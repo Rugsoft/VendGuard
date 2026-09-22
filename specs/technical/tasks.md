@@ -38,7 +38,7 @@
   * **Dependencias:** T-01
   * **Hecho cuando:** Existen los ficheros tipados `UrgencyLevel.php` (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`), `IncidentStatus.php` (8 estados) y `MachineType.php` con métodos de validación inmutables.
 
-- [ ] **T-06: Implementar el calculador de urgencias (`UrgencyCalculator.php`)**
+- [x] **T-06: Implementar el calculador de urgencias (`UrgencyCalculator.php`)**
   * **Requisitos:** `RF-03` (EARS 3.2, 3.3, 3.4, 3.5, 3.6, 3.7)
   * **Dependencias:** T-05
   * **Hecho cuando:** `UrgencyCalculator::calculate('PERISHABLE_FOOD', 'TEMPERATURE_COLD')` devuelve `CRITICAL`; en `COLD_DRINKS` devuelve `MEDIUM`; en `PAYMENT_SYSTEM` devuelve `HIGH`; y en `OTHER` devuelve `MEDIUM`.
