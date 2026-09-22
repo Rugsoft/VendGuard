@@ -237,7 +237,7 @@
   * **Dependencias:** T-34, T-35, T-36, T-37, T-38
   * **Hecho cuando:** Se completa con éxito el recorrido funcional: reporte por sede ➔ triaje/asignación ➔ intervención y resolución móvil ➔ comprobación de no-duplicidad y reapertura.
 
-- [ ] **T-41: Auditoría Constitucional y Cierre del MVP**
+- [x] **T-41: Auditoría Constitucional y Cierre del MVP**
   * **Requisitos:** Artículos I al VII de `constitution.md`
   * **Dependencias:** T-39, T-40
   * **Hecho cuando:** Se comprueba que no existe ningún `DELETE FROM` en el código, cero frameworks pesados, tipado estricto en el 100% de ficheros PHP y cumplimiento de los tokens visuales de Docker.
