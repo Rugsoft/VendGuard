@@ -96,7 +96,7 @@
 
 ## Fase 4: Enrutamiento y Base de la API REST
 
-- [ ] **T-16: Implementar `Request.php` y `Response.php` (HTTP JSON Envelope)**
+- [x] **T-16: Implementar `Request.php` y `Response.php` (HTTP JSON Envelope)**
   * **Requisitos:** `RNF-04`
   * **Dependencias:** T-01
   * **Hecho cuando:** `Response::json($data, 200)` emite la cabecera `Content-Type: application/json` y el cuerpo estandarizado `{ "success": true, "data": ... }`.
