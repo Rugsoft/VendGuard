@@ -35,12 +35,24 @@ class ConnectionFactory
             return self::$instance;
         }
 
-        $host = $customConfig['host'] ?? (getenv('DB_HOST') ?: '127.0.0.1');
-        $port = (string)($customConfig['port'] ?? (getenv('DB_PORT') ?: '3306'));
-        $dbname = $customConfig['dbname'] ?? (getenv('DB_NAME') ?: 'vendguard_db');
+        // Soporte para DATABASE_URL o MYSQL_URL (común en PaaS)
+        $dbUrl = getenv('DATABASE_URL') ?: (getenv('MYSQL_URL') ?: null);
+        $urlParts = is_string($dbUrl) ? parse_url($dbUrl) : null;
+        if (!is_array($urlParts)) {
+            $urlParts = [];
+        }
+
+        $host = $customConfig['host'] 
+            ?? ($urlParts['host'] ?? (getenv('DB_HOST') ?: '127.0.0.1'));
+        $port = (string)($customConfig['port'] 
+            ?? ($urlParts['port'] ?? (getenv('DB_PORT') ?: '3306')));
+        $dbname = $customConfig['dbname'] 
+            ?? (isset($urlParts['path']) ? ltrim($urlParts['path'], '/') : (getenv('DB_NAME') ?: (getenv('DB_DATABASE') ?: 'vendguard_db')));
         $charset = $customConfig['charset'] ?? 'utf8mb4';
-        $user = $customConfig['user'] ?? (getenv('DB_USER') ?: 'root');
-        $password = $customConfig['password'] ?? (getenv('DB_PASS') !== false ? getenv('DB_PASS') : '');
+        $user = $customConfig['user'] 
+            ?? ($urlParts['user'] ?? (getenv('DB_USER') ?: (getenv('DB_USERNAME') ?: 'root')));
+        $password = $customConfig['password'] 
+            ?? ($urlParts['pass'] ?? (getenv('DB_PASS') !== false ? getenv('DB_PASS') : (getenv('DB_PASSWORD') !== false ? getenv('DB_PASSWORD') : '')));
 
         $dsn = "mysql:host={$host};port={$port};dbname={$dbname};charset={$charset}";
 
@@ -50,6 +62,13 @@ class ConnectionFactory
             PDO::ATTR_EMULATE_PREPARES => false,
             PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES {$charset} COLLATE {$charset}_unicode_ci",
         ];
+
+        // Soporte para SSL en bases de datos gestionadas en la nube (TiDB Cloud, Aiven, etc.)
+        $enableSsl = $customConfig['ssl'] 
+            ?? (getenv('DB_SSL') === 'true' || getenv('DB_SSL') === '1' || str_contains((string)$host, 'tidbcloud.com') || str_contains((string)$host, 'aivencloud.com'));
+        if ($enableSsl) {
+            $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
+        }
 
         try {
             $pdo = new PDO($dsn, $user, $password, $options);
