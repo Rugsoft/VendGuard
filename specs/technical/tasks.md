@@ -111,7 +111,7 @@
   * **Dependencias:** T-16, T-17
   * **Hecho cuando:** Peticiones sin cabecera de autenticación válida son interceptadas y rechazadas con error HTTP 401 Unauthorized.
 
-- [ ] **T-19: Implementar el gestor seguro de subida de fotos (`LocalFileUploader.php`)**
+- [x] **T-19: Implementar el gestor seguro de subida de fotos (`LocalFileUploader.php`)**
   * **Requisitos:** `RNF-05` (EARS 3.9)
   * **Dependencias:** T-16
   * **Hecho cuando:** Valida que el archivo recibido no supere 5 MB, verifica el tipo MIME real (`image/jpeg`, `image/png`, `image/webp`), genera un nombre hash único y lo almacena en `public/uploads/`.
