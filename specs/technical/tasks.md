@@ -125,7 +125,7 @@
   * **Dependencias:** T-11, T-13, T-18
   * **Hecho cuando:** `POST /api/auth/site-login` valida códigos de sede y `POST /api/auth/login` valida credenciales internas emitiendo tokens de sesión.
 
-- [ ] **T-21: Endpoint de Consulta de Máquinas de Sede (`LocationPortalController.php`)**
+- [x] **T-21: Endpoint de Consulta de Máquinas de Sede (`LocationPortalController.php`)**
   * **Requisitos:** `RF-01`, `RF-02`
   * **Dependencias:** T-12, T-20
   * **Hecho cuando:** `GET /api/locations/{site_code}/machines` devuelve el JSON del catálogo de la sede con el estado de avería activo de cada máquina.
