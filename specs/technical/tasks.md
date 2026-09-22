@@ -179,7 +179,7 @@
 
 ## Fase 6: Frontend - Tokens Visuales, Cliente API y Estado
 
-- [ ] **T-31: Implementar variables CSS del Sistema de Diseño Docker (`design-tokens.css`)**
+- [x] **T-31: Implementar variables CSS del Sistema de Diseño Docker (`design-tokens.css`)**
   * **Requisitos:** `RNF-06` (design.md)
   * **Dependencias:** T-01
   * **Hecho cuando:** El archivo define `--color-primary: #2560ff`, `--color-canvas: #f9fafb`, `--color-slate: #2c333f`, bordes de 4px en interactivos y 8px en tarjetas, e importa las fuentes Inter y DM Sans.

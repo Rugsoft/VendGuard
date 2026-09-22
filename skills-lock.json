@@ -25,6 +25,12 @@
       "skillPath": "skills/php-best-practices/SKILL.md",
       "computedHash": "4ec7edc12bdbaefe464715d0eedc14678696df4ae28d1cd32237827c735dd69c"
     },
+    "ponytail": {
+      "source": "dietrichgebert/ponytail",
+      "sourceType": "github",
+      "skillPath": "skills/ponytail/SKILL.md",
+      "computedHash": "9e8d05cbbaf6dc38f0cffc924c09b3cbe76d94ba4ba0d09bde803da2f8c6b5a0"
+    },
     "ui-ux-pro-max": {
       "source": "nextlevelbuilder/ui-ux-pro-max-skill",
       "sourceType": "github",
