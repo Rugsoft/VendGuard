@@ -106,7 +106,7 @@
   * **Dependencias:** T-16
   * **Hecho cuando:** El router captura métodos (`GET`, `POST`, `PATCH`), procesa parámetros en URL (ej: `/api/locations/{code}/machines`) y despacha la petición al controlador adecuado.
 
-- [ ] **T-18: Implementar `SiteAuthMiddleware.php` y `InternalAuthMiddleware.php`**
+- [x] **T-18: Implementar `SiteAuthMiddleware.php` y `InternalAuthMiddleware.php`**
   * **Requisitos:** `RF-01`, `RF-04`
   * **Dependencias:** T-16, T-17
   * **Hecho cuando:** Peticiones sin cabecera de autenticación válida son interceptadas y rechazadas con error HTTP 401 Unauthorized.
