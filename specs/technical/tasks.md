@@ -155,7 +155,7 @@
   * **Dependencias:** T-14, T-25
   * **Hecho cuando:** `PATCH /api/coordinator/incidents/{id}/assign` asocia un técnico único y exige motivo obligatorio si se modifica el nivel de urgencia, guardándolo en el historial.
 
-- [ ] **T-27: Endpoint de Cancelación Lógica de Avisos**
+- [x] **T-27: Endpoint de Cancelación Lógica de Avisos**
   * **Requisitos:** `RF-06` (EARS 6.1, 6.2, 6.3), `RNF-03`
   * **Dependencias:** T-14, T-25
   * **Hecho cuando:** `PATCH /api/coordinator/incidents/{id}/cancel` exige motivo de descarte y cambia el estado a `CANCELADA` sin borrar la fila de la base de datos.

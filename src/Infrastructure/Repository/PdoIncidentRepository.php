@@ -1003,4 +1003,79 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
             throw $e;
         }
     }
+
+    /**
+     * Descarta o anula lógicamente una incidencia activa (RF-06 / EARS 6.1, 6.2, 6.3 / RNF-03).
+     * Transiciona el estado a CANCELLED, fija cancelled_at y cancellation_reason,
+     * registra la auditoría inmutable en incident_history y preserva la fila en la BD.
+     */
+    public function cancel(int $incidentId, string $cancellationReason, ?int $coordinatorId = null): Incident
+    {
+        $isOwnTransaction = !$this->pdo->inTransaction();
+        if ($isOwnTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $incident = $this->findById($incidentId);
+            if ($incident === null) {
+                throw new DomainException("No se encontró ninguna incidencia con ID {$incidentId}.");
+            }
+
+            // 1. Validar que el motivo explicativo no esté vacío (EARS 6.1, 6.3)
+            $trimmedReason = trim($cancellationReason);
+            if ($trimmedReason === '') {
+                throw new DomainException("El motivo de cancelación es obligatorio.");
+            }
+
+            // 2. Validar transición legal a CANCELLED
+            if (!$incident->getStatus()->canTransitionTo(IncidentStatus::CANCELLED)) {
+                throw new InvalidTransitionException(
+                    "No se puede cancelar una incidencia en estado {$incident->getStatus()->value}.",
+                    $incident->getStatus(),
+                    IncidentStatus::CANCELLED
+                );
+            }
+
+            // 3. Actualizar la incidencia a CANCELLED preservando la fila en base de datos (EARS 6.2, RNF-03, Artículo III)
+            $sql = "
+                UPDATE `incidents`
+                SET `status` = 'CANCELLED',
+                    `cancellation_reason` = :reason,
+                    `cancelled_at` = CURRENT_TIMESTAMP
+                WHERE `id` = :id
+                  AND `deleted_at` IS NULL
+            ";
+
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->bindValue(':reason', $trimmedReason, PDO::PARAM_STR);
+            $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+            $stmt->execute();
+
+            // 4. Registrar evento de auditoría inmutable en incident_history
+            $this->insertHistory(
+                $incidentId,
+                $coordinatorId,
+                $incident->getStatus()->value,
+                'CANCELLED',
+                "Aviso descartado/cancelado. Motivo: " . $trimmedReason
+            );
+
+            if ($isOwnTransaction) {
+                $this->pdo->commit();
+            }
+
+            $cancelled = $this->findById($incidentId);
+            if ($cancelled === null) {
+                throw new DomainException("Error al recuperar la incidencia cancelada.");
+            }
+
+            return $cancelled;
+        } catch (Throwable $e) {
+            if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
 }

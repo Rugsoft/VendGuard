@@ -299,4 +299,71 @@ class CoordinatorController
             'assigned_at'            => $assigned->getAssignedAt(),
         ], 200);
     }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // RF-06 / EARS 6.1-6.3 — Descarte o Cancelación Lógica de Avisos
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * PATCH /api/coordinator/incidents/{id}/cancel
+     * 
+     * Descarta o anula lógicamente una incidencia activa (EARS 6.1, 6.2, 6.3).
+     * Exige obligatoriamente un motivo de descarte.
+     * Mantiene íntegra la fila en base de datos (Soft Delete / trazabilidad).
+     */
+    public function cancelIncident(Request $request): Response
+    {
+        // 1. Extraer y validar el ID de incidencia de la ruta
+        $rawId = $request->getRouteParam('id');
+        if ($rawId === null || !ctype_digit((string)$rawId)) {
+            return Response::error('INVALID_INCIDENT_ID', 'El ID de incidencia de la ruta no es válido.', 400);
+        }
+        $incidentId = (int)$rawId;
+
+        // 2. Extraer y validar el motivo de cancelación (EARS 6.1, 6.3)
+        $body = $request->getParsedBody();
+        $reason = isset($body['cancellation_reason']) ? trim((string)$body['cancellation_reason']) : '';
+        if ($reason === '') {
+            return Response::error('MISSING_CANCELLATION_REASON', 'El motivo de cancelación es obligatorio (cancellation_reason obligatorio).', 422);
+        }
+
+        // 3. Verificar que la incidencia exista
+        $incident = $this->incidentRepo->findById($incidentId);
+        if ($incident === null) {
+            return Response::error('INCIDENT_NOT_FOUND', "No se encontró ninguna incidencia con ID {$incidentId}.", 404);
+        }
+
+        // 4. Validar que el estado actual admita transición a CANCELLED
+        if (!$incident->getStatus()->canTransitionTo(IncidentStatus::CANCELLED)) {
+            return Response::error(
+                'INVALID_STATUS_FOR_CANCELLATION',
+                "No se puede cancelar una incidencia en estado {$incident->getStatus()->value}.",
+                422
+            );
+        }
+
+        // 5. ID del coordinador autenticado (para auditoría)
+        $coordinatorId = $request->getAttribute('user_id');
+
+        // 6. Ejecutar cancelación lógica en el repositorio
+        try {
+            $cancelled = $this->incidentRepo->cancel(
+                incidentId: $incidentId,
+                cancellationReason: $reason,
+                coordinatorId: $coordinatorId !== null ? (int)$coordinatorId : null
+            );
+        } catch (\VendGuard\Core\Domain\Exception\InvalidTransitionException $e) {
+            return Response::error('INVALID_STATUS_FOR_CANCELLATION', $e->getMessage(), 422);
+        } catch (\DomainException $e) {
+            return Response::error('CANCELLATION_FAILED', $e->getMessage(), 500);
+        }
+
+        // 7. Respuesta exitosa (contrato 4.3)
+        return Response::json([
+            'id'           => $cancelled->getId(),
+            'status'       => $cancelled->getStatus()->value,
+            'cancelled_at' => $cancelled->getCancelledAt(),
+        ], 200);
+    }
 }
+

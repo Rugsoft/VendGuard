@@ -150,4 +150,18 @@ interface IncidentRepositoryInterface
      * reinicia el reloj de 48h e inserta el evento de auditoría (RF-09 / EARS 9.1).
      */
     public function reopen(int $incidentId, string $reasonText): Incident;
+
+    /**
+     * Descarta o anula lógicamente una incidencia activa (RF-06 / EARS 6.1, 6.2, 6.3 / RNF-03).
+     * Transiciona el estado a CANCELLED, fija cancelled_at y cancellation_reason,
+     * registra la auditoría inmutable en incident_history y conserva el registro íntegro en BD.
+     *
+     * @param int $incidentId ID de la incidencia a cancelar.
+     * @param string $cancellationReason Motivo justificado obligatorio del descarte.
+     * @param int|null $coordinatorId ID del coordinador que cancela (para auditoría).
+     * @return Incident Entidad actualizada en estado CANCELLED.
+     * @throws InvalidTransitionException si el estado actual no admite cancelación.
+     * @throws \DomainException si la incidencia no existe o falla la actualización.
+     */
+    public function cancel(int $incidentId, string $cancellationReason, ?int $coordinatorId = null): Incident;
 }
