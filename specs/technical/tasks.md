@@ -203,7 +203,7 @@
   * **Dependencias:** T-21, T-33
   * **Hecho cuando:** El conserje entra con su código de sede, visualiza las máquinas de su edificio en tarjetas de 8px y ve claramente cuáles tienen incidencias abiertas.
 
-- [ ] **T-35: Implementar el modal de reporte guiado de avería (`IncidentReportModal.js`)**
+- [x] **T-35: Implementar el modal de reporte guiado de avería (`IncidentReportModal.js`)**
   * **Requisitos:** `RF-02`, `RF-03`, `RNF-05`
   * **Dependencias:** T-22, T-34
   * **Hecho cuando:** Permite reportar la avería en < 2 min; si la máquina ya tiene ticket activo, bloquea la creación y habilita el formulario para anexar comentarios/fotos.

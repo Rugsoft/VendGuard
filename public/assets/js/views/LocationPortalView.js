@@ -13,11 +13,13 @@
 import { api } from '../api.js';
 import { store } from '../store.js';
 import { MachineCard } from '../components/MachineCard.js';
+import { IncidentReportModal } from '../components/IncidentReportModal.js';
 
 export const LocationPortalView = {
   name: 'LocationPortalView',
   components: {
-    MachineCard
+    MachineCard,
+    IncidentReportModal
   },
   emits: ['report-incident', 'add-comment', 'reopen-incident'],
   data() {
@@ -28,7 +30,9 @@ export const LocationPortalView = {
       machines: [],
       isLoadingMachines: false,
       machinesError: '',
-      activeFilter: 'all' // 'all' | 'incident' | 'operational'
+      activeFilter: 'all', // 'all' | 'incident' | 'operational'
+      selectedMachine: null,
+      showReportModal: false
     };
   },
   computed: {
@@ -116,15 +120,27 @@ export const LocationPortalView = {
     },
 
     onReport(machine) {
+      this.selectedMachine = machine;
+      this.showReportModal = true;
       this.$emit('report-incident', machine);
     },
 
     onComment(machine) {
+      this.selectedMachine = machine;
+      this.showReportModal = true;
       this.$emit('add-comment', machine);
     },
 
     onReopen(machine) {
       this.$emit('reopen-incident', machine);
+    },
+
+    onIncidentCreated() {
+      this.loadMachines();
+    },
+
+    onCommentAdded() {
+      this.loadMachines();
     }
   },
   template: `
@@ -337,6 +353,14 @@ export const LocationPortalView = {
             @reopen="onReopen"
           />
         </div>
+
+        <!-- Incident Report / Add Comment Modal -->
+        <IncidentReportModal
+          v-model="showReportModal"
+          :machine="selectedMachine"
+          @created="onIncidentCreated"
+          @commented="onCommentAdded"
+        />
       </div>
     </div>
   `
