@@ -101,7 +101,7 @@
   * **Dependencias:** T-01
   * **Hecho cuando:** `Response::json($data, 200)` emite la cabecera `Content-Type: application/json` y el cuerpo estandarizado `{ "success": true, "data": ... }`.
 
-- [ ] **T-17: Implementar el enrutador frontal (`Router.php`) y Front Controller (`index.php`)**
+- [x] **T-17: Implementar el enrutador frontal (`Router.php`) y Front Controller (`index.php`)**
   * **Requisitos:** Arquitectura API-First
   * **Dependencias:** T-16
   * **Hecho cuando:** El router captura métodos (`GET`, `POST`, `PATCH`), procesa parámetros en URL (ej: `/api/locations/{code}/machines`) y despacha la petición al controlador adecuado.
