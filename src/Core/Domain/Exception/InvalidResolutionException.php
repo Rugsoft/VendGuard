@@ -16,15 +16,18 @@ class InvalidResolutionException extends InvalidArgumentException
 {
     /** @var array<string> */
     private array $errors;
+    private ?string $field;
 
     /**
      * @param string $message
      * @param array<string> $errors
+     * @param string|null $field
      */
-    public function __construct(string $message, array $errors = [])
+    public function __construct(string $message, array $errors = [], ?string $field = null)
     {
         parent::__construct($message);
         $this->errors = $errors;
+        $this->field = $field;
     }
 
     /**
@@ -36,4 +39,13 @@ class InvalidResolutionException extends InvalidArgumentException
     {
         return $this->errors;
     }
+
+    /**
+     * Devuelve el campo específico afectado (si aplica).
+     */
+    public function getField(): ?string
+    {
+        return $this->field;
+    }
 }
+

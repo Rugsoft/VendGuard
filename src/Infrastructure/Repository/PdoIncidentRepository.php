@@ -1231,5 +1231,85 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
             throw $e;
         }
     }
+
+    /**
+     * Resuelve técnicamente una incidencia activa (RF-08 / EARS 8.1, 8.2, 8.3).
+     * Exige diagnóstico y acción técnica de al menos 20 caracteres descriptivos cada uno.
+     * Transiciona el estado a RESOLVED, registra resolved_at e inserta el evento de auditoría.
+     */
+    public function resolve(int $incidentId, int $technicianId, string $diagnosis, string $action): Incident
+    {
+        $isOwnTransaction = !$this->pdo->inTransaction();
+        if ($isOwnTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $incident = $this->findById($incidentId);
+            if ($incident === null) {
+                throw new DomainException("No se encontró ninguna incidencia con ID {$incidentId}.");
+            }
+
+            // 1. Validar que la incidencia esté asignada al técnico que resuelve
+            if ($incident->getAssignedTechnicianId() !== $technicianId) {
+                throw new DomainException("La incidencia no está asignada al técnico indicado.");
+            }
+
+            // 2. Validar que el estado actual permita transicionar a RESOLVED
+            if (!$incident->getStatus()->canTransitionTo(IncidentStatus::RESOLVED)) {
+                throw new InvalidTransitionException(
+                    "No se puede resolver una incidencia en estado {$incident->getStatus()->value}. Debe encontrarse en estado EN_CURSO (IN_PROGRESS).",
+                    $incident->getStatus(),
+                    IncidentStatus::RESOLVED
+                );
+            }
+
+            // 3. Validación estricta de textos (mín. 20 caracteres en cada uno, EARS 8.1, 8.2)
+            \VendGuard\Core\Service\ResolutionValidator::validate($diagnosis, $action);
+
+            // 4. Actualizar estado a RESOLVED, registrar informe técnico y fijar resolved_at
+            $sql = "
+                UPDATE `incidents`
+                SET `status` = 'RESOLVED',
+                    `resolution_diagnosis` = :diagnosis,
+                    `resolution_action` = :action,
+                    `resolved_at` = CURRENT_TIMESTAMP
+                WHERE `id` = :id
+                  AND `deleted_at` IS NULL
+            ";
+
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->bindValue(':diagnosis', trim($diagnosis), PDO::PARAM_STR);
+            $stmt->bindValue(':action', trim($action), PDO::PARAM_STR);
+            $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+            $stmt->execute();
+
+            // 5. Registrar evento de resolución en el historial inmutable
+            $this->insertHistory(
+                $incidentId,
+                $technicianId,
+                $incident->getStatus()->value,
+                'RESOLVED',
+                "Avería resuelta con éxito por el técnico de campo. Diagnóstico: " . trim($diagnosis) . " | Solución: " . trim($action)
+            );
+
+            if ($isOwnTransaction) {
+                $this->pdo->commit();
+            }
+
+            $resolved = $this->findById($incidentId);
+            if ($resolved === null) {
+                throw new DomainException("Error al recuperar la incidencia resuelta.");
+            }
+
+            return $resolved;
+        } catch (Throwable $e) {
+            if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
 }
+
 

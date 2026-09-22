@@ -189,5 +189,22 @@ interface IncidentRepositoryInterface
      * @throws \DomainException si la incidencia no existe, no está asignada al técnico o falta motivo.
      */
     public function pauseIntervention(int $incidentId, int $technicianId, string $pendingPartsReason): Incident;
+
+    /**
+     * Resuelve técnicamente una incidencia activa (RF-08 / EARS 8.1, 8.2, 8.3).
+     * Exige diagnóstico y acción técnica de al menos 20 caracteres descriptivos cada uno.
+     * Transiciona el estado a RESOLVED, registra resolved_at e inserta el evento de auditoría.
+     *
+     * @param int $incidentId ID de la incidencia.
+     * @param int $technicianId ID del técnico asignado responsable.
+     * @param string $diagnosis Diagnóstico real del problema detectado (mín. 20 caracteres).
+     * @param string $action Acción técnica correctiva implementada (mín. 20 caracteres).
+     * @return Incident Entidad actualizada en estado RESOLVED.
+     * @throws InvalidResolutionException si el diagnóstico o acción no alcanzan los 20 caracteres.
+     * @throws InvalidTransitionException si el estado actual no permite pasar a RESOLVED.
+     * @throws \DomainException si la incidencia no existe o no está asignada a dicho técnico.
+     */
+    public function resolve(int $incidentId, int $technicianId, string $diagnosis, string $action): Incident;
 }
+
 

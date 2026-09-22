@@ -222,4 +222,90 @@ class TechnicianController
             'status' => $paused->getStatus()->value,
         ], 200);
     }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // RF-08 / EARS 8.1, 8.2, 8.3 — Resolución Obligatoriamente Justificada
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * POST /api/technician/incidents/{id}/resolve
+     * 
+     * Resuelve y documenta formalmente la intervención técnica (RF-08).
+     * Exige obligatoriamente:
+     * - Diagnóstico real con al menos 20 caracteres (EARS 8.1).
+     * - Acción correctiva con al menos 20 caracteres (EARS 8.1).
+     * Si no se cumplen los requisitos mínimos, rechaza la operación y mantiene el estado EN_CURSO (EARS 8.2).
+     * Si es válida, transiciona a RESUELTA y activa la ventana de garantía de 48 horas (EARS 8.3).
+     */
+    public function resolveIncident(Request $request): Response
+    {
+        // 1. Extraer y validar el ID de incidencia de la ruta
+        $rawId = $request->getRouteParam('id');
+        if ($rawId === null || !ctype_digit((string)$rawId)) {
+            return Response::error('INVALID_INCIDENT_ID', 'El ID de incidencia de la ruta no es válido.', 400);
+        }
+        $incidentId = (int)$rawId;
+
+        // 2. Extraer ID del técnico autenticado
+        $technicianId = $request->getAttribute('user_id');
+        if ($technicianId === null || !is_numeric($technicianId)) {
+            return Response::error('UNAUTHORIZED', 'No se pudo identificar al técnico autenticado.', 401);
+        }
+        $techId = (int)$technicianId;
+
+        // 3. Extraer y validar cuerpo de la petición (EARS 8.1)
+        $body = $request->getParsedBody();
+        $diagnosis = isset($body['resolution_diagnosis']) ? trim((string)$body['resolution_diagnosis']) : '';
+        $action    = isset($body['resolution_action']) ? trim((string)$body['resolution_action']) : '';
+
+        // Validar textos con ResolutionValidator (mínimo 20 caracteres descriptivos en cada campo)
+        $validationErrors = \VendGuard\Core\Service\ResolutionValidator::getValidationErrors($diagnosis, $action);
+        if (!empty($validationErrors)) {
+            return Response::error(
+                'INVALID_RESOLUTION',
+                'Datos de resolución insuficientes: ' . implode(' ', $validationErrors),
+                422,
+                ['errors' => $validationErrors]
+            );
+        }
+
+        // 4. Verificar existencia de la incidencia
+        $incident = $this->incidentRepo->findById($incidentId);
+        if ($incident === null) {
+            return Response::error('INCIDENT_NOT_FOUND', "No se encontró ninguna incidencia con ID {$incidentId}.", 404);
+        }
+
+        // 5. Verificar asignación a este técnico
+        if ($incident->getAssignedTechnicianId() !== $techId) {
+            return Response::error('FORBIDDEN', 'Esta incidencia no está asignada a tu ruta técnica.', 403);
+        }
+
+        // 6. Validar que el estado actual permita transicionar a RESOLVED (EARS 8.2: debe estar en IN_PROGRESS)
+        if (!$incident->getStatus()->canTransitionTo(IncidentStatus::RESOLVED)) {
+            return Response::error(
+                'INVALID_STATUS_FOR_RESOLUTION',
+                "No se puede resolver una incidencia en estado {$incident->getStatus()->value}. La intervención debe estar previamente en curso (IN_PROGRESS).",
+                422
+            );
+        }
+
+        // 7. Ejecutar resolución en el repositorio
+        try {
+            $resolved = $this->incidentRepo->resolve($incidentId, $techId, $diagnosis, $action);
+        } catch (\VendGuard\Core\Domain\Exception\InvalidResolutionException $e) {
+            return Response::error('INVALID_RESOLUTION', $e->getMessage(), 422, ['errors' => $e->getErrors()]);
+        } catch (InvalidTransitionException $e) {
+            return Response::error('INVALID_STATUS_FOR_RESOLUTION', $e->getMessage(), 422);
+        } catch (\DomainException $e) {
+            return Response::error('OPERATION_FAILED', $e->getMessage(), 500);
+        }
+
+        // 8. Respuesta exitosa (contrato 5.4)
+        return Response::json([
+            'id'          => $resolved->getId(),
+            'status'      => $resolved->getStatus()->value,
+            'resolved_at' => $resolved->getResolvedAt(),
+        ], 200);
+    }
 }
+

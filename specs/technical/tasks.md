@@ -165,7 +165,7 @@
   * **Dependencias:** T-14, T-20
   * **Hecho cuando:** `GET /api/technician/my-route` lista solo las asignadas al técnico, `PATCH /start` transiciona a `EN_CURSO` y `PATCH /pause` a `PENDIENTE_REPUESTO`.
 
-- [ ] **T-29: Endpoint de Resolución con Validación Estricta**
+- [x] **T-29: Endpoint de Resolución con Validación Estricta**
   * **Requisitos:** `RF-08`
   * **Dependencias:** T-08, T-28
   * **Hecho cuando:** `POST /api/technician/incidents/{id}/resolve` valida que el diagnóstico tenga >= 20 caracteres Y la acción >= 20 caracteres, pasando a `RESUELTA` e iniciando los 48h.
