@@ -7,6 +7,7 @@ namespace VendGuard\Presentation\Controller;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Model\Incident;
+use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
@@ -332,5 +333,195 @@ class LocationPortalController
             201,
             'Incidencia registrada con éxito'
         );
+    }
+
+    /**
+     * POST /api/incidents/{ticket_code}/comments
+     * Añade un nuevo comentario o fotografía adicional a la bitácora de un ticket activo (RF-02 / EARS 2.3).
+     * 
+     * Garantiza la preservación íntegra de la fotografía original del aviso sin sobreescribirla (Edge Case 6).
+     */
+    public function addComment(Request $request): Response
+    {
+        // 1. Identificar la sede autenticada
+        $location = $request->getAttribute('authenticated_location');
+        if ($location === null) {
+            $locationId = $request->getAttribute('location_id');
+            if ($locationId !== null) {
+                $location = $this->locationRepo->findById((int)$locationId);
+            }
+        }
+        if ($location === null) {
+            $siteCodeHeader = $request->getHeader('X-Site-Code') ?? $request->getAttribute('site_code');
+            if ($siteCodeHeader !== null && trim((string)$siteCodeHeader) !== '') {
+                $location = $this->locationRepo->findBySiteCode(trim((string)$siteCodeHeader), true);
+            }
+        }
+
+        if ($location === null) {
+            return Response::error(
+                'UNAUTHORIZED',
+                'Acceso no autorizado. No se ha podido verificar la sede del usuario.',
+                401
+            );
+        }
+
+        // 2. Obtener y validar el código de ticket de la ruta
+        $ticketCodeParam = $request->getRouteParam('ticket_code') ?? $request->getRouteParam('code');
+        if ($ticketCodeParam === null || trim($ticketCodeParam) === '') {
+            return Response::error(
+                'MISSING_TICKET_CODE',
+                'El código de ticket es obligatorio en la URL.',
+                400
+            );
+        }
+
+        $ticketCode = strtoupper(trim($ticketCodeParam));
+        $incident = $this->incidentRepo->findByTicketCode($ticketCode);
+
+        if ($incident === null) {
+            return Response::error(
+                'INCIDENT_NOT_FOUND',
+                "No se encontró ninguna incidencia con el código '{$ticketCode}'.",
+                404
+            );
+        }
+
+        // 3. Validar segregación de sede (Artículo V Constitución / RF-01)
+        if ($incident->getLocationId() !== $location->getId()) {
+            return Response::error(
+                'SITE_MISMATCH',
+                'No tiene autorización para interactuar con incidencias de otra sede.',
+                403
+            );
+        }
+
+        // 4. Validar que la incidencia no esté cerrada ni cancelada
+        if ($incident->isClosed() || $incident->isCancelled()) {
+            return Response::error(
+                'INCIDENT_NOT_ACTIVE',
+                'No se pueden añadir comentarios a una incidencia que ya ha sido cerrada o cancelada.',
+                422
+            );
+        }
+
+        // 5. Validar texto del comentario
+        $commentText = trim((string)($request->getBodyParam('comment_text') ?? $request->getBodyParam('text') ?? $request->getBodyParam('description') ?? ''));
+        if ($commentText === '') {
+            return Response::error(
+                'MISSING_COMMENT_TEXT',
+                'El texto del comentario es obligatorio.',
+                400
+            );
+        }
+
+        if (mb_strlen($commentText) < 3) {
+            return Response::error(
+                'COMMENT_TOO_SHORT',
+                'El comentario debe contener al menos 3 caracteres descriptivos.',
+                422
+            );
+        }
+
+        // 6. Autor del comentario
+        $authorName = trim((string)($request->getBodyParam('author_name') ?? ''));
+        if ($authorName === '') {
+            $authorName = $location->getContactName() ?? 'Responsable de Sede';
+        }
+
+        // 7. Procesar fotografía adjunta adicional si existe (EARS 2.3 & RNF-05)
+        $photoPath = null;
+        $photoFile = $request->getFile('photo') ?? $request->getFile('image') ?? $request->getFile('file');
+
+        if ($photoFile !== null && isset($photoFile['error']) && $photoFile['error'] !== UPLOAD_ERR_NO_FILE && !empty($photoFile['tmp_name'])) {
+            try {
+                $photoPath = $this->fileUploader->upload($photoFile);
+            } catch (InvalidUploadException $e) {
+                return Response::error(
+                    $e->getErrorCode(),
+                    $e->getMessage(),
+                    $e->getHttpStatusCode(),
+                    [
+                        'form_data' => [
+                            'ticket_code' => $ticketCode,
+                            'author_name' => $authorName,
+                            'comment_text' => $commentText,
+                        ],
+                    ]
+                );
+            }
+        } elseif ($request->getBodyParam('photo_path') !== null && trim((string)$request->getBodyParam('photo_path')) !== '') {
+            $photoPath = trim((string)$request->getBodyParam('photo_path'));
+        }
+
+        // 8. Crear y persistir la entrada en incident_comments
+        // Nota: La foto original en $incident->getPhotoPath() jamás se modifica ni sobreescribe (Edge Case 6)
+        $comment = new IncidentComment(
+            id: null,
+            incidentId: (int)$incident->getId(),
+            authorType: 'REPORTER',
+            userId: null,
+            authorName: $authorName,
+            commentText: $commentText,
+            photoPath: $photoPath,
+            isInternal: false,
+            createdAt: null,
+            ticketCode: $incident->getTicketCode()
+        );
+
+        $createdComment = $this->incidentRepo->addComment($comment);
+
+        // 9. Devolver respuesta 201 Created con el comentario anexado
+        return Response::json(
+            $createdComment->toArray(),
+            201,
+            'Comentario añadido correctamente a la bitácora de la incidencia'
+        );
+    }
+
+    /**
+     * GET /api/incidents/{ticket_code}/comments
+     * Devuelve la bitácora de comentarios públicos de una incidencia (RF-02).
+     */
+    public function getComments(Request $request): Response
+    {
+        $location = $request->getAttribute('authenticated_location');
+        if ($location === null) {
+            $locationId = $request->getAttribute('location_id');
+            if ($locationId !== null) {
+                $location = $this->locationRepo->findById((int)$locationId);
+            }
+        }
+        if ($location === null) {
+            $siteCodeHeader = $request->getHeader('X-Site-Code') ?? $request->getAttribute('site_code');
+            if ($siteCodeHeader !== null && trim((string)$siteCodeHeader) !== '') {
+                $location = $this->locationRepo->findBySiteCode(trim((string)$siteCodeHeader), true);
+            }
+        }
+
+        if ($location === null) {
+            return Response::error('UNAUTHORIZED', 'Acceso no autorizado.', 401);
+        }
+
+        $ticketCodeParam = $request->getRouteParam('ticket_code') ?? $request->getRouteParam('code');
+        if ($ticketCodeParam === null || trim($ticketCodeParam) === '') {
+            return Response::error('MISSING_TICKET_CODE', 'El código de ticket es obligatorio en la URL.', 400);
+        }
+
+        $ticketCode = strtoupper(trim($ticketCodeParam));
+        $incident = $this->incidentRepo->findByTicketCode($ticketCode);
+
+        if ($incident === null) {
+            return Response::error('INCIDENT_NOT_FOUND', "No se encontró la incidencia '{$ticketCode}'.", 404);
+        }
+
+        if ($incident->getLocationId() !== $location->getId()) {
+            return Response::error('SITE_MISMATCH', 'No tiene autorización para consultar incidencias de otra sede.', 403);
+        }
+
+        // Responsable de ubicación: nunca expone comentarios marcados como internos (RNF-04)
+        $comments = $this->incidentRepo->getComments((int)$incident->getId(), false);
+
+        return Response::json(array_map(fn(IncidentComment $c) => $c->toArray(), $comments), 200);
     }
 }

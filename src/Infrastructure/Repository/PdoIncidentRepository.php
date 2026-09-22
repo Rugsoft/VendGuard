@@ -9,6 +9,7 @@ use PDOException;
 use Throwable;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
 use VendGuard\Core\Domain\Model\Incident;
+use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\IncidentHistory;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -657,5 +658,102 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
 
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         return array_map(fn(array $row) => IncidentHistory::fromDatabaseRow($row), $rows);
+    }
+
+    /**
+     * Añade un nuevo comentario o evidencia fotográfica a la bitácora de la incidencia (RF-02 / EARS 2.3).
+     * Garantiza que la fotografía original en incidents.photo_path no sea sobreescrita.
+     */
+    public function addComment(IncidentComment $comment): IncidentComment
+    {
+        $sql = "
+            INSERT INTO `incident_comments` (
+                `incident_id`,
+                `author_type`,
+                `user_id`,
+                `author_name`,
+                `comment_text`,
+                `photo_path`,
+                `is_internal`,
+                `created_at`
+            ) VALUES (
+                :incident_id,
+                :author_type,
+                :user_id,
+                :author_name,
+                :comment_text,
+                :photo_path,
+                :is_internal,
+                CURRENT_TIMESTAMP
+            )
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':incident_id', $comment->getIncidentId(), PDO::PARAM_INT);
+        $stmt->bindValue(':author_type', $comment->getAuthorType(), PDO::PARAM_STR);
+        $stmt->bindValue(':user_id', $comment->getUserId(), $comment->getUserId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+        $stmt->bindValue(':author_name', $comment->getAuthorName(), PDO::PARAM_STR);
+        $stmt->bindValue(':comment_text', $comment->getCommentText(), PDO::PARAM_STR);
+        $stmt->bindValue(':photo_path', $comment->getPhotoPath(), $comment->getPhotoPath() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(':is_internal', $comment->isInternal() ? 1 : 0, PDO::PARAM_INT);
+
+        $stmt->execute();
+        $id = (int)$this->pdo->lastInsertId();
+
+        $fetchStmt = $this->pdo->prepare("
+            SELECT c.*, i.ticket_code 
+            FROM `incident_comments` c
+            JOIN `incidents` i ON c.incident_id = i.id
+            WHERE c.id = :id
+            LIMIT 1
+        ");
+        $fetchStmt->execute([':id' => $id]);
+        $row = $fetchStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$row) {
+            return new IncidentComment(
+                id: $id,
+                incidentId: $comment->getIncidentId(),
+                authorType: $comment->getAuthorType(),
+                userId: $comment->getUserId(),
+                authorName: $comment->getAuthorName(),
+                commentText: $comment->getCommentText(),
+                photoPath: $comment->getPhotoPath(),
+                isInternal: $comment->isInternal(),
+                createdAt: date('Y-m-d H:i:s'),
+                ticketCode: $comment->getTicketCode()
+            );
+        }
+
+        return IncidentComment::fromDatabaseRow($row);
+    }
+
+    /**
+     * Recupera los comentarios asociados a una incidencia.
+     *
+     * @param int $incidentId
+     * @param bool $includeInternal Si es false, excluye comentarios internos (RNF-04).
+     * @return list<IncidentComment>
+     */
+    public function getComments(int $incidentId, bool $includeInternal = true): array
+    {
+        $sql = "
+            SELECT c.*, i.ticket_code
+            FROM `incident_comments` c
+            JOIN `incidents` i ON c.incident_id = i.id
+            WHERE c.incident_id = :incident_id
+        ";
+
+        if (!$includeInternal) {
+            $sql .= " AND c.is_internal = 0";
+        }
+
+        $sql .= " ORDER BY c.created_at ASC, c.id ASC";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([':incident_id' => $incidentId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_map(fn(array $row) => IncidentComment::fromDatabaseRow($row), $rows);
     }
 }

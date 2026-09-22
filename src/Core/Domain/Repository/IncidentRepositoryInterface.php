@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Core\Domain\Repository;
 
 use VendGuard\Core\Domain\Model\Incident;
+use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\IncidentHistory;
 
 /**
@@ -98,4 +99,18 @@ interface IncidentRepositoryInterface
      * @return list<IncidentHistory>
      */
     public function getHistory(int $incidentId): array;
+
+    /**
+     * Añade un nuevo comentario o evidencia fotográfica a la bitácora de la incidencia (RF-02 / EARS 2.3).
+     */
+    public function addComment(IncidentComment $comment): IncidentComment;
+
+    /**
+     * Recupera los comentarios asociados a una incidencia.
+     *
+     * @param int $incidentId
+     * @param bool $includeInternal Si es false, excluye comentarios internos (RNF-04).
+     * @return list<IncidentComment>
+     */
+    public function getComments(int $incidentId, bool $includeInternal = true): array;
 }

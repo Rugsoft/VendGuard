@@ -135,7 +135,7 @@
   * **Dependencias:** T-06, T-14, T-19, T-21
   * **Hecho cuando:** Recibe datos `multipart/form-data`, calcula urgencia, rechaza duplicados con HTTP 409 y crea la incidencia devolviendo código HTTP 201 Created.
 
-- [ ] **T-23: Endpoint para Añadir Comentarios/Evidencias a Ticket Activo**
+- [x] **T-23: Endpoint para Añadir Comentarios/Evidencias a Ticket Activo**
   * **Requisitos:** `RF-02` (EARS 2.3)
   * **Dependencias:** T-14, T-22
   * **Hecho cuando:** `POST /api/incidents/{ticket_code}/comments` anexa una entrada en `incident_comments` sin sobreescribir la fotografía original de la incidencia.
