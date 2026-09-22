@@ -227,7 +227,7 @@
 
 ## Fase 8: Verificación Global y Auditoría de Cierre
 
-- [ ] **T-39: Ejecutar batería completa de pruebas automatizadas**
+- [x] **T-39: Ejecutar batería completa de pruebas automatizadas**
   * **Requisitos:** `RNF-03`, Criterios de Finalización
   * **Dependencias:** T-07, T-09, T-15
   * **Hecho cuando:** Todas las pruebas unitarias y de integración se ejecutan exitosamente con cero fallos (`0 errors, 0 failures`).
