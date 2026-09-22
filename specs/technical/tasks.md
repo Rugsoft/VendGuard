@@ -208,7 +208,7 @@
   * **Dependencias:** T-22, T-34
   * **Hecho cuando:** Permite reportar la avería en < 2 min; si la máquina ya tiene ticket activo, bloquea la creación y habilita el formulario para anexar comentarios/fotos.
 
-- [ ] **T-36: Implementar el modal de reapertura en garantía (`ReopenTicketModal.js`)**
+- [x] **T-36: Implementar el modal de reapertura en garantía (`ReopenTicketModal.js`)**
   * **Requisitos:** `RF-09`
   * **Dependencias:** T-24, T-34
   * **Hecho cuando:** En máquinas en estado `RESUELTA` muestra el botón "Reabrir incidencia" si no han pasado 48h y envía el motivo de reapertura.

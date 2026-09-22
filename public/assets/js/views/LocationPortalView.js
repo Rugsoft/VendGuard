@@ -14,12 +14,14 @@ import { api } from '../api.js';
 import { store } from '../store.js';
 import { MachineCard } from '../components/MachineCard.js';
 import { IncidentReportModal } from '../components/IncidentReportModal.js';
+import { ReopenTicketModal } from '../components/ReopenTicketModal.js';
 
 export const LocationPortalView = {
   name: 'LocationPortalView',
   components: {
     MachineCard,
-    IncidentReportModal
+    IncidentReportModal,
+    ReopenTicketModal
   },
   emits: ['report-incident', 'add-comment', 'reopen-incident'],
   data() {
@@ -32,7 +34,8 @@ export const LocationPortalView = {
       machinesError: '',
       activeFilter: 'all', // 'all' | 'incident' | 'operational'
       selectedMachine: null,
-      showReportModal: false
+      showReportModal: false,
+      showReopenModal: false
     };
   },
   computed: {
@@ -132,6 +135,8 @@ export const LocationPortalView = {
     },
 
     onReopen(machine) {
+      this.selectedMachine = machine;
+      this.showReopenModal = true;
       this.$emit('reopen-incident', machine);
     },
 
@@ -141,6 +146,15 @@ export const LocationPortalView = {
 
     onCommentAdded() {
       this.loadMachines();
+    },
+
+    onIncidentReopened() {
+      this.loadMachines();
+    },
+
+    onCreateNewTicketFromExpired(machine) {
+      this.selectedMachine = machine;
+      this.showReportModal = true;
     }
   },
   template: `
@@ -360,6 +374,14 @@ export const LocationPortalView = {
           :machine="selectedMachine"
           @created="onIncidentCreated"
           @commented="onCommentAdded"
+        />
+
+        <!-- Reopen Ticket in Warranty Modal -->
+        <ReopenTicketModal
+          v-model="showReopenModal"
+          :machine="selectedMachine"
+          @reopened="onIncidentReopened"
+          @create-new-ticket="onCreateNewTicketFromExpired"
         />
       </div>
     </div>
