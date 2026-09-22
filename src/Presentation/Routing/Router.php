@@ -10,6 +10,7 @@ use Throwable;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
 use VendGuard\Core\Domain\Exception\InvalidResolutionException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
+use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
 
@@ -204,6 +205,12 @@ class Router
                     'ticket_code' => $e->getTicketCode(),
                     'ticket_status' => $e->getTicketStatus(),
                 ]
+            );
+        } catch (InvalidUploadException $e) {
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode()
             );
         } catch (InvalidTransitionException $e) {
             return Response::error(

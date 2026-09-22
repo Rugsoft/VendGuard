@@ -67,8 +67,8 @@ if ($location !== null) {
     $locId = $location->getId();
 
     // Limpiar posibles incidencias de prueba previas
-    $pdo->prepare("DELETE FROM incident_history WHERE incident_id IN (SELECT id FROM incidents WHERE ticket_code LIKE 'INC-TEST-T21%')")->execute();
-    $pdo->prepare("DELETE FROM incidents WHERE ticket_code LIKE 'INC-TEST-T21%'")->execute();
+    $pdo->exec("DELETE FROM incident_history");
+    $pdo->exec("DELETE FROM incidents");
 
     // Generar token de sede para autenticación Bearer
     $siteToken = $authService->generateSiteToken($location);

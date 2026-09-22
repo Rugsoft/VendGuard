@@ -130,7 +130,7 @@
   * **Dependencias:** T-12, T-20
   * **Hecho cuando:** `GET /api/locations/{site_code}/machines` devuelve el JSON del catálogo de la sede con el estado de avería activo de cada máquina.
 
-- [ ] **T-22: Endpoint de Creación de Incidencia (`POST /api/incidents`)**
+- [x] **T-22: Endpoint de Creación de Incidencia (`POST /api/incidents`)**
   * **Requisitos:** `RF-02`, `RF-03`, `RNF-02`
   * **Dependencias:** T-06, T-14, T-19, T-21
   * **Hecho cuando:** Recibe datos `multipart/form-data`, calcula urgencia, rechaza duplicados con HTTP 409 y crea la incidencia devolviendo código HTTP 201 Created.

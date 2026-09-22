@@ -46,10 +46,11 @@ class AppRouter
         $router->post('/api/auth/login', [\VendGuard\Presentation\Controller\AuthController::class, 'login']);
 
         // -----------------------------------------------------------------
-        // 3. Módulo de Portal de Ubicación / Sede (T-21)
+        // 3. Módulo de Portal de Ubicación / Sede (T-21, T-22)
         // -----------------------------------------------------------------
         $siteAuth = new \VendGuard\Presentation\Http\Middleware\SiteAuthMiddleware();
         $router->get('/api/locations/{site_code}/machines', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'getMachines'], [$siteAuth]);
+        $router->post('/api/incidents', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'createIncident'], [$siteAuth]);
 
         return $router;
     }

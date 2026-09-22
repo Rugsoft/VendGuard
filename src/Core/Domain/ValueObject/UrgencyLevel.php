@@ -34,6 +34,19 @@ enum UrgencyLevel: string
     }
 
     /**
+     * Devuelve el código de color hexadecimal representativo del nivel de severidad (docs/design.md).
+     */
+    public function color(): string
+    {
+        return match ($this) {
+            self::CRITICAL => '#dc2626',
+            self::HIGH => '#ea580c',
+            self::MEDIUM => '#d97706',
+            self::LOW => '#64748b',
+        };
+    }
+
+    /**
      * Indica si el nivel de urgencia es de severidad crítica (SLA de respuesta 60 min).
      */
     public function isCritical(): bool
