@@ -9,7 +9,7 @@
 
 ## Fase 1: Infraestructura de Base de Datos y Entorno
 
-- [ ] **T-01: Inicializar estructura de carpetas y servidor local**
+- [x] **T-01: Inicializar estructura de carpetas y servidor local**
   * **Requisitos:** `RNF-06`
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existen los directorios `public/`, `src/Core/`, `src/Application/`, `src/Infrastructure/`, `src/Presentation/`, `tests/` y el servidor integrado de PHP responde con código HTTP 200 en `http://localhost:8000/`.
