@@ -189,7 +189,7 @@
   * **Dependencias:** T-31
   * **Hecho cuando:** `api.js` gestiona llamadas `fetch()`, adjunta tokens automáticamente y maneja errores; `store.js` expone el estado reactivo del usuario y la sede con Vue 3 `reactive`.
 
-- [ ] **T-33: Componentes base de UI (`AppNavbar.js`, `IncidentBadge.js`, `ModalDialog.js`)**
+- [x] **T-33: Componentes base de UI (`AppNavbar.js`, `IncidentBadge.js`, `ModalDialog.js`)**
   * **Requisitos:** `RNF-01`, `RNF-06`
   * **Dependencias:** T-31, T-32
   * **Hecho cuando:** Los componentes renderizan badges con colores semánticos, diálogos modales accesibles y barra de navegación con cierre de sesión.

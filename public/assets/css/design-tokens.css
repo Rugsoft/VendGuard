@@ -302,3 +302,8 @@ h4 { font-size: var(--font-size-heading-md); }
   overflow-y: auto;
   border: 1px solid var(--color-hairline);
 }
+
+@keyframes vg-progress-animation {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
