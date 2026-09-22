@@ -62,6 +62,7 @@ class AppRouter
             \VendGuard\Core\Domain\Model\UserRole::COORDINATOR
         );
         $router->get('/api/coordinator/incidents', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getIncidents'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/incidents/{id}/assign', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'assignTechnician'], [$coordinatorAuth]);
 
         return $router;
     }

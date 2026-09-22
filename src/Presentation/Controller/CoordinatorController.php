@@ -212,4 +212,91 @@ class CoordinatorController
 
         return Response::json($formattedIncidents, 200);
     }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // RF-05 / EARS 5.1-5.4 — Asignar Técnico con Reclasificación Auditada
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * PATCH /api/coordinator/incidents/{id}/assign
+     * 
+     * Asocia un técnico de campo único a la incidencia (EARS 5.1, 5.2).
+     * Permite la reclasificación de urgencia con motivo obligatorio (EARS 5.3).
+     * Rechaza la petición si no se proporciona un técnico válido (EARS 5.4).
+     */
+    public function assignTechnician(Request $request): Response
+    {
+        // 1. Extraer y validar el ID de incidencia de la ruta
+        $rawId = $request->getRouteParam('id');
+        if ($rawId === null || !ctype_digit((string)$rawId)) {
+            return Response::error('INVALID_INCIDENT_ID', 'El ID de incidencia de la ruta no es válido.', 400);
+        }
+        $incidentId = (int)$rawId;
+
+        // 2. Extraer y validar el cuerpo de la petición (EARS 5.4: technician_id obligatorio)
+        $body = $request->getParsedBody();
+        $rawTechnicianId = $body['technician_id'] ?? null;
+        if ($rawTechnicianId === null || !is_numeric($rawTechnicianId) || (int)$rawTechnicianId <= 0) {
+            return Response::error('MISSING_TECHNICIAN_ID', 'Se debe indicar un técnico válido (technician_id obligatorio).', 422);
+        }
+        $technicianId = (int)$rawTechnicianId;
+
+        $urgencyOverride = isset($body['urgency_override']) ? trim((string)$body['urgency_override']) : null;
+        $urgencyReason   = isset($body['urgency_override_reason']) ? trim((string)$body['urgency_override_reason']) : null;
+
+        // 3. Si hay reclasificación de urgencia, el motivo es obligatorio (EARS 5.3)
+        if ($urgencyOverride !== null && $urgencyOverride !== '') {
+            if (!UrgencyLevel::isValid($urgencyOverride)) {
+                return Response::error('INVALID_URGENCY', "Nivel de urgencia '{$urgencyOverride}' no reconocido. Valores aceptados: LOW, MEDIUM, HIGH, CRITICAL.", 422);
+            }
+            if ($urgencyReason === null || $urgencyReason === '') {
+                return Response::error('URGENCY_REASON_REQUIRED', 'La reclasificación de urgencia exige un motivo justificado (urgency_override_reason obligatorio).', 422);
+            }
+        }
+
+        // 4. Verificar que la incidencia exista
+        $incident = $this->incidentRepo->findById($incidentId);
+        if ($incident === null) {
+            return Response::error('INCIDENT_NOT_FOUND', "No se encontró ninguna incidencia con ID {$incidentId}.", 404);
+        }
+
+        // 5. Verificar que el técnico exista y tenga rol TECHNICIAN (EARS 5.2, 5.4)
+        $technician = $this->userRepo->findById($technicianId, onlyActive: true);
+        if ($technician === null || $technician->getRole()->value !== 'TECHNICIAN') {
+            return Response::error('TECHNICIAN_NOT_FOUND', "No se encontró ningún técnico de ruta activo con ID {$technicianId}.", 422);
+        }
+
+        // 6. Validar estado actual: solo REGISTERED o REOPENED (EARS 5.1)
+        $allowedStatuses = [IncidentStatus::REGISTERED, IncidentStatus::REOPENED];
+        if (!in_array($incident->getStatus(), $allowedStatuses, true)) {
+            return Response::error('INVALID_STATUS_FOR_ASSIGNMENT', "Solo se pueden asignar incidencias en estado REGISTERED o REOPENED. Estado actual: {$incident->getStatus()->value}.", 422);
+        }
+
+        // 7. ID del coordinador autenticado (para auditoría)
+        $coordinatorId = $request->getAttribute('user_id');
+
+        // 8. Realizar la asignación transaccional en el repositorio
+        try {
+            $assigned = $this->incidentRepo->assign(
+                incidentId: $incidentId,
+                technicianId: $technicianId,
+                coordinatorId: $coordinatorId !== null ? (int)$coordinatorId : null,
+                urgencyOverride: ($urgencyOverride !== null && $urgencyOverride !== '') ? $urgencyOverride : null,
+                urgencyReason: ($urgencyReason !== null && $urgencyReason !== '') ? $urgencyReason : null,
+            );
+        } catch (\VendGuard\Core\Domain\Exception\InvalidTransitionException $e) {
+            return Response::error('INVALID_STATUS_FOR_ASSIGNMENT', $e->getMessage(), 422);
+        } catch (\DomainException $e) {
+            return Response::error('ASSIGNMENT_FAILED', $e->getMessage(), 500);
+        }
+
+
+        // 9. Respuesta exitosa con datos esenciales de la incidencia asignada (contrato 4.2)
+        return Response::json([
+            'id'                     => $assigned->getId(),
+            'status'                 => $assigned->getStatus()->value,
+            'assigned_technician_id' => $assigned->getAssignedTechnicianId(),
+            'assigned_at'            => $assigned->getAssignedAt(),
+        ], 200);
+    }
 }

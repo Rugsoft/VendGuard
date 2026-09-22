@@ -808,6 +808,108 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
     }
 
     /**
+     * Asigna un técnico de campo a la incidencia y transiciona al estado ASSIGNED.
+     * Permite reclasificar la urgencia con motivo auditado (RF-05 / EARS 5.1, 5.2, 5.3).
+     */
+    public function assign(
+        int $incidentId,
+        int $technicianId,
+        ?int $coordinatorId = null,
+        ?string $urgencyOverride = null,
+        ?string $urgencyReason = null
+    ): Incident {
+        $isOwnTransaction = !$this->pdo->inTransaction();
+        if ($isOwnTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $incident = $this->findById($incidentId);
+            if ($incident === null) {
+                throw new DomainException("No se encontró ninguna incidencia con ID {$incidentId}.");
+            }
+
+            // 1. Validar transición legal: solo REGISTERED o REOPENED admiten asignación (EARS 5.1)
+            $allowedStatuses = [IncidentStatus::REGISTERED, IncidentStatus::REOPENED];
+            if (!in_array($incident->getStatus(), $allowedStatuses, true)) {
+                throw new InvalidTransitionException(
+                    "Solo las incidencias en estado REGISTRADA o REABIERTA pueden ser asignadas. Estado actual: {$incident->getStatus()->value}.",
+                    $incident->getStatus(),
+                    IncidentStatus::ASSIGNED
+                );
+            }
+
+            // 2. Resolver urgencia final (posible reclasificación coordinador, EARS 5.3)
+            $finalUrgency = $incident->getUrgency()->value;
+            $urgencyChanged = false;
+            if ($urgencyOverride !== null && trim($urgencyOverride) !== '') {
+                $newUrgency = strtoupper(trim($urgencyOverride));
+                if ($newUrgency !== $incident->getUrgency()->value) {
+                    $finalUrgency = $newUrgency;
+                    $urgencyChanged = true;
+                }
+            }
+
+            // 3. Actualizar incidencia: estado ASSIGNED, técnico asociado, fecha de asignación, urgencia final
+            $sql = "
+                UPDATE `incidents`
+                SET `status` = 'ASSIGNED',
+                    `assigned_technician_id` = :technician_id,
+                    `assigned_at` = CURRENT_TIMESTAMP,
+                    `urgency` = :urgency
+                WHERE `id` = :id
+                  AND `deleted_at` IS NULL
+            ";
+
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+            $stmt->bindValue(':urgency', $finalUrgency, PDO::PARAM_STR);
+            $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+            $stmt->execute();
+
+            // 4. Registrar evento de asignación en historial inmutable
+            $actionNote = "Incidencia asignada al técnico ID {$technicianId}.";
+            if ($urgencyChanged) {
+                $actionNote .= " Urgencia reclasificada de {$incident->getUrgency()->value} a {$finalUrgency}. Motivo: " . trim((string)$urgencyReason);
+            }
+            $this->insertHistory(
+                $incidentId,
+                $coordinatorId,
+                $incident->getStatus()->value,
+                'ASSIGNED',
+                $actionNote
+            );
+
+            // 5. Si se cambió la urgencia, registrar también un evento de auditoría de reclasificación
+            if ($urgencyChanged && $urgencyReason !== null && trim($urgencyReason) !== '') {
+                $this->insertHistory(
+                    $incidentId,
+                    $coordinatorId,
+                    'ASSIGNED',
+                    'ASSIGNED',
+                    "Reclasificación de urgencia a {$finalUrgency} registrada en auditoría. Justificación del coordinador: " . trim($urgencyReason)
+                );
+            }
+
+            if ($isOwnTransaction) {
+                $this->pdo->commit();
+            }
+
+            $assigned = $this->findById($incidentId);
+            if ($assigned === null) {
+                throw new DomainException("Error al recuperar la incidencia asignada.");
+            }
+
+            return $assigned;
+        } catch (Throwable $e) {
+            if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
      * Reabre una incidencia en garantía: transiciona a REABIERTA, desasigna al técnico,
      * reinicia el reloj de 48h e inserta el evento de auditoría (RF-09 / EARS 9.1, 9.2, 9.3).
      */

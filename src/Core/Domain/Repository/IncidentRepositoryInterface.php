@@ -125,6 +125,27 @@ interface IncidentRepositoryInterface
     public function markAsChronic(int $incidentId): bool;
 
     /**
+     * Asigna un técnico de campo único a la incidencia, transicionando a ASSIGNED y
+     * auditando opcionalmente la reclasificación de urgencia (RF-05 / EARS 5.1, 5.2, 5.3).
+     *
+     * @param int $incidentId      ID de la incidencia.
+     * @param int $technicianId    ID del técnico de campo (must have role TECHNICIAN).
+     * @param int|null $coordinatorId ID del coordinador que realiza la operación (para auditoría).
+     * @param string|null $urgencyOverride  Nuevo nivel de urgencia (ej: 'MEDIUM') o null si no se cambia.
+     * @param string|null $urgencyReason    Motivo obligatorio si se cambia la urgencia (EARS 5.3).
+     * @return Incident Entidad actualizada.
+     * @throws InvalidTransitionException si el estado actual no admite asignación.
+     * @throws \DomainException si el técnico no existe o no es de campo.
+     */
+    public function assign(
+        int $incidentId,
+        int $technicianId,
+        ?int $coordinatorId = null,
+        ?string $urgencyOverride = null,
+        ?string $urgencyReason = null
+    ): Incident;
+
+    /**
      * Reabre una incidencia en garantía: transiciona a REABIERTA, desasigna al técnico,
      * reinicia el reloj de 48h e inserta el evento de auditoría (RF-09 / EARS 9.1).
      */

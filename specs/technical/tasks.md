@@ -150,7 +150,7 @@
   * **Dependencias:** T-14, T-20
   * **Hecho cuando:** `GET /api/coordinator/incidents` devuelve todas las averías filtrables, calculando los minutos de espera y marcando `sla_breached: true` en críticas con > 60 min.
 
-- [ ] **T-26: Endpoint de Asignación y Reclasificación Auditada de Técnico**
+- [x] **T-26: Endpoint de Asignación y Reclasificación Auditada de Técnico**
   * **Requisitos:** `RF-05` (EARS 5.1, 5.2, 5.3)
   * **Dependencias:** T-14, T-25
   * **Hecho cuando:** `PATCH /api/coordinator/incidents/{id}/assign` asocia un técnico único y exige motivo obligatorio si se modifica el nivel de urgencia, guardándolo en el historial.
