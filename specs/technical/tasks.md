@@ -218,7 +218,7 @@
   * **Dependencias:** T-25, T-26, T-27, T-33
   * **Hecho cuando:** Muestra la tabla de averías con filtros, actualiza alertas de SLA > 60m mediante sondeo cada 60s y abre modales de asignación técnica y descarte.
 
-- [ ] **T-38: Implementar la vista móvil de campo del Técnico (`TechnicianRouteView.js`)**
+- [x] **T-38: Implementar la vista móvil de campo del Técnico (`TechnicianRouteView.js`)**
   * **Requisitos:** `RF-07`, `RF-08`, `RNF-01`
   * **Dependencias:** T-28, T-29, T-33
   * **Hecho cuando:** La interfaz vertical de smartphone permite al técnico ver su lista de tareas, pulsar "Iniciar intervención", "Pausar por repuesto" y abrir el modal de cierre que exige >= 20 caracteres por campo.

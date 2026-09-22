@@ -403,7 +403,8 @@ export class ApiClient {
      */
     pauseIncident: (incidentId, partsNote) => {
       return this.patch(`/technician/incidents/${incidentId}/pause`, {
-        parts_note: partsNote
+        parts_note: partsNote,
+        pending_parts_reason: partsNote
       });
     },
 
@@ -417,7 +418,9 @@ export class ApiClient {
     resolveIncident: (incidentId, diagnosis, actionTaken) => {
       return this.post(`/technician/incidents/${incidentId}/resolve`, {
         diagnosis,
-        action_taken: actionTaken
+        action_taken: actionTaken,
+        resolution_diagnosis: diagnosis,
+        resolution_action: actionTaken
       });
     }
   };

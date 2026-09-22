@@ -182,7 +182,9 @@ class TechnicianController
 
         // 3. Extraer y validar el motivo de pausa por repuesto (EARS 7.2)
         $body = $request->getParsedBody();
-        $reason = isset($body['pending_parts_reason']) ? trim((string)$body['pending_parts_reason']) : '';
+        $reason = isset($body['pending_parts_reason']) 
+            ? trim((string)$body['pending_parts_reason']) 
+            : (isset($body['parts_note']) ? trim((string)$body['parts_note']) : '');
         if ($reason === '') {
             return Response::error('MISSING_PENDING_PARTS_REASON', 'La descripción del repuesto requerido es obligatoria (pending_parts_reason obligatorio).', 422);
         }
@@ -255,8 +257,12 @@ class TechnicianController
 
         // 3. Extraer y validar cuerpo de la petición (EARS 8.1)
         $body = $request->getParsedBody();
-        $diagnosis = isset($body['resolution_diagnosis']) ? trim((string)$body['resolution_diagnosis']) : '';
-        $action    = isset($body['resolution_action']) ? trim((string)$body['resolution_action']) : '';
+        $diagnosis = isset($body['resolution_diagnosis']) 
+            ? trim((string)$body['resolution_diagnosis']) 
+            : (isset($body['diagnosis']) ? trim((string)$body['diagnosis']) : '');
+        $action    = isset($body['resolution_action']) 
+            ? trim((string)$body['resolution_action']) 
+            : (isset($body['action_taken']) ? trim((string)$body['action_taken']) : '');
 
         // Validar textos con ResolutionValidator (mínimo 20 caracteres descriptivos en cada campo)
         $validationErrors = \VendGuard\Core\Service\ResolutionValidator::getValidationErrors($diagnosis, $action);
