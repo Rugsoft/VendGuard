@@ -72,7 +72,7 @@
   * **Dependencias:** T-03, T-04
   * **Hecho cuando:** El método `findBySiteCode('SEDE-BCN-01')` recupera la sede activa y devuelve `null` si el código no existe o tiene `deleted_at IS NOT NULL`.
 
-- [ ] **T-12: Implementar `PdoMachineRepository.php` con detección de ticket activo**
+- [x] **T-12: Implementar `PdoMachineRepository.php` con detección de ticket activo**
   * **Requisitos:** `RF-01`, `RF-02`
   * **Dependencias:** T-03, T-04
   * **Hecho cuando:** `findActiveByLocationId($locationId)` devuelve el listado de máquinas indicando para cada una si tiene un aviso activo o en garantía (`ticket_code` y `status`).
