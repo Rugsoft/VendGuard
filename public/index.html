@@ -19,6 +19,21 @@
     </div>
   </div>
 
+  <!-- Error Diagnostics Handler -->
+  <script>
+    window.addEventListener('error', function(e) {
+      console.error('VendGuard Global Error:', e);
+      var app = document.getElementById('app');
+      if (app && app.innerText.indexOf('Cargando VendGuard...') !== -1) {
+        app.innerHTML = '<div style="max-width: 600px; margin: 40px auto; padding: 24px; font-family: sans-serif; background: #fff5f5; border: 1px solid #feb2b2; border-radius: 8px; color: #9b2c2c;">' +
+          '<h3 style="margin-top:0;">Error al cargar la aplicación</h3>' +
+          '<p style="font-size: 13px; font-family: monospace; background: #fee2e2; padding: 8px; border-radius: 4px;">' + (e.message || 'Error de script') + '</p>' +
+          '<button onclick="location.reload()" style="padding: 8px 16px; background: #2560ff; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Recargar página</button>' +
+          '</div>';
+      }
+    });
+  </script>
+
   <!-- Vanilla Vue 3 Application Root (ES Module) -->
   <script type="module" src="/assets/js/app.js"></script>
 </body>

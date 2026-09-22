@@ -50,12 +50,19 @@ if (typeof window !== 'undefined' && window.Vue?.reactive) {
 
 if (!vueReactive) {
   try {
-    const vue = await import('https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js');
+    const vue = await import('./vendor/vue.esm-browser.prod.js');
     if (vue?.reactive) {
       vueReactive = vue.reactive;
     }
   } catch (err) {
-    vueReactive = createProxyReactive;
+    try {
+      const vueCdn = await import('https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js');
+      if (vueCdn?.reactive) {
+        vueReactive = vueCdn.reactive;
+      }
+    } catch {
+      vueReactive = createProxyReactive;
+    }
   }
 }
 

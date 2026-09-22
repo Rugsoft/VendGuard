@@ -9,7 +9,7 @@
  * Dogma Vanilla: Native Vue 3 Composition/Options API via ES Modules (zero npm build step).
  */
 
-import { createApp } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js';
+import { createApp } from './vendor/vue.esm-browser.prod.js';
 import { store, restoreSession } from './store.js';
 import { AppNavbar } from './components/AppNavbar.js';
 import { LocationPortalView } from './views/LocationPortalView.js';
