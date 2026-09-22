@@ -53,7 +53,7 @@
   * **Dependencias:** T-05
   * **Hecho cuando:** `ResolutionValidator::validate($diagnosis, $action)` arroja error si el diagnóstico o la acción tienen menos de 20 caracteres cada uno, y devuelve verdadero solo si ambos superan el umbral.
 
-- [ ] **T-09: Crear suite de pruebas unitarias para `ResolutionValidatorTest.php`**
+- [x] **T-09: Crear suite de pruebas unitarias para `ResolutionValidatorTest.php`**
   * **Requisitos:** `RF-08`
   * **Dependencias:** T-08
   * **Hecho cuando:** La ejecución de `php tests/Unit/ResolutionValidatorTest.php` comprueba el rechazo de textos cortos (19 caracteres, "ok", ".") y la aceptación con >= 20 caracteres.
