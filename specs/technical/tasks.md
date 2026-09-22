@@ -58,7 +58,7 @@
   * **Dependencias:** T-08
   * **Hecho cuando:** La ejecución de `php tests/Unit/ResolutionValidatorTest.php` comprueba el rechazo de textos cortos (19 caracteres, "ok", ".") y la aceptación con >= 20 caracteres.
 
-- [ ] **T-10: Implementar la máquina de estados (`IncidentStateMachine.php`)**
+- [x] **T-10: Implementar la máquina de estados (`IncidentStateMachine.php`)**
   * **Requisitos:** `RF-05`, `RF-07`, `RF-08`, `RF-09`, `RF-10`
   * **Dependencias:** T-05
   * **Hecho cuando:** `IncidentStateMachine::canTransition($from, $to)` permite únicamente las transiciones legales del grafo y lanza `InvalidTransitionException` ante saltos no autorizados (ej: de `REGISTRADA` directo a `RESUELTA`).
