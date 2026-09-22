@@ -19,7 +19,7 @@
   * **Dependencias:** T-01
   * **Hecho cuando:** El script DDL de `database_schema.md` se ejecuta en la base de datos `vendguard_db` creando las 6 tablas (`locations`, `machines`, `users`, `incidents`, `incident_history`, `incident_comments`) y la columna virtual `is_active_ticket` con su índice único `uq_machine_active_ticket`.
 
-- [ ] **T-03: Implementar la factoría de conexión PDO (`ConnectionFactory.php`)**
+- [x] **T-03: Implementar la factoría de conexión PDO (`ConnectionFactory.php`)**
   * **Requisitos:** `RNF-03`
   * **Dependencias:** T-02
   * **Hecho cuando:** `ConnectionFactory::getConnection()` devuelve una instancia de `PDO` en modo `ERRMODE_EXCEPTION`, con codificación UTF-8 `utf8mb4` y emulación de prepares desactivada (`ATTR_EMULATE_PREPARES = false`).
