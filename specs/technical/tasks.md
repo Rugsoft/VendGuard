@@ -48,7 +48,7 @@
   * **Dependencias:** T-06
   * **Hecho cuando:** La ejecución de `php tests/Unit/UrgencyCalculatorTest.php` valida los 6 casos de prueba de severidad pasando al 100% en verde.
 
-- [ ] **T-08: Implementar el validador de cierre de avería (`ResolutionValidator.php`)**
+- [x] **T-08: Implementar el validador de cierre de avería (`ResolutionValidator.php`)**
   * **Requisitos:** `RF-08` (EARS 8.1, 8.2)
   * **Dependencias:** T-05
   * **Hecho cuando:** `ResolutionValidator::validate($diagnosis, $action)` arroja error si el diagnóstico o la acción tienen menos de 20 caracteres cada uno, y devuelve verdadero solo si ambos superan el umbral.
