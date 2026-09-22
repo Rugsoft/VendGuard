@@ -67,7 +67,7 @@
 
 ## Fase 3: Capa de Persistencia y Repositorios PDO
 
-- [ ] **T-11: Implementar `PdoLocationRepository.php`**
+- [x] **T-11: Implementar `PdoLocationRepository.php`**
   * **Requisitos:** `RF-01`
   * **Dependencias:** T-03, T-04
   * **Hecho cuando:** El método `findBySiteCode('SEDE-BCN-01')` recupera la sede activa y devuelve `null` si el código no existe o tiene `deleted_at IS NOT NULL`.
