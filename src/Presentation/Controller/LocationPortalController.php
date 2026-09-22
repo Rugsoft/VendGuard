@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
+use VendGuard\Core\Domain\Exception\ChronicIncidentException;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
+use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
+use VendGuard\Core\Domain\Exception\WarrantyExpiredException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\Location;
@@ -523,5 +526,136 @@ class LocationPortalController
         $comments = $this->incidentRepo->getComments((int)$incident->getId(), false);
 
         return Response::json(array_map(fn(IncidentComment $c) => $c->toArray(), $comments), 200);
+    }
+
+    /**
+     * POST /api/incidents/{ticket_code}/reopen
+     * Reabre una incidencia en estado RESUELTA dentro de las 48h de garantía (RF-09 / EARS 9.1, 9.2, 9.3).
+     * 
+     * - Desasigna automáticamente al técnico previo (assigned_technician_id = NULL) (EARS 9.1).
+     * - Reinicia el reloj de garantía a 0 (resolved_at = NULL).
+     * - Rechaza si han transcurrido > 48 horas con HTTP 422 REOPEN_WINDOW_EXPIRED (EARS 9.2).
+     * - Bloquea con "Avería Crónica" (HTTP 422 CHRONIC_INCIDENT_LIMIT) a la 3ª reincidencia (EARS 9.3).
+     * - Devuelve HTTP 200 OK con el ticket reabierto.
+     */
+    public function reopenIncident(Request $request): Response
+    {
+        // 1. Identificar la sede autenticada
+        $location = $request->getAttribute('authenticated_location');
+        if ($location === null) {
+            $locationId = $request->getAttribute('location_id');
+            if ($locationId !== null) {
+                $location = $this->locationRepo->findById((int)$locationId);
+            }
+        }
+        if ($location === null) {
+            $siteCodeHeader = $request->getHeader('X-Site-Code') ?? $request->getAttribute('site_code');
+            if ($siteCodeHeader !== null && trim((string)$siteCodeHeader) !== '') {
+                $location = $this->locationRepo->findBySiteCode(trim((string)$siteCodeHeader), true);
+            }
+        }
+
+        if ($location === null) {
+            return Response::error(
+                'UNAUTHORIZED',
+                'Acceso no autorizado. No se ha podido verificar la sede del usuario.',
+                401
+            );
+        }
+
+        // 2. Obtener y validar el código de ticket
+        $ticketCodeParam = $request->getRouteParam('ticket_code') ?? $request->getRouteParam('code');
+        if ($ticketCodeParam === null || trim($ticketCodeParam) === '') {
+            return Response::error(
+                'MISSING_TICKET_CODE',
+                'El código de ticket es obligatorio en la URL.',
+                400
+            );
+        }
+
+        $ticketCode = strtoupper(trim($ticketCodeParam));
+        $incident = $this->incidentRepo->findByTicketCode($ticketCode);
+
+        if ($incident === null) {
+            return Response::error(
+                'INCIDENT_NOT_FOUND',
+                "No se encontró ninguna incidencia con el código '{$ticketCode}'.",
+                404
+            );
+        }
+
+        // 3. Validar segregación de sede (Artículo V Constitución / RF-01)
+        if ($incident->getLocationId() !== $location->getId()) {
+            return Response::error(
+                'SITE_MISMATCH',
+                'No tiene autorización para reabrir incidencias de otra sede.',
+                403
+            );
+        }
+
+        // 4. Validar motivo descriptivo de la reapertura
+        $reason = trim((string)($request->getBodyParam('reopen_reason') ?? $request->getBodyParam('reason') ?? $request->getBodyParam('description') ?? ''));
+        if ($reason === '') {
+            return Response::error(
+                'MISSING_REOPEN_REASON',
+                'El motivo descriptivo de la reapertura es obligatorio.',
+                400
+            );
+        }
+
+        if (mb_strlen($reason) < 5) {
+            return Response::error(
+                'REOPEN_REASON_TOO_SHORT',
+                'El motivo de la reapertura debe contener al menos 5 caracteres descriptivos.',
+                422
+            );
+        }
+
+        // 5. Ejecutar la reapertura en el repositorio aplicando las reglas de negocio
+        try {
+            $reopenedIncident = $this->incidentRepo->reopen((int)$incident->getId(), $reason);
+        } catch (InvalidTransitionException $e) {
+            return Response::error(
+                'INVALID_TRANSITION',
+                $e->getMessage(),
+                422,
+                [
+                    'current_status' => $e->getFromStatus()?->value,
+                    'required_status' => IncidentStatus::RESOLVED->value,
+                ]
+            );
+        } catch (WarrantyExpiredException $e) {
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode()
+            );
+        } catch (ChronicIncidentException $e) {
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                [
+                    'ticket_code' => $e->getTicketCode(),
+                    'reopen_count' => $e->getReopenCount(),
+                    'tag' => 'Avería Crónica',
+                ]
+            );
+        }
+
+        // 6. Respuesta exitosa HTTP 200 OK con payload según contrato API
+        return Response::json(
+            [
+                'ticket_code' => $reopenedIncident->getTicketCode(),
+                'status' => 'REABIERTA',
+                'status_canonical' => $reopenedIncident->getStatus()->value,
+                'assigned_technician_id' => $reopenedIncident->getAssignedTechnicianId(),
+                'reopened_at' => $reopenedIncident->getReopenedAt(),
+                'reopen_reason' => $reopenedIncident->getReopenReason(),
+                'incident' => $reopenedIncident->toArray(),
+            ],
+            200,
+            'Incidencia reabierta con éxito y enviada a triaje de coordinación.'
+        );
     }
 }

@@ -7,10 +7,12 @@ namespace VendGuard\Presentation\Routing;
 use Closure;
 use DomainException;
 use Throwable;
+use VendGuard\Core\Domain\Exception\ChronicIncidentException;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
 use VendGuard\Core\Domain\Exception\InvalidResolutionException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
+use VendGuard\Core\Domain\Exception\WarrantyExpiredException;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
 
@@ -220,6 +222,23 @@ class Router
                 [
                     'from_status' => $e->getFromStatus()?->value,
                     'to_status' => $e->getToStatus()?->value,
+                ]
+            );
+        } catch (WarrantyExpiredException $e) {
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode()
+            );
+        } catch (ChronicIncidentException $e) {
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                [
+                    'ticket_code' => $e->getTicketCode(),
+                    'reopen_count' => $e->getReopenCount(),
+                    'tag' => 'Avería Crónica',
                 ]
             );
         } catch (InvalidResolutionException $e) {

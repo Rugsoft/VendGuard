@@ -4,14 +4,19 @@ declare(strict_types=1);
 
 namespace VendGuard\Infrastructure\Repository;
 
+use DomainException;
 use PDO;
 use PDOException;
 use Throwable;
+use VendGuard\Core\Domain\Exception\ChronicIncidentException;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
+use VendGuard\Core\Domain\Exception\InvalidTransitionException;
+use VendGuard\Core\Domain\Exception\WarrantyExpiredException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\IncidentHistory;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 
 /**
@@ -755,5 +760,145 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         return array_map(fn(array $row) => IncidentComment::fromDatabaseRow($row), $rows);
+    }
+
+    /**
+     * Cuenta el número de eventos de reapertura previos registrados en la auditoría (RF-09 / EARS 9.3).
+     */
+    public function countReopenEvents(int $incidentId): int
+    {
+        $sql = "
+            SELECT COUNT(*) 
+            FROM `incident_history` 
+            WHERE `incident_id` = :incident_id 
+              AND `to_status` IN ('REOPENED', 'REABIERTA')
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([':incident_id' => $incidentId]);
+
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * Marca un expediente como "Avería Crónica" al superar el límite de 2 reaperturas sucesivas (EARS 9.3).
+     */
+    public function markAsChronic(int $incidentId): bool
+    {
+        $sql = "
+            UPDATE `incidents`
+            SET `reopen_reason` = CONCAT(IFNULL(`reopen_reason`, ''), ' [AVERÍA CRÓNICA]')
+            WHERE `id` = :id
+              AND `deleted_at` IS NULL
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $updated = $stmt->execute([':id' => $incidentId]);
+
+        // Registrar en el historial la marca de Avería Crónica
+        $this->insertHistory(
+            $incidentId,
+            null,
+            'RESOLVED',
+            'RESOLVED',
+            'Expediente catalogado como Avería Crónica tras superar el límite de 2 reaperturas sucesivas.'
+        );
+
+        return $updated;
+    }
+
+    /**
+     * Reabre una incidencia en garantía: transiciona a REABIERTA, desasigna al técnico,
+     * reinicia el reloj de 48h e inserta el evento de auditoría (RF-09 / EARS 9.1, 9.2, 9.3).
+     */
+    public function reopen(int $incidentId, string $reasonText): Incident
+    {
+        $isOwnTransaction = !$this->pdo->inTransaction();
+        if ($isOwnTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $incident = $this->findById($incidentId);
+            if ($incident === null) {
+                throw new DomainException("No se encontró ninguna incidencia con ID {$incidentId}.");
+            }
+
+            // 1. Validar que la incidencia esté en estado RESOLVED
+            if ($incident->getStatus() !== IncidentStatus::RESOLVED) {
+                throw new InvalidTransitionException(
+                    "Solo se pueden reabrir incidencias en estado RESUELTA. El estado actual es {$incident->getStatus()->value}.",
+                    $incident->getStatus(),
+                    IncidentStatus::REOPENED
+                );
+            }
+
+            // 2. Validar ventana de garantía de 48 horas (EARS 9.2)
+            if (!$incident->isInWarranty(48)) {
+                throw new WarrantyExpiredException(
+                    'REOPEN_WINDOW_EXPIRED',
+                    'Han transcurrido más de 48 horas desde la resolución de la incidencia. La ventana de garantía ha expirado; debe registrar un nuevo ticket de avería.'
+                );
+            }
+
+            // 3. Validar límite de 2 reaperturas sucesivas (EARS 9.3)
+            $reopenCount = $this->countReopenEvents($incidentId);
+            if ($reopenCount >= 2) {
+                $this->markAsChronic($incidentId);
+                if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                    $this->pdo->commit();
+                }
+                throw new ChronicIncidentException(
+                    'CHRONIC_INCIDENT_LIMIT',
+                    'Esta máquina ha presentado múltiples reincidencias consecutivas y el expediente ha sido catalogado como \'Avería Crónica\'. La reapertura automática desde el portal está bloqueada. Por favor, contacte directamente con el centro de coordinación técnica para una auditoría presencial.',
+                    $incident->getTicketCode(),
+                    $reopenCount
+                );
+            }
+
+            // 4. Actualizar registro: status = REOPENED, desasignar técnico, reiniciar reloj 48h (resolved_at = NULL)
+            $sql = "
+                UPDATE `incidents`
+                SET `status` = 'REOPENED',
+                    `assigned_technician_id` = NULL,
+                    `assigned_at` = NULL,
+                    `reopened_at` = CURRENT_TIMESTAMP,
+                    `reopen_reason` = :reopen_reason,
+                    `resolved_at` = NULL
+                WHERE `id` = :id
+                  AND `deleted_at` IS NULL
+            ";
+
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+            $stmt->bindValue(':reopen_reason', trim($reasonText), PDO::PARAM_STR);
+            $stmt->execute();
+
+            // 5. Insertar evento en incident_history
+            $eventNumber = $reopenCount + 1;
+            $this->insertHistory(
+                $incidentId,
+                null,
+                'RESOLVED',
+                'REOPENED',
+                "Reapertura solicitada por la sede ({$eventNumber}ª reincidencia). Motivo: " . trim($reasonText)
+            );
+
+            if ($isOwnTransaction) {
+                $this->pdo->commit();
+            }
+
+            $reopened = $this->findById($incidentId);
+            if ($reopened === null) {
+                throw new DomainException("Error al recuperar la incidencia reabierta.");
+            }
+
+            return $reopened;
+        } catch (Throwable $e) {
+            if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 }

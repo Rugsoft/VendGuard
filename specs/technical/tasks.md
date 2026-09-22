@@ -140,7 +140,7 @@
   * **Dependencias:** T-14, T-22
   * **Hecho cuando:** `POST /api/incidents/{ticket_code}/comments` anexa una entrada en `incident_comments` sin sobreescribir la fotografía original de la incidencia.
 
-- [ ] **T-24: Endpoint de Reapertura en Ventana de Garantía (`POST /reopen`)**
+- [x] **T-24: Endpoint de Reapertura en Ventana de Garantía (`POST /reopen`)**
   * **Requisitos:** `RF-09` (EARS 9.1, 9.2, 9.3)
   * **Dependencias:** T-14
   * **Hecho cuando:** `POST /api/incidents/{ticket_code}/reopen` pasa el estado a `REABIERTA`, pone `assigned_technician_id = NULL`, reinicia el reloj de 48h, rechaza si han pasado >48h (HTTP 422) y bloquea con "Avería Crónica" a la 3ª reincidencia.

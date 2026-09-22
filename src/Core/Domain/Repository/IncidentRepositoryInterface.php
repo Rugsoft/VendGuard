@@ -113,4 +113,20 @@ interface IncidentRepositoryInterface
      * @return list<IncidentComment>
      */
     public function getComments(int $incidentId, bool $includeInternal = true): array;
+
+    /**
+     * Cuenta el número de eventos de reapertura previos registrados en la auditoría (RF-09 / EARS 9.3).
+     */
+    public function countReopenEvents(int $incidentId): int;
+
+    /**
+     * Marca un expediente como "Avería Crónica" al superar el límite de 2 reaperturas sucesivas (EARS 9.3).
+     */
+    public function markAsChronic(int $incidentId): bool;
+
+    /**
+     * Reabre una incidencia en garantía: transiciona a REABIERTA, desasigna al técnico,
+     * reinicia el reloj de 48h e inserta el evento de auditoría (RF-09 / EARS 9.1).
+     */
+    public function reopen(int $incidentId, string $reasonText): Incident;
 }
