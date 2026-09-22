@@ -145,7 +145,7 @@
   * **Dependencias:** T-14
   * **Hecho cuando:** `POST /api/incidents/{ticket_code}/reopen` pasa el estado a `REABIERTA`, pone `assigned_technician_id = NULL`, reinicia el reloj de 48h, rechaza si han pasado >48h (HTTP 422) y bloquea con "Avería Crónica" a la 3ª reincidencia.
 
-- [ ] **T-25: Endpoint de Bandeja Global del Coordinador (`CoordinatorController.php`)**
+- [x] **T-25: Endpoint de Bandeja Global del Coordinador (`CoordinatorController.php`)**
   * **Requisitos:** `RF-05`, `RF-11`
   * **Dependencias:** T-14, T-20
   * **Hecho cuando:** `GET /api/coordinator/incidents` devuelve todas las averías filtrables, calculando los minutos de espera y marcando `sla_breached: true` en críticas con > 60 min.

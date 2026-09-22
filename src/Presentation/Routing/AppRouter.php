@@ -55,6 +55,14 @@ class AppRouter
         $router->get('/api/incidents/{ticket_code}/comments', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'getComments'], [$siteAuth]);
         $router->post('/api/incidents/{ticket_code}/reopen', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'reopenIncident'], [$siteAuth]);
 
+        // -----------------------------------------------------------------
+        // 4. Módulo de Coordinación y Triaje (T-25, T-26, T-27)
+        // -----------------------------------------------------------------
+        $coordinatorAuth = new \VendGuard\Presentation\Http\Middleware\InternalAuthMiddleware(
+            \VendGuard\Core\Domain\Model\UserRole::COORDINATOR
+        );
+        $router->get('/api/coordinator/incidents', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getIncidents'], [$coordinatorAuth]);
+
         return $router;
     }
 }
