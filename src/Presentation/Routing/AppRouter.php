@@ -39,6 +39,12 @@ class AppRouter
         $router->get('/', $healthHandler);
         $router->get('/api/health', $healthHandler);
 
+        // -----------------------------------------------------------------
+        // 2. Módulo de Autenticación y Acceso (T-20)
+        // -----------------------------------------------------------------
+        $router->post('/api/auth/site-login', [\VendGuard\Presentation\Controller\AuthController::class, 'siteLogin']);
+        $router->post('/api/auth/login', [\VendGuard\Presentation\Controller\AuthController::class, 'login']);
+
         return $router;
     }
 }

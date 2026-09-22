@@ -100,10 +100,19 @@ class Request
 
         // Parsear cuerpo de la petición
         $parsedBody = [];
-        $contentType = $headers['Content-Type'] ?? $headers['content-type'] ?? '';
+        $contentType = '';
+        foreach ($headers as $k => $v) {
+            if (strcasecmp($k, 'Content-Type') === 0) {
+                $contentType = (string)$v;
+                break;
+            }
+        }
+        if ($contentType === '' && isset($_SERVER['CONTENT_TYPE'])) {
+            $contentType = (string)$_SERVER['CONTENT_TYPE'];
+        }
 
-        if (str_contains(strtolower($contentType), 'application/json')) {
-            $rawInput = file_get_contents('php://input');
+        $rawInput = file_get_contents('php://input');
+        if (str_contains(strtolower($contentType), 'application/json') || (empty($_POST) && $rawInput !== false && (str_starts_with(trim($rawInput), '{') || str_starts_with(trim($rawInput), '[')))) {
             if ($rawInput !== false && trim($rawInput) !== '') {
                 $decoded = json_decode($rawInput, true);
                 if (is_array($decoded)) {

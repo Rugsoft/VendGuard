@@ -120,7 +120,7 @@
 
 ## Fase 5: Controladores y Endpoints de la API REST
 
-- [ ] **T-20: Endpoint de Login de Sede y Personal (`AuthController.php`)**
+- [x] **T-20: Endpoint de Login de Sede y Personal (`AuthController.php`)**
   * **Requisitos:** `RF-01`, `RF-04`
   * **Dependencias:** T-11, T-13, T-18
   * **Hecho cuando:** `POST /api/auth/site-login` valida códigos de sede y `POST /api/auth/login` valida credenciales internas emitiendo tokens de sesión.
