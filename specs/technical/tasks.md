@@ -82,7 +82,7 @@
   * **Dependencias:** T-03, T-04
   * **Hecho cuando:** `findByEmail($email)` recupera el usuario y permite verificar su contraseña mediante `password_verify()`.
 
-- [ ] **T-14: Implementar `PdoIncidentRepository.php` (Creación, Historial y Soft Delete)**
+- [x] **T-14: Implementar `PdoIncidentRepository.php` (Creación, Historial y Soft Delete)**
   * **Requisitos:** `RF-02`, `RF-03`, `RF-05`, `RF-06`, `RNF-03`
   * **Dependencias:** T-03, T-05
   * **Hecho cuando:** El método `create()` inserta la incidencia y su primer registro en `incident_history` dentro de una transacción atómica PDO.
