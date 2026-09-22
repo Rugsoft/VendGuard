@@ -205,6 +205,17 @@ interface IncidentRepositoryInterface
      * @throws \DomainException si la incidencia no existe o no está asignada a dicho técnico.
      */
     public function resolve(int $incidentId, int $technicianId, string $diagnosis, string $action): Incident;
+
+    /**
+     * Cierra automáticamente todas las incidencias en estado RESOLVED cuya ventana
+     * de garantía de 48 horas haya vencido sin reapertura (RF-10 / EARS 10.1, 10.2).
+     * Transiciona el estado a CLOSED, fija closed_at e inserta eventos de auditoría inmutable.
+     *
+     * @param int $hours Tiempo de expiración de la ventana de garantía en horas (por defecto 48).
+     * @return list<Incident> Lista de entidades actualizadas a CLOSED.
+     */
+    public function autoCloseResolvedIncidents(int $hours = 48): array;
 }
+
 
 

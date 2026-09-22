@@ -79,6 +79,12 @@ class AppRouter
         $router->patch('/api/technician/{id}/pause', [\VendGuard\Presentation\Controller\TechnicianController::class, 'pauseIntervention'], [$technicianAuth]);
         $router->post('/api/technician/{id}/resolve', [\VendGuard\Presentation\Controller\TechnicianController::class, 'resolveIncident'], [$technicianAuth]);
 
+        // -----------------------------------------------------------------
+        // 6. Módulo de Automatización y Tareas Cron (T-30)
+        // -----------------------------------------------------------------
+        $router->post('/api/cron/auto-close', [\VendGuard\Presentation\Controller\CronController::class, 'autoClose']);
+
         return $router;
     }
 }
+

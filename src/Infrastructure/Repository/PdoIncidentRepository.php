@@ -1310,6 +1310,87 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
             throw $e;
         }
     }
+
+    /**
+     * Cierra automáticamente todas las incidencias en estado RESOLVED cuya ventana
+     * de garantía de 48 horas haya vencido sin reapertura (RF-10 / EARS 10.1, 10.2).
+     * Transiciona el estado a CLOSED, fija closed_at e inserta eventos de auditoría inmutable.
+     *
+     * @param int $hours
+     * @return list<Incident>
+     */
+    public function autoCloseResolvedIncidents(int $hours = 48): array
+    {
+        // 1. Buscar todas las incidencias en estado RESOLVED con más de 48h desde resolved_at
+        $sqlSelect = "
+            SELECT id FROM `incidents`
+            WHERE `status` = 'RESOLVED'
+              AND `resolved_at` IS NOT NULL
+              AND `resolved_at` <= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+              AND `deleted_at` IS NULL
+            ORDER BY `resolved_at` ASC
+        ";
+
+        $stmt = $this->pdo->prepare($sqlSelect);
+        $stmt->bindValue(':hours', $hours, PDO::PARAM_INT);
+        $stmt->execute();
+        $idsToClose = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        if (empty($idsToClose)) {
+            return [];
+        }
+
+        $closedIncidents = [];
+
+        foreach ($idsToClose as $incidentId) {
+            $id = (int)$incidentId;
+            $isOwnTx = !$this->pdo->inTransaction();
+            if ($isOwnTx) {
+                $this->pdo->beginTransaction();
+            }
+
+            try {
+                // Actualizar a CLOSED
+                $sqlUpdate = "
+                    UPDATE `incidents`
+                    SET `status` = 'CLOSED',
+                        `closed_at` = CURRENT_TIMESTAMP
+                    WHERE `id` = :id
+                      AND `status` = 'RESOLVED'
+                      AND `deleted_at` IS NULL
+                ";
+                $updateStmt = $this->pdo->prepare($sqlUpdate);
+                $updateStmt->bindValue(':id', $id, PDO::PARAM_INT);
+                $updateStmt->execute();
+
+                // Registrar en historial inmutable
+                $this->insertHistory(
+                    $id,
+                    null, // Automatismo del sistema (cron batch)
+                    'RESOLVED',
+                    'CLOSED',
+                    "Cierre automático y archivado definitivo tras vencer la ventana de garantía de {$hours}h sin réplica."
+                );
+
+                if ($isOwnTx) {
+                    $this->pdo->commit();
+                }
+
+                $closed = $this->findById($id);
+                if ($closed !== null) {
+                    $closedIncidents[] = $closed;
+                }
+            } catch (Throwable $e) {
+                if ($isOwnTx && $this->pdo->inTransaction()) {
+                    $this->pdo->rollBack();
+                }
+                // Continuar con los demás si uno fallara
+            }
+        }
+
+        return $closedIncidents;
+    }
 }
+
 
 

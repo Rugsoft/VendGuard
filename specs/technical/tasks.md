@@ -170,7 +170,7 @@
   * **Dependencias:** T-08, T-28
   * **Hecho cuando:** `POST /api/technician/incidents/{id}/resolve` valida que el diagnóstico tenga >= 20 caracteres Y la acción >= 20 caracteres, pasando a `RESUELTA` e iniciando los 48h.
 
-- [ ] **T-30: Endpoint de Auto-Cierre por Proceso Batch (`CronController.php`)**
+- [x] **T-30: Endpoint de Auto-Cierre por Proceso Batch (`CronController.php`)**
   * **Requisitos:** `RF-10` (EARS 10.1, 10.2)
   * **Dependencias:** T-14
   * **Hecho cuando:** `POST /api/cron/auto-close` protegido por token archiva a `CERRADA` definitiva todas las incidencias en `RESUELTA` con más de 48 horas de antigüedad.
