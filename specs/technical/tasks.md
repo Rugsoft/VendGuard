@@ -24,7 +24,7 @@
   * **Dependencias:** T-02
   * **Hecho cuando:** `ConnectionFactory::getConnection()` devuelve una instancia de `PDO` en modo `ERRMODE_EXCEPTION`, con codificación UTF-8 `utf8mb4` y emulación de prepares desactivada (`ATTR_EMULATE_PREPARES = false`).
 
-- [ ] **T-04: Carga de datos semilla (*Seed Data*) para desarrollo y pruebas**
+- [x] **T-04: Carga de datos semilla (*Seed Data*) para desarrollo y pruebas**
   * **Requisitos:** `RF-01`, `RF-04`
   * **Dependencias:** T-03
   * **Hecho cuando:** La base de datos contiene al menos 2 sedes (`SEDE-BCN-01`, `SEDE-BCN-02`), 3 máquinas (incluyendo una de `PERISHABLE_FOOD`) y los 2 usuarios de prueba (`coordinacion@vendguard.internal` y `jordi.ruta@vendguard.internal`) con contraseñas cifradas en Bcrypt.

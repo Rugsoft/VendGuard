@@ -13,6 +13,8 @@ Desktop.ini
 .vscode/
 *.sublime-project
 *.sublime-workspace
+.freebuff/
+
 
 # Subidas dinámicas de usuarios (conservando directorio)
 public/uploads/*
