@@ -184,7 +184,7 @@
   * **Dependencias:** T-01
   * **Hecho cuando:** El archivo define `--color-primary: #2560ff`, `--color-canvas: #f9fafb`, `--color-slate: #2c333f`, bordes de 4px en interactivos y 8px en tarjetas, e importa las fuentes Inter y DM Sans.
 
-- [ ] **T-32: Implementar el cliente HTTP nativo (`api.js`) y almacén reactivo (`store.js`)**
+- [x] **T-32: Implementar el cliente HTTP nativo (`api.js`) y almacén reactivo (`store.js`)**
   * **Requisitos:** `RNF-01`, Arquitectura Frontend
   * **Dependencias:** T-31
   * **Hecho cuando:** `api.js` gestiona llamadas `fetch()`, adjunta tokens automáticamente y maneja errores; `store.js` expone el estado reactivo del usuario y la sede con Vue 3 `reactive`.
