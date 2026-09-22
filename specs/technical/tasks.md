@@ -213,7 +213,7 @@
   * **Dependencias:** T-24, T-34
   * **Hecho cuando:** En máquinas en estado `RESUELTA` muestra el botón "Reabrir incidencia" si no han pasado 48h y envía el motivo de reapertura.
 
-- [ ] **T-37: Implementar el Dashboard del Coordinador (`CoordinatorDashboardView.js`)**
+- [x] **T-37: Implementar el Dashboard del Coordinador (`CoordinatorDashboardView.js`)**
   * **Requisitos:** `RF-05`, `RF-06`, `RF-11`
   * **Dependencias:** T-25, T-26, T-27, T-33
   * **Hecho cuando:** Muestra la tabla de averías con filtros, actualiza alertas de SLA > 60m mediante sondeo cada 60s y abre modales de asignación técnica y descarte.

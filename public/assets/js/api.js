@@ -352,9 +352,11 @@ export class ApiClient {
       };
       if (urgency) {
         body.urgency = urgency;
+        body.urgency_override = urgency;
       }
       if (urgencyReason) {
         body.urgency_reason = urgencyReason;
+        body.urgency_override_reason = urgencyReason;
       }
       return this.patch(`/coordinator/incidents/${incidentId}/assign`, body);
     },
