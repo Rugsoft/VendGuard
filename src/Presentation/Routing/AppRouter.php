@@ -23,6 +23,13 @@ class AppRouter
         // 1. Rutas de Diagnóstico y Health Check (T-01)
         // -----------------------------------------------------------------
         $healthHandler = function (Request $request): Response {
+            // Si la petición proviene de un navegador web (HTML), sirve el frontend SPA
+            $accept = (string)$request->getHeader('Accept');
+            $htmlPath = dirname(__DIR__, 3) . '/public/index.html';
+            if (str_contains($accept, 'text/html') && file_exists($htmlPath)) {
+                return new Response((string)file_get_contents($htmlPath), 200, ['Content-Type' => 'text/html; charset=UTF-8']);
+            }
+
             return Response::json([
                 'name' => 'VendGuard API',
                 'version' => '1.0.0-mvp',
