@@ -14,7 +14,7 @@
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existen los directorios `public/`, `src/Core/`, `src/Application/`, `src/Infrastructure/`, `src/Presentation/`, `tests/` y el servidor integrado de PHP responde con código HTTP 200 en `http://localhost:8000/`.
 
-- [ ] **T-02: Creación y ejecución de la migración DDL en MariaDB**
+- [x] **T-02: Creación y ejecución de la migración DDL en MariaDB**
   * **Requisitos:** `RNF-03`, `RF-02`
   * **Dependencias:** T-01
   * **Hecho cuando:** El script DDL de `database_schema.md` se ejecuta en la base de datos `vendguard_db` creando las 6 tablas (`locations`, `machines`, `users`, `incidents`, `incident_history`, `incident_comments`) y la columna virtual `is_active_ticket` con su índice único `uq_machine_active_ticket`.
