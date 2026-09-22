@@ -232,7 +232,7 @@
   * **Dependencias:** T-07, T-09, T-15
   * **Hecho cuando:** Todas las pruebas unitarias y de integración se ejecutan exitosamente con cero fallos (`0 errors, 0 failures`).
 
-- [ ] **T-40: Ejecutar el guion de verificación manual E2E de los 3 perfiles**
+- [x] **T-40: Ejecutar el guion de verificación manual E2E de los 3 perfiles**
   * **Requisitos:** Criterios de Finalización (Definition of Done)
   * **Dependencias:** T-34, T-35, T-36, T-37, T-38
   * **Hecho cuando:** Se completa con éxito el recorrido funcional: reporte por sede ➔ triaje/asignación ➔ intervención y resolución móvil ➔ comprobación de no-duplicidad y reapertura.
