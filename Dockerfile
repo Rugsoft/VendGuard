@@ -16,5 +16,5 @@ RUN mkdir -p public/uploads && chmod -R 777 public/uploads
 ENV PORT=8080
 EXPOSE 8080
 
-# Iniciar servidor web embebido de PHP con router integrado
-CMD ["sh", "-c", "php -S 0.0.0.0:${PORT} -t public public/index.php"]
+# Iniciar inicializador de BD en la nube (tablas y semillas) y arrancar servidor web
+CMD ["sh", "-c", "php bin/init_cloud_db.php ; php -S 0.0.0.0:${PORT} -t public public/index.php"]
