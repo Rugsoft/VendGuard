@@ -198,7 +198,7 @@
 
 ## Fase 7: Vistas de Usuario Frontend
 
-- [ ] **T-34: Implementar la vista del Portal del Responsable (`LocationPortalView.js`)**
+- [x] **T-34: Implementar la vista del Portal del Responsable (`LocationPortalView.js`)**
   * **Requisitos:** `RF-01`, `RF-02`, `RNF-02`
   * **Dependencias:** T-21, T-33
   * **Hecho cuando:** El conserje entra con su código de sede, visualiza las máquinas de su edificio en tarjetas de 8px y ve claramente cuáles tienen incidencias abiertas.
