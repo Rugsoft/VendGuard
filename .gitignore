@@ -1,0 +1,19 @@
+# Entornos y configuración local
+.env
+.env.local
+*.log
+
+# Archivos del sistema operativo
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# IDEs y editores
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Subidas dinámicas de usuarios (conservando directorio)
+public/uploads/*
+!public/uploads/.gitkeep
