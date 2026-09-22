@@ -33,7 +33,7 @@
 
 ## Fase 2: Lógica de Dominio y Pruebas Unitarias (TDD)
 
-- [ ] **T-05: Implementar Enums y Value Objects de Dominio**
+- [x] **T-05: Implementar Enums y Value Objects de Dominio**
   * **Requisitos:** `RF-03`, `RF-07`, `RF-08`
   * **Dependencias:** T-01
   * **Hecho cuando:** Existen los ficheros tipados `UrgencyLevel.php` (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`), `IncidentStatus.php` (8 estados) y `MachineType.php` con métodos de validación inmutables.
