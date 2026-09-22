@@ -77,7 +77,7 @@
   * **Dependencias:** T-03, T-04
   * **Hecho cuando:** `findActiveByLocationId($locationId)` devuelve el listado de máquinas indicando para cada una si tiene un aviso activo o en garantía (`ticket_code` y `status`).
 
-- [ ] **T-13: Implementar `PdoUserRepository.php` con autenticación segura**
+- [x] **T-13: Implementar `PdoUserRepository.php` con autenticación segura**
   * **Requisitos:** `RF-04`
   * **Dependencias:** T-03, T-04
   * **Hecho cuando:** `findByEmail($email)` recupera el usuario y permite verificar su contraseña mediante `password_verify()`.
