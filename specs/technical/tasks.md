@@ -87,7 +87,7 @@
   * **Dependencias:** T-03, T-05
   * **Hecho cuando:** El método `create()` inserta la incidencia y su primer registro en `incident_history` dentro de una transacción atómica PDO.
 
-- [ ] **T-15: Test de integración de la restricción de duplicados (`DuplicateIncidentTest.php`)**
+- [x] **T-15: Test de integración de la restricción de duplicados (`DuplicateIncidentTest.php`)**
   * **Requisitos:** `RF-02`, Artículo V de la Constitución
   * **Dependencias:** T-14
   * **Hecho cuando:** El test intenta insertar dos incidencias activas consecutivas para la misma máquina y comprueba que la segunda lanza la excepción de duplicado `409 Conflict`.

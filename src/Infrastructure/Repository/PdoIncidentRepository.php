@@ -48,6 +48,32 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
         }
 
         try {
+            // 1. Detección preventiva de duplicados y control de garantía (Artículo V Constitución / Algoritmo 3.2)
+            $existing = $this->findActiveOrResolvedByMachineId($incident->getMachineId());
+            if ($existing !== null) {
+                if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                    $this->pdo->rollBack();
+                }
+
+                if ($existing->getStatus() === \VendGuard\Core\Domain\ValueObject\IncidentStatus::RESOLVED) {
+                    throw new DuplicateIncidentException(
+                        'MACHINE_IN_WARRANTY',
+                        "Esta máquina fue reparada recientemente (Ticket #{$existing->getTicketCode()}). Si el fallo persiste, pulsa en 'Reabrir incidencia'.",
+                        $existing->getTicketCode(),
+                        $existing->getStatus()->value,
+                        409
+                    );
+                }
+
+                throw new DuplicateIncidentException(
+                    'MACHINE_HAS_ACTIVE_INCIDENT',
+                    "Esta máquina ya cuenta con un aviso activo (Ticket #{$existing->getTicketCode()}) en estado {$existing->getStatus()->value}.",
+                    $existing->getTicketCode(),
+                    $existing->getStatus()->value,
+                    409
+                );
+            }
+
             $sql = "
                 INSERT INTO `incidents` (
                     `ticket_code`,
@@ -158,7 +184,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
                         'MACHINE_HAS_ACTIVE_INCIDENT',
                         "Esta máquina ya cuenta con un aviso activo (Ticket #{$ticket}) en estado {$st}.",
                         $ticket,
-                        $st
+                        $st,
+                        409
                     );
                 }
             }
