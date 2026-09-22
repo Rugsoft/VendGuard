@@ -67,6 +67,15 @@ class ConnectionFactory
         $enableSsl = $customConfig['ssl'] 
             ?? (getenv('DB_SSL') === 'true' || getenv('DB_SSL') === '1' || str_contains((string)$host, 'tidbcloud.com') || str_contains((string)$host, 'aivencloud.com'));
         if ($enableSsl) {
+            $bundledCa = __DIR__ . '/isrgrootx1.pem';
+            $systemCa = '/etc/ssl/certs/ca-certificates.crt';
+
+            if (file_exists($bundledCa)) {
+                $options[PDO::MYSQL_ATTR_SSL_CA] = $bundledCa;
+            } elseif (file_exists($systemCa)) {
+                $options[PDO::MYSQL_ATTR_SSL_CA] = $systemCa;
+            }
+
             $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
         }
 

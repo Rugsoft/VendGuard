@@ -1,7 +1,8 @@
 FROM php:8.2-cli-alpine
 
-# Instalar extensiones nativas PDO y MySQL
-RUN docker-php-ext-install pdo pdo_mysql
+# Instalar ca-certificates para TLS y extensiones PDO y MySQL nativas
+RUN apk add --no-cache ca-certificates \
+    && docker-php-ext-install pdo pdo_mysql
 
 # Establecer directorio de trabajo
 WORKDIR /var/www/html
