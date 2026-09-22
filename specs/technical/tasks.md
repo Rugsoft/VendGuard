@@ -160,7 +160,7 @@
   * **Dependencias:** T-14, T-25
   * **Hecho cuando:** `PATCH /api/coordinator/incidents/{id}/cancel` exige motivo de descarte y cambia el estado a `CANCELADA` sin borrar la fila de la base de datos.
 
-- [ ] **T-28: Endpoints de Operativa de Campo del Técnico (`TechnicianController.php`)**
+- [x] **T-28: Endpoints de Operativa de Campo del Técnico (`TechnicianController.php`)**
   * **Requisitos:** `RF-07`
   * **Dependencias:** T-14, T-20
   * **Hecho cuando:** `GET /api/technician/my-route` lista solo las asignadas al técnico, `PATCH /start` transiciona a `EN_CURSO` y `PATCH /pause` a `PENDIENTE_REPUESTO`.

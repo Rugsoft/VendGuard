@@ -164,4 +164,30 @@ interface IncidentRepositoryInterface
      * @throws \DomainException si la incidencia no existe o falla la actualización.
      */
     public function cancel(int $incidentId, string $cancellationReason, ?int $coordinatorId = null): Incident;
+
+    /**
+     * Inicia o reanuda la intervención técnica in situ en campo (RF-07 / EARS 7.1, 7.3).
+     * Transiciona a IN_PROGRESS, registra started_at si es la primera vez y anota en auditoría.
+     *
+     * @param int $incidentId ID de la incidencia.
+     * @param int $technicianId ID del técnico asignado responsable.
+     * @return Incident Entidad actualizada en estado IN_PROGRESS.
+     * @throws InvalidTransitionException si el estado actual no permite pasar a IN_PROGRESS.
+     * @throws \DomainException si la incidencia no existe o no está asignada a dicho técnico.
+     */
+    public function startIntervention(int $incidentId, int $technicianId): Incident;
+
+    /**
+     * Pausa temporalmente la intervención técnica por falta de repuestos (RF-07 / EARS 7.2).
+     * Transiciona a PENDING_PARTS, exige descripción de la pieza y anota en auditoría.
+     *
+     * @param int $incidentId ID de la incidencia.
+     * @param int $technicianId ID del técnico asignado responsable.
+     * @param string $pendingPartsReason Nota descriptiva de la pieza requerida.
+     * @return Incident Entidad actualizada en estado PENDING_PARTS.
+     * @throws InvalidTransitionException si el estado actual no permite pasar a PENDING_PARTS.
+     * @throws \DomainException si la incidencia no existe, no está asignada al técnico o falta motivo.
+     */
+    public function pauseIntervention(int $incidentId, int $technicianId, string $pendingPartsReason): Incident;
 }
+

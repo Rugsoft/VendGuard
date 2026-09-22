@@ -1078,4 +1078,158 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
             throw $e;
         }
     }
+
+    /**
+     * Inicia o reanuda la intervención técnica en campo (RF-07 / EARS 7.1, 7.3).
+     * Transiciona a IN_PROGRESS, registra started_at si es la primera vez y anota en auditoría.
+     */
+    public function startIntervention(int $incidentId, int $technicianId): Incident
+    {
+        $isOwnTransaction = !$this->pdo->inTransaction();
+        if ($isOwnTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $incident = $this->findById($incidentId);
+            if ($incident === null) {
+                throw new DomainException("No se encontró ninguna incidencia con ID {$incidentId}.");
+            }
+
+            // 1. Validar que la incidencia esté asignada al técnico que interviene
+            if ($incident->getAssignedTechnicianId() !== $technicianId) {
+                throw new DomainException("La incidencia no está asignada al técnico indicado.");
+            }
+
+            // 2. Validar transición legal a IN_PROGRESS
+            if (!$incident->getStatus()->canTransitionTo(IncidentStatus::IN_PROGRESS)) {
+                throw new InvalidTransitionException(
+                    "No se puede iniciar la intervención en una incidencia en estado {$incident->getStatus()->value}.",
+                    $incident->getStatus(),
+                    IncidentStatus::IN_PROGRESS
+                );
+            }
+
+            // 3. Actualizar estado a IN_PROGRESS y fijar started_at (conservando si ya existía)
+            $sql = "
+                UPDATE `incidents`
+                SET `status` = 'IN_PROGRESS',
+                    `started_at` = COALESCE(`started_at`, CURRENT_TIMESTAMP)
+                WHERE `id` = :id
+                  AND `deleted_at` IS NULL
+            ";
+
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+            $stmt->execute();
+
+            // 4. Registrar en historial inmutable
+            $note = ($incident->getStatus() === IncidentStatus::PENDING_PARTS)
+                ? 'Reanudación de trabajos técnicos in situ tras recepción de repuestos.'
+                : 'Inicio de intervención presencial del técnico de campo.';
+
+            $this->insertHistory(
+                $incidentId,
+                $technicianId,
+                $incident->getStatus()->value,
+                'IN_PROGRESS',
+                $note
+            );
+
+            if ($isOwnTransaction) {
+                $this->pdo->commit();
+            }
+
+            $started = $this->findById($incidentId);
+            if ($started === null) {
+                throw new DomainException("Error al recuperar la incidencia iniciada.");
+            }
+
+            return $started;
+        } catch (Throwable $e) {
+            if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Pausa temporalmente la intervención técnica por falta de repuestos (RF-07 / EARS 7.2).
+     * Transiciona a PENDING_PARTS, exige descripción de la pieza requerida y anota en auditoría.
+     */
+    public function pauseIntervention(int $incidentId, int $technicianId, string $pendingPartsReason): Incident
+    {
+        $isOwnTransaction = !$this->pdo->inTransaction();
+        if ($isOwnTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $incident = $this->findById($incidentId);
+            if ($incident === null) {
+                throw new DomainException("No se encontró ninguna incidencia con ID {$incidentId}.");
+            }
+
+            // 1. Validar que la incidencia esté asignada al técnico que pausa
+            if ($incident->getAssignedTechnicianId() !== $technicianId) {
+                throw new DomainException("La incidencia no está asignada al técnico indicado.");
+            }
+
+            // 2. Validar que el motivo de recambio no esté vacío (EARS 7.2)
+            $trimmedReason = trim($pendingPartsReason);
+            if ($trimmedReason === '') {
+                throw new DomainException("La descripción de la pieza o repuesto requerido es obligatoria.");
+            }
+
+            // 3. Validar transición legal a PENDING_PARTS
+            if (!$incident->getStatus()->canTransitionTo(IncidentStatus::PENDING_PARTS)) {
+                throw new InvalidTransitionException(
+                    "No se puede pausar una incidencia en estado {$incident->getStatus()->value}.",
+                    $incident->getStatus(),
+                    IncidentStatus::PENDING_PARTS
+                );
+            }
+
+            // 4. Actualizar estado a PENDING_PARTS y registrar motivo
+            $sql = "
+                UPDATE `incidents`
+                SET `status` = 'PENDING_PARTS',
+                    `pending_parts_reason` = :reason
+                WHERE `id` = :id
+                  AND `deleted_at` IS NULL
+            ";
+
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->bindValue(':reason', $trimmedReason, PDO::PARAM_STR);
+            $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+            $stmt->execute();
+
+            // 5. Registrar en historial inmutable
+            $this->insertHistory(
+                $incidentId,
+                $technicianId,
+                $incident->getStatus()->value,
+                'PENDING_PARTS',
+                'Intervención pausada por falta de repuestos. Solicitud de pieza: ' . $trimmedReason
+            );
+
+            if ($isOwnTransaction) {
+                $this->pdo->commit();
+            }
+
+            $paused = $this->findById($incidentId);
+            if ($paused === null) {
+                throw new DomainException("Error al recuperar la incidencia pausada.");
+            }
+
+            return $paused;
+        } catch (Throwable $e) {
+            if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
 }
+
