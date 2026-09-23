@@ -17,15 +17,18 @@ import { api } from '../api.js';
 import { store } from '../store.js';
 import { IncidentBadge } from '../components/IncidentBadge.js';
 import { ModalDialog } from '../components/ModalDialog.js';
+import { TechnicianMetricsView } from './TechnicianMetricsView.js';
 
 export const TechnicianRouteView = {
   name: 'TechnicianRouteView',
   components: {
     IncidentBadge,
-    ModalDialog
+    ModalDialog,
+    TechnicianMetricsView
   },
   data() {
     return {
+      activeSection: 'route', // 'route' | 'metrics'
       incidents: [],
       isLoading: false,
       errorMessage: '',
@@ -479,9 +482,36 @@ export const TechnicianRouteView = {
           </div>
         </div>
 
-        <!-- Global Toast / Feedback Messages -->
-        <div
-          v-if="feedbackMessage"
+        <!-- Barra de Navegación Móvil del Técnico (RF-07, RF-04) -->
+        <div style="display: flex; gap: 8px; margin-bottom: 14px; background: #e5f2fc; padding: 4px; border-radius: 8px;">
+          <button
+            type="button"
+            @click="activeSection = 'route'"
+            :style="{ flex: 1, padding: '8px 12px', fontSize: '13px', fontWeight: '700', borderRadius: '6px', border: 'none', cursor: 'pointer', backgroundColor: activeSection === 'route' ? '#2560ff' : 'transparent', color: activeSection === 'route' ? '#ffffff' : '#2c333f', transition: 'all 0.2s ease' }"
+            data-testid="tech-tab-route"
+          >
+            📍 Mi Ruta ({{ routeMetrics.total }})
+          </button>
+          <button
+            type="button"
+            @click="activeSection = 'metrics'"
+            :style="{ flex: 1, padding: '8px 12px', fontSize: '13px', fontWeight: '700', borderRadius: '6px', border: 'none', cursor: 'pointer', backgroundColor: activeSection === 'metrics' ? '#2560ff' : 'transparent', color: activeSection === 'metrics' ? '#ffffff' : '#2c333f', transition: 'all 0.2s ease' }"
+            data-testid="tech-tab-metrics"
+          >
+            📈 Mis Métricas
+          </button>
+        </div>
+
+        <!-- SECCIÓN 2: MIS MÉTRICAS DE RENDIMIENTO (RF-04) -->
+        <div v-if="activeSection === 'metrics'">
+          <TechnicianMetricsView />
+        </div>
+
+        <!-- SECCIÓN 1: RUTA OPERATIVA DE TRABAJO (RF-07, RF-08) -->
+        <div v-else>
+          <!-- Global Toast / Feedback Messages -->
+          <div
+            v-if="feedbackMessage"
           style="background-color: #ecfdf5; border: 1px solid #6ee7b7; color: #065f46; padding: 10px 14px; border-radius: var(--radius-interactive, 4px); font-size: 13px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;"
           role="status"
         >
@@ -687,6 +717,7 @@ export const TechnicianRouteView = {
           </div>
         </div>
       </div>
+    </div>
 
       <!-- =================================================================== -->
       <!-- MODAL 1: PAUSE BY REPLACEMENT PART (RF-07 / EARS 7.2)               -->

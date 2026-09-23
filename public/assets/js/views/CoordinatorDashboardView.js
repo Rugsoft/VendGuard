@@ -19,6 +19,7 @@ import { ModalDialog } from '../components/ModalDialog.js';
 import { QrLabelModal } from '../components/QrLabelModal.js';
 import { QrBatchPrintView } from './QrBatchPrintView.js';
 import { CoordinatorFleetTab } from '../components/CoordinatorFleetTab.js';
+import { CoordinatorMetricsView } from './CoordinatorMetricsView.js';
 
 // Default list of route technicians from seeds
 const DEFAULT_TECHNICIANS = [
@@ -33,13 +34,14 @@ export const CoordinatorDashboardView = {
     ModalDialog,
     QrLabelModal,
     QrBatchPrintView,
-    CoordinatorFleetTab
+    CoordinatorFleetTab,
+    CoordinatorMetricsView
   },
   emits: ['assigned', 'cancelled', 'refresh'],
   data() {
     return {
-      // Navigation Tabs (RF-FLEET-01)
-      activeTab: 'incidents', // 'incidents' | 'fleet'
+      // Navigation Tabs (RF-FLEET-01, RF-03)
+      activeTab: 'incidents', // 'incidents' | 'fleet' | 'metrics'
 
       // Login Form
       loginEmail: '',
@@ -499,6 +501,17 @@ export const CoordinatorDashboardView = {
           >
             🏢 Parque de Sedes y Máquinas
           </button>
+
+          <button
+            type="button"
+            class="vg-btn"
+            :class="activeTab === 'metrics' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
+            @click="activeTab = 'metrics'"
+            data-testid="tab-metrics"
+          >
+            📊 Métricas y Auditoría
+          </button>
         </div>
 
         <!-- CONTENIDO PESTAÑA 1: TRIAJE Y AVISOS -->
@@ -801,6 +814,11 @@ export const CoordinatorDashboardView = {
         v-else-if="activeTab === 'fleet'"
         @open-qr="openQrLabelModal($event)"
         @open-batch-print="openQrBatchPrint($event.locationId, $event.locationName)"
+      />
+
+      <!-- CONTENIDO PESTAÑA 3: MÉTRICAS Y AUDITORÍA (RF-01, RF-02, RF-03, RF-05, RF-06) -->
+      <CoordinatorMetricsView
+        v-else-if="activeTab === 'metrics'"
       />
     </div>
 

@@ -94,7 +94,7 @@
   * **Dependencias:** T-MET-12
   * **Hecho cuando:** Al pulsar "Generar Informe Ejecutivo" se despliega el resumen ejecutivo y al imprimir (`Ctrl+P` / `window.print()`) se genera una salida limpia sin barras laterales ni botones de acción.
 
-- [ ] **T-MET-15: Integrar vista general `CoordinatorMetricsView.js` y panel privado `TechnicianMetricsView.js`**
+- [x] **T-MET-15: Integrar vista general `CoordinatorMetricsView.js` y panel privado `TechnicianMetricsView.js`**
   * **Requisitos:** `RF-03`, `RF-04`, `RNF-05`
   * **Dependencias:** T-MET-12, T-MET-13, T-MET-14, T-MET-10
   * **Hecho cuando:** El panel de Coordinación dispone de la nueva sección "📊 Métricas y Auditoría", el panel de Técnico dispone de "📈 Mis Métricas" y la suite `node tests/unit/MetricCardsTest.mjs` pasa al 100% en verde.
