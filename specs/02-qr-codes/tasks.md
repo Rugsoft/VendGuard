@@ -32,7 +32,7 @@
   * **Dependencias:** T-QR-02
   * **Hecho cuando:** `NativeSvgQrRenderer::renderLabel($config)` genera una cadena SVG XML válida de 400x600 px conteniendo el logo, código de máquina destacado, QR centralizado de al menos 40x40 mm y teléfono de asistencia técnica.
 
-- [ ] **T-QR-05: Crear suite de pruebas unitarias para `NativeSvgQrRendererTest.php`**
+- [x] **T-QR-05: Crear suite de pruebas unitarias para `NativeSvgQrRendererTest.php`**
   * **Requisitos:** `RF-01`, `RF-02`, `RNF-03`
   * **Dependencias:** T-QR-04
   * **Hecho cuando:** La ejecución de `php tests/unit/NativeSvgQrRendererTest.php` valida que el SVG generado sea sintácticamente válido, contenga las etiquetas `<svg viewBox="0 0 400 600"`, el código de la máquina, el teléfono y los elementos gráficos de seguridad.
