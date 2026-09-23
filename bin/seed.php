@@ -23,14 +23,21 @@ try {
     echo "[1/3] Conexión PDO obtenida con éxito.\n";
 
     $runner = new SeedRunner($pdo);
-    echo "[2/3] Ejecutando inserción de datos semilla...\n";
+    echo "[2/4] Ejecutando inserción de datos semilla base...\n";
     $summary = $runner->seedAll('Password123!');
 
     echo "      - Sedes cargadas/actualizadas: {$summary['locations']}\n";
     echo "      - Máquinas cargadas/actualizadas: {$summary['machines']}\n";
     echo "      - Usuarios cargados/actualizados: {$summary['users']}\n";
 
-    echo "[3/3] Verificando datos en la base de datos:\n";
+    echo "[3/4] Sembrando historial de averías, reparaciones y log de auditoría...\n";
+    require_once __DIR__ . '/../database/DemoMetricsSeeder.php';
+    $demoSeeder = new \VendGuard\Database\DemoMetricsSeeder($pdo);
+    $demoSummary = $demoSeeder->seed();
+    echo "      - Averías/reparaciones históricas: {$demoSummary['incidents']}\n";
+    echo "      - Eventos en log de auditoría: {$demoSummary['audit_events']}\n";
+
+    echo "[4/4] Verificando datos en la base de datos:\n";
 
     // 1. Sedes
     $stmt = $pdo->query("SELECT site_code, name FROM locations WHERE deleted_at IS NULL ORDER BY id ASC");

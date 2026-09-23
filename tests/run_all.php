@@ -216,6 +216,11 @@ try {
     $pdo = ConnectionFactory::getConnection();
     $seedRunner = new SeedRunner($pdo);
     $seedRunner->seedAll();
+
+    require_once __DIR__ . '/../database/DemoMetricsSeeder.php';
+    $demoSeeder = new \VendGuard\Database\DemoMetricsSeeder($pdo);
+    $demoSeeder->seed();
+
     $dbResetOk = true;
 } catch (\Throwable $e) {
     $dbResetOk = false;
