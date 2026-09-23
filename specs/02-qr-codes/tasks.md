@@ -51,7 +51,7 @@
   * **Dependencias:** T-QR-06
   * **Hecho cuando:** La ejecución de `php tests/unit/QrScanServiceTest.php` pasa al 100% en verde, verificando que los campos privados de técnicos, notas de taller y costes de repuestos jamás figuren en el payload de una máquina con avería abierta.
 
-- [ ] **T-QR-08: Implementar el servicio de reporte por QR y gestión de concurrencia (`QrReportService.php`)**
+- [x] **T-QR-08: Implementar el servicio de reporte por QR y gestión de concurrencia (`QrReportService.php`)**
   * **Requisitos:** `RF-03` (EARS 3.4), `RF-04` (EARS 4.5)
   * **Dependencias:** T-QR-06
   * **Hecho cuando:** `QrReportService::report($data)` crea un nuevo ticket o, si detecta una avería abierta por envío concurrente de otro usuario, anexa las observaciones como comentario adicional devolviendo `merged: true` sin arrojar error técnico.
