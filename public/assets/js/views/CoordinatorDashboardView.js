@@ -16,6 +16,8 @@ import { api } from '../api.js';
 import { store } from '../store.js';
 import { IncidentBadge } from '../components/IncidentBadge.js';
 import { ModalDialog } from '../components/ModalDialog.js';
+import { QrLabelModal } from '../components/QrLabelModal.js';
+import { QrBatchPrintView } from './QrBatchPrintView.js';
 
 // Default list of route technicians from seeds
 const DEFAULT_TECHNICIANS = [
@@ -27,7 +29,9 @@ export const CoordinatorDashboardView = {
   name: 'CoordinatorDashboardView',
   components: {
     IncidentBadge,
-    ModalDialog
+    ModalDialog,
+    QrLabelModal,
+    QrBatchPrintView
   },
   emits: ['assigned', 'cancelled', 'refresh'],
   data() {
@@ -67,7 +71,14 @@ export const CoordinatorDashboardView = {
       showCancelModal: false,
       cancelReason: '',
       isCancelling: false,
-      cancelError: ''
+      cancelError: '',
+
+      // QR Label & Batch Print State (T-QR-14)
+      showQrLabelModal: false,
+      selectedQrMachine: null,
+      showQrBatchView: false,
+      selectedBatchLocationId: 1,
+      selectedBatchLocationName: 'Hospital del Mar - Edificio Central'
     };
   },
   computed: {
@@ -338,6 +349,35 @@ export const CoordinatorDashboardView = {
       this.filterUrgency = '';
       this.filterSearch = '';
       this.filterSlaOnly = false;
+    },
+
+    /**
+     * Gestión de Etiquetas QR individuales y en lote (RF-01, RF-02 / T-QR-14)
+     */
+    openQrLabelModal(incidentOrMachine) {
+      this.selectedQrMachine = {
+        id: incidentOrMachine.machine_id || incidentOrMachine.id,
+        code: incidentOrMachine.machine_code || incidentOrMachine.code,
+        model: incidentOrMachine.machine_model || incidentOrMachine.model,
+        machine_type: incidentOrMachine.machine_type,
+        floor_wing: incidentOrMachine.floor_wing
+      };
+      this.showQrLabelModal = true;
+    },
+
+    closeQrLabelModal() {
+      this.showQrLabelModal = false;
+      this.selectedQrMachine = null;
+    },
+
+    openQrBatchPrint(locationId = 1, locationName = 'Hospital del Mar - Edificio Central') {
+      this.selectedBatchLocationId = locationId;
+      this.selectedBatchLocationName = locationName;
+      this.showQrBatchView = true;
+    },
+
+    closeQrBatchPrint() {
+      this.showQrBatchView = false;
     }
   },
   template: `
@@ -416,6 +456,14 @@ export const CoordinatorDashboardView = {
       <!-- =================================================================== -->
       <!-- STATE B: AUTHENTICATED COORDINATOR TRIAGE DASHBOARD                 -->
       <!-- =================================================================== -->
+      <!-- Vista de Impresión en Lote A4 de Sede (EARS 2.2 / T-QR-14) -->
+      <QrBatchPrintView
+        v-if="showQrBatchView"
+        :location-id="selectedBatchLocationId"
+        :location-name="selectedBatchLocationName"
+        @close="closeQrBatchPrint"
+      />
+
       <div v-else>
         <!-- 1. Flashing SLA Breaches Alert Banner (RF-11 / EARS 11.1) -->
         <div
@@ -540,6 +588,17 @@ export const CoordinatorDashboardView = {
 
           <!-- Refresh and Polling status -->
           <div style="display: flex; align-items: center; gap: 10px;">
+            <button
+              type="button"
+              class="vg-btn vg-btn-secondary"
+              style="height: 36px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px;"
+              @click="openQrBatchPrint(1, 'Hospital del Mar - Edificio Central')"
+              title="Emitir cuadrícula de etiquetas A4 para la sede"
+              data-testid="btn-batch-print"
+            >
+              📄 Etiquetas de Sede (A4)
+            </button>
+
             <span style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
               Sondeo activo (60s)
             </span>
@@ -657,6 +716,18 @@ export const CoordinatorDashboardView = {
                   <!-- 7. Acciones -->
                   <td style="padding: 14px 16px; vertical-align: top; text-align: right;">
                     <div style="display: inline-flex; gap: 8px;">
+                      <!-- Imprimir Etiqueta QR Button (RF-01 / T-QR-14) -->
+                      <button
+                        type="button"
+                        class="vg-btn vg-btn-secondary"
+                        style="height: 30px; font-size: 12px; padding: 0 8px; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 4px;"
+                        @click="openQrLabelModal(inc)"
+                        title="Previsualizar, personalizar e imprimir etiqueta con código QR"
+                        data-testid="btn-print-qr"
+                      >
+                        🏷️ Imprimir QR
+                      </button>
+
                       <!-- Assign / Reassign Button -->
                       <button
                         type="button"
@@ -825,6 +896,16 @@ export const CoordinatorDashboardView = {
           </div>
         </form>
       </ModalDialog>
+
+      <!-- =================================================================== -->
+      <!-- MODAL 3: QR LABEL PREVIEW & PRINT (RF-01, RF-02 / T-QR-14)          -->
+      <!-- =================================================================== -->
+      <QrLabelModal
+        v-model="showQrLabelModal"
+        :machine="selectedQrMachine"
+        :machine-id="selectedQrMachine?.id"
+        @close="closeQrLabelModal"
+      />
     </div>
   `
 };

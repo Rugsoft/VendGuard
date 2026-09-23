@@ -1,0 +1,238 @@
+/**
+ * VendGuard — Estilos de Impresión de Etiquetas QR (qr-print.css)
+ * 
+ * Requisitos: RF-01, RF-02 (EARS 2.1, 2.2), RNF-03 (Fidelidad de Impresión).
+ * 
+ * Soporta:
+ * 1. Previsualización WYSIWYG de hoja A4 en pantalla.
+ * 2. Impresión individual de etiqueta adhesiva aislada sin elementos web.
+ * 3. Impresión en lote por sede en cuadrícula A4 con saltos de página limpios (break-inside: avoid).
+ * 
+ * Respeta el Dogma Vanilla (cero dependencias externas).
+ */
+
+/* ─── 1. Estilos en Pantalla (Previsualización de Lote) ─────────────────────── */
+.qr-batch-preview-container {
+  background-color: var(--color-canvas, #f9fafb);
+  padding: 24px 16px;
+  min-height: 100vh;
+}
+
+.qr-batch-toolbar {
+  max-width: 900px;
+  margin: 0 auto 20px auto;
+  background-color: #ffffff;
+  border: 1px solid var(--color-hairline, #c8cfda);
+  border-radius: var(--radius-card, 8px);
+  padding: 16px 20px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.qr-batch-info h2 {
+  margin: 0 0 4px 0;
+  font-family: var(--font-display, 'DM Sans', sans-serif);
+  font-size: 20px;
+  color: var(--color-slate, #2c333f);
+}
+
+.qr-batch-info p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-ink-muted, #6c7e9d);
+}
+
+.qr-batch-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* Hoja A4 visual en pantalla */
+.qr-a4-sheet {
+  background-color: #ffffff;
+  max-width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 15mm 10mm;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--color-hairline, #c8cfda);
+  box-sizing: border-box;
+}
+
+/* Cuadrícula de Etiquetas (2 columnas x 3 filas por página A4) */
+.qr-batch-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10mm;
+  align-items: start;
+}
+
+.qr-label-cell {
+  background-color: #ffffff;
+  border: 1px dashed var(--color-hairline-soft, #a9b4c6);
+  border-radius: 4px;
+  padding: 8px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  page-break-inside: avoid;
+  break-inside: avoid;
+  break-inside: avoid-page;
+}
+
+.qr-label-cell svg {
+  width: 100%;
+  max-width: 85mm;
+  height: auto;
+  display: block;
+}
+
+/* ─── 2. Estilos para el Modal de Previsualización Individual (QrLabelModal) ── */
+.qr-modal-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding: 10px 0;
+}
+
+.qr-modal-preview-col {
+  flex: 1 1 280px;
+  background-color: #f1f5f9;
+  border: 1px solid var(--color-hairline, #c8cfda);
+  border-radius: var(--radius-card, 8px);
+  padding: 16px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+}
+
+.qr-modal-preview-col svg {
+  max-width: 260px;
+  width: 100%;
+  height: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  background-color: #ffffff;
+  border-radius: 6px;
+}
+
+.qr-modal-controls-col {
+  flex: 1 1 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.qr-meta-box {
+  background-color: var(--color-canvas, #f9fafb);
+  border: 1px solid var(--color-hairline, #c8cfda);
+  border-radius: var(--radius-interactive, 4px);
+  padding: 12px 14px;
+  font-size: 13px;
+}
+
+.qr-meta-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.qr-meta-row:last-child {
+  margin-bottom: 0;
+}
+
+.qr-meta-k {
+  color: var(--color-ink-muted, #6c7e9d);
+}
+
+.qr-meta-v {
+  font-weight: 600;
+  color: var(--color-slate, #2c333f);
+}
+
+/* ─── 3. Directivas de Impresión Real (@media print) ───────────────────────── */
+@media print {
+  /* Configuración del papel A4 */
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  /* Ocultar cualquier elemento no imprimible */
+  body * {
+    visibility: hidden;
+  }
+
+  .qr-print-zone,
+  .qr-print-zone * {
+    visibility: visible;
+  }
+
+  .qr-print-zone {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    background: transparent !important;
+  }
+
+  .no-print,
+  .qr-batch-toolbar,
+  .vg-modal-backdrop,
+  header,
+  nav,
+  footer,
+  button {
+    display: none !important;
+  }
+
+  .qr-a4-sheet {
+    max-width: 100%;
+    min-height: auto;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .qr-batch-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8mm;
+    width: 100%;
+  }
+
+  .qr-label-cell {
+    border: 1px dashed #cbd5e1 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    break-inside: avoid-page !important;
+    box-shadow: none !important;
+  }
+
+  .qr-label-cell svg {
+    max-width: 90mm;
+    width: 100%;
+    height: auto;
+  }
+
+  /* Impresión individual de una sola etiqueta */
+  .qr-single-print-wrap {
+    width: 100%;
+    max-width: 100mm;
+    margin: 0 auto;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .qr-single-print-wrap svg {
+    width: 100%;
+    height: auto;
+  }
+}

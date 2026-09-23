@@ -89,7 +89,7 @@
   * **Dependencias:** T-QR-10
   * **Hecho cuando:** Al montar `QrReportView` con una máquina limpia se muestra la máquina bloqueada y el banner sanitario en perecederos; ante avería activa muestra el panel público y formulario de comentario adicional; y tras reportar muestra la confirmación `#TICK-XXXX`.
 
-- [ ] **T-QR-14: Implementar componentes de coordinador: `QrLabelModal.js`, `QrBatchPrintView.js` y `qr-print.css`**
+- [x] **T-QR-14: Implementar componentes de coordinador: `QrLabelModal.js`, `QrBatchPrintView.js` y `qr-print.css`**
   * **Requisitos:** `RF-01`, `RF-02` (EARS 2.1, 2.2)
   * **Dependencias:** T-QR-11
   * **Hecho cuando:** El panel de coordinación incluye el botón "🏷️ Imprimir QR" en cada máquina (con previsualización, teléfono editable, descarga SVG e impresión) y el botón "📄 Etiquetas de Sede (A4)" que maqueta la cuadrícula con saltos de página limpios.
