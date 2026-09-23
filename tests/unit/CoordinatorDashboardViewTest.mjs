@@ -204,9 +204,34 @@ assert('3.1 Metrics calculates totalActive = 3', authDash.metrics.totalActive ==
 assert('3.2 Metrics calculates criticalFood = 1', authDash.metrics.criticalFood === 1);
 assert('3.3 Metrics calculates unassigned = 2', authDash.metrics.unassigned === 2);
 
-// Filter by status 'ASIGNADA'
+// Filter by status 'ASIGNADA' (legacy Spanish key)
 authDash.filterStatus = 'ASIGNADA';
 assert('3.4 Filter by status ASIGNADA returns 1 incident', authDash.filteredIncidents.length === 1 && authDash.filteredIncidents[0].ticket_code === 'INC-2026-0003');
+
+// Filter by status 'ASSIGNED' (canonical English key from database)
+authDash.filterStatus = 'ASSIGNED';
+assert('3.4a Filter by status ASSIGNED returns 1 incident', authDash.filteredIncidents.length === 1 && authDash.filteredIncidents[0].ticket_code === 'INC-2026-0003');
+
+// Filter by status 'REGISTERED' (canonical English key)
+authDash.filterStatus = 'REGISTERED';
+assert('3.4b Filter by status REGISTERED returns 2 incidents', authDash.filteredIncidents.length === 2);
+
+// Filter by status on incident list containing English DB statuses
+authDash.incidents = [
+  { id: 10, ticket_code: 'INC-EN-01', status: 'IN_PROGRESS' },
+  { id: 11, ticket_code: 'INC-EN-02', status: 'RESOLVED' }
+];
+authDash.filterStatus = 'IN_PROGRESS';
+assert('3.4c Filter by status IN_PROGRESS on DB incidents returns 1 match', authDash.filteredIncidents.length === 1 && authDash.filteredIncidents[0].ticket_code === 'INC-EN-01');
+authDash.filterStatus = 'EN_CURSO';
+assert('3.4d Filter by status EN_CURSO on DB incidents matches IN_PROGRESS', authDash.filteredIncidents.length === 1 && authDash.filteredIncidents[0].ticket_code === 'INC-EN-01');
+authDash.filterStatus = 'RESOLVED';
+assert('3.4e Filter by status RESOLVED on DB incidents returns 1 match', authDash.filteredIncidents.length === 1 && authDash.filteredIncidents[0].ticket_code === 'INC-EN-02');
+authDash.filterStatus = 'RESUELTA';
+assert('3.4f Filter by status RESUELTA on DB incidents matches RESOLVED', authDash.filteredIncidents.length === 1 && authDash.filteredIncidents[0].ticket_code === 'INC-EN-02');
+
+// Restore original mock incidents
+authDash.incidents = [...mockIncidents];
 
 // Filter by urgency 'CRITICAL'
 authDash.filterStatus = '';

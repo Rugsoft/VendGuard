@@ -21,6 +21,32 @@ import { QrBatchPrintView } from './QrBatchPrintView.js';
 import { CoordinatorFleetTab } from '../components/CoordinatorFleetTab.js';
 import { CoordinatorMetricsView } from './CoordinatorMetricsView.js';
 
+// Canonical mapping for bilingual status values
+const STATUS_CANONICAL_MAP = {
+  REGISTERED: 'REGISTERED',
+  REGISTRADA: 'REGISTERED',
+  ASSIGNED: 'ASSIGNED',
+  ASIGNADA: 'ASSIGNED',
+  IN_PROGRESS: 'IN_PROGRESS',
+  EN_CURSO: 'IN_PROGRESS',
+  PENDING_PARTS: 'PENDING_PARTS',
+  PENDIENTE_REPUESTO: 'PENDING_PARTS',
+  PENDIENTE_REPUESTOS: 'PENDING_PARTS',
+  RESOLVED: 'RESOLVED',
+  RESUELTA: 'RESOLVED',
+  REOPENED: 'REOPENED',
+  REABIERTA: 'REOPENED',
+  CLOSED: 'CLOSED',
+  CERRADA: 'CLOSED',
+  CANCELLED: 'CANCELLED',
+  CANCELADA: 'CANCELLED'
+};
+
+function normalizeStatus(val) {
+  const upper = String(val || '').trim().toUpperCase();
+  return STATUS_CANONICAL_MAP[upper] || upper;
+}
+
 // Default list of route technicians from seeds
 const DEFAULT_TECHNICIANS = [
   { id: 2, name: 'Jordi Técnico Ruta BCN', email: 'jordi.ruta@vendguard.internal' },
@@ -105,9 +131,13 @@ export const CoordinatorDashboardView = {
     },
     filteredIncidents() {
       return this.incidents.filter(inc => {
-        // Status filter
-        if (this.filterStatus && String(inc.status || '').toUpperCase() !== this.filterStatus) {
-          return false;
+        // Status filter (supports both canonical English and localized Spanish)
+        if (this.filterStatus) {
+          const filterNorm = normalizeStatus(this.filterStatus);
+          const incStatusNorm = normalizeStatus(inc.status);
+          if (filterNorm && incStatusNorm !== filterNorm) {
+            return false;
+          }
         }
 
         // Urgency filter
@@ -600,15 +630,16 @@ export const CoordinatorDashboardView = {
             />
 
             <!-- Status filter -->
-            <select v-model="filterStatus" class="vg-select" style="max-width: 170px; height: 36px;">
+            <select v-model="filterStatus" class="vg-select" style="max-width: 170px; height: 36px;" data-testid="select-status-filter">
               <option value="">Todos los estados</option>
-              <option value="REGISTRADA">Registrada</option>
-              <option value="ASIGNADA">Asignada</option>
-              <option value="EN_CURSO">En curso</option>
-              <option value="PENDIENTE_REPUESTO">Pend. Repuesto</option>
-              <option value="RESUELTA">Resuelta</option>
-              <option value="REABIERTA">Reabierta</option>
-              <option value="CANCELADA">Cancelada</option>
+              <option value="REGISTERED">Registrada</option>
+              <option value="ASSIGNED">Asignada</option>
+              <option value="IN_PROGRESS">En curso</option>
+              <option value="PENDING_PARTS">Pend. Repuesto</option>
+              <option value="RESOLVED">Resuelta</option>
+              <option value="REOPENED">Reabierta</option>
+              <option value="CLOSED">Cerrada</option>
+              <option value="CANCELLED">Cancelada</option>
             </select>
 
             <!-- Urgency filter -->
