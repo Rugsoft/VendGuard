@@ -41,7 +41,7 @@
 
 ## Fase 2: Servicios de Aplicación y Lógica de Negocio
 
-- [ ] **T-QR-06: Implementar el servicio de resolución de escaneo (`QrScanService.php`)**
+- [x] **T-QR-06: Implementar el servicio de resolución de escaneo (`QrScanService.php`)**
   * **Requisitos:** `RF-03` (EARS 3.1, 3.3), `RF-04` (EARS 4.1, 4.3, 4.4), `RF-05` (EARS 5.1, 5.2)
   * **Dependencias:** T-QR-01
   * **Hecho cuando:** `QrScanService::resolve($machineCode)` resuelve la máquina en su sede real vigente y devuelve el estado correspondiente (`CAN_REPORT` identificando perecederos, `ACTIVE_INCIDENT` blindando la privacidad del Art. V.4, `UNDER_WARRANTY` o excepción si la máquina está inactiva/no existe).
