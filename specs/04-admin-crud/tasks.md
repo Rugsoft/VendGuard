@@ -55,7 +55,7 @@
   * **Dependencias:** T-ADM-02, T-ADM-04
   * **Hecho cuando:** `AdminLocationService` orquesta la validación de regex `^[A-Z0-9-]{3,32}$`, detección de colisión con sedes inactivas (`can_reactivate = true`), bloqueo de baja si hay máquinas activas (`ActiveMachinesBlockedException`) y registro sincrónico append-only en `audit_log`, pasando al 100% la suite `php tests/unit/AdminLocationServiceTest.php`.
 
-- [ ] **T-ADM-08: Implementar `AdminMachineService.php` y suite de prueba unitaria `AdminMachineServiceTest.php`**
+- [x] **T-ADM-08: Implementar `AdminMachineService.php` y suite de prueba unitaria `AdminMachineServiceTest.php`**
   * **Requisitos:** `RF-02`, `RF-05`, Constitución Art. II
   * **Dependencias:** T-ADM-02, T-ADM-05
   * **Hecho cuando:** `AdminMachineService` valida la inmutabilidad del código, bloquea traslados, bajas y cambios de tipo si hay tickets activos o en ventana de garantía de 48h (`RESOLVED`), exige nueva sede activa al reactivar si la original está dada de baja, registra eventos en `audit_log`, y la suite `php tests/unit/AdminMachineServiceTest.php` pasa al 100%.
