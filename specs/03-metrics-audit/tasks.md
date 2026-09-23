@@ -36,7 +36,7 @@
 
 ## Fase 2: Repositorio Analítico y Servicios de Aplicación
 
-- [ ] **T-MET-05: Implementar consultas de agregación analítica e índices (`PdoMetricsRepository.php`)**
+- [x] **T-MET-05: Implementar consultas de agregación analítica e índices (`PdoMetricsRepository.php`)**
   * **Requisitos:** `RF-01` (EARS 1.2), `RF-02` (EARS 2.1 a 2.6), `RNF-02`
   * **Dependencias:** T-MET-01
   * **Hecho cuando:** `PdoMetricsRepository` implementa consultas SQL nativas filtrando por fecha de resolución (`resolved_at`), calculando diferencias temporales 24/7 y agrupando por sede histórica, técnico resolutor, tipo de máquina (aislando perecederos) y tipo de avería.
