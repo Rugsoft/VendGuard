@@ -231,6 +231,61 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Triggers an authenticated file download using fetch and an invisible anchor link.
+   * @param {string} endpoint
+   * @param {string} defaultFilename
+   * @param {Object} [params={}]
+   */
+  async downloadFile(endpoint, defaultFilename = 'export.csv', params = {}) {
+    const isAbsolute = /^https?:\/\//i.test(endpoint);
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    let url = isAbsolute ? endpoint : `${this.baseUrl}${cleanEndpoint}`;
+
+    const queryParams = { ...params };
+    const q = new URLSearchParams(queryParams).toString();
+    if (q) {
+      url += (url.includes('?') ? '&' : '?') + q;
+    }
+
+    const headers = {};
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+
+    const response = await fetch(url, { method: 'GET', headers });
+    if (!response.ok) {
+      let errorMsg = `Error al descargar archivo (${response.status})`;
+      try {
+        const json = await response.json();
+        errorMsg = json?.error?.message || errorMsg;
+      } catch (e) {}
+      throw new ApiError(response.status, 'DOWNLOAD_ERROR', errorMsg);
+    }
+
+    let filename = defaultFilename;
+    const disposition = response.headers.get('content-disposition');
+    if (disposition && disposition.includes('filename=')) {
+      const match = disposition.match(/filename="?([^";]+)"?/i);
+      if (match && match[1]) {
+        filename = match[1].trim();
+      }
+    }
+
+    const blob = await response.blob();
+    const downloadUrl = (typeof window !== 'undefined' && window.URL) ? window.URL.createObjectURL(blob) : null;
+    if (downloadUrl && typeof document !== 'undefined') {
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => window.URL.revokeObjectURL(downloadUrl), 1000);
+    }
+    return true;
+  }
+
   // =========================================================================
   // HIGH-LEVEL DOMAIN METHODS (VendGuard REST Contracts)
   // =========================================================================
@@ -536,8 +591,21 @@ export class ApiClient {
      * @returns {string}
      */
     exportCsvUrl: (params = {}) => {
-      const q = new URLSearchParams(params).toString();
+      const allParams = { ...params };
+      if (this.token) {
+        allParams.token = this.token;
+      }
+      const q = new URLSearchParams(allParams).toString();
       return `${this.baseUrl}/coordinator/metrics/export${q ? `?${q}` : ''}`;
+    },
+
+    /**
+     * Downloads metrics CSV export using authenticated fetch and saves file (RF-06).
+     * @param {Object} [params={}]
+     * @returns {Promise<boolean>}
+     */
+    downloadCsv: (params = {}) => {
+      return this.downloadFile('/coordinator/metrics/export', 'vendguard_metrics.csv', params);
     },
 
     /**
@@ -568,8 +636,21 @@ export class ApiClient {
      * @returns {string}
      */
     exportCsvUrl: (params = {}) => {
-      const q = new URLSearchParams(params).toString();
+      const allParams = { ...params };
+      if (this.token) {
+        allParams.token = this.token;
+      }
+      const q = new URLSearchParams(allParams).toString();
       return `${this.baseUrl}/coordinator/audit-log/export${q ? `?${q}` : ''}`;
+    },
+
+    /**
+     * Downloads audit log CSV export using authenticated fetch and saves file (RF-06).
+     * @param {Object} [params={}]
+     * @returns {Promise<boolean>}
+     */
+    downloadCsv: (params = {}) => {
+      return this.downloadFile('/coordinator/audit-log/export', 'vendguard_audit_log.csv', params);
     }
   };
 }

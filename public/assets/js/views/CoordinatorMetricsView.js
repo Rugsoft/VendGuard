@@ -97,7 +97,7 @@ export const CoordinatorMetricsView = {
         this.loadMetrics();
       }
     },
-    exportMetricsCsv() {
+    async exportMetricsCsv() {
       const params = {
         period: this.selectedPeriod
       };
@@ -105,8 +105,17 @@ export const CoordinatorMetricsView = {
         params.from = this.customFrom;
         params.to = this.customTo;
       }
-      const url = api.metrics.exportCsvUrl(params);
-      window.open(url, '_blank');
+      try {
+        if (typeof api.metrics.downloadCsv === 'function') {
+          await api.metrics.downloadCsv(params);
+        } else {
+          const url = api.metrics.exportCsvUrl(params);
+          window.open(url, '_blank');
+        }
+      } catch (err) {
+        const url = api.metrics.exportCsvUrl(params);
+        window.open(url, '_blank');
+      }
     }
   },
   template: `

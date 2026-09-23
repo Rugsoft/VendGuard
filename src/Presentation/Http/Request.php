@@ -195,17 +195,19 @@ class Request
     }
 
     /**
-     * Extrae el token Bearer de la cabecera Authorization si está presente.
+     * Extrae el token Bearer de la cabecera Authorization o query parameter 'token' / 'auth_token'.
      */
     public function getBearerToken(): ?string
     {
         $auth = $this->getHeader('Authorization');
-        if ($auth === null) {
-            return null;
+        if ($auth !== null && preg_match('/^Bearer\s+(\S+)$/i', $auth, $matches)) {
+            return $matches[1];
         }
 
-        if (preg_match('/^Bearer\s+(\S+)$/i', $auth, $matches)) {
-            return $matches[1];
+        // Fallback: Query parameter 'token' o 'auth_token' (útil para descargas directas de archivos en navegador)
+        $queryToken = $this->getQuery('token') ?? $this->getQuery('auth_token');
+        if ($queryToken !== null && trim((string)$queryToken) !== '') {
+            return trim((string)$queryToken);
         }
 
         return null;

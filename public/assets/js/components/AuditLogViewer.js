@@ -135,7 +135,7 @@ export const AuditLogViewer = {
       if (type === 'LOCATION') return `Sede #${id}`;
       return `${type} #${id}`;
     },
-    downloadAuditCsv() {
+    async downloadAuditCsv() {
       const params = {};
       if (this.filterEntityType) params.entity_type = this.filterEntityType;
       if (this.filterEntityId) params.entity_id = this.filterEntityId;
@@ -144,8 +144,17 @@ export const AuditLogViewer = {
       if (this.filterFrom) params.from = this.filterFrom;
       if (this.filterTo) params.to = this.filterTo;
 
-      const url = api.auditLog.exportCsvUrl(params);
-      window.open(url, '_blank');
+      try {
+        if (typeof api.auditLog.downloadCsv === 'function') {
+          await api.auditLog.downloadCsv(params);
+        } else {
+          const url = api.auditLog.exportCsvUrl(params);
+          window.open(url, '_blank');
+        }
+      } catch (err) {
+        const url = api.auditLog.exportCsvUrl(params);
+        window.open(url, '_blank');
+      }
     }
   },
   template: `
