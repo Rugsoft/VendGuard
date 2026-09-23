@@ -17,7 +17,7 @@
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existen en `src/Core/Domain/Model/` las clases inmutables tipadas `QrCodeData` y `QrLabelConfig` encapsulando datos de máquina, sede, teléfono editable y URL de destino con validaciones de integridad.
 
-- [ ] **T-QR-02: Implementar el generador matemático de matrices QR (`QrMatrixGenerator.php`)**
+- [x] **T-QR-02: Implementar el generador matemático de matrices QR (`QrMatrixGenerator.php`)**
   * **Requisitos:** `RF-01`, `RNF-01`, `RNF-04`
   * **Dependencias:** T-QR-01
   * **Hecho cuando:** `QrMatrixGenerator::generate($text, 'M')` produce en PHP puro una matriz binaria 2D estándar (versiones 2 a 4) con patrones de búsqueda (finder patterns) y corrección Reed-Solomon sin dependencias de Composer ni librerías externas.
