@@ -46,7 +46,7 @@
   * **Dependencias:** T-QR-01
   * **Hecho cuando:** `QrScanService::resolve($machineCode)` resuelve la máquina en su sede real vigente y devuelve el estado correspondiente (`CAN_REPORT` identificando perecederos, `ACTIVE_INCIDENT` blindando la privacidad del Art. V.4, `UNDER_WARRANTY` o excepción si la máquina está inactiva/no existe).
 
-- [ ] **T-QR-07: Crear suite de pruebas unitarias para `QrScanServiceTest.php`**
+- [x] **T-QR-07: Crear suite de pruebas unitarias para `QrScanServiceTest.php`**
   * **Requisitos:** `RF-04` (Art. V.4), `RF-05`
   * **Dependencias:** T-QR-06
   * **Hecho cuando:** La ejecución de `php tests/unit/QrScanServiceTest.php` pasa al 100% en verde, verificando que los campos privados de técnicos, notas de taller y costes de repuestos jamás figuren en el payload de una máquina con avería abierta.
