@@ -60,7 +60,7 @@
   * **Dependencias:** T-ADM-02, T-ADM-05
   * **Hecho cuando:** `AdminMachineService` valida la inmutabilidad del código, bloquea traslados, bajas y cambios de tipo si hay tickets activos o en ventana de garantía de 48h (`RESOLVED`), exige nueva sede activa al reactivar si la original está dada de baja, registra eventos en `audit_log`, y la suite `php tests/unit/AdminMachineServiceTest.php` pasa al 100%.
 
-- [ ] **T-ADM-09: Implementar `AdminUserService.php` y suite de prueba unitaria `AdminUserServiceTest.php`**
+- [x] **T-ADM-09: Implementar `AdminUserService.php` y suite de prueba unitaria `AdminUserServiceTest.php`**
   * **Requisitos:** `RF-03`, `RF-05`, Constitución Art. V.4
   * **Dependencias:** T-ADM-02, T-ADM-06
   * **Hecho cuando:** `AdminUserService` valida contraseñas seguras ($\ge 8$ caracteres), bloquea la auto-desactivación del coordinador en sesión, asegura la guardia mínima ($\ge 1$ técnico y $\ge 1$ coordinador activos), bloquea bajas con averías pendientes, registra en `audit_log` (sin filtrar hashes de claves), y la suite `php tests/unit/AdminUserServiceTest.php` pasa al 100%.
