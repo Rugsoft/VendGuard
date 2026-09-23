@@ -46,7 +46,7 @@
   * **Dependencias:** T-MET-05
   * **Hecho cuando:** `MetricsCalculationService` orquesta el cálculo de KPIs (MTTR global, comparativa porcentual de tendencia con periodo previo, tasa de resolución % y evaluación de alertas de SLA de 4h en perecederos y 24h general).
 
-- [ ] **T-MET-07: Crear suite de pruebas unitarias para `MetricsCalculationServiceTest.php`**
+- [x] **T-MET-07: Crear suite de pruebas unitarias para `MetricsCalculationServiceTest.php`**
   * **Requisitos:** `RF-01`, `RF-03`, `RF-04`
   * **Dependencias:** T-MET-06
   * **Hecho cuando:** `php tests/unit/MetricsCalculationServiceTest.php` pasa al 100% en verde, verificando tendencias, umbrales de alerta de SLA y cálculo del tiempo medio de primera respuesta hasta `IN_PROGRESS`.
