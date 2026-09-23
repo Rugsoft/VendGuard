@@ -22,7 +22,7 @@
   * **Dependencias:** T-MET-01
   * **Hecho cuando:** La ejecución de `php tests/unit/MttrMetricTest.php` pasa al 100% en verde evaluando cálculo con datos reales, formateo ("3h 15m"), retorno de `N/A` ante cero tickets resueltos, protección ante anomalías de reloj y exclusión de cancelados.
 
-- [ ] **T-MET-03: Crear migración DDL y repositorio de auditoría append-only (`003_create_audit_log_table.sql`, `PdoAuditLogRepository.php`)**
+- [x] **T-MET-03: Crear migración DDL y repositorio de auditoría append-only (`003_create_audit_log_table.sql`, `PdoAuditLogRepository.php`)**
   * **Requisitos:** `RF-05` (EARS 5.3, 5.4), `RNF-03`, Constitución Art. III.1 y III.3
   * **Dependencias:** T-MET-01
   * **Hecho cuando:** La tabla `audit_log` queda creada en base de datos con sus índices correspondientes y `PdoAuditLogRepository` permite insertar y listar eventos cronológicamente, sin exponer ningún método de borrado o actualización física.

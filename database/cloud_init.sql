@@ -168,6 +168,28 @@ CREATE TABLE `incident_comments` (
     REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- -----------------------------------------------------------------------------
+-- 7. TABLA: audit_log (Auditoría Inmutable de Sistema, Máquinas y Sedes - RF-05)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `audit_log` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `entity_type` ENUM('TICKET', 'MACHINE', 'LOCATION') NOT NULL,
+  `entity_id` INT UNSIGNED NOT NULL,
+  `action` VARCHAR(64) NOT NULL,
+  `user_id` INT UNSIGNED NULL DEFAULT NULL,
+  `user_role` VARCHAR(32) NOT NULL,
+  `user_name` VARCHAR(100) NOT NULL,
+  `previous_state` JSON NULL DEFAULT NULL,
+  `new_state` JSON NOT NULL,
+  `metadata` JSON NULL DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  INDEX `idx_audit_entity` (`entity_type`, `entity_id`),
+  INDEX `idx_audit_action` (`action`),
+  INDEX `idx_audit_user` (`user_id`),
+  INDEX `idx_audit_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- =============================================================================
 -- CARGA DE DATOS SEMILLA (SEEDS)
 -- =============================================================================
