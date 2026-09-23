@@ -65,7 +65,7 @@
   * **Dependencias:** T-MET-06, T-MET-08
   * **Hecho cuando:** Los endpoints `GET /api/coordinator/metrics/summary`, `/breakdown`, `/export`, `/audit-log` y `/audit-log/export` están protegidos con `InternalAuthMiddleware(COORDINATOR)` y responden según los contratos técnicos de `metrics_audit_contracts.md`.
 
-- [ ] **T-MET-10: Implementar `TechnicianMetricsController.php` y registrar rutas en `AppRouter.php`**
+- [x] **T-MET-10: Implementar `TechnicianMetricsController.php` y registrar rutas en `AppRouter.php`**
   * **Requisitos:** `RF-04` (EARS 4.1, 4.2), Constitución Art. V.4
   * **Dependencias:** T-MET-06
   * **Hecho cuando:** El endpoint `GET /api/technician/my-metrics` está protegido con `InternalAuthMiddleware(TECHNICIAN)`, calcula únicamente las métricas del técnico autenticado y responde `403 Forbidden` ante intentos de consultar métricas globales.
