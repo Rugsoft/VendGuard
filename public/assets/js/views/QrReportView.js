@@ -18,6 +18,7 @@
  */
 
 import { api } from '../api.js';
+import { QrInactiveMachineNotice } from '../components/QrInactiveMachineNotice.js';
 
 export const INCIDENT_CATEGORIES = [
   {
@@ -54,6 +55,9 @@ export const INCIDENT_CATEGORIES = [
 
 export const QrReportView = {
   name: 'QrReportView',
+  components: {
+    QrInactiveMachineNotice
+  },
   props: {
     code: {
       type: String,
@@ -70,7 +74,8 @@ export const QrReportView = {
       // Estado de carga y resolución
       loading: true,
       loadError: '',
-      statusMode: 'CAN_REPORT', // 'CAN_REPORT' | 'ACTIVE_INCIDENT' | 'UNDER_WARRANTY' | 'NOT_FOUND'
+      statusMode: 'CAN_REPORT', // 'CAN_REPORT' | 'ACTIVE_INCIDENT' | 'UNDER_WARRANTY' | 'NOT_FOUND' | 'INACTIVE'
+      inactiveNoticeMessage: '',
 
       // Datos resueltos de la máquina y sede
       machine: null,
@@ -159,6 +164,24 @@ export const QrReportView = {
       try {
         const res = await api.qr.scan(code, this.effectiveSiteCode || null);
         const data = res.data || res;
+
+        // Máquina inactiva o retirada del parque (RF-04, EARS 2.12)
+        if (data.status_mode === 'INACTIVE' || data.status === 'INACTIVE' || data.is_active === false || data.allow_reporting === false) {
+          this.statusMode = 'INACTIVE';
+          this.machine = {
+            code: data.code || (data.machine ? data.machine.code : code),
+            model: data.model || (data.machine ? data.machine.model : ''),
+            machine_type_label: data.machine_type_label || (data.machine ? data.machine.machine_type_label : ''),
+            floor_wing: data.floor_wing || (data.machine ? data.machine.floor_wing : ''),
+            is_active: false
+          };
+          this.location = data.location || {
+            name: data.location_name || '',
+            contact_phone: data.support_phone || data.contact_phone || ''
+          };
+          this.inactiveNoticeMessage = data.message || 'Esta máquina de vending se encuentra temporalmente retirada o fuera de servicio. No es posible registrar nuevas incidencias sobre este dispositivo.';
+          return;
+        }
 
         this.machine = data.machine || null;
         this.location = data.location || null;
@@ -360,7 +383,16 @@ export const QrReportView = {
           </button>
         </div>
 
-        <!-- 4. Error / Máquina No Encontrada o Inactiva (EARS 5.2) -->
+        <!-- 4. Máquina Inactiva / Retirada del Parque (RF-04, EARS 2.12) -->
+        <QrInactiveMachineNotice
+          v-else-if="statusMode === 'INACTIVE'"
+          :machine="machine"
+          :location="location"
+          :message="inactiveNoticeMessage"
+          @go-home="goHome"
+        />
+
+        <!-- 5. Error / Máquina No Encontrada (EARS 5.2) -->
         <div v-else-if="statusMode === 'NOT_FOUND'" class="qr-card qr-error-card" data-testid="not-found-card">
           <div class="qr-error-icon">⚠️</div>
           <h2 class="qr-card-title">Máquina No Identificada</h2>

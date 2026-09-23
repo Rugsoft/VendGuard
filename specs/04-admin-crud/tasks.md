@@ -103,7 +103,7 @@
   * **Dependencias:** T-ADM-10
   * **Hecho cuando:** El componente Vue 3 ESM renderiza la plantilla técnica y de coordinación mostrando roles y recuento de averías activas asignadas, modal de alta con contraseña, edición de datos de contacto, modal de reseteo de clave, y confirmación de baja con advertencia de bloqueo si tiene averías pendientes.
 
-- [ ] **T-ADM-16: Implementar componente informativo público `QrInactiveMachineNotice.js` y actualizar `QrReportView.js`**
+- [x] **T-ADM-16: Implementar componente informativo público `QrInactiveMachineNotice.js` y actualizar `QrReportView.js`**
   * **Requisitos:** `RF-04`
   * **Dependencias:** T-ADM-11
   * **Hecho cuando:** La lectura ciudadana de un código QR físico de una máquina retirada despliega la tarjeta informativa visual amigable indicando "Máquina temporalmente retirada o fuera de servicio" y ocultando completamente el formulario de reporte de averías.
