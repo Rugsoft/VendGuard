@@ -12,7 +12,7 @@
 
 ## Fase 1: Dominio y Motor Nativo de Generación QR (Backend Vanilla)
 
-- [ ] **T-QR-01: Implementar Value Objects y DTOs del Módulo QR (`QrCodeData.php`, `QrLabelConfig.php`)**
+- [x] **T-QR-01: Implementar Value Objects y DTOs del Módulo QR (`QrCodeData.php`, `QrLabelConfig.php`)**
   * **Requisitos:** `RF-01`, `RNF-04`
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existen en `src/Core/Domain/Model/` las clases inmutables tipadas `QrCodeData` y `QrLabelConfig` encapsulando datos de máquina, sede, teléfono editable y URL de destino con validaciones de integridad.
