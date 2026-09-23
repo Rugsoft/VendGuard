@@ -180,4 +180,26 @@ class PdoLocationRepository implements LocationRepositoryInterface
 
         return $stmt->rowCount() > 0;
     }
+
+    /**
+     * Actualiza el teléfono de contacto maestro de una sede (RF-01, EARS 1.3).
+     */
+    public function updateContactPhone(int $id, string $contactPhone): bool
+    {
+        $sql = "
+            UPDATE `locations`
+            SET `contact_phone` = :contact_phone,
+                `updated_at` = CURRENT_TIMESTAMP
+            WHERE `id` = :id
+              AND `deleted_at` IS NULL
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([
+            ':id' => $id,
+            ':contact_phone' => trim($contactPhone),
+        ]);
+
+        return $stmt->rowCount() >= 0;
+    }
 }

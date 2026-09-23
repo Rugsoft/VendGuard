@@ -121,6 +121,23 @@ class InMemoryLocationRepository implements LocationRepositoryInterface
     {
         return true;
     }
+
+    public function updateContactPhone(int $id, string $contactPhone): bool
+    {
+        if (isset($this->locations[$id])) {
+            $loc = $this->locations[$id];
+            $this->locations[$id] = new Location(
+                $loc->getId(),
+                $loc->getSiteCode(),
+                $loc->getName(),
+                $loc->getAddress(),
+                $loc->getContactName(),
+                $contactPhone,
+                $loc->isActive()
+            );
+        }
+        return true;
+    }
 }
 
 class InMemoryIncidentRepository implements IncidentRepositoryInterface

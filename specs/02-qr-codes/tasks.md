@@ -56,7 +56,7 @@
   * **Dependencias:** T-QR-06
   * **Hecho cuando:** `QrReportService::report($data)` crea un nuevo ticket o, si detecta una avería abierta por envío concurrente de otro usuario, anexa las observaciones como comentario adicional devolviendo `merged: true` sin arrojar error técnico.
 
-- [ ] **T-QR-09: Implementar el servicio de emisión y descarga de etiquetas (`QrLabelService.php`)**
+- [x] **T-QR-09: Implementar el servicio de emisión y descarga de etiquetas (`QrLabelService.php`)**
   * **Requisitos:** `RF-01` (EARS 1.2, 1.3), `RF-02` (EARS 2.2, 2.3)
   * **Dependencias:** T-QR-04
   * **Hecho cuando:** `QrLabelService::getMachineLabel($machineId, $customPhone, $updateLocation)` genera el SVG y actualiza opcionalmente el teléfono maestro en BD; y `QrLabelService::getLocationBatch($locationId)` devuelve el array de todas las máquinas activas de la sede con sus respectivos SVGs.

@@ -46,4 +46,13 @@ interface LocationRepositoryInterface
      * @return bool
      */
     public function softDelete(int $id): bool;
+
+    /**
+     * Actualiza el teléfono de contacto maestro de una sede (RF-01, EARS 1.3).
+     *
+     * @param int $id Identificador primario de la sede.
+     * @param string $contactPhone Nuevo número de contacto.
+     * @return bool True si se actualizó con éxito.
+     */
+    public function updateContactPhone(int $id, string $contactPhone): bool;
 }
