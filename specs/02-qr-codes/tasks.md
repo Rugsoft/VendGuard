@@ -70,7 +70,7 @@
   * **Dependencias:** T-QR-08
   * **Hecho cuando:** Los endpoints `GET /api/qr/scan/{code}` y `POST /api/qr/report` están registrados en `AppRouter.php` y responden exactamente conforme a los contratos técnicos de `qr_codes_contracts.md`.
 
-- [ ] **T-QR-11: Implementar `QrLabelController.php` y registrar rutas protegidas de coordinador**
+- [x] **T-QR-11: Implementar `QrLabelController.php` y registrar rutas protegidas de coordinador**
   * **Requisitos:** `RF-01`, `RF-02`
   * **Dependencias:** T-QR-09
   * **Hecho cuando:** Los endpoints `GET /api/coordinator/machines/{id}/qr-label` y `GET /api/coordinator/locations/{id}/qr-batch` están protegidos con `InternalAuthMiddleware(COORDINATOR)` y devuelven el JSON/SVG correspondiente o `401 Unauthorized`.
