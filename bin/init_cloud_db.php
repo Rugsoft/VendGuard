@@ -105,7 +105,7 @@ try {
     }
     echo "\n      ✓ {$count} sentencias ejecutadas correctamente.\n\n";
 
-    echo "[4/4] Verificando integridad de datos en el servidor...\n";
+    echo "[4/5] Verificando integridad de datos base en el servidor...\n";
     $locCount = (int)$pdo->query("SELECT COUNT(*) FROM locations WHERE deleted_at IS NULL")->fetchColumn();
     $machCount = (int)$pdo->query("SELECT COUNT(*) FROM machines WHERE deleted_at IS NULL")->fetchColumn();
     $usrCount = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL")->fetchColumn();
@@ -113,6 +113,13 @@ try {
     echo "      ✓ Sedes registradas: {$locCount}\n";
     echo "      ✓ Máquinas operativas: {$machCount}\n";
     echo "      ✓ Usuarios internos: {$usrCount}\n\n";
+
+    echo "[5/5] Sembrando histórico de averías, reparaciones y log de auditoría...\n";
+    require_once __DIR__ . '/../database/DemoMetricsSeeder.php';
+    $demoSeeder = new \VendGuard\Database\DemoMetricsSeeder($pdo);
+    $demoSummary = $demoSeeder->seed();
+    echo "      ✓ Averías y reparaciones sembradas: {$demoSummary['incidents']}\n";
+    echo "      ✓ Registros de auditoría sembrados: {$demoSummary['audit_events']}\n\n";
 
     echo "======================================================================\n";
     echo " ¡ÉXITO! La base de datos ha sido inicializada y está 100% lista.\n";
