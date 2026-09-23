@@ -17,7 +17,7 @@
   * **Dependencias:** Ninguna
   * **Hecho cuando:** La ejecución de `php bin/migrate.php` aplica con éxito `004_admin_crud_audit_and_snapshot.sql`, ampliando `audit_log.entity_type` para incluir `'USER'` e incorporando `machine_type_snapshot` en la tabla `incidents` con backfill para tickets preexistentes; el esquema `database/cloud_init.sql` queda consolidado.
 
-- [ ] **T-ADM-02: Implementar Excepciones de Dominio para Reglas de Bloqueo Administrativas**
+- [x] **T-ADM-02: Implementar Excepciones de Dominio para Reglas de Bloqueo Administrativas**
   * **Requisitos:** `RF-01`, `RF-02`, `RF-03`, `RNF-01`
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existen en `src/Core/Domain/Exception/` las 7 clases tipadas (`CannotDeactivateSelfException`, `MinimumActiveStaffException`, `PendingIncidentsBlockedException`, `ActiveMachinesBlockedException`, `MachineTransferBlockedException`, `MachineTypeChangeBlockedException` e `InactiveRecordCollisionException`), cada una proveyendo su código de error técnico y mensaje en castellano según contrato.
