@@ -36,7 +36,7 @@
   * **Dependencias:** T-ADM-01
   * **Hecho cuando:** `PdoLocationRepository` implementa métodos para creación (`create`), actualización (`update`), baja lógica (`softDelete` fijando `is_active = 0` y `deleted_at = NOW()`), reactivación (`restore` fijando `is_active = 1` y `deleted_at = NULL`), listado con filtros (`findAll` con `status` y `search`), y verificación `countActiveMachines(int $locationId): int`.
 
-- [ ] **T-ADM-05: Extender `MachineRepositoryInterface` y `PdoMachineRepository.php`**
+- [x] **T-ADM-05: Extender `MachineRepositoryInterface` y `PdoMachineRepository.php`**
   * **Requisitos:** `RF-02` (EARS 2.1 a 2.6)
   * **Dependencias:** T-ADM-01
   * **Hecho cuando:** `PdoMachineRepository` implementa creación (`create`), actualización de modelo/ubicación/tipo (`update`), traslado entre sedes (`transfer`), baja lógica (`softDelete`), reactivación con reubicación (`restoreWithLocation`), listado con filtros (`findAll` con `status`, `location_id`, `machine_type`, `search`) y comprobación atómica `hasActiveTicketOrWarranty(int $machineId): bool`.

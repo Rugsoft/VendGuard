@@ -61,12 +61,12 @@ class InMemoryMachineRepository implements MachineRepositoryInterface
         $this->machines[$machine->getCode()] = $machine;
     }
 
-    public function findByCode(string $code): ?Machine
+    public function findByCode(string $code, bool $withIncident = true, bool $allowDeleted = false): ?Machine
     {
         return $this->machines[strtoupper(trim($code))] ?? null;
     }
 
-    public function findById(int $id): ?Machine
+    public function findById(int $id, bool $withIncident = true, bool $allowDeleted = false): ?Machine
     {
         foreach ($this->machines as $machine) {
             if ($machine->getId() === $id) {
@@ -79,6 +79,41 @@ class InMemoryMachineRepository implements MachineRepositoryInterface
     public function findActiveByLocationId(int $locationId): array
     {
         return array_values(array_filter($this->machines, fn(Machine $m) => $m->getLocationId() === $locationId && $m->isActive()));
+    }
+
+    public function create(array $data): Machine
+    {
+        throw new \BadMethodCallException('Not implemented in mock');
+    }
+
+    public function update(int $id, array $data): bool
+    {
+        return true;
+    }
+
+    public function transfer(int $id, int $targetLocationId, string $floorWing, ?string $notes = null): bool
+    {
+        return true;
+    }
+
+    public function restoreWithLocation(int $id, ?int $newLocationId = null, ?string $newFloorWing = null): bool
+    {
+        return true;
+    }
+
+    public function findAll(array $filters = []): array
+    {
+        return [];
+    }
+
+    public function hasActiveTicketOrWarranty(int $machineId): bool
+    {
+        return false;
+    }
+
+    public function getActiveTicketOrWarranty(int $machineId): ?array
+    {
+        return null;
     }
 
     public function softDelete(int $id): bool
