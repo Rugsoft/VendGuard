@@ -17,7 +17,7 @@
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existen en `src/Core/Domain/Model/` las clases inmutables tipadas `MttrMetric` (formateo Xh Ym, horas decimales, cálculo seguro sin división por cero y estado `N/A`), `MetricFilter`, `KpiSummary` y `AuditEvent` con validaciones estrictas.
 
-- [ ] **T-MET-02: Crear suite de pruebas unitarias para `MttrMetricTest.php`**
+- [x] **T-MET-02: Crear suite de pruebas unitarias para `MttrMetricTest.php`**
   * **Requisitos:** `RF-01` (EARS 1.1, 1.3, 1.4, 1.6, 1.7, 1.8), `RNF-01`
   * **Dependencias:** T-MET-01
   * **Hecho cuando:** La ejecución de `php tests/unit/MttrMetricTest.php` pasa al 100% en verde evaluando cálculo con datos reales, formateo ("3h 15m"), retorno de `N/A` ante cero tickets resueltos, protección ante anomalías de reloj y exclusión de cancelados.

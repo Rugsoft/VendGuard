@@ -34,6 +34,61 @@ class MttrMetric implements JsonSerializable
     }
 
     /**
+     * Calcula el MTTR determinista a partir de un listado de tickets o intervalos de tiempo (EARS 1.1 a 1.8).
+     * Excluye tickets cancelados/duplicados y gestiona anomalías de reloj.
+     * 
+     * @param array<int, array<string, mixed>> $resolvedTickets Lista de tickets con 'created_at', 'resolved_at' y opcionalmente 'status'.
+     * @return self
+     */
+    public static function fromTicketDurations(array $resolvedTickets): self
+    {
+        if (empty($resolvedTickets)) {
+            return self::noData();
+        }
+
+        $totalMinutes = 0;
+        $validCount = 0;
+
+        foreach ($resolvedTickets as $ticket) {
+            $status = isset($ticket['status']) ? strtoupper((string)$ticket['status']) : 'RESOLVED';
+            // Exclusión estricta de cancelados y duplicados (EARS 1.4)
+            if ($status === 'CANCELLED' || $status === 'DUPLICATE') {
+                continue;
+            }
+
+            if (empty($ticket['created_at']) || empty($ticket['resolved_at'])) {
+                continue;
+            }
+
+            $created = strtotime((string)$ticket['created_at']);
+            $resolved = strtotime((string)$ticket['resolved_at']);
+
+            if ($created === false || $resolved === false) {
+                continue;
+            }
+
+            // Minutos transcurridos en tiempo natural continuo 24/7 (EARS 1.1)
+            $diffSeconds = $resolved - $created;
+
+            // Protección ante anomalía horaria (EARS 1.7)
+            if ($diffSeconds < 0) {
+                $diffSeconds = 0;
+            }
+
+            $diffMinutes = (int)round($diffSeconds / 60.0);
+            $totalMinutes += $diffMinutes;
+            $validCount++;
+        }
+
+        if ($validCount === 0) {
+            return self::noData();
+        }
+
+        $avgMinutes = (int)round($totalMinutes / $validCount);
+        return self::fromMinutes($avgMinutes);
+    }
+
+    /**
      * Crea una instancia de MTTR a partir de un valor de minutos (o null para muestra vacía).
      * 
      * @param int|null $minutes Minutos totales promedio de resolución.
