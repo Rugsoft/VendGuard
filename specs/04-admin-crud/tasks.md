@@ -31,7 +31,7 @@
 
 ## Fase 2: Repositorios PDO y Capa de Persistencia
 
-- [ ] **T-ADM-04: Extender `LocationRepositoryInterface` y `PdoLocationRepository.php`**
+- [x] **T-ADM-04: Extender `LocationRepositoryInterface` y `PdoLocationRepository.php`**
   * **Requisitos:** `RF-01` (EARS 1.1, 1.2, 1.3, 1.4, 1.5)
   * **Dependencias:** T-ADM-01
   * **Hecho cuando:** `PdoLocationRepository` implementa métodos para creación (`create`), actualización (`update`), baja lógica (`softDelete` fijando `is_active = 0` y `deleted_at = NOW()`), reactivación (`restore` fijando `is_active = 1` y `deleted_at = NULL`), listado con filtros (`findAll` con `status` y `search`), y verificación `countActiveMachines(int $locationId): int`.

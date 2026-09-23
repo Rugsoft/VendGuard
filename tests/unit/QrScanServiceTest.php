@@ -138,6 +138,34 @@ class InMemoryLocationRepository implements LocationRepositoryInterface
         }
         return true;
     }
+
+    public function findAll(string $status = 'all', ?string $search = null): array
+    {
+        return [];
+    }
+
+    public function create(array $data): Location
+    {
+        $id = count($this->locations) + 1;
+        $loc = new Location($id, (string)$data['site_code'], (string)$data['name'], (string)$data['address']);
+        $this->locations[$id] = $loc;
+        return $loc;
+    }
+
+    public function update(int $id, array $data): bool
+    {
+        return true;
+    }
+
+    public function restore(int $id): bool
+    {
+        return true;
+    }
+
+    public function countActiveMachines(int $locationId): int
+    {
+        return 0;
+    }
 }
 
 class InMemoryIncidentRepository implements IncidentRepositoryInterface

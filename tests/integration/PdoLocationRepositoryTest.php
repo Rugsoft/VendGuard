@@ -121,11 +121,87 @@ foreach ($allActive as $l) {
 $assert("4.2 SEDE-BCN-01 y SEDE-BCN-02 presentes en listado activo", $hasBcn01 && $hasBcn02);
 
 // =====================================================================
+// 5. Crear nueva sede (create)
+// =====================================================================
+echo "\n--- Caso 5: create() nueva sede ---\n";
+$newCode = 'SEDE-TEST-CRUD-01';
+$createdLoc = $repository->create([
+    'site_code' => $newCode,
+    'name' => 'Campus Universitario Norte',
+    'address' => 'Calle Mayor 50, BCN',
+    'contact_name' => 'Carlos Gestor',
+    'contact_phone' => '655112233'
+]);
+$assert("5.1 create() retorna instancia de Location", $createdLoc instanceof Location);
+$assert("5.2 ID autogenerado mayor que 0", $createdLoc->getId() > 0);
+$assert("5.3 site_code coincide", $createdLoc->getSiteCode() === $newCode);
+$assert("5.4 is_active inicial es true", $createdLoc->isActive());
+
+// =====================================================================
+// 6. Actualizar datos de sede (update)
+// =====================================================================
+echo "\n--- Caso 6: update() sede ---\n";
+$updateOk = $repository->update($createdLoc->getId(), [
+    'name' => 'Campus Universitario Norte - Edificio A',
+    'contact_name' => 'Carla Gestora',
+    'contact_phone' => '655998877'
+]);
+$assert("6.1 update() retorna true", $updateOk);
+
+$updatedLoc = $repository->findById($createdLoc->getId());
+$assert("6.2 Nombre actualizado en base de datos", $updatedLoc !== null && $updatedLoc->getName() === 'Campus Universitario Norte - Edificio A');
+$assert("6.3 Contacto actualizado", $updatedLoc !== null && $updatedLoc->getContactName() === 'Carla Gestora');
+$assert("6.4 Teléfono actualizado", $updatedLoc !== null && $updatedLoc->getContactPhone() === '655998877');
+
+// =====================================================================
+// 7. Baja lógica (softDelete) y Reactivación (restore)
+// =====================================================================
+echo "\n--- Caso 7: softDelete() y restore() ---\n";
+$softDelOk = $repository->softDelete($createdLoc->getId());
+$assert("7.1 softDelete() retorna true", $softDelOk);
+
+$afterDel = $repository->findById($createdLoc->getId(), true);
+$assert("7.2 Tras baja, is_active es false", $afterDel !== null && $afterDel->isActive() === false);
+$assert("7.3 Tras baja, deleted_at tiene fecha", $afterDel !== null && $afterDel->getDeletedAt() !== null);
+
+$restoreOk = $repository->restore($createdLoc->getId());
+$assert("7.4 restore() retorna true", $restoreOk);
+
+$afterRestore = $repository->findById($createdLoc->getId(), false);
+$assert("7.5 Tras reactivar, is_active es true", $afterRestore !== null && $afterRestore->isActive() === true);
+$assert("7.6 Tras reactivar, deleted_at es null", $afterRestore !== null && $afterRestore->getDeletedAt() === null);
+
+// =====================================================================
+// 8. Listado con filtros y conteos (findAll)
+// =====================================================================
+echo "\n--- Caso 8: findAll() con filtros de estado y búsqueda ---\n";
+$listAll = $repository->findAll('all');
+$assert("8.1 findAll('all') retorna array", is_array($listAll) && count($listAll) >= 3);
+$assert("8.2 Primer elemento contiene campos de conteo", isset($listAll[0]['active_machines_count']) && isset($listAll[0]['total_machines_count']));
+
+$listSearch = $repository->findAll('all', 'Universitario');
+$assert("8.3 Búsqueda por texto filtra correctamente", count($listSearch) >= 1 && str_contains($listSearch[0]['name'], 'Universitario'));
+
+// =====================================================================
+// 9. Conteo de máquinas activas (countActiveMachines)
+// =====================================================================
+echo "\n--- Caso 9: countActiveMachines() ---\n";
+$bcn01 = $repository->findBySiteCode('SEDE-BCN-01');
+$assert("9.1 Sede SEDE-BCN-01 encontrada", $bcn01 !== null);
+if ($bcn01 !== null) {
+    $activeCount = $repository->countActiveMachines($bcn01->getId());
+    $assert("9.2 Conteo de máquinas activas en SEDE-BCN-01 es >= 1", $activeCount >= 1);
+}
+
+// Limpieza de la sede de test creada
+$pdo->prepare("DELETE FROM `locations` WHERE `id` = :id")->execute([':id' => $createdLoc->getId()]);
+
+// =====================================================================
 // RESUMEN DE EJECUCIÓN
 // =====================================================================
 echo "\n======================================================================\n";
 if ($failures === 0) {
-    echo " RESULTADO: 100% EN VERDE. CONDICIÓN T-11 CUMPLIDA CON ÉXITO.\n";
+    echo " RESULTADO: 100% EN VERDE. CONDICIÓN T-ADM-04 CUMPLIDA CON ÉXITO.\n";
     echo "======================================================================\n";
     exit(0);
 } else {
@@ -133,3 +209,4 @@ if ($failures === 0) {
     echo "======================================================================\n";
     exit(1);
 }
+
