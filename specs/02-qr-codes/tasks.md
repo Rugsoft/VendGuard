@@ -27,7 +27,7 @@
   * **Dependencias:** T-QR-02
   * **Hecho cuando:** La ejecución de `php tests/unit/QrMatrixGeneratorTest.php` pasa al 100% en verde validando dimensiones cuadradas correctas, quiet zone de 4 módulos y generación determinista.
 
-- [ ] **T-QR-04: Implementar el renderizador vectorial nativo de etiquetas SVG (`NativeSvgQrRenderer.php`)**
+- [x] **T-QR-04: Implementar el renderizador vectorial nativo de etiquetas SVG (`NativeSvgQrRenderer.php`)**
   * **Requisitos:** `RF-01` (EARS 1.4), `RF-02` (EARS 2.3), `RNF-04`
   * **Dependencias:** T-QR-02
   * **Hecho cuando:** `NativeSvgQrRenderer::renderLabel($config)` genera una cadena SVG XML válida de 400x600 px conteniendo el logo, código de máquina destacado, QR centralizado de al menos 40x40 mm y teléfono de asistencia técnica.
