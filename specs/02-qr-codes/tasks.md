@@ -22,7 +22,7 @@
   * **Dependencias:** T-QR-01
   * **Hecho cuando:** `QrMatrixGenerator::generate($text, 'M')` produce en PHP puro una matriz binaria 2D estándar (versiones 2 a 4) con patrones de búsqueda (finder patterns) y corrección Reed-Solomon sin dependencias de Composer ni librerías externas.
 
-- [ ] **T-QR-03: Crear suite de pruebas unitarias para `QrMatrixGeneratorTest.php`**
+- [x] **T-QR-03: Crear suite de pruebas unitarias para `QrMatrixGeneratorTest.php`**
   * **Requisitos:** `RNF-01`, `RNF-04`
   * **Dependencias:** T-QR-02
   * **Hecho cuando:** La ejecución de `php tests/unit/QrMatrixGeneratorTest.php` pasa al 100% en verde validando dimensiones cuadradas correctas, quiet zone de 4 módulos y generación determinista.

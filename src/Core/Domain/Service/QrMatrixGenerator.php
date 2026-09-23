@@ -237,12 +237,8 @@ class QrMatrixGenerator
         // 8. Escribir la información de formato (BCH) con el nivel ECC y la máscara elegida
         $finalMatrix = self::writeFormatInfo($maskedMatrix, $eccLevel, $bestMask, $size);
 
-        // 9. Añadir quiet zone (zona de silencio) perimetral
-        if ($quietZone > 0) {
-            return self::addQuietZone($finalMatrix, $quietZone);
-        }
-
-        return $finalMatrix;
+        // 9. Añadir quiet zone (zona de silencio) perimetral y garantizar valores booleanos
+        return self::addQuietZone($finalMatrix, $quietZone);
     }
 
     /**
