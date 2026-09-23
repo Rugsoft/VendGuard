@@ -117,7 +117,7 @@
 
 ## Fase 6: Verificación Global y Certificación Constitucional
 
-- [ ] **T-ADM-18: Ejecución global de la batería de pruebas (`php tests/run_all.php`) y verificación de regresión**
+- [x] **T-ADM-18: Ejecución global de la batería de pruebas (`php tests/run_all.php`) y verificación de regresión**
   * **Requisitos:** `RNF-01`, `RNF-02`, `RNF-03`, `RNF-04`, Constitución Art. I al VII
   * **Dependencias:** T-ADM-12, T-ADM-17
   * **Hecho cuando:** La ejecución de `php tests/run_all.php` corre las 64 suites preexistentes más todas las nuevas suites del módulo 04 al 100% en verde (0 errores, 0 fallos), el comando de auditoría certifica cero sentencias `DELETE FROM` en `src/`, y la base de datos queda restaurada con sus datos semilla intactos.

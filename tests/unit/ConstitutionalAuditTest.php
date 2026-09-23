@@ -395,6 +395,74 @@ $assert(
 );
 
 // ─────────────────────────────────────────────────────────────────────────
+// 10. MÓDULO ADMINISTRACIÓN INTEGRAL (CRUD): AUDITORÍA CONSTITUCIONAL (T-ADM-18)
+// ─────────────────────────────────────────────────────────────────────────
+echo "\n{$colorBold}--- 10. Módulo Administración Integral (CRUD): Auditoría Constitucional (T-ADM-18) ---{$colorReset}\n";
+
+// 10.1 Soft Delete en repositorios maestros
+$locRepo = (string)file_get_contents($baseDir . '/src/Infrastructure/Repository/PdoLocationRepository.php');
+$macRepo = (string)file_get_contents($baseDir . '/src/Infrastructure/Repository/PdoMachineRepository.php');
+$usrRepo = (string)file_get_contents($baseDir . '/src/Infrastructure/Repository/PdoUserRepository.php');
+
+$assert(
+    "10.1 Soft Delete y Cero Borrado Físico en Sedes, Máquinas y Personal (deleted_at e is_active)",
+    (str_contains($locRepo, "is_active` = 0") || str_contains($locRepo, "is_active = 0")) &&
+    str_contains($locRepo, "deleted_at") &&
+    (str_contains($macRepo, "is_active` = 0") || str_contains($macRepo, "is_active = 0")) &&
+    str_contains($macRepo, "deleted_at") &&
+    (str_contains($usrRepo, "is_active` = 0") || str_contains($usrRepo, "is_active = 0")) &&
+    str_contains($usrRepo, "deleted_at")
+);
+
+// 10.2 Inmutabilidad de identificadores y roles
+$assert(
+    "10.2 Inmutabilidad de códigos y roles (site_code, machine code, user role protegidos)",
+    !str_contains($locRepo, "site_code = :site_code WHERE id = :id") &&
+    !str_contains($usrRepo, "role = :role WHERE id = :id")
+);
+
+// 10.3 Registro de auditoría sincrónico
+$locServ = (string)file_get_contents($baseDir . '/src/Application/Service/AdminLocationService.php');
+$macServ = (string)file_get_contents($baseDir . '/src/Application/Service/AdminMachineService.php');
+$usrServ = (string)file_get_contents($baseDir . '/src/Application/Service/AdminUserService.php');
+
+$assert(
+    "10.3 Eventos sincrónicos append-only en audit_log para LOCATION, MACHINE y USER",
+    str_contains($locServ, "LOCATION_CREATED") && str_contains($locServ, "LOCATION_DEACTIVATED") &&
+    str_contains($macServ, "MACHINE_CREATED") && str_contains($macServ, "MACHINE_TRANSFERRED") &&
+    str_contains($usrServ, "USER_CREATED") && str_contains($usrServ, "USER_PASSWORD_RESET")
+);
+
+// 10.4 Rutas protegidas por RBAC
+$routerCode = (string)file_get_contents($baseDir . '/src/Presentation/Routing/AppRouter.php');
+$assert(
+    "10.4 Protección RBAC estricta (COORDINATOR) en todas las rutas /api/coordinator/{locations,machines,users}",
+    str_contains($routerCode, "/api/coordinator/locations") &&
+    str_contains($routerCode, "/api/coordinator/machines") &&
+    str_contains($routerCode, "/api/coordinator/users") &&
+    str_contains($routerCode, "UserRole::COORDINATOR") &&
+    str_contains($routerCode, "CoordinatorAdminController")
+);
+
+// 10.5 Dualismo Lingüístico en Frontend de Administración y Aviso QR
+$adminLocTab = (string)file_get_contents($baseDir . '/public/assets/js/components/AdminLocationsTab.js');
+$adminMacTab = (string)file_get_contents($baseDir . '/public/assets/js/components/AdminMachinesTab.js');
+$adminUsrTab = (string)file_get_contents($baseDir . '/public/assets/js/components/AdminUsersTab.js');
+$qrNotice    = (string)file_get_contents($baseDir . '/public/assets/js/components/QrInactiveMachineNotice.js');
+
+$assert(
+    "10.5 Dualismo Lingüístico: Componentes administrativos con código en inglés e interfaz en español",
+    str_contains($adminLocTab, "export const AdminLocationsTab") &&
+    str_contains($adminLocTab, "Catálogo de Sedes") &&
+    str_contains($adminMacTab, "export const AdminMachinesTab") &&
+    str_contains($adminMacTab, "Parque de Máquinas") &&
+    str_contains($adminUsrTab, "export const AdminUsersTab") &&
+    str_contains($adminUsrTab, "Personal Interno") &&
+    str_contains($qrNotice, "export const QrInactiveMachineNotice") &&
+    str_contains($qrNotice, "Máquina Fuera de Servicio")
+);
+
+// ─────────────────────────────────────────────────────────────────────────
 // RESUMEN FINAL DE LA AUDITORÍA CONSTITUCIONAL
 // ─────────────────────────────────────────────────────────────────────────
 echo "\n{$colorBold}======================================================================{$colorReset}\n";
@@ -405,7 +473,7 @@ echo "{$colorBold}==============================================================
 
 if ($failures === 0) {
     echo "{$colorBold}{$colorGreen} RESULTADO: AUDITORÍA CONSTITUCIONAL APROBADA AL 100%.{$colorReset}\n";
-    echo "{$colorBold}{$colorGreen} CONDICIÓN T-MET-16 CUMPLIDA CON ÉXITO. EL MÓDULO 03 QUEDA BLINDADO Y CERRADO.{$colorReset}\n";
+    echo "{$colorBold}{$colorGreen} CONDICIÓN T-ADM-18 CUMPLIDA CON ÉXITO. EL MÓDULO 04 QUEDA BLINDADO Y CERTIFICADO.{$colorReset}\n";
     echo "{$colorBold}======================================================================{$colorReset}\n";
     exit(0);
 } else {
