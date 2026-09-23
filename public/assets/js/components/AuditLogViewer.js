@@ -76,10 +76,11 @@ export const AuditLogViewer = {
         if (this.filterTo) params.to = this.filterTo;
 
         const res = await api.auditLog.getEvents(params);
-        if (res.success && res.data) {
-          this.events = res.data.items || [];
-          this.totalRecords = res.data.total_records || 0;
-          this.totalPages = res.data.total_pages || 1;
+        const data = res?.data !== undefined ? res.data : res;
+        if (data && (data.items || data.total_records !== undefined)) {
+          this.events = data.items || [];
+          this.totalRecords = data.total_records || 0;
+          this.totalPages = data.total_pages || 1;
         } else {
           this.events = [];
           this.totalRecords = 0;

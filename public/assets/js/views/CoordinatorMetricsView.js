@@ -76,12 +76,11 @@ export const CoordinatorMetricsView = {
           api.metrics.getBreakdown(params)
         ]);
 
-        if (resSummary.success) {
-          this.summary = resSummary.data || {};
-        }
-        if (resBreakdown.success) {
-          this.breakdown = resBreakdown.data || {};
-        }
+        const summaryData = resSummary?.data !== undefined ? resSummary.data : resSummary;
+        this.summary = summaryData || {};
+
+        const breakdownData = resBreakdown?.data !== undefined ? resBreakdown.data : resBreakdown;
+        this.breakdown = breakdownData || {};
       } catch (err) {
         this.errorMessage = err.message || 'Error al cargar las métricas del servicio.';
       } finally {

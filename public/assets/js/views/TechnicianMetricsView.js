@@ -49,8 +49,9 @@ export const TechnicianMetricsView = {
 
       try {
         const res = await api.metrics.getMyMetrics({ period: this.selectedPeriod });
-        if (res.success && res.data) {
-          this.metricsData = res.data;
+        const data = res?.data !== undefined ? res.data : res;
+        if (data && (data.metrics || data.technician)) {
+          this.metricsData = data;
         } else {
           this.metricsData = null;
         }
