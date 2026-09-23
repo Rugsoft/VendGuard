@@ -84,7 +84,7 @@
   * **Dependencias:** T-MET-09
   * **Hecho cuando:** Los componentes renderizan de forma reactiva las tarjetas de KPIs (con badges de SLA y tendencias) y la tabla con desglose por sede, técnico y máquina destacando perecederos sanitarios en amarillo/rojo si superan 4h.
 
-- [ ] **T-MET-13: Implementar visor cronológico `AuditLogViewer.js`**
+- [x] **T-MET-13: Implementar visor cronológico `AuditLogViewer.js`**
   * **Requisitos:** `RF-05` (EARS 5.3, 5.5)
   * **Dependencias:** T-MET-09
   * **Hecho cuando:** `AuditLogViewer.js` muestra el listado cronológico de eventos con filtros por entidad/usuario/acción, detalles de cambios en JSON amigable y paginación reactiva.

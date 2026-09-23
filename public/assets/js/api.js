@@ -508,6 +508,70 @@ export class ApiClient {
       return this.get(`/coordinator/locations/${locationId}/qr-batch`);
     }
   };
+
+  metrics = {
+    /**
+     * Retrieves KPI summary and SLA alerts (RF-01, RF-03).
+     * @param {Object} [params={}]
+     * @returns {Promise<Object>}
+     */
+    getSummary: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/metrics/summary${q ? `?${q}` : ''}`);
+    },
+
+    /**
+     * Retrieves multidimensional metrics breakdown (RF-02).
+     * @param {Object} [params={}]
+     * @returns {Promise<Object>}
+     */
+    getBreakdown: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/metrics/breakdown${q ? `?${q}` : ''}`);
+    },
+
+    /**
+     * URL for downloading metrics CSV export (RF-06).
+     * @param {Object} [params={}]
+     * @returns {string}
+     */
+    exportCsvUrl: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return `${this.baseUrl}/coordinator/metrics/export${q ? `?${q}` : ''}`;
+    },
+
+    /**
+     * Retrieves personal metrics for authenticated technician (RF-04).
+     * @param {Object} [params={}]
+     * @returns {Promise<Object>}
+     */
+    getMyMetrics: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/technician/my-metrics${q ? `?${q}` : ''}`);
+    }
+  };
+
+  auditLog = {
+    /**
+     * Retrieves paginated immutable audit log events (RF-05, EARS 5.5).
+     * @param {Object} [params={}]
+     * @returns {Promise<Object>}
+     */
+    getEvents: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/audit-log${q ? `?${q}` : ''}`);
+    },
+
+    /**
+     * URL for downloading audit log CSV export (RF-06, EARS 6.2).
+     * @param {Object} [params={}]
+     * @returns {string}
+     */
+    exportCsvUrl: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return `${this.baseUrl}/coordinator/audit-log/export${q ? `?${q}` : ''}`;
+    }
+  };
 }
 
 // Create default singleton instance
