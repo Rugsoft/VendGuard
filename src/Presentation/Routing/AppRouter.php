@@ -71,7 +71,34 @@ class AppRouter
         $router->get('/api/coordinator/incidents', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getIncidents'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/incidents/{id}/assign', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'assignTechnician'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/incidents/{id}/cancel', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'cancelIncident'], [$coordinatorAuth]);
-        $router->get('/api/coordinator/locations', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getLocations'], [$coordinatorAuth]);
+        // Rutas de Administración Integral (Módulo 04: Sedes, Máquinas y Personal)
+        // Sedes (Locations)
+        $router->get('/api/coordinator/locations', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'listLocations'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/locations', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'createLocation'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/locations/{id}', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'getLocation'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/locations/{id}', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'updateLocation'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/locations/{id}/deactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'deactivateLocation'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/locations/{id}/reactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'reactivateLocation'], [$coordinatorAuth]);
+
+        // Máquinas (Machines)
+        $router->get('/api/coordinator/machines', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'listMachines'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/machines', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'createMachine'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/machines/{id}', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'getMachine'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/machines/{id}', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'updateMachine'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/machines/{id}/transfer', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'transferMachine'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/machines/{id}/deactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'deactivateMachine'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/machines/{id}/reactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'reactivateMachine'], [$coordinatorAuth]);
+
+        // Personal Interno (Users)
+        $router->get('/api/coordinator/users', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'listUsers'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/users', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'createUser'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/users/{id}', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'getUser'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/users/{id}', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'updateUser'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/users/{id}/reset-password', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'resetUserPassword'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/users/{id}/deactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'deactivateUser'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/users/{id}/reactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'reactivateUser'], [$coordinatorAuth]);
+
+        // Rutas existentes de Parque y QR
         $router->get('/api/coordinator/locations/{id}/machines', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getLocationMachines'], [$coordinatorAuth]);
         $router->get('/api/coordinator/machines/{id}/qr-label', [\VendGuard\Presentation\Controller\QrLabelController::class, 'getMachineLabel'], [$coordinatorAuth]);
         $router->get('/api/coordinator/locations/{id}/qr-batch', [\VendGuard\Presentation\Controller\QrLabelController::class, 'getLocationBatch'], [$coordinatorAuth]);

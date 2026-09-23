@@ -69,7 +69,7 @@
 
 ## Fase 4: Controladores REST y Rutas HTTP (API-First)
 
-- [ ] **T-ADM-10: Implementar `CoordinatorAdminController.php` y registrar rutas en `AppRouter.php`**
+- [x] **T-ADM-10: Implementar `CoordinatorAdminController.php` y registrar rutas en `AppRouter.php`**
   * **Requisitos:** `RF-01`, `RF-02`, `RF-03`, `RF-05`
   * **Dependencias:** T-ADM-07, T-ADM-08, T-ADM-09
   * **Hecho cuando:** Todos los endpoints especificados en `admin_crud_contracts.md` quedan registrados bajo la protección de `InternalAuthMiddleware(COORDINATOR)` en `AppRouter.php`, mapeando las excepciones de dominio a sus respectivos códigos de respuesta HTTP `200`, `201`, `400`, `403`, `404`, `409` y `422`.
