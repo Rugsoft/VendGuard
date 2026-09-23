@@ -98,7 +98,7 @@
   * **Dependencias:** T-ADM-10
   * **Hecho cuando:** El componente Vue 3 ESM renderiza la tabla de máquinas con insignias de tipología sanitaria (resaltando perecederos), filtros cruzados, modal de alta, edición, modal de traslado con selector de sedes activas, y diálogo de reactivación asistida con selector forzoso de nueva sede si la original fue dada de baja.
 
-- [ ] **T-ADM-15: Implementar componente `AdminUsersTab.js`**
+- [x] **T-ADM-15: Implementar componente `AdminUsersTab.js`**
   * **Requisitos:** `RF-03`, `RNF-05`
   * **Dependencias:** T-ADM-10
   * **Hecho cuando:** El componente Vue 3 ESM renderiza la plantilla técnica y de coordinación mostrando roles y recuento de averías activas asignadas, modal de alta con contraseña, edición de datos de contacto, modal de reseteo de clave, y confirmación de baja con advertencia de bloqueo si tiene averías pendientes.
