@@ -51,7 +51,7 @@
   * **Dependencias:** T-MET-06
   * **Hecho cuando:** `php tests/unit/MetricsCalculationServiceTest.php` pasa al 100% en verde, verificando tendencias, umbrales de alerta de SLA y cálculo del tiempo medio de primera respuesta hasta `IN_PROGRESS`.
 
-- [ ] **T-MET-08: Implementar servicio de exportación tabular CSV con UTF-8 BOM (`MetricsExportService.php`)**
+- [x] **T-MET-08: Implementar servicio de exportación tabular CSV con UTF-8 BOM (`MetricsExportService.php`)**
   * **Requisitos:** `RF-06` (EARS 6.1, 6.2)
   * **Dependencias:** T-MET-06, T-MET-03
   * **Hecho cuando:** `MetricsExportService::exportMetricsCsv($data)` y `exportAuditLogCsv($records)` devuelven streams CSV nativos que inician con el BOM `\xEF\xBB\xBF` y respetan el tope de 10.000 filas de seguridad en auditoría.
