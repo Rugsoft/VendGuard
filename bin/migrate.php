@@ -35,12 +35,25 @@ try {
     $runner = new MigrationRunner($pdo);
     $schemaFile = __DIR__ . '/../database/schema.sql';
 
-    echo "[2/3] Ejecutando script DDL: database/schema.sql ...\n";
+    echo "[2/4] Ejecutando script DDL base: database/schema.sql ...\n";
     $runner->runSqlFile($schemaFile);
     echo "      Script DDL ejecutado con éxito.\n";
 
-    // Conectar a vendguard_db para verificar
+    // Conectar a vendguard_db
     $pdo->exec("USE `vendguard_db`");
+
+    // Ejecutar migraciones incrementales en database/migrations/
+    echo "[3/4] Ejecutando migraciones incrementales (database/migrations/) ...\n";
+    $migrationsDir = __DIR__ . '/../database/migrations';
+    if (is_dir($migrationsDir)) {
+        $migrationFiles = glob($migrationsDir . '/*.sql');
+        sort($migrationFiles);
+        foreach ($migrationFiles as $mFile) {
+            $baseName = basename($mFile);
+            echo "      - Aplicando migración: {$baseName} ...\n";
+            $runner->runSqlFile($mFile);
+        }
+    }
 
     $expectedTables = [
         'locations',
@@ -48,10 +61,11 @@ try {
         'users',
         'incidents',
         'incident_history',
-        'incident_comments'
+        'incident_comments',
+        'audit_log'
     ];
 
-    echo "[3/3] Verificando tablas creadas en vendguard_db:\n";
+    echo "[4/4] Verificando esquema e integridad en vendguard_db:\n";
     $allTablesExist = true;
 
     foreach ($expectedTables as $table) {
@@ -72,16 +86,28 @@ try {
     $idx = $stmt->fetch();
     $hasUniqueIndex = ($idx !== false);
 
-    echo "      - Columna virtual `is_active_ticket`: [" . ($hasVirtualCol ? "OK" : "FALTA") . "]\n";
-    echo "      - Índice único `uq_machine_active_ticket`: [" . ($hasUniqueIndex ? "OK" : "FALTA") . "]\n\n";
+    // Verificar columna machine_type_snapshot (Módulo 04 / Art. II)
+    $stmt = $pdo->query("SHOW COLUMNS FROM `incidents` LIKE 'machine_type_snapshot'");
+    $colSnapshot = $stmt->fetch();
+    $hasSnapshotCol = ($colSnapshot !== false);
 
-    if ($allTablesExist && $hasVirtualCol && $hasUniqueIndex) {
+    // Verificar enum USER en audit_log (Módulo 04 / Art. III y V)
+    $stmt = $pdo->query("SHOW COLUMNS FROM `audit_log` LIKE 'entity_type'");
+    $colAuditEnum = $stmt->fetch();
+    $hasUserEnum = ($colAuditEnum !== false && str_contains((string)($colAuditEnum['Type'] ?? ''), "'USER'"));
+
+    echo "      - Columna virtual `is_active_ticket`: [" . ($hasVirtualCol ? "OK" : "FALTA") . "]\n";
+    echo "      - Índice único `uq_machine_active_ticket`: [" . ($hasUniqueIndex ? "OK" : "FALTA") . "]\n";
+    echo "      - Columna `machine_type_snapshot` en incidents: [" . ($hasSnapshotCol ? "OK" : "FALTA") . "]\n";
+    echo "      - Soporte entidad `USER` en audit_log: [" . ($hasUserEnum ? "OK" : "FALTA") . "]\n\n";
+
+    if ($allTablesExist && $hasVirtualCol && $hasUniqueIndex && $hasSnapshotCol && $hasUserEnum) {
         echo "========================================================\n";
-        echo " Migración completada exitosamente. Condición T-02 CUMPLIDA.\n";
+        echo " Migración completada exitosamente. Condición T-ADM-01 CUMPLIDA.\n";
         echo "========================================================\n";
         exit(0);
     } else {
-        echo "ERROR: Algunas tablas o índices no se crearon correctamente.\n";
+        echo "ERROR: Algunas tablas, columnas o índices no se crearon correctamente.\n";
         exit(1);
     }
 

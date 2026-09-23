@@ -86,6 +86,7 @@ CREATE TABLE `incidents` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `ticket_code` VARCHAR(32) NOT NULL,
   `machine_id` INT UNSIGNED NOT NULL,
+  `machine_type_snapshot` ENUM('HOT_DRINKS', 'COLD_DRINKS', 'SNACKS', 'PERISHABLE_FOOD', 'COMBO') NULL,
   `location_id` INT UNSIGNED NOT NULL,
   `assigned_technician_id` INT UNSIGNED NULL DEFAULT NULL,
   `reporter_name` VARCHAR(100) NULL,
@@ -173,7 +174,7 @@ CREATE TABLE `incident_comments` (
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `audit_log` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `entity_type` ENUM('TICKET', 'MACHINE', 'LOCATION') NOT NULL,
+  `entity_type` ENUM('TICKET', 'MACHINE', 'LOCATION', 'USER') NOT NULL,
   `entity_id` INT UNSIGNED NOT NULL,
   `action` VARCHAR(64) NOT NULL,
   `user_id` INT UNSIGNED NULL DEFAULT NULL,

@@ -12,7 +12,7 @@
 
 ## Fase 1: Esquema de Base de Datos y Excepciones de Dominio
 
-- [ ] **T-ADM-01: Migración DDL y soporte de auditoría (`004_admin_crud_audit_and_snapshot.sql`, `cloud_init.sql`)**
+- [x] **T-ADM-01: Migración DDL y soporte de auditoría (`004_admin_crud_audit_and_snapshot.sql`, `cloud_init.sql`)**
   * **Requisitos:** `RF-05`, Constitución Art. II y Art. III
   * **Dependencias:** Ninguna
   * **Hecho cuando:** La ejecución de `php bin/migrate.php` aplica con éxito `004_admin_crud_audit_and_snapshot.sql`, ampliando `audit_log.entity_type` para incluir `'USER'` e incorporando `machine_type_snapshot` en la tabla `incidents` con backfill para tickets preexistentes; el esquema `database/cloud_init.sql` queda consolidado.
