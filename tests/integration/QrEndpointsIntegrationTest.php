@@ -204,13 +204,28 @@ $assert("1.5 Máquina inexistente retorna HTTP 404 Not Found", $resNotFound->get
 $bodyNotFound = json_decode($resNotFound->getBody(), true);
 $assert("1.5 Código de error es MACHINE_NOT_FOUND_OR_INACTIVE", ($bodyNotFound['error']['code'] ?? '') === 'MACHINE_NOT_FOUND_OR_INACTIVE');
 
-// 1.6 Máquina inactiva
+// 1.6 Máquina inactiva (T-ADM-11)
 $pdo->prepare("UPDATE machines SET is_active = 0 WHERE code = 'VEND-0201'")->execute();
 $reqInactive = new Request('GET', '/api/qr/scan/VEND-0201');
 $resInactive = $router->dispatch($reqInactive);
-$assert("1.6 Máquina inactiva retorna HTTP 404 Not Found", $resInactive->getStatusCode() === 404);
+$assert("1.6 Máquina inactiva retorna HTTP 200 OK", $resInactive->getStatusCode() === 200);
 $bodyInactive = json_decode($resInactive->getBody(), true);
-$assert("1.6 Código de error es MACHINE_NOT_FOUND_OR_INACTIVE", ($bodyInactive['error']['code'] ?? '') === 'MACHINE_NOT_FOUND_OR_INACTIVE');
+$assert("1.6 Status mode es INACTIVE", ($bodyInactive['data']['status_mode'] ?? '') === 'INACTIVE');
+$assert("1.6 allow_reporting es false", ($bodyInactive['data']['allow_reporting'] ?? true) === false);
+$assert("1.6 is_active es false", ($bodyInactive['data']['is_active'] ?? true) === false);
+$assert("1.6 Incluye mensaje de máquina fuera de servicio", str_contains($bodyInactive['data']['message'] ?? '', 'fuera de servicio'));
+
+// 1.6b POST /api/qr/report bloquea la creación sobre máquina inactiva con HTTP 422
+$reqReportInactive = new Request('POST', '/api/qr/report', [], [
+    'machine_code' => 'VEND-0201',
+    'category' => 'PRODUCT_JAM',
+    'description' => 'Intento de reporte en máquina inactiva.'
+], ['content-type' => 'application/json']);
+$resReportInactive = $router->dispatch($reqReportInactive);
+$assert("1.6b Reportar incidencia en máquina inactiva retorna 422", $resReportInactive->getStatusCode() === 422);
+$bodyReportInactive = json_decode($resReportInactive->getBody(), true);
+$assert("1.6c Error code es MACHINE_INACTIVE", ($bodyReportInactive['error']['code'] ?? '') === 'MACHINE_INACTIVE');
+
 // Restauramos máquina
 $pdo->prepare("UPDATE machines SET is_active = 1 WHERE code = 'VEND-0201'")->execute();
 

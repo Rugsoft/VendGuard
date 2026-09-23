@@ -61,16 +61,22 @@ class QrScanService
             throw new MachineNotFoundException();
         }
 
-        // 1. Localizar la máquina en el repositorio
-        $machine = $this->machineRepo->findByCode($cleanMachineCode);
-        if ($machine === null || !$machine->isActive()) {
+        // 1. Localizar la máquina en el repositorio (incluyendo inactivas/dadas de baja para respuesta informativa RF-04)
+        $machine = $this->machineRepo->findByCode($cleanMachineCode, withIncident: true, allowDeleted: true);
+        if ($machine === null) {
             throw new MachineNotFoundException();
+        }
+
+        // Si la máquina está dada de baja o inactiva (RF-04, EARS 2.12)
+        if (!$machine->isActive()) {
+            $location = $this->locationRepo->findById($machine->getLocationId());
+            return $this->buildInactiveMachineResponse($machine, $location);
         }
 
         // 2. Resolver la sede física real vigente (EARS 5.1: Transparente ante reubicaciones)
         $location = $this->locationRepo->findById($machine->getLocationId());
         if ($location === null || !$location->isActive()) {
-            throw new MachineNotFoundException();
+            return $this->buildInactiveMachineResponse($machine, $location);
         }
 
         // 3. Inspeccionar el estado de incidencias vinculadas
@@ -106,6 +112,27 @@ class QrScanService
 
         // C) Máquina limpia sin avisos en curso: lista para emitir nuevo reporte (EARS 3.1)
         return $this->buildCanReportResponse($machine, $location);
+    }
+
+    /**
+     * Construye la respuesta para máquinas inactivas o retiradas del parque (RF-04, EARS 2.12).
+     */
+    private function buildInactiveMachineResponse(Machine $machine, ?Location $location): array
+    {
+        return [
+            'status_mode'        => 'INACTIVE',
+            'status'             => 'INACTIVE',
+            'is_active'          => false,
+            'allow_reporting'    => false,
+            'code'               => $machine->getCode(),
+            'model'              => $machine->getModel(),
+            'machine_type_label' => $machine->getMachineType()->label(),
+            'location_name'      => $location !== null ? $location->getName() : 'Sede no disponible',
+            'message'            => 'Esta máquina de vending se encuentra temporalmente retirada o fuera de servicio. No es posible registrar nuevas incidencias sobre este dispositivo.',
+            'machine'            => $this->formatMachineData($machine),
+            'location'           => $location !== null ? $this->formatLocationData($location) : null,
+            'active_incident'    => null,
+        ];
     }
 
     /**

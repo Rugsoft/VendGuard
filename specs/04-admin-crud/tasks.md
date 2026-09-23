@@ -74,7 +74,7 @@
   * **Dependencias:** T-ADM-07, T-ADM-08, T-ADM-09
   * **Hecho cuando:** Todos los endpoints especificados en `admin_crud_contracts.md` quedan registrados bajo la protección de `InternalAuthMiddleware(COORDINATOR)` en `AppRouter.php`, mapeando las excepciones de dominio a sus respectivos códigos de respuesta HTTP `200`, `201`, `400`, `403`, `404`, `409` y `422`.
 
-- [ ] **T-ADM-11: Actualizar `QrScanController.php` y servicio de escaneo para máquinas inactivas**
+- [x] **T-ADM-11: Actualizar `QrScanController.php` y servicio de escaneo para máquinas inactivas**
   * **Requisitos:** `RF-04` (EARS 4.1, 4.2)
   * **Dependencias:** T-ADM-05
   * **Hecho cuando:** Al invocar `GET /api/qr/scan/{code}` sobre una máquina con `is_active = 0`, el controlador responde HTTP `200` con `status = "INACTIVE"`, `is_active = false`, `allow_reporting = false` y el mensaje oficial de advertencia de fuera de servicio, bloqueando la creación de incidencias.

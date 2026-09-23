@@ -68,15 +68,22 @@ class QrReportService
         }
 
         $cleanMachineCode = strtoupper(trim((string)$machineCodeRaw));
-        $machine = $this->machineRepo->findByCode($cleanMachineCode);
-        if ($machine === null || !$machine->isActive()) {
+        $machine = $this->machineRepo->findByCode($cleanMachineCode, withIncident: true, allowDeleted: true);
+        if ($machine === null) {
             throw new MachineNotFoundException();
+        }
+        if (!$machine->isActive()) {
+            throw new InvalidArgumentException(
+                'Esta máquina de vending se encuentra temporalmente retirada o fuera de servicio. No es posible registrar nuevas incidencias sobre este dispositivo.'
+            );
         }
 
         // 2. Resolver y validar sede activa
-        $location = $this->locationRepo->findById($machine->getLocationId());
+        $location = $this->locationRepo->findById($machine->getLocationId(), allowDeleted: true);
         if ($location === null || !$location->isActive()) {
-            throw new MachineNotFoundException();
+            throw new InvalidArgumentException(
+                'La sede de la máquina se encuentra actualmente inactiva. No es posible registrar nuevas incidencias sobre este dispositivo.'
+            );
         }
 
         // 3. Validar categoría de avería

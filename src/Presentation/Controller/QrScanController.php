@@ -26,20 +26,26 @@ use VendGuard\Presentation\Http\Response;
  * 
  * Cumple con Dogma Vanilla y los Artículos II, IV y V de la Constitución de VendGuard.
  */
+use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+
 class QrScanController
 {
     private QrScanService $qrScanService;
     private QrReportService $qrReportService;
     private LocalFileUploader $fileUploader;
+    private MachineRepositoryInterface $machineRepo;
 
     public function __construct(
         ?QrScanService $qrScanService = null,
         ?QrReportService $qrReportService = null,
-        ?LocalFileUploader $fileUploader = null
+        ?LocalFileUploader $fileUploader = null,
+        ?MachineRepositoryInterface $machineRepo = null
     ) {
         $this->qrScanService = $qrScanService ?? new QrScanService();
         $this->qrReportService = $qrReportService ?? new QrReportService();
         $this->fileUploader = $fileUploader ?? new LocalFileUploader();
+        $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
     }
 
     /**
@@ -103,6 +109,17 @@ class QrScanController
             return Response::error(
                 'MISSING_MACHINE_CODE',
                 'El código de la máquina es obligatorio.',
+                422
+            );
+        }
+
+        // 1.1 Bloqueo estricto de reporte en máquinas inactivas o retiradas (RF-04, EARS 2.12)
+        $cleanCode = strtoupper(trim((string)$machineCode));
+        $machine = $this->machineRepo->findByCode($cleanCode, withIncident: false, allowDeleted: true);
+        if ($machine !== null && !$machine->isActive()) {
+            return Response::error(
+                'MACHINE_INACTIVE',
+                'Esta máquina de vending se encuentra temporalmente retirada o fuera de servicio. No es posible registrar nuevas incidencias sobre este dispositivo.',
                 422
             );
         }

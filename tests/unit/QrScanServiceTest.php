@@ -514,23 +514,18 @@ try {
     }
     assertCondition($caughtNotFound, "7.3 Máquina inexistente lanza MachineNotFoundException");
 
-    // 7.2 Máquina inactiva (is_active = false)
-    $caughtInactive = false;
-    try {
-        $service->resolve('VEND-INACTIVE');
-    } catch (MachineNotFoundException $e) {
-        $caughtInactive = true;
-    }
-    assertCondition($caughtInactive, "7.4 Máquina inactiva lanza MachineNotFoundException");
+    // 7.2 Máquina inactiva (is_active = false): Según T-ADM-11 responde status INACTIVE con allow_reporting = false
+    $inactiveResult = $service->resolve('VEND-INACTIVE');
+    assertCondition($inactiveResult['status_mode'] === 'INACTIVE', "7.4 Máquina inactiva devuelve status_mode INACTIVE");
+    assertCondition($inactiveResult['is_active'] === false, "7.4b Máquina inactiva devuelve is_active false");
+    assertCondition($inactiveResult['allow_reporting'] === false, "7.4c Máquina inactiva tiene allow_reporting en false");
+    assertCondition(str_contains($inactiveResult['message'], 'fuera de servicio'), "7.4d Máquina inactiva incluye mensaje oficial fuera de servicio");
 
-    // 7.3 Máquina borrada lógicamente (soft deleted)
-    $caughtDeleted = false;
-    try {
-        $service->resolve('VEND-DELETED');
-    } catch (MachineNotFoundException $e) {
-        $caughtDeleted = true;
-    }
-    assertCondition($caughtDeleted, "7.5 Máquina con borrado lógico lanza MachineNotFoundException");
+    // 7.3 Máquina borrada lógicamente (soft deleted): responde también INACTIVE con allow_reporting = false
+    $deletedResult = $service->resolve('VEND-DELETED');
+    assertCondition($deletedResult['status_mode'] === 'INACTIVE', "7.5 Máquina con borrado lógico devuelve status_mode INACTIVE");
+    assertCondition($deletedResult['is_active'] === false, "7.5b Máquina con borrado lógico devuelve is_active false");
+    assertCondition($deletedResult['allow_reporting'] === false, "7.5c Máquina con borrado lógico tiene allow_reporting en false");
 
     // 7.4 Código de máquina vacío
     $caughtEmpty = false;
