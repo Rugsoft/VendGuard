@@ -65,7 +65,7 @@
 
 ## Fase 3: Controladores REST y Rutas HTTP (API-First)
 
-- [ ] **T-QR-10: Implementar `QrScanController.php` y registrar rutas públicas de escaneo**
+- [x] **T-QR-10: Implementar `QrScanController.php` y registrar rutas públicas de escaneo**
   * **Requisitos:** `RF-03`, `RF-04`, `RF-05`
   * **Dependencias:** T-QR-08
   * **Hecho cuando:** Los endpoints `GET /api/qr/scan/{code}` y `POST /api/qr/report` están registrados en `AppRouter.php` y responden exactamente conforme a los contratos técnicos de `qr_codes_contracts.md`.

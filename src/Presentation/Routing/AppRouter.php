@@ -91,6 +91,12 @@ class AppRouter
         // -----------------------------------------------------------------
         $router->post('/api/cron/auto-close', [\VendGuard\Presentation\Controller\CronController::class, 'autoClose']);
 
+        // -----------------------------------------------------------------
+        // 7. Módulo de Códigos QR - Rutas Públicas (T-QR-10)
+        // -----------------------------------------------------------------
+        $router->get('/api/qr/scan/{code}', [\VendGuard\Presentation\Controller\QrScanController::class, 'scan']);
+        $router->post('/api/qr/report', [\VendGuard\Presentation\Controller\QrScanController::class, 'report']);
+
         return $router;
     }
 }
