@@ -653,6 +653,80 @@ export class ApiClient {
       return this.downloadFile('/coordinator/audit-log/export', 'vendguard_audit_log.csv', params);
     }
   };
+
+  /**
+   * 9. Administration Operations (Locations, Machines, Users) - Module 04 (RF-01 to RF-05)
+   */
+  admin = {
+    // Locations (RF-01)
+    getLocations: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/locations${q ? `?${q}` : ''}`);
+    },
+    createLocation: (payload) => {
+      return this.post('/coordinator/locations', payload);
+    },
+    getLocation: (id) => {
+      return this.get(`/coordinator/locations/${id}`);
+    },
+    updateLocation: (id, payload) => {
+      return this.patch(`/coordinator/locations/${id}`, payload);
+    },
+    deactivateLocation: (id) => {
+      return this.patch(`/coordinator/locations/${id}/deactivate`);
+    },
+    reactivateLocation: (id) => {
+      return this.patch(`/coordinator/locations/${id}/reactivate`);
+    },
+
+    // Machines (RF-02)
+    getMachines: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/machines${q ? `?${q}` : ''}`);
+    },
+    createMachine: (payload) => {
+      return this.post('/coordinator/machines', payload);
+    },
+    getMachine: (id) => {
+      return this.get(`/coordinator/machines/${id}`);
+    },
+    updateMachine: (id, payload) => {
+      return this.patch(`/coordinator/machines/${id}`, payload);
+    },
+    transferMachine: (id, payload) => {
+      return this.patch(`/coordinator/machines/${id}/transfer`, payload);
+    },
+    deactivateMachine: (id) => {
+      return this.patch(`/coordinator/machines/${id}/deactivate`);
+    },
+    reactivateMachine: (id, payload = {}) => {
+      return this.patch(`/coordinator/machines/${id}/reactivate`, payload);
+    },
+
+    // Users (RF-03)
+    getUsers: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/users${q ? `?${q}` : ''}`);
+    },
+    createUser: (payload) => {
+      return this.post('/coordinator/users', payload);
+    },
+    getUser: (id) => {
+      return this.get(`/coordinator/users/${id}`);
+    },
+    updateUser: (id, payload) => {
+      return this.patch(`/coordinator/users/${id}`, payload);
+    },
+    resetUserPassword: (id, newPassword) => {
+      return this.patch(`/coordinator/users/${id}/reset-password`, { new_password: newPassword });
+    },
+    deactivateUser: (id) => {
+      return this.patch(`/coordinator/users/${id}/deactivate`);
+    },
+    reactivateUser: (id) => {
+      return this.patch(`/coordinator/users/${id}/reactivate`);
+    }
+  };
 }
 
 // Create default singleton instance

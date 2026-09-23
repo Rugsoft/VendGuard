@@ -88,7 +88,7 @@
 
 ## Fase 5: Componentes Frontend y Vistas Vanilla Vue 3
 
-- [ ] **T-ADM-13: Implementar componente `AdminLocationsTab.js`**
+- [x] **T-ADM-13: Implementar componente `AdminLocationsTab.js`**
   * **Requisitos:** `RF-01`, `RNF-05`
   * **Dependencias:** T-ADM-10
   * **Hecho cuando:** El componente Vue 3 ESM renderiza la tabla de sedes con filtros de estado (`active`/`inactive`/`all`), caja de búsqueda, modal de alta con validación de código, edición de datos de contacto, y diálogo de confirmación de baja que alerta interactivamente si tiene máquinas activas.
