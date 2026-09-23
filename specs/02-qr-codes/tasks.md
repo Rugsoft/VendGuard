@@ -75,7 +75,7 @@
   * **Dependencias:** T-QR-09
   * **Hecho cuando:** Los endpoints `GET /api/coordinator/machines/{id}/qr-label` y `GET /api/coordinator/locations/{id}/qr-batch` están protegidos con `InternalAuthMiddleware(COORDINATOR)` y devuelven el JSON/SVG correspondiente o `401 Unauthorized`.
 
-- [ ] **T-QR-12: Crear suite de pruebas de integración HTTP para los endpoints QR (`QrEndpointsIntegrationTest.php`)**
+- [x] **T-QR-12: Crear suite de pruebas de integración HTTP para los endpoints QR (`QrEndpointsIntegrationTest.php`)**
   * **Requisitos:** `RF-01` a `RF-05`
   * **Dependencias:** T-QR-10, T-QR-11
   * **Hecho cuando:** La ejecución de `php tests/integration/QrEndpointsIntegrationTest.php` valida peticiones HTTP reales sobre los 4 endpoints cubriendo respuestas 200, 201, 401, 404, concurrencia simulada y descarga directa con cabecera `image/svg+xml`.
