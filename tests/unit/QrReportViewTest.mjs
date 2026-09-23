@@ -32,6 +32,7 @@ globalThis.window = {
 
 import { api } from '../../public/assets/js/api.js';
 import { QrReportView, INCIDENT_CATEGORIES } from '../../public/assets/js/views/QrReportView.js';
+import { App } from '../../public/assets/js/app.js';
 
 let assertions = 0;
 let failures = 0;
@@ -282,6 +283,57 @@ async function runTests() {
   assert('5.1 statusMode es NOT_FOUND', instance4.statusMode === 'NOT_FOUND');
   assert('5.2 loadError contiene mensaje de cortesía', instance4.loadError.includes('Máquina no identificada o temporalmente fuera de servicio'));
   assert('5.3 loading es false', instance4.loading === false);
+
+  // =====================================================================
+  // CASO 6: Detección de ?qr=... en app.js y Enrutamiento Directo (T-QR-15)
+  // =====================================================================
+  console.log('\n--- Caso 6: Detección de ?qr=... en app.js y Enrutamiento Directo (T-QR-15) ---');
+
+  // 6.1 Detección de ?qr=VEND-0101
+  globalThis.window.location.search = '?qr=VEND-0101';
+  const appInstance1 = {
+    ...App.data()
+  };
+  App.created.call(appInstance1);
+
+  assert('6.1 Cargar /?qr=VEND-0101 activa currentView === "qr"', appInstance1.currentView === 'qr');
+  assert('6.2 qrMachineCode se asigna a "VEND-0101"', appInstance1.qrMachineCode === 'VEND-0101');
+  assert('6.3 qrSiteCode es cadena vacía si no se especifica', appInstance1.qrSiteCode === '');
+
+  // 6.2 Detección de ?qr=VEND-0102 con site=SEDE-BCN-01
+  globalThis.window.location.search = '?qr=VEND-0102&site=SEDE-BCN-01';
+  const appInstance2 = {
+    ...App.data()
+  };
+  App.created.call(appInstance2);
+
+  assert('6.4 ?qr=VEND-0102&site=SEDE-BCN-01 extrae máquina y sede', 
+    appInstance2.currentView === 'qr' && 
+    appInstance2.qrMachineCode === 'VEND-0102' && 
+    appInstance2.qrSiteCode === 'SEDE-BCN-01');
+
+  // 6.3 Compatibilidad con parámetro ?code=VEND-0103
+  globalThis.window.location.search = '?code=VEND-0103';
+  const appInstance3 = {
+    ...App.data()
+  };
+  App.created.call(appInstance3);
+
+  assert('6.5 Soporte de compatibilidad con ?code=VEND-0103', 
+    appInstance3.currentView === 'qr' && appInstance3.qrMachineCode === 'VEND-0103');
+
+  // 6.4 Verificación de plantilla de App: Ocultación de barras administrativas
+  assert('6.6 App registra QrReportView en components', App.components.QrReportView === QrReportView);
+  assert('6.7 AppNavbar está condicionado a v-if="currentView !== \'qr\'"', 
+    App.template.includes('<AppNavbar v-if="currentView !== \'qr\'"'));
+  assert('6.8 Profile Selector Bar está condicionado a v-if="currentView !== \'qr\'"', 
+    App.template.includes('v-if="currentView !== \'qr\'"') && App.template.includes('Quick Testing Bar'));
+  assert('6.9 Footer está condicionado a v-if="currentView !== \'qr\'"', 
+    App.template.includes('<footer v-if="currentView !== \'qr\'"'));
+  assert('6.10 QrReportView se renderiza condicionalmente con :code y :site', 
+    App.template.includes('<QrReportView') && 
+    App.template.includes('v-if="currentView === \'qr\'"') &&
+    App.template.includes(':code="qrMachineCode"'));
 
   // =====================================================================
   // Resumen Final

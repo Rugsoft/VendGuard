@@ -15,6 +15,7 @@ import { AppNavbar } from './components/AppNavbar.js';
 import { LocationPortalView } from './views/LocationPortalView.js';
 import { CoordinatorDashboardView } from './views/CoordinatorDashboardView.js';
 import { TechnicianRouteView } from './views/TechnicianRouteView.js';
+import { QrReportView } from './views/QrReportView.js';
 
 export const App = {
   name: 'VendGuardApp',
@@ -22,13 +23,16 @@ export const App = {
     AppNavbar,
     LocationPortalView,
     CoordinatorDashboardView,
-    TechnicianRouteView
+    TechnicianRouteView,
+    QrReportView
   },
   data() {
     return {
-      currentView: 'portal', // 'portal' | 'coordinator' | 'technician'
+      currentView: 'portal', // 'portal' | 'coordinator' | 'technician' | 'qr'
       siteCode: 'SEDE-BCN-01',
-      showCredentialsGuide: true
+      showCredentialsGuide: true,
+      qrMachineCode: '',
+      qrSiteCode: ''
     };
   },
   computed: {
@@ -46,7 +50,19 @@ export const App = {
     }
   },
   created() {
-    // Restore session on startup
+    // 1. Detección prioritaria de Deep Link QR (?qr=... o ?code=...) (RF-03, RNF-02 / EARS 3.1)
+    if (typeof window !== 'undefined' && window.location) {
+      const urlParams = new URLSearchParams(window.location.search);
+      const qrParam = urlParams.get('qr') || urlParams.get('code');
+      if (qrParam && qrParam.trim() !== '') {
+        this.currentView = 'qr';
+        this.qrMachineCode = qrParam.trim();
+        this.qrSiteCode = (urlParams.get('site') || urlParams.get('site_code') || '').trim();
+        return;
+      }
+    }
+
+    // 2. Restauración de sesión si no es acceso por código QR
     const restored = restoreSession();
     if (restored) {
       if (store.state.user?.role === 'COORDINATOR') {
@@ -72,11 +88,12 @@ export const App = {
   },
   template: `
     <div style="min-height: 100vh; display: flex; flex-direction: column; background-color: var(--color-canvas, #f9fafb);">
-      <!-- Global Top Navbar -->
-      <AppNavbar @logout="handleLogout" @navigate-home="currentView = 'portal'" />
+      <!-- Global Top Navbar (Oculto en vista de escaneo QR ciudadano) -->
+      <AppNavbar v-if="currentView !== 'qr'" @logout="handleLogout" @navigate-home="currentView = 'portal'" />
 
-      <!-- Profile Selector Bar (Quick Testing Bar) -->
+      <!-- Profile Selector Bar (Quick Testing Bar - Oculto en vista QR ciudadano) -->
       <div
+        v-if="currentView !== 'qr'"
         style="background-color: #ffffff; border-bottom: 1px solid var(--color-hairline, #c8cfda); padding: 8px 16px;"
       >
         <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;">
@@ -163,9 +180,15 @@ export const App = {
       </div>
 
       <!-- Main Content Area: Dynamic View -->
-      <main style="flex: 1; padding: 16px 0;">
+      <main :style="{ flex: 1, padding: currentView === 'qr' ? '0' : '16px 0' }">
+        <QrReportView
+          v-if="currentView === 'qr'"
+          :code="qrMachineCode"
+          :site="qrSiteCode"
+          @go-home="switchView('portal')"
+        />
         <LocationPortalView
-          v-if="currentView === 'portal'"
+          v-else-if="currentView === 'portal'"
           :initial-site-code="siteCode"
           @authenticated="siteCode = $event"
         />
@@ -177,8 +200,8 @@ export const App = {
         />
       </main>
 
-      <!-- Footer -->
-      <footer style="background-color: #ffffff; border-top: 1px solid var(--color-hairline, #c8cfda); padding: 12px 16px; text-align: center; font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
+      <!-- Footer (Oculto en vista QR móvil) -->
+      <footer v-if="currentView !== 'qr'" style="background-color: #ffffff; border-top: 1px solid var(--color-hairline, #c8cfda); padding: 12px 16px; text-align: center; font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
         VendGuard MVP v1.0.0 · Sistema de Gestión de Incidencias de Vending · Dogma Vanilla & Docker Design System
       </footer>
     </div>

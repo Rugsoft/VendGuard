@@ -94,7 +94,7 @@
   * **Dependencias:** T-QR-11
   * **Hecho cuando:** El panel de coordinación incluye el botón "🏷️ Imprimir QR" en cada máquina (con previsualización, teléfono editable, descarga SVG e impresión) y el botón "📄 Etiquetas de Sede (A4)" que maqueta la cuadrícula con saltos de página limpios.
 
-- [ ] **T-QR-15: Integrar detección de `?qr=...` en `app.js` y pruebas frontend**
+- [x] **T-QR-15: Integrar detección de `?qr=...` en `app.js` y pruebas frontend**
   * **Requisitos:** `RF-03`, `RNF-02`
   * **Dependencias:** T-QR-13, T-QR-14
   * **Hecho cuando:** Cargar `/?qr=VEND-0101` en el navegador activa automáticamente la vista `QrReportView` ocultando barras administrativas, y la suite `node tests/unit/QrReportViewTest.mjs` pasa al 100% en verde.
