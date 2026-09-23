@@ -147,4 +147,39 @@ class AuditLogger
 
         return $this->auditRepo->log($event);
     }
+
+    /**
+     * Registra un evento administrativo o maestro en un usuario interno (EARS 4.1).
+     * 
+     * @param int $userId ID del usuario afectado.
+     * @param string $action Acción ejecutada (ej. 'USER_CREATED', 'USER_UPDATED', 'USER_DEACTIVATED', 'USER_REACTIVATED', 'USER_PASSWORD_RESET').
+     * @param array{id: int|null, role: string, name: string} $actor Datos del usuario coordinador actuante.
+     * @param array<string, mixed>|null $previousState
+     * @param array<string, mixed> $newState
+     * @param array<string, mixed>|null $metadata
+     * @return AuditEvent
+     */
+    public function logUserEvent(
+        int $userId,
+        string $action,
+        array $actor,
+        ?array $previousState,
+        array $newState,
+        ?array $metadata = null
+    ): AuditEvent {
+        $event = new AuditEvent(
+            id: null,
+            entityType: AuditEvent::ENTITY_USER,
+            entityId: $userId,
+            action: strtoupper(trim($action)),
+            userId: $actor['id'] ?? null,
+            userRole: $actor['role'] ?? 'COORDINATOR',
+            userName: $actor['name'] ?? 'Coordinación',
+            previousState: $previousState,
+            newState: $newState,
+            metadata: $metadata
+        );
+
+        return $this->auditRepo->log($event);
+    }
 }

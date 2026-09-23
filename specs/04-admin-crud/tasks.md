@@ -50,7 +50,7 @@
 
 ## Fase 3: Servicios de Aplicación y Auditoría Inmutable
 
-- [ ] **T-ADM-07: Implementar `AdminLocationService.php` y suite de prueba unitaria `AdminLocationServiceTest.php`**
+- [x] **T-ADM-07: Implementar `AdminLocationService.php` y suite de prueba unitaria `AdminLocationServiceTest.php`**
   * **Requisitos:** `RF-01`, `RF-05`
   * **Dependencias:** T-ADM-02, T-ADM-04
   * **Hecho cuando:** `AdminLocationService` orquesta la validación de regex `^[A-Z0-9-]{3,32}$`, detección de colisión con sedes inactivas (`can_reactivate = true`), bloqueo de baja si hay máquinas activas (`ActiveMachinesBlockedException`) y registro sincrónico append-only en `audit_log`, pasando al 100% la suite `php tests/unit/AdminLocationServiceTest.php`.

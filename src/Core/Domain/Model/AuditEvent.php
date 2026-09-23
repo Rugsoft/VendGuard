@@ -22,6 +22,7 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_TICKET   = 'TICKET';
     public const ENTITY_MACHINE  = 'MACHINE';
     public const ENTITY_LOCATION = 'LOCATION';
+    public const ENTITY_USER     = 'USER';
 
     private ?int $id;
     private string $entityType;
@@ -37,7 +38,7 @@ class AuditEvent implements JsonSerializable
 
     /**
      * @param int|null $id Identificador unívoco del registro en BD (null antes de persistir).
-     * @param string $entityType Tipo de entidad ('TICKET', 'MACHINE', 'LOCATION').
+     * @param string $entityType Tipo de entidad ('TICKET', 'MACHINE', 'LOCATION', 'USER').
      * @param int $entityId ID numérico de la entidad afectada.
      * @param string $action Acción ejecutada (ej. 'RESOLVE_INCIDENT', 'STATUS_CHANGE', 'ASSIGN_TECHNICIAN').
      * @param int|null $userId ID del usuario causante (null si es sistema o reporte anónimo).
@@ -61,7 +62,7 @@ class AuditEvent implements JsonSerializable
         ?array $metadata = null,
         ?string $createdAt = null
     ) {
-        $validTypes = [self::ENTITY_TICKET, self::ENTITY_MACHINE, self::ENTITY_LOCATION];
+        $validTypes = [self::ENTITY_TICKET, self::ENTITY_MACHINE, self::ENTITY_LOCATION, self::ENTITY_USER];
         if (!in_array($entityType, $validTypes, true)) {
             throw new InvalidArgumentException("Tipo de entidad de auditoría inválido: {$entityType}");
         }
