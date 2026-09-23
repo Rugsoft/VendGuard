@@ -93,7 +93,7 @@
   * **Dependencias:** T-ADM-10
   * **Hecho cuando:** El componente Vue 3 ESM renderiza la tabla de sedes con filtros de estado (`active`/`inactive`/`all`), caja de búsqueda, modal de alta con validación de código, edición de datos de contacto, y diálogo de confirmación de baja que alerta interactivamente si tiene máquinas activas.
 
-- [ ] **T-ADM-14: Implementar componente `AdminMachinesTab.js`**
+- [x] **T-ADM-14: Implementar componente `AdminMachinesTab.js`**
   * **Requisitos:** `RF-02`, `RNF-05`, Constitución Art. II
   * **Dependencias:** T-ADM-10
   * **Hecho cuando:** El componente Vue 3 ESM renderiza la tabla de máquinas con insignias de tipología sanitaria (resaltando perecederos), filtros cruzados, modal de alta, edición, modal de traslado con selector de sedes activas, y diálogo de reactivación asistida con selector forzoso de nueva sede si la original fue dada de baja.
