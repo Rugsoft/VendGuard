@@ -307,3 +307,353 @@ h4 { font-size: var(--font-size-heading-md); }
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* ─── 9. Estilos de la Vista Móvil de Códigos QR (QrReportView.js) ─────────── */
+.qr-report-view {
+  min-height: 100vh;
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  display: flex;
+  flex-direction: column;
+}
+
+.qr-header {
+  background-color: #ffffff;
+  border-bottom: 1px solid var(--color-hairline);
+  padding: 12px 20px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.qr-logo-container {
+  max-width: 600px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qr-brand-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--font-size-heading-lg);
+  color: var(--color-primary-dark);
+}
+
+.qr-badge-public {
+  margin-left: auto;
+  font-size: var(--font-size-caption);
+  background-color: var(--color-primary-subtle);
+  color: var(--color-primary-dark);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+
+.qr-content-wrapper {
+  flex: 1;
+  max-width: 600px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.qr-card {
+  background-color: #ffffff;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-card);
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.qr-card-center {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.qr-card-title {
+  font-family: var(--font-display);
+  font-size: var(--font-size-heading-lg);
+  margin-top: 0;
+  margin-bottom: 6px;
+  color: var(--color-slate);
+}
+
+.qr-card-subtitle {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-ink-muted);
+  margin-top: 0;
+  margin-bottom: 20px;
+}
+
+/* Chip de Máquina Bloqueada */
+.qr-machine-chip-card {
+  background-color: #ffffff;
+  border: 1px solid var(--color-hairline-soft);
+  border-left: 4px solid var(--color-primary);
+  border-radius: var(--radius-card);
+  padding: 14px 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+
+.qr-chip-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: var(--font-size-caption);
+}
+
+.qr-chip-label {
+  color: var(--color-ink-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.qr-chip-lock {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.qr-chip-main {
+  font-size: var(--font-size-body-md);
+  font-weight: 700;
+  color: var(--color-slate);
+  margin-bottom: 4px;
+}
+
+.qr-machine-code {
+  color: var(--color-primary-dark);
+  font-family: monospace;
+  margin-right: 6px;
+}
+
+.qr-chip-sub {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-ink-secondary);
+}
+
+/* Banner de Alerta Sanitaria */
+.qr-health-alert-banner {
+  background-color: var(--color-urgency-critical-bg);
+  border: 1px solid var(--color-urgency-critical);
+  border-radius: var(--radius-card);
+  padding: 14px 16px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  color: var(--color-urgency-critical);
+}
+
+.qr-health-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.qr-health-text strong {
+  display: block;
+  font-size: var(--font-size-body-sm);
+  margin-bottom: 2px;
+}
+
+.qr-health-text p {
+  margin: 0;
+  font-size: var(--font-size-body-sm);
+  line-height: 1.4;
+}
+
+/* Pantalla de Confirmación */
+.qr-confirmation-card {
+  text-align: center;
+  padding: 32px 20px;
+}
+
+.qr-confirmation-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.qr-title-display {
+  font-family: var(--font-display);
+  font-size: var(--font-size-display-sm);
+  margin-top: 0;
+  margin-bottom: 16px;
+  color: var(--color-slate);
+}
+
+.qr-ticket-badge {
+  background-color: var(--color-primary-subtle);
+  border: 1px dashed var(--color-primary);
+  border-radius: var(--radius-card);
+  padding: 16px;
+  margin: 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.qr-ticket-label {
+  font-size: var(--font-size-caption);
+  color: var(--color-ink-muted);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.qr-ticket-number {
+  font-family: monospace;
+  font-size: 26px;
+  color: var(--color-primary-dark);
+  letter-spacing: 1px;
+}
+
+.qr-confirmation-summary {
+  background-color: var(--color-canvas);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 16px;
+  text-align: left;
+  font-size: var(--font-size-body-sm);
+}
+
+.qr-summary-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.qr-summary-row:last-child {
+  margin-bottom: 0;
+}
+
+.qr-summary-label {
+  color: var(--color-ink-muted);
+}
+
+.qr-summary-value {
+  font-weight: 600;
+  color: var(--color-slate);
+}
+
+.qr-confirmation-message {
+  font-size: var(--font-size-body-md);
+  color: var(--color-ink-secondary);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.qr-thank-you-box {
+  background-color: var(--color-success-bg);
+  color: var(--color-success-text);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 24px;
+  font-size: var(--font-size-body-sm);
+}
+
+.qr-thank-you-box p {
+  margin: 0;
+}
+
+/* Panel de Avería Activa */
+.qr-status-indicator-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background-color: var(--color-urgency-high-bg);
+  color: var(--color-urgency-high);
+  font-size: var(--font-size-caption);
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+}
+
+.qr-indicator-pulse {
+  width: 8px;
+  height: 8px;
+  background-color: var(--color-urgency-high);
+  border-radius: 50%;
+  animation: qr-pulse 1.5s infinite;
+}
+
+@keyframes qr-pulse {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(249, 115, 22, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(249, 115, 22, 0); }
+}
+
+.qr-active-title {
+  margin-top: 0;
+  font-size: var(--font-size-heading-md);
+  color: var(--color-slate);
+}
+
+.qr-active-subtitle {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-ink-secondary);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.qr-active-details {
+  background-color: var(--color-canvas);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.qr-detail-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--font-size-body-sm);
+}
+
+.qr-detail-k {
+  color: var(--color-ink-muted);
+}
+
+.qr-detail-v {
+  font-weight: 600;
+}
+
+.qr-btn-block {
+  width: 100%;
+  padding: 14px;
+  font-size: var(--font-size-body-md);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: block;
+}
+
+.qr-footer {
+  text-align: center;
+  padding: 20px;
+  font-size: var(--font-size-caption);
+  color: var(--color-ink-muted);
+  border-top: 1px solid var(--color-hairline);
+  background-color: #ffffff;
+}
+
+.qr-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--color-hairline);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: qr-spin 1s linear infinite;
+  margin: 0 auto 16px;
+}
+
+@keyframes qr-spin {
+  to { transform: rotate(360deg); }
+}

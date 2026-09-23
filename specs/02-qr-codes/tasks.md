@@ -84,7 +84,7 @@
 
 ## Fase 4: Componentes Frontend y Vistas Vanilla Vue 3
 
-- [ ] **T-QR-13: Implementar la vista móvil de escaneo y reporte (`QrReportView.js`)**
+- [x] **T-QR-13: Implementar la vista móvil de escaneo y reporte (`QrReportView.js`)**
   * **Requisitos:** `RF-03` (EARS 3.1–3.4), `RF-04` (EARS 4.1, 4.2), `RF-05` (EARS 5.2)
   * **Dependencias:** T-QR-10
   * **Hecho cuando:** Al montar `QrReportView` con una máquina limpia se muestra la máquina bloqueada y el banner sanitario en perecederos; ante avería activa muestra el panel público y formulario de comentario adicional; y tras reportar muestra la confirmación `#TICK-XXXX`.

@@ -446,6 +446,51 @@ export class ApiClient {
       );
     }
   };
+
+  /**
+   * 7. QR Code Workflows (RF-01 to RF-05)
+   */
+  qr = {
+    /**
+     * Resolves machine status from QR scan (RF-03, RF-04, RF-05).
+     * @param {string} code
+     * @param {string|null} [site=null]
+     * @returns {Promise<Object>}
+     */
+    scan: (code, site = null) => {
+      const params = site ? `?site=${encodeURIComponent(site)}` : '';
+      return this.get(`/qr/scan/${encodeURIComponent(code)}${params}`);
+    },
+
+    /**
+     * Submits a public incident report via QR scan (RF-03, RF-04).
+     * @param {Object|FormData} payload
+     * @returns {Promise<Object>}
+     */
+    report: (payload) => {
+      return this.post('/qr/report', payload);
+    },
+
+    /**
+     * Retrieves QR label preview/data for coordinator (RF-01).
+     * @param {number|string} machineId
+     * @param {Object} [options={}]
+     * @returns {Promise<Object>}
+     */
+    getMachineLabel: (machineId, options = {}) => {
+      const q = new URLSearchParams(options).toString();
+      return this.get(`/coordinator/machines/${machineId}/qr-label${q ? `?${q}` : ''}`);
+    },
+
+    /**
+     * Retrieves batch QR labels for location (RF-02).
+     * @param {number|string} locationId
+     * @returns {Promise<Object>}
+     */
+    getLocationBatch: (locationId) => {
+      return this.get(`/coordinator/locations/${locationId}/qr-batch`);
+    }
+  };
 }
 
 // Create default singleton instance
