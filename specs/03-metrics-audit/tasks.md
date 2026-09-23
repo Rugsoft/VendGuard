@@ -60,7 +60,7 @@
 
 ## Fase 3: Controladores REST y Rutas HTTP (API-First)
 
-- [ ] **T-MET-09: Implementar `CoordinatorMetricsController.php` y registrar rutas en `AppRouter.php`**
+- [x] **T-MET-09: Implementar `CoordinatorMetricsController.php` y registrar rutas en `AppRouter.php`**
   * **Requisitos:** `RF-01`, `RF-02`, `RF-03`, `RF-05`, `RF-06`
   * **Dependencias:** T-MET-06, T-MET-08
   * **Hecho cuando:** Los endpoints `GET /api/coordinator/metrics/summary`, `/breakdown`, `/export`, `/audit-log` y `/audit-log/export` están protegidos con `InternalAuthMiddleware(COORDINATOR)` y responden según los contratos técnicos de `metrics_audit_contracts.md`.
