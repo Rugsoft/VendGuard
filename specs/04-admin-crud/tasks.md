@@ -79,7 +79,7 @@
   * **Dependencias:** T-ADM-05
   * **Hecho cuando:** Al invocar `GET /api/qr/scan/{code}` sobre una máquina con `is_active = 0`, el controlador responde HTTP `200` con `status = "INACTIVE"`, `is_active = false`, `allow_reporting = false` y el mensaje oficial de advertencia de fuera de servicio, bloqueando la creación de incidencias.
 
-- [ ] **T-ADM-12: Crear suites de integración HTTP (`AdminLocationsEndpointTest.php`, `AdminMachinesEndpointTest.php`, `AdminUsersEndpointTest.php`, `QrInactiveMachineScanTest.php`)**
+- [x] **T-ADM-12: Crear suites de integración HTTP (`AdminLocationsEndpointTest.php`, `AdminMachinesEndpointTest.php`, `AdminUsersEndpointTest.php`, `QrInactiveMachineScanTest.php`)**
   * **Requisitos:** `RF-01` a `RF-05`, `RNF-04`
   * **Dependencias:** T-ADM-10, T-ADM-11
   * **Hecho cuando:** La ejecución de las 4 suites de integración PHP pasa al 100% en verde evaluando las llamadas HTTP reales, validaciones de cabeceras Bearer, respuestas JSON y comprobando que cada mutación guarde su fila correspondiente en `audit_log`.

@@ -57,6 +57,11 @@ class ActiveMachinesBlockedException extends DomainException
         return $this->locationId;
     }
 
+    public function getActiveMachines(): array
+    {
+        return [];
+    }
+
     public function getHttpStatusCode(): int
     {
         return $this->httpStatusCode;

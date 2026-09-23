@@ -486,7 +486,6 @@ class CoordinatorAdminController
                 $e->getMessage(),
                 [
                     'active_machines_count' => $e->getActiveMachinesCount(),
-                    'active_machines'       => $e->getActiveMachines(),
                 ]
             );
         } catch (MachineTransferBlockedException $e) {
