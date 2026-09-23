@@ -12,7 +12,7 @@
 
 ## Fase 1: Dominio Matemático y Modelo de Auditoría (Backend Vanilla)
 
-- [ ] **T-MET-01: Implementar Value Objects y DTOs del Módulo (`MttrMetric.php`, `MetricFilter.php`, `KpiSummary.php`, `AuditEvent.php`)**
+- [x] **T-MET-01: Implementar Value Objects y DTOs del Módulo (`MttrMetric.php`, `MetricFilter.php`, `KpiSummary.php`, `AuditEvent.php`)**
   * **Requisitos:** `RF-01`, `RF-05`, `RNF-01`
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existen en `src/Core/Domain/Model/` las clases inmutables tipadas `MttrMetric` (formateo Xh Ym, horas decimales, cálculo seguro sin división por cero y estado `N/A`), `MetricFilter`, `KpiSummary` y `AuditEvent` con validaciones estrictas.
