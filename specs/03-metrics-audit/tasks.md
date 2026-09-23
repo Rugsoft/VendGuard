@@ -41,7 +41,7 @@
   * **Dependencias:** T-MET-01
   * **Hecho cuando:** `PdoMetricsRepository` implementa consultas SQL nativas filtrando por fecha de resolución (`resolved_at`), calculando diferencias temporales 24/7 y agrupando por sede histórica, técnico resolutor, tipo de máquina (aislando perecederos) y tipo de avería.
 
-- [ ] **T-MET-06: Implementar servicio de cálculo analítico (`MetricsCalculationService.php`)**
+- [x] **T-MET-06: Implementar servicio de cálculo analítico (`MetricsCalculationService.php`)**
   * **Requisitos:** `RF-01`, `RF-02`, `RF-03` (EARS 3.1, 3.2), `RF-04` (EARS 4.3)
   * **Dependencias:** T-MET-05
   * **Hecho cuando:** `MetricsCalculationService` orquesta el cálculo de KPIs (MTTR global, comparativa porcentual de tendencia con periodo previo, tasa de resolución % y evaluación de alertas de SLA de 4h en perecederos y 24h general).
