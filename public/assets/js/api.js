@@ -371,6 +371,23 @@ export class ApiClient {
       return this.patch(`/coordinator/incidents/${incidentId}/cancel`, {
         cancellation_reason: cancellationReason
       });
+    },
+
+    /**
+     * Retrieves all active locations with installed machines count (RF-FLEET-02).
+     * @returns {Promise<Array<Object>>}
+     */
+    getLocations: () => {
+      return this.get('/coordinator/locations');
+    },
+
+    /**
+     * Retrieves machines installed at a specific location with operational status (RF-FLEET-03).
+     * @param {number|string} locationId
+     * @returns {Promise<{ location: Object, machines: Array<Object> }>}
+     */
+    getLocationMachines: (locationId) => {
+      return this.get(`/coordinator/locations/${locationId}/machines`);
     }
   };
 

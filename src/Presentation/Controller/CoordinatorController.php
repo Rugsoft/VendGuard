@@ -365,5 +365,95 @@ class CoordinatorController
             'cancelled_at' => $cancelled->getCancelledAt(),
         ], 200);
     }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // RF-FLEET-01 / RF-FLEET-02 / RF-FLEET-03 — Parque de Sedes y Máquinas
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * GET /api/coordinator/locations
+     * 
+     * Consulta el catálogo de sedes activas para el coordinador con conteo de máquinas instaladas (RF-FLEET-02).
+     */
+    public function getLocations(Request $request): Response
+    {
+        $locations = $this->locationRepo->findAllActive();
+        $result = [];
+
+        foreach ($locations as $loc) {
+            $machines = $this->machineRepo->findActiveByLocationId($loc->getId());
+            $result[] = [
+                'id'            => $loc->getId(),
+                'site_code'     => $loc->getSiteCode(),
+                'name'          => $loc->getName(),
+                'address'       => $loc->getAddress(),
+                'contact_name'  => $loc->getContactName(),
+                'contact_phone' => $loc->getContactPhone(),
+                'machine_count' => count($machines),
+            ];
+        }
+
+        return Response::json($result, 200);
+    }
+
+    /**
+     * GET /api/coordinator/locations/{id}/machines
+     * 
+     * Consulta el parque de máquinas instaladas en una sede con su estado operativo y detalles de avería activa (RF-FLEET-03).
+     */
+    public function getLocationMachines(Request $request): Response
+    {
+        $rawId = $request->getRouteParam('id');
+        if ($rawId === null || !ctype_digit((string)$rawId)) {
+            return Response::error('INVALID_LOCATION_ID', 'El identificador de sede (id) debe ser un número entero positivo.', 400);
+        }
+        $locationId = (int)$rawId;
+
+        $location = $this->locationRepo->findById($locationId);
+        if ($location === null) {
+            return Response::error('LOCATION_NOT_FOUND', "No se encontró ninguna sede activa con ID {$locationId}.", 404);
+        }
+
+        $machines = $this->machineRepo->findActiveByLocationId($locationId);
+        $machineList = [];
+
+        foreach ($machines as $mach) {
+            $activeIncident = $mach->getActiveIncident();
+            $isPerishable = $mach->getMachineType()->value === 'PERISHABLE_FOOD';
+
+            $operationalStatus = 'OPERATIONAL';
+            if ($activeIncident !== null) {
+                if (isset($activeIncident['status']) && strtoupper((string)$activeIncident['status']) === 'RESOLVED') {
+                    $operationalStatus = 'IN_WARRANTY';
+                } else {
+                    $operationalStatus = 'ACTIVE_INCIDENT';
+                }
+            }
+
+            $machineList[] = [
+                'id'                 => $mach->getId(),
+                'location_id'        => $mach->getLocationId(),
+                'code'               => $mach->getCode(),
+                'model'              => $mach->getModel(),
+                'machine_type'       => $mach->getMachineType()->value,
+                'floor_wing'         => $mach->getFloorWing(),
+                'notes'              => $mach->getNotes(),
+                'is_perishable'      => $isPerishable,
+                'operational_status' => $operationalStatus,
+                'active_incident'    => $activeIncident,
+            ];
+        }
+
+        return Response::json([
+            'location' => [
+                'id'            => $location->getId(),
+                'site_code'     => $location->getSiteCode(),
+                'name'          => $location->getName(),
+                'address'       => $location->getAddress(),
+                'contact_phone' => $location->getContactPhone(),
+            ],
+            'machines' => $machineList,
+        ], 200);
+    }
 }
 

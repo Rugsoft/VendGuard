@@ -18,6 +18,7 @@ import { IncidentBadge } from '../components/IncidentBadge.js';
 import { ModalDialog } from '../components/ModalDialog.js';
 import { QrLabelModal } from '../components/QrLabelModal.js';
 import { QrBatchPrintView } from './QrBatchPrintView.js';
+import { CoordinatorFleetTab } from '../components/CoordinatorFleetTab.js';
 
 // Default list of route technicians from seeds
 const DEFAULT_TECHNICIANS = [
@@ -31,11 +32,15 @@ export const CoordinatorDashboardView = {
     IncidentBadge,
     ModalDialog,
     QrLabelModal,
-    QrBatchPrintView
+    QrBatchPrintView,
+    CoordinatorFleetTab
   },
   emits: ['assigned', 'cancelled', 'refresh'],
   data() {
     return {
+      // Navigation Tabs (RF-FLEET-01)
+      activeTab: 'incidents', // 'incidents' | 'fleet'
+
       // Login Form
       loginEmail: '',
       loginPassword: '',
@@ -465,9 +470,42 @@ export const CoordinatorDashboardView = {
       />
 
       <div v-else>
-        <!-- 1. Flashing SLA Breaches Alert Banner (RF-11 / EARS 11.1) -->
-        <div
-          v-if="slaBreachedIncidents.length > 0"
+        <!-- 0. Barra de Pestañas de Navegación del Coordinador (RF-FLEET-01) -->
+        <div style="display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--color-hairline, #c8cfda); padding-bottom: 8px;">
+          <button
+            type="button"
+            class="vg-btn"
+            :class="activeTab === 'incidents' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
+            @click="activeTab = 'incidents'"
+            data-testid="tab-incidents"
+          >
+            🚨 Triaje y Avisos (SLA)
+            <span
+              v-if="slaBreachedIncidents.length > 0"
+              style="background-color: #dc2626; color: #ffffff; font-size: 11px; padding: 1px 6px; border-radius: 10px;"
+            >
+              {{ slaBreachedIncidents.length }}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="vg-btn"
+            :class="activeTab === 'fleet' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
+            @click="activeTab = 'fleet'"
+            data-testid="tab-fleet"
+          >
+            🏢 Parque de Sedes y Máquinas
+          </button>
+        </div>
+
+        <!-- CONTENIDO PESTAÑA 1: TRIAJE Y AVISOS -->
+        <div v-if="activeTab === 'incidents'">
+          <!-- 1. Flashing SLA Breaches Alert Banner (RF-11 / EARS 11.1) -->
+          <div
+            v-if="slaBreachedIncidents.length > 0"
           class="vg-sla-alert-banner"
           style="background-color: #fee2e2; border: 2px solid #ef4444; border-radius: var(--radius-card, 8px); padding: 16px 20px; margin-bottom: 20px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; box-shadow: 0 4px 12px rgba(220, 38, 38, 0.15);"
         >
@@ -757,6 +795,14 @@ export const CoordinatorDashboardView = {
           </div>
         </div>
       </div>
+
+      <!-- CONTENIDO PESTAÑA 2: PARQUE DE SEDES Y MÁQUINAS (RF-FLEET-01, RF-FLEET-02, RF-FLEET-03) -->
+      <CoordinatorFleetTab
+        v-else-if="activeTab === 'fleet'"
+        @open-qr="openQrLabelModal($event)"
+        @open-batch-print="openQrBatchPrint($event.locationId, $event.locationName)"
+      />
+    </div>
 
       <!-- =================================================================== -->
       <!-- MODAL 1: ASSIGN TECHNICIAN & RECLASSIFY (RF-05)                     -->
