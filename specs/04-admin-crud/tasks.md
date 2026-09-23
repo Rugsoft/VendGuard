@@ -22,7 +22,7 @@
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existen en `src/Core/Domain/Exception/` las 7 clases tipadas (`CannotDeactivateSelfException`, `MinimumActiveStaffException`, `PendingIncidentsBlockedException`, `ActiveMachinesBlockedException`, `MachineTransferBlockedException`, `MachineTypeChangeBlockedException` e `InactiveRecordCollisionException`), cada una proveyendo su código de error técnico y mensaje en castellano según contrato.
 
-- [ ] **T-ADM-03: Crear suite de pruebas unitarias para excepciones y reglas de dominio (`AdminValidationExceptionsTest.php`)**
+- [x] **T-ADM-03: Crear suite de pruebas unitarias para excepciones y reglas de dominio (`AdminValidationExceptionsTest.php`)**
   * **Requisitos:** `RF-01`, `RF-02`, `RF-03`
   * **Dependencias:** T-ADM-02
   * **Hecho cuando:** La ejecución de `php tests/unit/AdminValidationExceptionsTest.php` pasa al 100% en verde evaluando las 7 excepciones, verificando códigos HTTP (`403`, `409`), identificadores de error (`CANNOT_DEACTIVATE_SELF`, `MINIMUM_ACTIVE_STAFF_BREACH`, etc.) y banderas de reactivación.
