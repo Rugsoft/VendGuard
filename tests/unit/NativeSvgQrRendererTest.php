@@ -74,6 +74,8 @@ try {
     assertCondition(str_contains($svg, 'Sanden Vendo G-Drink'), "2.4 Contiene el modelo de la máquina");
     assertCondition(str_contains($svg, 'Hospital del Mar - Edificio Central'), "2.5 Contiene el nombre de la sede");
     assertCondition(str_contains($svg, 'Planta Baja - Urgencias'), "2.6 Contiene la ubicación física de planta/ala");
+    assertCondition(str_contains($svg, 'fill="#0f172a"'), "2.7 Cabecera oscura con contraste de fondo fill='#0f172a' presente");
+    assertCondition(!str_contains($svg, '4000'), "2.8 Sin error de concatenación en coordenadas del path");
 
     // -------------------------------------------------------------
     // 3. Distintivos Sanitarios según Tipo de Máquina (Art. II)

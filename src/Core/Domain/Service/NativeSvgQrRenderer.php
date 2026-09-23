@@ -90,15 +90,16 @@ class NativeSvgQrRenderer
 
         // Franja de Cabecera Oficial VendGuard
         $svg[] = '  <!-- Cabecera Oficial y Logotipo -->';
-        $svg[] = '  <path d="M 0 16 Q 0 0 16 0 L ' . ($width - 16) . ' 0 Q ' . $width . 0 . ' ' . $width . ' 16 L ' . $width . ' 64 L 0 64 Z" class="header-bg" />';
+        $headerPath = 'M 0 16 Q 0 0 16 0 L ' . ($width - 16) . ' 0 Q ' . $width . ' 0 ' . $width . ' 16 L ' . $width . ' 64 L 0 64 Z';
+        $svg[] = '  <path d="' . $headerPath . '" fill="#0f172a" class="header-bg" />';
         
         // Logotipo Vectorial VendGuard (Escudo con check e icono de vending)
         $svg[] = '  <g transform="translate(24, 16)">';
         $svg[] = '    <rect width="32" height="32" rx="8" fill="#0284c7" />';
         $svg[] = '    <path d="M 9 16 L 14 21 L 23 11" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />';
         $svg[] = '  </g>';
-        $svg[] = '  <text x="68" y="36" class="font-sans brand-title">VENDGUARD</text>';
-        $svg[] = '  <text x="68" y="49" class="font-sans brand-subtitle">SISTEMA INTELIGENTE DE CONTROL DE VENDING</text>';
+        $svg[] = '  <text x="68" y="36" fill="#ffffff" class="font-sans brand-title">VENDGUARD</text>';
+        $svg[] = '  <text x="68" y="49" fill="#38bdf8" class="font-sans brand-subtitle">SISTEMA INTELIGENTE DE CONTROL DE VENDING</text>';
 
         // Tarjeta de Identificación de la Máquina
         $svg[] = '  <!-- Identificación de Máquina y Sede -->';
