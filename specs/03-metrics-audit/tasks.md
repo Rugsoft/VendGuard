@@ -89,7 +89,7 @@
   * **Dependencias:** T-MET-09
   * **Hecho cuando:** `AuditLogViewer.js` muestra el listado cronológico de eventos con filtros por entidad/usuario/acción, detalles de cambios en JSON amigable y paginación reactiva.
 
-- [ ] **T-MET-14: Implementar vista ejecutiva imprimible `ExecutiveReportModal.js` y estilos `metrics-print.css`**
+- [x] **T-MET-14: Implementar vista ejecutiva imprimible `ExecutiveReportModal.js` y estilos `metrics-print.css`**
   * **Requisitos:** `RF-06` (EARS 6.3)
   * **Dependencias:** T-MET-12
   * **Hecho cuando:** Al pulsar "Generar Informe Ejecutivo" se despliega el resumen ejecutivo y al imprimir (`Ctrl+P` / `window.print()`) se genera una salida limpia sin barras laterales ni botones de acción.
