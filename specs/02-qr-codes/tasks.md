@@ -103,7 +103,7 @@
 
 ## Fase 5: Auditoría Constitucional y Despliegue Cloud
 
-- [ ] **T-QR-16: Auditoría Constitucional y Verificación Global de Regresión**
+- [x] **T-QR-16: Auditoría Constitucional y Verificación Global de Regresión**
   * **Requisitos:** Artículos I al VII de la Constitución de VendGuard
   * **Dependencias:** T-QR-15
   * **Hecho cuando:** Se ejecutan todas las suites de pruebas (unitarias PHP, unitarias JS e integración) alcanzando el 100% en verde con cero infracciones constitucionales, y se despliega el módulo verificado en la nube.

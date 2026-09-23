@@ -255,6 +255,49 @@ $assert(
 );
 
 // ─────────────────────────────────────────────────────────────────────────
+// AUDITORÍA 8: MÓDULO QR — ARTÍCULOS I A VII (T-QR-16)
+// ─────────────────────────────────────────────────────────────────────────
+echo "\n{$colorBold}--- 8. Módulo QR: Auditoría Constitucional y Seguridad Zero Trust (T-QR-16) ---{$colorReset}\n";
+
+// 8.1 Dogma Vanilla en Generación QR
+$matrixGenFile = $baseDir . '/src/Core/Domain/Service/QrMatrixGenerator.php';
+$svgRenderFile = $baseDir . '/src/Core/Domain/Service/NativeSvgQrRenderer.php';
+$assert(
+    "8.1 Algoritmo QR nativo puro sin paquetes externos (Reed-Solomon Vanilla en PHP)",
+    file_exists($matrixGenFile) && file_exists($svgRenderFile)
+);
+
+// 8.2 Blindaje de Privacidad y Zero Trust en Scan Público (Art. V.4)
+$scanCtrlContent = (string)file_get_contents($baseDir . '/src/Presentation/Controller/QrScanController.php');
+$scanServiceContent = (string)file_get_contents($baseDir . '/src/Core/Service/QrScanService.php');
+$assert(
+    "8.2 QrScanController y QrScanService NO exponen assigned_technician ni notas internas en escaneo público",
+    !str_contains($scanCtrlContent, "'assigned_technician'") &&
+    !str_contains($scanServiceContent, "'internal_notes'") &&
+    !str_contains($scanServiceContent, "'resolution_notes'")
+);
+
+// 8.3 Control de Acceso RBAC en etiquetas de coordinador
+$routerContent = (string)file_get_contents($baseDir . '/src/Presentation/Routing/AppRouter.php');
+$assert(
+    "8.3 Endpoints /qr-label y /qr-batch protegidos por InternalAuthMiddleware('COORDINATOR')",
+    str_contains($routerContent, "/api/coordinator/machines/{id}/qr-label") &&
+    str_contains($routerContent, "/api/coordinator/locations/{id}/qr-batch") &&
+    str_contains($routerContent, "COORDINATOR")
+);
+
+// 8.4 Dualismo Lingüístico en componentes Frontend QR
+$qrViewContent = (string)file_get_contents($baseDir . '/public/assets/js/views/QrReportView.js');
+$assert(
+    "8.4 Dualismo Lingüístico: QrReportView utiliza inglés en código y español en interfaz",
+    str_contains($qrViewContent, "export const QrReportView") &&
+    str_contains($qrViewContent, "resolveMachine") &&
+    str_contains($qrViewContent, "submitReport") &&
+    str_contains($qrViewContent, "Asistencia Técnica") &&
+    str_contains($qrViewContent, "Aviso Registrado con Éxito")
+);
+
+// ─────────────────────────────────────────────────────────────────────────
 // RESUMEN FINAL DE LA AUDITORÍA CONSTITUCIONAL
 // ─────────────────────────────────────────────────────────────────────────
 echo "\n{$colorBold}======================================================================{$colorReset}\n";

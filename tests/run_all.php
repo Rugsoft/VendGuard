@@ -155,6 +155,28 @@ foreach ($unitMjsFiles as $filePath) {
 // =====================================================================
 echo "\n{$colorBold}--- Fase 3: Pruebas de Integración (MariaDB, Repositorios y API HTTP) ---{$colorReset}\n";
 
+// Asegurar servidor HTTP para pruebas con cURL
+$serverProcess = null;
+$serverPipes = [];
+$serverStartedByRunner = false;
+$socket = @fsockopen('127.0.0.1', 8000, $errNo, $errStr, 0.5);
+if (is_resource($socket)) {
+    fclose($socket);
+} else {
+    $publicDir = realpath(__DIR__ . '/../public');
+    $nullDevice = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN' ? 'NUL' : '/dev/null';
+    $serverCmd = 'php -S 127.0.0.1:8000 -t "' . $publicDir . '"';
+    $serverProcess = proc_open($serverCmd, [
+        0 => ["pipe", "r"],
+        1 => ["file", $nullDevice, "w"],
+        2 => ["file", $nullDevice, "w"]
+    ], $serverPipes);
+    if (is_resource($serverProcess)) {
+        $serverStartedByRunner = true;
+        usleep(500000); // 500ms para permitir que el socket quede en escucha
+    }
+}
+
 $integrationFiles = glob(__DIR__ . '/integration/*.php');
 sort($integrationFiles);
 
@@ -176,6 +198,15 @@ foreach ($integrationFiles as $filePath) {
         $failedFiles[] = "integration/{$fileName}";
         echo "  {$colorRed}[FAIL] {$fileName}{$colorReset}\n";
     }
+}
+
+// Cierre del servidor HTTP temporal si fue iniciado por el ejecutor
+if ($serverStartedByRunner && is_resource($serverProcess)) {
+    if (isset($serverPipes[0]) && is_resource($serverPipes[0])) {
+        fclose($serverPipes[0]);
+    }
+    proc_terminate($serverProcess);
+    proc_close($serverProcess);
 }
 
 // =====================================================================
