@@ -41,7 +41,7 @@
   * **Dependencias:** T-ADM-01
   * **Hecho cuando:** `PdoMachineRepository` implementa creación (`create`), actualización de modelo/ubicación/tipo (`update`), traslado entre sedes (`transfer`), baja lógica (`softDelete`), reactivación con reubicación (`restoreWithLocation`), listado con filtros (`findAll` con `status`, `location_id`, `machine_type`, `search`) y comprobación atómica `hasActiveTicketOrWarranty(int $machineId): bool`.
 
-- [ ] **T-ADM-06: Extender `UserRepositoryInterface` y `PdoUserRepository.php`**
+- [x] **T-ADM-06: Extender `UserRepositoryInterface` y `PdoUserRepository.php`**
   * **Requisitos:** `RF-03` (EARS 3.1 a 3.6)
   * **Dependencias:** T-ADM-01
   * **Hecho cuando:** `PdoUserRepository` implementa creación con hash Bcrypt (`create`), actualización de contacto (`update`), reseteo de contraseña (`resetPassword`), baja lógica (`softDelete`), reactivación (`restore`), listado con filtros (`findAll` con `role`, `status`, `search`), conteo de guardia mínima `countActiveByRole(UserRole $role): int` y conteo de incidencias pendientes `countPendingIncidents(int $technicianId): int`.
