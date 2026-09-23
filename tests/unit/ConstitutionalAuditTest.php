@@ -298,6 +298,103 @@ $assert(
 );
 
 // ─────────────────────────────────────────────────────────────────────────
+// AUDITORÍA 9: MÓDULO DE MÉTRICAS Y AUDITORÍA — ARTÍCULOS I A VII (T-MET-16)
+// ─────────────────────────────────────────────────────────────────────────
+echo "\n{$colorBold}--- 9. Módulo Métricas y Auditoría: Auditoría Constitucional (T-MET-16) ---{$colorReset}\n";
+
+// 9.1 Dogma Vanilla en Analítica y Exportación (Art. I y IV)
+$mttrMetricFile = $baseDir . '/src/Core/Domain/Model/MttrMetric.php';
+$calcServiceFile = $baseDir . '/src/Application/Service/MetricsCalculationService.php';
+$exportServiceFile = $baseDir . '/src/Application/Service/MetricsExportService.php';
+$exportServiceContent = file_exists($exportServiceFile) ? (string)file_get_contents($exportServiceFile) : '';
+
+$assert(
+    "9.1 Dogma Vanilla: Cálculo analítico y exportación CSV nativos sin dependencias externas",
+    file_exists($mttrMetricFile) &&
+    file_exists($calcServiceFile) &&
+    file_exists($exportServiceFile) &&
+    str_contains($exportServiceContent, "\\xEF\\xBB\\xBF") &&
+    str_contains($exportServiceContent, "10000")
+);
+
+// 9.2 Seguridad Alimentaria y SLAs Críticos (Art. II)
+$kpiSummaryFile = $baseDir . '/src/Core/Domain/Model/KpiSummary.php';
+$pdoMetricsRepoFile = $baseDir . '/src/Infrastructure/Repository/PdoMetricsRepository.php';
+$kpiSummaryContent = file_exists($kpiSummaryFile) ? (string)file_get_contents($kpiSummaryFile) : '';
+$pdoMetricsRepoContent = file_exists($pdoMetricsRepoFile) ? (string)file_get_contents($pdoMetricsRepoFile) : '';
+
+$assert(
+    "9.2 Artículo II: SLA innegociable de 4.0h para máquinas de alimentos perecederos y 24.0h general",
+    str_contains($kpiSummaryContent, "SLA_PERISHABLE_HOURS = 4.0") &&
+    str_contains($kpiSummaryContent, "SLA_GENERAL_HOURS") &&
+    str_contains($pdoMetricsRepoContent, "PERISHABLE_FOOD") &&
+    str_contains($pdoMetricsRepoContent, "240")
+);
+
+// 9.3 Inmutabilidad Radical y Trazabilidad de Auditoría (Art. III y V.1)
+$auditRepoInterface = (string)file_get_contents($baseDir . '/src/Core/Domain/Repository/AuditLogRepositoryInterface.php');
+$auditRepoPdo = (string)file_get_contents($baseDir . '/src/Infrastructure/Repository/PdoAuditLogRepository.php');
+
+$auditModificationsDetected = [];
+foreach ($prodPhpFiles as $filePath) {
+    $content = strtoupper((string)file_get_contents($filePath));
+    if (str_contains($content, 'UPDATE AUDIT_LOG') || str_contains($content, 'DELETE FROM AUDIT_LOG')) {
+        $auditModificationsDetected[] = str_replace($baseDir, '', $filePath);
+    }
+}
+
+$assert(
+    "9.3 Artículo III: Tabla audit_log estrictamente append-only (cero UPDATE/DELETE en todo el código)",
+    empty($auditModificationsDetected) &&
+    !str_contains(strtolower($auditRepoInterface), 'function delete') &&
+    !str_contains(strtolower($auditRepoInterface), 'function update') &&
+    !str_contains(strtolower($auditRepoPdo), 'function delete') &&
+    !str_contains(strtolower($auditRepoPdo), 'function update'),
+    "Mutaciones de audit_log detectadas en: " . implode(', ', $auditModificationsDetected)
+);
+
+// 9.4 Zero Trust y RBAC Estricto en Métricas (Art. V.4)
+$techMetricsCtrlContent = (string)file_get_contents($baseDir . '/src/Presentation/Controller/TechnicianMetricsController.php');
+
+$assert(
+    "9.4 Control de Acceso RBAC y neutralización de suplantación en rutas de métricas",
+    str_contains($routerContent, "/api/coordinator/metrics/summary") &&
+    str_contains($routerContent, "/api/coordinator/metrics/breakdown") &&
+    str_contains($routerContent, "/api/coordinator/metrics/export") &&
+    str_contains($routerContent, "/api/coordinator/audit-log") &&
+    str_contains($routerContent, "/api/technician/my-metrics") &&
+    str_contains($techMetricsCtrlContent, "getAttribute('user_id')") &&
+    !str_contains($techMetricsCtrlContent, "\$_GET['technician_id']")
+);
+
+// 9.5 Cero Bloatware en Informes Ejecutivos (Art. IV)
+$printCssFile = $baseDir . '/public/assets/css/metrics-print.css';
+$printCssContent = file_exists($printCssFile) ? (string)file_get_contents($printCssFile) : '';
+
+$assert(
+    "9.5 Informe Ejecutivo PDF nativo vía CSS @media print sin librerías externas pesadas",
+    file_exists($printCssFile) &&
+    str_contains($printCssContent, "@media print") &&
+    str_contains($printCssContent, "page-break-inside: avoid")
+);
+
+// 9.6 Dualismo Lingüístico en Frontend de Métricas y Auditoría
+$coordMetricsView = (string)file_get_contents($baseDir . '/public/assets/js/views/CoordinatorMetricsView.js');
+$techMetricsView = (string)file_get_contents($baseDir . '/public/assets/js/views/TechnicianMetricsView.js');
+$modalView = (string)file_get_contents($baseDir . '/public/assets/js/components/ExecutiveReportModal.js');
+
+$assert(
+    "9.6 Dualismo Lingüístico: Vistas de métricas con código en inglés e interfaz en español",
+    str_contains($coordMetricsView, "export const CoordinatorMetricsView") &&
+    str_contains($coordMetricsView, "loadMetrics") &&
+    str_contains($coordMetricsView, "Cuadro de Mandos (KPIs)") &&
+    str_contains($techMetricsView, "export const TechnicianMetricsView") &&
+    str_contains($techMetricsView, "loadMyMetrics") &&
+    str_contains($modalView, "export const ExecutiveReportModal") &&
+    str_contains($modalView, "Informe Ejecutivo de Rendimiento")
+);
+
+// ─────────────────────────────────────────────────────────────────────────
 // RESUMEN FINAL DE LA AUDITORÍA CONSTITUCIONAL
 // ─────────────────────────────────────────────────────────────────────────
 echo "\n{$colorBold}======================================================================{$colorReset}\n";
@@ -308,7 +405,7 @@ echo "{$colorBold}==============================================================
 
 if ($failures === 0) {
     echo "{$colorBold}{$colorGreen} RESULTADO: AUDITORÍA CONSTITUCIONAL APROBADA AL 100%.{$colorReset}\n";
-    echo "{$colorBold}{$colorGreen} CONDICIÓN T-41 CUMPLIDA CON ÉXITO. EL MVP QUEDA BLINDADO Y CERRADO.{$colorReset}\n";
+    echo "{$colorBold}{$colorGreen} CONDICIÓN T-MET-16 CUMPLIDA CON ÉXITO. EL MÓDULO 03 QUEDA BLINDADO Y CERRADO.{$colorReset}\n";
     echo "{$colorBold}======================================================================{$colorReset}\n";
     exit(0);
 } else {
@@ -316,3 +413,4 @@ if ($failures === 0) {
     echo "{$colorBold}======================================================================{$colorReset}\n";
     exit(1);
 }
+

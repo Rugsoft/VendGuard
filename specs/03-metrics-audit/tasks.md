@@ -103,7 +103,7 @@
 
 ## Fase 5: Auditoría Constitucional y Despliegue Cloud
 
-- [ ] **T-MET-16: Auditoría Constitucional y Verificación Global de Regresión**
+- [x] **T-MET-16: Auditoría Constitucional y Verificación Global de Regresión**
   * **Requisitos:** Artículos I al VII de la Constitución de VendGuard
   * **Dependencias:** T-MET-15
   * **Hecho cuando:** Se ejecuta `php tests/run_all.php` pasando todas las suites de prueba (unitarias PHP, unitarias JS e integración) al 100% en verde con cero fallos, y se verifica el despliegue funcional en producción cloud.
