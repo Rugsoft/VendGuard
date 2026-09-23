@@ -20,6 +20,9 @@ import { QrLabelModal } from '../components/QrLabelModal.js';
 import { QrBatchPrintView } from './QrBatchPrintView.js';
 import { CoordinatorFleetTab } from '../components/CoordinatorFleetTab.js';
 import { CoordinatorMetricsView } from './CoordinatorMetricsView.js';
+import { AdminLocationsTab } from '../components/AdminLocationsTab.js';
+import { AdminMachinesTab } from '../components/AdminMachinesTab.js';
+import { AdminUsersTab } from '../components/AdminUsersTab.js';
 
 // Canonical mapping for bilingual status values
 const STATUS_CANONICAL_MAP = {
@@ -61,13 +64,17 @@ export const CoordinatorDashboardView = {
     QrLabelModal,
     QrBatchPrintView,
     CoordinatorFleetTab,
-    CoordinatorMetricsView
+    CoordinatorMetricsView,
+    AdminLocationsTab,
+    AdminMachinesTab,
+    AdminUsersTab
   },
   emits: ['assigned', 'cancelled', 'refresh'],
   data() {
     return {
-      // Navigation Tabs (RF-FLEET-01, RF-03)
-      activeTab: 'incidents', // 'incidents' | 'fleet' | 'metrics'
+      // Navigation Tabs (RF-FLEET-01, RF-03, RF-05)
+      activeTab: 'incidents', // 'incidents' | 'fleet' | 'admin' | 'metrics'
+      activeAdminSubTab: 'locations', // 'locations' | 'machines' | 'users'
 
       // Login Form
       loginEmail: '',
@@ -535,6 +542,17 @@ export const CoordinatorDashboardView = {
           <button
             type="button"
             class="vg-btn"
+            :class="activeTab === 'admin' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
+            @click="activeTab = 'admin'"
+            data-testid="tab-admin"
+          >
+            🏢 Administración
+          </button>
+
+          <button
+            type="button"
+            class="vg-btn"
             :class="activeTab === 'metrics' ? 'vg-btn-primary' : 'vg-btn-secondary'"
             style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
             @click="activeTab = 'metrics'"
@@ -847,7 +865,60 @@ export const CoordinatorDashboardView = {
         @open-batch-print="openQrBatchPrint($event.locationId, $event.locationName)"
       />
 
-      <!-- CONTENIDO PESTAÑA 3: MÉTRICAS Y AUDITORÍA (RF-01, RF-02, RF-03, RF-05, RF-06) -->
+      <!-- CONTENIDO PESTAÑA 3: ADMINISTRACIÓN INTEGRAL (RF-01, RF-02, RF-03, RF-05) -->
+      <div v-else-if="activeTab === 'admin'" class="vg-admin-management-container" data-testid="admin-panel-container">
+        <!-- Sub-barra de navegación con subpestañas operativas (EARS 5.1) -->
+        <div class="card mb-4 shadow-sm" style="border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px);">
+          <div class="card-body py-2 px-3 d-flex flex-wrap align-items-center justify-content-between gap-3">
+            <div class="d-flex align-items-center gap-2">
+              <span class="text-muted small fw-bold text-uppercase" style="letter-spacing: 0.04em;">Submódulos:</span>
+              <div class="btn-group btn-group-sm" role="group" aria-label="Submódulos de Administración">
+                <button
+                  type="button"
+                  class="btn"
+                  :class="activeAdminSubTab === 'locations' ? 'btn-primary' : 'btn-outline-primary'"
+                  @click="activeAdminSubTab = 'locations'"
+                  data-testid="subtab-locations"
+                >
+                  🏢 Sedes
+                </button>
+                <button
+                  type="button"
+                  class="btn"
+                  :class="activeAdminSubTab === 'machines' ? 'btn-primary' : 'btn-outline-primary'"
+                  @click="activeAdminSubTab = 'machines'"
+                  data-testid="subtab-machines"
+                >
+                  🎰 Parque de Máquinas
+                </button>
+                <button
+                  type="button"
+                  class="btn"
+                  :class="activeAdminSubTab === 'users' ? 'btn-primary' : 'btn-outline-primary'"
+                  @click="activeAdminSubTab = 'users'"
+                  data-testid="subtab-users"
+                >
+                  🧑‍🔧 Personal Interno
+                </button>
+              </div>
+            </div>
+            <div class="text-muted small">
+              <span>Gestión centralizada con trazabilidad inmutable (Art. III)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Subpestaña 1: Sedes Clientes (RF-01) -->
+        <AdminLocationsTab v-if="activeAdminSubTab === 'locations'" />
+
+        <!-- Subpestaña 2: Catálogo de Máquinas (RF-02) -->
+        <AdminMachinesTab v-else-if="activeAdminSubTab === 'machines'" />
+
+        <!-- Subpestaña 3: Directorio de Personal (RF-03) -->
+        <AdminUsersTab v-else-if="activeAdminSubTab === 'users'" />
+      </div>
+
+      <!-- CONTENIDO PESTAÑA 4: MÉTRICAS Y AUDITORÍA (RF-01, RF-02, RF-03, RF-05, RF-06) -->
       <CoordinatorMetricsView
         v-else-if="activeTab === 'metrics'"
       />

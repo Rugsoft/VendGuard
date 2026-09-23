@@ -108,7 +108,7 @@
   * **Dependencias:** T-ADM-11
   * **Hecho cuando:** La lectura ciudadana de un código QR físico de una máquina retirada despliega la tarjeta informativa visual amigable indicando "Máquina temporalmente retirada o fuera de servicio" y ocultando completamente el formulario de reporte de averías.
 
-- [ ] **T-ADM-17: Integrar subpestaña "🏢 Administración" en `CoordinatorDashboardView.js` y suites ESM `AdminTabsTest.mjs`**
+- [x] **T-ADM-17: Integrar subpestaña "🏢 Administración" en `CoordinatorDashboardView.js` y suites ESM `AdminTabsTest.mjs`**
   * **Requisitos:** `RF-01`, `RF-02`, `RF-03`, `RF-04`
   * **Dependencias:** T-ADM-13, T-ADM-14, T-ADM-15, T-ADM-16
   * **Hecho cuando:** La vista `CoordinatorDashboardView.js` incorpora la pestaña "🏢 Administración" con navegación reactiva fluida entre Sedes, Máquinas y Personal, y la ejecución de `node tests/unit/AdminTabsTest.mjs` pasa al 100% en verde.
