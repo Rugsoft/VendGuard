@@ -27,7 +27,7 @@
   * **Dependencias:** T-MET-01
   * **Hecho cuando:** La tabla `audit_log` queda creada en base de datos con sus índices correspondientes y `PdoAuditLogRepository` permite insertar y listar eventos cronológicamente, sin exponer ningún método de borrado o actualización física.
 
-- [ ] **T-MET-04: Implementar `AuditLogger.php` y suite de pruebas unitarias `AuditLoggerTest.php`**
+- [x] **T-MET-04: Implementar `AuditLogger.php` y suite de pruebas unitarias `AuditLoggerTest.php`**
   * **Requisitos:** `RF-05` (EARS 5.1, 5.2), Constitución Art. III.3 y Art. V.1
   * **Dependencias:** T-MET-03
   * **Hecho cuando:** `php tests/unit/AuditLoggerTest.php` pasa al 100% en verde, validando que el logger registre eventos de tickets, sedes y máquinas, y lance una excepción impidiendo registrar resoluciones (`RESOLVED`) que carezcan de diagnóstico técnico o solución justificada.
