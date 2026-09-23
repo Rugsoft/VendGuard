@@ -111,11 +111,13 @@ class MetricFilter implements JsonSerializable
                 break;
 
             case self::PERIOD_LAST_30_DAYS:
-            default:
                 $period = self::PERIOD_LAST_30_DAYS;
                 $from = $now->modify('-29 days')->setTime(0, 0, 0);
                 $to = $now->setTime(23, 59, 59);
                 break;
+
+            default:
+                throw new InvalidArgumentException("Periodo de consulta no reconocido: '{$period}'.");
         }
 
         return new self($period, $from, $to, $locationId, $technicianId);

@@ -70,7 +70,7 @@
   * **Dependencias:** T-MET-06
   * **Hecho cuando:** El endpoint `GET /api/technician/my-metrics` está protegido con `InternalAuthMiddleware(TECHNICIAN)`, calcula únicamente las métricas del técnico autenticado y responde `403 Forbidden` ante intentos de consultar métricas globales.
 
-- [ ] **T-MET-11: Crear suite de pruebas de integración HTTP (`CoordinatorMetricsEndpointTest.php`, `TechnicianMetricsEndpointTest.php`)**
+- [x] **T-MET-11: Crear suite de pruebas de integración HTTP (`CoordinatorMetricsEndpointTest.php`, `TechnicianMetricsEndpointTest.php`)**
   * **Requisitos:** `RF-01` a `RF-06`, `RNF-04`
   * **Dependencias:** T-MET-09, T-MET-10
   * **Hecho cuando:** Las suites de integración PHP pasan al 100% en verde, validando respuestas HTTP 200 con filtros reales, descargas CSV con cabeceras correctas y bloqueo de autorización `403` a técnicos.
