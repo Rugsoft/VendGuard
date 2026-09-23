@@ -79,7 +79,7 @@
 
 ## Fase 4: Componentes Frontend y Vistas Vanilla Vue 3
 
-- [ ] **T-MET-12: Implementar componentes visuales `MetricCards.js` y `MetricBreakdownTable.js`**
+- [x] **T-MET-12: Implementar componentes visuales `MetricCards.js` y `MetricBreakdownTable.js`**
   * **Requisitos:** `RF-02`, `RF-03` (EARS 3.1, 3.2)
   * **Dependencias:** T-MET-09
   * **Hecho cuando:** Los componentes renderizan de forma reactiva las tarjetas de KPIs (con badges de SLA y tendencias) y la tabla con desglose por sede, técnico y máquina destacando perecederos sanitarios en amarillo/rojo si superan 4h.
