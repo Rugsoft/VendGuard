@@ -868,15 +868,16 @@ export const CoordinatorDashboardView = {
       <!-- CONTENIDO PESTAÑA 3: ADMINISTRACIÓN INTEGRAL (RF-01, RF-02, RF-03, RF-05) -->
       <div v-else-if="activeTab === 'admin'" class="vg-admin-management-container" data-testid="admin-panel-container">
         <!-- Sub-barra de navegación con subpestañas operativas (EARS 5.1) -->
-        <div class="card mb-4 shadow-sm" style="border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px);">
+        <div class="card mb-4 shadow-sm" style="border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px); background-color: #ffffff;">
           <div class="card-body py-2 px-3 d-flex flex-wrap align-items-center justify-content-between gap-3">
-            <div class="d-flex align-items-center gap-2">
-              <span class="text-muted small fw-bold text-uppercase" style="letter-spacing: 0.04em;">Submódulos:</span>
-              <div class="btn-group btn-group-sm" role="group" aria-label="Submódulos de Administración">
+            <div class="d-flex align-items-center gap-3">
+              <span class="text-muted small fw-bold text-uppercase" style="letter-spacing: 0.05em; font-size: 12px;">Submódulos:</span>
+              <div class="btn-group" role="group" aria-label="Submódulos de Administración" style="box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
                 <button
                   type="button"
                   class="btn"
                   :class="activeAdminSubTab === 'locations' ? 'btn-primary' : 'btn-outline-primary'"
+                  style="height: 34px; font-size: 13px; font-weight: 600; padding: 0 14px;"
                   @click="activeAdminSubTab = 'locations'"
                   data-testid="subtab-locations"
                 >
@@ -886,6 +887,7 @@ export const CoordinatorDashboardView = {
                   type="button"
                   class="btn"
                   :class="activeAdminSubTab === 'machines' ? 'btn-primary' : 'btn-outline-primary'"
+                  style="height: 34px; font-size: 13px; font-weight: 600; padding: 0 14px;"
                   @click="activeAdminSubTab = 'machines'"
                   data-testid="subtab-machines"
                 >
@@ -895,6 +897,7 @@ export const CoordinatorDashboardView = {
                   type="button"
                   class="btn"
                   :class="activeAdminSubTab === 'users' ? 'btn-primary' : 'btn-outline-primary'"
+                  style="height: 34px; font-size: 13px; font-weight: 600; padding: 0 14px;"
                   @click="activeAdminSubTab = 'users'"
                   data-testid="subtab-users"
                 >
@@ -902,8 +905,8 @@ export const CoordinatorDashboardView = {
                 </button>
               </div>
             </div>
-            <div class="text-muted small">
-              <span>Gestión centralizada con trazabilidad inmutable (Art. III)</span>
+            <div class="text-muted small" style="font-size: 12px;">
+              <span>🛡️ Gestión centralizada con trazabilidad inmutable (Art. III)</span>
             </div>
           </div>
         </div>

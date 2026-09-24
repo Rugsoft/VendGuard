@@ -308,7 +308,783 @@ h4 { font-size: var(--font-size-heading-md); }
   100% { background-position: -200% 0; }
 }
 
-/* ─── 9. Estilos de la Vista Móvil de Códigos QR (QrReportView.js) ─────────── */
+/* ─── 5. Utilidades de Maquetación, Grid y Flexbox ────────────────────────── */
+.d-flex { display: flex !important; }
+.d-inline-flex { display: inline-flex !important; }
+.d-block { display: block !important; }
+.d-none { display: none !important; }
+
+.flex-wrap { flex-wrap: wrap !important; }
+.flex-nowrap { flex-wrap: nowrap !important; }
+.flex-column { flex-direction: column !important; }
+.flex-row { flex-direction: row !important; }
+.flex-grow-1 { flex-grow: 1 !important; }
+.flex-shrink-0 { flex-shrink: 0 !important; }
+
+.align-items-center { align-items: center !important; }
+.align-items-start { align-items: flex-start !important; }
+.align-items-end { align-items: flex-end !important; }
+.align-items-stretch { align-items: stretch !important; }
+
+.justify-content-between { justify-content: space-between !important; }
+.justify-content-center { justify-content: center !important; }
+.justify-content-end { justify-content: flex-end !important; }
+.justify-content-start { justify-content: flex-start !important; }
+
+.gap-1 { gap: 4px !important; }
+.gap-2 { gap: 8px !important; }
+.gap-3 { gap: 16px !important; }
+.gap-4 { gap: 24px !important; }
+
+.w-100 { width: 100% !important; }
+.h-100 { height: 100% !important; }
+
+/* Grid Básico */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  margin-left: -8px;
+  margin-right: -8px;
+}
+.row > * {
+  box-sizing: border-box;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.g-2 { margin-left: -6px; margin-right: -6px; }
+.g-2 > * { padding-left: 6px; padding-right: 6px; }
+.g-3 { margin-left: -8px; margin-right: -8px; }
+.g-3 > * { padding-left: 8px; padding-right: 8px; }
+
+.col-12 { flex: 0 0 100%; max-width: 100%; }
+.col-md-3 { flex: 1 1 200px; max-width: 100%; }
+.col-md-4 { flex: 1 1 240px; max-width: 100%; }
+.col-md-5 { flex: 1 1 280px; max-width: 100%; }
+.col-md-6 { flex: 1 1 320px; max-width: 100%; }
+.col-lg-2 { flex: 1 1 160px; max-width: 100%; }
+.col-lg-3 { flex: 1 1 220px; max-width: 100%; }
+.col-lg-4 { flex: 1 1 280px; max-width: 100%; }
+.col-lg-5 { flex: 1 1 340px; max-width: 100%; }
+
+/* Espaciados y Márgenes */
+.m-0 { margin: 0 !important; }
+.mt-0 { margin-top: 0 !important; }
+.mt-1 { margin-top: 4px !important; }
+.mt-2 { margin-top: 8px !important; }
+.mt-3 { margin-top: 16px !important; }
+.mt-4 { margin-top: 24px !important; }
+.mb-0 { margin-bottom: 0 !important; }
+.mb-1 { margin-bottom: 4px !important; }
+.mb-2 { margin-bottom: 8px !important; }
+.mb-3 { margin-bottom: 16px !important; }
+.mb-4 { margin-bottom: 24px !important; }
+.me-1 { margin-right: 4px !important; }
+.me-2 { margin-right: 8px !important; }
+.me-3 { margin-right: 16px !important; }
+.ms-1 { margin-left: 4px !important; }
+.ms-2 { margin-left: 8px !important; }
+.ms-auto { margin-left: auto !important; }
+
+.p-0 { padding: 0 !important; }
+.p-2 { padding: 8px !important; }
+.p-3 { padding: 16px !important; }
+.p-4 { padding: 24px !important; }
+.py-1 { padding-top: 4px !important; padding-bottom: 4px !important; }
+.py-2 { padding-top: 8px !important; padding-bottom: 8px !important; }
+.py-3 { padding-top: 16px !important; padding-bottom: 16px !important; }
+.py-4 { padding-top: 24px !important; padding-bottom: 24px !important; }
+.py-5 { padding-top: 40px !important; padding-bottom: 40px !important; }
+.px-2 { padding-left: 8px !important; padding-right: 8px !important; }
+.px-3 { padding-left: 16px !important; padding-right: 16px !important; }
+.px-4 { padding-left: 24px !important; padding-right: 24px !important; }
+.ps-3 { padding-left: 16px !important; }
+.pe-3 { padding-right: 16px !important; }
+
+/* Tipografía y Textos */
+.text-center { text-align: center !important; }
+.text-start { text-align: left !important; }
+.text-end { text-align: right !important; }
+.text-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.text-nowrap { white-space: nowrap !important; }
+.text-uppercase { text-transform: uppercase !important; }
+.fw-bold { font-weight: 700 !important; }
+.fw-semibold { font-weight: 600 !important; }
+.fw-normal { font-weight: 400 !important; }
+.fst-italic { font-style: italic !important; }
+.font-monospace { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace !important; }
+.text-decoration-none { text-decoration: none !important; }
+
+.small { font-size: 13px !important; }
+.fs-1 { font-size: 32px !important; }
+.fs-2 { font-size: 28px !important; }
+.fs-3 { font-size: 24px !important; }
+.fs-4 { font-size: 20px !important; }
+.h5 { font-size: 18px !important; font-weight: 600; }
+.h6 { font-size: 15px !important; font-weight: 600; }
+
+.text-primary { color: var(--color-primary, #2560ff) !important; }
+.text-secondary { color: var(--color-ink-secondary, #434c5f) !important; }
+.text-muted { color: var(--color-ink-muted, #6c7e9d) !important; }
+.text-dark { color: var(--color-slate, #2c333f) !important; }
+.text-white { color: #ffffff !important; }
+.text-danger { color: #dc2626 !important; }
+.text-success { color: #059669 !important; }
+.text-warning { color: #d97706 !important; }
+.text-info { color: #0284c7 !important; }
+.opacity-75 { opacity: 0.75 !important; }
+
+/* Fondos y Bordes */
+.bg-white { background-color: #ffffff !important; }
+.bg-light { background-color: #f8fafc !important; }
+.border { border: 1px solid var(--color-hairline, #c8cfda) !important; }
+.border-0 { border: 0 !important; }
+.border-top { border-top: 1px solid var(--color-hairline, #c8cfda) !important; }
+.border-bottom { border-bottom: 1px solid var(--color-hairline, #c8cfda) !important; }
+.rounded { border-radius: var(--radius-interactive, 4px) !important; }
+
+/* ─── 6. Sistema de Tarjetas (Cards) ──────────────────────────────────────── */
+.card {
+  background-color: #ffffff;
+  border: 1px solid var(--color-hairline, #c8cfda);
+  border-radius: var(--radius-card, 8px);
+  box-shadow: var(--shadow-card, 0 1px 3px rgba(0, 0, 0, 0.04));
+  margin-bottom: 20px;
+  overflow: hidden;
+  transition: box-shadow var(--transition-base), border-color var(--transition-base);
+}
+
+.card:hover {
+  box-shadow: var(--shadow-card-hover);
+  border-color: var(--color-hairline-soft);
+}
+
+.card-body {
+  padding: 16px 20px;
+}
+
+.card-header {
+  padding: 14px 20px;
+  background-color: #ffffff;
+  border-bottom: 1px solid var(--color-hairline, #c8cfda);
+}
+
+.shadow-sm {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05) !important;
+}
+
+.shadow {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12) !important;
+}
+
+/* ─── 7. Sistema de Botones y Botoneras ────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--font-body, Inter, sans-serif);
+  font-size: var(--font-size-label-md, 14px);
+  font-weight: 500;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--radius-interactive, 4px);
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  user-select: none;
+  transition: all var(--transition-fast, 0.15s ease-in-out);
+  line-height: 1;
+  background-color: transparent;
+  color: var(--color-slate, #2c333f);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-sm {
+  height: 30px;
+  font-size: 12px;
+  padding: 0 10px;
+  border-radius: var(--radius-interactive, 4px);
+}
+
+.btn-primary {
+  background-color: var(--color-primary, #2560ff);
+  color: #ffffff;
+  border-color: var(--color-primary-dark, #003db5);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--color-primary-hover, #0d4df2);
+  color: #ffffff;
+}
+
+.btn-secondary {
+  background-color: #ffffff;
+  color: var(--color-slate, #2c333f);
+  border-color: var(--color-hairline, #c8cfda);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: var(--color-surface-1, #efefef);
+  border-color: var(--color-hairline-soft, #a9b4c6);
+}
+
+.btn-danger {
+  background-color: #dc2626;
+  color: #ffffff;
+  border-color: #b91c1c;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: #ef4444;
+  color: #ffffff;
+}
+
+.btn-outline-primary {
+  background-color: #ffffff;
+  color: var(--color-primary, #2560ff);
+  border-color: var(--color-primary, #2560ff);
+}
+
+.btn-outline-primary:hover:not(:disabled) {
+  background-color: var(--color-primary-subtle, #e5f2fc);
+  color: var(--color-primary-dark, #003db5);
+}
+
+.btn-outline-secondary {
+  background-color: #ffffff;
+  color: var(--color-ink-secondary, #434c5f);
+  border-color: var(--color-hairline, #c8cfda);
+}
+
+.btn-outline-secondary:hover:not(:disabled) {
+  background-color: #f1f5f9;
+  color: var(--color-slate, #2c333f);
+  border-color: var(--color-hairline-soft, #a9b4c6);
+}
+
+.btn-outline-danger {
+  background-color: #ffffff;
+  color: #dc2626;
+  border-color: #fca5a5;
+}
+
+.btn-outline-danger:hover:not(:disabled) {
+  background-color: #fee2e2;
+  border-color: #dc2626;
+  color: #991b1b;
+}
+
+.btn-outline-success {
+  background-color: #ffffff;
+  color: #059669;
+  border-color: #a7f3d0;
+}
+
+.btn-outline-success:hover:not(:disabled) {
+  background-color: #ecfdf5;
+  border-color: #059669;
+  color: #065f46;
+}
+
+.btn-link {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-primary, #2560ff);
+  cursor: pointer;
+}
+
+.btn-group {
+  display: inline-flex;
+  vertical-align: middle;
+  border-radius: var(--radius-interactive, 4px);
+  border: 1px solid var(--color-hairline, #c8cfda);
+  overflow: hidden;
+}
+
+.btn-group > .btn {
+  border-radius: 0;
+  border: none;
+  border-right: 1px solid var(--color-hairline, #c8cfda);
+}
+
+.btn-group > .btn:last-child {
+  border-right: none;
+}
+
+.btn-group-sm > .btn {
+  height: 30px;
+  font-size: 12px;
+  padding: 0 10px;
+}
+
+.btn-close {
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--color-ink-muted, #6c7e9d);
+  padding: 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-close::before {
+  content: '✕';
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.btn-close-white {
+  color: #ffffff !important;
+}
+
+/* ─── 8. Sistema de Tablas de Datos (Tables) ──────────────────────────────── */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-family: var(--font-body, Inter, sans-serif);
+  font-size: 13px;
+  color: var(--color-slate, #2c333f);
+}
+
+.table thead tr {
+  background-color: #fafbfc;
+  border-bottom: 1px solid var(--color-hairline, #c8cfda);
+}
+
+.table thead th {
+  padding: 12px 16px;
+  color: var(--color-ink-muted, #6c7e9d);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--color-hairline, #c8cfda);
+  white-space: nowrap;
+}
+
+.table tbody tr {
+  border-bottom: 1px solid var(--color-hairline, #c8cfda);
+  transition: background-color var(--transition-fast);
+}
+
+.table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.table tbody td {
+  padding: 13px 16px;
+  vertical-align: middle;
+  color: var(--color-slate, #2c333f);
+}
+
+.table-hover tbody tr:hover {
+  background-color: #f8fafc;
+}
+
+.table-light {
+  background-color: #fafbfc !important;
+}
+
+.align-middle {
+  vertical-align: middle !important;
+}
+
+/* ─── 9. Sistema de Formularios e Inputs ──────────────────────────────────── */
+.form-control, .form-select {
+  display: block;
+  width: 100%;
+  font-family: var(--font-body, Inter, sans-serif);
+  font-size: 14px;
+  color: var(--color-slate, #2c333f);
+  background-color: #ffffff;
+  border: 1px solid var(--color-hairline, #c8cfda);
+  border-radius: var(--radius-interactive, 4px);
+  padding: 8px 12px;
+  height: 38px;
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.form-select-sm, .form-control-sm {
+  height: 32px;
+  font-size: 13px;
+  padding: 4px 10px;
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 80px;
+  resize: vertical;
+}
+
+.form-control:focus, .form-select:focus {
+  border-color: var(--color-primary, #2560ff);
+  box-shadow: 0 0 0 3px var(--color-primary-subtle, #e5f2fc);
+}
+
+.form-control:disabled, .form-select:disabled {
+  background-color: #f1f5f9;
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+.form-control.is-invalid, .form-select.is-invalid {
+  border-color: #dc2626 !important;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.15) !important;
+}
+
+.invalid-feedback {
+  display: block;
+  color: #dc2626;
+  font-size: 12px;
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+.form-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-slate, #2c333f);
+  margin-bottom: 6px;
+}
+
+.form-text {
+  display: block;
+  font-size: 12px;
+  color: var(--color-ink-muted, #6c7e9d);
+  margin-top: 4px;
+}
+
+.input-group {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  border-radius: var(--radius-interactive, 4px);
+}
+
+.input-group-text {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  font-size: 14px;
+  background-color: #f8fafc;
+  color: var(--color-ink-muted, #6c7e9d);
+  border: 1px solid var(--color-hairline, #c8cfda);
+  border-right: none;
+  border-top-left-radius: var(--radius-interactive, 4px);
+  border-bottom-left-radius: var(--radius-interactive, 4px);
+}
+
+.input-group > .form-control {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.input-group > .btn {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* ─── 10. Badges, Chips y Pastillas ───────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  font-family: var(--font-body, Inter, sans-serif);
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--radius-interactive, 4px);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.rounded-pill {
+  border-radius: 9999px !important;
+}
+
+.bg-primary {
+  background-color: var(--color-primary-subtle, #e5f2fc) !important;
+  color: var(--color-primary-dark, #003db5) !important;
+  border: 1px solid rgba(37, 96, 255, 0.25) !important;
+}
+
+.bg-secondary {
+  background-color: #f1f5f9 !important;
+  color: var(--color-ink-secondary, #434c5f) !important;
+  border: 1px solid var(--color-hairline, #c8cfda) !important;
+}
+
+.bg-success {
+  background-color: #ecfdf5 !important;
+  color: #065f46 !important;
+  border: 1px solid #a7f3d0 !important;
+}
+
+.bg-danger {
+  background-color: #fef2f2 !important;
+  color: #991b1b !important;
+  border: 1px solid #fecaca !important;
+}
+
+.bg-warning {
+  background-color: #fefce8 !important;
+  color: #92400e !important;
+  border: 1px solid #fde68a !important;
+}
+
+.bg-info {
+  background-color: #f0f9ff !important;
+  color: #075985 !important;
+  border: 1px solid #bae6fd !important;
+}
+
+.bg-dark {
+  background-color: #1e293b !important;
+  color: #f8fafc !important;
+}
+
+.bg-primary-subtle {
+  background-color: var(--color-primary-subtle, #e5f2fc) !important;
+}
+
+.bg-success-subtle {
+  background-color: #ecfdf5 !important;
+}
+
+.bg-danger-subtle {
+  background-color: #fee2e2 !important;
+}
+
+.bg-warning-subtle {
+  background-color: #fef9c3 !important;
+}
+
+.bg-info-subtle {
+  background-color: #e0f2fe !important;
+}
+
+.border-primary-subtle {
+  border-color: #bfdbfe !important;
+}
+
+.border-danger-subtle {
+  border-color: #fca5a5 !important;
+}
+
+.border-warning-subtle {
+  border-color: #fde047 !important;
+}
+
+.border-success-subtle {
+  border-color: #86efac !important;
+}
+
+/* ─── 11. Alertas de Estado (Alerts) ──────────────────────────────────────── */
+.alert {
+  padding: 14px 18px;
+  border-radius: var(--radius-card, 8px);
+  font-size: 14px;
+  line-height: 1.4;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid transparent;
+}
+
+.alert-success {
+  background-color: #ecfdf5;
+  color: #065f46;
+  border-color: #a7f3d0;
+}
+
+.alert-danger {
+  background-color: #fef2f2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.alert-warning {
+  background-color: #fffbeb;
+  color: #92400e;
+  border-color: #fde68a;
+}
+
+.alert-info {
+  background-color: #eff6ff;
+  color: #1e40af;
+  border-color: #bfdbfe;
+}
+
+.alert-dismissible {
+  padding-right: 40px;
+  position: relative;
+}
+
+.alert-dismissible .btn-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+}
+
+/* ─── 12. Diálogos Modales (Modals) ───────────────────────────────────────── */
+.modal {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(3px);
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+  z-index: 1040;
+}
+
+.modal-dialog {
+  width: 100%;
+  max-width: 560px;
+  margin: auto;
+}
+
+.modal-lg {
+  max-width: 760px !important;
+}
+
+.modal-sm {
+  max-width: 420px !important;
+}
+
+.modal-dialog-centered {
+  display: flex;
+  align-items: center;
+  min-height: calc(100% - 32px);
+}
+
+.modal-content {
+  background-color: #ffffff;
+  border-radius: var(--radius-card, 8px);
+  box-shadow: var(--shadow-modal, 0 16px 36px rgba(0, 0, 0, 0.16));
+  border: 1px solid var(--color-hairline, #c8cfda);
+  width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-hairline, #c8cfda);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-header.bg-primary {
+  background-color: var(--color-primary, #2560ff) !important;
+  color: #ffffff;
+}
+
+.modal-header.bg-secondary {
+  background-color: #334155 !important;
+  color: #ffffff;
+}
+
+.modal-header.bg-danger {
+  background-color: #dc2626 !important;
+  color: #ffffff;
+}
+
+.modal-title {
+  font-family: var(--font-display, 'DM Sans', sans-serif);
+  font-size: 18px;
+  font-weight: 600;
+  color: inherit;
+  margin: 0;
+}
+
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  font-size: 14px;
+  color: var(--color-slate, #2c333f);
+  line-height: 1.5;
+}
+
+.modal-footer {
+  padding: 14px 20px;
+  border-top: 1px solid var(--color-hairline, #c8cfda);
+  background-color: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* Spinners y Accesibilidad */
+.spinner-border {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  vertical-align: -0.125em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spinner-border 0.75s linear infinite;
+}
+
+.spinner-border-sm {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
+
+@keyframes spinner-border {
+  to { transform: rotate(360deg); }
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* ─── 13. Estilos de la Vista Móvil de Códigos QR (QrReportView.js) ─────────── */
 .qr-report-view {
   min-height: 100vh;
   background-color: var(--color-canvas);
