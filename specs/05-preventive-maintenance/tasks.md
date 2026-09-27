@@ -76,7 +76,7 @@
   * **Dependencias:** T-PREV-10
   * **Hecho cuando:** `PreventiveCoexistenceBridgeService` crea incidencia correctiva vinculada con urgencia `CRITICAL` si no hay ticket previo, o añade apunte en bitácora (`incident_comments`) y eleva a `CRITICAL` si ya existe ticket activo (Art. V.2); exige $\ge 20$ caracteres en diagnóstico y solución para cerrar el correctivo (Art. V.1) y coordina la reapertura de la máquina tras reinspección térmica ($\le 4.0\text{ }^\circ\text{C}$), pasando al 100% `php tests/unit/PreventiveCoexistenceBridgeServiceTest.php`.
 
-- [ ] **T-PREV-12: Implementar `SanitaryCertificateService.php` y suite unitaria `SanitaryCertificateServiceTest.php`**
+- [x] **T-PREV-12: Implementar `SanitaryCertificateService.php` y suite unitaria `SanitaryCertificateServiceTest.php`**
   * **Requisitos:** RF-PREV-07, Constitución Art. V.4
   * **Dependencias:** T-PREV-07
   * **Hecho cuando:** `SanitaryCertificateService` emite certificados sanitarios con `operator_code` (sin DNI ni teléfono privado del técnico), genera la consolidación global de sede (dictamen `CONDICIONADO` si alguna máquina falla), suspende cautelarmente certificados ante averías de frío sobrevenidas y pasa al 100% `php tests/unit/SanitaryCertificateServiceTest.php`.
