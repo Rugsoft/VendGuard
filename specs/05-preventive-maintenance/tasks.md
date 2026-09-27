@@ -144,7 +144,7 @@
   * **Dependencias:** T-PREV-16
   * **Hecho cuando:** El escaneo QR ciudadano de una máquina en cuarentena muestra la alerta roja prominente con bloqueo total de reporte y compra; y en máquinas en pausa estacional muestra el aviso informativo vacacional.
 
-- [ ] **T-PREV-24: Integración global en `app.js` y tests frontend ESM (`PreventiveTabsTest.mjs`)**
+- [x] **T-PREV-24: Integración global en `app.js` y tests frontend ESM (`PreventiveTabsTest.mjs`)**
   * **Requisitos:** RF-PREV-01 a RF-PREV-08
   * **Dependencias:** T-PREV-18, T-PREV-19, T-PREV-20, T-PREV-21, T-PREV-22, T-PREV-23
   * **Hecho cuando:** La aplicación inyecta fluidamente las nuevas vistas preventivas según el rol autenticado y la suite `node tests/unit/PreventiveTabsTest.mjs` pasa al 100% en verde.
