@@ -32,7 +32,7 @@
 
 ## Fase 2: Repositorios PDO y Capa de Persistencia
 
-- [ ] **T-PREV-04: Implementar `PreventiveSettingsRepositoryInterface` y `PdoPreventiveSettingsRepository.php`**
+- [x] **T-PREV-04: Implementar `PreventiveSettingsRepositoryInterface` y `PdoPreventiveSettingsRepository.php`**
   * **Requisitos:** RF-PREV-01 (EARS 1.1, 1.2, 1.3, 1.4, 1.5)
   * **Dependencias:** T-PREV-01, T-PREV-02
   * **Hecho cuando:** `PdoPreventiveSettingsRepository` implementa consulta de frecuencias por tipología (`findByMachineType`), actualización de frecuencias globales (`updateTypeSettings` con validación $\le 15$ días en perecederos), configuración individual por máquina (`updateMachineConfig`) y gestión de pausa estacional (`setSeasonalPause` y `resumeSeasonalPause`).
