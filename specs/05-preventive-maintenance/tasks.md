@@ -23,7 +23,7 @@
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existen en `src/Core/Domain/Exception/` las 8 clases tipadas (`PerishableFrequencyLimitException`, `InvalidTemperatureRangeException`, `ChecklistIncompleteException`, `PreventiveOrderAlreadyAssignedException`, `PreventiveOrderNotInInspectionException`, `ReinspectionTemperatureExceededException`, `CannotIssueNonConformCertificateException` y `SeasonalPauseMissingReasonException`), cada una proveyendo su código de error técnico y mensaje en castellano según contrato.
 
-- [ ] **T-PREV-03: Crear suite de pruebas unitarias para excepciones y reglas de dominio (`PreventiveExceptionsTest.php`)**
+- [x] **T-PREV-03: Crear suite de pruebas unitarias para excepciones y reglas de dominio (`PreventiveExceptionsTest.php`)**
   * **Requisitos:** RF-PREV-01, RF-PREV-03, RF-PREV-04, RF-PREV-07, RNF-06
   * **Dependencias:** T-PREV-02
   * **Hecho cuando:** La ejecución de `php tests/unit/PreventiveExceptionsTest.php` pasa al 100% en verde evaluando las 8 excepciones, verificando códigos HTTP (`400`, `409`, `422`), códigos de error (`PERISHABLE_FREQUENCY_LIMIT_EXCEEDED`, `INVALID_TEMPERATURE_RANGE`, etc.) y mensajes.
