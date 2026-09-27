@@ -138,7 +138,7 @@ class SeedRunner
         ];
 
         $sql = "
-            INSERT INTO `machines` (`location_id`, `code`, `model`, `machine_type`, `floor_wing`, `notes`, `is_active`)
+            INSERT INTO `machines` (`location_id`, `code`, `model`, `machine_type`, `floor_wing`, `notes`, `is_active`, `sanitary_status`, `next_sanitary_inspection_due`)
             VALUES (
                 (SELECT `id` FROM `locations` WHERE `site_code` = :site_code LIMIT 1),
                 :code,
@@ -146,13 +146,17 @@ class SeedRunner
                 :machine_type,
                 :floor_wing,
                 :notes,
-                1
+                1,
+                'OK',
+                DATE_ADD(CURRENT_DATE(), INTERVAL :due_days DAY)
             )
             ON DUPLICATE KEY UPDATE
                 `model` = VALUES(`model`),
                 `machine_type` = VALUES(`machine_type`),
                 `floor_wing` = VALUES(`floor_wing`),
                 `notes` = VALUES(`notes`),
+                `sanitary_status` = VALUES(`sanitary_status`),
+                `next_sanitary_inspection_due` = VALUES(`next_sanitary_inspection_due`),
                 `deleted_at` = NULL
         ";
 
@@ -160,6 +164,7 @@ class SeedRunner
         $count = 0;
 
         foreach ($machines as $mach) {
+            $dueDays = ($mach['machine_type'] === 'PERISHABLE_FOOD' || $mach['machine_type'] === 'COMBO') ? 15 : 30;
             $stmt->execute([
                 ':site_code' => $mach['site_code'],
                 ':code' => $mach['code'],
@@ -167,6 +172,7 @@ class SeedRunner
                 ':machine_type' => $mach['machine_type'],
                 ':floor_wing' => $mach['floor_wing'],
                 ':notes' => $mach['notes'],
+                ':due_days' => $dueDays,
             ]);
             $count++;
         }
@@ -190,6 +196,7 @@ class SeedRunner
                 'email' => 'coordinacion@vendguard.internal',
                 'password_hash' => $passwordHash,
                 'role' => 'COORDINATOR',
+                'operator_code' => null,
                 'phone' => '677000111',
             ],
             [
@@ -197,17 +204,19 @@ class SeedRunner
                 'email' => 'jordi.ruta@vendguard.internal',
                 'password_hash' => $passwordHash,
                 'role' => 'TECHNICIAN',
+                'operator_code' => 'OP-01',
                 'phone' => '677222333',
             ],
         ];
 
         $sql = "
-            INSERT INTO `users` (`name`, `email`, `password_hash`, `role`, `phone`, `is_active`)
-            VALUES (:name, :email, :password_hash, :role, :phone, 1)
+            INSERT INTO `users` (`name`, `email`, `password_hash`, `role`, `operator_code`, `phone`, `is_active`)
+            VALUES (:name, :email, :password_hash, :role, :operator_code, :phone, 1)
             ON DUPLICATE KEY UPDATE
                 `name` = VALUES(`name`),
                 `password_hash` = VALUES(`password_hash`),
                 `role` = VALUES(`role`),
+                `operator_code` = VALUES(`operator_code`),
                 `phone` = VALUES(`phone`),
                 `deleted_at` = NULL
         ";
@@ -221,7 +230,48 @@ class SeedRunner
                 ':email' => $user['email'],
                 ':password_hash' => $user['password_hash'],
                 ':role' => $user['role'],
+                ':operator_code' => $user['operator_code'],
                 ':phone' => $user['phone'],
+            ]);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    /**
+     * Carga programática de frecuencias normativas preventivas (Art. II).
+     *
+     * @return int Número de configuraciones procesadas.
+     */
+    public function seedPreventiveSettings(): int
+    {
+        $settings = [
+            ['machine_type' => 'PERISHABLE_FOOD', 'default_frequency_days' => 15, 'max_allowed_days' => 15, 'advance_warning_days' => 5],
+            ['machine_type' => 'HOT_DRINKS',       'default_frequency_days' => 30, 'max_allowed_days' => 60, 'advance_warning_days' => 5],
+            ['machine_type' => 'COLD_DRINKS',      'default_frequency_days' => 45, 'max_allowed_days' => 90, 'advance_warning_days' => 5],
+            ['machine_type' => 'SNACKS',           'default_frequency_days' => 60, 'max_allowed_days' => 90, 'advance_warning_days' => 5],
+            ['machine_type' => 'COMBO',            'default_frequency_days' => 15, 'max_allowed_days' => 45, 'advance_warning_days' => 5],
+        ];
+
+        $sql = "
+            INSERT INTO `preventive_settings` (`machine_type`, `default_frequency_days`, `max_allowed_days`, `advance_warning_days`)
+            VALUES (:machine_type, :default_frequency_days, :max_allowed_days, :advance_warning_days)
+            ON DUPLICATE KEY UPDATE
+                `default_frequency_days` = VALUES(`default_frequency_days`),
+                `max_allowed_days` = VALUES(`max_allowed_days`),
+                `advance_warning_days` = VALUES(`advance_warning_days`)
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $count = 0;
+
+        foreach ($settings as $setting) {
+            $stmt->execute([
+                ':machine_type' => $setting['machine_type'],
+                ':default_frequency_days' => $setting['default_frequency_days'],
+                ':max_allowed_days' => $setting['max_allowed_days'],
+                ':advance_warning_days' => $setting['advance_warning_days'],
             ]);
             $count++;
         }
@@ -243,6 +293,7 @@ class SeedRunner
             $locCount = $this->seedLocations();
             $machCount = $this->seedMachines();
             $userCount = $this->seedUsers($defaultPassword);
+            $prevCount = $this->seedPreventiveSettings();
 
             $this->pdo->commit();
 
@@ -250,6 +301,7 @@ class SeedRunner
                 'locations' => $locCount,
                 'machines' => $machCount,
                 'users' => $userCount,
+                'preventive_settings' => $prevCount,
             ];
         } catch (PDOException $e) {
             if ($this->pdo->inTransaction()) {

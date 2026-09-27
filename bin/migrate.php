@@ -62,7 +62,11 @@ try {
         'incidents',
         'incident_history',
         'incident_comments',
-        'audit_log'
+        'audit_log',
+        'preventive_settings',
+        'preventive_orders',
+        'preventive_order_items',
+        'sanitary_certificates'
     ];
 
     echo "[4/4] Verificando esquema e integridad en vendguard_db:\n";
@@ -96,14 +100,33 @@ try {
     $colAuditEnum = $stmt->fetch();
     $hasUserEnum = ($colAuditEnum !== false && str_contains((string)($colAuditEnum['Type'] ?? ''), "'USER'"));
 
+    // Verificar extensiones de Módulo 05 (Preventivo y Sanitario)
+    $stmt = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'operator_code'");
+    $hasOperatorCode = ($stmt->fetch() !== false);
+
+    $stmt = $pdo->query("SHOW COLUMNS FROM `machines` LIKE 'sanitary_status'");
+    $hasSanitaryStatus = ($stmt->fetch() !== false);
+
+    $stmt = $pdo->query("SHOW COLUMNS FROM `incidents` LIKE 'preventive_order_id'");
+    $hasPreventiveOrderCol = ($stmt->fetch() !== false);
+
+    $hasPreventiveAuditEnum = ($colAuditEnum !== false && str_contains((string)($colAuditEnum['Type'] ?? ''), "'PREVENTIVE_ORDER'"));
+
     echo "      - Columna virtual `is_active_ticket`: [" . ($hasVirtualCol ? "OK" : "FALTA") . "]\n";
     echo "      - Índice único `uq_machine_active_ticket`: [" . ($hasUniqueIndex ? "OK" : "FALTA") . "]\n";
     echo "      - Columna `machine_type_snapshot` en incidents: [" . ($hasSnapshotCol ? "OK" : "FALTA") . "]\n";
-    echo "      - Soporte entidad `USER` en audit_log: [" . ($hasUserEnum ? "OK" : "FALTA") . "]\n\n";
+    echo "      - Soporte entidad `USER` en audit_log: [" . ($hasUserEnum ? "OK" : "FALTA") . "]\n";
+    echo "      - Columna `operator_code` en users: [" . ($hasOperatorCode ? "OK" : "FALTA") . "]\n";
+    echo "      - Columna `sanitary_status` en machines: [" . ($hasSanitaryStatus ? "OK" : "FALTA") . "]\n";
+    echo "      - Columna `preventive_order_id` en incidents: [" . ($hasPreventiveOrderCol ? "OK" : "FALTA") . "]\n";
+    echo "      - Soporte entidad `PREVENTIVE_ORDER` en audit_log: [" . ($hasPreventiveAuditEnum ? "OK" : "FALTA") . "]\n\n";
 
-    if ($allTablesExist && $hasVirtualCol && $hasUniqueIndex && $hasSnapshotCol && $hasUserEnum) {
+    $isMigrationComplete = $allTablesExist && $hasVirtualCol && $hasUniqueIndex && $hasSnapshotCol && $hasUserEnum
+        && $hasOperatorCode && $hasSanitaryStatus && $hasPreventiveOrderCol && $hasPreventiveAuditEnum;
+
+    if ($isMigrationComplete) {
         echo "========================================================\n";
-        echo " Migración completada exitosamente. Condición T-ADM-01 CUMPLIDA.\n";
+        echo " Migración completada exitosamente. Condición T-PREV-01 CUMPLIDA.\n";
         echo "========================================================\n";
         exit(0);
     } else {

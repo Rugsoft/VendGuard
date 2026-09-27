@@ -13,7 +13,7 @@
 
 ## Fase 1: Esquema de Base de Datos y Excepciones de Dominio
 
-- [ ] **T-PREV-01: Migración DDL y extensiones preventivas (`005_preventive_maintenance.sql`, `cloud_init.sql`)**
+- [x] **T-PREV-01: Migración DDL y extensiones preventivas (`005_preventive_maintenance.sql`, `cloud_init.sql`)**
   * **Requisitos:** RF-PREV-01 a RF-PREV-08, Constitución Art. II, Art. III, Art. V.4
   * **Dependencias:** Ninguna
   * **Hecho cuando:** La ejecución de `php bin/migrate.php` aplica con éxito `005_preventive_maintenance.sql`, creando las tablas `preventive_settings`, `preventive_orders`, `preventive_order_items`, `sanitary_certificates`, ampliando `machines` (semáforo, próximas fechas y pausa estacional), `users` (`operator_code`), `incidents` (`preventive_order_id`) y `audit_log`; `database/cloud_init.sql` queda consolidado con semillas normativas (máximo 15 días en perecederos).
