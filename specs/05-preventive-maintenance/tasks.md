@@ -95,7 +95,7 @@
   * **Dependencias:** T-PREV-10, T-PREV-11
   * **Hecho cuando:** Los endpoints del técnico (`/route`, `/claim`, `/checklist`, `/start`, `/complete`, `/reinspect`) quedan registrados bajo `InternalAuthMiddleware(TECHNICIAN)` en `AppRouter.php`, manejando las excepciones de dominio con códigos `200`, `400`, `409` y `422`.
 
-- [ ] **T-PREV-15: Implementar `SiteSanitaryController.php` y registrar rutas en `AppRouter.php`**
+- [x] **T-PREV-15: Implementar `SiteSanitaryController.php` y registrar rutas en `AppRouter.php`**
   * **Requisitos:** RF-PREV-06, RF-PREV-07
   * **Dependencias:** T-PREV-12
   * **Hecho cuando:** Los endpoints para clientes (`/sanitary-status`, `/certificates/machine/{code}`, `/certificates/global`) quedan registrados bajo `SiteAuthMiddleware` en `AppRouter.php`, devolviendo semáforos, certificados individuales A4 y certificados consolidados de sede.

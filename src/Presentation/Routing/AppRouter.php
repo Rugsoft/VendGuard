@@ -62,6 +62,11 @@ class AppRouter
         $router->get('/api/incidents/{ticket_code}/comments', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'getComments'], [$siteAuth]);
         $router->post('/api/incidents/{ticket_code}/reopen', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'reopenIncident'], [$siteAuth]);
 
+        // Mantenimiento Preventivo y Certificados Sanitarios de Sede (Módulo 05: Sede - T-PREV-15)
+        $router->get('/api/site/sanitary-status', [\VendGuard\Presentation\Controller\SiteSanitaryController::class, 'getSanitaryStatus'], [$siteAuth]);
+        $router->get('/api/site/certificates/machine/{code}', [\VendGuard\Presentation\Controller\SiteSanitaryController::class, 'getMachineCertificate'], [$siteAuth]);
+        $router->get('/api/site/certificates/global', [\VendGuard\Presentation\Controller\SiteSanitaryController::class, 'getGlobalCertificate'], [$siteAuth]);
+
         // -----------------------------------------------------------------
         // 4. Módulo de Coordinación y Triaje (T-25, T-26, T-27)
         // -----------------------------------------------------------------
