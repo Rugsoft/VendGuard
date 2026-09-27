@@ -247,6 +247,24 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
     }
 
     /**
+     * {@inheritdoc}
+     */
+    public function updateSanitaryStatus(int $machineId, string $status): bool
+    {
+        $stmt = $this->pdo->prepare("
+            UPDATE `machines`
+            SET `sanitary_status` = :status,
+                `updated_at` = CURRENT_TIMESTAMP
+            WHERE `id` = :id AND `deleted_at` IS NULL
+        ");
+
+        return $stmt->execute([
+            ':status' => $status,
+            ':id' => $machineId,
+        ]);
+    }
+
+    /**
      * @param array<string, mixed> $row
      * @return PreventiveSetting
      */

@@ -168,6 +168,14 @@ class InMemoryPreventiveSettingsRepository implements PreventiveSettingsReposito
         return true;
     }
 
+    public function updateSanitaryStatus(int $machineId, string $status): bool
+    {
+        if (isset($this->machines[$machineId])) {
+            $this->machines[$machineId]['sanitary_status'] = $status;
+        }
+        return true;
+    }
+
     public function getMachineSettings(int $machineId): ?array
     {
         if (!isset($this->machines[$machineId])) {

@@ -66,7 +66,7 @@
   * **Dependencias:** T-PREV-04, T-PREV-05
   * **Hecho cuando:** `PreventiveOrderSchedulerService` genera automáticamente órdenes preventivas para máquinas a $\le 5$ días del vencimiento, omite máquinas en pausa estacional o con orden activa previa, recalcula fechas límite y la suite `php tests/unit/PreventiveOrderSchedulerServiceTest.php` pasa al 100%.
 
-- [ ] **T-PREV-10: Implementar `PreventiveChecklistEvaluationService.php` y suite unitaria `PreventiveChecklistEvaluationServiceTest.php`**
+- [x] **T-PREV-10: Implementar `PreventiveChecklistEvaluationService.php` y suite unitaria `PreventiveChecklistEvaluationServiceTest.php`**
   * **Requisitos:** RF-PREV-03, RF-PREV-04, RNF-06, Constitución Art. II
   * **Dependencias:** T-PREV-02, T-PREV-05, T-PREV-06
   * **Hecho cuando:** `PreventiveChecklistEvaluationService` valida el rango físico de temperatura `[-5.0, 25.0]` con 1 decimal exacto, evalúa dictámenes (`CONFORME`, `CONFORME_CON_OBSERVACIONES`, `NO_CONFORME`), sitúa la máquina en estado `QUARANTINE` ante fallos críticos o temperatura $> 4.0\text{ }^\circ\text{C}$ en perecederos, pasando al 100% `php tests/unit/PreventiveChecklistEvaluationServiceTest.php`.

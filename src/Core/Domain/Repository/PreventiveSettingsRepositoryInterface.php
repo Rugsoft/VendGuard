@@ -93,4 +93,13 @@ interface PreventiveSettingsRepositoryInterface
      * @return array<string, mixed>|null
      */
     public function getMachineSettings(int $machineId): ?array;
+
+    /**
+     * Actualiza el estado higiénico-sanitario de una máquina ('OK', 'ATTENTION_REQUIRED', 'EXPIRED', 'QUARANTINE', 'SEASONAL_PAUSE').
+     *
+     * @param int $machineId
+     * @param string $status
+     * @return bool
+     */
+    public function updateSanitaryStatus(int $machineId, string $status): bool;
 }
