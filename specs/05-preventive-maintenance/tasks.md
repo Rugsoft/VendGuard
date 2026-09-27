@@ -42,7 +42,7 @@
   * **Dependencias:** T-PREV-01, T-PREV-02
   * **Hecho cuando:** `PdoPreventiveOrderRepository` implementa creación (`create`), búsqueda por ID/código (`findById`, `findByCode`), asignación a técnico (`assignTechnician`), autoasignación in situ (`claimOrderOpportunistically` atómico con bloqueo si ya no está en `PENDING_ASSIGNMENT`), cancelación lógica (`softCancel` fijando `status = 'CANCELLED'` sin borrado físico), listados para coordinación y ruta móvil de técnico.
 
-- [ ] **T-PREV-06: Implementar `PreventiveItemRepositoryInterface` y `PdoPreventiveItemRepository.php`**
+- [x] **T-PREV-06: Implementar `PreventiveItemRepositoryInterface` y `PdoPreventiveItemRepository.php`**
   * **Requisitos:** RF-PREV-03, RF-PREV-04
   * **Dependencias:** T-PREV-01
   * **Hecho cuando:** `PdoPreventiveItemRepository` implementa inserción por lotes de las comprobaciones de checklist (`saveOrderItems`), vinculación fotográfica de evidencias de fallos y consulta de ítems por orden (`findByOrderId`).
