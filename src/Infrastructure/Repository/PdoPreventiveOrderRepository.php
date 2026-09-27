@@ -558,4 +558,22 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
             $technicianData
         );
     }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function expireOverdueOrders(): int
+    {
+        $stmt = $this->pdo->prepare("
+            UPDATE `preventive_orders`
+            SET `status` = 'EXPIRED',
+                `updated_at` = CURRENT_TIMESTAMP
+            WHERE `status` IN ('PENDING_ASSIGNMENT', 'SCHEDULED')
+              AND `due_date` < CURRENT_DATE()
+              AND `deleted_at` IS NULL
+        ");
+
+        $stmt->execute();
+        return $stmt->rowCount();
+    }
 }

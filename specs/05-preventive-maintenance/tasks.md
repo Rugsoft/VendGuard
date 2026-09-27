@@ -61,7 +61,7 @@
   * **Dependencias:** T-PREV-02, T-PREV-04
   * **Hecho cuando:** `PreventiveSettingsService` valida y bloquea cualquier intento de configurar frecuencias $> 15$ días en perecederos (`PerishableFrequencyLimitException`), gestiona pausas estacionales con justificación obligatoria y registra eventos en `audit_log`, pasando al 100% `php tests/unit/PreventiveSettingsServiceTest.php`.
 
-- [ ] **T-PREV-09: Implementar `PreventiveOrderSchedulerService.php` y suite unitaria `PreventiveOrderSchedulerServiceTest.php`**
+- [x] **T-PREV-09: Implementar `PreventiveOrderSchedulerService.php` y suite unitaria `PreventiveOrderSchedulerServiceTest.php`**
   * **Requisitos:** RF-PREV-01 (inicio de ciclo en altas), RF-PREV-02 (horizonte 5 días)
   * **Dependencias:** T-PREV-04, T-PREV-05
   * **Hecho cuando:** `PreventiveOrderSchedulerService` genera automáticamente órdenes preventivas para máquinas a $\le 5$ días del vencimiento, omite máquinas en pausa estacional o con orden activa previa, recalcula fechas límite y la suite `php tests/unit/PreventiveOrderSchedulerServiceTest.php` pasa al 100%.

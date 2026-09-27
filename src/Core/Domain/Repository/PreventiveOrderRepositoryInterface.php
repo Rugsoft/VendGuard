@@ -139,4 +139,11 @@ interface PreventiveOrderRepositoryInterface
      * @return array<string, mixed>
      */
     public function getDashboardSummary(): array;
+
+    /**
+     * Marca como EXPIRED las órdenes preventivas pendientes o programadas cuya fecha límite ha expirado (EARS 2.4).
+     *
+     * @return int Número de órdenes actualizadas a EXPIRED
+     */
+    public function expireOverdueOrders(): int;
 }
