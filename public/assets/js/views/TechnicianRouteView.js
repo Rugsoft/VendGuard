@@ -18,13 +18,15 @@ import { store } from '../store.js';
 import { IncidentBadge } from '../components/IncidentBadge.js';
 import { ModalDialog } from '../components/ModalDialog.js';
 import { TechnicianMetricsView } from './TechnicianMetricsView.js';
+import { TechnicianPreventiveRouteTab } from '../components/TechnicianPreventiveRouteTab.js';
 
 export const TechnicianRouteView = {
   name: 'TechnicianRouteView',
   components: {
     IncidentBadge,
     ModalDialog,
-    TechnicianMetricsView
+    TechnicianMetricsView,
+    TechnicianPreventiveRouteTab
   },
   data() {
     return {
@@ -357,6 +359,13 @@ export const TechnicianRouteView = {
       } catch (e) {
         return isoString;
       }
+    },
+
+    /**
+     * Emits event to open the preventive checklist modal (RF-PREV-03 / T-PREV-21)
+     */
+    handleOpenPreventiveChecklist(order) {
+      this.$emit('open-preventive-checklist', order);
     }
   },
   template: `
@@ -482,20 +491,28 @@ export const TechnicianRouteView = {
           </div>
         </div>
 
-        <!-- Barra de Navegación Móvil del Técnico (RF-07, RF-04) -->
-        <div style="display: flex; gap: 8px; margin-bottom: 14px; background: #e5f2fc; padding: 4px; border-radius: 8px;">
+        <!-- Barra de Navegación Móvil del Técnico (RF-07, RF-04, RF-PREV-02) -->
+        <div style="display: flex; gap: 6px; margin-bottom: 14px; background: #e5f2fc; padding: 4px; border-radius: 8px;">
           <button
             type="button"
             @click="activeSection = 'route'"
-            :style="{ flex: 1, padding: '8px 12px', fontSize: '13px', fontWeight: '700', borderRadius: '6px', border: 'none', cursor: 'pointer', backgroundColor: activeSection === 'route' ? '#2560ff' : 'transparent', color: activeSection === 'route' ? '#ffffff' : '#2c333f', transition: 'all 0.2s ease' }"
+            :style="{ flex: 1, padding: '8px 8px', fontSize: '12px', fontWeight: '700', borderRadius: '6px', border: 'none', cursor: 'pointer', backgroundColor: activeSection === 'route' ? '#2560ff' : 'transparent', color: activeSection === 'route' ? '#ffffff' : '#2c333f', transition: 'all 0.2s ease' }"
             data-testid="tech-tab-route"
           >
-            📍 Mi Ruta ({{ routeMetrics.total }})
+            📍 Averías ({{ routeMetrics.total }})
+          </button>
+          <button
+            type="button"
+            @click="activeSection = 'preventive'"
+            :style="{ flex: 1, padding: '8px 8px', fontSize: '12px', fontWeight: '700', borderRadius: '6px', border: 'none', cursor: 'pointer', backgroundColor: activeSection === 'preventive' ? '#2560ff' : 'transparent', color: activeSection === 'preventive' ? '#ffffff' : '#2c333f', transition: 'all 0.2s ease' }"
+            data-testid="tech-tab-preventive"
+          >
+            🛡️ Preventivo
           </button>
           <button
             type="button"
             @click="activeSection = 'metrics'"
-            :style="{ flex: 1, padding: '8px 12px', fontSize: '13px', fontWeight: '700', borderRadius: '6px', border: 'none', cursor: 'pointer', backgroundColor: activeSection === 'metrics' ? '#2560ff' : 'transparent', color: activeSection === 'metrics' ? '#ffffff' : '#2c333f', transition: 'all 0.2s ease' }"
+            :style="{ flex: 1, padding: '8px 8px', fontSize: '12px', fontWeight: '700', borderRadius: '6px', border: 'none', cursor: 'pointer', backgroundColor: activeSection === 'metrics' ? '#2560ff' : 'transparent', color: activeSection === 'metrics' ? '#ffffff' : '#2c333f', transition: 'all 0.2s ease' }"
             data-testid="tech-tab-metrics"
           >
             📈 Mis Métricas
@@ -505,6 +522,15 @@ export const TechnicianRouteView = {
         <!-- SECCIÓN 2: MIS MÉTRICAS DE RENDIMIENTO (RF-04) -->
         <div v-if="activeSection === 'metrics'">
           <TechnicianMetricsView />
+        </div>
+
+        <!-- SECCIÓN 3: MANTENIMIENTO PREVENTIVO Y VISITA OPORTUNISTA (RF-PREV-02, EARS 2.3) -->
+        <div v-else-if="activeSection === 'preventive'">
+          <TechnicianPreventiveRouteTab
+            @open-checklist="handleOpenPreventiveChecklist($event)"
+            @order-claimed="loadRoute"
+            @inspection-started="loadRoute"
+          />
         </div>
 
         <!-- SECCIÓN 1: RUTA OPERATIVA DE TRABAJO (RF-07, RF-08) -->

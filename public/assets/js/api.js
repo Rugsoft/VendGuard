@@ -538,6 +538,27 @@ export class ApiClient {
         resolution_diagnosis: diagnosis,
         resolution_action: actionTaken
       });
+    },
+
+    // Mantenimiento Preventivo y Checklists Sanitarios (Módulo 05: RF-PREV-02, RF-PREV-03, RF-PREV-04, RF-PREV-08)
+    getPreventiveRoute: (locationId = null) => {
+      const q = locationId ? `?location_id=${Number(locationId)}` : '';
+      return this.get(`/technician/preventive/route${q}`);
+    },
+    claimPreventiveOrder: (orderId) => {
+      return this.post(`/technician/preventive/orders/${orderId}/claim`);
+    },
+    getPreventiveChecklist: (orderId) => {
+      return this.get(`/technician/preventive/orders/${orderId}/checklist`);
+    },
+    startPreventiveInspection: (orderId) => {
+      return this.post(`/technician/preventive/orders/${orderId}/start`);
+    },
+    completePreventiveInspection: (orderId, payload) => {
+      return this.post(`/technician/preventive/orders/${orderId}/complete`, payload);
+    },
+    reinspectPreventiveOrder: (orderId, payload) => {
+      return this.post(`/technician/preventive/orders/${orderId}/reinspect`, payload);
     }
   };
 

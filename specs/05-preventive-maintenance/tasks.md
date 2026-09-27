@@ -124,7 +124,7 @@
   * **Dependencias:** T-PREV-13
   * **Hecho cuando:** El componente Vue 3 ESM permite ajustar frecuencias sanitarias bloqueando entradas $> 15$ días en perecederos e incluye formulario para activar/desactivar pausas estacionales con fecha y motivo justificado.
 
-- [ ] **T-PREV-20: Implementar `TechnicianPreventiveRouteTab.js` con Visita Oportunista**
+- [x] **T-PREV-20: Implementar `TechnicianPreventiveRouteTab.js` con Visita Oportunista**
   * **Requisitos:** RF-PREV-02 (EARS 2.3)
   * **Dependencias:** T-PREV-14
   * **Hecho cuando:** La vista móvil del técnico agrupa sus inspecciones asignadas y destaca órdenes pendientes de la sede en la que se encuentra trabajando para permitir su autoasignación inmediata con un solo toque.
