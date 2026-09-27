@@ -19,6 +19,8 @@
 
 import { api } from '../api.js';
 import { QrInactiveMachineNotice } from '../components/QrInactiveMachineNotice.js';
+import { QrSanitaryQuarantineModal } from '../components/QrSanitaryQuarantineModal.js';
+import { QrSeasonalPauseNotice } from '../components/QrSeasonalPauseNotice.js';
 
 export const INCIDENT_CATEGORIES = [
   {
@@ -56,7 +58,9 @@ export const INCIDENT_CATEGORIES = [
 export const QrReportView = {
   name: 'QrReportView',
   components: {
-    QrInactiveMachineNotice
+    QrInactiveMachineNotice,
+    QrSanitaryQuarantineModal,
+    QrSeasonalPauseNotice
   },
   props: {
     code: {
@@ -74,8 +78,9 @@ export const QrReportView = {
       // Estado de carga y resolución
       loading: true,
       loadError: '',
-      statusMode: 'CAN_REPORT', // 'CAN_REPORT' | 'ACTIVE_INCIDENT' | 'UNDER_WARRANTY' | 'NOT_FOUND' | 'INACTIVE'
+      statusMode: 'CAN_REPORT', // 'CAN_REPORT' | 'ACTIVE_INCIDENT' | 'UNDER_WARRANTY' | 'NOT_FOUND' | 'INACTIVE' | 'SANITARY_QUARANTINE' | 'SEASONAL_PAUSE'
       inactiveNoticeMessage: '',
+      alertData: null,
 
       // Datos resueltos de la máquina y sede
       machine: null,
@@ -180,6 +185,25 @@ export const QrReportView = {
             contact_phone: data.support_phone || data.contact_phone || ''
           };
           this.inactiveNoticeMessage = data.message || 'Esta máquina de vending se encuentra temporalmente retirada o fuera de servicio. No es posible registrar nuevas incidencias sobre este dispositivo.';
+          return;
+        }
+
+        // Máquina en Cuarentena Sanitaria (RF-PREV-04, Art. II)
+        if (data.status_mode === 'SANITARY_QUARANTINE') {
+          this.statusMode = 'SANITARY_QUARANTINE';
+          this.machine = data.machine || null;
+          this.location = data.location || null;
+          this.alertData = data.alert || null;
+          this.activeIncident = data.active_incident || null;
+          return;
+        }
+
+        // Máquina en Pausa Estacional Programada (RF-PREV-01, EARS 1.5, Decisión 9)
+        if (data.status_mode === 'SEASONAL_PAUSE') {
+          this.statusMode = 'SEASONAL_PAUSE';
+          this.machine = data.machine || null;
+          this.location = data.location || null;
+          this.alertData = data.alert || null;
           return;
         }
 
@@ -383,7 +407,26 @@ export const QrReportView = {
           </button>
         </div>
 
-        <!-- 4. Máquina Inactiva / Retirada del Parque (RF-04, EARS 2.12) -->
+        <!-- 4. Máquina en Cuarentena Sanitaria (RF-PREV-01, RF-PREV-04, Art. II) -->
+        <QrSanitaryQuarantineModal
+          v-else-if="statusMode === 'SANITARY_QUARANTINE'"
+          :machine="machine"
+          :location="location"
+          :alert="alertData"
+          :active-incident="activeIncident"
+          @go-home="goHome"
+        />
+
+        <!-- 4b. Máquina en Pausa Estacional (RF-PREV-01, EARS 1.5, Decisión 9) -->
+        <QrSeasonalPauseNotice
+          v-else-if="statusMode === 'SEASONAL_PAUSE'"
+          :machine="machine"
+          :location="location"
+          :alert="alertData"
+          @go-home="goHome"
+        />
+
+        <!-- 4c. Máquina Inactiva / Retirada del Parque (RF-04, EARS 2.12) -->
         <QrInactiveMachineNotice
           v-else-if="statusMode === 'INACTIVE'"
           :machine="machine"

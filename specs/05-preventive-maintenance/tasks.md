@@ -139,7 +139,7 @@
   * **Dependencias:** T-PREV-15
   * **Hecho cuando:** El portal de sede muestra los semáforos higiénicos, permite visualizar e imprimir en A4 (`@media print`) el certificado oficial individual con `operator_code` (sin DNI privado) y el certificado consolidado de sede con dictamen `CONDICIONADO` ante incidencias.
 
-- [ ] **T-PREV-23: Implementar componentes públicos `QrSanitaryQuarantineModal.js` y `QrSeasonalPauseNotice.js` e integrarlos en `QrReportView.js`**
+- [x] **T-PREV-23: Implementar componentes públicos `QrSanitaryQuarantineModal.js` y `QrSeasonalPauseNotice.js` e integrarlos en `QrReportView.js`**
   * **Requisitos:** RF-PREV-01, RF-PREV-04, Constitución Art. II
   * **Dependencias:** T-PREV-16
   * **Hecho cuando:** El escaneo QR ciudadano de una máquina en cuarentena muestra la alerta roja prominente con bloqueo total de reporte y compra; y en máquinas en pausa estacional muestra el aviso informativo vacacional.
