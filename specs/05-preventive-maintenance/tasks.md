@@ -56,7 +56,7 @@
 
 ## Fase 3: Servicios de Aplicación y Reglas de Negocio
 
-- [ ] **T-PREV-08: Implementar `PreventiveSettingsService.php` y suite unitaria `PreventiveSettingsServiceTest.php`**
+- [x] **T-PREV-08: Implementar `PreventiveSettingsService.php` y suite unitaria `PreventiveSettingsServiceTest.php`**
   * **Requisitos:** RF-PREV-01, Constitución Art. II
   * **Dependencias:** T-PREV-02, T-PREV-04
   * **Hecho cuando:** `PreventiveSettingsService` valida y bloquea cualquier intento de configurar frecuencias $> 15$ días en perecederos (`PerishableFrequencyLimitException`), gestiona pausas estacionales con justificación obligatoria y registra eventos en `audit_log`, pasando al 100% `php tests/unit/PreventiveSettingsServiceTest.php`.
