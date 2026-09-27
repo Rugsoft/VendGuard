@@ -339,6 +339,48 @@ export class ApiClient {
   };
 
   /**
+   * 2b. Site Sanitary & Certificates (RF-PREV-06, RF-PREV-07, Art. V.4)
+   */
+  site = {
+    /**
+     * Retrieves sanitary status and semaphores for all machines in authenticated location.
+     * @returns {Promise<Object>}
+     */
+    getSanitaryStatus: () => {
+      return this.get('/site/sanitary-status');
+    },
+
+    /**
+     * Retrieves individual official sanitary certificate for a machine.
+     * @param {string} machineCode
+     * @param {string} [format='json']
+     * @returns {Promise<Object|string>}
+     */
+    getMachineCertificate: (machineCode, format = 'json') => {
+      if (format === 'html') {
+        return this.get(`/site/certificates/machine/${encodeURIComponent(machineCode)}?format=html`, {
+          headers: { 'Accept': 'text/html' }
+        });
+      }
+      return this.get(`/site/certificates/machine/${encodeURIComponent(machineCode)}`);
+    },
+
+    /**
+     * Retrieves global consolidated sanitary certificate for authenticated location.
+     * @param {string} [format='json']
+     * @returns {Promise<Object|string>}
+     */
+    getGlobalCertificate: (format = 'json') => {
+      if (format === 'html') {
+        return this.get('/site/certificates/global?format=html', {
+          headers: { 'Accept': 'text/html' }
+        });
+      }
+      return this.get('/site/certificates/global');
+    }
+  };
+
+  /**
    * 3. Incidents (Reporting, Comments, Reopening)
    */
   incidents = {

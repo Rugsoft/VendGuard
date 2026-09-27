@@ -15,13 +15,19 @@ import { store } from '../store.js';
 import { MachineCard } from '../components/MachineCard.js';
 import { IncidentReportModal } from '../components/IncidentReportModal.js';
 import { ReopenTicketModal } from '../components/ReopenTicketModal.js';
+import { SiteSanitaryStatusTab } from '../components/SiteSanitaryStatusTab.js';
+import { SanitaryCertificateModal } from '../components/SanitaryCertificateModal.js';
+import { SiteGlobalCertificateModal } from '../components/SiteGlobalCertificateModal.js';
 
 export const LocationPortalView = {
   name: 'LocationPortalView',
   components: {
     MachineCard,
     IncidentReportModal,
-    ReopenTicketModal
+    ReopenTicketModal,
+    SiteSanitaryStatusTab,
+    SanitaryCertificateModal,
+    SiteGlobalCertificateModal
   },
   emits: ['report-incident', 'add-comment', 'reopen-incident'],
   data() {
@@ -32,10 +38,14 @@ export const LocationPortalView = {
       machines: [],
       isLoadingMachines: false,
       machinesError: '',
+      activePortalTab: 'machines', // 'machines' | 'sanitary'
       activeFilter: 'all', // 'all' | 'incident' | 'operational'
       selectedMachine: null,
       showReportModal: false,
-      showReopenModal: false
+      showReopenModal: false,
+      showSanitaryCertModal: false,
+      showGlobalCertModal: false,
+      selectedCertMachineCode: ''
     };
   },
   computed: {
@@ -155,6 +165,19 @@ export const LocationPortalView = {
     onCreateNewTicketFromExpired(machine) {
       this.selectedMachine = machine;
       this.showReportModal = true;
+    },
+
+    setPortalTab(tab) {
+      this.activePortalTab = tab;
+    },
+
+    onViewMachineCertificate(machineCode) {
+      this.selectedCertMachineCode = machineCode;
+      this.showSanitaryCertModal = true;
+    },
+
+    onViewGlobalCertificate() {
+      this.showGlobalCertModal = true;
     }
   },
   template: `
@@ -269,102 +292,151 @@ export const LocationPortalView = {
           </button>
         </div>
 
-        <!-- Filter Tabs & Stats -->
-        <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px;">
-          <!-- Tabs -->
-          <div style="display: flex; gap: 6px; background-color: #f3f4f6; padding: 4px; border-radius: var(--radius-interactive, 4px);">
-            <button
-              type="button"
-              class="vg-btn"
-              :style="{
-                backgroundColor: activeFilter === 'all' ? '#ffffff' : 'transparent',
-                color: activeFilter === 'all' ? 'var(--color-primary, #2560ff)' : 'var(--color-slate, #2c333f)',
-                boxShadow: activeFilter === 'all' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                height: '32px',
-                fontSize: '13px',
-                padding: '0 12px',
-                borderRadius: 'var(--radius-interactive, 4px)'
-              }"
-              @click="setFilter('all')"
-            >
-              Todas ({{ totalCount }})
-            </button>
-            <button
-              type="button"
-              class="vg-btn"
-              :style="{
-                backgroundColor: activeFilter === 'incident' ? '#ffffff' : 'transparent',
-                color: activeFilter === 'incident' ? '#b91c1c' : 'var(--color-slate, #2c333f)',
-                boxShadow: activeFilter === 'incident' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                height: '32px',
-                fontSize: '13px',
-                padding: '0 12px',
-                borderRadius: 'var(--radius-interactive, 4px)'
-              }"
-              @click="setFilter('incident')"
-            >
-              Con Avería ({{ incidentCount }})
-            </button>
-            <button
-              type="button"
-              class="vg-btn"
-              :style="{
-                backgroundColor: activeFilter === 'operational' ? '#ffffff' : 'transparent',
-                color: activeFilter === 'operational' ? '#15803d' : 'var(--color-slate, #2c333f)',
-                boxShadow: activeFilter === 'operational' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                height: '32px',
-                fontSize: '13px',
-                padding: '0 12px',
-                borderRadius: 'var(--radius-interactive, 4px)'
-              }"
-              @click="setFilter('operational')"
-            >
-              Operativas ({{ operationalCount }})
-            </button>
+        <!-- Portal Section Tabs: Machines vs Sanitary (RF-PREV-06, RF-PREV-07) -->
+        <div style="display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--color-hairline, #c8cfda); padding-bottom: 10px;">
+          <button
+            type="button"
+            class="vg-btn"
+            :style="{
+              backgroundColor: activePortalTab === 'machines' ? 'var(--color-primary, #2560ff)' : '#ffffff',
+              color: activePortalTab === 'machines' ? '#ffffff' : 'var(--color-slate, #2c333f)',
+              border: '1px solid ' + (activePortalTab === 'machines' ? 'var(--color-primary, #2560ff)' : 'var(--color-hairline, #c8cfda)'),
+              borderRadius: 'var(--radius-interactive, 4px)',
+              fontSize: '13px',
+              fontWeight: '600',
+              height: '36px',
+              padding: '0 16px'
+            }"
+            @click="setPortalTab('machines')"
+          >
+            📋 Máquinas e Incidencias
+          </button>
+          <button
+            type="button"
+            class="vg-btn"
+            :style="{
+              backgroundColor: activePortalTab === 'sanitary' ? 'var(--color-primary, #2560ff)' : '#ffffff',
+              color: activePortalTab === 'sanitary' ? '#ffffff' : 'var(--color-slate, #2c333f)',
+              border: '1px solid ' + (activePortalTab === 'sanitary' ? 'var(--color-primary, #2560ff)' : 'var(--color-hairline, #c8cfda)'),
+              borderRadius: 'var(--radius-interactive, 4px)',
+              fontSize: '13px',
+              fontWeight: '600',
+              height: '36px',
+              padding: '0 16px'
+            }"
+            @click="setPortalTab('sanitary')"
+          >
+            🛡️ Control Higiénico y Certificados
+          </button>
+        </div>
+
+        <!-- TAB 1: Machines & Incidents View -->
+        <div v-if="activePortalTab === 'machines'">
+          <!-- Filter Tabs & Stats -->
+          <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px;">
+            <!-- Tabs -->
+            <div style="display: flex; gap: 6px; background-color: #f3f4f6; padding: 4px; border-radius: var(--radius-interactive, 4px);">
+              <button
+                type="button"
+                class="vg-btn"
+                :style="{
+                  backgroundColor: activeFilter === 'all' ? '#ffffff' : 'transparent',
+                  color: activeFilter === 'all' ? 'var(--color-primary, #2560ff)' : 'var(--color-slate, #2c333f)',
+                  boxShadow: activeFilter === 'all' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                  height: '32px',
+                  fontSize: '13px',
+                  padding: '0 12px',
+                  borderRadius: 'var(--radius-interactive, 4px)'
+                }"
+                @click="setFilter('all')"
+              >
+                Todas ({{ totalCount }})
+              </button>
+              <button
+                type="button"
+                class="vg-btn"
+                :style="{
+                  backgroundColor: activeFilter === 'incident' ? '#ffffff' : 'transparent',
+                  color: activeFilter === 'incident' ? '#b91c1c' : 'var(--color-slate, #2c333f)',
+                  boxShadow: activeFilter === 'incident' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                  height: '32px',
+                  fontSize: '13px',
+                  padding: '0 12px',
+                  borderRadius: 'var(--radius-interactive, 4px)'
+                }"
+                @click="setFilter('incident')"
+              >
+                Con Avería ({{ incidentCount }})
+              </button>
+              <button
+                type="button"
+                class="vg-btn"
+                :style="{
+                  backgroundColor: activeFilter === 'operational' ? '#ffffff' : 'transparent',
+                  color: activeFilter === 'operational' ? '#15803d' : 'var(--color-slate, #2c333f)',
+                  boxShadow: activeFilter === 'operational' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                  height: '32px',
+                  fontSize: '13px',
+                  padding: '0 12px',
+                  borderRadius: 'var(--radius-interactive, 4px)'
+                }"
+                @click="setFilter('operational')"
+              >
+                Operativas ({{ operationalCount }})
+              </button>
+            </div>
+
+            <div style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-muted, #6c7e9d);">
+              Mostrando {{ filteredMachines.length }} de {{ totalCount }} máquinas
+            </div>
           </div>
 
-          <div style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-muted, #6c7e9d);">
-            Mostrando {{ filteredMachines.length }} de {{ totalCount }} máquinas
+          <!-- Machines Grid (8px cards) -->
+          <div v-if="isLoadingMachines && machines.length === 0" style="text-align: center; padding: 48px;">
+            <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 15px; color: var(--color-slate, #2c333f);">
+              Cargando el parque de máquinas del centro...
+            </p>
+          </div>
+
+          <div
+            v-else-if="machinesError"
+            style="background-color: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; padding: 16px; border-radius: var(--radius-card, 8px); margin-bottom: 24px; text-align: center;"
+          >
+            <p style="margin: 0 0 10px 0;">{{ machinesError }}</p>
+            <button type="button" class="vg-btn vg-btn-secondary" @click="loadMachines">Reintentar</button>
+          </div>
+
+          <div
+            v-else-if="filteredMachines.length === 0"
+            style="text-align: center; padding: 48px; background-color: #ffffff; border: 1px dashed var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px);"
+          >
+            <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 14px; color: var(--color-ink-muted, #6c7e9d); margin: 0;">
+              No se han encontrado máquinas con el filtro seleccionado.
+            </p>
+          </div>
+
+          <!-- Responsive Card Grid with 8px border radius cards -->
+          <div
+            v-else
+            class="vg-machine-grid"
+            style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;"
+          >
+            <MachineCard
+              v-for="m in filteredMachines"
+              :key="m.id"
+              :machine="m"
+              @report="onReport"
+              @comment="onComment"
+              @reopen="onReopen"
+            />
           </div>
         </div>
 
-        <!-- Machines Grid (8px cards) -->
-        <div v-if="isLoadingMachines && machines.length === 0" style="text-align: center; padding: 48px;">
-          <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 15px; color: var(--color-slate, #2c333f);">
-            Cargando el parque de máquinas del centro...
-          </p>
-        </div>
-
-        <div
-          v-else-if="machinesError"
-          style="background-color: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; padding: 16px; border-radius: var(--radius-card, 8px); margin-bottom: 24px; text-align: center;"
-        >
-          <p style="margin: 0 0 10px 0;">{{ machinesError }}</p>
-          <button type="button" class="vg-btn vg-btn-secondary" @click="loadMachines">Reintentar</button>
-        </div>
-
-        <div
-          v-else-if="filteredMachines.length === 0"
-          style="text-align: center; padding: 48px; background-color: #ffffff; border: 1px dashed var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px);"
-        >
-          <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 14px; color: var(--color-ink-muted, #6c7e9d); margin: 0;">
-            No se han encontrado máquinas con el filtro seleccionado.
-          </p>
-        </div>
-
-        <!-- Responsive Card Grid with 8px border radius cards -->
-        <div
-          v-else
-          class="vg-machine-grid"
-          style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;"
-        >
-          <MachineCard
-            v-for="m in filteredMachines"
-            :key="m.id"
-            :machine="m"
-            @report="onReport"
-            @comment="onComment"
-            @reopen="onReopen"
+        <!-- TAB 2: Sanitary Status & Certificates Tab (RF-PREV-06, RF-PREV-07) -->
+        <div v-else-if="activePortalTab === 'sanitary'">
+          <SiteSanitaryStatusTab
+            @view-certificate="onViewMachineCertificate"
+            @view-global-certificate="onViewGlobalCertificate"
           />
         </div>
 
@@ -382,6 +454,17 @@ export const LocationPortalView = {
           :machine="selectedMachine"
           @reopened="onIncidentReopened"
           @create-new-ticket="onCreateNewTicketFromExpired"
+        />
+
+        <!-- Sanitary Individual Certificate Modal (RF-PREV-07, Art. V.4) -->
+        <SanitaryCertificateModal
+          v-model="showSanitaryCertModal"
+          :machine-code="selectedCertMachineCode"
+        />
+
+        <!-- Site Global Consolidated Certificate Modal (RF-PREV-07, EARS 7.2) -->
+        <SiteGlobalCertificateModal
+          v-model="showGlobalCertModal"
         />
       </div>
     </div>

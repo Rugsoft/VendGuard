@@ -134,7 +134,7 @@
   * **Dependencias:** T-PREV-14
   * **Hecho cuando:** El modal táctil permite registrar la temperatura con teclado numérico estricto `[-5.0, 25.0]` y responder los ítems del checklist en menos de 90 segundos; y el modal de reinspección permite registrar la lectura de comprobación tras resolver la avería.
 
-- [ ] **T-PREV-22: Implementar `SiteSanitaryStatusTab.js`, `SanitaryCertificateModal.js` y `SiteGlobalCertificateModal.js`**
+- [x] **T-PREV-22: Implementar `SiteSanitaryStatusTab.js`, `SanitaryCertificateModal.js` y `SiteGlobalCertificateModal.js`**
   * **Requisitos:** RF-PREV-06, RF-PREV-07, RNF-03, Constitución Art. V.4
   * **Dependencias:** T-PREV-15
   * **Hecho cuando:** El portal de sede muestra los semáforos higiénicos, permite visualizar e imprimir en A4 (`@media print`) el certificado oficial individual con `operator_code` (sin DNI privado) y el certificado consolidado de sede con dictamen `CONDICIONADO` ante incidencias.
