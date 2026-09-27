@@ -18,7 +18,7 @@
   * **Dependencias:** Ninguna
   * **Hecho cuando:** La ejecución de `php bin/migrate.php` aplica con éxito `005_preventive_maintenance.sql`, creando las tablas `preventive_settings`, `preventive_orders`, `preventive_order_items`, `sanitary_certificates`, ampliando `machines` (semáforo, próximas fechas y pausa estacional), `users` (`operator_code`), `incidents` (`preventive_order_id`) y `audit_log`; `database/cloud_init.sql` queda consolidado con semillas normativas (máximo 15 días en perecederos).
 
-- [ ] **T-PREV-02: Implementar Excepciones de Dominio Preventivas**
+- [x] **T-PREV-02: Implementar Excepciones de Dominio Preventivas**
   * **Requisitos:** RF-PREV-01, RF-PREV-03, RF-PREV-04, RF-PREV-07, RNF-06, Constitución Art. II
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existen en `src/Core/Domain/Exception/` las 8 clases tipadas (`PerishableFrequencyLimitException`, `InvalidTemperatureRangeException`, `ChecklistIncompleteException`, `PreventiveOrderAlreadyAssignedException`, `PreventiveOrderNotInInspectionException`, `ReinspectionTemperatureExceededException`, `CannotIssueNonConformCertificateException` y `SeasonalPauseMissingReasonException`), cada una proveyendo su código de error técnico y mensaje en castellano según contrato.
