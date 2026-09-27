@@ -8,6 +8,7 @@ use PDO;
 use Throwable;
 use VendGuard\Core\Domain\Model\PreventiveOrderItem;
 use VendGuard\Core\Domain\Repository\PreventiveItemRepositoryInterface;
+use VendGuard\Infrastructure\Database\ConnectionFactory;
 
 /**
  * Repositorio PDO de Ítems del Checklist Preventivo
@@ -18,9 +19,12 @@ use VendGuard\Core\Domain\Repository\PreventiveItemRepositoryInterface;
  */
 class PdoPreventiveItemRepository implements PreventiveItemRepositoryInterface
 {
+    private PDO $pdo;
+
     public function __construct(
-        private PDO $pdo
+        ?PDO $pdo = null
     ) {
+        $this->pdo = $pdo ?? ConnectionFactory::getConnection();
     }
 
     /**

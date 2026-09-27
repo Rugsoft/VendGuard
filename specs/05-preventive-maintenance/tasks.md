@@ -105,7 +105,7 @@
   * **Dependencias:** T-PREV-10
   * **Hecho cuando:** `GET /api/qr/scan/{code}` sobre una máquina en cuarentena responde HTTP `200` con `status_mode = "SANITARY_QUARANTINE"`, alerta sanitaria roja y bloqueo de reportes/compras; y sobre una máquina en pausa estacional responde `status_mode = "SEASONAL_PAUSE"` con aviso vacacional.
 
-- [ ] **T-PREV-17: Crear suites de integración HTTP (`CoordinatorPreventiveApiTest.php`, `TechnicianPreventiveApiTest.php`, `SiteSanitaryApiTest.php`, `QrSanitaryModeApiTest.php`)**
+- [x] **T-PREV-17: Crear suites de integración HTTP (`CoordinatorPreventiveApiTest.php`, `TechnicianPreventiveApiTest.php`, `SiteSanitaryApiTest.php`, `QrSanitaryModeApiTest.php`)**
   * **Requisitos:** RF-PREV-01 a RF-PREV-08, RNF-04, RNF-05
   * **Dependencias:** T-PREV-13, T-PREV-14, T-PREV-15, T-PREV-16
   * **Hecho cuando:** La ejecución de las 4 suites de integración PHP pasa al 100% en verde evaluando peticiones HTTP reales, validaciones Bearer, respuestas JSON y registro de eventos en `audit_log`.
