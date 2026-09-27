@@ -443,6 +443,50 @@ export class ApiClient {
      */
     getLocationMachines: (locationId) => {
       return this.get(`/coordinator/locations/${locationId}/machines`);
+    },
+
+    // Mantenimiento Preventivo (Módulo 05: RF-PREV-01, RF-PREV-02, RF-PREV-06)
+    getPreventiveDashboard: () => {
+      return this.get('/coordinator/preventive/dashboard');
+    },
+    getPreventiveOrders: (filters = {}) => {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(filters)) {
+        if (value !== undefined && value !== null && value !== '') {
+          params.append(key, String(value));
+        }
+      }
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      return this.get(`/coordinator/preventive/orders${qs}`);
+    },
+    createPreventiveOrder: (payload) => {
+      return this.post('/coordinator/preventive/orders', payload);
+    },
+    generateDuePreventiveOrders: (horizonDays = 5) => {
+      return this.post('/coordinator/preventive/generate-due', { horizon_days: Number(horizonDays) });
+    },
+    assignPreventiveOrder: (orderId, technicianId, scheduledDate) => {
+      return this.patch(`/coordinator/preventive/orders/${orderId}/assign`, {
+        technician_id: Number(technicianId),
+        scheduled_date: scheduledDate
+      });
+    },
+    cancelPreventiveOrder: (orderId, reason) => {
+      return this.patch(`/coordinator/preventive/orders/${orderId}/cancel`, {
+        reason: String(reason)
+      });
+    },
+    getPreventiveSettings: () => {
+      return this.get('/coordinator/preventive/settings');
+    },
+    updatePreventiveSettings: (payload) => {
+      return this.patch('/coordinator/preventive/settings', payload);
+    },
+    getMachinePreventiveConfig: (machineId) => {
+      return this.get(`/coordinator/machines/${machineId}/preventive-config`);
+    },
+    updateMachinePreventiveConfig: (machineId, payload) => {
+      return this.patch(`/coordinator/machines/${machineId}/preventive-config`, payload);
     }
   };
 

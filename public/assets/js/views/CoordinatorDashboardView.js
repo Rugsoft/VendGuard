@@ -23,6 +23,8 @@ import { CoordinatorMetricsView } from './CoordinatorMetricsView.js';
 import { AdminLocationsTab } from '../components/AdminLocationsTab.js';
 import { AdminMachinesTab } from '../components/AdminMachinesTab.js';
 import { AdminUsersTab } from '../components/AdminUsersTab.js';
+import { CoordinatorPreventiveDashboard } from '../components/CoordinatorPreventiveDashboard.js';
+import { CoordinatorPreventiveOrdersTab } from '../components/CoordinatorPreventiveOrdersTab.js';
 
 // Canonical mapping for bilingual status values
 const STATUS_CANONICAL_MAP = {
@@ -67,14 +69,17 @@ export const CoordinatorDashboardView = {
     CoordinatorMetricsView,
     AdminLocationsTab,
     AdminMachinesTab,
-    AdminUsersTab
+    AdminUsersTab,
+    CoordinatorPreventiveDashboard,
+    CoordinatorPreventiveOrdersTab
   },
   emits: ['assigned', 'cancelled', 'refresh'],
   data() {
     return {
-      // Navigation Tabs (RF-FLEET-01, RF-03, RF-05)
-      activeTab: 'incidents', // 'incidents' | 'fleet' | 'admin' | 'metrics'
+      // Navigation Tabs (RF-FLEET-01, RF-03, RF-05, RF-PREV-02)
+      activeTab: 'incidents', // 'incidents' | 'fleet' | 'preventive' | 'admin' | 'metrics'
       activeAdminSubTab: 'locations', // 'locations' | 'machines' | 'users'
+      activePreventiveSubTab: 'dashboard', // 'dashboard' | 'orders'
 
       // Login Form
       loginEmail: '',
@@ -542,6 +547,17 @@ export const CoordinatorDashboardView = {
           <button
             type="button"
             class="vg-btn"
+            :class="activeTab === 'preventive' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
+            @click="activeTab = 'preventive'"
+            data-testid="tab-preventive"
+          >
+            🛡️ Mantenimiento Preventivo
+          </button>
+
+          <button
+            type="button"
+            class="vg-btn"
             :class="activeTab === 'admin' ? 'vg-btn-primary' : 'vg-btn-secondary'"
             style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
             @click="activeTab = 'admin'"
@@ -864,6 +880,57 @@ export const CoordinatorDashboardView = {
         @open-qr="openQrLabelModal($event)"
         @open-batch-print="openQrBatchPrint($event.locationId, $event.locationName)"
       />
+
+      <!-- CONTENIDO PESTAÑA: MANTENIMIENTO PREVENTIVO Y SANITARIO (RF-PREV-02, RF-PREV-06) -->
+      <div v-else-if="activeTab === 'preventive'" class="vg-preventive-management-container" data-testid="preventive-panel-container">
+        <!-- Sub-barra de navegación con subpestañas operativas -->
+        <div class="card mb-4 shadow-sm" style="border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px); background-color: #ffffff; padding: 10px 16px; margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <span style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Módulo Preventivo:</span>
+              <div style="display: flex; gap: 6px;">
+                <button
+                  type="button"
+                  class="vg-btn"
+                  :class="activePreventiveSubTab === 'dashboard' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+                  style="height: 34px; font-size: 13px; font-weight: 600; padding: 0 14px; border-radius: var(--radius-interactive, 4px);"
+                  @click="activePreventiveSubTab = 'dashboard'"
+                  data-testid="subtab-preventive-dashboard"
+                >
+                  📊 Semáforos e Indicadores
+                </button>
+                <button
+                  type="button"
+                  class="vg-btn"
+                  :class="activePreventiveSubTab === 'orders' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+                  style="height: 34px; font-size: 13px; font-weight: 600; padding: 0 14px; border-radius: var(--radius-interactive, 4px);"
+                  @click="activePreventiveSubTab = 'orders'"
+                  data-testid="subtab-preventive-orders"
+                >
+                  📋 Listado de Órdenes
+                </button>
+              </div>
+            </div>
+            <div style="font-size: 12px; color: #64748b;">
+              <span>🛡️ M1: Periodicidad higiénico-sanitaria y salvaguarda alimentaria (Art. II)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Subpestaña 1: Semáforos y Panel Preventivo (RF-PREV-06) -->
+        <CoordinatorPreventiveDashboard
+          v-if="activePreventiveSubTab === 'dashboard'"
+          @view-orders="activePreventiveSubTab = 'orders'"
+          @refresh="loadIncidents(true)"
+        />
+
+        <!-- Subpestaña 2: Listado y Asignación de Órdenes (RF-PREV-02) -->
+        <CoordinatorPreventiveOrdersTab
+          v-else-if="activePreventiveSubTab === 'orders'"
+          @order-assigned="loadIncidents(true)"
+          @order-cancelled="loadIncidents(true)"
+        />
+      </div>
 
       <!-- CONTENIDO PESTAÑA 3: ADMINISTRACIÓN INTEGRAL (RF-01, RF-02, RF-03, RF-05) -->
       <div v-else-if="activeTab === 'admin'" class="vg-admin-management-container" data-testid="admin-panel-container">

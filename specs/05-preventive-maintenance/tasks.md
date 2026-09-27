@@ -114,7 +114,7 @@
 
 ## Fase 5: Componentes Frontend y Vistas Vanilla Vue 3
 
-- [ ] **T-PREV-18: Implementar `CoordinatorPreventiveDashboard.js` y `CoordinatorPreventiveOrdersTab.js`**
+- [x] **T-PREV-18: Implementar `CoordinatorPreventiveDashboard.js` y `CoordinatorPreventiveOrdersTab.js`**
   * **Requisitos:** RF-PREV-02, RF-PREV-06
   * **Dependencias:** T-PREV-13
   * **Hecho cuando:** Los componentes Vue 3 ESM renderizan los KPIs de semáforos de parque, alertas de máquinas en cuarentena, listado de órdenes con filtros, botón "Generar Preventivos Inminentes", modal de asignación técnica y cancelación lógica justificada.
