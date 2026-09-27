@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use PDO;
 use VendGuard\Core\Domain\Model\SanitaryCertificate;
 use VendGuard\Core\Domain\Repository\SanitaryCertificateRepositoryInterface;
+use VendGuard\Infrastructure\Database\ConnectionFactory;
 
 /**
  * Repositorio PDO de Certificados Sanitarios Oficiales
@@ -17,9 +18,12 @@ use VendGuard\Core\Domain\Repository\SanitaryCertificateRepositoryInterface;
  */
 class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryInterface
 {
+    private PDO $pdo;
+
     public function __construct(
-        private PDO $pdo
+        ?PDO $pdo = null
     ) {
+        $this->pdo = $pdo ?? ConnectionFactory::getConnection();
     }
 
     /**

@@ -135,6 +135,14 @@ class AppRouter
         $router->patch('/api/technician/{id}/pause', [\VendGuard\Presentation\Controller\TechnicianController::class, 'pauseIntervention'], [$technicianAuth]);
         $router->post('/api/technician/{id}/resolve', [\VendGuard\Presentation\Controller\TechnicianController::class, 'resolveIncident'], [$technicianAuth]);
 
+        // Mantenimiento Preventivo y Checklists Sanitarios (Módulo 05: Técnico - T-PREV-14)
+        $router->get('/api/technician/preventive/route', [\VendGuard\Presentation\Controller\TechnicianPreventiveController::class, 'getRoute'], [$technicianAuth]);
+        $router->post('/api/technician/preventive/orders/{id}/claim', [\VendGuard\Presentation\Controller\TechnicianPreventiveController::class, 'claimOrder'], [$technicianAuth]);
+        $router->get('/api/technician/preventive/orders/{id}/checklist', [\VendGuard\Presentation\Controller\TechnicianPreventiveController::class, 'getChecklist'], [$technicianAuth]);
+        $router->post('/api/technician/preventive/orders/{id}/start', [\VendGuard\Presentation\Controller\TechnicianPreventiveController::class, 'startInspection'], [$technicianAuth]);
+        $router->post('/api/technician/preventive/orders/{id}/complete', [\VendGuard\Presentation\Controller\TechnicianPreventiveController::class, 'completeInspection'], [$technicianAuth]);
+        $router->post('/api/technician/preventive/orders/{id}/reinspect', [\VendGuard\Presentation\Controller\TechnicianPreventiveController::class, 'reinspectOrder'], [$technicianAuth]);
+
         // -----------------------------------------------------------------
         // 6. Módulo de Automatización y Tareas Cron (T-30)
         // -----------------------------------------------------------------

@@ -90,7 +90,7 @@
   * **Dependencias:** T-PREV-08, T-PREV-09
   * **Hecho cuando:** Todos los endpoints de coordinación (`/dashboard`, `/orders`, `/generate-due`, `/assign`, `/cancel`, `/settings`, `/machines/{id}/preventive-config`) quedan registrados bajo la protección de `InternalAuthMiddleware(COORDINATOR)` en `AppRouter.php`.
 
-- [ ] **T-PREV-14: Implementar `TechnicianPreventiveController.php` y registrar rutas en `AppRouter.php`**
+- [x] **T-PREV-14: Implementar `TechnicianPreventiveController.php` y registrar rutas en `AppRouter.php`**
   * **Requisitos:** RF-PREV-02 (Claim), RF-PREV-03, RF-PREV-04, RF-PREV-08
   * **Dependencias:** T-PREV-10, T-PREV-11
   * **Hecho cuando:** Los endpoints del técnico (`/route`, `/claim`, `/checklist`, `/start`, `/complete`, `/reinspect`) quedan registrados bajo `InternalAuthMiddleware(TECHNICIAN)` en `AppRouter.php`, manejando las excepciones de dominio con códigos `200`, `400`, `409` y `422`.
