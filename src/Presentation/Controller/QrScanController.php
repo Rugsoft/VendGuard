@@ -27,7 +27,9 @@ use VendGuard\Presentation\Http\Response;
  * Cumple con Dogma Vanilla y los Artículos II, IV y V de la Constitución de VendGuard.
  */
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoPreventiveSettingsRepository;
 
 class QrScanController
 {
@@ -35,17 +37,33 @@ class QrScanController
     private QrReportService $qrReportService;
     private LocalFileUploader $fileUploader;
     private MachineRepositoryInterface $machineRepo;
+    private ?PreventiveSettingsRepositoryInterface $settingsRepo;
 
     public function __construct(
         ?QrScanService $qrScanService = null,
         ?QrReportService $qrReportService = null,
         ?LocalFileUploader $fileUploader = null,
-        ?MachineRepositoryInterface $machineRepo = null
+        ?MachineRepositoryInterface $machineRepo = null,
+        ?PreventiveSettingsRepositoryInterface $settingsRepo = null
     ) {
-        $this->qrScanService = $qrScanService ?? new QrScanService();
+        $this->settingsRepo = $settingsRepo;
+        $this->qrScanService = $qrScanService ?? new QrScanService(null, null, null, $settingsRepo);
         $this->qrReportService = $qrReportService ?? new QrReportService();
         $this->fileUploader = $fileUploader ?? new LocalFileUploader();
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
+    }
+
+    private function getSettingsRepo(): ?PreventiveSettingsRepositoryInterface
+    {
+        if ($this->settingsRepo !== null) {
+            return $this->settingsRepo;
+        }
+
+        try {
+            return new PdoPreventiveSettingsRepository();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**
@@ -122,6 +140,28 @@ class QrScanController
                 'Esta máquina de vending se encuentra temporalmente retirada o fuera de servicio. No es posible registrar nuevas incidencias sobre este dispositivo.',
                 422
             );
+        }
+
+        // 1.2 Bloqueo de reporte en máquinas en Cuarentena Sanitaria o Pausa Estacional (Art. II, EARS 7.3)
+        $settingsRepo = $this->getSettingsRepo();
+        if ($machine !== null && $settingsRepo !== null) {
+            $settings = $settingsRepo->getMachineSettings($machine->getId());
+            if ($settings !== null) {
+                if (($settings['sanitary_status'] ?? '') === 'QUARANTINE') {
+                    return Response::error(
+                        'MACHINE_IN_QUARANTINE',
+                        'Esta máquina se encuentra en cuarentena sanitaria preventiva. No se admiten nuevos reportes mientras se encuentre fuera de servicio por control higiénico-sanitario.',
+                        422
+                    );
+                }
+                if (!empty($settings['is_seasonal_pause']) || ($settings['sanitary_status'] ?? '') === 'SEASONAL_PAUSE') {
+                    return Response::error(
+                        'MACHINE_IN_SEASONAL_PAUSE',
+                        'Esta máquina se encuentra en pausa estacional programada. No se admiten reportes durante el periodo de cierre vacacional.',
+                        422
+                    );
+                }
+            }
         }
 
         // 2. Validar categoría de avería

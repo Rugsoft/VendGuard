@@ -11,10 +11,12 @@ use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoPreventiveSettingsRepository;
 
 /**
  * QrScanService
@@ -26,7 +28,9 @@ use VendGuard\Infrastructure\Repository\PdoMachineRepository;
  * 1. CAN_REPORT: Máquina limpia lista para nuevo aviso (con alerta de frío si es perecedera).
  * 2. ACTIVE_INCIDENT: Aviso activo preexistente con blindaje estricto de privacidad (Art. V.4).
  * 3. UNDER_WARRANTY: Avería resuelta dentro de la ventana legal de garantía de 48h (EARS 4.3).
- * 4. MachineNotFoundException (404): Si la máquina no existe o está dada de baja (EARS 5.2).
+ * 4. SANITARY_QUARANTINE: Máquina en cuarentena sanitaria por rotura térmica/falta grave (Art. II).
+ * 5. SEASONAL_PAUSE: Máquina en vaciado o pausa vacacional sin servicio (EARS 7.3).
+ * 6. MachineNotFoundException (404): Si la máquina no existe o está dada de baja (EARS 5.2).
  * 
  * Cumple con Dogma Vanilla y los Artículos II, IV y V de la Constitución de VendGuard.
  */
@@ -35,15 +39,31 @@ class QrScanService
     private MachineRepositoryInterface $machineRepo;
     private LocationRepositoryInterface $locationRepo;
     private IncidentRepositoryInterface $incidentRepo;
+    private ?PreventiveSettingsRepositoryInterface $settingsRepo;
 
     public function __construct(
         ?MachineRepositoryInterface $machineRepo = null,
         ?LocationRepositoryInterface $locationRepo = null,
-        ?IncidentRepositoryInterface $incidentRepo = null
+        ?IncidentRepositoryInterface $incidentRepo = null,
+        ?PreventiveSettingsRepositoryInterface $settingsRepo = null
     ) {
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
+        $this->settingsRepo = $settingsRepo;
+    }
+
+    private function getSettingsRepo(): ?PreventiveSettingsRepositoryInterface
+    {
+        if ($this->settingsRepo !== null) {
+            return $this->settingsRepo;
+        }
+
+        try {
+            return new PdoPreventiveSettingsRepository();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**
@@ -77,6 +97,24 @@ class QrScanService
         $location = $this->locationRepo->findById($machine->getLocationId());
         if ($location === null || !$location->isActive()) {
             return $this->buildInactiveMachineResponse($machine, $location);
+        }
+
+        // 2.5. Comprobar Modos Preventivos Especiales: Cuarentena Sanitaria y Pausa Estacional (RF-PREV-01, EARS 7.3)
+        $settingsRepo = $this->getSettingsRepo();
+        if ($settingsRepo !== null) {
+            $settings = $settingsRepo->getMachineSettings($machine->getId());
+            if ($settings !== null) {
+                // Caso A: Máquina en Cuarentena Sanitaria (Art. II Constitución)
+                if (($settings['sanitary_status'] ?? '') === 'QUARANTINE') {
+                    $activeIncident = $this->incidentRepo->findActiveByMachineId($machine->getId());
+                    return $this->buildSanitaryQuarantineResponse($machine, $location, $activeIncident);
+                }
+
+                // Caso B: Máquina en Pausa Estacional / Vaciado Sanitario Programado
+                if (!empty($settings['is_seasonal_pause']) || ($settings['sanitary_status'] ?? '') === 'SEASONAL_PAUSE') {
+                    return $this->buildSeasonalPauseResponse($machine, $location);
+                }
+            }
         }
 
         // 3. Inspeccionar el estado de incidencias vinculadas
@@ -124,6 +162,7 @@ class QrScanService
             'status'             => 'INACTIVE',
             'is_active'          => false,
             'allow_reporting'    => false,
+            'can_report'         => false,
             'code'               => $machine->getCode(),
             'model'              => $machine->getModel(),
             'machine_type_label' => $machine->getMachineType()->label(),
@@ -136,12 +175,76 @@ class QrScanService
     }
 
     /**
+     * Construye la respuesta para el modo SANITARY_QUARANTINE (bloqueo cautelar sanitario Art. II).
+     */
+    private function buildSanitaryQuarantineResponse(Machine $machine, Location $location, ?Incident $activeIncident): array
+    {
+        $activeIncidentData = null;
+        if ($activeIncident !== null) {
+            $activeIncidentData = [
+                'ticket_code' => $activeIncident->getTicketCode(),
+                'status_label' => 'Intervención técnica prioritaria en curso',
+            ];
+        }
+
+        return [
+            'status_mode' => 'SANITARY_QUARANTINE',
+            'machine' => [
+                'id' => $machine->getId(),
+                'code' => $machine->getCode(),
+                'model' => $machine->getModel(),
+                'machine_type' => $machine->getMachineType()->value,
+                'floor_wing' => $machine->getFloorWing(),
+                'is_perishable' => $machine->getMachineType()->isPerishable(),
+            ],
+            'location' => [
+                'name' => $location->getName(),
+            ],
+            'alert' => [
+                'title' => 'MÁQUINA FUERA DE SERVICIO POR CONTROL HIGIÉNICO-SANITARIO',
+                'message' => 'Por imperativo del Artículo II de la Constitución (Seguridad Alimentaria), queda prohibida la adquisición y consumo de productos de esta unidad.',
+                'severity' => 'CRITICAL_DANGER',
+            ],
+            'can_report' => false,
+            'active_incident' => $activeIncidentData,
+        ];
+    }
+
+    /**
+     * Construye la respuesta para el modo SEASONAL_PAUSE (pausa estacional programada).
+     */
+    private function buildSeasonalPauseResponse(Machine $machine, Location $location): array
+    {
+        return [
+            'status_mode' => 'SEASONAL_PAUSE',
+            'machine' => [
+                'id' => $machine->getId(),
+                'code' => $machine->getCode(),
+                'model' => $machine->getModel(),
+                'machine_type' => $machine->getMachineType()->value,
+                'floor_wing' => $machine->getFloorWing(),
+                'is_perishable' => $machine->getMachineType()->isPerishable(),
+            ],
+            'location' => [
+                'name' => $location->getName(),
+            ],
+            'alert' => [
+                'title' => 'DISPOSITIVO EN PAUSA ESTACIONAL PROGRAMADA',
+                'message' => 'Esta máquina se encuentra vacía de productos perecederos por periodo vacacional. Reanudará el servicio tras revisión sanitaria previa.',
+                'severity' => 'INFO',
+            ],
+            'can_report' => false,
+        ];
+    }
+
+    /**
      * Construye la respuesta para el modo CAN_REPORT (formulario limpio de aviso).
      */
     private function buildCanReportResponse(Machine $machine, Location $location): array
     {
         return [
             'status_mode' => 'CAN_REPORT',
+            'can_report' => true,
             'machine' => $this->formatMachineData($machine),
             'location' => $this->formatLocationData($location),
             'active_incident' => null,
@@ -159,6 +262,7 @@ class QrScanService
     {
         return [
             'status_mode' => 'ACTIVE_INCIDENT',
+            'can_report' => false,
             'machine' => $this->formatMachineData($machine),
             'location' => $this->formatLocationData($location),
             'active_incident' => [
@@ -188,6 +292,7 @@ class QrScanService
 
         return [
             'status_mode' => 'UNDER_WARRANTY',
+            'can_report' => false,
             'machine' => $this->formatMachineData($machine),
             'location' => $this->formatLocationData($location),
             'resolved_incident' => [

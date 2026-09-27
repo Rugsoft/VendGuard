@@ -100,7 +100,7 @@
   * **Dependencias:** T-PREV-12
   * **Hecho cuando:** Los endpoints para clientes (`/sanitary-status`, `/certificates/machine/{code}`, `/certificates/global`) quedan registrados bajo `SiteAuthMiddleware` en `AppRouter.php`, devolviendo semáforos, certificados individuales A4 y certificados consolidados de sede.
 
-- [ ] **T-PREV-16: Extender `QrScanController.php` para modos `SANITARY_QUARANTINE` y `SEASONAL_PAUSE`**
+- [x] **T-PREV-16: Extender `QrScanController.php` para modos `SANITARY_QUARANTINE` y `SEASONAL_PAUSE`**
   * **Requisitos:** RF-PREV-04 (EARS 4.2), RF-PREV-01 (EARS 1.5), Constitución Art. II
   * **Dependencias:** T-PREV-10
   * **Hecho cuando:** `GET /api/qr/scan/{code}` sobre una máquina en cuarentena responde HTTP `200` con `status_mode = "SANITARY_QUARANTINE"`, alerta sanitaria roja y bloqueo de reportes/compras; y sobre una máquina en pausa estacional responde `status_mode = "SEASONAL_PAUSE"` con aviso vacacional.
