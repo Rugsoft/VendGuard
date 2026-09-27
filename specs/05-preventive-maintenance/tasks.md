@@ -37,7 +37,7 @@
   * **Dependencias:** T-PREV-01, T-PREV-02
   * **Hecho cuando:** `PdoPreventiveSettingsRepository` implementa consulta de frecuencias por tipología (`findByMachineType`), actualización de frecuencias globales (`updateTypeSettings` con validación $\le 15$ días en perecederos), configuración individual por máquina (`updateMachineConfig`) y gestión de pausa estacional (`setSeasonalPause` y `resumeSeasonalPause`).
 
-- [ ] **T-PREV-05: Implementar `PreventiveOrderRepositoryInterface` y `PdoPreventiveOrderRepository.php`**
+- [x] **T-PREV-05: Implementar `PreventiveOrderRepositoryInterface` y `PdoPreventiveOrderRepository.php`**
   * **Requisitos:** RF-PREV-02, RF-PREV-04, Constitución Art. III
   * **Dependencias:** T-PREV-01, T-PREV-02
   * **Hecho cuando:** `PdoPreventiveOrderRepository` implementa creación (`create`), búsqueda por ID/código (`findById`, `findByCode`), asignación a técnico (`assignTechnician`), autoasignación in situ (`claimOrderOpportunistically` atómico con bloqueo si ya no está en `PENDING_ASSIGNMENT`), cancelación lógica (`softCancel` fijando `status = 'CANCELLED'` sin borrado físico), listados para coordinación y ruta móvil de técnico.
