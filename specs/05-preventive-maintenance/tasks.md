@@ -47,7 +47,7 @@
   * **Dependencias:** T-PREV-01
   * **Hecho cuando:** `PdoPreventiveItemRepository` implementa inserción por lotes de las comprobaciones de checklist (`saveOrderItems`), vinculación fotográfica de evidencias de fallos y consulta de ítems por orden (`findByOrderId`).
 
-- [ ] **T-PREV-07: Implementar `SanitaryCertificateRepositoryInterface` y `PdoSanitaryCertificateRepository.php`**
+- [x] **T-PREV-07: Implementar `SanitaryCertificateRepositoryInterface` y `PdoSanitaryCertificateRepository.php`**
   * **Requisitos:** RF-PREV-07, RF-PREV-08, Constitución Art. V.4
   * **Dependencias:** T-PREV-01
   * **Hecho cuando:** `PdoSanitaryCertificateRepository` implementa emisión y registro de certificados (`createCertificate`), consulta de certificado vigente por máquina (`findActiveByMachineCode`), suspensión cautelar (`suspendByMachineId` ante averías de frío) y consulta agregada para Certificado Global de Sede.
