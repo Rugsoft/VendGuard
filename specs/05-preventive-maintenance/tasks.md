@@ -119,7 +119,7 @@
   * **Dependencias:** T-PREV-13
   * **Hecho cuando:** Los componentes Vue 3 ESM renderizan los KPIs de semáforos de parque, alertas de máquinas en cuarentena, listado de órdenes con filtros, botón "Generar Preventivos Inminentes", modal de asignación técnica y cancelación lógica justificada.
 
-- [ ] **T-PREV-19: Implementar `CoordinatorPreventiveSettingsModal.js`**
+- [x] **T-PREV-19: Implementar `CoordinatorPreventiveSettingsModal.js`**
   * **Requisitos:** RF-PREV-01, Constitución Art. II
   * **Dependencias:** T-PREV-13
   * **Hecho cuando:** El componente Vue 3 ESM permite ajustar frecuencias sanitarias bloqueando entradas $> 15$ días en perecederos e incluye formulario para activar/desactivar pausas estacionales con fecha y motivo justificado.

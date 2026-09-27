@@ -25,6 +25,7 @@ import { AdminMachinesTab } from '../components/AdminMachinesTab.js';
 import { AdminUsersTab } from '../components/AdminUsersTab.js';
 import { CoordinatorPreventiveDashboard } from '../components/CoordinatorPreventiveDashboard.js';
 import { CoordinatorPreventiveOrdersTab } from '../components/CoordinatorPreventiveOrdersTab.js';
+import { CoordinatorPreventiveSettingsModal } from '../components/CoordinatorPreventiveSettingsModal.js';
 
 // Canonical mapping for bilingual status values
 const STATUS_CANONICAL_MAP = {
@@ -71,7 +72,8 @@ export const CoordinatorDashboardView = {
     AdminMachinesTab,
     AdminUsersTab,
     CoordinatorPreventiveDashboard,
-    CoordinatorPreventiveOrdersTab
+    CoordinatorPreventiveOrdersTab,
+    CoordinatorPreventiveSettingsModal
   },
   emits: ['assigned', 'cancelled', 'refresh'],
   data() {
@@ -80,6 +82,7 @@ export const CoordinatorDashboardView = {
       activeTab: 'incidents', // 'incidents' | 'fleet' | 'preventive' | 'admin' | 'metrics'
       activeAdminSubTab: 'locations', // 'locations' | 'machines' | 'users'
       activePreventiveSubTab: 'dashboard', // 'dashboard' | 'orders'
+      showPreventiveSettingsModal: false,
 
       // Login Form
       loginEmail: '',
@@ -921,6 +924,7 @@ export const CoordinatorDashboardView = {
         <CoordinatorPreventiveDashboard
           v-if="activePreventiveSubTab === 'dashboard'"
           @view-orders="activePreventiveSubTab = 'orders'"
+          @open-settings="showPreventiveSettingsModal = true"
           @refresh="loadIncidents(true)"
         />
 
@@ -1141,6 +1145,15 @@ export const CoordinatorDashboardView = {
         :machine="selectedQrMachine"
         :machine-id="selectedQrMachine?.id"
         @close="closeQrLabelModal"
+      />
+
+      <!-- =================================================================== -->
+      <!-- MODAL 4: PREVENTIVE SETTINGS & SEASONAL PAUSE (RF-PREV-01 / T-PREV-19) -->
+      <!-- =================================================================== -->
+      <CoordinatorPreventiveSettingsModal
+        v-model="showPreventiveSettingsModal"
+        @settings-updated="loadIncidents(true)"
+        @pause-updated="loadIncidents(true)"
       />
     </div>
   `
