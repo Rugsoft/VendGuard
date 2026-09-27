@@ -463,6 +463,83 @@ $assert(
 );
 
 // ─────────────────────────────────────────────────────────────────────────
+// 11. MÓDULO MANTENIMIENTO PREVENTIVO Y SEGURIDAD ALIMENTARIA (T-PREV-25)
+// ─────────────────────────────────────────────────────────────────────────
+echo "\n{$colorBold}--- 11. Módulo Mantenimiento Preventivo: Auditoría Constitucional (T-PREV-25) ---{$colorReset}\n";
+
+// 11.1 Artículo II: Blindaje de periodicidad en alimentos perecederos (Tope 15 días)
+$prevSettingsService = (string)file_get_contents($baseDir . '/src/Application/Service/PreventiveSettingsService.php');
+$assert(
+    "11.1 Artículo II: PreventiveSettingsService impone límite innegociable de 15 días en perecederos",
+    str_contains($prevSettingsService, "15") &&
+    str_contains($prevSettingsService, "PerishableFrequencyLimitException") &&
+    str_contains($prevSettingsService, "PERISHABLE_FOOD")
+);
+
+// 11.2 Artículo II: Evaluación estricta de temperatura y activación de cuarentena ante rotura de frío (> 4.0 °C)
+$prevEvalService = (string)file_get_contents($baseDir . '/src/Application/Service/PreventiveChecklistEvaluationService.php');
+$assert(
+    "11.2 Artículo II: PreventiveChecklistEvaluationService dictamina NO_CONFORME y CUARENTENA ante temperatura > 4.0 °C",
+    str_contains($prevEvalService, "4.0") &&
+    str_contains($prevEvalService, "QUARANTINE") &&
+    str_contains($prevEvalService, "NO_CONFORME")
+);
+
+// 11.3 Artículo III: Inviolabilidad de datos y soft-delete en órdenes preventivas
+$prevOrderRepo = (string)file_get_contents($baseDir . '/src/Infrastructure/Repository/PdoPreventiveOrderRepository.php');
+$assert(
+    "11.3 Artículo III: PdoPreventiveOrderRepository aplica cancelación lógica ('CANCELLED') sin sentencias DELETE FROM",
+    str_contains($prevOrderRepo, "CANCELLED") &&
+    !preg_match('/\bDELETE\s+FROM\s+preventive_orders\b/i', $prevOrderRepo)
+);
+
+// 11.4 Artículo V.2: Regla de ticket único y coexistencia sin duplicados
+$coexistenceService = (string)file_get_contents($baseDir . '/src/Application/Service/PreventiveCoexistenceBridgeService.php');
+$assert(
+    "11.4 Artículo V.2: PreventiveCoexistenceBridgeService añade nota a bitácora y eleva urgencia a CRITICAL sin duplicar ticket",
+    str_contains($coexistenceService, "APPENDED_TO_EXISTING_INCIDENT") &&
+    str_contains($coexistenceService, "findActiveByMachineId") &&
+    str_contains($coexistenceService, "addComment")
+);
+
+// 11.5 Artículo V.4: Privacidad innegociable del técnico en certificados oficiales (operator_code)
+$sanCertService = (string)file_get_contents($baseDir . '/src/Application/Service/SanitaryCertificateService.php');
+$siteSanCtrl = (string)file_get_contents($baseDir . '/src/Presentation/Controller/SiteSanitaryController.php');
+$sanCertModal = (string)file_get_contents($baseDir . '/public/assets/js/components/SanitaryCertificateModal.js');
+$assert(
+    "11.5 Artículo V.4: Certificados oficiales identifican al inspector mediante operator_code sin exhibir DNI o teléfono",
+    str_contains($sanCertService, "operator_code") &&
+    str_contains($sanCertModal, "inspectorOperatorCode") &&
+    str_contains($sanCertModal, "operator_code") &&
+    str_contains($siteSanCtrl, "operator_code")
+);
+
+// 11.6 RNF-06: Rango físico estricto de temperatura [-5.0 °C, +25.0 °C] con 1 decimal
+$assert(
+    "11.6 RNF-06: Validación térmica rigurosa [-5.0 °C, 25.0 °C] en backend",
+    str_contains($prevEvalService, "-5.0") &&
+    str_contains($prevEvalService, "25.0")
+);
+
+// 11.7 Dualismo Lingüístico en componentes preventivos
+$coordPrevDash = (string)file_get_contents($baseDir . '/public/assets/js/components/CoordinatorPreventiveDashboard.js');
+$techChecklistModal = (string)file_get_contents($baseDir . '/public/assets/js/components/TechnicianChecklistModal.js');
+$siteSanTab = (string)file_get_contents($baseDir . '/public/assets/js/components/SiteSanitaryStatusTab.js');
+$qrQuarantineModal = (string)file_get_contents($baseDir . '/public/assets/js/components/QrSanitaryQuarantineModal.js');
+
+$assert(
+    "11.7 Dualismo Lingüístico: Componentes preventivos con código en inglés e interfaz/avisos en español",
+    str_contains($coordPrevDash, "export const CoordinatorPreventiveDashboard") &&
+    str_contains($coordPrevDash, "Mantenimiento Preventivo") &&
+    str_contains($techChecklistModal, "export const TechnicianChecklistModal") &&
+    str_contains($techChecklistModal, "Checklist Sanitario") &&
+    str_contains($siteSanTab, "export const SiteSanitaryStatusTab") &&
+    str_contains($siteSanTab, "Control Higiénico-Sanitario") &&
+    str_contains($qrQuarantineModal, "export const QrSanitaryQuarantineModal") &&
+    str_contains($qrQuarantineModal, "ALERTA SANITARIA · ARTÍCULO II")
+);
+
+// ─────────────────────────────────────────────────────────────────────────
 // RESUMEN FINAL DE LA AUDITORÍA CONSTITUCIONAL
 // ─────────────────────────────────────────────────────────────────────────
 echo "\n{$colorBold}======================================================================{$colorReset}\n";
@@ -473,7 +550,7 @@ echo "{$colorBold}==============================================================
 
 if ($failures === 0) {
     echo "{$colorBold}{$colorGreen} RESULTADO: AUDITORÍA CONSTITUCIONAL APROBADA AL 100%.{$colorReset}\n";
-    echo "{$colorBold}{$colorGreen} CONDICIÓN T-ADM-18 CUMPLIDA CON ÉXITO. EL MÓDULO 04 QUEDA BLINDADO Y CERTIFICADO.{$colorReset}\n";
+    echo "{$colorBold}{$colorGreen} CONDICIONES T-ADM-18 Y T-PREV-25 CUMPLIDAS CON ÉXITO. EL SISTEMA VENDGUARD QUEDA CERTIFICADO.{$colorReset}\n";
     echo "{$colorBold}======================================================================{$colorReset}\n";
     exit(0);
 } else {

@@ -153,7 +153,7 @@
 
 ## Fase 6: Verificación Global y Certificación Constitucional
 
-- [ ] **T-PREV-25: Batería completa de pruebas (`php tests/run_all.php`), verificación de regresión y auditoría constitucional**
+- [x] **T-PREV-25: Batería completa de pruebas (`php tests/run_all.php`), verificación de regresión y auditoría constitucional**
   * **Requisitos:** RNF-01 a RNF-06, Constitución Art. I al VII
   * **Dependencias:** T-PREV-17, T-PREV-24
   * **Hecho cuando:** La ejecución de `php tests/run_all.php` corre las 68 suites preexistentes más todas las nuevas suites del módulo 05 al 100% en verde (0 errores, 0 fallos), el comando de auditoría certifica cero sentencias `DELETE FROM` en `src/` (Art. III), se valida el cumplimiento innegociable de seguridad alimentaria (Art. II), la regla de ticket único (Art. V.2), el cierre justificado (Art. V.1) y la privacidad de operadores técnicos (Art. V.4).
