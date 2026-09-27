@@ -8,6 +8,7 @@ use PDO;
 use VendGuard\Core\Domain\Model\PreventiveOrder;
 use VendGuard\Core\Domain\Repository\PreventiveOrderRepositoryInterface;
 use VendGuard\Core\Domain\Exception\PreventiveOrderAlreadyAssignedException;
+use VendGuard\Infrastructure\Database\ConnectionFactory;
 
 /**
  * PdoPreventiveOrderRepository
@@ -19,9 +20,9 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
 {
     private PDO $pdo;
 
-    public function __construct(PDO $pdo)
+    public function __construct(?PDO $pdo = null)
     {
-        $this->pdo = $pdo;
+        $this->pdo = $pdo ?? ConnectionFactory::getConnection();
     }
 
     public function create(array $data): PreventiveOrder

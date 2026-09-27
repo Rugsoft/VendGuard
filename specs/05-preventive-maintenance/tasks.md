@@ -85,7 +85,7 @@
 
 ## Fase 4: Controladores REST y Rutas HTTP (API-First)
 
-- [ ] **T-PREV-13: Implementar `CoordinatorPreventiveController.php` y registrar rutas en `AppRouter.php`**
+- [x] **T-PREV-13: Implementar `CoordinatorPreventiveController.php` y registrar rutas en `AppRouter.php`**
   * **Requisitos:** RF-PREV-01, RF-PREV-02, RF-PREV-06
   * **Dependencias:** T-PREV-08, T-PREV-09
   * **Hecho cuando:** Todos los endpoints de coordinación (`/dashboard`, `/orders`, `/generate-due`, `/assign`, `/cancel`, `/settings`, `/machines/{id}/preventive-config`) quedan registrados bajo la protección de `InternalAuthMiddleware(COORDINATOR)` en `AppRouter.php`.

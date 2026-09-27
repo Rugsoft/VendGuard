@@ -108,6 +108,18 @@ class AppRouter
         $router->get('/api/coordinator/audit-log', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'getAuditLog'], [$coordinatorAuth]);
         $router->get('/api/coordinator/audit-log/export', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'exportAuditLog'], [$coordinatorAuth]);
 
+        // Mantenimiento Preventivo y Checklists Sanitarios (Módulo 05: Coordinación - T-PREV-13)
+        $router->get('/api/coordinator/preventive/dashboard', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'getDashboard'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/preventive/orders', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'listOrders'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/preventive/orders', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'createOrder'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/preventive/generate-due', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'generateDue'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/preventive/orders/{id}/assign', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'assignOrder'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/preventive/orders/{id}/cancel', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'cancelOrder'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/preventive/settings', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'getSettings'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/preventive/settings', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'updateSettings'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/machines/{id}/preventive-config', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'getMachinePreventiveConfig'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/machines/{id}/preventive-config', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'updateMachinePreventiveConfig'], [$coordinatorAuth]);
+
         // -----------------------------------------------------------------
         // 5. Módulo de Técnico de Campo / "Mi Ruta" (T-28, T-29)
         // -----------------------------------------------------------------

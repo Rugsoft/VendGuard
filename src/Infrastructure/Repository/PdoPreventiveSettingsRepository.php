@@ -9,6 +9,7 @@ use VendGuard\Core\Domain\Model\PreventiveSetting;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Exception\PerishableFrequencyLimitException;
 use VendGuard\Core\Domain\Exception\SeasonalPauseMissingReasonException;
+use VendGuard\Infrastructure\Database\ConnectionFactory;
 
 /**
  * PdoPreventiveSettingsRepository
@@ -20,9 +21,9 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
 {
     private PDO $pdo;
 
-    public function __construct(PDO $pdo)
+    public function __construct(?PDO $pdo = null)
     {
-        $this->pdo = $pdo;
+        $this->pdo = $pdo ?? ConnectionFactory::getConnection();
     }
 
     /**
