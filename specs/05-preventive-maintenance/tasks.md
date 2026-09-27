@@ -129,7 +129,7 @@
   * **Dependencias:** T-PREV-14
   * **Hecho cuando:** La vista móvil del técnico agrupa sus inspecciones asignadas y destaca órdenes pendientes de la sede en la que se encuentra trabajando para permitir su autoasignación inmediata con un solo toque.
 
-- [ ] **T-PREV-21: Implementar `TechnicianChecklistModal.js` y `TechnicianReinspectionModal.js`**
+- [x] **T-PREV-21: Implementar `TechnicianChecklistModal.js` y `TechnicianReinspectionModal.js`**
   * **Requisitos:** RF-PREV-03, RF-PREV-04, RF-PREV-08, RNF-01, RNF-06
   * **Dependencias:** T-PREV-14
   * **Hecho cuando:** El modal táctil permite registrar la temperatura con teclado numérico estricto `[-5.0, 25.0]` y responder los ítems del checklist en menos de 90 segundos; y el modal de reinspección permite registrar la lectura de comprobación tras resolver la avería.

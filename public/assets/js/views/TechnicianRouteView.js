@@ -19,6 +19,8 @@ import { IncidentBadge } from '../components/IncidentBadge.js';
 import { ModalDialog } from '../components/ModalDialog.js';
 import { TechnicianMetricsView } from './TechnicianMetricsView.js';
 import { TechnicianPreventiveRouteTab } from '../components/TechnicianPreventiveRouteTab.js';
+import { TechnicianChecklistModal } from '../components/TechnicianChecklistModal.js';
+import { TechnicianReinspectionModal } from '../components/TechnicianReinspectionModal.js';
 
 export const TechnicianRouteView = {
   name: 'TechnicianRouteView',
@@ -26,11 +28,16 @@ export const TechnicianRouteView = {
     IncidentBadge,
     ModalDialog,
     TechnicianMetricsView,
-    TechnicianPreventiveRouteTab
+    TechnicianPreventiveRouteTab,
+    TechnicianChecklistModal,
+    TechnicianReinspectionModal
   },
   data() {
     return {
-      activeSection: 'route', // 'route' | 'metrics'
+      activeSection: 'route', // 'route' | 'preventive' | 'metrics'
+      showPreventiveChecklistModal: false,
+      showPreventiveReinspectionModal: false,
+      selectedPreventiveOrder: null,
       incidents: [],
       isLoading: false,
       errorMessage: '',
@@ -362,9 +369,15 @@ export const TechnicianRouteView = {
     },
 
     /**
-     * Emits event to open the preventive checklist modal (RF-PREV-03 / T-PREV-21)
+     * Emits event and opens the preventive checklist or reinspection modal (RF-PREV-03, RF-PREV-08)
      */
     handleOpenPreventiveChecklist(order) {
+      this.selectedPreventiveOrder = order;
+      if (order?.order_type === 'REINSPECTION' || order?.status === 'REINSPECTION_PENDING') {
+        this.showPreventiveReinspectionModal = true;
+      } else {
+        this.showPreventiveChecklistModal = true;
+      }
       this.$emit('open-preventive-checklist', order);
     }
   },
@@ -901,6 +914,24 @@ export const TechnicianRouteView = {
           </div>
         </form>
       </ModalDialog>
+
+      <!-- =================================================================== -->
+      <!-- MODAL 3: CHECKLIST SANITARIO DIGITAL IN SITU (RF-PREV-03 / T-PREV-21) -->
+      <!-- =================================================================== -->
+      <TechnicianChecklistModal
+        v-model="showPreventiveChecklistModal"
+        :order="selectedPreventiveOrder"
+        @inspection-completed="loadRoute"
+      />
+
+      <!-- =================================================================== -->
+      <!-- MODAL 4: REINSPECCIÓN SANITARIA (RF-PREV-04, RF-PREV-08 / T-PREV-21) -->
+      <!-- =================================================================== -->
+      <TechnicianReinspectionModal
+        v-model="showPreventiveReinspectionModal"
+        :order="selectedPreventiveOrder"
+        @reinspection-completed="loadRoute"
+      />
     </div>
   `
 };
