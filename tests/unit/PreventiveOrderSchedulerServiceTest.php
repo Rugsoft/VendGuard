@@ -140,6 +140,11 @@ class InMemoryPreventiveOrderRepository implements PreventiveOrderRepositoryInte
         return true;
     }
 
+    public function linkIncident(int $orderId, int $incidentId): bool
+    {
+        return true;
+    }
+
     public function softCancel(int $orderId, string $reason): bool
     {
         if (!isset($this->orders[$orderId])) {

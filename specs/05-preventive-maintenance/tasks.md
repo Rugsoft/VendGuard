@@ -71,7 +71,7 @@
   * **Dependencias:** T-PREV-02, T-PREV-05, T-PREV-06
   * **Hecho cuando:** `PreventiveChecklistEvaluationService` valida el rango físico de temperatura `[-5.0, 25.0]` con 1 decimal exacto, evalúa dictámenes (`CONFORME`, `CONFORME_CON_OBSERVACIONES`, `NO_CONFORME`), sitúa la máquina en estado `QUARANTINE` ante fallos críticos o temperatura $> 4.0\text{ }^\circ\text{C}$ en perecederos, pasando al 100% `php tests/unit/PreventiveChecklistEvaluationServiceTest.php`.
 
-- [ ] **T-PREV-11: Implementar `PreventiveCoexistenceBridgeService.php` y suite unitaria `PreventiveCoexistenceBridgeServiceTest.php`**
+- [x] **T-PREV-11: Implementar `PreventiveCoexistenceBridgeService.php` y suite unitaria `PreventiveCoexistenceBridgeServiceTest.php`**
   * **Requisitos:** RF-PREV-05, RF-PREV-08, Constitución Art. II, Art. V.1, Art. V.2
   * **Dependencias:** T-PREV-10
   * **Hecho cuando:** `PreventiveCoexistenceBridgeService` crea incidencia correctiva vinculada con urgencia `CRITICAL` si no hay ticket previo, o añade apunte en bitácora (`incident_comments`) y eleva a `CRITICAL` si ya existe ticket activo (Art. V.2); exige $\ge 20$ caracteres en diagnóstico y solución para cerrar el correctivo (Art. V.1) y coordina la reapertura de la máquina tras reinspección térmica ($\le 4.0\text{ }^\circ\text{C}$), pasando al 100% `php tests/unit/PreventiveCoexistenceBridgeServiceTest.php`.

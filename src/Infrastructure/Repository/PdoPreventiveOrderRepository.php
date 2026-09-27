@@ -252,6 +252,21 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
         ]);
     }
 
+    public function linkIncident(int $orderId, int $incidentId): bool
+    {
+        $stmt = $this->pdo->prepare("
+            UPDATE `preventive_orders`
+            SET `linked_incident_id` = :incident_id,
+                `updated_at` = CURRENT_TIMESTAMP
+            WHERE `id` = :id
+        ");
+
+        return $stmt->execute([
+            ':incident_id' => $incidentId,
+            ':id' => $orderId,
+        ]);
+    }
+
     public function softCancel(int $orderId, string $reason): bool
     {
         // Cancelación puramente lógica en estricto cumplimiento del Artículo III

@@ -142,6 +142,7 @@ class InMemoryOrderRepoForEval implements PreventiveOrderRepositoryInterface
         return true;
     }
 
+    public function linkIncident(int $orderId, int $incidentId): bool { return true; }
     public function softCancel(int $orderId, string $reason): bool { return true; }
     public function findForCoordinatorList(array $filters = []): array { return []; }
     public function countForCoordinatorList(array $filters = []): int { return 0; }

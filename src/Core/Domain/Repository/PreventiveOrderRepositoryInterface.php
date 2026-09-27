@@ -98,6 +98,15 @@ interface PreventiveOrderRepositoryInterface
     ): bool;
 
     /**
+     * Vincula una incidencia correctiva a una orden preventiva existente.
+     *
+     * @param int $orderId
+     * @param int $incidentId
+     * @return bool
+     */
+    public function linkIncident(int $orderId, int $incidentId): bool;
+
+    /**
      * Cancela lógicamente una orden preventiva preservando la trazabilidad histórica (Art. III).
      *
      * @param int $orderId
