@@ -134,7 +134,7 @@
   * **Dependencias:** T-SPARE-12, T-SPARE-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `SiteManagerPartsDataSegregationTest.php` pasando al 100% en verde, certificando que ningún endpoint accesible por el rol `LOCATION_MANAGER` expone piezas solicitadas, sustituidas, destinos ni costes económicos.
 
-- [ ] **T-SPARE-21: Verificación global de regresión, Dogma Vanilla y cierre de módulo**
+- [x] **T-SPARE-21: Verificación global de regresión, Dogma Vanilla y cierre de módulo**
   * **Requisitos:** Todos (RF-REP-01 a RF-REP-10, RNF-REP-01 a RNF-REP-05, Constitución Art. I a VII)
   * **Dependencias:** T-SPARE-01 a T-SPARE-20
   * **Hecho cuando:** La ejecución de `php tests/run_all.php` completa todas las suites unitarias PHP, unitarias reactivas frontend e integración con 0 fallos y 0 errores; se verifica la ausencia de dependencias externas npm/composer y el cumplimiento estricto del Dualismo Lingüístico.
