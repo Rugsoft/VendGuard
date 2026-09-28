@@ -14,7 +14,7 @@ use InvalidArgumentException;
  */
 class SparePartRequest
 {
-    private int $id;
+    private ?int $id;
     private int $incidentId;
     private ?int $sparePartId;
     private bool $isOutOfCatalog;
@@ -29,7 +29,7 @@ class SparePartRequest
     private string $updatedAt;
 
     public function __construct(
-        int $id,
+        ?int $id,
         int $incidentId,
         ?int $sparePartId,
         bool $isOutOfCatalog,
@@ -79,7 +79,7 @@ class SparePartRequest
         $this->updatedAt = $updatedAt;
     }
 
-    public function getId(): int
+    public function getId(): ?int
     {
         return $this->id;
     }

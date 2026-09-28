@@ -14,7 +14,7 @@ use InvalidArgumentException;
  */
 class SparePart
 {
-    private int $id;
+    private ?int $id;
     private string $partCode;
     private string $name;
     private SparePartCategory $category;
@@ -33,7 +33,7 @@ class SparePart
      * @param string[] $compatibleModels
      */
     public function __construct(
-        int $id,
+        ?int $id,
         string $partCode,
         string $name,
         SparePartCategory $category,
@@ -76,7 +76,7 @@ class SparePart
         $this->deletedAt = $deletedAt;
     }
 
-    public function getId(): int
+    public function getId(): ?int
     {
         return $this->id;
     }

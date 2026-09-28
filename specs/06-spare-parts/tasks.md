@@ -33,7 +33,7 @@
 
 ## Fase 2: Repositorios PDO y Capa de Persistencia
 
-- [ ] **T-SPARE-04: Implementar `SparePartRepositoryInterface` y `PdoSparePartRepository.php`**
+- [x] **T-SPARE-04: Implementar `SparePartRepositoryInterface` y `PdoSparePartRepository.php`**
   * **Requisitos:** RF-REP-01, RF-REP-02, RNF-REP-01, Constitución Art. III
   * **Dependencias:** T-SPARE-01, T-SPARE-02, T-SPARE-03
   * **Hecho cuando:** `PdoSparePartRepository` implementa creación de repuesto con modelos compatibles (`create`), actualización (`update`), baja lógica (`softDelete` fijando `is_active = 0`), búsqueda por ID y código (`findById`, `findByCode`), listado filtrado con compatibilidades (`findAll`), listado de repuestos compatibles con un modelo de máquina (`findCompatibleWithModel`) y consulta de modelos únicos (`findDistinctMachineModels`).

@@ -662,9 +662,12 @@ CREATE TABLE IF NOT EXISTS `spare_part_compatibilities` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `spare_part_id` INT UNSIGNED NOT NULL,
     `machine_model` VARCHAR(100) NOT NULL,
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `deleted_at` DATETIME NULL DEFAULT NULL,
     UNIQUE KEY `uq_part_model` (`spare_part_id`, `machine_model`),
     INDEX `idx_part_compat_model` (`machine_model`),
+    INDEX `idx_part_compat_active` (`spare_part_id`, `is_active`),
     CONSTRAINT `fk_compat_spare_part` FOREIGN KEY (`spare_part_id`)
         REFERENCES `spare_parts` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

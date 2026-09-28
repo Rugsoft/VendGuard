@@ -14,7 +14,7 @@ use InvalidArgumentException;
  */
 class IncidentReplacedPart
 {
-    private int $id;
+    private ?int $id;
     private string $interventionType; // 'INCIDENT' | 'PREVENTIVE'
     private ?int $incidentId;
     private ?int $preventiveOrderId;
@@ -41,7 +41,7 @@ class IncidentReplacedPart
     private ?string $technicianName;
 
     public function __construct(
-        int $id,
+        ?int $id,
         string $interventionType,
         ?int $incidentId,
         ?int $preventiveOrderId,
@@ -114,7 +114,7 @@ class IncidentReplacedPart
         $this->technicianName = $technicianName;
     }
 
-    public function getId(): int
+    public function getId(): ?int
     {
         return $this->id;
     }
