@@ -57,7 +57,7 @@
   * **Dependencias:** T-SPARE-04
   * **Hecho cuando:** `SparePartCatalogService` valida unicidad de código, consistencia de precios ($\ge 0.00$ con 2 decimales) y modelos asociados; `php tests/unit/SparePartCatalogServiceTest.php` pasa al 100% en verde comprobando creación, edición, rechazo de duplicados y baja lógica sin borrado físico.
 
-- [ ] **T-SPARE-08: Implementar `SparePartTraceabilityService.php` y suite unitaria `SparePartTraceabilityServiceTest.php`**
+- [x] **T-SPARE-08: Implementar `SparePartTraceabilityService.php` y suite unitaria `SparePartTraceabilityServiceTest.php`**
   * **Requisitos:** RF-REP-03, RF-REP-04, RF-REP-05, RF-REP-06, RF-REP-07, RNF-REP-04, Constitución Art. III, Art. V.1
   * **Dependencias:** T-SPARE-05, T-SPARE-06
   * **Hecho cuando:** `SparePartTraceabilityService` procesa la pausa estructurada (rechazando solicitudes vacías o justificantes $< 20$ chars) y la resolución de averías/preventivos (exigiendo declaración Sí/No y congelando snapshots de coste unitario); `php tests/unit/SparePartTraceabilityServiceTest.php` pasa al 100% en verde validando que cambios posteriores en el catálogo maestro no alteran el coste de las intervenciones registradas.
