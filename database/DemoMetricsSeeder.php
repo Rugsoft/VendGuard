@@ -64,9 +64,11 @@ class DemoMetricsSeeder
         $this->pdo->beginTransaction();
 
         try {
-            // Definición de averías y reparaciones con fechas realistas
+            // Definición de averías y reparaciones con fechas relativas dinámicas
+            $ref = new \DateTimeImmutable('now', new \DateTimeZone('Europe/Madrid'));
+
             $incidents = [
-                // 1. Período anterior (Agosto 2026): VEND-0101 Frío perecedero resuelto en 2h 10m (cumple SLA 4h)
+                // 1. Período anterior (hace 35 días): VEND-0101 Frío perecedero resuelto en 2h 10m (cumple SLA 4h)
                 [
                     'ticket_code' => 'INC-DEMO-0810',
                     'machine_id' => $vend0101['id'],
@@ -78,17 +80,17 @@ class DemoMetricsSeeder
                     'description' => 'Temperatura en cuba de sándwiches a 9.2°C con aviso acústico intermitente en display.',
                     'urgency' => 'CRITICAL',
                     'status' => 'CLOSED',
-                    'created_at' => '2026-08-10 08:30:00',
-                    'assigned_at' => '2026-08-10 08:45:00',
-                    'started_at' => '2026-08-10 09:10:00',
-                    'resolved_at' => '2026-08-10 10:40:00', // 130 min (2h 10m)
-                    'closed_at' => '2026-08-12 10:40:00',
+                    'created_at' => $ref->modify('-35 days')->setTime(8, 30, 0)->format('Y-m-d H:i:s'),
+                    'assigned_at' => $ref->modify('-35 days')->setTime(8, 45, 0)->format('Y-m-d H:i:s'),
+                    'started_at' => $ref->modify('-35 days')->setTime(9, 10, 0)->format('Y-m-d H:i:s'),
+                    'resolved_at' => $ref->modify('-35 days')->setTime(10, 40, 0)->format('Y-m-d H:i:s'), // 130 min (2h 10m)
+                    'closed_at' => $ref->modify('-33 days')->setTime(10, 40, 0)->format('Y-m-d H:i:s'),
                     'diagnosis' => 'Sonda de temperatura NTC averiada por pico de tensión registrando falsos 12°C en cuba.',
                     'action' => 'Sustitución de sonda NTC y ajuste de parámetros de histéresis a 3.5°C estables.',
                     'tech_name' => 'Jordi Técnico Ruta BCN',
                 ],
 
-                // 2. Período anterior (Agosto 2026): VEND-0102 Café caliente resuelto en 3h 45m
+                // 2. Período anterior (hace 32 días): VEND-0102 Café caliente resuelto en 3h 45m
                 [
                     'ticket_code' => 'INC-DEMO-0822',
                     'machine_id' => $vend0102['id'],
@@ -100,17 +102,17 @@ class DemoMetricsSeeder
                     'description' => 'El café no cae en vaso y sale vapor denso por la ranura de erogación.',
                     'urgency' => 'MEDIUM',
                     'status' => 'CLOSED',
-                    'created_at' => '2026-08-22 14:00:00',
-                    'assigned_at' => '2026-08-22 14:30:00',
-                    'started_at' => '2026-08-22 15:15:00',
-                    'resolved_at' => '2026-08-22 17:45:00', // 225 min (3h 45m)
-                    'closed_at' => '2026-08-24 17:45:00',
+                    'created_at' => $ref->modify('-32 days')->setTime(14, 0, 0)->format('Y-m-d H:i:s'),
+                    'assigned_at' => $ref->modify('-32 days')->setTime(14, 30, 0)->format('Y-m-d H:i:s'),
+                    'started_at' => $ref->modify('-32 days')->setTime(15, 15, 0)->format('Y-m-d H:i:s'),
+                    'resolved_at' => $ref->modify('-32 days')->setTime(17, 45, 0)->format('Y-m-d H:i:s'), // 225 min (3h 45m)
+                    'closed_at' => $ref->modify('-30 days')->setTime(17, 45, 0)->format('Y-m-d H:i:s'),
                     'diagnosis' => 'Atasco del grupo de infusión de café por apelmazamiento de molienda excesivamente fina.',
                     'action' => 'Desmontaje del grupo erogador, limpieza por inmersión y reajuste del micrométrico del molino.',
                     'tech_name' => 'Marta Técnica Ruta BCN',
                 ],
 
-                // 3. Período anterior (Agosto 2026): VEND-0201 Pago con tarjeta resuelto en 3h 30m
+                // 3. Período anterior / hace 26 días (Últimos 30 días): VEND-0201 Pago con tarjeta resuelto en 3h 30m
                 [
                     'ticket_code' => 'INC-DEMO-0828',
                     'machine_id' => $vend0201['id'],
@@ -122,17 +124,17 @@ class DemoMetricsSeeder
                     'description' => 'El datáfono contactless indica error de comunicación y rechaza pagos con tarjeta.',
                     'urgency' => 'HIGH',
                     'status' => 'CLOSED',
-                    'created_at' => '2026-08-28 10:15:00',
-                    'assigned_at' => '2026-08-28 10:30:00',
-                    'started_at' => '2026-08-28 11:00:00',
-                    'resolved_at' => '2026-08-28 13:45:00', // 210 min (3h 30m)
-                    'closed_at' => '2026-08-30 13:45:00',
+                    'created_at' => $ref->modify('-26 days')->setTime(10, 15, 0)->format('Y-m-d H:i:s'),
+                    'assigned_at' => $ref->modify('-26 days')->setTime(10, 30, 0)->format('Y-m-d H:i:s'),
+                    'started_at' => $ref->modify('-26 days')->setTime(11, 0, 0)->format('Y-m-d H:i:s'),
+                    'resolved_at' => $ref->modify('-26 days')->setTime(13, 45, 0)->format('Y-m-d H:i:s'), // 210 min (3h 30m)
+                    'closed_at' => $ref->modify('-24 days')->setTime(13, 45, 0)->format('Y-m-d H:i:s'),
                     'diagnosis' => 'Fallo de comunicación del lector contactless por cableado MDB pinzado en puerta.',
                     'action' => 'Reparación y enfundado del mazo de cables MDB y actualización del firmware del lector Nayax.',
                     'tech_name' => 'Jordi Técnico Ruta BCN',
                 ],
 
-                // 4. Mes actual (Hace 19 días): VEND-0101 Frío perecedero resuelto en 2h 05m (cumple SLA 4h)
+                // 4. Últimos 30 días (Hace 18 días): VEND-0101 Frío perecedero resuelto en 2h 05m (cumple SLA 4h)
                 [
                     'ticket_code' => 'INC-DEMO-0904',
                     'machine_id' => $vend0101['id'],
@@ -144,17 +146,17 @@ class DemoMetricsSeeder
                     'description' => 'Aviso preventivo: compresor encendido de forma continua con escarcha en evaporador.',
                     'urgency' => 'CRITICAL',
                     'status' => 'CLOSED',
-                    'created_at' => '2026-09-04 09:00:00',
-                    'assigned_at' => '2026-09-04 09:12:00',
-                    'started_at' => '2026-09-04 09:35:00',
-                    'resolved_at' => '2026-09-04 11:05:00', // 125 min (2h 05m)
-                    'closed_at' => '2026-09-06 11:05:00',
+                    'created_at' => $ref->modify('-18 days')->setTime(9, 0, 0)->format('Y-m-d H:i:s'),
+                    'assigned_at' => $ref->modify('-18 days')->setTime(9, 12, 0)->format('Y-m-d H:i:s'),
+                    'started_at' => $ref->modify('-18 days')->setTime(9, 35, 0)->format('Y-m-d H:i:s'),
+                    'resolved_at' => $ref->modify('-18 days')->setTime(11, 5, 0)->format('Y-m-d H:i:s'), // 125 min (2h 05m)
+                    'closed_at' => $ref->modify('-16 days')->setTime(11, 5, 0)->format('Y-m-d H:i:s'),
                     'diagnosis' => 'Acumulación de suciedad en la rejilla del ventilador evaporador reduciendo el flujo térmico.',
                     'action' => 'Limpieza profunda con desengrasante alimentario y comprobación del ciclo de desescarche.',
                     'tech_name' => 'Jordi Técnico Ruta BCN',
                 ],
 
-                // 5. Mes actual (Hace 13 días): VEND-0201 Atasco snacks resuelto en 2h 50m
+                // 5. Últimos 30 días (Hace 12 días): VEND-0201 Atasco snacks resuelto en 2h 50m
                 [
                     'ticket_code' => 'INC-DEMO-0910',
                     'machine_id' => $vend0201['id'],
@@ -166,17 +168,17 @@ class DemoMetricsSeeder
                     'description' => 'Bolsa de patatas enganchada en la espiral 23 sin caer al cajón de entrega.',
                     'urgency' => 'MEDIUM',
                     'status' => 'CLOSED',
-                    'created_at' => '2026-09-10 11:20:00',
-                    'assigned_at' => '2026-09-10 11:45:00',
-                    'started_at' => '2026-09-10 12:30:00',
-                    'resolved_at' => '2026-09-10 14:10:00', // 170 min (2h 50m)
-                    'closed_at' => '2026-09-12 14:10:00',
+                    'created_at' => $ref->modify('-12 days')->setTime(11, 20, 0)->format('Y-m-d H:i:s'),
+                    'assigned_at' => $ref->modify('-12 days')->setTime(11, 45, 0)->format('Y-m-d H:i:s'),
+                    'started_at' => $ref->modify('-12 days')->setTime(12, 30, 0)->format('Y-m-d H:i:s'),
+                    'resolved_at' => $ref->modify('-12 days')->setTime(14, 10, 0)->format('Y-m-d H:i:s'), // 170 min (2h 50m)
+                    'closed_at' => $ref->modify('-10 days')->setTime(14, 10, 0)->format('Y-m-d H:i:s'),
                     'diagnosis' => 'Bolsa de frutos secos trabada en la trampilla basculante de recogida de producto.',
                     'action' => 'Alineación del muelle de retorno de la trampilla y verificación de diez ciclos de dispensación.',
                     'tech_name' => 'Marta Técnica Ruta BCN',
                 ],
 
-                // 6. Últimos 7 días (Hace 7 días): VEND-0102 Fuga eléctrica resuelto en 3h 00m
+                // 6. Últimos 7 días (Hace 5 días): VEND-0102 Fuga eléctrica resuelto en 3h 00m
                 [
                     'ticket_code' => 'INC-DEMO-0916',
                     'machine_id' => $vend0102['id'],
@@ -188,17 +190,17 @@ class DemoMetricsSeeder
                     'description' => 'Máquina totalmente apagada. El diferencial del cuadro saltó a primera hora.',
                     'urgency' => 'HIGH',
                     'status' => 'CLOSED',
-                    'created_at' => '2026-09-16 07:45:00',
-                    'assigned_at' => '2026-09-16 08:00:00',
-                    'started_at' => '2026-09-16 08:30:00',
-                    'resolved_at' => '2026-09-16 10:45:00', // 180 min (3h 00m)
-                    'closed_at' => '2026-09-18 10:45:00',
+                    'created_at' => $ref->modify('-5 days')->setTime(7, 45, 0)->format('Y-m-d H:i:s'),
+                    'assigned_at' => $ref->modify('-5 days')->setTime(8, 0, 0)->format('Y-m-d H:i:s'),
+                    'started_at' => $ref->modify('-5 days')->setTime(8, 30, 0)->format('Y-m-d H:i:s'),
+                    'resolved_at' => $ref->modify('-5 days')->setTime(10, 45, 0)->format('Y-m-d H:i:s'), // 180 min (3h 00m)
+                    'closed_at' => $ref->modify('-3 days')->setTime(10, 45, 0)->format('Y-m-d H:i:s'),
                     'diagnosis' => 'Fuga de agua en racor de entrada de electroválvula provocando salto diferencial.',
                     'action' => 'Sustitución de racor rápido y tramo de teflón de 6mm con secado completo de la electrónica.',
                     'tech_name' => 'Jordi Técnico Ruta BCN',
                 ],
 
-                // 7. Últimos 7 días (Hace 4 días): VEND-0201 Monedero resuelto en 2h 45m
+                // 7. Últimos 7 días (Hace 3 días): VEND-0201 Monedero resuelto en 2h 45m
                 [
                     'ticket_code' => 'INC-DEMO-0919',
                     'machine_id' => $vend0201['id'],
@@ -210,17 +212,17 @@ class DemoMetricsSeeder
                     'description' => 'Traga monedas de 1 euro sin acreditar saldo ni devolver el importe.',
                     'urgency' => 'LOW',
                     'status' => 'CLOSED',
-                    'created_at' => '2026-09-19 15:10:00',
-                    'assigned_at' => '2026-09-19 15:30:00',
-                    'started_at' => '2026-09-19 16:15:00',
-                    'resolved_at' => '2026-09-19 17:55:00', // 165 min (2h 45m)
-                    'closed_at' => '2026-09-21 17:55:00',
+                    'created_at' => $ref->modify('-3 days')->setTime(15, 10, 0)->format('Y-m-d H:i:s'),
+                    'assigned_at' => $ref->modify('-3 days')->setTime(15, 30, 0)->format('Y-m-d H:i:s'),
+                    'started_at' => $ref->modify('-3 days')->setTime(16, 15, 0)->format('Y-m-d H:i:s'),
+                    'resolved_at' => $ref->modify('-3 days')->setTime(17, 55, 0)->format('Y-m-d H:i:s'), // 165 min (2h 45m)
+                    'closed_at' => $ref->modify('-1 day')->setTime(17, 55, 0)->format('Y-m-d H:i:s'),
                     'diagnosis' => 'Lector de monedas rechazaba por acumulación de grasa en las fotocélulas de entrada.',
                     'action' => 'Limpieza de fotocélulas ópticas y recalibración del canal de validación de 1€ y 2€.',
                     'tech_name' => 'Marta Técnica Ruta BCN',
                 ],
 
-                // 8. Ayer (Cerrado por garantía): VEND-0101 Display resuelto en 1h 45m
+                // 8. Ayer (Últimos 7 días): VEND-0101 Display resuelto en 1h 45m
                 [
                     'ticket_code' => 'INC-DEMO-0922',
                     'machine_id' => $vend0101['id'],
@@ -232,11 +234,11 @@ class DemoMetricsSeeder
                     'description' => 'Display frontal con caracteres ilegibles dificultando la selección de productos.',
                     'urgency' => 'LOW',
                     'status' => 'CLOSED',
-                    'created_at' => '2026-09-22 09:15:00',
-                    'assigned_at' => '2026-09-22 09:30:00',
-                    'started_at' => '2026-09-22 09:50:00',
-                    'resolved_at' => '2026-09-22 11:00:00', // 105 min (1h 45m)
-                    'closed_at' => '2026-09-23 11:00:00',
+                    'created_at' => $ref->modify('-1 day')->setTime(9, 15, 0)->format('Y-m-d H:i:s'),
+                    'assigned_at' => $ref->modify('-1 day')->setTime(9, 30, 0)->format('Y-m-d H:i:s'),
+                    'started_at' => $ref->modify('-1 day')->setTime(9, 50, 0)->format('Y-m-d H:i:s'),
+                    'resolved_at' => $ref->modify('-1 day')->setTime(11, 0, 0)->format('Y-m-d H:i:s'), // 105 min (1h 45m)
+                    'closed_at' => $ref->modify('-1 day')->setTime(20, 0, 0)->format('Y-m-d H:i:s'),
                     'diagnosis' => 'Falso contacto en conector cinta ribbon del display LCD frontal de la máquina.',
                     'action' => 'Sustitución de cable plano ribbon y ajuste de los tornillos de fijación del frontal.',
                     'tech_name' => 'Jordi Técnico Ruta BCN',
@@ -403,6 +405,21 @@ class DemoMetricsSeeder
                         ]);
                         $auditCount++;
                     }
+                } else {
+                    // Si ya existen, sincronizar sus marcas de tiempo relativas
+                    $updateAuditStmt = $this->pdo->prepare("
+                        UPDATE `audit_log`
+                        SET `created_at` = :created_at
+                        WHERE `entity_type` = 'TICKET' AND `entity_id` = :eid AND `action` = :action
+                    ");
+                    $updateAuditStmt->execute([':created_at' => $inc['created_at'], ':eid' => $incidentId, ':action' => 'TICKET_CREATED']);
+                    $updateAuditStmt->execute([':created_at' => $inc['assigned_at'], ':eid' => $incidentId, ':action' => 'TECHNICIAN_ASSIGNED']);
+                    $updateAuditStmt->execute([':created_at' => $inc['started_at'], ':eid' => $incidentId, ':action' => 'INTERVENTION_STARTED']);
+                    $updateAuditStmt->execute([':created_at' => $inc['resolved_at'], ':eid' => $incidentId, ':action' => 'TICKET_RESOLVED']);
+                    if ($inc['closed_at'] !== null) {
+                        $updateAuditStmt->execute([':created_at' => $inc['closed_at'], ':eid' => $incidentId, ':action' => 'TICKET_AUTO_CLOSED']);
+                    }
+                    $auditCount += 5;
                 }
             }
 
@@ -419,7 +436,7 @@ class DemoMetricsSeeder
                     ':previous_state' => null,
                     ':new_state' => json_encode(['qr_code' => 'VENDGUARD-0101-SAFE', 'type' => 'PERISHABLE_FOOD']),
                     ':metadata' => json_encode(['format' => 'SVG_VECTOR', 'phone_override' => null]),
-                    ':created_at' => '2026-09-01 10:00:00',
+                    ':created_at' => $ref->modify('-20 days')->setTime(10, 0, 0)->format('Y-m-d H:i:s'),
                 ]);
                 $auditCount++;
             }
@@ -436,7 +453,7 @@ class DemoMetricsSeeder
                     ':previous_state' => json_encode(['status' => 'OPERATIONAL']),
                     ':new_state' => json_encode(['status' => 'VERIFIED_AUDIT']),
                     ':metadata' => json_encode(['inspector' => 'Sanidad Hospitalaria']),
-                    ':created_at' => '2026-09-05 16:30:00',
+                    ':created_at' => $ref->modify('-15 days')->setTime(16, 30, 0)->format('Y-m-d H:i:s'),
                 ]);
                 $auditCount++;
             }

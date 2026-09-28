@@ -337,7 +337,8 @@ ON DUPLICATE KEY UPDATE
 INSERT INTO `users` (`name`, `email`, `password_hash`, `role`, `operator_code`, `phone`)
 VALUES
   ('Sara Coordinadora', 'coordinacion@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'COORDINATOR', NULL, '677000111'),
-  ('Jordi Técnico Ruta BCN', 'jordi.ruta@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'TECHNICIAN', 'OP-01', '677222333')
+  ('Jordi Técnico Ruta BCN', 'jordi.ruta@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'TECHNICIAN', 'OP-01', '677222333'),
+  ('Marta Técnica Ruta BCN', 'marta.ruta@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'TECHNICIAN', 'OP-02', '677444555')
 ON DUPLICATE KEY UPDATE
   `name` = VALUES(`name`),
   `password_hash` = VALUES(`password_hash`),
@@ -468,4 +469,159 @@ UPDATE `machines` SET
   `next_sanitary_inspection_due` = DATE_ADD(CURRENT_DATE(), INTERVAL 2 DAY),
   `sanitary_status` = 'OK'
 WHERE `code` = 'VEND-0102';
+
+-- -----------------------------------------------------------------------------
+-- Averías y Reparaciones Históricas de Demostración (Módulo 03 / Métricas)
+-- -----------------------------------------------------------------------------
+INSERT INTO `incidents` (
+  `ticket_code`, `machine_id`, `location_id`, `assigned_technician_id`,
+  `reporter_name`, `reporter_phone`, `category`, `description`, `urgency`,
+  `status`, `assigned_at`, `started_at`, `resolved_at`, `closed_at`,
+  `resolution_diagnosis`, `resolution_action`, `created_at`, `updated_at`
+) VALUES
+  (
+    'INC-DEMO-0810',
+    (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0101' LIMIT 1),
+    (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-01' LIMIT 1),
+    (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+    'Dra. Carmen Morales', '611223344', 'TEMPERATURE_COLD',
+    'Temperatura en cuba de sándwiches a 9.2°C con aviso acústico intermitente en display.',
+    'CRITICAL', 'CLOSED',
+    DATE_SUB(NOW(), INTERVAL 35 DAY) + INTERVAL 15 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 35 DAY) + INTERVAL 40 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 35 DAY) + INTERVAL 170 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 33 DAY),
+    'Sonda de temperatura NTC averiada por pico de tensión registrando falsos 12°C en cuba.',
+    'Sustitución de sonda NTC y ajuste de parámetros de histéresis a 3.5°C estables.',
+    DATE_SUB(NOW(), INTERVAL 35 DAY),
+    DATE_SUB(NOW(), INTERVAL 33 DAY)
+  ),
+  (
+    'INC-DEMO-0822',
+    (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0102' LIMIT 1),
+    (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-01' LIMIT 1),
+    (SELECT `id` FROM `users` WHERE `email` = 'marta.ruta@vendguard.internal' LIMIT 1),
+    'Enrique Vigilancia', '622334455', 'PRODUCT_JAM',
+    'El café no cae en vaso y sale vapor denso por la ranura de erogación.',
+    'MEDIUM', 'CLOSED',
+    DATE_SUB(NOW(), INTERVAL 32 DAY) + INTERVAL 30 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 32 DAY) + INTERVAL 75 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 32 DAY) + INTERVAL 255 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 30 DAY),
+    'Atasco del grupo de infusión de café por apelmazamiento de molienda excesivamente fina.',
+    'Desmontaje del grupo erogador, limpieza por inmersión y reajuste del micrométrico del molino.',
+    DATE_SUB(NOW(), INTERVAL 32 DAY),
+    DATE_SUB(NOW(), INTERVAL 30 DAY)
+  ),
+  (
+    'INC-DEMO-0828',
+    (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0201' LIMIT 1),
+    (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-02' LIMIT 1),
+    (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+    'Sonia Administrativa', '633445566', 'PAYMENT_SYSTEM',
+    'El datáfono contactless indica error de comunicación y rechaza pagos con tarjeta.',
+    'HIGH', 'CLOSED',
+    DATE_SUB(NOW(), INTERVAL 26 DAY) + INTERVAL 15 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 26 DAY) + INTERVAL 45 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 26 DAY) + INTERVAL 225 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 24 DAY),
+    'Fallo de comunicación del lector contactless por cableado MDB pinzado en puerta.',
+    'Reparación y enfundado del mazo de cables MDB y actualización del firmware del lector Nayax.',
+    DATE_SUB(NOW(), INTERVAL 26 DAY),
+    DATE_SUB(NOW(), INTERVAL 24 DAY)
+  ),
+  (
+    'INC-DEMO-0904',
+    (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0101' LIMIT 1),
+    (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-01' LIMIT 1),
+    (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+    'Laura Sanitaria', '600111222', 'TEMPERATURE_COLD',
+    'Aviso preventivo: compresor encendido de forma continua con escarcha en evaporador.',
+    'CRITICAL', 'CLOSED',
+    DATE_SUB(NOW(), INTERVAL 18 DAY) + INTERVAL 12 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 18 DAY) + INTERVAL 35 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 18 DAY) + INTERVAL 137 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 16 DAY),
+    'Acumulación de suciedad en la rejilla del ventilador evaporador reduciendo el flujo térmico.',
+    'Limpieza profunda con desengrasante alimentario y comprobación del ciclo de desescarche.',
+    DATE_SUB(NOW(), INTERVAL 18 DAY),
+    DATE_SUB(NOW(), INTERVAL 16 DAY)
+  ),
+  (
+    'INC-DEMO-0910',
+    (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0201' LIMIT 1),
+    (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-02' LIMIT 1),
+    (SELECT `id` FROM `users` WHERE `email` = 'marta.ruta@vendguard.internal' LIMIT 1),
+    'Marc Recepción', '600333444', 'PRODUCT_JAM',
+    'Bolsa de patatas enganchada en la espiral 23 sin caer al cajón de entrega.',
+    'MEDIUM', 'CLOSED',
+    DATE_SUB(NOW(), INTERVAL 12 DAY) + INTERVAL 25 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 12 DAY) + INTERVAL 70 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 12 DAY) + INTERVAL 195 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 10 DAY),
+    'Bolsa de frutos secos trabada en la trampilla basculante de recogida de producto.',
+    'Alineación del muelle de retorno de la trampilla y verificación de diez ciclos de dispensación.',
+    DATE_SUB(NOW(), INTERVAL 12 DAY),
+    DATE_SUB(NOW(), INTERVAL 10 DAY)
+  ),
+  (
+    'INC-DEMO-0916',
+    (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0102' LIMIT 1),
+    (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-01' LIMIT 1),
+    (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+    'Guillermo Mantenimiento', '644556677', 'ELECTRICAL_OFF',
+    'Máquina totalmente apagada. El diferencial del cuadro saltó a primera hora.',
+    'HIGH', 'CLOSED',
+    DATE_SUB(NOW(), INTERVAL 5 DAY) + INTERVAL 15 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 5 DAY) + INTERVAL 45 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 5 DAY) + INTERVAL 195 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 3 DAY),
+    'Fuga de agua en racor de entrada de electroválvula provocando salto diferencial.',
+    'Sustitución de racor rápido y tramo de teflón de 6mm con secado completo de la electrónica.',
+    DATE_SUB(NOW(), INTERVAL 5 DAY),
+    DATE_SUB(NOW(), INTERVAL 3 DAY)
+  ),
+  (
+    'INC-DEMO-0919',
+    (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0201' LIMIT 1),
+    (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-02' LIMIT 1),
+    (SELECT `id` FROM `users` WHERE `email` = 'marta.ruta@vendguard.internal' LIMIT 1),
+    'Patricia RRHH', '655667788', 'PAYMENT_SYSTEM',
+    'Traga monedas de 1 euro sin acreditar saldo ni devolver el importe.',
+    'LOW', 'CLOSED',
+    DATE_SUB(NOW(), INTERVAL 3 DAY) + INTERVAL 20 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 3 DAY) + INTERVAL 65 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 3 DAY) + INTERVAL 185 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 1 DAY),
+    'Lector de monedas rechazaba por acumulación de grasa en las fotocélulas de entrada.',
+    'Limpieza de fotocélulas ópticas y recalibración del canal de validación de 1€ y 2€.',
+    DATE_SUB(NOW(), INTERVAL 3 DAY),
+    DATE_SUB(NOW(), INTERVAL 1 DAY)
+  ),
+  (
+    'INC-DEMO-0922',
+    (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0101' LIMIT 1),
+    (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-01' LIMIT 1),
+    (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+    'Laura Sanitaria', '600111222', 'OTHER',
+    'Display frontal con caracteres ilegibles dificultando la selección de productos.',
+    'LOW', 'CLOSED',
+    DATE_SUB(NOW(), INTERVAL 1 DAY) + INTERVAL 15 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 1 DAY) + INTERVAL 35 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 1 DAY) + INTERVAL 120 MINUTE,
+    DATE_SUB(NOW(), INTERVAL 1 DAY) + INTERVAL 10 HOUR,
+    'Falso contacto en conector cinta ribbon del display LCD frontal de la máquina.',
+    'Sustitución de cable plano ribbon y ajuste de los tornillos de fijación del frontal.',
+    DATE_SUB(NOW(), INTERVAL 1 DAY),
+    DATE_SUB(NOW(), INTERVAL 1 DAY) + INTERVAL 10 HOUR
+  )
+ON DUPLICATE KEY UPDATE
+  `status` = VALUES(`status`),
+  `resolution_diagnosis` = VALUES(`resolution_diagnosis`),
+  `resolution_action` = VALUES(`resolution_action`),
+  `resolved_at` = VALUES(`resolved_at`),
+  `closed_at` = VALUES(`closed_at`),
+  `created_at` = VALUES(`created_at`),
+  `updated_at` = VALUES(`updated_at`);
+
 

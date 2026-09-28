@@ -207,6 +207,14 @@ class SeedRunner
                 'operator_code' => 'OP-01',
                 'phone' => '677222333',
             ],
+            [
+                'name' => 'Marta Técnica Ruta BCN',
+                'email' => 'marta.ruta@vendguard.internal',
+                'password_hash' => $passwordHash,
+                'role' => 'TECHNICIAN',
+                'operator_code' => 'OP-02',
+                'phone' => '677444555',
+            ],
         ];
 
         $sql = "
