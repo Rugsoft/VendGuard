@@ -421,7 +421,8 @@ ON DUPLICATE KEY UPDATE
 
 INSERT INTO `sanitary_certificates` (
   `certificate_code`, `preventive_order_id`, `machine_id`, `location_id`,
-  `technician_id`, `inspection_date`, `valid_until`, `temperature_measured`,
+  `technician_id`, `technician_name`, `technician_operator_code`,
+  `inspection_date`, `valid_until`, `temperature_measured`,
   `result`, `status`
 ) VALUES
   (
@@ -430,6 +431,8 @@ INSERT INTO `sanitary_certificates` (
     (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0101' LIMIT 1),
     (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-01' LIMIT 1),
     (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+    'Jordi Técnico Ruta BCN',
+    'OP-01',
     DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY),
     DATE_ADD(CURRENT_DATE(), INTERVAL 14 DAY),
     3.2,
@@ -442,6 +445,8 @@ INSERT INTO `sanitary_certificates` (
     (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0201' LIMIT 1),
     (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-02' LIMIT 1),
     (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+    'Jordi Técnico Ruta BCN',
+    'OP-01',
     DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY),
     DATE_ADD(CURRENT_DATE(), INTERVAL 13 DAY),
     3.8,
