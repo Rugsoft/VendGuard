@@ -43,7 +43,7 @@
   * **Dependencias:** T-SPARE-01, T-SPARE-02
   * **Hecho cuando:** `PdoSparePartRequestRepository` implementa registro de solicitudes en pausa técnica (`createRequest`), consulta de solicitudes por incidencia (`findByIncidentId`), transición atómica de solicitudes a atendidas (`markAttendedByIncident`) y listado de solicitudes fuera de catálogo pendientes de revisión para el coordinador.
 
-- [ ] **T-SPARE-06: Implementar `IncidentReplacedPartRepositoryInterface` y `PdoIncidentReplacedPartRepository.php`**
+- [x] **T-SPARE-06: Implementar `IncidentReplacedPartRepositoryInterface` y `PdoIncidentReplacedPartRepository.php`**
   * **Requisitos:** RF-REP-06, RF-REP-07, RF-REP-08, RNF-REP-04, Constitución Art. III
   * **Dependencias:** T-SPARE-01, T-SPARE-02
   * **Hecho cuando:** `PdoIncidentReplacedPartRepository` implementa inserción transaccional de piezas sustituidas capturando el snapshot inmutable de coste (`insertReplacedPart` con `unit_cost_snapshot`), consulta de piezas por incidencia/preventivo, agregaciones de costes acumulados por modelo/sede y consulta de piezas con $> 3$ sustituciones en 90 días naturales para alertas de fallo crónico.
