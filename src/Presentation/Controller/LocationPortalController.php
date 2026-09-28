@@ -107,7 +107,7 @@ class LocationPortalController
                 'machine_type' => $machine->getMachineType()->value,
                 'floor_wing' => $machine->getFloorWing(),
                 'notes' => $machine->getNotes(),
-                'active_incident' => $machine->getActiveIncident(),
+                'active_incident' => $this->sanitizeIncidentForSite($machine->getActiveIncident()),
             ];
         }, $machines);
 
@@ -332,7 +332,7 @@ class LocationPortalController
 
         // 11. Devolver respuesta 201 Created con el payload del recurso generado
         return Response::json(
-            $created->toArray(),
+            $this->sanitizeIncidentForSite($created->toArray()),
             201,
             'Incidencia registrada con éxito'
         );
@@ -652,10 +652,69 @@ class LocationPortalController
                 'assigned_technician_id' => $reopenedIncident->getAssignedTechnicianId(),
                 'reopened_at' => $reopenedIncident->getReopenedAt(),
                 'reopen_reason' => $reopenedIncident->getReopenReason(),
-                'incident' => $reopenedIncident->toArray(),
+                'incident' => $this->sanitizeIncidentForSite($reopenedIncident->toArray()),
             ],
             200,
             'Incidencia reabierta con éxito y enviada a triaje de coordinación.'
         );
+    }
+
+    /**
+     * Sanitiza recursivamente cualquier estructura de datos de incidencia destinada al Responsable de Sede,
+     * garantizando el blindaje constitucional de datos (Art. V.4 y RF-REP-10).
+     * 
+     * Elimina de forma estricta:
+     * - Piezas solicitadas (pending_parts_reason, spare_parts, spare_part_requests).
+     * - Piezas sustituidas (replaced_parts, incident_replaced_parts).
+     * - Costes económicos (unit_cost_snapshot, total_cost_snapshot, total_parts_cost, reference_cost, costs).
+     * - Destinos de componentes (old_part_destination, desguace, taller).
+     * - Teléfonos personales de técnicos y notas internas de taller.
+     *
+     * @param array<string, mixed>|null $data
+     * @return array<string, mixed>|null
+     */
+    public function sanitizeIncidentForSite(?array $data): ?array
+    {
+        if ($data === null) {
+            return null;
+        }
+
+        $forbiddenExactKeys = [
+            'pending_parts_reason',
+            'spare_parts',
+            'spare_part_requests',
+            'replaced_parts',
+            'incident_replaced_parts',
+            'unit_cost_snapshot',
+            'total_cost_snapshot',
+            'total_parts_cost',
+            'reference_cost',
+            'costs',
+            'cost',
+            'old_part_destination',
+            'part_code',
+            'part_name',
+            'technician_phone',
+            'internal_notes',
+            'notes_taller',
+        ];
+
+        foreach ($forbiddenExactKeys as $key) {
+            unset($data[$key]);
+        }
+
+        foreach ($data as $key => $value) {
+            if (is_string($key)) {
+                if (preg_match('/(spare_part|replaced_part|part_code|unit_cost|total_cost|cost_snapshot|reference_cost|old_part_dest)/i', $key)) {
+                    unset($data[$key]);
+                    continue;
+                }
+            }
+            if (is_array($value)) {
+                $data[$key] = $this->sanitizeIncidentForSite($value);
+            }
+        }
+
+        return $data;
     }
 }

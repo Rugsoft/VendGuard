@@ -12,12 +12,15 @@ use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\PreventiveChecklistEvaluationService;
 use VendGuard\Application\Service\PreventiveCoexistenceBridgeService;
 use VendGuard\Application\Service\SanitaryCertificateService;
+use VendGuard\Application\Service\SparePartTraceabilityService;
 use VendGuard\Core\Domain\Exception\CannotIssueNonConformCertificateException;
 use VendGuard\Core\Domain\Exception\ChecklistIncompleteException;
+use VendGuard\Core\Domain\Exception\InvalidPartQuantityException;
 use VendGuard\Core\Domain\Exception\InvalidTemperatureRangeException;
 use VendGuard\Core\Domain\Exception\PreventiveOrderAlreadyAssignedException;
 use VendGuard\Core\Domain\Exception\PreventiveOrderNotInInspectionException;
 use VendGuard\Core\Domain\Exception\ReinspectionTemperatureExceededException;
+use VendGuard\Core\Domain\Exception\SparePartNotFoundException;
 use VendGuard\Core\Domain\Model\PreventiveOrder;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
@@ -26,6 +29,7 @@ use VendGuard\Core\Domain\Repository\PreventiveOrderRepositoryInterface;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
+use VendGuard\Infrastructure\Repository\PdoIncidentReplacedPartRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
@@ -33,6 +37,8 @@ use VendGuard\Infrastructure\Repository\PdoPreventiveItemRepository;
 use VendGuard\Infrastructure\Repository\PdoPreventiveOrderRepository;
 use VendGuard\Infrastructure\Repository\PdoPreventiveSettingsRepository;
 use VendGuard\Infrastructure\Repository\PdoSanitaryCertificateRepository;
+use VendGuard\Infrastructure\Repository\PdoSparePartRepository;
+use VendGuard\Infrastructure\Repository\PdoSparePartRequestRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -57,6 +63,7 @@ use VendGuard\Presentation\Http\Response;
  * - RF-PREV-05 / Art. V.1, Art. V.2: Coexistencia con averías correctivas sin duplicar tickets.
  * - RF-PREV-07 / Art. V.4: Emisión de certificados sanitarios protegiendo datos personales (operator_code).
  * - RF-PREV-08 / Art. II, Art. V.1: Reinspección tras subsanación y levantamiento condicionado.
+ * - RF-REP-07: Registro opcional de piezas de repuesto sustituidas en preventivos con snapshot de costes.
  * - Dogma Vanilla (PHP 8.2+ sin frameworks, PDO).
  * - Dualismo Lingüístico (código en inglés, mensajes en español).
  */
@@ -71,6 +78,7 @@ class TechnicianPreventiveController
     private LocationRepositoryInterface $locationRepo;
     private UserRepositoryInterface $userRepo;
     private AuditLogger $auditLogger;
+    private SparePartTraceabilityService $traceabilityService;
 
     public function __construct(
         ?PreventiveOrderRepositoryInterface $orderRepo = null,
@@ -81,7 +89,8 @@ class TechnicianPreventiveController
         ?MachineRepositoryInterface $machineRepo = null,
         ?LocationRepositoryInterface $locationRepo = null,
         ?UserRepositoryInterface $userRepo = null,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?SparePartTraceabilityService $traceabilityService = null
     ) {
         $this->orderRepo = $orderRepo ?? new PdoPreventiveOrderRepository();
         $this->settingsRepo = $settingsRepo ?? new PdoPreventiveSettingsRepository();
@@ -114,6 +123,15 @@ class TechnicianPreventiveController
             certificateRepo: $certificateRepo,
             orderRepo: $this->orderRepo,
             settingsRepo: $this->settingsRepo,
+            machineRepo: $this->machineRepo,
+            auditLogger: $this->auditLogger
+        );
+
+        $this->traceabilityService = $traceabilityService ?? new SparePartTraceabilityService(
+            requestRepo: new PdoSparePartRequestRepository(),
+            replacedPartRepo: new PdoIncidentReplacedPartRepository(),
+            sparePartRepo: new PdoSparePartRepository(),
+            incidentRepo: $incidentRepo,
             machineRepo: $this->machineRepo,
             auditLogger: $this->auditLogger
         );
@@ -347,7 +365,27 @@ class TechnicianPreventiveController
                 $actor
             );
 
-            // 2. Si el dictamen es NO_CONFORME, gestionar cuarentena y correctivo con el coexistence bridge
+            // 2. Registro opcional de repuestos sustituidos en preventivo (RF-REP-07)
+            $replacedPartsDeclared = !empty($body['replaced_parts_declared']);
+            $partsResult = null;
+            if ($replacedPartsDeclared || !empty($body['replaced_parts'])) {
+                try {
+                    $partsResult = $this->traceabilityService->recordPreventiveReplacedParts(
+                        $orderId,
+                        $technicianId,
+                        $order->getMachineId(),
+                        $order->getLocationId(),
+                        $body['replaced_parts'] ?? [],
+                        $actor
+                    );
+                } catch (\InvalidArgumentException $e) {
+                    $msg = $e->getMessage();
+                    $errCode = str_contains($msg, 'destino') ? 'INVALID_PART_DESTINATION' : 'INVALID_ARGUMENT';
+                    return Response::error($errCode, $msg, 422);
+                }
+            }
+
+            // 3. Si el dictamen es NO_CONFORME, gestionar cuarentena y correctivo con el coexistence bridge
             if ($evalResult['result'] === 'NO_CONFORME' || $evalResult['is_quarantine_triggered']) {
                 $nonConformItems = array_filter($body['items'] ?? [], function ($item) {
                     $st = strtoupper((string)($item['status'] ?? ''));
@@ -374,10 +412,13 @@ class TechnicianPreventiveController
                     'temperature_measured' => $evalResult['temperature_measured'],
                     'machine_sanitary_status' => 'QUARANTINE',
                     'corrective_action' => $correctiveResult,
+                    'replaced_parts_count' => $partsResult['replaced_parts_count'] ?? 0,
+                    'total_parts_cost' => $partsResult['total_parts_cost'] ?? 0.00,
+                    'replaced_parts' => $partsResult['replaced_parts'] ?? [],
                 ], 200, 'ALERTA SANITARIA (Art. II): Máquina puesta en cuarentena y bloqueada en código QR. Incidencia correctiva vinculada procesada.');
             }
 
-            // 3. Si el dictamen es CONFORME o CONFORME_CON_OBSERVACIONES, emitir certificado sanitario oficial
+            // 4. Si el dictamen es CONFORME o CONFORME_CON_OBSERVACIONES, emitir certificado sanitario oficial
             $certificate = $this->sanitaryCertificateService->issueCertificate($orderId, $actor);
 
             return Response::json([
@@ -394,6 +435,9 @@ class TechnicianPreventiveController
                     'technician_operator_code' => $certificate->getTechnicianOperatorCode(),
                 ],
                 'machine_sanitary_status' => 'OK',
+                'replaced_parts_count' => $partsResult['replaced_parts_count'] ?? 0,
+                'total_parts_cost' => $partsResult['total_parts_cost'] ?? 0.00,
+                'replaced_parts' => $partsResult['replaced_parts'] ?? [],
             ], 200, 'Inspección conforme. Certificado sanitario emitido correctamente.');
         });
     }

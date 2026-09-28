@@ -81,7 +81,7 @@
   * **Dependencias:** T-SPARE-08
   * **Hecho cuando:** `TechnicianSparePartsController` sirve el catálogo compatible con la máquina en $< 250\text{ ms}$; `TechnicianController::pauseIntervention` procesa solicitudes estructuradas en `spare_part_requests` y `TechnicianController::resolveIncident` ejecuta la resolución obligatoriamente justificada con registro de piezas sustituidas, destino `DESGUACE`/`TALLER` y congelación de coste.
 
-- [ ] **T-SPARE-12: Actualizar `TechnicianPreventiveController.php` y blindar `LocationPortalController.php`**
+- [x] **T-SPARE-12: Actualizar `TechnicianPreventiveController.php` y blindar `LocationPortalController.php`**
   * **Requisitos:** RF-REP-07, RF-REP-10, Constitución Art. II, Art. V.4
   * **Dependencias:** T-SPARE-08
   * **Hecho cuando:** `TechnicianPreventiveController::completeInspection` admite la declaración opcional de piezas sustituidas en preventivos; `LocationPortalController` garantiza la exclusión estricta de piezas, códigos y costes en todas las respuestas dirigidas a usuarios de sede.
