@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guía Rápida de Taller · Repuestos en Averías (Módulo M2) · VendGuard</title>
+<style>
+  /* Tokens de diseño docs/design.md (inspiración Docker) · Impresión A4 única */
+  @page { size: A4 portrait; margin: 9mm; }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif;
+    color: #2c333f; background: #ffffff; margin: 0; font-size: 10.5px; line-height: 1.35;
+  }
+  .page { max-width: 192mm; margin: 0 auto; padding: 4mm 0; }
+
+  header.hd {
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 3px solid #2560ff; padding-bottom: 6px; margin-bottom: 8px;
+  }
+  header.hd h1 { font-size: 17px; font-weight: 700; margin: 0; color: #000000; letter-spacing: -0.2px; }
+  header.hd .sub { font-size: 9.5px; color: #6c7e9d; margin-top: 2px; }
+  .badge-role {
+    background: #2560ff; color: #ffffff; font-size: 9.5px; font-weight: 700;
+    padding: 5px 10px; border-radius: 4px; border: 1.5px solid #003db5; white-space: nowrap;
+  }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  section.card {
+    border: 1px solid #c8cfda; border-radius: 8px; padding: 8px 10px; background: #ffffff;
+  }
+  section.card h2 {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+    color: #2560ff; margin: 0 0 6px 0; border-bottom: 1px solid #c8cfda; padding-bottom: 3px;
+  }
+  section.card h2 .step {
+    display: inline-block; background: #2560ff; color: #fff; border-radius: 4px;
+    font-size: 9.5px; padding: 1px 6px; margin-right: 5px;
+  }
+
+  ul { margin: 0; padding-left: 14px; }
+  li { margin-bottom: 3px; }
+  b.k { color: #000000; }
+  .btn {
+    display: inline-block; border: 1px solid #c8cfda; border-radius: 4px;
+    padding: 1px 7px; font-weight: 700; font-size: 9.5px; background: #f9fafb; white-space: nowrap;
+  }
+  .btn.primary { background: #2560ff; border-color: #003db5; color: #fff; }
+  .btn.yes { background: #38bd7d; border-color: #23875c; color: #fff; }
+  .btn.no  { background: #f9fafb; border-color: #a9b4c6; color: #2c333f; }
+  .btn.warn{ background: #f8b60f; border-color: #c78f06; color: #2c333f; }
+
+  .callout {
+    background: #e5f2fc; border: 1px solid #a9b4c6; border-left: 4px solid #2560ff;
+    border-radius: 4px; padding: 5px 8px; margin: 6px 0 0 0; font-size: 10px;
+  }
+  .callout b { color: #003db5; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 9.5px; }
+  th {
+    background: #f9fafb; text-align: left; color: #434c5f; text-transform: uppercase;
+    font-size: 8.5px; letter-spacing: 0.3px; border: 1px solid #c8cfda; padding: 3px 5px;
+  }
+  td { border: 1px solid #c8cfda; padding: 4px 5px; vertical-align: top; }
+  td.err { color: #b91c1c; font-weight: 600; }
+  .ok  { color: #177a4e; font-weight: 700; }
+  .bad { color: #b91c1c; font-weight: 700; }
+
+  .example { border: 1px dashed #c8cfda; border-radius: 4px; padding: 4px 6px; margin-top: 3px; font-size: 9.5px; }
+  .example p { margin: 2px 0; }
+
+  footer.ft {
+    margin-top: 8px; border-top: 1px solid #c8cfda; padding-top: 4px;
+    font-size: 8.5px; color: #6c7e9d; display: flex; justify-content: space-between;
+  }
+
+  .dest { display: inline-block; border-radius: 4px; padding: 1px 6px; font-weight: 700; font-size: 9.5px; }
+  .dest.d { background: #fddfdf; color: #991b1b; border: 1px solid #ff5757; }
+  .dest.t { background: #fef9c3; color: #854d0e; border: 1px solid #f8b60f; }
+
+  @media print { .page { padding: 0; } header.hd h1 { font-size: 16px; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hd">
+    <div>
+      <h1>🧰 Guía Rápida de Taller · Repuestos en Averías</h1>
+      <div class="sub">VendGuard · Módulo M2 (RF-REP-03 a RF-REP-06) · Sin texto libre: toda pieza se registra de forma estructurada</div>
+    </div>
+    <div class="badge-role">Para: Técnico de Ruta</div>
+  </header>
+
+  <div class="grid">
+
+    <!-- COLUMNA IZQUIERDA -->
+    <section class="card">
+      <h2><span class="step">1</span>¿Cuándo pausar la avería?</h2>
+      <ul>
+        <li>Con la avería <b class="k">En Curso</b> y un componente que <b class="k">no llevas en la furgoneta</b>, pulsa <span class="btn">⏸ Pausar repuesto</span>.</li>
+        <li>El selector ya trae <b class="k">solo piezas compatibles</b> con el modelo de esa máquina. Indica la <b class="k">cantidad (1–50)</b> y confirma.</li>
+        <li>La avería queda <b class="k">⚠️ En espera de repuesto</b> (visible para coordinación). Al recibir la pieza: <span class="btn primary">▶ Iniciar intervención</span> y resuelve.</li>
+        <li><b class="k">No pauses</b> si puedes terminar hoy: resuelve directamente y declara las piezas en el cierre.</li>
+      </ul>
+      <div class="callout"><b>Regla de oro:</b> nunca describas la pieza a mano libre. Si está en el catálogo, selecciónala; si no, usa el modo “fuera de catálogo” con justificación.</div>
+    </section>
+
+    <section class="card">
+      <h2><span class="step">2</span>Pieza fuera de catálogo: cómo justificarla</h2>
+      <ul>
+        <li>Úsalo <b class="k">solo</b> si el componente <b class="k">no existe en el catálogo</b> o la máquina no tiene piezas compatibles.</li>
+        <li>Activa <span class="btn warn">Pieza fuera de catálogo</span> y redacta <b class="k">≥ 20 caracteres</b>: <b class="k">qué es + dónde va + para qué sirve</b>. El botón se desbloquea al llegar al mínimo.</li>
+        <li>Se registra con coste provisional <b class="k">0,00 €</b> y el Coordinador la homologará después (bandeja de revisión).</li>
+      </ul>
+      <div class="example">
+        <p><span class="bad">✘ MAL</span> “Tubo roto” <i>(11 caracteres)</i></p>
+        <p><span class="ok">✔ BIEN</span> “Tubo de desagüe del depósito de agua fría, 8 mm, para evacuar condensados del compresor”</p>
+      </div>
+    </section>
+
+    <!-- COLUMNA DERECHA -->
+    <section class="card">
+      <h2><span class="step">3</span>Los 3 errores de validación más comunes (HTTP 422)</h2>
+      <table>
+        <tr><th style="width:44%;">Error que verás</th><th>Por qué ocurre</th><th>Solución</th></tr>
+        <tr>
+          <td class="err">“Debe seleccionar al menos un repuesto compatible… o indicar una pieza fuera de catálogo.”</td>
+          <td>Confirmaste la pausa sin ninguna pieza marcada.</td>
+          <td>Marca <b class="k">1 pieza o más</b> del selector, o activa el modo fuera de catálogo.</td>
+        </tr>
+        <tr>
+          <td class="err">“La justificación técnica… debe tener al menos 20 caracteres.”</td>
+          <td>Descripción demasiado corta de la pieza fuera de catálogo.</td>
+          <td>Completa: componente + ubicación + función (mira el ejemplo ✔).</td>
+        </tr>
+        <tr>
+          <td class="err">“La cantidad de unidades debe ser un número entero entre 1 y 50.”</td>
+          <td>Cantidad en 0 o superior a 50.</td>
+          <td>Ajusta con los botones <b class="k">+ / −</b> antes de confirmar.</td>
+        </tr>
+      </table>
+      <div class="callout"><b>Otros bloqueos:</b> pieza no compatible con el modelo (selecciona del catálogo filtrado) · resolver sin responder Sí/No a la sustitución · declarar “Sí” sin añadir ninguna pieza.</div>
+    </section>
+
+    <section class="card">
+      <h2><span class="step">4</span>Al resolver: cierre bien el parte</h2>
+      <ul>
+        <li>Responde <b class="k">obligatoriamente</b>: “¿Se instaló o reemplazó algún componente?”
+          <span class="btn yes">✅ Sí, hubo sustitución</span> <span class="btn no">❎ No se cambiaron piezas</span></li>
+        <li>Si <b class="k">Sí</b>: cada pieza instalada con cantidad y destino del componente retirado:
+          <span class="dest d">DESGUACE</span> = desecho · <span class="dest t">TALLER</span> = reparar.</li>
+        <li><b class="k">Diagnóstico y acción ≥ 20 caracteres</b>, siempre (Art. V.1). Sin ellos no se cierra.</li>
+        <li>El coste de la pieza queda <b class="k">congelado en el parte</b>: aunque el catálogo cambie de precio, tu intervención no se recalcula.</li>
+        <li><b class="k">Preventivos:</b> las piezas se declaran solo al completar la orden y <b class="k">no levantan la cuarentena sanitaria</b> (eso exige certificado conforme).</li>
+      </ul>
+    </section>
+
+  </div>
+
+  <footer class="ft">
+    <span>Manual completo: <b>docs/manual_modulo_m2_repuestos.md</b> · Catálogo y analítica: pestaña “Repuestos” del Coordinador</span>
+    <span>VendGuard · v1.0 · Septiembre 2026 · Imprimir en A4 vertical</span>
+  </footer>
+
+</div>
+</body>
+</html>
