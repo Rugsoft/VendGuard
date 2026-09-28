@@ -105,7 +105,7 @@
   * **Dependencias:** T-SPARE-10
   * **Hecho cuando:** `CoordinatorSparePartsAnalyticsTab.js` renderiza las tarjetas KPI de gasto y consumo, banners de alertas por averías crónicas (> 3 sustituciones en 90 días con estilo de advertencia Docker), tabla ranking de piezas sustituidas con desglose de destino, botón de descarga directa de CSV y bandeja de piezas fuera de catálogo pendientes de revisión.
 
-- [ ] **T-SPARE-16: Implementar componentes móviles `TechnicianSparePartsPauseModal.js` y `TechnicianResolutionPartsBlock.js` con test `TechnicianSparePartsModalsTest.mjs`**
+- [x] **T-SPARE-16: Implementar componentes móviles `TechnicianSparePartsPauseModal.js` y `TechnicianResolutionPartsBlock.js` con test `TechnicianSparePartsModalsTest.mjs`**
   * **Requisitos:** RF-REP-03, RF-REP-04, RF-REP-05, RF-REP-06, RNF-REP-03, docs/design.md (Touch targets $\ge 44\text{px}$, conmutadores táctiles)
   * **Dependencias:** T-SPARE-11
   * **Hecho cuando:** `TechnicianSparePartsPauseModal.js` permite seleccionar piezas compatibles o justificar piezas fuera de catálogo ($\ge 20$ chars); `TechnicianResolutionPartsBlock.js` exige la respuesta obligatoria Sí/No y despliega selectores táctiles de repuestos, cantidades (1–50) y destino `DESGUACE`/`TALLER` con objetivos táctiles móviles $\ge 44\text{px}$; `node tests/unit/TechnicianSparePartsModalsTest.mjs` pasa al 100% en verde.

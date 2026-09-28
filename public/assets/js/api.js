@@ -596,30 +596,36 @@ export class ApiClient {
     },
 
     /**
-     * Pauses intervention pending replacement parts (RF-07 / EARS 7.2).
+     * Pauses intervention pending replacement parts (RF-07, RF-REP-03, RF-REP-04).
      * @param {number|string} incidentId
-     * @param {string} partsNote
+     * @param {string|Object} payloadOrNote
      * @returns {Promise<Object>}
      */
-    pauseIncident: (incidentId, partsNote) => {
+    pauseIncident: (incidentId, payloadOrNote) => {
+      if (typeof payloadOrNote === 'object' && payloadOrNote !== null) {
+        return this.patch(`/technician/incidents/${incidentId}/pause`, payloadOrNote);
+      }
       return this.patch(`/technician/incidents/${incidentId}/pause`, {
-        parts_note: partsNote,
-        pending_parts_reason: partsNote
+        parts_note: payloadOrNote,
+        pending_parts_reason: payloadOrNote
       });
     },
 
     /**
-     * Resolves incident with strict validation (>= 20 chars diagnosis & action) (RF-08).
+     * Resolves incident with strict validation and optional spare parts (RF-08, RF-REP-05, RF-REP-06).
      * @param {number|string} incidentId
-     * @param {string} diagnosis
-     * @param {string} actionTaken
+     * @param {string|Object} payloadOrDiagnosis
+     * @param {string|null} [actionTaken=null]
      * @returns {Promise<Object>}
      */
-    resolveIncident: (incidentId, diagnosis, actionTaken) => {
+    resolveIncident: (incidentId, payloadOrDiagnosis, actionTaken = null) => {
+      if (typeof payloadOrDiagnosis === 'object' && payloadOrDiagnosis !== null) {
+        return this.post(`/technician/incidents/${incidentId}/resolve`, payloadOrDiagnosis);
+      }
       return this.post(`/technician/incidents/${incidentId}/resolve`, {
-        diagnosis,
+        diagnosis: payloadOrDiagnosis,
         action_taken: actionTaken,
-        resolution_diagnosis: diagnosis,
+        resolution_diagnosis: payloadOrDiagnosis,
         resolution_action: actionTaken
       });
     },
