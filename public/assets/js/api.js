@@ -529,6 +529,16 @@ export class ApiClient {
     },
     updateMachinePreventiveConfig: (machineId, payload) => {
       return this.patch(`/coordinator/machines/${machineId}/preventive-config`, payload);
+    },
+
+    // Máquinas y Personal para Mantenimiento y Operaciones (RF-02, RF-03)
+    getMachines: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/machines${q ? `?${q}` : ''}`);
+    },
+    getUsers: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/users${q ? `?${q}` : ''}`);
     }
   };
 

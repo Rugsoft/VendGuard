@@ -357,3 +357,115 @@ ON DUPLICATE KEY UPDATE
   `default_frequency_days` = VALUES(`default_frequency_days`),
   `max_allowed_days` = VALUES(`max_allowed_days`),
   `advance_warning_days` = VALUES(`advance_warning_days`);
+
+-- -----------------------------------------------------------------------------
+-- Órdenes Preventivas y Certificados Sanitarios Iniciales (Módulo 05)
+-- -----------------------------------------------------------------------------
+INSERT INTO `preventive_orders` (
+  `order_code`, `machine_id`, `location_id`, `assigned_technician_id`,
+  `status`, `order_type`, `scheduled_date`, `due_date`, `started_at`, `completed_at`,
+  `temperature_measured`, `result`, `is_quarantine_triggered`, `notes`
+) VALUES
+  (
+    'ORD-PREV-2026-0001',
+    (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0101' LIMIT 1),
+    (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-01' LIMIT 1),
+    (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+    'COMPLETED',
+    'ROUTINE',
+    DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY),
+    CURRENT_DATE(),
+    DATE_SUB(NOW(), INTERVAL 1 DAY),
+    DATE_SUB(NOW(), INTERVAL 1 DAY),
+    3.2,
+    'CONFORME',
+    0,
+    'Inspección higiénico-sanitaria inicial conforme. Temperatura en rango seguro (Art. II).'
+  ),
+  (
+    'ORD-PREV-2026-0002',
+    (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0201' LIMIT 1),
+    (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-02' LIMIT 1),
+    (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+    'COMPLETED',
+    'ROUTINE',
+    DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY),
+    CURRENT_DATE(),
+    DATE_SUB(NOW(), INTERVAL 2 DAY),
+    DATE_SUB(NOW(), INTERVAL 2 DAY),
+    3.8,
+    'CONFORME',
+    0,
+    'Inspección periódica inicial conforme.'
+  ),
+  (
+    'ORD-PREV-2026-0003',
+    (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0102' LIMIT 1),
+    (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-01' LIMIT 1),
+    NULL,
+    'PENDING_ASSIGNMENT',
+    'ROUTINE',
+    DATE_ADD(CURRENT_DATE(), INTERVAL 2 DAY),
+    DATE_ADD(CURRENT_DATE(), INTERVAL 2 DAY),
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    0,
+    'Revisión preventiva inminente pendiente de asignación técnica.'
+  )
+ON DUPLICATE KEY UPDATE
+  `status` = VALUES(`status`),
+  `result` = VALUES(`result`);
+
+INSERT INTO `sanitary_certificates` (
+  `certificate_code`, `preventive_order_id`, `machine_id`, `location_id`,
+  `technician_id`, `inspection_date`, `valid_until`, `temperature_measured`,
+  `result`, `status`
+) VALUES
+  (
+    'CERT-2026-0001',
+    (SELECT `id` FROM `preventive_orders` WHERE `order_code` = 'ORD-PREV-2026-0001' LIMIT 1),
+    (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0101' LIMIT 1),
+    (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-01' LIMIT 1),
+    (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+    DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY),
+    DATE_ADD(CURRENT_DATE(), INTERVAL 14 DAY),
+    3.2,
+    'CONFORME',
+    'VALID'
+  ),
+  (
+    'CERT-2026-0002',
+    (SELECT `id` FROM `preventive_orders` WHERE `order_code` = 'ORD-PREV-2026-0002' LIMIT 1),
+    (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0201' LIMIT 1),
+    (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-02' LIMIT 1),
+    (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+    DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY),
+    DATE_ADD(CURRENT_DATE(), INTERVAL 13 DAY),
+    3.8,
+    'CONFORME',
+    'VALID'
+  )
+ON DUPLICATE KEY UPDATE
+  `valid_until` = VALUES(`valid_until`),
+  `status` = VALUES(`status`);
+
+UPDATE `machines` SET
+  `last_sanitary_inspection_at` = DATE_SUB(NOW(), INTERVAL 1 DAY),
+  `next_sanitary_inspection_due` = DATE_ADD(CURRENT_DATE(), INTERVAL 14 DAY),
+  `sanitary_status` = 'OK'
+WHERE `code` = 'VEND-0101';
+
+UPDATE `machines` SET
+  `last_sanitary_inspection_at` = DATE_SUB(NOW(), INTERVAL 2 DAY),
+  `next_sanitary_inspection_due` = DATE_ADD(CURRENT_DATE(), INTERVAL 13 DAY),
+  `sanitary_status` = 'OK'
+WHERE `code` = 'VEND-0201';
+
+UPDATE `machines` SET
+  `last_sanitary_inspection_at` = DATE_SUB(NOW(), INTERVAL 28 DAY),
+  `next_sanitary_inspection_due` = DATE_ADD(CURRENT_DATE(), INTERVAL 2 DAY),
+  `sanitary_status` = 'OK'
+WHERE `code` = 'VEND-0102';
+

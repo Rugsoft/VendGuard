@@ -317,7 +317,8 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
                 m.`model`, 
                 m.`machine_type`, 
                 m.`floor_wing`, 
-                m.`sanitary_status`
+                m.`sanitary_status`,
+                m.`next_sanitary_inspection_due`
             FROM `machines` m
             WHERE m.`location_id` = :location_id
               AND m.`is_active` = 1
@@ -392,13 +393,27 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
                     $semaphore = 'GREEN';
                     $detail = 'Inspección conforme en vigor hasta ' . $certRow['valid_until'] . '.';
                 }
-            } else {
-                // Sin certificado o con certificado expirado
+            } elseif ($certRow && $certRow['valid_until'] < $today) {
+                // Certificado expirado
                 $hasQuarantineOrExpired = true;
                 $issuesCount++;
                 $semaphore = 'RED';
                 $verdict = 'VENCIDO';
-                $detail = 'Inspección sanitaria periódica no realizada o vencida.';
+                $detail = 'Certificado sanitario expirado el ' . $certRow['valid_until'] . '. Requiere inspección urgente.';
+            } else {
+                // Sin certificado previo registrado
+                $nextDue = $mach['next_sanitary_inspection_due'] ?? null;
+                if ($nextDue && $nextDue >= $today) {
+                    $semaphore = 'YELLOW';
+                    $verdict = 'PENDIENTE_INSPECCION';
+                    $detail = 'Primera inspección sanitaria programada para el ' . $nextDue . '.';
+                } else {
+                    $hasQuarantineOrExpired = true;
+                    $issuesCount++;
+                    $semaphore = 'RED';
+                    $verdict = 'VENCIDO';
+                    $detail = 'Inspección sanitaria periódica no realizada o vencida.';
+                }
             }
 
             $breakdown[] = [

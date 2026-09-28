@@ -112,7 +112,8 @@ export const CoordinatorPreventiveOrdersTab = {
       await Promise.all([
         this.loadOrders(),
         this.loadLocations(),
-        this.loadTechnicians()
+        this.loadTechnicians(),
+        this.loadMachines()
       ]);
     },
 
@@ -133,7 +134,7 @@ export const CoordinatorPreventiveOrdersTab = {
         if (this.filterSearch.trim()) filters.search = this.filterSearch.trim();
 
         const res = await api.coordinator.getPreventiveOrders(filters);
-        this.orders = res?.data || (Array.isArray(res) ? res : []);
+        this.orders = Array.isArray(res) ? res : (res?.data || []);
       } catch (err) {
         this.errorMessage = err.message || 'Error al cargar el listado de órdenes preventivas.';
       } finally {
@@ -147,7 +148,7 @@ export const CoordinatorPreventiveOrdersTab = {
     async loadLocations() {
       try {
         const res = await api.coordinator.getLocations();
-        this.locations = res?.data || res || [];
+        this.locations = Array.isArray(res) ? res : (res?.data || []);
       } catch (err) {
         console.warn('No se pudieron cargar las sedes para filtros:', err);
       }
@@ -158,10 +159,24 @@ export const CoordinatorPreventiveOrdersTab = {
      */
     async loadTechnicians() {
       try {
-        const res = await api.coordinator.getUsers({ role: 'TECHNICIAN' });
-        this.technicians = res?.data || res || [];
+        const getter = api.coordinator.getUsers || api.admin.getUsers;
+        const res = await getter({ role: 'TECHNICIAN' });
+        this.technicians = Array.isArray(res) ? res : (res?.data || []);
       } catch (err) {
         console.warn('No se pudieron cargar los técnicos:', err);
+      }
+    },
+
+    /**
+     * Carga el parque de máquinas para asignaciones y creación manual
+     */
+    async loadMachines() {
+      try {
+        const getter = api.coordinator.getMachines || api.admin.getMachines;
+        const res = await getter();
+        this.machines = Array.isArray(res) ? res : (res?.data || []);
+      } catch (err) {
+        console.warn('No se pudieron cargar las máquinas:', err);
       }
     },
 
@@ -292,12 +307,7 @@ export const CoordinatorPreventiveOrdersTab = {
 
       // Cargar máquinas si no están cargadas
       if (this.machines.length === 0) {
-        try {
-          const res = await api.coordinator.getMachines();
-          this.machines = res?.data || res || [];
-        } catch (err) {
-          console.warn('No se pudieron cargar las máquinas:', err);
-        }
+        await this.loadMachines();
       }
     },
 
