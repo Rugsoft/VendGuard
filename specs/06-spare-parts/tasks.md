@@ -24,7 +24,7 @@
   * **Dependencias:** T-SPARE-01
   * **Hecho cuando:** Existen en `src/Core/Domain/Model/` los enums tipados (`SparePartCategory`, `OldPartDestination`, `SparePartRequestStatus`) y las entidades inmutables con tipado estricto PHP 8.2+ (`SparePart`, `SparePartRequest`, `IncidentReplacedPart`) con validaciones de invariantes de dominio.
 
-- [ ] **T-SPARE-03: Implementar Excepciones de Dominio y suite unitaria (`SparePartExceptionsTest.php`)**
+- [x] **T-SPARE-03: Implementar Excepciones de Dominio y suite unitaria (`SparePartExceptionsTest.php`)**
   * **Requisitos:** RF-REP-01, RF-REP-03, RF-REP-04, RF-REP-06, RF-REP-10, Constitución Art. V.4
   * **Dependencias:** T-SPARE-02
   * **Hecho cuando:** Existen en `src/Core/Domain/Exception/` las clases tipadas (`SparePartCodeExistsException`, `IncompatibleSparePartException`, `InvalidOutOfCatalogJustificationException`, `InvalidPartQuantityException`, `SitePartsDataForbiddenException`), y `php tests/unit/SparePartExceptionsTest.php` pasa al 100% en verde evaluando códigos HTTP (`403`, `409`, `422`), códigos de error técnicos y mensajes en castellano.
