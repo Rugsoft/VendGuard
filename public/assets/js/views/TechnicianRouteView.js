@@ -11,6 +11,7 @@
  * 5. Resolution modal: "Resolver Avería" enforcing strictly >= 20 chars for diagnosis AND action (RF-08 / EARS 8.1, 8.2).
  * 6. Quick telephone link (tel:) for immediate on-site coordinator or concierge contact.
  * 7. Mobile authentication screen for field technicians (RF-04).
+ * 8. Native link to the printable A4 spare parts quick guide (public/docs asset, RF-REP-03, RF-REP-04).
  */
 
 import { api } from '../api.js';
@@ -529,6 +530,18 @@ export const TechnicianRouteView = {
           </div>
 
           <div style="display: flex; gap: 6px;">
+            <a
+              href="/docs/guia_rapida_taller_repuestos_a4.html"
+              target="_blank"
+              rel="noopener"
+              class="vg-btn vg-btn-secondary"
+              style="height: 36px; padding: 0 10px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; text-decoration: none;"
+              title="Guía rápida de repuestos (A4 imprimible): cuándo pausar, justificar piezas y errores comunes"
+              aria-label="Abrir guía rápida de repuestos en formato A4"
+              data-testid="btn-quick-guide"
+            >
+              <span>🧰</span>
+            </a>
             <button
               type="button"
               class="vg-btn vg-btn-secondary"

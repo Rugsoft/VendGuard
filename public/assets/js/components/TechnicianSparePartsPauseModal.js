@@ -475,6 +475,13 @@ export const TechnicianSparePartsPauseModal = {
           <div v-else style="display: flex; flex-direction: column; gap: 10px;" data-testid="mode-out-of-catalog-section">
             <div style="background-color: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; padding: 10px 12px; font-size: 12px; color: #92400e;">
               ℹ️ Estás solicitando una pieza especial no presente en catálogo. Esta solicitud quedará marcada para revisión por coordinación sin bloquear tu operativa.
+              <a
+                href="/docs/guia_rapida_taller_repuestos_a4.html"
+                target="_blank"
+                rel="noopener"
+                style="display: inline-block; margin-top: 6px; font-size: 11.5px; font-weight: 600; color: #2560ff; text-decoration: underline;"
+                data-testid="link-quick-guide"
+              >📄 Ver guía rápida de repuestos (A4)</a>
             </div>
 
             <label style="display: block; font-size: 13px; font-weight: 600; color: #2c333f;">

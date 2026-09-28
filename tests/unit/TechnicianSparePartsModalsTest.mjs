@@ -204,6 +204,10 @@ assert('1.18 Template incluye data-testids requeridos',
   pauseTemplate.includes('data-testid="technician-spare-parts-pause-modal"') &&
   pauseTemplate.includes('data-testid="toggle-mode-catalog"') &&
   pauseTemplate.includes('data-testid="btn-confirm-pause"'));
+assert('1.19 Modo fuera de catálogo enlaza la guía rápida A4 de repuestos (ayuda contextual)',
+  pauseTemplate.includes('data-testid="link-quick-guide"') &&
+  pauseTemplate.includes('/docs/guia_rapida_taller_repuestos_a4.html') &&
+  pauseTemplate.includes('rel="noopener"'));
 
 // =========================================================================
 // PARTE 2: TechnicianResolutionPartsBlock.js

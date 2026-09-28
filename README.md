@@ -286,6 +286,7 @@ gestor-incidencias-vending/
 ├── public/                       # Raíz pública web (DocumentRoot)
 │   ├── index.html                # Contenedor SPA del Frontend Vue.js
 │   ├── index.php                 # Front Controller y despachador de assets
+│   ├── docs/                     # Guías rápidas imprimibles para taller (A4, técnico de campo)
 │   └── assets/
 │       ├── css/
 │       │   ├── design-tokens.css # Tokens CSS de Docker (#2560ff, tipografías, bordes)

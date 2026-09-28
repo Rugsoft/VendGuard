@@ -204,6 +204,17 @@ assert('2.7 Template contains click-to-call link for concierge (tel:)',
   TechnicianRouteView.template.includes("'tel:' + incident.location")
 );
 
+// Printable A4 spare parts quick guide native link (RF-REP-03, RF-REP-04)
+assert('2.8 Header quick guide link present with aria-label and testid',
+  TechnicianRouteView.template.includes('data-testid="btn-quick-guide"') &&
+  TechnicianRouteView.template.includes('aria-label="Abrir guía rápida de repuestos en formato A4"')
+);
+assert('2.9 Quick guide is a native anchor to the printable static asset (Dogma Vanilla, no API route)',
+  TechnicianRouteView.template.includes('href="/docs/guia_rapida_taller_repuestos_a4.html"') &&
+  TechnicianRouteView.template.includes('target="_blank"') &&
+  TechnicianRouteView.template.includes('rel="noopener"')
+);
+
 // ---------------------------------------------------------------------
 // TEST GROUP 3: "Iniciar intervención" Action (RF-07 / EARS 7.1, 7.3)
 // ---------------------------------------------------------------------

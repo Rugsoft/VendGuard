@@ -89,6 +89,12 @@ $assert("2.5 Integración de llamada táctil directa al conserje (tel: / RNF-01)
     strpos($viewContent, 'tel:') !== false
 );
 
+$assert("2.6 Enlace nativo a la guía rápida de repuestos A4 en cabecera de Mi Ruta (RF-REP-03, RF-REP-04)",
+    strpos($viewContent, 'guia_rapida_taller_repuestos_a4.html') !== false &&
+    strpos($viewContent, 'btn-quick-guide') !== false &&
+    strpos($viewContent, 'rel="noopener"') !== false
+);
+
 // =====================================================================
 // GRUPO 3: Ejecución del Runner Dinámico JS (40 aserciones reactivas)
 // =====================================================================
