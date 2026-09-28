@@ -86,7 +86,7 @@
   * **Dependencias:** T-SPARE-08
   * **Hecho cuando:** `TechnicianPreventiveController::completeInspection` admite la declaración opcional de piezas sustituidas en preventivos; `LocationPortalController` garantiza la exclusión estricta de piezas, códigos y costes en todas las respuestas dirigidas a usuarios de sede.
 
-- [ ] **T-SPARE-13: Registrar rutas en `AppRouter.php` y verificar enrutamiento (`SparePartsRoutesTest.php`)**
+- [x] **T-SPARE-13: Registrar rutas en `AppRouter.php` y verificar enrutamiento (`SparePartsRoutesTest.php`)**
   * **Requisitos:** RF-REP-01 a RF-REP-10
   * **Dependencias:** T-SPARE-10, T-SPARE-11, T-SPARE-12
   * **Hecho cuando:** Todas las rutas `/api/coordinator/spare-parts/*` y `/api/technician/spare-parts/*` están registradas con sus respectivos middlewares de rol (`COORDINATOR` o `TECHNICIAN`); la suite unitaria `php tests/unit/SparePartsRoutesTest.php` pasa al 100% en verde verificando métodos, URIs y rechazo ante accesos no autorizados.

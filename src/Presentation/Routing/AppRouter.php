@@ -125,6 +125,16 @@ class AppRouter
         $router->get('/api/coordinator/machines/{id}/preventive-config', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'getMachinePreventiveConfig'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/machines/{id}/preventive-config', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'updateMachinePreventiveConfig'], [$coordinatorAuth]);
 
+        // Gestión de Repuestos y Trazabilidad (Módulo 06: Coordinación - T-SPARE-10, T-SPARE-13)
+        $router->get('/api/coordinator/spare-parts', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'getCatalog'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/spare-parts', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'createPart'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/spare-parts/models', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'getModels'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/spare-parts/analytics', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'getAnalytics'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/spare-parts/export', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'exportCsv'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/spare-parts/requests/pending-review', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'getPendingReviewRequests'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/spare-parts/{id}', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'updatePart'], [$coordinatorAuth]);
+        $router->patch('/api/coordinator/spare-parts/{id}/status', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'toggleStatus'], [$coordinatorAuth]);
+
         // -----------------------------------------------------------------
         // 5. Módulo de Técnico de Campo / "Mi Ruta" (T-28, T-29)
         // -----------------------------------------------------------------
@@ -147,6 +157,9 @@ class AppRouter
         $router->post('/api/technician/preventive/orders/{id}/start', [\VendGuard\Presentation\Controller\TechnicianPreventiveController::class, 'startInspection'], [$technicianAuth]);
         $router->post('/api/technician/preventive/orders/{id}/complete', [\VendGuard\Presentation\Controller\TechnicianPreventiveController::class, 'completeInspection'], [$technicianAuth]);
         $router->post('/api/technician/preventive/orders/{id}/reinspect', [\VendGuard\Presentation\Controller\TechnicianPreventiveController::class, 'reinspectOrder'], [$technicianAuth]);
+
+        // Gestión de Repuestos y Trazabilidad en Movilidad (Módulo 06: Técnico - T-SPARE-11, T-SPARE-13)
+        $router->get('/api/technician/spare-parts/catalog', [\VendGuard\Presentation\Controller\TechnicianSparePartsController::class, 'getCatalog'], [$technicianAuth]);
 
         // -----------------------------------------------------------------
         // 6. Módulo de Automatización y Tareas Cron (T-30)

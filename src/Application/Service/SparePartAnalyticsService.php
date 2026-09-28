@@ -150,11 +150,11 @@ class SparePartAnalyticsService
         $csvBody = stream_get_contents($handle);
         fclose($handle);
 
-        if ($this->auditLogger !== null && $actor !== null) {
-            $this->auditLogger->logTicketEvent(
-                ticketId: 0,
+        if ($this->auditLogger !== null && $actor !== null && !empty($actor['id'])) {
+            $this->auditLogger->logUserEvent(
+                userId: (int)$actor['id'],
                 action: 'EXPORT_SPARE_PARTS_CSV',
-                user: $actor,
+                actor: $actor,
                 previousState: null,
                 newState: [
                     'period_days'   => $periodDays,
