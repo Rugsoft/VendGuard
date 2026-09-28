@@ -62,7 +62,7 @@
   * **Dependencias:** T-SPARE-05, T-SPARE-06
   * **Hecho cuando:** `SparePartTraceabilityService` procesa la pausa estructurada (rechazando solicitudes vacías o justificantes $< 20$ chars) y la resolución de averías/preventivos (exigiendo declaración Sí/No y congelando snapshots de coste unitario); `php tests/unit/SparePartTraceabilityServiceTest.php` pasa al 100% en verde validando que cambios posteriores en el catálogo maestro no alteran el coste de las intervenciones registradas.
 
-- [ ] **T-SPARE-09: Implementar `SparePartAnalyticsService.php` y suite unitaria `SparePartAnalyticsServiceTest.php`**
+- [x] **T-SPARE-09: Implementar `SparePartAnalyticsService.php` y suite unitaria `SparePartAnalyticsServiceTest.php`**
   * **Requisitos:** RF-REP-08, RF-REP-09
   * **Dependencias:** T-SPARE-06
   * **Hecho cuando:** `SparePartAnalyticsService` consolida el ranking de piezas más sustituidas, costes por modelo/sede, detecta alertas de avería recurrente ($> 3$ sustituciones en la misma máquina en 90 días) y genera el contenido plano CSV con codificación UTF-8; `php tests/unit/SparePartAnalyticsServiceTest.php` pasa al 100% en verde.
