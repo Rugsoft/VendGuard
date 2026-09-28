@@ -4,16 +4,27 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
+use VendGuard\Application\Service\SparePartTraceabilityService;
+use VendGuard\Core\Domain\Exception\IncompatibleSparePartException;
+use VendGuard\Core\Domain\Exception\InvalidOutOfCatalogJustificationException;
+use VendGuard\Core\Domain\Exception\InvalidPartQuantityException;
+use VendGuard\Core\Domain\Exception\InvalidResolutionException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
+use VendGuard\Core\Domain\Exception\SparePartNotFoundException;
 use VendGuard\Core\Domain\Model\Incident;
+use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Core\Service\ResolutionValidator;
+use VendGuard\Infrastructure\Repository\PdoIncidentReplacedPartRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoSparePartRepository;
+use VendGuard\Infrastructure\Repository\PdoSparePartRequestRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -21,8 +32,9 @@ use VendGuard\Presentation\Http\Response;
 /**
  * TechnicianController
  * 
- * Controlador REST para la operativa de campo del Técnico de Ruta (RF-07, RF-08).
- * Proporciona acceso a la vista móvil "Mi Ruta", inicio de intervención y pausa por repuestos.
+ * Controlador REST para la operativa de campo del Técnico de Ruta (RF-07, RF-08, RF-REP-03 a RF-REP-06).
+ * Proporciona acceso a la vista móvil "Mi Ruta", inicio de intervención, pausa estructurada por repuestos
+ * y resolución obligatoriamente justificada con registro inmutable de componentes y congelación de costes.
  * 
  * Respeta el Dogma Vanilla (PHP 8.2+ puro, PDO) y los principios de Clean Architecture.
  */
@@ -32,17 +44,26 @@ class TechnicianController
     private MachineRepositoryInterface $machineRepo;
     private LocationRepositoryInterface $locationRepo;
     private UserRepositoryInterface $userRepo;
+    private SparePartTraceabilityService $traceabilityService;
 
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?MachineRepositoryInterface $machineRepo = null,
         ?LocationRepositoryInterface $locationRepo = null,
-        ?UserRepositoryInterface $userRepo = null
+        ?UserRepositoryInterface $userRepo = null,
+        ?SparePartTraceabilityService $traceabilityService = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->machineRepo  = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
         $this->userRepo     = $userRepo ?? new PdoUserRepository();
+        $this->traceabilityService = $traceabilityService ?? new SparePartTraceabilityService(
+            requestRepo: new PdoSparePartRequestRepository(),
+            replacedPartRepo: new PdoIncidentReplacedPartRepository(),
+            sparePartRepo: new PdoSparePartRepository(),
+            incidentRepo: $this->incidentRepo,
+            machineRepo: $this->machineRepo
+        );
     }
 
     /**
@@ -161,8 +182,8 @@ class TechnicianController
     /**
      * PATCH /api/technician/incidents/{id}/pause
      * 
-     * Suspende temporalmente los trabajos técnicos por falta de repuestos (RF-07 / EARS 7.2).
-     * Exige obligatoriamente la descripción de la pieza solicitada y transiciona a PENDING_PARTS.
+     * Suspende temporalmente los trabajos técnicos por falta de repuestos (RF-07, RF-REP-03, RF-REP-04).
+     * Procesa solicitudes estructuradas en spare_part_requests o texto libre legacy.
      */
     public function pauseIntervention(Request $request): Response
     {
@@ -180,14 +201,8 @@ class TechnicianController
         }
         $techId = (int)$technicianId;
 
-        // 3. Extraer y validar el motivo de pausa por repuesto (EARS 7.2)
+        // 3. Extraer cuerpo de la petición
         $body = $request->getParsedBody();
-        $reason = isset($body['pending_parts_reason']) 
-            ? trim((string)$body['pending_parts_reason']) 
-            : (isset($body['parts_note']) ? trim((string)$body['parts_note']) : '');
-        if ($reason === '') {
-            return Response::error('MISSING_PENDING_PARTS_REASON', 'La descripción del repuesto requerido es obligatoria (pending_parts_reason obligatorio).', 422);
-        }
 
         // 4. Verificar existencia de la incidencia
         $incident = $this->incidentRepo->findById($incidentId);
@@ -209,7 +224,39 @@ class TechnicianController
             );
         }
 
-        // 7. Ejecutar pausa en repositorio
+        // 7. Determinar si es solicitud estructurada (RF-REP-03 / RF-REP-04) o texto libre legacy
+        $isStructured = array_key_exists('requested_parts', $body) || array_key_exists('is_out_of_catalog', $body);
+
+        if ($isStructured) {
+            $actor = $this->extractActor($request);
+            try {
+                $result = $this->traceabilityService->pauseIncidentWithParts($incidentId, $techId, $body, $actor);
+                return Response::json($result, 200, 'Intervención pausada por repuestos correctamente.');
+            } catch (IncompatibleSparePartException $e) {
+                return Response::error('INCOMPATIBLE_SPARE_PART', $e->getMessage(), 422);
+            } catch (InvalidOutOfCatalogJustificationException $e) {
+                return Response::error('INVALID_OUT_OF_CATALOG_JUSTIFICATION', $e->getMessage(), 422);
+            } catch (InvalidPartQuantityException $e) {
+                return Response::error('INVALID_PART_QUANTITY', $e->getMessage(), 422);
+            } catch (SparePartNotFoundException $e) {
+                return Response::error('SPARE_PART_NOT_FOUND', $e->getMessage(), 404);
+            } catch (InvalidTransitionException $e) {
+                return Response::error('INVALID_STATUS_FOR_PAUSE', $e->getMessage(), 422);
+            } catch (\InvalidArgumentException $e) {
+                return Response::error('MISSING_PARTS_REQUEST', $e->getMessage(), 422);
+            } catch (\DomainException $e) {
+                return Response::error('OPERATION_FAILED', $e->getMessage(), 400);
+            }
+        }
+
+        // Flujo legacy (T-28): motivo en texto libre
+        $reason = isset($body['pending_parts_reason']) 
+            ? trim((string)$body['pending_parts_reason']) 
+            : (isset($body['parts_note']) ? trim((string)$body['parts_note']) : '');
+        if ($reason === '') {
+            return Response::error('MISSING_PENDING_PARTS_REASON', 'La descripción del repuesto requerido es obligatoria (pending_parts_reason obligatorio).', 422);
+        }
+
         try {
             $paused = $this->incidentRepo->pauseIntervention($incidentId, $techId, $reason);
         } catch (InvalidTransitionException $e) {
@@ -218,7 +265,6 @@ class TechnicianController
             return Response::error('OPERATION_FAILED', $e->getMessage(), 500);
         }
 
-        // 8. Respuesta exitosa (contrato 5.3)
         return Response::json([
             'id'     => $paused->getId(),
             'status' => $paused->getStatus()->value,
@@ -226,16 +272,17 @@ class TechnicianController
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    // RF-08 / EARS 8.1, 8.2, 8.3 — Resolución Obligatoriamente Justificada
+    // RF-08, RF-REP-05, RF-REP-06 — Resolución Obligatoriamente Justificada con Repuestos
     // ────────────────────────────────────────────────────────────────────────
 
     /**
      * POST /api/technician/incidents/{id}/resolve
      * 
-     * Resuelve y documenta formalmente la intervención técnica (RF-08).
+     * Resuelve y documenta formalmente la intervención técnica (RF-08, RF-REP-05, RF-REP-06).
      * Exige obligatoriamente:
-     * - Diagnóstico real con al menos 20 caracteres (EARS 8.1).
-     * - Acción correctiva con al menos 20 caracteres (EARS 8.1).
+     * - Diagnóstico real con al menos 20 caracteres (EARS 8.1 / Art. V.1).
+     * - Acción correctiva con al menos 20 caracteres (EARS 8.1 / Art. V.1).
+     * - Declaración de piezas sustituidas (Sí/No) con snapshot inmutable de costes (Art. III).
      * Si no se cumplen los requisitos mínimos, rechaza la operación y mantiene el estado EN_CURSO (EARS 8.2).
      * Si es válida, transiciona a RESUELTA y activa la ventana de garantía de 48 horas (EARS 8.3).
      */
@@ -265,7 +312,7 @@ class TechnicianController
             : (isset($body['action_taken']) ? trim((string)$body['action_taken']) : '');
 
         // Validar textos con ResolutionValidator (mínimo 20 caracteres descriptivos en cada campo)
-        $validationErrors = \VendGuard\Core\Service\ResolutionValidator::getValidationErrors($diagnosis, $action);
+        $validationErrors = ResolutionValidator::getValidationErrors($diagnosis, $action);
         if (!empty($validationErrors)) {
             return Response::error(
                 'INVALID_RESOLUTION',
@@ -295,10 +342,42 @@ class TechnicianController
             );
         }
 
-        // 7. Ejecutar resolución en el repositorio
+        // 7. Determinar si incluye declaración de repuestos (Módulo M2) o resolución simple legacy (T-29)
+        $hasSparePartsDeclaration = array_key_exists('replaced_parts_declared', $body) || array_key_exists('replaced_parts', $body);
+
+        if ($hasSparePartsDeclaration) {
+            $actor = $this->extractActor($request);
+            try {
+                $result = $this->traceabilityService->resolveIncidentWithParts($incidentId, $techId, $body, $actor);
+                return Response::json($result, 200, 'Incidencia resuelta con registro de repuestos.');
+            } catch (InvalidPartQuantityException $e) {
+                return Response::error('INVALID_PART_QUANTITY', $e->getMessage(), 422);
+            } catch (SparePartNotFoundException $e) {
+                return Response::error('SPARE_PART_NOT_FOUND', $e->getMessage(), 404);
+            } catch (InvalidResolutionException $e) {
+                return Response::error('INVALID_RESOLUTION', $e->getMessage(), 422, ['errors' => $e->getErrors()]);
+            } catch (InvalidTransitionException $e) {
+                return Response::error('INVALID_STATUS_FOR_RESOLUTION', $e->getMessage(), 422);
+            } catch (\InvalidArgumentException $e) {
+                $msg = $e->getMessage();
+                $errCode = 'INVALID_RESOLUTION';
+                if (str_contains($msg, 'replaced_parts_declared')) {
+                    $errCode = 'PARTS_RECORD_REQUIRED';
+                } elseif (str_contains($msg, 'destino')) {
+                    $errCode = 'INVALID_PART_DESTINATION';
+                } elseif (str_contains($msg, 'no ha registrado ninguna pieza')) {
+                    $errCode = 'EMPTY_REPLACED_PARTS_LIST';
+                }
+                return Response::error($errCode, $msg, 422);
+            } catch (\DomainException $e) {
+                return Response::error('OPERATION_FAILED', $e->getMessage(), 500);
+            }
+        }
+
+        // Flujo simple legacy (T-29): sin declaración de piezas
         try {
             $resolved = $this->incidentRepo->resolve($incidentId, $techId, $diagnosis, $action);
-        } catch (\VendGuard\Core\Domain\Exception\InvalidResolutionException $e) {
+        } catch (InvalidResolutionException $e) {
             return Response::error('INVALID_RESOLUTION', $e->getMessage(), 422, ['errors' => $e->getErrors()]);
         } catch (InvalidTransitionException $e) {
             return Response::error('INVALID_STATUS_FOR_RESOLUTION', $e->getMessage(), 422);
@@ -306,12 +385,36 @@ class TechnicianController
             return Response::error('OPERATION_FAILED', $e->getMessage(), 500);
         }
 
-        // 8. Respuesta exitosa (contrato 5.4)
         return Response::json([
             'id'          => $resolved->getId(),
             'status'      => $resolved->getStatus()->value,
             'resolved_at' => $resolved->getResolvedAt(),
         ], 200);
+    }
+
+    /**
+     * Extrae los metadatos del usuario autenticado para trazabilidad en auditoría.
+     *
+     * @param Request $request
+     * @return array{id: int|null, role: string, name: string}
+     */
+    private function extractActor(Request $request): array
+    {
+        $user = $request->getAttribute('authenticated_user');
+        if ($user instanceof User) {
+            return [
+                'id'   => $user->getId(),
+                'role' => $user->getRole()->value,
+                'name' => $user->getName(),
+            ];
+        }
+
+        $userId = $request->getAttribute('user_id');
+        return [
+            'id'   => $userId !== null ? (int)$userId : 1,
+            'role' => (string)$request->getAttribute('user_role', 'TECHNICIAN'),
+            'name' => 'Técnico de Ruta',
+        ];
     }
 }
 

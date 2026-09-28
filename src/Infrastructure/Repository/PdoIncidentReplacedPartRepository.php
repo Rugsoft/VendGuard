@@ -10,6 +10,7 @@ use RuntimeException;
 use VendGuard\Core\Domain\Model\IncidentReplacedPart;
 use VendGuard\Core\Domain\Model\OldPartDestination;
 use VendGuard\Core\Domain\Repository\IncidentReplacedPartRepositoryInterface;
+use VendGuard\Infrastructure\Database\ConnectionFactory;
 
 /**
  * PdoIncidentReplacedPartRepository
@@ -22,9 +23,9 @@ class PdoIncidentReplacedPartRepository implements IncidentReplacedPartRepositor
 {
     private PDO $pdo;
 
-    public function __construct(PDO $pdo)
+    public function __construct(?PDO $pdo = null)
     {
-        $this->pdo = $pdo;
+        $this->pdo = $pdo ?? ConnectionFactory::getConnection();
     }
 
     /**

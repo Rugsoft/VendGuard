@@ -10,6 +10,7 @@ use RuntimeException;
 use VendGuard\Core\Domain\Model\SparePartRequest;
 use VendGuard\Core\Domain\Model\SparePartRequestStatus;
 use VendGuard\Core\Domain\Repository\SparePartRequestRepositoryInterface;
+use VendGuard\Infrastructure\Database\ConnectionFactory;
 
 /**
  * PdoSparePartRequestRepository
@@ -22,9 +23,9 @@ class PdoSparePartRequestRepository implements SparePartRequestRepositoryInterfa
 {
     private PDO $pdo;
 
-    public function __construct(PDO $pdo)
+    public function __construct(?PDO $pdo = null)
     {
-        $this->pdo = $pdo;
+        $this->pdo = $pdo ?? ConnectionFactory::getConnection();
     }
 
     /**

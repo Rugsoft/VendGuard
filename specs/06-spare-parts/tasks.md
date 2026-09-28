@@ -76,7 +76,7 @@
   * **Dependencias:** T-SPARE-07, T-SPARE-09
   * **Hecho cuando:** `CoordinatorSparePartsController` expone los endpoints de catálogo (`getCatalog`, `createPart`, `updatePart`, `toggleStatus`, `getModels`), el panel analítico (`getAnalytics`), la exportación de consumos (`exportCsv`) y la bandeja de revisión de repuestos no catalogados (`getPendingReviewRequests`), con validaciones y respuestas JSON conforme a contrato.
 
-- [ ] **T-SPARE-11: Implementar `TechnicianSparePartsController.php` y actualizar `TechnicianController.php`**
+- [x] **T-SPARE-11: Implementar `TechnicianSparePartsController.php` y actualizar `TechnicianController.php`**
   * **Requisitos:** RF-REP-03, RF-REP-04, RF-REP-05, RF-REP-06, RNF-REP-02
   * **Dependencias:** T-SPARE-08
   * **Hecho cuando:** `TechnicianSparePartsController` sirve el catálogo compatible con la máquina en $< 250\text{ ms}$; `TechnicianController::pauseIntervention` procesa solicitudes estructuradas en `spare_part_requests` y `TechnicianController::resolveIncident` ejecuta la resolución obligatoriamente justificada con registro de piezas sustituidas, destino `DESGUACE`/`TALLER` y congelación de coste.
