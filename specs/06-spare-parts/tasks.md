@@ -71,7 +71,7 @@
 
 ## Fase 4: Controladores HTTP, Middlewares y Enrutamiento
 
-- [ ] **T-SPARE-10: Implementar `CoordinatorSparePartsController.php`**
+- [x] **T-SPARE-10: Implementar `CoordinatorSparePartsController.php`**
   * **Requisitos:** RF-REP-01, RF-REP-02, RF-REP-04, RF-REP-08, RF-REP-09
   * **Dependencias:** T-SPARE-07, T-SPARE-09
   * **Hecho cuando:** `CoordinatorSparePartsController` expone los endpoints de catálogo (`getCatalog`, `createPart`, `updatePart`, `toggleStatus`, `getModels`), el panel analítico (`getAnalytics`), la exportación de consumos (`exportCsv`) y la bandeja de revisión de repuestos no catalogados (`getPendingReviewRequests`), con validaciones y respuestas JSON conforme a contrato.
