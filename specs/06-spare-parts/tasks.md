@@ -100,7 +100,7 @@
   * **Dependencias:** T-SPARE-10
   * **Hecho cuando:** `CoordinatorSparePartsTab.js` renderiza la tabla de repuestos con buscador en tiempo real, filtros por categoría y modelo, botón de conmutación de estado activo/inactivo y modal de alta/edición con selector dinámico de modelos compatibles; respeta las directrices visuales de `docs/design.md`; `node tests/unit/CoordinatorSparePartsTabTest.mjs` pasa al 100% en verde.
 
-- [ ] **T-SPARE-15: Implementar componente `CoordinatorSparePartsAnalyticsTab.js`**
+- [x] **T-SPARE-15: Implementar componente `CoordinatorSparePartsAnalyticsTab.js`**
   * **Requisitos:** RF-REP-04, RF-REP-08, RF-REP-09, docs/design.md (Alertas de fallo crónico en `#f8b60f`, tarjetas de métricas)
   * **Dependencias:** T-SPARE-10
   * **Hecho cuando:** `CoordinatorSparePartsAnalyticsTab.js` renderiza las tarjetas KPI de gasto y consumo, banners de alertas por averías crónicas (> 3 sustituciones en 90 días con estilo de advertencia Docker), tabla ranking de piezas sustituidas con desglose de destino, botón de descarga directa de CSV y bandeja de piezas fuera de catálogo pendientes de revisión.
