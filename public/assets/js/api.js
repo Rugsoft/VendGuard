@@ -209,6 +209,10 @@ export class ApiClient {
     return this.request(endpoint, { ...options, method: 'POST', body });
   }
 
+  put(endpoint, body = {}, options = {}) {
+    return this.request(endpoint, { ...options, method: 'PUT', body });
+  }
+
   patch(endpoint, body = {}, options = {}) {
     return this.request(endpoint, { ...options, method: 'PATCH', body });
   }
@@ -539,6 +543,34 @@ export class ApiClient {
     getUsers: (params = {}) => {
       const q = new URLSearchParams(params).toString();
       return this.get(`/coordinator/users${q ? `?${q}` : ''}`);
+    },
+
+    // Gestión de Repuestos (Módulo 06 - RF-REP-01, RF-REP-02, RF-REP-08, RF-REP-09)
+    getSparePartsCatalog: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/spare-parts${q ? `?${q}` : ''}`);
+    },
+    createSparePart: (payload) => {
+      return this.post('/coordinator/spare-parts', payload);
+    },
+    updateSparePart: (id, payload) => {
+      return this.put(`/coordinator/spare-parts/${id}`, payload);
+    },
+    toggleSparePartStatus: (id, isActive) => {
+      return this.patch(`/coordinator/spare-parts/${id}/status`, { is_active: isActive });
+    },
+    getSparePartModels: () => {
+      return this.get('/coordinator/spare-parts/models');
+    },
+    getSparePartsAnalytics: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/spare-parts/analytics${q ? `?${q}` : ''}`);
+    },
+    downloadSparePartsCsv: (params = {}) => {
+      return this.downloadFile('/coordinator/spare-parts/export', 'repuestos_intervenciones.csv', params);
+    },
+    getSparePartsPendingReview: () => {
+      return this.get('/coordinator/spare-parts/requests/pending-review');
     }
   };
 
@@ -611,6 +643,14 @@ export class ApiClient {
     },
     reinspectPreventiveOrder: (orderId, payload) => {
       return this.post(`/technician/preventive/orders/${orderId}/reinspect`, payload);
+    },
+
+    // Gestión de Repuestos en Movilidad (Módulo 06: RF-REP-03, RF-REP-04)
+    getSparePartsCatalog: (machineId, incidentId = null) => {
+      const params = { machine_id: machineId };
+      if (incidentId) params.incident_id = incidentId;
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/technician/spare-parts/catalog?${q}`);
     }
   };
 

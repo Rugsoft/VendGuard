@@ -95,7 +95,7 @@
 
 ## Fase 5: Componentes Frontend Reactivos (ES Modules) y Tests Unitarios Reactivos
 
-- [ ] **T-SPARE-14: Implementar componente `CoordinatorSparePartsTab.js` y test reactivo `CoordinatorSparePartsTabTest.mjs`**
+- [x] **T-SPARE-14: Implementar componente `CoordinatorSparePartsTab.js` y test reactivo `CoordinatorSparePartsTabTest.mjs`**
   * **Requisitos:** RF-REP-01, RF-REP-02, RNF-REP-03, docs/design.md (Azul eléctrico `#2560ff`, radio 4px en botones/badges y 8px en tarjetas)
   * **Dependencias:** T-SPARE-10
   * **Hecho cuando:** `CoordinatorSparePartsTab.js` renderiza la tabla de repuestos con buscador en tiempo real, filtros por categoría y modelo, botón de conmutación de estado activo/inactivo y modal de alta/edición con selector dinámico de modelos compatibles; respeta las directrices visuales de `docs/design.md`; `node tests/unit/CoordinatorSparePartsTabTest.mjs` pasa al 100% en verde.
