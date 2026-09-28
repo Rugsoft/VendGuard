@@ -129,7 +129,7 @@
   * **Dependencias:** T-SPARE-11, T-SPARE-12, T-SPARE-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `TechnicianSparePartsApiTest.php` contra MariaDB real pasando al 100% en verde en flujos de consulta de catálogo compatible, pausa técnica estructurada y resolución con congelación inmutable de costes.
 
-- [ ] **T-SPARE-20: Pruebas de blindaje constitucional y segregación de sede (`SiteManagerPartsDataSegregationTest.php`)**
+- [x] **T-SPARE-20: Pruebas de blindaje constitucional y segregación de sede (`SiteManagerPartsDataSegregationTest.php`)**
   * **Requisitos:** RF-REP-10, Constitución Art. V.4
   * **Dependencias:** T-SPARE-12, T-SPARE-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `SiteManagerPartsDataSegregationTest.php` pasando al 100% en verde, certificando que ningún endpoint accesible por el rol `LOCATION_MANAGER` expone piezas solicitadas, sustituidas, destinos ni costes económicos.
