@@ -38,7 +38,7 @@
   * **Dependencias:** T-SPARE-01, T-SPARE-02, T-SPARE-03
   * **Hecho cuando:** `PdoSparePartRepository` implementa creación de repuesto con modelos compatibles (`create`), actualización (`update`), baja lógica (`softDelete` fijando `is_active = 0`), búsqueda por ID y código (`findById`, `findByCode`), listado filtrado con compatibilidades (`findAll`), listado de repuestos compatibles con un modelo de máquina (`findCompatibleWithModel`) y consulta de modelos únicos (`findDistinctMachineModels`).
 
-- [ ] **T-SPARE-05: Implementar `SparePartRequestRepositoryInterface` y `PdoSparePartRequestRepository.php`**
+- [x] **T-SPARE-05: Implementar `SparePartRequestRepositoryInterface` y `PdoSparePartRequestRepository.php`**
   * **Requisitos:** RF-REP-03, RF-REP-04
   * **Dependencias:** T-SPARE-01, T-SPARE-02
   * **Hecho cuando:** `PdoSparePartRequestRepository` implementa registro de solicitudes en pausa técnica (`createRequest`), consulta de solicitudes por incidencia (`findByIncidentId`), transición atómica de solicitudes a atendidas (`markAttendedByIncident`) y listado de solicitudes fuera de catálogo pendientes de revisión para el coordinador.
