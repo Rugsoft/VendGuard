@@ -124,7 +124,7 @@
   * **Dependencias:** T-SPARE-10, T-SPARE-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `CoordinatorSparePartsApiTest.php` contra MariaDB real pasando al 100% en verde en flujos de creación, validación de códigos duplicados, baja lógica, cálculo analítico y descarga de CSV.
 
-- [ ] **T-SPARE-19: Pruebas de integración HTTP de Técnico (`TechnicianSparePartsApiTest.php`)**
+- [x] **T-SPARE-19: Pruebas de integración HTTP de Técnico (`TechnicianSparePartsApiTest.php`)**
   * **Requisitos:** RF-REP-03, RF-REP-04, RF-REP-05, RF-REP-06, RF-REP-07, RNF-REP-02, RNF-REP-04
   * **Dependencias:** T-SPARE-11, T-SPARE-12, T-SPARE-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `TechnicianSparePartsApiTest.php` contra MariaDB real pasando al 100% en verde en flujos de consulta de catálogo compatible, pausa técnica estructurada y resolución con congelación inmutable de costes.
