@@ -19,7 +19,7 @@
   * **Dependencias:** Ninguna
   * **Hecho cuando:** La ejecución de `php bin/migrate.php` aplica con éxito `006_spare_parts_catalog_and_traceability.sql`, creando las tablas `spare_parts`, `spare_part_compatibilities`, `spare_part_requests` e `incident_replaced_parts`; `database/cloud_init.sql` y `SeedRunner.php` incorporan semillas maestras iniciales de repuestos y compatibilidades por modelo de máquina.
 
-- [ ] **T-SPARE-02: Implementar Enums y Modelos de Dominio (`SparePartCategory`, `OldPartDestination`, `SparePartRequestStatus`, `SparePart`, `SparePartRequest`, `IncidentReplacedPart`)**
+- [x] **T-SPARE-02: Implementar Enums y Modelos de Dominio (`SparePartCategory`, `OldPartDestination`, `SparePartRequestStatus`, `SparePart`, `SparePartRequest`, `IncidentReplacedPart`)**
   * **Requisitos:** RF-REP-01, RF-REP-03, RF-REP-05, RF-REP-06, Constitución Art. VI (Clasificación cerrada sin feature creep)
   * **Dependencias:** T-SPARE-01
   * **Hecho cuando:** Existen en `src/Core/Domain/Model/` los enums tipados (`SparePartCategory`, `OldPartDestination`, `SparePartRequestStatus`) y las entidades inmutables con tipado estricto PHP 8.2+ (`SparePart`, `SparePartRequest`, `IncidentReplacedPart`) con validaciones de invariantes de dominio.
