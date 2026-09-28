@@ -134,6 +134,8 @@ class AppRouter
         $router->get('/api/coordinator/spare-parts/requests/pending-review', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'getPendingReviewRequests'], [$coordinatorAuth]);
         $router->put('/api/coordinator/spare-parts/{id}', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'updatePart'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/spare-parts/{id}/status', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'toggleStatus'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/spare-parts/{id}', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'getPart'], [$coordinatorAuth]);
+        $router->delete('/api/coordinator/spare-parts/{id}', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'deletePart'], [$coordinatorAuth]);
 
         // -----------------------------------------------------------------
         // 5. Módulo de Técnico de Campo / "Mi Ruta" (T-28, T-29)

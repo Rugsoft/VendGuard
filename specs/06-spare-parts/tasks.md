@@ -119,7 +119,7 @@
 
 ## Fase 6: Pruebas de Integración HTTP, Blindaje Constitucional y Cierre
 
-- [ ] **T-SPARE-18: Pruebas de integración HTTP de Coordinación (`CoordinatorSparePartsApiTest.php`)**
+- [x] **T-SPARE-18: Pruebas de integración HTTP de Coordinación (`CoordinatorSparePartsApiTest.php`)**
   * **Requisitos:** RF-REP-01, RF-REP-02, RF-REP-08, RF-REP-09
   * **Dependencias:** T-SPARE-10, T-SPARE-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `CoordinatorSparePartsApiTest.php` contra MariaDB real pasando al 100% en verde en flujos de creación, validación de códigos duplicados, baja lógica, cálculo analítico y descarga de CSV.

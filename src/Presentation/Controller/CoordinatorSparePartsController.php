@@ -250,6 +250,33 @@ class CoordinatorSparePartsController
     }
 
     /**
+     * DELETE /api/coordinator/spare-parts/{id}
+     * 
+     * Baja lógica del repuesto (is_active = false) sin borrado físico (Art. III Constitución).
+     */
+    public function deletePart(Request $request): Response
+    {
+        return $this->handleExecution(function () use ($request): Response {
+            $id = $this->extractIdFromRoute($request);
+            $actor = $this->extractActor($request);
+
+            try {
+                $this->catalogService->setSparePartStatus($id, false, $actor);
+                $part = $this->catalogService->getSparePart($id);
+
+                return Response::json([
+                    'id'        => $id,
+                    'part_code' => $part?->getPartCode() ?? '',
+                    'is_active' => false,
+                    'message'   => 'El repuesto ha sido dado de baja lógica con éxito.',
+                ], 200, 'El repuesto ha sido dado de baja lógica con éxito.');
+            } catch (SparePartNotFoundException $e) {
+                return Response::error('SPARE_PART_NOT_FOUND', $e->getMessage(), 404);
+            }
+        });
+    }
+
+    /**
      * GET /api/coordinator/spare-parts/models
      * 
      * Devuelve la lista única de modelos de máquinas actualmente existentes en el parque.

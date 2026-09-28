@@ -197,6 +197,7 @@ foreach ($integrationFiles as $filePath) {
         $stats['integration_php']['failed']++;
         $failedFiles[] = "integration/{$fileName}";
         echo "  {$colorRed}[FAIL] {$fileName}{$colorReset}\n";
+        echo "         " . str_replace("\n", "\n         ", trim($output)) . "\n";
     }
 }
 
