@@ -52,7 +52,7 @@
 
 ## Fase 3: Servicios de Aplicación y Pruebas Unitarias de Lógica
 
-- [ ] **T-SPARE-07: Implementar `SparePartCatalogService.php` y suite unitaria `SparePartCatalogServiceTest.php`**
+- [x] **T-SPARE-07: Implementar `SparePartCatalogService.php` y suite unitaria `SparePartCatalogServiceTest.php`**
   * **Requisitos:** RF-REP-01, RF-REP-02, RNF-REP-01, Constitución Art. III
   * **Dependencias:** T-SPARE-04
   * **Hecho cuando:** `SparePartCatalogService` valida unicidad de código, consistencia de precios ($\ge 0.00$ con 2 decimales) y modelos asociados; `php tests/unit/SparePartCatalogServiceTest.php` pasa al 100% en verde comprobando creación, edición, rechazo de duplicados y baja lógica sin borrado físico.
