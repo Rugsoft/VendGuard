@@ -29,6 +29,7 @@ try {
     echo "      - Sedes cargadas/actualizadas: {$summary['locations']}\n";
     echo "      - Máquinas cargadas/actualizadas: {$summary['machines']}\n";
     echo "      - Usuarios cargados/actualizados: {$summary['users']}\n";
+    echo "      - Repuestos cargados/actualizados: {$summary['spare_parts']}\n";
 
     echo "[3/4] Sembrando historial de averías, reparaciones y log de auditoría...\n";
     require_once __DIR__ . '/../database/DemoMetricsSeeder.php';

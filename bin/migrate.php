@@ -66,7 +66,11 @@ try {
         'preventive_settings',
         'preventive_orders',
         'preventive_order_items',
-        'sanitary_certificates'
+        'sanitary_certificates',
+        'spare_parts',
+        'spare_part_compatibilities',
+        'spare_part_requests',
+        'incident_replaced_parts'
     ];
 
     echo "[4/4] Verificando esquema e integridad en vendguard_db:\n";
@@ -126,7 +130,7 @@ try {
 
     if ($isMigrationComplete) {
         echo "========================================================\n";
-        echo " Migración completada exitosamente. Condición T-PREV-01 CUMPLIDA.\n";
+        echo " Migración completada exitosamente. Condición T-SPARE-01 CUMPLIDA.\n";
         echo "========================================================\n";
         exit(0);
     } else {

@@ -425,6 +425,143 @@ class SeedRunner
     }
 
     /**
+     * Carga programática de catálogo de repuestos y compatibilidades (Módulo 06 / M2).
+     *
+     * @return array{parts: int, compatibilities: int}
+     */
+    public function seedSpareParts(): array
+    {
+        $parts = [
+            [
+                'part_code' => 'VALV-ULKA-01',
+                'name' => 'Electroválvula 24V 2 Vías Ulka',
+                'category' => 'HYDRAULIC',
+                'manufacturer' => 'Ulka',
+                'reference_cost' => 28.50,
+                'is_active' => 1,
+                'notes' => 'Válvula de entrada de agua para calderas espresso',
+                'models' => ['Bianchi Gaia Espresso', 'Fas Perla', 'Azkoyen Palma+'],
+            ],
+            [
+                'part_code' => 'BOMB-VIB-02',
+                'name' => 'Bomba Vibratoria 230V EX5',
+                'category' => 'HYDRAULIC',
+                'manufacturer' => 'Ulka / CEME',
+                'reference_cost' => 36.00,
+                'is_active' => 1,
+                'notes' => 'Bomba de presión estándar para café',
+                'models' => ['Bianchi Gaia Espresso', 'Fas Perla', 'Azkoyen Palma+'],
+            ],
+            [
+                'part_code' => 'SOND-NTC-01',
+                'name' => 'Sonda Térmica NTC 10K Roscada',
+                'category' => 'THERMAL',
+                'manufacturer' => 'Carel',
+                'reference_cost' => 15.20,
+                'is_active' => 1,
+                'notes' => 'Sonda de temperatura para cámaras refrigeradas',
+                'models' => ['Sanden Vendo G-Drink', 'Necta Samba Combo', 'Azkoyen Palma+', 'Fas Fast 900'],
+            ],
+            [
+                'part_code' => 'TERM-SEG-01',
+                'name' => 'Termostato de Seguridad 135°C',
+                'category' => 'THERMAL',
+                'manufacturer' => 'Campini',
+                'reference_cost' => 12.80,
+                'is_active' => 1,
+                'notes' => 'Rearme manual de seguridad para grupo térmico',
+                'models' => ['Bianchi Gaia Espresso', 'Fas Perla', 'Azkoyen Palma+'],
+            ],
+            [
+                'part_code' => 'MOT-ESP-01',
+                'name' => 'Motor Extractor de Espiral 24V DC',
+                'category' => 'MECHANICAL',
+                'manufacturer' => 'Sande / Merkle',
+                'reference_cost' => 24.50,
+                'is_active' => 1,
+                'notes' => 'Motor con microinterruptor de posición',
+                'models' => ['Sanden Vendo G-Drink', 'Necta Samba Combo', 'Azkoyen Palma+', 'Fas Fast 900'],
+            ],
+            [
+                'part_code' => 'MON-CASH-01',
+                'name' => 'Monedero Selector de Monedas NRI G13',
+                'category' => 'PAYMENT_SYSTEM',
+                'manufacturer' => 'Crane / CPI',
+                'reference_cost' => 185.00,
+                'is_active' => 1,
+                'notes' => 'Validador estándar MDB multimoneda',
+                'models' => ['Sanden Vendo G-Drink', 'Bianchi Gaia Espresso', 'Necta Samba Combo', 'Azkoyen Palma+', 'Fas Fast 900', 'Fas Perla'],
+            ],
+            [
+                'part_code' => 'DISP-LCD-01',
+                'name' => 'Display LCD Gráfico 128x64 Azul',
+                'category' => 'ELECTRONIC',
+                'manufacturer' => 'Winstar',
+                'reference_cost' => 42.00,
+                'is_active' => 1,
+                'notes' => 'Pantalla frontal de selección de usuario',
+                'models' => ['Sanden Vendo G-Drink', 'Bianchi Gaia Espresso', 'Necta Samba Combo', 'Azkoyen Palma+', 'Fas Fast 900', 'Fas Perla'],
+            ],
+            [
+                'part_code' => 'JUNT-TOR-01',
+                'name' => 'Kit 10 Juntas Tóricas Silicona Alimentaria',
+                'category' => 'CONSUMABLE',
+                'manufacturer' => 'Parker',
+                'reference_cost' => 8.50,
+                'is_active' => 1,
+                'notes' => 'Juntas de estanqueidad para grupo de café y pistón',
+                'models' => ['Bianchi Gaia Espresso', 'Fas Perla', 'Azkoyen Palma+'],
+            ],
+        ];
+
+        $sqlPart = "
+            INSERT INTO `spare_parts` (`part_code`, `name`, `category`, `manufacturer`, `reference_cost`, `is_active`, `notes`)
+            VALUES (:part_code, :name, :category, :manufacturer, :reference_cost, :is_active, :notes)
+            ON DUPLICATE KEY UPDATE
+                `name` = VALUES(`name`),
+                `category` = VALUES(`category`),
+                `manufacturer` = VALUES(`manufacturer`),
+                `reference_cost` = VALUES(`reference_cost`),
+                `is_active` = VALUES(`is_active`),
+                `notes` = VALUES(`notes`)
+        ";
+        $stmtPart = $this->pdo->prepare($sqlPart);
+
+        $sqlCompat = "
+            INSERT INTO `spare_part_compatibilities` (`spare_part_id`, `machine_model`)
+            VALUES ((SELECT `id` FROM `spare_parts` WHERE `part_code` = :part_code LIMIT 1), :machine_model)
+            ON DUPLICATE KEY UPDATE `machine_model` = VALUES(`machine_model`)
+        ";
+        $stmtCompat = $this->pdo->prepare($sqlCompat);
+
+        $partCount = 0;
+        $compatCount = 0;
+
+        foreach ($parts as $p) {
+            $stmtPart->execute([
+                ':part_code' => $p['part_code'],
+                ':name' => $p['name'],
+                ':category' => $p['category'],
+                ':manufacturer' => $p['manufacturer'],
+                ':reference_cost' => $p['reference_cost'],
+                ':is_active' => $p['is_active'],
+                ':notes' => $p['notes'],
+            ]);
+            $partCount++;
+
+            foreach ($p['models'] as $model) {
+                $stmtCompat->execute([
+                    ':part_code' => $p['part_code'],
+                    ':machine_model' => $model,
+                ]);
+                $compatCount++;
+            }
+        }
+
+        return ['parts' => $partCount, 'compatibilities' => $compatCount];
+    }
+
+    /**
      * Ejecuta todas las semillas dentro de una transacción.
      *
      * @param string $defaultPassword
@@ -440,6 +577,7 @@ class SeedRunner
             $userCount = $this->seedUsers($defaultPassword);
             $prevCount = $this->seedPreventiveSettings();
             $this->seedPreventiveOrdersAndCertificates();
+            $partsRes = $this->seedSpareParts();
 
             $this->pdo->commit();
 
@@ -448,6 +586,7 @@ class SeedRunner
                 'machines' => $machCount,
                 'users' => $userCount,
                 'preventive_settings' => $prevCount,
+                'spare_parts' => $partsRes['parts'],
             ];
         } catch (PDOException $e) {
             if ($this->pdo->inTransaction()) {
