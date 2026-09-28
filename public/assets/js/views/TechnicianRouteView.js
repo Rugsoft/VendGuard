@@ -21,6 +21,8 @@ import { TechnicianMetricsView } from './TechnicianMetricsView.js';
 import { TechnicianPreventiveRouteTab } from '../components/TechnicianPreventiveRouteTab.js';
 import { TechnicianChecklistModal } from '../components/TechnicianChecklistModal.js';
 import { TechnicianReinspectionModal } from '../components/TechnicianReinspectionModal.js';
+import { TechnicianSparePartsPauseModal } from '../components/TechnicianSparePartsPauseModal.js';
+import { TechnicianResolutionPartsBlock } from '../components/TechnicianResolutionPartsBlock.js';
 
 export const TechnicianRouteView = {
   name: 'TechnicianRouteView',
@@ -30,7 +32,9 @@ export const TechnicianRouteView = {
     TechnicianMetricsView,
     TechnicianPreventiveRouteTab,
     TechnicianChecklistModal,
-    TechnicianReinspectionModal
+    TechnicianReinspectionModal,
+    TechnicianSparePartsPauseModal,
+    TechnicianResolutionPartsBlock
   },
   data() {
     return {
@@ -64,6 +68,7 @@ export const TechnicianRouteView = {
       showResolveModal: false,
       resolveDiagnosis: '',
       resolveAction: '',
+      resolvePartsData: { replaced_parts_declared: false, replaced_parts: [] },
       isResolving: false,
       resolveError: ''
     };
@@ -264,7 +269,24 @@ export const TechnicianRouteView = {
     },
 
     /**
-     * Submits the pause reason to the API (RF-07 / EARS 7.2).
+     * Handler invoked when TechnicianSparePartsPauseModal completes structured pause (RF-REP-03, RF-REP-04).
+     * @param {Object} event
+     */
+    handleIncidentPaused(event) {
+      if (this.selectedIncident) {
+        this.selectedIncident.status = 'PENDING_PARTS';
+        this.selectedIncident.pending_parts_reason = event?.payload?.is_out_of_catalog
+          ? event?.payload?.custom_part_description
+          : 'Repuestos solicitados de catálogo';
+      }
+      this.feedbackMessage = 'Avería pausada en espera de repuesto.';
+      this.$emit('paused', event);
+      this.closePauseModal();
+      this.loadRoute();
+    },
+
+    /**
+     * Submits the pause reason to the API (RF-07 / EARS 7.2) - Backwards compatible method.
      */
     async submitPause() {
       const reason = this.pauseReason.trim();
@@ -294,13 +316,14 @@ export const TechnicianRouteView = {
     },
 
     /**
-     * Opens the Resolve Modal with strict justification (RF-08 / EARS 8.1, 8.2).
+     * Opens the Resolve Modal with strict justification and spare parts block (RF-08 / EARS 8.1, 8.2 / RF-REP-05).
      * @param {Object} incident
      */
     openResolveModal(incident) {
       this.selectedIncident = incident;
       this.resolveDiagnosis = '';
       this.resolveAction = '';
+      this.resolvePartsData = { replaced_parts_declared: false, replaced_parts: [] };
       this.resolveError = '';
       this.showResolveModal = true;
     },
@@ -310,11 +333,12 @@ export const TechnicianRouteView = {
       this.selectedIncident = null;
       this.resolveDiagnosis = '';
       this.resolveAction = '';
+      this.resolvePartsData = { replaced_parts_declared: false, replaced_parts: [] };
       this.resolveError = '';
     },
 
     /**
-     * Submits technical resolution to API (RF-08 / EARS 8.1, 8.2, 8.3 / Art. V.1).
+     * Submits technical resolution to API (RF-08 / EARS 8.1, 8.2, 8.3 / Art. V.1 / RF-REP-05, RF-REP-06).
      */
     async submitResolve() {
       const diag = this.resolveDiagnosis.trim();
@@ -326,11 +350,32 @@ export const TechnicianRouteView = {
         return;
       }
 
+      if (this.$refs?.resolutionPartsBlockRef && typeof this.$refs.resolutionPartsBlockRef.validate === 'function') {
+        const partsVal = this.$refs.resolutionPartsBlockRef.validate();
+        if (!partsVal.isValid) {
+          this.resolveError = partsVal.error || 'Debe completar la declaración de repuestos sustituidos.';
+          return;
+        }
+      }
+
       this.isResolving = true;
       this.resolveError = '';
 
       try {
-        const res = await api.technician.resolveIncident(this.selectedIncident.id, diag, act);
+        const hasParts = Boolean(this.resolvePartsData?.replaced_parts_declared);
+        const replacedParts = hasParts ? (this.resolvePartsData?.replaced_parts || []) : [];
+        let res;
+        if (hasParts) {
+          const payload = {
+            diagnosis: diag,
+            action_taken: act,
+            replaced_parts_declared: true,
+            replaced_parts: replacedParts
+          };
+          res = await api.technician.resolveIncident(this.selectedIncident.id, payload);
+        } else {
+          res = await api.technician.resolveIncident(this.selectedIncident.id, diag, act);
+        }
         const resolvedAt = res?.data?.resolved_at || new Date().toISOString();
 
         this.feedbackMessage = '¡Avería resuelta con éxito! Se ha activado la ventana de garantía de 48 horas.';
@@ -338,7 +383,9 @@ export const TechnicianRouteView = {
           incidentId: this.selectedIncident.id,
           diagnosis: diag,
           action: act,
-          resolvedAt
+          resolvedAt,
+          replaced_parts_declared: hasParts,
+          replaced_parts: replacedParts
         });
 
         const solvedId = this.selectedIncident.id;
@@ -759,60 +806,14 @@ export const TechnicianRouteView = {
     </div>
 
       <!-- =================================================================== -->
-      <!-- MODAL 1: PAUSE BY REPLACEMENT PART (RF-07 / EARS 7.2)               -->
+      <!-- MODAL 1: PAUSE BY REPLACEMENT PART (RF-REP-03, RF-REP-04 / T-SPARE-16, T-SPARE-17) -->
       <!-- =================================================================== -->
-      <ModalDialog
+      <TechnicianSparePartsPauseModal
         v-model="showPauseModal"
-        title="Pausar por Falta de Repuesto"
-        :subtitle="selectedIncident ? ('Ticket #' + selectedIncident.ticket_code + ' · ' + (selectedIncident.machine?.code || '')) : ''"
-        size="md"
+        :incident="selectedIncident"
+        @paused="handleIncidentPaused"
         @close="closePauseModal"
-      >
-        <form v-if="selectedIncident" @submit.prevent="submitPause">
-          <p style="font-size: 13px; color: var(--color-slate, #2c333f); margin-bottom: 12px; line-height: 1.4;">
-            Conforme a la norma RF-07 (EARS 7.2), si debes suspender los trabajos por carecer de la pieza en tu furgoneta, describe el componente requerido para solicitarlo a almacén central.
-          </p>
-
-          <div style="margin-bottom: 14px;">
-            <label for="pause-reason-text" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
-              Descripción del repuesto necesario <span style="color: #dc2626;">*</span>
-            </label>
-            <textarea
-              id="pause-reason-text"
-              v-model="pauseReason"
-              class="vg-textarea"
-              rows="3"
-              placeholder="Ej: Electroválvula de entrada 24V (Ref. VENDO-EV24) quemada. Se requiere pieza nueva para continuar..."
-              required
-              :disabled="isPausing"
-            ></textarea>
-          </div>
-
-          <!-- Error Alert -->
-          <div
-            v-if="pauseError"
-            style="background-color: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; padding: 10px; border-radius: var(--radius-interactive, 4px); font-size: 13px; margin-bottom: 14px;"
-            role="alert"
-          >
-            {{ pauseError }}
-          </div>
-
-          <!-- Actions -->
-          <div style="display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--color-hairline, #c8cfda); padding-top: 14px;">
-            <button type="button" class="vg-btn vg-btn-secondary" @click="closePauseModal" :disabled="isPausing">
-              Volver a la ruta
-            </button>
-            <button
-              type="submit"
-              class="vg-btn vg-btn-primary"
-              :disabled="isPausing || !pauseReason.trim()"
-            >
-              <span v-if="!isPausing">Confirmar Pausa</span>
-              <span v-else>Guardando...</span>
-            </button>
-          </div>
-        </form>
-      </ModalDialog>
+      />
 
       <!-- =================================================================== -->
       <!-- MODAL 2: STRICT RESOLUTION MODAL (RF-08 / EARS 8.1, 8.2 / ART. V.1) -->
@@ -887,6 +888,15 @@ export const TechnicianRouteView = {
               Faltan {{ 20 - actionLength }} caracteres para alcanzar el mínimo de 20.
             </div>
           </div>
+
+          <!-- Field 3: Spare Parts Declaration (RF-REP-05, RF-REP-06 / T-SPARE-16, T-SPARE-17) -->
+          <TechnicianResolutionPartsBlock
+            ref="resolutionPartsBlockRef"
+            :machine-id="selectedIncident?.machine?.id || selectedIncident?.machine_id || 0"
+            :machine-model="selectedIncident?.machine?.model || selectedIncident?.machine_model || ''"
+            :incident-id="selectedIncident?.id"
+            @change="resolvePartsData = $event"
+          />
 
           <!-- Error Alert -->
           <div

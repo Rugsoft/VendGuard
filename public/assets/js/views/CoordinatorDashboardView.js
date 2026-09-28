@@ -26,6 +26,8 @@ import { AdminUsersTab } from '../components/AdminUsersTab.js';
 import { CoordinatorPreventiveDashboard } from '../components/CoordinatorPreventiveDashboard.js';
 import { CoordinatorPreventiveOrdersTab } from '../components/CoordinatorPreventiveOrdersTab.js';
 import { CoordinatorPreventiveSettingsModal } from '../components/CoordinatorPreventiveSettingsModal.js';
+import { CoordinatorSparePartsTab } from '../components/CoordinatorSparePartsTab.js';
+import { CoordinatorSparePartsAnalyticsTab } from '../components/CoordinatorSparePartsAnalyticsTab.js';
 
 // Canonical mapping for bilingual status values
 const STATUS_CANONICAL_MAP = {
@@ -73,13 +75,15 @@ export const CoordinatorDashboardView = {
     AdminUsersTab,
     CoordinatorPreventiveDashboard,
     CoordinatorPreventiveOrdersTab,
-    CoordinatorPreventiveSettingsModal
+    CoordinatorPreventiveSettingsModal,
+    CoordinatorSparePartsTab,
+    CoordinatorSparePartsAnalyticsTab
   },
   emits: ['assigned', 'cancelled', 'refresh'],
   data() {
     return {
-      // Navigation Tabs (RF-FLEET-01, RF-03, RF-05, RF-PREV-02)
-      activeTab: 'incidents', // 'incidents' | 'fleet' | 'preventive' | 'admin' | 'metrics'
+      // Navigation Tabs (RF-FLEET-01, RF-03, RF-05, RF-PREV-02, RF-REP-01, RF-REP-09)
+      activeTab: 'incidents', // 'incidents' | 'fleet' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'admin' | 'metrics'
       activeAdminSubTab: 'locations', // 'locations' | 'machines' | 'users'
       activePreventiveSubTab: 'dashboard', // 'dashboard' | 'orders'
       showPreventiveSettingsModal: false,
@@ -561,6 +565,28 @@ export const CoordinatorDashboardView = {
           <button
             type="button"
             class="vg-btn"
+            :class="activeTab === 'repuestos' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
+            @click="activeTab = 'repuestos'"
+            data-testid="tab-repuestos"
+          >
+            📦 Repuestos
+          </button>
+
+          <button
+            type="button"
+            class="vg-btn"
+            :class="activeTab === 'analitica-repuestos' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
+            @click="activeTab = 'analitica-repuestos'"
+            data-testid="tab-analitica-repuestos"
+          >
+            📈 Analítica Repuestos
+          </button>
+
+          <button
+            type="button"
+            class="vg-btn"
             :class="activeTab === 'admin' ? 'vg-btn-primary' : 'vg-btn-secondary'"
             style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
             @click="activeTab = 'admin'"
@@ -991,6 +1017,18 @@ export const CoordinatorDashboardView = {
         <!-- Subpestaña 3: Directorio de Personal (RF-03) -->
         <AdminUsersTab v-else-if="activeAdminSubTab === 'users'" />
       </div>
+
+      <!-- CONTENIDO PESTAÑA: CATÁLOGO Y GESTIÓN DE REPUESTOS (RF-REP-01, RF-REP-08 / T-SPARE-14, T-SPARE-17) -->
+      <CoordinatorSparePartsTab
+        v-else-if="activeTab === 'repuestos'"
+        @open-analytics="activeTab = 'analitica-repuestos'"
+      />
+
+      <!-- CONTENIDO PESTAÑA: ANALÍTICA Y PREDICCIÓN DE REPUESTOS (RF-REP-09 / T-SPARE-15, T-SPARE-17) -->
+      <CoordinatorSparePartsAnalyticsTab
+        v-else-if="activeTab === 'analitica-repuestos'"
+        @open-catalog="activeTab = 'repuestos'"
+      />
 
       <!-- CONTENIDO PESTAÑA 4: MÉTRICAS Y AUDITORÍA (RF-01, RF-02, RF-03, RF-05, RF-06) -->
       <CoordinatorMetricsView

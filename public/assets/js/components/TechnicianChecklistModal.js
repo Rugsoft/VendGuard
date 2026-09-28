@@ -17,9 +17,13 @@
  */
 
 import { api } from '../api.js';
+import { TechnicianResolutionPartsBlock } from './TechnicianResolutionPartsBlock.js';
 
 export const TechnicianChecklistModal = {
   name: 'TechnicianChecklistModal',
+  components: {
+    TechnicianResolutionPartsBlock
+  },
   props: {
     modelValue: {
       type: Boolean,
@@ -36,6 +40,7 @@ export const TechnicianChecklistModal = {
       checklistData: null,
       temperatureInput: '',
       itemsState: {}, // { item_code: { status: 'PASS'|'WARN'|'FAIL', observations: '' } }
+      replacedPartsData: { replaced_parts_declared: false, replaced_parts: [] },
       generalNotes: '',
       isLoading: false,
       isSubmitting: false,
@@ -115,6 +120,7 @@ export const TechnicianChecklistModal = {
       this.checklistData = null;
       this.temperatureInput = '';
       this.itemsState = {};
+      this.replacedPartsData = { replaced_parts_declared: false, replaced_parts: [] };
       this.generalNotes = '';
       this.errorMessage = '';
       this.completionResult = null;
@@ -204,6 +210,15 @@ export const TechnicianChecklistModal = {
         }
       }
 
+      // Validación opcional/obligatoria de repuestos si el bloque está activo
+      if (this.$refs?.partsBlockRef && typeof this.$refs.partsBlockRef.validate === 'function') {
+        const partsVal = this.$refs.partsBlockRef.validate();
+        if (!partsVal.isValid) {
+          this.errorMessage = partsVal.error || 'Debe responder si hubo sustitución de componentes y completar las piezas requeridas.';
+          return;
+        }
+      }
+
       this.isSubmitting = true;
 
       try {
@@ -216,7 +231,9 @@ export const TechnicianChecklistModal = {
         const payload = {
           temperature_measured: this.numericTemperature,
           items: itemsPayload,
-          general_notes: this.generalNotes.trim() || undefined
+          general_notes: this.generalNotes.trim() || undefined,
+          replaced_parts_declared: Boolean(this.replacedPartsData?.replaced_parts_declared),
+          replaced_parts: this.replacedPartsData?.replaced_parts_declared ? (this.replacedPartsData?.replaced_parts || []) : []
         };
 
         const res = await api.technician.completePreventiveInspection(this.order.id, payload);
@@ -483,6 +500,15 @@ export const TechnicianChecklistModal = {
                 </div>
               </div>
             </div>
+
+            <!-- Bloque de Declaración de Repuestos Sustituidos (RF-REP-05, RF-REP-07 / T-SPARE-17) -->
+            <TechnicianResolutionPartsBlock
+              ref="partsBlockRef"
+              :machine-id="order?.machine?.id || order?.machine_id || checklistData?.machine?.id || 0"
+              :machine-model="order?.machine?.model || checklistData?.machine?.model || ''"
+              :preventive-order-id="order?.id"
+              @change="replacedPartsData = $event"
+            />
 
             <!-- Notas Generales de la Inspección -->
             <div style="display: flex; flex-direction: column; gap: 4px;">

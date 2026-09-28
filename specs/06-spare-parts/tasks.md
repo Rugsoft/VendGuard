@@ -110,7 +110,7 @@
   * **Dependencias:** T-SPARE-11
   * **Hecho cuando:** `TechnicianSparePartsPauseModal.js` permite seleccionar piezas compatibles o justificar piezas fuera de catálogo ($\ge 20$ chars); `TechnicianResolutionPartsBlock.js` exige la respuesta obligatoria Sí/No y despliega selectores táctiles de repuestos, cantidades (1–50) y destino `DESGUACE`/`TALLER` con objetivos táctiles móviles $\ge 44\text{px}$; `node tests/unit/TechnicianSparePartsModalsTest.mjs` pasa al 100% en verde.
 
-- [ ] **T-SPARE-17: Integrar sustitución de piezas en `TechnicianChecklistModal.js` y navegación en `app.js`**
+- [x] **T-SPARE-17: Integrar sustitución de piezas en `TechnicianChecklistModal.js` y navegación en `app.js`**
   * **Requisitos:** RF-REP-07, Dogma Vanilla, docs/design.md
   * **Dependencias:** T-SPARE-12, T-SPARE-14, T-SPARE-15, T-SPARE-16
   * **Hecho cuando:** Al completar una orden preventiva en `TechnicianChecklistModal.js` se permite declarar piezas sustituidas; `app.js` registra las pestañas `repuestos` y `analitica-repuestos` en la barra del coordinador respetando el estilo de navegación activa de `docs/design.md` y enlaza los modales en la vista de técnico.
