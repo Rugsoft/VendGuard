@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/MariaDB-10.11%2B%20%7C%20MySQL%208.0-003545?style=flat-square&logo=mariadb&logoColor=white)](https://mariadb.org/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-120%20Suites%20%7C%203.792%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-120%20Suites%20%7C%203.796%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -112,7 +112,11 @@ mysql -u root -e "CREATE DATABASE IF NOT EXISTS vendguard_db CHARACTER SET utf8m
 # de auditoría, preventivos y repuestos, con verificación de integridad final):
 php bin/migrate.php
 
-# Cargar semillas (sedes, máquinas, usuarios, preventivos y catálogo de repuestos):
+# Cargar semillas (sedes, máquinas, usuarios, preventivos y catálogo de repuestos).
+# Opción recomendada: sembrador CLI con verificación de integridad T-04 y contraseñas demo:
+php bin/seed.php
+
+# Alternativa equivalente en una sola línea:
 php -r "require 'src/autoload.php'; require 'src/Infrastructure/Database/ConnectionFactory.php'; require 'src/Infrastructure/Database/SeedRunner.php'; \$pdo = VendGuard\Infrastructure\Database\ConnectionFactory::getConnection(); \$s = new VendGuard\Infrastructure\Database\SeedRunner(\$pdo); \$s->seedAll(); echo 'Base de datos inicializada.';"
 
 # Sembrar histórico representativo de métricas, reparaciones y log de auditoría:
@@ -148,6 +152,7 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `GET` | `/api/locations/{code}/machines` | `LOCATION_MANAGER` | Catálogo de máquinas del centro con estado de ticket activo. |
 | `POST`| `/api/incidents` | `LOCATION_MANAGER` | Registro de avería con cálculo de urgencia y prevención de duplicados (409). |
 | `POST`| `/api/incidents/{code}/comments`| `LOCATION_MANAGER` | Anexa comentarios o evidencias fotográficas a la bitácora. |
+| `GET` | `/api/incidents/{code}/comments` | `LOCATION_MANAGER` | Consulta la bitácora de comentarios y evidencias de la avería. |
 | `POST`| `/api/incidents/{code}/reopen` | `LOCATION_MANAGER` | Reapertura dentro de garantía (< 48h) desasignando al técnico. |
 | `GET` | `/api/coordinator/incidents` | `COORDINATOR` | Listado global con filtros combinados y evaluación de SLA > 60m. |
 | `PATCH`| `/api/coordinator/incidents/{id}/assign`| `COORDINATOR`| Asignación técnica a técnico de ruta (justificación si varía urgencia). |
@@ -197,6 +202,7 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `GET/POST` | `/api/coordinator/spare-parts` | `COORDINATOR` | Listado filtrable y creación de repuestos con modelos compatibles (409 si duplicado). |
 | `GET` | `/api/coordinator/spare-parts/models` | `COORDINATOR` | Modelos únicos del parque para los selectores de compatibilidad. |
 | `GET/PUT` | `/api/coordinator/spare-parts/{id}` | `COORDINATOR` | Detalle con unidades instaladas y edición (código inmutable). |
+| `DELETE` | `/api/coordinator/spare-parts/{id}` | `COORDINATOR` | Baja lógica del repuesto sin borrado físico (Art. III). |
 | `PATCH` | `/api/coordinator/spare-parts/{id}/status` | `COORDINATOR` | Baja lógica y reactivación sin borrado físico (Art. III). |
 | `GET` | `/api/coordinator/spare-parts/analytics` | `COORDINATOR` | Ranking de piezas, costes por modelo/sede y alertas de fallo crónico. |
 | `GET` | `/api/coordinator/spare-parts/export` | `COORDINATOR` | Exportación CSV de consumos con snapshots congelados. |
@@ -220,14 +226,14 @@ php tests/run_all.php
 ### Resumen de Ejecución Global (Septiembre 2026, cierre del Módulo M2):
 ```text
 ======================================================================
- RESUMEN DE EJECUCIÓN GLOBAL (120 Suites / 3.792 Aserciones)
+ RESUMEN DE EJECUCIÓN GLOBAL (120 Suites / 3.796 Aserciones)
 ======================================================================
  Suites de pruebas PHP Unit : 52 / 52 pasadas (100%)
  Suites de pruebas JS Unit  : 30 / 30 pasadas (100%)
  Suites de Integración PHP  : 38 / 38 pasadas (100%)
  ──────────────────────────────────────────────────────────────────
  Total Suites Ejecutadas    : 120
- Total Aserciones Evaluadas : 3.792
+ Total Aserciones Evaluadas : 3.796
  Fallos Detectados          : 0 (100% en verde)
  Base de datos restablecida : SÍ (Semillas intactas)
 ======================================================================
@@ -263,6 +269,7 @@ gestor-incidencias-vending/
 │   ├── schema.sql                # DDL MariaDB del núcleo operativo
 │   ├── cloud_init.sql            # Script unificado integral para despliegues cloud
 │   ├── migrations/               # DDL incrementales (003 auditoría, 004 CRUD, 005 preventivos, 006 repuestos)
+│   ├── seeds.sql                 # Semillas SQL del catálogo base (referencia)
 │   └── DemoMetricsSeeder.php     # Generador de histórico de averías y auditoría
 ├── docs/
 │   ├── design.md                 # Especificación de tokens visuales Docker
