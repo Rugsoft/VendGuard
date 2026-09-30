@@ -1736,6 +1736,53 @@ textarea.form-control {
   text-decoration: none;
 }
 
+.territorial-map-interactive {
+  touch-action: none;
+  cursor: grab;
+}
+
+.territorial-map-interactive:active {
+  cursor: grabbing;
+}
+
+.territorial-map-controls {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.territorial-map-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-xs);
+  background-color: #ffffff;
+  color: var(--color-slate, #2c333f);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(44, 51, 63, 0.18);
+  padding: 0;
+}
+
+.territorial-map-btn:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.territorial-map-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .territorial-marker {
   cursor: pointer;
   outline: none;

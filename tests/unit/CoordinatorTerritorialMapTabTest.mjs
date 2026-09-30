@@ -279,6 +279,117 @@ assert('6.9 Plantilla: mensaje amistoso para un territorio sin actividad', tmpl.
 assert('6.10 Plantilla: atribución obligatoria de OpenStreetMap en el mapa territorial', tmpl.includes('OpenStreetMap') && tmpl.includes('territorial-map-attribution'));
 
 // =========================================================================
+// BLOQUE 7: Zoom, gestos y reencuadre del territorio (RF-MAP-09, RNF-MAP-02)
+// =========================================================================
+console.log('\n--- BLOQUE 7: Zoom, gestos y reencuadre ---');
+
+function makePointerEvent(pointerId, x, y, type = 'mouse') {
+  return {
+    pointerId,
+    pointerType: type,
+    button: 0,
+    clientX: x,
+    clientY: y,
+    currentTarget: {
+      setPointerCapture: () => {},
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 620 })
+    }
+  };
+}
+
+const zoomTab = createTabInstance();
+await zoomTab.loadTerritorialData();
+const baseWindow = { ...zoomTab.mapWindow };
+
+assert('7.1 La vista inicial encaja el territorio completo (escala 1 y centrada)',
+  zoomTab.view.scale === 1 && zoomTab.view.centerX === 0.5 && zoomTab.view.centerY === 0.5);
+assert('7.2 En escala de encaje la ventana efectiva coincide con la ventana base',
+  zoomTab.effectiveWindow().sideTiles === baseWindow.sideTiles
+    && zoomTab.effectiveWindow().leftEdge === baseWindow.leftEdge);
+
+zoomTab.zoomIn();
+assert('7.3 Zoom + amplía 1.5x manteniendo el centro del lienzo',
+  Math.abs(zoomTab.view.scale - 1.5) < 1e-9);
+assert('7.4 La ventana efectiva reduce su lado a la mitad de teselas al ampliar',
+  Math.abs(zoomTab.effectiveWindow().sideTiles - baseWindow.sideTiles / 1.5) < 1e-9);
+assert('7.5 El zoom genera una ventana de teselas con cobertura ampliada',
+  zoomTab.mapTiles.length >= 1 && zoomTab.mapTiles.every(tile => tile.url.startsWith('https://tile.openstreetmap.org/')));
+
+const anchorBefore = {
+  x: zoomTab.view.centerX + (0.25 - 0.5) / zoomTab.view.scale,
+  y: zoomTab.view.centerY + (0.5 - 0.5) / zoomTab.view.scale
+};
+zoomTab.zoomToPoint(3, 0.25, 0.5);
+const anchorAfter = {
+  x: zoomTab.view.centerX + (0.25 - 0.5) / zoomTab.view.scale,
+  y: zoomTab.view.centerY + (0.5 - 0.5) / zoomTab.view.scale
+};
+assert('7.6 El zoom ancla el punto bajo el cursor: no se desplaza al ampliar',
+  Math.abs(anchorBefore.x - anchorAfter.x) < 1e-9 && Math.abs(anchorBefore.y - anchorAfter.y) < 1e-9);
+
+zoomTab.zoomToPoint(999, 0.5, 0.5);
+assert('7.7 La escala máxima de zoom queda limitada a 12x', zoomTab.view.scale === 12);
+zoomTab.zoomToPoint(0.01, 0.5, 0.5);
+assert('7.8 Alejar por debajo del encaje reencuadra el territorio completo',
+  zoomTab.view.scale === 1 && zoomTab.view.centerX === 0.5 && zoomTab.view.centerY === 0.5);
+
+zoomTab.zoomIn();
+const posBeforePan = zoomTab.sitePosition(zoomTab.sites[0]);
+zoomTab.handlePointerDown(makePointerEvent(1, 500, 300));
+zoomTab.handlePointerMove(makePointerEvent(1, 600, 340));
+zoomTab.handlePointerUp(makePointerEvent(1, 600, 340));
+const posAfterPan = zoomTab.sitePosition(zoomTab.sites[0]);
+assert('7.9 Arrastrar con un puntero mueve el mapa siguiendo el gesto (contenido pegado al dedo)',
+  posAfterPan.x > posBeforePan.x && posAfterPan.y > posBeforePan.y);
+assert('7.10 Un arrastre largo suprime el clic accidental sobre la sede',
+  zoomTab.suppressNextClick === true);
+zoomTab.emittedEvents = [];
+zoomTab.handleSiteClick(zoomTab.sites[2]);
+assert('7.11 Tras arrastrar, el clic siguiente no dispara asignaciones accidentales',
+  zoomTab.emittedEvents.length === 0 && zoomTab.suppressNextClick === false);
+
+const pinchTab = createTabInstance();
+await pinchTab.loadTerritorialData();
+pinchTab.handlePointerDown(makePointerEvent(1, 500, 300));
+pinchTab.handlePointerDown(makePointerEvent(2, 540, 300));
+pinchTab.handlePointerMove(makePointerEvent(2, 580, 300));
+assert('7.12 Separar los dedos (pellizco) amplía el mapa al doble',
+  Math.abs(pinchTab.view.scale - 2) < 1e-6);
+pinchTab.handlePointerMove(makePointerEvent(2, 660, 300));
+assert('7.13 El pellizco se ancla al inicio del gesto y no se compone acumulándose',
+  Math.abs(pinchTab.view.scale - 4) < 1e-6);
+pinchTab.handlePointerUp(makePointerEvent(2, 660, 300));
+assert('7.14 Quitar un dedo del pellizco vuelve al modo de paneo sin romper la escala',
+  pinchTab.activePointers.size === 1 && pinchTab.pinchStartScale === 1);
+
+const preWheelScale = zoomTab.view.scale;
+zoomTab.handleWheel({ deltaY: -120, clientX: 250, clientY: 310, currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 620 }) } });
+const wheelScale = zoomTab.view.scale;
+zoomTab.handleWheel({ deltaY: 120, clientX: 250, clientY: 310, currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 620 }) } });
+assert('7.15 La rueda del ratón amplía hacia arriba y reduce hacia abajo un paso',
+  Math.abs(wheelScale - preWheelScale * 1.25) < 1e-6 && Math.abs(zoomTab.view.scale - preWheelScale) < 1e-6);
+
+const preDblScale = zoomTab.view.scale;
+zoomTab.handleDblClick({ clientX: 250, clientY: 310, currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 620 }) } });
+assert('7.16 El doble clic amplía 1.8x anclado en el cursor',
+  Math.abs(zoomTab.view.scale - preDblScale * 1.8) < 1e-6);
+
+zoomTab.resetView();
+assert('7.17 El reencuadre devuelve la vista al territorio completo encajado',
+  zoomTab.view.scale === 1 && zoomTab.view.centerX === 0.5 && zoomTab.view.centerY === 0.5
+    && zoomTab.effectiveWindow().sideTiles === baseWindow.sideTiles);
+
+const zoomTmpl = CoordinatorTerritorialMapTab.template;
+assert('7.18 Plantilla: gestos de rueda, doble clic y punteros enlazados al lienzo',
+  zoomTmpl.includes('@wheel.prevent="handleWheel"') && zoomTmpl.includes('@dblclick.prevent="handleDblClick"')
+    && zoomTmpl.includes('@pointerdown="handlePointerDown"') && zoomTmpl.includes('@pointerup="handlePointerUp"'));
+assert('7.19 Plantilla: botones de zoom y reencuadre accesibles con etiquetas ARIA',
+  zoomTmpl.includes('btn-zoom-in') && zoomTmpl.includes('btn-zoom-out') && zoomTmpl.includes('btn-fit-territory')
+    && zoomTmpl.includes('aria-label="Acercar el mapa"') && zoomTmpl.includes('aria-label="Ver el territorio completo"'));
+assert('7.20 Plantilla: los botones se deshabilitan en los límites de escala',
+  zoomTmpl.includes(':disabled="view.scale >= zoomMaxScale"') && zoomTmpl.includes(':disabled="view.scale <= 1"'));
+
+// =========================================================================
 // RESUMEN FINAL
 // =========================================================================
 console.log('\n======================================================================');
