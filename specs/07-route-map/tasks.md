@@ -122,7 +122,7 @@
   * **Dependencias:** T-MAP-08, T-MAP-11
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `TechnicianRouteMapApiTest.php` contra MariaDB real pasando al 100% en verde en flujos de parada `#1` para `IN_PROGRESS`, priorización absoluta de averías perecederas (SLA < 4h), ordenación Nearest Neighbor, exclusión de `PENDING_PARTS`, fallback a Base Central y URLs universales de Google Maps.
 
-- [ ] **T-MAP-19: Pruebas de blindaje constitucional y segregación de sede (`SiteManagerRouteDataSegregationTest.php`)**
+- [x] **T-MAP-19: Pruebas de blindaje constitucional y segregación de sede (`SiteManagerRouteDataSegregationTest.php`)**
   * **Requisitos:** RF-MAP-10, Constitución Art. V.4
   * **Dependencias:** T-MAP-11
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `SiteManagerRouteDataSegregationTest.php` pasando al 100% en verde, certificando que ningún endpoint de ruta o mapa es accesible por el rol `LOCATION_MANAGER` (403 Forbidden) y que no existe rastreo personal continuo del smartphone de los técnicos.
