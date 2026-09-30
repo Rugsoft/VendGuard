@@ -45,7 +45,7 @@
   * **Dependencias:** T-MAP-02
   * **Hecho cuando:** `GeoDistanceService` implementa la fórmula trigonométrica pura de Haversine (`calculateDistanceKm`) y la validación de marco territorial (`isInsideOperationalArea`); `php tests/unit/GeoDistanceServiceTest.php` pasa al 100% en verde verificando distancias geodésicas conocidas, distancia cero sobre el mismo punto y rechazo de coordenadas fuera de rango territorial o invertidas.
 
-- [ ] **T-MAP-06: Implementar `RouteSettingsService.php` y suite unitaria (`RouteSettingsServiceTest.php`)**
+- [x] **T-MAP-06: Implementar `RouteSettingsService.php` y suite unitaria (`RouteSettingsServiceTest.php`)**
   * **Requisitos:** RF-MAP-02
   * **Dependencias:** T-MAP-04, T-MAP-05
   * **Hecho cuando:** `RouteSettingsService` permite obtener y actualizar los datos de la Base Central validando que las coordenadas se encuentren dentro del área operativa; `php tests/unit/RouteSettingsServiceTest.php` pasa al 100% en verde.
