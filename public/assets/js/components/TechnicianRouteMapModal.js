@@ -25,6 +25,7 @@
  */
 
 import { api } from '../api.js';
+import { Mercator, computeTileWindow, buildMapTiles, projectToWindow } from '../utils/Mercator.js';
 
 const STOP_COLORS = {
   inProgress: '#f8b60f',
@@ -35,40 +36,9 @@ const STOP_COLORS = {
 };
 
 /**
- * Standard Web Mercator projection helpers (pure functions, no dependencies).
- * Fractions are expressed in zoom-0 world units within [0, 1].
+ * Standard public map tiles covering the route viewport (RF-MAP-07, plan.md §5).
  */
-export const Mercator = {
-  /**
-   * Longitude to horizontal world fraction ([0 = -180°, 1 = +180°]).
-   */
-  lngToFraction(lng) {
-    return (Number(lng) + 180) / 360;
-  },
-  /**
-   * Latitude to vertical world fraction ([0 = north pole, 0.5 = equator, 1 = south pole])
-   * using the standard spherical Mercator formula with the OSM latitude clamp.
-   */
-  latToFraction(lat) {
-    const clamped = Math.max(Math.min(Number(lat), 85.0511), -85.0511);
-    const radians = (clamped * Math.PI) / 180;
-    return (1 - Math.log(Math.tan(radians) + 1 / Math.cos(radians)) / Math.PI) / 2;
-  },
-  /**
-   * Longitude to world tile units at the given zoom level.
-   */
-  lngToWorldX(lng, zoom) {
-    return this.lngToFraction(lng) * Math.pow(2, zoom);
-  },
-  /**
-   * Latitude to world tile units at the given zoom level.
-   */
-  latToWorldY(lat, zoom) {
-    return this.latToFraction(lat) * Math.pow(2, zoom);
-  }
-};
-
-export { STOP_COLORS };
+export { Mercator, STOP_COLORS };
 
 export const TechnicianRouteMapModal = {
   name: 'TechnicianRouteMapModal',
@@ -247,63 +217,14 @@ export const TechnicianRouteMapModal = {
      * a fixed padding. Deterministic: same coordinates always yield the same zoom and view.
      */
     computeTileWindow() {
-      const points = this.routePoints();
-      if (points.length === 0) {
-        return null;
-      }
-      const fractionsX = points.map(point => Mercator.lngToFraction(point.lng));
-      const fractionsY = points.map(point => Mercator.latToFraction(point.lat));
-      const minSpanFraction = 0.000012; // ~500 m minimum framing for a single-stop day
-      const spanX = Math.max(Math.max(...fractionsX) - Math.min(...fractionsX), minSpanFraction);
-      const spanY = Math.max(Math.max(...fractionsY) - Math.min(...fractionsY), minSpanFraction);
-      const sideFraction = Math.max(spanX, spanY) * 1.6; // content occupies ~62% of the canvas
-      let zoom = Math.round(Math.log2(1 / sideFraction));
-      zoom = Math.max(6, Math.min(16, zoom));
-      let sideTiles = sideFraction * Math.pow(2, zoom);
-      if (sideTiles < 0.9 && zoom < 16) {
-        zoom += 1;
-        sideTiles = sideFraction * Math.pow(2, zoom);
-      }
-      const centerX = ((Math.max(...fractionsX) + Math.min(...fractionsX)) / 2) * Math.pow(2, zoom);
-      const centerY = ((Math.max(...fractionsY) + Math.min(...fractionsY)) / 2) * Math.pow(2, zoom);
-      return {
-        zoom,
-        sideTiles,
-        leftEdge: centerX - sideTiles / 2,
-        topEdge: centerY - sideTiles / 2
-      };
+      return computeTileWindow(this.routePoints());
     },
     /**
      * Builds the list of standard public tiles covering the viewport. Percentages are
      * relative to the square canvas; edge tiles may overflow and are clipped by CSS.
      */
     buildMapTiles() {
-      const mapWindow = this.mapWindow || this.computeTileWindow();
-      if (!mapWindow) {
-        return [];
-      }
-      const worldSize = Math.pow(2, mapWindow.zoom);
-      const tilePercent = 100 / mapWindow.sideTiles;
-      const startX = Math.floor(mapWindow.leftEdge);
-      const endX = Math.floor(mapWindow.leftEdge + mapWindow.sideTiles);
-      const startY = Math.floor(mapWindow.topEdge);
-      const endY = Math.floor(mapWindow.topEdge + mapWindow.sideTiles);
-      const tiles = [];
-      for (let tx = startX; tx <= endX; tx++) {
-        if (tx < 0 || tx > worldSize - 1) continue;
-        for (let ty = startY; ty <= endY; ty++) {
-          if (ty < 0 || ty > worldSize - 1) continue;
-          tiles.push({
-            key: mapWindow.zoom + '/' + tx + '/' + ty,
-            url: `https://tile.openstreetmap.org/${mapWindow.zoom}/${tx}/${ty}.png`,
-            leftPct: ((tx - mapWindow.leftEdge) / mapWindow.sideTiles) * 100,
-            topPct: ((ty - mapWindow.topEdge) / mapWindow.sideTiles) * 100,
-            widthPct: tilePercent,
-            heightPct: tilePercent
-          });
-        }
-      }
-      return tiles;
+      return buildMapTiles(this.mapWindow || this.computeTileWindow());
     },
     /**
      * Hides a broken tile image without touching the marker overlay (RNF-MAP-04).
@@ -347,27 +268,14 @@ export const TechnicianRouteMapModal = {
      */
     markerFor(stop) {
       const mapWindow = this.mapWindow || this.computeTileWindow();
-      if (!mapWindow || !Number.isFinite(Number(stop.location.latitude)) || !Number.isFinite(Number(stop.location.longitude))) {
-        return { x: 50, y: 50 };
-      }
-      const worldX = Mercator.lngToWorldX(Number(stop.location.longitude), mapWindow.zoom);
-      const worldY = Mercator.latToWorldY(Number(stop.location.latitude), mapWindow.zoom);
-      return {
-        x: ((worldX - mapWindow.leftEdge) / mapWindow.sideTiles) * 100,
-        y: ((worldY - mapWindow.topEdge) / mapWindow.sideTiles) * 100
-      };
+      return projectToWindow(Number(stop.location.latitude), Number(stop.location.longitude), mapWindow);
     },
     originPoint() {
-      const mapWindow = this.mapWindow || this.computeTileWindow();
-      if (!mapWindow || !this.origin || !Number.isFinite(Number(this.origin.latitude)) || !Number.isFinite(Number(this.origin.longitude))) {
+      if (!this.origin) {
         return { x: 50, y: 50 };
       }
-      const worldX = Mercator.lngToWorldX(Number(this.origin.longitude), mapWindow.zoom);
-      const worldY = Mercator.latToWorldY(Number(this.origin.latitude), mapWindow.zoom);
-      return {
-        x: ((worldX - mapWindow.leftEdge) / mapWindow.sideTiles) * 100,
-        y: ((worldY - mapWindow.topEdge) / mapWindow.sideTiles) * 100
-      };
+      const mapWindow = this.mapWindow || this.computeTileWindow();
+      return projectToWindow(Number(this.origin.latitude), Number(this.origin.longitude), mapWindow);
     },
     /**
      * Selects a stop: highlights the marker and opens the summary sheet (RF-MAP-07).

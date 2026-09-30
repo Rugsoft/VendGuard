@@ -4,9 +4,10 @@
  * Coordinator territorial triage map (RF-MAP-09, RNF-MAP-02, RNF-MAP-06).
  *
  * Features:
- * 1. Large-format map of the whole territory rendering every site with unresolved incidents
- *    or preventive orders, using a light standard SVG canvas (zero external tile providers
- *    or paid APIs: constitutional Art. IV).
+ * 1. Large-format panoramic map of the whole territory rendering every site with unresolved
+ *    incidents or preventive orders over standard public map tiles (OpenStreetMap) projected
+ *    with the shared vanilla Web Mercator utility — zero libraries, zero API keys and zero
+ *    paid providers (constitutional Art. IV, plan.md §5).
  * 2. Site markers with a numeric badge counting pending machines at that building, and
  *    semantic colors: red for critical perishable risk, blue for ordinary incidents,
  *    green for preventive-only sites.
@@ -20,6 +21,7 @@
  */
 
 import { api } from '../api.js';
+import { computeTileWindow, buildMapTiles, projectToWindow } from '../utils/Mercator.js';
 
 const MARKER_COLORS = {
   critical: '#e02424',
@@ -28,7 +30,16 @@ const MARKER_COLORS = {
   unassigned: '#f8b60f'
 };
 
-export { MARKER_COLORS };
+/**
+ * Panoramic canvas height ratio: the SVG overlay uses a 100 x 62 viewBox, so marker
+ * percentages from the square Mercator window are scaled by this factor. The window
+ * is computed with a padding factor above 1/0.62 so the cropped central band keeps
+ * every site inside the visible area.
+ */
+const TERRITORIAL_CANVAS_HEIGHT_RATIO = 0.62;
+const TERRITORIAL_WINDOW_PADDING_FACTOR = 1.8;
+
+export { MARKER_COLORS, TERRITORIAL_CANVAS_HEIGHT_RATIO };
 
 export const CoordinatorTerritorialMapTab = {
   name: 'CoordinatorTerritorialMapTab',
@@ -48,6 +59,8 @@ export const CoordinatorTerritorialMapTab = {
       technicians: [],
       isLoading: false,
       errorMessage: '',
+      // Cached cartographic window (zoom + tile-space viewport) for the current sites
+      mapWindow: null,
       filters: {
         technician_id: '',
         is_critical_only: false,
@@ -70,6 +83,18 @@ export const CoordinatorTerritorialMapTab = {
     },
     totalActiveTasks() {
       return this.sites.reduce((sum, site) => sum + Number(site.total_incidents || 0) + Number(site.total_preventives || 0), 0);
+    },
+    /**
+     * Standard public map tiles covering the territorial viewport (RF-MAP-09, plan.md §5).
+     */
+    mapTiles() {
+      return buildMapTiles(this.mapWindow || this.computeTerritorialWindow());
+    },
+    /**
+     * Exposed panoramic ratio so templates and tests share the same constant.
+     */
+    canvasHeightRatio() {
+      return TERRITORIAL_CANVAS_HEIGHT_RATIO;
     }
   },
   watch: {
@@ -107,12 +132,54 @@ export const CoordinatorTerritorialMapTab = {
         const response = await api.map.getActiveIncidents(params);
         const payload = response && response.data ? response.data : response;
         this.sites = Array.isArray(payload && payload.locations) ? payload.locations : [];
+        this.mapWindow = this.computeTerritorialWindow();
       } catch (err) {
         this.sites = [];
+        this.mapWindow = null;
         this.errorMessage = (err && err.message) || 'No se pudo cargar el mapa territorial. Comprueba tu conexión.';
       } finally {
         this.isLoading = false;
       }
+    },
+    /**
+     * Computes the square Web Mercator window framing every active site of the territory.
+     */
+    computeTerritorialWindow() {
+      return computeTileWindow(
+        this.sites.map(site => ({ lat: Number(site.latitude), lng: Number(site.longitude) })),
+        { paddingFactor: TERRITORIAL_WINDOW_PADDING_FACTOR }
+      );
+    },
+    /**
+     * Hides a broken tile image without touching the marker overlay (RNF-MAP-04).
+     */
+    hideTile(event) {
+      if (event && event.target && event.target.style) {
+        event.target.style.display = 'none';
+      }
+    },
+    /**
+     * Maps a square-window percentage onto the visible central band of the panoramic
+     * canvas ([0, 100]). Vertical only: horizontally the window already spans the full
+     * canvas width, so X percentages pass through unchanged.
+     */
+    territorialBandCrop(value) {
+      const ratio = TERRITORIAL_CANVAS_HEIGHT_RATIO;
+      return (Number(value) - (1 - ratio) * 50) / ratio;
+    },
+    /**
+     * Inline style for a standard tile inside the panoramic canvas: left passes through
+     * untouched, top is band-cropped, and the square tile stretches vertically by 1/ratio
+     * because the canvas crops the central Mercator band.
+     */
+    territorialTileStyle(tile) {
+      const ratio = TERRITORIAL_CANVAS_HEIGHT_RATIO;
+      return {
+        left: tile.leftPct + '%',
+        top: this.territorialBandCrop(tile.topPct) + '%',
+        width: tile.widthPct + '%',
+        height: (tile.heightPct / ratio) + '%'
+      };
     },
     /**
      * Semantic marker color per site (RF-MAP-09 / RNF-MAP-06).
@@ -133,44 +200,21 @@ export const CoordinatorTerritorialMapTab = {
       return (site.assigned_technicians || []).map(tech => tech.name).join(' / ');
     },
     /**
-     * Projects geographic coordinates into the light SVG canvas (percent values).
+     * Projects geographic coordinates into the panoramic canvas percentages. The square
+     * Mercator window is vertically scaled by the canvas height ratio (100 x 62 viewBox).
      */
-    projectedSites() {
-      const positions = {};
-      const lats = this.sites.map(site => Number(site.latitude)).filter(Number.isFinite);
-      const lngs = this.sites.map(site => Number(site.longitude)).filter(Number.isFinite);
-      if (lats.length === 0) {
-        return positions;
-      }
-      let minLat = Math.min(...lats);
-      let maxLat = Math.max(...lats);
-      let minLng = Math.min(...lngs);
-      let maxLng = Math.max(...lngs);
-      const padding = 14;
-      const usable = 100 - padding * 2;
-      if (maxLat - minLat < 0.01) {
-        minLat -= 0.005;
-        maxLat += 0.005;
-      }
-      if (maxLng - minLng < 0.01) {
-        minLng -= 0.005;
-        maxLng += 0.005;
-      }
-      for (const site of this.sites) {
-        const lat = Number(site.latitude);
-        const lng = Number(site.longitude);
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-          continue;
-        }
-        positions[site.location_id] = {
-          x: padding + ((lng - minLng) / (maxLng - minLng)) * usable,
-          y: 100 - padding - ((lat - minLat) / (maxLat - minLat)) * usable
-        };
-      }
-      return positions;
-    },
+    /**
+     * Projects geographic coordinates into the panoramic SVG overlay (viewBox 100 x 62).
+     * X passes through from the square Mercator window; Y is band-cropped to the visible
+     * central band and scaled into the 62-unit viewBox keeping the isotropic scale.
+     */
     sitePosition(site) {
-      return this.projectedSites()[site.location_id] || { x: 50, y: 50 };
+      const mapWindow = this.mapWindow || this.computeTerritorialWindow();
+      const projected = projectToWindow(Number(site.latitude), Number(site.longitude), mapWindow);
+      return {
+        x: projected.x,
+        y: this.territorialBandCrop(projected.y) * TERRITORIAL_CANVAS_HEIGHT_RATIO
+      };
     },
     /**
      * Marks unassigned sites so they can start the assignment flow (RF-MAP-09).
@@ -235,9 +279,24 @@ export const CoordinatorTerritorialMapTab = {
           {{ sites.length }} sede(s) con actividad · {{ totalActiveTasks }} tarea(s) activa(s) · {{ criticalSiteCount }} crítica(s) · {{ multiTechnicianSiteCount }} con multi-técnico
         </div>
 
-        <!-- Large-format light SVG territorial canvas (Art. IV) -->
+        <!-- Panoramic standard public map tiles (OpenStreetMap) with the interactive SVG
+             overlay: keyless, zero external libraries (Art. IV, plan.md §5) -->
         <div class="territorial-map-canvas-wrapper">
-          <svg class="territorial-map-canvas" viewBox="0 0 100 62" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Mapa territorial de sedes con averías activas">
+          <div class="territorial-map-canvas">
+            <div class="territorial-tile-layer" aria-hidden="true">
+              <img
+                v-for="tile in mapTiles"
+                :key="tile.key"
+                class="territorial-tile"
+                :src="tile.url"
+                alt=""
+                draggable="false"
+                :style="territorialTileStyle(tile)"
+                @error="hideTile"
+                @dragstart.prevent
+              />
+            </div>
+            <svg class="territorial-map-overlay" viewBox="0 0 100 62" preserveAspectRatio="none" role="img" aria-label="Mapa territorial de sedes con averías activas">
             <g
               v-for="site in sites"
               :key="site.location_id"
@@ -255,7 +314,9 @@ export const CoordinatorTerritorialMapTab = {
               <text y="-5" text-anchor="middle" class="territorial-marker-badge">{{ sitePendingCount(site) }}</text>
               <text v-if="site.is_multi_technician" y="9.4" text-anchor="middle" class="territorial-marker-multi-badge">👥</text>
             </g>
-          </svg>
+            </svg>
+            <div class="territorial-map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</div>
+          </div>
           <div class="territorial-map-legend small">
             <span><i class="route-dot" style="background:#e02424"></i> Crítica (perecederos)</span>
             <span><i class="route-dot" style="background:#2560ff"></i> Ordinaria</span>

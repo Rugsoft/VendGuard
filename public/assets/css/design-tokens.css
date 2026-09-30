@@ -1689,9 +1689,51 @@ textarea.form-control {
 }
 
 .territorial-map-canvas {
+  position: relative;
   width: 100%;
-  height: auto;
+  aspect-ratio: 100 / 62;
   display: block;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  background-color: #e5e7ee;
+}
+
+.territorial-tile-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.territorial-tile {
+  position: absolute;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.territorial-map-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+}
+
+.territorial-map-attribution {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  z-index: 3;
+  font-size: 9px;
+  line-height: 1.2;
+  padding: 1px 5px;
+  background-color: rgba(255, 255, 255, 0.82);
+  border-radius: var(--radius-xs);
+  color: var(--color-ink-muted);
+}
+
+.territorial-map-attribution a {
+  color: var(--color-ink-muted);
+  text-decoration: none;
 }
 
 .territorial-marker {

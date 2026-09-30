@@ -34,6 +34,7 @@ globalThis.window = {
 
 import { api } from '../../public/assets/js/api.js';
 import { TechnicianRouteMapModal, STOP_COLORS, Mercator } from '../../public/assets/js/components/TechnicianRouteMapModal.js';
+import { buildMapTiles as sharedBuildMapTiles } from '../../public/assets/js/utils/Mercator.js';
 
 let assertions = 0;
 let failures = 0;
@@ -421,7 +422,11 @@ const tmpl = TechnicianRouteMapModal.template;
 assert('6.3 Plantilla: capa de teselas estándar bajo el overlay SVG con polilínea de ruta',
   tmpl.includes('route-tile-layer') && tmpl.includes(':src="tile.url"') && tmpl.includes('route-map-overlay')
     && tmpl.includes('<polyline') && tmpl.includes('route-map-canvas')
-    && TechnicianRouteMapModal.methods.buildMapTiles.toString().includes('tile.openstreetmap.org'));
+    && TechnicianRouteMapModal.methods.buildMapTiles.toString().includes('buildMapTiles(')
+    && (() => {
+      const sample = sharedBuildMapTiles({ zoom: 14, sideTiles: 2, leftEdge: 8289.5, topEdge: 6117.5 });
+      return sample.length >= 1 && sample.every(tile => tile.url.startsWith('https://tile.openstreetmap.org/14/'));
+    })());
 assert('6.4 Plantilla: marcadores circulares accesibles por parada', tmpl.includes('route-map-marker') && tmpl.includes('aria-label') && tmpl.includes('@click="selectStop(stop)"'));
 assert('6.5 Plantilla: check verde para paradas completadas', tmpl.includes('route-marker-check') && tmpl.includes('✔'));
 assert('6.6 Plantilla: leyenda con los colores semánticos institucionales',

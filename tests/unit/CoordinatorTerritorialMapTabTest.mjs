@@ -29,6 +29,7 @@ globalThis.window = {
 
 import { api } from '../../public/assets/js/api.js';
 import { CoordinatorTerritorialMapTab, MARKER_COLORS } from '../../public/assets/js/components/CoordinatorTerritorialMapTab.js';
+import { Mercator, buildMapTiles as sharedBuildMapTiles } from '../../public/assets/js/utils/Mercator.js';
 
 let assertions = 0;
 let failures = 0;
@@ -158,10 +159,35 @@ assert('2.2 Sede ordinaria usa el azul primario', tab.siteColor(sites[2]) === MA
 assert('2.3 Sede exclusiva de preventivo usa el verde', tab.siteColor({ has_perishable_risk: false, total_incidents: 0, total_preventives: 2 }) === MARKER_COLORS.preventive && MARKER_COLORS.preventive === '#38bd7d');
 assert('2.4 La insignia cuenta el total de máquinas pendientes de la sede', tab.sitePendingCount(sites[0]) === 2 && tab.sitePendingCount(sites[1]) === 2 && tab.sitePendingCount(sites[2]) === 1);
 
-const positions = tab.projectedSites();
+const positions = tab.sites.map(site => tab.sitePosition(site));
 assert('2.5 Cada sede proyecta un marcador finito dentro del lienzo territorial',
-  Object.values(positions).every(point => Number.isFinite(point.x) && Number.isFinite(point.y) && point.x >= 0 && point.x <= 100 && point.y >= 0 && point.y <= 100));
-assert('2.6 Cada sede dispone de posición para su marcador', tab.sitePosition(sites[0]).x !== undefined && tab.sitePosition(sites[2]).y !== undefined);
+  positions.every(point => Number.isFinite(point.x) && Number.isFinite(point.y) && point.x >= 0 && point.x <= 100 && point.y >= 0 && point.y <= 100));
+assert('2.6 Cada sede dispone de posición para su marcador', positions[0].x !== undefined && positions[2].y !== undefined);
+
+// Proyección Web Mercator y teselas estándar compartidas con el mapa del técnico (utils/Mercator.js)
+assert('2.7 Mercator compartido: el ecuador cae en 0.5 y Greenwich en el centro del mundo',
+  Mercator.latToFraction(0) === 0.5 && Mercator.lngToFraction(0) === 0.5);
+const tiles = tab.mapTiles;
+assert('2.8 Se solicitan teselas estándar de OpenStreetMap sin clave de API',
+  tiles.length >= 1 && tiles.every(tile => tile.url.startsWith('https://tile.openstreetmap.org/')));
+assert('2.9 La tesela que contiene la primera sede existe en la ventana territorial',
+  (() => {
+    const zoom = tab.mapWindow.zoom;
+    const tileX = Math.floor(Mercator.lngToWorldX(sites[0].longitude, zoom));
+    const tileY = Math.floor(Mercator.latToWorldY(sites[0].latitude, zoom));
+    return tiles.some(tile => tile.key === zoom + '/' + tileX + '/' + tileY);
+  })());
+assert('2.10 El recorte panorámico mantiene la banda central con escala isótropa',
+  Math.abs(tab.territorialBandCrop(19)) < 1e-9
+    && Math.abs(tab.territorialBandCrop(50) - 50) < 1e-9
+    && tab.territorialTileStyle(tiles[0]).height.endsWith('%'));
+assert('2.11 Una tesela rota se oculta sin romper los marcadores (RNF-MAP-04)',
+  (() => { const ev = { target: { style: {} } }; tab.hideTile(ev); return ev.target.style.display === 'none'; })());
+assert('2.12 El utilitario compartido genera teselas OSM válidas para cualquier ventana',
+  (() => {
+    const sample = sharedBuildMapTiles({ zoom: 13, sideTiles: 2, leftEdge: 4145.2, topEdge: 3058.8 });
+    return sample.length >= 1 && sample.every(tile => tile.url.startsWith('https://tile.openstreetmap.org/13/'));
+  })());
 
 // =========================================================================
 // BLOQUE 3: Detección multi-técnico y flujo de asignación (RF-MAP-09)
@@ -239,7 +265,9 @@ api.map.getActiveIncidents = async (params = {}) => {
 console.log('\n--- BLOQUE 6: Contratos de plantilla ---');
 
 const tmpl = CoordinatorTerritorialMapTab.template;
-assert('6.1 Plantilla: lienzo SVG territorial grande con marcadores', tmpl.includes('<svg') && tmpl.includes('territorial-map-canvas') && tmpl.includes('territorial-marker'));
+assert('6.1 Plantilla: capa de teselas OSM bajo el overlay SVG territorial con marcadores',
+  tmpl.includes('territorial-tile-layer') && tmpl.includes(':src="tile.url"') && tmpl.includes('territorial-map-overlay')
+    && tmpl.includes('territorial-map-canvas') && tmpl.includes('territorial-marker'));
 assert('6.2 Plantilla: insignia con el recuento de averías por sede', tmpl.includes('sitePendingCount(site)') && tmpl.includes('territorial-marker-badge') && tmpl.includes('territorial-site-badge'));
 assert('6.3 Plantilla: distintivo multi-técnico con los nombres de operarios', tmpl.includes('is_multi_technician') && tmpl.includes('technicianNames(site)') && tmpl.includes('👥'));
 assert('6.4 Plantilla: filtro reactivo por técnico y casillas de severidad', tmpl.includes('filters.technician_id') && tmpl.includes('filters.is_critical_only') && tmpl.includes('filters.unassigned_only'));
@@ -248,6 +276,7 @@ assert('6.6 Plantilla: leyenda con los colores semánticos institucionales', tmp
 assert('6.7 Plantilla: marcadores accesibles con roles ARIA y etiquetas descriptivas', tmpl.includes('role="button"') && tmpl.includes('aria-label') && tmpl.includes('@keydown.enter.prevent="handleSiteClick(site)"'));
 assert('6.8 Plantilla: resumen territorial con sedes, tareas y críticas', tmpl.includes('territorial-summary') && tmpl.includes('multiTechnicianSiteCount'));
 assert('6.9 Plantilla: mensaje amistoso para un territorio sin actividad', tmpl.includes('No hay averías ni preventivos activos en el territorio.'));
+assert('6.10 Plantilla: atribución obligatoria de OpenStreetMap en el mapa territorial', tmpl.includes('OpenStreetMap') && tmpl.includes('territorial-map-attribution'));
 
 // =========================================================================
 // RESUMEN FINAL
