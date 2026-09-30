@@ -26,7 +26,7 @@
   * **Dependencias:** T-MAP-01
   * **Hecho cuando:** Existen en `src/Core/Domain/Model/` los enums tipados (`StopStatus`, `StopPriority`), la entidad `Location` actualizada con `latitude` y `longitude`, y las entidades inmutables con tipado estricto PHP 8.2+ (`RouteStop`, `TechnicianRouteMap`, `RouteSettings`) con validaciones de invariantes de dominio.
 
-- [ ] **T-MAP-03: Implementar Excepciones de Dominio y suite unitaria (`RouteExceptionsTest.php`, `RouteDomainModelsTest.php`)**
+- [x] **T-MAP-03: Implementar Excepciones de Dominio y suite unitaria (`RouteExceptionsTest.php`, `RouteDomainModelsTest.php`)**
   * **Requisitos:** RF-MAP-01, RF-MAP-03, RF-MAP-04, RF-MAP-10, Constitución Art. V.4
   * **Dependencias:** T-MAP-02
   * **Hecho cuando:** Existen en `src/Core/Domain/Exception/` las excepciones tipadas (`InvalidCoordinatesException`, `CoordinatesOutOfBoundsException`, `SiteRouteDataForbiddenException`), y `php tests/unit/RouteExceptionsTest.php` junto con `php tests/unit/RouteDomainModelsTest.php` pasan al 100% en verde evaluando códigos HTTP (`403`, `422`), mensajes en castellano, progreso de tareas y herencia de prioridad crítica.
