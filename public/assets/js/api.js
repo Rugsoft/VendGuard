@@ -738,6 +738,18 @@ export class ApiClient {
     }
   };
 
+  map = {
+    /**
+     * Retrieves all sites with active incidents/preventives for the coordinator territorial triage map (RF-MAP-09).
+     * @param {Object} [params={}] Optional { technician_id, unassigned_only, is_critical_only } filters.
+     * @returns {Promise<Object>}
+     */
+    getActiveIncidents: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/map/active-incidents${q ? `?${q}` : ''}`);
+    }
+  };
+
   metrics = {
     /**
      * Retrieves KPI summary and SLA alerts (RF-01, RF-03).

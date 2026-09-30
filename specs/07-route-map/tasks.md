@@ -98,7 +98,7 @@
   * **Dependencias:** T-MAP-13
   * **Hecho cuando:** La vista móvil del técnico incluye el botón prominente de "Ver Mapa de Ruta", enlace general a Google Maps con waypoints, y cada tarjeta de parada dispone de un botón directo "Navegar con GPS".
 
-- [ ] **T-MAP-15: Implementar componente `CoordinatorTerritorialMapTab.js` y suite unitaria frontend (`CoordinatorTerritorialMapTabTest.mjs`)**
+- [x] **T-MAP-15: Implementar componente `CoordinatorTerritorialMapTab.js` y suite unitaria frontend (`CoordinatorTerritorialMapTabTest.mjs`)**
   * **Requisitos:** RF-MAP-09, RNF-MAP-02, RNF-MAP-06
   * **Dependencias:** T-MAP-09
   * **Hecho cuando:** El componente renderiza el mapa territorial global para coordinación, agrupando sedes, mostrando insignias con recuento de averías, destacando sedes multi-técnico y ofreciendo filtros reactivos por técnico y severidad; `node tests/unit/CoordinatorTerritorialMapTabTest.mjs` pasa al 100% en verde.

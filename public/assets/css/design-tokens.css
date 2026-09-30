@@ -1613,3 +1613,129 @@ textarea.form-control {
   padding: 3px 8px;
   font-size: var(--font-size-caption, 12px);
 }
+
+/* =========================================================================
+   Coordinator Territorial Map Tab (Módulo M4: RF-MAP-09, RNF-MAP-06)
+   ========================================================================= */
+.territorial-map-tab {
+  background-color: #ffffff;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+}
+
+.territorial-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background-color: #f9fafb;
+}
+
+.territorial-filters .form-select {
+  max-width: 220px;
+}
+
+.territorial-map-canvas-wrapper {
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  margin-bottom: 14px;
+  background-color: #f9fafb;
+}
+
+.territorial-map-canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.territorial-marker {
+  cursor: pointer;
+  outline: none;
+}
+
+.territorial-marker-circle {
+  stroke: #ffffff;
+  stroke-width: 0.7;
+}
+
+.territorial-marker.is-selected .territorial-marker-circle,
+.territorial-marker:focus .territorial-marker-circle {
+  stroke: var(--color-ink);
+  stroke-width: 1.1;
+}
+
+.territorial-marker-badge {
+  font-size: 4.2px;
+  font-weight: 700;
+  fill: var(--color-slate, #2c333f);
+}
+
+.territorial-marker-multi-badge {
+  font-size: 4.4px;
+}
+
+.territorial-marker-unassigned-ring {
+  fill: none;
+  stroke: #f8b60f;
+  stroke-width: 0.9;
+  stroke-dasharray: 1.8 1.2;
+}
+
+.territorial-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  padding-top: 8px;
+  color: var(--color-ink-muted, #6c7e9d);
+}
+
+.territorial-site-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.territorial-site-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background-color: #ffffff;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.territorial-site-card:hover {
+  border-color: var(--color-hairline-soft, #a9b4c6);
+  box-shadow: 0 2px 6px rgba(44, 51, 63, 0.12);
+}
+
+.territorial-site-card.is-unassigned {
+  border-color: #f8b60f;
+  background-color: #fffbeb;
+}
+
+.territorial-site-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  border-radius: var(--radius-xs);
+  color: #ffffff;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.territorial-site-main {
+  flex: 1;
+  min-width: 0;
+}
