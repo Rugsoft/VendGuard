@@ -21,7 +21,7 @@
   * **Dependencias:** Ninguna
   * **Hecho cuando:** La ejecución de `php bin/migrate.php` aplica con éxito `007_field_logistics_map.sql`, agregando las columnas `latitude` y `longitude` a `locations`, creando el índice `idx_locations_lat_lng` y la tabla `route_settings`; `database/cloud_init.sql` y `SeedRunner.php` incorporan coordenadas reales validadas para las sedes de prueba en Barcelona (`SEDE-BCN-01` y `SEDE-BCN-02`) y la fila singleton de Base Central.
 
-- [ ] **T-MAP-02: Implementar Enums y Modelos de Dominio (`StopStatus`, `StopPriority`, actualización de `Location`, `RouteStop`, `TechnicianRouteMap`, `RouteSettings`)**
+- [x] **T-MAP-02: Implementar Enums y Modelos de Dominio (`StopStatus`, `StopPriority`, actualización de `Location`, `RouteStop`, `TechnicianRouteMap`, `RouteSettings`)**
   * **Requisitos:** RF-MAP-01, RF-MAP-02, RF-MAP-03, RF-MAP-04, RF-MAP-08, Constitución Art. VI (Anti-feature creep)
   * **Dependencias:** T-MAP-01
   * **Hecho cuando:** Existen en `src/Core/Domain/Model/` los enums tipados (`StopStatus`, `StopPriority`), la entidad `Location` actualizada con `latitude` y `longitude`, y las entidades inmutables con tipado estricto PHP 8.2+ (`RouteStop`, `TechnicianRouteMap`, `RouteSettings`) con validaciones de invariantes de dominio.

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Core\Domain\Model;
 
 use ArrayAccess;
+use InvalidArgumentException;
 use JsonSerializable;
 
 /**
@@ -21,6 +22,8 @@ class Location implements ArrayAccess, JsonSerializable
     private string $siteCode;
     private string $name;
     private string $address;
+    private float $latitude;
+    private float $longitude;
     private ?string $contactName;
     private ?string $contactPhone;
     private bool $isActive;
@@ -38,12 +41,19 @@ class Location implements ArrayAccess, JsonSerializable
         bool $isActive = true,
         ?string $createdAt = null,
         ?string $updatedAt = null,
-        ?string $deletedAt = null
+        ?string $deletedAt = null,
+        float $latitude = 41.3850640,
+        float $longitude = 2.1734035
     ) {
         $this->id = $id;
         $this->siteCode = strtoupper(trim($siteCode));
         $this->name = trim($name);
         $this->address = trim($address);
+        $this->latitude = $latitude;
+        $this->longitude = $longitude;
+        if (!$this->hasValidCoordinates()) {
+            throw new InvalidArgumentException('Las coordenadas de la sede deben estar dentro del territorio operativo.');
+        }
         $this->contactName = $contactName !== null ? trim($contactName) : null;
         $this->contactPhone = $contactPhone !== null ? trim($contactPhone) : null;
         $this->isActive = $isActive;
@@ -70,7 +80,9 @@ class Location implements ArrayAccess, JsonSerializable
             (bool)($row['is_active'] ?? 1),
             isset($row['created_at']) ? (string)$row['created_at'] : null,
             isset($row['updated_at']) ? (string)$row['updated_at'] : null,
-            isset($row['deleted_at']) && $row['deleted_at'] !== null ? (string)$row['deleted_at'] : null
+            isset($row['deleted_at']) && $row['deleted_at'] !== null ? (string)$row['deleted_at'] : null,
+            isset($row['latitude']) ? (float)$row['latitude'] : 41.3850640,
+            isset($row['longitude']) ? (float)$row['longitude'] : 2.1734035
         );
     }
 
@@ -92,6 +104,27 @@ class Location implements ArrayAccess, JsonSerializable
     public function getAddress(): string
     {
         return $this->address;
+    }
+
+    public function getLatitude(): float
+    {
+        return $this->latitude;
+    }
+
+    public function getLongitude(): float
+    {
+        return $this->longitude;
+    }
+
+    public function hasValidCoordinates(): bool
+    {
+        return is_finite($this->latitude)
+            && is_finite($this->longitude)
+            && $this->latitude >= 27.0
+            && $this->latitude <= 44.5
+            && $this->longitude >= -18.5
+            && $this->longitude <= 5.0
+            && !($this->latitude === 0.0 && $this->longitude === 0.0);
     }
 
     public function getContactName(): ?string
@@ -141,6 +174,8 @@ class Location implements ArrayAccess, JsonSerializable
             'site_code' => $this->siteCode,
             'name' => $this->name,
             'address' => $this->address,
+            'latitude' => $this->latitude,
+            'longitude' => $this->longitude,
             'contact_name' => $this->contactName,
             'contact_phone' => $this->contactPhone,
             'is_active' => $this->isActive,
