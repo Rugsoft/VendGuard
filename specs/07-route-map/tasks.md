@@ -40,7 +40,7 @@
   * **Dependencias:** T-MAP-01, T-MAP-02, T-MAP-03
   * **Hecho cuando:** `PdoRouteSettingsRepository` implementa lectura y actualización de la configuración singleton de Base Central; `PdoLocationRepository` persiste y recupera `latitude` y `longitude` en todas las consultas; y `php tests/integration/PdoRouteSettingsRepositoryTest.php` pasa al 100% en verde.
 
-- [ ] **T-MAP-05: Implementar `GeoDistanceService.php` y suite unitaria (`GeoDistanceServiceTest.php`)**
+- [x] **T-MAP-05: Implementar `GeoDistanceService.php` y suite unitaria (`GeoDistanceServiceTest.php`)**
   * **Requisitos:** RF-MAP-01, RF-MAP-05, RNF-MAP-01
   * **Dependencias:** T-MAP-02
   * **Hecho cuando:** `GeoDistanceService` implementa la fórmula trigonométrica pura de Haversine (`calculateDistanceKm`) y la validación de marco territorial (`isInsideOperationalArea`); `php tests/unit/GeoDistanceServiceTest.php` pasa al 100% en verde verificando distancias geodésicas conocidas, distancia cero sobre el mismo punto y rechazo de coordenadas fuera de rango territorial o invertidas.
