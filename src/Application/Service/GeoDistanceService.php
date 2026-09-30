@@ -19,6 +19,18 @@ final class GeoDistanceService
      */
     public function calculateDistanceKm(float $latitude1, float $longitude1, float $latitude2, float $longitude2): float
     {
+        return round($this->calculatePreciseDistanceKm($latitude1, $longitude1, $latitude2, $longitude2), 2);
+    }
+
+    /**
+     * Calculates the unrounded great-circle distance for accurate route comparisons.
+     */
+    public function calculatePreciseDistanceKm(
+        float $latitude1,
+        float $longitude1,
+        float $latitude2,
+        float $longitude2
+    ): float {
         $latitudeDelta = deg2rad($latitude2 - $latitude1);
         $longitudeDelta = deg2rad($longitude2 - $longitude1);
 
@@ -27,7 +39,7 @@ final class GeoDistanceService
         $a = min(1.0, max(0.0, $a));
         $centralAngle = 2 * atan2(sqrt($a), sqrt(1 - $a));
 
-        return round(self::EARTH_RADIUS_KM * $centralAngle, 2);
+        return self::EARTH_RADIUS_KM * $centralAngle;
     }
 
     /**

@@ -50,7 +50,7 @@
   * **Dependencias:** T-MAP-04, T-MAP-05
   * **Hecho cuando:** `RouteSettingsService` permite obtener y actualizar los datos de la Base Central validando que las coordenadas se encuentren dentro del área operativa; `php tests/unit/RouteSettingsServiceTest.php` pasa al 100% en verde.
 
-- [ ] **T-MAP-07: Implementar `RouteOptimizationService.php` y suite unitaria (`RouteOptimizationServiceTest.php`)**
+- [x] **T-MAP-07: Implementar `RouteOptimizationService.php` y suite unitaria (`RouteOptimizationServiceTest.php`)**
   * **Requisitos:** RF-MAP-03, RF-MAP-04, RF-MAP-05, RF-MAP-06, RF-MAP-08, RNF-MAP-01, RNF-MAP-03, Constitución Art. II
   * **Dependencias:** T-MAP-04, T-MAP-05, T-MAP-06
   * **Hecho cuando:** `RouteOptimizationService` ejecuta la secuenciación híbrida de 4 fases (parada `IN_PROGRESS` como #1 inamovible, paradas críticas de perecederos ordenadas por SLA inminente, paradas ordinarias por Vecino Más Cercano y exclusión de `PENDING_PARTS`), generando URLs universales de Google Maps; `php tests/unit/RouteOptimizationServiceTest.php` pasa al 100% en verde con tiempo de ejecución $< 50\text{ ms}$.
