@@ -7,10 +7,11 @@
  * 1. Renderiza y gestiona la tabla de sedes con filtros de estado ('active', 'inactive', 'all').
  * 2. Aplica filtro de búsqueda en tiempo real (código, nombre, dirección y contacto).
  * 3. Valida en cliente el código de sede (3-32 chars, uppercase) y teléfono español (9 dígitos).
- * 4. Gestiona el modal de alta invocando a la API y reseteando errores.
- * 5. Gestiona el modal de edición preservando el código inmutable en modo solo lectura.
- * 6. Diálogo de confirmación de baja alerta interactivamente y bloquea si la sede tiene máquinas activas (EARS 1.4).
- * 7. Permite confirmar baja lógica si no tiene máquinas y soporta reactivación fluida.
+ * 4. Gestiona coordenadas geográficas con validación en cliente y envía ambas al guardar alta y edición mediante PUT.
+ * 5. Gestiona el modal de alta invocando a la API y reseteando errores.
+ * 6. Gestiona el modal de edición preservando el código inmutable en modo solo lectura.
+ * 7. Diálogo de confirmación de baja alerta interactivamente y bloquea si la sede tiene máquinas activas (EARS 1.4).
+ * 8. Permite confirmar baja lógica si no tiene máquinas y soporta reactivación fluida.
  * 
  * Dogma Vanilla: Node.js nativo con módulos ESM y cero dependencias externas.
  */
@@ -57,6 +58,8 @@ console.log('===================================================================
 const mockLocations = [
   {
     id: 1,
+    latitude: 41.385312,
+    longitude: 2.193245,
     site_code: 'SEDE-BCN-01',
     name: 'Hospital del Mar - Edificio Central',
     address: 'Passeig Marítim 25, Barcelona',
@@ -68,6 +71,8 @@ const mockLocations = [
   },
   {
     id: 2,
+    latitude: 41.403629,
+    longitude: 2.189512,
     site_code: 'SEDE-BCN-02',
     name: 'Torre Glòries - Planta 4 Oficinas',
     address: 'Avinguda Diagonal 211, Barcelona',
@@ -129,6 +134,9 @@ assert('1.8 validatePhone acepta null o vacío (campo opcional)', tab.validatePh
 assert('1.9 validatePhone rechaza teléfono con menos de 9 dígitos', tab.validatePhone('6001122') !== null);
 assert('1.10 validatePhone rechaza teléfono que no comience por 6, 7, 8 o 9', tab.validatePhone('500112233') !== null);
 assert('1.11 validatePhone acepta teléfono español válido de 9 dígitos', tab.validatePhone('600112233') === null);
+assert('1.12 validateCoordinates exige ambos valores', tab.validateCoordinates('', 2.17) !== null);
+assert('1.13 validateCoordinates rechaza ubicaciones fuera de territorio', tab.validateCoordinates(20, 2.17) !== null);
+assert('1.14 validateCoordinates acepta una ubicación dentro de territorio', tab.validateCoordinates(41.385312, 2.193245) === null);
 
 // =========================================================================
 // BLOQUE 2: Carga de Datos y Filtros Reactivos
@@ -188,10 +196,13 @@ tab.createForm.name = 'Hospital La Fe';
 tab.createForm.address = 'Avinguda de Fernando Abril Martorell 106, Valencia';
 tab.createForm.contact_name = 'Vicente Sanitario';
 tab.createForm.contact_phone = '600778899';
+tab.createForm.latitude = '39.4812';
+tab.createForm.longitude = '-0.3401';
 
 await tab.submitCreate();
 assert('3.4 submitCreate invoca a api.admin.createLocation', apiCreateCalled === true);
 assert('3.5 Payload enviado en mayúsculas y limpio', createdPayload.site_code === 'SEDE-VAL-01' && createdPayload.name === 'Hospital La Fe');
+assert('3.5.1 Alta envía ambas coordenadas numéricas', createdPayload.latitude === 39.4812 && createdPayload.longitude === -0.3401);
 assert('3.6 Modal de alta se cierra tras éxito', tab.showCreateModal === false);
 
 // =========================================================================
@@ -203,21 +214,31 @@ const locToEdit = mockLocations[0];
 tab.openEditModal(locToEdit);
 assert('4.1 openEditModal abre el modal de edición', tab.showEditModal === true);
 assert('4.2 editForm contiene los datos de la sede seleccionada', tab.editForm.site_code === 'SEDE-BCN-01' && tab.editForm.name === locToEdit.name);
+assert('4.2.1 editForm conserva latitud y longitud de la sede', tab.editForm.latitude === locToEdit.latitude && tab.editForm.longitude === locToEdit.longitude);
 
 let apiUpdateCalled = false;
 let updatedPayload = null;
-api.admin.updateLocation = async (id, payload) => {
+let updateHttpMethod = '';
+let updateEndpoint = '';
+api.put = async (endpoint, payload) => {
   apiUpdateCalled = true;
   updatedPayload = payload;
-  return { success: true, data: { id, ...payload } };
+  updateHttpMethod = 'PUT';
+  updateEndpoint = endpoint;
+  return { id: tab.editForm.id, ...payload };
 };
 
 tab.editForm.name = 'Hospital del Mar - Sede Renovada';
 tab.editForm.contact_phone = '699112233';
+tab.editForm.latitude = '41.4';
+tab.editForm.longitude = '2.2';
 await tab.submitEdit();
 
 assert('4.3 submitEdit invoca a api.admin.updateLocation', apiUpdateCalled === true);
+assert('4.3.1 Edición utiliza PUT para satisfacer el contrato aprobado', updateHttpMethod === 'PUT');
+assert('4.3.2 PUT actualiza la ruta de la sede correspondiente', updateEndpoint === `/coordinator/locations/${locToEdit.id}`);
 assert('4.4 Datos descriptivos actualizados enviados a la API', updatedPayload.name === 'Hospital del Mar - Sede Renovada' && updatedPayload.contact_phone === '699112233');
+assert('4.4.1 Edición envía ambas coordenadas numéricas', updatedPayload.latitude === 41.4 && updatedPayload.longitude === 2.2);
 assert('4.5 Modal de edición se cierra tras éxito', tab.showEditModal === false);
 
 // =========================================================================
@@ -277,6 +298,12 @@ assert('6.3 Template contiene selector de estado active/inactive/all', tmpl.incl
 assert('6.4 Template contiene input de búsqueda', tmpl.includes('searchQuery'));
 assert('6.5 Template contiene modal de alta con código inmutable', tmpl.includes('showCreateModal') && tmpl.includes('site_code'));
 assert('6.6 Template contiene modal de edición', tmpl.includes('showEditModal'));
+assert('6.6.1 Template contiene inputs numéricos requeridos de latitud y longitud',
+  (tmpl.match(/type="number" step="any"/g) || []).length === 4
+    && tmpl.includes('v-model="createForm.latitude"')
+    && tmpl.includes('v-model="createForm.longitude"')
+    && tmpl.includes('v-model="editForm.latitude"')
+    && tmpl.includes('v-model="editForm.longitude"'));
 assert('6.7 Template contiene modal de confirmación de baja con advertencia interactiva', tmpl.includes('showDeactivateModal') && tmpl.includes('canConfirmDeactivate'));
 
 // =========================================================================

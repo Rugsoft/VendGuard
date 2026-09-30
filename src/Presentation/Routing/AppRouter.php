@@ -87,6 +87,7 @@ class AppRouter
         $router->post('/api/coordinator/locations', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'createLocation'], [$coordinatorAuth]);
         $router->get('/api/coordinator/locations/{id}', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'getLocation'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/locations/{id}', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'updateLocation'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/locations/{id}', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'updateLocation'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/locations/{id}/deactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'deactivateLocation'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/locations/{id}/reactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'reactivateLocation'], [$coordinatorAuth]);
 

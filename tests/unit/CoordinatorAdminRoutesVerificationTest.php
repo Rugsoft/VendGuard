@@ -38,6 +38,7 @@ $routes = [
     ['POST', '/api/coordinator/locations'],
     ['GET', '/api/coordinator/locations/1'],
     ['PATCH', '/api/coordinator/locations/1'],
+    ['PUT', '/api/coordinator/locations/1'],
     ['PATCH', '/api/coordinator/locations/1/deactivate'],
     ['PATCH', '/api/coordinator/locations/1/reactivate'],
     // Máquinas

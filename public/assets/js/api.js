@@ -833,7 +833,7 @@ export class ApiClient {
       return this.get(`/coordinator/locations/${id}`);
     },
     updateLocation: (id, payload) => {
-      return this.patch(`/coordinator/locations/${id}`, payload);
+      return this.put(`/coordinator/locations/${id}`, payload);
     },
     deactivateLocation: (id) => {
       return this.patch(`/coordinator/locations/${id}/deactivate`);

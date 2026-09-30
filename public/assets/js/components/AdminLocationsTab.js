@@ -34,7 +34,9 @@ export const AdminLocationsTab = {
         name: '',
         address: '',
         contact_name: '',
-        contact_phone: ''
+        contact_phone: '',
+        latitude: '',
+        longitude: ''
       },
       createErrors: {},
       isSubmittingCreate: false,
@@ -47,7 +49,9 @@ export const AdminLocationsTab = {
         name: '',
         address: '',
         contact_name: '',
-        contact_phone: ''
+        contact_phone: '',
+        latitude: '',
+        longitude: ''
       },
       editErrors: {},
       isSubmittingEdit: false,
@@ -169,6 +173,18 @@ export const AdminLocationsTab = {
       return null;
     },
 
+    validateCoordinates(latitude, longitude) {
+      if (latitude === '' || longitude === '' || !Number.isFinite(Number(latitude)) || !Number.isFinite(Number(longitude))) {
+        return 'La latitud y la longitud son obligatorias y deben ser numéricas.';
+      }
+      const lat = Number(latitude);
+      const lng = Number(longitude);
+      if (lat < 27 || lat > 44.5 || lng < -18.5 || lng > 5 || (lat === 0 && lng === 0)) {
+        return 'Las coordenadas deben estar dentro del territorio operativo permitido.';
+      }
+      return null;
+    },
+
     /**
      * Abre el modal de alta de nueva sede.
      */
@@ -178,7 +194,9 @@ export const AdminLocationsTab = {
         name: '',
         address: '',
         contact_name: '',
-        contact_phone: ''
+        contact_phone: '',
+        latitude: '',
+        longitude: ''
       };
       this.createErrors = {};
       this.showCreateModal = true;
@@ -211,6 +229,9 @@ export const AdminLocationsTab = {
       const phoneError = this.validatePhone(this.createForm.contact_phone);
       if (phoneError) this.createErrors.contact_phone = phoneError;
 
+      const coordinateError = this.validateCoordinates(this.createForm.latitude, this.createForm.longitude);
+      if (coordinateError) this.createErrors.coordinates = coordinateError;
+
       if (Object.keys(this.createErrors).length > 0) {
         return;
       }
@@ -222,7 +243,9 @@ export const AdminLocationsTab = {
           name: this.createForm.name.trim(),
           address: this.createForm.address.trim(),
           contact_name: this.createForm.contact_name ? this.createForm.contact_name.trim() : null,
-          contact_phone: this.createForm.contact_phone ? this.createForm.contact_phone.trim().replace(/\s+/g, '') : null
+          contact_phone: this.createForm.contact_phone ? this.createForm.contact_phone.trim().replace(/\s+/g, '') : null,
+          latitude: Number(this.createForm.latitude),
+          longitude: Number(this.createForm.longitude)
         };
 
         await (api.admin ? api.admin.createLocation(payload) : api.post('/coordinator/locations', payload));
@@ -250,7 +273,9 @@ export const AdminLocationsTab = {
         name: location.name,
         address: location.address,
         contact_name: location.contact_name || '',
-        contact_phone: location.contact_phone || ''
+        contact_phone: location.contact_phone || '',
+        latitude: location.latitude ?? '',
+        longitude: location.longitude ?? ''
       };
       this.editErrors = {};
       this.showEditModal = true;
@@ -280,6 +305,9 @@ export const AdminLocationsTab = {
       const phoneError = this.validatePhone(this.editForm.contact_phone);
       if (phoneError) this.editErrors.contact_phone = phoneError;
 
+      const coordinateError = this.validateCoordinates(this.editForm.latitude, this.editForm.longitude);
+      if (coordinateError) this.editErrors.coordinates = coordinateError;
+
       if (Object.keys(this.editErrors).length > 0) {
         return;
       }
@@ -290,10 +318,12 @@ export const AdminLocationsTab = {
           name: this.editForm.name.trim(),
           address: this.editForm.address.trim(),
           contact_name: this.editForm.contact_name ? this.editForm.contact_name.trim() : null,
-          contact_phone: this.editForm.contact_phone ? this.editForm.contact_phone.trim().replace(/\s+/g, '') : null
+          contact_phone: this.editForm.contact_phone ? this.editForm.contact_phone.trim().replace(/\s+/g, '') : null,
+          latitude: Number(this.editForm.latitude),
+          longitude: Number(this.editForm.longitude)
         };
 
-        await (api.admin ? api.admin.updateLocation(this.editForm.id, payload) : api.patch(`/coordinator/locations/${this.editForm.id}`, payload));
+        await (api.admin ? api.admin.updateLocation(this.editForm.id, payload) : api.put(`/coordinator/locations/${this.editForm.id}`, payload));
         this.showSuccessNotification(`Sede "${this.editForm.site_code}" actualizada correctamente.`);
         this.closeEditModal();
         await this.loadLocations();
@@ -637,6 +667,19 @@ export const AdminLocationsTab = {
                   <div v-if="createErrors.address" class="invalid-feedback small">{{ createErrors.address }}</div>
                 </div>
 
+                <!-- Coordenadas geográficas obligatorias -->
+                <div class="row g-2">
+                  <div class="col-md-6 mb-3">
+                    <label class="form-label small fw-bold">Latitud <span class="text-danger">*</span></label>
+                    <input type="number" step="any" class="form-control" v-model="createForm.latitude" required />
+                  </div>
+                  <div class="col-md-6 mb-3">
+                    <label class="form-label small fw-bold">Longitud <span class="text-danger">*</span></label>
+                    <input type="number" step="any" class="form-control" v-model="createForm.longitude" required />
+                  </div>
+                  <div v-if="createErrors.coordinates" class="col-12 text-danger small">{{ createErrors.coordinates }}</div>
+                </div>
+
                 <!-- Contacto -->
                 <div class="row g-2">
                   <div class="col-md-6 mb-3">
@@ -731,6 +774,19 @@ export const AdminLocationsTab = {
                     required
                   />
                   <div v-if="editErrors.address" class="invalid-feedback small">{{ editErrors.address }}</div>
+                </div>
+
+                <!-- Coordenadas geográficas obligatorias -->
+                <div class="row g-2">
+                  <div class="col-md-6 mb-3">
+                    <label class="form-label small fw-bold">Latitud <span class="text-danger">*</span></label>
+                    <input type="number" step="any" class="form-control" v-model="editForm.latitude" required />
+                  </div>
+                  <div class="col-md-6 mb-3">
+                    <label class="form-label small fw-bold">Longitud <span class="text-danger">*</span></label>
+                    <input type="number" step="any" class="form-control" v-model="editForm.longitude" required />
+                  </div>
+                  <div v-if="editErrors.coordinates" class="col-12 text-danger small">{{ editErrors.coordinates }}</div>
                 </div>
 
                 <!-- Contacto -->

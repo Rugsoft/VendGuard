@@ -69,7 +69,7 @@
   * **Dependencias:** T-MAP-06, T-MAP-07
   * **Hecho cuando:** Los endpoints responden `200 OK` devolviendo la matriz territorial de sedes activas, severidad máxima, técnicos asignados y bandera `is_multi_technician`, y permiten consultar/actualizar la configuración de la Base Central.
 
-- [ ] **T-MAP-10: Actualizar `AdminLocationController.php` con validación de coordenadas obligatorias**
+- [x] **T-MAP-10: Actualizar `CoordinatorAdminController.php` con validación de coordenadas obligatorias**
   * **Requisitos:** RF-MAP-01
   * **Dependencias:** T-MAP-04, T-MAP-05
   * **Hecho cuando:** `POST /api/coordinator/locations` y `PUT /api/coordinator/locations/{id}` exigen obligatoriamente `latitude` y `longitude` numéricas y dentro del marco territorial operativo, respondiendo `422 Unprocessable Entity` si faltan o son inválidas.

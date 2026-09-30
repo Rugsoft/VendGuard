@@ -133,7 +133,9 @@ class InMemoryLocationRepository implements LocationRepositoryInterface
             true,
             '2026-09-23 20:00:00',
             '2026-09-23 20:00:00',
-            null
+            null,
+            (float)($data['latitude'] ?? 41.3850640),
+            (float)($data['longitude'] ?? 2.1734035)
         );
         $this->locations[$id] = $loc;
         return $loc;
@@ -154,7 +156,9 @@ class InMemoryLocationRepository implements LocationRepositoryInterface
             $loc->isActive(),
             $loc->getCreatedAt(),
             '2026-09-23 20:05:00',
-            $loc->getDeletedAt()
+            $loc->getDeletedAt(),
+            (float)($data['latitude'] ?? $loc->getLatitude()),
+            (float)($data['longitude'] ?? $loc->getLongitude())
         );
         return true;
     }
@@ -282,11 +286,14 @@ $created = $service->createLocation([
     'address'       => 'Camino de Vera s/n, 46022 Valencia',
     'contact_name'  => 'Laura Navarro',
     'contact_phone' => '633445566',
+    'latitude'      => 39.4812,
+    'longitude'     => -0.3401,
 ], $coordinatorActor, '192.168.1.50');
 
 assertCondition($created instanceof Location, "1.1 createLocation() devuelve instancia de Location");
 assertCondition($created->getSiteCode() === 'SEDE-VAL-01', "1.2 site_code coincide en mayúsculas");
 assertCondition($created->isActive() === true, "1.3 is_active es true por defecto");
+assertCondition($created->getLatitude() === 39.4812 && $created->getLongitude() === -0.3401, "1.3.1 Las coordenadas proporcionadas se conservan en la sede");
 
 // Verificar auditoría
 assertCondition(count($auditRepo->events) === 1, "1.4 Se registró 1 evento en audit_log");
@@ -367,18 +374,27 @@ echo "\n--- Caso 4: Actualización de sede (updateLocation) ---\n";
 $updated = $service->updateLocation($created->getId(), [
     'name'          => 'Politécnico de Valencia - Campus Central',
     'contact_phone' => '633999888',
+    'latitude'      => 39.4820,
+    'longitude'     => -0.3410,
 ], $coordinatorActor);
 
 assertCondition($updated->getName() === 'Politécnico de Valencia - Campus Central', "4.1 Nombre modificado con éxito");
 assertCondition($updated->getContactPhone() === '633999888', "4.2 Teléfono modificado con éxito");
 assertCondition($updated->getAddress() === 'Camino de Vera s/n, 46022 Valencia', "4.3 Dirección intacta");
+assertCondition($updated->getLatitude() === 39.4820 && $updated->getLongitude() === -0.3410, "4.3.1 Las coordenadas se actualizan correctamente");
 
 // Verificar auditoría de actualización
 $latestEvent = end($auditRepo->events);
 assertCondition($latestEvent->getAction() === 'LOCATION_UPDATED', "4.4 Acción es LOCATION_UPDATED");
 assertCondition(isset($latestEvent->getMetadata()['changed_fields']), "4.5 Metadatos contienen changed_fields");
 $changed = $latestEvent->getMetadata()['changed_fields'];
-assertCondition(in_array('name', $changed, true) && in_array('contact_phone', $changed, true), "4.6 changed_fields detecta 'name' y 'contact_phone'");
+assertCondition(
+    in_array('name', $changed, true)
+        && in_array('contact_phone', $changed, true)
+        && in_array('latitude', $changed, true)
+        && in_array('longitude', $changed, true),
+    "4.6 changed_fields detecta los campos descriptivos y las coordenadas"
+);
 
 // =====================================================================
 // CASO 5: Bloqueo de baja si tiene máquinas activas (EARS 1.4)
