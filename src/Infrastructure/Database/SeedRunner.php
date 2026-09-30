@@ -63,6 +63,8 @@ class SeedRunner
                 'site_code' => 'SEDE-BCN-01',
                 'name' => 'Hospital del Mar - Edificio Central',
                 'address' => 'Passeig Marítim 25, Barcelona',
+                'latitude' => 41.3853120,
+                'longitude' => 2.1932450,
                 'contact_name' => 'Laura Sanitaria',
                 'contact_phone' => '600111222',
             ],
@@ -70,17 +72,21 @@ class SeedRunner
                 'site_code' => 'SEDE-BCN-02',
                 'name' => 'Torre Glòries - Planta 4 Oficinas',
                 'address' => 'Avinguda Diagonal 211, Barcelona',
+                'latitude' => 41.4036290,
+                'longitude' => 2.1895120,
                 'contact_name' => 'Marc Recepción',
                 'contact_phone' => '600333444',
             ],
         ];
 
         $sql = "
-            INSERT INTO `locations` (`site_code`, `name`, `address`, `contact_name`, `contact_phone`, `is_active`)
-            VALUES (:site_code, :name, :address, :contact_name, :contact_phone, 1)
+            INSERT INTO `locations` (`site_code`, `name`, `address`, `latitude`, `longitude`, `contact_name`, `contact_phone`, `is_active`)
+            VALUES (:site_code, :name, :address, :latitude, :longitude, :contact_name, :contact_phone, 1)
             ON DUPLICATE KEY UPDATE
                 `name` = VALUES(`name`),
                 `address` = VALUES(`address`),
+                `latitude` = VALUES(`latitude`),
+                `longitude` = VALUES(`longitude`),
                 `contact_name` = VALUES(`contact_name`),
                 `contact_phone` = VALUES(`contact_phone`),
                 `deleted_at` = NULL
@@ -94,6 +100,8 @@ class SeedRunner
                 ':site_code' => $loc['site_code'],
                 ':name' => $loc['name'],
                 ':address' => $loc['address'],
+                ':latitude' => $loc['latitude'],
+                ':longitude' => $loc['longitude'],
                 ':contact_name' => $loc['contact_name'],
                 ':contact_phone' => $loc['contact_phone'],
             ]);
@@ -101,6 +109,35 @@ class SeedRunner
         }
 
         return $count;
+    }
+
+    /**
+     * Carga la configuración singleton de la Base Central de rutas.
+     *
+     * @return int Número de configuraciones procesadas.
+     */
+    public function seedRouteSettings(): int
+    {
+        $sql = "
+            INSERT INTO `route_settings` (
+                `id`, `base_name`, `base_address`, `base_latitude`, `base_longitude`,
+                `operational_radius_km`, `min_latitude`, `max_latitude`, `min_longitude`, `max_longitude`
+            ) VALUES (
+                1, :base_name, :base_address, :base_latitude, :base_longitude,
+                100, 27.0, 44.5, -18.5, 5.0
+            )
+            ON DUPLICATE KEY UPDATE `id` = VALUES(`id`)
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([
+            ':base_name' => 'Base Central VendGuard Barcelona',
+            ':base_address' => 'Carrer de la Marina 100, 08018 Barcelona',
+            ':base_latitude' => 41.3935000,
+            ':base_longitude' => 2.1890000,
+        ]);
+
+        return 1;
     }
 
     /**
@@ -573,6 +610,7 @@ class SeedRunner
 
         try {
             $locCount = $this->seedLocations();
+            $this->seedRouteSettings();
             $machCount = $this->seedMachines();
             $userCount = $this->seedUsers($defaultPassword);
             $prevCount = $this->seedPreventiveSettings();

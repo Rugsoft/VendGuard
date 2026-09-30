@@ -4,7 +4,8 @@
 -- =============================================================================
 -- Este fichero contiene el esquema completo DDL y las semillas iniciales.
 -- No fuerza la creación de base de datos para funcionar en bases de datos asignadas.
--- Incluye: Módulo 01-04 (Correctivo y Admin) y Módulo 05 (Preventivo y Sanitario M1).
+-- Incluye: Módulo 01-04 (Correctivo y Admin), Módulo 05 (Preventivo y Sanitario M1),
+-- Módulo 06 (Repuestos M2) y Módulo 07 (Mapa de rutas M4).
 -- =============================================================================
 
 SET NAMES utf8mb4;
@@ -32,6 +33,8 @@ CREATE TABLE `locations` (
   `site_code` VARCHAR(32) NOT NULL,
   `name` VARCHAR(150) NOT NULL,
   `address` VARCHAR(255) NOT NULL,
+  `latitude` DECIMAL(10, 7) NOT NULL DEFAULT 41.3850640,
+  `longitude` DECIMAL(11, 7) NOT NULL DEFAULT 2.1734035,
   `contact_name` VARCHAR(100) NULL,
   `contact_phone` VARCHAR(30) NULL,
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
@@ -40,7 +43,8 @@ CREATE TABLE `locations` (
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_locations_site_code` (`site_code`),
-  INDEX `idx_locations_active` (`is_active`, `deleted_at`)
+  INDEX `idx_locations_active` (`is_active`, `deleted_at`),
+  INDEX `idx_locations_lat_lng` (`latitude`, `longitude`, `is_active`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------------------------------
@@ -212,6 +216,22 @@ CREATE TABLE IF NOT EXISTS `audit_log` (
 -- -----------------------------------------------------------------------------
 -- 8. TABLA: preventive_settings (Frecuencias Sanitarias - M1 / Art. II)
 -- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `route_settings` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `base_name` VARCHAR(100) NOT NULL DEFAULT 'Base Central VendGuard Barcelona',
+  `base_address` VARCHAR(255) NOT NULL DEFAULT 'Carrer de la Marina 100, 08018 Barcelona',
+  `base_latitude` DECIMAL(10, 7) NOT NULL DEFAULT 41.3935000,
+  `base_longitude` DECIMAL(11, 7) NOT NULL DEFAULT 2.1890000,
+  `operational_radius_km` INT UNSIGNED NOT NULL DEFAULT 100,
+  `min_latitude` DECIMAL(10, 7) NOT NULL DEFAULT 27.0000000,
+  `max_latitude` DECIMAL(10, 7) NOT NULL DEFAULT 44.5000000,
+  `min_longitude` DECIMAL(11, 7) NOT NULL DEFAULT -18.5000000,
+  `max_longitude` DECIMAL(11, 7) NOT NULL DEFAULT 5.0000000,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `preventive_settings` (
   `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   `machine_type` ENUM('PERISHABLE_FOOD', 'HOT_DRINKS', 'COLD_DRINKS', 'SNACKS', 'COMBO') NOT NULL,
@@ -308,16 +328,22 @@ CREATE TABLE IF NOT EXISTS `sanitary_certificates` (
 -- CARGA DE DATOS SEMILLA (SEEDS)
 -- =============================================================================
 
-INSERT INTO `locations` (`site_code`, `name`, `address`, `contact_name`, `contact_phone`)
+INSERT INTO `locations` (`site_code`, `name`, `address`, `latitude`, `longitude`, `contact_name`, `contact_phone`)
 VALUES
-  ('SEDE-BCN-01', 'Hospital del Mar - Edificio Central', 'Passeig Marítim 25, Barcelona', 'Laura Sanitaria', '600111222'),
-  ('SEDE-BCN-02', 'Torre Glòries - Planta 4 Oficinas', 'Avinguda Diagonal 211, Barcelona', 'Marc Recepción', '600333444')
+  ('SEDE-BCN-01', 'Hospital del Mar - Edificio Central', 'Passeig Marítim 25, Barcelona', 41.3853120, 2.1932450, 'Laura Sanitaria', '600111222'),
+  ('SEDE-BCN-02', 'Torre Glòries - Planta 4 Oficinas', 'Avinguda Diagonal 211, Barcelona', 41.4036290, 2.1895120, 'Marc Recepción', '600333444')
 ON DUPLICATE KEY UPDATE
   `name` = VALUES(`name`),
   `address` = VALUES(`address`),
+  `latitude` = VALUES(`latitude`),
+  `longitude` = VALUES(`longitude`),
   `contact_name` = VALUES(`contact_name`),
   `contact_phone` = VALUES(`contact_phone`),
   `deleted_at` = NULL;
+
+INSERT INTO `route_settings` (`id`, `base_name`, `base_address`, `base_latitude`, `base_longitude`)
+VALUES (1, 'Base Central VendGuard Barcelona', 'Carrer de la Marina 100, 08018 Barcelona', 41.3935000, 2.1890000)
+ON DUPLICATE KEY UPDATE `id` = VALUES(`id`);
 
 INSERT INTO `machines` (`location_id`, `code`, `model`, `machine_type`, `floor_wing`, `notes`, `sanitary_status`, `next_sanitary_inspection_due`)
 VALUES
