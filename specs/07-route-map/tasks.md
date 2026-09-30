@@ -74,7 +74,7 @@
   * **Dependencias:** T-MAP-04, T-MAP-05
   * **Hecho cuando:** `POST /api/coordinator/locations` y `PUT /api/coordinator/locations/{id}` exigen obligatoriamente `latitude` y `longitude` numéricas y dentro del marco territorial operativo, respondiendo `422 Unprocessable Entity` si faltan o son inválidas.
 
-- [ ] **T-MAP-11: Registrar rutas en `AppRouter.php` y verificar enrutamiento**
+- [x] **T-MAP-11: Registrar rutas en `AppRouter.php` y verificar enrutamiento**
   * **Requisitos:** RF-MAP-01, RF-MAP-02, RF-MAP-07, RF-MAP-09
   * **Dependencias:** T-MAP-08, T-MAP-09, T-MAP-10
   * **Hecho cuando:** Las nuevas rutas `/api/technician/route/map`, `/api/coordinator/map/active-incidents` y `/api/coordinator/route/settings` están registradas y protegidas por RBAC en `AppRouter.php`, y los tests unitarios de enrutamiento pasan al 100% en verde.
