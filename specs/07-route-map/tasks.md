@@ -112,7 +112,7 @@
 
 ## Fase 5: Pruebas de Integración HTTP, Blindaje Constitucional y Cierre
 
-- [ ] **T-MAP-17: Pruebas de integración HTTP de Coordinación (`CoordinatorRouteMapApiTest.php`)**
+- [x] **T-MAP-17: Pruebas de integración HTTP de Coordinación (`CoordinatorRouteMapApiTest.php`)**
   * **Requisitos:** RF-MAP-01, RF-MAP-02, RF-MAP-09
   * **Dependencias:** T-MAP-09, T-MAP-10, T-MAP-11
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `CoordinatorRouteMapApiTest.php` contra MariaDB real pasando al 100% en verde en flujos de consulta de averías territoriales, detección multi-técnico, consulta/edición de Base Central y validación obligatoria de coordenadas en sedes.
