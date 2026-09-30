@@ -88,7 +88,7 @@
   * **Dependencias:** T-MAP-10
   * **Hecho cuando:** El formulario de alta y edición de Sedes incluye inputs numéricos para latitud y longitud, botón de "Geocodificar dirección" que sugiere coordenadas automáticamente y visualización previa de confirmación.
 
-- [ ] **T-MAP-13: Implementar componente `TechnicianRouteMapModal.js` y suite unitaria frontend (`TechnicianRouteMapModalTest.mjs`)**
+- [x] **T-MAP-13: Implementar componente `TechnicianRouteMapModal.js` y suite unitaria frontend (`TechnicianRouteMapModalTest.mjs`)**
   * **Requisitos:** RF-MAP-06, RF-MAP-07, RF-MAP-08, RNF-MAP-02, RNF-MAP-03, RNF-MAP-06
   * **Dependencias:** T-MAP-08
   * **Hecho cuando:** El componente modal muestra el mapa responsive móvil con marcadores circulares numerados (1, 2, 3...), colores semánticos (rojo para críticos, azul para ordinarios, ámbar para en progreso, gris para completados), ficha de parada al tocar y botones de navegación; `node tests/unit/TechnicianRouteMapModalTest.mjs` pasa al 100% en verde.

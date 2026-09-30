@@ -587,6 +587,17 @@ export class ApiClient {
     },
 
     /**
+     * Retrieves the optimized route map with consolidated stops and navigation URLs (RF-MAP-05, RF-MAP-07).
+     * @param {Object} [origin={}] Optional { origin_lat, origin_lng } device GPS coordinates.
+     * @returns {Promise<Object>}
+     */
+    getRouteMap: (origin = {}) => {
+      const pairs = Object.entries(origin).filter(([, value]) => value !== undefined && value !== null && value !== '');
+      const q = new URLSearchParams(pairs).toString();
+      return this.get(`/technician/route/map${q ? `?${q}` : ''}`);
+    },
+
+    /**
      * Starts intervention on an incident (transitions to EN_CURSO) (RF-07 / EARS 7.1).
      * @param {number|string} incidentId
      * @returns {Promise<Object>}

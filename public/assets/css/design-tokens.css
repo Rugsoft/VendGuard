@@ -1433,3 +1433,183 @@ textarea.form-control {
 @keyframes qr-spin {
   to { transform: rotate(360deg); }
 }
+
+/* =========================================================================
+   Technician Route Map Modal (Módulo M4: RF-MAP-06 a RF-MAP-08, RNF-MAP-06)
+   ========================================================================= */
+.route-map-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(44, 51, 63, 0.55);
+  z-index: 1055;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.route-map-modal {
+  background-color: #ffffff;
+  width: 100%;
+  max-width: 480px;
+  max-height: 94vh;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.route-map-header {
+  background-color: var(--color-primary);
+  color: #ffffff;
+  padding: 14px 16px;
+}
+
+.route-map-body {
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.route-map-canvas-wrapper {
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  margin-bottom: 12px;
+  background-color: #f9fafb;
+}
+
+.route-map-canvas {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1.1;
+  display: block;
+}
+
+.route-map-line {
+  fill: none;
+  stroke: var(--color-primary);
+  stroke-width: 0.7;
+  stroke-dasharray: 2 1.4;
+  opacity: 0.75;
+}
+
+.route-origin-dot {
+  fill: var(--color-ink);
+  stroke: #ffffff;
+  stroke-width: 0.6;
+}
+
+.route-origin-icon {
+  font-size: 3.2px;
+  fill: #ffffff;
+}
+
+.route-map-marker {
+  cursor: pointer;
+  outline: none;
+}
+
+.route-marker-circle {
+  stroke: #ffffff;
+  stroke-width: 0.7;
+}
+
+.route-marker-text {
+  font-size: 4.4px;
+  font-weight: 700;
+  fill: #ffffff;
+}
+
+.route-marker-check {
+  font-size: 4.2px;
+  font-weight: 700;
+  fill: var(--color-success);
+}
+
+.route-map-marker.is-selected .route-marker-circle {
+  stroke: var(--color-ink);
+  stroke-width: 1.1;
+}
+
+.route-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  padding-top: 8px;
+  color: var(--color-ink-muted);
+}
+
+.route-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-xs);
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.route-stop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.route-stop-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  cursor: pointer;
+  background-color: #ffffff;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.route-stop-card:hover {
+  border-color: var(--color-hairline-soft, #a9b4c6);
+  box-shadow: 0 2px 6px rgba(44, 51, 63, 0.12);
+}
+
+.route-stop-card.is-selected {
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 6px rgba(37, 96, 255, 0.25);
+}
+
+.route-stop-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  border-radius: var(--radius-xs);
+  color: #ffffff;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.route-stop-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.route-stop-distance {
+  flex-shrink: 0;
+}
+
+.route-stop-sheet {
+  border: 1px solid var(--color-hairline);
+  border-left: 4px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  background-color: #ffffff;
+  margin-bottom: 8px;
+}
+
+.route-urgency-badge {
+  color: #ffffff;
+  border-radius: var(--radius-xs);
+  padding: 3px 8px;
+  font-size: var(--font-size-caption, 12px);
+}
