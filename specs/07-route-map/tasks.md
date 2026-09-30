@@ -127,7 +127,7 @@
   * **Dependencias:** T-MAP-11
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `SiteManagerRouteDataSegregationTest.php` pasando al 100% en verde, certificando que ningún endpoint de ruta o mapa es accesible por el rol `LOCATION_MANAGER` (403 Forbidden) y que no existe rastreo personal continuo del smartphone de los técnicos.
 
-- [ ] **T-MAP-20: Verificación global de regresión, Dogma Vanilla y cierre de módulo**
+- [x] **T-MAP-20: Verificación global de regresión, Dogma Vanilla y cierre de módulo**
   * **Requisitos:** Todos (RF-MAP-01 a RF-MAP-10, RNF-MAP-01 a RNF-MAP-06, Constitución Art. I a VII)
   * **Dependencias:** T-MAP-01 a T-MAP-19
   * **Hecho cuando:** La ejecución de `php tests/run_all.php` completa todas las suites unitarias PHP, unitarias reactivas frontend e integración con 0 fallos y 0 errores; se verifica la ausencia de dependencias externas npm/composer y el cumplimiento estricto del Dualismo Lingüístico.
