@@ -372,6 +372,104 @@ assert('5.16 Emits "resolved" event with diagnosis and action',
 );
 
 // ---------------------------------------------------------------------
+// TEST GROUP 7: Route Map Integration (RF-MAP-07, RF-MAP-08 / T-MAP-14)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 7: Route Map Integration ---');
+
+// 7.1 The view registers the map modal component (Dogma Vanilla ESM import)
+assert('7.1 View registers TechnicianRouteMapModal component',
+  TechnicianRouteView.components?.TechnicianRouteMapModal !== undefined);
+
+// 7.2 Prominent "Ver Mapa de Ruta" button opens the modal (RF-MAP-07)
+assert('7.2 Template contains the prominent "Ver Mapa de Ruta" button',
+  TechnicianRouteView.template.includes('data-testid="btn-open-route-map"') &&
+  TechnicianRouteView.template.includes('Ver Mapa de Ruta') &&
+  TechnicianRouteView.template.includes('showRouteMapModal = true'));
+
+// 7.3 The modal is bound to the view state
+assert('7.3 Template mounts TechnicianRouteMapModal bound to showRouteMapModal',
+  TechnicianRouteView.template.includes('<TechnicianRouteMapModal v-model="showRouteMapModal"'));
+
+// 7.4 Full-day Google Maps link with waypoints (RF-MAP-08)
+const mapInstance = createRouteInstance();
+mapInstance.incidents = JSON.parse(JSON.stringify(mockRouteIncidents));
+mapInstance.incidents[0].location.latitude = 41.385312;
+mapInstance.incidents[0].location.longitude = 2.193245;
+mapInstance.incidents[1].location.latitude = 41.403629;
+mapInstance.incidents[1].location.longitude = 2.189512;
+mapInstance.incidents[2].location.latitude = 41.392;
+mapInstance.incidents[2].location.longitude = 2.164;
+Object.defineProperty(mapInstance, 'fullRouteNavigationUrl', {
+  get: () => TechnicianRouteView.computed.fullRouteNavigationUrl.call(mapInstance)
+});
+const fullUrl = mapInstance.fullRouteNavigationUrl;
+assert('7.4 Computes the full-day navigation link with origin stops as waypoints',
+  fullUrl.startsWith('https://www.google.com/maps/dir/?') &&
+  fullUrl.includes('destination=41.392%2C2.164') &&
+  fullUrl.includes('waypoints=41.385312%2C2.193245%7C41.403629%2C2.189512'));
+assert('7.5 Uses driving travelmode in the universal link', fullUrl.includes('travelmode=driving'));
+
+// 7.6 Incidents without coordinates are excluded without breaking the link
+const partialInstance = createRouteInstance();
+partialInstance.incidents = [
+  { id: 201, urgency: 'LOW', status: 'ASSIGNED', location: { name: 'Sede sin coordenadas', address: 'Calle 1' } },
+  { id: 202, urgency: 'LOW', status: 'ASSIGNED', location: { name: 'Sede geográfica', address: 'Calle 2', latitude: 41.4, longitude: 2.2 } }
+];
+Object.defineProperty(partialInstance, 'fullRouteNavigationUrl', {
+  get: () => TechnicianRouteView.computed.fullRouteNavigationUrl.call(partialInstance)
+});
+assert('7.6 Excludes incidents without coordinates and keeps the valid stop',
+  partialInstance.fullRouteNavigationUrl === 'https://www.google.com/maps/dir/?api=1&destination=41.4%2C2.2&travelmode=driving');
+
+// 7.7 No coordinates at all -> no link rendered
+const emptyCoordInstance = createRouteInstance();
+emptyCoordInstance.incidents = [
+  { id: 203, urgency: 'LOW', status: 'ASSIGNED', location: { name: 'Sede sin GPS', address: 'Calle 3' } }
+];
+Object.defineProperty(emptyCoordInstance, 'fullRouteNavigationUrl', {
+  get: () => TechnicianRouteView.computed.fullRouteNavigationUrl.call(emptyCoordInstance)
+});
+assert('7.7 Returns an empty link when no incident has coordinates',
+  emptyCoordInstance.fullRouteNavigationUrl === '');
+
+// 7.8 Link rendered conditionally in template
+assert('7.8 Template renders the full-day navigation link conditionally',
+  TechnicianRouteView.template.includes('v-if="fullRouteNavigationUrl"') &&
+  TechnicianRouteView.template.includes('data-testid="btn-full-route-navigation"'));
+
+// 7.9 One-tap GPS navigation per card (RF-MAP-08)
+assert('7.9 Template contains the per-card "Navegar con GPS" button',
+  TechnicianRouteView.template.includes('data-testid="btn-navigate-stop"') &&
+  TechnicianRouteView.template.includes('Navegar con GPS') &&
+  TechnicianRouteView.template.includes('@click="navigateToStopLocation(incident)"'));
+
+let openedUrls = [];
+const originalWindowOpen = globalThis.window?.open;
+globalThis.window = globalThis.window || {};
+globalThis.window.open = (url) => {
+  openedUrls.push(url);
+  return null;
+};
+
+openedUrls = [];
+mapInstance.navigateToStopLocation(mapInstance.incidents[0]);
+assert('7.10 navigateToStopLocation opens Google Maps with the exact stop coordinates',
+  openedUrls.length === 1 &&
+  openedUrls[0] === 'https://www.google.com/maps/dir/?api=1&destination=41.385312,2.193245&travelmode=driving');
+
+openedUrls = [];
+mapInstance.navigateToStopLocation({ location: { name: 'Sede sin coordenadas' } });
+assert('7.11 navigateToStopLocation is a no-op without coordinates', openedUrls.length === 0);
+
+if (originalWindowOpen !== undefined) {
+  globalThis.window.open = originalWindowOpen;
+}
+
+// 7.12 Coordinates available on the route payload (backend contract extension)
+assert('7.12 Template guards the GPS button when latitude is missing',
+  TechnicianRouteView.template.includes("incident.location?.latitude !== null && incident.location?.latitude !== undefined"));
+
+// ---------------------------------------------------------------------
 // SUMMARY
 // ---------------------------------------------------------------------
 console.log('\n======================================================================');

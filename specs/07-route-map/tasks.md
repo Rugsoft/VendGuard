@@ -93,7 +93,7 @@
   * **Dependencias:** T-MAP-08
   * **Hecho cuando:** El componente modal muestra el mapa responsive móvil con marcadores circulares numerados (1, 2, 3...), colores semánticos (rojo para críticos, azul para ordinarios, ámbar para en progreso, gris para completados), ficha de parada al tocar y botones de navegación; `node tests/unit/TechnicianRouteMapModalTest.mjs` pasa al 100% en verde.
 
-- [ ] **T-MAP-14: Integrar apertura de mapa y navegación en `TechnicianRouteView.js`**
+- [x] **T-MAP-14: Integrar apertura de mapa y navegación en `TechnicianRouteView.js`**
   * **Requisitos:** RF-MAP-07, RF-MAP-08
   * **Dependencias:** T-MAP-13
   * **Hecho cuando:** La vista móvil del técnico incluye el botón prominente de "Ver Mapa de Ruta", enlace general a Google Maps con waypoints, y cada tarjeta de parada dispone de un botón directo "Navegar con GPS".
