@@ -28,6 +28,7 @@ import { CoordinatorPreventiveOrdersTab } from '../components/CoordinatorPrevent
 import { CoordinatorPreventiveSettingsModal } from '../components/CoordinatorPreventiveSettingsModal.js';
 import { CoordinatorSparePartsTab } from '../components/CoordinatorSparePartsTab.js';
 import { CoordinatorSparePartsAnalyticsTab } from '../components/CoordinatorSparePartsAnalyticsTab.js';
+import { CoordinatorTerritorialMapTab } from '../components/CoordinatorTerritorialMapTab.js';
 
 // Canonical mapping for bilingual status values
 const STATUS_CANONICAL_MAP = {
@@ -77,13 +78,14 @@ export const CoordinatorDashboardView = {
     CoordinatorPreventiveOrdersTab,
     CoordinatorPreventiveSettingsModal,
     CoordinatorSparePartsTab,
-    CoordinatorSparePartsAnalyticsTab
+    CoordinatorSparePartsAnalyticsTab,
+    CoordinatorTerritorialMapTab
   },
   emits: ['assigned', 'cancelled', 'refresh'],
   data() {
     return {
       // Navigation Tabs (RF-FLEET-01, RF-03, RF-05, RF-PREV-02, RF-REP-01, RF-REP-09)
-      activeTab: 'incidents', // 'incidents' | 'fleet' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'admin' | 'metrics'
+      activeTab: 'incidents', // 'incidents' | 'fleet' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'admin' | 'metrics'
       activeAdminSubTab: 'locations', // 'locations' | 'machines' | 'users'
       activePreventiveSubTab: 'dashboard', // 'dashboard' | 'orders'
       showPreventiveSettingsModal: false,
@@ -285,6 +287,20 @@ export const CoordinatorDashboardView = {
           store.setLoading(false);
         }
       }
+    },
+
+    /**
+     * Starts the technical assignment flow for an unassigned site chosen on the
+     * territorial triage map (RF-MAP-09): switches to the triage tab filtered by
+     * the site so the coordinator can assign its incidents one by one.
+     */
+    handleTerritorialAssign(payload) {
+      this.activeTab = 'incidents';
+      const siteCode = payload && payload.siteCode ? String(payload.siteCode) : '';
+      this.filterStatus = '';
+      this.filterUrgency = '';
+      this.filterSearch = siteCode;
+      this.filterSlaOnly = false;
     },
 
     // --- Modal Triggers ---
@@ -549,6 +565,17 @@ export const CoordinatorDashboardView = {
             data-testid="tab-fleet"
           >
             🏢 Parque de Sedes y Máquinas
+          </button>
+
+          <button
+            type="button"
+            class="vg-btn"
+            :class="activeTab === 'mapa-territorial' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
+            @click="activeTab = 'mapa-territorial'"
+            data-testid="tab-mapa-territorial"
+          >
+            🗺️ Mapa Territorial
           </button>
 
           <button
@@ -1028,6 +1055,13 @@ export const CoordinatorDashboardView = {
       <CoordinatorSparePartsAnalyticsTab
         v-else-if="activeTab === 'analitica-repuestos'"
         @open-catalog="activeTab = 'repuestos'"
+      />
+
+      <!-- CONTENIDO PESTAÑA: MAPA TERRITORIAL DE TRIAJE (RF-MAP-09 / T-MAP-16) -->
+      <CoordinatorTerritorialMapTab
+        v-else-if="activeTab === 'mapa-territorial'"
+        :current-user="currentUser"
+        @assign-incidents="handleTerritorialAssign"
       />
 
       <!-- CONTENIDO PESTAÑA 4: MÉTRICAS Y AUDITORÍA (RF-01, RF-02, RF-03, RF-05, RF-06) -->

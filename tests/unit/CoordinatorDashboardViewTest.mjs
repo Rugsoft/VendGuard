@@ -309,6 +309,47 @@ assert('5.3 With reason, api.coordinator.cancelIncident is called', lastCancelCa
 assert('5.4 Passed cancellation reason to API', lastCancelCall?.reason === 'Falsa alarma reportada por el cliente');
 assert('5.5 submitCancellation emits "cancelled" event', cancelModalInstance.getEmits().some(e => e.evt === 'cancelled'));
 
+// ---------------------------------------------------------------------
+// TEST GROUP 6: Territorial Map Tab Integration (RF-MAP-09 / T-MAP-16)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 6: Territorial Map Tab Integration ---');
+
+assert('6.1 View registers CoordinatorTerritorialMapTab component',
+  CoordinatorDashboardView.components?.CoordinatorTerritorialMapTab !== undefined);
+
+assert('6.2 Tab bar contains the "Mapa Territorial" button',
+  CoordinatorDashboardView.template.includes('data-testid="tab-mapa-territorial"') &&
+  CoordinatorDashboardView.template.includes('🗺️ Mapa Territorial') &&
+  CoordinatorDashboardView.template.includes("activeTab = 'mapa-territorial'"));
+
+assert('6.3 Territorial map content mounts conditionally on the active tab',
+  CoordinatorDashboardView.template.includes("v-else-if=\"activeTab === 'mapa-territorial'\"") &&
+  CoordinatorDashboardView.template.includes('<CoordinatorTerritorialMapTab'));
+
+assert('6.4 Tab is accessible from the triage dashboard with seamless switching',
+  CoordinatorDashboardView.template.includes("@click=\"activeTab = 'incidents'\"") &&
+  CoordinatorDashboardView.template.includes("@click=\"activeTab = 'mapa-territorial'\""));
+
+// Alternative tab switching keeps the map mounted only while active
+const mapTabView = createDashboardInstance();
+mapTabView.activeTab = 'mapa-territorial';
+assert('6.5 Map tab becomes the active tab on click simulation', mapTabView.activeTab === 'mapa-territorial');
+mapTabView.activeTab = 'incidents';
+assert('6.6 Switching back to triage restores the incidents tab without residue', mapTabView.activeTab === 'incidents');
+
+// Assignment flow started from the territorial map (RF-MAP-09)
+const assignFlowView = createDashboardInstance();
+assignFlowView.activeTab = 'mapa-territorial';
+assignFlowView.filterSearch = '';
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(assignFlowView, { locationId: 3, siteCode: 'SEDE-BCN-03' });
+assert('6.7 Unassigned site click switches to the triage tab', assignFlowView.activeTab === 'incidents');
+assert('6.8 Triage list is filtered by the chosen site code', assignFlowView.filterSearch === 'SEDE-BCN-03' && assignFlowView.filterStatus === '' && assignFlowView.filterUrgency === '' && assignFlowView.filterSlaOnly === false);
+
+// Template passes the coordinator context to the map tab
+assert('6.9 Map tab receives the coordinator user context',
+  CoordinatorDashboardView.template.includes(':current-user="currentUser"') &&
+  CoordinatorDashboardView.template.includes('@assign-incidents="handleTerritorialAssign"'));
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);

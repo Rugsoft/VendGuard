@@ -103,7 +103,7 @@
   * **Dependencias:** T-MAP-09
   * **Hecho cuando:** El componente renderiza el mapa territorial global para coordinación, agrupando sedes, mostrando insignias con recuento de averías, destacando sedes multi-técnico y ofreciendo filtros reactivos por técnico y severidad; `node tests/unit/CoordinatorTerritorialMapTabTest.mjs` pasa al 100% en verde.
 
-- [ ] **T-MAP-16: Integrar pestaña del mapa territorial en la navegación de Coordinación (`AppNavbar.js`, `CoordinatorDashboardView.js`, `app.js`)**
+- [x] **T-MAP-16: Integrar pestaña del mapa territorial en la navegación de Coordinación (`AppNavbar.js`, `CoordinatorDashboardView.js`, `app.js`)**
   * **Requisitos:** RF-MAP-09
   * **Dependencias:** T-MAP-15
   * **Hecho cuando:** La barra de navegación del coordinador incluye la pestaña "Mapa Territorial" accesible desde el dashboard de triaje con alternancia fluida de pestañas.
