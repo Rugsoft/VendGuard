@@ -117,7 +117,7 @@
   * **Dependencias:** T-MAP-09, T-MAP-10, T-MAP-11
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `CoordinatorRouteMapApiTest.php` contra MariaDB real pasando al 100% en verde en flujos de consulta de averías territoriales, detección multi-técnico, consulta/edición de Base Central y validación obligatoria de coordenadas en sedes.
 
-- [ ] **T-MAP-18: Pruebas de integración HTTP de Técnico (`TechnicianRouteMapApiTest.php`)**
+- [x] **T-MAP-18: Pruebas de integración HTTP de Técnico (`TechnicianRouteMapApiTest.php`)**
   * **Requisitos:** RF-MAP-03, RF-MAP-04, RF-MAP-05, RF-MAP-06, RF-MAP-08, RNF-MAP-01, RNF-MAP-03, RNF-MAP-04
   * **Dependencias:** T-MAP-08, T-MAP-11
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `TechnicianRouteMapApiTest.php` contra MariaDB real pasando al 100% en verde en flujos de parada `#1` para `IN_PROGRESS`, priorización absoluta de averías perecederas (SLA < 4h), ordenación Nearest Neighbor, exclusión de `PENDING_PARTS`, fallback a Base Central y URLs universales de Google Maps.
