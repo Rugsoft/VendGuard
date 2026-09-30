@@ -35,7 +35,7 @@
 
 ## Fase 2: Repositorios PDO y Servicios de Aplicación
 
-- [ ] **T-MAP-04: Implementar `RouteSettingsRepositoryInterface`, `PdoRouteSettingsRepository.php` y actualizar `PdoLocationRepository.php`**
+- [x] **T-MAP-04: Implementar `RouteSettingsRepositoryInterface`, `PdoRouteSettingsRepository.php` y actualizar `PdoLocationRepository.php`**
   * **Requisitos:** RF-MAP-01, RF-MAP-02, RNF-MAP-05, Constitución Art. III
   * **Dependencias:** T-MAP-01, T-MAP-02, T-MAP-03
   * **Hecho cuando:** `PdoRouteSettingsRepository` implementa lectura y actualización de la configuración singleton de Base Central; `PdoLocationRepository` persiste y recupera `latitude` y `longitude` en todas las consultas; y `php tests/integration/PdoRouteSettingsRepositoryTest.php` pasa al 100% en verde.
