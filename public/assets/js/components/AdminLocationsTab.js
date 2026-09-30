@@ -10,6 +10,8 @@
  * 4. Modal de Edición de datos descriptivos de sede (nombre, dirección, persona y teléfono de contacto).
  * 5. Diálogo modal interactivo de confirmación de baja lógica con advertencia y bloqueo ante máquinas activas (EARS 1.4).
  * 6. Reactivación directa de sedes inactivas con actualización reactiva instantánea.
+ * 7. Geocodificación asistida de la dirección (servicio abierto estándar) con previsualización
+ *    de confirmación de coordenadas antes de guardar (RF-MAP-01).
  * 
  * Dogma Vanilla: Vue 3 Options API en módulos ESM nativos sin dependencias npm externas.
  */
@@ -63,7 +65,13 @@ export const AdminLocationsTab = {
       isSubmittingDeactivate: false,
 
       // Estado de reactivación en curso
-      isReactivatingId: null
+      isReactivatingId: null,
+
+      // Geocodificación asistida (RF-MAP-01)
+      isGeocodingCreate: false,
+      createSuggestion: null,
+      isGeocodingEdit: false,
+      editSuggestion: null
     };
   },
   computed: {
@@ -186,6 +194,101 @@ export const AdminLocationsTab = {
     },
 
     /**
+     * Solicita al servicio abierto estándar de geocodificación las coordenadas de la
+     * dirección introducida y propone el resultado en una previsualización de
+     * confirmación (RF-MAP-01), permitiendo siempre la corrección manual.
+     */
+    async geocodeAddress(scope) {
+      const form = scope === 'create' ? this.createForm : this.editForm;
+      const errors = scope === 'create' ? this.createErrors : this.editErrors;
+      const address = (form.address || '').trim();
+
+      if (!address) {
+        errors.geocode = 'Introduce la dirección completa antes de geocodificar.';
+        return;
+      }
+      delete errors.geocode;
+
+      if (scope === 'create') {
+        this.isGeocodingCreate = true;
+      } else {
+        this.isGeocodingEdit = true;
+      }
+
+      try {
+        const queryUrl = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=es&q='
+          + encodeURIComponent(address);
+        const response = await fetch(queryUrl, { headers: { Accept: 'application/json' } });
+        if (!response.ok) {
+          throw new Error('Geocoding request failed.');
+        }
+        const results = await response.json();
+        const firstResult = Array.isArray(results) ? results[0] : null;
+        const latitude = firstResult ? Number(firstResult.lat) : NaN;
+        const longitude = firstResult ? Number(firstResult.lon) : NaN;
+        if (!firstResult || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+          throw new Error('No geocoding result found.');
+        }
+        if (this.validateCoordinates(latitude, longitude) !== null) {
+          throw new Error('OUT_OF_TERRITORY');
+        }
+
+        const suggestion = {
+          latitude,
+          longitude,
+          label: firstResult.display_name || address
+        };
+        if (scope === 'create') {
+          this.createSuggestion = suggestion;
+        } else {
+          this.editSuggestion = suggestion;
+        }
+      } catch (err) {
+        errors.geocode = err && err.message === 'OUT_OF_TERRITORY'
+          ? 'La dirección geocodificada queda fuera del territorio operativo permitido; revísela e introduzca las coordenadas manualmente.'
+          : 'No se ha podido geocodificar la dirección. Revísela e introduzca las coordenadas manualmente.';
+      } finally {
+        if (scope === 'create') {
+          this.isGeocodingCreate = false;
+        } else {
+          this.isGeocodingEdit = false;
+        }
+      }
+    },
+
+    /**
+     * Confirma la previsualización cargando las coordenadas sugeridas en el
+     * formulario, donde el coordinador puede ajustarlas manualmente.
+     */
+    applyGeocodeSuggestion(scope) {
+      const suggestion = scope === 'create' ? this.createSuggestion : this.editSuggestion;
+      if (!suggestion) return;
+
+      if (scope === 'create') {
+        this.createForm.latitude = String(suggestion.latitude);
+        this.createForm.longitude = String(suggestion.longitude);
+        this.createSuggestion = null;
+        delete this.createErrors.coordinates;
+      } else {
+        this.editForm.latitude = String(suggestion.latitude);
+        this.editForm.longitude = String(suggestion.longitude);
+        this.editSuggestion = null;
+        delete this.editErrors.coordinates;
+      }
+    },
+
+    /**
+     * Descarta la sugerencia pendiente sin alterar los campos del formulario.
+     */
+    dismissGeocodeSuggestion(scope) {
+      if (scope === 'create') {
+        this.createSuggestion = null;
+      } else {
+        this.editSuggestion = null;
+      }
+    },
+
+    /**
      * Abre el modal de alta de nueva sede.
      */
     openCreateModal() {
@@ -199,6 +302,8 @@ export const AdminLocationsTab = {
         longitude: ''
       };
       this.createErrors = {};
+      this.createSuggestion = null;
+      this.isGeocodingCreate = false;
       this.showCreateModal = true;
     },
 
@@ -278,6 +383,8 @@ export const AdminLocationsTab = {
         longitude: location.longitude ?? ''
       };
       this.editErrors = {};
+      this.editSuggestion = null;
+      this.isGeocodingEdit = false;
       this.showEditModal = true;
     },
 
@@ -667,6 +774,23 @@ export const AdminLocationsTab = {
                   <div v-if="createErrors.address" class="invalid-feedback small">{{ createErrors.address }}</div>
                 </div>
 
+                <!-- Geocodificación asistida de la dirección (RF-MAP-01) -->
+                <div class="mb-3">
+                  <button type="button" class="btn btn-outline-primary btn-sm" @click="geocodeAddress('create')" :disabled="isGeocodingCreate">
+                    <span v-if="isGeocodingCreate" class="spinner-border spinner-border-sm me-1" role="status"></span>
+                    📍 Geocodificar dirección
+                  </button>
+                  <div v-if="createErrors.geocode" class="text-danger small mt-1">{{ createErrors.geocode }}</div>
+                  <div v-if="createSuggestion" class="alert alert-info py-2 small mt-2 mb-0">
+                    <strong>Coordenadas sugeridas:</strong> {{ createSuggestion.latitude }}, {{ createSuggestion.longitude }}
+                    <div class="text-muted">{{ createSuggestion.label }}</div>
+                    <div class="mt-2">
+                      <button type="button" class="btn btn-primary btn-sm me-2" @click="applyGeocodeSuggestion('create')">Usar coordenadas</button>
+                      <button type="button" class="btn btn-secondary btn-sm" @click="dismissGeocodeSuggestion('create')">Descartar</button>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- Coordenadas geográficas obligatorias -->
                 <div class="row g-2">
                   <div class="col-md-6 mb-3">
@@ -774,6 +898,23 @@ export const AdminLocationsTab = {
                     required
                   />
                   <div v-if="editErrors.address" class="invalid-feedback small">{{ editErrors.address }}</div>
+                </div>
+
+                <!-- Geocodificación asistida de la dirección (RF-MAP-01) -->
+                <div class="mb-3">
+                  <button type="button" class="btn btn-outline-primary btn-sm" @click="geocodeAddress('edit')" :disabled="isGeocodingEdit">
+                    <span v-if="isGeocodingEdit" class="spinner-border spinner-border-sm me-1" role="status"></span>
+                    📍 Geocodificar dirección
+                  </button>
+                  <div v-if="editErrors.geocode" class="text-danger small mt-1">{{ editErrors.geocode }}</div>
+                  <div v-if="editSuggestion" class="alert alert-info py-2 small mt-2 mb-0">
+                    <strong>Coordenadas sugeridas:</strong> {{ editSuggestion.latitude }}, {{ editSuggestion.longitude }}
+                    <div class="text-muted">{{ editSuggestion.label }}</div>
+                    <div class="mt-2">
+                      <button type="button" class="btn btn-primary btn-sm me-2" @click="applyGeocodeSuggestion('edit')">Usar coordenadas</button>
+                      <button type="button" class="btn btn-secondary btn-sm" @click="dismissGeocodeSuggestion('edit')">Descartar</button>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- Coordenadas geográficas obligatorias -->

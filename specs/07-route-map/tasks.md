@@ -83,7 +83,7 @@
 
 ## Fase 4: Componentes Frontend Vanilla (Vue.js 3 ES Modules)
 
-- [ ] **T-MAP-12: Actualizar `AdminLocationsTab.js` con campos de coordenadas y geocodificación asistida**
+- [x] **T-MAP-12: Actualizar `AdminLocationsTab.js` con campos de coordenadas y geocodificación asistida**
   * **Requisitos:** RF-MAP-01, RNF-MAP-06
   * **Dependencias:** T-MAP-10
   * **Hecho cuando:** El formulario de alta y edición de Sedes incluye inputs numéricos para latitud y longitud, botón de "Geocodificar dirección" que sugiere coordenadas automáticamente y visualización previa de confirmación.

@@ -8,10 +8,11 @@
  * 2. Aplica filtro de búsqueda en tiempo real (código, nombre, dirección y contacto).
  * 3. Valida en cliente el código de sede (3-32 chars, uppercase) y teléfono español (9 dígitos).
  * 4. Gestiona coordenadas geográficas con validación en cliente y envía ambas al guardar alta y edición mediante PUT.
- * 5. Gestiona el modal de alta invocando a la API y reseteando errores.
- * 6. Gestiona el modal de edición preservando el código inmutable en modo solo lectura.
- * 7. Diálogo de confirmación de baja alerta interactivamente y bloquea si la sede tiene máquinas activas (EARS 1.4).
- * 8. Permite confirmar baja lógica si no tiene máquinas y soporta reactivación fluida.
+ * 5. Geocodifica la dirección mediante el servicio abierto estándar y exige confirmación de la previsualización (RF-MAP-01).
+ * 6. Gestiona el modal de alta invocando a la API y reseteando errores.
+ * 7. Gestiona el modal de edición preservando el código inmutable en modo solo lectura.
+ * 8. Diálogo de confirmación de baja alerta interactivamente y bloquea si la sede tiene máquinas activas (EARS 1.4).
+ * 9. Permite confirmar baja lógica si no tiene máquinas y soporta reactivación fluida.
  * 
  * Dogma Vanilla: Node.js nativo con módulos ESM y cero dependencias externas.
  */
@@ -206,6 +207,86 @@ assert('3.5.1 Alta envía ambas coordenadas numéricas', createdPayload.latitude
 assert('3.6 Modal de alta se cierra tras éxito', tab.showCreateModal === false);
 
 // =========================================================================
+// BLOQUE 3B: Geocodificación Asistida de la Dirección (RF-MAP-01)
+// =========================================================================
+console.log('\n--- BLOQUE 3B: Geocodificación Asistida (RF-MAP-01) ---');
+
+let geocodeRequests = [];
+let geocodeResponseQueue = [];
+globalThis.fetch = async (url) => {
+  geocodeRequests.push(url);
+  const nextResponse = geocodeResponseQueue.shift();
+  return {
+    ok: true,
+    json: async () => nextResponse
+  };
+};
+
+const BARCELONA_GEOCODING_RESULT = [{
+  display_name: 'Passeig Marítim 25, 08003 Barcelona, España',
+  lat: '41.385312',
+  lon: '2.193245'
+}];
+
+// Modal de alta: flujo completo sugerir -> confirmar
+const createTab = createComponentInstance();
+createTab.openCreateModal();
+assert('3B.1 El alta se abre sin sugerencia pendiente', createTab.createSuggestion === null);
+
+await createTab.geocodeAddress('create');
+assert('3B.2 Sin dirección no se invoca al servicio de geocodificación', geocodeRequests.length === 0);
+assert('3B.3 Sin dirección se informa al coordinador en castellano', (createTab.createErrors.geocode || '').includes('geocodificar'));
+
+createTab.createForm.address = 'Passeig Marítim 25, 08003 Barcelona';
+geocodeResponseQueue = [BARCELONA_GEOCODING_RESULT];
+await createTab.geocodeAddress('create');
+assert('3B.4 El botón consulta el servicio abierto estándar con la dirección', geocodeRequests.length === 1 && geocodeRequests[0].includes('nominatim.openstreetmap.org'));
+assert('3B.5 La dirección viaja correctamente en la consulta', geocodeRequests[0].includes(encodeURIComponent('Passeig Marítim 25, 08003 Barcelona')));
+assert('3B.6 El servicio abierto propone la previsualización de coordenadas', createTab.createSuggestion !== null && createTab.createSuggestion.latitude === 41.385312 && createTab.createSuggestion.longitude === 2.193245);
+assert('3B.7 La previsualización incluye la etiqueta descriptiva del resultado', (createTab.createSuggestion.label || '').includes('Barcelona'));
+
+assert('3B.8 Confirmar requiere pulsar "Usar coordenadas" antes de guardar', createTab.createForm.latitude === '' && createTab.createForm.longitude === '');
+createTab.applyGeocodeSuggestion('create');
+assert('3B.9 "Usar coordenadas" rellena el formulario con la sugerencia', createTab.createForm.latitude === '41.385312' && createTab.createForm.longitude === '2.193245');
+assert('3B.10 La sugerencia se consume tras confirmarla', createTab.createSuggestion === null);
+
+// Descartar una nueva sugerencia no altera los campos ya confirmados
+createTab.createForm.address = 'Passeig Marítim 25, 08003 Barcelona';
+geocodeResponseQueue = [BARCELONA_GEOCODING_RESULT];
+await createTab.geocodeAddress('create');
+createTab.createForm.latitude = '41.4';
+createTab.dismissGeocodeSuggestion('create');
+assert('3B.11 Descartar la sugerencia no altera los campos del formulario', createTab.createSuggestion === null && createTab.createForm.latitude === '41.4');
+
+// Resultado fuera de territorio: se rechaza sin previsualización
+const outOfTerritoryTab = createComponentInstance();
+outOfTerritoryTab.openCreateModal();
+outOfTerritoryTab.createForm.address = 'Avenida de la Playa 1';
+geocodeResponseQueue = [[{ display_name: 'Somewhere else', lat: '20.5', lon: '2.1' }]];
+await outOfTerritoryTab.geocodeAddress('create');
+assert('3B.12 Una sugerencia fuera de territorio se rechaza sin previsualizar', outOfTerritoryTab.createSuggestion === null);
+assert('3B.13 Se avisa en castellano cuando el resultado queda fuera del territorio operativo', (outOfTerritoryTab.createErrors.geocode || '').includes('territorio operativo'));
+
+// Resultado vacío del servicio: se avisa sin romper el flujo
+const emptyResultTab = createComponentInstance();
+emptyResultTab.openCreateModal();
+emptyResultTab.createForm.address = 'Calle Inexistente 999';
+geocodeResponseQueue = [[]];
+await emptyResultTab.geocodeAddress('create');
+assert('3B.14 Un resultado vacío no genera previsualización', emptyResultTab.createSuggestion === null);
+assert('3B.15 Un resultado vacío se informa en castellano', (emptyResultTab.createErrors.geocode || '').includes('geocodificar'));
+
+// Modal de edición: mismo flujo asistido
+const editTab = createComponentInstance();
+editTab.openEditModal(mockLocations[0]);
+editTab.editForm.address = 'Passeig Marítim 25, 08003 Barcelona';
+geocodeResponseQueue = [BARCELONA_GEOCODING_RESULT];
+await editTab.geocodeAddress('edit');
+assert('3B.16 La edición geocodifica su propia dirección y propone previsualización', editTab.editSuggestion !== null && editTab.editSuggestion.latitude === 41.385312);
+editTab.applyGeocodeSuggestion('edit');
+assert('3B.17 La edición confirma la sugerencia en el formulario', editTab.editForm.latitude === '41.385312' && editTab.editForm.longitude === '2.193245');
+
+// =========================================================================
 // BLOQUE 4: Modal de Edición de Sede
 // =========================================================================
 console.log('\n--- BLOQUE 4: Modal de Edición de Sede ---');
@@ -305,6 +386,15 @@ assert('6.6.1 Template contiene inputs numéricos requeridos de latitud y longit
     && tmpl.includes('v-model="editForm.latitude"')
     && tmpl.includes('v-model="editForm.longitude"'));
 assert('6.7 Template contiene modal de confirmación de baja con advertencia interactiva', tmpl.includes('showDeactivateModal') && tmpl.includes('canConfirmDeactivate'));
+assert('6.8 Template contiene el botón "Geocodificar dirección" en alta y edición',
+  (tmpl.match(/📍 Geocodificar dirección/g) || []).length === 2
+    && tmpl.includes("geocodeAddress('create')")
+    && tmpl.includes("geocodeAddress('edit')"));
+assert('6.9 Template contiene la previsualización de confirmación de coordenadas',
+  tmpl.includes('createSuggestion') && tmpl.includes('editSuggestion')
+    && tmpl.includes('applyGeocodeSuggestion(\'create\')') && tmpl.includes('applyGeocodeSuggestion(\'edit\')')
+    && tmpl.includes('dismissGeocodeSuggestion')
+    && tmpl.includes('Usar coordenadas') && tmpl.includes('Descartar'));
 
 // =========================================================================
 // RESUMEN FINAL
