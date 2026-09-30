@@ -11,7 +11,8 @@
  * 4. Opens universal Google Maps navigation per stop and the full route with waypoints,
  *    warning when the waypoint limit truncates the sequence.
  * 5. Falls back transparently to Base Central with an informational notice when the GPS
- *    is denied, unavailable or fails, and shows the friendly empty-route message.
+ *    is denied, unavailable, hangs (own watchdog for embedded webviews) or fails, and
+ *    shows the friendly empty-route message.
  *
  * Dogma Vanilla: Node.js native ESM, zero external dependencies, zero network in tests.
  */
@@ -32,7 +33,7 @@ globalThis.window = {
 };
 
 import { api } from '../../public/assets/js/api.js';
-import { TechnicianRouteMapModal, STOP_COLORS } from '../../public/assets/js/components/TechnicianRouteMapModal.js';
+import { TechnicianRouteMapModal, STOP_COLORS, Mercator } from '../../public/assets/js/components/TechnicianRouteMapModal.js';
 
 let assertions = 0;
 let failures = 0;
@@ -165,6 +166,11 @@ function setGeolocation(behavior) {
         getCurrentPosition: (success, failure) => {
           if (behavior === 'granted') {
             success({ coords: { latitude: GPS_ORIGIN.latitude, longitude: GPS_ORIGIN.longitude } });
+          } else if (behavior === 'hang') {
+            // Embedded webviews: no callback is ever invoked
+          } else if (behavior === 'late') {
+            // The browser answers only after the app watchdog has already given up
+            setTimeout(() => success({ coords: { latitude: GPS_ORIGIN.latitude, longitude: GPS_ORIGIN.longitude } }), 200);
           } else {
             failure({ code: 1, message: 'User denied Geolocation' });
           }
@@ -248,10 +254,36 @@ assert('2.4 Parada exclusiva de preventivo usa el verde', modal1.stopColor(stops
 assert('2.5 Parada completada usa el gris atenuado', modal1.stopColor(stops[4]) === STOP_COLORS.completed && STOP_COLORS.completed === '#c8cfda');
 
 const projections = stops.map(stop => modal1.markerFor(stop));
-assert('2.6 Cada parada proyecta un marcador finito dentro del lienzo',
+assert('2.6 Cada parada proyecta un marcador finito dentro del lienzo de teselas',
   projections.every(point => Number.isFinite(point.x) && Number.isFinite(point.y) && point.x >= 0 && point.x <= 100 && point.y >= 0 && point.y <= 100));
 assert('2.7 El origen proyecta el indicador de inicio dentro del lienzo',
   Number.isFinite(modal1.originPoint().x) && Number.isFinite(modal1.originPoint().y));
+
+// Proyección Web Mercator verificada contra valores canónicos
+assert('2.10 Mercator: Greenwich cae en el centro del mundo y los polos en 0/1',
+  Mercator.lngToFraction(0) === 0.5 && Mercator.lngToFraction(-180) === 0 && Mercator.lngToFraction(180) === 1);
+assert('2.11 Mercator: el ecuador cae en 0.5 y los límites de latitud OSM en 0/1',
+  Mercator.latToFraction(0) === 0.5
+    && Math.abs(Mercator.latToFraction(85.0511)) < 1e-5
+    && Math.abs(Mercator.latToFraction(-85.0511) - 1) < 1e-5);
+assert('2.12 Mercator: Barcelona se proyecta en el cuadrante noreste del mundo',
+  Mercator.lngToFraction(2.16) > 0.5 && Mercator.latToFraction(41.4) < 0.5);
+
+// Ventana de teselas estándar (OpenStreetMap) que enmarca la ruta
+const tiles = modal1.mapTiles;
+assert('2.13 Se solicitan teselas estándar de OpenStreetMap sin clave de API',
+  tiles.length >= 1 && tiles.every(tile => tile.url.startsWith('https://tile.openstreetmap.org/')));
+assert('2.14 La tesela que contiene el origen existe en la ventana calculada',
+  (() => {
+    const zoom = modal1.mapWindow.zoom;
+    const originTileX = Math.floor(Mercator.lngToWorldX(GPS_ORIGIN.longitude, zoom));
+    const originTileY = Math.floor(Mercator.latToWorldY(GPS_ORIGIN.latitude, zoom));
+    return tiles.some(tile => tile.key === zoom + '/' + originTileX + '/' + originTileY);
+  })());
+assert('2.15 Cada tesela ocupa una posición y tamaño porcentuales finitos y acotados',
+  tiles.every(tile => [tile.leftPct, tile.topPct, tile.widthPct, tile.heightPct].every(value => Number.isFinite(value) && value > -200 && value < 200)));
+assert('2.16 Una tesela rota se oculta sin romper los marcadores (RNF-MAP-04)',
+  (() => { const ev = { target: { style: {} } }; modal1.hideTile(ev); return ev.target.style.display === 'none'; })());
 assert('2.8 El progreso parcial se muestra como contador visible', modal1.progressLabel(stops[0]) === '1 de 2 completadas' && modal1.progressLabel(stops[1]) === '0 de 1 completadas');
 assert('2.9 La parada completada se rotula como Completada', modal1.stopStatusLabel(stops[4]) === 'Completada' && modal1.stopStatusLabel(stops[0]) === 'En Curso');
 
@@ -335,6 +367,31 @@ setGeolocation('granted');
 await emptyModal.openMap();
 assert('5.6 Técnico sin paradas: la ruta se muestra vacía sin fallos', emptyModal.hasStops === false && emptyModal.errorMessage === '');
 
+// Watchdog propio: algunos webviews embebidos jamás invocan los callbacks de geolocalización (RNF-MAP-04)
+setGeolocation('hang');
+getRouteMapCalls = [];
+routeMapQueue = [makeRoutePayload({ origin: BASE_CENTRAL_ORIGIN })];
+const hangingModal = createModalInstance();
+hangingModal.gpsWatchdogMs = 60;
+const hangStart = Date.now();
+await hangingModal.openMap();
+const hangElapsed = Date.now() - hangStart;
+assert('5.7 Un GPS colgado no bloquea el modal: el watchdog propio rinde y carga la ruta',
+  hangingModal.gpsPermission === 'unavailable' && hangingModal.isLoading === false && hangingModal.hasStops === true && hangingModal.errorMessage === '');
+assert('5.8 El watchdog vence por su propio tiempo y no depende del timeout del navegador', hangElapsed >= 60 && hangElapsed < 2000);
+assert('5.9 Un GPS colgado cae a Base Central con aviso informativo',
+  hangingModal.isBaseCentralFallback === true && hangingModal.showBaseCentralNotice === true && hangingModal.gpsNotice.includes('Base Central'));
+
+setGeolocation('late');
+getRouteMapCalls = [];
+routeMapQueue = [makeRoutePayload({ origin: BASE_CENTRAL_ORIGIN })];
+const lateModal = createModalInstance();
+lateModal.gpsWatchdogMs = 50;
+await lateModal.openMap();
+await new Promise(resolve => setTimeout(resolve, 300));
+assert('5.10 Una respuesta GPS tardía tras el watchdog no corrompe el fallback ya calculado',
+  lateModal.gpsPermission === 'unavailable' && lateModal.deviceCoordinates === null && lateModal.isBaseCentralFallback === true);
+
 // =========================================================================
 // BLOQUE 6: Errores, cierre y contratos de plantilla (RNF-MAP-02, RNF-MAP-06)
 // =========================================================================
@@ -346,7 +403,7 @@ api.technician.getRouteMap = async () => {
 };
 const errorModal = createModalInstance();
 await errorModal.openMap();
-assert('6.1 Un fallo de red muestra un mensaje en castellano sin romper el modal', errorModal.errorMessage.includes('No se ha podido conectar') && errorModal.stops.length === 0);
+assert('6.1 Un fallo de red muestra un mensaje en castellano sin romper el modal ni pedir teselas', errorModal.errorMessage.includes('No se ha podido conectar') && errorModal.stops.length === 0 && errorModal.mapTiles.length === 0);
 api.technician.getRouteMap = async (origin = {}) => {
   getRouteMapCalls.push(origin);
   const payload = routeMapQueue.length > 0 ? routeMapQueue.shift() : makeRoutePayload();
@@ -361,7 +418,10 @@ assert('6.2 Cerrar el mapa emite update:modelValue a false',
     && closableModal.emittedEvents[0].value === false);
 
 const tmpl = TechnicianRouteMapModal.template;
-assert('6.3 Plantilla: lienzo SVG interactivo con polilínea de ruta', tmpl.includes('<svg') && tmpl.includes('<polyline') && tmpl.includes('route-map-canvas'));
+assert('6.3 Plantilla: capa de teselas estándar bajo el overlay SVG con polilínea de ruta',
+  tmpl.includes('route-tile-layer') && tmpl.includes(':src="tile.url"') && tmpl.includes('route-map-overlay')
+    && tmpl.includes('<polyline') && tmpl.includes('route-map-canvas')
+    && TechnicianRouteMapModal.methods.buildMapTiles.toString().includes('tile.openstreetmap.org'));
 assert('6.4 Plantilla: marcadores circulares accesibles por parada', tmpl.includes('route-map-marker') && tmpl.includes('aria-label') && tmpl.includes('@click="selectStop(stop)"'));
 assert('6.5 Plantilla: check verde para paradas completadas', tmpl.includes('route-marker-check') && tmpl.includes('✔'));
 assert('6.6 Plantilla: leyenda con los colores semánticos institucionales',
@@ -373,6 +433,8 @@ assert('6.9 Plantilla: mensaje amistoso para jornada sin paradas', tmpl.includes
 assert('6.10 Plantilla: aviso de fallback a Base Central condicionado', tmpl.includes('showBaseCentralNotice') && tmpl.includes('gpsNotice'));
 assert('6.11 Plantilla: distancias entre paradas visibles en la lista', tmpl.includes('distance_from_previous_km'));
 assert('6.12 Plantilla: diálogo accesible con roles ARIA', tmpl.includes('role="dialog"') && tmpl.includes('aria-modal="true"') && tmpl.includes('aria-label="Cerrar mapa"'));
+assert('6.13 Plantilla: atribución obligatoria de OpenStreetMap en el mapa', tmpl.includes('OpenStreetMap') && tmpl.includes('route-map-attribution'));
+assert('6.14 Plantilla: el indicador de origen usa un triángulo vectorial en vez de un glifo de texto', tmpl.includes('route-origin-triangle') && !tmpl.includes('route-origin-icon'));
 
 // =========================================================================
 // RESUMEN FINAL

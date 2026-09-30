@@ -5,17 +5,21 @@
  * (RF-MAP-05 to RF-MAP-08, RNF-MAP-02, RNF-MAP-03, RNF-MAP-06).
  *
  * Features:
- * 1. Responsive vertical mobile map rendering the ordered day route with light standard SVG
- *    (zero external tile providers or paid APIs: constitutional Art. IV).
+ * 1. Responsive vertical mobile map rendering the ordered day route over standard public
+ *    map tiles (OpenStreetMap) projected with native Web Mercator math — zero external
+ *    libraries, zero API keys and zero paid services (constitutional Art. IV, plan.md §5).
  * 2. Sequential numbered circular markers (1, 2, 3...) with semantic institutional colors:
  *    amber in-progress, red critical perishable, blue ordinary incident, green preventive,
- *    grey completed with green check, and start indicator for GPS position or Base Central.
- * 3. Tap a marker (or select a stop in the textual list) to center the view and open the stop
- *    summary sheet: site name, address, machine progress, urgency and "Navegar con GPS" button.
+ *    grey completed with green check, and a vector start indicator for GPS position or
+ *    Base Central.
+ * 3. Tap a marker (or select a stop in the textual list) to open the stop summary sheet:
+ *    site name, address, machine progress, urgency and "Navegar con GPS" button.
  * 4. One-tap Google Maps universal links per stop plus the full day route with waypoints;
  *    a non-intrusive notice explains waypoint truncation when the link limit is exceeded.
  * 5. Device GPS permission request; transparent fallback to Base Central with an informational
  *    notice when permissions are denied, the sensor is missing or the read fails (RF-MAP-06).
+ * 6. Offline resilience (RNF-MAP-04): if a tile fails to load the broken image is hidden and
+ *    the markers, route line and navigation buttons keep working on the fallback canvas.
  *
  * Dogma Vanilla: Vue 3 Options API in native ESM, no npm dependencies, no bundlers.
  */
@@ -28,6 +32,40 @@ const STOP_COLORS = {
   ordinary: '#2560ff',
   preventive: '#38bd7d',
   completed: '#c8cfda'
+};
+
+/**
+ * Standard Web Mercator projection helpers (pure functions, no dependencies).
+ * Fractions are expressed in zoom-0 world units within [0, 1].
+ */
+export const Mercator = {
+  /**
+   * Longitude to horizontal world fraction ([0 = -180°, 1 = +180°]).
+   */
+  lngToFraction(lng) {
+    return (Number(lng) + 180) / 360;
+  },
+  /**
+   * Latitude to vertical world fraction ([0 = north pole, 0.5 = equator, 1 = south pole])
+   * using the standard spherical Mercator formula with the OSM latitude clamp.
+   */
+  latToFraction(lat) {
+    const clamped = Math.max(Math.min(Number(lat), 85.0511), -85.0511);
+    const radians = (clamped * Math.PI) / 180;
+    return (1 - Math.log(Math.tan(radians) + 1 / Math.cos(radians)) / Math.PI) / 2;
+  },
+  /**
+   * Longitude to world tile units at the given zoom level.
+   */
+  lngToWorldX(lng, zoom) {
+    return this.lngToFraction(lng) * Math.pow(2, zoom);
+  },
+  /**
+   * Latitude to world tile units at the given zoom level.
+   */
+  latToWorldY(lat, zoom) {
+    return this.latToFraction(lat) * Math.pow(2, zoom);
+  }
 };
 
 export { STOP_COLORS };
@@ -50,10 +88,15 @@ export const TechnicianRouteMapModal = {
       errorMessage: '',
       routeData: null,
       selectedStopOrder: null,
+      // Cached cartographic window (zoom + tile-space viewport) for the current route
+      mapWindow: null,
       // Device GPS state (RF-MAP-06)
       deviceCoordinates: null,
       gpsNotice: '',
-      gpsPermission: 'unknown' // 'granted' | 'denied' | 'unavailable' | 'unknown'
+      gpsPermission: 'unknown', // 'granted' | 'denied' | 'unavailable' | 'unknown'
+      // Hard watchdog: some embedded browsers/webviews never invoke the geolocation
+      // callbacks at all, so the app must not trust the browser-side timeout alone.
+      gpsWatchdogMs: 5000
     };
   },
   computed: {
@@ -77,6 +120,12 @@ export const TechnicianRouteMapModal = {
     },
     summary() {
       return (this.routeData && this.routeData.summary) || { total_stops: 0, total_tasks: 0, total_critical: 0, estimated_total_distance_km: 0 };
+    },
+    /**
+     * Standard public map tiles covering the route viewport (RF-MAP-07, plan.md §4.1).
+     */
+    mapTiles() {
+      return this.buildMapTiles();
     },
     selectedStop() {
       if (this.selectedStopOrder === null) return null;
@@ -123,8 +172,19 @@ export const TechnicianRouteMapModal = {
         return Promise.resolve();
       }
       return new Promise(resolve => {
+        let settled = false;
+        const watchdog = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            this.gpsPermission = 'unavailable';
+            resolve();
+          }
+        }, this.gpsWatchdogMs);
         navigator.geolocation.getCurrentPosition(
           position => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(watchdog);
             this.deviceCoordinates = {
               origin_lat: position.coords.latitude,
               origin_lng: position.coords.longitude
@@ -133,6 +193,9 @@ export const TechnicianRouteMapModal = {
             resolve();
           },
           () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(watchdog);
             this.gpsPermission = 'denied';
             resolve();
           },
@@ -150,14 +213,104 @@ export const TechnicianRouteMapModal = {
         const response = await api.technician.getRouteMap(this.deviceCoordinates || {});
         const payload = response && response.data ? response.data : response;
         this.routeData = payload || { origin: null, stops: [], full_route_navigation_url: '', waypoints_truncated: false, summary: {} };
-        if (this.isBaseCentralFallback && this.gpsPermission === 'denied') {
+        this.mapWindow = this.computeTileWindow();
+        if (this.isBaseCentralFallback && (this.gpsPermission === 'denied' || this.gpsPermission === 'unavailable')) {
           this.gpsNotice = 'Ruta calculada desde Base Central (GPS móvil no disponible).';
         }
       } catch (err) {
         this.routeData = { origin: null, stops: [], full_route_navigation_url: '', waypoints_truncated: false, summary: {} };
+        this.mapWindow = null;
         this.errorMessage = (err && err.message) || 'No se pudo cargar el mapa de la ruta. Comprueba tu conexión.';
       } finally {
         this.isLoading = false;
+      }
+    },
+    /**
+     * Collects the finite geographic points (origin + stops) of the current route.
+     */
+    routePoints() {
+      const points = [];
+      if (this.origin && Number.isFinite(Number(this.origin.latitude)) && Number.isFinite(Number(this.origin.longitude))) {
+        points.push({ lat: Number(this.origin.latitude), lng: Number(this.origin.longitude) });
+      }
+      for (const stop of this.stops) {
+        const lat = Number(stop.location.latitude);
+        const lng = Number(stop.location.longitude);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          points.push({ lat, lng });
+        }
+      }
+      return points;
+    },
+    /**
+     * Computes the square Web Mercator window (in tile units) that frames the route with
+     * a fixed padding. Deterministic: same coordinates always yield the same zoom and view.
+     */
+    computeTileWindow() {
+      const points = this.routePoints();
+      if (points.length === 0) {
+        return null;
+      }
+      const fractionsX = points.map(point => Mercator.lngToFraction(point.lng));
+      const fractionsY = points.map(point => Mercator.latToFraction(point.lat));
+      const minSpanFraction = 0.000012; // ~500 m minimum framing for a single-stop day
+      const spanX = Math.max(Math.max(...fractionsX) - Math.min(...fractionsX), minSpanFraction);
+      const spanY = Math.max(Math.max(...fractionsY) - Math.min(...fractionsY), minSpanFraction);
+      const sideFraction = Math.max(spanX, spanY) * 1.6; // content occupies ~62% of the canvas
+      let zoom = Math.round(Math.log2(1 / sideFraction));
+      zoom = Math.max(6, Math.min(16, zoom));
+      let sideTiles = sideFraction * Math.pow(2, zoom);
+      if (sideTiles < 0.9 && zoom < 16) {
+        zoom += 1;
+        sideTiles = sideFraction * Math.pow(2, zoom);
+      }
+      const centerX = ((Math.max(...fractionsX) + Math.min(...fractionsX)) / 2) * Math.pow(2, zoom);
+      const centerY = ((Math.max(...fractionsY) + Math.min(...fractionsY)) / 2) * Math.pow(2, zoom);
+      return {
+        zoom,
+        sideTiles,
+        leftEdge: centerX - sideTiles / 2,
+        topEdge: centerY - sideTiles / 2
+      };
+    },
+    /**
+     * Builds the list of standard public tiles covering the viewport. Percentages are
+     * relative to the square canvas; edge tiles may overflow and are clipped by CSS.
+     */
+    buildMapTiles() {
+      const mapWindow = this.mapWindow || this.computeTileWindow();
+      if (!mapWindow) {
+        return [];
+      }
+      const worldSize = Math.pow(2, mapWindow.zoom);
+      const tilePercent = 100 / mapWindow.sideTiles;
+      const startX = Math.floor(mapWindow.leftEdge);
+      const endX = Math.floor(mapWindow.leftEdge + mapWindow.sideTiles);
+      const startY = Math.floor(mapWindow.topEdge);
+      const endY = Math.floor(mapWindow.topEdge + mapWindow.sideTiles);
+      const tiles = [];
+      for (let tx = startX; tx <= endX; tx++) {
+        if (tx < 0 || tx > worldSize - 1) continue;
+        for (let ty = startY; ty <= endY; ty++) {
+          if (ty < 0 || ty > worldSize - 1) continue;
+          tiles.push({
+            key: mapWindow.zoom + '/' + tx + '/' + ty,
+            url: `https://tile.openstreetmap.org/${mapWindow.zoom}/${tx}/${ty}.png`,
+            leftPct: ((tx - mapWindow.leftEdge) / mapWindow.sideTiles) * 100,
+            topPct: ((ty - mapWindow.topEdge) / mapWindow.sideTiles) * 100,
+            widthPct: tilePercent,
+            heightPct: tilePercent
+          });
+        }
+      }
+      return tiles;
+    },
+    /**
+     * Hides a broken tile image without touching the marker overlay (RNF-MAP-04).
+     */
+    hideTile(event) {
+      if (event && event.target && event.target.style) {
+        event.target.style.display = 'none';
       }
     },
     /**
@@ -190,73 +343,34 @@ export const TechnicianRouteMapModal = {
       return `${stop.completed_tasks || 0} de ${stop.total_tasks || 0} completadas`;
     },
     /**
-     * Returns marker screen coordinates (percent) for the SVG projection.
+     * Returns marker canvas coordinates (percent of the square map canvas).
      */
-    markerPosition(stop) {
-      return this.projectedStops().find(item => item.order === stop.order) || { x: 50, y: 50 };
-    },
-    originPosition() {
-      return this.projectedStops().originPosition;
-    },
-    /**
-     * Projects geographic coordinates into the light SVG canvas (percent values).
-     * Deterministic nearest-neighbor framing with a fixed padding; no external tiles.
-     */
-    projectedStops() {
-      const points = [];
-      if (this.origin && Number.isFinite(Number(this.origin.latitude))) {
-        points.push({ latitude: Number(this.origin.latitude), longitude: Number(this.origin.longitude) });
-      }
-      for (const stop of this.stops) {
-        points.push({ latitude: Number(stop.location.latitude), longitude: Number(stop.location.longitude) });
-      }
-      if (points.length === 0) {
-        return { originPosition: { x: 50, y: 50 }, positions: {} };
-      }
-      const latitudes = points.map(point => point.latitude);
-      const longitudes = points.map(point => point.longitude);
-      let minLat = Math.min(...latitudes);
-      let maxLat = Math.max(...latitudes);
-      let minLng = Math.min(...longitudes);
-      let maxLng = Math.max(...longitudes);
-      const spanLat = Math.max(maxLat - minLat, 0.01);
-      const spanLng = Math.max(maxLng - minLng, 0.01);
-      // Keep the canvas square-ish: align the smaller span around its center.
-      const padding = 14;
-      const usable = 100 - padding * 2;
-      const center = (minLat + maxLat) / 2;
-      if (spanLng > spanLat) {
-        minLat = center - spanLng / 2;
-        maxLat = center + spanLng / 2;
-      } else {
-        const centerLng = (minLng + maxLng) / 2;
-        minLng = centerLng - spanLat / 2;
-        maxLng = centerLng + spanLat / 2;
-      }
-      const spanLatFinal = maxLat - minLat;
-      const spanLngFinal = maxLng - minLng;
-      const project = (latitude, longitude) => ({
-        x: padding + ((longitude - minLng) / spanLngFinal) * usable,
-        y: 100 - padding - ((latitude - minLat) / spanLatFinal) * usable
-      });
-      const positions = {};
-      for (const stop of this.stops) {
-        positions[stop.order] = project(Number(stop.location.latitude), Number(stop.location.longitude));
-      }
-      const originPosition = this.origin && Number.isFinite(Number(this.origin.latitude))
-        ? project(Number(this.origin.latitude), Number(this.origin.longitude))
-        : { x: 50, y: 50 };
-      return { originPosition, positions };
-    },
     markerFor(stop) {
-      const projection = this.projectedStops();
-      return projection.positions[stop.order] || { x: 50, y: 50 };
+      const mapWindow = this.mapWindow || this.computeTileWindow();
+      if (!mapWindow || !Number.isFinite(Number(stop.location.latitude)) || !Number.isFinite(Number(stop.location.longitude))) {
+        return { x: 50, y: 50 };
+      }
+      const worldX = Mercator.lngToWorldX(Number(stop.location.longitude), mapWindow.zoom);
+      const worldY = Mercator.latToWorldY(Number(stop.location.latitude), mapWindow.zoom);
+      return {
+        x: ((worldX - mapWindow.leftEdge) / mapWindow.sideTiles) * 100,
+        y: ((worldY - mapWindow.topEdge) / mapWindow.sideTiles) * 100
+      };
     },
     originPoint() {
-      return this.projectedStops().originPosition;
+      const mapWindow = this.mapWindow || this.computeTileWindow();
+      if (!mapWindow || !this.origin || !Number.isFinite(Number(this.origin.latitude)) || !Number.isFinite(Number(this.origin.longitude))) {
+        return { x: 50, y: 50 };
+      }
+      const worldX = Mercator.lngToWorldX(Number(this.origin.longitude), mapWindow.zoom);
+      const worldY = Mercator.latToWorldY(Number(this.origin.latitude), mapWindow.zoom);
+      return {
+        x: ((worldX - mapWindow.leftEdge) / mapWindow.sideTiles) * 100,
+        y: ((worldY - mapWindow.topEdge) / mapWindow.sideTiles) * 100
+      };
     },
     /**
-     * Selects a stop: centers the view marker and opens the summary sheet (RF-MAP-07).
+     * Selects a stop: highlights the marker and opens the summary sheet (RF-MAP-07).
      */
     selectStop(stop) {
       this.selectedStopOrder = stop.order;
@@ -314,41 +428,58 @@ export const TechnicianRouteMapModal = {
           </div>
 
           <template v-else>
-            <!-- Interactive SVG map: light, standard, zero external tiles (Art. IV) -->
+            <!-- Standard public map tiles (OpenStreetMap) with the interactive SVG overlay:
+                 light, keyless, zero external libraries (Art. IV, plan.md §5) -->
             <div class="route-map-canvas-wrapper">
-              <svg class="route-map-canvas" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Mapa de ruta del día con paradas numeradas">
-                <polyline
-                  v-if="stops.length > 1"
-                  :points="[
-                    originPoint,
-                    ...stops.map(stop => markerFor(stop))
-                  ].map(point => point.x + ',' + point.y).join(' ')"
-                  class="route-map-line"
-                />
-                <g
-                  class="route-map-origin"
-                  :transform="'translate(' + originPoint.x + ', ' + originPoint.y + ')'"
-                >
-                  <circle r="3.4" class="route-origin-dot" />
-                  <text y="1.2" text-anchor="middle" class="route-origin-icon">▶</text>
-                </g>
-                <g
-                  v-for="stop in stops"
-                  :key="'marker-' + stop.order"
-                  class="route-map-marker"
-                  :class="{ 'is-selected': selectedStopOrder === stop.order }"
-                  :transform="'translate(' + markerFor(stop).x + ', ' + markerFor(stop).y + ')'"
-                  role="button"
-                  tabindex="0"
-                  :aria-label="'Parada ' + stop.order + ': ' + stop.location.name"
-                  @click="selectStop(stop)"
-                  @keydown.enter.prevent="selectStop(stop)"
-                >
-                  <circle r="4.6" :fill="stopColor(stop)" class="route-marker-circle" />
-                  <text v-if="stop.status !== 'COMPLETED'" y="1.6" text-anchor="middle" class="route-marker-text">{{ stop.order }}</text>
-                  <text v-else y="1.6" text-anchor="middle" class="route-marker-check">✔</text>
-                </g>
-              </svg>
+              <div class="route-map-canvas">
+                <div class="route-tile-layer" aria-hidden="true">
+                  <img
+                    v-for="tile in mapTiles"
+                    :key="tile.key"
+                    class="route-tile"
+                    :src="tile.url"
+                    alt=""
+                    draggable="false"
+                    :style="{ left: tile.leftPct + '%', top: tile.topPct + '%', width: tile.widthPct + '%', height: tile.heightPct + '%' }"
+                    @error="hideTile"
+                    @dragstart.prevent
+                  />
+                </div>
+                <svg class="route-map-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Mapa de ruta del día con paradas numeradas">
+                  <polyline
+                    v-if="stops.length > 1"
+                    :points="[
+                      originPoint(),
+                      ...stops.map(stop => markerFor(stop))
+                    ].map(point => point.x + ',' + point.y).join(' ')"
+                    class="route-map-line"
+                  />
+                  <g
+                    class="route-map-origin"
+                    :transform="'translate(' + originPoint().x + ', ' + originPoint().y + ')'"
+                  >
+                    <circle r="3.4" class="route-origin-dot" />
+                    <polygon points="-1.4,-2 -1.4,2 2.2,0" class="route-origin-triangle" />
+                  </g>
+                  <g
+                    v-for="stop in stops"
+                    :key="'marker-' + stop.order"
+                    class="route-map-marker"
+                    :class="{ 'is-selected': selectedStopOrder === stop.order }"
+                    :transform="'translate(' + markerFor(stop).x + ', ' + markerFor(stop).y + ')'"
+                    role="button"
+                    tabindex="0"
+                    :aria-label="'Parada ' + stop.order + ': ' + stop.location.name"
+                    @click="selectStop(stop)"
+                    @keydown.enter.prevent="selectStop(stop)"
+                  >
+                    <circle r="4.6" :fill="stopColor(stop)" class="route-marker-circle" />
+                    <text v-if="stop.status !== 'COMPLETED'" y="1.6" text-anchor="middle" class="route-marker-text">{{ stop.order }}</text>
+                    <text v-else y="1.6" text-anchor="middle" class="route-marker-check">✔</text>
+                  </g>
+                </svg>
+                <div class="route-map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</div>
+              </div>
               <div class="route-map-legend small">
                 <span><i class="route-dot" style="background:#f8b60f"></i> En curso</span>
                 <span><i class="route-dot" style="background:#e02424"></i> Crítica</span>
