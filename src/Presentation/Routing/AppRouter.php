@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Routing;
 
+use VendGuard\Presentation\Controller\TechnicianRouteMapController;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
 
@@ -143,6 +144,7 @@ class AppRouter
         $technicianAuth = new \VendGuard\Presentation\Http\Middleware\InternalAuthMiddleware(
             \VendGuard\Core\Domain\Model\UserRole::TECHNICIAN
         );
+        $router->get('/api/technician/route/map', [TechnicianRouteMapController::class, 'getRouteMap'], [$technicianAuth]);
         $router->get('/api/technician/my-route', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getMyRoute'], [$technicianAuth]);
         $router->get('/api/technician/my-metrics', [\VendGuard\Presentation\Controller\TechnicianMetricsController::class, 'getMyMetrics'], [$technicianAuth]);
         $router->patch('/api/technician/incidents/{id}/start', [\VendGuard\Presentation\Controller\TechnicianController::class, 'startIntervention'], [$technicianAuth]);

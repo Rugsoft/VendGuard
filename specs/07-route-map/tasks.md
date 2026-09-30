@@ -59,7 +59,7 @@
 
 ## Fase 3: Controladores REST y Enrutamiento HTTP
 
-- [ ] **T-MAP-08: Implementar `TechnicianRouteMapController.php` (`GET /api/technician/route/map`)**
+- [x] **T-MAP-08: Implementar `TechnicianRouteMapController.php` (`GET /api/technician/route/map`)**
   * **Requisitos:** RF-MAP-03, RF-MAP-04, RF-MAP-05, RF-MAP-06, RF-MAP-07, RF-MAP-08, RF-MAP-10, Constitución Art. V.4
   * **Dependencias:** T-MAP-07
   * **Hecho cuando:** El endpoint responde `200 OK` con el JSON de origen (GPS o Base Central fallback), paradas agrupadas correlativas, desglose correctivo/preventivo y URLs de Google Maps, rechazando usuarios no técnicos (`403`) y peticiones no autenticadas (`401`).
