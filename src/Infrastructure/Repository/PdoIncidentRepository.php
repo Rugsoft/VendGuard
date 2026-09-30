@@ -415,7 +415,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
                 m.machine_type AS machine_type,
                 l.name AS location_name,
                 l.site_code AS location_site_code,
-                u.name AS technician_name
+                u.name AS technician_name,
+                u.operator_code AS technician_operator_code
             FROM `incidents` i
             LEFT JOIN `machines` m ON i.machine_id = m.id
             LEFT JOIN `locations` l ON i.location_id = l.id

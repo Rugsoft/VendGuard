@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Routing;
 
+use VendGuard\Presentation\Controller\CoordinatorRouteMapController;
 use VendGuard\Presentation\Controller\TechnicianRouteMapController;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -74,6 +75,9 @@ class AppRouter
         $coordinatorAuth = new \VendGuard\Presentation\Http\Middleware\InternalAuthMiddleware(
             \VendGuard\Core\Domain\Model\UserRole::COORDINATOR
         );
+        $router->get('/api/coordinator/map/active-incidents', [CoordinatorRouteMapController::class, 'getActiveIncidents'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/route/settings', [CoordinatorRouteMapController::class, 'getRouteSettings'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/route/settings', [CoordinatorRouteMapController::class, 'updateRouteSettings'], [$coordinatorAuth]);
         $router->get('/api/coordinator/incidents', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getIncidents'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/incidents/{id}/assign', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'assignTechnician'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/incidents/{id}/cancel', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'cancelIncident'], [$coordinatorAuth]);

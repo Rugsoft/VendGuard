@@ -64,7 +64,7 @@
   * **Dependencias:** T-MAP-07
   * **Hecho cuando:** El endpoint responde `200 OK` con el JSON de origen (GPS o Base Central fallback), paradas agrupadas correlativas, desglose correctivo/preventivo y URLs de Google Maps, rechazando usuarios no técnicos (`403`) y peticiones no autenticadas (`401`).
 
-- [ ] **T-MAP-09: Implementar `CoordinatorRouteMapController.php` (`GET /api/coordinator/map/active-incidents`, `GET/PUT /api/coordinator/route/settings`)**
+- [x] **T-MAP-09: Implementar `CoordinatorRouteMapController.php` (`GET /api/coordinator/map/active-incidents`, `GET/PUT /api/coordinator/route/settings`)**
   * **Requisitos:** RF-MAP-02, RF-MAP-09, RF-MAP-10
   * **Dependencias:** T-MAP-06, T-MAP-07
   * **Hecho cuando:** Los endpoints responden `200 OK` devolviendo la matriz territorial de sedes activas, severidad máxima, técnicos asignados y bandera `is_multi_technician`, y permiten consultar/actualizar la configuración de la Base Central.

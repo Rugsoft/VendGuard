@@ -49,6 +49,14 @@ final class PdoRouteSettingsRepository implements RouteSettingsRepositoryInterfa
         );
     }
 
+    public function findUpdatedAt(): ?string
+    {
+        $stmt = $this->pdo->query("SELECT `updated_at` FROM `route_settings` WHERE `id` = 1 LIMIT 1");
+        $updatedAt = $stmt->fetchColumn();
+
+        return $updatedAt === false || $updatedAt === null ? null : (string)$updatedAt;
+    }
+
     public function update(RouteSettings $settings): bool
     {
         $stmt = $this->pdo->prepare("

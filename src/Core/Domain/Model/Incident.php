@@ -57,6 +57,7 @@ class Incident implements ArrayAccess, JsonSerializable
     private ?string $locationName;
     private ?string $locationSiteCode;
     private ?string $technicianName;
+    private ?string $technicianOperatorCode;
 
     public function __construct(
         ?int $id,
@@ -92,7 +93,8 @@ class Incident implements ArrayAccess, JsonSerializable
         ?string $machineType = null,
         ?string $locationName = null,
         ?string $locationSiteCode = null,
-        ?string $technicianName = null
+        ?string $technicianName = null,
+        ?string $technicianOperatorCode = null
     ) {
         $this->id = $id;
         $this->ticketCode = strtoupper(trim($ticketCode));
@@ -128,6 +130,7 @@ class Incident implements ArrayAccess, JsonSerializable
         $this->locationName = $locationName;
         $this->locationSiteCode = $locationSiteCode;
         $this->technicianName = $technicianName;
+        $this->technicianOperatorCode = $technicianOperatorCode;
     }
 
     /**
@@ -176,7 +179,8 @@ class Incident implements ArrayAccess, JsonSerializable
             isset($row['machine_type']) && $row['machine_type'] !== null ? (string)$row['machine_type'] : null,
             isset($row['location_name']) && $row['location_name'] !== null ? (string)$row['location_name'] : null,
             isset($row['location_site_code']) && $row['location_site_code'] !== null ? (string)$row['location_site_code'] : null,
-            isset($row['technician_name']) && $row['technician_name'] !== null ? (string)$row['technician_name'] : null
+            isset($row['technician_name']) && $row['technician_name'] !== null ? (string)$row['technician_name'] : null,
+            isset($row['technician_operator_code']) && $row['technician_operator_code'] !== null ? (string)$row['technician_operator_code'] : null
         );
     }
 
@@ -358,6 +362,11 @@ class Incident implements ArrayAccess, JsonSerializable
     public function getTechnicianName(): ?string
     {
         return $this->technicianName;
+    }
+
+    public function getTechnicianOperatorCode(): ?string
+    {
+        return $this->technicianOperatorCode;
     }
 
     /**
