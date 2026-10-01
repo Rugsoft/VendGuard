@@ -278,6 +278,35 @@ uncapturedHost.handlePointerLeave(plainEvent(400, 300));
 assert('4.12 Sin captura, salir del lienzo cierra el gesto',
   uncapturedHost.activePointers.size === 0 && uncapturedHost.isPanning === false);
 
+// Los controles (botones de zoom/reencuadre, marcadores y el crédito) viven DENTRO del
+// lienzo. Si el controlador se apropia de esa pulsación, la captura de puntero redirige
+// el clic derivado al lienzo y el boton queda muerto: el usuario pulsa y no pasa nada.
+function makePressEvent(pointerId, x, y, uiTarget) {
+  const event = makePointerEvent(pointerId, x, y);
+  event.defaultPrevented = false;
+  event.preventDefault = () => { event.defaultPrevented = true; };
+  event.target = {
+    closest: (selector) => (uiTarget && /button|a\[href\]|\[role="button"\]/.test(selector) ? { tagName: 'BUTTON' } : null)
+  };
+  return event;
+}
+
+const uiHost = createHost(BASE);
+const uiPress = makePressEvent(1, 400, 300, true);
+uiHost.handlePointerDown(uiPress);
+uiHost.handlePointerMove(makePointerEvent(1, 520, 340));
+uiHost.handlePointerUp(makePointerEvent(1, 520, 340));
+assert('4.13 Pulsar un control del mapa NO arranca arrastre, no captura el gesto ni lo cancela',
+  uiHost.activePointers.size === 0 && uiHost.isPanning === false && uiHost.view.centerX === 0.5 && !uiPress.defaultPrevented,
+  `punteros=${uiHost.activePointers.size} paneando=${uiHost.isPanning} centro=${uiHost.view.centerX} cancelado=${uiPress.defaultPrevented}`);
+
+const surfaceHost = createHost(BASE);
+const surfacePress = makePressEvent(1, 400, 300, false);
+surfaceHost.handlePointerDown(surfacePress);
+assert('4.14 Pulsar la superficie arrastrable sí cancela el comportamiento por defecto (sin selección de texto)',
+  surfacePress.defaultPrevented && surfaceHost.isPanning === true && surfaceHost.activePointers.size === 1,
+  `cancelado=${surfacePress.defaultPrevented} paneando=${surfaceHost.isPanning}`);
+
 // ------------------------------------------------------------------------
 console.log('\n--- Elección de tesela pixel-aware (mapas panorámicos anchos) ---');
 

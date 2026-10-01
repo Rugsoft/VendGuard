@@ -38,6 +38,19 @@ export const MAP_ZOOM_PAN_DEFAULTS = {
 };
 
 /**
+ * Interactive chrome that lives INSIDE the map surface on both maps: the zoom/fit
+ * buttons, the marker pins (role="button") and the OpenStreetMap attribution link.
+ */
+const MAP_UI_TARGET_SELECTOR = 'button, a[href], input, select, textarea, [role="button"], [data-map-ui]';
+
+/**
+ * True when a press landed on that chrome instead of the draggable surface.
+ */
+function isMapUiTarget(target) {
+  return Boolean(target && typeof target.closest === 'function' && target.closest(MAP_UI_TARGET_SELECTOR));
+}
+
+/**
  * Reactive data fields every interactive map component must expose in its data().
  */
 export function mapZoomPanState() {
@@ -234,10 +247,21 @@ clampCenter(value, scale) {
   },
   /**
    * Pointer bookkeeping for drag and pinch: one pointer pans, two pinch-zoom.
+   *
+   * A press that lands on the map chrome (zoom/fit buttons, marker pins, attribution
+   * link) is left untouched: capturing that pointer would retarget the derived click to
+   * the canvas, so the control would look dead, and cancelling its default would strip
+   * the browser event sequence buttons rely on.
    */
   handlePointerDown(event) {
     if (event.pointerType === 'mouse' && event.button !== 0) {
       return;
+    }
+    if (isMapUiTarget(event.target)) {
+      return;
+    }
+    if (typeof event.preventDefault === 'function') {
+      event.preventDefault();
     }
     if (event.currentTarget.setPointerCapture) {
       try { event.currentTarget.setPointerCapture(event.pointerId); } catch (e) { /* noop */ }
