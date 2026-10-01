@@ -492,8 +492,8 @@ assert('7.5 El zoom ancla el punto bajo el cursor: no se desplaza al ampliar',
 zoomModal.zoomToPoint(999, 0.5, 0.5);
 assert('7.6 La escala máxima de zoom queda limitada a 12x', zoomModal.view.scale === 12);
 zoomModal.zoomToPoint(0.01, 0.5, 0.5);
-assert('7.7 Alejar por debajo del encaje se detiene en el encaje con el centro libre (roaming)',
-  zoomModal.view.scale === 1 && zoomModal.view.centerX >= -1 && zoomModal.view.centerX <= 2 && zoomModal.view.centerY >= -1 && zoomModal.view.centerY <= 2);
+assert('7.7 Alejar por debajo del encaje se detiene en el encaje con el centro libre (roaming sin tope)',
+  zoomModal.view.scale === 1);
 
 // Paneo con recorrido: el técnico arrastra y el contenido sigue el dedo
 zoomModal.zoomToPoint(3, 0.5, 0.5);

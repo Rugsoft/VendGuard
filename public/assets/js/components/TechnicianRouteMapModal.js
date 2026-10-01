@@ -400,7 +400,7 @@ export const TechnicianRouteMapModal = {
                 @pointermove="handlePointerMove"
                 @pointerup="handlePointerUp"
                 @pointercancel="handlePointerUp"
-                @pointerleave="handlePointerUp"
+                @pointerleave="handlePointerLeave"
               >
                 <div class="route-tile-layer" aria-hidden="true">
                   <img

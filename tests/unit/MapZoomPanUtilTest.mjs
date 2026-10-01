@@ -153,30 +153,31 @@ const belowFit = createHost(BASE);
 belowFit.zoomToPoint(0.5, 0.5, 0.5);
 const centerBefore = { x: belowFit.view.centerX, y: belowFit.view.centerY };
 belowFit.panBy(120, 60, 800);
-assert('3.6 Por debajo del encaje arrastrar desplaza el centro libremente (roaming, el contenido sigue al dedo)',
-  belowFit.view.centerX < centerBefore.x && belowFit.view.centerY < centerBefore.y
-    && belowFit.view.centerX >= -MAP_ZOOM_PAN_DEFAULTS.ROAM_MARGIN
-    && belowFit.view.centerY >= -MAP_ZOOM_PAN_DEFAULTS.ROAM_MARGIN);
+assert('3.6 Por debajo del encaje arrastrar desplaza el centro (roaming sin tope, el contenido sigue al dedo)',
+  belowFit.view.centerX < centerBefore.x && belowFit.view.centerY < centerBefore.y);
 
-// Regresión de "arrastra un momento y luego deja de moverse": con el roaming acotado a
-// [0,1] el centro se agotaba en dos gestos. Varios arrastres seguidos en el mismo
-// sentido deben seguir desplazando el mapa, y el sentido contrario recupera el encaje.
+// Regresión de "arrastra un momento y luego deja de moverse": cualquier tope artificial a
+// escala de encaje se agota con dos gestos reales, porque un arrastre de ancho completo
+// recorre una unidad de ventana entera. Cinco arrastres de ancho completo en el mismo
+// sentido deben seguir desplazando el mapa.
 const sustained = createHost(BASE);
 const forwardTrack = [];
-for (let i = 0; i < 3; i++) {
-  sustained.panBy(400, 0, 800);
-  forwardTrack.push(sustained.view.centerX);
+for (let i = 0; i < 5; i++) {
+  sustained.panBy(800, 0, 800);
+  forwardTrack.push(Number(sustained.view.centerX.toFixed(6)));
 }
-assert('3.7 Tres arrastres largos seguidos en el mismo sentido siguen desplazando el mapa',
-  forwardTrack.every((value, i) => i === 0 || value < forwardTrack[i - 1])
-    && Math.abs(forwardTrack[2] + MAP_ZOOM_PAN_DEFAULTS.ROAM_MARGIN) < 1e-12,
+assert('3.7 Cinco arrastres de ancho completo seguidos siguen desplazando el mapa',
+  JSON.stringify(forwardTrack) === JSON.stringify([-0.5, -1.5, -2.5, -3.5, -4.5]),
   `recorrido observado: ${JSON.stringify(forwardTrack)}`);
-for (let i = 0; i < 3; i++) {
-  sustained.panBy(-400, 0, 800);
+for (let i = 0; i < 5; i++) {
+  sustained.panBy(-800, 0, 800);
 }
 assert('3.8 Arrastrando en sentido contrario se recupera el encaje',
   Math.abs(sustained.view.centerX - 0.5) < 1e-12 && Math.abs(sustained.view.centerY - 0.5) < 1e-12,
   `centro final: ${sustained.view.centerX}, ${sustained.view.centerY}`);
+
+assert('3.9 Un centro no finito vuelve al encaje en lugar de propagar NaN',
+  belowFit.clampCenter(Number.NaN, 1) === 0.5 && belowFit.clampCenter(Number.POSITIVE_INFINITY, 1) === 0.5);
 
 // -------------------------------------------------------------------------
 console.log('\n--- Gestos: rueda, doble clic, arrastre y pellizco ---');
@@ -214,6 +215,41 @@ const emptyHost = createHost(null);
 emptyHost.zoomToPoint(3, 0.5, 0.5);
 assert('4.9 Sin ventana base el controlador no falla ni muta la vista',
   emptyHost.view.scale === 1 && emptyHost.effectiveWindow() === null);
+
+// Salir del lienzo con la captura activa NO debe abortar el gesto: el dedo o el cursor
+// siguen moviendo el mapa fuera del elemento, y cortar ahí es lo que hace que un
+// arrastre parezca detenerse a mitad.
+const capturedHost = createHost(BASE);
+const capturedTarget = {
+  setPointerCapture: () => {},
+  hasPointerCapture: () => true,
+  getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 })
+};
+const capturedEvent = (x, y) => ({
+  pointerId: 1, pointerType: 'mouse', button: 0, clientX: x, clientY: y, currentTarget: capturedTarget
+});
+capturedHost.handlePointerDown(capturedEvent(400, 300));
+capturedHost.handlePointerMove(capturedEvent(480, 330));
+capturedHost.handlePointerLeave(capturedEvent(480, 330));
+assert('4.10 Con captura activa, salir del lienzo mantiene vivo el arrastre',
+  capturedHost.activePointers.size === 1 && capturedHost.isPanning === true,
+  `punteros=${capturedHost.activePointers.size} paneando=${capturedHost.isPanning}`);
+const centerAfterLeave = capturedHost.view.centerX;
+capturedHost.handlePointerMove(capturedEvent(560, 330));
+assert('4.11 Tras esa salida el arrastre sigue desplazando el mapa',
+  capturedHost.view.centerX < centerAfterLeave,
+  `centro: ${centerAfterLeave} -> ${capturedHost.view.centerX}`);
+
+// Sin captura (webview embebido) la salida sigue siendo la única señal de fin de gesto.
+const uncapturedHost = createHost(BASE);
+const plainEvent = (x, y) => ({
+  pointerId: 1, pointerType: 'mouse', button: 0, clientX: x, clientY: y,
+  currentTarget: { setPointerCapture: () => {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) }
+});
+uncapturedHost.handlePointerDown(plainEvent(400, 300));
+uncapturedHost.handlePointerLeave(plainEvent(400, 300));
+assert('4.12 Sin captura, salir del lienzo cierra el gesto',
+  uncapturedHost.activePointers.size === 0 && uncapturedHost.isPanning === false);
 
 // ------------------------------------------------------------------------
 console.log('\n--- Elección de tesela pixel-aware (mapas panorámicos anchos) ---');

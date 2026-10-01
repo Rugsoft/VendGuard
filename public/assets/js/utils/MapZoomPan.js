@@ -32,12 +32,6 @@ export const MAP_ZOOM_PAN_DEFAULTS = {
   BUTTON_FACTOR: 1.5,
   DBLCLICK_FACTOR: 1.8,
   DRAG_THRESHOLD_PX: 6,
-  // Free roaming around the fitted window, in fitted-window widths per side, while the
-  // viewport is at or below the fitted scale: the canvas already shows at least the whole
-  // fit, so dragging must keep sliding onto the neighboring area instead of pinning the
-  // center. The band stays generous enough that sustained dragging never freezes, and
-  // resetView() (the fit control) always recovers the framing.
-  ROAM_MARGIN: 1,
   // Tile zoom bounds: OSM serves z0..z19; never request below a readable z2.
   TILE_ZOOM_FLOOR: 2,
   TILE_ZOOM_CEILING: 19
@@ -145,24 +139,28 @@ export const MapZoomPanMethods = {
       topEdge: ((base.topEdge + (centerY - 1 / (2 * scale)) * base.sideTiles) / worldBase) * worldNew
     };
   },
-  /**
-   * Keeps the view from losing the content while panning. Above the fitted scale the
-   * visible rect must stay inside the fitted window: the center is held to the band
-   * [1/(2·scale), 1 - 1/(2·scale)]. At or below the fitted scale the whole fit already
-   * fits (or is smaller than) the canvas, so the center roams freely over a generous
-   * band [-ROAM_MARGIN, 1 + ROAM_MARGIN] measured in fitted-window widths: dragging the
-   * default fitted view pans to the neighboring area (the adaptive tile window covers
-   * the extra viewport) and keeps panning across repeated gestures, instead of freezing
-   * a couple of drags after the center reached the edge of the fit.
-   */
-  clampCenter(value, scale) {
-    const halfVisible = 1 / (2 * scale);
-    if (halfVisible < 0.5) {
-      return Math.min(Math.max(value, halfVisible), 1 - halfVisible);
-    }
-    const margin = MAP_ZOOM_PAN_DEFAULTS.ROAM_MARGIN;
-    return Math.min(Math.max(value, -margin), 1 + margin);
-  },
+/**
+ * Keeps the view from losing the content while panning. Above the fitted scale the
+ * visible rect must stay inside the fitted window: the center is held to the band
+ * [1/(2·scale), 1 - 1/(2·scale)] so zooming in cannot slide the content off-canvas.
+ * At or below the fitted scale the canvas already shows at least the whole fit, so the
+ * center is NOT clamped: the viewport is a slippy map that slides onto any neighboring
+ * area. Any clamp here is an artificial edge that freezes sustained dragging — a
+ * full-width swipe covers one fitted-window width, so even a generous margin is
+ * exhausted after two real-world gestures and the map looks broken while the gesture
+ * still works. resetView() (the fit control) recovers the framing.
+ */
+clampCenter(value, scale) {
+  const center = Number(value);
+  if (!Number.isFinite(center)) {
+    return 0.5;
+  }
+  const halfVisible = 1 / (2 * scale);
+  if (halfVisible < 0.5) {
+    return Math.min(Math.max(center, halfVisible), 1 - halfVisible);
+  }
+  return center;
+},
   /**
    * Core zoom: sets a new scale keeping the base-window point under the canvas anchor
    * (nx, ny in [0,1]) visually fixed. The host component translates ny if its canvas
@@ -282,6 +280,22 @@ export const MapZoomPanMethods = {
         this.suppressNextClick = true;
       }
     }
+  },
+  /**
+   * A leave event must not fight pointer capture: while the canvas holds the capture the
+   * gesture legitimately flows outside the element (the finger or cursor slides over the
+   * page chrome), and aborting there is what makes a swipe look like it stopped working.
+   * Only a real release (pointerup / pointercancel) ends a captured drag. Embedded
+   * webviews without capture still need the leave as an end-of-gesture signal, so it is
+   * honoured whenever no capture is active.
+   */
+  handlePointerLeave(event) {
+    const target = event.currentTarget;
+    if (target && typeof target.hasPointerCapture === 'function'
+      && target.hasPointerCapture(event.pointerId) === true) {
+      return;
+    }
+    this.handlePointerUp(event);
   },
   activePointersDistance() {
     const points = [...this.activePointers.values()];

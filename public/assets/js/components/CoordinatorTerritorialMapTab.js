@@ -412,7 +412,7 @@ export const CoordinatorTerritorialMapTab = {
             @pointermove="handlePointerMove"
             @pointerup="handlePointerUp"
             @pointercancel="handlePointerUp"
-            @pointerleave="handlePointerUp"
+            @pointerleave="handlePointerLeave"
           >
             <div class="territorial-tile-layer" aria-hidden="true">
               <img
