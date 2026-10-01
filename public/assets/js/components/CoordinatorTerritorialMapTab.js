@@ -171,10 +171,15 @@ export const CoordinatorTerritorialMapTab = {
   methods: {
     /**
      * Loads the territorial matrix applying the current reactive filters (RF-MAP-09).
+     * The silent variant (silent = true) skips the full-canvas spinner and clears a
+     * previous error message only on success, so a reactive refresh after assigning
+     * from the map never blanks the view nor steals the user's zoom/pan state.
      */
-    async loadTerritorialData() {
-      this.isLoading = true;
-      this.errorMessage = '';
+    async loadTerritorialData(silent = false) {
+      if (!silent) {
+        this.isLoading = true;
+        this.errorMessage = '';
+      }
       const params = {};
       if (this.filters.technician_id !== '' && this.filters.technician_id !== null && this.filters.technician_id !== undefined) {
         params.technician_id = this.filters.technician_id;
@@ -189,14 +194,30 @@ export const CoordinatorTerritorialMapTab = {
         const response = await api.map.getActiveIncidents(params);
         const payload = response && response.data ? response.data : response;
         this.sites = Array.isArray(payload && payload.locations) ? payload.locations : [];
+        const hadWindow = !!this.mapWindow;
         this.mapWindow = this.computeTerritorialWindow();
-        this.resetView();
+        if (silent) {
+          // A successful silent refresh clears any stale error banner without
+          // blanking the freshly reloaded markers.
+          this.errorMessage = '';
+        }
+        // A reactive silent refresh keeps the user's zoom/pan view; the re-fit is only
+        // forced when the map was empty before (no window to derive a view from).
+        if (!silent || !hadWindow) {
+          this.resetView();
+        }
       } catch (err) {
-        this.sites = [];
-        this.mapWindow = null;
-        this.errorMessage = (err && err.message) || 'No se pudo cargar el mapa territorial. Comprueba tu conexión.';
+        // Silent refreshes keep the current markers on transient failures; only a
+        // non-silent load reports the error and clears the board.
+        if (!silent) {
+          this.sites = [];
+          this.mapWindow = null;
+          this.errorMessage = (err && err.message) || 'No se pudo cargar el mapa territorial. Comprueba tu conexión.';
+        }
       } finally {
-        this.isLoading = false;
+        if (!silent) {
+          this.isLoading = false;
+        }
       }
     },
     /**
@@ -473,7 +494,7 @@ export const CoordinatorTerritorialMapTab = {
   <div class="territorial-map-tab">
     <div class="d-flex justify-content-between align-items-center mb-2">
       <h5 class="fw-bold mb-0">🗺️ Mapa Territorial de Averías</h5>
-      <button type="button" class="btn btn-outline-primary btn-sm" data-testid="btn-refresh-territorial" @click="loadTerritorialData" :disabled="isLoading">
+      <button type="button" class="btn btn-outline-primary btn-sm" data-testid="btn-refresh-territorial" @click="loadTerritorialData()" :disabled="isLoading">
         <span v-if="isLoading" class="spinner-border spinner-border-sm me-1" role="status"></span>
         🔄 Actualizar
       </button>

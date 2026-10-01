@@ -122,8 +122,10 @@ export const CoordinatorDashboardView = {
       assignError: '',
 
       // Bulk assignment modal state (reached from the territorial map, RF-MAP-09):
-      // one technician + optional urgency reclassification applied to every pending
-      // incident of the chosen site in a single confirmation.
+      // one technician + optional urgency reclassification applied to every active
+      // incident of the chosen site (unassigned ones plus assigned ones on sites
+      // worked by several technicians, enabling one-click consolidated reassignment)
+      // in a single confirmation.
       showBulkAssignModal: false,
       bulkAssignSite: null,
       bulkAssignIncidents: [],
@@ -319,8 +321,11 @@ export const CoordinatorDashboardView = {
       const pending = this.incidents.filter(inc => {
         const site = String(inc.location_site_code || inc.site_code || '').toUpperCase();
         const matchesSite = locationId !== null ? Number(inc.location_id) === locationId : (siteCode ? site === siteCode.toUpperCase() : false);
-        const isPending = !['CERRADA', 'CLOSED', 'CANCELADA', 'CANCELLED', 'RESUELTA', 'RESOLVED'].includes(String(inc.status || '').toUpperCase());
-        return matchesSite && isPending;
+        // Active tickets only: unassigned ones start the flow, assigned ones on sites
+        // worked by several technicians are included so the coordinator can consolidate
+        // the whole building under a single active owner in one click (T-MAP-15).
+        const isActive = !['CERRADA', 'CLOSED', 'CANCELADA', 'CANCELLED', 'RESUELTA', 'RESOLVED'].includes(String(inc.status || '').toUpperCase());
+        return matchesSite && isActive;
       });
       this.bulkAssignSite = {
         locationId,
@@ -339,6 +344,19 @@ export const CoordinatorDashboardView = {
       this.showBulkAssignModal = false;
       this.bulkAssignSite = null;
       this.bulkAssignIncidents = [];
+    },
+
+    /**
+     * Refreshes the territorial map in place when its tab is mounted (RF-MAP-09):
+     * markers and site cards react immediately after a bulk assignment without the
+     * manual "Actualizar" click, and the current zoom/pan view is preserved.
+     */
+    refreshTerritorialMap() {
+      const mapTab = this.$refs && this.$refs.territorialMap;
+      if (mapTab && typeof mapTab.loadTerritorialData === 'function') {
+        return mapTab.loadTerritorialData(true);
+      }
+      return null;
     },
 
     /**
@@ -388,6 +406,9 @@ export const CoordinatorDashboardView = {
 
         this.$emit('bulk-assigned', { site: this.bulkAssignSite, assigned, failed });
         await this.loadIncidents();
+        if (assigned.length > 0) {
+          this.refreshTerritorialMap();
+        }
         if (failed.length === 0) {
           this.closeBulkAssignModal();
         } else {
@@ -1158,6 +1179,7 @@ export const CoordinatorDashboardView = {
       <!-- CONTENIDO PESTAÑA: MAPA TERRITORIAL DE TRIAJE (RF-MAP-09 / T-MAP-16) -->
       <CoordinatorTerritorialMapTab
         v-else-if="activeTab === 'mapa-territorial'"
+        ref="territorialMap"
         :current-user="currentUser"
         @assign-incidents="handleTerritorialAssign"
       />
@@ -1267,7 +1289,7 @@ export const CoordinatorDashboardView = {
           <!-- Pending incidents summary -->
           <div style="background-color: #fafbfc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-bottom: 16px;">
             <div style="font-size: 12px; font-weight: 700; color: var(--color-slate, #2c333f); text-transform: uppercase; margin-bottom: 8px;">
-              Incidencias pendientes de {{ bulkAssignSite.siteCode }}
+              Incidencias activas de {{ bulkAssignSite.siteCode }}
             </div>
             <ul style="margin: 0; padding-left: 18px; font-size: 13px; color: var(--color-ink, #000000);">
               <li v-for="inc in bulkAssignIncidents" :key="inc.id" style="margin-bottom: 4px;">

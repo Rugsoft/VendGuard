@@ -147,6 +147,7 @@ assert('1.3 El resumen cuenta tareas activas del parque', tab.totalActiveTasks =
 assert('1.4 Detecta las sedes con riesgo de cadena de frío', tab.criticalSiteCount === 1);
 assert('1.5 Detecta las sedes con multi-técnico', tab.multiTechnicianSiteCount === 1);
 assert('1.6 Sin filtros la consulta se realiza sin parámetros', apiCalls[0] !== undefined && Object.keys(apiCalls[0]).length === 0);
+assert('1.7 La primera carga muestra el spinner (no silenciosa) y después lo retira', tab.isLoading === false);
 
 // =========================================================================
 // BLOQUE 2: Insignias, colores semánticos y proyección (RNF-MAP-06)
@@ -434,6 +435,67 @@ assert('7.23 Al mínimo, Badalona, El Prat, Cornellà y el sur de Barcelona qued
 assert('7.24 Con escala por debajo de 1 el centro queda fijado en 0.5 (sin inversión del clamp)',
   wideView.clampCenter(0.7, wideView.zoomMinScale) === 0.5 && wideView.clampCenter(0.8, 0.5) === 0.5
     && Math.abs(wideView.clampCenter(0.7, 2) - 0.7) < 1e-9);
+
+// =========================================================================
+// BLOQUE 8: Refresco reactivo silencioso tras asignar desde el mapa (RF-MAP-09)
+// =========================================================================
+console.log('\n--- BLOQUE 8: Refresco reactivo silencioso ---');
+
+const reactiveMap = createTabInstance();
+await reactiveMap.loadTerritorialData();
+assert('8.1 La carga normal muestra el spinner mientras dura y no es silenciosa',
+  (() => { const t = createTabInstance(); const p = t.loadTerritorialData(); assert('(8.1a) isLoading activo durante la carga', t.isLoading === true); return p.then(() => t.isLoading === false); })());
+
+// Zoom out and pan away: a silent refresh must preserve the view state...
+reactiveMap.zoomToPoint(0.2, 0.5, 0.5);
+reactiveMap.panBy(40, 25, 1000);
+const viewBeforeSilent = { ...reactiveMap.view };
+apiCalls = [];
+await reactiveMap.loadTerritorialData(true);
+assert('8.2 El refresco silencioso recarga los datos sin spinner ni reseteo de la vista',
+  apiCalls.length === 1 && reactiveMap.isLoading === false
+    && reactiveMap.view.scale === viewBeforeSilent.scale
+    && reactiveMap.view.centerX === viewBeforeSilent.centerX
+    && reactiveMap.view.centerY === viewBeforeSilent.centerY);
+
+// ...and keeps the fitted window geometry (markers move with the same projection).
+assert('8.3 El refresco silencioso conserva la ventana encajada (proyección estable)',
+  Math.abs(reactiveMap.mapWindow.sideTiles - tab.mapWindow.sideTiles) < 1e-9
+    && Math.abs(reactiveMap.mapWindow.leftEdge - tab.mapWindow.leftEdge) < 1e-9);
+
+// A silent refresh onto an empty board (map was empty before) re-fits the view.
+const emptySilent = createTabInstance();
+apiQueue = [{ locations: [] }];
+await emptySilent.loadTerritorialData(true);
+assert('8.4 Un refresco silencioso sobre tablero vacío reencuadra la vista',
+  emptySilent.sites.length === 0 && emptySilent.mapWindow === null && emptySilent.view.scale === 1 && emptySilent.view.centerX === 0.5);
+
+// A silent refresh clears a stale error banner on success but never sets one on failure.
+const staleError = createTabInstance();
+await staleError.loadTerritorialData(true);
+staleError.errorMessage = 'Fallo anterior';
+apiQueue = [{ locations: makeSites() }];
+await staleError.loadTerritorialData(true);
+assert('8.5 El refresco silencioso limpia un error previo al tener éxito', staleError.errorMessage === '' && staleError.sites.length === 3);
+
+const silentFailure = createTabInstance();
+await silentFailure.loadTerritorialData();
+const sitesBeforeFailure = silentFailure.sites.length;
+const windowBeforeFailure = { ...silentFailure.mapWindow };
+const previousHandler = api.map.getActiveIncidents;
+api.map.getActiveIncidents = async () => { throw new Error('red caída'); };
+await silentFailure.loadTerritorialData(true);
+assert('8.6 Un fallo transitorio en silencio conserva marcadores, ventana y no muestra error',
+  silentFailure.sites.length === sitesBeforeFailure && silentFailure.errorMessage === ''
+    && Math.abs(silentFailure.mapWindow.sideTiles - windowBeforeFailure.sideTiles) < 1e-9);
+api.map.getActiveIncidents = previousHandler;
+
+// The dashboard triggers the silent refresh through the component ref after assigning.
+const viewSource = await (await import('node:fs/promises')).readFile(
+  new URL('../../public/assets/js/views/CoordinatorDashboardView.js', import.meta.url), 'utf8');
+assert('8.7 El dashboard refresca el mapa vía ref tras asignar en lote (y solo si hubo altas)',
+  viewSource.includes('ref="territorialMap"') && viewSource.includes('refreshTerritorialMap()')
+    && viewSource.includes('if (assigned.length > 0) {') && viewSource.includes('mapTab.loadTerritorialData(true)'));
 
 // =========================================================================
 // RESUMEN FINAL
