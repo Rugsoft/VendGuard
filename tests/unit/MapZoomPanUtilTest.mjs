@@ -151,9 +151,11 @@ assert('3.5 El paneo queda sujeto a la ventana encajada: el centro se detiene en
 
 const belowFit = createHost(BASE);
 belowFit.zoomToPoint(0.5, 0.5, 0.5);
-belowFit.panBy(100, 100, 800);
-assert('3.6 Por debajo del encaje el centro queda fijado en 0.5 (sin clamp invertido)',
-  belowFit.view.centerX === 0.5 && belowFit.view.centerY === 0.5);
+const centerBefore = { x: belowFit.view.centerX, y: belowFit.view.centerY };
+belowFit.panBy(120, 60, 800);
+assert('3.6 Por debajo del encaje arrastrar desplaza el centro libremente (roaming [0,1], el contenido sigue al dedo)',
+  belowFit.view.centerX < centerBefore.x && belowFit.view.centerY < centerBefore.y
+    && belowFit.view.centerX >= 0 && belowFit.view.centerY >= 0);
 
 // -------------------------------------------------------------------------
 console.log('\n--- Gestos: rueda, doble clic, arrastre y pellizco ---');

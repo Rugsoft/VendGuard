@@ -12,10 +12,11 @@
  *    under the cursor/fingers visually fixed while zooming.
  * 2. One-pointer drag panning with a click-suppression flag so a gesture never fires an
  *    accidental marker click; two pointers pinch-zoom anchored at gesture start.
- * 3. Below the fitted scale (scale < 1) the whole base window stays visible: the view
- *    center pins to 0.5 (the clamp margin would invert otherwise) and the tile zoom
- *    level drops adaptively (slippy-map style) so wider views request a handful of
- *    tiles instead of compounding their count.
+ * 3. Below the fitted scale (scale < 1) the whole base window stays visible: the center
+ *    roams the full canvas so dragging still pans to the neighboring area (the adaptive
+ *    tile window covers the extra viewport), and the tile zoom level drops adaptively
+ *    (slippy-map style) so wider views request a handful of tiles instead of
+ *    compounding their count.
  * 4. Pixel-aware tile choice (Leaflet style): when the host reports its rendered
  *    width, the tile level is picked so every standard 256px tile renders near its
  *    native size — wide panoramic canvases get sharper imagery instead of an
@@ -102,7 +103,13 @@ export const MapZoomPanMethods = {
     if (!base) {
       return base;
     }
+    // Read the full view state up front: computed consumers (the map tile layers)
+    // track only the fields read during their first evaluation, and the early return
+    // below fires while the canvas is still unmeasured (loading spinner), which would
+    // leave centerX/centerY untracked and freeze tile panning at the fitted scale.
     const scale = this.view.scale;
+    const centerX = this.view.centerX;
+    const centerY = this.view.centerY;
     const widthPx = typeof this.getRenderWidthPx === 'function' ? Number(this.getRenderWidthPx()) || 0 : 0;
     if (scale === 1 && widthPx <= 0) {
       // Content-fit hosts without a measurable canvas keep the fitted window verbatim.
@@ -128,22 +135,25 @@ export const MapZoomPanMethods = {
     return {
       zoom,
       sideTiles,
-      leftEdge: ((base.leftEdge + (this.view.centerX - 1 / (2 * scale)) * base.sideTiles) / worldBase) * worldNew,
-      topEdge: ((base.topEdge + (this.view.centerY - 1 / (2 * scale)) * base.sideTiles) / worldBase) * worldNew
+      leftEdge: ((base.leftEdge + (centerX - 1 / (2 * scale)) * base.sideTiles) / worldBase) * worldNew,
+      topEdge: ((base.topEdge + (centerY - 1 / (2 * scale)) * base.sideTiles) / worldBase) * worldNew
     };
   },
   /**
-   * Keeps the view center inside the fitted window so the territory never leaves sight.
-   * Below the fitted scale (scale < 1) the fitted window occupies less than the whole
-   * canvas, so any centered value keeps it visible and the center stays fixed at 0.5
-   * instead of clamping into an empty inverted range.
+   * Keeps the view from losing the content while panning. Above the fitted scale the
+   * visible rect must stay inside the fitted window: the center is held to the band
+   * [1/(2·scale), 1 - 1/(2·scale)]. At or below the fitted scale the whole fit already
+   * fits (or is smaller than) the canvas, so the center roams the full [0, 1] range —
+   * dragging at the default fitted view pans the map to the neighboring area (the
+   * adaptive tile window covers the extra viewport) instead of being dead-locked at
+   * 0.5, and the fit always keeps overlapping the viewport so no site gets lost.
    */
   clampCenter(value, scale) {
-    const margin = 1 / (2 * scale);
-    if (margin >= 0.5) {
-      return 0.5;
+    const halfVisible = 1 / (2 * scale);
+    if (halfVisible < 0.5) {
+      return Math.min(Math.max(value, halfVisible), 1 - halfVisible);
     }
-    return Math.min(Math.max(value, margin), 1 - margin);
+    return Math.min(Math.max(value, 0), 1);
   },
   /**
    * Core zoom: sets a new scale keeping the base-window point under the canvas anchor
