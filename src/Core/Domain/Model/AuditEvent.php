@@ -24,6 +24,17 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_LOCATION = 'LOCATION';
     public const ENTITY_USER     = 'USER';
 
+    /**
+     * Entidades del módulo de reintegros (Módulo 08).
+     *
+     * 'REFUND_REQUEST' no puede reutilizarse como 'TICKET': el expediente de
+     * reintegro tiene su propio espacio de identificadores, así que auditarlo
+     * como ticket apuntaría a una avería ajena y rompería la trazabilidad del
+     * dinero (RNF-REF-01, Art. III.3).
+     */
+    public const ENTITY_REFUND_REQUEST          = 'REFUND_REQUEST';
+    public const ENTITY_UNCLAIMED_CASH_FINDING  = 'UNCLAIMED_CASH_FINDING';
+
     private ?int $id;
     private string $entityType;
     private int $entityId;
@@ -38,7 +49,8 @@ class AuditEvent implements JsonSerializable
 
     /**
      * @param int|null $id Identificador unívoco del registro en BD (null antes de persistir).
-     * @param string $entityType Tipo de entidad ('TICKET', 'MACHINE', 'LOCATION', 'USER').
+     * @param string $entityType Tipo de entidad ('TICKET', 'MACHINE', 'LOCATION', 'USER',
+     *   'REFUND_REQUEST', 'UNCLAIMED_CASH_FINDING').
      * @param int $entityId ID numérico de la entidad afectada.
      * @param string $action Acción ejecutada (ej. 'RESOLVE_INCIDENT', 'STATUS_CHANGE', 'ASSIGN_TECHNICIAN').
      * @param int|null $userId ID del usuario causante (null si es sistema o reporte anónimo).
@@ -62,7 +74,14 @@ class AuditEvent implements JsonSerializable
         ?array $metadata = null,
         ?string $createdAt = null
     ) {
-        $validTypes = [self::ENTITY_TICKET, self::ENTITY_MACHINE, self::ENTITY_LOCATION, self::ENTITY_USER];
+        $validTypes = [
+            self::ENTITY_TICKET,
+            self::ENTITY_MACHINE,
+            self::ENTITY_LOCATION,
+            self::ENTITY_USER,
+            self::ENTITY_REFUND_REQUEST,
+            self::ENTITY_UNCLAIMED_CASH_FINDING,
+        ];
         if (!in_array($entityType, $validTypes, true)) {
             throw new InvalidArgumentException("Tipo de entidad de auditoría inválido: {$entityType}");
         }

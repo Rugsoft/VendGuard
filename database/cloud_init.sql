@@ -197,7 +197,7 @@ CREATE TABLE `incident_comments` (
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `audit_log` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `entity_type` ENUM('TICKET', 'MACHINE', 'LOCATION', 'USER', 'PREVENTIVE_ORDER', 'SANITARY_CERTIFICATE') NOT NULL,
+  `entity_type` ENUM('TICKET', 'MACHINE', 'LOCATION', 'USER', 'PREVENTIVE_ORDER', 'SANITARY_CERTIFICATE', 'REFUND_REQUEST', 'UNCLAIMED_CASH_FINDING') NOT NULL,
   `entity_id` INT UNSIGNED NOT NULL,
   `action` VARCHAR(64) NOT NULL,
   `user_id` INT UNSIGNED NULL DEFAULT NULL,

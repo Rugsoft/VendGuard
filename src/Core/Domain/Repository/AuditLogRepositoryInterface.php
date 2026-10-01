@@ -30,7 +30,7 @@ interface AuditLogRepositoryInterface
      * Consulta cronológica paginada y filtrable del registro de auditoría (EARS 5.5).
      * 
      * @param array<string, mixed> $filters Filtros opcionales:
-     *   - entity_type: 'TICKET', 'MACHINE', 'LOCATION'
+     *   - entity_type: 'TICKET', 'MACHINE', 'LOCATION', 'USER', 'REFUND_REQUEST', 'UNCLAIMED_CASH_FINDING'
      *   - entity_id: int
      *   - action: string
      *   - user_id: int
@@ -53,7 +53,7 @@ interface AuditLogRepositoryInterface
     /**
      * Obtiene el historial de auditoría de una entidad específica ordenado cronológicamente.
      * 
-     * @param string $entityType Tipo de entidad ('TICKET', 'MACHINE', 'LOCATION').
+     * @param string $entityType Tipo de entidad ('TICKET', 'MACHINE', 'LOCATION', 'USER', 'REFUND_REQUEST', 'UNCLAIMED_CASH_FINDING').
      * @param int $entityId Identificador numérico de la entidad.
      * @return list<AuditEvent>
      */

@@ -78,6 +78,19 @@ Para evitar entregas erróneas o accesos indebidos en conserjería:
 ```sql
 -- Migración DDL: 008_refund_management.sql
 
+-- 0. Extensión del Enum de Auditoría (RNF-REF-01 / Art. III.3)
+-- Migración DDL: 009_refund_audit_entity.sql
+-- `REFUND_REQUEST` y `UNCLAIMED_CASH_FINDING` son obligatorios y no cosméticos:
+-- `refund_requests.id` e `incidents.id` son espacios de identificadores
+-- distintos, por lo que auditar un reintegro como `TICKET` apuntaría en
+-- silencio a una avería ajena y destruiría la trazabilidad del dinero.
+ALTER TABLE `audit_log`
+MODIFY COLUMN `entity_type` ENUM(
+    'TICKET', 'MACHINE', 'LOCATION', 'USER',
+    'PREVENTIVE_ORDER', 'SANITARY_CERTIFICATE',
+    'REFUND_REQUEST', 'UNCLAIMED_CASH_FINDING'
+) NOT NULL;
+
 -- 1. Ampliación de tabla LOCATIONS: indicador de conserjería / recepción física
 ALTER TABLE `locations`
 ADD COLUMN `has_physical_reception` TINYINT(1) NOT NULL DEFAULT 1 AFTER `longitude`;

@@ -136,6 +136,11 @@ try {
     $stmt = $pdo->query("SHOW INDEX FROM `refund_requests` WHERE Key_name = 'idx_refund_tracking_token'");
     $hasRefundTrackingIndex = ($stmt->fetch() !== false);
 
+    // Verificar entidades de reintegro en el enum de audit_log (Módulo 08 / RNF-REF-01)
+    $hasRefundAuditEnum = ($colAuditEnum !== false
+        && str_contains((string)($colAuditEnum['Type'] ?? ''), "'REFUND_REQUEST'")
+        && str_contains((string)($colAuditEnum['Type'] ?? ''), "'UNCLAIMED_CASH_FINDING'"));
+
     echo "      - Columna virtual `is_active_ticket`: [" . ($hasVirtualCol ? "OK" : "FALTA") . "]\n";
     echo "      - Índice único `uq_machine_active_ticket`: [" . ($hasUniqueIndex ? "OK" : "FALTA") . "]\n";
     echo "      - Columna `machine_type_snapshot` en incidents: [" . ($hasSnapshotCol ? "OK" : "FALTA") . "]\n";
@@ -148,12 +153,13 @@ try {
     echo "      - Índice `idx_locations_lat_lng`: [" . ($hasLocationCoordinateIndex ? "OK" : "FALTA") . "]\n";
     echo "      - Fila singleton `route_settings` (id=1): [" . ($hasRouteSettingsSingleton ? "OK" : "FALTA") . "]\n";
     echo "      - Columna `has_physical_reception` en locations: [" . ($hasPhysicalReceptionCol ? "OK" : "FALTA") . "]\n";
-    echo "      - Índice `idx_refund_tracking_token`: [" . ($hasRefundTrackingIndex ? "OK" : "FALTA") . "]\n\n";
+    echo "      - Índice `idx_refund_tracking_token`: [" . ($hasRefundTrackingIndex ? "OK" : "FALTA") . "]\n";
+    echo "      - Entidades `REFUND_REQUEST` y `UNCLAIMED_CASH_FINDING` en audit_log: [" . ($hasRefundAuditEnum ? "OK" : "FALTA") . "]\n\n";
 
     $isMigrationComplete = $allTablesExist && $hasVirtualCol && $hasUniqueIndex && $hasSnapshotCol && $hasUserEnum
         && $hasOperatorCode && $hasSanitaryStatus && $hasPreventiveOrderCol && $hasPreventiveAuditEnum
         && $hasLocationLatitude && $hasLocationLongitude && $hasLocationCoordinateIndex && $hasRouteSettingsSingleton
-        && $hasPhysicalReceptionCol && $hasRefundTrackingIndex;
+        && $hasPhysicalReceptionCol && $hasRefundTrackingIndex && $hasRefundAuditEnum;
 
     if ($isMigrationComplete) {
         echo "========================================================\n";
