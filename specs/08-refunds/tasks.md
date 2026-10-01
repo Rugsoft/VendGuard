@@ -26,7 +26,7 @@
   * **Dependencias:** T-REF-01
   * **Hecho cuando:** Existen en `src/Core/Domain/Model/` los enums tipados (`CompensationMethod`, `RefundStatus`, `TechnicianFinding`, `CashCustodyAction`) y las entidades inmutables con tipado estricto PHP 8.2+ (`RefundRequest`, `UnclaimedCashFinding`) con validaciones de invariantes de dominio (anonimización de nombres, verificación segura de PIN en tiempo constante y regla de supervisión especial).
 
-- [ ] **T-REF-03: Implementar Excepciones de Dominio y suite unitaria (`RefundExceptionsTest.php`, `RefundDomainModelsTest.php`)**
+- [x] **T-REF-03: Implementar Excepciones de Dominio y suite unitaria (`RefundExceptionsTest.php`, `RefundDomainModelsTest.php`)**
   * **Requisitos:** RF-REF-01, RF-REF-02, RF-REF-03, RF-REF-05, RF-REF-06, RF-REF-10, Constitución Art. V.4
   * **Dependencias:** T-REF-02
   * **Hecho cuando:** Existen en `src/Core/Domain/Exception/` las clases tipadas (`InvalidRefundAmountException`, `InvalidIbanFormatException`, `InvalidBizumPhoneException`, `InvalidPickupPinException`, `ReceptionDeliveryNotAllowedException`, `InvalidRefundStateTransitionException`, `SiteRefundDataForbiddenException`), y `php tests/unit/RefundExceptionsTest.php` junto con `php tests/unit/RefundDomainModelsTest.php` pasan al 100% en verde evaluando códigos HTTP (`403`, `409`, `422`), mensajes en castellano, límites antifraude y anonimización de datos.
