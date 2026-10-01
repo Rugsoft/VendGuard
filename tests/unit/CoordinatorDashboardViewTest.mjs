@@ -51,6 +51,7 @@ const mockIncidents = [
     id: 1,
     ticket_code: 'INC-2026-0001',
     machine_id: 1,
+    location_id: 1,
     machine_code: 'VEND-0101',
     machine_model: 'Sanden Vendo G-Drink',
     machine_type: 'PERISHABLE_FOOD',
@@ -69,6 +70,7 @@ const mockIncidents = [
     id: 2,
     ticket_code: 'INC-2026-0002',
     machine_id: 2,
+    location_id: 1,
     machine_code: 'VEND-0102',
     machine_model: 'Necta Canto',
     machine_type: 'HOT_DRINKS',
@@ -87,6 +89,7 @@ const mockIncidents = [
     id: 3,
     ticket_code: 'INC-2026-0003',
     machine_id: 3,
+    location_id: 3,
     machine_code: 'VEND-0103',
     machine_model: 'Fas Fast',
     machine_type: 'SNACKS',
@@ -129,6 +132,14 @@ function createDashboardInstance(initialData = {}) {
     assignUrgencyReason: '',
     isAssigning: false,
     assignError: '',
+    showBulkAssignModal: false,
+    bulkAssignSite: null,
+    bulkAssignIncidents: [],
+    bulkAssignTechnicianId: 2,
+    bulkAssignUrgencyOverride: '',
+    bulkAssignUrgencyReason: '',
+    bulkAssignError: '',
+    isBulkAssigning: false,
     showCancelModal: false,
     cancelReason: '',
     isCancelling: false,
@@ -348,22 +359,79 @@ assert('6.5 Map tab becomes the active tab on click simulation', mapTabView.acti
 mapTabView.activeTab = 'incidents';
 assert('6.6 Switching back to triage restores the incidents tab without residue', mapTabView.activeTab === 'incidents');
 
-// Assignment flow started from the territorial map (RF-MAP-09)
+// Assignment flow started from the territorial map (RF-MAP-09): the bulk assignment
+// modal opens directly over the site pending incidents (no triage-list redirect).
 const assignFlowView = createDashboardInstance();
 assignFlowView.activeTab = 'mapa-territorial';
-assignFlowView.filterSearch = '';
-CoordinatorDashboardView.methods.handleTerritorialAssign.call(assignFlowView, { locationId: 3, siteCode: 'SEDE-BCN-03' });
-assert('6.7 Unassigned site click switches to the triage tab', assignFlowView.activeTab === 'incidents');
-assert('6.8 Triage list is filtered by the chosen site code', assignFlowView.filterSearch === 'SEDE-BCN-03' && assignFlowView.filterStatus === '' && assignFlowView.filterUrgency === '' && assignFlowView.filterSlaOnly === false);
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(assignFlowView, { locationId: 9, siteCode: 'SEDE-BCN-03' });
+assert('6.7 Unassigned site click opens the bulk assignment modal for that site', assignFlowView.showBulkAssignModal === true && assignFlowView.bulkAssignSite.siteCode === 'SEDE-BCN-03');
+assert('6.8 A site without pending incidents opens an empty bulk modal (submit disabled by contract)', assignFlowView.bulkAssignIncidents.length === 0 && assignFlowView.bulkAssignSite.name === 'SEDE-BCN-03');
 
-// End-to-end: arriving from a map card must actually surface that site's pending
-// incidents in the triage list (user-reported regression).
+// End-to-end: arriving from a map card must open the bulk modal over that site's
+// pending incidents (user-reported regression).
 const mapSearchView = createDashboardInstance();
 mapSearchView.activeTab = 'mapa-territorial';
 CoordinatorDashboardView.methods.handleTerritorialAssign.call(mapSearchView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
-assert('6.10 A map-card assignment lands on the triage tab showing that site pending incidents',
-  mapSearchView.activeTab === 'incidents' && mapSearchView.filteredIncidents.length === 2
-    && mapSearchView.filteredIncidents.every(i => (i.location_site_code || i.site_code) === 'SEDE-BCN-01'));
+assert('6.10 A map-card assignment opens the bulk modal over that site pending incidents',
+  mapSearchView.showBulkAssignModal === true && mapSearchView.bulkAssignIncidents.length === 2
+    && mapSearchView.bulkAssignIncidents.every(i => (i.location_site_code || i.site_code) === 'SEDE-BCN-01'));
+
+// ---------------------------------------------------------------------
+// TEST GROUP 7: Bulk Site Assignment Modal (RF-MAP-09)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 7: Bulk Site Assignment Modal (RF-MAP-09) ---');
+
+const bulkView = createDashboardInstance();
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(bulkView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+assert('7.1 Map card opens the bulk modal over the site pending incidents',
+  bulkView.showBulkAssignModal === true && bulkView.bulkAssignSite.siteCode === 'SEDE-BCN-01'
+    && bulkView.bulkAssignIncidents.length === 2
+    && bulkView.bulkAssignIncidents.every(i => i.location_site_code === 'SEDE-BCN-01'));
+assert('7.2 Site name is derived from the incidents and the first technician comes preselected',
+  bulkView.bulkAssignSite.name === 'Hospital del Mar' && bulkView.bulkAssignTechnicianId === 2);
+assert('7.3 Closed or resolved incidents of the site never enter the bulk list',
+  bulkView.bulkAssignIncidents.every(i => !['CERRADA', 'CLOSED', 'CANCELADA', 'CANCELLED', 'RESUELTA', 'RESOLVED'].includes(String(i.status || '').toUpperCase())));
+
+// EARS 5.3: reclassifying urgency without a justified reason is blocked
+bulkView.bulkAssignUrgencyOverride = 'HIGH';
+await CoordinatorDashboardView.methods.submitBulkAssignment.call(bulkView);
+assert('7.4 Bulk urgency reclassification without reason is blocked (EARS 5.3)',
+  bulkView.bulkAssignError.includes('obligatorio') && bulkView.isBulkAssigning === false);
+
+// Successful bulk assignment: one API call per pending incident
+const bulkCalls = [];
+api.coordinator.assignTechnician = async (id, techId, urgency, reason) => {
+  bulkCalls.push({ id, techId, urgency, reason });
+  return { id, technician_id: techId };
+};
+bulkView.bulkAssignUrgencyReason = 'Corte de refrigeración general de la sede';
+await CoordinatorDashboardView.methods.submitBulkAssignment.call(bulkView);
+assert('7.5 Confirming dispatches one assignment per pending incident and closes the modal',
+  bulkCalls.length === 2 && bulkCalls.every(c => c.techId === 2) && bulkCalls.every(c => c.reason.includes('refrigeración'))
+    && bulkView.showBulkAssignModal === false
+    && bulkView.getEmits().some(e => e.evt === 'bulk-assigned'));
+
+// Partial failure: modal stays open listing the failed tickets for retry
+const partialView = createDashboardInstance();
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(partialView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+let partialCalls = 0;
+api.coordinator.assignTechnician = async (id) => {
+  partialCalls++;
+  if (id === mockIncidents[1].id) {
+    throw new Error('La incidencia ya fue cerrada por otro operario.');
+  }
+  return { id };
+};
+await CoordinatorDashboardView.methods.submitBulkAssignment.call(partialView);
+assert('7.6 A per-incident failure keeps the modal open with the failed tickets for retry',
+  partialView.showBulkAssignModal === true && partialCalls === 2
+    && partialView.bulkAssignError.includes('ya fue cerrada')
+    && partialView.bulkAssignIncidents.length === 1
+    && partialView.bulkAssignIncidents[0].id === mockIncidents[1].id);
+
+assert('7.7 Submit stays disabled without pending incidents or technician (template contract)',
+  CoordinatorDashboardView.template.includes('isBulkAssigning || !bulkAssignTechnicianId || bulkAssignIncidents.length === 0')
+    && CoordinatorDashboardView.template.includes('data-testid="bulk-assign-form"'));
 
 // Template passes the coordinator context to the map tab
 assert('6.9 Map tab receives the coordinator user context',
