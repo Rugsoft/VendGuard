@@ -19,7 +19,9 @@
  * 6. Zoom and pan with vanilla pointer events: buttons, mouse wheel, double click, drag
  *    and pinch gestures, plus a fit-whole-territory reset button. The fitted Mercator
  *    window is never mutated; the view state derives an effective window so tiles and
- *    markers always share the same isotropic scale.
+ *    markers always share the same isotropic scale. Zooming out goes well below the
+ *    fitted scale so small site clusters (e.g. a two-site Barcelona demo park) can still
+ *    reveal the whole city and its surroundings without changing the fitted window.
  *
  * Dogma Vanilla: Vue 3 Options API in native ESM, no npm dependencies, no bundlers.
  */
@@ -44,9 +46,17 @@ const TERRITORIAL_CANVAS_HEIGHT_RATIO = 0.62;
 const TERRITORIAL_WINDOW_PADDING_FACTOR = 1.8;
 
 /**
- * Zoom interaction constants: minimum scale is the fitted whole-territory view.
+ * Zoom interaction constants. The fitted view is scale 1; the minimum sits well below
+ * it so operators can zoom out to the whole metropolitan area even when all active
+ * sites cluster in a couple of neighborhoods and the fitted window covers barely one
+ * tile. TERRITORIAL_MIN_WINDOW_FRACTION guarantees an absolute geographic floor for the
+ * widest reachable window: 0.0009 of the Mercator world (~27 km side at Barcelona's
+ * latitude) always covers the whole city and its surroundings regardless of how small
+ * the active-site cluster is. When zooming out, the tile zoom level drops adaptively
+ * (slippy-map style) so the wider window never compounds the number of tile requests.
  */
-const TERRITORIAL_MIN_SCALE = 1;
+const TERRITORIAL_MIN_SCALE = 0.15;
+const TERRITORIAL_MIN_WINDOW_FRACTION = 0.0009;
 const TERRITORIAL_MAX_SCALE = 12;
 const TERRITORIAL_WHEEL_FACTOR = 1.25;
 const TERRITORIAL_BUTTON_FACTOR = 1.5;
@@ -57,6 +67,7 @@ export {
   MARKER_COLORS,
   TERRITORIAL_CANVAS_HEIGHT_RATIO,
   TERRITORIAL_MIN_SCALE,
+  TERRITORIAL_MIN_WINDOW_FRACTION,
   TERRITORIAL_MAX_SCALE
 };
 
@@ -122,6 +133,19 @@ export const CoordinatorTerritorialMapTab = {
      */
     zoomMaxScale() {
       return TERRITORIAL_MAX_SCALE;
+    },
+    /**
+     * Minimum zoom scale exposed to the template disabled state. Dynamic: never above
+     * the static 0.15 floor, and lowered further when the fitted window is too small so
+     * zooming out can always reveal at least the guaranteed metropolitan area.
+     */
+    zoomMinScale() {
+      const base = this.mapWindow || this.computeTerritorialWindow();
+      if (!base) {
+        return 1;
+      }
+      const spanFraction = base.sideTiles / Math.pow(2, base.zoom);
+      return Math.min(TERRITORIAL_MIN_SCALE, spanFraction / TERRITORIAL_MIN_WINDOW_FRACTION);
     },
     /**
      * Exposed panoramic ratio so templates and tests share the same constant.
@@ -197,26 +221,46 @@ export const CoordinatorTerritorialMapTab = {
     // ---------------------------------------------------------------------
     /**
      * Derives the effective tile-space window from the fitted window and the current
-     * interactive view state. At scale 1 the fitted window is returned untouched.
+     * interactive view state. At scale 1 the fitted window is returned untouched. The
+     * visible rectangle is always the [centerX ± 1/(2·scale)] fraction of the fitted
+     * window, so the zoom anchor and panning stay exact. While zooming out below the
+     * fitted scale the tile zoom level drops adaptively (slippy-map style) so the wider
+     * geographic window keeps requesting a handful of standard tiles instead of
+     * compounding their count at the fitted resolution.
      */
     effectiveWindow() {
       const base = this.mapWindow || this.computeTerritorialWindow();
-      if (!base || this.view.scale === TERRITORIAL_MIN_SCALE) {
+      if (!base || this.view.scale === 1) {
         return base;
       }
-      const sideTiles = base.sideTiles / this.view.scale;
+      const scale = this.view.scale;
+      const spanFraction = base.sideTiles / Math.pow(2, base.zoom);
+      const desiredFraction = spanFraction / scale;
+      let zoom = base.zoom;
+      if (desiredFraction > spanFraction) {
+        zoom = Math.max(2, Math.min(base.zoom, Math.round(Math.log2(1 / desiredFraction))));
+      }
+      const worldBase = Math.pow(2, base.zoom);
+      const worldNew = Math.pow(2, zoom);
+      const sideTiles = (base.sideTiles / scale) / worldBase * worldNew;
       return {
-        zoom: base.zoom,
+        zoom,
         sideTiles,
-        leftEdge: base.leftEdge + (this.view.centerX - 0.5) * base.sideTiles - sideTiles / 2,
-        topEdge: base.topEdge + (this.view.centerY - 0.5) * base.sideTiles - sideTiles / 2
+        leftEdge: ((base.leftEdge + (this.view.centerX - 1 / (2 * scale)) * base.sideTiles) / worldBase) * worldNew,
+        topEdge: ((base.topEdge + (this.view.centerY - 1 / (2 * scale)) * base.sideTiles) / worldBase) * worldNew
       };
     },
     /**
      * Keeps the view center inside the fitted window so the territory never leaves sight.
+     * Below the fitted scale (scale < 1) the fitted window occupies less than the whole
+     * canvas, so any centered value keeps it visible and the center stays fixed at 0.5
+     * instead of clamping into an empty inverted range.
      */
     clampCenter(value, scale) {
       const margin = 1 / (2 * scale);
+      if (margin >= 0.5) {
+        return 0.5;
+      }
       return Math.min(Math.max(value, margin), 1 - margin);
     },
     /**
@@ -229,7 +273,7 @@ export const CoordinatorTerritorialMapTab = {
       if (!base) {
         return;
       }
-      const nextScale = Math.min(Math.max(Number(scale) || TERRITORIAL_MIN_SCALE, TERRITORIAL_MIN_SCALE), TERRITORIAL_MAX_SCALE);
+      const nextScale = Math.min(Math.max(Number(scale) || 1, this.zoomMinScale), TERRITORIAL_MAX_SCALE);
       if (nextScale === this.view.scale) {
         return;
       }
@@ -250,10 +294,11 @@ export const CoordinatorTerritorialMapTab = {
       this.view.centerY = this.clampCenter(this.view.centerY - dyPx / width, this.view.scale);
     },
     /**
-     * Fits the whole territory back into the canvas.
+     * Fits the whole territory back into the canvas: fitted scale 1, centered. Zooming
+     * out further (down to TERRITORIAL_MIN_SCALE) keeps working from this baseline.
      */
     resetView() {
-      this.view.scale = TERRITORIAL_MIN_SCALE;
+      this.view.scale = 1;
       this.view.centerX = 0.5;
       this.view.centerY = 0.5;
     },
@@ -521,8 +566,8 @@ export const CoordinatorTerritorialMapTab = {
             <div class="territorial-map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</div>
             <div class="territorial-map-controls">
               <button type="button" class="territorial-map-btn" data-testid="btn-zoom-in" :disabled="view.scale >= zoomMaxScale" @click="zoomIn" aria-label="Acercar el mapa">+</button>
-              <button type="button" class="territorial-map-btn" data-testid="btn-zoom-out" :disabled="view.scale <= 1" @click="zoomOut" aria-label="Alejar el mapa">−</button>
-              <button type="button" class="territorial-map-btn" data-testid="btn-fit-territory" :disabled="view.scale <= 1" @click="resetView" aria-label="Ver el territorio completo">⤢</button>
+              <button type="button" class="territorial-map-btn" data-testid="btn-zoom-out" :disabled="view.scale <= zoomMinScale" @click="zoomOut" aria-label="Alejar el mapa">−</button>
+              <button type="button" class="territorial-map-btn" data-testid="btn-fit-territory" :disabled="view.scale <= zoomMinScale" @click="resetView" aria-label="Ver el territorio completo">⤢</button>
             </div>
           </div>
           <div class="territorial-map-legend small">

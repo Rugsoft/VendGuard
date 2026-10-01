@@ -330,10 +330,13 @@ assert('7.6 El zoom ancla el punto bajo el cursor: no se desplaza al ampliar',
 zoomTab.zoomToPoint(999, 0.5, 0.5);
 assert('7.7 La escala máxima de zoom queda limitada a 12x', zoomTab.view.scale === 12);
 zoomTab.zoomToPoint(0.01, 0.5, 0.5);
-assert('7.8 Alejar por debajo del encaje reencuadra el territorio completo',
-  zoomTab.view.scale === 1 && zoomTab.view.centerX === 0.5 && zoomTab.view.centerY === 0.5);
+assert('7.8 Alejar por debajo del encaje se detiene en el mínimo metropolitano (0.15x) y centrado',
+  Math.abs(zoomTab.view.scale - zoomTab.zoomMinScale) < 1e-9 && zoomTab.view.centerX === 0.5 && zoomTab.view.centerY === 0.5);
 
-zoomTab.zoomIn();
+// El paneo necesita recorrido: a escala 3 el encaje supera el lienzo y arrastrar desplaza
+// el contenido de verdad (por debajo del encaje todo el territorio ya es visible y el
+// centro queda fijado, igual que en cualquier mapa real).
+zoomTab.zoomToPoint(3, 0.5, 0.5);
 const posBeforePan = zoomTab.sitePosition(zoomTab.sites[0]);
 zoomTab.handlePointerDown(makePointerEvent(1, 500, 300));
 zoomTab.handlePointerMove(makePointerEvent(1, 600, 340));
@@ -387,7 +390,50 @@ assert('7.19 Plantilla: botones de zoom y reencuadre accesibles con etiquetas AR
   zoomTmpl.includes('btn-zoom-in') && zoomTmpl.includes('btn-zoom-out') && zoomTmpl.includes('btn-fit-territory')
     && zoomTmpl.includes('aria-label="Acercar el mapa"') && zoomTmpl.includes('aria-label="Ver el territorio completo"'));
 assert('7.20 Plantilla: los botones se deshabilitan en los límites de escala',
-  zoomTmpl.includes(':disabled="view.scale >= zoomMaxScale"') && zoomTmpl.includes(':disabled="view.scale <= 1"'));
+  zoomTmpl.includes(':disabled="view.scale >= zoomMaxScale"') && zoomTmpl.includes(':disabled="view.scale <= zoomMinScale"'));
+
+// --- Zoom-out metropolitano: ver toda Barcelona y alrededores desde pocas sedes ---
+
+// Suelo geográfico absoluto: por debajo del encaje la ventana más ancha alcanzable
+// garantiza 0.0009 del mundo Mercator (~27 km de lado en Barcelona) cubriendo toda el
+// área metropolitana (Badalona - Cornellà - El Prat) aunque el clúster activo sea
+// mínimo; la escala nominal 0.15 actúa como límite superior del mínimo dinámico.
+const spanFraction = zoomTab.mapWindow.sideTiles / Math.pow(2, zoomTab.mapWindow.zoom);
+// Rama dinámica: un encaje diminuto (una sola sede a zoom 16) obliga a bajar el mínimo
+// por debajo de 0.15 hasta alcanzar el suelo geográfico garantizado.
+const tightView = createTabInstance();
+tightView.mapWindow = { zoom: 16, sideTiles: 0.65, leftEdge: 33161.5, topEdge: 24472.2 };
+assert('7.21 El zoom mínimo garantiza el suelo geográfico metropolitano (~27 km) desde cualquier encaje',
+  Math.abs(zoomTab.zoomMinScale - Math.min(0.15, spanFraction / 0.0009)) < 1e-12
+    && Math.abs(tightView.zoomMinScale - (tightView.mapWindow.sideTiles / Math.pow(2, 16)) / 0.0009) < 1e-12
+    && spanFraction / zoomTab.zoomMinScale >= 0.0009);
+
+const wideView = createTabInstance();
+wideView.sites = zoomTab.sites;
+wideView.mapWindow = { ...zoomTab.mapWindow };
+wideView.view.scale = wideView.zoomMinScale;
+const wideWindow = wideView.effectiveWindow();
+const wideSpan = wideWindow.sideTiles / Math.pow(2, wideWindow.zoom);
+const wideTiles = sharedBuildMapTiles(wideWindow);
+assert('7.22 Al mínimo, la ventana cubre el área metropolitana con zoom de tesela adaptativo y pocas teselas',
+  Math.abs(wideSpan - spanFraction / zoomTab.zoomMinScale) < 1e-12
+    && wideSpan >= 0.0009
+    && wideWindow.zoom === Math.round(Math.log2(1 / wideSpan))
+    && wideTiles.length >= 1 && wideTiles.length <= 9);
+
+const wideCorners = [
+  { lat: 41.4417, lng: 2.2246 },  // Badalona (NE)
+  { lat: 41.3592, lng: 2.1131 },  // El Prat de Llobregat (SW)
+  { lat: 41.4140, lng: 2.1520 },  // Cornellà / Esplugues (NO)
+  { lat: 41.3700, lng: 2.1900 }   // Barcelona sur (SE)
+];
+const widePositions = wideCorners.map(point => wideView.sitePosition(point));
+assert('7.23 Al mínimo, Badalona, El Prat, Cornellà y el sur de Barcelona quedan dentro del lienzo',
+  widePositions.every(point => point.x >= 0 && point.x <= 100 && point.y >= 0 && point.y <= 100));
+
+assert('7.24 Con escala por debajo de 1 el centro queda fijado en 0.5 (sin inversión del clamp)',
+  wideView.clampCenter(0.7, wideView.zoomMinScale) === 0.5 && wideView.clampCenter(0.8, 0.5) === 0.5
+    && Math.abs(wideView.clampCenter(0.7, 2) - 0.7) < 1e-9);
 
 // =========================================================================
 // RESUMEN FINAL
