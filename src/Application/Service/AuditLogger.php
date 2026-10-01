@@ -184,6 +184,77 @@ class AuditLogger
     }
 
     /**
+     * Registra un evento sobre una orden de mantenimiento preventivo (Módulo 05).
+     *
+     * Permite emitir eventos/historyicos nuevos con la entidad correcta sin
+     * alterar los ya escritos bajo `MACHINE`/`TICKET` (Art. III.3).
+     *
+     * @param int $preventiveOrderId ID de la orden en `preventive_orders`.
+     * @param string $action Acción ejecutada (ej. 'CREATE_PREVENTIVE_ORDER', 'COMPLETE_PREVENTIVE_ORDER').
+     * @param array{id: int|null, role: string, name: string} $actor Datos del causante.
+     * @param array<string, mixed>|null $previousState Estado anterior.
+     * @param array<string, mixed> $newState Estado resultante.
+     * @param array<string, mixed>|null $metadata Información adicional.
+     * @return AuditEvent Evento persistido con ID generado.
+     */
+    public function logPreventiveOrderEvent(
+        int $preventiveOrderId,
+        string $action,
+        array $actor,
+        ?array $previousState,
+        array $newState,
+        ?array $metadata = null
+    ): AuditEvent {
+        $event = new AuditEvent(
+            id: null,
+            entityType: AuditEvent::ENTITY_PREVENTIVE_ORDER,
+            entityId: $preventiveOrderId,
+            action: strtoupper(trim($action)),
+            userId: $actor['id'] ?? null,
+            userRole: $actor['role'] ?? 'SYSTEM',
+            userName: $actor['name'] ?? 'Sistema',
+            previousState: $previousState,
+            newState: $newState,
+            metadata: $metadata
+        );
+
+        return $this->auditRepo->log($event);
+    }
+
+    /**
+     * Registra un evento sobre un certificado sanitario (Módulo 05 / Art. II).
+     *
+     * @param int $certificateId ID del certificado en `sanitary_certificates`.
+     * @param string $action Acción ejecutada (ej. 'ISSUE_SANITARY_CERTIFICATE', 'SUSPEND_SANITARY_CERTIFICATE').
+     * @param array{id: int|null, role: string, name: string} $technician Datos del técnico actuante.
+     * @param array<string, mixed> $newState Estado resultante.
+     * @param array<string, mixed>|null $metadata Información adicional.
+     * @return AuditEvent Evento persistido con ID generado.
+     */
+    public function logSanitaryCertificateEvent(
+        int $certificateId,
+        string $action,
+        array $technician,
+        array $newState,
+        ?array $metadata = null
+    ): AuditEvent {
+        $event = new AuditEvent(
+            id: null,
+            entityType: AuditEvent::ENTITY_SANITARY_CERTIFICATE,
+            entityId: $certificateId,
+            action: strtoupper(trim($action)),
+            userId: $technician['id'] ?? null,
+            userRole: $technician['role'] ?? 'TECHNICIAN',
+            userName: $technician['name'] ?? 'Técnico',
+            previousState: null,
+            newState: $newState,
+            metadata: $metadata
+        );
+
+        return $this->auditRepo->log($event);
+    }
+
+    /**
      * Registra un evento del ciclo economico de un expediente de reintegro (RNF-REF-01).
      *
      * Cubre la trazabilidad completa exigida por el Art. III.3 sobre el dinero:

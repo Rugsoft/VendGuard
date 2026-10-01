@@ -3,15 +3,21 @@
 declare(strict_types=1);
 
 /**
- * VendGuard - Módulo 08: Refunds and Unclaimed Cash Management
+ * VendGuard - Tipos de entidad del registro de auditoría inmutable
  *
- * Certifies that refund cases and unclaimed cash findings own a dedicated
- * entity type in the immutable audit trail (RNF-REF-01, Art. III.3).
+ * Certifies that the audit_log.entity_type enum in the database and the
+ * AuditEvent whitelist in the domain agree exactly, for modules 05 and 08.
  *
- * The point of the test is the collision argument: `refund_requests.id` and
- * `incidents.id` are separate ID spaces, so a refund event recorded under
- * 'TICKET' would resolve to an unrelated incident and silently break the
- * traceability the Constitution demands for money movements.
+ * Two classes of bug are covered:
+ *
+ *  1. Collision: `refund_requests.id` and `incidents.id` are separate ID
+ *     spaces, so a refund event recorded under 'TICKET' would resolve to an
+ *     unrelated incident and silently break money traceability (RNF-REF-01).
+ *
+ *  2. Divergence: the enum accepted PREVENTIVE_ORDER and SANITARY_CERTIFICATE
+ *     since migration 005 while the domain rejected them, so no test could
+ *     ever emit them. Either direction of divergence is a latent defect, which
+ *     is why assertions 4.6 and 4.7 check both halves against real MariaDB.
  */
 
 $baseDir = dirname(__DIR__, 2);
@@ -95,6 +101,47 @@ $assert(
     $buildEvent(AuditEvent::ENTITY_TICKET) !== null
 );
 
+echo "\n--- 2b. Tipos del módulo 05 que el enum admitía pero el dominio rechazaba ---\n";
+
+$assert(
+    '2b.1 AuditEvent declara ENTITY_PREVENTIVE_ORDER',
+    AuditEvent::ENTITY_PREVENTIVE_ORDER === 'PREVENTIVE_ORDER'
+);
+
+$assert(
+    '2b.2 AuditEvent declara ENTITY_SANITARY_CERTIFICATE',
+    AuditEvent::ENTITY_SANITARY_CERTIFICATE === 'SANITARY_CERTIFICATE'
+);
+
+$preventiveEvent = $buildEvent(AuditEvent::ENTITY_PREVENTIVE_ORDER);
+$assert(
+    '2b.3 El dominio acepta un evento PREVENTIVE_ORDER',
+    $preventiveEvent !== null,
+    'El modelo de dominio rechazó PREVENTIVE_ORDER, pese a estar en el enum de audit_log'
+);
+
+$certificateEvent = $buildEvent(AuditEvent::ENTITY_SANITARY_CERTIFICATE);
+$assert(
+    '2b.4 El dominio acepta un evento SANITARY_CERTIFICATE',
+    $certificateEvent !== null,
+    'El modelo de dominio rechazó SANITARY_CERTIFICATE, pese a estar en el enum de audit_log'
+);
+
+$assert(
+    '2b.5 isValidEntityType() refleja la whitelist',
+    AuditEvent::isValidEntityType('PREVENTIVE_ORDER')
+    && AuditEvent::isValidEntityType('SANITARY_CERTIFICATE')
+    && AuditEvent::isValidEntityType('REFUND_REQUEST')
+    && !AuditEvent::isValidEntityType('REFUND')
+    && !AuditEvent::isValidEntityType('SPARE_PART')
+);
+
+$assert(
+    '2b.6 La whitelist no contiene duplicados',
+    count(AuditEvent::ENTITY_TYPES) === count(array_unique(AuditEvent::ENTITY_TYPES)),
+    'Constantes duplicadas en AuditEvent::ENTITY_TYPES'
+);
+
 echo "\n--- 3. AuditLogger expone los métodos de escritura del módulo 08 ---\n";
 
 $assert(
@@ -117,6 +164,26 @@ $assert(
 $assert(
     '3.4 logUnclaimedCashEvent etiqueta el evento como UNCLAIMED_CASH_FINDING',
     str_contains($auditLoggerSource, 'ENTITY_UNCLAIMED_CASH_FINDING')
+);
+
+$assert(
+    '3.5 AuditLogger::logPreventiveOrderEvent está definido',
+    method_exists(AuditLogger::class, 'logPreventiveOrderEvent')
+);
+
+$assert(
+    '3.6 AuditLogger::logSanitaryCertificateEvent está definido',
+    method_exists(AuditLogger::class, 'logSanitaryCertificateEvent')
+);
+
+$assert(
+    '3.7 logPreventiveOrderEvent etiqueta el evento como PREVENTIVE_ORDER',
+    str_contains($auditLoggerSource, 'ENTITY_PREVENTIVE_ORDER')
+);
+
+$assert(
+    '3.8 logSanitaryCertificateEvent etiqueta el evento como SANITARY_CERTIFICATE',
+    str_contains($auditLoggerSource, 'ENTITY_SANITARY_CERTIFICATE')
 );
 
 echo "\n--- 4. El enum de la base de datos admite los nuevos valores ---\n";
@@ -159,6 +226,23 @@ try {
         "Filas huérfanas: {$orphanCount}"
     );
 
+    preg_match_all("/'([A-Z_]+)'/", $enumType, $matches);
+    $dbEnumValues = $matches[1];
+
+    $missingInDomain = array_diff($dbEnumValues, AuditEvent::ENTITY_TYPES);
+    $assert(
+        '4.6 Todo tipo del enum de la BD es aceptado por el dominio (sin divergencias)',
+        empty($missingInDomain),
+        'Tipos que la BD admite y el dominio rechaza: ' . implode(', ', $missingInDomain)
+    );
+
+    $missingInDatabase = array_diff(AuditEvent::ENTITY_TYPES, $dbEnumValues);
+    $assert(
+        '4.7 Todo tipo del dominio existe en el enum de la BD',
+        empty($missingInDatabase),
+        'Tipos que el dominio acepta y la BD no: ' . implode(', ', $missingInDatabase)
+    );
+
     $distinctTypes = $pdo->query("SELECT DISTINCT `entity_type` FROM `audit_log`")->fetchAll(\PDO::FETCH_COLUMN);
     $unknownTypes = array_diff($distinctTypes, [
         'TICKET', 'MACHINE', 'LOCATION', 'USER',
@@ -169,6 +253,15 @@ try {
         '4.5 Los datos existentes solo usan tipos declarados en el enum',
         empty($unknownTypes),
         'Tipos no declarados hallados: ' . implode(', ', $unknownTypes)
+    );
+
+    $preventiveLegacyCount = (int)$pdo->query(
+        "SELECT COUNT(*) FROM `audit_log` WHERE `entity_type` IN ('PREVENTIVE_ORDER', 'SANITARY_CERTIFICATE')"
+    )->fetchColumn();
+    $assert(
+        '4.9 El histórico preventivo sigue registrado bajo MACHINE/TICKET (sin reetiquetar)',
+        $preventiveLegacyCount === 0,
+        "Eventos preventivo/sanitario reetiquetados: {$preventiveLegacyCount}"
     );
 } catch (Throwable $e) {
     $assert(
