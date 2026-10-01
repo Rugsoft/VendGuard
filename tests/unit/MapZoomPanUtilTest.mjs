@@ -179,6 +179,33 @@ assert('3.8 Arrastrando en sentido contrario se recupera el encaje',
 assert('3.9 Un centro no finito vuelve al encaje en lugar de propagar NaN',
   belowFit.clampCenter(Number.NaN, 1) === 0.5 && belowFit.clampCenter(Number.POSITIVE_INFINITY, 1) === 0.5);
 
+// Regresion de percepcion: "con mucho zoom out apenas se mueve y con mucho zoom in se
+// arrastra muchisimo". El centro vive en unidades de ventana encajada, asi que el delta
+// en pixeles debe dividirse por el ancho Y por la escala; sin el factor de escala el
+// arrastre desplaza `dragPx * scale` pixeles reales. Este recorrido mide el
+// desplazamiento real en pantalla y exige que sea 1:1 en toda la rango de escalas.
+const slippyTracks = [0.15, 0.5, 1, 4, 8].map((scale) => {
+  const slippy = createHost(BASE, { hookMin: () => 0.15, hookWidth: () => 800 });
+  slippy.view.scale = scale;
+  const before = slippy.effectiveWindow();
+  slippy.panBy(120, 0, 800);
+  const after = slippy.effectiveWindow();
+  return Number(((after.leftEdge - before.leftEdge) * (800 / after.sideTiles)).toFixed(6));
+});
+assert('3.10 El arrastre sigue al dedo 1:1 a cualquier escala (metropoli, encaje y cerca)',
+  slippyTracks.every((px) => Math.abs(px + 120) < 1e-9),
+  `desplazamiento en pantalla de un arrastre de 120px: ${JSON.stringify(slippyTracks)}`);
+
+// Y el otro eje: la correccion no debe romper el paneo vertical (misma proporcionalidad).
+const slippyY = createHost(BASE, { hookMin: () => 0.15, hookWidth: () => 800 });
+slippyY.view.scale = 0.25;
+const beforeY = slippyY.effectiveWindow();
+slippyY.panBy(0, 90, 800);
+const afterY = slippyY.effectiveWindow();
+assert('3.11 El paneo vertical tambien sigue al dedo 1:1 por debajo del encaje',
+  Math.abs((afterY.topEdge - beforeY.topEdge) * (800 / afterY.sideTiles) + 90) < 1e-9,
+  `desplazamiento vertical: ${((afterY.topEdge - beforeY.topEdge) * (800 / afterY.sideTiles)).toFixed(4)} px`);
+
 // -------------------------------------------------------------------------
 console.log('\n--- Gestos: rueda, doble clic, arrastre y pellizco ---');
 

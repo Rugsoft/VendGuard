@@ -182,13 +182,22 @@ clampCenter(value, scale) {
     this.view.centerY = this.clampCenter(worldY - (Number(ny) - 0.5) / nextScale, nextScale);
   },
   /**
-   * Pans the view by raw pixel deltas; the square Mercator world renders
+   * Pans the view by raw pixel deltas so the content always follows the finger 1:1
+   * at every zoom level (slippy behaviour). The square Mercator world renders
    * width-px per window-normalized unit on both axes (isotropic projection).
+   *
+   * The center is expressed in fitted-window units while the canvas shows
+   * `baseSideTiles / scale` of them across `canvasWidthPx`, so a pixel delta has to be
+   * divided by the canvas width AND by the scale. Leaving the scale factor out made the
+   * window move `dragPx * scale` screen pixels: the metropolitan view (0.15x) crawled
+   * 15px for a 100px drag and a close-up (8x) threw the map 800px away.
    */
   panBy(dxPx, dyPx, canvasWidthPx) {
     const width = Number(canvasWidthPx) || 1;
-    this.view.centerX = this.clampCenter(this.view.centerX - dxPx / width, this.view.scale);
-    this.view.centerY = this.clampCenter(this.view.centerY - dyPx / width, this.view.scale);
+    const scale = Math.max(Number(this.view.scale) || 1, 1e-6);
+    const unitsPerPx = 1 / (width * scale);
+    this.view.centerX = this.clampCenter(this.view.centerX - dxPx * unitsPerPx, this.view.scale);
+    this.view.centerY = this.clampCenter(this.view.centerY - dyPx * unitsPerPx, this.view.scale);
   },
   /**
    * Fits the whole content back into the canvas: fitted scale 1, centered.

@@ -456,6 +456,23 @@ assert('7.25 Cuatro arrastres de ancho completo seguidos siguen desplazando el m
   JSON.stringify(sustainedTrack) === JSON.stringify([-0.5, -1.5, -2.5, -3.5]),
   `recorrido observado: ${JSON.stringify(sustainedTrack)}`);
 
+// El arrastre debe tener la misma sensacion a cualquier escala: el contenido se pega al
+// dedo. El lienzo mide 1000px y el viewBox 100 unidades, asi que un arrastre de 250px
+// debe desplazar el marcador exactamente 25 unidades, tanto en la vista metropolitana
+// (0.25x) como con la lupa puesta (3x).
+const slippyTracks = [];
+for (const scale of [0.25, 3]) {
+  const slippyTab = createTabInstance();
+  await slippyTab.loadTerritorialData();
+  slippyTab.zoomToPoint(scale, 0.5, 0.5);
+  const before = slippyTab.sitePosition(slippyTab.sites[0]);
+  slippyTab.panBy(250, 0, 1000);
+  slippyTracks.push(Number((slippyTab.sitePosition(slippyTab.sites[0]).x - before.x).toFixed(6)));
+}
+assert('7.26 El arrastre es 1:1 con el dedo tanto alejado como cerca (25 unidades por 250px)',
+  slippyTracks.every((units) => Math.abs(units - 25) < 1e-9),
+  `desplazamiento observado por arrastre de 250px: ${JSON.stringify(slippyTracks)} unidades`);
+
 // =========================================================================
 // BLOQUE 8: Refresco reactivo silencioso tras asignar desde el mapa (RF-MAP-09)
 // =========================================================================
