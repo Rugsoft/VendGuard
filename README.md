@@ -4,17 +4,18 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/MariaDB-10.11%2B%20%7C%20MySQL%208.0-003545?style=flat-square&logo=mariadb&logoColor=white)](https://mariadb.org/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-120%20Suites%20%7C%203.796%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-137%20Suites%20%7C%204.383%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
 
-El sistema erradica de raíz los problemas críticos del sector vending mediante cinco pilares:
+El sistema erradica de raíz los problemas críticos del sector vending mediante seis pilares:
 1. **Preservación de la cadena de frío (Art. II Constitución):** Detección inmediata y forzado de prioridad máxima (**CRÍTICA / Innegociable**) en máquinas con alimentos perecederos con objetivo estricto de SLA < 4.0 horas.
 2. **Prevención atómica de duplicados:** Índice atómico en base de datos (`uq_machine_active_ticket`) que imposibilita la creación de tickets concurrentes para una misma máquina.
 3. **Justificación obligatoria de intervenciones (Art. V.1):** Prohibición terminante de resolver incidencias sin registrar diagnóstico técnico real ($\ge 20$ caracteres) y acción correctiva demostrable ($\ge 20$ caracteres).
 4. **Trazabilidad y auditoría permanente (Art. III):** Borrado físico estrictamente prohibido (*Soft Delete* obligatorio) y registro inmutable *Append-Only* (`audit_log`) con ventana de garantía de 48 horas y detección de averías crónicas.
 5. **Trazabilidad económica de repuestos (Módulo M2):** Catálogo maestro por modelo de máquina con *snapshot* inmutable de coste en cada intervención, clasificación cerrada de destino (`DESGUACE`/`TALLER`) y segregación estricta de datos de piezas y costes para el Responsable de Sede (Art. V.4).
+6. **Cartografía territorial y optimización de rutas (Módulo M4):** Proyección pura Web Mercator y secuenciación heurística en 4 fases sin librerías de terceros ni claves de API privadas (Dogma Vanilla), con visión unificada para Coordinación y navegación GPS móvil asistida para Técnicos de Campo, garantizando estricta segregación de datos frente a clientes (Art. V.4).
 
 ---
 
@@ -79,6 +80,23 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 * **Analítica de taller:** ranking de piezas, costes acumulados por modelo/sede, alertas de fallo crónico (> 3 sustituciones en 90 días en la misma máquina), bandeja de homologación de piezas fuera de catálogo y exportación CSV.
 * **Blindaje constitucional Art. V.4 certificado por suite automática** (`SiteManagerPartsDataSegregationTest`).
 
+### 7. Mapa Interactivo de Rutas y Georreferenciación Territorial (Módulo M4)
+* **Proyección Cartográfica Web Mercator Pura (EPSG:3857):** Renderizado de teselas estándar (OpenStreetMap / IGN) mediante matemática vectorial pura en JavaScript ESM (`Mercator.js`), con encuadre dinámico adaptativo (*bounding box*) y controlador gestual fluido (`MapZoomPan.js`) de rueda, doble clic, arrastre táctil y *pinch-to-zoom* con elección de tesela *pixel-aware* para evitar distorsiones en pantallas panorámicas.
+* **Optimización Heurística de Ruta de Campo en 4 Fases:** Secuenciación determinista sin servicios externos de pago de enrutamiento:
+  1. Parada actualmente en curso (`IN_PROGRESS`) inamovible como primera parada (`#1`).
+  2. Paradas críticas de alimentos perecederos ordenadas por proximidad al vencimiento de SLA (< 4h).
+  3. Paradas ordinarias optimizadas mediante heurística geométrica de *Nearest Neighbor* (Vecino Más Cercano) calculada con trigonometría esférica de Haversine (`GeoDistanceService.php`).
+  4. Exclusión automática de incidencias en espera de repuestos (`PENDING_PARTS`).
+* **Modal Cartográfico Móvil para Técnico:** Visualización interactiva en smartphone con marcadores circulares numerados correlativos (1, 2, 3...), códigos semánticos de color (crítico, ordinario, en curso, preventivo), ficha contextual al tocar el marcador o la lista, recentrado reactivo (`focusOn`), y botones de navegación GPS directa mediante enlaces universales de Google Maps.
+* **Cuadro Territorial de Coordinación:** Pestaña "Mapa Territorial" con vista panorámica de centros en ruta, matriz de averías activas por severidad, detección de concurrencia multi-técnico y reencuadre interactivo.
+* **Geocodificación Asistida de Sedes:** Selector y validación de coordenadas latitud/longitud en la administración de sedes con geocodificación abierta para sugerir ubicaciones automáticamente.
+* **Blindaje Constitucional de Privacidad (Art. V.4):** Imposibilidad estricta de acceso al mapa y a la posición de las rutas por parte de los Responsables de Sede, y prohibición de rastreo continuo en segundo plano del personal técnico (`SiteManagerRouteDataSegregationTest`).
+
+### 8. Gestión de Reintegros e Importe Retenido / Dinero Tragado (Módulo M5 · Diseñado en SDD)
+* **Especificación y Contratos Formalizados:** Documentación integral en [`specs/functional/refunds_spec.md`](specs/functional/refunds_spec.md), [`specs/technical/refunds_contracts.md`](specs/technical/refunds_contracts.md), plan técnico de arquitectura [`specs/08-refunds/plan.md`](specs/08-refunds/plan.md) y desglose atómico de 24 tareas [`specs/08-refunds/tasks.md`](specs/08-refunds/tasks.md).
+* **Protocolo de Reclamación Ciudadana y PIN Secreto:** Solicitud opcional de reintegro en el reporte QR por fallo de pago o dinero tragado, con generación de PIN secreto de 4 dígitos para entrega presencial en conserjería o transferencia digital (Bizum/IBAN validado nativamente mediante Módulo 97 ISO 7064).
+* **Custodia y Desacoplamiento (Art. II y III):** Dictamen económico desacoplado de la resolución técnica del ticket, custodia central forzada para importes $> 10,00\ \text{€}$ y bandeja de coordinación para liquidación administrativa con registro inmutable.
+
 ---
 
 ## 👥 Actores del Sistema y Credenciales de Demostración
@@ -108,8 +126,8 @@ La aplicación cuenta con un conmutador de perfiles en la barra superior para al
 # Crear la base de datos:
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS vendguard_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
-# Opción recomendada: migrador DDL idempotente (esquema base + migraciones 003-006
-# de auditoría, preventivos y repuestos, con verificación de integridad final):
+# Opción recomendada: migrador DDL idempotente (esquema base + migraciones 003-007
+# de auditoría, preventivos, repuestos y logística de rutas, con verificación de integridad final):
 php bin/migrate.php
 
 # Cargar semillas (sedes, máquinas, usuarios, preventivos y catálogo de repuestos).
@@ -212,9 +230,17 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `POST` | `/api/technician/incidents/{id}/resolve` | `TECHNICIAN` | Resolución con `replaced_parts_declared`, destino `DESGUACE`/`TALLER` y snapshot de coste. |
 | `POST` | `/api/technician/preventive/orders/{id}/complete` | `TECHNICIAN` | Cierre preventivo con registro opcional de piezas sustituidas. |
 
+#### Logística de Rutas y Cartografía Territorial (Módulo M4)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/technician/route/map` | `TECHNICIAN` | Hoja de ruta secuenciada con paradas, criticidades, desglose correctivo/preventivo y enlaces GPS. |
+| `GET` | `/api/coordinator/map/active-incidents` | `COORDINATOR` | Matriz territorial de sedes con averías activas, severidad máxima y marcas multi-técnico. |
+| `GET/PUT` | `/api/coordinator/route/settings` | `COORDINATOR` | Consulta y actualización de parámetros de la Base Central (coordenadas y radio operativo). |
+| `POST/PUT` | `/api/coordinator/locations` | `COORDINATOR` | Alta y edición de sedes con latitud/longitud validadas dentro del marco operativo territorial. |
+
 ---
 
-## 🧪 Batería Completa de Pruebas Automatizadas (T-39 & Módulos 02, 03, 04, M1 y M2)
+## 🧪 Batería Completa de Pruebas Automatizadas (T-39 & Módulos 02, 03, 04, M1, M2 y M4)
 
 La integridad de VendGuard está certificada mediante un ejecutor de pruebas automatizado nativo en 3 fases continuas:
 
@@ -223,17 +249,17 @@ La integridad de VendGuard está certificada mediante un ejecutor de pruebas aut
 php tests/run_all.php
 ```
 
-### Resumen de Ejecución Global (Septiembre 2026, cierre del Módulo M2):
+### Resumen de Ejecución Global (Octubre 2026, cierre del Módulo M4):
 ```text
 ======================================================================
- RESUMEN DE EJECUCIÓN GLOBAL (120 Suites / 3.796 Aserciones)
+ RESUMEN DE EJECUCIÓN GLOBAL (137 Suites / 4.383 Aserciones)
 ======================================================================
- Suites de pruebas PHP Unit : 52 / 52 pasadas (100%)
- Suites de pruebas JS Unit  : 30 / 30 pasadas (100%)
- Suites de Integración PHP  : 38 / 38 pasadas (100%)
+ Suites de pruebas PHP Unit : 62 / 62 pasadas (100%)
+ Suites de pruebas JS Unit  : 33 / 33 pasadas (100%)
+ Suites de Integración PHP  : 42 / 42 pasadas (100%)
  ──────────────────────────────────────────────────────────────────
- Total Suites Ejecutadas    : 120
- Total Aserciones Evaluadas : 3.796
+ Total Suites Ejecutadas    : 137
+ Total Aserciones Evaluadas : 4.383
  Fallos Detectados          : 0 (100% en verde)
  Base de datos restablecida : SÍ (Semillas intactas)
 ======================================================================
@@ -245,8 +271,10 @@ php tests/run_all.php
 Entre las suites de certificación destacan:
 * **`ConstitutionalAuditTest`** — auditoría automática de los Artículos I al VII (cero `DELETE FROM` en producción, tipado estricto, tokens visuales Docker).
 * **`SiteManagerPartsDataSegregationTest` (T-SPARE-20)** — blindaje del Art. V.4: ningún endpoint del portal de sede expone piezas, destinos ni costes.
-* **`SparePartsModuleComplianceTest` (T-SPARE-21)** — verificación global de regresión, Dogma Vanilla (cero dependencias npm/composer) y Dualismo Lingüístico.
-* **`CoordinatorSparePartsApiTest` / `TechnicianSparePartsApiTest` (T-SPARE-18/19)** — integración HTTP del ciclo completo de repuestos con congelación inmutable de costes.
+* **`SiteManagerRouteDataSegregationTest` (T-MAP-19)** — blindaje del Art. V.4: bloqueo 403 Forbidden para responsables de sede frente a rutas de campo y prohibición de rastreo en segundo plano del personal.
+* **`RouteOptimizationServiceTest` (T-MAP-07)** — verificación matemática de la heurística de optimización de rutas (Haversine, paradas prioritarias por SLA < 4h, parada activa `#1` y exclusión de `PENDING_PARTS`).
+* **`MapZoomPanUtilTest.mjs` (T-MAP-21)** — controlador gestual reactivo puro: anclaje, límites de escala, clamp de encuadre, gestos táctiles *pinch-to-zoom* y recentrado interactivo `focusOn`.
+* **`CoordinatorRouteMapApiTest` / `TechnicianRouteMapApiTest` (T-MAP-17/18)** — integración HTTP contra MariaDB del ciclo cartográfico completo, fallback a Base Central y cálculo de enlaces universales de navegación.
 
 > **Nota operativa:** las suites de integración incluyen pruebas de HTTP real contra `127.0.0.1:8000`. Si el puerto está ocupado por un servidor obsoleto, arránquelo antes con `php -S 127.0.0.1:8000 -t public public/index.php`.
 
@@ -262,13 +290,13 @@ gestor-incidencias-vending/
 ├── README.md                     # Esta guía maestra de entrega y operaciones
 ├── bin/
 │   ├── init_cloud_db.php         # Inicializador automático para MySQL/TiDB Cloud
-│   ├── migrate.php               # Migrador DDL idempotente (esquema + migraciones 003-006)
+│   ├── migrate.php               # Migrador DDL idempotente (esquema + migraciones 003-007)
 │   ├── seed.php                  # Sembrador CLI del catálogo base
 │   └── seed_demo_metrics.php     # Sembrador de métricas históricas y auditoría
 ├── database/
 │   ├── schema.sql                # DDL MariaDB del núcleo operativo
 │   ├── cloud_init.sql            # Script unificado integral para despliegues cloud
-│   ├── migrations/               # DDL incrementales (003 auditoría, 004 CRUD, 005 preventivos, 006 repuestos)
+│   ├── migrations/               # DDL incrementales (003 auditoría, 004 CRUD, 005 preventivos, 006 repuestos, 007 mapa)
 │   ├── seeds.sql                 # Semillas SQL del catálogo base (referencia)
 │   └── DemoMetricsSeeder.php     # Generador de histórico de averías y auditoría
 ├── docs/
@@ -283,11 +311,13 @@ gestor-incidencias-vending/
 │   ├── 04-admin-crud/            # Especificación del panel de administración integral
 │   ├── 05-preventive-maintenance/ # Especificación del mantenimiento preventivo y certificación sanitaria (M1)
 │   ├── 06-spare-parts/           # Especificación del catálogo de repuestos y trazabilidad (M2)
-│   ├── functional/               # Especificaciones funcionales EARS transversales (núcleo MVP, admin, preventivos, repuestos)
-│   └── technical/                # Contratos de API, DDL y esquema de base de datos
+│   ├── 07-route-map/             # Especificación del mapa interactivo de rutas y logística territorial (M4)
+│   ├── 08-refunds/               # Especificación y plan del módulo de reintegros y dinero tragado (M5)
+│   ├── functional/               # Especificaciones funcionales EARS transversales
+│   └── technical/                # Contratos de API, DDL y esquemas de base de datos
 ├── src/
-│   ├── Core/                     # Entidades inmutables, Enums, DTOs y Servicios de Dominio
-│   ├── Application/              # Casos de uso de autenticación, métricas y auditoría
+│   ├── Core/                     # Entidades inmutables, Enums, DTOs y Servicios de Dominio (Haversine, SLA, Repuestos)
+│   ├── Application/              # Casos de uso de autenticación, optimización de rutas, métricas y auditoría
 │   ├── Infrastructure/           # Repositorios PDO, conexión DB, uploader de imágenes
 │   └── Presentation/             # Router frontal, Middlewares RBAC y Controladores REST
 ├── public/                       # Raíz pública web (DocumentRoot)
@@ -304,13 +334,14 @@ gestor-incidencias-vending/
 │           ├── api.js            # Cliente HTTP nativo fetch con descargas autenticadas
 │           ├── store.js          # Almacén reactivo de sesión y alertas
 │           ├── vendor/           # Vue 3 ESM embebido (sin CDN ni npm)
-│           ├── components/       # Componentes UI (MetricCards, AuditLogViewer, SpareParts, etc.)
+│           ├── utils/            # Cartografía Web Mercator pura (Mercator.js) y gestos (MapZoomPan.js)
+│           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 120 suites
+    ├── run_all.php               # Ejecutor global de la batería de 137 suites (100% verde)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)
-    ├── unit/                     # Pruebas unitarias de lógica pura y contratos
+    ├── unit/                     # Pruebas unitarias de lógica pura, geometría y contratos
     └── integration/              # Pruebas de persistencia real en MariaDB y API HTTP
 ```
 
@@ -318,4 +349,4 @@ gestor-incidencias-vending/
 
 ## 📜 Licencia y Metodología
 Proyecto desarrollado bajo la metodología **Specification-Driven Development (SDD)** conforme a la Constitución de VendGuard.
-Septiembre 2026.
+Octubre 2026.
