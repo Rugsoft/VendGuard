@@ -60,12 +60,31 @@ const TERRITORIAL_MIN_SCALE = 0.15;
 const TERRITORIAL_MIN_WINDOW_FRACTION = 0.0009;
 const TERRITORIAL_MAX_SCALE = 12;
 
+/**
+ * Marker sizing (RF-MAP-09). The pin is drawn in viewBox units, so it renders at a
+ * constant screen size at every zoom: a designed 32px dot that is right at the fitted
+ * view but, on the metropolitan view, big enough to swallow the canvas and pile up on
+ * top of neighbouring sites when several incidents share an area. Below the fitted
+ * scale the radius therefore shrinks progressively, never below a legible floor, and
+ * the invisible hit area keeps enough room to stay clickable.
+ */
+const TERRITORIAL_MARKER_RADIUS = 3.6;
+const TERRITORIAL_MARKER_SHRINK_EXPONENT = 0.65;
+const TERRITORIAL_MARKER_MIN_RADIUS = 1;
+const TERRITORIAL_MARKER_HIT_FACTOR = 2.5;
+const TERRITORIAL_MARKER_MIN_HIT_RADIUS = 3;
+
 export {
   MARKER_COLORS,
   TERRITORIAL_CANVAS_HEIGHT_RATIO,
   TERRITORIAL_MIN_SCALE,
   TERRITORIAL_MIN_WINDOW_FRACTION,
-  TERRITORIAL_MAX_SCALE
+  TERRITORIAL_MAX_SCALE,
+  TERRITORIAL_MARKER_RADIUS,
+  TERRITORIAL_MARKER_MIN_RADIUS,
+  TERRITORIAL_MARKER_HIT_FACTOR,
+  TERRITORIAL_MARKER_MIN_HIT_RADIUS,
+  TERRITORIAL_MARKER_SHRINK_EXPONENT
 };
 
 export const CoordinatorTerritorialMapTab = {
@@ -131,6 +150,27 @@ export const CoordinatorTerritorialMapTab = {
      */
     zoomMinScale() {
       return this.getMinScale();
+    },
+    /**
+     * Visible marker radius for the current zoom: the designed size at or above the
+     * fitted scale, progressively smaller (with a legible floor) below it.
+     */
+    markerRadius() {
+      const scale = Number(this.view.scale);
+      if (!Number.isFinite(scale) || scale >= 1) {
+        return TERRITORIAL_MARKER_RADIUS;
+      }
+      return Math.max(
+        TERRITORIAL_MARKER_MIN_RADIUS,
+        TERRITORIAL_MARKER_RADIUS * Math.pow(scale, TERRITORIAL_MARKER_SHRINK_EXPONENT)
+      );
+    },
+    /**
+     * Invisible hit radius: always comfortably larger than the visible pin, and never
+     * below a usable target even when the pin shrinks on the metropolitan view.
+     */
+    markerHitRadius() {
+      return Math.max(TERRITORIAL_MARKER_MIN_HIT_RADIUS, this.markerRadius * TERRITORIAL_MARKER_HIT_FACTOR);
     },
     /**
      * Exposed panoramic ratio so templates and tests share the same constant.
@@ -459,11 +499,11 @@ export const CoordinatorTerritorialMapTab = {
               @click="handleSiteClick(site)"
               @keydown.enter.prevent="handleSiteClick(site)"
             >
-              <circle r="9" fill="transparent" class="territorial-marker-hit" />
-              <circle r="3.6" :fill="siteColor(site)" class="territorial-marker-circle" />
-              <circle v-if="isUnassignedSite(site)" r="5.4" class="territorial-marker-unassigned-ring" />
-              <text y="-5" text-anchor="middle" class="territorial-marker-badge">{{ sitePendingCount(site) }}</text>
-              <text v-if="site.is_multi_technician" y="9.4" text-anchor="middle" class="territorial-marker-multi-badge">👥</text>
+              <circle :r="markerHitRadius" fill="transparent" class="territorial-marker-hit" />
+              <circle :r="markerRadius" :fill="siteColor(site)" class="territorial-marker-circle" />
+              <circle v-if="isUnassignedSite(site)" :r="markerRadius * 1.5" class="territorial-marker-unassigned-ring" />
+              <text :y="-(markerRadius + 1.9)" text-anchor="middle" class="territorial-marker-badge">{{ sitePendingCount(site) }}</text>
+              <text v-if="site.is_multi_technician" :y="markerRadius + 3.4" text-anchor="middle" class="territorial-marker-multi-badge">👥</text>
             </g>
             </svg>
             <div class="territorial-map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</div>

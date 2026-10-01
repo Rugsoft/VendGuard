@@ -548,10 +548,39 @@ assert('7.31 Tras arrastrar, el PRIMER clic sobre un marcador sí reencuadra',
 // sobre un viewBox de 100, asi que sin un blanco transparente mayor el puntero falla
 // entre el circulo y la insignia y el clic "no hace nada".
 assert('7.32 El marcador tiene un blanco de pulsacion invisible mas grande que el circulo visible',
-  /<circle r="([\d.]+)" fill="transparent" class="territorial-marker-hit"/.test(zoomTmpl)
-    && Number(/r="([\d.]+)" fill="transparent" class="territorial-marker-hit"/.exec(zoomTmpl)[1])
-      > Number(/<circle r="([\d.]+)" :fill="siteColor/.exec(zoomTmpl)[1]),
-  'falta el circulo de golpeo o es menor que el circulo visible');
+  /<circle :r="markerHitRadius" fill="transparent" class="territorial-marker-hit"/.test(zoomTmpl)
+    && /<circle :r="markerRadius" :fill="siteColor/.test(zoomTmpl),
+  'el circulo visible y el de golpeo deben enlazar su radio a los computeds');
+
+// Tamano del marcador segun la escala (RF-MAP-09): al alejar por debajo del encaje el pin
+// se reduce para que las sedes proximas no se solapen, con suelo legible y area de
+// pulsacion holgada.
+const sizeTab = createTabInstance();
+await sizeTab.loadTerritorialData();
+const radiusAt = (scale) => { sizeTab.view.scale = scale; return Number(sizeTab.markerRadius.toFixed(4)); };
+const radiusFit = radiusAt(1);
+const radiusHalf = radiusAt(0.5);
+const radiusMin = radiusAt(sizeTab.zoomMinScale);
+assert('7.33 A escala de encaje el marcador conserva su radio de diseño (3.6)',
+  radiusFit === 3.6 && radiusAt(2) === 3.6 && radiusAt(4) === 3.6,
+  `encaje=${radiusFit}`);
+assert('7.34 Por debajo del encaje el marcador se reduce de forma monótona',
+  radiusHalf < radiusFit && radiusMin < radiusHalf && radiusMin >= 1,
+  `radios: encaje=${radiusFit}, 0.5=${radiusHalf}, minimo=${radiusMin}`);
+assert('7.35 El radio nunca baja del suelo legible (1 unidad ≈ 9px en el lienzo)',
+  radiusMin >= 1 && radiusAt(0.01) === 1 && radiusAt(0.5) > 1,
+  `radio en el minimo=${radiusMin}, radio con escala 0.01=${radiusAt(0.01)}`);
+sizeTab.view.scale = sizeTab.zoomMinScale;
+assert('7.36 El area de pulsación mantiene un suelo aunque el pin se encoja',
+  sizeTab.markerHitRadius > sizeTab.markerRadius && sizeTab.markerHitRadius >= 3,
+  `pin=${Number(sizeTab.markerRadius.toFixed(3))} golpeo=${Number(sizeTab.markerHitRadius.toFixed(3))}`);
+sizeTab.view.scale = 1;
+assert('7.37 El area de pulsación mantiene la holgura de 2.5x en el encuadre',
+  Math.abs(sizeTab.markerHitRadius - 9) < 1e-9,
+  `golpeo=${sizeTab.markerHitRadius}`);
+assert('7.38 Las insignias siguen al radio del pin para no quedar descolgadas',
+  zoomTmpl.includes(':y="-(markerRadius + 1.9)"') && zoomTmpl.includes(':y="markerRadius + 3.4"'),
+  'la insignia de recuento o la de multi-tecnico no siguen al radio');
 
 // =========================================================================
 // BLOQUE 8: Refresco reactivo silencioso tras asignar desde el mapa (RF-MAP-09)
