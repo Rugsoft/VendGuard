@@ -54,7 +54,7 @@ const mockIncidents = [
     machine_code: 'VEND-0101',
     machine_model: 'Sanden Vendo G-Drink',
     machine_type: 'PERISHABLE_FOOD',
-    site_code: 'SEDE-BCN-01',
+    location_site_code: 'SEDE-BCN-01',
     location_name: 'Hospital del Mar',
     floor_wing: 'Planta Baja',
     category: 'TEMPERATURE_COLD',
@@ -72,7 +72,7 @@ const mockIncidents = [
     machine_code: 'VEND-0102',
     machine_model: 'Necta Canto',
     machine_type: 'HOT_DRINKS',
-    site_code: 'SEDE-BCN-01',
+    location_site_code: 'SEDE-BCN-01',
     location_name: 'Hospital del Mar',
     floor_wing: 'Planta 1',
     category: 'PAYMENT_SYSTEM',
@@ -90,7 +90,7 @@ const mockIncidents = [
     machine_code: 'VEND-0103',
     machine_model: 'Fas Fast',
     machine_type: 'SNACKS',
-    site_code: 'SEDE-MAD-01',
+    location_site_code: 'SEDE-MAD-01',
     location_name: 'Campus Central',
     floor_wing: 'Cafetería',
     category: 'PRODUCT_JAM',
@@ -248,6 +248,17 @@ authDash.filterSlaOnly = false;
 authDash.filterSearch = 'VEND-0102';
 assert('3.7 Search by machine code returns matching machine', authDash.filteredIncidents.length === 1 && authDash.filteredIncidents[0].machine_code === 'VEND-0102');
 
+// Site-code search: the incidents API serializes it as location_site_code (Incident.php).
+// Regression: the filter used to read inc.site_code, a field the API never sends, so
+// searching or arriving from a territorial-map card returned zero rows.
+authDash.filterSearch = 'sede-bcn-01';
+assert('3.8 Search by site code (case-insensitive) returns every incident of the site', authDash.filteredIncidents.length === 2 && authDash.filteredIncidents.every(i => i.location_site_code === 'SEDE-BCN-01'));
+authDash.filterSearch = 'SEDE-MAD';
+assert('3.9 Search by site code prefix returns only that site', authDash.filteredIncidents.length === 1 && authDash.filteredIncidents[0].location_site_code === 'SEDE-MAD-01');
+authDash.filterSearch = 'Hospital del Mar';
+assert('3.10 Search by location name keeps working', authDash.filteredIncidents.length === 2);
+authDash.filterSearch = '';
+
 // ---------------------------------------------------------------------
 // TEST GROUP 4: Assign Modal & Urgency Override Validation (RF-05 / EARS 5.3)
 // ---------------------------------------------------------------------
@@ -344,6 +355,15 @@ assignFlowView.filterSearch = '';
 CoordinatorDashboardView.methods.handleTerritorialAssign.call(assignFlowView, { locationId: 3, siteCode: 'SEDE-BCN-03' });
 assert('6.7 Unassigned site click switches to the triage tab', assignFlowView.activeTab === 'incidents');
 assert('6.8 Triage list is filtered by the chosen site code', assignFlowView.filterSearch === 'SEDE-BCN-03' && assignFlowView.filterStatus === '' && assignFlowView.filterUrgency === '' && assignFlowView.filterSlaOnly === false);
+
+// End-to-end: arriving from a map card must actually surface that site's pending
+// incidents in the triage list (user-reported regression).
+const mapSearchView = createDashboardInstance();
+mapSearchView.activeTab = 'mapa-territorial';
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(mapSearchView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+assert('6.10 A map-card assignment lands on the triage tab showing that site pending incidents',
+  mapSearchView.activeTab === 'incidents' && mapSearchView.filteredIncidents.length === 2
+    && mapSearchView.filteredIncidents.every(i => (i.location_site_code || i.site_code) === 'SEDE-BCN-01'));
 
 // Template passes the coordinator context to the map tab
 assert('6.9 Map tab receives the coordinator user context',

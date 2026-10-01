@@ -176,12 +176,14 @@ export const CoordinatorDashboardView = {
           if (!isBreached) return false;
         }
 
-        // Text search (ticket code, machine code, site code or location name)
+        // Text search (ticket code, machine code, site code or location name). The
+        // incidents API serializes the site code as `location_site_code` (Incident.php),
+        // with a legacy `site_code` fallback for older payloads.
         if (this.filterSearch.trim()) {
           const q = this.filterSearch.trim().toLowerCase();
           const matchCode = String(inc.ticket_code || '').toLowerCase().includes(q);
           const matchMachine = String(inc.machine_code || '').toLowerCase().includes(q);
-          const matchSite = String(inc.site_code || '').toLowerCase().includes(q);
+          const matchSite = String(inc.location_site_code || inc.site_code || '').toLowerCase().includes(q);
           const matchLocation = String(inc.location_name || '').toLowerCase().includes(q);
           if (!matchCode && !matchMachine && !matchSite && !matchLocation) {
             return false;
@@ -848,7 +850,7 @@ export const CoordinatorDashboardView = {
                   <!-- 2. Sede -->
                   <td style="padding: 14px 16px; vertical-align: top;">
                     <div style="font-weight: 600; color: var(--color-slate, #2c333f);">
-                      {{ inc.location_name || inc.site_code }}
+                      {{ inc.location_name || inc.location_site_code || inc.site_code }}
                     </div>
                     <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 2px;">
                       {{ inc.floor_wing || 'Ubicación no especificada' }}
