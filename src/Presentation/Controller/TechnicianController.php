@@ -108,6 +108,9 @@ class TechnicianController
                     'name'          => $location?->getName() ?? $incident->getLocationName(),
                     'address'       => $location?->getAddress(),
                     'contact_phone' => $location?->getContactPhone(),
+                    // Coordinates for the one-tap GPS navigation button (RF-MAP-08).
+                    'latitude'      => $location?->getLatitude(),
+                    'longitude'     => $location?->getLongitude(),
                 ],
                 'category'             => $incident->getCategory()->value,
                 'description'          => $incident->getDescription(),

@@ -8,9 +8,9 @@ declare(strict_types=1);
  * Test de Integración HTTP para los endpoints administrativos de Sedes (RF-01, RNF-04, Art. III.1, III.3):
  * 1. Control de acceso RBAC estricto (401 si no hay token, 403 si el rol no es COORDINATOR).
  * 2. GET /api/coordinator/locations (Catálogo de sedes con filtros por status y búsqueda, con conteo de máquinas).
- * 3. POST /api/coordinator/locations (Alta de sede con código inmutable, validaciones y auditoría inmutable).
+ * 3. POST /api/coordinator/locations (Alta de sede con coordenadas obligatorias, validaciones y auditoría inmutable).
  * 4. GET /api/coordinator/locations/{id} (Detalle de sede).
- * 5. PATCH /api/coordinator/locations/{id} (Edición de datos descriptivos y auditoría inmutable).
+ * 5. PUT/PATCH /api/coordinator/locations/{id} (Edición de datos y auditoría inmutable).
  * 6. PATCH /api/coordinator/locations/{id}/deactivate (Baja lógica con bloqueo ante máquinas activas y auditoría).
  * 7. PATCH /api/coordinator/locations/{id}/reactivate (Reactivación de sede y auditoría).
  * 
@@ -110,13 +110,71 @@ $assert("2.7 Coincide con Hospital del Mar", str_contains($bodySearch['data'][0]
 // =========================================================================
 echo "\n--- BLOQUE 3: POST /api/coordinator/locations ---\n";
 
+$createLocationRequest = static function (string $siteCode, array $coordinates) use ($coordinatorToken): Request {
+    return new Request('POST', '/api/coordinator/locations', [], array_merge([
+        'site_code' => $siteCode,
+        'name' => 'Ubicación geográfica de aceptación',
+        'address' => 'Avenida de prueba 10, Barcelona',
+    ], $coordinates), [
+        'authorization' => "Bearer {$coordinatorToken}",
+        'content-type' => 'application/json',
+    ]);
+};
+
+$invalidCoordinateCases = [
+    ['missing latitude', 'SEDE-MAP-NL', ['longitude' => 2.17], 'INVALID_COORDINATES'],
+    ['missing longitude', 'SEDE-MAP-NG', ['latitude' => 41.38], 'INVALID_COORDINATES'],
+    ['non-numeric latitude', 'SEDE-MAP-XL', ['latitude' => 'north', 'longitude' => 2.17], 'INVALID_COORDINATES'],
+    ['out-of-territory coordinates', 'SEDE-MAP-OB', ['latitude' => 20.0, 'longitude' => 2.17], 'COORDINATES_OUT_OF_BOUNDS'],
+    ['null-island coordinates', 'SEDE-MAP-NI', ['latitude' => 0, 'longitude' => 0], 'COORDINATES_OUT_OF_BOUNDS'],
+];
+foreach ($invalidCoordinateCases as [$caseName, $siteCode, $coordinates, $expectedCode]) {
+    $response = $router->dispatch($createLocationRequest($siteCode, $coordinates));
+    $payload = $response->getDecodedBody();
+    $assert("Coordenadas de alta {$caseName} => HTTP 422", $response->getStatusCode() === 422);
+    $assert(
+        "Coordenadas de alta {$caseName} => {$expectedCode}",
+        ($payload['error']['code'] ?? '') === $expectedCode
+    );
+    $assert(
+        "Coordenadas de alta {$caseName} no persisten ubicación",
+        $locationRepo->findBySiteCode($siteCode, onlyActive: false, allowDeleted: true) === null
+    );
+}
+
+$invalidBody = $invalidCoordinateCases[0];
+$invalidRequest = $createLocationRequest($invalidBody[1], $invalidBody[2]);
+$invalidResponse = $router->dispatch($invalidRequest);
+$invalidPayload = $invalidResponse->getDecodedBody();
+$assert(
+    "Error de coordenadas ausentes contiene el mensaje del contrato",
+    ($invalidPayload['error']['message'] ?? '') === 'Las coordenadas geográficas (latitud y longitud) son obligatorias y deben ser numéricas.'
+);
+
+$validSiteCode = strtoupper('SEDE-MAP-VALID-' . substr(md5((string)microtime(true)), 0, 4));
+$validRequest = $createLocationRequest($validSiteCode, ['latitude' => 41.385312, 'longitude' => 2.193245]);
+$validResponse = $router->dispatch($validRequest);
+$validPayload = $validResponse->getDecodedBody();
+$assert("Coordenadas operativas válidas permiten el alta", $validResponse->getStatusCode() === 201);
+$assert(
+    "Coordenadas operativas válidas se persisten como valores geográficos recibidos",
+    ($validPayload['data']['latitude'] ?? null) === 41.385312
+        && ($validPayload['data']['longitude'] ?? null) === 2.193245
+);
+$validCreatedId = (int)($validPayload['data']['id'] ?? 0);
+if ($validCreatedId > 0) {
+    $locationRepo->softDelete($validCreatedId);
+}
+
 // 3.1 Error de validación: campos obligatorios vacíos o teléfono inválido
 $reqInvalidPost = new Request('POST', '/api/coordinator/locations', [], [
     'site_code' => 'SEDE-BAD',
     'name' => '',
     'address' => 'Calle Falsa',
     'contact_name' => 'Test',
-    'contact_phone' => '123' // Menos de 9 dígitos
+    'contact_phone' => '123', // Menos de 9 dígitos
+    'latitude' => 41.385312,
+    'longitude' => 2.193245
 ], ['authorization' => "Bearer {$coordinatorToken}", 'content-type' => 'application/json']);
 $resInvalidPost = $router->dispatch($reqInvalidPost);
 $assert("3.1 Validación de datos incorrectos retorna HTTP 400 Bad Request", $resInvalidPost->getStatusCode() === 400);
@@ -127,7 +185,9 @@ $reqDuplicate = new Request('POST', '/api/coordinator/locations', [], [
     'name' => 'Duplicado Sede',
     'address' => 'Calle Copia 1',
     'contact_name' => 'Contacto',
-    'contact_phone' => '600112233'
+    'contact_phone' => '600112233',
+    'latitude' => 41.385312,
+    'longitude' => 2.193245
 ], ['authorization' => "Bearer {$coordinatorToken}", 'content-type' => 'application/json']);
 $resDuplicate = $router->dispatch($reqDuplicate);
 $assert("3.2 Alta con site_code existente retorna HTTP 409 Conflict", $resDuplicate->getStatusCode() === 409);
@@ -141,7 +201,9 @@ $reqCreate = new Request('POST', '/api/coordinator/locations', [], [
     'name' => 'Parque Tecnológico Norte',
     'address' => 'Avenida de la Innovación 45, Planta 0',
     'contact_name' => 'Elena Gestora',
-    'contact_phone' => '677889900'
+    'contact_phone' => '677889900',
+    'latitude' => 41.385312,
+    'longitude' => 2.193245
 ], ['authorization' => "Bearer {$coordinatorToken}", 'content-type' => 'application/json']);
 $resCreate = $router->dispatch($reqCreate);
 $bodyCreate = $resCreate->getDecodedBody();
@@ -149,6 +211,11 @@ $bodyCreate = $resCreate->getDecodedBody();
 $assert("3.3 Alta válida retorna HTTP 201 Created", $resCreate->getStatusCode() === 201);
 $assert("3.3 Devuelve ID generado", !empty($bodyCreate['data']['id']));
 $newLocationId = (int)($bodyCreate['data']['id'] ?? 0);
+$assert(
+    "3.3 Coordenadas persistidas en la sede creada",
+    ($bodyCreate['data']['latitude'] ?? null) === 41.385312
+        && ($bodyCreate['data']['longitude'] ?? null) === 2.193245
+);
 $assert("3.3 Devuelve site_code inmutable correcto", ($bodyCreate['data']['site_code'] ?? '') === $uniqueCode);
 $assert("3.3 is_active es true", ($bodyCreate['data']['is_active'] ?? false) === true);
 
@@ -157,6 +224,12 @@ $stmtLoc = $pdo->prepare("SELECT * FROM locations WHERE id = :id");
 $stmtLoc->execute([':id' => $newLocationId]);
 $dbLoc = $stmtLoc->fetch(PDO::FETCH_ASSOC);
 $assert("3.4 Sede persistida físicamente en base de datos", $dbLoc !== false && (int)$dbLoc['is_active'] === 1);
+$assert(
+    "3.4 Coordenadas correctas almacenadas en MariaDB",
+    $dbLoc !== false
+        && (float)$dbLoc['latitude'] === 41.385312
+        && (float)$dbLoc['longitude'] === 2.193245
+);
 
 $stmtAudit = $pdo->prepare("SELECT * FROM audit_log WHERE entity_type = 'LOCATION' AND action = 'LOCATION_CREATED' AND entity_id = :id");
 $stmtAudit->execute([':id' => $newLocationId]);
@@ -182,13 +255,67 @@ $reqGetNotFound = new Request('GET', '/api/coordinator/locations/999999', [], []
 $resGetNotFound = $router->dispatch($reqGetNotFound);
 $assert("4.4 Sede inexistente retorna HTTP 404 Not Found", $resGetNotFound->getStatusCode() === 404);
 
-// =========================================================================
-// BLOQUE 5: PATCH /api/coordinator/locations/{id} (Edición descriptiva)
-// =========================================================================
-echo "\n--- BLOQUE 5: PATCH /api/coordinator/locations/{id} ---\n";
+$putNoAuth = $router->dispatch(new Request('PUT', "/api/coordinator/locations/{$newLocationId}"));
+$putWrongRole = $router->dispatch(new Request(
+    'PUT',
+    "/api/coordinator/locations/{$newLocationId}",
+    [],
+    [],
+    ['authorization' => "Bearer {$technicianToken}"]
+));
+$assert("4.5 PUT de edición sin token se rechaza con HTTP 401", $putNoAuth->getStatusCode() === 401);
+$assert("4.6 PUT de edición como técnico se rechaza con HTTP 403", $putWrongRole->getStatusCode() === 403);
 
-// 5.1 Edición válida
-$reqUpdate = new Request('PATCH', "/api/coordinator/locations/{$newLocationId}", [], [
+// =========================================================================
+// BLOQUE 5: PUT /api/coordinator/locations/{id} (Edición con coordenadas obligatorias)
+// =========================================================================
+echo "\n--- BLOQUE 5: PUT /api/coordinator/locations/{id} ---\n";
+
+$updateLocationRequest = static function (array $coordinates) use ($coordinatorToken, $newLocationId): Request {
+    return new Request('PUT', "/api/coordinator/locations/{$newLocationId}", [], array_merge([
+        'name' => 'Parque Tecnológico Norte (Renombrado)',
+    ], $coordinates), [
+        'authorization' => "Bearer {$coordinatorToken}",
+        'content-type' => 'application/json',
+    ]);
+};
+
+$invalidUpdateCases = [
+    ['missing latitude', [], 'INVALID_COORDINATES'],
+    ['missing longitude', ['latitude' => 41.385312], 'INVALID_COORDINATES'],
+    ['non-numeric longitude', ['latitude' => 41.385312, 'longitude' => 'east'], 'INVALID_COORDINATES'],
+    ['outside territory', ['latitude' => 41.0, 'longitude' => 6.0], 'COORDINATES_OUT_OF_BOUNDS'],
+];
+foreach ($invalidUpdateCases as [$caseName, $coordinates, $expectedCode]) {
+    $beforeUpdate = $locationRepo->findById($newLocationId);
+    $auditCountStatement = $pdo->prepare("SELECT COUNT(*) FROM `audit_log` WHERE `entity_type` = 'LOCATION' AND `entity_id` = :id AND `action` = 'LOCATION_UPDATED'");
+    $auditCountStatement->execute([':id' => $newLocationId]);
+    $auditBeforeUpdate = $auditCountStatement->fetchColumn();
+    $response = $router->dispatch($updateLocationRequest($coordinates));
+    $payload = $response->getDecodedBody();
+    $afterUpdate = $locationRepo->findById($newLocationId);
+    $auditCountStatement->execute([':id' => $newLocationId]);
+    $auditAfterUpdate = $auditCountStatement->fetchColumn();
+    $assert("Coordenadas de edición {$caseName} => HTTP 422", $response->getStatusCode() === 422);
+    $assert(
+        "Coordenadas de edición {$caseName} => {$expectedCode}",
+        ($payload['error']['code'] ?? '') === $expectedCode
+    );
+    $assert(
+        "Coordenadas de edición {$caseName} no actualizan la sede",
+        $beforeUpdate !== null
+            && $afterUpdate !== null
+            && $afterUpdate->getName() === $beforeUpdate->getName()
+            && $afterUpdate->getLatitude() === $beforeUpdate->getLatitude()
+            && $afterUpdate->getLongitude() === $beforeUpdate->getLongitude()
+            && (int)$auditAfterUpdate === (int)$auditBeforeUpdate
+    );
+}
+
+// 5.1 Edición válida con coordenadas territoriales
+$reqUpdate = new Request('PUT', "/api/coordinator/locations/{$newLocationId}", [], [
+    'latitude' => 41.403629,
+    'longitude' => 2.189512,
     'name' => 'Parque Tecnológico Norte (Renombrado)',
     'address' => 'Avenida de la Innovación 45, Planta 1',
     'contact_name' => 'Elena Gestora Principal',
@@ -200,12 +327,23 @@ $bodyUpdate = $resUpdate->getDecodedBody();
 $assert("5.1 Edición de sede retorna HTTP 200 OK", $resUpdate->getStatusCode() === 200);
 $assert("5.2 Nombre actualizado en respuesta", ($bodyUpdate['data']['name'] ?? '') === 'Parque Tecnológico Norte (Renombrado)');
 $assert("5.3 Teléfono actualizado en respuesta", ($bodyUpdate['data']['contact_phone'] ?? '') === '688990011');
+$assert(
+    "5.3 Coordenadas geográficas actualizadas en respuesta",
+    ($bodyUpdate['data']['latitude'] ?? null) === 41.403629
+        && ($bodyUpdate['data']['longitude'] ?? null) === 2.189512
+);
 
 // 5.2 Verificación en audit_log
 $stmtAuditUpd = $pdo->prepare("SELECT * FROM audit_log WHERE entity_type = 'LOCATION' AND action = 'LOCATION_UPDATED' AND entity_id = :id ORDER BY id DESC LIMIT 1");
 $stmtAuditUpd->execute([':id' => $newLocationId]);
 $auditUpd = $stmtAuditUpd->fetch(PDO::FETCH_ASSOC);
 $assert("5.4 Evento LOCATION_UPDATED registrado en audit_log", $auditUpd !== false);
+$assert(
+    "5.4 Coordenadas nuevas quedan registradas en auditoría",
+    $auditUpd !== false
+        && str_contains((string)$auditUpd['new_state'], '41.403629')
+        && str_contains((string)$auditUpd['new_state'], '2.189512')
+);
 
 // =========================================================================
 // BLOQUE 6: PATCH /api/coordinator/locations/{id}/deactivate (Baja Lógica)
@@ -269,7 +407,7 @@ $auditReact = $stmtAuditReact->fetch(PDO::FETCH_ASSOC);
 $assert("7.5 Evento LOCATION_REACTIVATED registrado en audit_log", $auditReact !== false);
 
 // Limpieza de sede temporal de prueba
-$pdo->prepare("DELETE FROM locations WHERE id = :id")->execute([':id' => $newLocationId]);
+$locationRepo->softDelete($newLocationId);
 
 // =========================================================================
 // RESUMEN FINAL

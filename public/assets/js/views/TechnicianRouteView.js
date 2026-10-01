@@ -24,6 +24,7 @@ import { TechnicianChecklistModal } from '../components/TechnicianChecklistModal
 import { TechnicianReinspectionModal } from '../components/TechnicianReinspectionModal.js';
 import { TechnicianSparePartsPauseModal } from '../components/TechnicianSparePartsPauseModal.js';
 import { TechnicianResolutionPartsBlock } from '../components/TechnicianResolutionPartsBlock.js';
+import { TechnicianRouteMapModal } from '../components/TechnicianRouteMapModal.js';
 
 export const TechnicianRouteView = {
   name: 'TechnicianRouteView',
@@ -35,7 +36,8 @@ export const TechnicianRouteView = {
     TechnicianChecklistModal,
     TechnicianReinspectionModal,
     TechnicianSparePartsPauseModal,
-    TechnicianResolutionPartsBlock
+    TechnicianResolutionPartsBlock,
+    TechnicianRouteMapModal
   },
   data() {
     return {
@@ -71,7 +73,10 @@ export const TechnicianRouteView = {
       resolveAction: '',
       resolvePartsData: { replaced_parts_declared: false, replaced_parts: [] },
       isResolving: false,
-      resolveError: ''
+      resolveError: '',
+
+      // Interactive route map (RF-MAP-07, RF-MAP-08)
+      showRouteMapModal: false
     };
   },
   computed: {
@@ -151,6 +156,33 @@ export const TechnicianRouteView = {
     },
     canResolve() {
       return this.isDiagnosisValid && this.isActionValid;
+    },
+
+    /**
+     * Full-day Google Maps navigation with waypoints for the ordered route (RF-MAP-08).
+     */
+    fullRouteNavigationUrl() {
+      const stops = [];
+      for (const inc of this.incidents) {
+        const lat = Number(inc.location?.latitude);
+        const lng = Number(inc.location?.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          continue;
+        }
+        stops.push(`${lat},${lng}`);
+      }
+      if (stops.length === 0) {
+        return '';
+      }
+      const params = new URLSearchParams();
+      params.set('api', '1');
+      params.set('destination', stops[stops.length - 1]);
+      if (stops.length > 1) {
+        // Raw pipe is encoded as %7C by URLSearchParams, matching the Maps contract.
+        params.set('waypoints', stops.slice(0, -1).join('|'));
+      }
+      params.set('travelmode', 'driving');
+      return `https://www.google.com/maps/dir/?${params.toString()}`;
     }
   },
   mounted() {
@@ -159,6 +191,21 @@ export const TechnicianRouteView = {
     }
   },
   methods: {
+    /**
+     * One-tap Google Maps driving navigation to the exact stop coordinates (RF-MAP-08).
+     */
+    navigateToStopLocation(incident) {
+      const lat = Number(incident.location?.latitude);
+      const lng = Number(incident.location?.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return;
+      }
+      const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+      if (typeof window !== 'undefined' && window.open) {
+        window.open(url, '_blank', 'noopener');
+      }
+    },
+
     /**
      * Loads assigned route incidents from backend (RF-07).
      */
@@ -608,6 +655,30 @@ export const TechnicianRouteView = {
 
         <!-- SECCIÓN 1: RUTA OPERATIVA DE TRABAJO (RF-07, RF-08) -->
         <div v-else>
+          <!-- Prominent "Ver Mapa de Ruta" button plus full-day Google Maps link (RF-MAP-08) -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;">
+            <button
+              type="button"
+              class="vg-btn vg-btn-primary"
+              style="height: 48px; font-size: 15px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px;"
+              data-testid="btn-open-route-map"
+              @click="showRouteMapModal = true"
+            >
+              🗺️ Ver Mapa de Ruta
+            </button>
+            <a
+              v-if="fullRouteNavigationUrl"
+              :href="fullRouteNavigationUrl"
+              target="_blank"
+              rel="noopener"
+              class="vg-btn vg-btn-secondary"
+              style="height: 48px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none;"
+              data-testid="btn-full-route-navigation"
+            >
+              🚗 Navegación GPS del día
+            </a>
+          </div>
+
           <!-- Global Toast / Feedback Messages -->
           <div
             v-if="feedbackMessage"
@@ -734,6 +805,19 @@ export const TechnicianRouteView = {
                   📞 Llamar conserjería: {{ incident.location.contact_phone }}
                 </a>
               </div>
+
+              <!-- One-tap GPS navigation to the exact machine location (RF-MAP-08) -->
+              <div v-if="incident.location?.latitude !== null && incident.location?.latitude !== undefined" style="margin-top: 6px;">
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-secondary"
+                  style="display: inline-flex; align-items: center; gap: 6px; height: 30px; font-size: 12px; padding: 0 10px;"
+                  data-testid="btn-navigate-stop"
+                  @click="navigateToStopLocation(incident)"
+                >
+                  🧭 Navegar con GPS
+                </button>
+              </div>
             </div>
 
             <!-- Description Box -->
@@ -817,6 +901,11 @@ export const TechnicianRouteView = {
         </div>
       </div>
     </div>
+
+      <!-- =================================================================== -->
+      <!-- MODAL 0: INTERACTIVE ROUTE MAP (RF-MAP-06, RF-MAP-07, RF-MAP-08) -->
+      <!-- =================================================================== -->
+      <TechnicianRouteMapModal v-model="showRouteMapModal" />
 
       <!-- =================================================================== -->
       <!-- MODAL 1: PAUSE BY REPLACEMENT PART (RF-REP-03, RF-REP-04 / T-SPARE-16, T-SPARE-17) -->

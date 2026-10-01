@@ -107,13 +107,19 @@ class AdminLocationService
             );
         }
 
-        $created = $this->locationRepo->create([
+        $locationData = [
             'site_code'     => $siteCode,
             'name'          => $name,
             'address'       => $address,
             'contact_name'  => $contactName,
             'contact_phone' => $contactPhone,
-        ]);
+        ];
+        if (array_key_exists('latitude', $data) && array_key_exists('longitude', $data)) {
+            $locationData['latitude'] = (float)$data['latitude'];
+            $locationData['longitude'] = (float)$data['longitude'];
+        }
+
+        $created = $this->locationRepo->create($locationData);
 
         // Auditoría inmutable sincrónica (RF-05, EARS 4.1)
         $metadata = [];
@@ -130,6 +136,8 @@ class AdminLocationService
                 'site_code'     => $created->getSiteCode(),
                 'name'          => $created->getName(),
                 'address'       => $created->getAddress(),
+                'latitude'      => $created->getLatitude(),
+                'longitude'     => $created->getLongitude(),
                 'contact_name'  => $created->getContactName(),
                 'contact_phone' => $created->getContactPhone(),
             ],
@@ -178,6 +186,22 @@ class AdminLocationService
             }
         }
 
+        if (array_key_exists('latitude', $data)) {
+            $latitude = (float)$data['latitude'];
+            $cleanData['latitude'] = $latitude;
+            if ($latitude !== $location->getLatitude()) {
+                $changedFields[] = 'latitude';
+            }
+        }
+
+        if (array_key_exists('longitude', $data)) {
+            $longitude = (float)$data['longitude'];
+            $cleanData['longitude'] = $longitude;
+            if ($longitude !== $location->getLongitude()) {
+                $changedFields[] = 'longitude';
+            }
+        }
+
         if (array_key_exists('contact_name', $data)) {
             $contactName = $data['contact_name'] !== null && $data['contact_name'] !== '' ? trim((string)$data['contact_name']) : null;
             $cleanData['contact_name'] = $contactName;
@@ -204,6 +228,8 @@ class AdminLocationService
         $previousState = [
             'name'          => $location->getName(),
             'address'       => $location->getAddress(),
+            'latitude'      => $location->getLatitude(),
+            'longitude'     => $location->getLongitude(),
             'contact_name'  => $location->getContactName(),
             'contact_phone' => $location->getContactPhone(),
         ];
@@ -217,6 +243,8 @@ class AdminLocationService
         $newState = [
             'name'          => $updated->getName(),
             'address'       => $updated->getAddress(),
+            'latitude'      => $updated->getLatitude(),
+            'longitude'     => $updated->getLongitude(),
             'contact_name'  => $updated->getContactName(),
             'contact_phone' => $updated->getContactPhone(),
         ];

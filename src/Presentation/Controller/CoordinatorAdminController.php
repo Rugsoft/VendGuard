@@ -10,6 +10,7 @@ use VendGuard\Application\Service\AdminLocationService;
 use VendGuard\Application\Service\AdminMachineService;
 use VendGuard\Application\Service\AdminUserService;
 use VendGuard\Application\Service\AuditLogger;
+use VendGuard\Application\Service\GeoDistanceService;
 use VendGuard\Core\Domain\Exception\ActiveMachinesBlockedException;
 use VendGuard\Core\Domain\Exception\CannotDeactivateSelfException;
 use VendGuard\Core\Domain\Exception\InactiveRecordCollisionException;
@@ -98,6 +99,11 @@ class CoordinatorAdminController
     {
         return $this->handleExecution(function () use ($request): Response {
             $body = $request->getParsedBody();
+            $coordinateError = $this->validateLocationCoordinates($body);
+            if ($coordinateError !== null) {
+                return $coordinateError;
+            }
+
             $actor = $this->extractActor($request);
             $ip = $this->extractClientIp($request);
 
@@ -122,14 +128,19 @@ class CoordinatorAdminController
     }
 
     /**
-     * PATCH /api/coordinator/locations/{id}
-     * Actualiza datos descriptivos de la sede (site_code es inmutable).
+     * PUT/PATCH /api/coordinator/locations/{id}
+     * Actualiza datos de la sede, incluidas las coordenadas obligatorias (site_code es inmutable).
      */
     public function updateLocation(Request $request): Response
     {
         return $this->handleExecution(function () use ($request): Response {
             $id = $this->extractIdFromRoute($request);
             $body = $request->getParsedBody();
+            $coordinateError = $this->validateLocationCoordinates($body);
+            if ($coordinateError !== null) {
+                return $coordinateError;
+            }
+
             $actor = $this->extractActor($request);
             $ip = $this->extractClientIp($request);
 
@@ -534,6 +545,46 @@ class CoordinatorAdminController
             }
             return $this->errorResponse(400, 'VALIDATION_ERROR', $e->getMessage());
         }
+    }
+
+    /**
+     * Validates mandatory coordinates before any location service persistence.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function validateLocationCoordinates(array $body): ?Response
+    {
+        if (
+            !array_key_exists('latitude', $body)
+            || !array_key_exists('longitude', $body)
+            || !is_numeric($body['latitude'])
+            || !is_numeric($body['longitude'])
+        ) {
+            return $this->errorResponse(
+                422,
+                'INVALID_COORDINATES',
+                'Las coordenadas geográficas (latitud y longitud) son obligatorias y deben ser numéricas.'
+            );
+        }
+
+        $latitude = (float)$body['latitude'];
+        $longitude = (float)$body['longitude'];
+        if (!is_finite($latitude) || !is_finite($longitude)) {
+            return $this->errorResponse(
+                422,
+                'COORDINATES_OUT_OF_BOUNDS',
+                'Las coordenadas especificadas se encuentran fuera del territorio geográfico operativo permitido.'
+            );
+        }
+        if (!(new GeoDistanceService())->isInsideOperationalArea($latitude, $longitude)) {
+            return $this->errorResponse(
+                422,
+                'COORDINATES_OUT_OF_BOUNDS',
+                'Las coordenadas especificadas se encuentran fuera del territorio geográfico operativo permitido.'
+            );
+        }
+
+        return null;
     }
 
     private function errorResponse(int $statusCode, string $code, string $message, array $extra = []): Response

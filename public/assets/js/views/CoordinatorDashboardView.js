@@ -28,6 +28,7 @@ import { CoordinatorPreventiveOrdersTab } from '../components/CoordinatorPrevent
 import { CoordinatorPreventiveSettingsModal } from '../components/CoordinatorPreventiveSettingsModal.js';
 import { CoordinatorSparePartsTab } from '../components/CoordinatorSparePartsTab.js';
 import { CoordinatorSparePartsAnalyticsTab } from '../components/CoordinatorSparePartsAnalyticsTab.js';
+import { CoordinatorTerritorialMapTab } from '../components/CoordinatorTerritorialMapTab.js';
 
 // Canonical mapping for bilingual status values
 const STATUS_CANONICAL_MAP = {
@@ -77,13 +78,14 @@ export const CoordinatorDashboardView = {
     CoordinatorPreventiveOrdersTab,
     CoordinatorPreventiveSettingsModal,
     CoordinatorSparePartsTab,
-    CoordinatorSparePartsAnalyticsTab
+    CoordinatorSparePartsAnalyticsTab,
+    CoordinatorTerritorialMapTab
   },
   emits: ['assigned', 'cancelled', 'refresh'],
   data() {
     return {
       // Navigation Tabs (RF-FLEET-01, RF-03, RF-05, RF-PREV-02, RF-REP-01, RF-REP-09)
-      activeTab: 'incidents', // 'incidents' | 'fleet' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'admin' | 'metrics'
+      activeTab: 'incidents', // 'incidents' | 'fleet' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'admin' | 'metrics'
       activeAdminSubTab: 'locations', // 'locations' | 'machines' | 'users'
       activePreventiveSubTab: 'dashboard', // 'dashboard' | 'orders'
       showPreventiveSettingsModal: false,
@@ -118,6 +120,20 @@ export const CoordinatorDashboardView = {
       assignUrgencyReason: '',
       isAssigning: false,
       assignError: '',
+
+      // Bulk assignment modal state (reached from the territorial map, RF-MAP-09):
+      // one technician + optional urgency reclassification applied to every active
+      // incident of the chosen site (unassigned ones plus assigned ones on sites
+      // worked by several technicians, enabling one-click consolidated reassignment)
+      // in a single confirmation.
+      showBulkAssignModal: false,
+      bulkAssignSite: null,
+      bulkAssignIncidents: [],
+      bulkAssignTechnicianId: 2,
+      bulkAssignUrgencyOverride: '',
+      bulkAssignUrgencyReason: '',
+      bulkAssignError: '',
+      isBulkAssigning: false,
 
       // Cancel Modal State
       showCancelModal: false,
@@ -174,12 +190,14 @@ export const CoordinatorDashboardView = {
           if (!isBreached) return false;
         }
 
-        // Text search (ticket code, machine code, site code or location name)
+        // Text search (ticket code, machine code, site code or location name). The
+        // incidents API serializes the site code as `location_site_code` (Incident.php),
+        // with a legacy `site_code` fallback for older payloads.
         if (this.filterSearch.trim()) {
           const q = this.filterSearch.trim().toLowerCase();
           const matchCode = String(inc.ticket_code || '').toLowerCase().includes(q);
           const matchMachine = String(inc.machine_code || '').toLowerCase().includes(q);
-          const matchSite = String(inc.site_code || '').toLowerCase().includes(q);
+          const matchSite = String(inc.location_site_code || inc.site_code || '').toLowerCase().includes(q);
           const matchLocation = String(inc.location_name || '').toLowerCase().includes(q);
           if (!matchCode && !matchMachine && !matchSite && !matchLocation) {
             return false;
@@ -284,6 +302,123 @@ export const CoordinatorDashboardView = {
           this.isLoading = false;
           store.setLoading(false);
         }
+      }
+    },
+
+    /**
+     * Starts the technical assignment flow for an unassigned site chosen on the
+     * territorial triage map (RF-MAP-09): switches to the triage tab filtered by
+     * the site so the coordinator can assign its incidents one by one.
+     */
+    handleTerritorialAssign(payload) {
+      // Reached from a territorial-map card: open the bulk assignment modal directly
+      // over that site's pending incidents (RF-MAP-09) instead of redirecting the
+      // coordinator to a pre-filtered triage list.
+      const locationId = payload && payload.locationId !== undefined && payload.locationId !== null
+        ? Number(payload.locationId)
+        : null;
+      const siteCode = payload && payload.siteCode ? String(payload.siteCode) : '';
+      const pending = this.incidents.filter(inc => {
+        const site = String(inc.location_site_code || inc.site_code || '').toUpperCase();
+        const matchesSite = locationId !== null ? Number(inc.location_id) === locationId : (siteCode ? site === siteCode.toUpperCase() : false);
+        // Active tickets only: unassigned ones start the flow, assigned ones on sites
+        // worked by several technicians are included so the coordinator can consolidate
+        // the whole building under a single active owner in one click (T-MAP-15).
+        const isActive = !['CERRADA', 'CLOSED', 'CANCELADA', 'CANCELLED', 'RESUELTA', 'RESOLVED'].includes(String(inc.status || '').toUpperCase());
+        return matchesSite && isActive;
+      });
+      this.bulkAssignSite = {
+        locationId,
+        siteCode,
+        name: (pending[0] && pending[0].location_name) || siteCode
+      };
+      this.bulkAssignIncidents = pending;
+      this.bulkAssignTechnicianId = this.technicians[0]?.id || 2;
+      this.bulkAssignUrgencyOverride = '';
+      this.bulkAssignUrgencyReason = '';
+      this.bulkAssignError = '';
+      this.showBulkAssignModal = true;
+    },
+
+    closeBulkAssignModal() {
+      this.showBulkAssignModal = false;
+      this.bulkAssignSite = null;
+      this.bulkAssignIncidents = [];
+    },
+
+    /**
+     * Refreshes the territorial map in place when its tab is mounted (RF-MAP-09):
+     * markers and site cards react immediately after a bulk assignment without the
+     * manual "Actualizar" click, and the current zoom/pan view is preserved.
+     */
+    refreshTerritorialMap() {
+      const mapTab = this.$refs && this.$refs.territorialMap;
+      if (mapTab && typeof mapTab.loadTerritorialData === 'function') {
+        return mapTab.loadTerritorialData(true);
+      }
+      return null;
+    },
+
+    /**
+     * Bulk assignment: one technician (+ optional audited urgency reclassification)
+     * applied to every pending incident of the site chosen on the territorial map.
+     * Failure-safe: the loop keeps assigning after a per-incident error and reports
+     * a partial result instead of leaving the rest unassigned silently.
+     */
+    async submitBulkAssignment() {
+      if (!this.bulkAssignIncidents.length || !this.bulkAssignTechnicianId) return;
+
+      // Validate: if urgency is reclassified, reason is mandatory (EARS 5.3)
+      if (this.bulkAssignUrgencyOverride && !this.bulkAssignUrgencyReason.trim()) {
+        this.bulkAssignError = 'Es obligatorio indicar el motivo justificado de la reclasificación de urgencia (EARS 5.3).';
+        return;
+      }
+
+      this.bulkAssignError = '';
+      this.isBulkAssigning = true;
+      store.setLoading(true);
+
+      const assigned = [];
+      const failed = [];
+      try {
+        for (const incident of this.bulkAssignIncidents) {
+          try {
+            await api.coordinator.assignTechnician(
+              incident.id,
+              this.bulkAssignTechnicianId,
+              this.bulkAssignUrgencyOverride || null,
+              this.bulkAssignUrgencyReason.trim() || null
+            );
+            assigned.push(incident.ticket_code);
+          } catch (err) {
+            failed.push({ ticket: incident.ticket_code, message: err.message || 'Error desconocido' });
+          }
+        }
+
+        if (failed.length === 0) {
+          store.addAlert(`Sede ${this.bulkAssignSite.siteCode}: ${assigned.length} incidencia(s) asignada(s) correctamente.`, 'success', 5000);
+        } else if (assigned.length === 0) {
+          this.bulkAssignError = failed.map(f => `#${f.ticket}: ${f.message}`).join(' · ');
+        } else {
+          store.addAlert(`Asignación parcial en ${this.bulkAssignSite.siteCode}: ${assigned.length} correcta(s), ${failed.length} con error.`, 'warning', 7000);
+          this.bulkAssignError = failed.map(f => `#${f.ticket}: ${f.message}`).join(' · ');
+        }
+
+        this.$emit('bulk-assigned', { site: this.bulkAssignSite, assigned, failed });
+        await this.loadIncidents();
+        if (assigned.length > 0) {
+          this.refreshTerritorialMap();
+        }
+        if (failed.length === 0) {
+          this.closeBulkAssignModal();
+        } else {
+          // Keep the modal open listing what failed; the remaining (already-assigned)
+          // incidents are removed from the pending list after the reload.
+          this.bulkAssignIncidents = this.incidents.filter(inc => failed.some(f => f.ticket === inc.ticket_code));
+        }
+      } finally {
+        this.isBulkAssigning = false;
+        store.setLoading(false);
       }
     },
 
@@ -549,6 +684,17 @@ export const CoordinatorDashboardView = {
             data-testid="tab-fleet"
           >
             🏢 Parque de Sedes y Máquinas
+          </button>
+
+          <button
+            type="button"
+            class="vg-btn"
+            :class="activeTab === 'mapa-territorial' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
+            @click="activeTab = 'mapa-territorial'"
+            data-testid="tab-mapa-territorial"
+          >
+            🗺️ Mapa Territorial
           </button>
 
           <button
@@ -821,7 +967,7 @@ export const CoordinatorDashboardView = {
                   <!-- 2. Sede -->
                   <td style="padding: 14px 16px; vertical-align: top;">
                     <div style="font-weight: 600; color: var(--color-slate, #2c333f);">
-                      {{ inc.location_name || inc.site_code }}
+                      {{ inc.location_name || inc.location_site_code || inc.site_code }}
                     </div>
                     <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 2px;">
                       {{ inc.floor_wing || 'Ubicación no especificada' }}
@@ -1030,6 +1176,14 @@ export const CoordinatorDashboardView = {
         @open-catalog="activeTab = 'repuestos'"
       />
 
+      <!-- CONTENIDO PESTAÑA: MAPA TERRITORIAL DE TRIAJE (RF-MAP-09 / T-MAP-16) -->
+      <CoordinatorTerritorialMapTab
+        v-else-if="activeTab === 'mapa-territorial'"
+        ref="territorialMap"
+        :current-user="currentUser"
+        @assign-incidents="handleTerritorialAssign"
+      />
+
       <!-- CONTENIDO PESTAÑA 4: MÉTRICAS Y AUDITORÍA (RF-01, RF-02, RF-03, RF-05, RF-06) -->
       <CoordinatorMetricsView
         v-else-if="activeTab === 'metrics'"
@@ -1113,6 +1267,107 @@ export const CoordinatorDashboardView = {
             </button>
             <button type="submit" class="vg-btn vg-btn-primary" :disabled="isAssigning || !assignTechnicianId">
               <span v-if="!isAssigning">Confirmar Asignación</span>
+              <span v-else>Guardando...</span>
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
+
+      <!-- =================================================================== -->
+      <!-- MODAL 1B: BULK SITE ASSIGNMENT (reached from the territorial map,  -->
+      <!-- RF-MAP-09): one technician + optional audited urgency applied to   -->
+      <!-- every pending incident of the chosen site.                         -->
+      <!-- =================================================================== -->
+      <ModalDialog
+        v-model="showBulkAssignModal"
+        title="Asignar Técnico a la Sede"
+        :subtitle="bulkAssignSite ? (bulkAssignSite.name + ' · ' + bulkAssignIncidents.length + ' incidencia(s) pendiente(s)') : ''"
+        size="md"
+        @close="closeBulkAssignModal"
+      >
+        <form v-if="bulkAssignSite" @submit.prevent="submitBulkAssignment" data-testid="bulk-assign-form">
+          <!-- Pending incidents summary -->
+          <div style="background-color: #fafbfc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-bottom: 16px;">
+            <div style="font-size: 12px; font-weight: 700; color: var(--color-slate, #2c333f); text-transform: uppercase; margin-bottom: 8px;">
+              Incidencias activas de {{ bulkAssignSite.siteCode }}
+            </div>
+            <ul style="margin: 0; padding-left: 18px; font-size: 13px; color: var(--color-ink, #000000);">
+              <li v-for="inc in bulkAssignIncidents" :key="inc.id" style="margin-bottom: 4px;">
+                <strong>#{{ inc.ticket_code }}</strong> · {{ inc.machine_code }} · {{ inc.category_label || inc.category }}
+                <IncidentBadge :value="inc.urgency" type="urgency" size="sm" />
+              </li>
+            </ul>
+          </div>
+
+          <!-- Technician Selector -->
+          <div style="margin-bottom: 16px;">
+            <label for="bulk-assign-tech-select" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
+              Técnico de Campo responsable <span style="color: #dc2626;">*</span>
+            </label>
+            <select
+              id="bulk-assign-tech-select"
+              v-model="bulkAssignTechnicianId"
+              class="vg-select"
+              required
+              :disabled="isBulkAssigning"
+              data-testid="bulk-assign-tech-select"
+            >
+              <option v-for="t in technicians" :key="t.id" :value="t.id">
+                {{ t.name }} ({{ t.email }})
+              </option>
+            </select>
+            <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 4px;">
+              El mismo técnico quedará como único responsable activo de todas las incidencias listadas (Art. II: un responsable activo por incidencia).
+            </div>
+          </div>
+
+          <!-- Urgency Reclassification (Optional / Audit trail required) -->
+          <div style="background-color: #fafbfc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 14px; margin-bottom: 16px;">
+            <label for="bulk-assign-urgency" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
+              Reclasificar urgencia del lote <span style="font-size: 11px; color: var(--color-ink-muted, #6c7e9d);">(Opcional, afecta a todas)</span>
+            </label>
+            <select id="bulk-assign-urgency" v-model="bulkAssignUrgencyOverride" class="vg-select" :disabled="isBulkAssigning" data-testid="bulk-assign-urgency">
+              <option value="">Mantener la urgencia actual de cada incidencia</option>
+              <option value="CRITICAL">Cambiar todo a CRÍTICA</option>
+              <option value="HIGH">Cambiar todo a ALTA</option>
+              <option value="MEDIUM">Cambiar todo a MEDIA</option>
+              <option value="LOW">Cambiar todo a BAJA</option>
+            </select>
+
+            <!-- Mandatory Justification if override is set (EARS 5.3) -->
+            <div v-if="bulkAssignUrgencyOverride" style="margin-top: 10px;">
+              <label for="bulk-assign-urgency-reason" style="display: block; font-size: 12px; font-weight: 600; color: #dc2626; margin-bottom: 4px;">
+                Motivo justificado del cambio <span style="color: #dc2626;">* (Obligatorio en auditoría)</span>
+              </label>
+              <textarea
+                id="bulk-assign-urgency-reason"
+                v-model="bulkAssignUrgencyReason"
+                class="vg-textarea"
+                rows="2"
+                placeholder="Ej: Corte de refrigeración general de la sede, todas las máquinas de frío se degradan a CRÍTICA..."
+                required
+                :disabled="isBulkAssigning"
+              ></textarea>
+            </div>
+          </div>
+
+          <!-- Error Alert -->
+          <div
+            v-if="bulkAssignError"
+            style="background-color: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; padding: 10px; border-radius: var(--radius-interactive, 4px); font-size: 13px; margin-bottom: 16px;"
+            role="alert"
+            data-testid="bulk-assign-error"
+          >
+            {{ bulkAssignError }}
+          </div>
+
+          <!-- Actions -->
+          <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--color-hairline, #c8cfda); padding-top: 16px;">
+            <button type="button" class="vg-btn vg-btn-secondary" @click="closeBulkAssignModal" :disabled="isBulkAssigning">
+              Cancelar
+            </button>
+            <button type="submit" class="vg-btn vg-btn-primary" :disabled="isBulkAssigning || !bulkAssignTechnicianId || bulkAssignIncidents.length === 0" data-testid="bulk-assign-submit">
+              <span v-if="!isBulkAssigning">Asignar {{ bulkAssignIncidents.length }} incidencia(s)</span>
               <span v-else>Guardando...</span>
             </button>
           </div>

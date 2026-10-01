@@ -49,16 +49,17 @@ interface LocationRepositoryInterface
     /**
      * Da de alta una nueva sede cliente con código único inmutable (RF-01, EARS 1.2).
      *
-     * @param array<string, mixed> $data Datos validados de la sede.
+     * @param array<string, mixed> $data Datos de la sede, incluyendo opcionalmente latitude y longitude.
+     *        Los llamadores heredados que omitan coordenadas conservan los valores por defecto del dominio.
      * @return Location Entidad persistida con su ID autogenerado.
      */
     public function create(array $data): Location;
 
     /**
-     * Actualiza los datos descriptivos de una sede (RF-01, EARS 1.3).
+     * Actualiza datos descriptivos y, cuando se suministran, las coordenadas de una sede (RF-01, RF-MAP-01).
      *
      * @param int $id Identificador primario.
-     * @param array<string, mixed> $data Campos a modificar (name, address, contact_name, contact_phone).
+     * @param array<string, mixed> $data Campos a modificar (name, address, latitude, longitude, contact_name, contact_phone).
      * @return bool True si se actualizó con éxito.
      */
     public function update(int $id, array $data): bool;

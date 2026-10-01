@@ -587,6 +587,17 @@ export class ApiClient {
     },
 
     /**
+     * Retrieves the optimized route map with consolidated stops and navigation URLs (RF-MAP-05, RF-MAP-07).
+     * @param {Object} [origin={}] Optional { origin_lat, origin_lng } device GPS coordinates.
+     * @returns {Promise<Object>}
+     */
+    getRouteMap: (origin = {}) => {
+      const pairs = Object.entries(origin).filter(([, value]) => value !== undefined && value !== null && value !== '');
+      const q = new URLSearchParams(pairs).toString();
+      return this.get(`/technician/route/map${q ? `?${q}` : ''}`);
+    },
+
+    /**
      * Starts intervention on an incident (transitions to EN_CURSO) (RF-07 / EARS 7.1).
      * @param {number|string} incidentId
      * @returns {Promise<Object>}
@@ -727,6 +738,18 @@ export class ApiClient {
     }
   };
 
+  map = {
+    /**
+     * Retrieves all sites with active incidents/preventives for the coordinator territorial triage map (RF-MAP-09).
+     * @param {Object} [params={}] Optional { technician_id, unassigned_only, is_critical_only } filters.
+     * @returns {Promise<Object>}
+     */
+    getActiveIncidents: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/map/active-incidents${q ? `?${q}` : ''}`);
+    }
+  };
+
   metrics = {
     /**
      * Retrieves KPI summary and SLA alerts (RF-01, RF-03).
@@ -833,7 +856,7 @@ export class ApiClient {
       return this.get(`/coordinator/locations/${id}`);
     },
     updateLocation: (id, payload) => {
-      return this.patch(`/coordinator/locations/${id}`, payload);
+      return this.put(`/coordinator/locations/${id}`, payload);
     },
     deactivateLocation: (id) => {
       return this.patch(`/coordinator/locations/${id}/deactivate`);

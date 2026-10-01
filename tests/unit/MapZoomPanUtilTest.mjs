@@ -1,0 +1,457 @@
+/**
+ * VendGuard - MapZoomPan Utility Test Suite (MapZoomPanUtilTest.mjs)
+ *
+ * Validates the shared zoom/pan controller contract consumed by every interactive
+ * Mercator canvas of the application (coordinator territorial tab, technician route
+ * modal): anchored zooming, clamped panning, click suppression after drags, scale
+ * bounds and the below-fit adaptive tile-zoom window derivation.
+ *
+ * Dogma Vanilla: Node.js native ESM, zero external dependencies, zero network in tests.
+ */
+
+import { mapZoomPanState, MapZoomPanMethods, MAP_ZOOM_PAN_DEFAULTS } from '../../public/assets/js/utils/MapZoomPan.js';
+
+let assertions = 0;
+let failures = 0;
+
+function assert(description, condition, details = '') {
+  assertions++;
+  if (condition) {
+    console.log(`  [PASS] ${description}`);
+  } else {
+    console.error(`  [FAIL] ${description}`);
+    if (details) {
+      console.error(`         Motivo: ${details}`);
+    }
+    failures++;
+  }
+}
+
+console.log('======================================================================');
+console.log(' VendGuard: Frontend Test Suite - MapZoomPan shared controller');
+console.log('======================================================================\n');
+
+/**
+ * Minimal host harness exposing the controller methods over a fixed base window,
+ * exactly like the real components bind them.
+ */
+function createHost(baseWindow, hooks = {}) {
+  const host = {
+    ...mapZoomPanState(),
+    ...hooks,
+    mapWindow: baseWindow,
+    getBaseWindow() {
+      return this.mapWindow;
+    },
+    getMinScale() {
+      return typeof this.hookMin === 'function' ? this.hookMin() : MAP_ZOOM_PAN_DEFAULTS.MIN_SCALE;
+    },
+    getMaxScale() {
+      return typeof this.hookMax === 'function' ? this.hookMax() : MAP_ZOOM_PAN_DEFAULTS.MAX_SCALE;
+    },
+    getRenderWidthPx() {
+      return typeof this.hookWidth === 'function' ? this.hookWidth() : 0;
+    }
+  };
+  for (const [name, fn] of Object.entries(MapZoomPanMethods)) {
+    if (name !== 'getBaseWindow' && name !== 'getMinScale' && name !== 'getMaxScale' && name !== 'getRenderWidthPx') {
+      host[name] = fn.bind(host);
+    }
+  }
+  return host;
+}
+
+// Ventana encajada canónica (zoom 13, ~1.2 teselas de lado) y función de eventos puntero
+const BASE = { zoom: 13, sideTiles: 1.1978752, leftEdge: 4144.9768277, topEdge: 3058.8653644 };
+function makePointerEvent(pointerId, x, y, type = 'mouse') {
+  return {
+    pointerId,
+    pointerType: type,
+    button: 0,
+    clientX: x,
+    clientY: y,
+    currentTarget: {
+      setPointerCapture: () => {},
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 })
+    }
+  };
+}
+
+// -------------------------------------------------------------------------
+console.log('--- Estado inicial y fábrica ---');
+
+const factory = createHost(BASE);
+assert('1.1 La fábrica expone la vista encajada inicial (escala 1, centrada)',
+  factory.view.scale === 1 && factory.view.centerX === 0.5 && factory.view.centerY === 0.5);
+assert('1.2 El estado de gestos arranca limpio',
+  factory.isPanning === false && factory.dragDistance === 0 && factory.suppressNextClick === false
+    && factory.activePointers.size === 0 && factory.pinchStartDistance === 0);
+assert('1.3 Los límites por defecto son 1x..12x con factores 1.25/1.5/1.8',
+  MAP_ZOOM_PAN_DEFAULTS.MIN_SCALE === 1 && MAP_ZOOM_PAN_DEFAULTS.MAX_SCALE === 12
+    && MAP_ZOOM_PAN_DEFAULTS.WHEEL_FACTOR === 1.25 && MAP_ZOOM_PAN_DEFAULTS.BUTTON_FACTOR === 1.5
+    && MAP_ZOOM_PAN_DEFAULTS.DBLCLICK_FACTOR === 1.8);
+
+// -------------------------------------------------------------------------
+console.log('\n--- Ventana efectiva y zoom de tesela adaptativo ---');
+
+assert('2.1 A escala 1 la ventana efectiva es la ventana base intacta',
+  (() => { const w = factory.effectiveWindow(); return w.zoom === BASE.zoom && w.sideTiles === BASE.sideTiles && w.leftEdge === BASE.leftEdge && w.topEdge === BASE.topEdge; })());
+
+const zoomedIn = createHost(BASE);
+zoomedIn.zoomToPoint(2, 0.5, 0.5);
+const wIn = zoomedIn.effectiveWindow();
+const fitSpan = BASE.sideTiles / Math.pow(2, BASE.zoom);
+const inSpan = wIn.sideTiles / Math.pow(2, wIn.zoom);
+assert('2.2 Ampliar 2x sube el zoom de tesela (+1) sin estirar bitmap: misma tesela cubre la mitad de área',
+  wIn.zoom === BASE.zoom + 1
+    && Math.abs(wIn.sideTiles - BASE.sideTiles) < 1e-9
+    && Math.abs(inSpan - fitSpan / 2) < 1e-15);
+
+// El zoom de tesela adaptativo solo entra por debajo del encaje: el host necesita un
+// mínimo dinámico (< 1), igual que el mapa territorial con su suelo metropolitano.
+const zoomedOut = createHost(BASE, { hookMin: () => 0.15 });
+zoomedOut.zoomToPoint(0.25, 0.5, 0.5);
+const wOut = zoomedOut.effectiveWindow();
+const spanOut = wOut.sideTiles / Math.pow(2, wOut.zoom);
+const baseSpan = BASE.sideTiles / Math.pow(2, BASE.zoom);
+assert('2.3 Alejar 0.25x baja el zoom de tesela adaptativamente (estilo slippy-map)',
+  wOut.zoom < BASE.zoom
+    && Math.abs(wOut.zoom - Math.round(Math.log2(1 / (baseSpan / 0.25)))) < 1e-9
+    && Math.abs(spanOut - baseSpan / 0.25) < 1e-15);
+assert('2.4 La ventana más ancha mantiene un recuento acotado de teselas (<= 2x2) y zoom >= 2',
+  wOut.sideTiles <= 2 && wOut.zoom >= 2);
+
+// -------------------------------------------------------------------------
+console.log('\n--- Anclaje, límites y clamp de centro ---');
+
+const anchored = createHost(BASE);
+anchored.zoomToPoint(1.5, 0.5, 0.5);
+const anchorBefore = { x: anchored.view.centerX + (0.2 - 0.5) / anchored.view.scale, y: anchored.view.centerY + (0.8 - 0.5) / anchored.view.scale };
+anchored.zoomToPoint(3, 0.2, 0.8);
+const anchorAfter = { x: anchored.view.centerX + (0.2 - 0.5) / anchored.view.scale, y: anchored.view.centerY + (0.8 - 0.5) / anchored.view.scale };
+assert('3.1 El zoom mantiene fijo el punto del lienzo bajo el ancla',
+  Math.abs(anchorBefore.x - anchorAfter.x) < 1e-9 && Math.abs(anchorBefore.y - anchorAfter.y) < 1e-9);
+
+const bounded = createHost(BASE);
+bounded.zoomToPoint(999, 0.5, 0.5);
+assert('3.2 La escala superior se respeta (12x)', bounded.view.scale === 12);
+bounded.zoomToPoint(0.001, 0.5, 0.5);
+assert('3.3 La escala inferior se respeta y reencuadra al encaje',
+  bounded.view.scale === 1 && bounded.view.centerX === 0.5 && bounded.view.centerY === 0.5);
+
+const dynamicHost = createHost(BASE, { hookMin: () => 0.2 });
+dynamicHost.zoomToPoint(0.05, 0.5, 0.5);
+assert('3.4 El límite inferior dinámico del componente se respeta', Math.abs(dynamicHost.view.scale - 0.2) < 1e-12);
+
+const clamped = createHost(BASE);
+clamped.zoomToPoint(2, 0.5, 0.5);
+clamped.panBy(-5000, 5000, 800);
+// Margen de sobredesplazamiento = 0.5 * (1 / (2 * 2)) = 0.125 por lado.
+assert('3.5 El paneo sale de la ventana encjada como máximo el margen acootado (0.125 a escala 2)',
+  Math.abs(clamped.view.centerX - 1.125) < 1e-12 && Math.abs(clamped.view.centerY + 0.125) < 1e-12,
+  `centro=(${clamped.view.centerX}, ${clamped.view.centerY})`);
+
+const belowFit = createHost(BASE);
+belowFit.zoomToPoint(0.5, 0.5, 0.5);
+const centerBefore = { x: belowFit.view.centerX, y: belowFit.view.centerY };
+belowFit.panBy(120, 60, 800);
+assert('3.6 Por debajo del encaje arrastrar desplaza el centro (roaming sin tope, el contenido sigue al dedo)',
+  belowFit.view.centerX < centerBefore.x && belowFit.view.centerY < centerBefore.y);
+
+// Regresión de "arrastra un momento y luego deja de moverse": cualquier tope artificial a
+// escala de encaje se agota con dos gestos reales, porque un arrastre de ancho completo
+// recorre una unidad de ventana entera. Cinco arrastres de ancho completo en el mismo
+// sentido deben seguir desplazando el mapa.
+const sustained = createHost(BASE);
+const forwardTrack = [];
+for (let i = 0; i < 5; i++) {
+  sustained.panBy(800, 0, 800);
+  forwardTrack.push(Number(sustained.view.centerX.toFixed(6)));
+}
+assert('3.7 Cinco arrastres de ancho completo seguidos siguen desplazando el mapa',
+  JSON.stringify(forwardTrack) === JSON.stringify([-0.5, -1.5, -2.5, -3.5, -4.5]),
+  `recorrido observado: ${JSON.stringify(forwardTrack)}`);
+for (let i = 0; i < 5; i++) {
+  sustained.panBy(-800, 0, 800);
+}
+assert('3.8 Arrastrando en sentido contrario se recupera el encaje',
+  Math.abs(sustained.view.centerX - 0.5) < 1e-12 && Math.abs(sustained.view.centerY - 0.5) < 1e-12,
+  `centro final: ${sustained.view.centerX}, ${sustained.view.centerY}`);
+
+assert('3.9 Un centro no finito vuelve al encaje en lugar de propagar NaN',
+  belowFit.clampCenter(Number.NaN, 1) === 0.5 && belowFit.clampCenter(Number.POSITIVE_INFINITY, 1) === 0.5);
+
+// Regresion de percepcion: "con mucho zoom out apenas se mueve y con mucho zoom in se
+// arrastra muchisimo". El centro vive en unidades de ventana encajada, asi que el delta
+// en pixeles debe dividirse por el ancho Y por la escala; sin el factor de escala el
+// arrastre desplaza `dragPx * scale` pixeles reales. Este recorrido mide el
+// desplazamiento real en pantalla y exige que sea 1:1 en toda la rango de escalas.
+const slippyTracks = [0.15, 0.5, 1, 4, 8].map((scale) => {
+  const slippy = createHost(BASE, { hookMin: () => 0.15, hookWidth: () => 800 });
+  slippy.view.scale = scale;
+  const before = slippy.effectiveWindow();
+  slippy.panBy(120, 0, 800);
+  const after = slippy.effectiveWindow();
+  return Number(((after.leftEdge - before.leftEdge) * (800 / after.sideTiles)).toFixed(6));
+});
+assert('3.10 El arrastre sigue al dedo 1:1 a cualquier escala (metropoli, encaje y cerca)',
+  slippyTracks.every((px) => Math.abs(px + 120) < 1e-9),
+  `desplazamiento en pantalla de un arrastre de 120px: ${JSON.stringify(slippyTracks)}`);
+
+// Y el otro eje: la correccion no debe romper el paneo vertical (misma proporcionalidad).
+const slippyY = createHost(BASE, { hookMin: () => 0.15, hookWidth: () => 800 });
+slippyY.view.scale = 0.25;
+const beforeY = slippyY.effectiveWindow();
+slippyY.panBy(0, 90, 800);
+const afterY = slippyY.effectiveWindow();
+assert('3.11 El paneo vertical tambien sigue al dedo 1:1 por debajo del encaje',
+  Math.abs((afterY.topEdge - beforeY.topEdge) * (800 / afterY.sideTiles) + 90) < 1e-9,
+  `desplazamiento vertical: ${((afterY.topEdge - beforeY.topEdge) * (800 / afterY.sideTiles)).toFixed(4)} px`);
+
+// -------------------------------------------------------------------------
+console.log('\n--- Gestos: rueda, doble clic, arrastre y pellizco ---');
+
+const gestured = createHost(BASE);
+gestured.handleWheel({ deltaY: -120, clientX: 400, clientY: 300, currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) } });
+assert('4.1 La rueda hacia arriba amplía 1.25x', Math.abs(gestured.view.scale - 1.25) < 1e-12);
+gestured.handleWheel({ deltaY: 120, clientX: 400, clientY: 300, currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) } });
+assert('4.2 La rueda hacia abajo reduce de vuelta', Math.abs(gestured.view.scale - 1) < 1e-12);
+
+gestured.handleDblClick({ clientX: 400, clientY: 300, currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) } });
+assert('4.3 El doble clic amplía 1.8x', Math.abs(gestured.view.scale - 1.8) < 1e-12);
+gestured.resetView();
+
+gestured.handlePointerDown(makePointerEvent(1, 400, 300));
+gestured.handlePointerMove(makePointerEvent(1, 480, 330));
+gestured.handlePointerUp(makePointerEvent(1, 480, 330));
+assert('4.4 Un arrastre largo activa la supresión del clic posterior', gestured.suppressNextClick === true);
+gestured.handlePointerDown(makePointerEvent(1, 400, 300));
+gestured.handlePointerMove(makePointerEvent(1, 402, 301));
+gestured.handlePointerUp(makePointerEvent(1, 402, 301));
+assert('4.5 Un movimiento corto no suprime el clic (umbral de 6px)', gestured.suppressNextClick === false);
+
+const pincher = createHost(BASE);
+pincher.handlePointerDown(makePointerEvent(1, 400, 300));
+pincher.handlePointerDown(makePointerEvent(2, 440, 300));
+pincher.handlePointerMove(makePointerEvent(2, 480, 300));
+assert('4.6 Separar los dedos amplía al doble con anclaje al inicio del gesto', Math.abs(pincher.view.scale - 2) < 1e-9);
+pincher.handlePointerMove(makePointerEvent(2, 560, 300));
+assert('4.7 El pellizco no se compone: reancora contra la escala inicial', Math.abs(pincher.view.scale - 4) < 1e-9);
+pincher.handlePointerUp(makePointerEvent(2, 560, 300));
+assert('4.8 Quitar un dedo devuelve al paneo limpio', pincher.activePointers.size === 1 && pincher.pinchStartScale === 1);
+
+const emptyHost = createHost(null);
+emptyHost.zoomToPoint(3, 0.5, 0.5);
+assert('4.9 Sin ventana base el controlador no falla ni muta la vista',
+  emptyHost.view.scale === 1 && emptyHost.effectiveWindow() === null);
+
+// Salir del lienzo con la captura activa NO debe abortar el gesto: el dedo o el cursor
+// siguen moviendo el mapa fuera del elemento, y cortar ahí es lo que hace que un
+// arrastre parezca detenerse a mitad.
+const capturedHost = createHost(BASE);
+const capturedTarget = {
+  setPointerCapture: () => {},
+  hasPointerCapture: () => true,
+  getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 })
+};
+const capturedEvent = (x, y) => ({
+  pointerId: 1, pointerType: 'mouse', button: 0, clientX: x, clientY: y, currentTarget: capturedTarget
+});
+capturedHost.handlePointerDown(capturedEvent(400, 300));
+capturedHost.handlePointerMove(capturedEvent(480, 330));
+capturedHost.handlePointerLeave(capturedEvent(480, 330));
+assert('4.10 Con captura activa, salir del lienzo mantiene vivo el arrastre',
+  capturedHost.activePointers.size === 1 && capturedHost.isPanning === true,
+  `punteros=${capturedHost.activePointers.size} paneando=${capturedHost.isPanning}`);
+const centerAfterLeave = capturedHost.view.centerX;
+capturedHost.handlePointerMove(capturedEvent(560, 330));
+assert('4.11 Tras esa salida el arrastre sigue desplazando el mapa',
+  capturedHost.view.centerX < centerAfterLeave,
+  `centro: ${centerAfterLeave} -> ${capturedHost.view.centerX}`);
+
+// Sin captura (webview embebido) la salida sigue siendo la única señal de fin de gesto.
+const uncapturedHost = createHost(BASE);
+const plainEvent = (x, y) => ({
+  pointerId: 1, pointerType: 'mouse', button: 0, clientX: x, clientY: y,
+  currentTarget: { setPointerCapture: () => {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) }
+});
+uncapturedHost.handlePointerDown(plainEvent(400, 300));
+uncapturedHost.handlePointerLeave(plainEvent(400, 300));
+assert('4.12 Sin captura, salir del lienzo cierra el gesto',
+  uncapturedHost.activePointers.size === 0 && uncapturedHost.isPanning === false);
+
+// Los controles (botones de zoom/reencuadre, marcadores y el crédito) viven DENTRO del
+// lienzo. Si el controlador se apropia de esa pulsación, la captura de puntero redirige
+// el clic derivado al lienzo y el boton queda muerto: el usuario pulsa y no pasa nada.
+function makePressEvent(pointerId, x, y, uiTarget) {
+  const event = makePointerEvent(pointerId, x, y);
+  event.defaultPrevented = false;
+  event.preventDefault = () => { event.defaultPrevented = true; };
+  event.target = {
+    closest: (selector) => (uiTarget && /button|a\[href\]|\[role="button"\]/.test(selector) ? { tagName: 'BUTTON' } : null)
+  };
+  return event;
+}
+
+const uiHost = createHost(BASE);
+const uiPress = makePressEvent(1, 400, 300, true);
+uiHost.handlePointerDown(uiPress);
+uiHost.handlePointerMove(makePointerEvent(1, 520, 340));
+uiHost.handlePointerUp(makePointerEvent(1, 520, 340));
+assert('4.13 Pulsar un control del mapa NO arranca arrastre, no captura el gesto ni lo cancela',
+  uiHost.activePointers.size === 0 && uiHost.isPanning === false && uiHost.view.centerX === 0.5 && !uiPress.defaultPrevented,
+  `punteros=${uiHost.activePointers.size} paneando=${uiHost.isPanning} centro=${uiHost.view.centerX} cancelado=${uiPress.defaultPrevented}`);
+
+const surfaceHost = createHost(BASE);
+const surfacePress = makePressEvent(1, 400, 300, false);
+surfaceHost.handlePointerDown(surfacePress);
+assert('4.14 Pulsar la superficie arrastrable sí cancela el comportamiento por defecto (sin selección de texto)',
+  surfacePress.defaultPrevented && surfaceHost.isPanning === true && surfaceHost.activePointers.size === 1,
+  `cancelado=${surfacePress.defaultPrevented} paneando=${surfaceHost.isPanning}`);
+
+// Regresión: el cerrojo que descarta el clic final de un arrastre debe limpiarse ALSO
+// cuando la siguiente pulsación cae sobre un control del mapa, Y no debe volver a armarse
+// al soltar. Sin esto, tras cualquier arrastre el clic sobre un marcador se consumía
+// siempre (el dragDistance obsoleto re-armaba el cerrojo en cada pointerup) y el usuario
+// lo percibia como "el marcador está muerto".
+const latchHost = createHost(BASE);
+const plain = (x, y) => ({ ...makePointerEvent(1, x, y), target: { closest: () => null } });
+latchHost.handlePointerDown(plain(400, 300));
+latchHost.handlePointerMove(plain(700, 400));
+latchHost.handlePointerUp(plain(700, 400));
+const latched = latchHost.suppressNextClick === true;
+const controlPress = makePressEvent(1, 400, 300, true);
+latchHost.handlePointerDown(controlPress);
+latchHost.handlePointerUp(makePressEvent(1, 400, 300, true));
+assert('4.15 Tras un arrastre, pulsar y soltar un control del mapa deja el cerrojo libre',
+  latched && latchHost.suppressNextClick === false && latchHost.dragDistance === 0,
+  `cerrojo tras arrastre=${latched} tras control=${latchHost.suppressNextClick} distancia=${latchHost.dragDistance}`);
+
+// Un pointerup sin gesto en curso (pulsacion sobre un marcador) nunca debe armar el cerrojo.
+const strayUpHost = createHost(BASE);
+strayUpHost.dragDistance = 40;
+strayUpHost.handlePointerUp(makePointerEvent(1, 400, 300));
+assert('4.16 Un pointerup sin arrastre real no arma el cerrojo del clic',
+  strayUpHost.suppressNextClick === false,
+  `cerrojo=${strayUpHost.suppressNextClick}`);
+
+// ------------------------------------------------------------------------
+console.log('\n--- Elección de tesela pixel-aware (mapas panorámicos anchos) ---');
+
+// Un lienzo panorámico de 1300px encajado sobre la ventana BASE: la elección
+// content-fit serviría teselas estiradas ~4x (pixelado); la pixel-aware debe
+// subir el nivel para que cada tesela se renderice cerca de sus 256px nativos.
+const wide = createHost(BASE, { hookWidth: () => 1300 });
+wide.hookMin = () => 0.15;
+const wideFit = wide.effectiveWindow();
+const wideFitTiles = wideFit.sideTiles; // teselas visibles a lo ancho a escala 1
+assert('5.1 Encaje pixel-aware: el nivel de tesela sube hasta renderizar ~5 teselas de 256px en 1300px',
+  wideFit.zoom > BASE.zoom && Math.abs(wideFitTiles - 1300 / 256) < 1.01);
+
+wide.zoomToPoint(2, 0.5, 0.5);
+const wideIn = wide.effectiveWindow();
+assert('5.2 Ampliar 2x sobre el lienzo ancho sube el nivel de tesela (+1) manteniendo ~5 teselas',
+  wideIn.zoom === wideFit.zoom + 1 && Math.abs(wideIn.sideTiles - wideFitTiles) < 1e-9);
+
+// Recuento acotado: la ventana ancha al suelo geográfico no explota en decenas de teselas
+wide.zoomToPoint(0.15, 0.5, 0.5);
+const wideFloor = wide.effectiveWindow();
+assert('5.3 Al suelo de zoom la ventana ancha mantiene un recuento de teselas acotado (<= 20)',
+  wideFloor.sideTiles <= 20 && wideFloor.zoom >= MAP_ZOOM_PAN_DEFAULTS.TILE_ZOOM_FLOOR);
+
+// Sin medición de lienzo (0) se usa el fallback content-fit intacto
+const noWidth = createHost(BASE, { hookWidth: () => 0 });
+noWidth.hookMin = () => 0.15;
+noWidth.zoomToPoint(2, 0.5, 0.5);
+const noWidthWin = noWidth.effectiveWindow();
+assert('5.4 Sin ancho medible se conserva el fallback content-fit (zoom = redondeo log2 de la escala)',
+  noWidthWin.zoom === Math.round(Math.log2(2 / (BASE.sideTiles / Math.pow(2, BASE.zoom)))));
+
+// -------------------------------------------------------------------------
+console.log('\n--- Encuadre de un punto de interés: focusOn (RF-MAP-07 / RF-MAP-09) ---');
+
+// Posicion proyectada de un punto geografico fijo (unidades de la ventana EFECTIVA),
+// que es lo que devuelve projectToWindow() para un marcador y lo que recibe focusOn():
+// punto = 0.5 + (base - centro) * escala.
+const projectedPoint = (host, groundPoint) => ({
+  x: 0.5 + (groundPoint.x - host.view.centerX) * host.view.scale,
+  y: 0.5 + (groundPoint.y - host.view.centerY) * host.view.scale
+});
+
+const focusHost = createHost(BASE);
+const focusPoint = { x: 0.4, y: 0.6 };
+const firstProjection = projectedPoint(focusHost, focusPoint);
+focusHost.focusOn(firstProjection.x, firstProjection.y);
+assert('6.1 Encuadrar un marcador lleva la vista a escala x2 sobre el encaje',
+  focusHost.view.scale === 2 && MAP_ZOOM_PAN_DEFAULTS.FOCUS_SCALE === 2,
+  `escala=${focusHost.view.scale}`);
+const centered = projectedPoint(focusHost, focusPoint);
+assert('6.2 El marcador encuadrado queda en el centro geométrico del lienzo',
+  Math.abs(centered.x - 0.5) < 1e-9 && Math.abs(centered.y - 0.5) < 1e-9,
+  `proyectado=(${centered.x}, ${centered.y})`);
+
+const refocus = { x: focusHost.view.centerX, y: focusHost.view.centerY };
+const secondProjection = projectedPoint(focusHost, focusPoint);
+focusHost.focusOn(secondProjection.x, secondProjection.y);
+assert('6.3 Volver a pulsar el mismo marcador NO acumula zoom ni desplaza la vista (idempotente)',
+  focusHost.view.scale === 2 && Math.abs(focusHost.view.centerX - refocus.x) < 1e-9
+    && Math.abs(focusHost.view.centerY - refocus.y) < 1e-9,
+  `escala=${focusHost.view.scale} centro=(${focusHost.view.centerX}, ${focusHost.view.centerY})`);
+
+const closeHost = createHost(BASE);
+closeHost.zoomToPoint(4, 0.5, 0.5);
+const closePoint = { x: 0.55, y: 0.5 };
+const closeProjection = projectedPoint(closeHost, closePoint);
+closeHost.focusOn(closeProjection.x, closeProjection.y);
+const recentered = projectedPoint(closeHost, closePoint);
+assert('6.4 Si la vista ya está más cerca que x2, sólo recentra y NO aleja',
+  closeHost.view.scale === 4 && Math.abs(recentered.x - 0.5) < 1e-9 && Math.abs(recentered.y - 0.5) < 1e-9,
+  `escala=${closeHost.view.scale} proyectado=(${recentered.x}, ${recentered.y})`);
+
+// El punto geografico encuadrado es el mismo antes y después del acercamiento.
+const anchoredFocus = createHost(BASE);
+const offCenterPoint = { x: 0.35, y: 0.65 };
+const offProjection = projectedPoint(anchoredFocus, offCenterPoint);
+anchoredFocus.focusOn(offProjection.x, offProjection.y);
+const drawnAfter = projectedPoint(anchoredFocus, offCenterPoint);
+assert('6.5 El punto encuadrado es el mismo antes y después del acercamiento',
+  Math.abs(drawnAfter.x - 0.5) < 1e-9 && Math.abs(drawnAfter.y - 0.5) < 1e-9,
+  `proyectado=(${drawnAfter.x}, ${drawnAfter.y})`);
+
+// Una sede pegada al borde del territorio (base 1.08) se centra gracias al margen
+// acotado: con el limite estricto quedaria a media pantalla.
+const edgeHost = createHost(BASE);
+edgeHost.focusOn(1.08, 1.08);
+assert('6.6 Una sede al borde del territorio se centra con el margen acotado',
+  edgeHost.view.scale === 2 && Math.abs(edgeHost.view.centerX - 1.08) < 1e-9
+    && Math.abs(edgeHost.view.centerY - 1.08) < 1e-9,
+  `escala=${edgeHost.view.scale} centro=(${edgeHost.view.centerX}, ${edgeHost.view.centerY})`);
+
+const farHost = createHost(BASE);
+farHost.zoomToPoint(6, 0.5, 0.5);
+farHost.focusOn(9, 9);
+assert('6.7 El margen sigue acotado: el encuadre nunca deja mas vacio que media semiventana',
+  farHost.view.scale === 6 && Math.abs(farHost.view.centerX - (1 + 1 / 24)) < 1e-12
+    && Math.abs(farHost.view.centerY - (1 + 1 / 24)) < 1e-12,
+  `escala=${farHost.view.scale} centro=(${farHost.view.centerX}, ${farHost.view.centerY})`);
+
+const bogusHost = createHost(BASE);
+bogusHost.focusOn(Number.NaN, 99);
+assert('6.8 Un ancla corrupta o fuera de lienzo no rompe la vista',
+  bogusHost.view.scale === 2 && Number.isFinite(bogusHost.view.centerX) && Number.isFinite(bogusHost.view.centerY),
+  `escala=${bogusHost.view.scale} centro=(${bogusHost.view.centerX}, ${bogusHost.view.centerY})`);
+
+const emptyFocus = createHost(null);
+emptyFocus.focusOn(0.3, 0.3);
+assert('6.9 Sin ventana base el encuadre no muta la vista',
+  emptyFocus.view.scale === 1 && emptyFocus.view.centerX === 0.5 && emptyFocus.view.centerY === 0.5);
+
+// -------------------------------------------------------------------------
+console.log('\n======================================================================');
+if (failures === 0) {
+  console.log(` RESULTADO: ¡TODAS LAS PRUEBAS DEL CONTROLADOR PASARON (${assertions} aserciones)!`);
+  process.exit(0);
+} else {
+  console.error(` RESULTADO: ${failures} fallos detectados de ${assertions} aserciones.`);
+  process.exit(1);
+}

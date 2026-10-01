@@ -42,7 +42,9 @@ class PdoLocationRepository implements LocationRepositoryInterface
                 `id`, 
                 `site_code`, 
                 `name`, 
-                `address`, 
+                `address`,
+                `latitude`,
+                `longitude`,
                 `contact_name`, 
                 `contact_phone`, 
                 `is_active`, 
@@ -88,7 +90,9 @@ class PdoLocationRepository implements LocationRepositoryInterface
                 `id`, 
                 `site_code`, 
                 `name`, 
-                `address`, 
+                `address`,
+                `latitude`,
+                `longitude`,
                 `contact_name`, 
                 `contact_phone`, 
                 `is_active`, 
@@ -128,7 +132,9 @@ class PdoLocationRepository implements LocationRepositoryInterface
                 `id`, 
                 `site_code`, 
                 `name`, 
-                `address`, 
+                `address`,
+                `latitude`,
+                `longitude`,
                 `contact_name`, 
                 `contact_phone`, 
                 `is_active`, 
@@ -161,7 +167,9 @@ class PdoLocationRepository implements LocationRepositoryInterface
                 l.`id`, 
                 l.`site_code`, 
                 l.`name`, 
-                l.`address`, 
+                l.`address`,
+                l.`latitude`,
+                l.`longitude`,
                 l.`contact_name`, 
                 l.`contact_phone`, 
                 l.`is_active`, 
@@ -218,6 +226,8 @@ class PdoLocationRepository implements LocationRepositoryInterface
             'site_code' => (string)$row['site_code'],
             'name' => (string)$row['name'],
             'address' => (string)$row['address'],
+            'latitude' => (float)$row['latitude'],
+            'longitude' => (float)$row['longitude'],
             'contact_name' => $row['contact_name'] !== null ? (string)$row['contact_name'] : null,
             'contact_phone' => $row['contact_phone'] !== null ? (string)$row['contact_phone'] : null,
             'is_active' => (bool)$row['is_active'],
@@ -243,6 +253,8 @@ class PdoLocationRepository implements LocationRepositoryInterface
                 `site_code`,
                 `name`,
                 `address`,
+                `latitude`,
+                `longitude`,
                 `contact_name`,
                 `contact_phone`,
                 `is_active`,
@@ -253,6 +265,8 @@ class PdoLocationRepository implements LocationRepositoryInterface
                 :site_code,
                 :name,
                 :address,
+                :latitude,
+                :longitude,
                 :contact_name,
                 :contact_phone,
                 1,
@@ -267,6 +281,8 @@ class PdoLocationRepository implements LocationRepositoryInterface
             ':site_code' => strtoupper(trim((string)$data['site_code'])),
             ':name' => trim((string)$data['name']),
             ':address' => trim((string)$data['address']),
+            ':latitude' => array_key_exists('latitude', $data) ? (float)$data['latitude'] : 41.3850640,
+            ':longitude' => array_key_exists('longitude', $data) ? (float)$data['longitude'] : 2.1734035,
             ':contact_name' => isset($data['contact_name']) && $data['contact_name'] !== '' ? trim((string)$data['contact_name']) : null,
             ':contact_phone' => isset($data['contact_phone']) && $data['contact_phone'] !== '' ? trim((string)$data['contact_phone']) : null,
         ]);
@@ -300,6 +316,14 @@ class PdoLocationRepository implements LocationRepositoryInterface
         if (array_key_exists('address', $data)) {
             $fields[] = "`address` = :address";
             $params[':address'] = trim((string)$data['address']);
+        }
+        if (array_key_exists('latitude', $data)) {
+            $fields[] = "`latitude` = :latitude";
+            $params[':latitude'] = (float)$data['latitude'];
+        }
+        if (array_key_exists('longitude', $data)) {
+            $fields[] = "`longitude` = :longitude";
+            $params[':longitude'] = (float)$data['longitude'];
         }
         if (array_key_exists('contact_name', $data)) {
             $fields[] = "`contact_name` = :contact_name";

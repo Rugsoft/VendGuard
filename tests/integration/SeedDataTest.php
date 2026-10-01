@@ -39,6 +39,34 @@ if (count($locations) === 2) {
     $failures++;
 }
 
+$expectedCoordinates = [
+    'SEDE-BCN-01' => ['latitude' => '41.3853120', 'longitude' => '2.1932450'],
+    'SEDE-BCN-02' => ['latitude' => '41.4036290', 'longitude' => '2.1895120'],
+];
+foreach ($locations as $location) {
+    $expected = $expectedCoordinates[$location['site_code']] ?? null;
+    $coordinatesMatch = $expected !== null
+        && (string)$location['latitude'] === $expected['latitude']
+        && (string)$location['longitude'] === $expected['longitude'];
+    if (!$coordinatesMatch) {
+        echo "1. Coordenadas validadas de {$location['site_code']}: [FALLO]\n";
+        $failures++;
+    }
+}
+if (count($locations) === 2 && $failures === 0) {
+    echo "1. Coordenadas reales validadas para las sedes de Barcelona: [OK]\n";
+}
+
+$routeSettings = $pdo->query("SELECT `id`, `base_latitude`, `base_longitude` FROM `route_settings` WHERE `id` = 1")->fetch(PDO::FETCH_ASSOC);
+if ($routeSettings !== false
+    && (string)$routeSettings['base_latitude'] === '41.3935000'
+    && (string)$routeSettings['base_longitude'] === '2.1890000') {
+    echo "1. Fila singleton de Base Central con coordenadas válidas: [OK]\n";
+} else {
+    echo "1. Fila singleton de Base Central con coordenadas válidas: [FALLO]\n";
+    $failures++;
+}
+
 // 2. Verificar Máquinas (al menos 3 máquinas, incluyendo PERISHABLE_FOOD)
 $stmt = $pdo->prepare("SELECT * FROM `machines` WHERE `code` IN ('VEND-0101', 'VEND-0102', 'VEND-0201') AND `deleted_at` IS NULL");
 $stmt->execute();
