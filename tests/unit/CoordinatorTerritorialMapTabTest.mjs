@@ -386,7 +386,10 @@ assert('7.17 El reencuadre devuelve la vista al territorio completo encajado',
 const zoomTmpl = CoordinatorTerritorialMapTab.template;
 assert('7.18 Plantilla: gestos de rueda, doble clic y punteros enlazados al lienzo',
   zoomTmpl.includes('@wheel.prevent="handleWheel"') && zoomTmpl.includes('@dblclick.prevent="handleDblClick"')
-    && zoomTmpl.includes('@pointerdown="handlePointerDown"') && zoomTmpl.includes('@pointerup="handlePointerUp"'));
+    // `.prevent` en pointerdown es obligatorio: sin él el arrastre deja una selección de
+    // texto y el siguiente gesto lo consume el navegador como arrastre nativo, dejando
+    // el mapa muerto hasta que el usuario pulse fuera del lienzo.
+    && zoomTmpl.includes('@pointerdown.prevent="handlePointerDown"') && zoomTmpl.includes('@pointerup="handlePointerUp"'));
 assert('7.19 Plantilla: botones de zoom y reencuadre accesibles con etiquetas ARIA',
   zoomTmpl.includes('btn-zoom-in') && zoomTmpl.includes('btn-zoom-out') && zoomTmpl.includes('btn-fit-territory')
     && zoomTmpl.includes('aria-label="Acercar el mapa"') && zoomTmpl.includes('aria-label="Ver el territorio completo"'));

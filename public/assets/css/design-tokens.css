@@ -1736,9 +1736,20 @@ textarea.form-control {
   text-decoration: none;
 }
 
+/*
+ * Interactive map surface (coordinator territorial tab + technician route modal).
+ * `user-select: none` is mandatory here, not cosmetic: dragging over a selectable
+ * element starts a text selection, and the NEXT press/move is then handled by the
+ * browser as a native drag of that selection, which swallows the pointermove events
+ * and freezes the map until the user clicks somewhere else. Combined with the
+ * `.prevent` modifier on @pointerdown, the gesture belongs exclusively to the map.
+ */
 .territorial-map-interactive {
   touch-action: none;
   cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .territorial-map-interactive:active {
