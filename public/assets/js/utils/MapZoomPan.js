@@ -32,6 +32,12 @@ export const MAP_ZOOM_PAN_DEFAULTS = {
   BUTTON_FACTOR: 1.5,
   DBLCLICK_FACTOR: 1.8,
   DRAG_THRESHOLD_PX: 6,
+  // Free roaming around the fitted window, in fitted-window widths per side, while the
+  // viewport is at or below the fitted scale: the canvas already shows at least the whole
+  // fit, so dragging must keep sliding onto the neighboring area instead of pinning the
+  // center. The band stays generous enough that sustained dragging never freezes, and
+  // resetView() (the fit control) always recovers the framing.
+  ROAM_MARGIN: 1,
   // Tile zoom bounds: OSM serves z0..z19; never request below a readable z2.
   TILE_ZOOM_FLOOR: 2,
   TILE_ZOOM_CEILING: 19
@@ -143,17 +149,19 @@ export const MapZoomPanMethods = {
    * Keeps the view from losing the content while panning. Above the fitted scale the
    * visible rect must stay inside the fitted window: the center is held to the band
    * [1/(2·scale), 1 - 1/(2·scale)]. At or below the fitted scale the whole fit already
-   * fits (or is smaller than) the canvas, so the center roams the full [0, 1] range —
-   * dragging at the default fitted view pans the map to the neighboring area (the
-   * adaptive tile window covers the extra viewport) instead of being dead-locked at
-   * 0.5, and the fit always keeps overlapping the viewport so no site gets lost.
+   * fits (or is smaller than) the canvas, so the center roams freely over a generous
+   * band [-ROAM_MARGIN, 1 + ROAM_MARGIN] measured in fitted-window widths: dragging the
+   * default fitted view pans to the neighboring area (the adaptive tile window covers
+   * the extra viewport) and keeps panning across repeated gestures, instead of freezing
+   * a couple of drags after the center reached the edge of the fit.
    */
   clampCenter(value, scale) {
     const halfVisible = 1 / (2 * scale);
     if (halfVisible < 0.5) {
       return Math.min(Math.max(value, halfVisible), 1 - halfVisible);
     }
-    return Math.min(Math.max(value, 0), 1);
+    const margin = MAP_ZOOM_PAN_DEFAULTS.ROAM_MARGIN;
+    return Math.min(Math.max(value, -margin), 1 + margin);
   },
   /**
    * Core zoom: sets a new scale keeping the base-window point under the canvas anchor

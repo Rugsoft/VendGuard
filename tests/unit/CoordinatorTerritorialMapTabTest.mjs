@@ -332,7 +332,7 @@ zoomTab.zoomToPoint(999, 0.5, 0.5);
 assert('7.7 La escala máxima de zoom queda limitada a 12x', zoomTab.view.scale === 12);
 zoomTab.zoomToPoint(0.01, 0.5, 0.5);
 assert('7.8 Alejar por debajo del encaje se detiene en el mínimo metropolitano (0.15x) con el centro libre',
-  Math.abs(zoomTab.view.scale - zoomTab.zoomMinScale) < 1e-9 && zoomTab.view.centerX >= 0 && zoomTab.view.centerX <= 1 && zoomTab.view.centerY >= 0 && zoomTab.view.centerY <= 1);
+  Math.abs(zoomTab.view.scale - zoomTab.zoomMinScale) < 1e-9 && zoomTab.view.centerX >= -1 && zoomTab.view.centerX <= 2 && zoomTab.view.centerY >= -1 && zoomTab.view.centerY <= 2);
 
 // El paneo necesita recorrido: a escala 3 el encaje supera el lienzo y arrastrar desplaza
 // el contenido de verdad (por debajo del encaje todo el territorio ya es visible y el
@@ -435,7 +435,24 @@ assert('7.23 Al mínimo, Badalona, El Prat, Cornellà y el sur de Barcelona qued
 assert('7.24 Por debajo del encaje el centro recorre el lienzo sin inversión del clamp (y por encima se sujeta al visible)',
   wideView.clampCenter(0.7, wideView.zoomMinScale) === 0.7 && wideView.clampCenter(0.05, 0.5) === 0.05
     && Math.abs(wideView.clampCenter(0.7, 2) - 0.7) < 1e-9
+    && wideView.clampCenter(9, 1) === 2 && wideView.clampCenter(-9, 1) === -1
     && Math.abs(wideView.clampCenter(0.99, 2) - 0.75) < 1e-9 && Math.abs(wideView.clampCenter(0.01, 2) - 0.25) < 1e-9);
+
+// Regresión del paneo que se congelaba tras un par de arrastres en la vista de encaje:
+// cuatro gestos de 400 px seguidos deben seguir moviendo el lienzo hasta el margen de
+// roaming. Con el roaming acotado a [0,1] el recorrido se habria congelado en el
+// segundo gesto, asi que este recorrido discrimina el fallo.
+const sustainedTab = createTabInstance();
+const sustainedTrack = [];
+for (let i = 0; i < 4; i++) {
+  sustainedTab.handlePointerDown(makePointerEvent(1, 500, 300));
+  sustainedTab.handlePointerMove(makePointerEvent(1, 900, 300));
+  sustainedTab.handlePointerUp(makePointerEvent(1, 900, 300));
+  sustainedTrack.push(Number(sustainedTab.view.centerX.toFixed(4)));
+}
+assert('7.25 Cuatro arrastres seguidos en el mismo sentido siguen desplazando el mapa territorial',
+  JSON.stringify(sustainedTrack) === JSON.stringify([0.1, -0.3, -0.7, -1]),
+  `recorrido observado: ${JSON.stringify(sustainedTrack)}`);
 
 // =========================================================================
 // BLOQUE 8: Refresco reactivo silencioso tras asignar desde el mapa (RF-MAP-09)

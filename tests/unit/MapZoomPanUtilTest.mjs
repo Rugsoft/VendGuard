@@ -153,9 +153,30 @@ const belowFit = createHost(BASE);
 belowFit.zoomToPoint(0.5, 0.5, 0.5);
 const centerBefore = { x: belowFit.view.centerX, y: belowFit.view.centerY };
 belowFit.panBy(120, 60, 800);
-assert('3.6 Por debajo del encaje arrastrar desplaza el centro libremente (roaming [0,1], el contenido sigue al dedo)',
+assert('3.6 Por debajo del encaje arrastrar desplaza el centro libremente (roaming, el contenido sigue al dedo)',
   belowFit.view.centerX < centerBefore.x && belowFit.view.centerY < centerBefore.y
-    && belowFit.view.centerX >= 0 && belowFit.view.centerY >= 0);
+    && belowFit.view.centerX >= -MAP_ZOOM_PAN_DEFAULTS.ROAM_MARGIN
+    && belowFit.view.centerY >= -MAP_ZOOM_PAN_DEFAULTS.ROAM_MARGIN);
+
+// Regresión de "arrastra un momento y luego deja de moverse": con el roaming acotado a
+// [0,1] el centro se agotaba en dos gestos. Varios arrastres seguidos en el mismo
+// sentido deben seguir desplazando el mapa, y el sentido contrario recupera el encaje.
+const sustained = createHost(BASE);
+const forwardTrack = [];
+for (let i = 0; i < 3; i++) {
+  sustained.panBy(400, 0, 800);
+  forwardTrack.push(sustained.view.centerX);
+}
+assert('3.7 Tres arrastres largos seguidos en el mismo sentido siguen desplazando el mapa',
+  forwardTrack.every((value, i) => i === 0 || value < forwardTrack[i - 1])
+    && Math.abs(forwardTrack[2] + MAP_ZOOM_PAN_DEFAULTS.ROAM_MARGIN) < 1e-12,
+  `recorrido observado: ${JSON.stringify(forwardTrack)}`);
+for (let i = 0; i < 3; i++) {
+  sustained.panBy(-400, 0, 800);
+}
+assert('3.8 Arrastrando en sentido contrario se recupera el encaje',
+  Math.abs(sustained.view.centerX - 0.5) < 1e-12 && Math.abs(sustained.view.centerY - 0.5) < 1e-12,
+  `centro final: ${sustained.view.centerX}, ${sustained.view.centerY}`);
 
 // -------------------------------------------------------------------------
 console.log('\n--- Gestos: rueda, doble clic, arrastre y pellizco ---');
