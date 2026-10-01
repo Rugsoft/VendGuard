@@ -178,6 +178,22 @@ export const CoordinatorTerritorialMapTab = {
       return TERRITORIAL_MAX_SCALE;
     },
     /**
+     * Pixel-aware tile choice: reports the rendered canvas width so the shared
+     * controller picks a tile level where every 256px tile displays near its native
+     * size (wide panoramic canvases get sharp imagery instead of upscaled bitmaps).
+     */
+    getRenderWidthPx() {
+      if (typeof document === 'undefined') {
+        return 0;
+      }
+      const canvas = document.querySelector('[data-testid="territorial-canvas"]');
+      if (!canvas || !canvas.getBoundingClientRect) {
+        return 0;
+      }
+      const width = Math.round(canvas.getBoundingClientRect().width);
+      return width > 0 ? width : 0;
+    },
+    /**
      * Loads the territorial matrix applying the current reactive filters (RF-MAP-09).
      * The silent variant (silent = true) skips the full-canvas spinner and clears a
      * previous error message only on success, so a reactive refresh after assigning

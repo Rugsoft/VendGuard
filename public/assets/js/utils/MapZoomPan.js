@@ -16,6 +16,10 @@
  *    center pins to 0.5 (the clamp margin would invert otherwise) and the tile zoom
  *    level drops adaptively (slippy-map style) so wider views request a handful of
  *    tiles instead of compounding their count.
+ * 4. Pixel-aware tile choice (Leaflet style): when the host reports its rendered
+ *    width, the tile level is picked so every standard 256px tile renders near its
+ *    native size — wide panoramic canvases get sharper imagery instead of an
+ *    upscaled, pixelated bitmap.
  *
  * Dogma Vanilla: native ESM, pure functions and plain objects, no dependencies.
  */
@@ -73,6 +77,16 @@ export const MapZoomPanMethods = {
     return MAP_ZOOM_PAN_DEFAULTS.MAX_SCALE;
   },
   /**
+   * Hook (optional): rendered canvas width in CSS pixels. When provided (> 0) the tile
+   * zoom level is chosen pixel-aware, Leaflet style, so each standard 256px tile is
+   * displayed at roughly its native size across the canvas — wide panoramic canvases
+   * get sharper imagery than a square content-fit window would produce. Return 0 to
+   * fall back to the pure scale-relative tile choice.
+   */
+  getRenderWidthPx() {
+    return 0;
+  },
+  /**
    * Derives the effective tile-space window from the fitted window and the current
    * interactive view state. At scale 1 the fitted window is returned untouched. The
    * visible rectangle is always the [centerX ± 1/(2·scale)] fraction of the fitted
@@ -85,14 +99,29 @@ export const MapZoomPanMethods = {
    */
   effectiveWindow() {
     const base = this.getBaseWindow();
-    if (!base || this.view.scale === 1) {
+    if (!base) {
       return base;
     }
     const scale = this.view.scale;
+    const widthPx = typeof this.getRenderWidthPx === 'function' ? Number(this.getRenderWidthPx()) || 0 : 0;
+    if (scale === 1 && widthPx <= 0) {
+      // Content-fit hosts without a measurable canvas keep the fitted window verbatim.
+      return base;
+    }
     const spanFraction = base.sideTiles / Math.pow(2, base.zoom);
     const desiredFraction = spanFraction / scale;
-    const idealZoom = Math.round(Math.log2(1 / desiredFraction));
-    const zoom = Math.max(MAP_ZOOM_PAN_DEFAULTS.TILE_ZOOM_FLOOR, Math.min(MAP_ZOOM_PAN_DEFAULTS.TILE_ZOOM_CEILING, idealZoom));
+    let idealZoom;
+    if (widthPx > 0) {
+      // Pixel-aware slippy choice: sideTiles ~= widthPx / 256 keeps every standard
+      // tile near its native 256px render size. It already tracks the scale (the
+      // scale factor sits inside the logarithm), so zooming in raises the level and
+      // zooming out lowers it with no extra math.
+      idealZoom = Math.log2((widthPx * scale) / (256 * spanFraction));
+    } else {
+      // Content-fit fallback (no measurable canvas): keep ~1 tile across the window.
+      idealZoom = Math.log2(1 / desiredFraction);
+    }
+    const zoom = Math.max(MAP_ZOOM_PAN_DEFAULTS.TILE_ZOOM_FLOOR, Math.min(MAP_ZOOM_PAN_DEFAULTS.TILE_ZOOM_CEILING, Math.round(idealZoom)));
     const worldBase = Math.pow(2, base.zoom);
     const worldNew = Math.pow(2, zoom);
     const sideTiles = (base.sideTiles / scale) / worldBase * worldNew;

@@ -48,10 +48,13 @@ function createHost(baseWindow, hooks = {}) {
     },
     getMaxScale() {
       return typeof this.hookMax === 'function' ? this.hookMax() : MAP_ZOOM_PAN_DEFAULTS.MAX_SCALE;
+    },
+    getRenderWidthPx() {
+      return typeof this.hookWidth === 'function' ? this.hookWidth() : 0;
     }
   };
   for (const [name, fn] of Object.entries(MapZoomPanMethods)) {
-    if (name !== 'getBaseWindow' && name !== 'getMinScale' && name !== 'getMaxScale') {
+    if (name !== 'getBaseWindow' && name !== 'getMinScale' && name !== 'getMaxScale' && name !== 'getRenderWidthPx') {
       host[name] = fn.bind(host);
     }
   }
@@ -188,6 +191,38 @@ const emptyHost = createHost(null);
 emptyHost.zoomToPoint(3, 0.5, 0.5);
 assert('4.9 Sin ventana base el controlador no falla ni muta la vista',
   emptyHost.view.scale === 1 && emptyHost.effectiveWindow() === null);
+
+// ------------------------------------------------------------------------
+console.log('\n--- Elección de tesela pixel-aware (mapas panorámicos anchos) ---');
+
+// Un lienzo panorámico de 1300px encajado sobre la ventana BASE: la elección
+// content-fit serviría teselas estiradas ~4x (pixelado); la pixel-aware debe
+// subir el nivel para que cada tesela se renderice cerca de sus 256px nativos.
+const wide = createHost(BASE, { hookWidth: () => 1300 });
+wide.hookMin = () => 0.15;
+const wideFit = wide.effectiveWindow();
+const wideFitTiles = wideFit.sideTiles; // teselas visibles a lo ancho a escala 1
+assert('5.1 Encaje pixel-aware: el nivel de tesela sube hasta renderizar ~5 teselas de 256px en 1300px',
+  wideFit.zoom > BASE.zoom && Math.abs(wideFitTiles - 1300 / 256) < 1.01);
+
+wide.zoomToPoint(2, 0.5, 0.5);
+const wideIn = wide.effectiveWindow();
+assert('5.2 Ampliar 2x sobre el lienzo ancho sube el nivel de tesela (+1) manteniendo ~5 teselas',
+  wideIn.zoom === wideFit.zoom + 1 && Math.abs(wideIn.sideTiles - wideFitTiles) < 1e-9);
+
+// Recuento acotado: la ventana ancha al suelo geográfico no explota en decenas de teselas
+wide.zoomToPoint(0.15, 0.5, 0.5);
+const wideFloor = wide.effectiveWindow();
+assert('5.3 Al suelo de zoom la ventana ancha mantiene un recuento de teselas acotado (<= 20)',
+  wideFloor.sideTiles <= 20 && wideFloor.zoom >= MAP_ZOOM_PAN_DEFAULTS.TILE_ZOOM_FLOOR);
+
+// Sin medición de lienzo (0) se usa el fallback content-fit intacto
+const noWidth = createHost(BASE, { hookWidth: () => 0 });
+noWidth.hookMin = () => 0.15;
+noWidth.zoomToPoint(2, 0.5, 0.5);
+const noWidthWin = noWidth.effectiveWindow();
+assert('5.4 Sin ancho medible se conserva el fallback content-fit (zoom = redondeo log2 de la escala)',
+  noWidthWin.zoom === Math.round(Math.log2(2 / (BASE.sideTiles / Math.pow(2, BASE.zoom)))));
 
 // -------------------------------------------------------------------------
 console.log('\n======================================================================');

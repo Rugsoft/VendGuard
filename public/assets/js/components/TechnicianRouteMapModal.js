@@ -148,6 +148,21 @@ export const TechnicianRouteMapModal = {
     getMaxScale() {
       return MAP_ZOOM_PAN_DEFAULTS.MAX_SCALE;
     },
+    /**
+     * Pixel-aware tile choice: reports the rendered canvas width so the shared
+     * controller keeps every 256px tile near its native size while zooming.
+     */
+    getRenderWidthPx() {
+      if (typeof document === 'undefined') {
+        return 0;
+      }
+      const canvas = document.querySelector('[data-testid="route-map-canvas"]');
+      if (!canvas || !canvas.getBoundingClientRect) {
+        return 0;
+      }
+      const width = Math.round(canvas.getBoundingClientRect().width);
+      return width > 0 ? width : 0;
+    },
     close() {
       this.$emit('update:modelValue', false);
     },
