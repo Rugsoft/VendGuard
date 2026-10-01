@@ -35,6 +35,7 @@ CREATE TABLE `locations` (
   `address` VARCHAR(255) NOT NULL,
   `latitude` DECIMAL(10, 7) NOT NULL DEFAULT 41.3850640,
   `longitude` DECIMAL(11, 7) NOT NULL DEFAULT 2.1734035,
+  `has_physical_reception` TINYINT(1) NOT NULL DEFAULT 1,
   `contact_name` VARCHAR(100) NULL,
   `contact_phone` VARCHAR(30) NULL,
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
@@ -792,6 +793,86 @@ WHERE
     OR
     (sp.part_code = 'DISP-LCD-01')
 ON DUPLICATE KEY UPDATE `machine_model` = VALUES(`machine_model`);
+
+-- =============================================================================
+-- MÓDULO 08 (M5): GESTIÓN DE REINTEGROS E IMPORTE RETENIDO (DINERO TRAGADO)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `refund_requests` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `incident_id` INT UNSIGNED NOT NULL,
+    `machine_id` INT UNSIGNED NOT NULL,
+    `location_id` INT UNSIGNED NOT NULL,
+    `claimant_name` VARCHAR(100) NOT NULL,
+    `claimant_contact` VARCHAR(100) NOT NULL,
+    `claimed_amount` DECIMAL(6, 2) NOT NULL,
+    `product_attempted` VARCHAR(100) NULL DEFAULT NULL,
+    `compensation_method` ENUM('EN_MANO_SEDE', 'BIZUM', 'TRANSFERENCIA_BANCARIA') NOT NULL,
+    `bizum_phone` VARCHAR(15) NULL DEFAULT NULL,
+    `iban` VARCHAR(34) NULL DEFAULT NULL,
+    `pickup_pin` VARCHAR(4) NULL DEFAULT NULL,
+    `tracking_token` VARCHAR(64) NOT NULL UNIQUE,
+    `status` ENUM(
+        'PENDING_INSPECTION',
+        'DEPOSITED_AT_RECEPTION',
+        'VERIFIED_PENDING_PAYMENT',
+        'REQUIRES_COORDINATOR_APPROVAL',
+        'PENDING_CONTACT',
+        'PAID_DIGITAL',
+        'REFUNDED_IN_HAND',
+        'REJECTED'
+    ) NOT NULL DEFAULT 'PENDING_INSPECTION',
+    `technician_finding` ENUM('FOUND_PHYSICAL', 'CONFIRMED_NO_CASH', 'UNVERIFIED_NO_CASH') NULL DEFAULT NULL,
+    `recovered_amount` DECIMAL(6, 2) NULL DEFAULT NULL,
+    `cash_custody_action` ENUM('LEFT_AT_RECEPTION', 'HELD_FOR_CENTRAL') NULL DEFAULT NULL,
+    `receptionist_name` VARCHAR(100) NULL DEFAULT NULL,
+    `technician_justification` TEXT NULL DEFAULT NULL,
+    `technician_inspected_at` DATETIME NULL DEFAULT NULL,
+    `technician_id` INT UNSIGNED NULL DEFAULT NULL,
+    `coordinator_decision` ENUM('APPROVED', 'REJECTED') NULL DEFAULT NULL,
+    `approved_amount` DECIMAL(6, 2) NULL DEFAULT NULL,
+    `coordinator_justification` TEXT NULL DEFAULT NULL,
+    `coordinator_id` INT UNSIGNED NULL DEFAULT NULL,
+    `payment_reference` VARCHAR(100) NULL DEFAULT NULL,
+    `paid_at` DATETIME NULL DEFAULT NULL,
+    `hand_delivered_at` DATETIME NULL DEFAULT NULL,
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `deleted_at` DATETIME NULL DEFAULT NULL,
+    CONSTRAINT `fk_refund_incident` FOREIGN KEY (`incident_id`)
+        REFERENCES `incidents` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT `fk_refund_machine` FOREIGN KEY (`machine_id`)
+        REFERENCES `machines` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT `fk_refund_location` FOREIGN KEY (`location_id`)
+        REFERENCES `locations` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT `fk_refund_technician` FOREIGN KEY (`technician_id`)
+        REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT `fk_refund_coordinator` FOREIGN KEY (`coordinator_id`)
+        REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+    INDEX `idx_refund_status_location` (`status`, `location_id`),
+    INDEX `idx_refund_incident` (`incident_id`),
+    INDEX `idx_refund_tracking_token` (`tracking_token`),
+    INDEX `idx_refund_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `unclaimed_cash_findings` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `incident_id` INT UNSIGNED NOT NULL,
+    `machine_id` INT UNSIGNED NOT NULL,
+    `technician_id` INT UNSIGNED NOT NULL,
+    `amount` DECIMAL(6, 2) NOT NULL,
+    `notes` TEXT NULL DEFAULT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT `fk_unclaimed_incident` FOREIGN KEY (`incident_id`)
+        REFERENCES `incidents` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT `fk_unclaimed_machine` FOREIGN KEY (`machine_id`)
+        REFERENCES `machines` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT `fk_unclaimed_technician` FOREIGN KEY (`technician_id`)
+        REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+    INDEX `idx_unclaimed_incident` (`incident_id`),
+    INDEX `idx_unclaimed_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 

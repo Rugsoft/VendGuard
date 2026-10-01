@@ -16,7 +16,7 @@
 
 ## Fase 1: Esquema de Base de Datos, Modelos y Excepciones de Dominio
 
-- [ ] **T-REF-01: Migración DDL idempotente y ampliación de esquema (`008_refund_management.sql`, `cloud_init.sql`)**
+- [x] **T-REF-01: Migración DDL idempotente y ampliación de esquema (`008_refund_management.sql`, `cloud_init.sql`)**
   * **Requisitos:** RF-REF-01, RF-REF-04, RF-REF-10, Constitución Art. III (Inviolabilidad de datos y soft delete)
   * **Dependencias:** Ninguna
   * **Hecho cuando:** La ejecución de `php bin/migrate.php` aplica con éxito `008_refund_management.sql`, creando las tablas `refund_requests` y `unclaimed_cash_findings`, y agregando `has_physical_reception` a `locations`; `database/cloud_init.sql` incorpora el esquema completo.
