@@ -28,7 +28,7 @@ globalThis.window = {
 };
 
 import { api } from '../../public/assets/js/api.js';
-import { CoordinatorTerritorialMapTab, MARKER_COLORS } from '../../public/assets/js/components/CoordinatorTerritorialMapTab.js';
+import { CoordinatorTerritorialMapTab, MARKER_COLORS, TERRITORIAL_CANVAS_HEIGHT_RATIO } from '../../public/assets/js/components/CoordinatorTerritorialMapTab.js';
 import { Mercator, buildMapTiles as sharedBuildMapTiles } from '../../public/assets/js/utils/Mercator.js';
 
 let assertions = 0;
@@ -437,11 +437,14 @@ const widePositions = wideCorners.map(point => wideView.sitePosition(point));
 assert('7.23 Al mínimo, Badalona, El Prat, Cornellà y el sur de Barcelona quedan dentro del lienzo',
   widePositions.every(point => point.x >= 0 && point.x <= 100 && point.y >= 0 && point.y <= 100));
 
-assert('7.24 Por debajo del encaje el centro recorre el lienzo sin tope (y por encima se sujeta al visible)',
+assert('7.24 Por debajo del encaje el centro recorre el lienzo sin tope (y por encima se sujeta al visible con margen acotado)',
   wideView.clampCenter(0.7, wideView.zoomMinScale) === 0.7 && wideView.clampCenter(0.05, 0.5) === 0.05
     && Math.abs(wideView.clampCenter(0.7, 2) - 0.7) < 1e-9
     && wideView.clampCenter(9, 1) === 9 && wideView.clampCenter(-9, 1) === -9
-    && Math.abs(wideView.clampCenter(0.99, 2) - 0.75) < 1e-9 && Math.abs(wideView.clampCenter(0.01, 2) - 0.25) < 1e-9);
+    // A escala 2 el margen es 0.5 * (1/4) = 0.125 a cada lado: 0.99 sigue siendo valido,
+    // y el limite se aplica a partir de 1.125.
+    && Math.abs(wideView.clampCenter(0.99, 2) - 0.99) < 1e-9
+    && Math.abs(wideView.clampCenter(9, 2) - 1.125) < 1e-9 && Math.abs(wideView.clampCenter(-9, 2) + 0.125) < 1e-9);
 
 // Regresión del paneo que se congelaba tras un par de arrastres: cualquier tope a escala
 // de encaje se agota con dos gestos reales, porque un arrastre de ancho completo recorre
@@ -474,6 +477,55 @@ for (const scale of [0.25, 3]) {
 assert('7.26 El arrastre es 1:1 con el dedo tanto alejado como cerca (25 unidades por 250px)',
   slippyTracks.every((units) => Math.abs(units - 25) < 1e-9),
   `desplazamiento observado por arrastre de 250px: ${JSON.stringify(slippyTracks)} unidades`);
+
+// =========================================================================
+// BLOQUE 7 bis: Encuadre al pulsar un marcador (RF-MAP-09, contrato tecnico 7.1)
+// =========================================================================
+console.log('\n--- BLOQUE 7 bis: Encuadre de sede al pulsar su marcador ---');
+
+const focusTab = createTabInstance();
+await focusTab.loadTerritorialData();
+// El clamp de la ventana visible impide centrar una sede pegada al borde al ampliar,
+// asi que el caso de encuadre exacto se verifica con una sede alcanzable.
+const reachable = (tab) => tab.sites.find((site) => {
+  const point = tab.siteWindowPosition(site);
+  return point.x > 26 && point.x < 74 && point.y > 26 && point.y < 74;
+});
+const focusSite = reachable(focusTab);
+assert('7.27a El fixture de prueba contiene una sede centrable (el clamp lo alcanzaria)',
+  focusSite !== undefined,
+  'ninguna sede del fixture queda dentro de la banda alcanzable a escala 2');
+focusTab.handleSiteClick(focusSite);
+const focusPos = focusTab.sitePosition(focusSite);
+assert('7.27 Pulsar un marcador encuadra la sede a escala x2 y la deja centrada en el lienzo',
+  focusTab.view.scale === 2
+    && Math.abs(focusPos.x - 50) < 1e-6
+    && Math.abs(focusPos.y - TERRITORIAL_CANVAS_HEIGHT_RATIO * 50) < 1e-6,
+  `escala=${focusTab.view.scale} posicion=(${focusPos.x}, ${focusPos.y})`);
+const focusAfter = { x: focusTab.view.centerX, y: focusTab.view.centerY };
+focusTab.handleSiteClick(focusSite);
+assert('7.28 Pulsar dos veces el mismo marcador no acumula zoom',
+  focusTab.view.scale === 2
+    && Math.abs(focusTab.view.centerX - focusAfter.x) < 1e-9 && Math.abs(focusTab.view.centerY - focusAfter.y) < 1e-9,
+  `escala=${focusTab.view.scale} centro=(${focusTab.view.centerX}, ${focusTab.view.centerY})`);
+
+// Sede ya asignada: reencuadra sin abrir el flujo de asignacion.
+const assignedFocus = createTabInstance();
+await assignedFocus.loadTerritorialData();
+const assignedSite = assignedFocus.sites.find(site => !assignedFocus.isUnassignedSite(site)) || assignedFocus.sites[0];
+assignedFocus.handleSiteClick(assignedSite);
+assert('7.29 Una sede ya asignada reencuadra el mapa y NO abre la asignacion',
+  assignedFocus.view.scale === 2 && assignedFocus.emittedEvents.length === 0,
+  `escala=${assignedFocus.view.scale} eventos=${assignedFocus.emittedEvents.length}`);
+
+// El clic que cierra un arrastre largo no debe reencuadrar (no fue una pulsacion real).
+const dragFocus = createTabInstance();
+await dragFocus.loadTerritorialData();
+dragFocus.suppressNextClick = true;
+dragFocus.handleSiteClick(dragFocus.sites[0]);
+assert('7.30 El clic residual de un arrastre no reencuadra ni asigna',
+  dragFocus.view.scale === 1 && dragFocus.emittedEvents.length === 0,
+  `escala=${dragFocus.view.scale} eventos=${dragFocus.emittedEvents.length}`);
 
 // =========================================================================
 // BLOQUE 8: Refresco reactivo silencioso tras asignar desde el mapa (RF-MAP-09)

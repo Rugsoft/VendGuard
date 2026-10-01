@@ -34,7 +34,15 @@ export const MAP_ZOOM_PAN_DEFAULTS = {
   DRAG_THRESHOLD_PX: 6,
   // Tile zoom bounds: OSM serves z0..z19; never request below a readable z2.
   TILE_ZOOM_FLOOR: 2,
-  TILE_ZOOM_CEILING: 19
+  TILE_ZOOM_CEILING: 19,
+  // Scale reached when framing a point of interest (see focusOn): twice the fitted
+  // view, the smallest zoom that makes a marker and its surroundings legible.
+  FOCUS_SCALE: 2,
+  // How far the view may leave the fitted window, as a fraction of the visible
+  // half-window, once zoomed in. 0.5 keeps at least 75% of the screen filled with real
+  // content while still letting a site flush against the edge of the territory be
+  // centered instead of landing half-out of frame.
+  CONTENT_OVERSCAN: 0.5
 };
 
 /**
@@ -48,6 +56,17 @@ const MAP_UI_TARGET_SELECTOR = 'button, a[href], input, select, textarea, [role=
  */
 function isMapUiTarget(target) {
   return Boolean(target && typeof target.closest === 'function' && target.closest(MAP_UI_TARGET_SELECTOR));
+}
+
+/**
+ * Fuzz guard for a framing target: discards corrupt input (NaN/Infinity) and absurd
+ * values, while leaving the real geometry limits to clampCenter (which knows about the
+ * CONTENT_OVERSCAN margin and therefore lets a site sit slightly outside the fitted
+ * window).
+ */
+function clampFocusAnchor(value) {
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? Math.min(Math.max(normalized, -0.5), 1.5) : 0.5;
 }
 
 /**
@@ -170,7 +189,12 @@ clampCenter(value, scale) {
   }
   const halfVisible = 1 / (2 * scale);
   if (halfVisible < 0.5) {
-    return Math.min(Math.max(center, halfVisible), 1 - halfVisible);
+    // Zoomed in, the view may leave the fitted window by up to CONTENT_OVERSCAN of the
+    // visible half-window. That bounded margin keeps the territory from being lost
+    // (at least 75% of the canvas always shows content) while allowing focusOn() to
+    // really center a site sitting on the edge of the fitted area.
+    const margin = MAP_ZOOM_PAN_DEFAULTS.CONTENT_OVERSCAN * halfVisible;
+    return Math.min(Math.max(center, -margin), 1 + margin);
   }
   return center;
 },
@@ -193,6 +217,33 @@ clampCenter(value, scale) {
     this.view.scale = nextScale;
     this.view.centerX = this.clampCenter(worldX - (Number(nx) - 0.5) / nextScale, nextScale);
     this.view.centerY = this.clampCenter(worldY - (Number(ny) - 0.5) / nextScale, nextScale);
+  },
+  /**
+   * Frames a point of interest: brings it to the center of the canvas and zooms in up to
+   * x2 the fitted scale (RF-MAP-07, RF-MAP-09, contracts 7.1).
+   *
+   * `(pointX, pointY)` is the point projection in EFFECTIVE-WINDOW normalized units
+   * (0..1), exactly what `projectToWindow()` returns for a marker against the current
+   * window. That is not the same as a base-window position: the adaptive tile choice
+   * keeps the tile COUNT constant while the level rises, so `sideTiles` does not shrink
+   * with the scale. The base position is therefore derived with the CURRENT scale
+   * (`ground = center + (point - 0.5) / scale`) before the view changes, which also
+   * makes repeated presses exactly idempotent.
+   *
+   * Hosts must pass the UNCROPPED projection: the coordinator canvas crops a band of the
+   * square window, so its band-adjusted marker coordinates are not valid here.
+   */
+  focusOn(pointX, pointY) {
+    if (!this.getBaseWindow()) {
+      return;
+    }
+    const scale = Math.max(Number(this.view.scale) || 1, 1e-6);
+    const groundX = this.view.centerX + (Number(pointX) - 0.5) / scale;
+    const groundY = this.view.centerY + (Number(pointY) - 0.5) / scale;
+    const targetScale = Math.min(Math.max(this.view.scale, MAP_ZOOM_PAN_DEFAULTS.FOCUS_SCALE), this.getMaxScale());
+    this.view.scale = targetScale;
+    this.view.centerX = this.clampCenter(clampFocusAnchor(groundX), targetScale);
+    this.view.centerY = this.clampCenter(clampFocusAnchor(groundY), targetScale);
   },
   /**
    * Pans the view by raw pixel deltas so the content always follows the finger 1:1

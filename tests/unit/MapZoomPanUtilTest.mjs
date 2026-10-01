@@ -146,8 +146,10 @@ assert('3.4 El límite inferior dinámico del componente se respeta', Math.abs(d
 const clamped = createHost(BASE);
 clamped.zoomToPoint(2, 0.5, 0.5);
 clamped.panBy(-5000, 5000, 800);
-assert('3.5 El paneo queda sujeto a la ventana encajada: el centro se detiene en el borde (0.75, 0.25)',
-  clamped.view.centerX === 0.75 && clamped.view.centerY === 0.25);
+// Margen de sobredesplazamiento = 0.5 * (1 / (2 * 2)) = 0.125 por lado.
+assert('3.5 El paneo sale de la ventana encjada como máximo el margen acootado (0.125 a escala 2)',
+  Math.abs(clamped.view.centerX - 1.125) < 1e-12 && Math.abs(clamped.view.centerY + 0.125) < 1e-12,
+  `centro=(${clamped.view.centerX}, ${clamped.view.centerY})`);
 
 const belowFit = createHost(BASE);
 belowFit.zoomToPoint(0.5, 0.5, 0.5);
@@ -338,6 +340,85 @@ noWidth.zoomToPoint(2, 0.5, 0.5);
 const noWidthWin = noWidth.effectiveWindow();
 assert('5.4 Sin ancho medible se conserva el fallback content-fit (zoom = redondeo log2 de la escala)',
   noWidthWin.zoom === Math.round(Math.log2(2 / (BASE.sideTiles / Math.pow(2, BASE.zoom)))));
+
+// -------------------------------------------------------------------------
+console.log('\n--- Encuadre de un punto de interés: focusOn (RF-MAP-07 / RF-MAP-09) ---');
+
+// Posicion proyectada de un punto geografico fijo (unidades de la ventana EFECTIVA),
+// que es lo que devuelve projectToWindow() para un marcador y lo que recibe focusOn():
+// punto = 0.5 + (base - centro) * escala.
+const projectedPoint = (host, groundPoint) => ({
+  x: 0.5 + (groundPoint.x - host.view.centerX) * host.view.scale,
+  y: 0.5 + (groundPoint.y - host.view.centerY) * host.view.scale
+});
+
+const focusHost = createHost(BASE);
+const focusPoint = { x: 0.4, y: 0.6 };
+const firstProjection = projectedPoint(focusHost, focusPoint);
+focusHost.focusOn(firstProjection.x, firstProjection.y);
+assert('6.1 Encuadrar un marcador lleva la vista a escala x2 sobre el encaje',
+  focusHost.view.scale === 2 && MAP_ZOOM_PAN_DEFAULTS.FOCUS_SCALE === 2,
+  `escala=${focusHost.view.scale}`);
+const centered = projectedPoint(focusHost, focusPoint);
+assert('6.2 El marcador encuadrado queda en el centro geométrico del lienzo',
+  Math.abs(centered.x - 0.5) < 1e-9 && Math.abs(centered.y - 0.5) < 1e-9,
+  `proyectado=(${centered.x}, ${centered.y})`);
+
+const refocus = { x: focusHost.view.centerX, y: focusHost.view.centerY };
+const secondProjection = projectedPoint(focusHost, focusPoint);
+focusHost.focusOn(secondProjection.x, secondProjection.y);
+assert('6.3 Volver a pulsar el mismo marcador NO acumula zoom ni desplaza la vista (idempotente)',
+  focusHost.view.scale === 2 && Math.abs(focusHost.view.centerX - refocus.x) < 1e-9
+    && Math.abs(focusHost.view.centerY - refocus.y) < 1e-9,
+  `escala=${focusHost.view.scale} centro=(${focusHost.view.centerX}, ${focusHost.view.centerY})`);
+
+const closeHost = createHost(BASE);
+closeHost.zoomToPoint(4, 0.5, 0.5);
+const closePoint = { x: 0.55, y: 0.5 };
+const closeProjection = projectedPoint(closeHost, closePoint);
+closeHost.focusOn(closeProjection.x, closeProjection.y);
+const recentered = projectedPoint(closeHost, closePoint);
+assert('6.4 Si la vista ya está más cerca que x2, sólo recentra y NO aleja',
+  closeHost.view.scale === 4 && Math.abs(recentered.x - 0.5) < 1e-9 && Math.abs(recentered.y - 0.5) < 1e-9,
+  `escala=${closeHost.view.scale} proyectado=(${recentered.x}, ${recentered.y})`);
+
+// El punto geografico encuadrado es el mismo antes y después del acercamiento.
+const anchoredFocus = createHost(BASE);
+const offCenterPoint = { x: 0.35, y: 0.65 };
+const offProjection = projectedPoint(anchoredFocus, offCenterPoint);
+anchoredFocus.focusOn(offProjection.x, offProjection.y);
+const drawnAfter = projectedPoint(anchoredFocus, offCenterPoint);
+assert('6.5 El punto encuadrado es el mismo antes y después del acercamiento',
+  Math.abs(drawnAfter.x - 0.5) < 1e-9 && Math.abs(drawnAfter.y - 0.5) < 1e-9,
+  `proyectado=(${drawnAfter.x}, ${drawnAfter.y})`);
+
+// Una sede pegada al borde del territorio (base 1.08) se centra gracias al margen
+// acotado: con el limite estricto quedaria a media pantalla.
+const edgeHost = createHost(BASE);
+edgeHost.focusOn(1.08, 1.08);
+assert('6.6 Una sede al borde del territorio se centra con el margen acotado',
+  edgeHost.view.scale === 2 && Math.abs(edgeHost.view.centerX - 1.08) < 1e-9
+    && Math.abs(edgeHost.view.centerY - 1.08) < 1e-9,
+  `escala=${edgeHost.view.scale} centro=(${edgeHost.view.centerX}, ${edgeHost.view.centerY})`);
+
+const farHost = createHost(BASE);
+farHost.zoomToPoint(6, 0.5, 0.5);
+farHost.focusOn(9, 9);
+assert('6.7 El margen sigue acotado: el encuadre nunca deja mas vacio que media semiventana',
+  farHost.view.scale === 6 && Math.abs(farHost.view.centerX - (1 + 1 / 24)) < 1e-12
+    && Math.abs(farHost.view.centerY - (1 + 1 / 24)) < 1e-12,
+  `escala=${farHost.view.scale} centro=(${farHost.view.centerX}, ${farHost.view.centerY})`);
+
+const bogusHost = createHost(BASE);
+bogusHost.focusOn(Number.NaN, 99);
+assert('6.8 Un ancla corrupta o fuera de lienzo no rompe la vista',
+  bogusHost.view.scale === 2 && Number.isFinite(bogusHost.view.centerX) && Number.isFinite(bogusHost.view.centerY),
+  `escala=${bogusHost.view.scale} centro=(${bogusHost.view.centerX}, ${bogusHost.view.centerY})`);
+
+const emptyFocus = createHost(null);
+emptyFocus.focusOn(0.3, 0.3);
+assert('6.9 Sin ventana base el encuadre no muta la vista',
+  emptyFocus.view.scale === 1 && emptyFocus.view.centerX === 0.5 && emptyFocus.view.centerY === 0.5);
 
 // -------------------------------------------------------------------------
 console.log('\n======================================================================');

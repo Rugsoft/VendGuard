@@ -137,8 +137,8 @@ El sistema debe incorporar en la vista móvil del técnico un mapa interactivo r
   - Paradas exclusivas de Mantenimiento Preventivo (verde / preventivo).
   - Paradas Completadas (gris / atenuado con check verde).
   - Posición actual del técnico o Base Central (indicador de inicio).
-* **EARS Evento:** Cuando el técnico pulse sobre un marcador del mapa, el sistema DEBE centrar la vista en dicho punto y abrir una ficha resumen con: nombre de sede, dirección, progreso de máquinas a intervenir, nivel de urgencia y botón directo de navegación.
-* **EARS Evento:** Cuando el técnico seleccione una parada en la lista textual de la ruta, el mapa DEBE sincronizarse automáticamente resaltando y encuadrando el marcador correspondiente.
+* **EARS Evento:** Cuando el técnico pulse sobre un marcador del mapa, el sistema DEBE centrar la vista en dicho punto acercando la escala hasta un factor **×2 sobre el encaje** (idempotente: nunca más lejos que ×2 ni acumulativo) y abrir una ficha resumen con: nombre de sede, dirección, progreso de máquinas a intervenir, nivel de urgencia y botón directo de navegación.
+* **EARS Evento:** Cuando el técnico seleccione una parada en la lista textual de la ruta, el mapa DEBE sincronizarse automáticamente resaltando y encuadrando el marcador correspondiente con el mismo enfoque de escala ×2.
 
 #### RF-MAP-08: Apertura Directa de Navegación GPS en Google Maps
 El sistema debe proporcionar acceso con un solo toque a la navegación vehicular asistida en Google Maps desde el dispositivo móvil o navegador de escritorio.
@@ -163,6 +163,9 @@ El sistema debe ofrecer en el panel de Coordinación una vista de mapa de gran f
 * **EARS Evento:** Cuando una misma Sede tenga tareas asignadas concurrentemente a más de un técnico, el sistema DEBE mostrar un distintivo multi-técnico (ej. *"2 técnicos asignados: Jordi / Marta"*), permitiendo al coordinador reasignar tareas para consolidar la visita en un único operario.
 * **EARS Evento:** Cuando el coordinador filtre por técnico, estado de incidencia o tipología de máquina en el panel de triaje, el mapa DEBE actualizar reactivamente los marcadores mostrados.
 * **EARS Evento:** Cuando el coordinador haga clic en una sede sin asignar dentro del mapa, el sistema DEBE permitir iniciar el flujo de asignación técnica para las incidencias de dicha ubicación.
+* **EARS Evento:** Cuando el coordinador pulse un marcador de cualquier sede (asignada o sin asignar), el sistema DEBE encuadrar la vista sobre esa sede acercando la escala hasta un factor **×2 sobre el encaje**, de forma **idempotente**: si la vista ya está más cerca, sólo recentra, y pulsar de nuevo el mismo marcador NO vuelve a acercar. Si la sede no tiene tareas sin asignar, el pulsado NO DEBE abrir ningún flujo de asignación.
+
+> **Nota de diseño (fase de refinamiento de la UX):** el reencuadre con acercamiento responde a que, en la vista de encaje metropolitano, "centrar" un marcador no produce ningún cambio visible para el usuario. El factor ×2 es el mínimo que hace legible el marcador y su entorno inmediato sin perder el contexto territorial. La idempotencia evita el efecto "zoom progresivo" al pulsar repetidamente sobre el mismo marcador.
 
 ---
 

@@ -539,6 +539,55 @@ await zoomModal.loadRouteMap();
 assert('7.16 Recargar la ruta invalida la vista previa y vuelve a encajar',
   zoomModal.view.scale === 1 && zoomModal.view.centerX === 0.5);
 
+// =========================================================================
+// BLOQUE 7 bis: Encuadre al seleccionar una parada (RF-MAP-07, ambos EARS)
+// =========================================================================
+console.log('\n--- BLOQUE 7 bis: Encuadre de la parada seleccionada ---');
+
+const stopFocus = createModalInstance();
+await stopFocus.loadRouteMap();
+// El clamp de la ventana visible impide centrar una parada pegada al borde al ampliar,
+// asi que el caso de encuadre exacto se verifica con una parada alcanzable.
+const reachableStop = (modal) => modal.stops.find((stop) => {
+  const point = modal.markerFor(stop);
+  return point.x > 26 && point.x < 74 && point.y > 26 && point.y < 74;
+});
+const focusStop = reachableStop(stopFocus);
+assert('7.16a-1 El fixture de prueba contiene una parada centrable (el clamp lo alcanzaria)',
+  focusStop !== undefined, 'ninguna parada del fixture queda dentro de la banda alcanzable a escala 2');
+stopFocus.selectStop(focusStop);
+const focusMarker = stopFocus.markerFor(focusStop);
+assert('7.16a Seleccionar una parada encuadra el mapa a escala x2 con la parada centrada',
+  stopFocus.view.scale === 2 && Math.abs(focusMarker.x - 50) < 1e-6 && Math.abs(focusMarker.y - 50) < 1e-6,
+  `escala=${stopFocus.view.scale} marcador=(${focusMarker.x}, ${focusMarker.y})`);
+assert('7.16b La parada seleccionada queda marcada para abrir su ficha resumen',
+  stopFocus.selectedStopOrder === focusStop.order);
+const stopFocusView = { x: stopFocus.view.centerX, y: stopFocus.view.centerY };
+stopFocus.selectStop(focusStop);
+assert('7.16c Volver a seleccionar la misma parada no acumula zoom',
+  stopFocus.view.scale === 2
+    && Math.abs(stopFocus.view.centerX - stopFocusView.x) < 1e-9 && Math.abs(stopFocus.view.centerY - stopFocusView.y) < 1e-9,
+  `escala=${stopFocus.view.scale} centro=(${stopFocus.view.centerX}, ${stopFocus.view.centerY})`);
+
+// El mismo metodo sirve al marcador del mapa y a la lista textual: ambos deben encuadrar.
+const fromList = createModalInstance();
+await fromList.loadRouteMap();
+const listStop = reachableStop(fromList);
+fromList.selectStop(listStop);
+const listMarker = fromList.markerFor(listStop);
+assert('7.16d Seleccionar en la lista textual tambien reencuadra el mapa (sincronizacion)',
+  fromList.view.scale === 2 && Math.abs(listMarker.x - 50) < 1e-6 && Math.abs(listMarker.y - 50) < 1e-6,
+  `escala=${fromList.view.scale} marcador=(${listMarker.x}, ${listMarker.y})`);
+
+// El clic residual de un arrastre largo no debe reencuadrar ni seleccionar.
+const dragStopFocus = createModalInstance();
+await dragStopFocus.loadRouteMap();
+dragStopFocus.suppressNextClick = true;
+dragStopFocus.selectStop(dragStopFocus.stops[0]);
+assert('7.16e El clic residual de un arrastre no reencuadra ni cambia de parada',
+  dragStopFocus.view.scale === 1 && dragStopFocus.selectedStopOrder === null,
+  `escala=${dragStopFocus.view.scale} seleccion=${dragStopFocus.selectedStopOrder}`);
+
 // Contratos de plantilla del zoom compartido
 const zoomTmpl = TechnicianRouteMapModal.template;
 assert('7.17 Plantilla: gestos de rueda, doble clic y punteros enlazados al lienzo',

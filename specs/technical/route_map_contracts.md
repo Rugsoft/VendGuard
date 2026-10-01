@@ -490,3 +490,47 @@ Para cumplir incondicionalmente con la **autonomía de la suite de pruebas local
      - Generación correcta de enlaces universales de Google Maps.
 2. **Blindaje Constitucional de Segregación (Art. V.4):**
    - La suite `SiteManagerRouteDataSegregationTest.php` certifica que el rol `LOCATION_MANAGER` recibe `403 Forbidden` al invocar `/api/technician/route/map`, `/api/coordinator/map/active-incidents` o `/api/coordinator/route/settings`.
+
+---
+
+## 7. Contrato del Controlador de Zoom y Paneo Compartido (`MapZoomPan.js`)
+
+Controlador único (sin dependencias, Dogma Vanilla) que consumen **ambas** superficies cartográficas: la pestaña de mapa territorial del coordinador y el modal de mapa de ruta del técnico. El host aporta su ventana Mercator encajada mediante `getBaseWindow()` y sus límites mediante `getMinScale()` / `getMaxScale()`.
+
+### 7.1 `focusOn(nx, ny)`: Encuadre de un punto de interés (RF-MAP-07, RF-MAP-09)
+
+```js
+focusOn(pointX, pointY)
+```
+
+Lleva la vista al punto indicado, **`(pointX, pointY)` expresados en unidades normalizadas de la VENTANA EFECTIVA** (`[0,1]`, es decir la salida de `projectToWindow` sobre la ventana vigente, dividida por 100), acercando la escala hasta un factor **×2 sobre el encaje**.
+
+> **Por qué no se acepta directamente la posición en unidades de ventana encajada:** la elección adaptativa de tesela mantiene constante el NÚMERO de teselas mientras sube el nivel, de modo que `sideTiles` NO se reduce con la escala y una posición "porcentual dentro de la ventana actual" no equivale a una posición en unidades de la ventana base. El controlador des-proyecta con la escala vigente antes de tocar la vista: `base = centro + (punto - 0.5) / escala`.
+
+| Regla | Comportamiento |
+|---|---|
+| Escala objetivo | `clamp(max(escala_actual, 2), minScale, maxScale)` |
+| Des-proyección | `groundX/Y = centro + (punto - 0.5) / escala_actual`, calculado ANTES de mutar la vista. |
+| Idempotencia | Si la escala actual ya es `>= 2`, NO se acerca más: sólo recentra. Como la proyección se recalcula en cada pulsación sobre el marcador ya reenquadrado, pulsar dos veces deja centro y escala idénticos (salvo ruido de coma flotante). |
+| Encuadre | El centro de la vista pasa a ser el punto des-proyectado (con `clampCenter` a la escala destino), de modo que el marcador queda en el centro geométrico del lienzo. NO delega en `zoomToPoint`, cuyo acceso temprano para escala invariable impediría recentrar. |
+| Sin ventana base | Si `getBaseWindow()` devuelve `null` (mapa sin datos) no muta la vista. |
+| Ancla inválida | La posición des-proyectada se acota a `[0.02, 0.98]` y los valores no finitos caen a `0.5`, para que un dato corrupto no desplace la vista a un punto imposible. |
+
+**Aporte de coordenadas por host (proyección SIN recortar):**
+
+- **Territorial:** el `viewBox` del overlay es `0 0 100 62` y `sitePosition()` devuelve el eje Y recortado por banda. El host DEBE usar la proyección cruda (`siteWindowPosition(site)`) y dividir entre 100.
+- **Ruta del técnico:** el overlay es `viewBox="0 0 100 100"` sin recorte, luego `markerFor(stop)` sirve directamente dividido entre 100.
+
+### 7.3 `clampCenter(value, scale)`: límite de paneo con margen acotado
+
+Por encima de la escala de encaje la vista puede salirse de la ventana encajada como máximo `CONTENT_OVERSCAN` (= 0,5) de la **semiventana visible** (`1 / (2 × escala)`), lo que garantiza que **al menos el 75 % del lienzo** muestra contenido real. Ese margen acotado es lo que permite que `focusOn()` centric de verdad una sede pegada al borde del territorio, en lugar de dejarla a media pantalla.
+
+| Regla | Comportamiento |
+|---|---|
+| `escala <= 1` | Sin límite: roaming libre (a escala de encaje o inferior se ve todo el territorio). |
+| `escala > 1` | `centro ∈ [-margen, 1 + margen]` con `margen = 0.5 / (2 × escala)`. |
+| Centro no finito | Cae a `0.5`. |
+
+### 7.4 Requisito de no robo de gesto
+
+`handlePointerDown(event)` DEBE ignorar el gesto cuando `event.target` corresponde a la interfaz cartográfica interna (botones de zoom/reencuadre, marcadores con `role="button"`, enlace de atribución). Tomar la pulsación suprimiría los eventos de ratón compatibles y la captura de puntero redirigiría el `click` derivado al lienzo, dejando los controles muertos. El comportamiento por defecto del navegador sólo se cancela cuando el gesto es realmente un arrastre.

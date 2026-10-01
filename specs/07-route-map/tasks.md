@@ -131,3 +131,19 @@
   * **Requisitos:** Todos (RF-MAP-01 a RF-MAP-10, RNF-MAP-01 a RNF-MAP-06, Constitución Art. I a VII)
   * **Dependencias:** T-MAP-01 a T-MAP-19
   * **Hecho cuando:** La ejecución de `php tests/run_all.php` completa todas las suites unitarias PHP, unitarias reactivas frontend e integración con 0 fallos y 0 errores; se verifica la ausencia de dependencias externas npm/composer y el cumplimiento estricto del Dualismo Lingüístico.
+
+---
+
+## Fase 6: Refinamiento de UX del Encuadre (Reapertura Justificada del Módulo)
+
+> **Justificación de reapertura:** el criterio EARS de RF-MAP-07 ("el técnico DEBE centrar la vista en dicho punto" y "el mapa DEBE sincronizarse... encuadrando el marcador") estaba aprobado en la spec pero **nunca se implementó**: el clic de marcador abría la ficha sin mover la vista. Además se extiende el comportamiento al mapa de coordinación (RF-MAP-09). No se trata de *feature creep*: es cumplimiento de requisito ya aprobado más su extensión simétrica documentada.
+
+- [x] **T-MAP-21: Método `focusOn(pointX, pointY)` en el controlador compartido (`MapZoomPan.js`)**
+  * **Requisitos:** RF-MAP-07, RF-MAP-09, Contrato técnico §7.1
+  * **Dependencias:** T-MAP-13
+  * **Hecho cuando:** `focusOn` lleva la escala a `max(actual, 2)` acotada a los límites del host y recentra el punto bajo el puntero; es idempotente, acota el ancla a `[0.02, 0.98]` y no muta la vista sin ventana base. `node tests/unit/MapZoomPanUtilTest.mjs` pasa al 100% en verde.
+
+- [x] **T-MAP-22: Encuadre al pulsar marcador en ambas superficies cartográficas**
+  * **Requisitos:** RF-MAP-07, RF-MAP-09, Contrato técnico §7.1
+  * **Dependencias:** T-MAP-21
+  * **Hecho cuando:** `handleSiteClick` (territorial) enfoca la sede antes de abrir el flujo de asignación y las sedes ya asignadas sólo reencuadran sin abrir nada; `selectStop` (técnico) enfoca tanto desde el marcador del mapa como desde la lista textual, complying con ambos criterios EARS de RF-MAP-07. Las suites `CoordinatorTerritorialMapTabTest.mjs` y `TechnicianRouteMapModalTest.mjs` pasan al 100% en verde.

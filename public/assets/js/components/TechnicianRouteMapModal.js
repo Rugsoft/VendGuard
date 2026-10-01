@@ -334,6 +334,16 @@ export const TechnicianRouteMapModal = {
         return;
       }
       this.selectedStopOrder = stop.order;
+      this.focusOnStop(stop);
+    },
+    /**
+     * Centers the stop marker on the canvas and zooms in up to x2 the fitted scale,
+     * so both EARS criteria of RF-MAP-07 hold from the map marker and from the
+     * textual stop list (contracts 7.1).
+     */
+    focusOnStop(stop) {
+      const point = this.markerFor(stop);
+      this.focusOn(point.x / 100, point.y / 100);
     },
     clearSelection() {
       this.selectedStopOrder = null;

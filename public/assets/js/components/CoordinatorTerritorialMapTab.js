@@ -323,12 +323,19 @@ export const CoordinatorTerritorialMapTab = {
      * viewBox keeping the isotropic scale.
      */
     sitePosition(site) {
-      const mapWindow = this.effectiveWindow() || this.computeTerritorialWindow();
-      const projected = projectToWindow(Number(site.latitude), Number(site.longitude), mapWindow);
+      const projected = this.siteWindowPosition(site);
       return {
         x: projected.x,
         y: this.territorialBandCrop(projected.y) * TERRITORIAL_CANVAS_HEIGHT_RATIO
       };
+    },
+    /**
+     * Raw projection of a site in window-normalized units (0..100), WITHOUT the
+     * panoramic band crop applied by sitePosition().
+     */
+    siteWindowPosition(site) {
+      const mapWindow = this.effectiveWindow() || this.computeTerritorialWindow();
+      return projectToWindow(Number(site.latitude), Number(site.longitude), mapWindow);
     },
     /**
      * Marks unassigned sites so they can start the assignment flow (RF-MAP-09).
@@ -346,10 +353,22 @@ export const CoordinatorTerritorialMapTab = {
         this.suppressNextClick = false;
         return;
       }
+      // RF-MAP-09: pulsing a site frames it on the map whatever its assignment state;
+      // only unassigned sites additionally open the assignment flow.
+      this.focusOnSite(site);
       if (!this.isUnassignedSite(site)) {
         return;
       }
       this.$emit('assign-incidents', { locationId: site.location_id, siteCode: site.site_code });
+    },
+    /**
+     * Centers the site marker on the canvas and zooms in up to x2 the fitted scale
+     * (contracts 7.1). Uses the raw window projection: the cropped band coordinates of
+     * sitePosition() would place the site off-center on the Y axis.
+     */
+    focusOnSite(site) {
+      const point = this.siteWindowPosition(site);
+      this.focusOn(point.x / 100, point.y / 100);
     }
   },
   template: `
