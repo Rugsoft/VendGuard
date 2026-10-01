@@ -26,7 +26,10 @@ export const MAP_ZOOM_PAN_DEFAULTS = {
   WHEEL_FACTOR: 1.25,
   BUTTON_FACTOR: 1.5,
   DBLCLICK_FACTOR: 1.8,
-  DRAG_THRESHOLD_PX: 6
+  DRAG_THRESHOLD_PX: 6,
+  // Tile zoom bounds: OSM serves z0..z19; never request below a readable z2.
+  TILE_ZOOM_FLOOR: 2,
+  TILE_ZOOM_CEILING: 19
 };
 
 /**
@@ -73,10 +76,12 @@ export const MapZoomPanMethods = {
    * Derives the effective tile-space window from the fitted window and the current
    * interactive view state. At scale 1 the fitted window is returned untouched. The
    * visible rectangle is always the [centerX ± 1/(2·scale)] fraction of the fitted
-   * window, so the zoom anchor and panning stay exact. While zooming out below the
-   * fitted scale the tile zoom level drops adaptively (slippy-map style) so the wider
-   * geographic window keeps requesting a handful of standard tiles instead of
-   * compounding their count at the fitted resolution.
+   * window, so the zoom anchor and panning stay exact. The tile zoom level adapts
+   * slippy-map style to keep a ~1-tile rendering resolution at every scale: it rises
+   * while zooming in (each 256px tile is never stretched, so OSM serves sharper
+   * imagery instead of a pixelated enlarged bitmap) and drops while zooming out below
+   * the fitted scale (the wider window keeps a handful of tiles instead of
+   * compounding their count at the fitted resolution).
    */
   effectiveWindow() {
     const base = this.getBaseWindow();
@@ -86,10 +91,8 @@ export const MapZoomPanMethods = {
     const scale = this.view.scale;
     const spanFraction = base.sideTiles / Math.pow(2, base.zoom);
     const desiredFraction = spanFraction / scale;
-    let zoom = base.zoom;
-    if (desiredFraction > spanFraction) {
-      zoom = Math.max(2, Math.min(base.zoom, Math.round(Math.log2(1 / desiredFraction))));
-    }
+    const idealZoom = Math.round(Math.log2(1 / desiredFraction));
+    const zoom = Math.max(MAP_ZOOM_PAN_DEFAULTS.TILE_ZOOM_FLOOR, Math.min(MAP_ZOOM_PAN_DEFAULTS.TILE_ZOOM_CEILING, idealZoom));
     const worldBase = Math.pow(2, base.zoom);
     const worldNew = Math.pow(2, zoom);
     const sideTiles = (base.sideTiles / scale) / worldBase * worldNew;

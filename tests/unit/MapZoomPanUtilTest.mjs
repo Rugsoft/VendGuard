@@ -97,8 +97,12 @@ assert('2.1 A escala 1 la ventana efectiva es la ventana base intacta',
 const zoomedIn = createHost(BASE);
 zoomedIn.zoomToPoint(2, 0.5, 0.5);
 const wIn = zoomedIn.effectiveWindow();
-assert('2.2 Ampliar 2x reduce el lado de la ventana a la mitad en el mismo zoom',
-  wIn.zoom === BASE.zoom && Math.abs(wIn.sideTiles - BASE.sideTiles / 2) < 1e-12);
+const fitSpan = BASE.sideTiles / Math.pow(2, BASE.zoom);
+const inSpan = wIn.sideTiles / Math.pow(2, wIn.zoom);
+assert('2.2 Ampliar 2x sube el zoom de tesela (+1) sin estirar bitmap: misma tesela cubre la mitad de área',
+  wIn.zoom === BASE.zoom + 1
+    && Math.abs(wIn.sideTiles - BASE.sideTiles) < 1e-9
+    && Math.abs(inSpan - fitSpan / 2) < 1e-15);
 
 // El zoom de tesela adaptativo solo entra por debajo del encaje: el host necesita un
 // mínimo dinámico (< 1), igual que el mapa territorial con su suelo metropolitano.
