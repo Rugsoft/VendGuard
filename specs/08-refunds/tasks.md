@@ -21,7 +21,7 @@
   * **Dependencias:** Ninguna
   * **Hecho cuando:** La ejecución de `php bin/migrate.php` aplica con éxito `008_refund_management.sql`, creando las tablas `refund_requests` y `unclaimed_cash_findings`, y agregando `has_physical_reception` a `locations`; `database/cloud_init.sql` incorpora el esquema completo. La ampliación correlativa de `audit_log.entity_type` con `REFUND_REQUEST` y `UNCLAIMED_CASH_FINDING` (`009_refund_audit_entity.sql`) forma parte de la misma entrega, exigida por RNF-REF-01 y Art. III.3.
 
-- [ ] **T-REF-02: Implementar Enums y Modelos de Dominio (`CompensationMethod`, `RefundStatus`, `TechnicianFinding`, `CashCustodyAction`, `RefundRequest`, `UnclaimedCashFinding`)**
+- [x] **T-REF-02: Implementar Enums y Modelos de Dominio (`CompensationMethod`, `RefundStatus`, `TechnicianFinding`, `CashCustodyAction`, `RefundRequest`, `UnclaimedCashFinding`)**
   * **Requisitos:** RF-REF-01, RF-REF-03, RF-REF-04, RF-REF-05, RF-REF-07, RF-REF-10, Constitución Art. VI (Anti-feature creep)
   * **Dependencias:** T-REF-01
   * **Hecho cuando:** Existen en `src/Core/Domain/Model/` los enums tipados (`CompensationMethod`, `RefundStatus`, `TechnicianFinding`, `CashCustodyAction`) y las entidades inmutables con tipado estricto PHP 8.2+ (`RefundRequest`, `UnclaimedCashFinding`) con validaciones de invariantes de dominio (anonimización de nombres, verificación segura de PIN en tiempo constante y regla de supervisión especial).
