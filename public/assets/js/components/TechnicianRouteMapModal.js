@@ -453,6 +453,7 @@ export const TechnicianRouteMapModal = {
                     @click="selectStop(stop)"
                     @keydown.enter.prevent="selectStop(stop)"
                   >
+                    <circle r="10" fill="transparent" class="route-marker-hit" />
                     <circle r="4.6" :fill="stopColor(stop)" class="route-marker-circle" />
                     <text v-if="stop.status !== 'COMPLETED'" y="1.6" text-anchor="middle" class="route-marker-text">{{ stop.order }}</text>
                     <text v-else y="1.6" text-anchor="middle" class="route-marker-check">✔</text>

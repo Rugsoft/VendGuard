@@ -459,6 +459,7 @@ export const CoordinatorTerritorialMapTab = {
               @click="handleSiteClick(site)"
               @keydown.enter.prevent="handleSiteClick(site)"
             >
+              <circle r="9" fill="transparent" class="territorial-marker-hit" />
               <circle r="3.6" :fill="siteColor(site)" class="territorial-marker-circle" />
               <circle v-if="isUnassignedSite(site)" r="5.4" class="territorial-marker-unassigned-ring" />
               <text y="-5" text-anchor="middle" class="territorial-marker-badge">{{ sitePendingCount(site) }}</text>

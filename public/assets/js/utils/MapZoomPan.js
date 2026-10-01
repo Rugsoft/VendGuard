@@ -308,7 +308,17 @@ clampCenter(value, scale) {
     if (event.pointerType === 'mouse' && event.button !== 0) {
       return;
     }
+    // Any fresh press starts a new gesture, so the click-suppression latch left over by
+    // a previous drag must be released here — INCLUDING for presses that land on the map
+    // chrome below. Keeping it armed would swallow the first click on a marker after the
+    // user panned the map, which reads as "the marker is dead".
+    this.suppressNextClick = false;
     if (isMapUiTarget(event.target)) {
+      // The press belongs to that control, not to a pan: drop the leftovers of the
+      // previous gesture so the release below cannot re-arm the click-suppression latch
+      // from a stale dragDistance and swallow this control's click.
+      this.dragDistance = 0;
+      this.isPanning = false;
       return;
     }
     if (typeof event.preventDefault === 'function') {
@@ -317,7 +327,6 @@ clampCenter(value, scale) {
     if (event.currentTarget.setPointerCapture) {
       try { event.currentTarget.setPointerCapture(event.pointerId); } catch (e) { /* noop */ }
     }
-    this.suppressNextClick = false;
     this.activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (this.activePointers.size === 1) {
       this.isPanning = true;
@@ -353,6 +362,7 @@ clampCenter(value, scale) {
     }
   },
   handlePointerUp(event) {
+    const wasPanning = this.isPanning || this.activePointers.size > 0;
     this.activePointers.delete(event.pointerId);
     if (this.activePointers.size < 2) {
       this.pinchStartDistance = 0;
@@ -360,9 +370,13 @@ clampCenter(value, scale) {
     }
     if (this.activePointers.size === 0) {
       this.isPanning = false;
-      if (this.dragDistance > MAP_ZOOM_PAN_DEFAULTS.DRAG_THRESHOLD_PX) {
+      // Only a gesture that really panned may suppress its own click. Without this guard
+      // a press on a marker (which never registers a pointer) would still read the
+      // dragDistance left by the last pan and keep swallowing clicks forever.
+      if (wasPanning && this.dragDistance > MAP_ZOOM_PAN_DEFAULTS.DRAG_THRESHOLD_PX) {
         this.suppressNextClick = true;
       }
+      this.dragDistance = 0;
     }
   },
   /**

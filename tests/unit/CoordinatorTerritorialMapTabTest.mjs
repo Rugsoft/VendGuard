@@ -527,6 +527,32 @@ assert('7.30 El clic residual de un arrastre no reencuadra ni asigna',
   dragFocus.view.scale === 1 && dragFocus.emittedEvents.length === 0,
   `escala=${dragFocus.view.scale} eventos=${dragFocus.emittedEvents.length}`);
 
+// ...pero en el gesto REAL el usuario arrastra y LUEGO pulsa un marcador: ese primer clic
+// debe funcionar. El cerrojo lo libera la pulsacion sobre el mapa, no el clic.
+const afterDragTab = createTabInstance();
+await afterDragTab.loadTerritorialData();
+afterDragTab.handlePointerDown(makePointerEvent(1, 300, 300));
+afterDragTab.handlePointerMove(makePointerEvent(1, 600, 420));
+afterDragTab.handlePointerUp(makePointerEvent(1, 600, 420));
+const markerPress = makePointerEvent(1, 320, 310);
+markerPress.target = { closest: (selector) => (selector.includes('[role="button"]') ? { tagName: 'g' } : null) };
+afterDragTab.handlePointerDown(markerPress);
+afterDragTab.handlePointerUp(markerPress);
+const afterDragSite = reachable(afterDragTab);
+afterDragTab.handleSiteClick(afterDragSite);
+assert('7.31 Tras arrastrar, el PRIMER clic sobre un marcador sí reencuadra',
+  afterDragTab.view.scale === 2 && afterDragTab.suppressNextClick === false,
+  `cerrojo=${afterDragTab.suppressNextClick} escala=${afterDragTab.view.scale}`);
+
+// El area pulsable del marcador debe ser holgada: el circulo visible es de 3.6 unidades
+// sobre un viewBox de 100, asi que sin un blanco transparente mayor el puntero falla
+// entre el circulo y la insignia y el clic "no hace nada".
+assert('7.32 El marcador tiene un blanco de pulsacion invisible mas grande que el circulo visible',
+  /<circle r="([\d.]+)" fill="transparent" class="territorial-marker-hit"/.test(zoomTmpl)
+    && Number(/r="([\d.]+)" fill="transparent" class="territorial-marker-hit"/.exec(zoomTmpl)[1])
+      > Number(/<circle r="([\d.]+)" :fill="siteColor/.exec(zoomTmpl)[1]),
+  'falta el circulo de golpeo o es menor que el circulo visible');
+
 // =========================================================================
 // BLOQUE 8: Refresco reactivo silencioso tras asignar desde el mapa (RF-MAP-09)
 // =========================================================================

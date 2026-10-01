@@ -588,6 +588,22 @@ assert('7.16e El clic residual de un arrastre no reencuadra ni cambia de parada'
   dragStopFocus.view.scale === 1 && dragStopFocus.selectedStopOrder === null,
   `escala=${dragStopFocus.view.scale} seleccion=${dragStopFocus.selectedStopOrder}`);
 
+// ...pero en el gesto REAL el usuario arrastra y LUEGO pulsa una parada: el primer clic
+// debe abrir su ficha y reencuadrar.
+const afterDragModal = createModalInstance();
+await afterDragModal.loadRouteMap();
+const modalEvent = (x, y) => ({ ...makePointerEvent(1, x, y), target: { closest: () => null } });
+afterDragModal.handlePointerDown(modalEvent(300, 300));
+afterDragModal.handlePointerMove(modalEvent(620, 420));
+afterDragModal.handlePointerUp(modalEvent(620, 420));
+afterDragModal.handlePointerDown(modalEvent(320, 310));
+const afterDragStop = reachableStop(afterDragModal);
+afterDragModal.selectStop(afterDragStop);
+assert('7.16f Tras arrastrar, el PRIMER clic sobre una parada la enfoca y selecciona',
+  afterDragModal.view.scale === 2 && afterDragModal.selectedStopOrder === afterDragStop.order
+    && afterDragModal.suppressNextClick === false,
+  `cerrojo=${afterDragModal.suppressNextClick} escala=${afterDragModal.view.scale} seleccion=${afterDragModal.selectedStopOrder}`);
+
 // Contratos de plantilla del zoom compartido
 const zoomTmpl = TechnicianRouteMapModal.template;
 assert('7.17 Plantilla: gestos de rueda, doble clic y punteros enlazados al lienzo',
@@ -603,6 +619,10 @@ assert('7.18 Plantilla: botones de zoom y reencuadre accesibles con etiquetas AR
     && zoomTmpl.includes('aria-label="Acercar el mapa"') && zoomTmpl.includes('aria-label="Ver la ruta completa"'));
 assert('7.19 Plantilla: los botones se deshabilitan en los límites de escala',
   zoomTmpl.includes(':disabled="view.scale >= zoomMaxScale"') && zoomTmpl.includes(':disabled="view.scale <= zoomMinScale"'));
+assert('7.19b Plantilla: la parada tiene un blanco de pulsacion invisible mayor que el circulo visible',
+  Number(/r="([\d.]+)" fill="transparent" class="route-marker-hit"/.exec(zoomTmpl)[1])
+    > Number(/<circle r="([\d.]+)" :fill="stopColor/.exec(zoomTmpl)[1]),
+  'falta el circulo de golpeo o es menor que el circulo visible');
 assert('7.20 El lienzo comparte la clase interactiva y el controlador con el mapa territorial',
   zoomTmpl.includes('territorial-map-interactive')
     && TechnicianRouteMapModal.methods.getBaseWindow !== undefined

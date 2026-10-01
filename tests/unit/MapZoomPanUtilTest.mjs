@@ -309,6 +309,32 @@ assert('4.14 Pulsar la superficie arrastrable sí cancela el comportamiento por 
   surfacePress.defaultPrevented && surfaceHost.isPanning === true && surfaceHost.activePointers.size === 1,
   `cancelado=${surfacePress.defaultPrevented} paneando=${surfaceHost.isPanning}`);
 
+// Regresión: el cerrojo que descarta el clic final de un arrastre debe limpiarse ALSO
+// cuando la siguiente pulsación cae sobre un control del mapa, Y no debe volver a armarse
+// al soltar. Sin esto, tras cualquier arrastre el clic sobre un marcador se consumía
+// siempre (el dragDistance obsoleto re-armaba el cerrojo en cada pointerup) y el usuario
+// lo percibia como "el marcador está muerto".
+const latchHost = createHost(BASE);
+const plain = (x, y) => ({ ...makePointerEvent(1, x, y), target: { closest: () => null } });
+latchHost.handlePointerDown(plain(400, 300));
+latchHost.handlePointerMove(plain(700, 400));
+latchHost.handlePointerUp(plain(700, 400));
+const latched = latchHost.suppressNextClick === true;
+const controlPress = makePressEvent(1, 400, 300, true);
+latchHost.handlePointerDown(controlPress);
+latchHost.handlePointerUp(makePressEvent(1, 400, 300, true));
+assert('4.15 Tras un arrastre, pulsar y soltar un control del mapa deja el cerrojo libre',
+  latched && latchHost.suppressNextClick === false && latchHost.dragDistance === 0,
+  `cerrojo tras arrastre=${latched} tras control=${latchHost.suppressNextClick} distancia=${latchHost.dragDistance}`);
+
+// Un pointerup sin gesto en curso (pulsacion sobre un marcador) nunca debe armar el cerrojo.
+const strayUpHost = createHost(BASE);
+strayUpHost.dragDistance = 40;
+strayUpHost.handlePointerUp(makePointerEvent(1, 400, 300));
+assert('4.16 Un pointerup sin arrastre real no arma el cerrojo del clic',
+  strayUpHost.suppressNextClick === false,
+  `cerrojo=${strayUpHost.suppressNextClick}`);
+
 // ------------------------------------------------------------------------
 console.log('\n--- Elección de tesela pixel-aware (mapas panorámicos anchos) ---');
 
