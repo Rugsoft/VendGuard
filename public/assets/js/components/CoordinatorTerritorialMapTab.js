@@ -28,6 +28,7 @@
 
 import { api } from '../api.js';
 import { computeTileWindow, buildMapTiles, projectToWindow } from '../utils/Mercator.js';
+import { mapZoomPanState, MapZoomPanMethods } from '../utils/MapZoomPan.js';
 
 const MARKER_COLORS = {
   critical: '#e02424',
@@ -58,10 +59,6 @@ const TERRITORIAL_WINDOW_PADDING_FACTOR = 1.8;
 const TERRITORIAL_MIN_SCALE = 0.15;
 const TERRITORIAL_MIN_WINDOW_FRACTION = 0.0009;
 const TERRITORIAL_MAX_SCALE = 12;
-const TERRITORIAL_WHEEL_FACTOR = 1.25;
-const TERRITORIAL_BUTTON_FACTOR = 1.5;
-const TERRITORIAL_DBLCLICK_FACTOR = 1.8;
-const TERRITORIAL_DRAG_THRESHOLD_PX = 6;
 
 export {
   MARKER_COLORS,
@@ -91,14 +88,8 @@ export const CoordinatorTerritorialMapTab = {
       errorMessage: '',
       // Cached cartographic window (zoom + tile-space viewport) for the current sites
       mapWindow: null,
-      // Interactive view state over the fitted window: scale 1 / centered = full territory
-      view: { scale: 1, centerX: 0.5, centerY: 0.5 },
-      isPanning: false,
-      dragDistance: 0,
-      suppressNextClick: false,
-      pinchStartDistance: 0,
-      pinchStartScale: 1,
-      activePointers: new Map(),
+      // Shared zoom/pan controller state (utils/MapZoomPan.js)
+      ...mapZoomPanState(),
       filters: {
         technician_id: '',
         is_critical_only: false,
@@ -135,17 +126,11 @@ export const CoordinatorTerritorialMapTab = {
       return TERRITORIAL_MAX_SCALE;
     },
     /**
-     * Minimum zoom scale exposed to the template disabled state. Dynamic: never above
-     * the static 0.15 floor, and lowered further when the fitted window is too small so
-     * zooming out can always reveal at least the guaranteed metropolitan area.
+     * Minimum zoom scale exposed to the template disabled state: delegates to the
+     * shared controller hook with the dynamic metropolitan floor.
      */
     zoomMinScale() {
-      const base = this.mapWindow || this.computeTerritorialWindow();
-      if (!base) {
-        return 1;
-      }
-      const spanFraction = base.sideTiles / Math.pow(2, base.zoom);
-      return Math.min(TERRITORIAL_MIN_SCALE, spanFraction / TERRITORIAL_MIN_WINDOW_FRACTION);
+      return this.getMinScale();
     },
     /**
      * Exposed panoramic ratio so templates and tests share the same constant.
@@ -169,6 +154,29 @@ export const CoordinatorTerritorialMapTab = {
     this.loadTerritorialData();
   },
   methods: {
+    // ---------------------------------------------------------------------
+    // Zoom & pan controller hooks and delegation (utils/MapZoomPan.js)
+    // ---------------------------------------------------------------------
+    ...MapZoomPanMethods,
+    getBaseWindow() {
+      return this.mapWindow || this.computeTerritorialWindow();
+    },
+    /**
+     * Dynamic lower bound: never above the static 0.15 floor, and lowered further when
+     * the fitted window is too small so zooming out can always reveal at least the
+     * guaranteed metropolitan area.
+     */
+    getMinScale() {
+      const base = this.mapWindow || this.computeTerritorialWindow();
+      if (!base) {
+        return 1;
+      }
+      const spanFraction = base.sideTiles / Math.pow(2, base.zoom);
+      return Math.min(TERRITORIAL_MIN_SCALE, spanFraction / TERRITORIAL_MIN_WINDOW_FRACTION);
+    },
+    getMaxScale() {
+      return TERRITORIAL_MAX_SCALE;
+    },
     /**
      * Loads the territorial matrix applying the current reactive filters (RF-MAP-09).
      * The silent variant (silent = true) skips the full-canvas spinner and clears a
@@ -238,181 +246,19 @@ export const CoordinatorTerritorialMapTab = {
       }
     },
     // ---------------------------------------------------------------------
-    // Zoom & pan (vanilla gestures over the fitted Mercator window)
+    // ---------------------------------------------------------------------
+    // Panoramic band adaptation + delegation to the shared controller
     // ---------------------------------------------------------------------
     /**
-     * Derives the effective tile-space window from the fitted window and the current
-     * interactive view state. At scale 1 the fitted window is returned untouched. The
-     * visible rectangle is always the [centerX ± 1/(2·scale)] fraction of the fitted
-     * window, so the zoom anchor and panning stay exact. While zooming out below the
-     * fitted scale the tile zoom level drops adaptively (slippy-map style) so the wider
-     * geographic window keeps requesting a handful of standard tiles instead of
-     * compounding their count at the fitted resolution.
-     */
-    effectiveWindow() {
-      const base = this.mapWindow || this.computeTerritorialWindow();
-      if (!base || this.view.scale === 1) {
-        return base;
-      }
-      const scale = this.view.scale;
-      const spanFraction = base.sideTiles / Math.pow(2, base.zoom);
-      const desiredFraction = spanFraction / scale;
-      let zoom = base.zoom;
-      if (desiredFraction > spanFraction) {
-        zoom = Math.max(2, Math.min(base.zoom, Math.round(Math.log2(1 / desiredFraction))));
-      }
-      const worldBase = Math.pow(2, base.zoom);
-      const worldNew = Math.pow(2, zoom);
-      const sideTiles = (base.sideTiles / scale) / worldBase * worldNew;
-      return {
-        zoom,
-        sideTiles,
-        leftEdge: ((base.leftEdge + (this.view.centerX - 1 / (2 * scale)) * base.sideTiles) / worldBase) * worldNew,
-        topEdge: ((base.topEdge + (this.view.centerY - 1 / (2 * scale)) * base.sideTiles) / worldBase) * worldNew
-      };
-    },
-    /**
-     * Keeps the view center inside the fitted window so the territory never leaves sight.
-     * Below the fitted scale (scale < 1) the fitted window occupies less than the whole
-     * canvas, so any centered value keeps it visible and the center stays fixed at 0.5
-     * instead of clamping into an empty inverted range.
-     */
-    clampCenter(value, scale) {
-      const margin = 1 / (2 * scale);
-      if (margin >= 0.5) {
-        return 0.5;
-      }
-      return Math.min(Math.max(value, margin), 1 - margin);
-    },
-    /**
-     * Core zoom: sets a new scale keeping the base-window point under the canvas anchor
-     * (nx, ny in [0,1]) visually fixed. ny is canvas-normalized and converted through the
-     * panoramic band mapping (canvas shows the central [0.19, 0.81] band of the window).
+     * Panoramic-canvas adaptation of the shared zoom: ny is canvas-normalized and
+     * converted through the band mapping (canvas shows the central [0.19, 0.81] band
+     * of the square window) before delegating to the shared anchored zoom.
      */
     zoomToPoint(scale, nx, ny) {
-      const base = this.mapWindow || this.computeTerritorialWindow();
-      if (!base) {
-        return;
-      }
-      const nextScale = Math.min(Math.max(Number(scale) || 1, this.zoomMinScale), TERRITORIAL_MAX_SCALE);
-      if (nextScale === this.view.scale) {
-        return;
-      }
       const bandY = (Number(ny) - (1 - TERRITORIAL_CANVAS_HEIGHT_RATIO) / 2) / TERRITORIAL_CANVAS_HEIGHT_RATIO;
-      const worldX = this.view.centerX + (Number(nx) - 0.5) / this.view.scale;
-      const worldY = this.view.centerY + (bandY - 0.5) / this.view.scale;
-      this.view.scale = nextScale;
-      this.view.centerX = this.clampCenter(worldX - (Number(nx) - 0.5) / nextScale, nextScale);
-      this.view.centerY = this.clampCenter(worldY - (bandY - 0.5) / nextScale, nextScale);
+      return MapZoomPanMethods.zoomToPoint.call(this, scale, nx, bandY);
     },
-    /**
-     * Pans the view by raw pixel deltas; the square Mercator world renders
-     * width-px per window-normalized unit on both axes (isotropic projection).
-     */
-    panBy(dxPx, dyPx, canvasWidthPx) {
-      const width = Number(canvasWidthPx) || 1;
-      this.view.centerX = this.clampCenter(this.view.centerX - dxPx / width, this.view.scale);
-      this.view.centerY = this.clampCenter(this.view.centerY - dyPx / width, this.view.scale);
-    },
-    /**
-     * Fits the whole territory back into the canvas: fitted scale 1, centered. Zooming
-     * out further (down to TERRITORIAL_MIN_SCALE) keeps working from this baseline.
-     */
-    resetView() {
-      this.view.scale = 1;
-      this.view.centerX = 0.5;
-      this.view.centerY = 0.5;
-    },
-    zoomIn() {
-      this.zoomToPoint(this.view.scale * TERRITORIAL_BUTTON_FACTOR, 0.5, 0.5);
-    },
-    zoomOut() {
-      this.zoomToPoint(this.view.scale / TERRITORIAL_BUTTON_FACTOR, 0.5, 0.5);
-    },
-    /**
-     * Mouse wheel zoom anchored at the cursor position.
-     */
-    handleWheel(event) {
-      const rect = event.currentTarget.getBoundingClientRect();
-      const nx = (event.clientX - rect.left) / rect.width;
-      const ny = (event.clientY - rect.top) / rect.height;
-      const factor = event.deltaY < 0 ? TERRITORIAL_WHEEL_FACTOR : 1 / TERRITORIAL_WHEEL_FACTOR;
-      this.zoomToPoint(this.view.scale * factor, nx, ny);
-    },
-    /**
-     * Double click / double tap zoom anchored at the cursor position.
-     */
-    handleDblClick(event) {
-      const rect = event.currentTarget.getBoundingClientRect();
-      const nx = (event.clientX - rect.left) / rect.width;
-      const ny = (event.clientY - rect.top) / rect.height;
-      this.zoomToPoint(this.view.scale * TERRITORIAL_DBLCLICK_FACTOR, nx, ny);
-    },
-    /**
-     * Pointer bookkeeping for drag and pinch: one pointer pans, two pinch-zoom.
-     */
-    handlePointerDown(event) {
-      if (event.pointerType === 'mouse' && event.button !== 0) {
-        return;
-      }
-      if (event.currentTarget.setPointerCapture) {
-        try { event.currentTarget.setPointerCapture(event.pointerId); } catch (e) { /* noop */ }
-      }
-      this.suppressNextClick = false;
-      this.activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      if (this.activePointers.size === 1) {
-        this.isPanning = true;
-        this.dragDistance = 0;
-      } else {
-        this.isPanning = false;
-        this.pinchStartDistance = this.activePointersDistance();
-        this.pinchStartScale = this.view.scale;
-      }
-    },
-    handlePointerMove(event) {
-      if (!this.activePointers.has(event.pointerId)) {
-        return;
-      }
-      const previous = this.activePointers.get(event.pointerId);
-      this.activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      if (this.activePointers.size >= 2 && this.pinchStartDistance > 0) {
-        const rect = event.currentTarget.getBoundingClientRect();
-        const points = [...this.activePointers.values()];
-        const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
-        const nx = ((points[0].x + points[1].x) / 2 - rect.left) / rect.width;
-        const ny = ((points[0].y + points[1].y) / 2 - rect.top) / rect.height;
-        // Spreading fingers widens the distance and therefore zooms in; both the
-        // distance and the scale are anchored at gesture start to avoid compounding
-        const targetScale = this.pinchStartScale * (distance / this.pinchStartDistance);
-        this.zoomToPoint(targetScale, nx, ny);
-      } else if (this.activePointers.size === 1 && this.isPanning) {
-        const rect = event.currentTarget.getBoundingClientRect();
-        const dx = event.clientX - previous.x;
-        const dy = event.clientY - previous.y;
-        this.dragDistance += Math.abs(dx) + Math.abs(dy);
-        this.panBy(dx, dy, rect.width);
-      }
-    },
-    handlePointerUp(event) {
-      this.activePointers.delete(event.pointerId);
-      if (this.activePointers.size < 2) {
-        this.pinchStartDistance = 0;
-        this.pinchStartScale = 1;
-      }
-      if (this.activePointers.size === 0) {
-        this.isPanning = false;
-        if (this.dragDistance > TERRITORIAL_DRAG_THRESHOLD_PX) {
-          this.suppressNextClick = true;
-        }
-      }
-    },
-    activePointersDistance() {
-      const points = [...this.activePointers.values()];
-      if (points.length < 2) {
-        return 0;
-      }
-      return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
-    },
+
     /**
      * Maps a square-window percentage onto the visible central band of the panoramic
      * canvas ([0, 100]). Vertical only: horizontally the window already spans the full

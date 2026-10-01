@@ -18,7 +18,10 @@
  *    a non-intrusive notice explains waypoint truncation when the link limit is exceeded.
  * 5. Device GPS permission request; transparent fallback to Base Central with an informational
  *    notice when permissions are denied, the sensor is missing or the read fails (RF-MAP-06).
- * 6. Offline resilience (RNF-MAP-04): if a tile fails to load the broken image is hidden and
+ * 6. Zoom and pan over the route with the shared vanilla controller (utils/MapZoomPan.js):
+ *    buttons, mouse wheel, double click, drag and pinch gestures plus a fit-route reset
+ *    button (RNF-MAP-02). Marker taps fired right after a drag are suppressed.
+ * 7. Offline resilience (RNF-MAP-04): if a tile fails to load the broken image is hidden and
  *    the markers, route line and navigation buttons keep working on the fallback canvas.
  *
  * Dogma Vanilla: Vue 3 Options API in native ESM, no npm dependencies, no bundlers.
@@ -26,6 +29,7 @@
 
 import { api } from '../api.js';
 import { Mercator, computeTileWindow, buildMapTiles, projectToWindow } from '../utils/Mercator.js';
+import { mapZoomPanState, MapZoomPanMethods, MAP_ZOOM_PAN_DEFAULTS } from '../utils/MapZoomPan.js';
 
 const STOP_COLORS = {
   inProgress: '#f8b60f',
@@ -60,6 +64,8 @@ export const TechnicianRouteMapModal = {
       selectedStopOrder: null,
       // Cached cartographic window (zoom + tile-space viewport) for the current route
       mapWindow: null,
+      // Shared zoom/pan controller state (utils/MapZoomPan.js)
+      ...mapZoomPanState(),
       // Device GPS state (RF-MAP-06)
       deviceCoordinates: null,
       gpsNotice: '',
@@ -92,10 +98,19 @@ export const TechnicianRouteMapModal = {
       return (this.routeData && this.routeData.summary) || { total_stops: 0, total_tasks: 0, total_critical: 0, estimated_total_distance_km: 0 };
     },
     /**
-     * Standard public map tiles covering the route viewport (RF-MAP-07, plan.md §4.1).
+     * Standard public map tiles covering the effective (zoomed/panned) route viewport.
      */
     mapTiles() {
       return this.buildMapTiles();
+    },
+    /**
+     * Scale limits exposed to the template disabled state (shared controller bounds).
+     */
+    zoomMinScale() {
+      return this.getMinScale();
+    },
+    zoomMaxScale() {
+      return this.getMaxScale();
     },
     selectedStop() {
       if (this.selectedStopOrder === null) return null;
@@ -120,6 +135,19 @@ export const TechnicianRouteMapModal = {
     }
   },
   methods: {
+    // ---------------------------------------------------------------------
+    // Zoom & pan controller hooks and delegation (utils/MapZoomPan.js)
+    // ---------------------------------------------------------------------
+    ...MapZoomPanMethods,
+    getBaseWindow() {
+      return this.mapWindow || this.computeTileWindow();
+    },
+    getMinScale() {
+      return MAP_ZOOM_PAN_DEFAULTS.MIN_SCALE;
+    },
+    getMaxScale() {
+      return MAP_ZOOM_PAN_DEFAULTS.MAX_SCALE;
+    },
     close() {
       this.$emit('update:modelValue', false);
     },
@@ -184,6 +212,8 @@ export const TechnicianRouteMapModal = {
         const payload = response && response.data ? response.data : response;
         this.routeData = payload || { origin: null, stops: [], full_route_navigation_url: '', waypoints_truncated: false, summary: {} };
         this.mapWindow = this.computeTileWindow();
+        // The base window is recomputed, so any previous zoom/pan view is invalid.
+        this.resetView();
         if (this.isBaseCentralFallback && (this.gpsPermission === 'denied' || this.gpsPermission === 'unavailable')) {
           this.gpsNotice = 'Ruta calculada desde Base Central (GPS móvil no disponible).';
         }
@@ -220,11 +250,12 @@ export const TechnicianRouteMapModal = {
       return computeTileWindow(this.routePoints());
     },
     /**
-     * Builds the list of standard public tiles covering the viewport. Percentages are
-     * relative to the square canvas; edge tiles may overflow and are clipped by CSS.
+     * Builds the list of standard public tiles covering the effective (zoomed/panned)
+     * viewport. Percentages are relative to the square canvas; edge tiles may overflow
+     * and are clipped by CSS.
      */
     buildMapTiles() {
-      return buildMapTiles(this.mapWindow || this.computeTileWindow());
+      return buildMapTiles(this.effectiveWindow() || this.computeTileWindow());
     },
     /**
      * Hides a broken tile image without touching the marker overlay (RNF-MAP-04).
@@ -264,23 +295,29 @@ export const TechnicianRouteMapModal = {
       return `${stop.completed_tasks || 0} de ${stop.total_tasks || 0} completadas`;
     },
     /**
-     * Returns marker canvas coordinates (percent of the square map canvas).
+     * Returns marker canvas coordinates (percent of the effective zoomed/panned canvas).
      */
     markerFor(stop) {
-      const mapWindow = this.mapWindow || this.computeTileWindow();
+      const mapWindow = this.effectiveWindow() || this.computeTileWindow();
       return projectToWindow(Number(stop.location.latitude), Number(stop.location.longitude), mapWindow);
     },
     originPoint() {
       if (!this.origin) {
         return { x: 50, y: 50 };
       }
-      const mapWindow = this.mapWindow || this.computeTileWindow();
+      const mapWindow = this.effectiveWindow() || this.computeTileWindow();
       return projectToWindow(Number(this.origin.latitude), Number(this.origin.longitude), mapWindow);
     },
     /**
      * Selects a stop: highlights the marker and opens the summary sheet (RF-MAP-07).
+     * Clicks fired right after a drag gesture are ignored so panning never opens the
+     * sheet accidentally.
      */
     selectStop(stop) {
+      if (this.suppressNextClick) {
+        this.suppressNextClick = false;
+        return;
+      }
       this.selectedStopOrder = stop.order;
     },
     clearSelection() {
@@ -339,7 +376,17 @@ export const TechnicianRouteMapModal = {
             <!-- Standard public map tiles (OpenStreetMap) with the interactive SVG overlay:
                  light, keyless, zero external libraries (Art. IV, plan.md §5) -->
             <div class="route-map-canvas-wrapper">
-              <div class="route-map-canvas">
+              <div
+                class="route-map-canvas territorial-map-interactive"
+                data-testid="route-map-canvas"
+                @wheel.prevent="handleWheel"
+                @dblclick.prevent="handleDblClick"
+                @pointerdown="handlePointerDown"
+                @pointermove="handlePointerMove"
+                @pointerup="handlePointerUp"
+                @pointercancel="handlePointerUp"
+                @pointerleave="handlePointerUp"
+              >
                 <div class="route-tile-layer" aria-hidden="true">
                   <img
                     v-for="tile in mapTiles"
@@ -387,6 +434,11 @@ export const TechnicianRouteMapModal = {
                   </g>
                 </svg>
                 <div class="route-map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</div>
+                <div class="territorial-map-controls">
+                  <button type="button" class="territorial-map-btn" data-testid="btn-zoom-in" :disabled="view.scale >= zoomMaxScale" @click="zoomIn" aria-label="Acercar el mapa">+</button>
+                  <button type="button" class="territorial-map-btn" data-testid="btn-zoom-out" :disabled="view.scale <= zoomMinScale" @click="zoomOut" aria-label="Alejar el mapa">−</button>
+                  <button type="button" class="territorial-map-btn" data-testid="btn-fit-route" :disabled="view.scale <= zoomMinScale" @click="resetView" aria-label="Ver la ruta completa">⤢</button>
+                </div>
               </div>
               <div class="route-map-legend small">
                 <span><i class="route-dot" style="background:#f8b60f"></i> En curso</span>

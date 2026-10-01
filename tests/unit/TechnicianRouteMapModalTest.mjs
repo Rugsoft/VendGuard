@@ -35,6 +35,7 @@ globalThis.window = {
 import { api } from '../../public/assets/js/api.js';
 import { TechnicianRouteMapModal, STOP_COLORS, Mercator } from '../../public/assets/js/components/TechnicianRouteMapModal.js';
 import { buildMapTiles as sharedBuildMapTiles } from '../../public/assets/js/utils/Mercator.js';
+import { MapZoomPanMethods as CoordinatorTerritorialSharedRef } from '../../public/assets/js/utils/MapZoomPan.js';
 
 let assertions = 0;
 let failures = 0;
@@ -440,6 +441,118 @@ assert('6.11 Plantilla: distancias entre paradas visibles en la lista', tmpl.inc
 assert('6.12 Plantilla: diálogo accesible con roles ARIA', tmpl.includes('role="dialog"') && tmpl.includes('aria-modal="true"') && tmpl.includes('aria-label="Cerrar mapa"'));
 assert('6.13 Plantilla: atribución obligatoria de OpenStreetMap en el mapa', tmpl.includes('OpenStreetMap') && tmpl.includes('route-map-attribution'));
 assert('6.14 Plantilla: el indicador de origen usa un triángulo vectorial en vez de un glifo de texto', tmpl.includes('route-origin-triangle') && !tmpl.includes('route-origin-icon'));
+
+// =========================================================================
+// BLOQUE 7: Zoom, gestos y reencuadre de la ruta (RNF-MAP-02, utils/MapZoomPan.js)
+// =========================================================================
+console.log('\n--- BLOQUE 7: Zoom y paneo de la ruta ---');
+
+function makePointerEvent(pointerId, x, y, type = 'mouse') {
+  return {
+    pointerId,
+    pointerType: type,
+    button: 0,
+    clientX: x,
+    clientY: y,
+    currentTarget: {
+      setPointerCapture: () => {},
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 400 })
+    }
+  };
+}
+
+const zoomModal = createModalInstance();
+zoomModal.modelValue = true;
+await zoomModal.openMap();
+const baseWindow = { ...zoomModal.mapWindow };
+
+assert('7.1 La vista inicial encaja la ruta completa (escala 1 y centrada)',
+  zoomModal.view.scale === 1 && zoomModal.view.centerX === 0.5 && zoomModal.view.centerY === 0.5);
+assert('7.2 En escala de encaje la ventana efectiva coincide con la ventana base',
+  zoomModal.effectiveWindow().sideTiles === baseWindow.sideTiles && zoomModal.effectiveWindow().leftEdge === baseWindow.leftEdge);
+
+zoomModal.zoomIn();
+assert('7.3 Zoom + amplía 1.5x manteniendo el centro del lienzo', Math.abs(zoomModal.view.scale - 1.5) < 1e-9);
+assert('7.4 La ventana efectiva reduce su lado al ampliar',
+  Math.abs(zoomModal.effectiveWindow().sideTiles - baseWindow.sideTiles / 1.5) < 1e-9);
+
+// El zoom ancla el punto bajo el cursor (ancla no centrada)
+const anchorBefore = {
+  x: zoomModal.view.centerX + (0.3 - 0.5) / zoomModal.view.scale,
+  y: zoomModal.view.centerY + (0.6 - 0.5) / zoomModal.view.scale
+};
+zoomModal.zoomToPoint(2.5, 0.3, 0.6);
+const anchorAfter = {
+  x: zoomModal.view.centerX + (0.3 - 0.5) / zoomModal.view.scale,
+  y: zoomModal.view.centerY + (0.6 - 0.5) / zoomModal.view.scale
+};
+assert('7.5 El zoom ancla el punto bajo el cursor: no se desplaza al ampliar',
+  Math.abs(anchorBefore.x - anchorAfter.x) < 1e-9 && Math.abs(anchorBefore.y - anchorAfter.y) < 1e-9);
+
+zoomModal.zoomToPoint(999, 0.5, 0.5);
+assert('7.6 La escala máxima de zoom queda limitada a 12x', zoomModal.view.scale === 12);
+zoomModal.zoomToPoint(0.01, 0.5, 0.5);
+assert('7.7 Alejar por debajo del encaje reencuadra la ruta completa',
+  zoomModal.view.scale === 1 && zoomModal.view.centerX === 0.5 && zoomModal.view.centerY === 0.5);
+
+// Paneo con recorrido: el técnico arrastra y el contenido sigue el dedo
+zoomModal.zoomToPoint(3, 0.5, 0.5);
+const posBeforePan = zoomModal.markerFor(zoomModal.stops[0]);
+zoomModal.handlePointerDown(makePointerEvent(1, 200, 200));
+zoomModal.handlePointerMove(makePointerEvent(1, 260, 230));
+zoomModal.handlePointerUp(makePointerEvent(1, 260, 230));
+const posAfterPan = zoomModal.markerFor(zoomModal.stops[0]);
+assert('7.8 Arrastrar con un puntero mueve el mapa siguiendo el gesto',
+  posAfterPan.x > posBeforePan.x && posAfterPan.y > posBeforePan.y);
+assert('7.9 Un arrastre largo suprime el clic accidental sobre la parada', zoomModal.suppressNextClick === true);
+zoomModal.selectStop(zoomModal.stops[0]);
+assert('7.10 Tras arrastrar, el clic siguiente no abre la ficha de parada',
+  zoomModal.selectedStopOrder === null && zoomModal.suppressNextClick === false);
+
+// Pellizco anclado al inicio del gesto
+const pinchModal = createModalInstance();
+pinchModal.modelValue = true;
+await pinchModal.openMap();
+pinchModal.handlePointerDown(makePointerEvent(1, 200, 200));
+pinchModal.handlePointerDown(makePointerEvent(2, 240, 200));
+pinchModal.handlePointerMove(makePointerEvent(2, 280, 200));
+assert('7.11 Separar los dedos (pellizco) amplía el mapa al doble', Math.abs(pinchModal.view.scale - 2) < 1e-6);
+pinchModal.handlePointerUp(makePointerEvent(2, 280, 200));
+assert('7.12 Quitar un dedo vuelve al modo de paneo sin romper la escala',
+  pinchModal.activePointers.size === 1 && pinchModal.pinchStartScale === 1);
+
+// Rueda y doble clic
+const preWheel = zoomModal.view.scale;
+zoomModal.handleWheel({ deltaY: -120, clientX: 100, clientY: 300, currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 400 }) } });
+assert('7.13 La rueda del ratón amplía un paso 1.25x', Math.abs(zoomModal.view.scale - preWheel * 1.25) < 1e-6);
+const preDbl = zoomModal.view.scale;
+zoomModal.handleDblClick({ clientX: 100, clientY: 300, currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 400 }) } });
+assert('7.14 El doble clic amplía 1.8x anclado en el cursor', Math.abs(zoomModal.view.scale - preDbl * 1.8) < 1e-6);
+
+// Reencuadre y recarga de ruta
+zoomModal.resetView();
+assert('7.15 El reencuadre devuelve la vista a la ruta completa encajada',
+  zoomModal.view.scale === 1 && zoomModal.view.centerX === 0.5
+    && zoomModal.effectiveWindow().sideTiles === baseWindow.sideTiles);
+zoomModal.zoomIn();
+await zoomModal.loadRouteMap();
+assert('7.16 Recargar la ruta invalida la vista previa y vuelve a encajar',
+  zoomModal.view.scale === 1 && zoomModal.view.centerX === 0.5);
+
+// Contratos de plantilla del zoom compartido
+const zoomTmpl = TechnicianRouteMapModal.template;
+assert('7.17 Plantilla: gestos de rueda, doble clic y punteros enlazados al lienzo',
+  zoomTmpl.includes('@wheel.prevent="handleWheel"') && zoomTmpl.includes('@dblclick.prevent="handleDblClick"')
+    && zoomTmpl.includes('@pointerdown="handlePointerDown"') && zoomTmpl.includes('@pointerup="handlePointerUp"'));
+assert('7.18 Plantilla: botones de zoom y reencuadre accesibles con etiquetas ARIA',
+  zoomTmpl.includes('btn-zoom-in') && zoomTmpl.includes('btn-zoom-out') && zoomTmpl.includes('btn-fit-route')
+    && zoomTmpl.includes('aria-label="Acercar el mapa"') && zoomTmpl.includes('aria-label="Ver la ruta completa"'));
+assert('7.19 Plantilla: los botones se deshabilitan en los límites de escala',
+  zoomTmpl.includes(':disabled="view.scale >= zoomMaxScale"') && zoomTmpl.includes(':disabled="view.scale <= zoomMinScale"'));
+assert('7.20 El lienzo comparte la clase interactiva y el controlador con el mapa territorial',
+  zoomTmpl.includes('territorial-map-interactive')
+    && TechnicianRouteMapModal.methods.getBaseWindow !== undefined
+    && TechnicianRouteMapModal.methods.effectiveWindow === CoordinatorTerritorialSharedRef.effectiveWindow);
 
 // =========================================================================
 // RESUMEN FINAL
