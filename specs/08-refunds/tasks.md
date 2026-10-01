@@ -35,7 +35,7 @@
 
 ## Fase 2: Repositorios PDO y Servicios de Aplicación
 
-- [ ] **T-REF-04: Implementar `RefundRequestRepositoryInterface`, `PdoRefundRequestRepository.php`, `UnclaimedCashFindingRepositoryInterface` y `PdoUnclaimedCashFindingRepository.php`**
+- [x] **T-REF-04: Implementar `RefundRequestRepositoryInterface`, `PdoRefundRequestRepository.php`, `UnclaimedCashFindingRepositoryInterface` y `PdoUnclaimedCashFindingRepository.php`**
   * **Requisitos:** RF-REF-01, RF-REF-04, RF-REF-07, RF-REF-10, RNF-REF-01, Constitución Art. III
   * **Dependencias:** T-REF-01, T-REF-02, T-REF-03
   * **Hecho cuando:** `PdoRefundRequestRepository` implementa creación de expediente, búsqueda por ID y token de seguimiento (`findByTrackingToken`), consulta por incidencia y sede, actualización atómica de estados y listados filtrados para coordinación; `PdoUnclaimedCashFindingRepository` persiste hallazgos de monedas de oficio; y las consultas omiten columnas sensibles (`iban`, `bizum_phone`) en los métodos para roles restringidos.

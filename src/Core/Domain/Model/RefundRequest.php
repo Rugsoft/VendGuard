@@ -53,7 +53,8 @@ final readonly class RefundRequest implements JsonSerializable
         private ?string $paymentReference = null,
         private bool $isActive = true,
         private ?string $createdAt = null,
-        private ?string $updatedAt = null
+        private ?string $updatedAt = null,
+        private bool $financialColumnsRestricted = false
     ) {
         if ($id < 1 || $incidentId < 1 || $machineId < 1 || $locationId < 1) {
             throw new InvalidArgumentException('Los identificadores del expediente deben ser enteros positivos.');
@@ -100,12 +101,18 @@ final readonly class RefundRequest implements JsonSerializable
 
         // RF-REF-05: digital channels are settled by the central office, so the
         // cash backing them can never stay at the reception desk.
-        if ($compensationMethod->requiresBizumPhone() && ($bizumPhone === null || trim($bizumPhone) === '')) {
-            throw new InvalidArgumentException('El pago por Bizum requiere el teléfono del reclamante.');
-        }
+        //
+        // The two payment-detail rules below are skipped only for a restricted
+        // rehydration, where the columns were never selected. They still hold
+        // for every creation path, so a case can never be created incomplete.
+        if (!$financialColumnsRestricted) {
+            if ($compensationMethod->requiresBizumPhone() && ($bizumPhone === null || trim($bizumPhone) === '')) {
+                throw new InvalidArgumentException('El pago por Bizum requiere el teléfono del reclamante.');
+            }
 
-        if ($compensationMethod->requiresIban() && ($iban === null || trim($iban) === '')) {
-            throw new InvalidArgumentException('La transferencia bancaria requiere el IBAN del reclamante.');
+            if ($compensationMethod->requiresIban() && ($iban === null || trim($iban) === '')) {
+                throw new InvalidArgumentException('La transferencia bancaria requiere el IBAN del reclamante.');
+            }
         }
 
         if ($cashCustodyAction === CashCustodyAction::LEFT_AT_RECEPTION
@@ -195,6 +202,70 @@ final readonly class RefundRequest implements JsonSerializable
         }
 
         return hash_equals($this->pickupPin, trim($inputPin));
+    }
+
+    /**
+     * Builds a case from a row that was projected WITHOUT the financial columns.
+     *
+     * The constructor refuses a Bizum case with no phone, because a case must
+     * never be *created* incomplete. Reading one back through a restricted
+     * projection is a different matter: the site desk and the field technician
+     * are not allowed to see the IBAN or the Bizum number at all (Art. V.4),
+     * so the columns are absent by policy rather than by corruption. This
+     * factory is the single sanctioned way to hydrate such a row, and it keeps
+     * the creation-time invariant intact for every other path.
+     *
+     * @param array<string, mixed> $row Row without `iban` and `bizum_phone`.
+     * @return self
+     */
+    public static function fromRestrictedProjection(array $row): self
+    {
+        $nullable = static fn (string $key): ?string => isset($row[$key]) ? (string)$row[$key] : null;
+
+        return new self(
+            id: (int)($row['id'] ?? 0),
+            incidentId: (int)($row['incident_id'] ?? 0),
+            machineId: (int)($row['machine_id'] ?? 0),
+            locationId: (int)($row['location_id'] ?? 0),
+            claimantName: (string)($row['claimant_name'] ?? ''),
+            claimantContact: (string)($row['claimant_contact'] ?? ''),
+            claimedAmount: (float)($row['claimed_amount'] ?? 0.0),
+            productAttempted: (string)($row['product_attempted'] ?? ''),
+            compensationMethod: CompensationMethod::from((string)($row['compensation_method'] ?? '')),
+            bizumPhone: null,
+            iban: null,
+            pickupPin: $nullable('pickup_pin'),
+            trackingToken: (string)($row['tracking_token'] ?? ''),
+            status: RefundStatus::from((string)($row['status'] ?? '')),
+            technicianFinding: isset($row['technician_finding']) && $row['technician_finding'] !== null
+                ? TechnicianFinding::from((string)$row['technician_finding'])
+                : null,
+            recoveredAmount: isset($row['recovered_amount']) && $row['recovered_amount'] !== null
+                ? (float)$row['recovered_amount']
+                : null,
+            cashCustodyAction: isset($row['cash_custody_action']) && $row['cash_custody_action'] !== null
+                ? CashCustodyAction::from((string)$row['cash_custody_action'])
+                : null,
+            receptionistName: $nullable('receptionist_name'),
+            technicianJustification: $nullable('technician_justification'),
+            approvedAmount: isset($row['approved_amount']) && $row['approved_amount'] !== null
+                ? (float)$row['approved_amount']
+                : null,
+            paymentReference: $nullable('payment_reference'),
+            isActive: (int)($row['is_active'] ?? 1) === 1,
+            createdAt: $nullable('created_at'),
+            updatedAt: $nullable('updated_at'),
+            financialColumnsRestricted: true,
+        );
+    }
+
+    /**
+     * Whether this case was rehydrated from a projection that never selected
+     * the financial columns, so its IBAN and Bizum phone are absent by policy.
+     */
+    public function hasRestrictedFinancialColumns(): bool
+    {
+        return $this->financialColumnsRestricted;
     }
 
     /**
