@@ -60,7 +60,7 @@
 
 ## Fase 3: Controladores REST y Registro en AppRouter
 
-- [ ] **T-REF-08: Implementar `PublicRefundController.php` (`GET/PATCH /api/public/refunds/track`)**
+- [x] **T-REF-08: Implementar `PublicRefundController.php` (`GET/PATCH /api/public/refunds/track`)**
   * **Requisitos:** RF-REF-02, RF-REF-07
   * **Dependencias:** T-REF-05, T-REF-06
   * **Hecho cuando:** El endpoint público permite consultar de forma anónima el estado del expediente mediante token seguro en la URL, y permite rectificar IBAN o teléfono cuando el estado es `PENDING_CONTACT`, rechazando peticiones con tokens inexistentes (`404`) o formatos inválidos (`422`).
