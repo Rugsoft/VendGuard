@@ -32,6 +32,7 @@ use VendGuard\Presentation\Routing\AppRouter;
 
 echo "======================================================================\n";
 echo " VendGuard: Test de Integración - LocationPortalControllerTest (T-21)\n";
+echo " Casos 1-6: portal de sede. Caso 7: reintegros de conserjería (T-REF-11).\n";
 echo "======================================================================\n\n";
 
 $pdo = ConnectionFactory::getConnection();
@@ -247,6 +248,124 @@ if ($location !== null) {
     } else {
         echo "  [INFO] Servidor local no accesible en puerto 8000.\n";
     }
+
+    // =====================================================================
+    // CASO 7: Reintegros de conserjería (T-REF-11)
+    // Listado anonimizado y entrega presencial con PIN de 4 dígitos.
+    //
+    // Las rutas de reintegro se registran en T-REF-13, así que aquí se invoca
+    // el controlador directamente. A propósito se construye SIN argumentos:
+    // es el cableado real de producción, que es donde un colaborador mal
+    // inyectado se escondería de una suite que sólo use dobles.
+    // =====================================================================
+    echo "\n--- Caso 7: Reintegros de la sede (T-REF-11) ---\n";
+
+    $refundController = new \VendGuard\Presentation\Controller\LocationRefundController();
+    $refundRepoPdo = new \VendGuard\Infrastructure\Repository\PdoRefundRequestRepository($pdo);
+    $refundMgmtPdo = new \VendGuard\Application\Service\RefundManagementService($refundRepoPdo);
+
+    $machinesForRefund = $machineRepo->findActiveByLocationId($locId);
+    $assert("7.0 Hay máquinas de la sede para la prueba", count($machinesForRefund) >= 1);
+    $machineForRefund = $machinesForRefund[0];
+
+    $deskCase = $refundMgmtPdo->createCase(new \VendGuard\Application\DTO\CreateRefundRequestDTO(
+        incidentId: (int)$createdIncident->getId(),
+        machineId: $machineForRefund->getId(),
+        locationId: $locId,
+        claimantName: 'Laura Sanitaria',
+        claimantContact: '600111222',
+        claimedAmount: 2.50,
+        compensationMethod: \VendGuard\Core\Domain\Model\CompensationMethod::EN_MANO_SEDE,
+        productAttempted: 'Café con leche carril 2'
+    ));
+    $deskCaseId = (int)$deskCase->getId();
+
+    // El técnico deja el sobre en conserjería (RF-REF-05).
+    $refundRepoPdo->transitionStatus(
+        $deskCaseId,
+        \VendGuard\Core\Domain\Model\RefundStatus::PENDING_INSPECTION,
+        \VendGuard\Core\Domain\Model\RefundStatus::DEPOSITED_AT_RECEPTION
+    );
+    $deskPin = (string)$refundRepoPdo->findById($deskCaseId)?->getPickupPin();
+    $assert("7.1 El expediente de prueba tiene PIN de 4 dígitos", preg_match('/^[0-9]{4}$/', $deskPin) === 1, 'pin: ' . $deskPin);
+
+    // 7.2 Listado por cabecera X-Site-Code (sin location_id en atributos)
+    $listReq = new Request('GET', '/api/location/refunds', [], [], ['X-Site-Code' => 'SEDE-BCN-01']);
+    $listRes = $refundController->index($listReq);
+    $listBody = json_decode($listRes->getBody(), true);
+    $listRaw = (string)$listRes->getBody();
+
+    $assert("7.2 El listado responde HTTP 200", $listRes->getStatusCode() === 200, "HTTP {$listRes->getStatusCode()} " . $listRaw);
+    $assert("7.3 Incluye el expediente de la sede", (int)($listBody['data']['total'] ?? 0) >= 1);
+    $assert(
+        "7.4 Lo marca como listo para recoger",
+        ($listBody['data']['ready_for_pickup_total'] ?? 0) >= 1,
+        'listo: ' . ($listBody['data']['ready_for_pickup_total'] ?? 'AUSENTE')
+    );
+    $assert(
+        "7.5 El nombre del reclamante va anonimizado",
+        str_contains($listRaw, 'Laura S.') && !str_contains($listRaw, 'Laura Sanitaria'),
+        'respuesta: ' . $listRaw
+    );
+    $assert("7.6 Art. V.4: el PIN de recogida NO aparece en el listado", !str_contains($listRaw, $deskPin), 'pin: ' . $deskPin);
+    $assert("7.7 Art. V.4: ninguna clave `iban` ni `bizum_phone` en el listado", !str_contains($listRaw, '"iban"') && !str_contains($listRaw, 'bizum_phone'));
+    $assert("7.8 Art. V.4: el token de seguimiento tampoco", !str_contains($listRaw, 'tracking_token'));
+
+    // 7.9 PIN incorrecto: no se suelta nada
+    $wrongReq = new Request(
+        'POST',
+        "/api/location/refunds/{$deskCaseId}/deliver",
+        [],
+        ['pickup_pin' => '0000'],
+        ['X-Site-Code' => 'SEDE-BCN-01']
+    );
+    // Al invocar el controlador sin pasar por el router, el parámetro de ruta
+    // hay que inyectarlo a mano.
+    $wrongReq->setRouteParams(['id' => (string)$deskCaseId]);
+    $wrongRes = $refundController->deliver($wrongReq);
+    $wrongBody = json_decode($wrongRes->getBody(), true);
+    $assert("7.9 Un PIN incorrecto responde HTTP 422", $wrongRes->getStatusCode() === 422, "HTTP {$wrongRes->getStatusCode()} " . json_encode($wrongBody));
+    $assert(
+        "7.10 Expone INVALID_PICKUP_PIN",
+        ($wrongBody['error']['code'] ?? '') === 'INVALID_PICKUP_PIN',
+        'error: ' . ($wrongBody['error']['code'] ?? 'AUSENTE')
+    );
+    $assert(
+        "7.11 BD: el sobre sigue en el mostrador",
+        $refundRepoPdo->findById($deskCaseId)?->getStatus() === \VendGuard\Core\Domain\Model\RefundStatus::DEPOSITED_AT_RECEPTION
+    );
+
+    // 7.12 PIN correcto: entrega registrada
+    $rightReq = new Request(
+        'POST',
+        "/api/location/refunds/{$deskCaseId}/deliver",
+        [],
+        ['pickup_pin' => $deskPin],
+        ['X-Site-Code' => 'SEDE-BCN-01']
+    );
+    $rightReq->setRouteParams(['id' => (string)$deskCaseId]);
+    $rightRes = $refundController->deliver($rightReq);
+    $rightBody = json_decode($rightRes->getBody(), true);
+    $assert("7.12 Con el PIN correcto responde HTTP 200", $rightRes->getStatusCode() === 200, "HTTP {$rightRes->getStatusCode()} " . json_encode($rightBody));
+    $assert(
+        "7.13 El expediente pasa a REFUNDED_IN_HAND",
+        ($rightBody['data']['status'] ?? '') === 'REFUNDED_IN_HAND',
+        'estado: ' . ($rightBody['data']['status'] ?? 'AUSENTE')
+    );
+    $assert(
+        "7.14 BD: el estado persistido es REFUNDED_IN_HAND",
+        $refundRepoPdo->findById($deskCaseId)?->getStatus() === \VendGuard\Core\Domain\Model\RefundStatus::REFUNDED_IN_HAND
+    );
+    $assert(
+        "7.15 BD: audit_log registra la entrega en mano",
+        (int)$pdo->query("SELECT COUNT(*) FROM audit_log WHERE entity_type = 'REFUND_REQUEST' AND entity_id = {$deskCaseId} AND action = 'REFUND_DELIVERED_IN_HAND'")->fetchColumn() >= 1
+    );
+
+    // 7.16 Sin sede no hay ni lectura
+    $anonRes = $refundController->index(new Request('GET', '/api/location/refunds'));
+    $anonBody = json_decode($anonRes->getBody(), true);
+    $assert("7.16 Sin sede autenticada responde HTTP 401", $anonRes->getStatusCode() === 401, "HTTP {$anonRes->getStatusCode()}");
+    $assert("7.17 El 401 expone UNAUTHORIZED", ($anonBody['error']['code'] ?? '') === 'UNAUTHORIZED');
 
     // Limpieza de datos de prueba
     TestDataCleaner::purgeIncident($pdo, (int)$createdIncident->getId());

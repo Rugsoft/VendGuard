@@ -75,7 +75,7 @@
   * **Dependencias:** T-REF-07
   * **Hecho cuando:** `GET /api/technician/incidents/{id}/refund` retorna las solicitudes asociadas omitiendo IBAN y teléfonos privados; y `POST /api/technician/incidents/{id}/resolve` procesa obligatoriamente el bloque `refund_inspection` si hay solicitudes activas, resolviendo la avería técnica y actualizando el expediente de saldo.
 
-- [ ] **T-REF-11: Implementar `LocationRefundController.php` (`GET /api/location/refunds`, `POST .../deliver`)**
+- [x] **T-REF-11: Implementar `LocationRefundController.php` (`GET /api/location/refunds`, `POST .../deliver`)**
   * **Requisitos:** RF-REF-06, RF-REF-10, Constitución Art. V.4
   * **Dependencias:** T-REF-06
   * **Hecho cuando:** `GET /api/location/refunds` lista los reintegros del centro con nombres anonimizados y sin datos bancarios; y `POST /api/location/refunds/{id}/deliver` valida el PIN de 4 dígitos del usuario, transicionando a `REFUNDED_IN_HAND` si coincide o respondiendo `422 INVALID_PICKUP_PIN` si es incorrecto.
