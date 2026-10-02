@@ -123,7 +123,7 @@
 
 ## Fase 5: Pruebas de Integración HTTP, Blindaje Constitucional y Cierre
 
-- [ ] **T-REF-19: Pruebas de integración HTTP de seguimiento público y reporte QR (`PublicRefundTrackingApiTest.php`)**
+- [x] **T-REF-19: Pruebas de integración HTTP de seguimiento público y reporte QR (`PublicRefundTrackingApiTest.php`)**
   * **Requisitos:** RF-REF-01, RF-REF-02, RF-REF-03
   * **Dependencias:** T-REF-08, T-REF-09, T-REF-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `PublicRefundTrackingApiTest.php` contra MariaDB real pasando al 100% en verde en flujos de creación QR con PIN, consulta de estado por token seguro y rectificación en `PENDING_CONTACT`.
