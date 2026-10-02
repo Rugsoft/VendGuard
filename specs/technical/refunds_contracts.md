@@ -479,6 +479,14 @@ Permite a conserjería consultar los reembolsos de su edificio con nombres anoni
 * **Método:** `GET`
 * **Ruta:** `/api/location/refunds`
 * **Autenticación:** Obligatoria (`Bearer <token_sede>` o cabecera `X-Site-Code`).
+  **Aviso de seguridad, noорма de estilo:** el `site_code` **es** la credencial de este rol.
+  `POST /api/auth/site-login` emite un token firmado a cambio exclusivamente del código, sin contraseña,
+  así que el acceso a este endpoint no está protegido por ningún secreto que no esté impreso en la
+  etiqueta QR del propio edificio. La cabecera y el login son **la misma puerta**: retirar la una no
+  cierra la otra. Con este token se alcanzan también endpoints de escritura (`POST /api/incidents`
+  devuelve `201`). El hallazgo está documentado y escalado a 🔴 en
+  [`specs/08-refunds/analisis_sexta_tanda.md`](../../specs/08-refunds/analisis_sexta_tanda.md) §2 (H-1)
+  y §5; cerrarlo exige una decisión de producto (secreto por sede o *pairing* en la primera visita).
 * **Roles:** `LOCATION_MANAGER`.
 
 **Respuesta Exitosa (`200 OK`):**
@@ -703,7 +711,9 @@ Desestima una reclamación con justificación obligatoria ($\ge 20$ caracteres).
 | `422 Unprocessable` | `INVALID_PICKUP_PIN` | *"El PIN de recogida introducido no coincide con el expediente de reintegro."* | Fallo en la verificación de entrega presencial en conserjería. |
 | `422 Unprocessable` | `RECEPTION_DELIVERY_NOT_ALLOWED` | *"No se permite el depósito en conserjería para importes superiores a 10,00 € o con método de compensación digital."* | Intento indebido de marcar `LEFT_AT_RECEPTION` para BIZUM/IBAN o $> 10\ \text{€}$. |
 | `422 Unprocessable` | `JUSTIFICATION_TOO_SHORT` | *"La justificación técnica o de rechazo debe contener un mínimo de 20 caracteres descriptivos."* | Cumplimiento del Art. V.1 de la Constitución. |
-| `422 Unprocessable` | `INVALID_RECOVERED_AMOUNT` | *"El importe de efectivo recuperado no concuerda con las reclamaciones de esta avería. Si se trata de dinero sobrante, regístrelo como efectivo no reclamado."* | Recuperado por encima de lo reclamado, o hallazgo de efectivo no reclamado por encima del tope de 50,00 € (RF-REF-03, RF-REF-04). |
+| `422 Unprocessable` | `INVALID_RECOVERED_AMOUNT` | *"El importe de efectivo recuperado no concuerda con las reclamaciones de esta avería. Si se trata de dinero sobrante, regístrelo como efectivo no reclamado."* | Recuperado por encima de lo reclamado (RF-REF-03). |
+| `422 Unprocessable` | `INVALID_RECOVERED_AMOUNT` | *"Esta máquina ya tiene X € registrados como efectivo no reclamado y el tope por máquina es de 50,00 €."* | El hallazgo de oficio supera el **agregado por máquina** de 50,00 € una vez sumados los hallazgos previos de esa máquina, no el importe de un hallazgo suelto (RF-REF-04). `details.maximum_allowed` informa del hueco restante en euros. |
+| `422 Unprocessable` | `INVALID_RECOVERED_AMOUNT` | *"Esta avería tiene una reclamación de reintegro ya inspeccionada por el técnico: su efectivo está adjudicado y no puede abonarse además como efectivo no reclamado. Si el sobrante es real, debe abrirlo Coordinación."* | Intento de doble asiento: el `resolve` acepta el dictamen y `unclaimed_cash_found` en la misma llamada, y las monedas son las mismas. `details.maximum_allowed` es `0.00` (RF-REF-03, RF-REF-04). |
 | `409 Conflict` | `DUPLICATE_REFUND_CLAIM` | *"Ya tienes una solicitud de reintegro en marcha sobre esta avería. Consulta el enlace de seguimiento que recibiste al abrirla para seguirla."* | Reclamación duplicada del mismo consumidor sobre la misma avería, comparada por forma canónica del contacto. La respuesta incluye **solo** `details.existing_refund_id`; el token de seguimiento nunca sale por un endpoint sin autenticación (RF-REF-11). |
 | `423 Locked` | `PICKUP_PIN_LOCKED` | *"El PIN de recogida está bloqueado por intentos incorrectos. Inténtelo de nuevo en 15 minutos o solicite un nuevo PIN en el punto de atención."* | Quinto intento fallido de PIN; el bloqueo expira solo (RF-REF-02). |
 

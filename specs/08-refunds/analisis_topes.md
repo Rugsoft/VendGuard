@@ -160,4 +160,12 @@ Por eso la opción B de §3 no es solo la más simple: es la única que no oblig
 
 1. ¿Tolerancia del 20 % real, o corregir la especificación para que refleje el escalado por cualquier déficit? (Recomendado: corregir la especificación.)
 2. Si se decide repartir el efectivo recuperado entre varios reclamantes, hace falta una regla de reparto y una regla para el sobrante con reclamaciones abiertas. Hoy ninguna de las dos existe.
-3. ¿Debe existir un techo agregado por máquina o por sede? No hace falta para la seguridad del módulo, pero es la única forma de acotar el peor caso de N × 50 €.
+3. ~~¿Debe existir un techo agregado por máquina o por sede?~~ **Resuelto en la sexta tanda
+   (2026-10-02):** existe, y es **por máquina**, en céntimos enteros. Se adoptó la variante por máquina
+   y no por sede porque el límite de 50 € protege del *fraude del técnico* (una persona declarando
+   efectivo en una máquina) y ese riesgo termina en la máquina: el daño se contabiliza en lo que el
+   hallazgo dice haber salido de *ese* dispositivo. Un techo por sede además frenaría a un técnico
+   legítimo que atiende parque y asigna el sobrante a la máquina equivocada. Medido: dos
+   intervenciones legítimas sobre la misma máquina daban 100,00 € antes del arreglo; ahora el segundo
+   intento se rechaza con `422` y el mensaje informa de lo ya registrado. Véase
+   [`analisis_sexta_tanda.md`](analisis_sexta_tanda.md) §2 (H-3).

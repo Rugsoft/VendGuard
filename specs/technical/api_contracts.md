@@ -124,6 +124,10 @@ Inicio de sesión para Coordinadores y Técnicos de Campo (RF-04).
 Obtiene el parque de máquinas instaladas en la sede para el formulario de reporte (RF-01, RF-02).
 
 * **Autenticación:** Token de sede o cabecera `X-Site-Code: SEDE-BCN-01`
+  **Aviso de seguridad:** el `site_code` es la credencial completa de este rol; `POST /api/auth/site-login`
+  emite el token firmado a cambio del código y sin contraseña. Ambos caminos son la misma puerta y el
+  acceso alcanza también endpoints de escritura. Hallazgo abierto y escalado a 🔴 en
+  `specs/08-refunds/analisis_sexta_tanda.md` §2 (H-1) y §5; cerrarlo exige una decisión de producto.
 * **Respuesta Exitosa (`200 OK`):**
 ```json
 {
