@@ -56,6 +56,10 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
         'coordinator_decision',
         'coordinator_justification',
         'technician_id',
+        // La columna existe en el DDL y `TechnicianRefundService` la envía con
+        // cada dictamen: sin ella, el instante en que el técnico declara qué
+        // ocurrió con el dinero se perdería (Art. III.3).
+        'technician_inspected_at',
         'coordinator_id',
     ];
 

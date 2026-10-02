@@ -128,7 +128,7 @@
   * **Dependencias:** T-REF-08, T-REF-09, T-REF-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `PublicRefundTrackingApiTest.php` contra MariaDB real pasando al 100% en verde en flujos de creación QR con PIN, consulta de estado por token seguro y rectificación en `PENDING_CONTACT`.
 
-- [ ] **T-REF-20: Pruebas de integración HTTP de dictamen técnico en resolución (`TechnicianRefundInspectionApiTest.php`)**
+- [x] **T-REF-20: Pruebas de integración HTTP de dictamen técnico en resolución (`TechnicianRefundInspectionApiTest.php`)**
   * **Requisitos:** RF-REF-04, RF-REF-05, RF-REF-09, RNF-REF-04
   * **Dependencias:** T-REF-10, T-REF-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `TechnicianRefundInspectionApiTest.php` contra MariaDB real pasando al 100% en verde comprobando dictamen físico, regla de custodia forzada para caja central si $> 10\ \text{€}$, desacoplamiento del cierre técnico y registro de monedas atascadas de oficio.
