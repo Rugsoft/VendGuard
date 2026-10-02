@@ -632,6 +632,7 @@ $doctrine = [
     'desk_controller' => $read('src/Presentation/Controller/LocationRefundController.php'),
     'duplicate_exception' => $read('src/Core/Domain/Exception/DuplicateRefundClaimException.php'),
     'recovered_exception' => $read('src/Core/Domain/Exception/InvalidRecoveredAmountException.php'),
+    'amount_exception' => $read('src/Core/Domain/Exception/InvalidRefundAmountException.php'),
     'locked_exception' => $read('src/Core/Domain/Exception/PickupPinLockedException.php'),
 ];
 
@@ -646,7 +647,7 @@ $assert(
     '6.2 Una liquidación se persiste y solo puede ser exactamente lo aprobado (RF-REF-03, RF-REF-07)',
     str_contains($doctrine['refund_service'], "'paid_amount' => \$dto->paidAmount")
     && str_contains($doctrine['refund_service'], 'payableAmount')
-    && str_contains($doctrine['refund_service'], 'SETTLEMENT_TOLERANCE')
+    && str_contains($doctrine['refund_service'], 'isCentExact')
     && str_contains($doctrine['repository'], 'r.`paid_amount`'),
     'registerDigitalPayment() escribe paid_amount y lo iguala con payableAmount()'
 );
@@ -737,17 +738,46 @@ $claimantIdentity = $read('src/Core/Domain/ValueObject/ClaimantIdentity.php');
 $assert(
     '6.10 El duplicado se detecta sobre la FORMA CANÓNICA del contacto (RF-REF-11)',
     str_contains($doctrine['refund_service'], 'ClaimantIdentity::from')
-    && str_contains($claimantIdentity, "preg_replace('/\\D+/u'")
+    && str_contains($doctrine['refund_service'], '->equals(ClaimantIdentity::from(')
+    && str_contains($claimantIdentity, 'NATIONAL_LENGTH = 9')
     && !str_contains($doctrine['refund_service'], 'preg_replace'),
-    'la comparación vive en el objeto de valor; el servicio no normaliza por su cuenta'
+    'la comparación vive en el objeto de valor y el servicio no normaliza por su cuenta'
 );
 
 // 6.11 — La liquidación es una igualdad, no un techo.
 $assert(
     '6.11 La liquidación se compara por IGUALDAD, no por techo (RF-REF-03)',
-    str_contains($doctrine['refund_service'], 'abs($dto->paidAmount - $expectedAmount) > self::SETTLEMENT_TOLERANCE')
-    && !str_contains($doctrine['refund_service'], '$dto->paidAmount > $'),
-    'registerDigitalPayment() no puede volver a aceptar cualquier cifra por debajo de la aprobada'
+    str_contains($doctrine['refund_service'], '$dto->paidAmount !== $expectedAmount')
+    && !str_contains($doctrine['refund_service'], '$dto->paidAmount > $')
+    && !str_contains($doctrine['refund_service'], 'SETTLEMENT_TOLERANCE'),
+    'registerDigitalPayment() exige igualdad exacta y no admite ninguna tolerancia de coma flotante'
+);
+
+// 6.12 — Solo hay dinero en céntimos, y el visto bueno no supera lo reclamado.
+$assert(
+    '6.12 El importe se valida en céntimos y el visto bueno no supera lo reclamado (RF-REF-03)',
+    // Los TRES puntos por donde entra dinero se validan uno por uno. Contar que
+    // el helper existe en el fichero no vale: al borrar el control de la
+    // liquidación el helper sigue estando por el de la reclamación y el visto
+    // bueno, y una guarda que solo mira el texto daría verde con el agujero
+    // abierto.
+    str_contains($doctrine['refund_service'], 'isCentExact($dto->claimedAmount)')
+    && str_contains($doctrine['refund_service'], 'isCentExact($dto->approvedAmount)')
+    && str_contains($doctrine['refund_service'], 'isCentExact($dto->paidAmount)')
+    && str_contains($doctrine['refund_service'], '$dto->approvedAmount > $case->getClaimedAmount()')
+    && str_contains($doctrine['amount_exception'], 'APPROVAL_ABOVE_CLAIM_MESSAGE')
+    && str_contains($doctrine['amount_exception'], 'NOT_CENT_EXACT_MESSAGE'),
+    'una cifra con fracción de céntimo se rechaza en la puerta, y firmar por encima de la reclamación es imposible'
+);
+
+// 6.13 — La identidad canónica se construye sobre dígitos ASCII, no sobre \\D.
+$assert(
+    '6.13 La identidad del reclamante se construye sobre dígitos ASCII (RF-REF-11)',
+    str_contains($claimantIdentity, "/[^0-9]/")
+    && !str_contains($claimantIdentity, '/\\D+/u')
+    && str_contains($claimantIdentity, 'toAsciiDigits')
+    && !str_contains($doctrine['refund_service'], 'preg_replace'),
+    '\\D con el modificador u conserva los dígitos Unicode: la identidad se construye transliterando, no descartando'
 );
 
 echo "\n======================================================================\n";

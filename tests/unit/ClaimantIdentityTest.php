@@ -156,6 +156,74 @@ $assert(
     && $typed->typedContact() === '+34 600 123 456'
 );
 
+// ─────────────────────────────────────────────────────────────────────
+echo "\n--- 6. El MISMO número escrito con otra escritura de dígitos (RF-REF-11) ---\n";
+// ─────────────────────────────────────────────────────────────────────
+// La quinta tanda adversarial encontró que `preg_replace('/\D+/u', ...)` no
+// bastaba: el modificador `u` de PCRE activa `PCRE_UCP`, donde `\d` engloba
+// CUALQUIER dígito decimal Unicode, así que la limpieza conservaba los dígitos
+// de ancho completo y los arábigo-indicos. El número se canonicaba a sí mismo
+// en vez de a su gemelo ASCII y el consumidor abría un segundo expediente vivo
+// del mismo teléfono: dos sobres, dos pagos, una queja.
+//
+// Estos casos se generan desde el propio número ASCII porque escribirlos a mano
+// es justo donde se cuela el error: un borrador de esta suite traía los
+// literales mal tecleados y daba verde sobre una comparación que no probaba nada.
+$unicodeBlocks = [
+    '3.1a' => [0xFF10, 'ancho completo (U+FF10)'],
+    '3.1b' => [0x0660, 'arabigo-indico (U+0660)'],
+    '3.1c' => [0x06F0, 'arabigo-indico extendido (U+06F0)'],
+    '3.1d' => [0x0966, 'devanagari (U+0966)'],
+    '3.1e' => [0x09E6, 'bengali (U+09E6)'],
+    '3.1f' => [0x0E50, 'tailandes (U+0E50)'],
+    '3.1g' => [0x0BE6, 'tamil (U+0BE6)'],
+];
+
+foreach ($unicodeBlocks as $label => [$blockBase, $script]) {
+    $typed = '';
+    foreach (str_split('600123456') as $digit) {
+        $typed .= mb_chr($blockBase + (int)$digit, 'UTF-8');
+    }
+
+    $assert(
+        $label . ' El mismo teléfono en ' . $script . ' es la MISMA persona',
+        ClaimantIdentity::from('600123456')->equals(ClaimantIdentity::from($typed)),
+        'clave: ' . ClaimantIdentity::from($typed)->key()
+    );
+}
+
+// El prefijo del país tampoco tiene por qué venir en ASCII.
+$assert(
+    '3.2 Un "+34" con signo más de ancho completo sigue siendo el mismo prefijo',
+    ClaimantIdentity::from('600123456')->equals(ClaimantIdentity::from("\u{FF0B}\u{FF13}\u{FF14} 600123456")),
+    'clave: ' . ClaimantIdentity::from("\u{FF0B}\u{FF13}\u{FF14} 600123456")->key()
+);
+$assert(
+    '3.3 El prefijo "0034" en dígitos arabigo-indicos también se recorta',
+    ClaimantIdentity::from('600123456')->equals(ClaimantIdentity::from("\u{0660}\u{0660}\u{0663}\u{0664}600123456")),
+    'clave: ' . ClaimantIdentity::from("\u{0660}\u{0660}\u{0663}\u{0664}600123456")->key()
+);
+$assert(
+    '3.4 Una mezcla de ASCII y otro script en el MISMO número sigue siendo la misma persona',
+    ClaimantIdentity::from('600123456')->equals(ClaimantIdentity::from("+34 600\u{0661}\u{0662}\u{0663}456")),
+    'clave: ' . ClaimantIdentity::from("+34 600\u{0661}\u{0662}\u{0663}456")->key()
+);
+
+// La otra mitad de la regla: una escritura desconocida NO puede robarle la
+// identidad a otra persona. Un bloque de dígitos que la clase no reconoce
+// conserva su clave propia en lugar de traducirse a una ASCII que podria
+// coincidir con la de alguien, porque fusionar dos personas reales es un fallo
+// peor que el que esta clase viene a evitar.
+$assert(
+    '3.5 Un script no contemplado conserva su clave y NO se funde con el ASCII',
+    !ClaimantIdentity::from('600123456')->equals(ClaimantIdentity::from("\u{10E60}1\u{10E62}\u{10E63}")),
+    'clave: ' . ClaimantIdentity::from("\u{10E60}1\u{10E62}\u{10E63}")->key()
+);
+$assert(
+    '3.6 Un numeral romano (U+2170) no es un dígito decimal y no cuenta como tal',
+    ClaimantIdentity::from("\u{2170}\u{2171}\u{2172}123456")->key() !== '600123456'
+);
+
 echo "\n======================================================================\n";
 echo " Total Aserciones: {$assertions} | Fallos: {$failures}\n";
 if ($failures === 0) {

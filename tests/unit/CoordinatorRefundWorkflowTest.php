@@ -1163,9 +1163,52 @@ foreach ($amountCases as $payload) {
     );
 }
 
-$atCap = $makeCase(CompensationMethod::BIZUM, 20.00, true, 20.00);
-$capOk = $invoke('approve', $coordRequest('APPROVE', ['approved_amount' => 50.00], [], (string)$atCap->getId()));
-$assert('5.6 El tope exacto de 50,00 € se acepta', $capOk->getStatusCode() === 200, $detail($capOk));
+// Esta aserción decía «el tope exacto de 50,00 € se acepta» sobre una
+// reclamación de 20,00 €, y eso era exactamente el agujero de la quinta tanda:
+// el único control del visto bueno era el bloque de 50,00 €, así que un
+// coordinador podía autorizar tres veces lo reclamado. Con la liquidación por
+// igualdad, ese 50,00 € además pasaba a ser la única cifra que el servicio
+// aceptaba, de modo que firmarlo autorizaba el desembolso entero.
+//
+// El tope de 50,00 € sigue existiendo y se comprueba en 5.5; lo que cambia es
+// que el máximo real del visto bueno es el importe reclamado.
+$atClaim = $makeCase(CompensationMethod::BIZUM, 20.00, true, 20.00);
+$claimOk = $invoke('approve', $coordRequest('APPROVE', ['approved_amount' => 20.00], [], (string)$atClaim->getId()));
+$assert(
+    '5.6 Firmar exactamente lo reclamado sigue aceptándose',
+    $claimOk->getStatusCode() === 200,
+    $detail($claimOk)
+);
+
+$overClaim = $makeCase(CompensationMethod::BIZUM, 20.00, true, 20.00);
+$overOk = $invoke('approve', $coordRequest('APPROVE', ['approved_amount' => 50.00], [], (string)$overClaim->getId()));
+$assert(
+    '5.6b Firmar 50,00 € sobre una reclamación de 20,00 € se rechaza',
+    $overOk->getStatusCode() === 422
+    && ($overOk->getDecodedBody()['error']['code'] ?? '') === 'INVALID_REFUND_AMOUNT',
+    $detail($overOk)
+);
+$assert(
+    '5.6c El rechazo dice cuál era el máximo admisible',
+    (float)($overOk->getDecodedBody()['error']['details']['maximum_allowed'] ?? 0) === 20.00,
+    'detalles: ' . json_encode($overOk->getDecodedBody()['error']['details'] ?? null)
+);
+$assert(
+    '5.6d El expediente sigue esperando visto bueno tras el rechazo',
+    $refundRepo->findById((int)$overClaim->getId())?->getStatus() === RefundStatus::REQUIRES_COORDINATOR_APPROVAL,
+    'estado: ' . var_export($refundRepo->findById((int)$overClaim->getId())?->getStatus()?->value, true)
+);
+
+// Un importe con fracción de céntimo no es dinero, y la columna DECIMAL lo
+// redondearía: 4,005 € se guardaría como 4,01 € sin que nadie lo firmara.
+$halfCent = $makeCase(CompensationMethod::BIZUM, 20.00, true, 20.00);
+$halfCentResponse = $invoke('approve', $coordRequest('APPROVE', ['approved_amount' => 4.005], [], (string)$halfCent->getId()));
+$assert(
+    '5.6e Un importe con fracción de céntimo se rechaza antes de guardarse',
+    $halfCentResponse->getStatusCode() === 422
+    && ($halfCentResponse->getDecodedBody()['error']['code'] ?? '') === 'INVALID_REFUND_AMOUNT',
+    $detail($halfCentResponse)
+);
 
 $badId = $invoke('approve', $coordRequest('APPROVE', ['approved_amount' => 5.00], [], 'abc'));
 $assert(

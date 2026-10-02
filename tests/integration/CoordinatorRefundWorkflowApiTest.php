@@ -885,6 +885,160 @@ $bizumContact = $lastClaimantContact;
         && (float)($bodyOf($defaultSettle)['paid_amount'] ?? 0) === 7.30,
         'HTTP ' . $defaultSettle->getStatusCode() . ' ' . (string)$defaultSettle->getBody()
     );
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Quinta tanda adversarial. El techo del 50,00 € era el único control del
+    // visto bueno, así que una reclamación de 1,00 € se firmaba por 50,00 € con
+    // HTTP 200; y como la liquidación tiene que coincidir exactamente con lo
+    // aprobado, ese 50,00 € pasaba a ser la ÚNICA cifra que el servicio
+    // aceptaba. Firmar autorizaba el desembolso entero: la regla que se
+    // endureció en la cuarta tanda convirtió al visto bueno en el techo real.
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 9. El visto bueno nunca supera lo reclamado (RF-REF-03) ---\n";
+
+    foreach ([[4.00, 45.00], [1.00, 50.00]] as [$claim, $signOff]) {
+        $overCaseId = $openCase(CompensationMethod::BIZUM, $claim);
+        $escalate($overCaseId, $claim);
+
+        $over = $controller->approve($request(
+            'POST',
+            "/api/coordinator/refunds/{$overCaseId}/approve",
+            ['approved_amount' => $signOff, 'justification' => 'Importe verificado contra el efectivo recuperado.'],
+            [],
+            $coordinatorId,
+            'COORDINATOR'
+        ));
+
+        $assert(
+            sprintf(
+                '9.%s No se firma un visto bueno de %.2f € sobre una reclamación de %.2f €',
+                $claim === 4.00 ? '1' : '2',
+                $signOff,
+                $claim
+            ),
+            $over->getStatusCode() === 422 && $errOf($over) === 'INVALID_REFUND_AMOUNT',
+            'HTTP ' . $over->getStatusCode() . ' ' . $errOf($over)
+        );
+
+        $assert(
+            sprintf('9.%s El rechazo dice cuál era el máximo admisible', $claim === 4.00 ? '1b' : '2b'),
+            (float)($over->getDecodedBody()['error']['details']['maximum_allowed'] ?? 0) === $claim,
+            'detalles: ' . json_encode($over->getDecodedBody()['error']['details'] ?? null)
+        );
+
+        // Y lo importante: el rechazo NO deja el expediente listo para cobrar.
+        $assert(
+            sprintf('9.%s El expediente sigue SIN aprobar tras el rechazo', $claim === 4.00 ? '1c' : '2c'),
+            (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$overCaseId}")->fetchColumn() === 'REQUIRES_COORDINATOR_APPROVAL'
+            && $pdo->query("SELECT `approved_amount` FROM `refund_requests` WHERE `id` = {$overCaseId}")->fetchColumn() === null,
+            'estado: ' . (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$overCaseId}")->fetchColumn()
+        );
+    }
+
+    // Igualar lo reclamado sigue siendo legal: es lo que hace el flujo normal.
+    $equalCaseId = $openCase(CompensationMethod::BIZUM, 7.50);
+    $escalate($equalCaseId, 7.50);
+    $equal = $controller->approve($request(
+        'POST',
+        "/api/coordinator/refunds/{$equalCaseId}/approve",
+        ['approved_amount' => 7.50, 'justification' => 'Importe verificado contra el efectivo recuperado.'],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+
+    $assert(
+        '9.3 Firmar EXACTAMENTE lo reclamado sigue siendo legal',
+        $equal->getStatusCode() === 200
+        && (float)($bodyOf($equal)['approved_amount'] ?? 0) === 7.50,
+        'HTTP ' . $equal->getStatusCode() . ' ' . (string)$equal->getBody()
+    );
+
+    // Bajar el importe sigue siendo la vía legítima para pagar menos (RF-REF-07).
+    $lowerCaseId = $openCase(CompensationMethod::BIZUM, 7.50);
+    $escalate($lowerCaseId, 7.50);
+    $controller->approve($request(
+        'POST',
+        "/api/coordinator/refunds/{$lowerCaseId}/approve",
+        ['approved_amount' => 6.00, 'justification' => 'Discrepancia entre lo reclamado y el efectivo recuperado.'],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+    $lowerPay = $controller->pay($request(
+        'POST',
+        "/api/coordinator/refunds/{$lowerCaseId}/pay",
+        ['payment_reference' => 'PAGO-REDUCIDO-0005', 'paid_amount' => 6.00],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+
+    $assert(
+        '9.4 Bajar el importe aprobado sigue siendo la forma de pagar menos',
+        $lowerPay->getStatusCode() === 200
+        && (float)$pdo->query("SELECT `paid_amount` FROM `refund_requests` WHERE `id` = {$lowerCaseId}")->fetchColumn() === 6.00,
+        'HTTP ' . $lowerPay->getStatusCode() . ' ' . (string)$lowerPay->getBody()
+    );
+
+    // ─────────────────────────────────────────────────────────────────────
+    // El borde de la tolerancia. Con la comparación abierta, 4,005 sobre un
+    // aprobado de 4,00 caía dentro del `> 0,005` y la columna DECIMAL(10,2)
+    // redondeaba a 4,01: la API afirmaba un importe que nadie había firmado.
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 10. La tolerancia de medio céntimo es estricta (RF-REF-03, RF-REF-07) ---\n";
+
+    $halfCentCaseId = $openCase(CompensationMethod::BIZUM, 4.00);
+    $escalate($halfCentCaseId, 4.00);
+    $controller->approve($request(
+        'POST',
+        "/api/coordinator/refunds/{$halfCentCaseId}/approve",
+        ['approved_amount' => 4.00, 'justification' => 'Importe verificado contra el efectivo recuperado.'],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+
+    $halfCent = $controller->pay($request(
+        'POST',
+        "/api/coordinator/refunds/{$halfCentCaseId}/pay",
+        ['payment_reference' => 'REF-MEDIO-CENTIMO', 'paid_amount' => 4.005],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+
+    $assert(
+        '10.1 Medio céntimo por encima NO es el importe aprobado',
+        $halfCent->getStatusCode() === 422 && $errOf($halfCent) === 'INVALID_REFUND_AMOUNT',
+        'HTTP ' . $halfCent->getStatusCode() . ' ' . $errOf($halfCent)
+    );
+
+    $assert(
+        '10.2 El expediente no queda liquidado con un importe que nadie firmó',
+        (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$halfCentCaseId}")->fetchColumn() === 'VERIFIED_PENDING_PAYMENT'
+        && $pdo->query("SELECT `paid_amount` FROM `refund_requests` WHERE `id` = {$halfCentCaseId}")->fetchColumn() === null,
+        'estado: ' . (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$halfCentCaseId}")->fetchColumn()
+    );
+
+    // Y el importe exacto sigue funcionando tras endurecer el borde.
+    $exactCent = $controller->pay($request(
+        'POST',
+        "/api/coordinator/refunds/{$halfCentCaseId}/pay",
+        ['payment_reference' => 'PAGO-AL-CENTIMO-0006', 'paid_amount' => 4.00],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+
+    $assert(
+        '10.3 El importe exacto sigue liquidando tras endurecer el borde',
+        $exactCent->getStatusCode() === 200
+        && (float)$pdo->query("SELECT `paid_amount` FROM `refund_requests` WHERE `id` = {$halfCentCaseId}")->fetchColumn() === 4.00,
+        'HTTP ' . $exactCent->getStatusCode() . ' ' . (string)$exactCent->getBody()
+    );
+
+
 } finally {
     $pdo->rollBack();
 }
