@@ -18,7 +18,7 @@ use JsonSerializable;
 final readonly class UnclaimedCashFinding implements JsonSerializable
 {
     public function __construct(
-        private int $id,
+        private ?int $id,
         private int $incidentId,
         private int $machineId,
         private int $technicianId,
@@ -26,7 +26,14 @@ final readonly class UnclaimedCashFinding implements JsonSerializable
         private string $notes,
         private string $createdAt
     ) {
-        if ($id < 1 || $incidentId < 1 || $machineId < 1 || $technicianId < 1) {
+        // `null` significa "todavía no persistido", el mismo centinela que usan
+        // `Incident` y `RefundRequest`. Un identificador explícito sigue siendo
+        // obligatorio y estrictamente positivo.
+        if ($id !== null && $id < 1) {
+            throw new InvalidArgumentException('El hallazgo requiere un identificador estrictamente positivo.');
+        }
+
+        if ($incidentId < 1 || $machineId < 1 || $technicianId < 1) {
             throw new InvalidArgumentException('Los identificadores del hallazgo deben ser enteros positivos.');
         }
 
@@ -44,7 +51,10 @@ final readonly class UnclaimedCashFinding implements JsonSerializable
         }
     }
 
-    public function getId(): int
+    /**
+     * The persisted identifier, or null while the finding has not been stored yet.
+     */
+    public function getId(): ?int
     {
         return $this->id;
     }

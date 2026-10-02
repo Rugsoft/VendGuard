@@ -287,6 +287,53 @@ final readonly class RefundRequest implements JsonSerializable
     }
 
     /**
+     * Returns a copy carrying the technician's on-site verdict.
+ *
+     * The case is immutable, so filing a verdict produces a new instance rather
+     * than mutating this one. Keeping the copy here means the service never has
+     * to restate the twenty-six constructor arguments just to attach a verdict.
+     *
+     * The status is deliberately left untouched: filing a verdict and moving the
+     * case to its next state are two separate steps, and the latter goes through
+     * the repository's guarded transition.
+     */
+    public function withInspection(
+        TechnicianFinding $finding,
+        ?float $recoveredAmount = null,
+        ?CashCustodyAction $cashCustodyAction = null,
+        ?string $receptionistName = null,
+        ?string $technicianJustification = null
+    ): self {
+        return new self(
+            id: $this->id,
+            incidentId: $this->incidentId,
+            machineId: $this->machineId,
+            locationId: $this->locationId,
+            claimantName: $this->claimantName,
+            claimantContact: $this->claimantContact,
+            claimedAmount: $this->claimedAmount,
+            productAttempted: $this->productAttempted,
+            compensationMethod: $this->compensationMethod,
+            bizumPhone: $this->bizumPhone,
+            iban: $this->iban,
+            pickupPin: $this->pickupPin,
+            trackingToken: $this->trackingToken,
+            status: $this->status,
+            technicianFinding: $finding,
+            recoveredAmount: $recoveredAmount,
+            cashCustodyAction: $cashCustodyAction,
+            receptionistName: $receptionistName ?? $this->receptionistName,
+            technicianJustification: $technicianJustification ?? $this->technicianJustification,
+            approvedAmount: $this->approvedAmount,
+            paymentReference: $this->paymentReference,
+            isActive: $this->isActive,
+            createdAt: $this->createdAt,
+            updatedAt: $this->updatedAt,
+            financialColumnsRestricted: $this->financialColumnsRestricted
+        );
+    }
+
+    /**
      * The persisted identifier, or null while the case has not been stored yet.
      */
     public function getId(): ?int

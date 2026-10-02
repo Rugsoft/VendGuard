@@ -51,7 +51,7 @@
   * **Dependencias:** T-REF-02, T-REF-04, T-REF-05
   * **Hecho cuando:** `RefundManagementService` gestiona la creación de expedientes con generación segura de PIN de 4 dígitos y token de 64 caracteres, transiciones legales de la máquina de estados, clasificación automática como `REQUIRES_COORDINATOR_APPROVAL` si $> 10,00\ \text{€}$, validación de PIN en entrega presencial, autorización y registro de liquidación digital con referencia bancaria; `php tests/unit/RefundStateMachineTest.php` pasa al 100% en verde.
 
-- [ ] **T-REF-07: Implementar `TechnicianRefundService.php` y pruebas unitarias de dictamen y custodia**
+- [x] **T-REF-07: Implementar `TechnicianRefundService.php` y pruebas unitarias de dictamen y custodia**
   * **Requisitos:** RF-REF-03, RF-REF-04, RF-REF-05, RF-REF-08, RNF-REF-04
   * **Dependencias:** T-REF-04, T-REF-06
   * **Hecho cuando:** `TechnicianRefundService` valida y procesa el dictamen de saldo (`FOUND_PHYSICAL`, `CONFIRMED_NO_CASH`, `UNVERIFIED_NO_CASH`), forzando la custodia física hacia caja central (`HELD_FOR_CENTRAL`) si el importe es $> 10,00\ \text{€}$ o el método es digital, y registrando hallazgos de monedas de oficio sin reclamación previa.
