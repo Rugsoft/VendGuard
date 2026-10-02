@@ -323,7 +323,7 @@ Permite añadir la reclamación de reintegro en el mismo envío del reporte púb
 
 **Respuesta cuando la avería se fusiona con otra abierta (`200 OK`):** mismo cuerpo, con la clave `merged: true` y el `incident_id` de la avería superviviente. La fusión de averías ya estaba especificada; el reintegro viaja con ella.
 
-*Reclamación duplicada (`409 Conflict`, RF-REF-11):* la unidad protegida es **(avería, consumidor)**, y la comparación se hace sobre la **forma canónica** del medio de contacto (correo en minúsculas; teléfono solo con sus dígitos y sin el prefijo `+34`/`0034`/`34`), de modo que `600 111 222`, `600-111-222`, `+34 600111222` y `600_111_222` son la misma persona y no cuatro. Si ese consumidor ya tiene un expediente **vivo** sobre esa avería, la API no abre un segundo.
+*Reclamación duplicada (`409 Conflict`, RF-REF-11):* la unidad protegida es **(avería, consumidor)**, y la comparación se hace sobre la **forma canónica** del medio de contacto: correo en minúsculas, y teléfono reducido a sus dígitos **ASCII** sin el prefijo `+34`/`0034`/`34`. De este modo `600 111 222`, `600-111-222`, `+34 600111222` y `600_111_222` son la misma persona y no cuatro. Los dígitos decimales Unicode (ancho completo `U+FF10`-`U+FF19`, arábigo-indicos `U+0660`-`U+0669`, devanagari y demás) se **transliteran** a su dígito ASCII antes de comparar, porque el modificador `u` de PCRE activa `PCRE_UCP`, donde `\d` engloba cualquier dígito decimal Unicode: una limpieza con `\D+` los conservaría, el número se canonicaría a sí mismo en vez de a su gemelo ASCII y el mismo teléfono abriría un segundo expediente vivo. Si ese consumidor ya tiene un expediente **vivo** sobre esa avería, la API no abre un segundo.
 
 La respuesta identifica el expediente afectado y **remite al enlace que el consumidor ya recibió**, pero **no devuelve su token de seguimiento**:
 ```json
@@ -647,6 +647,8 @@ Registra la emisión efectiva del reembolso con su identificador de justificante
 
 Si se omite `paid_amount`, se liquida exactamente el importe aprobado, o el reclamado si nunca hubo visto bueno formal.
 
+> **Techo del visto bueno (RF-REF-03).** `approved_amount` debe ser un número exacto de céntimos y **menor o igual que `claimed_amount`**. Firmar por encima de lo reclamado se responde con `422 INVALID_REFUND_AMOUNT` y `details.maximum_allowed` igual a lo reclamado, y el expediente permanece en `REQUIRES_COORDINATOR_APPROVAL`. El visto bueno existe para resolver la discrepancia entre lo reclamado y lo verificado, y esa discrepancia solo puede ir a la baja: nadie ha reclamado de más. La consecuencia es doble: como la liquidación debe coincidir exactamente con el importe aprobado (ver más abajo), un visto bueno inflado se convertía en la única cifra que la API aceptaba, de modo que firmarlo autorizaba un desembolso de hasta 50,00 € sobre una reclamación de céntimos.
+
 *Liquidación por igualdad (RF-REF-03, RF-REF-07):* `paid_amount` debe ser **exactamente** `min(importe aprobado ?? reclamado, 50,00 €)`. Cualquier otra cifra —por encima o por debajo— responde `422 INVALID_REFUND_AMOUNT` con `details.expected_amount`:
 
 ```json
@@ -666,7 +668,7 @@ Si se omite `paid_amount`, se liquida exactamente el importe aprobado, o el recl
 
 Un techo solo acotaba por arriba: `paid_amount: 0.01` sobre un expediente de 4,00 € respondía `200 OK` y saltaba directo a `PAID_DIGITAL`, de modo que el consumidor leía «su devolución ha sido abonada» habiendo cobrado una centésima parte de lo acordado, y los 3,99 € restantes no tenían adónde ir. Como el estado liquidado es terminal, el daño deja de ser corregible en ese momento. **Para pagar menos de lo reclamado hay que bajar antes `approved_amount` mediante el doble visto bueno**, que es exactamente para lo que existe ese endpoint.
 
-La comparación admite una tolerancia de `0,005` (medio céntimo) que existe solo por el residuo de coma flotante de un `DECIMAL(10,2)` —`4.00` llega como `3.9999999999999996`— y nunca como regla de dinero: un céntimo de diferencia sigue siendo un importe distinto y se rechaza. El importe que devuelve la respuesta es el **persistido** en `refund_requests.paid_amount`: la API nunca afirma una cifra distinta de la almacenada.
+**No hay tolerancia de coma flotante.** Una versión anterior de esta regla comparaba con un margen de medio céntimo para absorber el residuo binario y no cumplía su propósito: el doble más cercano a `4.005` es `4.004999999999999893`, de modo que un pago de medio céntimo pasaba el filtro con cualquier operador de comparación y la columna `DECIMAL(10,2)` lo redondeaba a `4,01`, con la respuesta afirmando un importe que nadie había firmado. La regla vigente es que **el dinero se cuenta en céntimos**: se rechaza toda cifra que no sea un número exacto de céntimos (más de dos decimales), y a partir de ahí la igualdad entre importes es una igualdad real. El importe que devuelve la respuesta es el **persistido** en `refund_requests.paid_amount`: la API nunca afirma una cifra distinta de la almacenada.
 
 ---
 
@@ -694,6 +696,8 @@ Desestima una reclamación con justificación obligatoria ($\ge 20$ caracteres).
 | `409 Conflict` | `INVALID_REFUND_STATE_TRANSITION` | *"La acción solicitada no es válida para el estado actual del expediente."* | Ej. intentar pagar un expediente que ya fue rechazado o entregado en mano. |
 | `422 Unprocessable` | `INVALID_REFUND_AMOUNT` | *"El importe reclamado debe ser mayor a 0,00 € y no puede exceder el límite máximo de 50,00 €."* | Violación del rango de importes (RF-REF-03). |
 | `422 Unprocessable` | `INVALID_REFUND_AMOUNT` | *"La liquidación debe coincidir exactamente con el importe aprobado del expediente."* | `paid_amount` distinto del importe aprobado, por encima o por debajo. `details` incluye `expected_amount` (RF-REF-03, RF-REF-07). |
+| `422 Unprocessable` | `INVALID_REFUND_AMOUNT` | *"El importe aprobado no puede superar el importe reclamado por el consumidor."* | `approved_amount` por encima de `claimed_amount`. `details.maximum_allowed` es el importe reclamado (RF-REF-03). |
+| `422 Unprocessable` | `INVALID_REFUND_AMOUNT` | *"El importe debe expresarse en céntimos, con un máximo de dos decimales."* | Importe con fracción de céntimo en la reclamación, en el visto bueno o en la liquidación: `4,005` no es un importe de dinero y la columna `DECIMAL(10,2)` lo redondearía sin avisar (RF-REF-03, RF-REF-07). |
 | `422 Unprocessable` | `INVALID_IBAN_FORMAT` | *"El código de cuenta bancaria (IBAN) introducido no es válido conforme al algoritmo oficial Módulo 97."* | Fallo en la verificación sintáctica o checksum del IBAN. |
 | `422 Unprocessable` | `INVALID_BIZUM_PHONE` | *"El número de teléfono para Bizum debe contener exactamente 9 dígitos numéricos."* | Formato incorrecto de teléfono móvil. |
 | `422 Unprocessable` | `INVALID_PICKUP_PIN` | *"El PIN de recogida introducido no coincide con el expediente de reintegro."* | Fallo en la verificación de entrega presencial en conserjería. |

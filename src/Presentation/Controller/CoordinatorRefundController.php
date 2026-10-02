@@ -278,7 +278,9 @@ class CoordinatorRefundController
                 $this->buildActor($request)
             );
         } catch (InvalidRefundAmountException $e) {
-            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+            // Los detalles viajan para que el coordinador sepa cuál es la cifra
+            // máxima admisible, en vez de tener que deducirla de la reclamacion.
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode(), $e->getDetails());
         } catch (InvalidRefundStateTransitionException $e) {
             return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
         } catch (RefundNotFoundException $e) {

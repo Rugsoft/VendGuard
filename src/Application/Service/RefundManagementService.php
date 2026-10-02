@@ -60,17 +60,26 @@ final class RefundManagementService
     public const TRACKING_TOKEN_BYTES = 32;
 
     /**
-     * Slack allowed when comparing two amounts that both went through the same
-     * cents-only decimal column.
+     * Decimal places of every money figure in this module.
      *
-     * It is here and not in the rule itself because it is a fact about binary
-     * floating point, not about money: 4.00 arrives as 3.9999999999999996 and
-     * an equality check on floats would refuse a settlement that is exactly the
-     * approved one. It exists for that arithmetic residue and for nothing else:
-     * it is below half a cent, so it can never turn a genuine mismatch (the
-     * smallest one being one cent) into an accepted settlement.
+     * The euro has no subunit smaller than the cent, so two decimals is not a
+     * display choice but the last position at which a figure is a quantity of
+     * money at all. Anything with a third decimal is refused on the way in, and
+     * that removes the need for a comparison tolerance.
      */
-    public const SETTLEMENT_TOLERANCE = 0.005;
+    public const MONEY_DECIMALS = 2;
+
+    /**
+     * Whether a figure is an exact number of cents.
+     *
+     * `round()` returns the double nearest to the two-decimal value, so for any
+     * legitimate amount this holds; for `4.005` it does not, because the nearest
+     * double to 4.005 is 4.004999999999999893, which rounds to 4.01.
+     */
+    private static function isCentExact(float $amount): bool
+    {
+        return round($amount, self::MONEY_DECIMALS) === $amount;
+    }
 
     /**
      * Legal edges of the refund lifecycle, exactly as contracted.
@@ -244,6 +253,17 @@ final class RefundManagementService
             throw new InvalidRefundAmountException(
                 attemptedAmount: $dto->claimedAmount,
                 maximumAllowed: RefundRequest::MAX_CLAIMED_AMOUNT
+            );
+        }
+
+        // Una reclamación de 4,005 € no es una cantidad de dinero: la columna
+        // DECIMAL(10,2) la guardaría como 4,01 y el consumidor vería una cifra
+        // que él no escribió. Se rechaza en la puerta, no al liquidar.
+        if (!self::isCentExact($dto->claimedAmount)) {
+            throw new InvalidRefundAmountException(
+                attemptedAmount: $dto->claimedAmount,
+                maximumAllowed: RefundRequest::MAX_CLAIMED_AMOUNT,
+                message: InvalidRefundAmountException::NOT_CENT_EXACT_MESSAGE
             );
         }
 
@@ -456,6 +476,10 @@ final class RefundManagementService
         // visto bueno. `createCase()` lo respeta al abrir el expediente, pero
         // sin este segundo control una firma podría convalidar con el botón
         // de aprobación un importe que el formulario de entrada habría rechazado.
+        //
+        // Este control va ANTES de cargar el expediente a propósito: el orden de
+        // los errores es parte del contrato, y un id inexistente con un importe
+        // dentro del rango tiene que seguir contestando 404 y no 422.
         if ($dto->approvedAmount <= 0.0 || $dto->approvedAmount > RefundRequest::MAX_CLAIMED_AMOUNT) {
             throw new InvalidRefundAmountException(
                 attemptedAmount: $dto->approvedAmount,
@@ -463,7 +487,30 @@ final class RefundManagementService
             );
         }
 
+        if (!self::isCentExact($dto->approvedAmount)) {
+            throw new InvalidRefundAmountException(
+                attemptedAmount: $dto->approvedAmount,
+                maximumAllowed: RefundRequest::MAX_CLAIMED_AMOUNT,
+                message: InvalidRefundAmountException::NOT_CENT_EXACT_MESSAGE
+            );
+        }
+
         $case = $this->loadCase($id);
+
+        // El visto bueno NO puede superar lo reclamado. Antes solo se acotaba por
+        // el bloque de 50,00 €, así que una reclamación de 1,00 € se firmaba por
+        // 50,00 € con HTTP 200; y como la liquidación tiene que coincidir
+        // exactamente con el importe aprobado, ese 50,00 € se convertía en la
+        // única cifra que el servicio aceptaba, de modo que la firma autorizaba
+        // el desembolso entero. Nadie reclama de más, y la discrepancia entre lo
+        // reclamado y lo verificado solo puede resolverse a la baja.
+        if ($dto->approvedAmount > $case->getClaimedAmount()) {
+            throw new InvalidRefundAmountException(
+                attemptedAmount: $dto->approvedAmount,
+                maximumAllowed: $case->getClaimedAmount(),
+                message: InvalidRefundAmountException::APPROVAL_ABOVE_CLAIM_MESSAGE
+            );
+        }
 
         // El grafo legal admite PENDING_INSPECTION -> VERIFIED_PENDING_PAYMENT
         // porque es la vía del técnico cuando lleva el efectivo a caja central.
@@ -534,7 +581,29 @@ final class RefundManagementService
         // authorisation owes the smaller figure the coordinator signed.
         $expectedAmount = $this->payableAmount($case);
 
-        if ($dto->paidAmount <= 0.0 || abs($dto->paidAmount - $expectedAmount) > self::SETTLEMENT_TOLERANCE) {
+        // ## Por qué igualdad exacta y no una tolerancia
+        // La versión anterior comparaba con un margen de medio céntimo para
+        // absorber el residuo de la coma flotante, y NO cumplía su propósito:
+        // el doble más cercano a 4,005 es 4,004999999999999893, o sea un
+        // residuo POR DEBAJO, de modo que 4,005 pasaba el filtro con cualquier
+        // operador y la columna redondeaba a 4,01 un pago sobre un expediente
+        // aprobado en 4,00. Ninguna comparación en coma flotante puede cerrar esa
+        // puerta: el valor que llega ni siquiera es 4,005.
+        //
+        // La regla que sí se sostiene es que el dinero se cuenta en céntimos: se
+        // rechaza toda cifra que no sea un número exacto de céntimos, y a partir
+        // de ahí la igualdad entre dos importes ya es una igualdad real, porque
+        // ambos son el mismo doble. La tolerancia desaparece con ella.
+        if (!self::isCentExact($dto->paidAmount)) {
+            throw new InvalidRefundAmountException(
+                attemptedAmount: $dto->paidAmount,
+                maximumAllowed: $expectedAmount,
+                expectedAmount: $expectedAmount,
+                message: InvalidRefundAmountException::NOT_CENT_EXACT_MESSAGE
+            );
+        }
+
+        if ($dto->paidAmount <= 0.0 || $dto->paidAmount !== $expectedAmount) {
             throw new InvalidRefundAmountException(
                 attemptedAmount: $dto->paidAmount,
                 maximumAllowed: $expectedAmount,

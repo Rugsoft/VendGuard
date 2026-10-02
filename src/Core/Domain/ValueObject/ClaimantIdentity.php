@@ -41,6 +41,35 @@ final readonly class ClaimantIdentity
     /** Length of a Spanish subscriber number once the prefix is gone. */
     private const NATIONAL_LENGTH = 9;
 
+    /**
+     * First code point of every decimal-digit block the canonicaliser knows.
+     *
+     * Every one of them is a run of ten consecutive code points whose last nine
+     * are the digits `0` to `9`, so a single base plus its offset is enough to
+     * transliterate the block: `base + 7` is a seven wherever it is written.
+     */
+    private const DIGIT_BLOCKS = [
+        0x0660, // Arabic-Indic          ٠١٢٣
+        0x06F0, // Extended Arabic-Indic ۰۱۲
+        0x07C0, // NKo                   ߀߁
+        0x0966, // Devanagari            ०१२
+        0x09E6, // Bengali              ০১২
+        0x0A66, // Gurmukhi             ੦੧
+        0x0AE6, // Gujarati             ૦૧
+        0x0B66, // Oriya                 ୦୧
+        0x0BE6, // Tamil                 ௦௧
+        0x0C66, // Telugu                ౦౧
+        0x0CE6, // Kannada               ೦೧
+        0x0D66, // Malayalam           ൦൧
+        0x0E50, // Thai                   ๐๑
+        0x0ED0, // Lao                    ໐໑
+        0x0F20, // Tibetan                 ༠༡
+        0x1040, // Myanmar                ႐႑
+        0x17E0, // Khmer                   ០១
+        0x1810, // Mongolian               ᠐᠑
+        0xFF10, // Fullwidth              ０１
+    ];
+
     private function __construct(
         private string $typedContact,
         private string $key
@@ -91,6 +120,40 @@ final readonly class ClaimantIdentity
     /**
      * Canonicalisation rules, in the order the specification states them.
      */
+    /**
+     * Rewrites every unicode decimal digit as its ASCII counterpart.
+     *
+     * A digit from a block this class does not know is left untouched instead
+     * of being guessed at, and that is deliberate: canonicalisation that merges
+     * two different people is a worse bug than the one it fixes, so an
+     * unrecognised script keeps its own key rather than borrowing another one.
+     *
+     * @return array{0: string, 1: string}|null
+     */
+    private static function toAsciiDigits(string $value): string
+    {
+        return (string)preg_replace_callback('/\p{Nd}/u', static function (array $matches): string {
+            $codepoint = self::codepointOf($matches[0]);
+
+            foreach (self::DIGIT_BLOCKS as $base) {
+                if ($codepoint >= $base && $codepoint <= $base + 9) {
+                    return (string)($codepoint - $base);
+                }
+            }
+
+            return $matches[0];
+        }, $value);
+    }
+
+    /** Code point of a single UTF-8 character, via UCS-4BE. */
+    private static function codepointOf(string $character): int
+    {
+        /** @var array{1: int} $unpacked */
+        $unpacked = unpack('N', str_pad(mb_convert_encoding($character, 'UCS-4BE', 'UTF-8'), 4, "\0", STR_PAD_LEFT));
+
+        return $unpacked[1];
+    }
+
     private static function canonicalKey(string $trimmed): string
     {
         $lowered = mb_strtolower($trimmed);
@@ -99,11 +162,30 @@ final readonly class ClaimantIdentity
             return $lowered;
         }
 
-        // `\D` under the unicode flag removes every non-digit, which covers the
-        // separator families the naive version missed: ASCII spaces, tabs, the
-        // non-breaking space (U+00A0) and the thin spaces, plus hyphens,
-        // underscores and dots in any of their unicode spellings.
-        $digits = (string)preg_replace('/\D+/u', '', $lowered);
+        // Only ASCII `0`-`9` survive, and that is the whole point of the class
+        // name: the canonical form of a phone number is ASCII digits and
+        // nothing else.
+        //
+        // The obvious `\D+` under the unicode flag is NOT equivalent, and it
+        // failed in production-shaped input. PHP's `u` modifier turns on
+        // `PCRE_UCP`, where `\d` matches ANY unicode decimal digit, so `\D+`
+        // KEEPS the fullwidth digits (U+FF10..U+FF19), the arabic-indic ones
+        // (U+0660..U+0669) and the devanagari ones. A contact typed with those
+        // glyphs then canonicalised to itself instead of to its ASCII twin, and
+        // the duplicate rule of RF-REF-11 opened a second live case for the very
+        // same person: two envelopes, two payments, one complaint.
+        //
+        // They have to be TRANSLITERATED rather than simply dropped: a contact
+        // written entirely in fullwidth digits has no ASCII digit to keep, so
+        // dropping them leaves nothing and the identity collapses to the raw
+        // text, which is the same hole with a different symptom. Digits are
+        // therefore folded to ASCII first, and only the separators go after.
+        //
+        // An explicit ASCII class says what it means and cannot be widened by a
+        // regex flag. It still strips every separator family the naive version
+        // missed: ASCII spaces, tabs, the non-breaking space (U+00A0) and the
+        // thin spaces, plus hyphens, underscores and dots in any spelling.
+        $digits = (string)preg_replace('/[^0-9]/', '', self::toAsciiDigits($lowered));
 
         if ($digits === '') {
             // A contact with no digits and no `@` (a nickname, a typo) must not

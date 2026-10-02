@@ -31,6 +31,27 @@ class InvalidRefundAmountException extends DomainException
      */
     public const SETTLEMENT_MISMATCH_MESSAGE = 'La liquidación debe coincidir exactamente con el importe aprobado del expediente.';
 
+    /**
+     * Message for a coordinator sign-off above the claim (RF-REF-03).
+     *
+     * The sign-off settles the gap between what was claimed and what the
+     * technician verified, and that gap only goes one way: nobody claims too
+     * much, and the company does not refund more than was claimed. It matters
+     * because the settlement must equal the approved figure exactly, so an
+     * inflated sign-off used to become the one number the API would accept.
+     */
+    public const APPROVAL_ABOVE_CLAIM_MESSAGE = 'El importe aprobado no puede superar el importe reclamado por el consumidor.';
+
+    /**
+     * Message for a figure that is not a whole number of cents.
+     *
+     * The euro has no subunit below the cent, so `4.005` is not a smaller
+     * amount than `4.01`: it is not an amount at all. Accepting it and letting
+     * the `DECIMAL(10,2)` column round it was how an unapproved figure ended
+     * up persisted as a payment.
+     */
+    public const NOT_CENT_EXACT_MESSAGE = 'El importe debe expresarse en céntimos, con un máximo de dos decimales.';
+
     public function __construct(
         private readonly float $attemptedAmount,
         private readonly float $maximumAllowed = 50.00,
