@@ -41,7 +41,7 @@
   * **Dependencias:** T-REF-01, T-REF-02, T-REF-03
   * **Hecho cuando:** `PdoRefundRequestRepository` implementa creación de expediente, búsqueda por ID y token de seguimiento (`findByTrackingToken`), consulta por incidencia y sede, actualización atómica de estados y listados filtrados para coordinación; `PdoUnclaimedCashFindingRepository` persiste hallazgos de monedas de oficio; y las consultas omiten columnas sensibles (`iban`, `bizum_phone`) en los métodos para roles restringidos.
 
-- [ ] **T-REF-05: Implementar `IbanValidationService.php` (Módulo 97 nativo en PHP puro) y suite unitaria (`IbanValidationServiceTest.php`)**
+- [x] **T-REF-05: Implementar `IbanValidationService.php` (Módulo 97 nativo en PHP puro) y suite unitaria (`IbanValidationServiceTest.php`)**
   * **Requisitos:** RF-REF-01, RF-REF-10, RNF-REF-03, Constitución Art. IV
   * **Dependencias:** Ninguna
   * **Hecho cuando:** `IbanValidationService` implementa la validación ISO 7064 Módulo 97 mediante aritmética por bloques sin dependencias Composer y validación de teléfonos Bizum (9 dígitos); `php tests/unit/IbanValidationServiceTest.php` pasa al 100% en verde verificando IBANs españoles e internacionales válidos, erróneos y con checksum falso.
