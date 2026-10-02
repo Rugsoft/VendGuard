@@ -368,7 +368,7 @@ export const LocationRefundsTab = {
                       display: 'inline-flex',
                       alignItems: 'center',
                       padding: '4px 10px',
-                      borderRadius: var(--radius-interactive)',
+                      borderRadius: 'var(--radius-interactive)',
                       fontSize: '11px',
                       fontWeight: '700',
                       letterSpacing: '0.02em',

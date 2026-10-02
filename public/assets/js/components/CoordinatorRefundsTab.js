@@ -730,7 +730,7 @@ export const CoordinatorRefundsTab = {
                       display: 'inline-flex',
                       alignItems: 'center',
                       padding: '4px 10px',
-                      borderRadius: var(--radius-interactive)',
+                      borderRadius: 'var(--radius-interactive)',
                       fontSize: '11px',
                       fontWeight: '700',
                       backgroundColor: statusMeta(refund.status).bg,
