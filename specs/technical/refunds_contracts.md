@@ -70,6 +70,14 @@ Para evitar entregas erróneas o accesos indebidos en conserjería:
 * Al crearse la solicitud presencial por QR, se genera un PIN aleatorio `random_int(1000, 9999)` y un token de seguimiento `bin2hex(random_bytes(32))`.
 * El conserje ve el expediente en estado `DEPOSITED_AT_RECEPTION` con nombre anonimizado (ej. *"Marc R. · 3,00 €"*).
 * Para liberar el dinero, el conserje introduce el PIN facilitado presencialmente por el usuario. El sistema valida `hash_equals()` en tiempo constante y transiciona a `REFUNDED_IN_HAND`.
+* **Freno antifuerza (RF-REF-02).** `hash_equals()` protege el secreto frente a fugas por temporización, pero no frente al volumen: contra este endpoint se toleraron 3000 PIN incorrectos en 1,02 segundos, y con 10.000 combinaciones eso hace el espacio entero alcanzable en menos de cuatro minutos. Por tanto:
+  1. Cada intento fallido incrementa `refund_requests.pickup_attempts`.
+  2. El quinto intento bloquea el expediente 15 minutos (`refund_requests.pickup_locked_until`) y responde **`423 PICKUP_PIN_LOCKED`** con `details.locked_until` y `details.failed_attempts`.
+  3. Mientras el bloqueo esté vigente, incluso el PIN correcto responde 423 y el efectivo **no** se entrega. El bloqueo se comprueba **antes** de comparar el secreto, para que un expediente bloqueado no sirva de oráculo.
+  4. El bloqueo es **por expediente**, nunca por sede: un dusting no puede congelar el mostrador entero.
+  5. El bloqueo expira solo (un bloqueo permanente sería denegación de servicio contra el usuario que quiere su dinero) y la entrega correcta reinicia el contador a cero.
+  6. `pickup_attempts` y `pickup_locked_until` **no** se proyectan en la vista restringida ni en ningún DTO de salida: cuántas combinaciones quedan es tan sensible como el PIN.
+  7. El intento fallido se audita como `REFUND_PICKUP_PIN_REJECTED` **sin el PIN introducido** (Art. V.4).
 
 ---
 
@@ -168,6 +176,25 @@ CREATE TABLE IF NOT EXISTS `unclaimed_cash_findings` (
     INDEX `idx_unclaimed_incident` (`incident_id`),
     INDEX `idx_unclaimed_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Freno antifuerza del PIN de recogida (migración 013_refund_pickup_pin_lockout.sql)
+-- Sin esto, 10.000 combinaciones y 0,34 ms por intento hacen el espacio entero
+-- alcanzable en menos de cuatro minutos (RF-REF-02).
+ALTER TABLE `refund_requests`
+    ADD COLUMN `pickup_attempts` TINYINT UNSIGNED NOT NULL DEFAULT 0 AFTER `pickup_pin`,
+    ADD COLUMN `pickup_locked_until` DATETIME NULL AFTER `pickup_attempts`;
+
+-- Importes íntegros y verificables (migración 011_refund_amount_integrity.sql)
+-- DECIMAL(6,2) saturaba en silencio (999999,00 -> 9999.99) porque el servidor
+-- corre sin STRICT_TRANS_TABLES, y `paid_amount` sencillamente no existía.
+ALTER TABLE `refund_requests`
+    ADD COLUMN `paid_amount` DECIMAL(10,2) NULL AFTER `payment_reference`,
+    MODIFY COLUMN `claimed_amount` DECIMAL(10,2) NOT NULL,
+    MODIFY COLUMN `recovered_amount` DECIMAL(10,2) NULL,
+    MODIFY COLUMN `approved_amount` DECIMAL(10,2) NULL;
+
+ALTER TABLE `unclaimed_cash_findings`
+    MODIFY COLUMN `amount` DECIMAL(10,2) NOT NULL;
 ```
 
 ---
@@ -293,6 +320,24 @@ Permite añadir la reclamación de reintegro en el mismo envío del reporte púb
 ```
 
 *Nota:* Si el método fuera `EN_MANO_SEDE`, `pickup_pin` retornaría un string de 4 dígitos (ej. `"4821"`).
+
+**Respuesta cuando la avería se fusiona con otra abierta (`200 OK`):** mismo cuerpo, con la clave `merged: true` y el `incident_id` de la avería superviviente. La fusión de averías ya estaba especificada; el reintegro viaja con ella.
+
+*Reclamación duplicada (`409 Conflict`, RF-REF-11):* la unidad protegida es **(avería, consumidor)**. Si ese consumidor ya tiene un expediente **vivo** sobre esa avería, la API no abre un segundo y devuelve el token del que ya existe, para que el usuario recupere su caso en lugar de pagar dos veces:
+```json
+{
+  "success": false,
+  "error": {
+    "code": "DUPLICATE_REFUND_CLAIM",
+    "message": "Ya existe una reclamación viva de esta persona sobre esta avería. Consulte el expediente que ya abrió.",
+    "details": {
+      "existing_refund_id": 41,
+      "existing_tracking_token": "a1b2c3d4e5f6789012345678abcdef0123456789abcdef0123456789abcdef01"
+    }
+  }
+}
+```
+Un expediente ya terminal (`PAID_DIGITAL`, `REFUNDED_IN_HAND`, `REJECTED`) **no** bloquea una reclamación nueva: el derecho a reclamar se reabre cuando el anterior se desestimó.
 
 ---
 
@@ -485,6 +530,22 @@ El conserje valida el PIN facilitado por el usuario para entregar el dinero en m
 }
 ```
 
+*Bloqueo antifuerza (`423 Locked`, RF-REF-02):* el quinto PIN incorrecto bloquea el expediente 15 minutos. La respuesta dice **cuándo** se libera el dinero, y ni el PIN introducido ni el almacenado aparecen en ella:
+```json
+{
+  "success": false,
+  "error": {
+    "code": "PICKUP_PIN_LOCKED",
+    "message": "El PIN de recogida está bloqueado por intentos incorrectos. Inténtelo de nuevo en 15 minutos o solicite un nuevo PIN en el punto de atención.",
+    "details": {
+      "failed_attempts": 5,
+      "locked_until": "2026-10-02T13:15:00+02:00"
+    }
+  }
+}
+```
+Un PIN correcto presentado durante el bloqueo responde igualmente `423` y **no** entrega el efectivo.
+
 *Error de validación (`422 Unprocessable Entity`):*
 ```json
 {
@@ -574,10 +635,16 @@ Registra la emisión efectiva del reembolso con su identificador de justificante
     "id": 1,
     "status": "PAID_DIGITAL",
     "payment_reference": "BIZUM-20261001-998822",
+    "paid_amount": 15.00,
+    "approved_amount": 15.00,
     "paid_at": "2026-10-01T15:30:00+02:00"
   }
 }
 ```
+
+Si se omite `paid_amount`, se liquida el techo del expediente: `min(importe aprobado, 50,00 €)`, o el reclamado si nunca hubo visto bueno formal.
+
+*Techo de liquidación (RF-REF-03, RF-REF-07):* `paid_amount` debe ser mayor que 0 y no puede superar `min(importe aprobado ?? reclamado, 50,00 €)`; superarlo responde `422 INVALID_REFUND_AMOUNT`. El importe que devuelve la respuesta es el **persistido** en `refund_requests.paid_amount`: la API nunca afirma una cifra distinta de la almacenada.
 
 ---
 
@@ -609,6 +676,9 @@ Desestima una reclamación con justificación obligatoria ($\ge 20$ caracteres).
 | `422 Unprocessable` | `INVALID_PICKUP_PIN` | *"El PIN de recogida introducido no coincide con el expediente de reintegro."* | Fallo en la verificación de entrega presencial en conserjería. |
 | `422 Unprocessable` | `RECEPTION_DELIVERY_NOT_ALLOWED` | *"No se permite el depósito en conserjería para importes superiores a 10,00 € o con método de compensación digital."* | Intento indebido de marcar `LEFT_AT_RECEPTION` para BIZUM/IBAN o $> 10\ \text{€}$. |
 | `422 Unprocessable` | `JUSTIFICATION_TOO_SHORT` | *"La justificación técnica o de rechazo debe contener un mínimo de 20 caracteres descriptivos."* | Cumplimiento del Art. V.1 de la Constitución. |
+| `422 Unprocessable` | `INVALID_RECOVERED_AMOUNT` | *"El importe de efectivo recuperado no concuerda con las reclamaciones de esta avería. Si se trata de dinero sobrante, regístrelo como efectivo no reclamado."* | Recuperado por encima de lo reclamado, o hallazgo de efectivo no reclamado por encima del tope de 50,00 € (RF-REF-03, RF-REF-04). |
+| `409 Conflict` | `DUPLICATE_REFUND_CLAIM` | *"Ya existe una reclamación viva de esta persona sobre esta avería. Consulte el expediente que ya abrió."* | Segundo escaneo del mismo QR por el mismo consumidor. La respuesta incluye `details.existing_refund_id` y `details.existing_tracking_token` (RF-REF-11). |
+| `423 Locked` | `PICKUP_PIN_LOCKED` | *"El PIN de recogida está bloqueado por intentos incorrectos. Inténtelo de nuevo en 15 minutos o solicite un nuevo PIN en el punto de atención."* | Quinto intento fallido de PIN; el bloqueo expira solo (RF-REF-02). |
 
 ---
 

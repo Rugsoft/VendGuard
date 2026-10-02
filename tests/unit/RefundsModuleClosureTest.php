@@ -44,6 +44,13 @@ declare(strict_types=1);
  *    declared in `design-tokens.css` and hardcode no colour or radius of
  *    their own, which `DesignTokensTest` cannot see because that suite
  *    only reads the CSS file.
+ * 6. Module dogma: the five guards an adversarial audit forced into this
+ *    module (one live claim per incident and consumer, a persisted and bounded
+ *    settlement, bounded cash reconciliation, a site that cannot take an
+ *    envelope, and a brute-force brake on the pickup PIN) are still in place,
+ *    in the right layer, and are still covered by a suite that runs them
+ *    against HTTP and a real database. This is what stops one of them from
+ *    being quietly deleted while every behavioural suite stays green.
  *
  * It reads the repository, it does not mutate it.
  */
@@ -330,9 +337,9 @@ if (preg_match_all('/(?:#{4}\s+\*\*|####\s+|\*\s+\*\*)(RNF-REF-\d+|RF-REF-\d+)/'
 }
 sort($declared);
 $assert(
-    '3.1 La especificación funcional declara los 11 funcionales y los 5 no funcionales',
+    '3.1 La especificación funcional declara los 11 funcionales y los 6 no funcionales',
     count(array_filter($declared, static fn (string $id): bool => str_starts_with($id, 'RF-'))) === 11
-    && count(array_filter($declared, static fn (string $id): bool => str_starts_with($id, 'RNF-'))) === 5,
+    && count(array_filter($declared, static fn (string $id): bool => str_starts_with($id, 'RNF-'))) === 6,
     'declarados: ' . json_encode($declared)
 );
 
@@ -601,6 +608,105 @@ $assert(
     '5.7 Cada token que consumen los componentes existe en `design-tokens.css`',
     $unknownTokens === [],
     json_encode(array_slice($unknownTokens, 0, 5))
+);
+
+// ─────────────────────────────────────────────────────────────────────
+echo "\n--- 6. Doctrina del módulo: los guardas existen y no se pueden borrar en silencio ---\n";
+// ─────────────────────────────────────────────────────────────────────
+
+// ## Por qué este bloque es estático
+// Esta suite audita CÓMO está construido el módulo, sin base de datos ni red, y
+// el propio encabezado lo declara: lee el repositorio, no lo muta. Las cinco
+// guardas que se comprueban abajo nacieron de un ataque adversarial contra los
+// flujos reales, y su prueba de comportamiento vive en suites que sí ejecutan
+// endpoints HTTP contra MariaDB. Lo que este bloque evita es la pérdida
+// silenciosa: que alguien borre una línea de un guarda y la batería siga en
+// verde porque la aserción que lo cubría miraba otra cosa. Cada guarda se
+// comprueba aquí Y se comprueba que existe una suite que lo ejecuta de verdad.
+$doctrine = [
+    'refund_service' => $read('src/Application/Service/RefundManagementService.php'),
+    'technician_service' => $read('src/Application/Service/TechnicianRefundService.php'),
+    'entity' => $read('src/Core/Domain/Model/RefundRequest.php'),
+    'repository' => $read('src/Infrastructure/Repository/PdoRefundRequestRepository.php'),
+    'qr_controller' => $read('src/Presentation/Controller/QrScanController.php'),
+    'desk_controller' => $read('src/Presentation/Controller/LocationRefundController.php'),
+    'duplicate_exception' => $read('src/Core/Domain/Exception/DuplicateRefundClaimException.php'),
+    'recovered_exception' => $read('src/Core/Domain/Exception/InvalidRecoveredAmountException.php'),
+    'locked_exception' => $read('src/Core/Domain/Exception/PickupPinLockedException.php'),
+];
+
+$assert(
+    '6.1 No se abre un segundo expediente vivo del mismo consumidor sobre la misma avería (RF-REF-11)',
+    str_contains($doctrine['refund_service'], 'assertNoDuplicateClaim')
+    && str_contains($doctrine['qr_controller'], 'DuplicateRefundClaimException')
+    && str_contains($doctrine['duplicate_exception'], "ERROR_CODE = 'DUPLICATE_REFUND_CLAIM'"),
+    'el guarda vive en RefundManagementService::assertNoDuplicateClaim() y el 409 lo traduce QrScanController'
+);
+$assert(
+    '6.2 Una liquidación se persiste y no puede superar lo aprobado (RF-REF-03, RF-REF-07)',
+    str_contains($doctrine['refund_service'], "'paid_amount' => $dto->paidAmount")
+    && str_contains($doctrine['refund_service'], 'payableCeiling')
+    && str_contains($doctrine['repository'], 'r.`paid_amount`'),
+    'registerDigitalPayment() escribe paid_amount y lo acota con payableCeiling()'
+);
+$assert(
+    '6.3 El efectivo declarado no puede exceder lo reclamado, ni el sobrante el tope (RF-REF-03, RF-REF-04)',
+    str_contains($doctrine['technician_service'], 'InvalidRecoveredAmountException')
+    && str_contains($doctrine['recovered_exception'], "ERROR_CODE = 'INVALID_RECOVERED_AMOUNT'"),
+    'inspectBalance() y registerUnclaimedCash() comparten la excepción de dominio'
+);
+$assert(
+    '6.4 Una sede sin conserjería física no puede custodiar el sobre (RF-REF-05)',
+    str_contains($doctrine['technician_service'], 'hasPhysicalReception')
+    && str_contains($doctrine['technician_service'], 'assertSiteCanReceiveEnvelope'),
+    'la bandera de la sede se consulta antes de admitir LEFT_AT_RECEPTION'
+);
+$assert(
+    '6.5 El PIN de recogida se blinda con un contador y un bloqueo temporal (RF-REF-02)',
+    str_contains($doctrine['entity'], 'PICKUP_PIN_MAX_ATTEMPTS = 5')
+    && str_contains($doctrine['entity'], 'PICKUP_PIN_LOCK_MINUTES = 15')
+    && str_contains($doctrine['refund_service'], 'registerFailedPickupAttempt')
+    && str_contains($doctrine['locked_exception'], "ERROR_CODE = 'PICKUP_PIN_LOCKED'")
+    && str_contains($doctrine['desk_controller'], 'PickupPinLockedException'),
+    'el freno vive en la entidad y lo aplica deliverInHand()'
+);
+$assert(
+    '6.6 El freno antifuerza NO viaja en la proyección restringida (Art. V.4)',
+    preg_match("/RESTRICTED_COLUMNS = '(.*?)';/s", $doctrine['repository'], $restricted) === 1
+    && !str_contains($restricted[0], 'pickup_attempts')
+    && !str_contains($restricted[0], 'pickup_locked_until'),
+    'RESTRICTED_COLUMNS arrastra el contador o la fecha de bloqueo'
+);
+$assert(
+    '6.7 La mesa de conserjería no recibe el contador ni la fecha de bloqueo',
+    !str_contains($read('src/Application/DTO/LocationRefundViewDTO.php'), 'pickup_attempts')
+    && !str_contains($read('src/Application/DTO/PublicRefundTrackingDTO.php'), 'pickup_attempts')
+    && !str_contains($doctrine['entity'], "'pickup_attempts' =>"),
+    'el contador no puede salir por ningún DTO'
+);
+
+// Control de no-vacuidad: cada guarda necesita además una suite que la ejecute
+// de verdad contra el sistema en marcha. Un guarda sin prueba de comportamiento
+// es un guarda que nadie ha comprobado nunca.
+$doctrineSuites = [
+    'RF-REF-11 duplicados' => 'tests/integration/PublicRefundTrackingApiTest.php',
+    'dinero persistido y acotado' => 'tests/integration/CoordinatorRefundWorkflowApiTest.php',
+    'efectivo declarado y sobrante' => 'tests/integration/TechnicianRefundInspectionApiTest.php',
+    'sede sin conserjería' => 'tests/unit/TechnicianRefundServiceTest.php',
+    'fuerza bruta sobre el PIN' => 'tests/integration/LocationRefundDeliveryApiTest.php',
+];
+
+$missingSuites = [];
+foreach ($doctrineSuites as $label => $relativePath) {
+    $contents = $read($relativePath);
+    if ($contents === '' || !str_contains($contents, '[PASS]')) {
+        $missingSuites[] = $label;
+    }
+}
+$assert(
+    '6.8 Cada guarda tiene una suite que lo ejecuta contra HTTP y base de datos reales',
+    $missingSuites === [],
+    json_encode($missingSuites)
 );
 
 echo "\n======================================================================\n";

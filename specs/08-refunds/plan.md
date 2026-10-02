@@ -430,21 +430,22 @@ flowchart LR
 | Requisito | Descripción | Componente Backend / Servicio | Componente Frontend | Test Automatizado |
 | :--- | :--- | :--- | :--- | :--- |
 | **RF-REF-01** | Captura de reclamación en QR y Sede | `QrIncidentController`, `CreateRefundRequestDTO` | `QrRefundRequestBlock.js` | `PublicRefundTrackingApiTest.php` |
-| **RF-REF-02** | PIN de recogida y URL pública de tracking | `RefundManagementService` | `PublicRefundTrackingView.js` | `PublicRefundTrackingApiTest.php` |
-| **RF-REF-03** | Límites cuantitativos y doble visto bueno | `RefundManagementService`, `RefundStateMachine` | `CoordinatorRefundsTab.js` | `RefundStateMachineTest.php`, `CoordinatorRefundWorkflowApiTest.php` |
-| **RF-REF-04** | Dictamen técnico y hallazgo de oficio | `TechnicianRefundService`, `TechnicianController` | `TechnicianResolutionRefundBlock.js` | `TechnicianRefundInspectionApiTest.php` |
-| **RF-REF-05** | Reglas de custodia coherente | `TechnicianRefundService` | `TechnicianResolutionRefundBlock.js` | `TechnicianRefundInspectionApiTest.php`, `RefundStateMachineTest.php` |
-| **RF-REF-06** | Entrega presencial con PIN en conserjería | `LocationRefundController`, `PdoRefundRequestRepository` | `LocationRefundsTab.js` | `LocationRefundDeliveryApiTest.php`, `LocationRefundsTabTest.mjs` |
-| **RF-REF-07** | Ciclo formal de estados y liquidación digital | `RefundManagementService`, `CoordinatorRefundController` | `CoordinatorRefundsTab.js` | `CoordinatorRefundWorkflowApiTest.php`, `RefundStateMachineTest.php` |
-| **RF-REF-08** | Gestión de discrepancias y multireclamación | `RefundManagementService` | `CoordinatorRefundsTab.js` | `CoordinatorRefundWorkflowApiTest.php` |
+| **RF-REF-02** | PIN de recogida, URL pública de tracking y freno antifuerza | `RefundManagementService::deliverInHand()`, `RefundRequest::isPickupLockedAt()` | `PublicRefundTrackingView.js` | `PublicRefundTrackingApiTest.php`, `LocationRefundDeliveryApiTest.php`, `LocationRefundDeliveryTest.php` |
+| **RF-REF-03** | Límites cuantitativos, techo de pago y doble visto bueno | `RefundManagementService::payableCeiling()`, `RefundStateMachine` | `CoordinatorRefundsTab.js` | `RefundStateMachineTest.php`, `CoordinatorRefundWorkflowApiTest.php` |
+| **RF-REF-04** | Dictamen técnico, concilación acotada y hallazgo de oficio | `TechnicianRefundService`, `InvalidRecoveredAmountException`, `TechnicianController` | `TechnicianResolutionRefundBlock.js` | `TechnicianRefundInspectionApiTest.php` |
+| **RF-REF-05** | Reglas de custodia coherente y sede con conserjería real | `TechnicianRefundService::assertSiteCanReceiveEnvelope()` | `TechnicianResolutionRefundBlock.js` | `TechnicianRefundInspectionApiTest.php`, `TechnicianRefundServiceTest.php`, `RefundStateMachineTest.php` |
+| **RF-REF-06** | Entrega presencial con PIN en conserjería | `LocationRefundController`, `PdoRefundRequestRepository`, `PickupPinLockedException` | `LocationRefundsTab.js` | `LocationRefundDeliveryApiTest.php`, `LocationRefundDeliveryTest.php`, `LocationRefundsTabTest.mjs` |
+| **RF-REF-07** | Ciclo formal de estados y liquidación digital persistida | `RefundManagementService::registerDigitalPayment()`, `CoordinatorRefundController` | `CoordinatorRefundsTab.js` | `CoordinatorRefundWorkflowApiTest.php`, `RefundStateMachineTest.php` |
+| **RF-REF-08** | Gestión de discrepancias y multireclamación | `RefundManagementService`, `TechnicianRefundService::inspectBalance()` | `CoordinatorRefundsTab.js` | `CoordinatorRefundWorkflowApiTest.php`, `TechnicianRefundInspectionApiTest.php` |
 | **RF-REF-09** | Desacoplamiento operativo e inmutabilidad | `TechnicianController`, `IncidentStateMachine` | N/A | `TechnicianRefundInspectionApiTest.php`, `ConstitutionalAuditTest.php` |
-| **RF-REF-10** | Segregación de IBAN y blindaje Art. V.4 | `AuthMiddleware`, `PdoRefundRequestRepository` | `LocationRefundsTab.js` | `SiteManagerRefundDataSegregationTest.php` |
-| **RF-REF-11** | Una sola reclamación viva por avería y consumidor | `RefundManagementService::assertNoDuplicateClaim()`, `QrScanController` | N/A | `PublicRefundTrackingApiTest.php`, `RefundStateMachineTest.php` |
-| **RNF-REF-01** | Trazabilidad inmutable en `audit_log` | `AuditLogger`, `RefundManagementService` | `AuditLogViewer.js` | `CoordinatorRefundWorkflowApiTest.php` |
+| **RF-REF-10** | Segregación de IBAN y blindaje Art. V.4 | `AuthMiddleware`, `PdoRefundRequestRepository` (proyección restringida sin el freno antifuerza) | `LocationRefundsTab.js` | `SiteManagerRefundDataSegregationTest.php`, `RefundsModuleClosureTest.php` |
+| **RF-REF-11** | Una sola reclamación viva por avería y consumidor | `RefundManagementService::assertNoDuplicateClaim()`, `DuplicateRefundClaimException`, `QrScanController` | N/A | `PublicRefundTrackingApiTest.php`, `RefundsModuleClosureTest.php` |
+| **RNF-REF-01** | Trazabilidad inmutable en `audit_log` | `AuditLogger`, `RefundManagementService` (incluye `REFUND_PICKUP_PIN_REJECTED`) | `AuditLogViewer.js` | `CoordinatorRefundWorkflowApiTest.php`, `AuditEntityTypesTest.php` |
 | **RNF-REF-02** | Rendimiento $< 150\text{ ms}$ en servidor | `PdoRefundRequestRepository` (índices SQL) | N/A | `CoordinatorRefundWorkflowApiTest.php` |
 | **RNF-REF-03** | Confidencialidad y DTOs seguros de IBAN | `PublicRefundTrackingDTO`, DTOs de salida | N/A | `SiteManagerRefundDataSegregationTest.php` |
 | **RNF-REF-04** | Usabilidad táctil en movilidad $< 20\text{ s}$ | N/A | `TechnicianResolutionRefundBlock.js` | `TechnicianResolutionRefundBlockTest.mjs` |
 | **RNF-REF-05** | Consistencia visual con sistema de diseño | CSS tokens institucionales | Todos los componentes y vistas de reintegros | `DesignTokensTest.php`, `RefundsModuleClosureTest.php` |
+| **RNF-REF-06** | Blindaje antifraude verificable | `RefundsModuleClosureTest` (bloque 6), migraciones `011`, `012` y `013` | N/A | `RefundsModuleClosureTest.php`, `AuditEntityTypesTest.php`, `CoordinatorMetricsEndpointTest.php` |
 
 ---
 
