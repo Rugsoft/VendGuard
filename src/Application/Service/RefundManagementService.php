@@ -21,6 +21,7 @@ use VendGuard\Core\Domain\Model\RefundRequest;
 use VendGuard\Core\Domain\Model\RefundStatus;
 use VendGuard\Core\Domain\Model\TechnicianFinding;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\ClaimantIdentity;
 
 /**
  * RefundManagementService
@@ -662,6 +663,10 @@ final class RefundManagementService
     /**
      * One live case per (incident, claimant), which is the unit RF-REF-11 names.
      *
+     * The comparison goes through `ClaimantIdentity`, never through the typed
+     * characters: a `+34` prefix, a non-breaking space or an underscore used to
+     * be enough to slip a second payable case past this rule.
+     *
      * The check lives here, in the domain, and not in the controller or in a
      * unique index, for two reasons. A controller-only check is one forgotten
      * call away from being bypassed by the next entry point. And a UNIQUE index
@@ -678,18 +683,14 @@ final class RefundManagementService
      */
     private function assertNoDuplicateClaim(CreateRefundRequestDTO $dto): void
     {
-        $contact = $this->normalizeClaimantContact($dto->claimantContact);
-
-        if ($contact === '') {
-            return;
-        }
+        $contact = ClaimantIdentity::from($dto->claimantContact);
 
         foreach ($this->refundRepo->findRestrictedByIncident($dto->incidentId) as $existing) {
             if ($existing->getStatus()->isTerminal()) {
                 continue;
             }
 
-            if ($this->normalizeClaimantContact($existing->getClaimantContact()) !== $contact) {
+            if (!$contact->equals(ClaimantIdentity::from($existing->getClaimantContact()))) {
                 continue;
             }
 
@@ -698,25 +699,6 @@ final class RefundManagementService
             // la conserjería (RF-REF-11).
             throw new DuplicateRefundClaimException(existingCaseId: (int)$existing->getId());
         }
-    }
-
-    /**
-     * Folds a free-text contact channel into a comparable identity.
-     *
-     * The field accepts a phone or an email as typed, so "600 123 456",
-     * "600-123-456" and "600123456" are the same claimant, not three. Phone
-     * punctuation and spacing are removed; an email only loses its outer space
-     * and case, because its dots and signs are meaningful.
-     */
-    private function normalizeClaimantContact(string $contact): string
-    {
-        $trimmed = mb_strtolower(trim($contact));
-
-        if (str_contains($trimmed, '@')) {
-            return $trimmed;
-        }
-
-        return (string)preg_replace('/[\s\-.]/', '', $trimmed);
     }
 
     /**

@@ -608,6 +608,41 @@ try {
     $retryResponse = $dispatch('POST', '/api/qr/report', [], $claimBody($duplicateMachine->getCode(), '600111222'));
     $retryReceipt = $decode($retryResponse)['data']['refund'] ?? [];
 
+    // ─────────────────────────────────────────────────────────────────────
+    // 6.b Escrituras del MISMO teléfono que el primer normalizador no cubría.
+    // Cada una de ellas abría un segundo expediente vivo y, por tanto, un
+    // segundo desembolso sobre la misma avería.
+    // ─────────────────────────────────────────────────────────────────────
+    $liveBeforeVariants = count($refunds->findRestrictedByIncident($firstIncidentId));
+
+    $writeVariants = [
+        '6.8a' => ['+34 600 111 222', 'con el prefijo del país'],
+        '6.8b' => ["600\u{00A0}111\u{00A0}222", 'con espacios duros (U+00A0)'],
+        '6.8c' => ['600_111_222', 'con guiones bajos'],
+        '6.8d' => ['0034600111222', 'con el prefijo internacional'],
+    ];
+
+    foreach ($writeVariants as $label => [$variant, $why]) {
+        $variantResponse = $dispatch('POST', '/api/qr/report', [], $claimBody($duplicateMachine->getCode(), $variant));
+        $variantError = $decode($variantResponse)['error'] ?? [];
+
+        $assert(
+            $label . ' El mismo teléfono escrito ' . $why . ' NO abre un segundo expediente',
+            $variantResponse->getStatusCode() === 409
+            && (string)($variantError['code'] ?? '') === 'DUPLICATE_REFUND_CLAIM',
+            'HTTP ' . $variantResponse->getStatusCode() . ' ' . json_encode($variantError)
+        );
+    }
+
+    // La avería tiene legítimamente más de un expediente vivo (otro consumidor
+    // y una reapertura), así que lo que se comprueba es que las variantes NO
+    // hayan añadido ninguno, no que quede uno solo.
+    $assert(
+        '6.8e Ninguna de las escrituras alternativas añade un expediente vivo',
+        count($refunds->findRestrictedByIncident($firstIncidentId)) === $liveBeforeVariants,
+        'antes: ' . $liveBeforeVariants . ' | después: ' . count($refunds->findRestrictedByIncident($firstIncidentId))
+    );
+
     $assert(
         '6.7 Tras una desestimación el consumidor puede volver a reclamar',
         $retryResponse->getStatusCode() >= 200 && $retryResponse->getStatusCode() < 300
