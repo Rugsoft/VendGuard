@@ -133,7 +133,7 @@
   * **Dependencias:** T-REF-10, T-REF-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `TechnicianRefundInspectionApiTest.php` contra MariaDB real pasando al 100% en verde comprobando dictamen físico, regla de custodia forzada para caja central si $> 10\ \text{€}$, desacoplamiento del cierre técnico y registro de monedas atascadas de oficio.
 
-- [ ] **T-REF-21: Pruebas de integración HTTP de entrega presencial con PIN en conserjería (`LocationRefundDeliveryApiTest.php`)**
+- [x] **T-REF-21: Pruebas de integración HTTP de entrega presencial con PIN en conserjería (`LocationRefundDeliveryApiTest.php`)**
   * **Requisitos:** RF-REF-06, RF-REF-10, Constitución Art. V.4
   * **Dependencias:** T-REF-11, T-REF-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `LocationRefundDeliveryApiTest.php` pasando al 100% en verde verificando listado anonimizado, éxito ante PIN correcto transicionando a `REFUNDED_IN_HAND` y rechazo con `422` ante PIN erróneo.
