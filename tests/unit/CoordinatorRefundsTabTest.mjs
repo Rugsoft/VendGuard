@@ -415,8 +415,8 @@ assert('5.1 The discrepancy warning shows recovered vs claimed amounts',
     && tab.discrepancyLabel(paymentCase) === '');
 assert('5.2 Cases without discrepancies never render the warning',
   !CoordinatorRefundsTab.methods.discrepancyLabel.call(tab, paymentCase));
-assert('5.3 The rows pending approval are highlighted and carry the supervision flag',
-  template.includes(':style="{') && template.includes("refund.requires_approval ? '#fef8e7'")
+assert('5.3 The rows pending approval are highlighted with the institutional warning token and carry the supervision flag',
+  template.includes(':style="{') && template.includes("refund.requires_approval ? 'var(--color-warning-bg)'")
     && template.includes('requires_special_supervision') && template.includes('Supervisión especial'));
 assert('5.4 The inbox alert announces the number of cases requiring double authorization',
   template.includes('requieren doble autorización') && template.includes('data-testid="approval-alert"'));

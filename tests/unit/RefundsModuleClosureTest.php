@@ -24,7 +24,7 @@ declare(strict_types=1);
  * requirement quietly loses its test. Those regressions are invisible to
  * functional tests by construction, so they need a check of their own.
  *
- * It certifies four things, all statically, with no database and no network:
+ * It certifies five things, all statically, with no database and no network:
  *
  * 1. Dogma Vanilla (Constitution Art. IV.3): zero third-party packages. No npm
  *    or Composer manifest, no installed tree, no bundler configuration, no bare
@@ -40,6 +40,10 @@ declare(strict_types=1);
  * 4. Constitutional guardrails (Art. III, V.4, VI): no hard delete anywhere in
  *    `src/`, the Art. III.1 guard on `refund_requests` in place, no way for
  *    production code to unlock it, and no deferred-phase machinery.
+ * 5. Design system (RNF-REF-05): the refund components consume the tokens
+ *    declared in `design-tokens.css` and hardcode no colour or radius of
+ *    their own, which `DesignTokensTest` cannot see because that suite
+ *    only reads the CSS file.
  *
  * It reads the repository, it does not mutate it.
  */
@@ -470,6 +474,133 @@ $assert(
     '4.7 Ningún fichero de reintegros arrastra maquinaria de fases futuras (Art. VI)',
     $deferredPhase === [],
     json_encode($deferredPhase)
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+echo "\n--- 5. Sistema de diseño: los componentes no fijan valores (RNF-REF-05) ---\n";
+// ─────────────────────────────────────────────────────────────────────────
+
+// `DesignTokensTest` (T-DES-03) certifica que el fichero de tokens DECLARA la
+// paleta institucional. Eso no dice nada de quién la consume: un componente
+// puede escribir `var(--color-primary)` y el de al lado `#2560ff` a mano, y
+// ambos pasan aquel test mientras la interfaz queda medio tokenizada y medio no.
+// RNF-REF-05 pide consistencia visual, y la consistencia sólo existe si el
+// valor literal no está en el componente. Por eso aquí se barre el código de
+// los componentes, no el CSS.
+$designTokensCss = $read('public/assets/css/design-tokens.css');
+preg_match_all('/^\s*(--[a-z0-9-]+)\s*:/m', $designTokensCss, $tokenDeclarations);
+$declaredTokens = array_values(array_unique($tokenDeclarations[1]));
+
+// Un color literal es un `#` seguido de 3, 4, 6 u 8 dígitos hexadecimales sin
+// palabra pegada. Los guardias `(?<![\w#-])` y `(?![0-9a-zA-Z_-])` evitan las
+// tres falsas alarmas habituales del vocabulario de JavaScript: selectores de
+// id, anclas (`#ancla`) y fragmentos de ruta (`#clip-path`).
+$hardColorsIn = static function (string $source): array {
+    preg_match_all(
+        '/(?<![\w#-])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})(?![0-9a-zA-Z_-])/',
+        $source,
+        $matches
+    );
+
+    return array_values(array_unique($matches[0]));
+};
+
+// Cubre las dos sintaxis que conviven en el frontend: CSS plano
+// (`border-radius: 8px`) y estilos en JavaScript con la clave entre comillas
+// (`borderRadius: '4px'`), más las esquinas sueltas (`border-top-left-radius`).
+$hardRadiiIn = static function (string $source): array {
+    preg_match_all(
+        '/[bB]order[-A-Za-z]*[Rr]adius["\']?\s*[:=]\s*["\']?(\d+)px/',
+        $source,
+        $matches
+    );
+
+    return array_values(array_unique($matches[0]));
+};
+
+$tokensUsedIn = static function (string $source): array {
+    preg_match_all('/var\(\s*(--[a-z0-9-]+)/', $source, $matches);
+
+    return array_values(array_unique($matches[1]));
+};
+
+// Antes de dar por bueno un «no he encontrado nada» hay que demostrar que el
+// detector encuentra. Esta muestra sintética pasa por EXACTAMENTE el mismo
+// código que barre los componentes reales: si el escaneo se rompe algún día, la
+// batería seguiría verde al descubrir cero literales, y estas aserciones son
+// las únicas que lo delatarían.
+$sample = <<<'JS'
+    const estilo = {
+        color: '#ff00aa',
+        'border-radius': '13px',
+        background: 'var(--color-ink)'
+    };
+    JS;
+
+$sampleColors = $hardColorsIn($sample);
+$assert(
+    '5.1 El detector ve un color fuera de paleta en la muestra de control',
+    $sampleColors === ['#ff00aa'],
+    json_encode($sampleColors)
+);
+
+$sampleRadii = $hardRadiiIn($sample);
+$assert(
+    '5.2 El detector ve un radio literal en la muestra de control',
+    $sampleRadii !== [] && str_contains($sampleRadii[0], '13px'),
+    json_encode($sampleRadii)
+);
+
+$assert(
+    '5.3 La paleta institucional se lee de `design-tokens.css` y el detector separa tokens',
+    count($declaredTokens) >= 35 && $tokensUsedIn($sample) === ['--color-ink'],
+    'tokens declarados: ' . count($declaredTokens)
+);
+
+// El barrido real. `$refundFrontend` es la lista que ya se resolvió en el
+// bloque 1 para las aserciones 1.5 y 1.7 recorriendo `public/assets/js`; aquí
+// se reutiliza en vez de volver a recorrer el disco con otro criterio, para que
+// el alcance sea por construcción el mismo que ya se auditó en el bloque 1.
+$hardColors = [];
+$hardRadii = [];
+$unknownTokens = [];
+$tokensSeen = [];
+foreach ($refundFrontend as $path) {
+    $source = (string)file_get_contents($path);
+
+    foreach ($hardColorsIn($source) as $literal) {
+        $hardColors[] = basename($path) . ' -> ' . $literal;
+    }
+    foreach ($hardRadiiIn($source) as $literal) {
+        $hardRadii[] = basename($path) . ' -> ' . $literal;
+    }
+    foreach ($tokensUsedIn($source) as $token) {
+        $tokensSeen[$token] = true;
+        if (!in_array($token, $declaredTokens, true)) {
+            $unknownTokens[] = basename($path) . ' -> ' . $token;
+        }
+    }
+}
+
+$assert(
+    '5.4 El barrido alcanza los componentes de reintegros y encuentra tokens que usar',
+    count($refundFrontend) >= 3 && count($tokensSeen) >= 10,
+    'componentes: ' . count($refundFrontend) . ', tokens distintos: ' . count($tokensSeen)
+);
+$assert(
+    '5.5 Ningún componente de reintegros fija un color literal (RNF-REF-05)',
+    $hardColors === [],
+    json_encode(array_slice($hardColors, 0, 5))
+);
+$assert(
+    '5.6 Ningún componente de reintegros fija un radio literal (RNF-REF-05)',
+    $hardRadii === [],
+    json_encode(array_slice($hardRadii, 0, 5))
+);
+$assert(
+    '5.7 Cada token que consumen los componentes existe en `design-tokens.css`',
+    $unknownTokens === [],
+    json_encode(array_slice($unknownTokens, 0, 5))
 );
 
 echo "\n======================================================================\n";

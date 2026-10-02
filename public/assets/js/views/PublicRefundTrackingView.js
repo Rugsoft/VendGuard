@@ -141,15 +141,15 @@ export const PublicRefundTrackingView = {
     }
   },
   template: `
-    <div class="public-refund-tracking" style="width: min(calc(100% - 32px), 720px); margin: 28px auto; color: var(--color-slate, #2c333f);">
+    <div class="public-refund-tracking" style="width: min(calc(100% - 32px), 720px); margin: 28px auto; color: var(--color-ink-slate);">
       <header style="margin-bottom: 20px;">
-        <div style="font-size: 13px; font-weight: 700; color: #2560ff; letter-spacing: .04em;">VENDGUARD · ATENCIÓN AL CONSUMIDOR</div>
+        <div style="font-size: 13px; font-weight: 700; color: var(--color-primary); letter-spacing: .04em;">VENDGUARD · ATENCIÓN AL CONSUMIDOR</div>
         <h1 style="margin: 8px 0 4px; font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 28px;">Seguimiento de tu devolución</h1>
-        <p style="margin: 0; color: #6c7e9d; font-size: 14px;">Consulta el estado de tu solicitud de forma segura.</p>
+        <p style="margin: 0; color: var(--color-ink-muted); font-size: 14px;">Consulta el estado de tu solicitud de forma segura.</p>
       </header>
 
       <section v-if="loading" class="vg-card" aria-live="polite" style="padding: 22px; text-align: center;">Consultando tu expediente...</section>
-      <section v-else-if="errorMessage && !refund" class="vg-card" role="alert" style="padding: 20px; border-color: #ef4444; background: #fff7f7;">
+      <section v-else-if="errorMessage && !refund" class="vg-card" role="alert" style="padding: 20px; border-color: var(--color-error); background: var(--color-error-bg);">
         <strong>No se ha podido cargar el seguimiento</strong>
         <p style="margin: 8px 0 14px;">{{ errorMessage }}</p>
         <button type="button" class="vg-btn vg-btn-secondary" @click="loadTracking">Volver a intentar</button>
@@ -159,58 +159,58 @@ export const PublicRefundTrackingView = {
         <section class="vg-card" style="padding: 20px; margin-bottom: 16px;">
           <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: flex-start;">
             <div>
-              <div style="font-size: 12px; color: #6c7e9d;">ESTADO ACTUAL</div>
+              <div style="font-size: 12px; color: var(--color-ink-muted);">ESTADO ACTUAL</div>
               <h2 style="margin: 5px 0; font-size: 20px;">{{ refund.status_label }}</h2>
             </div>
-            <strong style="font-size: 24px; color: #2560ff; white-space: nowrap;">{{ formattedAmount }}</strong>
+            <strong style="font-size: 24px; color: var(--color-primary); white-space: nowrap;">{{ formattedAmount }}</strong>
           </div>
           <p style="margin: 10px 0 0; line-height: 1.5;">{{ refund.status_description }}</p>
-          <div style="display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 14px; font-size: 13px; color: #596579;">
+          <div style="display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 14px; font-size: 13px; color: var(--color-ink-muted);">
             <span v-if="refund.machine_code">Máquina: <strong>{{ refund.machine_code }}</strong></span>
             <span v-if="refund.location_name">Centro: <strong>{{ refund.location_name }}</strong></span>
             <span v-if="refund.product_attempted">Producto: <strong>{{ refund.product_attempted }}</strong></span>
           </div>
-          <div style="margin-top: 12px; font-size: 12px; color: #6c7e9d;">Solicitud: {{ formatDate(refund.created_at) }} · Última actualización: {{ formatDate(refund.updated_at) }}</div>
+          <div style="margin-top: 12px; font-size: 12px; color: var(--color-ink-muted);">Solicitud: {{ formatDate(refund.created_at) }} · Última actualización: {{ formatDate(refund.updated_at) }}</div>
         </section>
 
         <section class="vg-card" style="padding: 20px; margin-bottom: 16px;" aria-labelledby="refund-timeline-title">
           <h2 id="refund-timeline-title" style="margin: 0 0 16px; font-size: 17px;">Evolución de tu solicitud</h2>
           <ol class="tracking-timeline" style="list-style: none; padding: 0; margin: 0; display: grid; gap: 14px;">
             <li v-for="(step, index) in timelineSteps" :key="step.id" :data-state="step.state" style="display: flex; align-items: flex-start; gap: 12px;">
-              <span aria-hidden="true" :style="{ width: '26px', height: '26px', flex: '0 0 26px', display: 'grid', placeItems: 'center', borderRadius: '50%', border: '2px solid', borderColor: step.state === 'pending' ? '#c8cfda' : '#2560ff', background: step.state === 'complete' ? '#2560ff' : '#ffffff', color: step.state === 'complete' ? '#ffffff' : '#2560ff', fontWeight: '700' }">{{ step.state === 'complete' ? '✓' : index + 1 }}</span>
-              <span :style="{ paddingTop: '4px', color: step.state === 'pending' ? '#6c7e9d' : '#2c333f', fontWeight: step.state === 'current' ? '700' : '500' }">{{ step.label }}<small v-if="step.state === 'current'" style="display: block; color: #2560ff; font-weight: 600; margin-top: 3px;">En curso</small></span>
+              <span aria-hidden="true" :style="{ width: '26px', height: '26px', flex: '0 0 26px', display: 'grid', placeItems: 'center', borderRadius: '50%', border: '2px solid', borderColor: step.state === 'pending' ? 'var(--color-hairline)' : 'var(--color-primary)', background: step.state === 'complete' ? 'var(--color-primary)' : 'var(--color-surface-card)', color: step.state === 'complete' ? 'var(--color-surface-card)' : 'var(--color-primary)', fontWeight: '700' }">{{ step.state === 'complete' ? '✓' : index + 1 }}</span>
+              <span :style="{ paddingTop: '4px', color: step.state === 'pending' ? 'var(--color-ink-muted)' : 'var(--color-ink-slate)', fontWeight: step.state === 'current' ? '700' : '500' }">{{ step.label }}<small v-if="step.state === 'current'" style="display: block; color: var(--color-primary); font-weight: 600; margin-top: 3px;">En curso</small></span>
             </li>
           </ol>
         </section>
 
-        <section v-if="showPickupPin" class="vg-card" data-testid="pickup-pin-card" style="padding: 20px; margin-bottom: 16px; border-color: #38bd7d; background: #f3fbf6; text-align: center;">
+        <section v-if="showPickupPin" class="vg-card" data-testid="pickup-pin-card" style="padding: 20px; margin-bottom: 16px; border-color: var(--color-success); background: var(--color-success-bg); text-align: center;">
           <h2 style="margin: 0 0 6px; font-size: 18px;">Tu dinero está en conserjería</h2>
           <p style="margin: 0 0 10px;">Presenta este PIN de cuatro cifras para recogerlo en el centro indicado.</p>
-          <strong style="display: block; color: #2560ff; font-size: 36px; letter-spacing: .24em;" aria-label="PIN de recogida">{{ refund.pickup_pin }}</strong>
+          <strong style="display: block; color: var(--color-primary); font-size: 36px; letter-spacing: .24em;" aria-label="PIN de recogida">{{ refund.pickup_pin }}</strong>
           <span style="font-size: 13px;">Importe disponible: {{ formattedAmount }}</span>
         </section>
 
         <section v-if="canRectify" class="vg-card" style="padding: 20px; margin-bottom: 16px;" aria-labelledby="rectification-title">
           <h2 id="rectification-title" style="margin: 0 0 6px; font-size: 18px;">Corrige tus datos de pago</h2>
-          <p style="margin: 0 0 14px; color: #596579;">El dato corregido se enviará de forma segura a Coordinación. No mostraremos tus datos bancarios en el seguimiento.</p>
+          <p style="margin: 0 0 14px; color: var(--color-ink-muted);">El dato corregido se enviará de forma segura a Coordinación. No mostraremos tus datos bancarios en el seguimiento.</p>
           <form @submit.prevent="submitRectification">
             <div v-if="rectificationMethod === 'BIZUM'" style="margin-bottom: 14px;">
               <label for="tracking-bizum-phone" style="display: block; margin-bottom: 6px; font-weight: 600;">Nuevo móvil de Bizum</label>
-              <input id="tracking-bizum-phone" v-model="bizumPhone" type="tel" inputmode="numeric" autocomplete="tel" maxlength="15" placeholder="600 000 000" required style="box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #c8cfda; border-radius: 4px; font: inherit;" />
-              <small v-if="bizumPhone && !isRectificationValid" role="alert" style="display: block; margin-top: 5px; color: #b42318;">Introduce un móvil español de 9 dígitos.</small>
+              <input id="tracking-bizum-phone" v-model="bizumPhone" type="tel" inputmode="numeric" autocomplete="tel" maxlength="15" placeholder="600 000 000" required style="box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); font: inherit;" />
+              <small v-if="bizumPhone && !isRectificationValid" role="alert" style="display: block; margin-top: 5px; color: var(--color-error-text);">Introduce un móvil español de 9 dígitos.</small>
             </div>
             <div v-else style="margin-bottom: 14px;">
               <label for="tracking-iban" style="display: block; margin-bottom: 6px; font-weight: 600;">Nuevo IBAN español</label>
-              <input id="tracking-iban" v-model="iban" type="text" autocomplete="off" autocapitalize="characters" maxlength="29" placeholder="ES00 0000 0000 0000 0000 0000" required style="box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #c8cfda; border-radius: 4px; font: inherit;" />
-              <small v-if="iban && !isRectificationValid" role="alert" style="display: block; margin-top: 5px; color: #b42318;">Comprueba los 24 caracteres y el dígito de control del IBAN.</small>
+              <input id="tracking-iban" v-model="iban" type="text" autocomplete="off" autocapitalize="characters" maxlength="29" placeholder="ES00 0000 0000 0000 0000 0000" required style="box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); font: inherit;" />
+              <small v-if="iban && !isRectificationValid" role="alert" style="display: block; margin-top: 5px; color: var(--color-error-text);">Comprueba los 24 caracteres y el dígito de control del IBAN.</small>
             </div>
             <button type="submit" class="vg-btn vg-btn-primary" :disabled="!isRectificationValid || isSubmitting" style="min-height: 40px;">{{ isSubmitting ? 'Guardando...' : 'Actualizar datos' }}</button>
           </form>
         </section>
 
-        <p v-if="successMessage" role="status" aria-live="polite" style="padding: 12px 14px; border: 1px solid #38bd7d; border-radius: 4px; background: #f3fbf6; color: #17633b;">{{ successMessage }}</p>
-        <p v-if="errorMessage" role="alert" style="padding: 12px 14px; border: 1px solid #ef4444; border-radius: 4px; background: #fff7f7; color: #991b1b;">{{ errorMessage }}</p>
-        <div style="margin: 18px 0 30px; text-align: center; font-size: 12px; color: #6c7e9d;">Tu enlace es personal. No compartas este localizador con otras personas.</div>
+        <p v-if="successMessage" role="status" aria-live="polite" style="padding: 12px 14px; border: 1px solid var(--color-success); border-radius: var(--radius-interactive); background: var(--color-success-bg); color: var(--color-success-text);">{{ successMessage }}</p>
+        <p v-if="errorMessage" role="alert" style="padding: 12px 14px; border: 1px solid var(--color-error); border-radius: var(--radius-interactive); background: var(--color-error-bg); color: var(--color-error-text);">{{ errorMessage }}</p>
+        <div style="margin: 18px 0 30px; text-align: center; font-size: 12px; color: var(--color-ink-muted);">Tu enlace es personal. No compartas este localizador con otras personas.</div>
       </template>
     </div>
   `

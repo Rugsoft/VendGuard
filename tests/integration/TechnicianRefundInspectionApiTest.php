@@ -109,12 +109,16 @@ try {
     $techId = (int)$technician->getId();
     $authService = new AuthService($locations, $users);
     $techToken = $authService->generateInternalToken($technician);
+    $siteToken = $authService->generateSiteToken($location);
     $coordinatorToken = $authService->generateInternalToken($coordinator);
 
     $router = AppRouter::create();
     $routerSource = (string)file_get_contents(__DIR__ . '/../../src/Presentation/Routing/AppRouter.php');
 
     $techHeaders = ['authorization' => 'Bearer ' . $techToken, 'content-type' => 'application/json'];
+    $coordinatorToken = $authService->generateInternalToken($coordinator);
+    $coordinatorHeaders = ['authorization' => 'Bearer ' . $coordinatorToken, 'content-type' => 'application/json'];
+    $siteHeaders = ['authorization' => 'Bearer ' . $siteToken, 'content-type' => 'application/json'];
 
     /**
      * @param array<string, mixed>|null $body
@@ -832,6 +836,206 @@ try {
     $assert(
         '7.4 La ruta de técnico rechaza un identificador de incidencia no numérico',
         $dispatch('GET', '/api/technician/incidents/abc/refund', null, $techHeaders)->getStatusCode() === 400
+    );
+
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 8. Supervivencia del expediente ante cancelación y reapertura (RF-REF-09) ---\n";
+    // ─────────────────────────────────────────────────────────────────────
+    // RF-REF-09 exige dos cosas más allá del desacoplamiento del bloque 5, y
+    // ninguna tenía prueba: que cancelar la avería por descarte NO arrastre el
+    // expediente de reintegro, y que reabrir una avería dentro de la ventana de
+    // 48 h deje intacto el expediente ya cerrado y abra uno nuevo independiente.
+    //
+    // Son dos escenarios y no uno porque el estado CANCELLED es terminal: una
+    // avería cancelada no se puede reabrir (la máquina de estados sólo admite
+    // RESOLVED -> REOPENED), así que reutilizar la misma avería para las dos
+    // cláusulas no probaría nada de la segunda.
+
+    // ── 8.1 Cancelación: la avería se descarta, el expediente sobrevive ──
+    $cancelMachine = $makeMachine('TREF20G-', MachineType::COLD_DRINKS);
+    $cancelIncident = $makeIncident($cancelMachine, $techId, 'TREF20-CANCEL-');
+    $cancelCase = $openCase(
+        $cancelIncident,
+        $cancelMachine,
+        CompensationMethod::BIZUM,
+        7.50,
+        bizumPhone: '600111222'
+    );
+    $cancelCaseId = (int)$cancelCase->getId();
+
+    $cancelResponse = $dispatch(
+        'PATCH',
+        "/api/coordinator/incidents/{$cancelIncident->getId()}/cancel",
+        ['cancellation_reason' => 'Falsa alarma: el usuario retracta la reclamacion tras verificar el cobro.'],
+        $coordinatorHeaders
+    );
+    $assert(
+        '8.1 El coordinador descarta la avería como falsa alarma',
+        $cancelResponse->getStatusCode() === 200,
+        'HTTP ' . $cancelResponse->getStatusCode() . ' ' . (string)$cancelResponse->getBody()
+    );
+    $assert(
+        '8.1 La avería queda CANCELLED',
+        $incidents->findById((int)$cancelIncident->getId())?->getStatus() === IncidentStatus::CANCELLED
+    );
+
+    $survivingCase = $refunds->findById($cancelCaseId);
+    $assert(
+        '8.2 Cancelar la avería NO borra ni cancela el expediente de reintegro (RF-REF-09)',
+        $survivingCase !== null
+        && $survivingCase->isActive()
+        && $survivingCase->getStatus() === RefundStatus::PENDING_INSPECTION,
+        'estado: ' . ($survivingCase?->getStatus()->value ?? 'AUSENTE')
+    );
+    $assert(
+        '8.2 El expediente conserva su importe y su canal de compensación originales',
+        $survivingCase?->getClaimedAmount() === 7.50
+        && $survivingCase?->getCompensationMethod() === CompensationMethod::BIZUM
+    );
+
+    $cancelInbox = $dispatch('GET', '/api/coordinator/refunds', null, $coordinatorHeaders);
+    $cancelInboxIds = [];
+    foreach ($data($cancelInbox)['items'] ?? [] as $entry) {
+        $cancelInboxIds[] = (int)($entry['id'] ?? 0);
+    }
+    $assert(
+        '8.3 El expediente superviviente sigue activo en la bandeja de Coordinación',
+        $cancelInbox->getStatusCode() === 200 && in_array($cancelCaseId, $cancelInboxIds, true),
+        'HTTP ' . $cancelInbox->getStatusCode() . ' ' . json_encode($cancelInboxIds)
+    );
+
+    // ── 8.4 Reapertura: el expediente cerrado queda inmutable y abre otro ──
+    $reopenMachine = $makeMachine('TREF20H-', MachineType::HOT_DRINKS);
+    $reopenIncident = $makeIncident($reopenMachine, $techId, 'TREF20-REOPEN-');
+    $reopenCase = $openCase(
+        $reopenIncident,
+        $reopenMachine,
+        CompensationMethod::BIZUM,
+        3.25,
+        bizumPhone: '600111222'
+    );
+    $reopenCaseId = (int)$reopenCase->getId();
+
+    // Dictamen del técnico: el dinero va a caja central por canal digital.
+    $reopenResolution = $dispatch(
+        'POST',
+        "/api/technician/incidents/{$reopenIncident->getId()}/resolve",
+        [
+            'resolution_diagnosis' => $validDiagnosis,
+            'resolution_action' => $validAction,
+            'refund_inspection' => [
+                'finding' => 'FOUND_PHYSICAL',
+                'recovered_amount' => 3.25,
+            ],
+        ],
+        $techHeaders
+    );
+    $assert(
+        '8.4 La primera intervención se resuelve con dictamen de saldo',
+        $reopenResolution->getStatusCode() === 200
+        && $refunds->findById($reopenCaseId)?->getStatus() === RefundStatus::VERIFIED_PENDING_PAYMENT,
+        'HTTP ' . $reopenResolution->getStatusCode() . ' ' . (string)$reopenResolution->getBody()
+    );
+
+    // Coordinación lo liquida por Bizum siguiendo el endpoint real, no con un
+    // UPDATE a mano: el expediente tiene que quedar cerrado por el mismo camino
+    // que en producción para que la inmutabilidad probada sea la de verdad.
+    $paymentReference = 'BIZUM-REINC-0001';
+    $payResponse = $dispatch(
+        'POST',
+        "/api/coordinator/refunds/{$reopenCaseId}/pay",
+        ['payment_reference' => $paymentReference, 'paid_amount' => 3.25],
+        $coordinatorHeaders
+    );
+    $assert(
+        '8.4 Coordinación liquida el expediente por Bizum con referencia bancaria',
+        $payResponse->getStatusCode() === 200,
+        'HTTP ' . $payResponse->getStatusCode() . ' ' . (string)$payResponse->getBody()
+    );
+    $assert(
+        '8.4 El expediente de la primera intervención queda liquidado',
+        $refunds->findById($reopenCaseId)?->getStatus() === RefundStatus::PAID_DIGITAL
+        && $refunds->findById($reopenCaseId)?->getStatus()->isTerminal(),
+        'estado: ' . ($refunds->findById($reopenCaseId)?->getStatus()->value ?? 'AUSENTE')
+    );
+
+    // Fotografía del expediente cerrado, para comparar tras la reapertura.
+    $closedSnapshot = $pdo->prepare('
+        SELECT `status`, `is_active`, `claimed_amount`, `payment_reference`, `paid_at`,
+               `technician_finding`, `recovered_amount`, `updated_at`
+        FROM `refund_requests` WHERE `id` = :id
+    ');
+    $closedSnapshot->execute([':id' => $reopenCaseId]);
+    $closedRow = $closedSnapshot->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    // Reapertura dentro de las 48 h (Art. V.6).
+    $reopenResponse = $dispatch(
+        'POST',
+        '/api/incidents/' . $reopenIncident->getTicketCode() . '/reopen',
+        ['reopen_reason' => 'El usuario confirma que la maquina volvio a retener saldo sin entregar.'],
+        $siteHeaders
+    );
+    $assert(
+        '8.5 La sede reabre la avería dentro de la ventana de 48 horas',
+        $reopenResponse->getStatusCode() === 200,
+        'HTTP ' . $reopenResponse->getStatusCode() . ' ' . (string)$reopenResponse->getBody()
+    );
+    $assert(
+        '8.5 La avería queda REOPENED',
+        $incidents->findById((int)$reopenIncident->getId())?->getStatus() === IncidentStatus::REOPENED
+    );
+
+    // El expediente ya liquidado no puede haber cambiado: ni un caracter.
+    $closedSnapshot->execute([':id' => $reopenCaseId]);
+    $afterReopenRow = $closedSnapshot->fetch(PDO::FETCH_ASSOC) ?: [];
+    $changedFields = [];
+    foreach (['status', 'is_active', 'claimed_amount', 'payment_reference', 'paid_at', 'technician_finding', 'recovered_amount', 'updated_at'] as $field) {
+        if (($closedRow[$field] ?? null) !== ($afterReopenRow[$field] ?? null)) {
+            $changedFields[] = $field;
+        }
+    }
+    $assert(
+        '8.6 La reapertura NO altera el expediente ya cerrado de la primera intervención',
+        $changedFields === [],
+        'campos alterados: ' . json_encode($changedFields)
+    );
+    $assert(
+        '8.6 Sigue terminal, liquidado y con su referencia bancaria intacta (inmutabilidad)',
+        ($afterReopenRow['status'] ?? '') === 'PAID_DIGITAL'
+        && (int)($afterReopenRow['is_active'] ?? 0) === 1
+        && ($afterReopenRow['payment_reference'] ?? '') === $paymentReference
+        && (string)($afterReopenRow['paid_at'] ?? '') !== ''
+    );
+
+    // Nueva pérdida de dinero en la reincidencia => expediente nuevo e independiente.
+    $secondLossCase = $refundService->createCase(new CreateRefundRequestDTO(
+        incidentId: (int)$reopenIncident->getId(),
+        machineId: (int)$reopenMachine->getId(),
+        locationId: (int)$location->getId(),
+        claimantName: 'Laura Sanitaria',
+        claimantContact: '600111222',
+        claimedAmount: 1.20,
+        compensationMethod: CompensationMethod::BIZUM,
+        productAttempted: 'Agua mineral 50 cl carril 1',
+        bizumPhone: '600111222'
+    ));
+    $secondLossId = (int)$secondLossCase->getId();
+    $assert(
+        '8.7 La reincidencia registra un expediente NUEVO e independiente',
+        $secondLossId > 0 && $secondLossId !== $reopenCaseId
+        && $secondLossCase->getStatus() === RefundStatus::PENDING_INSPECTION
+        && (float)$secondLossCase->getClaimedAmount() === 1.20,
+        'id nuevo: ' . $secondLossId . ' | id viejo: ' . $reopenCaseId
+    );
+    $assert(
+        '8.7 Los dos expedientes coexisten sin pisarse',
+        $refunds->findById($reopenCaseId)?->getStatus() === RefundStatus::PAID_DIGITAL
+        && $refunds->findById($secondLossId)?->getStatus() === RefundStatus::PENDING_INSPECTION
+    );
+    $assert(
+        '8.7 El expediente nuevo no hereda el dictamen ni el pago del anterior',
+        $refunds->findById($secondLossId)?->getTechnicianFinding() === null
+        && (string)($refunds->findById($secondLossId)?->getPaymentReference() ?? '') === ''
     );
 } finally {
     if ($pdo->inTransaction()) {

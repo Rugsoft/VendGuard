@@ -23,51 +23,51 @@ import { api } from '../api.js';
 const STATUS_META = {
   PENDING_INSPECTION: {
     label: 'Pendiente de inspección técnica',
-    color: '#475569',
-    bg: '#f1f5f9',
-    border: '#cbd5e1'
+    color: 'var(--color-ink-secondary)',
+    bg: 'var(--color-canvas)',
+    border: 'var(--color-hairline)'
   },
   DEPOSITED_AT_RECEPTION: {
     label: 'Efectivo en conserjería, listo para entrega',
-    color: '#166534',
-    bg: '#dcfce7',
-    border: '#86efac'
+    color: 'var(--color-success-text)',
+    bg: 'var(--color-success-bg)',
+    border: 'var(--color-success)'
   },
   VERIFIED_PENDING_PAYMENT: {
     label: 'Verificado, pendiente de pago',
-    color: '#003db5',
-    bg: '#e5f2fc',
-    border: '#2560ff'
+    color: 'var(--color-primary-dark)',
+    bg: 'var(--color-primary-subtle)',
+    border: 'var(--color-primary)'
   },
   REQUIRES_COORDINATOR_APPROVAL: {
     label: 'Requiere visto bueno de coordinación',
-    color: '#92400e',
-    bg: '#fef8e7',
-    border: '#f8b60f'
+    color: 'var(--color-warning-text)',
+    bg: 'var(--color-warning-bg)',
+    border: 'var(--color-warning)'
   },
   PENDING_CONTACT: {
     label: 'Pendiente de contacto del afectado',
-    color: '#92400e',
-    bg: '#fef8e7',
-    border: '#f8b60f'
+    color: 'var(--color-warning-text)',
+    bg: 'var(--color-warning-bg)',
+    border: 'var(--color-warning)'
   },
   PAID_DIGITAL: {
     label: 'Reembolsado por vía digital',
-    color: '#475569',
-    bg: '#f1f5f9',
-    border: '#cbd5e1'
+    color: 'var(--color-ink-secondary)',
+    bg: 'var(--color-canvas)',
+    border: 'var(--color-hairline)'
   },
   REFUNDED_IN_HAND: {
     label: 'Reembolsado en mano',
-    color: '#166534',
-    bg: '#dcfce7',
-    border: '#86efac'
+    color: 'var(--color-success-text)',
+    bg: 'var(--color-success-bg)',
+    border: 'var(--color-success)'
   },
   REJECTED: {
     label: 'Desestimado',
-    color: '#b91c1c',
-    bg: '#fee2e2',
-    border: '#fca5a5'
+    color: 'var(--color-error-text)',
+    bg: 'var(--color-urgency-critical-bg)',
+    border: 'var(--color-error)'
   }
 };
 
@@ -216,9 +216,9 @@ export const LocationRefundsTab = {
     statusMeta(status) {
       return STATUS_META[status] || {
         label: status || 'Estado desconocido',
-        color: '#475569',
-        bg: '#f1f5f9',
-        border: '#cbd5e1'
+        color: 'var(--color-ink-secondary)',
+        bg: 'var(--color-canvas)',
+        border: 'var(--color-hairline)'
       };
     },
 
@@ -246,16 +246,16 @@ export const LocationRefundsTab = {
       <!-- Header card: pending envelopes summary -->
       <div
         class="vg-card"
-        style="border-radius: var(--radius-card, 8px); padding: 18px 22px; margin-bottom: 20px; background: #ffffff; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px;"
+        style="border-radius: var(--radius-card, 8px); padding: 18px 22px; margin-bottom: 20px; background: var(--color-surface-card); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px;"
       >
         <div>
           <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
             <span style="font-size: 20px;">💶</span>
-            <h2 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 19px; font-weight: 700; color: var(--color-ink, #000000); margin: 0;">
+            <h2 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 19px; font-weight: 700; color: var(--color-ink, var(--color-ink)); margin: 0;">
               Reintegros de la sede
             </h2>
           </div>
-          <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-slate, #2c333f); margin: 0;">
+          <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-slate, var(--color-ink-slate)); margin: 0;">
             Sobres de efectivo depositados por el técnico y entregas pendientes de validar con el PIN de 4 dígitos del afectado.
           </p>
         </div>
@@ -263,7 +263,7 @@ export const LocationRefundsTab = {
         <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
           <div
             data-testid="ready-for-pickup-counter"
-            style="padding: 8px 14px; border-radius: var(--radius-card, 8px); border: 1px solid #86efac; background: #f0fdf4; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; font-weight: 700; color: #166534;"
+            style="padding: 8px 14px; border-radius: var(--radius-card, 8px); border: 1px solid var(--color-success); background: var(--color-success-bg); font-family: var(--font-body, Inter, sans-serif); font-size: 13px; font-weight: 700; color: var(--color-success-text);"
           >
             Sobres en conserjería: {{ readyForPickupCount }}
           </div>
@@ -285,21 +285,21 @@ export const LocationRefundsTab = {
         v-if="successMessage"
         role="status"
         data-testid="refund-delivery-success"
-        style="background-color: #f0fdf4; border: 1px solid #86efac; color: #166534; padding: 12px 18px; border-radius: var(--radius-card, 8px); margin-bottom: 20px; font-family: var(--font-body, Inter, sans-serif); font-size: 13.5px; font-weight: 600;"
+        style="background-color: var(--color-success-bg); border: 1px solid var(--color-success); color: var(--color-success-text); padding: 12px 18px; border-radius: var(--radius-card, 8px); margin-bottom: 20px; font-family: var(--font-body, Inter, sans-serif); font-size: 13.5px; font-weight: 600;"
       >
         ✅ {{ successMessage }}
       </div>
 
       <!-- Loading / Error / Empty / List -->
       <div v-if="loading && !hasRefunds" style="text-align: center; padding: 48px;">
-        <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 15px; color: var(--color-slate, #2c333f);">
+        <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 15px; color: var(--color-slate, var(--color-ink-slate));">
           Cargando los reintegros del centro...
         </p>
       </div>
 
       <div
         v-else-if="error"
-        style="background-color: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; padding: 16px; border-radius: var(--radius-card, 8px); margin-bottom: 24px; text-align: center;"
+        style="background-color: var(--color-urgency-critical-bg); border: 1px solid var(--color-error); color: var(--color-error-text); padding: 16px; border-radius: var(--radius-card, 8px); margin-bottom: 24px; text-align: center;"
       >
         <p style="margin: 0 0 10px 0;">{{ error }}</p>
         <button type="button" class="vg-btn vg-btn-secondary" @click="loadRefunds">Reintentar</button>
@@ -307,25 +307,25 @@ export const LocationRefundsTab = {
 
       <div
         v-else-if="!hasRefunds"
-        style="text-align: center; padding: 48px; background-color: #ffffff; border: 1px dashed var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px);"
+        style="text-align: center; padding: 48px; background-color: var(--color-surface-card); border: 1px dashed var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-card, 8px);"
       >
-        <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 14px; color: var(--color-ink-muted, #6c7e9d); margin: 0;">
+        <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 14px; color: var(--color-ink-muted, var(--color-ink-muted)); margin: 0;">
           No constan reclamaciones de reintegro asociadas a las máquinas de este centro.
         </p>
       </div>
 
-      <div v-else class="vg-card" style="border-radius: var(--radius-card, 8px); overflow: hidden; background: #ffffff;">
+      <div v-else class="vg-card" style="border-radius: var(--radius-card, 8px); overflow: hidden; background: var(--color-surface-card);">
         <div style="overflow-x: auto;">
           <table style="width: 100%; border-collapse: collapse; font-family: var(--font-body, Inter, sans-serif); font-size: 13px;">
             <thead>
-              <tr style="background-color: #f8fafc; border-bottom: 1px solid var(--color-hairline, #c8cfda); text-align: left;">
-                <th style="padding: 12px 16px; font-weight: 600; color: #475569;">Expediente</th>
-                <th style="padding: 12px 16px; font-weight: 600; color: #475569;">Máquina</th>
-                <th style="padding: 12px 16px; font-weight: 600; color: #475569;">Afectado</th>
-                <th style="padding: 12px 16px; font-weight: 600; color: #475569; text-align: right;">Importe</th>
-                <th style="padding: 12px 16px; font-weight: 600; color: #475569;">Alta</th>
-                <th style="padding: 12px 16px; font-weight: 600; color: #475569; text-align: center;">Estado</th>
-                <th style="padding: 12px 16px; font-weight: 600; color: #475569; text-align: right;">Entrega</th>
+              <tr style="background-color: var(--color-surface-card); border-bottom: 1px solid var(--color-hairline, var(--color-hairline)); text-align: left;">
+                <th style="padding: 12px 16px; font-weight: 600; color: var(--color-ink-secondary);">Expediente</th>
+                <th style="padding: 12px 16px; font-weight: 600; color: var(--color-ink-secondary);">Máquina</th>
+                <th style="padding: 12px 16px; font-weight: 600; color: var(--color-ink-secondary);">Afectado</th>
+                <th style="padding: 12px 16px; font-weight: 600; color: var(--color-ink-secondary); text-align: right;">Importe</th>
+                <th style="padding: 12px 16px; font-weight: 600; color: var(--color-ink-secondary);">Alta</th>
+                <th style="padding: 12px 16px; font-weight: 600; color: var(--color-ink-secondary); text-align: center;">Estado</th>
+                <th style="padding: 12px 16px; font-weight: 600; color: var(--color-ink-secondary); text-align: right;">Entrega</th>
               </tr>
             </thead>
             <tbody>
@@ -334,30 +334,30 @@ export const LocationRefundsTab = {
                 :key="refund.id"
                 :data-testid="'refund-row-' + refund.id"
                 :style="{
-                  borderBottom: '1px solid #f1f5f9',
-                  backgroundColor: refund.ready_for_pickup ? '#f0fdf4' : '#ffffff'
+                  borderBottom: '1px solid var(--color-canvas)',
+                  backgroundColor: refund.ready_for_pickup ? 'var(--color-success-bg)' : 'var(--color-surface-card)'
                 }"
               >
                 <td style="padding: 12px 16px;">
-                  <div style="font-family: monospace; font-weight: 700; color: #0f172a; font-size: 13.5px;">
+                  <div style="font-family: monospace; font-weight: 700; color: var(--color-ink-slate); font-size: 13.5px;">
                     {{ refund.incident_code || ('RE-' + refund.id) }}
                   </div>
                 </td>
 
-                <td style="padding: 12px 16px; color: #334155;">
+                <td style="padding: 12px 16px; color: var(--color-ink-secondary);">
                   {{ refund.machine_code || 'N/D' }}
                 </td>
 
                 <!-- Anonymized claimant: "Laura S." (Art. V.4, RF-REF-10) -->
-                <td style="padding: 12px 16px; color: #334155; font-weight: 600;" data-testid="claimant-anon">
+                <td style="padding: 12px 16px; color: var(--color-ink-secondary); font-weight: 600;" data-testid="claimant-anon">
                   {{ refund.claimant_name_anon }}
                 </td>
 
-                <td style="padding: 12px 16px; text-align: right; font-weight: 700; color: #0f172a;">
+                <td style="padding: 12px 16px; text-align: right; font-weight: 700; color: var(--color-ink-slate);">
                   {{ formatAmount(refund.claimed_amount) }}
                 </td>
 
-                <td style="padding: 12px 16px; color: #334155;">
+                <td style="padding: 12px 16px; color: var(--color-ink-secondary);">
                   {{ formatDate(refund.created_at) }}
                 </td>
 
@@ -368,7 +368,7 @@ export const LocationRefundsTab = {
                       display: 'inline-flex',
                       alignItems: 'center',
                       padding: '4px 10px',
-                      borderRadius: '4px',
+                      borderRadius: var(--radius-interactive)',
                       fontSize: '11px',
                       fontWeight: '700',
                       letterSpacing: '0.02em',
@@ -392,7 +392,7 @@ export const LocationRefundsTab = {
                   >
                     Entregar efectivo
                   </button>
-                  <span v-else style="color: #94a3b8; font-size: 12px;">Sin sobre en conserjería</span>
+                  <span v-else style="color: var(--color-hairline-soft); font-size: 12px;">Sin sobre en conserjería</span>
                 </td>
               </tr>
             </tbody>
@@ -411,28 +411,28 @@ export const LocationRefundsTab = {
         style="position: fixed; inset: 0; background-color: rgba(15, 23, 42, 0.55); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 50;"
       >
         <div
-          style="width: 100%; max-width: 380px; background: #ffffff; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px); padding: 22px 20px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);"
+          style="width: 100%; max-width: 380px; background: var(--color-surface-card); border: 1px solid var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-card, 8px); padding: 22px 20px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);"
         >
-          <h3 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 18px; font-weight: 700; color: var(--color-ink, #000000); margin: 0 0 6px;">
+          <h3 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 18px; font-weight: 700; color: var(--color-ink, var(--color-ink)); margin: 0 0 6px;">
             Entrega de efectivo en conserjería
           </h3>
-          <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-slate, #2c333f); margin: 0 0 14px; line-height: 1.45;">
+          <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-slate, var(--color-ink-slate)); margin: 0 0 14px; line-height: 1.45;">
             Pida al afectado el PIN de 4 dígitos que muestra en su móvil y técleelo para liberar el sobre.
           </p>
 
           <div
             data-testid="pin-case-summary"
-            style="display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; background: #f9fafb; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); margin-bottom: 16px;"
+            style="display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; background: var(--color-canvas); border: 1px solid var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-interactive, 4px); margin-bottom: 16px;"
           >
             <div>
-              <div style="font-size: 15px; font-weight: 700; color: #0f172a;">
+              <div style="font-size: 15px; font-weight: 700; color: var(--color-ink-slate);">
                 {{ selectedRefund.claimant_name_anon }}
               </div>
-              <div style="font-size: 12px; color: #596579;">
+              <div style="font-size: 12px; color: var(--color-ink-muted);">
                 {{ selectedRefund.incident_code || ('RE-' + selectedRefund.id) }} · {{ selectedRefund.machine_code || 'N/D' }}
               </div>
             </div>
-            <div style="font-size: 16px; font-weight: 800; color: #0f172a;">
+            <div style="font-size: 16px; font-weight: 800; color: var(--color-ink-slate);">
               {{ formatAmount(selectedRefund.claimed_amount) }}
             </div>
           </div>
@@ -454,9 +454,9 @@ export const LocationRefundsTab = {
                 justifyContent: 'center',
                 fontSize: '26px',
                 fontWeight: '700',
-                color: '#0f172a',
-                background: '#ffffff',
-                border: '1.5px solid ' + (filled ? 'var(--color-primary, #2560ff)' : 'var(--color-hairline, #c8cfda)'),
+                color: 'var(--color-ink-slate)',
+                background: 'var(--color-surface-card)',
+                border: '1.5px solid ' + (filled ? 'var(--color-primary, var(--color-primary))' : 'var(--color-hairline, var(--color-hairline))'),
                 borderRadius: 'var(--radius-interactive, 4px)'
               }"
             >
@@ -468,7 +468,7 @@ export const LocationRefundsTab = {
             v-if="pinError"
             role="alert"
             data-testid="pin-error"
-            style="background-color: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; padding: 10px 12px; border-radius: var(--radius-interactive, 4px); font-family: var(--font-body, Inter, sans-serif); font-size: 13px; margin-bottom: 14px;"
+            style="background-color: var(--color-urgency-critical-bg); border: 1px solid var(--color-error); color: var(--color-error-text); padding: 10px 12px; border-radius: var(--radius-interactive, 4px); font-family: var(--font-body, Inter, sans-serif); font-size: 13px; margin-bottom: 14px;"
           >
             {{ pinError }}
           </div>
@@ -481,7 +481,7 @@ export const LocationRefundsTab = {
               type="button"
               :data-testid="'pin-key-' + digit"
               :disabled="isDelivering"
-              style="min-height: 48px; font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 20px; font-weight: 700; color: var(--color-slate, #2c333f); background: #ffffff; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); cursor: pointer;"
+              style="min-height: 48px; font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 20px; font-weight: 700; color: var(--color-slate, var(--color-ink-slate)); background: var(--color-surface-card); border: 1px solid var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-interactive, 4px); cursor: pointer;"
               @click="appendPinDigit(digit)"
             >
               {{ digit }}
@@ -490,7 +490,7 @@ export const LocationRefundsTab = {
               type="button"
               data-testid="pin-key-backspace"
               :disabled="isDelivering || pin.length === 0"
-              style="min-height: 48px; font-size: 14px; font-weight: 700; color: var(--color-slate, #2c333f); background: #f1f5f9; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); cursor: pointer;"
+              style="min-height: 48px; font-size: 14px; font-weight: 700; color: var(--color-slate, var(--color-ink-slate)); background: var(--color-canvas); border: 1px solid var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-interactive, 4px); cursor: pointer;"
               @click="removePinDigit"
             >
               ⌫ Borrar
@@ -499,7 +499,7 @@ export const LocationRefundsTab = {
               type="button"
               data-testid="pin-key-0"
               :disabled="isDelivering"
-              style="min-height: 48px; font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 20px; font-weight: 700; color: var(--color-slate, #2c333f); background: #ffffff; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); cursor: pointer;"
+              style="min-height: 48px; font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 20px; font-weight: 700; color: var(--color-slate, var(--color-ink-slate)); background: var(--color-surface-card); border: 1px solid var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-interactive, 4px); cursor: pointer;"
               @click="appendPinDigit('0')"
             >
               0

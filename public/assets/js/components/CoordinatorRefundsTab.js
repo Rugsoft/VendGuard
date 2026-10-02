@@ -25,51 +25,51 @@ import { ModalDialog } from './ModalDialog.js';
 const STATUS_META = {
   PENDING_INSPECTION: {
     label: 'Pendiente de inspección técnica',
-    color: '#475569',
-    bg: '#f1f5f9',
-    border: '#cbd5e1'
+    color: 'var(--color-ink-secondary)',
+    bg: 'var(--color-canvas)',
+    border: 'var(--color-hairline)'
   },
   DEPOSITED_AT_RECEPTION: {
     label: 'Efectivo en conserjería',
-    color: '#166534',
-    bg: '#dcfce7',
-    border: '#86efac'
+    color: 'var(--color-success-text)',
+    bg: 'var(--color-success-bg)',
+    border: 'var(--color-success)'
   },
   VERIFIED_PENDING_PAYMENT: {
     label: 'Verificado, pendiente de pago',
-    color: '#003db5',
-    bg: '#e5f2fc',
-    border: '#2560ff'
+    color: 'var(--color-primary-dark)',
+    bg: 'var(--color-primary-subtle)',
+    border: 'var(--color-primary)'
   },
   REQUIRES_COORDINATOR_APPROVAL: {
     label: 'Requiere visto bueno de coordinación',
-    color: '#92400e',
-    bg: '#fef8e7',
-    border: '#f8b60f'
+    color: 'var(--color-warning-text)',
+    bg: 'var(--color-warning-bg)',
+    border: 'var(--color-warning)'
   },
   PENDING_CONTACT: {
     label: 'Pendiente de contacto del afectado',
-    color: '#92400e',
-    bg: '#fef8e7',
-    border: '#f8b60f'
+    color: 'var(--color-warning-text)',
+    bg: 'var(--color-warning-bg)',
+    border: 'var(--color-warning)'
   },
   PAID_DIGITAL: {
     label: 'Reembolsado por vía digital',
-    color: '#166534',
-    bg: '#dcfce7',
-    border: '#86efac'
+    color: 'var(--color-success-text)',
+    bg: 'var(--color-success-bg)',
+    border: 'var(--color-success)'
   },
   REFUNDED_IN_HAND: {
     label: 'Reembolsado en mano',
-    color: '#166534',
-    bg: '#dcfce7',
-    border: '#86efac'
+    color: 'var(--color-success-text)',
+    bg: 'var(--color-success-bg)',
+    border: 'var(--color-success)'
   },
   REJECTED: {
     label: 'Desestimado',
-    color: '#b91c1c',
-    bg: '#fee2e2',
-    border: '#fca5a5'
+    color: 'var(--color-error-text)',
+    bg: 'var(--color-urgency-critical-bg)',
+    border: 'var(--color-error)'
   }
 };
 
@@ -447,9 +447,9 @@ export const CoordinatorRefundsTab = {
     statusMeta(status) {
       return STATUS_META[status] || {
         label: status || 'Estado desconocido',
-        color: '#475569',
-        bg: '#f1f5f9',
-        border: '#cbd5e1'
+        color: 'var(--color-ink-secondary)',
+        bg: 'var(--color-canvas)',
+        border: 'var(--color-hairline)'
       };
     },
 
@@ -519,39 +519,39 @@ export const CoordinatorRefundsTab = {
       <!-- Header card: liability summary -->
       <div
         class="vg-card"
-        style="border-radius: var(--radius-card, 8px); padding: 18px 22px; margin-bottom: 20px; background: #ffffff; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px;"
+        style="border-radius: var(--radius-card, 8px); padding: 18px 22px; margin-bottom: 20px; background: var(--color-surface-card); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px;"
       >
         <div>
           <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
             <span style="font-size: 20px;">💶</span>
-            <h2 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 19px; font-weight: 700; color: var(--color-ink, #000000); margin: 0;">
+            <h2 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 19px; font-weight: 700; color: var(--color-ink, var(--color-ink)); margin: 0;">
               Reintegros e Importe Retenido
             </h2>
           </div>
-          <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-slate, #2c333f); margin: 0;">
+          <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-slate, var(--color-ink-slate)); margin: 0;">
             Bandeja global con doble visto bueno para importes superiores a 10,00 € o discrepancias, y liquidación digital con justificante bancario.
           </p>
         </div>
 
         <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
-          <div style="padding: 8px 14px; border-radius: var(--radius-card, 8px); border: 1px solid var(--color-hairline, #c8cfda); background: #ffffff; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: #475569;">
-            Expedientes: <strong style="color: #0f172a;">{{ total }}</strong>
+          <div style="padding: 8px 14px; border-radius: var(--radius-card, 8px); border: 1px solid var(--color-hairline, var(--color-hairline)); background: var(--color-surface-card); font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-secondary);">
+            Expedientes: <strong style="color: var(--color-ink-slate);">{{ total }}</strong>
           </div>
           <div
             data-testid="approval-pending-counter"
             :style="{
               padding: '8px 14px',
               borderRadius: 'var(--radius-card, 8px)',
-              border: '1px solid ' + (hasApprovalPending ? '#f8b60f' : '#c8cfda'),
-              background: hasApprovalPending ? '#fef8e7' : '#ffffff',
+              border: '1px solid ' + (hasApprovalPending ? 'var(--color-warning)' : 'var(--color-hairline)'),
+              background: hasApprovalPending ? 'var(--color-warning-bg)' : 'var(--color-surface-card)',
               fontFamily: 'var(--font-body, Inter, sans-serif)',
               fontSize: '13px',
-              color: hasApprovalPending ? '#92400e' : '#475569'
+              color: hasApprovalPending ? 'var(--color-warning-text)' : 'var(--color-ink-secondary)'
             }"
           >
             Pendientes de visto bueno: <strong>{{ requiresApprovalTotal }}</strong>
           </div>
-          <div style="padding: 8px 14px; border-radius: var(--radius-card, 8px); border: 1px solid #86efac; background: #f0fdf4; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: #166534;">
+          <div style="padding: 8px 14px; border-radius: var(--radius-card, 8px); border: 1px solid var(--color-success); background: var(--color-success-bg); font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-success-text);">
             Pendiente de pago: <strong>{{ formatAmount(totals.payable_amount) }}</strong>
           </div>
           <button
@@ -572,7 +572,7 @@ export const CoordinatorRefundsTab = {
         v-if="hasApprovalPending"
         role="alert"
         data-testid="approval-alert"
-        style="background-color: #fef8e7; border: 2px solid #f8b60f; color: #92400e; padding: 14px 18px; border-radius: var(--radius-card, 8px); margin-bottom: 20px; display: flex; align-items: flex-start; gap: 12px;"
+        style="background-color: var(--color-warning-bg); border: 2px solid var(--color-warning); color: var(--color-warning-text); padding: 14px 18px; border-radius: var(--radius-card, 8px); margin-bottom: 20px; display: flex; align-items: flex-start; gap: 12px;"
       >
         <span style="font-size: 20px; line-height: 1;">⚠️</span>
         <div style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; line-height: 1.5;">
@@ -585,7 +585,7 @@ export const CoordinatorRefundsTab = {
         v-if="actionMessage"
         role="status"
         data-testid="refund-action-success"
-        style="background-color: #f0fdf4; border: 1px solid #86efac; color: #166534; padding: 12px 18px; border-radius: var(--radius-card, 8px); margin-bottom: 20px; font-family: var(--font-body, Inter, sans-serif); font-size: 13.5px; font-weight: 600;"
+        style="background-color: var(--color-success-bg); border: 1px solid var(--color-success); color: var(--color-success-text); padding: 12px 18px; border-radius: var(--radius-card, 8px); margin-bottom: 20px; font-family: var(--font-body, Inter, sans-serif); font-size: 13.5px; font-weight: 600;"
       >
         ✅ {{ actionMessage }}
       </div>
@@ -593,7 +593,7 @@ export const CoordinatorRefundsTab = {
       <!-- Filters toolbar -->
       <div
         class="vg-card"
-        style="border-radius: var(--radius-card, 8px); padding: 14px 18px; margin-bottom: 20px; background: #ffffff; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;"
+        style="border-radius: var(--radius-card, 8px); padding: 14px 18px; margin-bottom: 20px; background: var(--color-surface-card); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;"
       >
         <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; flex: 1 1 auto;">
           <select
@@ -609,12 +609,12 @@ export const CoordinatorRefundsTab = {
             </option>
           </select>
 
-          <label style="display: flex; align-items: center; gap: 8px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; font-weight: 600; color: #92400e; cursor: pointer; min-height: 44px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; font-weight: 600; color: var(--color-warning-text); cursor: pointer; min-height: 44px;">
             <input
               type="checkbox"
               :checked="approvalOnly"
               data-testid="refund-approval-filter"
-              style="width: 18px; height: 18px; accent-color: #f8b60f;"
+              style="width: 18px; height: 18px; accent-color: var(--color-warning);"
               @change="toggleApprovalOnly($event.target.checked)"
             />
             Solo pendientes de visto bueno
@@ -630,21 +630,21 @@ export const CoordinatorRefundsTab = {
           />
         </div>
 
-        <div style="font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
+        <div style="font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-ink-muted, var(--color-ink-muted));">
           Mostrando {{ filteredItems.length }} de {{ total }} expediente(s)
         </div>
       </div>
 
       <!-- Loading / Error / Empty / Refunds table -->
       <div v-if="loading && !hasItems" style="text-align: center; padding: 48px;">
-        <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 15px; color: var(--color-slate, #2c333f);">
+        <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 15px; color: var(--color-slate, var(--color-ink-slate));">
           Cargando la bandeja global de reintegros...
         </p>
       </div>
 
       <div
         v-else-if="error"
-        style="background-color: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; padding: 16px; border-radius: var(--radius-card, 8px); margin-bottom: 24px; text-align: center;"
+        style="background-color: var(--color-urgency-critical-bg); border: 1px solid var(--color-error); color: var(--color-error-text); padding: 16px; border-radius: var(--radius-card, 8px); margin-bottom: 24px; text-align: center;"
       >
         <p style="margin: 0 0 10px 0;">{{ error }}</p>
         <button type="button" class="vg-btn vg-btn-secondary" @click="loadRefunds">Reintentar</button>
@@ -652,25 +652,25 @@ export const CoordinatorRefundsTab = {
 
       <div
         v-else-if="!filteredItems.length"
-        style="text-align: center; padding: 48px; background-color: #ffffff; border: 1px dashed var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px);"
+        style="text-align: center; padding: 48px; background-color: var(--color-surface-card); border: 1px dashed var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-card, 8px);"
       >
-        <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 14px; color: var(--color-ink-muted, #6c7e9d); margin: 0;">
+        <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 14px; color: var(--color-ink-muted, var(--color-ink-muted)); margin: 0;">
           No hay expedientes de reintegro con los filtros seleccionados.
         </p>
       </div>
 
-      <div v-else class="vg-card" style="border-radius: var(--radius-card, 8px); overflow: hidden; background: #ffffff;">
+      <div v-else class="vg-card" style="border-radius: var(--radius-card, 8px); overflow: hidden; background: var(--color-surface-card);">
         <div style="overflow-x: auto;">
           <table style="width: 100%; border-collapse: collapse; font-family: var(--font-body, Inter, sans-serif); font-size: 13px;">
             <thead>
-              <tr style="background-color: #f8fafc; border-bottom: 1px solid var(--color-hairline, #c8cfda); text-align: left;">
-                <th style="padding: 12px 16px; font-weight: 600; color: #475569;">Expediente</th>
-                <th style="padding: 12px 16px; font-weight: 600; color: #475569;">Sede / Máquina</th>
-                <th style="padding: 12px 16px; font-weight: 600; color: #475569;">Afectado</th>
-                <th style="padding: 12px 16px; font-weight: 600; color: #475569; text-align: right;">Reclamado / A pagar</th>
-                <th style="padding: 12px 16px; font-weight: 600; color: #475569;">Dictamen técnico</th>
-                <th style="padding: 12px 16px; font-weight: 600; color: #475569; text-align: center;">Estado</th>
-                <th style="padding: 12px 16px; font-weight: 600; color: #475569; text-align: right;">Resolución</th>
+              <tr style="background-color: var(--color-surface-card); border-bottom: 1px solid var(--color-hairline, var(--color-hairline)); text-align: left;">
+                <th style="padding: 12px 16px; font-weight: 600; color: var(--color-ink-secondary);">Expediente</th>
+                <th style="padding: 12px 16px; font-weight: 600; color: var(--color-ink-secondary);">Sede / Máquina</th>
+                <th style="padding: 12px 16px; font-weight: 600; color: var(--color-ink-secondary);">Afectado</th>
+                <th style="padding: 12px 16px; font-weight: 600; color: var(--color-ink-secondary); text-align: right;">Reclamado / A pagar</th>
+                <th style="padding: 12px 16px; font-weight: 600; color: var(--color-ink-secondary);">Dictamen técnico</th>
+                <th style="padding: 12px 16px; font-weight: 600; color: var(--color-ink-secondary); text-align: center;">Estado</th>
+                <th style="padding: 12px 16px; font-weight: 600; color: var(--color-ink-secondary); text-align: right;">Resolución</th>
               </tr>
             </thead>
             <tbody>
@@ -679,41 +679,41 @@ export const CoordinatorRefundsTab = {
                 :key="refund.id"
                 :data-testid="'refund-row-' + refund.id"
                 :style="{
-                  borderBottom: '1px solid #f1f5f9',
-                  backgroundColor: refund.requires_approval ? '#fef8e7' : '#ffffff'
+                  borderBottom: '1px solid var(--color-canvas)',
+                  backgroundColor: refund.requires_approval ? 'var(--color-warning-bg)' : 'var(--color-surface-card)'
                 }"
               >
                 <td style="padding: 12px 16px;">
-                  <div style="font-family: monospace; font-weight: 700; color: #0f172a; font-size: 13.5px;">
+                  <div style="font-family: monospace; font-weight: 700; color: var(--color-ink-slate); font-size: 13.5px;">
                     {{ refund.incident_code || ('RE-' + refund.id) }}
                   </div>
-                  <div style="font-size: 12px; color: #596579;">
+                  <div style="font-size: 12px; color: var(--color-ink-muted);">
                     {{ formatDate(refund.created_at) }}
                   </div>
                 </td>
 
-                <td style="padding: 12px 16px; color: #334155;">
+                <td style="padding: 12px 16px; color: var(--color-ink-secondary);">
                   <div style="font-weight: 600;">{{ refund.location_name || 'Sede no especificada' }}</div>
-                  <div style="font-size: 12px; color: #596579;">{{ refund.machine_code || 'N/D' }}</div>
+                  <div style="font-size: 12px; color: var(--color-ink-muted);">{{ refund.machine_code || 'N/D' }}</div>
                 </td>
 
-                <td style="padding: 12px 16px; color: #334155;">
+                <td style="padding: 12px 16px; color: var(--color-ink-secondary);">
                   <div style="font-weight: 600;">{{ refund.claimant_name }}</div>
-                  <div style="font-size: 12px; color: #596579;">{{ compensationLabel(refund.compensation_method) }}</div>
+                  <div style="font-size: 12px; color: var(--color-ink-muted);">{{ compensationLabel(refund.compensation_method) }}</div>
                 </td>
 
                 <td style="padding: 12px 16px; text-align: right;">
-                  <div style="font-weight: 700; color: #0f172a;">{{ formatAmount(refund.claimed_amount) }}</div>
-                  <div style="font-size: 12px; color: #166534;">A pagar: {{ formatAmount(refund.payable_amount) }}</div>
+                  <div style="font-weight: 700; color: var(--color-ink-slate);">{{ formatAmount(refund.claimed_amount) }}</div>
+                  <div style="font-size: 12px; color: var(--color-success-text);">A pagar: {{ formatAmount(refund.payable_amount) }}</div>
                 </td>
 
-                <td style="padding: 12px 16px; color: #334155;">
+                <td style="padding: 12px 16px; color: var(--color-ink-secondary);">
                   <div style="font-weight: 600;">{{ findingLabel(refund.technician_finding) }}</div>
-                  <div style="font-size: 12px; color: #596579;">{{ custodyLabel(refund.cash_custody_action) }}</div>
+                  <div style="font-size: 12px; color: var(--color-ink-muted);">{{ custodyLabel(refund.cash_custody_action) }}</div>
                   <div
                     v-if="discrepancyLabel(refund)"
                     data-testid="discrepancy-note"
-                    style="margin-top: 4px; font-size: 12px; font-weight: 700; color: #b45309;"
+                    style="margin-top: 4px; font-size: 12px; font-weight: 700; color: var(--color-warning-text);"
                   >
                     ⚠️ {{ discrepancyLabel(refund) }}
                   </div>
@@ -726,7 +726,7 @@ export const CoordinatorRefundsTab = {
                       display: 'inline-flex',
                       alignItems: 'center',
                       padding: '4px 10px',
-                      borderRadius: '4px',
+                      borderRadius: var(--radius-interactive)',
                       fontSize: '11px',
                       fontWeight: '700',
                       backgroundColor: statusMeta(refund.status).bg,
@@ -739,7 +739,7 @@ export const CoordinatorRefundsTab = {
                   <div
                     v-if="refund.requires_special_supervision"
                     data-testid="special-supervision-flag"
-                    style="margin-top: 4px; font-size: 11px; font-weight: 700; color: #b91c1c;"
+                    style="margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--color-error-text);"
                   >
                     Supervisión especial (&gt; 10,00 € / discrepancia)
                   </div>
@@ -772,7 +772,7 @@ export const CoordinatorRefundsTab = {
                       type="button"
                       class="vg-btn vg-btn-secondary"
                       :data-testid="'reject-refund-' + refund.id"
-                      style="font-size: 12px; min-height: 36px; padding: 0 10px; border-radius: var(--radius-interactive, 4px); color: #b91c1c;"
+                      style="font-size: 12px; min-height: 36px; padding: 0 10px; border-radius: var(--radius-interactive, 4px); color: var(--color-error-text);"
                       @click="openRejectModal(refund)"
                     >
                       Desestimar
@@ -796,17 +796,17 @@ export const CoordinatorRefundsTab = {
         @close="closeApprovalModal"
       >
         <form v-if="selectedRefund" data-testid="approval-modal-body" @submit.prevent="submitApproval">
-          <div style="background-color: #fafbfc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-bottom: 16px; font-size: 13px;">
+          <div style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-bottom: 16px; font-size: 13px;">
             <div style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px;">
-              <span style="color: #596579;">Importe reclamado</span>
+              <span style="color: var(--color-ink-muted);">Importe reclamado</span>
               <strong>{{ formatAmount(selectedRefund.claimed_amount) }}</strong>
             </div>
             <div style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px;">
-              <span style="color: #596579;">Efectivo recuperado</span>
+              <span style="color: var(--color-ink-muted);">Efectivo recuperado</span>
               <strong>{{ selectedRefund.recovered_amount === null || selectedRefund.recovered_amount === undefined ? 'No consta' : formatAmount(selectedRefund.recovered_amount) }}</strong>
             </div>
             <div style="display: flex; justify-content: space-between; gap: 12px;">
-              <span style="color: #596579;">Vía solicitada</span>
+              <span style="color: var(--color-ink-muted);">Vía solicitada</span>
               <strong>{{ compensationLabel(selectedRefund.compensation_method) }}</strong>
             </div>
           </div>
@@ -815,22 +815,22 @@ export const CoordinatorRefundsTab = {
             v-if="discrepancyLabel(selectedRefund)"
             role="alert"
             data-testid="approval-discrepancy-alert"
-            style="background-color: #fef8e7; border: 1px solid #f8b60f; color: #92400e; padding: 10px 12px; border-radius: var(--radius-interactive, 4px); font-size: 12.5px; margin-bottom: 16px; line-height: 1.45;"
+            style="background-color: var(--color-warning-bg); border: 1px solid var(--color-warning); color: var(--color-warning-text); padding: 10px 12px; border-radius: var(--radius-interactive, 4px); font-size: 12.5px; margin-bottom: 16px; line-height: 1.45;"
           >
             ⚠️ Discrepancia de saldo: {{ discrepancyLabel(selectedRefund) }}. Autorice la cuantía final según el histórico de ventas de la máquina (RF-REF-08).
           </div>
 
-          <div style="margin-bottom: 16px; font-size: 13px; line-height: 1.5; color: #2c333f;">
+          <div style="margin-bottom: 16px; font-size: 13px; line-height: 1.5; color: var(--color-ink-slate);">
             <div style="font-weight: 700; margin-bottom: 4px;">Dictamen técnico</div>
             <div>{{ findingLabel(selectedRefund.technician_finding) }} · {{ custodyLabel(selectedRefund.cash_custody_action) }}</div>
-            <p v-if="selectedRefund.technician_justification" style="margin: 6px 0 0; color: #596579; font-size: 12.5px;">
+            <p v-if="selectedRefund.technician_justification" style="margin: 6px 0 0; color: var(--color-ink-muted); font-size: 12.5px;">
               «{{ selectedRefund.technician_justification }}»
             </p>
           </div>
 
           <div style="margin-bottom: 16px;">
-            <label for="approval-amount" style="display: block; font-size: 13px; font-weight: 600; color: #2c333f; margin-bottom: 6px;">
-              Cuantía final autorizada (€) <span style="color: #dc2626;">*</span>
+            <label for="approval-amount" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-ink-slate); margin-bottom: 6px;">
+              Cuantía final autorizada (€) <span style="color: var(--color-urgency-critical);">*</span>
             </label>
             <input
               id="approval-amount"
@@ -842,17 +842,17 @@ export const CoordinatorRefundsTab = {
               inputmode="decimal"
               data-testid="approval-amount-input"
               :disabled="isApproving"
-              style="box-sizing: border-box; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); font-family: var(--font-body, Inter, sans-serif); font-size: 14px;"
+              style="box-sizing: border-box; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-interactive, 4px); font-family: var(--font-body, Inter, sans-serif); font-size: 14px;"
               @input="setApprovalAmount($event.target.value)"
             />
-            <small style="display: block; margin-top: 4px; font-size: 12px; color: #596579;">
+            <small style="display: block; margin-top: 4px; font-size: 12px; color: var(--color-ink-muted);">
               Tope antifraude: 50,00 € por reclamación. La autorización superior a 10,00 € exige este doble visto bueno.
             </small>
           </div>
 
           <div style="margin-bottom: 16px;">
-            <label for="approval-notes" style="display: block; font-size: 13px; font-weight: 600; color: #2c333f; margin-bottom: 6px;">
-              Notas de la decisión <span style="font-size: 11px; color: #6c7e9d;">(opcional)</span>
+            <label for="approval-notes" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-ink-slate); margin-bottom: 6px;">
+              Notas de la decisión <span style="font-size: 11px; color: var(--color-ink-muted);">(opcional)</span>
             </label>
             <textarea
               id="approval-notes"
@@ -862,7 +862,7 @@ export const CoordinatorRefundsTab = {
               data-testid="approval-notes-input"
               :disabled="isApproving"
               placeholder="Ej: Comprobado el registro de ventas y el corte de stock; se autoriza la devolución íntegra."
-              style="box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); font-family: var(--font-body, Inter, sans-serif); font-size: 13px;"
+              style="box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-interactive, 4px); font-family: var(--font-body, Inter, sans-serif); font-size: 13px;"
               @input="approvalNotes = $event.target.value"
             ></textarea>
           </div>
@@ -871,12 +871,12 @@ export const CoordinatorRefundsTab = {
             v-if="approvalError"
             role="alert"
             data-testid="approval-error"
-            style="background-color: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; padding: 10px 12px; border-radius: var(--radius-interactive, 4px); font-size: 13px; margin-bottom: 16px;"
+            style="background-color: var(--color-urgency-critical-bg); border: 1px solid var(--color-error); color: var(--color-error-text); padding: 10px 12px; border-radius: var(--radius-interactive, 4px); font-size: 13px; margin-bottom: 16px;"
           >
             {{ approvalError }}
           </div>
 
-          <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--color-hairline, #c8cfda); padding-top: 16px;">
+          <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--color-hairline, var(--color-hairline)); padding-top: 16px;">
             <button type="button" class="vg-btn vg-btn-secondary" :disabled="isApproving" @click="closeApprovalModal">
               Cancelar
             </button>
@@ -904,29 +904,29 @@ export const CoordinatorRefundsTab = {
         @close="closePaymentModal"
       >
         <form v-if="selectedRefund" data-testid="payment-modal-body" @submit.prevent="submitPayment">
-          <div style="background-color: #fafbfc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-bottom: 16px; font-size: 13px;">
+          <div style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-bottom: 16px; font-size: 13px;">
             <div style="font-weight: 700; margin-bottom: 8px;">Destino del pago</div>
             <div style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px;">
-              <span style="color: #596579;">Vía</span>
+              <span style="color: var(--color-ink-muted);">Vía</span>
               <strong>{{ compensationLabel(selectedRefund.compensation_method) }}</strong>
             </div>
             <div v-if="selectedRefund.compensation_method === 'BIZUM'" style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px;">
-              <span style="color: #596579;">Teléfono Bizum</span>
+              <span style="color: var(--color-ink-muted);">Teléfono Bizum</span>
               <strong style="font-family: monospace;">{{ selectedRefund.bizum_phone || 'No informado' }}</strong>
             </div>
             <div v-if="selectedRefund.compensation_method === 'TRANSFERENCIA_BANCARIA'" style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px;">
-              <span style="color: #596579;">IBAN</span>
+              <span style="color: var(--color-ink-muted);">IBAN</span>
               <strong style="font-family: monospace; font-size: 12px;">{{ selectedRefund.iban || 'No informado' }}</strong>
             </div>
             <div style="display: flex; justify-content: space-between; gap: 12px;">
-              <span style="color: #596579;">Afectado</span>
+              <span style="color: var(--color-ink-muted);">Afectado</span>
               <strong>{{ selectedRefund.claimant_name }} · {{ selectedRefund.claimant_contact }}</strong>
             </div>
           </div>
 
           <div style="margin-bottom: 16px;">
-            <label for="payment-amount" style="display: block; font-size: 13px; font-weight: 600; color: #2c333f; margin-bottom: 6px;">
-              Importe liquidado (€) <span style="color: #dc2626;">*</span>
+            <label for="payment-amount" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-ink-slate); margin-bottom: 6px;">
+              Importe liquidado (€) <span style="color: var(--color-urgency-critical);">*</span>
             </label>
             <input
               id="payment-amount"
@@ -937,14 +937,14 @@ export const CoordinatorRefundsTab = {
               inputmode="decimal"
               data-testid="payment-amount-input"
               :disabled="isPaying"
-              style="box-sizing: border-box; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); font-family: var(--font-body, Inter, sans-serif); font-size: 14px;"
+              style="box-sizing: border-box; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-interactive, 4px); font-family: var(--font-body, Inter, sans-serif); font-size: 14px;"
               @input="setPaymentAmount($event.target.value)"
             />
           </div>
 
           <div style="margin-bottom: 16px;">
-            <label for="payment-reference" style="display: block; font-size: 13px; font-weight: 600; color: #2c333f; margin-bottom: 6px;">
-              Referencia del justificante bancario o de Bizum <span style="color: #dc2626;">*</span>
+            <label for="payment-reference" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-ink-slate); margin-bottom: 6px;">
+              Referencia del justificante bancario o de Bizum <span style="color: var(--color-urgency-critical);">*</span>
             </label>
             <input
               id="payment-reference"
@@ -955,10 +955,10 @@ export const CoordinatorRefundsTab = {
               data-testid="payment-reference-input"
               :disabled="isPaying"
               placeholder="Ej: BIZUM-20261001-998822"
-              style="box-sizing: border-box; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); font-family: var(--font-body, Inter, sans-serif); font-size: 14px;"
+              style="box-sizing: border-box; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-interactive, 4px); font-family: var(--font-body, Inter, sans-serif); font-size: 14px;"
               @input="paymentReference = $event.target.value"
             />
-            <small style="display: block; margin-top: 4px; font-size: 12px; color: #596579;">
+            <small style="display: block; margin-top: 4px; font-size: 12px; color: var(--color-ink-muted);">
               Sin esta referencia no existe asiento contable que justifique la salida de dinero (RF-REF-07).
             </small>
           </div>
@@ -967,12 +967,12 @@ export const CoordinatorRefundsTab = {
             v-if="paymentError"
             role="alert"
             data-testid="payment-error"
-            style="background-color: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; padding: 10px 12px; border-radius: var(--radius-interactive, 4px); font-size: 13px; margin-bottom: 16px;"
+            style="background-color: var(--color-urgency-critical-bg); border: 1px solid var(--color-error); color: var(--color-error-text); padding: 10px 12px; border-radius: var(--radius-interactive, 4px); font-size: 13px; margin-bottom: 16px;"
           >
             {{ paymentError }}
           </div>
 
-          <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--color-hairline, #c8cfda); padding-top: 16px;">
+          <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--color-hairline, var(--color-hairline)); padding-top: 16px;">
             <button type="button" class="vg-btn vg-btn-secondary" :disabled="isPaying" @click="closePaymentModal">
               Cancelar
             </button>
@@ -1000,13 +1000,13 @@ export const CoordinatorRefundsTab = {
         @close="closeRejectModal"
       >
         <form v-if="selectedRefund" data-testid="reject-modal-body" @submit.prevent="submitRejection">
-          <p style="font-size: 13px; color: #2c333f; margin: 0 0 14px 0; line-height: 1.5;">
+          <p style="font-size: 13px; color: var(--color-ink-slate); margin: 0 0 14px 0; line-height: 1.5;">
             La reclamación quedará en estado <strong>DESESTIMADO</strong> con su motivo escrito. Nada se elimina: el expediente completo se conserva para auditoría (Art. III).
           </p>
 
           <div style="margin-bottom: 16px;">
-            <label for="rejection-reason" style="display: block; font-size: 13px; font-weight: 600; color: #2c333f; margin-bottom: 6px;">
-              Motivo de la desestimación <span style="color: #dc2626;">*</span> (mínimo 20 caracteres)
+            <label for="rejection-reason" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-ink-slate); margin-bottom: 6px;">
+              Motivo de la desestimación <span style="color: var(--color-urgency-critical);">*</span> (mínimo 20 caracteres)
             </label>
             <textarea
               id="rejection-reason"
@@ -1016,10 +1016,10 @@ export const CoordinatorRefundsTab = {
               data-testid="rejection-reason-input"
               :disabled="isRejecting"
               placeholder="Ej: Inspección técnica sin monedas atascadas y máquina operando con normalidad según auditoría de ventas."
-              style="box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); font-family: var(--font-body, Inter, sans-serif); font-size: 13px;"
+              style="box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-interactive, 4px); font-family: var(--font-body, Inter, sans-serif); font-size: 13px;"
               @input="rejectionReason = $event.target.value"
             ></textarea>
-            <small style="display: block; margin-top: 4px; font-size: 12px; color: #596579;">
+            <small style="display: block; margin-top: 4px; font-size: 12px; color: var(--color-ink-muted);">
               {{ rejectionReason.trim().length }} / 20 caracteres
             </small>
           </div>
@@ -1028,12 +1028,12 @@ export const CoordinatorRefundsTab = {
             v-if="rejectionError"
             role="alert"
             data-testid="rejection-error"
-            style="background-color: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; padding: 10px 12px; border-radius: var(--radius-interactive, 4px); font-size: 13px; margin-bottom: 16px;"
+            style="background-color: var(--color-urgency-critical-bg); border: 1px solid var(--color-error); color: var(--color-error-text); padding: 10px 12px; border-radius: var(--radius-interactive, 4px); font-size: 13px; margin-bottom: 16px;"
           >
             {{ rejectionError }}
           </div>
 
-          <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--color-hairline, #c8cfda); padding-top: 16px;">
+          <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--color-hairline, var(--color-hairline)); padding-top: 16px;">
             <button type="button" class="vg-btn vg-btn-secondary" :disabled="isRejecting" @click="closeRejectModal">
               Volver
             </button>

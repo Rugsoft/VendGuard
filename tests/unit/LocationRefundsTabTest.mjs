@@ -125,8 +125,9 @@ assert('1.2 The list stores the three site cases', tab.hasRefunds && tab.refunds
 assert('1.3 readyForPickupCount counts only envelopes physically at reception', tab.readyForPickupCount === 1);
 assert('1.4 The envelope row keeps the anonymized claimant name', tab.refunds[0].claimant_name_anon === 'Laura S.');
 assert('1.5 Status labels are rendered in Spanish', tab.statusMeta('DEPOSITED_AT_RECEPTION').label.includes('conserjería'));
-assert('1.6 Rejected cases are visually flagged as an error state',
-  tab.statusMeta('REJECTED').color === '#b91c1c' && tab.statusMeta('REJECTED').bg === '#fee2e2');
+assert('1.6 Rejected cases are visually flagged as an error state using the institutional tokens (RNF-REF-05)',
+  tab.statusMeta('REJECTED').color === 'var(--color-error-text)'
+    && tab.statusMeta('REJECTED').bg === 'var(--color-urgency-critical-bg)');
 assert('1.7 Amounts are formatted with two decimals', tab.formatAmount(2.5) === '2.50 €');
 assert('1.8 A load failure surfaces a retryable error state', await (async () => {
   const failingTab = createTab();

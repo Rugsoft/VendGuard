@@ -523,6 +523,91 @@ try {
         '6.2 Los expedientes desestimados siguen consultables para auditoría',
         (int)$pdo->query("SELECT COUNT(*) FROM `refund_requests` WHERE `status` = 'REJECTED' AND `coordinator_justification` IS NOT NULL")->fetchColumn() >= 1
     );
+
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 7. Rendimiento en servidor (RNF-REF-02) ---\n";
+    // ─────────────────────────────────────────────────────────────────────
+    // RNF-REF-02 exige que la consulta de la bandeja y el procesamiento de
+    // cambios de estado terminen por debajo de 150 ms en servidor. El requisito
+    // llevaba meses declarado en la matriz de trazabilidad sin que NINGUNA
+    // prueba lo midiera: esta sección es la que lo convierte en una afirmación
+    // verificada en vez de una intención.
+    //
+    // Por qué la mediana y no una única muestra: una aserción de latencia sobre
+    // una sola ejecución mide el ruido del sistema operativo tanto como el
+    // código, y en un portátil con el antivirus y el IDE abiertos es una bomba
+    // de intermitencias. Con 40 muestras la mediana sigue la señal y descarta
+    // los picos, que es lo que se quiere evaluar.
+    $PERFORMANCE_LIMIT_MS = 150.0;
+    $medianMs = static function (callable $work, int $runs = 40) use ($pdo): array {
+        $samples = [];
+        for ($i = 0; $i < $runs; $i++) {
+            $start = microtime(true);
+            $work();
+            $samples[] = (microtime(true) - $start) * 1000;
+        }
+        sort($samples);
+
+        return [
+            'median' => $samples[(int)floor($runs / 2)],
+            'worst' => $samples[$runs - 1],
+        ];
+    };
+
+    $inboxTiming = $medianMs(static fn () => $repo->findForCoordinator());
+    $locationTiming = $medianMs(static fn () => $repo->findRestrictedByLocation($locationId));
+    $transitionTiming = $medianMs(static function () use ($repo, $freshCaseId) {
+        $repo->transitionStatus(
+            $freshCaseId,
+            RefundStatus::PENDING_INSPECTION,
+            RefundStatus::VERIFIED_PENDING_PAYMENT,
+            ['technician_finding' => TechnicianFinding::CONFIRMED_NO_CASH->value]
+        );
+    });
+
+    $assert(
+        '7.1 La consulta de la bandeja de Coordinación va por debajo de 150 ms (RNF-REF-02)',
+        $inboxTiming['median'] < $PERFORMANCE_LIMIT_MS,
+        sprintf('mediana: %.3f ms | peor: %.3f ms | límite: %.0f ms', $inboxTiming['median'], $inboxTiming['worst'], $PERFORMANCE_LIMIT_MS)
+    );
+    $assert(
+        '7.2 El listado restringido de sede va por debajo de 150 ms',
+        $locationTiming['median'] < $PERFORMANCE_LIMIT_MS,
+        sprintf('mediana: %.3f ms | peor: %.3f ms', $locationTiming['median'], $locationTiming['worst'])
+    );
+    $assert(
+        '7.3 El procesamiento de un cambio de estado va por debajo de 150 ms',
+        $transitionTiming['median'] < $PERFORMANCE_LIMIT_MS,
+        sprintf('mediana: %.3f ms | peor: %.3f ms', $transitionTiming['median'], $transitionTiming['worst'])
+    );
+
+    // Una mediana holgada no basta: el objetivo es que ni siquiera la muestra
+    // peor se acerque al umbral con la maquina cargada. Se exige margen para
+    // que una excepcion aislada del sistema no tumbe la bateria, sin tolerar
+    // que el caso tipico se acerque al limite.
+    $assert(
+        '7.4 El caso típico conserva margen de sobra sobre el umbral',
+        $inboxTiming['median'] < $PERFORMANCE_LIMIT_MS / 4,
+        sprintf('mediana: %.3f ms | cuarto de umbral: %.1f ms', $inboxTiming['median'], $PERFORMANCE_LIMIT_MS / 4)
+    );
+    $assert(
+        '7.5 Ni una sola de las 40 muestras se acerca al límite',
+        $inboxTiming['worst'] < $PERFORMANCE_LIMIT_MS / 2,
+        sprintf('peor: %.3f ms | mitad del umbral: %.1f ms', $inboxTiming['worst'], $PERFORMANCE_LIMIT_MS / 2)
+    );
+
+    // Los índices que sostienen esa latencia están declarados en la migración;
+    // sin ellos la consulta degrada a un barrido completo en cuanto la tabla
+    // crezca, que es justo lo que el requisito pretende evitar.
+    $indexed = (int)$pdo->query('
+        SELECT COUNT(*) FROM information_schema.statistics
+        WHERE table_schema = DATABASE() AND table_name = \'refund_requests\'
+    ')->fetchColumn();
+    $assert(
+        '7.6 La tabla tiene los índices que hacen posible el rendimiento (008)',
+        $indexed >= 2,
+        'índices en refund_requests: ' . $indexed
+    );
 } finally {
     $pdo->rollBack();
 }

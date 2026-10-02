@@ -219,63 +219,63 @@ export const TechnicianResolutionRefundBlock = {
     }
   },
   template: `
-    <section v-if="hasPendingRequests || canRegisterUnclaimedCash" class="technician-resolution-refund-block" data-testid="technician-resolution-refund-block" style="margin-bottom: 16px; padding: 16px; background: #ffffff; border: 1px solid #c8cfda; border-radius: 8px;">
-      <h3 style="margin: 0 0 6px; font-size: 16px; color: #2c333f;">💶 Efectivo retenido (RF-REF-04/05)</h3>
-      <p style="margin: 0 0 14px; color: #596579; font-size: 12px; line-height: 1.45;">
+    <section v-if="hasPendingRequests || canRegisterUnclaimedCash" class="technician-resolution-refund-block" data-testid="technician-resolution-refund-block" style="margin-bottom: 16px; padding: 16px; background: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card);">
+      <h3 style="margin: 0 0 6px; font-size: 16px; color: var(--color-ink-slate);">💶 Efectivo retenido (RF-REF-04/05)</h3>
+      <p style="margin: 0 0 14px; color: var(--color-ink-muted); font-size: 12px; line-height: 1.45;">
         {{ hasPendingRequests ? 'Esta avería tiene reclamaciones pendientes: registra el dictamen antes de resolver.' : 'Si encuentras monedas atascadas sin reclamación previa, puedes anotarlas aquí.' }}
       </p>
 
       <div v-if="hasPendingRequests" data-testid="pending-refund-requests" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;">
-        <article v-for="request in refundRequests" :key="request.id" style="padding: 10px 12px; background: #f9fafb; border: 1px solid #c8cfda; border-radius: 4px;">
+        <article v-for="request in refundRequests" :key="request.id" style="padding: 10px 12px; background: var(--color-canvas); border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive);">
           <strong>{{ Number(request.claimed_amount).toFixed(2) }} €</strong>
           <span v-if="request.product_attempted"> · {{ request.product_attempted }}</span>
-          <p style="margin: 4px 0 0; color: #596579; font-size: 12px;">{{ request.custody_instruction }}</p>
+          <p style="margin: 4px 0 0; color: var(--color-ink-muted); font-size: 12px;">{{ request.custody_instruction }}</p>
         </article>
       </div>
 
       <fieldset v-if="hasPendingRequests" style="padding: 0; margin: 0; border: 0;" :disabled="disabled">
         <legend style="margin-bottom: 8px; font-size: 13px; font-weight: 700;">Dictamen de saldo obligatorio</legend>
         <div style="display: grid; gap: 8px;">
-          <button v-for="option in findingOptions" :key="option.value" type="button" :aria-pressed="finding === option.value" :data-testid="'finding-' + option.value" @click="setFinding(option.value)" :style="{ minHeight: '48px', padding: '10px 12px', textAlign: 'left', font: 'inherit', fontSize: '13px', fontWeight: finding === option.value ? '700' : '500', color: finding === option.value ? '#003db5' : '#2c333f', background: finding === option.value ? '#e5f2fc' : '#ffffff', border: '1px solid ' + (finding === option.value ? '#2560ff' : '#c8cfda'), borderRadius: '4px', cursor: disabled ? 'not-allowed' : 'pointer' }">{{ option.label }}</button>
+          <button v-for="option in findingOptions" :key="option.value" type="button" :aria-pressed="finding === option.value" :data-testid="'finding-' + option.value" @click="setFinding(option.value)" :style="{ minHeight: '48px', padding: '10px 12px', textAlign: 'left', font: 'inherit', fontSize: '13px', fontWeight: finding === option.value ? '700' : '500', color: finding === option.value ? 'var(--color-primary-dark)' : 'var(--color-ink-slate)', background: finding === option.value ? 'var(--color-primary-subtle)' : 'var(--color-surface-card)', border: '1px solid ' + (finding === option.value ? 'var(--color-primary)' : 'var(--color-hairline)'), borderRadius: var(--radius-interactive)', cursor: disabled ? 'not-allowed' : 'pointer' }">{{ option.label }}</button>
         </div>
 
-        <div v-if="finding === 'FOUND_PHYSICAL'" style="margin-top: 14px; padding-top: 14px; border-top: 1px solid #e2e8f0;">
+        <div v-if="finding === 'FOUND_PHYSICAL'" style="margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--color-hairline);">
           <label for="refund-recovered-amount" style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600;">Importe exacto recuperado (€) *</label>
-          <input id="refund-recovered-amount" :value="recoveredAmount" @input="setRecoveredAmount($event.target.value)" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0,00" :disabled="disabled" style="box-sizing: border-box; width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid #c8cfda; border-radius: 4px; font: inherit;" />
+          <input id="refund-recovered-amount" :value="recoveredAmount" @input="setRecoveredAmount($event.target.value)" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0,00" :disabled="disabled" style="box-sizing: border-box; width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); font: inherit;" />
 
           <div style="margin-top: 12px;">
             <div style="margin-bottom: 8px; font-size: 13px; font-weight: 600;">Destino del efectivo *</div>
-            <p v-if="requiresCentralCustody" data-testid="central-custody-forced" role="status" style="margin: 0 0 8px; padding: 9px 10px; color: #92400e; background: #fef8e7; border: 1px solid #f8b60f; border-radius: 4px; font-size: 12px;">Por el método de compensación o el importe recuperado, el efectivo debe ir a caja central.</p>
+            <p v-if="requiresCentralCustody" data-testid="central-custody-forced" role="status" style="margin: 0 0 8px; padding: 9px 10px; color: var(--color-warning-text); background: var(--color-warning-bg); border: 1px solid var(--color-warning); border-radius: var(--radius-interactive); font-size: 12px;">Por el método de compensación o el importe recuperado, el efectivo debe ir a caja central.</p>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-              <button type="button" :disabled="disabled || requiresCentralCustody" :aria-pressed="custodyAction === 'LEFT_AT_RECEPTION'" @click="setCustodyAction('LEFT_AT_RECEPTION')" style="min-height: 48px; padding: 8px; border: 1px solid #c8cfda; border-radius: 4px; background: #ffffff; font: inherit; font-size: 12px;">Dejar en conserjería</button>
-              <button type="button" :disabled="disabled" :aria-pressed="custodyAction === 'HELD_FOR_CENTRAL' || requiresCentralCustody" @click="setCustodyAction('HELD_FOR_CENTRAL')" style="min-height: 48px; padding: 8px; border: 1px solid #2560ff; border-radius: 4px; background: #e5f2fc; color: #003db5; font: inherit; font-size: 12px;">Custodiar para caja central</button>
+              <button type="button" :disabled="disabled || requiresCentralCustody" :aria-pressed="custodyAction === 'LEFT_AT_RECEPTION'" @click="setCustodyAction('LEFT_AT_RECEPTION')" style="min-height: 48px; padding: 8px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); background: var(--color-surface-card); font: inherit; font-size: 12px;">Dejar en conserjería</button>
+              <button type="button" :disabled="disabled" :aria-pressed="custodyAction === 'HELD_FOR_CENTRAL' || requiresCentralCustody" @click="setCustodyAction('HELD_FOR_CENTRAL')" style="min-height: 48px; padding: 8px; border: 1px solid var(--color-primary); border-radius: var(--radius-interactive); background: var(--color-primary-subtle); color: var(--color-primary-dark); font: inherit; font-size: 12px;">Custodiar para caja central</button>
             </div>
           </div>
 
           <div v-if="custodyAction === 'LEFT_AT_RECEPTION' && !requiresCentralCustody" style="margin-top: 12px;">
             <label for="refund-receptionist-name" style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600;">Persona que recibe el sobre *</label>
-            <input id="refund-receptionist-name" v-model="receptionistName" type="text" maxlength="100" autocomplete="off" placeholder="Nombre de quien recibe el sobre" :disabled="disabled" style="box-sizing: border-box; width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid #c8cfda; border-radius: 4px; font: inherit;" />
+            <input id="refund-receptionist-name" v-model="receptionistName" type="text" maxlength="100" autocomplete="off" placeholder="Nombre de quien recibe el sobre" :disabled="disabled" style="box-sizing: border-box; width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); font: inherit;" />
           </div>
         </div>
 
         <div v-if="finding === 'UNVERIFIED_NO_CASH'" style="margin-top: 14px;">
           <label for="refund-inspection-justification" style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600;">Justificación (20 caracteres como mínimo) *</label>
-          <textarea id="refund-inspection-justification" v-model="justification" rows="3" minlength="20" :disabled="disabled" placeholder="Describe por qué no hay evidencia de saldo retenido." style="box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #c8cfda; border-radius: 4px; font: inherit;"></textarea>
+          <textarea id="refund-inspection-justification" v-model="justification" rows="3" minlength="20" :disabled="disabled" placeholder="Describe por qué no hay evidencia de saldo retenido." style="box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); font: inherit;"></textarea>
           <small>{{ justification.trim().length }} / 20 caracteres</small>
         </div>
       </fieldset>
 
-      <div v-if="canRegisterUnclaimedCash" style="margin-top: 16px; padding-top: 14px; border-top: 1px solid #e2e8f0;">
+      <div v-if="canRegisterUnclaimedCash" style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--color-hairline);">
         <label style="display: flex; align-items: flex-start; gap: 10px; min-height: 48px; cursor: pointer; font-size: 13px; font-weight: 600;">
-          <input type="checkbox" :checked="includeUnclaimedCash" :disabled="disabled" @change="toggleUnclaimedCash($event.target.checked)" data-testid="unclaimed-cash-toggle" style="width: 20px; height: 20px; margin-top: 2px; accent-color: #2560ff;" />
+          <input type="checkbox" :checked="includeUnclaimedCash" :disabled="disabled" @change="toggleUnclaimedCash($event.target.checked)" data-testid="unclaimed-cash-toggle" style="width: 20px; height: 20px; margin-top: 2px; accent-color: var(--color-primary);" />
           <span>Efectivo atascado recuperado de oficio (sin reclamación previa)</span>
         </label>
         <div v-if="includeUnclaimedCash" style="display: grid; gap: 10px; margin-top: 10px;">
           <label for="unclaimed-cash-amount" style="font-size: 13px; font-weight: 600;">Importe recuperado (€) *</label>
-          <input id="unclaimed-cash-amount" :value="unclaimedAmount" @input="unclaimedAmount = $event.target.value" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0,00" :disabled="disabled" style="box-sizing: border-box; width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid #c8cfda; border-radius: 4px; font: inherit;" />
+          <input id="unclaimed-cash-amount" :value="unclaimedAmount" @input="unclaimedAmount = $event.target.value" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0,00" :disabled="disabled" style="box-sizing: border-box; width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); font: inherit;" />
           <label for="unclaimed-cash-notes" style="font-size: 13px; font-weight: 600;">Observación (opcional)</label>
-          <textarea id="unclaimed-cash-notes" :value="unclaimedNotes" @input="unclaimedNotes = $event.target.value" rows="2" :disabled="disabled" placeholder="Dónde se encontró el efectivo" style="box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #c8cfda; border-radius: 4px; font: inherit;"></textarea>
-          <p style="margin: 0; color: #596579; font-size: 12px;">Este efectivo queda registrado como sobrante no reclamado para caja central.</p>
+          <textarea id="unclaimed-cash-notes" :value="unclaimedNotes" @input="unclaimedNotes = $event.target.value" rows="2" :disabled="disabled" placeholder="Dónde se encontró el efectivo" style="box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); font: inherit;"></textarea>
+          <p style="margin: 0; color: var(--color-ink-muted); font-size: 12px;">Este efectivo queda registrado como sobrante no reclamado para caja central.</p>
         </div>
       </div>
     </section>
