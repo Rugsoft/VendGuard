@@ -695,6 +695,7 @@ $doctrineSuites = [
     'efectivo declarado y sobrante' => 'tests/integration/TechnicianRefundInspectionApiTest.php',
     'sede sin conserjería' => 'tests/unit/TechnicianRefundServiceTest.php',
     'fuerza bruta sobre el PIN' => 'tests/integration/LocationRefundDeliveryApiTest.php',
+    'identidad canónica del reclamante' => 'tests/unit/ClaimantIdentityTest.php',
 ];
 
 $missingSuites = [];
@@ -708,6 +709,45 @@ $assert(
     '6.8 Cada guarda tiene una suite que lo ejecuta contra HTTP y base de datos reales',
     $missingSuites === [],
     json_encode($missingSuites)
+);
+
+// Las tres guardas siguientes cubren los hallazgos de la cuarta tanda
+// adversarial, y tienen una forma distinta a las anteriores: no comprueban que
+// el guarda EXISTA, sino que no se pueda reponer en una sola línea lo que
+// cerró cada hallazgo.
+
+// 6.9 — El rechazo por duplicado no puede volver a llevar la credencial.
+$duplicateGuard = preg_match(
+    '/private function assertNoDuplicateClaim.*?\n    \}/s',
+    $doctrine['refund_service'],
+    $matches
+) === 1 ? $matches[0] : '';
+$assert(
+    '6.9 El 409 de duplicado NO transporta el token de seguimiento (RF-REF-11)',
+    $duplicateGuard !== ''
+    && !str_contains($duplicateGuard, 'getTrackingToken')
+    && !str_contains($doctrine['duplicate_exception'], 'getExistingTrackingToken')
+    && !str_contains($doctrine['duplicate_exception'], 'existing_tracking_token')
+    && !str_contains($doctrine['duplicate_exception'], 'private readonly string $trackingToken'),
+    'el token es la credencial del expediente y no puede salir por un endpoint sin autenticación'
+);
+
+// 6.10 — La identidad del reclamante se compara por forma canónica, no por lo tecleado.
+$claimantIdentity = $read('src/Core/Domain/ValueObject/ClaimantIdentity.php');
+$assert(
+    '6.10 El duplicado se detecta sobre la FORMA CANÓNICA del contacto (RF-REF-11)',
+    str_contains($doctrine['refund_service'], 'ClaimantIdentity::from')
+    && str_contains($claimantIdentity, "preg_replace('/\\D+/u'")
+    && !str_contains($doctrine['refund_service'], 'preg_replace'),
+    'la comparación vive en el objeto de valor; el servicio no normaliza por su cuenta'
+);
+
+// 6.11 — La liquidación es una igualdad, no un techo.
+$assert(
+    '6.11 La liquidación se compara por IGUALDAD, no por techo (RF-REF-03)',
+    str_contains($doctrine['refund_service'], 'abs($dto->paidAmount - $expectedAmount) > self::SETTLEMENT_TOLERANCE')
+    && !str_contains($doctrine['refund_service'], '$dto->paidAmount > $'),
+    'registerDigitalPayment() no puede volver a aceptar cualquier cifra por debajo de la aprobada'
 );
 
 echo "\n======================================================================\n";

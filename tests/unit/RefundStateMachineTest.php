@@ -407,7 +407,22 @@ for ($i = 0; $i < 50; $i++) {
     $pins[] = $service->generatePickupPin();
     $tokens[] = $service->generateTrackingToken();
 }
-$assert('3.4 50 PIN generados son todos distintos (no hay patrón repetido)', count(array_unique($pins)) === 50);
+// ## Por qué 3.4 no puede exigir 50 valores distintos
+// El PIN tiene 9000 valores posibles (1000-9999) y se extrae al azar, así que 50
+// tiradas se repiten por el PARADOJA DEL CUMPLEANOS con probabilidad ~12,7%
+// (1 - Π(1 - i/9000) para i = 0..49). La aserción original fallaba sola una de
+// cada ocho ejecuciones, y una batería que se pone roja sin que nada cambie es
+// una batería a la que se deja de creer. Lo que 3.4 quiere demostrar es que el
+// generador no devuelve un patrón, no que el azar nunca colisione: un
+// generador fijo o casi fijo repite un valor muchas veces y no sobrevive a
+// ninguno de los dos criterios. 3.5, con 2^256 valores posibles, sí puede
+// exigir la unicidad sin significar nada.
+$pinFrequencies = array_count_values($pins);
+$assert(
+    '3.4 50 PIN generados no siguen un patrón (casi 50 valores distintos, ninguno muy repetido)',
+    count($pinFrequencies) >= 45 && max($pinFrequencies) <= 2,
+    'distintos: ' . count($pinFrequencies) . ' | repeticiones máximas: ' . max($pinFrequencies)
+);
 $assert('3.5 50 tokens generados son todos distintos', count(array_unique($tokens)) === 50);
 $assert(
     '3.6 Todos los PIN caen dentro del rango 1000-9999',

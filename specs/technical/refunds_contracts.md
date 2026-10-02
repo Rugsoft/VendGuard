@@ -323,7 +323,9 @@ Permite añadir la reclamación de reintegro en el mismo envío del reporte púb
 
 **Respuesta cuando la avería se fusiona con otra abierta (`200 OK`):** mismo cuerpo, con la clave `merged: true` y el `incident_id` de la avería superviviente. La fusión de averías ya estaba especificada; el reintegro viaja con ella.
 
-*Reclamación duplicada (`409 Conflict`, RF-REF-11):* la unidad protegida es **(avería, consumidor)**. Si ese consumidor ya tiene un expediente **vivo** sobre esa avería, la API no abre un segundo y devuelve el token del que ya existe, para que el usuario recupere su caso en lugar de pagar dos veces:
+*Reclamación duplicada (`409 Conflict`, RF-REF-11):* la unidad protegida es **(avería, consumidor)**, y la comparación se hace sobre la **forma canónica** del medio de contacto (correo en minúsculas; teléfono solo con sus dígitos y sin el prefijo `+34`/`0034`/`34`), de modo que `600 111 222`, `600-111-222`, `+34 600111222` y `600_111_222` son la misma persona y no cuatro. Si ese consumidor ya tiene un expediente **vivo** sobre esa avería, la API no abre un segundo.
+
+La respuesta identifica el expediente afectado y **remite al enlace que el consumidor ya recibió**, pero **no devuelve su token de seguimiento**:
 ```json
 {
   "success": false,
@@ -331,13 +333,14 @@ Permite añadir la reclamación de reintegro en el mismo envío del reporte púb
     "code": "DUPLICATE_REFUND_CLAIM",
     "message": "Ya existe una reclamación viva de esta persona sobre esta avería. Consulte el expediente que ya abrió.",
     "details": {
-      "existing_refund_id": 41,
-      "existing_tracking_token": "a1b2c3d4e5f6789012345678abcdef0123456789abcdef0123456789abcdef01"
+      "existing_refund_id": 41
     }
   }
 }
 ```
 Un expediente ya terminal (`PAID_DIGITAL`, `REFUNDED_IN_HAND`, `REJECTED`) **no** bloquea una reclamación nueva: el derecho a reclamar se reabre cuando el anterior se desestimó.
+
+> **Por qué el token no viaja.** El token de seguimiento **es la credencial** del expediente: con él se lee el estado, se lee el `pickup_pin` mientras el sobre espera en la conserjería y se rectifica el `bizum_phone` del pago. Este endpoint es público y anónimo, así que devolver el token equivale a entregar la llave del reembolso a quien haya acertado con el número de teléfono de otra persona, un dato adivinable que el propio rechazo le confirma. `existing_refund_id` sí viaja porque no es credencial: le dice que su reclamación está en marcha y le permite pedir ayuda en conserjería. Recuperar el acceso es cosa del enlace recibido al abrir la reclamación, nunca de un rechazo (RF-REF-11).
 
 ---
 
@@ -642,9 +645,28 @@ Registra la emisión efectiva del reembolso con su identificador de justificante
 }
 ```
 
-Si se omite `paid_amount`, se liquida el techo del expediente: `min(importe aprobado, 50,00 €)`, o el reclamado si nunca hubo visto bueno formal.
+Si se omite `paid_amount`, se liquida exactamente el importe aprobado, o el reclamado si nunca hubo visto bueno formal.
 
-*Techo de liquidación (RF-REF-03, RF-REF-07):* `paid_amount` debe ser mayor que 0 y no puede superar `min(importe aprobado ?? reclamado, 50,00 €)`; superarlo responde `422 INVALID_REFUND_AMOUNT`. El importe que devuelve la respuesta es el **persistido** en `refund_requests.paid_amount`: la API nunca afirma una cifra distinta de la almacenada.
+*Liquidación por igualdad (RF-REF-03, RF-REF-07):* `paid_amount` debe ser **exactamente** `min(importe aprobado ?? reclamado, 50,00 €)`. Cualquier otra cifra —por encima o por debajo— responde `422 INVALID_REFUND_AMOUNT` con `details.expected_amount`:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "INVALID_REFUND_AMOUNT",
+    "message": "La liquidación debe coincidir exactamente con el importe aprobado del expediente.",
+    "details": {
+      "attempted_amount": 0.01,
+      "maximum_allowed": 4.00,
+      "expected_amount": 4.00
+    }
+  }
+}
+```
+
+Un techo solo acotaba por arriba: `paid_amount: 0.01` sobre un expediente de 4,00 € respondía `200 OK` y saltaba directo a `PAID_DIGITAL`, de modo que el consumidor leía «su devolución ha sido abonada» habiendo cobrado una centésima parte de lo acordado, y los 3,99 € restantes no tenían adónde ir. Como el estado liquidado es terminal, el daño deja de ser corregible en ese momento. **Para pagar menos de lo reclamado hay que bajar antes `approved_amount` mediante el doble visto bueno**, que es exactamente para lo que existe ese endpoint.
+
+La comparación admite una tolerancia de `0,005` (medio céntimo) que existe solo por el residuo de coma flotante de un `DECIMAL(10,2)` —`4.00` llega como `3.9999999999999996`— y nunca como regla de dinero: un céntimo de diferencia sigue siendo un importe distinto y se rechaza. El importe que devuelve la respuesta es el **persistido** en `refund_requests.paid_amount`: la API nunca afirma una cifra distinta de la almacenada.
 
 ---
 
@@ -671,13 +693,14 @@ Desestima una reclamación con justificación obligatoria ($\ge 20$ caracteres).
 | `404 Not Found` | `REFUND_NOT_FOUND` | *"El expediente de reintegro especificado no existe o fue archivado."* | ID o token de seguimiento inexistente. |
 | `409 Conflict` | `INVALID_REFUND_STATE_TRANSITION` | *"La acción solicitada no es válida para el estado actual del expediente."* | Ej. intentar pagar un expediente que ya fue rechazado o entregado en mano. |
 | `422 Unprocessable` | `INVALID_REFUND_AMOUNT` | *"El importe reclamado debe ser mayor a 0,00 € y no puede exceder el límite máximo de 50,00 €."* | Violación del rango de importes (RF-REF-03). |
+| `422 Unprocessable` | `INVALID_REFUND_AMOUNT` | *"La liquidación debe coincidir exactamente con el importe aprobado del expediente."* | `paid_amount` distinto del importe aprobado, por encima o por debajo. `details` incluye `expected_amount` (RF-REF-03, RF-REF-07). |
 | `422 Unprocessable` | `INVALID_IBAN_FORMAT` | *"El código de cuenta bancaria (IBAN) introducido no es válido conforme al algoritmo oficial Módulo 97."* | Fallo en la verificación sintáctica o checksum del IBAN. |
 | `422 Unprocessable` | `INVALID_BIZUM_PHONE` | *"El número de teléfono para Bizum debe contener exactamente 9 dígitos numéricos."* | Formato incorrecto de teléfono móvil. |
 | `422 Unprocessable` | `INVALID_PICKUP_PIN` | *"El PIN de recogida introducido no coincide con el expediente de reintegro."* | Fallo en la verificación de entrega presencial en conserjería. |
 | `422 Unprocessable` | `RECEPTION_DELIVERY_NOT_ALLOWED` | *"No se permite el depósito en conserjería para importes superiores a 10,00 € o con método de compensación digital."* | Intento indebido de marcar `LEFT_AT_RECEPTION` para BIZUM/IBAN o $> 10\ \text{€}$. |
 | `422 Unprocessable` | `JUSTIFICATION_TOO_SHORT` | *"La justificación técnica o de rechazo debe contener un mínimo de 20 caracteres descriptivos."* | Cumplimiento del Art. V.1 de la Constitución. |
 | `422 Unprocessable` | `INVALID_RECOVERED_AMOUNT` | *"El importe de efectivo recuperado no concuerda con las reclamaciones de esta avería. Si se trata de dinero sobrante, regístrelo como efectivo no reclamado."* | Recuperado por encima de lo reclamado, o hallazgo de efectivo no reclamado por encima del tope de 50,00 € (RF-REF-03, RF-REF-04). |
-| `409 Conflict` | `DUPLICATE_REFUND_CLAIM` | *"Ya existe una reclamación viva de esta persona sobre esta avería. Consulte el expediente que ya abrió."* | Segundo escaneo del mismo QR por el mismo consumidor. La respuesta incluye `details.existing_refund_id` y `details.existing_tracking_token` (RF-REF-11). |
+| `409 Conflict` | `DUPLICATE_REFUND_CLAIM` | *"Ya tienes una solicitud de reintegro en marcha sobre esta avería. Consulta el enlace de seguimiento que recibiste al abrirla para seguirla."* | Reclamación duplicada del mismo consumidor sobre la misma avería, comparada por forma canónica del contacto. La respuesta incluye **solo** `details.existing_refund_id`; el token de seguimiento nunca sale por un endpoint sin autenticación (RF-REF-11). |
 | `423 Locked` | `PICKUP_PIN_LOCKED` | *"El PIN de recogida está bloqueado por intentos incorrectos. Inténtelo de nuevo en 15 minutos o solicite un nuevo PIN en el punto de atención."* | Quinto intento fallido de PIN; el bloqueo expira solo (RF-REF-02). |
 
 ---
