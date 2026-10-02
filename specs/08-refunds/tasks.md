@@ -163,3 +163,14 @@
   * **Incidencia:** `fk_refund_incident` y `fk_unclaimed_incident` bloquearon el `DELETE FROM incidents` que repetían 29 suites. Una sola fila de reintegro huérfana reventaba 22 suites a la vez con el error 1451, aunque la primera grieta ya venía de `006_spare_parts` (`fk_requests_incident`, `fk_replaced_incident`).
   * **Hecho cuando:** `php tests/run_all.php` aborta en Fase 0 si cualquier suite de `tests/integration/` o `tests/Manual/` borra `incidents` sin usar `TestDataCleaner`; el orden de borrado se deriva del grafo real de `information_schema` (12 tablas, `incidents` la última) de modo que una FK `RESTRICT` futura queda cubierta sin tocar código; `TestDataCleanerIsolationTest` demuestra que el orden inverso falla con 1451; y la Fase 4 purga y re-siembra para dejar la base en estado conocido.
   * **Documentación:** [`specs/technical/testing_cleanup_contract.md`](../technical/testing_cleanup_contract.md)
+
+---
+
+## Fase 5: Deuda Técnica Cerrada (post T-REF-04, segunda tanda)
+
+- [x] **T-REF-26: Guardia de plantillas del frontend (`FrontendTemplateCompileTest.mjs`)**
+  * **Requisitos:** RNF-REF-05 (sistema de diseño), Constitución Art. IV.1
+  * **Dependencias:** T-REF-24
+  * **Incidencia:** `borderRadius: var(--radius-interactive)'` en tres componentes. `var(--x)` no es JavaScript, así que Vue lanzaba `SyntaxError: Unexpected token 'var'` al compilar la plantilla EN EL MOMENTO de montarla. Las 162 suites estaban en verde porque todas leen `data()`, `methods()` y `computed`, y ninguna mira la plantilla: el coste era cero cobertura real sobre la mitad de la interfaz, porque una vista que no renderiza no puede probarse. Para quien lo recibía no era cosmético: la pestaña de Reintegros quedaba en blanco y el error tumbaba el árbol de reactividad, así que ningún otro clic respondía hasta recargar con F5.
+  * **Hecho cuando:** `php tests/run_all.php` ejecuta `FrontendTemplateCompileTest.mjs` y falla si alguna de las 85 plantillas de `public/assets/js/` lleva JavaScript inválido en un `{{ }}`, un `:attr`, un `@event` o un `v-if`/`v-for`. La suite incluye el control de no-vacuidad (una muestra con el defecto original tiene que ser marcada) y una segunda comprobación, independiente del extractor, que detecta la forma concreta del defecto por la convención kebab-case de CSS frente a camelCase de JavaScript.
+  * **Nota de diseño:** no se usa el `compile()` de `vue.esm-browser.prod.js` porque la build de navegador necesita `document` para decodificar entidades, y en Node sólo cubriría las plantillas sin atributos con comillas dobles. Una cobertura parcial y silenciosa es peor que una comprobación DOM-free que cubre el 100 %, y el proyecto no puede añadir `@vue/compiler-dom` (Art. IV.3).
