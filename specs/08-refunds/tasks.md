@@ -5,6 +5,7 @@
 **Documento:** `specs/08-refunds/tasks.md`  
 **Referencia Funcional:** [`specs/functional/refunds_spec.md`](../functional/refunds_spec.md) (RF-REF-01 a RF-REF-10, RNF-REF-01 a RNF-REF-05)  
 **Contratos Técnicos y DDL:** [`specs/technical/refunds_contracts.md`](../technical/refunds_contracts.md)  
+**Contrato de Limpieza de Pruebas:** [`specs/technical/testing_cleanup_contract.md`](../technical/testing_cleanup_contract.md) (`fk_refund_incident` es `ON DELETE RESTRICT`; toda limpieza de `incidents` en `tests/` pasa por `TestDataCleaner`)  
 **Plan Técnico:** [`specs/08-refunds/plan.md`](plan.md)  
 **Normativa Suprema:** [`constitution.md`](../../constitution.md) (Artículos I al VII)  
 **Directrices Operativas:** [`AGENTS.md`](../../AGENTS.md) (SDD, Dogma Vanilla, Dualismo Lingüístico)  
@@ -151,3 +152,14 @@
   * **Requisitos:** Todos (RF-REF-01 a RF-REF-10, RNF-REF-01 a RNF-REF-05, Constitución Art. I a VII)
   * **Dependencias:** T-REF-01 a T-REF-23
   * **Hecho cuando:** La ejecución de `php tests/run_all.php` completa todas las suites unitarias PHP, unitarias reactivas frontend e integración con 0 fallos y 0 errores; se verifica la ausencia de dependencias externas npm/composer y el cumplimiento estricto del Dualismo Lingüístico.
+
+---
+
+## Fase 5: Deuda Técnica Cerrada (post T-REF-04)
+
+- [x] **T-REF-25: Contrato de limpieza de datos de prueba y barredor de suites (`TestDataCleaner`, `TestDataCleanerIsolationTest`, guardia Fase 0)**
+  * **Requisitos:** Constitución Art. III (Inviolabilidad de datos), RF-REF-01 (FK `fk_refund_incident` con `ON DELETE RESTRICT`)
+  * **Dependencias:** T-REF-01
+  * **Incidencia:** `fk_refund_incident` y `fk_unclaimed_incident` bloquearon el `DELETE FROM incidents` que repetían 29 suites. Una sola fila de reintegro huérfana reventaba 22 suites a la vez con el error 1451, aunque la primera grieta ya venía de `006_spare_parts` (`fk_requests_incident`, `fk_replaced_incident`).
+  * **Hecho cuando:** `php tests/run_all.php` aborta en Fase 0 si cualquier suite de `tests/integration/` o `tests/Manual/` borra `incidents` sin usar `TestDataCleaner`; el orden de borrado se deriva del grafo real de `information_schema` (12 tablas, `incidents` la última) de modo que una FK `RESTRICT` futura queda cubierta sin tocar código; `TestDataCleanerIsolationTest` demuestra que el orden inverso falla con 1451; y la Fase 4 purga y re-siembra para dejar la base en estado conocido.
+  * **Documentación:** [`specs/technical/testing_cleanup_contract.md`](../technical/testing_cleanup_contract.md)
