@@ -694,7 +694,34 @@ export class ApiClient {
   };
 
   /**
-   * 7. QR Code Workflows (RF-01 to RF-05)
+   * 7. Public consumer refund tracking (RF-REF-02, RF-REF-07).
+   * The secure tracking token is the only credential; no session is required.
+   */
+  publicRefunds = {
+    /**
+     * Retrieves the safe public tracking projection for one refund case.
+     * @param {string} trackingToken
+     * @returns {Promise<Object>}
+     */
+    track: (trackingToken) => {
+      const token = encodeURIComponent(String(trackingToken ?? '').trim());
+      return this.get(`/public/refunds/track?token=${token}`);
+    },
+
+    /**
+     * Corrects Bizum or bank transfer details while the case awaits contact.
+     * @param {string} trackingToken
+     * @param {{bizum_phone?: string, iban?: string}} payload
+     * @returns {Promise<Object>}
+     */
+    rectify: (trackingToken, payload) => {
+      const token = encodeURIComponent(String(trackingToken ?? '').trim());
+      return this.patch(`/public/refunds/track?token=${token}`, payload);
+    }
+  };
+
+  /**
+   * 8. QR Code Workflows (RF-01 to RF-05)
    */
   qr = {
     /**

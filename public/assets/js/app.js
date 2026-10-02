@@ -16,6 +16,7 @@ import { LocationPortalView } from './views/LocationPortalView.js';
 import { CoordinatorDashboardView } from './views/CoordinatorDashboardView.js';
 import { TechnicianRouteView } from './views/TechnicianRouteView.js';
 import { QrReportView } from './views/QrReportView.js';
+import { PublicRefundTrackingView } from './views/PublicRefundTrackingView.js';
 
 export const App = {
   name: 'VendGuardApp',
@@ -24,11 +25,13 @@ export const App = {
     LocationPortalView,
     CoordinatorDashboardView,
     TechnicianRouteView,
-    QrReportView
+    QrReportView,
+    PublicRefundTrackingView
   },
   data() {
     return {
-      currentView: 'portal', // 'portal' | 'coordinator' | 'technician' | 'qr'
+      currentView: 'portal', // 'portal' | 'coordinator' | 'technician' | 'qr' | 'tracking'
+      trackingToken: '',
       siteCode: 'SEDE-BCN-01',
       showCredentialsGuide: true,
       qrMachineCode: '',
@@ -50,9 +53,16 @@ export const App = {
     }
   },
   created() {
-    // 1. Detección prioritaria de Deep Link QR (?qr=... o ?code=...) (RF-03, RNF-02 / EARS 3.1)
+    // 1. Seguimiento público por token (?track=...), antes de restaurar cualquier sesión.
     if (typeof window !== 'undefined' && window.location) {
       const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has('track')) {
+        this.currentView = 'tracking';
+        this.trackingToken = (urlParams.get('track') || '').trim();
+        return;
+      }
+
+      // 2. Detección de Deep Link QR (?qr=... o ?code=...) (RF-03, RNF-02 / EARS 3.1)
       const qrParam = urlParams.get('qr') || urlParams.get('code');
       if (qrParam && qrParam.trim() !== '') {
         this.currentView = 'qr';
@@ -62,7 +72,7 @@ export const App = {
       }
     }
 
-    // 2. Restauración de sesión si no es acceso por código QR
+    // 3. Restauración de sesión si no es acceso público por QR o seguimiento
     const restored = restoreSession();
     if (restored) {
       if (store.state.user?.role === 'COORDINATOR') {
@@ -88,12 +98,12 @@ export const App = {
   },
   template: `
     <div style="min-height: 100vh; display: flex; flex-direction: column; background-color: var(--color-canvas, #f9fafb);">
-      <!-- Global Top Navbar (Oculto en vista de escaneo QR ciudadano) -->
-      <AppNavbar v-if="currentView !== 'qr'" @logout="handleLogout" @navigate-home="currentView = 'portal'" />
+      <!-- Global Top Navbar (Oculto en las vistas públicas QR y seguimiento) -->
+      <AppNavbar v-if="currentView !== 'qr' && currentView !== 'tracking'" @logout="handleLogout" @navigate-home="currentView = 'portal'" />
 
-      <!-- Profile Selector Bar (Quick Testing Bar - Oculto en vista QR ciudadano) -->
+      <!-- Profile Selector Bar (Oculto en las vistas públicas QR y seguimiento) -->
       <div
-        v-if="currentView !== 'qr'"
+        v-if="currentView !== 'qr' && currentView !== 'tracking'"
         style="background-color: #ffffff; border-bottom: 1px solid var(--color-hairline, #c8cfda); padding: 8px 16px;"
       >
         <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;">
@@ -163,7 +173,7 @@ export const App = {
 
       <!-- Flash Message Toast -->
       <div
-        v-if="flashMessage"
+        v-if="flashMessage && currentView !== 'tracking'"
         style="max-width: 1200px; margin: 12px auto 0 auto; padding: 0 16px; width: 100%;"
       >
         <div
@@ -180,9 +190,13 @@ export const App = {
       </div>
 
       <!-- Main Content Area: Dynamic View -->
-      <main :style="{ flex: 1, padding: currentView === 'qr' ? '0' : '16px 0' }">
+      <main :style="{ flex: 1, padding: currentView === 'qr' || currentView === 'tracking' ? '0' : '16px 0' }">
+        <PublicRefundTrackingView
+          v-if="currentView === 'tracking'"
+          :token="trackingToken"
+        />
         <QrReportView
-          v-if="currentView === 'qr'"
+          v-else-if="currentView === 'qr'"
           :code="qrMachineCode"
           :site="qrSiteCode"
           @go-home="switchView('portal')"
@@ -200,8 +214,8 @@ export const App = {
         />
       </main>
 
-      <!-- Footer (Oculto en vista QR móvil) -->
-      <footer v-if="currentView !== 'qr'" style="background-color: #ffffff; border-top: 1px solid var(--color-hairline, #c8cfda); padding: 12px 16px; text-align: center; font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
+      <!-- Footer (Oculto en las vistas públicas QR y seguimiento) -->
+      <footer v-if="currentView !== 'qr' && currentView !== 'tracking'" style="background-color: #ffffff; border-top: 1px solid var(--color-hairline, #c8cfda); padding: 12px 16px; text-align: center; font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
         VendGuard MVP v1.0.0 · Sistema de Gestión de Incidencias de Vending · Dogma Vanilla & Docker Design System
       </footer>
     </div>

@@ -324,16 +324,17 @@ async function runTests() {
 
   // 6.4 Verificación de plantilla de App: Ocultación de barras administrativas
   assert('6.6 App registra QrReportView en components', App.components.QrReportView === QrReportView);
-  assert('6.7 AppNavbar está condicionado a v-if="currentView !== \'qr\'"', 
-    App.template.includes('<AppNavbar v-if="currentView !== \'qr\'"'));
-  assert('6.8 Profile Selector Bar está condicionado a v-if="currentView !== \'qr\'"', 
-    App.template.includes('v-if="currentView !== \'qr\'"') && App.template.includes('Quick Testing Bar'));
-  assert('6.9 Footer está condicionado a v-if="currentView !== \'qr\'"', 
-    App.template.includes('<footer v-if="currentView !== \'qr\'"'));
+  assert('6.7 AppNavbar se oculta en las vistas públicas QR y seguimiento',
+    App.template.includes('<AppNavbar v-if="currentView !== \'qr\' && currentView !== \'tracking\'"'));
+  assert('6.8 Profile Selector Bar se oculta en las vistas públicas QR y seguimiento',
+    App.template.includes('v-if="currentView !== \'qr\' && currentView !== \'tracking\'"') && App.template.includes('Profile Selector Bar'));
+  assert('6.9 Footer se oculta en las vistas públicas QR y seguimiento',
+    App.template.includes('<footer v-if="currentView !== \'qr\' && currentView !== \'tracking\'"'));
   assert('6.10 QrReportView se renderiza condicionalmente con :code y :site', 
     App.template.includes('<QrReportView') && 
-    App.template.includes('v-if="currentView === \'qr\'"') &&
-    App.template.includes(':code="qrMachineCode"'));
+    App.template.includes('v-else-if="currentView === \'qr\'"') &&
+    App.template.includes(':code="qrMachineCode"') &&
+    App.template.includes(':site="qrSiteCode"'));
 
   // =====================================================================
   // Resumen Final

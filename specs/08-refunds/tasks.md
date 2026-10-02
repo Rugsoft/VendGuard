@@ -99,7 +99,7 @@
   * **Dependencias:** T-REF-09
   * **Hecho cuando:** El formulario de reporte ciudadano QR permite desplegar la sección de dinero retenido, validar en vivo teléfono Bizum e IBAN, y tras enviar muestra la tarjeta de resguardo con el PIN de 4 dígitos y el enlace permanente de seguimiento.
 
-- [ ] **T-REF-15: Implementar vista pública `PublicRefundTrackingView.js`**
+- [x] **T-REF-15: Implementar vista pública `PublicRefundTrackingView.js`**
   * **Requisitos:** RF-REF-02, RF-REF-07, RNF-REF-05
   * **Dependencias:** T-REF-08
   * **Hecho cuando:** La aplicación carga la vista `PublicRefundTrackingView` al acceder mediante `?track={token}`, renderizando la línea de tiempo del estado, la tarjeta de recogida con PIN si está en conserjería, y el formulario de rectificación si está en `PENDING_CONTACT`.
