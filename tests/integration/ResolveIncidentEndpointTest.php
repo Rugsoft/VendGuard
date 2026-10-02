@@ -325,6 +325,155 @@ $assert("4.12 Historial: acción contiene diagnóstico y solución",
 $assert("4.13 Historial: user_id registrado con ID del técnico", (int)($hist['user_id'] ?? 0) === $tech1Id);
 
 // =========================================================================
+// CASO 4B: Dictamen de Saldo Obligatorio en la Resolución (T-REF-10)
+// RF-REF-04/05: una avería con reclamación NO se cierra sin dictaminar el dinero.
+// =========================================================================
+echo "\n--- Caso 4B: Dictamen de saldo obligatorio (T-REF-10) ---\n";
+
+$refundMgmt = new \VendGuard\Application\Service\RefundManagementService(
+    new \VendGuard\Infrastructure\Repository\PdoRefundRequestRepository($pdo)
+);
+
+// Avería con una reclamación EN_MANO_SEDE pendiente de dictamen
+$incRefund = $makeIncidentInState($mach2->getId(), $location1->getId(), $tech1Id);
+$refundCase = $refundMgmt->createCase(new \VendGuard\Application\DTO\CreateRefundRequestDTO(
+    incidentId: (int)$incRefund->getId(),
+    machineId: $mach2->getId(),
+    locationId: $location1->getId(),
+    claimantName: 'Laura Sanitaria',
+    claimantContact: '600111222',
+    claimedAmount: 2.00,
+    compensationMethod: \VendGuard\Core\Domain\Model\CompensationMethod::EN_MANO_SEDE,
+    productAttempted: 'Café con leche carril 2'
+));
+$refundCaseId = (int)$refundCase->getId();
+$assert("4B.0 Reclamación creada en PENDING_INSPECTION", $refundCase->getStatus() === \VendGuard\Core\Domain\Model\RefundStatus::PENDING_INSPECTION);
+
+// 4B.1 Sin dictamen la resolución se rechaza y la avería NO se cierra
+$reqNoVerdict = new Request(
+    method: 'POST',
+    path: "/api/technician/incidents/{$incRefund->getId()}/resolve",
+    parsedBody: ['resolution_diagnosis' => $validDiag, 'resolution_action' => $validAct],
+    headers: $authTech1
+);
+$resNoVerdict = $router->dispatch($reqNoVerdict);
+$bodyNoVerdict = $resNoVerdict->getDecodedBody();
+$assert("4B.1 Sin dictamen de saldo responde HTTP 422", $resNoVerdict->getStatusCode() === 422, "HTTP {$resNoVerdict->getStatusCode()} " . json_encode($bodyNoVerdict));
+$assert("4B.1 Código REFUND_INSPECTION_REQUIRED", ($bodyNoVerdict['error']['code'] ?? '') === 'REFUND_INSPECTION_REQUIRED', 'error: ' . ($bodyNoVerdict['error']['code'] ?? 'AUSENTE'));
+$assert(
+    "4B.1 BD: la avería sigue IN_PROGRESS",
+    $incidentRepo->findById((int)$incRefund->getId())?->getStatus() === IncidentStatus::IN_PROGRESS
+);
+$assert(
+    "4B.1 BD: la reclamación sigue PENDING_INSPECTION",
+    (new \VendGuard\Infrastructure\Repository\PdoRefundRequestRepository($pdo))->findById($refundCaseId)?->getStatus() === \VendGuard\Core\Domain\Model\RefundStatus::PENDING_INSPECTION
+);
+
+// 4B.2 Con dictamen válido se resuelven ambas cosas a la vez
+$reqWithVerdict = new Request(
+    method: 'POST',
+    path: "/api/technician/incidents/{$incRefund->getId()}/resolve",
+    parsedBody: [
+        'resolution_diagnosis' => $validDiag,
+        'resolution_action' => $validAct,
+        'refund_inspection' => [
+            'finding' => 'FOUND_PHYSICAL',
+            'recovered_amount' => 2.00,
+            'cash_custody_action' => 'LEFT_AT_RECEPTION',
+            'receptionist_name' => 'Imposada (Conserjería Planta Baja)',
+        ],
+    ],
+    headers: $authTech1
+);
+$resWithVerdict = $router->dispatch($reqWithVerdict);
+$bodyWithVerdict = $resWithVerdict->getDecodedBody();
+$assert("4B.2 Con dictamen válido responde HTTP 200", $resWithVerdict->getStatusCode() === 200, "HTTP {$resWithVerdict->getStatusCode()} " . json_encode($bodyWithVerdict));
+$assert("4B.2 BD: la avería queda RESOLVED", $incidentRepo->findById((int)$incRefund->getId())?->getStatus() === IncidentStatus::RESOLVED);
+$assert(
+    "4B.2 La respuesta expone refund_status = DEPOSITED_AT_RECEPTION",
+    ($bodyWithVerdict['data']['refund_status'] ?? '') === 'DEPOSITED_AT_RECEPTION',
+    'refund_status: ' . ($bodyWithVerdict['data']['refund_status'] ?? 'AUSENTE')
+);
+
+$refundRepoReal = new \VendGuard\Infrastructure\Repository\PdoRefundRequestRepository($pdo);
+$storedCase = $refundRepoReal->findById($refundCaseId);
+$assert("4B.2 BD: el expediente queda DEPOSITED_AT_RECEPTION", $storedCase?->getStatus() === \VendGuard\Core\Domain\Model\RefundStatus::DEPOSITED_AT_RECEPTION, 'estado: ' . $storedCase?->getStatus()->value);
+$assert("4B.2 BD: se persiste el importe recuperado", $storedCase?->getRecoveredAmount() === 2.00);
+$assert("4B.2 BD: se persiste quién recibió el sobre", ($storedCase?->getReceptionistName() ?? '') !== '');
+$assert(
+    "4B.2 BD: audit_log registra REFUND_INSPECTED",
+    (int)$pdo->query("SELECT COUNT(*) FROM audit_log WHERE entity_type = 'REFUND_REQUEST' AND entity_id = {$refundCaseId} AND action = 'REFUND_INSPECTED'")->fetchColumn() >= 1
+);
+
+// 4B.3 Un canal digital NO puede quedarse en conserjería
+$incDigital = $makeIncidentInState($mach3->getId(), $location2->getId(), $tech1Id);
+$refundMgmt->createCase(new \VendGuard\Application\DTO\CreateRefundRequestDTO(
+    incidentId: (int)$incDigital->getId(),
+    machineId: $mach3->getId(),
+    locationId: $location2->getId(),
+    claimantName: 'Marc Ruibal',
+    claimantContact: '699888777',
+    claimedAmount: 3.00,
+    compensationMethod: \VendGuard\Core\Domain\Model\CompensationMethod::BIZUM,
+    bizumPhone: '699888777'
+));
+$reqDigital = new Request(
+    method: 'POST',
+    path: "/api/technician/incidents/{$incDigital->getId()}/resolve",
+    parsedBody: [
+        'resolution_diagnosis' => $validDiag,
+        'resolution_action' => $validAct,
+        'refund_inspection' => [
+            'finding' => 'FOUND_PHYSICAL',
+            'recovered_amount' => 3.00,
+            'cash_custody_action' => 'LEFT_AT_RECEPTION',
+        ],
+    ],
+    headers: $authTech1
+);
+$resDigital = $router->dispatch($reqDigital);
+$bodyDigital = $resDigital->getDecodedBody();
+$assert("4B.3 Dejar efectivo digital en conserjería responde HTTP 422", $resDigital->getStatusCode() === 422, "HTTP {$resDigital->getStatusCode()} " . json_encode($bodyDigital));
+$assert(
+    "4B.3 Código RECEPTION_DELIVERY_NOT_ALLOWED",
+    ($bodyDigital['error']['code'] ?? '') === 'RECEPTION_DELIVERY_NOT_ALLOWED',
+    'error: ' . ($bodyDigital['error']['code'] ?? 'AUSENTE')
+);
+$assert(
+    "4B.3 BD: la avería sigue sin resolverse para que el técnico reintente",
+    $incidentRepo->findById((int)$incDigital->getId())?->getStatus() === IncidentStatus::IN_PROGRESS
+);
+
+// 4B.4 Hallazgo de monedas de oficio en una avería SIN reclamación
+$incUnclaimed = $makeIncidentInState($mach1->getId(), $location1->getId(), $tech1Id);
+$reqUnclaimed = new Request(
+    method: 'POST',
+    path: "/api/technician/incidents/{$incUnclaimed->getId()}/resolve",
+    parsedBody: [
+        'resolution_diagnosis' => $validDiag,
+        'resolution_action' => $validAct,
+        'unclaimed_cash_found' => ['amount' => 1.00, 'notes' => 'Moneda de un euro en la canaleta.'],
+    ],
+    headers: $authTech1
+);
+$resUnclaimed = $router->dispatch($reqUnclaimed);
+$bodyUnclaimed = $resUnclaimed->getDecodedBody();
+$assert("4B.4 Una avería sin reclamación se resuelve sin pedir dictamen", $resUnclaimed->getStatusCode() === 200, "HTTP {$resUnclaimed->getStatusCode()} " . json_encode($bodyUnclaimed));
+$assert("4B.4 No se inventa un refund_status en la respuesta", !array_key_exists('refund_status', $bodyUnclaimed['data'] ?? []));
+$findingId = (int)($bodyUnclaimed['data']['unclaimed_cash_finding_id'] ?? 0);
+$assert("4B.4 La respuesta expone el hallazgo de oficio", $findingId > 0);
+$assert(
+    "4B.4 BD: el hallazgo queda persistido y anclado a la avería",
+    $pdo->query("SELECT COUNT(*) FROM unclaimed_cash_findings WHERE id = {$findingId} AND incident_id = " . (int)$incUnclaimed->getId() . " AND technician_id = {$tech1Id}")->fetchColumn() >= 1
+);
+
+// 4B.5 El técnico nunca recibe datos bancarios en su payload de salida
+$assert(
+    "4B.5 Ninguna respuesta del técnico filtra el IBAN ni el Bizum",
+    !str_contains((string)$resWithVerdict->getBody(), 'bizum_phone')
+);
+
+// =========================================================================
 // CASO 5: Prueba HTTP Real vía cURL (127.0.0.1:8000)
 // =========================================================================
 echo "\n--- Caso 5: Prueba HTTP Real contra 127.0.0.1:8000 ---\n";

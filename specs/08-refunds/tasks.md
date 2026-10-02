@@ -70,7 +70,7 @@
   * **Dependencias:** T-REF-06, T-REF-08
   * **Hecho cuando:** El endpoint existente `POST /api/qr/report` procesa los campos de reintegro si `refund_requested = true`, validando importes ($\le 50,00\ \text{€}$), método y datos de contacto, devolviendo en la respuesta el resguardo con PIN de 4 dígitos y la URL de seguimiento con token.
 
-- [ ] **T-REF-10: Implementar `TechnicianRefundController.php` y actualizar `TechnicianController::resolveIncident`**
+- [x] **T-REF-10: Implementar `TechnicianRefundController.php` y actualizar `TechnicianController::resolveIncident`**
   * **Requisitos:** RF-REF-04, RF-REF-05, RF-REF-09, RF-REF-10, Constitución Art. V.4
   * **Dependencias:** T-REF-07
   * **Hecho cuando:** `GET /api/technician/incidents/{id}/refund` retorna las solicitudes asociadas omitiendo IBAN y teléfonos privados; y `POST /api/technician/incidents/{id}/resolve` procesa obligatoriamente el bloque `refund_inspection` si hay solicitudes activas, resolviendo la avería técnica y actualizando el expediente de saldo.
