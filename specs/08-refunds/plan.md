@@ -442,7 +442,7 @@ flowchart LR
 | **RNF-REF-01** | Trazabilidad inmutable en `audit_log` | `AuditLogger`, `RefundManagementService` | `AuditLogViewer.js` | `CoordinatorRefundWorkflowApiTest.php` |
 | **RNF-REF-02** | Rendimiento $< 150\text{ ms}$ en servidor | `PdoRefundRequestRepository` (índices SQL) | N/A | `CoordinatorRefundWorkflowApiTest.php` |
 | **RNF-REF-03** | Confidencialidad y DTOs seguros de IBAN | `PublicRefundTrackingDTO`, DTOs de salida | N/A | `SiteManagerRefundDataSegregationTest.php` |
-| **RNF-REF-04** | Usabilidad táctil en movilidad $< 20\text{ s}$ | N/A | `TechnicianResolutionRefundBlock.js` | `TechnicianResolutionModalTest.mjs` |
+| **RNF-REF-04** | Usabilidad táctil en movilidad $< 20\text{ s}$ | N/A | `TechnicianResolutionRefundBlock.js` | `TechnicianResolutionRefundBlockTest.mjs` |
 | **RNF-REF-05** | Consistencia visual con sistema de diseño | CSS tokens institucionales | Todos los componentes de reintegros | `DesignTokensTest.php` |
 
 ---

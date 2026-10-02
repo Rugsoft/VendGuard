@@ -148,7 +148,7 @@
   * **Dependencias:** T-REF-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `SiteManagerRefundDataSegregationTest.php` pasando al 100% en verde, certificando que los endpoints de coordinación devuelven `403 Forbidden` a roles no autorizados, que las respuestas de sede y técnico nunca proyectan las columnas `iban` ni `bizum_phone`, y que la tabla `refund_requests` prohíbe el borrado físico (`DELETE FROM`).
 
-- [ ] **T-REF-24: Verificación global de regresión, Dogma Vanilla y cierre de módulo**
+- [x] **T-REF-24: Verificación global de regresión, Dogma Vanilla y cierre de módulo**
   * **Requisitos:** Todos (RF-REF-01 a RF-REF-10, RNF-REF-01 a RNF-REF-05, Constitución Art. I a VII)
   * **Dependencias:** T-REF-01 a T-REF-23
   * **Hecho cuando:** La ejecución de `php tests/run_all.php` completa todas las suites unitarias PHP, unitarias reactivas frontend e integración con 0 fallos y 0 errores; se verifica la ausencia de dependencias externas npm/composer y el cumplimiento estricto del Dualismo Lingüístico.

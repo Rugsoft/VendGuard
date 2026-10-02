@@ -360,6 +360,15 @@ assert(
         validate: () => ({ isValid: true, error: '' })
       }
     },
+    // Estado del dictamen de saldo (RF-REF-04, T-REF-16). El bloqueo de repuestos
+    // ya no es la única condición de envío: `submitResolve()` es fail-closed y
+    // aborta si no puede verificar las reclamaciones de saldo. Estos son los
+    // valores por defecto que la vista inicializa en `data()` para una avería
+    // sin reclamaciones colgadas, así que el envío debe prosperar.
+    isLoadingRefundInspection: false,
+    refundInspectionFailed: false,
+    hasPendingRefundVerdict: false,
+    resolveRefundData: { isValid: true },
     incidents: [{ id: 102 }, { id: 103 }],
     showResolveModal: true,
     feedbackMessage: '',
