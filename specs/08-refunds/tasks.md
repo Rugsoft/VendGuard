@@ -94,7 +94,7 @@
 
 ## Fase 4: Componentes Frontend Vanilla (Vue.js 3 ES Modules)
 
-- [ ] **T-REF-14: Implementar `QrRefundRequestBlock.js` e integrar en `QrReportView.js`**
+- [x] **T-REF-14: Implementar `QrRefundRequestBlock.js` e integrar en `QrReportView.js`**
   * **Requisitos:** RF-REF-01, RF-REF-02, RNF-REF-05
   * **Dependencias:** T-REF-09
   * **Hecho cuando:** El formulario de reporte ciudadano QR permite desplegar la sección de dinero retenido, validar en vivo teléfono Bizum e IBAN, y tras enviar muestra la tarjeta de resguardo con el PIN de 4 dígitos y el enlace permanente de seguimiento.

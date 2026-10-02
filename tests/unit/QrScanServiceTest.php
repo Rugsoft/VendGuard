@@ -290,8 +290,16 @@ try {
     assertCondition($resCleanPerishable['machine']['is_perishable'] === true, "1.2 Máquina perecedera reporta is_perishable=true (Art. II)");
     assertCondition($resCleanPerishable['active_incident'] === null, "1.3 active_incident es estrictamente null");
     assertCondition($resCleanPerishable['location']['site_code'] === 'SEDE-BCN-01', "1.4 Sede resuelta correctamente");
+    assertCondition($resCleanPerishable['location']['has_physical_reception'] === true, "1.4b El escaneo público anuncia la disponibilidad de conserjería");
 
     // 1.2 No perecedera: detecta is_perishable = false
+    $locationWithoutReception = new Location(3, 'SEDE-BCN-02', 'Centro sin recepción', 'Carrer del Mar, 2', isActive: true, hasPhysicalReception: false);
+    $locationRepo->add($locationWithoutReception);
+    $machineWithoutReception = new Machine(5, 3, 'VEND-0103', 'Necta Canto Touch', MachineType::HOT_DRINKS, 'Planta 1');
+    $machineRepo->add($machineWithoutReception);
+    $resWithoutReception = $service->resolve('VEND-0103');
+    assertCondition($resWithoutReception['location']['has_physical_reception'] === false, "1.4c El escaneo identifica una sede sin conserjería");
+
     $resCleanDrinks = $service->resolve('VEND-0102');
     assertCondition($resCleanDrinks['status_mode'] === 'CAN_REPORT', "1.5 status_mode es 'CAN_REPORT' en máquina de bebidas");
     assertCondition($resCleanDrinks['machine']['is_perishable'] === false, "1.6 Máquina de bebidas reporta is_perishable=false");

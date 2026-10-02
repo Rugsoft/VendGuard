@@ -47,6 +47,7 @@ class PdoLocationRepository implements LocationRepositoryInterface
                 `longitude`,
                 `contact_name`, 
                 `contact_phone`, 
+                `has_physical_reception`,
                 `is_active`, 
                 `created_at`, 
                 `updated_at`, 
@@ -95,6 +96,7 @@ class PdoLocationRepository implements LocationRepositoryInterface
                 `longitude`,
                 `contact_name`, 
                 `contact_phone`, 
+                `has_physical_reception`,
                 `is_active`, 
                 `created_at`, 
                 `updated_at`, 
@@ -137,6 +139,7 @@ class PdoLocationRepository implements LocationRepositoryInterface
                 `longitude`,
                 `contact_name`, 
                 `contact_phone`, 
+                `has_physical_reception`,
                 `is_active`, 
                 `created_at`, 
                 `updated_at`, 
@@ -172,6 +175,7 @@ class PdoLocationRepository implements LocationRepositoryInterface
                 l.`longitude`,
                 l.`contact_name`, 
                 l.`contact_phone`, 
+                l.`has_physical_reception`,
                 l.`is_active`, 
                 l.`created_at`, 
                 l.`updated_at`, 
@@ -230,6 +234,7 @@ class PdoLocationRepository implements LocationRepositoryInterface
             'longitude' => (float)$row['longitude'],
             'contact_name' => $row['contact_name'] !== null ? (string)$row['contact_name'] : null,
             'contact_phone' => $row['contact_phone'] !== null ? (string)$row['contact_phone'] : null,
+            'has_physical_reception' => (bool)$row['has_physical_reception'],
             'is_active' => (bool)$row['is_active'],
             'created_at' => (string)$row['created_at'],
             'updated_at' => $row['updated_at'] !== null ? (string)$row['updated_at'] : null,
@@ -257,6 +262,7 @@ class PdoLocationRepository implements LocationRepositoryInterface
                 `longitude`,
                 `contact_name`,
                 `contact_phone`,
+                `has_physical_reception`,
                 `is_active`,
                 `created_at`,
                 `updated_at`,
@@ -269,6 +275,7 @@ class PdoLocationRepository implements LocationRepositoryInterface
                 :longitude,
                 :contact_name,
                 :contact_phone,
+                :has_physical_reception,
                 1,
                 CURRENT_TIMESTAMP,
                 CURRENT_TIMESTAMP,
@@ -285,6 +292,9 @@ class PdoLocationRepository implements LocationRepositoryInterface
             ':longitude' => array_key_exists('longitude', $data) ? (float)$data['longitude'] : 2.1734035,
             ':contact_name' => isset($data['contact_name']) && $data['contact_name'] !== '' ? trim((string)$data['contact_name']) : null,
             ':contact_phone' => isset($data['contact_phone']) && $data['contact_phone'] !== '' ? trim((string)$data['contact_phone']) : null,
+            ':has_physical_reception' => array_key_exists('has_physical_reception', $data)
+                ? (bool)$data['has_physical_reception']
+                : true,
         ]);
 
         $newId = (int)$this->pdo->lastInsertId();

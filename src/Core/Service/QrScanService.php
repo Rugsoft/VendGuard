@@ -332,6 +332,7 @@ class QrScanService
             'site_code' => $location->getSiteCode(),
             'name' => $location->getName(),
             'contact_phone' => $location->getContactPhone() ?? '',
+            'has_physical_reception' => $location->hasPhysicalReception(),
         ];
     }
 
