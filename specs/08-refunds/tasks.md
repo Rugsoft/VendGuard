@@ -143,7 +143,7 @@
   * **Dependencias:** T-REF-12, T-REF-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `CoordinatorRefundWorkflowApiTest.php` pasando al 100% en verde en flujos de visto bueno (> 10 €), desestimación motivada ($\ge 20$ chars), liquidación digital con referencia bancaria e inmutabilidad en `audit_log`.
 
-- [ ] **T-REF-23: Pruebas de blindaje constitucional y segregación de sede (`SiteManagerRefundDataSegregationTest.php`)**
+- [x] **T-REF-23: Pruebas de blindaje constitucional y segregación de sede (`SiteManagerRefundDataSegregationTest.php`)**
   * **Requisitos:** RF-REF-10, Constitución Art. III y Art. V.4
   * **Dependencias:** T-REF-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `SiteManagerRefundDataSegregationTest.php` pasando al 100% en verde, certificando que los endpoints de coordinación devuelven `403 Forbidden` a roles no autorizados, que las respuestas de sede y técnico nunca proyectan las columnas `iban` ni `bizum_phone`, y que la tabla `refund_requests` prohíbe el borrado físico (`DELETE FROM`).

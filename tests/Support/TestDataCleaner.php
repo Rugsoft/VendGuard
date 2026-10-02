@@ -89,11 +89,15 @@ final class TestDataCleaner
 
         $pdo->beginTransaction();
         try {
-            $deleted = [];
-            foreach ($order as $table) {
-                $stmt = $pdo->exec('DELETE FROM `' . $table . '`');
-                $deleted[$table] = ($stmt === false) ? 0 : (int)$stmt;
-            }
+            $deleted = self::withPurgeUnlocked($pdo, static function () use ($pdo, $order): array {
+                $deleted = [];
+                foreach ($order as $table) {
+                    $stmt = $pdo->exec('DELETE FROM `' . $table . '`');
+                    $deleted[$table] = ($stmt === false) ? 0 : (int)$stmt;
+                }
+
+                return $deleted;
+            });
             $pdo->commit();
             return $deleted;
         } catch (Throwable $e) {
@@ -101,6 +105,34 @@ final class TestDataCleaner
                 $pdo->rollBack();
             }
             throw $e;
+        }
+    }
+
+    /**
+     * Runs a block with the Art. III.1 purge window open.
+     *
+     * `refund_requests` carries a BEFORE DELETE trigger that refuses physical
+     * deletion (migration 010), so the harness has to say out loud that it is
+     * resetting a test database. That single session variable is the ONLY thing
+     * in the repository that unlocks the table, which is what keeps the
+     * constitutional rule absolute for production code: nothing under `src/`
+     * sets it, so a stray DELETE there still fails loudly.
+     *
+     * The window is always closed again in a `finally`, so one failing purge
+     * cannot leave the guard disabled for whatever runs next in this process.
+     *
+     * @template T
+     * @param callable(): T $work
+     * @return T
+     */
+    private static function withPurgeUnlocked(PDO $pdo, callable $work): mixed
+    {
+        $pdo->exec('SET @vendguard_purge = 1');
+
+        try {
+            return $work();
+        } finally {
+            $pdo->exec('SET @vendguard_purge = 0');
         }
     }
 
@@ -128,15 +160,19 @@ final class TestDataCleaner
 
         $pdo->beginTransaction();
         try {
-            $deleted = [];
-            foreach ($order as $table) {
-                $stmt = $pdo->prepare('DELETE FROM `' . $table . '` WHERE `incident_id` = :id');
+            $deleted = self::withPurgeUnlocked($pdo, static function () use ($pdo, $order, $incidentId): array {
+                $deleted = [];
+                foreach ($order as $table) {
+                    $stmt = $pdo->prepare('DELETE FROM `' . $table . '` WHERE `incident_id` = :id');
+                    $stmt->execute([':id' => $incidentId]);
+                    $deleted[$table] = $stmt->rowCount();
+                }
+                $stmt = $pdo->prepare('DELETE FROM `incidents` WHERE `id` = :id');
                 $stmt->execute([':id' => $incidentId]);
-                $deleted[$table] = $stmt->rowCount();
-            }
-            $stmt = $pdo->prepare('DELETE FROM `incidents` WHERE `id` = :id');
-            $stmt->execute([':id' => $incidentId]);
-            $deleted['incidents'] = $stmt->rowCount();
+                $deleted['incidents'] = $stmt->rowCount();
+
+                return $deleted;
+            });
             $pdo->commit();
             return $deleted;
         } catch (Throwable $e) {

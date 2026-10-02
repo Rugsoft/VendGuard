@@ -2,10 +2,10 @@
 declare(strict_types=1);
 
 /**
- * VendGuard - SiteManagerRefundDataSegregationTest (T-REF-13)
+ * VendGuard - SiteManagerRefundDataSegregationTest (T-REF-13, T-REF-23)
  *
  * Constitutional route-registration suite for the refund module (RF-REF-10,
- * RNF-REF-03, Constitution Art. V.4).
+ * RNF-REF-03, Constitution Art. V.4 and Art. III).
  *
  * It exercises all eleven refund-related routes through the real AppRouter and
  * real MariaDB repositories: public QR/report and token tracking, technician,
@@ -24,6 +24,11 @@ declare(strict_types=1);
  *   technician, reception, and public projections.
  * - The two public endpoints are intentionally public: the tracking token is
  *   their credential, not an internal session.
+ * - `refund_requests` itself refuses physical deletion (Art. III.1). The
+ *   prohibition is enforced by a BEFORE DELETE trigger (migration 010) rather
+ *   than by convention, and it is checked by actually attempting the DELETE
+ *   against a real row, not by reading the migration file. Soft cancellation
+ *   via `is_active` remains the only legitimate way to retire a case.
  *
  * The test creates its site, machine, incident and claim inside one database
  * transaction and always rolls it back. `SeedRunner` runs before the
@@ -366,6 +371,178 @@ try {
     // Confirma que la suite realmente crea datos de pago que se ocultaron antes.
     $assert('5.10 Control de no-vacuidad: el IBAN guardado sigue existiendo en MariaDB',
         $refunds->findById($refundId)?->getIban() === 'ES9121000418450200051332');
+
+    // ─────────────────────────────────────────────────────────────────────────
+    echo "\n--- 6. Inviolabilidad: la tabla prohíbe el borrado físico (Art. III.1) ---\n";
+    // ─────────────────────────────────────────────────────────────────────────
+    // Hasta aquí "nunca se borra" era una convención del código: un DELETE
+    // descuidado en cualquier ruta habría destruido un registro económico sin
+    // que nada se quejara. La Constitución lo prohíbe sobre las ENTIDADES, no
+    // sobre los caminos de código, así que la regla se instala donde vive el
+    // dato. Se certifica contra MariaDB real, no leyendo el fichero de la
+    // migración.
+
+    $triggerName = 'trg_refund_requests_no_hard_delete';
+    $triggerRow = $pdo->prepare('
+        SELECT ACTION_TIMING, EVENT_MANIPULATION, EVENT_OBJECT_TABLE
+        FROM information_schema.TRIGGERS
+        WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = :name
+    ');
+    $triggerRow->execute([':name' => $triggerName]);
+    $trigger = $triggerRow->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    $assert('6.1 La tabla `refund_requests` tiene montado su guardián BEFORE DELETE',
+        ($trigger['ACTION_TIMING'] ?? '') === 'BEFORE'
+        && ($trigger['EVENT_MANIPULATION'] ?? '') === 'DELETE'
+        && ($trigger['EVENT_OBJECT_TABLE'] ?? '') === 'refund_requests',
+        json_encode($trigger));
+
+    // El objetivo real de esta sección: intentar BORRAR de verdad el expediente
+    // que la suite acaba de crear (el mismo que lleva el IBAN) y comprobar que
+    // la base de datos se niega.
+    $hardDeleteRefused = false;
+    $refusalMessage = '';
+    try {
+        $pdo->exec("DELETE FROM `refund_requests` WHERE `id` = " . (int)$refundId);
+    } catch (Throwable $e) {
+        $hardDeleteRefused = true;
+        $refusalMessage = $e->getMessage();
+    }
+
+    $assert('6.2 Un DELETE FROM refund_requests sobre un expediente real es rechazado por la BD',
+        $hardDeleteRefused,
+        'el DELETE se ejecutó sin resistencia: el Art. III.1 no se está aplicando');
+    $assert('6.2 El rechazo es un SQLSTATE 45000 y explica la regla constitucional',
+        str_contains($refusalMessage, '45000') && str_contains($refusalMessage, 'Art. III.1'),
+        'mensaje: ' . $refusalMessage);
+
+    $assert('6.3 El expediente sobrevive intacto al intento de borrado',
+        (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests` WHERE `id` = ' . (int)$refundId . ' AND `is_active` = 1')->fetchColumn() === 1
+        && $refunds->findById($refundId)?->getIban() === 'ES9121000418450200051332');
+
+    // Un borrado "de mentira" (0 filas afectadas) no dispara un trigger FOR EACH
+    // ROW, así que se comprueba también sobre un id inexistente para que nadie
+    // confunda un DELETE inocuo con un guardián funcionando.
+    $noRowDelete = 'ok';
+    try {
+        $pdo->exec('DELETE FROM `refund_requests` WHERE `id` = 4294967295');
+    } catch (Throwable $e) {
+        $noRowDelete = 'rechazado';
+    }
+    $assert('6.4 Control de no-vacuidad: el guardián muerde sobre filas reales, no sobre un id inexistente',
+        $noRowDelete === 'ok' && $hardDeleteRefused === true,
+        'id inexistente: ' . $noRowDelete);
+
+    // La anulación es la vía legítima: se conservan la fila y su motivo.
+    $rejectedReason = 'Corte de caja sin cobro coincidente en la auditoría de ventas.';
+    $pdo->prepare('
+        UPDATE `refund_requests`
+        SET `status` = \'REJECTED\', `is_active` = 0, `coordinator_justification` = :reason
+        WHERE `id` = :id
+    ')->execute([':reason' => $rejectedReason, ':id' => (int)$refundId]);
+
+    $softDeleted = $pdo->prepare('
+        SELECT `status`, `is_active`, `coordinator_justification`
+        FROM `refund_requests` WHERE `id` = :id
+    ');
+    $softDeleted->execute([':id' => (int)$refundId]);
+    $softRow = $softDeleted->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    $assert('6.5 La anulación lógica conserva la fila y su motivo para la auditoría (Art. III.2)',
+        ($softRow['status'] ?? '') === 'REJECTED'
+        && (int)($softRow['is_active'] ?? 1) === 0
+        && ($softRow['coordinator_justification'] ?? '') === $rejectedReason);
+
+    // A partir de aquí se usan filas desechables: el expediente original ya
+    // ha hecho su ciclo y borrarlo de verdad dejaría sin datos las
+    // comprobaciones siguientes. Estas copias existen sólo para pelearse con el
+    // guardián y desaparecen con el rollback de la suite.
+    $makeDisposableCase = static function (string $name) use ($pdo): int {
+        $seed = $pdo->query('
+            SELECT `incident_id`, `machine_id`, `location_id`
+            FROM `refund_requests` ORDER BY `id` LIMIT 1
+        ')->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        if ($seed === []) {
+            return 0;
+        }
+
+        $pdo->prepare('
+            INSERT INTO `refund_requests`
+                (`incident_id`, `machine_id`, `location_id`, `claimant_name`, `claimant_contact`,
+                 `claimed_amount`, `compensation_method`, `pickup_pin`, `tracking_token`, `status`, `is_active`)
+            VALUES (:i, :m, :l, :n, :c, 1.00, :cm, :pin, :tok, :st, 1)
+        ')->execute([
+            ':i' => (int)$seed['incident_id'],
+            ':m' => (int)$seed['machine_id'],
+            ':l' => (int)$seed['location_id'],
+            ':n' => $name,
+            ':c' => '600111222',
+            ':cm' => 'EN_MANO_SEDE',
+            ':pin' => '1234',
+            ':tok' => hash('sha256', $name),
+            ':st' => 'PENDING_INSPECTION',
+        ]);
+
+        return (int)$pdo->lastInsertId();
+    };
+
+    // El arnés de pruebas debe poder seguir limpiando: es el único que puede
+    // abrir la ventana, y su código vive fuera de src/.
+    $purgeCaseId = $makeDisposableCase('Fila desechable para la ventana de purga');
+    $pdo->exec('SET @vendguard_purge = 1');
+    try {
+        $pdo->exec('DELETE FROM `refund_requests` WHERE `id` = ' . $purgeCaseId);
+        $purged = (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests` WHERE `id` = ' . $purgeCaseId)->fetchColumn() === 0;
+    } finally {
+        $pdo->exec('SET @vendguard_purge = 0');
+    }
+    $assert('6.6 Sólo la ventana explícita de purga del arnés puede vaciar la tabla',
+        $purgeCaseId > 0 && $purged,
+        'id: ' . $purgeCaseId);
+
+    $controlCaseId = $makeDisposableCase('Fila de control tras cerrar la ventana');
+    $refusedAgain = false;
+    try {
+        $pdo->exec('DELETE FROM `refund_requests` WHERE `id` = ' . $controlCaseId);
+    } catch (Throwable $e) {
+        $refusedAgain = true;
+    }
+    $assert('6.7 Tras cerrarla, el guardián vuelve a estar activo',
+        $controlCaseId > 0
+        && $refusedAgain
+        && (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests` WHERE `id` = ' . $controlCaseId)->fetchColumn() === 1,
+        'id: ' . $controlCaseId . ' rechazó: ' . var_export($refusedAgain, true));
+
+    // La ventana de purga no puede quedar abierta para el resto de la corrida.
+    $assert('6.8 La variable de purga queda desactivada al terminar la comprobación',
+        (int)((($pdo->query('SELECT @vendguard_purge AS v')->fetch(PDO::FETCH_ASSOC) ?: [])['v']) ?? 0) === 0);
+
+    // El guardián no puede abrirse desde el código de producción: la única
+    // escritor de la variable vive en el arnés de pruebas, nunca en producción.
+    $srcRoot = dirname(__DIR__, 2) . '/src';
+    $srcOffenders = [];
+    $directory = new RecursiveDirectoryIterator($srcRoot, FilesystemIterator::SKIP_DOTS);
+    foreach (new RecursiveIteratorIterator($directory) as $fileInfo) {
+        if ($fileInfo->getExtension() !== 'php') {
+            continue;
+        }
+        if (str_contains((string)file_get_contents($fileInfo->getPathname()), '@vendguard_purge')) {
+            $srcOffenders[] = $fileInfo->getFilename();
+        }
+    }
+    $assert('6.9 Ningún fichero de src/ puede abrir la ventana de purga (Art. III.1)',
+        $srcOffenders === [],
+        'escritores: ' . json_encode($srcOffenders));
+
+    $migrationSource = (string)file_get_contents(
+        dirname(__DIR__, 2) . '/database/migrations/010_refund_hard_delete_guard.sql'
+    );
+    $assert('6.10 La migración del guardián está versionada y es idempotente',
+        $migrationSource !== ''
+        && str_contains($migrationSource, 'CREATE TRIGGER')
+        && str_contains($migrationSource, 'information_schema.triggers')
+        && str_contains($migrationSource, '45000'));
 } finally {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
@@ -375,7 +552,7 @@ try {
 echo "\n======================================================================\n";
 echo " Total Aserciones: {$assertions} | Fallos: {$failures}\n";
 if ($failures === 0) {
-    echo " RESULTADO: Blindaje RBAC y segregación financiera verificados. T-REF-13 CUMPLIDA.\n";
+    echo " RESULTADO: Blindaje RBAC, segregación financiera e inviolabilidad de datos verificados. T-REF-13 y T-REF-23 CUMPLIDAS.\n";
 } else {
     echo " RESULTADO: {$failures} fallo(s) de {$assertions} aserciones.\n";
 }
