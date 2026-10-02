@@ -587,6 +587,15 @@ export class ApiClient {
     },
 
     /**
+     * Retrieves privacy-safe refund claims for a route incident (T-REF-16, Art. V.4).
+     * @param {number|string} incidentId
+     * @returns {Promise<Object>}
+     */
+    getRefundInspection: (incidentId) => {
+      return this.get(`/technician/incidents/${encodeURIComponent(incidentId)}/refund`);
+    },
+
+    /**
      * Retrieves the optimized route map with consolidated stops and navigation URLs (RF-MAP-05, RF-MAP-07).
      * @param {Object} [origin={}] Optional { origin_lat, origin_lng } device GPS coordinates.
      * @returns {Promise<Object>}

@@ -232,6 +232,23 @@ assert('4.2 Alert contains correct message and type', state.alerts[0].message ==
 removeAlert(alertId);
 assert('4.3 removeAlert removes alert by ID', state.alerts.length === 0);
 
+// ---------------------------------------------------------------------
+// TEST GROUP 5: Technician refund inspection API (T-REF-16)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 5: Technician refund inspection API ---');
+
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({ success: true, data: { has_pending_verdict: true, requests: [] } })
+};
+const refundInspection = await api.technician.getRefundInspection(42);
+assert('5.1 Technician refund inspection uses its incident-scoped GET endpoint',
+  lastFetchCall.url === '/api/technician/incidents/42/refund' && lastFetchCall.options.method === 'GET');
+assert('5.2 Technician refund inspection unpacks the JSON data envelope',
+  refundInspection?.has_pending_verdict === true && Array.isArray(refundInspection.requests));
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);

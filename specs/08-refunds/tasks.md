@@ -104,7 +104,7 @@
   * **Dependencias:** T-REF-08
   * **Hecho cuando:** La aplicación carga la vista `PublicRefundTrackingView` al acceder mediante `?track={token}`, renderizando la línea de tiempo del estado, la tarjeta de recogida con PIN si está en conserjería, y el formulario de rectificación si está en `PENDING_CONTACT`.
 
-- [ ] **T-REF-16: Implementar `TechnicianResolutionRefundBlock.js` e integrar en el modal de resolución móvil**
+- [x] **T-REF-16: Implementar `TechnicianResolutionRefundBlock.js` e integrar en el modal de resolución móvil**
   * **Requisitos:** RF-REF-04, RF-REF-05, RNF-REF-04, RNF-REF-05
   * **Dependencias:** T-REF-10
   * **Hecho cuando:** El modal de resolución técnica de `TechnicianRouteView.js` despliega el bloque táctil de saldo si hay solicitudes pendientes, bloqueando el depósito en conserjería si $> 10,00\ \text{€}$ o digital, y permitiendo registrar monedas de oficio.
