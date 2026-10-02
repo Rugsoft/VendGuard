@@ -693,10 +693,10 @@ final class RefundManagementService
                 continue;
             }
 
-            throw new DuplicateRefundClaimException(
-                existingCaseId: (int)$existing->getId(),
-                existingTrackingToken: $existing->getTrackingToken()
-            );
+            // El identificador sí viaja; el token NO. La respuesta de este
+            // rechazo sale por un endpoint público y el token abre el sobre en
+            // la conserjería (RF-REF-11).
+            throw new DuplicateRefundClaimException(existingCaseId: (int)$existing->getId());
         }
     }
 

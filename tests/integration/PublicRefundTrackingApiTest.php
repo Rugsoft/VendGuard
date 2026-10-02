@@ -529,11 +529,36 @@ try {
         'HTTP ' . $secondResponse->getStatusCode() . ' ' . json_encode($secondError)
     );
 
+    // El rechazo identifica el expediente pero NO entrega su token: el token es
+    // la credencial que abre el sobre en la conserjería y permite rectificar el
+    // Bizum, y esta respuesta sale por un endpoint público.
     $assert(
-        '6.3 El rechazo devuelve el enlace del expediente ya abierto',
-        (string)($secondError['details']['existing_tracking_token'] ?? '') === $firstToken
-        && (int)($secondError['details']['existing_refund_id'] ?? 0) === (int)($firstReceipt['id'] ?? 0),
+        '6.3 El rechazo identifica el expediente y NO devuelve su token de seguimiento',
+        (int)($secondError['details']['existing_refund_id'] ?? 0) === (int)($firstReceipt['id'] ?? 0)
+        && !array_key_exists('existing_tracking_token', $secondError['details'] ?? []),
         json_encode($secondError['details'] ?? null)
+    );
+
+    // Barrido del cuerpo entero, no sólo de `details`: un token filterse por
+    // cualquier otro sitio de la respuesta seguiría siendo un robo de credencial
+    // y un verde sobre la clave concreta no lo detectaría.
+    $secondRaw = (string)$secondResponse->getBody();
+    $assert(
+        '6.3b La respuesta de rechazo no contiene NINGÚN token de seguimiento',
+        preg_match('/[0-9a-f]{' . 64 . '}/', $secondRaw) !== 1
+        && !str_contains($secondRaw, $firstToken),
+        substr($secondRaw, 0, 300)
+    );
+
+    // Y la consecuencia práctica: sin el token, el intruso no llega al PIN.
+    $stolen = (string)($secondError['details']['existing_tracking_token'] ?? '');
+    $peek = $dispatch('GET', '/api/public/refunds/track', ['token' => $stolen !== '' ? $stolen : str_repeat('0', 64)]);
+    $peekBody = $decode($peek)['data'] ?? [];
+    $assert(
+        '6.9 El rechazo no da acceso al expediente: ni el estado ni el PIN se pueden leer',
+        ($stolen === '' && $peek->getStatusCode() !== 200)
+        && !array_key_exists('pickup_pin', (array) $peekBody),
+        'HTTP ' . $peek->getStatusCode() . ' ' . json_encode($peekBody)
     );
 
     // The decisive check: the rejection is not a soft warning. One incident, one

@@ -180,9 +180,14 @@ El sistema debe impedir que un mismo consumidor acumule varios expedientes de re
 
 * **EARS Ubicuo:** La unidad de la regla es la pareja **(avería, consumidor)**, nunca la avería a secas. Cuando una avería afecte a varias personas (por ejemplo, una máquina que retiene el saldo de cinco usuarios), CADA uno de esos consumidores DEBE poder abrir su propia reclamación, porque son reintegros legítimos y distintos.
 * **EARS Excepción:** Si un consumidor ya tiene un expediente **vivo** (no terminal) sobre una avería y vuelve a solicitar un reintegro por ella, el sistema NO DEBE crear un segundo expediente y DEBE responder con el código `409 DUPLICATE_REFUND_CLAIM`.
-* **EARS Evento:** Ante ese rechazo, el sistema DEBE incluir en la respuesta el **token de seguimiento del expediente ya abierto**, de modo que el consumidor recupere el acceso a su solicitud en curso en lugar de perderlo.
+* **EARS Evento:** Ante ese rechazo, el sistema DEBE responder indicando que la reclamación ya está en marcha y recordando al consumidor de que use el enlace de seguimiento que recibió al abrirla. La respuesta PUEDE identificar el expediente afectado (`existing_refund_id`) para que la conserjería pueda localizarlo.
+* **EARS Ubicuo:** El **token de seguimiento es la credencial del expediente**: con él se lee el estado, se lee el PIN de recogida mientras el sobre espera en la conserjería y se rectifican los datos de pago. En consecuencia, el sistema NO DEBE devolver el token de seguimiento de un expediente por NINGÚN endpoint sin autenticación, incluidos los rechazos de esta regla. Un token entregado a quien no es su titular equivale a entregarle el PIN y la posibilidad de desviar el reembolso.
 * **EARS Excepción:** Se ADMITE un expediente nuevo cuando el anterior se encuentre en estado terminal (`PAID_DIGITAL`, `REFUNDED_IN_HAND` o `REJECTED`), ya que en ese caso el consumidor tiene derecho a reclamar de nuevo, por ejemplo tras una desestimación con el fin de corregir sus datos.
-* **EARS Ubicuo:** La comparación de identidad entre dos solicitudes se DEBE realizar sobre el medio de contacto normalizado (minúsculas, sin espacios, guiones ni puntos en teléfonos), de modo que `600 123 456`, `600-123-456` y `600123456` se reconozcan como el mismo reclamante y no como tres distintos.
+* **EARS Ubicuo:** La comparación de identidad entre dos solicitudes se DEBE realizar sobre la **forma canónica del medio de contacto**, no sobre los caracteres tecleados:
+  1. Si el contacto es un **correo electrónico**, la clave canónica es el texto en minúsculas sin espacios exteriores, porque sus puntos y signos son significativos.
+  2. Si el contacto es un **teléfono**, la clave canónica es la **secuencia de dígitos sin el prefijo de país** (`+34`, `0034` o `34`), de modo que `600 123 456`, `600-123-456`, `600123456`, `+34 600123456` y `600_123_456` se reconozcan como el mismo reclamante y no como cinco distintos.
+  3. El medio de contacto **almacenado** se conserva tal como lo escribió la persona, porque la conserjería necesita poder leerlo y usarlo para localizarla; lo que se canonicaliza es exclusivamente la clave de comparación.
+  4. Si el contacto no contiene ningún dígito ni es un correo válido, la clave canónica DEBE caer al texto recortado en minúsculas, de modo que dos contactos sin sentido nunca colisionen entre sí.
 
 ---
 
