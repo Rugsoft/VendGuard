@@ -255,16 +255,18 @@ class Router
                 400
             );
         } catch (Throwable $e) {
+            // El `details` de este handler devolvía clase de excepción,
+            // mensaje, fichero y línea sin condición alguna: con un
+            // `PDOException` eso es la consulta SQL y el esquema de la base de
+            // datos en la respuesta. Un 500 no puede devolver un mapa del
+            // servidor a un cliente sin autenticar, así que el rastro se queda
+            // en el log del servidor, que es donde se investiga.
+            error_log('[vendguard] ' . $e);
+
             return Response::error(
                 'INTERNAL_SERVER_ERROR',
                 'Ha ocurrido un error interno no controlado en el servidor.',
-                500,
-                [
-                    'exception' => get_class($e),
-                    'message' => $e->getMessage(),
-                    'file' => basename($e->getFile()),
-                    'line' => $e->getLine(),
-                ]
+                500
             );
         }
     }

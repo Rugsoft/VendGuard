@@ -424,7 +424,13 @@ HTML;
                 : ($e->getCode() >= 400 && $e->getCode() < 600 ? $e->getCode() : 400);
             return Response::error($code, $e->getMessage(), $statusCode);
         } catch (Throwable $e) {
-            return Response::error('INTERNAL_SERVER_ERROR', 'Error interno del servidor: ' . $e->getMessage(), 500);
+            // El mensaje de la excepción no se devuelve al cliente. Un
+            // `PDOException` arrastra la consulta SQL completa, que es un mapa
+            // de la base de datos; el `details` del Router añade además clase,
+            // fichero y línea. El rastro se queda en el log del servidor.
+            error_log('[vendguard] ' . $e);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'Error interno del servidor.', 500);
         }
     }
 
