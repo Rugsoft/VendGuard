@@ -1199,6 +1199,264 @@ try {
         'HTTP ' . $withDesk->getStatusCode() . ' | estado: '
         . $pdo->query("SELECT status FROM refund_requests WHERE id = {$deskCaseId}")->fetchColumn()
     );
+
+    // ───────────────────────────────────────────────────────────────────────────
+    echo "\n--- 11. El mismo euro no se asienta dos veces (RF-REF-03, RF-REF-04) ---\n";
+    // ───────────────────────────────────────────────────────────────────────────
+
+    // El `resolve` del técnico acepta el dictamen y el hallazgo de sobrante en la
+    // MISMA llamada. Antes de este bloque, una sola petición podía conciliar
+    // 8,00 € contra la reclamación y abonoar esos mismos 8,00 € como efectivo no
+    // reclamado: el coordinador acababa pagando la reclamación y el sobrante
+    // acababa en caja central. El mismo euro, dos veces, en los libros.
+    $doubleMachine = $makeMachine('TREF20M-', MachineType::COLD_DRINKS);
+    $doubleIncident = $makeIncident($doubleMachine, $techId, 'TREF20M-DOBLE-');
+    $doubleCase = $openCase($doubleIncident, $doubleMachine, CompensationMethod::EN_MANO_SEDE, 8.00);
+    $doubleCaseId = (int)$doubleCase->getId();
+    $doubleMachineId = (int)$doubleMachine->getId();
+
+    $doubleEntry = $dispatch('POST', "/api/technician/incidents/{$doubleIncident->getId()}/resolve", [
+        'resolution_diagnosis' => $validDiagnosis,
+        'resolution_action' => $validAction,
+        'refund_inspection' => [
+            'finding' => 'FOUND_PHYSICAL',
+            'recovered_amount' => 8.00,
+            'cash_custody_action' => 'HELD_FOR_CENTRAL',
+            'justification' => 'Efectivo localizado en la canaleta por el importe reclamado.',
+        ],
+        'unclaimed_cash_found' => [
+            'amount' => 8.00,
+            'notes' => 'Sobrante de la misma canaleta.',
+        ],
+    ], $techHeaders);
+
+    $assert(
+        '11.1 Asentar el mismo dinero como conciliado y como sobrante se rechaza con 422',
+        $doubleEntry->getStatusCode() === 422
+        && $errorCode($doubleEntry) === 'INVALID_RECOVERED_AMOUNT',
+        'HTTP ' . $doubleEntry->getStatusCode() . ' ' . $errorCode($doubleEntry)
+    );
+
+    $assert(
+        '11.2 NO queda ni una fila de efectivo no reclamado para esa avería',
+        (int)$pdo->query(
+            "SELECT COUNT(*) FROM `unclaimed_cash_findings` WHERE `incident_id` = " . (int)$doubleIncident->getId()
+        )->fetchColumn() === 0,
+        'filas: ' . $pdo->query(
+            "SELECT COUNT(*) FROM `unclaimed_cash_findings` WHERE `incident_id` = " . (int)$doubleIncident->getId()
+        )->fetchColumn()
+    );
+
+    $assert(
+        '11.3 El mensaje explica que el dinero ya está adjudicado y quién lo puede abrir',
+        str_contains((string)($doubleEntry->getDecodedBody()['error']['message'] ?? ''), 'Coordinación')
+        || str_contains((string)($doubleEntry->getDecodedBody()['error']['message'] ?? ''), 'adjudicado'),
+        json_encode($doubleEntry->getDecodedBody()['error'] ?? null)
+    );
+
+    // El dictamen SÍ queda registrado antes del rechazo: es el desacoplamiento
+    // declarado en RF-REF-09 (la avería no se retiene por un problema de dinero)
+    // y la prueba lo fija para que no se confunda con un efecto secundario.
+    $assert(
+        '11.4 El dictamen previo queda registrado: el rechazo es del sobrante, no del veredicto',
+        $pdo->query("SELECT status FROM refund_requests WHERE id = {$doubleCaseId}")->fetchColumn() === 'VERIFIED_PENDING_PAYMENT',
+        'estado: ' . $pdo->query("SELECT status FROM refund_requests WHERE id = {$doubleCaseId}")->fetchColumn()
+    );
+
+    // Y el técnico puede cerrar la avería reintentando sin el bloque de sobrante:
+    // el rechazo no deja la intervención en un limbo irrecuperable.
+    $doubleRetry = $dispatch('POST', "/api/technician/incidents/{$doubleIncident->getId()}/resolve", [
+        'resolution_diagnosis' => $validDiagnosis,
+        'resolution_action' => $validAction,
+    ], $techHeaders);
+
+    $assert(
+        '11.5 Reintentar sin el bloque de sobrante cierra la intervención con normalidad',
+        $doubleRetry->getStatusCode() === 200
+        && $incidents->findById((int)$doubleIncident->getId())?->getStatus() === IncidentStatus::RESOLVED,
+        'HTTP ' . $doubleRetry->getStatusCode() . ' | estado: '
+        . $incidents->findById((int)$doubleIncident->getId())?->getStatus()->value
+    );
+
+    // El tope del sobrante era por HALLAZGO, y una segunda intervención sobre la
+    // misma máquina lo reiniciaba: 50,00 € + 50,00 € = 100,00 € en la misma
+    // máquina, por la vía legítima de la reapertura. Ahora el agregado se cuenta
+    // por máquina, así que la segunda visita tiene que respetar lo que la
+    // primera ya se llevó.
+    //
+    // La segunda visita se hace por el camino real —la sede reabre la avería
+    // dentro de la ventana de 48 h (Art. V.6)— y no con un UPDATE a mano,
+    // porque un atajo en el arnés probaría el SELECT del agregado pero no el
+    // escenario que lo hizo explotable.
+    $visitAgain = static function (Incident $incident) use ($dispatch, $siteHeaders, $incidents, $pdo, $techId): bool {
+        $reopened = $dispatch(
+            'POST',
+            '/api/incidents/' . $incident->getTicketCode() . '/reopen',
+            ['reopen_reason' => 'La maquina vuelve a retener saldo sin entregar el producto.'],
+            $siteHeaders
+        );
+        if ($reopened->getStatusCode() !== 200) {
+            return false;
+        }
+
+        $pdo->prepare('
+            UPDATE `incidents`
+            SET `status` = :status,
+                `assigned_technician_id` = :tech_id,
+                `started_at` = CURRENT_TIMESTAMP
+            WHERE `id` = :id
+        ')->execute([
+            ':status' => IncidentStatus::IN_PROGRESS->value,
+            ':tech_id' => $techId,
+            ':id' => (int)$incident->getId(),
+        ]);
+
+        return true;
+    };
+
+    $resolveWithSurplus = static function (int $incidentId, float $amount, string $notes) use ($dispatch, $techHeaders, $validDiagnosis, $validAction) {
+        return $dispatch('POST', "/api/technician/incidents/{$incidentId}/resolve", [
+            'resolution_diagnosis' => $validDiagnosis,
+            'resolution_action' => $validAction,
+            'unclaimed_cash_found' => ['amount' => $amount, 'notes' => $notes],
+        ], $techHeaders);
+    };
+
+    $machineSurplus = static function (int $machineId) use ($pdo): float {
+        return (float)$pdo->query(
+            "SELECT COALESCE(SUM(amount), 0) FROM unclaimed_cash_findings WHERE machine_id = {$machineId}"
+        )->fetchColumn();
+    };
+
+    $ceilingMachine = $makeMachine('TREF20N-', MachineType::PERISHABLE_FOOD);
+    $ceilingMachineId = (int)$ceilingMachine->getId();
+    $ceilingIncident = $makeIncident($ceilingMachine, $techId, 'TREF20N-TOPE-');
+
+    $ceilingFirst = $resolveWithSurplus(
+        (int)$ceilingIncident->getId(),
+        30.00,
+        'Primer hallazgo: monedas sueltas en la canaleta del cajon.'
+    );
+
+    $assert(
+        '11.6 El primer hallazgo de 30,00 € sobre una avería sin reclamaciones se acepta',
+        $ceilingFirst->getStatusCode() === 200,
+        'HTTP ' . $ceilingFirst->getStatusCode() . ' ' . $errorCode($ceilingFirst)
+    );
+
+    $assert(
+        '11.6 La sede reabre la avería y la intervención vuelve a la ruta',
+        $visitAgain($ceilingIncident) === true,
+        'la reapertura por la sede no devolvió 200'
+    );
+
+    $ceilingBlocked = $resolveWithSurplus(
+        (int)$ceilingIncident->getId(),
+        25.00,
+        'Segundo hallazgo sobre la misma maquina.'
+    );
+
+    $assert(
+        '11.7 El segundo hallazgo NO reinicia el presupuesto de la máquina',
+        $ceilingBlocked->getStatusCode() === 422
+        && $errorCode($ceilingBlocked) === 'INVALID_RECOVERED_AMOUNT',
+        'HTTP ' . $ceilingBlocked->getStatusCode() . ' ' . $errorCode($ceilingBlocked)
+    );
+
+    $assert(
+        '11.8 El rechazo informa de lo que esa máquina ya tiene registrado',
+        str_contains((string)($ceilingBlocked->getDecodedBody()['error']['message'] ?? ''), '30.00')
+        || str_contains((string)($ceilingBlocked->getDecodedBody()['error']['message'] ?? ''), '30,00'),
+        json_encode($ceilingBlocked->getDecodedBody()['error'] ?? null)
+    );
+
+    // Se cierra la visita sin hallazgo para no dejar la intervención colgada.
+    $dispatch('POST', "/api/technician/incidents/{$ceilingIncident->getId()}/resolve", [
+        'resolution_diagnosis' => $validDiagnosis,
+        'resolution_action' => $validAction,
+    ], $techHeaders);
+    $visitAgain($ceilingIncident);
+
+    // Lo que cabe en el hueco pendiente se acepta: el agregado es un techo, no
+    // una prohibición de registrar, y un techo que se cumple en céntimos no
+    // puede ser el que impide el hallazgo siguiente.
+    $ceilingFitting = $resolveWithSurplus(
+        (int)$ceilingIncident->getId(),
+        20.00,
+        'Hallazgo que completa el agregado de la maquina.'
+    );
+
+    $assert(
+        '11.9 Un hallazgo que cabe en el agregado pendiente de la máquina se acepta',
+        $ceilingFitting->getStatusCode() === 200
+        && $machineSurplus($ceilingMachineId) === 50.00,
+        'HTTP ' . $ceilingFitting->getStatusCode() . ' | acumulado: ' . $machineSurplus($ceilingMachineId)
+    );
+
+    $assert(
+        '11.10 Esa máquina acumula exactamente 50,00 €, no 100,00 €',
+        $machineSurplus($ceilingMachineId) === 50.00,
+        'acumulado: ' . $machineSurplus($ceilingMachineId)
+    );
+
+    // El agregado es POR MÁQUINA y no global: con la anterior ya en 50,00 €, otra
+    // máquina arranca con su presupuesto entero. Un tope global sería otra
+    // política, y también sería otro fallo.
+    //
+    // Además se mide al céntimo: 49,99 € dejan un hueco de 0,01 € y no de 0,02 €,
+    // porque un agregado redondeado a la baja sería un techo que admite más
+    // dinero del que dice admitir.
+    $otherMachine = $makeMachine('TREF20O-', MachineType::SNACKS);
+    $otherMachineId = (int)$otherMachine->getId();
+    $otherIncident = $makeIncident($otherMachine, $techId, 'TREF20O-TOPE-');
+
+    $otherFirst = $resolveWithSurplus(
+        (int)$otherIncident->getId(),
+        49.99,
+        'Hallazgo de 49,99 euros en otra maquina.'
+    );
+
+    $assert(
+        '11.11 Otra máquina conserva su presupuesto completo pese a que la primera esté agotada',
+        $otherFirst->getStatusCode() === 200
+        && $machineSurplus($otherMachineId) === 49.99,
+        'HTTP ' . $otherFirst->getStatusCode() . ' ' . $errorCode($otherFirst)
+    );
+
+    $visitAgain($otherIncident);
+    $otherBlocked = $resolveWithSurplus(
+        (int)$otherIncident->getId(),
+        0.02,
+        'Dos céntimos por encima del agregado pendiente de la maquina.'
+    );
+
+    $assert(
+        '11.12 El agregado se mide al céntimo: 0,02 € sobre 49,99 € se rechazan',
+        $otherBlocked->getStatusCode() === 422
+        && $errorCode($otherBlocked) === 'INVALID_RECOVERED_AMOUNT',
+        'HTTP ' . $otherBlocked->getStatusCode() . ' ' . $errorCode($otherBlocked)
+    );
+
+    $dispatch('POST', "/api/technician/incidents/{$otherIncident->getId()}/resolve", [
+        'resolution_diagnosis' => $validDiagnosis,
+        'resolution_action' => $validAction,
+    ], $techHeaders);
+    $visitAgain($otherIncident);
+
+    $otherExact = $resolveWithSurplus(
+        (int)$otherIncident->getId(),
+        0.01,
+        'El céntimo que faltaba para cerrar el agregado de la maquina.'
+    );
+
+    $assert(
+        '11.13 El céntimo que sí cabe completa el agregado en 50,00 € exactos',
+        $otherExact->getStatusCode() === 200
+        && $machineSurplus($otherMachineId) === 50.00
+        && $machineSurplus($ceilingMachineId) === 50.00,
+        'HTTP ' . $otherExact->getStatusCode() . ' ' . $errorCode($otherExact)
+        . ' | agregado de la otra máquina: ' . $machineSurplus($otherMachineId)
+    );
 } finally {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();

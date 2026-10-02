@@ -780,6 +780,146 @@ $assert(
     '\\D con el modificador u conserva los dígitos Unicode: la identidad se construye transliterando, no descartando'
 );
 
+// ─────────────────────────────────────────────────────────────────────
+echo "\n--- 7. Doctrina de la sexta tanda: conciliación, rastro y proyección ---\n";
+// ─────────────────────────────────────────────────────────────────────
+
+// Los hallazgos de esta tanda tienen una cosa en común: ninguno se resolvía
+// mirando el módulo por dentro. Uno multiplicaba un tope por el número de
+// intervenciones, otro contaba el mismo euro dos veces en los libros, otro
+// recortaba en silencio y otro servía el mapa de la base de datos en un 500.
+// Los cuatro se comportaban bien en la prueba que los ejercita con un caso: el
+// agujero estaba en el segundo, el tercero y el cuarto escenario, que es justo
+// lo que una prueba de un solo caso no mira.
+//
+// Por eso este bloque no se limita a que el guarda EXISTA. Comprueba que no se
+// pueda reponer en una sola línea lo que cerró cada hallazgo.
+
+$findingRepositoryInterface = $read('src/Core/Domain/Repository/UnclaimedCashFindingRepositoryInterface.php');
+$findingRepositoryPdo = $read('src/Infrastructure/Repository/PdoUnclaimedCashFindingRepository.php');
+$auditRepositoryPdo = $read('src/Infrastructure/Repository/PdoAuditLogRepository.php');
+$metricsController = $read('src/Presentation/Controller/CoordinatorMetricsController.php');
+$waveSixAnalysis = $read('specs/08-refunds/analisis_sexta_tanda.md');
+
+// 7.1 — Un hallazgo de sobrante no se asienta sobre un dictamen ya emitido.
+$unclaimedGuard = preg_match(
+    '/public function registerUnclaimedCash.*?\n    \}/s',
+    $doctrine['technician_service'],
+    $matches
+) === 1 ? $matches[0] : '';
+$assert(
+    '7.1 El sobrante NO puede asentarse sobre dinero ya conciliado (RF-REF-03, RF-REF-04)',
+    $unclaimedGuard !== ''
+    // El bloqueo mira el dictamen, no sólo el estado: mirar sólo el estado
+    // declararía adjudicated un caso que el consumidor canceló sin inspección.
+    && str_contains($unclaimedGuard, 'getTechnicianFinding() !== null')
+    && str_contains($unclaimedGuard, 'awaitsInspection()')
+    && str_contains($unclaimedGuard, 'findRestrictedByIncident')
+    // Y mira la proyección RESTRINGIDA, no la completa: cargar el IBAN del
+    // reclamante para decidir un hallazgo de monedas sería dejar la puerta
+    // abierta de Art. V.4 por el hueco de una consulta.
+    && !str_contains($unclaimedGuard, 'findByIncident('),
+    'la guarda compara estado y dictamen antes de insertar, sobre la proyección restringida'
+);
+
+// 7.2 — El tope del sobrante es un agregado POR MÁQUINA, contado en céntimos.
+$assert(
+    '7.2 El tope de efectivo no reclamado se agrega por MÁQUINA, no por hallazgo (RF-REF-04)',
+    str_contains($unclaimedGuard, 'sumAmountByMachine')
+    && str_contains($unclaimedGuard, 'toCents')
+    && str_contains($findingRepositoryInterface, 'sumAmountByMachine(int $machineId): float')
+    && str_contains($findingRepositoryPdo, 'COALESCE(SUM(`amount`), 0)')
+    && str_contains($findingRepositoryPdo, '`machine_id` = :machine_id')
+    // El mensaje antiguo decía «divídalo en varios registros», que es la
+    // multiplicación escrita; no puede volver.
+    && !str_contains($unclaimedGuard, 'Divídalo')
+    && !str_contains($unclaimedGuard, 'divide'),
+    'el agregado se cuenta sobre la máquina y el importe se compara en céntimos enteros'
+);
+
+// 7.3 — La exportación de auditoría declara su recorte.
+$assert(
+    '7.3 La exportación de auditoría DECLARA su recorte en lugar de callárselo (Art. III)',
+    !str_contains($auditRepositoryPdo, 'min(100, $limit)')
+    && str_contains($auditRepositoryPdo, "':limit', max(1, \$limit)")
+    && str_contains($metricsController, 'AUDIT_PAGE_MAX = 100')
+    && str_contains($metricsController, 'min(self::AUDIT_PAGE_MAX')
+    && str_contains($metricsController, 'EXPORTACION PARCIAL')
+    && str_contains($metricsController, 'countEvents($filters)'),
+    'el tope de paginación vive en el listado y la exportación declara cuántos eventos deja fuera'
+);
+
+// 7.4 — Ningún 500 filtra el detalle interno de la excepción.
+// El detector es el mismo que el de `ConstitutionalAuditTest` 9.8, y se ejecuta
+// sobre `src/` entero: el fallo no era del módulo de reintegros sino del
+// proyecto, y un guarda de módulo que no mira fuera del módulo no lo habría
+// visto.
+$leakyHandlers = [];
+foreach ($srcFiles as $path) {
+    $source = (string)file_get_contents($path);
+    $offset = 0;
+    while (($pos = strpos($source, "'INTERNAL_SERVER_ERROR'", $offset)) !== false) {
+        $carried = substr($source, $pos, 250);
+        if (
+            str_contains($carried, 'getMessage()')
+            || str_contains($carried, 'get_class(')
+            || str_contains($carried, 'getFile()')
+            || str_contains($carried, 'getTraceAsString()')
+        ) {
+            $leakyHandlers[] = basename($path);
+            break;
+        }
+        $offset = $pos + 1;
+    }
+}
+$assert(
+    '7.4 Ningún handler 500 devuelve el mensaje, la clase o el origen de la excepción (Art. V.4)',
+    $leakyHandlers === [],
+    json_encode(array_values(array_unique($leakyHandlers)))
+);
+
+// 7.5 — El bypass de sede está documentado, no olvidado.
+// `X-Site-Code` y `POST /api/auth/site-login` son LA MISMA puerta sin
+// credencial: el código de sede ES el factor de autenticación por diseño de
+// RF-01. Retirar la cabecera no cerraba nada, y un hallazgo aparcado sin
+// escribir por qué se deja abierto vuelve a abrirse solo en la siguiente
+// iteración, cuando alguien lo encuentre de nuevo.
+//
+// La aserción mira el documento VERSIONADO, no la auditoría local: `docs/
+// auditoria_arquitectura.md` está en `.gitignore` porque es un artefacto de
+// análisis, así que una guarda que la leyera daría verde en esta máquina y
+// rojo en cualquier clon.
+$assert(
+    '7.5 El bypass de sede (X-Site-Code ≡ site-login) está documentado y llega a escritura (Art. V.4)',
+    str_contains($waveSixAnalysis, 'X-Site-Code')
+    && str_contains($waveSixAnalysis, 'site-login')
+    && str_contains($waveSixAnalysis, 'POST /api/incidents')
+    && preg_match('/🔴\s*H-1/u', $waveSixAnalysis) === 1
+    && str_contains($waveSixAnalysis, 'decisión de producto'),
+    'specs/08-refunds/analisis_sexta_tanda.md debe describir H-1 con su escalada a escritura y el motivo de no cerrarlo'
+);
+
+// Control de no-vacuidad: los cuatro guardas de código necesitan una suite que
+// los ejecute de verdad. El quinto es documental y no lo necesita: lo que
+// certifica es que el hallazgo está escrito, y `7.5` lo lee del disco.
+$waveSixSuites = [
+    'doble asiento y agregado por máquina' => 'tests/integration/TechnicianRefundInspectionApiTest.php',
+    'truncamiento de la exportación' => 'tests/unit/ConstitutionalAuditTest.php',
+    'fuga de detalle interno en 500' => 'tests/unit/ConstitutionalAuditTest.php',
+];
+$missingSuites = [];
+foreach ($waveSixSuites as $label => $relativePath) {
+    $contents = $read($relativePath);
+    if ($contents === '' || !str_contains($contents, '[PASS]')) {
+        $missingSuites[] = $label;
+    }
+}
+$assert(
+    '7.6 Cada guarda de la sexta tanda tiene una suite que la ejecuta de verdad',
+    $missingSuites === [],
+    json_encode($missingSuites)
+);
+
 echo "\n======================================================================\n";
 echo " Total Aserciones: {$assertions} | Fallos: {$failures}\n";
 if ($failures === 0) {

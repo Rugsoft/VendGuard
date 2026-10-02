@@ -27,6 +27,7 @@ use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SeedRunner;
+use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Routing\AppRouter;
 
@@ -145,6 +146,51 @@ $contentDisposition = $resAuditExp->getHeader('Content-Disposition');
 $assert(str_contains((string)$contentDisposition, 'attachment; filename="vendguard_audit_log_'), "Cabecera Content-Disposition con nombre de archivo correcto");
 $assert(str_starts_with($resAuditExp->getBody(), "\xEF\xBB\xBF"), "Audit CSV incluye BOM UTF-8");
 $assert(str_contains($resAuditExp->getBody(), 'Fecha y Hora'), "Cabeceras CSV de auditoría presentes");
+
+echo "\n--- Caso 7: El recorte de la auditoría se DECLARA, no se calla ---\n";
+
+// `PdoAuditLogRepository::findEvents()` recortaba a 100 filas por su cuenta, un
+// tope pensado para el listado paginado que se colaba también en la
+// exportación. El endpoint anunciaba 10.000 registros y entregaba 99, sin
+// avisar: un export de cumplimiento que se calla lo que no incluye es peor que
+// uno que falla, porque la auditoría se apoya en él.
+$auditRepo = new PdoAuditLogRepository($pdo);
+$eventsWithNoCap = $auditRepo->findEvents([], 250, 0);
+$assert(
+    count($eventsWithNoCap) > 100,
+    'El repositorio devuelve más de 100 eventos cuando se le piden 250',
+    count($eventsWithNoCap)
+);
+
+$totalAuditEvents = $auditRepo->countEvents([]);
+$auditBody = $resAuditExp->getBody();
+$exportWasPartial = $totalAuditEvents > 10000;
+
+// El aviso de recorte tiene que ser coherente con lo que la base de datos dice
+// que hay. Si el export fue completo, no hay aviso que buscar; si no lo fue, el
+// aviso tiene que estar y tiene que dar las dos cifras.
+if ($exportWasPartial) {
+    $assert(
+        str_contains($auditBody, 'EXPORTACION PARCIAL')
+        && str_contains($auditBody, 'de ' . $totalAuditEvents . ' eventos'),
+        'La exportación declara cuántos eventos de ' . $totalAuditEvents . ' ha dejado fuera',
+        substr($auditBody, 0, 200)
+    );
+    // Y va DETRÁS del BOM: Excel decide el formato de un CSV por sus tres
+    // primeros bytes, y una línea de aviso por delante convertiría la
+    // exportación en latin-1 con todos los acentos rotos.
+    $assert(
+        str_starts_with($auditBody, "\xEF\xBB\xBF#"),
+        'El aviso de recorte va inmediatamente despues del BOM UTF-8',
+        bin2hex(substr($auditBody, 0, 12))
+    );
+} else {
+    $assert(
+        !str_contains($auditBody, 'EXPORTACION PARCIAL'),
+        'Sin recorte no hay aviso de exportacion parcial que declarar',
+        'eventos en base de datos: ' . $totalAuditEvents
+    );
+}
 
 echo "\n======================================================================\n";
 echo " RESUMEN: {$assertionCount} aserciones superadas exitosamente (100% PASS).\n";

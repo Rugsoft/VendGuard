@@ -259,6 +259,18 @@ final class TechFindingRepo implements UnclaimedCashFindingRepositoryInterface
             static fn (UnclaimedCashFinding $f): bool => $f->getTechnicianId() === $technicianId
         )), 0, $limit);
     }
+
+    public function sumAmountByMachine(int $machineId): float
+    {
+        $total = 0.0;
+        foreach ($this->rows as $row) {
+            if ($row->getMachineId() === $machineId) {
+                $total += $row->getAmount();
+            }
+        }
+
+        return $total;
+    }
 }
 
 final class TechAuditRepo implements AuditLogRepositoryInterface

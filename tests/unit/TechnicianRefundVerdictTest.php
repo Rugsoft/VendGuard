@@ -575,6 +575,18 @@ final class VerdictFindingRepo implements UnclaimedCashFindingRepositoryInterfac
     {
         return [];
     }
+
+    public function sumAmountByMachine(int $machineId): float
+    {
+        $total = 0.0;
+        foreach ($this->rows as $row) {
+            if ($row->getMachineId() === $machineId) {
+                $total += $row->getAmount();
+            }
+        }
+
+        return $total;
+    }
 }
 
 final class VerdictAuditRepo implements AuditLogRepositoryInterface
