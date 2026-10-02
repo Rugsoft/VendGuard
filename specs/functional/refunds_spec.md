@@ -171,6 +171,18 @@ El sistema debe proteger la privacidad de los datos personales y bancarios de lo
 * **EARS Ubicuo:** El **Responsable de Sede** ÚNICAMENTE DEBE visualizar el nombre anonimizado del afectado (ej. *"Nombre Inicial."*), el importe y el estado del reembolso, quedando terminantemente oculta cualquier información de IBAN o cuentas bancarias (Art. V.4).
 * **EARS Ubicuo:** La plataforma DEBE validar la sintaxis estándar de Bizum e IBAN (módulo 97) de forma nativa en PHP puro sin librerías externas de pago ni conexiones telemáticas directas a pasarelas bancarias en tiempo de ejecución (Art. IV y Art. VI).
 
+#### RF-REF-11: Una sola Reclamación Viva por Avería y Consumidor
+El sistema debe impedir que un mismo consumidor acumule varios expedientes de reintegro vivos sobre una misma avería, sin llegar a impedir que distintos reclamen sobre una avería compartida.
+
+* **EARS Ubicuo:** La unidad de la regla es la pareja **(avería, consumidor)**, nunca la avería a secas. Cuando una avería afecte a varias personas (por ejemplo, una máquina que retiene el saldo de cinco usuarios), CADA uno de esos consumidores DEBE poder abrir su propia reclamación, porque son reintegros legítimos y distintos.
+* **EARS Excepción:** Si un consumidor ya tiene un expediente **vivo** (no terminal) sobre una avería y vuelve a solicitar un reintegro por ella, el sistema NO DEBE crear un segundo expediente y DEBE responder con el código `409 DUPLICATE_REFUND_CLAIM`.
+* **EARS Evento:** Ante ese rechazo, el sistema DEBE incluir en la respuesta el **token de seguimiento del expediente ya abierto**, de modo que el consumidor recupere el acceso a su solicitud en curso en lugar de perderlo.
+* **EARS Excepción:** Se ADMITE un expediente nuevo cuando el anterior se encuentre en estado terminal (`PAID_DIGITAL`, `REFUNDED_IN_HAND` o `REJECTED`), ya que en ese caso el consumidor tiene derecho a reclamar de nuevo, por ejemplo tras una desestimación con el fin de corregir sus datos.
+* **EARS Ubicuo:** La comparación de identidad entre dos solicitudes se DEBE realizar sobre el medio de contacto normalizado (minúsculas, sin espacios, guiones ni puntos en teléfonos), de modo que `600 123 456`, `600-123-456` y `600123456` se reconozcan como el mismo reclamante y no como tres distintos.
+
+---
+
+
 ---
 
 ## 5. Requisitos No Funcionales (RNF)

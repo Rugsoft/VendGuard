@@ -10,6 +10,7 @@ use VendGuard\Application\DTO\CreateRefundRequestDTO;
 use VendGuard\Application\DTO\RefundReceiptDTO;
 use VendGuard\Application\Service\IbanValidationService;
 use VendGuard\Application\Service\RefundManagementService;
+use VendGuard\Core\Domain\Exception\DuplicateRefundClaimException;
 use VendGuard\Core\Domain\Exception\InvalidBizumPhoneException;
 use VendGuard\Core\Domain\Exception\InvalidIbanFormatException;
 use VendGuard\Core\Domain\Exception\InvalidRefundAmountException;
@@ -538,6 +539,16 @@ class QrScanController
             ));
         } catch (InvalidRefundAmountException $e) {
             return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (DuplicateRefundClaimException $e) {
+            // RF-REF-11: se rechaza la segunda reclamación del mismo consumidor,
+            // pero el token viaja en `details` para que no pierda el acceso al
+            // expediente que ya tiene en marcha.
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                $e->getDetails()
+            );
         } catch (InvalidBizumPhoneException | InvalidIbanFormatException $e) {
             return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
         } catch (InvalidArgumentException $e) {

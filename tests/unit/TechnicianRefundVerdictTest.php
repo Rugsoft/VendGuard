@@ -683,22 +683,30 @@ $refundController = new TechnicianRefundController($incidentRepo, $refundRepo);
 /**
  * Opens a claim against an incident.
  */
+// `$contact` existe por RF-REF-08: varias personas pueden reclamar sobre la
+// MISMA avería, y cada una es un expediente distinto. Lo que la regla prohíbe
+// (RF-REF-11) es que el MISMO consumidor acumule dos, así que las reclamaciones
+// compartidas deben traer contactos distintos, no el mismo teléfono tres veces.
+// El teléfono de Bizum sigue al contacto para que el expediente sea coherente.
 $openCase = static function (
     CompensationMethod $method,
     float $amount,
     int $incidentId,
-    string $name = 'Laura Sanitaria'
+    string $name = 'Laura Sanitaria',
+    ?string $contact = null
 ) use ($management): RefundRequest {
+    $contact ??= '600111222';
+
     return $management->createCase(new CreateRefundRequestDTO(
         incidentId: $incidentId,
         machineId: MACHINE_ID,
         locationId: LOCATION_ID,
         claimantName: $name,
-        claimantContact: '600111222',
+        claimantContact: $contact,
         claimedAmount: $amount,
         compensationMethod: $method,
         productAttempted: 'Café con leche carril 2',
-        bizumPhone: $method->requiresBizumPhone() ? '600111222' : null,
+        bizumPhone: $method->requiresBizumPhone() ? $contact : null,
         iban: $method->requiresIban() ? 'ES9121000418450200051332' : null
     ));
 };
@@ -809,9 +817,9 @@ $assert('0.5 La resolución con dictamen NO ejecuta ningún DELETE FROM (Art. II
 echo "\n--- 1. GET .../refund: qué hay que dictaminar ---\n";
 
 $sharedIncident = $makeIncident();
-$inHand = $openCase(CompensationMethod::EN_MANO_SEDE, 2.00, $sharedIncident);
-$bizum = $openCase(CompensationMethod::BIZUM, 15.00, $sharedIncident, 'Marc Ruibal');
-$transfer = $openCase(CompensationMethod::TRANSFERENCIA_BANCARIA, 3.50, $sharedIncident, 'Rosa Palmera');
+$inHand = $openCase(CompensationMethod::EN_MANO_SEDE, 2.00, $sharedIncident, 'Laura Sanitaria', '600111222');
+$bizum = $openCase(CompensationMethod::BIZUM, 15.00, $sharedIncident, 'Marc Ruibal', '600999888');
+$transfer = $openCase(CompensationMethod::TRANSFERENCIA_BANCARIA, 3.50, $sharedIncident, 'Rosa Palmera', '600777555');
 
 $shown = $invokeShow($showRequest(TECH_ID, (string)$sharedIncident));
 $shownBody = $shown->getDecodedBody();
@@ -854,7 +862,7 @@ $assert('2.4 Ningún nombre de reclamante aparece', !str_contains($shownJson, 'L
 $assert('2.5 Tampoco el teléfono de contacto del reclamante', !str_contains($shownJson, '600111222'));
 $assert(
     '2.6 Control de no-vacuidad: el IBAN SÍ existe en el dominio que se está ocultando',
-    $transfer->getIban() === 'ES9121000418450200051332' && $bizum->getBizumPhone() === '600111222',
+    $transfer->getIban() === 'ES9121000418450200051332' && $bizum->getBizumPhone() === '600999888',
     'iban: ' . var_export($transfer->getIban(), true) . ' bizum: ' . var_export($bizum->getBizumPhone(), true)
 );
 

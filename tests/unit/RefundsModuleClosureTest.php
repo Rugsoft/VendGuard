@@ -330,8 +330,8 @@ if (preg_match_all('/(?:#{4}\s+\*\*|####\s+|\*\s+\*\*)(RNF-REF-\d+|RF-REF-\d+)/'
 }
 sort($declared);
 $assert(
-    '3.1 La especificación funcional declara los 10 funcionales y los 5 no funcionales',
-    count(array_filter($declared, static fn (string $id): bool => str_starts_with($id, 'RF-'))) === 10
+    '3.1 La especificación funcional declara los 11 funcionales y los 5 no funcionales',
+    count(array_filter($declared, static fn (string $id): bool => str_starts_with($id, 'RF-'))) === 11
     && count(array_filter($declared, static fn (string $id): bool => str_starts_with($id, 'RNF-'))) === 5,
     'declarados: ' . json_encode($declared)
 );

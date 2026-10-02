@@ -474,6 +474,123 @@ try {
         && $rectifyResponse->getStatusCode() === 200
         && $unknownToken->getStatusCode() === 404
     );
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 6. Una sola reclamación viva por avería y consumidor (RF-REF-11) ---\n";
+    // ─────────────────────────────────────────────────────────────────────
+
+    // Machine dedicated to the duplicate rule: the two reports below must land on
+    // the same incident, which is what turns the second attempt into a duplicate
+    // rather than a separate claim.
+    $duplicateMachine = $machines->create([
+        'location_id' => $location->getId(),
+        'code' => 'TREF19X-' . strtoupper(bin2hex(random_bytes(3))),
+        'model' => 'VendGuard duplicate claim machine',
+        'machine_type' => MachineType::HOT_DRINKS->value,
+        'floor_wing' => 'Planta baja - Vestíbulo',
+        'notes' => 'Máquina creada dentro de la transacción reversible de T-REF-19.',
+    ]);
+
+    $claimBody = static function (string $code, string $phone, string $name = 'Laura Sanitaria') use ($dispatch): array {
+        return [
+            'machine_code' => $code,
+            'category' => 'PAYMENT_SYSTEM',
+            'description' => 'Metí una moneda y la máquina no entregó el producto.',
+            'reporter_name' => $name,
+            'reporter_phone' => $phone,
+            'refund_requested' => true,
+            'claimed_amount' => 2.00,
+            'compensation_method' => 'EN_MANO_SEDE',
+            'product_attempted' => 'Café con leche carril 2',
+        ];
+    };
+
+    $firstResponse = $dispatch('POST', '/api/qr/report', [], $claimBody($duplicateMachine->getCode(), '600 111 222'));
+    $firstReceipt = $decode($firstResponse)['data']['refund'] ?? [];
+    $firstToken = (string)($firstReceipt['tracking_token'] ?? '');
+
+    $assert(
+        '6.1 La primera reclamación del consumidor abre su expediente',
+        $firstResponse->getStatusCode() >= 200 && $firstResponse->getStatusCode() < 300
+        && (int)($firstReceipt['id'] ?? 0) > 0
+        && $firstToken !== '',
+        json_encode($decode($firstResponse)['error'] ?? null)
+    );
+
+    // Same consumer, same incident, but the phone typed the way a second person
+    // would type it. RF-REF-11 compares the NORMALISED contact, so this has to
+    // be read as the same claimant and not as a third party.
+    $secondResponse = $dispatch('POST', '/api/qr/report', [], $claimBody($duplicateMachine->getCode(), '600-111-222'));
+    $secondError = $decode($secondResponse)['error'] ?? [];
+
+    $assert(
+        '6.2 El mismo consumidor no acumula un segundo expediente con otro formato de teléfono',
+        $secondResponse->getStatusCode() === 409
+        && (string)($secondError['code'] ?? '') === 'DUPLICATE_REFUND_CLAIM',
+        'HTTP ' . $secondResponse->getStatusCode() . ' ' . json_encode($secondError)
+    );
+
+    $assert(
+        '6.3 El rechazo devuelve el enlace del expediente ya abierto',
+        (string)($secondError['details']['existing_tracking_token'] ?? '') === $firstToken
+        && (int)($secondError['details']['existing_refund_id'] ?? 0) === (int)($firstReceipt['id'] ?? 0),
+        json_encode($secondError['details'] ?? null)
+    );
+
+    // The decisive check: the rejection is not a soft warning. One incident, one
+    // live case, and the rejected attempt left no row behind.
+    $firstIncidentId = (int)($decode($firstResponse)['data']['incident_id'] ?? 0);
+    $liveOnIncident = $refunds->findRestrictedByIncident($firstIncidentId);
+
+    $assert(
+        '6.4 La avería queda con un único expediente vivo tras el rechazo',
+        $firstIncidentId > 0
+        && count($liveOnIncident) === 1
+        && (int)$liveOnIncident[0]->getId() === (int)($firstReceipt['id'] ?? 0),
+        'expedientes vivos: ' . count($liveOnIncident)
+    );
+
+    // A DIFFERENT consumer on the same broken machine is the legitimate case
+    // RF-REF-11 must not break: five people can each lose a coin to one fault.
+    $otherResponse = $dispatch('POST', '/api/qr/report', [], $claimBody($duplicateMachine->getCode(), '699 888 777', 'Marc Ruibal'));
+    $otherReceipt = $decode($otherResponse)['data']['refund'] ?? [];
+
+    $assert(
+        '6.5 Otro consumidor sí abre su propia reclamación sobre la misma avería',
+        $otherResponse->getStatusCode() >= 200 && $otherResponse->getStatusCode() < 300
+        && (int)($otherReceipt['id'] ?? 0) > 0
+        && (int)($otherReceipt['id'] ?? 0) !== (int)($firstReceipt['id'] ?? 0)
+        && (string)($otherReceipt['tracking_token'] ?? '') !== $firstToken,
+        'HTTP ' . $otherResponse->getStatusCode() . ' ' . json_encode($decode($otherResponse)['error'] ?? null)
+    );
+
+    $assert(
+        '6.6 La segunda reclamación tiene token y PIN propios, no compartidos',
+        $otherReceipt !== []
+        && (string)($otherReceipt['tracking_token'] ?? '') !== $firstToken
+        && (string)($otherReceipt['pickup_pin'] ?? '') !== (string)($firstReceipt['pickup_pin'] ?? ''),
+        json_encode($otherReceipt)
+    );
+
+    // Once the first case is rejected it is terminal, and the claimant is
+    // entitled to claim again instead of being locked out forever.
+    $refunds->transitionStatus(
+        (int)($firstReceipt['id'] ?? 0),
+        RefundStatus::PENDING_INSPECTION,
+        RefundStatus::REJECTED,
+        []
+    );
+
+    $retryResponse = $dispatch('POST', '/api/qr/report', [], $claimBody($duplicateMachine->getCode(), '600111222'));
+    $retryReceipt = $decode($retryResponse)['data']['refund'] ?? [];
+
+    $assert(
+        '6.7 Tras una desestimación el consumidor puede volver a reclamar',
+        $retryResponse->getStatusCode() >= 200 && $retryResponse->getStatusCode() < 300
+        && (int)($retryReceipt['id'] ?? 0) > 0
+        && (int)($retryReceipt['id'] ?? 0) !== (int)($firstReceipt['id'] ?? 0),
+        'HTTP ' . $retryResponse->getStatusCode() . ' ' . json_encode($decode($retryResponse)['error'] ?? null)
+    );
+
 } finally {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();

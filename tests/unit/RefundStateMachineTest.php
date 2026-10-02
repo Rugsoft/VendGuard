@@ -259,17 +259,26 @@ $service = new RefundManagementService(
 
 $validIban = 'ES9121000418450200051332';
 
+// Cada llamada de $cashDto abre un ESCENARIO distinto (límite antifraude,
+// entrega con PIN, visto bueno, liquidaci��n...), no una segunda reclamación del
+// mismo consumidor. RF-REF-11 prohibe precisamente eso, así que la avería se
+// va allocating en vez de repetir la 101: el fixture sigue siendo autonomous y
+// la regla nueva queda honrada en lugar de esquivada.
+$cashIncidentSeq = 101;
+
 /** Builds the canonical creation DTO for a cash-in-hand case. */
-$cashDto = static fn (float $amount = 2.00): CreateRefundRequestDTO => new CreateRefundRequestDTO(
-    incidentId: 101,
-    machineId: 11,
-    locationId: 1,
-    claimantName: 'Laura Sanitaria',
-    claimantContact: '600111222',
-    claimedAmount: $amount,
-    compensationMethod: CompensationMethod::EN_MANO_SEDE,
-    productAttempted: 'Café con leche carril 2'
-);
+$cashDto = static function (float $amount = 2.00) use (&$cashIncidentSeq): CreateRefundRequestDTO {
+    return new CreateRefundRequestDTO(
+        incidentId: $cashIncidentSeq++,
+        machineId: 11,
+        locationId: 1,
+        claimantName: 'Laura Sanitaria',
+        claimantContact: '600111222',
+        claimedAmount: $amount,
+        compensationMethod: CompensationMethod::EN_MANO_SEDE,
+        productAttempted: 'Café con leche carril 2'
+    );
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0. Dogma Vanilla y Art. III
@@ -406,7 +415,7 @@ $assert(
 );
 
 $bizumCase = $service->createCase(new CreateRefundRequestDTO(
-    incidentId: 102,
+    incidentId: 901,
     machineId: 11,
     locationId: 1,
     claimantName: 'Marc Rider',
@@ -457,7 +466,7 @@ $assert('4.5 El importe límite de 50,00 € SÍ se acepta', $repo->findById($bo
 $overIban = null;
 try {
     $service->createCase(new CreateRefundRequestDTO(
-        incidentId: 103,
+        incidentId: 902,
         machineId: 11,
         locationId: 1,
         claimantName: 'Laura',
@@ -477,7 +486,7 @@ $assert(
 $overPhone = null;
 try {
     $service->createCase(new CreateRefundRequestDTO(
-        incidentId: 104,
+        incidentId: 903,
         machineId: 11,
         locationId: 1,
         claimantName: 'Marc',
@@ -710,7 +719,7 @@ $assert('7.5 Dar el visto bueno dos veces se rechaza con 409', $doubleApproval !
 echo "\n--- 8. Liquidación digital con justificante bancario (RF-REF-07) ---\n";
 
 $payCase = $service->createCase(new CreateRefundRequestDTO(
-    incidentId: 105,
+    incidentId: 904,
     machineId: 11,
     locationId: 1,
     claimantName: 'Laura Sanitaria',
@@ -794,7 +803,7 @@ echo "\n--- 10. El registro de auditoría nunca filtra datos bancarios (Art. V.4
 // un expediente con IBAN válido en la base de la suite: si no, `str_contains`
 // buscaría una cadena que jamás se escribió y la aserción pasaría en falso.
 $ibanCase = $service->createCase(new CreateRefundRequestDTO(
-    incidentId: 106,
+    incidentId: 905,
     machineId: 11,
     locationId: 1,
     claimantName: 'Laura Sanitaria',

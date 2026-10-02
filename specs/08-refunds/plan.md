@@ -439,6 +439,7 @@ flowchart LR
 | **RF-REF-08** | Gestión de discrepancias y multireclamación | `RefundManagementService` | `CoordinatorRefundsTab.js` | `CoordinatorRefundWorkflowApiTest.php` |
 | **RF-REF-09** | Desacoplamiento operativo e inmutabilidad | `TechnicianController`, `IncidentStateMachine` | N/A | `TechnicianRefundInspectionApiTest.php`, `ConstitutionalAuditTest.php` |
 | **RF-REF-10** | Segregación de IBAN y blindaje Art. V.4 | `AuthMiddleware`, `PdoRefundRequestRepository` | `LocationRefundsTab.js` | `SiteManagerRefundDataSegregationTest.php` |
+| **RF-REF-11** | Una sola reclamación viva por avería y consumidor | `RefundManagementService::assertNoDuplicateClaim()`, `QrScanController` | N/A | `PublicRefundTrackingApiTest.php`, `RefundStateMachineTest.php` |
 | **RNF-REF-01** | Trazabilidad inmutable en `audit_log` | `AuditLogger`, `RefundManagementService` | `AuditLogViewer.js` | `CoordinatorRefundWorkflowApiTest.php` |
 | **RNF-REF-02** | Rendimiento $< 150\text{ ms}$ en servidor | `PdoRefundRequestRepository` (índices SQL) | N/A | `CoordinatorRefundWorkflowApiTest.php` |
 | **RNF-REF-03** | Confidencialidad y DTOs seguros de IBAN | `PublicRefundTrackingDTO`, DTOs de salida | N/A | `SiteManagerRefundDataSegregationTest.php` |

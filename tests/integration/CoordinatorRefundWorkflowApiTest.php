@@ -164,17 +164,24 @@ try {
         return null;
     };
 
-    $openCase = static function (CompensationMethod $method, float $amount) use ($service, $incidentId, $machineId, $locationId): int {
+    // Cada llamada monta un escenario distinto de la bandeja de Coordinación, no
+    // una segunda reclamación del mismo consumidor: RF-REF-11 lo prohíbe, así que
+    // el expediente se abre con un contacto propio en vez de repetir el de Laura.
+    $claimantSeq = 0;
+    $lastClaimantContact = '';
+    $openCase = static function (CompensationMethod $method, float $amount) use ($service, $incidentId, $machineId, $locationId, &$claimantSeq, &$lastClaimantContact): int {
+        $contact = (string)(600000000 + (++$claimantSeq));
+        $lastClaimantContact = $contact;
         $case = $service->createCase(new CreateRefundRequestDTO(
             incidentId: $incidentId,
             machineId: $machineId,
             locationId: $locationId,
             claimantName: 'Laura Sanitaria',
-            claimantContact: '600111222',
+            claimantContact: $contact,
             claimedAmount: $amount,
             compensationMethod: $method,
             productAttempted: 'Café con leche carril 2',
-            bizumPhone: $method->requiresBizumPhone() ? '600111222' : null,
+            bizumPhone: $method->requiresBizumPhone() ? $contact : null,
             iban: $method->requiresIban() ? 'ES9121000418450200051332' : null
         ));
 
@@ -196,6 +203,7 @@ try {
     $transferCaseId = $openCase(CompensationMethod::TRANSFERENCIA_BANCARIA, 12.00);
     $escalate($transferCaseId, 12.00);
     $bizumCaseId = $openCase(CompensationMethod::BIZUM, 30.00);
+$bizumContact = $lastClaimantContact;
     $escalate($bizumCaseId, 4.00);
     $freshCaseId = $openCase(CompensationMethod::EN_MANO_SEDE, 2.00);
 
@@ -219,7 +227,7 @@ try {
     );
     $assert(
         '1.5 Y el teléfono Bizum del expediente correspondiente',
-        ($rowOf($inboxBody, $bizumCaseId)['bizum_phone'] ?? null) === '600111222'
+        ($rowOf($inboxBody, $bizumCaseId)['bizum_phone'] ?? null) === $bizumContact
     );
     $assert(
         '1.6 El nombre completo del reclamante sí se publica aquí',

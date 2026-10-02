@@ -7,6 +7,7 @@ namespace VendGuard\Application\Service;
 use VendGuard\Application\DTO\CoordinatorApprovalDTO;
 use VendGuard\Application\DTO\CoordinatorPaymentDTO;
 use VendGuard\Application\DTO\CreateRefundRequestDTO;
+use VendGuard\Core\Domain\Exception\DuplicateRefundClaimException;
 use VendGuard\Core\Domain\Exception\InvalidPickupPinException;
 use VendGuard\Core\Domain\Exception\InvalidRefundAmountException;
 use VendGuard\Core\Domain\Exception\InvalidRefundStateTransitionException;
@@ -216,6 +217,8 @@ final class RefundManagementService
      *
      * @throws InvalidRefundAmountException When the claim leaves the antifraud
      *   range of (0,00 €, 50,00 €].
+     * @throws DuplicateRefundClaimException When this same claimant already has
+     *   a live case on this incident (RF-REF-11).
      * @throws \VendGuard\Core\Domain\Exception\InvalidBizumPhoneException
      * @throws \VendGuard\Core\Domain\Exception\InvalidIbanFormatException
      */
@@ -228,6 +231,8 @@ final class RefundManagementService
                 maximumAllowed: RefundRequest::MAX_CLAIMED_AMOUNT
             );
         }
+
+        $this->assertNoDuplicateClaim($dto);
 
         $bizumPhone = $dto->compensationMethod->requiresBizumPhone()
             ? $this->ibanValidator->assertValidBizumPhone((string)$dto->bizumPhone)
@@ -512,6 +517,66 @@ final class RefundManagementService
     // ─────────────────────────────────────────────────────────────────────
     // Internals
     // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * One live case per (incident, claimant), which is the unit RF-REF-11 names.
+     *
+     * The check lives here, in the domain, and not in the controller or in a
+     * unique index, for two reasons. A controller-only check is one forgotten
+     * call away from being bypassed by the next entry point. And a UNIQUE index
+     * on `incident_id` would be wrong: it would also forbid re-claiming after a
+     * case was rejected, which is exactly when a claimant legitimately tries
+     * again with corrected data.
+     *
+     * Terminal cases are skipped on purpose. `PAID_DIGITAL`, `REFUNDED_IN_HAND`
+     * and `REJECTED` are the three ends of the lifecycle: the first two mean the
+     * money already left, and the third means the claim was dismissed and the
+     * consumer is entitled to start over.
+     *
+     * @throws DuplicateRefundClaimException
+     */
+    private function assertNoDuplicateClaim(CreateRefundRequestDTO $dto): void
+    {
+        $contact = $this->normalizeClaimantContact($dto->claimantContact);
+
+        if ($contact === '') {
+            return;
+        }
+
+        foreach ($this->refundRepo->findRestrictedByIncident($dto->incidentId) as $existing) {
+            if ($existing->getStatus()->isTerminal()) {
+                continue;
+            }
+
+            if ($this->normalizeClaimantContact($existing->getClaimantContact()) !== $contact) {
+                continue;
+            }
+
+            throw new DuplicateRefundClaimException(
+                existingCaseId: (int)$existing->getId(),
+                existingTrackingToken: $existing->getTrackingToken()
+            );
+        }
+    }
+
+    /**
+     * Folds a free-text contact channel into a comparable identity.
+     *
+     * The field accepts a phone or an email as typed, so "600 123 456",
+     * "600-123-456" and "600123456" are the same claimant, not three. Phone
+     * punctuation and spacing are removed; an email only loses its outer space
+     * and case, because its dots and signs are meaningful.
+     */
+    private function normalizeClaimantContact(string $contact): string
+    {
+        $trimmed = mb_strtolower(trim($contact));
+
+        if (str_contains($trimmed, '@')) {
+            return $trimmed;
+        }
+
+        return (string)preg_replace('/[\s\-.]/', '', $trimmed);
+    }
 
     /**
      * @throws RefundNotFoundException When the case does not exist or was archived.

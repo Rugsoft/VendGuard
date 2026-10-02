@@ -764,14 +764,18 @@ echo "\n--- 2. Recogida en sede: el resguardo trae PIN y enlace ---\n";
 $incidentRepo->rows = [];
 $incidentRepo->comments = [];
 
+// RF-REF-11: cada consumidor abre como mucho un expediente vivo por avería. Este
+// caso en mano y el de Bizum comparten máquina, así que son dos personas
+// distintas; Laura queda para la vía digital, que es la que comprueba que el
+// teléfono y el nombre no se filtran en el resguardo.
 $inHand = $invoke($report([
     'refund_requested' => true,
     'claimed_amount' => 2.00,
     'compensation_method' => 'EN_MANO_SEDE',
     'product_attempted' => 'Café con leche carril 2',
-    'contact_name' => 'Laura Sanitaria',
-    'contact_phone' => '600111222',
-]));
+    'contact_name' => 'Nuria Vela',
+    'contact_phone' => '600555443',
+], ['reporter_name' => 'Nuria Vela', 'reporter_phone' => '600555443']));
 $inHandBody = $inHand->getDecodedBody();
 $inHandReceipt = $inHandBody['data']['refund'] ?? [];
 
@@ -826,12 +830,16 @@ $assert('3.4 La clave `bizum_phone` no existe en el resguardo', !array_key_exist
 $assert('3.5 El nombre del reclamante NO vuelve en la respuesta', !str_contains($bizumJson, 'Laura Sanitaria'));
 $assert('3.6 El teléfono SÍ queda persistido para el coordinating team', $refundRepo->findById((int)($bizumReceipt['id'] ?? 0))?->getBizumPhone() === '600111222');
 
+// RF-REF-11: el mismo consumidor no acumula dos expedientes vivos, así que la
+// vía de transferencia la abre OTRA persona sobre la misma máquina. El IBAN es
+// lo que se está comprobando aquí, así que el cambio de reclamante no afecta a
+// las aserciones 3.7 a 3.10.
 $transfer = $invoke($report([
     'refund_requested' => true,
     'claimed_amount' => 15.00,
     'compensation_method' => 'TRANSFERENCIA_BANCARIA',
     'iban' => 'ES9121000418450200051332',
-]));
+], ['reporter_name' => 'Marc Ruibal', 'reporter_phone' => '699888777']));
 $transferBody = $transfer->getDecodedBody();
 $transferReceipt = $transferBody['data']['refund'] ?? [];
 $transferJson = (string)json_encode($transferBody, JSON_THROW_ON_ERROR);

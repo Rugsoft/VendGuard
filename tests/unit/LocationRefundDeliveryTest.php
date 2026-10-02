@@ -579,15 +579,36 @@ $controller = new LocationRefundController($refundRepo, $locationRepo, $incident
  * Opens a claim and, when asked, walks it to the desk so there is an envelope
  * to hand over.
  */
+// Cada llamada de $makeCase abre un escenario distinto (importe elevado, vía
+// digital, entrega correcta), no una segunda reclamación del mismo consumidor.
+// RF-REF-11 prohíbe eso, así que cada caso abre su propia avería en vez de
+// repetir la constante: el fixture sigue siendo autónomo y la regla se honra.
+$siteIncidentSeq = INCIDENT_ID + 1;
+$siteLastTicketCode = '';
+
 $makeCase = static function (
     CompensationMethod $method,
     float $amount,
     bool $depositAtReception = false,
     int $locationId = SITE_ID,
     string $name = 'Laura Sanitaria'
-) use ($management, $refundRepo): RefundRequest {
+) use ($management, $refundRepo, $incidentRepo, &$siteIncidentSeq, &$siteLastTicketCode): RefundRequest {
+    $incidentId = $siteIncidentSeq++;
+    $siteLastTicketCode = 'INC-2026-' . str_pad((string)$incidentId, 4, '0', STR_PAD_LEFT);
+    $incidentRepo->rows[$incidentId] = new Incident(
+        id: $incidentId,
+        ticketCode: $siteLastTicketCode,
+        machineId: MACHINE_ID,
+        locationId: SITE_ID,
+        category: IncidentCategory::PAYMENT_SYSTEM,
+        description: 'La máquina cobra y no entrega el producto.',
+        urgency: UrgencyLevel::HIGH,
+        status: IncidentStatus::RESOLVED,
+        assignedTechnicianId: 7
+    );
+
     $case = $management->createCase(new CreateRefundRequestDTO(
-        incidentId: INCIDENT_ID,
+        incidentId: $incidentId,
         machineId: MACHINE_ID,
         locationId: $locationId,
         claimantName: $name,
@@ -676,6 +697,7 @@ echo "\n--- 1. GET /api/location/refunds: los sobres del mostrador ---\n";
 // primero uno que NO está en el mostrador y después el sobre que sí lo está.
 $waitingFirst = $makeCase(CompensationMethod::EN_MANO_SEDE, 6.00);
 $atDesk = $makeCase(CompensationMethod::EN_MANO_SEDE, 2.50, true);
+$atDeskTicketCode = $siteLastTicketCode;
 $pending = $makeCase(CompensationMethod::BIZUM, 4.00);
 $otherSiteCase = $makeCase(CompensationMethod::EN_MANO_SEDE, 1.00, true, OTHER_SITE_ID);
 
@@ -703,7 +725,7 @@ $assert(
 );
 $assert('1.6 El sobre del mostrador está marcado como listo', ($listedBody['data']['refunds'][0]['ready_for_pickup'] ?? false) === true);
 $assert('1.7 El nombre del reclamante va anonimizado', ($listedBody['data']['refunds'][0]['claimant_name_anon'] ?? '') === 'Laura S.', 'anon: ' . ($listedBody['data']['refunds'][0]['claimant_name_anon'] ?? 'AUSENTE'));
-$assert('1.8 Expone el código de la avería de origen', ($listedBody['data']['refunds'][0]['incident_code'] ?? '') === 'INC-2026-0001');
+$assert('1.8 Expone el código de la avería de origen', ($listedBody['data']['refunds'][0]['incident_code'] ?? '') === $atDeskTicketCode, 'esperado ' . $atDeskTicketCode . ', recibido ' . ($listedBody['data']['refunds'][0]['incident_code'] ?? 'vacio'));
 $assert('1.9 Expone el código de máquina', ($listedBody['data']['refunds'][0]['machine_code'] ?? '') === 'VEND-0101');
 $assert('1.10 Expone el importe reclamado', (float)($listedBody['data']['refunds'][0]['claimed_amount'] ?? 0) === 2.50);
 $assert('1.11 Expone la etiqueta en castellano del estado', ($listedBody['data']['refunds'][0]['status_label'] ?? '') !== '');

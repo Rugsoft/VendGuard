@@ -677,6 +677,13 @@ $controller = new CoordinatorRefundController($refundRepo, $incidentRepo, $machi
  *
  * @param bool $escalate Lleva el expediente a REQUIRES_COORDINATOR_APPROVAL.
  */
+// Cada llamada de $makeCase monta un escenario distinto (vía digital, importe
+// elevado, ventanilla), no una segunda reclamación del mismo consumidor. RF-REF-11
+// prohíbe justo eso, así que cada caso abre su propia avería en vez de repetir
+// la 101: el fixture sigue siendo autónomo y la regla nueva se honra.
+$coordIncidentSeq = 102;
+$coordLastTicketCode = '';
+
 $makeCase = static function (
     CompensationMethod $method,
     float $amount,
@@ -684,9 +691,26 @@ $makeCase = static function (
     ?float $recovered = null,
     TechnicianFinding $finding = TechnicianFinding::FOUND_PHYSICAL,
     string $name = 'Laura Sanitaria'
-) use ($management, $refundRepo): RefundRequest {
+) use ($management, $refundRepo, $incidentRepo, &$coordIncidentSeq, &$coordLastTicketCode): RefundRequest {
+    // La bandeja resuelve el código de avería de cada expediente (contrato §4.1),
+    // así que la avería generada necesita su fila: sin ella, `incident_code`
+    // saldría vacío y la aserción 1.13 midría el fixture, no el DTO.
+    $incidentId = $coordIncidentSeq++;
+    $coordLastTicketCode = 'INC-2026-' . str_pad((string)$incidentId, 4, '0', STR_PAD_LEFT);
+    $incidentRepo->rows[$incidentId] = new Incident(
+        id: $incidentId,
+        ticketCode: $coordLastTicketCode,
+        machineId: COORD_MACHINE_ID,
+        locationId: COORD_SITE_ID,
+        category: IncidentCategory::PAYMENT_SYSTEM,
+        description: 'La máquina cobra y no entrega el producto.',
+        urgency: UrgencyLevel::HIGH,
+        status: IncidentStatus::RESOLVED,
+        assignedTechnicianId: 7
+    );
+
     $case = $management->createCase(new CreateRefundRequestDTO(
-        incidentId: COORD_INCIDENT_ID,
+        incidentId: $incidentId,
         machineId: COORD_MACHINE_ID,
         locationId: COORD_SITE_ID,
         claimantName: $name,
@@ -827,6 +851,7 @@ $assert(
 echo "\n--- 1. GET /api/coordinator/refunds: la bandeja con detalle financiero ---\n";
 
 $transferCase = $makeCase(CompensationMethod::TRANSFERENCIA_BANCARIA, 12.00, true, 12.00);
+$transferTicketCode = $coordLastTicketCode;
 $bizumCase = $makeCase(CompensationMethod::BIZUM, 18.00, true, 3.00, TechnicianFinding::FOUND_PHYSICAL, 'Marc Rider');
 $deskCase = $makeCase(CompensationMethod::EN_MANO_SEDE, 2.00);
 
@@ -888,7 +913,7 @@ $assert(
     $missingKeys === [],
     'claves ausentes: ' . implode(',', $missingKeys)
 );
-$assert('1.13 Expone el código de la avería de origen', ($transferRow['incident_code'] ?? '') === 'INC-2026-0001');
+$assert('1.13 Expone el código de la avería de origen', ($transferRow['incident_code'] ?? '') === $transferTicketCode, 'esperado ' . $transferTicketCode . ', recibido ' . ($transferRow['incident_code'] ?? 'vacio'));
 $assert('1.14 Expone el código de máquina', ($transferRow['machine_code'] ?? '') === 'VEND-0101');
 $assert('1.15 Expone el nombre de la sede', ($transferRow['location_name'] ?? '') === 'Hospital del Mar - Edificio Central');
 $assert('1.16 Expone la etiqueta en castellano del estado', ($transferRow['status_label'] ?? '') !== '');

@@ -380,9 +380,15 @@ $routes = [
     'REFUNDED_IN_HAND' => ['DEPOSITED_AT_RECEPTION', 'REFUNDED_IN_HAND'],
 ];
 
-$makeCase = static function (RefundStatus $status, CompensationMethod $method = CompensationMethod::EN_MANO_SEDE) use ($management, $refundRepo, $routes): RefundRequest {
+// Cada llamada de $makeCase construye un expediente en un ESTADO distinto para
+// probar la proyección del seguimiento público, no una segunda reclamación del
+// mismo consumidor. RF-REF-11 prohíbe eso, así que cada expediente abre su
+// propia avería en vez de repetir la 101.
+$publicIncidentSeq = 101;
+
+$makeCase = static function (RefundStatus $status, CompensationMethod $method = CompensationMethod::EN_MANO_SEDE) use ($management, $refundRepo, $routes, &$publicIncidentSeq): RefundRequest {
     $case = $management->createCase(new CreateRefundRequestDTO(
-        incidentId: 101,
+        incidentId: $publicIncidentSeq++,
         machineId: 11,
         locationId: 1,
         claimantName: 'Laura Sanitaria',
