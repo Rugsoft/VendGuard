@@ -591,6 +591,64 @@ export class ApiClient {
     },
     getSparePartsPendingReview: () => {
       return this.get('/coordinator/spare-parts/requests/pending-review');
+    },
+
+    // Gestión de Reintegros e Importe Retenido (Módulo 08 - RF-REF-03, RF-REF-07, RF-REF-08)
+    /**
+     * Retrieves the global refund inbox with full financial detail and filters.
+     * @param {Object} [filters={}] - { status, location_id, machine_id, requires_approval_only, from, to, limit, offset }
+     * @returns {Promise<Object>}
+     */
+    getRefunds: (filters = {}) => {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(filters)) {
+        if (value !== undefined && value !== null && value !== '') {
+          params.append(key, String(value));
+        }
+      }
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      return this.get(`/coordinator/refunds${qs}`);
+    },
+
+    /**
+     * Grants the formal double approval of the final payable amount (RF-REF-03).
+     * @param {number|string} refundId
+     * @param {number} approvedAmount
+     * @param {string} [notes='']
+     * @returns {Promise<Object>}
+     */
+    approveRefund: (refundId, approvedAmount, notes = '') => {
+      return this.post(`/coordinator/refunds/${encodeURIComponent(refundId)}/approve`, {
+        approved_amount: Number(approvedAmount),
+        notes: String(notes ?? '')
+      });
+    },
+
+    /**
+     * Registers the digital settlement together with its bank/payment reference (RF-REF-07).
+     * @param {number|string} refundId
+     * @param {string} paymentReference
+     * @param {number|null} [paidAmount=null] Defaults server-side to the approved amount.
+     * @returns {Promise<Object>}
+     */
+    payRefund: (refundId, paymentReference, paidAmount = null) => {
+      const body = { payment_reference: String(paymentReference ?? '') };
+      if (paidAmount !== null && paidAmount !== undefined && paidAmount !== '') {
+        body.paid_amount = Number(paidAmount);
+      }
+      return this.post(`/coordinator/refunds/${encodeURIComponent(refundId)}/pay`, body);
+    },
+
+    /**
+     * Rejects a claim with a mandatory written justification of at least 20 characters (RF-REF-08).
+     * @param {number|string} refundId
+     * @param {string} rejectionReason
+     * @returns {Promise<Object>}
+     */
+    rejectRefund: (refundId, rejectionReason) => {
+      return this.post(`/coordinator/refunds/${encodeURIComponent(refundId)}/reject`, {
+        rejection_reason: String(rejectionReason ?? '')
+      });
     }
   };
 

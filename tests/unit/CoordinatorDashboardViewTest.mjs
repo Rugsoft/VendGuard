@@ -438,6 +438,26 @@ assert('6.9 Map tab receives the coordinator user context',
   CoordinatorDashboardView.template.includes(':current-user="currentUser"') &&
   CoordinatorDashboardView.template.includes('@assign-incidents="handleTerritorialAssign"'));
 
+// ---------------------------------------------------------------------
+// TEST GROUP 8: Refunds Inbox Tab Integration (RF-REF-03, RF-REF-07, RF-REF-08 / T-REF-18)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 8: Refunds Inbox Tab Integration ---');
+
+assert('8.1 View registers CoordinatorRefundsTab component',
+  CoordinatorDashboardView.components?.CoordinatorRefundsTab !== undefined);
+
+assert('8.2 Tab bar contains the "Reintegros" button',
+  CoordinatorDashboardView.template.includes('data-testid="tab-refunds"') &&
+  CoordinatorDashboardView.template.includes('💶 Reintegros') &&
+  CoordinatorDashboardView.template.includes("activeTab = 'refunds'"));
+
+assert('8.3 Refunds inbox mounts conditionally on the active tab',
+  CoordinatorDashboardView.template.includes("v-else-if=\"activeTab === 'refunds'\"") &&
+  CoordinatorDashboardView.template.includes('<CoordinatorRefundsTab'));
+
+assert('8.4 The triage tab stays the default landing section',
+  CoordinatorDashboardView.data().activeTab === 'incidents');
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);

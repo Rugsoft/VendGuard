@@ -114,7 +114,7 @@
   * **Dependencias:** T-REF-11
   * **Hecho cuando:** El portal de sede incluye la pestaña "Reintegros" con lista de avisos anonimizada y botón para abrir el modal con teclado numérico que valida el PIN de 4 dígitos; `node tests/unit/LocationRefundsTabTest.mjs` pasa al 100% en verde.
 
-- [ ] **T-REF-18: Implementar `CoordinatorRefundsTab.js` e integrar en `CoordinatorDashboardView.js` y `app.js` y suite frontend (`CoordinatorRefundsTabTest.mjs`)**
+- [x] **T-REF-18: Implementar `CoordinatorRefundsTab.js` e integrar en `CoordinatorDashboardView.js` y `app.js` y suite frontend (`CoordinatorRefundsTabTest.mjs`)**
   * **Requisitos:** RF-REF-03, RF-REF-07, RF-REF-08, RNF-REF-05
   * **Dependencias:** T-REF-12
   * **Hecho cuando:** El panel de Coordinación incluye la pestaña "Reintegros" con filtros por estado, modales reactivos de visto bueno, rechazo motivado y registro de justificante de pago digital; `node tests/unit/CoordinatorRefundsTabTest.mjs` pasa al 100% en verde.
