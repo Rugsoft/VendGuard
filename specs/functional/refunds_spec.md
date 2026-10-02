@@ -85,6 +85,9 @@ El sistema debe facilitar al consumidor final anónimo los medios para consultar
 * **EARS Evento:** Cuando un usuario registre una solicitud de reintegro desde el escaneo público QR, el sistema DEBE generar un **Código PIN de Recogida de 4 dígitos numéricos** aleatorios y un **Token de Seguimiento Criptográfico Seguro** (URL pública de consulta).
 * **EARS Evento:** Al finalizar el envío del reporte QR, el sistema DEBE mostrar una pantalla de confirmación con el resumen de la reclamación, el PIN de 4 dígitos para entrega en mano (si aplicara) y el enlace de seguimiento permanente para consultar el estado del expediente en cualquier momento.
 * **EARS Estado:** Mientras el expediente de reintegro se encuentre en estado `PENDING_CONTACT` (datos bancarios erróneos), el enlace seguro de seguimiento DEBE permitir al usuario introducir y corregir su número de Bizum o IBAN bancario.
+* **EARS Evento:** El sistema DEBE contabilizar cada intento de entrega fallido por PIN incorrecto sobre el mismo expediente y, al alcanzar **5 intentos**, DEBE bloquear el PIN durante **15 minutos**, respondiendo `423 PICKUP_PIN_LOCKED` con la fecha de liberación hasta que expire el bloqueo. Un PIN correcto presentado durante el bloqueo NO DEBE liberar el efectivo.
+* **EARS Evento:** El sistema NO DEBE exponer el contador de intentos ni la fecha de bloqueo en el enlace público de seguimiento ni en la vista de la conserjería, por tratarse de información antifuerza tan sensible como el propio PIN.
+* **EARS Evento:** Al entregarse el efectivo con un PIN correcto, DEBE reiniciarse a cero el contador de intentos, de modo que un error aislado nunca bloquee la entrega de otro expediente posterior.
 
 ---
 

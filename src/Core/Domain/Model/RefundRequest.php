@@ -29,6 +29,20 @@ final readonly class RefundRequest implements JsonSerializable
     /** Relative gap between claimed and recovered cash that forces escalation. */
     public const DISCREPANCY_TOLERANCE = 0.20;
 
+    /**
+     * Wrong pickup PINs a case tolerates before it locks (RF-REF-02).
+     *
+     * Four digits is 10.000 combinations. Measured against this endpoint, 3000
+     * wrong PINs went through in 1.02 seconds, so without a brake the whole
+     * keyspace was reachable in under four minutes. `hash_equals()` stops the
+     * secret leaking through timing; only a counter stops it being ground down
+     * by volume.
+     */
+    public const PICKUP_PIN_MAX_ATTEMPTS = 5;
+
+    /** How long the pickup PIN stays locked, in minutes (RF-REF-02). */
+    public const PICKUP_PIN_LOCK_MINUTES = 15;
+
     public function __construct(
         private ?int $id,
         private int $incidentId,
@@ -58,7 +72,11 @@ final readonly class RefundRequest implements JsonSerializable
         private bool $isActive = true,
         private ?string $createdAt = null,
         private ?string $updatedAt = null,
-        private bool $financialColumnsRestricted = false
+        private bool $financialColumnsRestricted = false,
+        // RF-REF-02: the brute-force brake. Declared last so every existing
+        // construction site keeps working; they are named-argument calls.
+        private int $pickupAttempts = 0,
+        private ?string $pickupLockedUntil = null
     ) {
         // `null` significa "todavía no persistido", el mismo centinela que usa
         // la entidad `Incident`. El identificador sólo existe una vez insertada
@@ -123,6 +141,16 @@ final readonly class RefundRequest implements JsonSerializable
 
         if ($paidAmount !== null && $paidAmount > self::MAX_CLAIMED_AMOUNT) {
             throw new InvalidArgumentException('El importe liquidado no puede superar el tope máximo de 50,00 €.');
+        }
+
+        // TINYINT UNSIGNED is the column, so 255 is the storage truth. Anything
+        // beyond it is not a counter, it is corruption.
+        if ($pickupAttempts < 0 || $pickupAttempts > 255) {
+            throw new InvalidArgumentException('El contador de intentos del PIN debe estar entre 0 y 255.');
+        }
+
+        if ($pickupLockedUntil !== null && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $pickupLockedUntil) !== 1) {
+            throw new InvalidArgumentException('El bloqueo del PIN debe ser una fecha y hora válidas.');
         }
 
         // RF-REF-05: digital channels are settled by the central office, so the
@@ -230,6 +258,39 @@ final readonly class RefundRequest implements JsonSerializable
     }
 
     /**
+     * How many wrong PINs this case has absorbed (RF-REF-02).
+     *
+     * Never projected to a consumer or to the desk: the counter tells an
+     * attacker how much of the keyspace is gone.
+     */
+    public function getPickupAttempts(): int
+    {
+        return $this->pickupAttempts;
+    }
+
+    /**
+     * When the pickup PIN stops being locked, or null when it is not locked
+     * (RF-REF-02). A lock that never expired would be a denial of service on
+     * the consumer, so it is time-bounded rather than a flag.
+     */
+    public function getPickupLockedUntil(): ?string
+    {
+        return $this->pickupLockedUntil;
+    }
+
+    /**
+     * Whether the pickup PIN is locked at `$now` (RF-REF-02).
+     *
+     * The comparison is a string one on purpose: both sides are
+     * `Y-m-d H:i:s` in the same timezone, and lexicographic order IS
+     * chronological order for that format.
+     */
+    public function isPickupLockedAt(string $now): bool
+    {
+        return $this->pickupLockedUntil !== null && strcmp($this->pickupLockedUntil, $now) > 0;
+    }
+
+    /**
      * Constant-time comparison of a pickup PIN presented at the reception desk
      * (RF-REF-06). Kept on the entity so no caller can fall back to a plain
      * string comparison that leaks timing information.
@@ -306,6 +367,13 @@ final readonly class RefundRequest implements JsonSerializable
             createdAt: $nullable('created_at'),
             updatedAt: $nullable('updated_at'),
             financialColumnsRestricted: true,
+            // La proyección restringida nunca selecciona el freno antifuerza: el
+            // contador de intentos es tan sensible como el propio PIN, porque
+            // dice cuántas combinaciones quedan por probar. Lejos de la mesa de
+            // conserjería el valor por defecto (cero) es además la lectura
+            // honesta, ya que sólo la vista completa conoce el histórico real.
+            pickupAttempts: 0,
+            pickupLockedUntil: null,
         );
     }
 
@@ -369,6 +437,8 @@ final readonly class RefundRequest implements JsonSerializable
             paidAmount: $this->paidAmount,
             coordinatorDecision: $this->coordinatorDecision,
             coordinatorJustification: $this->coordinatorJustification,
+            pickupAttempts: $this->pickupAttempts,
+            pickupLockedUntil: $this->pickupLockedUntil,
             paidAt: $this->paidAt,
             isActive: $this->isActive,
             createdAt: $this->createdAt,
@@ -583,6 +653,9 @@ final readonly class RefundRequest implements JsonSerializable
             'coordinator_decision' => $this->coordinatorDecision?->value,
             'coordinator_justification' => $this->coordinatorJustification,
             'paid_at' => $this->paidAt,
+            // `pickup_attempts` y `pickup_locked_until` NO se serializan a
+            // propósito: son estado antifuerza interno (RF-REF-02) y nadie fuera
+            // del dominio necesita saber cuántos intentos lleva el expediente.
             'is_active' => $this->isActive,
             'created_at' => $this->createdAt,
             'updated_at' => $this->updatedAt,

@@ -46,6 +46,7 @@ use VendGuard\Application\DTO\CreateRefundRequestDTO;
 use VendGuard\Application\Service\AuthService;
 use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Core\Domain\Model\CompensationMethod;
+use VendGuard\Core\Domain\Model\RefundRequest;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\RefundStatus;
@@ -242,6 +243,9 @@ try {
     $deskMachine = $makeMachine('TREF21A-', $location);
     $secondDeskMachine = $makeMachine('TREF21B-', $location);
     $otherSiteMachine = $makeMachine('TREF21C-', $otherLocation);
+    // Tercera máquina de la misma sede: el escenario de fuerza bruta necesita
+    // su propio expediente, porque cada sobre lleva su propio PIN.
+    $thirdDeskMachine = $makeMachine('TREF21D-', $location);
 
     $assert(
         '0.3 Las tres máquinas de prueba se crean dentro de la transacción',
@@ -692,6 +696,125 @@ try {
         '5.4 Sólo las dos entregas de esta suite dejaron apunte en la auditoría',
         $audits === 2,
         "REFUND_DELIVERED_IN_HAND de esta suite: {$audits}"
+    );
+
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 6. La fuerza bruta contra el PIN de recogida se topa con el freno (RF-REF-02) ---\n";
+    // ─────────────────────────────────────────────────────────────────────
+
+    // Antes de este requisito el endpoint toleraba 3000 PIN incorrectos en 1,02
+    // segundos (0,34 ms por intento): con 10.000 combinaciones, el espacio
+    // entero era alcanzable en menos de cuatro minutos. Se reproduce aquí el
+    // ataque sobre el endpoint HTTP real, no sobre el servicio.
+    [$bruteCaseId, $brutePin] = $buildDeskCase(
+        $thirdDeskMachine,
+        $location,
+        $techId,
+        'TREF21D-FUERZA-BRUTA-',
+        'Álvaro Exhausto',
+        3.00,
+        $techHeaders,
+        $dispatch,
+        $makeIncident
+    );
+
+    $bruteStatuses = [];
+    $lockedResponse = null;
+    for ($guess = 0; $guess < RefundRequest::PICKUP_PIN_MAX_ATTEMPTS; $guess++) {
+        // Se esquivan el PIN real a propósito: adivinarlo en el quinto intento
+        // sería una prueba de suerte, no una prueba del freno.
+        $candidate = (string)(1000 + (($brutePin - 1000 + 1 + $guess) % 9000));
+        $attempt = $dispatch('POST', "/api/location/refunds/{$bruteCaseId}/deliver", [
+            'pickup_pin' => $candidate,
+        ], $siteHeaders);
+        $bruteStatuses[] = $attempt->getStatusCode();
+
+        if ($attempt->getStatusCode() === 423) {
+            $lockedResponse = $attempt;
+        }
+    }
+
+    $assert(
+        '6.1 Los primeros intentos son 422 y el último cierra la puerta con 423',
+        $bruteStatuses === array_merge(
+            array_fill(0, RefundRequest::PICKUP_PIN_MAX_ATTEMPTS - 1, 422),
+            [423]
+        ),
+        'estados: ' . json_encode($bruteStatuses)
+    );
+    $assert(
+        '6.2 El bloqueo se identifica como PICKUP_PIN_LOCKED y dice cuándo se libera',
+        $lockedResponse !== null
+        && $errorCode($lockedResponse) === 'PICKUP_PIN_LOCKED'
+        && (string)($lockedResponse->getDecodedBody()['error']['details']['locked_until'] ?? '') !== '',
+        'detalle: ' . json_encode($lockedResponse?->getDecodedBody()['error'] ?? null)
+    );
+
+    $afterLock = $dispatch('POST', "/api/location/refunds/{$bruteCaseId}/deliver", [
+        'pickup_pin' => $brutePin,
+    ], $siteHeaders);
+    $bruteRow = $pdo->prepare('SELECT `status`, `pickup_attempts`, `pickup_locked_until` FROM `refund_requests` WHERE `id` = :id');
+    $bruteRow->execute([':id' => $bruteCaseId]);
+    $bruteRowData = $bruteRow->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    $assert(
+        '6.3 El PIN CORRECTO ya no abre el sobre: el sobre sigue en el mostrador',
+        $afterLock->getStatusCode() === 423
+        && (string)($bruteRowData['status'] ?? '') === 'DEPOSITED_AT_RECEPTION',
+        "HTTP {$afterLock->getStatusCode()} | estado: " . (string)($bruteRowData['status'] ?? '')
+    );
+    $assert(
+        '6.4 El contador y el bloqueo quedan persistidos en la base de datos',
+        (int)($bruteRowData['pickup_attempts'] ?? 0) === RefundRequest::PICKUP_PIN_MAX_ATTEMPTS
+        && trim((string)($bruteRowData['pickup_locked_until'] ?? '')) !== '',
+        'intentos: ' . (string)($bruteRowData['pickup_attempts'] ?? '')
+    );
+
+    // Seguir insistiendo no cuela: 200 intentos más siguen sin mover el expediente.
+    $persistence = [];
+    for ($extra = 0; $extra < 200; $extra++) {
+        $persistence[] = $dispatch('POST', "/api/location/refunds/{$bruteCaseId}/deliver", [
+            'pickup_pin' => (string)(1000 + ($extra % 9000)),
+        ], $siteHeaders)->getStatusCode();
+    }
+    $assert(
+        '6.5 Doscientos intentos más no cambian la respuesta ni abren el expediente',
+        array_unique($persistence) === [423]
+        && $refunds->findById($bruteCaseId)?->getStatus() === RefundStatus::DEPOSITED_AT_RECEPTION,
+        'estados distintos: ' . json_encode(array_values(array_unique($persistence)))
+    );
+
+    $deskListing = $dispatch('GET', '/api/location/refunds', null, $siteHeaders);
+    $assert(
+        '6.6 La conserjería NO ve el contador de intentos ni la fecha de bloqueo',
+        !str_contains((string)$deskListing->getBody(), 'pickup_attempts')
+        && !str_contains((string)$deskListing->getBody(), 'pickup_locked_until')
+        && !str_contains((string)$afterLock->getBody(), 'pickup_attempts'),
+        'respuesta: ' . substr((string)$deskListing->getBody(), 0, 200)
+    );
+
+    // El bloqueo es temporal: agotado el plazo, el consumidor vuelve a cobrar.
+    $pdo->prepare('UPDATE `refund_requests` SET `pickup_locked_until` = :until WHERE `id` = :id')
+        ->execute([
+            ':until' => date('Y-m-d H:i:s', strtotime('-1 minute')),
+            ':id' => $bruteCaseId,
+        ]);
+
+    $recovered = $dispatch('POST', "/api/location/refunds/{$bruteCaseId}/deliver", [
+        'pickup_pin' => $brutePin,
+    ], $siteHeaders);
+    $recoveredRow = $refunds->findById($bruteCaseId);
+
+    $assert(
+        '6.7 Vencido el bloqueo, el PIN correcto vuelve a entregar el sobre',
+        $recovered->getStatusCode() === 200
+        && $recoveredRow?->getStatus() === RefundStatus::REFUNDED_IN_HAND,
+        "HTTP {$recovered->getStatusCode()} " . json_encode($recovered->getDecodedBody())
+    );
+    $assert(
+        '6.8 La entrega correcta deja el contador a cero',
+        $recoveredRow?->getPickupAttempts() === 0 && $recoveredRow?->getPickupLockedUntil() === null,
+        'intentos: ' . var_export($recoveredRow?->getPickupAttempts(), true)
     );
 } finally {
     if ($pdo->inTransaction()) {

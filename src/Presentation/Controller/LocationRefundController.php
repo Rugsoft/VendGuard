@@ -8,6 +8,7 @@ use VendGuard\Application\DTO\LocationRefundViewDTO;
 use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Core\Domain\Exception\InvalidPickupPinException;
 use VendGuard\Core\Domain\Exception\InvalidRefundStateTransitionException;
+use VendGuard\Core\Domain\Exception\PickupPinLockedException;
 use VendGuard\Core\Domain\Exception\RefundNotFoundException;
 use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\RefundRequest;
@@ -193,6 +194,17 @@ class LocationRefundController
                 $refundId,
                 $rawPin,
                 $this->buildActor($request)
+            );
+        } catch (PickupPinLockedException $e) {
+            // 423 y no 429: el motivo del rechazo lo conoce quien lo recibe (los
+            // intentos se agotaron) y se le indica cuándo reintentar. Los details
+            // llevan `locked_until` para que la interfaz pueda mostrarlo, y en
+            // ningún caso el PIN introducido.
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                $e->getDetails()
             );
         } catch (InvalidPickupPinException $e) {
             return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());

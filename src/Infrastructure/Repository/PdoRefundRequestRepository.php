@@ -28,7 +28,8 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
     /** Full projection: Coordination only. */
     private const FULL_COLUMNS = 'r.`id`, r.`incident_id`, r.`machine_id`, r.`location_id`,
         r.`claimant_name`, r.`claimant_contact`, r.`claimed_amount`, r.`product_attempted`,
-        r.`compensation_method`, r.`bizum_phone`, r.`iban`, r.`pickup_pin`, r.`tracking_token`,
+        r.`compensation_method`, r.`bizum_phone`, r.`iban`, r.`pickup_pin`,
+        r.`pickup_attempts`, r.`pickup_locked_until`, r.`tracking_token`,
         r.`status`, r.`technician_finding`, r.`recovered_amount`, r.`cash_custody_action`,
         r.`receptionist_name`, r.`technician_justification`, r.`approved_amount`,
         r.`payment_reference`, r.`paid_amount`, r.`coordinator_decision`, r.`coordinator_justification`,
@@ -53,6 +54,13 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
         'payment_reference',
         'paid_amount',
         'paid_at',
+        // RF-REF-02: el freno antifuerza del PIN se escribe por la MISMA puerta
+        // que el resto del expediente, con la misma lista blanca y la misma
+        // transición Compare-And-Swap. Un contador que se actualizara por
+        // `UPDATE` directo saltaría la garantía de que nadie escribe sobre un
+        // caso que otro sistema acaba de mover.
+        'pickup_attempts',
+        'pickup_locked_until',
         'hand_delivered_at',
         'coordinator_decision',
         'coordinator_justification',
@@ -77,14 +85,16 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
             INSERT INTO `refund_requests` (
                 `incident_id`, `machine_id`, `location_id`,
                 `claimant_name`, `claimant_contact`, `claimed_amount`, `product_attempted`,
-                `compensation_method`, `bizum_phone`, `iban`, `pickup_pin`, `tracking_token`,
+                `compensation_method`, `bizum_phone`, `iban`, `pickup_pin`,
+                `pickup_attempts`, `pickup_locked_until`, `tracking_token`,
                 `status`, `technician_finding`, `recovered_amount`, `cash_custody_action`,
                 `receptionist_name`, `technician_justification`, `approved_amount`,
                 `payment_reference`, `is_active`
             ) VALUES (
                 :incident_id, :machine_id, :location_id,
                 :claimant_name, :claimant_contact, :claimed_amount, :product_attempted,
-                :compensation_method, :bizum_phone, :iban, :pickup_pin, :tracking_token,
+                :compensation_method, :bizum_phone, :iban, :pickup_pin,
+                :pickup_attempts, :pickup_locked_until, :tracking_token,
                 :status, :technician_finding, :recovered_amount, :cash_custody_action,
                 :receptionist_name, :technician_justification, :approved_amount,
                 :payment_reference, :is_active
@@ -103,6 +113,8 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
             ':bizum_phone' => $refundRequest->getBizumPhone(),
             ':iban' => $refundRequest->getIban(),
             ':pickup_pin' => $refundRequest->getPickupPin(),
+            ':pickup_attempts' => $refundRequest->getPickupAttempts(),
+            ':pickup_locked_until' => $refundRequest->getPickupLockedUntil(),
             ':tracking_token' => $refundRequest->getTrackingToken(),
             ':status' => $refundRequest->getStatus()->value,
             ':technician_finding' => $refundRequest->getTechnicianFinding()?->value,
@@ -370,6 +382,8 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
             bizumPhone: $nullable('bizum_phone'),
             iban: $nullable('iban'),
             pickupPin: $nullable('pickup_pin'),
+            pickupAttempts: isset($row['pickup_attempts']) ? (int)$row['pickup_attempts'] : 0,
+            pickupLockedUntil: $nullable('pickup_locked_until'),
             trackingToken: (string)$row['tracking_token'],
             status: RefundStatus::from((string)$row['status']),
             technicianFinding: isset($row['technician_finding']) && $row['technician_finding'] !== null

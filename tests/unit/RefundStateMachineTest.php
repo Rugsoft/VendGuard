@@ -658,6 +658,68 @@ try {
 }
 $assert('6.7 Entregar dos veces el mismo expediente se rechaza con 409', $repeatDelivery !== null && $repeatDelivery->getHttpStatusCode() === 409);
 
+// El freno antifuerza vive en la entidad, no en el servicio: son reglas que
+// viajan con el expediente aunque lo elija el punto de entrada (RF-REF-02).
+$assert(
+    '6.8 El presupuesto de intentos del PIN es de 5 intentos',
+    RefundRequest::PICKUP_PIN_MAX_ATTEMPTS === 5
+);
+$assert(
+    '6.9 El bloqueo dura 15 minutos',
+    RefundRequest::PICKUP_PIN_LOCK_MINUTES === 15
+);
+$assert(
+    '6.10 Un expediente recién creado no está bloqueado ni lleva intentos',
+    $service->createCase($cashDto(1.50))->getPickupAttempts() === 0
+    && $service->createCase($cashDto(1.75))->getPickupLockedUntil() === null
+);
+$assert(
+    '6.11 El bloqueo se resuelve contra la hora actual, no contra una bandera',
+    (function (): bool {
+        $now = '2026-10-02 12:00:00';
+
+        return (new RefundRequest(
+            id: 1,
+            incidentId: 1,
+            machineId: 1,
+            locationId: 1,
+            claimantName: 'Laura Sanitaria',
+            claimantContact: '600111222',
+            claimedAmount: 3.00,
+            productAttempted: 'Café con leche',
+            compensationMethod: CompensationMethod::EN_MANO_SEDE,
+            bizumPhone: null,
+            iban: null,
+            pickupPin: '1234',
+            trackingToken: 'token-de-prueba',
+            status: RefundStatus::DEPOSITED_AT_RECEPTION,
+            pickupAttempts: 5,
+            pickupLockedUntil: '2026-10-02 12:15:00',
+        ))->isPickupLockedAt($now);
+    })()
+);
+$assert(
+    '6.12 Pasada la hora de liberación el PIN vuelve a estar disponible',
+    !(new RefundRequest(
+        id: 1,
+        incidentId: 1,
+        machineId: 1,
+        locationId: 1,
+        claimantName: 'Laura Sanitaria',
+        claimantContact: '600111222',
+        claimedAmount: 3.00,
+        productAttempted: 'Café con leche',
+        compensationMethod: CompensationMethod::EN_MANO_SEDE,
+        bizumPhone: null,
+        iban: null,
+        pickupPin: '1234',
+        trackingToken: 'token-de-prueba',
+        status: RefundStatus::DEPOSITED_AT_RECEPTION,
+        pickupAttempts: 5,
+        pickupLockedUntil: '2026-10-02 12:15:00',
+    ))->isPickupLockedAt('2026-10-02 12:15:01')
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 7. Visto bueno de Coordinación
 // ─────────────────────────────────────────────────────────────────────────────

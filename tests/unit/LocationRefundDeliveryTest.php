@@ -392,6 +392,9 @@ function rebuildDeskCase(RefundRequest $case, array $overrides = []): RefundRequ
         technicianJustification: $pick('technicianJustification', $case->getTechnicianJustification()),
         approvedAmount: $pick('approvedAmount', $case->getApprovedAmount()),
         paymentReference: $pick('paymentReference', $case->getPaymentReference()),
+        paidAmount: $pick('paidAmount', $case->getPaidAmount()),
+        pickupAttempts: (int)$pick('pickupAttempts', $case->getPickupAttempts()),
+        pickupLockedUntil: $pick('pickupLockedUntil', $case->getPickupLockedUntil()),
         isActive: (bool)$pick('isActive', $case->isActive()),
         createdAt: $pick('createdAt', $case->getCreatedAt()),
         updatedAt: $pick('updatedAt', $case->getUpdatedAt())
@@ -819,7 +822,127 @@ $assert(
     '4.4 El expediente sigue en el mostrador, sin entregar',
     $refundRepo->findById((int)$guarded->getId())?->getStatus() === RefundStatus::DEPOSITED_AT_RECEPTION
 );
-$assert('4.5 No se registra ninguna entrega fallida en la auditoría', count($auditRepo->events) === $guardedEventsBefore);
+// El dogma cambió con RF-REF-02: un PIN incorrecto ya no es un NO-OP invisible
+// (eso era justo lo que hacía ilimitados los intentos), pero NUNCA se audita
+// como si el dinero se hubiera entregado. Lo que se audita es el rechazo, y sin
+// el PIN introducido (Art. V.4).
+$refusedEvents = array_values(array_filter(
+    array_slice($auditRepo->events, $guardedEventsBefore),
+    static fn (AuditEvent $event): bool => $event->getAction() === 'REFUND_DELIVERED_IN_HAND'
+));
+$assert(
+    '4.5 El intento fallido NO se audita como una entrega de efectivo',
+    $refusedEvents === []
+);
+$rejectEvents = array_values(array_filter(
+    array_slice($auditRepo->events, $guardedEventsBefore),
+    static fn (AuditEvent $event): bool => $event->getAction() === 'REFUND_PICKUP_PIN_REJECTED'
+));
+$assert(
+    '4.6 El rechazo SÍ queda auditado, con el intento contado',
+    count($rejectEvents) === 1
+    && (int)($rejectEvents[0]->getNewState()['failed_attempts'] ?? 0) === 1
+);
+$assert(
+    '4.7 Ni el mensaje ni la auditoría reproducen el PIN introducido',
+    !str_contains(json_encode($rejectEvents[0]->getNewState(), JSON_UNESCAPED_UNICODE) ?: '', '0000')
+    && !str_contains(json_encode($rejectEvents[0]->getMetadata(), JSON_UNESCAPED_UNICODE) ?: '', '0000')
+);
+$assert(
+    '4.8 El intento fallido queda contabilizado en el expediente',
+    $refundRepo->findById((int)$guarded->getId())?->getPickupAttempts() === 1
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4.b El PIN se bloquea al quinto intento y el bloqueo es por expediente (RF-REF-02)
+// ─────────────────────────────────────────────────────────────────────────────
+echo "\n--- 4.b El freno antifuerza del PIN de recogida (RF-REF-02) ---\n";
+
+$brute = $makeCase(CompensationMethod::EN_MANO_SEDE, 3.00, true);
+$bruteId = (int)$brute->getId();
+$brutePin = (string)$refundRepo->findById($bruteId)?->getPickupPin();
+
+// Cuatro intentos: el quinto es el que cierra la puerta.
+$guessStatuses = [];
+for ($guess = 1; $guess < RefundRequest::PICKUP_PIN_MAX_ATTEMPTS; $guess++) {
+    $guessStatuses[] = $invokeDeliver(
+        $deskRequest('POST', ['pickup_pin' => $guess % 2 === 0 ? '0000' : '9999'], (string)$bruteId)
+    )->getStatusCode();
+}
+
+$assert(
+    '4.b.1 Los primeros intentos siguen siendo simples 422 INVALID_PICKUP_PIN',
+    $guessStatuses === array_fill(0, RefundRequest::PICKUP_PIN_MAX_ATTEMPTS - 1, 422),
+    'estados: ' . json_encode($guessStatuses)
+);
+
+$fifth = $invokeDeliver($deskRequest('POST', ['pickup_pin' => '0000'], (string)$bruteId));
+$fifthBody = $fifth->getDecodedBody();
+$lockedRow = $refundRepo->findById($bruteId);
+
+$assert(
+    '4.b.2 El quinto intento bloquea el PIN con 423 PICKUP_PIN_LOCKED',
+    $fifth->getStatusCode() === 423
+    && ($fifthBody['error']['code'] ?? '') === 'PICKUP_PIN_LOCKED',
+    $statusDetail($fifth)
+);
+$assert(
+    '4.b.3 El bloqueo expone cuándo se libera y cuántos intentos lo provocaron',
+    (int)($fifthBody['error']['details']['failed_attempts'] ?? 0) === RefundRequest::PICKUP_PIN_MAX_ATTEMPTS
+    && ($fifthBody['error']['details']['locked_until'] ?? '') !== '',
+    'details: ' . json_encode($fifthBody['error']['details'] ?? null)
+);
+$assert(
+    '4.b.4 El bloqueo dura 15 minutos y queda anotado en el expediente',
+    $lockedRow?->getPickupAttempts() === RefundRequest::PICKUP_PIN_MAX_ATTEMPTS
+    && $lockedRow?->getPickupLockedUntil() !== null
+    && (strtotime((string)$lockedRow->getPickupLockedUntil()) - time()) > (RefundRequest::PICKUP_PIN_LOCK_MINUTES * 60) - 5,
+    'locked_until: ' . var_export($lockedRow?->getPickupLockedUntil(), true)
+);
+
+$duringLock = $invokeDeliver($deskRequest('POST', ['pickup_pin' => $brutePin], (string)$bruteId));
+$assert(
+    '4.b.5 El PIN CORRECTO durante el bloqueo tampoco suelta el efectivo',
+    $duringLock->getStatusCode() === 423
+    && $refundRepo->findById($bruteId)?->getStatus() === RefundStatus::DEPOSITED_AT_RECEPTION,
+    $statusDetail($duringLock)
+);
+
+// El bloqueo es POR EXPEDIENTE: otro sobre de la misma conserjería sigue
+// entregándose, o un atacante bloquearía a toda la sede de un solo dusting.
+$neighbour = $makeCase(CompensationMethod::EN_MANO_SEDE, 2.00, true);
+$neighbourPin = (string)$refundRepo->findById((int)$neighbour->getId())?->getPickupPin();
+$neighbourDelivery = $invokeDeliver(
+    $deskRequest('POST', ['pickup_pin' => $neighbourPin], (string)$neighbour->getId())
+);
+$assert(
+    '4.b.6 El bloqueo NO se extiende a los demás expedientes de la misma sede',
+    $neighbourDelivery->getStatusCode() === 200
+    && $refundRepo->findById((int)$neighbour->getId())?->getStatus() === RefundStatus::REFUNDED_IN_HAND,
+    $statusDetail($neighbourDelivery)
+);
+
+// Agotar los quince minutos de reloj: el bloqueo es temporal, no una condena.
+$refundRepo->transitionStatus(
+    $bruteId,
+    RefundStatus::DEPOSITED_AT_RECEPTION,
+    RefundStatus::DEPOSITED_AT_RECEPTION,
+    ['pickup_locked_until' => date('Y-m-d H:i:s', strtotime('-16 minutes'))]
+);
+
+$afterExpiry = $invokeDeliver($deskRequest('POST', ['pickup_pin' => $brutePin], (string)$bruteId));
+$afterRow = $refundRepo->findById($bruteId);
+$assert(
+    '4.b.7 Pasado el bloqueo el PIN correcto vuelve a funcionar',
+    $afterExpiry->getStatusCode() === 200
+    && $afterRow?->getStatus() === RefundStatus::REFUNDED_IN_HAND,
+    $statusDetail($afterExpiry)
+);
+$assert(
+    '4.b.8 La entrega correcta reinicia el contador a cero',
+    $afterRow?->getPickupAttempts() === 0 && $afterRow?->getPickupLockedUntil() === null,
+    'intentos: ' . var_export($afterRow?->getPickupAttempts(), true)
+);
 $assert(
     '4.6 Control de no-vacuidad: el PIN almacenado NO era el introducido',
     $guarded->getPickupPin() !== '0000',
