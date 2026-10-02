@@ -146,6 +146,7 @@ function rebuildCoordCase(RefundRequest $case, array $overrides = []): RefundReq
         receptionistName: $pick('receptionistName', $case->getReceptionistName()),
         technicianJustification: $pick('technicianJustification', $case->getTechnicianJustification()),
         approvedAmount: $pick('approvedAmount', $case->getApprovedAmount()),
+        paidAmount: $pick('paidAmount', $case->getPaidAmount()),
         paymentReference: $pick('paymentReference', $case->getPaymentReference()),
         coordinatorDecision: $decision,
         coordinatorJustification: $pick('coordinatorJustification', $case->getCoordinatorJustification()),

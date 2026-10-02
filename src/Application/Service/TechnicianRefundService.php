@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Application\Service;
 
 use VendGuard\Application\DTO\TechnicianRefundInspectionDTO;
+use VendGuard\Core\Domain\Exception\InvalidRecoveredAmountException;
 use VendGuard\Core\Domain\Exception\InvalidRefundStateTransitionException;
 use VendGuard\Core\Domain\Exception\JustificationTooShortException;
 use VendGuard\Core\Domain\Exception\RefundNotFoundException;
@@ -118,6 +119,21 @@ final class TechnicianRefundService
             $claims
         ));
 
+        // RF-REF-03/04: a single pile of coins cannot cover more than was claimed,
+        // and recovering far MORE than was owed is not a bigger reimbursement,
+        // it is a different fact. `recovered_amount` reconciles the claims of
+        // THIS incident, so anything above their sum is surplus, and surplus has
+        // its own path: `registerUnclaimedCash()`. Accepting it here persisted a
+        // figure that simply could not be true (999,00 € recovered against a 2,00 €
+        // claim) straight into the cash reconciliation and the audit trail.
+        if ($recovered > $claimedTotal) {
+            throw new InvalidRecoveredAmountException(
+                attemptedAmount: $recovered,
+                maximumAllowed: $claimedTotal,
+                incidentId: $incidentId
+            );
+        }
+
         // RF-REF-08: a single pile of coins cannot satisfy several claimants.
         // The shortfall escalates every case instead of splitting the cash.
         $shortfall = $claims === [] ? false : ($recovered < $claimedTotal);
@@ -143,8 +159,13 @@ final class TechnicianRefundService
      * The money is unclaimed surplus destined for the central safe, so it is
      * only ever recorded, never attached to a refund case.
      *
+     * The amount is bounded by the same 50,00 EUR block the consumer claims use,
+     * and for the same reason: a single till deposit that outgrows the antifraud
+     * ceiling is not a till deposit, and with `DECIMAL(10,2)` and no strict
+     * `sql_mode` the database would have stored whatever it was handed.
+     *
      * @param array{id?: int|null, role?: string, name?: string} $actor
-     * @throws \InvalidArgumentException When the amount is not strictly positive.
+     * @throws InvalidRecoveredAmountException When the amount is out of range.
      */
     public function registerUnclaimedCash(
         int $incidentId,
@@ -154,6 +175,22 @@ final class TechnicianRefundService
         string $notes = '',
         array $actor = []
     ): UnclaimedCashFinding {
+        if (!is_finite($amount) || $amount <= 0.0) {
+            throw new InvalidRecoveredAmountException(
+                attemptedAmount: $amount,
+                maximumAllowed: RefundRequest::MAX_CLAIMED_AMOUNT
+            );
+        }
+
+        if ($amount > RefundRequest::MAX_CLAIMED_AMOUNT) {
+            throw new InvalidRecoveredAmountException(
+                attemptedAmount: $amount,
+                maximumAllowed: RefundRequest::MAX_CLAIMED_AMOUNT,
+                incidentId: $incidentId,
+                message: 'El efectivo no reclamado no puede superar el tope máximo de 50,00 € por hallazgo. Divídalo en varios registros si el importe es superior.'
+            );
+        }
+
         $finding = new UnclaimedCashFinding(
             id: null,
             incidentId: $incidentId,

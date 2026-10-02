@@ -31,7 +31,7 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
         r.`compensation_method`, r.`bizum_phone`, r.`iban`, r.`pickup_pin`, r.`tracking_token`,
         r.`status`, r.`technician_finding`, r.`recovered_amount`, r.`cash_custody_action`,
         r.`receptionist_name`, r.`technician_justification`, r.`approved_amount`,
-        r.`payment_reference`, r.`coordinator_decision`, r.`coordinator_justification`,
+        r.`payment_reference`, r.`paid_amount`, r.`coordinator_decision`, r.`coordinator_justification`,
         r.`paid_at`, r.`is_active`, r.`created_at`, r.`updated_at`';
 
     /** Restricted projection: never selects the financial columns (Art. V.4). */
@@ -40,7 +40,7 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
         r.`compensation_method`, r.`pickup_pin`, r.`tracking_token`,
         r.`status`, r.`technician_finding`, r.`recovered_amount`, r.`cash_custody_action`,
         r.`receptionist_name`, r.`technician_justification`, r.`approved_amount`,
-        r.`payment_reference`, r.`is_active`, r.`created_at`, r.`updated_at`';
+        r.`payment_reference`, r.`paid_amount`, r.`is_active`, r.`created_at`, r.`updated_at`';
 
     /** Columns a transition is allowed to write. Anything else is ignored. */
     private const WRITABLE_FIELDS = [
@@ -51,6 +51,7 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
         'technician_justification',
         'approved_amount',
         'payment_reference',
+        'paid_amount',
         'paid_at',
         'hand_delivered_at',
         'coordinator_decision',
@@ -386,6 +387,9 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
                 ? (float)$row['approved_amount']
                 : null,
             paymentReference: $nullable('payment_reference'),
+            paidAmount: isset($row['paid_amount']) && $row['paid_amount'] !== null
+                ? (float)$row['paid_amount']
+                : null,
             coordinatorDecision: isset($row['coordinator_decision']) && $row['coordinator_decision'] !== null
                 ? CoordinatorDecision::from((string)$row['coordinator_decision'])
                 : null,

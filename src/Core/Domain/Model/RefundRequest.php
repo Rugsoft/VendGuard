@@ -51,6 +51,7 @@ final readonly class RefundRequest implements JsonSerializable
         private ?string $technicianJustification = null,
         private ?float $approvedAmount = null,
         private ?string $paymentReference = null,
+        private ?float $paidAmount = null,
         private ?CoordinatorDecision $coordinatorDecision = null,
         private ?string $coordinatorJustification = null,
         private ?string $paidAt = null,
@@ -110,6 +111,18 @@ final readonly class RefundRequest implements JsonSerializable
 
         if ($approvedAmount !== null && (!is_finite($approvedAmount) || $approvedAmount < 0.0)) {
             throw new InvalidArgumentException('El importe aprobado no puede ser negativo ni no finito.');
+        }
+
+        // RF-REF-07: the settled amount is a stored fact. It is bounded by the
+        // 50,00 EUR block so a corrupted figure can never sit in a monetary
+        // column; `registerDigitalPayment()` enforces the tighter per-case
+        // ceiling against the approved or claimed amount.
+        if ($paidAmount !== null && (!is_finite($paidAmount) || $paidAmount <= 0.0)) {
+            throw new InvalidArgumentException('El importe liquidado debe ser un valor finito mayor que 0,00 €.');
+        }
+
+        if ($paidAmount !== null && $paidAmount > self::MAX_CLAIMED_AMOUNT) {
+            throw new InvalidArgumentException('El importe liquidado no puede superar el tope máximo de 50,00 €.');
         }
 
         // RF-REF-05: digital channels are settled by the central office, so the
@@ -204,6 +217,19 @@ final readonly class RefundRequest implements JsonSerializable
     }
 
     /**
+     * The amount Coordination actually settled (RF-REF-07).
+     *
+     * Stored rather than re-derived: the case is the audit record of the money,
+     * and a case sitting in PAID_DIGITAL must be able to say on its own how much
+     * left the till, without anyone having to reconstruct it from a banking
+     * reference afterwards.
+     */
+    public function getPaidAmount(): ?float
+    {
+        return $this->paidAmount;
+    }
+
+    /**
      * Constant-time comparison of a pickup PIN presented at the reception desk
      * (RF-REF-06). Kept on the entity so no caller can fall back to a plain
      * string comparison that leaks timing information.
@@ -265,6 +291,9 @@ final readonly class RefundRequest implements JsonSerializable
                 ? (float)$row['approved_amount']
                 : null,
             paymentReference: $nullable('payment_reference'),
+            paidAmount: isset($row['paid_amount']) && $row['paid_amount'] !== null
+                ? (float)$row['paid_amount']
+                : null,
             // `coordinator_decision` sólo se proyecta en la vista completa de
             // Coordinación: una proyección restringida nunca lo seleccionó, y
             // quien no puede ver el IBAN tampoco necesita el motivo del rechazo.
@@ -337,6 +366,7 @@ final readonly class RefundRequest implements JsonSerializable
             technicianJustification: $technicianJustification ?? $this->technicianJustification,
             approvedAmount: $this->approvedAmount,
             paymentReference: $this->paymentReference,
+            paidAmount: $this->paidAmount,
             coordinatorDecision: $this->coordinatorDecision,
             coordinatorJustification: $this->coordinatorJustification,
             paidAt: $this->paidAt,

@@ -1037,6 +1037,102 @@ try {
         $refunds->findById($secondLossId)?->getTechnicianFinding() === null
         && (string)($refunds->findById($secondLossId)?->getPaymentReference() ?? '') === ''
     );
+// ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 9. El efectivo declarado no puede exceder lo reclamado (RF-REF-03, RF-REF-04) ---\n";
+    // ─────────────────────────────────────────────────────────────────────
+
+    // Over-recovery is not a bigger reimbursement, it is a different fact: the
+    // surplus of a drawer belongs to `unclaimed_cash_findings`, not to a
+    // consumer claim. Accepting it stored a figure that cannot be true.
+    $overMachine = $makeMachine('TREF20I-', MachineType::COLD_DRINKS);
+    $overIncident = $makeIncident($overMachine, $techId, 'TREF20I-SOBRA-');
+    $overCase = $openCase($overIncident, $overMachine, CompensationMethod::EN_MANO_SEDE, 2.00);
+    $overCaseId = (int)$overCase->getId();
+
+    $overResponse = $dispatch('POST', "/api/technician/incidents/{$overIncident->getId()}/resolve", [
+        'resolution_diagnosis' => $validDiagnosis,
+        'resolution_action' => $validAction,
+        'refund_inspection' => [
+            'finding' => 'FOUND_PHYSICAL',
+            'recovered_amount' => 999.00,
+            'cash_custody_action' => 'HELD_FOR_CENTRAL',
+            'justification' => 'Se han localizado 999 euros de efectivo en la maquina.',
+        ],
+    ], $techHeaders);
+
+    $assert(
+        '9.1 Declarar 999,00 € recuperados sobre un reclamo de 2,00 € se rechaza con 422',
+        $overResponse->getStatusCode() === 422
+        && $errorCode($overResponse) === 'INVALID_RECOVERED_AMOUNT',
+        'HTTP ' . $overResponse->getStatusCode() . ' ' . $errorCode($overResponse)
+    );
+
+    $assert(
+        '9.2 El rechazo NO deja el expediente con dictamen ni cierra la avería',
+        $pdo->query("SELECT status FROM refund_requests WHERE id = {$overCaseId}")->fetchColumn() === 'PENDING_INSPECTION'
+        && $pdo->query("SELECT recovered_amount FROM refund_requests WHERE id = {$overCaseId}")->fetchColumn() === null
+        && $incidents->findById((int)$overIncident->getId())?->getStatus() === IncidentStatus::IN_PROGRESS,
+        'estado: ' . $pdo->query("SELECT status FROM refund_requests WHERE id = {$overCaseId}")->fetchColumn()
+    );
+
+    $assert(
+        '9.3 El mensaje de error dice adónde va el sobrante',
+        str_contains((string)($overResponse->getDecodedBody()['error']['message'] ?? ''), 'efectivo no reclamado'),
+        json_encode($overResponse->getDecodedBody()['error'] ?? null)
+    );
+
+    // The legitimate version of the same scenario: recovering exactly what was
+    // claimed is the normal path and must keep working.
+    $exactMachine = $makeMachine('TREF20J-', MachineType::COLD_DRINKS);
+    $exactIncident = $makeIncident($exactMachine, $techId, 'TREF20J-EXACTO-');
+    $exactCase = $openCase($exactIncident, $exactMachine, CompensationMethod::EN_MANO_SEDE, 4.50);
+
+    $exactResponse = $dispatch('POST', "/api/technician/incidents/{$exactIncident->getId()}/resolve", [
+        'resolution_diagnosis' => $validDiagnosis,
+        'resolution_action' => $validAction,
+        'refund_inspection' => [
+            'finding' => 'FOUND_PHYSICAL',
+            'recovered_amount' => 4.50,
+            'cash_custody_action' => 'HELD_FOR_CENTRAL',
+            'justification' => 'Efectivo recuperado por el importe exacto reclamado.',
+        ],
+    ], $techHeaders);
+    $exactBody = $data($exactResponse);
+
+    $assert(
+        '9.4 Recuperar exactamente lo reclamado sigue siendo el camino normal',
+        $exactResponse->getStatusCode() === 200
+        && (float)($exactBody['recovered_total'] ?? -1) === 4.50
+        && (int)($exactBody['refund_processed'] ?? 0) === 1,
+        'HTTP ' . $exactResponse->getStatusCode() . ' ' . json_encode($exactBody)
+    );
+
+    // Unclaimed cash had no ceiling at all: 999999,00 was accepted and then
+    // silently stored as 9999,99 by DECIMAL(6,2) without strict mode.
+    $surplusMachine = $makeMachine('TREF20K-', MachineType::SNACKS);
+    $surplusIncident = $makeIncident($surplusMachine, $techId, 'TREF20K-SOBRANTE-');
+
+    $absurdSurplus = $dispatch('POST', "/api/technician/incidents/{$surplusIncident->getId()}/resolve", [
+        'resolution_diagnosis' => $validDiagnosis,
+        'resolution_action' => $validAction,
+        'unclaimed_cash_found' => [
+            'amount' => 999999.00,
+            'notes' => 'Efectivo sobrante del cajon de monedas.',
+        ],
+    ], $techHeaders);
+
+    $assert(
+        '9.5 El efectivo no reclamado de 999.999,00 € se rechaza con 422',
+        $absurdSurplus->getStatusCode() === 422
+        && $errorCode($absurdSurplus) === 'INVALID_RECOVERED_AMOUNT',
+        'HTTP ' . $absurdSurplus->getStatusCode() . ' ' . $errorCode($absurdSurplus)
+    );
+
+    $assert(
+        '9.6 No queda ningún hallazgo de efectivo persistido por encima del tope',
+        (int)$pdo->query("SELECT COUNT(*) FROM unclaimed_cash_findings WHERE amount > 50.00")->fetchColumn() === 0,
+        'hallazgos por encima del tope: ' . $pdo->query("SELECT COUNT(*) FROM unclaimed_cash_findings WHERE amount > 50.00")->fetchColumn()
+    );
 } finally {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();

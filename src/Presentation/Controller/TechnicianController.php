@@ -10,6 +10,7 @@ use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
 use VendGuard\Application\Service\TechnicianRefundService;
 use VendGuard\Core\Domain\Exception\IncompatibleSparePartException;
+use VendGuard\Core\Domain\Exception\InvalidRecoveredAmountException;
 use VendGuard\Core\Domain\Exception\InvalidRefundStateTransitionException;
 use VendGuard\Core\Domain\Exception\JustificationTooShortException;
 use VendGuard\Core\Domain\Exception\ReceptionDeliveryNotAllowedException;
@@ -591,6 +592,8 @@ class TechnicianController
                 machineId: (int)$incident->getMachineId(),
                 actor: $this->extractActor($request)
             );
+        } catch (InvalidRecoveredAmountException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode(), $e->getDetails());
         } catch (ReceptionDeliveryNotAllowedException $e) {
             return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
         } catch (JustificationTooShortException $e) {
@@ -649,6 +652,10 @@ class TechnicianController
                 notes: (string)($raw['notes'] ?? ''),
                 actor: $this->extractActor($request)
             )->getId();
+        } catch (InvalidRecoveredAmountException $e) {
+            // El importe se sale del rango admitido: es una entrada incorrecta
+            // del técnico, no un fallo del sistema, asi que responde 422 y no 500.
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode(), $e->getDetails());
         } catch (\InvalidArgumentException $e) {
             return Response::error('INVALID_UNCLAIMED_CASH', $e->getMessage(), 422);
         } catch (\DomainException $e) {

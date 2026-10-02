@@ -616,6 +616,163 @@ $bizumContact = $lastClaimantContact;
         $indexed >= 2,
         'índices en refund_requests: ' . $indexed
     );
+// ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 8. Integridad del dinero: techo de pago e importe persistido (RF-REF-03, RF-REF-07) ---\n";
+    // ─────────────────────────────────────────────────────────────────────
+
+    $errOf = static fn ($response): string => (string)($response->getDecodedBody()['error']['code'] ?? '');
+    $bodyOf = static fn ($response): array => (array)($response->getDecodedBody()['data'] ?? []);
+
+    // The ceiling is the approved amount, not the claimed one: a coordinator who
+    // signed 1,00 for antifraud reasons must not be able to settle 45,00.
+    $cappedCaseId = $openCase(CompensationMethod::BIZUM, 30.00);
+    $escalate($cappedCaseId, 30.00);
+    $approve = $controller->approve($request(
+        'POST',
+        "/api/coordinator/refunds/{$cappedCaseId}/approve",
+        ['approved_amount' => 1.00, 'justification' => 'Control antifraude estricto, se aprueba un euro.'],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+
+    $assert(
+        '8.1 El visto bueno de 1,00 se registra en el expediente',
+        $approve->getStatusCode() === 200
+        && (float)($bodyOf($approve)['approved_amount'] ?? 0) === 1.00,
+        'HTTP ' . $approve->getStatusCode() . ' ' . (string)$approve->getBody()
+    );
+
+    $overApproved = $controller->pay($request(
+        'POST',
+        "/api/coordinator/refunds/{$cappedCaseId}/pay",
+        ['payment_reference' => 'REF-EXCESO', 'paid_amount' => 45.00],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+
+    $assert(
+        '8.2 No se puede liquidar muy por encima del importe aprobado',
+        $overApproved->getStatusCode() === 422 && $errOf($overApproved) === 'INVALID_REFUND_AMOUNT',
+        'HTTP ' . $overApproved->getStatusCode() . ' ' . $errOf($overApproved)
+    );
+
+    $assert(
+        '8.3 El rechazo del exceso deja el expediente sin tocar',
+        (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$cappedCaseId}")->fetchColumn() === 'VERIFIED_PENDING_PAYMENT'
+        && $pdo->query("SELECT `paid_amount` FROM `refund_requests` WHERE `id` = {$cappedCaseId}")->fetchColumn() === null,
+        'estado: ' . (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$cappedCaseId}")->fetchColumn()
+    );
+
+    // Without an approval behind it the ceiling is the 50,00 block. The audit
+    // settled a 3,20 case for 999999,00 with a plain HTTP 200.
+    $tinyCaseId = $openCase(CompensationMethod::BIZUM, 3.20);
+    $escalate($tinyCaseId, 3.20);
+    $controller->approve($request(
+        'POST',
+        "/api/coordinator/refunds/{$tinyCaseId}/approve",
+        ['approved_amount' => 3.20, 'justification' => 'Importe verificado contra el efectivo recuperado.'],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+    $absurd = $controller->pay($request(
+        'POST',
+        "/api/coordinator/refunds/{$tinyCaseId}/pay",
+        ['payment_reference' => 'REF-ABSURDA', 'paid_amount' => 999999.00],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+
+    $assert(
+        '8.4 No se puede liquidar 999999,00 sobre un expediente de 3,20',
+        $absurd->getStatusCode() === 422 && $errOf($absurd) === 'INVALID_REFUND_AMOUNT',
+        'HTTP ' . $absurd->getStatusCode() . ' ' . $errOf($absurd)
+    );
+
+    // The happy path: the settled amount is now a stored fact, not an echo of the
+    // request. This is what the migration 011 `paid_amount` column exists for.
+    $paidCaseId = $openCase(CompensationMethod::TRANSFERENCIA_BANCARIA, 8.40);
+    $escalate($paidCaseId, 8.40);
+    $controller->approve($request(
+        'POST',
+        "/api/coordinator/refunds/{$paidCaseId}/approve",
+        ['approved_amount' => 8.40, 'justification' => 'Importe verificado contra el efectivo recuperado.'],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+    $settle = $controller->pay($request(
+        'POST',
+        "/api/coordinator/refunds/{$paidCaseId}/pay",
+        ['payment_reference' => 'PAGO-REAL-0001', 'paid_amount' => 8.40],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+    $stored = $pdo->query(
+        "SELECT `paid_amount`, `payment_reference`, `status` FROM `refund_requests` WHERE `id` = {$paidCaseId}"
+    )->fetch(PDO::FETCH_ASSOC);
+
+    $assert(
+        '8.5 El importe liquidado queda PERSISTIDO en la fila del expediente',
+        $settle->getStatusCode() === 200
+        && (float)$stored['paid_amount'] === 8.40
+        && $stored['payment_reference'] === 'PAGO-REAL-0001'
+        && $stored['status'] === 'PAID_DIGITAL',
+        'stored: ' . json_encode($stored)
+    );
+
+    $assert(
+        '8.6 La respuesta de pago devuelve el importe persistido, no el del cuerpo',
+        (float)($bodyOf($settle)['paid_amount'] ?? 0) === 8.40,
+        (string)$settle->getBody()
+    );
+
+    $inboxAfter = $controller->index($request('GET', '/api/coordinator/refunds', [], [], $coordinatorId, 'COORDINATOR'));
+    $settledRow = $rowOf($decode($inboxAfter), $paidCaseId);
+
+    $assert(
+        '8.7 La bandeja de Coordinación muestra el importe liquidado',
+        $settledRow !== null && (float)($settledRow['paid_amount'] ?? 0) === 8.40,
+        'fila: ' . json_encode($settledRow)
+    );
+
+    // The regression behind migration 011: DECIMAL(6,2) silently saturated every
+    // amount above 9999,99 because this server runs without STRICT_TRANS_TABLES.
+    $wideCaseId = $openCase(CompensationMethod::TRANSFERENCIA_BANCARIA, 20.00);
+    $escalate($wideCaseId, 20.00);
+    $controller->approve($request(
+        'POST',
+        "/api/coordinator/refunds/{$wideCaseId}/approve",
+        ['approved_amount' => 20.00, 'justification' => 'Importe verificado contra el efectivo recuperado.'],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+    $controller->pay($request(
+        'POST',
+        "/api/coordinator/refunds/{$wideCaseId}/pay",
+        ['payment_reference' => 'PAGO-RANGO-0002', 'paid_amount' => 20.00],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+    $wideStored = $pdo->query("SELECT `paid_amount` FROM `refund_requests` WHERE `id` = {$wideCaseId}")->fetchColumn();
+
+    $assert(
+        '8.8 Un importe en el rango ampliado se guarda INTEGRO, sin saturar a 9999,99',
+        (float)$wideStored === 20.00
+        && (string)$pdo->query(
+            "SELECT `column_type` FROM `information_schema`.`columns`
+             WHERE `table_schema` = DATABASE() AND `table_name` = 'refund_requests'
+               AND `column_name` = 'paid_amount'"
+        )->fetchColumn() === 'decimal(10,2)',
+        'guardado: ' . var_export($wideStored, true)
+    );
 } finally {
     $pdo->rollBack();
 }

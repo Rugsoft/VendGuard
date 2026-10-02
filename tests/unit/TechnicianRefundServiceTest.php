@@ -307,15 +307,19 @@ $validJustification = 'Se desmontó el embudo y no se localizó ninguna moneda n
  * cases of independent scenarios collide.
  */
 $incidentSeq = 100;
-$openClaim = static function (float $amount, CompensationMethod $method, ?int $incidentId = null) use ($management, &$incidentSeq): RefundRequest {
+// `$contact` permite abrir dos reclamaciones sobre la MISMA avería, que es el
+// caso legítimo de RF-REF-08: son dos personas distintas y, por tanto, dos
+// expedientes. Lo que RF-REF-11 prohíbe es que el MISMO consumidor repita.
+$openClaim = static function (float $amount, CompensationMethod $method, ?int $incidentId = null, ?string $contact = null) use ($management, &$incidentSeq): RefundRequest {
     $incidentId ??= ++$incidentSeq;
+    $contact ??= '600111222';
 
     $dto = new CreateRefundRequestDTO(
         incidentId: $incidentId,
         machineId: 11,
         locationId: 1,
         claimantName: 'Laura Sanitaria',
-        claimantContact: '600111222',
+        claimantContact: $contact,
         claimedAmount: $amount,
         compensationMethod: $method,
         productAttempted: 'Café con leche',
@@ -570,7 +574,10 @@ $assert(
         && $refundRepo->findById($rejected->getId())?->getCashCustodyAction() === null
 );
 
-$rejectedHigh = $openClaim(5.00, CompensationMethod::EN_MANO_SEDE, 304);
+// El reclamo se eleva a 18,00 € para que el techo de `recovered_amount`
+// (que no puede superar lo reclamado) sea el happy path y la custodia en
+// conserjería sea el motivo real del rechazo (RF-REF-05).
+$rejectedHigh = $openClaim(18.00, CompensationMethod::EN_MANO_SEDE, 304);
 $attemptHigh = null;
 try {
     $service->inspectBalance(
@@ -614,8 +621,10 @@ $assert(
 // ─────────────────────────────────────────────────────────────────────────────
 echo "\n--- 4. Reclamaciones múltiples y dinero insuficiente (RF-REF-08) ---\n";
 
-$a = $openClaim(4.00, CompensationMethod::EN_MANO_SEDE, 200);
-$b = $openClaim(3.00, CompensationMethod::EN_MANO_SEDE, 200);
+// Dos consumidores distintos sobre la avería 200: Laura reclama 4,00 € y Marc
+// 3,00 €, así que 7,00 € es lo que hay que cubrir con el efectivo recuperado.
+$a = $openClaim(4.00, CompensationMethod::EN_MANO_SEDE, 200, '600111222');
+$b = $openClaim(3.00, CompensationMethod::EN_MANO_SEDE, 200, '600999888');
 
 $multi = $service->inspectBalance(
     200,

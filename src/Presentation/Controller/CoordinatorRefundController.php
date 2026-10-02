@@ -373,7 +373,9 @@ class CoordinatorRefundController
             'id' => (int)$paid->getId(),
             'status' => $paid->getStatus()->value,
             'payment_reference' => $paid->getPaymentReference(),
-            'paid_amount' => $paidAmount,
+            // Se devuelve lo PERSISTIDO, no lo que venía en el cuerpo: así la
+            // respuesta no puede afirmar una cifra distinta de la almacenada.
+            'paid_amount' => $paid->getPaidAmount(),
             'approved_amount' => $paid->getApprovedAmount(),
             'paid_at' => $paid->getPaidAt(),
         ], 200, 'Pago digital registrado con éxito. Expediente de reintegro liquidado.');

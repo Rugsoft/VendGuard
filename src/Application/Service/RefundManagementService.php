@@ -384,22 +384,44 @@ final class RefundManagementService
     /**
      * Registers a digital settlement with its banking reference (RF-REF-07).
      *
+     * The amount is now STORED, not just requested. It used to be validated,
+     * demanded by the DTO and then silently dropped: the case reached
+     * PAID_DIGITAL with a reference and a timestamp and no record of how much
+     * left the till.
+     *
+     * RF-REF-03 applies to the settlement as well as to the claim. The ceiling
+     * is the formally approved amount when there is one, otherwise the claimed
+     * amount, never above the 50,00 EUR block. Without that bound a 3,20 EUR
+     * case could be settled for 999999,00 and a case approved at 1,00 EUR for
+     * fraud control could be settled at 45,00: both were accepted with HTTP 200.
+     *
      * @param array{id?: int|null, role?: string, name?: string} $actor
+     * @throws InvalidRefundAmountException When the amount is out of the payable range.
      * @throws RefundNotFoundException
      * @throws InvalidRefundStateTransitionException
      */
     public function registerDigitalPayment(int $id, CoordinatorPaymentDTO $dto, array $actor = []): RefundRequest
     {
-        if ($dto->paidAmount <= 0.0) {
+        $case = $this->loadCase($id);
+
+        // The ceiling needs the persisted case, because `approved_amount` only
+        // exists there: a case settled without formal approval is bounded by what
+        // the consumer claimed, and one that went through RF-REF-03's double
+        // authorisation is bounded by the smaller figure the coordinator signed.
+        $payableCeiling = min(
+            $case->getApprovedAmount() ?? $case->getClaimedAmount(),
+            RefundRequest::MAX_CLAIMED_AMOUNT
+        );
+
+        if ($dto->paidAmount <= 0.0 || $dto->paidAmount > $payableCeiling) {
             throw new InvalidRefundAmountException(
                 attemptedAmount: $dto->paidAmount,
-                maximumAllowed: RefundRequest::MAX_CLAIMED_AMOUNT
+                maximumAllowed: $payableCeiling
             );
         }
 
-        $case = $this->loadCase($id);
-
         $this->transitionCase($case, RefundStatus::PAID_DIGITAL, 'PAY', [
+            'paid_amount' => $dto->paidAmount,
             'payment_reference' => trim($dto->paymentReference),
             'paid_at' => date('Y-m-d H:i:s'),
         ]);
@@ -411,11 +433,25 @@ final class RefundManagementService
             ['status' => $case->getStatus()->value],
             [
                 'status' => RefundStatus::PAID_DIGITAL->value,
+                'paid_amount' => $dto->paidAmount,
                 'payment_reference' => trim($dto->paymentReference),
             ]
         );
 
         return $this->loadCase($id);
+    }
+
+    /**
+     * The highest amount this case may legally be settled for, as RF-REF-03
+     * defines it: the approved amount when the coordinator signed one, the
+     * claimed amount otherwise, and never over the 50,00 EUR block.
+     */
+    public function payableCeiling(RefundRequest $case): float
+    {
+        return min(
+            $case->getApprovedAmount() ?? $case->getClaimedAmount(),
+            RefundRequest::MAX_CLAIMED_AMOUNT
+        );
     }
 
     /**
