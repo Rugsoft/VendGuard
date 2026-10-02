@@ -1133,6 +1133,72 @@ try {
         (int)$pdo->query("SELECT COUNT(*) FROM unclaimed_cash_findings WHERE amount > 50.00")->fetchColumn() === 0,
         'hallazgos por encima del tope: ' . $pdo->query("SELECT COUNT(*) FROM unclaimed_cash_findings WHERE amount > 50.00")->fetchColumn()
     );
+
+// ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 10. La sede sin conserjería no puede recibir el sobre (RF-REF-05) ---\n";
+    // ─────────────────────────────────────────────────────────────────────
+
+    // `locations.has_physical_reception` era decorativa: solo la lectura pública
+    // del QR la consultaba. Ahora la resolución técnica también la exige, así que
+    // se apaga la bandera de la sede semilla y se repite el escenario de 9.4
+    // pidiendo conserjería. La transacción reversible la restaura al final.
+    $locationId = (int)$location->getId();
+    $pdo->prepare('UPDATE `locations` SET `has_physical_reception` = 0 WHERE `id` = :id')
+        ->execute([':id' => $locationId]);
+
+    $deskMachine = $makeMachine('TREF20L-', MachineType::HOT_DRINKS);
+    $deskIncident = $makeIncident($deskMachine, $techId, 'TREF20L-CONSERJERIA-');
+    $deskCase = $openCase($deskIncident, $deskMachine, CompensationMethod::EN_MANO_SEDE, 4.50);
+    $deskCaseId = (int)$deskCase->getId();
+
+    $noDesk = $dispatch('POST', "/api/technician/incidents/{$deskIncident->getId()}/resolve", [
+        'resolution_diagnosis' => $validDiagnosis,
+        'resolution_action' => $validAction,
+        'refund_inspection' => [
+            'finding' => 'FOUND_PHYSICAL',
+            'recovered_amount' => 4.50,
+            'cash_custody_action' => 'LEFT_AT_RECEPTION',
+            'receptionist_name' => 'Conserjería del vestíbulo',
+        ],
+    ], $techHeaders);
+
+    $assert(
+        '10.1 Dejar el sobre en una sede sin conserjería se rechaza con 422',
+        $noDesk->getStatusCode() === 422
+        && $errorCode($noDesk) === 'RECEPTION_DELIVERY_NOT_ALLOWED',
+        'HTTP ' . $noDesk->getStatusCode() . ' ' . $errorCode($noDesk)
+    );
+
+    $assert(
+        '10.2 El rechazo NO inventa una custodia ni cierra la avería',
+        $pdo->query("SELECT cash_custody_action FROM refund_requests WHERE id = {$deskCaseId}")->fetchColumn() === null
+        && $pdo->query("SELECT status FROM refund_requests WHERE id = {$deskCaseId}")->fetchColumn() === 'PENDING_INSPECTION'
+        && $incidents->findById((int)$deskIncident->getId())?->getStatus() === IncidentStatus::IN_PROGRESS
+    );
+
+    // Con la Reception devuelta, la MISMA regla deja el sobre donde el técnico
+    // pidió: lo que decide es la bandera de la sede, no el cableado.
+    $pdo->prepare('UPDATE `locations` SET `has_physical_reception` = 1 WHERE `id` = :id')
+        ->execute([':id' => $locationId]);
+
+    $withDesk = $dispatch('POST', "/api/technician/incidents/{$deskIncident->getId()}/resolve", [
+        'resolution_diagnosis' => $validDiagnosis,
+        'resolution_action' => $validAction,
+        'refund_inspection' => [
+            'finding' => 'FOUND_PHYSICAL',
+            'recovered_amount' => 4.50,
+            'cash_custody_action' => 'LEFT_AT_RECEPTION',
+            'receptionist_name' => 'Conserjería del vestíbulo',
+        ],
+    ], $techHeaders);
+
+    $assert(
+        '10.3 Con conserjería disponible el depósito en recepción se acepta',
+        $withDesk->getStatusCode() === 200
+        && $pdo->query("SELECT status FROM refund_requests WHERE id = {$deskCaseId}")->fetchColumn() === 'DEPOSITED_AT_RECEPTION',
+        'HTTP ' . $withDesk->getStatusCode() . ' | estado: '
+        . $pdo->query("SELECT status FROM refund_requests WHERE id = {$deskCaseId}")->fetchColumn()
+    );
 } finally {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();

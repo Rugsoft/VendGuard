@@ -86,7 +86,10 @@ class TechnicianController
         $this->refundService = $refundService ?? new TechnicianRefundService(
             refundRepo: $this->refundRepo,
             findingRepo: new PdoUnclaimedCashFindingRepository(),
-            managementService: new RefundManagementService($this->refundRepo)
+            managementService: new RefundManagementService($this->refundRepo),
+            // La regla de conserjeria (RF-REF-05) solo es exigible si
+            // alguien sabe si la sede tiene mesa de recepcion.
+            locationRepo: $this->locationRepo
         );
     }
 

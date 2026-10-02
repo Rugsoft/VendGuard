@@ -116,6 +116,7 @@ El sistema debe forzar la coherencia entre la vía de pago elegida por el usuari
 
 * **EARS Evento:** Si el usuario solicitó compensación digital (`BIZUM` o `TRANSFERENCIA_BANCARIA`) o si el importe recuperado supera los **10,00 €**, el sistema NO DEBE permitir al técnico seleccionar depósito en conserjería y DEBE fijar obligatoriamente la custodia física hacia caja central (`HELD_FOR_CENTRAL`).
 * **EARS Evento:** Si el usuario solicitó compensación presencial (`EN_MANO_SEDE`) y el importe es $\le 10,00\ \text{€}$, el técnico DEBE poder seleccionar depósito en recepción (`LEFT_AT_RECEPTION`), registrando el nombre del conserje que recibe el sobre.
+* **EARS Evento:** Si la sede asociada al expediente **no dispone de conserjería física** (`has_physical_reception = 0`), el sistema NO DEBE admitir el depósito en recepción con independencia del método de compensación y del importe, y DEBE exigir al técnico custodiar el efectivo hacia caja central (`HELD_FOR_CENTRAL`), rechazando con `422 RECEPTION_DELIVERY_NOT_ALLOWED` todo intento explícito de `LEFT_AT_RECEPTION` sobre una sede que no puede recibirlo.
 * **EARS Evento:** Al confirmarse el depósito en recepción (`LEFT_AT_RECEPTION`), el expediente de reintegro DEBE transicionar automáticamente al estado **`DEPOSITED_AT_RECEPTION`** (*"Efectivo en conserjería pendiente de recogida"*).
 
 ---

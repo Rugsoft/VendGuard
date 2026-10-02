@@ -45,8 +45,10 @@ use VendGuard\Core\Domain\Model\CompensationMethod;
 use VendGuard\Core\Domain\Model\RefundRequest;
 use VendGuard\Core\Domain\Model\RefundStatus;
 use VendGuard\Core\Domain\Model\TechnicianFinding;
+use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\UnclaimedCashFinding;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
+use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UnclaimedCashFindingRepositoryInterface;
 
@@ -290,11 +292,103 @@ final class TechAuditRepo implements AuditLogRepositoryInterface
     }
 }
 
+/**
+ * Minimal site double: the reception rule (RF-REF-05) needs to know whether a
+ * site has a desk, and only `hasPhysicalReception()` is ever consulted. The rest
+ * of the interface throws instead of pretending to work.
+ */
+final class TechLocationRepo implements LocationRepositoryInterface
+{
+    /** @var array<int, Location> */
+    public array $rows = [];
+
+    public function findById(int $id, bool $allowDeleted = false): ?Location
+    {
+        return $this->rows[$id] ?? null;
+    }
+
+    public function findBySiteCode(string $siteCode): ?Location
+    {
+        foreach ($this->rows as $location) {
+            if ($location->getSiteCode() === $siteCode) {
+                return $location;
+            }
+        }
+
+        return null;
+    }
+
+    public function findAllActive(): array
+    {
+        return array_values($this->rows);
+    }
+
+    public function findAll(string $status = 'all', ?string $search = null): array
+    {
+        return array_values($this->rows);
+    }
+
+    public function create(array $data): Location
+    {
+        throw new LogicException('No se usa en esta suite.');
+    }
+
+    public function update(int $id, array $data): bool
+    {
+        throw new LogicException('No se usa en esta suite.');
+    }
+
+    public function softDelete(int $id): bool
+    {
+        throw new LogicException('No se usa en esta suite.');
+    }
+
+    public function restore(int $id): bool
+    {
+        throw new LogicException('No se usa en esta suite.');
+    }
+
+    public function updateContactPhone(int $id, string $contactPhone): bool
+    {
+        throw new LogicException('No se usa en esta suite.');
+    }
+
+    public function countActiveMachines(int $locationId): int
+    {
+        return 0;
+    }
+}
+
 $refundRepo = new TechRefundRepo();
 $findingRepo = new TechFindingRepo();
 $auditRepo = new TechAuditRepo();
 $management = new RefundManagementService($refundRepo, new IbanValidationService(), new AuditLogger($auditRepo));
 $service = new TechnicianRefundService($refundRepo, $findingRepo, $management, new AuditLogger($auditRepo));
+
+// La MISMA regla con la sede disponible: es la configuracion de produccion,
+// donde `TechnicianController` inyecta el repositorio real de sedes.
+$locationRepo = new TechLocationRepo();
+$locationRepo->rows[1] = new Location(
+    id: 1,
+    siteCode: 'SEDE-CON-RECEPCION',
+    name: 'Campus con conserjeria',
+    address: 'Carrer de la Reception 1',
+    hasPhysicalReception: true
+);
+$locationRepo->rows[2] = new Location(
+    id: 2,
+    siteCode: 'SEDE-SIN-RECEPCION',
+    name: 'Aeropuerto sin conserjeria',
+    address: 'Terminal sin mostrador 2',
+    hasPhysicalReception: false
+);
+$siteAwareService = new TechnicianRefundService(
+    $refundRepo,
+    $findingRepo,
+    $management,
+    new AuditLogger($auditRepo),
+    $locationRepo
+);
 
 $technician = ['id' => 7, 'role' => 'TECHNICIAN', 'name' => 'Jordi Prats'];
 $validJustification = 'Se desmontó el embudo y no se localizó ninguna moneda ni rastro de saldo retenido.';
@@ -310,14 +404,16 @@ $incidentSeq = 100;
 // `$contact` permite abrir dos reclamaciones sobre la MISMA avería, que es el
 // caso legítimo de RF-REF-08: son dos personas distintas y, por tanto, dos
 // expedientes. Lo que RF-REF-11 prohíbe es que el MISMO consumidor repita.
-$openClaim = static function (float $amount, CompensationMethod $method, ?int $incidentId = null, ?string $contact = null) use ($management, &$incidentSeq): RefundRequest {
+// `$locationId` permite abrir el reclamo en una sede concreta: la regla de
+// conserjería (RF-REF-05) se decide por la sede, no por el expediente.
+$openClaim = static function (float $amount, CompensationMethod $method, ?int $incidentId = null, ?string $contact = null, int $locationId = 1) use ($management, &$incidentSeq): RefundRequest {
     $incidentId ??= ++$incidentSeq;
     $contact ??= '600111222';
 
     $dto = new CreateRefundRequestDTO(
         incidentId: $incidentId,
         machineId: 11,
-        locationId: 1,
+        locationId: $locationId,
         claimantName: 'Laura Sanitaria',
         claimantContact: $contact,
         claimedAmount: $amount,
@@ -614,6 +710,60 @@ $service->inspectBalance(
 $assert(
     '3.7 Un importe <= 10,00 € en presencial SÍ puede quedar en conserjería',
     $refundRepo->findById($allowed->getId())?->getStatus() === RefundStatus::DEPOSITED_AT_RECEPTION
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3.b La sede decide si existe conserjería (RF-REF-05, `has_physical_reception`)
+// ─────────────────────────────────────────────────────────────────────────────
+
+$noDesk = $openClaim(5.00, CompensationMethod::EN_MANO_SEDE, 306, null, 2);
+$attemptNoDesk = null;
+try {
+    $siteAwareService->inspectBalance(
+        $noDesk->getIncidentId(),
+        new TechnicianRefundInspectionDTO(
+            finding: TechnicianFinding::FOUND_PHYSICAL,
+            recoveredAmount: 5.00,
+            cashCustodyAction: CashCustodyAction::LEFT_AT_RECEPTION,
+            receptionistName: 'Mostrador del aeropuerto'
+        ),
+        11,
+        $technician
+    );
+} catch (Throwable $e) {
+    $attemptNoDesk = $e;
+}
+$assert(
+    '3.8 Una sede sin conserjería física NO admite depósito en recepción',
+    $attemptNoDesk instanceof ReceptionDeliveryNotAllowedException && $attemptNoDesk->getHttpStatusCode() === 422,
+    'excepción real: ' . ($attemptNoDesk === null ? 'ninguna' : get_class($attemptNoDesk))
+);
+$assert(
+    '3.9 El rechazo NO reescribe la custodia: el sobre sigue sin dueño declarado',
+    $refundRepo->findById($noDesk->getId())?->getStatus() === RefundStatus::PENDING_INSPECTION
+        && $refundRepo->findById($noDesk->getId())?->getCashCustodyAction() === null
+);
+$assert(
+    '3.10 El motivo explica que el efectivo va a caja central',
+    $attemptNoDesk instanceof ReceptionDeliveryNotAllowedException
+        && str_contains($attemptNoDesk->getMessage(), 'HELD_FOR_CENTRAL')
+);
+
+$withDesk = $openClaim(5.00, CompensationMethod::EN_MANO_SEDE, 307, null, 1);
+$siteAwareService->inspectBalance(
+    $withDesk->getIncidentId(),
+    new TechnicianRefundInspectionDTO(
+        finding: TechnicianFinding::FOUND_PHYSICAL,
+        recoveredAmount: 5.00,
+        cashCustodyAction: CashCustodyAction::LEFT_AT_RECEPTION,
+        receptionistName: 'Conserjería Campus'
+    ),
+    11,
+    $technician
+);
+$assert(
+    '3.11 La MISMA regla en una sede CON conserjería sí deja el sobre en recepción',
+    $refundRepo->findById($withDesk->getId())?->getStatus() === RefundStatus::DEPOSITED_AT_RECEPTION
 );
 
 // ─────────────────────────────────────────────────────────────────────────────

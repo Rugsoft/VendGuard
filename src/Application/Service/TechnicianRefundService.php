@@ -15,6 +15,7 @@ use VendGuard\Core\Domain\Model\RefundRequest;
 use VendGuard\Core\Domain\Model\RefundStatus;
 use VendGuard\Core\Domain\Model\TechnicianFinding;
 use VendGuard\Core\Domain\Model\UnclaimedCashFinding;
+use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UnclaimedCashFindingRepositoryInterface;
 
@@ -42,6 +43,10 @@ use VendGuard\Core\Domain\Repository\UnclaimedCashFindingRepositoryInterface;
  *    `ReceptionDeliveryNotAllowedException`. Silently rewriting the technician's
  *    choice would leave an audit trail that says they decided something they did
  *    not decide, which is exactly what Art. III.3 forbids.
+ *  - If the technician EXPLICITLY selects `LEFT_AT_RECEPTION` at a site that
+ *    does not declare a physical reception, the attempt is refused for the
+ *    same reason: the case would sit in `DEPOSITED_AT_RECEPTION` with an
+ *    envelope nobody is able to take in.
  *  - If the technician leaves the custody unset, the rules decide it, and the
  *    central safe is forced for digital channels and elevated amounts.
  *
@@ -65,16 +70,25 @@ final class TechnicianRefundService
     private RefundManagementService $managementService;
     private AuditLogger $auditLogger;
 
+    /**
+     * Optional on purpose: the reception rule is only enforceable when somebody
+     * can answer "does this site have a desk?". Callers that cannot (the
+     * in-memory suites) keep the previous behaviour instead of failing to build.
+     */
+    private ?LocationRepositoryInterface $locationRepo;
+
     public function __construct(
         RefundRequestRepositoryInterface $refundRepo,
         UnclaimedCashFindingRepositoryInterface $findingRepo,
         RefundManagementService $managementService,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?LocationRepositoryInterface $locationRepo = null
     ) {
         $this->refundRepo = $refundRepo;
         $this->findingRepo = $findingRepo;
         $this->managementService = $managementService;
         $this->auditLogger = $auditLogger ?? new AuditLogger();
+        $this->locationRepo = $locationRepo;
     }
 
     /**
@@ -351,6 +365,8 @@ final class TechnicianRefundService
                 );
             }
 
+            $this->assertSiteCanReceiveEnvelope($case);
+
             return CashCustodyAction::LEFT_AT_RECEPTION;
         }
 
@@ -361,5 +377,40 @@ final class TechnicianRefundService
         }
 
         return $dto->cashCustodyAction;
+    }
+
+    /**
+     * Refuses a reception deposit at a site with no reception desk (RF-REF-05).
+     *
+     * `locations.has_physical_reception` used to be decorative: only the public
+     * QR report ever read it, so a technician could leave an envelope at a site
+     * that cannot take one and the case would wait forever in
+     * `DEPOSITED_AT_RECEPTION` with nobody holding the money. The flag is the
+     * site telling us it cannot receive cash, and the module ignored it.
+     *
+     * Two situations deliberately do NOT block, and both are documented rather
+     * than hidden: no repository was injected (an in-memory caller cannot know
+     * the sites), and the site row cannot be loaded (a missing location is a
+     * data integrity fault behind a foreign key, not a reception decision).
+     *
+     * @throws ReceptionDeliveryNotAllowedException
+     */
+    private function assertSiteCanReceiveEnvelope(RefundRequest $case): void
+    {
+        if ($this->locationRepo === null) {
+            return;
+        }
+
+        $location = $this->locationRepo->findById($case->getLocationId());
+        if ($location === null || $location->hasPhysicalReception()) {
+            return;
+        }
+
+        throw new ReceptionDeliveryNotAllowedException(
+            claimedAmount: $case->getClaimedAmount(),
+            compensationMethod: $case->getCompensationMethod(),
+            receptionLimit: self::RECEPTION_DELIVERY_LIMIT,
+            message: 'La sede asociada no dispone de conserjería física: el efectivo debe custodiarse en caja central (HELD_FOR_CENTRAL).'
+        );
     }
 }
