@@ -10,9 +10,11 @@ use VendGuard\Application\DTO\CreateRefundRequestDTO;
 use VendGuard\Core\Domain\Exception\InvalidPickupPinException;
 use VendGuard\Core\Domain\Exception\InvalidRefundAmountException;
 use VendGuard\Core\Domain\Exception\InvalidRefundStateTransitionException;
+use VendGuard\Core\Domain\Exception\JustificationTooShortException;
 use VendGuard\Core\Domain\Exception\ReceptionDeliveryNotAllowedException;
 use VendGuard\Core\Domain\Exception\RefundNotFoundException;
 use VendGuard\Core\Domain\Model\CashCustodyAction;
+use VendGuard\Core\Domain\Model\CoordinatorDecision;
 use VendGuard\Core\Domain\Model\RefundRequest;
 use VendGuard\Core\Domain\Model\RefundStatus;
 use VendGuard\Core\Domain\Model\TechnicianFinding;
@@ -326,7 +328,11 @@ final class RefundManagementService
      */
     public function approveCase(int $id, CoordinatorApprovalDTO $dto, array $actor = []): RefundRequest
     {
-        if ($dto->approvedAmount <= 0.0) {
+        // RF-REF-03: el techo de 50,00 € por reclamación también aplica al
+        // visto bueno. `createCase()` lo respeta al abrir el expediente, pero
+        // sin este segundo control una firma podría convalidar con el botón
+        // de aprobación un importe que el formulario de entrada habría rechazado.
+        if ($dto->approvedAmount <= 0.0 || $dto->approvedAmount > RefundRequest::MAX_CLAIMED_AMOUNT) {
             throw new InvalidRefundAmountException(
                 attemptedAmount: $dto->approvedAmount,
                 maximumAllowed: RefundRequest::MAX_CLAIMED_AMOUNT
@@ -351,8 +357,9 @@ final class RefundManagementService
 
         $this->transitionCase($case, RefundStatus::VERIFIED_PENDING_PAYMENT, 'APPROVE', [
             'approved_amount' => $dto->approvedAmount,
-            'coordinator_decision' => 'APPROVED',
+            'coordinator_decision' => CoordinatorDecision::APPROVED->value,
             'coordinator_justification' => $dto->justification !== '' ? $dto->justification : null,
+            'coordinator_id' => $actor['id'] ?? null,
         ]);
 
         $this->auditLogger->logRefundEvent(
@@ -400,6 +407,55 @@ final class RefundManagementService
             [
                 'status' => RefundStatus::PAID_DIGITAL->value,
                 'payment_reference' => trim($dto->paymentReference),
+            ]
+        );
+
+        return $this->loadCase($id);
+    }
+
+    /**
+     * Records the formal coordinator dismissal of a claim (RF-REF-08).
+     *
+     * It lives here, next to `approveCase()`, and not in the coordination
+     * controller on purpose: `LEGAL_TRANSITIONS` is documented as the single
+     * authority on which moves exist, and `transitionCase()` as the single
+     * guarded write path. A controller writing straight to the repository would
+     * be the one place in the module able to change a state without asking the
+     * graph, which is exactly how a case ends up paid and rejected at once.
+     *
+     * A dismissal is terminal but never destructive: the case keeps its full
+     * financial history for the audit trail (Art. III).
+     *
+     * @param array{id?: int|null, role?: string, name?: string} $actor
+     * @throws JustificationTooShortException When the written reason is shorter
+     *   than the 20 descriptive characters the contract demands.
+     * @throws RefundNotFoundException When the case does not exist or was archived.
+     * @throws InvalidRefundStateTransitionException When the current status has
+     *   no edge to `REJECTED`.
+     */
+    public function rejectCase(int $id, string $justification, array $actor = []): RefundRequest
+    {
+        $reason = trim($justification);
+        if (mb_strlen($reason) < JustificationTooShortException::MINIMUM_LENGTH) {
+            throw new JustificationTooShortException($reason);
+        }
+
+        $case = $this->loadCase($id);
+
+        $this->transitionCase($case, RefundStatus::REJECTED, 'REJECT_REFUND', [
+            'coordinator_decision' => CoordinatorDecision::REJECTED->value,
+            'coordinator_justification' => $reason,
+            'coordinator_id' => $actor['id'] ?? null,
+        ]);
+
+        $this->auditLogger->logRefundEvent(
+            $id,
+            'REFUND_REJECTED',
+            $this->normalizeActor($actor, 'COORDINATOR', 'Coordinación'),
+            ['status' => $case->getStatus()->value],
+            [
+                'status' => RefundStatus::REJECTED->value,
+                'claimed_amount' => $case->getClaimedAmount(),
             ]
         );
 

@@ -51,6 +51,9 @@ final readonly class RefundRequest implements JsonSerializable
         private ?string $technicianJustification = null,
         private ?float $approvedAmount = null,
         private ?string $paymentReference = null,
+        private ?CoordinatorDecision $coordinatorDecision = null,
+        private ?string $coordinatorJustification = null,
+        private ?string $paidAt = null,
         private bool $isActive = true,
         private ?string $createdAt = null,
         private ?string $updatedAt = null,
@@ -262,6 +265,14 @@ final readonly class RefundRequest implements JsonSerializable
                 ? (float)$row['approved_amount']
                 : null,
             paymentReference: $nullable('payment_reference'),
+            // `coordinator_decision` sólo se proyecta en la vista completa de
+            // Coordinación: una proyección restringida nunca lo seleccionó, y
+            // quien no puede ver el IBAN tampoco necesita el motivo del rechazo.
+            coordinatorDecision: isset($row['coordinator_decision']) && $row['coordinator_decision'] !== null
+                ? CoordinatorDecision::from((string)$row['coordinator_decision'])
+                : null,
+            coordinatorJustification: $nullable('coordinator_justification'),
+            paidAt: $nullable('paid_at'),
             isActive: (int)($row['is_active'] ?? 1) === 1,
             createdAt: $nullable('created_at'),
             updatedAt: $nullable('updated_at'),
@@ -326,6 +337,9 @@ final readonly class RefundRequest implements JsonSerializable
             technicianJustification: $technicianJustification ?? $this->technicianJustification,
             approvedAmount: $this->approvedAmount,
             paymentReference: $this->paymentReference,
+            coordinatorDecision: $this->coordinatorDecision,
+            coordinatorJustification: $this->coordinatorJustification,
+            paidAt: $this->paidAt,
             isActive: $this->isActive,
             createdAt: $this->createdAt,
             updatedAt: $this->updatedAt,
@@ -441,6 +455,32 @@ final readonly class RefundRequest implements JsonSerializable
         return $this->paymentReference;
     }
 
+    /**
+     * Decisión formal de Coordinación, o null mientras el expediente no se ha
+     * trámite (RF-REF-03, RF-REF-08).
+     */
+    public function getCoordinatorDecision(): ?CoordinatorDecision
+    {
+        return $this->coordinatorDecision;
+    }
+
+    /**
+     * Motivo escrito del visto bueno o del rechazo.
+     */
+    public function getCoordinatorJustification(): ?string
+    {
+        return $this->coordinatorJustification;
+    }
+
+    /**
+     * Instante de la liquidación digital efectiva, o null si el dinero aún no
+     * ha salido (RF-REF-07).
+     */
+    public function getPaidAt(): ?string
+    {
+        return $this->paidAt;
+    }
+
     public function isActive(): bool
     {
         return $this->isActive;
@@ -510,6 +550,9 @@ final readonly class RefundRequest implements JsonSerializable
             'technician_justification' => $this->technicianJustification,
             'approved_amount' => $this->approvedAmount,
             'payment_reference' => $this->paymentReference,
+            'coordinator_decision' => $this->coordinatorDecision?->value,
+            'coordinator_justification' => $this->coordinatorJustification,
+            'paid_at' => $this->paidAt,
             'is_active' => $this->isActive,
             'created_at' => $this->createdAt,
             'updated_at' => $this->updatedAt,

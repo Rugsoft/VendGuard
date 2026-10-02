@@ -80,7 +80,7 @@
   * **Dependencias:** T-REF-06
   * **Hecho cuando:** `GET /api/location/refunds` lista los reintegros del centro con nombres anonimizados y sin datos bancarios; y `POST /api/location/refunds/{id}/deliver` valida el PIN de 4 dígitos del usuario, transicionando a `REFUNDED_IN_HAND` si coincide o respondiendo `422 INVALID_PICKUP_PIN` si es incorrecto.
 
-- [ ] **T-REF-12: Implementar `CoordinatorRefundController.php` (`GET /api/coordinator/refunds`, `approve`, `pay`, `reject`)**
+- [x] **T-REF-12: Implementar `CoordinatorRefundController.php` (`GET /api/coordinator/refunds`, `approve`, `pay`, `reject`)**
   * **Requisitos:** RF-REF-03, RF-REF-07, RF-REF-08, RF-REF-10
   * **Dependencias:** T-REF-06
   * **Hecho cuando:** Los endpoints de coordinación permiten listar expedientes con detalle financiero completo, dar visto bueno formal ante importes $> 10,00\ \text{€}$ (`approve`), registrar pagos con justificante bancario (`pay`), y rechazar motivadamente con justificación $\ge 20$ caracteres (`reject`).

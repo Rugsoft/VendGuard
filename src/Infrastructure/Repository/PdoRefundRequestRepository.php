@@ -7,6 +7,7 @@ namespace VendGuard\Infrastructure\Repository;
 use PDO;
 use PDOStatement;
 use VendGuard\Core\Domain\Model\CashCustodyAction;
+use VendGuard\Core\Domain\Model\CoordinatorDecision;
 use VendGuard\Core\Domain\Model\CompensationMethod;
 use VendGuard\Core\Domain\Model\RefundRequest;
 use VendGuard\Core\Domain\Model\RefundStatus;
@@ -30,7 +31,8 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
         r.`compensation_method`, r.`bizum_phone`, r.`iban`, r.`pickup_pin`, r.`tracking_token`,
         r.`status`, r.`technician_finding`, r.`recovered_amount`, r.`cash_custody_action`,
         r.`receptionist_name`, r.`technician_justification`, r.`approved_amount`,
-        r.`payment_reference`, r.`is_active`, r.`created_at`, r.`updated_at`';
+        r.`payment_reference`, r.`coordinator_decision`, r.`coordinator_justification`,
+        r.`paid_at`, r.`is_active`, r.`created_at`, r.`updated_at`';
 
     /** Restricted projection: never selects the financial columns (Art. V.4). */
     private const RESTRICTED_COLUMNS = 'r.`id`, r.`incident_id`, r.`machine_id`, r.`location_id`,
@@ -380,6 +382,11 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
                 ? (float)$row['approved_amount']
                 : null,
             paymentReference: $nullable('payment_reference'),
+            coordinatorDecision: isset($row['coordinator_decision']) && $row['coordinator_decision'] !== null
+                ? CoordinatorDecision::from((string)$row['coordinator_decision'])
+                : null,
+            coordinatorJustification: $nullable('coordinator_justification'),
+            paidAt: $nullable('paid_at'),
             isActive: (int)($row['is_active'] ?? 1) === 1,
             createdAt: $nullable('created_at'),
             updatedAt: $nullable('updated_at'),
