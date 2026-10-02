@@ -87,6 +87,17 @@ final class PdoUnclaimedCashFindingRepository implements UnclaimedCashFindingRep
         return $this->hydrateAll($stmt);
     }
 
+    public function sumAmountByMachine(int $machineId): float
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT COALESCE(SUM(`amount`), 0) FROM `unclaimed_cash_findings` WHERE `machine_id` = :machine_id'
+        );
+        $stmt->bindValue(':machine_id', $machineId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return (float)$stmt->fetchColumn();
+    }
+
     /**
      * @param array<string, mixed> $row
      */

@@ -178,8 +178,26 @@ final class TechnicianRefundService
      * ceiling is not a till deposit, and with `DECIMAL(10,2)` and no strict
      * `sql_mode` the database would have stored whatever it was handed.
      *
+     * ## Why the ceiling is per MACHINE and not per finding
+     * Bounding each finding at 50,00 EUR bounds nothing in practice: reopening an
+     * incident and attending it again files a second finding for the same machine
+     * and the ceiling starts over. Two findings of 50,00 EUR were measured on one
+     * machine, and nothing stopped a third. The old error message even advised
+     * dividing the amount, which is the multiplication spelled out. The aggregate
+     * is therefore counted over the machine, using the same figure the module
+     * already uses for money, so no new constant is invented for it.
+     *
+     * ## Why reconciled claims close the door
+     * The money a technician reconciles against a live claim and the money they
+     * book as surplus are the SAME coins, and `resolve` accepts both blocks in a
+     * single request. One call therefore left 8,00 EUR reconciled against a claim
+     * AND 8,00 EUR booked as surplus, and the coordinator then paid the claim:
+     * the same euro twice in the books. Once a claim of the incident has been
+     * reconciled, that cash already has an owner and cannot be surplus as well.
+     *
      * @param array{id?: int|null, role?: string, name?: string} $actor
-     * @throws InvalidRecoveredAmountException When the amount is out of range.
+     * @throws InvalidRecoveredAmountException When the amount is out of range, or
+     *   the money already has an owner, or the machine's aggregate is exhausted.
      */
     public function registerUnclaimedCash(
         int $incidentId,
@@ -201,7 +219,54 @@ final class TechnicianRefundService
                 attemptedAmount: $amount,
                 maximumAllowed: RefundRequest::MAX_CLAIMED_AMOUNT,
                 incidentId: $incidentId,
-                message: 'El efectivo no reclamado no puede superar el tope máximo de 50,00 € por hallazgo. Divídalo en varios registros si el importe es superior.'
+                message: 'El efectivo no reclamado no puede superar el tope máximo de 50,00 € por hallazgo.'
+            );
+        }
+
+        // El dinero conciliado contra una reclamación ya tiene dueño. Abonarlo
+        // además como sobrante es contar dos veces las mismas monedas, y el
+        // `resolve` del técnico acepta ambos bloques en la misma llamada.
+        //
+        // El bloqueo mira el dictamen, no el estado: una reclamación que el
+        // consumidor cerró sin que ningún técnico la inspeccionase no consumió
+        // ningún euro, así que no genera doble asiento y no debe impedir
+        // declarar el sobrante. En cambio, en cuanto existe un dictamen el
+        // dinero de esa máquina ya está adjudicado, hayaseit para el
+        // consumidor o para nadie, y quien lo reclame a partir de ahí es
+        // Coordinación, no el técnico de campo.
+        //
+        // `findRestrictedByIncident()` es la proyección restringida: para decidir
+        // esto solo hacen falta el estado y el dictamen, y así el dinero del
+        // consumidor ni siquiera se carga en memoria aquí.
+        foreach ($this->refundRepo->findRestrictedByIncident($incidentId) as $case) {
+            if (!$case->awaitsInspection() && $case->getTechnicianFinding() !== null) {
+                throw new InvalidRecoveredAmountException(
+                    attemptedAmount: $amount,
+                    maximumAllowed: 0.0,
+                    incidentId: $incidentId,
+                    message: 'Esta avería tiene una reclamación de reintegro ya inspeccionada por el técnico: su efectivo está adjudicado y no puede abonarse además como efectivo no reclamado. Si el sobrante es real, debe abrirlo Coordinación.'
+                );
+            }
+        }
+
+        // El tope es por MÁQUINA, no por hallazgo (ver el docblock), y se cuenta en
+        // CÉNTIMOS. Restar euros en coma flotante no es restar dinero: con 49,99
+        // registrados el hueco salía en 0,00999999999999801 € y un hallazgo de
+        // 0,01 € que cierra el agregado en 50,00 € exactos se rechazaba. Un techo
+        // que no alcanza su propio límite no es un techo.
+        $alreadyBooked = $this->findingRepo->sumAmountByMachine($machineId);
+        $machineCeilingCents = self::toCents(RefundRequest::MAX_CLAIMED_AMOUNT) - self::toCents($alreadyBooked);
+
+        if (self::toCents($amount) > $machineCeilingCents) {
+            throw new InvalidRecoveredAmountException(
+                attemptedAmount: $amount,
+                maximumAllowed: max(0.0, $machineCeilingCents / 100),
+                incidentId: $incidentId,
+                message: sprintf(
+                    'Esta máquina ya tiene %.2f € registrados como efectivo no reclamado y el tope por máquina es de %.2f €.',
+                    $alreadyBooked,
+                    RefundRequest::MAX_CLAIMED_AMOUNT
+                )
             );
         }
 
@@ -241,6 +306,19 @@ final class TechnicianRefundService
     // ─────────────────────────────────────────────────────────────────────
     // Internals
     // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Convierte euros a céntimos enteros sin perder el último.
+     *
+     * Todo importe que llega por HTTP pasa por `isCentExact()` en el servicio de
+     * gestión, así que llegar aquí con más de dos decimales ya es un contractual
+     * incumplido; `round()` sólo protege el agregado, que se calcula restando
+     * dos decimales que NO han pasado por ese filtro.
+     */
+    private static function toCents(float $amount): int
+    {
+        return (int)round($amount * 100);
+    }
 
     /**
      * `UNVERIFIED_NO_CASH` is the verdict that most deserves a second look, so
