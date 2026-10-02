@@ -76,8 +76,7 @@ $assert("3. Técnico Jordi encontrado para auditoría", $tech !== null);
 
 if ($testMachine !== null && $loc !== null && $tech !== null) {
     // Limpiar incidencias previas de prueba sobre esta máquina para estado inicial limpio
-    $pdo->prepare("DELETE FROM incident_history WHERE incident_id IN (SELECT id FROM incidents WHERE ticket_code LIKE 'INC-TEST-T14%')")->execute();
-    $pdo->prepare("DELETE FROM incidents WHERE ticket_code LIKE 'INC-TEST-T14%'")->execute();
+    TestDataCleaner::purgeIncidentsMatchingTicket($pdo, 'INC-TEST-T14%');
 
     // =====================================================================
     // CASO 1: Creación atómica de Incidencia y primer registro en Historial
@@ -247,8 +246,7 @@ if ($testMachine !== null && $loc !== null && $tech !== null) {
     );
 
     // Limpieza final de registros de test
-    $pdo->prepare("DELETE FROM incident_history WHERE incident_id = :id")->execute([':id' => $createdIncident->getId()]);
-    $pdo->prepare("DELETE FROM incidents WHERE id = :id")->execute([':id' => $createdIncident->getId()]);
+    TestDataCleaner::purgeIncident($pdo, (int)$createdIncident->getId());
 }
 
 // Resumen del test

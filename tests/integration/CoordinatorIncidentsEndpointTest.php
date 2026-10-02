@@ -44,10 +44,8 @@ echo "======================================================================\n\n
 
 $pdo = ConnectionFactory::getConnection();
 
-// Limpieza para aislamiento
-$pdo->exec("DELETE FROM incident_comments");
-$pdo->exec("DELETE FROM incident_history");
-$pdo->exec("DELETE FROM incidents");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedAll();

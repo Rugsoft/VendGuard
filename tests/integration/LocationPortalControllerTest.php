@@ -66,9 +66,8 @@ $assert("1. Sede SEDE-BCN-01 recuperada de base de datos", $location !== null);
 if ($location !== null) {
     $locId = $location->getId();
 
-    // Limpiar posibles incidencias de prueba previas
-    $pdo->exec("DELETE FROM incident_history");
-    $pdo->exec("DELETE FROM incidents");
+    // Limpieza operacional segura (orden derivado del grafo de FKs).
+    TestDataCleaner::purge($pdo);
 
     // Generar token de sede para autenticación Bearer
     $siteToken = $authService->generateSiteToken($location);
@@ -250,8 +249,7 @@ if ($location !== null) {
     }
 
     // Limpieza de datos de prueba
-    $pdo->prepare("DELETE FROM incident_history WHERE incident_id = :id")->execute([':id' => $createdIncident->getId()]);
-    $pdo->prepare("DELETE FROM incidents WHERE id = :id")->execute([':id' => $createdIncident->getId()]);
+    TestDataCleaner::purgeIncident($pdo, (int)$createdIncident->getId());
 }
 
 // Resumen del test

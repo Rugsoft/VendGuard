@@ -58,10 +58,8 @@ echo "======================================================================\n\n
 
 $pdo = ConnectionFactory::getConnection();
 
-// 1. Limpieza para aislamiento estricto
-$pdo->exec("DELETE FROM incident_comments");
-$pdo->exec("DELETE FROM incident_history");
-$pdo->exec("DELETE FROM incidents");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 // 2. Restauración de semillas
 $seedRunner = new SeedRunner($pdo);
@@ -235,8 +233,8 @@ $pdo->prepare("UPDATE machines SET is_active = 1 WHERE code = 'VEND-0201'")->exe
 echo "\n--- BLOQUE 2: POST /api/qr/report ---\n";
 
 // Limpiamos incidencias activas en VEND-0201 para probar creación limpia
-$pdo->prepare("DELETE FROM incident_history WHERE incident_id IN (SELECT id FROM incidents WHERE machine_id = (SELECT id FROM machines WHERE code = 'VEND-0201'))")->execute();
-$pdo->prepare("DELETE FROM incidents WHERE machine_id = (SELECT id FROM machines WHERE code = 'VEND-0201')")->execute();
+$vend0201Id = (int)$pdo->query("SELECT `id` FROM `machines` WHERE `code` = 'VEND-0201'")->fetchColumn();
+TestDataCleaner::purgeIncidentsByMachine($pdo, $vend0201Id);
 
 // 2.1 Creación de ticket inicial sobre máquina limpia
 $postDataClean = [

@@ -49,14 +49,8 @@ echo "==========================================================================
 
 $pdo = ConnectionFactory::getConnection();
 
-// 1. Limpieza estricta y aislamiento de la prueba (solo fixtures de prueba, jamás entidades productivas)
-$pdo->exec("DELETE FROM spare_part_requests");
-$pdo->exec("DELETE FROM incident_replaced_parts");
-$pdo->exec("DELETE FROM spare_part_compatibilities");
-$pdo->exec("DELETE FROM spare_parts");
-$pdo->exec("DELETE FROM incident_comments");
-$pdo->exec("DELETE FROM incident_history");
-$pdo->exec("DELETE FROM incidents");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedAll();
@@ -519,14 +513,8 @@ $assert(
     "Fugas detectadas:\n         - " . implode("\n         - ", $fugasGlobales)
 );
 
-// =========================================================================
-// Limpieza final de las fixtures de prueba
-// =========================================================================
-$pdo->exec("DELETE FROM spare_part_requests");
-$pdo->exec("DELETE FROM incident_replaced_parts");
-$pdo->exec("DELETE FROM incident_comments");
-$pdo->exec("DELETE FROM incident_history");
-$pdo->exec("DELETE FROM incidents");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 echo "\n======================================================================================\n";
 echo " Total Aserciones: {$assertions} | Fallos: {$failures}\n";

@@ -113,10 +113,8 @@ echo "{$colorCyan}--- Paso 0: Preparación de Datos Semilla en MariaDB ---{$colo
 
 $pdo = ConnectionFactory::getConnection();
 
-// Limpiar histórico e incidencias previas para un test E2E determinista
-$pdo->exec("DELETE FROM incident_comments");
-$pdo->exec("DELETE FROM incident_history");
-$pdo->exec("DELETE FROM incidents");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedAll();

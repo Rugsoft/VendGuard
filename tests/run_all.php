@@ -94,6 +94,75 @@ function extractAssertionsCount(string $output): int
     return 1;
 }
 
+/**
+ * FASE 0 — Guardia de integridad de la limpieza de datos.
+ *
+ * Prohíbe que una suite vuelva a borrar `incidents` "a pelo" (sin WHERE). Ese
+ * borrado sólo funciona mientras ninguna tabla hija con ON DELETE RESTRICT
+ * tenga filas, y hoy hay cuatro: incident_replaced_parts, refund_requests,
+ * spare_part_requests y unclaimed_cash_findings. Una única fila huérfana
+ * reventaba 22 suites a la vez con el error 1451.
+ *
+ * Las variantes con WHERE sí se permiten: son borrados dirigidos de la fila
+ * propia del test, y deben pasar por TestDataCleaner::purgeIncident*() para
+ * arrastrar también a sus hijas.
+ *
+ * La única excepción es TestDataCleanerIsolationTest, que reproduce el borrado
+ * ingenuo a propósito para demostrar que falla (prueba de mordida).
+ *
+ * @return list<string> lista de infracciones "fichero:línea"
+ */
+function auditSuitesCleanupDiscipline(string $testRoot): array
+{
+    $violations = [];
+    $scanFiles = array_merge(
+        glob($testRoot . '/integration/*.php') ?: [],
+        glob($testRoot . '/Manual/*.php') ?: []
+    );
+
+    // `DELETE FROM incidents` / `DELETE FROM `incidents`` sin cláusula WHERE.
+    $nakedDelete = '/DELETE\s+FROM\s+`?incidents`?\s*(?!.*\bWHERE\b)/i';
+
+    foreach ($scanFiles as $filePath) {
+        $fileName = basename($filePath);
+        if ($fileName === 'TestDataCleanerIsolationTest.php') {
+            continue; // Reproduce el patrón a propósito para probar que muerde.
+        }
+        $lines = file($filePath);
+        if ($lines === false) {
+            continue;
+        }
+        foreach ($lines as $index => $line) {
+            if (stripos($line, 'TestDataCleaner') !== false) {
+                continue;
+            }
+            if (preg_match($nakedDelete, $line)) {
+                $violations[] = 'tests/' . str_replace('\\', '/', substr($filePath, strlen($testRoot) + 1)) . ':' . ($index + 1);
+            }
+        }
+    }
+
+    return $violations;
+}
+
+// =====================================================================
+// FASE 0: Guardia de limpieza de datos (aborta antes de ejecutar nada)
+// =====================================================================
+echo "{$colorBold}--- Fase 0: Guardia de limpieza de datos ---{$colorReset}\n";
+
+$cleanupViolations = auditSuitesCleanupDiscipline(__DIR__);
+if ($cleanupViolations !== []) {
+    echo "  {$colorRed}[BLOQUEO] {$colorReset}" . count($cleanupViolations) . " suite(s) borran `incidents` sin usar TestDataCleaner:\n";
+    foreach ($cleanupViolations as $violation) {
+        echo "         - {$violation}\n";
+    }
+    echo "\n{$colorBold}{$colorRed} BATERÍA ABORTADA. Usa TestDataCleaner::purge() o purgeIncident*(){$colorReset}\n";
+    echo "{$colorBold}{$colorRed} para que el orden de borrado respete las claves foráneas RESTRICT.{$colorReset}\n";
+    echo "{$colorBold}======================================================================{$colorReset}\n";
+    exit(1);
+}
+echo "  [OK] Todas las suites respetan el contrato de limpieza.\n";
+
 // =====================================================================
 // FASE 1: Pruebas Unitarias Backend y Contratos Frontend (PHP)
 // =====================================================================
@@ -211,10 +280,15 @@ if ($serverStartedByRunner && is_resource($serverProcess)) {
 }
 
 // =====================================================================
-// FASE 4: Re-sembrado final para dejar la BD en estado limpio operativo
+// FASE 4: Reinicio operacional y re-sembrado final
 // =====================================================================
+// La purga previa garantiza que cada ejecución termine con la BD en un estado
+// limpio conocido: pase lo que pase dentro de la corrida (incluido un fatal que
+// salte un `finally`), la siguiente arranca sin filas huérfanas.
 try {
     $pdo = ConnectionFactory::getConnection();
+    TestDataCleaner::purge($pdo);
+
     $seedRunner = new SeedRunner($pdo);
     $seedRunner->seedAll();
 
@@ -225,6 +299,7 @@ try {
     $dbResetOk = true;
 } catch (\Throwable $e) {
     $dbResetOk = false;
+    echo "  {$colorRed}[WARN] Reinicio final de base de datos: " . $e->getMessage() . "{$colorReset}\n";
 }
 
 $elapsedTime = round(microtime(true) - $startTime, 2);

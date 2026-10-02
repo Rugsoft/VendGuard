@@ -41,10 +41,8 @@ echo "======================================================================\n\n
 
 $pdo = ConnectionFactory::getConnection();
 
-// 1. Limpieza y preparación
-$pdo->exec("DELETE FROM incident_comments");
-$pdo->exec("DELETE FROM incident_history");
-$pdo->exec("DELETE FROM incidents");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedAll();
@@ -202,9 +200,8 @@ $assert("5.2 can_report vuelve a true", ($bodyNormal['data']['can_report'] ?? fa
 
 // Limpieza final de máquinas de prueba
 $settingsRepo->updateSanitaryStatus($mach1->getId(), 'OK');
-$pdo->exec("DELETE FROM incident_comments");
-$pdo->exec("DELETE FROM incident_history");
-$pdo->exec("DELETE FROM incidents");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 echo "\n======================================================================\n";
 if ($failures === 0) {

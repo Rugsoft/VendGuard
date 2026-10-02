@@ -44,11 +44,8 @@ echo "======================================================================\n\n
 // ─── Bootstrap: MariaDB real y semillas ───────────────────────────────────────
 $pdo = ConnectionFactory::getConnection();
 
-$pdo->exec('DELETE FROM incident_replaced_parts');
-$pdo->exec('DELETE FROM spare_part_requests');
-$pdo->exec('DELETE FROM incident_history');
-$pdo->exec('DELETE FROM incident_comments');
-$pdo->exec('DELETE FROM incidents');
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 // Restos físicos de suites anteriores: los soft-delete dejan filas huérfanas que
 // findBySiteCode/findByCode no devuelven, rompiendo la reejecución idempotente.

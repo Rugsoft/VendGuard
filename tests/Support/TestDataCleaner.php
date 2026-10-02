@@ -148,6 +148,62 @@ final class TestDataCleaner
     }
 
     /**
+     * Purga dirigida de todos los incidentes de una máquina, con sus hijas.
+     * Sustituye al clásico par:
+     *   DELETE FROM incident_history WHERE incident_id IN (SELECT ... machine_id = :mid);
+     *   DELETE FROM incidents WHERE machine_id = :mid;
+     * que fallaba en cuanto la incidencia tenía un reintegro colgado.
+     *
+     * @return array<string, int> tabla => filas borradas
+     */
+    public static function purgeIncidentsByMachine(PDO $pdo, int $machineId): array
+    {
+        return self::purgeMatchingIncidents($pdo, '`machine_id` = :target', [':target' => $machineId]);
+    }
+
+    /**
+     * Purga dirigida de un incidente identificado por su código de ticket.
+     *
+     * @return array<string, int> tabla => filas borradas
+     */
+    public static function purgeIncidentByTicket(PDO $pdo, string $ticketCode): array
+    {
+        return self::purgeMatchingIncidents($pdo, '`ticket_code` = :target', [':target' => $ticketCode]);
+    }
+
+    /**
+     * Purga dirigida de los incidentes cuyo ticket casa con un patrón `LIKE`.
+     *
+     * @return array<string, int> tabla => filas borradas
+     */
+    public static function purgeIncidentsMatchingTicket(PDO $pdo, string $likePattern): array
+    {
+        return self::purgeMatchingIncidents($pdo, '`ticket_code` LIKE :target', [':target' => $likePattern]);
+    }
+
+    /**
+     * Resuelve los ids de incidente que casan con un filtro y purga cada uno
+     * con su subárbol de hijas.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, int> tabla => filas borradas
+     */
+    private static function purgeMatchingIncidents(PDO $pdo, string $condition, array $params): array
+    {
+        $stmt = $pdo->prepare('SELECT `id` FROM `incidents` WHERE ' . $condition);
+        $stmt->execute($params);
+        $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+
+        $totals = [];
+        foreach ($ids as $id) {
+            foreach (self::purgeIncident($pdo, $id) as $table => $count) {
+                $totals[$table] = ($totals[$table] ?? 0) + $count;
+            }
+        }
+        return $totals;
+    }
+
+    /**
      * Orden de borrado completo derivado del grafo (expuesto para las pruebas
      * de la autoverificación). No ejecuta SQL de escritura.
      *

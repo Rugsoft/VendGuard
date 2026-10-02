@@ -83,9 +83,8 @@ if ($location !== null && $targetMachine !== null && $secondMachine !== null) {
     $locId = $location->getId();
     $machineId = $targetMachine->getId();
 
-    // Limpiar incidencias previas del test
-    $pdo->prepare("DELETE FROM incident_history WHERE incident_id IN (SELECT id FROM incidents WHERE ticket_code LIKE 'INC-DUP-%')")->execute();
-    $pdo->prepare("DELETE FROM incidents WHERE ticket_code LIKE 'INC-DUP-%'")->execute();
+    // Limpiar incidencias previas del test (purga dirigida FK-segura)
+    TestDataCleaner::purgeIncidentsMatchingTicket($pdo, 'INC-DUP-%');
 
     // =====================================================================
     // CASO 1: Inserción consecutiva de dos incidencias activas (Condición Hecho cuando:)
@@ -347,9 +346,8 @@ if ($location !== null && $targetMachine !== null && $secondMachine !== null) {
         $ticketA->getId() > 0 && $ticketB->getId() > 0 && $ticketA->getId() !== $ticketB->getId()
     );
 
-    // Limpieza final de datos de prueba
-    $pdo->prepare("DELETE FROM incident_history WHERE incident_id IN (SELECT id FROM incidents WHERE ticket_code LIKE 'INC-DUP-%')")->execute();
-    $pdo->prepare("DELETE FROM incidents WHERE ticket_code LIKE 'INC-DUP-%'")->execute();
+    // Limpieza final de datos de prueba (purga dirigida FK-segura)
+    TestDataCleaner::purgeIncidentsMatchingTicket($pdo, 'INC-DUP-%');
 }
 
 // Resumen del test

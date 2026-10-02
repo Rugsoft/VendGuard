@@ -44,9 +44,8 @@ echo "======================================================================\n\n
 
 $pdo = ConnectionFactory::getConnection();
 
-// Limpiar todas las incidencias previas para aislamiento del test
-$pdo->exec("DELETE FROM incident_history");
-$pdo->exec("DELETE FROM incidents");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 // Asegurar semillas limpias
 $seedRunner = new SeedRunner($pdo);
@@ -387,10 +386,7 @@ if ($chCheck !== false) {
 
 if ($serverAvailable) {
     // 7.1 Limpiar incidencias de la máquina de SEDE-BCN-02
-    $pdo->prepare("DELETE FROM incident_history WHERE incident_id IN (SELECT id FROM incidents WHERE machine_id = :mid)")
-        ->execute([':mid' => $loc2Machine->getId()]);
-    $pdo->prepare("DELETE FROM incidents WHERE machine_id = :mid")
-        ->execute([':mid' => $loc2Machine->getId()]);
+    TestDataCleaner::purgeIncidentsByMachine($pdo, $loc2Machine->getId());
 
     $tokenLoc2 = $authService->generateSiteToken($location2);
 

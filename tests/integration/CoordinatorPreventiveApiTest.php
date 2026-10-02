@@ -46,13 +46,8 @@ echo "======================================================================\n\n
 
 $pdo = ConnectionFactory::getConnection();
 
-// 1. Limpieza estricta y restauración de semillas
-$pdo->exec("DELETE FROM preventive_order_items");
-$pdo->exec("DELETE FROM sanitary_certificates");
-$pdo->exec("DELETE FROM incident_comments");
-$pdo->exec("DELETE FROM incident_history");
-$pdo->exec("DELETE FROM incidents");
-$pdo->exec("DELETE FROM preventive_orders");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedAll();
@@ -340,12 +335,8 @@ $assert("10.5 GET preventive-config retorna HTTP 200", $resGetConfig->getStatusC
 $bodyGetConfig = json_decode($resGetConfig->getBody(), true);
 $assert("10.6 Respuesta contiene datos de la máquina", ($bodyGetConfig['success'] ?? false) === true);
 
-// =========================================================================
-// Limpieza final
-// =========================================================================
-$pdo->exec("DELETE FROM preventive_order_items");
-$pdo->exec("DELETE FROM sanitary_certificates");
-$pdo->exec("DELETE FROM preventive_orders");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 // Restaurar sanitary_status a OK
 $settingsRepo->updateSanitaryStatus($machine1->getId(), 'OK');
