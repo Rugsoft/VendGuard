@@ -174,6 +174,10 @@ class QrReportService
             $created = $this->incidentRepo->create($newIncident, null, 'Aviso registrado mediante código QR');
 
             return [
+                // `incident_id` / `incident_code` (contrato §4.1.1) permiten anclar un
+                // expediente de reintegro a este mismo aviso sin volver a consultarlo.
+                'incident_id' => (int)$created->getId(),
+                'incident_code' => $created->getTicketCode(),
                 'ticket_code' => $created->getTicketCode(),
                 'merged' => false,
                 'status' => $created->getStatus()->value,
@@ -252,6 +256,11 @@ class QrReportService
         $this->incidentRepo->addComment($comment);
 
         return [
+            // Un segundo consumidor sobre el mismo ticket genera su propio
+            // expediente de reintegro (RF-REF-08, caso límite 4), así que también
+            // necesita el identificador de la incidencia a la que anclarse.
+            'incident_id' => (int)$incident->getId(),
+            'incident_code' => $incident->getTicketCode(),
             'ticket_code' => $incident->getTicketCode(),
             'merged' => true,
             'status' => $incident->getStatus()->value,

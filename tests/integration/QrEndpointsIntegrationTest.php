@@ -19,6 +19,9 @@ declare(strict_types=1);
  *    - 200 OK ante reporte concurrente/duplicado sobre la misma máquina (merged: true, comentario añadido EARS 4.5).
  *    - 422 Unprocessable Content ante campos obligatorios omitidos (MISSING_DESCRIPTION, etc.).
  *    - 404 Not Found ante máquina inexistente (MACHINE_NOT_FOUND_OR_INACTIVE).
+ *    - BLOQUE 2B (T-REF-09): captura opcional de solicitud de reintegro con `refund_requested`,
+ *      persistencia real en MariaDB, resguardo con PIN y token, no devolución de IBAN ni
+ *      teléfono de Bizum (Art. V.4), y rechazo por importe sin dejar avería huérfana.
  * 3. GET /api/coordinator/machines/{id}/qr-label
  *    - 401 Unauthorized sin token.
  *    - 403 Forbidden con rol de técnico.
@@ -317,6 +320,114 @@ $postNotFound = [
 $reqReportNotFound = new Request('POST', '/api/qr/report', [], $postNotFound, ['content-type' => 'application/json']);
 $resReportNotFound = $router->dispatch($reqReportNotFound);
 $assert("2.4 Reporte sobre máquina inexistente retorna HTTP 404 Not Found", $resReportNotFound->getStatusCode() === 404);
+
+// =========================================================================
+// BLOQUE 2B: POST /api/qr/report con solicitud de reintegro (T-REF-09)
+// =========================================================================
+echo "\n--- BLOQUE 2B: POST /api/qr/report con reintegro opcional ---\n";
+
+TestDataCleaner::purgeIncidentsByMachine($pdo, $vend0201Id);
+
+// 2B.1 Recogida en sede: el resguardo trae PIN de 4 dígitos y URL de seguimiento
+$postWithRefund = [
+    'machine_code' => 'VEND-0201',
+    'category' => 'PAYMENT_SYSTEM',
+    'description' => 'Metí una moneda de 2 euros y se quedó atascada sin dar producto.',
+    'reporter_name' => 'Laura Sanitaria',
+    'reporter_phone' => '600111222',
+    'refund_requested' => true,
+    'claimed_amount' => 2.00,
+    'compensation_method' => 'EN_MANO_SEDE',
+    'product_attempted' => 'Café con leche carril 2',
+];
+$reqWithRefund = new Request('POST', '/api/qr/report', [], $postWithRefund, ['content-type' => 'application/json']);
+$resWithRefund = $router->dispatch($reqWithRefund);
+$assert("2B.1 Reporte con solicitud de reintegro retorna HTTP 201 Created", $resWithRefund->getStatusCode() === 201);
+
+$bodyWithRefund = json_decode($resWithRefund->getBody(), true);
+$receipt = $bodyWithRefund['data']['refund'] ?? [];
+$assert("2B.1 El resguardo incluye el PIN de recogida de 4 dígitos", preg_match('/^[0-9]{4}$/', (string)($receipt['pickup_pin'] ?? '')) === 1, 'pin: ' . var_export($receipt['pickup_pin'] ?? null, true));
+$assert("2B.1 El resguardo incluye el token de 64 hexadecimales", preg_match('/^[0-9a-f]{64}$/', (string)($receipt['tracking_token'] ?? '')) === 1);
+$assert("2B.1 El resguardo incluye la URL de seguimiento con el token", ($receipt['tracking_url'] ?? '') === '/?track=' . ($receipt['tracking_token'] ?? ''));
+$assert("2B.1 El resguardo refleja importe y vía", (float)($receipt['claimed_amount'] ?? 0) === 2.00 && ($receipt['compensation_method'] ?? '') === 'EN_MANO_SEDE');
+
+// 2B.2 Persistencia real en MariaDB
+$stmtRefund = $pdo->prepare("SELECT * FROM `refund_requests` WHERE `tracking_token` = :token");
+$stmtRefund->execute([':token' => $receipt['tracking_token'] ?? '']);
+$rowRefund = $stmtRefund->fetch(PDO::FETCH_ASSOC);
+$assert("2B.2 El expediente de reintegro queda persistido en MariaDB", is_array($rowRefund));
+$assert("2B.2 Nace en PENDING_INSPECTION", ($rowRefund['status'] ?? '') === 'PENDING_INSPECTION');
+$assert("2B.2 El PIN persistido coincide con el del resguardo", ($rowRefund['pickup_pin'] ?? '') === ($receipt['pickup_pin'] ?? 'X'));
+$assert("2B.2 Queda anclado a la avería recién creada", (int)($rowRefund['incident_id'] ?? 0) === (int)($bodyWithRefund['data']['incident_id'] ?? 0));
+// `?? 'X'` se traga un NULL real, así que la ausencia se comprueba con
+// `array_key_exists` sobre la fila, no con el operador de coalescencia.
+$assert(
+    "2B.2 La vía presencial no guarda IBAN ni teléfono de Bizum",
+    array_key_exists('iban', $rowRefund)
+    && array_key_exists('bizum_phone', $rowRefund)
+    && $rowRefund['iban'] === null
+    && $rowRefund['bizum_phone'] === null,
+    'iban: ' . var_export($rowRefund['iban'] ?? 'AUSENTE', true) . ' bizum: ' . var_export($rowRefund['bizum_phone'] ?? 'AUSENTE', true)
+);
+$assert("2B.2 El producto intentado queda registrado", ($rowRefund['product_attempted'] ?? '') === 'Café con leche carril 2');
+
+// 2B.3 El token emitido resuelve el expediente en el repositorio (Art. II / T-REF-08)
+$refundRepoReal = new \VendGuard\Infrastructure\Repository\PdoRefundRequestRepository($pdo);
+$caseByToken = $refundRepoReal->findByTrackingToken((string)($receipt['tracking_token'] ?? ''));
+$assert("2B.3 El token del resguardo localiza el expediente sin conocer nada más", $caseByToken !== null);
+$assert("2B.3 La proyección restringida oculta el IBAN", !array_key_exists('iban', $caseByToken->toRestrictedArray()));
+$assert("2B.3 La proyección restringida oculta el teléfono de Bizum", !array_key_exists('bizum_phone', $caseByToken->toRestrictedArray()));
+
+// 2B.4 Vía digital: los datos tecleados se guardan pero NO se devuelven
+// Máquina limpia para que la respuesta sea una creación (201) y no una fusión.
+TestDataCleaner::purgeIncidentsByMachine($pdo, $vend0201Id);
+$postBizumRefund = [
+    'machine_code' => 'VEND-0201',
+    'category' => 'PAYMENT_SYSTEM',
+    'description' => 'La máquina cobró sin entregar el producto, quiero el importe por Bizum.',
+    'reporter_name' => 'Marc Ruibal',
+    'reporter_phone' => '699888777',
+    'refund_requested' => true,
+    'claimed_amount' => 1.50,
+    'compensation_method' => 'BIZUM',
+    'bizum_phone' => '699888777',
+];
+$reqBizumRefund = new Request('POST', '/api/qr/report', [], $postBizumRefund, ['content-type' => 'application/json']);
+$resBizumRefund = $router->dispatch($reqBizumRefund);
+$assert("2B.4 Reporte con Bizum retorna HTTP 201 Created", $resBizumRefund->getStatusCode() === 201);
+$rawBizumBody = (string)$resBizumRefund->getBody();
+$assert("2B.4 El teléfono de Bizum NO se devuelve (Art. V.4)", !str_contains($rawBizumBody, '"bizum_phone"') && !array_key_exists('bizum_phone', json_decode($rawBizumBody, true)['data']['refund'] ?? []));
+$assert("2B.4 El nombre del reclamante NO se devuelve (Art. V.4)", !str_contains($rawBizumBody, 'Marc Ruibal'));
+$assert("2B.4 pickup_pin existe y vale null en vía digital", array_key_exists('pickup_pin', json_decode($rawBizumBody, true)['data']['refund'] ?? []) && json_decode($rawBizumBody, true)['data']['refund']['pickup_pin'] === null);
+
+// 2B.5 Un importe por encima del tope se rechaza SIN dejar avería huérfana
+$incidentsBeforeReject = (int)$pdo->query("SELECT COUNT(*) FROM `incidents` WHERE `machine_id` = " . $vend0201Id)->fetchColumn();
+$refundsBeforeReject = (int)$pdo->query("SELECT COUNT(*) FROM `refund_requests`")->fetchColumn();
+$postOverCap = [
+    'machine_code' => 'VEND-0201',
+    'category' => 'PAYMENT_SYSTEM',
+    'description' => 'Solicito una devolución desmedida por un fallo de cobro.',
+    'reporter_name' => 'Actor Malicioso',
+    'reporter_phone' => '600000000',
+    'refund_requested' => true,
+    'claimed_amount' => 5000.00,
+    'compensation_method' => 'EN_MANO_SEDE',
+];
+$reqOverCap = new Request('POST', '/api/qr/report', [], $postOverCap, ['content-type' => 'application/json']);
+$resOverCap = $router->dispatch($reqOverCap);
+$assert("2B.5 Importe superior al tope de 50,00 € retorna HTTP 422", $resOverCap->getStatusCode() === 422);
+$bodyOverCap = json_decode($resOverCap->getBody(), true);
+$assert("2B.5 Código de error INVALID_REFUND_AMOUNT", ($bodyOverCap['error']['code'] ?? '') === 'INVALID_REFUND_AMOUNT');
+$assert("2B.5 RF-REF-03 remite a atención al cliente", str_contains((string)($bodyOverCap['error']['message'] ?? ''), 'atención al cliente'));
+$incidentsAfterReject = (int)$pdo->query("SELECT COUNT(*) FROM `incidents` WHERE `machine_id` = " . $vend0201Id)->fetchColumn();
+$refundsAfterReject = (int)$pdo->query("SELECT COUNT(*) FROM `refund_requests`")->fetchColumn();
+$assert("2B.5 NO queda ninguna avería huérfana sin su reclamación", $incidentsAfterReject === $incidentsBeforeReject, 'antes: ' . $incidentsBeforeReject . ' ahora: ' . $incidentsAfterReject);
+$assert("2B.5 NO queda ningún expediente de reintegro", $refundsAfterReject === $refundsBeforeReject, 'antes: ' . $refundsBeforeReject . ' ahora: ' . $refundsAfterReject);
+
+// 2B.6 RNF-REF-01: la creación queda auditada de forma inmutable
+$auditRefund = $pdo->prepare("SELECT COUNT(*) FROM `audit_log` WHERE `entity_type` = 'REFUND_REQUEST' AND `entity_id` = :id");
+$auditRefund->execute([':id' => (int)($rowRefund['id'] ?? 0)]);
+$assert("2B.6 La apertura del expediente dejó evento en audit_log", (int)$auditRefund->fetchColumn() >= 1);
 
 // =========================================================================
 // BLOQUE 3: GET /api/coordinator/machines/{id}/qr-label (Etiqueta Individual)

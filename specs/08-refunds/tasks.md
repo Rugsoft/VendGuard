@@ -65,7 +65,7 @@
   * **Dependencias:** T-REF-05, T-REF-06
   * **Hecho cuando:** El endpoint público permite consultar de forma anónima el estado del expediente mediante token seguro en la URL, y permite rectificar IBAN o teléfono cuando el estado es `PENDING_CONTACT`, rechazando peticiones con tokens inexistentes (`404`) o formatos inválidos (`422`).
 
-- [ ] **T-REF-09: Modificar `QrIncidentController.php` para captura opcional de reintegro en `POST /api/qr/report`**
+- [x] **T-REF-09: Modificar `QrIncidentController.php` para captura opcional de reintegro en `POST /api/qr/report`**
   * **Requisitos:** RF-REF-01, RF-REF-02, RF-REF-03
   * **Dependencias:** T-REF-06, T-REF-08
   * **Hecho cuando:** El endpoint existente `POST /api/qr/report` procesa los campos de reintegro si `refund_requested = true`, validando importes ($\le 50,00\ \text{€}$), método y datos de contacto, devolviendo en la respuesta el resguardo con PIN de 4 dígitos y la URL de seguimiento con token.
