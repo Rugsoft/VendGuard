@@ -773,6 +773,118 @@ $bizumContact = $lastClaimantContact;
         )->fetchColumn() === 'decimal(10,2)',
         'guardado: ' . var_export($wideStored, true)
     );
+
+    // ─────────────────────────────────────────────────────────────────────
+    // The other half of RF-REF-03. Bounding the settlement from above left the
+    // bottom open: `pay paid_amount: 0.01` on a 4,00 EUR case answered HTTP 200
+    // and went straight to `PAID_DIGITAL`, so the consumer read "your refund
+    // has been paid" after collecting a hundredth of what was agreed and the
+    // leftover 3,99 EUR had nowhere to go. A settled case is terminal, so the
+    // damage stops being correctable from that moment on.
+    // ─────────────────────────────────────────────────────────────────────
+
+    $partialCaseId = $openCase(CompensationMethod::BIZUM, 4.00);
+    $escalate($partialCaseId, 4.00);
+    $controller->approve($request(
+        'POST',
+        "/api/coordinator/refunds/{$partialCaseId}/approve",
+        ['approved_amount' => 4.00, 'justification' => 'Importe verificado contra el efectivo recuperado.'],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+
+    $partial = $controller->pay($request(
+        'POST',
+        "/api/coordinator/refunds/{$partialCaseId}/pay",
+        ['payment_reference' => 'REF-PARCIAL', 'paid_amount' => 0.01],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+
+    $assert(
+        '8.9 No se puede liquidar una fracción de lo aprobado (RF-REF-03)',
+        $partial->getStatusCode() === 422 && $errOf($partial) === 'INVALID_REFUND_AMOUNT',
+        'HTTP ' . $partial->getStatusCode() . ' ' . $errOf($partial)
+    );
+
+    $assert(
+        '8.9b El rechazo de la liquidación parcial deja el expediente SIN liquidar',
+        (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$partialCaseId}")->fetchColumn() === 'VERIFIED_PENDING_PAYMENT'
+        && $pdo->query("SELECT `paid_amount` FROM `refund_requests` WHERE `id` = {$partialCaseId}")->fetchColumn() === null,
+        'estado: ' . (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$partialCaseId}")->fetchColumn()
+    );
+
+    $assert(
+        '8.9c El rechazo dice cuál era el importe esperado, para que se firme ese',
+        (float)($partial->getDecodedBody()['error']['details']['expected_amount'] ?? 0) === 4.00,
+        'detalles: ' . json_encode($partial->getDecodedBody()['error']['details'] ?? null)
+    );
+
+    // One cent under is still a different amount. The tolerance exists only for
+    // the binary residue of 4.00 (3.9999999999999996), never as a money rule, so
+    // the guard proving it is a guard against reintroducing the loophole.
+    $oneCentUnder = $controller->pay($request(
+        'POST',
+        "/api/coordinator/refunds/{$partialCaseId}/pay",
+        ['payment_reference' => 'REF-UN-CENTIMO', 'paid_amount' => 3.99],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+
+    $assert(
+        '8.9d Un céntimo por debajo tampoco es el importe aprobado',
+        $oneCentUnder->getStatusCode() === 422 && $errOf($oneCentUnder) === 'INVALID_REFUND_AMOUNT',
+        'HTTP ' . $oneCentUnder->getStatusCode() . ' ' . $errOf($oneCentUnder)
+    );
+
+    $exact = $controller->pay($request(
+        'POST',
+        "/api/coordinator/refunds/{$partialCaseId}/pay",
+        ['payment_reference' => 'PAGO-EXACTO-0003', 'paid_amount' => 4.00],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+
+    $assert(
+        '8.10 Liquidar exactamente lo aprobado sí funciona y persiste el importe',
+        $exact->getStatusCode() === 200
+        && (float)$pdo->query("SELECT `paid_amount` FROM `refund_requests` WHERE `id` = {$partialCaseId}")->fetchColumn() === 4.00
+        && (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$partialCaseId}")->fetchColumn() === 'PAID_DIGITAL',
+        'HTTP ' . $exact->getStatusCode() . ' ' . (string)$exact->getBody()
+    );
+
+    // Omitting the amount has to settle the very same figure, otherwise the
+    // modal that leaves the field empty would collect a 422 from an endpoint it
+    // can reach without typing anything.
+    $defaultCaseId = $openCase(CompensationMethod::BIZUM, 7.30);
+    $escalate($defaultCaseId, 7.30);
+    $controller->approve($request(
+        'POST',
+        "/api/coordinator/refunds/{$defaultCaseId}/approve",
+        ['approved_amount' => 7.30, 'justification' => 'Importe verificado contra el efectivo recuperado.'],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+    $defaultSettle = $controller->pay($request(
+        'POST',
+        "/api/coordinator/refunds/{$defaultCaseId}/pay",
+        ['payment_reference' => 'PAGO-SIN-IMPORTE-0004'],
+        [],
+        $coordinatorId,
+        'COORDINATOR'
+    ));
+
+    $assert(
+        '8.11 Omitir el importe liquida el aprobado, no el sugerido por la vista',
+        $defaultSettle->getStatusCode() === 200
+        && (float)($bodyOf($defaultSettle)['paid_amount'] ?? 0) === 7.30,
+        'HTTP ' . $defaultSettle->getStatusCode() . ' ' . (string)$defaultSettle->getBody()
+    );
 } finally {
     $pdo->rollBack();
 }

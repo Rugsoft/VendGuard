@@ -304,7 +304,11 @@ export const CoordinatorRefundsTab = {
     openPaymentModal(refund) {
       if (!this.canPay(refund)) return;
       this.selectedRefund = refund;
-      this.paymentAmount = String(refund.payable_amount ?? refund.claimed_amount ?? '');
+      // RF-REF-03: la liquidación solo admite el importe aprobado o, sin
+      // visto bueno formal, el reclamado. `payable_amount` es una sugerencia
+      // de trabajo y cae al importe verificado cuando hay discrepancia dentro
+      // del 20% tolerado, cifra que el backend ya no acepta como liquidación.
+      this.paymentAmount = String(refund.approved_amount ?? refund.claimed_amount ?? '');
       this.paymentReference = '';
       this.paymentError = '';
       this.actionMessage = '';

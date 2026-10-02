@@ -362,7 +362,9 @@ class CoordinatorRefundController
                 $this->buildActor($request)
             );
         } catch (InvalidRefundAmountException $e) {
-            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+            // Se propagan los detalles para que el coordinador reciba el importe
+            // esperado y pueda firma el que corresponda, en lugar de adivinarlo.
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode(), $e->getDetails());
         } catch (InvalidRefundStateTransitionException $e) {
             return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
         } catch (RefundNotFoundException $e) {
@@ -497,13 +499,17 @@ class CoordinatorRefundController
     /**
      * El importe que se liquida si el operador no escribe uno.
      *
-     * El aprobado manda porque es la cifra que Coordinación firmó
-     * formalmente; si no hay visto bueno, el importe verificado; y en último
-     * término, lo reclamado.
+     * Delega en `RefundManagementService::payableAmount()` a propósito: la
+     * cifra por defecto tiene que ser exactamente la que el servicio acepta,
+     * porque `registerDigitalPayment()` ya no tolera otras. La vista de
+     * coordinación ofrece `payable_amount` como sugerencia de trabajo y cae al
+     * importe verificado cuando lo reclamado y lo recuperado se diferencian
+     * dentro del 20% tolerado; usar esa cifra como predeterminada terminaba en
+     * un 422 en casos que la propia interfaz daba por liquidables.
      */
     private function defaultPayableAmount(RefundRequest $case): float
     {
-        return CoordinatorRefundViewDTO::fromRefundRequest($case)->payableAmount();
+        return $this->managementService->payableAmount($case);
     }
 
     /**

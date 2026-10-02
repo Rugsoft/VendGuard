@@ -60,6 +60,19 @@ final class RefundManagementService
     public const TRACKING_TOKEN_BYTES = 32;
 
     /**
+     * Slack allowed when comparing two amounts that both went through the same
+     * cents-only decimal column.
+     *
+     * It is here and not in the rule itself because it is a fact about binary
+     * floating point, not about money: 4.00 arrives as 3.9999999999999996 and
+     * an equality check on floats would refuse a settlement that is exactly the
+     * approved one. It exists for that arithmetic residue and for nothing else:
+     * it is below half a cent, so it can never turn a genuine mismatch (the
+     * smallest one being one cent) into an accepted settlement.
+     */
+    public const SETTLEMENT_TOLERANCE = 0.005;
+
+    /**
      * Legal edges of the refund lifecycle, exactly as contracted.
      *
      * @var array<string, list<string>>
@@ -495,14 +508,19 @@ final class RefundManagementService
      * PAID_DIGITAL with a reference and a timestamp and no record of how much
      * left the till.
      *
-     * RF-REF-03 applies to the settlement as well as to the claim. The ceiling
-     * is the formally approved amount when there is one, otherwise the claimed
-     * amount, never above the 50,00 EUR block. Without that bound a 3,20 EUR
-     * case could be settled for 999999,00 and a case approved at 1,00 EUR for
-     * fraud control could be settled at 45,00: both were accepted with HTTP 200.
+     * RF-REF-03 applies to the settlement as well as to the claim, and not only
+     * as a ceiling but as an equality. The settlement must match the formally
+     * approved amount exactly, or the claimed amount when there was no formal
+     * approval. Bounding it from above was half the fix and left the other half
+     * open: a 4,00 EUR case accepted `paid_amount` 0,01 with HTTP 200 and went
+     * straight to `PAID_DIGITAL`, so the consumer saw "your refund has been
+     * paid" after collecting a hundredth of what was agreed, and the leftover
+     * 3,99 EUR had nowhere to go. To pay less than approved the coordinator has
+     * to lower `approved_amount` first through the double authorisation, which
+     * is what that endpoint exists for.
      *
      * @param array{id?: int|null, role?: string, name?: string} $actor
-     * @throws InvalidRefundAmountException When the amount is out of the payable range.
+     * @throws InvalidRefundAmountException When the amount is not the approved one.
      * @throws RefundNotFoundException
      * @throws InvalidRefundStateTransitionException
      */
@@ -510,19 +528,18 @@ final class RefundManagementService
     {
         $case = $this->loadCase($id);
 
-        // The ceiling needs the persisted case, because `approved_amount` only
-        // exists there: a case settled without formal approval is bounded by what
-        // the consumer claimed, and one that went through RF-REF-03's double
-        // authorisation is bounded by the smaller figure the coordinator signed.
-        $payableCeiling = min(
-            $case->getApprovedAmount() ?? $case->getClaimedAmount(),
-            RefundRequest::MAX_CLAIMED_AMOUNT
-        );
+        // The expected amount needs the persisted case, because `approved_amount`
+        // only exists there: a case settled without formal approval owes what the
+        // consumer claimed, and one that went through RF-REF-03's double
+        // authorisation owes the smaller figure the coordinator signed.
+        $expectedAmount = $this->payableAmount($case);
 
-        if ($dto->paidAmount <= 0.0 || $dto->paidAmount > $payableCeiling) {
+        if ($dto->paidAmount <= 0.0 || abs($dto->paidAmount - $expectedAmount) > self::SETTLEMENT_TOLERANCE) {
             throw new InvalidRefundAmountException(
                 attemptedAmount: $dto->paidAmount,
-                maximumAllowed: $payableCeiling
+                maximumAllowed: $expectedAmount,
+                expectedAmount: $expectedAmount,
+                message: InvalidRefundAmountException::SETTLEMENT_MISMATCH_MESSAGE
             );
         }
 
@@ -548,11 +565,15 @@ final class RefundManagementService
     }
 
     /**
-     * The highest amount this case may legally be settled for, as RF-REF-03
+     * The only amount this case may legally be settled for, as RF-REF-03
      * defines it: the approved amount when the coordinator signed one, the
      * claimed amount otherwise, and never over the 50,00 EUR block.
+     *
+     * It is an equality target and not a ceiling any more. The name says so on
+     * purpose: a ceiling invites a comparison that only asks "is it too much?",
+     * and the payment that escaped was 0,01 under a 4,00 EUR case.
      */
-    public function payableCeiling(RefundRequest $case): float
+    public function payableAmount(RefundRequest $case): float
     {
         return min(
             $case->getApprovedAmount() ?? $case->getClaimedAmount(),

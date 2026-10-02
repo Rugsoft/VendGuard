@@ -643,11 +643,12 @@ $assert(
     'el guarda vive en RefundManagementService::assertNoDuplicateClaim() y el 409 lo traduce QrScanController'
 );
 $assert(
-    '6.2 Una liquidación se persiste y no puede superar lo aprobado (RF-REF-03, RF-REF-07)',
-    str_contains($doctrine['refund_service'], "'paid_amount' => $dto->paidAmount")
-    && str_contains($doctrine['refund_service'], 'payableCeiling')
+    '6.2 Una liquidación se persiste y solo puede ser exactamente lo aprobado (RF-REF-03, RF-REF-07)',
+    str_contains($doctrine['refund_service'], "'paid_amount' => \$dto->paidAmount")
+    && str_contains($doctrine['refund_service'], 'payableAmount')
+    && str_contains($doctrine['refund_service'], 'SETTLEMENT_TOLERANCE')
     && str_contains($doctrine['repository'], 'r.`paid_amount`'),
-    'registerDigitalPayment() escribe paid_amount y lo acota con payableCeiling()'
+    'registerDigitalPayment() escribe paid_amount y lo iguala con payableAmount()'
 );
 $assert(
     '6.3 El efectivo declarado no puede exceder lo reclamado, ni el sobrante el tope (RF-REF-03, RF-REF-04)',
