@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Routing;
 
+use VendGuard\Presentation\Controller\CoordinatorRefundController;
 use VendGuard\Presentation\Controller\CoordinatorRouteMapController;
+use VendGuard\Presentation\Controller\LocationRefundController;
+use VendGuard\Presentation\Controller\PublicRefundController;
+use VendGuard\Presentation\Controller\TechnicianRefundController;
 use VendGuard\Presentation\Controller\TechnicianRouteMapController;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -58,6 +62,10 @@ class AppRouter
         // 3. Módulo de Portal de Ubicación / Sede (T-21, T-22, T-23)
         // -----------------------------------------------------------------
         $siteAuth = new \VendGuard\Presentation\Http\Middleware\SiteAuthMiddleware();
+        // Reintegros de sede (Módulo 08: T-REF-13); datos de pago protegidos por DTO y middleware.
+        $router->get('/api/location/refunds', [LocationRefundController::class, 'index'], [$siteAuth]);
+        $router->post('/api/location/refunds/{id}/deliver', [LocationRefundController::class, 'deliver'], [$siteAuth]);
+
         $router->get('/api/locations/{site_code}/machines', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'getMachines'], [$siteAuth]);
         $router->post('/api/incidents', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'createIncident'], [$siteAuth]);
         $router->post('/api/incidents/{ticket_code}/comments', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'addComment'], [$siteAuth]);
@@ -75,6 +83,14 @@ class AppRouter
         $coordinatorAuth = new \VendGuard\Presentation\Http\Middleware\InternalAuthMiddleware(
             \VendGuard\Core\Domain\Model\UserRole::COORDINATOR
         );
+        // Bandeja de reintegros y decisiones financieras (Módulo 08: T-REF-13).
+        // La protección del rol se aplica en middleware ANTES del controlador,
+        // porque estos endpoints serializan IBAN y teléfono Bizum (Art. V.4).
+        $router->get('/api/coordinator/refunds', [CoordinatorRefundController::class, 'index'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/refunds/{id}/approve', [CoordinatorRefundController::class, 'approve'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/refunds/{id}/pay', [CoordinatorRefundController::class, 'pay'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/refunds/{id}/reject', [CoordinatorRefundController::class, 'reject'], [$coordinatorAuth]);
+
         $router->get('/api/coordinator/map/active-incidents', [CoordinatorRouteMapController::class, 'getActiveIncidents'], [$coordinatorAuth]);
         $router->get('/api/coordinator/route/settings', [CoordinatorRouteMapController::class, 'getRouteSettings'], [$coordinatorAuth]);
         $router->put('/api/coordinator/route/settings', [CoordinatorRouteMapController::class, 'updateRouteSettings'], [$coordinatorAuth]);
@@ -154,6 +170,8 @@ class AppRouter
         $router->get('/api/technician/my-metrics', [\VendGuard\Presentation\Controller\TechnicianMetricsController::class, 'getMyMetrics'], [$technicianAuth]);
         $router->patch('/api/technician/incidents/{id}/start', [\VendGuard\Presentation\Controller\TechnicianController::class, 'startIntervention'], [$technicianAuth]);
         $router->patch('/api/technician/incidents/{id}/pause', [\VendGuard\Presentation\Controller\TechnicianController::class, 'pauseIntervention'], [$technicianAuth]);
+        // Consulta del reintegro vinculado con DTO sin datos bancarios (Art. V.4).
+        $router->get('/api/technician/incidents/{id}/refund', [TechnicianRefundController::class, 'show'], [$technicianAuth]);
         $router->post('/api/technician/incidents/{id}/resolve', [\VendGuard\Presentation\Controller\TechnicianController::class, 'resolveIncident'], [$technicianAuth]);
         $router->patch('/api/technician/{id}/start', [\VendGuard\Presentation\Controller\TechnicianController::class, 'startIntervention'], [$technicianAuth]);
         $router->patch('/api/technician/{id}/pause', [\VendGuard\Presentation\Controller\TechnicianController::class, 'pauseIntervention'], [$technicianAuth]);
@@ -180,6 +198,11 @@ class AppRouter
         // -----------------------------------------------------------------
         $router->get('/api/qr/scan/{code}', [\VendGuard\Presentation\Controller\QrScanController::class, 'scan']);
         $router->post('/api/qr/report', [\VendGuard\Presentation\Controller\QrScanController::class, 'report']);
+
+        // Seguimiento público por token (Módulo 08: T-REF-13). No requiere
+        // sesión: el token criptográfico es la credencial del consumidor.
+        $router->get('/api/public/refunds/track', [PublicRefundController::class, 'track']);
+        $router->patch('/api/public/refunds/track', [PublicRefundController::class, 'rectify']);
 
         return $router;
     }

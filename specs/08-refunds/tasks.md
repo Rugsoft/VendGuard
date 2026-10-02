@@ -85,7 +85,7 @@
   * **Dependencias:** T-REF-06
   * **Hecho cuando:** Los endpoints de coordinación permiten listar expedientes con detalle financiero completo, dar visto bueno formal ante importes $> 10,00\ \text{€}$ (`approve`), registrar pagos con justificante bancario (`pay`), y rechazar motivadamente con justificación $\ge 20$ caracteres (`reject`).
 
-- [ ] **T-REF-13: Registrar rutas y protección RBAC en `AppRouter.php`**
+- [x] **T-REF-13: Registrar rutas y protección RBAC en `AppRouter.php`**
   * **Requisitos:** RF-REF-01 a RF-REF-10, Constitución Art. V.4
   * **Dependencias:** T-REF-08, T-REF-09, T-REF-10, T-REF-11, T-REF-12
   * **Hecho cuando:** Todas las rutas públicas, de técnico, de sede y de coordinación están registradas en `AppRouter.php` con sus correspondientes middlewares de autenticación y rol, bloqueando accesos no autorizados (`401`, `403`).
