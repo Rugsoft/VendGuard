@@ -109,7 +109,7 @@
   * **Dependencias:** T-REF-10
   * **Hecho cuando:** El modal de resolución técnica de `TechnicianRouteView.js` despliega el bloque táctil de saldo si hay solicitudes pendientes, bloqueando el depósito en conserjería si $> 10,00\ \text{€}$ o digital, y permitiendo registrar monedas de oficio.
 
-- [ ] **T-REF-17: Implementar `LocationRefundsTab.js` e integrar en `LocationPortalView.js` y suite frontend (`LocationRefundsTabTest.mjs`)**
+- [x] **T-REF-17: Implementar `LocationRefundsTab.js` e integrar en `LocationPortalView.js` y suite frontend (`LocationRefundsTabTest.mjs`)**
   * **Requisitos:** RF-REF-06, RF-REF-10, RNF-REF-05, Constitución Art. V.4
   * **Dependencias:** T-REF-11
   * **Hecho cuando:** El portal de sede incluye la pestaña "Reintegros" con lista de avisos anonimizada y botón para abrir el modal con teclado numérico que valida el PIN de 4 dígitos; `node tests/unit/LocationRefundsTabTest.mjs` pasa al 100% en verde.

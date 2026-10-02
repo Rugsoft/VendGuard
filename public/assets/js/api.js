@@ -340,10 +340,8 @@ export class ApiClient {
       const code = siteCode || this.siteCode;
       return this.get(`/locations/${encodeURIComponent(code)}/machines`);
     }
-  };
-
-  /**
-   * 2b. Site Sanitary & Certificates (RF-PREV-06, RF-PREV-07, Art. V.4)
+  };  /**
+   * 2b. Site Portal: Sanitary Certificates & Refund Desk (RF-PREV-06, RF-PREV-07, RF-REF-06, Art. V.4)
    */
   site = {
     /**
@@ -381,6 +379,28 @@ export class ApiClient {
         });
       }
       return this.get('/site/certificates/global');
+    },
+
+    /**
+     * Lists the refund cases held at the authenticated site with anonymized
+     * claimant names and no payment instruments (RF-REF-06, RF-REF-10, Art. V.4).
+     * @returns {Promise<{total: number, ready_for_pickup_total: number, refunds: Array<Object>}>}
+     */
+    getRefunds: () => {
+      return this.get('/location/refunds');
+    },
+
+    /**
+     * Releases the cash envelope of a case against the 4-digit pickup PIN typed
+     * by the receptionist (RF-REF-06).
+     * @param {number|string} refundId
+     * @param {string} pickupPin
+     * @returns {Promise<Object>}
+     */
+    deliverRefund: (refundId, pickupPin) => {
+      return this.post(`/location/refunds/${encodeURIComponent(refundId)}/deliver`, {
+        pickup_pin: String(pickupPin ?? '')
+      });
     }
   };
 

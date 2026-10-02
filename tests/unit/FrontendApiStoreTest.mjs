@@ -249,6 +249,37 @@ assert('5.1 Technician refund inspection uses its incident-scoped GET endpoint',
 assert('5.2 Technician refund inspection unpacks the JSON data envelope',
   refundInspection?.has_pending_verdict === true && Array.isArray(refundInspection.requests));
 
+// ---------------------------------------------------------------------
+// TEST GROUP 6: Site refund desk API (T-REF-17)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 6: Site refund desk API ---');
+
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({ success: true, data: { total: 1, ready_for_pickup_total: 1, refunds: [] } })
+};
+const siteRefunds = await api.site.getRefunds();
+assert('6.1 Site refunds list uses the location refunds GET endpoint',
+  lastFetchCall.url === '/api/location/refunds' && lastFetchCall.options.method === 'GET');
+assert('6.2 Site refunds list unpacks the envelope totals',
+  siteRefunds?.total === 1 && siteRefunds?.ready_for_pickup_total === 1 && Array.isArray(siteRefunds.refunds));
+
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({ success: true, data: { id: 21, status: 'REFUNDED_IN_HAND', claimant_name_anon: 'Laura S.' } })
+};
+const delivered = await api.site.deliverRefund(21, '4821');
+assert('6.3 Handover posts the 4-digit PIN to the deliver endpoint',
+  lastFetchCall.url === '/api/location/refunds/21/deliver'
+    && lastFetchCall.options.method === 'POST'
+    && lastFetchCall.options.body === JSON.stringify({ pickup_pin: '4821' }));
+assert('6.4 Handover returns the updated anonymized case',
+  delivered?.status === 'REFUNDED_IN_HAND' && delivered?.claimant_name_anon === 'Laura S.');
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
