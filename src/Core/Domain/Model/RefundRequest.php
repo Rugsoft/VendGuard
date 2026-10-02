@@ -30,7 +30,7 @@ final readonly class RefundRequest implements JsonSerializable
     public const DISCREPANCY_TOLERANCE = 0.20;
 
     public function __construct(
-        private int $id,
+        private ?int $id,
         private int $incidentId,
         private int $machineId,
         private int $locationId,
@@ -56,7 +56,17 @@ final readonly class RefundRequest implements JsonSerializable
         private ?string $updatedAt = null,
         private bool $financialColumnsRestricted = false
     ) {
-        if ($id < 1 || $incidentId < 1 || $machineId < 1 || $locationId < 1) {
+        // `null` significa "todavía no persistido", el mismo centinela que usa
+        // la entidad `Incident`. El identificador sólo existe una vez insertada
+        // la fila, así que el servicio de aplicación construye el expediente con
+        // `null` y lo recarga tras el INSERT. Un identificador explícito
+        // continúa siendo obligatorio y estrictamente positivo: cero o
+        // negativos son corrupción, no "sin guardar".
+        if ($id !== null && $id < 1) {
+            throw new InvalidArgumentException('El expediente requiere un identificador estrictamente positivo.');
+        }
+
+        if ($incidentId < 1 || $machineId < 1 || $locationId < 1) {
             throw new InvalidArgumentException('Los identificadores del expediente deben ser enteros positivos.');
         }
 
@@ -223,7 +233,7 @@ final readonly class RefundRequest implements JsonSerializable
         $nullable = static fn (string $key): ?string => isset($row[$key]) ? (string)$row[$key] : null;
 
         return new self(
-            id: (int)($row['id'] ?? 0),
+            id: isset($row['id']) ? (int)$row['id'] : null,
             incidentId: (int)($row['incident_id'] ?? 0),
             machineId: (int)($row['machine_id'] ?? 0),
             locationId: (int)($row['location_id'] ?? 0),
@@ -276,7 +286,10 @@ final readonly class RefundRequest implements JsonSerializable
         return $this->status === RefundStatus::PENDING_INSPECTION;
     }
 
-    public function getId(): int
+    /**
+     * The persisted identifier, or null while the case has not been stored yet.
+     */
+    public function getId(): ?int
     {
         return $this->id;
     }

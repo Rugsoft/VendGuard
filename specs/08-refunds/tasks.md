@@ -46,7 +46,7 @@
   * **Dependencias:** Ninguna
   * **Hecho cuando:** `IbanValidationService` implementa la validación ISO 7064 Módulo 97 mediante aritmética por bloques sin dependencias Composer y validación de teléfonos Bizum (9 dígitos); `php tests/unit/IbanValidationServiceTest.php` pasa al 100% en verde verificando IBANs españoles e internacionales válidos, erróneos y con checksum falso.
 
-- [ ] **T-REF-06: Implementar `RefundManagementService.php` y suite unitaria (`RefundStateMachineTest.php`)**
+- [x] **T-REF-06: Implementar `RefundManagementService.php` y suite unitaria (`RefundStateMachineTest.php`)**
   * **Requisitos:** RF-REF-01, RF-REF-02, RF-REF-03, RF-REF-05, RF-REF-06, RF-REF-07, RF-REF-08, RNF-REF-01, Constitución Art. III
   * **Dependencias:** T-REF-02, T-REF-04, T-REF-05
   * **Hecho cuando:** `RefundManagementService` gestiona la creación de expedientes con generación segura de PIN de 4 dígitos y token de 64 caracteres, transiciones legales de la máquina de estados, clasificación automática como `REQUIRES_COORDINATOR_APPROVAL` si $> 10,00\ \text{€}$, validación de PIN en entrega presencial, autorización y registro de liquidación digital con referencia bancaria; `php tests/unit/RefundStateMachineTest.php` pasa al 100% en verde.
