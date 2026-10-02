@@ -5,7 +5,17 @@ declare(strict_types=1);
 /**
  * VendGuard - Módulo 08: Refunds and Unclaimed Cash Management
  *
- * Integration suite for the coordination inbox (T-REF-12).
+ * Integration suite for the coordination workflow (T-REF-22).
+ *
+ * Cubre RF-REF-03 (visto bueno e importes), RF-REF-07 (ciclo formal y
+ * liquidación digital), RF-REF-08 (desestimación motivada), RNF-REF-01
+ * (rastro inmutable en `audit_log`) y RNF-REF-02 (los contadores y la
+ * paginación salen del SQL real, no de un array en memoria).
+ *
+ * Esta suite NO sustituye a `SiteManagerRefundDataSegregationTest` (T-REF-13):
+ * aquella certifica por `AppRouter` el cableado y el RBAC de los cuatro
+ * endpoints de Coordinación; ésta certifica la lógica de estado y el SQL que
+ * hay detrás. Juntas cierran las dos capas.
  *
  * Everything here runs against real MariaDB inside a transaction that is always
  * rolled back, so the suite exercises the actual SQL: the column list of
@@ -30,6 +40,7 @@ use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Core\Domain\Model\CashCustodyAction;
 use VendGuard\Core\Domain\Model\CompensationMethod;
 use VendGuard\Core\Domain\Model\Incident;
+use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\RefundStatus;
 use VendGuard\Core\Domain\Model\TechnicianFinding;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
@@ -38,6 +49,7 @@ use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SeedRunner;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
+use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
 use VendGuard\Presentation\Controller\CoordinatorRefundController;
@@ -69,11 +81,24 @@ $requestsBefore = (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests`')->fe
 $pdo->beginTransaction();
 
 try {
-    $locationId = (int)$pdo->query('SELECT `id` FROM `locations` ORDER BY `id` LIMIT 1')->fetchColumn();
-    $machineId = (int)(new PdoMachineRepository($pdo))->findById(
-        (int)$pdo->query('SELECT `id` FROM `machines` ORDER BY `id` LIMIT 1')->fetchColumn(),
-        false
-    )?->getId() ?? 0;
+    $location = (new PdoLocationRepository($pdo))->findBySiteCode('SEDE-BCN-01');
+    $locationId = (int)($location?->getId() ?? 0);
+
+    // Máquina PROPIA de esta suite, creada dentro de la transacción. Reutilizar
+    // una máquina semilla compartida haría que el resultado dependiera del orden
+    // de ejecución: si otra suite resolvió esa avería hace menos de 48 h,
+    // `PdoIncidentRepository::create()` aborta con `DuplicateIncidentException`
+    // (Art. V.6) y esta suite ni siquiera llega a empezar. Con una máquina
+    // propia no hay incidencia previa que la bloquee y el rollback se la lleva.
+    $machineId = (int)((new PdoMachineRepository($pdo))->create([
+        'location_id' => $locationId,
+        'code' => 'TREF22-' . strtoupper(bin2hex(random_bytes(3))),
+        'model' => 'VendGuard coordinator workflow machine',
+        'machine_type' => MachineType::HOT_DRINKS->value,
+        'floor_wing' => 'Planta baja - Vestíbulo',
+        'notes' => 'Máquina creada dentro de la transacción reversible de T-REF-22.',
+    ])?->getId() ?? 0);
+
     $coordinatorId = (int)$pdo->query("SELECT `id` FROM `users` WHERE `role` = 'COORDINATOR' ORDER BY `id` LIMIT 1")->fetchColumn();
     $technicianId = (int)$pdo->query("SELECT `id` FROM `users` WHERE `role` = 'TECHNICIAN' ORDER BY `id` LIMIT 1")->fetchColumn();
 
@@ -87,12 +112,12 @@ try {
             $machineId,
             $locationId,
             IncidentCategory::PAYMENT_SYSTEM,
-            'La máquina cobra y no entrega el producto (T-REF-12).',
+            'La máquina cobra y no entrega el producto (T-REF-22).',
             UrgencyLevel::HIGH,
             IncidentStatus::REGISTERED
         ),
         null,
-        'Aviso de prueba T-REF-12'
+        'Aviso de prueba T-REF-22'
     )->getId();
 
     $assert('0.1 El entorno tiene datos maestros sembrados', $incidentId > 0 && $machineId > 0 && $locationId > 0, "incidente: {$incidentId} máquina: {$machineId} sede: {$locationId}");
@@ -506,7 +531,7 @@ echo "\n======================================================================\n
 echo " Total Aserciones: {$assertions}\n";
 
 if ($failures === 0) {
-    echo " RESULTADO: 100% EN VERDE. Condición T-REF-12 CUMPLIDA SATISFACTORIAMENTE.\n";
+    echo " RESULTADO: 100% EN VERDE. Condición T-REF-22 CUMPLIDA SATISFACTORIAMENTE.\n";
 } else {
     echo " RESULTADO: {$failures} FALLO(S) DETECTADO(S).\n";
 }

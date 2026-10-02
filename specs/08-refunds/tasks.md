@@ -138,7 +138,7 @@
   * **Dependencias:** T-REF-11, T-REF-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `LocationRefundDeliveryApiTest.php` pasando al 100% en verde verificando listado anonimizado, éxito ante PIN correcto transicionando a `REFUNDED_IN_HAND` y rechazo con `422` ante PIN erróneo.
 
-- [ ] **T-REF-22: Pruebas de integración HTTP de Coordinación (`CoordinatorRefundWorkflowApiTest.php`)**
+- [x] **T-REF-22: Pruebas de integración HTTP de Coordinación (`CoordinatorRefundWorkflowApiTest.php`)**
   * **Requisitos:** RF-REF-03, RF-REF-07, RF-REF-08, RNF-REF-01, RNF-REF-02
   * **Dependencias:** T-REF-12, T-REF-13
   * **Hecho cuando:** `php tests/run_all.php` ejecuta `CoordinatorRefundWorkflowApiTest.php` pasando al 100% en verde en flujos de visto bueno (> 10 €), desestimación motivada ($\ge 20$ chars), liquidación digital con referencia bancaria e inmutabilidad en `audit_log`.
