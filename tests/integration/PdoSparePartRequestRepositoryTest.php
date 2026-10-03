@@ -39,8 +39,30 @@ $incStmt = $pdo->query("SELECT id, ticket_code FROM `incidents` LIMIT 2");
 $incidents = $incStmt->fetchAll(PDO::FETCH_ASSOC);
 
 if (count($incidents) < 2) {
-    echo "  [ERROR] Se requieren al menos 2 incidencias sembradas para ejecutar el test.\n";
-    exit(1);
+    $mach = $pdo->query("SELECT id, location_id, machine_type FROM `machines` LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $techUser = $pdo->query("SELECT id FROM `users` WHERE role = 'TECHNICIAN' LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $machId = $mach ? (int)$mach['id'] : 1;
+    $locId = $mach ? (int)$mach['location_id'] : 1;
+    $machType = $mach ? $mach['machine_type'] : 'HOT_DRINKS';
+    $tId = $techUser ? (int)$techUser['id'] : null;
+
+    $ins = $pdo->prepare("
+        INSERT INTO `incidents` (
+            `ticket_code`, `machine_id`, `machine_type_snapshot`, `location_id`,
+            `assigned_technician_id`, `reporter_phone`, `category`, `description`,
+            `urgency`, `status`, `created_at`, `updated_at`
+        ) VALUES (?, ?, ?, ?, ?, '600000000', 'PAYMENT_SYSTEM', 'Incidencia para test autocontenido de repuestos', 'MEDIUM', 'CLOSED', NOW(), NOW())
+    ");
+    $time = time();
+    $ins->execute(["INC-REQ-{$time}-1", $machId, $machType, $locId, $tId]);
+    $id1 = (int)$pdo->lastInsertId();
+    $ins->execute(["INC-REQ-{$time}-2", $machId, $machType, $locId, $tId]);
+    $id2 = (int)$pdo->lastInsertId();
+
+    $incidents = [
+        ['id' => $id1, 'ticket_code' => "INC-REQ-{$time}-1"],
+        ['id' => $id2, 'ticket_code' => "INC-REQ-{$time}-2"]
+    ];
 }
 
 $inc1Id = (int)$incidents[0]['id'];

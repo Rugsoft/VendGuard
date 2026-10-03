@@ -413,64 +413,44 @@ class TechnicianController
             }
         }
 
-        // 9. Determinar si incluye declaración de repuestos (Módulo M2) o resolución simple legacy (T-29)
-        $hasSparePartsDeclaration = array_key_exists('replaced_parts_declared', $body) || array_key_exists('replaced_parts', $body);        if ($hasSparePartsDeclaration) {
-            $actor = $this->extractActor($request);
+        // 9. Declaracion obligatoria universal de repuestos en la resolucion (RF-REP-05 / Modulo M2)
+        $actor = $this->extractActor($request);
 
-            try {
-                $result = $this->traceabilityService->resolveIncidentWithParts($incidentId, $techId, $body, $actor);
-
-                return Response::json(
-                    $result + $this->buildRefundSummary($incidentId, $refundOutcome, $unclaimedFindingId),
-                    200,
-                    $refundOutcome !== null
-                        ? 'Incidencia resuelta y dictamen de efectivo registrado correctamente.'
-                        : 'Incidencia resuelta con registro de repuestos.'
-                );
-            } catch (InvalidPartQuantityException $e) {
-                return Response::error('INVALID_PART_QUANTITY', $e->getMessage(), 422);
-            } catch (SparePartNotFoundException $e) {
-                return Response::error('SPARE_PART_NOT_FOUND', $e->getMessage(), 404);
-            } catch (InvalidResolutionException $e) {
-                return Response::error('INVALID_RESOLUTION', $e->getMessage(), 422, ['errors' => $e->getErrors()]);
-            } catch (InvalidTransitionException $e) {
-                return Response::error('INVALID_STATUS_FOR_RESOLUTION', $e->getMessage(), 422);
-            } catch (\InvalidArgumentException $e) {
-                $msg = $e->getMessage();
-                $errCode = 'INVALID_RESOLUTION';
-                if (str_contains($msg, 'replaced_parts_declared')) {
-                    $errCode = 'PARTS_RECORD_REQUIRED';
-                } elseif (str_contains($msg, 'destino')) {
-                    $errCode = 'INVALID_PART_DESTINATION';
-                } elseif (str_contains($msg, 'no ha registrado ninguna pieza')) {
-                    $errCode = 'EMPTY_REPLACED_PARTS_LIST';
-                }
-                return Response::error($errCode, $msg, 422);
-            } catch (\DomainException $e) {
-                return Response::error('OPERATION_FAILED', $e->getMessage(), 500);
-            }
-        }
-
-        // Flujo simple legacy (T-29): sin declaración de piezas
         try {
-            $resolved = $this->incidentRepo->resolve($incidentId, $techId, $diagnosis, $action);
+            $result = $this->traceabilityService->resolveIncidentWithParts($incidentId, $techId, $body, $actor);
+
+            return Response::json(
+                $result + $this->buildRefundSummary($incidentId, $refundOutcome, $unclaimedFindingId),
+                200,
+                $refundOutcome !== null
+                    ? 'Incidencia resuelta y dictamen de efectivo registrado correctamente.'
+                    : 'Incidencia resuelta con registro de repuestos.'
+            );
+        } catch (InvalidPartQuantityException $e) {
+            return Response::error('INVALID_PART_QUANTITY', $e->getMessage(), 422);
+        } catch (SparePartNotFoundException $e) {
+            return Response::error('SPARE_PART_NOT_FOUND', $e->getMessage(), 404);
         } catch (InvalidResolutionException $e) {
             return Response::error('INVALID_RESOLUTION', $e->getMessage(), 422, ['errors' => $e->getErrors()]);
         } catch (InvalidTransitionException $e) {
             return Response::error('INVALID_STATUS_FOR_RESOLUTION', $e->getMessage(), 422);
+        } catch (\InvalidArgumentException $e) {
+            $msg = $e->getMessage();
+            $errCode = 'INVALID_RESOLUTION';
+            if (str_contains($msg, 'replaced_parts_declared')) {
+                $errCode = 'PARTS_RECORD_REQUIRED';
+            } elseif (str_contains($msg, 'destino')) {
+                $errCode = 'INVALID_PART_DESTINATION';
+            } elseif (str_contains($msg, 'no ha registrado ninguna pieza')) {
+                $errCode = 'EMPTY_REPLACED_PARTS_LIST';
+            }
+            return Response::error($errCode, $msg, 422);
         } catch (\DomainException $e) {
-            return Response::error('OPERATION_FAILED', $e->getMessage(), 500);
+            $errCode = (str_contains($e->getMessage(), 'transacci') || str_contains($e->getMessage(), 'base de datos'))
+                ? 'SPARE_PART_TRANSACTION_FAILED'
+                : 'OPERATION_FAILED';
+            return Response::error($errCode, $e->getMessage(), 500);
         }
-
-        return Response::json([
-            'id'          => $resolved->getId(),
-            'status'      => $resolved->getStatus()->value,
-            'resolved_at' => $resolved->getResolvedAt(),
-        ] + $this->buildRefundSummary($incidentId, $refundOutcome, $unclaimedFindingId), 200,
-            $refundOutcome !== null
-                ? 'Incidencia resuelta y dictamen de efectivo registrado correctamente.'
-                : 'Incidencia resuelta correctamente.'
-        );
     }
 
     // ────────────────────────────────────────────────────────────────────────
