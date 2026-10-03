@@ -15,12 +15,14 @@ $path = parse_url($requestUri, PHP_URL_PATH);
 $filePath = __DIR__ . $path;
 
 if ($path !== '/' && $path !== '/index.php' && is_file($filePath)) {
-    // Si corre en el servidor web embebido de PHP (php -S)
-    if (php_sapi_name() === 'cli-server') {
-        return false;
-    }
+    // El despacho de estáticos NO delega en el servidor web embebido con
+    // `return false`: ese atajo es justo el que usa el contenedor de producción
+    // (`php -S ... public/index.php`, ver Dockerfile), y al ceder el fichero al
+    // servidor se perdía la cabecera `Cache-Control` que se añade más abajo. El
+    // resultado era que el fallback no protegía el escenario para el que existe.
+    // Servimos el fichero nosotros mismos, que además garantiza el MIME correcto.
 
-    // Servir con cabecera MIME correcta para cualquier otro entorno
+    // Servir con cabecera MIME correcta
     $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
     $mimeTypes = [
         'js'   => 'application/javascript; charset=UTF-8',

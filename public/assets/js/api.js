@@ -649,6 +649,38 @@ export class ApiClient {
       return this.post(`/coordinator/refunds/${encodeURIComponent(refundId)}/reject`, {
         rejection_reason: String(rejectionReason ?? '')
       });
+    },
+
+    /**
+     * Regularizes a case stranded in PENDING_INSPECTION by filing its balance
+     * verdict from Coordination, when the incident was cancelled or the
+     * technician can no longer reach the machine (RF-REF-04, RF-REF-09).
+     * @param {number|string} refundId
+     * @param {{finding: string, recoveredAmount?: number|null, cashCustodyAction?: string|null, receptionistName?: string, justification?: string}} payload
+     * @returns {Promise<Object>}
+     */
+    regularizeRefund: (refundId, payload = {}) => {
+      const body = {
+        finding: String(payload.finding ?? '')
+      };
+
+      if (payload.recoveredAmount !== undefined && payload.recoveredAmount !== null && payload.recoveredAmount !== '') {
+        body.recovered_amount = Number(payload.recoveredAmount);
+      }
+
+      if (payload.cashCustodyAction) {
+        body.cash_custody_action = String(payload.cashCustodyAction);
+      }
+
+      if (payload.receptionistName) {
+        body.receptionist_name = String(payload.receptionistName);
+      }
+
+      if (payload.justification) {
+        body.justification = String(payload.justification);
+      }
+
+      return this.post(`/coordinator/refunds/${encodeURIComponent(refundId)}/regularize`, body);
     }
   };
 

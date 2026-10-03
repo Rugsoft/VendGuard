@@ -173,6 +173,7 @@ let listCalls = [];
 let approveCalls = [];
 let payCalls = [];
 let rejectCalls = [];
+let regularizeCalls = [];
 
 api.coordinator.getRefunds = async (filters = {}) => {
   listCalls.push(filters);
@@ -184,6 +185,16 @@ api.coordinator.getRefunds = async (filters = {}) => {
     filters,
     totals: { claimed_amount: 32.5, payable_amount: 26 },
     items: [approvalCase, paymentCase, inspectionCase, rejectedCase]
+  };
+};
+
+api.coordinator.regularizeRefund = async (refundId, payload) => {
+  regularizeCalls.push({ refundId, payload });
+  return {
+    id: refundId,
+    status: 'REQUIRES_COORDINATOR_APPROVAL',
+    technician_finding: payload?.finding,
+    regularized_by_coordinator: true
   };
 };
 
@@ -469,6 +480,88 @@ assert('6.9 The refunds section is mounted only while its tab is active',
   CoordinatorDashboardView.template.includes('<CoordinatorRefundsTab')
     && CoordinatorDashboardView.template.includes('v-else-if="activeTab === \'refunds\'"')
     && CoordinatorDashboardView.data().activeTab === 'incidents');
+
+// ---------------------------------------------------------------------
+// 7. Regularization of a verdict stranded in PENDING_INSPECTION (RF-REF-04/09)
+// ---------------------------------------------------------------------
+console.log('\n--- 7. Regularización de dictamen atascado (RF-REF-04/09) ---');
+
+const regTab = createTab();
+regTab.items = [approvalCase, paymentCase, inspectionCase, rejectedCase];
+
+assert('7.1 Only a case awaiting inspection can be regularized',
+  regTab.canRegularize(inspectionCase) === true
+    && regTab.canRegularize(approvalCase) === false
+    && regTab.canRegularize(rejectedCase) === false);
+
+regTab.openRegularizeModal(inspectionCase);
+assert('7.2 Opening the modal targets the stranded case and clears the form',
+  regTab.showRegularizeModal === true && regTab.selectedRefund?.id === 33
+    && regTab.regularizeFinding === '' && regTab.regularizeRecoveredAmount === '');
+
+assert('7.3 A physical finding without an amount is not submittable',
+  (() => {
+    regTab.setRegularizeFinding('FOUND_PHYSICAL');
+    const withoutAmount = regTab.isRegularizeValid;
+    regTab.regularizeRecoveredAmount = '3.50';
+    return withoutAmount === false && regTab.isRegularizeValid === true;
+  })());
+
+assert('7.4 A finding without an amount clears the amount when switching verdict',
+  (() => {
+    regTab.setRegularizeFinding('CONFIRMED_NO_CASH');
+    return regTab.regularizeRecoveredAmount === '' && regTab.isRegularizeValid === true;
+  })());
+
+assert('7.5 UNVERIFIED_NO_CASH demands a >= 20 character justification',
+  (() => {
+    regTab.setRegularizeFinding('UNVERIFIED_NO_CASH');
+    regTab.regularizeJustification = 'corta';
+    const short = regTab.isRegularizeValid;
+    regTab.regularizeJustification = 'Avería cancelada por falsa alarma, sin evidencia de saldo.';
+    return short === false && regTab.isRegularizeValid === true
+      && regTab.needsRegularizeJustification === true;
+  })());
+
+// The submit path: a physical finding with its exact amount reaches the API.
+const submitTab = createTab();
+submitTab.items = [inspectionCase];
+submitTab.openRegularizeModal(inspectionCase);
+submitTab.setRegularizeFinding('FOUND_PHYSICAL');
+submitTab.regularizeRecoveredAmount = '1.50';
+submitTab.regularizeCustody = 'HELD_FOR_CENTRAL';
+submitTab.regularizeJustification = 'Efectivo recuperado en el monedero durante la revisión.';
+regularizeCalls = [];
+await submitTab.submitRegularize();
+assert('7.6 Submitting sends the verdict to the regularization endpoint',
+  regularizeCalls.length === 1 && regularizeCalls[0].refundId === 33
+    && regularizeCalls[0].payload.finding === 'FOUND_PHYSICAL'
+    && regularizeCalls[0].payload.recoveredAmount === 1.5
+    && regularizeCalls[0].payload.cashCustodyAction === 'HELD_FOR_CENTRAL');
+assert('7.7 A successful regularization updates the row and closes the modal',
+  submitTab.showRegularizeModal === false
+    && submitTab.items[0].technician_finding === 'FOUND_PHYSICAL'
+    && submitTab.items[0].status !== 'PENDING_INSPECTION');
+assert('7.8 The confirmation message names the regularized claimant',
+  submitTab.actionMessage.includes('Núria Puig'));
+
+// The template must offer the action and the modal with its test hooks.
+const regTemplate = CoordinatorRefundsTab.template;
+assert('7.9 The row offers the regularize action only through canRegularize',
+  regTemplate.includes("v-if=\"canRegularize(refund)\"")
+    && regTemplate.includes("'regularize-refund-' + refund.id")
+    && regTemplate.includes('Regularizar dictamen'));
+assert('7.10 The modal exposes the finding, amount, custody and justification hooks',
+  regTemplate.includes('data-testid="regularize-modal-body"')
+    && regTemplate.includes('data-testid="regularize-finding-input"')
+    && regTemplate.includes('data-testid="regularize-amount-input"')
+    && regTemplate.includes('data-testid="regularize-custody-input"')
+    && regTemplate.includes('data-testid="regularize-justification-input"')
+    && regTemplate.includes('data-testid="regularize-submit"'));
+assert('7.11 The submit button is gated on the same validation as the method',
+  regTemplate.includes('isRegularizing || !isRegularizeValid'));
+assert('7.12 The API client exposes regularizeRefund and posts the snake_case body',
+  typeof api.coordinator.regularizeRefund === 'function');
 
 // Summary
 console.log('\n======================================================================');

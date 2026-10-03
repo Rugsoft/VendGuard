@@ -77,6 +77,18 @@ const APPROVAL_THRESHOLD = 10;
 const MAX_APPROVED_AMOUNT = 50;
 const MIN_JUSTIFICATION_LENGTH = 20;
 
+/** Verdicts the technician may file on site (RF-REF-04). */
+const FINDING_OPTIONS = [
+  { value: 'FOUND_PHYSICAL', label: 'He recuperado dinero físico en la máquina' },
+  { value: 'CONFIRMED_NO_CASH', label: 'Fallo verificado de cobro, sin monedas recuperadas' },
+  { value: 'UNVERIFIED_NO_CASH', label: 'No localizo dinero ni evidencia técnica de saldo retenido' }
+];
+
+const CUSTODY_OPTIONS = [
+  { value: 'LEFT_AT_RECEPTION', label: 'Depositado en conserjería (solo ≤ 10,00 € y en mano)' },
+  { value: 'HELD_FOR_CENTRAL', label: 'Custodiado para caja central' }
+];
+
 export const CoordinatorRefundsTab = {
   name: 'CoordinatorRefundsTab',
   components: { ModalDialog },
@@ -115,6 +127,17 @@ export const CoordinatorRefundsTab = {
       rejectionReason: '',
       isRejecting: false,
       rejectionError: '',
+
+      // Regularization of a case stranded in PENDING_INSPECTION (RF-REF-04/09)
+      showRegularizeModal: false,
+      regularizeFinding: '',
+      regularizeRecoveredAmount: '',
+      regularizeCustody: '',
+      regularizeJustification: '',
+      isRegularizing: false,
+      regularizeError: '',
+      findingOptions: FINDING_OPTIONS,
+      custodyOptions: CUSTODY_OPTIONS,
 
       approvalThreshold: APPROVAL_THRESHOLD,
       maxApprovedAmount: MAX_APPROVED_AMOUNT,
@@ -161,6 +184,32 @@ export const CoordinatorRefundsTab = {
     },
     isRejectionValid() {
       return this.rejectionReason.trim().length >= MIN_JUSTIFICATION_LENGTH;
+    },
+    /**
+     * Whether the regularize form can be submitted. A `FOUND_PHYSICAL` verdict
+     * is a contradiction without an amount, and an `UNVERIFIED_NO_CASH` verdict
+     * needs a written justification of at least 20 characters (RF-REF-04), so
+     * both are mirrored here instead of only in the backend.
+     */
+    isRegularizeValid() {
+      if (!this.regularizeFinding) return false;
+
+      if (this.regularizeFinding === 'FOUND_PHYSICAL') {
+        const amount = Number(this.regularizeRecoveredAmount);
+        if (this.regularizeRecoveredAmount === '' || !Number.isFinite(amount) || amount <= 0) {
+          return false;
+        }
+      }
+
+      if (this.regularizeFinding === 'UNVERIFIED_NO_CASH'
+        && this.regularizeJustification.trim().length < MIN_JUSTIFICATION_LENGTH) {
+        return false;
+      }
+
+      return true;
+    },
+    needsRegularizeJustification() {
+      return this.regularizeFinding === 'UNVERIFIED_NO_CASH';
     }
   },
   mounted() {
@@ -374,6 +423,96 @@ export const CoordinatorRefundsTab = {
         this.paymentError = err?.message || 'No se pudo registrar la liquidación digital.';
       } finally {
         this.isPaying = false;
+      }
+    },
+
+    /**
+     * Only a case still awaiting its inspection can be regularized: a case
+     * already ruled on is immutable (Art. III) and the backend answers 409.
+     */
+    canRegularize(refund) {
+      return Boolean(refund) && String(refund.status) === 'PENDING_INSPECTION';
+    },
+
+    openRegularizeModal(refund) {
+      if (!this.canRegularize(refund)) return;
+      this.selectedRefund = refund;
+      this.regularizeFinding = '';
+      this.regularizeRecoveredAmount = '';
+      this.regularizeCustody = '';
+      this.regularizeJustification = '';
+      this.regularizeError = '';
+      this.actionMessage = '';
+      this.showRegularizeModal = true;
+    },
+
+    closeRegularizeModal() {
+      if (this.isRegularizing) return;
+      this.resetRegularizeModal();
+    },
+
+    resetRegularizeModal() {
+      this.showRegularizeModal = false;
+      this.selectedRefund = null;
+      this.regularizeFinding = '';
+      this.regularizeRecoveredAmount = '';
+      this.regularizeCustody = '';
+      this.regularizeJustification = '';
+      this.regularizeError = '';
+    },
+
+    setRegularizeFinding(value) {
+      this.regularizeFinding = String(value ?? '');
+      this.regularizeError = '';
+      if (this.regularizeFinding !== 'FOUND_PHYSICAL') {
+        this.regularizeRecoveredAmount = '';
+      }
+    },
+
+    /**
+     * Files the balance verdict from Coordination for a case stranded in
+     * `PENDING_INSPECTION` (RF-REF-04, RF-REF-09). Nothing is deleted and the
+     * backend records the decision in the immutable audit trail.
+     */
+    async submitRegularize() {
+      if (!this.selectedRefund || this.isRegularizing) return;
+
+      if (!this.isRegularizeValid) {
+        this.regularizeError = this.regularizeFinding === 'FOUND_PHYSICAL'
+          ? 'Si ha recuperado dinero físico, indique el importe exacto recuperado.'
+          : 'Seleccione el dictamen de saldo (y, si no localiza dinero, escriba al menos 20 caracteres de justificación).';
+        return;
+      }
+
+      const refund = this.selectedRefund;
+      this.isRegularizing = true;
+      this.regularizeError = '';
+
+      try {
+        const result = await api.coordinator.regularizeRefund(refund.id, {
+          finding: this.regularizeFinding,
+          recoveredAmount: this.regularizeFinding === 'FOUND_PHYSICAL' ? Number(this.regularizeRecoveredAmount) : null,
+          cashCustodyAction: this.regularizeCustody || null,
+          justification: this.regularizeJustification.trim()
+        });
+
+        const status = result?.status || 'REQUIRES_COORDINATOR_APPROVAL';
+        this.applyUpdate(refund.id, {
+          status,
+          status_label: this.statusMeta(status).label,
+          technician_finding: result?.technician_finding || this.regularizeFinding,
+          recovered_amount: this.regularizeFinding === 'FOUND_PHYSICAL' ? Number(this.regularizeRecoveredAmount) : null,
+          cash_custody_action: this.regularizeCustody || null,
+          requires_approval: status === 'REQUIRES_COORDINATOR_APPROVAL',
+          awaits_payment: status === 'VERIFIED_PENDING_PAYMENT'
+        });
+
+        this.actionMessage = `Expediente de ${refund.claimant_name} regularizado con dictamen de saldo.`;
+        this.resetRegularizeModal();
+      } catch (err) {
+        this.regularizeError = err?.message || 'No se pudo regularizar el expediente.';
+      } finally {
+        this.isRegularizing = false;
       }
     },
 
@@ -787,6 +926,16 @@ export const CoordinatorRefundsTab = {
                     >
                       Desestimar
                     </button>
+                    <button
+                      v-if="canRegularize(refund)"
+                      type="button"
+                      class="vg-btn vg-btn-secondary"
+                      :data-testid="'regularize-refund-' + refund.id"
+                      style="font-size: 12px; min-height: 36px; padding: 0 10px; border-radius: var(--radius-interactive, 4px);"
+                      @click="openRegularizeModal(refund)"
+                    >
+                      Regularizar dictamen
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -1054,6 +1203,138 @@ export const CoordinatorRefundsTab = {
               :disabled="isRejecting || !isRejectionValid"
             >
               <span v-if="!isRejecting">Confirmar desestimación</span>
+              <span v-else>Registrando...</span>
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
+
+      <!-- =============================================================== -->
+      <!-- MODAL 4: REGULARIZATION OF A STRANDED VERDICT (RF-REF-04/09)    -->
+      <!-- =============================================================== -->
+      <ModalDialog
+        v-model="showRegularizeModal"
+        title="Regularizar dictamen de saldo"
+        :subtitle="selectedRefund ? (selectedRefund.claimant_name + ' · ' + (selectedRefund.incident_code || ('RE-' + selectedRefund.id))) : ''"
+        size="md"
+        @close="closeRegularizeModal"
+      >
+        <form v-if="selectedRefund" data-testid="regularize-modal-body" @submit.prevent="submitRegularize">
+          <p style="font-size: 13px; color: var(--color-ink-slate); margin: 0 0 14px 0; line-height: 1.5;">
+            Este expediente sigue <strong>pendiente de inspección técnica</strong> y el técnico ya no puede dictaminarlo (avería cancelada o intervención cerrada). Registre aquí el dictamen de saldo para desbloquearlo. Nada se elimina: la decisión queda auditada (Art. III).
+          </p>
+
+          <div style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-bottom: 16px; font-size: 13px;">
+            <div style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px;">
+              <span style="color: var(--color-ink-muted);">Importe reclamado</span>
+              <strong>{{ formatAmount(selectedRefund.claimed_amount) }}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; gap: 12px;">
+              <span style="color: var(--color-ink-muted);">Vía solicitada</span>
+              <strong>{{ compensationLabel(selectedRefund.compensation_method) }}</strong>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 16px;">
+            <label for="regularize-finding" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-ink-slate); margin-bottom: 6px;">
+              Dictamen de saldo <span style="color: var(--color-urgency-critical);">*</span>
+            </label>
+            <select
+              id="regularize-finding"
+              class="vg-select"
+              data-testid="regularize-finding-input"
+              :value="regularizeFinding"
+              :disabled="isRegularizing"
+              style="box-sizing: border-box; width: 100%; min-height: 44px; border-radius: var(--radius-interactive, 4px);"
+              @change="setRegularizeFinding($event.target.value)"
+            >
+              <option value="">Seleccione el dictamen...</option>
+              <option v-for="option in findingOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </div>
+
+          <div v-if="regularizeFinding === 'FOUND_PHYSICAL'" style="margin-bottom: 16px;">
+            <label for="regularize-amount" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-ink-slate); margin-bottom: 6px;">
+              Importe recuperado (€) <span style="color: var(--color-urgency-critical);">*</span>
+            </label>
+            <input
+              id="regularize-amount"
+              :value="regularizeRecoveredAmount"
+              type="number"
+              min="0.01"
+              step="0.01"
+              inputmode="decimal"
+              data-testid="regularize-amount-input"
+              :disabled="isRegularizing"
+              style="box-sizing: border-box; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-interactive, 4px); font-family: var(--font-body, Inter, sans-serif); font-size: 14px;"
+              @input="regularizeRecoveredAmount = $event.target.value"
+            />
+          </div>
+
+          <div v-if="regularizeFinding" style="margin-bottom: 16px;">
+            <label for="regularize-custody" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-ink-slate); margin-bottom: 6px;">
+              Custodia del efectivo <span style="font-size: 11px; color: var(--color-ink-muted);">(opcional; las reglas la deciden si se omite)</span>
+            </label>
+            <select
+              id="regularize-custody"
+              class="vg-select"
+              data-testid="regularize-custody-input"
+              :value="regularizeCustody"
+              :disabled="isRegularizing"
+              style="box-sizing: border-box; width: 100%; min-height: 44px; border-radius: var(--radius-interactive, 4px);"
+              @change="regularizeCustody = $event.target.value"
+            >
+              <option value="">Sin custodia declarada</option>
+              <option v-for="option in custodyOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </div>
+
+          <div style="margin-bottom: 16px;">
+            <label for="regularize-justification" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-ink-slate); margin-bottom: 6px;">
+              Justificación
+              <span v-if="needsRegularizeJustification" style="color: var(--color-urgency-critical);">*</span>
+              <span style="font-size: 11px; color: var(--color-ink-muted);">(obligatoria al no localizar dinero)</span>
+            </label>
+            <textarea
+              id="regularize-justification"
+              :value="regularizeJustification"
+              rows="3"
+              maxlength="500"
+              data-testid="regularize-justification-input"
+              :disabled="isRegularizing"
+              placeholder="Ej: Avería cancelada por falsa alarma; sin evidencia de saldo retenido en la máquina."
+              style="box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid var(--color-hairline, var(--color-hairline)); border-radius: var(--radius-interactive, 4px); font-family: var(--font-body, Inter, sans-serif); font-size: 13px;"
+              @input="regularizeJustification = $event.target.value"
+            ></textarea>
+            <small v-if="needsRegularizeJustification" style="display: block; margin-top: 4px; font-size: 12px; color: var(--color-ink-muted);">
+              {{ regularizeJustification.trim().length }} / 20 caracteres
+            </small>
+          </div>
+
+          <div
+            v-if="regularizeError"
+            role="alert"
+            data-testid="regularize-error"
+            style="background-color: var(--color-urgency-critical-bg); border: 1px solid var(--color-error); color: var(--color-error-text); padding: 10px 12px; border-radius: var(--radius-interactive, 4px); font-size: 13px; margin-bottom: 16px;"
+          >
+            {{ regularizeError }}
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--color-hairline, var(--color-hairline)); padding-top: 16px;">
+            <button type="button" class="vg-btn vg-btn-secondary" :disabled="isRegularizing" @click="closeRegularizeModal">
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              class="vg-btn vg-btn-primary"
+              data-testid="regularize-submit"
+              :disabled="isRegularizing || !isRegularizeValid"
+            >
+              <span v-if="!isRegularizing">Confirmar dictamen</span>
               <span v-else>Registrando...</span>
             </button>
           </div>
