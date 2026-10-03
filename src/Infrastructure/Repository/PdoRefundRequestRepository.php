@@ -43,6 +43,15 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
         r.`receptionist_name`, r.`technician_justification`, r.`approved_amount`,
         r.`payment_reference`, r.`paid_amount`, r.`is_active`, r.`created_at`, r.`updated_at`';
 
+    /**
+     * Join needed by the coordination filters that look at the incident, such as
+     * `incident_status`. `refund_requests.incident_id` is NOT NULL behind a
+     * foreign key, so a LEFT JOIN never drops a row; it is LEFT only so that a
+     * future soft-deleted incident still returns its case instead of vanishing
+     * from the inbox.
+     */
+    private const COORDINATOR_INCIDENT_JOIN = ' LEFT JOIN `incidents` i ON i.`id` = r.`incident_id`';
+
     /** Columns a transition is allowed to write. Anything else is ignored. */
     private const WRITABLE_FIELDS = [
         'technician_finding',
@@ -203,7 +212,7 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
 
         $stmt = $this->pdo->prepare("
             SELECT " . self::FULL_COLUMNS . "
-            FROM `refund_requests` r
+            FROM `refund_requests` r" . self::COORDINATOR_INCIDENT_JOIN . "
             {$where}
             ORDER BY r.`created_at` DESC, r.`id` DESC
             LIMIT :limit OFFSET :offset
@@ -227,7 +236,9 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
     {
         [$where, $params] = $this->buildCoordinatorFilters($filters);
 
-        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM `refund_requests` r {$where}");
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM `refund_requests` r' . self::COORDINATOR_INCIDENT_JOIN . " {$where}"
+        );
         foreach ($params as $key => $value) {
             $stmt->bindValue($key, $value);
         }
@@ -345,6 +356,27 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
         if (isset($filters['machine_id']) && (int)$filters['machine_id'] > 0) {
             $clauses[] = 'r.`machine_id` = :machine_id';
             $params[':machine_id'] = (int)$filters['machine_id'];
+        }
+
+        // Filtro por estado de la AVERÍA (no del expediente). Es lo que permite
+        // aislar los expedientes atascados: los que siguen pendientes de
+        // inspección sobre una avería ya cerrada o cancelada, donde el técnico
+        // no puede volver a dictaminar y solo Coordinación puede regularizar.
+        if (isset($filters['incident_status']) && $filters['incident_status'] !== '' && $filters['incident_status'] !== []) {
+            $statuses = is_array($filters['incident_status'])
+                ? array_values($filters['incident_status'])
+                : [$filters['incident_status']];
+
+            $placeholders = [];
+            foreach ($statuses as $index => $status) {
+                $key = ':incident_status_' . $index;
+                $placeholders[] = $key;
+                $params[$key] = (string)$status;
+            }
+
+            if ($placeholders !== []) {
+                $clauses[] = 'i.`status` IN (' . implode(', ', $placeholders) . ')';
+            }
         }
 
         if (isset($filters['from']) && $filters['from'] !== '') {

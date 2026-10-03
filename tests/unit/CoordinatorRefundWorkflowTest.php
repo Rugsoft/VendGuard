@@ -165,6 +165,15 @@ final class CoordRefundRepo implements RefundRequestRepositoryInterface
     /** Últimos filtros aplicados, para comprobar lo que llega al SQL. */
     public array $lastFilters = [];
 
+    /**
+     * Filtros de TODAS las llamadas de conteo, en orden. La bandeja pide tres
+     * conteos por petición (total, visto bueno y atascados), así que mirar solo
+     * el último diría que el filtro de la bandeja es el del contador, que es
+     * justo lo que la aserción 2.2 quiere evitar.
+     */
+    /** @var list<array<string, mixed>> */
+    public array $countFilters = [];
+
     public int $lastLimit = 0;
 
     public int $lastOffset = 0;
@@ -234,6 +243,7 @@ final class CoordRefundRepo implements RefundRequestRepositoryInterface
     {
         $this->countCalls++;
         $this->lastFilters = $filters;
+        $this->countFilters[] = $filters;
 
         return count($this->matchFilters($filters));
     }
@@ -963,21 +973,26 @@ $assert('1.26 Y el PIN real tampoco aparece como valor suelto', !str_contains($i
 // ─────────────────────────────────────────────────────────────────────────────
 echo "\n--- 2. Filtros y paginación ---\n";
 
+// La sección 1 ya ha contado la bandeja sin filtros; se parte de cero para que
+// `countFilters[0]` sea el conteo principal de ESTA petición filtrada y no el
+// de una llamada anterior.
+$refundRepo->countFilters = [];
 $byStatus = $invoke('index', $coordRequest('GET', [], ['status' => 'REQUIRES_COORDINATOR_APPROVAL']));
 $byStatusBody = $byStatus->getDecodedBody();
 $assert('2.1 El filtro por estado acota la bandeja', ($byStatusBody['data']['total'] ?? 0) === 2, 'total: ' . ($byStatusBody['data']['total'] ?? 'AUSENTE'));
 $assert(
     '2.2 El filtro llega al repositorio por nombre de columna',
-    ($refundRepo->lastFilters['status'] ?? '') === 'REQUIRES_COORDINATOR_APPROVAL',
-    json_encode($refundRepo->lastFilters, JSON_THROW_ON_ERROR)
+    ($refundRepo->countFilters[0]['status'] ?? '') === 'REQUIRES_COORDINATOR_APPROVAL',
+    json_encode($refundRepo->countFilters[0] ?? null, JSON_THROW_ON_ERROR)
 );
 
+$refundRepo->countFilters = [];
 $approvalOnly = $invoke('index', $coordRequest('GET', [], ['requires_approval_only' => '1']));
 $approvalOnlyBody = $approvalOnly->getDecodedBody();
 $assert('2.3 `requires_approval_only` devuelve sólo los escalados', ($approvalOnlyBody['data']['total'] ?? 0) === 2);
 $assert(
     '2.4 Y el atajo se traduce al estado, no a otra consulta',
-    ($refundRepo->lastFilters['status'] ?? '') === 'REQUIRES_COORDINATOR_APPROVAL'
+    ($refundRepo->countFilters[0]['status'] ?? '') === 'REQUIRES_COORDINATOR_APPROVAL'
 );
 
 $byLocation = $invoke('index', $coordRequest('GET', [], ['location_id' => '1']));

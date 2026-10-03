@@ -596,7 +596,7 @@ export class ApiClient {
     // Gestión de Reintegros e Importe Retenido (Módulo 08 - RF-REF-03, RF-REF-07, RF-REF-08)
     /**
      * Retrieves the global refund inbox with full financial detail and filters.
-     * @param {Object} [filters={}] - { status, location_id, machine_id, requires_approval_only, from, to, limit, offset }
+     * @param {Object} [filters={}] - { status, location_id, machine_id, requires_approval_only, stranded_only, incident_status, from, to, limit, offset }
      * @returns {Promise<Object>}
      */
     getRefunds: (filters = {}) => {

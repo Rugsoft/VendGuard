@@ -576,7 +576,9 @@ Listado filtrado y paginado de expedientes con vista completa.
 * **Método:** `GET`
 * **Ruta:** `/api/coordinator/refunds`
 * **Autenticación:** Obligatoria (`COORDINATOR`).
-* **Parámetros Query:** `status`, `location_id`, `machine_id`, `requires_approval_only`.
+* **Parámetros Query:** `status`, `location_id`, `machine_id`, `requires_approval_only`, `incident_status`, `stranded_only`.
+  * `incident_status` filtra por el estado de la **avería** (no del expediente) y admite una lista separada por comas (`CANCELLED,CLOSED`). Un estado desconocido responde `422 INVALID_REFUND_FILTER`.
+  * `stranded_only=1` es el atajo de los **expedientes atascados en inspección**: los que siguen en `PENDING_INSPECTION` sobre una avería ya terminal (`CLOSED` o `CANCELLED`), donde el técnico ya no puede dictaminar y solo Coordinación puede regularizarlos. La respuesta incluye el contador `stranded_total`, que se calcula con los mismos filtros de sede, máquina y fechas pero con el estado de expediente y de avería que definen el atascado, de modo que activar el atajo nunca lo colapsa a cero.
 
 **Respuesta Exitosa (`200 OK`):**
 ```json
@@ -584,10 +586,14 @@ Listado filtrado y paginado de expedientes con vista completa.
   "success": true,
   "data": {
     "total": 1,
+    "requires_approval_total": 0,
+    "stranded_total": 1,
     "items": [
       {
         "id": 1,
         "incident_id": 101,
+        "incident_code": "INC-2026-8F2A",
+        "incident_status": "CANCELLED",
         "machine_code": "VEND-0101",
         "location_name": "Hospital del Mar - Edificio Central",
         "claimant_name": "Laura Sanitaria",

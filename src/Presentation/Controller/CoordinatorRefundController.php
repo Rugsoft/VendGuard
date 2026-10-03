@@ -16,10 +16,12 @@ use VendGuard\Core\Domain\Exception\JustificationTooShortException;
 use VendGuard\Core\Domain\Exception\ReceptionDeliveryNotAllowedException;
 use VendGuard\Core\Domain\Exception\RefundNotFoundException;
 use VendGuard\Core\Domain\Model\CashCustodyAction;
+use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\RefundRequest;
 use VendGuard\Core\Domain\Model\RefundStatus;
 use VendGuard\Core\Domain\Model\TechnicianFinding;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
@@ -147,6 +149,40 @@ class CoordinatorRefundController
             $filters['status'] = RefundStatus::REQUIRES_COORDINATOR_APPROVAL->value;
         }
 
+        // Filtro por estado de la AVERÍA. `incident_status` acepta un estado
+        // (lista separada por comas) y `stranded_only` es el atajo del
+        // semáforo: expedientes que siguen pendientes de inspección sobre una
+        // avería ya terminal, es decir, atascados y solo regularizables por
+        // Coordinación. Un estado desconocido se rechaza en vez de ignorarse.
+        $incidentStatusRaw = trim((string)($request->getQuery('incident_status') ?? ''));
+        if ($invalid === null && $incidentStatusRaw !== '') {
+            $statuses = [];
+            foreach (explode(',', $incidentStatusRaw) as $candidate) {
+                $normalized = strtoupper(trim($candidate));
+                if ($normalized === '') {
+                    continue;
+                }
+                if (IncidentStatus::tryFrom($normalized) === null) {
+                    $invalid = 'incident_status';
+                    break;
+                }
+                $statuses[] = $normalized;
+            }
+
+            if ($invalid === null && $statuses !== []) {
+                $filters['incident_status'] = $statuses;
+            }
+        }
+
+        $strandedOnly = $this->parseBoolFilter($request->getQuery('stranded_only'));
+        if ($invalid === null && $strandedOnly === true) {
+            $filters['status'] = RefundStatus::PENDING_INSPECTION->value;
+            $filters['incident_status'] = [
+                IncidentStatus::CLOSED->value,
+                IncidentStatus::CANCELLED->value,
+            ];
+        }
+
         foreach (['location_id', 'machine_id'] as $idFilter) {
             $raw = trim((string)($request->getQuery($idFilter) ?? ''));
             if ($raw === '') {
@@ -201,7 +237,8 @@ class CoordinatorRefundController
                 $case,
                 $this->resolveIncidentCode($case),
                 $this->resolveMachineCode($case),
-                $this->resolveLocationName($case)
+                $this->resolveLocationName($case),
+                $this->resolveIncidentStatus($case)
             ),
             $cases
         );
@@ -212,9 +249,22 @@ class CoordinatorRefundController
         $approvalFilters = $filters;
         $approvalFilters['status'] = RefundStatus::REQUIRES_COORDINATOR_APPROVAL->value;
 
+        // El contador de atascados ignora el filtro de estado del expediente
+        // (siempre es PENDING_INSPECTION) pero respeta el de avería activa: sin
+        // el `unset`, activar el semáforo devolvería 0 al filtrar por un estado
+        // de incidencia distinto del que él mismo impone.
+        $strandedFilters = $filters;
+        $strandedFilters['status'] = RefundStatus::PENDING_INSPECTION->value;
+        unset($strandedFilters['incident_status']);
+        $strandedFilters['incident_status'] = [
+            IncidentStatus::CLOSED->value,
+            IncidentStatus::CANCELLED->value,
+        ];
+
         return Response::json([
             'total' => $this->refundRepo->countForCoordinator($filters),
             'requires_approval_total' => $this->refundRepo->countForCoordinator($approvalFilters),
+            'stranded_total' => $this->refundRepo->countForCoordinator($strandedFilters),
             'limit' => $limit,
             'offset' => $offset,
             'filters' => $filters,
@@ -670,20 +720,33 @@ class CoordinatorRefundController
     }
 
     /**
-     * Memoria por petición para no repetir la misma consulta por cada fila.
+     * Memoria por petición para no repetir la misma consulta por cada fila. Se
+     * guarda la AVERÍA entera (no sólo el código) porque la bandeja necesita de
+     * ella tanto el ticket como su estado, y el estado es lo que permite a la
+     * interfaz marcar los expedientes atascados en inspección.
      *
-     * @var array<int, string|null>
+     * @var array<int, Incident|null>
      */
-    private array $incidentCodeCache = [];
+    private array $incidentCache = [];
+
+    private function resolveIncident(RefundRequest $case): ?Incident
+    {
+        $incidentId = $case->getIncidentId();
+        if (!array_key_exists($incidentId, $this->incidentCache)) {
+            $this->incidentCache[$incidentId] = $this->incidentRepo->findById($incidentId);
+        }
+
+        return $this->incidentCache[$incidentId];
+    }
 
     private function resolveIncidentCode(RefundRequest $case): ?string
     {
-        $incidentId = $case->getIncidentId();
-        if (!array_key_exists($incidentId, $this->incidentCodeCache)) {
-            $this->incidentCodeCache[$incidentId] = $this->incidentRepo->findById($incidentId)?->getTicketCode();
-        }
+        return $this->resolveIncident($case)?->getTicketCode();
+    }
 
-        return $this->incidentCodeCache[$incidentId];
+    private function resolveIncidentStatus(RefundRequest $case): ?string
+    {
+        return $this->resolveIncident($case)?->getStatus()->value;
     }
 
     /** @var array<int, string|null> */

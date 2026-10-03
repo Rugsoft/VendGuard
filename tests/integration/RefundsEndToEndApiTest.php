@@ -78,11 +78,20 @@ $coordToken = $auth->generateInternalToken($coordinator);
 
 $router = AppRouter::create();
 
+// `Request` recibe la query por separado de la ruta, así que el helper la
+// extrae del propio path: sin esto, un `?stranded_only=1` se descartaría en
+// silencio y la prueba afirmaría sobre una bandeja sin filtrar.
 $dispatch = static function (string $method, string $path, ?array $body = null, ?array $headers = null) use ($router) {
+    $query = [];
+    $queryString = parse_url($path, PHP_URL_QUERY);
+    if (is_string($queryString) && $queryString !== '') {
+        parse_str($queryString, $query);
+    }
+
     return $router->dispatch(new Request(
         $method,
         $path,
-        [],
+        $query,
         $body ?? [],
         $headers ?? ['content-type' => 'application/json']
     ));
@@ -536,6 +545,102 @@ try {
     $assert('D.4 Un ratio 0 no debe producir aviso de discrepancia en la UI',
         $discrepancyZeroRatio === null || (float)$discrepancyZeroRatio <= 0.0001,
         'ratio=' . var_export($discrepancyZeroRatio, true));
+
+    // ═══════════════════════════════════════════════════════════════════
+    echo "\n--- ESCENARIO E: filtro de atascados en inspeccion ---\n";
+    // ═══════════════════════════════════════════════════════════════════
+
+    // El caso E ya quedo regularizado en C.9 (sale de PENDING_INSPECTION), asi
+    // que el atascado de esta prueba se construye aparte: una averia cancelada
+    // con la reclamacion viva (RF-REF-09), que es exactamente lo que el filtro
+    // debe localizar.
+    $machineF = $makeMachine('SONDA-F-');
+    $incidentF = $incidents->create(new Incident(
+        id: null,
+        ticketCode: 'SONDA-F-' . strtoupper(bin2hex(random_bytes(3))),
+        machineId: (int)$machineF->getId(),
+        locationId: (int)$location->getId(),
+        category: IncidentCategory::PAYMENT_SYSTEM,
+        description: 'Averia cancelada por falsa alarma con reclamacion viva.',
+        urgency: UrgencyLevel::HIGH,
+        status: IncidentStatus::REGISTERED,
+        assignedTechnicianId: null,
+        createdAt: null
+    ));
+    $pdo->prepare("UPDATE incidents SET status = 'CANCELLED', is_active_ticket = 0 WHERE id = :id")
+        ->execute([':id' => (int)$incidentF->getId()]);
+
+    $caseF = $refundService->createCase(new CreateRefundRequestDTO(
+        incidentId: (int)$incidentF->getId(),
+        machineId: (int)$machineF->getId(),
+        locationId: (int)$location->getId(),
+        claimantName: 'Consumidor Atascado Filtro',
+        claimantContact: '677777777',
+        claimedAmount: 7.00,
+        compensationMethod: CompensationMethod::EN_MANO_SEDE,
+        productAttempted: 'Zumo'
+    ));
+
+    $stranded = $decode($dispatch('GET', '/api/coordinator/refunds', null, $coordHeaders));
+    $strandedData = $stranded['data'] ?? [];
+    $assert('E.1 El contador stranded_total sale de la respuesta',
+        array_key_exists('stranded_total', $strandedData),
+        'keys: ' . implode(',', array_keys($strandedData)));
+    $assert('E.2 El caso atascado se cuenta como stranded',
+        (int)($strandedData['stranded_total'] ?? 0) >= 1,
+        'stranded_total=' . var_export($strandedData['stranded_total'] ?? null, true));
+
+    // El atajo debe devolver SOLO atascados, y todos en PENDING_INSPECTION.
+    $onlyStranded = $decode($dispatch('GET', '/api/coordinator/refunds?stranded_only=1', null, $coordHeaders));
+    $strandedIds = array_map(static fn (array $item): int => (int)$item['id'], $onlyStranded['data']['items'] ?? []);
+    $strandedStatuses = array_unique(array_map(
+        static fn (array $item): string => (string)$item['status'],
+        $onlyStranded['data']['items'] ?? []
+    ));
+    $assert('E.3 stranded_only=1 incluye el caso atascado', in_array((int)$caseF->getId(), $strandedIds, true),
+        'ids=' . implode(',', $strandedIds));
+    $assert('E.4 stranded_only=1 solo devuelve expedientes pendientes de inspeccion',
+        $strandedStatuses === ['PENDING_INSPECTION'],
+        'estados=' . implode(',', $strandedStatuses));
+    $assert('E.5 stranded_only=1 no devuelve el expediente de averia viva',
+        !in_array((int)$caseAId, $strandedIds, true));
+
+    // El estado de la AVERIA viaja en cada item: sin el, la interfaz no puede
+    // marcar la fila como atascada sin una consulta extra por expediente.
+    $strandedItemStatus = null;
+    foreach ($onlyStranded['data']['items'] ?? [] as $item) {
+        if ((int)$item['id'] === (int)$caseF->getId()) {
+            $strandedItemStatus = $item['incident_status'] ?? null;
+        }
+    }
+    $assert('E.5b La proyeccion expone el estado terminal de la averia en el item atascado',
+        $strandedItemStatus === 'CANCELLED',
+        'incident_status=' . var_export($strandedItemStatus, true));
+
+    // Coherencia con el conteo directo en SQL: el filtro no puede inventar filas.
+    $directCount = (int)$pdo->query("
+        SELECT COUNT(*) FROM refund_requests r
+        JOIN incidents i ON i.id = r.incident_id
+        WHERE r.is_active = 1 AND r.status = 'PENDING_INSPECTION'
+          AND i.status IN ('CLOSED','CANCELLED')
+    ")->fetchColumn();
+    $assert('E.6 stranded_total coincide con el COUNT directo en SQL',
+        $directCount === (int)($onlyStranded['data']['total'] ?? -1),
+        "directo={$directCount} api=" . var_export($onlyStranded['data']['total'] ?? null, true));
+
+    // Un estado de averia desconocido se rechaza en vez de ignorarse.
+    $badIncidentStatus = $dispatch('GET', '/api/coordinator/refunds?incident_status=NOPE', null, $coordHeaders);
+    $assert('E.7 Un incident_status desconocido se rechaza con 422',
+        $badIncidentStatus->getStatusCode() === 422
+        && $errCode($badIncidentStatus) === 'INVALID_REFUND_FILTER',
+        'HTTP ' . $badIncidentStatus->getStatusCode() . ' ' . $errCode($badIncidentStatus));
+
+    // El atajo y el de visto bueno responden preguntas distintas y no deben
+    // anularse: activar uno deja el contador del otro intacto.
+    $approvalInbox = $decode($dispatch('GET', '/api/coordinator/refunds?requires_approval_only=1', null, $coordHeaders));
+    $assert('E.8 El contador de atascados no colapsa al filtrar por visto bueno',
+        (int)($approvalInbox['data']['stranded_total'] ?? 0) >= 1,
+        'stranded_total=' . var_export($approvalInbox['data']['stranded_total'] ?? null, true));
 
     echo "\n";
 } catch (\Throwable $e) {

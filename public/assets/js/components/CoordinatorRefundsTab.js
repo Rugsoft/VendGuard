@@ -99,10 +99,12 @@ export const CoordinatorRefundsTab = {
       items: [],
       total: 0,
       requiresApprovalTotal: 0,
+      strandedTotal: 0,
       totals: { claimed_amount: 0, payable_amount: 0 },
 
       statusFilter: '',
       approvalOnly: false,
+      strandedOnly: false,
       searchQuery: '',
 
       actionMessage: '',
@@ -149,7 +151,11 @@ export const CoordinatorRefundsTab = {
       return this.items.length > 0;
     },
     isFiltered() {
-      return this.statusFilter !== '' || this.approvalOnly || this.searchQuery.trim() !== '';
+      return this.statusFilter !== '' || this.approvalOnly || this.strandedOnly
+        || this.searchQuery.trim() !== '';
+    },
+    hasStranded() {
+      return this.strandedTotal > 0;
     },
     filteredItems() {
       const query = this.searchQuery.trim().toLowerCase();
@@ -228,6 +234,7 @@ export const CoordinatorRefundsTab = {
         this.items = Array.isArray(data?.items) ? data.items : [];
         this.total = Number(data?.total ?? this.items.length);
         this.requiresApprovalTotal = Number(data?.requires_approval_total ?? 0);
+        this.strandedTotal = Number(data?.stranded_total ?? 0);
         this.totals = {
           claimed_amount: Number(data?.totals?.claimed_amount ?? 0),
           payable_amount: Number(data?.totals?.payable_amount ?? 0)
@@ -242,12 +249,16 @@ export const CoordinatorRefundsTab = {
 
     /**
      * Only the filters the backend contract understands are sent to the API.
-     * @returns {{status?: string, requires_approval_only?: number}}
+     * `stranded_only` is the shortcut for cases awaiting inspection whose
+     * incident is already terminal, so the server owns the definition and the
+     * client cannot drift from it (RF-REF-09).
+     * @returns {{status?: string, requires_approval_only?: number, stranded_only?: number}}
      */
     buildFilters() {
       const filters = {};
       if (this.statusFilter !== '') filters.status = this.statusFilter;
       if (this.approvalOnly) filters.requires_approval_only = 1;
+      if (this.strandedOnly) filters.stranded_only = 1;
       return filters;
     },
 
@@ -259,6 +270,34 @@ export const CoordinatorRefundsTab = {
     toggleApprovalOnly(value) {
       this.approvalOnly = Boolean(value);
       this.loadRefunds();
+    },
+
+    /**
+     * The two shortcuts answer different questions, so turning one on turns the
+     * other off: a case awaiting double approval is not stranded, and a stranded
+     * case has no verdict to approve yet.
+     */
+    toggleStrandedOnly(value) {
+      this.strandedOnly = Boolean(value);
+      if (this.strandedOnly) {
+        this.approvalOnly = false;
+        this.statusFilter = '';
+      }
+      this.loadRefunds();
+    },
+
+    /**
+     * A case is stranded when it still awaits its inspection but its incident
+     * is already terminal: the technician can no longer rule on it, so only
+     * Coordination can regularize it.
+     */
+    isStranded(refund) {
+      return Boolean(refund) && String(refund.status) === 'PENDING_INSPECTION'
+        && this.isTerminalIncident(refund.incident_status);
+    },
+
+    isTerminalIncident(status) {
+      return ['CLOSED', 'CANCELLED'].includes(String(status));
     },
 
     /**
@@ -705,6 +744,25 @@ export const CoordinatorRefundsTab = {
           </div>
           <button
             type="button"
+            data-testid="stranded-counter"
+            :aria-pressed="strandedOnly ? 'true' : 'false'"
+            :style="{
+              padding: '8px 14px',
+              borderRadius: 'var(--radius-card, 8px)',
+              border: '1px solid ' + (hasStranded ? 'var(--color-error)' : 'var(--color-hairline)'),
+              background: hasStranded ? 'var(--color-urgency-critical-bg)' : 'var(--color-surface-card)',
+              fontFamily: 'var(--font-body, Inter, sans-serif)',
+              fontSize: '13px',
+              color: hasStranded ? 'var(--color-error-text)' : 'var(--color-ink-secondary)',
+              cursor: hasStranded ? 'pointer' : 'default'
+            }"
+            :disabled="!hasStranded"
+            @click="hasStranded && toggleStrandedOnly(true)"
+          >
+            Atascados en inspección: <strong>{{ strandedTotal }}</strong>
+          </button>
+          <button
+            type="button"
             class="vg-btn vg-btn-secondary"
             style="border-radius: var(--radius-interactive, 4px); font-size: 13px; height: 36px;"
             :disabled="loading"
@@ -767,6 +825,17 @@ export const CoordinatorRefundsTab = {
               @change="toggleApprovalOnly($event.target.checked)"
             />
             Solo pendientes de visto bueno
+          </label>
+
+          <label style="display: flex; align-items: center; gap: 8px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; font-weight: 600; color: var(--color-error-text); cursor: pointer; min-height: 44px;">
+            <input
+              type="checkbox"
+              :checked="strandedOnly"
+              data-testid="refund-stranded-filter"
+              style="width: 18px; height: 18px; accent-color: var(--color-error);"
+              @change="toggleStrandedOnly($event.target.checked)"
+            />
+            Solo atascados en inspección
           </label>
 
           <input
@@ -891,6 +960,13 @@ export const CoordinatorRefundsTab = {
                     style="margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--color-error-text);"
                   >
                     Supervisión especial (&gt; 10,00 € / discrepancia)
+                  </div>
+                  <div
+                    v-if="isStranded(refund)"
+                    data-testid="stranded-flag"
+                    style="margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--color-error-text);"
+                  >
+                    ⛔ Avería cerrada/cancelada sin dictamen
                   </div>
                 </td>
 

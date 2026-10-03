@@ -42,6 +42,7 @@ final readonly class CoordinatorRefundViewDTO
         public int $id,
         public int $incidentId,
         public ?string $incidentCode,
+        public ?string $incidentStatus,
         public int $machineId,
         public ?string $machineCode,
         public int $locationId,
@@ -84,7 +85,8 @@ final readonly class CoordinatorRefundViewDTO
         RefundRequest $case,
         ?string $incidentCode = null,
         ?string $machineCode = null,
-        ?string $locationName = null
+        ?string $locationName = null,
+        ?string $incidentStatus = null
     ): self {
         $status = $case->getStatus();
 
@@ -92,6 +94,7 @@ final readonly class CoordinatorRefundViewDTO
             id: (int)$case->getId(),
             incidentId: $case->getIncidentId(),
             incidentCode: $incidentCode,
+            incidentStatus: $incidentStatus,
             machineId: $case->getMachineId(),
             machineCode: $machineCode,
             locationId: $case->getLocationId(),
@@ -160,6 +163,7 @@ final readonly class CoordinatorRefundViewDTO
             'id' => $this->id,
             'incident_id' => $this->incidentId,
             'incident_code' => $this->incidentCode,
+            'incident_status' => $this->incidentStatus,
             'machine_id' => $this->machineId,
             'machine_code' => $this->machineCode,
             'location_id' => $this->locationId,

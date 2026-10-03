@@ -180,6 +180,7 @@ api.coordinator.getRefunds = async (filters = {}) => {
   return {
     total: 4,
     requires_approval_total: 1,
+    stranded_total: 1,
     limit: 50,
     offset: 0,
     filters,
@@ -562,6 +563,75 @@ assert('7.11 The submit button is gated on the same validation as the method',
   regTemplate.includes('isRegularizing || !isRegularizeValid'));
 assert('7.12 The API client exposes regularizeRefund and posts the snake_case body',
   typeof api.coordinator.regularizeRefund === 'function');
+
+// ---------------------------------------------------------------------
+// 8. Stranded-in-inspection filter (RF-REF-09)
+// ---------------------------------------------------------------------
+console.log('\n--- 8. Filtro de atascados en inspección (RF-REF-09) ---');
+
+// A case awaiting inspection whose incident is already terminal is stranded:
+// the technician can no longer rule on it, so only Coordination can regularize.
+const strandedCase = { ...inspectionCase, id: 41, incident_status: 'CANCELLED' };
+const closedIncidentCase = { ...inspectionCase, id: 42, incident_status: 'CLOSED' };
+const liveIncidentCase = { ...inspectionCase, id: 43, incident_status: 'IN_PROGRESS' };
+
+const strTab = createTab();
+
+assert('8.1 A pending case on a cancelled/closed incident is stranded',
+  strTab.isStranded(strandedCase) === true
+    && strTab.isStranded(closedIncidentCase) === true
+    && strTab.isStranded(liveIncidentCase) === false);
+assert('8.2 A case already ruled on is never stranded, whatever the incident says',
+  strTab.isStranded({ ...approvalCase, incident_status: 'CANCELLED' }) === false
+    && strTab.isStranded({ ...rejectedCase, incident_status: 'CANCELLED' }) === false);
+assert('8.3 The terminal incident set is exactly CLOSED and CANCELLED',
+  strTab.isTerminalIncident('CLOSED') === true
+    && strTab.isTerminalIncident('CANCELLED') === true
+    && strTab.isTerminalIncident('RESOLVED') === false
+    && strTab.isTerminalIncident(null) === false);
+
+assert('8.4 The shortcut is sent to the server so the definition cannot drift',
+  (() => {
+    const t = createTab();
+    t.strandedOnly = true;
+    return t.buildFilters().stranded_only === 1;
+  })());
+assert('8.5 The shortcut is absent when inactive',
+  createTab().buildFilters().stranded_only === undefined);
+
+// Turning the stranded shortcut on must release the other, incompatible one:
+// a case awaiting approval is not stranded, and vice versa.
+listCalls = [];
+const toggleTab = createTab();
+toggleTab.approvalOnly = true;
+toggleTab.statusFilter = 'PAID_DIGITAL';
+toggleTab.toggleStrandedOnly(true);
+assert('8.6 Enabling the stranded shortcut clears the approval one and the status filter',
+  toggleTab.strandedOnly === true && toggleTab.approvalOnly === false
+    && toggleTab.statusFilter === '');
+assert('8.7 It reloads the inbox with the server-side shortcut',
+  listCalls.length === 1 && listCalls[0].stranded_only === 1
+    && listCalls[0].requires_approval_only === undefined);
+
+assert('8.8 The counter is read from the server response',
+  (() => {
+    const t = createTab();
+    t.strandedTotal = 0;
+    return t.hasStranded === false;
+  })());
+
+const strTemplate = CoordinatorRefundsTab.template;
+assert('8.9 The toolbar offers the stranded filter with its test hook',
+  strTemplate.includes('data-testid="refund-stranded-filter"')
+    && strTemplate.includes('Solo atascados en inspección')
+    && strTemplate.includes('toggleStrandedOnly($event.target.checked)'));
+assert('8.10 The header exposes a clickable stranded counter',
+  strTemplate.includes('data-testid="stranded-counter"')
+    && strTemplate.includes('Atascados en inspección')
+    && strTemplate.includes('toggleStrandedOnly(true)'));
+assert('8.11 A stranded row is flagged visually',
+  strTemplate.includes('data-testid="stranded-flag"')
+    && strTemplate.includes('v-if="isStranded(refund)"'));
 
 // Summary
 console.log('\n======================================================================');
