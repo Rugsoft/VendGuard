@@ -17,6 +17,7 @@ import { store } from '../store.js';
 import { ModalDialog } from './ModalDialog.js';
 import { IncidentBadge } from './IncidentBadge.js';
 import { ImagePreview } from './ImagePreview.js';
+import { QrRefundRequestBlock } from './QrRefundRequestBlock.js';
 
 // Predefined incident categories per spec
 const INCIDENT_CATEGORIES = [
@@ -63,7 +64,8 @@ export const IncidentReportModal = {
   components: {
     ModalDialog,
     IncidentBadge,
-    ImagePreview
+    ImagePreview,
+    QrRefundRequestBlock
   },
   props: {
     modelValue: {
@@ -85,6 +87,9 @@ export const IncidentReportModal = {
       reporterName: '',
       reporterPhone: '',
       photoFile: null,
+      refundClaim: { refund_requested: false },
+      refundClaimValid: true,
+      lastRefundReceipt: null,
 
       // Comment Form (for existing duplicate tickets)
       commentText: '',
@@ -125,6 +130,12 @@ export const IncidentReportModal = {
     },
     categories() {
       return INCIDENT_CATEGORIES;
+    },
+    refundRequested() {
+      return this.refundClaim?.refund_requested === true;
+    },
+    hasPhysicalReception() {
+      return store.state.location?.has_physical_reception !== false;
     }
   },
   watch: {
@@ -150,6 +161,9 @@ export const IncidentReportModal = {
       this.description = '';
       this.retainedMoney = '';
       this.photoFile = null;
+      this.refundClaim = { refund_requested: false };
+      this.refundClaimValid = true;
+      this.lastRefundReceipt = null;
       this.commentText = '';
       this.commentPhotoFile = null;
       this.errorMessage = '';
@@ -168,11 +182,22 @@ export const IncidentReportModal = {
       this.$emit('close');
     },
 
+    handleRefundClaimUpdate(newClaim) {
+      this.refundClaim = newClaim || { refund_requested: false };
+      if (this.refundRequested && newClaim?.claimed_amount) {
+        this.retainedMoney = String(newClaim.claimed_amount);
+      }
+    },
+    handleRefundClaimValidity(isValid) {
+      this.refundClaimValid = Boolean(isValid);
+    },
+
     /**
      * Submits a new incident report (RF-02, RF-03, RNF-05)
      */
     async handleSubmitReport() {
       if (!this.machine) return;
+      if (this.refundRequested && !this.refundClaimValid) return;
 
       this.errorMessage = '';
       this.isSubmitting = true;
@@ -191,6 +216,11 @@ export const IncidentReportModal = {
           if (this.retainedMoney !== '' && this.retainedMoney !== null) {
             payload.append('retained_money_amount', String(this.retainedMoney));
           }
+          if (this.refundRequested) {
+            for (const [key, value] of Object.entries(this.refundClaim)) {
+              payload.append(key, value === null || value === undefined ? '' : String(value));
+            }
+          }
           payload.append('photo', this.photoFile);
         } else {
           // Standard JSON payload
@@ -199,7 +229,8 @@ export const IncidentReportModal = {
             category: this.category,
             description: this.description.trim(),
             reporter_name: this.reporterName.trim(),
-            reporter_phone: this.reporterPhone.trim()
+            reporter_phone: this.reporterPhone.trim(),
+            ...(this.refundRequested ? this.refundClaim : {})
           };
           if (this.retainedMoney !== '' && this.retainedMoney !== null) {
             payload.retained_money_amount = Number(this.retainedMoney);
@@ -208,10 +239,20 @@ export const IncidentReportModal = {
 
         const createdIncident = await api.incidents.create(payload);
 
+        let successMsg = `Avería registrada con éxito. Ticket #${createdIncident.ticket_code}`;
+        if (createdIncident.refund) {
+          this.lastRefundReceipt = createdIncident.refund;
+          if (createdIncident.refund.pickup_pin) {
+            successMsg += ` · Expediente de reintegro abierto con PIN: ${createdIncident.refund.pickup_pin}`;
+          } else {
+            successMsg += ' · Expediente de reintegro digital abierto correctamente.';
+          }
+        }
+
         store.addAlert(
-          `Avería registrada con éxito. Ticket #${createdIncident.ticket_code}`,
+          successMsg,
           'success',
-          6000
+          8000
         );
 
         this.$emit('created', createdIncident);
@@ -471,24 +512,33 @@ export const IncidentReportModal = {
           ></textarea>
         </div>
 
-        <!-- 3. Retained Money (Optional - EARS 3.8) -->
+        <!-- 3. Solicitud de Reintegro Formal (HU-02 / RF-REF-01) o Retained Money Informativo -->
         <div style="margin-bottom: 16px;">
-          <label for="incident-retained-money" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 4px;">
-            ¿Se tragó dinero la máquina? <span style="font-size: 11px; color: var(--color-ink-muted, #6c7e9d);">(opcional)</span>
-          </label>
-          <div style="position: relative; max-width: 180px;">
-            <input
-              id="incident-retained-money"
-              v-model="retainedMoney"
-              type="number"
-              step="0.05"
-              min="0"
-              class="vg-input"
-              placeholder="0.00"
-              style="padding-right: 28px;"
-              :disabled="isSubmitting"
-            />
-            <span style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--color-ink-muted, #6c7e9d);">€</span>
+          <QrRefundRequestBlock
+            :model-value="refundClaim"
+            :has-physical-reception="hasPhysicalReception"
+            :disabled="isSubmitting"
+            @update:model-value="handleRefundClaimUpdate"
+            @validity-change="handleRefundClaimValidity"
+          />
+          <div v-if="!refundRequested" style="margin-top: 8px;">
+            <label for="incident-retained-money" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 4px;">
+              ¿Se tragó dinero la máquina sin tramitar reintegro? <span style="font-size: 11px; color: var(--color-ink-muted, #6c7e9d);">(opcional informativo)</span>
+            </label>
+            <div style="position: relative; max-width: 180px;">
+              <input
+                id="incident-retained-money"
+                v-model="retainedMoney"
+                type="number"
+                step="0.05"
+                min="0"
+                class="vg-input"
+                placeholder="0.00"
+                style="padding-right: 28px;"
+                :disabled="isSubmitting"
+              />
+              <span style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--color-ink-muted, #6c7e9d);">€</span>
+            </div>
           </div>
         </div>
 

@@ -161,6 +161,12 @@ function createModalInstance(machine, initialData = {}) {
   Object.defineProperty(instance, 'modalTitle', {
     get: () => IncidentReportModal.computed.modalTitle.call(instance)
   });
+  Object.defineProperty(instance, 'refundRequested', {
+    get: () => IncidentReportModal.computed.refundRequested.call(instance)
+  });
+  Object.defineProperty(instance, 'hasPhysicalReception', {
+    get: () => IncidentReportModal.computed.hasPhysicalReception.call(instance)
+  });
 
   return instance;
 }
@@ -263,6 +269,57 @@ await IncidentReportModal.methods.handleSubmitComment.call(modalConflict);
 assert('4.7 api.incidents.addComment() called for active ticket INC-2026-0042', lastCommentTicket === 'INC-2026-0042');
 assert('4.8 Comment payload contains author and comment text', lastCommentPayload.author_name === 'Recepción Central' && lastCommentPayload.comment.includes('contactless'));
 assert('4.9 handleSubmitComment emits "commented" event', modalConflict.getEmits().some(e => e.evt === 'commented'));
+
+// ---------------------------------------------------------------------
+// TEST GROUP 5: Refund Capture Integration in IncidentReportModal (HU-02)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 5: Refund Capture Integration (HU-02 / RF-REF-01) ---');
+
+let lastRefundCreatedPayload = null;
+api.incidents.create = async (payload) => {
+  lastRefundCreatedPayload = payload;
+  return {
+    id: 99,
+    ticket_code: 'INC-2026-0099',
+    status: 'REGISTRADA',
+    urgency: 'HIGH',
+    machine_id: 1,
+    refund: {
+      id: 5,
+      claimed_amount: 3.5,
+      compensation_method: 'EN_MANO_SEDE',
+      status: 'PENDING_INSPECTION',
+      pickup_pin: '7391',
+      tracking_token: 'aabbcc112233',
+      tracking_url: '/?track=aabbcc112233'
+    }
+  };
+};
+
+const modalWithRefund = createModalInstance(perishableMachine, {
+  category: 'PAYMENT_SYSTEM',
+  description: 'Tragó monedas de 2€ y 1.50€ y no entregó bebida',
+  reporterName: 'Marta Cliente',
+  reporterPhone: '622334455',
+  refundClaim: {
+    refund_requested: true,
+    claimed_amount: 3.5,
+    compensation_method: 'EN_MANO_SEDE',
+    contact_name: 'Marta Cliente',
+    contact_phone: '622334455',
+    product_attempted: 'Bebida isotónica'
+  },
+  refundClaimValid: true
+});
+
+assert('5.1 refundRequested is true when refundClaim.refund_requested', modalWithRefund.refundRequested === true);
+
+await IncidentReportModal.methods.handleSubmitReport.call(modalWithRefund);
+
+assert('5.2 Submitting with refund forwards refund_requested flag', lastRefundCreatedPayload.refund_requested === true);
+assert('5.3 Submitting with refund forwards claimed_amount', lastRefundCreatedPayload.claimed_amount === 3.5);
+assert('5.4 Submitting with refund forwards compensation_method', lastRefundCreatedPayload.compensation_method === 'EN_MANO_SEDE');
+assert('5.5 Submitting with refund captures and saves lastRefundReceipt', modalWithRefund.lastRefundReceipt?.pickup_pin === '7391');
 
 // Summary
 console.log('\n======================================================================');
