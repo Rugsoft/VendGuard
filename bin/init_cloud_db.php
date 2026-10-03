@@ -138,9 +138,18 @@ try {
         // statement protocol yet`), y además permite nombrar en el error la
         // migración que falló.
         foreach (SqlScriptSplitter::split($migrationSql) as $migrationStatement) {
+            $stmtUpper = strtoupper(ltrim($migrationStatement));
+            $isTriggerStmt = str_starts_with($stmtUpper, 'CREATE TRIGGER') || str_starts_with($stmtUpper, 'DROP TRIGGER');
             try {
                 executeStatement($pdo, $migrationStatement);
             } catch (PDOException $e) {
+                // TiDB Serverless y ciertos motores cloud no implementan triggers
+                // ("check the manual that corresponds to your TiDB version ... near TRIGGER").
+                // En MySQL y MariaDB se ejecutan de forma obligatoria.
+                if ($isTriggerStmt && (str_contains(strtolower($e->getMessage()), 'tidb') || str_contains($e->getMessage(), 'not supported'))) {
+                    echo "      ⚠ Triggers no soportados por el motor de base de datos cloud (TiDB): ignorando trigger.\n";
+                    continue;
+                }
                 throw new RuntimeException(
                     "Error en la migración {$migrationName}: {$e->getMessage()}\nSentencia:\n"
                     . substr($migrationStatement, 0, 200) . '...',
