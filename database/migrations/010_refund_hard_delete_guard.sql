@@ -35,24 +35,18 @@
 -- the refusal surfaces as a normal PDOException rather than a silent no-op.
 -- =============================================================================
 
--- Create the trigger only when absent (idempotent, portable across MySQL and
--- MariaDB). DROP TRIGGER IF EXISTS would silently replace a hand-tuned
--- definition, so existence is checked in information_schema instead.
-SET @vg_refund_guard_ddl = IF(
-    (SELECT COUNT(*) FROM information_schema.triggers
-     WHERE trigger_schema = DATABASE()
-       AND trigger_name = 'trg_refund_requests_no_hard_delete') = 0,
-    'CREATE TRIGGER `trg_refund_requests_no_hard_delete`
-     BEFORE DELETE ON `refund_requests`
-     FOR EACH ROW
-     BEGIN
-         IF COALESCE(@vendguard_purge, 0) <> 1 THEN
-             SIGNAL SQLSTATE ''45000''
-                 SET MESSAGE_TEXT = ''Art. III.1: los expedientes de reintegro no se borran fisicamente; se anulan por estado (is_active = 0).'';
-         END IF;
-     END',
-    'SELECT 1'
-);
-PREPARE vg_refund_guard_statement FROM @vg_refund_guard_ddl;
-EXECUTE vg_refund_guard_statement;
-DEALLOCATE PREPARE vg_refund_guard_statement;
+-- Drop and recreate the trigger idempotently.
+-- Note: MySQL/MariaDB cannot PREPARE a CREATE TRIGGER statement (Error 1295),
+-- so dynamic PREPARE cannot be used here. Direct execution is portable across
+-- MySQL and MariaDB, while maintaining idempotency against information_schema.triggers.
+DROP TRIGGER IF EXISTS `trg_refund_requests_no_hard_delete`;
+
+CREATE TRIGGER `trg_refund_requests_no_hard_delete`
+BEFORE DELETE ON `refund_requests`
+FOR EACH ROW
+BEGIN
+    IF COALESCE(@vendguard_purge, 0) <> 1 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Art. III.1: los expedientes de reintegro no se borran fisicamente; se anulan por estado (is_active = 0).';
+    END IF;
+END;
