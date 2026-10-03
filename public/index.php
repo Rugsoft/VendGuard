@@ -38,6 +38,15 @@ if ($path !== '/' && $path !== '/index.php' && is_file($filePath)) {
     $contentType = $mimeTypes[$ext] ?? 'application/octet-stream';
     header("Content-Type: {$contentType}");
     header('Content-Length: ' . (string)filesize($filePath));
+
+    // Sin `Cache-Control`, el navegador puede seguir sirviendo un módulo JS
+    // antiguo después de un despliegue, de modo que una corrección desplegada no
+    // se ve hasta que el usuario purga la caché a mano. El código fuente se sirve
+    // tal cual (Dogma Vanilla: sin empaquetador ni hash de contenido), así que la
+    // política honesta es revalidar en cada carga.
+    if (in_array($ext, ['js', 'mjs', 'css'], true)) {
+        header('Cache-Control: no-cache, must-revalidate');
+    }
     readfile($filePath);
     exit;
 }

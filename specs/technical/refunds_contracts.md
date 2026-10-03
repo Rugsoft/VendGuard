@@ -692,6 +692,29 @@ Desestima una reclamación con justificación obligatoria ($\ge 20$ caracteres).
 }
 ```
 
+#### 4.4.5 Regularización de Dictamen Atascado: `POST /api/coordinator/refunds/{id}/regularize`
+Aplica el dictamen de saldo a un expediente que quedó atascado en `PENDING_INSPECTION`
+porque la avería se canceló (RF-REF-09) o el técnico ya no puede volver a la máquina.
+Es la válvula que cierra el hueco del 409 del dictamen técnico: sin ella, el expediente y
+su dinero se quedaban sin salida.
+
+* **Método:** `POST`
+* **Ruta:** `/api/coordinator/refunds/{id}/regularize`
+* **Rol:** `COORDINATOR`
+* **Cuerpo:**
+```json
+{
+  "finding": "UNVERIFIED_NO_CASH",
+  "cash_custody_action": "HELD_FOR_CENTRAL",
+  "justification": "Avería cancelada por falsa alarma; sin evidencia de saldo retenido."
+}
+```
+* **Restricción:** solo sobre un expediente `PENDING_INSPECTION`. Un expediente ya
+dictaminado es inmutable (Art. III) y responde `409 INVALID_REFUND_STATE_TRANSITION`.
+* **Errores propios:** `MISSING_REGULARIZATION_FINDING` (422) cuando falta `finding`;
+`INVALID_REFUND_INSPECTION` (422) cuando `FOUND_PHYSICAL` llega sin importe o la
+custodia no es válida.
+
 ---
 
 ## 5. Catálogo de Errores Normalizados

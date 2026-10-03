@@ -116,7 +116,16 @@ final class TechnicianRefundService
     ): array {
         $this->assertVerdictIsJustified($dto);
 
-        $claims = $this->refundRepo->findRestrictedByIncident($incidentId);
+        // El dictamen se aplica SOLO a los expedientes pendientes de inspección.
+        // Un expediente ya dictaminado (por ejemplo tras reabrir la avería
+        // dentro de las 48 h del Art. V.6) es inmutable y no se vuelve a tocar:
+        // antes, convivir un dictaminado con un pendiente abortaba la resolución
+        // entera con un 409 y dejaba al técnico sin salida y al expediente
+        // atascado en `PENDING_INSPECTION` para siempre.
+        $claims = array_values(array_filter(
+            $this->refundRepo->findRestrictedByIncident($incidentId),
+            static fn (RefundRequest $case): bool => $case->awaitsInspection()
+        ));
         if ($claims === []) {
             return [
                 'processed' => 0,
@@ -132,6 +141,17 @@ final class TechnicianRefundService
             static fn (RefundRequest $case): float => $case->getClaimedAmount(),
             $claims
         ));
+
+        // RF-REF-08: una sola pila de monedas no puede satisfacer a varios
+        // reclamantes, así que cada expediente registra SU PARTE del efectivo
+        // recuperado, no el total de la avería. Guardar el total en cada uno
+        // hacía que un segundo reclamante de 2,00 € leyese un recuperado de
+        // 3,00 € y el panel pintase una discrepancia falsa del 50 %; peor aún,
+        // Coordinación podía firmar y liquidar la reclamación íntegra de cada
+        // uno y pagar 5,00 € sobre 3,00 € realmente recuperados. El reparto es
+        // proporcional al importe reclamado y se hace en céntimos enteros para
+        // que la suma de las partes sea EXACTAMENTE el recuperado.
+        $allocation = $this->allocateRecovered($claims, $recovered);
 
         // RF-REF-03/04: a single pile of coins cannot cover more than was claimed,
         // and recovering far MORE than was owed is not a bigger reimbursement,
@@ -154,7 +174,8 @@ final class TechnicianRefundService
 
         $statuses = [];
         foreach ($claims as $case) {
-            $statuses[] = $this->applyVerdict($case, $dto, $recovered, $shortfall, $machineId, $actor)->value;
+            $caseRecovered = $allocation[(int)$case->getId()] ?? 0.0;
+            $statuses[] = $this->applyVerdict($case, $dto, $caseRecovered, $shortfall, $machineId, $actor)->value;
         }
 
         return [
@@ -164,6 +185,64 @@ final class TechnicianRefundService
             'discrepancy' => $shortfall,
             'statuses' => $statuses,
         ];
+    }
+
+    /**
+     * Aplica el dictamen a UN expediente concreto (válvula de Coordinación).
+     *
+     * La resolución técnica dictamina todos los pendientes de una avería, pero
+     * hay situaciones en las que el expediente queda atascado en
+     * `PENDING_INSPECTION` sin que el técnico pueda volver a la máquina: la
+     * avería se canceló por falsa alarma (RF-REF-09: la reclamación sobrevive a
+     * la cancelación) o el técnico cerró la intervención antes de que el segundo
+     * consumidor reclamase. Sin esta puerta, el dinero se quedaba sin dueño y sin
+     * forma de dictaminarse.
+     *
+     * Solo Coordinación la usa, y solo sobre un expediente pendiente: un
+     * expediente ya dictaminado es inmutable (Art. III) y no se reescribe.
+     *
+     * @param array{id?: int|null, role?: string, name?: string} $actor
+     * @throws RefundNotFoundException
+     * @throws InvalidRefundStateTransitionException Cuando el expediente no está
+     *   pendiente de inspección.
+     */
+    public function regularizeCase(
+        int $refundId,
+        TechnicianRefundInspectionDTO $dto,
+        array $actor = []
+    ): RefundStatus {
+        $case = $this->refundRepo->findById($refundId);
+        if ($case === null || !$case->isActive()) {
+            throw new RefundNotFoundException($refundId);
+        }
+
+        if (!$case->awaitsInspection()) {
+            throw new InvalidRefundStateTransitionException(
+                fromStatus: $case->getStatus(),
+                toStatus: RefundStatus::VERIFIED_PENDING_PAYMENT,
+                attemptedAction: 'REGULARIZE_INSPECTION'
+            );
+        }
+
+        $this->assertVerdictIsJustified($dto);
+
+        // El tope agregado de la avería ya se aplica al aprobar y al liquidar,
+        // así que aquí basta con registrar la parte que corresponde a este
+        // expediente. Si es el único pendiente, recibe el total declarado.
+        $siblings = array_values(array_filter(
+            $this->refundRepo->findRestrictedByIncident($case->getIncidentId()),
+            static fn (RefundRequest $sibling): bool => $sibling->awaitsInspection()
+        ));
+        $recovered = $dto->recoveredAmount ?? 0.0;
+        $allocation = $this->allocateRecovered($siblings, $recovered);
+        $caseRecovered = $allocation[(int)$case->getId()] ?? $recovered;
+
+        $shortfall = $recovered < array_sum(array_map(
+            static fn (RefundRequest $sibling): float => $sibling->getClaimedAmount(),
+            $siblings
+        ));
+
+        return $this->applyVerdict($case, $dto, $caseRecovered, $shortfall, $case->getMachineId(), $actor);
     }
 
     /**
@@ -306,6 +385,88 @@ final class TechnicianRefundService
     // ─────────────────────────────────────────────────────────────────────
     // Internals
     // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Reparte el efectivo recuperado entre los expedientes de una avería.
+     *
+     * El reparto es proporcional al importe reclamado y se calcula en céntimos
+     * enteros, con el residuo asignado a los expedientes de mayor reclamación
+     * (desempate por identificador, para que el resultado sea determinista).
+     * Así la suma de las partes es exactamente el recuperado: no se crea ni se
+     * pierde un céntimo al repartir.
+     *
+     * Un solo expediente recibe el total, que es el caso mayoritario y el que
+     * conserva intacto el comportamiento anterior.
+     *
+     * @param list<RefundRequest> $claims
+     * @return array<int, float> Importe recuperado por id de expediente.
+     */
+    private function allocateRecovered(array $claims, float $recovered): array
+    {
+        if ($claims === []) {
+            return [];
+        }
+
+        if (count($claims) === 1) {
+            return [(int)$claims[0]->getId() => $recovered];
+        }
+
+        $claimedTotalCents = 0;
+        $claimedCents = [];
+        foreach ($claims as $case) {
+            $cents = self::toCents($case->getClaimedAmount());
+            $claimedCents[(int)$case->getId()] = $cents;
+            $claimedTotalCents += $cents;
+        }
+
+        // Sin reclamaciones no hay proporción que aplicar: el efectivo se
+        // reparte a partes iguales para que nada quede sin dueño.
+        if ($claimedTotalCents <= 0) {
+            $recoveredCents = self::toCents($recovered);
+            $base = intdiv($recoveredCents, count($claims));
+            $remainder = $recoveredCents - ($base * count($claims));
+            $allocation = [];
+            foreach ($claims as $index => $case) {
+                $allocation[(int)$case->getId()] = $base + ($index < $remainder ? 1 : 0);
+            }
+
+            return array_map(static fn (int $cents): float => $cents / 100, $allocation);
+        }
+
+        $recoveredCents = self::toCents($recovered);
+
+        // Suelo proporcional de cada parte.
+        $allocation = [];
+        $assigned = 0;
+        foreach ($claims as $case) {
+            $id = (int)$case->getId();
+            $share = intdiv($recoveredCents * $claimedCents[$id], $claimedTotalCents);
+            $allocation[$id] = $share;
+            $assigned += $share;
+        }
+
+        // El residuo de los redondeos se asigna a los expedientes de mayor
+        // reclamación; el identificador desempata para que sea determinista.
+        $remainder = $recoveredCents - $assigned;
+        if ($remainder > 0) {
+            $order = $claims;
+            usort($order, static function (RefundRequest $a, RefundRequest $b) use ($claimedCents): int {
+                $byAmount = $claimedCents[(int)$b->getId()] <=> $claimedCents[(int)$a->getId()];
+
+                return $byAmount !== 0 ? $byAmount : ((int)$a->getId() <=> (int)$b->getId());
+            });
+
+            foreach ($order as $case) {
+                if ($remainder === 0) {
+                    break;
+                }
+                $allocation[(int)$case->getId()]++;
+                $remainder--;
+            }
+        }
+
+        return array_map(static fn (int $cents): float => $cents / 100, $allocation);
+    }
 
     /**
      * Convierte euros a céntimos enteros sin perder el último.

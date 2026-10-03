@@ -489,27 +489,18 @@ class TechnicianController
      */
     private function readRefundInspection(Request $request, int $incidentId): TechnicianRefundInspectionDTO|Response|null
     {
-        $claims = $this->refundRepo->findRestrictedByIncident($incidentId);
+        // El dictamen se aplica solo a los expedientes PENDIENTES. Un expediente
+        // ya dictaminado (avería reabierta dentro de las 48 h del Art. V.6) se
+        // preserva inmutable, en lugar de bloquear la resolución entera con un
+        // 409 que dejaba al técnico sin salida y al expediente atascado.
         $pending = array_values(array_filter(
-            $claims,
+            $this->refundRepo->findRestrictedByIncident($incidentId),
             static fn ($case): bool => $case->awaitsInspection()
         ));
 
         // Nada pendiente de dictaminar: la resolución sigue su curso normal.
         if ($pending === []) {
             return null;
-        }
-
-        // Un expediente ya dictaminado conviviendo con otro pendiente dejaría al
-        // servicio a medias, escribiendo unos y fallando con otros. Se avisa en
-        // lugar de dejar el expediente económico en un estado intermedio.
-        if (count($pending) !== count($claims)) {
-            return Response::error(
-                'INVALID_REFUND_STATE_TRANSITION',
-                'Algunos expedientes de reintegro de esta avería ya tienen dictamen registrado. '
-                    . 'Contacte con Coordinación para regularizarlos antes de resolver.',
-                409
-            );
         }
 
         $raw = $request->getParsedBody()['refund_inspection'] ?? null;

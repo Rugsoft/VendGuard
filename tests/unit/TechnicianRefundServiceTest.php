@@ -813,6 +813,35 @@ $assert(
     $refundRepo->findById($a->getId())?->getStatus() === RefundStatus::REQUIRES_COORDINATOR_APPROVAL
 );
 
+// RF-REF-08: cada expediente guarda SU PARTE proporcional del efectivo
+// recuperado, no el total de la avería. Antes ambos guardaban 5,00 € y el
+// segundo reclamante mostraba una discrepancia falsa; peor aún, Coordinación
+// podía liquidar el importe íntegro de cada uno y pagar más que lo recuperado.
+// 4,00 y 3,00 sobre 5,00 € recuperados dan 2,857… y 2,142…, que en céntimos
+// enteros son 2,86 € y 2,14 € (la suma exacta es 5,00 €).
+$partA = $refundRepo->findById($a->getId())?->getRecoveredAmount();
+$partB = $refundRepo->findById($b->getId())?->getRecoveredAmount();
+$assert(
+    '4.6b El reparto proporcional asigna 2,86 € al reclamante de 4,00 €',
+    $partA === 2.86,
+    'parte A: ' . var_export($partA, true)
+);
+$assert(
+    '4.6c El reparto proporcional asigna 2,14 € al reclamante de 3,00 €',
+    $partB === 2.14,
+    'parte B: ' . var_export($partB, true)
+);
+$assert(
+    '4.6d La suma de las partes es EXACTAMENTE el efectivo recuperado',
+    abs(($partA + $partB) - 5.00) < 0.0001,
+    'suma: ' . ($partA + $partB)
+);
+$assert(
+    '4.6e Ningún expediente registra más de lo que él mismo reclamó',
+    $partA <= 4.00 && $partB <= 3.00,
+    "A={$partA}/4.00 B={$partB}/3.00"
+);
+
 $exactDiscrepancy = null;
 $repeatInspection = null;
 try {
@@ -831,12 +860,19 @@ try {
     $repeatInspection = $e;
 }
 
-// Un expediente ya dictaminado no admite un segundo dictamen: Coordinación ya
-// lo está revisando y sobrescribirlo perdería la trazabilidad (Art. III.3).
+// Un expediente ya dictaminado no admite un segundo dictamen, pero tampoco
+// bloquea la resolución: `inspectBalance()` solo dictamina los pendientes y
+// preserva los ya dictaminados (Art. III.3). Antes, convivir un dictaminado con
+// un pendiente abortaba con 409 y dejaba al expediente atascado sin salida.
 $assert(
-    '4.7 Un segundo dictamen sobre expedientes ya escalados se rechaza con 409',
-    $repeatInspection !== null && $repeatInspection->getHttpStatusCode() === 409,
-    'excepción: ' . ($repeatInspection === null ? 'ninguna' : 'discrepancia=' . var_export($exactDiscrepancy, true))
+    '4.7 Un segundo dictamen no reprocesa los expedientes ya dictaminados',
+    $repeatInspection === null && $exact['processed'] === 0,
+    'excepción: ' . ($repeatInspection === null ? 'ninguna' : get_class($repeatInspection))
+);
+$assert(
+    '4.7b Los expedientes ya escalados conservan su estado',
+    $refundRepo->findById($a->getId())?->getStatus() === RefundStatus::REQUIRES_COORDINATOR_APPROVAL,
+    'estado: ' . ($refundRepo->findById($a->getId())?->getStatus()->value ?? 'N/D')
 );
 
 // El caso más delicado: un expediente YA entregado en mano, re-inspeccionado con
@@ -874,7 +910,7 @@ try {
 }
 $assert(
     '4.8 Un expediente ya entregado en mano NO puede ser sobrescrito por un nuevo dictamen',
-    $overwrite !== null && $overwrite->getHttpStatusCode() === 409,
+    $overwrite === null && $refundRepo->findById($settled->getId())?->getStatus() === RefundStatus::REFUNDED_IN_HAND,
     'excepción real: ' . ($overwrite === null ? 'ninguna' : get_class($overwrite))
 );
 $assert(

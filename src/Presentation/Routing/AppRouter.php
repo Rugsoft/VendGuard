@@ -90,6 +90,9 @@ class AppRouter
         $router->post('/api/coordinator/refunds/{id}/approve', [CoordinatorRefundController::class, 'approve'], [$coordinatorAuth]);
         $router->post('/api/coordinator/refunds/{id}/pay', [CoordinatorRefundController::class, 'pay'], [$coordinatorAuth]);
         $router->post('/api/coordinator/refunds/{id}/reject', [CoordinatorRefundController::class, 'reject'], [$coordinatorAuth]);
+        // Válvula de regularización: dictamina un expediente atascado en
+        // PENDING_INSPECTION (avería cancelada o técnico ya fuera de la máquina).
+        $router->post('/api/coordinator/refunds/{id}/regularize', [CoordinatorRefundController::class, 'regularize'], [$coordinatorAuth]);
 
         $router->get('/api/coordinator/map/active-incidents', [CoordinatorRouteMapController::class, 'getActiveIncidents'], [$coordinatorAuth]);
         $router->get('/api/coordinator/route/settings', [CoordinatorRouteMapController::class, 'getRouteSettings'], [$coordinatorAuth]);

@@ -526,6 +526,12 @@ final class RefundManagementService
             );
         }
 
+        // RF-REF-03/08: el visto bueno no puede hacer que la suma de lo firmado
+        // para la avería supere el efectivo realmente recuperado en ella. Sin
+        // este tope, varios reclamantes de una misma avería se firmaban por su
+        // importe íntegro y se liquidaba más dinero del que salió de la máquina.
+        $this->assertIncidentPayoutWithinRecovered($case, $dto->approvedAmount);
+
         $this->transitionCase($case, RefundStatus::VERIFIED_PENDING_PAYMENT, 'APPROVE', [
             'approved_amount' => $dto->approvedAmount,
             'coordinator_decision' => CoordinatorDecision::APPROVED->value,
@@ -612,6 +618,15 @@ final class RefundManagementService
             );
         }
 
+        // El orden de los errores es parte del contrato: pagar un expediente
+        // desestimado o ya liquidado debe seguir respondiendo 409, no 422. Por
+        // eso la validez de la transición se comprueba antes del tope agregado.
+        $this->assertTransitionAllowed($case->getStatus(), RefundStatus::PAID_DIGITAL, 'PAY');
+
+        // El tope agregado también protege la liquidación: es la última puerta
+        // antes de que el dinero salga.
+        $this->assertIncidentPayoutWithinRecovered($case, $dto->paidAmount);
+
         $this->transitionCase($case, RefundStatus::PAID_DIGITAL, 'PAY', [
             'paid_amount' => $dto->paidAmount,
             'payment_reference' => trim($dto->paymentReference),
@@ -648,6 +663,80 @@ final class RefundManagementService
             $case->getApprovedAmount() ?? $case->getClaimedAmount(),
             RefundRequest::MAX_CLAIMED_AMOUNT
         );
+    }
+
+    /**
+     * Impide que la suma de lo comprometido para una avería supere el efectivo
+     * realmente recuperado en ella (RF-REF-08).
+     *
+     * Es la guarda agregada que faltaba. La igualdad de `registerDigitalPayment()`
+     * compara, por expediente, la liquidación con lo reclamado o lo aprobado, y
+     * por eso no veía nada raro cuando dos reclamantes de una misma avería
+     * cobraban cada uno su importe íntegro: la suma de los pagos superaba el
+     * efectivo que salió de la máquina y la conciliación diaria cuadraba en cada
+     * fila y no cuadraba en el total. El tope se cuenta en céntimos enteros y
+     * solo aplica cuando el técnico ya ha declarado cuánto recuperó (si no,
+     * `recovered_amount` es null y no hay techo que imponer todavía).
+     *
+     * @throws InvalidRefundAmountException
+     */
+    private function assertIncidentPayoutWithinRecovered(RefundRequest $case, float $candidateAmount): void
+    {
+        $incidentId = $case->getIncidentId();
+        if ($incidentId < 1) {
+            return;
+        }
+
+        $siblings = $this->refundRepo->findRestrictedByIncident($incidentId);
+        if ($siblings === []) {
+            return;
+        }
+
+        $recoveredTotal = 0.0;
+        $committedCents = 0;
+        $hasRecovered = false;
+
+        foreach ($siblings as $sibling) {
+            $siblingId = (int)$sibling->getId();
+            if ($sibling->getRecoveredAmount() !== null) {
+                $recoveredTotal += $sibling->getRecoveredAmount();
+                $hasRecovered = true;
+            }
+
+            if ($siblingId === (int)$case->getId()) {
+                continue;
+            }
+
+            // Lo ya comprometido para los demás: el importe liquidado si ya
+            // salió el dinero, y si no el aprobado formalmente.
+            $committedCents += self::toCents($sibling->getPaidAmount() ?? $sibling->getApprovedAmount() ?? 0.0);
+        }
+
+        if (!$hasRecovered) {
+            return;
+        }
+
+        $ceilingCents = self::toCents($recoveredTotal) - $committedCents;
+        if (self::toCents($candidateAmount) > $ceilingCents) {
+            throw new InvalidRefundAmountException(
+                attemptedAmount: $candidateAmount,
+                maximumAllowed: max(0.0, $ceilingCents / 100),
+                message: sprintf(
+                    'El efectivo recuperado en esta avería (%.2f €) no cubre el importe indicado: ya hay %.2f € comprometidos en otros expedientes.',
+                    $recoveredTotal,
+                    $committedCents / 100
+                )
+            );
+        }
+    }
+
+    /**
+     * Convierte euros a céntimos enteros, la unidad en la que se comparan
+     * todos los agregados de este módulo.
+     */
+    private static function toCents(float $amount): int
+    {
+        return (int)round($amount * 100);
     }
 
     /**

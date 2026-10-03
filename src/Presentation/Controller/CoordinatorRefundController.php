@@ -7,13 +7,18 @@ namespace VendGuard\Presentation\Controller;
 use VendGuard\Application\DTO\CoordinatorApprovalDTO;
 use VendGuard\Application\DTO\CoordinatorPaymentDTO;
 use VendGuard\Application\DTO\CoordinatorRefundViewDTO;
+use VendGuard\Application\DTO\TechnicianRefundInspectionDTO;
 use VendGuard\Application\Service\RefundManagementService;
+use VendGuard\Application\Service\TechnicianRefundService;
 use VendGuard\Core\Domain\Exception\InvalidRefundAmountException;
 use VendGuard\Core\Domain\Exception\InvalidRefundStateTransitionException;
 use VendGuard\Core\Domain\Exception\JustificationTooShortException;
+use VendGuard\Core\Domain\Exception\ReceptionDeliveryNotAllowedException;
 use VendGuard\Core\Domain\Exception\RefundNotFoundException;
+use VendGuard\Core\Domain\Model\CashCustodyAction;
 use VendGuard\Core\Domain\Model\RefundRequest;
 use VendGuard\Core\Domain\Model\RefundStatus;
+use VendGuard\Core\Domain\Model\TechnicianFinding;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
@@ -22,6 +27,7 @@ use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
+use VendGuard\Infrastructure\Repository\PdoUnclaimedCashFindingRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
 
@@ -436,6 +442,112 @@ class CoordinatorRefundController
             'paid_amount' => null,
             'preserved_for_audit' => $rejected->isActive(),
         ], 200, 'Reclamación desestimada con motivo registrado. El expediente se conserva para su auditoría.');
+    }
+
+    /**
+     * POST /api/coordinator/refunds/{id}/regularize
+     *
+     * Válvula de regularización: dictamina un expediente que quedó atascado en
+     * `PENDING_INSPECTION` sin que el técnico pudiera volver a la máquina (la
+     * avería se canceló por falsa alarma, o el técnico cerró la intervención
+     * antes de que el segundo consumidor reclamase).
+     *
+     * Sin esta puerta, el 409 del dictamen técnico dejaba al expediente y a su
+     * dinero sin salida. Solo Coordinación puede usarla, y solo sobre un
+     * expediente pendiente: uno ya dictaminado es inmutable (Art. III).
+     *
+     * @return array<string, mixed>
+     */
+    public function regularize(Request $request): Response
+    {
+        $denied = $this->authorizeCoordinator($request);
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        $refundId = $this->resolveRefundId($request);
+        if ($refundId instanceof Response) {
+            return $refundId;
+        }
+
+        $rawFinding = strtoupper(trim((string)($request->getBodyParam('finding') ?? '')));
+        $finding = TechnicianFinding::tryFrom($rawFinding);
+        if ($finding === null) {
+            return Response::error(
+                'MISSING_REGULARIZATION_FINDING',
+                'Indique el dictamen de saldo con el que se regulariza el expediente.',
+                422
+            );
+        }
+
+        $rawRecovered = $request->getBodyParam('recovered_amount');
+        if ($finding === TechnicianFinding::FOUND_PHYSICAL && ($rawRecovered === null || !is_numeric($rawRecovered))) {
+            return Response::error(
+                'INVALID_REFUND_INSPECTION',
+                'Si se ha recuperado dinero físico, indique el importe exacto recuperado.',
+                422
+            );
+        }
+
+        $rawCustody = strtoupper(trim((string)($request->getBodyParam('cash_custody_action') ?? '')));
+        $custody = $rawCustody === '' ? null : CashCustodyAction::tryFrom($rawCustody);
+        if ($rawCustody !== '' && $custody === null) {
+            return Response::error(
+                'INVALID_REFUND_INSPECTION',
+                'La custodia del efectivo sólo admite dejarlo en recepción o custodiarlo en caja central.',
+                422
+            );
+        }
+
+        try {
+            $dto = new TechnicianRefundInspectionDTO(
+                finding: $finding,
+                recoveredAmount: $rawRecovered === null || !is_numeric($rawRecovered) ? null : round((float)$rawRecovered, 2),
+                cashCustodyAction: $custody,
+                receptionistName: (string)($request->getBodyParam('receptionist_name') ?? ''),
+                justification: (string)($request->getBodyParam('justification') ?? '')
+            );
+
+            $status = $this->technicianRefundService()->regularizeCase(
+                $refundId,
+                $dto,
+                $this->buildActor($request)
+            );
+        } catch (InvalidRefundAmountException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode(), $e->getDetails());
+        } catch (ReceptionDeliveryNotAllowedException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode(), $e->getDetails());
+        } catch (JustificationTooShortException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode(), $e->getDetails());
+        } catch (InvalidRefundStateTransitionException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (RefundNotFoundException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (\InvalidArgumentException $e) {
+            return Response::error('INVALID_REFUND_INSPECTION', $e->getMessage(), 422);
+        }
+
+        return Response::json([
+            'id' => $refundId,
+            'status' => $status->value,
+            'technician_finding' => $finding->value,
+            'regularized_by_coordinator' => true,
+        ], 200, 'Expediente regularizado con dictamen de saldo registrado.');
+    }
+
+    /**
+     * Construye el servicio de dictamen bajo demanda, para no cargarlo en cada
+     * petición de la bandeja (que no lo necesita).
+     */
+    private function technicianRefundService(): TechnicianRefundService
+    {
+        return new TechnicianRefundService(
+            $this->refundRepo,
+            new PdoUnclaimedCashFindingRepository(),
+            $this->managementService,
+            null,
+            $this->locationRepo
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────

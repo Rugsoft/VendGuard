@@ -55,12 +55,21 @@ try {
     $ibanValidator = new IbanValidationService();
     $refundService = new RefundManagementService($refundRepo, $ibanValidator);
 
-    // 1. Obtener una máquina activa que no tenga incidencia activa
-    $allMachines = $machineRepo->findActiveByLocationId(1);
-    if (empty($allMachines)) {
-        $allMachines = $machineRepo->findActiveByLocationId(2);
+    // 1. Obtener la sede semilla y una máquina suya SIN incidencia activa.
+    //
+    // Antes esto usaba `findActiveByLocationId(1)` / `(2)` con identificadores
+    // fijos y, si todas las máquinas tenían aviso, un `UPDATE ... WHERE
+    // machine_id = :mid` que cerraba a ciegas los tickets de esa máquina. Eso
+    // dejaba el escenario a merced de qué fila fuese la 1 y podía alterar
+    // averías ajenas. Ahora se ancla a la sede semilla y se aborta si no hay una
+    // máquina libre, en lugar de tocar datos existentes.
+    $location = $locationRepo->findBySiteCode('SEDE-BCN-01');
+    if ($location === null) {
+        throw new RuntimeException("No se encontró la sede semilla SEDE-BCN-01.");
     }
-    
+
+    $allMachines = $machineRepo->findActiveByLocationId((int)$location->getId());
+
     $machine = null;
     foreach ($allMachines as $candidate) {
         $activeInc = $incidentRepo->findActiveByMachineId((int)$candidate->getId());
@@ -71,17 +80,10 @@ try {
     }
 
     if ($machine === null) {
-        // Si todas tienen aviso, usar la primera cerrando o cancelando el previo para la prueba
-        $machine = $allMachines[0] ?? null;
-        if ($machine === null) {
-            throw new RuntimeException("No se encontró ninguna máquina activa de prueba.");
-        }
-        $pdo->prepare("UPDATE incidents SET status = 'CLOSED', is_active_ticket = 0 WHERE machine_id = :mid")->execute([':mid' => $machine->getId()]);
-    }
-
-    $location = $locationRepo->findById($machine->getLocationId());
-    if ($location === null) {
-        throw new RuntimeException("No se encontró la sede de la máquina #{$machine->getId()}.");
+        throw new RuntimeException(
+            'Todas las máquinas de ' . $location->getName()
+            . ' tienen una avería activa. Cierre o atienda una avería antes de generar este caso demo.'
+        );
     }
 
     // 2. Crear una nueva incidencia
