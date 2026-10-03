@@ -129,9 +129,17 @@ final readonly class CoordinatorRefundViewDTO
      * The approved figure wins because that is the formal decision; before any
      * sign-off it falls back to the verified amount and finally to the claim,
      * so the inbox can total the pending liability without a second query.
+     *
+     * If the case is already settled or rejected (terminal state), the pending
+     * liability is 0.00 EUR.
      */
     public function payableAmount(): float
     {
+        $statusEnum = RefundStatus::tryFrom($this->status);
+        if ($statusEnum?->isTerminal()) {
+            return 0.0;
+        }
+
         if ($this->approvedAmount !== null) {
             return $this->approvedAmount;
         }

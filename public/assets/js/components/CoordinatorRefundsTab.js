@@ -496,7 +496,13 @@ export const CoordinatorRefundsTab = {
 
     discrepancyLabel(refund) {
       if (refund?.discrepancy_ratio === null || refund?.discrepancy_ratio === undefined) return '';
+      const ratio = Number(refund.discrepancy_ratio);
+      if (ratio <= 0.0001) return '';
       return `Recuperado ${this.formatAmount(refund.recovered_amount)} vs Reclamado ${this.formatAmount(refund.claimed_amount)}`;
+    },
+
+    isTerminalStatus(status) {
+      return ['REFUNDED_IN_HAND', 'PAID_DIGITAL', 'REJECTED'].includes(status);
     },
 
     formatAmount(value) {
@@ -708,7 +714,7 @@ export const CoordinatorRefundsTab = {
 
                 <td style="padding: 12px 16px; text-align: right;">
                   <div style="font-weight: 700; color: var(--color-ink-slate);">{{ formatAmount(refund.claimed_amount) }}</div>
-                  <div style="font-size: 12px; color: var(--color-success-text);">A pagar: {{ formatAmount(refund.payable_amount) }}</div>
+                  <div v-if="!isTerminalStatus(refund.status)" style="font-size: 12px; color: var(--color-success-text);">A pagar: {{ formatAmount(refund.payable_amount) }}</div>
                 </td>
 
                 <td style="padding: 12px 16px; color: var(--color-ink-secondary);">
