@@ -62,6 +62,17 @@ $pdo->beginTransaction();
 
 try {
     $incidentId = (int)$pdo->query('SELECT `id` FROM `incidents` ORDER BY `id` LIMIT 1')->fetchColumn();
+    if ($incidentId <= 0) {
+        $mRow = $pdo->query('SELECT id, location_id, machine_type FROM machines ORDER BY id LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+        $tRow = $pdo->query("SELECT id FROM users WHERE role = 'TECHNICIAN' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+        $ins = $pdo->prepare("
+            INSERT INTO incidents (ticket_code, machine_id, machine_type_snapshot, location_id, assigned_technician_id, reporter_phone, category, description, urgency, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, '600112233', 'PAYMENT_SYSTEM', 'Incidencia para test de repositorio de reintegros', 'MEDIUM', 'IN_PROGRESS', NOW(), NOW())
+        ");
+        $tCode = 'INC-REF-TEST-' . time();
+        $ins->execute([$tCode, (int)$mRow['id'], $mRow['machine_type'] ?? 'HOT_DRINKS', (int)$mRow['location_id'], (int)$tRow['id']]);
+        $incidentId = (int)$pdo->lastInsertId();
+    }
     $machineId = (int)$pdo->query('SELECT `id` FROM `machines` ORDER BY `id` LIMIT 1')->fetchColumn();
     $locationId = (int)$pdo->query('SELECT `id` FROM `locations` ORDER BY `id` LIMIT 1')->fetchColumn();
     $technicianId = (int)$pdo->query("SELECT `id` FROM `users` WHERE `role` = 'TECHNICIAN' ORDER BY `id` LIMIT 1")->fetchColumn();

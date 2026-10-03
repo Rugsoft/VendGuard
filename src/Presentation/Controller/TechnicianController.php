@@ -413,8 +413,11 @@ class TechnicianController
             }
         }
 
-        // 9. Declaracion obligatoria universal de repuestos en la resolucion (RF-REP-05 / Modulo M2)
+        // 9. Declaracion obligatoria de repuestos en la resolucion (RF-REP-05 / Modulo M2)
         $actor = $this->extractActor($request);
+        if (!array_key_exists('replaced_parts_declared', $body) && !array_key_exists('replaced_parts', $body)) {
+            $body['replaced_parts_declared'] = false;
+        }
 
         try {
             $result = $this->traceabilityService->resolveIncidentWithParts($incidentId, $techId, $body, $actor);
