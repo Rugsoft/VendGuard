@@ -182,4 +182,151 @@ class AuditLogger
 
         return $this->auditRepo->log($event);
     }
+
+    /**
+     * Registra un evento sobre una orden de mantenimiento preventivo (Módulo 05).
+     *
+     * Permite emitir eventos/historyicos nuevos con la entidad correcta sin
+     * alterar los ya escritos bajo `MACHINE`/`TICKET` (Art. III.3).
+     *
+     * @param int $preventiveOrderId ID de la orden en `preventive_orders`.
+     * @param string $action Acción ejecutada (ej. 'CREATE_PREVENTIVE_ORDER', 'COMPLETE_PREVENTIVE_ORDER').
+     * @param array{id: int|null, role: string, name: string} $actor Datos del causante.
+     * @param array<string, mixed>|null $previousState Estado anterior.
+     * @param array<string, mixed> $newState Estado resultante.
+     * @param array<string, mixed>|null $metadata Información adicional.
+     * @return AuditEvent Evento persistido con ID generado.
+     */
+    public function logPreventiveOrderEvent(
+        int $preventiveOrderId,
+        string $action,
+        array $actor,
+        ?array $previousState,
+        array $newState,
+        ?array $metadata = null
+    ): AuditEvent {
+        $event = new AuditEvent(
+            id: null,
+            entityType: AuditEvent::ENTITY_PREVENTIVE_ORDER,
+            entityId: $preventiveOrderId,
+            action: strtoupper(trim($action)),
+            userId: $actor['id'] ?? null,
+            userRole: $actor['role'] ?? 'SYSTEM',
+            userName: $actor['name'] ?? 'Sistema',
+            previousState: $previousState,
+            newState: $newState,
+            metadata: $metadata
+        );
+
+        return $this->auditRepo->log($event);
+    }
+
+    /**
+     * Registra un evento sobre un certificado sanitario (Módulo 05 / Art. II).
+     *
+     * @param int $certificateId ID del certificado en `sanitary_certificates`.
+     * @param string $action Acción ejecutada (ej. 'ISSUE_SANITARY_CERTIFICATE', 'SUSPEND_SANITARY_CERTIFICATE').
+     * @param array{id: int|null, role: string, name: string} $technician Datos del técnico actuante.
+     * @param array<string, mixed> $newState Estado resultante.
+     * @param array<string, mixed>|null $metadata Información adicional.
+     * @return AuditEvent Evento persistido con ID generado.
+     */
+    public function logSanitaryCertificateEvent(
+        int $certificateId,
+        string $action,
+        array $technician,
+        array $newState,
+        ?array $metadata = null
+    ): AuditEvent {
+        $event = new AuditEvent(
+            id: null,
+            entityType: AuditEvent::ENTITY_SANITARY_CERTIFICATE,
+            entityId: $certificateId,
+            action: strtoupper(trim($action)),
+            userId: $technician['id'] ?? null,
+            userRole: $technician['role'] ?? 'TECHNICIAN',
+            userName: $technician['name'] ?? 'Técnico',
+            previousState: null,
+            newState: $newState,
+            metadata: $metadata
+        );
+
+        return $this->auditRepo->log($event);
+    }
+
+    /**
+     * Registra un evento del ciclo economico de un expediente de reintegro (RNF-REF-01).
+     *
+     * Cubre la trazabilidad completa exigida por el Art. III.3 sobre el dinero:
+     * creacion, dictamen tecnico, deposito en conserjeria, validacion de PIN,
+     * aprobacion, rechazo y liquidacion digital con referencia bancaria.
+     *
+     * @param int $refundRequestId ID del expediente en `refund_requests`.
+     * @param string $action Accion ejecutada (ej. 'CREATE_REFUND_REQUEST',
+     *   'VALIDATE_PICKUP_PIN', 'APPROVE_REFUND', 'PAY_REFUND', 'REJECT_REFUND').
+     * @param array{id: int|null, role: string, name: string} $actor Datos del causante.
+     * @param array<string, mixed>|null $previousState Estado anterior.
+     * @param array<string, mixed> $newState Estado resultante.
+     * @param array<string, mixed>|null $metadata Informacion adicional.
+     * @return AuditEvent Evento persistido con ID generado.
+     */
+    public function logRefundEvent(
+        int $refundRequestId,
+        string $action,
+        array $actor,
+        ?array $previousState,
+        array $newState,
+        ?array $metadata = null
+    ): AuditEvent {
+        $event = new AuditEvent(
+            id: null,
+            entityType: AuditEvent::ENTITY_REFUND_REQUEST,
+            entityId: $refundRequestId,
+            action: strtoupper(trim($action)),
+            userId: $actor['id'] ?? null,
+            userRole: $actor['role'] ?? 'SYSTEM',
+            userName: $actor['name'] ?? 'Sistema',
+            previousState: $previousState,
+            newState: $newState,
+            metadata: $metadata
+        );
+
+        return $this->auditRepo->log($event);
+    }
+
+    /**
+     * Registra el hallazgo de efectivo recuperado sin reclamacion previa (RF-REF-04).
+     *
+     * El dinero atascado encontrado de oficio tambien exige trazabilidad
+     * contable inmutable, aunque no llegue a liquidarse nunca.
+     *
+     * @param int $findingId ID del hallazgo en `unclaimed_cash_findings`.
+     * @param string $action Accion ejecutada (ej. 'REGISTER_UNCLAIMED_CASH').
+     * @param array{id: int|null, role: string, name: string} $technician Datos del tecnico actuante.
+     * @param array<string, mixed> $newState Estado resultante.
+     * @param array<string, mixed>|null $metadata Informacion adicional.
+     * @return AuditEvent Evento persistido con ID generado.
+     */
+    public function logUnclaimedCashEvent(
+        int $findingId,
+        string $action,
+        array $technician,
+        array $newState,
+        ?array $metadata = null
+    ): AuditEvent {
+        $event = new AuditEvent(
+            id: null,
+            entityType: AuditEvent::ENTITY_UNCLAIMED_CASH_FINDING,
+            entityId: $findingId,
+            action: strtoupper(trim($action)),
+            userId: $technician['id'] ?? null,
+            userRole: $technician['role'] ?? 'TECHNICIAN',
+            userName: $technician['name'] ?? 'Tecnico',
+            previousState: null,
+            newState: $newState,
+            metadata: $metadata
+        );
+
+        return $this->auditRepo->log($event);
+    }
 }

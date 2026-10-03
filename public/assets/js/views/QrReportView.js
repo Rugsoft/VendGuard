@@ -19,6 +19,7 @@
 
 import { api } from '../api.js';
 import { QrInactiveMachineNotice } from '../components/QrInactiveMachineNotice.js';
+import { QrRefundRequestBlock } from '../components/QrRefundRequestBlock.js';
 import { QrSanitaryQuarantineModal } from '../components/QrSanitaryQuarantineModal.js';
 import { QrSeasonalPauseNotice } from '../components/QrSeasonalPauseNotice.js';
 
@@ -59,6 +60,7 @@ export const QrReportView = {
   name: 'QrReportView',
   components: {
     QrInactiveMachineNotice,
+    QrRefundRequestBlock,
     QrSanitaryQuarantineModal,
     QrSeasonalPauseNotice
   },
@@ -91,7 +93,8 @@ export const QrReportView = {
       // Formulario de nuevo reporte (CAN_REPORT)
       category: 'TEMPERATURE_COLD',
       description: '',
-      retainedMoney: '',
+      refundClaim: { refund_requested: false },
+      refundClaimValid: true,
       reporterName: '',
       reporterPhone: '',
       photoFile: null,
@@ -145,6 +148,9 @@ export const QrReportView = {
       if (!this.submittedTicket?.ticket_code) return '';
       const code = this.submittedTicket.ticket_code;
       return code.startsWith('#') ? code : `#${code}`;
+    },
+    refundRequested() {
+      return this.refundClaim?.refund_requested === true;
     }
   },
   mounted() {
@@ -254,8 +260,18 @@ export const QrReportView = {
     /**
      * Envía el formulario público de reporte de avería (RF-03, RF-04)
      */
+    handleRefundClaimValidity(valid) {
+      this.refundClaimValid = Boolean(valid);
+    },
+
+    handleRefundClaimUpdate(claim) {
+      this.refundClaim = claim && typeof claim === 'object'
+        ? claim
+        : { refund_requested: false };
+    },
+
     async submitReport() {
-      if (!this.isDescriptionValid || this.isSubmitting) {
+      if (!this.isDescriptionValid || this.isSubmitting || (this.refundRequested && !this.refundClaimValid)) {
         return;
       }
 
@@ -272,7 +288,11 @@ export const QrReportView = {
           payload.append('description', this.description.trim());
           if (this.reporterName) payload.append('reporter_name', this.reporterName.trim());
           if (this.reporterPhone) payload.append('reporter_phone', this.reporterPhone.trim());
-          if (this.retainedMoney) payload.append('retained_money_amount', String(this.retainedMoney));
+          if (this.refundRequested) {
+            for (const [key, value] of Object.entries(this.refundClaim)) {
+              payload.append(key, value === null || value === undefined ? '' : String(value));
+            }
+          }
           payload.append('photo', this.photoFile);
         } else {
           payload = {
@@ -281,7 +301,7 @@ export const QrReportView = {
             description: this.description.trim(),
             reporter_name: this.reporterName.trim() || null,
             reporter_phone: this.reporterPhone.trim() || null,
-            retained_money_amount: this.retainedMoney ? Number(this.retainedMoney) : null
+            ...(this.refundRequested ? this.refundClaim : {})
           };
         }
 
@@ -293,7 +313,8 @@ export const QrReportView = {
           status: data.status || 'REGISTERED',
           urgency: data.urgency || '',
           merged: Boolean(data.merged),
-          message: data.message || res.message || 'Incidencia registrada con éxito.'
+          message: data.message || res.message || 'Incidencia registrada con éxito.',
+          refund: data.refund || null
         };
         this.submitted = true;
       } catch (err) {
@@ -397,6 +418,21 @@ export const QrReportView = {
           <p class="qr-confirmation-message" data-testid="confirmation-message">
             {{ submittedTicket?.message || 'Nuestro equipo técnico ha recibido tu aviso y se ocupará de resolver la avería lo antes posible.' }}
           </p>
+
+          <section v-if="submittedTicket?.refund" class="qr-card qr-refund-receipt-card" data-testid="refund-receipt-card" aria-labelledby="refund-receipt-title">
+            <h3 id="refund-receipt-title" class="qr-card-title">Resguardo de tu solicitud de devolución</h3>
+            <p class="qr-confirmation-message">Importe solicitado: <strong>{{ Number(submittedTicket.refund.claimed_amount).toFixed(2) }} €</strong></p>
+            <div v-if="submittedTicket.refund.pickup_pin" class="qr-refund-pin" data-testid="refund-pickup-pin" style="padding: 14px; margin: 12px 0; text-align: center; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px); background: var(--color-canvas, #f9fafb);">
+              <span class="qr-summary-label">PIN para recoger el dinero en conserjería</span>
+              <strong style="display: block; margin-top: 4px; color: var(--color-primary, #2560ff); font-size: 2rem; letter-spacing: 0.2em;" aria-label="PIN de recogida">{{ submittedTicket.refund.pickup_pin }}</strong>
+            </div>
+            <a
+              v-if="submittedTicket.refund.tracking_url"
+              :href="submittedTicket.refund.tracking_url"
+              class="btn btn-secondary qr-btn-block"
+              data-testid="refund-tracking-link"
+            >Consultar el estado de tu devolución</a>
+          </section>
 
           <div class="qr-thank-you-box">
             <p>🙏 Gracias por tu colaboración para mantener el servicio en perfecto estado.</p>
@@ -610,22 +646,14 @@ export const QrReportView = {
                 </span>
               </div>
 
-              <!-- Dinero Retenido (opcional) -->
-              <div class="form-group">
-                <label class="form-label" for="money-input">
-                  Dinero retenido / Importe no devuelto (€) <span class="text-muted">(opcional)</span>
-                </label>
-                <input
-                  id="money-input"
-                  v-model="retainedMoney"
-                  type="number"
-                  step="0.05"
-                  min="0"
-                  class="form-control"
-                  placeholder="0.00"
-                  data-testid="retained-money-input"
-                />
-              </div>
+              <!-- Solicitud de devolución opcional (RF-REF-01/02) -->
+              <QrRefundRequestBlock
+                :model-value="refundClaim"
+                :has-physical-reception="location?.has_physical_reception !== false"
+                :disabled="isSubmitting"
+                @update:model-value="handleRefundClaimUpdate"
+                @validity-change="handleRefundClaimValidity"
+              />
 
               <!-- Datos de Contacto Opcionales -->
               <div class="form-group-grid">
@@ -677,7 +705,7 @@ export const QrReportView = {
               <button
                 type="submit"
                 class="btn btn-primary qr-btn-block qr-btn-submit"
-                :disabled="!isDescriptionValid || isSubmitting"
+                :disabled="!isDescriptionValid || isSubmitting || (refundRequested && !refundClaimValid)"
                 data-testid="submit-report-btn"
               >
                 <span v-if="isSubmitting" class="qr-btn-spinner"></span>

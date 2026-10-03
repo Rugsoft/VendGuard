@@ -10,6 +10,7 @@
  * 4. AssignTechnician modal with mandatory justification for urgency overrides (RF-05 / EARS 5.3).
  * 5. CancelIncident modal enforcing mandatory discard reason (RF-06 / EARS 6.1, Soft Delete).
  * 6. Internal login form if unauthenticated or missing coordinator role (RF-04).
+ * 7. Refunds inbox tab with double approval, digital settlement and motivated rejection (T-REF-18).
  */
 
 import { api } from '../api.js';
@@ -29,6 +30,7 @@ import { CoordinatorPreventiveSettingsModal } from '../components/CoordinatorPre
 import { CoordinatorSparePartsTab } from '../components/CoordinatorSparePartsTab.js';
 import { CoordinatorSparePartsAnalyticsTab } from '../components/CoordinatorSparePartsAnalyticsTab.js';
 import { CoordinatorTerritorialMapTab } from '../components/CoordinatorTerritorialMapTab.js';
+import { CoordinatorRefundsTab } from '../components/CoordinatorRefundsTab.js';
 
 // Canonical mapping for bilingual status values
 const STATUS_CANONICAL_MAP = {
@@ -79,13 +81,14 @@ export const CoordinatorDashboardView = {
     CoordinatorPreventiveSettingsModal,
     CoordinatorSparePartsTab,
     CoordinatorSparePartsAnalyticsTab,
-    CoordinatorTerritorialMapTab
+    CoordinatorTerritorialMapTab,
+    CoordinatorRefundsTab
   },
   emits: ['assigned', 'cancelled', 'refresh'],
   data() {
     return {
       // Navigation Tabs (RF-FLEET-01, RF-03, RF-05, RF-PREV-02, RF-REP-01, RF-REP-09)
-      activeTab: 'incidents', // 'incidents' | 'fleet' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'admin' | 'metrics'
+      activeTab: 'incidents', // 'incidents' | 'fleet' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'refunds' | 'admin' | 'metrics'
       activeAdminSubTab: 'locations', // 'locations' | 'machines' | 'users'
       activePreventiveSubTab: 'dashboard', // 'dashboard' | 'orders'
       showPreventiveSettingsModal: false,
@@ -733,6 +736,17 @@ export const CoordinatorDashboardView = {
           <button
             type="button"
             class="vg-btn"
+            :class="activeTab === 'refunds' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
+            @click="activeTab = 'refunds'"
+            data-testid="tab-refunds"
+          >
+            💶 Reintegros
+          </button>
+
+          <button
+            type="button"
+            class="vg-btn"
             :class="activeTab === 'admin' ? 'vg-btn-primary' : 'vg-btn-secondary'"
             style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
             @click="activeTab = 'admin'"
@@ -1174,6 +1188,11 @@ export const CoordinatorDashboardView = {
       <CoordinatorSparePartsAnalyticsTab
         v-else-if="activeTab === 'analitica-repuestos'"
         @open-catalog="activeTab = 'repuestos'"
+      />
+
+      <!-- CONTENIDO PESTAÑA: REINTEGROS Y LIQUIDACIÓN DIGITAL (RF-REF-03, RF-REF-07, RF-REF-08 / T-REF-18) -->
+      <CoordinatorRefundsTab
+        v-else-if="activeTab === 'refunds'"
       />
 
       <!-- CONTENIDO PESTAÑA: MAPA TERRITORIAL DE TRIAJE (RF-MAP-09 / T-MAP-16) -->

@@ -25,9 +25,8 @@ echo "======================================================================\n\n
 
 $pdo = ConnectionFactory::getConnection();
 
-// Limpiar incidencias previas para aislamiento del test
-$pdo->exec("DELETE FROM `incident_history`");
-$pdo->exec("DELETE FROM `incidents`");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 // Asegurar semillas
 $seedRunner = new SeedRunner($pdo);
@@ -81,8 +80,8 @@ if ($loc1 !== null) {
     echo "\n--- Caso 2: Detección de aviso activo (ticket_code y status) ---\n";
     $testTicketCode = 'INC-2026-TEST-T12';
 
-    // Limpiar previo si existiera
-    $pdo->prepare("DELETE FROM `incidents` WHERE `ticket_code` = :tc")->execute([':tc' => $testTicketCode]);
+    // Limpiar previo si existiera (purga dirigida FK-segura)
+    TestDataCleaner::purgeIncidentByTicket($pdo, $testTicketCode);
 
     // Insertar incidencia de prueba en estado REGISTERED
     $stmt = $pdo->prepare("
@@ -156,8 +155,8 @@ if ($loc1 !== null) {
 
     $assert("4.1 VEND-0101 ya NO reporta aviso activo tras CLOSED (active_incident es null)", $m101AfterClosed !== null && !$m101AfterClosed->hasActiveIncident());
 
-    // Limpieza de datos de prueba
-    $pdo->prepare("DELETE FROM `incidents` WHERE `id` = :id")->execute([':id' => $incidentId]);
+    // Limpieza de datos de prueba (purga dirigida FK-segura)
+    TestDataCleaner::purgeIncident($pdo, (int)$incidentId);
 
     // =====================================================================
     // CASO 5: Creación de nueva máquina (create)
@@ -225,7 +224,7 @@ if ($loc1 !== null) {
 
     // Insertar ticket en progreso
     $ticketCodeTest = 'INC-TEST-ATW-01';
-    $pdo->prepare("DELETE FROM `incidents` WHERE `ticket_code` = :tc")->execute([':tc' => $ticketCodeTest]);
+    TestDataCleaner::purgeIncidentByTicket($pdo, $ticketCodeTest);
     $stmt = $pdo->prepare("
         INSERT INTO `incidents` (`ticket_code`, `machine_id`, `location_id`, `category`, `description`, `urgency`, `status`)
         VALUES (:tc, :mid, :lid, 'PAYMENT_FAILURE', 'Fallo validador monedas', 'MEDIUM', 'IN_PROGRESS')
@@ -249,8 +248,8 @@ if ($loc1 !== null) {
     $assert("8.7 hasActiveTicketOrWarranty retorna false tras CLOSED", $machineRepo->hasActiveTicketOrWarranty($createdId) === false);
     $assert("8.8 getActiveTicketOrWarranty retorna null tras CLOSED", $machineRepo->getActiveTicketOrWarranty($createdId) === null);
 
-    // Limpieza de ticket
-    $pdo->prepare("DELETE FROM `incidents` WHERE `id` = :id")->execute([':id' => $incAtwId]);
+    // Limpieza de ticket (purga dirigida FK-segura)
+    TestDataCleaner::purgeIncident($pdo, (int)$incAtwId);
 
     // =====================================================================
     // CASO 9: Baja lógica (softDelete) y reactivación con reubicación (restoreWithLocation)

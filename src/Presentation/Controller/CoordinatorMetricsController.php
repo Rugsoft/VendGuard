@@ -33,6 +33,20 @@ use VendGuard\Presentation\Http\Response;
  */
 class CoordinatorMetricsController
 {
+    /**
+     * Tope de filas del LISTADO paginado del audit log (RF-05).
+     *
+     * El tope vive aquí y no en el repositorio. `PdoAuditLogRepository::findEvents()`
+     * recortaba a 100 por su cuenta, un valor pensado para el listado, y esa
+     * decisión se colaba en la exportación: el endpoint anunciaba 10.000 registros
+     * y entregaba 99, sin avisar. Un export que se calla lo que no incluye es peor
+     * que uno que falla, porque la auditoría se apoya en él (Art. III).
+     */
+    private const AUDIT_PAGE_MAX = 100;
+
+    /** Marca de orden de bytes que `MetricsExportService` antepone a todo CSV. */
+    private const CSV_BOM = "\xEF\xBB\xBF";
+
     private MetricsCalculationService $metricsService;
     private MetricsExportService $exportService;
     private AuditLogRepositoryInterface $auditRepo;
@@ -62,7 +76,9 @@ class CoordinatorMetricsController
         } catch (InvalidArgumentException $e) {
             return Response::error('INVALID_FILTER_PARAMS', $e->getMessage(), 400);
         } catch (Throwable $e) {
-            return Response::error('INTERNAL_SERVER_ERROR', 'Error al procesar el resumen de métricas: ' . $e->getMessage(), 500);
+            $this->logInternalFailure($e);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'Error al procesar el resumen de métricas.', 500);
         }
     }
 
@@ -81,7 +97,9 @@ class CoordinatorMetricsController
         } catch (InvalidArgumentException $e) {
             return Response::error('INVALID_FILTER_PARAMS', $e->getMessage(), 400);
         } catch (Throwable $e) {
-            return Response::error('INTERNAL_SERVER_ERROR', 'Error al procesar el desglose analítico: ' . $e->getMessage(), 500);
+            $this->logInternalFailure($e);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'Error al procesar el desglose analítico.', 500);
         }
     }
 
@@ -109,7 +127,9 @@ class CoordinatorMetricsController
         } catch (InvalidArgumentException $e) {
             return Response::error('INVALID_FILTER_PARAMS', $e->getMessage(), 400);
         } catch (Throwable $e) {
-            return Response::error('INTERNAL_SERVER_ERROR', 'Error al exportar métricas en CSV: ' . $e->getMessage(), 500);
+            $this->logInternalFailure($e);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'Error al exportar métricas en CSV.', 500);
         }
     }
 
@@ -122,7 +142,7 @@ class CoordinatorMetricsController
     {
         try {
             $page = max(1, (int)$request->getQuery('page', 1));
-            $limit = max(1, min(100, (int)$request->getQuery('limit', 50)));
+            $limit = max(1, min(self::AUDIT_PAGE_MAX, (int)$request->getQuery('limit', 50)));
             $offset = ($page - 1) * $limit;
 
             $filters = [];
@@ -170,7 +190,9 @@ class CoordinatorMetricsController
                 'items' => $items,
             ]);
         } catch (Throwable $e) {
-            return Response::error('INTERNAL_SERVER_ERROR', 'Error al consultar el registro de auditoría: ' . $e->getMessage(), 500);
+            $this->logInternalFailure($e);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'Error al consultar el registro de auditoría.', 500);
         }
     }
 
@@ -212,6 +234,28 @@ class CoordinatorMetricsController
             $events = $this->auditRepo->findEvents($filters, MetricsExportService::AUDIT_EXPORT_LIMIT, 0);
             $csvContent = $this->exportService->exportAuditLogCsv($events);
 
+            // Si el recorte del límite de seguridad ha dejado fuera eventos, el
+            // CSV lo declara en su propia cabecera. Un fichero de auditoría que
+            // parece completo y no lo es induce a firmar una conformidad sobre
+            // una ventana temporal que nadie ha mirado.
+            //
+            // El aviso va DETRÁS del BOM UTF-8, no delante:Excel decide el
+            // formato de un CSV por sus tres primeros bytes, y una línea de
+            // aviso por delante convertiría la exportación en latin-1 con los
+            // acentos rotos. El BOM va primero siempre; el aviso, segundo.
+            $totalEvents = $this->auditRepo->countEvents($filters);
+            if ($totalEvents > count($events)) {
+                $notice = sprintf(
+                    "# ATENCION: EXPORTACION PARCIAL. %d de %d eventos de auditoria exportados. Filtre por fecha o entidad para obtener el historico completo.\n",
+                    count($events),
+                    $totalEvents
+                );
+
+                $csvContent = str_starts_with($csvContent, self::CSV_BOM)
+                    ? self::CSV_BOM . $notice . substr($csvContent, strlen(self::CSV_BOM))
+                    : $notice . $csvContent;
+            }
+
             $dateSuffix = date('Y-m-d');
             $filename = "vendguard_audit_log_{$dateSuffix}.csv";
 
@@ -221,7 +265,21 @@ class CoordinatorMetricsController
                 'Cache-Control' => 'no-cache, no-store, must-revalidate',
             ]);
         } catch (Throwable $e) {
-            return Response::error('INTERNAL_SERVER_ERROR', 'Error al exportar registro de auditoría: ' . $e->getMessage(), 500);
+            $this->logInternalFailure($e);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'Error al exportar registro de auditoría.', 500);
         }
+    }
+
+    /**
+     * Los handlers 500 no devuelven el mensaje de la excepción al cliente.
+     *
+     * Un `PDOException` incluye la consulta SQL que falló, y esa consulta
+     * describe la tabla, las columnas y los valores comparados: es un mapa de la
+     * base de datos servido por HTTP. El rastro completo se queda en el log.
+     */
+    private function logInternalFailure(Throwable $e): void
+    {
+        error_log('[vendguard] ' . $e);
     }
 }

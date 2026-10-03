@@ -46,11 +46,8 @@ echo "======================================================================\n\n
 
 $pdo = ConnectionFactory::getConnection();
 
-// 1. Limpieza estricta y restauración de semillas
-$pdo->exec("DELETE FROM spare_part_requests");
-$pdo->exec("DELETE FROM incident_replaced_parts");
-$pdo->exec("DELETE FROM spare_part_compatibilities");
-$pdo->exec("DELETE FROM spare_parts");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedAll();
@@ -571,7 +568,9 @@ $assert("8.3 La solicitud pendiente contiene la justificación técnica exacta d
 // =========================================================================
 $pdo->exec("DELETE FROM spare_part_requests WHERE custom_part_description = '{$customDesc}'");
 if ($createdIncidentId !== null) {
-    $pdo->exec("DELETE FROM incidents WHERE id = {$createdIncidentId}");
+    if ($createdIncidentId !== null) {
+    TestDataCleaner::purgeIncident($pdo, (int)$createdIncidentId);
+}
 }
 $pdo->exec("DELETE FROM incident_replaced_parts WHERE machine_id = {$machineId}");
 

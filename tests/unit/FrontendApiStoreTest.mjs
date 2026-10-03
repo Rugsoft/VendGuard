@@ -232,6 +232,113 @@ assert('4.2 Alert contains correct message and type', state.alerts[0].message ==
 removeAlert(alertId);
 assert('4.3 removeAlert removes alert by ID', state.alerts.length === 0);
 
+// ---------------------------------------------------------------------
+// TEST GROUP 5: Technician refund inspection API (T-REF-16)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 5: Technician refund inspection API ---');
+
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({ success: true, data: { has_pending_verdict: true, requests: [] } })
+};
+const refundInspection = await api.technician.getRefundInspection(42);
+assert('5.1 Technician refund inspection uses its incident-scoped GET endpoint',
+  lastFetchCall.url === '/api/technician/incidents/42/refund' && lastFetchCall.options.method === 'GET');
+assert('5.2 Technician refund inspection unpacks the JSON data envelope',
+  refundInspection?.has_pending_verdict === true && Array.isArray(refundInspection.requests));
+
+// ---------------------------------------------------------------------
+// TEST GROUP 6: Site refund desk API (T-REF-17)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 6: Site refund desk API ---');
+
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({ success: true, data: { total: 1, ready_for_pickup_total: 1, refunds: [] } })
+};
+const siteRefunds = await api.site.getRefunds();
+assert('6.1 Site refunds list uses the location refunds GET endpoint',
+  lastFetchCall.url === '/api/location/refunds' && lastFetchCall.options.method === 'GET');
+assert('6.2 Site refunds list unpacks the envelope totals',
+  siteRefunds?.total === 1 && siteRefunds?.ready_for_pickup_total === 1 && Array.isArray(siteRefunds.refunds));
+
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({ success: true, data: { id: 21, status: 'REFUNDED_IN_HAND', claimant_name_anon: 'Laura S.' } })
+};
+const delivered = await api.site.deliverRefund(21, '4821');
+assert('6.3 Handover posts the 4-digit PIN to the deliver endpoint',
+  lastFetchCall.url === '/api/location/refunds/21/deliver'
+    && lastFetchCall.options.method === 'POST'
+    && lastFetchCall.options.body === JSON.stringify({ pickup_pin: '4821' }));
+assert('6.4 Handover returns the updated anonymized case',
+  delivered?.status === 'REFUNDED_IN_HAND' && delivered?.claimant_name_anon === 'Laura S.');
+
+// ---------------------------------------------------------------------
+// TEST GROUP 7: Coordinator refunds inbox API (T-REF-18)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 7: Coordinator refunds inbox API ---');
+
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({ success: true, data: { total: 2, requires_approval_total: 1, items: [] } })
+};
+const inbox = await api.coordinator.getRefunds({ status: 'REQUIRES_COORDINATOR_APPROVAL', requires_approval_only: 1 });
+assert('7.1 Coordinator inbox targets the global refunds endpoint with its filters',
+  lastFetchCall.url === '/api/coordinator/refunds?status=REQUIRES_COORDINATOR_APPROVAL&requires_approval_only=1'
+    && lastFetchCall.options.method === 'GET');
+assert('7.2 Coordinator inbox unpacks the pending-approval counter',
+  inbox?.requires_approval_total === 1 && Array.isArray(inbox.items));
+
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({ success: true, data: { id: 31, status: 'VERIFIED_PENDING_PAYMENT' } })
+};
+const approvedRefund = await api.coordinator.approveRefund(31, 12.5, 'Autorizado tras revisar el histórico de ventas.');
+assert('7.3 Double approval posts the final amount and the notes',
+  lastFetchCall.url === '/api/coordinator/refunds/31/approve'
+    && lastFetchCall.options.method === 'POST'
+    && lastFetchCall.options.body === JSON.stringify({ approved_amount: 12.5, notes: 'Autorizado tras revisar el histórico de ventas.' })
+    && approvedRefund?.status === 'VERIFIED_PENDING_PAYMENT');
+
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({ success: true, data: { id: 32, status: 'PAID_DIGITAL', payment_reference: 'BIZUM-20261002-998822' } })
+};
+const paidRefund = await api.coordinator.payRefund(32, 'BIZUM-20261002-998822', 8);
+assert('7.4 Digital settlement posts the bank reference and the settled amount',
+  lastFetchCall.url === '/api/coordinator/refunds/32/pay'
+    && lastFetchCall.options.body === JSON.stringify({ payment_reference: 'BIZUM-20261002-998822', paid_amount: 8 })
+    && paidRefund?.payment_reference === 'BIZUM-20261002-998822');
+
+await api.coordinator.payRefund(33, 'TRF-20261002-0001');
+assert('7.5 Settlement without an explicit amount lets the backend apply the approved figure',
+  lastFetchCall.options.body === JSON.stringify({ payment_reference: 'TRF-20261002-0001' }));
+
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({ success: true, data: { id: 35, status: 'REJECTED', coordinator_decision: 'REJECTED' } })
+};
+const rejectedRefund = await api.coordinator.rejectRefund(35, 'Inspección sin monedas atascadas y máquina operando con normalidad.');
+assert('7.6 Motivated rejection posts the mandatory written reason',
+  lastFetchCall.url === '/api/coordinator/refunds/35/reject'
+    && lastFetchCall.options.body === JSON.stringify({ rejection_reason: 'Inspección sin monedas atascadas y máquina operando con normalidad.' })
+    && rejectedRefund?.status === 'REJECTED');
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);

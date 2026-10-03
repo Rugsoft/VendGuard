@@ -8,6 +8,8 @@
  * 3. Clearly differentiate between operational machines and those with active incidents.
  * 4. Filter by status (All, Active Incidents, Operational).
  * 5. Trigger report, comment or reopen workflows.
+ * 6. Supervise sanitary certificates and hand over refund envelopes with the
+ *    pickup PIN (RF-PREV-06, RF-PREV-07, RF-REF-06).
  */
 
 import { api } from '../api.js';
@@ -18,6 +20,7 @@ import { ReopenTicketModal } from '../components/ReopenTicketModal.js';
 import { SiteSanitaryStatusTab } from '../components/SiteSanitaryStatusTab.js';
 import { SanitaryCertificateModal } from '../components/SanitaryCertificateModal.js';
 import { SiteGlobalCertificateModal } from '../components/SiteGlobalCertificateModal.js';
+import { LocationRefundsTab } from '../components/LocationRefundsTab.js';
 
 export const LocationPortalView = {
   name: 'LocationPortalView',
@@ -27,7 +30,8 @@ export const LocationPortalView = {
     ReopenTicketModal,
     SiteSanitaryStatusTab,
     SanitaryCertificateModal,
-    SiteGlobalCertificateModal
+    SiteGlobalCertificateModal,
+    LocationRefundsTab
   },
   emits: ['report-incident', 'add-comment', 'reopen-incident'],
   data() {
@@ -38,7 +42,7 @@ export const LocationPortalView = {
       machines: [],
       isLoadingMachines: false,
       machinesError: '',
-      activePortalTab: 'machines', // 'machines' | 'sanitary'
+      activePortalTab: 'machines', // 'machines' | 'sanitary' | 'refunds'
       activeFilter: 'all', // 'all' | 'incident' | 'operational'
       selectedMachine: null,
       showReportModal: false,
@@ -328,6 +332,23 @@ export const LocationPortalView = {
           >
             🛡️ Control Higiénico y Certificados
           </button>
+          <button
+            type="button"
+            class="vg-btn"
+            :style="{
+              backgroundColor: activePortalTab === 'refunds' ? 'var(--color-primary, #2560ff)' : '#ffffff',
+              color: activePortalTab === 'refunds' ? '#ffffff' : 'var(--color-slate, #2c333f)',
+              border: '1px solid ' + (activePortalTab === 'refunds' ? 'var(--color-primary, #2560ff)' : 'var(--color-hairline, #c8cfda)'),
+              borderRadius: 'var(--radius-interactive, 4px)',
+              fontSize: '13px',
+              fontWeight: '600',
+              height: '36px',
+              padding: '0 16px'
+            }"
+            @click="setPortalTab('refunds')"
+          >
+            💶 Reintegros
+          </button>
         </div>
 
         <!-- TAB 1: Machines & Incidents View -->
@@ -438,6 +459,11 @@ export const LocationPortalView = {
             @view-certificate="onViewMachineCertificate"
             @view-global-certificate="onViewGlobalCertificate"
           />
+        </div>
+
+        <!-- TAB 3: Refunds Desk Tab (RF-REF-06, RF-REF-10, Art. V.4) -->
+        <div v-else-if="activePortalTab === 'refunds'">
+          <LocationRefundsTab />
         </div>
 
         <!-- Incident Report / Add Comment Modal -->

@@ -340,10 +340,8 @@ export class ApiClient {
       const code = siteCode || this.siteCode;
       return this.get(`/locations/${encodeURIComponent(code)}/machines`);
     }
-  };
-
-  /**
-   * 2b. Site Sanitary & Certificates (RF-PREV-06, RF-PREV-07, Art. V.4)
+  };  /**
+   * 2b. Site Portal: Sanitary Certificates & Refund Desk (RF-PREV-06, RF-PREV-07, RF-REF-06, Art. V.4)
    */
   site = {
     /**
@@ -381,6 +379,28 @@ export class ApiClient {
         });
       }
       return this.get('/site/certificates/global');
+    },
+
+    /**
+     * Lists the refund cases held at the authenticated site with anonymized
+     * claimant names and no payment instruments (RF-REF-06, RF-REF-10, Art. V.4).
+     * @returns {Promise<{total: number, ready_for_pickup_total: number, refunds: Array<Object>}>}
+     */
+    getRefunds: () => {
+      return this.get('/location/refunds');
+    },
+
+    /**
+     * Releases the cash envelope of a case against the 4-digit pickup PIN typed
+     * by the receptionist (RF-REF-06).
+     * @param {number|string} refundId
+     * @param {string} pickupPin
+     * @returns {Promise<Object>}
+     */
+    deliverRefund: (refundId, pickupPin) => {
+      return this.post(`/location/refunds/${encodeURIComponent(refundId)}/deliver`, {
+        pickup_pin: String(pickupPin ?? '')
+      });
     }
   };
 
@@ -571,6 +591,96 @@ export class ApiClient {
     },
     getSparePartsPendingReview: () => {
       return this.get('/coordinator/spare-parts/requests/pending-review');
+    },
+
+    // Gestión de Reintegros e Importe Retenido (Módulo 08 - RF-REF-03, RF-REF-07, RF-REF-08)
+    /**
+     * Retrieves the global refund inbox with full financial detail and filters.
+     * @param {Object} [filters={}] - { status, location_id, machine_id, requires_approval_only, stranded_only, incident_status, from, to, limit, offset }
+     * @returns {Promise<Object>}
+     */
+    getRefunds: (filters = {}) => {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(filters)) {
+        if (value !== undefined && value !== null && value !== '') {
+          params.append(key, String(value));
+        }
+      }
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      return this.get(`/coordinator/refunds${qs}`);
+    },
+
+    /**
+     * Grants the formal double approval of the final payable amount (RF-REF-03).
+     * @param {number|string} refundId
+     * @param {number} approvedAmount
+     * @param {string} [notes='']
+     * @returns {Promise<Object>}
+     */
+    approveRefund: (refundId, approvedAmount, notes = '') => {
+      return this.post(`/coordinator/refunds/${encodeURIComponent(refundId)}/approve`, {
+        approved_amount: Number(approvedAmount),
+        notes: String(notes ?? '')
+      });
+    },
+
+    /**
+     * Registers the digital settlement together with its bank/payment reference (RF-REF-07).
+     * @param {number|string} refundId
+     * @param {string} paymentReference
+     * @param {number|null} [paidAmount=null] Defaults server-side to the approved amount.
+     * @returns {Promise<Object>}
+     */
+    payRefund: (refundId, paymentReference, paidAmount = null) => {
+      const body = { payment_reference: String(paymentReference ?? '') };
+      if (paidAmount !== null && paidAmount !== undefined && paidAmount !== '') {
+        body.paid_amount = Number(paidAmount);
+      }
+      return this.post(`/coordinator/refunds/${encodeURIComponent(refundId)}/pay`, body);
+    },
+
+    /**
+     * Rejects a claim with a mandatory written justification of at least 20 characters (RF-REF-08).
+     * @param {number|string} refundId
+     * @param {string} rejectionReason
+     * @returns {Promise<Object>}
+     */
+    rejectRefund: (refundId, rejectionReason) => {
+      return this.post(`/coordinator/refunds/${encodeURIComponent(refundId)}/reject`, {
+        rejection_reason: String(rejectionReason ?? '')
+      });
+    },
+
+    /**
+     * Regularizes a case stranded in PENDING_INSPECTION by filing its balance
+     * verdict from Coordination, when the incident was cancelled or the
+     * technician can no longer reach the machine (RF-REF-04, RF-REF-09).
+     * @param {number|string} refundId
+     * @param {{finding: string, recoveredAmount?: number|null, cashCustodyAction?: string|null, receptionistName?: string, justification?: string}} payload
+     * @returns {Promise<Object>}
+     */
+    regularizeRefund: (refundId, payload = {}) => {
+      const body = {
+        finding: String(payload.finding ?? '')
+      };
+
+      if (payload.recoveredAmount !== undefined && payload.recoveredAmount !== null && payload.recoveredAmount !== '') {
+        body.recovered_amount = Number(payload.recoveredAmount);
+      }
+
+      if (payload.cashCustodyAction) {
+        body.cash_custody_action = String(payload.cashCustodyAction);
+      }
+
+      if (payload.receptionistName) {
+        body.receptionist_name = String(payload.receptionistName);
+      }
+
+      if (payload.justification) {
+        body.justification = String(payload.justification);
+      }
+
+      return this.post(`/coordinator/refunds/${encodeURIComponent(refundId)}/regularize`, body);
     }
   };
 
@@ -584,6 +694,15 @@ export class ApiClient {
      */
     getMyRoute: () => {
       return this.get('/technician/my-route');
+    },
+
+    /**
+     * Retrieves privacy-safe refund claims for a route incident (T-REF-16, Art. V.4).
+     * @param {number|string} incidentId
+     * @returns {Promise<Object>}
+     */
+    getRefundInspection: (incidentId) => {
+      return this.get(`/technician/incidents/${encodeURIComponent(incidentId)}/refund`);
     },
 
     /**
@@ -694,7 +813,34 @@ export class ApiClient {
   };
 
   /**
-   * 7. QR Code Workflows (RF-01 to RF-05)
+   * 7. Public consumer refund tracking (RF-REF-02, RF-REF-07).
+   * The secure tracking token is the only credential; no session is required.
+   */
+  publicRefunds = {
+    /**
+     * Retrieves the safe public tracking projection for one refund case.
+     * @param {string} trackingToken
+     * @returns {Promise<Object>}
+     */
+    track: (trackingToken) => {
+      const token = encodeURIComponent(String(trackingToken ?? '').trim());
+      return this.get(`/public/refunds/track?token=${token}`);
+    },
+
+    /**
+     * Corrects Bizum or bank transfer details while the case awaits contact.
+     * @param {string} trackingToken
+     * @param {{bizum_phone?: string, iban?: string}} payload
+     * @returns {Promise<Object>}
+     */
+    rectify: (trackingToken, payload) => {
+      const token = encodeURIComponent(String(trackingToken ?? '').trim());
+      return this.patch(`/public/refunds/track?token=${token}`, payload);
+    }
+  };
+
+  /**
+   * 8. QR Code Workflows (RF-01 to RF-05)
    */
   qr = {
     /**

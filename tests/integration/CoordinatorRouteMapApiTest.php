@@ -45,12 +45,8 @@ echo "======================================================================\n\n
 // ─── Bootstrap: MariaDB real y semillas ───────────────────────────────────────
 $pdo = ConnectionFactory::getConnection();
 
-// Reinicio idempotente respetando el orden de claves foráneas (Art. III: no se tocan maestros)
-$pdo->exec('DELETE FROM incident_replaced_parts');
-$pdo->exec('DELETE FROM spare_part_requests');
-$pdo->exec('DELETE FROM incident_history');
-$pdo->exec('DELETE FROM incident_comments');
-$pdo->exec('DELETE FROM incidents');
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedAll();

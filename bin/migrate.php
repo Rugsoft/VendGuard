@@ -71,7 +71,9 @@ try {
         'spare_part_compatibilities',
         'spare_part_requests',
         'incident_replaced_parts',
-        'route_settings'
+        'route_settings',
+        'refund_requests',
+        'unclaimed_cash_findings'
     ];
 
     echo "[4/4] Verificando esquema e integridad en vendguard_db:\n";
@@ -127,6 +129,18 @@ try {
     $routeSettingsCount = (int)$pdo->query("SELECT COUNT(*) FROM `route_settings` WHERE `id` = 1")->fetchColumn();
     $hasRouteSettingsSingleton = ($routeSettingsCount === 1);
 
+    // Verificar extensiones del módulo de reintegros (Módulo 08 / T-REF-01)
+    $stmt = $pdo->query("SHOW COLUMNS FROM `locations` LIKE 'has_physical_reception'");
+    $hasPhysicalReceptionCol = ($stmt->fetch() !== false);
+
+    $stmt = $pdo->query("SHOW INDEX FROM `refund_requests` WHERE Key_name = 'idx_refund_tracking_token'");
+    $hasRefundTrackingIndex = ($stmt->fetch() !== false);
+
+    // Verificar entidades de reintegro en el enum de audit_log (Módulo 08 / RNF-REF-01)
+    $hasRefundAuditEnum = ($colAuditEnum !== false
+        && str_contains((string)($colAuditEnum['Type'] ?? ''), "'REFUND_REQUEST'")
+        && str_contains((string)($colAuditEnum['Type'] ?? ''), "'UNCLAIMED_CASH_FINDING'"));
+
     echo "      - Columna virtual `is_active_ticket`: [" . ($hasVirtualCol ? "OK" : "FALTA") . "]\n";
     echo "      - Índice único `uq_machine_active_ticket`: [" . ($hasUniqueIndex ? "OK" : "FALTA") . "]\n";
     echo "      - Columna `machine_type_snapshot` en incidents: [" . ($hasSnapshotCol ? "OK" : "FALTA") . "]\n";
@@ -137,15 +151,19 @@ try {
     echo "      - Soporte entidad `PREVENTIVE_ORDER` en audit_log: [" . ($hasPreventiveAuditEnum ? "OK" : "FALTA") . "]\n";
     echo "      - Columnas `latitude` y `longitude` en locations: [" . ($hasLocationLatitude && $hasLocationLongitude ? "OK" : "FALTA") . "]\n";
     echo "      - Índice `idx_locations_lat_lng`: [" . ($hasLocationCoordinateIndex ? "OK" : "FALTA") . "]\n";
-    echo "      - Fila singleton `route_settings` (id=1): [" . ($hasRouteSettingsSingleton ? "OK" : "FALTA") . "]\n\n";
+    echo "      - Fila singleton `route_settings` (id=1): [" . ($hasRouteSettingsSingleton ? "OK" : "FALTA") . "]\n";
+    echo "      - Columna `has_physical_reception` en locations: [" . ($hasPhysicalReceptionCol ? "OK" : "FALTA") . "]\n";
+    echo "      - Índice `idx_refund_tracking_token`: [" . ($hasRefundTrackingIndex ? "OK" : "FALTA") . "]\n";
+    echo "      - Entidades `REFUND_REQUEST` y `UNCLAIMED_CASH_FINDING` en audit_log: [" . ($hasRefundAuditEnum ? "OK" : "FALTA") . "]\n\n";
 
     $isMigrationComplete = $allTablesExist && $hasVirtualCol && $hasUniqueIndex && $hasSnapshotCol && $hasUserEnum
         && $hasOperatorCode && $hasSanitaryStatus && $hasPreventiveOrderCol && $hasPreventiveAuditEnum
-        && $hasLocationLatitude && $hasLocationLongitude && $hasLocationCoordinateIndex && $hasRouteSettingsSingleton;
+        && $hasLocationLatitude && $hasLocationLongitude && $hasLocationCoordinateIndex && $hasRouteSettingsSingleton
+        && $hasPhysicalReceptionCol && $hasRefundTrackingIndex && $hasRefundAuditEnum;
 
     if ($isMigrationComplete) {
         echo "========================================================\n";
-        echo " Migración completada exitosamente. Condiciones T-SPARE-01 y T-MAP-01 CUMPLIDAS.\n";
+        echo " Migración completada exitosamente. Condiciones T-SPARE-01, T-MAP-01 y T-REF-01 CUMPLIDAS.\n";
         echo "========================================================\n";
         exit(0);
     } else {

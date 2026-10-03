@@ -273,8 +273,7 @@ $m0101 = (new PdoMachineRepository($pdo))->findByCode('VEND-0101');
 $m0101Id = $m0101 !== null ? $m0101->getId() : 1;
 $m0101LocId = $m0101 !== null ? $m0101->getLocationId() : 1;
 
-$pdo->prepare("DELETE FROM incident_history WHERE incident_id IN (SELECT id FROM incidents WHERE machine_id = :mid)")->execute([':mid' => $m0101Id]);
-$pdo->prepare("DELETE FROM incidents WHERE machine_id = :mid")->execute([':mid' => $m0101Id]);
+TestDataCleaner::purgeIncidentsByMachine($pdo, $m0101Id);
 $pdo->prepare("INSERT INTO incidents (ticket_code, machine_id, location_id, assigned_technician_id, category, description, urgency, status)
     VALUES ('INC-TECH-BLOCKED', :mid, :locId, :techId, 'PRODUCT_JAM', 'Asignada a técnico para prueba de baja', 'MEDIUM', 'ASSIGNED')")
     ->execute([':mid' => $m0101Id, ':locId' => $m0101LocId, ':techId' => $techId]);
@@ -331,8 +330,7 @@ $auditReactUsr = $stmtAuditReactUsr->fetch(PDO::FETCH_ASSOC);
 $assert("8.4 Evento USER_REACTIVATED en audit_log", $auditReactUsr !== false);
 
 // Limpieza de datos temporales de prueba
-$pdo->prepare("DELETE FROM incident_history WHERE incident_id IN (SELECT id FROM incidents WHERE ticket_code = 'INC-TECH-BLOCKED')")->execute();
-$pdo->prepare("DELETE FROM incidents WHERE ticket_code = 'INC-TECH-BLOCKED'")->execute();
+TestDataCleaner::purgeIncidentByTicket($pdo, 'INC-TECH-BLOCKED');
 $pdo->prepare("DELETE FROM users WHERE id = :id")->execute([':id' => $newUserId]);
 
 // =========================================================================

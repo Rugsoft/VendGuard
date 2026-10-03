@@ -42,13 +42,8 @@ echo "======================================================================\n\n
 
 $pdo = ConnectionFactory::getConnection();
 
-// 1. Limpieza estricta y semillas
-$pdo->exec("DELETE FROM preventive_order_items");
-$pdo->exec("DELETE FROM sanitary_certificates");
-$pdo->exec("DELETE FROM incident_comments");
-$pdo->exec("DELETE FROM incident_history");
-$pdo->exec("DELETE FROM incidents");
-$pdo->exec("DELETE FROM preventive_orders");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedAll();
@@ -271,15 +266,8 @@ $assert("7.1 Acceso con X-Site-Code retorna HTTP 200", $resXSite->getStatusCode(
 $bodyXSite = json_decode($resXSite->getBody(), true);
 $assert("7.2 Respuesta contiene success=true", ($bodyXSite['success'] ?? false) === true);
 
-// =========================================================================
-// Limpieza final
-// =========================================================================
-$pdo->exec("DELETE FROM preventive_order_items");
-$pdo->exec("DELETE FROM sanitary_certificates");
-$pdo->exec("DELETE FROM incident_comments");
-$pdo->exec("DELETE FROM incident_history");
-$pdo->exec("DELETE FROM incidents");
-$pdo->exec("DELETE FROM preventive_orders");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 $settingsRepo->updateSanitaryStatus($machine1->getId(), 'OK');
 $settingsRepo->updateSanitaryStatus($machine2->getId(), 'OK');
 

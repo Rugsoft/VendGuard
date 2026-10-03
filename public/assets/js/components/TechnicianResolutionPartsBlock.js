@@ -18,6 +18,12 @@
 
 import { api } from '../api.js';
 
+// Clasificación cerrada de destinos normativos de piezas retiradas (RF-REP-06)
+export const OLD_PART_DESTINATIONS = Object.freeze([
+  { value: 'DESGUACE', label: 'Desguace / Reciclaje' },
+  { value: 'TALLER', label: 'Taller / Reacondicionamiento' }
+]);
+
 export const TechnicianResolutionPartsBlock = {
   name: 'TechnicianResolutionPartsBlock',
   props: {
@@ -53,7 +59,8 @@ export const TechnicianResolutionPartsBlock = {
       selectedPartIdToAdd: '',
       customPartNameToAdd: '',
       quantityToAdd: 1,
-      destinationToAdd: 'DESGUACE', // 'DESGUACE' | 'TALLER'
+      destinationToAdd: 'DESGUACE',
+      availableDestinations: OLD_PART_DESTINATIONS,
       notesToAdd: '',
       catalogError: ''
     };

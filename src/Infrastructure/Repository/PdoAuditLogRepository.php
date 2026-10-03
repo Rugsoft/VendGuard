@@ -110,7 +110,13 @@ class PdoAuditLogRepository implements AuditLogRepositoryInterface
             foreach ($params as $paramKey => $paramVal) {
                 $stmt->bindValue($paramKey, $paramVal);
             }
-            $stmt->bindValue(':limit', max(1, min(100, $limit)), PDO::PARAM_INT);
+            // El límite lo decide el que llama. Antes este repositorio lo
+            // recortaba siempre a 100 filas, un tope pensado para el listado
+            // paginado que se colaba también en la exportación: el endpoint
+            // anunciaba 10.000 registros y entregaba 99, sin avisar. Un export
+            // de cumplimiento que se calla lo que no incluye es peor que uno
+            // que falla, porque la auditoría se apoya en él.
+            $stmt->bindValue(':limit', max(1, $limit), PDO::PARAM_INT);
             $stmt->bindValue(':offset', max(0, $offset), PDO::PARAM_INT);
 
             $stmt->execute();

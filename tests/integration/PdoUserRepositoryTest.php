@@ -216,7 +216,7 @@ $tempMachineId = (int)$pdo->lastInsertId();
 
 // Asignar una incidencia en IN_PROGRESS
 $testTicketCode = 'INC-USER-TEST-01';
-$pdo->prepare("DELETE FROM `incidents` WHERE `ticket_code` = :tc")->execute([':tc' => $testTicketCode]);
+TestDataCleaner::purgeIncidentByTicket($pdo, $testTicketCode);
 
 $stmtInc = $pdo->prepare("
     INSERT INTO `incidents` (
@@ -242,7 +242,7 @@ $pdo->prepare("UPDATE `incidents` SET `status` = 'CLOSED', `closed_at` = CURRENT
 $assert("10.3 Detecta 0 incidencias activas tras CLOSED", $userRepo->countActiveAssignedIncidents($newUserId) === 0);
 
 // Limpieza de incidencia y máquina temporal
-$pdo->prepare("DELETE FROM `incidents` WHERE `id` = :id")->execute([':id' => $assignedIncId]);
+TestDataCleaner::purgeIncident($pdo, (int)$assignedIncId);
 $pdo->prepare("DELETE FROM `machines` WHERE `id` = :id")->execute([':id' => $tempMachineId]);
 
 // =====================================================================

@@ -57,17 +57,8 @@ echo "======================================================================\n\n
 
 $pdo = ConnectionFactory::getConnection();
 
-// 1. Limpieza estricta y aislamiento de la prueba
-$pdo->exec("DELETE FROM spare_part_requests");
-$pdo->exec("DELETE FROM incident_replaced_parts");
-$pdo->exec("DELETE FROM spare_part_compatibilities");
-$pdo->exec("DELETE FROM spare_parts");
-$pdo->exec("DELETE FROM incident_comments");
-$pdo->exec("DELETE FROM incident_history");
-$pdo->exec("DELETE FROM incidents");
-$pdo->exec("DELETE FROM preventive_order_items");
-$pdo->exec("DELETE FROM sanitary_certificates");
-$pdo->exec("DELETE FROM preventive_orders");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedAll();
@@ -135,10 +126,9 @@ $assert("0.3 Repuestos semilla recuperados dinámicamente", $ulkaPartId > 0 && $
 // Helper para crear incidencias de prueba asignadas o no asignadas
 $createTestIncident = function (int $machineId, int $locationId, ?int $assignedTechId, string $status = 'IN_PROGRESS') use ($pdo): int {
     // Limpiar incidencias previas en esta máquina para respetar la restricción única uq_machine_active_ticket
-    $pdo->exec("DELETE FROM spare_part_requests WHERE incident_id IN (SELECT id FROM incidents WHERE machine_id = {$machineId})");
+    // (purga dirigida FK-segura: incluye las hijas RESTRICT antes que `incidents`)
+    TestDataCleaner::purgeIncidentsByMachine($pdo, (int)$machineId);
     $pdo->exec("DELETE FROM incident_replaced_parts WHERE machine_id = {$machineId}");
-    $pdo->exec("DELETE FROM incident_history WHERE incident_id IN (SELECT id FROM incidents WHERE machine_id = {$machineId})");
-    $pdo->exec("DELETE FROM incidents WHERE machine_id = {$machineId}");
 
     $uniqueCode = 'TICK-' . date('Ymd') . '-' . substr(uniqid(), -5);
     $stmt = $pdo->prepare("
@@ -633,16 +623,8 @@ if ($prevOrderId !== null) {
     );
 }
 
-// =========================================================================
-// Limpieza final
-// =========================================================================
-$pdo->exec("DELETE FROM spare_part_requests");
-$pdo->exec("DELETE FROM incident_replaced_parts");
-$pdo->exec("DELETE FROM incident_history");
-$pdo->exec("DELETE FROM incidents");
-$pdo->exec("DELETE FROM preventive_order_items");
-$pdo->exec("DELETE FROM sanitary_certificates");
-$pdo->exec("DELETE FROM preventive_orders");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 echo "\n======================================================================\n";
 if ($failures === 0) {

@@ -24,6 +24,7 @@ import { TechnicianChecklistModal } from '../components/TechnicianChecklistModal
 import { TechnicianReinspectionModal } from '../components/TechnicianReinspectionModal.js';
 import { TechnicianSparePartsPauseModal } from '../components/TechnicianSparePartsPauseModal.js';
 import { TechnicianResolutionPartsBlock } from '../components/TechnicianResolutionPartsBlock.js';
+import { TechnicianResolutionRefundBlock } from '../components/TechnicianResolutionRefundBlock.js';
 import { TechnicianRouteMapModal } from '../components/TechnicianRouteMapModal.js';
 
 export const TechnicianRouteView = {
@@ -37,6 +38,7 @@ export const TechnicianRouteView = {
     TechnicianReinspectionModal,
     TechnicianSparePartsPauseModal,
     TechnicianResolutionPartsBlock,
+    TechnicianResolutionRefundBlock,
     TechnicianRouteMapModal
   },
   data() {
@@ -72,6 +74,12 @@ export const TechnicianRouteView = {
       resolveDiagnosis: '',
       resolveAction: '',
       resolvePartsData: { replaced_parts_declared: false, replaced_parts: [] },
+      resolveRefundData: { isValid: true },
+      refundRequests: [],
+      hasPendingRefundVerdict: false,
+      isLoadingRefundInspection: false,
+      refundInspectionFailed: false,
+      refundInspectionRequestId: 0,
       isResolving: false,
       resolveError: '',
 
@@ -155,7 +163,7 @@ export const TechnicianRouteView = {
       return this.actionLength >= 20;
     },
     canResolve() {
-      return this.isDiagnosisValid && this.isActionValid;
+      return this.isDiagnosisValid && this.isActionValid && this.resolveRefundData.isValid;
     },
 
     /**
@@ -367,13 +375,20 @@ export const TechnicianRouteView = {
      * Opens the Resolve Modal with strict justification and spare parts block (RF-08 / EARS 8.1, 8.2 / RF-REP-05).
      * @param {Object} incident
      */
-    openResolveModal(incident) {
+    async openResolveModal(incident) {
       this.selectedIncident = incident;
       this.resolveDiagnosis = '';
       this.resolveAction = '';
       this.resolvePartsData = { replaced_parts_declared: false, replaced_parts: [] };
+      this.resolveRefundData = { isValid: true };
+      this.refundRequests = [];
+      this.hasPendingRefundVerdict = false;
+      this.refundInspectionFailed = false;
+      this.refundInspectionRequestId++;
+      this.isLoadingRefundInspection = true;
       this.resolveError = '';
       this.showResolveModal = true;
+      await this.loadRefundInspection(incident);
     },
 
     closeResolveModal() {
@@ -382,7 +397,64 @@ export const TechnicianRouteView = {
       this.resolveDiagnosis = '';
       this.resolveAction = '';
       this.resolvePartsData = { replaced_parts_declared: false, replaced_parts: [] };
+      this.resolveRefundData = { isValid: true };
+      this.refundRequests = [];
+      this.hasPendingRefundVerdict = false;
+      this.refundInspectionFailed = false;
+      this.refundInspectionRequestId++;
+      this.isLoadingRefundInspection = false;
       this.resolveError = '';
+    },
+
+    /**
+     * Loads privacy-safe refund claims before the technician can resolve an incident (T-REF-16).
+     * A failed lookup blocks resolution rather than assuming there is no pending claim.
+     * @param {Object} incident
+     */
+    async loadRefundInspection(incident) {
+      const incidentId = incident?.id;
+      if (!incidentId) {
+        this.isLoadingRefundInspection = false;
+        this.refundInspectionFailed = true;
+        this.hasPendingRefundVerdict = true;
+        this.resolveRefundData = { isValid: false };
+        this.resolveError = 'No se pudo identificar la incidencia para consultar sus reclamaciones de saldo.';
+        return;
+      }
+
+      const requestId = this.refundInspectionRequestId;
+      this.refundInspectionFailed = false;
+      this.isLoadingRefundInspection = true;
+      try {
+        const response = await api.technician.getRefundInspection(incidentId);
+        if (requestId !== this.refundInspectionRequestId || !this.showResolveModal || this.selectedIncident?.id !== incidentId) return;
+        const data = response?.data || response || {};
+        if (!Array.isArray(data.requests) || typeof data.has_pending_verdict !== 'boolean') {
+          throw new Error('La respuesta de reclamaciones no tiene el formato esperado.');
+        }
+        this.refundRequests = data.requests;
+        this.hasPendingRefundVerdict = data.has_pending_verdict;
+        this.refundInspectionFailed = false;
+        const hasPendingRequest = data.requests.some((request) => request.status === 'PENDING_INSPECTION');
+        this.resolveRefundData = { isValid: !data.has_pending_verdict && !hasPendingRequest };
+      } catch (err) {
+        if (requestId !== this.refundInspectionRequestId || !this.showResolveModal || this.selectedIncident?.id !== incidentId) return;
+        this.refundRequests = [];
+        this.hasPendingRefundVerdict = true;
+        this.refundInspectionFailed = true;
+        this.resolveRefundData = { isValid: false };
+        this.resolveError = err?.message || 'No se pudieron consultar las reclamaciones de saldo. Inténtalo de nuevo.';
+      } finally {
+        if (requestId === this.refundInspectionRequestId) this.isLoadingRefundInspection = false;
+      }
+    },
+
+    /**
+     * Captures the validity and optional inspection payload from the refund block.
+     * @param {Object} event
+     */
+    handleRefundInspectionChange(event) {
+      this.resolveRefundData = event && typeof event === 'object' ? event : { isValid: false };
     },
 
     /**
@@ -398,12 +470,35 @@ export const TechnicianRouteView = {
         return;
       }
 
+      if (this.isLoadingRefundInspection) {
+        this.resolveError = 'Espera a que termine la consulta de reclamaciones de saldo antes de resolver.';
+        return;
+      }
+      if (this.refundInspectionFailed) {
+        this.resolveError = 'No se pudo verificar si hay reclamaciones de saldo; vuelve a abrir la resolución para intentarlo de nuevo.';
+        return;
+      }
+
+      let partsVal = null;
       if (this.$refs?.resolutionPartsBlockRef && typeof this.$refs.resolutionPartsBlockRef.validate === 'function') {
-        const partsVal = this.$refs.resolutionPartsBlockRef.validate();
+        partsVal = this.$refs.resolutionPartsBlockRef.validate();
         if (!partsVal.isValid) {
           this.resolveError = partsVal.error || 'Debe completar la declaración de repuestos sustituidos.';
           return;
         }
+      }
+
+      let refundPayload = {};
+      if (this.$refs?.resolutionRefundBlockRef && typeof this.$refs.resolutionRefundBlockRef.validate === 'function') {
+        const refundVal = this.$refs.resolutionRefundBlockRef.validate();
+        if (!refundVal.isValid) {
+          this.resolveError = refundVal.error || 'Debe completar el dictamen de saldo antes de resolver.';
+          return;
+        }
+        refundPayload = refundVal.payload || {};
+      } else if (this.hasPendingRefundVerdict || !this.resolveRefundData?.isValid) {
+        this.resolveError = 'No se ha podido verificar o completar el dictamen obligatorio de saldo.';
+        return;
       }
 
       this.isResolving = true;
@@ -412,18 +507,19 @@ export const TechnicianRouteView = {
       try {
         const hasParts = Boolean(this.resolvePartsData?.replaced_parts_declared);
         const replacedParts = hasParts ? (this.resolvePartsData?.replaced_parts || []) : [];
-        let res;
+        const payload = {
+          diagnosis: diag,
+          action_taken: act,
+          ...refundPayload
+        };
         if (hasParts) {
-          const payload = {
-            diagnosis: diag,
-            action_taken: act,
-            replaced_parts_declared: true,
-            replaced_parts: replacedParts
-          };
-          res = await api.technician.resolveIncident(this.selectedIncident.id, payload);
-        } else {
-          res = await api.technician.resolveIncident(this.selectedIncident.id, diag, act);
+          payload.replaced_parts_declared = true;
+          payload.replaced_parts = replacedParts;
         }
+        const hasRefundPayload = Object.keys(refundPayload).length > 0;
+        const res = hasParts || hasRefundPayload
+          ? await api.technician.resolveIncident(this.selectedIncident.id, payload)
+          : await api.technician.resolveIncident(this.selectedIncident.id, diag, act);
         const resolvedAt = res?.data?.resolved_at || new Date().toISOString();
 
         this.feedbackMessage = '¡Avería resuelta con éxito! Se ha activado la ventana de garantía de 48 horas.';
@@ -433,7 +529,8 @@ export const TechnicianRouteView = {
           action: act,
           resolvedAt,
           replaced_parts_declared: hasParts,
-          replaced_parts: replacedParts
+          replaced_parts: replacedParts,
+          ...refundPayload
         });
 
         const solvedId = this.selectedIncident.id;
@@ -992,6 +1089,19 @@ export const TechnicianRouteView = {
           </div>
 
           <!-- Field 3: Spare Parts Declaration (RF-REP-05, RF-REP-06 / T-SPARE-16, T-SPARE-17) -->
+          <div v-if="isLoadingRefundInspection" role="status" style="margin-bottom: 14px; padding: 12px; color: #596579; background: #f9fafb; border: 1px solid #c8cfda; border-radius: 4px; font-size: 13px;">
+            ⏳ Consultando reclamaciones de saldo...
+          </div>
+          <TechnicianResolutionRefundBlock
+            v-else
+            ref="resolutionRefundBlockRef"
+            :refund-requests="refundRequests"
+            :requires-verdict="hasPendingRefundVerdict"
+            :allow-unclaimed-cash="selectedIncident?.category === 'PAYMENT_SYSTEM'"
+            :disabled="isResolving || refundInspectionFailed"
+            @change="handleRefundInspectionChange"
+          />
+
           <TechnicianResolutionPartsBlock
             ref="resolutionPartsBlockRef"
             :machine-id="selectedIncident?.machine?.id || selectedIncident?.machine_id || 0"
@@ -1018,7 +1128,7 @@ export const TechnicianRouteView = {
               type="submit"
               class="vg-btn vg-btn-primary"
               style="background-color: #059669; border-color: #047857;"
-              :disabled="isResolving || !canResolve"
+              :disabled="isResolving || isLoadingRefundInspection || refundInspectionFailed || !canResolve || !resolveRefundData.isValid"
             >
               <span v-if="!isResolving">Confirmar Resolución (48h Garantía)</span>
               <span v-else>Guardando resolución...</span>

@@ -15,12 +15,14 @@ $path = parse_url($requestUri, PHP_URL_PATH);
 $filePath = __DIR__ . $path;
 
 if ($path !== '/' && $path !== '/index.php' && is_file($filePath)) {
-    // Si corre en el servidor web embebido de PHP (php -S)
-    if (php_sapi_name() === 'cli-server') {
-        return false;
-    }
+    // El despacho de estáticos NO delega en el servidor web embebido con
+    // `return false`: ese atajo es justo el que usa el contenedor de producción
+    // (`php -S ... public/index.php`, ver Dockerfile), y al ceder el fichero al
+    // servidor se perdía la cabecera `Cache-Control` que se añade más abajo. El
+    // resultado era que el fallback no protegía el escenario para el que existe.
+    // Servimos el fichero nosotros mismos, que además garantiza el MIME correcto.
 
-    // Servir con cabecera MIME correcta para cualquier otro entorno
+    // Servir con cabecera MIME correcta
     $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
     $mimeTypes = [
         'js'   => 'application/javascript; charset=UTF-8',
@@ -38,6 +40,15 @@ if ($path !== '/' && $path !== '/index.php' && is_file($filePath)) {
     $contentType = $mimeTypes[$ext] ?? 'application/octet-stream';
     header("Content-Type: {$contentType}");
     header('Content-Length: ' . (string)filesize($filePath));
+
+    // Sin `Cache-Control`, el navegador puede seguir sirviendo un módulo JS
+    // antiguo después de un despliegue, de modo que una corrección desplegada no
+    // se ve hasta que el usuario purga la caché a mano. El código fuente se sirve
+    // tal cual (Dogma Vanilla: sin empaquetador ni hash de contenido), así que la
+    // política honesta es revalidar en cada carga.
+    if (in_array($ext, ['js', 'mjs', 'css'], true)) {
+        header('Cache-Control: no-cache, must-revalidate');
+    }
     readfile($filePath);
     exit;
 }

@@ -4,11 +4,20 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
+use VendGuard\Application\DTO\CreateRefundRequestDTO;
+use VendGuard\Application\DTO\RefundReceiptDTO;
+use VendGuard\Application\Service\IbanValidationService;
+use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Core\Domain\Exception\ChronicIncidentException;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
+use VendGuard\Core\Domain\Exception\DuplicateRefundClaimException;
+use VendGuard\Core\Domain\Exception\InvalidBizumPhoneException;
+use VendGuard\Core\Domain\Exception\InvalidIbanFormatException;
+use VendGuard\Core\Domain\Exception\InvalidRefundAmountException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Exception\WarrantyExpiredException;
+use VendGuard\Core\Domain\Model\CompensationMethod;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\Location;
@@ -16,6 +25,7 @@ use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
 use VendGuard\Core\Domain\Service\UrgencyCalculator;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
@@ -23,6 +33,7 @@ use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
 use VendGuard\Infrastructure\Storage\LocalFileUploader;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -36,21 +47,38 @@ use VendGuard\Presentation\Http\Response;
  */
 class LocationPortalController
 {
+    public const ERROR_MISSING_REFUND_DATA = 'MISSING_REFUND_DATA';
+    public const ERROR_MISSING_REFUND_AMOUNT = 'MISSING_REFUND_AMOUNT';
+    public const ERROR_MISSING_REFUND_PAYMENT_DATA = 'MISSING_REFUND_PAYMENT_DATA';
+    public const ERROR_INVALID_COMPENSATION_METHOD = 'INVALID_COMPENSATION_METHOD';
+
+    public const MESSAGE_OVER_TELEPHONE_ADVICE =
+        'Para importes superiores a 50,00 €, contacte con el departamento de atención al cliente de VendGuard.';
+
+    private const TRUTHY_VALUES = ['1', 'true', 'yes', 'si', 'sí'];
+
     private MachineRepositoryInterface $machineRepo;
     private LocationRepositoryInterface $locationRepo;
     private IncidentRepositoryInterface $incidentRepo;
     private LocalFileUploader $fileUploader;
+    private RefundManagementService $refundService;
+    private IbanValidationService $ibanValidator;
 
     public function __construct(
         ?MachineRepositoryInterface $machineRepo = null,
         ?LocationRepositoryInterface $locationRepo = null,
         ?IncidentRepositoryInterface $incidentRepo = null,
-        ?LocalFileUploader $fileUploader = null
+        ?LocalFileUploader $fileUploader = null,
+        ?RefundManagementService $refundService = null,
+        ?IbanValidationService $ibanValidator = null
     ) {
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->fileUploader = $fileUploader ?? new LocalFileUploader();
+        $this->ibanValidator = $ibanValidator ?? new IbanValidationService();
+        $this->refundService = $refundService
+            ?? new RefundManagementService(new PdoRefundRequestRepository(), $this->ibanValidator);
     }
 
     /**
@@ -263,6 +291,20 @@ class LocationPortalController
             $retainedMoney = $retainedMoneyVal;
         }
 
+        // 5.1 Reclamación formal de reintegro (HU-02 / RF-REF-01)
+        // Si el usuario marcó explícitamente solicitud de reintegro, se valida antes
+        // de cualquier escritura para no registrar averías inconsistentes.
+        $refundClaim = null;
+        if ($this->wantsRefund($request)) {
+            $refundClaim = $this->readRefundClaim($request);
+            if ($refundClaim instanceof Response) {
+                return $refundClaim;
+            }
+            if ($retainedMoney === null) {
+                $retainedMoney = $refundClaim['claimed_amount'];
+            }
+        }
+
         // 6. Procesar archivo adjunto si se envía (RNF-05, EARS 3.9)
         $photoPath = null;
         $photoFile = $request->getFile('photo') ?? $request->getFile('image') ?? $request->getFile('file');
@@ -330,12 +372,217 @@ class LocationPortalController
             );
         }
 
-        // 11. Devolver respuesta 201 Created con el payload del recurso generado
+        // 11. Apertura de expediente de reintegro formal si se solicitó (HU-02)
+        $payload = $this->sanitizeIncidentForSite($created->toArray());
+        if ($refundClaim !== null) {
+            $receipt = $this->openRefundCase($refundClaim, (int)$created->getId(), $machine, $location);
+            if ($receipt instanceof Response) {
+                return $receipt;
+            }
+            $payload['refund'] = $receipt;
+        }
+
+        // 12. Devolver respuesta 201 Created con el payload del recurso generado
         return Response::json(
-            $this->sanitizeIncidentForSite($created->toArray()),
+            $payload,
             201,
             'Incidencia registrada con éxito'
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Internals: captura de reintegros de sede (HU-02 / RF-REF-01)
+    // ─────────────────────────────────────────────────────────────────────
+
+    private function wantsRefund(Request $request): bool
+    {
+        $raw = $request->getBodyParam('refund_requested');
+
+        if ($raw === null) {
+            return false;
+        }
+
+        if (is_bool($raw)) {
+            return $raw;
+        }
+
+        if (is_int($raw) || is_float($raw)) {
+            return (int)$raw === 1;
+        }
+
+        if (!is_string($raw)) {
+            return false;
+        }
+
+        return in_array(strtolower(trim($raw)), self::TRUTHY_VALUES, true);
+    }
+
+    /**
+     * @return Response|array{
+     *     claimant_name: string,
+     *     claimant_contact: string,
+     *     claimed_amount: float,
+     *     compensation_method: CompensationMethod,
+     *     product_attempted: string,
+     *     bizum_phone: ?string,
+     *     iban: ?string
+     * }
+     */
+    private function readRefundClaim(Request $request): Response|array
+    {
+        $rawAmount = $request->getBodyParam('claimed_amount') ?? $request->getBodyParam('retained_money_amount');
+        if ($rawAmount === null || !is_numeric($rawAmount)) {
+            return Response::error(
+                self::ERROR_MISSING_REFUND_AMOUNT,
+                'Indique el importe de dinero que la máquina le ha retenido.',
+                422
+            );
+        }
+
+        $claimedAmount = round((float)$rawAmount, 2);
+        if ($claimedAmount <= 0.0 || $claimedAmount > 50.00) {
+            return Response::error(
+                InvalidRefundAmountException::ERROR_CODE,
+                InvalidRefundAmountException::DEFAULT_MESSAGE . ' ' . self::MESSAGE_OVER_TELEPHONE_ADVICE,
+                InvalidRefundAmountException::HTTP_STATUS
+            );
+        }
+
+        $rawMethod = strtoupper(trim((string)($request->getBodyParam('compensation_method') ?? '')));
+        $method = CompensationMethod::tryFrom($rawMethod);
+        if ($method === null) {
+            return Response::error(
+                self::ERROR_INVALID_COMPENSATION_METHOD,
+                'Indique cómo quiere recibir su dinero: recogida en la sede, Bizum o transferencia bancaria.',
+                422
+            );
+        }
+
+        $claimantName = $this->firstFilledValue(
+            $request->getBodyParam('contact_name'),
+            $request->getBodyParam('reporter_name')
+        );
+        $claimantContact = $this->firstFilledValue(
+            $request->getBodyParam('contact_phone'),
+            $request->getBodyParam('reporter_phone')
+        );
+
+        if ($claimantName === '' || $claimantContact === '') {
+            return Response::error(
+                self::ERROR_MISSING_REFUND_DATA,
+                'Indique su nombre y un medio de contacto para poder tramitar la devolución.',
+                422
+            );
+        }
+
+        $bizumPhone = null;
+        $iban = null;
+
+        if ($method->requiresBizumPhone()) {
+            $rawPhone = trim((string)($request->getBodyParam('bizum_phone') ?? ''));
+            if ($rawPhone === '') {
+                return Response::error(
+                    self::ERROR_MISSING_REFUND_PAYMENT_DATA,
+                    'Indique el número de móvil de 9 dígitos donde desea recibir el Bizum.',
+                    422
+                );
+            }
+
+            try {
+                $bizumPhone = $this->ibanValidator->assertValidBizumPhone($rawPhone);
+            } catch (InvalidBizumPhoneException $e) {
+                return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+            }
+        }
+
+        if ($method->requiresIban()) {
+            $rawIban = trim((string)($request->getBodyParam('iban') ?? ''));
+            if ($rawIban === '') {
+                return Response::error(
+                    self::ERROR_MISSING_REFUND_PAYMENT_DATA,
+                    'Indique el IBAN de la cuenta donde desea recibir la transferencia.',
+                    422
+                );
+            }
+
+            try {
+                $iban = $this->ibanValidator->assertValidIban($rawIban);
+            } catch (InvalidIbanFormatException $e) {
+                return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+            }
+        }
+
+        return [
+            'claimant_name' => $claimantName,
+            'claimant_contact' => $claimantContact,
+            'claimed_amount' => $claimedAmount,
+            'compensation_method' => $method,
+            'product_attempted' => trim((string)($request->getBodyParam('product_attempted') ?? '')),
+            'bizum_phone' => $bizumPhone,
+            'iban' => $iban,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $claim
+     * @return array<string, mixed>|Response
+     */
+    private function openRefundCase(array $claim, int $incidentId, Machine $machine, Location $location): Response|array
+    {
+        if ($incidentId < 1) {
+            return Response::error(
+                'INTERNAL_SERVER_ERROR',
+                'No ha sido posible asociar su solicitud de reintegro al aviso registrado.',
+                500
+            );
+        }
+
+        try {
+            $case = $this->refundService->createCase(new CreateRefundRequestDTO(
+                incidentId: $incidentId,
+                machineId: (int)$machine->getId(),
+                locationId: (int)$location->getId(),
+                claimantName: (string)$claim['claimant_name'],
+                claimantContact: (string)$claim['claimant_contact'],
+                claimedAmount: (float)$claim['claimed_amount'],
+                compensationMethod: $claim['compensation_method'],
+                productAttempted: (string)$claim['product_attempted'],
+                bizumPhone: $claim['bizum_phone'],
+                iban: $claim['iban']
+            ));
+        } catch (InvalidRefundAmountException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (DuplicateRefundClaimException $e) {
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                $e->getDetails()
+            );
+        } catch (InvalidBizumPhoneException | InvalidIbanFormatException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (InvalidArgumentException $e) {
+            return Response::error(self::ERROR_MISSING_REFUND_DATA, $e->getMessage(), 422);
+        } catch (\Throwable $t) {
+            return Response::error(
+                'INTERNAL_SERVER_ERROR',
+                'Su aviso se ha registrado, pero no ha sido posible abrir la solicitud de reintegro.',
+                500
+            );
+        }
+
+        return RefundReceiptDTO::fromRefundRequest($case)->toArray();
+    }
+
+    private function firstFilledValue(mixed ...$candidates): string
+    {
+        foreach ($candidates as $candidate) {
+            if (is_string($candidate) && trim($candidate) !== '') {
+                return trim($candidate);
+            }
+        }
+
+        return '';
     }
 
     /**

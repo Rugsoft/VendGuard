@@ -44,9 +44,8 @@ echo "======================================================================\n\n
 
 $pdo = ConnectionFactory::getConnection();
 
-// Limpiar todas las incidencias previas para aislamiento del test
-$pdo->exec("DELETE FROM incident_history");
-$pdo->exec("DELETE FROM incidents");
+// Limpieza operacional segura (orden derivado del grafo de FKs).
+TestDataCleaner::purge($pdo);
 
 // Asegurar semillas limpias
 $seedRunner = new SeedRunner($pdo);
@@ -387,10 +386,7 @@ if ($chCheck !== false) {
 
 if ($serverAvailable) {
     // 7.1 Limpiar incidencias de la máquina de SEDE-BCN-02
-    $pdo->prepare("DELETE FROM incident_history WHERE incident_id IN (SELECT id FROM incidents WHERE machine_id = :mid)")
-        ->execute([':mid' => $loc2Machine->getId()]);
-    $pdo->prepare("DELETE FROM incidents WHERE machine_id = :mid")
-        ->execute([':mid' => $loc2Machine->getId()]);
+    TestDataCleaner::purgeIncidentsByMachine($pdo, $loc2Machine->getId());
 
     $tokenLoc2 = $authService->generateSiteToken($location2);
 
@@ -436,6 +432,50 @@ if ($serverAvailable) {
 } else {
     echo "  [SKIP] Servidor local no disponible en 127.0.0.1:8000 para Caso 7.\n";
 }
+
+// =========================================================================
+// CASO 8: Apertura formal de expediente de reintegro desde Sede (HU-02 / RF-REF-01)
+// =========================================================================
+echo "\n--- Caso 8: Creación de incidencia con expediente de reintegro en Sede (HU-02) ---\n";
+
+TestDataCleaner::purgeIncidentsByMachine($pdo, $perishableMachine->getId());
+
+$req8 = new Request(
+    method: 'POST',
+    path: '/api/incidents',
+    queryParams: [],
+    parsedBody: [
+        'machine_id' => (string)$perishableMachine->getId(),
+        'category' => 'PAYMENT_SYSTEM',
+        'description' => 'Tragó 2.50€ y no dio producto ni cambio',
+        'reporter_name' => 'Conserje Test Sede',
+        'reporter_phone' => '600112233',
+        'refund_requested' => 'true',
+        'claimed_amount' => '2.50',
+        'compensation_method' => 'EN_MANO_SEDE',
+        'product_attempted' => 'Sándwich mixto',
+    ],
+    headers: [
+        'Authorization' => "Bearer {$tokenLoc1}",
+    ]
+);
+
+$res8 = $router->dispatch($req8);
+$assert("8.1 Endpoint con reintegro responde HTTP 201 Created", $res8->getStatusCode() === 201, "Status: {$res8->getStatusCode()}");
+$body8 = $res8->getDecodedBody();
+$assert("8.2 Respuesta contiene envolvente de éxito", ($body8['success'] ?? false) === true);
+$assert("8.3 Respuesta incluye clave refund", isset($body8['data']['refund']));
+$assert("8.4 Reintegro incluye PIN de 4 dígitos para entrega en mano", preg_match('/^[0-9]{4}$/', (string)($body8['data']['refund']['pickup_pin'] ?? '')) === 1);
+$assert("8.5 Reintegro incluye token y url de seguimiento", !empty($body8['data']['refund']['tracking_url']));
+$assert("8.6 Reintegro refleja el importe reclamado exacto", (float)($body8['data']['refund']['claimed_amount'] ?? 0) === 2.50);
+
+// Verificar en base de datos tabla refund_requests
+$stmtRefund = $pdo->prepare('SELECT * FROM refund_requests WHERE incident_id = :inc_id');
+$stmtRefund->execute([':inc_id' => $body8['data']['id']]);
+$refundRow = $stmtRefund->fetch(PDO::FETCH_ASSOC);
+$assert("8.7 Expediente formal persistido en tabla refund_requests", $refundRow !== false);
+$assert("8.8 Estado inicial es PENDING_INSPECTION", ($refundRow['status'] ?? '') === 'PENDING_INSPECTION');
+$assert("8.9 Importe reclamado persistido como 2.50", (float)($refundRow['claimed_amount'] ?? 0) === 2.50);
 
 // Resumen final
 echo "\n======================================================================\n";

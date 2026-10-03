@@ -30,6 +30,7 @@ class Location implements ArrayAccess, JsonSerializable
     private ?string $createdAt;
     private ?string $updatedAt;
     private ?string $deletedAt;
+    private bool $hasPhysicalReception;
 
     public function __construct(
         int $id,
@@ -43,7 +44,8 @@ class Location implements ArrayAccess, JsonSerializable
         ?string $updatedAt = null,
         ?string $deletedAt = null,
         float $latitude = 41.3850640,
-        float $longitude = 2.1734035
+        float $longitude = 2.1734035,
+        bool $hasPhysicalReception = true
     ) {
         $this->id = $id;
         $this->siteCode = strtoupper(trim($siteCode));
@@ -60,6 +62,7 @@ class Location implements ArrayAccess, JsonSerializable
         $this->createdAt = $createdAt;
         $this->updatedAt = $updatedAt;
         $this->deletedAt = $deletedAt;
+        $this->hasPhysicalReception = $hasPhysicalReception;
     }
 
     /**
@@ -82,7 +85,8 @@ class Location implements ArrayAccess, JsonSerializable
             isset($row['updated_at']) ? (string)$row['updated_at'] : null,
             isset($row['deleted_at']) && $row['deleted_at'] !== null ? (string)$row['deleted_at'] : null,
             isset($row['latitude']) ? (float)$row['latitude'] : 41.3850640,
-            isset($row['longitude']) ? (float)$row['longitude'] : 2.1734035
+            isset($row['longitude']) ? (float)$row['longitude'] : 2.1734035,
+            (bool)($row['has_physical_reception'] ?? true)
         );
     }
 
@@ -137,6 +141,11 @@ class Location implements ArrayAccess, JsonSerializable
         return $this->contactPhone;
     }
 
+    public function hasPhysicalReception(): bool
+    {
+        return $this->hasPhysicalReception;
+    }
+
     public function isActive(): bool
     {
         return $this->isActive && $this->deletedAt === null;
@@ -178,6 +187,7 @@ class Location implements ArrayAccess, JsonSerializable
             'longitude' => $this->longitude,
             'contact_name' => $this->contactName,
             'contact_phone' => $this->contactPhone,
+            'has_physical_reception' => $this->hasPhysicalReception,
             'is_active' => $this->isActive,
             'created_at' => $this->createdAt,
             'updated_at' => $this->updatedAt,

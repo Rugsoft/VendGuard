@@ -1,0 +1,938 @@
+<?php
+
+declare(strict_types=1);
+
+namespace VendGuard\Application\Service;
+
+use VendGuard\Application\DTO\CoordinatorApprovalDTO;
+use VendGuard\Application\DTO\CoordinatorPaymentDTO;
+use VendGuard\Application\DTO\CreateRefundRequestDTO;
+use VendGuard\Core\Domain\Exception\DuplicateRefundClaimException;
+use VendGuard\Core\Domain\Exception\InvalidPickupPinException;
+use VendGuard\Core\Domain\Exception\InvalidRefundAmountException;
+use VendGuard\Core\Domain\Exception\InvalidRefundStateTransitionException;
+use VendGuard\Core\Domain\Exception\JustificationTooShortException;
+use VendGuard\Core\Domain\Exception\PickupPinLockedException;
+use VendGuard\Core\Domain\Exception\ReceptionDeliveryNotAllowedException;
+use VendGuard\Core\Domain\Exception\RefundNotFoundException;
+use VendGuard\Core\Domain\Model\CashCustodyAction;
+use VendGuard\Core\Domain\Model\CoordinatorDecision;
+use VendGuard\Core\Domain\Model\RefundRequest;
+use VendGuard\Core\Domain\Model\RefundStatus;
+use VendGuard\Core\Domain\Model\TechnicianFinding;
+use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\ClaimantIdentity;
+
+/**
+ * RefundManagementService
+ *
+ * Orchestrates the lifecycle of a consumer refund case: opening it from the QR
+ * report or the site portal, moving it along the legal state machine, releasing
+ * the cash at the reception desk behind the pickup PIN, and recording the
+ * coordinator sign-off and the digital settlement.
+ *
+ * The case lifecycle is deliberately independent from the incident one, so a
+ * broken machine returns to service without waiting for the claimant to be paid
+ * (Constitution Art. II). Nothing here ever removes a row: a case is cancelled
+ * logically and the audit trail is append-only (Art. III).
+ *
+ * ## State machine
+ * `LEGAL_TRANSITIONS` mirrors the graph of `specs/technical/refunds_contracts.md`
+ * §1.1 edge for edge. It is the single authority on which moves exist; every
+ * write below goes through `transitionCase()`, so no caller can skip the check.
+ * The `REQUIRES_COORDINATOR_APPROVAL -> REJECTED` edge is already declared here
+ * even though the reject operation lands with the coordination controller in
+ * T-REF-12, so the table stays a faithful mirror of the contract.
+ *
+ * ## Financial secrecy (Art. V.4)
+ * Audit payloads are assembled field by field and never spread the case, so the
+ * IBAN, the Bizum phone and the pickup PIN can never reach the audit log.
+ */
+final class RefundManagementService
+{
+    /** Lower bound of the generated pickup PIN (RF-REF-02). */
+    public const PICKUP_PIN_MIN = 1000;
+
+    /** Upper bound of the generated pickup PIN (RF-REF-02). */
+    public const PICKUP_PIN_MAX = 9999;
+
+    /** Random bytes behind the tracking token: 32 bytes render as 64 hex chars. */
+    public const TRACKING_TOKEN_BYTES = 32;
+
+    /**
+     * Decimal places of every money figure in this module.
+     *
+     * The euro has no subunit smaller than the cent, so two decimals is not a
+     * display choice but the last position at which a figure is a quantity of
+     * money at all. Anything with a third decimal is refused on the way in, and
+     * that removes the need for a comparison tolerance.
+     */
+    public const MONEY_DECIMALS = 2;
+
+    /**
+     * Whether a figure is an exact number of cents.
+     *
+     * `round()` returns the double nearest to the two-decimal value, so for any
+     * legitimate amount this holds; for `4.005` it does not, because the nearest
+     * double to 4.005 is 4.004999999999999893, which rounds to 4.01.
+     */
+    private static function isCentExact(float $amount): bool
+    {
+        return round($amount, self::MONEY_DECIMALS) === $amount;
+    }
+
+    /**
+     * Legal edges of the refund lifecycle, exactly as contracted.
+     *
+     * @var array<string, list<string>>
+     */
+    private const LEGAL_TRANSITIONS = [
+        'PENDING_INSPECTION' => [
+            'DEPOSITED_AT_RECEPTION',
+            'VERIFIED_PENDING_PAYMENT',
+            'REQUIRES_COORDINATOR_APPROVAL',
+        ],
+        'DEPOSITED_AT_RECEPTION' => ['REFUNDED_IN_HAND'],
+        'VERIFIED_PENDING_PAYMENT' => ['PAID_DIGITAL', 'PENDING_CONTACT'],
+        'REQUIRES_COORDINATOR_APPROVAL' => ['VERIFIED_PENDING_PAYMENT', 'REJECTED'],
+        'PENDING_CONTACT' => ['VERIFIED_PENDING_PAYMENT'],
+        'PAID_DIGITAL' => [],
+        'REFUNDED_IN_HAND' => [],
+        'REJECTED' => [],
+    ];
+
+    private RefundRequestRepositoryInterface $refundRepo;
+    private IbanValidationService $ibanValidator;
+    private AuditLogger $auditLogger;
+
+    public function __construct(
+        RefundRequestRepositoryInterface $refundRepo,
+        ?IbanValidationService $ibanValidator = null,
+        ?AuditLogger $auditLogger = null
+    ) {
+        $this->refundRepo = $refundRepo;
+        $this->ibanValidator = $ibanValidator ?? new IbanValidationService();
+        $this->auditLogger = $auditLogger ?? new AuditLogger();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Secrets
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Cryptographically secure four-digit pickup PIN (RF-REF-02).
+     *
+     * `random_int` is used instead of `rand` so the secret cannot be predicted
+     * from a previous draw.
+     */
+    public function generatePickupPin(): string
+    {
+        return (string)random_int(self::PICKUP_PIN_MIN, self::PICKUP_PIN_MAX);
+    }
+
+    /**
+     * Cryptographically secure tracking token: 32 random bytes as 64 hex chars.
+     */
+    public function generateTrackingToken(): string
+    {
+        return bin2hex(random_bytes(self::TRACKING_TOKEN_BYTES));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // State machine
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Whether the lifecycle graph allows moving a case between two states.
+     */
+    public function canTransition(RefundStatus $from, RefundStatus $to): bool
+    {
+        return in_array($to->value, self::LEGAL_TRANSITIONS[$from->value] ?? [], true);
+    }
+
+    /**
+     * Every legal edge of the lifecycle, as a transition map.
+     *
+     * @return array<string, list<string>>
+     */
+    public function legalTransitions(): array
+    {
+        return self::LEGAL_TRANSITIONS;
+    }
+
+    /**
+     * @throws InvalidRefundStateTransitionException When the edge does not exist.
+     */
+    public function assertTransitionAllowed(
+        RefundStatus $from,
+        RefundStatus $to,
+        ?string $attemptedAction = null
+    ): void {
+        if (!$this->canTransition($from, $to)) {
+            throw new InvalidRefundStateTransitionException(
+                fromStatus: $from,
+                toStatus: $to,
+                attemptedAction: $attemptedAction
+            );
+        }
+    }
+
+    /**
+     * Decides the state a case lands in once the technician has filed a verdict.
+     *
+     * Implements the classification of `plan.md` §3.3 verbatim: cash already
+     * waiting at the reception desk stops there; anything above 10,00 €, with a
+     * material discrepancy, or with an unverified absence of cash escalates to
+     * Coordination instead of going straight to payment.
+     *
+     * @throws InvalidRefundStateTransitionException When the case is not awaiting
+     *   its inspection any more, so a second verdict cannot overwrite the first.
+     * @throws ReceptionDeliveryNotAllowedException When the cash backing a
+     *   digital channel, or more than 10,00 €, is claimed to stay at reception.
+     */
+    public function classifyInspectionOutcome(RefundRequest $case): RefundStatus
+    {
+        if (!$case->awaitsInspection()) {
+            throw new InvalidRefundStateTransitionException(
+                fromStatus: $case->getStatus(),
+                toStatus: RefundStatus::VERIFIED_PENDING_PAYMENT,
+                attemptedAction: 'INSPECT_INCIDENT'
+            );
+        }
+
+        $recovered = $case->getRecoveredAmount() ?? 0.0;
+        $custody = $case->getCashCustodyAction();
+        $isDigital = $case->getCompensationMethod()->isDigital();
+
+        if ($case->getTechnicianFinding() === TechnicianFinding::FOUND_PHYSICAL) {
+            // RF-REF-05: elevated amounts and digital channels must go to the
+            // central safe; leaving them at the desk is refused outright.
+            if (($recovered > RefundRequest::RECEPTION_DELIVERY_LIMIT || $isDigital)
+                && $custody !== CashCustodyAction::HELD_FOR_CENTRAL) {
+                throw new ReceptionDeliveryNotAllowedException(
+                    claimedAmount: $case->getClaimedAmount(),
+                    compensationMethod: $case->getCompensationMethod(),
+                    receptionLimit: RefundRequest::RECEPTION_DELIVERY_LIMIT
+                );
+            }
+
+            if ($custody === CashCustodyAction::LEFT_AT_RECEPTION) {
+                return RefundStatus::DEPOSITED_AT_RECEPTION;
+            }
+        }
+
+        if ($case->requiresSpecialSupervision()) {
+            return RefundStatus::REQUIRES_COORDINATOR_APPROVAL;
+        }
+
+        return RefundStatus::VERIFIED_PENDING_PAYMENT;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Case creation
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Opens a refund case with a fresh PIN and tracking token (RF-REF-01/02).
+     *
+     * The pickup PIN is only issued for `EN_MANO_SEDE`: a Bizum or bank transfer
+     * is settled by the central office and the claimant never presents a secret
+     * at the reception desk.
+     *
+     * @throws InvalidRefundAmountException When the claim leaves the antifraud
+     *   range of (0,00 €, 50,00 €].
+     * @throws DuplicateRefundClaimException When this same claimant already has
+     *   a live case on this incident (RF-REF-11).
+     * @throws \VendGuard\Core\Domain\Exception\InvalidBizumPhoneException
+     * @throws \VendGuard\Core\Domain\Exception\InvalidIbanFormatException
+     */
+    public function createCase(CreateRefundRequestDTO $dto): RefundRequest
+    {
+        // RF-REF-03: the 50.00 EUR ceiling is blocking, not advisory.
+        if ($dto->claimedAmount <= 0.0 || $dto->claimedAmount > RefundRequest::MAX_CLAIMED_AMOUNT) {
+            throw new InvalidRefundAmountException(
+                attemptedAmount: $dto->claimedAmount,
+                maximumAllowed: RefundRequest::MAX_CLAIMED_AMOUNT
+            );
+        }
+
+        // Una reclamación de 4,005 € no es una cantidad de dinero: la columna
+        // DECIMAL(10,2) la guardaría como 4,01 y el consumidor vería una cifra
+        // que él no escribió. Se rechaza en la puerta, no al liquidar.
+        if (!self::isCentExact($dto->claimedAmount)) {
+            throw new InvalidRefundAmountException(
+                attemptedAmount: $dto->claimedAmount,
+                maximumAllowed: RefundRequest::MAX_CLAIMED_AMOUNT,
+                message: InvalidRefundAmountException::NOT_CENT_EXACT_MESSAGE
+            );
+        }
+
+        $this->assertNoDuplicateClaim($dto);
+
+        $bizumPhone = $dto->compensationMethod->requiresBizumPhone()
+            ? $this->ibanValidator->assertValidBizumPhone((string)$dto->bizumPhone)
+            : null;
+
+        $iban = $dto->compensationMethod->requiresIban()
+            ? $this->ibanValidator->assertValidIban((string)$dto->iban)
+            : null;
+
+        $pickupPin = $dto->compensationMethod->isDigital()
+            ? null
+            : $this->generatePickupPin();
+
+        $case = new RefundRequest(
+            id: null,
+            incidentId: $dto->incidentId,
+            machineId: $dto->machineId,
+            locationId: $dto->locationId,
+            claimantName: trim($dto->claimantName),
+            claimantContact: trim($dto->claimantContact),
+            claimedAmount: $dto->claimedAmount,
+            productAttempted: $dto->productAttempted,
+            compensationMethod: $dto->compensationMethod,
+            bizumPhone: $bizumPhone,
+            iban: $iban,
+            pickupPin: $pickupPin,
+            trackingToken: $this->generateTrackingToken(),
+            status: RefundStatus::PENDING_INSPECTION
+        );
+
+        $caseId = $this->refundRepo->insert($case);
+
+        // `RefundRequest` is immutable and was built with id 0, because the
+        // identifier only exists once the row exists. Reloading returns the
+        // persisted case, so callers never handle a zero identifier.
+        $persisted = $this->loadCase($caseId);
+
+        $this->auditLogger->logRefundEvent(
+            $caseId,
+            'REFUND_CASE_CREATED',
+            ['id' => null, 'role' => 'PUBLIC', 'name' => 'Consumidor final'],
+            null,
+            [
+                'status' => RefundStatus::PENDING_INSPECTION->value,
+                'claimed_amount' => $case->getClaimedAmount(),
+                'compensation_method' => $case->getCompensationMethod()->value,
+            ],
+            ['incident_id' => $case->getIncidentId()]
+        );
+
+        return $persisted;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Operations
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Releases the cash to the claimant at the reception desk (RF-REF-06).
+     *
+     * The PIN is compared in constant time through the entity. A wrong PIN no
+     * longer leaves the case completely untouched, because "untouched" is exactly
+     * what made an unbounded number of guesses possible: the attempt is counted,
+     * and the fifth one locks the PIN for fifteen minutes (RF-REF-02). Measured
+     * against this endpoint, 3000 wrong PINs used to go through in 1.02 seconds.
+     *
+     * @param array{id?: int|null, role?: string, name?: string} $actor Receptionist.
+     * @throws RefundNotFoundException
+     * @throws InvalidPickupPinException
+     * @throws PickupPinLockedException When the PIN is inside its lock window.
+     * @throws InvalidRefundStateTransitionException
+     */
+    public function deliverInHand(int $id, string $pin, array $actor = []): RefundRequest
+    {
+        $case = $this->loadCase($id);
+        $now = date('Y-m-d H:i:s');
+
+        // The lock is checked BEFORE the secret, so a locked case never even
+        // compares. That ordering matters: it stops a locked case from being
+        // used as an oracle to tell "wrong PIN" apart from "right PIN but
+        // still locked".
+        if ($case->isPickupLockedAt($now)) {
+            throw new PickupPinLockedException(
+                failedAttempts: $case->getPickupAttempts(),
+                lockedUntil: $case->getPickupLockedUntil()
+            );
+        }
+
+        if (!$case->verifyPickupPin($pin)) {
+            // The attempt that exhausts the budget answers 423 instead of 422:
+            // the desk should learn that the door just closed, and until when,
+            // on the very request that closed it. Answering 422 would leave the
+            // receptionist (and the consumer) guessing for one more round trip.
+            if ($this->registerFailedPickupAttempt($case, $now, $actor)) {
+                throw new PickupPinLockedException(
+                    failedAttempts: $case->getPickupAttempts() + 1,
+                    lockedUntil: date(
+                        'Y-m-d H:i:s',
+                        strtotime($now . ' +' . RefundRequest::PICKUP_PIN_LOCK_MINUTES . ' minutes')
+                    )
+                );
+            }
+
+            throw new InvalidPickupPinException();
+        }
+
+        $this->transitionCase($case, RefundStatus::REFUNDED_IN_HAND, 'DELIVER_IN_HAND', [
+            'hand_delivered_at' => $now,
+            // Un acierto borra el historial de intentos: el contador mide la
+            // racha fallida, no la vida del expediente, y dejarlo acumulado
+            // convertiría un error aislado de hace semanas en un bloqueo
+            // futuro injusto.
+            'pickup_attempts' => 0,
+            'pickup_locked_until' => null,
+        ]);
+
+        $this->auditLogger->logRefundEvent(
+            $id,
+            'REFUND_DELIVERED_IN_HAND',
+            $this->normalizeActor($actor, 'LOCATION_MANAGER', 'Conserjería'),
+            ['status' => $case->getStatus()->value],
+            ['status' => RefundStatus::REFUNDED_IN_HAND->value]
+        );
+
+        return $this->loadCase($id);
+    }
+
+    /**
+     * Counts one wrong PIN and locks the case once the budget runs out
+     * (RF-REF-02).
+     *
+     * The write goes through the repository's Compare-And-Swap with the SAME
+     * status it read, so the guard the module already relies on applies here
+     * too: a delivery that landed a microsecond earlier wins and this attempt is
+     * dropped instead of resurrecting a case that is already `REFUNDED_IN_HAND`.
+     * A false return therefore means "somebody else got there first", which is
+     * not a failure worth raising on top of the wrong PIN.
+     *
+     * It deliberately does NOT ask the lifecycle graph. Counting a guess is not
+     * a state move, and inventing a self-loop edge in `LEGAL_TRANSITIONS` to
+     * carry a column would weaken the single authority that map exists to be.
+     *
+     * Concurrency, stated plainly: this is a read-modify-write on a counter, not
+     * an atomic increment, so two simultaneous guesses could let one extra try
+     * through. That is a deliberate trade because the lock is monotonic and
+     * self-expiring: worst case the fifth and sixth attempts land together and
+     * the lock still engages. Making it atomic would mean a new repository
+     * method and a new column comparison in every test double, to shave one
+     * guess off a 10.000 key space that the lock already denies.
+     *
+     * @param array{id?: int|null, role?: string, name?: string} $actor
+     * @return bool Whether THIS attempt is the one that closed the door.
+     */
+    private function registerFailedPickupAttempt(RefundRequest $case, string $now, array $actor): bool
+    {
+        $attempts = $case->getPickupAttempts() + 1;
+        $lockedUntil = null;
+        $justLocked = $attempts >= RefundRequest::PICKUP_PIN_MAX_ATTEMPTS;
+
+        if ($justLocked) {
+            $lockedUntil = date(
+                'Y-m-d H:i:s',
+                strtotime($now . ' +' . RefundRequest::PICKUP_PIN_LOCK_MINUTES . ' minutes')
+            );
+        }
+
+        $this->refundRepo->transitionStatus(
+            (int)$case->getId(),
+            $case->getStatus(),
+            $case->getStatus(),
+            [
+                'pickup_attempts' => $attempts,
+                'pickup_locked_until' => $lockedUntil,
+            ]
+        );
+
+        // The audit records THAT the PIN was refused and how close the case is to
+        // locking, never the PIN itself (Art. V.4): an audit log that leaked the
+        // guesses it is counting would be worse than no log at all.
+        $this->auditLogger->logRefundEvent(
+            (int)$case->getId(),
+            'REFUND_PICKUP_PIN_REJECTED',
+            $this->normalizeActor($actor, 'LOCATION_MANAGER', 'Conserjería'),
+            ['status' => $case->getStatus()->value],
+            [
+                'status' => $case->getStatus()->value,
+                'failed_attempts' => $attempts,
+                'max_attempts' => RefundRequest::PICKUP_PIN_MAX_ATTEMPTS,
+                'locked_until' => $lockedUntil,
+            ]
+        );
+
+        return $justLocked;
+    }
+
+    /**
+     * Records the formal coordinator sign-off of the final amount (RF-REF-03).
+     *
+     * @param array{id?: int|null, role?: string, name?: string} $actor
+     * @throws RefundNotFoundException
+     * @throws InvalidRefundStateTransitionException
+     */
+    public function approveCase(int $id, CoordinatorApprovalDTO $dto, array $actor = []): RefundRequest
+    {
+        // RF-REF-03: el techo de 50,00 € por reclamación también aplica al
+        // visto bueno. `createCase()` lo respeta al abrir el expediente, pero
+        // sin este segundo control una firma podría convalidar con el botón
+        // de aprobación un importe que el formulario de entrada habría rechazado.
+        //
+        // Este control va ANTES de cargar el expediente a propósito: el orden de
+        // los errores es parte del contrato, y un id inexistente con un importe
+        // dentro del rango tiene que seguir contestando 404 y no 422.
+        if ($dto->approvedAmount <= 0.0 || $dto->approvedAmount > RefundRequest::MAX_CLAIMED_AMOUNT) {
+            throw new InvalidRefundAmountException(
+                attemptedAmount: $dto->approvedAmount,
+                maximumAllowed: RefundRequest::MAX_CLAIMED_AMOUNT
+            );
+        }
+
+        if (!self::isCentExact($dto->approvedAmount)) {
+            throw new InvalidRefundAmountException(
+                attemptedAmount: $dto->approvedAmount,
+                maximumAllowed: RefundRequest::MAX_CLAIMED_AMOUNT,
+                message: InvalidRefundAmountException::NOT_CENT_EXACT_MESSAGE
+            );
+        }
+
+        $case = $this->loadCase($id);
+
+        // El visto bueno NO puede superar lo reclamado. Antes solo se acotaba por
+        // el bloque de 50,00 €, así que una reclamación de 1,00 € se firmaba por
+        // 50,00 € con HTTP 200; y como la liquidación tiene que coincidir
+        // exactamente con el importe aprobado, ese 50,00 € se convertía en la
+        // única cifra que el servicio aceptaba, de modo que la firma autorizaba
+        // el desembolso entero. Nadie reclama de más, y la discrepancia entre lo
+        // reclamado y lo verificado solo puede resolverse a la baja.
+        if ($dto->approvedAmount > $case->getClaimedAmount()) {
+            throw new InvalidRefundAmountException(
+                attemptedAmount: $dto->approvedAmount,
+                maximumAllowed: $case->getClaimedAmount(),
+                message: InvalidRefundAmountException::APPROVAL_ABOVE_CLAIM_MESSAGE
+            );
+        }
+
+        // El grafo legal admite PENDING_INSPECTION -> VERIFIED_PENDING_PAYMENT
+        // porque es la vía del técnico cuando lleva el efectivo a caja central.
+        // El visto bueno de Coordinación, en cambio, sólo existe para resolver
+        // un expediente que la clasificación automática ya marcó como
+        // REQUIRES_COORDINATOR_APPROVAL. Sin esta precondición, el endpoint
+        // serviría para saltarse la doble autorización del RF-REF-03.
+        if ($case->getStatus() !== RefundStatus::REQUIRES_COORDINATOR_APPROVAL) {
+            throw new InvalidRefundStateTransitionException(
+                fromStatus: $case->getStatus(),
+                toStatus: RefundStatus::VERIFIED_PENDING_PAYMENT,
+                attemptedAction: 'APPROVE'
+            );
+        }
+
+        // RF-REF-03/08: el visto bueno no puede hacer que la suma de lo firmado
+        // para la avería supere el efectivo realmente recuperado en ella. Sin
+        // este tope, varios reclamantes de una misma avería se firmaban por su
+        // importe íntegro y se liquidaba más dinero del que salió de la máquina.
+        $this->assertIncidentPayoutWithinRecovered($case, $dto->approvedAmount);
+
+        $this->transitionCase($case, RefundStatus::VERIFIED_PENDING_PAYMENT, 'APPROVE', [
+            'approved_amount' => $dto->approvedAmount,
+            'coordinator_decision' => CoordinatorDecision::APPROVED->value,
+            'coordinator_justification' => $dto->justification !== '' ? $dto->justification : null,
+            'coordinator_id' => $actor['id'] ?? null,
+        ]);
+
+        $this->auditLogger->logRefundEvent(
+            $id,
+            'REFUND_APPROVED',
+            $this->normalizeActor($actor, 'COORDINATOR', 'Coordinación'),
+            ['status' => $case->getStatus()->value],
+            [
+                'status' => RefundStatus::VERIFIED_PENDING_PAYMENT->value,
+                'approved_amount' => $dto->approvedAmount,
+            ]
+        );
+
+        return $this->loadCase($id);
+    }
+
+    /**
+     * Registers a digital settlement with its banking reference (RF-REF-07).
+     *
+     * The amount is now STORED, not just requested. It used to be validated,
+     * demanded by the DTO and then silently dropped: the case reached
+     * PAID_DIGITAL with a reference and a timestamp and no record of how much
+     * left the till.
+     *
+     * RF-REF-03 applies to the settlement as well as to the claim, and not only
+     * as a ceiling but as an equality. The settlement must match the formally
+     * approved amount exactly, or the claimed amount when there was no formal
+     * approval. Bounding it from above was half the fix and left the other half
+     * open: a 4,00 EUR case accepted `paid_amount` 0,01 with HTTP 200 and went
+     * straight to `PAID_DIGITAL`, so the consumer saw "your refund has been
+     * paid" after collecting a hundredth of what was agreed, and the leftover
+     * 3,99 EUR had nowhere to go. To pay less than approved the coordinator has
+     * to lower `approved_amount` first through the double authorisation, which
+     * is what that endpoint exists for.
+     *
+     * @param array{id?: int|null, role?: string, name?: string} $actor
+     * @throws InvalidRefundAmountException When the amount is not the approved one.
+     * @throws RefundNotFoundException
+     * @throws InvalidRefundStateTransitionException
+     */
+    public function registerDigitalPayment(int $id, CoordinatorPaymentDTO $dto, array $actor = []): RefundRequest
+    {
+        $case = $this->loadCase($id);
+
+        // The expected amount needs the persisted case, because `approved_amount`
+        // only exists there: a case settled without formal approval owes what the
+        // consumer claimed, and one that went through RF-REF-03's double
+        // authorisation owes the smaller figure the coordinator signed.
+        $expectedAmount = $this->payableAmount($case);
+
+        // ## Por qué igualdad exacta y no una tolerancia
+        // La versión anterior comparaba con un margen de medio céntimo para
+        // absorber el residuo de la coma flotante, y NO cumplía su propósito:
+        // el doble más cercano a 4,005 es 4,004999999999999893, o sea un
+        // residuo POR DEBAJO, de modo que 4,005 pasaba el filtro con cualquier
+        // operador y la columna redondeaba a 4,01 un pago sobre un expediente
+        // aprobado en 4,00. Ninguna comparación en coma flotante puede cerrar esa
+        // puerta: el valor que llega ni siquiera es 4,005.
+        //
+        // La regla que sí se sostiene es que el dinero se cuenta en céntimos: se
+        // rechaza toda cifra que no sea un número exacto de céntimos, y a partir
+        // de ahí la igualdad entre dos importes ya es una igualdad real, porque
+        // ambos son el mismo doble. La tolerancia desaparece con ella.
+        if (!self::isCentExact($dto->paidAmount)) {
+            throw new InvalidRefundAmountException(
+                attemptedAmount: $dto->paidAmount,
+                maximumAllowed: $expectedAmount,
+                expectedAmount: $expectedAmount,
+                message: InvalidRefundAmountException::NOT_CENT_EXACT_MESSAGE
+            );
+        }
+
+        if ($dto->paidAmount <= 0.0 || $dto->paidAmount !== $expectedAmount) {
+            throw new InvalidRefundAmountException(
+                attemptedAmount: $dto->paidAmount,
+                maximumAllowed: $expectedAmount,
+                expectedAmount: $expectedAmount,
+                message: InvalidRefundAmountException::SETTLEMENT_MISMATCH_MESSAGE
+            );
+        }
+
+        // El orden de los errores es parte del contrato: pagar un expediente
+        // desestimado o ya liquidado debe seguir respondiendo 409, no 422. Por
+        // eso la validez de la transición se comprueba antes del tope agregado.
+        $this->assertTransitionAllowed($case->getStatus(), RefundStatus::PAID_DIGITAL, 'PAY');
+
+        // El tope agregado también protege la liquidación: es la última puerta
+        // antes de que el dinero salga.
+        $this->assertIncidentPayoutWithinRecovered($case, $dto->paidAmount);
+
+        $this->transitionCase($case, RefundStatus::PAID_DIGITAL, 'PAY', [
+            'paid_amount' => $dto->paidAmount,
+            'payment_reference' => trim($dto->paymentReference),
+            'paid_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $this->auditLogger->logRefundEvent(
+            $id,
+            'REFUND_PAID_DIGITAL',
+            $this->normalizeActor($actor, 'COORDINATOR', 'Coordinación'),
+            ['status' => $case->getStatus()->value],
+            [
+                'status' => RefundStatus::PAID_DIGITAL->value,
+                'paid_amount' => $dto->paidAmount,
+                'payment_reference' => trim($dto->paymentReference),
+            ]
+        );
+
+        return $this->loadCase($id);
+    }
+
+    /**
+     * The only amount this case may legally be settled for, as RF-REF-03
+     * defines it: the approved amount when the coordinator signed one, the
+     * claimed amount otherwise, and never over the 50,00 EUR block.
+     *
+     * It is an equality target and not a ceiling any more. The name says so on
+     * purpose: a ceiling invites a comparison that only asks "is it too much?",
+     * and the payment that escaped was 0,01 under a 4,00 EUR case.
+     */
+    public function payableAmount(RefundRequest $case): float
+    {
+        return min(
+            $case->getApprovedAmount() ?? $case->getClaimedAmount(),
+            RefundRequest::MAX_CLAIMED_AMOUNT
+        );
+    }
+
+    /**
+     * Impide que la suma de lo comprometido para una avería supere el efectivo
+     * realmente recuperado en ella (RF-REF-08).
+     *
+     * Es la guarda agregada que faltaba. La igualdad de `registerDigitalPayment()`
+     * compara, por expediente, la liquidación con lo reclamado o lo aprobado, y
+     * por eso no veía nada raro cuando dos reclamantes de una misma avería
+     * cobraban cada uno su importe íntegro: la suma de los pagos superaba el
+     * efectivo que salió de la máquina y la conciliación diaria cuadraba en cada
+     * fila y no cuadraba en el total. El tope se cuenta en céntimos enteros y
+     * solo aplica cuando el técnico ya ha declarado cuánto recuperó (si no,
+     * `recovered_amount` es null y no hay techo que imponer todavía).
+     *
+     * @throws InvalidRefundAmountException
+     */
+    private function assertIncidentPayoutWithinRecovered(RefundRequest $case, float $candidateAmount): void
+    {
+        $incidentId = $case->getIncidentId();
+        if ($incidentId < 1) {
+            return;
+        }
+
+        $siblings = $this->refundRepo->findRestrictedByIncident($incidentId);
+        if ($siblings === []) {
+            return;
+        }
+
+        $recoveredTotal = 0.0;
+        $committedCents = 0;
+        $hasRecovered = false;
+
+        foreach ($siblings as $sibling) {
+            $siblingId = (int)$sibling->getId();
+            if ($sibling->getRecoveredAmount() !== null) {
+                $recoveredTotal += $sibling->getRecoveredAmount();
+                $hasRecovered = true;
+            }
+
+            if ($siblingId === (int)$case->getId()) {
+                continue;
+            }
+
+            // Lo ya comprometido para los demás: el importe liquidado si ya
+            // salió el dinero, y si no el aprobado formalmente.
+            $committedCents += self::toCents($sibling->getPaidAmount() ?? $sibling->getApprovedAmount() ?? 0.0);
+        }
+
+        if (!$hasRecovered) {
+            return;
+        }
+
+        $ceilingCents = self::toCents($recoveredTotal) - $committedCents;
+        if (self::toCents($candidateAmount) > $ceilingCents) {
+            throw new InvalidRefundAmountException(
+                attemptedAmount: $candidateAmount,
+                maximumAllowed: max(0.0, $ceilingCents / 100),
+                message: sprintf(
+                    'El efectivo recuperado en esta avería (%.2f €) no cubre el importe indicado: ya hay %.2f € comprometidos en otros expedientes.',
+                    $recoveredTotal,
+                    $committedCents / 100
+                )
+            );
+        }
+    }
+
+    /**
+     * Convierte euros a céntimos enteros, la unidad en la que se comparan
+     * todos los agregados de este módulo.
+     */
+    private static function toCents(float $amount): int
+    {
+        return (int)round($amount * 100);
+    }
+
+    /**
+     * Records the formal coordinator dismissal of a claim (RF-REF-08).
+     *
+     * It lives here, next to `approveCase()`, and not in the coordination
+     * controller on purpose: `LEGAL_TRANSITIONS` is documented as the single
+     * authority on which moves exist, and `transitionCase()` as the single
+     * guarded write path. A controller writing straight to the repository would
+     * be the one place in the module able to change a state without asking the
+     * graph, which is exactly how a case ends up paid and rejected at once.
+     *
+     * A dismissal is terminal but never destructive: the case keeps its full
+     * financial history for the audit trail (Art. III).
+     *
+     * @param array{id?: int|null, role?: string, name?: string} $actor
+     * @throws JustificationTooShortException When the written reason is shorter
+     *   than the 20 descriptive characters the contract demands.
+     * @throws RefundNotFoundException When the case does not exist or was archived.
+     * @throws InvalidRefundStateTransitionException When the current status has
+     *   no edge to `REJECTED`.
+     */
+    public function rejectCase(int $id, string $justification, array $actor = []): RefundRequest
+    {
+        $reason = trim($justification);
+        if (mb_strlen($reason) < JustificationTooShortException::MINIMUM_LENGTH) {
+            throw new JustificationTooShortException($reason);
+        }
+
+        $case = $this->loadCase($id);
+
+        $this->transitionCase($case, RefundStatus::REJECTED, 'REJECT_REFUND', [
+            'coordinator_decision' => CoordinatorDecision::REJECTED->value,
+            'coordinator_justification' => $reason,
+            'coordinator_id' => $actor['id'] ?? null,
+        ]);
+
+        $this->auditLogger->logRefundEvent(
+            $id,
+            'REFUND_REJECTED',
+            $this->normalizeActor($actor, 'COORDINATOR', 'Coordinación'),
+            ['status' => $case->getStatus()->value],
+            [
+                'status' => RefundStatus::REJECTED->value,
+                'claimed_amount' => $case->getClaimedAmount(),
+            ]
+        );
+
+        return $this->loadCase($id);
+    }
+
+    /**
+     * Rectifies the claimant payment details after a contact failure
+     * (RF-REF-07) and returns the case to the payment lane.
+     *
+     * @throws RefundNotFoundException
+     * @throws InvalidRefundStateTransitionException
+     */
+    public function rectifyContactDetails(int $id, ?string $bizumPhone = null, ?string $iban = null): RefundRequest
+    {
+        $case = $this->loadCase($id);
+
+        $validatedPhone = $bizumPhone !== null
+            ? $this->ibanValidator->assertValidBizumPhone($bizumPhone)
+            : null;
+
+        $validatedIban = $iban !== null
+            ? $this->ibanValidator->assertValidIban($iban)
+            : null;
+
+        $this->assertTransitionAllowed($case->getStatus(), RefundStatus::VERIFIED_PENDING_PAYMENT, 'RECTIFY_CONTACT');
+
+        if ($case->getCompensationMethod()->requiresBizumPhone() && $validatedPhone === null) {
+            $validatedPhone = $this->ibanValidator->assertValidBizumPhone((string)$case->getBizumPhone());
+        }
+
+        if ($case->getCompensationMethod()->requiresIban() && $validatedIban === null) {
+            $validatedIban = $this->ibanValidator->assertValidIban((string)$case->getIban());
+        }
+
+        $this->refundRepo->updateContactDetails($id, $validatedPhone, $validatedIban);
+
+        $updated = $this->loadCase($id);
+
+        $this->transitionCase($updated, RefundStatus::VERIFIED_PENDING_PAYMENT, 'RECTIFY_CONTACT');
+
+        // The payload carries no financial detail on purpose (Art. V.4).
+        $this->auditLogger->logRefundEvent(
+            $id,
+            'REFUND_CONTACT_RECTIFIED',
+            ['id' => null, 'role' => 'PUBLIC', 'name' => 'Consumidor final'],
+            ['status' => RefundStatus::PENDING_CONTACT->value],
+            ['status' => RefundStatus::VERIFIED_PENDING_PAYMENT->value]
+        );
+
+        return $this->loadCase($id);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Internals
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * One live case per (incident, claimant), which is the unit RF-REF-11 names.
+     *
+     * The comparison goes through `ClaimantIdentity`, never through the typed
+     * characters: a `+34` prefix, a non-breaking space or an underscore used to
+     * be enough to slip a second payable case past this rule.
+     *
+     * The check lives here, in the domain, and not in the controller or in a
+     * unique index, for two reasons. A controller-only check is one forgotten
+     * call away from being bypassed by the next entry point. And a UNIQUE index
+     * on `incident_id` would be wrong: it would also forbid re-claiming after a
+     * case was rejected, which is exactly when a claimant legitimately tries
+     * again with corrected data.
+     *
+     * Terminal cases are skipped on purpose. `PAID_DIGITAL`, `REFUNDED_IN_HAND`
+     * and `REJECTED` are the three ends of the lifecycle: the first two mean the
+     * money already left, and the third means the claim was dismissed and the
+     * consumer is entitled to start over.
+     *
+     * @throws DuplicateRefundClaimException
+     */
+    private function assertNoDuplicateClaim(CreateRefundRequestDTO $dto): void
+    {
+        $contact = ClaimantIdentity::from($dto->claimantContact);
+
+        foreach ($this->refundRepo->findRestrictedByIncident($dto->incidentId) as $existing) {
+            if ($existing->getStatus()->isTerminal()) {
+                continue;
+            }
+
+            if (!$contact->equals(ClaimantIdentity::from($existing->getClaimantContact()))) {
+                continue;
+            }
+
+            // El identificador sí viaja; el token NO. La respuesta de este
+            // rechazo sale por un endpoint público y el token abre el sobre en
+            // la conserjería (RF-REF-11).
+            throw new DuplicateRefundClaimException(existingCaseId: (int)$existing->getId());
+        }
+    }
+
+    /**
+     * @throws RefundNotFoundException When the case does not exist or was archived.
+     */
+    private function loadCase(int $id): RefundRequest
+    {
+        $case = $this->refundRepo->findById($id);
+
+        if ($case === null || !$case->isActive()) {
+            throw new RefundNotFoundException($id);
+        }
+
+        return $case;
+    }
+
+    /**
+     * The single guarded write path: the edge must be legal and the repository
+     * must confirm the optimistic update, so a concurrent request cannot settle
+     * a case twice.
+     *
+     * @param array<string, mixed> $fields
+     * @throws InvalidRefundStateTransitionException
+     */
+    private function transitionCase(
+        RefundRequest $case,
+        RefundStatus $to,
+        string $action,
+        array $fields = []
+    ): void {
+        $from = $case->getStatus();
+
+        $this->assertTransitionAllowed($from, $to, $action);
+
+        if (!$this->refundRepo->transitionStatus((int) $case->getId(), $from, $to, $fields)) {
+            // Another request moved the case first; report it as a conflict
+            // rather than silently overwriting the winner.
+            throw new InvalidRefundStateTransitionException(
+                fromStatus: $from,
+                toStatus: $to,
+                attemptedAction: $action
+            );
+        }
+    }
+
+    /**
+     * @param array{id?: int|null, role?: string, name?: string} $actor
+     * @return array{id: int|null, role: string, name: string}
+     */
+    private function normalizeActor(array $actor, string $defaultRole, string $defaultName): array
+    {
+        return [
+            'id' => $actor['id'] ?? null,
+            'role' => $actor['role'] ?? $defaultRole,
+            'name' => $actor['name'] ?? $defaultName,
+        ];
+    }
+}

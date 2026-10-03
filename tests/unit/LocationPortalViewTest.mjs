@@ -8,6 +8,7 @@
  * 4. Informs user that duplicate tickets are blocked on machines with open incidents (RF-02).
  * 5. Provides reopen action for machines under 48h warranty.
  * 6. Filters machines by status (All, Active Incident, Operational).
+ * 7. Integrates the Refunds Desk tab for PIN-protected cash handovers (T-REF-17).
  */
 
 // Mock localStorage for headless Node environment
@@ -245,6 +246,21 @@ assert('4.5 operationalCount is 1', LocationPortalView.computed.operationalCount
 // 4.6: Responsive grid template verification
 assert('4.6 Template defines responsive CSS grid with minmax(280px, 1fr)', LocationPortalView.template.includes('repeat(auto-fill, minmax(280px, 1fr))'));
 assert('4.7 Template renders MachineCard components with event listeners', LocationPortalView.template.includes('<MachineCard') && LocationPortalView.template.includes('@report="onReport"'));
+
+// ---------------------------------------------------------------------
+// TEST GROUP 5: Refunds Desk Tab Integration (RF-REF-06, T-REF-17)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 5: Refunds Desk Tab Integration (RF-REF-06) ---');
+
+assert('5.1 Portal registers the LocationRefundsTab component', Boolean(LocationPortalView.components.LocationRefundsTab));
+assert('5.2 Portal exposes the "Reintegros" section tab',
+  LocationPortalView.template.includes("setPortalTab('refunds')") && LocationPortalView.template.includes('💶 Reintegros'));
+assert('5.3 The refunds section renders the anonymized refunds component',
+  LocationPortalView.template.includes("activePortalTab === 'refunds'") && LocationPortalView.template.includes('<LocationRefundsTab'));
+
+const tabState = { activePortalTab: 'machines' };
+LocationPortalView.methods.setPortalTab.call(tabState, 'refunds');
+assert('5.4 setPortalTab("refunds") activates the refunds section', tabState.activePortalTab === 'refunds');
 
 // Summary
 console.log('\n======================================================================');

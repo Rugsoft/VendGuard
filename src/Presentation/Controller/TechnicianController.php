@@ -4,8 +4,22 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
+use VendGuard\Application\DTO\TechnicianRefundInspectionDTO;
+use VendGuard\Application\DTO\TechnicianRefundViewDTO;
+use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
+use VendGuard\Application\Service\TechnicianRefundService;
 use VendGuard\Core\Domain\Exception\IncompatibleSparePartException;
+use VendGuard\Core\Domain\Exception\InvalidRecoveredAmountException;
+use VendGuard\Core\Domain\Exception\InvalidRefundStateTransitionException;
+use VendGuard\Core\Domain\Exception\JustificationTooShortException;
+use VendGuard\Core\Domain\Exception\ReceptionDeliveryNotAllowedException;
+use VendGuard\Core\Domain\Exception\RefundNotFoundException;
+use VendGuard\Core\Domain\Model\CashCustodyAction;
+use VendGuard\Core\Domain\Model\TechnicianFinding;
+use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
+use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
+use VendGuard\Infrastructure\Repository\PdoUnclaimedCashFindingRepository;
 use VendGuard\Core\Domain\Exception\InvalidOutOfCatalogJustificationException;
 use VendGuard\Core\Domain\Exception\InvalidPartQuantityException;
 use VendGuard\Core\Domain\Exception\InvalidResolutionException;
@@ -45,13 +59,17 @@ class TechnicianController
     private LocationRepositoryInterface $locationRepo;
     private UserRepositoryInterface $userRepo;
     private SparePartTraceabilityService $traceabilityService;
+    private RefundRequestRepositoryInterface $refundRepo;
+    private TechnicianRefundService $refundService;
 
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?MachineRepositoryInterface $machineRepo = null,
         ?LocationRepositoryInterface $locationRepo = null,
         ?UserRepositoryInterface $userRepo = null,
-        ?SparePartTraceabilityService $traceabilityService = null
+        ?SparePartTraceabilityService $traceabilityService = null,
+        ?RefundRequestRepositoryInterface $refundRepo = null,
+        ?TechnicianRefundService $refundService = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->machineRepo  = $machineRepo ?? new PdoMachineRepository();
@@ -63,6 +81,15 @@ class TechnicianController
             sparePartRepo: new PdoSparePartRepository(),
             incidentRepo: $this->incidentRepo,
             machineRepo: $this->machineRepo
+        );
+        $this->refundRepo = $refundRepo ?? new PdoRefundRequestRepository();
+        $this->refundService = $refundService ?? new TechnicianRefundService(
+            refundRepo: $this->refundRepo,
+            findingRepo: new PdoUnclaimedCashFindingRepository(),
+            managementService: new RefundManagementService($this->refundRepo),
+            // La regla de conserjeria (RF-REF-05) solo es exigible si
+            // alguien sabe si la sede tiene mesa de recepcion.
+            locationRepo: $this->locationRepo
         );
     }
 
@@ -345,54 +372,300 @@ class TechnicianController
             );
         }
 
-        // 7. Determinar si incluye declaración de repuestos (Módulo M2) o resolución simple legacy (T-29)
-        $hasSparePartsDeclaration = array_key_exists('replaced_parts_declared', $body) || array_key_exists('replaced_parts', $body);
+        // 7. Bloque de dictamen de saldo (RF-REF-04, RF-REF-05, contrato §4.2.2).
+        //
+        //    Orden deliberado: TODA la validación ocurre antes de la primera
+        //    escritura y el dictamen se registra ANTES de resolver la avería.
+        //
+        //    Why: the technician is standing at the machine. A 422 costs them a
+        //    dropdown and one retry; a verdict silently dropped would leave the
+        //    consumer's money in limbo with no record of what happened to it, and
+        //    the technician has already driven away. Conversely the machine is
+        //    never held out of service by a refund problem: the technical repair
+        //    is the last write, so a failure there is reported honestly with the
+        //    verdict already on file (RF-REF-09 decoupling).
+        $refundBlock = $this->readRefundInspection($request, (int)$incident->getId());
+        if ($refundBlock instanceof Response) {
+            return $refundBlock;
+        }
 
-        if ($hasSparePartsDeclaration) {
-            $actor = $this->extractActor($request);
-            try {
-                $result = $this->traceabilityService->resolveIncidentWithParts($incidentId, $techId, $body, $actor);
-                return Response::json($result, 200, 'Incidencia resuelta con registro de repuestos.');
-            } catch (InvalidPartQuantityException $e) {
-                return Response::error('INVALID_PART_QUANTITY', $e->getMessage(), 422);
-            } catch (SparePartNotFoundException $e) {
-                return Response::error('SPARE_PART_NOT_FOUND', $e->getMessage(), 404);
-            } catch (InvalidResolutionException $e) {
-                return Response::error('INVALID_RESOLUTION', $e->getMessage(), 422, ['errors' => $e->getErrors()]);
-            } catch (InvalidTransitionException $e) {
-                return Response::error('INVALID_STATUS_FOR_RESOLUTION', $e->getMessage(), 422);
-            } catch (\InvalidArgumentException $e) {
-                $msg = $e->getMessage();
-                $errCode = 'INVALID_RESOLUTION';
-                if (str_contains($msg, 'replaced_parts_declared')) {
-                    $errCode = 'PARTS_RECORD_REQUIRED';
-                } elseif (str_contains($msg, 'destino')) {
-                    $errCode = 'INVALID_PART_DESTINATION';
-                } elseif (str_contains($msg, 'no ha registrado ninguna pieza')) {
-                    $errCode = 'EMPTY_REPLACED_PARTS_LIST';
-                }
-                return Response::error($errCode, $msg, 422);
-            } catch (\DomainException $e) {
-                return Response::error('OPERATION_FAILED', $e->getMessage(), 500);
+        $refundOutcome = null;
+        if ($refundBlock instanceof TechnicianRefundInspectionDTO) {
+            $refundOutcome = $this->fileRefundVerdict(
+                $incidentId,
+                $incident,
+                $refundBlock,
+                $techId,
+                $request
+            );
+            if ($refundOutcome instanceof Response) {
+                return $refundOutcome;
             }
         }
 
-        // Flujo simple legacy (T-29): sin declaración de piezas
+        // 8. Hallazgo de monedas de oficio (RF-REF-04): opcional e independiente
+        //    de que exista o no una reclamación previa.
+        $unclaimedFindingId = null;
+        if ($this->wantsUnclaimedCash($body)) {
+            $unclaimedFindingId = $this->registerUnclaimedCash($incidentId, $incident, $techId, $body, $request);
+            if ($unclaimedFindingId instanceof Response) {
+                return $unclaimedFindingId;
+            }
+        }
+
+        // 9. Declaracion obligatoria de repuestos en la resolucion (RF-REP-05 / Modulo M2)
+        $actor = $this->extractActor($request);
+        if (!array_key_exists('replaced_parts_declared', $body) && !array_key_exists('replaced_parts', $body)) {
+            $body['replaced_parts_declared'] = false;
+        }
+
         try {
-            $resolved = $this->incidentRepo->resolve($incidentId, $techId, $diagnosis, $action);
+            $result = $this->traceabilityService->resolveIncidentWithParts($incidentId, $techId, $body, $actor);
+
+            return Response::json(
+                $result + $this->buildRefundSummary($incidentId, $refundOutcome, $unclaimedFindingId),
+                200,
+                $refundOutcome !== null
+                    ? 'Incidencia resuelta y dictamen de efectivo registrado correctamente.'
+                    : 'Incidencia resuelta con registro de repuestos.'
+            );
+        } catch (InvalidPartQuantityException $e) {
+            return Response::error('INVALID_PART_QUANTITY', $e->getMessage(), 422);
+        } catch (SparePartNotFoundException $e) {
+            return Response::error('SPARE_PART_NOT_FOUND', $e->getMessage(), 404);
         } catch (InvalidResolutionException $e) {
             return Response::error('INVALID_RESOLUTION', $e->getMessage(), 422, ['errors' => $e->getErrors()]);
         } catch (InvalidTransitionException $e) {
             return Response::error('INVALID_STATUS_FOR_RESOLUTION', $e->getMessage(), 422);
+        } catch (\InvalidArgumentException $e) {
+            $msg = $e->getMessage();
+            $errCode = 'INVALID_RESOLUTION';
+            if (str_contains($msg, 'replaced_parts_declared')) {
+                $errCode = 'PARTS_RECORD_REQUIRED';
+            } elseif (str_contains($msg, 'destino')) {
+                $errCode = 'INVALID_PART_DESTINATION';
+            } elseif (str_contains($msg, 'no ha registrado ninguna pieza')) {
+                $errCode = 'EMPTY_REPLACED_PARTS_LIST';
+            }
+            return Response::error($errCode, $msg, 422);
+        } catch (\DomainException $e) {
+            $errCode = (str_contains($e->getMessage(), 'transacci') || str_contains($e->getMessage(), 'base de datos'))
+                ? 'SPARE_PART_TRANSACTION_FAILED'
+                : 'OPERATION_FAILED';
+            return Response::error($errCode, $e->getMessage(), 500);
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // RF-REF-04 / RF-REF-05 — Dictamen de saldo obligatorio en la resolución
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Valida el bloque `refund_inspection` del cuerpo de la resolución.
+     *
+     * Returns null when the incident carries nothing to rule on, which keeps the
+     * endpoint working exactly as before for the overwhelming majority of faults
+     * that have nothing to do with money (RF-REF-04 only makes the verdict
+     * mandatory when a claim exists).
+     *
+     * @return TechnicianRefundInspectionDTO|Response|null
+     */
+    private function readRefundInspection(Request $request, int $incidentId): TechnicianRefundInspectionDTO|Response|null
+    {
+        // El dictamen se aplica solo a los expedientes PENDIENTES. Un expediente
+        // ya dictaminado (avería reabierta dentro de las 48 h del Art. V.6) se
+        // preserva inmutable, en lugar de bloquear la resolución entera con un
+        // 409 que dejaba al técnico sin salida y al expediente atascado.
+        $pending = array_values(array_filter(
+            $this->refundRepo->findRestrictedByIncident($incidentId),
+            static fn ($case): bool => $case->awaitsInspection()
+        ));
+
+        // Nada pendiente de dictaminar: la resolución sigue su curso normal.
+        if ($pending === []) {
+            return null;
+        }
+
+        $raw = $request->getParsedBody()['refund_inspection'] ?? null;
+        if (!is_array($raw)) {
+            return Response::error(
+                'REFUND_INSPECTION_REQUIRED',
+                'Esta avería tiene una reclamación de dinero pendiente: debe registrar el dictamen '
+                    . 'de saldo (refund_inspection) antes de resolverla.',
+                422
+            );
+        }
+
+        $rawFinding = strtoupper(trim((string)($raw['finding'] ?? '')));
+        $finding = TechnicianFinding::tryFrom($rawFinding);
+        if ($finding === null) {
+            return Response::error(
+                'INVALID_REFUND_INSPECTION',
+                'Indique el dictamen de saldo: se ha recuperado dinero físico, no se ha '
+                    . 'verificado fallo de cobro, o no se localiza evidencia de saldo retenido.',
+                422
+            );
+        }
+
+        // RF-REF-04 (EARS Evento): `FOUND_PHYSICAL` sin importe recuperado es
+        // una contradicción en el propio dictamen, no una omisión tolerable.
+        $rawRecovered = $raw['recovered_amount'] ?? null;
+        if ($finding === TechnicianFinding::FOUND_PHYSICAL && ($rawRecovered === null || !is_numeric($rawRecovered))) {
+            return Response::error(
+                'INVALID_REFUND_INSPECTION',
+                'Si ha recuperado dinero físico, indique el importe exacto recuperado.',
+                422
+            );
+        }
+
+        $rawCustody = strtoupper(trim((string)($raw['cash_custody_action'] ?? '')));
+        $custody = $rawCustody === '' ? null : CashCustodyAction::tryFrom($rawCustody);
+        if ($rawCustody !== '' && $custody === null) {
+            return Response::error(
+                'INVALID_REFUND_INSPECTION',
+                'La custodia del efectivo sólo admite dejarlo en recepción o custodiarlo en caja central.',
+                422
+            );
+        }
+
+        if ($rawRecovered !== null && !is_numeric($rawRecovered)) {
+            return Response::error(
+                'INVALID_REFUND_INSPECTION',
+                'El importe recuperado debe ser un número.',
+                422
+            );
+        }
+
+        try {
+            return new TechnicianRefundInspectionDTO(
+                finding: $finding,
+                recoveredAmount: $rawRecovered === null ? null : round((float)$rawRecovered, 2),
+                cashCustodyAction: $custody,
+                receptionistName: (string)($raw['receptionist_name'] ?? ''),
+                justification: (string)($raw['justification'] ?? '')
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Response::error('INVALID_REFUND_INSPECTION', $e->getMessage(), 422);
+        }
+    }
+
+    /**
+     * Files the verdict against every claim of the incident.
+     *
+     * @return array<string, mixed>|Response The inspection outcome, or the error
+     *   that must stop the resolution before anything is written.
+     */
+    private function fileRefundVerdict(
+        int $incidentId,
+        Incident $incident,
+        TechnicianRefundInspectionDTO $dto,
+        int $techId,
+        Request $request
+    ): array|Response {
+        try {
+            return $this->refundService->inspectBalance(
+                incidentId: $incidentId,
+                dto: $dto,
+                machineId: (int)$incident->getMachineId(),
+                actor: $this->extractActor($request)
+            );
+        } catch (InvalidRecoveredAmountException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode(), $e->getDetails());
+        } catch (ReceptionDeliveryNotAllowedException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (JustificationTooShortException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (InvalidRefundStateTransitionException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (RefundNotFoundException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (\InvalidArgumentException $e) {
+            return Response::error('INVALID_REFUND_INSPECTION', $e->getMessage(), 422);
+        }
+    }
+
+    /**
+     * Whether the body carries an on-site cash finding with no prior claim.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function wantsUnclaimedCash(array $body): bool
+    {
+        $raw = $body['unclaimed_cash_found'] ?? null;
+
+        return is_array($raw) && trim((string)($raw['amount'] ?? '')) !== '';
+    }
+
+    /**
+     * Records cash recovered by the technician with no consumer claim (RF-REF-04).
+     *
+     * @param array<string, mixed> $body
+     * @return int|null|Response The finding id, or an error response.
+     */
+    private function registerUnclaimedCash(
+        int $incidentId,
+        Incident $incident,
+        int $techId,
+        array $body,
+        Request $request
+    ): int|null|Response {
+        $raw = $body['unclaimed_cash_found'];
+        $amount = $raw['amount'] ?? null;
+
+        if (!is_numeric($amount) || (float)$amount <= 0.0) {
+            return Response::error(
+                'INVALID_UNCLAIMED_CASH',
+                'El importe del efectivo recuperado de oficio debe ser un número mayor que cero.',
+                422
+            );
+        }
+
+        try {
+            return $this->refundService->registerUnclaimedCash(
+                incidentId: $incidentId,
+                machineId: (int)$incident->getMachineId(),
+                technicianId: $techId,
+                amount: round((float)$amount, 2),
+                notes: (string)($raw['notes'] ?? ''),
+                actor: $this->extractActor($request)
+            )->getId();
+        } catch (InvalidRecoveredAmountException $e) {
+            // El importe se sale del rango admitido: es una entrada incorrecta
+            // del técnico, no un fallo del sistema, asi que responde 422 y no 500.
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode(), $e->getDetails());
+        } catch (\InvalidArgumentException $e) {
+            return Response::error('INVALID_UNCLAIMED_CASH', $e->getMessage(), 422);
         } catch (\DomainException $e) {
             return Response::error('OPERATION_FAILED', $e->getMessage(), 500);
         }
+    }
 
-        return Response::json([
-            'id'          => $resolved->getId(),
-            'status'      => $resolved->getStatus()->value,
-            'resolved_at' => $resolved->getResolvedAt(),
-        ], 200);
+    /**
+     * Merges the verdict outcome into the resolution payload (contract §4.2.2).
+     *
+     * @param array<string, mixed>|null $refundOutcome
+     * @return array<string, mixed>
+     */
+    private function buildRefundSummary(int $incidentId, ?array $refundOutcome, int|null $unclaimedFindingId): array
+    {
+        $summary = ['incident_id' => $incidentId];
+
+        if ($refundOutcome !== null) {
+            $summary['refund_processed'] = $refundOutcome['processed'];
+            $summary['refund_status'] = $refundOutcome['statuses'][0] ?? null;
+            $summary['refund_statuses'] = $refundOutcome['statuses'];
+            $summary['recovered_total'] = $refundOutcome['recovered_total'];
+            $summary['claimed_total'] = $refundOutcome['claimed_total'];
+            // Aviso de discrepancia: el efectivo recuperado no cubre lo reclamado
+            // y Coordinación debe repartirlo (RF-REF-08).
+            $summary['refund_discrepancy'] = $refundOutcome['discrepancy'];
+        }
+
+        if ($unclaimedFindingId !== null) {
+            $summary['unclaimed_cash_finding_id'] = $unclaimedFindingId;
+        }
+
+        return $summary;
     }
 
     /**

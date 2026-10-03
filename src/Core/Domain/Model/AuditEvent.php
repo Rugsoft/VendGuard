@@ -24,6 +24,62 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_LOCATION = 'LOCATION';
     public const ENTITY_USER     = 'USER';
 
+    /**
+     * Entidades del módulo de reintegros (Módulo 08).
+     *
+     * 'REFUND_REQUEST' no puede reutilizarse como 'TICKET': el expediente de
+     * reintegro tiene su propio espacio de identificadores, así que auditarlo
+     * como ticket apuntaría a una avería ajena y rompería la trazabilidad del
+     * dinero (RNF-REF-01, Art. III.3).
+     */
+    public const ENTITY_REFUND_REQUEST          = 'REFUND_REQUEST';
+    public const ENTITY_UNCLAIMED_CASH_FINDING  = 'UNCLAIMED_CASH_FINDING';
+
+    /**
+     * Entidades del módulo de mantenimiento preventivo (Módulo 05).
+     *
+     * El enum de `audit_log` admitia estos valores desde la migracion 005, pero
+     * el dominio los rechazaba, de modo que ninguna suite podia emitirlos. Los
+     * servicios preventivos siguenregistrando bajo `MACHINE` y `TICKET`, que es
+     * lo correcto para el historico ya escrito: reetiquetar eventos existentes
+     * cambiaria su `entity_id` de referencia y romperia la trazabilidad
+     * inmutable (Art. III.3). Estos tipos quedan disponibles para el historico
+     * nuevo que se emita a partir de ahora.
+     */
+    public const ENTITY_PREVENTIVE_ORDER     = 'PREVENTIVE_ORDER';
+    public const ENTITY_SANITARY_CERTIFICATE = 'SANITARY_CERTIFICATE';
+
+    /**
+     * Whitelist completa de tipos de entidad admitidos por el dominio.
+     *
+     * Debe coincidir exactamente con el enum `audit_log.entity_type` de la base
+     * de datos: cualquier divergencia significa o bien un tipo que el motor
+     * rechaza en silencio, o bien un valor del enum que el dominio prohibe.
+     *
+     * @var list<string>
+     */
+    public const ENTITY_TYPES = [
+        self::ENTITY_TICKET,
+        self::ENTITY_MACHINE,
+        self::ENTITY_LOCATION,
+        self::ENTITY_USER,
+        self::ENTITY_PREVENTIVE_ORDER,
+        self::ENTITY_SANITARY_CERTIFICATE,
+        self::ENTITY_REFUND_REQUEST,
+        self::ENTITY_UNCLAIMED_CASH_FINDING,
+    ];
+
+    /**
+     * Indica si un tipo de entidad está permitido por el dominio.
+     *
+     * @param string $entityType Tipo de entidad a comprobar.
+     * @return bool
+     */
+    public static function isValidEntityType(string $entityType): bool
+    {
+        return in_array($entityType, self::ENTITY_TYPES, true);
+    }
+
     private ?int $id;
     private string $entityType;
     private int $entityId;
@@ -38,7 +94,8 @@ class AuditEvent implements JsonSerializable
 
     /**
      * @param int|null $id Identificador unívoco del registro en BD (null antes de persistir).
-     * @param string $entityType Tipo de entidad ('TICKET', 'MACHINE', 'LOCATION', 'USER').
+     * @param string $entityType Tipo de entidad ('TICKET', 'MACHINE', 'LOCATION', 'USER',
+     *   'PREVENTIVE_ORDER', 'SANITARY_CERTIFICATE', 'REFUND_REQUEST', 'UNCLAIMED_CASH_FINDING').
      * @param int $entityId ID numérico de la entidad afectada.
      * @param string $action Acción ejecutada (ej. 'RESOLVE_INCIDENT', 'STATUS_CHANGE', 'ASSIGN_TECHNICIAN').
      * @param int|null $userId ID del usuario causante (null si es sistema o reporte anónimo).
@@ -62,8 +119,7 @@ class AuditEvent implements JsonSerializable
         ?array $metadata = null,
         ?string $createdAt = null
     ) {
-        $validTypes = [self::ENTITY_TICKET, self::ENTITY_MACHINE, self::ENTITY_LOCATION, self::ENTITY_USER];
-        if (!in_array($entityType, $validTypes, true)) {
+        if (!self::isValidEntityType($entityType)) {
             throw new InvalidArgumentException("Tipo de entidad de auditoría inválido: {$entityType}");
         }
 

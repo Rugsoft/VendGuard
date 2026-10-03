@@ -1,0 +1,932 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * VendGuard - RefundsModuleClosureTest (T-REF-24)
+ *
+ * Module closure audit for Módulo 08 (Refunds and Unclaimed Cash Management).
+ *
+ * ## How this relates to ConstitutionalAuditTest
+ * `ConstitutionalAuditTest` (T-41, extended by T-ADM-18 and T-PREV-25) already
+ * audits Articles I to VII for the WHOLE project. This suite does not replace
+ * it and must never be merged into it: that file is the project's constitutional
+ * certificate, and a module audit living there would blur whose scope is whose.
+ * Together they close the two levels, the same way `CoordinatorRefundWorkflowA-
+ * piTest` (workflow) and `SiteManagerRefundDataSegregationTest` (routing and
+ * RBAC) do for the coordination endpoints.
+ *
+ * ## Why a module needs its own audit
+ * The behavioural refund suites prove the module WORKS. They cannot prove it is
+ * built the way the project is required to be built, because that is exactly
+ * the class of regression that leaves behaviour intact: a dependency creeps in,
+ * a bilingual string lands on the wrong side of the language rule, a
+ * requirement quietly loses its test. Those regressions are invisible to
+ * functional tests by construction, so they need a check of their own.
+ *
+ * It certifies five things, all statically, with no database and no network:
+ *
+ * 1. Dogma Vanilla (Constitution Art. IV.3): zero third-party packages. No npm
+ *    or Composer manifest, no installed tree, no bundler configuration, no bare
+ *    module specifier in the frontend, and no namespace in `src/` that is
+ *    neither internal nor a PHP built-in.
+ * 2. Dualismo Lingüístico (AGENTS.md §3): business language in Spanish, code in
+ *    English. Identifiers carry no accented characters, the specifications are
+ *    written in Spanish, the refund UI speaks Spanish, and error codes are
+ *    English while their messages are Spanish.
+ * 3. Traceability (Constitution Art. I.1, plan §7): every RF-REF and RNF-REF
+ *    requirement is still declared in the functional spec, still has a row in
+ *    the traceability matrix, and every test that row names exists on disk.
+ * 4. Constitutional guardrails (Art. III, V.4, VI): no hard delete anywhere in
+ *    `src/`, the Art. III.1 guard on `refund_requests` in place, no way for
+ *    production code to unlock it, and no deferred-phase machinery.
+ * 5. Design system (RNF-REF-05): the refund components consume the tokens
+ *    declared in `design-tokens.css` and hardcode no colour or radius of
+ *    their own, which `DesignTokensTest` cannot see because that suite
+ *    only reads the CSS file.
+ * 6. Module dogma: the five guards an adversarial audit forced into this
+ *    module (one live claim per incident and consumer, a persisted and bounded
+ *    settlement, bounded cash reconciliation, a site that cannot take an
+ *    envelope, and a brute-force brake on the pickup PIN) are still in place,
+ *    in the right layer, and are still covered by a suite that runs them
+ *    against HTTP and a real database. This is what stops one of them from
+ *    being quietly deleted while every behavioural suite stays green.
+ *
+ * It reads the repository, it does not mutate it.
+ */
+
+require_once __DIR__ . '/../bootstrap.php';
+
+$baseDir = dirname(__DIR__, 2);
+
+$assertions = 0;
+$failures = 0;
+
+$assert = static function (string $label, bool $condition, string $detail = '') use (&$assertions, &$failures): void {
+    $assertions++;
+    if ($condition) {
+        echo "  [PASS] {$label}\n";
+    } else {
+        $failures++;
+        echo "  [FAIL] {$label}" . ($detail !== '' ? " -- {$detail}" : '') . "\n";
+    }
+};
+
+$read = static function (string $relativePath) use ($baseDir): string {
+    $path = $baseDir . '/' . $relativePath;
+
+    return is_file($path) ? (string)file_get_contents($path) : '';
+};
+
+/**
+ * @return list<string>
+ */
+$phpFilesUnder = static function (string $relativeDir) use ($baseDir): array {
+    $root = $baseDir . '/' . $relativeDir;
+    if (!is_dir($root)) {
+        return [];
+    }
+
+    $files = [];
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS)
+    );
+    foreach ($iterator as $fileInfo) {
+        if ($fileInfo->isFile() && strtolower($fileInfo->getExtension()) === 'php') {
+            $files[] = $fileInfo->getPathname();
+        }
+    }
+    sort($files);
+
+    return $files;
+};
+
+/**
+ * @return list<string>
+ */
+$jsFilesUnder = static function (string $relativeDir) use ($baseDir): array {
+    $root = $baseDir . '/' . $relativeDir;
+    if (!is_dir($root)) {
+        return [];
+    }
+
+    $files = [];
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS)
+    );
+    foreach ($iterator as $fileInfo) {
+        if ($fileInfo->isFile() && strtolower($fileInfo->getExtension()) === 'js') {
+            $files[] = $fileInfo->getPathname();
+        }
+    }
+    sort($files);
+
+    return $files;
+};
+
+echo "======================================================================\n";
+echo " VendGuard: RefundsModuleClosureTest - Cierre del Módulo 08 (T-REF-24)\n";
+echo "======================================================================\n";
+
+$srcFiles = $phpFilesUnder('src');
+$publicJsFiles = $jsFilesUnder('public/assets/js');
+
+// ─────────────────────────────────────────────────────────────────────────
+echo "\n--- 1. Dogma Vanilla: cero dependencias externas (Art. IV.3) ---\n";
+// ─────────────────────────────────────────────────────────────────────────
+
+foreach (['package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'composer.json', 'composer.lock'] as $manifest) {
+    $assert(
+        "1.1 No existe el manifiesto de dependencias `{$manifest}`",
+        !file_exists($baseDir . '/' . $manifest),
+        'presente: ' . $manifest
+    );
+}
+
+foreach (['vendor', 'node_modules'] as $installedTree) {
+    $assert(
+        "1.2 No hay ningún árbol de paquetes instalado (`{$installedTree}/`)",
+        !is_dir($baseDir . '/' . $installedTree),
+        'presente: ' . $installedTree
+    );
+}
+
+$bundlerConfigs = array_values(array_filter(
+    ['vite.config.js', 'vite.config.ts', 'webpack.config.js', 'rollup.config.js', 'esbuild.config.js'],
+    static fn (string $name): bool => file_exists($baseDir . '/' . $name)
+));
+$assert('1.3 No hay configuración de bundler ni de empaquetado', $bundlerConfigs === [], json_encode($bundlerConfigs));
+
+$assert(
+    '1.4 Vue 3 se sirve como fichero local ESM, no como paquete instalado',
+    is_file($baseDir . '/public/assets/js/vendor/vue.esm-browser.prod.js')
+);
+
+// Una dependencia de npm se delata por su import con especificador "bare" (sin
+// ruta): `import x from 'lodash'`. Los servicios de mapas (teselas, geocodifi-
+// cación) son servicios en tiempo de ejecución de otro módulo, no paquetes, así
+// que no se cuentan aquí. El único origen externo tolerado es el respaldo CDN
+// de Vue, y sólo como último recurso.
+$bareImports = [];
+foreach ($publicJsFiles as $path) {
+    if (str_contains($path, '/vendor/')) {
+        continue; // La copia local de Vue es la librería, no una dependencia
+    }
+    $source = (string)file_get_contents($path);
+    if (preg_match_all('#(?:from|import)\s*\(?\s*[\'"]([a-z@][A-Za-z0-9@/._-]*)[\'"]#', $source, $matches) === 0) {
+        continue;
+    }
+    foreach ($matches[1] as $specifier) {
+        if ($specifier === 'vue' || str_starts_with($specifier, 'vue@')) {
+            continue;
+        }
+        $bareImports[] = basename($path) . ' -> ' . $specifier;
+    }
+}
+$assert(
+    '1.5 El frontend no importa ningún paquete por especificador (cero npm)',
+    $bareImports === [],
+    json_encode(array_slice($bareImports, 0, 5))
+);
+
+$externalScriptTags = [];
+foreach (glob($baseDir . '/public/**/*.html') ?: [] as $htmlPath) {
+    if (preg_match_all('#<(?:script|link)[^>]+(?:src|href)=["\']https?://[^"\']+#i', (string)file_get_contents($htmlPath), $matches) > 0) {
+        foreach ($matches[0] as $tag) {
+            $externalScriptTags[] = basename($htmlPath) . ' -> ' . $tag;
+        }
+    }
+}
+$assert(
+    '1.6 Ninguna página HTML carga librerías o estilos desde un origen externo',
+    $externalScriptTags === [],
+    json_encode(array_slice($externalScriptTags, 0, 5))
+);
+
+// El módulo de reintegros, en concreto, no habla con ningún origen externo.
+$refundFrontend = array_values(array_filter(
+    $publicJsFiles,
+    static fn (string $path): bool => (bool)preg_match('/(Refund|RefundRequest)/i', basename($path))
+));
+$refundOrigins = [];
+foreach ($refundFrontend as $path) {
+    if (preg_match_all('#https?://[A-Za-z0-9./@_-]+#', (string)file_get_contents($path), $matches) > 0) {
+        foreach ($matches[0] as $url) {
+            $refundOrigins[] = basename($path) . ' -> ' . $url;
+        }
+    }
+}
+$assert(
+    '1.7 El módulo de reintegros no depende de ningún origen externo',
+    $refundFrontend !== [] && $refundOrigins === [],
+    json_encode($refundOrigins)
+);
+
+$storeSource = $read('public/assets/js/store.js');
+$assert(
+    '1.8 Vue se resuelve primero en local y el CDN es sólo el último recurso',
+    str_contains($storeSource, './vendor/vue.esm-browser.prod.js')
+    && strpos($storeSource, './vendor/vue.esm-browser.prod.js') < strpos($storeSource, 'unpkg.com/vue@3')
+);
+
+$thirdParty = [];
+foreach ($srcFiles as $path) {
+    $source = (string)file_get_contents($path);
+    if (preg_match_all('/^use\s+([A-Za-z0-9_\\\\]+)\s*(?:as\s+\w+)?;/m', $source, $matches) === 0) {
+        continue;
+    }
+    foreach ($matches[1] as $fqcn) {
+        if (str_starts_with($fqcn, 'VendGuard\\')) {
+            continue;
+        }
+        // Los built-ins de PHP son la plataforma, no una dependencia.
+        $builtins = [
+            'ArrayAccess', 'Closure', 'DateTimeImmutable', 'DateTimeInterface', 'DateTimeZone',
+            'DomainException', 'InvalidArgumentException', 'JsonSerializable', 'PDO', 'PDOException',
+            'PDOStatement', 'RuntimeException', 'Throwable', 'finfo',
+        ];
+        if (in_array($fqcn, $builtins, true)) {
+            continue;
+        }
+        $thirdParty[] = basename($path) . ' -> ' . $fqcn;
+    }
+}
+$assert(
+    '1.9 `src/` sólo importa el espacio de nombres propio y built-ins de PHP',
+    $thirdParty === [],
+    json_encode(array_slice($thirdParty, 0, 5))
+);
+
+$missingStrictTypes = [];
+foreach ($srcFiles as $path) {
+    if (!str_contains((string)file_get_contents($path), 'declare(strict_types=1);')) {
+        $missingStrictTypes[] = basename($path);
+    }
+}
+$assert(
+    '1.10 Todo el backend PHP usa tipado estricto (Art. IV.1)',
+    $missingStrictTypes === [],
+    json_encode(array_slice($missingStrictTypes, 0, 5))
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+echo "\n--- 2. Dualismo Lingüístico (AGENTS.md §3) ---\n";
+// ─────────────────────────────────────────────────────────────────────────
+
+$accentedIdentifiers = [];
+foreach ($srcFiles as $path) {
+    if (preg_match('/^\s*(?:final\s+|abstract\s+)?(?:class|interface|enum|trait)\s+\S*[áéíóúñÁÉÍÓÚÑ]/m', (string)file_get_contents($path)) === 1) {
+        $accentedIdentifiers[] = basename($path);
+    }
+}
+$assert(
+    '2.1 Los identificadores del código están en inglés, sin acentos ni eñes',
+    $accentedIdentifiers === [],
+    json_encode($accentedIdentifiers)
+);
+
+$refundSpec = $read('specs/functional/refunds_spec.md');
+$assert(
+    '2.2 La especificación funcional está redactada en castellano',
+    $refundSpec !== ''
+    && preg_match('/(Especificación|Requisito|Sistema|solicitante|Reintegro|avería)/u', $refundSpec) === 1
+);
+
+$refundContracts = $read('specs/technical/refunds_contracts.md');
+$assert(
+    '2.3 Los contratos técnicos están redactados en castellano',
+    $refundContracts !== ''
+    && preg_match('/(Autenticación|Método|Ruta|Roles|Respuesta)/u', $refundContracts) === 1
+);
+
+$uiFilesWithSpanish = 0;
+foreach ($publicJsFiles as $path) {
+    if (preg_match_all('/[\'"][^\'"]*(conserjería|Reintegro|reintegro|saldo|Saldo|dictamen|Dictamen)[^\'"]*[\'"]/u', (string)file_get_contents($path)) > 0) {
+        $uiFilesWithSpanish++;
+    }
+}
+$assert(
+    '2.4 La interfaz de reintegros se muestra en castellano',
+    $uiFilesWithSpanish >= 1,
+    'componentes con textos de negocio en español: ' . $uiFilesWithSpanish
+);
+
+$assert(
+    '2.5 El catálogo de errores expresa los mensajes en castellano',
+    preg_match('/El PIN de recogida introducido no coincide/u', $refundContracts) === 1
+);
+
+// El código que produce el error está en inglés y su mensaje en castellano: las
+// dos caras del mismo contrato, que es el Dualismo Lingüístico en la práctica.
+$pickupPinException = $read('src/Core/Domain/Exception/InvalidPickupPinException.php');
+$assert(
+    '2.6 El código del error está en inglés y su mensaje en castellano',
+    str_contains($pickupPinException, "ERROR_CODE = 'INVALID_PICKUP_PIN'")
+    && preg_match("/DEFAULT_MESSAGE = 'El PIN de recogida/u", $pickupPinException) === 1
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+echo "\n--- 3. Trazabilidad de requisitos (Art. I.1, plan §7) ---\n";
+// ─────────────────────────────────────────────────────────────────────────
+
+$declared = [];
+// Los funcionales van en cabecera `#### RF-REF-0X:` y los no funcionales en
+// viñeta `* **RNF-REF-0X (...)`; ambos formatos son parte de la especificación.
+if (preg_match_all('/(?:#{4}\s+\*\*|####\s+|\*\s+\*\*)(RNF-REF-\d+|RF-REF-\d+)/', $refundSpec, $matches) > 0) {
+    $declared = array_values(array_unique($matches[1]));
+}
+sort($declared);
+$assert(
+    '3.1 La especificación funcional declara los 11 funcionales y los 6 no funcionales',
+    count(array_filter($declared, static fn (string $id): bool => str_starts_with($id, 'RF-'))) === 11
+    && count(array_filter($declared, static fn (string $id): bool => str_starts_with($id, 'RNF-'))) === 6,
+    'declarados: ' . json_encode($declared)
+);
+
+$plan = $read('specs/08-refunds/plan.md');
+$unmapped = [];
+foreach ($declared as $id) {
+    if (!str_contains($plan, $id)) {
+        $unmapped[] = $id;
+    }
+}
+$assert(
+    '3.2 Cada requisito declarado tiene fila en la matriz de trazabilidad del plan',
+    $unmapped === [],
+    json_encode($unmapped)
+);
+
+// Cada fila de la matriz debe nombrar al menos un test real en disco: una
+// trazabilidad que apunta a un fichero inexistente no es trazabilidad. Esta
+// comprobación es la que detectó a `TechnicianResolutionModalTest.mjs`, nombre
+// que el plan arrastraba desde antes de que T-REF-16 separase el bloque de
+// dictamen del modal, y que nunca llegó a existir en disco.
+$matrixRows = preg_split('/\R/', $plan) ?: [];
+$danglingTest = [];
+foreach ($matrixRows as $row) {
+    if (preg_match('/^\|\s*\*\*(RNF-REF-\d+|RF-REF-\d+)\*\*/', $row, $idMatch) !== 1) {
+        continue;
+    }
+    if (preg_match_all('/`([A-Za-z0-9_]+\.(?:php|mjs))`/', $row, $testMatches) === 0) {
+        $danglingTest[] = $idMatch[1] . ' (sin test)';
+        continue;
+    }
+    foreach ($testMatches[1] as $testFile) {
+        $found = is_file($baseDir . '/tests/integration/' . $testFile)
+            || is_file($baseDir . '/tests/unit/' . $testFile);
+        if (!$found) {
+            $danglingTest[] = $idMatch[1] . ' -> ' . $testFile;
+        }
+    }
+}
+$assert(
+    '3.3 Toda la matriz de trazabilidad apunta a tests que existen en disco',
+    $danglingTest === [],
+    json_encode($danglingTest)
+);
+
+$closingSuites = [
+    'PublicRefundTrackingApiTest.php',
+    'TechnicianRefundInspectionApiTest.php',
+    'LocationRefundDeliveryApiTest.php',
+    'CoordinatorRefundWorkflowApiTest.php',
+    'SiteManagerRefundDataSegregationTest.php',
+];
+$missingSuites = array_values(array_filter(
+    $closingSuites,
+    static fn (string $name): bool => !is_file($baseDir . '/tests/integration/' . $name)
+));
+$assert(
+    '3.4 Las cinco suites HTTP que cierran el módulo existen',
+    $missingSuites === [],
+    json_encode($missingSuites)
+);
+
+$tasks = $read('specs/08-refunds/tasks.md');
+$openTasks = [];
+foreach (preg_split('/\R/', $tasks) ?: [] as $line) {
+    if (preg_match('/^- \[ \] \*\*(T-REF-\d+):/', $line, $taskMatch) === 1) {
+        $openTasks[] = $taskMatch[1];
+    }
+}
+$assert(
+    '3.5 No queda ninguna tarea de la Fase 5 sin cerrar',
+    $openTasks === [],
+    'pendientes: ' . json_encode($openTasks)
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+echo "\n--- 4. Blindaje constitucional del módulo (Art. III, V.4, VI) ---\n";
+// ─────────────────────────────────────────────────────────────────────────
+
+$hardDeletes = [];
+foreach ($srcFiles as $path) {
+    if (stripos((string)file_get_contents($path), 'DELETE FROM') !== false) {
+        $hardDeletes[] = basename($path);
+    }
+}
+$assert('4.1 Ningún fichero de `src/` ejecuta un DELETE FROM (Art. III.1)', $hardDeletes === [], json_encode($hardDeletes));
+
+$purgeUnlockers = [];
+foreach ($srcFiles as $path) {
+    if (str_contains((string)file_get_contents($path), '@vendguard_purge')) {
+        $purgeUnlockers[] = basename($path);
+    }
+}
+$assert(
+    '4.2 El código de producción no puede abrir la ventana de purga (Art. III.1)',
+    $purgeUnlockers === [],
+    json_encode($purgeUnlockers)
+);
+
+$guardMigration = $read('database/migrations/010_refund_hard_delete_guard.sql');
+$assert(
+    '4.3 El guardián de borrado físico está versionado e instalado',
+    $guardMigration !== ''
+    && str_contains($guardMigration, 'BEFORE DELETE ON `refund_requests`')
+    && str_contains($guardMigration, '45000')
+);
+
+$cleaner = $read('tests/Support/TestDataCleaner.php');
+$assert(
+    '4.4 Sólo el arnés de pruebas abre la ventana, y siempre la cierra',
+    substr_count($cleaner, '@vendguard_purge') === 2
+    && str_contains($cleaner, 'SET @vendguard_purge = 0')
+);
+
+$runAll = $read('tests/run_all.php');
+$assert(
+    '4.5 La batería descubre las suites por glob, así que ninguna queda fuera sin avisar',
+    str_contains($runAll, "glob(__DIR__ . '/integration/*.php')")
+    && str_contains($runAll, "glob(__DIR__ . '/unit/*.php')")
+    && str_contains($runAll, "glob(__DIR__ . '/unit/*.mjs')")
+);
+$assert(
+    '4.6 La guardia de Fase 0 se ejecuta antes que cualquier prueba',
+    strpos($runAll, 'auditSuitesCleanupDiscipline') < strpos($runAll, "glob(__DIR__ . '/unit/*.php')")
+);
+
+// Art. VI: nada de la Fase 2 colado en el módulo de reintegros.
+$deferredPhase = [];
+foreach ($srcFiles as $path) {
+    $source = (string)file_get_contents($path);
+    if (stripos($source, 'refund') === false) {
+        continue;
+    }
+    if (preg_match('/\b(telemetr\w*|IoT|MDB|DEX|inventario de furgonetas)\b/i', $source) === 1) {
+        $deferredPhase[] = basename($path);
+    }
+}
+$assert(
+    '4.7 Ningún fichero de reintegros arrastra maquinaria de fases futuras (Art. VI)',
+    $deferredPhase === [],
+    json_encode($deferredPhase)
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+echo "\n--- 5. Sistema de diseño: los componentes no fijan valores (RNF-REF-05) ---\n";
+// ─────────────────────────────────────────────────────────────────────────
+
+// `DesignTokensTest` (T-DES-03) certifica que el fichero de tokens DECLARA la
+// paleta institucional. Eso no dice nada de quién la consume: un componente
+// puede escribir `var(--color-primary)` y el de al lado `#2560ff` a mano, y
+// ambos pasan aquel test mientras la interfaz queda medio tokenizada y medio no.
+// RNF-REF-05 pide consistencia visual, y la consistencia sólo existe si el
+// valor literal no está en el componente. Por eso aquí se barre el código de
+// los componentes, no el CSS.
+$designTokensCss = $read('public/assets/css/design-tokens.css');
+preg_match_all('/^\s*(--[a-z0-9-]+)\s*:/m', $designTokensCss, $tokenDeclarations);
+$declaredTokens = array_values(array_unique($tokenDeclarations[1]));
+
+// Un color literal es un `#` seguido de 3, 4, 6 u 8 dígitos hexadecimales sin
+// palabra pegada. Los guardias `(?<![\w#-])` y `(?![0-9a-zA-Z_-])` evitan las
+// tres falsas alarmas habituales del vocabulario de JavaScript: selectores de
+// id, anclas (`#ancla`) y fragmentos de ruta (`#clip-path`).
+$hardColorsIn = static function (string $source): array {
+    preg_match_all(
+        '/(?<![\w#-])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})(?![0-9a-zA-Z_-])/',
+        $source,
+        $matches
+    );
+
+    return array_values(array_unique($matches[0]));
+};
+
+// Cubre las dos sintaxis que conviven en el frontend: CSS plano
+// (`border-radius: 8px`) y estilos en JavaScript con la clave entre comillas
+// (`borderRadius: '4px'`), más las esquinas sueltas (`border-top-left-radius`).
+$hardRadiiIn = static function (string $source): array {
+    preg_match_all(
+        '/[bB]order[-A-Za-z]*[Rr]adius["\']?\s*[:=]\s*["\']?(\d+)px/',
+        $source,
+        $matches
+    );
+
+    return array_values(array_unique($matches[0]));
+};
+
+$tokensUsedIn = static function (string $source): array {
+    preg_match_all('/var\(\s*(--[a-z0-9-]+)/', $source, $matches);
+
+    return array_values(array_unique($matches[1]));
+};
+
+// Antes de dar por bueno un «no he encontrado nada» hay que demostrar que el
+// detector encuentra. Esta muestra sintética pasa por EXACTAMENTE el mismo
+// código que barre los componentes reales: si el escaneo se rompe algún día, la
+// batería seguiría verde al descubrir cero literales, y estas aserciones son
+// las únicas que lo delatarían.
+$sample = <<<'JS'
+    const estilo = {
+        color: '#ff00aa',
+        'border-radius': '13px',
+        background: 'var(--color-ink)'
+    };
+    JS;
+
+$sampleColors = $hardColorsIn($sample);
+$assert(
+    '5.1 El detector ve un color fuera de paleta en la muestra de control',
+    $sampleColors === ['#ff00aa'],
+    json_encode($sampleColors)
+);
+
+$sampleRadii = $hardRadiiIn($sample);
+$assert(
+    '5.2 El detector ve un radio literal en la muestra de control',
+    $sampleRadii !== [] && str_contains($sampleRadii[0], '13px'),
+    json_encode($sampleRadii)
+);
+
+$assert(
+    '5.3 La paleta institucional se lee de `design-tokens.css` y el detector separa tokens',
+    count($declaredTokens) >= 35 && $tokensUsedIn($sample) === ['--color-ink'],
+    'tokens declarados: ' . count($declaredTokens)
+);
+
+// El barrido real. `$refundFrontend` es la lista que ya se resolvió en el
+// bloque 1 para las aserciones 1.5 y 1.7 recorriendo `public/assets/js`; aquí
+// se reutiliza en vez de volver a recorrer el disco con otro criterio, para que
+// el alcance sea por construcción el mismo que ya se auditó en el bloque 1.
+$hardColors = [];
+$hardRadii = [];
+$unknownTokens = [];
+$tokensSeen = [];
+foreach ($refundFrontend as $path) {
+    $source = (string)file_get_contents($path);
+
+    foreach ($hardColorsIn($source) as $literal) {
+        $hardColors[] = basename($path) . ' -> ' . $literal;
+    }
+    foreach ($hardRadiiIn($source) as $literal) {
+        $hardRadii[] = basename($path) . ' -> ' . $literal;
+    }
+    foreach ($tokensUsedIn($source) as $token) {
+        $tokensSeen[$token] = true;
+        if (!in_array($token, $declaredTokens, true)) {
+            $unknownTokens[] = basename($path) . ' -> ' . $token;
+        }
+    }
+}
+
+$assert(
+    '5.4 El barrido alcanza los componentes de reintegros y encuentra tokens que usar',
+    count($refundFrontend) >= 3 && count($tokensSeen) >= 10,
+    'componentes: ' . count($refundFrontend) . ', tokens distintos: ' . count($tokensSeen)
+);
+$assert(
+    '5.5 Ningún componente de reintegros fija un color literal (RNF-REF-05)',
+    $hardColors === [],
+    json_encode(array_slice($hardColors, 0, 5))
+);
+$assert(
+    '5.6 Ningún componente de reintegros fija un radio literal (RNF-REF-05)',
+    $hardRadii === [],
+    json_encode(array_slice($hardRadii, 0, 5))
+);
+$assert(
+    '5.7 Cada token que consumen los componentes existe en `design-tokens.css`',
+    $unknownTokens === [],
+    json_encode(array_slice($unknownTokens, 0, 5))
+);
+
+// ─────────────────────────────────────────────────────────────────────
+echo "\n--- 6. Doctrina del módulo: los guardas existen y no se pueden borrar en silencio ---\n";
+// ─────────────────────────────────────────────────────────────────────
+
+// ## Por qué este bloque es estático
+// Esta suite audita CÓMO está construido el módulo, sin base de datos ni red, y
+// el propio encabezado lo declara: lee el repositorio, no lo muta. Las cinco
+// guardas que se comprueban abajo nacieron de un ataque adversarial contra los
+// flujos reales, y su prueba de comportamiento vive en suites que sí ejecutan
+// endpoints HTTP contra MariaDB. Lo que este bloque evita es la pérdida
+// silenciosa: que alguien borre una línea de un guarda y la batería siga en
+// verde porque la aserción que lo cubría miraba otra cosa. Cada guarda se
+// comprueba aquí Y se comprueba que existe una suite que lo ejecuta de verdad.
+$doctrine = [
+    'refund_service' => $read('src/Application/Service/RefundManagementService.php'),
+    'technician_service' => $read('src/Application/Service/TechnicianRefundService.php'),
+    'entity' => $read('src/Core/Domain/Model/RefundRequest.php'),
+    'repository' => $read('src/Infrastructure/Repository/PdoRefundRequestRepository.php'),
+    'qr_controller' => $read('src/Presentation/Controller/QrScanController.php'),
+    'desk_controller' => $read('src/Presentation/Controller/LocationRefundController.php'),
+    'duplicate_exception' => $read('src/Core/Domain/Exception/DuplicateRefundClaimException.php'),
+    'recovered_exception' => $read('src/Core/Domain/Exception/InvalidRecoveredAmountException.php'),
+    'amount_exception' => $read('src/Core/Domain/Exception/InvalidRefundAmountException.php'),
+    'locked_exception' => $read('src/Core/Domain/Exception/PickupPinLockedException.php'),
+];
+
+$assert(
+    '6.1 No se abre un segundo expediente vivo del mismo consumidor sobre la misma avería (RF-REF-11)',
+    str_contains($doctrine['refund_service'], 'assertNoDuplicateClaim')
+    && str_contains($doctrine['qr_controller'], 'DuplicateRefundClaimException')
+    && str_contains($doctrine['duplicate_exception'], "ERROR_CODE = 'DUPLICATE_REFUND_CLAIM'"),
+    'el guarda vive en RefundManagementService::assertNoDuplicateClaim() y el 409 lo traduce QrScanController'
+);
+$assert(
+    '6.2 Una liquidación se persiste y solo puede ser exactamente lo aprobado (RF-REF-03, RF-REF-07)',
+    str_contains($doctrine['refund_service'], "'paid_amount' => \$dto->paidAmount")
+    && str_contains($doctrine['refund_service'], 'payableAmount')
+    && str_contains($doctrine['refund_service'], 'isCentExact')
+    && str_contains($doctrine['repository'], 'r.`paid_amount`'),
+    'registerDigitalPayment() escribe paid_amount y lo iguala con payableAmount()'
+);
+$assert(
+    '6.3 El efectivo declarado no puede exceder lo reclamado, ni el sobrante el tope (RF-REF-03, RF-REF-04)',
+    str_contains($doctrine['technician_service'], 'InvalidRecoveredAmountException')
+    && str_contains($doctrine['recovered_exception'], "ERROR_CODE = 'INVALID_RECOVERED_AMOUNT'"),
+    'inspectBalance() y registerUnclaimedCash() comparten la excepción de dominio'
+);
+$assert(
+    '6.4 Una sede sin conserjería física no puede custodiar el sobre (RF-REF-05)',
+    str_contains($doctrine['technician_service'], 'hasPhysicalReception')
+    && str_contains($doctrine['technician_service'], 'assertSiteCanReceiveEnvelope'),
+    'la bandera de la sede se consulta antes de admitir LEFT_AT_RECEPTION'
+);
+$assert(
+    '6.5 El PIN de recogida se blinda con un contador y un bloqueo temporal (RF-REF-02)',
+    str_contains($doctrine['entity'], 'PICKUP_PIN_MAX_ATTEMPTS = 5')
+    && str_contains($doctrine['entity'], 'PICKUP_PIN_LOCK_MINUTES = 15')
+    && str_contains($doctrine['refund_service'], 'registerFailedPickupAttempt')
+    && str_contains($doctrine['locked_exception'], "ERROR_CODE = 'PICKUP_PIN_LOCKED'")
+    && str_contains($doctrine['desk_controller'], 'PickupPinLockedException'),
+    'el freno vive en la entidad y lo aplica deliverInHand()'
+);
+$assert(
+    '6.6 El freno antifuerza NO viaja en la proyección restringida (Art. V.4)',
+    preg_match("/RESTRICTED_COLUMNS = '(.*?)';/s", $doctrine['repository'], $restricted) === 1
+    && !str_contains($restricted[0], 'pickup_attempts')
+    && !str_contains($restricted[0], 'pickup_locked_until'),
+    'RESTRICTED_COLUMNS arrastra el contador o la fecha de bloqueo'
+);
+$assert(
+    '6.7 La mesa de conserjería no recibe el contador ni la fecha de bloqueo',
+    !str_contains($read('src/Application/DTO/LocationRefundViewDTO.php'), 'pickup_attempts')
+    && !str_contains($read('src/Application/DTO/PublicRefundTrackingDTO.php'), 'pickup_attempts')
+    && !str_contains($doctrine['entity'], "'pickup_attempts' =>"),
+    'el contador no puede salir por ningún DTO'
+);
+
+// Control de no-vacuidad: cada guarda necesita además una suite que la ejecute
+// de verdad contra el sistema en marcha. Un guarda sin prueba de comportamiento
+// es un guarda que nadie ha comprobado nunca.
+$doctrineSuites = [
+    'RF-REF-11 duplicados' => 'tests/integration/PublicRefundTrackingApiTest.php',
+    'dinero persistido y acotado' => 'tests/integration/CoordinatorRefundWorkflowApiTest.php',
+    'efectivo declarado y sobrante' => 'tests/integration/TechnicianRefundInspectionApiTest.php',
+    'sede sin conserjería' => 'tests/unit/TechnicianRefundServiceTest.php',
+    'fuerza bruta sobre el PIN' => 'tests/integration/LocationRefundDeliveryApiTest.php',
+    'identidad canónica del reclamante' => 'tests/unit/ClaimantIdentityTest.php',
+];
+
+$missingSuites = [];
+foreach ($doctrineSuites as $label => $relativePath) {
+    $contents = $read($relativePath);
+    if ($contents === '' || !str_contains($contents, '[PASS]')) {
+        $missingSuites[] = $label;
+    }
+}
+$assert(
+    '6.8 Cada guarda tiene una suite que lo ejecuta contra HTTP y base de datos reales',
+    $missingSuites === [],
+    json_encode($missingSuites)
+);
+
+// Las tres guardas siguientes cubren los hallazgos de la cuarta tanda
+// adversarial, y tienen una forma distinta a las anteriores: no comprueban que
+// el guarda EXISTA, sino que no se pueda reponer en una sola línea lo que
+// cerró cada hallazgo.
+
+// 6.9 — El rechazo por duplicado no puede volver a llevar la credencial.
+$duplicateGuard = preg_match(
+    '/private function assertNoDuplicateClaim.*?\n    \}/s',
+    $doctrine['refund_service'],
+    $matches
+) === 1 ? $matches[0] : '';
+$assert(
+    '6.9 El 409 de duplicado NO transporta el token de seguimiento (RF-REF-11)',
+    $duplicateGuard !== ''
+    && !str_contains($duplicateGuard, 'getTrackingToken')
+    && !str_contains($doctrine['duplicate_exception'], 'getExistingTrackingToken')
+    && !str_contains($doctrine['duplicate_exception'], 'existing_tracking_token')
+    && !str_contains($doctrine['duplicate_exception'], 'private readonly string $trackingToken'),
+    'el token es la credencial del expediente y no puede salir por un endpoint sin autenticación'
+);
+
+// 6.10 — La identidad del reclamante se compara por forma canónica, no por lo tecleado.
+$claimantIdentity = $read('src/Core/Domain/ValueObject/ClaimantIdentity.php');
+$assert(
+    '6.10 El duplicado se detecta sobre la FORMA CANÓNICA del contacto (RF-REF-11)',
+    str_contains($doctrine['refund_service'], 'ClaimantIdentity::from')
+    && str_contains($doctrine['refund_service'], '->equals(ClaimantIdentity::from(')
+    && str_contains($claimantIdentity, 'NATIONAL_LENGTH = 9')
+    && !str_contains($doctrine['refund_service'], 'preg_replace'),
+    'la comparación vive en el objeto de valor y el servicio no normaliza por su cuenta'
+);
+
+// 6.11 — La liquidación es una igualdad, no un techo.
+$assert(
+    '6.11 La liquidación se compara por IGUALDAD, no por techo (RF-REF-03)',
+    str_contains($doctrine['refund_service'], '$dto->paidAmount !== $expectedAmount')
+    && !str_contains($doctrine['refund_service'], '$dto->paidAmount > $')
+    && !str_contains($doctrine['refund_service'], 'SETTLEMENT_TOLERANCE'),
+    'registerDigitalPayment() exige igualdad exacta y no admite ninguna tolerancia de coma flotante'
+);
+
+// 6.12 — Solo hay dinero en céntimos, y el visto bueno no supera lo reclamado.
+$assert(
+    '6.12 El importe se valida en céntimos y el visto bueno no supera lo reclamado (RF-REF-03)',
+    // Los TRES puntos por donde entra dinero se validan uno por uno. Contar que
+    // el helper existe en el fichero no vale: al borrar el control de la
+    // liquidación el helper sigue estando por el de la reclamación y el visto
+    // bueno, y una guarda que solo mira el texto daría verde con el agujero
+    // abierto.
+    str_contains($doctrine['refund_service'], 'isCentExact($dto->claimedAmount)')
+    && str_contains($doctrine['refund_service'], 'isCentExact($dto->approvedAmount)')
+    && str_contains($doctrine['refund_service'], 'isCentExact($dto->paidAmount)')
+    && str_contains($doctrine['refund_service'], '$dto->approvedAmount > $case->getClaimedAmount()')
+    && str_contains($doctrine['amount_exception'], 'APPROVAL_ABOVE_CLAIM_MESSAGE')
+    && str_contains($doctrine['amount_exception'], 'NOT_CENT_EXACT_MESSAGE'),
+    'una cifra con fracción de céntimo se rechaza en la puerta, y firmar por encima de la reclamación es imposible'
+);
+
+// 6.13 — La identidad canónica se construye sobre dígitos ASCII, no sobre \\D.
+$assert(
+    '6.13 La identidad del reclamante se construye sobre dígitos ASCII (RF-REF-11)',
+    str_contains($claimantIdentity, "/[^0-9]/")
+    && !str_contains($claimantIdentity, '/\\D+/u')
+    && str_contains($claimantIdentity, 'toAsciiDigits')
+    && !str_contains($doctrine['refund_service'], 'preg_replace'),
+    '\\D con el modificador u conserva los dígitos Unicode: la identidad se construye transliterando, no descartando'
+);
+
+// ─────────────────────────────────────────────────────────────────────
+echo "\n--- 7. Doctrina de la sexta tanda: conciliación, rastro y proyección ---\n";
+// ─────────────────────────────────────────────────────────────────────
+
+// Los hallazgos de esta tanda tienen una cosa en común: ninguno se resolvía
+// mirando el módulo por dentro. Uno multiplicaba un tope por el número de
+// intervenciones, otro contaba el mismo euro dos veces en los libros, otro
+// recortaba en silencio y otro servía el mapa de la base de datos en un 500.
+// Los cuatro se comportaban bien en la prueba que los ejercita con un caso: el
+// agujero estaba en el segundo, el tercero y el cuarto escenario, que es justo
+// lo que una prueba de un solo caso no mira.
+//
+// Por eso este bloque no se limita a que el guarda EXISTA. Comprueba que no se
+// pueda reponer en una sola línea lo que cerró cada hallazgo.
+
+$findingRepositoryInterface = $read('src/Core/Domain/Repository/UnclaimedCashFindingRepositoryInterface.php');
+$findingRepositoryPdo = $read('src/Infrastructure/Repository/PdoUnclaimedCashFindingRepository.php');
+$auditRepositoryPdo = $read('src/Infrastructure/Repository/PdoAuditLogRepository.php');
+$metricsController = $read('src/Presentation/Controller/CoordinatorMetricsController.php');
+$waveSixAnalysis = $read('specs/08-refunds/analisis_sexta_tanda.md');
+
+// 7.1 — Un hallazgo de sobrante no se asienta sobre un dictamen ya emitido.
+$unclaimedGuard = preg_match(
+    '/public function registerUnclaimedCash.*?\n    \}/s',
+    $doctrine['technician_service'],
+    $matches
+) === 1 ? $matches[0] : '';
+$assert(
+    '7.1 El sobrante NO puede asentarse sobre dinero ya conciliado (RF-REF-03, RF-REF-04)',
+    $unclaimedGuard !== ''
+    // El bloqueo mira el dictamen, no sólo el estado: mirar sólo el estado
+    // declararía adjudicated un caso que el consumidor canceló sin inspección.
+    && str_contains($unclaimedGuard, 'getTechnicianFinding() !== null')
+    && str_contains($unclaimedGuard, 'awaitsInspection()')
+    && str_contains($unclaimedGuard, 'findRestrictedByIncident')
+    // Y mira la proyección RESTRINGIDA, no la completa: cargar el IBAN del
+    // reclamante para decidir un hallazgo de monedas sería dejar la puerta
+    // abierta de Art. V.4 por el hueco de una consulta.
+    && !str_contains($unclaimedGuard, 'findByIncident('),
+    'la guarda compara estado y dictamen antes de insertar, sobre la proyección restringida'
+);
+
+// 7.2 — El tope del sobrante es un agregado POR MÁQUINA, contado en céntimos.
+$assert(
+    '7.2 El tope de efectivo no reclamado se agrega por MÁQUINA, no por hallazgo (RF-REF-04)',
+    str_contains($unclaimedGuard, 'sumAmountByMachine')
+    && str_contains($unclaimedGuard, 'toCents')
+    && str_contains($findingRepositoryInterface, 'sumAmountByMachine(int $machineId): float')
+    && str_contains($findingRepositoryPdo, 'COALESCE(SUM(`amount`), 0)')
+    && str_contains($findingRepositoryPdo, '`machine_id` = :machine_id')
+    // El mensaje antiguo decía «divídalo en varios registros», que es la
+    // multiplicación escrita; no puede volver.
+    && !str_contains($unclaimedGuard, 'Divídalo')
+    && !str_contains($unclaimedGuard, 'divide'),
+    'el agregado se cuenta sobre la máquina y el importe se compara en céntimos enteros'
+);
+
+// 7.3 — La exportación de auditoría declara su recorte.
+$assert(
+    '7.3 La exportación de auditoría DECLARA su recorte en lugar de callárselo (Art. III)',
+    !str_contains($auditRepositoryPdo, 'min(100, $limit)')
+    && str_contains($auditRepositoryPdo, "':limit', max(1, \$limit)")
+    && str_contains($metricsController, 'AUDIT_PAGE_MAX = 100')
+    && str_contains($metricsController, 'min(self::AUDIT_PAGE_MAX')
+    && str_contains($metricsController, 'EXPORTACION PARCIAL')
+    && str_contains($metricsController, 'countEvents($filters)'),
+    'el tope de paginación vive en el listado y la exportación declara cuántos eventos deja fuera'
+);
+
+// 7.4 — Ningún 500 filtra el detalle interno de la excepción.
+// El detector es el mismo que el de `ConstitutionalAuditTest` 9.8, y se ejecuta
+// sobre `src/` entero: el fallo no era del módulo de reintegros sino del
+// proyecto, y un guarda de módulo que no mira fuera del módulo no lo habría
+// visto.
+$leakyHandlers = [];
+foreach ($srcFiles as $path) {
+    $source = (string)file_get_contents($path);
+    $offset = 0;
+    while (($pos = strpos($source, "'INTERNAL_SERVER_ERROR'", $offset)) !== false) {
+        $carried = substr($source, $pos, 250);
+        if (
+            str_contains($carried, 'getMessage()')
+            || str_contains($carried, 'get_class(')
+            || str_contains($carried, 'getFile()')
+            || str_contains($carried, 'getTraceAsString()')
+        ) {
+            $leakyHandlers[] = basename($path);
+            break;
+        }
+        $offset = $pos + 1;
+    }
+}
+$assert(
+    '7.4 Ningún handler 500 devuelve el mensaje, la clase o el origen de la excepción (Art. V.4)',
+    $leakyHandlers === [],
+    json_encode(array_values(array_unique($leakyHandlers)))
+);
+
+// 7.5 — El bypass de sede está documentado, no olvidado.
+// `X-Site-Code` y `POST /api/auth/site-login` son LA MISMA puerta sin
+// credencial: el código de sede ES el factor de autenticación por diseño de
+// RF-01. Retirar la cabecera no cerraba nada, y un hallazgo aparcado sin
+// escribir por qué se deja abierto vuelve a abrirse solo en la siguiente
+// iteración, cuando alguien lo encuentre de nuevo.
+//
+// La aserción mira el documento VERSIONADO, no la auditoría local: `docs/
+// auditoria_arquitectura.md` está en `.gitignore` porque es un artefacto de
+// análisis, así que una guarda que la leyera daría verde en esta máquina y
+// rojo en cualquier clon.
+$assert(
+    '7.5 El bypass de sede (X-Site-Code ≡ site-login) está documentado y llega a escritura (Art. V.4)',
+    str_contains($waveSixAnalysis, 'X-Site-Code')
+    && str_contains($waveSixAnalysis, 'site-login')
+    && str_contains($waveSixAnalysis, 'POST /api/incidents')
+    && preg_match('/🔴\s*H-1/u', $waveSixAnalysis) === 1
+    && str_contains($waveSixAnalysis, 'decisión de producto'),
+    'specs/08-refunds/analisis_sexta_tanda.md debe describir H-1 con su escalada a escritura y el motivo de no cerrarlo'
+);
+
+// Control de no-vacuidad: los cuatro guardas de código necesitan una suite que
+// los ejecute de verdad. El quinto es documental y no lo necesita: lo que
+// certifica es que el hallazgo está escrito, y `7.5` lo lee del disco.
+$waveSixSuites = [
+    'doble asiento y agregado por máquina' => 'tests/integration/TechnicianRefundInspectionApiTest.php',
+    'truncamiento de la exportación' => 'tests/unit/ConstitutionalAuditTest.php',
+    'fuga de detalle interno en 500' => 'tests/unit/ConstitutionalAuditTest.php',
+];
+$missingSuites = [];
+foreach ($waveSixSuites as $label => $relativePath) {
+    $contents = $read($relativePath);
+    if ($contents === '' || !str_contains($contents, '[PASS]')) {
+        $missingSuites[] = $label;
+    }
+}
+$assert(
+    '7.6 Cada guarda de la sexta tanda tiene una suite que la ejecuta de verdad',
+    $missingSuites === [],
+    json_encode($missingSuites)
+);
+
+echo "\n======================================================================\n";
+echo " Total Aserciones: {$assertions} | Fallos: {$failures}\n";
+if ($failures === 0) {
+    echo " RESULTADO: 100% EN VERDE. Condición T-REF-24 CUMPLIDA SATISFACTORIAMENTE.\n";
+} else {
+    echo " RESULTADO: {$failures} FALLO(S) DETECTADO(S).\n";
+}
+echo "======================================================================\n";
+
+exit($failures === 0 ? 0 : 1);

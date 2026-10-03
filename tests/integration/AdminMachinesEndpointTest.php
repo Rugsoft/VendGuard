@@ -212,8 +212,7 @@ $m0101Id = $m0101 !== null ? $m0101->getId() : 1;
 $m0101LocId = $m0101 !== null ? $m0101->getLocationId() : $bcnId;
 
 // Asegurar que VEND-0101 tiene ticket activo
-$pdo->prepare("DELETE FROM incident_history WHERE incident_id IN (SELECT id FROM incidents WHERE machine_id = :mid)")->execute([':mid' => $m0101Id]);
-$pdo->prepare("DELETE FROM incidents WHERE machine_id = :mid")->execute([':mid' => $m0101Id]);
+TestDataCleaner::purgeIncidentsByMachine($pdo, $m0101Id);
 $pdo->prepare("INSERT INTO incidents (ticket_code, machine_id, machine_type_snapshot, location_id, reporter_phone, category, description, urgency, status)
     VALUES ('INC-TEST-BLOCKED', :mid, 'PERISHABLE_FOOD', :locId, '600111222', 'TEMPERATURE_COLD', 'Avería activa de prueba', 'HIGH', 'ASSIGNED')")->execute([':mid' => $m0101Id, ':locId' => $m0101LocId]);
 
@@ -380,8 +379,7 @@ $assert("8.7 Máquina reubicada a la sede activa", (int)($bodyReactAssisted['dat
 $assert("8.8 is_active es true tras reactivación asistida", ($bodyReactAssisted['data']['is_active'] ?? false) === true);
 
 // Limpieza de datos temporales de prueba para preservar semillas puras
-$pdo->prepare("DELETE FROM incident_history WHERE incident_id IN (SELECT id FROM incidents WHERE ticket_code = 'INC-TEST-BLOCKED')")->execute();
-$pdo->prepare("DELETE FROM incidents WHERE ticket_code = 'INC-TEST-BLOCKED'")->execute();
+TestDataCleaner::purgeIncidentByTicket($pdo, 'INC-TEST-BLOCKED');
 $pdo->prepare("DELETE FROM machines WHERE id IN (:id1, :id2)")->execute([':id1' => $newMachineId, ':id2' => $tempMacId]);
 $pdo->prepare("DELETE FROM locations WHERE id = :locId")->execute([':locId' => $tempLocId]);
 

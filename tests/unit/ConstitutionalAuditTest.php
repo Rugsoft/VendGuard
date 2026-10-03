@@ -394,6 +394,57 @@ $assert(
     str_contains($modalView, "Informe Ejecutivo de Rendimiento")
 );
 
+// 9.7 La exportación de auditoría NO recorta en silencio (Art. III, Art. V.1)
+// El tope de 100 filas vivía en `PdoAuditLogRepository::findEvents()`, un valor
+// pensado para el listado paginado, y se colaba en la exportación: el endpoint
+// anunciaba 10.000 registros y entregaba 99 sin decir nada. El recorte sigue
+// existiendo, pero donde corresponde (el listado, en el controlador) y la
+// exportación DECLARA en su cabecera lo que ha dejado fuera.
+$coordMetricsCtrl = (string)file_get_contents($baseDir . '/src/Presentation/Controller/CoordinatorMetricsController.php');
+
+$assert(
+    "9.7 Artículo III: la exportación de auditoría declara su recorte en lugar de callárselo",
+    str_contains($coordMetricsCtrl, 'AUDIT_PAGE_MAX = 100')
+    && str_contains($coordMetricsCtrl, 'EXPORTACION PARCIAL')
+    && str_contains($coordMetricsCtrl, 'countEvents($filters)')
+    && !str_contains($auditRepoPdo, 'min(100, $limit)'),
+    "El tope de paginación debe vivir en el controlador y el repositorio no debe recortar por su cuenta"
+);
+
+// 9.8 Un 500 no devuelve el detalle interno de la excepción (Art. V.4)
+// Un `PDOException` incluye la consulta SQL que falló, y el `details` del Router
+// añadía clase, fichero y línea sin condición alguna: eso es un mapa de la base
+// de datos y de la instalación servido por HTTP a un cliente sin autenticar. El
+// rastro se queda en `error_log`, que es donde se investiga.
+//
+// El detector no intenta emparejar el `catch`: se ancla en el propio literal
+// `'INTERNAL_SERVER_ERROR'` y lee lo que la respuesta arrastra a partir de ahí.
+// Un `catch` de dominio puede devolver su mensaje sin problema (es un 4xx que
+// explica un rechazo); lo que no puede es hacerlo DESPUÉS de un 500.
+$internalErrorLeaks = [];
+foreach ($prodPhpFiles as $filePath) {
+    $content = (string)file_get_contents($filePath);
+    $offset = 0;
+    while (($pos = strpos($content, "'INTERNAL_SERVER_ERROR'", $offset)) !== false) {
+        $carried = substr($content, $pos, 250);
+        if (
+            str_contains($carried, 'getMessage()')
+            || str_contains($carried, 'get_class(')
+            || str_contains($carried, 'getFile()')
+            || str_contains($carried, 'getTraceAsString()')
+        ) {
+            $internalErrorLeaks[] = str_replace($baseDir, '', $filePath) . ' @' . $pos;
+        }
+        $offset = $pos + 1;
+    }
+}
+
+$assert(
+    "9.8 Artículo V.4: ningún handler 500 filtra el mensaje, la clase o el origen de la excepción",
+    empty($internalErrorLeaks),
+    'Fugas en: ' . implode(', ', array_slice(array_unique($internalErrorLeaks), 0, 5))
+);
+
 // ─────────────────────────────────────────────────────────────────────────
 // 10. MÓDULO ADMINISTRACIÓN INTEGRAL (CRUD): AUDITORÍA CONSTITUCIONAL (T-ADM-18)
 // ─────────────────────────────────────────────────────────────────────────

@@ -24,6 +24,7 @@ globalThis.sessionStorage = { ...globalThis.localStorage };
 // 2. Import components and store
 import { TechnicianRouteView } from '../../public/assets/js/views/TechnicianRouteView.js';
 import { api } from '../../public/assets/js/api.js';
+import { TechnicianResolutionRefundBlock } from '../../public/assets/js/components/TechnicianResolutionRefundBlock.js';
 import { store, setInternalSession, clearSession } from '../../public/assets/js/store.js';
 
 console.log('======================================================================');
@@ -297,10 +298,17 @@ console.log('\n--- Group 5: Strict Resolution Modal & 20 Chars per Field ---');
 let resolveCalledId = null;
 let resolveCalledDiag = null;
 let resolveCalledAct = null;
+let resolveCalledPayload = null;
+api.technician.getRefundInspection = async () => ({
+  has_refund_requests: false,
+  has_pending_verdict: false,
+  requests: []
+});
 api.technician.resolveIncident = async (id, diag, act) => {
   resolveCalledId = id;
   resolveCalledDiag = diag;
   resolveCalledAct = act;
+  resolveCalledPayload = typeof diag === 'object' ? diag : null;
   return {
     success: true,
     data: { id, status: 'RESOLVED', resolved_at: '2026-09-22T10:00:00Z' }
@@ -308,7 +316,7 @@ api.technician.resolveIncident = async (id, diag, act) => {
 };
 
 const inProgressInc = authView.incidents.find(i => i.id === 102);
-authView.openResolveModal(inProgressInc);
+await authView.openResolveModal(inProgressInc);
 
 assert('5.1 openResolveModal opens modal and sets incident',
   authView.showResolveModal === true &&
@@ -361,6 +369,7 @@ await authView.submitResolve();
 assert('5.11 Dispatches api.technician.resolveIncident with ID 102', resolveCalledId === 102);
 assert('5.12 Passed valid diagnosis text', resolveCalledDiag === validDiagnosis);
 assert('5.13 Passed valid corrective action text', resolveCalledAct === validAction);
+assert('5.13a Legacy resolution without refund or parts keeps the positional API contract', resolveCalledPayload === null);
 assert('5.14 Modal closed upon resolution', authView.showResolveModal === false);
 assert('5.15 Resolved incident is removed from active route', authView.incidents.find(i => i.id === 102) === undefined);
 
@@ -370,6 +379,129 @@ assert('5.16 Emits "resolved" event with diagnosis and action',
   resolvedEmits[0].val.incidentId === 102 &&
   resolvedEmits[0].val.diagnosis === validDiagnosis
 );
+
+// ---------------------------------------------------------------------
+// TEST GROUP 6: Refund verdict integration (T-REF-16)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 6: Mobile refund verdict integration ---');
+
+assert('6.1 View registers the tactile refund verdict block',
+  TechnicianRouteView.components?.TechnicianResolutionRefundBlock === TechnicianResolutionRefundBlock);
+assert('6.2 Resolve modal loads technician-safe refund inspection before showing the block',
+  TechnicianRouteView.methods.loadRefundInspection.toString().includes('getRefundInspection')
+    && TechnicianRouteView.template.includes('ref="resolutionRefundBlockRef"')
+    && TechnicianRouteView.template.includes(':refund-requests="refundRequests"')
+    && TechnicianRouteView.template.includes('PAYMENT_SYSTEM'));
+assert('6.3 Resolve action is disabled during loading, failed lookup, or invalid verdict',
+  TechnicianRouteView.template.includes('isLoadingRefundInspection || refundInspectionFailed || !canResolve || !resolveRefundData.isValid'));
+assert('6.4 A failed refund inspection request fails closed',
+  TechnicianRouteView.methods.loadRefundInspection.toString().includes('this.hasPendingRefundVerdict = true')
+    && TechnicianRouteView.methods.loadRefundInspection.toString().includes('this.refundInspectionFailed = true')
+    && TechnicianRouteView.methods.loadRefundInspection.toString().includes('this.resolveRefundData = { isValid: false }'));
+assert('6.5 Refund API method uses the technician-scoped incident endpoint',
+  typeof api.technician.getRefundInspection === 'function');
+
+const refundRouteView = createRouteInstance();
+const paymentIncident = { ...mockRouteIncidents[1], category: 'PAYMENT_SYSTEM' };
+let inspectionRequestedFor = null;
+api.technician.getRefundInspection = async (id) => {
+  inspectionRequestedFor = id;
+  return {
+    has_refund_requests: true,
+    has_pending_verdict: true,
+    requests: [{
+      id: 44,
+      claimed_amount: 3,
+      product_attempted: 'Café',
+      compensation_method: 'EN_MANO_SEDE',
+      status: 'PENDING_INSPECTION',
+      custody_instruction: 'Depositar en recepción.'
+    }]
+  };
+};
+await refundRouteView.openResolveModal(paymentIncident);
+assert('6.6 Opening the resolve modal queries refund information for that incident',
+  inspectionRequestedFor === paymentIncident.id && refundRouteView.isLoadingRefundInspection === false);
+assert('6.7 Pending claim data is loaded and blocks resolution pending a verdict',
+  refundRouteView.refundRequests.length === 1
+    && refundRouteView.hasPendingRefundVerdict === true
+    && refundRouteView.resolveRefundData.isValid === false);
+assert('6.7a The block receives only backend-projected request fields',
+  refundRouteView.refundRequests.every((request) => !('iban' in request) && !('bizum_phone' in request))
+    && TechnicianRouteView.template.includes(':refund-requests="refundRequests"'));
+assert('6.8 A pending claim does not submit until the refund block provides a valid verdict',
+  refundRouteView.resolveRefundData.isValid === false && refundRouteView.hasPendingRefundVerdict === true);
+
+const receivedPayloads = [];
+api.technician.resolveIncident = async (id, payloadOrDiagnosis, actionTaken) => {
+  receivedPayloads.push({ id, payloadOrDiagnosis, actionTaken });
+  return { data: { id, status: 'RESOLVED', resolved_at: '2026-10-02T10:00:00Z' } };
+};
+refundRouteView.resolveDiagnosis = 'Fallo de selector con moneda atascada en canal interno.';
+refundRouteView.resolveAction = 'Desatascado el selector y probado el pago con monedas.';
+refundRouteView.$refs = {
+  resolutionRefundBlockRef: {
+    validate: () => ({
+      isValid: true,
+      payload: {
+        refund_inspection: {
+          finding: 'FOUND_PHYSICAL',
+          recovered_amount: 3,
+          cash_custody_action: 'LEFT_AT_RECEPTION',
+          receptionist_name: 'Ana'
+        }
+      }
+    })
+  },
+  resolutionPartsBlockRef: { validate: () => ({ isValid: true, payload: {} }) }
+};
+await refundRouteView.submitResolve();
+assert('6.9 The resolved request combines technical and refund data in one object payload',
+  receivedPayloads.length === 1
+    && typeof receivedPayloads[0].payloadOrDiagnosis === 'object'
+    && receivedPayloads[0].payloadOrDiagnosis.refund_inspection?.finding === 'FOUND_PHYSICAL'
+    && receivedPayloads[0].payloadOrDiagnosis.diagnosis === refundRouteView.getEmits().find((event) => event.evt === 'resolved')?.val.diagnosis);
+
+const unclaimedRouteView = createRouteInstance();
+api.technician.getRefundInspection = async () => ({
+  has_refund_requests: false,
+  has_pending_verdict: false,
+  requests: []
+});
+await unclaimedRouteView.openResolveModal(paymentIncident);
+unclaimedRouteView.resolveDiagnosis = 'No hay fallo de cobro y selector se mueve con normalidad.';
+unclaimedRouteView.resolveAction = 'Limpieza interna y prueba de venta con moneda válida.';
+unclaimedRouteView.$refs = {
+  resolutionRefundBlockRef: {
+    validate: () => ({
+      isValid: true,
+      payload: { unclaimed_cash_found: { amount: 1.5, notes: 'Canal del monedero' } }
+    })
+  }
+};
+await unclaimedRouteView.submitResolve();
+assert('6.10 An optional unclaimed-cash finding is merged into the resolution object payload',
+  receivedPayloads.length === 2
+    && receivedPayloads[1].payloadOrDiagnosis.unclaimed_cash_found?.amount === 1.5);
+assert('6.10a Payment incidents with no claims pass an explicit opt-in for the unclaimed-cash control',
+  TechnicianRouteView.template.includes(':allow-unclaimed-cash="selectedIncident?.category === \'PAYMENT_SYSTEM\'"'));
+
+const failedLookupView = createRouteInstance();
+api.technician.getRefundInspection = async () => { throw new Error('No hay conexión'); };
+await failedLookupView.openResolveModal(mockRouteIncidents[1]);
+assert('6.11 A failed lookup leaves resolution blocked and shows the lookup error',
+  failedLookupView.resolveRefundData.isValid === false
+    && failedLookupView.hasPendingRefundVerdict === true
+    && failedLookupView.refundInspectionFailed === true
+    && failedLookupView.resolveError === 'No hay conexión');
+failedLookupView.resolveDiagnosis = 'Monedero sin evidencia de atasco en canal interno.';
+failedLookupView.resolveAction = 'Verificado el ciclo de pago con moneda de prueba válida.';
+const payloadCountBeforeFailedLookupSubmit = receivedPayloads.length;
+await failedLookupView.submitResolve();
+assert('6.12 Resolution is refused after an unsuccessful refund lookup, regardless of local block state',
+  failedLookupView.resolveError.includes('No se pudo verificar')
+    && receivedPayloads.length === payloadCountBeforeFailedLookupSubmit
+    && failedLookupView.isResolving === false);
 
 // ---------------------------------------------------------------------
 // TEST GROUP 7: Route Map Integration (RF-MAP-07, RF-MAP-08 / T-MAP-14)

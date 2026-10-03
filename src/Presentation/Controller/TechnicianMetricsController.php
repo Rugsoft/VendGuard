@@ -82,7 +82,12 @@ class TechnicianMetricsController
         } catch (InvalidArgumentException $e) {
             return Response::error('INVALID_FILTER_PARAMS', $e->getMessage(), 400);
         } catch (Throwable $e) {
-            return Response::error('INTERNAL_SERVER_ERROR', 'Error al consultar las métricas del técnico: ' . $e->getMessage(), 500);
+            // El mensaje de la excepción no se devuelve al cliente: un
+            // `PDOException` incluye la consulta SQL. El rastro se queda en el
+            // log del servidor.
+            error_log('[vendguard] ' . $e);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'Error al consultar las métricas del técnico.', 500);
         }
     }
 }
