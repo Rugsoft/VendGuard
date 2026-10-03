@@ -99,7 +99,8 @@ export const IncidentReportModal = {
       // UI State
       isSubmitting: false,
       errorMessage: '',
-      duplicateIncidentData: null // Set when a 409 Conflict occurs or machine has active ticket
+      duplicateIncidentData: null, // Set when a 409 Conflict occurs or machine has active ticket
+      submittedSuccessData: null // Set when an incident with refund is created to show confirmation screen
     };
   },
   computed: {
@@ -114,6 +115,7 @@ export const IncidentReportModal = {
       return this.duplicateIncidentData || this.machine?.active_incident || null;
     },
     modalTitle() {
+      if (this.submittedSuccessData) return 'Aviso y Solicitud Registrados';
       if (!this.machine) return 'Reportar avería';
       if (this.hasActiveIncident) {
         return `Avería en curso · Máquina ${this.machine.code}`;
@@ -121,6 +123,9 @@ export const IncidentReportModal = {
       return `Nueva avería · Máquina ${this.machine.code}`;
     },
     modalSubtitle() {
+      if (this.submittedSuccessData) {
+        return `Ticket #${this.submittedSuccessData.ticket_code} · ${this.machine?.code || ''}`;
+      }
       if (!this.machine) return '';
       return `${this.machine.model || 'Vending'} (${this.machine.floor_wing || 'Ubicación'})`;
     },
@@ -164,6 +169,7 @@ export const IncidentReportModal = {
       this.refundClaim = { refund_requested: false };
       this.refundClaimValid = true;
       this.lastRefundReceipt = null;
+      this.submittedSuccessData = null;
       this.commentText = '';
       this.commentPhotoFile = null;
       this.errorMessage = '';
@@ -242,6 +248,7 @@ export const IncidentReportModal = {
         let successMsg = `Avería registrada con éxito. Ticket #${createdIncident.ticket_code}`;
         if (createdIncident.refund) {
           this.lastRefundReceipt = createdIncident.refund;
+          this.submittedSuccessData = createdIncident;
           if (createdIncident.refund.pickup_pin) {
             successMsg += ` · Expediente de reintegro abierto con PIN: ${createdIncident.refund.pickup_pin}`;
           } else {
@@ -256,7 +263,12 @@ export const IncidentReportModal = {
         );
 
         this.$emit('created', createdIncident);
-        this.closeModal();
+
+        // Si hay resguardo de devolución (especialmente entrega en mano con PIN),
+        // mantenemos el modal abierto mostrando la pantalla de resguardo hasta que pulse Entendido
+        if (!createdIncident.refund) {
+          this.closeModal();
+        }
       } catch (err) {
         // Handle 409 Conflict: machine has active incident (RF-02 strict prevention)
         if (err.status === 409) {
@@ -328,9 +340,84 @@ export const IncidentReportModal = {
       @close="closeModal"
     >
       <!-- =================================================================== -->
+      <!-- CASE 0: SUCCESS CONFIRMATION WITH REFUND RECEIPT & PICKUP PIN       -->
+      <!-- =================================================================== -->
+      <div v-if="submittedSuccessData" class="vg-refund-success-receipt" style="padding: 4px 0;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <div style="width: 52px; height: 52px; border-radius: 50%; background-color: #eaf8f1; color: #0d824d; font-size: 26px; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 10px;">
+            ✓
+          </div>
+          <h3 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 18px; font-weight: 700; color: var(--color-ink, #000000); margin: 0 0 4px 0;">
+            Aviso y Reintegro Registrados
+          </h3>
+          <p style="font-size: 13px; color: var(--color-ink-muted, #6c7e9d); margin: 0;">
+            Se ha creado el ticket <strong>#{{ submittedSuccessData.ticket_code }}</strong> para la máquina <strong>{{ machine?.code }}</strong>.
+          </p>
+        </div>
+
+        <!-- Tarjeta destacada de PIN de Entrega en Conserjería -->
+        <div
+          v-if="submittedSuccessData.refund?.pickup_pin"
+          style="background: #ffffff; border: 2px solid var(--color-primary, #2560ff); border-radius: 8px; padding: 18px; text-align: center; margin-bottom: 16px; box-shadow: 0 4px 12px rgba(37, 96, 255, 0.08);"
+          data-testid="refund-pin-receipt"
+        >
+          <span style="display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-primary, #2560ff); margin-bottom: 6px;">
+            PIN de Recogida en Conserjería
+          </span>
+          <div style="font-size: 38px; font-weight: 800; letter-spacing: 0.25em; color: var(--color-ink, #000000); font-family: monospace; margin: 4px 0 10px 0;">
+            {{ submittedSuccessData.refund.pickup_pin }}
+          </div>
+          <p style="font-size: 13px; color: var(--color-slate, #2c333f); margin: 0; line-height: 1.4;">
+            Facilita este <strong>PIN de 4 dígitos</strong> a la persona afectada.<br>
+            El conserje o recepcionista lo requerirá en la pestaña <em>Reintegros</em> para entregarle el sobre con el dinero.
+          </p>
+        </div>
+
+        <!-- Resumen de Reintegro Digital (Bizum / Transferencia) -->
+        <div
+          v-else-if="submittedSuccessData.refund"
+          style="background: #f8fafc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: 6px; padding: 14px; margin-bottom: 16px;"
+        >
+          <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
+            <span style="color: var(--color-ink-muted, #6c7e9d);">Vía de compensación:</span>
+            <strong>{{ submittedSuccessData.refund.compensation_method === 'BIZUM' ? 'Bizum' : 'Transferencia Bancaria' }}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 13px;">
+            <span style="color: var(--color-ink-muted, #6c7e9d);">Importe solicitado:</span>
+            <strong>{{ Number(submittedSuccessData.refund.claimed_amount).toFixed(2) }} €</strong>
+          </div>
+        </div>
+
+        <!-- Enlace público de seguimiento si aplica -->
+        <div v-if="submittedSuccessData.refund?.tracking_url" style="margin-bottom: 20px; text-align: center;">
+          <a
+            :href="submittedSuccessData.refund.tracking_url"
+            target="_blank"
+            class="vg-btn vg-btn-secondary"
+            style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; height: 32px; text-decoration: none;"
+          >
+            🔗 Abrir enlace de seguimiento del afectado
+          </a>
+        </div>
+
+        <!-- Botón de Cierre -->
+        <div style="display: flex; justify-content: flex-end; border-top: 1px solid var(--color-hairline, #c8cfda); padding-top: 14px;">
+          <button
+            type="button"
+            class="vg-btn vg-btn-primary"
+            style="width: 100%; height: 40px; font-size: 14px; font-weight: 600;"
+            @click="closeModal"
+            data-testid="btn-close-receipt"
+          >
+            Entendido, cerrar resguardo
+          </button>
+        </div>
+      </div>
+
+      <!-- =================================================================== -->
       <!-- CASE 1: MACHINE WITH ACTIVE INCIDENT (RF-02 DUPLICATE BLOCKED)       -->
       <!-- =================================================================== -->
-      <div v-if="hasActiveIncident" class="vg-duplicate-incident-container">
+      <div v-else-if="hasActiveIncident" class="vg-duplicate-incident-container">
         <!-- Active incident banner -->
         <div
           style="background-color: #fef2f2; border: 1px solid #fee2e2; border-radius: var(--radius-interactive, 4px); padding: 14px; margin-bottom: 20px;"

@@ -149,6 +149,10 @@ function createModalInstance(machine, initialData = {}) {
   };
 
   // Add computed getters
+  Object.defineProperty(instance, 'isOpen', {
+    get: () => IncidentReportModal.computed.isOpen.get.call(instance),
+    set: (v) => IncidentReportModal.computed.isOpen.set.call(instance, v)
+  });
   Object.defineProperty(instance, 'hasActiveIncident', {
     get: () => IncidentReportModal.computed.hasActiveIncident.call(instance)
   });
@@ -320,6 +324,8 @@ assert('5.2 Submitting with refund forwards refund_requested flag', lastRefundCr
 assert('5.3 Submitting with refund forwards claimed_amount', lastRefundCreatedPayload.claimed_amount === 3.5);
 assert('5.4 Submitting with refund forwards compensation_method', lastRefundCreatedPayload.compensation_method === 'EN_MANO_SEDE');
 assert('5.5 Submitting with refund captures and saves lastRefundReceipt', modalWithRefund.lastRefundReceipt?.pickup_pin === '7391');
+assert('5.6 Modal remains open with confirmation screen when refund is created', modalWithRefund.isOpen === true && modalWithRefund.submittedSuccessData !== null);
+assert('5.7 Modal title reflects successful registration', modalWithRefund.modalTitle === 'Aviso y Solicitud Registrados');
 
 // Summary
 console.log('\n======================================================================');
