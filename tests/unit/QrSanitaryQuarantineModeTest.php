@@ -121,6 +121,7 @@ class MockLocationRepository implements LocationRepositoryInterface
 
 class MockIncidentRepository implements IncidentRepositoryInterface
 {
+    public function findEnrichedDetailById(int|string $identifier): ?array { return null; }
     /** @var array<int, Incident> */
     public array $incidents = [];
 

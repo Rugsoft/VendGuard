@@ -453,6 +453,7 @@ class MockPrevMachineRepo implements MachineRepositoryInterface
 
 class MockPrevIncidentRepo implements IncidentRepositoryInterface
 {
+    public function findEnrichedDetailById(int|string $identifier): ?array { return null; }
     public array $incidents = [];
     public function create(Incident $i, ?int $u = null, ?string $n = null): Incident
     {

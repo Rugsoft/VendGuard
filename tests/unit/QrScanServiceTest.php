@@ -205,6 +205,7 @@ class InMemoryLocationRepository implements LocationRepositoryInterface
 
 class InMemoryIncidentRepository implements IncidentRepositoryInterface
 {
+    public function findEnrichedDetailById(int|string $identifier): ?array { return null; }
     public ?Incident $activeIncident = null;
     public ?Incident $resolvedIncident = null;
 

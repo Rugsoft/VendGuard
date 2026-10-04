@@ -57,7 +57,7 @@ final readonly class CoordinatorIncidentDetailDto
      *   id: int,
      *   code: string,
      *   model: string,
-     *   manufacturer: string,
+     *   manufacturer: string|null,
      *   type: string,
      *   type_label: string,
      *   has_perishables: bool

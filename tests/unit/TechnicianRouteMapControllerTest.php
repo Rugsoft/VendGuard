@@ -54,6 +54,7 @@ function makeTechnicianRouteMapRequest(array $query = [], int $userId = 7, strin
 
 final class RouteMapIncidentRepositoryStub implements IncidentRepositoryInterface
 {
+    public function findEnrichedDetailById(int|string $identifier): ?array { return null; }
     public function __construct(private readonly array $incidents) {}
     public function create(Incident $incident, ?int $userId = null, ?string $initialNote = null): Incident { throw new LogicException(); }
     public function findById(int $id): ?Incident { return null; }

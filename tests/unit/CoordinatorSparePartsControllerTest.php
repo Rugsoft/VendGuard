@@ -306,6 +306,7 @@ function createControllerEnvironment(): array {
     $analyticsService = new SparePartAnalyticsService($replacedPartRepo);
 
     $dummyIncidentRepo = new class implements IncidentRepositoryInterface {
+        public function findEnrichedDetailById(int|string $identifier): ?array { return null; }
         public function create(\VendGuard\Core\Domain\Model\Incident $i, ?int $u = null, ?string $n = null): \VendGuard\Core\Domain\Model\Incident { return $i; }
         public function findById(int $id): ?\VendGuard\Core\Domain\Model\Incident { return null; }
         public function findByTicketCode(string $c): ?\VendGuard\Core\Domain\Model\Incident { return null; }

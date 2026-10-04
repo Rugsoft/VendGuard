@@ -54,6 +54,7 @@ function makeCoordinatorRouteMapRequest(
 
 final class CoordinatorMapIncidentRepositoryStub implements IncidentRepositoryInterface
 {
+    public function findEnrichedDetailById(int|string $identifier): ?array { return null; }
     public array $lastFilters = [];
     public function __construct(private readonly array $incidents) {}
     public function create(Incident $incident, ?int $userId = null, ?string $initialNote = null): Incident { throw new LogicException(); }

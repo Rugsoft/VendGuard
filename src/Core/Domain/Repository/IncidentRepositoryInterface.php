@@ -73,6 +73,30 @@ interface IncidentRepositoryInterface
     public function findAssignedToTechnician(int $technicianId, array $statuses = []): array;
 
     /**
+     * Recupera en una única transacción de lectura el expediente completo enriquecido de
+     * una incidencia para el modal de detalle de Coordinación (módulo 09).
+     *
+     * Acepta el ID primario (entero o cadena numérica), el código de ticket y el mismo
+     * código con prefijo `#`. Devuelve los bloques `incident`, `machine`, `location`,
+     * `technician`, `history`, `comments`, `requested_parts`, `replaced_parts` y `refund`,
+     * o `null` si la incidencia no existe o está borrada lógicamente.
+     *
+     * @param int|string $identifier ID de la incidencia o código de ticket con '#' opcional.
+     * @return array{
+     *   incident: array<string, mixed>,
+     *   machine: array<string, mixed>|null,
+     *   location: array<string, mixed>|null,
+     *   technician: array<string, mixed>|null,
+     *   history: list<array<string, mixed>>,
+     *   comments: list<array<string, mixed>>,
+     *   requested_parts: list<array<string, mixed>>,
+     *   replaced_parts: list<array<string, mixed>>,
+     *   refund: array<string, mixed>|null
+     * }|null
+     */
+    public function findEnrichedDetailById(int|string $identifier): ?array;
+
+    /**
      * Actualiza los campos mutables y el estado de una incidencia.
      */
     public function update(Incident $incident): bool;

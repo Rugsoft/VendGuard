@@ -25,7 +25,7 @@
   * **Dependencias:** T-IDM-01
   * **Hecho cuando:** `PdoIncidentRepository` implementa el método `findEnrichedDetailById(int|string $identifier): ?array` que recupera en una única transacción de lectura la información completa de la avería, incluyendo datos de máquina, sede cliente, técnico asignado, piezas solicitadas en pausa (`requested_parts`), piezas sustituidas con costes unitarios congelados (`incident_replaced_parts`), bitácora de comentarios y expediente de reintegro vinculado.
 
-- [ ] **T-IDM-03: Implementar `CoordinatorIncidentDetailService.php` con algoritmos de SLA y enmascaramiento seguro**
+- [x] **T-IDM-03: Implementar `CoordinatorIncidentDetailService.php` con algoritmos de SLA y enmascaramiento seguro**
   * **Requisitos:** RF-03, RF-06, RF-07, RNF-01, RNF-05, Constitución Art. II y Art. V.4
   * **Dependencias:** T-IDM-01, T-IDM-02
   * **Hecho cuando:** Existe en `src/Application/Service/CoordinatorIncidentDetailService.php` el servicio que implementa: (1) `computeSlaStatus()` calculando cuenta atrás activa o balance histórico formal cerrado (*"Cumplido en..."* / *"Incumplido por..."*); (2) `maskFinancialAndContactData()` enmascarando teléfono Bizum (`6** *** 789`) e IBAN (`ES**...3456`); y (3) cálculo de permisos operativos según la máquina de estados.

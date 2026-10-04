@@ -229,6 +229,7 @@ final class DeskLocationRepo implements LocationRepositoryInterface
 
 final class DeskIncidentRepo implements IncidentRepositoryInterface
 {
+    public function findEnrichedDetailById(int|string $identifier): ?array { return null; }
     /** @var array<int, Incident> */
     public array $rows = [];
 

@@ -539,6 +539,7 @@ class MockPreventiveItemRepoForTech implements PreventiveItemRepositoryInterface
 
 class MockIncidentRepoForTech implements IncidentRepositoryInterface
 {
+    public function findEnrichedDetailById(int|string $identifier): ?array { return null; }
     /** @var array<int, Incident> */
     public array $incidents = [];
     /** @var array<int, list<IncidentComment>> */
