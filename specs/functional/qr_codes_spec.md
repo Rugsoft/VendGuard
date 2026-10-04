@@ -1,7 +1,7 @@
 # ESPECIFICACIÓN FUNCIONAL · GENERADOR Y LECTOR DE CÓDIGOS QR PARA MÁQUINAS
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
 **Documento:** `specs/functional/qr_codes_spec.md`  
-**Estado:** Especificación Formal Consolidada (Auditada por QA y Lista para Aprobación)  
+**Estado:** Especificación Formal Consolidada · **Enmienda 1 aprobada el 2026-10-04**  
 **Metodología:** SDD (Specification-Driven Development) · Notación EARS  
 **Conformidad Constitucional:** Artículos I, II, III, IV y V de la Constitución de VendGuard  
 
@@ -90,6 +90,18 @@ Definir los requisitos funcionales y el comportamiento operativo para:
 * **EARS 5.2 (Excepción/Máquina Inactiva o No Encontrada):** Si el enlace del código QR contiene un código de máquina inexistente, malformado o correspondiente a una máquina dada de baja o inactiva en el parque, el sistema deberá mostrar una pantalla explicativa de cortesía: *"Máquina no identificada o temporalmente fuera de servicio. Si necesitas asistencia técnica inmediata, contacta con el servicio de atención."*, ofreciendo un acceso alternativo al portal general del servicio.
 * **EARS 5.3 (Excepción/URL con Sede sin Máquina):** Si la URL escaneada incluye el parámetro de sede pero omite el de máquina, el sistema abrirá el portal de sede convencional permitiendo al usuario seleccionar manualmente la máquina afectada.
 
+### RF-06: Modo Escaneo a Pantalla Completa (Enmienda 1 · aprobada 2026-10-04)
+*El sistema garantizará que el código QR pueda leerse directamente desde la pantalla de un dispositivo (móvil u ordenador) cuando no se disponga de la etiqueta adhesiva impresa, sin incorporar lectores embebidos ni dependencias externas.*
+
+> [!NOTE]
+> **Justificación técnica (diagnóstico del 2026-10-04):** Los códigos QR actuales son válidos y decodificables (verificado con decodificadores independientes ZXing y jsQR sobre el SVG real servido en producción). El fallo reportado (no detectado por cámaras Android, sí por iPhone) se debe a la densidad en pantalla: la previsualización del modal limita la etiqueta a 260 px, dejando el núcleo QR en ~105 px ≈ 3,17 px/módulo (matriz versión 4, 33×33 módulos, ECC M), por debajo del umbral práctico de los lectores Android (familia Google Lens/ZXing), mientras que el decodificador de iPhone tolera esa resolución. La etiqueta impresa a 90 mm (núcleo ≈ 36 mm) no presenta este problema y sigue siendo la vía principal prevista.
+
+* **EARS 6.1 (Evento/Apertura):** Cuando el coordinador pulse la acción *"🔍 Modo escaneo"* sobre la previsualización de la etiqueta, el sistema deberá mostrar una capa a pantalla completa con el código QR como único protagonista visual sobre fondo blanco opaco y un botón de cierre claramente visible.
+* **EARS 6.2 (Estado/Dimensiones y contraste):** Mientras el modo escaneo esté visible, el código QR completo (matriz más zona de silencio de 4 módulos) deberá ocupar al menos el 85% del lado menor del viewport, garantizando una densidad mínima de 4 píxeles CSS por módulo (objetivo de diseño ≥ 6 px CSS/módulo en pantallas de 360 px o más), sin sombras, degradados, transparencias ni ningún elemento superpuesto que reduzca el contraste.
+* **EARS 6.3 (Estado/Información de contexto):** La capa mostrará bajo el código el texto *"Acerca la cámara del otro dispositivo o escanéalo con tu app de códigos"*, junto al código de máquina y la sede; si el escaneo no prospera, se ofrecerá la recomendación de subir el brillo de la pantalla y evitar reflejos directos.
+* **EARS 6.4 (Evento/Cierre sin pérdida de estado):** Cuando el coordinador cierre el modo escaneo, el sistema deberá volver al modal de etiqueta conservando el teléfono personalizado y el SVG ya cargado, sin solicitudes adicionales al servidor.
+* **EARS 6.5 (Excepción/Viewport apaisado o reducido):** Si el viewport es apaisado o de altura reducida, el código QR se dimensionará por el lado menor disponible manteniendo la matriz y su zona de silencio completas, sin recortes ni desplazamientos.
+
 ---
 
 ## 5. Requisitos No Funcionales (RNF)
@@ -98,6 +110,7 @@ Definir los requisitos funcionales y el comportamiento operativo para:
 * **RNF-02 (Velocidad de Respuesta):** El tiempo de apertura del formulario tras el escaneo no deberá superar los 2 segundos en conexiones móviles 4G/5G convencionales.
 * **RNF-03 (Fidelidad de Impresión):** Las plantillas de impresión deberán respetar las proporciones físicas para etiquetas adhesivas estándar sin desbordar los márgenes de página.
 * **RNF-04 (Autonomía de Dependencias y Dogma Vanilla):** El renderizado del código QR y su composición visual no dependerán de pasarelas ni servicios web externos de generación de terceros. La generación y exportación vectorial (SVG) se realizará de manera totalmente nativa y autónoma.
+* **RNF-05 (Robustez de detección en pantalla y payload contenido):** El payload codificado en el QR se mantendrá en la matriz más pequeña posible (versión ≤ 4, es decir ≤ 33×33 módulos) y el modo escaneo priorizará siempre tamaño y contraste sobre cualquier adorno visual. Cualquier ampliación de la longitud de la URL que pudiera elevar la versión de la matriz deberá justificarse y revalidarse con móviles Android de referencia.
 
 ---
 
@@ -106,6 +119,7 @@ Definir los requisitos funcionales y el comportamiento operativo para:
 1. **Escaneo sin cobertura de red:** Si el dispositivo no tiene conexión a internet en el momento exacto del escaneo, el navegador móvil del usuario mostrará su pantalla estándar de sin conexión; la información en texto visible en la etiqueta física (código de máquina, ubicación y teléfono de contacto) servirá de alternativa analógica para que el usuario pueda llamar por teléfono.
 2. **Nombres de sede o ubicaciones extremadamente largas:** La plantilla de la pegatina aplicará ajuste proporcional de tipografía garantizando que el código QR conserve su tamaño mínimo de 40x40 mm.
 3. **Escaneo de ticket resuelto hace más de 48 horas:** Se considera cerrado (`CLOSED`) y no se ofrece reapertura; se abre un ticket nuevo si se reporta un nuevo fallo.
+4. **Escaneo desde pantalla con brillo bajo o reflejos:** El modo escaneo recomienda subir el brillo y evitar reflejos; si aun así no se detecta, la vía de respaldo es la etiqueta impresa (90 mm, núcleo ≈ 36 mm) o el lector de códigos nativo del dispositivo.
 
 ---
 
@@ -116,6 +130,7 @@ Quedan formalmente excluidos de esta especificación:
 2. Geolocalización obligatoria por GPS del dispositivo móvil en el momento del escaneo.
 3. Uso de acortadores o redirecciones externas de URLs (ej. Bitly, TinyURL).
 4. Auditoría analítica de telemetría de clics y escaneos de marketing.
+5. Lectores QR embebidos en la aplicación web (API `getUserMedia` o `BarcodeDetector`): el escaneo se delega siempre en la cámara o aplicación nativa del dispositivo, evitando dependencias de APIs no universales.
 
 ---
 
@@ -129,9 +144,22 @@ Esta funcionalidad se considerará terminada y lista para entrega cuando:
 5. Ante una máquina con avería abierta, el escaneo muestre el estado de la incidencia activa con privacidad estricta (sin notas internas ni datos de técnicos) y permita aportar comentarios adicionales.
 6. Si dos usuarios envían un reporte simultáneamente, el segundo usuario sea informado amigablemente de que su aviso fue integrado en el ticket recién creado sin recibir un error técnico.
 7. Ante un código erróneo o máquina inactiva, el sistema muestre la pantalla de máquina no reconocida con el mensaje de cortesía y acceso alternativo.
+8. El coordinador pueda abrir el *"Modo escaneo"* a pantalla completa desde la previsualización de la etiqueta y el código QR resultante sea detectable por las cámaras nativas de iOS y Android (validación manual con al menos un móvil Android de referencia), sin depender de la impresión física.
+9. Las etiquetas emitidas (previsualización, descarga SVG y lote A4) codifiquen la URL del host efectivo del despliegue (`APP_BASE_URL` o host de la petición), sin ningún dominio embebido en el código fuente.
 
 ---
 
 ## 9. Dudas Abiertas
 
-*Actualmente no existen dudas abiertas. Todas las ambigüedades, casos límite, condiciones de carrera y requisitos constitucionales fueron resueltos y aprobados durante la sesión de auditoría con el Product Owner.*
+*No existen dudas abiertas bloqueantes. Queda registrada una decisión aplazada (ver §10): la reducción de densidad del QR a versión 3 mediante un dominio corto se valorará en el futuro; no es necesaria para cerrar la Enmienda 1.*
+
+---
+
+## 10. Registro de Enmiendas y Decisiones Formales
+
+### Enmienda 1 (2026-10-04) — Modo Escaneo a Pantalla Completa y Host Configurable
+* **Estado:** Aprobada el 2026-10-04 e implementada/verificada: batería completa al 100% (168 suites, 6.317 aserciones) y validación manual en navegador del modo escaneo (86% del lado menor, 11,4 px/módulo en escritorio y 8,2 px/módulo en móvil 390 px, con decodificación real del lienzo recortado).
+* **Motivo:** Incidencia en producción: el QR se lee con iPhone pero no con varios modelos Android al escanearlo desde la pantalla de un dispositivo. Diagnóstico: QR válido (ZXing y jsQR decodifican la URL correcta), con densidad en pantalla de ~3,17 px CSS/módulo (núcleo 105 px sobre matriz de 33×33, versión 4, ECC M) a causa del límite `max-width: 260px` de la previsualización; queda por debajo del umbral de detección de los lectores Android.
+* **Cambios propuestos:** nuevos `RF-06` (EARS 6.1–6.5) y `RNF-05`, caso límite §6.4, exclusión §7.5 y criterios de finalización §8.8–§8.9; enmienda §1.2 del contrato técnico [`qr_codes_contracts.md`](../technical/qr_codes_contracts.md) (resolución de `APP_BASE_URL`); Fase 6 en [`tasks.md`](../02-qr-codes/tasks.md).
+* **Desviación subsanada:** la implementación hardcodeaba `https://vendguard.onrender.com` en `QrLabelService` y en el pie del SVG, ignorando el marcador `{APP_BASE_URL}` del contrato §1.1.
+* **Decisión aplazada:** reducir la matriz a versión 3 (29×29) exigiría una URL ≤ 44 bytes (dominio corto). No se aborda en esta enmienda; el modo escaneo resuelve el caso real por tamaño.

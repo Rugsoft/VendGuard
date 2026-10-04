@@ -136,9 +136,15 @@ class NativeSvgQrRenderer
         $svg[] = '  <text x="200" y="520" text-anchor="middle" class="font-sans phone-label">📞 Asistencia Técnica y Atención Telefónica</text>';
         $svg[] = '  <text x="200" y="546" text-anchor="middle" class="font-sans phone-number">' . $supportPhone . '</text>';
 
-        // Pie de Página
+        // Pie de Página (host resuelto dinámicamente; sin dominios embebidos — Enmienda 1 §1.2)
+        $targetParts = parse_url($config->getTargetUrl());
+        if (is_array($targetParts) && isset($targetParts['host']) && $targetParts['host'] !== '') {
+            $footerHost = $targetParts['host'] . (isset($targetParts['port']) ? ':' . $targetParts['port'] : '');
+        } else {
+            $footerHost = 'localhost';
+        }
         $svg[] = '  <!-- Pie Institucional -->';
-        $svg[] = '  <text x="200" y="583" text-anchor="middle" class="font-sans footer-note">VendGuard Security &amp; Safety · www.vendguard.onrender.com</text>';
+        $svg[] = '  <text x="200" y="583" text-anchor="middle" class="font-sans footer-note">VendGuard Security &amp; Safety · ' . self::escapeXml($footerHost) . '</text>';
 
         $svg[] = '</svg>';
 

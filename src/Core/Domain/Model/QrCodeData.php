@@ -25,7 +25,7 @@ class QrCodeData implements JsonSerializable
     /**
      * @param string $machineCode Código único de la máquina (ej: 'VEND-0101').
      * @param string $siteCode Código de la sede asociada (ej: 'SEDE-BCN-01').
-     * @param string $baseUrl URL base del sistema (ej: 'https://vendguard.onrender.com' o '/').
+     * @param string $baseUrl URL base del sistema (ej: 'https://qr.vendguard.example' o '/').
      * @throws InvalidArgumentException Si alguno de los parámetros requeridos está vacío.
      */
     public function __construct(string $machineCode, string $siteCode, string $baseUrl = '/')

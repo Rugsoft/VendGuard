@@ -6,6 +6,7 @@
 **Contratos Técnicos:** [`specs/technical/qr_codes_contracts.md`](../technical/qr_codes_contracts.md)  
 **Normativa Suprema:** [constitution.md](../../constitution.md) (Artículos I al VII)  
 **Directrices Operativas:** [AGENTS.md](../../AGENTS.md) (SDD, Dogma Vanilla, Dualismo Lingüístico)  
+**Estado:** Vigente · **Enmienda 1 (2026-10-04, aprobada)** — ver Fase 6 de [`tasks.md`](tasks.md)  
 
 ---
 
@@ -182,6 +183,7 @@ FUNCTION handleQrReport(payload):
 * En `CoordinatorDashboardView`:
   - Botón *"🏷️ Imprimir QR"* en cada tarjeta de máquina. Abre `QrLabelModal.js` con previsualización SVG, edición del teléfono y opciones *"Imprimir"* / *"Descargar SVG"*.
   - Botón *"📄 Etiquetas de Sede (A4)"* en la cabecera de la sede. Abre `QrBatchPrintView.js` que renderiza la cuadrícula A4 de todas las máquinas activas y lanza `window.print()`.
+  - Acción *"🔍 Modo escaneo"* (Enmienda 1 · `RF-06`): overlay a pantalla completa con el QR maximizado (≥ 85% del lado menor, ≥ 4 px CSS/módulo), pensado para escanear directamente desde la pantalla de un dispositivo sin imprimir la pegatina.
 
 ---
 
@@ -193,6 +195,7 @@ FUNCTION handleQrReport(payload):
 | **Impresión A4 con CSS `@media print`** | La maquetación en el navegador permite previsualización WYSIWYG, saltos de página con `break-inside: avoid` y soporte universal en cualquier sistema operativo. | **Generador de PDF en backend (ej: Dompdf / mPDF):** Descartado por consumo excesivo de memoria en tiers gratuitos y dependencias complejas de fuentes. |
 | **Descarga gráfica individual en SVG** | Un archivo `.svg` se abre de forma nativa en cualquier navegador, se edita en Illustrator/Inkscape y se manda directamente a imprenta con calidad vectorial. | **Exportación Raster PNG/JPEG:** Descartada porque pierde nitidez si se imprime a gran escala y requeriría rasterización en el servidor. |
 | **Deep Link con Query Params (`?qr=VEND-0101`)** | Compatible con el servidor web embebido y cualquier PaaS (Render, Nginx, Apache) sin requerir reescrituras complejas de URLs tipo `.htaccess`. | **Ruta HTML5 History API (`/qr/VEND-0101`):** Descartada porque requiere configurar soporte de fallback en servidores web de producción para no dar 404 al recargar. |
+| **Modo escaneo a pantalla completa (overlay en el DOM, Enmienda 1)** | Elimina el fallo de detección de lectores Android sin tocar el encoder ni añadir dependencias: amplía el núcleo QR de ~105 px a ≥ 85% del lado menor del dispositivo (objetivo ≥ 6 px CSS/módulo). | **Lector QR embebido (`getUserMedia` / `BarcodeDetector`):** Descartado por depender de APIs no universales y por desviarse del flujo previsto (cámara nativa del informador); además añadiría complejidad no exigida por el MVP. |
 
 ---
 
@@ -221,6 +224,8 @@ FUNCTION handleQrReport(payload):
 ### 6.3 Pruebas Frontend (Node ESM)
 1. `QrReportViewTest.mjs`:
    - Verifica el montaje reactivo de la vista de escaneo, la renderización del banner sanitario en `PERISHABLE_FOOD` y la visualización de la confirmación tras el reporte.
+2. `QrLabelModalScanModeTest.mjs` (Enmienda 1):
+   - Verifica la apertura/cierre del modo escaneo, que el QR se maximiza conforme al criterio EARS 6.2 (≥ 85% del lado menor, ≥ 4 px CSS/módulo) y que el teléfono personalizado se conserva al cerrar.
 
 ---
 
@@ -234,6 +239,7 @@ FUNCTION handleQrReport(payload):
 | **RF-04 (EARS 4.1–4.5)** | Anti-duplicados, privacidad Art. V.4 y concurrencia | `QrScanService.php`, `QrReportService.php` | `QrScanServiceTest.php`, `QrReportEndpointTest.php` |
 | **RF-05 (EARS 5.1–5.3)** | Máquinas reubicadas, inactivas o parámetros incompletos | `QrScanService.php`, `QrScanController.php` | `QrScanEndpointTest.php` |
 | **RNF-01 a RNF-04** | Corrección error M/Q, velocidad <2s, proporciones, Dogma Vanilla | `NativeSvgQrRenderer.php`, `QrMatrixGenerator.php` | `NativeSvgQrRendererTest.php`, `ConstitutionalAuditTest.php` |
+| **RF-06 + RNF-05 (Enmienda 1)** | Modo escaneo a pantalla completa, densidad mínima en pantalla y payload contenido | `QrLabelModal.js`, `qr-print.css`, `QrLabelService.php` | `QrLabelModalScanModeTest.mjs`, `QrEndpointsIntegrationTest.php` |
 
 ---
 

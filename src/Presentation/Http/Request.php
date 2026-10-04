@@ -24,6 +24,7 @@ class Request
     private array $headers;
     /** @var array<string, mixed> */
     private array $files;
+    private bool $isSecure;
     /** @var array<string, string> */
     private array $routeParams = [];
     /** @var array<string, mixed> */
@@ -43,7 +44,8 @@ class Request
         array $queryParams = [],
         array $parsedBody = [],
         array $headers = [],
-        array $files = []
+        array $files = [],
+        bool $isSecure = false
     ) {
         $this->method = strtoupper(trim($method));
         $this->path = '/' . trim(parse_url($path, PHP_URL_PATH) ?? '/', '/');
@@ -53,6 +55,7 @@ class Request
         $this->queryParams = $queryParams;
         $this->parsedBody = $parsedBody;
         $this->files = $files;
+        $this->isSecure = $isSecure;
 
         // Normalizar cabeceras a minúsculas para acceso insensible a mayúsculas
         $this->headers = [];
@@ -123,13 +126,17 @@ class Request
             $parsedBody = $_POST;
         }
 
+        // Conexión directa por TLS (Apache/Nginx sin proxy): HTTPS='on'
+        $isSecure = !empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off';
+
         return new self(
             $method,
             $path,
             $_GET,
             $parsedBody,
             $headers,
-            $_FILES
+            $_FILES,
+            $isSecure
         );
     }
 
@@ -192,6 +199,22 @@ class Request
     {
         $normalized = strtolower(trim($name));
         return isset($this->headers[$normalized]);
+    }
+
+    /**
+     * Determina el esquema real de la petición (http/https) honrando proxios TLS.
+     * Usado por la Enmienda 1 del módulo QR (contrato §1.2) para resolver el host
+     * efectivo de los enlaces codificados en las etiquetas.
+     */
+    public function getScheme(): string
+    {
+        $forwardedProto = $this->getHeader('X-Forwarded-Proto');
+        if ($forwardedProto !== null && trim($forwardedProto) !== '') {
+            $first = strtolower(trim((string)explode(',', $forwardedProto)[0]));
+            return $first === 'https' ? 'https' : 'http';
+        }
+
+        return $this->isSecure ? 'https' : 'http';
     }
 
     /**

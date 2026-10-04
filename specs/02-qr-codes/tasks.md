@@ -7,6 +7,7 @@
 **Plan Técnico:** [`specs/02-qr-codes/plan.md`](plan.md)  
 **Estimación por Tarea:** 20–30 minutos  
 **Regla de Ejecución:** Estricto orden de dependencias; no iniciar una tarea sin completar y verificar sus predecesoras.  
+**Estado:** Módulo desplegado en producción · **Fase 6 (Enmienda 1, aprobada el 2026-10-04) implementada y verificada**  
 
 ---
 
@@ -107,3 +108,28 @@
   * **Requisitos:** Artículos I al VII de la Constitución de VendGuard
   * **Dependencias:** T-QR-15
   * **Hecho cuando:** Se ejecutan todas las suites de pruebas (unitarias PHP, unitarias JS e integración) alcanzando el 100% en verde con cero infracciones constitucionales, y se despliega el módulo verificado en la nube.
+
+---
+
+## Fase 6: Enmienda 1 — Escaneo en Pantalla y Host Configurable (Aprobada 2026-10-04 · Implementada)
+
+- [x] **T-QR-17: Resolver dinámicamente la URL base de las etiquetas (`APP_BASE_URL` + host de petición)**
+  * **Requisitos:** Contrato técnico `qr_codes_contracts.md` §1.1–§1.2 (Enmienda 1)
+  * **Dependencias:** T-QR-09, T-QR-11
+  * **Hecho cuando:** `QrLabelService` y `QrLabelController` construyen el destino con `APP_BASE_URL` si existe y, en su defecto, con el host efectivo de la petición (`X-Forwarded-Proto` + `Host`), sin literales de dominio embebidos; el pie del SVG muestra el host resuelto y las suites `QrEndpointsIntegrationTest.php` verifican los tres criterios de aceptación de §1.2.
+
+- [x] **T-QR-18: Implementar el "Modo escaneo" a pantalla completa en `QrLabelModal.js` y `qr-print.css`**
+  * **Requisitos:** `RF-06` (EARS 6.1–6.5), `RNF-05`
+  * **Dependencias:** T-QR-14
+  * **Hecho cuando:** El modal ofrece la acción "🔍 Modo escaneo" que abre una capa a pantalla completa con el QR maximizado (matriz + zona de silencio ≥ 85% del lado menor, ≥ 4 px CSS/módulo en viewports ≥ 360 px), fondo blanco opaco, contraste máximo y cierre que conserva el estado del modal.
+
+- [x] **T-QR-19: Suites de pruebas del modo escaneo (`QrLabelModalScanModeTest.mjs`) y de la URL configurable**
+  * **Requisitos:** `RF-06`, Contrato técnico §1.2
+  * **Dependencias:** T-QR-17, T-QR-18
+  * **Hecho cuando:** La suite Node valida apertura/cierre del modo escaneo, dimensionado mínimo del QR y conservación del teléfono; la suite PHP valida la precedencia de `APP_BASE_URL`/host de petición y la ausencia de dominios embebidos.
+
+- [ ] **T-QR-20: Verificación global de regresión y validación física con Android**
+  * **Requisitos:** Artículos I al VII de la Constitución; criterios de finalización §8.8–§8.9 de `qr_codes_spec.md`
+  * **Dependencias:** T-QR-17, T-QR-18, T-QR-19
+  * **Hecho cuando:** `php tests/run_all.php` pasa al 100% en verde y el modo escaneo se valida manualmente con al menos un móvil Android de referencia frente a la pantalla.
+  * **Estado 2026-10-04:** regresión completada (168 suites / 6.317 aserciones al 100%) y validación manual en navegador (86% del lado menor, 8,2–11,4 px/módulo, decodificación real del lienzo recortado). ⏳ Pendiente únicamente la comprobación física del usuario con su móvil Android tras desplegar.

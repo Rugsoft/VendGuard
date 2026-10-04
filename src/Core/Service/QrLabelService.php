@@ -35,7 +35,7 @@ class QrLabelService
     public function __construct(
         ?MachineRepositoryInterface $machineRepo = null,
         ?LocationRepositoryInterface $locationRepo = null,
-        string $baseUrl = 'https://vendguard.onrender.com'
+        string $baseUrl = 'http://localhost'
     ) {
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
@@ -48,6 +48,7 @@ class QrLabelService
      * @param int $machineId Identificador único de la máquina.
      * @param string|null $customPhone Teléfono personalizado de asistencia para la etiqueta (opcional).
      * @param bool $updateLocation Si es true y se indicó teléfono, actualiza el registro maestro de la sede en BD.
+     * @param string|null $baseUrl URL base contextual resuelta por el llamante (Enmienda 1 §1.2); si es null se usa la del constructor.
      * @return array<string, mixed> Metadatos de máquina, sede, teléfono y código SVG generado.
      * @throws MachineNotFoundException Si la máquina o sede no existen o están inactivas.
      * @throws InvalidArgumentException Si los identificadores o parámetros son inválidos.
@@ -55,7 +56,8 @@ class QrLabelService
     public function getMachineLabel(
         int $machineId,
         ?string $customPhone = null,
-        bool $updateLocation = false
+        bool $updateLocation = false,
+        ?string $baseUrl = null
     ): array {
         if ($machineId <= 0) {
             throw new InvalidArgumentException('El identificador de máquina debe ser un entero positivo.');
@@ -95,7 +97,8 @@ class QrLabelService
         }
 
         // 4. Construir la URL codificada en el QR mediante QrCodeData (Value Object)
-        $qrData = new QrCodeData($machine->getCode(), $location->getSiteCode(), $this->baseUrl);
+        $effectiveBaseUrl = $baseUrl ?? $this->baseUrl;
+        $qrData = new QrCodeData($machine->getCode(), $location->getSiteCode(), $effectiveBaseUrl);
         $targetUrl = $qrData->getTargetUrl();
 
         // 5. Configurar y renderizar la etiqueta adhesiva en SVG nativo
@@ -136,11 +139,12 @@ class QrLabelService
      * Genera el lote completo de etiquetas con código QR para todas las máquinas activas de una sede (A4 batch).
      *
      * @param int $locationId Identificador único de la sede cliente.
+     * @param string|null $baseUrl URL base contextual resuelta por el llamante (Enmienda 1 §1.2); si es null se usa la del constructor.
      * @return array<string, mixed> Colección de etiquetas de las máquinas de la sede en formato vectorial.
      * @throws MachineNotFoundException Si la sede no existe o se encuentra inactiva.
      * @throws InvalidArgumentException Si el ID de sede es inválido.
      */
-    public function getLocationBatch(int $locationId): array
+    public function getLocationBatch(int $locationId, ?string $baseUrl = null): array
     {
         if ($locationId <= 0) {
             throw new InvalidArgumentException('El identificador de sede debe ser un entero positivo.');
@@ -163,9 +167,11 @@ class QrLabelService
             $supportPhone = '900000000';
         }
 
+        $effectiveBaseUrl = $baseUrl ?? $this->baseUrl;
+
         $items = [];
         foreach ($machines as $machine) {
-            $qrData = new QrCodeData($machine->getCode(), $location->getSiteCode(), $this->baseUrl);
+            $qrData = new QrCodeData($machine->getCode(), $location->getSiteCode(), $effectiveBaseUrl);
             $targetUrl = $qrData->getTargetUrl();
 
             $labelConfig = new QrLabelConfig(

@@ -60,7 +60,8 @@ class QrLabelController
         $format = strtolower(trim((string)$request->getQuery('format', 'json')));
 
         try {
-            $data = $this->qrLabelService->getMachineLabel($machineId, $cleanPhone, $updateLocation);
+            $baseUrl = $this->resolveBaseUrl($request);
+            $data = $this->qrLabelService->getMachineLabel($machineId, $cleanPhone, $updateLocation, $baseUrl);
 
             // Si se solicita descarga directa como archivo vectorial SVG (EARS 2.3)
             if ($format === 'svg') {
@@ -118,7 +119,8 @@ class QrLabelController
         $locationId = (int)$idParam;
 
         try {
-            $data = $this->qrLabelService->getLocationBatch($locationId);
+            $baseUrl = $this->resolveBaseUrl($request);
+            $data = $this->qrLabelService->getLocationBatch($locationId, $baseUrl);
             return Response::json($data, 200);
         } catch (MachineNotFoundException $e) {
             return Response::error(
@@ -139,5 +141,25 @@ class QrLabelController
                 500
             );
         }
+    }
+
+    /**
+     * Resuelve la URL base pública para los enlaces QR con la precedencia del contrato §1.2
+     * (Enmienda 1): variable de entorno APP_BASE_URL → host efectivo de la petición → null
+     * (el servicio aplicará su fallback de desarrollo).
+     */
+    private function resolveBaseUrl(Request $request): ?string
+    {
+        $envBaseUrl = getenv('APP_BASE_URL');
+        if ($envBaseUrl !== false && trim((string)$envBaseUrl) !== '') {
+            return rtrim(trim((string)$envBaseUrl), '/');
+        }
+
+        $host = $request->getHeader('Host');
+        if ($host !== null && trim($host) !== '' && preg_match('/^[A-Za-z0-9.\-:\[\]]+$/', trim($host)) === 1) {
+            return $request->getScheme() . '://' . trim($host);
+        }
+
+        return null;
     }
 }

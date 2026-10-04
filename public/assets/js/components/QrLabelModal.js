@@ -11,6 +11,9 @@
  * - EARS 1.4: Previsualización en tiempo real del SVG vectorial completo (400x600 px).
  * - EARS 2.1: Impresión directa individual mediante window.print().
  * - EARS 2.3: Descarga vectorial SVG nativa descargable como archivo para imprenta.
+ * - EARS 6.1–6.5 (Enmienda 1): Modo escaneo a pantalla completa con el QR maximizado
+ *   (≥ 85% del lado menor del viewport y ≥ 4 px CSS/módulo), pensado para leer el
+ *   código directamente desde la pantalla de un dispositivo.
  * 
  * Respeta el Dogma Vanilla y utiliza ModalDialog.js.
  */
@@ -48,7 +51,8 @@ export const QrLabelModal = {
       locationData: null,
       errorMessage: '',
       isApplyingPhone: false,
-      saveSuccessNotice: false
+      saveSuccessNotice: false,
+      scanMode: false
     };
   },
   computed: {
@@ -94,6 +98,7 @@ export const QrLabelModal = {
       this.locationData = null;
       this.errorMessage = '';
       this.saveSuccessNotice = false;
+      this.scanMode = false;
     },
 
     /**
@@ -174,6 +179,32 @@ export const QrLabelModal = {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
+    },
+
+    /**
+     * Abre el Modo Escaneo a pantalla completa con el QR maximizado (Enmienda 1 · RF-06, EARS 6.1–6.3).
+     */
+    openScanMode() {
+      if (!this.svgContent) return;
+      this.scanMode = true;
+
+      // Recorta el viewBox al área exacta del QR (matriz + zona de silencio de 4 módulos)
+      // maquetada por NativeSvgQrRenderer: cuadrado de 200x200 unidades en (100, 220).
+      this.$nextTick(() => {
+        const stage = this.$refs.scanStage;
+        const svgEl = stage ? stage.querySelector('svg') : null;
+        if (svgEl) {
+          svgEl.setAttribute('viewBox', '100 220 200 200');
+          svgEl.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        }
+      });
+    },
+
+    /**
+     * Cierra el Modo Escaneo conservando el teléfono y el SVG ya cargados (EARS 6.4).
+     */
+    closeScanMode() {
+      this.scanMode = false;
     },
 
     /**
@@ -352,6 +383,17 @@ export const QrLabelModal = {
               type="button"
               class="vg-btn vg-btn-secondary"
               style="width: 100%; height: 38px; font-size: 13px; font-weight: 600;"
+              @click="openScanMode"
+              :disabled="!svgContent"
+              data-testid="btn-scan-mode"
+            >
+              🔍 Modo escaneo (pantalla completa)
+            </button>
+
+            <button
+              type="button"
+              class="vg-btn vg-btn-secondary"
+              style="width: 100%; height: 38px; font-size: 13px; font-weight: 600;"
               @click="downloadSvg"
               data-testid="btn-download-svg"
             >
@@ -361,6 +403,38 @@ export const QrLabelModal = {
         </div>
       </div>
     </ModalDialog>
+
+    <!-- Modo Escaneo a Pantalla Completa (Enmienda 1 · RF-06, EARS 6.1–6.5) -->
+    <div
+      v-if="scanMode"
+      class="qr-scan-overlay"
+      data-testid="qr-scan-overlay"
+      @click.self="closeScanMode"
+    >
+      <button
+        type="button"
+        class="vg-btn vg-btn-secondary qr-scan-close"
+        @click="closeScanMode"
+        data-testid="btn-scan-close"
+      >
+        ✕ Cerrar
+      </button>
+
+      <div
+        ref="scanStage"
+        class="qr-scan-stage"
+        data-testid="qr-scan-stage"
+        v-html="svgContent"
+      ></div>
+
+      <div class="qr-scan-caption">
+        <p class="qr-scan-instruction">Acerca la cámara del otro dispositivo o escanéalo con tu app de códigos</p>
+        <p class="qr-scan-meta">
+          <span class="font-mono">{{ machineCodeDisplay }}</span><span v-if="locationData?.name"> · {{ locationData.name }}</span>
+        </p>
+        <p class="qr-scan-tip">Si no lo detecta, sube el brillo de la pantalla y evita reflejos.</p>
+      </div>
+    </div>
   `
 };
 

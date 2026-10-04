@@ -155,6 +155,96 @@
   color: var(--color-slate, #2c333f);
 }
 
+/* ─── 2.b Modo Escaneo a Pantalla Completa (Enmienda 1 · RF-06, EARS 6.1–6.5) ─ */
+.qr-scan-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background-color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* Lienzo cuadrado: el QR completo (matriz + zona de silencio) ocupa el 86% del
+   lado menor del viewport (EARS 6.2). Geometría acoplada a NativeSvgQrRenderer
+   (etiqueta 400x600; área QR de 200x200 unidades en (100, 220)); actualizar ambos
+   si cambia la maqueta de la etiqueta. */
+.qr-scan-stage {
+  width: 86vmin;
+  height: 86vmin;
+  flex: 0 0 auto;
+  background-color: #ffffff;
+  overflow: hidden;
+}
+
+.qr-scan-stage svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+/* El marco decorativo del QR queda fuera del área útil; se oculta para no
+   ensuciar la zona de silencio exigida por la norma QR (EARS 6.2). */
+.qr-scan-stage svg rect[fill="#ffffff"][stroke="#e2e8f0"] {
+  display: none;
+}
+
+.qr-scan-caption {
+  max-width: 86vmin;
+  text-align: center;
+}
+
+.qr-scan-instruction {
+  margin: 0;
+  font-size: clamp(11px, 2.6vmin, 15px);
+  font-weight: 600;
+  color: var(--color-slate, #2c333f);
+}
+
+.qr-scan-meta {
+  margin: 2px 0 0 0;
+  font-size: clamp(10px, 2.2vmin, 13px);
+  color: var(--color-ink-muted, #6c7e9d);
+}
+
+.qr-scan-tip {
+  margin: 2px 0 0 0;
+  font-size: clamp(9px, 2vmin, 12px);
+  color: var(--color-ink-muted, #6c7e9d);
+}
+
+.qr-scan-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  height: 40px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* EARS 6.5: en viewports apaisados y bajos la leyenda pasa al lateral para que el
+   lienzo cuadrado del QR nunca se recorte ni se desplace. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .qr-scan-overlay {
+    flex-direction: row;
+    gap: 14px;
+  }
+
+  .qr-scan-caption {
+    max-width: 42vw;
+    text-align: left;
+  }
+}
+
 /* ─── 3. Directivas de Impresión Real (@media print) ───────────────────────── */
 @media print {
   /* Configuración del papel A4 */
@@ -234,5 +324,12 @@
   .qr-single-print-wrap svg {
     width: 100%;
     height: auto;
+  }
+}
+
+/* El modo escaneo en pantalla nunca debe imprimirse (Enmienda 1 · RF-06) */
+@media print {
+  .qr-scan-overlay {
+    display: none !important;
   }
 }

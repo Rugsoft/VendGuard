@@ -3,6 +3,7 @@
 **Documento:** `specs/technical/qr_codes_contracts.md`  
 **Referencia Funcional:** `specs/functional/qr_codes_spec.md` (RF-01 a RF-05)  
 **Protocolo:** HTTP/1.1 · JSON (`application/json; charset=utf-8`) y SVG vectorial (`image/svg+xml`)  
+**Estado:** Vigente · **Enmienda 1 (§1.2) aprobada el 2026-10-04**  
 **Metodología:** SDD (Specification-Driven Development) · Contratos API-First  
 
 ---
@@ -20,6 +21,19 @@ Cada código QR físico contiene una dirección web única normalizada:
 * **Parámetros:**
   * `qr` (obligatorio): Código único alfanumérico de la máquina (`machines.code`).
   * `site` (opcional/contextual): Código de la sede (`locations.site_code`). Si la máquina fue reubicada, la base de datos central prevalece sobre este parámetro (`RF-05, EARS 5.1`).
+
+### 1.2 Resolución del Host de Destino (`APP_BASE_URL`) — Enmienda 1 (aprobada 2026-10-04)
+El marcador `{APP_BASE_URL}` de la URL de escaneo se resolverá, en el momento de emitir la etiqueta, con esta precedencia:
+
+1. **Variable de entorno `APP_BASE_URL`** (si está definida y no vacía): se adopta tal cual, normalizada sin barra final. Mecanismo previsto para despliegues con dominio propio.
+2. **Host efectivo de la petición HTTP** (si no hay variable): esquema real (`https` cuando `HTTPS` esté activo o el proxy declare `X-Forwarded-Proto: https`, como hace el balanceador TLS de Render) más la cabecera `Host` de la petición entrante.
+3. **Valor explícito del llamante** (contextos CLI, scripts o pruebas sin petición): parámetro `baseUrl` inyectado en el servicio; en su defecto, `http://localhost`.
+
+* **Criterios de aceptación (verificables en tests):**
+  * Petición con `Host: vendguard.onrender.com` y `X-Forwarded-Proto: https` → `https://vendguard.onrender.com/?qr={machine_code}&site={site_code}`.
+  * Petición local directa a `127.0.0.1:8000` → `http://127.0.0.1:8000/?qr={machine_code}&site={site_code}`.
+  * `APP_BASE_URL=https://qr.vendguard.example` definida → prevalece sobre el host de la petición.
+* **Efectos:** el pie de la etiqueta SVG (texto de dominio) debe mostrar el host resuelto por esta misma regla; quedan prohibidos los literales de dominio embebidos en el código. Los ejemplos JSON de §3.3 y §3.4 ilustran el caso de un despliegue servido desde `vendguard.onrender.com`.
 
 ---
 
