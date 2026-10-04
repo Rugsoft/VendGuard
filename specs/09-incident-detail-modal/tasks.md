@@ -30,7 +30,7 @@
   * **Dependencias:** T-IDM-01, T-IDM-02
   * **Hecho cuando:** Existe en `src/Application/Service/CoordinatorIncidentDetailService.php` el servicio que implementa: (1) `computeSlaStatus()` calculando cuenta atrás activa o balance histórico formal cerrado (*"Cumplido en..."* / *"Incumplido por..."*); (2) `maskFinancialAndContactData()` enmascarando teléfono Bizum (`6** *** 789`) e IBAN (`ES**...3456`); y (3) cálculo de permisos operativos según la máquina de estados.
 
-- [ ] **T-IDM-04: Implementar suite de pruebas unitarias PHP `CoordinatorIncidentDetailServiceTest.php`**
+- [x] **T-IDM-04: Implementar suite de pruebas unitarias PHP `CoordinatorIncidentDetailServiceTest.php`**
   * **Requisitos:** RF-02, RF-03, RF-04, RF-06, RF-07, RNF-05
   * **Dependencias:** T-IDM-03
   * **Hecho cuando:** La ejecución de `php tests/unit/CoordinatorIncidentDetailServiceTest.php` pasa al 100% en verde evaluando: cálculo de SLA activo y cerrado, enmascaramiento exacto de datos de pago/contacto, visualización de piezas de catálogo y fuera de catálogo, y matriz de permisos por estado (`REPORTED`, `ASSIGNED`, `IN_PROGRESS`, `PENDING_PARTS`, `RESOLVED`, `CLOSED`, `CANCELLED`).
