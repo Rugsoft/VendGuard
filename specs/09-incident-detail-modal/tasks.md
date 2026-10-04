@@ -15,7 +15,7 @@
 
 ## Fase 1: Backend DTO y Servicio de Aplicación
 
-- [ ] **T-IDM-01: Implementar DTO inmutable `CoordinatorIncidentDetailDto.php`**
+- [x] **T-IDM-01: Implementar DTO inmutable `CoordinatorIncidentDetailDto.php`**
   * **Requisitos:** RF-02, RF-03, RF-04, RF-06, RNF-01, RNF-04, RNF-05
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existe en `src/Application/DTO/CoordinatorIncidentDetailDto.php` la clase con tipado estricto PHP 8.2+ (`declare(strict_types=1);`), inmutabilidad y método `toArray()` que estructura los bloques `incident`, `location`, `machine`, `technician`, `timeline`, `sla`, `technical_intervention`, `comments`, `refund` y `permissions` conforme al contrato de `plan.md`.
