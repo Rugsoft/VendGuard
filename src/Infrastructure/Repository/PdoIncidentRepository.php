@@ -7,6 +7,7 @@ namespace VendGuard\Infrastructure\Repository;
 use DomainException;
 use PDO;
 use PDOException;
+use PDOStatement;
 use Throwable;
 use VendGuard\Core\Domain\Exception\ChronicIncidentException;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
@@ -522,6 +523,187 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
 
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         return array_map(fn(array $row) => Incident::fromDatabaseRow($row), $rows);
+    }
+
+    /**
+     * One consistent read of the whole incident file, for the coordinator detail modal.
+     *
+     * Module 09 needs everything that today is scattered across the triage table, the
+     * audit console and the refunds inbox (RF-02 to RF-06, RNF-01) in a single round
+     * trip. The method opens one read transaction so every piece comes from the same
+     * snapshot and performs no writes at all: viewing a case must never mutate it
+     * (Art. III, RNF-04).
+     *
+     * The identifier accepts the primary key (int or numeric string), a ticket code
+     * (`TICK-2026-00142`) and the same code prefixed with `#`, because the modal is
+     * fed from table rows where either form may travel.
+     *
+     * Rows are returned as fetched: deriving SLA, labels, permissions and masked
+     * payment data belongs to `CoordinatorIncidentDetailService` (T-IDM-03), which
+     * consumes this structure.
+     *
+     * @param int|string $identifier Incident id or ticket code, with optional '#' prefix.
+     * @return array{
+     *   incident: array<string, mixed>,
+     *   machine: array<string, mixed>|null,
+     *   location: array<string, mixed>|null,
+     *   technician: array<string, mixed>|null,
+     *   history: list<array<string, mixed>>,
+     *   comments: list<array<string, mixed>>,
+     *   requested_parts: list<array<string, mixed>>,
+     *   replaced_parts: list<array<string, mixed>>,
+     *   refund: array<string, mixed>|null
+     * }|null Null when the incident does not exist or is soft-deleted.
+     */
+    public function findEnrichedDetailById(int|string $identifier): ?array
+    {
+        $incidentId = null;
+        $ticketCode = null;
+
+        if (is_int($identifier)) {
+            if ($identifier < 1) {
+                return null;
+            }
+            $incidentId = $identifier;
+        } else {
+            $candidate = trim($identifier);
+            if (str_starts_with($candidate, '#')) {
+                $candidate = trim(substr($candidate, 1));
+            }
+
+            if ($candidate === '') {
+                return null;
+            }
+
+            if (ctype_digit($candidate)) {
+                $incidentId = (int)$candidate;
+            } else {
+                $ticketCode = strtoupper($candidate);
+            }
+        }
+
+        $isOwnTransaction = !$this->pdo->inTransaction();
+        if ($isOwnTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $incident = $this->fetchSingleRow(
+                "SELECT i.* FROM `incidents` i WHERE i.deleted_at IS NULL"
+                . ($ticketCode !== null ? " AND i.ticket_code = :ticket_code" : " AND i.id = :incident_id")
+                . " LIMIT 1",
+                $ticketCode !== null ? [':ticket_code' => $ticketCode] : [':incident_id' => $incidentId]
+            );
+
+            if ($incident === null) {
+                if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                    $this->pdo->rollBack();
+                }
+
+                return null;
+            }
+
+            $incidentId = (int)$incident['id'];
+            $technicianId = $incident['assigned_technician_id'] !== null
+                ? (int)$incident['assigned_technician_id']
+                : null;
+
+            $result = [
+                'incident' => $incident,
+                'machine' => $this->fetchSingleRow(
+                    "SELECT id, location_id, code, model, machine_type, floor_wing, sanitary_status, notes, is_active\r\n                     FROM `machines` WHERE id = :machine_id LIMIT 1",
+                    [':machine_id' => (int)$incident['machine_id']]
+                ),
+                'location' => $this->fetchSingleRow(
+                    "SELECT id, site_code, name, address, has_physical_reception, latitude, longitude\r\n                     FROM `locations` WHERE id = :location_id LIMIT 1",
+                    [':location_id' => (int)$incident['location_id']]
+                ),
+                'technician' => $technicianId === null ? null : $this->fetchSingleRow(
+                    "SELECT id, name, operator_code, role, is_active\r\n                     FROM `users` WHERE id = :technician_id LIMIT 1",
+                    [':technician_id' => $technicianId]
+                ),
+                'history' => $this->fetchAllRows(
+                    "SELECT h.id, h.user_id, h.from_status, h.to_status, h.action_note, h.created_at,\r\n                            u.name AS user_name, u.role AS user_role\r\n                     FROM `incident_history` h\r\n                     LEFT JOIN `users` u ON h.user_id = u.id\r\n                     WHERE h.incident_id = :incident_id\r\n                     ORDER BY h.created_at ASC, h.id ASC",
+                    [':incident_id' => $incidentId]
+                ),
+                'comments' => $this->fetchAllRows(
+                    "SELECT c.id, c.author_type, c.user_id, c.author_name, c.comment_text,\r\n                            c.photo_path, c.is_internal, c.created_at\r\n                     FROM `incident_comments` c\r\n                     WHERE c.incident_id = :incident_id\r\n                     ORDER BY c.created_at ASC, c.id ASC",
+                    [':incident_id' => $incidentId]
+                ),
+                'requested_parts' => $this->fetchAllRows(
+                    "SELECT r.id, r.spare_part_id, r.is_out_of_catalog, r.custom_part_description,\r\n                            r.quantity, r.status, r.created_at, p.part_code, p.name AS part_name\r\n                     FROM `spare_part_requests` r\r\n                     LEFT JOIN `spare_parts` p ON r.spare_part_id = p.id\r\n                     WHERE r.incident_id = :incident_id\r\n                     ORDER BY r.created_at ASC, r.id ASC",
+                    [':incident_id' => $incidentId]
+                ),
+                'replaced_parts' => $this->fetchAllRows(
+                    "SELECT rp.id, rp.spare_part_id, rp.is_out_of_catalog, rp.custom_part_name,\r\n                            rp.quantity, rp.unit_cost_snapshot, rp.total_cost_snapshot, rp.old_part_destination,\r\n                            rp.notes, rp.installed_at, rp.created_at, p.part_code, p.name AS part_name\r\n                     FROM `incident_replaced_parts` rp\r\n                     LEFT JOIN `spare_parts` p ON rp.spare_part_id = p.id\r\n                     WHERE rp.incident_id = :incident_id AND rp.intervention_type = 'INCIDENT'\r\n                     ORDER BY rp.installed_at ASC, rp.id ASC",
+                    [':incident_id' => $incidentId]
+                ),
+                'refund' => $this->fetchSingleRow(
+                    "SELECT id, incident_id, machine_id, location_id, claimant_name, claimant_contact,\r\n                            claimed_amount, product_attempted, compensation_method, bizum_phone, iban, status,\r\n                            technician_finding, recovered_amount, cash_custody_action, technician_justification,\r\n                            technician_inspected_at, technician_id, coordinator_decision, approved_amount,\r\n                            coordinator_justification, coordinator_id, payment_reference, paid_amount, paid_at,\r\n                            hand_delivered_at, created_at, updated_at\r\n                     FROM `refund_requests`\r\n                     WHERE incident_id = :incident_id AND deleted_at IS NULL\r\n                     ORDER BY id DESC\r\n                     LIMIT 1",
+                    [':incident_id' => $incidentId]
+                ),
+            ];
+
+            if ($isOwnTransaction) {
+                $this->pdo->commit();
+            }
+
+            return $result;
+        } catch (Throwable $e) {
+            if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Runs one prepared read and returns its first row, or null when there is none.
+     *
+     * @param array<string, int|string|null> $params
+     * @return array<string, mixed>|null
+     */
+    private function fetchSingleRow(string $sql, array $params): ?array
+    {
+        $stmt = $this->pdo->prepare($sql);
+        $this->bindParams($stmt, $params);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : $row;
+    }
+
+    /**
+     * Runs one prepared read and returns every row as an associative array.
+     *
+     * @param array<string, int|string|null> $params
+     * @return list<array<string, mixed>>
+     */
+    private function fetchAllRows(string $sql, array $params): array
+    {
+        $stmt = $this->pdo->prepare($sql);
+        $this->bindParams($stmt, $params);
+        $stmt->execute();
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Binds a homogeneous parameter map with the narrowest PDO type.
+     *
+     * @param array<string, int|string|null> $params
+     */
+    private function bindParams(PDOStatement $stmt, array $params): void
+    {
+        foreach ($params as $key => $value) {
+            if ($value === null) {
+                $stmt->bindValue($key, null, PDO::PARAM_NULL);
+            } elseif (is_int($value)) {
+                $stmt->bindValue($key, $value, PDO::PARAM_INT);
+            } else {
+                $stmt->bindValue($key, $value, PDO::PARAM_STR);
+            }
+        }
     }
 
     /**

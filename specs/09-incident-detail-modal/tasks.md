@@ -20,7 +20,7 @@
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existe en `src/Application/DTO/CoordinatorIncidentDetailDto.php` la clase con tipado estricto PHP 8.2+ (`declare(strict_types=1);`), inmutabilidad y método `toArray()` que estructura los bloques `incident`, `location`, `machine`, `technician`, `timeline`, `sla`, `technical_intervention`, `comments`, `refund` y `permissions` conforme al contrato de `plan.md`.
 
-- [ ] **T-IDM-02: Implementar métodos de consulta agregada en `PdoIncidentRepository.php`**
+- [x] **T-IDM-02: Implementar métodos de consulta agregada en `PdoIncidentRepository.php`**
   * **Requisitos:** RF-02, RF-04, RF-05, RF-06, RNF-01, Constitución Art. III
   * **Dependencias:** T-IDM-01
   * **Hecho cuando:** `PdoIncidentRepository` implementa el método `findEnrichedDetailById(int|string $identifier): ?array` que recupera en una única transacción de lectura la información completa de la avería, incluyendo datos de máquina, sede cliente, técnico asignado, piezas solicitadas en pausa (`requested_parts`), piezas sustituidas con costes unitarios congelados (`incident_replaced_parts`), bitácora de comentarios y expediente de reintegro vinculado.
