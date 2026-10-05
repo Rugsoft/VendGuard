@@ -128,7 +128,7 @@
   * **Dependencias:** T-IDM-13, T-IDM-15
   * **Hecho cuando:** La ejecución de `node tests/unit/CoordinatorIncidentDetailModalTest.mjs` pasa al 100% en verde verificando: renderizado de bloques, inhabilitación de acciones operativas en tickets resueltos o cerrados, validación de 20 caracteres en descarte, confirmación de guardián sucio al pulsar ESC y cierre limpio sin borrador.
 
-- [ ] **T-IDM-17: Implementar suite de pruebas de integración HTTP `CoordinatorIncidentDetailApiTest.php`**
+- [x] **T-IDM-17: Implementar suite de pruebas de integración HTTP `CoordinatorIncidentDetailApiTest.php`**
   * **Requisitos:** RF-01 a RF-07, RNF-01, RNF-04, RNF-05
   * **Dependencias:** T-IDM-07, T-IDM-15, T-IDM-20
   * **Hecho cuando:** La ejecución de `php tests/run_all.php` (o test individual contra MariaDB real) pasa al 100% en verde evaluando: endpoint de detalle enriquecido, asignación técnica desde modal, descarte justificado con motivo válido, rechazo con HTTP 422 ante motivos cortos, adición de notas de taller y persistencia de eventos en `audit_log`.
