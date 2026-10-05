@@ -300,3 +300,41 @@ export const MACHINE_TYPE_ICONS = Object.freeze({
 export function isPerishableMachineType(value) {
   return String(value || '').trim().toUpperCase() === 'PERISHABLE_FOOD';
 }
+
+// =====================================================================
+// Incident categories (mirrors IncidentCategory.php)
+// =====================================================================
+
+/** Canonical incident categories, mirroring IncidentCategory.php (English canonical keys). */
+export const INCIDENT_CATEGORIES = Object.freeze([
+  Object.freeze({
+    value: 'TEMPERATURE_COLD',
+    label: 'Temperatura / Pérdida de frío',
+    description: 'Fallo en motor frigorífico o máquina marcando temperatura alta.',
+    icon: '❄️'
+  }),
+  Object.freeze({
+    value: 'PAYMENT_SYSTEM',
+    label: 'Fallo en medios de pago',
+    description: 'No acepta monedas, tarjeta bancaria o billetero atascado.',
+    icon: '💳'
+  }),
+  Object.freeze({
+    value: 'PRODUCT_JAM',
+    label: 'Atasco de producto en espiral',
+    description: 'El motor gira pero el producto queda atrapado en el carril.',
+    icon: '⚠️'
+  }),
+  Object.freeze({
+    value: 'ELECTRICAL_OFF',
+    label: 'Máquina apagada / Sin suministro',
+    description: 'Pantalla apagada, sin iluminación ni respuesta eléctrica.',
+    icon: '🔌'
+  }),
+  Object.freeze({
+    value: 'OTHER',
+    label: 'Otro motivo',
+    description: 'Cualquier otra anomalía no clasificada anteriormente.',
+    icon: '📝'
+  })
+]);

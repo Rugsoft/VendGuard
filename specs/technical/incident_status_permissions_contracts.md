@@ -44,7 +44,8 @@ Todas aceptan el incidente completo (`{ status, assigned_technician_id }`) o el 
 - **`CoordinatorDashboardView.js`** (bandeja): elimina `STATUS_CANONICAL_MAP`, `normalizeStatus` y las 6 listas; importa el módulo y delega `canQuickAssign`/`canQuickCancel` (plantilla intacta: mismos `v-if`), `filteredIncidents`, `metrics`, `slaBreachedIncidents` (delegando en `isCriticalUrgency`), el bloqueo del bulk-assign del mapa y el filtro de incidencias pendientes. El fichero queda **cero literales de estado**.
 - **`CoordinatorIncidentDetailModal.js`** (ficha): sin cambios funcionales; sigue consumiendo `permissions` del backend. Queda documentado en su cabecera que las reglas espejo viven en el módulo utilitario.
 - **`TechnicianRouteView.js`** (ruta móvil del técnico): consume `INCIDENT_STATUSES`, `URGENCY_LEVELS`, `URGENCY_RANKS`, `normalizeUrgency` e `isCriticalUrgency` para métricas de ruta (`routeMetrics`), filtrado y ordenación operacional (`filteredIncidents`), estilos de borde y predicados en plantilla.
-- **`IncidentReportModal.js`**: utiliza `URGENCY_LEVELS.MEDIUM` como fallback tipado ante colisiones 409.
+- **`IncidentReportModal.js`**: utiliza `INCIDENT_CATEGORIES` (5 categorías canónicas coincidentes con `IncidentCategory.php`) y `URGENCY_LEVELS.MEDIUM` como fallback tipado ante colisiones 409.
+- **`QrReportView.js`**: reexporta `INCIDENT_CATEGORIES` del módulo compartido, garantizando cero divergencias entre sede y escaneo público.
 - **`MachineCard.js`** y **`ReopenTicketModal.js`** (sede / portal de ubicación): delegan la comprobación de estado de garantía y elegibilidad de reapertura en `isResolvedStatus` e `INCIDENT_STATUSES.RESOLVED`, eliminando literales duplicados `'RESUELTA' || 'RESOLVED'`.
 
 ## 4. Verificación
@@ -60,6 +61,7 @@ El módulo concentra también los mapas de **presentación** que antes estaban d
 - `STATUS_LABELS` / `URGENCY_LABELS`: etiquetas en español. `URGENCY_LABELS.CRITICAL` conserva la variante corta de insignia ('Crítica'); la etiqueta completa del servidor ('Crítica (Riesgo Alimentario)') sigue llegando vía API donde hay espacio.
 - `BADGE_URGENCY_PALETTE` / `BADGE_STATUS_PALETTE`: paletas semánticas del sistema Docker, byte a byte idénticas a las pre-extracción.
 - `MACHINE_TYPE_LABELS` / `MACHINE_TYPE_ICONS` / `isPerishableMachineType`: vocabulario de tipos de máquina, espejo de `MachineType.php`, con la regla sanitaria de perecederos.
+- `INCIDENT_CATEGORIES`: lista congelada de las 5 categorías canónicas de avería (espejo de `IncidentCategory.php`), consumida por el modal de reporte guiado y por la vista QR pública.
 - `normalizeBadgeKey` / `resolveBadgeConfig(value, type)`: normalización tolerante del badge (NFD sin diacríticos, espacios → guion bajo) y resolución única de paleta + etiqueta en modos `urgency`/`status`/`auto` (precedencia histórica: urgencia primero). Valores desconocidos → `null`: cada consumidor conserva su fallback.
 
 Los componentes `IncidentBadge` y `MachineCard` quedan como puros mapeadores a markup (cero literales de etiquetas; verificado por los grupos 7–9 de la suite). El wrapper `UIComponentsTest.php` apunta ahora sus contratos de diccionario al módulo compartido.

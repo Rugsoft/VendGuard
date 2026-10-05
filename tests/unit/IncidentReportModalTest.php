@@ -40,6 +40,7 @@ $assert = function (string $caseTitle, bool $condition, string $message = '') us
 $baseDir = dirname(__DIR__, 2);
 $previewJsPath = $baseDir . '/public/assets/js/components/ImagePreview.js';
 $reportModalPath = $baseDir . '/public/assets/js/components/IncidentReportModal.js';
+$permissionsPath = $baseDir . '/public/assets/js/utils/IncidentStatusPermissions.js';
 $testMjsPath = $baseDir . '/tests/unit/IncidentReportModalTest.mjs';
 
 // =====================================================================
@@ -60,6 +61,7 @@ if (!$previewExists || !$modalExists) {
 
 $previewContent = (string) file_get_contents($previewJsPath);
 $modalContent = (string) file_get_contents($reportModalPath);
+$sharedPermissionsContent = (string) (file_exists($permissionsPath) ? file_get_contents($permissionsPath) : '');
 
 // =====================================================================
 // GRUPO 2: Contratos de ImagePreview.js (RNF-05)
@@ -86,11 +88,12 @@ $assert("2.3 Limpia la vista previa y emite valor actualizado",
 // =====================================================================
 echo "\n--- Grupo 3: Reporte Guiado y Bloqueo Estricto de Duplicados ---\n";
 
-$assert("3.1 Define las categorías estándar de avería del sistema",
-    strpos($modalContent, 'TEMPERATURE_COLD') !== false &&
-    strpos($modalContent, 'PAYMENT_SYSTEM') !== false &&
-    strpos($modalContent, 'PRODUCT_JAM') !== false &&
-    strpos($modalContent, 'ELECTRICAL_OFF') !== false
+$assert("3.1 Define o importa las categorías estándar de avería del sistema (INCIDENT_CATEGORIES)",
+    (strpos($modalContent, 'INCIDENT_CATEGORIES') !== false || strpos($modalContent, 'TEMPERATURE_COLD') !== false) &&
+    strpos($sharedPermissionsContent, 'TEMPERATURE_COLD') !== false &&
+    strpos($sharedPermissionsContent, 'PAYMENT_SYSTEM') !== false &&
+    strpos($sharedPermissionsContent, 'PRODUCT_JAM') !== false &&
+    strpos($sharedPermissionsContent, 'ELECTRICAL_OFF') !== false
 );
 
 $assert("3.2 Incorpora alerta sanitaria crítica para máquinas PERISHABLE_FOOD con fallo térmico (Art. II)",

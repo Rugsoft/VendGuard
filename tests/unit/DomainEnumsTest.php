@@ -199,6 +199,22 @@ if (count(IncidentCategory::cases()) === 5 && count(UserRole::cases()) === 2) {
     $failures++;
 }
 
+// Paridad estricta de categorías con IncidentStatusPermissions.js
+if (file_exists($sharedModulePath)) {
+    $categoryParityOk = true;
+    foreach (IncidentCategory::cases() as $cat) {
+        if (!str_contains($sharedJs, "value: '{$cat->value}'")) {
+            $categoryParityOk = false;
+        }
+    }
+    if ($categoryParityOk) {
+        echo "      - Paridad estricta IncidentCategory con INCIDENT_CATEGORIES de JS: [OK]\n";
+    } else {
+        echo "      - Paridad IncidentCategory falló en IncidentStatusPermissions.js: [FALLO]\n";
+        $failures++;
+    }
+}
+
 $ticket = TicketCode::generate(42, 2026);
 $ticketOther = new TicketCode('INC-2026-0042');
 $ticketDiff = new TicketCode('INC-2026-0043');

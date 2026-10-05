@@ -40,7 +40,8 @@ import {
   MACHINE_TYPE_ICONS,
   normalizeBadgeKey,
   resolveBadgeConfig,
-  isPerishableMachineType
+  isPerishableMachineType,
+  INCIDENT_CATEGORIES
 } from '../../public/assets/js/utils/IncidentStatusPermissions.js';
 
 let assertions = 0;
@@ -225,6 +226,13 @@ const isPriorityOrderingStrictlyPar = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].ever
 });
 assert('5.6 Strict priority rank isomorphism between UrgencyLevel.php and URGENCY_RANKS',
   phpRankPairs.length === 4 && isPriorityOrderingStrictlyPar);
+
+const phpCategorySource = readFileSync('src/Core/Domain/ValueObject/IncidentCategory.php', 'utf8');
+const phpCategoryCases = [...phpCategorySource.matchAll(/case ([A-Z_]+) = '/g)].map(m => m[1]);
+assert('5.7 Every IncidentCategory case in PHP exists in INCIDENT_CATEGORIES',
+  phpCategoryCases.length === 5 &&
+  INCIDENT_CATEGORIES.length === 5 &&
+  phpCategoryCases.every(c => INCIDENT_CATEGORIES.some(ic => ic.value === c)));
 
 // ---------------------------------------------------------------------
 // TEST GROUP 6: Tray integration (single source in the view)

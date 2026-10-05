@@ -123,7 +123,7 @@ assert('1.5 Valid JPG under 5 MB is accepted and emitted', imageEmits.some(e => 
 // ---------------------------------------------------------------------
 console.log('\n--- Group 2: Guided Report & Food Safety Alert (Art. II) ---');
 
-assert('2.1 IncidentReportModal defines 6 standard categories', IncidentReportModal.computed.categories().length === 6);
+assert('2.1 IncidentReportModal defines 5 standard categories matching IncidentCategory.php', IncidentReportModal.computed.categories().length === 5);
 
 // Helper for modal instance evaluation
 function createModalInstance(machine, initialData = {}) {

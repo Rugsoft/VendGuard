@@ -18,47 +18,7 @@ import { ModalDialog } from './ModalDialog.js';
 import { IncidentBadge } from './IncidentBadge.js';
 import { ImagePreview } from './ImagePreview.js';
 import { QrRefundRequestBlock } from './QrRefundRequestBlock.js';
-import { INCIDENT_STATUSES, URGENCY_LEVELS } from '../utils/IncidentStatusPermissions.js';
-
-// Predefined incident categories per spec
-const INCIDENT_CATEGORIES = [
-  {
-    value: 'TEMPERATURE_COLD',
-    label: 'Temperatura / Pérdida de frío',
-    description: 'Fallo en motor frigorífico o máquina marcando temperatura alta.',
-    icon: '❄️'
-  },
-  {
-    value: 'PAYMENT_SYSTEM',
-    label: 'Fallo en medios de pago',
-    description: 'No acepta monedas, billetes, tarjeta bancaria o billetero atascado.',
-    icon: '💳'
-  },
-  {
-    value: 'PRODUCT_JAM',
-    label: 'Atasco de producto en espiral',
-    description: 'El motor gira pero el producto queda atrapado en el carril.',
-    icon: '⚠️'
-  },
-  {
-    value: 'ELECTRICAL_OFF',
-    label: 'Máquina apagada / Sin suministro',
-    description: 'Pantalla apagada, sin iluminación ni respuesta eléctrica.',
-    icon: '🔌'
-  },
-  {
-    value: 'COSMETIC_LIGHTING',
-    label: 'Iluminación / Desperfecto estético',
-    description: 'Luces LED fundidas o pequeños daños externos sin afectar venta.',
-    icon: '💡'
-  },
-  {
-    value: 'OTHER',
-    label: 'Otro motivo',
-    description: 'Cualquier otra anomalía no clasificada anteriormente.',
-    icon: '📝'
-  }
-];
+import { INCIDENT_CATEGORIES, INCIDENT_STATUSES, URGENCY_LEVELS } from '../utils/IncidentStatusPermissions.js';
 
 export const IncidentReportModal = {
   name: 'IncidentReportModal',

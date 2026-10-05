@@ -18,44 +18,13 @@
  */
 
 import { api } from '../api.js';
-import { INCIDENT_STATUSES } from '../utils/IncidentStatusPermissions.js';
+import { INCIDENT_CATEGORIES, INCIDENT_STATUSES } from '../utils/IncidentStatusPermissions.js';
 import { QrInactiveMachineNotice } from '../components/QrInactiveMachineNotice.js';
 import { QrRefundRequestBlock } from '../components/QrRefundRequestBlock.js';
 import { QrSanitaryQuarantineModal } from '../components/QrSanitaryQuarantineModal.js';
 import { QrSeasonalPauseNotice } from '../components/QrSeasonalPauseNotice.js';
 
-export const INCIDENT_CATEGORIES = [
-  {
-    value: 'TEMPERATURE_COLD',
-    label: 'Temperatura / Pérdida de frío',
-    description: 'Fallo en motor frigorífico o máquina marcando temperatura alta.',
-    icon: '❄️'
-  },
-  {
-    value: 'PAYMENT_SYSTEM',
-    label: 'Fallo en medios de pago',
-    description: 'No acepta monedas, tarjeta bancaria o billetero atascado.',
-    icon: '💳'
-  },
-  {
-    value: 'PRODUCT_JAM',
-    label: 'Atasco de producto en espiral',
-    description: 'El motor gira pero el producto queda atrapado en el carril.',
-    icon: '⚠️'
-  },
-  {
-    value: 'ELECTRICAL_OFF',
-    label: 'Máquina apagada / Sin suministro',
-    description: 'Pantalla apagada, sin iluminación ni respuesta eléctrica.',
-    icon: '🔌'
-  },
-  {
-    value: 'OTHER',
-    label: 'Otro motivo',
-    description: 'Cualquier otra anomalía no clasificada anteriormente.',
-    icon: '📝'
-  }
-];
+export { INCIDENT_CATEGORIES };
 
 export const QrReportView = {
   name: 'QrReportView',
