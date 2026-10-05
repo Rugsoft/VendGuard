@@ -18,6 +18,7 @@ Desktop.ini
 # Artefactos locales de análisis y auditoría
 scratch/
 docs/auditoria_arquitectura.md
+docs/features_pendientes.md
 repomix-output.xml
 
 # Subidas dinámicas de usuarios (conservando directorio)
