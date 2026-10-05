@@ -4,14 +4,18 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
+use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\CoordinatorIncidentDetailService;
 use VendGuard\Core\Domain\Model\Incident;
+use VendGuard\Core\Domain\Model\IncidentComment;
+use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
+use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
@@ -34,13 +38,15 @@ class CoordinatorController
     private LocationRepositoryInterface $locationRepo;
     private MachineRepositoryInterface $machineRepo;
     private CoordinatorIncidentDetailService $incidentDetailService;
+    private AuditLogger $auditLogger;
 
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?UserRepositoryInterface $userRepo = null,
         ?LocationRepositoryInterface $locationRepo = null,
         ?MachineRepositoryInterface $machineRepo = null,
-        ?CoordinatorIncidentDetailService $incidentDetailService = null
+        ?CoordinatorIncidentDetailService $incidentDetailService = null,
+        ?AuditLogger $auditLogger = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->userRepo = $userRepo ?? new PdoUserRepository();
@@ -49,6 +55,7 @@ class CoordinatorController
         // El servicio de detalle se compone sobre el mismo repositorio inyectado para
         // que el endpoint y la lectura agregada compartan una única fuente de datos.
         $this->incidentDetailService = $incidentDetailService ?? new CoordinatorIncidentDetailService($this->incidentRepo);
+        $this->auditLogger = $auditLogger ?? new AuditLogger(new PdoAuditLogRepository());
     }
 
     /**
@@ -429,6 +436,146 @@ class CoordinatorController
     }
 
     /**
+     * POST /api/coordinator/incidents/{id}/comments
+     * 
+     * Añade un comentario o nota interna de taller a la bitácora de una incidencia
+     * desde el modal de detalle (RF-05.3, RNF-04). El texto es obligatorio y debe
+     * alcanzar 5 caracteres reales; `is_internal` decide si la nota es pública
+     * (visible en el portal de sede) o confidencial de taller (Art. V.4).
+     * 
+     * La máquina de estados se respeta en servidor reutilizando la matriz de
+     * permisos del servicio de detalle: los tickets activos admiten comentarios, un
+     * ticket resuelto solo dentro de las 48 horas de garantía (Art. V.6) y los
+     * tickets cerrados o descartados quedan sellados (Art. III).
+     * 
+     * Cada escritura deja constancia inmutable del evento INCIDENT_COMMENT_ADDED en
+     * `audit_log` con el coordinador autenticado (Art. III.3) y responde 201 Created
+     * con el comentario persistido.
+     */
+    public function addComment(Request $request): Response
+    {
+        // 1. Control de acceso antes de leer o persistir nada (Art. V.4)
+        $authFailure = $this->authorizeCoordinator($request);
+        if ($authFailure !== null) {
+            return $authFailure;
+        }
+
+        // 2. Identificador de ruta: ID primario positivo o código de ticket (# opcional)
+        $rawIdentifier = trim((string)($request->getRouteParam('id') ?? ''));
+        $identifier = $this->resolveIncidentIdentifier($rawIdentifier);
+        if ($identifier === null) {
+            return Response::error(
+                'INVALID_INCIDENT_IDENTIFIER',
+                'El identificador de la incidencia no es válido. Se admite un ID numérico positivo o un código de ticket (ej: INC-2026-0001).',
+                400
+            );
+        }
+
+        // 3. Validación temprana del cuerpo: texto obligatorio y mínimo de 5 caracteres
+        $commentText = trim((string)($request->getBodyParam('comment_text') ?? ''));
+        if ($commentText === '') {
+            return Response::error(
+                'MISSING_COMMENT_TEXT',
+                'El texto del comentario es obligatorio (comment_text).',
+                422
+            );
+        }
+        if (mb_strlen($commentText) < 5) {
+            return Response::error(
+                'COMMENT_TOO_SHORT',
+                'El comentario debe contener al menos 5 caracteres descriptivos.',
+                422
+            );
+        }
+
+        // 4. Visibilidad del comentario: público por defecto, booleano estricto si viaja
+        $isInternal = false;
+        if (array_key_exists('is_internal', $request->getParsedBody())) {
+            $parsedFlag = $this->parseBooleanFlag($request->getBodyParam('is_internal'));
+            if ($parsedFlag === null) {
+                return Response::error(
+                    'INVALID_IS_INTERNAL',
+                    'El indicador is_internal debe ser booleano (true/false).',
+                    422
+                );
+            }
+            $isInternal = $parsedFlag;
+        }
+
+        // 5. Recuperar la incidencia referenciada (404 si no existe o está borrada)
+        $incident = is_int($identifier)
+            ? $this->incidentRepo->findById($identifier)
+            : $this->incidentRepo->findByTicketCode(strtoupper(ltrim($identifier, '#')));
+
+        if ($incident === null) {
+            return Response::error(
+                'INCIDENT_NOT_FOUND',
+                "No se encontró ninguna incidencia con identificador '{$rawIdentifier}'.",
+                404
+            );
+        }
+
+        // 6. Ventana de comentarios según la máquina de estados (RF-07.2, Art. V.6)
+        $permissions = $this->incidentDetailService->computePermissions([
+            'status' => $incident->getStatus()->value,
+            'resolved_at' => $incident->getResolvedAt(),
+            'updated_at' => $incident->getUpdatedAt(),
+        ]);
+        if (($permissions['can_add_comment'] ?? false) !== true) {
+            $isSealed = in_array($incident->getStatus(), [IncidentStatus::CLOSED, IncidentStatus::CANCELLED], true);
+            return Response::error(
+                'COMMENT_WINDOW_CLOSED',
+                $isSealed
+                    ? 'La bitácora de una incidencia cerrada o descartada está sellada y no admite nuevos comentarios.'
+                    : 'La ventana de garantía de 48 horas para comentar esta incidencia resuelta ha finalizado.',
+                422
+            );
+        }
+
+        // 7. Persistir el comentario en la bitácora con su bandera de visibilidad
+        $actor = $this->extractActor($request);
+        $comment = new IncidentComment(
+            id: null,
+            incidentId: (int)$incident->getId(),
+            authorType: 'COORDINATOR',
+            userId: $actor['id'],
+            authorName: $actor['name'],
+            commentText: $commentText,
+            photoPath: null,
+            isInternal: $isInternal,
+            createdAt: null,
+            ticketCode: $incident->getTicketCode()
+        );
+
+        $createdComment = $this->incidentRepo->addComment($comment);
+
+        // 8. Evento inmutable en audit_log con el coordinador autenticado (Art. III.3)
+        $this->auditLogger->logTicketEvent(
+            ticketId: (int)$incident->getId(),
+            action: 'INCIDENT_COMMENT_ADDED',
+            user: $actor,
+            previousState: ['status' => $incident->getStatus()->value],
+            newState: [
+                'comment_id' => $createdComment->getId(),
+                'author_type' => 'COORDINATOR',
+                'is_internal' => $createdComment->isInternal(),
+                'comment_text' => $createdComment->getCommentText(),
+            ],
+            metadata: [
+                'ticket_code' => $incident->getTicketCode(),
+                'visibility' => $createdComment->isInternal() ? 'INTERNAL' : 'PUBLIC',
+            ]
+        );
+
+        // 9. Respuesta 201 Created con el comentario anexado a la bitácora
+        return Response::json(
+            $createdComment->toArray(),
+            201,
+            'Comentario añadido correctamente a la bitácora de la incidencia.'
+        );
+    }
+
+    /**
      * 401 sin identidad y 403 sin rol de Coordinación para el detalle integral.
      * 
      * El middleware de la ruta (T-IDM-07) ya exige rol COORDINATOR; esta comprobación
@@ -479,6 +626,67 @@ class CoordinatorController
         }
 
         return null;
+    }
+
+    /**
+     * Interpreta un indicador booleano del cuerpo JSON (true/false, 1/0, 'yes'/'no').
+     * 
+     * Devuelve null cuando el valor recibido no es un booleano reconocible, de modo
+     * que el controlador pueda rechazarlo con 422 en lugar de coercionar en silencio.
+     */
+    private function parseBooleanFlag(mixed $value): ?bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value)) {
+            if ($value == 1) {
+                return true;
+            }
+            if ($value == 0) {
+                return false;
+            }
+            return null;
+        }
+
+        if (is_string($value)) {
+            $normalized = strtolower(trim($value));
+            if (in_array($normalized, ['1', 'true', 'yes'], true)) {
+                return true;
+            }
+            if (in_array($normalized, ['0', 'false', 'no'], true)) {
+                return false;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Identidad del coordinador actuante para la bitácora y la auditoría.
+     *
+     * Usa el usuario autenticado inyectado por el middleware; si no viaja como
+     * entidad, cae a los atributos planos que el propio middleware garantiza.
+     *
+     * @return array{id: int|null, role: string, name: string}
+     */
+    private function extractActor(Request $request): array
+    {
+        $user = $request->getAttribute('authenticated_user');
+        if ($user instanceof User) {
+            return [
+                'id' => $user->getId(),
+                'role' => $user->getRole()->value,
+                'name' => $user->getName(),
+            ];
+        }
+
+        return [
+            'id' => $request->getAttribute('user_id') !== null ? (int)$request->getAttribute('user_id') : null,
+            'role' => (string)$request->getAttribute('user_role', 'COORDINATOR'),
+            'name' => 'Coordinación',
+        ];
     }
 
     // ────────────────────────────────────────────────────────────────────────

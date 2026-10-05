@@ -44,7 +44,7 @@
   * **Dependencias:** T-IDM-03, T-IDM-04
   * **Hecho cuando:** `CoordinatorController::getIncidentDetail(Request $request)` responde `200 OK` con la envolvente canónica JSON y el DTO enriquecido al recibir un ID o código de ticket válido, `404 Not Found` ante tickets inexistentes, y rechaza peticiones no autorizadas.
 
-- [ ] **T-IDM-06: Implementar endpoint `POST /api/coordinator/incidents/{id}/comments` en `CoordinatorController.php`**
+- [x] **T-IDM-06: Implementar endpoint `POST /api/coordinator/incidents/{id}/comments` en `CoordinatorController.php`**
   * **Requisitos:** RF-05, RNF-04, Constitución Art. III y Art. V.4
   * **Dependencias:** T-IDM-05
   * **Hecho cuando:** `CoordinatorController::addComment(Request $request)` valida texto obligatorio ($\ge 5$ caracteres), persiste el comentario con bandera `is_internal` (público vs. nota interna de taller), registra el evento inmutable `INCIDENT_COMMENT_ADDED` en `audit_log` con el usuario coordinador autenticado y responde `201 Created`.
