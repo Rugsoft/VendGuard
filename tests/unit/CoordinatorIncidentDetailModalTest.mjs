@@ -8,6 +8,12 @@
  * 4. It honours the Docker design tokens of docs/design.md (RNF-02): hairlines, canvas, 8px card radius, DM Sans/Inter.
  * 5. It loads the enriched file through GET /api/coordinator/incidents/{id}/detail and guards the loading/error states.
  *
+ * T-IDM-09 extends this suite with the reactive rendering of:
+ * 6. Header ticket code, status/urgency badges and the conditional reopening chip (RF-02.1, RF-02.2).
+ * 7. Reopened banner, location/machine cards with the perishables indicator, description,
+ *    report channel and the expandable photo evidence (RF-02.2 to RF-02.4, Art. II).
+ * 8. Life-cycle timeline and SLA monitor with active countdown or formal historical balance (RF-03).
+ *
  * Dogma Vanilla: pure Node ESM suite, no external dependencies, mirrors the browser module graph.
  * Dualismo Lingüístico: assertions in English, user-facing copy in Spanish.
  */
@@ -65,6 +71,8 @@ function createInstance(overrides = {}) {
     detail: null,
     isLoading: false,
     errorMessage: '',
+    photoZoomOpen: false,
+    photoFailed: false,
     ...overrides,
     $emit: (event, payload) => { emitted.push({ event, payload }); },
     getEmitted: () => emitted
@@ -76,11 +84,20 @@ function createInstance(overrides = {}) {
     instance[methodName] = method.bind(instance);
   }
 
+  // Vue exposes computed properties as instance getters; the harness mirrors that so a
+  // computed can depend on its siblings (e.g. hasReopening reads this.incident).
+  for (const [name, handler] of Object.entries(CoordinatorIncidentDetailModal.computed)) {
+    Object.defineProperty(instance, name, {
+      get: () => handler.call(instance),
+      configurable: true
+    });
+  }
+
   return instance;
 }
 
 console.log('======================================================================');
-console.log(' VendGuard: Frontend Test Suite - CoordinatorIncidentDetailModal (T-IDM-08)');
+console.log(' VendGuard: Frontend Test Suite - CoordinatorIncidentDetailModal (T-IDM-08/T-IDM-09)');
 console.log('======================================================================\n');
 
 // ---------------------------------------------------------------------
@@ -284,12 +301,259 @@ CoordinatorIncidentDetailModal.methods.notifyIncidentUpdated.call(updatedInstanc
 assert('6.4 notifyIncidentUpdated emits incident-updated with the payload',
   updatedInstance.getEmitted().some((e) => e.event === 'incident-updated' && e.payload?.status === 'ASSIGNED'));
 
+// ---------------------------------------------------------------------
+// T-IDM-09 fixtures and helpers
+// ---------------------------------------------------------------------
+
+/** Enriched detail payload mirroring the module 09 contract (plan.md §2.1). */
+const detailFixture = {
+  incident: {
+    id: 142,
+    ticket_code: 'INC-DEMO-0922',
+    status: 'PENDING_PARTS',
+    status_label: 'Pendiente de repuestos',
+    urgency: 'CRITICAL',
+    urgency_label: 'Crítica',
+    is_reopened: true,
+    reopened_at: '2026-10-02 11:30:00',
+    reopened_reason: 'La máquina volvió a fallar 2 horas después de la reparación del técnico.',
+    description: 'El compresor no arranca y los sándwiches superan los 9°C.',
+    report_channel: 'QR_CODE',
+    photo_url: '/uploads/evidence/evidence_142.jpg',
+    created_at: '2026-10-01 08:15:00',
+    updated_at: '2026-10-02 12:00:00'
+  },
+  location: {
+    id: 1,
+    name: 'Hospital del Mar',
+    code: 'SEDE-BCN-01',
+    address: 'Passeig Marítim 25-29, Barcelona',
+    floor_zone: 'Planta 1 - Urgencias',
+    has_physical_reception: true
+  },
+  machine: {
+    id: 10,
+    code: 'VEND-0101',
+    model: 'FAS Perla Fast Cold',
+    manufacturer: null,
+    type: 'PERISHABLE_FOOD',
+    type_label: 'Alimentos perecederos (Sándwiches y lácteos frescos)',
+    has_perishables: true
+  },
+  timeline: {
+    created_at: '2026-10-01 08:15:00',
+    assigned_at: '2026-10-01 08:30:00',
+    started_at: '2026-10-01 09:10:00',
+    paused_at: '2026-10-01 09:45:00',
+    resolved_at: null,
+    closed_at: null,
+    time_to_assign_minutes: 15,
+    time_to_first_response_minutes: 55,
+    total_elapsed_minutes: 1665
+  },
+  sla: {
+    has_sla_limit: true,
+    sla_limit_hours: 4,
+    is_active_countdown: true,
+    is_breached: true,
+    minutes_remaining: -65,
+    historical_balance: 'SLA superado hace 1 h 5 min',
+    sla_target_at: '2026-10-01 12:15:00'
+  },
+  technical_intervention: {
+    pause: { is_paused: true, reason: 'Fallo del compresor.', requested_parts: [] },
+    resolution: { is_resolved: false, diagnosis: null, corrective_action: null, replaced_parts_declared: false, replaced_parts: [], total_parts_cost: 0 },
+    cancellation: { is_cancelled: false, cancelled_at: null, cancelled_by_name: null, reason: null }
+  },
+  comments: [],
+  refund: { has_refund: false },
+  permissions: { can_assign: true, can_reassign: false, can_cancel: true, can_add_comment: true }
+};
+
+function computed(instance, name) {
+  return CoordinatorIncidentDetailModal.computed[name].call(instance);
+}
+
+// ---------------------------------------------------------------------
+// GROUP 7: Header badges, reopened banner and machine/location cards (T-IDM-09)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 7: Header, reopened banner and metadata rendering ---');
+
+const fixtureInstance = createInstance({ detail: detailFixture });
+
+assert('7.1 Computed accessors surface the incident, location, machine, timeline and SLA blocks',
+  computed(fixtureInstance, 'incident') === detailFixture.incident &&
+  computed(fixtureInstance, 'location') === detailFixture.location &&
+  computed(fixtureInstance, 'machine') === detailFixture.machine &&
+  computed(fixtureInstance, 'timeline') === detailFixture.timeline &&
+  computed(fixtureInstance, 'sla') === detailFixture.sla);
+
+assert('7.2 Reopening flag follows the incident contract',
+  computed(fixtureInstance, 'hasReopening') === true &&
+  computed(createInstance({ detail: { incident: { is_reopened: false } } }), 'hasReopening') === false);
+
+assert('7.3 Report channel translates QR_CODE to the citizen QR reading',
+  computed(fixtureInstance, 'reportChannelLabel') === 'Lectura QR Ciudadana');
+assert('7.4 Report channel translates LOCATION_PORTAL to the site portal',
+  computed(createInstance({ detail: { incident: { report_channel: 'LOCATION_PORTAL' } } }), 'reportChannelLabel') === 'Portal de Sede');
+assert('7.5 Unknown report channels fall back to the raw value',
+  computed(createInstance({ detail: { incident: { report_channel: 'UNKNOWN_CHANNEL' } } }), 'reportChannelLabel') === 'UNKNOWN_CHANNEL');
+
+assert('7.6 IncidentBadge is registered and reused for status and urgency',
+  CoordinatorIncidentDetailModal.components.IncidentBadge?.name === 'IncidentBadge' &&
+  template.includes('type="status"') && template.includes('type="urgency"') &&
+  template.includes(':custom-label="incident.status_label"') &&
+  template.includes(':custom-label="incident.urgency_label"'));
+
+assert('7.7 Header renders the status/urgency badges and the reopening chip',
+  template.includes('data-testid="incident-detail-status-badge"') &&
+  template.includes('data-testid="incident-detail-urgency-badge"') &&
+  template.includes('data-testid="incident-detail-reopened-chip"'));
+
+assert('7.8 Reopened banner shows the mandatory client reason and the reopening date',
+  template.includes('data-testid="reopened-banner"') &&
+  template.includes('Reabierta en Garantía') &&
+  template.includes('Motivo aportado por la sede:') &&
+  template.includes('formatDateTime(incident.reopened_at)'));
+
+assert('7.9 Location card exposes site, physical zone, address and reception',
+  template.includes('data-testid="location-name"') &&
+  template.includes('data-testid="location-zone"') &&
+  template.includes('location.floor_zone') && template.includes('location.has_physical_reception'));
+
+assert('7.10 Machine card shows code/model/type and the perishables sanitary indicator (Art. II)',
+  template.includes('data-testid="machine-code"') &&
+  template.includes('data-testid="machine-type"') &&
+  template.includes('data-testid="machine-perishable"') &&
+  template.includes('Alimentos Perecederos'));
+
+assert('7.11 Description block shows the original report, channel and expandable evidence',
+  template.includes('data-testid="incident-description"') &&
+  template.includes('Canal de reporte:') &&
+  template.includes('data-testid="incident-photo-thumb"') &&
+  template.includes('data-testid="photo-zoom"') &&
+  template.includes('@click="openPhotoZoom"'));
+
+assert('7.12 Broken evidence swaps to the styled substitution box',
+  template.includes('data-testid="incident-photo-fallback"') &&
+  template.includes('Evidencia gráfica no disponible') &&
+  template.includes('@error="handlePhotoError"'));
+
+assert('7.13 Header still binds the status label from the server and not a client duplicate',
+  !template.includes('vg-badge-critical') &&
+  !template.includes("label: 'Crítica'"));
+
+// ---------------------------------------------------------------------
+// GROUP 8: Life-cycle timeline and derived times (T-IDM-09)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 8: Timeline milestones and elapsed times ---');
+
+const fixtureMilestones = computed(fixtureInstance, 'timelineMilestones');
+assert('8.1 Milestones follow the life-cycle order with the reopening between resolution and closure',
+  fixtureMilestones.map((m) => m.key).join(',') === 'created,assigned,started,paused,resolved,reopened,closed');
+
+assert('8.2 Paused milestone disappears when the incident never paused',
+  computed(createInstance({
+    detail: { ...detailFixture, incident: { ...detailFixture.incident, is_reopened: false }, timeline: { ...detailFixture.timeline, paused_at: null } }
+  }), 'timelineMilestones').map((m) => m.key).join(',') === 'created,assigned,started,resolved,closed');
+
+assert('8.3 Reopening milestone disappears when the incident was not reopened',
+  computed(createInstance({
+    detail: { ...detailFixture, incident: { ...detailFixture.incident, is_reopened: false } }
+  }), 'timelineMilestones').map((m) => m.key).includes('reopened') === false);
+
+const reopenedMilestone = fixtureMilestones.find((m) => m.key === 'reopened');
+assert('8.4 Reopening milestone carries the date and the client motive',
+  reopenedMilestone.at === '2026-10-02 11:30:00' &&
+  reopenedMilestone.detail.includes('volvió a fallar') && reopenedMilestone.done === true);
+
+const pendingMilestones = computed(createInstance({
+  detail: { ...detailFixture, incident: { ...detailFixture.incident, is_reopened: false }, timeline: { ...detailFixture.timeline, resolved_at: null, closed_at: null } }
+}), 'timelineMilestones');
+assert('8.5 Unreached milestones render as pending instead of disappearing',
+  pendingMilestones.filter((m) => ['resolved', 'closed'].includes(m.key)).every((m) => m.at === null && m.done === false));
+
+const fixtureMetrics = computed(fixtureInstance, 'timelineMetrics');
+assert('8.6 Derived times render assignment, first response and total elapsed',
+  fixtureMetrics.map((m) => `${m.key}:${m.value}`).join('|') === 'assign:15 min|response:55 min|total:27 h 45 min');
+
+assert('8.7 Timeline and metric blocks are present in the template',
+  template.includes('data-testid="incident-timeline"') &&
+  template.includes('data-testid="timeline-metrics"') &&
+  template.includes("formatDateTime(milestone.at)"));
+
+assert('8.8 formatMinutes renders minutes and hours/minutes',
+  CoordinatorIncidentDetailModal.methods.formatMinutes.call(fixtureInstance, 0) === '0 min' &&
+  CoordinatorIncidentDetailModal.methods.formatMinutes.call(fixtureInstance, 59) === '59 min' &&
+  CoordinatorIncidentDetailModal.methods.formatMinutes.call(fixtureInstance, 120) === '2 h 0 min');
+
+assert('8.9 formatDateTime renders DD/MM/YYYY HH:MM without timezone drift',
+  CoordinatorIncidentDetailModal.methods.formatDateTime.call(fixtureInstance, '2026-10-01 08:15:00') === '01/10/2026 08:15' &&
+  CoordinatorIncidentDetailModal.methods.formatDateTime.call(fixtureInstance, null) === '');
+
+// ---------------------------------------------------------------------
+// GROUP 9: SLA monitor and integrated photo viewer (T-IDM-09)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 9: SLA monitor and photo viewer lifecycle ---');
+
+assert('9.1 SLA monitor only exists for perishable machines with a limit',
+  computed(fixtureInstance, 'hasSla') === true &&
+  computed(createInstance({ detail: { sla: { has_sla_limit: false } } }), 'hasSla') === false);
+
+const breachedStyle = computed(fixtureInstance, 'slaMonitorStyle');
+assert('9.2 Breached SLA paints the error tokens',
+  breachedStyle.backgroundColor.includes('--color-error-bg') &&
+  breachedStyle.border.includes('--color-error'));
+
+const fulfilledStyle = computed(createInstance({
+  detail: { sla: { has_sla_limit: true, is_breached: false } }
+}), 'slaMonitorStyle');
+assert('9.3 Fulfilled SLA paints the success tokens',
+  fulfilledStyle.backgroundColor.includes('--color-success-bg') &&
+  fulfilledStyle.border.includes('--color-success'));
+
+assert('9.4 Monitor distinguishes active countdown from formal historical balance',
+  template.includes('data-testid="sla-monitor"') &&
+  template.includes("'Cuenta atrás activa'") && template.includes("'Balance histórico formal'") &&
+  template.includes('sla.historical_balance'));
+
+const viewerInstance = createInstance({ detail: detailFixture });
+CoordinatorIncidentDetailModal.methods.openPhotoZoom.call(viewerInstance);
+assert('9.5 Miniatura click opens the integrated viewer', viewerInstance.photoZoomOpen === true);
+
+CoordinatorIncidentDetailModal.methods.closePhotoZoom.call(viewerInstance);
+assert('9.6 closePhotoZoom hides the viewer', viewerInstance.photoZoomOpen === false);
+
+const brokenViewerInstance = createInstance({ detail: detailFixture, photoFailed: true });
+CoordinatorIncidentDetailModal.methods.openPhotoZoom.call(brokenViewerInstance);
+assert('9.7 Viewer never opens over a broken image', brokenViewerInstance.photoZoomOpen === false);
+
+const errorViewerInstance = createInstance({ detail: detailFixture, photoZoomOpen: true });
+CoordinatorIncidentDetailModal.methods.handlePhotoError.call(errorViewerInstance);
+assert('9.8 Broken image marks the fallback and closes the viewer',
+  errorViewerInstance.photoFailed === true && errorViewerInstance.photoZoomOpen === false);
+
+const noPhotoInstance = createInstance({ detail: { incident: { photo_url: null } } });
+CoordinatorIncidentDetailModal.methods.openPhotoZoom.call(noPhotoInstance);
+assert('9.9 Viewer stays closed when the incident has no evidence', noPhotoInstance.photoZoomOpen === false);
+
+const escapeViewerInstance = createInstance({ detail: detailFixture, photoZoomOpen: true });
+CoordinatorIncidentDetailModal.methods.handleKeyDown.call(escapeViewerInstance, { key: 'Escape' });
+assert('9.10 Escape closes the viewer first and does not close the modal',
+  escapeViewerInstance.photoZoomOpen === false && escapeViewerInstance.getEmitted().length === 0);
+
+api.coordinator.getIncidentDetail = async () => ({ ...detailFixture });
+const refreshInstance = createInstance({ incidentId: 142, photoZoomOpen: true, photoFailed: true });
+await CoordinatorIncidentDetailModal.methods.fetchDetail.call(refreshInstance);
+assert('9.11 Reloading the file resets the transient viewer state',
+  refreshInstance.photoZoomOpen === false && refreshInstance.photoFailed === false);
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 
 if (failures === 0) {
-  console.log(' RESULT: 100% IN GREEN. CONDITION T-IDM-08 FULFILLED SUCCESSFULLY.');
+  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-IDM-08/T-IDM-09 FULFILLED SUCCESSFULLY.');
   console.log('======================================================================\n');
   process.exit(0);
 } else {

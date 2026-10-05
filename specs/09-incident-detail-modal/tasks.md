@@ -63,7 +63,7 @@
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existe en `public/assets/js/components/CoordinatorIncidentDetailModal.js` el componente Vue 3 ESM con props `isOpen` e `incidentId`, emitiendo `close` e `incident-updated`, maquetado con cabecera fija, cuerpo con scroll vertical independiente y pie de acciones conforme a los tokens Docker de `docs/design.md`.
 
-- [ ] **T-IDM-09: Renderizado reactivo de cabecera, metadatos, aviso de reapertura y cronograma de SLA**
+- [x] **T-IDM-09: Renderizado reactivo de cabecera, metadatos, aviso de reapertura y cronograma de SLA**
   * **Requisitos:** RF-02, RF-03, RNF-02
   * **Dependencias:** T-IDM-08
   * **Hecho cuando:** El modal presenta dinámicamente: código de ticket, insignias de estado y urgencia, banner condicional destacado de *"Reabierta en Garantía"* con motivo del cliente, tarjeta de ubicación y máquina con distintivo de perecederos, evidencia gráfica ampliable, línea de tiempo de hitos y tarjeta de monitorización de SLA (con cuenta atrás activa o balance histórico formal cerrado).
