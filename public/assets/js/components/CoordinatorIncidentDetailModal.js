@@ -12,11 +12,13 @@
  *    - Descripción original, canal de reporte y evidencia gráfica ampliable (RF-02.4).
  *    - Cronograma de hitos y monitor de SLA, con cuenta atrás activa o balance histórico
  *      formal cerrado (RF-03.2, RF-03.3).
+ *    - Intervención técnica: pausa con piezas de catálogo y fuera de catálogo justificadas,
+ *      resolución con diagnóstico, acción y costes unitarios congelados, descarte
+ *      justificado y expediente de reintegro con datos enmascarados (RF-04, RF-06, RNF-05).
  * 3. Pie de acciones fijo con el cierre del modal (RNF-03).
  * 
- * Alcance de esta tarea: los bloques de intervención técnica, bitácora y reintegro se
- * renderizan en T-IDM-10 (intervención, repuestos y reintegro), T-IDM-11 (bitácora y
- * formulario en línea) y T-IDM-12 (paneles operativos en línea).
+ * Alcance de esta tarea: la bitácora de comentarios y su formulario en línea se renderizan
+ * en T-IDM-11, y los paneles operativos en línea en T-IDM-12.
  * 
  * Dogma Vanilla: Vue 3 Options API vía ES Modules (cero dependencias externas).
  * Dualismo Lingüístico: código en inglés, interfaz y mensajes en español.
@@ -95,6 +97,67 @@ export const CoordinatorIncidentDetailModal = {
     /** Evaluación de SLA de frío, activa o histórica (RF-03, Art. II). */
     sla() {
       return this.detail?.sla || null;
+    },
+
+    /** Asignación técnica vigente y motivo de reasignación (RF-04.1, Art. V.3). */
+    technician() {
+      return this.detail?.technician || null;
+    },
+
+    /** Bloque completo de intervención técnica (RF-04). */
+    technicalIntervention() {
+      return this.detail?.technical_intervention || null;
+    },
+
+    /** Pausa estructurada por repuestos (RF-04.2). */
+    pause() {
+      return this.technicalIntervention?.pause || null;
+    },
+
+    /** Resolución documentada con costes congelados (RF-04.3). */
+    resolution() {
+      return this.technicalIntervention?.resolution || null;
+    },
+
+    /** Descarte justificado del aviso (RF-04.4, Art. III.2). */
+    cancellation() {
+      return this.technicalIntervention?.cancellation || null;
+    },
+
+    /** Expediente de reintegro vinculado, con datos ya enmascarados en servidor (RF-06). */
+    refund() {
+      return this.detail?.refund || null;
+    },
+
+    /** La sección de reintegro solo existe cuando hay solicitud asociada (RF-06.2). */
+    hasRefund() {
+      return Boolean(this.refund?.has_refund);
+    },
+
+    /** Distingue la resolución con material sustituido del cierre sin coste (caso límite 4). */
+    hasReplacedParts() {
+      return Array.isArray(this.resolution?.replaced_parts) && this.resolution.replaced_parts.length > 0;
+    },
+
+    /** Traducción del dictamen de inspección del monedero (RF-06.1). */
+    refundFindingLabel() {
+      const findings = {
+        FOUND_PHYSICAL: 'Efectivo encontrado físicamente',
+        CONFIRMED_NO_CASH: 'Confirmado sin efectivo',
+        UNVERIFIED_NO_CASH: 'Sin efectivo y sin verificar'
+      };
+      const value = this.refund?.technician_finding || '';
+      return findings[value] || value || 'No registrado';
+    },
+
+    /** Traducción de la custodia física del efectivo recuperado (RF-06.1). */
+    refundCustodyLabel() {
+      const actions = {
+        LEFT_AT_RECEPTION: 'Depositado en conserjería',
+        HELD_FOR_CENTRAL: 'Custodiado para caja central'
+      };
+      const value = this.refund?.cash_custody_action || '';
+      return actions[value] || value;
     },
 
     /** Incidencia reabierta por la sede dentro de la ventana de garantía (RF-02.2). */
@@ -322,6 +385,20 @@ export const CoordinatorIncidentDetailModal = {
         return `${remaining} min`;
       }
       return `${hours} h ${remaining} min`;
+    },
+
+    /**
+     * Formatea un importe monetario congelado como `X.XX €`.
+     */
+    formatCurrency(amount) {
+      if (amount === null || amount === undefined || amount === '') {
+        return '—';
+      }
+      const value = Number(amount);
+      if (!Number.isFinite(value)) {
+        return '—';
+      }
+      return `${value.toFixed(2)} €`;
     },
 
     handleBackdropClick(event) {
@@ -660,15 +737,151 @@ export const CoordinatorIncidentDetailModal = {
                 </div>
               </section>
 
-              <!-- Bloques pendientes de contenido: T-IDM-10 (intervención y reintegro) y T-IDM-11 (bitácora) -->
+              <!-- 5. Intervención Técnica, Repuestos y Descarte (RF-04) -->
               <section
                 class="info-card detail-section"
                 data-testid="section-technical-intervention"
                 style="background-color: #ffffff; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px); padding: 16px 20px; margin-bottom: 16px;"
               >
-                <h3 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 16px; font-weight: 500; color: var(--color-ink, #000000); margin: 0 0 8px;">
+                <h3 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 16px; font-weight: 500; color: var(--color-ink, #000000); margin: 0 0 12px;">
                   🔧 Intervención Técnica
                 </h3>
+
+                <!-- Técnico asignado (RF-04.1) -->
+                <p v-if="technician.assigned" data-testid="technician-summary" style="margin: 0 0 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 14px; color: var(--color-ink-slate, #2c333f);">
+                  <strong>Técnico asignado:</strong> {{ technician.name }}
+                  <span v-if="technician.operator_code">({{ technician.operator_code }})</span>
+                  <span v-if="technician.assigned_at"> · desde {{ formatDateTime(technician.assigned_at) }}</span>
+                  <span v-if="technician.assigned_by_name"> · asignado por {{ technician.assigned_by_name }}</span>
+                </p>
+                <p v-else data-testid="technician-pending" style="margin: 0 0 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 14px; font-weight: 600; color: var(--color-warning-text, #92400e);">
+                  ⏳ Pendiente de asignación técnica.
+                </p>
+                <p v-if="technician.reassignment_reason" style="margin: 0 0 12px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-secondary, #434c5f);">
+                  <strong>Motivo de reasignación:</strong> {{ technician.reassignment_reason }}
+                </p>
+
+                <!-- Pausa técnica por repuestos (RF-04.2) -->
+                <div
+                  v-if="pause.is_paused"
+                  data-testid="pause-block"
+                  style="background-color: var(--color-canvas, #f9fafb); border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-bottom: 12px;"
+                >
+                  <h4 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 14px; font-weight: 500; color: var(--color-ink, #000000); margin: 0 0 6px;">
+                    🧰 Pausa técnica por repuestos
+                  </h4>
+                  <p v-if="pause.reason" style="margin: 0 0 10px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f); line-height: 1.45;">
+                    {{ pause.reason }}
+                  </p>
+                  <ul v-if="pause.requested_parts.length" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px;">
+                    <li
+                      v-for="(part, index) in pause.requested_parts"
+                      :key="index"
+                      data-testid="requested-part"
+                      style="border-top: 1px solid var(--color-hairline, #c8cfda); padding-top: 8px;"
+                    >
+                      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                        <span style="font-family: ui-monospace, monospace; font-size: 11px; background-color: var(--color-surface-1, #efefef); color: var(--color-ink-secondary, #434c5f); border-radius: var(--radius-interactive, 4px); padding: 2px 6px;">
+                          {{ part.part_code }}
+                        </span>
+                        <span style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f);">
+                          {{ part.description }} × <strong>{{ part.quantity }}</strong>
+                        </span>
+                        <span v-if="part.is_out_of_catalog" data-testid="out-of-catalog-chip" style="font-family: var(--font-body, Inter, sans-serif); font-size: 11px; font-weight: 600; background-color: var(--color-warning-bg, #fef8e7); color: var(--color-warning-text, #92400e); border: 1px solid var(--color-warning, #f8b60f); border-radius: var(--radius-interactive, 4px); padding: 2px 6px;">
+                          Fuera de catálogo
+                        </span>
+                      </div>
+                      <p v-if="part.is_out_of_catalog && part.justification" style="margin: 6px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-ink-secondary, #434c5f); line-height: 1.45;">
+                        <strong>Justificación técnica:</strong> {{ part.justification }}
+                      </p>
+                    </li>
+                  </ul>
+                  <p v-else style="margin: 0; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-muted, #6c7e9d);">
+                    Sin piezas registradas durante la pausa.
+                  </p>
+                </div>
+
+                <!-- Resolución técnica documentada (RF-04.3) -->
+                <div
+                  v-if="resolution.is_resolved"
+                  data-testid="resolution-block"
+                  style="background-color: var(--color-success-bg, #eaf8f1); border: 1px solid var(--color-success, #38bd7d); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-bottom: 12px;"
+                >
+                  <h4 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 14px; font-weight: 500; color: var(--color-success-text, #065f46); margin: 0 0 6px;">
+                    ✅ Resolución técnica documentada
+                  </h4>
+                  <p style="margin: 0 0 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f); line-height: 1.45;">
+                    <strong>Diagnóstico:</strong> {{ resolution.diagnosis || 'No registrado' }}
+                  </p>
+                  <p style="margin: 0 0 10px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f); line-height: 1.45;">
+                    <strong>Acción correctiva:</strong> {{ resolution.corrective_action || 'No registrada' }}
+                  </p>
+
+                  <div v-if="hasReplacedParts" data-testid="replaced-parts">
+                    <p style="margin: 0 0 6px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; font-weight: 600; color: var(--color-ink-slate, #2c333f);">
+                      Repuestos sustituidos
+                    </p>
+                    <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px;">
+                      <li
+                        v-for="(part, index) in resolution.replaced_parts"
+                        :key="index"
+                        data-testid="replaced-part"
+                        style="background-color: #ffffff; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 8px 10px;"
+                      >
+                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                          <span style="font-family: ui-monospace, monospace; font-size: 11px; background-color: var(--color-surface-1, #efefef); color: var(--color-ink-secondary, #434c5f); border-radius: var(--radius-interactive, 4px); padding: 2px 6px;">
+                            {{ part.part_code }}
+                          </span>
+                          <span style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f);">
+                            {{ part.description }} × <strong>{{ part.quantity }}</strong>
+                          </span>
+                          <span v-if="part.is_out_of_catalog" style="font-family: var(--font-body, Inter, sans-serif); font-size: 11px; font-weight: 600; background-color: var(--color-warning-bg, #fef8e7); color: var(--color-warning-text, #92400e); border: 1px solid var(--color-warning, #f8b60f); border-radius: var(--radius-interactive, 4px); padding: 2px 6px;">
+                            Fuera de catálogo
+                          </span>
+                          <span v-if="part.destination_label" style="font-family: var(--font-body, Inter, sans-serif); font-size: 11px; font-weight: 600; background-color: var(--color-info-bg, #e5f2fc); color: var(--color-info-text, #003db5); border-radius: var(--radius-interactive, 4px); padding: 2px 6px;">
+                            Destino: {{ part.destination_label }}
+                          </span>
+                        </div>
+                        <div style="margin-top: 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-ink-secondary, #434c5f);">
+                          Coste unitario congelado: {{ formatCurrency(part.unit_cost_snapshot) }} · Total: {{ formatCurrency(part.total_cost_snapshot) }}
+                        </div>
+                        <p v-if="part.notes" style="margin: 4px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-ink-secondary, #434c5f); line-height: 1.45;">
+                          {{ part.notes }}
+                        </p>
+                      </li>
+                    </ul>
+                    <p data-testid="total-parts-cost" style="margin: 8px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f);">
+                      <strong>Coste total de materiales:</strong> {{ formatCurrency(resolution.total_parts_cost) }}
+                    </p>
+                  </div>
+                  <p v-else data-testid="no-replaced-parts" style="margin: 0; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-secondary, #434c5f);">
+                    Sin sustitución de repuestos (intervención sin coste de material).
+                  </p>
+                </div>
+
+                <!-- Descarte justificado (RF-04.4) -->
+                <div
+                  v-if="cancellation.is_cancelled"
+                  data-testid="cancellation-block"
+                  style="background-color: var(--color-error-bg, #fddfdf); border: 1px solid var(--color-error, #ff5757); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-bottom: 12px;"
+                >
+                  <h4 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 14px; font-weight: 500; color: var(--color-error-text, #b91c1c); margin: 0 0 6px;">
+                    🚫 Descarte justificado
+                  </h4>
+                  <p style="margin: 0 0 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f);">
+                    <strong>Fecha:</strong> {{ formatDateTime(cancellation.cancelled_at) }}
+                  </p>
+                  <p v-if="cancellation.cancelled_by_name" style="margin: 0 0 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f);">
+                    <strong>Autorizado por:</strong> {{ cancellation.cancelled_by_name }}
+                  </p>
+                  <p style="margin: 0; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f); line-height: 1.45;">
+                    <strong>Motivo:</strong> {{ cancellation.reason || 'No registrado' }}
+                  </p>
+                </div>
+
+                <p v-if="!pause.is_paused && !resolution.is_resolved && !cancellation.is_cancelled" data-testid="intervention-empty" style="margin: 0; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-muted, #6c7e9d);">
+                  Expediente sin intervención técnica registrada todavía.
+                </p>
               </section>
 
               <section
@@ -681,8 +894,9 @@ export const CoordinatorIncidentDetailModal = {
                 </h3>
               </section>
 
+              <!-- 7. Expediente de Reintegro Vinculado (RF-06, RNF-05) -->
               <section
-                v-if="detail.refund && detail.refund.has_refund"
+                v-if="hasRefund"
                 class="info-card detail-section refund-card"
                 data-testid="section-refund"
                 style="background-color: #ffffff; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px); padding: 16px 20px; margin-bottom: 16px;"
@@ -690,6 +904,36 @@ export const CoordinatorIncidentDetailModal = {
                 <h3 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 16px; font-weight: 500; color: var(--color-ink, #000000); margin: 0 0 8px;">
                   💰 Reintegro Económico Vinculado
                 </h3>
+                <p style="margin: 0 0 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 14px; color: var(--color-ink-slate, #2c333f);">
+                  <strong>Importe reclamado:</strong>
+                  <span data-testid="refund-amount">{{ formatCurrency(refund.amount) }}</span>
+                  <span v-if="refund.compensation_method_label"> · {{ refund.compensation_method_label }}</span>
+                </p>
+                <p style="margin: 0 0 8px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-secondary, #434c5f);">
+                  <strong>Expediente:</strong> {{ refund.claim_code || '—' }} · <strong>Estado:</strong> {{ refund.status_label || '—' }}
+                </p>
+                <p v-if="refund.contact_phone_masked" data-testid="refund-phone" style="margin: 0 0 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f);">
+                  <strong>Teléfono de contacto (enmascarado):</strong> {{ refund.contact_phone_masked }}
+                </p>
+                <p v-if="refund.iban_masked" data-testid="refund-iban" style="margin: 0 0 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f);">
+                  <strong>Cuenta bancaria (enmascarada):</strong> {{ refund.iban_masked }}
+                </p>
+                <p v-if="refund.technician_finding || refund.cash_custody_action" data-testid="refund-inspection" style="margin: 0 0 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f);">
+                  <strong>Inspección del monedero:</strong> {{ refundFindingLabel }}
+                  <span v-if="refundCustodyLabel"> · {{ refundCustodyLabel }}</span>
+                </p>
+                <p v-if="refund.technician_notes" style="margin: 0 0 8px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-secondary, #434c5f); line-height: 1.45;">
+                  <strong>Notas de inspección:</strong> {{ refund.technician_notes }}
+                </p>
+                <a
+                  v-if="refund.refund_tab_url"
+                  class="vg-link"
+                  data-testid="refund-link"
+                  :href="refund.refund_tab_url"
+                  style="display: inline-block; margin-top: 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; font-weight: 600; color: var(--color-primary, #2560ff);"
+                >
+                  Abrir expediente en la bandeja de Reintegros ↗
+                </a>
               </section>
 
               <!-- Visor Integrado de Evidencia Gráfica (RNF-06: sin modales superpuestos) -->

@@ -68,7 +68,7 @@
   * **Dependencias:** T-IDM-08
   * **Hecho cuando:** El modal presenta dinámicamente: código de ticket, insignias de estado y urgencia, banner condicional destacado de *"Reabierta en Garantía"* con motivo del cliente, tarjeta de ubicación y máquina con distintivo de perecederos, evidencia gráfica ampliable, línea de tiempo de hitos y tarjeta de monitorización de SLA (con cuenta atrás activa o balance histórico formal cerrado).
 
-- [ ] **T-IDM-10: Renderizado de intervención técnica, desglose de repuestos y reintegro enmascarado**
+- [x] **T-IDM-10: Renderizado de intervención técnica, desglose de repuestos y reintegro enmascarado**
   * **Requisitos:** RF-04, RF-06, RNF-05
   * **Dependencias:** T-IDM-09
   * **Hecho cuando:** El modal muestra: bloque de pausa técnica con piezas de catálogo o fuera de catálogo justificadas, bloque de resolución con diagnóstico, acción y piezas sustituidas con costes unitarios congelados, y bloque condicional de reintegro económico con datos de pago/contacto enmascarados y enlace a la bandeja de Reintegros.

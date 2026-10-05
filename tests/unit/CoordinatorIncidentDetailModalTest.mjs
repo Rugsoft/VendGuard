@@ -14,6 +14,13 @@
  *    report channel and the expandable photo evidence (RF-02.2 to RF-02.4, Art. II).
  * 8. Life-cycle timeline and SLA monitor with active countdown or formal historical balance (RF-03).
  *
+ * T-IDM-10 extends this suite with:
+ * 9. Technical intervention rendering: pause with catalog and justified out-of-catalog parts,
+ *    resolution with diagnosis/action and replaced parts carrying frozen unit costs, plus the
+ *    justified discard block (RF-04).
+ * 10. Conditional refund case with server-masked payment/contact data and the link to the
+ *     Reintegros board, never exposing unmasked fields (RF-06, RNF-05).
+ *
  * Dogma Vanilla: pure Node ESM suite, no external dependencies, mirrors the browser module graph.
  * Dualismo Lingüístico: assertions in English, user-facing copy in Spanish.
  */
@@ -97,7 +104,7 @@ function createInstance(overrides = {}) {
 }
 
 console.log('======================================================================');
-console.log(' VendGuard: Frontend Test Suite - CoordinatorIncidentDetailModal (T-IDM-08/T-IDM-09)');
+console.log(' VendGuard: Frontend Test Suite - CoordinatorIncidentDetailModal (T-IDM-08/T-IDM-09/T-IDM-10)');
 console.log('======================================================================\n');
 
 // ---------------------------------------------------------------------
@@ -340,6 +347,15 @@ const detailFixture = {
     type_label: 'Alimentos perecederos (Sándwiches y lácteos frescos)',
     has_perishables: true
   },
+  technician: {
+    assigned: true,
+    technician_id: 4,
+    name: 'Jordi Cruz',
+    operator_code: 'OP-BCN-04',
+    assigned_at: '2026-10-01 08:30:00',
+    assigned_by_name: 'Coordinación Central',
+    reassignment_reason: null
+  },
   timeline: {
     created_at: '2026-10-01 08:15:00',
     assigned_at: '2026-10-01 08:30:00',
@@ -548,12 +564,154 @@ await CoordinatorIncidentDetailModal.methods.fetchDetail.call(refreshInstance);
 assert('9.11 Reloading the file resets the transient viewer state',
   refreshInstance.photoZoomOpen === false && refreshInstance.photoFailed === false);
 
+// ---------------------------------------------------------------------
+// T-IDM-10 fixtures: intervention with parts and masked refund
+// ---------------------------------------------------------------------
+
+const interventionFixture = {
+  ...detailFixture,
+  technical_intervention: {
+    pause: {
+      is_paused: true,
+      reason: 'Fallo en condensador de arranque y relé térmico del compresor.',
+      requested_parts: [
+        { spare_part_id: 12, part_code: 'SP-FAS-RELAY-01', description: 'Relé Térmico Compresor 230V', quantity: 1, is_out_of_catalog: false, justification: null },
+        { spare_part_id: null, part_code: 'OUT_OF_CATALOG', description: 'Abrazadera reforzada antivibración para circuito de cobre', quantity: 1, is_out_of_catalog: true, justification: 'Tubería de cobre suelta genera resonancia y fatiga de material en soporte.' }
+      ]
+    },
+    resolution: {
+      is_resolved: true,
+      diagnosis: 'Condensador de arranque agotado y relé térmico disparado.',
+      corrective_action: 'Sustitución del relé y rearme del circuito de frío.',
+      replaced_parts_declared: true,
+      replaced_parts: [
+        { spare_part_id: 12, part_code: 'SP-FAS-RELAY-01', description: 'Relé Térmico Compresor 230V', quantity: 1, is_out_of_catalog: false, unit_cost_snapshot: 18.5, total_cost_snapshot: 18.5, old_part_destination: 'DESGUACE', destination_label: 'Desguace', notes: null },
+        { spare_part_id: null, part_code: 'OUT_OF_CATALOG', description: 'Abrazadera reforzada antivibración', quantity: 2, is_out_of_catalog: true, unit_cost_snapshot: 2.25, total_cost_snapshot: 4.5, old_part_destination: 'TALLER', destination_label: 'Taller', notes: 'Recuperada del circuito antiguo.' }
+      ],
+      total_parts_cost: 23.0
+    },
+    cancellation: { is_cancelled: false, cancelled_at: null, cancelled_by_name: null, reason: null }
+  },
+  refund: {
+    has_refund: true,
+    refund_id: 5,
+    claim_code: 'REF-2026-00005',
+    amount: 2.5,
+    compensation_method: 'BIZUM',
+    compensation_method_label: 'Bizum',
+    status: 'REQUIRES_COORDINATOR_APPROVAL',
+    status_label: 'Pendiente de visto bueno',
+    contact_phone_masked: '6** *** 789',
+    iban_masked: 'ES** **** **** **** **12 3456',
+    technician_finding: 'FOUND_PHYSICAL',
+    cash_custody_action: 'HELD_FOR_CENTRAL',
+    technician_notes: 'Moneda de 2 € y 0,50 € retenidas en el selector mecánico.',
+    refund_tab_url: '#refunds?id=5'
+  }
+};
+
+const interventionInstance = createInstance({ detail: interventionFixture });
+
+// ---------------------------------------------------------------------
+// GROUP 10: Technical intervention, pause, parts and discard (T-IDM-10)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 10: Technical intervention and parts breakdown ---');
+
+assert('10.1 Computed accessors surface technician, intervention, pause, resolution and cancellation',
+  computed(interventionInstance, 'technician') === detailFixture.technician &&
+  computed(interventionInstance, 'technicalIntervention') === interventionFixture.technical_intervention &&
+  computed(interventionInstance, 'pause') === interventionFixture.technical_intervention.pause &&
+  computed(interventionInstance, 'resolution') === interventionFixture.technical_intervention.resolution &&
+  computed(interventionInstance, 'cancellation') === interventionFixture.technical_intervention.cancellation);
+
+assert('10.2 Pause block renders reason, catalog parts and justified out-of-catalog parts',
+  template.includes('data-testid="pause-block"') &&
+  template.includes('data-testid="requested-part"') &&
+  template.includes('data-testid="out-of-catalog-chip"') &&
+  template.includes('{{ pause.reason }}') &&
+  template.includes('part.justification'));
+
+assert('10.3 Pause without registered parts falls back to an explicit notice',
+  template.includes('Sin piezas registradas durante la pausa.'));
+
+assert('10.4 Resolution block shows diagnosis and corrective action (RF-04.3)',
+  template.includes('data-testid="resolution-block"') &&
+  template.includes('Diagnóstico:') && template.includes('Acción correctiva:') &&
+  template.includes('{{ resolution.diagnosis') && template.includes('{{ resolution.corrective_action'));
+
+assert('10.5 Replaced parts carry frozen unit and total costs plus the destination label',
+  template.includes('data-testid="replaced-part"') &&
+  template.includes('{{ formatCurrency(part.unit_cost_snapshot) }}') &&
+  template.includes('{{ formatCurrency(part.total_cost_snapshot) }}') &&
+  template.includes('part.destination_label') &&
+  template.includes('data-testid="total-parts-cost"'));
+
+assert('10.6 hasReplacedParts distinguishes material substitution from a zero-cost fix',
+  computed(interventionInstance, 'hasReplacedParts') === true &&
+  computed(createInstance({
+    detail: { ...interventionFixture, technical_intervention: { ...interventionFixture.technical_intervention, resolution: { ...interventionFixture.technical_intervention.resolution, replaced_parts: [], total_parts_cost: 0 } } }
+  }), 'hasReplacedParts') === false &&
+  template.includes('data-testid="no-replaced-parts"') &&
+  template.includes('Sin sustitución de repuestos (intervención sin coste de material).'));
+
+assert('10.7 Justified discard block (RF-04.4) renders date, authorizer and reason',
+  template.includes('data-testid="cancellation-block"') &&
+  template.includes('formatDateTime(cancellation.cancelled_at)') &&
+  template.includes('cancellation.cancelled_by_name') && template.includes('cancellation.reason') &&
+  template.includes('data-testid="intervention-empty"'));
+
+assert('10.8 formatCurrency renders frozen amounts with two decimals',
+  CoordinatorIncidentDetailModal.methods.formatCurrency.call(interventionInstance, 2.5) === '2.50 €' &&
+  CoordinatorIncidentDetailModal.methods.formatCurrency.call(interventionInstance, 0) === '0.00 €' &&
+  CoordinatorIncidentDetailModal.methods.formatCurrency.call(interventionInstance, null) === '—' &&
+  CoordinatorIncidentDetailModal.methods.formatCurrency.call(interventionInstance, undefined) === '—');
+
+assert('10.9 Technician summary and pending-assignment warning are both wired (RF-04.1)',
+  template.includes('data-testid="technician-summary"') &&
+  template.includes('data-testid="technician-pending"') &&
+  template.includes('technician.reassignment_reason'));
+
+// ---------------------------------------------------------------------
+// GROUP 11: Masked refund case and privacy guard (T-IDM-10, RNF-05)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 11: Masked refund case ---');
+
+assert('11.1 hasRefund follows the refund block contract (RF-06.2)',
+  computed(interventionInstance, 'hasRefund') === true &&
+  computed(createInstance({ detail: { ...detailFixture, refund: { has_refund: false } } }), 'hasRefund') === false);
+
+assert('11.2 Refund card shows amount, claim code, status and masked contact/payment data',
+  template.includes('data-testid="refund-amount"') &&
+  template.includes('{{ formatCurrency(refund.amount) }}') &&
+  template.includes('refund.claim_code') && template.includes('refund.status_label') &&
+  template.includes('data-testid="refund-phone"') && template.includes('refund.contact_phone_masked') &&
+  template.includes('data-testid="refund-iban"') && template.includes('refund.iban_masked'));
+
+assert('11.3 Refund card links to the coordinator Reintegros board',
+  template.includes('data-testid="refund-link"') &&
+  template.includes(':href="refund.refund_tab_url"') &&
+  template.includes('Abrir expediente en la bandeja de Reintegros'));
+
+assert('11.4 Privacy guard: the template never binds an unmasked IBAN or phone field',
+  !/refund\.iban(?!_masked)/.test(template) &&
+  !/refund\.contact_phone(?!_masked)/.test(template) &&
+  !template.includes('bizum'));
+
+assert('11.5 Inspector verdict and custody labels are translated for the coordinator',
+  CoordinatorIncidentDetailModal.computed.refundFindingLabel.call(interventionInstance) === 'Efectivo encontrado físicamente' &&
+  CoordinatorIncidentDetailModal.computed.refundCustodyLabel.call(interventionInstance) === 'Custodiado para caja central' &&
+  CoordinatorIncidentDetailModal.computed.refundFindingLabel.call(createInstance({ detail: { refund: { technician_finding: 'CONFIRMED_NO_CASH' } } })) === 'Confirmado sin efectivo');
+
+assert('11.6 Refund section is conditional on the refund case existing',
+  template.includes('v-if="hasRefund"') &&
+  template.includes('refund.technician_notes'));
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 
 if (failures === 0) {
-  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-IDM-08/T-IDM-09 FULFILLED SUCCESSFULLY.');
+  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-IDM-08/T-IDM-09/T-IDM-10 FULFILLED SUCCESSFULLY.');
   console.log('======================================================================\n');
   process.exit(0);
 } else {
