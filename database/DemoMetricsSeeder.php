@@ -56,6 +56,16 @@ class DemoMetricsSeeder
         $vend0101 = $machMap['VEND-0101'] ?? null; // PERISHABLE_FOOD (Hospital del Mar)
         $vend0102 = $machMap['VEND-0102'] ?? null; // HOT_DRINKS (Hospital del Mar)
         $vend0201 = $machMap['VEND-0201'] ?? null; // COMBO (Torre Glòries)
+        $vend0301 = $machMap['VEND-0301'] ?? null; // PERISHABLE_FOOD (Bellvitge)
+        $vend0401 = $machMap['VEND-0401'] ?? null; // COMBO (WTC)
+        $vend0501 = $machMap['VEND-0501'] ?? null; // SNACKS (Campus Nord)
+        $vend0601 = $machMap['VEND-0601'] ?? null; // COLD_DRINKS (Parc Tecnològic)
+        $vend0701 = $machMap['VEND-0701'] ?? null; // PERISHABLE_FOOD (Badalona Can Ruti)
+        $vend1001 = $machMap['VEND-1001'] ?? null; // HOT_DRINKS (WTC Almeda)
+
+        $carlosId = $userMap['carlos.ruta@vendguard.internal'] ?? null;
+        $elenaId  = $userMap['elena.ruta@vendguard.internal'] ?? null;
+        $marcId   = $userMap['marc.ruta@vendguard.internal'] ?? null;
 
         if ($vend0101 === null || $vend0102 === null || $vend0201 === null) {
             throw new RuntimeException("No se pudieron resolver las máquinas base VEND-0101, VEND-0102, VEND-0201.");
@@ -243,6 +253,116 @@ class DemoMetricsSeeder
                     'action' => 'Sustitución de cable plano ribbon y ajuste de los tornillos de fijación del frontal.',
                     'tech_name' => 'Jordi Técnico Ruta BCN',
                 ],
+
+                // 9. Bellvitge (Hace 8 días): VEND-0301 Alimentos Perecederos resuelto en 1h 50m (cumple SLA 4h)
+                [
+                    'ticket_code' => 'INC-DEMO-0925',
+                    'machine_id' => ($vend0301 !== null ? $vend0301['id'] : $vend0101['id']),
+                    'location_id' => ($vend0301 !== null ? $vend0301['location_id'] : $vend0101['location_id']),
+                    'assigned_technician_id' => ($carlosId ?? $jordiId),
+                    'reporter_name' => 'Carles Coordinador Bellvitge',
+                    'reporter_phone' => '600555666',
+                    'category' => 'TEMPERATURE_COLD',
+                    'description' => 'Aviso en sonda de temperatura: oscilaciones entre 6.8°C y 8.1°C en bandeja inferior de ensaladas.',
+                    'urgency' => 'CRITICAL',
+                    'status' => 'CLOSED',
+                    'created_at' => $ref->modify('-8 days')->setTime(8, 0, 0)->format('Y-m-d H:i:s'),
+                    'assigned_at' => $ref->modify('-8 days')->setTime(8, 15, 0)->format('Y-m-d H:i:s'),
+                    'started_at' => $ref->modify('-8 days')->setTime(8, 40, 0)->format('Y-m-d H:i:s'),
+                    'resolved_at' => $ref->modify('-8 days')->setTime(9, 50, 0)->format('Y-m-d H:i:s'), // 110 min (1h 50m)
+                    'closed_at' => $ref->modify('-6 days')->setTime(9, 50, 0)->format('Y-m-d H:i:s'),
+                    'diagnosis' => 'Obstrucción parcial en el conducto de retorno de aire por envoltorio plástico suelto.',
+                    'action' => 'Retirada de elemento obstructor, limpieza del plenum y verificación de temperatura a 3.8°C constante.',
+                    'tech_name' => 'Carlos Técnico Ruta Sud',
+                ],
+
+                // 10. Campus Nord UPC (Hace 6 días): VEND-0501 Atasco espiral aperitivos resuelto en 2h 15m
+                [
+                    'ticket_code' => 'INC-DEMO-0928',
+                    'machine_id' => ($vend0501 !== null ? $vend0501['id'] : $vend0201['id']),
+                    'location_id' => ($vend0501 !== null ? $vend0501['location_id'] : $vend0201['location_id']),
+                    'assigned_technician_id' => ($elenaId ?? $martaId),
+                    'reporter_name' => 'Albert Campus UPC',
+                    'reporter_phone' => '600999000',
+                    'category' => 'PRODUCT_JAM',
+                    'description' => 'Espirales de barritas energéticas trabadas tras intento de compra.',
+                    'urgency' => 'MEDIUM',
+                    'status' => 'CLOSED',
+                    'created_at' => $ref->modify('-6 days')->setTime(10, 10, 0)->format('Y-m-d H:i:s'),
+                    'assigned_at' => $ref->modify('-6 days')->setTime(10, 25, 0)->format('Y-m-d H:i:s'),
+                    'started_at' => $ref->modify('-6 days')->setTime(11, 0, 0)->format('Y-m-d H:i:s'),
+                    'resolved_at' => $ref->modify('-6 days')->setTime(12, 25, 0)->format('Y-m-d H:i:s'), // 135 min (2h 15m)
+                    'closed_at' => $ref->modify('-4 days')->setTime(12, 25, 0)->format('Y-m-d H:i:s'),
+                    'diagnosis' => 'Desalineación mecánica del microinterruptor de fin de carrera del motor de espiral.',
+                    'action' => 'Ajuste del soporte del motor y test de giro completo con cinco expulsiones correctas.',
+                    'tech_name' => 'Elena Técnica Ruta Nord',
+                ],
+
+                // 11. Parc Tecnològic (Hace 4 días): VEND-0601 Bebidas Frías - fallo datáfono resuelto en 2h 20m
+                [
+                    'ticket_code' => 'INC-DEMO-1001',
+                    'machine_id' => ($vend0601 !== null ? $vend0601['id'] : $vend0201['id']),
+                    'location_id' => ($vend0601 !== null ? $vend0601['location_id'] : $vend0201['location_id']),
+                    'assigned_technician_id' => ($marcId ?? $jordiId),
+                    'reporter_name' => 'Clara Innovació',
+                    'reporter_phone' => '611222333',
+                    'category' => 'PAYMENT_SYSTEM',
+                    'description' => 'El lector contactless muestra error de red móvil y deniega cobro con tarjeta.',
+                    'urgency' => 'HIGH',
+                    'status' => 'CLOSED',
+                    'created_at' => $ref->modify('-4 days')->setTime(12, 0, 0)->format('Y-m-d H:i:s'),
+                    'assigned_at' => $ref->modify('-4 days')->setTime(12, 15, 0)->format('Y-m-d H:i:s'),
+                    'started_at' => $ref->modify('-4 days')->setTime(12, 50, 0)->format('Y-m-d H:i:s'),
+                    'resolved_at' => $ref->modify('-4 days')->setTime(14, 20, 0)->format('Y-m-d H:i:s'), // 140 min (2h 20m)
+                    'closed_at' => $ref->modify('-2 days')->setTime(14, 20, 0)->format('Y-m-d H:i:s'),
+                    'diagnosis' => 'Antena adhesiva 4G suelta dentro del chasis metálico generando apantallamiento de señal.',
+                    'action' => 'Reposicionamiento exterior de la antena magnética y test de cobertura con operadora satisfactorio.',
+                    'tech_name' => 'Marc Técnico Express BCN',
+                ],
+
+                // 12. Badalona Can Ruti (Ayer): VEND-0701 Alimentos Perecederos resuelto en 1h 40m (cumple SLA 4h)
+                [
+                    'ticket_code' => 'INC-DEMO-1003',
+                    'machine_id' => ($vend0701 !== null ? $vend0701['id'] : $vend0101['id']),
+                    'location_id' => ($vend0701 !== null ? $vend0701['location_id'] : $vend0101['location_id']),
+                    'assigned_technician_id' => ($elenaId ?? $martaId),
+                    'reporter_name' => 'Sergi Logística Can Ruti',
+                    'reporter_phone' => '611444555',
+                    'category' => 'TEMPERATURE_COLD',
+                    'description' => 'Aviso sonoro continuo por desvío térmico a 7.5°C en máquina de sándwiches.',
+                    'urgency' => 'CRITICAL',
+                    'status' => 'RESOLVED', // En periodo de garantía de 48h
+                    'created_at' => $ref->modify('-1 day')->setTime(13, 0, 0)->format('Y-m-d H:i:s'),
+                    'assigned_at' => $ref->modify('-1 day')->setTime(13, 10, 0)->format('Y-m-d H:i:s'),
+                    'started_at' => $ref->modify('-1 day')->setTime(13, 30, 0)->format('Y-m-d H:i:s'),
+                    'resolved_at' => $ref->modify('-1 day')->setTime(14, 40, 0)->format('Y-m-d H:i:s'), // 100 min (1h 40m)
+                    'closed_at' => null, // En garantía
+                    'diagnosis' => 'Sensor NTC descalibrado 3.2°C por condensación en el conector estanco.',
+                    'action' => 'Secado con aire caliente, sellado con grasa de silicona dieléctrica y lectura normalizada a 3.4°C.',
+                    'tech_name' => 'Elena Técnica Ruta Nord',
+                ],
+
+                // 13. WTC Almeda Cornellà (Hoy): VEND-1001 Café caliente resuelto en 1h 55m
+                [
+                    'ticket_code' => 'INC-DEMO-1005',
+                    'machine_id' => ($vend1001 !== null ? $vend1001['id'] : $vend0102['id']),
+                    'location_id' => ($vend1001 !== null ? $vend1001['location_id'] : $vend0102['location_id']),
+                    'assigned_technician_id' => ($carlosId ?? $jordiId),
+                    'reporter_name' => 'Mireia Serveis Almeda',
+                    'reporter_phone' => '622111222',
+                    'category' => 'ELECTRICAL_OFF',
+                    'description' => 'Bomba de presión no arranca y caldera bloqueada por error de caudal de agua.',
+                    'urgency' => 'HIGH',
+                    'status' => 'RESOLVED', // En periodo de garantía
+                    'created_at' => $ref->modify('-4 hours')->format('Y-m-d H:i:s'),
+                    'assigned_at' => $ref->modify('-3 hours 45 minutes')->format('Y-m-d H:i:s'),
+                    'started_at' => $ref->modify('-3 hours')->format('Y-m-d H:i:s'),
+                    'resolved_at' => $ref->modify('-2 hours 5 minutes')->format('Y-m-d H:i:s'), // 115 min (1h 55m)
+                    'closed_at' => null,
+                    'diagnosis' => 'Bomba de vibración 230V gripada por calcificación en válvula antirretorno.',
+                    'action' => 'Sustitución de bomba de presión y descalcificación preventiva de circuito.',
+                    'tech_name' => 'Carlos Técnico Ruta Sud',
+                ],
             ];
 
             $insertIncidentStmt = $this->pdo->prepare("
@@ -271,6 +391,7 @@ class DemoMetricsSeeder
                     `closed_at` = VALUES(`closed_at`),
                     `resolution_diagnosis` = VALUES(`resolution_diagnosis`),
                     `resolution_action` = VALUES(`resolution_action`),
+                    `created_at` = VALUES(`created_at`),
                     `updated_at` = VALUES(`updated_at`),
                     `deleted_at` = NULL
             ");
