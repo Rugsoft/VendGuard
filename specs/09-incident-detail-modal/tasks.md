@@ -114,7 +114,7 @@
   * **Dependencias:** T-IDM-07
   * **Hecho cuando:** `CoordinatorController::cancelIncident()` rechaza con `422` (`CANCELLATION_REASON_TOO_SHORT`) cualquier `cancellation_reason` con menos de 20 caracteres reales tras `trim()` (multibyte-safe), conserva la respuesta `200` con motivos válidos y la suite PHP de cancelación pasa al 100% en verde con el nuevo caso límite.
 
-- [ ] **T-IDM-21: Soportar la reasignación técnica en línea con motivo obligatorio y evento INCIDENT_REASSIGNED**
+- [x] **T-IDM-21: Soportar la reasignación técnica en línea con motivo obligatorio y evento INCIDENT_REASSIGNED**
   * **Requisitos:** RF-07.3, RNF-04, Constitución Art. III.3 y Art. V.3
   * **Dependencias:** T-IDM-20
   * **Hecho cuando:** `PATCH /api/coordinator/incidents/{id}/assign` admite reasignaciones desde `ASSIGNED`, `IN_PROGRESS` y `PENDING_PARTS` exigiendo un motivo de reasignación ($\ge 10$ caracteres, `422` si falta), mantiene un único técnico responsable activo (Art. V.3), registra el evento inmutable `INCIDENT_REASSIGNED` en `audit_log`, y el modal vuelve a mostrar el botón "Reasignar Técnico" con su campo de motivo obligatorio operativo.

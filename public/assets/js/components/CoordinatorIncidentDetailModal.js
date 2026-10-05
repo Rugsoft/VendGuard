@@ -79,6 +79,8 @@ export const CoordinatorIncidentDetailModal = {
       selectedTechnicianId: null,
       isSubmittingAssign: false,
       assignErrorMessage: '',
+      /** Borrador del motivo de reasignación, obligatorio con ≥ 10 caracteres reales (RF-07.3). */
+      reassignReason: '',
       /** Borrador del motivo de descarte y su envío lógico (Art. III.2, RF-07.4). */
       cancelReason: '',
       isSubmittingCancel: false,
@@ -198,6 +200,38 @@ export const CoordinatorIncidentDetailModal = {
     /** Acción directa de asignación habilitada por la máquina de estados (RF-07.1). */
     canAssign() {
       return Boolean(this.detail?.permissions?.can_assign);
+    },
+
+    /** El aviso ya tiene un técnico responsable vigente: el panel cambia de profesional (RF-07.3). */
+    isReassign() {
+      return Boolean(this.technician?.assigned);
+    },
+
+    /** Acción directa de reasignación habilitada por la máquina de estados (RF-07.1, RF-07.3). */
+    canReassign() {
+      return Boolean(this.detail?.permissions?.can_reassign);
+    },
+
+    /**
+     * Técnicos ofrecidos en el selector. Al reasignar se excluye al responsable actual:
+     * la incidencia conserva un único técnico activo simultáneo (Art. V.3).
+     */
+    reassignableTechnicians() {
+      if (!this.isReassign) {
+        return this.technicians;
+      }
+      const currentId = this.technician?.technician_id;
+      return this.technicians.filter((technician) => technician.id !== currentId);
+    },
+
+    /** Contador de caracteres reales (puntos de código Unicode) del motivo de reasignación. */
+    reassignReasonLength() {
+      return Array.from(String(this.reassignReason || '').trim()).length;
+    },
+
+    /** La reasignación exige un motivo justificado de al menos 10 caracteres reales (RF-07.3). */
+    isReassignReasonValid() {
+      return !this.isReassign || this.reassignReasonLength >= 10;
     },
 
     /** Acción directa de descarte habilitada mientras el ticket siga activo (RF-07.1). */
@@ -545,6 +579,11 @@ export const CoordinatorIncidentDetailModal = {
       this.isCancelPanelOpen = false;
       this.isAssignPanelOpen = true;
       this.assignErrorMessage = '';
+      this.reassignReason = '';
+      // El responsable vigente nunca es destino válido de la reasignación (Art. V.3).
+      if (this.isReassign && this.selectedTechnicianId === this.technician?.technician_id) {
+        this.selectedTechnicianId = null;
+      }
       if (!this.techniciansLoaded) {
         this.loadTechnicians();
       }
@@ -553,6 +592,7 @@ export const CoordinatorIncidentDetailModal = {
     closeAssignPanel() {
       this.isAssignPanelOpen = false;
       this.assignErrorMessage = '';
+      this.reassignReason = '';
     },
 
     /**
@@ -582,8 +622,12 @@ export const CoordinatorIncidentDetailModal = {
         const list = Array.isArray(response) ? response : (Array.isArray(response?.data) ? response.data : []);
         this.technicians = list;
         this.techniciansLoaded = true;
-        if (!this.selectedTechnicianId && list.length > 0) {
-          this.selectedTechnicianId = list[0].id;
+        if (!this.selectedTechnicianId) {
+          // Al reasignar se preselecciona un profesional distinto del responsable actual.
+          const candidates = this.reassignableTechnicians;
+          if (candidates.length > 0) {
+            this.selectedTechnicianId = candidates[0].id;
+          }
         }
       } catch (err) {
         this.techniciansErrorMessage = err?.message || 'No se pudieron cargar los técnicos activos.';
@@ -599,19 +643,36 @@ export const CoordinatorIncidentDetailModal = {
       if (!this.selectedTechnicianId) {
         return;
       }
+      // El motivo de reasignación se valida en cliente antes de llamar al servidor (RF-07.3).
+      if (!this.isReassignReasonValid) {
+        this.assignErrorMessage = 'El motivo de la reasignación debe contener al menos 10 caracteres.';
+        return;
+      }
       const incidentId = this.actionableIncidentId;
       if (incidentId === null || incidentId === undefined || incidentId === '') {
         return;
       }
 
+      // El flujo se captura antes de enviar: refrescar la ficha puede cambiar el bloque
+      // de técnico y el motivo del evento debe reflejar la acción realmente ejecutada.
+      const isReassignment = this.isReassign;
+
       this.isSubmittingAssign = true;
       this.assignErrorMessage = '';
 
       try {
-        await api.coordinator.assignTechnician(incidentId, this.selectedTechnicianId);
+        await api.coordinator.assignTechnician(
+          incidentId,
+          this.selectedTechnicianId,
+          null,
+          null,
+          isReassignment ? String(this.reassignReason).trim() : null
+        );
         this.isAssignPanelOpen = false;
         this.selectedTechnicianId = null;
+        this.reassignReason = '';
         await this.fetchDetail();
+        // El padre refresca la fila del aviso con el mismo evento para asignar y reasignar.
         this.notifyIncidentUpdated({ reason: 'assign' });
       } catch (err) {
         this.assignErrorMessage = err?.message || 'No se pudo registrar la asignación técnica.';
@@ -1277,10 +1338,10 @@ export const CoordinatorIncidentDetailModal = {
                 style="background-color: #ffffff; border: 1px solid var(--color-primary, #2560ff); border-radius: var(--radius-card, 8px); padding: 16px 20px; margin-bottom: 16px;"
               >
                 <h4 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 14px; font-weight: 500; color: var(--color-ink, #000000); margin: 0 0 10px;">
-                  👷 Asignar Técnico
+                  {{ isReassign ? '🔁 Reasignar Técnico' : '👷 Asignar Técnico' }}
                 </h4>
                 <label for="assign-technician-select" style="display: block; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-ink-secondary, #434c5f); margin-bottom: 4px;">
-                  Técnico de ruta activo
+                  {{ isReassign ? 'Nuevo técnico responsable' : 'Técnico de ruta activo' }}
                 </label>
                 <select
                   id="assign-technician-select"
@@ -1291,7 +1352,7 @@ export const CoordinatorIncidentDetailModal = {
                   style="width: 100%; max-width: 420px; box-sizing: border-box; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f); background-color: var(--color-canvas, #f9fafb); border: 1px solid var(--color-hairline-soft, #a9b4c6); border-radius: var(--radius-interactive, 4px); padding: 8px 12px;"
                 >
                   <option :value="null">Selecciona un técnico…</option>
-                  <option v-for="technician in technicians" :key="technician.id" :value="technician.id">
+                  <option v-for="technician in reassignableTechnicians" :key="technician.id" :value="technician.id">
                     {{ technician.name }} ({{ technician.active_assigned_incidents_count }} avisos activos)
                   </option>
                 </select>
@@ -1301,6 +1362,30 @@ export const CoordinatorIncidentDetailModal = {
                 <p v-if="techniciansErrorMessage" data-testid="assign-technicians-error" style="margin: 6px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-error-text, #b91c1c);">
                   {{ techniciansErrorMessage }}
                 </p>
+                <p v-if="isReassign && reassignableTechnicians.length === 0" data-testid="assign-no-alternatives" style="margin: 6px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-warning-text, #92400e);">
+                  No hay otro técnico activo disponible para reasignar este aviso.
+                </p>
+                <div v-if="isReassign" style="margin-top: 12px;">
+                  <label for="assign-reason-input" style="display: block; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-ink-secondary, #434c5f); margin-bottom: 4px;">
+                    Motivo obligatorio de la reasignación
+                  </label>
+                  <textarea
+                    id="assign-reason-input"
+                    v-model="reassignReason"
+                    class="vg-textarea"
+                    data-testid="assign-reason"
+                    rows="3"
+                    placeholder="Explica por qué cambia el técnico responsable (mínimo 10 caracteres)..."
+                    :disabled="isSubmittingAssign"
+                    style="width: 100%; box-sizing: border-box; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f); background-color: var(--color-canvas, #f9fafb); border: 1px solid var(--color-hairline-soft, #a9b4c6); border-radius: var(--radius-interactive, 4px); padding: 8px 12px; resize: vertical;"
+                  ></textarea>
+                  <span
+                    data-testid="assign-reason-counter"
+                    :style="{ fontFamily: 'var(--font-body, Inter, sans-serif)', fontSize: '12px', fontWeight: '600', color: isReassignReasonValid ? 'var(--color-success-text, #065f46)' : 'var(--color-ink-muted, #6c7e9d)' }"
+                  >
+                    {{ reassignReasonLength }} / 10 caracteres
+                  </span>
+                </div>
                 <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
                   <button
                     type="button"
@@ -1315,10 +1400,10 @@ export const CoordinatorIncidentDetailModal = {
                     type="button"
                     class="vg-btn vg-btn-primary"
                     data-testid="assign-confirm"
-                    :disabled="isSubmittingAssign || !selectedTechnicianId"
+                    :disabled="isSubmittingAssign || !selectedTechnicianId || !isReassignReasonValid"
                     @click="confirmAssign"
                   >
-                    {{ isSubmittingAssign ? 'Asignando…' : 'Confirmar Asignación' }}
+                    {{ isSubmittingAssign ? (isReassign ? 'Reasignando…' : 'Asignando…') : (isReassign ? 'Confirmar Reasignación' : 'Confirmar Asignación') }}
                   </button>
                 </div>
                 <p v-if="assignErrorMessage" data-testid="assign-error" role="alert" style="margin: 8px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-error-text, #b91c1c);">
@@ -1438,8 +1523,15 @@ export const CoordinatorIncidentDetailModal = {
               >
                 Descartar Incidencia
               </button>
-              <!-- "Reasignar Técnico" se habilitará cuando el backend de reasignación
-                   (tarea T-IDM-21) acepte el cambio de técnico con motivo obligatorio. -->
+              <button
+                v-if="canReassign && !isAssignPanelOpen"
+                type="button"
+                class="vg-btn vg-btn-primary"
+                data-testid="incident-detail-reassign-trigger"
+                @click="openAssignPanel"
+              >
+                Reasignar Técnico
+              </button>
             </div>
             <button
               type="button"

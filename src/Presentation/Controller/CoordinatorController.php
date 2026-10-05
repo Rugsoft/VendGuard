@@ -39,6 +39,21 @@ class CoordinatorController
      */
     private const MIN_CANCELLATION_REASON_LENGTH = 20;
 
+    /**
+     * Longitud mínima del motivo de reasignación exigida por RF-07.3 (Art. III.3):
+     * 10 caracteres reales contados sobre el texto ya recortado.
+     */
+    private const MIN_REASSIGNMENT_REASON_LENGTH = 10;
+
+    /**
+     * Estados con técnico responsable vigente que admiten cambio de profesional (RF-07.3).
+     */
+    private const REASSIGNMENT_STATUSES = [
+        IncidentStatus::ASSIGNED,
+        IncidentStatus::IN_PROGRESS,
+        IncidentStatus::PENDING_PARTS,
+    ];
+
     private IncidentRepositoryInterface $incidentRepo;
     private UserRepositoryInterface $userRepo;
     private LocationRepositoryInterface $locationRepo;
@@ -242,6 +257,25 @@ class CoordinatorController
      * Asocia un técnico de campo único a la incidencia (EARS 5.1, 5.2).
      * Permite la reclasificación de urgencia con motivo obligatorio (EARS 5.3).
      * Rechaza la petición si no se proporciona un técnico válido (EARS 5.4).
+     * 
+     * Desde RF-07.3 el endpoint atiende también la reasignación en línea que ofrece el
+     * modal de detalle: un aviso con responsable vigente (`ASSIGNED`, `IN_PROGRESS` o
+     * `PENDING_PARTS`) admite el cambio de profesional siempre que viaje un motivo
+     * justificado de al menos 10 caracteres reales —clave canónica
+     * `reassignment_reason` o alias `reason` del plan §2.2—, medido con `mb_strlen()`
+     * sobre el texto recortado. La incidencia mantiene un único técnico responsable
+     * simultáneo (Art. V.3) y el cambio queda en el historial inmutable y en `audit_log`
+     * con el evento `INCIDENT_REASSIGNED` (la asignación inicial emite
+     * `INCIDENT_ASSIGNED`).
+     * 
+     * Respuestas: 200 OK con el ticket asignado; 400 si el ID de ruta no es numérico;
+     * 422 `MISSING_TECHNICIAN_ID` sin técnico válido; 422 `INVALID_URGENCY` o
+     * `URGENCY_REASON_REQUIRED` en la reclasificación de urgencia; 404 si la incidencia
+     * no existe; 422 `TECHNICIAN_NOT_FOUND` si el profesional no está activo con rol
+     * TECHNICIAN; 422 `INVALID_STATUS_FOR_ASSIGNMENT` si el estado no admite la acción;
+     * 422 `MISSING_REASSIGNMENT_REASON` o `REASSIGNMENT_REASON_TOO_SHORT` cuando la
+     * reasignación carece de motivo válido; 422 `TECHNICIAN_ALREADY_ASSIGNED` si el
+     * destino es el responsable actual; 500 `ASSIGNMENT_FAILED` ante un fallo inesperado.
      */
     public function assignTechnician(Request $request): Response
     {
@@ -273,6 +307,11 @@ class CoordinatorController
             }
         }
 
+        // 3.b Motivo de la reasignación (RF-07.3): clave canónica `reassignment_reason`
+        //     con el alias compacto `reason` publicado en el plan técnico (§2.2).
+        $rawReassignmentReason = $body['reassignment_reason'] ?? $body['reason'] ?? null;
+        $reassignmentReason = $rawReassignmentReason !== null ? trim((string)$rawReassignmentReason) : '';
+
         // 4. Verificar que la incidencia exista
         $incident = $this->incidentRepo->findById($incidentId);
         if ($incident === null) {
@@ -285,16 +324,48 @@ class CoordinatorController
             return Response::error('TECHNICIAN_NOT_FOUND', "No se encontró ningún técnico de ruta activo con ID {$technicianId}.", 422);
         }
 
-        // 6. Validar estado actual: solo REGISTERED o REOPENED (EARS 5.1)
-        $allowedStatuses = [IncidentStatus::REGISTERED, IncidentStatus::REOPENED];
-        if (!in_array($incident->getStatus(), $allowedStatuses, true)) {
-            return Response::error('INVALID_STATUS_FOR_ASSIGNMENT', "Solo se pueden asignar incidencias en estado REGISTERED o REOPENED. Estado actual: {$incident->getStatus()->value}.", 422);
+        // 6. Validar estado actual: asignación inicial desde REGISTERED/REOPENED y
+        //    reasignación desde los estados con responsable vigente (EARS 5.1, RF-07.3)
+        $isReassignment = in_array($incident->getStatus(), self::REASSIGNMENT_STATUSES, true);
+        if (!$isReassignment && !in_array($incident->getStatus(), [IncidentStatus::REGISTERED, IncidentStatus::REOPENED], true)) {
+            return Response::error(
+                'INVALID_STATUS_FOR_ASSIGNMENT',
+                "Solo se pueden asignar incidencias en estado REGISTERED o REOPENED, o reasignar las que están en ASSIGNED, IN_PROGRESS o PENDING_PARTS. Estado actual: {$incident->getStatus()->value}.",
+                422
+            );
         }
 
-        // 7. ID del coordinador autenticado (para auditoría)
+        // 7. La reasignación exige motivo justificado de ≥ 10 caracteres reales y un
+        //    destino distinto: la incidencia conserva un único responsable activo
+        //    (RF-07.3, Art. V.3) y no se registran eventos de reasignación ficticios (Art. III.3).
+        if ($isReassignment) {
+            if ($reassignmentReason === '') {
+                return Response::error(
+                    'MISSING_REASSIGNMENT_REASON',
+                    'La reasignación técnica exige un motivo justificado (reassignment_reason obligatorio).',
+                    422
+                );
+            }
+            if (mb_strlen($reassignmentReason, 'UTF-8') < self::MIN_REASSIGNMENT_REASON_LENGTH) {
+                return Response::error(
+                    'REASSIGNMENT_REASON_TOO_SHORT',
+                    'El motivo de la reasignación debe contener al menos 10 caracteres reales.',
+                    422
+                );
+            }
+            if ($incident->getAssignedTechnicianId() === $technicianId) {
+                return Response::error(
+                    'TECHNICIAN_ALREADY_ASSIGNED',
+                    'El técnico indicado ya es el responsable activo de esta incidencia; seleccione un profesional distinto para reasignar.',
+                    422
+                );
+            }
+        }
+
+        // 8. ID del coordinador autenticado (para auditoría)
         $coordinatorId = $request->getAttribute('user_id');
 
-        // 8. Realizar la asignación transaccional en el repositorio
+        // 9. Realizar la asignación o reasignación transaccional en el repositorio
         try {
             $assigned = $this->incidentRepo->assign(
                 incidentId: $incidentId,
@@ -302,6 +373,7 @@ class CoordinatorController
                 coordinatorId: $coordinatorId !== null ? (int)$coordinatorId : null,
                 urgencyOverride: ($urgencyOverride !== null && $urgencyOverride !== '') ? $urgencyOverride : null,
                 urgencyReason: ($urgencyReason !== null && $urgencyReason !== '') ? $urgencyReason : null,
+                reassignmentReason: $isReassignment ? $reassignmentReason : null,
             );
         } catch (\VendGuard\Core\Domain\Exception\InvalidTransitionException $e) {
             return Response::error('INVALID_STATUS_FOR_ASSIGNMENT', $e->getMessage(), 422);
@@ -309,8 +381,37 @@ class CoordinatorController
             return Response::error('ASSIGNMENT_FAILED', $e->getMessage(), 500);
         }
 
+        // 10. Evento inmutable en `audit_log` con el coordinador autenticado (RNF-04,
+        //     plan §2.2): INCIDENT_REASSIGNED cuando cambia el responsable e
+        //     INCIDENT_ASSIGNED en la asignación inicial del aviso.
+        $actor = $this->extractActor($request);
+        $this->auditLogger->logTicketEvent(
+            ticketId: $incidentId,
+            action: $isReassignment ? 'INCIDENT_REASSIGNED' : 'INCIDENT_ASSIGNED',
+            user: $actor,
+            previousState: [
+                'status' => $incident->getStatus()->value,
+                'assigned_technician_id' => $incident->getAssignedTechnicianId(),
+            ],
+            newState: $isReassignment
+                ? [
+                    'status' => $assigned->getStatus()->value,
+                    'assigned_technician_id' => $assigned->getAssignedTechnicianId(),
+                    'reassignment_reason' => $reassignmentReason,
+                ]
+                : [
+                    'status' => $assigned->getStatus()->value,
+                    'assigned_technician_id' => $assigned->getAssignedTechnicianId(),
+                ],
+            metadata: $isReassignment
+                ? [
+                    'previous_technician_id' => $incident->getAssignedTechnicianId(),
+                    'new_technician_id' => $technicianId,
+                ]
+                : null
+        );
 
-        // 9. Respuesta exitosa con datos esenciales de la incidencia asignada (contrato 4.2)
+        // 11. Respuesta exitosa con datos esenciales de la incidencia asignada (contrato 4.2)
         return Response::json([
             'id'                     => $assigned->getId(),
             'status'                 => $assigned->getStatus()->value,

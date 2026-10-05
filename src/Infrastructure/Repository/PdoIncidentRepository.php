@@ -993,13 +993,23 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
     /**
      * Asigna un técnico de campo a la incidencia y transiciona al estado ASSIGNED.
      * Permite reclasificar la urgencia con motivo auditado (RF-05 / EARS 5.1, 5.2, 5.3).
+     *
+     * Desde RF-07.3 el método también soporta la reasignación de un aviso con técnico
+     * responsable vigente (ASSIGNED, IN_PROGRESS, PENDING_PARTS): el profesional se
+     * sustituye manteniendo un único asignado activo (EARS 5.2, Art. V.3) y el motivo
+     * justificado viaja a la nota del historial inmutable (Art. III.3). En la
+     * reasignación NO se retrocede el estado operativo ni se reescribe `assigned_at`:
+     * el hito oficial de asignación se conserva para no falsear los tiempos de
+     * respuesta ya auditados, y el instante del cambio queda fechado por la propia
+     * fila de historial (Art. III.1).
      */
     public function assign(
         int $incidentId,
         int $technicianId,
         ?int $coordinatorId = null,
         ?string $urgencyOverride = null,
-        ?string $urgencyReason = null
+        ?string $urgencyReason = null,
+        ?string $reassignmentReason = null
     ): Incident {
         $isOwnTransaction = !$this->pdo->inTransaction();
         if ($isOwnTransaction) {
@@ -1012,14 +1022,28 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
                 throw new DomainException("No se encontró ninguna incidencia con ID {$incidentId}.");
             }
 
-            // 1. Validar transición legal: solo REGISTERED o REOPENED admiten asignación (EARS 5.1)
-            $allowedStatuses = [IncidentStatus::REGISTERED, IncidentStatus::REOPENED];
-            if (!in_array($incident->getStatus(), $allowedStatuses, true)) {
+            // 1. Validar transición legal (EARS 5.1, RF-07.3): REGISTERED/REOPENED admiten
+            //    la asignación inicial y los estados con responsable vigente admiten el
+            //    cambio de técnico sin retroceder el estado operativo.
+            $assignmentStatuses = [IncidentStatus::REGISTERED, IncidentStatus::REOPENED];
+            $reassignmentStatuses = [IncidentStatus::ASSIGNED, IncidentStatus::IN_PROGRESS, IncidentStatus::PENDING_PARTS];
+            $isReassignment = in_array($incident->getStatus(), $reassignmentStatuses, true);
+            if (!$isReassignment && !in_array($incident->getStatus(), $assignmentStatuses, true)) {
                 throw new InvalidTransitionException(
-                    "Solo las incidencias en estado REGISTRADA o REABIERTA pueden ser asignadas. Estado actual: {$incident->getStatus()->value}.",
+                    "Solo las incidencias activas (REGISTRADA, REABIERTA, ASIGNADA, EN CURSO o PENDIENTE DE REPUESTOS) admiten asignación técnica. Estado actual: {$incident->getStatus()->value}.",
                     $incident->getStatus(),
                     IncidentStatus::ASSIGNED
                 );
+            }
+
+            // 1.b Guardas internas de la reasignación (defensa en profundidad: la capa de
+            //     presentación ya responde 422 antes de llegar aquí).
+            $cleanReassignmentReason = $reassignmentReason !== null ? trim($reassignmentReason) : '';
+            if ($isReassignment && $cleanReassignmentReason === '') {
+                throw new DomainException('La reasignación técnica exige un motivo justificado.');
+            }
+            if ($isReassignment && $incident->getAssignedTechnicianId() === $technicianId) {
+                throw new DomainException('El técnico indicado ya es el responsable activo de la incidencia.');
             }
 
             // 2. Resolver urgencia final (posible reclasificación coordinador, EARS 5.3)
@@ -1033,13 +1057,15 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
                 }
             }
 
-            // 3. Actualizar incidencia: estado ASSIGNED, técnico asociado, fecha de asignación, urgencia final
+            // 3. Actualizar incidencia: técnico asociado y urgencia final. En la asignación
+            //    inicial se fija además el estado ASSIGNED y la fecha oficial; en la
+            //    reasignación se preservan estado y fecha para no reescribir hitos auditados.
+            $setClause = $isReassignment
+                ? "`assigned_technician_id` = :technician_id,\n                    `urgency` = :urgency"
+                : "`status` = 'ASSIGNED',\n                    `assigned_technician_id` = :technician_id,\n                    `assigned_at` = CURRENT_TIMESTAMP,\n                    `urgency` = :urgency";
             $sql = "
                 UPDATE `incidents`
-                SET `status` = 'ASSIGNED',
-                    `assigned_technician_id` = :technician_id,
-                    `assigned_at` = CURRENT_TIMESTAMP,
-                    `urgency` = :urgency
+                SET {$setClause}
                 WHERE `id` = :id
                   AND `deleted_at` IS NULL
             ";
@@ -1050,16 +1076,29 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
             $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
             $stmt->execute();
 
-            // 4. Registrar evento de asignación en historial inmutable
-            $actionNote = "Incidencia asignada al técnico ID {$technicianId}.";
-            if ($urgencyChanged) {
-                $actionNote .= " Urgencia reclasificada de {$incident->getUrgency()->value} a {$finalUrgency}. Motivo: " . trim((string)$urgencyReason);
+            // 4. Registrar el evento de asignación o reasignación en el historial inmutable.
+            //    En la reasignación el motivo justificado se coloca al final de la nota, con
+            //    el marcador canónico 'Motivo: ' que el servicio de detalle lee para exponer
+            //    `technician.reassignment_reason` (RF-02, RF-04.1). Debe permanecer al final.
+            if ($isReassignment) {
+                $actionNote = 'Reasignación técnica: del técnico ID '
+                    . ($incident->getAssignedTechnicianId() ?? 0)
+                    . " al técnico ID {$technicianId}.";
+                if ($urgencyChanged) {
+                    $actionNote .= " Reclasificación de urgencia de {$incident->getUrgency()->value} a {$finalUrgency}.";
+                }
+                $actionNote .= ' Motivo: ' . $cleanReassignmentReason;
+            } else {
+                $actionNote = "Incidencia asignada al técnico ID {$technicianId}.";
+                if ($urgencyChanged) {
+                    $actionNote .= " Urgencia reclasificada de {$incident->getUrgency()->value} a {$finalUrgency}. Motivo: " . trim((string)$urgencyReason);
+                }
             }
             $this->insertHistory(
                 $incidentId,
                 $coordinatorId,
                 $incident->getStatus()->value,
-                'ASSIGNED',
+                $isReassignment ? $incident->getStatus()->value : 'ASSIGNED',
                 $actionNote
             );
 

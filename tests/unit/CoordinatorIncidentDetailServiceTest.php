@@ -13,6 +13,9 @@ declare(strict_types=1);
  * - Matriz de permisos operativos por estado de la máquina de estados, RF-07.
  * - Ensamblado íntegro de los diez bloques del DTO (plan §2.1) sin exponer datos completos.
  *
+ * T-IDM-21 amplía la cobertura con el motivo de la reasignación técnica leído del
+ * historial inmutable que escribe el repositorio (RF-07.3, Art. III.1).
+ *
  * Dogma Vanilla: PHP 8.2 puro, sin dependencias externas y sin base de datos; el
  * repositorio se sustituye por un doble implementando su contrato de dominio.
  */
@@ -297,6 +300,59 @@ $assert('5.15 Sin reintegro: bloque limpio con has_refund false y resto a null',
 $repo->fixture = null;
 $assert('5.16 Expediente inexistente: buildDetail devuelve null', $service->buildDetail('#TICK-2099-00001', $at1115) === null);
 $assert('5.17 Los identificadores no encontrados también se delegan al repositorio', $repo->identifiers === [142, 142, 142, '#TICK-2099-00001']);
+
+// =====================================================================
+// GRUPO 6: Motivo de reasignación desde el historial inmutable (T-IDM-21 / RF-07.3)
+// =====================================================================
+echo "\n--- Grupo 6: Motivo de reasignación en el bloque de técnico ---\n";
+
+$reassignedFixture = array_merge($fixture, [
+    'incident' => array_merge($fixture['incident'], ['assigned_technician_id' => 9]),
+    'technician' => ['id' => 9, 'name' => 'Marta Ruta', 'operator_code' => 'OP-BCN-09', 'role' => 'TECHNICIAN', 'is_active' => 1],
+    'history' => array_merge($fixture['history'], [[
+        'id' => 9, 'user_id' => 2, 'from_status' => 'PENDING_PARTS', 'to_status' => 'PENDING_PARTS',
+        'action_note' => 'Reasignación técnica: del técnico ID 4 al técnico ID 9. Motivo: Proximidad geográfica al centro sanitario con riesgo de frío.',
+        'created_at' => '2026-10-01 10:30:00', 'user_name' => 'Coordinación Central', 'user_role' => 'COORDINATOR',
+    ]]),
+]);
+$repo->fixture = $reassignedFixture;
+$reassignmentBlocks = $service->buildDetail(142, $at1115)->toArray();
+
+$assert(
+    '6.1 El motivo de reasignación se expone desde la nota inmutable del repositorio',
+    $reassignmentBlocks['technician']['reassignment_reason'] === 'Proximidad geográfica al centro sanitario con riesgo de frío.',
+    json_encode($reassignmentBlocks['technician'])
+);
+$assert(
+    '6.2 El bloque apunta al nuevo responsable activo (Art. V.3)',
+    $reassignmentBlocks['technician']['technician_id'] === 9
+        && $reassignmentBlocks['technician']['name'] === 'Marta Ruta'
+        && $reassignmentBlocks['technician']['operator_code'] === 'OP-BCN-09'
+);
+
+// La nota puede intercalar la reclasificación de urgencia: el motivo justificado cierra el texto.
+$urgencyReassignmentFixture = array_merge($reassignedFixture, [
+    'history' => array_merge($reassignedFixture['history'], [[
+        'id' => 10, 'user_id' => 2, 'from_status' => 'PENDING_PARTS', 'to_status' => 'PENDING_PARTS',
+        'action_note' => 'Reasignación técnica: del técnico ID 9 al técnico ID 4. Reclasificación de urgencia de MEDIUM a CRITICAL. Motivo: Rotura confirmada de la cadena de frío en la sala de urgencias.',
+        'created_at' => '2026-10-01 11:05:00', 'user_name' => 'Coordinación Central', 'user_role' => 'COORDINATOR',
+    ]]),
+]);
+$repo->fixture = $urgencyReassignmentFixture;
+$latestReassignment = $service->buildDetail(142, $at1115)->toArray()['technician']['reassignment_reason'];
+
+$assert(
+    '6.3 Reclasificación intercalada: el motivo se aísla sin arrastrar el texto de la urgencia',
+    $latestReassignment === 'Rotura confirmada de la cadena de frío en la sala de urgencias.',
+    (string)$latestReassignment
+);
+$assert('6.4 La última reasignación prevalece sobre las anteriores', $latestReassignment !== 'Proximidad geográfica al centro sanitario con riesgo de frío.');
+
+$repo->fixture = $fixture;
+$assert(
+    '6.5 Sin reasignaciones el contrato mantiene el campo a null',
+    $service->buildDetail(142, $at1115)->toArray()['technician']['reassignment_reason'] === null
+);
 
 // =====================================================================
 // RESUMEN DE EJECUCIÓN

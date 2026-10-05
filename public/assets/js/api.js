@@ -467,7 +467,7 @@ export class ApiClient {
      * @param {string|null} [urgencyReason=null]
      * @returns {Promise<Object>}
      */
-    assignTechnician: (incidentId, technicianId, urgency = null, urgencyReason = null) => {
+    assignTechnician: (incidentId, technicianId, urgency = null, urgencyReason = null, reassignmentReason = null) => {
       const body = {
         technician_id: Number(technicianId)
       };
@@ -478,6 +478,11 @@ export class ApiClient {
       if (urgencyReason) {
         body.urgency_reason = urgencyReason;
         body.urgency_override_reason = urgencyReason;
+      }
+      if (reassignmentReason) {
+        // Canonical key of the endpoint plus the compact alias of the technical plan (§2.2).
+        body.reassignment_reason = reassignmentReason;
+        body.reason = reassignmentReason;
       }
       return this.patch(`/coordinator/incidents/${incidentId}/assign`, body);
     },

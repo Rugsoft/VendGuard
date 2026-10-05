@@ -60,6 +60,14 @@ final class CoordinatorIncidentDetailService
         IncidentStatus::CANCELLED,
     ];
 
+    /**
+     * Canonical markers of the immutable reassignment note written by the repository
+     * (`PdoIncidentRepository::assign()`, RF-07.3). The justified motive always closes
+     * the note, so everything after the marker is the motive the modal must display.
+     */
+    private const REASSIGNMENT_NOTE_MARKER = 'Reasignación técnica:';
+    private const REASSIGNMENT_MOTIVE_MARKER = ' Motivo: ';
+
     /** States that show the documented technical resolution block (RF-04.3). */
     private const RESOLUTION_STATUSES = [
         IncidentStatus::RESOLVED,
@@ -357,9 +365,9 @@ final class CoordinatorIncidentDetailService
             'operator_code' => $technician['operator_code'] ?? null,
             'assigned_at' => $incident['assigned_at'] ?? null,
             'assigned_by_name' => $this->findLastActorName($history, IncidentStatus::ASSIGNED->value),
-            // Reassignment exists from RF-07.3 onwards; until then every ticket keeps
-            // a single assignment and there is no recorded motive to expose.
-            'reassignment_reason' => null,
+            // The reassignment motive (RF-07.3) lives in the immutable history written by
+            // the repository; the latest reassignment wins, so the modal shows the current one.
+            'reassignment_reason' => $this->findReassignmentReason($history),
         ];
     }
 
@@ -606,6 +614,37 @@ final class CoordinatorIncidentDetailService
         }
 
         return $actorName;
+    }
+
+    /**
+     * Latest justified motive of a technical reassignment, read from the immutable
+     * history (RF-07.3, Art. III.1). Returns null while the ticket keeps its first
+     * technician, which is the case of every ticket outside the reassignment flow.
+     *
+     * @param list<array<string, mixed>> $history Chronologically ordered history rows.
+     */
+    private function findReassignmentReason(array $history): ?string
+    {
+        $reason = null;
+
+        foreach ($history as $row) {
+            $note = (string)($row['action_note'] ?? '');
+            if (!str_contains($note, self::REASSIGNMENT_NOTE_MARKER)) {
+                continue;
+            }
+
+            $markerAt = strpos($note, self::REASSIGNMENT_MOTIVE_MARKER);
+            if ($markerAt === false) {
+                continue;
+            }
+
+            $motive = trim(substr($note, $markerAt + strlen(self::REASSIGNMENT_MOTIVE_MARKER)));
+            if ($motive !== '') {
+                $reason = $motive;
+            }
+        }
+
+        return $reason;
     }
 
     /**

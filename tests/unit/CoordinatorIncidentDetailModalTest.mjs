@@ -34,6 +34,12 @@
  *     list, assignment and soft-delete discard refreshing the file without closing the
  *     modal, drafts retained on failure (RNF-06, Art. III.2 y V.1).
  *
+ * T-IDM-21 extends this suite with:
+ * 15. Reassignment panel: the fixed footer reopens the "Reasignar Técnico" action, the
+ *     current responsible is excluded from the selector (Art. V.3) and the justified motive
+ *     (>= 10 real characters) is mandatory before the request reaches the endpoint,
+ *     keeping the draft intact when the server rejects it (RF-07.3).
+ *
  * Dogma Vanilla: pure Node ESM suite, no external dependencies, mirrors the browser module graph.
  * Dualismo Lingüístico: assertions in English, user-facing copy in Spanish.
  */
@@ -119,7 +125,7 @@ function createInstance(overrides = {}) {
 }
 
 console.log('======================================================================');
-console.log(' VendGuard: Frontend Test Suite - CoordinatorIncidentDetailModal (T-IDM-08..T-IDM-12)');
+console.log(' VendGuard: Frontend Test Suite - CoordinatorIncidentDetailModal (T-IDM-08..T-IDM-12, T-IDM-21)');
 console.log('======================================================================\n');
 
 // ---------------------------------------------------------------------
@@ -399,6 +405,28 @@ const detailFixture = {
   comments: [],
   refund: { has_refund: false },
   permissions: { can_assign: true, can_reassign: false, can_cancel: true, can_add_comment: true }
+};
+
+/** Fresh assignment case: the ticket has no responsible technician yet (RF-07.1, RF-07.3). */
+const assignFixture = {
+  ...detailFixture,
+  incident: { ...detailFixture.incident, status: 'REGISTERED', status_label: 'Registrada', is_reopened: false },
+  technician: {
+    assigned: false,
+    technician_id: null,
+    name: null,
+    operator_code: null,
+    assigned_at: null,
+    assigned_by_name: null,
+    reassignment_reason: null
+  },
+  permissions: { ...detailFixture.permissions, can_assign: true, can_reassign: false }
+};
+
+/** Reassignment case: the ticket already carries a responsible technician (RF-07.3). */
+const reassignFixture = {
+  ...detailFixture,
+  permissions: { ...detailFixture.permissions, can_assign: false, can_reassign: true }
 };
 
 function computed(instance, name) {
@@ -907,8 +935,10 @@ assert('14.8 Discard panel wires the counter and the guarded confirmation button
   template.includes('data-testid="cancel-counter"') && template.includes('/ 20 caracteres') &&
   template.includes(':disabled="!isCancelReasonValid || isSubmittingCancel"'));
 
-assert('14.9 Reassignment stays hidden until the backend supports it (T-IDM-21)',
-  !template.includes('data-testid="incident-detail-reassign') &&
+assert('14.9 Reassignment trigger and its mandatory motive field are rendered (RF-07.3, T-IDM-21)',
+  template.includes('data-testid="incident-detail-reassign-trigger"') &&
+  template.includes('v-if="canReassign && !isAssignPanelOpen"') &&
+  template.includes('data-testid="assign-reason"') &&
   typeof CoordinatorIncidentDetailModal.methods.confirmReassign !== 'function');
 
 // ---------------------------------------------------------------------
@@ -938,12 +968,12 @@ assert('15.2 A failed technician load surfaces the reason and clears the spinner
 
 let assignArgs = null;
 let assignRefreshes = 0;
-api.coordinator.assignTechnician = async (incidentId, technicianId) => {
-  assignArgs = { incidentId, technicianId };
+api.coordinator.assignTechnician = async (incidentId, technicianId, urgency, urgencyReason, reassignmentReason) => {
+  assignArgs = { incidentId, technicianId, urgency, urgencyReason, reassignmentReason };
   return { id: incidentId, status: 'ASSIGNED' };
 };
 const assignInstance = createInstance({
-  detail: detailFixture,
+  detail: assignFixture,
   incidentId: 142,
   isAssignPanelOpen: true,
   selectedTechnicianId: 3
@@ -953,12 +983,13 @@ await CoordinatorIncidentDetailModal.methods.confirmAssign.call(assignInstance);
 
 assert('15.3 Confirmed assignment refreshes the file and notifies the parent row',
   assignArgs?.incidentId === 142 && assignArgs?.technicianId === 3 &&
+  assignArgs?.reassignmentReason === null &&
   assignInstance.isAssignPanelOpen === false && assignInstance.selectedTechnicianId === null &&
   assignRefreshes === 1 &&
   assignInstance.getEmitted().some((e) => e.event === 'incident-updated' && e.payload?.reason === 'assign') &&
   assignInstance.isSubmittingAssign === false && assignInstance.assignErrorMessage === '');
 
-const assignByCode = createInstance({ detail: detailFixture, incidentId: 'INC-DEMO-0922', selectedTechnicianId: 2 });
+const assignByCode = createInstance({ detail: assignFixture, incidentId: 'INC-DEMO-0922', selectedTechnicianId: 2 });
 assignByCode.fetchDetail = async () => {};
 await CoordinatorIncidentDetailModal.methods.confirmAssign.call(assignByCode);
 assert('15.4 Assignment opened by ticket code still targets the numeric endpoint id',
@@ -967,7 +998,7 @@ assert('15.4 Assignment opened by ticket code still targets the numeric endpoint
 api.coordinator.assignTechnician = async () => {
   throw new ApiError(422, 'INVALID_STATUS_FOR_ASSIGNMENT', 'Solo se pueden asignar incidencias en estado REGISTERED o REOPENED.');
 };
-const failedAssign = createInstance({ detail: detailFixture, incidentId: 142, isAssignPanelOpen: true, selectedTechnicianId: 2 });
+const failedAssign = createInstance({ detail: assignFixture, incidentId: 142, isAssignPanelOpen: true, selectedTechnicianId: 2 });
 await CoordinatorIncidentDetailModal.methods.confirmAssign.call(failedAssign);
 assert('15.5 Failed assignment keeps the panel open with the API message',
   failedAssign.isAssignPanelOpen === true &&
@@ -1020,12 +1051,127 @@ assert('15.8 Failed discard keeps the panel open and the reason intact for a ret
   failedCancel.cancelErrorMessage.includes('descarte lógico') &&
   failedCancel.isSubmittingCancel === false);
 
+// ---------------------------------------------------------------------
+// GROUP 16: Reassignment with mandatory motive (T-IDM-21 / RF-07.3)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 16: Reassignment with mandatory motive ---');
+
+const reassignPanel = createInstance({ detail: reassignFixture, incidentId: 142 });
+assert('16.1 Reassignment is offered only while the ticket has a responsible technician',
+  computed(reassignPanel, 'canReassign') === true && computed(reassignPanel, 'isReassign') === true &&
+  computed(createInstance({ detail: assignFixture, incidentId: 142 }), 'canReassign') === false &&
+  computed(createInstance({ detail: assignFixture, incidentId: 142 }), 'isReassign') === false);
+
+const techniciansList = [
+  { id: 4, name: 'Jordi Técnico Ruta BCN', active_assigned_incidents_count: 3 },
+  { id: 7, name: 'Marta Técnica Ruta BCN', active_assigned_incidents_count: 1 }
+];
+const optionsInstance = createInstance({ detail: reassignFixture, technicians: techniciansList });
+const openOptions = createInstance({
+  detail: { ...reassignFixture, technician: { ...reassignFixture.technician, technician_id: null } },
+  technicians: techniciansList
+});
+assert('16.2 The current responsible never appears as reassignment target (Art. V.3)',
+  computed(optionsInstance, 'reassignableTechnicians').length === 1 &&
+  computed(optionsInstance, 'reassignableTechnicians')[0].id === 7 &&
+  computed(openOptions, 'reassignableTechnicians').length === 2);
+
+assert('16.3 Reactive counter measures real characters with a 10-character threshold (RF-07.3)',
+  computed(createInstance({ detail: reassignFixture, reassignReason: '   ' }), 'reassignReasonLength') === 0 &&
+  computed(createInstance({ detail: reassignFixture, reassignReason: 'a'.repeat(9) }), 'isReassignReasonValid') === false &&
+  computed(createInstance({ detail: reassignFixture, reassignReason: 'a'.repeat(10) }), 'isReassignReasonValid') === true &&
+  computed(createInstance({ detail: reassignFixture, reassignReason: ' ' + 'á'.repeat(10) + ' ' }), 'reassignReasonLength') === 10 &&
+  computed(createInstance({ detail: assignFixture, reassignReason: '' }), 'isReassignReasonValid') === true);
+
+assert('16.4 Panel copy, filtered selector, counter and guarded confirmation are wired',
+  template.includes("isReassign ? '🔁 Reasignar Técnico' : '👷 Asignar Técnico'") &&
+  template.includes("isReassign ? 'Nuevo técnico responsable' : 'Técnico de ruta activo'") &&
+  template.includes('v-for="technician in reassignableTechnicians"') &&
+  template.includes('data-testid="assign-reason"') &&
+  template.includes('data-testid="assign-reason-counter"') &&
+  template.includes('/ 10 caracteres') &&
+  template.includes(':disabled="isSubmittingAssign || !selectedTechnicianId || !isReassignReasonValid"'));
+
+let reassignArgs = null;
+let reassignRefreshes = 0;
+api.coordinator.assignTechnician = async (incidentId, technicianId, urgency, urgencyReason, reassignmentReason) => {
+  reassignArgs = { incidentId, technicianId, reassignmentReason };
+  return { id: incidentId, status: 'PENDING_PARTS' };
+};
+
+const shortReassign = createInstance({
+  detail: reassignFixture,
+  incidentId: 142,
+  isAssignPanelOpen: true,
+  selectedTechnicianId: 7,
+  reassignReason: 'Cobertura',
+  isSubmittingAssign: false
+});
+await CoordinatorIncidentDetailModal.methods.confirmAssign.call(shortReassign);
+assert('16.5 A short motive never reaches the server and keeps the draft with a clear message',
+  reassignArgs === null &&
+  shortReassign.assignErrorMessage.includes('10 caracteres') &&
+  shortReassign.reassignReason === 'Cobertura' &&
+  shortReassign.isAssignPanelOpen === true &&
+  shortReassign.isSubmittingAssign === false);
+
+const reassignInstance = createInstance({
+  detail: reassignFixture,
+  incidentId: 142,
+  isAssignPanelOpen: true,
+  selectedTechnicianId: 7,
+  reassignReason: '  Cobertura inmediata por rotura de la cadena de frío en urgencias.  '
+});
+reassignInstance.fetchDetail = async () => { reassignRefreshes++; };
+await CoordinatorIncidentDetailModal.methods.confirmAssign.call(reassignInstance);
+assert('16.6 Confirmed reassignment sends the trimmed motive, refreshes and clears the draft',
+  reassignArgs?.incidentId === 142 && reassignArgs?.technicianId === 7 &&
+  reassignArgs?.reassignmentReason === 'Cobertura inmediata por rotura de la cadena de frío en urgencias.' &&
+  reassignInstance.reassignReason === '' && reassignInstance.isAssignPanelOpen === false &&
+  reassignInstance.selectedTechnicianId === null && reassignRefreshes === 1 &&
+  reassignInstance.getEmitted().some((e) => e.event === 'incident-updated' && e.payload?.reason === 'assign') &&
+  reassignInstance.isSubmittingAssign === false);
+
+api.coordinator.assignTechnician = async () => {
+  throw new ApiError(422, 'TECHNICIAN_ALREADY_ASSIGNED', 'El técnico indicado ya es el responsable activo de esta incidencia.');
+};
+const failedReassign = createInstance({
+  detail: reassignFixture,
+  incidentId: 142,
+  isAssignPanelOpen: true,
+  selectedTechnicianId: 7,
+  reassignReason: 'Motivo válido para reasignar y reintentar el envío.'
+});
+await CoordinatorIncidentDetailModal.methods.confirmAssign.call(failedReassign);
+assert('16.7 A rejected reassignment keeps the panel open with the motive intact for a retry',
+  failedReassign.isAssignPanelOpen === true &&
+  failedReassign.reassignReason === 'Motivo válido para reasignar y reintentar el envío.' &&
+  failedReassign.assignErrorMessage.includes('responsable activo') &&
+  failedReassign.isSubmittingAssign === false);
+
+api.coordinator.getUsers = async () => techniciansList;
+const preselectInstance = createInstance({ detail: reassignFixture });
+await CoordinatorIncidentDetailModal.methods.loadTechnicians.call(preselectInstance);
+assert('16.8 Loading technicians for a reassignment preselects a different professional',
+  preselectInstance.technicians.length === 2 && preselectInstance.selectedTechnicianId === 7 &&
+  preselectInstance.techniciansLoaded === true);
+
+const stalePanel = createInstance({ detail: reassignFixture, techniciansLoaded: true, selectedTechnicianId: 4 });
+CoordinatorIncidentDetailModal.methods.openAssignPanel.call(stalePanel);
+assert('16.9 Opening the panel drops a stale selection of the current responsible',
+  stalePanel.isAssignPanelOpen === true && stalePanel.selectedTechnicianId === null &&
+  stalePanel.reassignReason === '' && stalePanel.isCancelPanelOpen === false);
+
+CoordinatorIncidentDetailModal.methods.closeAssignPanel.call(stalePanel);
+assert('16.10 Closing the panel discards the motive draft',
+  stalePanel.isAssignPanelOpen === false && stalePanel.reassignReason === '' && stalePanel.assignErrorMessage === '');
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 
 if (failures === 0) {
-  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-IDM-08..T-IDM-12 FULFILLED SUCCESSFULLY.');
+  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-IDM-08..T-IDM-12 AND T-IDM-21 FULFILLED SUCCESSFULLY.');
   console.log('======================================================================\n');
   process.exit(0);
 } else {
