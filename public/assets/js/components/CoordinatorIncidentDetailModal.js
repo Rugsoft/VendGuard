@@ -19,8 +19,10 @@
  *      formulario en línea de publicación integrado (RF-05).
  * 3. Pie de acciones fijo con el cierre del modal (RNF-03).
  * 
- * Alcance de esta tarea: los paneles operativos en línea (asignación y descarte) se
- * renderizan en T-IDM-12.
+ * Los paneles operativos en línea (asignación y descarte justificado) se integran en el
+ * propio cuerpo del modal, sin sub-modales superpuestos (T-IDM-12, RNF-06). El botón de
+ * reasignación queda oculto hasta que el backend lo soporte con motivo obligatorio y
+ * evento INCIDENT_REASSIGNED (tarea backend T-IDM-21).
  * 
  * Dogma Vanilla: Vue 3 Options API vía ES Modules (cero dependencias externas).
  * Dualismo Lingüístico: código en inglés, interfaz y mensajes en español.
@@ -65,7 +67,22 @@ export const CoordinatorIncidentDetailModal = {
       /** Selector de visibilidad: comentario público o nota interna de taller (RF-05.2). */
       isCommentInternal: false,
       isSubmittingComment: false,
-      commentErrorMessage: ''
+      commentErrorMessage: '',
+      /** Paneles operativos integrados en el cuerpo del modal (RNF-06). */
+      isAssignPanelOpen: false,
+      isCancelPanelOpen: false,
+      /** Técnicos activos cargados bajo demanda desde el listado real de usuarios. */
+      technicians: [],
+      techniciansLoaded: false,
+      isLoadingTechnicians: false,
+      techniciansErrorMessage: '',
+      selectedTechnicianId: null,
+      isSubmittingAssign: false,
+      assignErrorMessage: '',
+      /** Borrador del motivo de descarte y su envío lógico (Art. III.2, RF-07.4). */
+      cancelReason: '',
+      isSubmittingCancel: false,
+      cancelErrorMessage: ''
     };
   },
   computed: {
@@ -176,6 +193,38 @@ export const CoordinatorIncidentDetailModal = {
     /** El formulario en línea solo aparece si la máquina de estados lo permite (RF-07.2). */
     canAddComment() {
       return Boolean(this.detail?.permissions?.can_add_comment);
+    },
+
+    /** Acción directa de asignación habilitada por la máquina de estados (RF-07.1). */
+    canAssign() {
+      return Boolean(this.detail?.permissions?.can_assign);
+    },
+
+    /** Acción directa de descarte habilitada mientras el ticket siga activo (RF-07.1). */
+    canCancel() {
+      return Boolean(this.detail?.permissions?.can_cancel);
+    },
+
+    /**
+     * Identificador numérico para las acciones operativas: los endpoints de asignación y
+     * descarte exigen el ID primario, así que se prefiere el del expediente cargado.
+     */
+    actionableIncidentId() {
+      const raw = this.incidentId;
+      if (raw !== null && raw !== undefined && raw !== '' && /^\d+$/.test(String(raw))) {
+        return Number(raw);
+      }
+      return this.detail?.incident?.id || raw;
+    },
+
+    /** Contador de caracteres reales (puntos de código Unicode) del motivo de descarte. */
+    cancelReasonLength() {
+      return Array.from(String(this.cancelReason || '').trim()).length;
+    },
+
+    /** El descarte exige un motivo justificado de al menos 20 caracteres reales (Art. V.1). */
+    isCancelReasonValid() {
+      return this.cancelReasonLength >= 20;
     },
 
     /** Bitácora lista para pintar: autor traducido y fecha formateada. */
@@ -486,6 +535,118 @@ export const CoordinatorIncidentDetailModal = {
     handleBackdropClick(event) {
       if (event.target === event.currentTarget) {
         this.requestClose();
+      }
+    },
+
+    /**
+     * Abre el panel de asignación en línea y cierra cualquier otro panel abierto (RNF-06).
+     */
+    openAssignPanel() {
+      this.isCancelPanelOpen = false;
+      this.isAssignPanelOpen = true;
+      this.assignErrorMessage = '';
+      if (!this.techniciansLoaded) {
+        this.loadTechnicians();
+      }
+    },
+
+    closeAssignPanel() {
+      this.isAssignPanelOpen = false;
+      this.assignErrorMessage = '';
+    },
+
+    /**
+     * Abre el panel de descarte justificado en línea (RF-07.4, RNF-06).
+     */
+    openCancelPanel() {
+      this.isAssignPanelOpen = false;
+      this.isCancelPanelOpen = true;
+      this.cancelErrorMessage = '';
+    },
+
+    closeCancelPanel() {
+      this.isCancelPanelOpen = false;
+      this.cancelErrorMessage = '';
+    },
+
+    /**
+     * Carga los técnicos de ruta activos reales desde el listado de usuarios (sin listas
+     * simuladas): `GET /api/coordinator/users?status=active&role=TECHNICIAN`.
+     */
+    async loadTechnicians() {
+      this.isLoadingTechnicians = true;
+      this.techniciansErrorMessage = '';
+
+      try {
+        const response = await api.coordinator.getUsers({ status: 'active', role: 'TECHNICIAN' });
+        const list = Array.isArray(response) ? response : (Array.isArray(response?.data) ? response.data : []);
+        this.technicians = list;
+        this.techniciansLoaded = true;
+        if (!this.selectedTechnicianId && list.length > 0) {
+          this.selectedTechnicianId = list[0].id;
+        }
+      } catch (err) {
+        this.techniciansErrorMessage = err?.message || 'No se pudieron cargar los técnicos activos.';
+      } finally {
+        this.isLoadingTechnicians = false;
+      }
+    },
+
+    /**
+     * Confirma la asignación en línea y refresca la ficha sin recargar la página (RF-07.3).
+     */
+    async confirmAssign() {
+      if (!this.selectedTechnicianId) {
+        return;
+      }
+      const incidentId = this.actionableIncidentId;
+      if (incidentId === null || incidentId === undefined || incidentId === '') {
+        return;
+      }
+
+      this.isSubmittingAssign = true;
+      this.assignErrorMessage = '';
+
+      try {
+        await api.coordinator.assignTechnician(incidentId, this.selectedTechnicianId);
+        this.isAssignPanelOpen = false;
+        this.selectedTechnicianId = null;
+        await this.fetchDetail();
+        this.notifyIncidentUpdated({ reason: 'assign' });
+      } catch (err) {
+        this.assignErrorMessage = err?.message || 'No se pudo registrar la asignación técnica.';
+      } finally {
+        this.isSubmittingAssign = false;
+      }
+    },
+
+    /**
+     * Confirma el descarte lógico con motivo justificado: el contador reactivo impide
+     * enviar menos de 20 caracteres reales (RF-07.4, Art. III.2 y V.1).
+     */
+    async confirmCancel() {
+      if (!this.isCancelReasonValid) {
+        this.cancelErrorMessage = 'El motivo del descarte debe contener al menos 20 caracteres.';
+        return;
+      }
+      const incidentId = this.actionableIncidentId;
+      if (incidentId === null || incidentId === undefined || incidentId === '') {
+        return;
+      }
+
+      this.isSubmittingCancel = true;
+      this.cancelErrorMessage = '';
+
+      try {
+        await api.coordinator.cancelIncident(incidentId, String(this.cancelReason).trim());
+        this.cancelReason = '';
+        this.isCancelPanelOpen = false;
+        await this.fetchDetail();
+        this.notifyIncidentUpdated({ reason: 'cancel' });
+      } catch (err) {
+        this.cancelErrorMessage = err?.message || 'No se pudo descartar la incidencia. Inténtelo de nuevo.';
+      } finally {
+        this.isSubmittingCancel = false;
       }
     },
 
@@ -1108,6 +1269,114 @@ export const CoordinatorIncidentDetailModal = {
                 </a>
               </section>
 
+              <!-- 8. Paneles operativos en línea (RF-07.3, RF-07.4, RNF-06) -->
+              <div
+                v-if="isAssignPanelOpen"
+                class="inline-action-panel"
+                data-testid="assign-panel"
+                style="background-color: #ffffff; border: 1px solid var(--color-primary, #2560ff); border-radius: var(--radius-card, 8px); padding: 16px 20px; margin-bottom: 16px;"
+              >
+                <h4 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 14px; font-weight: 500; color: var(--color-ink, #000000); margin: 0 0 10px;">
+                  👷 Asignar Técnico
+                </h4>
+                <label for="assign-technician-select" style="display: block; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-ink-secondary, #434c5f); margin-bottom: 4px;">
+                  Técnico de ruta activo
+                </label>
+                <select
+                  id="assign-technician-select"
+                  v-model="selectedTechnicianId"
+                  class="vg-select"
+                  data-testid="assign-technician-select"
+                  :disabled="isSubmittingAssign || isLoadingTechnicians"
+                  style="width: 100%; max-width: 420px; box-sizing: border-box; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f); background-color: var(--color-canvas, #f9fafb); border: 1px solid var(--color-hairline-soft, #a9b4c6); border-radius: var(--radius-interactive, 4px); padding: 8px 12px;"
+                >
+                  <option :value="null">Selecciona un técnico…</option>
+                  <option v-for="technician in technicians" :key="technician.id" :value="technician.id">
+                    {{ technician.name }} ({{ technician.active_assigned_incidents_count }} avisos activos)
+                  </option>
+                </select>
+                <p v-if="isLoadingTechnicians" style="margin: 6px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
+                  Cargando técnicos activos…
+                </p>
+                <p v-if="techniciansErrorMessage" data-testid="assign-technicians-error" style="margin: 6px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-error-text, #b91c1c);">
+                  {{ techniciansErrorMessage }}
+                </p>
+                <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
+                  <button
+                    type="button"
+                    class="vg-btn vg-btn-secondary"
+                    data-testid="assign-dismiss"
+                    :disabled="isSubmittingAssign"
+                    @click="closeAssignPanel"
+                  >
+                    Volver
+                  </button>
+                  <button
+                    type="button"
+                    class="vg-btn vg-btn-primary"
+                    data-testid="assign-confirm"
+                    :disabled="isSubmittingAssign || !selectedTechnicianId"
+                    @click="confirmAssign"
+                  >
+                    {{ isSubmittingAssign ? 'Asignando…' : 'Confirmar Asignación' }}
+                  </button>
+                </div>
+                <p v-if="assignErrorMessage" data-testid="assign-error" role="alert" style="margin: 8px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-error-text, #b91c1c);">
+                  {{ assignErrorMessage }}
+                </p>
+              </div>
+
+              <div
+                v-if="isCancelPanelOpen"
+                class="inline-action-panel panel-danger"
+                data-testid="cancel-panel"
+                style="background-color: #ffffff; border: 1px solid var(--color-error, #ff5757); border-radius: var(--radius-card, 8px); padding: 16px 20px; margin-bottom: 16px;"
+              >
+                <h4 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 14px; font-weight: 500; color: var(--color-error-text, #b91c1c); margin: 0 0 10px;">
+                  🚫 Descartar Incidencia (Cancelación Justificada)
+                </h4>
+                <textarea
+                  v-model="cancelReason"
+                  class="vg-textarea"
+                  data-testid="cancel-reason"
+                  rows="3"
+                  placeholder="Motivo del descarte (mínimo 20 caracteres)..."
+                  :disabled="isSubmittingCancel"
+                  style="width: 100%; box-sizing: border-box; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f); background-color: var(--color-canvas, #f9fafb); border: 1px solid var(--color-hairline-soft, #a9b4c6); border-radius: var(--radius-interactive, 4px); padding: 8px 12px; resize: vertical;"
+                ></textarea>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 6px; flex-wrap: wrap;">
+                  <span
+                    data-testid="cancel-counter"
+                    :style="{ fontFamily: 'var(--font-body, Inter, sans-serif)', fontSize: '12px', fontWeight: '600', color: isCancelReasonValid ? 'var(--color-success-text, #065f46)' : 'var(--color-ink-muted, #6c7e9d)' }"
+                  >
+                    {{ cancelReasonLength }} / 20 caracteres
+                  </span>
+                  <div style="display: flex; gap: 8px;">
+                    <button
+                      type="button"
+                      class="vg-btn vg-btn-secondary"
+                      data-testid="cancel-dismiss"
+                      :disabled="isSubmittingCancel"
+                      @click="closeCancelPanel"
+                    >
+                      Volver
+                    </button>
+                    <button
+                      type="button"
+                      class="vg-btn vg-btn-danger"
+                      data-testid="cancel-confirm"
+                      :disabled="!isCancelReasonValid || isSubmittingCancel"
+                      @click="confirmCancel"
+                    >
+                      {{ isSubmittingCancel ? 'Descartando…' : 'Confirmar Descarte' }}
+                    </button>
+                  </div>
+                </div>
+                <p v-if="cancelErrorMessage" data-testid="cancel-error" role="alert" style="margin: 8px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-error-text, #b91c1c);">
+                  {{ cancelErrorMessage }}
+                </p>
+              </div>
+
               <!-- Visor Integrado de Evidencia Gráfica (RNF-06: sin modales superpuestos) -->
               <div
                 v-if="photoZoomOpen"
@@ -1148,8 +1417,30 @@ export const CoordinatorIncidentDetailModal = {
           <footer
             class="modal-footer incident-detail-footer"
             data-testid="incident-detail-footer"
-            style="flex: 0 0 auto; background-color: #ffffff; justify-content: flex-end;"
+            style="flex: 0 0 auto; background-color: #ffffff; justify-content: space-between; gap: 12px; flex-wrap: wrap;"
           >
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <button
+                v-if="canAssign && !isAssignPanelOpen"
+                type="button"
+                class="vg-btn vg-btn-primary"
+                data-testid="incident-detail-assign-trigger"
+                @click="openAssignPanel"
+              >
+                Asignar Técnico
+              </button>
+              <button
+                v-if="canCancel && !isCancelPanelOpen"
+                type="button"
+                class="vg-btn vg-btn-danger"
+                data-testid="incident-detail-cancel-trigger"
+                @click="openCancelPanel"
+              >
+                Descartar Incidencia
+              </button>
+              <!-- "Reasignar Técnico" se habilitará cuando el backend de reasignación
+                   (tarea T-IDM-21) acepte el cambio de técnico con motivo obligatorio. -->
+            </div>
             <button
               type="button"
               class="vg-btn vg-btn-secondary"

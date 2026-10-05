@@ -78,7 +78,7 @@
   * **Dependencias:** T-IDM-10
   * **Hecho cuando:** La bitácora renderiza los mensajes en un contenedor con scroll propio distinguiendo notas públicas de notas internas de taller, y el formulario en línea permite enviar una nueva nota técnica llamando a `POST .../comments` y refrescando la bitácora sin cerrar el modal.
 
-- [ ] **T-IDM-12: Implementar paneles colapsables en línea para Asignación y Descarte justificado ($\ge 20$ caracteres)**
+- [x] **T-IDM-12: Implementar paneles colapsables en línea para Asignación y Descarte justificado ($\ge 20$ caracteres)**
   * **Requisitos:** RF-07, RNF-06, Constitución Art. III y Art. V.1
   * **Dependencias:** T-IDM-10
   * **Hecho cuando:** Al pulsar "Asignar/Reasignar" o "Descartar" se despliegan paneles en línea integrados en el cuerpo del modal (sin sub-modales superpuestos); el panel de descarte incluye contador de caracteres reactivo y deshabilita el botón de confirmación si el motivo contiene menos de 20 caracteres reales.
@@ -104,6 +104,23 @@
 
 ---
 
+## Fase 4.5: Cierre de Huecos de Backend Detectados en T-IDM-12 (Acuerdo de Product Owner, Octubre 2026)
+
+> [!IMPORTANT]
+> Detectados al implementar T-IDM-12: el endpoint de asignación no admite reasignación (solo `REGISTERED`/`REOPENED`) y el de descarte no valida el mínimo de 20 caracteres en servidor. Estas dos tareas cierran ambos huecos antes de las suites de integración T-IDM-17/T-IDM-18.
+
+- [ ] **T-IDM-20: Validar en servidor el motivo de descarte con mínimo de 20 caracteres reales**
+  * **Requisitos:** RF-07.4, RNF-04, Constitución Art. III.2 y Art. V.1
+  * **Dependencias:** T-IDM-07
+  * **Hecho cuando:** `CoordinatorController::cancelIncident()` rechaza con `422` (`CANCELLATION_REASON_TOO_SHORT`) cualquier `cancellation_reason` con menos de 20 caracteres reales tras `trim()` (multibyte-safe), conserva la respuesta `200` con motivos válidos y la suite PHP de cancelación pasa al 100% en verde con el nuevo caso límite.
+
+- [ ] **T-IDM-21: Soportar la reasignación técnica en línea con motivo obligatorio y evento INCIDENT_REASSIGNED**
+  * **Requisitos:** RF-07.3, RNF-04, Constitución Art. III.3 y Art. V.3
+  * **Dependencias:** T-IDM-20
+  * **Hecho cuando:** `PATCH /api/coordinator/incidents/{id}/assign` admite reasignaciones desde `ASSIGNED`, `IN_PROGRESS` y `PENDING_PARTS` exigiendo un motivo de reasignación ($\ge 10$ caracteres, `422` si falta), mantiene un único técnico responsable activo (Art. V.3), registra el evento inmutable `INCIDENT_REASSIGNED` en `audit_log`, y el modal vuelve a mostrar el botón "Reasignar Técnico" con su campo de motivo obligatorio operativo.
+
+---
+
 ## Fase 5: Pruebas Unitarias Reactivas Frontend, Integración HTTP, Blindaje Constitucional y Cierre
 
 - [ ] **T-IDM-16: Implementar suite de pruebas unitarias reactivas frontend `CoordinatorIncidentDetailModalTest.mjs`**
@@ -113,15 +130,15 @@
 
 - [ ] **T-IDM-17: Implementar suite de pruebas de integración HTTP `CoordinatorIncidentDetailApiTest.php`**
   * **Requisitos:** RF-01 a RF-07, RNF-01, RNF-04, RNF-05
-  * **Dependencias:** T-IDM-07, T-IDM-15
+  * **Dependencias:** T-IDM-07, T-IDM-15, T-IDM-20
   * **Hecho cuando:** La ejecución de `php tests/run_all.php` (o test individual contra MariaDB real) pasa al 100% en verde evaluando: endpoint de detalle enriquecido, asignación técnica desde modal, descarte justificado con motivo válido, rechazo con HTTP 422 ante motivos cortos, adición de notas de taller y persistencia de eventos en `audit_log`.
 
 - [ ] **T-IDM-18: Implementar suite de blindaje constitucional y segregación de datos `CoordinatorIncidentDetailConstitutionalTest.php`**
   * **Requisitos:** Constitución Art. II, Art. III, Art. V.1, Art. V.4, RNF-04, RNF-05
-  * **Dependencias:** T-IDM-17
+  * **Dependencias:** T-IDM-17, T-IDM-20
   * **Hecho cuando:** La suite pasa al 100% en verde certificando: (1) Inviolabilidad de datos (cero `DELETE FROM`), (2) Validación estricta $\ge 20$ caracteres en descartes, (3) Enmascaramiento irrevocable de teléfonos e IBANs en la respuesta JSON, y (4) Denegación de acceso 403 Forbidden para roles de sede y técnicos.
 
 - [ ] **T-IDM-19: Verificación global de regresión, certificación de Dogma Vanilla y cierre del módulo**
   * **Requisitos:** Todos (RF-01 a RF-08, RNF-01 a RNF-06, Constitución Art. I a VII)
-  * **Dependencias:** T-IDM-01 a T-IDM-18
+  * **Dependencias:** T-IDM-01 a T-IDM-18, T-IDM-20 y T-IDM-21
   * **Hecho cuando:** La ejecución de `php tests/run_all.php` supera con éxito la totalidad de suites PHP Unit, JS Unit e Integración con 0 errores y 0 fallos, se certifica la ausencia de dependencias npm o Composer externas, y se verifica el cumplimiento estricto del Dualismo Lingüístico.

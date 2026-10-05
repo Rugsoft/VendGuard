@@ -27,6 +27,13 @@
  * 12. Inline form publishing a note through POST .../comments, refreshing the log without
  *     closing the modal and retaining the draft on failure (RF-05.3, RF-08.4).
  *
+ * T-IDM-12 extends this suite with:
+ * 13. Inline assignment and discard panels toggled from the fixed footer, with the
+ *     reactive 20-character counter disabling the discard confirmation (RF-07.3, RF-07.4).
+ * 14. Panel actions against the real endpoints: active technicians loaded from the users
+ *     list, assignment and soft-delete discard refreshing the file without closing the
+ *     modal, drafts retained on failure (RNF-06, Art. III.2 y V.1).
+ *
  * Dogma Vanilla: pure Node ESM suite, no external dependencies, mirrors the browser module graph.
  * Dualismo Lingüístico: assertions in English, user-facing copy in Spanish.
  */
@@ -86,6 +93,8 @@ function createInstance(overrides = {}) {
     errorMessage: '',
     photoZoomOpen: false,
     photoFailed: false,
+    isAssignPanelOpen: false,
+    isCancelPanelOpen: false,
     ...overrides,
     $emit: (event, payload) => { emitted.push({ event, payload }); },
     getEmitted: () => emitted
@@ -110,7 +119,7 @@ function createInstance(overrides = {}) {
 }
 
 console.log('======================================================================');
-console.log(' VendGuard: Frontend Test Suite - CoordinatorIncidentDetailModal (T-IDM-08..T-IDM-11)');
+console.log(' VendGuard: Frontend Test Suite - CoordinatorIncidentDetailModal (T-IDM-08..T-IDM-12)');
 console.log('======================================================================\n');
 
 // ---------------------------------------------------------------------
@@ -843,12 +852,180 @@ assert('13.6 Sealed states replace the form with a consultation notice',
   template.includes('data-testid="comments-sealed"') &&
   template.includes('La bitácora está sellada para este estado'));
 
+// ---------------------------------------------------------------------
+// GROUP 14: Inline panels scaffolding and lifecycle (T-IDM-12)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 14: Inline assignment and discard panels ---');
+
+const panelInstance = createInstance({ detail: detailFixture, incidentId: 142 });
+
+assert('14.1 Panels ship closed and live inside the scrollable body, not as nested modals',
+  panelInstance.isAssignPanelOpen === false && panelInstance.isCancelPanelOpen === false &&
+  template.includes('data-testid="assign-panel"') && template.includes('data-testid="cancel-panel"') &&
+  template.indexOf('data-testid="incident-detail-body"') < template.indexOf('data-testid="assign-panel"') &&
+  template.indexOf('data-testid="assign-panel"') < template.indexOf('data-testid="incident-detail-footer"') &&
+  (template.match(/role="dialog"/g) || []).length === 1);
+
+assert('14.2 Fixed footer carries the two operational triggers, gated by permissions (RF-07.1)',
+  template.includes('data-testid="incident-detail-assign-trigger"') &&
+  template.includes('v-if="canAssign && !isAssignPanelOpen"') &&
+  template.includes('data-testid="incident-detail-cancel-trigger"') &&
+  template.includes('v-if="canCancel && !isCancelPanelOpen"') &&
+  computed(panelInstance, 'canAssign') === true && computed(panelInstance, 'canCancel') === true);
+
+assert('14.3 Operational actions always target the numeric incident id',
+  computed(panelInstance, 'actionableIncidentId') === 142 &&
+  computed(createInstance({ detail: detailFixture, incidentId: 'INC-DEMO-0922' }), 'actionableIncidentId') === 142 &&
+  computed(createInstance({ detail: null, incidentId: 99 }), 'actionableIncidentId') === 99);
+
+let loadCalls = 0;
+const toggleInstance = createInstance({ detail: detailFixture });
+toggleInstance.loadTechnicians = () => { loadCalls++; };
+CoordinatorIncidentDetailModal.methods.openAssignPanel.call(toggleInstance);
+assert('14.4 Opening the assignment panel loads technicians once and closes the discard panel',
+  toggleInstance.isAssignPanelOpen === true && toggleInstance.isCancelPanelOpen === false && loadCalls === 1);
+
+toggleInstance.techniciansLoaded = true;
+CoordinatorIncidentDetailModal.methods.closeAssignPanel.call(toggleInstance);
+CoordinatorIncidentDetailModal.methods.openAssignPanel.call(toggleInstance);
+assert('14.5 Cached technicians are not re-fetched on every panel open',
+  toggleInstance.isAssignPanelOpen === true && loadCalls === 1);
+
+CoordinatorIncidentDetailModal.methods.openCancelPanel.call(toggleInstance);
+assert('14.6 Opening the discard panel closes the assignment panel (single inline panel)',
+  toggleInstance.isCancelPanelOpen === true && toggleInstance.isAssignPanelOpen === false);
+
+assert('14.7 Reactive counter counts real trimmed characters (Art. V.1)',
+  computed(createInstance({ cancelReason: '   ' }), 'cancelReasonLength') === 0 &&
+  computed(createInstance({ cancelReason: 'a'.repeat(19) }), 'isCancelReasonValid') === false &&
+  computed(createInstance({ cancelReason: 'a'.repeat(20) }), 'isCancelReasonValid') === true &&
+  computed(createInstance({ cancelReason: '  motivo suficientemente largo  ' }), 'isCancelReasonValid') === true &&
+  computed(createInstance({ cancelReason: ' ' + 'á'.repeat(20) + ' ' }), 'cancelReasonLength') === 20);
+
+assert('14.8 Discard panel wires the counter and the guarded confirmation button',
+  template.includes('data-testid="cancel-reason"') &&
+  template.includes('data-testid="cancel-counter"') && template.includes('/ 20 caracteres') &&
+  template.includes(':disabled="!isCancelReasonValid || isSubmittingCancel"'));
+
+assert('14.9 Reassignment stays hidden until the backend supports it (T-IDM-21)',
+  !template.includes('data-testid="incident-detail-reassign') &&
+  typeof CoordinatorIncidentDetailModal.methods.confirmReassign !== 'function');
+
+// ---------------------------------------------------------------------
+// GROUP 15: Panel actions against the real endpoints (T-IDM-12)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 15: Assignment and discard requests ---');
+
+const techniciansPayload = [
+  { id: 2, name: 'Jordi Técnico Ruta BCN', role: 'TECHNICIAN', is_active: true, active_assigned_incidents_count: 3 },
+  { id: 3, name: 'Marta Técnica Ruta BCN', role: 'TECHNICIAN', is_active: true, active_assigned_incidents_count: 0 }
+];
+let usersQuery = null;
+api.coordinator.getUsers = async (params) => { usersQuery = params; return techniciansPayload; };
+
+const loadInstance = createInstance({ detail: detailFixture });
+await CoordinatorIncidentDetailModal.methods.loadTechnicians.call(loadInstance);
+assert('15.1 Active technicians come from the users endpoint, never a hardcoded list',
+  usersQuery?.role === 'TECHNICIAN' && usersQuery?.status === 'active' &&
+  loadInstance.technicians.length === 2 && loadInstance.selectedTechnicianId === 2 &&
+  loadInstance.techniciansLoaded === true && loadInstance.isLoadingTechnicians === false);
+
+api.coordinator.getUsers = async () => { throw new ApiError(403, 'FORBIDDEN', 'Acceso denegado a la lista de usuarios.'); };
+const failedLoad = createInstance({ detail: detailFixture });
+await CoordinatorIncidentDetailModal.methods.loadTechnicians.call(failedLoad);
+assert('15.2 A failed technician load surfaces the reason and clears the spinner',
+  failedLoad.techniciansErrorMessage.includes('Acceso denegado') && failedLoad.isLoadingTechnicians === false);
+
+let assignArgs = null;
+let assignRefreshes = 0;
+api.coordinator.assignTechnician = async (incidentId, technicianId) => {
+  assignArgs = { incidentId, technicianId };
+  return { id: incidentId, status: 'ASSIGNED' };
+};
+const assignInstance = createInstance({
+  detail: detailFixture,
+  incidentId: 142,
+  isAssignPanelOpen: true,
+  selectedTechnicianId: 3
+});
+assignInstance.fetchDetail = async () => { assignRefreshes++; };
+await CoordinatorIncidentDetailModal.methods.confirmAssign.call(assignInstance);
+
+assert('15.3 Confirmed assignment refreshes the file and notifies the parent row',
+  assignArgs?.incidentId === 142 && assignArgs?.technicianId === 3 &&
+  assignInstance.isAssignPanelOpen === false && assignInstance.selectedTechnicianId === null &&
+  assignRefreshes === 1 &&
+  assignInstance.getEmitted().some((e) => e.event === 'incident-updated' && e.payload?.reason === 'assign') &&
+  assignInstance.isSubmittingAssign === false && assignInstance.assignErrorMessage === '');
+
+const assignByCode = createInstance({ detail: detailFixture, incidentId: 'INC-DEMO-0922', selectedTechnicianId: 2 });
+assignByCode.fetchDetail = async () => {};
+await CoordinatorIncidentDetailModal.methods.confirmAssign.call(assignByCode);
+assert('15.4 Assignment opened by ticket code still targets the numeric endpoint id',
+  assignArgs?.incidentId === 142 && assignArgs?.technicianId === 2);
+
+api.coordinator.assignTechnician = async () => {
+  throw new ApiError(422, 'INVALID_STATUS_FOR_ASSIGNMENT', 'Solo se pueden asignar incidencias en estado REGISTERED o REOPENED.');
+};
+const failedAssign = createInstance({ detail: detailFixture, incidentId: 142, isAssignPanelOpen: true, selectedTechnicianId: 2 });
+await CoordinatorIncidentDetailModal.methods.confirmAssign.call(failedAssign);
+assert('15.5 Failed assignment keeps the panel open with the API message',
+  failedAssign.isAssignPanelOpen === true &&
+  failedAssign.assignErrorMessage.includes('REGISTERED o REOPENED') &&
+  failedAssign.isSubmittingAssign === false);
+
+let cancelArgs = null;
+let cancelRefreshes = 0;
+api.coordinator.cancelIncident = async (incidentId, reason) => {
+  cancelArgs = { incidentId, reason };
+  return { id: incidentId, status: 'CANCELLED' };
+};
+
+const blockedCancel = createInstance({ detail: detailFixture, incidentId: 142, isCancelPanelOpen: true, cancelReason: 'motivo corto' });
+await CoordinatorIncidentDetailModal.methods.confirmCancel.call(blockedCancel);
+assert('15.6 A short reason never reaches the server and keeps the draft',
+  cancelArgs === null && blockedCancel.cancelErrorMessage.includes('20 caracteres') &&
+  blockedCancel.cancelReason === 'motivo corto' && blockedCancel.isCancelPanelOpen === true);
+
+const cancelInstance = createInstance({
+  detail: detailFixture,
+  incidentId: 142,
+  isCancelPanelOpen: true,
+  cancelReason: '  Avería duplicada confirmada telefónicamente con la sede; ya atendida en otro ticket.  '
+});
+cancelInstance.fetchDetail = async () => { cancelRefreshes++; };
+await CoordinatorIncidentDetailModal.methods.confirmCancel.call(cancelInstance);
+
+assert('15.7 Confirmed discard sends the trimmed reason, refreshes and notifies',
+  cancelArgs?.incidentId === 142 &&
+  cancelArgs?.reason === 'Avería duplicada confirmada telefónicamente con la sede; ya atendida en otro ticket.' &&
+  cancelInstance.cancelReason === '' && cancelInstance.isCancelPanelOpen === false &&
+  cancelRefreshes === 1 &&
+  cancelInstance.getEmitted().some((e) => e.event === 'incident-updated' && e.payload?.reason === 'cancel') &&
+  cancelInstance.isSubmittingCancel === false);
+
+api.coordinator.cancelIncident = async () => {
+  throw new ApiError(500, 'CANCELLATION_FAILED', 'No se pudo ejecutar el descarte lógico.');
+};
+const failedCancel = createInstance({
+  detail: detailFixture,
+  incidentId: 142,
+  isCancelPanelOpen: true,
+  cancelReason: 'Motivo perfectamente válido para reintentar el descarte.'
+});
+await CoordinatorIncidentDetailModal.methods.confirmCancel.call(failedCancel);
+assert('15.8 Failed discard keeps the panel open and the reason intact for a retry',
+  failedCancel.isCancelPanelOpen === true &&
+  failedCancel.cancelReason === 'Motivo perfectamente válido para reintentar el descarte.' &&
+  failedCancel.cancelErrorMessage.includes('descarte lógico') &&
+  failedCancel.isSubmittingCancel === false);
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 
 if (failures === 0) {
-  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-IDM-08..T-IDM-11 FULFILLED SUCCESSFULLY.');
+  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-IDM-08..T-IDM-12 FULFILLED SUCCESSFULLY.');
   console.log('======================================================================\n');
   process.exit(0);
 } else {
