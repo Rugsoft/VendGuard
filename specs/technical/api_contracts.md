@@ -292,10 +292,11 @@ Consulta el listado completo para supervisión y asignación (RF-05, RF-11).
 
 ---
 
-### 4.2 `PATCH /api/coordinator/incidents/{id}/assign` (Asignar Técnico)
-Asocia un técnico de campo único a la incidencia (RF-05).
+### 4.2 `PATCH /api/coordinator/incidents/{id}/assign` (Asignar o Reasignar Técnico)
+Asocia un técnico de campo único a la incidencia y, desde el modal de detalle del triaje, sustituye al responsable vigente por otro profesional con motivo justificado (RF-05, RF-07.3, Art. V.3).
 
-* **Request Body:**
+* **Autenticación:** Token interno con rol `COORDINATOR` (`401 Unauthorized` sin token o con token inválido; `403 Forbidden` con otro rol).
+* **Request Body (asignación inicial):**
 ```json
 {
   "technician_id": 2,
@@ -303,6 +304,18 @@ Asocia un técnico de campo único a la incidencia (RF-05).
   "urgency_override_reason": "Comprobado que la máquina no contiene comida perecedera en esta temporada."
 }
 ```
+* **Request Body (reasignación de un aviso con responsable vigente):**
+```json
+{
+  "technician_id": 7,
+  "reassignment_reason": "Reasignación por proximidad geográfica al centro con riesgo de rotura de la cadena de frío."
+}
+```
+* **Parámetros:**
+  * `technician_id` (int, obligatorio): ID de un técnico de ruta activo con rol `TECHNICIAN`.
+  * `urgency_override` / `urgency_override_reason` (string, opcionales): reclasificación de urgencia con motivo obligatorio cuando se envía la nueva clasificación.
+  * `reassignment_reason` (string, obligatorio en la reasignación): motivo justificado de **10 caracteres reales** mínimo tras recortar espacios. Se admite también el alias `reason`.
+* **Estados admitidos:** asignación inicial desde `REGISTERED` y `REOPENED`; reasignación desde `ASSIGNED`, `IN_PROGRESS` y `PENDING_PARTS`. La reasignación conserva el estado operativo y el hito `assigned_at` original (el instante del cambio queda fechado en el historial inmutable) y mantiene un único técnico responsable activo por incidencia.
 * **Respuesta Exitosa (`200 OK`):**
 ```json
 {
@@ -315,12 +328,28 @@ Asocia un técnico de campo único a la incidencia (RF-05).
   }
 }
 ```
+* **Errores de Validación / Negocio:**
+  * `400 Bad Request` (`INVALID_INCIDENT_ID`): el ID de ruta no es numérico.
+  * `401 Unauthorized` (`UNAUTHORIZED`) / `403 Forbidden` (`FORBIDDEN`).
+  * `404 Not Found` (`INCIDENT_NOT_FOUND`): la incidencia no existe o está borrada lógicamente.
+  * `422 Unprocessable` (`MISSING_TECHNICIAN_ID`): falta `technician_id` o no es un entero positivo.
+  * `422 Unprocessable` (`TECHNICIAN_NOT_FOUND`): no existe un usuario activo con rol `TECHNICIAN` para ese ID.
+  * `422 Unprocessable` (`INVALID_URGENCY`): la urgencia enviada no pertenece a `LOW, MEDIUM, HIGH, CRITICAL`.
+  * `422 Unprocessable` (`URGENCY_REASON_REQUIRED`): reclasificación de urgencia sin motivo justificado.
+  * `422 Unprocessable` (`INVALID_STATUS_FOR_ASSIGNMENT`): el estado no admite asignación ni reasignación (`RESOLVED`, `CLOSED`, `CANCELLED`).
+  * `422 Unprocessable` (`MISSING_REASSIGNMENT_REASON`): reasignación sin `reassignment_reason`.
+  * `422 Unprocessable` (`REASSIGNMENT_REASON_TOO_SHORT`): el motivo de la reasignación no alcanza los 10 caracteres reales.
+  * `422 Unprocessable` (`TECHNICIAN_ALREADY_ASSIGNED`): el destino es el responsable actual del aviso.
+  * `500 Server Error` (`ASSIGNMENT_FAILED`): fallo inesperado durante la asignación transaccional.
+* **Trazabilidad:** la acción deja un registro inmutable en `incident_history` con el actor, los estados de origen y destino y el motivo. La nota de reasignación reserva su texto final tras el marcador `Motivo: `, del que el servicio de detalle lee `technician.reassignment_reason` (apartado 4.4).
+* **Auditoría (RNF-04, Art. III.3):** la asignación inicial emite `INCIDENT_ASSIGNED` y la reasignación `INCIDENT_REASSIGNED` en `audit_log` con `entity_type = TICKET`, el coordinador autenticado como causante y el detalle en `new_state` (`status`, `assigned_technician_id` y, en la reasignación, `reassignment_reason`); `metadata` registra `previous_technician_id` y `new_technician_id` en la reasignación.
 
 ---
 
 ### 4.3 `PATCH /api/coordinator/incidents/{id}/cancel` (Descartar Aviso)
-Anulación lógica obligatoriamente justificada (RF-06).
+Anulación lógica obligatoriamente justificada con un motivo de **20 caracteres reales** mínimo (RF-06, RF-07.4, Art. III.2 y V.1).
 
+* **Autenticación:** Token interno con rol `COORDINATOR` (`401 Unauthorized` sin token o con token inválido; `403 Forbidden` con otro rol).
 * **Request Body:**
 ```json
 {
@@ -338,6 +367,18 @@ Anulación lógica obligatoriamente justificada (RF-06).
   }
 }
 ```
+* **Parámetros:**
+  * `cancellation_reason` (string, obligatorio): motivo del descarte, mínimo **20 caracteres reales** medidos con `mb_strlen()` sobre el texto ya recortado; los acentos y símbolos cuentan como un único carácter y el relleno con espacios no supera el umbral.
+* **Errores de Validación / Negocio:**
+  * `400 Bad Request` (`INVALID_INCIDENT_ID`): el ID de ruta no es numérico.
+  * `401 Unauthorized` (`UNAUTHORIZED`) / `403 Forbidden` (`FORBIDDEN`).
+  * `404 Not Found` (`INCIDENT_NOT_FOUND`): la incidencia no existe o está borrada lógicamente.
+  * `422 Unprocessable` (`MISSING_CANCELLATION_REASON`): falta el motivo o llega vacío tras recortar.
+  * `422 Unprocessable` (`CANCELLATION_REASON_TOO_SHORT`): el motivo no alcanza los 20 caracteres reales.
+  * `422 Unprocessable` (`INVALID_STATUS_FOR_CANCELLATION`): el estado actual no admite el descarte.
+  * `500 Server Error` (`CANCELLATION_FAILED`): fallo inesperado durante el descarte transaccional.
+* **Trazabilidad:** el descarte es un borrado lógico (`status = CANCELLED`) que preserva la fila íntegra y registra el evento inmutable en `incident_history` con el actor, la transición y el motivo; `incidents.cancellation_reason` y `incidents.cancelled_at` conservan el motivo y la fecha (Art. III).
+* **Auditoría en `audit_log` (RNF-04):** **pendiente de implementación**. El descarte aún no emite el evento `INCIDENT_CANCELLED` en `audit_log` que RNF-04 exige para las acciones del modal; el hueco quedó detectado al cerrar T-IDM-20 y aguarda decisión del Product Owner sobre la tarea que lo cierra.
 
 ---
 
@@ -350,7 +391,7 @@ Devuelve la ficha completa enriquecida que consume el modal de detalle del triaj
   * `incident`: cabecera del ticket (`ticket_code`, `status`, `status_label`, `urgency`, `urgency_label`, `is_reopened`, `reopened_at`, `reopened_reason`, `description`, `report_channel`, `photo_url`, `created_at`, `updated_at`).
   * `location`: sede cliente (`id`, `name`, `code`, `address`, `floor_zone`, `has_physical_reception`).
   * `machine`: máquina (`id`, `code`, `model`, `manufacturer`, `type`, `type_label`, `has_perishables`).
-  * `technician`: profesional asignado (`assigned`, `technician_id`, `name`, `operator_code`, `assigned_at`, `assigned_by_name`, `reassignment_reason`).
+  * `technician`: profesional asignado (`assigned`, `technician_id`, `name`, `operator_code`, `assigned_at`, `assigned_by_name`, `reassignment_reason` — motivo justificado de la última reasignación leído del historial inmutable; `null` mientras el aviso conserve a su primer responsable).
   * `timeline`: hitos del ciclo de vida (`created_at`, `assigned_at`, `started_at`, `paused_at`, `resolved_at`, `closed_at` y tiempos derivados en minutos).
   * `sla`: objetivo de cadena de frío (`has_sla_limit`, `sla_limit_hours`, `is_active_countdown`, `is_breached`, `minutes_remaining`, `historical_balance`, `sla_target_at`).
   * `technical_intervention`: `pause` (motivo y piezas solicitadas), `resolution` (diagnóstico, acción correctiva y piezas sustituidas con coste congelado) y `cancellation`.
