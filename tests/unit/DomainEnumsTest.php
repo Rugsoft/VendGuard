@@ -54,6 +54,37 @@ if (UrgencyLevel::CRITICAL->priorityRank() > UrgencyLevel::HIGH->priorityRank()
     $failures++;
 }
 
+// Paridad estricta con el módulo ESM compartido (IncidentStatusPermissions.js)
+$sharedModulePath = __DIR__ . '/../../public/assets/js/utils/IncidentStatusPermissions.js';
+if (file_exists($sharedModulePath)) {
+    $sharedJs = (string) file_get_contents($sharedModulePath);
+    $jsParityOk = true;
+
+    // 1. Cada caso de UrgencyLevel debe existir en URGENCY_LEVELS
+    foreach (UrgencyLevel::cases() as $case) {
+        $expectedLine = "  {$case->value}: '{$case->value}',";
+        $altLine = "  {$case->value}: '{$case->value}'";
+        if (!str_contains($sharedJs, $expectedLine) && !str_contains($sharedJs, $altLine)) {
+            $jsParityOk = false;
+        }
+    }
+
+    // 2. Paridad de rangos en URGENCY_RANKS (1=CRITICAL..4=LOW)
+    if (!str_contains($sharedJs, "[URGENCY_LEVELS.CRITICAL]: 1") ||
+        !str_contains($sharedJs, "[URGENCY_LEVELS.HIGH]: 2") ||
+        !str_contains($sharedJs, "[URGENCY_LEVELS.MEDIUM]: 3") ||
+        !str_contains($sharedJs, "[URGENCY_LEVELS.LOW]: 4")) {
+        $jsParityOk = false;
+    }
+
+    if ($jsParityOk) {
+        echo "      - Paridad estricta frontend/backend con IncidentStatusPermissions.js: [OK]\n";
+    } else {
+        echo "      - Paridad frontend/backend falló en IncidentStatusPermissions.js: [FALLO]\n";
+        $failures++;
+    }
+}
+
 if (UrgencyLevel::isValid('CRITICAL') && UrgencyLevel::isValid('low') && !UrgencyLevel::isValid('INVALID')) {
     echo "      - UrgencyLevel::isValid() valida correctamente: [OK]\n";
 } else {

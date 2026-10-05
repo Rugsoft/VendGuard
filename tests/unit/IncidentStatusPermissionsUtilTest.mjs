@@ -203,6 +203,29 @@ assert('5.4 JS mirror never widens the PHP assignable set',
   ASSIGNABLE_STATUSES.every(s => /IncidentStatus::' + s + '/.test(phpController.replace(/'/g, "")) === false ? true : true) &&
   ASSIGNABLE_STATUSES.every(s => phpController.includes(`IncidentStatus::${s}`)));
 
+const phpUrgencySource = readFileSync('src/Core/Domain/ValueObject/UrgencyLevel.php', 'utf8');
+const phpUrgencyCases = [...phpUrgencySource.matchAll(/case ([A-Z_]+) = '/g)].map(m => m[1]);
+assert('5.5 Every UrgencyLevel case in PHP exists in URGENCY_LEVELS',
+  phpUrgencyCases.length === 4 &&
+  phpUrgencyCases.every(u => Object.values(URGENCY_LEVELS).includes(u)) &&
+  Object.values(URGENCY_LEVELS).every(u => phpUrgencyCases.includes(u)));
+
+const phpRanksMatch = phpUrgencySource.match(/priorityRank\(\)[^{]*\{([\s\S]*?)\}/);
+const phpRankPairs = phpRanksMatch
+  ? [...phpRanksMatch[1].matchAll(/self::([A-Z_]+)\s*=>\s*(\d+)/g)].map(m => [m[1], Number(m[2])])
+  : [];
+const phpRankMap = Object.fromEntries(phpRankPairs);
+
+const isPriorityOrderingStrictlyPar = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].every((a, idx, arr) => {
+  return arr.slice(idx + 1).every(b => {
+    const phpHigher = phpRankMap[a] > phpRankMap[b];
+    const jsEarlier = URGENCY_RANKS[a] < URGENCY_RANKS[b];
+    return phpHigher && jsEarlier;
+  });
+});
+assert('5.6 Strict priority rank isomorphism between UrgencyLevel.php and URGENCY_RANKS',
+  phpRankPairs.length === 4 && isPriorityOrderingStrictlyPar);
+
 // ---------------------------------------------------------------------
 // TEST GROUP 6: Tray integration (single source in the view)
 // ---------------------------------------------------------------------
