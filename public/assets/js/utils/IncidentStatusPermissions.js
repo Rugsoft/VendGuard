@@ -110,6 +110,11 @@ export function isTerminalStatus(value) {
   return TERMINAL_STATUSES.includes(normalizeIncidentStatus(value));
 }
 
+/** True when the canonical status is RESOLVED (used for warranty window evaluation). */
+export function isResolvedStatus(value) {
+  return normalizeIncidentStatus(value) === INCIDENT_STATUSES.RESOLVED;
+}
+
 /** True when the canonical status is one of the open lifecycle statuses. */
 export function isActiveStatus(value) {
   return ACTIVE_STATUSES.includes(normalizeIncidentStatus(value));

@@ -16,6 +16,7 @@ import { api } from '../api.js';
 import { store } from '../store.js';
 import { ModalDialog } from './ModalDialog.js';
 import { IncidentBadge } from './IncidentBadge.js';
+import { INCIDENT_STATUSES, isResolvedStatus } from '../utils/IncidentStatusPermissions.js';
 
 export const ReopenTicketModal = {
   name: 'ReopenTicketModal',
@@ -61,6 +62,9 @@ export const ReopenTicketModal = {
       if (!this.machine) return '';
       return `${this.machine.code} · ${this.machine.model || 'Vending'} (${this.machine.floor_wing || 'Sede'})`;
     },
+    resolvedStatus() {
+      return INCIDENT_STATUSES.RESOLVED;
+    },
     /**
      * Calculates hours elapsed since incident resolution
      */
@@ -75,9 +79,8 @@ export const ReopenTicketModal = {
      * Whether warranty window (< 48 hours) is active
      */
     isWarrantyActive() {
-      // If status is not RESOLVED or RESUELTA, cannot reopen
-      const status = String(this.activeIncident?.status || '').toUpperCase();
-      if (status !== 'RESUELTA' && status !== 'RESOLVED') {
+      // If status is not RESOLVED, cannot reopen
+      if (!isResolvedStatus(this.activeIncident?.status)) {
         return false;
       }
       return this.hoursSinceResolution <= 48.0;
@@ -237,7 +240,7 @@ export const ReopenTicketModal = {
                   Garantía de 48h Activa
                 </span>
                 <IncidentBadge
-                  value="RESUELTA"
+                  :value="resolvedStatus"
                   type="status"
                   size="sm"
                 />

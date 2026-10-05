@@ -18,6 +18,7 @@ import { api } from '../api.js';
 import { store } from '../store.js';
 import { IncidentBadge } from '../components/IncidentBadge.js';
 import { ModalDialog } from '../components/ModalDialog.js';
+import { INCIDENT_STATUSES, normalizeIncidentStatus } from '../utils/IncidentStatusPermissions.js';
 import { TechnicianMetricsView } from './TechnicianMetricsView.js';
 import { TechnicianPreventiveRouteTab } from '../components/TechnicianPreventiveRouteTab.js';
 import { TechnicianChecklistModal } from '../components/TechnicianChecklistModal.js';
@@ -115,9 +116,10 @@ export const TechnicianRouteView = {
       let critical = 0;
 
       for (const inc of this.incidents) {
-        if (inc.status === 'ASSIGNED') assigned++;
-        if (inc.status === 'IN_PROGRESS') inProgress++;
-        if (inc.status === 'PENDING_PARTS') pendingParts++;
+        const status = normalizeIncidentStatus(inc.status);
+        if (status === INCIDENT_STATUSES.ASSIGNED) assigned++;
+        if (status === INCIDENT_STATUSES.IN_PROGRESS) inProgress++;
+        if (status === INCIDENT_STATUSES.PENDING_PARTS) pendingParts++;
         if (inc.urgency === 'CRITICAL') critical++;
       }
 
@@ -132,19 +134,24 @@ export const TechnicianRouteView = {
       let list = [...this.incidents];
 
       if (this.filterStatus !== 'ALL') {
-        list = list.filter(inc => inc.status === this.filterStatus);
+        const filterNorm = normalizeIncidentStatus(this.filterStatus);
+        list = list.filter(inc => normalizeIncidentStatus(inc.status) === filterNorm);
       }
 
       const urgencyOrder = { CRITICAL: 1, HIGH: 2, MEDIUM: 3, LOW: 4 };
-      const statusOrder = { IN_PROGRESS: 1, ASSIGNED: 2, PENDING_PARTS: 3 };
+      const statusOrder = {
+        [INCIDENT_STATUSES.IN_PROGRESS]: 1,
+        [INCIDENT_STATUSES.ASSIGNED]: 2,
+        [INCIDENT_STATUSES.PENDING_PARTS]: 3
+      };
 
       return list.sort((a, b) => {
         const uA = urgencyOrder[a.urgency] || 99;
         const uB = urgencyOrder[b.urgency] || 99;
         if (uA !== uB) return uA - uB;
 
-        const sA = statusOrder[a.status] || 99;
-        const sB = statusOrder[b.status] || 99;
+        const sA = statusOrder[normalizeIncidentStatus(a.status)] || 99;
+        const sB = statusOrder[normalizeIncidentStatus(b.status)] || 99;
         return sA - sB;
       });
     },
@@ -278,6 +285,16 @@ export const TechnicianRouteView = {
       this.errorMessage = '';
     },
 
+    isAssigned(incident) {
+      return normalizeIncidentStatus(incident?.status) === INCIDENT_STATUSES.ASSIGNED;
+    },
+    isInProgress(incident) {
+      return normalizeIncidentStatus(incident?.status) === INCIDENT_STATUSES.IN_PROGRESS;
+    },
+    isPendingParts(incident) {
+      return normalizeIncidentStatus(incident?.status) === INCIDENT_STATUSES.PENDING_PARTS;
+    },
+
     /**
      * Starts or resumes intervention on an incident (RF-07 / EARS 7.1, 7.3).
      * @param {Object} incident
@@ -294,7 +311,7 @@ export const TechnicianRouteView = {
         const startedAt = res?.data?.started_at || new Date().toISOString();
 
         // Update local object immediately for smooth responsive mobile UX
-        incident.status = 'IN_PROGRESS';
+        incident.status = INCIDENT_STATUSES.IN_PROGRESS;
         incident.started_at = startedAt;
 
         this.feedbackMessage = 'Intervención iniciada en máquina ' + (incident.machine?.code || incident.ticket_code) + '.';
@@ -330,7 +347,7 @@ export const TechnicianRouteView = {
      */
     handleIncidentPaused(event) {
       if (this.selectedIncident) {
-        this.selectedIncident.status = 'PENDING_PARTS';
+        this.selectedIncident.status = INCIDENT_STATUSES.PENDING_PARTS;
         this.selectedIncident.pending_parts_reason = event?.payload?.is_out_of_catalog
           ? event?.payload?.custom_part_description
           : 'Repuestos solicitados de catálogo';
@@ -358,7 +375,7 @@ export const TechnicianRouteView = {
         await api.technician.pauseIncident(this.selectedIncident.id, reason);
 
         // Update local state
-        this.selectedIncident.status = 'PENDING_PARTS';
+        this.selectedIncident.status = INCIDENT_STATUSES.PENDING_PARTS;
         this.selectedIncident.pending_parts_reason = reason;
 
         this.feedbackMessage = 'Avería pausada en espera de repuesto: "' + reason + '".';
@@ -928,7 +945,7 @@ export const TechnicianRouteView = {
             <!-- Status Context Highlights -->
             <!-- 1. Intervención en curso banner -->
             <div
-              v-if="incident.status === 'IN_PROGRESS'"
+              v-if="isInProgress(incident)"
               style="background-color: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; border-radius: var(--radius-interactive, 4px); padding: 6px 10px; font-size: 12px; font-weight: 500; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;"
             >
               <span style="font-size: 14px;">⏱️</span>
@@ -937,7 +954,7 @@ export const TechnicianRouteView = {
 
             <!-- 2. Pendiente de repuesto banner -->
             <div
-              v-if="incident.status === 'PENDING_PARTS'"
+              v-if="isPendingParts(incident)"
               style="background-color: #fefce8; border: 1px solid #fef08a; color: #854d0e; border-radius: var(--radius-interactive, 4px); padding: 8px 10px; font-size: 12px; margin-bottom: 12px;"
             >
               <strong>⚠️ En espera de repuesto:</strong>
@@ -950,7 +967,7 @@ export const TechnicianRouteView = {
             <div style="border-top: 1px solid var(--color-hairline, #c8cfda); padding-top: 10px;">
               <!-- Action Option 1: Start Intervention (when ASSIGNED) -->
               <button
-                v-if="incident.status === 'ASSIGNED'"
+                v-if="isAssigned(incident)"
                 type="button"
                 class="vg-btn vg-btn-primary"
                 style="width: 100%; height: 46px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"
@@ -962,7 +979,7 @@ export const TechnicianRouteView = {
               </button>
 
               <!-- Action Option 2: In Progress Controls (when IN_PROGRESS) -->
-              <div v-else-if="incident.status === 'IN_PROGRESS'" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <div v-else-if="isInProgress(incident)" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                 <button
                   type="button"
                   class="vg-btn vg-btn-secondary"
@@ -983,7 +1000,7 @@ export const TechnicianRouteView = {
 
               <!-- Action Option 3: Resume from Missing Parts (when PENDING_PARTS) -->
               <button
-                v-else-if="incident.status === 'PENDING_PARTS'"
+                v-else-if="isPendingParts(incident)"
                 type="button"
                 class="vg-btn vg-btn-primary"
                 style="width: 100%; height: 46px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"

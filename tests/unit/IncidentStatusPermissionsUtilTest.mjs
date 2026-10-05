@@ -25,6 +25,7 @@ import {
   canQuickCancel,
   canQuickCancelStatus,
   isTerminalStatus,
+  isResolvedStatus,
   isActiveStatus,
   isPendingAssignment,
   STATUS_LABELS,
@@ -139,6 +140,12 @@ assert('3.4 canQuickCancelStatus: status-only variant matches the incident predi
 assert('3.5 isTerminalStatus classifies the three closing statuses in both languages',
   isTerminalStatus('Resuelta') && isTerminalStatus('CERRADA') && isTerminalStatus('CANCELLED') &&
   !isTerminalStatus('REGISTRADA') && !isTerminalStatus('IN_PROGRESS'));
+
+assert('3.5b isResolvedStatus accurately identifies RESOLVED in both languages and rejects other statuses',
+  isResolvedStatus('RESOLVED') === true && isResolvedStatus('RESUELTA') === true &&
+  isResolvedStatus('Resuelta') === true && isResolvedStatus('CLOSED') === false &&
+  isResolvedStatus('ASSIGNED') === false && isResolvedStatus('') === false &&
+  isResolvedStatus(null) === false);
 
 assert('3.6 isActiveStatus is the exact complement of terminal for known statuses',
   ['REGISTERED', 'REOPENED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS']
@@ -288,7 +295,11 @@ assert('9.2 IncidentBadge imports the shared resolvers',
 assert('9.3 MachineCard holds no MACHINE_TYPE_MAP dictionary',
   !machineCardSource.includes('MACHINE_TYPE_MAP') &&
   machineCardSource.includes("from '../utils/IncidentStatusPermissions.js'"));
-assert('9.4 The module exports the full localized vocabulary',
+assert('9.4 TechnicianRouteView and ReopenTicketModal delegate status predicates and constants',
+  readFileSync('public/assets/js/views/TechnicianRouteView.js', 'utf8').includes("from '../utils/IncidentStatusPermissions.js'") &&
+  readFileSync('public/assets/js/components/ReopenTicketModal.js', 'utf8').includes("from '../utils/IncidentStatusPermissions.js'") &&
+  readFileSync('public/assets/js/components/MachineCard.js', 'utf8').includes('isResolvedStatus'));
+assert('9.5 The module exports the full localized vocabulary',
   (moduleSource.match(/export const (STATUS_LABELS|URGENCY_LABELS|BADGE_URGENCY_PALETTE|BADGE_STATUS_PALETTE|MACHINE_TYPE_LABELS|MACHINE_TYPE_ICONS)/g) || []).length === 6);
 
 // Summary

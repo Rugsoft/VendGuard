@@ -9,7 +9,7 @@
  */
 
 import { IncidentBadge } from './IncidentBadge.js';
-import { MACHINE_TYPE_LABELS, MACHINE_TYPE_ICONS, isPerishableMachineType } from '../utils/IncidentStatusPermissions.js';
+import { MACHINE_TYPE_LABELS, MACHINE_TYPE_ICONS, isPerishableMachineType, isResolvedStatus } from '../utils/IncidentStatusPermissions.js';
 
 // Machine-type labels, icons and the sanitary perishable rule live in the shared
 // module utils/IncidentStatusPermissions.js (mirrors MachineType.php); unknown
@@ -40,8 +40,7 @@ export const MachineCard = {
     },
     isUnderWarranty() {
       if (!this.activeIncident) return false;
-      const status = String(this.activeIncident.status || '').toUpperCase();
-      return status === 'RESUELTA' || status === 'RESOLVED';
+      return isResolvedStatus(this.activeIncident.status);
     },
     typeInfo() {
       const type = this.machine?.machine_type;

@@ -31,6 +31,7 @@ export const CANONICAL_STATUS_MAP = Object.freeze({ REGISTERED: 'REGISTERED', RE
 | `canQuickAssign(incident): boolean` | EARS 5.5: `true` solo si el estado canónico ∈ `ASSIGNABLE_STATUSES`. |
 | `canQuickCancel(incident): boolean` | EARS 6.4: `true` si el estado canónico ∈ `ACTIVE_STATUSES`; estado vacío o desconocido → `false` (fail-safe con acción destructiva). |
 | `isTerminalStatus(value): boolean` | Estado canónico ∈ `TERMINAL_STATUSES`. |
+| `isResolvedStatus(value): boolean` | Estado canónico === `RESOLVED` (identificación de tickets resueltos para ventana de garantía y reaperturas). |
 | `isActiveStatus(value): boolean` | Estado canónico ∈ `ACTIVE_STATUSES`. |
 | `isPendingAssignment(value): boolean` | Estado ∈ `ASSIGNABLE_STATUSES` **o** `assigned_technician_id` vacío; replica el semáforo SLA previo de la bandeja (`slaBreachedIncidents`). |
 
@@ -40,6 +41,8 @@ Todas aceptan el incidente completo (`{ status, assigned_technician_id }`) o el 
 
 - **`CoordinatorDashboardView.js`** (bandeja): elimina `STATUS_CANONICAL_MAP`, `normalizeStatus` y las 6 listas; importa el módulo y delega `canQuickAssign`/`canQuickCancel` (plantilla intacta: mismos `v-if`), `filteredIncidents`, `metrics`, `slaBreachedIncidents`, el bloqueo del bulk-assign del mapa y el filtro de incidencias pendientes. El fichero queda **cero literales de estado**.
 - **`CoordinatorIncidentDetailModal.js`** (ficha): sin cambios funcionales; sigue consumiendo `permissions` del backend. Queda documentado en su cabecera que las reglas espejo viven en el módulo utilitario.
+- **`TechnicianRouteView.js`** (ruta móvil del técnico): consume `INCIDENT_STATUSES` y `normalizeIncidentStatus` para métricas de ruta (`routeMetrics`), filtrado y ordenación operacional (`filteredIncidents`), transiciones inmediatas de estado local y predicados en plantilla (`isAssigned`, `isInProgress`, `isPendingParts`).
+- **`MachineCard.js`** y **`ReopenTicketModal.js`** (sede / portal de ubicación): delegan la comprobación de estado de garantía y elegibilidad de reapertura en `isResolvedStatus` e `INCIDENT_STATUSES.RESOLVED`, eliminando literales duplicados `'RESUELTA' || 'RESOLVED'`.
 
 ## 4. Verificación
 
