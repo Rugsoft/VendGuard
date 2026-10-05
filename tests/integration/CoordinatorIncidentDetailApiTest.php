@@ -13,17 +13,17 @@ declare(strict_types=1);
  *   2. PATCH .../assign performs the assignment launched from the modal (RF-07.3) and persists
  *      the immutable INCIDENT_ASSIGNED event in audit_log (RNF-04, Art. III.3).
  *   3. PATCH .../cancel executes the justified soft-delete discard with a valid reason (RF-07.4,
- *      Art. III.2) leaving the full trail in incident_history; short reasons are rejected with
- *      HTTP 422 CANCELLATION_REASON_TOO_SHORT (T-IDM-20) without persisting anything.
+ *      Art. III.2) leaving the full trail in incident_history and the immutable
+ *      INCIDENT_CANCELLED event in audit_log (RNF-04, Art. III.3); short reasons are rejected
+ *      with HTTP 422 CANCELLATION_REASON_TOO_SHORT (T-IDM-20) without persisting anything.
  *   4. POST .../comments publishes internal workshop notes (RF-05.2, RF-05.3) persisted with the
  *      immutable INCIDENT_COMMENT_ADDED event in audit_log, and the enriched detail exposes them
  *      with their visibility flag.
  *   5. RBAC: 401 without a token, 403 with a technician token (Art. V.4 defense in depth).
  *
- * Known documented gap (api_contracts.md section 4.3): the discard still leaves its audit trail
- * in incident_history and the incidents columns while the INCIDENT_CANCELLED emission into
- * audit_log remains pending implementation (RNF-04); this suite therefore certifies the
- * discard trail through incident_history and does not assert the missing audit_log event.
+ * The discard audit trail is certified on both surfaces: the incident_history transition
+ * rows and the INCIDENT_CANCELLED event in audit_log carrying the reason, the timestamp
+ * and the authenticated coordinator as the actor.
  *
  * Dogma Vanilla: PHP 8.2 strict types, PDO against the real database, no external libraries.
  * Dualismo Linguistico: identifiers in English, test titles and messages in Spanish.
@@ -337,14 +337,25 @@ $historyStmt->execute([':id' => $incDetail->getId()]);
 $lastHistory = $historyStmt->fetch(PDO::FETCH_ASSOC);
 $assert("5.6 Historial inmutable: ASSIGNED => CANCELLED con motivo y coordinador", $lastHistory !== false && ($lastHistory['from_status'] ?? null) === 'ASSIGNED' && ($lastHistory['to_status'] ?? null) === 'CANCELLED' && str_contains((string)($lastHistory['action_note'] ?? ''), 'duplicada') && (int)($lastHistory['user_id'] ?? 0) === $coordinatorId);
 
-// 5.7 El detalle en modo consulta refleja el descarte y sella los permisos (RF-07.2, RF-04.4)
+// Evento inmutable INCIDENT_CANCELLED en audit_log (RNF-04, Art. III.3, RF-07.4)
+$cancelAuditStmt = $pdo->prepare("SELECT * FROM audit_log WHERE entity_type = 'TICKET' AND entity_id = :id AND action = 'INCIDENT_CANCELLED' ORDER BY id DESC LIMIT 1");
+$cancelAuditStmt->execute([':id' => $incDetail->getId()]);
+$cancelAudit = $cancelAuditStmt->fetch(PDO::FETCH_ASSOC);
+$assert("5.7 Evento INCIDENT_CANCELLED persistido en audit_log", $cancelAudit !== false, 'Sin filas de auditoría del descarte.');
+if ($cancelAudit !== false) {
+    $cancelState    = json_decode((string)$cancelAudit['new_state'], true) ?? [];
+    $cancelMetadata = json_decode((string)$cancelAudit['metadata'], true) ?? [];
+    $assert("5.7 audit_log: motivo del descarte, fecha y actor coordinador", ($cancelState['cancellation_reason'] ?? null) === $discardReason && isset($cancelState['cancelled_at']) && (int)($cancelAudit['user_id'] ?? 0) === $coordinatorId && ($cancelMetadata['ticket_code'] ?? null) === $incDetail->getTicketCode());
+}
+
+// 5.8 El detalle en modo consulta refleja el descarte y sella los permisos (RF-07.2, RF-04.4)
 $req        = new Request(method: 'GET', path: "/api/coordinator/incidents/{$incDetail->getId()}/detail", headers: $authHdr);
 $res        = $router->dispatch($req);
 $detailData = $res->getDecodedBody()['data'] ?? [];
-$assert("5.7 Detalle: estado CANCELLED con bloque de cancelación justificada (RF-04.4)", ($detailData['incident']['status'] ?? null) === 'CANCELLED' && ($detailData['technical_intervention']['cancellation']['is_cancelled'] ?? false) === true);
-$assert("5.8 Detalle: acciones operativas inhabilitadas en estado terminal (RF-07.2)", ($detailData['permissions']['can_assign'] ?? true) === false && ($detailData['permissions']['can_cancel'] ?? true) === false && ($detailData['permissions']['can_reassign'] ?? true) === false && ($detailData['permissions']['can_add_comment'] ?? true) === false);
+$assert("5.8 Detalle: estado CANCELLED con bloque de cancelación justificada (RF-04.4)", ($detailData['incident']['status'] ?? null) === 'CANCELLED' && ($detailData['technical_intervention']['cancellation']['is_cancelled'] ?? false) === true);
+$assert("5.9 Detalle: acciones operativas inhabilitadas en estado terminal (RF-07.2)", ($detailData['permissions']['can_assign'] ?? true) === false && ($detailData['permissions']['can_cancel'] ?? true) === false && ($detailData['permissions']['can_reassign'] ?? true) === false && ($detailData['permissions']['can_add_comment'] ?? true) === false);
 
-// 5.9 La bitácora de un ticket descartado está sellada (RF-07.2, Art. V.6)
+// 5.10 La bitácora de un ticket descartado está sellada (RF-07.2, Art. V.6)
 $req = new Request(
     method: 'POST',
     path: "/api/coordinator/incidents/{$incDetail->getId()}/comments",
@@ -352,7 +363,7 @@ $req = new Request(
     headers: $authHdr
 );
 $res = $router->dispatch($req);
-$assert("5.9 Comentario sobre ticket descartado => 422 COMMENT_WINDOW_CLOSED", $res->getStatusCode() === 422 && ($res->getDecodedBody()['error']['code'] ?? '') === 'COMMENT_WINDOW_CLOSED');
+$assert("5.10 Comentario sobre ticket descartado => 422 COMMENT_WINDOW_CLOSED", $res->getStatusCode() === 422 && ($res->getDecodedBody()['error']['code'] ?? '') === 'COMMENT_WINDOW_CLOSED');
 
 // =========================================================================
 // CASO 6: Prueba HTTP real vía cURL contra 127.0.0.1:8000

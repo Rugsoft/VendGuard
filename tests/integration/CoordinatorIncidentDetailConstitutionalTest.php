@@ -286,6 +286,24 @@ $assert(
     $row !== false && ($row['status'] ?? null) === 'CANCELLED' && ($row['cancellation_reason'] ?? null) === $reasonThreshold && ($row['deleted_at'] ?? null) === null
 );
 
+// Evento inmutable INCIDENT_CANCELLED en audit_log (RNF-04, Art. III.3, RF-07.4)
+$cancelAuditStmt = $pdo->prepare("SELECT * FROM audit_log WHERE entity_type = 'TICKET' AND entity_id = :id AND action = 'INCIDENT_CANCELLED' ORDER BY id DESC LIMIT 1");
+$cancelAuditStmt->execute([':id' => $incV1->getId()]);
+$cancelAudit = $cancelAuditStmt->fetch(PDO::FETCH_ASSOC);
+$assert(
+    '2.7 Evento INCIDENT_CANCELLED persistido en audit_log (RNF-04, Art. III.3)',
+    $cancelAudit !== false,
+    'Sin filas de auditoría del descarte.'
+);
+if ($cancelAudit !== false) {
+    $cancelState    = json_decode((string)$cancelAudit['new_state'], true) ?? [];
+    $cancelMetadata = json_decode((string)$cancelAudit['metadata'], true) ?? [];
+    $assert(
+        '2.7 audit_log: motivo íntegro, fecha de descarte y actor coordinador',
+        ($cancelState['cancellation_reason'] ?? null) === $reasonThreshold && isset($cancelState['cancelled_at']) && (int)($cancelAudit['user_id'] ?? 0) === $coordinatorId && ($cancelMetadata['ticket_code'] ?? null) === $incV1->getTicketCode()
+    );
+}
+
 // =========================================================================
 // CASO 3: Art. V.4 / RNF-05 - Enmascaramiento irrevocable en la respuesta JSON
 // El expediente lleva un reintegro BIZUM + transferencia con teléfono e IBAN

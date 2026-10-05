@@ -433,6 +433,8 @@ class CoordinatorController
      * para que acentos y símbolos cuenten como un único carácter y los espacios de
      * relleno no sirvan para superar el umbral.
      * Mantiene íntegra la fila en base de datos (Soft Delete / trazabilidad).
+     * Cada descarte ejecutado deja constancia inmutable del evento INCIDENT_CANCELLED
+     * en `audit_log` con el coordinador que lo autorizó (RNF-04, Art. III.3, RF-07.4).
      * 
      * Respuestas: 200 OK con el ticket descartado; 400 si el ID de ruta no es numérico;
      * 422 `MISSING_CANCELLATION_REASON` si el motivo falta o está vacío; 422
@@ -498,7 +500,29 @@ class CoordinatorController
             return Response::error('CANCELLATION_FAILED', $e->getMessage(), 500);
         }
 
-        // 8. Respuesta exitosa (contrato 4.3)
+        // 8. Evento inmutable en `audit_log` con el coordinador autenticado (RNF-04,
+        //    Art. III.3, RF-07.4): cierra el ciclo de auditoría del descarte que las
+        //    acciones del modal del Módulo 09 ya exigían para asignación y comentarios.
+        $actor = $this->extractActor($request);
+        $this->auditLogger->logTicketEvent(
+            ticketId: $incidentId,
+            action: 'INCIDENT_CANCELLED',
+            user: $actor,
+            previousState: [
+                'status' => $incident->getStatus()->value,
+                'assigned_technician_id' => $incident->getAssignedTechnicianId(),
+            ],
+            newState: [
+                'status' => $cancelled->getStatus()->value,
+                'cancellation_reason' => $reason,
+                'cancelled_at' => $cancelled->getCancelledAt(),
+            ],
+            metadata: [
+                'ticket_code' => $incident->getTicketCode(),
+            ]
+        );
+
+        // 9. Respuesta exitosa (contrato 4.3)
         return Response::json([
             'id'           => $cancelled->getId(),
             'status'       => $cancelled->getStatus()->value,

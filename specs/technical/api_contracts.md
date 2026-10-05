@@ -378,7 +378,7 @@ Anulación lógica obligatoriamente justificada con un motivo de **20 caracteres
   * `422 Unprocessable` (`INVALID_STATUS_FOR_CANCELLATION`): el estado actual no admite el descarte.
   * `500 Server Error` (`CANCELLATION_FAILED`): fallo inesperado durante el descarte transaccional.
 * **Trazabilidad:** el descarte es un borrado lógico (`status = CANCELLED`) que preserva la fila íntegra y registra el evento inmutable en `incident_history` con el actor, la transición y el motivo; `incidents.cancellation_reason` y `incidents.cancelled_at` conservan el motivo y la fecha (Art. III).
-* **Auditoría en `audit_log` (RNF-04):** **pendiente de implementación**. El descarte aún no emite el evento `INCIDENT_CANCELLED` en `audit_log` que RNF-04 exige para las acciones del modal; el hueco quedó detectado al cerrar T-IDM-20 y aguarda decisión del Product Owner sobre la tarea que lo cierra.
+* **Auditoría en `audit_log` (RNF-04):** cada descarte ejecutado emite el evento inmutable `INCIDENT_CANCELLED` con el coordinador que lo autorizó. `previous_state` conserva el estado y el técnico responsable previos, `new_state` registra el nuevo estado, el motivo del descarte y su marca temporal, y `metadata` incluye el `ticket_code`. El rastro permanece además en `incident_history` y en las columnas del soft delete (Art. III).
 
 ---
 
