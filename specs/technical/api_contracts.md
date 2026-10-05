@@ -341,6 +341,111 @@ Anulación lógica obligatoriamente justificada (RF-06).
 
 ---
 
+### 4.4 `GET /api/coordinator/incidents/{id}/detail` (Ficha Integral del Expediente)
+Devuelve la ficha completa enriquecida que consume el modal de detalle del triaje (Módulo 09, RF-01 a RF-06). Consolida en una única transacción de lectura los metadatos de sede y máquina, el cronograma del ciclo de vida, el SLA de frío, la intervención técnica, la bitácora, el reintegro enmascarado y la matriz de permisos (RNF-01).
+
+* **Autenticación:** Token interno con rol `COORDINATOR` (`401 Unauthorized` sin token o con token inválido; `403 Forbidden` con otro rol).
+* **Parámetros de Ruta:** `id` — ID primario (entero positivo) o código de ticket con prefijo `#` opcional (ej. `INC-2026-0142` o `%23INC-2026-0142` si viaja codificado en la URL).
+* **Respuesta Exitosa (`200 OK`):** la envolvente canónica con los diez bloques del contrato, en su orden publicado:
+  * `incident`: cabecera del ticket (`ticket_code`, `status`, `status_label`, `urgency`, `urgency_label`, `is_reopened`, `reopened_at`, `reopened_reason`, `description`, `report_channel`, `photo_url`, `created_at`, `updated_at`).
+  * `location`: sede cliente (`id`, `name`, `code`, `address`, `floor_zone`, `has_physical_reception`).
+  * `machine`: máquina (`id`, `code`, `model`, `manufacturer`, `type`, `type_label`, `has_perishables`).
+  * `technician`: profesional asignado (`assigned`, `technician_id`, `name`, `operator_code`, `assigned_at`, `assigned_by_name`, `reassignment_reason`).
+  * `timeline`: hitos del ciclo de vida (`created_at`, `assigned_at`, `started_at`, `paused_at`, `resolved_at`, `closed_at` y tiempos derivados en minutos).
+  * `sla`: objetivo de cadena de frío (`has_sla_limit`, `sla_limit_hours`, `is_active_countdown`, `is_breached`, `minutes_remaining`, `historical_balance`, `sla_target_at`).
+  * `technical_intervention`: `pause` (motivo y piezas solicitadas), `resolution` (diagnóstico, acción correctiva y piezas sustituidas con coste congelado) y `cancellation`.
+  * `comments`: bitácora cronológica; `is_internal` distingue los comentarios públicos de las notas internas de taller.
+  * `refund`: expediente de reintegro vinculado (`has_refund`, importe, estado y datos de contacto y pago enmascarados en servidor; Art. V.4).
+  * `permissions`: matriz operativa del estado (`can_assign`, `can_reassign`, `can_cancel`, `can_add_comment`).
+* **Ejemplo de respuesta (bloques abreviados):**
+```json
+{
+  "success": true,
+  "data": {
+    "incident": {
+      "id": 142,
+      "ticket_code": "INC-2026-0142",
+      "status": "PENDING_PARTS",
+      "status_label": "Pendiente de repuestos",
+      "urgency": "CRITICAL",
+      "urgency_label": "Crítica",
+      "is_reopened": false,
+      "description": "El compresor no arranca y los sándwiches superan los 9°C.",
+      "report_channel": "QR_CODE",
+      "created_at": "2026-10-01 08:15:00",
+      "updated_at": "2026-10-02 12:00:00"
+    },
+    "location": { "id": 1, "name": "Hospital del Mar", "code": "SEDE-BCN-01", "floor_zone": "Planta Baja - Urgencias", "has_physical_reception": true },
+    "machine": { "id": 10, "code": "VEND-0101", "model": "FAS Perla Fast Cold", "manufacturer": null, "type": "PERISHABLE_FOOD", "type_label": "Alimentos perecederos (Sándwiches y lácteos frescos)", "has_perishables": true },
+    "technician": { "assigned": true, "technician_id": 4, "name": "Jordi Cruz", "operator_code": "OP-BCN-04", "assigned_at": "2026-10-01 08:30:00", "assigned_by_name": "Coordinación Central", "reassignment_reason": null },
+    "timeline": { "created_at": "2026-10-01 08:15:00", "assigned_at": "2026-10-01 08:30:00", "started_at": "2026-10-01 09:10:00", "paused_at": "2026-10-01 09:45:00", "resolved_at": null, "closed_at": null, "time_to_assign_minutes": 15, "time_to_first_response_minutes": 55, "total_elapsed_minutes": 180 },
+    "sla": { "has_sla_limit": true, "sla_limit_hours": 4.0, "is_active_countdown": true, "is_breached": false, "minutes_remaining": 60, "historical_balance": "Tiempo restante: 1 h 0 min", "sla_target_at": "2026-10-01 12:15:00" },
+    "technical_intervention": {
+      "pause": { "is_paused": true, "reason": "Fallo en condensador de arranque y relé térmico del compresor.", "requested_parts": [ { "spare_part_id": 12, "part_code": "SP-FAS-RELAY-01", "description": "Relé Térmico Compresor 230V", "quantity": 1, "is_out_of_catalog": false, "justification": null } ] },
+      "resolution": { "is_resolved": false, "diagnosis": null, "corrective_action": null, "replaced_parts_declared": false, "replaced_parts": [], "total_parts_cost": 0.0 },
+      "cancellation": { "is_cancelled": false, "cancelled_at": null, "cancelled_by_name": null, "reason": null }
+    },
+    "comments": [ { "id": 86, "author_type": "TECHNICIAN", "author_name": "Jordi Cruz", "comment_text": "Comprobada fuga en bandeja de desescarche.", "is_internal": true, "created_at": "2026-10-01 09:46:00" } ],
+    "refund": { "has_refund": true, "refund_id": 5, "claim_code": "REF-2026-00005", "amount": 2.5, "compensation_method": "BIZUM", "status": "REQUIRES_COORDINATOR_APPROVAL", "contact_phone_masked": "6** *** 789", "iban_masked": null, "technician_finding": "FOUND_PHYSICAL", "cash_custody_action": "HELD_FOR_CENTRAL", "refund_tab_url": "#refunds?id=5" },
+    "permissions": { "can_assign": false, "can_reassign": true, "can_cancel": true, "can_add_comment": true }
+  }
+}
+```
+* **Errores de Validación / Negocio:**
+  * `400 Bad Request` (`INVALID_INCIDENT_IDENTIFIER`): identificador de ruta vacío, no positivo o con caracteres no admitidos.
+  * `401 Unauthorized` (`UNAUTHORIZED`) / `403 Forbidden` (`FORBIDDEN`).
+  * `404 Not Found` (`INCIDENT_NOT_FOUND`): el ticket no existe o está borrado lógicamente.
+* **Consideraciones Técnicas:**
+  * Endpoint estrictamente de lectura: abre una única transacción de lectura y no escribe ni muta nada (Art. III, RNF-04).
+  * Los datos completos de teléfono e IBAN del consumidor nunca salen del servidor; el enmascaramiento se resuelve en el DTO (Art. V.4, RNF-05).
+
+---
+
+### 4.5 `POST /api/coordinator/incidents/{id}/comments` (Añadir Comentario o Nota Interna de Taller)
+Registra una anotación en la bitácora de la incidencia desde el modal de detalle y deja constancia inmutable del evento en `audit_log` (Módulo 09, RF-05.3, RNF-04).
+
+* **Autenticación:** Token interno con rol `COORDINATOR`.
+* **Parámetros de Ruta:** `id` — ID primario o código de ticket con `#` opcional (mismo contrato que el apartado 4.4).
+* **Request Body:**
+```json
+{
+  "comment_text": "Revisado compresor en taller; pieza en camino desde almacén central.",
+  "is_internal": true
+}
+```
+  * `comment_text` (string, obligatorio): mínimo **5 caracteres reales** tras recortar espacios en blanco.
+  * `is_internal` (boolean, opcional, por defecto `false`): `false` publica el comentario en la bitácora visible del portal de sede; `true` lo marca como nota interna confidencial de taller. Se admiten igualmente `1` y `0`.
+* **Respuesta Exitosa (`201 Created`):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": 341,
+    "incident_id": 142,
+    "author_type": "COORDINATOR",
+    "user_id": 2,
+    "author_name": "Coordinación",
+    "comment_text": "Revisado compresor en taller; pieza en camino desde almacén central.",
+    "photo_path": null,
+    "is_internal": true,
+    "created_at": "2026-10-05 12:00:00",
+    "ticket_code": "INC-2026-0142"
+  },
+  "message": "Comentario añadido correctamente a la bitácora de la incidencia."
+}
+```
+* **Errores de Validación / Negocio:**
+  * `400 Bad Request` (`INVALID_INCIDENT_IDENTIFIER`).
+  * `401 Unauthorized` (`UNAUTHORIZED`) / `403 Forbidden` (`FORBIDDEN`).
+  * `404 Not Found` (`INCIDENT_NOT_FOUND`).
+  * `422 Unprocessable` (`MISSING_COMMENT_TEXT`): falta `comment_text` o llega vacío tras recortar.
+  * `422 Unprocessable` (`COMMENT_TOO_SHORT`): el texto no alcanza los 5 caracteres reales.
+  * `422 Unprocessable` (`INVALID_IS_INTERNAL`): el indicador no es un booleano reconocible.
+  * `422 Unprocessable` (`COMMENT_WINDOW_CLOSED`): bitácora sellada en tickets `CLOSED`/`CANCELLED` (Art. III) o ventana de garantía de 48 horas vencida en tickets `RESOLVED` (Art. V.6).
+* **Auditoría (Art. III.3):** cada escritura emite un evento `INCIDENT_COMMENT_ADDED` en `audit_log` con `entity_type = TICKET`, el `entity_id` de la incidencia, el coordinador autenticado como causante (`user_id`, `user_role`, `user_name`) y el detalle del comentario en `new_state` (`comment_id`, `author_type`, `is_internal`, `comment_text`); `metadata.visibility` registra `PUBLIC` o `INTERNAL`.
+
+---
+
 ## 5. Módulo de Técnico de Campo (Vista Móvil "Mi Ruta")
 
 ### 5.1 `GET /api/technician/my-route`
