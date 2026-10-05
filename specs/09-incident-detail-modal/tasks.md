@@ -133,7 +133,7 @@
   * **Dependencias:** T-IDM-07, T-IDM-15, T-IDM-20
   * **Hecho cuando:** La ejecución de `php tests/run_all.php` (o test individual contra MariaDB real) pasa al 100% en verde evaluando: endpoint de detalle enriquecido, asignación técnica desde modal, descarte justificado con motivo válido, rechazo con HTTP 422 ante motivos cortos, adición de notas de taller y persistencia de eventos en `audit_log`.
 
-- [ ] **T-IDM-18: Implementar suite de blindaje constitucional y segregación de datos `CoordinatorIncidentDetailConstitutionalTest.php`**
+- [x] **T-IDM-18: Implementar suite de blindaje constitucional y segregación de datos `CoordinatorIncidentDetailConstitutionalTest.php`**
   * **Requisitos:** Constitución Art. II, Art. III, Art. V.1, Art. V.4, RNF-04, RNF-05
   * **Dependencias:** T-IDM-17, T-IDM-20
   * **Hecho cuando:** La suite pasa al 100% en verde certificando: (1) Inviolabilidad de datos (cero `DELETE FROM`), (2) Validación estricta $\ge 20$ caracteres en descartes, (3) Enmascaramiento irrevocable de teléfonos e IBANs en la respuesta JSON, y (4) Denegación de acceso 403 Forbidden para roles de sede y técnicos.
