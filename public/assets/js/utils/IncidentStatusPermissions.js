@@ -152,6 +152,22 @@ export const STATUS_LABELS = Object.freeze({
   CANCELLED: 'Cancelada'
 });
 
+/** Canonical urgency levels, mirroring UrgencyLevel.php (English canonical keys). */
+export const URGENCY_LEVELS = Object.freeze({
+  CRITICAL: 'CRITICAL',
+  HIGH: 'HIGH',
+  MEDIUM: 'MEDIUM',
+  LOW: 'LOW'
+});
+
+/** Priority ranks for deterministic sorting (1 = highest priority / CRITICAL first). */
+export const URGENCY_RANKS = Object.freeze({
+  [URGENCY_LEVELS.CRITICAL]: 1,
+  [URGENCY_LEVELS.HIGH]: 2,
+  [URGENCY_LEVELS.MEDIUM]: 3,
+  [URGENCY_LEVELS.LOW]: 4
+});
+
 /**
  * Localized Spanish labels for urgencies. CRITICAL uses the short badge variant:
  * the full PHP label ('Crítica (Riesgo Alimentario)') is served by the API where
@@ -175,6 +191,20 @@ const URGENCY_KEY_ALIASES = Object.freeze({
   LOW: 'LOW',
   BAJA: 'LOW'
 });
+
+/**
+ * Normalizes any urgency value (Spanish or English, casing, whitespace, accents)
+ * into canonical English UrgencyLevel key. Unknown values return upper-cased.
+ */
+export function normalizeUrgency(value) {
+  const key = normalizeBadgeKey(value);
+  return URGENCY_KEY_ALIASES[key] || key;
+}
+
+/** True when the urgency level is CRITICAL. */
+export function isCriticalUrgency(value) {
+  return normalizeUrgency(value) === URGENCY_LEVELS.CRITICAL;
+}
 
 /** Docker-design palette per urgency (semantic colors + CSS class hook). */
 export const BADGE_URGENCY_PALETTE = Object.freeze({

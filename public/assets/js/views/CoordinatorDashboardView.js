@@ -19,7 +19,16 @@
 
 import { api } from '../api.js';
 import { store } from '../store.js';
-import { canQuickAssign, canQuickCancel, isActiveStatus, isPendingAssignment, isTerminalStatus, normalizeIncidentStatus } from '../utils/IncidentStatusPermissions.js';
+import {
+  canQuickAssign,
+  canQuickCancel,
+  isActiveStatus,
+  isCriticalUrgency,
+  isPendingAssignment,
+  isTerminalStatus,
+  normalizeIncidentStatus,
+  normalizeUrgency
+} from '../utils/IncidentStatusPermissions.js';
 import { IncidentBadge } from '../components/IncidentBadge.js';
 import { ModalDialog } from '../components/ModalDialog.js';
 import { QrLabelModal } from '../components/QrLabelModal.js';
@@ -159,7 +168,7 @@ export const CoordinatorDashboardView = {
 
     slaBreachedIncidents() {
       return this.incidents.filter(inc => {
-        const isCritical = String(inc.urgency || '').toUpperCase() === 'CRITICAL';
+        const isCritical = isCriticalUrgency(inc.urgency);
         const isPending = isPendingAssignment(inc);
         const minutes = Number(inc.waiting_minutes ?? inc.sla_minutes_elapsed ?? 0);
         return inc.sla_breached === true || (isCritical && isPending && minutes > 60);
@@ -177,14 +186,14 @@ export const CoordinatorDashboardView = {
         }
 
         // Urgency filter
-        if (this.filterUrgency && String(inc.urgency || '').toUpperCase() !== this.filterUrgency) {
+        if (this.filterUrgency && normalizeUrgency(inc.urgency) !== normalizeUrgency(this.filterUrgency)) {
           return false;
         }
 
         // SLA breach only filter
         if (this.filterSlaOnly) {
           const isBreached = inc.sla_breached === true || (
-            String(inc.urgency || '').toUpperCase() === 'CRITICAL' &&
+            isCriticalUrgency(inc.urgency) &&
             Number(inc.waiting_minutes ?? 0) > 60 &&
             !inc.assigned_technician_id
           );
@@ -210,7 +219,7 @@ export const CoordinatorDashboardView = {
     },
     metrics() {
       const active = this.incidents.filter(i => isActiveStatus(i.status));
-      const criticalFood = active.filter(i => String(i.urgency || '').toUpperCase() === 'CRITICAL' && i.machine_type === 'PERISHABLE_FOOD');
+      const criticalFood = active.filter(i => isCriticalUrgency(i.urgency) && i.machine_type === 'PERISHABLE_FOOD');
       const unassigned = active.filter(i => !i.assigned_technician_id);
       const pendingParts = active.filter(i => normalizeIncidentStatus(i.status) === 'PENDING_PARTS');
 

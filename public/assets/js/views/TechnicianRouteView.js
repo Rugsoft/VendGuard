@@ -18,7 +18,14 @@ import { api } from '../api.js';
 import { store } from '../store.js';
 import { IncidentBadge } from '../components/IncidentBadge.js';
 import { ModalDialog } from '../components/ModalDialog.js';
-import { INCIDENT_STATUSES, normalizeIncidentStatus } from '../utils/IncidentStatusPermissions.js';
+import {
+  INCIDENT_STATUSES,
+  URGENCY_LEVELS,
+  URGENCY_RANKS,
+  isCriticalUrgency,
+  normalizeIncidentStatus,
+  normalizeUrgency
+} from '../utils/IncidentStatusPermissions.js';
 import { TechnicianMetricsView } from './TechnicianMetricsView.js';
 import { TechnicianPreventiveRouteTab } from '../components/TechnicianPreventiveRouteTab.js';
 import { TechnicianChecklistModal } from '../components/TechnicianChecklistModal.js';
@@ -120,7 +127,7 @@ export const TechnicianRouteView = {
         if (status === INCIDENT_STATUSES.ASSIGNED) assigned++;
         if (status === INCIDENT_STATUSES.IN_PROGRESS) inProgress++;
         if (status === INCIDENT_STATUSES.PENDING_PARTS) pendingParts++;
-        if (inc.urgency === 'CRITICAL') critical++;
+        if (isCriticalUrgency(inc.urgency)) critical++;
       }
 
       return { total, assigned, inProgress, pendingParts, critical };
@@ -138,7 +145,6 @@ export const TechnicianRouteView = {
         list = list.filter(inc => normalizeIncidentStatus(inc.status) === filterNorm);
       }
 
-      const urgencyOrder = { CRITICAL: 1, HIGH: 2, MEDIUM: 3, LOW: 4 };
       const statusOrder = {
         [INCIDENT_STATUSES.IN_PROGRESS]: 1,
         [INCIDENT_STATUSES.ASSIGNED]: 2,
@@ -146,8 +152,8 @@ export const TechnicianRouteView = {
       };
 
       return list.sort((a, b) => {
-        const uA = urgencyOrder[a.urgency] || 99;
-        const uB = urgencyOrder[b.urgency] || 99;
+        const uA = URGENCY_RANKS[normalizeUrgency(a.urgency)] || 99;
+        const uB = URGENCY_RANKS[normalizeUrgency(b.urgency)] || 99;
         if (uA !== uB) return uA - uB;
 
         const sA = statusOrder[normalizeIncidentStatus(a.status)] || 99;
@@ -293,6 +299,12 @@ export const TechnicianRouteView = {
     },
     isPendingParts(incident) {
       return normalizeIncidentStatus(incident?.status) === INCIDENT_STATUSES.PENDING_PARTS;
+    },
+    cardBorderLeft(incident) {
+      const urg = normalizeUrgency(incident?.urgency);
+      if (urg === URGENCY_LEVELS.CRITICAL) return '4px solid #dc2626';
+      if (urg === URGENCY_LEVELS.HIGH) return '4px solid #f97316';
+      return '4px solid #c8cfda';
     },
 
     /**
@@ -880,7 +892,7 @@ export const TechnicianRouteView = {
             :style="{
               backgroundColor: '#ffffff',
               border: '1px solid var(--color-hairline, #c8cfda)',
-              borderLeft: incident.urgency === 'CRITICAL' ? '4px solid #dc2626' : (incident.urgency === 'HIGH' ? '4px solid #f97316' : '4px solid #c8cfda'),
+              borderLeft: cardBorderLeft(incident),
               borderRadius: 'var(--radius-card, 8px)',
               padding: '14px',
               boxShadow: 'var(--shadow-card, 0 1px 3px rgba(0,0,0,0.04))'

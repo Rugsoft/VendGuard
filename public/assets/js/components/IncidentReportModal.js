@@ -18,7 +18,7 @@ import { ModalDialog } from './ModalDialog.js';
 import { IncidentBadge } from './IncidentBadge.js';
 import { ImagePreview } from './ImagePreview.js';
 import { QrRefundRequestBlock } from './QrRefundRequestBlock.js';
-import { INCIDENT_STATUSES } from '../utils/IncidentStatusPermissions.js';
+import { INCIDENT_STATUSES, URGENCY_LEVELS } from '../utils/IncidentStatusPermissions.js';
 
 // Predefined incident categories per spec
 const INCIDENT_CATEGORIES = [
@@ -276,7 +276,7 @@ export const IncidentReportModal = {
           this.duplicateIncidentData = {
             ticket_code: err.details?.ticket_code || 'ACTIVO',
             status: err.details?.status || INCIDENT_STATUSES.REGISTERED,
-            urgency: err.details?.urgency || 'MEDIUM',
+            urgency: err.details?.urgency || URGENCY_LEVELS.MEDIUM,
             message: err.message
           };
           this.errorMessage = err.message || 'Esta máquina ya cuenta con un aviso activo. Se ha bloqueado la creación.';

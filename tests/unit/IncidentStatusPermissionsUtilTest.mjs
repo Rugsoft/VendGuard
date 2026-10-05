@@ -28,6 +28,10 @@ import {
   isResolvedStatus,
   isActiveStatus,
   isPendingAssignment,
+  URGENCY_LEVELS,
+  URGENCY_RANKS,
+  normalizeUrgency,
+  isCriticalUrgency,
   STATUS_LABELS,
   URGENCY_LABELS,
   BADGE_URGENCY_PALETTE,
@@ -227,6 +231,24 @@ assert('7.1 STATUS_LABELS covers the eight lifecycle statuses in Spanish',
 assert('7.2 URGENCY_LABELS keeps the short badge wording (full PHP label stays server-side)',
   URGENCY_LABELS.CRITICAL === 'Crítica' && URGENCY_LABELS.HIGH === 'Alta' &&
   URGENCY_LABELS.MEDIUM === 'Media' && URGENCY_LABELS.LOW === 'Baja');
+
+assert('7.2b URGENCY_LEVELS and URGENCY_RANKS mirror UrgencyLevel.php priority ranks (1=CRITICAL..4=LOW)',
+  URGENCY_LEVELS.CRITICAL === 'CRITICAL' && URGENCY_LEVELS.HIGH === 'HIGH' &&
+  URGENCY_LEVELS.MEDIUM === 'MEDIUM' && URGENCY_LEVELS.LOW === 'LOW' &&
+  URGENCY_RANKS.CRITICAL === 1 && URGENCY_RANKS.HIGH === 2 &&
+  URGENCY_RANKS.MEDIUM === 3 && URGENCY_RANKS.LOW === 4);
+
+assert('7.2c normalizeUrgency folds Spanish aliases and accents (CRÍTICA -> CRITICAL, Alta -> HIGH)',
+  normalizeUrgency('CRÍTICA') === 'CRITICAL' && normalizeUrgency('Crítica') === 'CRITICAL' &&
+  normalizeUrgency('critica') === 'CRITICAL' && normalizeUrgency('ALTA') === 'HIGH' &&
+  normalizeUrgency('Media') === 'MEDIUM' && normalizeUrgency('baja') === 'LOW' &&
+  normalizeUrgency('HIGH') === 'HIGH');
+
+assert('7.2d isCriticalUrgency returns true strictly for CRITICAL in both languages',
+  isCriticalUrgency('CRITICAL') === true && isCriticalUrgency('CRÍTICA') === true &&
+  isCriticalUrgency('Crítica') === true && isCriticalUrgency('HIGH') === false &&
+  isCriticalUrgency('MEDIUM') === false && isCriticalUrgency('') === false &&
+  isCriticalUrgency(null) === false);
 
 const paletteUrgencies = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
 assert('7.3 BADGE_URGENCY_PALETTE: semantic colors survive byte-for-byte',
