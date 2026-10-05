@@ -73,7 +73,7 @@
   * **Dependencias:** T-IDM-09
   * **Hecho cuando:** El modal muestra: bloque de pausa técnica con piezas de catálogo o fuera de catálogo justificadas, bloque de resolución con diagnóstico, acción y piezas sustituidas con costes unitarios congelados, y bloque condicional de reintegro económico con datos de pago/contacto enmascarados y enlace a la bandeja de Reintegros.
 
-- [ ] **T-IDM-11: Implementar bitácora de comentarios y formulario en línea con selector de nota interna**
+- [x] **T-IDM-11: Implementar bitácora de comentarios y formulario en línea con selector de nota interna**
   * **Requisitos:** RF-05, RNF-04
   * **Dependencias:** T-IDM-10
   * **Hecho cuando:** La bitácora renderiza los mensajes en un contenedor con scroll propio distinguiendo notas públicas de notas internas de taller, y el formulario en línea permite enviar una nueva nota técnica llamando a `POST .../comments` y refrescando la bitácora sin cerrar el modal.

@@ -15,10 +15,12 @@
  *    - Intervención técnica: pausa con piezas de catálogo y fuera de catálogo justificadas,
  *      resolución con diagnóstico, acción y costes unitarios congelados, descarte
  *      justificado y expediente de reintegro con datos enmascarados (RF-04, RF-06, RNF-05).
+ *    - Bitácora cronológica de comentarios públicos y notas internas de taller, con
+ *      formulario en línea de publicación integrado (RF-05).
  * 3. Pie de acciones fijo con el cierre del modal (RNF-03).
  * 
- * Alcance de esta tarea: la bitácora de comentarios y su formulario en línea se renderizan
- * en T-IDM-11, y los paneles operativos en línea en T-IDM-12.
+ * Alcance de esta tarea: los paneles operativos en línea (asignación y descarte) se
+ * renderizan en T-IDM-12.
  * 
  * Dogma Vanilla: Vue 3 Options API vía ES Modules (cero dependencias externas).
  * Dualismo Lingüístico: código en inglés, interfaz y mensajes en español.
@@ -57,7 +59,13 @@ export const CoordinatorIncidentDetailModal = {
       /** Visor de evidencia gráfica integrado en el propio modal (RF-02.4, RNF-06). */
       photoZoomOpen: false,
       /** Marca la evidencia rota o inaccesible para mostrar el recuadro de sustitución. */
-      photoFailed: false
+      photoFailed: false,
+      /** Borrador del formulario en línea de la bitácora (RF-05.3). */
+      newCommentText: '',
+      /** Selector de visibilidad: comentario público o nota interna de taller (RF-05.2). */
+      isCommentInternal: false,
+      isSubmittingComment: false,
+      commentErrorMessage: ''
     };
   },
   computed: {
@@ -158,6 +166,31 @@ export const CoordinatorIncidentDetailModal = {
       };
       const value = this.refund?.cash_custody_action || '';
       return actions[value] || value;
+    },
+
+    /** Bitácora cronológica de comentarios y notas de taller (RF-05.1). */
+    comments() {
+      return Array.isArray(this.detail?.comments) ? this.detail.comments : [];
+    },
+
+    /** El formulario en línea solo aparece si la máquina de estados lo permite (RF-07.2). */
+    canAddComment() {
+      return Boolean(this.detail?.permissions?.can_add_comment);
+    },
+
+    /** Bitácora lista para pintar: autor traducido y fecha formateada. */
+    commentsView() {
+      const authors = {
+        REPORTER: 'Responsable de Sede',
+        TECHNICIAN: 'Técnico de Campo',
+        COORDINATOR: 'Coordinación',
+        SYSTEM: 'Sistema'
+      };
+      return this.comments.map((comment) => ({
+        ...comment,
+        author_label: authors[comment.author_type] || comment.author_type || 'Autor desconocido',
+        created_at_label: this.formatDateTime(comment.created_at)
+      }));
     },
 
     /** Incidencia reabierta por la sede dentro de la ventana de garantía (RF-02.2). */
@@ -309,6 +342,7 @@ export const CoordinatorIncidentDetailModal = {
         // llega directamente el DTO de detalle enriquecido.
         const response = await api.coordinator.getIncidentDetail(this.incidentId);
         this.detail = response && typeof response === 'object' ? response : null;
+        this.scrollCommentsToLatest();
       } catch (err) {
         this.detail = null;
         this.errorMessage = err?.message || 'No se pudo cargar el detalle de la incidencia.';
@@ -399,6 +433,54 @@ export const CoordinatorIncidentDetailModal = {
         return '—';
       }
       return `${value.toFixed(2)} €`;
+    },
+
+    /**
+     * Mantiene visibles los comentarios más recientes al abrir o refrescar la bitácora
+     * (caso límite 8): el contenedor tiene scroll propio y acotado.
+     */
+    scrollCommentsToLatest() {
+      if (typeof this.$nextTick !== 'function') {
+        return;
+      }
+      this.$nextTick(() => {
+        const log = this.$refs?.commentsLog;
+        if (log && typeof log.scrollTop === 'number') {
+          log.scrollTop = log.scrollHeight;
+        }
+      });
+    },
+
+    /**
+     * Publica una nueva nota técnica en la bitácora y refresca la ficha sin cerrar el modal
+     * (RF-05.3). Ante un fallo de red o de negocio el borrador se conserva íntegro para
+     * permitir el reintento inmediato (RF-08.4).
+     */
+    async submitComment() {
+      const text = String(this.newCommentText || '').trim();
+      if (text.length < 5) {
+        this.commentErrorMessage = 'El comentario debe contener al menos 5 caracteres descriptivos.';
+        return;
+      }
+      if (this.incidentId === null || this.incidentId === '') {
+        return;
+      }
+
+      this.isSubmittingComment = true;
+      this.commentErrorMessage = '';
+
+      try {
+        await api.coordinator.addComment(this.incidentId, text, this.isCommentInternal);
+        this.newCommentText = '';
+        this.isCommentInternal = false;
+        // Refresco de la bitácora sin cerrar el modal (RF-05.3).
+        await this.fetchDetail();
+        this.notifyIncidentUpdated({ reason: 'comment' });
+      } catch (err) {
+        this.commentErrorMessage = err?.message || 'No se pudo registrar el comentario. Inténtelo de nuevo.';
+      } finally {
+        this.isSubmittingComment = false;
+      }
     },
 
     handleBackdropClick(event) {
@@ -884,14 +966,104 @@ export const CoordinatorIncidentDetailModal = {
                 </p>
               </section>
 
+              <!-- 6. Bitácora de Comentarios y Notas Técnicas (RF-05) -->
               <section
                 class="info-card detail-section"
                 data-testid="section-comments"
                 style="background-color: #ffffff; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px); padding: 16px 20px; margin-bottom: 16px;"
               >
-                <h3 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 16px; font-weight: 500; color: var(--color-ink, #000000); margin: 0 0 8px;">
+                <h3 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 16px; font-weight: 500; color: var(--color-ink, #000000); margin: 0 0 12px;">
                   💬 Bitácora y Notas de Taller
                 </h3>
+
+                <!-- Contenedor con scroll propio y acotado (caso límite 8) -->
+                <div
+                  v-if="commentsView.length"
+                  ref="commentsLog"
+                  class="comments-scroll-area"
+                  data-testid="comments-log"
+                  style="max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; margin-bottom: 12px;"
+                >
+                  <div
+                    v-for="comment in commentsView"
+                    :key="comment.id"
+                    class="comment-item"
+                    data-testid="comment-item"
+                    :style="{ backgroundColor: comment.is_internal ? 'var(--color-warning-bg, #fef8e7)' : '#ffffff', border: comment.is_internal ? '1px solid var(--color-warning, #f8b60f)' : '1px solid var(--color-hairline, #c8cfda)', borderRadius: 'var(--radius-interactive, 4px)', padding: '10px 12px' }"
+                  >
+                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px;">
+                      <strong style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f);">{{ comment.author_name }}</strong>
+                      <span style="font-family: var(--font-body, Inter, sans-serif); font-size: 11px; font-weight: 600; background-color: var(--color-surface-1, #efefef); color: var(--color-ink-secondary, #434c5f); border-radius: var(--radius-interactive, 4px); padding: 2px 6px;">
+                        {{ comment.author_label }}
+                      </span>
+                      <span
+                        v-if="comment.is_internal"
+                        data-testid="comment-internal-chip"
+                        style="font-family: var(--font-body, Inter, sans-serif); font-size: 11px; font-weight: 600; background-color: var(--color-warning-bg, #fef8e7); color: var(--color-warning-text, #92400e); border: 1px solid var(--color-warning, #f8b60f); border-radius: var(--radius-interactive, 4px); padding: 2px 6px;"
+                      >
+                        🔒 Nota interna de taller
+                      </span>
+                      <span style="margin-left: auto; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-ink-muted, #6c7e9d);">
+                        {{ comment.created_at_label }}
+                      </span>
+                    </div>
+                    <p style="margin: 0; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f); line-height: 1.5; white-space: pre-wrap;">
+                      {{ comment.comment_text }}
+                    </p>
+                  </div>
+                </div>
+                <p v-else data-testid="comments-empty" style="margin: 0 0 12px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-muted, #6c7e9d);">
+                  Sin comentarios registrados todavía.
+                </p>
+
+                <!-- Formulario en línea, integrado y sin modales superpuestos (RF-05.3, RNF-06) -->
+                <form
+                  v-if="canAddComment"
+                  class="comment-form-inline"
+                  data-testid="comment-form"
+                  style="border-top: 1px solid var(--color-hairline, #c8cfda); padding-top: 12px;"
+                  @submit.prevent="submitComment"
+                >
+                  <textarea
+                    v-model="newCommentText"
+                    class="vg-textarea"
+                    data-testid="comment-input"
+                    rows="2"
+                    placeholder="Escribir comentario o nota técnica..."
+                    :disabled="isSubmittingComment"
+                    style="width: 100%; box-sizing: border-box; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f); background-color: var(--color-canvas, #f9fafb); border: 1px solid var(--color-hairline-soft, #a9b4c6); border-radius: var(--radius-interactive, 4px); padding: 8px 12px; resize: vertical;"
+                  ></textarea>
+                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 8px;">
+                    <label style="display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-ink-secondary, #434c5f); cursor: pointer;">
+                      <input
+                        type="checkbox"
+                        v-model="isCommentInternal"
+                        data-testid="comment-internal-toggle"
+                        :disabled="isSubmittingComment"
+                      />
+                      Nota interna de taller (confidencial)
+                    </label>
+                    <button
+                      type="submit"
+                      class="vg-btn vg-btn-primary"
+                      data-testid="comment-submit"
+                      :disabled="isSubmittingComment || newCommentText.trim().length < 5"
+                    >
+                      {{ isSubmittingComment ? 'Enviando…' : 'Enviar Nota' }}
+                    </button>
+                  </div>
+                  <p
+                    v-if="commentErrorMessage"
+                    data-testid="comment-error"
+                    role="alert"
+                    style="margin: 8px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-error-text, #b91c1c);"
+                  >
+                    {{ commentErrorMessage }}
+                  </p>
+                </form>
+                <p v-else data-testid="comments-sealed" style="margin: 0; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-muted, #6c7e9d);">
+                  🔒 La bitácora está sellada para este estado; el expediente queda en modo consulta.
+                </p>
               </section>
 
               <!-- 7. Expediente de Reintegro Vinculado (RF-06, RNF-05) -->

@@ -21,6 +21,12 @@
  * 10. Conditional refund case with server-masked payment/contact data and the link to the
  *     Reintegros board, never exposing unmasked fields (RF-06, RNF-05).
  *
+ * T-IDM-11 extends this suite with:
+ * 11. Comment log rendered in its own bounded scroll container, visually separating public
+ *     comments from internal workshop notes (RF-05.1, RF-05.2, case limit 8).
+ * 12. Inline form publishing a note through POST .../comments, refreshing the log without
+ *     closing the modal and retaining the draft on failure (RF-05.3, RF-08.4).
+ *
  * Dogma Vanilla: pure Node ESM suite, no external dependencies, mirrors the browser module graph.
  * Dualismo Lingüístico: assertions in English, user-facing copy in Spanish.
  */
@@ -104,7 +110,7 @@ function createInstance(overrides = {}) {
 }
 
 console.log('======================================================================');
-console.log(' VendGuard: Frontend Test Suite - CoordinatorIncidentDetailModal (T-IDM-08/T-IDM-09/T-IDM-10)');
+console.log(' VendGuard: Frontend Test Suite - CoordinatorIncidentDetailModal (T-IDM-08..T-IDM-11)');
 console.log('======================================================================\n');
 
 // ---------------------------------------------------------------------
@@ -706,12 +712,143 @@ assert('11.6 Refund section is conditional on the refund case existing',
   template.includes('v-if="hasRefund"') &&
   template.includes('refund.technician_notes'));
 
+// ---------------------------------------------------------------------
+// T-IDM-11 fixtures: chronological log with a public and an internal note
+// ---------------------------------------------------------------------
+
+const commentsFixture = {
+  ...detailFixture,
+  comments: [
+    { id: 85, author_type: 'REPORTER', author_name: 'Conserjería Hospital', comment_text: 'El agua gotea por debajo de la máquina.', is_internal: false, created_at: '2026-10-01 08:20:00' },
+    { id: 86, author_type: 'TECHNICIAN', author_name: 'Jordi Cruz', comment_text: 'Comprobada fuga en bandeja de desescarche. Pauso aviso esperando recambio.', is_internal: true, created_at: '2026-10-01 09:46:00' }
+  ]
+};
+
+const commentsInstance = createInstance({ detail: commentsFixture });
+
+// ---------------------------------------------------------------------
+// GROUP 12: Comment log rendering (T-IDM-11)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 12: Comment log with public and internal notes ---');
+
+assert('12.1 Comments accessor returns the log array or an empty list',
+  computed(commentsInstance, 'comments') === commentsFixture.comments &&
+  computed(createInstance({ detail: {} }), 'comments').length === 0);
+
+assert('12.2 The inline form only appears when the state machine allows commenting (RF-07.2)',
+  computed(commentsInstance, 'canAddComment') === true &&
+  computed(createInstance({ detail: { ...detailFixture, permissions: { ...detailFixture.permissions, can_add_comment: false } } }), 'canAddComment') === false &&
+  template.includes('v-if="canAddComment"'));
+
+const commentsView = computed(commentsInstance, 'commentsView');
+assert('12.3 Log entries translate the author type and format the timestamp',
+  commentsView[0].author_label === 'Responsable de Sede' &&
+  commentsView[1].author_label === 'Técnico de Campo' &&
+  commentsView[0].created_at_label === '01/10/2026 08:20' &&
+  computed(createInstance({ detail: { comments: [{ author_type: 'UNKNOWN', comment_text: 'x', created_at: 'n/a' }] } }), 'commentsView')[0].author_label === 'UNKNOWN');
+
+assert('12.4 Log lives in its own bounded scroll container (case limit 8)',
+  template.includes('data-testid="comments-log"') &&
+  template.includes('max-height: 280px; overflow-y: auto') &&
+  template.includes('ref="commentsLog"'));
+
+assert('12.5 Internal notes are visually separated from public comments (RF-05.2)',
+  template.includes('data-testid="comment-internal-chip"') &&
+  template.includes('🔒 Nota interna de taller') &&
+  template.includes("comment.is_internal ? 'var(--color-warning-bg, #fef8e7)'") &&
+  template.includes('{{ comment.author_label }}'));
+
+assert('12.6 Empty log falls back to an explicit notice',
+  template.includes('data-testid="comments-empty"') &&
+  template.includes('Sin comentarios registrados todavía.'));
+
+let scrollCalls = 0;
+const scrollInstance = createInstance({ detail: commentsFixture });
+scrollInstance.scrollCommentsToLatest = () => { scrollCalls++; };
+api.coordinator.getIncidentDetail = async () => commentsFixture;
+await CoordinatorIncidentDetailModal.methods.fetchDetail.call(scrollInstance);
+assert('12.7 Refreshing the file keeps the latest comments visible',
+  scrollCalls === 1 &&
+  CoordinatorIncidentDetailModal.methods.scrollCommentsToLatest.call(createInstance()) === undefined);
+
+// ---------------------------------------------------------------------
+// GROUP 13: Inline comment form (T-IDM-11)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 13: Inline comment form and POST wiring ---');
+
+assert('13.1 Form scaffold binds input, internal toggle and submit button',
+  template.includes('data-testid="comment-form"') &&
+  template.includes('v-model="newCommentText"') &&
+  template.includes('data-testid="comment-internal-toggle"') &&
+  template.includes('v-model="isCommentInternal"') &&
+  template.includes('Nota interna de taller (confidencial)') &&
+  template.includes('data-testid="comment-submit"') &&
+  template.includes('newCommentText.trim().length < 5'));
+
+const submittedCalls = [];
+let refreshCalls = 0;
+api.coordinator.addComment = async (incidentId, text, isInternal) => {
+  submittedCalls.push({ incidentId, text, isInternal });
+  return { id: 87, comment_text: text, is_internal: isInternal };
+};
+
+const submitInstance = createInstance({
+  incidentId: 3661,
+  detail: commentsFixture,
+  newCommentText: '  Revisado el compresor en taller; recambio en camino.  ',
+  isCommentInternal: true
+});
+submitInstance.fetchDetail = async () => { refreshCalls++; };
+
+await CoordinatorIncidentDetailModal.methods.submitComment.call(submitInstance);
+
+assert('13.2 Form submits trimmed text and the visibility flag to POST .../comments',
+  submittedCalls.length === 1 &&
+  submittedCalls[0].incidentId === 3661 &&
+  submittedCalls[0].text === 'Revisado el compresor en taller; recambio en camino.' &&
+  submittedCalls[0].isInternal === true);
+
+assert('13.3 Successful send clears the draft, refreshes the log and notifies the parent',
+  submitInstance.newCommentText === '' && submitInstance.isCommentInternal === false &&
+  refreshCalls === 1 &&
+  submitInstance.getEmitted().some((e) => e.event === 'incident-updated' && e.payload?.reason === 'comment') &&
+  submitInstance.isSubmittingComment === false && submitInstance.commentErrorMessage === '');
+
+const shortInstance = createInstance({ incidentId: 3661, newCommentText: '  ab  ' });
+const callsBeforeShort = submittedCalls.length;
+await CoordinatorIncidentDetailModal.methods.submitComment.call(shortInstance);
+assert('13.4 Drafts under 5 real characters never reach the server',
+  submittedCalls.length === callsBeforeShort &&
+  shortInstance.commentErrorMessage.includes('5 caracteres') &&
+  shortInstance.newCommentText === '  ab  ');
+
+api.coordinator.addComment = async () => {
+  throw new ApiError(422, 'COMMENT_WINDOW_CLOSED', 'La ventana de garantía de 48 horas está cerrada para este ticket.');
+};
+const failedInstance = createInstance({
+  incidentId: 3661,
+  detail: commentsFixture,
+  newCommentText: 'Nota que debe sobrevivir al fallo de red.'
+});
+failedInstance.fetchDetail = async () => { throw new Error('no debe refrescarse'); };
+await CoordinatorIncidentDetailModal.methods.submitComment.call(failedInstance);
+
+assert('13.5 A rejected comment keeps the draft intact for an immediate retry (RF-08.4)',
+  failedInstance.newCommentText === 'Nota que debe sobrevivir al fallo de red.' &&
+  failedInstance.commentErrorMessage.includes('48 horas') &&
+  failedInstance.isSubmittingComment === false &&
+  failedInstance.getEmitted().some((e) => e.event === 'close') === false);
+
+assert('13.6 Sealed states replace the form with a consultation notice',
+  template.includes('data-testid="comments-sealed"') &&
+  template.includes('La bitácora está sellada para este estado'));
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 
 if (failures === 0) {
-  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-IDM-08/T-IDM-09/T-IDM-10 FULFILLED SUCCESSFULLY.');
+  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-IDM-08..T-IDM-11 FULFILLED SUCCESSFULLY.');
   console.log('======================================================================\n');
   process.exit(0);
 } else {

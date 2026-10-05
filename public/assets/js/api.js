@@ -504,6 +504,20 @@ export class ApiClient {
     },
 
     /**
+     * Appends a coordinator comment or internal workshop note to the incident log (Módulo 09, RF-05).
+     * @param {number|string} incidentId Incident id or ticket code with optional '#'.
+     * @param {string} commentText Comment body (at least 5 characters).
+     * @param {boolean} [isInternal=false] Internal workshop note flag (RF-05.2).
+     * @returns {Promise<Object>} Created comment.
+     */
+    addComment: (incidentId, commentText, isInternal = false) => {
+      return this.post(`/coordinator/incidents/${encodeURIComponent(incidentId)}/comments`, {
+        comment_text: commentText,
+        is_internal: isInternal
+      });
+    },
+
+    /**
      * Retrieves all active locations with installed machines count (RF-FLEET-02).
      * @returns {Promise<Array<Object>>}
      */
