@@ -35,10 +35,16 @@
  *     modal, drafts retained on failure (RNF-06, Art. III.2 y V.1).
  *
  * T-IDM-21 extends this suite with:
- * 15. Reassignment panel: the fixed footer reopens the "Reasignar Técnico" action, the
+ * 16. Reassignment panel: the fixed footer reopens the "Reasignar Técnico" action, the
  *     current responsible is excluded from the selector (Art. V.3) and the justified motive
  *     (>= 10 real characters) is mandatory before the request reaches the endpoint,
  *     keeping the draft intact when the server rejects it (RF-07.3).
+ *
+ * T-IDM-13 extends this suite with:
+ * 17. Dirty state guard on the modal lifecycle: comment, discard and reassignment drafts
+ *     force an explicit confirmation before closing, clean forms close immediately and
+ *     every close signal (Escape, shaded backdrop, header and footer buttons) shares that
+ *     single guard (RF-08.1 to RF-08.3, plan §3.3).
  *
  * Dogma Vanilla: pure Node ESM suite, no external dependencies, mirrors the browser module graph.
  * Dualismo Lingüístico: assertions in English, user-facing copy in Spanish.
@@ -125,7 +131,7 @@ function createInstance(overrides = {}) {
 }
 
 console.log('======================================================================');
-console.log(' VendGuard: Frontend Test Suite - CoordinatorIncidentDetailModal (T-IDM-08..T-IDM-12, T-IDM-21)');
+console.log(' VendGuard: Frontend Test Suite - CoordinatorIncidentDetailModal (T-IDM-08..T-IDM-13, T-IDM-21)');
 console.log('======================================================================\n');
 
 // ---------------------------------------------------------------------
@@ -1166,12 +1172,102 @@ CoordinatorIncidentDetailModal.methods.closeAssignPanel.call(stalePanel);
 assert('16.10 Closing the panel discards the motive draft',
   stalePanel.isAssignPanelOpen === false && stalePanel.reassignReason === '' && stalePanel.assignErrorMessage === '');
 
+// ---------------------------------------------------------------------
+// GROUP 17: Dirty state guard on the close lifecycle (T-IDM-13 / RF-08)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 17: Dirty state guard and close lifecycle ---');
+
+assert('17.1 A clean modal reports no drafts, even when a closed panel still holds text',
+  computed(createInstance({}), 'isFormDirty') === false &&
+  computed(createInstance({}), 'hasUnsavedComment') === false &&
+  computed(createInstance({ cancelReason: 'borrador huérfano' }), 'hasUnsavedCancelReason') === false &&
+  computed(createInstance({ reassignReason: 'borrador huérfano' }), 'hasUnsavedAssignReason') === false);
+
+assert('17.2 A comment draft marks the form dirty regardless of the panels (RF-08.1)',
+  computed(createInstance({ newCommentText: '   ' }), 'hasUnsavedComment') === false &&
+  computed(createInstance({ newCommentText: 'Nota a medio escribir' }), 'isFormDirty') === true);
+
+assert('17.3 Discard and reassignment drafts count only inside their open panel (plan §3.3)',
+  computed(createInstance({ isCancelPanelOpen: true, cancelReason: 'Motivo a medias' }), 'isFormDirty') === true &&
+  computed(createInstance({ isAssignPanelOpen: true, detail: reassignFixture, reassignReason: 'Motivo a medias' }), 'isFormDirty') === true &&
+  computed(createInstance({ isAssignPanelOpen: true, detail: assignFixture, reassignReason: 'Motivo a medias' }), 'isFormDirty') === false);
+
+const originalConfirm = globalThis.confirm;
+let confirmMessages = [];
+globalThis.confirm = (message) => { confirmMessages.push(String(message)); return true; };
+
+const cleanClose = createInstance({ isOpen: true, newCommentText: '', cancelReason: '', reassignReason: '' });
+CoordinatorIncidentDetailModal.methods.requestClose.call(cleanClose);
+assert('17.4 Clean forms close immediately without asking (RF-08.3, plan §3.3)',
+  confirmMessages.length === 0 &&
+  cleanClose.getEmitted().some((e) => e.event === 'close'));
+
+confirmMessages = [];
+const dirtyClose = createInstance({
+  isOpen: true,
+  newCommentText: 'Comentario a medio redactar',
+  isCommentInternal: true,
+  isCancelPanelOpen: true,
+  cancelReason: 'Motivo de descarte a medio redactar',
+  cancelErrorMessage: 'error previo'
+});
+CoordinatorIncidentDetailModal.methods.requestClose.call(dirtyClose);
+assert('17.5 A confirmed discard asks exactly once, closes and resets every draft (RF-08.2)',
+  confirmMessages.length === 1 && confirmMessages[0].includes('¿Descartar cambios sin guardar?') &&
+  dirtyClose.getEmitted().some((e) => e.event === 'close') &&
+  dirtyClose.newCommentText === '' && dirtyClose.isCommentInternal === false &&
+  dirtyClose.cancelReason === '' && dirtyClose.isCancelPanelOpen === false &&
+  dirtyClose.cancelErrorMessage === '' && computed(dirtyClose, 'isFormDirty') === false);
+
+confirmMessages = [];
+globalThis.confirm = (message) => { confirmMessages.push(String(message)); return false; };
+const keptOpen = createInstance({
+  isOpen: true,
+  newCommentText: '  Nota intacta  ',
+  isAssignPanelOpen: true,
+  detail: reassignFixture,
+  reassignReason: 'Motivo de reasignación intacto'
+});
+CoordinatorIncidentDetailModal.methods.requestClose.call(keptOpen);
+assert('17.6 Cancelling the confirmation keeps the modal open with the texts intact (RF-08.2)',
+  confirmMessages.length === 1 &&
+  keptOpen.getEmitted().some((e) => e.event === 'close') === false &&
+  keptOpen.newCommentText === '  Nota intacta  ' &&
+  keptOpen.reassignReason === 'Motivo de reasignación intacto' &&
+  keptOpen.isAssignPanelOpen === true && computed(keptOpen, 'isFormDirty') === true);
+
+confirmMessages = [];
+const escapeInstance = createInstance({ isOpen: true, isCancelPanelOpen: true, cancelReason: 'Motivo en curso' });
+CoordinatorIncidentDetailModal.methods.handleKeyDown.call(escapeInstance, { key: 'Escape' });
+CoordinatorIncidentDetailModal.methods.handleBackdropClick.call(escapeInstance, { target: 'backdrop', currentTarget: 'backdrop' });
+assert('17.7 Escape and the shaded backdrop share the very same guarded signal (RF-08.1)',
+  confirmMessages.length === 2 &&
+  escapeInstance.getEmitted().some((e) => e.event === 'close') === false &&
+  escapeInstance.cancelReason === 'Motivo en curso' &&
+  escapeInstance.isCancelPanelOpen === true);
+
+const zoomInstance = createInstance({ isOpen: true, photoZoomOpen: true, newCommentText: 'borrador en curso' });
+confirmMessages = [];
+CoordinatorIncidentDetailModal.methods.handleKeyDown.call(zoomInstance, { key: 'Escape' });
+assert('17.8 Escape closes the evidence viewer first without touching the drafts (RF-02.4)',
+  zoomInstance.photoZoomOpen === false && confirmMessages.length === 0 &&
+  zoomInstance.newCommentText === 'borrador en curso' &&
+  zoomInstance.getEmitted().some((e) => e.event === 'close') === false);
+
+globalThis.confirm = originalConfirm;
+
+assert('17.9 Header, footer and backdrop close signals all route through the guarded method',
+  (template.match(/@click="requestClose"/g) || []).length >= 2 &&
+  template.includes('@click.self="handleBackdropClick"') &&
+  typeof CoordinatorIncidentDetailModal.methods.confirmDiscardChanges === 'function' &&
+  typeof CoordinatorIncidentDetailModal.methods.resetDrafts === 'function');
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 
 if (failures === 0) {
-  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-IDM-08..T-IDM-12 AND T-IDM-21 FULFILLED SUCCESSFULLY.');
+  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-IDM-08..T-IDM-13 AND T-IDM-21 FULFILLED SUCCESSFULLY.');
   console.log('======================================================================\n');
   process.exit(0);
 } else {

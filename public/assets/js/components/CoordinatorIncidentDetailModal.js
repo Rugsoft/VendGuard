@@ -19,10 +19,13 @@
  *      formulario en línea de publicación integrado (RF-05).
  * 3. Pie de acciones fijo con el cierre del modal (RNF-03).
  * 
- * Los paneles operativos en línea (asignación y descarte justificado) se integran en el
- * propio cuerpo del modal, sin sub-modales superpuestos (T-IDM-12, RNF-06). El botón de
- * reasignación queda oculto hasta que el backend lo soporte con motivo obligatorio y
- * evento INCIDENT_REASSIGNED (tarea backend T-IDM-21).
+ * Los paneles operativos en línea (asignación, reasignación con motivo justificado y
+ * descarte justificado) se integran en el propio cuerpo del modal, sin sub-modales
+ * superpuestos (T-IDM-12, T-IDM-21, RNF-06).
+ * 
+ * El cierre del modal pasa por el guardián de formulario sucio (T-IDM-13, RF-08): si hay
+ * borradores sin enviar pregunta antes de descartarlos. Los borradores se retienen ante
+ * errores de red para permitir el reintento inmediato (RF-08.4).
  * 
  * Dogma Vanilla: Vue 3 Options API vía ES Modules (cero dependencias externas).
  * Dualismo Lingüístico: código en inglés, interfaz y mensajes en español.
@@ -234,6 +237,27 @@ export const CoordinatorIncidentDetailModal = {
       return !this.isReassign || this.reassignReasonLength >= 10;
     },
 
+    /** Existe un comentario en redacción sin enviar (RF-08.1, plan §3.3). */
+    hasUnsavedComment() {
+      return String(this.newCommentText || '').trim().length > 0;
+    },
+
+    /** Existe un motivo de descarte en redacción dentro de su panel abierto (RF-08.1). */
+    hasUnsavedCancelReason() {
+      return Boolean(this.isCancelPanelOpen) && String(this.cancelReason || '').trim().length > 0;
+    },
+
+    /** Existe un motivo de reasignación en redacción dentro de su panel abierto (RF-08.1). */
+    hasUnsavedAssignReason() {
+      return Boolean(this.isAssignPanelOpen) && this.isReassign
+        && String(this.reassignReason || '').trim().length > 0;
+    },
+
+    /** Hay algún borrador en edición activa: el cierre exige confirmación explícita (RF-08.2). */
+    isFormDirty() {
+      return this.hasUnsavedComment || this.hasUnsavedCancelReason || this.hasUnsavedAssignReason;
+    },
+
     /** Acción directa de descarte habilitada mientras el ticket siga activo (RF-07.1). */
     canCancel() {
       return Boolean(this.detail?.permissions?.can_cancel);
@@ -387,7 +411,8 @@ export const CoordinatorIncidentDetailModal = {
   methods: {
     /**
      * Sincroniza los efectos de apertura/cierre: bloqueo del scroll de fondo y atajo Escape.
-     * El guardián de formulario sucio (T-IDM-13) refinará el cierre sobre `requestClose()`.
+     * Todas las señales de cierre (Escape, fondo sombreado, botón de cabecera y pie) pasan
+     * por `requestClose()`, que aplica el guardián de formulario sucio (T-IDM-13, RF-08.1).
      */
     handleOpenState(isOpen) {
       if (typeof document !== 'undefined') {
@@ -435,11 +460,53 @@ export const CoordinatorIncidentDetailModal = {
     },
 
     /**
-     * Solicita el cierre del modal; el componente padre decide desmontarlo.
-     * El guardián de formulario sucio (T-IDM-13) interceptará esta señal antes de emitir.
+     * Solicita el cierre del modal aplicando el guardián de formulario sucio (T-IDM-13,
+     * RF-08, plan §3.3): con borradores sin enviar pide confirmación explícita y solo cierra
+     * si el usuario la concede; con los campos limpios cierra de inmediato. En ambos casos
+     * reinicia los borradores antes de emitir para que el padre desmonte sin residuos.
      */
     requestClose() {
+      if (this.isFormDirty && !this.confirmDiscardChanges()) {
+        // El usuario conserva la edición: el modal sigue abierto con los textos intactos.
+        return;
+      }
+
+      this.resetDrafts();
       this.$emit('close');
+    },
+
+    /**
+     * Pregunta explícitamente antes de descartar los borradores (RF-08.2). Usa el diálogo
+     * nativo del navegador —sin sub-modales superpuestos (RNF-06)— y, en entornos sin
+     * diálogo disponible (pruebas headless), autoriza el cierre para no dejar el modal
+     * atrapado sin salida.
+     */
+    confirmDiscardChanges() {
+      const confirmFn = typeof globalThis.confirm === 'function' ? globalThis.confirm : null;
+      if (confirmFn === null) {
+        return true;
+      }
+
+      // El texto conserva íntegra la pregunta canónica de RF-08.2 ("¿Descartar cambios sin
+      // guardar?") para que el diálogo y la especificación no diverjan.
+      return confirmFn(
+        'Tiene cambios o comentarios sin guardar en esta incidencia. ¿Descartar cambios sin guardar?'
+      ) === true;
+    },
+
+    /**
+     * Reinicia los borradores y los paneles en línea tras un cierre o una acción confirmada
+     * (T-IDM-13, plan §3.3). Los errores de red no pasan por aquí: los textos se conservan.
+     */
+    resetDrafts() {
+      this.newCommentText = '';
+      this.isCommentInternal = false;
+      this.isAssignPanelOpen = false;
+      this.isCancelPanelOpen = false;
+      this.cancelReason = '';
+      this.reassignReason = '';
+      this.assignErrorMessage = '';
+      this.cancelErrorMessage = '';
     },
 
     /**

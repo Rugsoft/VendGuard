@@ -83,7 +83,7 @@
   * **Dependencias:** T-IDM-10
   * **Hecho cuando:** Al pulsar "Asignar/Reasignar" o "Descartar" se despliegan paneles en línea integrados en el cuerpo del modal (sin sub-modales superpuestos); el panel de descarte incluye contador de caracteres reactivo y deshabilita el botón de confirmación si el motivo contiene menos de 20 caracteres reales.
 
-- [ ] **T-IDM-13: Implementar guardián de formulario sucio (*Dirty State Guard*) y control de ciclo de vida del modal**
+- [x] **T-IDM-13: Implementar guardián de formulario sucio (*Dirty State Guard*) y control de ciclo de vida del modal**
   * **Requisitos:** RF-08, RNF-06
   * **Dependencias:** T-IDM-11, T-IDM-12
   * **Hecho cuando:** Al pulsar `Escape` o hacer clic en el fondo sombreado exterior, el modal detecta si hay texto sin enviar en el comentario, motivo de descarte o reasignación, solicitando confirmación explícita (*"¿Descartar cambios sin guardar?"*); se cierra inmediatamente si los campos están limpios; y retiene los textos ante errores HTTP de red para permitir reintentos.
