@@ -138,7 +138,7 @@
   * **Dependencias:** T-IDM-17, T-IDM-20
   * **Hecho cuando:** La suite pasa al 100% en verde certificando: (1) Inviolabilidad de datos (cero `DELETE FROM`), (2) Validación estricta $\ge 20$ caracteres en descartes, (3) Enmascaramiento irrevocable de teléfonos e IBANs en la respuesta JSON, y (4) Denegación de acceso 403 Forbidden para roles de sede y técnicos.
 
-- [ ] **T-IDM-19: Verificación global de regresión, certificación de Dogma Vanilla y cierre del módulo**
+- [x] **T-IDM-19: Verificación global de regresión, certificación de Dogma Vanilla y cierre del módulo**
   * **Requisitos:** Todos (RF-01 a RF-08, RNF-01 a RNF-06, Constitución Art. I a VII)
   * **Dependencias:** T-IDM-01 a T-IDM-18, T-IDM-20 y T-IDM-21
   * **Hecho cuando:** La ejecución de `php tests/run_all.php` supera con éxito la totalidad de suites PHP Unit, JS Unit e Integración con 0 errores y 0 fallos, se certifica la ausencia de dependencias npm o Composer externas, y se verifica el cumplimiento estricto del Dualismo Lingüístico.
