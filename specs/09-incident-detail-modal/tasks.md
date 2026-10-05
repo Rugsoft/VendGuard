@@ -39,7 +39,7 @@
 
 ## Fase 2: Controladores REST y Rutas en AppRouter
 
-- [ ] **T-IDM-05: Implementar endpoint `GET /api/coordinator/incidents/{id}/detail` en `CoordinatorController.php`**
+- [x] **T-IDM-05: Implementar endpoint `GET /api/coordinator/incidents/{id}/detail` en `CoordinatorController.php`**
   * **Requisitos:** RF-01, RF-02, RF-03, RF-04, RF-06, RNF-01, RNF-05
   * **Dependencias:** T-IDM-03, T-IDM-04
   * **Hecho cuando:** `CoordinatorController::getIncidentDetail(Request $request)` responde `200 OK` con la envolvente canónica JSON y el DTO enriquecido al recibir un ID o código de ticket válido, `404 Not Found` ante tickets inexistentes, y rechaza peticiones no autorizadas.

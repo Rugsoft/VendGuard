@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
+use VendGuard\Application\Service\CoordinatorIncidentDetailService;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
@@ -32,17 +33,22 @@ class CoordinatorController
     private UserRepositoryInterface $userRepo;
     private LocationRepositoryInterface $locationRepo;
     private MachineRepositoryInterface $machineRepo;
+    private CoordinatorIncidentDetailService $incidentDetailService;
 
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?UserRepositoryInterface $userRepo = null,
         ?LocationRepositoryInterface $locationRepo = null,
-        ?MachineRepositoryInterface $machineRepo = null
+        ?MachineRepositoryInterface $machineRepo = null,
+        ?CoordinatorIncidentDetailService $incidentDetailService = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->userRepo = $userRepo ?? new PdoUserRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
+        // El servicio de detalle se compone sobre el mismo repositorio inyectado para
+        // que el endpoint y la lectura agregada compartan una única fuente de datos.
+        $this->incidentDetailService = $incidentDetailService ?? new CoordinatorIncidentDetailService($this->incidentRepo);
     }
 
     /**
@@ -364,6 +370,115 @@ class CoordinatorController
             'status'       => $cancelled->getStatus()->value,
             'cancelled_at' => $cancelled->getCancelledAt(),
         ], 200);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // RF-01 / RF-02 / RF-03 / RF-04 / RF-06 — Ficha Integral de Detalle (Módulo 09)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * GET /api/coordinator/incidents/{id}/detail
+     * 
+     * Devuelve la ficha integral enriquecida del expediente que consume el modal de
+     * detalle del triaje (plan §2.1, RF-01 a RF-06): metadatos de sede y máquina,
+     * cronograma de hitos, evaluación del SLA de frío, intervención técnica con
+     * repuestos y costes congelados, bitácora de comentarios, expediente de reintegro
+     * con datos de contacto y pago enmascarados en servidor (Art. V.4) y matriz de
+     * permisos según la máquina de estados.
+     * 
+     * El identificador de ruta admite el ID primario (entero positivo) o el código de
+     * ticket con prefijo '#' opcional (ej. INC-2026-0001). Toda respuesta viaja en la
+     * envolvente canónica JSON de VendGuard.
+     * 
+     * Respuestas: 200 OK con los diez bloques del contrato; 400 si el identificador no
+     * es válido; 401/403 si la petición no procede de un coordinador autenticado
+     * (defensa en profundidad, además del middleware de la ruta registrada en T-IDM-07);
+     * 404 si el ticket no existe o está borrado lógicamente.
+     */
+    public function getIncidentDetail(Request $request): Response
+    {
+        // 1. Control de acceso al detalle integral antes de leer o validar nada más (Art. V.4)
+        $authFailure = $this->authorizeCoordinator($request);
+        if ($authFailure !== null) {
+            return $authFailure;
+        }
+
+        // 2. Identificador de ruta: ID primario positivo o código de ticket (# opcional)
+        $rawIdentifier = trim((string)($request->getRouteParam('id') ?? ''));
+        $identifier = $this->resolveIncidentIdentifier($rawIdentifier);
+        if ($identifier === null) {
+            return Response::error(
+                'INVALID_INCIDENT_IDENTIFIER',
+                'El identificador de la incidencia no es válido. Se admite un ID numérico positivo o un código de ticket (ej: INC-2026-0001).',
+                400
+            );
+        }
+
+        // 3. Ensamblar la ficha completa en una única lectura agregada (RNF-01)
+        $detail = $this->incidentDetailService->buildDetail($identifier);
+        if ($detail === null) {
+            return Response::error(
+                'INCIDENT_NOT_FOUND',
+                "No se encontró ninguna incidencia con identificador '{$rawIdentifier}'.",
+                404
+            );
+        }
+
+        // 4. Envolvente canónica con los diez bloques del contrato del modal
+        return Response::json($detail->toArray(), 200);
+    }
+
+    /**
+     * 401 sin identidad y 403 sin rol de Coordinación para el detalle integral.
+     * 
+     * El middleware de la ruta (T-IDM-07) ya exige rol COORDINATOR; esta comprobación
+     * es defensa en profundidad para que el controlador no dependa jamás de cómo fue
+     * montado y nunca lea un expediente para un actor no autorizado (Art. V.4).
+     */
+    private function authorizeCoordinator(Request $request): ?Response
+    {
+        $userId = $request->getAttribute('user_id');
+        if ($userId === null || !is_numeric($userId) || (int)$userId < 1) {
+            return Response::error('UNAUTHORIZED', 'Token de autenticación ausente o inválido.', 401);
+        }
+
+        if ((string)$request->getAttribute('user_role') !== 'COORDINATOR') {
+            return Response::error(
+                'FORBIDDEN',
+                'No dispone de permisos para consultar el detalle integral de incidencias de Coordinación.',
+                403
+            );
+        }
+
+        return null;
+    }
+
+    /**
+     * Normaliza el `{id}` de la ruta a un identificador de dominio.
+     * 
+     * Devuelve el entero positivo cuando el segmento es numérico y el código de ticket
+     * cuando cumple el formato admitido (alfanumérico con guiones y '#' inicial
+     * opcional). Cualquier otro valor devuelve null y el controlador responde 400.
+     *
+     * @return int|string|null
+     */
+    private function resolveIncidentIdentifier(string $rawIdentifier): int|string|null
+    {
+        if ($rawIdentifier === '') {
+            return null;
+        }
+
+        // ID primario: solo enteros positivos; '-5' o '0' no viajan como código de ticket.
+        if (preg_match('/^[+-]?\d+$/', $rawIdentifier) === 1) {
+            return (ctype_digit($rawIdentifier) && (int)$rawIdentifier > 0) ? (int)$rawIdentifier : null;
+        }
+
+        // Código de ticket: alfanumérico con guiones y '#' inicial opcional (ej: INC-2026-0001).
+        if (preg_match('/^#?[A-Za-z0-9][A-Za-z0-9-]{2,29}$/', $rawIdentifier) === 1) {
+            return $rawIdentifier;
+        }
+
+        return null;
     }
 
     // ────────────────────────────────────────────────────────────────────────
