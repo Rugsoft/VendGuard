@@ -16,7 +16,9 @@
  */
 
 import {
+  INCIDENT_STATUSES,
   normalizeBadgeKey,
+  normalizeIncidentStatus,
   resolveBadgeConfig
 } from '../utils/IncidentStatusPermissions.js';
 
@@ -95,7 +97,7 @@ export const IncidentBadge = {
         backgroundColor: cfg.bg,
         color: cfg.color,
         border: `1px solid ${cfg.border || 'transparent'}`,
-        textDecoration: this.normalizedKey === 'CANCELADA' || this.normalizedKey === 'CANCELLED' ? 'line-through' : 'none',
+        textDecoration: normalizeIncidentStatus(this.normalizedKey) === INCIDENT_STATUSES.CANCELLED ? 'line-through' : 'none',
         whiteSpace: 'nowrap'
       };
     },

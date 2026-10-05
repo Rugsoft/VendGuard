@@ -18,6 +18,7 @@
  */
 
 import { api } from '../api.js';
+import { INCIDENT_STATUSES } from '../utils/IncidentStatusPermissions.js';
 import { QrInactiveMachineNotice } from '../components/QrInactiveMachineNotice.js';
 import { QrRefundRequestBlock } from '../components/QrRefundRequestBlock.js';
 import { QrSanitaryQuarantineModal } from '../components/QrSanitaryQuarantineModal.js';
@@ -310,7 +311,7 @@ export const QrReportView = {
 
         this.submittedTicket = {
           ticket_code: data.ticket_code || '#TICK-REGISTRADO',
-          status: data.status || 'REGISTERED',
+          status: data.status || INCIDENT_STATUSES.REGISTERED,
           urgency: data.urgency || '',
           merged: Boolean(data.merged),
           message: data.message || res.message || 'Incidencia registrada con éxito.',

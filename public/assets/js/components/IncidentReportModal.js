@@ -18,6 +18,7 @@ import { ModalDialog } from './ModalDialog.js';
 import { IncidentBadge } from './IncidentBadge.js';
 import { ImagePreview } from './ImagePreview.js';
 import { QrRefundRequestBlock } from './QrRefundRequestBlock.js';
+import { INCIDENT_STATUSES } from '../utils/IncidentStatusPermissions.js';
 
 // Predefined incident categories per spec
 const INCIDENT_CATEGORIES = [
@@ -274,7 +275,7 @@ export const IncidentReportModal = {
         if (err.status === 409) {
           this.duplicateIncidentData = {
             ticket_code: err.details?.ticket_code || 'ACTIVO',
-            status: err.details?.status || 'REGISTRADA',
+            status: err.details?.status || INCIDENT_STATUSES.REGISTERED,
             urgency: err.details?.urgency || 'MEDIUM',
             message: err.message
           };
