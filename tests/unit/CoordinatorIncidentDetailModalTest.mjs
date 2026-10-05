@@ -46,6 +46,12 @@
  *     every close signal (Escape, shaded backdrop, header and footer buttons) shares that
  *     single guard (RF-08.1 to RF-08.3, plan §3.3).
  *
+ * T-IDM-16 certifies the module Done-when checklist with:
+ * 18. Terminal-state sealing: RESOLVED, CLOSED and CANCELLED files switch the modal to
+ *     consultation mode with zero operational actions and a sealed log (RF-07.2), closing
+ *     the certification of blocks rendering, 20-character discard validation, dirty guard
+ *     on ESC and clean closing achieved across groups 1-17.
+ *
  * Dogma Vanilla: pure Node ESM suite, no external dependencies, mirrors the browser module graph.
  * Dualismo Lingüístico: assertions in English, user-facing copy in Spanish.
  */
@@ -131,7 +137,7 @@ function createInstance(overrides = {}) {
 }
 
 console.log('======================================================================');
-console.log(' VendGuard: Frontend Test Suite - CoordinatorIncidentDetailModal (T-IDM-08..T-IDM-13, T-IDM-21)');
+console.log(' VendGuard: Frontend Test Suite - CoordinatorIncidentDetailModal (T-IDM-08..T-IDM-13, T-IDM-16, T-IDM-21)');
 console.log('======================================================================\n');
 
 // ---------------------------------------------------------------------
@@ -1262,12 +1268,53 @@ assert('17.9 Header, footer and backdrop close signals all route through the gua
   typeof CoordinatorIncidentDetailModal.methods.confirmDiscardChanges === 'function' &&
   typeof CoordinatorIncidentDetailModal.methods.resetDrafts === 'function');
 
+// ---------------------------------------------------------------------
+// GROUP 18: Terminal states seal the operational actions (RF-07.2 / T-IDM-16)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 18: Terminal states seal the operational actions (T-IDM-16) ---');
+
+// RF-07.2: RESOLVED, CLOSED and CANCELLED files switch the modal to consultation and
+// immutable-audit mode: the assign, reassign and discard actions vanish from the footer
+// and the log is sealed. The backend remains the fail-fast last line (group 15.5 and
+// the T-IDM-21 integration suite cover the 422 rejections).
+const TERMINAL_CASES = [
+  { number: '18.1', status: 'RESOLVED', label: 'Resuelta' },
+  { number: '18.2', status: 'CLOSED', label: 'Cerrada' },
+  { number: '18.3', status: 'CANCELLED', label: 'Cancelada' }
+];
+for (const terminal of TERMINAL_CASES) {
+  const sealedDetail = {
+    ...detailFixture,
+    incident: { ...detailFixture.incident, status: terminal.status, status_label: terminal.label },
+    permissions: { can_assign: false, can_reassign: false, can_cancel: false, can_add_comment: false }
+  };
+  const sealedInstance = createInstance({ detail: sealedDetail });
+  assert(`${terminal.number} A ${terminal.status} file switches to consultation mode: no assign, reassign, discard or comment form (RF-07.2)`,
+    computed(sealedInstance, 'canAssign') === false &&
+    computed(sealedInstance, 'canReassign') === false &&
+    computed(sealedInstance, 'canCancel') === false &&
+    computed(sealedInstance, 'canAddComment') === false);
+}
+
+assert('18.4 The footer triggers are permission-gated, so terminal files render zero operational actions (RF-07.2)',
+  template.includes('v-if="canAssign && !isAssignPanelOpen"') &&
+  template.includes('v-if="canCancel && !isCancelPanelOpen"') &&
+  template.includes('v-if="canReassign && !isAssignPanelOpen"'));
+
+assert('18.5 The comment form is gated by canAddComment and falls back to the sealed consultation notice (RF-07.2)',
+  template.includes('v-if="canAddComment"') &&
+  template.includes('v-else data-testid="comments-sealed"'));
+
+assert('18.6 No operational entry point escapes the permission gates (consultation mode is total)',
+  (template.match(/@click="openAssignPanel"/g) || []).length === 2 &&
+  (template.match(/@click="openCancelPanel"/g) || []).length === 1);
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 
 if (failures === 0) {
-  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-IDM-08..T-IDM-13 AND T-IDM-21 FULFILLED SUCCESSFULLY.');
+  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-IDM-08..T-IDM-13, T-IDM-16 AND T-IDM-21 FULFILLED SUCCESSFULLY.');
   console.log('======================================================================\n');
   process.exit(0);
 } else {

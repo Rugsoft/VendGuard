@@ -123,7 +123,7 @@
 
 ## Fase 5: Pruebas Unitarias Reactivas Frontend, Integración HTTP, Blindaje Constitucional y Cierre
 
-- [ ] **T-IDM-16: Implementar suite de pruebas unitarias reactivas frontend `CoordinatorIncidentDetailModalTest.mjs`**
+- [x] **T-IDM-16: Implementar suite de pruebas unitarias reactivas frontend `CoordinatorIncidentDetailModalTest.mjs`**
   * **Requisitos:** RF-01 a RF-08, RNF-01 a RNF-06
   * **Dependencias:** T-IDM-13, T-IDM-15
   * **Hecho cuando:** La ejecución de `node tests/unit/CoordinatorIncidentDetailModalTest.mjs` pasa al 100% en verde verificando: renderizado de bloques, inhabilitación de acciones operativas en tickets resueltos o cerrados, validación de 20 caracteres en descarte, confirmación de guardián sucio al pulsar ESC y cierre limpio sin borrador.
