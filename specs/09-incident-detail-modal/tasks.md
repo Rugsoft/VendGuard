@@ -58,7 +58,7 @@
 
 ## Fase 3: Componente Frontend Vanilla/Vue 3 ES Modules
 
-- [ ] **T-IDM-08: Scaffolding y estructura maquetada de `CoordinatorIncidentDetailModal.js`**
+- [x] **T-IDM-08: Scaffolding y estructura maquetada de `CoordinatorIncidentDetailModal.js`**
   * **Requisitos:** RF-02, RNF-02, RNF-03, docs/design.md
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existe en `public/assets/js/components/CoordinatorIncidentDetailModal.js` el componente Vue 3 ESM con props `isOpen` e `incidentId`, emitiendo `close` e `incident-updated`, maquetado con cabecera fija, cuerpo con scroll vertical independiente y pie de acciones conforme a los tokens Docker de `docs/design.md`.

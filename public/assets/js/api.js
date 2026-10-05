@@ -495,6 +495,15 @@ export class ApiClient {
     },
 
     /**
+     * Retrieves the enriched detail file of one incident for the triage modal (Módulo 09, RF-01).
+     * @param {number|string} incidentId Incident id or ticket code with optional '#'.
+     * @returns {Promise<Object>}
+     */
+    getIncidentDetail: (incidentId) => {
+      return this.get(`/coordinator/incidents/${encodeURIComponent(incidentId)}/detail`);
+    },
+
+    /**
      * Retrieves all active locations with installed machines count (RF-FLEET-02).
      * @returns {Promise<Array<Object>>}
      */
