@@ -163,14 +163,25 @@ try {
     }
     echo "\n";
 
+    echo "[4b/6] Asegurando catálogo ampliado de sedes, máquinas, técnicos y repuestos...\n";
+    require_once __DIR__ . '/../src/Infrastructure/Database/SeedRunner.php';
+    $seedRunner = new \VendGuard\Infrastructure\Database\SeedRunner($pdo);
+    $seedSummary = $seedRunner->seedAll('Password123!');
+    echo "      ✓ Sedes procesadas: {$seedSummary['locations']}\n";
+    echo "      ✓ Máquinas procesadas: {$seedSummary['machines']}\n";
+    echo "      ✓ Usuarios procesados: {$seedSummary['users']}\n";
+    echo "      ✓ Repuestos procesados: {$seedSummary['spare_parts']} (compatibilidades: {$seedSummary['spare_part_compatibilities']})\n\n";
+
     echo "[5/6] Verificando integridad de datos base en el servidor...\n";
     $locCount = (int)$pdo->query("SELECT COUNT(*) FROM locations WHERE deleted_at IS NULL")->fetchColumn();
     $machCount = (int)$pdo->query("SELECT COUNT(*) FROM machines WHERE deleted_at IS NULL")->fetchColumn();
     $usrCount = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL")->fetchColumn();
+    $partsCount = (int)$pdo->query("SELECT COUNT(*) FROM spare_parts WHERE is_active = 1")->fetchColumn();
 
-    echo "      ✓ Sedes registradas: {$locCount}\n";
-    echo "      ✓ Máquinas operativas: {$machCount}\n";
-    echo "      ✓ Usuarios internos: {$usrCount}\n";
+    echo "      ✓ Sedes registradas: {$locCount} (esperado >= 10)\n";
+    echo "      ✓ Máquinas operativas: {$machCount} (esperado >= 13)\n";
+    echo "      ✓ Usuarios internos: {$usrCount} (esperado >= 6)\n";
+    echo "      ✓ Repuestos activos: {$partsCount} (esperado >= 13)\n";
 
     // Las columnas que el listado de reintegros selecciona tienen que existir
     // aunque la tabla ya estuviera creada antes de que se declararan: son las

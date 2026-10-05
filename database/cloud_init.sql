@@ -332,7 +332,15 @@ CREATE TABLE IF NOT EXISTS `sanitary_certificates` (
 INSERT INTO `locations` (`site_code`, `name`, `address`, `latitude`, `longitude`, `contact_name`, `contact_phone`)
 VALUES
   ('SEDE-BCN-01', 'Hospital del Mar - Edificio Central', 'Passeig Marítim 25, Barcelona', 41.3853120, 2.1932450, 'Laura Sanitaria', '600111222'),
-  ('SEDE-BCN-02', 'Torre Glòries - Planta 4 Oficinas', 'Avinguda Diagonal 211, Barcelona', 41.4036290, 2.1895120, 'Marc Recepción', '600333444')
+  ('SEDE-BCN-02', 'Torre Glòries - Planta 4 Oficinas', 'Avinguda Diagonal 211, Barcelona', 41.4036290, 2.1895120, 'Marc Recepción', '600333444'),
+  ('SEDE-BCN-03', 'Hospital Universitari de Bellvitge', 'Carrer de la Feixa Llarga s/n, L\'Hospitalet de Llobregat', 41.3458200, 2.1075400, 'Carles Coordinador', '600555666'),
+  ('SEDE-BCN-04', 'World Trade Center Barcelona', 'Moll de Barcelona s/n, Barcelona', 41.3725000, 2.1819000, 'Núria Port', '600777888'),
+  ('SEDE-BCN-05', 'Campus Nord UPC - Edifici Nexus', 'Carrer del Gran Capità 2, Barcelona', 41.3888000, 2.1123000, 'Albert Campus', '600999000'),
+  ('SEDE-BCN-06', 'Parc Tecnològic Barcelona Activa', 'Carrer Marie Curie 8, Nou Barris, Barcelona', 41.4392000, 2.1758000, 'Clara Innovació', '611222333'),
+  ('SEDE-BCN-07', 'Badalona Centre Mèdic Can Ruti', 'Carretera de Canyet s/n, Badalona', 41.4645000, 2.2421000, 'Sergi Logística', '611444555'),
+  ('SEDE-BCN-08', 'Sant Cugat Trade Center', 'Avinguda de les Corts Catalanes 5, Sant Cugat del Vallès', 41.4712000, 2.0689000, 'Gemma Gestió', '611666777'),
+  ('SEDE-BCN-09', 'Fira Gran Via - Pavelló 1', 'Avinguda Joan Carles I 64, L\'Hospitalet de Llobregat', 41.3547000, 2.1284000, 'Pau Esdeveniments', '611888999'),
+  ('SEDE-BCN-10', 'WTC Almeda Park Cornellà', 'Plaça de la Pau s/n, Cornellà de Llobregat', 41.3533000, 2.0862000, 'Mireia Serveis', '622111222')
 ON DUPLICATE KEY UPDATE
   `name` = VALUES(`name`),
   `address` = VALUES(`address`),
@@ -350,7 +358,17 @@ INSERT INTO `machines` (`location_id`, `code`, `model`, `machine_type`, `floor_w
 VALUES
   ((SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-01'), 'VEND-0101', 'Sanden Vendo G-Drink', 'PERISHABLE_FOOD', 'Planta Baja - Urgencias', 'Máquina de sándwiches y lácteos frescos', 'OK', DATE_ADD(CURRENT_DATE(), INTERVAL 15 DAY)),
   ((SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-01'), 'VEND-0102', 'Bianchi Gaia Espresso', 'HOT_DRINKS', 'Planta 1 - Sala Médica', 'Café en grano y bebidas calientes', 'OK', DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY)),
-  ((SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-02'), 'VEND-0201', 'Necta Samba Combo', 'COMBO', 'Planta 4 - Office Este', 'Snacks y refrescos variados', 'OK', DATE_ADD(CURRENT_DATE(), INTERVAL 15 DAY))
+  ((SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-02'), 'VEND-0201', 'Necta Samba Combo', 'COMBO', 'Planta 4 - Office Este', 'Snacks y refrescos variados', 'OK', DATE_ADD(CURRENT_DATE(), INTERVAL 15 DAY)),
+  ((SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-03'), 'VEND-0301', 'Sanden Vendo G-Drink', 'PERISHABLE_FOOD', 'Edificio Principal - Hall Consultas', 'Comida fresca y ensaladas preparadas', 'OK', DATE_ADD(CURRENT_DATE(), INTERVAL 15 DAY)),
+  ((SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-03'), 'VEND-0302', 'Bianchi Gaia Espresso', 'HOT_DRINKS', 'Planta 2 - Sala Descanso Personal', 'Café de especialidad e infusiones', 'OK', DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY)),
+  ((SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-04'), 'VEND-0401', 'Necta Samba Combo', 'COMBO', 'Edifici Est - Planta Baixa Lobby', 'Bebidas isotónicas y aperitivos saludables', 'OK', DATE_ADD(CURRENT_DATE(), INTERVAL 15 DAY)),
+  ((SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-05'), 'VEND-0501', 'Fas Fast 900', 'SNACKS', 'Edifici Nexus I - Entrada Estudiants', 'Aperitivos, frutos secos y barritas energéticas', 'OK', DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY)),
+  ((SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-05'), 'VEND-0502', 'Fas Perla', 'HOT_DRINKS', 'Edifici Nexus I - Sala Professorat', 'Café largo, cortado y chocolate', 'OK', DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY)),
+  ((SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-06'), 'VEND-0601', 'Azkoyen Palma+', 'COLD_DRINKS', 'Coworking Principal - Zona Cafeteria', 'Aguas minerales, zumos y refrescos en lata/botella', 'OK', DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY)),
+  ((SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-07'), 'VEND-0701', 'Sanden Vendo G-Drink', 'PERISHABLE_FOOD', 'Planta 0 - Accés Visitants', 'Sandwiches envasados y yogures refrigerados', 'OK', DATE_ADD(CURRENT_DATE(), INTERVAL 15 DAY)),
+  ((SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-08'), 'VEND-0801', 'Necta Samba Combo', 'COMBO', 'Atri Central - Planta Baixa', 'Bebidas frías y aperitivos mixtos', 'OK', DATE_ADD(CURRENT_DATE(), INTERVAL 15 DAY)),
+  ((SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-09'), 'VEND-0901', 'Azkoyen Palma+', 'COLD_DRINKS', 'Pavelló 1 - Porta Nord', 'Bebidas frías de alta rotación para ferias', 'OK', DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY)),
+  ((SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-10'), 'VEND-1001', 'Bianchi Gaia Espresso', 'HOT_DRINKS', 'Planta 1 - Mòdul B Corporatiu', 'Servicio de café continuo para oficinas', 'OK', DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY))
 ON DUPLICATE KEY UPDATE
   `location_id` = VALUES(`location_id`),
   `model` = VALUES(`model`),
@@ -365,7 +383,10 @@ INSERT INTO `users` (`name`, `email`, `password_hash`, `role`, `operator_code`, 
 VALUES
   ('Sara Coordinadora', 'coordinacion@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'COORDINATOR', NULL, '677000111'),
   ('Jordi Técnico Ruta BCN', 'jordi.ruta@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'TECHNICIAN', 'OP-01', '677222333'),
-  ('Marta Técnica Ruta BCN', 'marta.ruta@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'TECHNICIAN', 'OP-02', '677444555')
+  ('Marta Técnica Ruta BCN', 'marta.ruta@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'TECHNICIAN', 'OP-02', '677444555'),
+  ('Carlos Técnico Ruta Sud', 'carlos.ruta@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'TECHNICIAN', 'OP-03', '677666777'),
+  ('Elena Técnica Ruta Nord', 'elena.ruta@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'TECHNICIAN', 'OP-04', '677888999'),
+  ('Marc Técnico Express BCN', 'marc.ruta@vendguard.internal', '$2y$10$2kYc4PEIpFz0Y.BtbOT05uY2XruBBpA9VvyUMP8DCKjnvB2bHdMwm', 'TECHNICIAN', 'OP-05', '677112233')
 ON DUPLICATE KEY UPDATE
   `name` = VALUES(`name`),
   `password_hash` = VALUES(`password_hash`),
@@ -767,7 +788,12 @@ VALUES
     ('MOT-ESP-01',   'Motor Extractor de Espiral 24V DC', 'MECHANICAL', 'Sande / Merkle', 24.50, 1, 'Motor con microinterruptor de posición'),
     ('MON-CASH-01',  'Monedero Selector de Monedas NRI G13', 'PAYMENT_SYSTEM', 'Crane / CPI', 185.00, 1, 'Validador estándar MDB multimoneda'),
     ('DISP-LCD-01',  'Display LCD Gráfico 128x64 Azul', 'ELECTRONIC', 'Winstar', 42.00, 1, 'Pantalla frontal de selección de usuario'),
-    ('JUNT-TOR-01',  'Kit 10 Juntas Tóricas Silicona Alimentaria', 'CONSUMABLE', 'Parker', 8.50, 1, 'Juntas de estanqueidad para grupo de café y pistón')
+    ('JUNT-TOR-01',  'Kit 10 Juntas Tóricas Silicona Alimentaria', 'CONSUMABLE', 'Parker', 8.50, 1, 'Juntas de estanqueidad para grupo de café y pistón'),
+    ('TELEC-NAYAX-01', 'Lector Contactless & Telemetría VPOS Touch', 'PAYMENT_SYSTEM', 'Nayax', 295.00, 1, 'Terminal de pago con tarjeta, móvil contactless y telemetría 4G MDB'),
+    ('FOTO-CAID-01', 'Sensor Fotocélula Detección Caída de Producto', 'ELECTRONIC', 'Omron / Fas', 38.00, 1, 'Barrera óptica infrarroja de validación de entrega de producto'),
+    ('VENT-EVAP-01', 'Motor Ventilador Evaporador No-Frost 230V', 'THERMAL', 'Ebm-Papst', 46.50, 1, 'Turbina de recirculación de aire frío en cabina refrigerada'),
+    ('GRUP-ESPR-01', 'Grupo Infusor de Café Espresso Z4000', 'MECHANICAL', 'N&W / Bianchi', 145.00, 1, 'Módulo de erogación de café en grano con cámara de compresión variable'),
+    ('FILT-AGUA-01', 'Cartucho Filtración Antical y Carbón Activo', 'CONSUMABLE', 'Brita Professional', 58.00, 1, 'Filtro descalcificador de agua potable para calderas vending')
 ON DUPLICATE KEY UPDATE
     `name` = VALUES(`name`),
     `category` = VALUES(`category`),
@@ -787,11 +813,11 @@ CROSS JOIN (
     UNION SELECT 'Fas Perla'
 ) m
 WHERE 
-    (sp.part_code IN ('SOND-NTC-01', 'MOT-ESP-01', 'MON-CASH-01') AND m.model IN ('Sanden Vendo G-Drink', 'Necta Samba Combo', 'Azkoyen Palma+', 'Fas Fast 900'))
+    (sp.part_code IN ('SOND-NTC-01', 'MOT-ESP-01', 'MON-CASH-01', 'FOTO-CAID-01', 'VENT-EVAP-01') AND m.model IN ('Sanden Vendo G-Drink', 'Necta Samba Combo', 'Azkoyen Palma+', 'Fas Fast 900'))
     OR
-    (sp.part_code IN ('VALV-ULKA-01', 'BOMB-VIB-02', 'TERM-SEG-01', 'JUNT-TOR-01', 'MON-CASH-01') AND m.model IN ('Bianchi Gaia Espresso', 'Fas Perla', 'Azkoyen Palma+'))
+    (sp.part_code IN ('VALV-ULKA-01', 'BOMB-VIB-02', 'TERM-SEG-01', 'JUNT-TOR-01', 'MON-CASH-01', 'GRUP-ESPR-01', 'FILT-AGUA-01') AND m.model IN ('Bianchi Gaia Espresso', 'Fas Perla', 'Azkoyen Palma+'))
     OR
-    (sp.part_code = 'DISP-LCD-01')
+    (sp.part_code IN ('DISP-LCD-01', 'TELEC-NAYAX-01'))
 ON DUPLICATE KEY UPDATE `machine_model` = VALUES(`machine_model`);
 
 -- =============================================================================
