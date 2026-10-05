@@ -105,12 +105,12 @@ $assert("3.1 Runner JS finaliza con código de salida 0", $returnCode === 0, imp
 
 $hasGreenResult = false;
 foreach ($output as $line) {
-    if (strpos($line, 'CONDITION T-37 FULFILLED SUCCESSFULLY') !== false) {
+    if (strpos($line, 'CONDITIONS T-37 AND T-IDM-14 FULFILLED SUCCESSFULLY') !== false) {
         $hasGreenResult = true;
         break;
     }
 }
-$assert("3.2 Runner JS confirma cumplimiento total de T-37", $hasGreenResult);
+$assert("3.2 Runner JS confirma cumplimiento total de T-37 y T-IDM-14", $hasGreenResult);
 
 // =====================================================================
 // RESUMEN FINAL

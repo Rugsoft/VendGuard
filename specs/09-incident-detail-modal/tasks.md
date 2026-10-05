@@ -92,7 +92,7 @@
 
 ## Fase 4: Integración en el Panel de Triaje (`CoordinatorDashboardView.js`)
 
-- [ ] **T-IDM-14: Integrar botón disparador "Ver detalle" en las filas de la tabla de triaje**
+- [x] **T-IDM-14: Integrar botón disparador "Ver detalle" en las filas de la tabla de triaje**
   * **Requisitos:** RF-01, RNF-02
   * **Dependencias:** T-IDM-08
   * **Hecho cuando:** En la tabla de incidencias de `public/assets/js/views/CoordinatorDashboardView.js`, cada fila incorpora en la columna de acciones el botón "Ver detalle" con icono de inspección y atributo `data-testid="btn-view-detail"`, sin interferir con los botones preexistentes de "Asignar" o "Descartar".

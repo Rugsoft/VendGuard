@@ -7,6 +7,8 @@
  * 3. 60-second polling mechanism updates without manual reload.
  * 4. Assign modal enforces mandatory reason on urgency overrides (RF-05 / EARS 5.3).
  * 5. Cancel modal enforces mandatory reason for logical soft delete (RF-06 / EARS 6.1).
+ * 6. Per-row "Ver detalle" trigger with inspection icon, kept independent from the
+ *    preexisting assign/cancel quick actions (RF-01 / T-IDM-14).
  */
 
 // Mock localStorage for headless Node environment
@@ -144,6 +146,8 @@ function createDashboardInstance(initialData = {}) {
     cancelReason: '',
     isCancelling: false,
     cancelError: '',
+    showDetailModal: false,
+    selectedDetailIncident: null,
     ...initialData,
     $emit: (evt, val) => { emits.push({ evt, val }); },
     getEmits: () => emits
@@ -458,12 +462,55 @@ assert('8.3 Refunds inbox mounts conditionally on the active tab',
 assert('8.4 The triage tab stays the default landing section',
   CoordinatorDashboardView.data().activeTab === 'incidents');
 
+// ---------------------------------------------------------------------
+// TEST GROUP 9: Incident Detail Trigger Button (RF-01 / T-IDM-14)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 9: Incident Detail Trigger Button (RF-01 / T-IDM-14) ---');
+
+// The trigger is rendered inside the v-for row, so the slice between the row opening
+// tag and its first closing </tr> proves every triage row carries it in the actions cell.
+const triageTemplate = CoordinatorDashboardView.template;
+const triageRowStart = triageTemplate.indexOf('v-for="inc in filteredIncidents"');
+const triageRowEnd = triageTemplate.indexOf('</tr>', triageRowStart);
+const triageRowBlock = triageTemplate.slice(triageRowStart, triageRowEnd);
+
+assert('9.1 Every triage row renders the "Ver detalle" trigger with the inspection icon (RF-01.1)',
+  triageRowStart !== -1 && triageRowEnd > triageRowStart &&
+  triageRowBlock.includes('data-testid="btn-view-detail"') &&
+  triageRowBlock.includes('🔍 Ver detalle'));
+
+assert('9.2 The trigger sits in the actions column beside the intact quick actions (RF-01.1, RF-01.2)',
+  triageRowBlock.includes('<!-- 7. Acciones -->') &&
+  triageRowBlock.indexOf('<!-- 7. Acciones -->') < triageRowBlock.indexOf('btn-view-detail') &&
+  triageRowBlock.includes('@click.stop="openDetailModal(inc)"') &&
+  triageRowBlock.includes('@click="openQrLabelModal(inc)"') &&
+  triageRowBlock.includes('@click="openAssignModal(inc)"') &&
+  triageRowBlock.includes('@click="openCancelModal(inc)"'));
+
+const detailTriggerView = createDashboardInstance();
+CoordinatorDashboardView.methods.openDetailModal.call(detailTriggerView, mockIncidents[0]);
+assert('9.3 The trigger records the chosen incident and flips only the detail state (RF-01.1)',
+  detailTriggerView.selectedDetailIncident === mockIncidents[0] &&
+  detailTriggerView.showDetailModal === true &&
+  detailTriggerView.showAssignModal === false &&
+  detailTriggerView.showCancelModal === false);
+
+const independentActionsView = createDashboardInstance();
+CoordinatorDashboardView.methods.openDetailModal.call(independentActionsView, mockIncidents[2]);
+CoordinatorDashboardView.methods.openAssignModal.call(independentActionsView, mockIncidents[0]);
+CoordinatorDashboardView.methods.openCancelModal.call(independentActionsView, mockIncidents[1]);
+assert('9.4 Quick assign/discard keep their own lifecycle without disturbing the detail selection (RF-01.2)',
+  independentActionsView.selectedIncident === mockIncidents[1] &&
+  independentActionsView.showAssignModal === true && independentActionsView.showCancelModal === true &&
+  independentActionsView.selectedDetailIncident === mockIncidents[2] &&
+  independentActionsView.showDetailModal === true);
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 
 if (failures === 0) {
-  console.log(' RESULT: 100% IN GREEN. CONDITION T-37 FULFILLED SUCCESSFULLY.');
+  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-37 AND T-IDM-14 FULFILLED SUCCESSFULLY.');
   console.log('======================================================================\n');
   process.exit(0);
 } else {

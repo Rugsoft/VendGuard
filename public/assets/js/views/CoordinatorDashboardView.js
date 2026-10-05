@@ -11,6 +11,8 @@
  * 5. CancelIncident modal enforcing mandatory discard reason (RF-06 / EARS 6.1, Soft Delete).
  * 6. Internal login form if unauthenticated or missing coordinator role (RF-04).
  * 7. Refunds inbox tab with double approval, digital settlement and motivated rejection (T-REF-18).
+ * 8. Per-row "Ver detalle" trigger selecting the incident for the integral detail modal,
+ *    kept independent from the preexisting assign/cancel quick actions (RF-01, T-IDM-14).
  */
 
 import { api } from '../api.js';
@@ -143,6 +145,11 @@ export const CoordinatorDashboardView = {
       cancelReason: '',
       isCancelling: false,
       cancelError: '',
+
+      // Incident Detail State (RF-01, T-IDM-14): the row trigger records the incident
+      // chosen for the integral detail modal, mounted by T-IDM-15.
+      showDetailModal: false,
+      selectedDetailIncident: null,
 
       // QR Label & Batch Print State (T-QR-14)
       showQrLabelModal: false,
@@ -451,6 +458,16 @@ export const CoordinatorDashboardView = {
     closeCancelModal() {
       this.showCancelModal = false;
       this.selectedIncident = null;
+    },
+
+    /**
+     * Selecciona la incidencia y solicita la apertura de la ficha de detalle integral
+     * (RF-01.1, T-IDM-14). El modal de detalle se monta sobre este estado (T-IDM-15) y
+     * permanece independiente de los modales de asignación y descarte de la fila (RF-01.2).
+     */
+    openDetailModal(incident) {
+      this.selectedDetailIncident = incident;
+      this.showDetailModal = true;
     },
 
     // --- Actions ---
@@ -1021,6 +1038,19 @@ export const CoordinatorDashboardView = {
                   <!-- 7. Acciones -->
                   <td style="padding: 14px 16px; vertical-align: top; text-align: right;">
                     <div style="display: inline-flex; gap: 8px;">
+
+                      <!-- View Detail Button (RF-01.1 / T-IDM-14) -->
+                      <button
+                        type="button"
+                        class="vg-btn vg-btn-secondary"
+                        style="height: 30px; font-size: 12px; padding: 0 8px; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 4px;"
+                        @click.stop="openDetailModal(inc)"
+                        title="Ver el detalle integral de la incidencia"
+                        data-testid="btn-view-detail"
+                      >
+                        🔍 Ver detalle
+                      </button>
+
                       <!-- Imprimir Etiqueta QR Button (RF-01 / T-QR-14) -->
                       <button
                         type="button"
