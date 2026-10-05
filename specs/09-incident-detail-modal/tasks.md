@@ -97,7 +97,7 @@
   * **Dependencias:** T-IDM-08
   * **Hecho cuando:** En la tabla de incidencias de `public/assets/js/views/CoordinatorDashboardView.js`, cada fila incorpora en la columna de acciones el botón "Ver detalle" con icono de inspección y atributo `data-testid="btn-view-detail"`, sin interferir con los botones preexistentes de "Asignar" o "Descartar".
 
-- [ ] **T-IDM-15: Montaje reactivo del modal y sincronización de eventos de actualización**
+- [x] **T-IDM-15: Montaje reactivo del modal y sincronización de eventos de actualización**
   * **Requisitos:** RF-01, RF-07, RF-08
   * **Dependencias:** T-IDM-13, T-IDM-14
   * **Hecho cuando:** `CoordinatorDashboardView.js` monta `CoordinatorIncidentDetailModal`, controla su apertura reactiva al pulsar "Ver detalle", y ante el evento `incident-updated` refresca la fila correspondiente en la tabla de triaje sin recargar la página completa.

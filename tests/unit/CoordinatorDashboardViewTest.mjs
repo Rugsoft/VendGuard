@@ -9,6 +9,8 @@
  * 5. Cancel modal enforces mandatory reason for logical soft delete (RF-06 / EARS 6.1).
  * 6. Per-row "Ver detalle" trigger with inspection icon, kept independent from the
  *    preexisting assign/cancel quick actions (RF-01 / T-IDM-14).
+ * 7. Reactive mount of the integral incident detail modal over that trigger, refreshing
+ *    the corresponding triage row in place on incident-updated (RF-01/RF-07/RF-08, T-IDM-15).
  */
 
 // Mock localStorage for headless Node environment
@@ -44,7 +46,7 @@ function assert(description, condition, details = '') {
 }
 
 console.log('======================================================================');
-console.log(' VendGuard: Frontend Test Suite - CoordinatorDashboardView (T-37)');
+console.log(' VendGuard: Frontend Test Suite - CoordinatorDashboardView (T-37, T-IDM-14, T-IDM-15)');
 console.log('======================================================================\n');
 
 // Mock incident fixtures
@@ -164,6 +166,9 @@ function createDashboardInstance(initialData = {}) {
   });
   Object.defineProperty(instance, 'metrics', {
     get: () => CoordinatorDashboardView.computed.metrics.call(instance)
+  });
+  Object.defineProperty(instance, 'detailIncidentId', {
+    get: () => CoordinatorDashboardView.computed.detailIncidentId.call(instance)
   });
 
   if (CoordinatorDashboardView.methods) {
@@ -505,12 +510,81 @@ assert('9.4 Quick assign/discard keep their own lifecycle without disturbing the
   independentActionsView.selectedDetailIncident === mockIncidents[2] &&
   independentActionsView.showDetailModal === true);
 
+// ---------------------------------------------------------------------
+// TEST GROUP 10: Reactive Detail Modal Mount & Row Refresh (RF-01/RF-07/RF-08 / T-IDM-15)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 10: Reactive Detail Modal Mount & Row Refresh (T-IDM-15) ---');
+
+assert('10.1 View registers CoordinatorIncidentDetailModal and mounts it with reactive bindings',
+  CoordinatorDashboardView.components?.CoordinatorIncidentDetailModal !== undefined &&
+  CoordinatorDashboardView.template.includes('<CoordinatorIncidentDetailModal') &&
+  CoordinatorDashboardView.template.includes(':is-open="showDetailModal"') &&
+  CoordinatorDashboardView.template.includes(':incident-id="detailIncidentId"') &&
+  CoordinatorDashboardView.template.includes('@close="closeDetailModal"') &&
+  CoordinatorDashboardView.template.includes('@incident-updated="handleIncidentUpdated"'));
+
+const mountView = createDashboardInstance();
+CoordinatorDashboardView.methods.openDetailModal.call(mountView, mockIncidents[0]);
+assert('10.2 Pressing "Ver detalle" reactively opens the modal over the chosen incident (RF-01.1)',
+  mountView.showDetailModal === true &&
+  mountView.detailIncidentId === mockIncidents[0].id);
+
+CoordinatorDashboardView.methods.closeDetailModal.call(mountView);
+assert('10.3 Closing the modal clears the selection without residue',
+  mountView.showDetailModal === false && mountView.detailIncidentId === null &&
+  mountView.selectedDetailIncident === null);
+
+// incident-updated refreshes ONLY the corresponding row, in place, without a page reload.
+// The modal payload carries just the reason, so the view locates the row through the
+// incident currently open in the modal (selectedDetailIncident).
+const refreshedRow = { ...mockIncidents[0], status: 'CANCELADA', urgency: 'LOW' };
+const freshServerList = [refreshedRow, mockIncidents[1], mockIncidents[2]];
+let incidentListCalls = 0;
+api.coordinator.getIncidents = async () => { incidentListCalls++; return freshServerList; };
+
+const rowRefreshView = createDashboardInstance();
+CoordinatorDashboardView.methods.openDetailModal.call(rowRefreshView, mockIncidents[0]);
+const untouchedSecondRow = rowRefreshView.incidents[1];
+const untouchedThirdRow = rowRefreshView.incidents[2];
+await CoordinatorDashboardView.methods.handleIncidentUpdated.call(rowRefreshView, { reason: 'cancel' });
+assert('10.4 incident-updated replaces only the corresponding row in place without a reload (RF-07.4)',
+  incidentListCalls === 1 &&
+  rowRefreshView.incidents.length === 3 &&
+  rowRefreshView.incidents[0] === refreshedRow &&
+  rowRefreshView.incidents[0].status === 'CANCELADA' &&
+  rowRefreshView.incidents[1] === untouchedSecondRow &&
+  rowRefreshView.incidents[2] === untouchedThirdRow &&
+  rowRefreshView.isLoading === false);
+
+// A ticket that left the coordinator list degrades to a silent full sync
+api.coordinator.getIncidents = async () => [mockIncidents[1], mockIncidents[2]];
+const vanishedView = createDashboardInstance();
+CoordinatorDashboardView.methods.openDetailModal.call(vanishedView, mockIncidents[0]);
+await CoordinatorDashboardView.methods.handleIncidentUpdated.call(vanishedView, { reason: 'cancel' });
+assert('10.5 A vanished ticket falls back to a silent full sync without a page reload',
+  vanishedView.incidents.length === 2 && vanishedView.isLoading === false);
+
+// A failing background refresh keeps the table intact and never breaks the flow
+api.coordinator.getIncidents = async () => { throw new Error('Red caída'); };
+const failingRefreshView = createDashboardInstance();
+CoordinatorDashboardView.methods.openDetailModal.call(failingRefreshView, mockIncidents[1]);
+let refreshThrew = false;
+try {
+  await CoordinatorDashboardView.methods.handleIncidentUpdated.call(failingRefreshView, { reason: 'assign' });
+} catch (refreshFailure) {
+  refreshThrew = true;
+}
+assert('10.6 A failed row refresh keeps the table intact and degrades gracefully',
+  refreshThrew === false &&
+  failingRefreshView.incidents.length === 3 &&
+  failingRefreshView.incidents[1].id === mockIncidents[1].id);
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 
 if (failures === 0) {
-  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-37 AND T-IDM-14 FULFILLED SUCCESSFULLY.');
+  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-37, T-IDM-14 AND T-IDM-15 FULFILLED SUCCESSFULLY.');
   console.log('======================================================================\n');
   process.exit(0);
 } else {

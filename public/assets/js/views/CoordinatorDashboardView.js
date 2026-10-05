@@ -13,6 +13,8 @@
  * 7. Refunds inbox tab with double approval, digital settlement and motivated rejection (T-REF-18).
  * 8. Per-row "Ver detalle" trigger selecting the incident for the integral detail modal,
  *    kept independent from the preexisting assign/cancel quick actions (RF-01, T-IDM-14).
+ * 9. Reactive mount of the integral detail modal over that trigger, refreshing the
+ *    corresponding triage row in place on incident-updated (RF-01/RF-07/RF-08, T-IDM-15).
  */
 
 import { api } from '../api.js';
@@ -33,6 +35,7 @@ import { CoordinatorSparePartsTab } from '../components/CoordinatorSparePartsTab
 import { CoordinatorSparePartsAnalyticsTab } from '../components/CoordinatorSparePartsAnalyticsTab.js';
 import { CoordinatorTerritorialMapTab } from '../components/CoordinatorTerritorialMapTab.js';
 import { CoordinatorRefundsTab } from '../components/CoordinatorRefundsTab.js';
+import { CoordinatorIncidentDetailModal } from '../components/CoordinatorIncidentDetailModal.js';
 
 // Canonical mapping for bilingual status values
 const STATUS_CANONICAL_MAP = {
@@ -84,7 +87,8 @@ export const CoordinatorDashboardView = {
     CoordinatorSparePartsTab,
     CoordinatorSparePartsAnalyticsTab,
     CoordinatorTerritorialMapTab,
-    CoordinatorRefundsTab
+    CoordinatorRefundsTab,
+    CoordinatorIncidentDetailModal
   },
   emits: ['assigned', 'cancelled', 'refresh'],
   data() {
@@ -166,6 +170,16 @@ export const CoordinatorDashboardView = {
     currentUser() {
       return store.state.user;
     },
+
+    /** Identificador (ID primario o código de ticket) de la incidencia abierta en el detalle (T-IDM-15). */
+    detailIncidentId() {
+      const selected = this.selectedDetailIncident;
+      if (!selected) {
+        return null;
+      }
+      return selected.id ?? selected.ticket_code ?? null;
+    },
+
     slaBreachedIncidents() {
       return this.incidents.filter(inc => {
         const isCritical = String(inc.urgency || '').toUpperCase() === 'CRITICAL';
@@ -468,6 +482,53 @@ export const CoordinatorDashboardView = {
     openDetailModal(incident) {
       this.selectedDetailIncident = incident;
       this.showDetailModal = true;
+    },
+
+    /**
+     * Cierra la ficha de detalle integral y libera la selección (T-IDM-15). El modal ya
+     * reinició sus borradores antes de emitir `close` (T-IDM-13), de modo que aquí solo
+     * queda desmontar el estado de la bandeja sin residuos.
+     */
+    closeDetailModal() {
+      this.showDetailModal = false;
+      this.selectedDetailIncident = null;
+    },
+
+    /**
+     * Refresca en caliente la fila de la bandeja correspondiente a la incidencia abierta
+     * en el modal de detalle (T-IDM-15, RF-07.3/RF-07.4): vuelve a pedir el listado al
+     * servidor y sustituye únicamente la fila afectada mediante splice reactivo, sin
+     * recargar la página completa ni disparar el spinner de carga. El payload del modal
+     * ({ reason: 'assign' | 'cancel' | 'comment' }) no hace falta para localizar la fila:
+     * la bandeja ya conoce la incidencia abierta en `selectedDetailIncident`.
+     */
+    async handleIncidentUpdated() {
+      const incidentId = this.selectedDetailIncident?.id;
+      if (incidentId === undefined || incidentId === null) {
+        await this.loadIncidents(true);
+        return;
+      }
+
+      try {
+        const data = await api.coordinator.getIncidents();
+        const freshRows = Array.isArray(data) ? data : [];
+        const rowIndex = this.incidents.findIndex(inc => Number(inc.id) === Number(incidentId));
+        const freshRow = freshRows.find(inc => Number(inc.id) === Number(incidentId));
+
+        if (rowIndex !== -1 && freshRow) {
+          // Sustitución en sitio: Vue 3 repinta únicamente la fila afectada.
+          this.incidents.splice(rowIndex, 1, freshRow);
+          this.lastUpdated = new Date();
+        } else {
+          // El ticket salió del alcance del listado del coordinador: sincroniza el
+          // conjunto en silencio, siempre sin recargar la página completa.
+          await this.loadIncidents(true);
+        }
+      } catch (refreshError) {
+        // Fallo de red en el refresco de fondo: la tabla conserva sus datos actuales y el
+        // modal ya informó del resultado real de la acción; el sondeo de 60 s seguirá
+        // sincronizando la bandeja. Nunca se recarga la página.
+      }
     },
 
     // --- Actions ---
@@ -1496,6 +1557,16 @@ export const CoordinatorDashboardView = {
         v-model="showPreventiveSettingsModal"
         @settings-updated="loadIncidents(true)"
         @pause-updated="loadIncidents(true)"
+      />
+
+      <!-- =================================================================== -->
+      <!-- MODAL 5: INTEGRAL INCIDENT DETAIL (RF-01, RF-07, RF-08 / T-IDM-15)  -->
+      <!-- =================================================================== -->
+      <CoordinatorIncidentDetailModal
+        :is-open="showDetailModal"
+        :incident-id="detailIncidentId"
+        @close="closeDetailModal"
+        @incident-updated="handleIncidentUpdated"
       />
     </div>
   `
