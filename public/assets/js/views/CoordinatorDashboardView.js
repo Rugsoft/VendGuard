@@ -446,6 +446,34 @@ export const CoordinatorDashboardView = {
       }
     },
 
+    // --- Per-Row Quick Action Gating (EARS 5.5 / EARS 6.4) ---
+
+    /**
+     * Quick "Asignar" action is only offered for statuses that accept an initial
+     * assignment (EARS 5.5): REGISTRADA/REGISTERED and REABIERTA/REOPENED. Any other
+     * state hides the action; reassignment stays exclusive to the integral detail modal
+     * (RF-07.3), which already owns technician exclusion and mandatory reasons.
+     * Statuses are matched in both canonical English and localized Spanish forms,
+     * mirroring the existing status helpers of this view (metrics, bulk assign).
+     */
+    canQuickAssign(incident) {
+      const status = String(incident?.status || '').toUpperCase();
+      return ['REGISTRADA', 'REGISTERED', 'REABIERTA', 'REOPENED'].includes(status);
+    },
+
+    /**
+     * Quick "Descartar" action is only offered for active tickets (EARS 6.4): every
+     * status except RESUELTA/RESOLVED, CERRADA/CLOSED and CANCELADA/CANCELLED. An
+     * unknown or empty status hides the destructive action by design (fail-safe).
+     */
+    canQuickCancel(incident) {
+      const status = String(incident?.status || '').toUpperCase();
+      if (status === '') {
+        return false;
+      }
+      return !['RESUELTA', 'RESOLVED', 'CERRADA', 'CLOSED', 'CANCELADA', 'CANCELLED'].includes(status);
+    },
+
     // --- Modal Triggers ---
 
     openAssignModal(incident) {
@@ -508,7 +536,18 @@ export const CoordinatorDashboardView = {
         await this.loadIncidents(true);
         return;
       }
+      await this.refreshIncidentRow(incidentId);
+    },
 
+    /**
+     * Refreshes a single triage row in place with the server truth (T-IDM-15,
+     * EARS 5.6/6.5): re-requests the listing and substitutes only the affected row via
+     * reactive splice, without a full page reload or the loading spinner. Shared by the
+     * detail-modal `incident-updated` handler and by the stale-state defense of the row
+     * quick actions (a backend rejection re-syncs the row while the panel keeps showing
+     * the rejection reason).
+     */
+    async refreshIncidentRow(incidentId) {
       try {
         const data = await api.coordinator.getIncidents();
         const freshRows = Array.isArray(data) ? data : [];
@@ -526,7 +565,7 @@ export const CoordinatorDashboardView = {
         }
       } catch (refreshError) {
         // Fallo de red en el refresco de fondo: la tabla conserva sus datos actuales y el
-        // modal ya informó del resultado real de la acción; el sondeo de 60 s seguirá
+        // panel ya informó del resultado real de la acción; el sondeo de 60 s seguirá
         // sincronizando la bandeja. Nunca se recarga la página.
       }
     },
@@ -568,6 +607,12 @@ export const CoordinatorDashboardView = {
         await this.loadIncidents();
       } catch (err) {
         this.assignError = err.message || 'Error al asignar la incidencia.';
+        // Stale-row defense (EARS 5.6): the backend rejected the operation because the
+        // real state no longer allows it. Re-sync the affected row with the server truth
+        // while the panel stays open showing the rejection reason.
+        if (this.selectedIncident?.id !== undefined && this.selectedIncident?.id !== null) {
+          await this.refreshIncidentRow(this.selectedIncident.id);
+        }
       } finally {
         this.isAssigning = false;
         store.setLoading(false);
@@ -606,6 +651,12 @@ export const CoordinatorDashboardView = {
         await this.loadIncidents();
       } catch (err) {
         this.cancelError = err.message || 'Error al descartar la incidencia.';
+        // Stale-row defense (EARS 6.5): the backend rejected the discard because the
+        // real state no longer allows it. Re-sync the affected row with the server truth
+        // while the panel stays open showing the rejection reason.
+        if (this.selectedIncident?.id !== undefined && this.selectedIncident?.id !== null) {
+          await this.refreshIncidentRow(this.selectedIncident.id);
+        }
       } finally {
         this.isCancelling = false;
         store.setLoading(false);
@@ -1124,8 +1175,9 @@ export const CoordinatorDashboardView = {
                         🏷️ Imprimir QR
                       </button>
 
-                      <!-- Assign / Reassign Button -->
+                      <!-- Assign Button: visible only in assignable states (EARS 5.5) -->
                       <button
+                        v-if="canQuickAssign(inc)"
                         type="button"
                         class="vg-btn vg-btn-primary"
                         style="height: 30px; font-size: 12px; padding: 0 10px; border-radius: var(--radius-interactive, 4px);"
@@ -1135,8 +1187,9 @@ export const CoordinatorDashboardView = {
                         Asignar
                       </button>
 
-                      <!-- Cancel / Discard Button -->
+                      <!-- Cancel / Discard Button: visible only in active states (EARS 6.4) -->
                       <button
+                        v-if="canQuickCancel(inc)"
                         type="button"
                         class="vg-btn vg-btn-secondary"
                         style="height: 30px; font-size: 12px; padding: 0 8px; color: #dc2626; border-radius: var(--radius-interactive, 4px);"

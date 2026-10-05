@@ -11,6 +11,9 @@
  *    preexisting assign/cancel quick actions (RF-01 / T-IDM-14).
  * 7. Reactive mount of the integral incident detail modal over that trigger, refreshing
  *    the corresponding triage row in place on incident-updated (RF-01/RF-07/RF-08, T-IDM-15).
+ * 8. Per-row quick action gating by incident status (EARS 5.5 / EARS 6.4) plus the
+ *    stale-state defense that re-syncs the affected row after a backend rejection
+ *    (EARS 5.6 / EARS 6.5).
  */
 
 // Mock localStorage for headless Node environment
@@ -579,12 +582,89 @@ assert('10.6 A failed row refresh keeps the table intact and degrades gracefully
   failingRefreshView.incidents.length === 3 &&
   failingRefreshView.incidents[1].id === mockIncidents[1].id);
 
+// ---------------------------------------------------------------------
+// TEST GROUP 11: Per-Row Quick Action Gating by Status (EARS 5.5 / EARS 6.4)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 11: Quick Action Gating by Status (EARS 5.5 / EARS 6.4) ---');
+
+const gatingMethods = CoordinatorDashboardView.methods;
+const mkStatusIncident = (status) => ({ id: 99, ticket_code: 'INC-2026-GATE', status });
+
+assert('11.1 "Asignar" visible in REGISTRADA (EARS 5.5)',
+  gatingMethods.canQuickAssign(mkStatusIncident('REGISTRADA')) === true);
+assert('11.2 "Asignar" visible in canonical REGISTERED',
+  gatingMethods.canQuickAssign(mkStatusIncident('REGISTERED')) === true);
+assert('11.3 "Asignar" visible in REABIERTA/REOPENED (re-entry after warranty)',
+  gatingMethods.canQuickAssign(mkStatusIncident('REABIERTA')) === true &&
+  gatingMethods.canQuickAssign(mkStatusIncident('REOPENED')) === true);
+assert('11.4 "Asignar" hidden in states with an active owner (reassignment stays in the detail modal, RF-07.3)',
+  ['ASIGNADA', 'ASSIGNED', 'EN CURSO', 'IN_PROGRESS', 'PENDIENTE_REPUESTO', 'PENDING_PARTS']
+    .every(s => gatingMethods.canQuickAssign(mkStatusIncident(s)) === false));
+assert('11.5 "Asignar" hidden in terminal states',
+  ['RESUELTA', 'RESOLVED', 'CERRADA', 'CLOSED', 'CANCELADA', 'CANCELLED']
+    .every(s => gatingMethods.canQuickAssign(mkStatusIncident(s)) === false));
+assert('11.6 "Asignar" hidden without status (fail-safe)',
+  gatingMethods.canQuickAssign(mkStatusIncident('')) === false);
+
+assert('11.7 "Descartar" visible in every active status (EARS 6.4)',
+  ['REGISTRADA', 'REGISTERED', 'REABIERTA', 'REOPENED', 'ASIGNADA', 'ASSIGNED', 'EN CURSO', 'IN_PROGRESS', 'PENDIENTE_REPUESTO', 'PENDING_PARTS']
+    .every(s => gatingMethods.canQuickCancel(mkStatusIncident(s)) === true));
+assert('11.8 "Descartar" hidden in RESUELTA/CERRADA/CANCELADA (both languages)',
+  ['RESUELTA', 'RESOLVED', 'CERRADA', 'CLOSED', 'CANCELADA', 'CANCELLED']
+    .every(s => gatingMethods.canQuickCancel(mkStatusIncident(s)) === false));
+assert('11.9 "Descartar" hidden without status (fail-safe)',
+  gatingMethods.canQuickCancel(mkStatusIncident('')) === false);
+
+assert('11.10 Row template gates "Asignar" with v-if (EARS 5.5)',
+  triageRowBlock.includes('v-if="canQuickAssign(inc)"') &&
+  triageRowBlock.includes('@click="openAssignModal(inc)"'));
+assert('11.11 Row template gates "Descartar" with v-if (EARS 6.4)',
+  triageRowBlock.includes('v-if="canQuickCancel(inc)"') &&
+  triageRowBlock.includes('@click="openCancelModal(inc)"'));
+
+// ---------------------------------------------------------------------
+// TEST GROUP 12: Stale-State Defense on Quick Actions (EARS 5.6 / EARS 6.5)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 12: Stale-State Defense on Quick Actions (EARS 5.6 / EARS 6.5) ---');
+
+// The tray says REGISTRADA but the server already cancelled the ticket (another
+// operator won the race). The 422 rejection must surface in the panel AND the
+// affected row must be re-synced in place with the server truth.
+api.coordinator.assignTechnician = async () => {
+  throw new Error('Solo se pueden asignar incidencias en estado REGISTERED o REOPENED, o reasignar las que están en ASSIGNED, IN_PROGRESS o PENDING_PARTS. Estado actual: CANCELLED.');
+};
+api.coordinator.getIncidents = async () => [{ ...mockIncidents[0], status: 'CANCELLED' }];
+
+const staleAssignView = createDashboardInstance({ selectedIncident: mockIncidents[0] });
+await CoordinatorDashboardView.methods.submitAssignment.call(staleAssignView);
+assert('12.1 A stale assignment surfaces the backend rejection in the panel (EARS 5.6)',
+  staleAssignView.assignError.includes('REGISTERED'));
+assert('12.2 The rejected row is re-synced in place with the server state (EARS 5.6)',
+  staleAssignView.incidents[0].status === 'CANCELLED' &&
+  staleAssignView.incidents.length === 3);
+
+api.coordinator.cancelIncident = async () => {
+  throw new Error('No se puede cancelar una incidencia en estado CLOSED.');
+};
+api.coordinator.getIncidents = async () => [{ ...mockIncidents[0], status: 'CLOSED' }];
+
+const staleCancelView = createDashboardInstance({
+  selectedIncident: mockIncidents[0],
+  cancelReason: 'Motivo de descarte de prueba'
+});
+await CoordinatorDashboardView.methods.submitCancellation.call(staleCancelView);
+assert('12.3 A stale discard surfaces the backend rejection in the panel (EARS 6.5)',
+  staleCancelView.cancelError.includes('CLOSED'));
+assert('12.4 The rejected row is re-synced in place with the server state (EARS 6.5)',
+  staleCancelView.incidents[0].status === 'CLOSED' &&
+  staleCancelView.incidents.length === 3);
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 
 if (failures === 0) {
-  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-37, T-IDM-14 AND T-IDM-15 FULFILLED SUCCESSFULLY.');
+  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-37, T-IDM-14, T-IDM-15 AND TRAY GATING (EARS 5.5/6.4) FULFILLED SUCCESSFULLY.');
   console.log('======================================================================\n');
   process.exit(0);
 } else {

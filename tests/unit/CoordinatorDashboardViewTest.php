@@ -105,12 +105,12 @@ $assert("3.1 Runner JS finaliza con código de salida 0", $returnCode === 0, imp
 
 $hasGreenResult = false;
 foreach ($output as $line) {
-    if (strpos($line, 'CONDITIONS T-37, T-IDM-14 AND T-IDM-15 FULFILLED SUCCESSFULLY') !== false) {
+    if (strpos($line, 'CONDITIONS T-37, T-IDM-14, T-IDM-15 AND TRAY GATING (EARS 5.5/6.4) FULFILLED SUCCESSFULLY') !== false) {
         $hasGreenResult = true;
         break;
     }
 }
-$assert("3.2 Runner JS confirma cumplimiento total de T-37, T-IDM-14 y T-IDM-15", $hasGreenResult);
+$assert("3.2 Runner JS confirma cumplimiento total de T-37, T-IDM-14, T-IDM-15 y gating de bandeja (EARS 5.5/6.4)", $hasGreenResult);
 
 // =====================================================================
 // RESUMEN FINAL

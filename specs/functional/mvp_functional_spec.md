@@ -85,6 +85,8 @@ Definir con precisión el comportamiento funcional del Producto Mínimo Viable (
 * **EARS 5.2 (Ubicuo):** El sistema deberá garantizar que una incidencia solo tenga un único técnico asignado activo de forma simultánea.
 * **EARS 5.3 (Opcional/Auditoría):** Donde el coordinador detecte discrepancias justificadas en la gravedad de la avería (incluyendo la degradación de una urgencia `CRÍTICA` si la máquina está vacía de producto perecedero), el sistema deberá permitirle modificar el nivel de urgencia **exigiendo obligatoriamente un motivo justificado que quedará registrado en el historial inmutable** de la incidencia.
 * **EARS 5.4 (Excepción):** Si el coordinador intenta asignar una incidencia sin seleccionar un técnico válido, entonces el sistema deberá rechazar la operación y mantener la incidencia en su estado actual.
+* **EARS 5.5 (Estado/Visibilidad):** El sistema solo deberá mostrar la acción rápida *"Asignar"* de la bandeja de triaje en incidencias en estado `REGISTRADA` o `REABIERTA`; en cualquier otro estado deberá permanecer oculta, quedando la reasignación como acción exclusiva de la ficha de detalle integral (RF-07.3).
+* **EARS 5.6 (Excepción/Dato obsoleto):** Si al confirmar una asignación el estado real de la incidencia ya no la admite (p. ej., cerrada por otro operador mientras la bandeja estaba abierta), el sistema deberá rechazar la operación con el error `INVALID_STATUS_FOR_ASSIGNMENT`, mostrar el motivo al coordinador y refrescar la fila de la bandeja con el estado vigente del servidor.
 
 ### RF-06: Descarte o Cancelación Lógica de Avisos
 *El coordinador podrá anular avisos improcedentes sin destruir información histórica.*
@@ -92,6 +94,8 @@ Definir con precisión el comportamiento funcional del Producto Mínimo Viable (
 * **EARS 6.1 (Evento):** Cuando el coordinador descarte una incidencia (falsa alarma, error de reporte o máquina retirada), el sistema deberá exigir obligatoriamente un motivo de descarte.
 * **EARS 6.2 (Ubicuo):** El sistema deberá realizar la anulación mediante borrado lógico, cambiando el estado a `CANCELADA` y preservando el registro íntegro en base de datos.
 * **EARS 6.3 (Excepción):** Si el coordinador intenta cancelar un aviso sin rellenar el motivo explicativo, entonces el sistema deberá bloquear la cancelación.
+* **EARS 6.4 (Estado/Visibilidad):** El sistema solo deberá mostrar la acción rápida *"Descartar"* de la bandeja de triaje en incidencias en estados activos (`REGISTRADA`, `ASIGNADA`, `EN CURSO`, `PENDIENTE REPUESTO` o `REABIERTA`), ocultándola en `RESUELTA`, `CERRADA` y `CANCELADA`.
+* **EARS 6.5 (Excepción/Dato obsoleto):** Si al confirmar un descarte el estado real de la incidencia ya no lo admite, el sistema deberá rechazar la operación con el error `INVALID_STATUS_FOR_CANCELLATION`, mostrar el motivo al coordinador y refrescar la fila de la bandeja con el estado vigente del servidor.
 
 ### RF-07: Gestión de la Intervención Técnica en Campo
 *El técnico de campo gestionará el estado de la máquina durante su presencia física.*
