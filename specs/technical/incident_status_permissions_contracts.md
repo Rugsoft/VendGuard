@@ -47,6 +47,17 @@ Todas aceptan el incidente completo (`{ status, assigned_technician_id }`) o el 
 - `CoordinatorDashboardViewTest.mjs` conserva sus 79 aserciones: prueba que el gating y los filtros siguen operativos tras la delegación.
 - Batería global `tests/run_all.php` recoge la suite nueva por descubrimiento automático `glob(tests/unit/*.mjs)`.
 
-## 5. Restricción de futuro
+## 6. Extensión: vocabulario localizado y paletas de insignias
+
+El módulo concentra también los mapas de **presentación** que antes estaban duplicados en `IncidentBadge.js` (`URGENCY_CONFIG`, `STATUS_CONFIG` bilingües) y `MachineCard.js` (`MACHINE_TYPE_MAP`):
+
+- `STATUS_LABELS` / `URGENCY_LABELS`: etiquetas en español. `URGENCY_LABELS.CRITICAL` conserva la variante corta de insignia ('Crítica'); la etiqueta completa del servidor ('Crítica (Riesgo Alimentario)') sigue llegando vía API donde hay espacio.
+- `BADGE_URGENCY_PALETTE` / `BADGE_STATUS_PALETTE`: paletas semánticas del sistema Docker, byte a byte idénticas a las pre-extracción.
+- `MACHINE_TYPE_LABELS` / `MACHINE_TYPE_ICONS` / `isPerishableMachineType`: vocabulario de tipos de máquina, espejo de `MachineType.php`, con la regla sanitaria de perecederos.
+- `normalizeBadgeKey` / `resolveBadgeConfig(value, type)`: normalización tolerante del badge (NFD sin diacríticos, espacios → guion bajo) y resolución única de paleta + etiqueta en modos `urgency`/`status`/`auto` (precedencia histórica: urgencia primero). Valores desconocidos → `null`: cada consumidor conserva su fallback.
+
+Los componentes `IncidentBadge` y `MachineCard` quedan como puros mapeadores a markup (cero literales de etiquetas; verificado por los grupos 7–9 de la suite). El wrapper `UIComponentsTest.php` apunta ahora sus contratos de diccionario al módulo compartido.
+
+## 7. Restricción de futuro
 
 Si el ciclo de vida cambia, la edición canónica es PHP (`IncidentStatus` + `CoordinatorIncidentDetailService`); este módulo y su suite espejo se actualizan en el mismo commit. Ninguna otra superficie del frontend debe volver a escribir listas de estado literales.

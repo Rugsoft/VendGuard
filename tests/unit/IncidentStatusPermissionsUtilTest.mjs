@@ -26,7 +26,16 @@ import {
   canQuickCancelStatus,
   isTerminalStatus,
   isActiveStatus,
-  isPendingAssignment
+  isPendingAssignment,
+  STATUS_LABELS,
+  URGENCY_LABELS,
+  BADGE_URGENCY_PALETTE,
+  BADGE_STATUS_PALETTE,
+  MACHINE_TYPE_LABELS,
+  MACHINE_TYPE_ICONS,
+  normalizeBadgeKey,
+  resolveBadgeConfig,
+  isPerishableMachineType
 } from '../../public/assets/js/utils/IncidentStatusPermissions.js';
 
 let assertions = 0;
@@ -196,6 +205,91 @@ assert('6.2 The tray imports the shared module and exposes the gating facade',
   viewSource.includes("from '../utils/IncidentStatusPermissions.js'") &&
   viewSource.includes('return canQuickAssign(incident);') &&
   viewSource.includes('return canQuickCancel(incident);'));
+
+// ---------------------------------------------------------------------
+// TEST GROUP 7: Localized labels + badge palettes (single shared source)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 7: Localized labels and badge palettes ---');
+
+assert('7.1 STATUS_LABELS covers the eight lifecycle statuses in Spanish',
+  STATUS_LABELS.REGISTERED === 'Registrada' && STATUS_LABELS.ASSIGNED === 'Asignada' &&
+  STATUS_LABELS.IN_PROGRESS === 'En curso' && STATUS_LABELS.PENDING_PARTS === 'Pendiente repuesto' &&
+  STATUS_LABELS.RESOLVED === 'Resuelta (Garantía)' && STATUS_LABELS.REOPENED === 'Reabierta' &&
+  STATUS_LABELS.CLOSED === 'Cerrada' && STATUS_LABELS.CANCELLED === 'Cancelada');
+
+assert('7.2 URGENCY_LABELS keeps the short badge wording (full PHP label stays server-side)',
+  URGENCY_LABELS.CRITICAL === 'Crítica' && URGENCY_LABELS.HIGH === 'Alta' &&
+  URGENCY_LABELS.MEDIUM === 'Media' && URGENCY_LABELS.LOW === 'Baja');
+
+const paletteUrgencies = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+assert('7.3 BADGE_URGENCY_PALETTE: semantic colors survive byte-for-byte',
+  BADGE_URGENCY_PALETTE.CRITICAL.bg === '#fee2e2' && BADGE_URGENCY_PALETTE.CRITICAL.color === '#dc2626' &&
+  BADGE_URGENCY_PALETTE.HIGH.bg === '#ffedd5' && BADGE_URGENCY_PALETTE.MEDIUM.bg === '#fef9c3' &&
+  BADGE_URGENCY_PALETTE.LOW.bg === '#dbeafe' &&
+  paletteUrgencies.every(u => BADGE_URGENCY_PALETTE[u].cssClass && Object.isFrozen(BADGE_URGENCY_PALETTE[u])));
+
+assert('7.4 BADGE_STATUS_PALETTE: all per-status colors survive byte-for-byte',
+  BADGE_STATUS_PALETTE.REGISTERED.bg === '#e5f2fc' && BADGE_STATUS_PALETTE.ASSIGNED.color === '#6d28d9' &&
+  BADGE_STATUS_PALETTE.IN_PROGRESS.color === '#92400e' && BADGE_STATUS_PALETTE.PENDING_PARTS.bg === '#ffedd5' &&
+  BADGE_STATUS_PALETTE.RESOLVED.color === '#065f46' && BADGE_STATUS_PALETTE.REOPENED.color === '#b91c1c' &&
+  BADGE_STATUS_PALETTE.CLOSED.color === '#4b5563' && BADGE_STATUS_PALETTE.CANCELLED.color === '#9ca3af');
+
+assert('7.5 MACHINE_TYPE_LABELS + icons mirror the pre-extraction dictionary',
+  MACHINE_TYPE_LABELS.PERISHABLE_FOOD === 'Comida Perecedera' && MACHINE_TYPE_LABELS.COLD_DRINKS === 'Bebidas Frías' &&
+  MACHINE_TYPE_LABELS.HOT_DRINKS === 'Café / Calientes' && MACHINE_TYPE_LABELS.SNACKS === 'Snacks y Aperitivos' &&
+  MACHINE_TYPE_LABELS.COMBO === 'Máquina Mixta' &&
+  MACHINE_TYPE_ICONS.PERISHABLE_FOOD === '🥪' && MACHINE_TYPE_ICONS.COMBO === '📦');
+
+// ---------------------------------------------------------------------
+// TEST GROUP 8: Badge resolvers (IncidentBadge / MachineCard consumers)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 8: Badge resolver (palette + label in one lookup) ---');
+
+assert('8.1 resolveBadgeConfig(urgency) returns palette + localized label',
+  resolveBadgeConfig('CRITICAL', 'urgency').bg === '#fee2e2' &&
+  resolveBadgeConfig('CRITICAL', 'urgency').label === 'Crítica' &&
+  resolveBadgeConfig('BAJA', 'urgency').label === 'Baja');
+
+assert('8.2 resolveBadgeConfig(status) resolves bilingual keys with the shared normalizer',
+  resolveBadgeConfig('EN_CURSO', 'status').label === 'En curso' &&
+  resolveBadgeConfig('Resuelta', 'status').label === 'Resuelta (Garantía)' &&
+  resolveBadgeConfig('EN CURSO', 'status').label === 'En curso'); // historical badge tolerance: whitespace folds to underscore
+
+assert('8.3 Auto mode keeps the historical urgency-first precedence',
+  resolveBadgeConfig('CRITICAL').bg === '#fee2e2' &&
+  resolveBadgeConfig('RESUELTA').label === 'Resuelta (Garantía)');
+
+assert('8.4 Unknown values resolve to null (consumers keep their own fallback)',
+  resolveBadgeConfig('FOO') === null && resolveBadgeConfig('') === null &&
+  resolveBadgeConfig(undefined) === null && resolveBadgeConfig('CRITICAL', 'status') === null);
+
+assert('8.5 normalizeBadgeKey strips diacritics and folds whitespace (CRÍTICA -> CRITICA)',
+  normalizeBadgeKey('  CRÍTICA ') === 'CRITICA' && normalizeBadgeKey('En curso') === 'EN_CURSO' &&
+  normalizeBadgeKey(null) === '');
+
+assert('8.6 isPerishableMachineType keeps the sanitary rule strict',
+  isPerishableMachineType('PERISHABLE_FOOD') === true &&
+  isPerishableMachineType('COLD_DRINKS') === false && isPerishableMachineType('') === false);
+
+// ---------------------------------------------------------------------
+// TEST GROUP 9: Components delegate (no duplicated dictionaries)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 9: Consumers delegate to the shared module ---');
+
+const badgeSource = readFileSync('public/assets/js/components/IncidentBadge.js', 'utf8');
+const machineCardSource = readFileSync('public/assets/js/components/MachineCard.js', 'utf8');
+const moduleSource = readFileSync('public/assets/js/utils/IncidentStatusPermissions.js', 'utf8');
+const labelLiterals = (badgeSource.match(/(Registrada|Asignada|'En curso'|Pendiente repuesto|Reabierta|Cerrada|Cancelada|Crítica|'Alta'|'Media'|'Baja')/g) || []);
+assert('9.1 IncidentBadge holds zero localized label literals (all delegated)',
+  labelLiterals.length === 0);
+assert('9.2 IncidentBadge imports the shared resolvers',
+  badgeSource.includes("from '../utils/IncidentStatusPermissions.js'") &&
+  badgeSource.includes('resolveBadgeConfig(') && badgeSource.includes('normalizeBadgeKey('));
+assert('9.3 MachineCard holds no MACHINE_TYPE_MAP dictionary',
+  !machineCardSource.includes('MACHINE_TYPE_MAP') &&
+  machineCardSource.includes("from '../utils/IncidentStatusPermissions.js'"));
+assert('9.4 The module exports the full localized vocabulary',
+  (moduleSource.match(/export const (STATUS_LABELS|URGENCY_LABELS|BADGE_URGENCY_PALETTE|BADGE_STATUS_PALETTE|MACHINE_TYPE_LABELS|MACHINE_TYPE_ICONS)/g) || []).length === 6);
 
 // Summary
 console.log('\n======================================================================');

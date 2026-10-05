@@ -8,166 +8,17 @@
  * - Semantic color mapping for all incident urgencies and lifecycle statuses.
  * - Bilingual compatibility: accepts both English and Spanish status/urgency values.
  * - 4px border radius adhering to RNF-06 interactive/label tokens.
+ * 
+ * Single source note: the localized labels, the semantic palettes and the tolerant
+ * key normalization live in utils/IncidentStatusPermissions.js (shared with the
+ * tray, the SLA classifiers and the machine cards). This component only maps a
+ * resolved config to badge markup; unknown values keep their local fallback.
  */
 
-// Mapping dictionaries for Semantic Statuses & Urgencies
-const URGENCY_CONFIG = {
-  CRITICAL: {
-    label: 'Crítica',
-    cssClass: 'vg-badge-critical',
-    bg: '#fee2e2',
-    color: '#dc2626',
-    border: '#fca5a5'
-  },
-  CRITICA: {
-    label: 'Crítica',
-    cssClass: 'vg-badge-critical',
-    bg: '#fee2e2',
-    color: '#dc2626',
-    border: '#fca5a5'
-  },
-  HIGH: {
-    label: 'Alta',
-    cssClass: 'vg-badge-high',
-    bg: '#ffedd5',
-    color: '#c2410c',
-    border: '#fdba74'
-  },
-  ALTA: {
-    label: 'Alta',
-    cssClass: 'vg-badge-high',
-    bg: '#ffedd5',
-    color: '#c2410c',
-    border: '#fdba74'
-  },
-  MEDIUM: {
-    label: 'Media',
-    cssClass: 'vg-badge-medium',
-    bg: '#fef9c3',
-    color: '#854d0e',
-    border: '#fde047'
-  },
-  MEDIA: {
-    label: 'Media',
-    cssClass: 'vg-badge-medium',
-    bg: '#fef9c3',
-    color: '#854d0e',
-    border: '#fde047'
-  },
-  LOW: {
-    label: 'Baja',
-    cssClass: 'vg-badge-low',
-    bg: '#dbeafe',
-    color: '#1d4ed8',
-    border: '#93c5fd'
-  },
-  BAJA: {
-    label: 'Baja',
-    cssClass: 'vg-badge-low',
-    bg: '#dbeafe',
-    color: '#1d4ed8',
-    border: '#93c5fd'
-  }
-};
-
-const STATUS_CONFIG = {
-  REGISTERED: {
-    label: 'Registrada',
-    bg: '#e5f2fc',
-    color: '#003db5',
-    border: '#9ec5fe'
-  },
-  REGISTRADA: {
-    label: 'Registrada',
-    bg: '#e5f2fc',
-    color: '#003db5',
-    border: '#9ec5fe'
-  },
-  ASSIGNED: {
-    label: 'Asignada',
-    bg: '#ede9fe',
-    color: '#6d28d9',
-    border: '#c4b5fd'
-  },
-  ASIGNADA: {
-    label: 'Asignada',
-    bg: '#ede9fe',
-    color: '#6d28d9',
-    border: '#c4b5fd'
-  },
-  IN_PROGRESS: {
-    label: 'En curso',
-    bg: '#fef3c7',
-    color: '#92400e',
-    border: '#fcd34d'
-  },
-  EN_CURSO: {
-    label: 'En curso',
-    bg: '#fef3c7',
-    color: '#92400e',
-    border: '#fcd34d'
-  },
-  PENDING_PARTS: {
-    label: 'Pendiente repuesto',
-    bg: '#ffedd5',
-    color: '#c2410c',
-    border: '#fdba74'
-  },
-  PENDIENTE_REPUESTO: {
-    label: 'Pendiente repuesto',
-    bg: '#ffedd5',
-    color: '#c2410c',
-    border: '#fdba74'
-  },
-  RESOLVED: {
-    label: 'Resuelta (Garantía)',
-    bg: '#eaf8f1',
-    color: '#065f46',
-    border: '#86efac'
-  },
-  RESUELTA: {
-    label: 'Resuelta (Garantía)',
-    bg: '#eaf8f1',
-    color: '#065f46',
-    border: '#86efac'
-  },
-  REOPENED: {
-    label: 'Reabierta',
-    bg: '#fee2e2',
-    color: '#b91c1c',
-    border: '#fca5a5'
-  },
-  REABIERTA: {
-    label: 'Reabierta',
-    bg: '#fee2e2',
-    color: '#b91c1c',
-    border: '#fca5a5'
-  },
-  CLOSED: {
-    label: 'Cerrada',
-    bg: '#f3f4f6',
-    color: '#4b5563',
-    border: '#d1d5db'
-  },
-  CERRADA: {
-    label: 'Cerrada',
-    bg: '#f3f4f6',
-    color: '#4b5563',
-    border: '#d1d5db'
-  },
-  CANCELLED: {
-    label: 'Cancelada',
-    bg: '#f3f4f6',
-    color: '#9ca3af',
-    border: '#e5e7eb'
-  },
-  CANCELADA: {
-    label: 'Cancelada',
-    bg: '#f3f4f6',
-    color: '#9ca3af',
-    border: '#e5e7eb'
-  }
-};
+import {
+  normalizeBadgeKey,
+  resolveBadgeConfig
+} from '../utils/IncidentStatusPermissions.js';
 
 export const IncidentBadge = {
   name: 'IncidentBadge',
@@ -203,33 +54,18 @@ export const IncidentBadge = {
   },
   computed: {
     normalizedKey() {
-      if (!this.value) return '';
-      return String(this.value)
-        .trim()
-        .toUpperCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/\s+/g, '_');
+      return normalizeBadgeKey(this.value);
     },
     resolvedConfig() {
-      const key = this.normalizedKey;
-
-      if (this.type === 'urgency') {
-        return URGENCY_CONFIG[key] || { label: this.value, bg: '#f3f4f6', color: '#374151', border: '#e5e7eb' };
+      const shared = resolveBadgeConfig(this.value, this.type);
+      if (shared) {
+        return shared;
       }
 
-      if (this.type === 'status') {
-        return STATUS_CONFIG[key] || { label: this.value, bg: '#f3f4f6', color: '#374151', border: '#e5e7eb' };
+      // Typed fallbacks preserve the exact pre-extraction rendering of unknown values.
+      if (this.type === 'urgency' || this.type === 'status') {
+        return { label: this.value, bg: '#f3f4f6', color: '#374151', border: '#e5e7eb' };
       }
-
-      // Auto-detect between urgency and status
-      if (URGENCY_CONFIG[key]) {
-        return URGENCY_CONFIG[key];
-      }
-      if (STATUS_CONFIG[key]) {
-        return STATUS_CONFIG[key];
-      }
-
       return {
         label: this.value,
         bg: '#f3f4f6',

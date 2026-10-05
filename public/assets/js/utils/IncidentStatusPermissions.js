@@ -127,3 +127,141 @@ export function isPendingAssignment(valueOrIncident, assignedTechnicianId) {
   const status = normalizeIncidentStatus(incident?.status);
   return ASSIGNABLE_STATUSES.includes(status) || !incident?.assigned_technician_id;
 }
+
+// =====================================================================
+// Localized labels + badge presentation (single shared source)
+// =====================================================================
+
+/**
+ * Localized Spanish labels for the lifecycle statuses, mirroring the vocabulary
+ * already used across the UI. RESOLVED keeps its tray wording (warranty window).
+ */
+export const STATUS_LABELS = Object.freeze({
+  REGISTERED: 'Registrada',
+  ASSIGNED: 'Asignada',
+  IN_PROGRESS: 'En curso',
+  PENDING_PARTS: 'Pendiente repuesto',
+  RESOLVED: 'Resuelta (Garantía)',
+  REOPENED: 'Reabierta',
+  CLOSED: 'Cerrada',
+  CANCELLED: 'Cancelada'
+});
+
+/**
+ * Localized Spanish labels for urgencies. CRITICAL uses the short badge variant:
+ * the full PHP label ('Crítica (Riesgo Alimentario)') is served by the API where
+ * there is room for it; compact badges keep 'Crítica'.
+ */
+export const URGENCY_LABELS = Object.freeze({
+  CRITICAL: 'Crítica',
+  HIGH: 'Alta',
+  MEDIUM: 'Media',
+  LOW: 'Baja'
+});
+
+/** Spanish aliases for urgencies (accent-free keys; see normalizeBadgeKey). */
+const URGENCY_KEY_ALIASES = Object.freeze({
+  CRITICAL: 'CRITICAL',
+  CRITICA: 'CRITICAL',
+  HIGH: 'HIGH',
+  ALTA: 'HIGH',
+  MEDIUM: 'MEDIUM',
+  MEDIA: 'MEDIUM',
+  LOW: 'LOW',
+  BAJA: 'LOW'
+});
+
+/** Docker-design palette per urgency (semantic colors + CSS class hook). */
+export const BADGE_URGENCY_PALETTE = Object.freeze({
+  CRITICAL: Object.freeze({ cssClass: 'vg-badge-critical', bg: '#fee2e2', color: '#dc2626', border: '#fca5a5' }),
+  HIGH: Object.freeze({ cssClass: 'vg-badge-high', bg: '#ffedd5', color: '#c2410c', border: '#fdba74' }),
+  MEDIUM: Object.freeze({ cssClass: 'vg-badge-medium', bg: '#fef9c3', color: '#854d0e', border: '#fde047' }),
+  LOW: Object.freeze({ cssClass: 'vg-badge-low', bg: '#dbeafe', color: '#1d4ed8', border: '#93c5fd' })
+});
+
+/** Docker-design palette per lifecycle status. */
+export const BADGE_STATUS_PALETTE = Object.freeze({
+  REGISTERED: Object.freeze({ bg: '#e5f2fc', color: '#003db5', border: '#9ec5fe' }),
+  ASSIGNED: Object.freeze({ bg: '#ede9fe', color: '#6d28d9', border: '#c4b5fd' }),
+  IN_PROGRESS: Object.freeze({ bg: '#fef3c7', color: '#92400e', border: '#fcd34d' }),
+  PENDING_PARTS: Object.freeze({ bg: '#ffedd5', color: '#c2410c', border: '#fdba74' }),
+  RESOLVED: Object.freeze({ bg: '#eaf8f1', color: '#065f46', border: '#86efac' }),
+  REOPENED: Object.freeze({ bg: '#fee2e2', color: '#b91c1c', border: '#fca5a5' }),
+  CLOSED: Object.freeze({ bg: '#f3f4f6', color: '#4b5563', border: '#d1d5db' }),
+  CANCELLED: Object.freeze({ bg: '#f3f4f6', color: '#9ca3af', border: '#e5e7eb' })
+});
+
+/**
+ * Badge-key normalization: trims, upper-cases, strips diacritics (NFD) and folds
+ * whitespace into underscores, exactly the tolerant policy IncidentBadge used
+ * before this module existed ('CRÍTICA' -> 'CRITICA', 'En curso' -> 'EN_CURSO').
+ */
+export function normalizeBadgeKey(value) {
+  if (!value) {
+    return '';
+  }
+  return String(value)
+    .trim()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '_');
+}
+
+/**
+ * Resolves the full badge presentation (palette + localized label) for a value in
+ * one of the three modes ('urgency' | 'status' | 'auto'; auto tries urgency first,
+ * then status, the historical precedence of IncidentBadge). Returns null when
+ * nothing matches so every consumer keeps its own fallback rendering (unknown
+ * values are never invented).
+ */
+export function resolveBadgeConfig(value, type = 'auto') {
+  const key = normalizeBadgeKey(value);
+  if (!key) {
+    return null;
+  }
+
+  if (type === 'urgency') {
+    const urgency = URGENCY_KEY_ALIASES[key];
+    return urgency ? { ...BADGE_URGENCY_PALETTE[urgency], label: URGENCY_LABELS[urgency] } : null;
+  }
+
+  if (type === 'status') {
+    const status = CANONICAL_STATUS_MAP[key] || key;
+    return BADGE_STATUS_PALETTE[status]
+      ? { ...BADGE_STATUS_PALETTE[status], label: STATUS_LABELS[status] || status }
+      : null;
+  }
+
+  const urgency = URGENCY_KEY_ALIASES[key];
+  if (urgency) {
+    return { ...BADGE_URGENCY_PALETTE[urgency], label: URGENCY_LABELS[urgency] };
+  }
+  const status = CANONICAL_STATUS_MAP[key] || key;
+  return BADGE_STATUS_PALETTE[status]
+    ? { ...BADGE_STATUS_PALETTE[status], label: STATUS_LABELS[status] || status }
+    : null;
+}
+
+/** Localized Spanish labels for machine types, mirroring MachineType.php. */
+export const MACHINE_TYPE_LABELS = Object.freeze({
+  HOT_DRINKS: 'Café / Calientes',
+  COLD_DRINKS: 'Bebidas Frías',
+  SNACKS: 'Snacks y Aperitivos',
+  PERISHABLE_FOOD: 'Comida Perecedera',
+  COMBO: 'Máquina Mixta'
+});
+
+/** Friendly icon per machine type (presentation only). */
+export const MACHINE_TYPE_ICONS = Object.freeze({
+  HOT_DRINKS: '☕',
+  COLD_DRINKS: '🥤',
+  SNACKS: '🥨',
+  PERISHABLE_FOOD: '🥪',
+  COMBO: '📦'
+});
+
+/** Sanitary rule: only PERISHABLE_FOOD machines carry the food-risk SLA. */
+export function isPerishableMachineType(value) {
+  return String(value || '').trim().toUpperCase() === 'PERISHABLE_FOOD';
+}

@@ -68,18 +68,24 @@ $navbarContent = (string) file_get_contents($navbarJsPath);
 // =====================================================================
 echo "\n--- Grupo 2: Badges Semánticos (IncidentBadge.js) ---\n";
 
+// Since the label/palette extraction, the badge sources its configuration from the
+// shared module utils/IncidentStatusPermissions.js (single source of truth for the
+// lifecycle vocabulary); the badge file itself keeps only the markup mapping.
+$sharedStatusModulePath = $baseDir . '/public/assets/js/utils/IncidentStatusPermissions.js';
+$sharedStatusContent = (string) file_get_contents($sharedStatusModulePath);
+
 $assert("2.1 Define configuración para urgencias (CRITICAL, HIGH, MEDIUM, LOW)",
-    strpos($badgeContent, 'CRITICAL:') !== false &&
-    strpos($badgeContent, 'HIGH:') !== false &&
-    strpos($badgeContent, 'MEDIUM:') !== false &&
-    strpos($badgeContent, 'LOW:') !== false
+    strpos($sharedStatusContent, "CRITICAL: 'Crítica'") !== false &&
+    strpos($sharedStatusContent, "HIGH: 'Alta'") !== false &&
+    strpos($sharedStatusContent, "MEDIUM: 'Media'") !== false &&
+    strpos($sharedStatusContent, "LOW: 'Baja'") !== false
 );
 
 $assert("2.2 Define configuración para estados de ciclo de vida (REGISTERED, ASSIGNED, IN_PROGRESS, RESOLVED, etc.)",
-    strpos($badgeContent, 'REGISTERED:') !== false &&
-    strpos($badgeContent, 'ASSIGNED:') !== false &&
-    strpos($badgeContent, 'IN_PROGRESS:') !== false &&
-    strpos($badgeContent, 'RESOLVED:') !== false
+    strpos($sharedStatusContent, "REGISTERED: 'Registrada'") !== false &&
+    strpos($sharedStatusContent, "ASSIGNED: 'Asignada'") !== false &&
+    strpos($sharedStatusContent, "IN_PROGRESS: 'En curso'") !== false &&
+    strpos($sharedStatusContent, "RESOLVED: 'Resuelta (Garantía)'") !== false
 );
 
 $assert("2.3 Aplica radio de borde interactivo de 4px (--radius-interactive)",
@@ -87,7 +93,7 @@ $assert("2.3 Aplica radio de borde interactivo de 4px (--radius-interactive)",
 );
 
 $assert("2.4 Dispone de normalización diacrítica de acentos (ej. CRÍTICA -> CRITICA)",
-    strpos($badgeContent, "normalize('NFD')") !== false
+    strpos($sharedStatusContent, "normalize('NFD')") !== false
 );
 
 // =====================================================================

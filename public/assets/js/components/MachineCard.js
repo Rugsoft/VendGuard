@@ -9,15 +9,11 @@
  */
 
 import { IncidentBadge } from './IncidentBadge.js';
+import { MACHINE_TYPE_LABELS, MACHINE_TYPE_ICONS, isPerishableMachineType } from '../utils/IncidentStatusPermissions.js';
 
-// Machine type human-readable labels and friendly icons/badges
-const MACHINE_TYPE_MAP = {
-  PERISHABLE_FOOD: { label: 'Comida Perecedera', icon: '🥪', isPerishable: true },
-  COLD_DRINKS: { label: 'Bebidas Frías', icon: '🥤', isPerishable: false },
-  HOT_DRINKS: { label: 'Café / Calientes', icon: '☕', isPerishable: false },
-  SNACKS: { label: 'Snacks y Aperitivos', icon: '🥨', isPerishable: false },
-  COMBO: { label: 'Máquina Mixta', icon: '📦', isPerishable: false }
-};
+// Machine-type labels, icons and the sanitary perishable rule live in the shared
+// module utils/IncidentStatusPermissions.js (mirrors MachineType.php); unknown
+// types keep the local neutral fallback.
 
 export const MachineCard = {
   name: 'MachineCard',
@@ -49,7 +45,10 @@ export const MachineCard = {
     },
     typeInfo() {
       const type = this.machine?.machine_type;
-      return MACHINE_TYPE_MAP[type] || { label: type || 'Máquina', icon: '🎰', isPerishable: false };
+      if (MACHINE_TYPE_LABELS[type]) {
+        return { label: MACHINE_TYPE_LABELS[type], icon: MACHINE_TYPE_ICONS[type], isPerishable: isPerishableMachineType(type) };
+      }
+      return { label: type || 'Máquina', icon: '🎰', isPerishable: false };
     },
     cardBorderColor() {
       if (this.hasActiveIncident) {
