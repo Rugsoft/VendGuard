@@ -33,6 +33,12 @@ use VendGuard\Presentation\Http\Response;
  */
 class CoordinatorController
 {
+    /**
+     * Longitud mínima del motivo de descarte exigida por RF-07.4 (Art. III.2 y V.1):
+     * 20 caracteres reales contados sobre el texto ya recortado.
+     */
+    private const MIN_CANCELLATION_REASON_LENGTH = 20;
+
     private IncidentRepositoryInterface $incidentRepo;
     private UserRepositoryInterface $userRepo;
     private LocationRepositoryInterface $locationRepo;
@@ -321,8 +327,17 @@ class CoordinatorController
      * PATCH /api/coordinator/incidents/{id}/cancel
      * 
      * Descarta o anula lógicamente una incidencia activa (EARS 6.1, 6.2, 6.3).
-     * Exige obligatoriamente un motivo de descarte.
+     * Exige obligatoriamente un motivo de descarte de al menos 20 caracteres reales
+     * (RF-07.4, Art. III.2 y V.1), medidos con `mb_strlen()` sobre el texto ya recortado
+     * para que acentos y símbolos cuenten como un único carácter y los espacios de
+     * relleno no sirvan para superar el umbral.
      * Mantiene íntegra la fila en base de datos (Soft Delete / trazabilidad).
+     * 
+     * Respuestas: 200 OK con el ticket descartado; 400 si el ID de ruta no es numérico;
+     * 422 `MISSING_CANCELLATION_REASON` si el motivo falta o está vacío; 422
+     * `CANCELLATION_REASON_TOO_SHORT` si no alcanza el mínimo de caracteres reales; 404 si
+     * la incidencia no existe; 422 `INVALID_STATUS_FOR_CANCELLATION` si el estado no admite
+     * el descarte; 500 `CANCELLATION_FAILED` ante un fallo inesperado del repositorio.
      */
     public function cancelIncident(Request $request): Response
     {
@@ -340,13 +355,24 @@ class CoordinatorController
             return Response::error('MISSING_CANCELLATION_REASON', 'El motivo de cancelación es obligatorio (cancellation_reason obligatorio).', 422);
         }
 
-        // 3. Verificar que la incidencia exista
+        // 3. Mínimo de caracteres reales exigido por RF-07.4 (Art. III.2 y V.1). La
+        //    medición es multibyte-safe y se aplica sobre el texto ya recortado, de modo
+        //    que un motivo relleno de espacios no alcanza el umbral.
+        if (mb_strlen($reason, 'UTF-8') < self::MIN_CANCELLATION_REASON_LENGTH) {
+            return Response::error(
+                'CANCELLATION_REASON_TOO_SHORT',
+                'El motivo de descarte debe contener al menos 20 caracteres reales que justifiquen la anulación del aviso.',
+                422
+            );
+        }
+
+        // 4. Verificar que la incidencia exista
         $incident = $this->incidentRepo->findById($incidentId);
         if ($incident === null) {
             return Response::error('INCIDENT_NOT_FOUND', "No se encontró ninguna incidencia con ID {$incidentId}.", 404);
         }
 
-        // 4. Validar que el estado actual admita transición a CANCELLED
+        // 5. Validar que el estado actual admita transición a CANCELLED
         if (!$incident->getStatus()->canTransitionTo(IncidentStatus::CANCELLED)) {
             return Response::error(
                 'INVALID_STATUS_FOR_CANCELLATION',
@@ -355,10 +381,10 @@ class CoordinatorController
             );
         }
 
-        // 5. ID del coordinador autenticado (para auditoría)
+        // 6. ID del coordinador autenticado (para auditoría)
         $coordinatorId = $request->getAttribute('user_id');
 
-        // 6. Ejecutar cancelación lógica en el repositorio
+        // 7. Ejecutar cancelación lógica en el repositorio
         try {
             $cancelled = $this->incidentRepo->cancel(
                 incidentId: $incidentId,
@@ -371,7 +397,7 @@ class CoordinatorController
             return Response::error('CANCELLATION_FAILED', $e->getMessage(), 500);
         }
 
-        // 7. Respuesta exitosa (contrato 4.3)
+        // 8. Respuesta exitosa (contrato 4.3)
         return Response::json([
             'id'           => $cancelled->getId(),
             'status'       => $cancelled->getStatus()->value,

@@ -109,7 +109,7 @@
 > [!IMPORTANT]
 > Detectados al implementar T-IDM-12: el endpoint de asignación no admite reasignación (solo `REGISTERED`/`REOPENED`) y el de descarte no valida el mínimo de 20 caracteres en servidor. Estas dos tareas cierran ambos huecos antes de las suites de integración T-IDM-17/T-IDM-18.
 
-- [ ] **T-IDM-20: Validar en servidor el motivo de descarte con mínimo de 20 caracteres reales**
+- [x] **T-IDM-20: Validar en servidor el motivo de descarte con mínimo de 20 caracteres reales**
   * **Requisitos:** RF-07.4, RNF-04, Constitución Art. III.2 y Art. V.1
   * **Dependencias:** T-IDM-07
   * **Hecho cuando:** `CoordinatorController::cancelIncident()` rechaza con `422` (`CANCELLATION_REASON_TOO_SHORT`) cualquier `cancellation_reason` con menos de 20 caracteres reales tras `trim()` (multibyte-safe), conserva la respuesta `200` con motivos válidos y la suite PHP de cancelación pasa al 100% en verde con el nuevo caso límite.

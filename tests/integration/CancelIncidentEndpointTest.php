@@ -9,6 +9,9 @@ declare(strict_types=1);
  *   - EARS 6.1: Requires a mandatory cancellation reason.
  *   - EARS 6.2: Logical cancellation (Soft Delete), changing status to CANCELLED and preserving the row in DB.
  *   - EARS 6.3: Blocks cancellation if reason is missing/empty or state transition is illegal.
+ *   - RF-07.4 / T-IDM-20: Enforces the minimum of 20 real characters (multibyte-safe after trim)
+ *     rejecting shorter reasons with 422 CANCELLATION_REASON_TOO_SHORT without persisting any change,
+ *     while still accepting reasons that reach the threshold.
  *   - RNF-03 / Article III: No hard deletion (DELETE FROM), audit trail in incident_history.
  *   - Auth guard: 401/403 for unauthenticated or unauthorized users.
  *   - Real HTTP verification via cURL.
@@ -33,7 +36,9 @@ use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Routing\AppRouter;
 
 echo "======================================================================\n";
+
 echo " VendGuard: Test de Integración - CancelIncidentEndpointTest (T-27)\n";
+
 echo "======================================================================\n\n";
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
@@ -129,6 +134,7 @@ $makeIncident = function (
 // =========================================================================
 // CASO 1: Control de Acceso y RBAC (401 / 403)
 // =========================================================================
+
 echo "\n--- Caso 1: Control de Acceso RBAC (401 / 403) ---\n";
 
 // 1.1 Sin token => 401
@@ -149,6 +155,7 @@ $assert("1.3 Técnico en ruta de coordinador => 403 FORBIDDEN", $res->getStatusC
 // =========================================================================
 // CASO 2: Validación de Entrada (EARS 6.1, 6.3)
 // =========================================================================
+
 echo "\n--- Caso 2: Validación de Entrada (EARS 6.1, 6.3) ---\n";
 
 $authHdr = ['Authorization' => "Bearer {$coordinatorToken}"];
@@ -171,14 +178,116 @@ $res = $router->dispatch($req);
 $assert("2.3 ID alfanumérico => 400 INVALID_INCIDENT_ID", $res->getStatusCode() === 400 && ($res->getDecodedBody()['error']['code'] ?? '') === 'INVALID_INCIDENT_ID');
 
 // 2.4 Incidencia inexistente => 404 INCIDENT_NOT_FOUND
-$req = new Request(method: 'PATCH', path: '/api/coordinator/incidents/999999/cancel', parsedBody: ['cancellation_reason' => 'Falsa alarma'], headers: $authHdr);
+// El motivo viaja con longitud válida para aislar la comprobación de existencia: el
+// cuerpo se valida antes de resolver el recurso (mismo orden que addComment).
+$req = new Request(method: 'PATCH', path: '/api/coordinator/incidents/999999/cancel', parsedBody: ['cancellation_reason' => 'Descarte de prueba sobre una incidencia inexistente'], headers: $authHdr);
 $res = $router->dispatch($req);
 $assert("2.4 Incidencia inexistente => 404 INCIDENT_NOT_FOUND", $res->getStatusCode() === 404 && ($res->getDecodedBody()['error']['code'] ?? '') === 'INCIDENT_NOT_FOUND');
+
+// =========================================================================
+// CASO 2B: Umbral de 20 Caracteres Reales del Motivo (RF-07.4 / T-IDM-20)
+// El servidor rechaza con 422 CANCELLATION_REASON_TOO_SHORT todo motivo que, tras
+// recortar los espacios extremos, no alcance 20 caracteres reales (mb_strlen,
+// multibyte-safe) sin persistir cambio alguno; y admite el que alcanza el umbral.
+// =========================================================================
+
+echo "\n--- Caso 2B: Umbral de 20 Caracteres Reales del Motivo (RF-07.4) ---\n";
+
+// 2.5 Motivo de 19 caracteres reales => 422 CANCELLATION_REASON_TOO_SHORT
+$incUnder = $makeIncident($mach2->getId(), $location1->getId());
+$reason19 = 'Descarte duplicados'; // 19 caracteres reales exactos
+$assert(
+    "2.5 Fixture: motivo de 19 caracteres reales",
+    mb_strlen($reason19, 'UTF-8') === 19,
+    'Longitud real: ' . mb_strlen($reason19, 'UTF-8')
+);
+
+$req = new Request(
+    method: 'PATCH',
+    path: "/api/coordinator/incidents/{$incUnder->getId()}/cancel",
+    parsedBody: ['cancellation_reason' => $reason19],
+    headers: $authHdr
+);
+$res = $router->dispatch($req);
+$assert("2.5 19 caracteres => 422", $res->getStatusCode() === 422, "Código HTTP: {$res->getStatusCode()}");
+$assert("2.5 19 caracteres => CANCELLATION_REASON_TOO_SHORT", ($res->getDecodedBody()['error']['code'] ?? '') === 'CANCELLATION_REASON_TOO_SHORT');
+
+// La incidencia permanece intacta: ni descarte ni motivo persistido (Art. III.2)
+$underRow = $pdo->query("SELECT status, cancellation_reason, cancelled_at FROM incidents WHERE id = {$incUnder->getId()}")->fetch(PDO::FETCH_ASSOC);
+$assert("2.5 Incidencia intacta: status sigue siendo REGISTERED", ($underRow['status'] ?? null) === 'REGISTERED');
+$assert("2.5 Incidencia intacta: sin motivo ni fecha de descarte persistidos", ($underRow['cancellation_reason'] ?? null) === null && ($underRow['cancelled_at'] ?? null) === null);
+
+// 2.6 Motivo de 19 caracteres reales rodeado de espacios (25 crudos) => 422
+$incPadded = $makeIncident($mach2->getId(), $location1->getId());
+$reasonPadded = '   Descarte duplicados   '; // 25 crudos, 19 reales tras trim()
+$assert(
+    "2.6 Fixture: 25 caracteres crudos pero 19 reales tras trim()",
+    mb_strlen($reasonPadded, 'UTF-8') >= 20 && mb_strlen(trim($reasonPadded), 'UTF-8') === 19
+);
+
+$req = new Request(
+    method: 'PATCH',
+    path: "/api/coordinator/incidents/{$incPadded->getId()}/cancel",
+    parsedBody: ['cancellation_reason' => $reasonPadded],
+    headers: $authHdr
+);
+$res = $router->dispatch($req);
+$assert("2.6 El relleno de espacios no salva el umbral => 422", $res->getStatusCode() === 422);
+$assert("2.6 Relleno por espacios => CANCELLATION_REASON_TOO_SHORT", ($res->getDecodedBody()['error']['code'] ?? '') === 'CANCELLATION_REASON_TOO_SHORT');
+
+// 2.7 Motivo multibyte de 19 caracteres (38 bytes) => 422 (mb_strlen, no strlen)
+$incMultibyte = $makeIncident($mach1->getId(), $location1->getId());
+$reasonMultibyte19 = str_repeat('á', 19);
+$assert(
+    "2.7 Fixture: 19 caracteres reales en 38 bytes (multibyte)",
+    mb_strlen($reasonMultibyte19, 'UTF-8') === 19 && strlen($reasonMultibyte19) === 38
+);
+
+$req = new Request(
+    method: 'PATCH',
+    path: "/api/coordinator/incidents/{$incMultibyte->getId()}/cancel",
+    parsedBody: ['cancellation_reason' => $reasonMultibyte19],
+    headers: $authHdr
+);
+$res = $router->dispatch($req);
+$assert(
+    "2.7 19 caracteres multibyte => 422 CANCELLATION_REASON_TOO_SHORT",
+    $res->getStatusCode() === 422 && ($res->getDecodedBody()['error']['code'] ?? '') === 'CANCELLATION_REASON_TOO_SHORT'
+);
+
+// 2.8 Motivo de exactamente 20 caracteres reales (con tilde) => 200 y descarte efectivo
+$incBoundary = $makeIncident($mach3->getId(), $location2->getId());
+$reasonBoundary20 = 'Avería duplicada: sí'; // 20 caracteres reales exactos (la tilde cuenta 1)
+$assert(
+    "2.8 Fixture: 20 caracteres reales exactos con tilde (más bytes que caracteres)",
+    mb_strlen($reasonBoundary20, 'UTF-8') === 20 && strlen($reasonBoundary20) > mb_strlen($reasonBoundary20, 'UTF-8')
+);
+
+$req = new Request(
+    method: 'PATCH',
+    path: "/api/coordinator/incidents/{$incBoundary->getId()}/cancel",
+    parsedBody: ['cancellation_reason' => $reasonBoundary20],
+    headers: $authHdr
+);
+$res = $router->dispatch($req);
+$boundaryBody = $res->getDecodedBody();
+$assert(
+    "2.8 Umbral exacto de 20 caracteres => 200 OK",
+    $res->getStatusCode() === 200 && ($boundaryBody['success'] ?? false) === true,
+    "Código HTTP: {$res->getStatusCode()}"
+);
+$assert("2.8 data.status => CANCELLED", ($boundaryBody['data']['status'] ?? null) === 'CANCELLED');
+$boundaryRow = $pdo->query("SELECT status, cancellation_reason FROM incidents WHERE id = {$incBoundary->getId()}")->fetch(PDO::FETCH_ASSOC);
+$assert(
+    "2.8 BD: motivo íntegro persistido tras aceptar el umbral",
+    ($boundaryRow['status'] ?? null) === 'CANCELLED' && ($boundaryRow['cancellation_reason'] ?? null) === $reasonBoundary20
+);
 
 // =========================================================================
 // CASO 3: Cancelación Exitosa desde REGISTERED [CONDICIÓN "HECHO CUANDO"]
 // Exige motivo de descarte y cambia el estado a CANCELADA sin borrar la fila de la base de datos.
 // =========================================================================
+
 echo "\n--- Caso 3: Cancelación Exitosa desde REGISTERED (EARS 6.1, 6.2, RNF-03) ---\n";
 
 $incB = $makeIncident($mach2->getId(), $location1->getId());
@@ -226,6 +335,7 @@ $assert("3.16 Máquina liberada: no tiene ticket activo tras cancelación", $mac
 // =========================================================================
 // CASO 4: Cancelación desde otros estados legales (ASSIGNED, IN_PROGRESS, REOPENED)
 // =========================================================================
+
 echo "\n--- Caso 4: Cancelación desde ASSIGNED, IN_PROGRESS y REOPENED ---\n";
 
 // 4.1 Desde ASSIGNED
@@ -264,6 +374,7 @@ $assert("4.3 REOPENED => CANCELLED (HTTP 200)", $res->getStatusCode() === 200 &&
 // =========================================================================
 // CASO 5: Bloqueo de cancelación desde estados no permitidos (EARS 6.3)
 // =========================================================================
+
 echo "\n--- Caso 5: Bloqueo de Cancelación desde Estados Terminales o No Permitidos ---\n";
 
 // 5.1 Re-cancelación de una incidencia ya CANCELLED
@@ -302,6 +413,7 @@ $assert("5.3 RESOLVED => 422 INVALID_STATUS_FOR_CANCELLATION", $res->getStatusCo
 // =========================================================================
 // CASO 6: Prueba HTTP Real vía cURL
 // =========================================================================
+
 echo "\n--- Caso 6: Prueba HTTP Real (cURL) contra 127.0.0.1:8000 ---\n";
 
 $incCurl = $makeIncident($mach2->getId(), $location1->getId(), IncidentStatus::REGISTERED);
@@ -335,6 +447,7 @@ $curlDb = $pdo->query("SELECT * FROM incidents WHERE id = {$incCurl->getId()}")-
 $assert("6.5 Fila preservada en BD tras llamada HTTP real", $curlDb !== false && ($curlDb['status'] ?? null) === 'CANCELLED');
 
 // ─── RESULTADO FINAL ──────────────────────────────────────────────────────────
+
 echo "\n" . str_repeat('=', 70) . "\n";
 if ($failures === 0) {
     echo " RESULTADO: ¡TODAS LAS PRUEBAS PASARON EXITOSAMENTE (0 fallos)!\n";
