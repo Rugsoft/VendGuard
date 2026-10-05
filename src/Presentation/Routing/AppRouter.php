@@ -100,6 +100,11 @@ class AppRouter
         $router->get('/api/coordinator/incidents', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getIncidents'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/incidents/{id}/assign', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'assignTechnician'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/incidents/{id}/cancel', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'cancelIncident'], [$coordinatorAuth]);
+        // Modal de detalle integral de triaje (Módulo 09: T-IDM-07). La ficha y su
+        // bitácora exigen rol COORDINATOR en el middleware; el propio controlador
+        // refuerza el blindaje y enmascara los datos de pago (Art. V.4).
+        $router->get('/api/coordinator/incidents/{id}/detail', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getIncidentDetail'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/incidents/{id}/comments', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'addComment'], [$coordinatorAuth]);
         // Rutas de Administración Integral (Módulo 04: Sedes, Máquinas y Personal)
         // Sedes (Locations)
         $router->get('/api/coordinator/locations', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'listLocations'], [$coordinatorAuth]);

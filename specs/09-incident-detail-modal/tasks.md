@@ -49,7 +49,7 @@
   * **Dependencias:** T-IDM-05
   * **Hecho cuando:** `CoordinatorController::addComment(Request $request)` valida texto obligatorio ($\ge 5$ caracteres), persiste el comentario con bandera `is_internal` (público vs. nota interna de taller), registra el evento inmutable `INCIDENT_COMMENT_ADDED` en `audit_log` con el usuario coordinador autenticado y responde `201 Created`.
 
-- [ ] **T-IDM-07: Registrar y blindar rutas de detalle y comentarios en `AppRouter.php`**
+- [x] **T-IDM-07: Registrar y blindar rutas de detalle y comentarios en `AppRouter.php`**
   * **Requisitos:** RF-01, RF-05, RNF-05
   * **Dependencias:** T-IDM-05, T-IDM-06
   * **Hecho cuando:** Las rutas `GET /api/coordinator/incidents/{id}/detail` y `POST /api/coordinator/incidents/{id}/comments` están registradas en `src/Presentation/Routing/AppRouter.php` bajo el middleware `$coordinatorAuth`, y los tests unitarios de enrutamiento existentes pasan al 100% en verde.
