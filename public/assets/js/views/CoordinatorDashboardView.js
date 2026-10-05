@@ -19,6 +19,7 @@
 
 import { api } from '../api.js';
 import { store } from '../store.js';
+import { canQuickAssign, canQuickCancel, isActiveStatus, isPendingAssignment, isTerminalStatus, normalizeIncidentStatus } from '../utils/IncidentStatusPermissions.js';
 import { IncidentBadge } from '../components/IncidentBadge.js';
 import { ModalDialog } from '../components/ModalDialog.js';
 import { QrLabelModal } from '../components/QrLabelModal.js';
@@ -37,32 +38,8 @@ import { CoordinatorTerritorialMapTab } from '../components/CoordinatorTerritori
 import { CoordinatorRefundsTab } from '../components/CoordinatorRefundsTab.js';
 import { CoordinatorIncidentDetailModal } from '../components/CoordinatorIncidentDetailModal.js';
 
-// Canonical mapping for bilingual status values
-const STATUS_CANONICAL_MAP = {
-  REGISTERED: 'REGISTERED',
-  REGISTRADA: 'REGISTERED',
-  ASSIGNED: 'ASSIGNED',
-  ASIGNADA: 'ASSIGNED',
-  IN_PROGRESS: 'IN_PROGRESS',
-  EN_CURSO: 'IN_PROGRESS',
-  PENDING_PARTS: 'PENDING_PARTS',
-  PENDIENTE_REPUESTO: 'PENDING_PARTS',
-  PENDIENTE_REPUESTOS: 'PENDING_PARTS',
-  RESOLVED: 'RESOLVED',
-  RESUELTA: 'RESOLVED',
-  REOPENED: 'REOPENED',
-  REABIERTA: 'REOPENED',
-  CLOSED: 'CLOSED',
-  CERRADA: 'CLOSED',
-  CANCELLED: 'CANCELLED',
-  CANCELADA: 'CANCELLED'
-};
-
-function normalizeStatus(val) {
-  const upper = String(val || '').trim().toUpperCase();
-  return STATUS_CANONICAL_MAP[upper] || upper;
-}
-
+// Status classification is delegated to the shared module utils/IncidentStatusPermissions.js
+// (frontend mirror of the PHP lifecycle rules): no literal status lists live in this view.
 // Default list of route technicians from seeds
 const DEFAULT_TECHNICIANS = [
   { id: 2, name: 'Jordi Técnico Ruta BCN', email: 'jordi.ruta@vendguard.internal' },
@@ -183,7 +160,7 @@ export const CoordinatorDashboardView = {
     slaBreachedIncidents() {
       return this.incidents.filter(inc => {
         const isCritical = String(inc.urgency || '').toUpperCase() === 'CRITICAL';
-        const isPending = !inc.assigned_technician_id || ['REGISTRADA', 'REGISTERED', 'REABIERTA', 'REOPENED'].includes(String(inc.status || '').toUpperCase());
+        const isPending = isPendingAssignment(inc);
         const minutes = Number(inc.waiting_minutes ?? inc.sla_minutes_elapsed ?? 0);
         return inc.sla_breached === true || (isCritical && isPending && minutes > 60);
       });
@@ -192,8 +169,8 @@ export const CoordinatorDashboardView = {
       return this.incidents.filter(inc => {
         // Status filter (supports both canonical English and localized Spanish)
         if (this.filterStatus) {
-          const filterNorm = normalizeStatus(this.filterStatus);
-          const incStatusNorm = normalizeStatus(inc.status);
+          const filterNorm = normalizeIncidentStatus(this.filterStatus);
+          const incStatusNorm = normalizeIncidentStatus(inc.status);
           if (filterNorm && incStatusNorm !== filterNorm) {
             return false;
           }
@@ -232,10 +209,10 @@ export const CoordinatorDashboardView = {
       });
     },
     metrics() {
-      const active = this.incidents.filter(i => !['CERRADA', 'CLOSED', 'CANCELADA', 'CANCELLED'].includes(String(i.status || '').toUpperCase()));
+      const active = this.incidents.filter(i => isActiveStatus(i.status));
       const criticalFood = active.filter(i => String(i.urgency || '').toUpperCase() === 'CRITICAL' && i.machine_type === 'PERISHABLE_FOOD');
       const unassigned = active.filter(i => !i.assigned_technician_id);
-      const pendingParts = active.filter(i => ['PENDIENTE_REPUESTO', 'PENDING_PARTS'].includes(String(i.status || '').toUpperCase()));
+      const pendingParts = active.filter(i => normalizeIncidentStatus(i.status) === 'PENDING_PARTS');
 
       return {
         totalActive: active.length,
@@ -348,8 +325,7 @@ export const CoordinatorDashboardView = {
         // Active tickets only: unassigned ones start the flow, assigned ones on sites
         // worked by several technicians are included so the coordinator can consolidate
         // the whole building under a single active owner in one click (T-MAP-15).
-        const isActive = !['CERRADA', 'CLOSED', 'CANCELADA', 'CANCELLED', 'RESUELTA', 'RESOLVED'].includes(String(inc.status || '').toUpperCase());
-        return matchesSite && isActive;
+        return matchesSite && !isTerminalStatus(inc.status);
       });
       this.bulkAssignSite = {
         locationId,
@@ -450,28 +426,21 @@ export const CoordinatorDashboardView = {
 
     /**
      * Quick "Asignar" action is only offered for statuses that accept an initial
-     * assignment (EARS 5.5): REGISTRADA/REGISTERED and REABIERTA/REOPENED. Any other
-     * state hides the action; reassignment stays exclusive to the integral detail modal
-     * (RF-07.3), which already owns technician exclusion and mandatory reasons.
-     * Statuses are matched in both canonical English and localized Spanish forms,
-     * mirroring the existing status helpers of this view (metrics, bulk assign).
+     * assignment (EARS 5.5). Delegates to the shared module
+     * utils/IncidentStatusPermissions.js (frontend mirror of the PHP state-machine
+     * guard): reassignment stays exclusive to the integral detail modal (RF-07.3).
      */
     canQuickAssign(incident) {
-      const status = String(incident?.status || '').toUpperCase();
-      return ['REGISTRADA', 'REGISTERED', 'REABIERTA', 'REOPENED'].includes(status);
+      return canQuickAssign(incident);
     },
 
     /**
-     * Quick "Descartar" action is only offered for active tickets (EARS 6.4): every
-     * status except RESUELTA/RESOLVED, CERRADA/CLOSED and CANCELADA/CANCELLED. An
-     * unknown or empty status hides the destructive action by design (fail-safe).
+     * Quick "Descartar" action is only offered for active tickets (EARS 6.4).
+     * Delegates to the shared module; unknown or empty statuses fail safe by hiding
+     * the destructive action.
      */
     canQuickCancel(incident) {
-      const status = String(incident?.status || '').toUpperCase();
-      if (status === '') {
-        return false;
-      }
-      return !['RESUELTA', 'RESOLVED', 'CERRADA', 'CLOSED', 'CANCELADA', 'CANCELLED'].includes(status);
+      return canQuickCancel(incident);
     },
 
     // --- Modal Triggers ---

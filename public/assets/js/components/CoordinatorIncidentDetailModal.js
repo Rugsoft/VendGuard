@@ -27,6 +27,12 @@
  * borradores sin enviar pregunta antes de descartarlos. Los borradores se retienen ante
  * errores de red para permitir el reintento inmediato (RF-08.4).
  * 
+ * Estado y permisos: este modal NO duplica listas de estado. Consume el objeto
+ * `permissions` que calcula el backend (API-First, autoridad única del servidor); el
+ * espejo frontend de las reglas del ciclo de vida vive en
+ * utils/IncidentStatusPermissions.js y sirve a las superficies de bandeja que solo
+ * disponen del listado de filas.
+ *
  * Dogma Vanilla: Vue 3 Options API vía ES Modules (cero dependencias externas).
  * Dualismo Lingüístico: código en inglés, interfaz y mensajes en español.
  */

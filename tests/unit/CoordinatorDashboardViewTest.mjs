@@ -598,7 +598,7 @@ assert('11.3 "Asignar" visible in REABIERTA/REOPENED (re-entry after warranty)',
   gatingMethods.canQuickAssign(mkStatusIncident('REABIERTA')) === true &&
   gatingMethods.canQuickAssign(mkStatusIncident('REOPENED')) === true);
 assert('11.4 "Asignar" hidden in states with an active owner (reassignment stays in the detail modal, RF-07.3)',
-  ['ASIGNADA', 'ASSIGNED', 'EN CURSO', 'IN_PROGRESS', 'PENDIENTE_REPUESTO', 'PENDING_PARTS']
+  ['ASIGNADA', 'ASSIGNED', 'EN_CURSO', 'IN_PROGRESS', 'PENDIENTE_REPUESTO', 'PENDING_PARTS']
     .every(s => gatingMethods.canQuickAssign(mkStatusIncident(s)) === false));
 assert('11.5 "Asignar" hidden in terminal states',
   ['RESUELTA', 'RESOLVED', 'CERRADA', 'CLOSED', 'CANCELADA', 'CANCELLED']
@@ -607,7 +607,7 @@ assert('11.6 "Asignar" hidden without status (fail-safe)',
   gatingMethods.canQuickAssign(mkStatusIncident('')) === false);
 
 assert('11.7 "Descartar" visible in every active status (EARS 6.4)',
-  ['REGISTRADA', 'REGISTERED', 'REABIERTA', 'REOPENED', 'ASIGNADA', 'ASSIGNED', 'EN CURSO', 'IN_PROGRESS', 'PENDIENTE_REPUESTO', 'PENDING_PARTS']
+  ['REGISTRADA', 'REGISTERED', 'REABIERTA', 'REOPENED', 'ASIGNADA', 'ASSIGNED', 'EN_CURSO', 'IN_PROGRESS', 'PENDIENTE_REPUESTO', 'PENDING_PARTS']
     .every(s => gatingMethods.canQuickCancel(mkStatusIncident(s)) === true));
 assert('11.8 "Descartar" hidden in RESUELTA/CERRADA/CANCELADA (both languages)',
   ['RESUELTA', 'RESOLVED', 'CERRADA', 'CLOSED', 'CANCELADA', 'CANCELLED']
