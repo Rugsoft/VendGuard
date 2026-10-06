@@ -244,7 +244,9 @@ $comments = [
 
 $siteThread = $service->getThread(142, 'SITE_MANAGER');
 $siteComments = $siteThread->comments;
-$siteSerialized = json_encode($siteThread);
+// JSON_UNESCAPED_UNICODE: sin esta bandera los acentos viajan escapados
+// (P\u00e9rez) y la búsqueda de fugas de nombres reales sería vacua (T-COM-04).
+$siteSerialized = json_encode($siteThread, JSON_UNESCAPED_UNICODE);
 
 $assert("1.1 La Sede recibe solo los 3 comentarios públicos (RF-02.1)", count($siteComments) === 3);
 $assert("1.2 El técnico aparece enmascarado como 'Servicio Técnico Oficial (Operador #55)'",
