@@ -882,15 +882,18 @@ export const CoordinatorIncidentDetailModal = {
               >
                 Actualizar
               </button>
+              <!--
+                El glifo de cierre lo aporta el pseudo-elemento ::before de la clase
+                compartida .btn-close (design-tokens.css): el botón se deja vacío para
+                no duplicar la ✕ (una sola aspa en la cabecera).
+              -->
               <button
                 type="button"
                 class="vg-btn vg-btn-secondary btn-close"
                 data-testid="incident-detail-close"
                 aria-label="Cerrar la ficha de detalle"
                 @click="requestClose"
-              >
-                ✕
-              </button>
+              ></button>
             </div>
           </header>
 
