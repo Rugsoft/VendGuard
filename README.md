@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/MariaDB-10.11%2B%20%7C%20MySQL%208.0-003545?style=flat-square&logo=mariadb&logoColor=white)](https://mariadb.org/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-137%20Suites%20%7C%204.383%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-181%20Suites%20%7C%207.029%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -37,6 +37,7 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 ### 1. Núcleo Operativo de Incidencias (MVP)
 * **Portal de Responsable de Sede:** Catálogo visual de máquinas del centro, reporte guiado de averías con subida de imágenes, bitácora de evidencias y reapertura justificada dentro de garantía de 48h.
 * **Panel de Triaje y Coordinación 24/7:** Bandeja global en tiempo real con banner de advertencia visual para averías críticas sin asignar (> 60 min), asignación técnica con justificación de urgencia y descarte lógico (*Soft Delete*).
+* **Modal de Detalle Integral en Triaje:** Ficha completa de solo lectura de cada avería (máquina y sede, bitácora de evidencias, piezas, SLA y cronología de auditoría con atribución) conforme a la especificación [`specs/09-incident-detail-modal/`](specs/09-incident-detail-modal/spec.md).
 * **Vista Móvil "Mi Ruta" para Técnicos:** Interfaz vertical optimizada para smartphone (uso con una sola mano), inicio de intervención in situ, pausa estructurada por repuestos, resolución técnica justificada con declaración de piezas sustituidas y consulta de métricas individuales.
 * **Cron Automatizado de Garantía:** Cierre definitivo de tickets resueltos transcurridas 48h sin reclamaciones (`/api/cron/auto-close`).
 
@@ -51,7 +52,7 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
   * **MTTR Promedio Global** (tiempo medio de resolución 24/7 en minutos y horas) con cálculo de variación de tendencia porcentual frente al periodo equivalente anterior.
   * **Monitor de Alimentos Perecederos (SLA 4h, Art. II):** Evaluación en tiempo real de cumplimiento contractual (*Compliant* vs *Breached*).
   * **Tasa de Resolución Formal:** Porcentaje de incidencias resueltas frente a creadas y control de *backlog* activo.
-* **Desglose Multidimensional Combinable:** Análisis cruzado por Sede, Técnico resolutor, Tipología de máquina y Categoría de avería con detección de entidades inactivas.
+* **Desglose Multidimensional Combinable:** Análisis cruzado por Sede, Técnico resolutor, Tipología de máquina y Categoría de avería con detección de entidades inactivas. Incluye el indicador de **reintervenciones por garantía 48 h** por técnico (EARS 2.3.1): averías reabiertas dentro de la ventana del Art. V.6, atribuidas al técnico que firmó la resolución efectiva, como evidencia de reincidencia para auditoría de calidad (no es carga pendiente ni altera el MTTR original, EARS 1.3).
 * **Autoconsulta Segregada del Técnico (Principio de Mínimo Privilegio, Art. V.4):**
   * Consulta protegida de MTTR personal, averías resueltas en el período, incidencias actualmente en curso y tiempo medio de primera respuesta técnica. Bloqueo estricto de acceso a métricas globales o de otros compañeros.
 * **Visor del Registro Inmutable de Auditoría (*Append-Only*):**
@@ -64,7 +65,7 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 ### 4. Administración Integral del Parque (Módulo 04)
 * **CRUD de Sedes Clientes:** Alta, edición, baja lógica y reactivación de centros con aislamiento de datos por sede.
 * **CRUD de Máquinas:** Gestión del parque con tipologías normativas, planta/ala de ubicación y transferencias entre sedes auditadas.
-* **CRUD de Personal Interno:** Altas de coordinadores y técnicos con operador oficial, reseteo de contraseñas y bajas lógicas.
+* **CRUD de Personal Interno:** Altas de coordinadores y técnicos con operador oficial, reseteo de contraseñas y bajas lógicas con triple salvaguarda. La carga del directorio reporta solo averías pendientes de trabajo (`ASSIGNED`/`IN_PROGRESS`/`PENDING_PARTS`, Decisión QA 2) junto a un contador informativo de averías en garantía 48 h (solo lectura, no bloquea la baja); el bloqueo de baja comparte el mismo criterio.
 
 ### 5. Mantenimiento Preventivo y Certificación Sanitaria (Módulo M1)
 * **Configuración de frecuencias normativas por tipología de máquina** (perecederos cada 15 días, Art. II) con alertas de vencimiento y generación automática de órdenes.
@@ -92,9 +93,9 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 * **Geocodificación Asistida de Sedes:** Selector y validación de coordenadas latitud/longitud en la administración de sedes con geocodificación abierta para sugerir ubicaciones automáticamente.
 * **Blindaje Constitucional de Privacidad (Art. V.4):** Imposibilidad estricta de acceso al mapa y a la posición de las rutas por parte de los Responsables de Sede, y prohibición de rastreo continuo en segundo plano del personal técnico (`SiteManagerRouteDataSegregationTest`).
 
-### 8. Gestión de Reintegros e Importe Retenido / Dinero Tragado (Módulo M5 · Diseñado en SDD)
-* **Especificación y Contratos Formalizados:** Documentación integral en [`specs/functional/refunds_spec.md`](specs/functional/refunds_spec.md), [`specs/technical/refunds_contracts.md`](specs/technical/refunds_contracts.md), plan técnico de arquitectura [`specs/08-refunds/plan.md`](specs/08-refunds/plan.md) y desglose atómico de 24 tareas [`specs/08-refunds/tasks.md`](specs/08-refunds/tasks.md).
-* **Protocolo de Reclamación Ciudadana y PIN Secreto:** Solicitud opcional de reintegro en el reporte QR por fallo de pago o dinero tragado, con generación de PIN secreto de 4 dígitos para entrega presencial en conserjería o transferencia digital (Bizum/IBAN validado nativamente mediante Módulo 97 ISO 7064).
+### 8. Gestión de Reintegros e Importe Retenido / Dinero Tragado (Módulo M5)
+* **Implementación Completa Certificada:** 8 suites específicas en verde (flujo del coordinador, entrega en sede, inspección técnica, seguimiento público, segregación Art. V.4, repositorio y extremo a extremo) sobre la especificación formal [`specs/functional/refunds_spec.md`](specs/functional/refunds_spec.md), los contratos técnicos [`specs/technical/refunds_contracts.md`](specs/technical/refunds_contracts.md), el plan de arquitectura [`specs/08-refunds/plan.md`](specs/08-refunds/plan.md) y el desglose de tareas [`specs/08-refunds/tasks.md`](specs/08-refunds/tasks.md).
+* **Protocolo de Reclamación Ciudadana y PIN Secreto:** Solicitud opcional de reintegro en el reporte QR por fallo de pago o dinero tragado, con generación de PIN secreto de 4 dígitos para entrega presencial en conserjería o transferencia digital (Bizum/IBAN validado nativamente mediante Módulo 97 ISO 7064). Seguimiento ciudadano anónimo por token con rectificación de datos de cobro, y freno antifuerza del PIN: bloqueo temporal del expediente (`423 PICKUP_PIN_LOCKED`) tras cinco intentos fallidos de entrega.
 * **Custodia y Desacoplamiento (Art. II y III):** Dictamen económico desacoplado de la resolución técnica del ticket, custodia central forzada para importes $> 10,00\ \text{€}$ y bandeja de coordinación para liquidación administrativa con registro inmutable.
 
 ---
@@ -126,8 +127,8 @@ La aplicación cuenta con un conmutador de perfiles en la barra superior para al
 # Crear la base de datos:
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS vendguard_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
-# Opción recomendada: migrador DDL idempotente (esquema base + migraciones 003-007
-# de auditoría, preventivos, repuestos y logística de rutas, con verificación de integridad final):
+# Opción recomendada: migrador DDL idempotente (esquema base + migraciones 003-013
+# de auditoría, CRUD, preventivos, repuestos, mapa, reintegros y freno del PIN, con verificación de integridad final):
 php bin/migrate.php
 
 # Cargar semillas (sedes, máquinas, usuarios, preventivos y catálogo de repuestos).
@@ -180,7 +181,7 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `GET` | `/api/coordinator/machines/{id}/qr-label` | `COORDINATOR` | Datos y SVG vectorial de etiqueta QR para máquina. |
 | `GET` | `/api/coordinator/locations/{id}/qr-batch` | `COORDINATOR` | Lote completo de etiquetas QR de una sede para impresión masiva. |
 | `GET` | `/api/coordinator/metrics/summary` | `COORDINATOR` | KPIs globales, MTTR, comparativa de tendencia y alertas de SLA. |
-| `GET` | `/api/coordinator/metrics/breakdown` | `COORDINATOR` | Desglose multidimensional (sedes, técnicos, máquinas, averías). |
+| `GET` | `/api/coordinator/metrics/breakdown` | `COORDINATOR` | Desglose multidimensional (sedes, técnicos, máquinas, averías) con reintervenciones por garantía 48h por técnico (`warranty_reopens`). |
 | `GET` | `/api/coordinator/metrics/export` | `COORDINATOR` | Descarga CSV con codificación UTF-8 BOM de métricas agregadas. |
 | `GET` | `/api/coordinator/audit-log` | `COORDINATOR` | Consulta cronológica paginada y filtrable del registro inmutable. |
 | `GET` | `/api/coordinator/audit-log/export` | `COORDINATOR` | Descarga CSV del registro inmutable (máx. 10.000 filas). |
@@ -198,13 +199,14 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | :--- | :--- | :--- |
 | `GET/POST/PATCH` | `/api/coordinator/locations[/{id}][/deactivate\|/reactivate]` | CRUD de sedes clientes con bajas lógicas. |
 | `GET/POST/PATCH` | `/api/coordinator/machines[/{id}][/transfer\|/deactivate\|/reactivate]` | CRUD de máquinas con transferencias auditadas entre sedes. |
-| `GET/POST/PATCH` | `/api/coordinator/users[/{id}][/reset-password\|/deactivate\|/reactivate]` | CRUD de personal interno con reseteo de credenciales. |
+| `GET/POST/PATCH` | `/api/coordinator/users[/{id}][/reset-password\|/deactivate\|/reactivate]` | CRUD de personal interno con reseteo de credenciales y contador informativo de garantía 48h (`warranty_incidents_count`). |
 
 #### Mantenimiento Preventivo y Certificación Sanitaria (Módulo M1)
 | Método | Endpoint | Rol | Descripción del Recurso |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/coordinator/preventive/dashboard` | `COORDINATOR` | Cuadro de vencimientos y alertas de inspección por tipología. |
 | `GET/POST` | `/api/coordinator/preventive/orders` | `COORDINATOR` | Listado y creación de órdenes preventivas. |
+| `GET` | `/api/coordinator/preventive/orders/{id}/detail` | `COORDINATOR` | Detalle integral de solo lectura de la orden (checklist, cronología de auditoría y cumplimiento). |
 | `POST` | `/api/coordinator/preventive/generate-due` | `COORDINATOR` | Generación automática de órdenes por vencimiento normativo. |
 | `PATCH` | `/api/coordinator/preventive/orders/{id}/assign\|/cancel` | `COORDINATOR` | Asignación técnica o cancelación justificada de la orden. |
 | `GET/PATCH` | `/api/coordinator/preventive/settings` y `/api/coordinator/machines/{id}/preventive-config` | `COORDINATOR` | Frecuencias normativas por tipología (globales y por máquina). |
@@ -238,6 +240,18 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `GET/PUT` | `/api/coordinator/route/settings` | `COORDINATOR` | Consulta y actualización de parámetros de la Base Central (coordenadas y radio operativo). |
 | `POST/PUT` | `/api/coordinator/locations` | `COORDINATOR` | Alta y edición de sedes con latitud/longitud validadas dentro del marco operativo territorial. |
 
+#### Reintegros e Importe Retenido (Módulo M5)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/qr/report` | Público | Reporte ciudadano con solicitud opcional de reintegro (fallo de pago o dinero tragado). |
+| `GET` | `/api/public/refunds/track` | Público | Seguimiento anónimo del reintegro por token con estado y Liquidación. |
+| `PATCH` | `/api/public/refunds/track` | Público | Rectificación ciudadana de datos de cobro (Bizum/IBAN Módulo 97 ISO 7064). |
+| `GET` | `/api/technician/incidents/{id}/refund` | `TECHNICIAN` | Dictamen económico desacoplado de la resolución técnica del ticket. |
+| `GET` | `/api/location/refunds` | `LOCATION_MANAGER` | Reintegros de la sede pendientes de entrega en conserjería. |
+| `POST` | `/api/location/refunds/{id}/deliver` | `LOCATION_MANAGER` | Entrega presencial validando el PIN secreto de 4 dígitos (bloqueo 423 tras 5 intentos). |
+| `GET` | `/api/coordinator/refunds` | `COORDINATOR` | Bandeja de liquidación administrativa de reintegros custodiados. |
+| `POST` | `/api/coordinator/refunds/{id}/approve\|/pay\|/reject\|/regularize` | `COORDINATOR` | Aprobación, pago, rechazo y regularización con registro inmutable. |
+
 ---
 
 ## 🧪 Batería Completa de Pruebas Automatizadas (T-39 & Módulos 02, 03, 04, M1, M2 y M4)
@@ -249,17 +263,17 @@ La integridad de VendGuard está certificada mediante un ejecutor de pruebas aut
 php tests/run_all.php
 ```
 
-### Resumen de Ejecución Global (Octubre 2026, cierre del Módulo M4):
+### Resumen de Ejecución Global (Octubre 2026):
 ```text
 ======================================================================
- RESUMEN DE EJECUCIÓN GLOBAL (137 Suites / 4.383 Aserciones)
+ RESUMEN DE EJECUCIÓN GLOBAL (181 Suites / 7.029 Aserciones)
 ======================================================================
- Suites de pruebas PHP Unit : 62 / 62 pasadas (100%)
- Suites de pruebas JS Unit  : 33 / 33 pasadas (100%)
- Suites de Integración PHP  : 42 / 42 pasadas (100%)
+ Suites de pruebas PHP Unit : 82 / 82 pasadas (100%)
+ Suites de pruebas JS Unit  : 43 / 43 pasadas (100%)
+ Suites de Integración PHP  : 56 / 56 pasadas (100%)
  ──────────────────────────────────────────────────────────────────
- Total Suites Ejecutadas    : 137
- Total Aserciones Evaluadas : 4.383
+ Total Suites Ejecutadas    : 181
+ Total Aserciones Evaluadas : 7.029
  Fallos Detectados          : 0 (100% en verde)
  Base de datos restablecida : SÍ (Semillas intactas)
 ======================================================================
@@ -271,6 +285,7 @@ php tests/run_all.php
 Entre las suites de certificación destacan:
 * **`ConstitutionalAuditTest`** — auditoría automática de los Artículos I al VII (cero `DELETE FROM` en producción, tipado estricto, tokens visuales Docker).
 * **`SiteManagerPartsDataSegregationTest` (T-SPARE-20)** — blindaje del Art. V.4: ningún endpoint del portal de sede expone piezas, destinos ni costes.
+* **`SiteManagerRefundDataSegregationTest`** — blindaje del Art. V.4 en reintegros: ningún rol ajeno consulta el dictamen económico (403) y la entrega en sede exige el PIN de recogida.
 * **`SiteManagerRouteDataSegregationTest` (T-MAP-19)** — blindaje del Art. V.4: bloqueo 403 Forbidden para responsables de sede frente a rutas de campo y prohibición de rastreo en segundo plano del personal.
 * **`RouteOptimizationServiceTest` (T-MAP-07)** — verificación matemática de la heurística de optimización de rutas (Haversine, paradas prioritarias por SLA < 4h, parada activa `#1` y exclusión de `PENDING_PARTS`).
 * **`MapZoomPanUtilTest.mjs` (T-MAP-21)** — controlador gestual reactivo puro: anclaje, límites de escala, clamp de encuadre, gestos táctiles *pinch-to-zoom* y recentrado interactivo `focusOn`.
@@ -287,23 +302,27 @@ gestor-incidencias-vending/
 ├── constitution.md               # Ley Suprema del proyecto (Artículos I al VII)
 ├── AGENTS.md                     # Directrices operativas de desarrollo y SDD
 ├── Dockerfile                    # Contenedor para despliegues cloud en Render
+├── router.php                    # Router del servidor embebido de PHP (php -S ... router.php)
 ├── README.md                     # Esta guía maestra de entrega y operaciones
 ├── bin/
 │   ├── init_cloud_db.php         # Inicializador automático para MySQL/TiDB Cloud
-│   ├── migrate.php               # Migrador DDL idempotente (esquema + migraciones 003-007)
+│   ├── migrate.php               # Migrador DDL idempotente (esquema + migraciones 003-013)
 │   ├── seed.php                  # Sembrador CLI del catálogo base
-│   └── seed_demo_metrics.php     # Sembrador de métricas históricas y auditoría
+│   ├── seed_demo_metrics.php     # Sembrador de métricas históricas y auditoría
+│   └── create_bizum_case.php     # Script CLI de caso demo de reintegro por Bizum
 ├── database/
 │   ├── schema.sql                # DDL MariaDB del núcleo operativo
 │   ├── cloud_init.sql            # Script unificado integral para despliegues cloud
-│   ├── migrations/               # DDL incrementales (003 auditoría, 004 CRUD, 005 preventivos, 006 repuestos, 007 mapa)
+│   ├── migrations/               # DDL incrementales (003 auditoría, 004 CRUD, 005 preventivos, 006 repuestos, 007 mapa, 008-013 reintegros y PIN)
 │   ├── seeds.sql                 # Semillas SQL del catálogo base (referencia)
-│   └── DemoMetricsSeeder.php     # Generador de histórico de averías y auditoría
+│   └── DemoMetricsSeeder.php     # Generador de histórico de averías, reaperturas por garantía y auditoría
 ├── docs/
 │   ├── design.md                 # Especificación de tokens visuales Docker
 │   ├── manual_0_analisis_problema.md # Análisis de negocio y reglas de vending
 │   ├── manual_e2e_verification.md    # Guion de verificación E2E (T-40)
 │   ├── manual_modulo_m2_repuestos.md # Manual de usuario del Módulo M2 (coordinador y técnico)
+│   ├── features_pendientes.md        # Catálogo de features pendientes y roadmap
+│   ├── auditoria_arquitectura.md     # Auditoría de arquitectura
 │   └── constitutional_audit_report.md# Dictamen formal de auditoría
 ├── specs/
 │   ├── 02-qr-codes/              # Especificación del módulo de códigos QR
@@ -313,6 +332,7 @@ gestor-incidencias-vending/
 │   ├── 06-spare-parts/           # Especificación del catálogo de repuestos y trazabilidad (M2)
 │   ├── 07-route-map/             # Especificación del mapa interactivo de rutas y logística territorial (M4)
 │   ├── 08-refunds/               # Especificación y plan del módulo de reintegros y dinero tragado (M5)
+│   ├── 09-incident-detail-modal/ # Especificación del modal de detalle integral de incidencias
 │   ├── functional/               # Especificaciones funcionales EARS transversales
 │   └── technical/                # Contratos de API, DDL y esquemas de base de datos
 ├── src/
@@ -338,7 +358,7 @@ gestor-incidencias-vending/
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 137 suites (100% verde)
+    ├── run_all.php               # Ejecutor global de la batería de 181 suites (100% verde)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)
     ├── unit/                     # Pruebas unitarias de lógica pura, geometría y contratos
