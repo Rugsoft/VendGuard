@@ -494,6 +494,8 @@ class MockPrevIncidentRepo implements IncidentRepositoryInterface
     public function getHistory(int $i): array { return []; }
     public function addComment(\VendGuard\Core\Domain\Model\IncidentComment $c): \VendGuard\Core\Domain\Model\IncidentComment { return $c; }
     public function getComments(int $i, bool $in = true): array { return []; }
+    public function getCommentsPaged(int $incidentId, bool $includeInternal, int $limit = 50, ?int $beforeId = null): array { return []; }
+    public function countComments(int $incidentId, bool $includeInternal): int { return 0; }
     public function countReopenEvents(int $i): int { return 0; }
     public function markAsChronic(int $i): bool { return true; }
     public function assign(int $i, int $t, ?int $c = null, ?string $o = null, ?string $r = null): Incident { throw new RuntimeException("Stub"); }

@@ -61,6 +61,8 @@ final class CoordinatorIncidentDetailServiceStubRepo implements IncidentReposito
     public function getHistory(int $incidentId): array { return []; }
     public function addComment(IncidentComment $comment): IncidentComment { throw new LogicException('Not used.'); }
     public function getComments(int $incidentId, bool $includeInternal = true): array { return []; }
+    public function getCommentsPaged(int $incidentId, bool $includeInternal, int $limit = 50, ?int $beforeId = null): array { return []; }
+    public function countComments(int $incidentId, bool $includeInternal): int { return 0; }
     public function countReopenEvents(int $incidentId): int { return 0; }
     public function markAsChronic(int $incidentId): bool { return false; }
     public function assign(int $incidentId, int $technicianId, ?int $coordinatorId = null, ?string $urgencyOverride = null, ?string $urgencyReason = null): Incident { throw new LogicException('Not used.'); }

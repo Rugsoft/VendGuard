@@ -993,6 +993,76 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
     }
 
     /**
+     * Recupera un bloque paginado por cursor de los comentarios de una incidencia
+     * (Módulo 10, T-COM-02 · RF-01.2, RF-01.3, RNF-02).
+     *
+     * La consulta aprovecha el índice `idx_comments_incident` (incident_id,
+     * created_at): filtra por la incidencia, toma el bloque de mensajes más
+     * recientes (DESC) recortado por el cursor `beforeId` y lo reordena en
+     * ascendente para entregarlo cronológicamente, sin escanear tablas completas.
+     * El desempate por `id` garantiza orden inequívoco ante marcas temporales
+     * iguales (milisegundos del servidor).
+     */
+    public function getCommentsPaged(int $incidentId, bool $includeInternal, int $limit = 50, ?int $beforeId = null): array
+    {
+        $sql = "
+            SELECT c.*, i.ticket_code
+            FROM `incident_comments` c
+            JOIN `incidents` i ON c.incident_id = i.id
+            WHERE c.incident_id = :incident_id
+        ";
+
+        // Segregación estricta de notas internas ante perfiles de Sede (Art. V.4).
+        if (!$includeInternal) {
+            $sql .= " AND c.is_internal = 0";
+        }
+
+        // Paginación retrospectiva por cursor: solo mensajes más antiguos que el
+        // mensaje más antiguo ya cargado en el cliente (RF-01.3).
+        if ($beforeId !== null) {
+            $sql .= " AND c.id < :before_id";
+        }
+
+        $sql .= " ORDER BY c.created_at DESC, c.id DESC LIMIT :limit_rows";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':incident_id', $incidentId, PDO::PARAM_INT);
+        if ($beforeId !== null) {
+            $stmt->bindValue(':before_id', $beforeId, PDO::PARAM_INT);
+        }
+        $stmt->bindValue(':limit_rows', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // El bloque se capturó de más reciente a más antiguo: se invierte para
+        // entregarse en orden cronológico de lectura (más antiguo primero).
+        $rows = array_reverse($rows);
+
+        return array_map(fn(array $row) => IncidentComment::fromDatabaseRow($row), $rows);
+    }
+
+    /**
+     * Cuenta los comentarios de una incidencia con recuentos segregados
+     * (Módulo 10, T-COM-02 · RF-01.1): solo públicos para la Sede
+     * (`is_internal = 0`) o el total público + interno para Técnicos y
+     * Coordinadores (`is_internal IN (0, 1)`).
+     */
+    public function countComments(int $incidentId, bool $includeInternal): int
+    {
+        $sql = "SELECT COUNT(*) FROM `incident_comments` WHERE incident_id = :incident_id";
+
+        if (!$includeInternal) {
+            $sql .= " AND is_internal = 0";
+        }
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([':incident_id' => $incidentId]);
+
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
      * Cuenta el número de eventos de reapertura previos registrados en la auditoría (RF-09 / EARS 9.3).
      */
     public function countReopenEvents(int $incidentId): int

@@ -149,6 +149,29 @@ interface IncidentRepositoryInterface
      * @return list<IncidentComment>
      */
     public function getComments(int $incidentId, bool $includeInternal = true): array;
+    /**
+     * Recupera un bloque paginado por cursor de los comentarios de una incidencia
+     * usando el índice `idx_comments_incident` (Módulo 10, T-COM-02 · RF-01.2,
+     * RF-01.3, RNF-02). Devuelve los mensajes más recientes primero, con orden
+     * cronológico estable y sin escaneos completos de tabla.
+     *
+     * @param int $incidentId Identificador de la incidencia.
+     * @param bool $includeInternal Si es false, excluye estrictamente las notas internas (Art. V.4).
+     * @param int $limit Tamaño del bloque (por defecto 50, máximo contractual 100).
+     * @param int|null $beforeId ID del comentario más antiguo ya cargado para paginar hacia atrás.
+     * @return list<IncidentComment>
+     */
+    public function getCommentsPaged(int $incidentId, bool $includeInternal, int $limit = 50, ?int $beforeId = null): array;
+
+    /**
+     * Cuenta los comentarios de una incidencia con recuentos segregados (RF-01.1):
+     * solo públicos (`includeInternal = false`, `is_internal = 0`) o el total
+     * público + interno (`includeInternal = true`, `is_internal IN (0, 1)`).
+     *
+     * @param int $incidentId Identificador de la incidencia.
+     * @param bool $includeInternal Si es true, suma también las notas internas.
+     */
+    public function countComments(int $incidentId, bool $includeInternal): int;
 
     /**
      * Cuenta el número de eventos de reapertura previos registrados en la auditoría (RF-09 / EARS 9.3).

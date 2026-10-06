@@ -617,6 +617,8 @@ class MockIncidentRepoForTech implements IncidentRepositoryInterface
     {
         return $this->comments[$incidentId] ?? [];
     }
+    public function getCommentsPaged(int $incidentId, bool $includeInternal, int $limit = 50, ?int $beforeId = null): array { return []; }
+    public function countComments(int $incidentId, bool $includeInternal): int { return 0; }
 
     public function countReopenEvents(int $incidentId): int { return 0; }
     public function markAsChronic(int $incidentId): bool { return true; }

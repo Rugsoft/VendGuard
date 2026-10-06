@@ -20,7 +20,7 @@
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existen en `src/Application/DTO/IncidentCommentItemDto.php` y `src/Application/DTO/IncidentCommentThreadDto.php` las clases `final readonly` con tipado estricto PHP 8.2+ (`declare(strict_types=1);`), inmutabilidad y métodos `toArray()` y `jsonSerialize()` que modelan la cabecera contextual del expediente, la paginación por cursor (`total_comments`, `loaded_count`, `has_more_before`, `oldest_id`, `latest_id`) y la lista de mensajes proyectados con soporte para enmascaramiento y exclusión de campos de confidencialidad interna en perfiles de sede.
 
-- [ ] **T-COM-02: Extender `IncidentRepositoryInterface` y `PdoIncidentRepository` con paginación cursorizada y recuentos segregados**
+- [x] **T-COM-02: Extender `IncidentRepositoryInterface` y `PdoIncidentRepository` con paginación cursorizada y recuentos segregados**
   * **Requisitos:** RF-01.1, RF-01.2, RF-01.3, RF-02.1, Constitución Art. III
   * **Dependencias:** T-COM-01
   * **Hecho cuando:** `IncidentRepositoryInterface` y `PdoIncidentRepository` incorporan: (1) `getCommentsPaged(int $incidentId, bool $includeInternal, int $limit = 50, ?int $beforeId = null): array` utilizando la clave indexada `idx_comments_incident` para devolver bloques cronológicos sin escaneos completos de tabla; (2) `countComments(int $incidentId, bool $includeInternal): int` permitiendo calcular recuentos segregados (solo públicos con `is_internal = 0` vs. total con `is_internal IN (0, 1)`); y la prueba de integración del repositorio valida ambos métodos.

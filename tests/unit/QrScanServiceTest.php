@@ -236,6 +236,8 @@ class InMemoryIncidentRepository implements IncidentRepositoryInterface
     public function getHistory(int $incidentId): array { return []; }
     public function addComment(IncidentComment $comment): IncidentComment { return $comment; }
     public function getComments(int $incidentId, bool $includeInternal = true): array { return []; }
+    public function getCommentsPaged(int $incidentId, bool $includeInternal, int $limit = 50, ?int $beforeId = null): array { return []; }
+    public function countComments(int $incidentId, bool $includeInternal): int { return 0; }
     public function countReopenEvents(int $incidentId): int { return 0; }
     public function hasActiveIncidentForMachine(int $machineId, ?int $excludeIncidentId = null): bool { return $this->activeIncident !== null; }
     public function updateStatus(int $id, IncidentStatus $status, ?int $userId = null, ?string $note = null): bool { return true; }
