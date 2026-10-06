@@ -39,7 +39,7 @@
 
 ## Fase 2: Controladores REST y Rutas en AppRouter
 
-- [ ] **T-COM-05: Implementar endpoints de Sede en `LocationPortalController.php`**
+- [x] **T-COM-05: Implementar endpoints de Sede en `LocationPortalController.php`**
   * **Requisitos:** RF-01.2, RF-02.1, RF-02.2, RF-03.2, RF-04.1, RNF-01, Constitución Art. V.4
   * **Dependencias:** T-COM-03, T-COM-04
   * **Hecho cuando:** `LocationPortalController` implementa `getComments(Request $request)` y `addComment(Request $request)` orquestados mediante `IncidentCommentService`, aceptando `multipart/form-data` con foto opcional, garantizando que el cliente jamás reciba notas internas ni configure `is_internal = true`, respondiendo `200 OK` con `IncidentCommentThreadDto` y `201 Created` al publicar, o `403 Forbidden` si el expediente está sellado.

@@ -109,6 +109,9 @@ class IncidentCommentService
 
         // Cargamos una unidad extra para calcular `has_more_before` sin una
         // segunda consulta: si viene el mensaje extra, hay histórico previo.
+        // El sobrante es el mensaje MÁS ANTIGUO de la ventana (el repositorio
+        // devuelve siempre el bloque más reciente), así que se descarta por la
+        // izquierda para conservar los `limit` mensajes más recientes (RF-01.2).
         $fetchLimit = min(max($limit, 1), self::MAX_THREAD_LIMIT);
         $comments = $this->incidentRepo->getCommentsPaged(
             (int)$incidentRow['id'],
@@ -118,7 +121,7 @@ class IncidentCommentService
         );
         $hasMoreBefore = count($comments) > $fetchLimit;
         if ($hasMoreBefore) {
-            array_pop($comments);
+            array_shift($comments);
         }
 
         $projected = [];

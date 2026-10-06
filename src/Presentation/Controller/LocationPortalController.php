@@ -7,19 +7,21 @@ namespace VendGuard\Presentation\Controller;
 use VendGuard\Application\DTO\CreateRefundRequestDTO;
 use VendGuard\Application\DTO\RefundReceiptDTO;
 use VendGuard\Application\Service\IbanValidationService;
+use VendGuard\Application\Service\IncidentCommentService;
 use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Core\Domain\Exception\ChronicIncidentException;
+use VendGuard\Core\Domain\Exception\ConversationSealedException;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
 use VendGuard\Core\Domain\Exception\DuplicateRefundClaimException;
 use VendGuard\Core\Domain\Exception\InvalidBizumPhoneException;
 use VendGuard\Core\Domain\Exception\InvalidIbanFormatException;
+use VendGuard\Core\Domain\Exception\InvalidCommentLengthException;
 use VendGuard\Core\Domain\Exception\InvalidRefundAmountException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Exception\WarrantyExpiredException;
 use VendGuard\Core\Domain\Model\CompensationMethod;
 use VendGuard\Core\Domain\Model\Incident;
-use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
@@ -63,6 +65,7 @@ class LocationPortalController
     private LocalFileUploader $fileUploader;
     private RefundManagementService $refundService;
     private IbanValidationService $ibanValidator;
+    private ?IncidentCommentService $commentService;
 
     public function __construct(
         ?MachineRepositoryInterface $machineRepo = null,
@@ -70,7 +73,8 @@ class LocationPortalController
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?LocalFileUploader $fileUploader = null,
         ?RefundManagementService $refundService = null,
-        ?IbanValidationService $ibanValidator = null
+        ?IbanValidationService $ibanValidator = null,
+        ?IncidentCommentService $commentService = null
     ) {
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
@@ -79,6 +83,19 @@ class LocationPortalController
         $this->ibanValidator = $ibanValidator ?? new IbanValidationService();
         $this->refundService = $refundService
             ?? new RefundManagementService(new PdoRefundRequestRepository(), $this->ibanValidator);
+
+        // Inicialización perezosa: el AuditLogger por defecto del servicio de
+        // comentarios abre conexión a MariaDB al instanciarse, y este controlador
+        // también se construye en contextos unitarios sin base de datos.
+        $this->commentService = $commentService;
+    }
+
+    /**
+     * Servicio de aplicación del hilo de comentarios, resuelto bajo demanda.
+     */
+    private function comments(): IncidentCommentService
+    {
+        return $this->commentService ??= new IncidentCommentService($this->incidentRepo, null, $this->fileUploader);
     }
 
     /**
@@ -585,29 +602,26 @@ class LocationPortalController
         return '';
     }
 
-    /**
-     * POST /api/incidents/{ticket_code}/comments
-     * Añade un nuevo comentario o fotografía adicional a la bitácora de un ticket activo (RF-02 / EARS 2.3).
-     * 
-     * Garantiza la preservación íntegra de la fotografía original del aviso sin sobreescribirla (Edge Case 6).
-     */
-    public function addComment(Request $request): Response
-    {
-        // 1. Identificar la sede autenticada
-        $location = $request->getAttribute('authenticated_location');
-        if ($location === null) {
-            $locationId = $request->getAttribute('location_id');
-            if ($locationId !== null) {
-                $location = $this->locationRepo->findById((int)$locationId);
-            }
-        }
-        if ($location === null) {
-            $siteCodeHeader = $request->getHeader('X-Site-Code') ?? $request->getAttribute('site_code');
-            if ($siteCodeHeader !== null && trim((string)$siteCodeHeader) !== '') {
-                $location = $this->locationRepo->findBySiteCode(trim((string)$siteCodeHeader), true);
-            }
-        }
+    // ─────────────────────────────────────────────────────────────────────
+    // Hilo de conversación del expediente (Módulo 10 · T-COM-05)
+    // Orquestado por IncidentCommentService: la segregación, el enmascaramiento
+    // y la máquina de estados del sellado viven en la capa de aplicación.
+    // ─────────────────────────────────────────────────────────────────────
 
+    /**
+     * GET /api/location/incidents/{id}/comments  (alias retrocompatible: /api/incidents/{ticket_code}/comments)
+     * Devuelve el hilo de conversación del expediente para el Responsable de Sede
+     * (RF-01.2, RF-01.4, RF-02.1, RF-02.2) con paginación cursorizada.
+     *
+     * Garantías de servidor (RNF-01 / Art. V.4):
+     * - Segregación estricta: las notas internas jamás alcanzan el payload.
+     * - Cero campo `is_internal` o metadato deducible en la respuesta JSON.
+     * - Enmascaramiento de la identidad técnica y de coordinación ante la Sede.
+     */
+    public function getComments(Request $request): Response
+    {
+        // 1. Autenticación de sede (fail-fast)
+        $location = $this->resolveAuthenticatedLocation($request);
         if ($location === null) {
             return Response::error(
                 'UNAUTHORIZED',
@@ -616,28 +630,110 @@ class LocationPortalController
             );
         }
 
-        // 2. Obtener y validar el código de ticket de la ruta
-        $ticketCodeParam = $request->getRouteParam('ticket_code') ?? $request->getRouteParam('code');
-        if ($ticketCodeParam === null || trim($ticketCodeParam) === '') {
+        // 2. Identificador del expediente en la ruta ({id} numérico o alias {ticket_code})
+        $identifier = $this->resolveIncidentIdentifier($request);
+        if ($identifier === null) {
             return Response::error(
                 'MISSING_TICKET_CODE',
-                'El código de ticket es obligatorio en la URL.',
+                'El identificador de la incidencia es obligatorio en la URL.',
                 400
             );
         }
 
-        $ticketCode = strtoupper(trim($ticketCodeParam));
-        $incident = $this->incidentRepo->findByTicketCode($ticketCode);
-
+        // 3. Autorización de acceso: existencia y aislamiento de sede (Art. V.4)
+        $incident = $this->findIncidentByIdentifier($identifier);
         if ($incident === null) {
             return Response::error(
                 'INCIDENT_NOT_FOUND',
-                "No se encontró ninguna incidencia con el código '{$ticketCode}'.",
+                "No se encontró ninguna incidencia con el identificador '{$identifier}'.",
                 404
             );
         }
+        if ($incident->getLocationId() !== $location->getId()) {
+            return Response::error(
+                'SITE_MISMATCH',
+                'No tiene autorización para consultar incidencias de otra sede.',
+                403
+            );
+        }
 
-        // 3. Validar segregación de sede (Artículo V Constitución / RF-01)
+        // 4. Parámetros de paginación cursorizada (RF-01.2, RF-01.3)
+        $limitRaw = $request->getQuery('limit');
+        if ($limitRaw !== null && (!ctype_digit((string)$limitRaw) || (int)$limitRaw < 1)) {
+            return Response::error(
+                'INVALID_LIMIT',
+                'El parámetro limit debe ser un entero positivo.',
+                400
+            );
+        }
+        $limit = $limitRaw !== null ? (int)$limitRaw : IncidentCommentService::DEFAULT_THREAD_LIMIT;
+
+        $beforeIdRaw = $request->getQuery('before_id');
+        if ($beforeIdRaw !== null && (!ctype_digit((string)$beforeIdRaw) || (int)$beforeIdRaw < 1)) {
+            return Response::error(
+                'INVALID_BEFORE_ID',
+                'El parámetro before_id debe ser un entero positivo.',
+                400
+            );
+        }
+        $beforeId = $beforeIdRaw !== null ? (int)$beforeIdRaw : null;
+
+        // 5. Orquestación del servicio de aplicación: filtrado y enmascaramiento en servidor
+        try {
+            $thread = $this->comments()->getThread((int)$incident->getId(), 'SITE_MANAGER', null, $limit, $beforeId);
+        } catch (ConversationSealedException $e) {
+            // Barrera defensiva (no alcanzable con el filtrado previo del repositorio).
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (\DomainException $e) {
+            return Response::error('INCIDENT_NOT_FOUND', 'La incidencia solicitada no existe.', 404);
+        }
+
+        return Response::json($thread->jsonSerialize(), 200);
+    }
+
+    /**
+     * POST /api/location/incidents/{id}/comments  (alias retrocompatible: /api/incidents/{ticket_code}/comments)
+     * Publica un mensaje público en el hilo de conversación del expediente (RF-03.2, RF-04.1).
+     *
+     * Garantías de servidor (RNF-01 / Art. V.4 y Art. V.5):
+     * - El cliente de sede jamás puede fijar `is_internal`: cualquier valor del
+     *   cuerpo se ignora y el mensaje se publica siempre como público.
+     * - La fotografía opcional se valida en servidor (≤ 5 MB y magic bytes reales)
+     *   mediante LocalFileUploader antes de persistir nada.
+     * - Expediente sellado (CLOSED/CANCELLED o RESOLVED fuera de la garantía de 48 h)
+     *   se rechaza con HTTP 403 Forbidden (RF-05.3).
+     */
+    public function addComment(Request $request): Response
+    {
+        // 1. Autenticación de sede (fail-fast)
+        $location = $this->resolveAuthenticatedLocation($request);
+        if ($location === null) {
+            return Response::error(
+                'UNAUTHORIZED',
+                'Acceso no autorizado. No se ha podido verificar la sede del usuario.',
+                401
+            );
+        }
+
+        // 2. Identificador del expediente en la ruta
+        $identifier = $this->resolveIncidentIdentifier($request);
+        if ($identifier === null) {
+            return Response::error(
+                'MISSING_TICKET_CODE',
+                'El identificador de la incidencia es obligatorio en la URL.',
+                400
+            );
+        }
+
+        // 3. Autorización de acceso: existencia y aislamiento de sede (Art. V.4)
+        $incident = $this->findIncidentByIdentifier($identifier);
+        if ($incident === null) {
+            return Response::error(
+                'INCIDENT_NOT_FOUND',
+                "No se encontró ninguna incidencia con el identificador '{$identifier}'.",
+                404
+            );
+        }
         if ($incident->getLocationId() !== $location->getId()) {
             return Response::error(
                 'SITE_MISMATCH',
@@ -646,17 +742,13 @@ class LocationPortalController
             );
         }
 
-        // 4. Validar que la incidencia no esté cerrada ni cancelada
-        if ($incident->isClosed() || $incident->isCancelled()) {
-            return Response::error(
-                'INCIDENT_NOT_ACTIVE',
-                'No se pueden añadir comentarios a una incidencia que ya ha sido cerrada o cancelada.',
-                422
-            );
-        }
-
-        // 5. Validar texto del comentario
-        $commentText = trim((string)($request->getBodyParam('comment_text') ?? $request->getBodyParam('text') ?? $request->getBodyParam('description') ?? ''));
+        // 4. Texto del mensaje: solo se comprueba su presencia (400); los límites
+        //    de 5 a 1.000 caracteres descriptivos los aplica el servicio (RF-03.1).
+        $commentText = trim((string)($request->getBodyParam('comment_text')
+            ?? $request->getBodyParam('text')
+            ?? $request->getBodyParam('description')
+            ?? $request->getBodyParam('comment')
+            ?? ''));
         if ($commentText === '') {
             return Response::error(
                 'MISSING_COMMENT_TEXT',
@@ -665,75 +757,54 @@ class LocationPortalController
             );
         }
 
-        if (mb_strlen($commentText) < 3) {
-            return Response::error(
-                'COMMENT_TOO_SHORT',
-                'El comentario debe contener al menos 3 caracteres descriptivos.',
-                422
-            );
-        }
-
-        // 6. Autor del comentario
-        $authorName = trim((string)($request->getBodyParam('author_name') ?? ''));
-        if ($authorName === '') {
-            $authorName = $location->getContactName() ?? 'Responsable de Sede';
-        }
-
-        // 7. Procesar fotografía adjunta adicional si existe (EARS 2.3 & RNF-05)
-        $photoPath = null;
+        // 5. Fotografía opcional multipart/form-data (RF-04.1). La autoría de la Sede
+        //    la deriva el servicio desde el nombre de la sede del expediente.
         $photoFile = $request->getFile('photo') ?? $request->getFile('image') ?? $request->getFile('file');
 
-        if ($photoFile !== null && isset($photoFile['error']) && $photoFile['error'] !== UPLOAD_ERR_NO_FILE && !empty($photoFile['tmp_name'])) {
-            try {
-                $photoPath = $this->fileUploader->upload($photoFile);
-            } catch (InvalidUploadException $e) {
-                return Response::error(
-                    $e->getErrorCode(),
-                    $e->getMessage(),
-                    $e->getHttpStatusCode(),
-                    [
-                        'form_data' => [
-                            'ticket_code' => $ticketCode,
-                            'author_name' => $authorName,
-                            'comment_text' => $commentText,
-                        ],
-                    ]
-                );
-            }
-        } elseif ($request->getBodyParam('photo_path') !== null && trim((string)$request->getBodyParam('photo_path')) !== '') {
-            $photoPath = trim((string)$request->getBodyParam('photo_path'));
+        // 6. Orquestación del servicio de aplicación (fail-fast, sellado y auditoría)
+        try {
+            $thread = $this->comments()->addComment(
+                (int)$incident->getId(),
+                'SITE_MANAGER',
+                $commentText,
+                null,
+                null,
+                $photoFile
+            );
+        } catch (InvalidCommentLengthException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (ConversationSealedException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (InvalidUploadException $e) {
+            // RF-07.1: se devuelven los datos de texto íntegros para el reintento.
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                [
+                    'form_data' => [
+                        'ticket_code' => $incident->getTicketCode(),
+                        'comment_text' => $commentText,
+                    ],
+                ]
+            );
+        } catch (\DomainException $e) {
+            return Response::error('INCIDENT_NOT_FOUND', 'La incidencia solicitada no existe.', 404);
         }
 
-        // 8. Crear y persistir la entrada en incident_comments
-        // Nota: La foto original en $incident->getPhotoPath() jamás se modifica ni sobreescribe (Edge Case 6)
-        $comment = new IncidentComment(
-            id: null,
-            incidentId: (int)$incident->getId(),
-            authorType: 'REPORTER',
-            userId: null,
-            authorName: $authorName,
-            commentText: $commentText,
-            photoPath: $photoPath,
-            isInternal: false,
-            createdAt: null,
-            ticketCode: $incident->getTicketCode()
-        );
-
-        $createdComment = $this->incidentRepo->addComment($comment);
-
-        // 9. Devolver respuesta 201 Created con el comentario anexado
+        // 7. Respuesta 201 Created con el hilo actualizado del expediente (RF-03.4)
         return Response::json(
-            $createdComment->toArray(),
+            $thread->jsonSerialize(),
             201,
-            'Comentario añadido correctamente a la bitácora de la incidencia'
+            'Comentario publicado en el hilo de conversación'
         );
     }
 
     /**
-     * GET /api/incidents/{ticket_code}/comments
-     * Devuelve la bitácora de comentarios públicos de una incidencia (RF-02).
+     * Resuelve la sede autenticada a partir de los atributos inyectados por
+     * SiteAuthMiddleware, con las vías legacy de respaldo (Art. V.4).
      */
-    public function getComments(Request $request): Response
+    private function resolveAuthenticatedLocation(Request $request): ?Location
     {
         $location = $request->getAttribute('authenticated_location');
         if ($location === null) {
@@ -749,30 +820,38 @@ class LocationPortalController
             }
         }
 
-        if ($location === null) {
-            return Response::error('UNAUTHORIZED', 'Acceso no autorizado.', 401);
+        return $location;
+    }
+
+    /**
+     * Identificador del expediente en la ruta: {id} numérico en las rutas nuevas
+     * o {ticket_code} en el alias retrocompatible.
+     */
+    private function resolveIncidentIdentifier(Request $request): ?string
+    {
+        $identifier = $request->getRouteParam('id')
+            ?? $request->getRouteParam('ticket_code')
+            ?? $request->getRouteParam('code');
+        if ($identifier === null || trim($identifier) === '') {
+            return null;
         }
 
-        $ticketCodeParam = $request->getRouteParam('ticket_code') ?? $request->getRouteParam('code');
-        if ($ticketCodeParam === null || trim($ticketCodeParam) === '') {
-            return Response::error('MISSING_TICKET_CODE', 'El código de ticket es obligatorio en la URL.', 400);
+        return trim($identifier);
+    }
+
+    /**
+     * Localiza el expediente por ID numérico o código de ticket normalizado
+     * (admite el prefijo '#' y minúsculas del alias legacy).
+     */
+    private function findIncidentByIdentifier(string $identifier): ?Incident
+    {
+        if (ctype_digit($identifier)) {
+            return $this->incidentRepo->findById((int)$identifier);
         }
 
-        $ticketCode = strtoupper(trim($ticketCodeParam));
-        $incident = $this->incidentRepo->findByTicketCode($ticketCode);
+        $normalizedCode = strtoupper(ltrim($identifier, '#'));
 
-        if ($incident === null) {
-            return Response::error('INCIDENT_NOT_FOUND', "No se encontró la incidencia '{$ticketCode}'.", 404);
-        }
-
-        if ($incident->getLocationId() !== $location->getId()) {
-            return Response::error('SITE_MISMATCH', 'No tiene autorización para consultar incidencias de otra sede.', 403);
-        }
-
-        // Responsable de ubicación: nunca expone comentarios marcados como internos (RNF-04)
-        $comments = $this->incidentRepo->getComments((int)$incident->getId(), false);
-
-        return Response::json(array_map(fn(IncidentComment $c) => $c->toArray(), $comments), 200);
+        return $this->incidentRepo->findByTicketCode($normalizedCode);
     }
 
     /**

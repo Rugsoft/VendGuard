@@ -7,14 +7,18 @@ declare(strict_types=1);
  * 
  * Test de Integración para el Endpoint de Añadir Comentarios/Evidencias a Ticket Activo (Tarea T-23).
  * Requisitos: RF-02 (EARS 2.3), Edge Case 6 del MVP.
+ * Migrado en T-COM-05 al contrato del hilo de conversación (Módulo 10): las
+ * respuestas devuelven el IncidentCommentThreadDto consolidado, la identidad
+ * de la Sede es corporativa ("Responsable de Sede · Centro"), el límite mínimo
+ * pasa a 5 caracteres (RF-03.1) y el sellado responde 403 (RF-05.3).
  * 
  * Valida que:
  * 1. POST /api/incidents/{ticket_code}/comments añade una entrada a la bitácora incident_comments (HTTP 201).
  * 2. CONDICIÓN CRÍTICA "Hecho cuando:": La fotografía original del ticket inicial (incidents.photo_path)
  *    PERMANECE INTACTA Y NUNCA SE SOBREESCRIBE al adjuntar una nueva foto en los comentarios.
  * 3. Admite subidas de evidencias fotográficas sucesivas multipart/form-data (RNF-05).
- * 4. Valida entradas (400 MISSING_COMMENT_TEXT, 422 COMMENT_TOO_SHORT, 404 INCIDENT_NOT_FOUND).
- * 5. Rechaza comentarios sobre tickets en estado terminal CLOSED o CANCELLED (422 INCIDENT_NOT_ACTIVE).
+ * 4. Valida entradas (400 MISSING_COMMENT_TEXT, 422 INVALID_COMMENT_LENGTH, 404 INCIDENT_NOT_FOUND).
+ * 5. Rechaza comentarios sobre expedientes sellados CLOSED o CANCELLED (403 CONVERSATION_SEALED).
  * 6. Garantiza el aislamiento de sedes (403 SITE_MISMATCH).
  * 7. Ejecuta llamadas HTTP reales contra el servidor local en 127.0.0.1:8000.
  */
@@ -130,14 +134,17 @@ $res1 = $router->dispatch($req1);
 $assert("1.1 Endpoint responde HTTP 201 Created", $res1->getStatusCode() === 201, "Status: {$res1->getStatusCode()}");
 $body1 = $res1->getDecodedBody();
 $assert("1.2 Envolvente contiene success => true", ($body1['success'] ?? false) === true);
+// T-COM-05: la respuesta devuelve el hilo consolidado (IncidentCommentThreadDto).
 $data1 = $body1['data'] ?? [];
+$threadComments1 = is_array($data1['comments'] ?? null) ? $data1['comments'] : [];
+$newComment1 = end($threadComments1) ?: [];
 
-$assert("1.3 ID de comentario generado autoincremental", (int)($data1['id'] ?? 0) > 0);
-$assert("1.4 incident_id coincide con el ticket", (int)($data1['incident_id'] ?? 0) === $createdIncident->getId());
-$assert("1.5 ticket_code coincide con INC-2026-T2301", ($data1['ticket_code'] ?? '') === 'INC-2026-T2301');
-$assert("1.6 author_name registrado correctamente", ($data1['author_name'] ?? '') === 'Marta Conserjería');
-$assert("1.7 comment_text registrado", str_contains((string)($data1['comment_text'] ?? ''), 'pitido continuo'));
-$assert("1.8 photo_path es null en comentario de texto", ($data1['photo_path'] ?? null) === null);
+$assert("1.3 ID de comentario generado autoincremental", (int)($newComment1['id'] ?? 0) > 0);
+$assert("1.4 La cabecera del hilo corresponde al ticket creado", (int)($data1['incident']['id'] ?? 0) === $createdIncident->getId());
+$assert("1.5 ticket_code coincide con INC-2026-T2301", ($data1['incident']['ticket_code'] ?? '') === 'INC-2026-T2301');
+$assert("1.6 author_name corporativo de Sede registrado (RF-02.1)", str_starts_with((string)($newComment1['author_name'] ?? ''), 'Responsable de Sede'));
+$assert("1.7 comment_text registrado", str_contains((string)($newComment1['comment_text'] ?? ''), 'pitido continuo'));
+$assert("1.8 photo_url es null en comentario de texto", array_key_exists('photo_url', $newComment1) && $newComment1['photo_url'] === null);
 
 // CONDICIÓN CRÍTICA "Hecho cuando:": Verificar que incidents.photo_path sigue intacta
 $checkStmt1 = $pdo->prepare("SELECT photo_path FROM incidents WHERE id = :id");
@@ -184,10 +191,12 @@ $res2 = $router->dispatch($req2);
 $assert("2.1 Anexar comentario con foto responde HTTP 201 Created", $res2->getStatusCode() === 201, "Status: {$res2->getStatusCode()}");
 $body2 = $res2->getDecodedBody();
 $data2 = $body2['data'] ?? [];
+$threadComments2 = is_array($data2['comments'] ?? null) ? $data2['comments'] : [];
+$newComment2 = end($threadComments2) ?: [];
 
-$commentPhotoPath = (string)($data2['photo_path'] ?? '');
-$assert("2.2 photo_path del comentario guardado en /uploads/...", str_starts_with($commentPhotoPath, '/uploads/') && str_ends_with($commentPhotoPath, '.jpg'));
-$assert("2.3 photo_path del comentario es DIFERENTE a la foto original del ticket", $commentPhotoPath !== $originalPhotoPath);
+$commentPhotoPath = (string)($newComment2['photo_url'] ?? '');
+$assert("2.2 photo_url del comentario guardado en /uploads/...", str_starts_with($commentPhotoPath, '/uploads/') && str_ends_with($commentPhotoPath, '.jpg'));
+$assert("2.3 photo_url del comentario es DIFERENTE a la foto original del ticket", $commentPhotoPath !== $originalPhotoPath);
 
 $absoluteDiskPath = dirname(__DIR__, 2) . '/public' . $commentPhotoPath;
 $assert("2.4 Archivo físico de la evidencia adicional existe en public/uploads/", file_exists($absoluteDiskPath));
@@ -224,10 +233,10 @@ $req3 = new Request(
 $res3 = $router->dispatch($req3);
 $assert("3.1 GET comentarios responde HTTP 200 OK", $res3->getStatusCode() === 200);
 $body3 = $res3->getDecodedBody();
-$commentsList = $body3['data'] ?? [];
-$assert("3.2 Se listan exactamente 2 comentarios añadidos", count($commentsList) === 2);
+$commentsList = is_array($body3['data']['comments'] ?? null) ? $body3['data']['comments'] : [];
+$assert("3.2 Se listan exactamente 2 comentarios añadidos en el hilo", count($commentsList) === 2);
 $assert("3.3 Primer comentario es el de texto", str_contains((string)($commentsList[0]['comment_text'] ?? ''), 'pitido continuo'));
-$assert("3.4 Segundo comentario contiene la fotografía adicional", !empty($commentsList[1]['photo_path']));
+$assert("3.4 Segundo comentario contiene la fotografía adicional", !empty($commentsList[1]['photo_url']));
 
 // =========================================================================
 // CASO 4: Validaciones de entrada (400 / 404 / 422)
@@ -244,10 +253,10 @@ $req4b = new Request('POST', '/api/incidents/INC-2026-T2301/comments', [], ['aut
 $res4b = $router->dispatch($req4b);
 $assert("4.2 Falta comment_text => HTTP 400 MISSING_COMMENT_TEXT", $res4b->getStatusCode() === 400 && ($res4b->getDecodedBody()['error']['code'] ?? '') === 'MISSING_COMMENT_TEXT');
 
-// 4.3 comment_text demasiado corto (< 3 caracteres) -> 422
+// 4.3 comment_text demasiado corto (< 5 caracteres) -> 422 (RF-03.1)
 $req4c = new Request('POST', '/api/incidents/INC-2026-T2301/comments', [], ['comment_text' => 'Ok'], ['Authorization' => "Bearer {$tokenLoc1}"]);
 $res4c = $router->dispatch($req4c);
-$assert("4.3 Comentario < 3 caracteres => HTTP 422 COMMENT_TOO_SHORT", $res4c->getStatusCode() === 422 && ($res4c->getDecodedBody()['error']['code'] ?? '') === 'COMMENT_TOO_SHORT');
+$assert("4.3 Comentario < 5 caracteres => HTTP 422 INVALID_COMMENT_LENGTH (RF-03.1)", $res4c->getStatusCode() === 422 && ($res4c->getDecodedBody()['error']['code'] ?? '') === 'INVALID_COMMENT_LENGTH');
 
 // 4.4 Archivo no válido -> 422 INVALID_FILE_TYPE con datos preservados
 $fakeFile = tempnam(sys_get_temp_dir(), 'fake_') . '.txt';
@@ -280,9 +289,9 @@ if (file_exists($fakeFile)) {
 }
 
 // =========================================================================
-// CASO 5: Bloqueo de comentarios en ticket cerrado o cancelado (422)
+// CASO 5: Bloqueo de comentarios en ticket cerrado o cancelado (403)
 // =========================================================================
-echo "\n--- Caso 5: Bloqueo en tickets cerrados / cancelados (422 INCIDENT_NOT_ACTIVE) ---\n";
+echo "\n--- Caso 5: Bloqueo en tickets cerrados / cancelados (403 CONVERSATION_SEALED) ---\n";
 
 $pdo->prepare("UPDATE incidents SET status = 'CLOSED', is_active_ticket = NULL WHERE id = :id")
     ->execute([':id' => $createdIncident->getId()]);
@@ -295,7 +304,7 @@ $req5 = new Request(
     headers: ['Authorization' => "Bearer {$tokenLoc1}"]
 );
 $res5 = $router->dispatch($req5);
-$assert("5.1 Ticket CLOSED no admite comentarios => HTTP 422 INCIDENT_NOT_ACTIVE", $res5->getStatusCode() === 422 && ($res5->getDecodedBody()['error']['code'] ?? '') === 'INCIDENT_NOT_ACTIVE');
+$assert("5.1 Ticket CLOSED sellado => HTTP 403 CONVERSATION_SEALED (RF-05.3)", $res5->getStatusCode() === 403 && ($res5->getDecodedBody()['error']['code'] ?? '') === 'CONVERSATION_SEALED');
 
 // =========================================================================
 // CASO 6: Segregación de sedes (403 Forbidden - SITE_MISMATCH)
@@ -356,7 +365,9 @@ if ($serverAvailable) {
     $assert("7.1 Llamada HTTP real responde HTTP 201 Created", $statusCode === 201, "Status: {$statusCode}, Body: {$responseStr}");
     $httpDecoded = json_decode((string)$responseStr, true);
     $assert("7.2 HTTP real devuelve success => true", ($httpDecoded['success'] ?? false) === true);
-    $assert("7.3 Comentario persistido con autor 'Operador Remoto'", ($httpDecoded['data']['author_name'] ?? '') === 'Operador Remoto');
+    $httpThreadComments = is_array($httpDecoded['data']['comments'] ?? null) ? $httpDecoded['data']['comments'] : [];
+$httpNewComment = end($httpThreadComments) ?: [];
+$assert("7.3 Comentario persistido en el hilo con autoría corporativa de Sede", str_contains((string)($httpNewComment['comment_text'] ?? ''), 'HTTP real') && str_starts_with((string)($httpNewComment['author_name'] ?? ''), 'Responsable de Sede'));
 
     // Comprobar una vez más la condición "Hecho cuando:" en BD tras la llamada HTTP real
     $checkStmtReal = $pdo->prepare("SELECT photo_path FROM incidents WHERE ticket_code = 'INC-2026-T2301'");
