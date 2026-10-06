@@ -579,6 +579,80 @@ class DemoMetricsSeeder
                 $auditCount++;
             }
 
+            // Escenario demo del indicador de reintervenciones por garantía (Art. V.6):
+            // INC-DEMO-1001 (Marc) sufrió una reapertura válida dentro de las 48 h de su
+            // resolución y fue resuelto de nuevo antes del cierre final. El expediente
+            // termina CLOSED; el histórico inmutable muestra la reincidencia para el
+            // desglose por técnico de Métricas (EARS 2.3.1). Idempotente por terna.
+            $reopenIncidentId = (int)$this->pdo->query(
+                "SELECT `id` FROM `incidents` WHERE `ticket_code` = 'INC-DEMO-1001'"
+            )->fetchColumn();
+            if ($reopenIncidentId > 0) {
+                $reopenCreatedAt = $ref->modify('-4 days')->setTime(15, 0, 0)->format('Y-m-d H:i:s'); // 40 min tras la resolución (14:20)
+                $reresolveAt = $ref->modify('-4 days')->setTime(15, 45, 0)->format('Y-m-d H:i:s');
+
+                // Evento de resolución original (el que reopen() encontrará como técnico
+                // resolutor para la atribución de la reincidencia).
+                $insertOriginalResolve = $this->pdo->prepare("
+                    INSERT INTO `incident_history` (
+                        `incident_id`, `user_id`, `from_status`, `to_status`, `action_note`, `created_at`
+                    ) SELECT :origres_incident_id, :origres_user_id, 'IN_PROGRESS', 'RESOLVED', :origres_note, :origres_created_at
+                      WHERE NOT EXISTS (
+                          SELECT 1 FROM `incident_history`
+                          WHERE `incident_id` = :origres_lookup_id
+                            AND `to_status` = 'RESOLVED'
+                            AND `created_at` = :origres_lookup_at
+                      )
+                ");
+                $insertOriginalResolve->execute([
+                    ':origres_incident_id' => $reopenIncidentId,
+                    ':origres_user_id' => ($marcId ?? $jordiId),
+                    ':origres_note' => 'Avería resuelta con éxito por el técnico de campo. Diagnóstico: Antena adhesiva 4G suelta dentro del chasis metálico. | Solución: Reposicionamiento exterior de la antena magnética.',
+                    ':origres_created_at' => $ref->modify('-4 days')->setTime(14, 20, 0)->format('Y-m-d H:i:s'),
+                    ':origres_lookup_id' => $reopenIncidentId,
+                    ':origres_lookup_at' => $ref->modify('-4 days')->setTime(14, 20, 0)->format('Y-m-d H:i:s'),
+                ]);
+
+                $insertReopenHistory = $this->pdo->prepare("
+                    INSERT INTO `incident_history` (
+                        `incident_id`, `user_id`, `from_status`, `to_status`, `action_note`, `created_at`
+                    ) SELECT :reopen_incident_id, NULL, 'RESOLVED', 'REOPENED', :reopen_note, :reopen_created_at
+                      WHERE NOT EXISTS (
+                          SELECT 1 FROM `incident_history`
+                          WHERE `incident_id` = :reopen_lookup_id
+                            AND `to_status` = 'REOPENED'
+                            AND `created_at` = :reopen_lookup_at
+                      )
+                ");
+                $insertReopenHistory->execute([
+                    ':reopen_incident_id' => $reopenIncidentId,
+                    ':reopen_note' => 'Reapertura solicitada por la sede (1ª reincidencia). Motivo: El datáfono vuelve a denegar cobros tras 30 minutos de uso continuo.',
+                    ':reopen_created_at' => $reopenCreatedAt,
+                    ':reopen_lookup_id' => $reopenIncidentId,
+                    ':reopen_lookup_at' => $reopenCreatedAt,
+                ]);
+
+                $insertReresolveHistory = $this->pdo->prepare("
+                    INSERT INTO `incident_history` (
+                        `incident_id`, `user_id`, `from_status`, `to_status`, `action_note`, `created_at`
+                    ) SELECT :reresolve_incident_id, :reresolve_user_id, 'REOPENED', 'RESOLVED', :reresolve_note, :reresolve_created_at
+                      WHERE NOT EXISTS (
+                          SELECT 1 FROM `incident_history`
+                          WHERE `incident_id` = :reresolve_lookup_id
+                            AND `to_status` = 'RESOLVED'
+                            AND `created_at` = :reresolve_lookup_at
+                      )
+                ");
+                $insertReresolveHistory->execute([
+                    ':reresolve_incident_id' => $reopenIncidentId,
+                    ':reresolve_user_id' => ($marcId ?? $jordiId),
+                    ':reresolve_note' => 'Reintervención por garantía: antena 4G reasentada con fijación antivibración y test de cobertura definitivo.',
+                    ':reresolve_created_at' => $reresolveAt,
+                    ':reresolve_lookup_id' => $reopenIncidentId,
+                    ':reresolve_lookup_at' => $reresolveAt,
+                ]);
+            }
+
             $this->pdo->commit();
 
             return [

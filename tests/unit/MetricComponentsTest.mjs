@@ -176,6 +176,7 @@ const mockBreakdown = {
       display_name: 'Jordi Técnico Ruta BCN',
       is_active: true,
       tickets_resolved: 42,
+      warranty_reopens: 1, // Reintervención por garantía 48h (Art. V.6)
       mttr_minutes: 195,
       mttr_formatted: '3h 15m',
       mttr_hours: 3.3
@@ -186,6 +187,7 @@ const mockBreakdown = {
       display_name: 'Carlos Antiguo (Inactivo)',
       is_active: false, // Inactivo
       tickets_resolved: 10,
+      warranty_reopens: 0, // Sin reintervenciones
       mttr_minutes: 210,
       mttr_formatted: '3h 30m',
       mttr_hours: 3.5
@@ -288,6 +290,18 @@ assert('2.10 Pestaña Categorías contiene 2 averías', filteredCategories.lengt
 
 const catTranslated = MetricBreakdownTable.methods.formatCategoryName('TEMPERATURE_COLD');
 assert('2.11 Traduce categoría TEMPERATURE_COLD al español con indicación sanitaria', catTranslated.includes('Refrigeración y Frío'));
+
+// 2.5 Indicador de Reintervenciones por Garantía (EARS 2.3.1, Art. V.6)
+const template = MetricBreakdownTable.template;
+assert('2.12 El template declara la columna Reinterv. 48h solo en la pestaña de técnicos', template.includes("activeTab === 'technician'") && template.includes('Reinterv. 48h'));
+assert('2.13 El template muestra warranty_reopens con chip de reincidencia', template.includes('warranty_reopens') && template.includes('🛡️'));
+assert('2.14 El indicador se documenta como reincidencia, no como carga ni MTTR', template.includes('no es carga pendiente ni afecta al MTTR'));
+
+const jordiRow = MetricBreakdownTable.computed.filteredItems.call({ ...tableContext, activeTab: 'technician', searchQuery: '' }).find(i => i.technician_id === 2);
+assert('2.15 La fila de técnicos con 1 reincidencia queda disponible para el chip informativo', jordiRow !== undefined && jordiRow.warranty_reopens === 1);
+
+const carlosRow = MetricBreakdownTable.computed.filteredItems.call({ ...tableContext, activeTab: 'technician', searchQuery: '' }).find(i => i.technician_id === 5);
+assert('2.16 Técnicos sin reaperturas reportan warranty_reopens = 0', carlosRow !== undefined && carlosRow.warranty_reopens === 0);
 
 console.log('\n======================================================================');
 console.log(` RESUMEN: ${assertions} aserciones superadas exitosamente (100% PASS).`);

@@ -421,6 +421,47 @@ if ($serverAvailable) {
     echo "  [SKIP] Servidor local no disponible en 127.0.0.1:8000 para Caso 8.\n";
 }
 
+// =========================================================================
+// CASO 9: Indicador de reintervenciones por garantía (EARS 2.3.1, Art. V.6)
+// =========================================================================
+echo "\n--- Caso 9: Reintervenciones por garantía en desglose por técnico ---\n";
+
+require_once __DIR__ . '/../../src/Infrastructure/Repository/PdoMetricsRepository.php';
+$metricsRepo = new \VendGuard\Infrastructure\Repository\PdoMetricsRepository($pdo);
+
+// INC-2026-T2401 (de los casos 1-3) registra dos reaperturas dentro de las 48 h;
+// ambas resoluciones las firmó $technician (Jordi). INC-2026-T2402 no tiene
+// reaperturas. El periodo del filtro cubre los eventos recientes.
+$metricsFilter = \VendGuard\Core\Domain\Model\MetricFilter::fromQueryParams(['period' => 'last_7_days']);
+$techBreakdown = $metricsRepo->getBreakdownByTechnician($metricsFilter);
+
+$rowJordi = null;
+foreach ($techBreakdown as $row) {
+    if ((int)$row['technician_id'] === (int)$technician->getId()) {
+        $rowJordi = $row;
+    }
+}
+$assert("9.1 El desglose por técnico incluye la fila del técnico con reaperturas", $rowJordi !== null);
+$assert("9.2 La fila expone warranty_reopens", $rowJordi !== null && array_key_exists('warranty_reopens', $rowJordi));
+
+// Esperado: 2 reaperturas de INC-2026-T2401 + 1 de INC-2026-T2402 si el Caso 8 (HTTP real)
+// pudo ejecutarse contra el servidor local.
+$expectedReopens = $serverAvailable ? 3 : 2;
+$assert("9.3 warranty_reopens = {$expectedReopens} para el técnico resolutor de las reaperturas en garantía", $rowJordi !== null && (int)$rowJordi['warranty_reopens'] === $expectedReopens, "Obtenido: " . var_export($rowJordi['warranty_reopens'] ?? null, true));
+
+$rowOther = null;
+foreach ($techBreakdown as $row) {
+    if ($rowJordi !== null && (int)$row['technician_id'] !== (int)$technician->getId()) {
+        $rowOther = $row;
+        break;
+    }
+}
+$assert("9.4 Otros técnicos sin reaperturas reportan warranty_reopens = 0", $rowOther !== null && (int)$rowOther['warranty_reopens'] === 0);
+
+// La atribución se deriva del RESOLVED previo aunque la reapertura venga con user_id NULL
+$reopenEvents = $incidentRepo->countReopenEvents((int)$dbInc1->getId());
+$assert("9.5 La avería INC-2026-T2401 conserva sus 2 eventos de reapertura en el historial", $reopenEvents === 2);
+
 // Resumen final
 echo "\n======================================================================\n";
 if ($failures === 0) {

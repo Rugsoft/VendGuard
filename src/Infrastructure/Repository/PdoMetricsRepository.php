@@ -299,6 +299,7 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
                     u.`name` AS technician_name,
                     u.`is_active`,
                     COUNT(i.`id`) AS tickets_resolved,
+                    COUNT(rh.`incident_id`) AS warranty_reopens,
                     ROUND(AVG(TIMESTAMPDIFF(MINUTE, i.`created_at`, i.`resolved_at`))) AS avg_minutes
                 FROM `users` u
                 LEFT JOIN `incidents` i ON i.`assigned_technician_id` = u.`id`
@@ -306,6 +307,27 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
                     AND i.`status` IN ('RESOLVED', 'CLOSED')
                     AND i.`resolved_at` >= :from_date
                     AND i.`resolved_at` <= :to_date
+                LEFT JOIN (
+                    -- Reintervenciones por garantía (Art. V.6): reaperturas dentro de las
+                    -- 48 h posteriores a una resolución, atribuidas al técnico que firmó la
+                    -- resolución efectiva. El evento REOPENED de incident_history lleva
+                    -- user_id = NULL (reopen() desasigna al técnico), de modo que la
+                    -- atribución se deriva del evento RESOLVED inmediatamente anterior de
+                    -- la misma avería; con created_at (marca del evento, no del expediente).
+                    SELECT h.`incident_id`, h.`created_at`,
+                           (SELECT h2.`user_id`
+                              FROM `incident_history` h2
+                             WHERE h2.`incident_id` = h.`incident_id`
+                               AND h2.`to_status` IN ('RESOLVED', 'RESUELTA')
+                               AND (h2.`created_at` < h.`created_at`
+                                    OR (h2.`created_at` = h.`created_at` AND h2.`id` < h.`id`))
+                             ORDER BY h2.`created_at` DESC, h2.`id` DESC
+                             LIMIT 1) AS resolver_technician_id
+                      FROM `incident_history` h
+                     WHERE h.`to_status` IN ('REOPENED', 'REABIERTA')
+                       AND h.`created_at` >= :reopens_from_date
+                       AND h.`created_at` <= :reopens_to_date
+                ) rh ON rh.`resolver_technician_id` = u.`id`
                 WHERE u.`role` = 'TECHNICIAN'
                 GROUP BY u.`id`, u.`name`, u.`is_active`
                 ORDER BY tickets_resolved DESC, u.`name` ASC";
@@ -315,6 +337,8 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
             $stmt->execute([
                 ':from_date' => $filter->getFrom()->format('Y-m-d H:i:s'),
                 ':to_date'   => $filter->getTo()->format('Y-m-d H:i:s'),
+                ':reopens_from_date' => $filter->getFrom()->format('Y-m-d H:i:s'),
+                ':reopens_to_date'   => $filter->getTo()->format('Y-m-d H:i:s'),
             ]);
 
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -333,6 +357,7 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
                     'is_active' => $isActive,
                     'display_name' => $displayName,
                     'tickets_resolved' => $count,
+                    'warranty_reopens' => (int)$row['warranty_reopens'],
                     'mttr_minutes' => $mttr->getMinutes(),
                     'mttr_formatted' => $mttr->getFormatted(),
                     'mttr_hours' => $mttr->getHours(),

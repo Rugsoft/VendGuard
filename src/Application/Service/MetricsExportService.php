@@ -51,6 +51,7 @@ class MetricsExportService
             'MTTR Minutos',
             'MTTR Formateado',
             'MTTR Horas',
+            'Reintervenciones 48h',
             'SLA Objetivo Horas',
             'Estado SLA'
         ];
@@ -68,6 +69,7 @@ class MetricsExportService
                     $loc['mttr_minutes'] !== null ? (string)$loc['mttr_minutes'] : 'N/A',
                     $loc['mttr_formatted'] ?? 'N/A',
                     $loc['mttr_hours'] !== null ? (string)$loc['mttr_hours'] : 'N/A',
+                    '0',
                     isset($loc['sla_target_hours']) ? (string)$loc['sla_target_hours'] : '24.0',
                     $loc['sla_status'] ?? 'N/A',
                 ], ',');
@@ -86,6 +88,7 @@ class MetricsExportService
                     $tech['mttr_minutes'] !== null ? (string)$tech['mttr_minutes'] : 'N/A',
                     $tech['mttr_formatted'] ?? 'N/A',
                     $tech['mttr_hours'] !== null ? (string)$tech['mttr_hours'] : 'N/A',
+                    (string)($tech['warranty_reopens'] ?? 0),
                     'N/A',
                     'N/A',
                 ], ',');
@@ -104,6 +107,7 @@ class MetricsExportService
                     $mType['mttr_minutes'] !== null ? (string)$mType['mttr_minutes'] : 'N/A',
                     $mType['mttr_formatted'] ?? 'N/A',
                     $mType['mttr_hours'] !== null ? (string)$mType['mttr_hours'] : 'N/A',
+                    '0',
                     isset($mType['sla_target_hours']) ? (string)$mType['sla_target_hours'] : 'N/A',
                     $mType['sla_status'] ?? 'N/A',
                 ], ',');
@@ -122,6 +126,7 @@ class MetricsExportService
                     $cat['mttr_minutes'] !== null ? (string)$cat['mttr_minutes'] : 'N/A',
                     $cat['mttr_formatted'] ?? 'N/A',
                     'N/A',
+                    '0',
                     'N/A',
                     'N/A',
                 ], ',');

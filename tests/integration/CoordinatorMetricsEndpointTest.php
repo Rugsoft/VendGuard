@@ -106,6 +106,8 @@ $bodyBreakdown = json_decode($resBreakdown->getBody(), true);
 $assert(isset($bodyBreakdown['success']) && $bodyBreakdown['success'] === true, "Breakdown devuelve JSON con success=true");
 $assert(isset($bodyBreakdown['data']['by_location']), "Breakdown contiene desglose by_location");
 $assert(isset($bodyBreakdown['data']['by_technician']), "Breakdown contiene desglose by_technician");
+$firstTech = $bodyBreakdown['data']['by_technician'][0] ?? [];
+$assert(isset($firstTech['warranty_reopens']) && is_int($firstTech['warranty_reopens']), "by_technician expone warranty_reopens como entero (indicador EARS 2.3.1)");
 $assert(isset($bodyBreakdown['data']['by_machine_type']), "Breakdown contiene desglose by_machine_type");
 $assert(isset($bodyBreakdown['data']['by_category']), "Breakdown contiene desglose by_category");
 

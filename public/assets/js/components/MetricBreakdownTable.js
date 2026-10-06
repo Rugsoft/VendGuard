@@ -192,6 +192,9 @@ export const MetricBreakdownTable = {
                 <span v-else>Tipología de Avería</span>
               </th>
               <th style="padding: 12px 16px; font-weight: 700; text-align: center;">Incidencias Resueltas</th>
+              <th v-if="activeTab === 'technician'" style="padding: 12px 16px; font-weight: 700; text-align: center;" title="Reintervenciones por garantía (Art. V.6): averías reabiertas dentro de las 48h posteriores a la resolución del técnico. Indicador de reincidencia: no es carga pendiente ni afecta al MTTR.">
+                Reinterv. 48h
+              </th>
               <th style="padding: 12px 16px; font-weight: 700;">MTTR Formateado</th>
               <th style="padding: 12px 16px; font-weight: 700;">MTTR (Horas)</th>
               <th v-if="activeTab !== 'category' && activeTab !== 'technician'" style="padding: 12px 16px; font-weight: 700;">Objetivo SLA</th>
@@ -203,7 +206,7 @@ export const MetricBreakdownTable = {
           <tbody>
             
             <tr v-if="filteredItems.length === 0">
-              <td :colspan="activeTab === 'category' || activeTab === 'technician' ? 4 : 6" style="padding: 32px; text-align: center; color: #6c7e9d;">
+              <td :colspan="activeTab === 'technician' ? 5 : (activeTab === 'category' ? 4 : 6)" style="padding: 32px; text-align: center; color: #6c7e9d;">
                 No se encontraron registros para el filtro seleccionado.
               </td>
             </tr>
@@ -266,6 +269,16 @@ export const MetricBreakdownTable = {
                 </td>
                 <td style="padding: 12px 16px; text-align: center; font-weight: 600;">
                   {{ item.tickets_resolved }}
+                </td>
+                <td style="padding: 12px 16px; text-align: center;">
+                  <span
+                    v-if="Number(item.warranty_reopens || 0) > 0"
+                    style="display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; background: #fef3c7; color: #92400e; border: 1px solid #fde68a;"
+                    title="Reintervenciones por garantía: averías reabiertas dentro de las 48h posteriores a la resolución. Indicador de reincidencia del fallo: no es carga pendiente ni afecta al MTTR."
+                  >
+                    🛡️ {{ item.warranty_reopens }}
+                  </span>
+                  <span v-else style="color: #6c7e9d;">0</span>
                 </td>
                 <td style="padding: 12px 16px; font-weight: 600; color: #2560ff;">
                   {{ item.mttr_formatted }}

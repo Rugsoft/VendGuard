@@ -147,6 +147,9 @@ Obtiene las tarjetas de indicadores principales de rendimiento para el rango tem
 
 ### 3.2 `GET /api/coordinator/metrics/breakdown` (Desglose Multidimensional)
 
+> [!NOTE]
+> **Semántica de `warranty_reopens` (solo en `by_technician`):** número de reintervenciones por garantía (Art. V.6) del técnico en el periodo consultado: averías reabiertas dentro de las 48 h posteriores a una resolución. La reapertura desasigna al técnico (`reopen()`), de modo que la atribución se deriva del evento `RESOLVED` inmediatamente anterior de esa avería en `incident_history` (el técnico que firmó la resolución efectiva, conforme a EARS 2.3); se contabiliza por la marca temporal del evento de reapertura. Es un indicador de reincidencia del fallo para auditoría de calidad: **no** es carga pendiente y no afecta al bloqueo de baja ni al MTTR, que conserva la primera resolución (EARS 1.3).
+
 Proporciona el desglose del MTTR y volumen por dimensiones analíticas combinables (`RF-02`).
 
 * **Acceso:** Protegido (`InternalAuthMiddleware(COORDINATOR)`).
@@ -193,6 +196,7 @@ Proporciona el desglose del MTTR y volumen por dimensiones analíticas combinabl
         "technician_name": "Jordi Técnico Ruta BCN",
         "is_active": true,
         "tickets_resolved": 42,
+        "warranty_reopens": 1,
         "mttr_minutes": 195,
         "mttr_formatted": "3h 15m",
         "mttr_hours": 3.3
@@ -287,6 +291,9 @@ Sede,SEDE-BCN-02,Torre Glòries - Planta 4 Oficinas,Sí,14,255,4h 15m,4.3,24.0,C
 Técnico,2,Jordi Técnico Ruta BCN,Sí,42,195,3h 15m,3.3,N/A,N/A
 Tipo Máquina,PERISHABLE_FOOD,Alimentos Perecederos (Sanitario),Sí,12,110,1h 50m,1.8,4.0,COMPLIANT
 Tipo Máquina,HOT_DRINKS,Bebidas Calientes,Sí,15,210,3h 30m,3.5,24.0,COMPLIANT
+
+> [!NOTE]
+> Desde la introducción del indicador de reintervenciones por garantía (Art. V.6), las filas de la dimensión **Técnico** incorporan una columna adicional `Reintervenciones 48h` al final, con el valor de `warranty_reopens` (`0` para el resto de dimensiones).
 ```
 
 ---
