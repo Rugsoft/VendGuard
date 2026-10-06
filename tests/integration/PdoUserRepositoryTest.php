@@ -236,14 +236,63 @@ $assignedIncId = (int)$pdo->lastInsertId();
 $assert("10.2 Detecta 1 incidencia activa asignada (countActiveAssignedIncidents)", $userRepo->countActiveAssignedIncidents($newUserId) === 1);
 $assert("10.2b Detecta 1 incidencia activa asignada (countPendingIncidents)", $userRepo->countPendingIncidents($newUserId) === 1);
 
+// Regresión (bug del directorio): una avería RESOLVED dentro de su ventana de garantía
+// de 48 h sigue siendo expediente activo de la máquina (is_active_ticket = 1), pero ya
+// no es carga de trabajo del técnico (Decisión QA 2: solo ASSIGNED/IN_PROGRESS/PENDING_PARTS).
+// Requiere máquina propia: uq_machine_active_ticket impide dos tickets activos por máquina.
+$resolvedMachineCode = 'VEND-TMP-USERTEST-10B';
+$pdo->prepare("DELETE FROM `machines` WHERE `code` = :c")->execute([':c' => $resolvedMachineCode]);
+$pdo->prepare("
+    INSERT INTO `machines` (`location_id`, `code`, `model`, `machine_type`, `floor_wing`, `is_active`)
+    VALUES (1, :c, 'Test Temp Model B', 'COMBO', 'Planta Test', 1)
+")->execute([':c' => $resolvedMachineCode]);
+$resolvedMachineId = (int)$pdo->lastInsertId();
+
+$resolvedTicketCode = 'INC-USER-TEST-02';
+TestDataCleaner::purgeIncidentByTicket($pdo, $resolvedTicketCode);
+
+$stmtResolved = $pdo->prepare("
+    INSERT INTO `incidents` (
+        `ticket_code`, `machine_id`, `location_id`, `category`, `description`, `urgency`, `status`, `assigned_technician_id`, `resolved_at`
+    ) VALUES (
+        :tc, :mid, :lid, 'OTHER', 'Test garantia 48h', 'LOW', 'RESOLVED', :tech_id, DATE_SUB(NOW(), INTERVAL 2 HOUR)
+    )
+");
+$stmtResolved->execute([
+    ':tc'      => $resolvedTicketCode,
+    ':mid'     => $resolvedMachineId,
+    ':lid'     => 1,
+    ':tech_id' => $newUserId,
+]);
+$resolvedIncId = (int)$pdo->lastInsertId();
+
+// Sanity: la avería RESOLVED en garantía sigue siendo expediente activo de la máquina.
+$stmtFlag = $pdo->prepare("SELECT `is_active_ticket` FROM `incidents` WHERE `id` = :id");
+$stmtFlag->execute([':id' => $resolvedIncId]);
+$activeFlag = (int)$stmtFlag->fetchColumn();
+$assert("10.3 La avería RESOLVED en garantía sigue siendo expediente activo (is_active_ticket = 1)", $activeFlag === 1);
+$assert("10.4 El conteo ignora la avería RESOLVED en garantía (sigue en 1, countActiveAssignedIncidents)", $userRepo->countActiveAssignedIncidents($newUserId) === 1);
+$assert("10.4b El conteo ignora la avería RESOLVED en garantía (countPendingIncidents)", $userRepo->countPendingIncidents($newUserId) === 1);
+
+// El listado del directorio (findAll) tampoco debe contarla como carga.
+$listedCount = null;
+foreach ($userRepo->findAll() as $row) {
+    if ((int)$row['id'] === $newUserId) {
+        $listedCount = (int)$row['active_assigned_incidents_count'];
+    }
+}
+$assert("10.5 findAll() reporta carga 1 en el directorio con la avería RESOLVED en garantía", $listedCount === 1);
+
 // Cerrar la incidencia
 $pdo->prepare("UPDATE `incidents` SET `status` = 'CLOSED', `closed_at` = CURRENT_TIMESTAMP WHERE `id` = :id")
     ->execute([':id' => $assignedIncId]);
-$assert("10.3 Detecta 0 incidencias activas tras CLOSED", $userRepo->countActiveAssignedIncidents($newUserId) === 0);
+$assert("10.6 Detecta 0 incidencias activas tras CLOSED (la RESOLVED tampoco cuenta)", $userRepo->countActiveAssignedIncidents($newUserId) === 0);
 
-// Limpieza de incidencia y máquina temporal
+// Limpieza de incidencias y máquinas temporales
 TestDataCleaner::purgeIncident($pdo, (int)$assignedIncId);
+TestDataCleaner::purgeIncident($pdo, (int)$resolvedIncId);
 $pdo->prepare("DELETE FROM `machines` WHERE `id` = :id")->execute([':id' => $tempMachineId]);
+$pdo->prepare("DELETE FROM `machines` WHERE `id` = :id")->execute([':id' => $resolvedMachineId]);
 
 // =====================================================================
 // CASO 11: Baja lógica y Reactivación (softDelete / restore)

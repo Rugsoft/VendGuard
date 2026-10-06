@@ -29,7 +29,7 @@ Todos los endpoints administrativos requieren autenticación de Coordinador (`In
 | `PATCH` | `/api/coordinator/machines/{id}/deactivate` | Coordinador | Baja lógica de máquina (bloqueada si hay tickets activos o en garantía) |
 | `PATCH` | `/api/coordinator/machines/{id}/reactivate` | Coordinador | Reactivación de máquina (con reubicación obligatoria si su sede original está inactiva) |
 | **Personal Interno (Users)** | | | |
-| `GET` | `/api/coordinator/users` | Coordinador | Listado de técnicos y coordinadores (`role`, `status`, `search`) con carga de averías activas |
+| `GET` | `/api/coordinator/users` | Coordinador | Listado de técnicos y coordinadores (`role`, `status`, `search`) con carga de averías pendientes de trabajo (`ASSIGNED`/`IN_PROGRESS`/`PENDING_PARTS`) |
 | `POST` | `/api/coordinator/users` | Coordinador | Alta de usuario con credenciales seguras |
 | `PATCH` | `/api/coordinator/users/{id}` | Coordinador | Edición de nombre y teléfono corporativo |
 | `PATCH` | `/api/coordinator/users/{id}/reset-password` | Coordinador | Reseteo seguro de contraseña (mín. 8 caracteres) |
@@ -492,7 +492,10 @@ Reactiva una máquina previamente dada de baja. Si su sede original se encuentra
 ### 3.3 Gestión de Personal Interno (Users: Técnicos y Coordinadores)
 
 #### 3.3.1 `GET /api/coordinator/users`
-Lista el personal del sistema, permitiendo filtrar por rol y estado operativo, e informando de la carga de averías activas.
+Lista el personal del sistema, permitiendo filtrar por rol y estado operativo, e informando de la carga de averías pendientes de trabajo (Decisión QA 2, `specs/04-admin-crud/plan.md` §3.2).
+
+> [!NOTE]
+> **Semántica de `active_assigned_incidents_count`:** cuenta exclusivamente las averías en `ASSIGNED`, `IN_PROGRESS` o `PENDING_PARTS` del técnico. Una avería `RESOLVED` en su ventana de garantía de 48 h sigue siendo un expediente activo de la máquina (`is_active_ticket = 1`, cierre automático pendiente), pero el trabajo del técnico ya está hecho y no vuelve a intervenir: si el consumidor reabre por garantía, `reopen()` desasigna al técnico y la avería regresa a triaje como `REOPENED`. Contarla como carga falsificaría el directorio y bloquearía la baja de un técnico sin trabajo pendiente. El mismo criterio gobierna el bloqueo de baja (§3.3.6).
 
 * **Parámetros Query:**
   * `role` *(opcional, default: `all`)*: `TECHNICIAN`, `COORDINATOR`, `all`.

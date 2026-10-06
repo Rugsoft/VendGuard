@@ -335,6 +335,17 @@ class PdoUserRepository implements UserRepositoryInterface
     /**
      * Recupera el listado del personal con filtros por rol, estado y recuento de averías asignadas (RF-03, EARS 3.2).
      *
+     * La carga reporta las averías que aún deben trabajo al técnico: `ASSIGNED`,
+     * `IN_PROGRESS` o `PENDING_PARTS` (Decisión QA 2, specs/04-admin-crud/plan.md §3.2).
+     * Una avería `RESOLVED` en su ventana de garantía de 48 h sigue activa como
+     * expediente de la máquina (`is_active_ticket = 1`, pendiente de cierre automático),
+     * pero el trabajo del técnico ya está hecho: si el consumidor reabre por garantía,
+     * `PdoIncidentRepository::reopen()` desasigna al técnico y la avería regresa al
+     * triaje como `REOPENED` (sin técnico), de modo que ninguna avería `RESOLVED` ni
+     * `REOPENED` puede deber trabajo a quien figura como técnico asignado.
+     * Contarlas como carga falsificaría el directorio y bloquearía la baja de un
+     * técnico que ya no tiene nada pendiente.
+     *
      * @param array<string, mixed> $filters
      * @return array<array<string, mixed>>
      */
@@ -357,7 +368,7 @@ class PdoUserRepository implements UserRepositoryInterface
                 SELECT `assigned_technician_id`, COUNT(*) as `active_count`
                 FROM `incidents`
                 WHERE `deleted_at` IS NULL
-                  AND `is_active_ticket` = 1
+                  AND `status` IN ('ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS')
                 GROUP BY `assigned_technician_id`
             ) inc ON inc.`assigned_technician_id` = u.`id`
             WHERE 1=1
@@ -446,12 +457,19 @@ class PdoUserRepository implements UserRepositoryInterface
      */
     public function countActiveAssignedIncidents(int $userId): int
     {
+        // Pendiente de trabajo del técnico (Decisión QA 2, specs/04-admin-crud/plan.md §3.2):
+        // ASSIGNED / IN_PROGRESS / PENDING_PARTS. Una avería RESOLVED en su ventana de
+        // garantía de 48 h sigue siendo un expediente activo de la máquina
+        // (is_active_ticket = 1, cierre automático pendiente), pero el técnico ya resolvió
+        // su trabajo y no vuelve a intervenir: reopen() desasigna al técnico si el
+        // consumidor reabre por garantía. Contarla bloquearía la baja de un técnico que
+        // ya no tiene nada pendiente.
         $sql = "
             SELECT COUNT(*) 
             FROM `incidents`
             WHERE `assigned_technician_id` = :user_id
               AND `deleted_at` IS NULL
-              AND `is_active_ticket` = 1
+              AND `status` IN ('ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS')
         ";
 
         $stmt = $this->pdo->prepare($sql);
