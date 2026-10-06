@@ -56,6 +56,18 @@ interface IncidentRepositoryInterface
     public function findAllByLocation(int $locationId, bool $activeOnly = false): array;
 
     /**
+     * Recupera el historial completo de averías de una máquina concreta, de más
+     * reciente a más antigua, excluyendo los estados indicados (por defecto solo
+     * los descartes). Consulta de solo lectura para el historial de máquina del
+     * técnico (RF-07 / EARS H.1, specs/technical/technician_machine_history_contracts.md).
+     *
+     * @param int $machineId Identificador de la máquina.
+     * @param list<string> $excludeStatuses Estados a excluir (por defecto ['CANCELLED']).
+     * @return list<Incident>
+     */
+    public function findAllByMachineId(int $machineId, array $excludeStatuses = ['CANCELLED']): array;
+
+    /**
      * Recupera el listado global de incidencias con opciones de filtrado.
      *
      * @param array<string, mixed> $filters Filtros (status, urgency, location_id, assigned_technician_id, active_only).

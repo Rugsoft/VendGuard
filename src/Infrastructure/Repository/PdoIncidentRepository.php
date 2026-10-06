@@ -401,6 +401,53 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
     }
 
     /**
+     * Recupera el historial completo de averías de una máquina (modal de historial
+     * del técnico, EARS H.1 de specs/technical/technician_machine_history_contracts.md):
+     * toda avería no borrada lógicamente salvo los estados excluidos, ordenada de
+     * más reciente a más antigua.
+     *
+     * @param int $machineId Identificador de la máquina.
+     * @param list<string> $excludeStatuses Estados a excluir (por defecto ['CANCELLED']).
+     * @return list<Incident>
+     */
+    public function findAllByMachineId(int $machineId, array $excludeStatuses = ['CANCELLED']): array
+    {
+        $sql = "
+            SELECT 
+                i.*,
+                m.code AS machine_code,
+                m.model AS machine_model,
+                m.machine_type AS machine_type,
+                l.name AS location_name,
+                l.site_code AS location_site_code,
+                u.name AS technician_name
+            FROM `incidents` i
+            LEFT JOIN `machines` m ON i.machine_id = m.id
+            LEFT JOIN `locations` l ON i.location_id = l.id
+            LEFT JOIN `users` u ON i.assigned_technician_id = u.id
+            WHERE i.machine_id = :machine_id
+              AND i.deleted_at IS NULL
+        ";
+
+        foreach ($excludeStatuses as $idx => $status) {
+            $key = ":excl_status_{$idx}";
+            $sql .= " AND i.status <> {$key}";
+        }
+
+        $sql .= " ORDER BY i.created_at DESC, i.id DESC";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':machine_id', $machineId, PDO::PARAM_INT);
+        foreach ($excludeStatuses as $idx => $status) {
+            $stmt->bindValue(":excl_status_{$idx}", (string)$status, PDO::PARAM_STR);
+        }
+        $stmt->execute();
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return array_map(fn(array $row) => Incident::fromDatabaseRow($row), $rows);
+    }
+
+    /**
      * Listado global con filtros combinados (Coordinador).
      *
      * @param array<string, mixed> $filters

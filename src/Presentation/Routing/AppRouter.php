@@ -176,6 +176,8 @@ class AppRouter
         );
         $router->get('/api/technician/route/map', [TechnicianRouteMapController::class, 'getRouteMap'], [$technicianAuth]);
         $router->get('/api/technician/my-route', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getMyRoute'], [$technicianAuth]);
+        // Historial de averías de una máquina de la ruta (solo lectura, Art. V.4).
+        $router->get('/api/technician/machines/{id}/history', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getMachineHistory'], [$technicianAuth]);
         $router->get('/api/technician/my-metrics', [\VendGuard\Presentation\Controller\TechnicianMetricsController::class, 'getMyMetrics'], [$technicianAuth]);
         $router->patch('/api/technician/incidents/{id}/start', [\VendGuard\Presentation\Controller\TechnicianController::class, 'startIntervention'], [$technicianAuth]);
         $router->patch('/api/technician/incidents/{id}/pause', [\VendGuard\Presentation\Controller\TechnicianController::class, 'pauseIntervention'], [$technicianAuth]);

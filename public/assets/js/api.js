@@ -734,6 +734,16 @@ export class ApiClient {
     },
 
     /**
+     * Retrieves the read-only incident history of a machine the technician is
+     * currently working on (RF-07 / EARS H.1-H.5, specs/technical/technician_machine_history_contracts.md).
+     * @param {number|string} machineId
+     * @returns {Promise<Object>}
+     */
+    getMachineHistory: (machineId) => {
+      return this.get(`/technician/machines/${encodeURIComponent(machineId)}/history`);
+    },
+
+    /**
      * Retrieves privacy-safe refund claims for a route incident (T-REF-16, Art. V.4).
      * @param {number|string} incidentId
      * @returns {Promise<Object>}

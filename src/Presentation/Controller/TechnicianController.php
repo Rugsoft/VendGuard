@@ -151,6 +151,80 @@ class TechnicianController
     }
 
     /**
+     * GET /api/technician/machines/{id}/history
+     * 
+     * Historial de averías de una máquina concreta para el técnico de ruta
+     * (RF-07 / EARS H.1-H.5 de specs/technical/technician_machine_history_contracts.md).
+     * Consulta de solo lectura, sin datos privados (Art. V.4), permitida únicamente
+     * cuando el técnico autenticado tiene una avería de esa máquina en estados
+     * activos de ruta (EARS H.3).
+     */
+    public function getMachineHistory(Request $request): Response
+    {
+        // 1. Identidad del técnico autenticado (EARS H.5: middleware TECHNICIAN).
+        $technicianId = $request->getAttribute('user_id');
+        if ($technicianId === null || !is_numeric($technicianId)) {
+            return Response::error('UNAUTHORIZED', 'No se pudo identificar al técnico autenticado.', 401);
+        }
+
+        // 2. ID de máquina de la ruta.
+        $rawMachineId = $request->getRouteParam('id');
+        if ($rawMachineId === null || !ctype_digit((string)$rawMachineId)) {
+            return Response::error('INVALID_MACHINE_ID', 'El ID de máquina de la ruta no es válido.', 400);
+        }
+        $machineId = (int)$rawMachineId;
+
+        // 3. La máquina debe existir (404 si no, EARS H.4).
+        $machine = $this->machineRepo->findById($machineId, withIncident: false);
+        if ($machine === null) {
+            return Response::error('MACHINE_NOT_FOUND', 'La máquina solicitada no existe.', 404);
+        }
+
+        // 4. Autorización: la máquina debe estar en la ruta activa del técnico
+        //    (al menos una avería suya en estados de ruta, EARS H.3).
+        $activeIncident = $this->incidentRepo->findActiveByMachineId($machineId);
+        if (
+            $activeIncident === null
+            || $activeIncident->getAssignedTechnicianId() !== (int)$technicianId
+        ) {
+            return Response::error(
+                'NOT_ASSIGNED_TO_TECHNICIAN',
+                'Solo puedes consultar el historial de máquinas con una avería activa asignada a tu ruta.',
+                403
+            );
+        }
+
+        // 5. Historial completo de la máquina, excluyendo descartes (EARS H.1)
+        //    con recuento de reaperturas por expediente (EARS H.2).
+        $history = $this->incidentRepo->findAllByMachineId($machineId);
+        $historyPayload = [];
+        foreach ($history as $incident) {
+            $historyPayload[] = [
+                'id'              => $incident->getId(),
+                'ticket_code'     => $incident->getTicketCode(),
+                'status'          => $incident->getStatus()->value,
+                'urgency'         => $incident->getUrgency()->value,
+                'category'        => $incident->getCategory()->value,
+                'description'     => $incident->getDescription(),
+                'technician_name' => $incident->getTechnicianName(),
+                'created_at'      => $incident->getCreatedAt(),
+                'resolved_at'     => $incident->getResolvedAt(),
+                'closed_at'       => $incident->getClosedAt(),
+                'reopen_count'    => $this->incidentRepo->countReopenEvents((int)$incident->getId()),
+            ];
+        }
+
+        return Response::json([
+            'machine' => [
+                'id'    => $machine->getId(),
+                'code'  => $machine->getCode(),
+                'model' => $machine->getModel(),
+            ],
+            'history' => $historyPayload,
+        ], 200);
+    }
+
+    /**
      * PATCH /api/technician/incidents/{id}/start
      * 
      * Inicia o reanuda la intervención técnica in situ frente a la máquina (RF-07 / EARS 7.1, 7.3).

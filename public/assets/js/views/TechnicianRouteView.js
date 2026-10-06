@@ -34,6 +34,7 @@ import { TechnicianSparePartsPauseModal } from '../components/TechnicianSparePar
 import { TechnicianResolutionPartsBlock } from '../components/TechnicianResolutionPartsBlock.js';
 import { TechnicianResolutionRefundBlock } from '../components/TechnicianResolutionRefundBlock.js';
 import { TechnicianRouteMapModal } from '../components/TechnicianRouteMapModal.js';
+import { TechnicianMachineHistoryModal } from '../components/TechnicianMachineHistoryModal.js';
 
 export const TechnicianRouteView = {
   name: 'TechnicianRouteView',
@@ -47,7 +48,8 @@ export const TechnicianRouteView = {
     TechnicianSparePartsPauseModal,
     TechnicianResolutionPartsBlock,
     TechnicianResolutionRefundBlock,
-    TechnicianRouteMapModal
+    TechnicianRouteMapModal,
+    TechnicianMachineHistoryModal
   },
   data() {
     return {
@@ -92,7 +94,11 @@ export const TechnicianRouteView = {
       resolveError: '',
 
       // Interactive route map (RF-MAP-07, RF-MAP-08)
-      showRouteMapModal: false
+      showRouteMapModal: false,
+
+      // Machine incident history modal (RF-07 / EARS H.1-H.6, specs/technical/technician_machine_history_contracts.md)
+      showMachineHistoryModal: false,
+      historyMachine: null
     };
   },
   computed: {
@@ -333,6 +339,21 @@ export const TechnicianRouteView = {
       } finally {
         this.actionInProgressId = null;
       }
+    },
+
+    /**
+     * Opens the read-only machine incident history modal (RF-07 / EARS H.1).
+     * @param {Object} incident Route incident carrying the machine payload.
+     */
+    openMachineHistoryModal(incident) {
+      if (!incident?.machine?.id) return;
+      this.historyMachine = incident.machine;
+      this.showMachineHistoryModal = true;
+    },
+
+    closeMachineHistoryModal() {
+      this.showMachineHistoryModal = false;
+      this.historyMachine = null;
     },
 
     /**
@@ -944,6 +965,19 @@ export const TechnicianRouteView = {
                   🧭 Navegar con GPS
                 </button>
               </div>
+
+              <!-- Read-only incident history of this machine (RF-07 / EARS H.1, H.6) -->
+              <div v-if="incident.machine?.id" style="margin-top: 6px;">
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-secondary"
+                  style="display: inline-flex; align-items: center; gap: 6px; height: 30px; font-size: 12px; padding: 0 10px;"
+                  data-testid="btn-machine-history"
+                  @click="openMachineHistoryModal(incident)"
+                >
+                  🕘 Historial de la máquina
+                </button>
+              </div>
             </div>
 
             <!-- Description Box -->
@@ -1032,6 +1066,15 @@ export const TechnicianRouteView = {
       <!-- MODAL 0: INTERACTIVE ROUTE MAP (RF-MAP-06, RF-MAP-07, RF-MAP-08) -->
       <!-- =================================================================== -->
       <TechnicianRouteMapModal v-model="showRouteMapModal" />
+
+      <!-- =================================================================== -->
+      <!-- MODAL 0-bis: MACHINE INCIDENT HISTORY (read-only, EARS H.1-H.6) -->
+      <!-- =================================================================== -->
+      <TechnicianMachineHistoryModal
+        v-model="showMachineHistoryModal"
+        :machine="historyMachine"
+        @close="closeMachineHistoryModal"
+      />
 
       <!-- =================================================================== -->
       <!-- MODAL 1: PAUSE BY REPLACEMENT PART (RF-REP-03, RF-REP-04 / T-SPARE-16, T-SPARE-17) -->
