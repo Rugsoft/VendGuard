@@ -532,6 +532,7 @@ final class CoordIncidentRepo implements IncidentRepositoryInterface
     {
         return null;
     }
+    public function findAllByMachineId(int $machineId, array $excludeStatuses = ['CANCELLED']): array { return []; }
 
     public function findAllByLocation(int $locationId, bool $activeOnly = false): array
     {

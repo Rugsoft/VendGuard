@@ -144,6 +144,7 @@ class MockIncidentRepository implements IncidentRepositoryInterface
         }
         return null;
     }
+    public function findAllByMachineId(int $machineId, array $excludeStatuses = ['CANCELLED']): array { return []; }
 
     public function create(Incident $incident, ?int $userId = null, ?string $initialNote = null): Incident
     {

@@ -339,6 +339,49 @@ assert('7.6 Motivated rejection posts the mandatory written reason',
     && lastFetchCall.options.body === JSON.stringify({ rejection_reason: 'Inspección sin monedas atascadas y máquina operando con normalidad.' })
     && rejectedRefund?.status === 'REJECTED');
 
+// ---------------------------------------------------------------------
+// TEST GROUP 8: Technician Machine History Endpoint Client (EARS H.1-H.5,
+// specs/technical/technician_machine_history_contracts.md)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 8: Technician Machine History Client ---');
+
+// 8.1: Successful retrieval unwraps the envelope
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({ success: true, data: {
+    machine: { id: 12, code: 'VM-012', model: 'Necta Koro' },
+    history: [ { id: 3401, ticket_code: 'INC-2026-0341', status: 'CLOSED', reopen_count: 1 } ]
+  } })
+};
+
+const machineHistory = await api.technician.getMachineHistory(12);
+assert('8.1 getMachineHistory dispatches GET to /technician/machines/{id}/history',
+  lastFetchCall.url === '/api/technician/machines/12/history' && lastFetchCall.options.method === 'GET');
+assert('8.2 getMachineHistory unwraps envelope with machine block and history list',
+  machineHistory?.machine?.id === 12 && Array.isArray(machineHistory?.history)
+    && machineHistory.history[0]?.reopen_count === 1);
+
+// 8.3: 403 NOT_ASSIGNED_TO_TECHNICIAN becomes a structured ApiError (EARS H.3)
+mockFetchResponse = {
+  ok: false,
+  status: 403,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({ success: false, error: { code: 'NOT_ASSIGNED_TO_TECHNICIAN', message: 'Solo puedes consultar el historial de máquinas con una avería activa asignada a tu ruta.' } })
+};
+
+let historyForbiddenError = null;
+try {
+  await api.technician.getMachineHistory(99);
+} catch (err) {
+  historyForbiddenError = err;
+}
+assert('8.3 403 NOT_ASSIGNED_TO_TECHNICIAN surfaces as structured ApiError',
+  historyForbiddenError instanceof ApiError
+    && historyForbiddenError.status === 403
+    && historyForbiddenError.code === 'NOT_ASSIGNED_TO_TECHNICIAN');
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);

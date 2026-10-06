@@ -316,6 +316,7 @@ final class CaptureIncidentRepo implements IncidentRepositoryInterface
     {
         return $this->findActiveByMachineId($machineId);
     }
+    public function findAllByMachineId(int $machineId, array $excludeStatuses = ['CANCELLED']): array { return []; }
 
     public function findAllByLocation(int $locationId, bool $activeOnly = false): array
     {

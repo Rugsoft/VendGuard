@@ -61,6 +61,7 @@ final class RouteMapIncidentRepositoryStub implements IncidentRepositoryInterfac
     public function findByTicketCode(string $ticketCode): ?Incident { return null; }
     public function findActiveByMachineId(int $machineId): ?Incident { return null; }
     public function findActiveOrResolvedByMachineId(int $machineId): ?Incident { return null; }
+    public function findAllByMachineId(int $machineId, array $excludeStatuses = ['CANCELLED']): array { return []; }
     public function findAllByLocation(int $locationId, bool $activeOnly = false): array { return []; }
     public function findAll(array $filters = []): array { return []; }
     public function findAssignedToTechnician(int $technicianId, array $statuses = []): array { return $this->incidents; }

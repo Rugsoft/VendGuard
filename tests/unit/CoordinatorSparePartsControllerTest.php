@@ -312,6 +312,7 @@ function createControllerEnvironment(): array {
         public function findByTicketCode(string $c): ?\VendGuard\Core\Domain\Model\Incident { return null; }
         public function findActiveByMachineId(int $m): ?\VendGuard\Core\Domain\Model\Incident { return null; }
         public function findActiveOrResolvedByMachineId(int $m): ?\VendGuard\Core\Domain\Model\Incident { return null; }
+        public function findAllByMachineId(int $machineId, array $excludeStatuses = ['CANCELLED']): array { return []; }
         public function findAllByLocation(int $l, bool $a = false): array { return []; }
         public function findAll(array $f = []): array { return []; }
         public function findAssignedToTechnician(int $t, array $s = []): array { return []; }

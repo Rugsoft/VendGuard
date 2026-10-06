@@ -320,6 +320,7 @@ class DetailIncidentRepoDouble implements IncidentRepositoryInterface
     {
         return null;
     }
+    public function findAllByMachineId(int $machineId, array $excludeStatuses = ['CANCELLED']): array { return []; }
 
     /** @return array<Incident> */
     public function findAllByLocation(int $locationId, bool $activeOnly = false): array

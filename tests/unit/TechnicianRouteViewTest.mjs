@@ -602,6 +602,43 @@ assert('7.12 Template guards the GPS button when latitude is missing',
   TechnicianRouteView.template.includes("incident.location?.latitude !== null && incident.location?.latitude !== undefined"));
 
 // ---------------------------------------------------------------------
+// 8. MACHINE INCIDENT HISTORY ACCESS (RF-07 / EARS H.1-H.6,
+//    specs/technical/technician_machine_history_contracts.md)
+// ---------------------------------------------------------------------
+console.log('\n--- Grupo 8: Acceso al historial de la máquina (EARS H.1, H.6) ---');
+
+assert('8.1 Cada avería pendiente ofrece el botón "Historial de la máquina"',
+  TechnicianRouteView.template.includes('btn-machine-history')
+    && TechnicianRouteView.template.includes('Historial de la máquina'));
+
+assert('8.2 El botón se muestra en cada tarjeta de avería y se guarda si la máquina tiene id',
+  TechnicianRouteView.template.includes('v-if="incident.machine?.id"'));
+
+const historyViewInstance = { historyMachine: null, showMachineHistoryModal: false };
+TechnicianRouteView.methods.openMachineHistoryModal.call(historyViewInstance, { machine: { id: 12, code: 'VM-012' } });
+assert('8.3 openMachineHistoryModal abre el modal con la máquina de la avería',
+  historyViewInstance.showMachineHistoryModal === true && historyViewInstance.historyMachine?.id === 12);
+
+const historyMachineBefore = historyViewInstance.historyMachine;
+TechnicianRouteView.methods.openMachineHistoryModal.call(historyViewInstance, { machine: null });
+assert('8.4 Ignora averías sin máquina y no rompe el estado previo (EARS H.6)',
+  historyViewInstance.showMachineHistoryModal === true && historyViewInstance.historyMachine === historyMachineBefore);
+
+TechnicianRouteView.methods.closeMachineHistoryModal.call(historyViewInstance);
+assert('8.5 closeMachineHistoryModal cierra y resetea el estado',
+  historyViewInstance.showMachineHistoryModal === false && historyViewInstance.historyMachine === null);
+
+assert('8.6 El modal de historial está registrado como componente de la vista',
+  typeof TechnicianRouteView.components?.TechnicianMachineHistoryModal === 'object');
+
+assert('8.7 El modal se renderiza una única vez, fuera del bucle de tarjetas (EARS H.6)',
+  (TechnicianRouteView.template.match(/<TechnicianMachineHistoryModal/g) || []).length === 1);
+
+const viewData = TechnicianRouteView.data();
+assert('8.8 Estado del modal declarado en data() con valores iniciales cerrados',
+  viewData.showMachineHistoryModal === false && viewData.historyMachine === null);
+
+// ---------------------------------------------------------------------
 // SUMMARY
 // ---------------------------------------------------------------------
 console.log('\n======================================================================');
