@@ -15,7 +15,7 @@
 
 ## Fase 1: Backend DTOs, Extensión de Repositorio y Servicio de Aplicación
 
-- [ ] **T-COM-01: Implementar DTOs inmutables `IncidentCommentItemDto.php` e `IncidentCommentThreadDto.php`**
+- [x] **T-COM-01: Implementar DTOs inmutables `IncidentCommentItemDto.php` e `IncidentCommentThreadDto.php`**
   * **Requisitos:** RF-01.2, RF-01.3, RF-02.1, RF-02.2, RF-02.3, RNF-01
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existen en `src/Application/DTO/IncidentCommentItemDto.php` y `src/Application/DTO/IncidentCommentThreadDto.php` las clases `final readonly` con tipado estricto PHP 8.2+ (`declare(strict_types=1);`), inmutabilidad y métodos `toArray()` y `jsonSerialize()` que modelan la cabecera contextual del expediente, la paginación por cursor (`total_comments`, `loaded_count`, `has_more_before`, `oldest_id`, `latest_id`) y la lista de mensajes proyectados con soporte para enmascaramiento y exclusión de campos de confidencialidad interna en perfiles de sede.
