@@ -638,6 +638,390 @@ class SeedRunner
     }
 
     /**
+     * Carga programática de las respuestas del checklist normativo de las inspecciones
+     * preventivas ya completadas (RF-PREV-03, RF-PD-05).
+     *
+     * Implementa el mismo guardado idempotente por pareja (orden, código de ítem) que
+     * `PdoPreventiveItemRepository::saveOrderItems()` —actualiza la respuesta existente o
+     * inserta la nueva, sin borrar nunca físicamente (Art. III)— pero con SQL propio: esta
+     * capa se ejecuta en arranques mínimos (por ejemplo el contenedor de despliegue) donde
+     * no hay autoloader cargado, así que no puede depender de otras clases del proyecto.
+     *
+     * Sin estas respuestas, la ficha de detalle de la orden mostraría el bloque de
+     * checklist vacío y no habría nada que auditar desde Coordinación.
+     *
+     * @return int Número de órdenes cuyo checklist quedó sembrado.
+     */
+    public function seedPreventiveChecklistItems(): int
+    {
+        $selectOrder = $this->pdo->prepare("
+            SELECT `id`
+            FROM `preventive_orders`
+            WHERE `order_code` = :order_code
+            LIMIT 1
+        ");
+        $selectItem = $this->pdo->prepare("
+            SELECT `id`
+            FROM `preventive_order_items`
+            WHERE `preventive_order_id` = :order_id
+              AND `item_code` = :item_code
+            LIMIT 1
+        ");
+        $updateItem = $this->pdo->prepare("
+            UPDATE `preventive_order_items`
+            SET
+                `item_description` = :item_description,
+                `is_critical` = :is_critical,
+                `status` = :status,
+                `observations` = :observations
+            WHERE `id` = :id
+        ");
+        $insertItem = $this->pdo->prepare("
+            INSERT INTO `preventive_order_items` (
+                `preventive_order_id`,
+                `item_code`,
+                `item_description`,
+                `is_critical`,
+                `status`,
+                `observations`
+            ) VALUES (
+                :order_id,
+                :item_code,
+                :item_description,
+                :is_critical,
+                :status,
+                :observations
+            )
+        ");
+
+        $seededOrders = 0;
+
+        foreach ($this->preventiveChecklistBlueprints() as $orderCode => $blueprint) {
+            $selectOrder->execute([':order_code' => $orderCode]);
+            $orderId = $selectOrder->fetchColumn();
+            $selectOrder->closeCursor();
+
+            if ($orderId === false || $orderId === null) {
+                continue;
+            }
+
+            foreach ($blueprint as $item) {
+                // Cada sentencia recibe exactamente sus marcadores: pasar parámetros de más
+                // (o de menos) es un error de vinculación en PDO, no una precaución inofensiva.
+                $itemColumns = [
+                    ':item_description' => $item['item_description'],
+                    ':is_critical' => $item['is_critical'] ? 1 : 0,
+                    ':status' => $item['status'],
+                    ':observations' => $item['observations'],
+                ];
+
+                $selectItem->execute([':order_id' => (int)$orderId, ':item_code' => $item['item_code']]);
+                $existingId = $selectItem->fetchColumn();
+                $selectItem->closeCursor();
+
+                if ($existingId !== false && $existingId !== null) {
+                    $updateItem->execute($itemColumns + [':id' => (int)$existingId]);
+                    continue;
+                }
+
+                $insertItem->execute(
+                    $itemColumns + [':order_id' => (int)$orderId, ':item_code' => $item['item_code']]
+                );
+            }
+
+            $seededOrders++;
+        }
+
+        return $seededOrders;
+    }
+
+    /**
+     * Siembra la trazabilidad de auditoría de las órdenes preventivas demo (RF-PD-09, Art. III).
+     *
+     * Cada acción del ciclo preventivo deja su evento append-only bajo la entidad de la
+     * máquina auditada (así lo registran los controladores y servicios reales del módulo
+     * vía `AuditLogger::logMachineEvent`), con el `order_code` en `metadata` como atribución
+     * a la orden. Sin ellos, la ficha de detalle mostraría la cronología vacía aunque la
+     * orden tenga historia real que auditar. El guardado es idempotente por la terna
+     * (máquina, acción, order_code) y nunca borra nada.
+     *
+     * @return int Número de eventos de auditoría sembrados.
+     */
+    public function seedPreventiveAuditTrail(): int
+    {
+        $selectOrder = $this->pdo->prepare("
+            SELECT `id`, `order_code`, `machine_id`, `status`, `assigned_technician_id`, `completed_at`
+            FROM `preventive_orders`
+            WHERE `order_code` = :order_code
+            LIMIT 1
+        ");
+        $existsEvent = $this->pdo->prepare("
+            SELECT `id`
+            FROM `audit_log`
+            WHERE `entity_type` = 'MACHINE'
+              AND `entity_id` = :machine_id
+              AND `action` = :action
+              AND JSON_UNQUOTE(JSON_EXTRACT(`metadata`, '$.\"order_code\"')) = :order_code
+            LIMIT 1
+        ");
+        $insertEvent = $this->pdo->prepare("
+            INSERT INTO `audit_log` (
+                `entity_type`, `entity_id`, `action`, `user_id`, `user_role`, `user_name`,
+                `previous_state`, `new_state`, `metadata`, `created_at`
+            ) VALUES (
+                'MACHINE', :machine_id, :action, :user_id, :user_role, :user_name,
+                :previous_state, :new_state, :metadata, :created_at
+            )
+        ");
+
+        $coordinatorId = (int)($this->pdo->query(
+            "SELECT `id` FROM `users` WHERE `email` = 'coordinacion@vendguard.internal' LIMIT 1"
+        )->fetchColumn() ?: 1);
+        $technicianId = (int)($this->pdo->query(
+            "SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1"
+        )->fetchColumn() ?: 1);
+
+        $seeded = 0;
+
+        foreach ($this->preventiveAuditBlueprints() as $orderCode => $events) {
+            $selectOrder->execute([':order_code' => $orderCode]);
+            $order = $selectOrder->fetch(PDO::FETCH_ASSOC);
+            $selectOrder->closeCursor();
+
+            if ($order === false) {
+                continue;
+            }
+
+            foreach ($events as $event) {
+                $existsEvent->execute([
+                    ':machine_id' => (int)$order['machine_id'],
+                    ':action' => $event['action'],
+                    ':order_code' => (string)$order['order_code'],
+                ]);
+                $alreadyLogged = $existsEvent->fetchColumn();
+                $existsEvent->closeCursor();
+
+                if ($alreadyLogged !== false && $alreadyLogged !== null) {
+                    continue;
+                }
+
+                // El veredicto de la inspección y el certificado son hechos del técnico;
+                // el resto del ciclo es coordinación.
+                $isCoordinatorAction = !in_array(
+                    $event['action'],
+                    ['EVALUATE_PREVENTIVE_CHECKLIST', 'ISSUE_SANITARY_CERTIFICATE'],
+                    true
+                );
+                $insertEvent->execute([
+                    ':machine_id' => (int)$order['machine_id'],
+                    ':action' => $event['action'],
+                    ':user_id' => $isCoordinatorAction ? $coordinatorId : $technicianId,
+                    ':user_role' => $isCoordinatorAction ? 'COORDINATOR' : 'TECHNICIAN',
+                    ':user_name' => $event['user_name'],
+                    ':previous_state' => $event['previous_state'] !== null ? json_encode($event['previous_state']) : null,
+                    ':new_state' => json_encode($event['new_state']),
+                    ':metadata' => json_encode(array_merge(
+                        $event['metadata'] ?? [],
+                        ['order_code' => $order['order_code']]
+                    )),
+                    ':created_at' => $event['created_at'],
+                ]);
+                $seeded++;
+            }
+        }
+
+        return $seeded;
+    }
+
+    /**
+     * Guion de eventos de auditoría de las órdenes demo, en orden cronológico.
+     *
+     * @return array<string, list<array{action: string, user_name: string, previous_state: array<string, mixed>|null, new_state: array<string, mixed>, metadata: array<string, mixed>|null, created_at: string}>>
+     */
+    private function preventiveAuditBlueprints(): array
+    {
+        $coordinatorName = 'Sara Coordinadora';
+        $technicianName = 'Jordi Técnico Ruta BCN';
+        $createdAt = date('Y-m-d H:i:s', strtotime('-3 days'));
+
+        return [
+            'ORD-PREV-2026-0001' => [
+                [
+                    'action' => 'CREATE_PREVENTIVE_ORDER',
+                    'user_name' => $coordinatorName,
+                    'previous_state' => null,
+                    'new_state' => ['status' => 'PENDING_ASSIGNMENT', 'order_type' => 'ROUTINE'],
+                    'metadata' => ['origin' => 'SCHEDULER'],
+                    'created_at' => $createdAt,
+                ],
+                [
+                    'action' => 'ASSIGN_PREVENTIVE_ORDER',
+                    'user_name' => $coordinatorName,
+                    'previous_state' => ['status' => 'PENDING_ASSIGNMENT'],
+                    'new_state' => ['status' => 'SCHEDULED'],
+                    'metadata' => ['operator_code' => 'OP-01'],
+                    'created_at' => date('Y-m-d H:i:s', strtotime('-2 days')),
+                ],
+                [
+                    'action' => 'EVALUATE_PREVENTIVE_CHECKLIST',
+                    'user_name' => $technicianName,
+                    'previous_state' => ['status' => 'IN_INSPECTION'],
+                    'new_state' => ['status' => 'COMPLETED', 'result' => 'CONFORME', 'temperature_measured' => 3.2],
+                    'metadata' => ['quarantine_triggered' => false],
+                    'created_at' => date('Y-m-d H:i:s', strtotime('-1 day')),
+                ],
+            ],
+            'ORD-PREV-2026-0002' => [
+                [
+                    'action' => 'CREATE_PREVENTIVE_ORDER',
+                    'user_name' => $coordinatorName,
+                    'previous_state' => null,
+                    'new_state' => ['status' => 'PENDING_ASSIGNMENT', 'order_type' => 'ROUTINE'],
+                    'metadata' => ['origin' => 'SCHEDULER'],
+                    'created_at' => date('Y-m-d H:i:s', strtotime('-4 days')),
+                ],
+                [
+                    'action' => 'ASSIGN_PREVENTIVE_ORDER',
+                    'user_name' => $coordinatorName,
+                    'previous_state' => ['status' => 'PENDING_ASSIGNMENT'],
+                    'new_state' => ['status' => 'SCHEDULED'],
+                    'metadata' => ['operator_code' => 'OP-01'],
+                    'created_at' => date('Y-m-d H:i:s', strtotime('-3 days')),
+                ],
+                [
+                    'action' => 'EVALUATE_PREVENTIVE_CHECKLIST',
+                    'user_name' => $technicianName,
+                    'previous_state' => ['status' => 'IN_INSPECTION'],
+                    'new_state' => ['status' => 'COMPLETED', 'result' => 'CONFORME', 'temperature_measured' => 3.8],
+                    'metadata' => ['quarantine_triggered' => false],
+                    'created_at' => date('Y-m-d H:i:s', strtotime('-2 days')),
+                ],
+            ],
+            'ORD-PREV-2026-0003' => [
+                [
+                    'action' => 'CREATE_PREVENTIVE_ORDER',
+                    'user_name' => $coordinatorName,
+                    'previous_state' => null,
+                    'new_state' => ['status' => 'PENDING_ASSIGNMENT', 'order_type' => 'ROUTINE'],
+                    'metadata' => ['origin' => 'SCHEDULER'],
+                    'created_at' => $createdAt,
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Catálogo normativo respondido por las dos inspecciones completadas del escenario demo:
+     * cuatro ítems críticos y tres secundarios conforme a la severidad tipificada (EARS 3.3).
+     *
+     * Los estados usan los literales del enum de `preventive_order_items.status` para no
+     * arrastrar dependencias de autoload a esta capa.
+     *
+     * @return array<string, list<array{item_code: string, item_description: string, is_critical: bool, status: string, observations: string|null}>>
+     */
+    private function preventiveChecklistBlueprints(): array
+    {
+        $temperatureItem = [
+            'item_code' => 'TEMPERATURE_READING',
+            'item_description' => 'Temperatura de sonda estabilizada ≤ 4.0 °C en alimentos perecederos',
+            'is_critical' => true,
+        ];
+        $boilerLeakItem = [
+            'item_code' => 'BOILER_LEAK',
+            'item_description' => 'Fuga activa en caldera o circuito hidráulico con riesgo de quemadura o inundación',
+            'is_critical' => true,
+        ];
+        $electricalItem = [
+            'item_code' => 'ELECTRICAL_GROUNDING',
+            'item_description' => 'Derivación, cable pelado o ausencia de toma de tierra eléctrica',
+            'is_critical' => true,
+        ];
+        $pestItem = [
+            'item_code' => 'PEST_PRESENCE',
+            'item_description' => 'Presencia de plagas, insectos o contaminación biológica en el interior de la cabina',
+            'is_critical' => true,
+        ];
+        $casingItem = [
+            'item_code' => 'CASING_WEAR',
+            'item_description' => 'Desgaste incipiente o suciedad leve en carcasas exteriores o botonera',
+            'is_critical' => false,
+        ];
+        $lightingItem = [
+            'item_code' => 'LED_LIGHTING',
+            'item_description' => 'Iluminación LED interior parcialmente degradada o tenue',
+            'is_critical' => false,
+        ];
+        $filterItem = [
+            'item_code' => 'WATER_FILTER_LIFE',
+            'item_description' => 'Cartucho de filtro de agua próximo a agotar su ciclo de vida útil',
+            'is_critical' => false,
+        ];
+
+        return [
+            'ORD-PREV-2026-0001' => [
+                $temperatureItem + [
+                    'status' => 'PASS',
+                    'observations' => 'Sonda estabilizada en 3.2 °C tras espera de régimen térmico.',
+                ],
+                $boilerLeakItem + [
+                    'status' => 'NOT_APPLICABLE',
+                    'observations' => 'Máquina sin circuito de caldera: comprobación no aplicable.',
+                ],
+                $electricalItem + [
+                    'status' => 'PASS',
+                    'observations' => 'Toma de tierra verificada con polímetro sin incidencias.',
+                ],
+                $pestItem + [
+                    'status' => 'PASS',
+                    'observations' => 'Cabina desinfectada y sin indicios biológicos.',
+                ],
+                $casingItem + [
+                    'status' => 'PASS',
+                    'observations' => null,
+                ],
+                $lightingItem + [
+                    'status' => 'WARN',
+                    'observations' => 'Tira LED superior con brillo reducido; se programa revisión de seguimiento.',
+                ],
+                $filterItem + [
+                    'status' => 'PASS',
+                    'observations' => null,
+                ],
+            ],
+            'ORD-PREV-2026-0002' => [
+                $temperatureItem + [
+                    'status' => 'PASS',
+                    'observations' => 'Lectura de sonda registrada en 3.8 °C, dentro del margen normativo.',
+                ],
+                $boilerLeakItem + [
+                    'status' => 'NOT_APPLICABLE',
+                    'observations' => 'Combo sin circuito de agua caliente: comprobación no aplicable.',
+                ],
+                $electricalItem + [
+                    'status' => 'PASS',
+                    'observations' => null,
+                ],
+                $pestItem + [
+                    'status' => 'PASS',
+                    'observations' => 'Sin presencia de insectos ni restos orgánicos.',
+                ],
+                $casingItem + [
+                    'status' => 'PASS',
+                    'observations' => null,
+                ],
+                $lightingItem + [
+                    'status' => 'PASS',
+                    'observations' => null,
+                ],
+                $filterItem + [
+                    'status' => 'WARN',
+                    'observations' => 'Cartucho al 80% de vida útil; sustituir en la próxima visita programada.',
+                ],
+            ],
+        ];
+    }
+
+    /**
      * Carga programática de catálogo de repuestos y compatibilidades (Módulo 06 / M2).
      *
      * @return array{parts: int, compatibilities: int}
@@ -841,6 +1225,8 @@ class SeedRunner
             $userCount = $this->seedUsers($defaultPassword);
             $prevCount = $this->seedPreventiveSettings();
             $this->seedPreventiveOrdersAndCertificates();
+            $checklistOrders = $this->seedPreventiveChecklistItems();
+            $auditEvents = $this->seedPreventiveAuditTrail();
             $partsRes = $this->seedSpareParts();
 
             $this->pdo->commit();
@@ -850,6 +1236,8 @@ class SeedRunner
                 'machines' => $machCount,
                 'users' => $userCount,
                 'preventive_settings' => $prevCount,
+                'preventive_checklists' => $checklistOrders,
+                'preventive_audit_events' => $auditEvents,
                 'spare_parts' => $partsRes['parts'],
                 'spare_part_compatibilities' => $partsRes['compatibilities'],
             ];

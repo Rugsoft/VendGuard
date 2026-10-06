@@ -27,6 +27,7 @@ globalThis.window = {
 import { api } from '../../public/assets/js/api.js';
 import { CoordinatorPreventiveDashboard } from '../../public/assets/js/components/CoordinatorPreventiveDashboard.js';
 import { CoordinatorPreventiveOrdersTab } from '../../public/assets/js/components/CoordinatorPreventiveOrdersTab.js';
+import { CoordinatorPreventiveOrderDetailModal } from '../../public/assets/js/components/CoordinatorPreventiveOrderDetailModal.js';
 import { CoordinatorDashboardView } from '../../public/assets/js/views/CoordinatorDashboardView.js';
 
 let assertions = 0;
@@ -391,6 +392,59 @@ assert('3.2 CoordinatorDashboardView incluye CoordinatorPreventiveOrdersTab en c
 const coordViewData = CoordinatorDashboardView.data();
 assert('3.3 CoordinatorDashboardView define activePreventiveSubTab con valor inicial "dashboard"',
   coordViewData.activePreventiveSubTab === 'dashboard');
+
+// =========================================================================
+// BLOQUE 4: Ficha integral de detalle de la orden (RF-PD-01, T-PREV-29/30)
+// =========================================================================
+console.log('\n--- BLOQUE 4: Ficha integral de detalle de la orden preventiva ---');
+
+assert('4.1 La pestaña registra el modal de detalle preventivo',
+  CoordinatorPreventiveOrdersTab.components?.CoordinatorPreventiveOrderDetailModal !== undefined
+  && CoordinatorPreventiveOrderDetailModal.name === 'CoordinatorPreventiveOrderDetailModal');
+
+assert('4.2 La pestaña declara el evento de salto a la ficha de avería',
+  CoordinatorPreventiveOrdersTab.emits.includes('open-incident-detail'));
+
+assert('4.3 Cada fila ofrece el disparador "Ver detalle" junto a los botones rápidos',
+  CoordinatorPreventiveOrdersTab.template.includes('data-testid="btn-view-order-detail"')
+  && CoordinatorPreventiveOrdersTab.template.includes('@click.stop="openDetailModal(order)"')  
+  && CoordinatorPreventiveOrdersTab.template.includes('data-testid="btn-assign-order"')
+  && CoordinatorPreventiveOrdersTab.template.includes('data-testid="btn-cancel-order"'));
+
+assert('4.4 El modal se monta con is-open y order-id sobre el estado de la pestaña',
+  CoordinatorPreventiveOrdersTab.template.includes('<CoordinatorPreventiveOrderDetailModal')
+  && CoordinatorPreventiveOrdersTab.template.includes(':is-open="showDetailModal"')
+  && CoordinatorPreventiveOrdersTab.template.includes(':order-id="detailOrderId"'));
+
+const detailTrayInstance = {
+  detailOrderId: null,
+  showDetailModal: false,
+  ...CoordinatorPreventiveOrdersTab.methods
+};
+detailTrayInstance.openDetailModal({ id: 7, order_code: 'ORD-PREV-2026-0007' });
+assert('4.5 Abrir el detalle fija la orden seleccionada y muestra el modal',
+  detailTrayInstance.detailOrderId === 7 && detailTrayInstance.showDetailModal === true);
+detailTrayInstance.closeDetailModal();
+assert('4.6 Cerrar el detalle libera la selección sin tocar la tabla',
+  detailTrayInstance.detailOrderId === null && detailTrayInstance.showDetailModal === false);
+
+assert('4.7 Los badges de la tabla delegan en el util compartido (fuente única de etiquetas)',
+  CoordinatorPreventiveOrdersTab.methods.getStatusBadge.call({}, 'COMPLETED').label === 'Completada'
+  && CoordinatorPreventiveOrdersTab.methods.getOrderTypeLabel.call({}, 'ROUTINE') === 'Ordinaria');
+
+assert('4.8 La vista de Coordinación cablea el salto a la ficha de avería existente',
+  CoordinatorDashboardView.template.includes('@open-incident-detail="openIncidentDetailFromPreventive"')
+  && typeof CoordinatorDashboardView.methods.openIncidentDetailFromPreventive === 'function');
+
+const jumpViewInstance = {
+  incidents: [{ id: 3661, ticket_code: 'INC-DEMO-0922' }],
+  selectedDetailIncident: null,
+  showDetailModal: false,
+  ...CoordinatorDashboardView.methods
+};
+jumpViewInstance.openIncidentDetailFromPreventive(3661);
+assert('4.9 El salto abre el modal de detalle de incidencias con el ticket vinculado',
+  jumpViewInstance.selectedDetailIncident?.id === 3661 && jumpViewInstance.showDetailModal === true);
 
 console.log('\n======================================================================');
 if (failures === 0) {

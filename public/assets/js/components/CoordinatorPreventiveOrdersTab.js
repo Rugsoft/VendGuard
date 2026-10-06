@@ -18,9 +18,19 @@
 
 import { api } from '../api.js';
 
+import { CoordinatorPreventiveOrderDetailModal } from './CoordinatorPreventiveOrderDetailModal.js';
+import {
+  getOrderResultBadge,
+  getOrderStatusBadge,
+  getOrderTypeLabel
+} from '../utils/PreventiveLabels.js';
+
 export const CoordinatorPreventiveOrdersTab = {
   name: 'CoordinatorPreventiveOrdersTab',
-  emits: ['order-assigned', 'order-cancelled', 'order-created'],
+  components: {
+    CoordinatorPreventiveOrderDetailModal
+  },
+  emits: ['order-assigned', 'order-cancelled', 'order-created', 'open-incident-detail'],
   data() {
     return {
       orders: [],
@@ -48,6 +58,10 @@ export const CoordinatorPreventiveOrdersTab = {
         scheduled_date: ''
       },
       assignError: '',
+
+      // Modal de Detalle Integral de la Orden (RF-PD-01, solo consulta)
+      showDetailModal: false,
+      detailOrderId: null,
 
       // Modal de Cancelación (Art. III)
       showCancelModal: false,
@@ -353,36 +367,45 @@ export const CoordinatorPreventiveOrdersTab = {
     // HELPERS VISUALES
     // =========================================================================
 
+    /**
+     * Delegado en el util compartido: la pestaña y la ficha de detalle muestran
+     * exactamente las mismas etiquetas y colores (fuente única, RF-PD-02).
+     */
     getStatusBadge(status) {
-      const map = {
-        PENDING_ASSIGNMENT: { label: 'Pendiente Asignación', bg: '#fef3c7', color: '#92400e', icon: '⏳' },
-        SCHEDULED: { label: 'Programada', bg: '#e0e7ff', color: '#3730a3', icon: '📅' },
-        IN_INSPECTION: { label: 'En Inspección', bg: '#dbeafe', color: '#1e40af', icon: '🔍' },
-        COMPLETED: { label: 'Completada', bg: '#dcfce7', color: '#166534', icon: '✅' },
-        EXPIRED: { label: 'Vencida', bg: '#fee2e2', color: '#991b1b', icon: '🔴' },
-        CANCELLED: { label: 'Cancelada', bg: '#f1f5f9', color: '#475569', icon: '✕' }
-      };
-      return map[status] || { label: status || 'Desconocido', bg: '#f1f5f9', color: '#475569', icon: '•' };
+      return getOrderStatusBadge(status);
     },
 
     getResultBadge(result) {
-      if (!result) return null;
-      const map = {
-        CONFORME: { label: 'Conforme', bg: '#dcfce7', color: '#166534' },
-        CONFORME_CON_OBSERVACIONES: { label: 'Con Obs.', bg: '#fef3c7', color: '#854d0e' },
-        NO_CONFORME: { label: 'No Conforme', bg: '#fee2e2', color: '#991b1b' },
-        NO_EVALUABLE_POR_CAUSA_EXTERNA: { label: 'No Evaluable', bg: '#f1f5f9', color: '#475569' }
-      };
-      return map[result] || { label: result, bg: '#f1f5f9', color: '#475569' };
+      return getOrderResultBadge(result);
     },
 
     getOrderTypeLabel(type) {
-      const map = {
-        ROUTINE: 'Ordinaria',
-        REINSPECTION: 'Reinspección',
-        MANUAL_EXTRA: 'Extraordinaria'
-      };
-      return map[type] || type || 'Ordinaria';
+      return getOrderTypeLabel(type);
+    },
+
+    /**
+     * Abre la ficha integral de la orden seleccionada (RF-PD-01.1). Es una lectura:
+     * no altera la orden ni sus dependencias de escritura de la fila.
+     */
+    openDetailModal(order) {
+      if (!order) {
+        return;
+      }
+      this.detailOrderId = order.id ?? order.order_code ?? null;
+      this.showDetailModal = true;
+    },
+
+    closeDetailModal() {
+      this.showDetailModal = false;
+      this.detailOrderId = null;
+    },
+
+    /**
+     * La ficha preventiva solicita el salto a la avería correctiva vinculada
+     * (RF-PD-07.2): la vista de Coordinación abre el modal de detalle de incidencias.
+     */
+    handleOpenIncidentDetail(incidentId) {
+      this.$emit('open-incident-detail', incidentId);
     }
   },
   template: `
@@ -630,6 +653,18 @@ export const CoordinatorPreventiveOrdersTab = {
 
                 <!-- Acciones -->
                 <td style="padding: 12px 16px; text-align: right; white-space: nowrap;">
+                  <!-- Botón Ver detalle (RF-PD-01): lectura pura, disponible en cualquier estado -->
+                  <button
+                    type="button"
+                    class="vg-btn"
+                    style="background: #eef2ff; color: #1e3a8a; border: 1px solid #c7d2fe; padding: 4px 8px; font-size: 12px; border-radius: 4px; cursor: pointer; margin-right: 6px;"
+                    @click.stop="openDetailModal(order)"
+                    title="Abrir la ficha integral de la orden preventiva"
+                    data-testid="btn-view-order-detail"
+                  >
+                    🔍 Ver detalle
+                  </button>
+
                   <!-- Botón Asignar -->
                   <button
                     v-if="['PENDING_ASSIGNMENT', 'SCHEDULED', 'EXPIRED'].includes(order.status)"
@@ -665,6 +700,16 @@ export const CoordinatorPreventiveOrdersTab = {
       <!-- ================================================================= -->
       <!-- MODAL: ASIGNACIÓN TÉCNICA (RF-PREV-02, EARS 2.2)                   -->
       <!-- ================================================================= -->
+      <!-- ================================================================= -->
+      <!-- MODAL: FICHA INTEGRAL DE LA ORDEN (RF-PD-01, solo consulta)         -->
+      <!-- ================================================================= -->
+      <CoordinatorPreventiveOrderDetailModal
+        :is-open="showDetailModal"
+        :order-id="detailOrderId"
+        @close="closeDetailModal"
+        @open-incident-detail="handleOpenIncidentDetail"
+      />
+
       <div
         v-if="showAssignModal"
         style="position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 16px;"

@@ -4,6 +4,7 @@
 **Módulo:** `05-preventive-maintenance`  
 **Documento:** `specs/05-preventive-maintenance/tasks.md`  
 **Referencia Funcional:** [`specs/functional/preventive_maintenance_spec.md`](../functional/preventive_maintenance_spec.md) (RF-PREV-01 a RF-PREV-08, RNF-01 a RNF-06)  
+**Ampliación:** [`specs/functional/preventive_order_detail_modal_spec.md`](../functional/preventive_order_detail_modal_spec.md) (RF-PD-01 a RF-PD-10)  
 **Contratos Técnicos y DDL:** [`specs/technical/preventive_maintenance_contracts.md`](../technical/preventive_maintenance_contracts.md)  
 **Plan Técnico:** [`specs/05-preventive-maintenance/plan.md`](plan.md)  
 **Estimación por Tarea:** 20–30 minutos  
@@ -157,3 +158,37 @@
   * **Requisitos:** RNF-01 a RNF-06, Constitución Art. I al VII
   * **Dependencias:** T-PREV-17, T-PREV-24
   * **Hecho cuando:** La ejecución de `php tests/run_all.php` corre las 68 suites preexistentes más todas las nuevas suites del módulo 05 al 100% en verde (0 errores, 0 fallos), el comando de auditoría certifica cero sentencias `DELETE FROM` en `src/` (Art. III), se valida el cumplimiento innegociable de seguridad alimentaria (Art. II), la regla de ticket único (Art. V.2), el cierre justificado (Art. V.1) y la privacidad de operadores técnicos (Art. V.4).
+
+---
+
+## Fase 7: Ficha Integral de Detalle de Orden Preventiva (Ampliación · RF-PD-01 a RF-PD-10)
+
+- [x] **T-PREV-26: Semilla de checklist normativo respondido (`SeedRunner`, `seeds.sql`, `cloud_init.sql`)**
+  * **Requisitos:** RF-PD-05, RNF-PD-01
+  * **Dependencias:** Ninguna
+  * **Hecho cuando:** Las órdenes `ORD-PREV-2026-0001` y `ORD-PREV-2026-0002` disponen de ítems de checklist persistidos e idempotentes (críticos y secundarios, con `PASS`, `WARN` y `NOT_APPLICABLE`), el resumen de `SeedRunner::seedAll()` los contabiliza y `php bin/init_cloud_db.php` verifica el umbral mínimo sembrado.
+
+- [x] **T-PREV-27: Implementar `CoordinatorPreventiveDetailService` y su DTO de contrato**
+  * **Requisitos:** RF-PD-03 a RF-PD-09, RNF-PD-01, RNF-PD-04, RNF-PD-05
+  * **Dependencias:** T-PREV-05, T-PREV-06, T-PREV-07, T-PREV-26
+  * **Hecho cuando:** El servicio ensambla los nueve bloques de la ficha con una única lectura agregada (`CoordinatorPreventiveOrderDetailDto`), deriva el semáforo de vigencia, traduce etiquetas en servidor, calcula los contadores de cumplimiento y no ejecuta ninguna escritura ni evento de auditoría.
+
+- [x] **T-PREV-28: Exponer `GET /api/coordinator/preventive/orders/{id}/detail`**
+  * **Requisitos:** RF-PD-01, RNF-PD-07, RNF-PD-04
+  * **Dependencias:** T-PREV-27
+  * **Hecho cuando:** La ruta queda registrada en `AppRouter.php` bajo `InternalAuthMiddleware(COORDINATOR)`, el controlador resuelve ID o código de orden, responde `200` con la ficha, `400` con identificador inválido y `404` con orden inexistente.
+
+- [x] **T-PREV-29: Implementar el componente `CoordinatorPreventiveOrderDetailModal.js` y el util de etiquetas**
+  * **Requisitos:** RF-PD-02, RF-PD-05 a RF-PD-10, RNF-PD-02, RNF-PD-03, RNF-PD-06
+  * **Dependencias:** T-PREV-28
+  * **Hecho cuando:** El modal espejo del módulo 09 renderiza cabecera fija con una sola ✕, cuerpo con scroll independiente, pie fijo, visor integrado de evidencias y estados vacíos para checklist, avería, certificado y auditoría; y emite `open-incident-detail` al solicitar la ficha de la avería vinculada. Los mapas de etiquetas preventivos quedan en un util compartido consumido también por la pestaña de órdenes.
+
+- [x] **T-PREV-30: Integrar el disparador en la pestaña de órdenes y el salto a la avería en la vista**
+  * **Requisitos:** RF-PD-01, RF-PD-07.2, RNF-PD-06
+  * **Dependencias:** T-PREV-29
+  * **Hecho cuando:** Cada fila ofrece "🔍 Ver detalle" sin interferir con "Asignar"/"Cancelar", el modal se abre con la orden correcta, y la vista de Coordinación abre el modal de detalle de incidencias existente al recibir el evento del salto.
+
+- [x] **T-PREV-31: Suites de prueba de la ampliación y regresión global**
+  * **Requisitos:** RF-PD-01 a RF-PD-10, RNF-PD-01 a RNF-PD-07
+  * **Dependencias:** T-PREV-26 a T-PREV-30
+  * **Hecho cuando:** `php tests/unit/CoordinatorPreventiveDetailServiceTest.php`, `php tests/integration/CoordinatorPreventiveDetailApiTest.php` y `node tests/unit/CoordinatorPreventiveOrderDetailModalTest.mjs` pasan al 100% en verde, las suites preventivas preexistentes siguen en verde y queda demostrado que el endpoint de detalle no altera el histórico (Art. III).

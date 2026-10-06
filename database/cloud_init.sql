@@ -524,6 +524,101 @@ UPDATE `machines` SET
 WHERE `code` = 'VEND-0102';
 
 -- -----------------------------------------------------------------------------
+-- Checklists Normativos Respondidos (Módulo 05 / Ampliación RF-PD-05)
+-- -----------------------------------------------------------------------------
+-- Respuestas de las dos inspecciones completadas del escenario demo. El bloque es
+-- idempotente por pareja (orden, código de ítem) y nunca borra físicamente (Art. III):
+-- al no existir clave única en la tabla, cada fila se inserta solo si aún no está.
+INSERT INTO `preventive_order_items` (
+  `preventive_order_id`, `item_code`, `item_description`, `is_critical`, `status`, `observations`
+)
+SELECT
+  po.`id`,
+  seed.`item_code`,
+  seed.`item_description`,
+  seed.`is_critical`,
+  seed.`status`,
+  seed.`observations`
+FROM (
+  SELECT 'ORD-PREV-2026-0001' AS `order_code`, 'TEMPERATURE_READING' AS `item_code`, 'Temperatura de sonda estabilizada ≤ 4.0 °C en alimentos perecederos' AS `item_description`, 1 AS `is_critical`, 'PASS' AS `status`, 'Sonda estabilizada en 3.2 °C tras espera de régimen térmico.' AS `observations`
+  UNION ALL SELECT 'ORD-PREV-2026-0001', 'BOILER_LEAK', 'Fuga activa en caldera o circuito hidráulico con riesgo de quemadura o inundación', 1, 'NOT_APPLICABLE', 'Máquina sin circuito de caldera: comprobación no aplicable.'
+  UNION ALL SELECT 'ORD-PREV-2026-0001', 'ELECTRICAL_GROUNDING', 'Derivación, cable pelado o ausencia de toma de tierra eléctrica', 1, 'PASS', 'Toma de tierra verificada con polímetro sin incidencias.'
+  UNION ALL SELECT 'ORD-PREV-2026-0001', 'PEST_PRESENCE', 'Presencia de plagas, insectos o contaminación biológica en el interior de la cabina', 1, 'PASS', 'Cabina desinfectada y sin indicios biológicos.'
+  UNION ALL SELECT 'ORD-PREV-2026-0001', 'CASING_WEAR', 'Desgaste incipiente o suciedad leve en carcasas exteriores o botonera', 0, 'PASS', NULL
+  UNION ALL SELECT 'ORD-PREV-2026-0001', 'LED_LIGHTING', 'Iluminación LED interior parcialmente degradada o tenue', 0, 'WARN', 'Tira LED superior con brillo reducido; se programa revisión de seguimiento.'
+  UNION ALL SELECT 'ORD-PREV-2026-0001', 'WATER_FILTER_LIFE', 'Cartucho de filtro de agua próximo a agotar su ciclo de vida útil', 0, 'PASS', NULL
+  UNION ALL SELECT 'ORD-PREV-2026-0002', 'TEMPERATURE_READING', 'Temperatura de sonda estabilizada ≤ 4.0 °C en alimentos perecederos', 1, 'PASS', 'Lectura de sonda registrada en 3.8 °C, dentro del margen normativo.'
+  UNION ALL SELECT 'ORD-PREV-2026-0002', 'BOILER_LEAK', 'Fuga activa en caldera o circuito hidráulico con riesgo de quemadura o inundación', 1, 'NOT_APPLICABLE', 'Combo sin circuito de agua caliente: comprobación no aplicable.'
+  UNION ALL SELECT 'ORD-PREV-2026-0002', 'ELECTRICAL_GROUNDING', 'Derivación, cable pelado o ausencia de toma de tierra eléctrica', 1, 'PASS', NULL
+  UNION ALL SELECT 'ORD-PREV-2026-0002', 'PEST_PRESENCE', 'Presencia de plagas, insectos o contaminación biológica en el interior de la cabina', 1, 'PASS', 'Sin presencia de insectos ni restos orgánicos.'
+  UNION ALL SELECT 'ORD-PREV-2026-0002', 'CASING_WEAR', 'Desgaste incipiente o suciedad leve en carcasas exteriores o botonera', 0, 'PASS', NULL
+  UNION ALL SELECT 'ORD-PREV-2026-0002', 'LED_LIGHTING', 'Iluminación LED interior parcialmente degradada o tenue', 0, 'PASS', NULL
+  UNION ALL SELECT 'ORD-PREV-2026-0002', 'WATER_FILTER_LIFE', 'Cartucho de filtro de agua próximo a agotar su ciclo de vida útil', 0, 'WARN', 'Cartucho al 80% de vida útil; sustituir en la próxima visita programada.'
+) AS seed
+INNER JOIN `preventive_orders` po ON po.`order_code` = seed.`order_code`
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM `preventive_order_items` poi
+  WHERE poi.`preventive_order_id` = po.`id`
+    AND poi.`item_code` = seed.`item_code`
+);
+
+-- -----------------------------------------------------------------------------
+-- Trazabilidad de Auditoría de las Órdenes Preventivas Demo (RF-PD-09, Art. III)
+-- -----------------------------------------------------------------------------
+-- Cada acción del ciclo preventivo deja su evento append-only bajo la entidad de
+-- la MÁQUINA auditada: es así como lo escriben los controladores y servicios reales
+-- del módulo (AuditLogger::logMachineEvent), y por eso la semilla respeta el mismo
+-- camino: sin esta regla, la ficha de detalle de la orden mostraría una cronología
+-- que ningún recorrido real habría podido producir. La orden se atribuye mediante
+-- `order_code` dentro de `metadata`, igual que lo hacen los escritores reales.
+--
+-- IMPORTANTE: no sembrar jamás bajo 'PREVENTIVE_ORDER'. La migración 004 redefine
+-- `entity_type` con un enum de cuatro valores y, en un servidor sin
+-- STRICT_TRANS_TABLES, cualquier fila 'PREVENTIVE_ORDER' anterior queda
+-- silenciosamente vaciada a '', lo que aborta el arranque en la migración 012.
+--
+-- Idempotente por la terna (máquina, acción, order_code) y sin borrados físicos.
+INSERT INTO `audit_log` (
+  `entity_type`, `entity_id`, `action`, `user_id`, `user_role`, `user_name`,
+  `previous_state`, `new_state`, `metadata`, `created_at`
+)
+SELECT
+  'MACHINE',
+  po.`machine_id`,
+  seed.`action`,
+  (SELECT `id` FROM `users` WHERE `email` = CASE
+      WHEN seed.`user_role` = 'COORDINATOR' THEN 'coordinacion@vendguard.internal'
+      ELSE 'jordi.ruta@vendguard.internal'
+    END LIMIT 1),
+  seed.`user_role`,
+  seed.`user_name`,
+  seed.`previous_state`,
+  seed.`new_state`,
+  seed.`metadata`,
+  DATE_SUB(NOW(), INTERVAL seed.`days_ago` DAY)
+FROM (
+  SELECT 'ORD-PREV-2026-0001' AS `order_code`, 'CREATE_PREVENTIVE_ORDER' AS `action`, 'COORDINATOR' AS `user_role`, 'Sara Coordinadora' AS `user_name`, NULL AS `previous_state`, '{"status": "PENDING_ASSIGNMENT", "order_type": "ROUTINE"}' AS `new_state`, '{"origin": "SCHEDULER", "order_code": "ORD-PREV-2026-0001"}' AS `metadata`, 3 AS `days_ago`
+  UNION ALL SELECT 'ORD-PREV-2026-0001', 'ASSIGN_PREVENTIVE_ORDER', 'COORDINATOR', 'Sara Coordinadora', '{"status": "PENDING_ASSIGNMENT"}', '{"status": "SCHEDULED"}', '{"operator_code": "OP-01", "order_code": "ORD-PREV-2026-0001"}', 2
+  UNION ALL SELECT 'ORD-PREV-2026-0001', 'EVALUATE_PREVENTIVE_CHECKLIST', 'TECHNICIAN', 'Jordi Técnico Ruta BCN', '{"status": "IN_INSPECTION"}', '{"status": "COMPLETED", "result": "CONFORME", "temperature_measured": 3.2}', '{"quarantine_triggered": false, "order_code": "ORD-PREV-2026-0001"}', 1
+  UNION ALL SELECT 'ORD-PREV-2026-0001', 'ISSUE_SANITARY_CERTIFICATE', 'TECHNICIAN', 'Jordi Técnico Ruta BCN', NULL, '{"result": "CONFORME", "status": "VALID"}', '{"certificate_code": "CERT-2026-0001", "order_code": "ORD-PREV-2026-0001"}', 1
+  UNION ALL SELECT 'ORD-PREV-2026-0002', 'CREATE_PREVENTIVE_ORDER', 'COORDINATOR', 'Sara Coordinadora', NULL, '{"status": "PENDING_ASSIGNMENT", "order_type": "ROUTINE"}', '{"origin": "SCHEDULER", "order_code": "ORD-PREV-2026-0002"}', 4
+  UNION ALL SELECT 'ORD-PREV-2026-0002', 'ASSIGN_PREVENTIVE_ORDER', 'COORDINATOR', 'Sara Coordinadora', '{"status": "PENDING_ASSIGNMENT"}', '{"status": "SCHEDULED"}', '{"operator_code": "OP-01", "order_code": "ORD-PREV-2026-0002"}', 3
+  UNION ALL SELECT 'ORD-PREV-2026-0002', 'EVALUATE_PREVENTIVE_CHECKLIST', 'TECHNICIAN', 'Jordi Técnico Ruta BCN', '{"status": "IN_INSPECTION"}', '{"status": "COMPLETED", "result": "CONFORME", "temperature_measured": 3.8}', '{"quarantine_triggered": false, "order_code": "ORD-PREV-2026-0002"}', 2
+  UNION ALL SELECT 'ORD-PREV-2026-0002', 'ISSUE_SANITARY_CERTIFICATE', 'TECHNICIAN', 'Jordi Técnico Ruta BCN', NULL, '{"result": "CONFORME", "status": "VALID"}', '{"certificate_code": "CERT-2026-0002", "order_code": "ORD-PREV-2026-0002"}', 2
+  UNION ALL SELECT 'ORD-PREV-2026-0003', 'CREATE_PREVENTIVE_ORDER', 'COORDINATOR', 'Sara Coordinadora', NULL, '{"status": "PENDING_ASSIGNMENT", "order_type": "ROUTINE"}', '{"origin": "SCHEDULER", "order_code": "ORD-PREV-2026-0003"}', 3
+) AS seed
+INNER JOIN `preventive_orders` po ON po.`order_code` = seed.`order_code`
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM `audit_log` al
+  WHERE al.`entity_type` = 'MACHINE'
+    AND al.`entity_id` = po.`machine_id`
+    AND al.`action` = seed.`action`
+    AND JSON_UNQUOTE(JSON_EXTRACT(al.`metadata`, '$."order_code"')) = seed.`order_code`
+);
+
+-- -----------------------------------------------------------------------------
 -- Averías y Reparaciones Históricas de Demostración (Módulo 03 / Métricas)
 -- -----------------------------------------------------------------------------
 INSERT INTO `incidents` (

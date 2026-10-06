@@ -501,6 +501,26 @@ export const CoordinatorDashboardView = {
     },
 
     /**
+     * Abre la ficha integral de la avería correctiva vinculada a una orden preventiva
+     * (RF-PD-07.2): reutiliza el modal de detalle de incidencias ya montado en esta vista,
+     * sin duplicar la ficha correctiva. La orden solo conoce el ID del ticket, así que se
+     * rehidrata la fila desde la bandeja cargada cuando está presente y, si no lo está
+     * (por filtros o paginación), el modal acepta igualmente el identificador directo.
+     */
+    openIncidentDetailFromPreventive(incidentId) {
+      if (incidentId === null || incidentId === undefined || incidentId === '') {
+        return;
+      }
+
+      const knownIncident = this.incidents.find(
+        (incident) => Number(incident.id) === Number(incidentId)
+      );
+
+      this.selectedDetailIncident = knownIncident || { id: Number(incidentId) };
+      this.showDetailModal = true;
+    },
+
+    /**
      * Refresca en caliente la fila de la bandeja correspondiente a la incidencia abierta
      * en el modal de detalle (T-IDM-15, RF-07.3/RF-07.4): vuelve a pedir el listado al
      * servidor y sustituye únicamente la fila afectada mediante splice reactivo, sin
@@ -1241,6 +1261,7 @@ export const CoordinatorDashboardView = {
           v-else-if="activePreventiveSubTab === 'orders'"
           @order-assigned="loadIncidents(true)"
           @order-cancelled="loadIncidents(true)"
+          @open-incident-detail="openIncidentDetailFromPreventive"
         />
       </div>
 

@@ -556,6 +556,15 @@ export class ApiClient {
     createPreventiveOrder: (payload) => {
       return this.post('/coordinator/preventive/orders', payload);
     },
+    /**
+     * Retrieves the integral detail file of one preventive order for the coordinator
+     * ficha modal (Módulo 05, RF-PD-01). Read-only: one aggregated request, no writes.
+     * @param {number|string} orderId Order id or order code (ej: PREV-2026-0001).
+     * @returns {Promise<Object>}
+     */
+    getPreventiveOrderDetail: (orderId) => {
+      return this.get(`/coordinator/preventive/orders/${encodeURIComponent(orderId)}/detail`);
+    },
     generateDuePreventiveOrders: (horizonDays = 5) => {
       return this.post('/coordinator/preventive/generate-due', { horizon_days: Number(horizonDays) });
     },

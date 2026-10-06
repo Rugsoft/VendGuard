@@ -213,6 +213,20 @@ assert('6.6 api.coordinator.cancelPreventiveOrder exists', typeof api.coordinato
 assert('6.7 api.coordinator.getPreventiveSettings exists', typeof api.coordinator.getPreventiveSettings === 'function');
 assert('6.8 api.coordinator.updatePreventiveSettings exists', typeof api.coordinator.updatePreventiveSettings === 'function');
 assert('6.9 api.coordinator.updateMachinePreventiveConfig exists', typeof api.coordinator.updateMachinePreventiveConfig === 'function');
+assert('6.9b api.coordinator.getPreventiveOrderDetail exists (ficha integral, RF-PD-01)',
+  typeof api.coordinator.getPreventiveOrderDetail === 'function');
+
+// La ficha preventiva debe apuntar al endpoint de detalle con el identificador codificado.
+const originalApiGetForDetail = api.get;
+let preventiveDetailPath = null;
+api.get = (endpoint) => {
+  preventiveDetailPath = endpoint;
+  return Promise.resolve({});
+};
+api.coordinator.getPreventiveOrderDetail('ORD-PREV-2026-0001');
+api.get = originalApiGetForDetail;
+assert('6.9c La ficha preventiva resuelve contra /coordinator/preventive/orders/{id}/detail',
+  preventiveDetailPath === '/coordinator/preventive/orders/ORD-PREV-2026-0001/detail');
 
 // Technician preventive endpoints
 assert('6.10 api.technician.getPreventiveRoute exists', typeof api.technician.getPreventiveRoute === 'function');

@@ -146,6 +146,7 @@ class AppRouter
         // Mantenimiento Preventivo y Checklists Sanitarios (Módulo 05: Coordinación - T-PREV-13)
         $router->get('/api/coordinator/preventive/dashboard', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'getDashboard'], [$coordinatorAuth]);
         $router->get('/api/coordinator/preventive/orders', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'listOrders'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/preventive/orders/{id}/detail', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'getOrderDetail'], [$coordinatorAuth]);
         $router->post('/api/coordinator/preventive/orders', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'createOrder'], [$coordinatorAuth]);
         $router->post('/api/coordinator/preventive/generate-due', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'generateDue'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/preventive/orders/{id}/assign', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'assignOrder'], [$coordinatorAuth]);

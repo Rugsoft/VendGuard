@@ -9,6 +9,7 @@ use DomainException;
 use InvalidArgumentException;
 use Throwable;
 use VendGuard\Application\Service\AuditLogger;
+use VendGuard\Application\Service\CoordinatorPreventiveDetailService;
 use VendGuard\Application\Service\PreventiveOrderSchedulerService;
 use VendGuard\Application\Service\PreventiveSettingsService;
 use VendGuard\Core\Domain\Exception\PerishableFrequencyLimitException;
@@ -22,8 +23,11 @@ use VendGuard\Core\Domain\Repository\PreventiveOrderRepositoryInterface;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
+use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoPreventiveItemRepository;
 use VendGuard\Infrastructure\Repository\PdoPreventiveOrderRepository;
+use VendGuard\Infrastructure\Repository\PdoSanitaryCertificateRepository;
 use VendGuard\Infrastructure\Repository\PdoPreventiveSettingsRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
@@ -53,6 +57,7 @@ class CoordinatorPreventiveController
     private MachineRepositoryInterface $machineRepo;
     private UserRepositoryInterface $userRepo;
     private AuditLogger $auditLogger;
+    private ?CoordinatorPreventiveDetailService $detailService;
 
     public function __construct(
         ?PreventiveOrderRepositoryInterface $orderRepo = null,
@@ -61,8 +66,10 @@ class CoordinatorPreventiveController
         ?PreventiveSettingsService $settingsService = null,
         ?MachineRepositoryInterface $machineRepo = null,
         ?UserRepositoryInterface $userRepo = null,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?CoordinatorPreventiveDetailService $detailService = null
     ) {
+        $this->detailService = $detailService;
         $this->orderRepo = $orderRepo ?? new PdoPreventiveOrderRepository();
         $this->settingsRepo = $settingsRepo ?? new PdoPreventiveSettingsRepository();
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
@@ -166,6 +173,38 @@ class CoordinatorPreventiveController
                 'X-Page'        => (string)$page,
                 'X-Per-Page'    => (string)$perPage,
             ]);
+        });
+    }
+
+    /**
+     * GET /api/coordinator/preventive/orders/{id}/detail
+     *
+     * Ficha integral de una orden preventiva para el modal de Coordinación
+     * (RF-PD-01 a RF-PD-10). Admite el ID primario o el código de orden. Es una
+     * lectura pura: no escribe ni emite eventos de auditoría (RNF-PD-04, Art. III).
+     */
+    public function getOrderDetail(Request $request): Response
+    {
+        return $this->handleExecution(function () use ($request): Response {
+            $rawIdentifier = trim((string)($request->getRouteParam('id') ?? ''));
+            if ($rawIdentifier === '') {
+                return Response::error(
+                    'INVALID_PREVENTIVE_ORDER_IDENTIFIER',
+                    'El identificador de la orden no es válido. Se admite un ID numérico positivo o un código de orden (ej: PREV-2026-0001).',
+                    400
+                );
+            }
+
+            $detail = $this->resolveDetailService()->buildDetail($rawIdentifier);
+            if ($detail === null) {
+                return Response::error(
+                    'PREVENTIVE_ORDER_NOT_FOUND',
+                    "No se encontró ninguna orden preventiva con identificador '{$rawIdentifier}'.",
+                    404
+                );
+            }
+
+            return Response::json($detail->toArray(), 200);
         });
     }
 
@@ -601,6 +640,25 @@ class CoordinatorPreventiveController
 
             return Response::error('INTERNAL_SERVER_ERROR', 'Error interno del servidor.', 500);
         }
+    }
+
+    /**
+     * Ensambla el servicio de detalle bajo demanda: los endpoints de escritura no deben
+     * abrir conexiones que no van a usar, y las pruebas pueden inyectar un doble.
+     */
+    private function resolveDetailService(): CoordinatorPreventiveDetailService
+    {
+        if ($this->detailService === null) {
+            $this->detailService = new CoordinatorPreventiveDetailService(
+                orderRepo: $this->orderRepo,
+                itemRepo: new PdoPreventiveItemRepository(),
+                certificateRepo: new PdoSanitaryCertificateRepository(),
+                incidentRepo: new PdoIncidentRepository(),
+                auditRepo: new PdoAuditLogRepository()
+            );
+        }
+
+        return $this->detailService;
     }
 
     private function extractIdFromRoute(Request $request): int

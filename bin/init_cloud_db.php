@@ -170,6 +170,8 @@ try {
     echo "      ✓ Sedes procesadas: {$seedSummary['locations']}\n";
     echo "      ✓ Máquinas procesadas: {$seedSummary['machines']}\n";
     echo "      ✓ Usuarios procesados: {$seedSummary['users']}\n";
+    echo "      ✓ Checklists preventivos procesados: {$seedSummary['preventive_checklists']} órdenes\n";
+    echo "      ✓ Eventos de auditoría preventiva procesados: {$seedSummary['preventive_audit_events']}\n";
     echo "      ✓ Repuestos procesados: {$seedSummary['spare_parts']} (compatibilidades: {$seedSummary['spare_part_compatibilities']})\n\n";
 
     echo "[5/6] Verificando integridad de datos base en el servidor...\n";
@@ -177,11 +179,13 @@ try {
     $machCount = (int)$pdo->query("SELECT COUNT(*) FROM machines WHERE deleted_at IS NULL")->fetchColumn();
     $usrCount = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL")->fetchColumn();
     $partsCount = (int)$pdo->query("SELECT COUNT(*) FROM spare_parts WHERE is_active = 1")->fetchColumn();
+    $checklistCount = (int)$pdo->query("SELECT COUNT(*) FROM preventive_order_items")->fetchColumn();
 
     echo "      ✓ Sedes registradas: {$locCount} (esperado >= 10)\n";
     echo "      ✓ Máquinas operativas: {$machCount} (esperado >= 13)\n";
     echo "      ✓ Usuarios internos: {$usrCount} (esperado >= 6)\n";
     echo "      ✓ Repuestos activos: {$partsCount} (esperado >= 13)\n";
+    echo "      ✓ Ítems de checklist preventivo: {$checklistCount} (esperado >= 14)\n";
 
     // Las columnas que el listado de reintegros selecciona tienen que existir
     // aunque la tabla ya estuviera creada antes de que se declararan: son las
