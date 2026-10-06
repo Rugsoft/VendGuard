@@ -676,19 +676,28 @@ export const AdminUsersTab = {
                     </span>
                   </td>
 
-                  <!-- Carga de Averías Asignadas -->
+                  <!-- Carga de Averías Asignadas (+ garantía 48 h, solo informativa) -->
                   <td>
                     <template v-if="u.role === 'TECHNICIAN'">
-                      <span 
-                        v-if="Number(u.active_assigned_incidents_count || 0) > 0" 
-                        class="badge bg-warning text-dark fw-bold"
-                        :title="u.active_assigned_incidents_count + ' averías asignadas pendientes'"
-                      >
-                        ⚠️ {{ u.active_assigned_incidents_count }} avería(s)
-                      </span>
-                      <span v-else class="badge bg-success-subtle text-success">
-                        0 pendientes
-                      </span>
+                      <div class="d-flex flex-column align-items-start gap-1">
+                        <span 
+                          v-if="Number(u.active_assigned_incidents_count || 0) > 0" 
+                          class="badge bg-warning text-dark fw-bold"
+                          :title="u.active_assigned_incidents_count + ' averías asignadas pendientes'"
+                        >
+                          ⚠️ {{ u.active_assigned_incidents_count }} avería(s)
+                        </span>
+                        <span v-else class="badge bg-success-subtle text-success">
+                          0 pendientes
+                        </span>
+                        <span 
+                          v-if="Number(u.warranty_incidents_count || 0) > 0" 
+                          class="badge bg-info-subtle text-info border border-info-subtle"
+                          :title="u.warranty_incidents_count + ' avería(s) resuelta(s) por el técnico en garantía de 48 h. Informativo: no es carga pendiente ni bloquea la baja.'"
+                        >
+                          🛡️ {{ u.warranty_incidents_count }} en garantía 48h
+                        </span>
+                      </div>
                     </template>
                     <template v-else>
                       <span class="text-muted small">-</span>

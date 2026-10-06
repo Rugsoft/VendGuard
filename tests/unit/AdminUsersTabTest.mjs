@@ -75,6 +75,7 @@ const mockUsers = [
     phone: '677998811',
     is_active: true,
     active_assigned_incidents_count: 2, // Con averías activas asignadas
+    warranty_incidents_count: 0, // Sin averías en ventana de garantía
     created_at: '2026-09-01 08:00:00'
   },
   {
@@ -86,6 +87,7 @@ const mockUsers = [
     phone: '655443322',
     is_active: true,
     active_assigned_incidents_count: 0, // Sin averías asignadas
+    warranty_incidents_count: 1, // Una avería RESOLVED en ventana de garantía 48h (solo informativo)
     created_at: '2026-09-05 10:00:00'
   },
   {
@@ -350,6 +352,7 @@ console.log('\n--- BLOQUE 6: Diálogo de Baja Lógica y Bloqueos (EARS 3.5, 3.6,
 
   assert('6.7 canConfirmDeactivate es true para técnico sin averías y con guardia mínima cubierta', comp.canConfirmDeactivate === true);
   assert('6.8 deactivateWarning está vacío cuando la baja está permitida', comp.deactivateWarning === '');
+  assert('6.8b La avería en garantía 48h de Lucas (informativa, sin pendientes) NO bloquea su baja', Number(freeTechnician.warranty_incidents_count || 0) === 1 && comp.canConfirmDeactivate === true);
 
   let deactivatedUserId = null;
   api.admin.deactivateUser = async (id) => {
@@ -391,6 +394,9 @@ console.log('\n--- BLOQUE 7: Reactivación y Template HTML ---');
   assert('7.5 Template contiene modal de edición con inmutabilidad de email y rol', template.includes('Correo Electrónico (Inmutable)') && template.includes('Rol Operativo (Inmutable)'));
   assert('7.6 Template contiene modal de reseteo de contraseña', template.includes('Restablecer Contraseña') && template.includes('resetPasswordForm'));
   assert('7.7 Template contiene modal de confirmación de baja con advertencia interactiva', template.includes('Confirmar Baja Lógica de Personal') && template.includes('canConfirmDeactivate'));
+  assert('7.8 Template muestra chip informativo de garantía 48h junto a la carga', template.includes('warranty_incidents_count') && template.includes('en garantía 48h'));
+  assert('7.9 El chip de garantía se declara solo informativo (no es carga ni bloquea la baja)', template.includes('no es carga pendiente ni bloquea la baja'));
+  assert('7.10 El resumen global no mezcla garantías con averías pendientes (activeAssignedTroubles solo carga real)', comp.summaryMetrics.activeAssignedTroubles === 2);
 }
 
 // --------------------------------------------------------------------

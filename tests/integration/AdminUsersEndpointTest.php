@@ -103,6 +103,7 @@ $assert("2.4 Contiene nombre", isset($firstUser['name']));
 $assert("2.5 Contiene email", isset($firstUser['email']));
 $assert("2.6 Contiene role", isset($firstUser['role']));
 $assert("2.7 Contiene active_assigned_incidents_count", isset($firstUser['active_assigned_incidents_count']) || isset($firstUser['active_incidents_count']));
+$assert("2.7b Contiene warranty_incidents_count (contador informativo de garantía 48h)", isset($firstUser['warranty_incidents_count']) && is_int($firstUser['warranty_incidents_count']));
 
 // Filtro por rol TECHNICIAN
 $reqFilterTech = new Request('GET', '/api/coordinator/users', ['role' => 'TECHNICIAN'], [], ['authorization' => "Bearer {$coordinatorToken}"]);

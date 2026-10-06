@@ -29,7 +29,7 @@ Todos los endpoints administrativos requieren autenticación de Coordinador (`In
 | `PATCH` | `/api/coordinator/machines/{id}/deactivate` | Coordinador | Baja lógica de máquina (bloqueada si hay tickets activos o en garantía) |
 | `PATCH` | `/api/coordinator/machines/{id}/reactivate` | Coordinador | Reactivación de máquina (con reubicación obligatoria si su sede original está inactiva) |
 | **Personal Interno (Users)** | | | |
-| `GET` | `/api/coordinator/users` | Coordinador | Listado de técnicos y coordinadores (`role`, `status`, `search`) con carga de averías pendientes de trabajo (`ASSIGNED`/`IN_PROGRESS`/`PENDING_PARTS`) |
+| `GET` | `/api/coordinator/users` | Coordinador | Listado de técnicos y coordinadores (`role`, `status`, `search`) con carga de averías pendientes de trabajo (`ASSIGNED`/`IN_PROGRESS`/`PENDING_PARTS`) y contador informativo de garantía 48 h |
 | `POST` | `/api/coordinator/users` | Coordinador | Alta de usuario con credenciales seguras |
 | `PATCH` | `/api/coordinator/users/{id}` | Coordinador | Edición de nombre y teléfono corporativo |
 | `PATCH` | `/api/coordinator/users/{id}/reset-password` | Coordinador | Reseteo seguro de contraseña (mín. 8 caracteres) |
@@ -496,6 +496,8 @@ Lista el personal del sistema, permitiendo filtrar por rol y estado operativo, e
 
 > [!NOTE]
 > **Semántica de `active_assigned_incidents_count`:** cuenta exclusivamente las averías en `ASSIGNED`, `IN_PROGRESS` o `PENDING_PARTS` del técnico. Una avería `RESOLVED` en su ventana de garantía de 48 h sigue siendo un expediente activo de la máquina (`is_active_ticket = 1`, cierre automático pendiente), pero el trabajo del técnico ya está hecho y no vuelve a intervenir: si el consumidor reabre por garantía, `reopen()` desasigna al técnico y la avería regresa a triaje como `REOPENED`. Contarla como carga falsificaría el directorio y bloquearía la baja de un técnico sin trabajo pendiente. El mismo criterio gobierna el bloqueo de baja (§3.3.6).
+>
+> **Semántica de `warranty_incidents_count` (informativo, solo lectura):** averías `RESOLVED` del técnico dentro de su ventana de garantía de 48 h (`resolved_at >= NOW() - INTERVAL 48 HOUR`). No forma parte del bloqueo de baja ni de ningún cálculo de carga: es un dato de contexto para el coordinador (trabajo reciente del técnico aún en período de garantía).
 
 * **Parámetros Query:**
   * `role` *(opcional, default: `all`)*: `TECHNICIAN`, `COORDINATOR`, `all`.
@@ -516,6 +518,7 @@ Lista el personal del sistema, permitiendo filtrar por rol y estado operativo, e
       "phone": "677998811",
       "is_active": true,
       "active_assigned_incidents_count": 2,
+      "warranty_incidents_count": 1,
       "created_at": "2026-09-01 08:00:00",
       "updated_at": "2026-09-22 17:00:00"
     },

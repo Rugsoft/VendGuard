@@ -274,19 +274,33 @@ $assert("10.3 La avería RESOLVED en garantía sigue siendo expediente activo (i
 $assert("10.4 El conteo ignora la avería RESOLVED en garantía (sigue en 1, countActiveAssignedIncidents)", $userRepo->countActiveAssignedIncidents($newUserId) === 1);
 $assert("10.4b El conteo ignora la avería RESOLVED en garantía (countPendingIncidents)", $userRepo->countPendingIncidents($newUserId) === 1);
 
-// El listado del directorio (findAll) tampoco debe contarla como carga.
+// El listado del directorio (findAll) tampoco debe contarla como carga y expone el
+// contador informativo de garantía 48h (solo lectura, no bloquea la baja).
 $listedCount = null;
+$listedWarrantyCount = null;
 foreach ($userRepo->findAll() as $row) {
     if ((int)$row['id'] === $newUserId) {
         $listedCount = (int)$row['active_assigned_incidents_count'];
+        $listedWarrantyCount = (int)($row['warranty_incidents_count'] ?? -1);
     }
 }
 $assert("10.5 findAll() reporta carga 1 en el directorio con la avería RESOLVED en garantía", $listedCount === 1);
+$assert("10.5b findAll() expone warranty_incidents_count = 1 (informativo, solo lectura)", $listedWarrantyCount === 1);
 
 // Cerrar la incidencia
 $pdo->prepare("UPDATE `incidents` SET `status` = 'CLOSED', `closed_at` = CURRENT_TIMESTAMP WHERE `id` = :id")
     ->execute([':id' => $assignedIncId]);
 $assert("10.6 Detecta 0 incidencias activas tras CLOSED (la RESOLVED tampoco cuenta)", $userRepo->countActiveAssignedIncidents($newUserId) === 0);
+
+// El contador informativo de garantía permanece mientras la RESOLVED siga dentro de
+// las 48 h, y sigue sin formar parte del bloqueo de baja.
+$warrantyAfterClose = null;
+foreach ($userRepo->findAll() as $row) {
+    if ((int)$row['id'] === $newUserId) {
+        $warrantyAfterClose = (int)($row['warranty_incidents_count'] ?? -1);
+    }
+}
+$assert("10.6b La garantía informativa persiste tras CLOSED de la otra avería (warranty_incidents_count = 1)", $warrantyAfterClose === 1);
 
 // Limpieza de incidencias y máquinas temporales
 TestDataCleaner::purgeIncident($pdo, (int)$assignedIncId);

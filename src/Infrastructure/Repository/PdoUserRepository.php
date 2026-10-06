@@ -346,6 +346,12 @@ class PdoUserRepository implements UserRepositoryInterface
      * Contarlas como carga falsificaría el directorio y bloquearía la baja de un
      * técnico que ya no tiene nada pendiente.
      *
+     * Junto a la carga se expone `warranty_incidents_count`, un contador puramente
+     * informativo (solo lectura) con las averías `RESOLVED` dentro de su ventana de
+     * garantía de 48 h (`resolved_at >= NOW() - INTERVAL 48 HOUR`). No forma parte
+     * del bloqueo de baja: el trabajo del técnico ya está hecho y `reopen()` desasigna
+     * al técnico si el consumidor reabre por garantía.
+     *
      * @param array<string, mixed> $filters
      * @return array<array<string, mixed>>
      */
@@ -362,7 +368,8 @@ class PdoUserRepository implements UserRepositoryInterface
                 u.`created_at`,
                 u.`updated_at`,
                 u.`deleted_at`,
-                COALESCE(inc.active_count, 0) AS `active_assigned_incidents_count`
+                COALESCE(inc.active_count, 0) AS `active_assigned_incidents_count`,
+                COALESCE(war.warranty_count, 0) AS `warranty_incidents_count`
             FROM `users` u
             LEFT JOIN (
                 SELECT `assigned_technician_id`, COUNT(*) as `active_count`
@@ -371,6 +378,14 @@ class PdoUserRepository implements UserRepositoryInterface
                   AND `status` IN ('ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS')
                 GROUP BY `assigned_technician_id`
             ) inc ON inc.`assigned_technician_id` = u.`id`
+            LEFT JOIN (
+                SELECT `assigned_technician_id`, COUNT(*) as `warranty_count`
+                FROM `incidents`
+                WHERE `deleted_at` IS NULL
+                  AND `status` = 'RESOLVED'
+                  AND `resolved_at` >= DATE_SUB(NOW(), INTERVAL 48 HOUR)
+                GROUP BY `assigned_technician_id`
+            ) war ON war.`assigned_technician_id` = u.`id`
             WHERE 1=1
         ";
 
@@ -418,6 +433,7 @@ class PdoUserRepository implements UserRepositoryInterface
                 'phone'                           => $row['phone'] !== null ? (string)$row['phone'] : null,
                 'is_active'                       => (bool)$row['is_active'] && $row['deleted_at'] === null,
                 'active_assigned_incidents_count' => (int)$row['active_assigned_incidents_count'],
+                'warranty_incidents_count'        => (int)$row['warranty_incidents_count'],
                 'created_at'                      => (string)$row['created_at'],
                 'updated_at'                      => $row['updated_at'] !== null ? (string)$row['updated_at'] : null,
                 'deleted_at'                      => $row['deleted_at'] !== null ? (string)$row['deleted_at'] : null,
