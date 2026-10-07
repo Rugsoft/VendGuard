@@ -104,7 +104,9 @@ Para cumplir con el requerimiento de carga rápida ($< 250\text{ ms}$, RNF-02) y
       "location_name": "Hospital del Mar",
       "status": "IN_PROGRESS",
       "status_label": "En Reparación",
-      "is_sealed": false
+      "is_sealed": false,
+      "can_comment": true,
+      "read_only_reason": null
     },
     "pagination": {
       "total_comments": 4,
@@ -156,7 +158,9 @@ Para cumplir con el requerimiento de carga rápida ($< 250\text{ ms}$, RNF-02) y
       "location_name": "Hospital del Mar",
       "status": "IN_PROGRESS",
       "status_label": "En Reparación",
-      "is_sealed": false
+      "is_sealed": false,
+      "can_comment": true,
+      "read_only_reason": null
     },
     "pagination": {
       "total_comments": 5,
@@ -475,7 +479,9 @@ Diseñado siguiendo los **Tokens Docker** de `docs/design.md`:
 * **Pie Fijo / Formulario de Envío:**
   * Si la conversación está sellada (`is_sealed == true`):
     * Recuadro informativo gris de solo lectura: *"Expediente archivado: conversación sellada por auditoría"*.
-  * Si la conversación está abierta:
+  * Si `can_comment == false` sin sellado (`read_only_reason == "REOPENED_AWAITING_REASSIGNMENT"`, RF-05.4):
+    * Recuadro informativo ámbar tenue de solo lectura, sin formulario: *"Expediente reabierto pendiente de reasignación: el historial se mantiene consultable"*.
+  * Si la conversación está abierta (`can_comment == true`):
     * **Selector de Privacidad Reactivo (Solo Técnicos y Coordinadores):**
       * Opción 1: `🔒 Nota Interna de Taller (Confidencial)` [**Preseleccionada por defecto**, RF-03.3].
       * Opción 2: `🌐 Mensaje para Sede (Público)`.

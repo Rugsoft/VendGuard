@@ -140,6 +140,8 @@ Establecer un **Canal Unificado de Conversación Bidireccional** dentro del expe
   MIENTRAS la incidencia se encuentre resuelta (`RESOLVED`) dentro de la ventana de garantía de 48 horas (Art. V.6), el sistema DEBE permitir que la sede, el técnico y el coordinador sigan aportando comentarios de seguimiento.
 * **RF-05.3 [EARS - Estado]:**  
   MIENTRAS la incidencia se encuentre en estado cerrado definitivo (`CLOSED`) o cancelada (`CANCELLED`), el sistema DEBE sellar el hilo de conversación en **modo estrictamente de solo lectura**, deshabilitando el formulario de envío y mostrando un aviso de *"Expediente archivado: conversación sellada por auditoría"*.
+* **RF-05.4 [EARS - Estado]:**  
+  MIENTRAS la incidencia se encuentre reabierta en garantía (`REOPENED`) y **sin técnico asignado** (desasignación obligatoria de la reapertura, EARS 9.1), el sistema DEBE conceder al técnico que intervino previamente en el expediente acceso de **solo lectura** al hilo, con las mismas reglas de proyección de su canal (comentarios públicos y notas internas de taller), bloqueando la publicación hasta que coordinación le reasigne el expediente. El acceso de lectura no se concede a ningún otro técnico: leer el hilo no constituye responsabilidad activa sobre la avería (Art. V · Un único técnico responsable activo por incidencia).
 
 ---
 
@@ -192,6 +194,8 @@ Establecer un **Canal Unificado de Conversación Bidireccional** dentro del expe
    Si dos usuarios envían mensajes casi simultáneamente, el sistema los ordena inequívocamente por su marca temporal de registro en servidor (`created_at`) con precisión de milisegundos.
 6. **Reporte iniciado por código QR Ciudadano:**  
    Si la avería se originó por escaneo QR de un consumidor anónimo, el seguimiento público por QR no muestra el hilo de conversación; el diálogo se reserva exclusivamente a la Sede (autenticada por código de centro) y al servicio técnico.
+7. **Reapertura en garantía sin técnico asignado:**  
+   Al reabrir, el expediente se desasigna y regresa a triaje de coordinación, por lo que desaparece de la ruta del técnico. Quien intervino previamente (acreditado por el historial inmutable de estados, `incident_history`) conserva el hilo en **modo de solo lectura**: consulta íntegra con su proyección habitual y sin formulario de envío, con el aviso *"Expediente reabierto pendiente de reasignación: el historial se mantiene consultable"*. Un técnico que no intervino en el expediente recibe `403 NOT_ASSIGNED_TO_TECHNICIAN` tanto en lectura como en publicación. La publicación se restablece únicamente cuando coordinación reasigna el expediente.
 
 ---
 

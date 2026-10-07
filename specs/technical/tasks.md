@@ -143,7 +143,7 @@
 - [x] **T-24: Endpoint de Reapertura en Ventana de Garantía (`POST /reopen`)**
   * **Requisitos:** `RF-09` (EARS 9.1, 9.2, 9.3)
   * **Dependencias:** T-14
-  * **Hecho cuando:** `POST /api/incidents/{ticket_code}/reopen` pasa el estado a `REABIERTA`, pone `assigned_technician_id = NULL`, reinicia el reloj de 48h, rechaza si han pasado >48h (HTTP 422) y bloquea con "Avería Crónica" a la 3ª reincidencia.
+  * **Hecho cuando:** `POST /api/incidents/{ticket_code}/reopen` pasa el estado al canónico `REOPENED` (etiqueta legible `Reabierta` en `status_label`), pone `assigned_technician_id = NULL`, reinicia el reloj de 48h, anota el evento inmutable `REOPEN_TICKET` en `audit_log` (EARS 5.1.2), rechaza si han pasado >48h (HTTP 422) y bloquea con "Avería Crónica" a la 3ª reincidencia.
 
 - [x] **T-25: Endpoint de Bandeja Global del Coordinador (`CoordinatorController.php`)**
   * **Requisitos:** `RF-05`, `RF-11`

@@ -36,7 +36,7 @@ sequenceDiagram
     Tech->>API: 12. POST /resolve (Diagnóstico >= 20 chars, Solución >= 20 chars)
     Note over API,DB: Estado: RESUELTA. Reloj garantía 48h activo
     Resp->>API: 13. POST /reopen (Fallo recurrente dentro de 48h)
-    Note over API,DB: Estado: REABIERTA. Técnico desasignado. Reloj 48h reiniciado
+    Note over API,DB: Estado: REOPENED. Técnico desasignado. Reloj 48h reiniciado. Evento REOPEN_TICKET en audit_log
 ```
 
 ---
@@ -82,8 +82,9 @@ sequenceDiagram
 1. **Consulta en el portal:** `GET /api/locations/SEDE-BCN-01/machines`. La máquina aparece con estado `RESUELTA` bajo garantía de 48 horas.
 2. **Reapertura de la avería (RF-09 / EARS 9.1):** `POST /api/incidents/{ticket_code}/reopen` aportando motivo justificado de persistencia del fallo.
    * **Resultado:** HTTP 200 OK.
-   * **Reglas de Desasignación y Reloj:** El estado pasa a `REABIERTA` (`REOPENED`), `assigned_technician_id` pasa a `null` para nuevo triaje y el reloj de 48 horas se reinicia a 0 (`resolved_at = null`).
-3. **Auditabilidad Inmutable (Art. III):** Comprobación en `incident_history` del registro secuencial inalterado de todos los estados: `REGISTERED` ➔ `ASSIGNED` ➔ `IN_PROGRESS` ➔ `RESOLVED` ➔ `REOPENED`.
+   * **Contrato de estado:** el payload devuelve `status: "REOPENED"` (canónico, común a toda la API) y la etiqueta legible en `status_label: "Reabierta"`.
+   * **Reglas de Desasignación y Reloj:** El estado pasa a `REOPENED`, `assigned_technician_id` pasa a `null` para nuevo triaje y el reloj de 48 horas se reinicia a 0 (`resolved_at = null`).
+3. **Auditabilidad Inmutable (Art. III):** Comprobación en `incident_history` del registro secuencial inalterado de todos los estados: `REGISTERED` ➔ `ASSIGNED` ➔ `IN_PROGRESS` ➔ `RESOLVED` ➔ `REOPENED`. La reapertura deja además su evento inmutable `REOPEN_TICKET` en `audit_log` (`user_role = SITE_MANAGER`), que es el que alimenta el filtro *"Reapertura de Ticket"* del visor de auditoría (EARS 5.1.2).
 
 ---
 

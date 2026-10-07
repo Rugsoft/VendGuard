@@ -267,9 +267,11 @@ ALGORITMO reopenIncident(ticketCode, reasonText):
     FIN SI
 
     // Transicionar estado y desasignar técnico (Cumplimiento Art. V.3)
+    // El estado persistido es el canónico; la etiqueta "Reabierta" solo se deriva al serializar.
     PdoIncidentRepository.update(incident.id, {
-        status: "REABIERTA",
-        assignedTechnicianId: NULL,     // Desasignación obligatoria
+        status: "REOPENED",
+        assignedTechnicianId: NULL,     // Desasignación obligatoria (EARS 9.1)
+        resolvedAt: NULL,               // Reinicio del reloj de garantía de 48 h
         reopenedAt: AHORA_UTC(),
         reopenReason: reasonText
     })
@@ -278,11 +280,24 @@ ALGORITMO reopenIncident(ticketCode, reasonText):
         incident.id, 
         NULL, 
         "RESOLVED", 
-        "REABIERTA", 
+        "REOPENED", 
         "Reapertura solicitada por cliente (" + (reopenCount + 1) + "ª reincidencia). Motivo: " + reasonText
     )
 
     CONFIRMAR TRANSACCIÓN
+
+    // Evento inmutable de auditoría del cambio de estado (EARS 5.1.2).
+    // Se emite tras el commit, igual que INCIDENT_ASSIGNED en el triaje: la ventana entre
+    // el commit y la inserción del evento es una limitación conocida, no atómica con la reapertura.
+    AuditLogger.logTicketEvent(
+        ticketId: incident.id,
+        action: "REOPEN_TICKET",
+        user: {id: NULL, role: "SITE_MANAGER", name: "Responsable de Sede · " + incident.sedeNombre},
+        previousState: {status: "RESOLVED", assigned_technician_id: tecnicoSaliente, resolved_at: resolvedAt},
+        newState: {status: "REOPENED", assigned_technician_id: NULL, reopen_reason: reasonText, reopened_at: AHORA_UTC()},
+        metadata: {ticket_code: incident.ticketCode, reopen_count: reopenCount + 1}
+    )
+
     RETORNAR incident
 FIN ALGORITMO
 ```

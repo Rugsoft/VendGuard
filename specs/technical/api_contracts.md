@@ -247,14 +247,32 @@ Solicita una segunda intervención si la máquina vuelve a fallar tras la repara
   "success": true,
   "data": {
     "ticket_code": "INC-2026-0004",
-    "status": "REABIERTA",
-    "reopened_at": "2026-09-22T15:30:00Z"
+    "status": "REOPENED",
+    "status_label": "Reabierta",
+    "status_canonical": "REOPENED",
+    "assigned_technician_id": null,
+    "reopened_at": "2026-09-22T15:30:00Z",
+    "reopen_reason": "El técnico se marchó hace 2 horas pero al introducir monedas de 1 euro las sigue expulsando."
   },
   "message": "Incidencia reabierta con éxito y enviada a triaje de coordinación."
 }
 ```
+> **Contrato de estado (normalizado):** el campo `status` de **todos** los endpoints de la API transporta el enumerado canónico
+> (`REGISTERED`, `ASSIGNED`, `IN_PROGRESS`, `PENDING_PARTS`, `RESOLVED`, `REOPENED`, `CLOSED`, `CANCELLED`) y la etiqueta legible
+> en castellano viaja siempre en `status_label`. `status_canonical` se conserva como **alias deprecado** de `status` durante una
+> versión para no romper a los clientes que ya lo consumían; su uso en código nuevo está desaconsejado.
+> **Efectos obligatorios de la reapertura (EARS 9.1):** `assigned_technician_id = NULL`, `assigned_at = NULL`, `resolved_at = NULL`,
+> `reopened_at = ahora` y reinicio del reloj de garantía de 48 h. La transición queda registrada en `incident_history`
+> (`RESOLVED → REOPENED`) y el evento inmutable **`REOPEN_TICKET`** se anota en `audit_log`
+> (`user_role = SITE_MANAGER`, `new_state.status = REOPENED`), dando cumplimiento a EARS 5.1.2 de
+> [metrics_audit_spec.md](../functional/metrics_audit_spec.md).
 * **Errores de Validación / Negocio:**
+  * `400 Unprocessable` (`MISSING_REOPEN_REASON`): falta el motivo descriptivo de la reapertura.
+  * `401 Unauthorized` (`UNAUTHORIZED`): no se ha podido verificar la sede autenticada.
+  * `403 Forbidden` (`SITE_MISMATCH`): el expediente pertenece a otra sede.
   * `422 Unprocessable` (`REOPEN_WINDOW_EXPIRED`): **EARS 9.2.** Han transcurrido más de 48 horas desde la resolución.
+  * `422 Unprocessable` (`REOPEN_REASON_TOO_SHORT`): el motivo no alcanza los 5 caracteres descriptivos.
+  * `422 Unprocessable` (`CHRONIC_INCIDENT_LIMIT`): **EARS 9.3.** Tercera reincidencia consecutiva: expediente marcado como *Avería Crónica*.
 
 ---
 
