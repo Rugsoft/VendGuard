@@ -73,7 +73,7 @@
   * **Dependencias:** T-COM-09
   * **Hecho cuando:** El modal presenta los mensajes cronológicamente: (1) comentarios públicos en bocadillos grises neutros (o azul suave para mensajes propios); (2) notas internas confidenciales con fondo ámbar `#fef9c3`, borde `#fde047`, distintivo con icono de candado SVG y etiqueta `🔒 Nota Interna de Taller (Confidencial)`; (3) miniaturas fotográficas con visor modal ampliable; (4) auto-scroll al mensaje más reciente al cargar; y (5) botón superior *"Cargar mensajes anteriores"* que recupera bloques previos preservando el punto de lectura visual sin saltos.
 
-- [ ] **T-COM-11: Formulario reactivo de redacción, selector de privacidad por defecto y adjuntos fotográficos**
+- [x] **T-COM-11: Formulario reactivo de redacción, selector de privacidad por defecto y adjuntos fotográficos**
   * **Requisitos:** RF-03.1, RF-03.2, RF-03.3, RF-04.1, RF-04.5
   * **Dependencias:** T-COM-10
   * **Hecho cuando:** El formulario en el pie del modal incluye: (1) selector reactivo de privacidad para técnicos y coordinadores con la opción `"Nota Interna de Taller"` **preseleccionada por defecto** (y completamente ausente para responsables de sede); (2) área de texto con contador reactivo de caracteres restantes (5 a 1.000), bloqueando el botón de envío si el texto es inferior a 5 caracteres; (3) selector de fotografía con previsualización en miniatura y botón para retirarla antes del envío; y (4) indicador visual de carga (spinner) deshabilitando el botón durante la subida.
