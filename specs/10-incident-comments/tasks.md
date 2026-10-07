@@ -126,7 +126,7 @@
   * **Dependencias:** T-COM-08
   * **Hecho cuando:** La ejecución de `php tests/integration/CoordinatorCommentsApiTest.php` pasa al 100% en verde comprobando: publicación de comentarios y notas internas de coordinación, e inserción inmutable de eventos `INCIDENT_COMMENT_ADDED` en la tabla `audit_log` con el identificador del coordinador, código del ticket y visibilidad correspondiente.
 
-- [ ] **T-COM-20: Implementar pruebas de blindaje constitucional (`IncidentCommentsConstitutionalTest.php`) y verificación de regresión global**
+- [x] **T-COM-20: Implementar pruebas de blindaje constitucional (`IncidentCommentsConstitutionalTest.php`) y verificación de regresión global**
   * **Requisitos:** Artículos I al VII de constitution.md, RNF-01 a RNF-06
   * **Dependencias:** T-COM-17, T-COM-18, T-COM-19
   * **Hecho cuando:**
