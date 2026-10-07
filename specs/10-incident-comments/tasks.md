@@ -92,7 +92,7 @@
   * **Dependencias:** T-COM-08
   * **Hecho cuando:** `public/assets/js/api.js` implementa métodos normalizados tipados: (1) `api.incidents.getComments(ticketCode, { limit, beforeId })` y `api.incidents.addComment(ticketCode, formDataOrJson)`; (2) `api.technician.getComments(incidentId, { limit, beforeId })` y `api.technician.addComment(incidentId, formData)`; (3) `api.coordinator.getComments(incidentId, { limit, beforeId })` y `api.coordinator.addComment(incidentId, formDataOrJson)`.
 
-- [ ] **T-COM-14: Integrar insignia reactiva y modal en `MachineCard.js` y `LocationPortalView.js`**
+- [x] **T-COM-14: Integrar insignia reactiva y modal en `MachineCard.js` y `LocationPortalView.js`**
   * **Requisitos:** RF-01.1, RF-02.1
   * **Dependencias:** T-COM-12, T-COM-13
   * **Hecho cuando:** (1) `MachineCard.js` renderiza una insignia interactiva con icono de diálogo y contador numérico contabilizando **únicamente comentarios públicos** (`public_comments_count`); (2) al pulsar la insignia o el botón de conversación, emite el evento para abrir `IncidentCommentThreadModal` con rol `SITE_MANAGER`; y (3) al emitirse un nuevo comentario, `LocationPortalView.js` recarga el estado de las máquinas actualizando reactivamente el contador.

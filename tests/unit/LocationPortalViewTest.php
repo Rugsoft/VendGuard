@@ -73,10 +73,13 @@ $assert("2.2 Aplica radio de 4px en botones interactivos (--radius-interactive)"
     strpos($cardContent, "var(--radius-interactive, 4px)") !== false
 );
 
+// Módulo 10 (T-COM-14): el botón genérico de comentarios se sustituye por la insignia
+// de conversación que abre el hilo del expediente (plan.md §4.2.A).
 $assert("2.3 Distingue visualmente máquinas con aviso activo bloqueando nuevos reportes",
     strpos($cardContent, "hasActiveIncident") !== false &&
     strpos($cardContent, "Avería en curso. No es posible abrir un nuevo ticket") !== false &&
-    strpos($cardContent, "Añadir comentarios / fotos") !== false
+    strpos($cardContent, "vg-conversation-badge") !== false &&
+    strpos($cardContent, "Conversación") !== false
 );
 
 $assert("2.4 Dispone de botón de reporte para máquinas totalmente operativas",

@@ -6,6 +6,12 @@
  * - 8px card container border radius (--radius-card).
  * - 4px interactive button/badge border radius (--radius-interactive).
  * - Immediate visual distinction between operational machines and machines with active incidents (RF-02).
+ *
+ * Módulo 10 (T-COM-14): cada avería activa (en curso o en garantía) expone una
+ * insignia interactiva de conversación con el recuento numérico de comentarios
+ * PÚBLICOS (`active_incident.public_comments_count`). El total de mensajes jamás
+ * se lee en este canal: contabilizar notas internas revelaría su existencia al
+ * Responsable de Sede (RF-01.1, RF-02.1, Constitución Art. V.4).
  */
 
 import { IncidentBadge } from './IncidentBadge.js';
@@ -30,7 +36,7 @@ export const MachineCard = {
       required: true
     }
   },
-  emits: ['report', 'comment', 'reopen', 'select'],
+  emits: ['report', 'open-comments', 'reopen', 'select'],
   computed: {
     activeIncident() {
       return this.machine?.active_incident || null;
@@ -57,14 +63,34 @@ export const MachineCard = {
         return '#fca5a5'; // Light red outline for active incident
       }
       return 'var(--color-hairline, #c8cfda)';
+    },
+    /**
+     * Contador de la insignia de conversación. Lee EXCLUSIVAMENTE el recuento
+     * segregado de comentarios públicos (`public_comments_count`) que la API
+     * entrega al canal de sede (RF-01.1, RNF-01, Art. V.4).
+     */
+    publicCommentsCount() {
+      const raw = this.activeIncident?.public_comments_count;
+      const parsed = Number.parseInt(raw, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    },
+    /**
+     * Etiqueta accesible de la insignia, con el recuento público ya resuelto.
+     */
+    conversationBadgeLabel() {
+      return `Conversación (${this.publicCommentsCount})`;
     }
   },
   methods: {
     handleReportClick() {
       this.$emit('report', this.machine);
     },
-    handleCommentClick() {
-      this.$emit('comment', this.machine);
+    /**
+     * Abre el hilo de conversación del expediente activo (RF-01.2). La vista que
+     * contiene la tarjeta monta el modal con el canal 'SITE_MANAGER'.
+     */
+    handleOpenComments() {
+      this.$emit('open-comments', this.machine);
     },
     handleReopenClick() {
       this.$emit('reopen', this.machine);
@@ -213,34 +239,67 @@ export const MachineCard = {
           Reportar avería
         </button>
 
-        <!-- If ongoing incident -> Add comment/photos button -->
+        <!-- If ongoing incident -> Conversation badge with public comment count (RF-01.1) -->
         <button
           v-else-if="hasActiveIncident && !isUnderWarranty"
           type="button"
-          class="vg-btn vg-btn-secondary"
-          style="width: 100%; border-radius: var(--radius-interactive, 4px); font-size: 13px;"
-          @click="handleCommentClick"
+          class="vg-btn vg-btn-secondary vg-conversation-badge"
+          data-testid="machine-card-comments-badge"
+          :aria-label="conversationBadgeLabel"
+          style="width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: var(--radius-interactive, 4px); font-size: 13px;"
+          @click="handleOpenComments"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
           </svg>
-          Añadir comentarios / fotos
+          Conversación
+          <span
+            class="vg-conversation-badge__count"
+            data-testid="machine-card-comments-count"
+            style="display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 18px; padding: 0 5px; border-radius: var(--radius-interactive, 4px); background-color: var(--color-primary, #2560ff); color: #ffffff; font-family: var(--font-body, Inter, sans-serif); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;"
+          >
+            {{ publicCommentsCount }}
+          </span>
         </button>
 
-        <!-- If resolved within warranty -> Reopen button -->
-        <button
+        <!-- If resolved within warranty -> Reopen button + Conversation badge -->
+        <div
           v-else-if="hasActiveIncident && isUnderWarranty"
-          type="button"
-          class="vg-btn vg-btn-secondary"
-          style="width: 100%; border-radius: var(--radius-interactive, 4px); font-size: 13px; color: #b91c1c; border-color: #fca5a5;"
-          @click="handleReopenClick"
+          style="display: flex; flex-direction: column; gap: 8px;"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;" aria-hidden="true">
-            <polyline points="1 4 1 10 7 10"></polyline>
-            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
-          </svg>
-          Reabrir incidencia
-        </button>
+          <button
+            type="button"
+            class="vg-btn vg-btn-secondary"
+            style="width: 100%; border-radius: var(--radius-interactive, 4px); font-size: 13px; color: #b91c1c; border-color: #fca5a5;"
+            @click="handleReopenClick"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;" aria-hidden="true">
+              <polyline points="1 4 1 10 7 10"></polyline>
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+            </svg>
+            Reabrir incidencia
+          </button>
+          <button
+            type="button"
+            class="vg-btn vg-btn-secondary vg-conversation-badge"
+            data-testid="machine-card-comments-badge"
+            :aria-label="conversationBadgeLabel"
+            style="width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: var(--radius-interactive, 4px); font-size: 13px;"
+            @click="handleOpenComments"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+            Conversación
+            <span
+              class="vg-conversation-badge__count"
+              data-testid="machine-card-comments-count"
+              style="display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 18px; padding: 0 5px; border-radius: var(--radius-interactive, 4px); background-color: var(--color-primary, #2560ff); color: #ffffff; font-family: var(--font-body, Inter, sans-serif); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;"
+            >
+              {{ publicCommentsCount }}
+            </span>
+          </button>
+        </div>
       </div>
     </div>
   `

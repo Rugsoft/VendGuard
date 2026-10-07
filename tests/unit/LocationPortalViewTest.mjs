@@ -191,7 +191,10 @@ console.log('\n--- Group 3: Prevention of Duplicates & Contextual Actions (RF-02
 
 // Check MachineCard template conditional buttons
 assert('3.1 Operational machine displays "Reportar avería" primary button', MachineCard.template.includes('Reportar avería') && MachineCard.template.includes('vg-btn-primary'));
-assert('3.2 Machine with active incident blocks new report and displays "Añadir comentarios / fotos"', MachineCard.template.includes('Añadir comentarios / fotos'));
+// Módulo 10 (T-COM-14): el botón genérico de comentarios se sustituye por la
+// insignia de conversación que abre el hilo del expediente (plan.md §4.2.A).
+assert('3.2 Machine with active incident blocks new report and displays the "Conversación" comments badge',
+  MachineCard.template.includes('vg-conversation-badge') && MachineCard.template.includes('Conversación'));
 assert('3.3 Machine with active incident explains duplicate block', MachineCard.template.includes('No es posible abrir un nuevo ticket para esta máquina'));
 assert('3.4 Machine under warranty provides "Reabrir incidencia" button', MachineCard.template.includes('Reabrir incidencia'));
 
@@ -207,8 +210,8 @@ assert('3.5 Clicking report button emits "report" event with machine data', emit
 
 emittedCardEvents = [];
 mockCardInstance.machine = mockMachines[1];
-MachineCard.methods.handleCommentClick.call(mockCardInstance);
-assert('3.6 Clicking comment button emits "comment" event with machine data', emittedCardEvents.some(e => e.evt === 'comment' && e.val.id === 2));
+MachineCard.methods.handleOpenComments.call(mockCardInstance);
+assert('3.6 Clicking the comments badge emits "open-comments" event with machine data', emittedCardEvents.some(e => e.evt === 'open-comments' && e.val.id === 2));
 
 emittedCardEvents = [];
 mockCardInstance.machine = mockMachines[2];

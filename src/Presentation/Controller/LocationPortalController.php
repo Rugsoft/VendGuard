@@ -152,11 +152,40 @@ class LocationPortalController
                 'machine_type' => $machine->getMachineType()->value,
                 'floor_wing' => $machine->getFloorWing(),
                 'notes' => $machine->getNotes(),
-                'active_incident' => $this->sanitizeIncidentForSite($machine->getActiveIncident()),
+                'active_incident' => $this->withPublicCommentsCount(
+                    $this->sanitizeIncidentForSite($machine->getActiveIncident())
+                ),
             ];
         }, $machines);
 
         return Response::json($payload, 200);
+    }
+
+    /**
+     * Anexa a la avería activa el recuento segregado de comentarios PÚBLICOS que
+     * alimenta la insignia de conversación de la tarjeta de máquina (RF-01.1).
+     *
+     * La sede nunca recibe el total de mensajes: un recuento que incluyera notas
+     * internas delataría su existencia al Responsable de Ubicación (RF-02.1,
+     * RNF-01, Constitución Art. V.4). El cálculo se delega en el repositorio, que
+     * resuelve el `COUNT(*)` filtrado (`is_internal = 0`) sobre el índice
+     * `idx_comments_incident` (T-COM-02).
+     *
+     * @param array<string, mixed>|null $incident Avería activa ya saneada; `null` si la máquina está operativa.
+     * @return array<string, mixed>|null
+     */
+    private function withPublicCommentsCount(?array $incident): ?array
+    {
+        if ($incident === null) {
+            return null;
+        }
+
+        $incidentId = (int)($incident['id'] ?? 0);
+        $incident['public_comments_count'] = $incidentId > 0
+            ? $this->incidentRepo->countComments($incidentId, false)
+            : 0;
+
+        return $incident;
     }
 
     /**

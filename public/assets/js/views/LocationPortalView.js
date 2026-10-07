@@ -15,6 +15,7 @@
 import { api } from '../api.js';
 import { store } from '../store.js';
 import { MachineCard } from '../components/MachineCard.js';
+import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';
 import { IncidentReportModal } from '../components/IncidentReportModal.js';
 import { ReopenTicketModal } from '../components/ReopenTicketModal.js';
 import { SiteSanitaryStatusTab } from '../components/SiteSanitaryStatusTab.js';
@@ -26,6 +27,7 @@ export const LocationPortalView = {
   name: 'LocationPortalView',
   components: {
     MachineCard,
+    IncidentCommentThreadModal,
     IncidentReportModal,
     ReopenTicketModal,
     SiteSanitaryStatusTab,
@@ -33,7 +35,7 @@ export const LocationPortalView = {
     SiteGlobalCertificateModal,
     LocationRefundsTab
   },
-  emits: ['report-incident', 'add-comment', 'reopen-incident'],
+  emits: ['report-incident', 'open-comments', 'reopen-incident'],
   data() {
     return {
       siteCodeInput: '',
@@ -46,6 +48,7 @@ export const LocationPortalView = {
       activeFilter: 'all', // 'all' | 'incident' | 'operational'
       selectedMachine: null,
       showReportModal: false,
+      showCommentsModal: false,
       showReopenModal: false,
       showSanitaryCertModal: false,
       showGlobalCertModal: false,
@@ -76,6 +79,24 @@ export const LocationPortalView = {
     },
     operationalCount() {
       return this.machines.filter(m => m.active_incident === null).length;
+    },
+    /**
+     * Avería activa cuya tarjeta abrió el hilo de conversación (Módulo 10).
+     */
+    activeCommentIncident() {
+      return this.selectedMachine?.active_incident || null;
+    },
+    /**
+     * Identificador numérico del expediente abierto en el hilo de conversación.
+     */
+    activeCommentIncidentId() {
+      return this.activeCommentIncident?.id ?? null;
+    },
+    /**
+     * Código de ticket visible del expediente abierto en el hilo.
+     */
+    activeCommentTicketCode() {
+      return this.activeCommentIncident?.ticket_code ?? null;
     }
   },
   mounted() {
@@ -142,10 +163,25 @@ export const LocationPortalView = {
       this.$emit('report-incident', machine);
     },
 
-    onComment(machine) {
+    /**
+     * Abre el hilo de conversación del expediente activo desde la insignia de la
+     * tarjeta (RF-01.1, RF-01.2). El modal se monta con el canal 'SITE_MANAGER':
+     * al ser responsable de sede solo recibe y publica comentarios públicos
+     * (RF-02.1, RF-03.2, Art. V.4).
+     */
+    onOpenComments(machine) {
       this.selectedMachine = machine;
-      this.showReportModal = true;
-      this.$emit('add-comment', machine);
+      this.showCommentsModal = true;
+      this.$emit('open-comments', machine);
+    },
+
+    /**
+     * Cierre del hilo: libera la selección para que la próxima tarjeta pulsada
+     * vuelva a fijar su expediente.
+     */
+    onCloseComments() {
+      this.showCommentsModal = false;
+      this.selectedMachine = null;
     },
 
     onReopen(machine) {
@@ -447,7 +483,7 @@ export const LocationPortalView = {
               :key="m.id"
               :machine="m"
               @report="onReport"
-              @comment="onComment"
+              @open-comments="onOpenComments"
               @reopen="onReopen"
             />
           </div>
@@ -466,12 +502,22 @@ export const LocationPortalView = {
           <LocationRefundsTab />
         </div>
 
-        <!-- Incident Report / Add Comment Modal -->
+        <!-- Incident Report Modal -->
         <IncidentReportModal
           v-model="showReportModal"
           :machine="selectedMachine"
           @created="onIncidentCreated"
           @commented="onCommentAdded"
+        />
+
+        <!-- Conversation Thread Modal (Módulo 10: canal SITE_MANAGER, RF-01.1) -->
+        <IncidentCommentThreadModal
+          :is-open="showCommentsModal"
+          :incident-id="activeCommentIncidentId"
+          :ticket-code="activeCommentTicketCode"
+          role="SITE_MANAGER"
+          @close="onCloseComments"
+          @comment-added="onCommentAdded"
         />
 
         <!-- Reopen Ticket in Warranty Modal -->
