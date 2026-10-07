@@ -87,7 +87,7 @@
 
 ## Fase 4: Integración en Vistas Operativas y Capa de API
 
-- [ ] **T-COM-13: Extender métodos cliente en `public/assets/js/api.js`**
+- [x] **T-COM-13: Extender métodos cliente en `public/assets/js/api.js`**
   * **Requisitos:** RF-01, RNF-01
   * **Dependencias:** T-COM-08
   * **Hecho cuando:** `public/assets/js/api.js` implementa métodos normalizados tipados: (1) `api.incidents.getComments(ticketCode, { limit, beforeId })` y `api.incidents.addComment(ticketCode, formDataOrJson)`; (2) `api.technician.getComments(incidentId, { limit, beforeId })` y `api.technician.addComment(incidentId, formData)`; (3) `api.coordinator.getComments(incidentId, { limit, beforeId })` y `api.coordinator.addComment(incidentId, formDataOrJson)`.

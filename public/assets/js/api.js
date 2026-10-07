@@ -34,6 +34,70 @@ export class ApiError extends Error {
 }
 
 /**
+ * Bloque de mensajes que carga cada petición del hilo: los 50 más recientes del
+ * expediente (Módulo 10, RF-01.2 de specs/10-incident-comments/spec.md).
+ */
+const COMMENT_THREAD_PAGE_SIZE = 50;
+
+/**
+ * Construye la cadena de consulta de la paginación cursorizada del hilo a partir de
+ * los parámetros normalizados `{ limit, beforeId }` (Módulo 10, RF-01.2, RF-01.3).
+ *
+ * El backend espera `limit` y `before_id`; `before_id` se omite cuando no se solicita
+ * un bloque anterior, de modo que el servidor devuelve siempre el tramo más reciente.
+ *
+ * @param {{limit?: number|string, beforeId?: number|string|null}} [params={}]
+ * @returns {string} Cadena de consulta (`?...`) lista para concatenar, o cadena vacía.
+ */
+function buildCommentQuery(params = {}) {
+  const query = new URLSearchParams();
+  const limit = params.limit ?? COMMENT_THREAD_PAGE_SIZE;
+
+  if (limit !== undefined && limit !== null && limit !== '') {
+    query.set('limit', String(limit));
+  }
+
+  if (params.beforeId !== undefined && params.beforeId !== null && params.beforeId !== '') {
+    query.set('before_id', String(params.beforeId));
+  }
+
+  const qs = query.toString();
+  return qs ? `?${qs}` : '';
+}
+
+/**
+ * Normaliza el cuerpo de publicación de un mensaje al contrato REST del hilo
+ * (Módulo 10, RF-03, RF-04.1). Acepta indistintamente:
+ * - `FormData`: envío atómico multipart con `comment_text`, `is_internal` y `photo`.
+ * - Objeto plano JSON: `{ comment_text, is_internal? }`.
+ * - Texto plano + bandera opcional: atajo retrospectivo previo a este módulo que se
+ *   traduce a `{ comment_text, is_internal }` para no romper llamadas existentes.
+ *
+ * @param {FormData|Object|string} formDataOrJson
+ * @param {boolean|undefined} [legacyIsInternal]
+ * @returns {Object|FormData} Cuerpo listo para `post()`.
+ */
+function normalizeCommentBody(formDataOrJson, legacyIsInternal = undefined) {
+  if (typeof FormData !== 'undefined' && formDataOrJson instanceof FormData) {
+    return formDataOrJson;
+  }
+
+  if (typeof formDataOrJson === 'string') {
+    const payload = { comment_text: formDataOrJson };
+    if (typeof legacyIsInternal === 'boolean') {
+      payload.is_internal = legacyIsInternal;
+    }
+    return payload;
+  }
+
+  if (formDataOrJson && typeof formDataOrJson === 'object') {
+    return formDataOrJson;
+  }
+
+  return {};
+}
+
+/**
  * Native REST API Client for VendGuard.
  */
 export class ApiClient {
@@ -419,13 +483,30 @@ export class ApiClient {
     },
 
     /**
-     * Adds a comment or additional photo to an active incident (RF-02 / EARS 2.3).
-     * @param {string} ticketCode
-     * @param {Object|FormData} payload
-     * @returns {Promise<Object>}
+     * Retrieves the site-scoped conversation thread of an incident by its ticket code
+     * (Módulo 10, RF-01.2, RF-01.3). The server filters internal notes out, so a site
+     * manager never receives them (RNF-01, Art. V.4).
+     * @param {string} ticketCode e.g. 'TICK-2026-00142' (accepts an optional leading '#')
+     * @param {{limit?: number|string, beforeId?: number|string|null}} [params={}]
+     * @returns {Promise<Object>} IncidentCommentThreadDto
      */
-    addComment: (ticketCode, payload) => {
-      return this.post(`/incidents/${encodeURIComponent(ticketCode)}/comments`, payload);
+    getComments: (ticketCode, params = {}) => {
+      return this.get(`/incidents/${encodeURIComponent(ticketCode)}/comments${buildCommentQuery(params)}`);
+    },
+
+    /**
+     * Adds a public comment or additional photo to an active incident (RF-02 / EARS 2.3;
+     * Módulo 10, RF-03.2, RF-04.1). Accepts a JSON payload `{ comment_text }` or a
+     * `FormData` instance for atomic multipart upload with an optional photo.
+     * @param {string} ticketCode
+     * @param {Object|FormData} formDataOrJson
+     * @returns {Promise<Object>} Updated IncidentCommentThreadDto
+     */
+    addComment: (ticketCode, formDataOrJson) => {
+      return this.post(
+        `/incidents/${encodeURIComponent(ticketCode)}/comments`,
+        normalizeCommentBody(formDataOrJson)
+      );
     },
 
     /**
@@ -509,17 +590,32 @@ export class ApiClient {
     },
 
     /**
-     * Appends a coordinator comment or internal workshop note to the incident log (Módulo 09, RF-05).
+     * Retrieves the full conversation thread of an incident (public comments and internal
+     * workshop notes) for the operations coordinator (Módulo 10, RF-01.2, RF-02.3).
      * @param {number|string} incidentId Incident id or ticket code with optional '#'.
-     * @param {string} commentText Comment body (at least 5 characters).
-     * @param {boolean} [isInternal=false] Internal workshop note flag (RF-05.2).
-     * @returns {Promise<Object>} Created comment.
+     * @param {{limit?: number|string, beforeId?: number|string|null}} [params={}]
+     * @returns {Promise<Object>} IncidentCommentThreadDto
      */
-    addComment: (incidentId, commentText, isInternal = false) => {
-      return this.post(`/coordinator/incidents/${encodeURIComponent(incidentId)}/comments`, {
-        comment_text: commentText,
-        is_internal: isInternal
-      });
+    getComments: (incidentId, params = {}) => {
+      return this.get(`/coordinator/incidents/${encodeURIComponent(incidentId)}/comments${buildCommentQuery(params)}`);
+    },
+
+    /**
+     * Appends a coordinator comment or internal workshop note to the incident thread
+     * (Módulo 09 RF-05; Módulo 10, RF-03.3, RF-04.1). Accepts a `FormData` instance for
+     * atomic multipart upload with an optional photo, a plain JSON payload
+     * `{ comment_text, is_internal? }`, or the retrospective `(incidentId, text, isInternal)`
+     * shortcut used by the triage detail modal.
+     * @param {number|string} incidentId Incident id or ticket code with optional '#'.
+     * @param {FormData|Object|string} formDataOrJson
+     * @param {boolean} [legacyIsInternal=false] Internal note flag for the text shortcut.
+     * @returns {Promise<Object>} Updated IncidentCommentThreadDto
+     */
+    addComment: (incidentId, formDataOrJson, legacyIsInternal = false) => {
+      return this.post(
+        `/coordinator/incidents/${encodeURIComponent(incidentId)}/comments`,
+        normalizeCommentBody(formDataOrJson, legacyIsInternal)
+      );
     },
 
     /**
@@ -750,6 +846,33 @@ export class ApiClient {
      */
     getRefundInspection: (incidentId) => {
       return this.get(`/technician/incidents/${encodeURIComponent(incidentId)}/refund`);
+    },
+
+    /**
+     * Retrieves the integral conversation thread of an incident assigned to the
+     * authenticated technician: public comments plus internal workshop notes, with the
+     * real names of the technical team (Módulo 10, RF-01.2, RF-02.3).
+     * @param {number|string} incidentId
+     * @param {{limit?: number|string, beforeId?: number|string|null}} [params={}]
+     * @returns {Promise<Object>} IncidentCommentThreadDto
+     */
+    getComments: (incidentId, params = {}) => {
+      return this.get(`/technician/incidents/${encodeURIComponent(incidentId)}/comments${buildCommentQuery(params)}`);
+    },
+
+    /**
+     * Publishes a public comment or an internal workshop note on the assigned incident
+     * (Módulo 10, RF-03.3, RF-04.1). Accepts a `FormData` instance for atomic multipart
+     * upload with an optional photo, or a plain JSON payload `{ comment_text, is_internal? }`.
+     * @param {number|string} incidentId
+     * @param {FormData|Object} formDataOrJson
+     * @returns {Promise<Object>} Updated IncidentCommentThreadDto
+     */
+    addComment: (incidentId, formDataOrJson) => {
+      return this.post(
+        `/technician/incidents/${encodeURIComponent(incidentId)}/comments`,
+        normalizeCommentBody(formDataOrJson)
+      );
     },
 
     /**
