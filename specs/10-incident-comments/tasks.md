@@ -111,7 +111,7 @@
 
 ## Fase 5: Pruebas Integrales, Blindaje Constitucional y Regresión Global
 
-- [ ] **T-COM-17: Implementar pruebas unitarias reactivas frontend ESM `IncidentCommentThreadModalTest.mjs`**
+- [x] **T-COM-17: Implementar pruebas unitarias reactivas frontend ESM `IncidentCommentThreadModalTest.mjs`**
   * **Requisitos:** RF-01.2, RF-02.4, RF-03.1, RF-03.3, RF-05.3, RNF-04, RNF-06
   * **Dependencias:** T-COM-12
   * **Hecho cuando:** La ejecución de `node tests/unit/IncidentCommentThreadModalTest.mjs` pasa al 100% en verde evaluando: (1) renderizado de bocadillos ámbar `#fef9c3` con candado y etiqueta para notas internas; (2) selector preseleccionado en `'INTERNAL'` para técnicos y ausente para sede; (3) reactividad del contador (deshabilitado con 4 caracteres, habilitado con 5 a 1.000); (4) dirty form guard interceptando pulsaciones de `Escape`; y (5) renderizado del aviso de auditoría en modo sellado de solo lectura.

@@ -887,6 +887,7 @@ export const IncidentCommentThreadModal = {
                 v-for="comment in comments"
                 :key="comment.id"
                 class="incident-comment-item"
+                :class="{ 'is-internal': comment.is_internal }"
                 :data-testid="'incident-comment-item-' + comment.id"
                 :style="bubbleStyle(comment)"
               >
