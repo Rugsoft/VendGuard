@@ -6,8 +6,11 @@ namespace VendGuard\Presentation\Controller;
 
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\CoordinatorIncidentDetailService;
+use VendGuard\Application\Service\IncidentCommentService;
+use VendGuard\Core\Domain\Exception\ConversationSealedException;
+use VendGuard\Core\Domain\Exception\InvalidCommentLengthException;
+use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Model\Incident;
-use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
@@ -20,6 +23,7 @@ use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
+use VendGuard\Infrastructure\Storage\LocalFileUploader;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
 
@@ -60,6 +64,8 @@ class CoordinatorController
     private MachineRepositoryInterface $machineRepo;
     private CoordinatorIncidentDetailService $incidentDetailService;
     private AuditLogger $auditLogger;
+    private LocalFileUploader $fileUploader;
+    private ?IncidentCommentService $commentService;
 
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
@@ -67,7 +73,9 @@ class CoordinatorController
         ?LocationRepositoryInterface $locationRepo = null,
         ?MachineRepositoryInterface $machineRepo = null,
         ?CoordinatorIncidentDetailService $incidentDetailService = null,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?LocalFileUploader $fileUploader = null,
+        ?IncidentCommentService $commentService = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->userRepo = $userRepo ?? new PdoUserRepository();
@@ -77,6 +85,20 @@ class CoordinatorController
         // que el endpoint y la lectura agregada compartan una única fuente de datos.
         $this->incidentDetailService = $incidentDetailService ?? new CoordinatorIncidentDetailService($this->incidentRepo);
         $this->auditLogger = $auditLogger ?? new AuditLogger(new PdoAuditLogRepository());
+
+        // El hilo de comentarios se resuelve bajo demanda (ver comments()): el
+        // servicio abre conexión a MariaDB al instanciarse y este controlador
+        // también se construye en contextos unitarios sin base de datos.
+        $this->fileUploader = $fileUploader ?? new LocalFileUploader();
+        $this->commentService = $commentService;
+    }
+
+    /**
+     * Servicio de aplicación del hilo de comentarios, resuelto bajo demanda.
+     */
+    private function comments(): IncidentCommentService
+    {
+        return $this->commentService ??= new IncidentCommentService($this->incidentRepo, null, $this->fileUploader);
     }
 
     /**
@@ -586,22 +608,96 @@ class CoordinatorController
         return Response::json($detail->toArray(), 200);
     }
 
+    // ────────────────────────────────────────────────────────────────────────
+    // Módulo 10 · T-COM-07 — Hilo de conversación del expediente
+    // Orquestado por IncidentCommentService: la segregación, el enmascaramiento
+    // y la máquina de estados del sellado viven en la capa de aplicación.
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * GET /api/coordinator/incidents/{id}/comments
+     *
+     * Devuelve el hilo íntegro del expediente para el Coordinador de Operaciones
+     * (RF-01.2, RF-02.3): comentarios públicos y notas internas de taller, con la
+     * identidad nominal real de todo el equipo y el candado `is_internal` expuesto.
+     *
+     * Respuestas: 200 OK con el `IncidentCommentThreadDto`; 400 si el identificador
+     * o el cursor de paginación no son válidos; 401/403 si la petición no procede de
+     * un coordinador autenticado; 404 si el ticket no existe o está borrado.
+     */
+    public function getComments(Request $request): Response
+    {
+        // 1. Control de acceso antes de leer nada (Art. V.4)
+        $authFailure = $this->authorizeCoordinator($request);
+        if ($authFailure !== null) {
+            return $authFailure;
+        }
+
+        // 2. Identificador de ruta: ID primario positivo o código de ticket (# opcional)
+        $rawIdentifier = trim((string)($request->getRouteParam('id') ?? ''));
+        $identifier = $this->resolveIncidentIdentifier($rawIdentifier);
+        if ($identifier === null) {
+            return Response::error(
+                'INVALID_INCIDENT_IDENTIFIER',
+                'El identificador de la incidencia no es válido. Se admite un ID numérico positivo o un código de ticket (ej: INC-2026-0001).',
+                400
+            );
+        }
+
+        // 3. Cursor de paginación cursorizada (RF-01.2, RF-01.3)
+        $limitRaw = $request->getQuery('limit');
+        if ($limitRaw !== null && (!ctype_digit((string)$limitRaw) || (int)$limitRaw < 1)) {
+            return Response::error('INVALID_LIMIT', 'El parámetro limit debe ser un entero positivo.', 400);
+        }
+        $limit = $limitRaw !== null ? (int)$limitRaw : IncidentCommentService::DEFAULT_THREAD_LIMIT;
+
+        $beforeIdRaw = $request->getQuery('before_id');
+        if ($beforeIdRaw !== null && (!ctype_digit((string)$beforeIdRaw) || (int)$beforeIdRaw < 1)) {
+            return Response::error('INVALID_BEFORE_ID', 'El parámetro before_id debe ser un entero positivo.', 400);
+        }
+        $beforeId = $beforeIdRaw !== null ? (int)$beforeIdRaw : null;
+
+        // 4. Inspección total del diálogo con identidad nominal real (RF-02.3)
+        try {
+            $thread = $this->comments()->getThread(
+                $identifier,
+                'COORDINATOR',
+                (int)$request->getAttribute('user_id'),
+                $limit,
+                $beforeId
+            );
+        } catch (ConversationSealedException $e) {
+            // Barrera defensiva: la consulta agregada nunca debe exponer notas internas
+            // de un expediente ajeno al llamante.
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (\DomainException $e) {
+            return Response::error(
+                'INCIDENT_NOT_FOUND',
+                "No se encontró ninguna incidencia con identificador '{$rawIdentifier}'.",
+                404
+            );
+        }
+
+        return Response::json($thread->jsonSerialize(), 200);
+    }
+
     /**
      * POST /api/coordinator/incidents/{id}/comments
-     * 
-     * Añade un comentario o nota interna de taller a la bitácora de una incidencia
-     * desde el modal de detalle (RF-05.3, RNF-04). El texto es obligatorio y debe
-     * alcanzar 5 caracteres reales; `is_internal` decide si la nota es pública
-     * (visible en el portal de sede) o confidencial de taller (Art. V.4).
-     * 
-     * La máquina de estados se respeta en servidor reutilizando la matriz de
-     * permisos del servicio de detalle: los tickets activos admiten comentarios, un
-     * ticket resuelto solo dentro de las 48 horas de garantía (Art. V.6) y los
-     * tickets cerrados o descartados quedan sellados (Art. III).
-     * 
-     * Cada escritura deja constancia inmutable del evento INCIDENT_COMMENT_ADDED en
-     * `audit_log` con el coordinador autenticado (Art. III.3) y responde 201 Created
-     * con el comentario persistido.
+     *
+     * Publica un comentario público o una nota interna de taller en el hilo del
+     * expediente desde el modal de triaje (RF-03.3, RF-05.3, RNF-04).
+     *
+     * Garantías de servidor:
+     * - El selector de privacidad se interpreta con fail-safe: si `is_internal` no
+     *   viaja en el cuerpo, la nota se clasifica como interna de taller (RF-03.3)
+     *   para no filtrar material técnico al cliente por un campo ausente.
+     * - La máquina de estados del sellado la aplica el servicio de aplicación: los
+     *   tickets activos y los resueltos dentro de la garantía de 48 h admiten
+     *   mensajes; CLOSED/CANCELLED y la garantía vencida responden 403 (Art. V.6).
+     * - La fotografía adjunta se valida en servidor (≤ 5 MB y magic bytes reales)
+     *   antes de persistir nada (Art. V.5).
+     * - Cada escritura deja constancia inmutable del evento INCIDENT_COMMENT_ADDED
+     *   en `audit_log` con el coordinador autenticado (Art. III.3).
      */
     public function addComment(Request $request): Response
     {
@@ -622,25 +718,24 @@ class CoordinatorController
             );
         }
 
-        // 3. Validación temprana del cuerpo: texto obligatorio y mínimo de 5 caracteres
-        $commentText = trim((string)($request->getBodyParam('comment_text') ?? ''));
+        // 3. Texto obligatorio: solo se comprueba su presencia (400); los límites de
+        //    5 a 1.000 caracteres descriptivos los aplica el servicio (RF-03.1).
+        $commentText = trim((string)($request->getBodyParam('comment_text')
+            ?? $request->getBodyParam('text')
+            ?? $request->getBodyParam('comment')
+            ?? ''));
         if ($commentText === '') {
             return Response::error(
                 'MISSING_COMMENT_TEXT',
                 'El texto del comentario es obligatorio (comment_text).',
-                422
-            );
-        }
-        if (mb_strlen($commentText) < 5) {
-            return Response::error(
-                'COMMENT_TOO_SHORT',
-                'El comentario debe contener al menos 5 caracteres descriptivos.',
-                422
+                400,
+                ['form_data' => ['comment_text' => $commentText]]
             );
         }
 
-        // 4. Visibilidad del comentario: público por defecto, booleano estricto si viaja
-        $isInternal = false;
+        // 4. Selector de privacidad (RF-03.3): "Nota Interna de Taller" viene
+        //    PRESELECCIONADA por defecto; solo un valor explícito la desmarca.
+        $isInternal = true;
         if (array_key_exists('is_internal', $request->getParsedBody())) {
             $parsedFlag = $this->parseBooleanFlag($request->getBodyParam('is_internal'));
             if ($parsedFlag === null) {
@@ -653,12 +748,49 @@ class CoordinatorController
             $isInternal = $parsedFlag;
         }
 
-        // 5. Recuperar la incidencia referenciada (404 si no existe o está borrada)
-        $incident = is_int($identifier)
-            ? $this->incidentRepo->findById($identifier)
-            : $this->incidentRepo->findByTicketCode(strtoupper(ltrim($identifier, '#')));
+        // 5. Evidencia fotográfica opcional (multipart/form-data, RF-04.1)
+        $photoFile = $request->getFile('photo') ?? $request->getFile('image') ?? $request->getFile('file');
 
-        if ($incident === null) {
+        // 6. Publicación orquestada por el servicio de aplicación
+        $actor = $this->extractActor($request);
+        try {
+            $thread = $this->comments()->addComment(
+                $identifier,
+                'COORDINATOR',
+                $commentText,
+                $actor,
+                $isInternal,
+                $photoFile
+            );
+        } catch (InvalidCommentLengthException $e) {
+            // RF-07.1: se devuelven los datos de texto íntegros para el reintento.
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                ['form_data' => ['comment_text' => $commentText]]
+            );
+        } catch (ConversationSealedException $e) {
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                ['form_data' => ['comment_text' => $commentText, 'is_internal' => $isInternal]]
+            );
+        } catch (InvalidUploadException $e) {
+            // RF-07.1: texto y clasificación íntegros para el reintento manual.
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                [
+                    'form_data' => [
+                        'comment_text' => $commentText,
+                        'is_internal' => $isInternal,
+                    ],
+                ]
+            );
+        } catch (\DomainException $e) {
             return Response::error(
                 'INCIDENT_NOT_FOUND',
                 "No se encontró ninguna incidencia con identificador '{$rawIdentifier}'.",
@@ -666,63 +798,13 @@ class CoordinatorController
             );
         }
 
-        // 6. Ventana de comentarios según la máquina de estados (RF-07.2, Art. V.6)
-        $permissions = $this->incidentDetailService->computePermissions([
-            'status' => $incident->getStatus()->value,
-            'resolved_at' => $incident->getResolvedAt(),
-            'updated_at' => $incident->getUpdatedAt(),
-        ]);
-        if (($permissions['can_add_comment'] ?? false) !== true) {
-            $isSealed = in_array($incident->getStatus(), [IncidentStatus::CLOSED, IncidentStatus::CANCELLED], true);
-            return Response::error(
-                'COMMENT_WINDOW_CLOSED',
-                $isSealed
-                    ? 'La bitácora de una incidencia cerrada o descartada está sellada y no admite nuevos comentarios.'
-                    : 'La ventana de garantía de 48 horas para comentar esta incidencia resuelta ha finalizado.',
-                422
-            );
-        }
-
-        // 7. Persistir el comentario en la bitácora con su bandera de visibilidad
-        $actor = $this->extractActor($request);
-        $comment = new IncidentComment(
-            id: null,
-            incidentId: (int)$incident->getId(),
-            authorType: 'COORDINATOR',
-            userId: $actor['id'],
-            authorName: $actor['name'],
-            commentText: $commentText,
-            photoPath: null,
-            isInternal: $isInternal,
-            createdAt: null,
-            ticketCode: $incident->getTicketCode()
-        );
-
-        $createdComment = $this->incidentRepo->addComment($comment);
-
-        // 8. Evento inmutable en audit_log con el coordinador autenticado (Art. III.3)
-        $this->auditLogger->logTicketEvent(
-            ticketId: (int)$incident->getId(),
-            action: 'INCIDENT_COMMENT_ADDED',
-            user: $actor,
-            previousState: ['status' => $incident->getStatus()->value],
-            newState: [
-                'comment_id' => $createdComment->getId(),
-                'author_type' => 'COORDINATOR',
-                'is_internal' => $createdComment->isInternal(),
-                'comment_text' => $createdComment->getCommentText(),
-            ],
-            metadata: [
-                'ticket_code' => $incident->getTicketCode(),
-                'visibility' => $createdComment->isInternal() ? 'INTERNAL' : 'PUBLIC',
-            ]
-        );
-
-        // 9. Respuesta 201 Created con el comentario anexado a la bitácora
+        // 7. Respuesta 201 Created con el hilo actualizado del expediente (RF-03.4)
         return Response::json(
-            $createdComment->toArray(),
+            $thread->jsonSerialize(),
             201,
-            'Comentario añadido correctamente a la bitácora de la incidencia.'
+            $isInternal
+                ? 'Nota interna registrada en el hilo de conversación'
+                : 'Comentario publicado en el hilo de conversación'
         );
     }
 

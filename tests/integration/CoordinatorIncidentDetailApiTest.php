@@ -258,7 +258,9 @@ $req = new Request(
 $res          = $router->dispatch($req);
 $commentBody  = $res->getDecodedBody();
 $assert("4.1 Nota interna => 201 Created", $res->getStatusCode() === 201 && ($commentBody['success'] ?? false) === true, "Código HTTP: {$res->getStatusCode()}");
-$assert("4.2 data: texto íntegro y visibilidad interna", str_contains((string)($commentBody['data']['comment_text'] ?? ''), 'condensador sucio') && ($commentBody['data']['is_internal'] ?? null) === true);
+$threadEntries = is_array($commentBody['data']['comments'] ?? null) ? $commentBody['data']['comments'] : [];
+$lastThreadEntry = $threadEntries === [] ? [] : $threadEntries[count($threadEntries) - 1];
+$assert("4.2 data: hilo con el texto íntegro y visibilidad interna", str_contains((string)($lastThreadEntry['comment_text'] ?? ''), 'condensador sucio') && ($lastThreadEntry['is_internal'] ?? null) === true);
 
 $commentAuditStmt = $pdo->prepare("SELECT * FROM audit_log WHERE entity_type = 'TICKET' AND entity_id = :id AND action = 'INCIDENT_COMMENT_ADDED' ORDER BY id DESC LIMIT 1");
 $commentAuditStmt->execute([':id' => $incDetail->getId()]);
@@ -267,7 +269,7 @@ $assert("4.3 Evento INCIDENT_COMMENT_ADDED persistido en audit_log", $commentAud
 if ($commentAudit !== false) {
     $commentState    = json_decode((string)$commentAudit['new_state'], true) ?? [];
     $commentMetadata = json_decode((string)$commentAudit['metadata'], true) ?? [];
-    $assert("4.4 audit_log: nota interna y actor coordinador", ($commentState['is_internal'] ?? null) === true && (int)($commentAudit['user_id'] ?? 0) === $coordinatorId && ($commentMetadata['visibility'] ?? null) === 'INTERNAL');
+    $assert("4.4 audit_log: nota interna, ticket y actor coordinador", ($commentState['is_internal'] ?? null) === true && (int)($commentAudit['user_id'] ?? 0) === $coordinatorId && ($commentState['ticket_code'] ?? null) === $incDetail->getTicketCode());
 }
 
 // El detalle enriquecido lista la nota con su visibilidad (RF-05.2)
@@ -280,7 +282,7 @@ $internalEntries = array_values(array_filter(
 ));
 $assert("4.5 Detalle expone la nota interna con su bandera de visibilidad", count($internalEntries) === 1 && ($internalEntries[0]['is_internal'] ?? null) === true);
 
-// Comentario demasiado corto => 422 COMMENT_TOO_SHORT (validación temprana)
+// Comentario demasiado corto => 422 INVALID_COMMENT_LENGTH (límites del servicio)
 $req = new Request(
     method: 'POST',
     path: "/api/coordinator/incidents/{$incDetail->getId()}/comments",
@@ -288,7 +290,7 @@ $req = new Request(
     headers: $authHdr
 );
 $res = $router->dispatch($req);
-$assert("4.6 Comentario corto => 422 COMMENT_TOO_SHORT", $res->getStatusCode() === 422 && ($res->getDecodedBody()['error']['code'] ?? '') === 'COMMENT_TOO_SHORT');
+$assert("4.6 Comentario corto => 422 INVALID_COMMENT_LENGTH", $res->getStatusCode() === 422 && ($res->getDecodedBody()['error']['code'] ?? '') === 'INVALID_COMMENT_LENGTH');
 
 // =========================================================================
 // CASO 5: Descarte justificado desde el modal (RF-07.4) con umbral de 20 (T-IDM-20)
@@ -363,7 +365,7 @@ $req = new Request(
     headers: $authHdr
 );
 $res = $router->dispatch($req);
-$assert("5.10 Comentario sobre ticket descartado => 422 COMMENT_WINDOW_CLOSED", $res->getStatusCode() === 422 && ($res->getDecodedBody()['error']['code'] ?? '') === 'COMMENT_WINDOW_CLOSED');
+$assert("5.10 Comentario sobre ticket descartado => 403 CONVERSATION_SEALED", $res->getStatusCode() === 403 && ($res->getDecodedBody()['error']['code'] ?? '') === 'CONVERSATION_SEALED');
 
 // =========================================================================
 // CASO 6: Prueba HTTP real vía cURL contra 127.0.0.1:8000

@@ -49,7 +49,7 @@
   * **Dependencias:** T-COM-03, T-COM-04
   * **Hecho cuando:** `TechnicianController` incorpora `getComments(Request $request)` y `addComment(Request $request)` bajo autenticación de técnico de ruta, permitiendo consultar el hilo íntegro (públicos y notas internas), publicar notas clasificadas mediante el selector de privacidad `is_internal` (por defecto `true`) y adjuntar fotografías in situ con validación binaria, respondiendo `200 OK` y `201 Created`.
 
-- [ ] **T-COM-07: Implementar endpoints de Coordinador en `CoordinatorController.php`**
+- [x] **T-COM-07: Implementar endpoints de Coordinador en `CoordinatorController.php`**
   * **Requisitos:** RF-01.2, RF-02.3, RF-03.3, RF-06.3, Constitución Art. III
   * **Dependencias:** T-COM-03, T-COM-04
   * **Hecho cuando:** `CoordinatorController` implementa `getComments(Request $request)` y refactoriza su método `addComment(Request $request)` conectándolo con `IncidentCommentService`, soportando inspección total del diálogo, publicación de notas internas o públicas, soporte `multipart/form-data` y auditoría inmutable en `audit_log` con acción `INCIDENT_COMMENT_ADDED`.
