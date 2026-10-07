@@ -63,7 +63,7 @@
 
 ## Fase 3: Componente Modal Frontend Vanilla/Vue 3 ES Modules
 
-- [ ] **T-COM-09: Scaffolding y maquetación de `IncidentCommentThreadModal.js`**
+- [x] **T-COM-09: Scaffolding y maquetación de `IncidentCommentThreadModal.js`**
   * **Requisitos:** RF-01.2, RF-01.4, RNF-03, RNF-04, docs/design.md
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existe en `public/assets/js/components/IncidentCommentThreadModal.js` el componente Vue 3 ESM con props `isOpen`, `incidentId` (o `ticketCode`) y `role`, emitiendo `close` y `comment-added`, maquetado con cabecera contextual fija (ticket code en monospace, máquina, sede, insignia de estado), cuerpo central con scroll vertical independiente y pie fijo conforme a los tokens de diseño Docker.
