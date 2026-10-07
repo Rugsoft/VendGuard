@@ -659,6 +659,86 @@ assert('12.4 The rejected row is re-synced in place with the server state (EARS 
   staleCancelView.incidents[0].status === 'CLOSED' &&
   staleCancelView.incidents.length === 3);
 
+// ---------------------------------------------------------------------
+// TEST GROUP 13: Real Technician Roster from the Users Endpoint (EARS 3.9)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 13: Real Technician Roster from the Users Endpoint (EARS 3.9) ---');
+
+// 13.1 The view no longer ships a hardcoded seed list: the module must not define
+// DEFAULT_TECHNICIANS nor any parallel technician vocabulary (regression for the
+// defect where the tray only offered Jordi/Marta while the detail modal offered all).
+const source = (await import('node:fs')).readFileSync(
+  new URL('../../public/assets/js/views/CoordinatorDashboardView.js', import.meta.url), 'utf8'
+);
+assert('13.1 The view ships no hardcoded technician roster',
+  !/DEFAULT_TECHNICIANS/.test(source) && !/marta\.ruta@vendguard\.internal/.test(source));
+
+let rosterQuery = null;
+let rosterCallCount = 0;
+api.coordinator.getUsers = async (params) => {
+  rosterCallCount++;
+  rosterQuery = params;
+  return [
+    { id: 2, name: 'Jordi Técnico Ruta BCN', email: 'jordi.ruta@vendguard.internal' },
+    { id: 3, name: 'Marta Técnica Ruta BCN', email: 'marta.ruta@vendguard.internal' },
+    { id: 4, name: 'Carlos Técnico Ruta Sud', email: 'carlos.ruta@vendguard.internal' }
+  ];
+};
+
+const rosterView = createDashboardInstance({ technicians: [], techniciansLoaded: false, techniciansErrorMessage: '', isLoadingTechnicians: false });
+await rosterView.loadTechnicians();
+assert('13.2 Active route technicians come from the users endpoint with active filter',
+  rosterCallCount === 1 && rosterQuery && rosterQuery.status === 'active' && rosterQuery.role === 'TECHNICIAN');
+assert('13.3 The full real roster (beyond the old Jordi/Marta pair) populates the tray',
+  rosterView.technicians.length === 3 && rosterView.techniciansLoaded === true && rosterView.isLoadingTechnicians === false);
+
+const realRosterView = createDashboardInstance({
+  technicians: [
+    { id: 2, name: 'Jordi Técnico Ruta BCN', email: 'jordi.ruta@vendguard.internal' },
+    { id: 3, name: 'Marta Técnica Ruta BCN', email: 'marta.ruta@vendguard.internal' },
+    { id: 4, name: 'Carlos Técnico Ruta Sud', email: 'carlos.ruta@vendguard.internal' }
+  ],
+  techniciansLoaded: true,
+  techniciansErrorMessage: '',
+  isLoadingTechnicians: false
+});
+realRosterView.openAssignModal(mockIncidents[0]);
+assert('13.4 Opening the assign modal exposes the full real roster (3 technicians)',
+  realRosterView.technicians.length === 3 && realRosterView.showAssignModal === true);
+assert('13.5 Without a prior assignee the modal preselects the first real technician, not a hardcoded id',
+  realRosterView.assignTechnicianId === 2
+  && realRosterView.technicians[0].id === 2
+  && realRosterView.technicians.some((t) => t.id === 4));
+
+// 13.6 Submit guard: without a chosen technician nothing is sent to the API
+const guardView = createDashboardInstance({
+  selectedIncident: mockIncidents[0],
+  assignTechnicianId: null,
+  technicians: []
+});
+let guardAssignCalled = false;
+api.coordinator.assignTechnician = async () => { guardAssignCalled = true; return {}; };
+await guardView.submitAssignment();
+assert('13.6 Submit without technician is blocked with a local error and no API call',
+  guardAssignCalled === false && guardView.assignError.includes('técnico'));
+
+// 13.7 A failed roster load is retried when the modal reopens (no permanent dead list)
+let rosterFailures = 0;
+api.coordinator.getUsers = async () => {
+  rosterFailures++;
+  if (rosterFailures === 1) throw new Error('Acceso denegado');
+  return [{ id: 4, name: 'Carlos Técnico Ruta Sud', email: 'carlos.ruta@vendguard.internal' }];
+};
+const retryView = createDashboardInstance({ technicians: [], techniciansLoaded: false, techniciansErrorMessage: '', isLoadingTechnicians: false });
+await retryView.loadTechnicians();
+assert('13.7a First failed load records the error without marking the roster as loaded',
+  retryView.techniciansErrorMessage.includes('Acceso denegado') && retryView.techniciansLoaded === false && retryView.isLoadingTechnicians === false);
+retryView.techniciansErrorMessage = '';
+retryView.ensureTechniciansLoaded();
+await retryView.loadTechnicians();
+assert('13.7b The modal reopens re-request the roster and recover to a populated list',
+  retryView.technicians.length === 1 && retryView.techniciansLoaded === true && retryView.techniciansErrorMessage === '');
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);

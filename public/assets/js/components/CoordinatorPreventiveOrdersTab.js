@@ -169,12 +169,13 @@ export const CoordinatorPreventiveOrdersTab = {
     },
 
     /**
-     * Carga el personal técnico disponible
+     * Carga el personal técnico activo disponible (EARS 3.9: el personal dado de baja
+     * queda excluido de las listas de asignación). Sin listas simuladas.
      */
     async loadTechnicians() {
       try {
         const getter = api.coordinator.getUsers || api.admin.getUsers;
-        const res = await getter({ role: 'TECHNICIAN' });
+        const res = await getter({ status: 'active', role: 'TECHNICIAN' });
         this.technicians = Array.isArray(res) ? res : (res?.data || []);
       } catch (err) {
         console.warn('No se pudieron cargar los técnicos:', err);

@@ -46,15 +46,8 @@ import { CoordinatorSparePartsAnalyticsTab } from '../components/CoordinatorSpar
 import { CoordinatorTerritorialMapTab } from '../components/CoordinatorTerritorialMapTab.js';
 import { CoordinatorRefundsTab } from '../components/CoordinatorRefundsTab.js';
 import { CoordinatorIncidentDetailModal } from '../components/CoordinatorIncidentDetailModal.js';
-import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';
-
-// Status classification is delegated to the shared module utils/IncidentStatusPermissions.js
+import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';// Status classification is delegated to the shared module utils/IncidentStatusPermissions.js
 // (frontend mirror of the PHP lifecycle rules): no literal status lists live in this view.
-// Default list of route technicians from seeds
-const DEFAULT_TECHNICIANS = [
-  { id: 2, name: 'Jordi Técnico Ruta BCN', email: 'jordi.ruta@vendguard.internal' },
-  { id: 3, name: 'Marta Técnica Ruta BCN', email: 'marta.ruta@vendguard.internal' }
-];
 
 export const CoordinatorDashboardView = {
   name: 'CoordinatorDashboardView',
@@ -106,8 +99,13 @@ export const CoordinatorDashboardView = {
       filterSearch: '',
       filterSlaOnly: false,
 
-      // Available technicians
-      technicians: [...DEFAULT_TECHNICIANS],
+      // Available technicians (loaded from GET /api/coordinator/users?role=TECHNICIAN
+      // before the first assignment; no hardcoded seed list so personnel changes are
+      // reflected immediately and EARS 3.9 keeps deactivated staff out of triage).
+      technicians: [],
+      techniciansLoaded: false,
+      techniciansErrorMessage: '',
+      isLoadingTechnicians: false,
 
       // Assign Modal State
       showAssignModal: false,
@@ -241,6 +239,7 @@ export const CoordinatorDashboardView = {
   mounted() {
     if (this.isAuthenticated) {
       this.loadIncidents();
+      this.loadTechnicians();
       this.startPolling();
     }
   },
@@ -288,6 +287,7 @@ export const CoordinatorDashboardView = {
         store.setInternalSession(response.user, response.token);
         this.loginPassword = '';
         await this.loadIncidents();
+        this.loadTechnicians();
         this.startPolling();
       } catch (err) {
         this.loginError = err.message || 'Credenciales incorrectas o usuario inactivo.';
@@ -331,6 +331,7 @@ export const CoordinatorDashboardView = {
       // Reached from a territorial-map card: open the bulk assignment modal directly
       // over that site's pending incidents (RF-MAP-09) instead of redirecting the
       // coordinator to a pre-filtered triage list.
+      this.ensureTechniciansLoaded();
       const locationId = payload && payload.locationId !== undefined && payload.locationId !== null
         ? Number(payload.locationId)
         : null;
@@ -349,7 +350,7 @@ export const CoordinatorDashboardView = {
         name: (pending[0] && pending[0].location_name) || siteCode
       };
       this.bulkAssignIncidents = pending;
-      this.bulkAssignTechnicianId = this.technicians[0]?.id || 2;
+      this.bulkAssignTechnicianId = this.technicians[0]?.id || null;
       this.bulkAssignUrgencyOverride = '';
       this.bulkAssignUrgencyReason = '';
       this.bulkAssignError = '';
@@ -382,7 +383,13 @@ export const CoordinatorDashboardView = {
      * a partial result instead of leaving the rest unassigned silently.
      */
     async submitBulkAssignment() {
-      if (!this.bulkAssignIncidents.length || !this.bulkAssignTechnicianId) return;
+      if (!this.bulkAssignIncidents.length) return;
+
+      // Guard: no bulk assignment without a chosen active technician (EARS 5.5).
+      if (!this.bulkAssignTechnicianId) {
+        this.bulkAssignError = 'Selecciona un técnico de ruta activo antes de confirmar la asignación.';
+        return;
+      }
 
       // Validate: if urgency is reclassified, reason is mandatory (EARS 5.3)
       if (this.bulkAssignUrgencyOverride && !this.bulkAssignUrgencyReason.trim()) {
@@ -461,12 +468,46 @@ export const CoordinatorDashboardView = {
 
     // --- Modal Triggers ---
 
+    /**
+     * Loads the real active route technicians from the users endpoint, mirroring the
+     * integral detail modal (single source of truth, no hardcoded seed list):
+     * `GET /api/coordinator/users?status=active&role=TECHNICIAN` (EARS 3.9 keeps
+     * deactivated staff out of triage selection).
+     */
+    async loadTechnicians() {
+      if (this.isLoadingTechnicians) return;
+      this.isLoadingTechnicians = true;
+      this.techniciansErrorMessage = '';
+      try {
+        const response = await api.coordinator.getUsers({ status: 'active', role: 'TECHNICIAN' });
+        const list = Array.isArray(response) ? response : (Array.isArray(response?.data) ? response.data : []);
+        this.technicians = list;
+        this.techniciansLoaded = true;
+      } catch (err) {
+        this.techniciansErrorMessage = err?.message || 'No se pudieron cargar los técnicos activos.';
+      } finally {
+        this.isLoadingTechnicians = false;
+      }
+    },
+
+    /**
+     * Refreshes the technician roster right before the assignment modal opens: any
+     * personnel change (new hires, logical deletions) is reflected without waiting
+     * for a page reload. A previous failed load is retried transparently.
+     */
+    ensureTechniciansLoaded() {
+      if (!this.techniciansLoaded || this.techniciansErrorMessage) {
+        this.loadTechnicians();
+      }
+    },
+
     openAssignModal(incident) {
       this.selectedIncident = incident;
-      this.assignTechnicianId = incident.assigned_technician_id || (this.technicians[0]?.id || 2);
+      this.assignTechnicianId = incident.assigned_technician_id || (this.technicians[0]?.id || null);
       this.assignUrgencyOverride = '';
       this.assignUrgencyReason = '';
       this.assignError = '';
+      this.ensureTechniciansLoaded();
       this.showAssignModal = true;
     },
 
@@ -681,6 +722,13 @@ export const CoordinatorDashboardView = {
      */
     async submitAssignment() {
       if (!this.selectedIncident) return;
+
+      // Guard: no assignment is sent without a chosen active technician (EARS 5.5,
+      // API contract requires technician_id of an active route technician).
+      if (!this.assignTechnicianId) {
+        this.assignError = 'Selecciona un técnico de ruta activo antes de confirmar la asignación.';
+        return;
+      }
 
       // Validate: if urgency is changed, reason is mandatory (EARS 5.3)
       if (this.assignUrgencyOverride && !this.assignUrgencyReason.trim()) {
@@ -1493,10 +1541,17 @@ export const CoordinatorDashboardView = {
               required
               :disabled="isAssigning"
             >
+              <option v-if="isLoadingTechnicians" value="" disabled>Cargando técnicos activos...</option>
+              <option v-else-if="technicians.length === 0" value="" disabled>
+                {{ techniciansErrorMessage || 'No hay técnicos de ruta activos disponibles.' }}
+              </option>
               <option v-for="t in technicians" :key="t.id" :value="t.id">
                 {{ t.name }} ({{ t.email }})
               </option>
             </select>
+            <p v-if="techniciansErrorMessage && technicians.length > 0" style="margin: 6px 0 0; font-size: 12px; color: #b91c1c;" role="alert">
+              {{ techniciansErrorMessage }}
+            </p>
           </div>
 
           <!-- Urgency Reclassification (Optional / Audit trail required) -->
@@ -1592,6 +1647,10 @@ export const CoordinatorDashboardView = {
               :disabled="isBulkAssigning"
               data-testid="bulk-assign-tech-select"
             >
+              <option v-if="isLoadingTechnicians" value="" disabled>Cargando técnicos activos...</option>
+              <option v-else-if="technicians.length === 0" value="" disabled>
+                {{ techniciansErrorMessage || 'No hay técnicos de ruta activos disponibles.' }}
+              </option>
               <option v-for="t in technicians" :key="t.id" :value="t.id">
                 {{ t.name }} ({{ t.email }})
               </option>
