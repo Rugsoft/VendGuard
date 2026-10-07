@@ -121,7 +121,7 @@
   * **Dependencias:** T-COM-08, T-COM-13
   * **Hecho cuando:** La ejecución de `php tests/integration/LocationCommentsApiTest.php` y `php tests/integration/TechnicianCommentsApiTest.php` pasa al 100% en verde evaluando: (1) Sede: filtrado en base de datos de notas internas (cero fugas en payload), enmascaramiento oficial de técnicos (`"Servicio Técnico Oficial (Operador #XX)"`), y subida multipart con foto; (2) Técnico: publicación con selector de nota interna persistiendo `is_internal = 1`, visibilidad de nombres reales de compañeros y fotos adjuntas.
 
-- [ ] **T-COM-19: Implementar pruebas de integración de Coordinador y auditoría (`CoordinatorCommentsApiTest.php`)**
+- [x] **T-COM-19: Implementar pruebas de integración de Coordinador y auditoría (`CoordinatorCommentsApiTest.php`)**
   * **Requisitos:** RF-02.3, RF-06.3, Constitución Art. III
   * **Dependencias:** T-COM-08
   * **Hecho cuando:** La ejecución de `php tests/integration/CoordinatorCommentsApiTest.php` pasa al 100% en verde comprobando: publicación de comentarios y notas internas de coordinación, e inserción inmutable de eventos `INCIDENT_COMMENT_ADDED` en la tabla `audit_log` con el identificador del coordinador, código del ticket y visibilidad correspondiente.
