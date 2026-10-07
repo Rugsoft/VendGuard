@@ -107,3 +107,12 @@
   * **Requisitos:** Artículos I al VII de la Constitución de VendGuard
   * **Dependencias:** T-MET-15
   * **Hecho cuando:** Se ejecuta `php tests/run_all.php` pasando todas las suites de prueba (unitarias PHP, unitarias JS e integración) al 100% en verde con cero fallos, y se verifica el despliegue funcional en producción cloud.
+
+---
+
+## Fase 6: Cierre de Hallazgos de Verificación
+
+- [x] **T-MET-17: Alinear el catálogo de acciones del visor de auditoría con el vocabulario real del backend y blindarlo con una guarda anti-deriva**
+  * **Requisitos:** `RF-05` (EARS 5.3, 5.5), `RF-06` (EARS 6.2), Art. III.3
+  * **Dependencias:** T-MET-13
+  * **Hecho cuando:** `utils/AuditActionLabels.js` es la única fuente de verdad de códigos, etiquetas, tonos y agrupación; `AuditLogViewer.js` deriva de él tanto la insignia de cada fila como las opciones del filtro (incluido el filtro de entidad, que ofrece el enum completo de `audit_log`); y `tests/unit/AuditActionCatalogTest.php` certifica la igualdad bidireccional entre el vocabulario escrito por el backend y el catálogo de la interfaz, sin opciones muertas ni acciones sin etiqueta.

@@ -306,9 +306,9 @@ Permite inspeccionar cronológicamente las acciones ejecutadas sobre tickets, m�
 * **Parámetros Query:**
   * `page` *(opcional, default 1)*: Número de página.
   * `limit` *(opcional, default 50, máx 100)*: Tamaño de página.
-  * `entity_type` *(opcional)*: `TICKET`, `MACHINE`, `LOCATION`.
+  * `entity_type` *(opcional)*: `TICKET`, `MACHINE`, `LOCATION`, `USER`, `PREVENTIVE_ORDER`, `SANITARY_CERTIFICATE`, `REFUND_REQUEST`, `UNCLAIMED_CASH_FINDING` (enum de `audit_log`).
   * `entity_id` *(opcional)*: ID numérico de la entidad.
-  * `action` *(opcional)*: Ej. `RESOLVE_INCIDENT`, `STATUS_CHANGE`, `ASSIGN_TECHNICIAN`.
+  * `action` *(opcional)*: Ej. `INCIDENT_ASSIGNED`, `RESOLVE_INCIDENT`, `REOPEN_TICKET`, `MACHINE_UPDATED`. Catálogo canónico en §3.4.1.
   * `from` / `to` *(opcional)*: Rango de fechas `YYYY-MM-DD`.
 
 #### Respuesta Exitosa (`200 OK`)
@@ -349,24 +349,25 @@ Permite inspeccionar cronológicamente las acciones ejecutadas sobre tickets, m�
         "timestamp": "2026-09-23 09:20:00",
         "entity_type": "TICKET",
         "entity_id": 4,
-        "action": "START_INTERVENTION",
+        "action": "INCIDENT_ASSIGNED",
         "user": {
           "id": 2,
           "name": "Jordi Técnico Ruta BCN",
           "role": "TECHNICIAN"
         },
         "details": {
-          "previous_status": "ASSIGNED",
-          "new_status": "IN_PROGRESS",
+          "previous_status": "REGISTERED",
+          "new_status": "ASSIGNED",
+          "assigned_technician_id": 2,
           "first_response_time_minutes": 50
         }
       },
       {
         "id": 126,
         "timestamp": "2026-09-23 08:30:00",
-        "entity_type": "MACHINE",
+        "entity_type": "LOCATION",
         "entity_id": 1,
-        "action": "UPDATE_LOCATION_PHONE",
+        "action": "LOCATION_UPDATED",
         "user": {
           "id": 1,
           "name": "Sara Coordinadora",
@@ -384,6 +385,17 @@ Permite inspeccionar cronológicamente las acciones ejecutadas sobre tickets, m�
 
 ---
 
+#### 3.4.1 Catálogo canónico de acciones y guarda anti-deriva
+
+El vocabulario de `action` es un contrato compartido: el backend lo escribe y el visor de auditoría lo etiqueta y lo filtra. Para que no vuelva a derivar:
+
+* **Fuente única de verdad en la interfaz:** `public/assets/js/utils/AuditActionLabels.js` declara el catálogo completo (código, etiqueta en español, tono visual y grupo del desplegable). `AuditLogViewer.js` **no** mantiene listas propias: tanto la insignia de cada fila como las opciones del filtro se derivan de ese módulo, de modo que insignia y filtro no pueden divergir entre sí.
+* **Vocabulario canónico:** el conjunto de acciones reales es exactamente el de los literales que el backend pasa a `AuditLogger::log*Event()` (argumento posicional o nombrado) más los valores que los sembradores insertan en `audit_log`.
+* **Guarda automática:** `tests/unit/AuditActionCatalogTest.php` verifica la igualdad bidireccional entre el vocabulario del backend y el catálogo de la interfaz, que toda acción presente en la base de datos esté catalogada, que ningún código se repita y que la extracción no quede vacía. Cualquier acción nueva sin etiqueta, o cualquier opción de filtro que el backend no escriba jamás, rompe la suite.
+* **Divergencia conocida y deliberada:** el sembrador de demostración (`database/DemoMetricsSeeder.php`) escribe un vocabulario histórico propio (`TICKET_CREATED`, `INTERVENTION_STARTED`, `TICKET_RESOLVED`, `TICKET_AUTO_CLOSED`, `TECHNICIAN_ASSIGNED`, `LOCATION_INSPECTED`, `QR_LABEL_GENERATED`) porque la aplicación todavía no audita el alta del aviso, el inicio de intervención ni el cierre automático; esas filas se etiquetan con el sufijo «(registro de demo)» en lugar de ocultarse.
+
+---
+
 ### 3.5 `GET /api/coordinator/audit-log/export` (Exportación CSV del Audit Log)
 
 Descarga de las entradas del log de auditoría filtradas, con tope de seguridad de 10.000 filas (`RF-06, EARS 6.2`).
@@ -398,7 +410,7 @@ Descarga de las entradas del log de auditoría filtradas, con tope de seguridad 
 ```csv
 ID,Fecha y Hora,Entidad,ID Entidad,Acción,Usuario ID,Nombre Usuario,Rol,Estado Previo,Estado Nuevo,Diagnóstico,Solución,Piezas Sustituidas
 128,2026-09-23 10:15:30,TICKET,4,RESOLVE_INCIDENT,2,Jordi Técnico Ruta BCN,TECHNICIAN,IN_PROGRESS,RESOLVED,"Sensor térmico NTC descalibrado","Sustitución sonda NTC","Sonda térmica NTC Sanden; Conector estanco IP67"
-127,2026-09-23 09:20:00,TICKET,4,START_INTERVENTION,2,Jordi Técnico Ruta BCN,TECHNICIAN,ASSIGNED,IN_PROGRESS,"","",""
+127,2026-09-23 09:20:00,TICKET,4,INCIDENT_ASSIGNED,2,Jordi Técnico Ruta BCN,TECHNICIAN,REGISTERED,ASSIGNED,"","",""
 ```
 
 ---

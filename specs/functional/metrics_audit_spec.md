@@ -124,9 +124,10 @@ Definir los requisitos funcionales y operativos del sistema para:
   2. Marca de tiempo exacta con precisión de segundos (`timestamp`).
   3. Identificador y nombre del usuario causante (o `"Sistema / QR Público"` en reportes anónimos o procesos por lotes).
   4. Rol del usuario en el momento de la acción.
-  5. Tipo de entidad afectada (`TICKET`, `MACHINE`, `LOCATION`).
+  5. Tipo de entidad afectada, tomado del enum de `audit_log` (catálogo canónico en `specs/technical/metrics_audit_contracts.md` §3.4.1: `TICKET`, `MACHINE`, `LOCATION`, `USER`, `PREVENTIVE_ORDER`, `SANITARY_CERTIFICATE`, `REFUND_REQUEST`, `UNCLAIMED_CASH_FINDING`).
   6. Identificador de la entidad afectada.
-  7. Acción ejecutada (ej. `STATUS_CHANGE`, `ASSIGN_TECHNICIAN`, `UPDATE_PHONE`, `CREATE_TICKET`).
+  7. Acción ejecutada, tomada del catálogo canónico de acciones reales (`specs/technical/metrics_audit_contracts.md` §3.4.1). Ejemplos: `INCIDENT_ASSIGNED`, `RESOLVE_INCIDENT`, `REOPEN_TICKET`, `MACHINE_UPDATED`, `LOCATION_UPDATED`.
+     Ningún valor del catálogo puede ser una acción que el sistema no llegue a escribir jamás: un filtro que devuelve siempre cero filas es un defecto de contrato, no una opción inocua (guarda automática: `tests/unit/AuditActionCatalogTest.php`).
   8. Estado o valor previo (`previous_value`) y estado o valor nuevo (`new_value`) en formato legible / estructurado.
 * **EARS 5.4 (Inmutabilidad Estricta):** El registro de auditoría será estrictamente de adición (*append-only*). El sistema no dispondrá bajo ninguna circunstancia de funciones, botones ni endpoints para editar, alterar o eliminar registros del log de auditoría.
 * **EARS 5.5 (Consulta y Búsqueda para Coordinación):** Cuando el coordinador consulte el visor de auditoría, el sistema deberá permitir filtrar por fecha, tipo de entidad, identificador de ticket/máquina/sede, usuario causante y tipo de acción.

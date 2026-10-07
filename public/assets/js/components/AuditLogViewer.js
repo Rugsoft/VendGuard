@@ -16,6 +16,12 @@
  */
 
 import { api } from '../api.js';
+import {
+  AUDIT_ENTITY_LABELS,
+  getAuditActionBadge,
+  getAuditActionGroups,
+  getAuditEntityLabel
+} from '../utils/AuditActionLabels.js';
 
 export const AuditLogViewer = {
   name: 'AuditLogViewer',
@@ -45,6 +51,14 @@ export const AuditLogViewer = {
     this.fetchAuditEvents();
   },
   computed: {
+    /** Grouped catalogue of real audit actions (utils/AuditActionLabels.js). */
+    actionFilterGroups() {
+      return getAuditActionGroups();
+    },
+    /** Entity types of the audit_log enum, with their Spanish labels. */
+    entityOptions() {
+      return AUDIT_ENTITY_LABELS;
+    },
     hasActiveFilters() {
       return Boolean(
         this.filterEntityType ||
@@ -113,27 +127,18 @@ export const AuditLogViewer = {
       this.selectedEvent = null;
       this.showDetailModal = false;
     },
+    /**
+     * Badge of an action. Delegates to the shared catalogue so a row badge and the
+     * filter option of the same action can never disagree (RF-05, EARS 5.5).
+     */
     formatActionBadge(action) {
-      const map = {
-        'RESOLVE_INCIDENT': { label: 'Resolución de Avería', bg: '#dcfce7', color: '#15803d', border: '#86efac' },
-        'START_INTERVENTION': { label: 'Inicio de Intervención', bg: '#e0f2fe', color: '#0369a1', border: '#7dd3fc' },
-        'PAUSE_INTERVENTION': { label: 'Pausa por Repuestos', bg: '#fef3c7', color: '#92400e', border: '#fde68a' },
-        'STATUS_CHANGE': { label: 'Cambio de Estado', bg: '#e5f2fc', color: '#2560ff', border: '#bfdbfe' },
-        'ASSIGN_TECHNICIAN': { label: 'Asignación de Técnico', bg: '#f3e8ff', color: '#7e22ce', border: '#d8b4fe' },
-        'REOPEN_TICKET': { label: 'Reapertura de Ticket', bg: '#ffedd5', color: '#c2410c', border: '#fdba74' },
-        'CANCEL_INCIDENT': { label: 'Cancelación de Avería', bg: '#fee2e2', color: '#dc2626', border: '#fca5a5' },
-        'CREATE_TICKET': { label: 'Creación de Ticket', bg: '#f1f5f9', color: '#334155', border: '#cbd5e1' },
-        'UPDATE_MACHINE': { label: 'Modificación de Máquina', bg: '#f8fafc', color: '#475569', border: '#cbd5e1' },
-        'UPDATE_LOCATION': { label: 'Modificación de Sede', bg: '#f8fafc', color: '#475569', border: '#cbd5e1' }
-      };
-
-      return map[action] || { label: action, bg: '#f1f5f9', color: '#475569', border: '#cbd5e1' };
+      return getAuditActionBadge(action);
     },
     formatEntityName(type, id) {
       if (type === 'TICKET') return `Avería #${id}`;
       if (type === 'MACHINE') return `Máquina #${id}`;
       if (type === 'LOCATION') return `Sede #${id}`;
-      return `${type} #${id}`;
+      return `${getAuditEntityLabel(type)} #${id}`;
     },
     async downloadAuditCsv() {
       const params = {};
@@ -195,9 +200,11 @@ export const AuditLogViewer = {
           style="padding: 6px 10px; font-size: 13px; border: 1px solid #c8cfda; border-radius: 4px; background: #ffffff; color: #2c333f;"
         >
           <option value="">Todas las Entidades</option>
-          <option value="TICKET">Incidencias / Tickets</option>
-          <option value="MACHINE">Máquinas Vending</option>
-          <option value="LOCATION">Sedes Clientes</option>
+          <option
+            v-for="(entityLabel, entityCode) in entityOptions"
+            :key="entityCode"
+            :value="entityCode"
+          >{{ entityLabel }}</option>
         </select>
 
         <!-- Filtro Acción -->
@@ -207,14 +214,17 @@ export const AuditLogViewer = {
           style="padding: 6px 10px; font-size: 13px; border: 1px solid #c8cfda; border-radius: 4px; background: #ffffff; color: #2c333f;"
         >
           <option value="">Todas las Acciones</option>
-          <option value="RESOLVE_INCIDENT">Resolución de Avería</option>
-          <option value="START_INTERVENTION">Inicio de Intervención</option>
-          <option value="PAUSE_INTERVENTION">Pausa por Repuestos</option>
-          <option value="STATUS_CHANGE">Cambio de Estado</option>
-          <option value="ASSIGN_TECHNICIAN">Asignación de Técnico</option>
-          <option value="REOPEN_TICKET">Reapertura de Ticket</option>
-          <option value="CANCEL_INCIDENT">Cancelación de Avería</option>
-          <option value="CREATE_TICKET">Creación de Ticket</option>
+          <optgroup
+            v-for="group in actionFilterGroups"
+            :key="group.key"
+            :label="group.label"
+          >
+            <option
+              v-for="entry in group.actions"
+              :key="entry.code"
+              :value="entry.code"
+            >{{ entry.label }}</option>
+          </optgroup>
         </select>
 
         <!-- Filtro ID Entidad -->

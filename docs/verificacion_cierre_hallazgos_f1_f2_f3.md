@@ -187,7 +187,7 @@ Servicio en `http://127.0.0.1:8000`, semillas canónicas y ciclo completo multi-
 3. **`GET /api/technician/machines/{id}/history` conserva su propio 403** para el técnico desasignado. Su contrato (`specs/technical/technician_machine_history_contracts.md` §2.1-2.2) documenta esa regla de forma explícita, así que extenderlo exige otra enmienda y no se ha tocado.
 4. **La auditoría de la reapertura no es atómica** con su commit (apartado 3.4).
 5. **El bloqueo por Avería Crónica no emite evento propio.** Se decidió no ampliar el alcance; queda como candidato para una iteración de auditoría.
-6. **F-4 sigue abierto (deriva de vocabulario del visor de auditoría).** El catálogo del visor usa nombres que el backend nunca escribe (`RESOLVE_INCIDENT` vs `TICKET_RESOLVED`, `ASSIGN_TECHNICIAN` vs `INCIDENT_ASSIGNED`, `CANCEL_INCIDENT` vs `INCIDENT_CANCELLED`), de modo que varios filtros siguen devolviendo cero filas. F-2 ha reactivado el de «Reapertura de Ticket»; el resto es una limpieza aparte.
+6. **F-4 CERRADO (07/10/2026).** La deriva de vocabulario del visor de auditoría - ocho filtros que nunca podían devolver una fila y 44 acciones del backend sin etiqueta ni filtro - se corrigió con un catálogo único derivado de los escritores reales y una guarda anti-deriva en la suite: [verificacion_cierre_hallazgo_f4.md](verificacion_cierre_hallazgo_f4.md).
 
 ---
 
