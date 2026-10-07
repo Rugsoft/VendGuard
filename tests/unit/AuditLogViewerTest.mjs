@@ -33,6 +33,7 @@ globalThis.window = {
 
 import { api } from '../../public/assets/js/api.js';
 import { AuditLogViewer } from '../../public/assets/js/components/AuditLogViewer.js';
+import { AUDIT_ACTION_CATALOG } from '../../public/assets/js/utils/AuditActionLabels.js';
 
 let assertions = 0;
 let failures = 0;
@@ -83,15 +84,15 @@ const mockAuditEvents = [
     timestamp: '2026-09-23 09:20:00',
     entity_type: 'TICKET',
     entity_id: 4,
-    action: 'START_INTERVENTION',
+    action: 'INCIDENT_ASSIGNED',
     user: {
       id: 2,
       name: 'Jordi Técnico Ruta BCN',
       role: 'TECHNICIAN'
     },
     details: {
-      previous_status: 'ASSIGNED',
-      new_status: 'IN_PROGRESS'
+      previous_status: 'REGISTERED',
+      new_status: 'ASSIGNED'
     }
   },
   {
@@ -99,7 +100,7 @@ const mockAuditEvents = [
     timestamp: '2026-09-23 08:30:00',
     entity_type: 'MACHINE',
     entity_id: 1,
-    action: 'UPDATE_MACHINE',
+    action: 'MACHINE_UPDATED',
     user: {
       id: 1,
       name: 'Sara Coordinadora',
@@ -141,6 +142,14 @@ const instance = {
   downloadAuditCsv: AuditLogViewer.methods.downloadAuditCsv
 };
 
+// Las propiedades calculadas se evalúan contra la instancia simulada
+Object.defineProperty(instance, 'actionFilterGroups', {
+  get: () => AuditLogViewer.computed.actionFilterGroups.call(instance)
+});
+Object.defineProperty(instance, 'entityOptions', {
+  get: () => AuditLogViewer.computed.entityOptions.call(instance)
+});
+
 // -------------------------------------------------------------
 // 1. Carga inicial de datos
 // -------------------------------------------------------------
@@ -161,8 +170,9 @@ const badgeResolve = instance.formatActionBadge('RESOLVE_INCIDENT');
 assert('2.1 RESOLVE_INCIDENT tiene etiqueta amigable en español', badgeResolve.label === 'Resolución de Avería');
 assert('2.2 RESOLVE_INCIDENT usa fondo verde (#dcfce7)', badgeResolve.bg === '#dcfce7');
 
-const badgeAssign = instance.formatActionBadge('ASSIGN_TECHNICIAN');
-assert('2.3 ASSIGN_TECHNICIAN tiene etiqueta amigable', badgeAssign.label === 'Asignación de Técnico');
+const badgeAssign = instance.formatActionBadge('INCIDENT_ASSIGNED');
+assert('2.3 INCIDENT_ASSIGNED tiene etiqueta amigable', badgeAssign.label === 'Asignación de Técnico');
+assert('2.3b INCIDENT_ASSIGNED usa el tono morado de asignación (#f3e8ff)', badgeAssign.bg === '#f3e8ff');
 
 const entityTicket = instance.formatEntityName('TICKET', 4);
 assert('2.4 Entidad TICKET formateada como "Avería #4"', entityTicket === 'Avería #4');
@@ -215,6 +225,55 @@ console.log('\n--- 5. URL de Exportación CSV (RF-06, EARS 6.2) ---');
 const exportUrl = api.auditLog.exportCsvUrl({ entity_type: 'TICKET' });
 assert('5.1 URL de descarga apunta al endpoint de exportación CSV', exportUrl.includes('/api/coordinator/audit-log/export'));
 assert('5.2 Parámetro de filtro preservado en la URL de descarga', exportUrl.includes('entity_type=TICKET'));
+
+// -------------------------------------------------------------
+// 6. Catálogo compartido de acciones y entidades
+// -------------------------------------------------------------
+console.log('\n--- 6. Catálogo Compartido de Acciones y Entidades ---');
+
+assert('6.1 El catálogo declara códigos únicos y cubre el parque completo',
+  AUDIT_ACTION_CATALOG.length >= 50
+  && new Set(AUDIT_ACTION_CATALOG.map((entry) => entry.code)).size === AUDIT_ACTION_CATALOG.length,
+  `Entradas: ${AUDIT_ACTION_CATALOG.length}`);
+
+assert('6.2 Toda acción de los eventos cargados muestra etiqueta en español (no un código crudo)',
+  instance.events.every((event) => !/^[A-Z][A-Z0-9_]*$/.test(instance.formatActionBadge(event.action).label)));
+
+assert('6.3 El filtro se construye agrupado desde el catálogo y cubre todas las acciones',
+  instance.actionFilterGroups.length >= 8
+  && instance.actionFilterGroups.reduce((total, group) => total + group.actions.length, 0) === AUDIT_ACTION_CATALOG.length
+  && instance.actionFilterGroups.every((group) => group.actions.length > 0 && group.label.trim() !== ''));
+
+const offeredActions = instance.actionFilterGroups.flatMap((group) => group.actions.map((entry) => entry.code));
+assert('6.4 El filtro ya no ofrece acciones fantasma (ASSIGN_TECHNICIAN, CANCEL_INCIDENT, STATUS_CHANGE)',
+  !offeredActions.includes('ASSIGN_TECHNICIAN')
+  && !offeredActions.includes('CANCEL_INCIDENT')
+  && !offeredActions.includes('STATUS_CHANGE'));
+
+assert('6.5 El filtro ofrece las acciones reales del ciclo de incidencia',
+  ['INCIDENT_ASSIGNED', 'INCIDENT_REASSIGNED', 'INCIDENT_CANCELLED', 'INCIDENT_COMMENT_ADDED', 'RESOLVE_INCIDENT', 'REOPEN_TICKET']
+    .every((code) => offeredActions.includes(code)));
+
+assert('6.6 Una acción desconocida conserva distintivo legible en lugar de desaparecer',
+  instance.formatActionBadge('ASSIGN_TECHNICIAN').label === 'ASSIGN_TECHNICIAN');
+
+assert('6.7 REOPEN_TICKET usa la etiqueta acordada y el tono de aviso',
+  instance.formatActionBadge('REOPEN_TICKET').label === 'Reapertura de Ticket'
+  && instance.formatActionBadge('REOPEN_TICKET').bg === '#fef3c7');
+
+const entityCodes = Object.keys(instance.entityOptions);
+assert('6.8 El filtro de entidad ofrece los ocho tipos del enum de audit_log',
+  entityCodes.length === 8
+  && ['TICKET', 'MACHINE', 'LOCATION', 'USER', 'PREVENTIVE_ORDER', 'SANITARY_CERTIFICATE', 'REFUND_REQUEST', 'UNCLAIMED_CASH_FINDING']
+    .every((code) => entityCodes.includes(code))
+  && Object.values(instance.entityOptions).every((label) => label.trim() !== ''));
+
+assert('6.9 El formateador de entidad usa la etiqueta en español también para los tipos nuevos',
+  instance.formatEntityName('REFUND_REQUEST', 12) === 'Expediente de Reintegro #12'
+  && instance.formatEntityName('TICKET', 4) === 'Avería #4');
+
+assert('6.10 Cada entrada del catálogo declara tono y grupo no vacíos',
+  AUDIT_ACTION_CATALOG.every((entry) => entry.tone.trim() !== '' && entry.group.trim() !== ''));
 
 console.log('\n======================================================================');
 console.log(` RESUMEN: ${assertions} aserciones superadas exitosamente (100% PASS).`);
