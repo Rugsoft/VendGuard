@@ -168,6 +168,10 @@ class TechnicianController
                 'started_at'           => $incident->getStartedAt(),
                 'pending_parts_reason' => $incident->getPendingPartsReason(),
                 'created_at'           => $incident->getCreatedAt(),
+                // Insignia de conversación de la parada (RF-01.1): el técnico de ruta
+                // contabiliza la TOTALIDAD de mensajes, públicos y notas internas de
+                // taller, porque su canal sí tiene acceso legítimo a ambos (RF-02.3).
+                'comments_count'       => $this->incidentRepo->countComments($incident->getId(), true),
             ];
         }
 

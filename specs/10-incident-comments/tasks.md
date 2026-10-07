@@ -97,7 +97,7 @@
   * **Dependencias:** T-COM-12, T-COM-13
   * **Hecho cuando:** (1) `MachineCard.js` renderiza una insignia interactiva con icono de diálogo y contador numérico contabilizando **únicamente comentarios públicos** (`public_comments_count`); (2) al pulsar la insignia o el botón de conversación, emite el evento para abrir `IncidentCommentThreadModal` con rol `SITE_MANAGER`; y (3) al emitirse un nuevo comentario, `LocationPortalView.js` recarga el estado de las máquinas actualizando reactivamente el contador.
 
-- [ ] **T-COM-15: Integrar insignia reactiva y modal en tarjetas de parada en `TechnicianRouteView.js`**
+- [x] **T-COM-15: Integrar insignia reactiva y modal en tarjetas de parada en `TechnicianRouteView.js`**
   * **Requisitos:** RF-01.1, RF-02.3
   * **Dependencias:** T-COM-12, T-COM-13
   * **Hecho cuando:** (1) Cada tarjeta de parada de intervención en la vista móvil "Mi Ruta" incorpora una insignia interactiva con icono de conversación y contador numérico con la totalidad de mensajes (`comments_count`); (2) al pulsar, abre `IncidentCommentThreadModal` con rol `TECHNICIAN`; y (3) al publicar un mensaje, el contador de la parada se incrementa de forma inmediata en la interfaz móvil.

@@ -35,6 +35,7 @@ import { TechnicianResolutionPartsBlock } from '../components/TechnicianResoluti
 import { TechnicianResolutionRefundBlock } from '../components/TechnicianResolutionRefundBlock.js';
 import { TechnicianRouteMapModal } from '../components/TechnicianRouteMapModal.js';
 import { TechnicianMachineHistoryModal } from '../components/TechnicianMachineHistoryModal.js';
+import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';
 
 export const TechnicianRouteView = {
   name: 'TechnicianRouteView',
@@ -49,7 +50,8 @@ export const TechnicianRouteView = {
     TechnicianResolutionPartsBlock,
     TechnicianResolutionRefundBlock,
     TechnicianRouteMapModal,
-    TechnicianMachineHistoryModal
+    TechnicianMachineHistoryModal,
+    IncidentCommentThreadModal
   },
   data() {
     return {
@@ -98,7 +100,11 @@ export const TechnicianRouteView = {
 
       // Machine incident history modal (RF-07 / EARS H.1-H.6, specs/technical/technician_machine_history_contracts.md)
       showMachineHistoryModal: false,
-      historyMachine: null
+      historyMachine: null,
+
+      // Modal 5: Hilo de conversación de la parada (Módulo 10, RF-01.1, RF-02.3)
+      showCommentsModal: false,
+      selectedCommentIncident: null
     };
   },
   computed: {
@@ -354,6 +360,57 @@ export const TechnicianRouteView = {
     closeMachineHistoryModal() {
       this.showMachineHistoryModal = false;
       this.historyMachine = null;
+    },
+
+    /**
+     * Contador total de mensajes de una parada para la insignia de conversación
+     * (RF-01.1). El técnico contabiliza públicos y notas internas de taller.
+     *
+     * @param {Object} incident Parada de la ruta.
+     * @returns {number} Entero no negativo; 0 si la parada aún no tiene hilo.
+     */
+    commentCountOf(incident) {
+      const parsed = Number.parseInt(incident?.comments_count, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    },
+
+    /**
+     * Abre el hilo de conversación de la parada pulsada (RF-01.2). El modal se
+     * monta con el canal 'TECHNICIAN': muestra notas internas con distintivo
+     * ámbar y publica en modo 'Nota Interna de Taller' por defecto (RF-02.3,
+     * RF-03.3).
+     *
+     * @param {Object} incident Parada de la ruta.
+     */
+    openCommentsModal(incident) {
+      if (!incident) return;
+      this.selectedCommentIncident = incident;
+      this.showCommentsModal = true;
+    },
+
+    closeCommentsModal() {
+      this.showCommentsModal = false;
+      this.selectedCommentIncident = null;
+    },
+
+    /**
+     * Refresco inmediato del contador de la parada tras publicar un mensaje
+     * (RF-03.4): usa el total exacto del hilo devuelto por el servidor y, si no
+     * llegara, incrementa el valor actual en una unidad sin recargar la ruta.
+     *
+     * @param {Object|null} threadDto DTO del hilo emitido por el modal.
+     */
+    onCommentAdded(threadDto) {
+      const incidentId = this.selectedCommentIncident?.id ?? null;
+      if (incidentId === null) return;
+
+      const target = this.incidents.find(inc => inc.id === incidentId);
+      if (!target) return;
+
+      const reportedTotal = Number.parseInt(threadDto?.pagination?.total_comments, 10);
+      target.comments_count = Number.isFinite(reportedTotal)
+        ? reportedTotal
+        : this.commentCountOf(target) + 1;
     },
 
     /**
@@ -978,6 +1035,21 @@ export const TechnicianRouteView = {
                   🕘 Historial de la máquina
                 </button>
               </div>
+
+              <!-- Conversation thread badge with the total message count (RF-01.1, RF-02.3) -->
+              <div style="margin-top: 6px;">
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-secondary vg-stop-comments-badge"
+                  style="display: inline-flex; align-items: center; gap: 6px; height: 34px; font-size: 13px; font-weight: 600; padding: 0 12px;"
+                  data-testid="btn-stop-comments"
+                  :aria-label="'Conversación de la parada: ' + commentCountOf(incident) + ' mensajes'"
+                  @click="openCommentsModal(incident)"
+                >
+                  <span aria-hidden="true">💬</span>
+                  <span data-testid="stop-comments-count">{{ commentCountOf(incident) }}</span> mensajes
+                </button>
+              </div>
             </div>
 
             <!-- Description Box -->
@@ -1074,6 +1146,18 @@ export const TechnicianRouteView = {
         v-model="showMachineHistoryModal"
         :machine="historyMachine"
         @close="closeMachineHistoryModal"
+      />
+
+      <!-- =================================================================== -->
+      <!-- MODAL: HILO DE CONVERSACIÓN DE LA PARADA (Módulo 10, canal TÉCNICO)  -->
+      <!-- =================================================================== -->
+      <IncidentCommentThreadModal
+        :is-open="showCommentsModal"
+        :incident-id="selectedCommentIncident?.id ?? null"
+        :ticket-code="selectedCommentIncident?.ticket_code ?? null"
+        role="TECHNICIAN"
+        @close="closeCommentsModal"
+        @comment-added="onCommentAdded"
       />
 
       <!-- =================================================================== -->
