@@ -116,7 +116,7 @@
   * **Dependencias:** T-COM-12
   * **Hecho cuando:** La ejecución de `node tests/unit/IncidentCommentThreadModalTest.mjs` pasa al 100% en verde evaluando: (1) renderizado de bocadillos ámbar `#fef9c3` con candado y etiqueta para notas internas; (2) selector preseleccionado en `'INTERNAL'` para técnicos y ausente para sede; (3) reactividad del contador (deshabilitado con 4 caracteres, habilitado con 5 a 1.000); (4) dirty form guard interceptando pulsaciones de `Escape`; y (5) renderizado del aviso de auditoría en modo sellado de solo lectura.
 
-- [ ] **T-COM-18: Implementar pruebas de integración HTTP contra MariaDB real (`LocationCommentsApiTest.php` y `TechnicianCommentsApiTest.php`)**
+- [x] **T-COM-18: Implementar pruebas de integración HTTP contra MariaDB real (`LocationCommentsApiTest.php` y `TechnicianCommentsApiTest.php`)**
   * **Requisitos:** RF-01, RF-02, RF-03, RF-04, RF-05, RNF-01, Constitución Art. V.4, Art. V.5
   * **Dependencias:** T-COM-08, T-COM-13
   * **Hecho cuando:** La ejecución de `php tests/integration/LocationCommentsApiTest.php` y `php tests/integration/TechnicianCommentsApiTest.php` pasa al 100% en verde evaluando: (1) Sede: filtrado en base de datos de notas internas (cero fugas en payload), enmascaramiento oficial de técnicos (`"Servicio Técnico Oficial (Operador #XX)"`), y subida multipart con foto; (2) Técnico: publicación con selector de nota interna persistiendo `is_internal = 1`, visibilidad de nombres reales de compañeros y fotos adjuntas.
