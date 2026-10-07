@@ -6,12 +6,16 @@ namespace VendGuard\Presentation\Controller;
 
 use VendGuard\Application\DTO\TechnicianRefundInspectionDTO;
 use VendGuard\Application\DTO\TechnicianRefundViewDTO;
+use VendGuard\Application\Service\IncidentCommentService;
 use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
 use VendGuard\Application\Service\TechnicianRefundService;
+use VendGuard\Core\Domain\Exception\ConversationSealedException;
 use VendGuard\Core\Domain\Exception\IncompatibleSparePartException;
+use VendGuard\Core\Domain\Exception\InvalidCommentLengthException;
 use VendGuard\Core\Domain\Exception\InvalidRecoveredAmountException;
 use VendGuard\Core\Domain\Exception\InvalidRefundStateTransitionException;
+use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Exception\JustificationTooShortException;
 use VendGuard\Core\Domain\Exception\ReceptionDeliveryNotAllowedException;
 use VendGuard\Core\Domain\Exception\RefundNotFoundException;
@@ -40,6 +44,7 @@ use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRequestRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
+use VendGuard\Infrastructure\Storage\LocalFileUploader;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
 
@@ -61,6 +66,8 @@ class TechnicianController
     private SparePartTraceabilityService $traceabilityService;
     private RefundRequestRepositoryInterface $refundRepo;
     private TechnicianRefundService $refundService;
+    private LocalFileUploader $fileUploader;
+    private ?IncidentCommentService $commentService;
 
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
@@ -69,7 +76,9 @@ class TechnicianController
         ?UserRepositoryInterface $userRepo = null,
         ?SparePartTraceabilityService $traceabilityService = null,
         ?RefundRequestRepositoryInterface $refundRepo = null,
-        ?TechnicianRefundService $refundService = null
+        ?TechnicianRefundService $refundService = null,
+        ?LocalFileUploader $fileUploader = null,
+        ?IncidentCommentService $commentService = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->machineRepo  = $machineRepo ?? new PdoMachineRepository();
@@ -91,6 +100,21 @@ class TechnicianController
             // alguien sabe si la sede tiene mesa de recepcion.
             locationRepo: $this->locationRepo
         );
+
+        $this->fileUploader = $fileUploader ?? new LocalFileUploader();
+
+        // Inicialización perezosa: el AuditLogger por defecto del servicio de
+        // comentarios abre conexión a MariaDB al instanciarse, y este controlador
+        // también se construye en contextos unitarios sin base de datos.
+        $this->commentService = $commentService;
+    }
+
+    /**
+     * Servicio de aplicación del hilo de comentarios, resuelto bajo demanda.
+     */
+    private function comments(): IncidentCommentService
+    {
+        return $this->commentService ??= new IncidentCommentService($this->incidentRepo, null, $this->fileUploader);
     }
 
     /**
@@ -765,6 +789,296 @@ class TechnicianController
             'role' => (string)$request->getAttribute('user_role', 'TECHNICIAN'),
             'name' => 'Técnico de Ruta',
         ];
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Módulo 10 · T-COM-06 — Hilo de conversación del expediente
+    // Orquestado por IncidentCommentService: la segregación, el enmascaramiento
+    // y la máquina de estados del sellado viven en la capa de aplicación.
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * GET /api/technician/incidents/{id}/comments
+     *
+     * Devuelve el hilo íntegro del expediente para el Técnico de Ruta: comentarios
+     * públicos y notas internas de taller, con la identidad nominal real de los
+     * compañeros y el candado `is_internal` expuesto (RF-01.2, RF-02.3).
+     *
+     * El acceso se limita al expediente asignado al técnico autenticado: las notas
+     * internas son material confidencial del equipo y solo conciernen a quien
+     * interviene la avería (Art. V.4).
+     */
+    public function getComments(Request $request): Response
+    {
+        // 1. Identidad del técnico autenticado (middleware InternalAuthMiddleware).
+        $technician = $this->resolveAuthenticatedTechnician($request);
+        if ($technician === null) {
+            return Response::error('UNAUTHORIZED', 'No se pudo identificar al técnico autenticado.', 401);
+        }
+
+        // 2. Expediente de la ruta: existencia y asignación (404 / 403).
+        $incident = $this->resolveAssignedIncident($request, $technician['id']);
+        if ($incident instanceof Response) {
+            return $incident;
+        }
+
+        // 3. Cursor de paginación cursorizada (RF-01.2, RF-01.3).
+        $limitRaw = $request->getQuery('limit');
+        if ($limitRaw !== null && (!ctype_digit((string)$limitRaw) || (int)$limitRaw < 1)) {
+            return Response::error('INVALID_LIMIT', 'El parámetro limit debe ser un entero positivo.', 400);
+        }
+        $limit = $limitRaw !== null ? (int)$limitRaw : IncidentCommentService::DEFAULT_THREAD_LIMIT;
+
+        $beforeIdRaw = $request->getQuery('before_id');
+        if ($beforeIdRaw !== null && (!ctype_digit((string)$beforeIdRaw) || (int)$beforeIdRaw < 1)) {
+            return Response::error('INVALID_BEFORE_ID', 'El parámetro before_id debe ser un entero positivo.', 400);
+        }
+        $beforeId = $beforeIdRaw !== null ? (int)$beforeIdRaw : null;
+
+        // 4. Proyección nominal completa en servidor, notas internas incluidas.
+        try {
+            $thread = $this->comments()->getThread(
+                (int)$incident->getId(),
+                'TECHNICIAN',
+                $technician['id'],
+                $limit,
+                $beforeId
+            );
+        } catch (ConversationSealedException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (\DomainException $e) {
+            return Response::error('INCIDENT_NOT_FOUND', 'La incidencia solicitada no existe.', 404);
+        }
+
+        return Response::json($thread->jsonSerialize(), 200);
+    }
+
+    /**
+     * POST /api/technician/incidents/{id}/comments
+     *
+     * Publica un comentario o una nota interna de taller en el expediente de la
+     * ruta del técnico autenticado (RF-03.3, RF-04.1).
+     *
+     * Garantías de servidor:
+     * - El selector de privacidad se interpreta con fail-safe: si `is_internal`
+     *   no viaja, la nota se clasifica como interna (RF-03.3) para no filtrar al
+     *   cliente material de taller por un campo ausente.
+     * - La fotografía in situ se valida en servidor (≤ 5 MB y magic bytes reales)
+     *   mediante LocalFileUploader antes de persistir nada (Art. V.5 / RF-04.2).
+     * - Expediente sellado (CLOSED/CANCELLED o RESOLVED fuera de la garantía de
+     *   48 h) se rechaza con HTTP 403 Forbidden (RF-05.3 / RF-07.2).
+     */
+    public function addComment(Request $request): Response
+    {
+        // 1. Identidad del técnico autenticado: autoría nominal real (RF-02.3).
+        $technician = $this->resolveAuthenticatedTechnician($request);
+        if ($technician === null) {
+            return Response::error('UNAUTHORIZED', 'No se pudo identificar al técnico autenticado.', 401);
+        }
+
+        // 2. Expediente de la ruta: existencia y asignación (404 / 403).
+        $incident = $this->resolveAssignedIncident($request, $technician['id']);
+        if ($incident instanceof Response) {
+            return $incident;
+        }
+
+        // 3. Texto del mensaje: solo se comprueba su presencia (400); los límites
+        //    de 5 a 1.000 caracteres descriptivos los aplica el servicio (RF-03.1).
+        $commentText = trim((string)($request->getBodyParam('comment_text')
+            ?? $request->getBodyParam('text')
+            ?? $request->getBodyParam('comment')
+            ?? ''));
+        if ($commentText === '') {
+            return Response::error(
+                'MISSING_COMMENT_TEXT',
+                'El texto del comentario es obligatorio.',
+                400,
+                ['form_data' => ['comment_text' => $commentText]]
+            );
+        }
+
+        // 4. Selector de privacidad (RF-03.3): "Nota Interna de Taller" viene
+        //    PRESELECCIONADA por defecto; solo un valor explícito la desmarca.
+        $isInternal = true;
+        if (array_key_exists('is_internal', $request->getParsedBody())) {
+            $parsedFlag = $this->parseBooleanFlag($request->getBodyParam('is_internal'));
+            if ($parsedFlag === null) {
+                return Response::error(
+                    'INVALID_IS_INTERNAL',
+                    'El indicador is_internal debe ser booleano (true/false).',
+                    422
+                );
+            }
+            $isInternal = $parsedFlag;
+        }
+
+        // 5. Evidencia fotográfica in situ (multipart/form-data, RF-04.1).
+        $photoFile = $request->getFile('photo') ?? $request->getFile('image') ?? $request->getFile('file');
+
+        // 6. Publicación orquestada: sellado, clasificación y auditoría en el servicio.
+        try {
+            $thread = $this->comments()->addComment(
+                (int)$incident->getId(),
+                'TECHNICIAN',
+                $commentText,
+                [
+                    'id' => $technician['id'],
+                    'role' => 'TECHNICIAN',
+                    'name' => $technician['name'],
+                ],
+                $isInternal,
+                $photoFile
+            );
+        } catch (InvalidCommentLengthException $e) {
+            // RF-07.1: se devuelven los datos de texto íntegros para el reintento.
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                ['form_data' => ['ticket_code' => $incident->getTicketCode(), 'comment_text' => $commentText]]
+            );
+        } catch (ConversationSealedException $e) {
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                ['form_data' => ['ticket_code' => $incident->getTicketCode(), 'comment_text' => $commentText]]
+            );
+        } catch (InvalidUploadException $e) {
+            // RF-07.1: texto y clasificación íntegros para el reintento manual.
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                [
+                    'form_data' => [
+                        'ticket_code' => $incident->getTicketCode(),
+                        'comment_text' => $commentText,
+                        'is_internal' => $isInternal,
+                    ],
+                ]
+            );
+        } catch (\DomainException $e) {
+            return Response::error('INCIDENT_NOT_FOUND', 'La incidencia solicitada no existe.', 404);
+        }
+
+        // 7. Respuesta 201 Created con el hilo actualizado del expediente (RF-03.4).
+        return Response::json(
+            $thread->jsonSerialize(),
+            201,
+            $isInternal
+                ? 'Nota interna registrada en el hilo de conversación'
+                : 'Comentario publicado en el hilo de conversación'
+        );
+    }
+
+    /**
+     * Identidad del técnico autenticado para la autoría nominal del mensaje.
+     *
+     * Devuelve null cuando no hay una identidad fiable (sin ID o sin nombre), de
+     * modo que el endpoint responda 401 en lugar de firmar una nota de taller con
+     * una identidad inventada: la autoría es parte del registro inmutable (Art. III).
+     *
+     * @return array{id: int, name: string}|null
+     */
+    private function resolveAuthenticatedTechnician(Request $request): ?array
+    {
+        $user = $request->getAttribute('authenticated_user');
+        if ($user instanceof User) {
+            $name = trim($user->getName());
+
+            return $name === '' ? null : ['id' => (int)$user->getId(), 'name' => $name];
+        }
+
+        $userId = $request->getAttribute('user_id');
+        if ($userId === null || !is_numeric($userId)) {
+            return null;
+        }
+
+        $name = trim((string)$request->getAttribute('user_name', ''));
+
+        return $name === '' ? null : ['id' => (int)$userId, 'name' => $name];
+    }
+
+    /**
+     * Resuelve el expediente de la ruta y verifica que esté asignado al técnico.
+     *
+     * @return Incident|Response El expediente autorizado o la respuesta de error
+     *   (400 identificador ausente, 404 inexistente, 403 no asignado).
+     */
+    private function resolveAssignedIncident(Request $request, int $technicianId): Incident|Response
+    {
+        $identifier = $request->getRouteParam('id')
+            ?? $request->getRouteParam('ticket_code')
+            ?? $request->getRouteParam('code');
+        if ($identifier === null || trim($identifier) === '') {
+            return Response::error(
+                'MISSING_INCIDENT_ID',
+                'El identificador de la incidencia es obligatorio en la URL.',
+                400
+            );
+        }
+        $identifier = trim($identifier);
+
+        $incident = ctype_digit($identifier)
+            ? $this->incidentRepo->findById((int)$identifier)
+            : $this->incidentRepo->findByTicketCode(strtoupper(ltrim($identifier, '#')));
+
+        if ($incident === null) {
+            return Response::error(
+                'INCIDENT_NOT_FOUND',
+                "No se encontró ninguna incidencia con el identificador '{$identifier}'.",
+                404
+            );
+        }
+
+        // Un solo técnico responsable activo por incidencia (Art. V): el hilo de
+        // taller solo se abre al técnico al que el expediente está asignado.
+        if ($incident->getAssignedTechnicianId() !== $technicianId) {
+            return Response::error(
+                'NOT_ASSIGNED_TO_TECHNICIAN',
+                'Esta incidencia no está asignada a tu ruta técnica.',
+                403
+            );
+        }
+
+        return $incident;
+    }
+
+    /**
+     * Interpreta un indicador booleano del cuerpo de la petición (true/false, 1/0, 'yes'/'no').
+     *
+     * Devuelve null cuando el valor recibido no es un booleano reconocible, de modo
+     * que el controlador pueda rechazarlo con 422 en lugar de coercionar en silencio.
+     */
+    private function parseBooleanFlag(mixed $value): ?bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value)) {
+            if ($value == 1) {
+                return true;
+            }
+            if ($value == 0) {
+                return false;
+            }
+
+            return null;
+        }
+
+        if (is_string($value)) {
+            $normalized = strtolower(trim($value));
+            if (in_array($normalized, ['1', 'true', 'yes'], true)) {
+                return true;
+            }
+            if (in_array($normalized, ['0', 'false', 'no'], true)) {
+                return false;
+            }
+        }
+
+        return null;
     }
 }
 

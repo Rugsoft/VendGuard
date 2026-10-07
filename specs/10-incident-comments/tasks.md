@@ -44,7 +44,7 @@
   * **Dependencias:** T-COM-03, T-COM-04
   * **Hecho cuando:** `LocationPortalController` implementa `getComments(Request $request)` y `addComment(Request $request)` orquestados mediante `IncidentCommentService`, aceptando `multipart/form-data` con foto opcional, garantizando que el cliente jamás reciba notas internas ni configure `is_internal = true`, respondiendo `200 OK` con `IncidentCommentThreadDto` y `201 Created` al publicar, o `403 Forbidden` si el expediente está sellado.
 
-- [ ] **T-COM-06: Implementar endpoints de Técnico en `TechnicianController.php`**
+- [x] **T-COM-06: Implementar endpoints de Técnico en `TechnicianController.php`**
   * **Requisitos:** RF-01.2, RF-02.3, RF-03.3, RF-04.1, Constitución Art. V.4
   * **Dependencias:** T-COM-03, T-COM-04
   * **Hecho cuando:** `TechnicianController` incorpora `getComments(Request $request)` y `addComment(Request $request)` bajo autenticación de técnico de ruta, permitiendo consultar el hilo íntegro (públicos y notas internas), publicar notas clasificadas mediante el selector de privacidad `is_internal` (por defecto `true`) y adjuntar fotografías in situ con validación binaria, respondiendo `200 OK` y `201 Created`.
