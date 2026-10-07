@@ -6,6 +6,7 @@ namespace VendGuard\Presentation\Controller;
 
 use VendGuard\Application\DTO\CreateRefundRequestDTO;
 use VendGuard\Application\DTO\RefundReceiptDTO;
+use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\IbanValidationService;
 use VendGuard\Application\Service\IncidentCommentService;
 use VendGuard\Application\Service\RefundManagementService;
@@ -32,6 +33,7 @@ use VendGuard\Core\Domain\Service\UrgencyCalculator;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
+use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
@@ -66,6 +68,7 @@ class LocationPortalController
     private RefundManagementService $refundService;
     private IbanValidationService $ibanValidator;
     private ?IncidentCommentService $commentService;
+    private ?AuditLogger $auditLogger;
 
     public function __construct(
         ?MachineRepositoryInterface $machineRepo = null,
@@ -74,7 +77,8 @@ class LocationPortalController
         ?LocalFileUploader $fileUploader = null,
         ?RefundManagementService $refundService = null,
         ?IbanValidationService $ibanValidator = null,
-        ?IncidentCommentService $commentService = null
+        ?IncidentCommentService $commentService = null,
+        ?AuditLogger $auditLogger = null
     ) {
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
@@ -88,6 +92,19 @@ class LocationPortalController
         // comentarios abre conexión a MariaDB al instanciarse, y este controlador
         // también se construye en contextos unitarios sin base de datos.
         $this->commentService = $commentService;
+        $this->auditLogger = $auditLogger;
+    }
+
+    /**
+     * Registro inmutable de auditoría (RF-05, EARS 5.1), resuelto bajo demanda.
+     *
+     * Se construye de forma perezosa por el mismo motivo que el servicio de
+     * comentarios: este controlador también se instancia en contextos unitarios
+     * sin base de datos, y las suites pueden inyectar un sumidero en memoria.
+     */
+    private function audit(): AuditLogger
+    {
+        return $this->auditLogger ??= new AuditLogger(new PdoAuditLogRepository());
     }
 
     /**
@@ -998,11 +1015,43 @@ class LocationPortalController
             );
         }
 
-        // 6. Respuesta exitosa HTTP 200 OK con payload según contrato API
+        // 6. Evento inmutable de auditoría del cambio de estado (EARS 5.1.2 de
+        //    metrics_audit_spec.md): la reapertura es un cambio de estado del ticket
+        //    y queda auditada con la sede como actor, el estado previo (RESOLVED con
+        //    su técnico saliente) y el resultante (REOPENED desasignado). Se emite
+        //    tras el commit de la reapertura, igual que INCIDENT_ASSIGNED en el triaje.
+        $siteName = trim((string)$location->getName());
+        $this->audit()->logTicketEvent(
+            ticketId: (int)$reopenedIncident->getId(),
+            action: 'REOPEN_TICKET',
+            user: [
+                'id' => null,
+                'role' => 'SITE_MANAGER',
+                'name' => $siteName !== '' ? 'Responsable de Sede · ' . $siteName : 'Responsable de Sede',
+            ],
+            previousState: [
+                'status' => $incident->getStatus()->value,
+                'assigned_technician_id' => $incident->getAssignedTechnicianId(),
+                'resolved_at' => $incident->getResolvedAt(),
+            ],
+            newState: [
+                'status' => $reopenedIncident->getStatus()->value,
+                'assigned_technician_id' => $reopenedIncident->getAssignedTechnicianId(),
+                'reopen_reason' => $reopenedIncident->getReopenReason(),
+                'reopened_at' => $reopenedIncident->getReopenedAt(),
+            ],
+            metadata: [
+                'ticket_code' => $reopenedIncident->getTicketCode(),
+                'reopen_count' => $this->incidentRepo->countReopenEvents((int)$reopenedIncident->getId()),
+            ]
+        );
+
+        // 7. Respuesta exitosa HTTP 200 OK con payload según contrato API
         return Response::json(
             [
                 'ticket_code' => $reopenedIncident->getTicketCode(),
-                'status' => 'REABIERTA',
+                'status' => $reopenedIncident->getStatus()->value,
+                'status_label' => 'Reabierta',
                 'status_canonical' => $reopenedIncident->getStatus()->value,
                 'assigned_technician_id' => $reopenedIncident->getAssignedTechnicianId(),
                 'reopened_at' => $reopenedIncident->getReopenedAt(),

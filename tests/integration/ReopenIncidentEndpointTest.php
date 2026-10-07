@@ -9,7 +9,8 @@ declare(strict_types=1);
  * Requisitos: RF-09 (EARS 9.1, 9.2, 9.3).
  * 
  * Valida la condición "Hecho cuando:":
- * 1. POST /api/incidents/{ticket_code}/reopen pasa el estado a REABIERTA (REOPENED).
+ * 1. POST /api/incidents/{ticket_code}/reopen pasa el estado al canónico REOPENED,
+ *    con la etiqueta legible en `status_label` (contrato normalizado, api_contracts.md §3.4).
  * 2. Pone assigned_technician_id = NULL (desasignación automática del técnico).
  * 3. Reinicia el reloj de 48h (resolved_at = NULL).
  * 4. Rechaza si han pasado >48h (HTTP 422 REOPEN_WINDOW_EXPIRED).
@@ -18,6 +19,8 @@ declare(strict_types=1);
  * 7. Transiciones inválidas (422 INVALID_TRANSITION si el estado no es RESOLVED).
  * 8. Segregación de sede (403 SITE_MISMATCH).
  * 9. Prueba HTTP real contra el servidor local en 127.0.0.1:8000.
+ * 10. Evento inmutable REOPEN_TICKET en audit_log (EARS 5.1.2): actor SITE_MANAGER,
+ *     estado previo RESOLVED y nuevo REOPENED, una sola vez por reapertura efectiva.
  */
 
 require_once __DIR__ . '/../bootstrap.php';
@@ -129,7 +132,9 @@ $res1 = $router->dispatch($req1);
 
 $assert("1.1 Petición de reapertura responde HTTP 200 OK", $res1->getStatusCode() === 200);
 $body1 = $res1->getDecodedBody();
-$assert("1.2 Respuesta indica status REABIERTA", ($body1['data']['status'] ?? '') === 'REABIERTA');
+$assert("1.2 Respuesta devuelve el estado canónico REOPENED", ($body1['data']['status'] ?? '') === 'REOPENED');
+$assert("1.2b Respuesta devuelve la etiqueta legible en status_label", ($body1['data']['status_label'] ?? '') === 'Reabierta');
+$assert("1.2c status_canonical se conserva como alias deprecado de status", ($body1['data']['status_canonical'] ?? '') === 'REOPENED');
 $assert("1.3 assigned_technician_id en respuesta es NULL", array_key_exists('assigned_technician_id', $body1['data'] ?? []) && $body1['data']['assigned_technician_id'] === null);
 
 // Comprobar estado en BD
@@ -139,6 +144,45 @@ $assert("1.5 BD: assigned_technician_id = NULL", $dbInc1 !== null && $dbInc1->ge
 $assert("1.6 BD: reloj de 48h reiniciado (resolved_at = NULL)", $dbInc1 !== null && $dbInc1->getResolvedAt() === null);
 $assert("1.7 BD: reopened_at establecido", $dbInc1 !== null && $dbInc1->getReopenedAt() !== null);
 $assert("1.8 BD: reopen_reason guardado correctamente", $dbInc1 !== null && str_contains((string)$dbInc1->getReopenReason(), 'espiral 3 vuelve a atascarse'));
+
+// Comprobar el evento inmutable de auditoría del cambio de estado (EARS 5.1.2).
+$fetchReopenAudits = function () use ($pdo, $dbInc1): array {
+    $stmt = $pdo->prepare(
+        "SELECT * FROM audit_log WHERE entity_type = 'TICKET' AND entity_id = :eid AND action = 'REOPEN_TICKET' ORDER BY id ASC"
+    );
+    $stmt->execute([':eid' => (int)$dbInc1->getId()]);
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+};
+
+$reopenAudits = $fetchReopenAudits();
+$firstReopenAudit = $reopenAudits[0] ?? [];
+$auditPrevState = json_decode((string)($firstReopenAudit['previous_state'] ?? ''), true) ?: [];
+$auditNewState = json_decode((string)($firstReopenAudit['new_state'] ?? ''), true) ?: [];
+$auditMetadata = json_decode((string)($firstReopenAudit['metadata'] ?? ''), true) ?: [];
+
+$assert("1.10 Auditoría: la reapertura registra el evento inmutable REOPEN_TICKET",
+    count($reopenAudits) === 1,
+    'Eventos REOPEN_TICKET: ' . count($reopenAudits)
+);
+$assert("1.11 Auditoría: actor SITE_MANAGER identificado con la sede y sin user_id interno",
+    ($firstReopenAudit['user_role'] ?? '') === 'SITE_MANAGER'
+    && array_key_exists('user_id', $firstReopenAudit) && $firstReopenAudit['user_id'] === null
+    && str_contains((string)($firstReopenAudit['user_name'] ?? ''), 'Responsable de Sede'),
+    'role=' . var_export($firstReopenAudit['user_role'] ?? null, true) . ' name=' . var_export($firstReopenAudit['user_name'] ?? null, true)
+);
+$assert("1.12 Auditoría: estado previo RESOLVED con el técnico saliente y nuevo REOPENED sin técnico",
+    ($auditPrevState['status'] ?? '') === 'RESOLVED'
+    && (int)($auditPrevState['assigned_technician_id'] ?? 0) === (int)$technician->getId()
+    && ($auditNewState['status'] ?? '') === 'REOPENED'
+    && array_key_exists('assigned_technician_id', $auditNewState) && $auditNewState['assigned_technician_id'] === null
+    && str_contains((string)($auditNewState['reopen_reason'] ?? ''), 'espiral 3'),
+    'prev=' . json_encode($auditPrevState) . ' new=' . json_encode($auditNewState)
+);
+$assert("1.13 Auditoría: la metadata trae el código de ticket y el número de reincidencia",
+    ($auditMetadata['ticket_code'] ?? '') === 'INC-2026-T2401' && (int)($auditMetadata['reopen_count'] ?? 0) === 1,
+    'metadata=' . json_encode($auditMetadata)
+);
 
 // Comprobar auditoría en incident_history
 $history1 = $incidentRepo->getHistory((int)$dbInc1->getId());
@@ -180,7 +224,7 @@ $res2 = $router->dispatch($req2);
 
 $assert("2.1 2ª Reapertura responde HTTP 200 OK", $res2->getStatusCode() === 200);
 $body2 = $res2->getDecodedBody();
-$assert("2.2 2ª Reapertura status REABIERTA", ($body2['data']['status'] ?? '') === 'REABIERTA');
+$assert("2.2 2ª Reapertura devuelve el estado canónico REOPENED con su etiqueta", ($body2['data']['status'] ?? '') === 'REOPENED' && ($body2['data']['status_label'] ?? '') === 'Reabierta');
 
 $dbInc2 = $incidentRepo->findByTicketCode('INC-2026-T2401');
 $assert("2.3 BD: assigned_technician_id es NULL tras 2ª reapertura", $dbInc2 !== null && $dbInc2->getAssignedTechnicianId() === null);
@@ -242,6 +286,13 @@ foreach ($history3 as $h) {
     }
 }
 $assert("3.7 Historial contiene apunte de catalogación como Avería Crónica", $chronicHistoryFound);
+
+// La reapertura rechazada (expediente marcado como crónico) no debe dejar evento de auditoría.
+$reopenAuditsAfterBlock = $fetchReopenAudits();
+$assert("3.8 La reapertura bloqueada por Avería Crónica no emite evento REOPEN_TICKET",
+    count($reopenAuditsAfterBlock) === 2,
+    'Eventos REOPEN_TICKET tras el intento bloqueado: ' . count($reopenAuditsAfterBlock) . ' (esperado 2)'
+);
 
 // =========================================================================
 // CASO 4: Rechazo por garantía expirada (>48h) (EARS 9.2)
@@ -406,7 +457,7 @@ if ($serverAvailable) {
     $assert("8.1 Llamada HTTP real responde HTTP 200 OK", $statusCode === 200, "Status: {$statusCode}, Body: {$responseStr}");
     $httpDecoded = json_decode((string)$responseStr, true);
     $assert("8.2 HTTP real devuelve success => true", ($httpDecoded['success'] ?? false) === true);
-    $assert("8.3 HTTP real devuelve status => REABIERTA", ($httpDecoded['data']['status'] ?? '') === 'REABIERTA');
+    $assert("8.3 HTTP real devuelve status => REOPENED con status_label => Reabierta", ($httpDecoded['data']['status'] ?? '') === 'REOPENED' && ($httpDecoded['data']['status_label'] ?? '') === 'Reabierta');
     $assert("8.4 HTTP real devuelve assigned_technician_id => NULL", array_key_exists('assigned_technician_id', $httpDecoded['data'] ?? []) && $httpDecoded['data']['assigned_technician_id'] === null);
 
     // Verificar en base de datos tras HTTP real

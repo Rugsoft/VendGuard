@@ -307,7 +307,7 @@ $resReopen = makeHttpRequest('POST', "{$baseUrl}/api/incidents/{$ticketCode}/reo
 ], $siteToken);
 $assert("4.3 Petición de reapertura responde HTTP 200 OK", $resReopen['status'] === 200);
 $reopenedData = $resReopen['body']['data'] ?? [];
-$assert("4.4 Estado de la incidencia pasa a REABIERTA (REOPENED)", ($reopenedData['status'] ?? '') === 'REABIERTA');
+$assert("4.4 Estado de la incidencia pasa al canónico REOPENED con la etiqueta Reabierta", ($reopenedData['status'] ?? '') === 'REOPENED' && ($reopenedData['status_label'] ?? '') === 'Reabierta');
 $assert("4.5 Técnico previo queda formalmente desasignado (assigned_technician_id = null)", $reopenedData['assigned_technician_id'] === null);
 
 // 4.3 Comprobación en base de datos de la trazabilidad constitucional (Art. III)

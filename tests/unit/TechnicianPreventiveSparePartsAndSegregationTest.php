@@ -502,6 +502,9 @@ class MockPrevIncidentRepo implements IncidentRepositoryInterface
     public function reopen(int $i, string $r): Incident
     {
         $inc = $this->incidents[$i];
+        // El doble replica el contrato real de PdoIncidentRepository::reopen(): el
+        // expediente pasa a REOPENED y queda desasignado (EARS 9.1). Devolver otro
+        // estado dejaría el test del contrato de la respuesta sin valor probatorio.
         $reopened = new Incident(
             id: $inc->getId(),
             ticketCode: $inc->getTicketCode(),
@@ -510,7 +513,7 @@ class MockPrevIncidentRepo implements IncidentRepositoryInterface
             category: $inc->getCategory(),
             description: $inc->getDescription(),
             urgency: $inc->getUrgency(),
-            status: IncidentStatus::REGISTERED,
+            status: IncidentStatus::REOPENED,
             assignedTechnicianId: null,
             machineModel: $inc->getMachineModel(),
             pendingPartsReason: $inc->getPendingPartsReason()
@@ -1069,7 +1072,8 @@ $leakedInReopen = array_intersect(
 $assert(
     "3.4 reopenIncident blinda el objeto incident excluyendo pending_parts_reason y costes",
     empty($leakedInReopen) &&
-    ($dataReopen['status'] ?? '') === 'REABIERTA' &&
+    ($dataReopen['status'] ?? '') === 'REOPENED' &&
+    ($dataReopen['status_label'] ?? '') === 'Reabierta' &&
     ($reopenedIncidentData['ticket_code'] ?? '') === 'INC-2026-00088'
 );
 

@@ -173,7 +173,8 @@ api.incidents.reopen = async (ticketCode, reason) => {
   lastReopenReason = reason;
   return {
     ticket_code: ticketCode,
-    status: 'REABIERTA',
+    status: 'REOPENED',
+    status_label: 'Reabierta',
     assigned_technician_id: null,
     reopen_reason: reason
   };
@@ -187,7 +188,13 @@ await ReopenTicketModal.methods.handleReopenSubmit.call(modalToSubmit);
 
 assert('3.1 api.incidents.reopen was called with ticket INC-2026-0010', lastReopenTicket === 'INC-2026-0010');
 assert('3.2 api.incidents.reopen received mandatory reason', lastReopenReason.includes('vuelve a marcar +12ºC'));
-assert('3.3 handleReopenSubmit emits "reopened" event', modalToSubmit.getEmits().some(e => e.evt === 'reopened' && e.val.status === 'REABIERTA'));
+// El modal no interpreta el estado: reemite la respuesta del API tal cual (contrato normalizado).
+assert('3.3 handleReopenSubmit emits "reopened" event with the API response verbatim',
+  modalToSubmit.getEmits().some(e => e.evt === 'reopened'
+    && e.val.status === 'REOPENED'
+    && e.val.status_label === 'Reabierta'
+    && e.val.ticket_code === 'INC-2026-0010'
+    && e.val.assigned_technician_id === null));
 assert('3.4 Flash alert added to store', store.state.alerts.some(a => a.message.includes('reabierta con éxito')));
 
 // ---------------------------------------------------------------------

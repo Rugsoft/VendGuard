@@ -366,8 +366,10 @@ $registerAuditPayload('POST /api/incidents/{ticket_code}/reopen', $resReopen->ge
 
 $bodyReopen = json_decode($resReopen->getBody(), true)['data'] ?? [];
 $assert(
-    "3.7 La reapertura devuelve el expediente sanitizado con status REABIERTA",
-    ($bodyReopen['status'] ?? '') === 'REABIERTA' && is_array($bodyReopen['incident'] ?? null)
+    "3.7 La reapertura devuelve el expediente sanitizado con el estado canónico REOPENED y su etiqueta",
+    ($bodyReopen['status'] ?? '') === 'REOPENED'
+    && ($bodyReopen['status_label'] ?? '') === 'Reabierta'
+    && is_array($bodyReopen['incident'] ?? null)
 );
 
 // =========================================================================
