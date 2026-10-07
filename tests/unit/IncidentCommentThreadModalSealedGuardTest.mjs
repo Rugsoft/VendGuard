@@ -264,6 +264,103 @@ assert('4.3 Se muestra el mensaje de error para informar al usuario',
 assert('4.4 isSubmitting vuelve a false permitiendo reintento manual inmediato',
   networkFailModal.isSubmitting === false && networkFailModal.isSubmitDisabled === false);
 
+// ─── Grupo 5: Solo lectura por reapertura sin reasignar (RF-05.4) ────────────
+console.log('\n--- Grupo 5: Solo lectura por reapertura pendiente de reasignación (RF-05.4) ---');
+
+assert('5.1 La plantilla incluye el aviso de expediente reabierto pendiente de reasignación',
+  template.includes('data-testid="incident-comment-reopened-notice"') &&
+  template.includes('Expediente reabierto pendiente de reasignación: el historial se mantiene consultable'));
+
+assert('5.2 El aviso se muestra con v-else-if="isReadOnlyReopened" y el formulario conserva el v-else',
+  template.includes('v-else-if="isReadOnlyReopened"') &&
+  template.includes('class="incident-comment-form"'));
+
+assert('5.3 El aviso de reapertura ofrece el botón de cierre del modal',
+  template.includes('data-testid="incident-comment-reopened-notice"') &&
+  template.includes('data-testid="incident-comment-footer-close"'));
+
+const reopenedReadOnlyModal = buildInstance({
+  thread: {
+    incident: {
+      id: 142,
+      status: 'REOPENED',
+      is_sealed: false,
+      can_comment: false,
+      read_only_reason: 'REOPENED_AWAITING_REASSIGNMENT',
+    }
+  }
+});
+assert('5.4 Expediente reabierto sin reasignar => isReadOnlyReopened === true',
+  reopenedReadOnlyModal.isReadOnlyReopened === true);
+
+const assignedTechnicianModal = buildInstance({
+  thread: {
+    incident: {
+      id: 142,
+      status: 'IN_PROGRESS',
+      is_sealed: false,
+      can_comment: true,
+      read_only_reason: null,
+    }
+  }
+});
+assert('5.5 Expediente con publicación habilitada => isReadOnlyReopened === false',
+  assignedTechnicianModal.isReadOnlyReopened === false);
+
+const sealedPrecedenceModal = buildInstance({
+  thread: {
+    incident: {
+      id: 142,
+      status: 'CLOSED',
+      is_sealed: true,
+      can_comment: false,
+      read_only_reason: 'REOPENED_AWAITING_REASSIGNMENT',
+    }
+  }
+});
+assert('5.6 El sellado tiene precedencia: no se etiqueta como reapertura pendiente',
+  sealedPrecedenceModal.isSealed === true && sealedPrecedenceModal.isReadOnlyReopened === false);
+
+const activeWithoutReasonModal = buildInstance({
+  thread: {
+    incident: {
+      id: 142,
+      status: 'IN_PROGRESS',
+      is_sealed: false,
+      can_comment: false,
+      read_only_reason: null,
+    }
+  }
+});
+assert('5.7 Sin motivo de reapertura no se anuncia reapertura pendiente',
+  activeWithoutReasonModal.isReadOnlyReopened === false);
+
+// Guarda de cortesía: ni siquiera se llama al API cuando el hilo está en solo lectura por reapertura.
+let reopenPostCalls = 0;
+api.post = async () => { reopenPostCalls++; return {}; };
+api.upload = async () => { reopenPostCalls++; return {}; };
+
+const guardedModal = buildInstance({
+  commentText: 'Intento de nota interna antes de la reasignación',
+  thread: {
+    incident: {
+      id: 142,
+      status: 'REOPENED',
+      is_sealed: false,
+      can_comment: false,
+      read_only_reason: 'REOPENED_AWAITING_REASSIGNMENT',
+    }
+  }
+});
+await guardedModal.submitComment();
+
+assert('5.8 En solo lectura por reapertura el envío se bloquea sin llamar al API',
+  reopenPostCalls === 0 && guardedModal.formError.includes('pendiente de reasignación'),
+  `llamadas=${reopenPostCalls} error='${guardedModal.formError}'`);
+
+assert('5.9 El texto redactado se conserva tras el bloqueo (RF-07.1)',
+  guardedModal.commentText === 'Intento de nota interna antes de la reasignación');
+
 // ---------------------------------------------------------------------
 // SUMMARY
 // ---------------------------------------------------------------------

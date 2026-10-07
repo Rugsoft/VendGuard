@@ -179,13 +179,14 @@ $assert = function (string $caseTitle, bool $condition, string $message = '') us
 };
 
 // ─── Fábricas de dobles ──────────────────────────────────────────────────────
-$makeDetail = function (string $status, ?string $resolvedAt = null): array {
+$makeDetail = function (string $status, ?string $resolvedAt = null, ?int $assignedTechnicianId = null): array {
     return [
         'incident' => [
             'id' => 142,
             'ticket_code' => 'TICK-2026-00142',
             'status' => $status,
             'resolved_at' => $resolvedAt,
+            'assigned_technician_id' => $assignedTechnicianId,
         ],
         'machine' => ['id' => 7, 'code' => 'VEN-BCN-001', 'model' => 'CoffeMax Pro 3000'],
         'location' => ['id' => 3, 'name' => 'Hospital del Mar'],
@@ -399,6 +400,65 @@ $assert("7.2 La foto se delega al gestor de subidas validado (Art. V.5)", $uploa
 $photoMsg = end($repo->storedComments);
 $assert("7.3 El mensaje persiste la ruta pública de la evidencia",
     $photoMsg !== false && $photoMsg->getPhotoPath() === '/uploads/stub_evidence.jpg');
+
+// =========================================================================
+// CASO 8: Permiso efectivo de publicación del hilo (RF-05.1 a RF-05.4)
+// =========================================================================
+echo "\n--- Caso 8: can_comment y solo lectura por reapertura sin reasignar ---\n";
+
+// 8.1 Técnico asignado: publica con normalidad.
+[$svcAssigned] = $buildService($makeDetail('IN_PROGRESS', null, 55), $comments);
+$assignedThread = $svcAssigned->getThread(142, 'TECHNICIAN', 55);
+$assert("8.1 Técnico asignado => can_comment true sin motivo de solo lectura",
+    ($assignedThread->incident['can_comment'] ?? null) === true
+    && array_key_exists('read_only_reason', $assignedThread->incident)
+    && $assignedThread->incident['read_only_reason'] === null);
+
+// 8.2 Técnico con antecedentes sobre un expediente reabierto y sin asignar: solo lectura.
+[$svcReopened] = $buildService($makeDetail('REOPENED', null, null), $comments);
+$reopenedThread = $svcReopened->getThread(142, 'TECHNICIAN', 55);
+$assert("8.2 Técnico desasignado en REOPENED => can_comment false con motivo explícito",
+    ($reopenedThread->incident['can_comment'] ?? null) === false
+    && ($reopenedThread->incident['read_only_reason'] ?? '') === 'REOPENED_AWAITING_REASSIGNMENT');
+$assert("8.3 La consulta en solo lectura conserva la proyección íntegra del canal técnico",
+    count($reopenedThread->comments) === 5
+    && ($reopenedThread->comments[1]->isInternal ?? null) === true
+    && ($reopenedThread->comments[1]->authorName ?? '') === 'Carlos Pérez');
+$assert("8.4 El expediente reabierto no está sellado: la lectura sigue viva (RF-05.4)",
+    ($reopenedThread->incident['is_sealed'] ?? null) === false);
+
+// 8.5 Sede y coordinación sí publican en el expediente reabierto (EARS 9.1 lo devuelve a triaje).
+[$svcSiteReopened] = $buildService($makeDetail('REOPENED', null, null), $comments);
+$siteReopenedThread = $svcSiteReopened->getThread(142, 'SITE_MANAGER');
+$coordReopenedThread = $svcSiteReopened->getThread(142, 'COORDINATOR', 9);
+$assert("8.5 Sede y coordinación conservan can_comment true en el expediente reabierto",
+    ($siteReopenedThread->incident['can_comment'] ?? null) === true
+    && ($coordReopenedThread->incident['can_comment'] ?? null) === true);
+
+// 8.6 Tras la reasignación, el técnico recupera la publicación.
+[$svcReassigned] = $buildService($makeDetail('REOPENED', null, 55), $comments);
+$reassignedThread = $svcReassigned->getThread(142, 'TECHNICIAN', 55);
+$assert("8.6 Tras la reasignación el técnico vuelve a poder publicar",
+    ($reassignedThread->incident['can_comment'] ?? null) === true
+    && array_key_exists('read_only_reason', $reassignedThread->incident)
+    && $reassignedThread->incident['read_only_reason'] === null);
+
+// 8.7 El sellado se comunica con su propia marca, sin motivo de reapertura.
+[$svcSealed] = $buildService($makeDetail('CLOSED', null, 55), $comments);
+$sealedThread = $svcSealed->getThread(142, 'TECHNICIAN', 55);
+$assert("8.7 Expediente sellado => is_sealed true, can_comment false y sin motivo de reapertura",
+    ($sealedThread->incident['is_sealed'] ?? null) === true
+    && ($sealedThread->incident['can_comment'] ?? null) === false
+    && array_key_exists('read_only_reason', $sealedThread->incident)
+    && $sealedThread->incident['read_only_reason'] === null);
+
+// 8.8 El contrato del bloque incident expone las diez claves en orden estable.
+$assert("8.8 El bloque incident expone el contrato completo del hilo",
+    array_keys($assignedThread->incident) === [
+        'id', 'ticket_code', 'machine_code', 'machine_model', 'location_name',
+        'status', 'status_label', 'is_sealed', 'can_comment', 'read_only_reason',
+    ],
+    'Claves reales: ' . implode(', ', array_keys($assignedThread->incident)));
 
 // ---------------------------------------------------------------------
 // SUMMARY

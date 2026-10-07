@@ -238,6 +238,18 @@ export const IncidentCommentThreadModal = {
     },
 
     /**
+     * El expediente se reabrió en garantía y volvió a triaje sin técnico (RF-05.4):
+     * el hilo se conserva consultable para quien intervino, sin formulario de envío,
+     * hasta que coordinación reasigne el expediente. No es un sellado: la conversación
+     * sigue viva para el resto de canales.
+     */
+    isReadOnlyReopened() {
+      return !this.isSealed
+        && this.thread?.incident?.can_comment === false
+        && this.thread?.incident?.read_only_reason === 'REOPENED_AWAITING_REASSIGNMENT';
+    },
+
+    /**
      * El selector de privacidad solo se muestra a técnicos y coordinadores (RF-03.2, RF-03.3).
      * Los responsables de sede publican siempre comentario público y no ven el selector.
      */
@@ -684,6 +696,14 @@ export const IncidentCommentThreadModal = {
         return;
       }
 
+      // Guarda de cortesía: un expediente reabierto y sin reasignar no admite
+      // publicación en el canal del técnico (RF-05.4). El servidor lo rechaza
+      // igualmente con 403 NOT_ASSIGNED_TO_TECHNICIAN.
+      if (this.isReadOnlyReopened) {
+        this.formError = 'El expediente está pendiente de reasignación: el historial se mantiene consultable en solo lectura.';
+        return;
+      }
+
       const text = (this.commentText || '').trim();
       if (text.length < MIN_COMMENT_LENGTH || (this.commentText || '').length > MAX_COMMENT_LENGTH) {
         this.formError = `El comentario debe contener entre ${MIN_COMMENT_LENGTH} y ${MAX_COMMENT_LENGTH} caracteres descriptivos.`;
@@ -991,6 +1011,42 @@ export const IncidentCommentThreadModal = {
                   <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                 </svg>
                 <span>Expediente archivado: conversación sellada por auditoría</span>
+              </div>
+
+              <button
+                type="button"
+                class="vg-btn vg-btn-secondary"
+                data-testid="incident-comment-footer-close"
+                @click="requestClose"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <!-- SOLO LECTURA POR REAPERTURA PENDIENTE DE REASIGNACIÓN (T-COM-13, RF-05.4) -->
+            <div
+              v-else-if="isReadOnlyReopened"
+              class="incident-comment-reopened-notice"
+              data-testid="incident-comment-reopened-notice"
+              role="status"
+              style="display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 12px 16px; background-color: #fffbeb; border: 1px solid #fde047; border-radius: var(--radius-interactive, 4px);"
+            >
+              <div style="display: flex; align-items: center; gap: 8px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: #92400e; font-weight: 500;">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <polyline points="1 4 1 10 7 10"></polyline>
+                  <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                </svg>
+                <span>Expediente reabierto pendiente de reasignación: el historial se mantiene consultable</span>
               </div>
 
               <button

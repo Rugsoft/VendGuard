@@ -457,6 +457,125 @@ $assert('8.3 El nombre real del técnico no se filtra a la Sede (identidad enmas
     !str_contains($resSite->getBody(), $technician->getName())
         && !str_contains($resSite->getBody(), $coworker->getName()));
 
+// =========================================================================
+// CASO 9: Reapertura en garantía: lectura histórica del técnico sin reasignar (RF-05.4)
+// =========================================================================
+echo "\n--- Caso 9: Ciclo resolver -> reabrir -> leer sin publicar -> reasignar ---\n";
+
+// 9.0 El técnico titular cierra su intervención para habilitar la reapertura.
+$resStart = $router->dispatch(new Request(
+    method: 'PATCH',
+    path: "/api/technician/incidents/{$incidentId}/start",
+    queryParams: [],
+    parsedBody: [],
+    headers: ['Authorization' => 'Bearer ' . $techToken]
+));
+$resResolve = $router->dispatch(new Request(
+    method: 'POST',
+    path: "/api/technician/incidents/{$incidentId}/resolve",
+    queryParams: [],
+    parsedBody: [
+        'resolution_diagnosis' => 'Electroválvula del circuito de agua con contacto intermitente.',
+        'resolution_action' => 'Sustitución de la electroválvula, purga del circuito y tres ventas de prueba.',
+    ],
+    headers: ['Authorization' => 'Bearer ' . $techToken]
+));
+$assert('9.0 El técnico inicia y resuelve el expediente antes de la reapertura',
+    $resStart->getStatusCode() === 200 && $resResolve->getStatusCode() === 200,
+    "start: {$resStart->getStatusCode()}, resolve: {$resResolve->getStatusCode()}");
+
+// 9.1 La sede reabre dentro de la ventana de garantía (EARS 9.1).
+$resReopen = $router->dispatch(new Request(
+    method: 'POST',
+    path: "/api/incidents/{$ticketCode}/reopen",
+    queryParams: [],
+    parsedBody: ['reopen_reason' => 'La máquina vuelve a quedarse sin agua después de la reparación.'],
+    headers: ['Authorization' => 'Bearer ' . $siteToken]
+));
+$reopenBody = $resReopen->getDecodedBody()['data'] ?? [];
+$dbAfterReopen = $pdo->query("SELECT status, assigned_technician_id FROM `incidents` WHERE id = {$incidentId}")->fetch(PDO::FETCH_ASSOC) ?: [];
+$assert('9.1 La reapertura devuelve REOPENED y desasigna al técnico',
+    $resReopen->getStatusCode() === 200
+    && ($reopenBody['status'] ?? '') === 'REOPENED'
+    && ($reopenBody['status_label'] ?? '') === 'Reabierta'
+    && ($dbAfterReopen['status'] ?? '') === 'REOPENED'
+    && array_key_exists('assigned_technician_id', $dbAfterReopen)
+    && $dbAfterReopen['assigned_technician_id'] === null,
+    'reopen: ' . $resReopen->getStatusCode() . ' cuerpo: ' . json_encode($reopenBody) . ' fila: ' . json_encode($dbAfterReopen));
+
+$reopenAuditRow = $pdo->query(
+    "SELECT action, user_role FROM `audit_log` WHERE entity_type = 'TICKET' AND entity_id = {$incidentId} AND action = 'REOPEN_TICKET'"
+)->fetch(PDO::FETCH_ASSOC) ?: [];
+$assert('9.2 La reapertura queda auditada como REOPEN_TICKET con actor de sede',
+    ($reopenAuditRow['action'] ?? '') === 'REOPEN_TICKET' && ($reopenAuditRow['user_role'] ?? '') === 'SITE_MANAGER',
+    'fila audit_log: ' . json_encode($reopenAuditRow));
+
+// 9.3 El técnico que intervino conserva la lectura del hilo, con la publicación cerrada.
+$resReopenedThread = $router->dispatch(new Request(
+    method: 'GET',
+    path: "/api/technician/incidents/{$incidentId}/comments",
+    queryParams: [],
+    parsedBody: [],
+    headers: ['Authorization' => 'Bearer ' . $techToken]
+));
+$reopenedThreadIncident = $resReopenedThread->getDecodedBody()['data']['incident'] ?? [];
+$reopenedThreadComments = $resReopenedThread->getDecodedBody()['data']['comments'] ?? [];
+$assert('9.3 El técnico con antecedentes recibe el hilo reabierto con HTTP 200',
+    $resReopenedThread->getStatusCode() === 200,
+    'status: ' . $resReopenedThread->getStatusCode() . ' code: ' . ($resReopenedThread->getDecodedBody()['error']['code'] ?? '—'));
+$assert('9.4 El hilo llega íntegro (notas internas incluidas) y sin sellar',
+    count($reopenedThreadComments) >= 4
+    && ($reopenedThreadIncident['is_sealed'] ?? null) === false
+    && ($reopenedThreadIncident['status'] ?? '') === 'REOPENED',
+    'mensajes: ' . count($reopenedThreadComments) . ' incident: ' . json_encode($reopenedThreadIncident));
+$assert('9.5 La publicación queda deshabilitada con el motivo de reapertura pendiente',
+    ($reopenedThreadIncident['can_comment'] ?? null) === false
+    && ($reopenedThreadIncident['read_only_reason'] ?? '') === 'REOPENED_AWAITING_REASSIGNMENT');
+
+$resReopenedPost = $router->dispatch(new Request(
+    method: 'POST',
+    path: "/api/technician/incidents/{$incidentId}/comments",
+    queryParams: [],
+    parsedBody: ['comment_text' => 'Nota del técnico antes de que coordinación reasigne el expediente.', 'is_internal' => true],
+    headers: ['Authorization' => 'Bearer ' . $techToken]
+));
+$assert('9.6 El POST del técnico desasignado sigue rechazándose con 403 sin persistir',
+    $resReopenedPost->getStatusCode() === 403
+    && ($resReopenedPost->getDecodedBody()['error']['code'] ?? '') === 'NOT_ASSIGNED_TO_TECHNICIAN'
+    && (int)$pdo->query("SELECT COUNT(*) FROM `incident_comments` WHERE incident_id = {$incidentId} AND comment_text LIKE 'Nota del técnico antes%'")->fetchColumn() === 0,
+    'status: ' . $resReopenedPost->getStatusCode());
+
+// 9.7 Tras la reasignación del coordinador, el técnico recupera la publicación.
+$resAssign = $router->dispatch(new Request(
+    method: 'PATCH',
+    path: "/api/coordinator/incidents/{$incidentId}/assign",
+    queryParams: [],
+    parsedBody: ['technician_id' => $technicianId],
+    headers: ['Authorization' => 'Bearer ' . $coordToken]
+));
+$resAfterAssignGet = $router->dispatch(new Request(
+    method: 'GET',
+    path: "/api/technician/incidents/{$incidentId}/comments",
+    queryParams: [],
+    parsedBody: [],
+    headers: ['Authorization' => 'Bearer ' . $techToken]
+));
+$resAfterAssignPost = $router->dispatch(new Request(
+    method: 'POST',
+    path: "/api/technician/incidents/{$incidentId}/comments",
+    queryParams: [],
+    parsedBody: ['comment_text' => 'Retomo el expediente reabierto para revisar la electroválvula.', 'is_internal' => true],
+    headers: ['Authorization' => 'Bearer ' . $techToken]
+));
+$afterAssignIncident = $resAfterAssignGet->getDecodedBody()['data']['incident'] ?? [];
+$assert('9.7 Tras la reasignación el técnico vuelve a publicar (can_comment true y 201)',
+    $resAssign->getStatusCode() === 200
+    && $resAfterAssignGet->getStatusCode() === 200
+    && ($afterAssignIncident['can_comment'] ?? null) === true
+    && $resAfterAssignPost->getStatusCode() === 201,
+    'assign: ' . $resAssign->getStatusCode() . ' GET: ' . $resAfterAssignGet->getStatusCode()
+        . ' POST: ' . $resAfterAssignPost->getStatusCode());
+
 // ─── Limpieza final (convención de la batería) ─────────────────────────────
 foreach ($storedUploads as $uploadedPath) {
     if ($uploadedPath !== '') {

@@ -49,6 +49,13 @@ class IncidentCommentService
     /** Ventana de garantía post-resolución que mantiene el diálogo abierto (Art. V.6). */
     public const WARRANTY_WINDOW_HOURS = 48;
 
+    /**
+     * Motivo de solo lectura del hilo (RF-05.4): el expediente se reabrió en garantía,
+     * la desasignación obligatoria lo devolvió a triaje y el técnico que intervino
+     * conserva la consulta pero no la publicación hasta que coordinación lo reasigne.
+     */
+    public const READ_ONLY_REOPENED_AWAITING_REASSIGNMENT = 'REOPENED_AWAITING_REASSIGNMENT';
+
     /** Bloque por defecto del cursor de paginación (RF-01.2). */
     public const DEFAULT_THREAD_LIMIT = 50;
 
@@ -56,6 +63,7 @@ class IncidentCommentService
     public const MAX_THREAD_LIMIT = 100;
 
     private const ROLE_SITE_MANAGER = 'SITE_MANAGER';
+    private const ROLE_TECHNICIAN = 'TECHNICIAN';
     private const AUTHOR_TYPE_TECHNICIAN = 'TECHNICIAN';
     private const AUTHOR_TYPE_COORDINATOR = 'COORDINATOR';
     private const AUTHOR_TYPE_REPORTER = 'REPORTER';
@@ -138,6 +146,22 @@ class IncidentCommentService
 
         $commentIds = array_map(static fn(IncidentComment $c): int => (int)$c->getId(), $comments);
 
+        // Permiso efectivo de publicación (RF-05.1 a RF-05.4): el sellado cierra la
+        // conversación para todos los perfiles y, además, el técnico de ruta solo publica
+        // en los expedientes que tiene asignados. Un técnico con antecedentes que consulta
+        // un expediente reabierto y aún sin reasignar recibe el hilo en modo de solo
+        // lectura, con el motivo explícito para que la interfaz no muestre un formulario
+        // condenado a un 403.
+        $statusEnum = IncidentStatus::tryFrom((string)($incidentRow['status'] ?? ''));
+        $isTechnicianChannel = strtoupper($role) === self::ROLE_TECHNICIAN;
+        $acceptsComments = $this->acceptsNewComments($incidentRow);
+        $isAssignedTechnician = $authUserId !== null
+            && (int)($incidentRow['assigned_technician_id'] ?? 0) === $authUserId;
+        $canComment = $acceptsComments && (!$isTechnicianChannel || $isAssignedTechnician);
+        $readOnlyReason = (!$canComment && $acceptsComments && $statusEnum === IncidentStatus::REOPENED)
+            ? self::READ_ONLY_REOPENED_AWAITING_REASSIGNMENT
+            : null;
+
         return new IncidentCommentThreadDto(
             incident: [
                 'id' => (int)$incidentRow['id'],
@@ -147,7 +171,9 @@ class IncidentCommentService
                 'location_name' => (string)($locationRow['name'] ?? ''),
                 'status' => (string)($incidentRow['status'] ?? ''),
                 'status_label' => $this->statusLabel($incidentRow['status'] ?? ''),
-                'is_sealed' => !$this->acceptsNewComments($incidentRow),
+                'is_sealed' => !$acceptsComments,
+                'can_comment' => $canComment,
+                'read_only_reason' => $readOnlyReason,
             ],
             pagination: [
                 // Ante la Sede el total transmitido es el recuento público:

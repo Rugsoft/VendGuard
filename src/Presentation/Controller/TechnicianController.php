@@ -820,8 +820,9 @@ class TechnicianController
             return Response::error('UNAUTHORIZED', 'No se pudo identificar al técnico autenticado.', 401);
         }
 
-        // 2. Expediente de la ruta: existencia y asignación (404 / 403).
-        $incident = $this->resolveAssignedIncident($request, $technician['id']);
+        // 2. Expediente legible: asignado al técnico o reabierto sin reasignar con
+        //    antecedentes de intervención (404 / 403, RF-05.4).
+        $incident = $this->resolveReadableIncident($request, $technician['id']);
         if ($incident instanceof Response) {
             return $incident;
         }
@@ -1005,12 +1006,12 @@ class TechnicianController
     }
 
     /**
-     * Resuelve el expediente de la ruta y verifica que esté asignado al técnico.
+     * Localiza el expediente referenciado en la URL de la ruta.
      *
-     * @return Incident|Response El expediente autorizado o la respuesta de error
-     *   (400 identificador ausente, 404 inexistente, 403 no asignado).
+     * @return Incident|Response El expediente o la respuesta de error
+     *   (400 identificador ausente, 404 inexistente).
      */
-    private function resolveAssignedIncident(Request $request, int $technicianId): Incident|Response
+    private function locateRequestedIncident(Request $request): Incident|Response
     {
         $identifier = $request->getRouteParam('id')
             ?? $request->getRouteParam('ticket_code')
@@ -1036,6 +1037,22 @@ class TechnicianController
             );
         }
 
+        return $incident;
+    }
+
+    /**
+     * Resuelve el expediente de la ruta y verifica que esté asignado al técnico.
+     *
+     * @return Incident|Response El expediente autorizado o la respuesta de error
+     *   (400 identificador ausente, 404 inexistente, 403 no asignado).
+     */
+    private function resolveAssignedIncident(Request $request, int $technicianId): Incident|Response
+    {
+        $incident = $this->locateRequestedIncident($request);
+        if ($incident instanceof Response) {
+            return $incident;
+        }
+
         // Un solo técnico responsable activo por incidencia (Art. V): el hilo de
         // taller solo se abre al técnico al que el expediente está asignado.
         if ($incident->getAssignedTechnicianId() !== $technicianId) {
@@ -1047,6 +1064,67 @@ class TechnicianController
         }
 
         return $incident;
+    }
+
+    /**
+     * Resuelve el expediente para una consulta de solo lectura del técnico (RF-05.4).
+     *
+     * Además del expediente asignado, se abre en lectura el expediente reabierto en
+     * garantía que quedó sin técnico: la reapertura lo devuelve a triaje (EARS 9.1) y el
+     * hilo es una bitácora de solo adición (Art. III), de modo que sigue siendo el
+     * historial de trabajo de quien intervino. La publicación NO se restablece aquí:
+     * el compositor queda deshabilitado (`can_comment = false` en el DTO del hilo) hasta
+     * que coordinación reasigne el expediente.
+     *
+     * @return Incident|Response El expediente legible o la respuesta de error
+     *   (400 identificador ausente, 404 inexistente, 403 sin antecedentes).
+     */
+    private function resolveReadableIncident(Request $request, int $technicianId): Incident|Response
+    {
+        $incident = $this->locateRequestedIncident($request);
+        if ($incident instanceof Response) {
+            return $incident;
+        }
+
+        if ($incident->getAssignedTechnicianId() === $technicianId) {
+            return $incident;
+        }
+
+        $isReopenedWithoutTechnician = $incident->getStatus() === IncidentStatus::REOPENED
+            && $incident->getAssignedTechnicianId() === null;
+
+        if ($isReopenedWithoutTechnician
+            && $this->hasIntervenedInIncident((int)$incident->getId(), $technicianId)
+        ) {
+            return $incident;
+        }
+
+        return Response::error(
+            'NOT_ASSIGNED_TO_TECHNICIAN',
+            'Esta incidencia no está asignada a tu ruta técnica.',
+            403
+        );
+    }
+
+    /**
+     * Antecedentes de intervención del técnico en el expediente (RF-05.4).
+     *
+     * Se acredita con el historial inmutable de estados: las transiciones a IN_PROGRESS
+     * (inicio o reanudación de la intervención) y a RESOLVED registran el `user_id` del
+     * técnico que las firmó. El historial es append-only (Art. III), así que un técnico no
+     * puede fabricarse antecedentes ni perderlos retroactivamente.
+     */
+    private function hasIntervenedInIncident(int $incidentId, int $technicianId): bool
+    {
+        foreach ($this->incidentRepo->getHistory($incidentId) as $entry) {
+            if ($entry->getUserId() === $technicianId
+                && in_array($entry->getToStatus(), ['IN_PROGRESS', 'RESOLVED'], true)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

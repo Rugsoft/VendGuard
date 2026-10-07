@@ -40,6 +40,7 @@ use VendGuard\Application\Service\IncidentCommentService;
 use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
+use VendGuard\Core\Domain\Model\IncidentHistory;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
@@ -64,6 +65,9 @@ final class TechnicianCommentStubIncidentRepo implements IncidentRepositoryInter
 
     /** @var list<array<string, mixed>> */
     public array $auditTrail = [];
+
+    /** @var list<IncidentHistory> Historial inmutable de estados del expediente. */
+    public array $history = [];
 
     public function findEnrichedDetailById(int|string $identifier): ?array
     {
@@ -163,7 +167,7 @@ final class TechnicianCommentStubIncidentRepo implements IncidentRepositoryInter
     public function update(Incident $incident): bool { return false; }
     public function softDelete(int $id): bool { return false; }
     public function insertHistory(int $incidentId, ?int $userId, ?string $fromStatus, string $toStatus, ?string $actionNote = null): int { return 1; }
-    public function getHistory(int $incidentId): array { return []; }
+    public function getHistory(int $incidentId): array { return $this->history; }
     public function getComments(int $incidentId, bool $includeInternal = true): array { return []; }
     public function countReopenEvents(int $incidentId): int { return 0; }
     public function markAsChronic(int $incidentId): bool { return false; }
@@ -231,7 +235,7 @@ $makeTechnician = function (int $id = 55, string $name = 'Carlos Pérez'): User 
     );
 };
 
-$makeDetail = function (string $status, ?string $resolvedAt = null, int $assignedTechnicianId = 55): array {
+$makeDetail = function (string $status, ?string $resolvedAt = null, ?int $assignedTechnicianId = 55): array {
     return [
         'incident' => [
             'id' => 142,
@@ -708,6 +712,97 @@ foreach (glob(sys_get_temp_dir() . '/vg_uploads_*') ?: [] as $tempUploadsDir) {
     }
     @rmdir((string)$tempUploadsDir);
 }
+
+// =====================================================================
+// CASO 9: Lectura histórica del técnico con antecedentes (RF-05.4)
+// =====================================================================
+echo "\n--- Caso 9: Reapertura sin reasignar: el historial se lee, no se publica ---\n";
+
+// Antecedentes acreditados por el historial inmutable: las transiciones firmadas por el técnico.
+$ownInterventionHistory = [
+    new IncidentHistory(null, 142, 55, 'ASSIGNED', 'IN_PROGRESS', 'Inicio de intervención presencial del técnico de campo.', '2026-10-06 09:00:00', 'Carlos Pérez', 'TECHNICIAN'),
+    new IncidentHistory(null, 142, 55, 'IN_PROGRESS', 'RESOLVED', 'Avería resuelta con éxito por el técnico de campo.', '2026-10-06 12:00:00', 'Carlos Pérez', 'TECHNICIAN'),
+];
+$coworkerHistory = [
+    new IncidentHistory(null, 142, 61, 'ASSIGNED', 'IN_PROGRESS', 'Intervención del compañero de ruta.', '2026-10-06 09:00:00', 'Marta Ruiz', 'TECHNICIAN'),
+];
+
+// 9.1 Reabierto y sin técnico, con antecedentes propios => lectura íntegra.
+[$controller, $repo] = $buildHarness($makeDetail('REOPENED', null, null), $seedThread());
+$repo->history = $ownInterventionHistory;
+$resReopenedGet = $controller->getComments($makeGetRequest('142'));
+$reopenedIncident = $resReopenedGet->getDecodedBody()['data']['incident'] ?? [];
+$reopenedComments = $resReopenedGet->getDecodedBody()['data']['comments'] ?? [];
+$assert('9.1 Expediente reabierto sin reasignar con antecedentes => GET 200 (RF-05.4)',
+    $resReopenedGet->getStatusCode() === 200,
+    'Status: ' . $resReopenedGet->getStatusCode()
+);
+$assert('9.2 El hilo llega íntegro: públicos y notas internas del canal técnico',
+    count($reopenedComments) === 5
+    && ($reopenedComments[1]['is_internal'] ?? null) === true
+    && ($reopenedComments[1]['author_name'] ?? '') === 'Carlos Pérez'
+);
+$assert('9.3 El expediente no está sellado pero tampoco admite publicación',
+    ($reopenedIncident['is_sealed'] ?? null) === false
+    && ($reopenedIncident['can_comment'] ?? null) === false
+    && ($reopenedIncident['read_only_reason'] ?? '') === 'REOPENED_AWAITING_REASSIGNMENT',
+    'incident=' . json_encode($reopenedIncident, JSON_UNESCAPED_UNICODE)
+);
+
+$resReopenedPost = $controller->addComment($makePostRequest(
+    ['comment_text' => 'Nota del técnico antes de que coordinación reasigne el expediente.']
+));
+$assert('9.4 POST del técnico con antecedentes => 403 sin persistir (la titularidad sigue en triaje)',
+    $resReopenedPost->getStatusCode() === 403
+    && ($resReopenedPost->getDecodedBody()['error']['code'] ?? '') === 'NOT_ASSIGNED_TO_TECHNICIAN'
+    && count($repo->storedComments) === 5,
+    'Status: ' . $resReopenedPost->getStatusCode() . ' almacenados: ' . count($repo->storedComments)
+);
+
+// 9.5 Reabierto y sin técnico, sin antecedentes propios => 403 (la lectura histórica no es un permiso general).
+[$controller, $repo] = $buildHarness($makeDetail('REOPENED', null, null), $seedThread());
+$repo->history = $coworkerHistory;
+$resNoHistoryGet = $controller->getComments($makeGetRequest('142'));
+$resNoHistoryPost = $controller->addComment($makePostRequest(['comment_text' => 'Intento sin antecedentes en el expediente.']));
+$assert('9.5 Sin antecedentes propios => 403 en lectura y publicación',
+    $resNoHistoryGet->getStatusCode() === 403
+    && $resNoHistoryPost->getStatusCode() === 403
+    && ($resNoHistoryGet->getDecodedBody()['error']['code'] ?? '') === 'NOT_ASSIGNED_TO_TECHNICIAN'
+);
+
+// 9.6 Reabierto pero ya asignado a otro compañero => 403 aunque tenga antecedentes previos.
+[$controller, $repo] = $buildHarness($makeDetail('REOPENED', null, 61), $seedThread());
+$repo->history = $ownInterventionHistory;
+$resReassignedElsewhere = $controller->getComments($makeGetRequest('142'));
+$assert('9.6 Expediente reasignado a otro técnico => 403 para el técnico con antecedentes',
+    $resReassignedElsewhere->getStatusCode() === 403
+    && ($resReassignedElsewhere->getDecodedBody()['error']['code'] ?? '') === 'NOT_ASSIGNED_TO_TECHNICIAN'
+);
+
+// 9.7 Tras la reasignación al propio técnico, vuelve el acceso completo y la publicación.
+[$controller, $repo] = $buildHarness($makeDetail('REOPENED', null, 55), $seedThread());
+$repo->history = $ownInterventionHistory;
+$resOwnAgain = $controller->getComments($makeGetRequest('142'));
+$ownAgainIncident = $resOwnAgain->getDecodedBody()['data']['incident'] ?? [];
+$ownAgainPost = $controller->addComment($makePostRequest(['comment_text' => 'Retomo el expediente reabierto tras la reasignación.']));
+$assert('9.7 Tras la reasignación: can_comment true y POST 201',
+    $resOwnAgain->getStatusCode() === 200
+    && ($ownAgainIncident['can_comment'] ?? null) === true
+    && $ownAgainPost->getStatusCode() === 201,
+    'GET: ' . $resOwnAgain->getStatusCode() . ' POST: ' . $ownAgainPost->getStatusCode()
+);
+
+// 9.8 El motivo de solo lectura no se aplica al sellado ni a los expedientes activos ordinarios.
+[$controller, $repo] = $buildHarness($makeDetail('CLOSED', null, 55), $seedThread());
+$repo->history = $ownInterventionHistory;
+$closedIncident = $controller->getComments($makeGetRequest('142'))->getDecodedBody()['data']['incident'] ?? [];
+$assert('9.8 Expediente sellado: is_sealed true, can_comment false y sin motivo de reapertura',
+    ($closedIncident['is_sealed'] ?? null) === true
+    && ($closedIncident['can_comment'] ?? null) === false
+    && array_key_exists('read_only_reason', $closedIncident)
+    && $closedIncident['read_only_reason'] === null,
+    'incident=' . json_encode($closedIncident, JSON_UNESCAPED_UNICODE)
+);
 
 // ---------------------------------------------------------------------
 // RESUMEN DE EJECUCIÓN

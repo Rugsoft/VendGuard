@@ -238,6 +238,8 @@ $incidentHeader = [
     'status' => 'IN_PROGRESS',
     'status_label' => 'En Reparación',
     'is_sealed' => false,
+    'can_comment' => true,
+    'read_only_reason' => null,
 ];
 $paginationMeta = [
     'total_comments' => 3,
@@ -272,7 +274,7 @@ $assert('4.1 toArray() devuelve exactamente los bloques incident, pagination y c
     'Claves obtenidas: ' . implode(', ', array_keys($threadPayload))
 );
 $assert('4.2 La cabecera conserva las 8 claves contractuales del expediente (RF-01.4)',
-    array_keys($threadPayload['incident']) === ['id', 'ticket_code', 'machine_code', 'machine_model', 'location_name', 'status', 'status_label', 'is_sealed']
+    array_keys($threadPayload['incident']) === ['id', 'ticket_code', 'machine_code', 'machine_model', 'location_name', 'status', 'status_label', 'is_sealed', 'can_comment', 'read_only_reason']
         && $threadPayload['incident'] === $incidentHeader
 );
 $assert('4.3 La paginación conserva las 5 claves contractuales del cursor (RF-01.2, RF-01.3)',
