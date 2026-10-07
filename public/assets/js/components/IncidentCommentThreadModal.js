@@ -273,6 +273,14 @@ export const IncidentCommentThreadModal = {
      */
     isSubmitDisabled() {
       return !this.isCommentValid || this.isSubmitting || !this.hasIdentifier;
+    },
+
+    /**
+     * Comprueba si el usuario tiene un borrador de texto o una foto en edición
+     * sin enviar (RNF-06, guardián de formulario sucio).
+     */
+    isDirty() {
+      return (this.commentText || '').trim().length > 0 || this.photoFile !== null;
     }
   },
   watch: {
@@ -553,10 +561,21 @@ export const IncidentCommentThreadModal = {
     },
 
     /**
-     * Solicita el cierre del modal: el componente padre decide desmontarlo. T-COM-12
-     * interceptará esta señal para preguntar antes de descartar un borrador.
+     * Solicita el cierre del modal: si hay borrador sin guardar (texto o foto),
+     * solicita confirmación explícita antes de cerrar (RNF-06, RF-07.1).
+     * Si el usuario confirma o no hay cambios pendientes, emite 'close'.
      */
     requestClose() {
+      if (this.isDirty) {
+        const confirmFn = typeof globalThis.confirm === 'function' ? globalThis.confirm : null;
+        if (confirmFn !== null) {
+          const accepted = confirmFn('¿Descartar mensaje en redacción?');
+          if (!accepted) {
+            return;
+          }
+        }
+      }
+
       this.$emit('close');
     },
 
@@ -945,8 +964,45 @@ export const IncidentCommentThreadModal = {
             data-testid="incident-comment-footer"
             style="flex: 0 0 auto; background-color: #ffffff; padding: 16px; border-top: 1px solid var(--color-hairline, #c8cfda); display: flex; flex-direction: column; gap: 12px;"
           >
+            <!-- MODO SELLADO DE AUDITORÍA EN SOLO LECTURA (T-COM-12, RF-05.3) -->
+            <div
+              v-if="isSealed"
+              class="incident-comment-sealed-notice"
+              data-testid="incident-comment-sealed-notice"
+              role="alert"
+              style="display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 12px 16px; background-color: var(--color-canvas, #f9fafb); border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px);"
+            >
+              <div style="display: flex; align-items: center; gap: 8px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-muted, #6c7e9d); font-weight: 500;">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+                <span>Expediente archivado: conversación sellada por auditoría</span>
+              </div>
+
+              <button
+                type="button"
+                class="vg-btn vg-btn-secondary"
+                data-testid="incident-comment-footer-close"
+                @click="requestClose"
+              >
+                Cerrar
+              </button>
+            </div>
+
             <!-- FORMULARIO REACTIVO DE REDACCIÓN (T-COM-11, RF-03, RF-04) -->
             <form
+              v-else
               class="incident-comment-form"
               data-testid="incident-comment-form"
               @submit.prevent="submitComment"

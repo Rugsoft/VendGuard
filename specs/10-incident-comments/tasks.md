@@ -78,7 +78,7 @@
   * **Dependencias:** T-COM-10
   * **Hecho cuando:** El formulario en el pie del modal incluye: (1) selector reactivo de privacidad para técnicos y coordinadores con la opción `"Nota Interna de Taller"` **preseleccionada por defecto** (y completamente ausente para responsables de sede); (2) área de texto con contador reactivo de caracteres restantes (5 a 1.000), bloqueando el botón de envío si el texto es inferior a 5 caracteres; (3) selector de fotografía con previsualización en miniatura y botón para retirarla antes del envío; y (4) indicador visual de carga (spinner) deshabilitando el botón durante la subida.
 
-- [ ] **T-COM-12: Modo de sellado de solo lectura y guardián de formulario sucio (*Dirty State Guard*)**
+- [x] **T-COM-12: Modo de sellado de solo lectura y guardián de formulario sucio (*Dirty State Guard*)**
   * **Requisitos:** RF-05.3, RF-07.1, RNF-06
   * **Dependencias:** T-COM-11
   * **Hecho cuando:** (1) Si el ticket se encuentra en estado cerrado o cancelado (`is_sealed == true`), el pie del modal oculta el formulario y muestra el aviso de auditoría *"Expediente archivado: conversación sellada por auditoría"*; (2) al pulsar la tecla `Escape` o hacer clic en el fondo sombreado exterior mientras hay texto o foto en edición, el modal solicita confirmación explícita (*"¿Descartar mensaje en redacción?"*) antes de cerrar; y (3) ante errores de red móvil (HTTP 4xx/5xx), retiene íntegros el texto redactado y la fotografía para permitir reintentos manuales inmediatos.
