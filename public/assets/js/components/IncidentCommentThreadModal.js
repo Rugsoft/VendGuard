@@ -614,8 +614,10 @@ export const IncidentCommentThreadModal = {
     },
 
     /**
-     * Procesa la selección de fotografía desde el selector de archivos (RF-04.1).
-     * Valida el formato MIME y el tamaño máximo de 5 MB en cliente antes de la subida (RF-04.2).
+     * Procesa la selección o captura de la fotografía de evidencia (RF-04.1).
+     * Punto único de entrada para las DOS vías exigidas por la especificación: el selector
+     * de archivos del dispositivo y la captura directa con la cámara móvil. Valida el formato
+     * MIME y el tamaño máximo de 5 MB en cliente antes de la subida (RF-04.2).
      */
     handlePhotoSelect(event) {
       this.formError = '';
@@ -764,7 +766,7 @@ export const IncidentCommentThreadModal = {
           <header
             class="modal-header incident-comment-header"
             data-testid="incident-comment-header"
-            style="flex: 0 0 auto; gap: 12px; background-color: #ffffff;"
+            style="flex: 0 0 auto; flex-wrap: wrap; row-gap: 8px; gap: 12px; background-color: #ffffff;"
           >
             <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
               <h2
@@ -793,13 +795,13 @@ export const IncidentCommentThreadModal = {
               >
                 <span
                   data-testid="incident-comment-machine"
-                  style="font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-slate, #2c333f); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                  style="font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-slate, #2c333f); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
                 >
                   {{ headerMachineLabel }}
                 </span>
                 <span
                   data-testid="incident-comment-location"
-                  style="font-family: var(--font-body, Inter, sans-serif); font-size: 11px; color: var(--color-ink-muted, #6c7e9d); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                  style="font-family: var(--font-body, Inter, sans-serif); font-size: 11px; color: var(--color-ink-muted, #6c7e9d); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
                 >
                   {{ headerLocationLabel }}
                 </span>
@@ -1117,27 +1119,30 @@ export const IncidentCommentThreadModal = {
                 </button>
               </div>
 
-              <!-- Barra de acciones: Adjuntar foto, Cerrar y Enviar -->
-              <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px;">
+              <!-- Barra de acciones: Hacer foto, Adjuntar foto, Cerrar y Enviar. Envuelve sus dos
+                   grupos para que los cuatro controles convivan en pantallas estrechas (RNF-03). -->
+              <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; row-gap: 8px; gap: 10px; margin-top: 4px;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                  <!-- Input oculto para adjuntar fotografía (RF-04.1) -->
+                  <!-- Input oculto para capturar la evidencia con la cámara trasera (RF-04.1) -->
                   <input
                     type="file"
-                    id="incident-comment-photo-input"
-                    ref="photoInput"
+                    id="incident-comment-camera-input"
+                    ref="photoCaptureInput"
                     accept="image/jpeg,image/png,image/webp"
-                    data-testid="incident-comment-photo-input"
+                    capture="environment"
+                    data-testid="incident-comment-camera-input"
                     style="display: none;"
                     :disabled="isSubmitting"
                     @change="handlePhotoSelect"
                   />
                   <button
                     type="button"
-                    class="vg-btn vg-btn-secondary incident-comment-photo-btn"
-                    data-testid="incident-comment-photo-btn"
+                    class="vg-btn vg-btn-secondary incident-comment-camera-btn"
+                    data-testid="incident-comment-camera-btn"
+                    aria-label="Hacer foto con la cámara del dispositivo"
                     :disabled="isSubmitting"
                     style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;"
-                    @click="$refs.photoInput?.click()"
+                    @click="$refs.photoCaptureInput?.click()"
                   >
                     <svg
                       width="14"
@@ -1153,11 +1158,51 @@ export const IncidentCommentThreadModal = {
                       <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
                       <circle cx="12" cy="13" r="4"></circle>
                     </svg>
+                    <span>Hacer foto</span>
+                  </button>
+
+                  <!-- Input oculto para adjuntar una imagen ya existente del dispositivo (RF-04.1) -->
+                  <input
+                    type="file"
+                    id="incident-comment-photo-input"
+                    ref="photoInput"
+                    accept="image/jpeg,image/png,image/webp"
+                    data-testid="incident-comment-photo-input"
+                    style="display: none;"
+                    :disabled="isSubmitting"
+                    @change="handlePhotoSelect"
+                  />
+                  <button
+                    type="button"
+                    class="vg-btn vg-btn-secondary incident-comment-photo-btn"
+                    data-testid="incident-comment-photo-btn"
+                    aria-label="Adjuntar una fotografía ya existente del dispositivo"
+                    :disabled="isSubmitting"
+                    style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;"
+                    @click="$refs.photoInput?.click()"
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                      <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                      <polyline points="21 15 16 10 5 21"></polyline>
+                    </svg>
                     <span>Adjuntar foto</span>
                   </button>
                 </div>
 
-                <div style="display: flex; align-items: center; gap: 8px;">
+                <!-- Anclaje al borde derecho: si la barra envuelve en móvil, la acción
+                     principal conserva la esquina inferior derecha (zona de pulgar). -->
+                <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
                   <button
                     type="button"
                     class="vg-btn vg-btn-secondary"

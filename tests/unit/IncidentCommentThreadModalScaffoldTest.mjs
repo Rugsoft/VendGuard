@@ -348,6 +348,51 @@ assert('7.3 El diálogo declara su rol accesible y el bloqueo de scroll del fond
     && componentSource.includes("document.body.style.overflow = isOpen ? 'hidden' : ''"));
 
 // ---------------------------------------------------------------------
+// 8. RNF-03 · Cabecera responsive para uso a una mano en pantallas estrechas
+//
+// Trampa de regresión nacida de la verificación visual H-2 (390×844): el bloque
+// `.modal-header` es `nowrap` por defecto y las etiquetas de contexto llevaban un
+// `max-width: 260px` FIJO, mayor que la columna disponible en un móvil. En esa
+// combinación el texto se salía por la izquierda de la tarjeta (x=5,7px frente al
+// borde del modal en x=24px) y se imprimía encima del código de ticket. La cabecera
+// debe envolver sus dos columnas y cada etiqueta debe elipsar contra su columna.
+// ---------------------------------------------------------------------
+console.log('\n--- Grupo 8: Cabecera responsive para móvil (RNF-03 · verificación H-2) ---');
+
+const headerBlock = template.slice(headerIndex, template.indexOf('</header>', headerIndex));
+
+assert('8.1 La cabecera envuelve sus columnas en lugar de comprimirlas (RNF-03)',
+  /flex-wrap:\s*wrap/.test(headerBlock),
+  'sin `flex-wrap: wrap` las dos columnas se comprimen y sus textos se solapan en 390px');
+
+assert('8.2 La columna contextual puede encogerse dentro de la cabecera',
+  /class="incident-comment-context"[\s\S]{0,220}min-width:\s*0/.test(headerBlock),
+  'sin `min-width: 0` la columna no reduce su ancho y desborda la tarjeta');
+
+const elasticLabels = headerBlock.match(/max-width:\s*100%/g) || [];
+assert('8.3 Máquina y sede elipsan contra el ancho de su columna, no contra un valor fijo',
+  elasticLabels.length === 2,
+  `se esperaban 2 etiquetas con max-width: 100%, encontradas ${elasticLabels.length}`);
+
+assert('8.4 Ninguna etiqueta de la cabecera conserva un ancho máximo fijo que desborde en móvil',
+  !/max-width:\s*\d+px/.test(headerBlock),
+  'un `max-width` en píxeles vuelve a provocar el desbordamiento medido en 390px');
+
+// Medición real en 390×844 con la captura por cámara (H-4) ya presente: la barra de
+// acciones envuelve en dos filas y, sin el anclaje, `justify-content: space-between`
+// alinea a la izquierda la fila de un solo elemento, dejando el botón «Enviar» en el
+// centro-izquierda (x=117,8 medido) en vez de la esquina inferior derecha, fuera del
+// alcance cómodo del pulgar. El grupo de acciones debe anclarse al borde derecho.
+const actionBarStart = template.indexOf('<!-- Barra de acciones');
+const actionBarBlock = template.slice(
+  actionBarStart,
+  template.indexOf('data-testid="incident-comment-footer-close"', actionBarStart)
+);
+assert('8.5 El grupo de acciones se ancla al borde derecho aunque la barra envuelva (RNF-03)',
+  /flex-wrap:\s*wrap/.test(actionBarBlock) && /margin-left:\s*auto/.test(actionBarBlock),
+  'sin `margin-left: auto` la acción principal pierde la esquina inferior derecha al envolver');
+
+// ---------------------------------------------------------------------
 // SUMMARY
 // ---------------------------------------------------------------------
 console.log('\n======================================================================');

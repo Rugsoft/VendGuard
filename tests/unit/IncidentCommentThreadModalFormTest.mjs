@@ -12,6 +12,9 @@
  *    del envío (RF-04.1).
  * 4. Indicador visual de carga (spinner) deshabilitando el botón durante la subida (RF-04.5).
  * 5. Emisión del evento 'comment-added' y reseteo del formulario preservando la privacidad por defecto.
+ * 6. Captura directa con la cámara móvil para la evidencia fotográfica: input dedicado con
+ *    `capture="environment"` que comparte la tubería de validación y previsualización del
+ *    selector de archivos (RF-04.1, hallazgo H-4).
  *
  * Dogma Vanilla: Node.js ESM nativo, cero dependencias externas.
  */
@@ -305,6 +308,114 @@ assert('5.3 Ante fallo de red se muestra mensaje de error descriptivo',
 
 assert('5.4 isSubmitting regresa a false tras el fallo permitiendo reintento inmediato',
   failureModal.isSubmitting === false && failureModal.isSubmitDisabled === false);
+
+// ─── Grupo 6: Captura Directa con la Cámara Móvil (RF-04.1 · hallazgo H-4) ───
+//
+// RF-04.1 exige DOS vías para la evidencia: «seleccionar un archivo de imagen desde
+// el dispositivo O capturarlo con la cámara móvil». La primera existía desde T-COM-11;
+// la captura directa con cámara faltaba (hallazgo H-4). Este grupo fija el contrato:
+// un input dedicado con `capture="environment"` (cámara trasera, la útil para
+// fotografiar el frontal de la máquina) que desemboca en la MISMA tubería de
+// validación y previsualización que el selector de archivos, sin duplicar reglas.
+console.log('\n--- Grupo 6: Captura Directa con la Cámara Móvil (RF-04.1 · H-4) ---');
+
+/** Extrae la etiqueta completa (<input ... />) que contiene un data-testid dado. */
+function extractTagWithTestId(source, testId) {
+  const anchor = source.indexOf(`data-testid="${testId}"`);
+  if (anchor === -1) return '';
+  const start = source.lastIndexOf('<input', anchor);
+  const end = source.indexOf('/>', anchor);
+  return start === -1 || end === -1 ? '' : source.slice(start, end + 2);
+}
+
+const cameraInputTag = extractTagWithTestId(template, 'incident-comment-camera-input');
+const fileInputTag = extractTagWithTestId(template, 'incident-comment-photo-input');
+
+assert('6.1 La plantilla declara un input dedicado a la captura con cámara (RF-04.1)',
+  cameraInputTag !== '',
+  'no se encontró la etiqueta del input de cámara');
+
+assert('6.2 El input de cámara pide la cámara trasera del dispositivo (capture="environment")',
+  cameraInputTag.includes('type="file"') && cameraInputTag.includes('capture="environment"'),
+  `etiqueta inspeccionada: ${cameraInputTag.slice(0, 160)}`);
+
+assert('6.3 Ambas vías comparten exactamente el mismo contrato de formatos admitidos',
+  fileInputTag.includes('accept="image/jpeg,image/png,image/webp"') &&
+  cameraInputTag.includes('accept="image/jpeg,image/png,image/webp"'));
+
+assert('6.4 La barra de acciones ofrece las dos vías exigidas por RF-04.1',
+  template.includes('data-testid="incident-comment-camera-btn"') &&
+  template.includes('data-testid="incident-comment-photo-btn"') &&
+  template.includes('Hacer foto') &&
+  template.includes('Adjuntar foto'));
+
+assert('6.5 El botón de cámara abre su propio input, no el selector de archivos',
+  template.includes('$refs.photoCaptureInput?.click()') &&
+  template.includes('$refs.photoInput?.click()'));
+
+assert('6.6 Una sola tubería: la cámara y el selector entran por handlePhotoSelect',
+  (cameraInputTag.includes('@change="handlePhotoSelect"') || cameraInputTag.includes('@change="handlePhotoSelect(')) &&
+  fileInputTag.includes('@change="handlePhotoSelect"'));
+
+assert('6.7 Ambos inputs y sus botones se deshabilitan durante la subida (RF-04.5)',
+  cameraInputTag.includes(':disabled="isSubmitting"') &&
+  fileInputTag.includes(':disabled="isSubmitting"') &&
+  /data-testid="incident-comment-camera-btn"[\s\S]{0,240}:disabled="isSubmitting"/.test(template) &&
+  /data-testid="incident-comment-photo-btn"[\s\S]{0,240}:disabled="isSubmitting"/.test(template));
+
+assert('6.8 El botón de cámara se anuncia de forma inequívoca a lectores de pantalla',
+  /data-testid="incident-comment-camera-btn"[\s\S]{0,260}aria-label="[^"]*cámara[^"]*"/.test(template));
+
+// El compositor interactivo (`<form data-testid="incident-comment-form">`) vive dentro del
+// pie, junto a la rama de solo lectura del sellado; la captura debe pertenecer al formulario
+// editable y quedar ausente de la rama sellada (RF-05.3).
+const formStart = template.indexOf('data-testid="incident-comment-form"');
+const formEnd = template.indexOf('</form>', formStart);
+const cameraInputIndex = template.indexOf('incident-comment-camera-input');
+assert('6.9 La captura pertenece al formulario editable y no a la rama sellada',
+  formStart > -1 && formEnd > formStart &&
+  cameraInputIndex > formStart && cameraInputIndex < formEnd);
+
+assert('6.10 Guarda de maquetación (lección H-2): la barra de acciones envuelve en pantallas estrechas',
+  /Barra de acciones[\s\S]{0,400}flex-wrap:\s*wrap/.test(template),
+  'sin flex-wrap, un tercer control desbordaría la tarjeta a 390 px');
+
+// Prueba reactiva de la tubería compartida: una foto capturada con la cámara se
+// procesa igual que una elegida del dispositivo (validación + miniatura + revocación
+// de la URL de objeto previa, porque solo se admite una evidencia por mensaje).
+const originalUrlApi = globalThis.URL;
+const revokedUrls = [];
+let createdUrls = 0;
+globalThis.URL = {
+  createObjectURL: () => `blob:captured-${++createdUrls}`,
+  revokeObjectURL: (url) => { revokedUrls.push(url); }
+};
+
+const cameraModal = buildInstance();
+// Archivos reales: la cámara móvil entrega siempre un File (image/jpeg del carrete del sensor).
+const galleryPhoto = new File([new Uint8Array(2048)], 'carrete.jpg', { type: 'image/jpeg' });
+const cameraPhoto = new File([new Uint8Array(2048)], 'image.jpg', { type: 'image/jpeg' });
+
+// 1) Selección clásica desde el dispositivo
+cameraModal.handlePhotoSelect({ target: { files: [galleryPhoto], value: 'dummy' } });
+const firstPreviewUrl = cameraModal.photoPreviewUrl;
+
+// 2) Captura directa con la cámara (mismo manejador que declara el input con capture)
+cameraModal.handlePhotoSelect({ target: { files: [cameraPhoto], value: 'dummy' } });
+
+assert('6.11 La foto capturada con la cámara se acepta y sustituye a la anterior',
+  cameraModal.photoFile === cameraPhoto && cameraModal.formError === '' && cameraModal.photoPreviewUrl !== firstPreviewUrl);
+
+assert('6.12 La miniatura anterior se revoca al capturar la nueva (una evidencia por mensaje)',
+  revokedUrls.includes(firstPreviewUrl));
+
+const bigCameraShot = new File([new Uint8Array(6 * 1024 * 1024)], 'image.jpg', { type: 'image/jpeg' });
+cameraModal.clearSelectedPhoto();
+cameraModal.handlePhotoSelect({ target: { files: [bigCameraShot], value: 'dummy' } });
+assert('6.13 Una captura que supera los 5 MB se rechaza por la misma tubería (RF-04.2)',
+  cameraModal.photoFile === null && cameraModal.formError.includes('5 MB'));
+
+globalThis.URL = originalUrlApi;
 
 // ---------------------------------------------------------------------
 // SUMMARY
