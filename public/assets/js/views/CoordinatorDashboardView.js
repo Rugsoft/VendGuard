@@ -46,6 +46,7 @@ import { CoordinatorSparePartsAnalyticsTab } from '../components/CoordinatorSpar
 import { CoordinatorTerritorialMapTab } from '../components/CoordinatorTerritorialMapTab.js';
 import { CoordinatorRefundsTab } from '../components/CoordinatorRefundsTab.js';
 import { CoordinatorIncidentDetailModal } from '../components/CoordinatorIncidentDetailModal.js';
+import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';
 
 // Status classification is delegated to the shared module utils/IncidentStatusPermissions.js
 // (frontend mirror of the PHP lifecycle rules): no literal status lists live in this view.
@@ -74,7 +75,8 @@ export const CoordinatorDashboardView = {
     CoordinatorSparePartsAnalyticsTab,
     CoordinatorTerritorialMapTab,
     CoordinatorRefundsTab,
-    CoordinatorIncidentDetailModal
+    CoordinatorIncidentDetailModal,
+    IncidentCommentThreadModal
   },
   emits: ['assigned', 'cancelled', 'refresh'],
   data() {
@@ -140,6 +142,11 @@ export const CoordinatorDashboardView = {
       // chosen for the integral detail modal, mounted by T-IDM-15.
       showDetailModal: false,
       selectedDetailIncident: null,
+
+      // Conversation Thread State (Módulo 10, RF-01.1, RF-02.3): fila de triaje y
+      // ficha de detalle comparten el mismo hilo con canal 'COORDINATOR'.
+      showCommentsModal: false,
+      selectedCommentIncident: null,
 
       // QR Label & Batch Print State (T-QR-14)
       showQrLabelModal: false,
@@ -488,6 +495,105 @@ export const CoordinatorDashboardView = {
     openDetailModal(incident) {
       this.selectedDetailIncident = incident;
       this.showDetailModal = true;
+    },
+
+    /**
+     * Contador total de mensajes de una avería para la insignia de conversación de la
+     * fila de triaje (RF-01.1). El coordinador contabiliza públicos y notas internas de
+     * taller, porque su canal tiene acceso legítimo a ambos (RF-02.3).
+     *
+     * @param {Object} incident Fila de la bandeja de triaje.
+     * @returns {number} Entero no negativo; 0 si el expediente aún no tiene hilo.
+     */
+    commentCountOf(incident) {
+      const parsed = Number.parseInt(incident?.comments_count, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    },
+
+    /**
+     * Abre el hilo de conversación de una avería con el canal 'COORDINATOR' (RF-01.2):
+     * admite tanto la insignia de la fila de triaje como el disparador de la ficha de
+     * detalle, que reutiliza la fila ya seleccionada en la bandeja.
+     *
+     * @param {Object|null} incident Fila de triaje o expediente mínimo con `id`.
+     */
+    openCommentsModal(incident) {
+      const target = incident || this.selectedDetailIncident;
+      if (!target || (target.id === undefined && target.ticket_code === undefined)) {
+        return;
+      }
+
+      // Si el disparador viene de una fila de la bandeja, se rehidrata la fila real para
+      // que el contador sincronizado apunte al mismo objeto reactivo de la tabla.
+      const knownRow = this.incidents.find(inc => Number(inc.id) === Number(target.id));
+      this.selectedCommentIncident = knownRow || target;
+      this.showCommentsModal = true;
+    },
+
+    /**
+     * Disparador del hilo desde la ficha de detalle integral (RF-01.1): el modal de
+     * detalle sólo conoce su expediente, así que se abre el hilo sobre la fila que la
+     * bandeja tiene seleccionada.
+     */
+    onDetailOpenComments() {
+      this.openCommentsModal(this.selectedDetailIncident);
+    },
+
+    /**
+     * Cierra el hilo de conversación y libera la selección.
+     *
+     * El modal del hilo libera el bloqueo de scroll del fondo al cerrarse, pero la ficha
+     * de detalle puede seguir abierta debajo: se restablece el bloqueo para que el cuerpo
+     * no se desplace por detrás de un modal aún visible (RNF-06).
+     */
+    closeCommentsModal() {
+      this.showCommentsModal = false;
+      this.selectedCommentIncident = null;
+
+      if (this.showDetailModal && typeof document !== 'undefined') {
+        // El modal del hilo libera el bloqueo de scroll en su propio watcher de cierre,
+        // que se ejecuta DESPUÉS de este manejador: con la ficha de detalle todavía
+        // abierta hay que reimponer el bloqueo una vez drenado ese ciclo.
+        const relockBackground = () => {
+          document.body.style.overflow = 'hidden';
+        };
+
+        if (typeof this.$nextTick === 'function') {
+          this.$nextTick(relockBackground);
+        } else {
+          relockBackground();
+        }
+      }
+    },
+
+    /**
+     * Sincroniza los contadores tras publicar un mensaje en el hilo (RF-03.4):
+     * (1) la insignia de la fila de triaje adopta el total exacto devuelto por el
+     * servidor (o incrementa una unidad si no llegara), y (2) si la ficha de detalle
+     * sigue abierta debajo, se recarga para que su bitácora y su disparador muestren el
+     * mensaje recién publicado.
+     *
+     * @param {Object|null} threadDto DTO del hilo emitido por el modal.
+     */
+    async onCommentAdded(threadDto) {
+      const incidentId = this.selectedCommentIncident?.id;
+
+      if (incidentId !== undefined && incidentId !== null) {
+        const row = this.incidents.find(inc => Number(inc.id) === Number(incidentId));
+        if (row) {
+          const reportedTotal = Number.parseInt(threadDto?.pagination?.total_comments, 10);
+          row.comments_count = Number.isFinite(reportedTotal)
+            ? reportedTotal
+            : this.commentCountOf(row) + 1;
+        }
+      }
+
+      if (this.showDetailModal) {
+        const detailModal = this.$refs?.detailModalRef;
+        if (detailModal && typeof detailModal.fetchDetail === 'function') {
+          await detailModal.fetchDetail();
+        }
+      }
     },
 
     /**
@@ -1149,6 +1255,18 @@ export const CoordinatorDashboardView = {
                   <td style="padding: 14px 16px; vertical-align: top; text-align: right;">
                     <div style="display: inline-flex; gap: 8px;">
 
+                      <!-- Conversation Thread Badge with the total message count (RF-01.1) -->
+                      <button
+                        type="button"
+                        class="vg-btn vg-btn-secondary vg-row-comments-badge"
+                        style="height: 30px; font-size: 12px; padding: 0 8px; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 4px;"
+                        @click.stop="openCommentsModal(inc)"
+                        :title="'Abrir el hilo de conversación del expediente (' + commentCountOf(inc) + ' mensajes)'"
+                        data-testid="btn-row-comments"
+                      >
+                        💬<span data-testid="row-comments-count">{{ commentCountOf(inc) }}</span>
+                      </button>
+
                       <!-- View Detail Button (RF-01.1 / T-IDM-14) -->
                       <button
                         type="button"
@@ -1615,10 +1733,27 @@ export const CoordinatorDashboardView = {
       <!-- MODAL 5: INTEGRAL INCIDENT DETAIL (RF-01, RF-07, RF-08 / T-IDM-15)  -->
       <!-- =================================================================== -->
       <CoordinatorIncidentDetailModal
+        ref="detailModalRef"
         :is-open="showDetailModal"
         :incident-id="detailIncidentId"
+        :comment-thread-open="showCommentsModal"
         @close="closeDetailModal"
         @incident-updated="handleIncidentUpdated"
+        @open-comments="onDetailOpenComments"
+      />
+
+      <!-- =================================================================== -->
+      <!-- MODAL 6: HILO DE CONVERSACIÓN (RF-01.1, RF-02.3 / T-COM-16)          -->
+      <!-- Se monta DESPUÉS de la ficha de detalle para que su capa quede por    -->
+      <!-- encima cuando el disparador parte del propio detalle.                 -->
+      <!-- =================================================================== -->
+      <IncidentCommentThreadModal
+        :is-open="showCommentsModal"
+        :incident-id="selectedCommentIncident?.id ?? selectedCommentIncident?.ticket_code ?? null"
+        :ticket-code="selectedCommentIncident?.ticket_code ?? null"
+        role="COORDINATOR"
+        @close="closeCommentsModal"
+        @comment-added="onCommentAdded"
       />
     </div>
   `

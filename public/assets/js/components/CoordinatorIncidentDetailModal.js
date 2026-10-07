@@ -59,9 +59,17 @@ export const CoordinatorIncidentDetailModal = {
     incidentId: {
       type: [Number, String],
       default: null
+    },
+    /**
+     * Indica que el hilo de conversación completo (Módulo 10) está abierto por encima
+     * de esta ficha: el atajo Escape debe cerrar solo el hilo y no la ficha de debajo.
+     */
+    commentThreadOpen: {
+      type: Boolean,
+      default: false
     }
   },
-  emits: ['close', 'incident-updated'],
+  emits: ['close', 'incident-updated', 'open-comments'],
   data() {
     return {
       detail: null,
@@ -304,6 +312,15 @@ export const CoordinatorIncidentDetailModal = {
         author_label: authors[comment.author_type] || comment.author_type || 'Autor desconocido',
         created_at_label: this.formatDateTime(comment.created_at)
       }));
+    },
+
+    /**
+     * Recuento TOTAL de mensajes del expediente para el disparador del hilo completo
+     * (RF-01.1): el coordinador ve públicos y notas internas, así que la bitácora
+     * cargada por el detalle enriquecido es el total real del expediente (RF-02.3).
+     */
+    commentThreadCount() {
+      return this.commentsView.length;
     },
 
     /** Incidencia reabierta por la sede dentro de la ventana de garantía (RF-02.2). */
@@ -640,9 +657,26 @@ export const CoordinatorIncidentDetailModal = {
     },
 
     handleBackdropClick(event) {
+      // Con el hilo de conversación abierto por encima, el fondo visible no es el de esta
+      // ficha: un clic en la zona sombreada pertenece al modal superior (T-COM-16).
+      if (this.commentThreadOpen) {
+        return;
+      }
       if (event.target === event.currentTarget) {
         this.requestClose();
       }
+    },
+
+    /**
+     * Abre el hilo de conversación completo del expediente (Módulo 10): la ficha de
+     * detalle publica el disparador con su recuento total y la bandeja de triaje monta
+     * `IncidentCommentThreadModal` con el canal 'COORDINATOR' (RF-01.1, RF-02.3).
+     */
+    openCommentThread() {
+      this.$emit('open-comments', {
+        incidentId: this.incidentId,
+        ticketCode: this.incident?.ticket_code ?? null
+      });
     },
 
     /**
@@ -786,9 +820,13 @@ export const CoordinatorIncidentDetailModal = {
 
     /**
      * Escape cierra primero el visor integrado de la evidencia y, después, el modal.
+     *
+     * Con el hilo de conversación abierto por encima (Módulo 10, T-COM-16) la pulsación
+     * pertenece al modal superior: el hilo la intercepta y aquí se ignora para no cerrar
+     * la ficha que queda debajo.
      */
     handleKeyDown(event) {
-      if (event.key !== 'Escape' || !this.isOpen) {
+      if (event.key !== 'Escape' || !this.isOpen || this.commentThreadOpen) {
         return;
       }
       if (this.photoZoomOpen) {
@@ -1270,9 +1308,26 @@ export const CoordinatorIncidentDetailModal = {
                 data-testid="section-comments"
                 style="background-color: #ffffff; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px); padding: 16px 20px; margin-bottom: 16px;"
               >
-                <h3 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 16px; font-weight: 500; color: var(--color-ink, #000000); margin: 0 0 12px;">
-                  💬 Bitácora y Notas de Taller
-                </h3>
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 0 0 12px;">
+                  <h3 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 16px; font-weight: 500; color: var(--color-ink, #000000); margin: 0;">
+                    💬 Bitácora y Notas de Taller
+                  </h3>
+
+                  <!-- Disparador del hilo completo con el recuento total (RF-01.1 / T-COM-16) -->
+                  <button
+                    type="button"
+                    class="vg-btn vg-btn-secondary"
+                    data-testid="btn-open-comment-thread"
+                    style="height: 30px; font-size: 12px; padding: 0 10px; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
+                    :title="'Abrir el hilo de conversación completo (' + commentThreadCount + ' mensajes)'"
+                    @click="openCommentThread"
+                  >
+                    💬 Hilo completo
+                    <span data-testid="comment-thread-count" style="display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 18px; padding: 0 5px; border-radius: var(--radius-interactive, 4px); background-color: var(--color-primary, #2560ff); color: #ffffff; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;">
+                      {{ commentThreadCount }}
+                    </span>
+                  </button>
+                </div>
 
                 <!-- Contenedor con scroll propio y acotado (caso límite 8) -->
                 <div

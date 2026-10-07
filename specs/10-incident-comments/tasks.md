@@ -102,7 +102,7 @@
   * **Dependencias:** T-COM-12, T-COM-13
   * **Hecho cuando:** (1) Cada tarjeta de parada de intervención en la vista móvil "Mi Ruta" incorpora una insignia interactiva con icono de conversación y contador numérico con la totalidad de mensajes (`comments_count`); (2) al pulsar, abre `IncidentCommentThreadModal` con rol `TECHNICIAN`; y (3) al publicar un mensaje, el contador de la parada se incrementa de forma inmediata en la interfaz móvil.
 
-- [ ] **T-COM-16: Integrar disparador directo al hilo de conversación en `CoordinatorDashboardView.js`**
+- [x] **T-COM-16: Integrar disparador directo al hilo de conversación en `CoordinatorDashboardView.js`**
   * **Requisitos:** RF-01.1, RF-02.3
   * **Dependencias:** T-COM-12, T-COM-13
   * **Hecho cuando:** En la tabla de triaje del coordinador y en `CoordinatorIncidentDetailModal`, cada avería cuenta con un disparador interactivo con el recuento total de mensajes que abre `IncidentCommentThreadModal` con rol `COORDINATOR`, permitiendo participar con notas internas o públicas y manteniendo sincronizados los contadores.

@@ -261,6 +261,10 @@ class CoordinatorController
                 'sla_minutes_elapsed' => $minutesWaiting,
                 'waiting_minutes' => $minutesWaiting,
                 'sla_breached' => $slaBreached,
+                // Insignia de conversación de la fila de triaje (RF-01.1): el coordinador
+                // contabiliza la TOTALIDAD de mensajes, públicos y notas internas de taller,
+                // porque su canal tiene acceso legítimo a ambos (RF-02.3).
+                'comments_count' => $this->incidentRepo->countComments((int)$incident->getId(), true),
             ]);
 
             $formattedIncidents[] = $item;
