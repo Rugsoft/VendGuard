@@ -54,7 +54,7 @@
   * **Dependencias:** T-COM-03, T-COM-04
   * **Hecho cuando:** `CoordinatorController` implementa `getComments(Request $request)` y refactoriza su método `addComment(Request $request)` conectándolo con `IncidentCommentService`, soportando inspección total del diálogo, publicación de notas internas o públicas, soporte `multipart/form-data` y auditoría inmutable en `audit_log` con acción `INCIDENT_COMMENT_ADDED`.
 
-- [ ] **T-COM-08: Registrar y blindar rutas seguras en `AppRouter.php`**
+- [x] **T-COM-08: Registrar y blindar rutas seguras en `AppRouter.php`**
   * **Requisitos:** RF-01, RF-02, RNF-01
   * **Dependencias:** T-COM-05, T-COM-06, T-COM-07
   * **Hecho cuando:** Las rutas `GET/POST /api/location/incidents/{id}/comments` (y alias `/api/incidents/{ticket_code}/comments`), `GET/POST /api/technician/incidents/{id}/comments` y `GET/POST /api/coordinator/incidents/{id}/comments` quedan registradas bajo los middlewares RBAC correspondientes (`$siteAuth`, `$technicianAuth`, `$coordinatorAuth`), y los tests unitarios de enrutamiento existentes pasan al 100% en verde.

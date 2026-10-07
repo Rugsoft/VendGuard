@@ -68,6 +68,12 @@ class AppRouter
 
         $router->get('/api/locations/{site_code}/machines', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'getMachines'], [$siteAuth]);
         $router->post('/api/incidents', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'createIncident'], [$siteAuth]);
+        // Hilo de conversación del expediente (Módulo 10: T-COM-08). El portal de sede
+        // jamás recibe notas internas: el filtrado y el enmascaramiento viven en el
+        // servicio de aplicación, detrás de la sesión de centro (Art. V.4 / RNF-01).
+        $router->get('/api/location/incidents/{id}/comments', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'getComments'], [$siteAuth]);
+        $router->post('/api/location/incidents/{id}/comments', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'addComment'], [$siteAuth]);
+        // Alias retrocompatible por código de ticket del portal de sede.
         $router->post('/api/incidents/{ticket_code}/comments', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'addComment'], [$siteAuth]);
         $router->get('/api/incidents/{ticket_code}/comments', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'getComments'], [$siteAuth]);
         $router->post('/api/incidents/{ticket_code}/reopen', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'reopenIncident'], [$siteAuth]);
@@ -104,6 +110,9 @@ class AppRouter
         // bitácora exigen rol COORDINATOR en el middleware; el propio controlador
         // refuerza el blindaje y enmascara los datos de pago (Art. V.4).
         $router->get('/api/coordinator/incidents/{id}/detail', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getIncidentDetail'], [$coordinatorAuth]);
+        // Hilo de conversación del expediente (Módulo 10: T-COM-08). Inspección total
+        // del diálogo y publicación de notas internas o públicas bajo rol COORDINATOR.
+        $router->get('/api/coordinator/incidents/{id}/comments', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getComments'], [$coordinatorAuth]);
         $router->post('/api/coordinator/incidents/{id}/comments', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'addComment'], [$coordinatorAuth]);
         // Rutas de Administración Integral (Módulo 04: Sedes, Máquinas y Personal)
         // Sedes (Locations)
@@ -181,6 +190,11 @@ class AppRouter
         $router->get('/api/technician/my-metrics', [\VendGuard\Presentation\Controller\TechnicianMetricsController::class, 'getMyMetrics'], [$technicianAuth]);
         $router->patch('/api/technician/incidents/{id}/start', [\VendGuard\Presentation\Controller\TechnicianController::class, 'startIntervention'], [$technicianAuth]);
         $router->patch('/api/technician/incidents/{id}/pause', [\VendGuard\Presentation\Controller\TechnicianController::class, 'pauseIntervention'], [$technicianAuth]);
+        // Hilo de conversación del expediente (Módulo 10: T-COM-08). El técnico de la
+        // ruta ve el hilo íntegro, notas internas incluidas, y publica con el selector
+        // de privacidad preseleccionado en "Nota Interna de Taller" (RF-02.3, RF-03.3).
+        $router->get('/api/technician/incidents/{id}/comments', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getComments'], [$technicianAuth]);
+        $router->post('/api/technician/incidents/{id}/comments', [\VendGuard\Presentation\Controller\TechnicianController::class, 'addComment'], [$technicianAuth]);
         // Consulta del reintegro vinculado con DTO sin datos bancarios (Art. V.4).
         $router->get('/api/technician/incidents/{id}/refund', [TechnicianRefundController::class, 'show'], [$technicianAuth]);
         $router->post('/api/technician/incidents/{id}/resolve', [\VendGuard\Presentation\Controller\TechnicianController::class, 'resolveIncident'], [$technicianAuth]);
