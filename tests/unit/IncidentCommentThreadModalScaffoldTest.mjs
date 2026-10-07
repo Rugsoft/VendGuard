@@ -127,9 +127,13 @@ assert('1.5 El validador de role rechaza un perfil ajeno al hilo',
 assert('1.6 Reutiliza IncidentBadge para la insignia de estado (sin dependencias nuevas)',
   IncidentCommentThreadModal.components?.IncidentBadge === IncidentBadge);
 
-assert('1.7 El scaffold no carga datos por red: no importa el cliente de API (seam de T-COM-10)',
-  !componentSource.includes("from '../api.js'") && !componentSource.includes('api.'),
-  'El hilo se conectará a los métodos de api.js en T-COM-13 con el visor de T-COM-10.');
+// T-COM-10 conectó el visor al hilo: el transporte entra por el cliente nativo del
+// proyecto (api.js) y el componente sigue sin llamar a `fetch()` por su cuenta.
+assert('1.7 El transporte HTTP entra por el cliente nativo del proyecto, no por fetch directo',
+  componentSource.includes("import { api } from '../api.js'")
+    && !componentSource.includes('fetch(')
+    && !componentSource.includes('axios'),
+  'Todo el tráfico del hilo pasa por api.js (Dogma Vanilla).');
 
 const importedModules = [...componentSource.matchAll(/^\s*import\s+[^'"]*['"]([^'"]+)['"]/gm)].map((m) => m[1]);
 assert('1.8 Dogma Vanilla: todos los imports son relativos al proyecto',

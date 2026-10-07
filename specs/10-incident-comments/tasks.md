@@ -68,7 +68,7 @@
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existe en `public/assets/js/components/IncidentCommentThreadModal.js` el componente Vue 3 ESM con props `isOpen`, `incidentId` (o `ticketCode`) y `role`, emitiendo `close` y `comment-added`, maquetado con cabecera contextual fija (ticket code en monospace, máquina, sede, insignia de estado), cuerpo central con scroll vertical independiente y pie fijo conforme a los tokens de diseño Docker.
 
-- [ ] **T-COM-10: Visor cronológico de mensajes, bocadillos diferenciados y carga de históricos previos**
+- [x] **T-COM-10: Visor cronológico de mensajes, bocadillos diferenciados y carga de históricos previos**
   * **Requisitos:** RF-01.2, RF-01.3, RF-02.4, RF-04.4, RNF-02
   * **Dependencias:** T-COM-09
   * **Hecho cuando:** El modal presenta los mensajes cronológicamente: (1) comentarios públicos en bocadillos grises neutros (o azul suave para mensajes propios); (2) notas internas confidenciales con fondo ámbar `#fef9c3`, borde `#fde047`, distintivo con icono de candado SVG y etiqueta `🔒 Nota Interna de Taller (Confidencial)`; (3) miniaturas fotográficas con visor modal ampliable; (4) auto-scroll al mensaje más reciente al cargar; y (5) botón superior *"Cargar mensajes anteriores"* que recupera bloques previos preservando el punto de lectura visual sin saltos.
