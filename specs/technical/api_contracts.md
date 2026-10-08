@@ -547,48 +547,101 @@ Devuelve la ficha completa enriquecida que consume el modal de detalle del triaj
 
 ---
 
-### 4.5 `POST /api/coordinator/incidents/{id}/comments` (Añadir Comentario o Nota Interna de Taller)
-Registra una anotación en la bitácora de la incidencia desde el modal de detalle y deja constancia inmutable del evento en `audit_log` (Módulo 09, RF-05.3, RNF-04).
+### 4.5 `GET|POST /api/coordinator/incidents/{id}/comments` (Hilo de Conversación de la Coordinación)
 
-* **Autenticación:** Token interno con rol `COORDINATOR`.
-* **Parámetros de Ruta:** `id` — ID primario o código de ticket con `#` opcional (mismo contrato que el apartado 4.4).
-* **Request Body:**
-```json
-{
-  "comment_text": "Revisado compresor en taller; pieza en camino desde almacén central.",
-  "is_internal": true
-}
-```
-  * `comment_text` (string, obligatorio): mínimo **5 caracteres reales** tras recortar espacios en blanco.
-  * `is_internal` (boolean, opcional, por defecto `false`): `false` publica el comentario en la bitácora visible del portal de sede; `true` lo marca como nota interna confidencial de taller. Se admiten igualmente `1` y `0`.
-* **Respuesta Exitosa (`201 Created`):**
+Consulta y publica mensajes en la bitácora del expediente desde el modal de detalle, con notas internas de taller
+incluidas, y deja constancia inmutable del evento en `audit_log` (Módulo 09 y Módulo 10, RF-05.3, RNF-04).
+
+* **Autenticación:** token interno con rol `COORDINATOR`. Un rol interno distinto (p. ej. técnico) recibe `403 FORBIDDEN`; sin token, `401 UNAUTHORIZED`.
+* **Identificador de ruta (`{id}`):** ID primario positivo, código de ticket o `#` + código de ticket (los tres admitidos en `GET` y en `POST`). Un identificador vacío, no positivo o con caracteres no admitidos devuelve `400 INVALID_INCIDENT_IDENTIFIER`.
+* **Contrato del módulo propietario:** [Módulo 10 · Hilo de comentarios](../10-incident-comments/plan.md) (§2.1.C consulta, §2.2.C publicación).
+
+#### 4.5.1 Consulta del hilo (`GET`)
+
+* **Parámetros de consulta:**
+  * `limit` *(int, opcional, por defecto `50`)*: tamaño del bloque; los valores por encima de **100** se saturan en el tope y `0` o un valor no numérico devuelven `400 INVALID_LIMIT`.
+  * `before_id` *(int, opcional)*: paginación retrospectiva por cursor; un valor no positivo o no numérico devuelve `400 INVALID_BEFORE_ID`.
+* **Visibilidad total (Art. III):** el canal interno no filtra nada. Devuelve los mensajes públicos **y** las notas internas, expone el campo booleano `is_internal` y muestra los nombres nominales reales de todos los autores, sin enmascaramiento. `total_comments` cuenta la totalidad de mensajes del expediente (comprobado con un hilo de 127 mensajes: 121 públicos + 6 internos). `is_own_message` es verdadero cuando el `user_id` del mensaje coincide con el del coordinador autenticado.
+* **Respuesta Exitosa (`200 OK`):** misma estructura de hilo que el apartado 3.3.1 (`incident` + `pagination` + `comments`), con el canal interno en los mensajes:
 ```json
 {
   "success": true,
   "data": {
-    "id": 341,
-    "incident_id": 142,
-    "author_type": "COORDINATOR",
-    "user_id": 2,
-    "author_name": "Coordinación",
-    "comment_text": "Revisado compresor en taller; pieza en camino desde almacén central.",
-    "photo_path": null,
-    "is_internal": true,
-    "created_at": "2026-10-05 12:00:00",
-    "ticket_code": "INC-2026-0142"
-  },
-  "message": "Comentario añadido correctamente a la bitácora de la incidencia."
+    "incident": {
+      "id": 142,
+      "ticket_code": "INC-2026-0142",
+      "machine_code": "VEND-0101",
+      "machine_model": "Sanden Vendo G-Drink",
+      "location_name": "Hospital del Mar - Edificio Central",
+      "status": "ASSIGNED",
+      "status_label": "Asignada",
+      "is_sealed": false,
+      "can_comment": true,
+      "read_only_reason": null
+    },
+    "pagination": {
+      "total_comments": 4,
+      "loaded_count": 4,
+      "has_more_before": false,
+      "oldest_id": 205716,
+      "latest_id": 205719
+    },
+    "comments": [
+      {
+        "id": 205716,
+        "author_type": "REPORTER",
+        "author_name": "Responsable de Sede · Hospital del Mar - Edificio Central",
+        "comment_text": "Mensaje público de la sede para el hilo.",
+        "photo_url": null,
+        "created_at": "2026-10-08 08:21:10",
+        "is_own_message": false,
+        "is_internal": false
+      },
+      {
+        "id": 205717,
+        "author_type": "TECHNICIAN",
+        "author_name": "Jordi Técnico Ruta BCN",
+        "comment_text": "Nota interna del técnico de ruta.",
+        "photo_url": null,
+        "created_at": "2026-10-08 08:21:10",
+        "is_own_message": false,
+        "is_internal": true
+      },
+      {
+        "id": 205719,
+        "author_type": "COORDINATOR",
+        "author_name": "Sara Coordinadora",
+        "comment_text": "Nota interna de coordinación.",
+        "photo_url": null,
+        "created_at": "2026-10-08 08:21:10",
+        "is_own_message": true,
+        "is_internal": true
+      }
+    ]
+  }
 }
 ```
+* **Errores de Validación / Negocio:** `400` (`INVALID_INCIDENT_IDENTIFIER` / `INVALID_LIMIT` / `INVALID_BEFORE_ID`), `401` (`UNAUTHORIZED`), `403` (`FORBIDDEN`) y `404` (`INCIDENT_NOT_FOUND`).
+
+#### 4.5.2 Publicación de un mensaje (`POST`)
+
+* **Formato:** `application/json` (sin archivo) o `multipart/form-data` (con fotografía).
+* **Campos:**
+  * `comment_text` *(string, obligatorio)*: entre **5 y 1.000 caracteres** tras recortar espacios. Alias admitidos: `text`, `comment`.
+  * `is_internal` *(boolean, opcional)*: **por defecto `true`** — la *Nota Interna de Taller* viene preseleccionada (RF-03.3) y solo un valor explícito la desmarca. Se admiten `true`/`false` y `1`/`0` (también como cadena); cualquier otro valor devuelve `422 INVALID_IS_INTERNAL`.
+  * `photo` *(file, opcional)*: imagen JPG, PNG o WebP de ≤ 5 MB validada por *magic bytes*. Alias: `image`, `file`.
+* **Respuesta Exitosa (`201 Created`):** envelope con `data` (el hilo completo actualizado, igual que en 4.5.1) y un `message` que distingue la visibilidad: `"Nota interna registrada en el hilo de conversación"` o `"Comentario publicado en el hilo de conversación"`.
 * **Errores de Validación / Negocio:**
-  * `400 Bad Request` (`INVALID_INCIDENT_IDENTIFIER`).
+  * `400 Bad Request` (`MISSING_COMMENT_TEXT`): falta `comment_text` o llega vacío tras recortar.
   * `401 Unauthorized` (`UNAUTHORIZED`) / `403 Forbidden` (`FORBIDDEN`).
-  * `404 Not Found` (`INCIDENT_NOT_FOUND`).
-  * `422 Unprocessable` (`MISSING_COMMENT_TEXT`): falta `comment_text` o llega vacío tras recortar.
-  * `422 Unprocessable` (`COMMENT_TOO_SHORT`): el texto no alcanza los 5 caracteres reales.
-  * `422 Unprocessable` (`INVALID_IS_INTERNAL`): el indicador no es un booleano reconocible.
-  * `422 Unprocessable` (`COMMENT_WINDOW_CLOSED`): bitácora sellada en tickets `CLOSED`/`CANCELLED` (Art. III) o ventana de garantía de 48 horas vencida en tickets `RESOLVED` (Art. V.6).
-* **Auditoría (Art. III.3):** cada escritura emite un evento `INCIDENT_COMMENT_ADDED` en `audit_log` con `entity_type = TICKET`, el `entity_id` de la incidencia, el coordinador autenticado como causante (`user_id`, `user_role`, `user_name`) y el detalle del comentario en `new_state` (`comment_id`, `author_type`, `is_internal`, `comment_text`); `metadata.visibility` registra `PUBLIC` o `INTERNAL`.
+  * `403 Forbidden` (`CONVERSATION_SEALED`): expediente `CLOSED`/`CANCELLED` o `RESOLVED` fuera de la ventana de garantía de 48 h. La lectura sigue disponible (`200`, con `is_sealed = true` y `can_comment = false`).
+  * `404 Not Found` (`INCIDENT_NOT_FOUND`): ni el ID ni el código de ticket corresponden a un expediente existente.
+  * `422 Unprocessable` (`INVALID_COMMENT_LENGTH`): texto con menos de 5 o más de 1.000 caracteres.
+  * `422 Unprocessable` (`INVALID_IS_INTERNAL`): indicador no reconocible como booleano.
+  * `422 Unprocessable` (`FILE_TOO_LARGE` / `INVALID_FILE_TYPE`): adjunto de más de 5 MB o *magic bytes* no seguros.
+  * **Eco para el reintento (RF-07.1):** los errores recuperables devuelven `details.form_data` con el texto íntegro —`comment_text`, y `is_internal` cuando el rechazo es por sellado o por archivo— para que la interfaz no obligue a reescribir la nota.
+  * **Orden de guardas:** la validación de la bandera de privacidad se resuelve **antes** del sellado; un indicador mal formado sobre un expediente cerrado devuelve `422 INVALID_IS_INTERNAL`, no `403`.
+* **Auditoría (Art. III.3):** cada publicación emite un evento inmutable `INCIDENT_COMMENT_ADDED` en `audit_log` con `entity_type = TICKET`, el `entity_id` del expediente, el coordinador autenticado como causante (`user_id`, `user_role = COORDINATOR`, `user_name`) y `new_state = { comment_id, ticket_code, is_internal, has_photo }`. El evento **no copia el texto del mensaje** (`metadata` queda a `null`), de modo que el contenido confidencial no se duplica fuera del hilo.
 
 ---
 
@@ -704,6 +757,86 @@ Cierre técnico con validación estricta de informe diagnóstico (RF-08).
       }
     }
     ```
+
+### 5.5 `GET|POST /api/technician/incidents/{id}/comments` (Hilo de Conversación de la Ruta)
+
+Hilo de conversación del expediente en la vista móvil *Mi Ruta*: el técnico consulta la conversación completa
+(notas internas incluidas) y publica mensajes clasificados como nota interna de taller o como mensaje público
+para la sede (Módulo 10, RF-01.2, RF-02.3, RF-03.3, RF-04.1, RF-05.4).
+
+* **Autenticación:** token interno con rol `TECHNICIAN`. Otro rol interno recibe `403 FORBIDDEN`; sin token, `401 UNAUTHORIZED`.
+* **Identificador de ruta (`{id}`):** admite el ID primario del expediente y también el código de ticket.
+* **Contrato del módulo propietario:** [Módulo 10 · Hilo de comentarios](../10-incident-comments/plan.md) (§2.1.B consulta, §2.2.B publicación).
+
+#### 5.5.1 Consulta del hilo (`GET`)
+
+* **Parámetros de consulta:** `limit` *(opcional, por defecto `50`, tope `100`)* y `before_id` *(cursor retrospectivo)*, con los mismos códigos de rechazo que el resto del hilo (`400 INVALID_LIMIT` / `INVALID_BEFORE_ID`).
+* **Alcance de lectura (RF-05.4):**
+  * **Asignado:** el técnico responsable activo consulta el hilo completo del expediente.
+  * **Antecedentes acreditados:** un técnico que figura en el historial inmutable del expediente (`IN_PROGRESS`/`RESOLVED` firmado con su `user_id`) consulta un expediente **`REOPENED` y sin reasignar** en **modo de solo lectura**, con `can_comment = false` y `read_only_reason = "REOPENED_AWAITING_REASSIGNMENT"`; la interfaz muestra el aviso de reasignación pendiente en lugar de un formulario condenado a un `403`.
+  * **Técnico ajeno:** cualquier otro técnico recibe `403 NOT_ASSIGNED_TO_TECHNICIAN` tanto en lectura como en escritura.
+* **Visibilidad total (Art. III):** se devuelven los mensajes públicos y las notas internas, con el campo `is_internal` y los nombres nominales reales (compañeros, coordinación y la sede como `Responsable de Sede · <ubicación>`). `total_comments` cuenta todos los mensajes y `is_own_message` marca los propios.
+* **Respuesta Exitosa (`200 OK`):** estructura de hilo del apartado 4.5.1, con la cabecera en modo lectura cuando procede:
+```json
+{
+  "success": true,
+  "data": {
+    "incident": {
+      "id": 142,
+      "ticket_code": "INC-2026-0142",
+      "machine_code": "VEND-0102",
+      "machine_model": "Bianchi Gaia Espresso",
+      "location_name": "Hospital del Mar - Edificio Central",
+      "status": "REOPENED",
+      "status_label": "Reabierta",
+      "is_sealed": false,
+      "can_comment": false,
+      "read_only_reason": "REOPENED_AWAITING_REASSIGNMENT"
+    },
+    "pagination": {
+      "total_comments": 4,
+      "loaded_count": 4,
+      "has_more_before": false,
+      "oldest_id": 205713,
+      "latest_id": 205719
+    },
+    "comments": [
+      {
+        "id": 205713,
+        "author_type": "TECHNICIAN",
+        "author_name": "Jordi Técnico Ruta BCN",
+        "comment_text": "Nota interna del técnico de ruta.",
+        "photo_url": null,
+        "created_at": "2026-10-08 08:21:10",
+        "is_own_message": true,
+        "is_internal": true
+      }
+    ]
+  }
+}
+```
+* **Errores de Validación / Negocio:** `400` (`INVALID_LIMIT` / `INVALID_BEFORE_ID`), `401` (`UNAUTHORIZED`), `403` (`FORBIDDEN` / `NOT_ASSIGNED_TO_TECHNICIAN`) y `404` (`INCIDENT_NOT_FOUND`).
+
+#### 5.5.2 Publicación de un mensaje (`POST`)
+
+* **Formato:** `multipart/form-data` (con fotografía in situ) o `application/json` (sin archivo).
+* **Campos:**
+  * `comment_text` *(string, obligatorio)*: entre **5 y 1.000 caracteres** tras recortar espacios. Alias admitidos: `text`, `comment`.
+  * `is_internal` *(boolean, opcional)*: **por defecto `true`** por seguridad — sin el campo, el mensaje se guarda como nota interna de taller (fail-safe). Se admiten `true`/`false` y `1`/`0`; cualquier otro valor devuelve `422 INVALID_IS_INTERNAL`.
+  * `photo` *(file, opcional)*: JPG, PNG o WebP de ≤ 5 MB validada por *magic bytes*. Alias: `image`, `file`.
+* **Regla de escritura:** publica **solo el técnico que tiene el expediente asignado**. Un técnico con antecedentes pero sin reasignación —aunque pueda leer— recibe `403 NOT_ASSIGNED_TO_TECHNICIAN`, igual que un técnico ajeno.
+* **Respuesta Exitosa (`201 Created`):** envelope con `data` (hilo completo actualizado) y un `message` según la clasificación: `"Nota interna registrada en el hilo de conversación"` o `"Comentario publicado en el hilo de conversación"`.
+* **Errores de Validación / Negocio:**
+  * `400 Bad Request` (`MISSING_COMMENT_TEXT`): falta `comment_text` o llega vacío tras recortar.
+  * `401 Unauthorized` (`UNAUTHORIZED`) / `403 Forbidden` (`FORBIDDEN`).
+  * `403 Forbidden` (`NOT_ASSIGNED_TO_TECHNICIAN`): expediente no asignado al técnico autenticado.
+  * `403 Forbidden` (`CONVERSATION_SEALED`): expediente `CLOSED`/`CANCELLED` o `RESOLVED` fuera de la ventana de garantía de 48 h. La lectura sigue disponible (`200`, con `is_sealed = true` y `can_comment = false`).
+  * `404 Not Found` (`INCIDENT_NOT_FOUND`).
+  * `422 Unprocessable` (`INVALID_COMMENT_LENGTH`): texto con menos de 5 o más de 1.000 caracteres.
+  * `422 Unprocessable` (`INVALID_IS_INTERNAL`): indicador no reconocible como booleano.
+  * `422 Unprocessable` (`FILE_TOO_LARGE` / `INVALID_FILE_TYPE`): adjunto de más de 5 MB o *magic bytes* no seguros.
+  * **Eco para el reintento (RF-07.1):** los errores recuperables devuelven `details.form_data` con `ticket_code` y `comment_text` (y `is_internal` cuando el rechazo es por sellado o por archivo), de modo que la ruta móvil pueda reintentar sin volver a redactar.
+* **Auditoría (Art. III.3):** cada publicación emite un evento inmutable `INCIDENT_COMMENT_ADDED` en `audit_log` con el técnico autenticado como causante (`user_id`, `user_role = TECHNICIAN`, `user_name`) y `new_state = { comment_id, ticket_code, is_internal, has_photo }`; el texto del mensaje no se copia al registro de auditoría.
 
 ---
 
