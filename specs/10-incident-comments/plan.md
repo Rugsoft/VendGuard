@@ -228,8 +228,8 @@ Para soportar subida atómica de fotografías opcionales sin flujos asíncronos 
   * `201 Created`: Comentario publicado con éxito.
   * `400 Bad Request`: Falta texto o datos requeridos.
   * `403 Forbidden`: Incidencia no pertenece a la sede o expediente sellado en modo solo lectura (`CLOSED`/`CANCELLED` o fuera de ventana de 48h).
-  * `413 Payload Too Large`: Fotografía supera 5 MB.
-  * `422 Unprocessable Content`: Texto $< 5$ o $> 1.000$ caracteres, o archivo adjunto no es una imagen gráfica válida (*magic bytes* inválidos).
+  * `422 Unprocessable Content`: Fotografía supera 5 MB (`FILE_TOO_LARGE`).
+  * `422 Unprocessable Content`: Texto $< 5$ o $> 1.000$ caracteres (`INVALID_COMMENT_LENGTH`), o archivo adjunto no es una imagen gráfica válida (`INVALID_FILE_TYPE`, *magic bytes* inválidos).
 
 #### B. Técnico de Ruta (`POST /api/technician/incidents/{id}/comments`)
 * **Seguridad:** `InternalAuthMiddleware(UserRole::TECHNICIAN)`.
