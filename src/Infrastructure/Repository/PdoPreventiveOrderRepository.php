@@ -320,14 +320,29 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
 
         $sql .= " ORDER BY po.`due_date` ASC, po.`id` DESC";
 
+        // Paginación con placeholders vinculados como enteros (hallazgo H-5). La conexión
+        // usa prepares nativos (`ATTR_EMULATE_PREPARES = false`), de modo que LIMIT/OFFSET
+        // no pueden viajar como texto: hay que declararlos `PDO::PARAM_INT`.
+        $limit = null;
+        $offset = 0;
         if (isset($filters['limit'])) {
             $limit = (int)$filters['limit'];
             $offset = isset($filters['offset']) ? (int)$filters['offset'] : 0;
-            $sql .= " LIMIT {$limit} OFFSET {$offset}";
+            $sql .= " LIMIT :limit OFFSET :offset";
         }
 
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
+        // Todos los parámetros se vinculan explícitamente: `execute($params)` con un array
+        // vacío descarta los valores ya vinculados, así que mezclar ambos caminos rompía
+        // la paginación sin filtros (SQLSTATE HY093).
+        foreach ($params as $name => $value) {
+            $stmt->bindValue($name, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        if ($limit !== null) {
+            $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+            $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        }
+        $stmt->execute();
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $orders = [];
