@@ -1,7 +1,7 @@
 # Handoff · Rama `incident-comments`
 
-**Fecha:** 2026-10-08 · **Cierre de contenido:** `a5005fa` (la segunda tanda de triaje va encima, **sin publicar**: los commits locales posteriores a la última publicación no están en `origin`) · **Estado:** árbol con cambios de esta pasada pendientes de commit + material ajeno no versionado
-**Batería:** `php tests/run_all.php` → **batería global: 216 suites · 8.194 aserciones** · 0 fallos · base restaurada a semillas
+**Fecha:** 2026-10-08 · **Cierre de contenido:** `a5005fa` + segunda tanda de triaje + cierre de S-4 (`f968d98`, `29f19ee`, `2ae2b63`) · **Publicado:** `origin/incident-comments` hasta `2ae2b63`; el arreglo del arranque desplegado de esta pasada está en el árbol, pendiente de commit · **Material ajeno no versionado:** `specs/11-*` y `pending_info_sla_pause_spec.md`
+**Batería:** `php tests/run_all.php` → **batería global: 216 suites · 8.199 aserciones** · 0 fallos · base restaurada a semillas
 *(la propia batería audita esta cifra: un desfase documental la pone en rojo vía `tests/Support/DocMetricsGuard.php`)*
 
 ---
@@ -56,7 +56,8 @@ El triaje completo, con criterios de aceptación y justificación por hallazgo, 
 
 ## 5. Verificación de esta pasada
 
-* **Batería global:** `216 suites · 8.194 aserciones · 0 fallos · exit 0` (antes 214/8.135: +2 suites y +59 aserciones con el cierre de S-4).
+* **Batería global:** `216 suites · 8.199 aserciones · 0 fallos · exit 0` (antes 214/8.135: +2 suites y +59 aserciones con el cierre de S-4, +4 más con la guarda del arranque desplegado).
+* **Arranque desplegado, verificado en un proceso limpio:** el contenedor abortaba en el paso 1/6 con «Class `VendGuard\Infrastructure\Config\SecretProvider` not found» mientras la batería seguía verde — `bin/init_cloud_db.php` no usa el autoloader y su lista de `require` no había crecido con las dependencias de S-5 (`ConnectionFactory` → `SecretProvider`) ni de S-4 (`SeedRunner` → `SiteAccessCodeGenerator`). Ambas se declaran ya en el propio script, y `CloudDeploySchemaParityTest` **Caso 1c** (aserciones 5–8) lanza una sonda en proceso limpio con los requires exactos del arranque, certifica que toda su cadena resuelve y que la guardia **muerde** cuando falta un require. Arranque real contra una base de sonda: exit 0, 6/6 pasos, 4/4 columnas de la clave de centro y **0 claves sembradas** en el despliegue. El mismo defecto estaba latente en `bin/seed.php` y `bin/seed_demo_metrics.php` (morían con «Class `SiteAccessCodeGenerator` not found» al sembrar con claves de desarrollo): ambas listas quedan completas y **Caso 1c-bis** recorre `bin/*.php` certificando en proceso limpio que cada herramienta resuelve la cadena que declara. `php bin/seed.php` y `php bin/seed_demo_metrics.php` se han ejecutado de nuevo con exit 0.
 * **Cierre de S-4 verificado en comportamiento:** `SiteAccessCodeTest.php` cubre acceso con las dos credenciales, error genérico idéntico, fallo en cerrado (sede sin clave o inactiva), retirada de `X-Site-Code` (401 sin nombrar la vía antigua), freno de cinco intentos con bloqueo temporal de 15 minutos, emisión en el alta y reemisión que invalida la clave anterior al instante con rastro en `audit_log` sin la clave en claro. `SiteAccessCodeGeneratorTest.php` fija formato `XXXXX-XXXXX` y alfabeto sin caracteres ambiguos.
 * **Suites migradas a token de sede:** `AuthControllerTest`, `AuthMiddlewareTest`, `LocationPortalControllerTest`, `LocationRefundDeliveryApiTest`, `LocationRefundDeliveryTest`, `LocationPortalReopenAuditTest`, `SiteManagerPartsDataSegregationTest`, `SiteManagerRefundDataSegregationTest`, `SiteSanitaryApiTest`, `SiteSanitaryControllerTest`, `FrontendApiStoreTest` (.php y .mjs), `LocationPortalViewTest.mjs`, `IncidentCommentRoutesVerificationTest` y el guion E2E: la cabecera retirada pasa a certificarse como rechazada (401) en todas ellas.
 * **Guarda de cifras:** se puso en rojo sola al detectar el desfase `8.116 → 8.132 → 8.135` y volvió a verde tras sincronizar README, handoff, manual E2E y las dos actas.
@@ -76,17 +77,19 @@ El triaje completo, con criterios de aceptación y justificación por hallazgo, 
 7. **Backlog declarado:** H-4 (`PdoIncidentRepository` por *concern*), reconciliación completa de la matriz de trazabilidad (§7 de [plan.md](../specs/technical/plan.md)) y refactor de tokens de los cinco componentes más densos (§6 del triaje).
 8. **Documentos no versionados:** `docs/auditoria_arquitectura.md` (`.gitignore:20`) y `docs/features_pendientes.md` (`.gitignore:21`); el triaje ya versionado cubre la decisión y la evidencia, pero el detalle original de S-3/S-4 solo existe en local.
 9. **Material ajeno en el árbol:** `specs/11-pending-info-sla-pause/` y `specs/functional/pending_info_sla_pause_spec.md` están sin versionar y **no forman parte de esta serie de commits** (otra línea de trabajo en curso).
+10. **La cadena de los scripts de `bin/` es una lista manual:** cualquier dependencia nueva de `ConnectionFactory`, `SqlScriptSplitter`, `SeedRunner` o `DemoMetricsSeeder` tiene que añadirse a los `require` del script que la use. La batería ya lo detecta antes de que lo descubra un despliegue: `CloudDeploySchemaParityTest` Caso 1c (arranque del contenedor, con la cadena derivada de los propios `use`) y Caso 1c-bis (resto de herramientas de `bin/`).
 
 ## 7. Cómo verificar
 
 ```bash
 # Batería completa (requiere MariaDB local; reutiliza o arranca el servidor en 127.0.0.1:8000)
-php tests/run_all.php          # esperado: 216/216 suites, 8.194 aserciones, 0 fallos, exit 0
+php tests/run_all.php          # esperado: 216/216 suites, 8.199 aserciones, 0 fallos, exit 0
 
 # Guardas de las dos tandas de triaje
 php tests/unit/AuditFindingsClosureTest.php             # 29/29 (S-1, S-2, H-1, H-3)
 php tests/unit/AuditFindingsSecondWaveClosureTest.php   # 16/16 (S-5, H-5, V-6, T-1, §5.2, §6)
 node tests/unit/DesignTokenDebtRatchetTest.mjs          # 3/3 (deuda de tokens congelada)
+php tests/integration/CloudDeploySchemaParityTest.php   # 27/27 (esquema y cadena de arranque del despliegue)
 
 # Suites tocadas por la segunda tanda
 php tests/integration/ConnectionFactoryTest.php         # política de credenciales intacta

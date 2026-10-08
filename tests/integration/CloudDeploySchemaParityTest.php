@@ -195,6 +195,224 @@ $assert(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Caso 1c: la cadena de arranque se resuelve sin autoloader
+// ─────────────────────────────────────────────────────────────────────────────
+echo "\n--- Caso 1c: el arranque resuelve su cadena de clases sin autoloader ---\n";
+
+// 2026-10-08: el contenedor abortó en el paso 1/6 con «Class
+// VendGuard\Infrastructure\Config\SecretProvider not found» mientras la batería
+// local seguía verde. `bin/init_cloud_db.php` no usa el autoloader: declara a
+// mano las clases que necesita, y `ConnectionFactory` (fallo en cerrado de S-5)
+// y `SeedRunner` (claves de centro de S-4) ganaron dependencias que nadie añadió
+// a esa lista. El mismo tipo de fallo que este suite ya cubría para el esquema,
+// ahora para el arranque: la cadena se resuelve en un proceso limpio con los
+// requires exactos del script, sin que intervenga el autoloader del bootstrap.
+$bootRequirePaths = [];
+if (preg_match_all("/require(?:_once)?\s+__DIR__\s*\.\s*'([^']+)'/", $bootScript, $bootRequireMatches)) {
+    foreach ($bootRequireMatches[1] as $relativePath) {
+        $resolvedPath = realpath($baseDir . '/bin/' . $relativePath);
+        if ($resolvedPath !== false) {
+            $bootRequirePaths[] = $resolvedPath;
+        }
+    }
+}
+
+// Clases VendGuard que la cadena usa, leídas de sus propios `use`: si una
+// dependencia nueva entra en ConnectionFactory o SeedRunner, entra aquí sola.
+$bootReferencedClasses = [];
+$bootScanQueue = $bootRequirePaths;
+$bootScannedFiles = [];
+while ($bootScanQueue !== []) {
+    $scannedFile = array_pop($bootScanQueue);
+    if (isset($bootScannedFiles[$scannedFile]) || !is_file($scannedFile)) {
+        continue;
+    }
+    $bootScannedFiles[$scannedFile] = true;
+
+    preg_match_all('/^use\s+(VendGuard\\\\[A-Za-z0-9_\\\\]+);/m', (string)file_get_contents($scannedFile), $useMatches);
+    foreach ($useMatches[1] as $usedClass) {
+        $classFile = $baseDir . '/src/' . str_replace('\\', '/', substr($usedClass, strlen('VendGuard\\'))) . '.php';
+        if (is_file($classFile)) {
+            $bootReferencedClasses[$usedClass] = (string)realpath($classFile);
+            $bootScanQueue[] = (string)realpath($classFile);
+        }
+    }
+}
+
+/**
+ * Lanza un proceso PHP limpio con los requires indicados y comprueba que cada
+ * clase de la lista resuelve y que las funciones puras devuelven lo pactado.
+ *
+ * @param array<int, string> $requirePaths Ficheros a requerir, en orden.
+ * @param array<string, string> $classes Clases VendGuard que deben resolverse.
+ * @return array{exit: int, output: string, error: string}
+ */
+$runBootProbe = static function (array $requirePaths, array $classes): array {
+    $probeLines = ['<?php', 'declare(strict_types=1);'];
+    foreach ($requirePaths as $requirePath) {
+        $probeLines[] = 'require_once ' . var_export($requirePath, true) . ';';
+    }
+    $probeLines[] = '$classes = ' . var_export(array_keys($classes), true) . ';';
+    $probeLines[] = 'foreach ($classes as $fqcn) {';
+    $probeLines[] = '    if (!class_exists($fqcn) && !interface_exists($fqcn) && !enum_exists($fqcn)) {';
+    $probeLines[] = '        fwrite(STDERR, "BOOT_CHAIN_MISSING:" . $fqcn);';
+    $probeLines[] = '        exit(3);';
+    $probeLines[] = '    }';
+    $probeLines[] = '}';
+    // Las comprobaciones de clave solo tienen sentido para quien carga esas clases:
+    // el arranque desplegado y las herramientas de semillas las referencian; un
+    // script que solo migra no tiene por qué poder llamarlas.
+    if (isset($classes['VendGuard\\Core\\Domain\\Service\\SiteAccessCodeGenerator'])) {
+        $probeLines[] = '$code = \VendGuard\Core\Domain\Service\SiteAccessCodeGenerator::normalize("K7M4p-2qx9r");';
+        $probeLines[] = 'if ($code !== "K7M4P2QX9R") { fwrite(STDERR, "NORMALIZE_MISMATCH:" . $code); exit(4); }';
+    }
+    if (isset($classes['VendGuard\\Infrastructure\\Database\\SeedRunner'])) {
+        $probeLines[] = 'if (\VendGuard\Infrastructure\Database\SeedRunner::devAccessCode("sede-bcn-01") !== "DEV-SEDE-BCN-01") { fwrite(STDERR, "DEV_KEY_MISMATCH"); exit(5); }';
+    }
+    $probeLines[] = 'echo "BOOT_CHAIN_OK";';
+
+    $probeFile = tempnam(sys_get_temp_dir(), 'vgboot');
+    if ($probeFile === false) {
+        return ['exit' => -1, 'output' => '', 'error' => 'no se pudo crear el fichero sonda'];
+    }
+    file_put_contents($probeFile, implode("\n", $probeLines));
+
+    $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+    $process = proc_open(PHP_BINARY . ' ' . escapeshellarg($probeFile), $descriptors, $pipes);
+    if (!is_resource($process)) {
+        @unlink($probeFile);
+
+        return ['exit' => -1, 'output' => '', 'error' => 'no se pudo lanzar el proceso sonda'];
+    }
+
+    $output = (string)stream_get_contents($pipes[1]);
+    $error = (string)stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $exitCode = proc_close($process);
+    @unlink($probeFile);
+
+    return ['exit' => $exitCode, 'output' => $output, 'error' => $error];
+};
+
+$assert(
+    count($bootRequirePaths) >= 4
+    && isset($bootReferencedClasses['VendGuard\\Infrastructure\\Config\\SecretProvider'])
+    && isset($bootReferencedClasses['VendGuard\\Core\\Domain\\Service\\SiteAccessCodeGenerator']),
+    'La sonda lee los requires del arranque y las clases de su cadena (S-5 y S-4 incluidas)',
+    'requires: ' . count($bootRequirePaths) . ' -- clases: ' . implode(', ', array_keys($bootReferencedClasses))
+);
+
+$missingBootRequires = [];
+foreach ($bootReferencedClasses as $usedClass => $classFile) {
+    if (!in_array($classFile, $bootRequirePaths, true)) {
+        $missingBootRequires[] = $usedClass;
+    }
+}
+$assert(
+    $missingBootRequires === [],
+    'Cada clase que la cadena de arranque usa esta declarada en su lista de requires',
+    'sin require: ' . implode(', ', $missingBootRequires)
+);
+
+$bootProbe = $runBootProbe($bootRequirePaths, $bootReferencedClasses);
+$assert(
+    $bootProbe['exit'] === 0 && str_contains($bootProbe['output'], 'BOOT_CHAIN_OK'),
+    'Un proceso limpio con los requires del arranque resuelve toda la cadena y sus claves',
+    trim($bootProbe['error'] . ' ' . $bootProbe['output'])
+);
+
+// Prueba de mordida: sin el require de la clase que rompió el despliegue, la
+// misma sonda tiene que fallar. Si no fallara, la guardia no serviría de nada.
+$bittenRequires = array_values(array_filter(
+    $bootRequirePaths,
+    static fn (string $path): bool => !in_array($path, array_values($bootReferencedClasses), true)
+));
+$bittenProbe = $runBootProbe($bittenRequires, $bootReferencedClasses);
+$assert(
+    $bittenProbe['exit'] !== 0 && !str_contains($bittenProbe['output'], 'BOOT_CHAIN_OK'),
+    'Sin los requires de la cadena, la sonda falla: la guardia muerde',
+    trim($bittenProbe['error'] . ' ' . $bittenProbe['output'])
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Caso 1c-bis: el mismo contrato para el resto de la caja de herramientas
+// ─────────────────────────────────────────────────────────────────────────────
+echo "\n--- Caso 1c-bis: los demas scripts de bin/ resuelven su cadena ---\n";
+
+// `bin/seed.php` y `bin/seed_demo_metrics.php` son la vía documentada para sembrar
+// a mano y `bin/migrate.php` la de migrar: los tres declaran a mano las clases que
+// usan, y los tres heredaron las mismas dependencias que rompieron el contenedor
+// (`SecretProvider` por S-5, `SiteAccessCodeGenerator` por S-4). El script del
+// despliegue ya tiene su propia certificación arriba; esta recorre el resto para
+// que ninguna herramienta del repositorio vuelva a morir con «Class not found»
+// mientras la batería sigue verde.
+$chainSpecOf = static function (string $entryScript) use ($baseDir): array {
+    $entrySource = (string)file_get_contents($entryScript);
+
+    $requiredFiles = [];
+    if (preg_match_all("/require(?:_once)?\s+__DIR__\s*\.\s*'([^']+)'/", $entrySource, $requireMatches)) {
+        foreach ($requireMatches[1] as $relativePath) {
+            $resolvedPath = realpath(dirname($entryScript) . '/' . $relativePath);
+            if ($resolvedPath !== false) {
+                $requiredFiles[] = $resolvedPath;
+            }
+        }
+    }
+
+    // Clases VendGuard que referencia la cadena: los `use` de cada fichero
+    // requerido más las menciones cualificadas del propio script.
+    $referencedClasses = [];
+    $scanQueue = $requiredFiles;
+    $scannedFiles = [];
+    while ($scanQueue !== []) {
+        $scannedFile = array_pop($scanQueue);
+        if (isset($scannedFiles[$scannedFile]) || !is_file($scannedFile)) {
+            continue;
+        }
+        $scannedFiles[$scannedFile] = true;
+
+        preg_match_all('/^use\s+(VendGuard\\\\[A-Za-z0-9_\\\\]+);/m', (string)file_get_contents($scannedFile), $useMatches);
+        foreach ($useMatches[1] as $usedClass) {
+            $classFile = $baseDir . '/src/' . str_replace('\\', '/', substr($usedClass, strlen('VendGuard\\'))) . '.php';
+            if (is_file($classFile)) {
+                $referencedClasses[$usedClass] = (string)realpath($classFile);
+                $scanQueue[] = (string)realpath($classFile);
+            }
+        }
+    }
+
+    preg_match_all('/\\\\VendGuard\\\\[A-Za-z0-9_\\\\]+/', $entrySource, $qualifiedMatches);
+    foreach ($qualifiedMatches[0] as $qualifiedClass) {
+        $usedClass = ltrim($qualifiedClass, '\\');
+        $classFile = $baseDir . '/src/' . str_replace('\\', '/', substr($usedClass, strlen('VendGuard\\'))) . '.php';
+        if (is_file($classFile)) {
+            $referencedClasses[$usedClass] = (string)realpath($classFile);
+        }
+    }
+
+    return ['requires' => $requiredFiles, 'classes' => $referencedClasses];
+};
+
+$toolchainFailures = [];
+foreach (glob($baseDir . '/bin/*.php') ?: [] as $entryScript) {
+    if ((string)realpath($entryScript) === (string)realpath($baseDir . '/bin/init_cloud_db.php')) {
+        continue; // el arranque desplegado ya está certificado en el Caso 1c
+    }
+
+    $chainSpec = $chainSpecOf($entryScript);
+    $chainProbe = $runBootProbe($chainSpec['requires'], $chainSpec['classes']);
+    if ($chainProbe['exit'] !== 0 || !str_contains($chainProbe['output'], 'BOOT_CHAIN_OK')) {
+        $toolchainFailures[] = basename($entryScript) . ' -> ' . trim($chainProbe['error'] . ' ' . $chainProbe['output']);
+    }
+}
+$assert(
+    $toolchainFailures === [],
+    'Los scripts de bin/ resuelven en proceso limpio la cadena VendGuard que declaran',
+    implode(' | ', $toolchainFailures)
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Caso 1b: el troceador sobrevive a los escapes que usan las migraciones
 // ─────────────────────────────────────────────────────────────────────────────
 echo "\n--- Caso 1b: el troceador respeta comillas escapadas ---\n";

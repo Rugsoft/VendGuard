@@ -29,6 +29,14 @@ declare(strict_types=1);
  * que hacer converger una base de datos ya existente.
  */
 
+// Este arranque no carga el autoloader: es lo primero que corre en el contenedor, así
+// que cada clase que su cadena toca tiene que declararse aquí de forma explícita.
+// `ConnectionFactory` resuelve el fallo en cerrado de producción con `SecretProvider`
+// (hallazgo S-5) y `SeedRunner` hashea las claves de centro con `SiteAccessCodeGenerator`
+// (hallazgo S-4): omitir una sola cambia un despliegue sano por un
+// «Class ... not found» en el paso 1/6, antes incluso de tocar el esquema.
+require_once __DIR__ . '/../src/Infrastructure/Config/SecretProvider.php';
+require_once __DIR__ . '/../src/Core/Domain/Service/SiteAccessCodeGenerator.php';
 require_once __DIR__ . '/../src/Infrastructure/Database/ConnectionFactory.php';
 require_once __DIR__ . '/../src/Infrastructure/Database/SqlScriptSplitter.php';
 
