@@ -7,7 +7,7 @@ namespace VendGuard\Presentation\Controller;
 use InvalidArgumentException;
 use Throwable;
 use VendGuard\Core\Domain\Exception\MachineNotFoundException;
-use VendGuard\Core\Service\QrLabelService;
+use VendGuard\Application\Service\QrLabelService;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
 

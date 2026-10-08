@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace VendGuard\Core\Service;
+namespace VendGuard\Application\Service;
 
 use VendGuard\Core\Domain\Exception\MachineNotFoundException;
 use VendGuard\Core\Domain\Model\Incident;

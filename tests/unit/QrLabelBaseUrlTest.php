@@ -19,7 +19,7 @@ require_once __DIR__ . '/../../src/autoload.php';
 
 use VendGuard\Core\Domain\Model\QrLabelConfig;
 use VendGuard\Core\Domain\Service\NativeSvgQrRenderer;
-use VendGuard\Core\Service\QrLabelService;
+use VendGuard\Application\Service\QrLabelService;
 use VendGuard\Presentation\Controller\QrLabelController;
 use VendGuard\Presentation\Http\Request;
 
@@ -135,7 +135,7 @@ try {
 
     $baseDir = __DIR__ . '/../../src';
     $productionFiles = [
-        $baseDir . '/Core/Service/QrLabelService.php',
+        $baseDir . '/Application/Service/QrLabelService.php',
         $baseDir . '/Core/Domain/Service/NativeSvgQrRenderer.php',
         $baseDir . '/Core/Domain/Model/QrCodeData.php',
         $baseDir . '/Presentation/Controller/QrLabelController.php',

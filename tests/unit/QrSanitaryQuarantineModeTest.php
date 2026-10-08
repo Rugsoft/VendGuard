@@ -36,7 +36,7 @@ use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
-use VendGuard\Core\Service\QrScanService;
+use VendGuard\Application\Service\QrScanService;
 use VendGuard\Presentation\Controller\QrScanController;
 use VendGuard\Presentation\Http\Request;
 

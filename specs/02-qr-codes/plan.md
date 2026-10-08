@@ -23,15 +23,15 @@ gestor-incidencias-vending/
 │   │       │   ├── QrCodeData.php            # DTO inmutable con metadatos del código QR
 │   │       │   └── QrLabelConfig.php         # DTO con opciones de etiqueta (teléfono, layout)
 │   │       └── Service/
-│   │           └── QrMatrixGenerator.php     # Algoritmo matemático nativo de matriz QR (Vanilla)
+│   │           ├── QrMatrixGenerator.php     # Algoritmo matemático nativo de matriz QR (Vanilla)
+│   │           └── NativeSvgQrRenderer.php   # Renderizador de matriz a SVG vectorial puro
 │   ├── Application/
 │   │   └── Service/
 │   │       ├── QrScanService.php             # Caso de uso: resolución de escaneo y privacidad
 │   │       ├── QrReportService.php           # Caso de uso: reporte efímero y merge concurrente
 │   │       └── QrLabelService.php            # Caso de uso: composición vectorial SVG de etiqueta
 │   ├── Infrastructure/
-│   │   └── Qr/
-│   │       └── NativeSvgQrRenderer.php       # Renderizador de matriz a SVG vectorial puro
+│   │   └── Repository/                       # Repositorios PDO compartidos (incidencias, máquinas, sedes)
 │   └── Presentation/
 │       ├── Controller/
 │       │   ├── QrScanController.php          # GET /api/qr/scan/{code}, POST /api/qr/report

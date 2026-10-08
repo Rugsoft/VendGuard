@@ -269,7 +269,7 @@ $assert(
 
 // 8.2 Blindaje de Privacidad y Zero Trust en Scan Público (Art. V.4)
 $scanCtrlContent = (string)file_get_contents($baseDir . '/src/Presentation/Controller/QrScanController.php');
-$scanServiceContent = (string)file_get_contents($baseDir . '/src/Core/Service/QrScanService.php');
+$scanServiceContent = (string)file_get_contents($baseDir . '/src/Application/Service/QrScanService.php');
 $assert(
     "8.2 QrScanController y QrScanService NO exponen assigned_technician ni notas internas en escaneo público",
     !str_contains($scanCtrlContent, "'assigned_technician'") &&

@@ -50,7 +50,7 @@ use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
-use VendGuard\Core\Service\QrReportService;
+use VendGuard\Application\Service\QrReportService;
 use VendGuard\Presentation\Controller\QrScanController;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;

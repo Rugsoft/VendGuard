@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace VendGuard\Core\Service;
+namespace VendGuard\Application\Service;
 
 use InvalidArgumentException;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
@@ -17,6 +17,7 @@ use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
+use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
