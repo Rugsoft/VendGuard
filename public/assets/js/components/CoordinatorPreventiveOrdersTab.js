@@ -243,6 +243,8 @@ export const CoordinatorPreventiveOrdersTab = {
         return;
       }
 
+      const isReassignment = this.hasAssignedTechnician(this.selectedOrderToAssign);
+
       this.isActionLoading = true;
       this.assignError = '';
 
@@ -253,12 +255,14 @@ export const CoordinatorPreventiveOrdersTab = {
           this.assignForm.scheduled_date
         );
 
-        this.successMessage = `Orden ${this.selectedOrderToAssign.order_code} asignada correctamente.`;
+        this.successMessage = `Orden ${this.selectedOrderToAssign.order_code} ${isReassignment ? 'reasignada' : 'asignada'} correctamente.`;
         this.closeAssignModal();
         await this.loadOrders();
         this.$emit('order-assigned');
       } catch (err) {
-        this.assignError = err.message || 'No fue posible asignar la orden preventiva.';
+        this.assignError = err.message || (isReassignment
+          ? 'No fue posible reasignar la orden preventiva.'
+          : 'No fue posible asignar la orden preventiva.');
       } finally {
         this.isActionLoading = false;
       }
@@ -382,6 +386,15 @@ export const CoordinatorPreventiveOrdersTab = {
 
     getOrderTypeLabel(type) {
       return getOrderTypeLabel(type);
+    },
+
+    /**
+     * True cuando la orden ya tiene técnico responsable vivo. La fila no debe
+     * ofrecer una "Asignación" inicial que en realidad sería una reasignación:
+     * RF-PREV-02 cubre asignación y reasignación, y el rótulo lo refleja.
+     */
+    hasAssignedTechnician(order) {
+      return Boolean(order && (order.technician?.name || order.assigned_technician_id));
     },
 
     /**
@@ -666,17 +679,18 @@ export const CoordinatorPreventiveOrdersTab = {
                     🔍 Ver detalle
                   </button>
 
-                  <!-- Botón Asignar -->
+                  <!-- Botón Asignar / Reasignar (RF-PREV-02): una orden con técnico vivo
+                       no ofrece una asignación inicial, sino la reasignación -->
                   <button
                     v-if="['PENDING_ASSIGNMENT', 'SCHEDULED', 'EXPIRED'].includes(order.status)"
                     type="button"
                     class="vg-btn"
                     style="background: #f1f5f9; color: #1e293b; border: 1px solid #cbd5e1; padding: 4px 8px; font-size: 12px; border-radius: 4px; cursor: pointer; margin-right: 6px;"
                     @click="openAssignModal(order)"
-                    title="Asignar o reprogramar técnico"
+                    :title="hasAssignedTechnician(order) ? 'Reasignar técnica o reprogramar la fecha de la orden' : 'Asignar o reprogramar técnico'"
                     data-testid="btn-assign-order"
                   >
-                    👤 Asignar
+                    {{ hasAssignedTechnician(order) ? '🔁 Reasignar' : '👤 Asignar' }}
                   </button>
 
                   <!-- Botón Cancelar Lógico (Art. III) -->
@@ -719,13 +733,14 @@ export const CoordinatorPreventiveOrdersTab = {
         <div style="background: #ffffff; width: 100%; max-width: 480px; border-radius: 8px; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); display: flex; flex-direction: column; gap: 16px;">
           <div style="display: flex; justify-content: space-between; align-items: center;">
             <h3 style="margin: 0; font-size: 18px; color: #1e293b;">
-              👤 Asignar Orden Preventiva
+              {{ hasAssignedTechnician(selectedOrderToAssign) ? '🔁 Reasignar Orden Preventiva' : '👤 Asignar Orden Preventiva' }}
             </h3>
             <button type="button" @click="closeAssignModal" style="background: none; border: none; font-size: 18px; cursor: pointer; color: #64748b;">✕</button>
           </div>
 
           <p style="margin: 0; font-size: 13px; color: #64748b;">
-            Asignación de la orden <strong>{{ selectedOrderToAssign?.order_code }}</strong> para la máquina
+            {{ hasAssignedTechnician(selectedOrderToAssign) ? 'Reasignación' : 'Asignación' }} de la orden
+            <strong>{{ selectedOrderToAssign?.order_code }}</strong> para la máquina
             <strong>{{ selectedOrderToAssign?.machine?.code || ('ID #' + selectedOrderToAssign?.machine_id) }}</strong>.
           </p>
 
@@ -779,8 +794,8 @@ export const CoordinatorPreventiveOrdersTab = {
               @click="submitAssignOrder"
               data-testid="btn-confirm-assign"
             >
-              <span v-if="isActionLoading">Asignando...</span>
-              <span v-else>Confirmar Asignación</span>
+              <span v-if="isActionLoading">{{ hasAssignedTechnician(selectedOrderToAssign) ? 'Reasignando...' : 'Asignando...' }}</span>
+              <span v-else>{{ hasAssignedTechnician(selectedOrderToAssign) ? 'Confirmar Reasignación' : 'Confirmar Asignación' }}</span>
             </button>
           </div>
         </div>

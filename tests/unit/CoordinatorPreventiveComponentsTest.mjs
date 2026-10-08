@@ -378,6 +378,35 @@ assert('2.26 Creación manual invoca api.coordinator.createPreventiveOrder', api
 assert('2.27 Modal de creación se cierra', ordersTab.showCreateModal === false);
 assert('2.28 Emite order-created', ordersTab._emitted['order-created'] === true);
 
+// 2.9 Rótulo contextual Asignar / Reasignar (RF-PREV-02)
+assert('2.29 hasAssignedTechnician distingue la orden con técnico vivo de la pendiente',
+  ordersTab.hasAssignedTechnician(mockOrders[0]) === true
+  && ordersTab.hasAssignedTechnician(mockOrders[1]) === false
+  && ordersTab.hasAssignedTechnician(null) === false
+  && ordersTab.hasAssignedTechnician({ assigned_technician_id: null, technician: { name: null } }) === false);
+
+assert('2.30 La fila rotula «Reasignar» con técnico vivo y «Asignar» sin él',
+  CoordinatorPreventiveOrdersTab.template.includes("hasAssignedTechnician(order) ? '🔁 Reasignar' : '👤 Asignar'")
+  && CoordinatorPreventiveOrdersTab.template.includes(':title="hasAssignedTechnician(order) ?'));
+
+assert('2.31 El modal adapta su título, su entradilla y su confirmación',
+  CoordinatorPreventiveOrdersTab.template.includes("'🔁 Reasignar Orden Preventiva' : '👤 Asignar Orden Preventiva'")
+  && CoordinatorPreventiveOrdersTab.template.includes("'Reasignación' : 'Asignación'")
+  && CoordinatorPreventiveOrdersTab.template.includes("'Confirmar Reasignación' : 'Confirmar Asignación'"));
+
+// Reasignación real de la orden programada con técnico (RF-PREV-02)
+ordersTab.openAssignModal(mockOrders[0]);
+assert('2.32 openAssignModal sobre una orden con técnico entra en modo reasignación',
+  ordersTab.hasAssignedTechnician(ordersTab.selectedOrderToAssign) === true);
+ordersTab.assignForm.technician_id = 4;
+ordersTab.assignForm.scheduled_date = '2026-10-09';
+ordersTab.successMessage = '';
+await ordersTab.submitAssignOrder();
+assert('2.33 Reasignación invoca la API con la orden programada',
+  assignParams.orderId === 1 && assignParams.techId === 4 && assignParams.date === '2026-10-09');
+assert('2.34 El mensaje de éxito distingue reasignación de asignación inicial',
+  ordersTab.successMessage.includes('reasignada correctamente'));
+
 // =========================================================================
 // BLOQUE 3: Integración en CoordinatorDashboardView
 // =========================================================================
