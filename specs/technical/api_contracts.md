@@ -206,29 +206,116 @@ Registra un nuevo aviso de avería con cálculo automático de urgencia y contro
 
 ---
 
-### 3.3 `POST /api/incidents/{ticket_code}/comments` (Añadir Comentario/Evidencia)
-Permite al informador aportar más datos a un ticket activo preexistente sin duplicarlo (EARS 2.2).
+### 3.3 `GET|POST /api/incidents/{ticket_code}/comments` (Hilo de Conversación de la Sede)
 
-* **Request Body:**
-```json
-{
-  "author_name": "Marta Conserjería",
-  "comment_text": "La máquina ha empezado a pitar con un código de error E04 en la pantalla."
-}
-```
-* **Respuesta Exitosa (`201 Created`):**
+* **Rutas:**
+  * `GET` / `POST /api/incidents/{ticket_code}/comments` — alias retrocompatible del informador (EARS 2.2).
+  * `GET` / `POST /api/location/incidents/{id}/comments` — rutas canónicas del módulo 10; el `{id}` admite tanto el identificador primario como el código de ticket.
+* **Autenticación:** middleware `SiteAuthMiddleware` (token de sesión de sede o cabecera `X-Site-Code`).
+* **Contrato del módulo propietario:** [Módulo 10 · Hilo de comentarios](../10-incident-comments/plan.md) (§2.1.A consulta, §2.2.A publicación).
+
+#### 3.3.1 Consulta del hilo (`GET`)
+
+* **Parámetros de consulta:**
+  * `limit` *(int, opcional, por defecto `50`)*: tamaño del bloque. Valores por encima de **100** se saturan en ese tope; `0` o un valor no numérico devuelven `400 INVALID_LIMIT`.
+  * `before_id` *(int, opcional)*: paginación retrospectiva por cursor. Devuelve el bloque inmediatamente anterior al identificador indicado; un valor no positivo o no numérico devuelve `400 INVALID_BEFORE_ID`.
+* **Segregación obligatoria (Art. V.4):** el servidor filtra `is_internal = 0` **antes de serializar**. El canal de sede no devuelve notas internas, ni el campo `is_internal`, ni los datos de contacto del personal técnico.
+  * `author_type = TECHNICIAN` → el nombre real se sustituye en servidor por `Servicio Técnico Oficial (Operador #NN)` (`sprintf('%02d', userId)`).
+  * `author_type = COORDINATOR` → `Coordinación Central de Operaciones`.
+  * `author_type = REPORTER` → `Responsable de Sede · <nombre de la ubicación>`.
+* **Respuesta Exitosa (`200 OK`):**
 ```json
 {
   "success": true,
   "data": {
-    "id": 5,
-    "incident_id": 14,
-    "author_name": "Marta Conserjería",
-    "comment_text": "La máquina ha empezado a pitar...",
-    "created_at": "2026-09-22T15:10:00Z"
+    "incident": {
+      "id": 142,
+      "ticket_code": "INC-2026-0142",
+      "machine_code": "VEND-0101",
+      "machine_model": "Sanden Vendo G-Drink",
+      "location_name": "Hospital del Mar - Edificio Central",
+      "status": "IN_PROGRESS",
+      "status_label": "En curso",
+      "is_sealed": false,
+      "can_comment": true,
+      "read_only_reason": null
+    },
+    "pagination": {
+      "total_comments": 2,
+      "loaded_count": 2,
+      "has_more_before": false,
+      "oldest_id": 205401,
+      "latest_id": 205403
+    },
+    "comments": [
+      {
+        "id": 205401,
+        "author_type": "REPORTER",
+        "author_name": "Responsable de Sede · Hospital del Mar - Edificio Central",
+        "comment_text": "Adjunto fotografía del panel con el código de error E04 en la pantalla.",
+        "photo_url": "/uploads/f0aa1d017d1da890b2e0e2f8025c08ec.jpg",
+        "created_at": "2026-10-08 08:12:54",
+        "is_own_message": true
+      },
+      {
+        "id": 205403,
+        "author_type": "TECHNICIAN",
+        "author_name": "Servicio Técnico Oficial (Operador #02)",
+        "comment_text": "Repongo el servicio tras sustituir el fusible del muelle.",
+        "photo_url": null,
+        "created_at": "2026-10-08 08:12:54",
+        "is_own_message": false
+      }
+    ]
   }
 }
 ```
+  * **`incident`**: cabecera contextual del expediente. `can_comment = false` indica modo de solo lectura; `read_only_reason` transporta el motivo legible cuando el servidor lo determina y puede llegar `null` aunque el expediente esté sellado (`is_sealed = true`).
+  * **`pagination`**: `total_comments` contabiliza **solo los mensajes públicos** en este canal; `loaded_count` es el tamaño del bloque devuelto; `has_more_before` indica si quedan bloques anteriores; `oldest_id` y `latest_id` son los cursores (`null` con el hilo vacío).
+  * **`comments`**: mensajes en orden cronológico ascendente. El canal de sede omite deliberadamente el campo `is_internal` y cierra cada mensaje con `is_own_message` (autoría del informador autenticado). El expediente sellado sigue siendo **legible** (`200 OK`).
+
+#### 3.3.2 Publicación de un mensaje (`POST`)
+
+* **Formato:** `multipart/form-data` (con fotografía) o `application/json` (sin archivo).
+* **Campos:**
+  * `comment_text` *(string, obligatorio)*: entre **5 y 1.000 caracteres** UTF-8 descriptivos tras recortar espacios. Se aceptan los alias `text`, `description` y `comment`.
+  * `photo` *(file, opcional)*: imagen JPG, PNG o WebP de **≤ 5 MB** validada por *magic bytes* reales. Alias: `image`, `file`.
+  * `author_name` *(string, opcional)*: **se acepta por compatibilidad y se ignora**; la autoría se deriva en servidor de la sede autenticada.
+  * `is_internal`: **ignorado por diseño**; el canal de sede publica siempre `is_internal = 0` (Art. V.4), también en `multipart/form-data`.
+* **Respuesta Exitosa (`201 Created`):** envelope con `data`, `message` y **el hilo completo actualizado** (mismo DTO que el `GET`, con el mensaje recién publicado como último elemento de `comments` y `total_comments` recalculado):
+```json
+{
+  "success": true,
+  "data": {
+    "incident": { "…": "misma cabecera contextual que en el apartado 3.3.1" },
+    "pagination": { "total_comments": 3, "loaded_count": 3, "has_more_before": false, "oldest_id": 205401, "latest_id": 205404 },
+    "comments": [ { "…": "hilo público íntegro en orden cronológico; el mensaje recién publicado es el último elemento" } ]
+  },
+  "message": "Comentario publicado en el hilo de conversación"
+}
+```
+* **Errores de Validación / Negocio:**
+  * `400 Bad Request` (`MISSING_COMMENT_TEXT`): falta el texto o llega vacío tras recortar.
+  * `400 Bad Request` (`INVALID_LIMIT` / `INVALID_BEFORE_ID`): parámetros de consulta mal formados (`GET`).
+  * `401 Unauthorized` (`UNAUTHORIZED`): no se ha podido verificar la sede autenticada.
+  * `403 Forbidden` (`SITE_MISMATCH`): el expediente pertenece a otra sede.
+  * `403 Forbidden` (`CONVERSATION_SEALED`): expediente `CLOSED`/`CANCELLED`, o `RESOLVED` fuera de la ventana de garantía de 48 h. La lectura sigue disponible.
+  * `404 Not Found` (`INCIDENT_NOT_FOUND`): no existe ningún expediente con ese código o identificador.
+  * `422 Unprocessable` (`INVALID_COMMENT_LENGTH`): texto con menos de 5 o más de 1.000 caracteres.
+  * `422 Unprocessable` (`FILE_TOO_LARGE`): archivo adjunto de más de 5 MB.
+  * `422 Unprocessable` (`INVALID_FILE_TYPE`): *magic bytes* que no corresponden a una imagen segura. En ambos errores de archivo se devuelve `details.form_data` con `ticket_code` y `comment_text` para permitir el reintento sin volver a redactar.
+* **Auditoría (Art. III.3):** cada publicación emite un evento inmutable `INCIDENT_COMMENT_ADDED` en `audit_log` (`entity_type = TICKET`, `entity_id` del expediente, autor y visibilidad `PUBLIC`).
+
+> **Contrato del hilo (decisión registrada el 08/10/2026).** Los endpoints de comentarios de la sede hablan el **DTO de hilo del módulo 10**
+> (`data.incident` + `data.pagination` + `data.comments[]`), tal y como implementan `IncidentCommentThreadDto` e
+> `IncidentCommentItemDto`. Este contrato **sustituye** al payload plano (`data.id`, `data.incident_id`, `data.author_name`,
+> `data.comment_text`, `data.created_at`) que documentaba la versión inicial de esta especificación y que el servicio dejó de
+> emitir al integrarse el hilo bidireccional (T-COM-01 … T-COM-05). **No se mantiene ningún alias de compatibilidad** porque el
+> único consumidor de frontend ignora el cuerpo de la respuesta, la segregación de notas internas exige que el payload sea
+> precisamente el hilo ya filtrado, y ningún cliente dependía del objeto plano. Los códigos `COMMENT_TOO_SHORT` e
+> `INCIDENT_NOT_ACTIVE` tampoco se emiten ya: su semántica la cubren `INVALID_COMMENT_LENGTH` (422) y `CONVERSATION_SEALED` (403).
+> Un cliente que hoy lea `data.id` debe migrar a `data.comments[].id`. La decisión va acompañada de la verificación de caja negra
+> del canal de sede documentada en [verificacion_modulo_10_reejecucion_humo_funcionalidad_flujo.md](../../docs/verificacion_modulo_10_reejecucion_humo_funcionalidad_flujo.md).
 
 ---
 
