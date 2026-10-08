@@ -3,13 +3,15 @@
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)
 **Fecha del triaje:** 8 de octubre de 2026
 **Documento auditado:** `docs/auditoria_arquitectura.md` (informe del 30 de septiembre de 2026, no versionado)
-**Alcance:** hallazgos **S-1..S-4** (seguridad) y **H-1..H-4** (arquitectura)
+**Alcance:** hallazgos **S-1..S-4** (seguridad) y **H-1..H-4** (arquitectura), más la segunda tanda **S-5, H-5, V-6, T-1, §5.2 y §6** (§6 de este documento)
 **Marco:** [`AGENTS.md`](../../AGENTS.md) §2 (SDD) y §5 (líneas rojas) · [`constitution.md`](../../constitution.md)
 
 > Este documento es la Fase 1 (especificación) del ciclo SDD para el cierre de los hallazgos.
-> No cambia comportamiento funcional alguno: los cuatro cierres de §2 son refactorizaciones
-> y endurecimientos sin alterar contratos de negocio. S-3 y S-4 quedan **explícitamente fuera
-> de Fase 1** (requieren especificación funcional y/o decisión de Product Owner, ver §3).
+> Los cuatro cierres de §2 y los de la segunda tanda (§6) son refactorizaciones, alineaciones
+> documentales y endurecimientos sin alterar contratos de negocio, con una excepción decidida
+> por el Product Owner: **V-6** baja la sesión de sede a 24 h (EARS 1.3). S-3 y S-4 quedan
+> **explícitamente fuera de Fase 1** (requieren especificación funcional y/o decisión de
+> Product Owner, ver §3).
 
 ---
 
@@ -139,4 +141,92 @@ grep -rn "class_alias" src/Core/Domain/Service/                  # → 0 resulta
 
 # Cierre completo
 php tests/run_all.php
+```
+
+---
+
+## 6. Segunda tanda (S-5, H-5, V-6, T-1, §5.2 y §6)
+
+| # | Hallazgo | Severidad | Disposición | Motivo |
+| :--- | :--- | :--- | :--- | :--- |
+| **S-5** | `ConnectionFactory` cae a `root` / contraseña vacía | 🟡 Media | **CERRADO en Fase 1** | Sin cambio de contrato: en desarrollo nada cambia; cuando el entorno se declara de producción, la conexión **falla en cerrado** si no hay credenciales explícitas o si el usuario es `root` sin contraseña. |
+| **H-5** | `LIMIT`/`OFFSET` interpolados en `PdoPreventiveOrderRepository` | 🟢 Baja | **CERRADO en Fase 1** | Placeholders nombrados con `PDO::PARAM_INT`, que es la convención del proyecto. La conexión usa prepares nativos (`ATTR_EMULATE_PREPARES => false`), así que el binding se verifica con una consulta real paginada. |
+| **V-6** | TTL de sede de 7 días frente a EARS 1.3 (24 h) | 🟡 Media | **CERRADO en Fase 1 · decisión de PO (2026-10-08)** | El Product Owner eligió alinear el código con la especificación: **TTL absoluto de 24 h**. La ventana deslizante de actividad que sugiere el texto queda como mejora futura declarada (exigiría reemitir el token). |
+| **T-1** | `GET /api/locations/{code}/incidents` especificado sin implementar | 🔴 Alta (según informe) | **CERRADO en Fase 1 (documental)** | La regla de negocio (RNF-04) está cubierta **de forma más restrictiva** por `sanitizeIncidentForSite()` y su suite; el plan técnico describía artefactos inexistentes. Se alinea el plan con el mecanismo real en lugar de crear un endpoint que nadie consume. |
+| **§5.2** | Informe de cierre constitucional desfasado | 🟡 Media | **CERRADO en Fase 1 (documental)** | Se reescribe como **histórico fechado** con la cifra de su momento y un puntero a la fuente viva (`ConstitutionalAuditTest` + batería), en lugar de presentar como cierre vigente un estado de hace seis módulos. |
+| **§6** | 2.466 literales hex en JS (era 2.063 el 30/09) | 🟢 Baja | **CIERRE PARCIAL + backlog** | El refactor de 8 h no cabe en Fase 1 y necesita regresión visual, pero la deuda **está creciendo** (+403 en ocho días): se congela con un trinquete que falla si el contador sube, y el refactor por componentes queda en backlog. |
+
+### 6.1 Criterios de aceptación
+
+**S-5 · credenciales de base de datos**
+
+| # | Criterio | Verificación |
+| :--- | :--- | :--- |
+| S-5.1 | En producción, sin `DATABASE_URL`/`MYSQL_URL` ni `DB_USER`/`DB_PASSWORD`, la conexión lanza excepción antes de intentar conectar. | Suite de segunda tanda. |
+| S-5.2 | En producción, `root` con contraseña vacía se rechaza aunque venga en configuración explícita. | Suite de segunda tanda. |
+| S-5.3 | En desarrollo la configuración por defecto sigue funcionando igual (XAMPP local). | `ConnectionFactoryTest` + suite. |
+| S-5.4 | El contenedor de producción no se rompe por este cambio: la declaración de entorno sigue siendo decisión del despliegue y queda documentada. | README y nota de despliegue. |
+
+**H-5 · paginación de preventivos**
+
+| # | Criterio | Verificación |
+| :--- | :--- | :--- |
+| H-5.1 | La consulta usa `LIMIT :limit OFFSET :offset` con `bindValue(... PDO::PARAM_INT)`. | Guarda estructural. |
+| H-5.2 | `findForCoordinatorList(['limit' => …, 'offset' => …])` se ejecuta sin error contra MariaDB con prepares nativos. | Suite de segunda tanda + `CoordinatorPreventiveApiTest` (per_page real). |
+
+**T-1 · alineación del plan**
+
+| # | Criterio | Verificación |
+| :--- | :--- | :--- |
+| T-1.1 | La matriz de trazabilidad cita el mecanismo real (`sanitizeIncidentForSite`, `SiteManagerPartsDataSegregationTest`) y no los artefactos inexistentes. | Guarda estructural sobre `specs/technical/plan.md`. |
+| T-1.2 | El endpoint no existe en el router y queda declarado como decisión (si alguna vez se necesita un listado por sede, será especificación nueva). | Guarda estructural del router. |
+
+**§5.2 · informe de cierre**
+
+| # | Criterio | Verificación |
+| :--- | :--- | :--- |
+| §5.2.1 | El documento se declara histórico y fechado, conserva su cifra original y apunta a la fuente viva. | Guarda estructural. |
+| §5.2.2 | No se presenta como cierre vigente: el estado actual se consulta en la suite constitucional y en la batería. | Revisión documental. |
+
+**§6 · trinquete de colores**
+
+| # | Criterio | Verificación |
+| :--- | :--- | :--- |
+| §6.1 | El contador de literales hex en `public/assets/js` (sin `vendor/`) no supera el techo congelado. | `DesignTokenDebtRatchetTest.mjs`. |
+| §6.2 | El techo es explícito y rebajarlo es el camino esperado; subirlo exige tocar la suite de forma visible en revisión. | La propia suite imprime el contador actual. |
+| §6.3 | El refactor por componentes sigue en backlog, empezando por los cinco más densos (`CoordinatorIncidentDetailModal`, `CoordinatorSparePartsAnalyticsTab`, `CoordinatorSparePartsTab`, `CoordinatorPreventiveOrdersTab`, `CoordinatorPreventiveOrderDetailModal`). | Acta de triaje (§6). |
+
+**V-6 · sesión de sede de 24 h (decisión de PO del 2026-10-08)**
+
+Decisión: **Alinear el código con EARS 1.3** mediante un TTL absoluto de 24 h (86400 s).
+
+| # | Criterio | Verificación |
+| :--- | :--- | :--- |
+| V-6.1 | El token de sede por defecto expira a las 24 h. | Suite de segunda tanda (grupo 6). |
+| V-6.2 | El parámetro de TTL explícito sigue respetándose para tests y flujos internos. | Suite de segunda tanda (grupo 6). |
+| V-6.3 | El valor de 7 días no reaparece en la implementación. | Guarda estructural (sin `604800`). |
+| V-6.4 | La ventana deslizante de actividad queda declarada como mejora futura, no como comportamiento implementado. | Este acta y el docblock de `AuthService::generateSiteToken()`. |
+
+Riesgo residual aceptado: la sede se reidentifica a diario con su código (un solo factor, por
+diseño de RF-01). Si la experiencia resulta gravosa, la mejora es la opción 3 —ventana
+deslizante— con su propia especificación de contrato.
+
+### 6.2 Reproducción de la segunda tanda
+
+```bash
+# S-5: la política de producción (nada de root sin contraseña)
+php tests/unit/AuditFindingsSecondWaveClosureTest.php
+
+# H-5: sin interpolación en la paginación de preventivos
+grep -n "LIMIT {" src/Infrastructure/Repository/PdoPreventiveOrderRepository.php   # → 0 resultados
+php tests/integration/CoordinatorPreventiveApiTest.php
+
+# T-1 y §5.2: plan alineado e informe declarado histórico
+grep -n "IncidentTimeline\|DataSegregationTest" specs/technical/plan.md               # → 0 resultados
+
+# §6: el trinquete de colores
+node tests/unit/DesignTokenDebtRatchetTest.mjs
+
+# V-6: la sesión de sede dura 24 h
+grep -n "ttlSeconds = 86400" src/Application/Service/AuthService.php
 ```
