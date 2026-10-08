@@ -101,3 +101,5 @@ La verificación automatizada ha sido implementada y evaluada mediante la suite 
 
 ## 4. Conclusión y Cierre Formal del MVP
 Habiéndose cumplido satisfactoriamente las 41 tareas del proyecto (`specs/technical/tasks.md`), superado con éxito las 43 suites de pruebas automatizadas (906 aserciones en verde con 0 fallos) y certificado el 100% de los controles constitucionales, **el MVP de VendGuard queda formalmente auditado, verificado y listo para producción**.
+
+> **Nota (08/10/2026):** las cifras de este cierre (43 suites / 906 aserciones) son las de la fecha de certificación y se conservan como evidencia histórica. La cifra vigente de la batería se declara con la frase canónica «batería global: …» en el [README](../README.md) y en los informes vivos, y es auditada automáticamente por [`tests/Support/DocMetricsGuard.php`](../tests/Support/DocMetricsGuard.php) en cada ejecución.

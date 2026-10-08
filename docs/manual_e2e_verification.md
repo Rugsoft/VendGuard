@@ -91,4 +91,6 @@ sequenceDiagram
 ## 4. Conclusión de la Tarea T-40
 El recorrido funcional de extremo a extremo ha sido ejecutado satisfactoriamente por el ejecutor automatizado [`tests/Manual/E2EVerificationRunner.php`](file:///C:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/tests/Manual/E2EVerificationRunner.php), cumpliendo al 100% la condición "Hecho cuando:" de la tarea **T-40**.
 
-> **Nota (08/10/2026):** el guion se ejecuta además en la **Fase 4** de `php tests/run_all.php`, con el servidor HTTP todavía en marcha, de modo que una regresión de flujo rompe ya la batería global (211/211 suites en verde).
+> **Nota (08/10/2026):** el guion se ejecuta además en la **Fase 4** de `php tests/run_all.php`, con el servidor HTTP todavía en marcha, de modo que una regresión de flujo rompe ya la batería global. Cifra vigente de la batería completa:
+>
+> batería global: 211 suites · 8.060 aserciones

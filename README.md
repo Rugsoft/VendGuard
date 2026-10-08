@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/MariaDB-10.11%2B%20%7C%20MySQL%208.0-003545?style=flat-square&logo=mariadb&logoColor=white)](https://mariadb.org/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-181%20Suites%20%7C%207.029%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-211%20Suites%20%7C%208.060%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -256,29 +256,37 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 
 ## 🧪 Batería Completa de Pruebas Automatizadas (T-39 & Módulos 02, 03, 04, M1, M2 y M4)
 
-La integridad de VendGuard está certificada mediante un ejecutor de pruebas automatizado nativo en 3 fases continuas:
+La integridad de VendGuard está certificada mediante un ejecutor de pruebas automatizado nativo, ejecutado en fases continuas (unitarias PHP, unitarias reactivas JS, integración HTTP real, guion E2E de los tres perfiles y guarda de coherencia entre las cifras documentadas y las ejecutadas):
 
 ```powershell
 # Ejecutar la suite completa (Unitarias PHP, Unitarias JS e Integración PHP):
 php tests/run_all.php
 ```
 
-### Resumen de Ejecución Global (Octubre 2026):
+### Resumen de Ejecución Global (Octubre 2026)
+
+La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
+
+batería global: 211 suites · 8.060 aserciones
+
 ```text
 ======================================================================
- RESUMEN DE EJECUCIÓN GLOBAL (181 Suites / 7.029 Aserciones)
+ RESUMEN DE EJECUCIÓN GLOBAL (T-39)
 ======================================================================
- Suites de pruebas PHP Unit : 82 / 82 pasadas (100%)
- Suites de pruebas JS Unit  : 43 / 43 pasadas (100%)
- Suites de Integración PHP  : 56 / 56 pasadas (100%)
+ Tiempo de ejecución total : 64.64 segundos   (variable en cada corrida)
+ Suites de pruebas PHP Unit : 94 / 94 pasadas
+ Suites de pruebas JS Unit  : 53 / 53 pasadas
+ Suites de Integración PHP  : 63 / 63 pasadas
+ Suites E2E Manuales (T-40): 1 / 1 pasadas
  ──────────────────────────────────────────────────────────────────
- Total Suites Ejecutadas    : 181
- Total Aserciones Evaluadas : 7.029
- Fallos Detectados          : 0 (100% en verde)
+ Total Suites Ejecutadas    : 211
+ Total Aserciones Evaluadas : 8060
+ Fallos Detectados          : 0
+ Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
 ======================================================================
  RESULTADO: 100% EN VERDE. (0 errors, 0 failures)
- CONDICIÓN DE CALIDAD Y CERTIFICACIÓN CONSTITUCIONAL CUMPLIDA.
+ CONDICIÓN T-39 CUMPLIDA SATISFACTORIAMENTE.
 ======================================================================
 ```
 
@@ -358,7 +366,7 @@ gestor-incidencias-vending/
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 181 suites (100% verde)
+    ├── run_all.php               # Ejecutor global de la batería de 211 suites (100% verde)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)
     ├── unit/                     # Pruebas unitarias de lógica pura, geometría y contratos
