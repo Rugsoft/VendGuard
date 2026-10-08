@@ -278,6 +278,7 @@ assert('6.7 Plantilla: marcadores accesibles con roles ARIA y etiquetas descript
 assert('6.8 Plantilla: resumen territorial con sedes, tareas y críticas', tmpl.includes('territorial-summary') && tmpl.includes('multiTechnicianSiteCount'));
 assert('6.9 Plantilla: mensaje amistoso para un territorio sin actividad', tmpl.includes('No hay averías ni preventivos activos en el territorio.'));
 assert('6.10 Plantilla: atribución obligatoria de OpenStreetMap en el mapa territorial', tmpl.includes('OpenStreetMap') && tmpl.includes('territorial-map-attribution'));
+assert('6.11 Plantilla: la acción de asignación se oculta si la sede no tiene trabajo sin asignar', tmpl.includes('v-if="isUnassignedSite(site)"'));
 
 // =========================================================================
 // BLOQUE 7: Zoom, gestos y reencuadre del territorio (RF-MAP-09, RNF-MAP-02)
