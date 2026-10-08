@@ -183,13 +183,18 @@ $assert("1.11 Código de error de duplicado es MACHINE_HAS_ACTIVE_INCIDENT",
 );
 
 // 1.5 Anexar comentarios/evidencias adicionales al ticket abierto (RF-02 / EARS 2.3)
+$commentText = 'Se aprecia que el ventilador exterior no gira y desprende ligero olor a recalentado.';
 $resComment = makeHttpRequest('POST', "{$baseUrl}/api/incidents/{$ticketCode}/comments", [
-    'comment_text'   => 'Se aprecia que el ventilador exterior no gira y desprende ligero olor a recalentado.',
+    'comment_text'   => $commentText,
     'author_name'    => 'Laura Sanitaria',
     'author_role'    => 'LOCATION_MANAGER'
 ], $siteToken);
 $assert("1.12 Anexar comentario a ticket existente responde HTTP 201 Created", $resComment['status'] === 201);
-$assert("1.13 Comentario anexado correctamente al ticket", ($resComment['body']['data']['ticket_code'] ?? '') === $ticketCode);
+$commentThread = $resComment['body']['data'] ?? [];
+$assert("1.13 Comentario anexado correctamente al hilo del ticket",
+    ($commentThread['incident']['ticket_code'] ?? '') === $ticketCode
+    && in_array($commentText, array_column($commentThread['comments'] ?? [], 'comment_text'), true)
+);
 
 // ─────────────────────────────────────────────────────────────────────────
 // FASE 2: PERFIL 2 — COORDINADOR DEL SERVICIO (TRIAGE Y ASIGNACIÓN)

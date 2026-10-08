@@ -9,6 +9,7 @@ declare(strict_types=1);
  * 1. Pruebas Unitarias Backend y Contratos Frontend (PHP CLI).
  * 2. Pruebas Unitarias Dinámicas Reactivas Frontend (Node.js ESM).
  * 3. Pruebas de Integración con MariaDB y API REST HTTP real (PHP CLI / cURL).
+ * 4. Guion E2E de extremo a extremo de los 3 perfiles (tests/Manual, T-40).
  * 
  * Requisitos:
  * - RNF-03 (Inviolabilidad de datos, cero borrado físico).
@@ -42,6 +43,7 @@ $stats = [
     'unit_php' => ['total' => 0, 'passed' => 0, 'failed' => 0],
     'unit_mjs' => ['total' => 0, 'passed' => 0, 'failed' => 0],
     'integration_php' => ['total' => 0, 'passed' => 0, 'failed' => 0],
+    'manual_e2e' => ['total' => 0, 'passed' => 0, 'failed' => 0],
 ];
 
 $failedFiles = [];
@@ -84,6 +86,10 @@ function extractAssertionsCount(string $output): int
 {
     // Busca patrones tipo: Total Aserciones: X | Total Assertions: X
     if (preg_match('/(?:Total Aserciones|Total Assertions):\s*(\d+)/i', $output, $m)) {
+        return (int)$m[1];
+    }
+    // Guion E2E (T-40): " Total Aserciones E2E Evaluadas : X"
+    if (preg_match('/Total Aserciones E2E Evaluadas\s*:\s*(\d+)/i', $output, $m)) {
         return (int)$m[1];
     }
     // O conteo de [PASS]
@@ -270,6 +276,40 @@ foreach ($integrationFiles as $filePath) {
     }
 }
 
+// =====================================================================
+// FASE 4: Guion E2E de extremo a extremo de los 3 perfiles (tests/Manual, T-40)
+// =====================================================================
+// Se ejecuta con el servidor HTTP todavía en marcha. Contrato de la carpeta:
+// cada guion de tests/Manual/*.php debe ser no interactivo, autosuficiente y
+// responsable de su propio estado (purga y re-siembra), de modo que corre en
+// último lugar para no interferir con las suites de integración. La guardia de
+// la Fase 0 ya audita esta carpeta contra borrados ingenuos de `incidents`.
+echo "\n{$colorBold}--- Fase 4: Guion E2E de los 3 Perfiles (tests/Manual) ---{$colorReset}\n";
+
+$manualFiles = glob(__DIR__ . '/Manual/*.php');
+sort($manualFiles);
+
+foreach ($manualFiles as $filePath) {
+    $fileName = basename($filePath);
+    $stats['manual_e2e']['total']++;
+
+    $cmd = 'php "' . $filePath . '"';
+    $output = '';
+    $success = runTestProcess($cmd, $fileName, $output);
+    $assertions = extractAssertionsCount($output);
+    $totalAssertions += $assertions;
+
+    if ($success) {
+        $stats['manual_e2e']['passed']++;
+        echo "  [PASS] {$fileName} ({$assertions} aserciones)\n";
+    } else {
+        $stats['manual_e2e']['failed']++;
+        $failedFiles[] = "Manual/{$fileName}";
+        echo "  {$colorRed}[FAIL] {$fileName}{$colorReset}\n";
+        echo "         " . str_replace("\n", "\n         ", trim($output)) . "\n";
+    }
+}
+
 // Cierre del servidor HTTP temporal si fue iniciado por el ejecutor
 if ($serverStartedByRunner && is_resource($serverProcess)) {
     if (isset($serverPipes[0]) && is_resource($serverPipes[0])) {
@@ -280,7 +320,7 @@ if ($serverStartedByRunner && is_resource($serverProcess)) {
 }
 
 // =====================================================================
-// FASE 4: Reinicio operacional y re-sembrado final
+// FASE 5: Reinicio operacional y re-sembrado final
 // =====================================================================
 // La purga previa garantiza que cada ejecución termine con la BD en un estado
 // limpio conocido: pase lo que pase dentro de la corrida (incluido un fatal que
@@ -307,9 +347,9 @@ $elapsedTime = round(microtime(true) - $startTime, 2);
 // =====================================================================
 // RESUMEN GLOBAL DE RESULTADOS
 // =====================================================================
-$totalSuites = $stats['unit_php']['total'] + $stats['unit_mjs']['total'] + $stats['integration_php']['total'];
-$totalPassed = $stats['unit_php']['passed'] + $stats['unit_mjs']['passed'] + $stats['integration_php']['passed'];
-$totalFailed = $stats['unit_php']['failed'] + $stats['unit_mjs']['failed'] + $stats['integration_php']['failed'];
+$totalSuites = $stats['unit_php']['total'] + $stats['unit_mjs']['total'] + $stats['integration_php']['total'] + $stats['manual_e2e']['total'];
+$totalPassed = $stats['unit_php']['passed'] + $stats['unit_mjs']['passed'] + $stats['integration_php']['passed'] + $stats['manual_e2e']['passed'];
+$totalFailed = $stats['unit_php']['failed'] + $stats['unit_mjs']['failed'] + $stats['integration_php']['failed'] + $stats['manual_e2e']['failed'];
 
 echo "\n{$colorBold}======================================================================{$colorReset}\n";
 echo "{$colorBold} RESUMEN DE EJECUCIÓN GLOBAL (T-39){$colorReset}\n";
@@ -318,6 +358,7 @@ echo " Tiempo de ejecución total : {$elapsedTime} segundos\n";
 echo " Suites de pruebas PHP Unit : {$stats['unit_php']['passed']} / {$stats['unit_php']['total']} pasadas\n";
 echo " Suites de pruebas JS Unit  : {$stats['unit_mjs']['passed']} / {$stats['unit_mjs']['total']} pasadas\n";
 echo " Suites de Integración PHP  : {$stats['integration_php']['passed']} / {$stats['integration_php']['total']} pasadas\n";
+echo " Suites E2E Manuales (T-40): {$stats['manual_e2e']['passed']} / {$stats['manual_e2e']['total']} pasadas\n";
 echo " ──────────────────────────────────────────────────────────────────\n";
 echo " Total Suites Ejecutadas    : {$totalSuites}\n";
 echo " Total Aserciones Evaluadas : {$totalAssertions}\n";
