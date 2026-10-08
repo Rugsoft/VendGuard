@@ -301,6 +301,8 @@ Obtiene la ruta optimizada del técnico autenticado para la jornada actual, cons
 #### 4.2.1 `GET /api/coordinator/map/active-incidents`
 Obtiene la totalidad de las sedes con intervenciones activas (correctivas y preventivas) para la representación cartográfica global de supervisión territorial y triaje.
 
+> **Nota de interfaz (RF-MAP-09):** `has_unassigned` significa «existe al menos una tarea sin responsable», no «la sede está íntegramente sin asignar». El cliente DEBE leerlo como la puerta del flujo de **asignación** y ofrecer además el flujo de **consolidación** cuando la sede está marcada como `is_multi_technician`, aunque no tenga trabajo sin asignar. En ambos modos el flujo opera sobre las **incidencias activas** de la sede: las órdenes preventivas conservan su asignación y se reasignan desde su propia pestaña (RF-PREV-02, EARS 2.6). **Sin cambios de contrato:** no se añaden campos, parámetros ni endpoints, ni se altera la respuesta.
+
 * **Método:** `GET`
 * **Ruta:** `/api/coordinator/map/active-incidents`
 * **Autenticación:** Obligatoria (`Authorization: Bearer <token_coordinador>`).

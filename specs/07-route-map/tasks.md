@@ -147,3 +147,24 @@
   * **Requisitos:** RF-MAP-07, RF-MAP-09, Contrato técnico §7.1
   * **Dependencias:** T-MAP-21
   * **Hecho cuando:** `handleSiteClick` (territorial) enfoca la sede antes de abrir el flujo de asignación y las sedes ya asignadas sólo reencuadran sin abrir nada; `selectStop` (técnico) enfoca tanto desde el marcador del mapa como desde la lista textual, complying con ambos criterios EARS de RF-MAP-07. Las suites `CoordinatorTerritorialMapTabTest.mjs` y `TechnicianRouteMapModalTest.mjs` pasan al 100% en verde.
+
+---
+
+## Fase 7: Refinamiento de Copy y Alcance de la Consolidación (Reapertura Justificada)
+
+> **Justificación de reapertura:** el flujo masivo se documentó como «asignación» pese a incluir por diseño incidencias ya asignadas; el EARS de multi-técnico de RF-MAP-09 (consolidar el edificio en un único operario) quedaba sin reflejo en la interfaz y, en lote mixto, sin poder completarse por falta del motivo de reasignación (RF-07.3). Además, la consolidación era inalcanzable en el caso que la motiva: una sede multi-técnico sin trabajo sin asignar no ofrecía el flujo. No es *feature creep*: es cumplimiento de requisitos ya aprobados.
+
+- [x] **T-MAP-23: Predicado de composición del lote y copy state-aware del MODAL 1B (`CoordinatorDashboardView.js`)**
+  * **Requisitos:** RF-MAP-09 (EARS de lote mixto), RNF-MAP-06
+  * **Dependencias:** T-MAP-15
+  * **Hecho cuando:** el diálogo rotula asignación o consolidación según el lote (título, entradilla con `M ya asignada(s)`, rótulo del lote, chip por fila con el responsable activo, botón `Reasignar N incidencia(s)` y alertas de consolidación correcta y parcial), el lote sin asignaciones conserva el copy de asignación, y `node tests/unit/CoordinatorDashboardViewTest.mjs` pasa al 100% en verde incluyendo las aserciones nuevas del lote mixto.
+
+- [x] **T-MAP-24: Motivo de reasignación obligatorio y paso del quinto argumento en el lote mixto (`CoordinatorDashboardView.js`, `api.js`)**
+  * **Requisitos:** RF-07.3, RF-MAP-09 (EARS de motivo en lote mixto)
+  * **Dependencias:** T-MAP-23
+  * **Hecho cuando:** `submitBulkAssignment` valida el lote completo antes de cualquier petición, envía `reassignment_reason` y bloquea la confirmación sin él cuando el lote es mixto; `CoordinatorDashboardViewTest.mjs` (grupo 14) y `AssignTechnicianEndpointTest.php` pasan al 100% en verde. *(Implementado como cumplimiento de RF-07.3 ya aprobado en `17acf02`; esta enmienda lo documenta.)*
+
+- [x] **T-MAP-25: Alcanzabilidad del flujo de consolidación en sedes multi-técnico sin trabajo sin asignar (`CoordinatorTerritorialMapTab.js`)**
+  * **Requisitos:** RF-MAP-09 (EARS de sede multi-técnico)
+  * **Dependencias:** T-MAP-23
+  * **Hecho cuando:** una sede marcada como multi-técnico ofrece el flujo de consolidación con rótulo propio («Consolidar visita») aunque no tenga ninguna tarea sin asignar, una sede mono-técnico con todo asignado lo mantiene oculto, y `CoordinatorTerritorialMapTabTest.mjs` + `CoordinatorRouteMapApiTest.php` lo verifican.

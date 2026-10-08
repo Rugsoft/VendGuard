@@ -226,7 +226,7 @@ Proporcionar una **Ficha Integral de Detalle Operativo** directamente accesible 
 
 Quedan formalmente excluidos de esta especificación:
 1. **Modificación directa de datos históricos originales:** Queda prohibido alterar el texto del reporte inicial del informador, transferir la incidencia a otra máquina a posteriori o modificar marcas temporales de auditoría.
-2. **Acciones masivas o por lotes:** El modal gestiona exclusivamente el expediente seleccionado; las acciones sobre múltiples tickets se efectúan desde la tabla de triaje general.
+2. **Acciones masivas o por lotes:** El modal gestiona exclusivamente el expediente seleccionado; las acciones sobre múltiples tickets se efectúan desde la tabla de triaje general y desde el flujo de consolidación por sede del mapa territorial (RF-MAP-09), nunca desde este modal.
 3. **Exportación individual a PDF o impresión directa:** Los informes formales agregados y certificados ya disponen de plantillas A4 dedicadas; este modal no genera documentos PDF individuales.
 4. **Activación del modal para otros roles:** Este modal integral está diseñado con exclusividad para el Coordinador de Operaciones. Los Responsables de Sede y los Técnicos conservan sus flujos desacoplados.
 

@@ -1,7 +1,7 @@
 # Propuesta de Enmienda de Especificación — Copy del Flujo de Consolidación Territorial
 
-**Estado:** 🔴 **Propuesta — pendiente de aprobación humana** (protocolo `AGENTS.md` §2, Fase 2: Puerta de Aprobación).
-Ninguna línea de código fuente ni de especificación aprobada ha sido modificada para redactar este documento (Línea Roja 5: prohibido modificar especificaciones aprobadas sin consenso).
+**Estado:** ✅ **Aprobada y aplicada el 2026-10-08** (protocolo `AGENTS.md` §2, Fase 2: Puerta de Aprobación superada).
+Las tres decisiones de §5 quedaron resueltas por el responsable del proyecto y el contenido de esta propuesta se aplicó ese mismo día a las especificaciones y al código; el documento conserva su redacción original para trazabilidad.
 **Fecha:** 2026-10-08 · **Módulo:** M4 (`specs/07-route-map/`) · **Rama:** `incident-comments`
 
 **Requisitos afectados:** RF-MAP-09, RF-07.1, RF-07.3, EARS 5.5 (MVP) · **RNF afectados:** RNF-MAP-06 (consistencia con el sistema de diseño)
@@ -115,11 +115,17 @@ Cumplimiento de diseño (RNF-MAP-06): el chip reutiliza radio 4px, tipografía 1
 
 ---
 
-## 5. Decisiones que requieren tu aprobación
+## 5. Decisiones resueltas (aprobadas el 2026-10-08)
 
 1. **Predicado y rotulación.** ¿Se adopta el título `Reasignar / Consolidar Sede en un Único Técnico` (o una variante: `Consolidar Sede en un Único Técnico`, `Reasignar Técnico de la Sede`) y el chip por fila? Alternativas: mantener un único título neutro (`Asignar / Reasignar Técnico a la Sede`) siempre, o adoptar los emojis del precedente preventivo.
 2. **Motivo de reasignación en lote mixto.** ¿Se exige en el propio diálogo masivo (recomendado: un único motivo para todo el lote, coherente con la reclasificación de urgencia ya existente) o se remite al coordinador a la ficha de detalle para las filas ya asignadas? La primera opción cierra el defecto 1.b; la segunda exige retirar esas filas del lote.
 3. **Alcance.** ¿Entra la decisión 3/T-MAP-25 (permitir consolidar una sede multi-técnico aunque no tenga trabajo sin asignar) en esta enmienda o se tramita aparte, como cambio de comportamiento con su propio gate?
+
+**Resolución aprobada:**
+
+1. **Rotulación:** se adopta la propuesta literal **sin emoji** (título `Reasignar / Consolidar Sede en un Único Técnico`, entradilla con `M ya asignada(s)`, rótulo del lote, chip por fila, botón `Reasignar N incidencia(s)` y alertas de consolidación).
+2. **Motivo en lote mixto:** se exige en el propio diálogo masivo, con un único motivo para todo el lote (implementado en `17acf02` como cumplimiento de RF-07.3).
+3. **Alcance:** `T-MAP-25` **entra** en esta enmienda: la consolidación queda alcanzable en sedes multi-técnico (Fase 7 de `specs/07-route-map/tasks.md`).
 
 ---
 
@@ -129,6 +135,6 @@ Cumplimiento de diseño (RNF-MAP-06): el chip reutiliza radio 4px, tipografía 1
 * Backend: ninguna regla de negocio nueva; el defecto 1.b se corrige en el cliente enviando el motivo que RF-07.3 ya exige.
 * Privacidad y constitución: el flujo sigue siendo exclusivo del Coordinador; no se añade rastreo ni dato personal alguno (Art. V.4).
 
-## 7. Reparto previsto (si se aprueba)
+## 7. Reparto aplicado
 
-`docs: amend the territorial consolidation copy` · `fix(map): send the reassignment reason in mixed bulk batches` · `test(map): cover the consolidation flow over mixed batches` · (si aplica la decisión 3) `feat(map): reachable consolidation for multi-technician sites`.
+`docs(map): amend the territorial consolidation copy` · `fix(map): state-aware copy for the consolidated site batch` · `feat(map): reachable consolidation for multi-technician sites` · `docs(prev): amend the preventive reassignment reason` · `feat(prev): mandatory reason to reassign a scheduled order`. Los hashes constan en el historial de la rama `incident-comments`.

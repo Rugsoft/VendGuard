@@ -85,7 +85,7 @@ Definir con precisión el comportamiento funcional del Producto Mínimo Viable (
 * **EARS 5.2 (Ubicuo):** El sistema deberá garantizar que una incidencia solo tenga un único técnico asignado activo de forma simultánea.
 * **EARS 5.3 (Opcional/Auditoría):** Donde el coordinador detecte discrepancias justificadas en la gravedad de la avería (incluyendo la degradación de una urgencia `CRÍTICA` si la máquina está vacía de producto perecedero), el sistema deberá permitirle modificar el nivel de urgencia **exigiendo obligatoriamente un motivo justificado que quedará registrado en el historial inmutable** de la incidencia.
 * **EARS 5.4 (Excepción):** Si el coordinador intenta asignar una incidencia sin seleccionar un técnico válido, entonces el sistema deberá rechazar la operación y mantener la incidencia en su estado actual.
-* **EARS 5.5 (Estado/Visibilidad):** El sistema solo deberá mostrar la acción rápida *"Asignar"* de la bandeja de triaje en incidencias en estado `REGISTRADA` o `REABIERTA`; en cualquier otro estado deberá permanecer oculta, quedando la reasignación como acción exclusiva de la ficha de detalle integral (RF-07.3).
+* **EARS 5.5 (Estado/Visibilidad):** El sistema solo deberá mostrar la acción rápida *"Asignar"* de la bandeja de triaje en incidencias en estado `REGISTRADA` o `REABIERTA`; en cualquier otro estado deberá permanecer oculta, quedando la reasignación como acción exclusiva de la ficha de detalle integral (RF-07.3) y del flujo de consolidación por sede del mapa territorial de Coordinación (RF-MAP-09), que exige motivo justificado y auditoría idénticos.
 * **EARS 5.6 (Excepción/Dato obsoleto):** Si al confirmar una asignación el estado real de la incidencia ya no la admite (p. ej., cerrada por otro operador mientras la bandeja estaba abierta), el sistema deberá rechazar la operación con el error `INVALID_STATUS_FOR_ASSIGNMENT`, mostrar el motivo al coordinador y refrescar la fila de la bandeja con el estado vigente del servidor.
 
 ### RF-06: Descarte o Cancelación Lógica de Avisos
@@ -167,14 +167,16 @@ Definir con precisión el comportamiento funcional del Producto Mínimo Viable (
 
 ## 8. Criterios de Finalización del MVP (Definition of Done)
 
-* [ ] El 100% de los requisitos funcionales (RF-01 al RF-11) están implementados y verificados.
-* [ ] Se ha verificado que ninguna máquina puede tener más de un ticket activo de forma concurrente (incluyendo `REABIERTA` y `RESUELTA`).
-* [ ] Se ha comprobado que las averías térmicas de alimentos se clasifican automáticamente como `CRÍTICA` y solo pueden reclasificarse con justificación auditada.
-* [ ] Se ha probado que el cierre de incidencia bloquea envíos con menos de 20 caracteres en diagnóstico o en acción.
-* [ ] Se ha validado que tras 48 horas continuadas la incidencia pasa a `CERRADA` sin posibilidad de reapertura.
-* [ ] Se ha probado que al reabrir una incidencia el técnico previo queda desasignado y la garantía de 48h se reinicia.
-* [ ] No existe ninguna instrucción de borrado físico destructivo en toda la lógica operativa.
-* [ ] Todas las pruebas de aceptación automatizadas derivadas de los criterios EARS pasan con éxito.
+* [x] El 100% de los requisitos funcionales (RF-01 al RF-11) están implementados y verificados.
+* [x] Se ha verificado que ninguna máquina puede tener más de un ticket activo de forma concurrente (incluyendo `REABIERTA` y `RESUELTA`).
+* [x] Se ha comprobado que las averías térmicas de alimentos se clasifican automáticamente como `CRÍTICA` y solo pueden reclasificarse con justificación auditada.
+* [x] Se ha probado que el cierre de incidencia bloquea envíos con menos de 20 caracteres en diagnóstico o en acción.
+* [x] Se ha validado que tras 48 horas continuadas la incidencia pasa a `CERRADA` sin posibilidad de reapertura.
+* [x] Se ha probado que al reabrir una incidencia el técnico previo queda desasignado y la garantía de 48h se reinicia.
+* [x] No existe ninguna instrucción de borrado físico destructivo en toda la lógica operativa.
+* [x] Todas las pruebas de aceptación automatizadas derivadas de los criterios EARS pasan con éxito.
+
+> **Acta de verificación (2026-10-08):** las ocho casillas quedan demostradas con evidencia ejecutable, medición reproducible o verificación manual registrada en [`docs/verificacion_criterios_finalizacion_mvp.md`](../../docs/verificacion_criterios_finalizacion_mvp.md).
 
 ---
 

@@ -262,7 +262,7 @@ El frontend no utiliza librerías npm ni empaquetadores en tiempo de compilació
   * Renderizar mapa territorial a pantalla ancha con todas las sedes del parque que alberguen averías o preventivos abiertos.
   * Leyenda de colores: rojo (crítico/perecederos), azul (ordinario/snacks/bebidas), verde (preventivo puro).
   * Marcadores con insignia numérica indicando el total de máquinas pendientes en ese edificio.
-  * Detección y destaque visual de sedes con múltiples técnicos asignados (`is_multi_technician = true`) para facilitar la reasignación unificada en un solo clic.
+  * Detección y destaque visual de sedes con múltiples técnicos asignados (`is_multi_technician = true`) para facilitar la reasignación unificada en un solo clic. Con lote mixto, el diálogo abierto desde la sede se rotula como reasignación/consolidación, exige motivo justificado (RF-07.3) y marca por fila las incidencias que ya tienen responsable activo; una sede multi-técnico ofrece además el flujo de consolidación aunque no tenga trabajo sin asignar.
   * Panel de filtros reactivos: por técnico asignado, averías críticas únicamente, o sedes sin asignar.
 
 ### 4.3 Componente: `AdminLocationsTab.js` (Ampliación)
@@ -361,7 +361,7 @@ flowchart LR
 | **RF-MAP-06** | Origen dinámico (GPS con fallback Base) | `RouteOptimizationService`, `RouteOriginDTO` | `TechnicianRouteMapModal.js` | `RouteOptimizationServiceTest`, `TechnicianRouteMapApiTest` |
 | **RF-MAP-07** | Mapa interactivo móvil de técnico | `TechnicianRouteMapController` | `TechnicianRouteMapModal.js`, `TechnicianRouteView.js` | `TechnicianRouteMapModalTest.mjs` |
 | **RF-MAP-08** | Navegación GPS directa Google Maps | `TechnicianRouteMap.php` (Generador URLs) | `TechnicianRouteMapModal.js`, `TechnicianRouteView.js` | `TechnicianRouteMapModalTest.mjs` |
-| **RF-MAP-09** | Mapa global y triaje para Coordinación | `CoordinatorRouteMapController` | `CoordinatorTerritorialMapTab.js` | `CoordinatorTerritorialMapTabTest.mjs`, `CoordinatorRouteMapApiTest` |
+| **RF-MAP-09** | Mapa global y triaje para Coordinación | `CoordinatorRouteMapController` | `CoordinatorTerritorialMapTab.js`, `CoordinatorDashboardView.js` (MODAL 1B) | `CoordinatorTerritorialMapTabTest.mjs`, `CoordinatorDashboardViewTest.mjs`, `CoordinatorRouteMapApiTest` |
 | **RF-MAP-10** | Blindaje y segregación de privacidad | `AuthMiddleware`, `SiteRouteDataForbiddenException` | `AppNavbar.js`, `LocationPortalView.js` | `SiteManagerRouteDataSegregationTest.php` |
 | **RNF-MAP-01** | Latencia cálculo de ruta $< 50\text{ ms}$ | `RouteOptimizationService` (Haversine nativo) | N/A | `RouteOptimizationServiceTest` |
 | **RNF-MAP-02** | Renderizado cartográfico fluido | N/A | `TechnicianRouteMapModal.js` | `TechnicianRouteMapModalTest.mjs` |
