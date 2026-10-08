@@ -293,6 +293,20 @@ $unassignedSites = array_filter(
 $assert('4.2 Tras asignar la preventiva, solo la sede con avería sin asignar permanece', count($unassignedSites) === 1
     && (reset($unassignedSites)['site_code'] ?? null) === 'SEDE-BCN-02');
 
+// T-MAP-25: precondición del flujo de consolidación. La sede 1 queda con sus tres tareas
+// (2 averías y su preventiva) bajo responsables vivos y sin trabajo sin asignar, de modo que
+// el cliente puede ofrecer la consolidación aunque el flujo de asignación no tenga nada que
+// repartir. `has_unassigned` significa «existe al menos una tarea sin responsable».
+$res = $router->dispatch(new Request(method: 'GET', path: '/api/coordinator/map/active-incidents', headers: ['Authorization' => "Bearer {$coordinatorToken}"]));
+$sitesAfterPreventive = array_column($res->getDecodedBody()['data']['locations'] ?? [], null, 'site_code');
+$consolidableSite = $sitesAfterPreventive['SEDE-BCN-01'] ?? null;
+$assert('4.2b Una sede multi-técnico sin trabajo sin asignar declara has_unassigned false',
+    $consolidableSite !== null
+    && ($consolidableSite['has_unassigned'] ?? true) === false
+    && ($consolidableSite['is_multi_technician'] ?? false) === true);
+$assert('4.2c La sede consolidable expone a los dos responsables implicados',
+    count($consolidableSite['assigned_technicians'] ?? []) === 2);
+
 // La avería del flujo vuelve a quedar asignada (Art. V.3: un técnico responsable)
 $pdo->prepare('UPDATE incidents SET assigned_technician_id = :tech_id, status = :status WHERE id = :id')
     ->execute([':tech_id' => $tech2Id, ':status' => IncidentStatus::ASSIGNED->value, ':id' => $incUnassignedFlow->getId()]);

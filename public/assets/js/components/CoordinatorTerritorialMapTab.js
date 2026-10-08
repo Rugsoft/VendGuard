@@ -383,6 +383,21 @@ export const CoordinatorTerritorialMapTab = {
     isUnassignedSite(site) {
       return Boolean(site.has_unassigned);
     },
+
+    /**
+     * Marks sites worked by several technicians as consolidable: the coordinator unifies the
+     * building's active incidents under a single owner even when nothing is left unassigned
+     * (RF-MAP-09 EARS de sede multi-técnico, T-MAP-25). Preventive orders keep their own
+     * assignment and are reassigned from their own tab (RF-PREV-02, EARS 2.6).
+     */
+    isConsolidableSite(site) {
+      return Boolean(site && site.is_multi_technician);
+    },
+
+    /** Rótulo de la acción de la sede: asignación inicial o consolidación de la visita. */
+    siteActionLabel(site) {
+      return this.isUnassignedSite(site) ? 'Asignar técnico' : 'Consolidar visita';
+    },
     /**
      * Clicking an unassigned site opens the technical assignment flow for its tickets.
      * Clicks fired right after a drag gesture are ignored so panning never triggers
@@ -396,7 +411,9 @@ export const CoordinatorTerritorialMapTab = {
       // RF-MAP-09: pulsing a site frames it on the map whatever its assignment state;
       // only unassigned sites additionally open the assignment flow.
       this.focusOnSite(site);
-      if (!this.isUnassignedSite(site)) {
+      // T-MAP-25: una sede multi-técnico sin trabajo sin asignar sigue ofreciendo el flujo de
+      // consolidación, que es el caso que motiva el EARS de multi-técnico de RF-MAP-09.
+      if (!this.isUnassignedSite(site) && !this.isConsolidableSite(site)) {
         return;
       }
       this.$emit('assign-incidents', { locationId: site.location_id, siteCode: site.site_code });
@@ -540,13 +557,13 @@ export const CoordinatorTerritorialMapTab = {
               </small>
             </span>
             <button
-              v-if="isUnassignedSite(site)"
+              v-if="isUnassignedSite(site) || isConsolidableSite(site)"
               type="button"
               class="btn btn-primary btn-sm"
               data-testid="btn-assign-site"
               @click="handleSiteClick(site)"
             >
-              Asignar técnico
+              {{ siteActionLabel(site) }}
             </button>
           </div>
         </div>

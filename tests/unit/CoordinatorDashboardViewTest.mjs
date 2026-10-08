@@ -14,6 +14,9 @@
  * 8. Per-row quick action gating by incident status (EARS 5.5 / EARS 6.4) plus the
  *    stale-state defense that re-syncs the affected row after a backend rejection
  *    (EARS 5.6 / EARS 6.5).
+ * 9. State-aware copy of the consolidated site batch: a mixed batch is titled, counted,
+ *    chipped and confirmed as a reassignment/consolidation while a batch without owners
+ *    keeps the plain assignment wording (RF-MAP-09, T-MAP-23).
  */
 
 // Mock localStorage for headless Node environment
@@ -879,6 +882,100 @@ await CoordinatorDashboardView.methods.submitBulkAssignment.call(contractView);
 assert('14.10 A contract-faithful backend accepts the whole consolidation with no 422 rejections',
   contractRejections.length === 0 && contractView.showBulkAssignModal === false
     && contractView.bulkAssignError === '' && contractView.getEmits().some(e => e.evt === 'bulk-assigned'));
+
+// ---------------------------------------------------------------------
+// TEST GROUP 15: State-Aware Copy of the Consolidated Site Batch (RF-MAP-09, T-MAP-23)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 15: State-Aware Copy of the Consolidated Site Batch ---');
+
+const copyView = createDashboardInstance({
+  incidents: [...mockIncidents, mixedAssignedIncident, mixedOrphanIncident],
+  technicians: mixedRoster
+});
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(copyView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+copyView.bulkAssignTechnicianId = 4;
+
+assert('15.1 A mixed batch titles the dialogue as a consolidation, never as a first assignment',
+  copyView.bulkAssignModalTitle() === 'Reasignar / Consolidar Sede en un Único Técnico'
+    && copyView.bulkAssignSubmitLabel() === `Reasignar ${copyView.bulkAssignIncidents.length} incidencia(s)`);
+
+assert('15.2 The entradilla counts the already assigned incidents of the batch',
+  copyView.bulkAssignSubtitle().includes(`${copyView.bulkAssignIncidents.length} incidencia(s)`)
+    && copyView.bulkAssignSubtitle().includes('1 ya asignada(s)'),
+  copyView.bulkAssignSubtitle());
+
+assert('15.3 Every already owned row carries its responsible as a per-row chip',
+  copyView.incidentOwnerLabel(mixedAssignedIncident) === 'Ya asignada: Jordi Técnico'
+    && copyView.incidentOwnerLabel(mixedOrphanIncident) === ''
+    && copyView.incidentOwnerLabel({ assigned_technician_id: 9, assigned_technician: null }) === 'Ya asignada: otro técnico');
+
+const cleanCopyView = createDashboardInstance();
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(cleanCopyView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+assert('15.4 A batch without owners keeps the assignment copy and its pending wording',
+  cleanCopyView.bulkAssignModalTitle() === 'Asignar Técnico a la Sede'
+    && cleanCopyView.bulkAssignSubmitLabel() === `Asignar ${cleanCopyView.bulkAssignIncidents.length} incidencia(s)`
+    && cleanCopyView.bulkAssignSubtitle().includes('pendiente(s)'),
+  cleanCopyView.bulkAssignSubtitle());
+
+assert('15.5 Template: title, subtitle and button bind the state-aware copy and the row chip',
+  CoordinatorDashboardView.template.includes(':title="bulkAssignModalTitle()"')
+    && CoordinatorDashboardView.template.includes(':subtitle="bulkAssignSubtitle()"')
+    && CoordinatorDashboardView.template.includes('{{ bulkAssignSubmitLabel() }}')
+    && CoordinatorDashboardView.template.includes('data-testid="bulk-assign-row-owner"')
+    && CoordinatorDashboardView.template.includes('data-testid="bulk-assign-batch-note"'));
+
+// The alert wording follows the nature of the batch: a consolidation is never reported as
+// a plain assignment (RF-MAP-09). The roster is pinned so the chosen owner has a stable name.
+api.coordinator.getUsers = async () => mixedRoster;
+const copyAlerts = [];
+const originalAddAlert = store.addAlert;
+store.addAlert = (message) => { copyAlerts.push(String(message)); };
+
+api.coordinator.assignTechnician = async (id) => ({ id });
+const alertView = createDashboardInstance({
+  incidents: [...mockIncidents, mixedAssignedIncident, mixedOrphanIncident],
+  technicians: mixedRoster
+});
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(alertView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+alertView.bulkAssignTechnicianId = 4;
+alertView.bulkAssignReassignmentReason = 'Consolidación de la sede';
+await CoordinatorDashboardView.methods.submitBulkAssignment.call(alertView);
+assert('15.6 A fully successful consolidation reports the site as consolidated in the chosen technician',
+  copyAlerts.length === 1 && copyAlerts[0].includes('consolidada en Marta Técnica')
+    && copyAlerts[0].includes('reasignada(s) correctamente'),
+  copyAlerts.join(' | '));
+
+copyAlerts.length = 0;
+const partialCopyView = createDashboardInstance({
+  incidents: [...mockIncidents, mixedAssignedIncident, mixedOrphanIncident],
+  technicians: mixedRoster
+});
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(partialCopyView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+partialCopyView.bulkAssignTechnicianId = 4;
+partialCopyView.bulkAssignReassignmentReason = 'Consolidación de la sede';
+api.coordinator.assignTechnician = async (id) => {
+  if (id === mixedAssignedIncident.id) {
+    throw new Error('El técnico indicado ya es el responsable activo de esta incidencia.');
+  }
+  return { id };
+};
+await CoordinatorDashboardView.methods.submitBulkAssignment.call(partialCopyView);
+assert('15.7 A rejected row reports the result as a partial consolidation, not as an assignment',
+  copyAlerts.length === 1 && copyAlerts[0].includes('Consolidación parcial en SEDE-BCN-01'),
+  copyAlerts.join(' | '));
+
+copyAlerts.length = 0;
+api.coordinator.assignTechnician = async (id) => ({ id });
+const cleanAlertView = createDashboardInstance();
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(cleanAlertView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+cleanAlertView.bulkAssignTechnicianId = 2;
+await CoordinatorDashboardView.methods.submitBulkAssignment.call(cleanAlertView);
+assert('15.8 A clean batch keeps the assignment wording in its success alert',
+  copyAlerts.length === 1 && copyAlerts[0].includes('asignada(s) correctamente')
+    && !copyAlerts[0].includes('consolidada'),
+  copyAlerts.join(' | '));
+
+store.addAlert = originalAddAlert;
 
 // Summary
 console.log('\n======================================================================');

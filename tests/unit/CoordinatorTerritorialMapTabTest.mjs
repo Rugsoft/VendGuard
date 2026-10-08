@@ -8,7 +8,8 @@
  * 1. Renders the global territorial map grouping sites with active incidents/preventives.
  * 2. Shows badges with the pending incident count per site and the semantic colors.
  * 3. Highlights multi-technician sites and offers reactive filters by technician and severity.
- * 4. Starts the technical assignment flow from unassigned sites.
+ * 4. Starts the technical assignment flow from unassigned sites and the consolidation flow
+ *    from multi-technician sites, even when they keep no unassigned work (T-MAP-25).
  *
  * Dogma Vanilla: Node.js native ESM, zero external dependencies, zero network in tests.
  */
@@ -199,11 +200,23 @@ assert('3.1 La sede multi-técnico lista a todos sus operarios', tab.technicianN
 assert('3.2 La sede con un solo técnico muestra su nombre', tab.technicianNames(sites[0]) === 'Jordi Técnico');
 assert('3.3 Una sede sin técnicos se considera sin asignar', tab.isUnassignedSite(sites[2]) === true && tab.isUnassignedSite(sites[1]) === false);
 
-tab.handleSiteClick(sites[1]);
-assert('3.4 Pulsar una sede asignada no dispara el flujo de asignación', tab.emittedEvents.length === 0);
+tab.handleSiteClick(sites[0]);
+assert('3.4 Pulsar una sede asignada mono-técnico no dispara ningún flujo', tab.emittedEvents.length === 0);
 
 tab.handleSiteClick(sites[2]);
 assert('3.5 Pulsar una sede sin asignar emite el evento de asignación con su sede', tab.emittedEvents.length === 1 && tab.emittedEvents[0].event === 'assign-incidents' && tab.emittedEvents[0].value.locationId === 3 && tab.emittedEvents[0].value.siteCode === 'SEDE-BCN-03');
+
+// T-MAP-25: la consolidación es alcanzable en el caso que la motiva, la sede multi-técnico
+// sin trabajo sin asignar (EARS de sede multi-técnico de RF-MAP-09).
+assert('3.6 Solo la sede multi-técnico es consolidable',
+  tab.isConsolidableSite(sites[1]) === true && tab.isConsolidableSite(sites[0]) === false && tab.isConsolidableSite(sites[2]) === false);
+assert('3.7 El botón de la sede rotula la acción según su composición',
+  tab.siteActionLabel(sites[1]) === 'Consolidar visita' && tab.siteActionLabel(sites[2]) === 'Asignar técnico');
+
+tab.handleSiteClick(sites[1]);
+assert('3.8 Pulsar una sede multi-técnico abre el flujo de consolidación',
+  tab.emittedEvents.length === 2 && tab.emittedEvents[1].event === 'assign-incidents'
+    && tab.emittedEvents[1].value.locationId === 2 && tab.emittedEvents[1].value.siteCode === 'SEDE-BCN-02');
 
 // =========================================================================
 // BLOQUE 4: Filtros reactivos por técnico y severidad (RF-MAP-09)
@@ -272,13 +285,13 @@ assert('6.1 Plantilla: capa de teselas OSM bajo el overlay SVG territorial con m
 assert('6.2 Plantilla: insignia con el recuento de averías por sede', tmpl.includes('sitePendingCount(site)') && tmpl.includes('territorial-marker-badge') && tmpl.includes('territorial-site-badge'));
 assert('6.3 Plantilla: distintivo multi-técnico con los nombres de operarios', tmpl.includes('is_multi_technician') && tmpl.includes('technicianNames(site)') && tmpl.includes('👥'));
 assert('6.4 Plantilla: filtro reactivo por técnico y casillas de severidad', tmpl.includes('filters.technician_id') && tmpl.includes('filters.is_critical_only') && tmpl.includes('filters.unassigned_only'));
-assert('6.5 Plantilla: acción de asignación disponible en sedes sin asignar', tmpl.includes('btn-assign-site') && tmpl.includes('Asignar técnico') && tmpl.includes('handleSiteClick(site)'));
+assert('6.5 Plantilla: acción disponible en las sedes que ofrecen asignación o consolidación', tmpl.includes('btn-assign-site') && tmpl.includes('siteActionLabel(site)') && tmpl.includes('handleSiteClick(site)'));
 assert('6.6 Plantilla: leyenda con los colores semánticos institucionales', tmpl.includes('background:#e02424') && tmpl.includes('background:#2560ff') && tmpl.includes('background:#38bd7d') && tmpl.includes('background:#f8b60f'));
 assert('6.7 Plantilla: marcadores accesibles con roles ARIA y etiquetas descriptivas', tmpl.includes('role="button"') && tmpl.includes('aria-label') && tmpl.includes('@keydown.enter.prevent="handleSiteClick(site)"'));
 assert('6.8 Plantilla: resumen territorial con sedes, tareas y críticas', tmpl.includes('territorial-summary') && tmpl.includes('multiTechnicianSiteCount'));
 assert('6.9 Plantilla: mensaje amistoso para un territorio sin actividad', tmpl.includes('No hay averías ni preventivos activos en el territorio.'));
 assert('6.10 Plantilla: atribución obligatoria de OpenStreetMap en el mapa territorial', tmpl.includes('OpenStreetMap') && tmpl.includes('territorial-map-attribution'));
-assert('6.11 Plantilla: la acción de asignación se oculta si la sede no tiene trabajo sin asignar', tmpl.includes('v-if="isUnassignedSite(site)"'));
+assert('6.11 Plantilla: la acción se oculta si la sede no tiene trabajo sin asignar ni es consolidable', tmpl.includes('v-if="isUnassignedSite(site) || isConsolidableSite(site)"'));
 
 // =========================================================================
 // BLOQUE 7: Zoom, gestos y reencuadre del territorio (RF-MAP-09, RNF-MAP-02)

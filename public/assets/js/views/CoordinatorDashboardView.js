@@ -402,6 +402,55 @@ export const CoordinatorDashboardView = {
     },
 
     /**
+     * State-aware copy of the bulk dialogue (RF-MAP-09): a batch that already carries owned
+     * incidents is a consolidation/reassignment, while a batch without owners keeps the plain
+     * initial-assignment wording. An incident with an active owner is never labelled "pending".
+     */
+    bulkAssignModalTitle() {
+      return this.hasAssignedIncidents()
+        ? 'Reasignar / Consolidar Sede en un Único Técnico'
+        : 'Asignar Técnico a la Sede';
+    },
+
+    /** Entradilla del lote: cuenta las incidencias y cuántas cambian de responsable (RF-MAP-09). */
+    bulkAssignSubtitle() {
+      const siteName = (this.bulkAssignSite && (this.bulkAssignSite.name || this.bulkAssignSite.siteCode)) || '';
+      const total = this.bulkAssignIncidents.length;
+      if (this.hasAssignedIncidents()) {
+        return `${siteName} · ${total} incidencia(s) · ${this.bulkAssignReassignmentTargets().length} ya asignada(s)`;
+      }
+      return `${siteName} · ${total} incidencia(s) pendiente(s)`;
+    },
+
+    /** Rótulo del botón de confirmación según la naturaleza real del lote (RF-MAP-09). */
+    bulkAssignSubmitLabel() {
+      const total = this.bulkAssignIncidents.length;
+      return this.hasAssignedIncidents()
+        ? `Reasignar ${total} incidencia(s)`
+        : `Asignar ${total} incidencia(s)`;
+    },
+
+    /**
+     * Distintivo por fila de las incidencias que ya tienen responsable activo: el coordinador
+     * ve de quién es cada ticket antes de consolidar el edificio entero (RF-MAP-09).
+     */
+    incidentOwnerLabel(incident) {
+      if (!incident || incident.assigned_technician_id === null || incident.assigned_technician_id === undefined) {
+        return '';
+      }
+      const ownerName = incident.assigned_technician && incident.assigned_technician.name
+        ? incident.assigned_technician.name
+        : 'otro técnico';
+      return `Ya asignada: ${ownerName}`;
+    },
+
+    /** Nombre del técnico elegido para el lote, usado por las alertas de consolidación. */
+    bulkAssignTechnicianName() {
+      const chosen = (this.technicians || []).find(t => Number(t.id) === Number(this.bulkAssignTechnicianId));
+      return chosen && chosen.name ? chosen.name : 'el técnico seleccionado';
+    },
+
+    /**
      * Bulk assignment: one technician (+ optional audited urgency reclassification)
      * applied to every pending incident of the site chosen on the territorial map.
      * Incidents with an active owner are reassignments and therefore send the mandatory
@@ -463,12 +512,27 @@ export const CoordinatorDashboardView = {
           }
         }
 
+        // El reporte respeta la naturaleza del lote: una consolidación nunca se comunica como
+        // una asignación inicial (RF-MAP-09).
+        const isConsolidationBatch = this.hasAssignedIncidents();
         if (failed.length === 0) {
-          store.addAlert(`Sede ${this.bulkAssignSite.siteCode}: ${assigned.length} incidencia(s) asignada(s) correctamente.`, 'success', 5000);
+          store.addAlert(
+            isConsolidationBatch
+              ? `Sede ${this.bulkAssignSite.siteCode}: consolidada en ${this.bulkAssignTechnicianName()} — ${assigned.length} incidencia(s) reasignada(s) correctamente.`
+              : `Sede ${this.bulkAssignSite.siteCode}: ${assigned.length} incidencia(s) asignada(s) correctamente.`,
+            'success',
+            5000
+          );
         } else if (assigned.length === 0) {
           this.bulkAssignError = failed.map(f => `#${f.ticket}: ${f.message}`).join(' · ');
         } else {
-          store.addAlert(`Asignación parcial en ${this.bulkAssignSite.siteCode}: ${assigned.length} correcta(s), ${failed.length} con error.`, 'warning', 7000);
+          store.addAlert(
+            isConsolidationBatch
+              ? `Consolidación parcial en ${this.bulkAssignSite.siteCode}: ${assigned.length} correcta(s), ${failed.length} con error.`
+              : `Asignación parcial en ${this.bulkAssignSite.siteCode}: ${assigned.length} correcta(s), ${failed.length} con error.`,
+            'warning',
+            7000
+          );
           this.bulkAssignError = failed.map(f => `#${f.ticket}: ${f.message}`).join(' · ');
         }
 
@@ -1660,8 +1724,8 @@ export const CoordinatorDashboardView = {
       <!-- =================================================================== -->
       <ModalDialog
         v-model="showBulkAssignModal"
-        title="Asignar Técnico a la Sede"
-        :subtitle="bulkAssignSite ? (bulkAssignSite.name + ' · ' + bulkAssignIncidents.length + ' incidencia(s) pendiente(s)') : ''"
+        :title="bulkAssignModalTitle()"
+        :subtitle="bulkAssignSubtitle()"
         size="md"
         @close="closeBulkAssignModal"
       >
@@ -1669,12 +1733,17 @@ export const CoordinatorDashboardView = {
           <!-- Pending incidents summary -->
           <div style="background-color: #fafbfc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-bottom: 16px;">
             <div style="font-size: 12px; font-weight: 700; color: var(--color-slate, #2c333f); text-transform: uppercase; margin-bottom: 8px;">
-              Incidencias activas de {{ bulkAssignSite.siteCode }}
+              Incidencias activas de {{ bulkAssignSite.siteCode }}<span v-if="hasAssignedIncidents()" data-testid="bulk-assign-batch-note">: se cambiará el responsable de las marcadas</span>
             </div>
             <ul style="margin: 0; padding-left: 18px; font-size: 13px; color: var(--color-ink, #000000);">
               <li v-for="inc in bulkAssignIncidents" :key="inc.id" style="margin-bottom: 4px;">
                 <strong>#{{ inc.ticket_code }}</strong> · {{ inc.machine_code }} · {{ inc.category_label || inc.category }}
                 <IncidentBadge :value="inc.urgency" type="urgency" size="sm" />
+                <span
+                  v-if="incidentOwnerLabel(inc)"
+                  data-testid="bulk-assign-row-owner"
+                  style="margin-left: 6px; font-size: 11px; font-weight: 600; color: var(--color-ink-muted, #6c7e9d); border: 1px solid var(--color-hairline, #c8cfda); border-radius: 4px; padding: 1px 6px;"
+                >{{ incidentOwnerLabel(inc) }}</span>
               </li>
             </ul>
           </div>
@@ -1701,7 +1770,7 @@ export const CoordinatorDashboardView = {
               </option>
             </select>
             <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 4px;">
-              El mismo técnico quedará como único responsable activo de todas las incidencias listadas (Art. II: un responsable activo por incidencia).
+              El mismo técnico quedará como único responsable activo de todas las incidencias listadas (Art. II: un responsable activo por incidencia).<span v-if="hasAssignedIncidents()"> Para las incidencias ya asignadas, el cambio de responsable exige motivo justificado (RF-07.3).</span>
             </div>
           </div>
 
@@ -1771,7 +1840,7 @@ export const CoordinatorDashboardView = {
               Cancelar
             </button>
             <button type="submit" class="vg-btn vg-btn-primary" :disabled="isBulkAssigning || !bulkAssignTechnicianId || bulkAssignIncidents.length === 0" data-testid="bulk-assign-submit">
-              <span v-if="!isBulkAssigning">Asignar {{ bulkAssignIncidents.length }} incidencia(s)</span>
+              <span v-if="!isBulkAssigning">{{ bulkAssignSubmitLabel() }}</span>
               <span v-else>Guardando...</span>
             </button>
           </div>
