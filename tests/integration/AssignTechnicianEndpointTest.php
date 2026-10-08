@@ -502,6 +502,90 @@ curl_close($chReassign);
 $jsonReassign = json_decode((string)$rawReassign, true) ?? [];
 $assert("6.6 HTTP real de reasignación => 200 OK con el nuevo responsable", $codeReassign === 200 && ($jsonReassign['data']['assigned_technician_id'] ?? null) === $secondTechnicianId, "Código HTTP: {$codeReassign}, Body: {$rawReassign}");
 
+// =========================================================================
+// CASO 7: Defensa en profundidad del repositorio (Art. V.3, RF-07.3)
+// El endpoint valida antes de delegar, pero assign() es la última garantía para
+// cualquier consumidor futuro (servicio de aplicación, consola, cron): un cambio de
+// responsable sin motivo justificado debe ser imposible también saltándose la capa HTTP.
+// =========================================================================
+
+echo "\n--- Caso 7: Defensa en profundidad del repositorio ---\n";
+
+// 7.1 Reasignación directa sin motivo => la entidad lo rechaza
+$directThrew = null;
+try {
+    $incidentRepo->assign(incidentId: (int)$incD->getId(), technicianId: $technicianId);
+} catch (\Throwable $e) {
+    $directThrew = $e;
+}
+$assert(
+    "7.1 assign() directo sin motivo => DomainException",
+    $directThrew instanceof \DomainException && str_contains($directThrew->getMessage(), 'exige un motivo justificado'),
+    $directThrew !== null ? get_class($directThrew) . ': ' . $directThrew->getMessage() : 'No lanzó ninguna excepción'
+);
+
+// 7.2 Reasignación al mismo responsable activo => rechazada (sin eventos ficticios, Art. III.3)
+$directThrew = null;
+try {
+    $incidentRepo->assign(
+        incidentId: (int)$incD->getId(),
+        technicianId: $secondTechnicianId,
+        reassignmentReason: 'Motivo suficientemente largo para superar la guarda de defensa en profundidad.'
+    );
+} catch (\Throwable $e) {
+    $directThrew = $e;
+}
+$assert(
+    "7.2 assign() directo al responsable actual => DomainException",
+    $directThrew instanceof \DomainException && str_contains($directThrew->getMessage(), 'ya es el responsable activo'),
+    $directThrew !== null ? get_class($directThrew) . ': ' . $directThrew->getMessage() : 'No lanzó ninguna excepción'
+);
+
+// 7.3 Reasignación directa con motivo => responsable sustituido, hito preservado y nota inmutable con el motivo
+$beforeDirect = $pdo->query("SELECT assigned_at, status FROM incidents WHERE id = {$incD->getId()}")->fetch(PDO::FETCH_ASSOC);
+$directReason = 'Motivo directo desde el repositorio: cobertura del turno de tarde con la pieza a bordo.';
+$directIncident = $incidentRepo->assign(
+    incidentId: (int)$incD->getId(),
+    technicianId: $technicianId,
+    coordinatorId: $coordinator->getId(),
+    reassignmentReason: $directReason
+);
+$afterDirect = $pdo->query("SELECT assigned_at, status, assigned_technician_id FROM incidents WHERE id = {$incD->getId()}")->fetch(PDO::FETCH_ASSOC);
+$directNote = $pdo->query("SELECT action_note FROM incident_history WHERE incident_id = {$incD->getId()} ORDER BY id DESC LIMIT 1")->fetchColumn();
+
+$assert(
+    "7.3 assign() directo con motivo => nuevo responsable con estado y hito auditado intactos",
+    $directIncident->getAssignedTechnicianId() === $technicianId
+        && (int)($afterDirect['assigned_technician_id'] ?? 0) === $technicianId
+        && ($afterDirect['status'] ?? null) === 'ASSIGNED'
+        && (string)($afterDirect['assigned_at'] ?? '') === (string)($beforeDirect['assigned_at'] ?? ''),
+    "Antes: " . json_encode($beforeDirect) . " Después: " . json_encode($afterDirect)
+);
+
+$assert(
+    "7.3 Historial inmutable con el marcador canónico 'Motivo: ' y el texto justificado",
+    is_string($directNote) && str_contains($directNote, 'Reasignación técnica:')
+        && str_contains($directNote, 'Motivo: ') && str_contains($directNote, $directReason),
+    "Nota: " . json_encode($directNote)
+);
+
+// 7.4 Expediente terminal => transición ilegal también sin pasar por HTTP
+$directThrew = null;
+try {
+    $incidentRepo->assign(
+        incidentId: (int)$incResolved->getId(),
+        technicianId: $technicianId,
+        reassignmentReason: 'Intento directo de reasignar un expediente resuelto y sellado.'
+    );
+} catch (\Throwable $e) {
+    $directThrew = $e;
+}
+$assert(
+    "7.4 assign() directo sobre expediente terminal => InvalidTransitionException",
+    $directThrew instanceof \VendGuard\Core\Domain\Exception\InvalidTransitionException,
+    $directThrew !== null ? get_class($directThrew) . ': ' . $directThrew->getMessage() : 'No lanzó ninguna excepción'
+);
+
 // ─── RESULTADO FINAL ──────────────────────────────────────────────────────────
 
 echo "\n" . str_repeat('=', 70) . "\n";
