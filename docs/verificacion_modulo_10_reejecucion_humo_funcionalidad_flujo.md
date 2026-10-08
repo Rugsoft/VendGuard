@@ -121,7 +121,10 @@ código.
 
 ### F-2 · Severidad BAJA-MEDIA · La suite de flujo del repositorio está en rojo y nada la vigila
 
-**Qué ocurre.** `php tests/Manual/E2EVerificationRunner.php` termina con **exit 1: 43/44 aserciones**, y la
+> **CERRADA (08/10/2026).** Los dos pasos de la recomendación se ejecutaron —aserción alineada con el contrato
+> real y suite incorporada a la batería global—; véase el apartado 7.5.
+
+**Qué ocurría.** `php tests/Manual/E2EVerificationRunner.php` terminaba con **exit 1: 43/44 aserciones**, y la
 fallida es la 1.13, que comprueba `data.ticket_code` en la respuesta del comentario de sede — un campo que
 existía en el payload heredado (`IncidentComment::toArray()` lo añadía) y que el DTO del hilo ya no expone en
 la raíz. La aserción quedó desfasada en el mismo commit que F-1 y no se ha vuelto a revisar.
@@ -135,12 +138,12 @@ la raíz. La aserción quedó desfasada en el mismo commit que F-1 y no se ha vu
 ```
 
 **Por qué importa.** Es la única evidencia automatizada del **flujo de trabajo completo de tres perfiles**, y
-lleva en rojo desde T-COM-05 sin que nadie lo notara porque `tests/run_all.php` **no descubre** las suites de
+llevaba en rojo desde T-COM-05 sin que nadie lo notara porque `tests/run_all.php` **no descubría** las suites de
 `tests/Manual/`: sólo las recorre el guardián de disciplina de limpieza. Un runner rojo que nadie ejecuta es
 peor que no tenerlo: al re-ejecutar el flujo (como en esta verificación) aparece como ruido y erosiona la
 confianza en la evidencia.
 
-**Recomendación.** Dos pasos independientes: (1) alinear la aserción 1.13 con el contrato aprobado
+**Recomendación (ejecutada el 08/10/2026, apartado 7.5).** Dos pasos independientes: (1) alinear la aserción 1.13 con el contrato aprobado
 (`data.incident.ticket_code`), y (2) incorporar `tests/Manual/*.php` a la batería global (o un script de
 verificación de flujo propio) para que una regresión de flujo no vuelva a pasar desapercibida.
 
@@ -194,8 +197,9 @@ Servidor temporal 8000 detenido · Código sin tocar (HEAD 06adb4d) · Único ca
 25 conjuntos de pruebas del módulo, las 68 comprobaciones de caja negra y las 209 suites de la batería global
 pasan sin un solo fallo, con las semillas intactas. Los dos hallazgos están **en el borde del módulo con su
 documentación y su evidencia**: un contrato de API sin enmendar desde T-COM-05 (F-1) y una aserción de flujo
-obsoleta en un runner que la batería global no ejecuta (F-2). Ninguno afecta a la seguridad de la conversación
-ni a los datos, y ambos exigen una decisión de especificación antes de tocar código.
+obsoleta en un runner que la batería global no ejecutaba (F-2). Ninguno afecta a la seguridad de la conversación
+ni a los datos, y **ambos quedaron cerrados el 08/10/2026** (apartados 7.1 a 7.5): la especificación se enmendó en los
+tres canales, la guarda anti-deriva vigila ya el contrato y la suite de flujo corre dentro de la batería global.
 
 ---
 
@@ -351,3 +355,25 @@ código de producción:
 deriva), `tests/unit/CoordinatorIncidentDetailModalTest.mjs` en verde con el doble corregido y batería global
 210/210 suites · 7.994 aserciones · 0 fallos con las semillas restablecidas. No queda ninguna mención a `413 Payload`
 en el repositorio fuera de este informe.
+
+---
+
+### 7.5 Cierre de F-2: la suite de flujo entra en la batería global (08/10/2026)
+
+Autorizada la recomendación de F-2, se cierran sus dos pasos independientes sin tocar código de producción:
+
+| Paso | Cambio aplicado |
+|---|---|
+| Aserción 1.13 | Deja de leer `data.ticket_code` (campo del payload plano retirado por T-COM-05) y lee el contrato real del hilo: `data.incident.ticket_code` y el texto publicado dentro de `data.comments[]` |
+| Descubrimiento | `tests/run_all.php` incorpora una **Fase 4** propia que ejecuta `tests/Manual/*.php` con el servidor HTTP todavía en marcha, con su contador `Suites E2E Manuales (T-40)` integrado en los totales y en la lista de fallos |
+
+**Decisión de descubrimiento:** la carpeta se recorre con el mismo patrón que `unit/` e `integration/`
+(`glob('Manual/*.php')`), en último lugar y antes de cerrar el servidor, porque sus guiones son no interactivos,
+autosuficientes y purgan y re-siembran por su cuenta; la guardia de la Fase 0 ya auditaba esa carpeta contra
+borrados ingenuos. El contrato de la carpeta queda escrito en el propio ejecutor. Se añade además un patrón de
+extracción específico para el resumen `Total Aserciones E2E Evaluadas : N`, sin tocar el que ya usan las demás
+suites (`Total Aserciones: N`), para que el recuento global siga siendo exacto.
+
+**Verificación:** `php tests/Manual/E2EVerificationRunner.php` → **44/44 aserciones, exit 0** (antes 43/44, exit 1);
+`php tests/run_all.php` → **211/211 suites · 8.038 aserciones · 0 fallos · exit 0** (antes 210/7.994), con las
+semillas canónicas restablecidas (13 incidencias, 0 comentarios) y sin residuos en `public/uploads/`.
