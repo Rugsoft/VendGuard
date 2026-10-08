@@ -193,6 +193,10 @@ incidents = 13 · incident_comments = 0 · public/uploads/ = 0 residuos
 Servidor temporal 8000 detenido · Código sin tocar (HEAD 06adb4d) · Único cambio en el árbol: este informe (sin commitear)
 ```
 
+> **Nota (08/10/2026):** esta es la fotografía del momento de la corrida. Los cambios posteriores —enmiendas de contrato,
+> correcciones documentales, la guarda anti-deriva y el cierre de F-2— se documentan en el apartado 7, con sus mediciones
+> y sus commits.
+
 **Conclusión.** El módulo 10 **no presenta ningún defecto de producto** en humo, funcionalidad ni flujo: los
 25 conjuntos de pruebas del módulo, las 68 comprobaciones de caja negra y las 209 suites de la batería global
 pasan sin un solo fallo, con las semillas intactas. Los dos hallazgos están **en el borde del módulo con su
