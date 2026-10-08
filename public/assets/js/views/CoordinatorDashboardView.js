@@ -127,6 +127,9 @@ export const CoordinatorDashboardView = {
       bulkAssignTechnicianId: 2,
       bulkAssignUrgencyOverride: '',
       bulkAssignUrgencyReason: '',
+      // Justification for the incidents of the batch that already have an active owner:
+      // the backend only accepts a reassignment with >= 10 real characters (RF-07.3).
+      bulkAssignReassignmentReason: '',
       bulkAssignError: '',
       isBulkAssigning: false,
 
@@ -353,6 +356,7 @@ export const CoordinatorDashboardView = {
       this.bulkAssignTechnicianId = this.technicians[0]?.id || null;
       this.bulkAssignUrgencyOverride = '';
       this.bulkAssignUrgencyReason = '';
+      this.bulkAssignReassignmentReason = '';
       this.bulkAssignError = '';
       this.showBulkAssignModal = true;
     },
@@ -361,6 +365,7 @@ export const CoordinatorDashboardView = {
       this.showBulkAssignModal = false;
       this.bulkAssignSite = null;
       this.bulkAssignIncidents = [];
+      this.bulkAssignReassignmentReason = '';
     },
 
     /**
@@ -377,8 +382,30 @@ export const CoordinatorDashboardView = {
     },
 
     /**
+     * Incidents of the batch that already have an active owner: those are the ones the
+     * backend treats as a reassignment and only accepts with a justified reason (RF-07.3).
+     */
+    bulkAssignReassignmentTargets(incidents = this.bulkAssignIncidents) {
+      return (incidents || []).filter(incident => incident
+        && incident.assigned_technician_id !== null
+        && incident.assigned_technician_id !== undefined);
+    },
+
+    /** True when the confirmation carries a consolidated reassignment over the site. */
+    hasAssignedIncidents(incidents = this.bulkAssignIncidents) {
+      return this.bulkAssignReassignmentTargets(incidents).length > 0;
+    },
+
+    /** Real characters (Unicode code points) typed in the reassignment reason (RF-07.3). */
+    bulkAssignReassignmentReasonLength() {
+      return Array.from(String(this.bulkAssignReassignmentReason || '').trim()).length;
+    },
+
+    /**
      * Bulk assignment: one technician (+ optional audited urgency reclassification)
      * applied to every pending incident of the site chosen on the territorial map.
+     * Incidents with an active owner are reassignments and therefore send the mandatory
+     * justified reason (RF-07.3, one reason for the whole consolidated batch).
      * Failure-safe: the loop keeps assigning after a per-incident error and reports
      * a partial result instead of leaving the rest unassigned silently.
      */
@@ -397,6 +424,22 @@ export const CoordinatorDashboardView = {
         return;
       }
 
+      // Validate the consolidated reassignment of the whole batch up front: incidents with
+      // an active owner can only change hands with a justified reason of >= 10 real
+      // characters, so a mixed confirmation must never fail incident by incident (RF-07.3).
+      const reassignmentTargets = this.bulkAssignReassignmentTargets();
+      const reassignmentReason = String(this.bulkAssignReassignmentReason || '').trim();
+      if (reassignmentTargets.length > 0) {
+        if (reassignmentReason === '') {
+          this.bulkAssignError = `El lote incluye ${reassignmentTargets.length} incidencia(s) ya asignada(s): indica el motivo justificado de la reasignación antes de confirmar (RF-07.3).`;
+          return;
+        }
+        if (this.bulkAssignReassignmentReasonLength() < 10) {
+          this.bulkAssignError = 'El motivo de la reasignación debe contener al menos 10 caracteres.';
+          return;
+        }
+      }
+
       this.bulkAssignError = '';
       this.isBulkAssigning = true;
       store.setLoading(true);
@@ -405,12 +448,14 @@ export const CoordinatorDashboardView = {
       const failed = [];
       try {
         for (const incident of this.bulkAssignIncidents) {
+          const isReassignment = reassignmentTargets.includes(incident);
           try {
             await api.coordinator.assignTechnician(
               incident.id,
               this.bulkAssignTechnicianId,
               this.bulkAssignUrgencyOverride || null,
-              this.bulkAssignUrgencyReason.trim() || null
+              this.bulkAssignUrgencyReason.trim() || null,
+              isReassignment ? reassignmentReason : null
             );
             assigned.push(incident.ticket_code);
           } catch (err) {
@@ -1657,6 +1702,26 @@ export const CoordinatorDashboardView = {
             </select>
             <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 4px;">
               El mismo técnico quedará como único responsable activo de todas las incidencias listadas (Art. II: un responsable activo por incidencia).
+            </div>
+          </div>
+
+          <!-- Reassignment Reason (mandatory as soon as the batch carries assigned incidents, RF-07.3) -->
+          <div v-if="hasAssignedIncidents()" style="background-color: #fafbfc; border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 14px; margin-bottom: 16px;">
+            <label for="bulk-assign-reassignment-reason" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
+              Motivo de la reasignación <span style="color: #dc2626;">* (Obligatorio para las incidencias ya asignadas)</span>
+            </label>
+            <textarea
+              id="bulk-assign-reassignment-reason"
+              v-model="bulkAssignReassignmentReason"
+              class="vg-textarea"
+              rows="2"
+              placeholder="Ej: Consolidación de la sede en un único técnico para resolver las averías en una sola visita..."
+              required
+              :disabled="isBulkAssigning"
+              data-testid="bulk-assign-reassignment-reason"
+            ></textarea>
+            <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 4px;">
+              El cambio de responsable exige al menos 10 caracteres reales y queda registrado en el historial inmutable de cada incidencia (RF-07.3).
             </div>
           </div>
 

@@ -145,6 +145,7 @@ function createDashboardInstance(initialData = {}) {
     bulkAssignTechnicianId: 2,
     bulkAssignUrgencyOverride: '',
     bulkAssignUrgencyReason: '',
+    bulkAssignReassignmentReason: '',
     bulkAssignError: '',
     isBulkAssigning: false,
     showCancelModal: false,
@@ -738,6 +739,146 @@ retryView.ensureTechniciansLoaded();
 await retryView.loadTechnicians();
 assert('13.7b The modal reopens re-request the roster and recover to a populated list',
   retryView.technicians.length === 1 && retryView.techniciansLoaded === true && retryView.techniciansErrorMessage === '');
+
+// ---------------------------------------------------------------------
+// TEST GROUP 14: Consolidated Reassignment Over a Mixed Batch (RF-MAP-09 + RF-07.3)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 14: Consolidated Reassignment Over a Mixed Batch ---');
+
+// A site that still keeps one unassigned ticket while another is already owned reaches the
+// bulk modal with a mixed batch: the orphan ticket is an initial assignment while the owned
+// one can only change hands with a justified reason of >= 10 real characters (RF-07.3).
+const mixedAssignedIncident = {
+  ...mockIncidents[0],
+  id: 90,
+  ticket_code: 'INC-2026-0090',
+  machine_code: 'VEND-0190',
+  status: 'ASIGNADA',
+  assigned_technician_id: 2,
+  assigned_technician: { id: 2, name: 'Jordi Técnico' }
+};
+const mixedOrphanIncident = {
+  ...mockIncidents[1],
+  id: 91,
+  ticket_code: 'INC-2026-0091',
+  assigned_technician_id: null,
+  assigned_technician: null
+};
+const mixedRoster = [{ id: 2, name: 'Jordi Técnico' }, { id: 4, name: 'Marta Técnica' }];
+
+// The batch flow reloads the triage list after confirming: declare the server picture so the
+// partial-failure retry list is deterministic (the rejected ticket stays untouched).
+api.coordinator.getIncidents = async () => [
+  { ...mixedAssignedIncident, status: 'ASIGNADA' },
+  { ...mixedOrphanIncident, status: 'ASIGNADA' }
+];
+
+const mixedView = createDashboardInstance({
+  incidents: [...mockIncidents, mixedAssignedIncident, mixedOrphanIncident],
+  technicians: mixedRoster
+});
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(mixedView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+mixedView.bulkAssignTechnicianId = 4; // consolidation onto a different owner
+
+assert('14.1 A mixed batch is detected as a consolidated reassignment',
+  mixedView.bulkAssignIncidents.length === 4 && mixedView.bulkAssignReassignmentTargets().length === 1
+    && mixedView.hasAssignedIncidents() === true
+    && mixedView.hasAssignedIncidents([mixedOrphanIncident]) === false);
+
+const pureBatchView = createDashboardInstance();
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(pureBatchView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+assert('14.2 A batch without owners stays a plain assignment and needs no reason',
+  pureBatchView.hasAssignedIncidents() === false && pureBatchView.bulkAssignReassignmentTargets().length === 0);
+
+// Fail fast: not a single incident of the batch is dispatched until the batch-level reason is valid.
+let mixedCalls = [];
+api.coordinator.assignTechnician = async (id, techId, urgency, urgencyReason, reassignmentReason) => {
+  mixedCalls.push({ id, techId, urgency, urgencyReason, reassignmentReason });
+  return { id, technician_id: techId };
+};
+await CoordinatorDashboardView.methods.submitBulkAssignment.call(mixedView);
+assert('14.3 Confirming a mixed batch without a reason is blocked before any API call',
+  mixedView.bulkAssignError.includes('ya asignada(s)') && mixedView.isBulkAssigning === false
+    && mixedCalls.length === 0 && mixedView.showBulkAssignModal === true);
+
+mixedView.bulkAssignReassignmentReason = 'Corto';
+await CoordinatorDashboardView.methods.submitBulkAssignment.call(mixedView);
+assert('14.4 A reason under 10 real characters is rejected with the RF-07.3 contract',
+  mixedView.bulkAssignError.includes('al menos 10 caracteres') && mixedCalls.length === 0);
+
+// Boundary: exactly 10 real characters satisfies the rule and dispatches the batch.
+mixedView.bulkAssignReassignmentReason = 'Consolidar';
+await CoordinatorDashboardView.methods.submitBulkAssignment.call(mixedView);
+assert('14.5 A valid reason dispatches one assignment per incident onto the chosen technician',
+  mixedCalls.length === 4 && mixedCalls.every(c => c.techId === 4));
+
+const assignedCall = mixedCalls.find(c => c.id === mixedAssignedIncident.id);
+const orphanCalls = mixedCalls.filter(c => c.id !== mixedAssignedIncident.id);
+assert('14.6 Only the incident with an active owner carries the reassignment reason (RF-07.3)',
+  assignedCall.reassignmentReason === 'Consolidar'
+    && orphanCalls.length === 3 && orphanCalls.every(c => !c.reassignmentReason));
+
+assert('14.7 A fully successful consolidation closes the modal and clears the typed reason',
+  mixedView.showBulkAssignModal === false && mixedView.bulkAssignReassignmentReason === ''
+    && mixedView.getEmits().some(e => e.evt === 'bulk-assigned'));
+
+// Partial failure on the reassigned row: the modal stays open and keeps the typed reason so
+// the coordinator can retry the consolidation without retyping the justification.
+const mixedRetryView = createDashboardInstance({
+  incidents: [...mockIncidents, mixedAssignedIncident, mixedOrphanIncident],
+  technicians: mixedRoster
+});
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(mixedRetryView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+mixedRetryView.bulkAssignTechnicianId = 4;
+mixedRetryView.bulkAssignReassignmentReason = 'Consolidación de la sede';
+let retryCalls = 0;
+api.coordinator.assignTechnician = async (id) => {
+  retryCalls++;
+  if (id === mixedAssignedIncident.id) {
+    throw new Error('El técnico indicado ya es el responsable activo de esta incidencia.');
+  }
+  return { id };
+};
+await CoordinatorDashboardView.methods.submitBulkAssignment.call(mixedRetryView);
+assert('14.8 A reassignment rejected by the backend keeps the modal open with the reason for retry',
+  mixedRetryView.showBulkAssignModal === true && retryCalls === 4
+    && mixedRetryView.bulkAssignReassignmentReason === 'Consolidación de la sede'
+    && mixedRetryView.bulkAssignError.includes('ya es el responsable activo')
+    && mixedRetryView.bulkAssignIncidents.length === 1
+    && mixedRetryView.bulkAssignIncidents[0].id === mixedAssignedIncident.id);
+
+assert('14.9 Template: the reassignment reason is only offered for mixed batches (RF-07.3)',
+  CoordinatorDashboardView.template.includes('v-if="hasAssignedIncidents()"')
+    && CoordinatorDashboardView.template.includes('v-model="bulkAssignReassignmentReason"')
+    && CoordinatorDashboardView.template.includes('data-testid="bulk-assign-reassignment-reason"'));
+
+// Contract-faithful backend emulation (CoordinatorController::assignTechnician): rejects any
+// reassignment without a justified reason of >= 10 real characters and any consolidation onto
+// the current owner. This is the regression that used to fail while the 5th argument was missing.
+const contractView = createDashboardInstance({
+  incidents: [...mockIncidents, mixedAssignedIncident, mixedOrphanIncident],
+  technicians: mixedRoster
+});
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(contractView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+contractView.bulkAssignTechnicianId = 4;
+contractView.bulkAssignReassignmentReason = 'Consolidación de la sede';
+const ownerById = new Map(contractView.bulkAssignIncidents.map(inc => [inc.id, inc.assigned_technician_id]));
+const contractRejections = [];
+api.coordinator.assignTechnician = async (id, techId, urgency, urgencyReason, reassignmentReason) => {
+  const currentOwner = ownerById.get(id);
+  if (currentOwner !== null && currentOwner !== undefined) {
+    if (currentOwner === techId) {
+      contractRejections.push(`${id}:TECHNICIAN_ALREADY_ASSIGNED`);
+    } else if (!reassignmentReason || Array.from(String(reassignmentReason).trim()).length < 10) {
+      contractRejections.push(`${id}:MISSING_REASSIGNMENT_REASON`);
+    }
+  }
+  return { id, technician_id: techId };
+};
+await CoordinatorDashboardView.methods.submitBulkAssignment.call(contractView);
+assert('14.10 A contract-faithful backend accepts the whole consolidation with no 422 rejections',
+  contractRejections.length === 0 && contractView.showBulkAssignModal === false
+    && contractView.bulkAssignError === '' && contractView.getEmits().some(e => e.evt === 'bulk-assigned'));
 
 // Summary
 console.log('\n======================================================================');
