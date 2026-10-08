@@ -342,9 +342,9 @@ try {
         'content-type' => 'application/json',
     ]);
     $assert(
-        '1.3 La cabecera X-Site-Code también abre la conserjería de su propio centro',
-        $headerOnly->getStatusCode() === 200 && (int)($data($headerOnly)['total'] ?? 0) >= 2,
-        "HTTP {$headerOnly->getStatusCode()} " . json_encode($data($headerOnly))
+        '1.3 La cabecera retirada X-Site-Code ya no abre la conserjería (S-4: 401)',
+        $headerOnly->getStatusCode() === 401 && $errorCode($headerOnly) === 'UNAUTHORIZED',
+        "HTTP {$headerOnly->getStatusCode()} " . json_encode($errorCode($headerOnly))
     );
 
     $listing = $dispatch('GET', '/api/location/refunds', null, $siteHeaders);

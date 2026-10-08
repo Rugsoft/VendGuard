@@ -83,7 +83,7 @@ client.setSiteCode('SEDE-BCN-01');
 
 await client.post('/test-post', { key: 'hello' });
 assert('1.4 Automatic injection of Authorization Bearer header', lastFetchCall.options.headers['Authorization'] === 'Bearer auth_token_mock_12345');
-assert('1.5 Automatic injection of X-Site-Code header', lastFetchCall.options.headers['X-Site-Code'] === 'SEDE-BCN-01');
+assert('1.5 Retired X-Site-Code header is no longer injected (S-4: site session is a Bearer token)', lastFetchCall.options.headers['X-Site-Code'] === undefined);
 assert('1.6 Auto-sets Content-Type to application/json for object bodies', lastFetchCall.options.headers['Content-Type'].includes('application/json'));
 assert('1.7 Request body is stringified JSON', lastFetchCall.options.body === JSON.stringify({ key: 'hello' }));
 

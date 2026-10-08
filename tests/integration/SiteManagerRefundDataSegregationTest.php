@@ -18,7 +18,7 @@ declare(strict_types=1);
  * - Coordinator financial endpoints return 401 without an internal token and
  *   403 for an authenticated technician before the controller reads money.
  * - Site routes require the site's supported authentication (Bearer or
- *   X-Site-Code); technician and coordinator endpoints require their own
+ *   retired `X-Site-Code` header, always rejected); technician and coordinator endpoints require their own
  *   internal role.
  * - IBAN and Bizum phone exist in the real row, but are absent from the
  *   technician, reception, and public projections.
@@ -316,7 +316,11 @@ try {
         'HTTP ' . $deliverAllowed->getStatusCode());
 
     $siteCodeList = $dispatch('GET', '/api/location/refunds', siteCode: 'SEDE-BCN-01');
-    $assert('4.6 GET sede acepta X-Site-Code según el contrato', $siteCodeList->getStatusCode() === 200);
+    $assert(
+        '4.6 La cabecera retirada X-Site-Code ya no abre la bandeja de sede (401, hallazgo S-4)',
+        $siteCodeList->getStatusCode() === 401
+        && ($decode($siteCodeList)['error']['code'] ?? '') === 'UNAUTHORIZED'
+    );
 
     // ─────────────────────────────────────────────────────────────────────
     echo "\n--- 5. Coordinación: los cuatro endpoints exigen rol COORDINATOR ---\n";

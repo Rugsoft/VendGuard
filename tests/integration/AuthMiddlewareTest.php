@@ -82,26 +82,26 @@ $assert(
     ($bodyEmpty['error']['code'] ?? '') === 'UNAUTHORIZED'
 );
 
-// Caso 1.2: Petición con X-Site-Code inexistente o erróneo -> 401
+// Caso 1.2: La cabecera retirada X-Site-Code ya no autentica (hallazgo S-4)
 $reqBadCode = new Request('GET', '/api/locations/UNKNOWN/machines', [], [], ['X-Site-Code' => 'SEDE-FANTASMA-99']);
 $resBadCode = $siteMiddleware->handle($reqBadCode, $nextOk);
 
 $assert(
-    "1.3 Petición con X-Site-Code inexistente es rechazada con HTTP 401",
+    "1.3 La cabecera retirada X-Site-Code (código inexistente) es rechazada con HTTP 401",
     $resBadCode->getStatusCode() === 401
 );
 
-// Caso 1.3: Petición con X-Site-Code válido -> 200 OK
-$reqGoodCode = new Request('GET', '/api/locations/SEDE-BCN-01/machines', [], [], ['X-Site-Code' => 'SEDE-BCN-01']);
-$resGoodCode = $siteMiddleware->handle($reqGoodCode, $nextOk);
+// Caso 1.3: la cabecera retirada tampoco vale con un código de sede real
+$reqRetiredHeader = new Request('GET', '/api/locations/SEDE-BCN-01/machines', [], [], ['X-Site-Code' => 'SEDE-BCN-01']);
+$resRetiredHeader = $siteMiddleware->handle($reqRetiredHeader, $nextOk);
 
 $assert(
-    "1.4 Petición con X-Site-Code válido ('SEDE-BCN-01') es autorizada (HTTP 200)",
-    $resGoodCode->getStatusCode() === 200
+    "1.4 La cabecera retirada X-Site-Code ya no autoriza ni con un código real (HTTP 401)",
+    $resRetiredHeader->getStatusCode() === 401
 );
 $assert(
-    "1.5 Atributo site_code inyectado en el contexto de la petición",
-    $reqGoodCode->getAttribute('site_code') === 'SEDE-BCN-01'
+    "1.5 El 401 no anuncia la vía antigua (no se nombra la cabecera retirada)",
+    !str_contains((string)($resRetiredHeader->getDecodedBody()['error']['message'] ?? ''), 'X-Site-Code')
 );
 
 // Caso 1.4: Petición con Bearer site_token firmado y válido -> 200 OK
@@ -116,6 +116,10 @@ $resGoodToken = $siteMiddleware->handle($reqGoodToken, $nextOk);
 $assert(
     "1.6 Petición con Bearer site_token válido es autorizada (HTTP 200)",
     $resGoodToken->getStatusCode() === 200
+);
+$assert(
+    "1.6b Atributo site_code inyectado en el contexto de la petición desde el token",
+    $reqGoodToken->getAttribute('site_code') === 'SEDE-BCN-01'
 );
 
 // Caso 1.5: Petición con Bearer site_token alterado / firma manipulada -> 401
@@ -236,7 +240,7 @@ $assert(
 
 // 3.2 Petición con autenticación correcta a través del router -> 200 OK
 $routerRes3 = $router->dispatch(new Request('GET', '/api/protected/machines', [], [], [
-    'X-Site-Code' => 'SEDE-BCN-01'
+    'Authorization' => "Bearer {$siteToken}"
 ]));
 $assert(
     "3.3 Router permite acceso autorizado por middleware y ejecuta controlador (HTTP 200)",

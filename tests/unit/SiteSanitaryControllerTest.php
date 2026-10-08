@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Batería de pruebas unitarias y de enrutamiento para SiteSanitaryController (T-PREV-15).
  * Verifica:
  * 1. Registro de endpoints en AppRouter bajo protección de SiteAuthMiddleware.
- * 2. Bloqueo 401 Unauthorized a peticiones anónimas sin token de sede ni cabecera X-Site-Code.
+ * 2. Bloqueo 401 Unauthorized a peticiones anónimas sin token de sede válido.
  * 3. Consulta de estado sanitario de sede (/api/site/sanitary-status) con semáforos de máquinas.
  * 4. Consulta de Certificado Sanitario Oficial individual (/api/site/certificates/machine/{code}):
  *    - 404 ante máquina inexistente.
@@ -541,16 +541,22 @@ $routesToVerify = [
 
 $pdoLocRepo = new \VendGuard\Infrastructure\Repository\PdoLocationRepository();
 $dbLoc = $pdoLocRepo->findBySiteCode('SEDE-BCN-01', true) ?? ($pdoLocRepo->findAllActive()[0] ?? null);
-$validSiteCode = $dbLoc !== null ? $dbLoc->getSiteCode() : 'SEDE-BCN-01';
+$validSiteToken = $dbLoc !== null
+    ? (new \VendGuard\Application\Service\AuthService())->generateSiteToken($dbLoc)
+    : '';
 
 foreach ($routesToVerify as [$method, $path]) {
-    // 4.1 Petición Anónima (sin token ni cabecera X-Site-Code) -> 401 Unauthorized
+    // 4.1 Petición Anónima (sin token de sede) -> 401 Unauthorized
     $anonReq = new Request($method, $path);
     $anonRes = $router->dispatch($anonReq);
     assertEquals(401, $anonRes->getStatusCode(), "4.1 Endpoint {$method} {$path} protegido contra acceso anónimo (401)");
 
-    // 4.2 Petición con cabecera X-Site-Code de sede válida en base de datos -> supera el middleware
-    $validSiteReq = new Request($method, $path, [], [], ['X-Site-Code' => $validSiteCode]);
+    // 4.1b La cabecera retirada X-Site-Code ya no abre ninguna ruta de sede (hallazgo S-4)
+    $retiredHeaderReq = new Request($method, $path, [], [], ['X-Site-Code' => $dbLoc !== null ? $dbLoc->getSiteCode() : 'SEDE-BCN-01']);
+    assertEquals(401, $router->dispatch($retiredHeaderReq)->getStatusCode(), "4.1b Endpoint {$method} {$path} ignora la cabecera retirada X-Site-Code (401)");
+
+    // 4.2 Petición con token de sede firmado de una sede real -> supera el middleware
+    $validSiteReq = new Request($method, $path, [], [], ['Authorization' => "Bearer {$validSiteToken}"]);
     $validSiteRes = $router->dispatch($validSiteReq);
     // El resultado no puede ser 401 (puede ser 200, o 400/404 según datos en BD, pero NO 401 Unauthorized)
     assertTrue($validSiteRes->getStatusCode() !== 401, "4.2 Endpoint {$method} {$path} reconoce autenticación de sede válida (status: {$validSiteRes->getStatusCode()})");

@@ -23,8 +23,9 @@ declare(strict_types=1);
  * - Comportamiento real del enrutador: una petición anónima a cualquiera de las rutas
  *   se corta con 401 Unauthorized cuyo mensaje es el del middleware correspondiente (y no
  *   el del controlador), lo que demuestra que la petición no llegó a alcanzar la acción;
- *   además, el canal de sede (cabecera X-Site-Code) no abre las rutas internas de técnico
- *   ni de coordinación.
+ *   además, el canal de sede (token firmado `site_token_…`) no abre las rutas internas de
+ *   técnico ni de coordinación, y la cabecera `X-Site-Code` está retirada como credencial
+ *   (hallazgo S-4: el acceso de sede exige código de sede y clave de centro).
  * - Control negativo: un método no admitido responde 405 Method Not Allowed con su
  *   cabecera Allow y un recurso inexistente bajo el mismo prefijo sigue devolviendo
  *   404 ROUTE_NOT_FOUND, lo que demuestra que los 401 anteriores certifican el registro
@@ -37,8 +38,26 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/autoload.php';
 
+use VendGuard\Infrastructure\Config\SecretProvider;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Routing\AppRouter;
+
+/**
+ * Firma un token de sede con el mismo algoritmo que `AuthService::generateSiteToken()`
+ * (Base64Url + HMAC-SHA256), sin instanciar repositorios PDO: la suite certifica el
+ * aislamiento de canales a nivel de middleware y sigue sin depender de MariaDB.
+ */
+$signSiteToken = static function (int $locationId, string $siteCode): string {
+    $payload = json_encode([
+        'type' => 'site',
+        'location_id' => $locationId,
+        'site_code' => $siteCode,
+        'exp' => time() + 3600,
+    ], JSON_UNESCAPED_SLASHES) ?: '{}';
+    $encoded = rtrim(strtr(base64_encode($payload), '+/', '-_'), '=');
+
+    return 'site_token_' . $encoded . '.' . hash_hmac('sha256', $encoded, SecretProvider::authSecret());
+};
 
 echo "======================================================================\n";
 echo " VendGuard: Verificación de Rutas - Hilo de Comentarios (Módulo 10, T-COM-08)\n";
@@ -146,9 +165,11 @@ $site401 = $router->dispatch(new Request(method: 'GET', path: '/api/location/inc
 $technician401 = $router->dispatch(new Request(method: 'GET', path: '/api/technician/incidents/142/comments'));
 $coordinator401 = $router->dispatch(new Request(method: 'GET', path: '/api/coordinator/incidents/142/comments'));
 
+$site401Message = (string)($site401->getDecodedBody()['error']['message'] ?? '');
 $assert(
-    '2.9 El 401 de sede lo emite SiteAuthMiddleware (mensaje de X-Site-Code), no el controlador',
-    str_contains((string)($site401->getDecodedBody()['error']['message'] ?? ''), 'X-Site-Code')
+    '2.9 El 401 de sede lo emite SiteAuthMiddleware (mensaje propio), no el controlador',
+    str_contains($site401Message, 'Inicie sesión en el centro')
+        && !str_contains($site401Message, 'X-Site-Code')
 );
 $assert(
     '2.10 El 401 de técnico lo emite InternalAuthMiddleware (mensaje de cabecera Bearer)',
@@ -171,18 +192,32 @@ $internalRoutes = [
     ['POST', '/api/coordinator/incidents/142/comments'],
 ];
 
+$validSiteToken = $signSiteToken(1, 'SEDE-BCN-01');
+
 foreach ($internalRoutes as [$method, $path]) {
     $response = $router->dispatch(new Request(
         method: $method,
         path: $path,
-        headers: ['X-Site-Code' => 'SEDE-BCN-01']
+        headers: ['Authorization' => "Bearer {$validSiteToken}"]
     ));
 
     $assert(
-        "3. {$method} {$path} rechaza el canal de sede (401) y sigue exigiendo token interno",
+        "3. {$method} {$path} rechaza un token de sede legítimo (401) y sigue exigiendo token interno",
         $response->getStatusCode() === 401 && ($response->getDecodedBody()['error']['code'] ?? '') === 'UNAUTHORIZED'
     );
 }
+
+$retiredHeader = $router->dispatch(new Request(
+    method: 'GET',
+    path: '/api/technician/incidents/142/comments',
+    headers: ['X-Site-Code' => 'SEDE-BCN-01']
+));
+$assert(
+    '3.5b La cabecera X-Site-Code está retirada: ya no abre ni el canal interno ni el de sede',
+    $retiredHeader->getStatusCode() === 401
+        && ($retiredHeader->getDecodedBody()['error']['code'] ?? '') === 'UNAUTHORIZED'
+        && !str_contains((string)($retiredHeader->getDecodedBody()['error']['message'] ?? ''), 'X-Site-Code')
+);
 
 $siteRouteWithInternalToken = $router->dispatch(new Request(
     method: 'GET',

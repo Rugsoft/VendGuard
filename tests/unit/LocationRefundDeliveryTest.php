@@ -1086,15 +1086,16 @@ $assert(
     $refundRepo->findById((int)$foreign->getId())?->getStatus() === RefundStatus::DEPOSITED_AT_RECEPTION
 );
 
-// La cabecera X-Site-Code también vale, como en el resto del portal de sede
-$byHeader = new Request(method: 'GET', path: '/api/location/refunds', headers: ['X-Site-Code' => 'SEDE-BCN-02']);
-$headerBody = $invokeIndex($byHeader)->getDecodedBody();
-$assert('7.4 La cabecera X-Site-Code identifica la sede', ($headerBody['data']['total'] ?? 0) >= 1, 'total: ' . ($headerBody['data']['total'] ?? 'AUSENTE'));
+// La cabecera X-Site-Code está retirada (S-4): el controlador ya no la lee y no puede
+// convertirse en una puerta trasera que se cuele por debajo del middleware.
+$byRetiredHeader = new Request(method: 'GET', path: '/api/location/refunds', headers: ['X-Site-Code' => 'SEDE-BCN-02']);
+$headerResponse = $invokeIndex($byRetiredHeader);
+$assert('7.4 La cabecera retirada X-Site-Code ya no identifica la sede (401)', $headerResponse->getStatusCode() === 401, $statusDetail($headerResponse));
 $assert(
-    '7.5 Y desde ahí sí se ve el sobre del otro edificio',
-    in_array(
+    '7.5 Y el sobre del otro edificio no se expone por esa vía',
+    !in_array(
         (int)$foreign->getId(),
-        array_map(static fn (array $row): int => (int)$row['id'], $headerBody['data']['refunds'] ?? []),
+        array_map(static fn (array $row): int => (int)$row['id'], $headerResponse->getDecodedBody()['data']['refunds'] ?? []),
         true
     )
 );

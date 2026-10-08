@@ -79,7 +79,7 @@ if ($location !== null) {
     echo "\n--- Caso 1: Catálogo de máquinas sin averías activas ---\n";
 
     $req1 = new Request('GET', '/api/locations/SEDE-BCN-01/machines', [], [], [
-        'X-Site-Code' => 'SEDE-BCN-01'
+        'Authorization' => "Bearer {$siteToken}"
     ]);
     $res1 = $router->dispatch($req1);
 
@@ -167,7 +167,7 @@ if ($location !== null) {
     ")->execute([':id' => $createdIncident->getId()]);
 
     $req3 = new Request('GET', '/api/locations/SEDE-BCN-01/machines', [], [], [
-        'X-Site-Code' => 'SEDE-BCN-01'
+        'Authorization' => "Bearer {$siteToken}"
     ]);
     $res3 = $router->dispatch($req3);
     $body3 = $res3->getDecodedBody();
@@ -193,7 +193,7 @@ if ($location !== null) {
     $pdo->prepare("UPDATE incidents SET status = 'CLOSED', closed_at = NOW() WHERE id = :id")->execute([':id' => $createdIncident->getId()]);
 
     $req4 = new Request('GET', '/api/locations/SEDE-BCN-01/machines', [], [], [
-        'X-Site-Code' => 'SEDE-BCN-01'
+        'Authorization' => "Bearer {$siteToken}"
     ]);
     $res4 = $router->dispatch($req4);
     $body4 = $res4->getDecodedBody();
@@ -214,8 +214,11 @@ if ($location !== null) {
     echo "\n--- Caso 5: Segregación constitucional de datos entre centros (Art. V) ---\n";
 
     // Petición identificada como SEDE-BCN-02 intentando consultar máquinas de SEDE-BCN-01
+    // (sesión de sede legítima de OTRO centro, vía token firmado)
+    $otherLocation = $locationRepo->findBySiteCode('SEDE-BCN-02');
+    $otherSiteToken = $otherLocation !== null ? $authService->generateSiteToken($otherLocation) : '';
     $reqMismatch = new Request('GET', '/api/locations/SEDE-BCN-01/machines', [], [], [
-        'X-Site-Code' => 'SEDE-BCN-02'
+        'Authorization' => "Bearer {$otherSiteToken}"
     ]);
     $resMismatch = $router->dispatch($reqMismatch);
 
@@ -236,7 +239,7 @@ if ($location !== null) {
         $liveOptions = [
             'http' => [
                 'method' => 'GET',
-                'header' => "X-Site-Code: SEDE-BCN-01\r\nAccept: application/json\r\n",
+                'header' => "Authorization: Bearer {$siteToken}\r\nAccept: application/json\r\n",
                 'ignore_errors' => true,
             ],
         ];
@@ -289,8 +292,10 @@ if ($location !== null) {
     $deskPin = (string)$refundRepoPdo->findById($deskCaseId)?->getPickupPin();
     $assert("7.1 El expediente de prueba tiene PIN de 4 dígitos", preg_match('/^[0-9]{4}$/', $deskPin) === 1, 'pin: ' . $deskPin);
 
-    // 7.2 Listado por cabecera X-Site-Code (sin location_id en atributos)
-    $listReq = new Request('GET', '/api/location/refunds', [], [], ['X-Site-Code' => 'SEDE-BCN-01']);
+    // 7.2 Listado con la identidad de sede que inyecta el middleware ya validado
+    $listReq = new Request('GET', '/api/location/refunds');
+    $listReq->setAttribute('authenticated_location', $location);
+    $listReq->setAttribute('site_code', 'SEDE-BCN-01');
     $listRes = $refundController->index($listReq);
     $listBody = json_decode($listRes->getBody(), true);
     $listRaw = (string)$listRes->getBody();
@@ -316,12 +321,13 @@ if ($location !== null) {
         'POST',
         "/api/location/refunds/{$deskCaseId}/deliver",
         [],
-        ['pickup_pin' => '0000'],
-        ['X-Site-Code' => 'SEDE-BCN-01']
+        ['pickup_pin' => '0000']
     );
-    // Al invocar el controlador sin pasar por el router, el parámetro de ruta
-    // hay que inyectarlo a mano.
+    // Al invocar el controlador sin pasar por el router, el parámetro de ruta y la
+    // identidad de sede hay que inyectarlos a mano.
     $wrongReq->setRouteParams(['id' => (string)$deskCaseId]);
+    $wrongReq->setAttribute('authenticated_location', $location);
+    $wrongReq->setAttribute('site_code', 'SEDE-BCN-01');
     $wrongRes = $refundController->deliver($wrongReq);
     $wrongBody = json_decode($wrongRes->getBody(), true);
     $assert("7.9 Un PIN incorrecto responde HTTP 422", $wrongRes->getStatusCode() === 422, "HTTP {$wrongRes->getStatusCode()} " . json_encode($wrongBody));
@@ -340,10 +346,11 @@ if ($location !== null) {
         'POST',
         "/api/location/refunds/{$deskCaseId}/deliver",
         [],
-        ['pickup_pin' => $deskPin],
-        ['X-Site-Code' => 'SEDE-BCN-01']
+        ['pickup_pin' => $deskPin]
     );
     $rightReq->setRouteParams(['id' => (string)$deskCaseId]);
+    $rightReq->setAttribute('authenticated_location', $location);
+    $rightReq->setAttribute('site_code', 'SEDE-BCN-01');
     $rightRes = $refundController->deliver($rightReq);
     $rightBody = json_decode($rightRes->getBody(), true);
     $assert("7.12 Con el PIN correcto responde HTTP 200", $rightRes->getStatusCode() === 200, "HTTP {$rightRes->getStatusCode()} " . json_encode($rightBody));

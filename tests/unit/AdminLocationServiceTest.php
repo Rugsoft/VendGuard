@@ -23,6 +23,8 @@ use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
+use VendGuard\Core\Domain\Repository\SiteAccessCodeRepositoryInterface;
+use VendGuard\Core\Domain\Service\SiteAccessCodeGenerator;
 
 echo "======================================================================\n";
 echo " VendGuard: Test Unitario - AdminLocationServiceTest (T-ADM-07)\n";
@@ -261,13 +263,61 @@ class InMemoryAuditLogRepository implements AuditLogRepositoryInterface
     }
 }
 
+/**
+ * Repositorio en memoria de la credencial de sede (hallazgo S-4).
+ *
+ * Solo guarda la huella que el servicio entrega: reproduces el contrato «solo huella»
+ * sin abrir conexión a MariaDB.
+ */
+class InMemorySiteAccessCodeRepository implements SiteAccessCodeRepositoryInterface
+{
+    /** @var array<int, string> locationId => bcrypt hash */
+    public array $hashes = [];
+    /** @var array<int, int> */
+    public array $failedAttempts = [];
+    /** @var array<int, bool> */
+    public array $locked = [];
+
+    public function findAccessState(int $locationId): ?array
+    {
+        return [
+            'hash' => $this->hashes[$locationId] ?? null,
+            'issued_at' => isset($this->hashes[$locationId]) ? '2026-10-08 12:00:00' : null,
+            'attempts' => $this->failedAttempts[$locationId] ?? 0,
+            'is_locked' => $this->locked[$locationId] ?? false,
+        ];
+    }
+
+    public function storeAccessCodeHash(int $locationId, string $hash): void
+    {
+        $this->hashes[$locationId] = $hash;
+        $this->failedAttempts[$locationId] = 0;
+        $this->locked[$locationId] = false;
+    }
+
+    public function registerFailedLogin(int $locationId, int $maxAttempts, int $lockSeconds): void
+    {
+        $this->failedAttempts[$locationId] = ($this->failedAttempts[$locationId] ?? 0) + 1;
+        if ($this->failedAttempts[$locationId] >= $maxAttempts) {
+            $this->locked[$locationId] = true;
+        }
+    }
+
+    public function resetLoginAttempts(int $locationId): void
+    {
+        $this->failedAttempts[$locationId] = 0;
+        $this->locked[$locationId] = false;
+    }
+}
+
 // -------------------------------------------------------------
 // Inicialización del servicio y actores de prueba
 // -------------------------------------------------------------
 $locRepo = new InMemoryLocationRepository();
 $auditRepo = new InMemoryAuditLogRepository();
 $auditLogger = new AuditLogger($auditRepo);
-$service = new AdminLocationService($locRepo, $auditLogger);
+$accessCodeRepo = new InMemorySiteAccessCodeRepository();
+$service = new AdminLocationService($locRepo, $auditLogger, $accessCodeRepo);
 
 $coordinatorActor = [
     'id'   => 1,
@@ -280,7 +330,7 @@ $coordinatorActor = [
 // =====================================================================
 echo "--- Caso 1: Creación exitosa de sede (createLocation) ---\n";
 
-$created = $service->createLocation([
+$createdResult = $service->createLocation([
     'site_code'     => 'SEDE-VAL-01',
     'name'          => 'Politécnico de Valencia - Rectorado',
     'address'       => 'Camino de Vera s/n, 46022 Valencia',
@@ -290,13 +340,28 @@ $created = $service->createLocation([
     'longitude'     => -0.3401,
 ], $coordinatorActor, '192.168.1.50');
 
-assertCondition($created instanceof Location, "1.1 createLocation() devuelve instancia de Location");
+assertCondition(is_array($createdResult) && ($createdResult['location'] ?? null) instanceof Location, "1.1 createLocation() devuelve la sede creada con su clave de centro");
+$created = $createdResult['location'];
+$issuedAccessCode = (string)($createdResult['access_code'] ?? '');
+
 assertCondition($created->getSiteCode() === 'SEDE-VAL-01', "1.2 site_code coincide en mayúsculas");
 assertCondition($created->isActive() === true, "1.3 is_active es true por defecto");
 assertCondition($created->getLatitude() === 39.4812 && $created->getLongitude() === -0.3401, "1.3.1 Las coordenadas proporcionadas se conservan en la sede");
 
+// Credencial de sede (S-4): el alta entrega la clave una sola vez y solo persiste su huella
+assertCondition(SiteAccessCodeGenerator::isValid($issuedAccessCode), "1.3.2 El alta emite una clave de centro con el formato canónico");
+assertCondition(
+    str_starts_with((string)($accessCodeRepo->hashes[$created->getId()] ?? ''), '$2y$')
+        && password_verify(SiteAccessCodeGenerator::normalize($issuedAccessCode), (string)$accessCodeRepo->hashes[$created->getId()]),
+    "1.3.3 La clave se guarda solo como huella bcrypt verificable"
+);
+assertCondition(
+    !str_contains((string)json_encode($auditRepo->events), $issuedAccessCode),
+    "1.3.4 Ni una sola entrada de auditoría contiene la clave en claro"
+);
+
 // Verificar auditoría
-assertCondition(count($auditRepo->events) === 1, "1.4 Se registró 1 evento en audit_log");
+assertCondition(count($auditRepo->events) === 2, "1.4 Se registraron 2 eventos en audit_log (alta + emisión de clave)");
 $ev1 = $auditRepo->events[0];
 assertCondition($ev1->getAction() === 'LOCATION_CREATED', "1.5 Acción es LOCATION_CREATED");
 assertCondition($ev1->getEntityType() === 'LOCATION', "1.6 Entidad es LOCATION");
@@ -304,6 +369,11 @@ assertCondition($ev1->getEntityId() === $created->getId(), "1.7 entity_id coinci
 assertCondition($ev1->getPreviousState() === null, "1.8 previous_state es null en alta");
 assertCondition(($ev1->getNewState()['site_code'] ?? '') === 'SEDE-VAL-01', "1.9 new_state contiene site_code");
 assertCondition(($ev1->getMetadata()['ip'] ?? '') === '192.168.1.50', "1.10 Metadatos registran IP del cliente");
+
+$evAccess = $auditRepo->events[1];
+assertCondition($evAccess->getAction() === 'LOCATION_ACCESS_CODE_ISSUED', "1.11 La emisión de la clave queda auditada (Art. III)");
+assertCondition(($evAccess->getMetadata()['delivery'] ?? '') === 'IN_PERSON_ONLY', "1.12 La auditoría fija la política de entrega en mano");
+assertCondition(($evAccess->getNewState()['has_access_code'] ?? null) === true, "1.13 El estado auditado solo declara que hay clave, nunca la clave");
 
 // =====================================================================
 // CASO 2: Validación estricta de formato de site_code

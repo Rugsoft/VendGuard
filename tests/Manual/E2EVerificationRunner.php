@@ -128,15 +128,20 @@ $vend0101Id = (int)$checkMachines['id'];
 // ─────────────────────────────────────────────────────────────────────────
 echo "\n{$colorCyan}--- Paso 1: Perfil Responsable de Ubicación (SEDE-BCN-01) ---{$colorReset}\n";
 
-// 1.1 Login por código de sede (RF-01)
+// 1.1 Login con las dos credenciales de sede (RF-01, hallazgo S-4): código de sede +
+// clave de centro. El guion corre contra el servidor local, cuyas sedes semilla llevan
+// la clave de desarrollo documentada en el README.
 $resSiteLogin = makeHttpRequest('POST', "{$baseUrl}/api/auth/site-login", [
-    'site_code' => 'SEDE-BCN-01'
+    'site_code' => 'SEDE-BCN-01',
+    'access_code' => SeedRunner::devAccessCode('SEDE-BCN-01')
 ]);
-$assert("1.1 Login de Sede con SEDE-BCN-01 responde HTTP 200 OK", $resSiteLogin['status'] === 200);
+$assert("1.1 Login de Sede con SEDE-BCN-01 y su clave de centro responde HTTP 200 OK", $resSiteLogin['status'] === 200);
 $siteToken = $resSiteLogin['body']['data']['token'] ?? null;
 $assert("1.2 Token de sede emitido correctamente", !empty($siteToken));
 
 // 1.2 Consulta de catálogo de máquinas de la sede (RF-01)
+// El token de sede es la única credencial válida de esta ruta: la antigua cabecera
+// X-Site-Code está retirada (hallazgo S-4).
 $resMachines = makeHttpRequest('GET', "{$baseUrl}/api/locations/SEDE-BCN-01/machines", [], $siteToken);
 $assert("1.3 Catálogo de máquinas devuelve HTTP 200 OK", $resMachines['status'] === 200);
 $machinesList = $resMachines['body']['data'] ?? [];

@@ -295,7 +295,7 @@ $reqCreate = new Request('POST', '/api/incidents', [], [
     'category'      => 'ELECTRICAL_OFF',
     'description'   => 'Monedero no devuelve cambio y la máquina no dispensa',
     'reporter_name' => 'Marc Recepción',
-], ['X-Site-Code' => 'SEDE-BCN-01']);
+], ['Authorization' => 'Bearer ' . $siteToken]);
 $resCreate = $router->dispatch($reqCreate);
 
 $assert("3.1 Creación de avería desde el portal de sede retorna HTTP 201", $resCreate->getStatusCode() === 201);
@@ -327,14 +327,14 @@ if ($createdIncidentId > 0) {
 $reqComment = new Request('POST', "/api/incidents/{$ticketCode}/comments", [], [
     'comment_text' => 'El personal de sala confirma que el fallo persiste desde esta mañana',
     'author_name'  => 'Marc Recepción',
-], ['X-Site-Code' => 'SEDE-BCN-01']);
+], ['Authorization' => 'Bearer ' . $siteToken]);
 $resComment = $router->dispatch($reqComment);
 
 $assert("3.3 Comentario público de sede registra HTTP 201", $resComment->getStatusCode() === 201);
 $registerAuditPayload('POST /api/incidents/{ticket_code}/comments', $resComment->getBody());
 
 // 3.4 Consulta de bitácora pública (los comentarios internos jamás se exponen, RNF-04)
-$resBitacora = $router->dispatch(new Request('GET', "/api/incidents/{$ticketCode}/comments", [], [], ['X-Site-Code' => 'SEDE-BCN-01']));
+$resBitacora = $router->dispatch(new Request('GET', "/api/incidents/{$ticketCode}/comments", [], [], ['Authorization' => 'Bearer ' . $siteToken]));
 $assert("3.4 Consulta de bitácora pública retorna HTTP 200", $resBitacora->getStatusCode() === 200);
 $registerAuditPayload('GET /api/incidents/{ticket_code}/comments', $resBitacora->getBody());
 
@@ -358,7 +358,7 @@ $pdo->prepare("
 
 $reqReopen = new Request('POST', "/api/incidents/{$ticketCode}/reopen", [], [
     'reopen_reason' => 'La máquina volvió a fallar tras la reparación anterior',
-], ['X-Site-Code' => 'SEDE-BCN-01']);
+], ['Authorization' => 'Bearer ' . $siteToken]);
 $resReopen = $router->dispatch($reqReopen);
 
 $assert("3.6 Reapertura dentro de la ventana de garantía retorna HTTP 200", $resReopen->getStatusCode() === 200);

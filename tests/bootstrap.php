@@ -11,6 +11,12 @@ declare(strict_types=1);
 error_reporting(E_ALL);
 ini_set('display_errors', '1');
 
+// Contexto de pruebas: habilita las claves de centro de desarrollo de las sedes
+// semilla (hallazgo S-4). `SeedRunner::devAccessCodeSeedingEnabled()` exige esta
+// constante —o `VENDGUARD_DEV_SITE_KEYS=1`— y jamás siembra con el entorno
+// declarado de producción, que es el arranque del contenedor desplegado.
+define('VENDGUARD_TESTING', true);
+
 require_once __DIR__ . '/../src/autoload.php';
 
 // Limpiador compartido de datos de prueba. Se carga aquí para que TODAS las

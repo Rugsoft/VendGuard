@@ -75,8 +75,14 @@ $assert("2.2 Define la clase ApiClient con inyección automática de tokens Bear
     strpos($apiContent, "headers['Authorization'] = `Bearer \${this.token}`") !== false
 );
 
-$assert("2.3 Define cabecera X-Site-Code para el contexto de sede",
-    strpos($apiContent, "headers['X-Site-Code'] = this.siteCode") !== false
+$assert("2.3 La cabecera X-Site-Code está retirada: el contexto de sede viaja solo en el token",
+    strpos($apiContent, "headers['X-Site-Code']") === false &&
+    strpos($apiContent, 'X-Site-Code') === false
+);
+
+$assert("2.3.1 El login de sede exige las dos credenciales (código de sede y clave de centro)",
+    strpos($apiContent, "siteLogin: async (siteCode, accessCode)") !== false &&
+    strpos($apiContent, 'access_code: accessCode') !== false
 );
 
 $assert("2.4 Maneja envío de FormData y omite Content-Type manual para cálculo de boundary",

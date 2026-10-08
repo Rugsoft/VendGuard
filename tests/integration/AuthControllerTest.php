@@ -49,12 +49,14 @@ $assert = function (string $caseTitle, bool $condition, string $message = '') us
 };
 
 // =====================================================================
-// SECCIÓN 1: POST /api/auth/site-login (Acceso por Código de Sede)
+// SECCIÓN 1: POST /api/auth/site-login (Código de Sede + Clave de Centro, S-4)
 // =====================================================================
 echo "--- Sección 1: POST /api/auth/site-login (RF-01) ---\n";
 
-// 1.1 Sede válida existente (SEDE-BCN-01)
-$reqSiteOk = new Request('POST', '/api/auth/site-login', [], ['site_code' => 'SEDE-BCN-01']);
+$devAccessCode = SeedRunner::devAccessCode('SEDE-BCN-01');
+
+// 1.1 Sede válida existente (SEDE-BCN-01) con su clave de centro vigente
+$reqSiteOk = new Request('POST', '/api/auth/site-login', [], ['site_code' => 'SEDE-BCN-01', 'access_code' => $devAccessCode]);
 $resSiteOk = $router->dispatch($reqSiteOk);
 
 $assert("1.1 Login con 'SEDE-BCN-01' responde HTTP 200 OK", $resSiteOk->getStatusCode() === 200);
@@ -71,24 +73,37 @@ $assert("1.5 El token codifica el site_code 'SEDE-BCN-01'", ($validatedPayload['
 $locationData = $bodySiteOk['data']['location'] ?? [];
 $assert("1.6 Se devuelven los datos de la sede (nombre y dirección)", ($locationData['site_code'] ?? '') === 'SEDE-BCN-01' && !empty($locationData['name']));
 
-// 1.2 Sede con espacios o minúsculas (normalización)
-$reqSiteNorm = new Request('POST', '/api/auth/site-login', [], ['site_code' => '  sede-bcn-01  ']);
+// 1.2 Sede con espacios o minúsculas (normalización) y clave normalizada
+$reqSiteNorm = new Request('POST', '/api/auth/site-login', [], ['site_code' => '  sede-bcn-01  ', 'access_code' => ' dev-sede-bcn-01 ']);
 $resSiteNorm = $router->dispatch($reqSiteNorm);
-$assert("1.7 Búsqueda de sede es insensible a mayúsculas y espacios periféricos", $resSiteNorm->getStatusCode() === 200);
+$assert("1.7 Búsqueda de sede y clave son insensibles a mayúsculas y espacios periféricos", $resSiteNorm->getStatusCode() === 200);
 
 // 1.3 Sede inexistente
-$reqSiteBad = new Request('POST', '/api/auth/site-login', [], ['site_code' => 'SEDE-INVENTADA-99']);
+$reqSiteBad = new Request('POST', '/api/auth/site-login', [], ['site_code' => 'SEDE-INVENTADA-99', 'access_code' => $devAccessCode]);
 $resSiteBad = $router->dispatch($reqSiteBad);
 
 $assert("1.8 Código de sede desconocido responde HTTP 401 Unauthorized", $resSiteBad->getStatusCode() === 401);
 $bodySiteBad = $resSiteBad->getDecodedBody();
-$assert("1.9 Código de error es 'INVALID_SITE_CODE'", ($bodySiteBad['error']['code'] ?? '') === 'INVALID_SITE_CODE');
+$assert("1.9 El error es genérico: 'INVALID_SITE_CREDENTIALS'", ($bodySiteBad['error']['code'] ?? '') === 'INVALID_SITE_CREDENTIALS');
 
-// 1.4 Código de sede ausente
+// 1.3b Clave de centro incorrecta sobre una sede real: mismo 401 y mismo mensaje
+$reqWrongKey = new Request('POST', '/api/auth/site-login', [], ['site_code' => 'SEDE-BCN-01', 'access_code' => 'K7M4P-2QX9R']);
+$resWrongKey = $router->dispatch($reqWrongKey);
+$bodyWrongKey = $resWrongKey->getDecodedBody();
+$assert("1.9b Clave incorrecta responde HTTP 401 Unauthorized", $resWrongKey->getStatusCode() === 401);
+$assert("1.9c El mensaje es idéntico al de una sede inexistente (sin oráculo)",
+    ($bodyWrongKey['error']['code'] ?? '') === 'INVALID_SITE_CREDENTIALS'
+    && ($bodyWrongKey['error']['message'] ?? '') === ($bodySiteBad['error']['message'] ?? null));
+
+// 1.4 Credenciales ausentes: sin site_code y sin access_code la petición es incompleta
 $reqSiteEmpty = new Request('POST', '/api/auth/site-login', [], []);
 $resSiteEmpty = $router->dispatch($reqSiteEmpty);
-
 $assert("1.10 Petición sin 'site_code' responde HTTP 400 Bad Request", $resSiteEmpty->getStatusCode() === 400);
+
+$reqNoKey = new Request('POST', '/api/auth/site-login', [], ['site_code' => 'SEDE-BCN-01']);
+$resNoKey = $router->dispatch($reqNoKey);
+$assert("1.11 Petición con sede pero sin 'access_code' responde HTTP 400 MISSING_SITE_CREDENTIALS",
+    $resNoKey->getStatusCode() === 400 && ($resNoKey->getDecodedBody()['error']['code'] ?? '') === 'MISSING_SITE_CREDENTIALS');
 
 // =====================================================================
 // SECCIÓN 2: POST /api/auth/login (Acceso de Personal Interno)
@@ -167,7 +182,7 @@ if ($socket) {
         'http' => [
             'method' => 'POST',
             'header' => "Content-Type: application/json\r\n",
-            'content' => json_encode(['site_code' => 'SEDE-BCN-01']),
+            'content' => json_encode(['site_code' => 'SEDE-BCN-01', 'access_code' => SeedRunner::devAccessCode('SEDE-BCN-01')]),
             'ignore_errors' => true,
         ],
     ];

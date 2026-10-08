@@ -176,9 +176,13 @@ $reopenRequest = function (int $slotIndex, string $ticketCode, string $reason) u
     $request = new Request(
         method: 'POST',
         path: "/api/incidents/{$ticketCode}/reopen",
-        parsedBody: ['reopen_reason' => $reason],
-        headers: ['X-Site-Code' => $slot['site_code']]
+        parsedBody: ['reopen_reason' => $reason]
     );
+
+    // La identidad de sede la inyecta el middleware ya validado (token firmado); la
+    // cabecera X-Site-Code está retirada como credencial (hallazgo S-4).
+    $request->setAttribute('authenticated_location', $slot['location']);
+    $request->setAttribute('site_code', $slot['site_code']);
 
     return $request->setRouteParams(['ticket_code' => $ticketCode]);
 };

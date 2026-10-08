@@ -2,7 +2,8 @@
  * VendGuard - LocationPortalView & MachineCard Test Suite (T-34)
  * 
  * Verifies:
- * 1. Location Responsible logs in with site code (SEDE-BCN-01) without passwords (RF-01).
+ * 1. Location Responsible logs in with the two site credentials, site code (SEDE-BCN-01)
+ *    plus the centre access code issued by coordination (RF-01, hallazgo S-4).
  * 2. Visualizes machines in 8px radius cards (--radius-card, RNF-06).
  * 3. Clearly distinguishes between operational machines and those with active incidents (RF-02).
  * 4. Informs user that duplicate tickets are blocked on machines with open incidents (RF-02).
@@ -102,9 +103,11 @@ console.log('--- Group 1: Site Code Authentication Flow (RF-01) ---');
 clearSession();
 assert('1.1 Initial view starts unauthenticated', store.isSiteSession === false);
 
-// Mock api.auth.siteLogin
-api.auth.siteLogin = async (code) => {
-  if (code === 'SEDE-BCN-01') {
+// Mock api.auth.siteLogin (two credentials since S-4: site code + centre access code)
+let lastSiteLoginArgs = null;
+api.auth.siteLogin = async (code, accessCode) => {
+  lastSiteLoginArgs = { code, accessCode };
+  if (code === 'SEDE-BCN-01' && accessCode === 'K7M4P-2QX9R') {
     return {
       token: 'site_token_bcn_test',
       location: {
@@ -116,18 +119,19 @@ api.auth.siteLogin = async (code) => {
       }
     };
   }
-  const err = new Error('Código de sede no reconocido.');
+  const err = new Error('Código o clave no reconocidos.');
   err.status = 401;
   throw err;
 };
 
 // Test unauthenticated template
 assert('1.2 Unauthenticated template renders site code input', LocationPortalView.template.includes('id="site-code-input"'));
-assert('1.3 Unauthenticated template renders uppercase input hint', LocationPortalView.template.includes('SEDE-BCN-01'));
+assert('1.3 Unauthenticated template renders the centre access code input (S-4)', LocationPortalView.template.includes('id="access-code-input"') && LocationPortalView.template.includes('SEDE-BCN-01'));
 
 // Simulate login call
 const viewInstance = {
   siteCodeInput: 'SEDE-BCN-01',
+  accessCodeInput: 'K7M4P-2QX9R',
   loginError: '',
   isLoggingIn: false,
   loadMachines: async () => {},
@@ -139,6 +143,34 @@ await viewInstance.handleSiteLogin();
 assert('1.4 handleSiteLogin() authenticates and updates store session', store.isSiteSession === true);
 assert('1.5 store.state.location matches logged in site', store.state.location?.site_code === 'SEDE-BCN-01');
 assert('1.6 siteCodeInput is cleared upon success', viewInstance.siteCodeInput === '');
+assert('1.6.1 Both credentials reach the API (site code + access code)', lastSiteLoginArgs?.code === 'SEDE-BCN-01' && lastSiteLoginArgs?.accessCode === 'K7M4P-2QX9R');
+assert('1.6.2 The access code is cleared from memory after a successful login', viewInstance.accessCodeInput === '');
+
+// Missing centre key must fail before any request
+const missingKeyInstance = {
+  siteCodeInput: 'SEDE-BCN-01',
+  accessCodeInput: '   ',
+  loginError: '',
+  isLoggingIn: false,
+  loadMachines: async () => {},
+  ...LocationPortalView.methods
+};
+lastSiteLoginArgs = null;
+await missingKeyInstance.handleSiteLogin();
+assert('1.7 Without the centre key the login is rejected locally and no request is sent', missingKeyInstance.loginError !== '' && lastSiteLoginArgs === null);
+
+// A wrong key keeps the user unauthenticated and shows the generic error
+clearSession();
+const wrongKeyInstance = {
+  siteCodeInput: 'SEDE-BCN-01',
+  accessCodeInput: 'XXXXX-XXXXX',
+  loginError: '',
+  isLoggingIn: false,
+  loadMachines: async () => {},
+  ...LocationPortalView.methods
+};
+await wrongKeyInstance.handleSiteLogin();
+assert('1.8 A rejected credential pair leaves the portal unauthenticated with an error', store.isSiteSession === false && wrongKeyInstance.loginError !== '');
 
 // ---------------------------------------------------------------------
 // TEST GROUP 2: MachineCard Rendering & 8px Card Radius

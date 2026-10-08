@@ -252,19 +252,25 @@ foreach ($globalQData['machines_breakdown'] ?? [] as $mb) {
         break;
     }
 }
-$assert("6.4 VEND-0101 aparece en breakdown con quarantine=true", $quarantineMachine !== null && ($quarantineMachine['quarantine'] ?? false) === true);
+$assert("6.4 VEND-0101 aparece en breakdown con quarantine=true", $quarantineMachine !== null && ($quarantineMachine['quarantine'] ?? false) === true);// =========================================================================
+// BLOQUE 7: La cabecera X-Site-Code está retirada (hallazgo S-4)
+// =========================================================================
 
-// =========================================================================
-// BLOQUE 7: Acceso con X-Site-Code header (alternativa a Bearer)
-// =========================================================================
-echo "\n--- BLOQUE 7: Autenticación mediante X-Site-Code ---\n";
+echo "\n--- BLOQUE 7: La cabecera retirada X-Site-Code ya no autentica ---\n";
 
 $reqXSite = new Request('GET', '/api/site/sanitary-status', [], [], ['X-Site-Code' => 'SEDE-BCN-01']);
 $resXSite = $router->dispatch($reqXSite);
 
-$assert("7.1 Acceso con X-Site-Code retorna HTTP 200", $resXSite->getStatusCode() === 200);
+$assert("7.1 Acceso con X-Site-Code retorna HTTP 401 (cabecera retirada)", $resXSite->getStatusCode() === 401);
 $bodyXSite = json_decode($resXSite->getBody(), true);
-$assert("7.2 Respuesta contiene success=true", ($bodyXSite['success'] ?? false) === true);
+$assert("7.2 El rechazo llega como error UNAUTHORIZED y no revela la vía antigua",
+    ($bodyXSite['success'] ?? true) === false
+    && ($bodyXSite['error']['code'] ?? '') === 'UNAUTHORIZED'
+    && !str_contains((string)($bodyXSite['error']['message'] ?? ''), 'X-Site-Code'));
+
+// El token de sede sigue siendo la única puerta: control positivo en el mismo endpoint
+$reqSiteToken = new Request('GET', '/api/site/sanitary-status', [], [], ['Authorization' => 'Bearer ' . $siteToken]);
+$assert("7.3 El token de sede sí abre el mismo endpoint (control positivo)", $router->dispatch($reqSiteToken)->getStatusCode() === 200);
 
 // Limpieza operacional segura (orden derivado del grafo de FKs).
 TestDataCleaner::purge($pdo);

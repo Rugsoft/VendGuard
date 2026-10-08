@@ -574,9 +574,11 @@ $assert('4.2 No queda ni un mensaje ni un expediente de la prueba de carga',
 // Las tablas maestras (locations, machines, users) están protegidas por diseño en
 // TestDataCleaner::purge(): no se purgan nunca, de modo que otras suites pueden
 // haber añadido filas propias. Se exige el suelo canónico de la semilla, no un valor
-// exacto que dependería del orden de ejecución de la batería.
+// exacto que dependería del orden de ejecución de la batería. El suelo son las filas
+// que produce `SeedRunner::seedAll()` (10 sedes, 13 máquinas, 7 usuarios internos) más
+// las que añade `DemoMetricsSeeder`: cualquier suite posterior solo puede sumar.
 $assert('4.3 Las tablas maestras conservan al menos la semilla canónica del proyecto',
-    $baseline['locations'] >= 101 && $baseline['machines'] >= 18 && $baseline['users'] >= 8,
+    $baseline['locations'] >= 10 && $baseline['machines'] >= 13 && $baseline['users'] >= 7,
     'estado real: ' . json_encode($baseline));
 
 echo "\nBase de datos restablecida a las semillas (limpieza de la suite).\n";
