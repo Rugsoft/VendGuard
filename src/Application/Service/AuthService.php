@@ -10,6 +10,7 @@ use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SiteAccessCodeRepositoryInterface;
+use VendGuard\Core\Domain\Repository\UserLockoutRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\Service\SiteAccessCodeGenerator;
 use VendGuard\Infrastructure\Config\SecretProvider;
@@ -42,21 +43,32 @@ class AuthService
     /** Duración del bloqueo temporal de una sede tras agotar los intentos: 15 minutos. */
     public const SITE_LOGIN_LOCK_SECONDS = 900;
 
+    /**
+     * Fallos consecutivos de contraseña que activan el bloqueo temporal de usuario interno (S-3).
+     */
+    public const INTERNAL_LOGIN_MAX_ATTEMPTS = 5;
+
+    /** Duración del bloqueo temporal de usuario interno: 15 minutos (900s). */
+    public const INTERNAL_LOGIN_LOCK_SECONDS = 900;
+
     private LocationRepositoryInterface $locationRepo;
     private UserRepositoryInterface $userRepo;
     private SiteAccessCodeRepositoryInterface $accessCodeRepo;
+    private UserLockoutRepositoryInterface $userLockoutRepo;
     private string $secretKey;
 
     public function __construct(
         ?LocationRepositoryInterface $locationRepo = null,
         ?UserRepositoryInterface $userRepo = null,
         ?string $secretKey = null,
-        ?SiteAccessCodeRepositoryInterface $accessCodeRepo = null
+        ?SiteAccessCodeRepositoryInterface $accessCodeRepo = null,
+        ?UserLockoutRepositoryInterface $userLockoutRepo = null
     ) {
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
         $this->userRepo = $userRepo ?? new PdoUserRepository();
         $this->secretKey = $secretKey ?? SecretProvider::authSecret();
         $this->accessCodeRepo = $accessCodeRepo ?? new PdoSiteAccessCodeRepository();
+        $this->userLockoutRepo = $userLockoutRepo ?? ($this->userRepo instanceof UserLockoutRepositoryInterface ? $this->userRepo : new PdoUserRepository());
     }
 
     /**
@@ -107,22 +119,44 @@ class AuthService
     }
 
     /**
-     * Autentica un usuario interno por email y contraseña (RF-04).
+     * Autentica un usuario interno por email y contraseña (RF-04), aplicando
+     * freno de fuerza bruta y bloqueo temporal a nivel de cuenta (hallazgo S-3).
      *
      * @param string $email Correo del usuario.
      * @param string $plainPassword Contraseña en texto plano.
-     * @return array{token: string, user: User}|null Devuelve null si credenciales inválidas.
+     * @return array{token: string, user: User}|null|'LOCKED' Devuelve array si es exitoso, 'LOCKED' si la cuenta está bloqueada, o null si las credenciales son inválidas.
      */
-    public function loginInternal(string $email, string $plainPassword): ?array
+    public function loginInternal(string $email, string $plainPassword): array|string|null
     {
         $user = $this->userRepo->findByEmail($email);
         if ($user === null) {
             return null;
         }
 
+        // Comprobar estado de bloqueo
+        $lockout = $this->userLockoutRepo->findLoginLockoutState($user->getId());
+        if ($lockout !== null && $lockout['is_locked']) {
+            return 'LOCKED';
+        }
+
         if (!$user->verifyPassword($plainPassword)) {
+            $this->userLockoutRepo->registerFailedLogin(
+                $user->getId(),
+                self::INTERNAL_LOGIN_MAX_ATTEMPTS,
+                self::INTERNAL_LOGIN_LOCK_SECONDS
+            );
+
+            // Si este intento activó el bloqueo, indicarlo
+            $afterLockout = $this->userLockoutRepo->findLoginLockoutState($user->getId());
+            if ($afterLockout !== null && $afterLockout['is_locked']) {
+                return 'LOCKED';
+            }
+
             return null;
         }
+
+        // Login exitoso: restablecer intentos
+        $this->userLockoutRepo->resetLoginAttempts($user->getId());
 
         $token = $this->generateInternalToken($user);
 

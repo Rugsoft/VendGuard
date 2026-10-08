@@ -94,6 +94,14 @@ class AuthController
 
         $result = $this->authService->loginInternal(trim((string)$email), (string)$password);
 
+        if ($result === 'LOCKED') {
+            return Response::error(
+                'ACCOUNT_LOCKED',
+                'Cuenta temporalmente bloqueada por demasiados intentos fallidos. Inténtelo de nuevo en 15 minutos.',
+                423
+            );
+        }
+
         if ($result === null) {
             return Response::error(
                 'INVALID_CREDENTIALS',

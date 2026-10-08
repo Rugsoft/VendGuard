@@ -8,6 +8,7 @@ use PDO;
 use RuntimeException;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
+use VendGuard\Core\Domain\Repository\UserLockoutRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 
@@ -17,7 +18,7 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  * Implementación PDO para el acceso y autenticación de usuarios internos.
  * Utiliza sentencias preparadas nativas y filtrado de soft delete (RF-03, RF-04 / RNF-03).
  */
-class PdoUserRepository implements UserRepositoryInterface
+class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositoryInterface
 {
     private PDO $pdo;
 
@@ -503,5 +504,88 @@ class PdoUserRepository implements UserRepositoryInterface
     public function countPendingIncidents(int $technicianId): int
     {
         return $this->countActiveAssignedIncidents($technicianId);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function findLoginLockoutState(int $userId): ?array
+    {
+        $sql = "
+            SELECT 
+                `login_attempts` AS attempts,
+                `login_locked_until` AS locked_until,
+                (`login_locked_until` IS NOT NULL AND `login_locked_until` > NOW()) AS is_locked
+            FROM `users`
+            WHERE `id` = :id
+              AND `deleted_at` IS NULL
+            LIMIT 1
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([':id' => $userId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($row === false) {
+            return null;
+        }
+
+        return [
+            'attempts' => (int)$row['attempts'],
+            'is_locked' => (bool)$row['is_locked'],
+            'locked_until' => $row['locked_until'] !== null ? (string)$row['locked_until'] : null,
+        ];
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function registerFailedLogin(int $userId, int $maxAttempts, int $lockSeconds): void
+    {
+        // Limpiar bloqueo expirado si ya transcurrió el tiempo de penalización
+        $clearExpiredSql = "
+            UPDATE `users`
+            SET `login_attempts` = 0, `login_locked_until` = NULL
+            WHERE `id` = :id
+              AND `login_locked_until` IS NOT NULL
+              AND `login_locked_until` <= NOW()
+        ";
+        $this->pdo->prepare($clearExpiredSql)->execute([':id' => $userId]);
+
+        // Registrar fallo e incrementar contador. Si llega al umbral, bloquear
+        $sql = "
+            UPDATE `users`
+            SET
+                `login_locked_until` = CASE
+                    WHEN (`login_attempts` + 1) >= :max_attempts
+                    THEN DATE_ADD(NOW(), INTERVAL :lock_seconds SECOND)
+                    ELSE NULL
+                END,
+                `login_attempts` = `login_attempts` + 1
+            WHERE `id` = :id
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([
+            ':max_attempts' => $maxAttempts,
+            ':lock_seconds' => $lockSeconds,
+            ':id' => $userId,
+        ]);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function resetLoginAttempts(int $userId): void
+    {
+        $sql = "
+            UPDATE `users`
+            SET
+                `login_attempts` = 0,
+                `login_locked_until` = NULL
+            WHERE `id` = :id
+        ";
+
+        $this->pdo->prepare($sql)->execute([':id' => $userId]);
     }
 }

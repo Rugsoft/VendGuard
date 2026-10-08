@@ -11,9 +11,9 @@
 > documentales y endurecimientos sin alterar contratos de negocio, con una excepción decidida
 > por el Product Owner: **V-6** baja la sesión de sede a 24 h (EARS 1.3). S-3 y S-4 quedaron
 > **explícitamente fuera de Fase 1** (requieren especificación funcional y/o decisión de
-> Product Owner, ver §3). **Actualización (2026-10-08):** S-4 fue decidido por el Product Owner y
-> cerrado con su propia enmienda (clave de centro, retirada de `X-Site-Code` y freno por sede);
-> S-3 sigue diferido.
+> Product Owner, ver §3). **Actualización (2026-10-08):** S-4 fue cerrado con su propia enmienda
+> (clave de centro, retirada de `X-Site-Code` y freno por sede). S-3 fue aprobado y cerrado
+> con bloqueo por cuenta tras 5 fallos durante 15 minutos (`423 ACCOUNT_LOCKED`).
 
 ---
 
@@ -23,7 +23,7 @@
 | :--- | :--- | :--- | :--- | :--- |
 | **S-1** | Secretos criptográficos hardcodeados (`SECRET_KEY`, `CRON_SECRET`) | 🔴 Crítica | **CERRADO en Fase 1** | Es un arreglo de configuración sin cambio de contrato: la clave de firma deja de estar en el repositorio y en producción el sistema **falla en cerrado** si no se define por entorno. |
 | **S-2** | `POST /api/cron/auto-close` sin middleware | 🟡 Media | **CERRADO en Fase 1** | La ruta de un proceso batch quedaba fuera del patrón de las 75 restantes. Se extrae `CronAuthMiddleware` y el controlador pasa a fail-closed. |
-| **S-3** | Cero rate-limiting en `loginInternal()` | 🔴 Crítica | **DIFERIDO** (necesita spec) | Introduce comportamiento nuevo (contador de intentos, umbrales, bloqueo, respuestas `429`) y por tanto contrato: exige Fase 1 funcional + puerta de aprobación antes de tocar código (AGENTS.md §2). |
+| **S-3** | Cero rate-limiting en `loginInternal()` | 🔴 Crítica | **CERRADO · decisión de PO (2026-10-08)** | Freno de 5 intentos fallidos consecutivos por cuenta con bloqueo de 15 min (`423 ACCOUNT_LOCKED`), migración 015 y `UserLockoutRepositoryInterface`. Enmienda en `docs/propuesta_decision_s3_login_lockout.md`. |
 | **S-4** | `X-Site-Code` y `site-login` son la misma puerta sin credencial | 🔴 Crítica | **CERRADO · decisión de PO (2026-10-08)** | El PO eligió la opción A: clave de centro emitida en el alta (solo huella, entregada en mano), retirada de la cabecera y freno de intentos por sede. Enmienda y plan en [`docs/propuesta_decision_s4_acceso_sede.md`](../../docs/propuesta_decision_s4_acceso_sede.md). |
 | **H-1** | Tres servicios de `Core/Service` dependen de `Infrastructure` | 🟡 Media | **CERRADO en Fase 1** | Refactor sin cambio de comportamiento y **alineación con la arquitectura ya aprobada**: `specs/02-qr-codes/plan.md` ya situaba `QrScanService`, `QrReportService` y `QrLabelService` en `Application/Service`. |
 | **H-2** | Service Locator disperso (`?? new Pdo...` en 24 ficheros) | 🟡 Media | **ACEPTADO por diseño** | Consecuencia deliberada del Dogma Vanilla (sin contenedor ni framework): los parámetros opcionales son el mecanismo de inyección en tests. H-1 elimina las instancias que además rompían la pureza de `Core`. Sin acción. |

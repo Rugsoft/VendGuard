@@ -76,9 +76,10 @@ Definir con precisión el comportamiento funcional del Producto Mínimo Viable (
 *El personal interno (coordinación y técnicos) accederá mediante credenciales seguras individuales.*
 
 * **EARS 4.1 (Evento):** Cuando un usuario interno introduce credenciales válidas (correo y contraseña), el sistema deberá iniciar sesión y redirigir a la vista correspondiente a su rol.
-* **EARS 4.2 (Excepción):** Si las credenciales son incorrectas, entonces el sistema deberá rechazar el acceso con un mensaje genérico de error y no revelar si el fallo reside en el usuario o en la clave.
+* **EARS 4.2 (Excepción):** Si las credenciales son incorrectas, entonces el sistema deberá rechazar el acceso con un mensaje genérico de error y no revelar si el fallo reside en el usuario o en la clave, registrando el intento fallido en la cuenta si el usuario existe.
 * **EARS 4.3 (Estado/Técnico):** Mientras un usuario con rol *Técnico de Campo* esté conectado, el sistema deberá mostrarle únicamente las incidencias asignadas a su identificador de usuario y la información operativa relevante.
 * **EARS 4.4 (Estado/Coordinador):** Mientras un usuario con rol *Coordinador* esté conectado, el sistema deberá otorgarle acceso a la supervisión global, reasignación, descarte y consulta de métricas.
+* **EARS 4.5 (Excepción/Bloqueo):** Si se acumulan 5 intentos fallidos consecutivos en una cuenta interna, el sistema deberá bloquear temporalmente el acceso durante 15 minutos respondiendo con código HTTP 423 y código de error `ACCOUNT_LOCKED`. Transcurrido dicho intervalo, el bloqueo expirará automáticamente. Un acceso exitoso restablecerá el contador a cero.
 
 ### RF-05: Triaje, Reclasificación y Asignación de Técnico
 *El coordinador evaluará la cola de trabajo y fijará la asignación a las rutas de campo.*

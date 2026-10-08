@@ -116,7 +116,9 @@ Inicio de sesión para Coordinadores y Técnicos de Campo (RF-04).
 }
 ```
 * **Errores posibles:**
+  * `400 Bad Request` (`MISSING_CREDENTIALS`): Correo o contraseña obligatorios ausentes.
   * `401 Unauthorized` (`INVALID_CREDENTIALS`): Correo o contraseña incorrectos.
+  * `423 Locked` (`ACCOUNT_LOCKED`): Cuenta temporalmente bloqueada por acumular 5 intentos fallidos consecutivos (freno de fuerza bruta S-3). Expira automáticamente a los 15 minutos.
 
 ---
 
