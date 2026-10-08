@@ -27,26 +27,35 @@ class AuthController
 
     /**
      * POST /api/auth/site-login
-     * Acceso simplificado para responsables de centro por código de sede (RF-01).
+     * Acceso de responsables de centro con código de sede y clave de centro (RF-01, EARS 1.1).
      */
     public function siteLogin(Request $request): Response
     {
         $siteCode = $request->getBodyParam('site_code');
+        $accessCode = $request->getBodyParam('access_code');
 
         if ($siteCode === null || trim((string)$siteCode) === '') {
             return Response::error(
-                'MISSING_SITE_CODE',
-                'El código de sede es obligatorio para iniciar sesión en el centro.',
+                'MISSING_SITE_CREDENTIALS',
+                'La petición debe incluir el código de sede y la clave de centro.',
                 400
             );
         }
 
-        $result = $this->authService->loginSite(trim((string)$siteCode));
+        if ($accessCode === null || trim((string)$accessCode) === '') {
+            return Response::error(
+                'MISSING_SITE_CREDENTIALS',
+                'La petición debe incluir el código de sede y la clave de centro.',
+                400
+            );
+        }
+
+        $result = $this->authService->loginSite(trim((string)$siteCode), (string)$accessCode);
 
         if ($result === null) {
             return Response::error(
-                'INVALID_SITE_CODE',
-                'El código de sede no existe o la sede se encuentra inactiva.',
+                'INVALID_SITE_CREDENTIALS',
+                'Código o clave no reconocidos. Contacte con el servicio técnico.',
                 401
             );
         }

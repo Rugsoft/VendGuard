@@ -7,6 +7,7 @@ namespace VendGuard\Infrastructure\Database;
 use PDO;
 use PDOException;
 use RuntimeException;
+use VendGuard\Core\Domain\Service\SiteAccessCodeGenerator;
 
 /**
  * SeedRunner
@@ -52,7 +53,46 @@ class SeedRunner
     }
 
     /**
+     * Clave de centro de desarrollo de una sede (hallazgo S-4).
+     *
+     * No es un secreto: solo existe para que el entorno local y la batería puedan
+     * iniciar sesión de sede sin depender de una entrega física. La regla es
+     * `DEV-<site_code>` y está documentada en el README.
+     */
+    public static function devAccessCode(string $siteCode): string
+    {
+        return 'DEV-' . strtoupper(trim($siteCode));
+    }
+
+    /**
+     * ¿Se pueden sembrar las claves de centro de desarrollo?
+     *
+     * Solo en contexto de pruebas (`VENDGUARD_TESTING`, definido por el bootstrap) o
+     * cuando el operador lo pide de forma explícita (`VENDGUARD_DEV_SITE_KEYS=1`), y
+     * nunca con el entorno declarado de producción. La detección de producción se
+     * replica aquí —en vez de depender de `SecretProvider`— porque esta capa se
+     * ejecuta en arranques mínimos sin autoloader (`bin/init_cloud_db.php`), que es
+     * precisamente el arranque del contenedor desplegado: sembrar aquí una clave
+     * conocida sería entregar el portal de sede a quien lea el repositorio.
+     */
+    public static function devAccessCodeSeedingEnabled(): bool
+    {
+        foreach (['APP_ENV', 'VENDGUARD_ENV'] as $envName) {
+            $value = getenv($envName);
+            if ($value !== false && in_array(strtolower(trim($value)), ['production', 'prod'], true)) {
+                return false;
+            }
+        }
+
+        return defined('VENDGUARD_TESTING') || getenv('VENDGUARD_DEV_SITE_KEYS') === '1';
+    }
+
+    /**
      * Carga programática de sedes iniciales.
+     *
+     * En desarrollo/pruebas siembra además la clave de centro determinista y limpia
+     * el freno de intentos (S-4), para que la batería parta siempre del mismo estado.
+     * En producción el campo no se toca: cada sede recibe su clave por coordinación.
      *
      * @return int Número de sedes procesadas.
      */
@@ -151,9 +191,22 @@ class SeedRunner
             ],
         ];
 
+        $seedDevAccessCodes = self::devAccessCodeSeedingEnabled();
+        $extraColumns = $seedDevAccessCodes
+            ? ', `access_code_hash`, `access_code_issued_at`, `login_attempts`, `login_locked_until`'
+            : '';
+        $extraValues = $seedDevAccessCodes ? ', :access_code_hash, CURRENT_TIMESTAMP, 0, NULL' : '';
+        $extraUpdates = $seedDevAccessCodes
+            ? ",
+                `access_code_hash` = VALUES(`access_code_hash`),
+                `access_code_issued_at` = VALUES(`access_code_issued_at`),
+                `login_attempts` = 0,
+                `login_locked_until` = NULL"
+            : '';
+
         $sql = "
-            INSERT INTO `locations` (`site_code`, `name`, `address`, `latitude`, `longitude`, `contact_name`, `contact_phone`, `is_active`)
-            VALUES (:site_code, :name, :address, :latitude, :longitude, :contact_name, :contact_phone, 1)
+            INSERT INTO `locations` (`site_code`, `name`, `address`, `latitude`, `longitude`, `contact_name`, `contact_phone`, `is_active`{$extraColumns})
+            VALUES (:site_code, :name, :address, :latitude, :longitude, :contact_name, :contact_phone, 1{$extraValues})
             ON DUPLICATE KEY UPDATE
                 `name` = VALUES(`name`),
                 `address` = VALUES(`address`),
@@ -161,14 +214,14 @@ class SeedRunner
                 `longitude` = VALUES(`longitude`),
                 `contact_name` = VALUES(`contact_name`),
                 `contact_phone` = VALUES(`contact_phone`),
-                `deleted_at` = NULL
+                `deleted_at` = NULL{$extraUpdates}
         ";
 
         $stmt = $this->pdo->prepare($sql);
         $count = 0;
 
         foreach ($locations as $loc) {
-            $stmt->execute([
+            $params = [
                 ':site_code' => $loc['site_code'],
                 ':name' => $loc['name'],
                 ':address' => $loc['address'],
@@ -176,7 +229,18 @@ class SeedRunner
                 ':longitude' => $loc['longitude'],
                 ':contact_name' => $loc['contact_name'],
                 ':contact_phone' => $loc['contact_phone'],
-            ]);
+            ];
+            if ($seedDevAccessCodes) {
+                // Se hashea la forma normalizada, la misma que compara `AuthService::loginSite()`,
+                // de modo que `DEV-SEDE-BCN-01` y `devsede bcn 01` abren la misma sede.
+                $params[':access_code_hash'] = password_hash(
+                    SiteAccessCodeGenerator::normalize(self::devAccessCode($loc['site_code'])),
+                    PASSWORD_BCRYPT,
+                    ['cost' => 10]
+                );
+            }
+
+            $stmt->execute($params);
             $count++;
         }
 

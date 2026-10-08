@@ -6,7 +6,6 @@
  * 
  * Key Responsibilities:
  * - Automatically attaches Bearer tokens (auth_token_... or site_token_...) to Authorization header.
- * - Automatically attaches X-Site-Code header when operating under site context.
  * - Auto-detects JSON payloads vs multipart/form-data (file uploads).
  * - Transforms backend envelope errors ({ success: false, error: { code, message, details } }) into ApiError.
  * - Exposes high-level domain methods for all VendGuard REST endpoints.
@@ -178,11 +177,6 @@ export class ApiClient {
     // Attach Bearer token if available and not explicitly provided
     if (this.token && !headers['Authorization']) {
       headers['Authorization'] = `Bearer ${this.token}`;
-    }
-
-    // Attach X-Site-Code if available and not explicitly provided
-    if (this.siteCode && !headers['X-Site-Code']) {
-      headers['X-Site-Code'] = this.siteCode;
     }
 
     // Prepare body: handle JSON vs FormData
@@ -363,12 +357,15 @@ export class ApiClient {
    */
   auth = {
     /**
-     * Authenticates location responsible via site code (RF-01).
+     * Authenticates location responsible with the two site credentials (RF-01).
+     * The site code identifies the centre; the access code — issued at the site's
+     * creation and handed over in person — is the credential that opens the door.
      * @param {string} siteCode - e.g. 'SEDE-BCN-01'
+     * @param {string} accessCode - e.g. 'K7M4P-2QX9R'
      * @returns {Promise<{ token: string, location: Object }>}
      */
-    siteLogin: async (siteCode) => {
-      const data = await this.post('/auth/site-login', { site_code: siteCode });
+    siteLogin: async (siteCode, accessCode) => {
+      const data = await this.post('/auth/site-login', { site_code: siteCode, access_code: accessCode });
       if (data?.token) {
         this.setToken(data.token);
         this.setSiteCode(siteCode);
@@ -1187,6 +1184,9 @@ export class ApiClient {
     },
     reactivateLocation: (id) => {
       return this.patch(`/coordinator/locations/${id}/reactivate`);
+    },
+    reissueLocationAccessCode: (id) => {
+      return this.post(`/coordinator/locations/${id}/access-code`);
     },
 
     // Machines (RF-02)

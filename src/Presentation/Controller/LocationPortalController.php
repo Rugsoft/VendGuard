@@ -226,9 +226,9 @@ class LocationPortalController
             }
         }
         if ($location === null) {
-            $siteCodeHeader = $request->getHeader('X-Site-Code') ?? $request->getAttribute('site_code');
-            if ($siteCodeHeader !== null && trim((string)$siteCodeHeader) !== '') {
-                $location = $this->locationRepo->findBySiteCode(trim((string)$siteCodeHeader), true);
+            $siteCode = $request->getAttribute('site_code');
+            if ($siteCode !== null && trim((string)$siteCode) !== '') {
+                $location = $this->locationRepo->findBySiteCode(trim((string)$siteCode), true);
             }
         }
 
@@ -860,9 +860,9 @@ class LocationPortalController
             }
         }
         if ($location === null) {
-            $siteCodeHeader = $request->getHeader('X-Site-Code') ?? $request->getAttribute('site_code');
-            if ($siteCodeHeader !== null && trim((string)$siteCodeHeader) !== '') {
-                $location = $this->locationRepo->findBySiteCode(trim((string)$siteCodeHeader), true);
+            $siteCode = $request->getAttribute('site_code');
+            if ($siteCode !== null && trim((string)$siteCode) !== '') {
+                $location = $this->locationRepo->findBySiteCode(trim((string)$siteCode), true);
             }
         }
 
@@ -921,9 +921,9 @@ class LocationPortalController
             }
         }
         if ($location === null) {
-            $siteCodeHeader = $request->getHeader('X-Site-Code') ?? $request->getAttribute('site_code');
-            if ($siteCodeHeader !== null && trim((string)$siteCodeHeader) !== '') {
-                $location = $this->locationRepo->findBySiteCode(trim((string)$siteCodeHeader), true);
+            $siteCode = $request->getAttribute('site_code');
+            if ($siteCode !== null && trim((string)$siteCode) !== '') {
+                $location = $this->locationRepo->findBySiteCode(trim((string)$siteCode), true);
             }
         }
 

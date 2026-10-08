@@ -10,6 +10,9 @@ use VendGuard\Core\Domain\Exception\InactiveRecordCollisionException;
 use VendGuard\Core\Domain\Exception\LocationNotFoundException;
 use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
+use VendGuard\Core\Domain\Repository\SiteAccessCodeRepositoryInterface;
+use VendGuard\Core\Domain\Service\SiteAccessCodeGenerator;
+use VendGuard\Infrastructure\Repository\PdoSiteAccessCodeRepository;
 
 /**
  * AdminLocationService
@@ -21,13 +24,28 @@ class AdminLocationService
 {
     private LocationRepositoryInterface $locationRepo;
     private AuditLogger $auditLogger;
+    private ?SiteAccessCodeRepositoryInterface $accessCodeRepo;
 
     public function __construct(
         LocationRepositoryInterface $locationRepo,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?SiteAccessCodeRepositoryInterface $accessCodeRepo = null
     ) {
         $this->locationRepo = $locationRepo;
         $this->auditLogger = $auditLogger ?? new AuditLogger();
+        $this->accessCodeRepo = $accessCodeRepo;
+    }
+
+    /**
+     * Puerto de la credencial de sede, resuelto de forma perezosa.
+     *
+     * Se difiere la construcción del adaptador PDO hasta el primer uso real: así una
+     * suite unitaria que solo consulte el catálogo no abre conexión a MariaDB ni
+     * depende del driver.
+     */
+    private function accessCodeRepo(): SiteAccessCodeRepositoryInterface
+    {
+        return $this->accessCodeRepo ??= new PdoSiteAccessCodeRepository();
     }
 
     /**
@@ -66,11 +84,12 @@ class AdminLocationService
      * @param array<string, mixed> $data Datos de la sede a registrar.
      * @param array{id: int|null, role: string, name: string} $actor Usuario coordinador actuante.
      * @param string|null $clientIp Dirección IP del cliente para metadatos de auditoría.
-     * @return Location Sede recién creada.
+     * @return array{location: Location, access_code: string} Sede creada y clave de centro en claro,
+     *         que solo existe en esta respuesta: la base de datos guarda únicamente su huella.
      * @throws InvalidArgumentException Si algún dato no cumple las especificaciones requeridas.
      * @throws InactiveRecordCollisionException Si el código ya existe (activo o inactivo).
      */
-    public function createLocation(array $data, array $actor, ?string $clientIp = null): Location
+    public function createLocation(array $data, array $actor, ?string $clientIp = null): array
     {
         $siteCode = strtoupper(trim((string)($data['site_code'] ?? '')));
         $name = trim((string)($data['name'] ?? ''));
@@ -144,7 +163,85 @@ class AdminLocationService
             !empty($metadata) ? $metadata : null
         );
 
-        return $created;
+        // Emisión de la credencial de sede (S-4): el alta entrega la clave una sola vez.
+        $accessCode = $this->issueAccessCode($created, $actor, false, $clientIp);
+
+        return [
+            'location'    => $created,
+            'access_code' => $accessCode,
+        ];
+    }
+
+    /**
+     * Reemite la clave de centro de una sede (RF-01, EARS 1.5; hallazgo S-4).
+     *
+     * La clave anterior deja de valer en el mismo instante: la sede guarda una única
+     * huella y esto la sobrescribe. La nueva clave se devuelve una sola vez para su
+     * entrega en mano y jamás se persiste en claro (Art. III).
+     *
+     * @param int $id Identificador numérico de la sede.
+     * @param array{id: int|null, role: string, name: string} $actor Usuario coordinador actuante.
+     * @param string|null $clientIp Dirección IP del cliente para metadatos de auditoría.
+     * @return string Clave de centro nueva en claro (solo en esta respuesta).
+     * @throws LocationNotFoundException Si la sede no existe o está dada de baja.
+     */
+    public function reissueAccessCode(int $id, array $actor, ?string $clientIp = null): string
+    {
+        $location = $this->locationRepo->findById($id, allowDeleted: false);
+        if ($location === null) {
+            throw new LocationNotFoundException($id);
+        }
+
+        return $this->issueAccessCode($location, $actor, true, $clientIp);
+    }
+
+    /**
+     * Genera, hashea y registra la clave de centro, auditando la entrega sin la clave.
+     *
+     * @param Location $location Sede destinataria.
+     * @param array{id: int|null, role: string, name: string} $actor Usuario coordinador actuante.
+     * @param bool $isReissue `true` para la rotación desde coordinación, `false` para el alta.
+     * @param string|null $clientIp Dirección IP del cliente para metadatos de auditoría.
+     * @return string Clave en claro lista para mostrar una vez.
+     */
+    private function issueAccessCode(Location $location, array $actor, bool $isReissue, ?string $clientIp): string
+    {
+        $accessCode = SiteAccessCodeGenerator::generate();
+
+        $this->accessCodeRepo()->storeAccessCodeHash(
+            $location->getId(),
+            password_hash(SiteAccessCodeGenerator::normalize($accessCode), PASSWORD_BCRYPT)
+        );
+
+        $metadata = ['delivery' => 'IN_PERSON_ONLY'];
+        if ($clientIp !== null && $clientIp !== '') {
+            $metadata['ip'] = $clientIp;
+        }
+
+        // La auditoría registra el hecho y la política de entrega, nunca la clave (Art. III).
+        // Cada rama usa un literal explícito: el vocabulario queda enumerable por la guarda
+        // `AuditActionCatalogTest`, que rechaza las acciones calculadas.
+        if ($isReissue) {
+            $this->auditLogger->logLocationEvent(
+                $location->getId(),
+                'LOCATION_ACCESS_CODE_REISSUED',
+                $actor,
+                ['has_access_code' => false],
+                ['has_access_code' => true],
+                $metadata
+            );
+        } else {
+            $this->auditLogger->logLocationEvent(
+                $location->getId(),
+                'LOCATION_ACCESS_CODE_ISSUED',
+                $actor,
+                ['has_access_code' => false],
+                ['has_access_code' => true],
+                $metadata
+            );
+        }
+
+        return $accessCode;
     }
 
     /**

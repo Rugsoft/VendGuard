@@ -15,10 +15,11 @@ use VendGuard\Presentation\Http\Response;
  * SiteAuthMiddleware
  * 
  * Middleware que intercepta y protege las rutas del Portal de Ubicación / Sede (RF-01).
- * Valida la presencia y autenticidad del token de sede (Bearer site_token_...) o
- * de la cabecera identificativa X-Site-Code.
- * 
- * Si no se aporta autenticación válida, rechaza con HTTP 401 Unauthorized.
+ *
+ * La única puerta de sede es el token emitido por `POST /api/auth/site-login`, que ya
+ * exige el código de sede y la clave de centro (hallazgo S-4): el código de sede por
+ * sí solo —en cualquier cabecera— ya no identifica a nadie. Si no se aporta un token
+ * de sede válido, rechaza con HTTP 401 Unauthorized.
  */
 class SiteAuthMiddleware
 {
@@ -38,43 +39,33 @@ class SiteAuthMiddleware
      */
     public function handle(Request $request, Closure $next): Response
     {
-        $siteCodeHeader = $request->getHeader('X-Site-Code');
         $bearerToken = $request->getBearerToken();
 
-        // 1. Si no hay ni token Bearer ni cabecera X-Site-Code -> 401 Unauthorized
-        if ($bearerToken === null && ($siteCodeHeader === null || trim($siteCodeHeader) === '')) {
+        // 1. Sin token de sede no hay puerta: 401 Unauthorized
+        if ($bearerToken === null) {
             return Response::error(
                 'UNAUTHORIZED',
-                'Acceso no autorizado. Se requiere un token de sesión o cabecera X-Site-Code válida.',
+                'Acceso no autorizado. Inicie sesión en el centro con su código de sede y clave de centro.',
                 401
             );
         }
 
-        $location = null;
-
-        // 2. Si se proporciona token Bearer, verificar firma y expiración
-        if ($bearerToken !== null) {
-            $payload = $this->authService->validateSiteToken($bearerToken);
-            if ($payload === null) {
-                return Response::error(
-                    'UNAUTHORIZED',
-                    'El token de sede proporcionado es inválido o ha caducado.',
-                    401
-                );
-            }
-
-            $location = $this->locationRepo->findById((int)$payload['location_id']);
+        // 2. Verificar firma y expiración del token de sede
+        $payload = $this->authService->validateSiteToken($bearerToken);
+        if ($payload === null) {
+            return Response::error(
+                'UNAUTHORIZED',
+                'El token de sede proporcionado es inválido o ha caducado.',
+                401
+            );
         }
 
-        // 3. Si se proporciona cabecera X-Site-Code y aún no se validó por token
-        if ($location === null && $siteCodeHeader !== null) {
-            $location = $this->locationRepo->findBySiteCode(trim($siteCodeHeader), true);
-        }
+        $location = $this->locationRepo->findById((int)$payload['location_id']);
 
         if ($location === null) {
             return Response::error(
                 'UNAUTHORIZED',
-                'Código o sede no encontrada o dada de baja.',
+                'La sede de la sesión no existe o está dada de baja.',
                 401
             );
         }

@@ -9,9 +9,12 @@ use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
+use VendGuard\Core\Domain\Repository\SiteAccessCodeRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
+use VendGuard\Core\Domain\Service\SiteAccessCodeGenerator;
 use VendGuard\Infrastructure\Config\SecretProvider;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
+use VendGuard\Infrastructure\Repository\PdoSiteAccessCodeRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 
 /**
@@ -30,37 +33,75 @@ class AuthService
     private const SITE_TOKEN_PREFIX = 'site_token_';
     private const AUTH_TOKEN_PREFIX = 'auth_token_';
 
+    /**
+     * Fallos consecutivos de clave de centro que activan el bloqueo temporal (S-4).
+     * Coincide con el freno del acceso interno para no crear dos políticas distintas.
+     */
+    public const SITE_LOGIN_MAX_ATTEMPTS = 5;
+
+    /** Duración del bloqueo temporal de una sede tras agotar los intentos: 15 minutos. */
+    public const SITE_LOGIN_LOCK_SECONDS = 900;
+
     private LocationRepositoryInterface $locationRepo;
     private UserRepositoryInterface $userRepo;
+    private SiteAccessCodeRepositoryInterface $accessCodeRepo;
     private string $secretKey;
 
     public function __construct(
         ?LocationRepositoryInterface $locationRepo = null,
         ?UserRepositoryInterface $userRepo = null,
-        ?string $secretKey = null
+        ?string $secretKey = null,
+        ?SiteAccessCodeRepositoryInterface $accessCodeRepo = null
     ) {
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
         $this->userRepo = $userRepo ?? new PdoUserRepository();
         $this->secretKey = $secretKey ?? SecretProvider::authSecret();
+        $this->accessCodeRepo = $accessCodeRepo ?? new PdoSiteAccessCodeRepository();
     }
 
     /**
-     * Autentica una sede por su código identificador (RF-01).
+     * Autentica una sede con las dos credenciales: código identificador y clave de
+     * centro (RF-01, EARS 1.1; hallazgo S-4 de la auditoría de arquitectura).
+     *
+     * El código de sede no es secreto (va impreso en la etiqueta QR), así que por sí
+     * solo ya no abre ninguna puerta: el acceso exige además la clave entregada en
+     * mano por coordinación. El fracaso es siempre genérico e idéntico —sede
+     * inexistente, inactiva, sin clave, bloqueada o clave incorrecta— para no ofrecer
+     * un oráculo de existencia de sedes (EARS 1.2).
      *
      * @param string $siteCode Código de sede (ej: SEDE-BCN-01).
-     * @return array{token: string, location: Location}|null Devuelve null si no existe o está inactiva.
+     * @param string $accessCode Clave de centro en claro, tal y como la teclea el responsable.
+     * @return array{token: string, location: Location}|null `null` en cualquier fallo de credenciales.
      */
-    public function loginSite(string $siteCode): ?array
+    public function loginSite(string $siteCode, string $accessCode): ?array
     {
         $location = $this->locationRepo->findBySiteCode($siteCode, true);
         if ($location === null) {
             return null;
         }
 
-        $token = $this->generateSiteToken($location);
+        $state = $this->accessCodeRepo->findAccessState($location->getId());
+        if ($state === null || $state['hash'] === null || $state['is_locked']) {
+            return null;
+        }
+
+        $normalizedCode = SiteAccessCodeGenerator::normalize($accessCode);
+        if ($normalizedCode === '' || !password_verify($normalizedCode, $state['hash'])) {
+            // El fallo se contabiliza solo sobre sedes existentes: el freno protege la
+            // sede real, no deja rastro de sedes inventadas (que no tienen fila).
+            $this->accessCodeRepo->registerFailedLogin(
+                $location->getId(),
+                self::SITE_LOGIN_MAX_ATTEMPTS,
+                self::SITE_LOGIN_LOCK_SECONDS
+            );
+
+            return null;
+        }
+
+        $this->accessCodeRepo->resetLoginAttempts($location->getId());
 
         return [
-            'token' => $token,
+            'token' => $this->generateSiteToken($location),
             'location' => $location,
         ];
     }

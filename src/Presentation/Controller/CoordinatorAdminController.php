@@ -109,7 +109,15 @@ class CoordinatorAdminController
 
             $created = $this->locationService->createLocation($body, $actor, $ip);
 
-            return Response::json($created->toArray(), 201, 'Sede creada exitosamente.');
+            // La clave de centro se devuelve una sola vez: la base de datos solo guarda su huella.
+            $payload = $created['location']->toArray();
+            $payload['access_code'] = $created['access_code'];
+
+            return Response::json(
+                $payload,
+                201,
+                'Sede creada exitosamente. Entregue la clave de centro en mano: solo se muestra una vez.'
+            );
         });
     }
 
@@ -181,6 +189,28 @@ class CoordinatorAdminController
             $reactivated = $this->locationService->reactivateLocation($id, $actor, $ip);
 
             return Response::json($reactivated->toArray(), 200, 'Sede reactivada exitosamente.');
+        });
+    }
+
+    /**
+     * POST /api/coordinator/locations/{id}/access-code
+     * Reemite la clave de centro de una sede (RF-01, EARS 1.5): invalida la anterior al
+     * instante, la nueva se muestra una sola vez y la rotación queda auditada sin la clave.
+     */
+    public function reissueLocationAccessCode(Request $request): Response
+    {
+        return $this->handleExecution(function () use ($request): Response {
+            $id = $this->extractIdFromRoute($request);
+            $actor = $this->extractActor($request);
+            $ip = $this->extractClientIp($request);
+
+            $accessCode = $this->locationService->reissueAccessCode($id, $actor, $ip);
+
+            return Response::json([
+                'id'          => $id,
+                'access_code' => $accessCode,
+                'delivery'    => 'IN_PERSON_ONLY',
+            ], 200, 'Clave de centro reemitida. La anterior ya no es válida y esta solo se muestra una vez.');
         });
     }
 

@@ -12,6 +12,8 @@
  * 6. Reactivación directa de sedes inactivas con actualización reactiva instantánea.
  * 7. Geocodificación asistida de la dirección (servicio abierto estándar) con previsualización
  *    de confirmación de coordenadas antes de guardar (RF-MAP-01).
+ * 8. Clave de centro (S-4): el alta y la reemisión la muestran una sola vez para su entrega
+ *    en mano, y la tabla marca las sedes «pendiente de entrega» (sin clave emitida).
  * 
  * Dogma Vanilla: Vue 3 Options API en módulos ESM nativos sin dependencias npm externas.
  */
@@ -66,6 +68,17 @@ export const AdminLocationsTab = {
 
       // Estado de reactivación en curso
       isReactivatingId: null,
+
+      // Clave de centro (S-4): mostrada una sola vez tras emitir o reemitir
+      showAccessCodeModal: false,
+      accessCodeSite: '',
+      issuedAccessCode: '',
+      accessCodeAction: '', // 'issued' | 'reissued'
+
+      // Modal de confirmación de reemisión de clave
+      showReissueModal: false,
+      locationToReissue: null,
+      isSubmittingReissue: false,
 
       // Geocodificación asistida (RF-MAP-01)
       isGeocodingCreate: false,
@@ -353,9 +366,17 @@ export const AdminLocationsTab = {
           longitude: Number(this.createForm.longitude)
         };
 
-        await (api.admin ? api.admin.createLocation(payload) : api.post('/coordinator/locations', payload));
+        const res = await (api.admin ? api.admin.createLocation(payload) : api.post('/coordinator/locations', payload));
+        const accessCode = res?.data?.access_code || res?.access_code || '';
+
         this.showSuccessNotification(`Sede "${payload.site_code}" dada de alta exitosamente.`);
         this.closeCreateModal();
+
+        // La clave solo existe en esta respuesta: se muestra una vez para entrega en mano.
+        if (accessCode) {
+          this.openAccessCodeModal(payload.site_code, accessCode, 'issued');
+        }
+
         await this.loadLocations();
       } catch (err) {
         if (err.code === 'INACTIVE_RECORD_COLLISION' || err.code === 'LOCATION_ALREADY_EXISTS_ACTIVE') {
@@ -504,6 +525,93 @@ export const AdminLocationsTab = {
     },
 
     /**
+     * Muestra la clave de centro recién emitida para su entrega en mano (S-4).
+     *
+     * La base de datos solo guarda su huella: cerrado este aviso, la clave no vuelve
+     * a ser recuperable desde la interfaz y solo cabe reemitirla.
+     */
+    openAccessCodeModal(siteCode, accessCode, action = 'issued') {
+      this.accessCodeSite = siteCode;
+      this.issuedAccessCode = accessCode;
+      this.accessCodeAction = action;
+      this.showAccessCodeModal = true;
+    },
+
+    /**
+     * Cierra el aviso de clave mostrada y descarta el valor en memoria.
+     */
+    closeAccessCodeModal() {
+      this.showAccessCodeModal = false;
+      this.accessCodeSite = '';
+      this.issuedAccessCode = '';
+      this.accessCodeAction = '';
+    },
+
+    /**
+     * Copia la clave al portapapeles para facilitar la entrega (nunca a un canal con historial).
+     */
+    async copyIssuedAccessCode() {
+      if (!this.issuedAccessCode) return false;
+      try {
+        if (navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(this.issuedAccessCode);
+          return true;
+        }
+      } catch (err) {
+        return false;
+      }
+      return false;
+    },
+
+    /**
+     * Abre la confirmación de reemisión de la clave de centro de una sede.
+     */
+    openReissueModal(location) {
+      if (!location) return;
+      this.locationToReissue = location;
+      this.showReissueModal = true;
+    },
+
+    /**
+     * Cierra la confirmación de reemisión sin emitir nada.
+     */
+    closeReissueModal() {
+      this.showReissueModal = false;
+      this.locationToReissue = null;
+    },
+
+    /**
+     * Reemite la clave de centro (RF-01, EARS 1.5): la anterior deja de valer al instante
+     * y la nueva se muestra una sola vez para su entrega en mano.
+     */
+    async confirmReissue() {
+      if (!this.locationToReissue) return;
+
+      this.isSubmittingReissue = true;
+      try {
+        const res = await (api.admin
+          ? api.admin.reissueLocationAccessCode(this.locationToReissue.id)
+          : api.post(`/coordinator/locations/${this.locationToReissue.id}/access-code`));
+        const accessCode = res?.data?.access_code || res?.access_code || '';
+        const siteCode = this.locationToReissue.site_code;
+
+        this.closeReissueModal();
+        this.showSuccessNotification(`Clave de centro de "${siteCode}" reemitida. La anterior ya no es válida.`);
+
+        if (accessCode) {
+          this.openAccessCodeModal(siteCode, accessCode, 'reissued');
+        }
+
+        await this.loadLocations();
+      } catch (err) {
+        this.errorMessage = err.message || 'Error al reemitir la clave de centro.';
+        this.closeReissueModal();
+      } finally {
+        this.isSubmittingReissue = false;
+      }
+    },
+
+    /**
      * Muestra mensaje flotante temporal de confirmación.
      */
     showSuccessNotification(msg) {
@@ -630,6 +738,11 @@ export const AdminLocationsTab = {
                 <!-- Código -->
                 <td>
                   <span class="badge bg-dark font-monospace text-wrap">{{ loc.site_code }}</span>
+                  <div v-if="loc.is_active && loc.has_access_code === false" class="mt-1">
+                    <span class="badge bg-warning text-dark" title="La sede no tiene clave de centro emitida: no puede iniciar sesión en el portal">
+                      🔑 Pendiente de entrega
+                    </span>
+                  </div>
                 </td>
 
                 <!-- Nombre y Dirección -->
@@ -679,6 +792,17 @@ export const AdminLocationsTab = {
                       @click="openEditModal(loc)"
                     >
                       ✏️ Editar
+                    </button>
+
+                    <!-- Clave de centro (si está activa) -->
+                    <button 
+                      v-if="loc.is_active" 
+                      type="button" 
+                      class="btn btn-outline-primary"
+                      title="Reemitir la clave de centro (invalida la anterior)"
+                      @click="openReissueModal(loc)"
+                    >
+                      🔑 Clave
                     </button>
 
                     <!-- Reactivar (si está inactiva) -->
@@ -1009,6 +1133,69 @@ export const AdminLocationsTab = {
                 <span v-if="isSubmittingDeactivate" class="spinner-border spinner-border-sm me-1" role="status"></span>
                 <span>Confirmar Baja</span>
               </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL CONFIRMACIÓN DE REEMISIÓN DE CLAVE DE CENTRO (S-4) -->
+      <div v-if="showReissueModal && locationToReissue" class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-primary text-white">
+              <h5 class="modal-title fw-bold">🔑 Reemitir Clave de Centro</h5>
+              <button type="button" class="btn-close btn-close-white" @click="closeReissueModal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+              <div class="alert alert-warning mb-3 small">
+                <span>
+                  Se emitirá una clave nueva para <strong>{{ locationToReissue.site_code }}</strong> ({{ locationToReissue.name }}).
+                  La clave anterior dejará de funcionar al instante y no puede recuperarse.
+                </span>
+              </div>
+              <p class="small text-muted mb-0">
+                La clave nueva se mostrará <strong>una sola vez</strong>: entréguela en mano al responsable del centro
+                y no la envíe por correo ni por chat.
+              </p>
+            </div>
+            <div class="modal-footer border-top">
+              <button type="button" class="btn btn-secondary" @click="closeReissueModal">Cancelar</button>
+              <button 
+                type="button" 
+                class="btn btn-primary" 
+                :disabled="isSubmittingReissue"
+                @click="confirmReissue"
+              >
+                <span v-if="isSubmittingReissue" class="spinner-border spinner-border-sm me-1" role="status"></span>
+                <span>Reemitir clave</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL CLAVE DE CENTRO: MOSTRAR UNA SOLA VEZ (S-4) -->
+      <div v-if="showAccessCodeModal" class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-dark text-white">
+              <h5 class="modal-title fw-bold">🔑 Clave de Centro de {{ accessCodeSite }}</h5>
+              <button type="button" class="btn-close btn-close-white" @click="closeAccessCodeModal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body text-center">
+              <p class="small text-muted mb-2">
+                {{ accessCodeAction === 'reissued' ? 'Clave reemitida. La anterior ya no es válida.' : 'Sede dada de alta con su clave de centro.' }}
+              </p>
+              <div class="alert alert-light border mb-2" data-testid="issued-access-code">
+                <span class="font-monospace fs-4 fw-bold">{{ issuedAccessCode }}</span>
+              </div>
+              <p class="small text-danger fw-semibold mb-0">
+                Esta clave solo se muestra una vez. Anótela y entréguela en mano: no se puede recuperar después.
+              </p>
+            </div>
+            <div class="modal-footer border-top">
+              <button type="button" class="btn btn-outline-secondary" @click="copyIssuedAccessCode">Copiar</button>
+              <button type="button" class="btn btn-primary" @click="closeAccessCodeModal">Entregada, cerrar</button>
             </div>
           </div>
         </div>

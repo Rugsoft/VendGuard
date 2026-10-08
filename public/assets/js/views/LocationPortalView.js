@@ -39,6 +39,7 @@ export const LocationPortalView = {
   data() {
     return {
       siteCodeInput: '',
+      accessCodeInput: '',
       loginError: '',
       isLoggingIn: false,
       machines: [],
@@ -106,7 +107,9 @@ export const LocationPortalView = {
   },
   methods: {
     /**
-     * Authenticates user via site code (RF-01)
+     * Authenticates the location responsible with the two site credentials (RF-01):
+     * the site code identifies the centre and the access code — handed over in person
+     * by coordination — is the credential that opens the portal.
      */
     async handleSiteLogin() {
       const code = this.siteCodeInput.trim().toUpperCase();
@@ -115,17 +118,24 @@ export const LocationPortalView = {
         return;
       }
 
+      const accessCode = this.accessCodeInput.trim();
+      if (!accessCode) {
+        this.loginError = 'Introduzca la clave de centro entregada por el servicio técnico.';
+        return;
+      }
+
       this.loginError = '';
       this.isLoggingIn = true;
       store.setLoading(true);
 
       try {
-        const response = await api.auth.siteLogin(code);
+        const response = await api.auth.siteLogin(code, accessCode);
         store.setSiteSession(response.location, response.token);
         this.siteCodeInput = '';
+        this.accessCodeInput = '';
         await this.loadMachines();
       } catch (err) {
-        this.loginError = err.message || 'Código de sede no reconocido. Contacte con el servicio técnico.';
+        this.loginError = err.message || 'Código o clave no reconocidos. Contacte con el servicio técnico.';
       } finally {
         this.isLoggingIn = false;
         store.setLoading(false);
@@ -239,7 +249,7 @@ export const LocationPortalView = {
             Portal del Responsable
           </h2>
           <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 14px; color: var(--color-ink-muted, #6c7e9d); margin-top: 6px;">
-            Introduce el código alfanumérico de tu sede para gestionar las máquinas de tu centro.
+            Introduce el código de tu sede y la clave de centro entregada por el servicio técnico.
           </p>
         </div>
 
@@ -259,6 +269,28 @@ export const LocationPortalView = {
               class="vg-input"
               placeholder="Ej: SEDE-BCN-01"
               autocapitalize="characters"
+              style="text-transform: uppercase; font-family: monospace; font-size: 15px; font-weight: 600; letter-spacing: 0.05em; border-radius: var(--radius-interactive, 4px);"
+              :disabled="isLoggingIn"
+              required
+            />
+          </div>
+
+          <!-- Access Code Input (S-4: centre credential handed over in person) -->
+          <div style="margin-bottom: 16px;">
+            <label
+              for="access-code-input"
+              style="display: block; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;"
+            >
+              Clave de Centro
+            </label>
+            <input
+              id="access-code-input"
+              v-model="accessCodeInput"
+              type="text"
+              class="vg-input"
+              placeholder="Ej: K7M4P-2QX9R"
+              autocapitalize="characters"
+              autocomplete="off"
               style="text-transform: uppercase; font-family: monospace; font-size: 15px; font-weight: 600; letter-spacing: 0.05em; border-radius: var(--radius-interactive, 4px);"
               :disabled="isLoggingIn"
               required
@@ -287,7 +319,7 @@ export const LocationPortalView = {
         </form>
 
         <div style="text-align: center; margin-top: 20px; font-size: 12px; color: var(--color-ink-muted, #6c7e9d); font-family: var(--font-body, Inter, sans-serif);">
-          ¿No conoces el código de tu centro? Consulta la etiqueta frontal de cualquiera de las máquinas de vending.
+          El código de centro aparece en la etiqueta frontal de cualquiera de las máquinas de vending. La clave de centro se entrega en mano: si no la tiene, solicítela al servicio técnico.
         </div>
       </div>
 

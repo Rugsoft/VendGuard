@@ -84,6 +84,8 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'LOCATION_UPDATED', label: 'Modificación de Sede', tone: 'neutral', group: 'location' },
   { code: 'LOCATION_DEACTIVATED', label: 'Baja de Sede', tone: 'danger', group: 'location' },
   { code: 'LOCATION_REACTIVATED', label: 'Reactivación de Sede', tone: 'success', group: 'location' },
+  { code: 'LOCATION_ACCESS_CODE_ISSUED', label: 'Emisión de Clave de Centro', tone: 'success', group: 'location' },
+  { code: 'LOCATION_ACCESS_CODE_REISSUED', label: 'Reemisión de Clave de Centro', tone: 'warning', group: 'location' },
   { code: 'LOCATION_INSPECTED', label: 'Inspección de Sede (registro de demo)', tone: 'info', group: 'location' },
   { code: 'USER_CREATED', label: 'Alta de Usuario', tone: 'success', group: 'user' },
   { code: 'USER_UPDATED', label: 'Modificación de Usuario', tone: 'neutral', group: 'user' },

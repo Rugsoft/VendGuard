@@ -123,6 +123,7 @@ class AppRouter
         $router->put('/api/coordinator/locations/{id}', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'updateLocation'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/locations/{id}/deactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'deactivateLocation'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/locations/{id}/reactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'reactivateLocation'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/locations/{id}/access-code', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'reissueLocationAccessCode'], [$coordinatorAuth]);
 
         // Máquinas (Machines)
         $router->get('/api/coordinator/machines', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'listMachines'], [$coordinatorAuth]);

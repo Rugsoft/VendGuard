@@ -230,8 +230,8 @@ class LocationRefundController
      * Resuelve la sede del conserje autenticado.
      *
      * Sigue la misma cadena que el portal de sede (`LocationPortalController`):
-     * entidad ya resuelta por el middleware, identificador de sede o cabecera
-     * `X-Site-Code`. Sin sede no hay ni lectura ni entrega posible.
+     * entidad ya resuelta por el middleware o identificador de sede de la sesión
+     * autenticada. Sin sede no hay ni lectura ni entrega posible.
      *
      * @return Location|Response
      */
@@ -250,7 +250,7 @@ class LocationRefundController
             }
         }
 
-        $siteCode = $request->getHeader('X-Site-Code') ?? $request->getAttribute('site_code');
+        $siteCode = $request->getAttribute('site_code');
         if ($siteCode !== null && trim((string)$siteCode) !== '') {
             $location = $this->locationRepo->findBySiteCode(trim((string)$siteCode));
             if ($location !== null) {
