@@ -872,7 +872,11 @@ assert('13.4 Drafts under 5 real characters never reach the server',
   shortInstance.newCommentText === '  ab  ');
 
 api.coordinator.addComment = async () => {
-  throw new ApiError(422, 'COMMENT_WINDOW_CLOSED', 'La ventana de garantía de 48 horas está cerrada para este ticket.');
+  throw new ApiError(
+    403,
+    'CONVERSATION_SEALED',
+    'El expediente está archivado: la conversación quedó sellada por auditoría y no admite nuevos mensajes.'
+  );
 };
 const failedInstance = createInstance({
   incidentId: 3661,
@@ -884,7 +888,7 @@ await CoordinatorIncidentDetailModal.methods.submitComment.call(failedInstance);
 
 assert('13.5 A rejected comment keeps the draft intact for an immediate retry (RF-08.4)',
   failedInstance.newCommentText === 'Nota que debe sobrevivir al fallo de red.' &&
-  failedInstance.commentErrorMessage.includes('48 horas') &&
+  failedInstance.commentErrorMessage.includes('quedó sellada') &&
   failedInstance.isSubmittingComment === false &&
   failedInstance.getEmitted().some((e) => e.event === 'close') === false);
 
