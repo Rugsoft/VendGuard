@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
-use VendGuard\Application\Service\AuthService;
 use VendGuard\Core\Domain\Model\Incident;
-use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Presentation\Http\Request;
@@ -18,25 +16,20 @@ use VendGuard\Presentation\Http\Response;
  * Controlador de Procesos Automatizados y Tareas Batch en Segundo Plano (RF-10 / EARS 10.1, 10.2).
  * Ejecuta el archivado definitivo a CERRADA de expedientes que superan la ventana de 48h en RESUELTA.
  * 
- * Protegido mediante token secreto configurable (X-Cron-Secret o Bearer token de Coordinador).
+ * Autenticación: la credencial la valida `CronAuthMiddleware` (hallazgo S-2), registrado en la
+ * ruta `POST /api/cron/auto-close`. Este controlador es **fail-closed**: solo ejecuta el proceso
+ * si el middleware marcó la petición como autorizada, de modo que una ruta mal registrada no
+ * abre el proceso batch por descuido.
+ *
  * Dogma Vanilla: PHP 8.2+ puro, PDO, cero dependencias externas.
  */
 class CronController
 {
-    public const DEFAULT_CRON_SECRET = 'vendguard-cron-secret-key-2026';
-
     private IncidentRepositoryInterface $incidentRepo;
-    private AuthService $authService;
-    private string $cronSecret;
 
-    public function __construct(
-        ?IncidentRepositoryInterface $incidentRepo = null,
-        ?AuthService $authService = null,
-        ?string $cronSecret = null
-    ) {
+    public function __construct(?IncidentRepositoryInterface $incidentRepo = null)
+    {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
-        $this->authService  = $authService ?? new AuthService();
-        $this->cronSecret   = $cronSecret ?? (getenv('CRON_SECRET') ?: self::DEFAULT_CRON_SECRET);
     }
 
     /**
@@ -45,14 +38,12 @@ class CronController
      * Cierra automáticamente y archiva todas las incidencias que han permanecido
      * más de 48 horas en estado RESUELTA sin haber sido reabiertas (RF-10 / EARS 10.1, 10.2).
      * 
-     * Cabecera de seguridad aceptada:
-     * - X-Cron-Secret: <secreto>
-     * - Authorization: Bearer <secreto> o Bearer <token_coordinador>
+     * Requisito de entrada: contexto `cron_authenticated` inyectado por `CronAuthMiddleware`.
      */
     public function autoClose(Request $request): Response
     {
-        // 1. Validar autenticación del proceso cron
-        if (!$this->isAuthorized($request)) {
+        // Defensa en profundidad: sin credencial verificada por el middleware no se ejecuta nada.
+        if ($request->getAttribute('cron_authenticated') !== true) {
             return Response::error(
                 'UNAUTHORIZED',
                 'Acceso no autorizado al proceso cron. Se requiere cabecera X-Cron-Secret o token válido.',
@@ -74,33 +65,5 @@ class CronController
             'closed_count'   => count($closedIncidents),
             'closed_tickets' => $closedTickets,
         ], 200);
-    }
-
-    /**
-     * Comprueba si la petición está autorizada para ejecutar tareas cron.
-     */
-    private function isAuthorized(Request $request): bool
-    {
-        // A. Cabecera directa X-Cron-Secret
-        $headerSecret = $request->getHeader('X-Cron-Secret');
-        if ($headerSecret !== null && hash_equals($this->cronSecret, $headerSecret)) {
-            return true;
-        }
-
-        // B. Bearer token igual al secreto cron
-        $bearerToken = $request->getBearerToken();
-        if ($bearerToken !== null && hash_equals($this->cronSecret, $bearerToken)) {
-            return true;
-        }
-
-        // C. Bearer token válido de un usuario con rol COORDINATOR
-        if ($bearerToken !== null) {
-            $verified = $this->authService->validateInternalToken($bearerToken);
-            if ($verified !== null && ($verified['role'] ?? '') === UserRole::COORDINATOR->value) {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

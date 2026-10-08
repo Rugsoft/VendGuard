@@ -23,6 +23,7 @@ use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
+use VendGuard\Infrastructure\Config\SecretProvider;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SeedRunner;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
@@ -53,7 +54,10 @@ $incidentRepo = new PdoIncidentRepository($pdo);
 $userRepo     = new PdoUserRepository($pdo);
 $authService  = new AuthService($locationRepo, $userRepo);
 
-$cronSecret = CronController::DEFAULT_CRON_SECRET;
+// La credencial se resuelve por entorno (SECRET_KEY / CRON_SECRET); en local cae a la clave
+// exclusiva de desarrollo del SecretProvider (hallazgo S-1). El secreto histórico del
+// repositorio ya no es válido en ningún entorno.
+$cronSecret = SecretProvider::cronSecret();
 
 $failures = 0;
 
@@ -177,6 +181,18 @@ $assert("1.6 Bearer cron secret válido => 200 OK", $res->getStatusCode() === 20
 $req = new Request(method: 'POST', path: '/api/cron/auto-close', headers: ['Authorization' => "Bearer {$coordinatorToken}"]);
 $res = $router->dispatch($req);
 $assert("1.7 Bearer de Coordinador autorizado => 200 OK", $res->getStatusCode() === 200);
+
+// 1.8 Defensa en profundidad: el controlador exige la marca de autorización del middleware
+$controller = new CronController($incidentRepo);
+$res = $controller->autoClose(new Request(
+    method: 'POST',
+    path: '/api/cron/auto-close',
+    headers: ['X-Cron-Secret' => $cronSecret]
+));
+$assert(
+    "1.8 Controlador sin la marca del middleware => 401 (fail-closed)",
+    $res->getStatusCode() === 401 && ($res->getDecodedBody()['error']['code'] ?? '') === 'UNAUTHORIZED'
+);
 
 // =========================================================================
 // CASO 2: Auto-Cierre de Incidencias con > 48 Horas en RESUELTA [CONDICIÓN "HECHO CUANDO"]

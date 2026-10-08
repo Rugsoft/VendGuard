@@ -216,7 +216,10 @@ class AppRouter
         // -----------------------------------------------------------------
         // 6. Módulo de Automatización y Tareas Cron (T-30)
         // -----------------------------------------------------------------
-        $router->post('/api/cron/auto-close', [\VendGuard\Presentation\Controller\CronController::class, 'autoClose']);
+        // El proceso batch ya no cuelga de una ruta "desnuda": la credencial la valida
+        // CronAuthMiddleware y el controlador exige la marca de autorización (hallazgo S-2).
+        $cronAuth = new \VendGuard\Presentation\Http\Middleware\CronAuthMiddleware();
+        $router->post('/api/cron/auto-close', [\VendGuard\Presentation\Controller\CronController::class, 'autoClose'], [$cronAuth]);
 
         // -----------------------------------------------------------------
         // 7. Módulo de Códigos QR - Rutas Públicas (T-QR-10)

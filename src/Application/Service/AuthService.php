@@ -10,6 +10,7 @@ use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
+use VendGuard\Infrastructure\Config\SecretProvider;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 
@@ -19,10 +20,13 @@ use VendGuard\Infrastructure\Repository\PdoUserRepository;
  * Servicio de Aplicación responsable de la autenticación de sedes y personal interno,
  * emisión de tokens criptográficos firmados con HMAC-SHA256 (Dogma Vanilla, sin librerías externas)
  * y verificación de validez y caducidad.
+ *
+ * La clave de firma se resuelve por entorno a través de `SecretProvider` (hallazgo S-1): ya no
+ * existe un literal utilizable en el código fuente. La inyección explícita por constructor
+ * mantiene la prioridad para los tests y para un hipotético despliegue con gestor de secretos.
  */
 class AuthService
 {
-    private const SECRET_KEY = 'vendguard-secret-key-change-in-production-rf04';
     private const SITE_TOKEN_PREFIX = 'site_token_';
     private const AUTH_TOKEN_PREFIX = 'auth_token_';
 
@@ -37,7 +41,7 @@ class AuthService
     ) {
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
         $this->userRepo = $userRepo ?? new PdoUserRepository();
-        $this->secretKey = $secretKey ?? self::SECRET_KEY;
+        $this->secretKey = $secretKey ?? SecretProvider::authSecret();
     }
 
     /**
