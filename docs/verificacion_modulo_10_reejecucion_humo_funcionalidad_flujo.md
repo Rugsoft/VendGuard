@@ -236,9 +236,13 @@ restaurado al terminar, sin residuos):
 | Archivos | `%PDF` como `.jpg`→422 `INVALID_FILE_TYPE` · > 5 MB→422 `FILE_TOO_LARGE` · ambos sin residuos en `uploads/` |
 | Identificador inexistente | 404 `INCIDENT_NOT_FOUND` en `GET` y `POST` |
 
-### 7.1 Deriva hermana detectada en el mismo barrido (pendiente de decisión)
+### 7.1 Deriva hermana detectada en el mismo barrido
 
-**§4.5 · Comentarios de coordinación: mismo desfase, no enmendado.** Medido en el mismo servicio:
+> **CERRADA (08/10/2026).** §4.5 enmendada y §5.5 creada con la misma disciplina de medición; véase el apartado 7.2.
+> Único punto entonces abierto, ya corregido el mismo día: la contradicción `413`/`422` de `plan.md` §2.2.A
+> (véase el apartado 7.4).
+
+**§4.5 · Comentarios de coordinación: mismo desfase, entonces sin enmendar.** Medido en el mismo servicio:
 
 | Documentado hoy en §4.5 | Comportamiento real medido |
 |---|---|
@@ -252,7 +256,98 @@ restaurado al terminar, sin residuos):
 **Canal de técnico:** `api_contracts.md` §5 no documenta los endpoints de comentarios (solo `my-route`, `start`,
 `pause` y `resolve`), aunque `plan.md` §2.2.B los define y están enrutados bajo `TechnicianAuthMiddleware`.
 
-**Contradicción menor:** `specs/10-incident-comments/plan.md` §2.2.A documenta `413 Payload Too Large` para fotografías de
-más de 5 MB, mientras el servicio responde `422 FILE_TOO_LARGE` (coherente con §3.2 y con la §3.3 recién enmendada).
+**Contradicción menor (corregida el 08/10/2026, apartado 7.4):** `specs/10-incident-comments/plan.md` §2.2.A documentaba
+`413 Payload Too Large` para fotografías de más de 5 MB, mientras el servicio responde `422 FILE_TOO_LARGE` (coherente
+con §3.2 y con la §3.3 recién enmendada).
 
-Las tres son correcciones de documentación del mismo tipo que F-1 y quedan fuera de la enmienda autorizada de §3.3.
+Las tres eran correcciones de documentación del mismo tipo que F-1 y excedían la enmienda autorizada de §3.3.
+
+### 7.2 Enmienda de los canales internos ejecutada el 08/10/2026 (§4.5 y §5.5)
+
+**Decisión registrada (con consentimiento del responsable del producto, Art. V.5):** el contrato de comentarios de los dos
+canales internos se documenta también con la forma real del DTO del hilo, incluidos los apartados que faltaban.
+`specs/technical/api_contracts.md` queda así:
+
+* **§4.5 reescrita** como `GET|POST /api/coordinator/incidents/{id}/comments`: resolución del identificador (ID, código
+de ticket o `#`+código), visibilidad total con `is_internal` y nombres nominales, `total_comments` sobre la totalidad del
+expediente, `limit`/`before_id`, `is_internal` **por defecto `true`** (solo un valor explícito la desmarca), eco de
+`details.form_data` para el reintento y payload real del evento de auditoría.
+* **§5.5 nueva** como `GET|POST /api/technician/incidents/{id}/comments`: alcance de lectura (asignado; antecedentes
+acreditados en `incident_history` sobre un expediente `REOPENED` sin reasignar en modo solo lectura con
+`read_only_reason = REOPENED_AWAITING_REASSIGNMENT`; técnico ajeno → 403 `NOT_ASSIGNED_TO_TECHNICIAN`), escisión entre
+lectura y escritura (el técnico con antecedentes lee pero no publica hasta la reasignación) y fail-safe de privacidad
+(`is_internal` por defecto `true`).
+
+**Dos afirmaciones falsas del apartado 4.5 antiguo, además del payload plano:** documentaba `is_internal` por defecto
+`false` (el servicio y `plan.md` §2.2.C aplican **`true`**: la nota interna viene preseleccionada, RF-03.3) y afirmaba que
+`metadata.visibility` registra `PUBLIC`/`INTERNAL` en el evento de auditoría (el registro se escribe con `metadata = null`
+y `new_state = { comment_id, ticket_code, is_internal, has_photo }`; el texto del mensaje no se copia, lo que además
+evitaba duplicar contenido confidencial fuera del hilo). Ambas se corrigieron con la medición.
+
+**Evidencia medida que sustenta §4.5 y §5.5** (sondas temporales contra el servicio en marcha, semillas canónicas,
+entorno restaurado):
+
+| Comprobación | Resultado medido |
+|---|---|
+| Coordinación: identificador | ID, código de ticket y `#`+código → 200 · `id=0` y `@@%` → 400 `INVALID_INCIDENT_IDENTIFIER` · inexistente → 404 |
+| Coordinación: rol y sesión | token de técnico → 403 `FORBIDDEN` · sin token → 401 `UNAUTHORIZED` |
+| Coordinación: visibilidad | 127 mensajes = 121 públicos + 6 internos en `total_comments`; nombres reales; `is_own_message` por `user_id` |
+| Coordinación: `is_internal` | ausente → 1 (**interno**) · `false` → 0 · `"1"` → 1 · `"quizas"` → 422 `INVALID_IS_INTERNAL` |
+| Coordinación: texto | vacío → 400 `MISSING_COMMENT_TEXT` (con `form_data`) · 4 y 1.001 caracteres → 422 `INVALID_COMMENT_LENGTH` (con `form_data`) · 5 → 201 |
+| Coordinación: archivo | multipart con foto → 201 con `photo_url` · > 5 MB → 422 `FILE_TOO_LARGE` sin residuos, con `form_data` (`comment_text`, `is_internal`) |
+| Coordinación: sellado | lectura 200 (`is_sealed=true`, `can_comment=false`) · publicación 403 `CONVERSATION_SEALED` con `form_data` · bandera inválida en sellado → 422 (la guarda de la bandera precede al sellado) |
+| Coordinación: auditoría | un evento `INCIDENT_COMMENT_ADDED` por mensaje, con `user_id`, `user_role = COORDINATOR`, `user_name`, `new_state = {comment_id, ticket_code, is_internal, has_photo}` y `metadata = null` |
+| Técnico: lectura | asignado → 200 · no asignado → 403 `NOT_ASSIGNED_TO_TECHNICIAN` · token de coordinación → 403 · sin token → 401 · por código de ticket → 200 |
+| Técnico: solo lectura histórica | tras resolver y reabrir sin asignar: 200 con `can_comment=false` y `read_only_reason=REOPENED_AWAITING_REASSIGNMENT`; publicación 403 `NOT_ASSIGNED_TO_TECHNICIAN`; tras la reasignación, `can_comment=true` y 201 |
+| Técnico: privacidad | sin `is_internal` → 1 (**fail-safe interno**) · `false` → 0 · `"quizas"` → 422 |
+| Técnico: archivo | multipart con foto → 201 con `photo_url` e `is_internal` respetado · > 5 MB → 422 `FILE_TOO_LARGE` sin residuos, con `form_data` (`ticket_code`, `comment_text`, `is_internal`) |
+| Mensajes de respuesta | `"Nota interna registrada en el hilo de conversación"` vs `"Comentario publicado en el hilo de conversación"` según visibilidad, en ambos canales |
+
+**Pendientes declarados, cerrados el mismo día (apartado 7.4):** `plan.md` §2.2.A describía `413 Payload Too Large` para
+fotografías > 5 MB mientras el servicio responde `422 FILE_TOO_LARGE` (coherente con §3.2, §3.3 y §4.5/§5.5), y el doble
+`CoordinatorIncidentDetailModalTest.mjs` simulaba el sellado con el código obsoleto `COMMENT_WINDOW_CLOSED`. Ambos se
+corrigieron tras la autorización expresa: el `413` era una línea de otro documento de especificación y el doble pasaba
+en verde porque el modal propaga el mensaje del servidor, no porque reflejara el contrato real.
+
+### 7.3 Guarda anti-deriva de contrato (08/10/2026)
+
+Para que esta clase de defecto no vuelva a colarse —y para que una enmienda futura no pueda «arreglarse» borrando
+campos de la especificación— se incorpora `tests/unit/ApiContractDriftGuardTest.php` (17 aserciones), descubierta por
+`tests/run_all.php` como una suite más: **210/210 suites · 7.994 aserciones · 0 fallos** en la batería global
+(antes 209/7.977), con las semillas restablecidas.
+
+**Qué certifica** (el vocabulario se deriva de los propios emisores, nunca de una segunda lista mantenida a mano):
+
+| Bloque | Cobertura |
+|---|---|
+| Códigos de error | **36 códigos documentados** en `api_contracts.md` ⊆ **301 emitibles** extraídos de `src/` con el tokenizer de PHP (`Response::error(...)`, `throw new XException('CODE'…)`, `errorCode =` / `:`, `'code' =>`). Cero fantasmas |
+| Aislamiento del módulo | Los **14 códigos** documentados en §3.3/§4.5/§5.5 los emite el propio módulo de comentarios (los 8 ficheros del hilo, cuya existencia también se asevera) |
+| Campos del payload | Ejemplos JSON de los tres apartados ⊆ claves reales: sobre (`incident`/`pagination`/`comments`), cabecera (10 campos), paginación (5) y mensaje (8). Cero campos fantasma |
+| Contrato obligatorio | Los campos del mensaje sin exclusión se documentan en los tres canales y la sede **no** documenta `is_internal`, regla leída del propio `siteExcludedKeys()` del DTO (RNF-01 / Art. V.4) |
+| Anti-vacuidad | Suelos de extracción (>= 30 códigos documentados, >= 250 emitibles, >= 12 en los apartados del hilo, >= 4 ejemplos JSON): una extracción vacía falla en vez de pasar en verde |
+| Mordida | Tres aserciones con fixtures que reproducen los fantasmas históricos (`COMMENT_WINDOW_CLOSED`, `COMMENT_TOO_SHORT`, `user_id`/`photo_path`/`ticket_code`) y comprueban que se detectan sin marcar los reales |
+
+**Verificación de que la guarda muerde sobre el artefacto real:** se inyectaron temporalmente `COMMENT_WINDOW_CLOSED`
+(§5.5) y `user_id` (§4.5) en la especificación y la guarda falló en 2.1, 2.2 y 4.3 con exit 1; restaurada la copia
+(md5 idéntico) volvió a 17/17 exit 0.
+
+**Alcance declarado:** la guarda cubre los códigos y campos de `specs/technical/api_contracts.md` (con foco en los tres
+apartados del hilo). No cubre `specs/10-incident-comments/plan.md` —ya sin contradicciones conocidas tras el apartado
+7.4— ni los códigos que emite el código sin estar documentados (67 en el recuento actual), porque el documento es una
+especificación por endpoint y no un catálogo exhaustivo: la dirección exigible es que la especificación no prometa nada
+que el código no emita.
+
+### 7.4 Cierre de los pendientes documentales y del doble de test (08/10/2026)
+
+Autorizada la corrección de los puntos que quedaban abiertos en los apartados 7.1 y 7.2, se cerraron ambos sin tocar
+código de producción:
+
+| Pendiente | Corrección aplicada |
+|---|---|
+| `specs/10-incident-comments/plan.md` §2.2.A: `413 Payload Too Large` | Sustituido por `422 Unprocessable Content` (`FILE_TOO_LARGE`), y el `422` de longitud y tipo de archivo nombra ahora sus códigos (`INVALID_COMMENT_LENGTH`, `INVALID_FILE_TYPE`). Coincide con el comportamiento medido en los tres canales |
+| `tests/unit/CoordinatorIncidentDetailModalTest.mjs` (aserción 13.5): `422 COMMENT_WINDOW_CLOSED` | El doble lanza el error real de sellado (`403 CONVERSATION_SEALED` con el mensaje del servicio) y la aserción comprueba que el modal propaga ese texto |
+
+**Verificación:** `tests/unit/ApiContractDriftGuardTest.php` 17/17 exit 0 (36 códigos documentados ⊆ 301 emitibles, sin
+deriva), `tests/unit/CoordinatorIncidentDetailModalTest.mjs` en verde con el doble corregido y batería global
+210/210 suites · 7.994 aserciones · 0 fallos con las semillas restablecidas. No queda ninguna mención a `413 Payload`
+en el repositorio fuera de este informe.
