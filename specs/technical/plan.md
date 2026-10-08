@@ -440,6 +440,13 @@ Prueban la persistencia real, restricciones y transacciones:
 
 ## 7. Matriz de Trazabilidad Estricta (Requirements Traceability Matrix)
 
+> **Nota de vigencia (triaje del 2026-10-08, hallazgo T-1).** Esta tabla es el **mapa de diseño**
+> del MVP: conserva los nombres previstos antes de implementar y varios de ellos ya no existen
+> con ese nombre (18 de los 38 artefactos citados). La trazabilidad **viva** son los `plan.md`
+> por módulo (`specs/02-*` a `specs/10-*`) y la batería completa. La fila de **RNF-04** se ha
+> corregido para describir el mecanismo realmente implementado; la reconciliación completa de la
+> tabla queda como tarea documental propia.
+
 | Requisito Funcional / No Funcional | Clases / Ficheros Backend | Vistas / Componentes Frontend | Endpoints REST | Tests Asociados |
 | :--- | :--- | :--- | :--- | :--- |
 | **RF-01 (Acceso Sede)** | `AuthService.php`, `PdoLocationRepository.php` | `LocationPortalView.js` | `POST /api/auth/site-login` | `SiteAuthTest.php` |
@@ -456,7 +463,7 @@ Prueban la persistencia real, restricciones y transacciones:
 | **RNF-01 (Usabilidad Móvil)** | N/A (Frontend) | `TechnicianRouteView.js`, `design-tokens.css` | N/A | Verificación Manual Móvil |
 | **RNF-02 (Reporte < 2 min)** | `LocationPortalController.php` | `IncidentReportModal.js` | `POST /api/incidents` | Verificación Manual UX |
 | **RNF-03 (No Hard Delete)** | Todos los Repositorios PDO | N/A (Base de Datos) | N/A | `SoftDeleteIntegrityTest.php` |
-| **RNF-04 (Privacidad Informador)** | `LocationPortalController.php` (Filtro DTO) | `IncidentTimeline.js` | `GET /api/locations/{code}/incidents` | `DataSegregationTest.php` |
+| **RNF-04 (Privacidad Informador)** | `LocationPortalController.php` → `sanitizeIncidentForSite()` (filtro DTO recursivo) | `MachineCard.js`, `IncidentReportModal.js` (reciben payloads ya saneados) | N/A: no existe listado de incidencias por sede. La regla se aplica a `GET /api/locations/{site_code}/machines`, `POST /api/incidents` y reapertura (decisión del triaje T-1) | `SiteManagerPartsDataSegregationTest.php` |
 | **RNF-05 (Seguridad Archivos 5MB)**| `LocalFileUploader.php` | `ImagePreview.js` | `POST /api/incidents` | `FileUploadSecurityTest.php` |
 | **RNF-06 (Sistema Diseño Docker)** | N/A | `design-tokens.css`, Todos los componentes | N/A | Auditoría Visual de Tokens |
 

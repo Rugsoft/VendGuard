@@ -1,9 +1,18 @@
-# Informe de Auditoría Constitucional y Cierre del MVP · VendGuard
+# Informe de Auditoría Constitucional del MVP · VendGuard · **Acta histórica** (septiembre 2026)
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
 **Fecha de Ratificación:** Septiembre 2026  
 **Auditoría Técnica:** Tarea T-41 de `specs/technical/tasks.md`  
-**Estatus Constitucional:** 100% Conforme (Cero Infracciones)  
+**Estatus Constitucional en la fecha de ratificación:** 100% Conforme (Cero Infracciones, alcance del MVP)  
 **Marco Normativo Supremo:** [`constitution.md`](file:///C:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/constitution.md)
+
+> **Documento histórico (triaje del 2026-10-08, hallazgo §5.2).** Este acta conserva el alcance,
+> las cifras y el dictamen del **momento** en que se ratificó (MVP de 41 tareas, 43 suites,
+> 906 aserciones, 20 controles constitucionales). Seis módulos después no describe el estado
+> actual y **no debe citarse como declaración de conformidad vigente**. La fuente viva es la
+> suite [`ConstitutionalAuditTest.php`](file:///C:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/tests/unit/ConstitutionalAuditTest.php),
+> que audita los Artículos I–VII sobre **todos** los módulos, y la batería completa
+> (`php tests/run_all.php`), cuyas cifras vigentes declara el [README](../README.md) y audita
+> [`DocMetricsGuard.php`](../tests/Support/DocMetricsGuard.php).
 
 ---
 
