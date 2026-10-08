@@ -325,6 +325,8 @@ MODIFY COLUMN `entity_type` ENUM('TICKET', 'MACHINE', 'LOCATION', 'USER', 'PREVE
 
 ### 4.3 Endpoints para Responsable de Sede (`SiteAuthMiddleware`)
 
+> **Autenticación (2026-10-08):** `Bearer <site_token>` emitido por `POST /api/auth/site-login` con código de sede y clave de centro; la cabecera `X-Site-Code` queda retirada como vía de autenticación (hallazgo S-4).
+
 | Método | Endpoint | Propósito |
 | :--- | :--- | :--- |
 | `GET` | `/api/site/sanitary-status` | Semáforo sanitario de cada máquina del centro, última desinfección y última temperatura |

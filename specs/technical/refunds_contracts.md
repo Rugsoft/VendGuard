@@ -478,15 +478,11 @@ Permite a conserjería consultar los reembolsos de su edificio con nombres anoni
 
 * **Método:** `GET`
 * **Ruta:** `/api/location/refunds`
-* **Autenticación:** Obligatoria (`Bearer <token_sede>` o cabecera `X-Site-Code`).
-  **Aviso de seguridad, noорма de estilo:** el `site_code` **es** la credencial de este rol.
-  `POST /api/auth/site-login` emite un token firmado a cambio exclusivamente del código, sin contraseña,
-  así que el acceso a este endpoint no está protegido por ningún secreto que no esté impreso en la
-  etiqueta QR del propio edificio. La cabecera y el login son **la misma puerta**: retirar la una no
-  cierra la otra. Con este token se alcanzan también endpoints de escritura (`POST /api/incidents`
-  devuelve `201`). El hallazgo está documentado y escalado a 🔴 en
-  [`specs/08-refunds/analisis_sexta_tanda.md`](../../specs/08-refunds/analisis_sexta_tanda.md) §2 (H-1)
-  y §5; cerrarlo exige una decisión de producto (secreto por sede o *pairing* en la primera visita).
+* **Autenticación:** Obligatoria (`Bearer <token_sede>`; la cabecera `X-Site-Code` está retirada).
+  El token se emite en `POST /api/auth/site-login` a cambio del código de sede **y de la clave de centro
+  vigente** (solo huella, entregada en mano), de modo que el acceso ya no se sostiene sobre un dato
+  impreso en la etiqueta QR del edificio. Hallazgo S-4 cerrado el 2026-10-08; decisión y migración en
+  [`docs/propuesta_decision_s4_acceso_sede.md`](../../docs/propuesta_decision_s4_acceso_sede.md).
 * **Roles:** `LOCATION_MANAGER`.
 
 **Respuesta Exitosa (`200 OK`):**

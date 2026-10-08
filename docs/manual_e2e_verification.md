@@ -19,7 +19,7 @@ sequenceDiagram
     participant API as VendGuard REST API
     participant DB as MariaDB
 
-    Resp->>API: 1. POST /api/auth/site-login (SEDE-BCN-01)
+    Resp->>API: 1. POST /api/auth/site-login (SEDE-BCN-01 + clave de centro)
     Resp->>API: 2. POST /api/incidents (VEND-0101, Frio Alimentos)
     Note over API,DB: Cálculo automático: Urgencia CRITICAL (Art. II)
     Resp-->>API: 3. Intento de ticket duplicado (Misma máquina)
@@ -45,7 +45,7 @@ sequenceDiagram
 
 | Perfil | Identificador / Email | Contraseña / Código | Rol del Sistema | Ámbito Operativo |
 | :--- | :--- | :--- | :--- | :--- |
-| **Responsable de Ubicación** | `SEDE-BCN-01` | *N/A (Código de sede)* | `LOCATION_MANAGER` | Hospital del Mar - Edificio Central |
+| **Responsable de Ubicación** | `SEDE-BCN-01` | `DEV-SEDE-BCN-01` *(clave de centro de desarrollo; en producción se entrega en mano)* | `LOCATION_MANAGER` | Hospital del Mar - Edificio Central |
 | **Coordinador del Servicio** | `coordinacion@vendguard.internal` | `Password123!` | `COORDINATOR` | Supervisión global, triaje y SLA |
 | **Técnico de Ruta de Campo** | `jordi.ruta@vendguard.internal` | `Password123!` | `TECHNICIAN` | Ruta móvil, intervención y taller |
 
@@ -54,7 +54,7 @@ sequenceDiagram
 ## 3. Registro Cronológico de la Verificación E2E
 
 ### Paso 1: Perfil Responsable de Ubicación (`SEDE-BCN-01`)
-1. **Acceso al portal:** Llamada a `POST /api/auth/site-login` enviando `site_code: "SEDE-BCN-01"`. Se emite token JWT/Bearer de sede con HTTP 200 OK.
+1. **Acceso al portal:** Llamada a `POST /api/auth/site-login` enviando `site_code: "SEDE-BCN-01"` y su clave de centro (`access_code`). Se emite token JWT/Bearer de sede con HTTP 200 OK. La clave se emite en el alta de la sede, solo se guarda su huella bcrypt y la cabecera `X-Site-Code` está retirada como credencial (hallazgo S-4).
 2. **Supervisión de máquinas:** `GET /api/locations/SEDE-BCN-01/machines`. Se lista el parque del centro; la máquina `VEND-0101` (*Sanden Vendo G-Drink*, alimentos perecederos) se encuentra disponible y sin avisos previos (`active_incident = null`).
 3. **Reporte de fallo térmico alimentario:** `POST /api/incidents` para `VEND-0101`, categoría `TEMPERATURE_COLD`, informador *Laura Sanitaria*.
    * **Resultado:** HTTP 201 Created. Ticket generado con código único.
@@ -93,4 +93,4 @@ El recorrido funcional de extremo a extremo ha sido ejecutado satisfactoriamente
 
 > **Nota (08/10/2026):** el guion se ejecuta además en la **Fase 4** de `php tests/run_all.php`, con el servidor HTTP todavía en marcha, de modo que una regresión de flujo rompe ya la batería global. Cifra vigente de la batería completa:
 >
-> batería global: 214 suites · 8.135 aserciones
+> batería global: 216 suites · 8.194 aserciones

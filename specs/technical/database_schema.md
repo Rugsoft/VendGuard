@@ -36,6 +36,7 @@ erDiagram
         string address "Av. Diagonal 123"
         string contact_name "Marta Pérez"
         string contact_phone "600123456"
+        string access_code_hash "nullable (bcrypt, S-4)"
         boolean is_active "1"
         datetime created_at
         datetime updated_at
@@ -137,6 +138,10 @@ Almacena los centros de trabajo donde están ubicadas las máquinas de vending.
 | `address` | `VARCHAR(255)` | NO | - | Dirección física completa |
 | `contact_name` | `VARCHAR(100)` | SÍ | `NULL` | Persona de contacto en el centro |
 | `contact_phone` | `VARCHAR(30)` | SÍ | `NULL` | Teléfono de contacto |
+| `access_code_hash` | `VARCHAR(255)` | SÍ | `NULL` | Huella bcrypt de la clave de centro (hallazgo S-4); `NULL` = pendiente de entrega (fallo en cerrado) |
+| `access_code_issued_at` | `TIMESTAMP` | SÍ | `NULL` | Fecha de emisión o última reemisión de la clave |
+| `login_attempts` | `TINYINT UNSIGNED` | NO | `0` | Fallos consecutivos de login de sede desde el último reinicio |
+| `login_locked_until` | `TIMESTAMP` | SÍ | `NULL` | Bloqueo temporal del login de sede tras superar el umbral de fallos |
 | `is_active` | `TINYINT(1)` | NO | `1` | Estado operativo de la sede (1: activa, 0: inactiva) |
 | `created_at` | `TIMESTAMP` | NO | `CURRENT_TIMESTAMP` | Fecha de creación del registro |
 | `updated_at` | `TIMESTAMP` | NO | `CURRENT_TIMESTAMP ON UPDATE` | Fecha de última modificación |

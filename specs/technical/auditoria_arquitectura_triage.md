@@ -9,9 +9,11 @@
 > Este documento es la Fase 1 (especificación) del ciclo SDD para el cierre de los hallazgos.
 > Los cuatro cierres de §2 y los de la segunda tanda (§6) son refactorizaciones, alineaciones
 > documentales y endurecimientos sin alterar contratos de negocio, con una excepción decidida
-> por el Product Owner: **V-6** baja la sesión de sede a 24 h (EARS 1.3). S-3 y S-4 quedan
+> por el Product Owner: **V-6** baja la sesión de sede a 24 h (EARS 1.3). S-3 y S-4 quedaron
 > **explícitamente fuera de Fase 1** (requieren especificación funcional y/o decisión de
-> Product Owner, ver §3).
+> Product Owner, ver §3). **Actualización (2026-10-08):** S-4 fue decidido por el Product Owner y
+> cerrado con su propia enmienda (clave de centro, retirada de `X-Site-Code` y freno por sede);
+> S-3 sigue diferido.
 
 ---
 
@@ -22,7 +24,7 @@
 | **S-1** | Secretos criptográficos hardcodeados (`SECRET_KEY`, `CRON_SECRET`) | 🔴 Crítica | **CERRADO en Fase 1** | Es un arreglo de configuración sin cambio de contrato: la clave de firma deja de estar en el repositorio y en producción el sistema **falla en cerrado** si no se define por entorno. |
 | **S-2** | `POST /api/cron/auto-close` sin middleware | 🟡 Media | **CERRADO en Fase 1** | La ruta de un proceso batch quedaba fuera del patrón de las 75 restantes. Se extrae `CronAuthMiddleware` y el controlador pasa a fail-closed. |
 | **S-3** | Cero rate-limiting en `loginInternal()` | 🔴 Crítica | **DIFERIDO** (necesita spec) | Introduce comportamiento nuevo (contador de intentos, umbrales, bloqueo, respuestas `429`) y por tanto contrato: exige Fase 1 funcional + puerta de aprobación antes de tocar código (AGENTS.md §2). |
-| **S-4** | `X-Site-Code` y `site-login` son la misma puerta sin credencial | 🔴 Crítica | **DIFERIDO** (decisión de PO) | El propio informe lo declara decisión de producto: exige emitir un secreto por sede o emparejar en la primera visita, ambas cambios de contrato para RF-01. No lo decide el agente (AGENTS.md §5.5). |
+| **S-4** | `X-Site-Code` y `site-login` son la misma puerta sin credencial | 🔴 Crítica | **CERRADO · decisión de PO (2026-10-08)** | El PO eligió la opción A: clave de centro emitida en el alta (solo huella, entregada en mano), retirada de la cabecera y freno de intentos por sede. Enmienda y plan en [`docs/propuesta_decision_s4_acceso_sede.md`](../../docs/propuesta_decision_s4_acceso_sede.md). |
 | **H-1** | Tres servicios de `Core/Service` dependen de `Infrastructure` | 🟡 Media | **CERRADO en Fase 1** | Refactor sin cambio de comportamiento y **alineación con la arquitectura ya aprobada**: `specs/02-qr-codes/plan.md` ya situaba `QrScanService`, `QrReportService` y `QrLabelService` en `Application/Service`. |
 | **H-2** | Service Locator disperso (`?? new Pdo...` en 24 ficheros) | 🟡 Media | **ACEPTADO por diseño** | Consecuencia deliberada del Dogma Vanilla (sin contenedor ni framework): los parámetros opcionales son el mecanismo de inyección en tests. H-1 elimina las instancias que además rompían la pureza de `Core`. Sin acción. |
 | **H-3** | Alias `class_alias()` en `Core/Domain/Service` | 🟢 Baja | **CERRADO en Fase 1** | Los tres alias de servicios no los usaba nadie salvo un `use` del portal de sede; se eliminan y queda un único camino por clase. |
@@ -100,16 +102,17 @@ tal y como ya describía `specs/02-qr-codes/plan.md`.
   email), ventana temporal, estrategia de bloqueo y contrato de la respuesta `429`, más el uso de
   `audit_log` (append-only) como almacén del contador. Es un incremento de alcance: no se implementa
   sin puerta de aprobación (AGENTS.md §2 Fase 2 y §5.1).
-* **S-4 (secreto por sede).** Requiere decisión de Product Owner entre emitir un secreto en el alta
-  de sede y emparejarlo en la primera visita. Hasta entonces el comportamiento actual está fijado
-  por `SiteManagerRefundDataSegregationTest` para que no se cambie por descuido.
+* **S-4 (secreto por sede) — resuelto.** El Product Owner aprobó la **opción A** (clave de centro
+  emitida en el alta, solo huella y entregada en mano), la retirada de `X-Site-Code` y el freno de
+  intentos por sede; la decisión, la enmienda de RF-01, la migración y el fallback de pérdida viven en
+  [`docs/propuesta_decision_s4_acceso_sede.md`](../../docs/propuesta_decision_s4_acceso_sede.md).
 * **H-4 (`PdoIncidentRepository`).** Requiere tarea propia (extracción por *concern*: historia,
   resolución, reapertura, auto-cierre) con su batería de caracterización previa. Es refactor de
   6 h sobre el repositorio más usado; sin riesgo activo, no entra en el cierre de Fase 1.
 
-Riesgo residual aceptado y declarado: mientras S-3 y S-4 sigan abiertos, la enumeración de sedes
-y la fuerza bruta sobre el login no tienen freno técnico. Ambos están ya documentados en el informe
-de auditoría; este triaje **no los mitiga**.
+Riesgo residual aceptado y declarado: mientras S-3 siga abierto, el login **interno** no tiene
+freno técnico de fuerza bruta (el login de sede ya lo tiene, por la decisión de S-4 del 2026-10-08).
+Está documentado en el informe de auditoría; este triaje **no lo mitiga**.
 
 ---
 

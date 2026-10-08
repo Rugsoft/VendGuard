@@ -22,7 +22,7 @@ Definir con precisión el comportamiento funcional del Producto Mínimo Viable (
 
 ## 2. Usuarios del Sistema
 
-* **Responsable de Ubicación (Informador):** Personal del edificio o centro cliente (conserje, recepcionista, encargado de planta) que notifica averías en las máquinas instaladas en su sede y consulta su resolución. Accede mediante un **Código de Sede** único. Al reportar, se identifica con nombre y teléfono de contacto para el seguimiento.
+* **Responsable de Ubicación (Informador):** Personal del edificio o centro cliente (conserje, recepcionista, encargado de planta) que notifica averías en las máquinas instaladas en su sede y consulta su resolución. Accede mediante el **Código de Sede** único y la **clave de centro** entregada físicamente en el alta; ninguna de las dos es una contraseña personal que deba memorizar. Al reportar, se identifica con nombre y teléfono de contacto para el seguimiento.
 * **Técnico de Campo / Ruta (Operador):** Personal técnico itinerante que recibe tareas en su dispositivo móvil, se desplaza a las máquinas, ejecuta la reparación y documenta la intervención. Accede mediante **credenciales individuales (usuario/contraseña)**.
 * **Coordinador del Servicio (Administrador):** Responsable operativo que supervisa el parque completo, valida severidades, asigna avisos a las rutas técnicas y gestiona reincidencias o descartes. Accede mediante **credenciales con permisos de administración**.
 
@@ -30,7 +30,7 @@ Definir con precisión el comportamiento funcional del Producto Mínimo Viable (
 
 ## 3. Historias de Usuario
 
-* **HU-01:** *Como* Responsable de Ubicación, *quiero* acceder rápidamente introduciendo el código alfanumérico de mi edificio *para* ver solo las máquinas de mi centro sin tener que recordar contraseñas.
+* **HU-01:** *Como* Responsable de Ubicación, *quiero* acceder rápidamente introduciendo el código alfanumérico de mi edificio y la clave de centro entregada en mano *para* ver solo las máquinas de mi centro sin contraseñas personales que memorizar.
 * **HU-02:** *Como* Responsable de Ubicación, *quiero* registrar una avería seleccionando la máquina y el fallo observado *para* que el servicio técnico acuda a repararla lo antes posible.
 * **HU-03:** *Como* Responsable de Ubicación, *quiero* que el sistema me impida abrir un ticket duplicado si la máquina ya está siendo atendida *para* no saturar al servicio técnico ni generar confusiones.
 * **HU-04:** *Como* Responsable de Ubicación, *quiero* poder reabrir una incidencia durante las primeras 48 horas tras su arreglo *para* alertar si la máquina vuelve a fallar por la misma causa.
@@ -43,12 +43,14 @@ Definir con precisión el comportamiento funcional del Producto Mínimo Viable (
 
 ## 4. Requisitos Funcionales y Criterios de Aceptación (Notación EARS)
 
-### RF-01: Acceso por Código de Sede
-*El sistema permitirá a los responsables de ubicación identificarse mediante un identificador alfanumérico propio de su edificio.*
+### RF-01: Acceso por Código de Sede y Clave de Centro
+*El sistema permitirá a los responsables de ubicación identificarse mediante un identificador alfanumérico propio de su edificio y una clave de centro emitida en el alta y entregada en mano.*
 
-* **EARS 1.1 (Evento):** Cuando el usuario introduce un código de sede válido en formato alfanumérico (ej: `SEDE-BCN-01`), el sistema deberá autenticar la sesión y mostrar la vista del portal de sede correspondiente.
-* **EARS 1.2 (Excepción):** Si el usuario introduce un código de sede inexistente o inactivo, entonces el sistema deberá denegar el acceso y mostrar el mensaje de error: *"Código de sede no reconocido. Contacte con el servicio técnico."*
+* **EARS 1.1 (Evento):** Cuando el usuario introduce en formato alfanumérico el código de sede (ej: `SEDE-BCN-01`) y la clave de centro vigente de esa sede, el sistema deberá autenticar la sesión y mostrar la vista del portal de sede correspondiente.
+* **EARS 1.2 (Excepción):** Si el código de sede no existe, está inactivo, no tiene clave emitida o la clave no es la vigente, entonces el sistema deberá denegar el acceso con un mensaje **único y genérico** —«Código o clave no reconocidos. Contacte con el servicio técnico.»— sin revelar cuál de los dos factores ha fallado, y señalará en el panel de coordinación las sedes pendientes de entrega.
 * **EARS 1.3 (Estado):** Mientras el responsable de ubicación navegue autenticado por código de sede, el sistema deberá restringir su visibilidad exclusivamente a las máquinas e incidencias pertenecientes a dicha sede, manteniendo la sesión activa durante 24 horas continuadas de actividad.
+* **EARS 1.4 (Evento):** Cuando el coordinador dé de alta una sede, el sistema deberá generar una clave de centro aleatoria, almacenar únicamente su huella criptográfica y mostrarla una sola vez para su entrega física; la clave no se imprimirá en las etiquetas QR ni se expondrá en ninguna respuesta posterior.
+* **EARS 1.5 (Excepción):** Si la clave de centro se pierde, se filtra o la sede cambia de responsable, cuando el coordinador emita una nueva clave, el sistema deberá invalidar de inmediato la anterior, registrar la rotación en la auditoría inmutable y mostrarla una sola vez.
 
 ### RF-02: Detección y Bloqueo Estricto de Incidencias Duplicadas
 *El sistema impedirá la existencia de más de una incidencia abierta o no consolidada de forma concurrente en una misma máquina.*
@@ -188,3 +190,4 @@ Definir con precisión el comportamiento funcional del Producto Mínimo Viable (
 * **Resolución QA 4 (20 Caracteres por Campo):** El umbral mínimo aplica de forma independiente tanto al diagnóstico (>= 20) como a la acción realizada (>= 20).
 * **Resolución QA 5 (Desasignación y Tope de Reaperturas):** Al reabrir, el técnico se desasigna automáticamente (`technician_id = NULL`), la garantía de 48h se reinicia a 0 y se establece un máximo de 2 reaperturas antes de declarar *"Avería Crónica"*.
 * **Resolución QA 6 (SLA 24/7 y Polling):** El SLA de 60 minutos corre 24/7 de reloj continuo. La UI sondea el estado cada 60 segundos.
+* **Resolución QA 7 (Credencial de Sede — cierre de S-4):** El código de sede deja de ser credencial completa: el acceso exige la clave de centro emitida en el alta (solo huella, mostrada una vez y entregada en mano), la sesión sigue siendo de 24 h (EARS 1.3) y la cabecera `X-Site-Code` se retira como vía de autenticación. La clave se reemite desde coordinación y la anterior queda invalidada al instante (EARS 1.4 y 1.5).

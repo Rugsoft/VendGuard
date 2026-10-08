@@ -1,7 +1,7 @@
 # Handoff · Rama `incident-comments`
 
 **Fecha:** 2026-10-08 · **Cierre de contenido:** `a5005fa` (la segunda tanda de triaje va encima, **sin publicar**: los commits locales posteriores a la última publicación no están en `origin`) · **Estado:** árbol con cambios de esta pasada pendientes de commit + material ajeno no versionado
-**Batería:** `php tests/run_all.php` → **batería global: 214 suites · 8.135 aserciones** · 0 fallos · base restaurada a semillas
+**Batería:** `php tests/run_all.php` → **batería global: 216 suites · 8.194 aserciones** · 0 fallos · base restaurada a semillas
 *(la propia batería audita esta cifra: un desfase documental la pone en rojo vía `tests/Support/DocMetricsGuard.php`)*
 
 ---
@@ -32,7 +32,7 @@ El triaje completo, con criterios de aceptación y justificación por hallazgo, 
 | **S-1** Secretos hardcodeados | Cerrado en Fase 1 | `src/Infrastructure/Config/SecretProvider.php`: `SECRET_KEY`/`CRON_SECRET` por entorno; en `APP_ENV`/`VENDGUARD_ENV`=`production`/`prod` la ausencia **lanza excepción**; fuera de producción se usa una clave **solo de desarrollo** distinta de la histórica, así que los tokens firmados con la clave del repositorio quedan invalidados |
 | **S-2** `/api/cron/auto-close` sin middleware | Cerrado en Fase 1 | `CronAuthMiddleware` registrado en la ruta; `CronController` es **fail-closed** (sin la marca `cron_authenticated` responde 401 aunque el secreto sea válido) |
 | **S-3** Sin rate-limiting en login | Diferido | Requiere spec funcional (umbrales, ventana, `429`) y puerta de aprobación: es alcance nuevo |
-| **S-4** `X-Site-Code`/`site-login` sin secreto previo | Diferido · decisión de PO | Emitir un secreto por sede o emparejar en la primera visita son cambios de contrato de RF-01; el comportamiento actual sigue fijado por `SiteManagerRefundDataSegregationTest` |
+| **S-4** `X-Site-Code`/`site-login` sin secreto previo | **Cerrado en Fase 1 · decisión de PO (2026-10-08)** | El PO eligió la opción A: clave de centro emitida en el alta (solo huella bcrypt, mostrada una vez y entregada en mano), `X-Site-Code` retirada como credencial y freno de intentos por sede. Enmienda en [propuesta_decision_s4_acceso_sede.md](propuesta_decision_s4_acceso_sede.md) §11, migración `014_location_access_code.sql`, suites `SiteAccessCodeTest.php` (32 aserciones) y `SiteAccessCodeGeneratorTest.php` (7) |
 | **H-1** `Core` dependía de `Infrastructure` | Cerrado en Fase 1 | Los tres servicios QR movidos a `src/Application/Service/`; `src/Core/` queda sin referencias a `VendGuard\Infrastructure` |
 | **H-2** Service Locator disperso | Aceptado por diseño | Consecuencia deliberada del Dogma Vanilla; sin contenedor |
 | **H-3** Alias `class_alias()` de servicios | Cerrado en Fase 1 | Eliminados los tres alias; `LocationPortalController` importa la implementación canónica. El alias de `MachineType` no se toca: es API real de tres suites |
@@ -56,7 +56,9 @@ El triaje completo, con criterios de aceptación y justificación por hallazgo, 
 
 ## 5. Verificación de esta pasada
 
-* **Batería global:** `214 suites · 8.135 aserciones · 0 fallos · exit 0` (antes 212/8.116: +2 suites y +19 aserciones entre la guarda de la segunda tanda —con V-6— y el trinquete).
+* **Batería global:** `216 suites · 8.194 aserciones · 0 fallos · exit 0` (antes 214/8.135: +2 suites y +59 aserciones con el cierre de S-4).
+* **Cierre de S-4 verificado en comportamiento:** `SiteAccessCodeTest.php` cubre acceso con las dos credenciales, error genérico idéntico, fallo en cerrado (sede sin clave o inactiva), retirada de `X-Site-Code` (401 sin nombrar la vía antigua), freno de cinco intentos con bloqueo temporal de 15 minutos, emisión en el alta y reemisión que invalida la clave anterior al instante con rastro en `audit_log` sin la clave en claro. `SiteAccessCodeGeneratorTest.php` fija formato `XXXXX-XXXXX` y alfabeto sin caracteres ambiguos.
+* **Suites migradas a token de sede:** `AuthControllerTest`, `AuthMiddlewareTest`, `LocationPortalControllerTest`, `LocationRefundDeliveryApiTest`, `LocationRefundDeliveryTest`, `LocationPortalReopenAuditTest`, `SiteManagerPartsDataSegregationTest`, `SiteManagerRefundDataSegregationTest`, `SiteSanitaryApiTest`, `SiteSanitaryControllerTest`, `FrontendApiStoreTest` (.php y .mjs), `LocationPortalViewTest.mjs`, `IncidentCommentRoutesVerificationTest` y el guion E2E: la cabecera retirada pasa a certificarse como rechazada (401) en todas ellas.
 * **Guarda de cifras:** se puso en rojo sola al detectar el desfase `8.116 → 8.132 → 8.135` y volvió a verde tras sincronizar README, handoff, manual E2E y las dos actas.
 * **Suites enfocadas del cierre:** `AuditFindingsSecondWaveClosureTest.php` 16/16 (S-5, H-5, V-6, T-1, §5.2, §6), `DesignTokenDebtRatchetTest.mjs` 3/3, `ConnectionFactoryTest` verde, `SeedDataTest` verde, `CoordinatorPreventiveApiTest.php` 53/53, `AuditFindingsClosureTest.php` 29/29 (primera tanda, sigue verde).
 * **V-6 verificado en comportamiento:** un token de sede recién emitido declara `exp = ahora + 86400` y el parámetro de TTL explícito sigue funcionando; la guarda estructural impide que vuelva el valor de 7 días.
@@ -66,7 +68,7 @@ El triaje completo, con criterios de aceptación y justificación por hallazgo, 
 ## 6. Riesgos abiertos y pendientes vivos
 
 1. **V-6 cerrado con decisión de PO:** la sesión de sede dura 24 h. El coste asumido es la reidentificación diaria con el código de sede; si resulta gravosa, la mejora natural es la ventana deslizante de 24 h de actividad (reemitir el token), que necesita especificación de contrato propia.
-2. **S-3 (rate-limiting del login) y S-4 (secreto por sede)** siguen abiertos: el triaje los difiere con su motivo, pero mientras no se decidan la enumeración de sedes y la fuerza bruta no tienen freno técnico.
+2. **S-3 (rate-limiting del login interno) sigue abierto:** el triaje lo difiere con su motivo. El login de sede ya tiene freno propio desde el cierre de S-4 (5 intentos → 15 minutos de bloqueo por sede).
 3. **Fallo en cerrado ligado a la declaración de entorno:** `SecretProvider` (S-1) y `ConnectionFactory` (S-5) solo exigen configuración cuando `APP_ENV`/`VENDGUARD_ENV` vale `production`/`prod`. Hoy el `Dockerfile` **no** declara el entorno, así que las guardas quedan inertes en el contenedor hasta que el despliegue lo declare junto con `SECRET_KEY`, `CRON_SECRET` y las credenciales de base de datos. No se tocó el `Dockerfile` a propósito: activarlo sin configurar habría tumbado un despliegue vivo.
 4. **Certificado A4 (casilla 7 del pliego preventivo):** la maquetación está cubierta, la **impresión física** no se ha verificado y por eso la casilla no se marca.
 5. **`T-QR-20`** (validación física en Android) continúa abierta en el módulo 02.
@@ -79,7 +81,7 @@ El triaje completo, con criterios de aceptación y justificación por hallazgo, 
 
 ```bash
 # Batería completa (requiere MariaDB local; reutiliza o arranca el servidor en 127.0.0.1:8000)
-php tests/run_all.php          # esperado: 214/214 suites, 8.135 aserciones, 0 fallos, exit 0
+php tests/run_all.php          # esperado: 216/216 suites, 8.194 aserciones, 0 fallos, exit 0
 
 # Guardas de las dos tandas de triaje
 php tests/unit/AuditFindingsClosureTest.php             # 29/29 (S-1, S-2, H-1, H-3)
@@ -108,7 +110,7 @@ La batería restablece la base a semillas al terminar, así que no deja datos de
 ## 9. Siguientes pasos sugeridos (por valor)
 
 1. Declarar `APP_ENV=production` y las claves (`SECRET_KEY`, `CRON_SECRET`) en el despliegue para que las guardas de S-1 y S-5 dejen de estar inertes.
-2. Decidir S-4 con el Product Owner y especificar S-3 antes de implementarlo.
+2. Especificar S-3 (rate-limiting del login interno) antes de implementarlo; S-4 quedó cerrado con decisión de PO el 2026-10-08.
 3. Medir el impacto de la sesión de 24 h en las sedes y, si procede, especificar la ventana deslizante como mejora (V-6 opción 3).
 4. Verificar la impresión física en A4 del certificado para cerrar la última casilla del pliego preventivo.
 5. Completar `T-QR-20` (validación física en Android) como cierre de la Fase 1.

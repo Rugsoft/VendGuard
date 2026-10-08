@@ -194,7 +194,7 @@ extrae el actor de los atributos del token, nunca del payload. Lo que fallaba er
 
 | # | Hallazgo | Decisión |
 | :--- | :--- | :--- |
-| H-1 | Bypass de sede | **Aparcado y documentado.** El arreglo es una decisión de producto (secreto por sede o *pairing*), no un parche. Escalado a 🔴 por su alcance de escritura. |
+| H-1 | Bypass de sede | **Cerrado el 2026-10-08** con decisión de PO: clave de centro emitida en el alta (solo huella, entregada en mano), `X-Site-Code` retirada y freno de intentos por sede. Enmienda en `docs/propuesta_decision_s4_acceso_sede.md` §11. |
 | H-2 | Doble asiento | **Prohibido.** `422` si hay dictamen previo en la misma avería. |
 | H-3 | Tope de sobrante | **Agregado por máquina**, en céntimos enteros. Contradice el «por hallazgo» implícito en RF-REF-04; la especificación se actualiza en §5. |
 | H-4 | Recorte de auditoría | **Declarado, no eliminado.** El límite de seguridad de 10.000 se mantiene; el CSV avisa de lo que no incluye. |
@@ -233,13 +233,20 @@ técnico: es una deuda de diseño conocida, con nombre y con medidas.
 
 **Riesgo residual:** 🔴 hasta que exista un secreto por sede.
 
+> **Nota de cierre (2026-10-08):** el Product Owner eligió la opción A y H-1 quedó cerrado en la rama
+> `incident-comments`: clave de centro emitida en el alta (solo huella bcrypt, mostrada una vez y
+> entregada en mano), retirada de `X-Site-Code` como vía de autenticación y freno de cinco intentos
+> por sede. Este apartado conserva su redacción original como registro de la decisión; el riesgo
+> residual de la última línea ya no aplica. Evidencia en `tests/integration/SiteAccessCodeTest.php`
+> y `tests/unit/SiteAccessCodeGeneratorTest.php`.
+
 ---
 
 ## 6. Trazabilidad
 
 | Hallazgo | Guardas | Pruebas de comportamiento |
 | :--- | :--- | :--- |
-| H-1 | `RefundsModuleClosureTest` 7.5 (documental) | `SiteManagerRefundDataSegregationTest` 4.6 (fija el comportamiento actual) |
+| H-1 | `RefundsModuleClosureTest` 7.5 (documental) · **cerrado 2026-10-08** | `SiteAccessCodeTest` (acceso, error genérico, fallo en cerrado, cabecera retirada, freno por sede y rotación con auditoría) + `SiteAccessCodeGeneratorTest` |
 | H-2 | `RefundsModuleClosureTest` 7.1 | `TechnicianRefundInspectionApiTest` 11.1–11.5 |
 | H-3 | `RefundsModuleClosureTest` 7.2 | `TechnicianRefundInspectionApiTest` 11.6–11.13 |
 | H-4 | `ConstitutionalAuditTest` 9.7 | Misma aserción (estática) + `TechnicianRefundInspectionApiTest` para el agregado |

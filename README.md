@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/MariaDB-10.11%2B%20%7C%20MySQL%208.0-003545?style=flat-square&logo=mariadb&logoColor=white)](https://mariadb.org/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-214%20Suites%20%7C%208.135%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-216%20Suites%20%7C%208.194%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -106,10 +106,12 @@ La aplicación cuenta con un conmutador de perfiles en la barra superior para al
 
 | Perfil / Actor | Identificador / Email | Contraseña / Código | Función Principal |
 | :--- | :--- | :--- | :--- |
-| **🏢 1. Responsable de Sede** | `SEDE-BCN-01` *(Hospital del Mar)*<br>`SEDE-BCN-02` *(Torre Glòries)* | *N/A (Acceso por código de sede)* | Supervisa máquinas del edificio, reporta averías (< 2 min), anexa evidencias y reabre en garantía. |
+| **🏢 1. Responsable de Sede** | `SEDE-BCN-01` *(Hospital del Mar)*<br>`SEDE-BCN-02` *(Torre Glòries)* | Código + `DEV-<site_code>` *(clave de desarrollo, ver nota)* | Supervisa máquinas del edificio, reporta averías (< 2 min), anexa evidencias y reabre en garantía. |
 | **📊 2. Coordinador de Operaciones** | `coordinacion@vendguard.internal` | `Password123!` | Triaje central, supervisión 24/7 de SLAs, administración del parque y personal, preventivos y certificados sanitarios, catálogo y analítica de repuestos, cuadro de mando de métricas y visor de auditoría. |
 | **📱 3. Técnico de Ruta de Campo** | `jordi.ruta@vendguard.internal`<br>`marta.ruta@vendguard.internal` | `Password123!` | Interfaz vertical *mobile-first*, gestión de averías en ruta, inicio de intervención, pausa estructurada por repuestos, resolución justificada con piezas sustituidas, inspecciones preventivas y consulta de métricas individuales. |
 | **🤳 4. Usuario / Consumidor Final** | Enlace QR (`?code=VEND-0101`) | *Público / Sin registro* | Reporte inmediato in situ escaneando la pegatina de la máquina, con feedback de estado si ya estaba reportada. |
+
+> **Clave de centro de desarrollo (cierre de S-4).** En pruebas, las semillas emiten una clave determinista por sede; para el trabajo manual en local hay que pedirla de forma explícita (`VENDGUARD_DEV_SITE_KEYS=1 php bin/seed.php`). La regla es `DEV-<site_code>` (p. ej. `DEV-SEDE-BCN-01`). En producción el campo no se siembra jamás: cada sede recibe su clave aleatoria al alta o al reemitirse desde coordinación, se muestra una sola vez y solo se guarda su huella bcrypt. Sin clave emitida, el acceso de la sede falla en cerrado.
 
 ---
 
@@ -127,8 +129,9 @@ La aplicación cuenta con un conmutador de perfiles en la barra superior para al
 # Crear la base de datos:
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS vendguard_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
-# Opción recomendada: migrador DDL idempotente (esquema base + migraciones 003-013
-# de auditoría, CRUD, preventivos, repuestos, mapa, reintegros y freno del PIN, con verificación de integridad final):
+# Opción recomendada: migrador DDL idempotente (esquema base + migraciones 003-014
+# de auditoría, CRUD, preventivos, repuestos, mapa, reintegros, freno del PIN y clave
+# de centro (S-4), con verificación de integridad final):
 php bin/migrate.php
 
 # Cargar semillas (sedes, máquinas, usuarios, preventivos y catálogo de repuestos).
@@ -166,7 +169,7 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | Método | Endpoint | Rol Autorizado | Descripción del Recurso |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/` y `/api/health` | Público | Comprobación de salud operativa y estado del sistema. |
-| `POST`| `/api/auth/site-login` | Público | Acceso de responsables mediante código de sede (`site_code`). |
+| `POST`| `/api/auth/site-login` | Público | Acceso de responsables mediante código de sede (`site_code`) y clave de centro (`access_code`). |
 | `POST`| `/api/auth/login` | Interno | Login para personal interno emitiendo token Bearer criptográfico. |
 | `GET` | `/api/locations/{code}/machines` | `LOCATION_MANAGER` | Catálogo de máquinas del centro con estado de ticket activo. |
 | `POST`| `/api/incidents` | `LOCATION_MANAGER` | Registro de avería con cálculo de urgencia y prevención de duplicados (409). |
@@ -267,20 +270,20 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 214 suites · 8.135 aserciones
+batería global: 216 suites · 8.194 aserciones
 
 ```text
 ======================================================================
  RESUMEN DE EJECUCIÓN GLOBAL (T-39)
 ======================================================================
- Tiempo de ejecución total : 64.64 segundos   (variable en cada corrida)
- Suites de pruebas PHP Unit : 96 / 96 pasadas
+ Tiempo de ejecución total : 112.33 segundos  (variable en cada corrida)
+ Suites de pruebas PHP Unit : 97 / 97 pasadas
  Suites de pruebas JS Unit  : 54 / 54 pasadas
- Suites de Integración PHP  : 63 / 63 pasadas
+ Suites de Integración PHP  : 64 / 64 pasadas
  Suites E2E Manuales (T-40): 1 / 1 pasadas
  ──────────────────────────────────────────────────────────────────
- Total Suites Ejecutadas    : 214
- Total Aserciones Evaluadas : 8135
+ Total Suites Ejecutadas    : 216
+ Total Aserciones Evaluadas : 8194
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
@@ -366,7 +369,7 @@ gestor-incidencias-vending/
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 214 suites (100% verde)
+    ├── run_all.php               # Ejecutor global de la batería de 216 suites (100% verde)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)
     ├── unit/                     # Pruebas unitarias de lógica pura, geometría y contratos

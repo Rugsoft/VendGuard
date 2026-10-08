@@ -56,14 +56,15 @@
 
 ## 2. Módulo de Autenticación y Acceso
 
-### 2.1 `POST /api/auth/site-login` (Acceso por Código de Sede)
-Permite al responsable de ubicación identificarse en su centro sin contraseñas (RF-01).
+### 2.1 `POST /api/auth/site-login` (Acceso por Código de Sede y Clave de Centro)
+Permite al responsable de ubicación identificarse en su centro sin contraseñas personales (RF-01): código de sede más la clave de centro entregada en mano.
 
 * **Cabeceras:** `Content-Type: application/json`
 * **Request Body:**
 ```json
 {
-  "site_code": "SEDE-BCN-01"
+  "site_code": "SEDE-BCN-01",
+  "access_code": "K7M4P-2QX9R"
 }
 ```
 * **Respuesta Exitosa (`200 OK`):**
@@ -83,7 +84,8 @@ Permite al responsable de ubicación identificarse en su centro sin contraseñas
 }
 ```
 * **Errores posibles:**
-  * `401 Unauthorized` (`INVALID_SITE_CODE`): Código no encontrado o sede inactiva.
+  * `401 Unauthorized` (`INVALID_SITE_CREDENTIALS`): mensaje único «Código o clave no reconocidos. Contacte con el servicio técnico.»; no distingue sede inexistente, inactiva, sin clave emitida o clave incorrecta.
+* **Nota de custodia:** la clave de centro solo se devuelve **una vez**, en la respuesta del alta o de la reemisión en coordinación; el login nunca la devuelve ni queda registrada en claro.
 
 ---
 
@@ -123,11 +125,10 @@ Inicio de sesión para Coordinadores y Técnicos de Campo (RF-04).
 ### 3.1 `GET /api/locations/{site_code}/machines`
 Obtiene el parque de máquinas instaladas en la sede para el formulario de reporte (RF-01, RF-02).
 
-* **Autenticación:** Token de sede o cabecera `X-Site-Code: SEDE-BCN-01`
-  **Aviso de seguridad:** el `site_code` es la credencial completa de este rol; `POST /api/auth/site-login`
-  emite el token firmado a cambio del código y sin contraseña. Ambos caminos son la misma puerta y el
-  acceso alcanza también endpoints de escritura. Hallazgo abierto y escalado a 🔴 en
-  `specs/08-refunds/analisis_sexta_tanda.md` §2 (H-1) y §5; cerrarlo exige una decisión de producto.
+* **Autenticación:** exclusivamente `Authorization: Bearer <site_token>` emitido por `POST /api/auth/site-login`
+  con código de sede y clave de centro vigente. La cabecera `X-Site-Code` queda **retirada** como vía de
+  autenticación (hallazgo S-4, cerrado el 2026-10-08; ver
+  [`docs/propuesta_decision_s4_acceso_sede.md`](../../docs/propuesta_decision_s4_acceso_sede.md)).
 * **Respuesta Exitosa (`200 OK`):**
 ```json
 {
@@ -211,7 +212,7 @@ Registra un nuevo aviso de avería con cálculo automático de urgencia y contro
 * **Rutas:**
   * `GET` / `POST /api/incidents/{ticket_code}/comments` — alias retrocompatible del informador (EARS 2.2).
   * `GET` / `POST /api/location/incidents/{id}/comments` — rutas canónicas del módulo 10; el `{id}` admite tanto el identificador primario como el código de ticket.
-* **Autenticación:** middleware `SiteAuthMiddleware` (token de sesión de sede o cabecera `X-Site-Code`).
+* **Autenticación:** middleware `SiteAuthMiddleware` (token de sesión de sede; la cabecera `X-Site-Code` está retirada).
 * **Contrato del módulo propietario:** [Módulo 10 · Hilo de comentarios](../10-incident-comments/plan.md) (§2.1.A consulta, §2.2.A publicación).
 
 #### 3.3.1 Consulta del hilo (`GET`)
