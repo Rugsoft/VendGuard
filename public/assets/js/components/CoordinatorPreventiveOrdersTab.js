@@ -58,6 +58,7 @@ export const CoordinatorPreventiveOrdersTab = {
         scheduled_date: ''
       },
       assignError: '',
+      assignReassignmentReason: '',
 
       // Modal de Detalle Integral de la Orden (RF-PD-01, solo consulta)
       showDetailModal: false,
@@ -224,6 +225,7 @@ export const CoordinatorPreventiveOrdersTab = {
       this.assignForm.technician_id = order.assigned_technician_id || '';
       this.assignForm.scheduled_date = order.scheduled_date || new Date().toISOString().split('T')[0];
       this.assignError = '';
+      this.assignReassignmentReason = '';
       this.showAssignModal = true;
     },
 
@@ -231,6 +233,7 @@ export const CoordinatorPreventiveOrdersTab = {
       this.showAssignModal = false;
       this.selectedOrderToAssign = null;
       this.assignError = '';
+      this.assignReassignmentReason = '';
     },
 
     async submitAssignOrder() {
@@ -244,6 +247,20 @@ export const CoordinatorPreventiveOrdersTab = {
       }
 
       const isReassignment = this.hasAssignedTechnician(this.selectedOrderToAssign);
+      const requiresReason = this.isAssignReassignment();
+
+      // EARS 2.6: cambiar de técnico una orden programada exige motivo justificado; se valida
+      // antes de llamar a la API para no dejar la orden en un estado ambiguo.
+      if (requiresReason) {
+        if (!String(this.assignReassignmentReason || '').trim()) {
+          this.assignError = 'El cambio de técnico de una orden programada exige un motivo justificado de la reasignación (EARS 2.6).';
+          return;
+        }
+        if (this.assignReassignmentReasonLength() < 10) {
+          this.assignError = 'El motivo de la reasignación debe contener al menos 10 caracteres.';
+          return;
+        }
+      }
 
       this.isActionLoading = true;
       this.assignError = '';
@@ -252,7 +269,8 @@ export const CoordinatorPreventiveOrdersTab = {
         await api.coordinator.assignPreventiveOrder(
           this.selectedOrderToAssign.id,
           this.assignForm.technician_id,
-          this.assignForm.scheduled_date
+          this.assignForm.scheduled_date,
+          requiresReason ? String(this.assignReassignmentReason).trim() : null
         );
 
         this.successMessage = `Orden ${this.selectedOrderToAssign.order_code} ${isReassignment ? 'reasignada' : 'asignada'} correctamente.`;
@@ -395,6 +413,35 @@ export const CoordinatorPreventiveOrdersTab = {
      */
     hasAssignedTechnician(order) {
       return Boolean(order && (order.technician?.name || order.assigned_technician_id));
+    },
+
+    /**
+     * Responsable vivo de la orden, leyendo el identificador o el objeto técnico de la fila.
+     */
+    currentAssignTechnicianId(order) {
+      if (!order) return null;
+      const raw = order.assigned_technician_id !== null && order.assigned_technician_id !== undefined
+        ? order.assigned_technician_id
+        : (order.technician ? order.technician.id : null);
+      if (raw === null || raw === undefined || raw === '') return null;
+      const numeric = Number(raw);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+
+    /**
+     * EARS 2.6: sólo es reasignación (y por tanto exige motivo) si el técnico elegido difiere
+     * del responsable vivo; la asignación inicial y la reprogramación de fecha quedan exentas.
+     */
+    isAssignReassignment() {
+      if (!this.assignForm || !this.assignForm.technician_id) return false;
+      const currentOwner = this.currentAssignTechnicianId(this.selectedOrderToAssign);
+      if (currentOwner === null) return false;
+      return Number(this.assignForm.technician_id) !== currentOwner;
+    },
+
+    /** Real characters (Unicode code points) of the reassignment reason (EARS 2.6). */
+    assignReassignmentReasonLength() {
+      return Array.from(String(this.assignReassignmentReason || '').trim()).length;
     },
 
     /**
@@ -774,6 +821,23 @@ export const CoordinatorPreventiveOrdersTab = {
               style="height: 38px; padding: 0 10px; border-radius: 4px; border: 1px solid #cbd5e1; font-size: 14px;"
               data-testid="input-assign-date"
             />
+          </div>
+
+          <!-- Motivo de la reasignación (EARS 2.6): obligatorio sólo al cambiar de técnico -->
+          <div v-if="isAssignReassignment()" style="display: flex; flex-direction: column; gap: 6px;">
+            <label for="assign-reassignment-reason" style="font-size: 13px; font-weight: 600; color: #b91c1c;">
+              Motivo justificado de la reasignación * <span style="font-weight: 400;">(queda en el historial inmutable, Art. III)</span>
+            </label>
+            <textarea
+              id="assign-reassignment-reason"
+              v-model="assignReassignmentReason"
+              class="vg-input"
+              rows="2"
+              placeholder="Ej: Baja médica de la técnica previa; el recorrido se reasigna para no retrasar la inspección sanitaria."
+              style="padding: 8px 10px; border-radius: 4px; border: 1px solid #cbd5e1; font-size: 13px; resize: vertical;"
+              data-testid="assign-reassignment-reason"
+            ></textarea>
+            <small style="font-size: 11px; color: #64748b;">Mínimo 10 caracteres reales (EARS 2.6).</small>
           </div>
 
           <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px;">

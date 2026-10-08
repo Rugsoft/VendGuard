@@ -391,7 +391,7 @@ flowchart TD
 | Requisito Funcional / No Funcional | Archivos de Backend Responsables | Componentes Frontend / UI | Pruebas Automatizadas |
 | :--- | :--- | :--- | :--- |
 | **RF-PREV-01:** Ciclos, Frecuencias y Pausas | `PreventiveSettingsService.php`, `PdoPreventiveSettingsRepository.php` | `CoordinatorPreventiveSettingsModal.js` | `PreventiveSchedulerTest.php` |
-| **RF-PREV-02:** Programación, Claim y Traslados | `PreventiveOrderSchedulerService.php`, `PdoPreventiveOrderRepository.php` | `CoordinatorPreventiveOrdersTab.js`, `TechnicianPreventiveRouteTab.js` | `CoordinatorPreventiveApiTest.php`, `TechnicianPreventiveApiTest.php` |
+| **RF-PREV-02:** Programación, Claim, Traslados y Reasignación Justificada (EARS 2.6) | `PreventiveOrderSchedulerService.php`, `PdoPreventiveOrderRepository.php`, `CoordinatorPreventiveController.php` | `CoordinatorPreventiveOrdersTab.js`, `TechnicianPreventiveRouteTab.js` | `CoordinatorPreventiveApiTest.php`, `CoordinatorPreventiveComponentsTest.mjs`, `TechnicianPreventiveApiTest.php` |
 | **RF-PREV-03:** Checklist y Rango Térmico | `PreventiveChecklistEvaluationService.php`, `PdoPreventiveItemRepository.php` | `TechnicianChecklistModal.js` | `PreventiveEvaluationTest.php` |
 | **RF-PREV-04:** Evaluación y Cuarentena (Art. II) | `PreventiveChecklistEvaluationService.php`, `QrScanController.php` | `QrSanitaryQuarantineModal.js`, `CoordinatorPreventiveDashboard.js` | `PreventiveEvaluationTest.php`, `QrSanitaryModeApiTest.php` |
 | **RF-PREV-05:** Coexistencia y Duplicados (Art. V.1/V.2) | `PreventiveCoexistenceBridgeService.php`, `CoordinatorAdminController.php` | `TechnicianChecklistModal.js`, `AdminTicketsTab.js` | `PreventiveCoexistenceTest.php` |

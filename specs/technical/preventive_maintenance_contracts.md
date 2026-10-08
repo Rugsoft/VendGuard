@@ -417,6 +417,8 @@ MODIFY COLUMN `entity_type` ENUM('TICKET', 'MACHINE', 'LOCATION', 'USER', 'PREVE
 ### 5.3 Coordinación · Asignación de Orden
 #### `PATCH /api/coordinator/preventive/orders/{id}/assign`
 * **Cabeceras:** `Authorization: Bearer <coord_token>`, `Content-Type: application/json`
+* **Campo `reassignment_reason` (EARS 2.6):** obligatorio (≥ 10 caracteres reales, umbral multibyte) **si y sólo si** la orden ya tenía técnico responsable y el `technician_id` recibido es distinto; exento en la asignación inicial y en la reprogramación de fecha que conserva al mismo técnico. El motivo se incorpora al evento `ASSIGN_PREVENTIVE_ORDER` de `audit_log` (append-only, Art. III): **sin cambios de esquema**.
+* **Errores de validación:** `422 MISSING_REASSIGNMENT_REASON` si falta en una reasignación y `422 REASSIGNMENT_REASON_TOO_SHORT` si no alcanza el umbral (mismo vocabulario que RF-07.3).
 * **Body:**
 ```json
 {

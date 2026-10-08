@@ -82,6 +82,7 @@ Definir con precisión el comportamiento funcional del sistema para:
 * **EARS 2.5 (Evento · Traslado de Máquina o Baja Lógica · Art. III):** Si una máquina con orden de inspección preventiva pendiente es trasladada físicamente de sede o dada de baja lógica:
   * El sistema deberá cancelar de forma puramente lógica la orden preventiva previa (`status = 'CANCELLED'`), preservando íntegramente su registro histórico sin ejecutar borrados destructivos (`DELETE FROM`), en estricto cumplimiento del Artículo III de la Constitución.
   * En caso de traslado de sede, el sistema generará automáticamente una nueva orden preventiva inicial asociada a la nueva ubicación física.
+* **EARS 2.6 (Evento · Reasignación Coordinada Justificada):** Cuando el Coordinador cambie el técnico responsable de una orden preventiva ya programada a otro distinto, el sistema deberá exigir obligatoriamente un motivo justificado (mínimo 10 caracteres reales) que quedará registrado en el rastro de auditoría inmutable (Art. III); la asignación inicial de una orden sin responsable y la reprogramación de la fecha que conserva al mismo técnico NO DEBEN exigirlo.
 
 ---
 
@@ -217,16 +218,18 @@ Para salvaguardar el **Artículo VI de la Constitución (Anti-Feature Creep)**, 
 
 ## 8. Criterios de Finalización (Definition of Done)
 
-* [ ] El 100% de los requisitos funcionales (RF-PREV-01 al RF-PREV-08) están formalmente implementados y cubiertos por pruebas de aceptación automatizadas en notación EARS.
-* [ ] Se verifica que toda máquina de perecederos genera su orden preventiva con ciclo de 15 días y rechaza configuraciones superiores a 15 días por imperativo constitucional (Art. II).
-* [ ] Se comprueba que el checklist exige obligatoriamente la temperatura en máquinas refrigeradas dentro del rango físico `[-5.0 °C, +25.0 °C]` y que valores > 4.0 °C en perecederos declaran `NO_CONFORME`, activando la cuarentena sanitaria inmediata en el código QR público.
-* [ ] Se valida que ante una no conformidad detectada: si no hay ticket previo se abre una incidencia correctiva vinculada (urgencia `CRÍTICA` si es térmica); y si ya existe un ticket activo, se incorpora a los comentarios de la bitácora sin crear duplicados (Art. V.2) y se eleva la urgencia a `CRÍTICA`.
-* [ ] Se comprueba que el cierre de la incidencia vinculada exige diagnóstico y solución (≥ 20 caracteres cada uno, Art. V.1) y que desencadena obligatoriamente la reinspección sanitaria.
-* [ ] Se prueba el correcto funcionamiento del semáforo sanitario (Verde, Amarillo, Rojo, Cuarentena y Pausa Estacional) tanto en la ficha de máquina como en el portal de sede del cliente.
+* [x] El 100% de los requisitos funcionales (RF-PREV-01 al RF-PREV-08) están formalmente implementados y cubiertos por pruebas de aceptación automatizadas en notación EARS.
+* [x] Se verifica que toda máquina de perecederos genera su orden preventiva con ciclo de 15 días y rechaza configuraciones superiores a 15 días por imperativo constitucional (Art. II).
+* [x] Se comprueba que el checklist exige obligatoriamente la temperatura en máquinas refrigeradas dentro del rango físico `[-5.0 °C, +25.0 °C]` y que valores > 4.0 °C en perecederos declaran `NO_CONFORME`, activando la cuarentena sanitaria inmediata en el código QR público.
+* [x] Se valida que ante una no conformidad detectada: si no hay ticket previo se abre una incidencia correctiva vinculada (urgencia `CRÍTICA` si es térmica); y si ya existe un ticket activo, se incorpora a los comentarios de la bitácora sin crear duplicados (Art. V.2) y se eleva la urgencia a `CRÍTICA`.
+* [x] Se comprueba que el cierre de la incidencia vinculada exige diagnóstico y solución (≥ 20 caracteres cada uno, Art. V.1) y que desencadena obligatoriamente la reinspección sanitaria.
+* [x] Se prueba el correcto funcionamiento del semáforo sanitario (Verde, Amarillo, Rojo, Cuarentena y Pausa Estacional) tanto en la ficha de máquina como en el portal de sede del cliente.
 * [ ] Se valida la emisión, visualización e impresión en formato A4 del Certificado Sanitario Oficial (individual y consolidado de sede con dictamen `CONDICIONADO` ante incidencias), respetando la privacidad del técnico mediante su Código de Operador Técnico (Art. V.4).
-* [ ] Se comprueba que una avería posterior de frío suspende cautelarmente el certificado emitido.
-* [ ] Se confirma que no existe ninguna instrucción de borrado físico (`DELETE FROM`) en todo el ciclo preventivo, gestionándose cancelaciones por traslado o baja mediante borrado lógico (Art. III).
-* [ ] Se comprueba la estricta observancia del Dualismo Lingüístico (código, nombres técnicos y pruebas en inglés; interfaz gráfica, mensajes y certificados en español).
+* [x] Se comprueba que una avería posterior de frío suspende cautelarmente el certificado emitido.
+* [x] Se confirma que no existe ninguna instrucción de borrado físico (`DELETE FROM`) en todo el ciclo preventivo, gestionándose cancelaciones por traslado o baja mediante borrado lógico (Art. III).
+* [x] Se comprueba la estricta observancia del Dualismo Lingüístico (código, nombres técnicos y pruebas en inglés; interfaz gráfica, mensajes y certificados en español).
+
+> **Acta de verificación (2026-10-08):** nueve de las diez casillas quedan demostradas en [`docs/verificacion_criterios_finalizacion_preventivo.md`](../../docs/verificacion_criterios_finalizacion_preventivo.md). La casilla del certificado A4 permanece **sin marcar** por el bloqueo declarado en el acta (el acto físico de impresión no se ha verificado), no por un defecto de la implementación.
 
 ---
 

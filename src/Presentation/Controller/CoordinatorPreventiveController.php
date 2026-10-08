@@ -50,6 +50,9 @@ use VendGuard\Presentation\Http\Response;
  */
 class CoordinatorPreventiveController
 {
+    /** EARS 2.6: umbral mínimo de caracteres reales del motivo de reasignación preventiva. */
+    private const MIN_REASSIGNMENT_REASON_LENGTH = 10;
+
     private PreventiveOrderRepositoryInterface $orderRepo;
     private PreventiveSettingsRepositoryInterface $settingsRepo;
     private PreventiveOrderSchedulerService $schedulerService;
@@ -364,6 +367,30 @@ class CoordinatorPreventiveController
                 return Response::error('ORDER_NOT_FOUND', "Orden preventiva con ID {$orderId} no encontrada.", 404);
             }
 
+            // EARS 2.6: cambiar de técnico una orden que ya tenía responsable exige un motivo
+            // justificado que queda en el rastro inmutable (Art. III). La asignación inicial y la
+            // reprogramación de la fecha que conserva al mismo técnico quedan exentas.
+            $reassignmentReason = null;
+            $currentTechnicianId = $order->getAssignedTechnicianId();
+            if ($currentTechnicianId !== null && (int)$currentTechnicianId !== $technicianId) {
+                $rawReason = $body['reassignment_reason'] ?? null;
+                $reassignmentReason = is_string($rawReason) ? trim($rawReason) : '';
+                if ($reassignmentReason === '') {
+                    return Response::error(
+                        'MISSING_REASSIGNMENT_REASON',
+                        'La reasignación de una orden preventiva exige un motivo justificado (reassignment_reason obligatorio).',
+                        422
+                    );
+                }
+                if (mb_strlen($reassignmentReason, 'UTF-8') < self::MIN_REASSIGNMENT_REASON_LENGTH) {
+                    return Response::error(
+                        'REASSIGNMENT_REASON_TOO_SHORT',
+                        'El motivo de la reasignación debe contener al menos 10 caracteres reales.',
+                        422
+                    );
+                }
+            }
+
             $technician = $this->userRepo->findById($technicianId);
             if ($technician === null) {
                 return Response::error('USER_NOT_FOUND', "Técnico con ID {$technicianId} no encontrado.", 404);
@@ -382,12 +409,22 @@ class CoordinatorPreventiveController
                     'status' => $order->getStatus(),
                     'assigned_technician_id' => $order->getAssignedTechnicianId(),
                 ],
-                [
-                    'status' => 'SCHEDULED',
-                    'assigned_technician_id' => $technicianId,
-                    'scheduled_date' => $scheduledDate,
-                ],
-                ['order_code' => $order->getOrderCode()]
+                array_filter(
+                    [
+                        'status' => 'SCHEDULED',
+                        'assigned_technician_id' => $technicianId,
+                        'scheduled_date' => $scheduledDate,
+                        'reassignment_reason' => $reassignmentReason,
+                    ],
+                    static fn ($value): bool => $value !== null
+                ),
+                $reassignmentReason !== null
+                    ? [
+                        'order_code' => $order->getOrderCode(),
+                        'previous_technician_id' => $currentTechnicianId,
+                        'new_technician_id' => $technicianId,
+                    ]
+                    : ['order_code' => $order->getOrderCode()]
             );
 
             $updatedOrder = $this->orderRepo->findById($orderId);

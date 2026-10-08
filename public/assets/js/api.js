@@ -664,11 +664,19 @@ export class ApiClient {
     generateDuePreventiveOrders: (horizonDays = 5) => {
       return this.post('/coordinator/preventive/generate-due', { horizon_days: Number(horizonDays) });
     },
-    assignPreventiveOrder: (orderId, technicianId, scheduledDate) => {
-      return this.patch(`/coordinator/preventive/orders/${orderId}/assign`, {
+    /**
+     * Assigns or reassigns a preventive order. The justified reason is mandatory when the
+     * order already had a different responsible technician (RF-PREV-02, EARS 2.6).
+     */
+    assignPreventiveOrder: (orderId, technicianId, scheduledDate, reassignmentReason = null) => {
+      const body = {
         technician_id: Number(technicianId),
         scheduled_date: scheduledDate
-      });
+      };
+      if (reassignmentReason) {
+        body.reassignment_reason = String(reassignmentReason);
+      }
+      return this.patch(`/coordinator/preventive/orders/${orderId}/assign`, body);
     },
     cancelPreventiveOrder: (orderId, reason) => {
       return this.patch(`/coordinator/preventive/orders/${orderId}/cancel`, {

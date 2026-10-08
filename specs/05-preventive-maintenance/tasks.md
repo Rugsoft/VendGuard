@@ -192,3 +192,24 @@
   * **Requisitos:** RF-PD-01 a RF-PD-10, RNF-PD-01 a RNF-PD-07
   * **Dependencias:** T-PREV-26 a T-PREV-30
   * **Hecho cuando:** `php tests/unit/CoordinatorPreventiveDetailServiceTest.php`, `php tests/integration/CoordinatorPreventiveDetailApiTest.php` y `node tests/unit/CoordinatorPreventiveOrderDetailModalTest.mjs` pasan al 100% en verde, las suites preventivas preexistentes siguen en verde y queda demostrado que el endpoint de detalle no altera el histórico (Art. III).
+
+---
+
+## Fase 8: Reasignación Preventiva Justificada (Reapertura Justificada · EARS 2.6)
+
+> **Justificación de reapertura:** RF-PREV-02 cubría asignación, reprogramación y traslados, y la auditoría de reasignación del módulo 07 constató que el cambio de técnico de una orden programada quedaba auditado pero **sin motivo**, mientras que en las averías es obligatorio (RF-07.3). El pliego preventivo no contenía ningún EARS de reasignación: el EARS 2.6 lo introduce por consenso. No es *feature creep*: no añade capacidades nuevas, sólo la justificación obligatoria de una capacidad ya existente.
+
+- [x] **T-PREV-32: Motivo justificado obligatorio al cambiar de técnico en `CoordinatorPreventiveController::assignOrder` (EARS 2.6)**
+  * **Requisitos:** RF-PREV-02 (EARS 2.6), RF-07.3 (vocabulario), Art. III
+  * **Dependencias:** T-PREV-05, T-PREV-06
+  * **Hecho cuando:** el endpoint exige `reassignment_reason` (≥ 10 caracteres reales, umbral multibyte) **si y sólo si** la orden ya tenía técnico y el nuevo es distinto (`422 MISSING_REASSIGNMENT_REASON` / `REASSIGNMENT_REASON_TOO_SHORT`), la asignación inicial y la reprogramación de fecha del mismo técnico siguen exentas, y el motivo se incorpora al evento `ASSIGN_PREVENTIVE_ORDER` de `audit_log` sin cambios de esquema.
+
+- [x] **T-PREV-33: Campo de motivo en el diálogo de asignación preventiva (`CoordinatorPreventiveOrdersTab.js`, `api.js`)**
+  * **Requisitos:** RF-PREV-02 (EARS 2.6), RNF-PD-06
+  * **Dependencias:** T-PREV-32
+  * **Hecho cuando:** el campo sólo se ofrece cuando el técnico seleccionado difiere del responsable vivo, la confirmación queda bloqueada sin motivo suficiente y el motivo viaja a la API; `node tests/unit/CoordinatorPreventiveComponentsTest.mjs` pasa al 100% en verde.
+
+- [x] **T-PREV-34: Pruebas HTTP de la reasignación justificada y regresión (`CoordinatorPreventiveApiTest.php`)**
+  * **Requisitos:** RF-PREV-02 (EARS 2.6)
+  * **Dependencias:** T-PREV-32
+  * **Hecho cuando:** la suite demuestra `422` sin motivo, `200` con motivo, `200` en reprogramación del mismo técnico y `200` en asignación inicial sin motivo, y que el motivo consta en `audit_log`.

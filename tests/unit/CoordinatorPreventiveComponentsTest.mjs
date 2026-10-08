@@ -265,9 +265,9 @@ api.coordinator.getMachines = async () => [
   { id: 1, code: 'VEND-0101', model: 'Sanden Vendo G-Drink', machine_type: 'PERISHABLE_FOOD' }
 ];
 
-api.coordinator.assignPreventiveOrder = async (orderId, techId, date) => {
+api.coordinator.assignPreventiveOrder = async (orderId, techId, date, reassignmentReason = null) => {
   apiAssignCalled = true;
-  assignParams = { orderId, techId, date };
+  assignParams = { orderId, techId, date, reason: reassignmentReason };
   return { success: true, data: { order_id: orderId, status: 'SCHEDULED' } };
 };
 
@@ -394,18 +394,64 @@ assert('2.31 El modal adapta su título, su entradilla y su confirmación',
   && CoordinatorPreventiveOrdersTab.template.includes("'Reasignación' : 'Asignación'")
   && CoordinatorPreventiveOrdersTab.template.includes("'Confirmar Reasignación' : 'Confirmar Asignación'"));
 
-// Reasignación real de la orden programada con técnico (RF-PREV-02)
+// Reasignación real de la orden programada con técnico (RF-PREV-02, EARS 2.6)
 ordersTab.openAssignModal(mockOrders[0]);
 assert('2.32 openAssignModal sobre una orden con técnico entra en modo reasignación',
   ordersTab.hasAssignedTechnician(ordersTab.selectedOrderToAssign) === true);
+
+assert('2.33 El modo reasignación sólo se activa si el técnico seleccionado difiere del responsable vivo',
+  ordersTab.isAssignReassignment() === false
+    && Number(ordersTab.assignForm.technician_id) === Number(mockOrders[0].technician.id));
+
 ordersTab.assignForm.technician_id = 4;
 ordersTab.assignForm.scheduled_date = '2026-10-09';
+ordersTab.assignReassignmentReason = '';
+apiAssignCalled = false;
+assignParams = null;
+await ordersTab.submitAssignOrder();
+assert('2.34 Reasignar sin motivo justificado se bloquea antes de llamar a la API (EARS 2.6)',
+  apiAssignCalled === false && ordersTab.assignError.includes('motivo justificado'));
+
+ordersTab.assignReassignmentReason = 'Corto';
+await ordersTab.submitAssignOrder();
+assert('2.35 Un motivo por debajo de 10 caracteres reales se rechaza (EARS 2.6)',
+  apiAssignCalled === false && ordersTab.assignError.includes('al menos 10 caracteres'));
+
+ordersTab.assignReassignmentReason = 'Baja médica de la técnica previa';
 ordersTab.successMessage = '';
 await ordersTab.submitAssignOrder();
-assert('2.33 Reasignación invoca la API con la orden programada',
-  assignParams.orderId === 1 && assignParams.techId === 4 && assignParams.date === '2026-10-09');
-assert('2.34 El mensaje de éxito distingue reasignación de asignación inicial',
+assert('2.36 Reasignación invoca la API con la orden programada y su motivo',
+  apiAssignCalled === true && assignParams.orderId === 1 && assignParams.techId === 4 && assignParams.date === '2026-10-09'
+    && assignParams.reason === 'Baja médica de la técnica previa');
+assert('2.37 El mensaje de éxito distingue reasignación de asignación inicial',
   ordersTab.successMessage.includes('reasignada correctamente'));
+
+// La reprogramación de fecha que conserva al mismo técnico no es una reasignación (EARS 2.6)
+ordersTab.openAssignModal(mockOrders[0]);
+ordersTab.assignForm.scheduled_date = '2026-10-20';
+ordersTab.assignReassignmentReason = '';
+apiAssignCalled = false;
+assignParams = null;
+await ordersTab.submitAssignOrder();
+assert('2.38 La reprogramación de fecha del mismo técnico sigue exenta de motivo (EARS 2.6)',
+  apiAssignCalled === true && assignParams.reason === null && ordersTab.assignError === '');
+
+// La asignación inicial de una orden sin responsable no exige motivo (EARS 2.6)
+ordersTab.openAssignModal(mockOrders[1]);
+assert('2.39 La orden sin responsable no entra en modo reasignación',
+  ordersTab.isAssignReassignment() === false);
+ordersTab.assignForm.technician_id = 3;
+ordersTab.assignForm.scheduled_date = '2026-10-22';
+apiAssignCalled = false;
+assignParams = null;
+await ordersTab.submitAssignOrder();
+assert('2.40 La asignación inicial se resuelve sin motivo justificado (EARS 2.6)',
+  apiAssignCalled === true && assignParams.techId === 3 && assignParams.reason === null);
+
+assert('2.41 Plantilla: el campo de motivo sólo se ofrece al cambiar de técnico',
+  CoordinatorPreventiveOrdersTab.template.includes('v-if="isAssignReassignment()"')
+    && CoordinatorPreventiveOrdersTab.template.includes('data-testid="assign-reassignment-reason"')
+    && CoordinatorPreventiveOrdersTab.template.includes('v-model="assignReassignmentReason"'));
 
 // =========================================================================
 // BLOQUE 3: Integración en CoordinatorDashboardView

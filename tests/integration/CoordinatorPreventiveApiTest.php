@@ -212,6 +212,66 @@ if ($createdOrderId !== null) {
     // Verificar registro en audit_log
     $auditCountAfter = (int)$pdo->query("SELECT COUNT(*) FROM audit_log")->fetchColumn();
     $assert("6.5 Evento ASSIGN registrado en audit_log", $auditCountAfter > $auditCountBefore);
+
+    // ─── EARS 2.6: sólo la reasignación a otro técnico exige motivo justificado ───
+    $secondTechnician = $userRepo->findByEmail('marta.ruta@vendguard.internal');
+    $assert("6.6 Usuario técnico alternativo preparado para la reasignación", $secondTechnician !== null);
+
+    if ($secondTechnician !== null) {
+        // 6a. Reprogramación de la fecha conservando al mismo técnico: sigue exenta de motivo.
+        $reqReschedule = new Request('PATCH', "/api/coordinator/preventive/orders/{$createdOrderId}/assign", [], [
+            'technician_id' => $technician->getId(),
+            'scheduled_date' => date('Y-m-d', strtotime('+3 days')),
+        ], ['Authorization' => 'Bearer ' . $coordToken]);
+        $reqReschedule->setRouteParams(['id' => (string)$createdOrderId]);
+        $resReschedule = $router->dispatch($reqReschedule);
+        $assert("6.7 Reprogramar la fecha del mismo técnico no exige motivo (EARS 2.6)", $resReschedule->getStatusCode() === 200);
+
+        // 6b. Reasignar a otro técnico sin motivo => 422 MISSING_REASSIGNMENT_REASON.
+        $reqNoReason = new Request('PATCH', "/api/coordinator/preventive/orders/{$createdOrderId}/assign", [], [
+            'technician_id' => $secondTechnician->getId(),
+            'scheduled_date' => date('Y-m-d', strtotime('+4 days')),
+        ], ['Authorization' => 'Bearer ' . $coordToken]);
+        $reqNoReason->setRouteParams(['id' => (string)$createdOrderId]);
+        $resNoReason = $router->dispatch($reqNoReason);
+        $assert("6.8 Reasignación sin motivo => 422 MISSING_REASSIGNMENT_REASON",
+            $resNoReason->getStatusCode() === 422 && ($resNoReason->getDecodedBody()['error']['code'] ?? '') === 'MISSING_REASSIGNMENT_REASON');
+
+        // 6c. Motivo por debajo de 10 caracteres reales => 422 REASSIGNMENT_REASON_TOO_SHORT.
+        $reqShortReason = new Request('PATCH', "/api/coordinator/preventive/orders/{$createdOrderId}/assign", [], [
+            'technician_id' => $secondTechnician->getId(),
+            'scheduled_date' => date('Y-m-d', strtotime('+4 days')),
+            'reassignment_reason' => 'Corto',
+        ], ['Authorization' => 'Bearer ' . $coordToken]);
+        $reqShortReason->setRouteParams(['id' => (string)$createdOrderId]);
+        $resShortReason = $router->dispatch($reqShortReason);
+        $assert("6.9 Motivo por debajo de 10 caracteres => 422 REASSIGNMENT_REASON_TOO_SHORT",
+            $resShortReason->getStatusCode() === 422 && ($resShortReason->getDecodedBody()['error']['code'] ?? '') === 'REASSIGNMENT_REASON_TOO_SHORT');
+
+        // 6d. Reasignación justificada => 200 con el nuevo responsable y rastro inmutable (Art. III).
+        $reassignmentReason = 'Baja médica de la técnica previa';
+        $reqReassign = new Request('PATCH', "/api/coordinator/preventive/orders/{$createdOrderId}/assign", [], [
+            'technician_id' => $secondTechnician->getId(),
+            'scheduled_date' => date('Y-m-d', strtotime('+4 days')),
+            'reassignment_reason' => $reassignmentReason,
+        ], ['Authorization' => 'Bearer ' . $coordToken]);
+        $reqReassign->setRouteParams(['id' => (string)$createdOrderId]);
+        $resReassign = $router->dispatch($reqReassign);
+        $bodyReassign = json_decode($resReassign->getBody(), true);
+        $assert("6.10 Reasignación justificada => 200 OK con el nuevo responsable",
+            $resReassign->getStatusCode() === 200
+            && ($bodyReassign['data']['technician']['id'] ?? null) === $secondTechnician->getId());
+
+        $auditReassignStmt = $pdo->prepare("SELECT * FROM audit_log WHERE action = 'ASSIGN_PREVENTIVE_ORDER' ORDER BY id DESC LIMIT 1");
+        $auditReassignStmt->execute();
+        $reassignAudit = $auditReassignStmt->fetch(PDO::FETCH_ASSOC);
+        $auditNewState = json_decode((string)($reassignAudit['new_state'] ?? ''), true) ?? [];
+        $auditMetadata = json_decode((string)($reassignAudit['metadata'] ?? ''), true) ?? [];
+        $assert("6.11 audit_log: motivo, técnico sustituido y nuevo responsable registrados",
+            ($auditNewState['reassignment_reason'] ?? null) === $reassignmentReason
+            && ($auditMetadata['previous_technician_id'] ?? null) === $technician->getId()
+            && ($auditMetadata['new_technician_id'] ?? null) === $secondTechnician->getId());
+    }
 } else {
     echo "  [SKIP] Bloque 6 omitido: no se obtuvo ID de orden creada.\n";
 }
