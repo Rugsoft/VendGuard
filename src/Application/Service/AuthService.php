@@ -93,8 +93,13 @@ class AuthService
 
     /**
      * Genera un token firmado para acceso de sede.
+     *
+     * El TTL por defecto son 24 horas: EARS 1.3 promete «24 horas» de sesión de centro y el
+     * hallazgo V-6 de la auditoría detectó que la implementación emitía 7 días sin cobertura de
+     * test. La ventana deslizante de actividad que sugiere el texto original queda como mejora
+     * futura (exigiría reemitir el token); esta implementación es estrictamente más conservadora.
      */
-    public function generateSiteToken(Location $location, int $ttlSeconds = 604800): string
+    public function generateSiteToken(Location $location, int $ttlSeconds = 86400): string
     {
         $payload = [
             'type' => 'site',
