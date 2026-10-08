@@ -16,6 +16,11 @@ declare(strict_types=1);
  * - Criterios de Finalización (Definition of Done).
  * - Hecho cuando: Todas las pruebas unitarias y de integración se ejecutan exitosamente con cero fallos (0 errors, 0 failures).
  * 
+ * Además, la ejecución termina con una guarda de coherencia entre las cifras que
+ * declara la documentación versionada (insignia y resumen del README, y frases
+ * canónicas) y las realmente ejecutadas: un desfase documental también pone la
+ * batería en rojo (ver `tests/Support/DocMetricsGuard.php`).
+ *
  * Dogma Vanilla: Cero dependencias externas (PHP 8.2+ puro).
  */
 
@@ -351,6 +356,25 @@ $totalSuites = $stats['unit_php']['total'] + $stats['unit_mjs']['total'] + $stat
 $totalPassed = $stats['unit_php']['passed'] + $stats['unit_mjs']['passed'] + $stats['integration_php']['passed'] + $stats['manual_e2e']['passed'];
 $totalFailed = $stats['unit_php']['failed'] + $stats['unit_mjs']['failed'] + $stats['integration_php']['failed'] + $stats['manual_e2e']['failed'];
 
+// =====================================================================
+// FASE 6: Guarda contra la deriva de las cifras documentadas
+// =====================================================================
+// Las cifras de la batería también viven escritas a mano en la documentación
+// (insignia del README, resumen por fases, árbol de directorios y frases
+// canónicas). La guarda convierte su desfase en un fallo de esta ejecución:
+// tests/Support/DocMetricsGuard.php documenta qué se audita y qué no.
+require_once __DIR__ . '/Support/DocMetricsGuard.php';
+$docMetricsGuard = new DocMetricsGuard(dirname(__DIR__));
+$docMetricsReport = $docMetricsGuard->verify($stats, $totalSuites, $totalAssertions);
+$docGuardDeviations = $docMetricsReport['deviations'];
+
+foreach ($docMetricsReport['warnings'] as $docWarning) {
+    echo "  {$colorRed}[WARN] Guarda de cifras documentadas: {$docWarning}{$colorReset}\n";
+}
+if ($docGuardDeviations === []) {
+    echo "  {$colorGreen}[OK] Cifras documentadas coherentes con la ejecución ({$totalSuites} suites / " . number_format($totalAssertions, 0, ',', '.') . " aserciones).{$colorReset}\n";
+}
+
 echo "\n{$colorBold}======================================================================{$colorReset}\n";
 echo "{$colorBold} RESUMEN DE EJECUCIÓN GLOBAL (T-39){$colorReset}\n";
 echo "{$colorBold}======================================================================{$colorReset}\n";
@@ -363,19 +387,28 @@ echo " ────────────────────────�
 echo " Total Suites Ejecutadas    : {$totalSuites}\n";
 echo " Total Aserciones Evaluadas : {$totalAssertions}\n";
 echo " Fallos Detectados          : {$totalFailed}\n";
+echo " Cifras documentadas        : " . ($docGuardDeviations === [] ? 'COHERENTES' : count($docGuardDeviations) . ' DESVIACIÓN(ES)') . "\n";
 echo " Base de datos restablecida : " . ($dbResetOk ? "SÍ (Semillas intactas)" : "ADVERTENCIA") . "\n";
 echo "{$colorBold}======================================================================{$colorReset}\n";
 
-if ($totalFailed === 0) {
+if ($totalFailed === 0 && $docGuardDeviations === []) {
     echo "{$colorBold}{$colorGreen} RESULTADO: 100% EN VERDE. (0 errors, 0 failures){$colorReset}\n";
     echo "{$colorBold}{$colorGreen} CONDICIÓN T-39 CUMPLIDA SATISFACTORIAMENTE.{$colorReset}\n";
     echo "{$colorBold}======================================================================{$colorReset}\n";
     exit(0);
-} else {
+}
+
+if ($totalFailed > 0) {
     echo "{$colorBold}{$colorRed} RESULTADO: {$totalFailed} SUITE(S) FALLIDAS:{$colorReset}\n";
     foreach ($failedFiles as $ff) {
         echo "   - {$ff}\n";
     }
-    echo "{$colorBold}======================================================================{$colorReset}\n";
-    exit(1);
 }
+if ($docGuardDeviations !== []) {
+    echo "{$colorBold}{$colorRed} RESULTADO: " . count($docGuardDeviations) . " DESVIACIÓN(ES) DE CIFRAS DOCUMENTADAS:{$colorReset}\n";
+    foreach ($docGuardDeviations as $deviation) {
+        echo "   - {$deviation}\n";
+    }
+}
+echo "{$colorBold}======================================================================{$colorReset}\n";
+exit(1);
