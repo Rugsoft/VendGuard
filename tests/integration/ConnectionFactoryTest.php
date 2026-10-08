@@ -7,8 +7,12 @@ declare(strict_types=1);
  * 
  * Verificación técnica de la factoría PDO de VendGuard.
  * Valida la condición 'Hecho cuando:' de la tarea T-03.
+ *
+ * Usa el bootstrap compartido: la factoría resuelve la política de credenciales de producción
+ * (hallazgo S-5) con `SecretProvider`, que necesita el autoloader como cualquier otra clase.
  */
 
+require_once __DIR__ . '/../bootstrap.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/ConnectionFactory.php';
 
 use VendGuard\Infrastructure\Database\ConnectionFactory;

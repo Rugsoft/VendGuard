@@ -7,8 +7,12 @@ declare(strict_types=1);
  * 
  * Test de Integración para validar la carga de datos semilla (Tarea T-04).
  * Valida la existencia de sedes, máquinas, tipos críticos de alimentos y contraseñas Bcrypt.
+ *
+ * Usa el bootstrap compartido: la factoría de conexión resuelve la política de credenciales
+ * de producción (hallazgo S-5) con `SecretProvider`, que necesita el autoloader.
  */
 
+require_once __DIR__ . '/../bootstrap.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/ConnectionFactory.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/SeedRunner.php';
 

@@ -7,6 +7,7 @@ namespace VendGuard\Infrastructure\Database;
 use PDO;
 use PDOException;
 use RuntimeException;
+use VendGuard\Infrastructure\Config\SecretProvider;
 
 /**
  * ConnectionFactory
@@ -14,6 +15,12 @@ use RuntimeException;
  * Factoría para la creación y gestión de conexiones seguras PDO a MariaDB/MySQL.
  * Garantiza modo de excepciones estricto, desactivación de emulación de prepares
  * y codificación completa UTF-8 (utf8mb4).
+ * 
+ * Credenciales (hallazgo S-5 de la auditoría): en desarrollo se mantiene el acceso local
+ * (`root` sin contraseña sobre XAMPP), pero cuando el entorno se declara de producción la
+ * factoría **falla en cerrado**: exige credenciales explícitas (`DATABASE_URL`/`MYSQL_URL` o
+ * `DB_USER`/`DB_PASSWORD`) y rechaza `root` sin contraseña, que es acceso administrativo
+ * sin credencial en un despliegue compartido.
  * 
  * Cumple con Dogma Vanilla (sin dependencias externas) y Clean Architecture.
  */
@@ -53,6 +60,28 @@ class ConnectionFactory
             ?? ($urlParts['user'] ?? (getenv('DB_USER') ?: (getenv('DB_USERNAME') ?: 'root')));
         $password = $customConfig['password'] 
             ?? ($urlParts['pass'] ?? (getenv('DB_PASS') !== false ? getenv('DB_PASS') : (getenv('DB_PASSWORD') !== false ? getenv('DB_PASSWORD') : '')));
+
+        // --- Fail-closed de credenciales en producción (hallazgo S-5) -------------------
+        if (SecretProvider::isProduction()) {
+            $hasExplicitSource = $customConfig !== []
+                || (is_string($dbUrl) && $dbUrl !== '')
+                || getenv('DB_USER') !== false
+                || getenv('DB_USERNAME') !== false
+                || getenv('DB_PASS') !== false
+                || getenv('DB_PASSWORD') !== false;
+
+            if (!$hasExplicitSource) {
+                throw new RuntimeException(
+                    'Configuración de base de datos insegura en producción (hallazgo S-5): no hay credenciales explícitas. Define DATABASE_URL/MYSQL_URL o DB_USER/DB_PASSWORD antes de desplegar.'
+                );
+            }
+
+            if ($user === 'root' && $password === '') {
+                throw new RuntimeException(
+                    'Configuración de base de datos insegura en producción (hallazgo S-5): el usuario root sin contraseña no está permitido. Usa un usuario de aplicación con contraseña.'
+                );
+            }
+        }
 
         $dsn = "mysql:host={$host};port={$port};dbname={$dbname};charset={$charset}";
 
