@@ -191,6 +191,11 @@ class AppRouter
         $router->get('/api/technician/my-metrics', [\VendGuard\Presentation\Controller\TechnicianMetricsController::class, 'getMyMetrics'], [$technicianAuth]);
         $router->patch('/api/technician/incidents/{id}/start', [\VendGuard\Presentation\Controller\TechnicianController::class, 'startIntervention'], [$technicianAuth]);
         $router->patch('/api/technician/incidents/{id}/pause', [\VendGuard\Presentation\Controller\TechnicianController::class, 'pauseIntervention'], [$technicianAuth]);
+        // Pausa por bloqueo de sede y reanudación manual in situ (Módulo 11: T-PAUSE-12).
+        // La pausa congela el reloj contractual de SLA; la reanudación lo reactiva con el
+        // vencimiento desplazado en horario comercial y devuelve el ticket a "En curso".
+        $router->post('/api/technician/incidents/{id}/pause-pending-info', [\VendGuard\Presentation\Controller\TechnicianController::class, 'pausePendingInfo'], [$technicianAuth]);
+        $router->post('/api/technician/incidents/{id}/resume-pending-info', [\VendGuard\Presentation\Controller\TechnicianController::class, 'resumePendingInfo'], [$technicianAuth]);
         // Hilo de conversación del expediente (Módulo 10: T-COM-08). El técnico de la
         // ruta ve el hilo íntegro, notas internas incluidas, y publica con el selector
         // de privacidad preseleccionado en "Nota Interna de Taller" (RF-02.3, RF-03.3).

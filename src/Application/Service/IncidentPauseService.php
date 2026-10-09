@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use DateTimeZone;
 use InvalidArgumentException;
 use RuntimeException;
+use VendGuard\Application\DTO\IncidentPauseRequestDto;
 use VendGuard\Application\DTO\IncidentPauseResponseDto;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Model\Incident;
@@ -20,6 +21,7 @@ use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
+use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
@@ -493,42 +495,17 @@ final class IncidentPauseService
             : IncidentStatus::ASSIGNED;
 
         $originalSlaTargetAt = $incident->getSlaTargetAt();
-        $shiftedSlaTargetAt = null;
-
-        // El agregado cierra el intervalo y acumula sus segundos; la fecha límite se
-        // graba aparte porque el desplazamiento comercial depende del calendario de sede.
-        $resumed = $incident->resumePendingInfo($targetStatus, $now);
-
-        if ($originalSlaTargetAt !== null) {
-            $originalDeadline = $this->parseDateTime($originalSlaTargetAt);
-            if ($originalDeadline !== null) {
-                $shiftedDeadline = $this->shiftSlaTargetInBusinessHours(
-                    $originalDeadline,
-                    $pauseDurationSeconds,
-                    $resumed->getLocationId()
-                );
-                $shiftedSlaTargetAt = $shiftedDeadline->format('Y-m-d H:i:s');
-                $resumed = $resumed->shiftSlaTarget($shiftedDeadline);
-            }
-        }
-
-        if (!$this->incidents()->update($resumed)) {
-            throw new RuntimeException(sprintf(
-                'No se pudo persistir la reanudación de la incidencia %d tras el comentario de sede.',
-                $incidentId
-            ));
-        }
 
         // Rastro inmutable de solo adición. El actor va como `null` a propósito: el
         // responsable de sede no es un usuario interno y `incident_history.user_id` es
         // una clave foránea a `users`; su referencia viaja en la nota para no perder
         // trazabilidad ni violar la integridad referencial (Art. III).
-        $this->incidents()->recordResumeEvent(
-            $incidentId,
-            null,
+        [$resumed, $shiftedSlaTargetAt] = $this->closePauseInterval(
+            $incident,
             $targetStatus,
             $pauseDurationSeconds,
-            $this->reactivationNote(
+            null,
+            fn (?string $shiftedDeadline): string => $this->reactivationNote(
                 $targetStatus,
                 $pauseDurationSeconds,
                 $technicianIsBusy,
@@ -536,9 +513,10 @@ final class IncidentPauseService
                 $assignedTechnicianId === null,
                 $siteUserId,
                 $originalSlaTargetAt,
-                $shiftedSlaTargetAt
+                $shiftedDeadline
             ),
-            $now
+            $now,
+            'tras el comentario de sede'
         );
 
         return new IncidentPauseResponseDto(
@@ -549,6 +527,227 @@ final class IncidentPauseService
             accumulatedPauseMinutes: (int)round($resumed->getTotalPendingInfoSeconds() / 60),
             slaTargetAtOriginal: $originalSlaTargetAt,
             slaTargetAtShifted: $shiftedSlaTargetAt
+        );
+    }
+
+    /**
+     * Declara la pausa por bloqueo imputable a la sede y deja el rastro inmutable
+     * (RF-01.1 a RF-01.4, RNF-02, Art. III y Art. V.1).
+     *
+     * Es el camino del técnico asignado —y, con el mismo servicio, el del coordinador
+     * en T-PAUSE-13—: la avería entra en `PENDING_INFO`, el reloj contractual queda
+     * congelado y la máquina se desprioriza en la ruta. La unidad de trabajo es UNA:
+     * la transición del expediente, el sellado del intervalo y su evento de auditoría
+     * no pueden quedar a medias, porque un ticket pausado sin rastro es un agujero en
+     * la trazabilidad (Art. III) y un rastro sin ticket pausado es una mentira.
+     *
+     * Reglas que muerden aquí:
+     * 1. **Causa tipificada obligatoria** del catálogo cerrado `IncidentPauseReasonCategory`
+     *    (RF-01.2): la pausa la provoca siempre un bloqueo de sede, nunca el taller.
+     * 2. **Justificación de al menos 20 caracteres reales** (RF-01.3, Art. V.1), validada
+     *    por `IncidentPauseRequestDto` —puerta única de la pausa— y de nuevo por el
+     *    agregado, para que ni el servicio ni el repositorio puedan abrir esa puerta
+     *    olvidando la validación.
+     * 3. **Sólo orígenes legales** `ASSIGNED`, `IN_PROGRESS`, `PENDING_PARTS` o
+     *    `REOPENED`; cualquier otro estado —incluida la doble pausa
+     *    `PENDING_INFO -> PENDING_INFO`— se rechaza con `InvalidTransitionException`,
+     *    que el controlador traduce a `422`.
+     *
+     * El vencimiento contractual no se toca al pausar: `sla_target_at` viaja intacto
+     * como extremo "original" de la respuesta y el desplazamiento comercial de RF-03.3
+     * se aplica al cerrar el intervalo, que es cuando ya se conoce su duración exacta.
+     *
+     * @param int $incidentId Incidencia que se pausa.
+     * @param int $actorUserId Usuario interno que declara la pausa (auditoría, Art. III).
+     * @param IncidentPauseReasonCategory $reasonCategory Causa tipificada del bloqueo.
+     * @param string $reasonText Justificación real (>= 20 caracteres tras recortar).
+     * @return IncidentPauseResponseDto Estado de pausa y reloj congelado.
+     *
+     * @throws InvalidArgumentException Si los identificadores son inválidos, la causa
+     *   no pertenece al catálogo o la justificación no alcanza el mínimo legal.
+     * @throws \DomainException Si la incidencia no existe.
+     * @throws InvalidTransitionException Si el estado de origen no admite la pausa.
+     * @throws RuntimeException Si la transición no se puede persistir.
+     */
+    public function declarePendingInfoPause(
+        int $incidentId,
+        int $actorUserId,
+        IncidentPauseReasonCategory $reasonCategory,
+        string $reasonText
+    ): IncidentPauseResponseDto {
+        if ($incidentId < 1) {
+            throw new InvalidArgumentException(
+                'La declaración de pausa exige una incidencia persistida (id positivo).'
+            );
+        }
+
+        if ($actorUserId < 1) {
+            throw new InvalidArgumentException(
+                'La declaración de pausa exige el usuario interno que la firma para la auditoría (Art. III).'
+            );
+        }
+
+        // El DTO es la puerta única de la pausa: mide el catálogo de causas y el umbral
+        // legal de 20 caracteres reales antes de que nada toque la base de datos.
+        $pauseRequest = new IncidentPauseRequestDto($reasonCategory, $reasonText);
+        $reason = $pauseRequest->normalizedReasonText();
+        $now = new DateTimeImmutable();
+
+        $paused = $this->transactions()->runInTransaction(function () use (
+            $incidentId,
+            $actorUserId,
+            $reasonCategory,
+            $reason,
+            $now
+        ): Incident {
+            $incident = $this->incidents()->findById($incidentId);
+            if ($incident === null) {
+                throw new \DomainException(sprintf(
+                    'No se encontró ninguna incidencia con ID %d para declarar la pausa por bloqueo de sede.',
+                    $incidentId
+                ));
+            }
+
+            $fromStatus = $incident->getStatus();
+            $pausedIncident = $incident->pausePendingInfo($reasonCategory, $reason, $now);
+
+            if (!$this->incidents()->update($pausedIncident)) {
+                throw new RuntimeException(sprintf(
+                    'No se pudo persistir la pausa de la incidencia %d.',
+                    $incidentId
+                ));
+            }
+
+            $this->incidents()->recordPauseEvent(
+                $incidentId,
+                $actorUserId,
+                $fromStatus,
+                $reasonCategory,
+                $reason,
+                $now
+            );
+
+            return $pausedIncident;
+        });
+
+        return new IncidentPauseResponseDto(
+            incidentId: (int)$paused->getId(),
+            ticketCode: $paused->getTicketCode(),
+            status: $paused->getStatus(),
+            isSlaPaused: true,
+            accumulatedPauseMinutes: (int)round($paused->getTotalPendingInfoSeconds() / 60),
+            slaTargetAtOriginal: $paused->getSlaTargetAt(),
+            slaTargetAtShifted: null,
+            pausedAt: $paused->getPausedAt(),
+            reasonCategory: $paused->getPendingInfoReasonCategory(),
+            reasonText: $paused->getPendingInfoReasonText()
+        );
+    }
+
+    /**
+     * Reanudación manual del intervalo de pausa por un usuario interno (RF-02.2,
+     * RF-02.3, RF-03.3, Art. III).
+     *
+     * Cierra el intervalo vivo, acumula sus segundos exactos en el agregado, desplaza
+     * el vencimiento contractual en horario comercial de la sede (Algoritmo 3) y sella
+     * el rastro inmutable. A diferencia de la reactivación por comentario de sede
+     * (RF-02.1), aquí no hay heurística de "calor": el destino lo decide quien reanuda
+     * y es su declaración la que queda auditada.
+     *
+     * **Destino legal acotado:** sólo `IN_PROGRESS` (el técnico está delante de la
+     * máquina) o `ASSIGNED` (debe desplazarse de nuevo). `RESOLVED` queda expresamente
+     * prohibido: cerrar en falso sin intervención es la violación que persigue el
+     * Art. V.1, y exige invertir la pausa con trabajo real documentado.
+     *
+     * @param int $incidentId Incidencia pausada que se reanuda.
+     * @param int $actorUserId Usuario interno que reanuda (auditoría, Art. III).
+     * @param IncidentStatus $targetStatus Estado operativo de destino (`IN_PROGRESS`/`ASSIGNED`).
+     * @param string|null $resumeNote Nota opcional de la reanudación.
+     * @return IncidentPauseResponseDto Estado resultante y vencimiento desplazado.
+     *
+     * @throws InvalidArgumentException Si los identificadores o el destino no son válidos.
+     * @throws \DomainException Si la incidencia no existe.
+     * @throws InvalidTransitionException Si el expediente no tiene pausa abierta que cerrar.
+     * @throws RuntimeException Si la reanudación no se puede persistir.
+     */
+    public function resumePendingInfoManually(
+        int $incidentId,
+        int $actorUserId,
+        IncidentStatus $targetStatus = IncidentStatus::IN_PROGRESS,
+        ?string $resumeNote = null
+    ): IncidentPauseResponseDto {
+        if ($incidentId < 1) {
+            throw new InvalidArgumentException(
+                'La reanudación manual exige una incidencia persistida (id positivo).'
+            );
+        }
+
+        if ($actorUserId < 1) {
+            throw new InvalidArgumentException(
+                'La reanudación manual exige el usuario interno que la ejecuta para la auditoría (Art. III).'
+            );
+        }
+
+        if (!in_array($targetStatus, [IncidentStatus::IN_PROGRESS, IncidentStatus::ASSIGNED], true)) {
+            throw new InvalidArgumentException(sprintf(
+                'La reanudación de una pausa sólo puede devolver el expediente a "En curso" o "Asignada"; se recibió %s.',
+                $targetStatus->value
+            ));
+        }
+
+        $now = new DateTimeImmutable();
+
+        [$resumed, $shiftedSlaTargetAt, $originalSlaTargetAt] = $this->transactions()->runInTransaction(function () use (
+            $incidentId,
+            $actorUserId,
+            $targetStatus,
+            $resumeNote,
+            $now
+        ): array {
+            $incident = $this->incidents()->findById($incidentId);
+            if ($incident === null) {
+                throw new \DomainException(sprintf(
+                    'No se encontró ninguna incidencia con ID %d para reanudar su pausa.',
+                    $incidentId
+                ));
+            }
+
+            $originalSlaTargetAt = $incident->getSlaTargetAt();
+            $pauseDurationSeconds = $incident->currentPauseDurationSeconds($now);
+
+            $note = sprintf(
+                'Reanudación manual de la intervención por el usuario interno #%d. Duración del intervalo de pausa: %d s.%s',
+                $actorUserId,
+                $pauseDurationSeconds,
+                $resumeNote !== null && trim($resumeNote) !== '' ? ' Nota: ' . trim($resumeNote) : ''
+            );
+
+            [$resumed, $shiftedSlaTargetAt] = $this->closePauseInterval(
+                $incident,
+                $targetStatus,
+                $pauseDurationSeconds,
+                $actorUserId,
+                fn (?string $shiftedDeadline): string => $shiftedDeadline === null
+                    ? $note
+                    : $note . ' Nuevo vencimiento contractual: ' . $shiftedDeadline . '.',
+                $now,
+                'al reanudar manualmente la pausa'
+            );
+
+            return [$resumed, $shiftedSlaTargetAt, $originalSlaTargetAt];
+        });
+
+        return new IncidentPauseResponseDto(
+            incidentId: (int)$resumed->getId(),
+            ticketCode: $resumed->getTicketCode(),
+            status: $targetStatus,
+            isSlaPaused: false,
+            accumulatedPauseMinutes: (int)round($resumed->getTotalPendingInfoSeconds() / 60),
+            slaTargetAtOriginal: $originalSlaTargetAt,
+            slaTargetAtShifted: $shiftedSlaTargetAt,
+            pausedAt: null,
+            reasonCategory: $resumed->getPendingInfoReasonCategory(),
+            reasonText: $resumed->getPendingInfoReasonText()
         );
     }
 
@@ -883,6 +1082,82 @@ final class IncidentPauseService
         }
 
         return false;
+    }
+
+    /**
+     * Cierra el intervalo de pausa vivo: transición, acumulación de segundos, desplazamiento
+     * comercial del vencimiento y rastro inmutable en `incident_history` (RF-02.4, RF-03.3, Art. III).
+     *
+     * Los dos caminos que reanudan una pausa —la reactivación automática por comentario de
+     * sede y la reanudación manual de técnico o coordinador— comparten este cierre para que
+     * la duración auditada, el acumulador descontable por MTTR (RF-04.1) y el vencimiento
+     * desplazado no puedan divergir entre caminos. La única diferencia es quién queda
+     * anotado como actor y qué nota viaja al historial.
+     *
+     * El desplazamiento se calcula DESPUÉS de cerrar el intervalo porque necesita la
+     * duración ya consolidada y el calendario de la sede; si el expediente no tenía
+     * compromiso de SLA, ambas fechas viajan nulas sin fingir un vencimiento.
+     *
+     * @param Incident $incident Expediente pausado que se reanuda.
+     * @param IncidentStatus $targetStatus Estado operativo de destino.
+     * @param int $pauseDurationSeconds Segundos exactos del intervalo que se cierra.
+     * @param int|null $actorUserId Usuario interno que reanuda, o `null` si es la sede.
+     * @param callable(string|null): string $note Constructor de la nota inmutable; recibe el
+     *   vencimiento ya desplazado (o `null` sin compromiso de SLA) para poder documentarlo.
+     * @param DateTimeImmutable $now Instante de la reanudación.
+     * @param string $failureContext Contexto del error de persistencia para el diagnóstico.
+     * @return array{0: Incident, 1: string|null} Expediente reanudado y nuevo vencimiento (nulo sin SLA).
+     *
+     * @throws InvalidTransitionException Si no hay pausa abierta o el destino no es legal.
+     * @throws RuntimeException Si la transición no se puede persistir.
+     */
+    private function closePauseInterval(
+        Incident $incident,
+        IncidentStatus $targetStatus,
+        int $pauseDurationSeconds,
+        ?int $actorUserId,
+        callable $note,
+        DateTimeImmutable $now,
+        string $failureContext
+    ): array {
+        $originalSlaTargetAt = $incident->getSlaTargetAt();
+        $shiftedSlaTargetAt = null;
+
+        // El agregado cierra el intervalo y acumula sus segundos; la fecha límite se
+        // graba aparte porque el desplazamiento comercial depende del calendario de sede.
+        $resumed = $incident->resumePendingInfo($targetStatus, $now);
+
+        if ($originalSlaTargetAt !== null) {
+            $originalDeadline = $this->parseDateTime($originalSlaTargetAt);
+            if ($originalDeadline !== null) {
+                $shiftedDeadline = $this->shiftSlaTargetInBusinessHours(
+                    $originalDeadline,
+                    $pauseDurationSeconds,
+                    $resumed->getLocationId()
+                );
+                $shiftedSlaTargetAt = $shiftedDeadline->format('Y-m-d H:i:s');
+                $resumed = $resumed->shiftSlaTarget($shiftedDeadline);
+            }
+        }
+
+        if (!$this->incidents()->update($resumed)) {
+            throw new RuntimeException(sprintf(
+                'No se pudo persistir la reanudación de la incidencia %d %s.',
+                (int)$resumed->getId(),
+                $failureContext
+            ));
+        }
+
+        $this->incidents()->recordResumeEvent(
+            (int)$resumed->getId(),
+            $actorUserId,
+            $targetStatus,
+            $pauseDurationSeconds,
+            $note($shiftedSlaTargetAt),
+            $now
+        );
+
+        return [$resumed, $shiftedSlaTargetAt];
     }
 
     /**

@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
+use VendGuard\Application\DTO\IncidentPauseRequestDto;
 use VendGuard\Application\DTO\TechnicianRefundInspectionDTO;
 use VendGuard\Application\DTO\TechnicianRefundViewDTO;
 use VendGuard\Application\Service\IncidentCommentService;
+use VendGuard\Application\Service\IncidentPauseService;
 use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
 use VendGuard\Application\Service\TechnicianRefundService;
@@ -68,6 +70,7 @@ class TechnicianController
     private TechnicianRefundService $refundService;
     private LocalFileUploader $fileUploader;
     private ?IncidentCommentService $commentService;
+    private ?IncidentPauseService $pauseService;
 
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
@@ -78,7 +81,8 @@ class TechnicianController
         ?RefundRequestRepositoryInterface $refundRepo = null,
         ?TechnicianRefundService $refundService = null,
         ?LocalFileUploader $fileUploader = null,
-        ?IncidentCommentService $commentService = null
+        ?IncidentCommentService $commentService = null,
+        ?IncidentPauseService $pauseService = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->machineRepo  = $machineRepo ?? new PdoMachineRepository();
@@ -107,6 +111,10 @@ class TechnicianController
         // comentarios abre conexión a MariaDB al instanciarse, y este controlador
         // también se construye en contextos unitarios sin base de datos.
         $this->commentService = $commentService;
+
+        // Igual que el servicio de comentarios: se resuelve bajo demanda para que el
+        // controlador pueda construirse en suites unitarias sin abrir conexiones.
+        $this->pauseService = $pauseService;
     }
 
     /**
@@ -115,6 +123,17 @@ class TechnicianController
     private function comments(): IncidentCommentService
     {
         return $this->commentService ??= new IncidentCommentService($this->incidentRepo, null, $this->fileUploader);
+    }
+
+    /**
+     * Servicio de aplicación del ciclo de pausa por bloqueo de sede (Módulo 11).
+     *
+     * Se le inyecta el repositorio de incidencias ya resuelto del controlador para no
+     * abrir una segunda conexión PDO ni resolver dos veces el mismo colaborador.
+     */
+    private function pauses(): IncidentPauseService
+    {
+        return $this->pauseService ??= new IncidentPauseService(incidentRepo: $this->incidentRepo);
     }
 
     /**
@@ -401,6 +420,182 @@ class TechnicianController
             'id'     => $paused->getId(),
             'status' => $paused->getStatus()->value,
         ], 200);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // RF-01, RF-02 — Pausa por bloqueo de sede y reanudación manual (Módulo 11: T-PAUSE-12)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * POST /api/technician/incidents/{id}/pause-pending-info
+     *
+     * Declara la pausa por bloqueo imputable a la sede (RF-01.1 a RF-01.4, RF-06.2): la
+     * avería entra en "Pendiente de información", el reloj contractual de SLA queda
+     * congelado y la parada se desprioriza en la ruta. Exige causa tipificada del
+     * catálogo cerrado y justificación de al menos 20 caracteres reales (Art. V.1).
+     *
+     * Contrato HTTP (plan.md §2.1): `200` pausa declarada; `400` identificador inválido o
+     * campo obligatorio ausente; `403` expediente no asignado a este técnico o en estado
+     * terminal; `404` expediente inexistente; `422` causa fuera del catálogo, justificación
+     * corta o estado de origen que no admite la pausa (doble pausa incluida).
+     */
+    public function pausePendingInfo(Request $request): Response
+    {
+        // 1. Identificador del expediente de la URL.
+        $rawId = $request->getRouteParam('id');
+        if ($rawId === null || !ctype_digit((string)$rawId)) {
+            return Response::error('INVALID_INCIDENT_ID', 'El ID de incidencia de la ruta no es válido.', 400);
+        }
+        $incidentId = (int)$rawId;
+
+        // 2. Identidad del técnico autenticado.
+        $technicianId = $request->getAttribute('user_id');
+        if ($technicianId === null || !is_numeric($technicianId)) {
+            return Response::error('UNAUTHORIZED', 'No se pudo identificar al técnico autenticado.', 401);
+        }
+        $techId = (int)$technicianId;
+
+        // 3. Cuerpo obligatorio: la AUSENCIA de campos es responsabilidad de esta capa
+        // (400); los VALORES inválidos los rechaza el DTO con 422 (T-PAUSE-03).
+        $body = $request->getParsedBody();
+        if (!array_key_exists('reason_category', $body) || !array_key_exists('reason_text', $body)) {
+            return Response::error(
+                'MISSING_PAUSE_FIELDS',
+                'La pausa exige una causa tipificada (reason_category) y un texto explicativo (reason_text) de al menos 20 caracteres.',
+                400
+            );
+        }
+
+        // 4. Existencia del expediente.
+        $incident = $this->incidentRepo->findById($incidentId);
+        if ($incident === null) {
+            return Response::error('INCIDENT_NOT_FOUND', "No se encontró ninguna incidencia con ID {$incidentId}.", 404);
+        }
+
+        // 5. Un único técnico responsable activo (Art. V.2) y expedientes vivos.
+        if ($incident->getAssignedTechnicianId() !== $techId) {
+            return Response::error('FORBIDDEN', 'Esta incidencia no está asignada a tu ruta técnica.', 403);
+        }
+        if ($incident->getStatus()->isTerminal()) {
+            return Response::error(
+                'FORBIDDEN',
+                "No se puede pausar una incidencia cerrada; el expediente está en estado {$incident->getStatus()->value}.",
+                403
+            );
+        }
+
+        // 6. Validación temprana del catálogo de causas y del umbral legal (Art. V.1).
+        try {
+            $pauseRequest = IncidentPauseRequestDto::fromPayload($body);
+        } catch (\InvalidArgumentException $e) {
+            return Response::error('INVALID_PAUSE_REQUEST', $e->getMessage(), 422);
+        }
+
+        // 7. Unidad de trabajo del servicio: transición + rastro inmutable (Art. III).
+        try {
+            $paused = $this->pauses()->declarePendingInfoPause(
+                $incidentId,
+                $techId,
+                $pauseRequest->reasonCategory,
+                $pauseRequest->normalizedReasonText()
+            );
+        } catch (InvalidTransitionException $e) {
+            return Response::error('INVALID_STATUS_FOR_PAUSE', $e->getMessage(), 422);
+        } catch (\InvalidArgumentException $e) {
+            return Response::error('INVALID_PAUSE_REQUEST', $e->getMessage(), 422);
+        } catch (\DomainException | \RuntimeException $e) {
+            return Response::error('OPERATION_FAILED', $e->getMessage(), 500);
+        }
+
+        return Response::json(
+            $paused->toArray(),
+            200,
+            'Incidencia pausada correctamente. Reloj contractual de SLA congelado.'
+        );
+    }
+
+    /**
+     * POST /api/technician/incidents/{id}/resume-pending-info
+     *
+     * Reanuda manualmente una pausa por bloqueo de sede (RF-02.2, RF-02.3, RF-03.3): el
+     * técnico ya está delante de la máquina, así que el destino es forzosamente
+     * "En curso" y el vencimiento contractual se desplaza en horario comercial la
+     * duración exacta que estuvo congelado.
+     *
+     * El cuerpo acepta una nota opcional (`resume_note`) que viaja al historial inmutable.
+     * Un `target_status` explícito distinto de `IN_PROGRESS` se rechaza con `422`: devolver
+     * el expediente a "Asignada" es la reanudación desfasada de coordinación, no la del
+     * técnico que está delante del equipo.
+     */
+    public function resumePendingInfo(Request $request): Response
+    {
+        // 1. Identificador del expediente de la URL.
+        $rawId = $request->getRouteParam('id');
+        if ($rawId === null || !ctype_digit((string)$rawId)) {
+            return Response::error('INVALID_INCIDENT_ID', 'El ID de incidencia de la ruta no es válido.', 400);
+        }
+        $incidentId = (int)$rawId;
+
+        // 2. Identidad del técnico autenticado.
+        $technicianId = $request->getAttribute('user_id');
+        if ($technicianId === null || !is_numeric($technicianId)) {
+            return Response::error('UNAUTHORIZED', 'No se pudo identificar al técnico autenticado.', 401);
+        }
+        $techId = (int)$technicianId;
+
+        // 3. Existencia del expediente.
+        $incident = $this->incidentRepo->findById($incidentId);
+        if ($incident === null) {
+            return Response::error('INCIDENT_NOT_FOUND', "No se encontró ninguna incidencia con ID {$incidentId}.", 404);
+        }
+
+        // 4. Sólo el técnico responsable activo reanuda su propia parada (Art. V.2).
+        if ($incident->getAssignedTechnicianId() !== $techId) {
+            return Response::error('FORBIDDEN', 'Esta incidencia no está asignada a tu ruta técnica.', 403);
+        }
+
+        // 5. Cuerpo opcional: nota de reanudación y destino explícito.
+        $body = $request->getParsedBody();
+        $rawTarget = $body['target_status'] ?? null;
+        if ($rawTarget !== null) {
+            $requestedTarget = is_string($rawTarget)
+                ? IncidentStatus::tryFrom(strtoupper(trim($rawTarget)))
+                : null;
+
+            if ($requestedTarget !== IncidentStatus::IN_PROGRESS) {
+                return Response::error(
+                    'INVALID_RESUME_TARGET',
+                    'La reanudación del técnico in situ devuelve siempre la incidencia a "En curso"; el retorno a "Asignada" corresponde a la reanudación desfasada de coordinación.',
+                    422
+                );
+            }
+        }
+
+        $resumeNote = isset($body['resume_note']) && is_string($body['resume_note']) && trim($body['resume_note']) !== ''
+            ? trim($body['resume_note'])
+            : null;
+
+        // 6. Unidad de trabajo del servicio: cierre del intervalo + desplazamiento de SLA.
+        try {
+            $resumed = $this->pauses()->resumePendingInfoManually(
+                $incidentId,
+                $techId,
+                IncidentStatus::IN_PROGRESS,
+                $resumeNote
+            );
+        } catch (InvalidTransitionException $e) {
+            return Response::error('INVALID_STATUS_FOR_RESUME', $e->getMessage(), 422);
+        } catch (\InvalidArgumentException $e) {
+            return Response::error('INVALID_RESUME_TARGET', $e->getMessage(), 422);
+        } catch (\DomainException | \RuntimeException $e) {
+            return Response::error('OPERATION_FAILED', $e->getMessage(), 500);
+        }
+
+        return Response::json(
+            $resumed->toArray(),
+            200,
+            'Intervención reanudada en curso. Reloj contractual de SLA reactivado con desplazamiento aplicado.'
+        );
     }
 
     // ────────────────────────────────────────────────────────────────────────
