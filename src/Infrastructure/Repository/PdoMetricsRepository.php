@@ -8,8 +8,8 @@ use PDO;
 use PDOException;
 use RuntimeException;
 use VendGuard\Core\Domain\Model\KpiSummary;
+use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\MetricFilter;
-use VendGuard\Core\Domain\Model\MttrMetric;
 use VendGuard\Core\Domain\Repository\MetricsRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 
@@ -19,6 +19,11 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  * Implementación de persistencia y cálculo analítico con PDO.
  * Ejecuta agregaciones SQL nativas optimizadas para tiempo natural continuo 24/7 (RF-01, EARS 1.1)
  * filtrando por fecha de resolución (`resolved_at`, EARS 1.2) y excluyendo cancelados/duplicados.
+ * 
+ * Módulo 11 (RF-03.1): expone la muestra bruta de resolución y la media de segundos en
+ * `PENDING_INFO` (`total_pending_info_seconds`), ambas en segundos. La resta del MTTR vive en
+ * `MetricsCalculationService`, salvo en el recuento de brechas de SLA, donde el umbral se decide
+ * ticket a ticket y no puede descomponerse en una media: allí se netea dentro del SQL.
  * 
  * Cumple con RNF-02 (rendimiento analítico < 1.5s) y el Dogma Vanilla (PHP 8.2+ puro).
  */
@@ -32,60 +37,77 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
     }
 
     /**
-     * Calcula el MTTR global para el filtro temporal dado (filtrando por resolved_at, EARS 1.2).
+     * Tiempo medio BRUTO de resolución en segundos para el filtro dado (filtrando por resolved_at, EARS 1.2).
+     * 
+     * Devuelve null cuando no hay muestra. Las pausas `PENDING_INFO` todavía NO se descuentan:
+     * esa resta es responsabilidad de `MetricsCalculationService` (RF-03.1).
      */
-    public function getGlobalMttr(MetricFilter $filter): MttrMetric
+    public function getGrossMttrSeconds(MetricFilter $filter, ?MachineType $machineType = null): ?int
     {
-        $sql = "SELECT 
-                    ROUND(AVG(TIMESTAMPDIFF(MINUTE, `created_at`, `resolved_at`))) as avg_minutes
-                FROM `incidents`
-                WHERE `resolved_at` IS NOT NULL
-                  AND `status` IN ('RESOLVED', 'CLOSED')
-                  AND `resolved_at` >= :from_date
-                  AND `resolved_at` <= :to_date";
+        [$scope, $params] = $this->buildResolvedSampleScope($filter, $machineType);
 
-        $params = [
-            ':from_date' => $filter->getFrom()->format('Y-m-d H:i:s'),
-            ':to_date'   => $filter->getTo()->format('Y-m-d H:i:s'),
-        ];
-
-        if ($filter->getLocationId() !== null) {
-            $sql .= " AND `location_id` = :location_id";
-            $params[':location_id'] = $filter->getLocationId();
-        }
-
-        if ($filter->getTechnicianId() !== null) {
-            $sql .= " AND `assigned_technician_id` = :technician_id";
-            $params[':technician_id'] = $filter->getTechnicianId();
-        }
+        $sql = "SELECT ROUND(AVG(TIMESTAMPDIFF(SECOND, i.`created_at`, i.`resolved_at`))) AS avg_seconds"
+             . $scope;
 
         try {
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute($params);
-            $avgMinutes = $stmt->fetchColumn();
+            $avgSeconds = $stmt->fetchColumn();
 
-            if ($avgMinutes === false || $avgMinutes === null) {
-                return MttrMetric::noData();
+            if ($avgSeconds === false || $avgSeconds === null) {
+                return null;
             }
 
-            return MttrMetric::fromMinutes((int)$avgMinutes);
+            return (int)$avgSeconds;
         } catch (PDOException $e) {
-            throw new RuntimeException("Error al calcular MTTR global: " . $e->getMessage(), (int)$e->getCode(), $e);
+            throw new RuntimeException("Error al calcular el tiempo bruto de resolución: " . $e->getMessage(), (int)$e->getCode(), $e);
         }
     }
 
     /**
-     * Calcula el MTTR específico para máquinas de alimentos perecederos (PERISHABLE_FOOD, Art. II).
+     * Media de segundos en `PENDING_INFO` descontables por cada ticket resuelto del periodo
+     * (RF-03.1, RF-04.1). Es el descuento acumulado multi-pausa del expediente.
+     * 
+     * Devuelve 0 cuando no hay muestra o ningún ticket del periodo acumuló pausas.
      */
-    public function getPerishableMttr(MetricFilter $filter): MttrMetric
+    public function getAveragePendingInfoSeconds(MetricFilter $filter, ?MachineType $machineType = null): int
     {
-        $sql = "SELECT 
-                    ROUND(AVG(TIMESTAMPDIFF(MINUTE, i.`created_at`, i.`resolved_at`))) as avg_minutes
-                FROM `incidents` i
-                INNER JOIN `machines` m ON i.`machine_id` = m.`id`
-                WHERE i.`resolved_at` IS NOT NULL
+        [$scope, $params] = $this->buildResolvedSampleScope($filter, $machineType);
+
+        $sql = "SELECT ROUND(AVG(i.`total_pending_info_seconds`)) AS avg_pause_seconds"
+             . $scope;
+
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            $avgSeconds = $stmt->fetchColumn();
+
+            if ($avgSeconds === false || $avgSeconds === null) {
+                return 0;
+            }
+
+            return max(0, (int)$avgSeconds);
+        } catch (PDOException $e) {
+            throw new RuntimeException("Error al calcular el descuento de pausas PENDING_INFO: " . $e->getMessage(), (int)$e->getCode(), $e);
+        }
+    }
+
+    /**
+     * Construye el FROM/WHERE común de las muestras analíticas de resolución (EARS 1.2, RF-03.1):
+     * sólo expedientes resueltos o cerrados dentro del periodo, con los filtros opcionales de
+     * sede, técnico responsable y tipología de máquina.
+     * 
+     * @return array{0: string, 1: array<string, mixed>}
+     */
+    private function buildResolvedSampleScope(MetricFilter $filter, ?MachineType $machineType): array
+    {
+        $from = "\n                FROM `incidents` i";
+        if ($machineType !== null) {
+            $from .= "\n                INNER JOIN `machines` m ON i.`machine_id` = m.`id`";
+        }
+
+        $where = "\n                WHERE i.`resolved_at` IS NOT NULL
                   AND i.`status` IN ('RESOLVED', 'CLOSED')
-                  AND m.`machine_type` = 'PERISHABLE_FOOD'
                   AND i.`resolved_at` >= :from_date
                   AND i.`resolved_at` <= :to_date";
 
@@ -95,23 +117,21 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
         ];
 
         if ($filter->getLocationId() !== null) {
-            $sql .= " AND i.`location_id` = :location_id";
+            $where .= "\n                  AND i.`location_id` = :location_id";
             $params[':location_id'] = $filter->getLocationId();
         }
 
-        try {
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute($params);
-            $avgMinutes = $stmt->fetchColumn();
-
-            if ($avgMinutes === false || $avgMinutes === null) {
-                return MttrMetric::noData();
-            }
-
-            return MttrMetric::fromMinutes((int)$avgMinutes);
-        } catch (PDOException $e) {
-            throw new RuntimeException("Error al calcular MTTR de perecederos: " . $e->getMessage(), (int)$e->getCode(), $e);
+        if ($filter->getTechnicianId() !== null) {
+            $where .= "\n                  AND i.`assigned_technician_id` = :technician_id";
+            $params[':technician_id'] = $filter->getTechnicianId();
         }
+
+        if ($machineType !== null) {
+            $where .= "\n                  AND m.`machine_type` = :machine_type";
+            $params[':machine_type'] = $machineType->value;
+        }
+
+        return [$from . $where, $params];
     }
 
     /**
@@ -210,9 +230,11 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
                   AND i.`resolved_at` >= :from_date
                   AND i.`resolved_at` <= :to_date
                   AND (
-                    (m.`machine_type` = 'PERISHABLE_FOOD' AND TIMESTAMPDIFF(MINUTE, i.`created_at`, i.`resolved_at`) > 240)
+                    (m.`machine_type` = 'PERISHABLE_FOOD'
+                     AND GREATEST(0, TIMESTAMPDIFF(SECOND, i.`created_at`, i.`resolved_at`) - i.`total_pending_info_seconds`) > 240 * 60)
                     OR
-                    (m.`machine_type` != 'PERISHABLE_FOOD' AND TIMESTAMPDIFF(MINUTE, i.`created_at`, i.`resolved_at`) > 1440)
+                    (m.`machine_type` != 'PERISHABLE_FOOD'
+                     AND GREATEST(0, TIMESTAMPDIFF(SECOND, i.`created_at`, i.`resolved_at`) - i.`total_pending_info_seconds`) > 1440 * 60)
                   )";
 
         try {
@@ -238,7 +260,8 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
                     l.`name` AS location_name,
                     l.`is_active`,
                     COUNT(i.`id`) AS tickets_resolved,
-                    ROUND(AVG(TIMESTAMPDIFF(MINUTE, i.`created_at`, i.`resolved_at`))) AS avg_minutes
+                    ROUND(AVG(TIMESTAMPDIFF(SECOND, i.`created_at`, i.`resolved_at`))) AS avg_gross_seconds,
+                    ROUND(AVG(i.`total_pending_info_seconds`)) AS avg_pause_seconds
                 FROM `locations` l
                 LEFT JOIN `incidents` i ON i.`location_id` = l.`id`
                     AND i.`resolved_at` IS NOT NULL
@@ -260,14 +283,8 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
 
             foreach ($rows as $row) {
                 $count = (int)$row['tickets_resolved'];
-                $avgMin = ($row['avg_minutes'] !== null && $count > 0) ? (int)$row['avg_minutes'] : null;
-                $mttr = MttrMetric::fromMinutes($avgMin);
-
-                $targetHours = KpiSummary::SLA_GENERAL_HOURS;
-                $slaStatus = 'NO_DATA';
-                if ($mttr->hasData()) {
-                    $slaStatus = ($mttr->getHours() > $targetHours) ? 'BREACHED' : 'COMPLIANT';
-                }
+                $grossSeconds = ($row['avg_gross_seconds'] !== null && $count > 0) ? (int)$row['avg_gross_seconds'] : null;
+                $pauseSeconds = ($row['avg_pause_seconds'] !== null && $count > 0) ? max(0, (int)$row['avg_pause_seconds']) : 0;
 
                 $result[] = [
                     'location_id' => (int)$row['location_id'],
@@ -275,11 +292,9 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
                     'location_name' => (string)$row['location_name'],
                     'is_active' => (bool)$row['is_active'],
                     'tickets_resolved' => $count,
-                    'mttr_minutes' => $mttr->getMinutes(),
-                    'mttr_formatted' => $mttr->getFormatted(),
-                    'mttr_hours' => $mttr->getHours(),
-                    'sla_target_hours' => $targetHours,
-                    'sla_status' => $slaStatus,
+                    'mttr_gross_seconds' => $grossSeconds,
+                    'mttr_pending_info_seconds' => $pauseSeconds,
+                    'sla_target_hours' => KpiSummary::SLA_GENERAL_HOURS,
                 ];
             }
 
@@ -300,7 +315,8 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
                     u.`is_active`,
                     COUNT(i.`id`) AS tickets_resolved,
                     COUNT(rh.`incident_id`) AS warranty_reopens,
-                    ROUND(AVG(TIMESTAMPDIFF(MINUTE, i.`created_at`, i.`resolved_at`))) AS avg_minutes
+                    ROUND(AVG(TIMESTAMPDIFF(SECOND, i.`created_at`, i.`resolved_at`))) AS avg_gross_seconds,
+                    ROUND(AVG(i.`total_pending_info_seconds`)) AS avg_pause_seconds
                 FROM `users` u
                 LEFT JOIN `incidents` i ON i.`assigned_technician_id` = u.`id`
                     AND i.`resolved_at` IS NOT NULL
@@ -346,8 +362,8 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
 
             foreach ($rows as $row) {
                 $count = (int)$row['tickets_resolved'];
-                $avgMin = ($row['avg_minutes'] !== null && $count > 0) ? (int)$row['avg_minutes'] : null;
-                $mttr = MttrMetric::fromMinutes($avgMin);
+                $grossSeconds = ($row['avg_gross_seconds'] !== null && $count > 0) ? (int)$row['avg_gross_seconds'] : null;
+                $pauseSeconds = ($row['avg_pause_seconds'] !== null && $count > 0) ? max(0, (int)$row['avg_pause_seconds']) : 0;
                 $isActive = (bool)$row['is_active'];
                 $displayName = (string)$row['technician_name'] . ($isActive ? '' : ' (Inactivo)');
 
@@ -358,9 +374,8 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
                     'display_name' => $displayName,
                     'tickets_resolved' => $count,
                     'warranty_reopens' => (int)$row['warranty_reopens'],
-                    'mttr_minutes' => $mttr->getMinutes(),
-                    'mttr_formatted' => $mttr->getFormatted(),
-                    'mttr_hours' => $mttr->getHours(),
+                    'mttr_gross_seconds' => $grossSeconds,
+                    'mttr_pending_info_seconds' => $pauseSeconds,
                 ];
             }
 
@@ -378,7 +393,8 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
         $sql = "SELECT 
                     m.`machine_type`,
                     COUNT(i.`id`) AS tickets_resolved,
-                    ROUND(AVG(TIMESTAMPDIFF(MINUTE, i.`created_at`, i.`resolved_at`))) AS avg_minutes
+                    ROUND(AVG(TIMESTAMPDIFF(SECOND, i.`created_at`, i.`resolved_at`))) AS avg_gross_seconds,
+                    ROUND(AVG(i.`total_pending_info_seconds`)) AS avg_pause_seconds
                 FROM `incidents` i
                 INNER JOIN `machines` m ON i.`machine_id` = m.`id`
                 WHERE i.`resolved_at` IS NOT NULL
@@ -413,24 +429,17 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
             foreach ($allTypes as $typeKey => $meta) {
                 $hasRow = isset($indexed[$typeKey]);
                 $count = $hasRow ? (int)$indexed[$typeKey]['tickets_resolved'] : 0;
-                $avgMin = ($hasRow && $indexed[$typeKey]['avg_minutes'] !== null && $count > 0) ? (int)$indexed[$typeKey]['avg_minutes'] : null;
-                $mttr = MttrMetric::fromMinutes($avgMin);
-
-                $slaStatus = 'NO_DATA';
-                if ($mttr->hasData()) {
-                    $slaStatus = ($mttr->getHours() > $meta['sla']) ? 'BREACHED' : 'COMPLIANT';
-                }
+                $grossSeconds = ($hasRow && $indexed[$typeKey]['avg_gross_seconds'] !== null && $count > 0) ? (int)$indexed[$typeKey]['avg_gross_seconds'] : null;
+                $pauseSeconds = ($hasRow && $indexed[$typeKey]['avg_pause_seconds'] !== null && $count > 0) ? max(0, (int)$indexed[$typeKey]['avg_pause_seconds']) : 0;
 
                 $result[] = [
                     'machine_type' => $typeKey,
                     'display_name' => $meta['name'],
                     'is_perishable' => $meta['perishable'],
                     'tickets_resolved' => $count,
-                    'mttr_minutes' => $mttr->getMinutes(),
-                    'mttr_formatted' => $mttr->getFormatted(),
-                    'mttr_hours' => $mttr->getHours(),
+                    'mttr_gross_seconds' => $grossSeconds,
+                    'mttr_pending_info_seconds' => $pauseSeconds,
                     'sla_target_hours' => $meta['sla'],
-                    'sla_status' => $slaStatus,
                 ];
             }
 
@@ -446,10 +455,11 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
     public function getBreakdownByCategory(MetricFilter $filter): array
     {
         $sql = "SELECT 
-                    `category`,
-                    COUNT(`id`) AS tickets_resolved,
-                    ROUND(AVG(TIMESTAMPDIFF(MINUTE, `created_at`, `resolved_at`))) AS avg_minutes
-                FROM `incidents`
+                    i.`category`,
+                    COUNT(i.`id`) AS tickets_resolved,
+                    ROUND(AVG(TIMESTAMPDIFF(SECOND, i.`created_at`, i.`resolved_at`))) AS avg_gross_seconds,
+                    ROUND(AVG(i.`total_pending_info_seconds`)) AS avg_pause_seconds
+                FROM `incidents` i
                 WHERE `resolved_at` IS NOT NULL
                   AND `status` IN ('RESOLVED', 'CLOSED')
                   AND `resolved_at` >= :from_date
@@ -482,15 +492,15 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
             foreach ($allCategories as $catKey => $catName) {
                 $hasRow = isset($indexed[$catKey]);
                 $count = $hasRow ? (int)$indexed[$catKey]['tickets_resolved'] : 0;
-                $avgMin = ($hasRow && $indexed[$catKey]['avg_minutes'] !== null && $count > 0) ? (int)$indexed[$catKey]['avg_minutes'] : null;
-                $mttr = MttrMetric::fromMinutes($avgMin);
+                $grossSeconds = ($hasRow && $indexed[$catKey]['avg_gross_seconds'] !== null && $count > 0) ? (int)$indexed[$catKey]['avg_gross_seconds'] : null;
+                $pauseSeconds = ($hasRow && $indexed[$catKey]['avg_pause_seconds'] !== null && $count > 0) ? max(0, (int)$indexed[$catKey]['avg_pause_seconds']) : 0;
 
                 $result[] = [
                     'category' => $catKey,
                     'display_name' => $catName,
                     'tickets_resolved' => $count,
-                    'mttr_minutes' => $mttr->getMinutes(),
-                    'mttr_formatted' => $mttr->getFormatted(),
+                    'mttr_gross_seconds' => $grossSeconds,
+                    'mttr_pending_info_seconds' => $pauseSeconds,
                 ];
             }
 
@@ -505,10 +515,12 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
      */
     public function getTechnicianMetrics(int $technicianId, MetricFilter $filter): array
     {
-        // 1. MTTR y tickets resueltos
+        // 1. Muestra bruta de resolución del técnico: segundos de vida y pausas PENDING_INFO
+        //    descontables (RF-03.1). El neto lo compone el servicio.
         $mttrSql = "SELECT 
                         COUNT(*) AS total_resolved,
-                        ROUND(AVG(TIMESTAMPDIFF(MINUTE, `created_at`, `resolved_at`))) AS avg_mttr_minutes
+                        ROUND(AVG(TIMESTAMPDIFF(SECOND, `created_at`, `resolved_at`))) AS avg_gross_seconds,
+                        ROUND(AVG(`total_pending_info_seconds`)) AS avg_pause_seconds
                     FROM `incidents`
                     WHERE `assigned_technician_id` = :tech_id
                       AND `resolved_at` IS NOT NULL
@@ -552,15 +564,16 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
             $avgResponse = $stmtResp->fetchColumn();
 
             $totalResolved = (int)($mttrRow['total_resolved'] ?? 0);
-            $avgMttrMin = ($mttrRow['avg_mttr_minutes'] !== null && $totalResolved > 0) ? (int)$mttrRow['avg_mttr_minutes'] : null;
-            $myMttr = MttrMetric::fromMinutes($avgMttrMin);
+            $grossSeconds = ($mttrRow['avg_gross_seconds'] !== null && $totalResolved > 0) ? (int)$mttrRow['avg_gross_seconds'] : null;
+            $pauseSeconds = ($mttrRow['avg_pause_seconds'] !== null && $totalResolved > 0) ? max(0, (int)$mttrRow['avg_pause_seconds']) : 0;
 
             $avgRespMin = ($avgResponse !== false && $avgResponse !== null) ? (int)$avgResponse : null;
             $respFormatted = ($avgRespMin !== null) ? sprintf('%dh %02dm', intdiv($avgRespMin, 60), $avgRespMin % 60) : 'N/A';
 
             return [
                 'technician_id' => $technicianId,
-                'my_mttr' => $myMttr,
+                'my_gross_mttr_seconds' => $grossSeconds,
+                'my_pending_info_seconds' => $pauseSeconds,
                 'total_resolved' => $totalResolved,
                 'current_in_progress' => $inProgressCount,
                 'avg_first_response_minutes' => $avgRespMin,
