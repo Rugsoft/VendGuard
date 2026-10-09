@@ -9,6 +9,7 @@ use RuntimeException;
 use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 
 /**
@@ -55,7 +56,9 @@ class PdoMachineRepository implements MachineRepositoryInterface
                 i.`category` AS inc_category,
                 i.`urgency` AS inc_urgency,
                 i.`created_at` AS inc_created_at,
-                i.`resolved_at` AS inc_resolved_at
+                i.`resolved_at` AS inc_resolved_at,
+                i.`pending_info_reason_category` AS inc_pending_info_reason_category,
+                i.`pending_info_reason_text` AS inc_pending_info_reason_text
             FROM `machines` m
             LEFT JOIN `incidents` i ON i.`machine_id` = m.`id`
                 AND i.`deleted_at` IS NULL
@@ -109,7 +112,9 @@ class PdoMachineRepository implements MachineRepositoryInterface
                 i.`category` AS inc_category,
                 i.`urgency` AS inc_urgency,
                 i.`created_at` AS inc_created_at,
-                i.`resolved_at` AS inc_resolved_at
+                i.`resolved_at` AS inc_resolved_at,
+                i.`pending_info_reason_category` AS inc_pending_info_reason_category,
+                i.`pending_info_reason_text` AS inc_pending_info_reason_text
             FROM `machines` m
             LEFT JOIN `incidents` i ON i.`machine_id` = m.`id`
                 AND i.`deleted_at` IS NULL
@@ -167,7 +172,9 @@ class PdoMachineRepository implements MachineRepositoryInterface
                 i.`category` AS inc_category,
                 i.`urgency` AS inc_urgency,
                 i.`created_at` AS inc_created_at,
-                i.`resolved_at` AS inc_resolved_at
+                i.`resolved_at` AS inc_resolved_at,
+                i.`pending_info_reason_category` AS inc_pending_info_reason_category,
+                i.`pending_info_reason_text` AS inc_pending_info_reason_text
             FROM `machines` m
             LEFT JOIN `incidents` i ON i.`machine_id` = m.`id`
                 AND i.`deleted_at` IS NULL
@@ -651,15 +658,25 @@ class PdoMachineRepository implements MachineRepositoryInterface
             $isInWarranty = ($hours <= 48.0);
         }
 
+        $categoryValue = !empty($row['inc_pending_info_reason_category'])
+            ? (string)$row['inc_pending_info_reason_category']
+            : null;
+        $category = $categoryValue !== null
+            ? IncidentPauseReasonCategory::tryFrom($categoryValue)
+            : null;
+
         return [
-            'id'             => (int)$row['inc_id'],
-            'ticket_code'    => (string)$row['inc_ticket_code'],
-            'status'         => $status,
-            'category'       => (string)$row['inc_category'],
-            'urgency'        => (string)$row['inc_urgency'],
-            'created_at'     => (string)$row['inc_created_at'],
-            'resolved_at'    => $row['inc_resolved_at'] !== null ? (string)$row['inc_resolved_at'] : null,
-            'is_in_warranty' => $isInWarranty,
+            'id'                                 => (int)$row['inc_id'],
+            'ticket_code'                        => (string)$row['inc_ticket_code'],
+            'status'                             => $status,
+            'category'                           => (string)$row['inc_category'],
+            'urgency'                            => (string)$row['inc_urgency'],
+            'created_at'                         => (string)$row['inc_created_at'],
+            'resolved_at'                        => $row['inc_resolved_at'] !== null ? (string)$row['inc_resolved_at'] : null,
+            'is_in_warranty'                     => $isInWarranty,
+            'pending_info_reason_category'       => $categoryValue,
+            'pending_info_reason_category_label' => $category?->label(),
+            'pending_info_reason_text'           => !empty($row['inc_pending_info_reason_text']) ? (string)$row['inc_pending_info_reason_text'] : null,
         ];
     }
 }

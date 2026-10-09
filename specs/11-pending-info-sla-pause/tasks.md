@@ -213,10 +213,11 @@
   * **Dependencias:** T-PAUSE-15
   * **Hecho cuando:** Existe `public/assets/js/components/PendingInfoPauseModal.js` como módulo ES nativo de Vue 3 que renderiza un modal accesible con: (1) selector de 4 causas tipificadas; (2) textarea con contador dinámico de caracteres restantes bloqueando el botón de envío si hay $< 20$ caracteres; (3) botones táctiles $\ge 44\text{ px}$; y (4) guardián de borrador sucio solicitando confirmación si el usuario presiona `Escape` o hace clic exterior habiendo texto escrito.
 
-- [ ] **T-PAUSE-17: Integrar banner informativo ámbar y llamada a la acción en `MachineCard.js` y `LocationPortalView.js`**
+- [x] **T-PAUSE-17: Integrar banner informativo ámbar y llamada a la acción en `MachineCard.js` y `LocationPortalView.js`**
   * **Requisitos:** RF-05.1, RF-05.2, RNF-04
   * **Dependencias:** T-PAUSE-15
   * **Hecho cuando:** Los componentes `MachineCard.js` y `LocationPortalView.js` muestran un banner ámbar destacado (`#fef9c3` con borde `#fde047` y texto `#854d0e`) cuando la máquina tiene una incidencia activa en `PENDING_INFO`, indicando la causa tipificada y ofreciendo un botón prominente de 1 clic *"Aportar información / Responder al técnico"* que abre directamente el modal de comentarios.
+  * **Verificación ejecutada (2026-10-09):** `node tests/unit/LocationPortalPendingInfoBannerTest.mjs` → **20 aserciones · exit 0**; `node tests/unit/DesignTokenDebtRatchetTest.mjs` → **3 aserciones (2466 tokens congelados, 0 deuda añadida mediante AMBER_TECHNICAL_TOKENS compartido) · exit 0**; `node tests/unit/LocationPortalViewTest.mjs` → **40 aserciones · exit 0**; `php tests/integration/LocationPortalControllerTest.php` → **23 aserciones · exit 0**. Se conectó la hidratación de `pending_info_reason_category`, `pending_info_reason_category_label` y `pending_info_reason_text` en `PdoMachineRepository.php`, el helper `isPendingInfoStatus` y exportación compartida de `AMBER_TECHNICAL_TOKENS` en `IncidentStatusPermissions.js`, el banner técnico ámbar en `MachineCard.js` con botón directo de respuesta, y el banner global de sede en `LocationPortalView.js` con acción de 1 clic al modal de comentarios.
 
 - [ ] **T-PAUSE-18: Integrar modal de pausa y despriorización de paradas en `TechnicianRouteView.js`**
   * **Requisitos:** RF-01.1, RF-02.2, RF-02.3, RF-05.5, RNF-03

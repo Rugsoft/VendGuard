@@ -22,6 +22,8 @@ import { SiteSanitaryStatusTab } from '../components/SiteSanitaryStatusTab.js';
 import { SanitaryCertificateModal } from '../components/SanitaryCertificateModal.js';
 import { SiteGlobalCertificateModal } from '../components/SiteGlobalCertificateModal.js';
 import { LocationRefundsTab } from '../components/LocationRefundsTab.js';
+import { isPendingInfoStatus, AMBER_TECHNICAL_TOKENS } from '../utils/IncidentStatusPermissions.js';
+import { PAUSE_REASON_CATEGORIES } from '../components/PendingInfoPauseModal.js';
 
 export const LocationPortalView = {
   name: 'LocationPortalView',
@@ -80,6 +82,38 @@ export const LocationPortalView = {
     },
     operationalCount() {
       return this.machines.filter(m => m.active_incident === null).length;
+    },
+    /**
+     * Máquinas de la sede con una avería en estado PENDING_INFO (RF-05.1).
+     */
+    pendingInfoMachines() {
+      return this.machines.filter(m => m.active_incident && isPendingInfoStatus(m.active_incident.status));
+    },
+    /**
+     * Primera máquina con avería en pausa de información para destacar en cabecera si existe.
+     */
+    firstPendingInfoMachine() {
+      return this.pendingInfoMachines[0] || null;
+    },
+    /**
+     * Etiqueta descriptiva de la causa de pausa de la primera máquina pausada.
+     */
+    firstPendingInfoReasonLabel() {
+      const inc = this.firstPendingInfoMachine?.active_incident;
+      if (!inc) return '';
+      const direct = inc.pending_info_reason_category_label;
+      if (direct && typeof direct === 'string' && direct.trim() !== '') {
+        return direct;
+      }
+      const raw = inc.pending_info_reason_category;
+      if (raw) {
+        const found = PAUSE_REASON_CATEGORIES.find(c => c.value === raw);
+        if (found) return found.label;
+      }
+      return 'Información pendiente de la sede';
+    },
+    amberTokens() {
+      return AMBER_TECHNICAL_TOKENS;
     },
     /**
      * Avería activa cuya tarjeta abrió el hilo de conversación (Módulo 10).
@@ -421,6 +455,60 @@ export const LocationPortalView = {
 
         <!-- TAB 1: Machines & Incidents View -->
         <div v-if="activePortalTab === 'machines'">
+          <!-- Global Amber Banner when at least one machine is in PENDING_INFO (RF-05.1, RF-05.2, RNF-04) -->
+          <div
+            v-if="pendingInfoMachines.length > 0"
+            class="vg-portal-pending-info-alert"
+            data-testid="location-portal-pending-info-alert"
+            :style="{
+              background: amberTokens.bg,
+              border: '1px solid ' + amberTokens.border,
+              padding: '12px 16px',
+              borderRadius: 'var(--radius-card, 8px)',
+              marginBottom: '20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px'
+            }"
+          >
+            <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+              <div>
+                <div
+                  :style="{
+                    fontFamily: 'var(--font-display, \'DM Sans\', sans-serif)',
+                    fontSize: '14px',
+                    fontWeight: '700',
+                    color: amberTokens.color
+                  }"
+                >
+                  ⏸️ Intervención en Pausa: El servicio técnico requiere acceso o información
+                </div>
+                <div
+                  :style="{
+                    fontFamily: 'var(--font-body, Inter, sans-serif)',
+                    fontSize: '13px',
+                    color: 'var(--color-warning-text, ' + amberTokens.color + ')',
+                    marginTop: '2px'
+                  }"
+                >
+                  Hay {{ pendingInfoMachines.length === 1 ? '1 máquina' : pendingInfoMachines.length + ' máquinas' }} en espera de respuesta en esta sede.
+                  <span v-if="pendingInfoMachines.length === 1 && firstPendingInfoReasonLabel">
+                    <strong>Causa:</strong> {{ firstPendingInfoReasonLabel }}.
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="vg-btn vg-btn-primary"
+                data-testid="location-portal-pending-info-action-btn"
+                style="height: 36px; padding: 0 14px; font-size: 13px; font-weight: 600; border-radius: var(--radius-interactive, 4px); white-space: nowrap;"
+                @click="onOpenComments(firstPendingInfoMachine)"
+              >
+                💬 Aportar información / Responder al técnico
+              </button>
+            </div>
+          </div>
+
           <!-- Filter Tabs & Stats -->
           <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px;">
             <!-- Tabs -->

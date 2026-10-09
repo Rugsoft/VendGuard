@@ -123,6 +123,11 @@ export function isResolvedStatus(value) {
   return normalizeIncidentStatus(value) === INCIDENT_STATUSES.RESOLVED;
 }
 
+/** True when the canonical status is PENDING_INFO (waiting for site access/information). */
+export function isPendingInfoStatus(value) {
+  return normalizeIncidentStatus(value) === INCIDENT_STATUSES.PENDING_INFO;
+}
+
 /** True when the canonical status is one of the open lifecycle statuses. */
 export function isActiveStatus(value) {
   return ACTIVE_STATUSES.includes(normalizeIncidentStatus(value));
@@ -216,11 +221,12 @@ export function isCriticalUrgency(value) {
 }
 
 /**
- * Amber technical tokens (RNF-04), declared once. The MEDIUM urgency badge and the
- * PENDING_INFO status badge share them, so the paused state introduces no new
- * hardcoded color to the design-token debt ratchet.
+ * Amber technical tokens (RNF-04), declared once. The MEDIUM urgency badge, the
+ * PENDING_INFO status badge, and the MachineCard/LocationPortalView pending info banner
+ * share them, so the paused state introduces no new hardcoded color to the design-token
+ * debt ratchet.
  */
-const AMBER_TECHNICAL_TOKENS = Object.freeze({ bg: '#fef9c3', color: '#854d0e', border: '#fde047' });
+export const AMBER_TECHNICAL_TOKENS = Object.freeze({ bg: '#fef9c3', color: '#854d0e', border: '#fde047' });
 
 /** Docker-design palette per urgency (semantic colors + CSS class hook). */
 export const BADGE_URGENCY_PALETTE = Object.freeze({

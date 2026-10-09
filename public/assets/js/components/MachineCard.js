@@ -15,7 +15,8 @@
  */
 
 import { IncidentBadge } from './IncidentBadge.js';
-import { MACHINE_TYPE_LABELS, MACHINE_TYPE_ICONS, isPerishableMachineType, isResolvedStatus } from '../utils/IncidentStatusPermissions.js';
+import { MACHINE_TYPE_LABELS, MACHINE_TYPE_ICONS, isPerishableMachineType, isResolvedStatus, isPendingInfoStatus, AMBER_TECHNICAL_TOKENS } from '../utils/IncidentStatusPermissions.js';
+import { PAUSE_REASON_CATEGORIES } from './PendingInfoPauseModal.js';
 
 // Machine-type labels, icons and the sanitary perishable rule live in the shared
 // module utils/IncidentStatusPermissions.js (mirrors MachineType.php); unknown
@@ -48,6 +49,28 @@ export const MachineCard = {
       if (!this.activeIncident) return false;
       return isResolvedStatus(this.activeIncident.status);
     },
+    isPendingInfo() {
+      if (!this.activeIncident) return false;
+      return isPendingInfoStatus(this.activeIncident.status);
+    },
+    pendingInfoReasonLabel() {
+      if (!this.activeIncident) return '';
+      const direct = this.activeIncident.pending_info_reason_category_label;
+      if (direct && typeof direct === 'string' && direct.trim() !== '') {
+        return direct;
+      }
+      const raw = this.activeIncident.pending_info_reason_category;
+      if (raw) {
+        const found = PAUSE_REASON_CATEGORIES.find(c => c.value === raw);
+        if (found) {
+          return found.label;
+        }
+      }
+      return 'Información pendiente de la sede';
+    },
+    pendingInfoReasonText() {
+      return this.activeIncident?.pending_info_reason_text || '';
+    },
     typeInfo() {
       const type = this.machine?.machine_type;
       if (MACHINE_TYPE_LABELS[type]) {
@@ -57,6 +80,9 @@ export const MachineCard = {
     },
     cardBorderColor() {
       if (this.hasActiveIncident) {
+        if (this.isPendingInfo) {
+          return AMBER_TECHNICAL_TOKENS.border; // Amber technical outline for pending info (RF-05.1, RNF-04)
+        }
         if (this.isUnderWarranty) {
           return '#86efac'; // Green outline for warranty/resolved
         }
@@ -79,6 +105,9 @@ export const MachineCard = {
      */
     conversationBadgeLabel() {
       return `Conversación (${this.publicCommentsCount})`;
+    },
+    amberTokens() {
+      return AMBER_TECHNICAL_TOKENS;
     }
   },
   methods: {
@@ -161,9 +190,85 @@ export const MachineCard = {
         </div>
 
         <!-- Middle: Incident Status Banner -->
+        <!-- Case 0: Machine with active incident in PENDING_INFO (RF-05.1, RNF-04) -->
+        <div
+          v-if="hasActiveIncident && isPendingInfo"
+          class="vg-pending-info-banner"
+          data-testid="machine-card-pending-info-banner"
+          :style="{
+            background: amberTokens.bg,
+            border: '1px solid ' + amberTokens.border,
+            padding: '10px',
+            borderRadius: 'var(--radius-interactive, 4px)',
+            marginBottom: '14px'
+          }"
+        >
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px;">
+            <span
+              :style="{
+                fontFamily: 'var(--font-body, Inter, sans-serif)',
+                fontSize: '11px',
+                fontWeight: '700',
+                color: amberTokens.color
+              }"
+            >
+              Ticket #{{ activeIncident.ticket_code }}
+            </span>
+            <IncidentBadge
+              v-if="activeIncident.status"
+              :value="activeIncident.status"
+              type="status"
+              size="sm"
+            />
+          </div>
+          <div
+            :style="{
+              fontFamily: 'var(--font-display, \\'DM Sans\\', sans-serif)',
+              fontWeight: '700',
+              color: amberTokens.color,
+              fontSize: '13px',
+              lineHeight: '1.3'
+            }"
+          >
+            ⏸️ Intervención en Pausa: El técnico necesita tu ayuda
+          </div>
+          <div
+            :style="{
+              fontFamily: 'var(--font-body, Inter, sans-serif)',
+              fontSize: '12px',
+              color: 'var(--color-warning-text, ' + amberTokens.color + ')',
+              margin: '4px 0'
+            }"
+          >
+            <strong>Causa:</strong> {{ pendingInfoReasonLabel }}
+          </div>
+          <p
+            v-if="pendingInfoReasonText"
+            :style="{
+              fontFamily: 'var(--font-body, Inter, sans-serif)',
+              fontSize: '11px',
+              color: 'var(--color-warning-text, ' + amberTokens.color + ')',
+              margin: '0 0 8px 0',
+              fontStyle: 'italic',
+              lineHeight: '1.35'
+            }"
+          >
+            "{{ pendingInfoReasonText }}"
+          </p>
+          <button
+            type="button"
+            class="vg-btn vg-btn-primary vg-pending-info-action-btn"
+            data-testid="machine-card-pending-info-reply-btn"
+            style="width: 100%; font-size: 12px; height: 36px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: var(--radius-interactive, 4px);"
+            @click="handleOpenComments"
+          >
+            💬 Aportar información / Responder al técnico
+          </button>
+        </div>
+
         <!-- Case 1: Machine with active ongoing incident -->
         <div
-          v-if="hasActiveIncident && !isUnderWarranty"
+          v-else-if="hasActiveIncident && !isUnderWarranty"
           style="background-color: #fef2f2; border: 1px solid #fee2e2; border-radius: var(--radius-interactive, 4px); padding: 10px; margin-bottom: 14px;"
         >
           <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px;">
