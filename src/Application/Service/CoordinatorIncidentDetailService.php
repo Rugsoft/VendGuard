@@ -44,6 +44,9 @@ final class CoordinatorIncidentDetailService
      *
      * The functional spec names the first one REPORTED; the implementation calls it
      * REGISTERED, and REOPENED re-enters the flow after a warranty reopening.
+     * PENDING_INFO belongs here too: the pause does not close the ticket (the engine
+     * keeps `is_active_ticket = 1`), so cancelling after the 72-hour silence (RF-04.3)
+     * and replying from the site portal (RF-05.1) must remain available.
      */
     private const ACTIVE_STATUSES = [
         IncidentStatus::REGISTERED,
@@ -51,6 +54,7 @@ final class CoordinatorIncidentDetailService
         IncidentStatus::ASSIGNED,
         IncidentStatus::IN_PROGRESS,
         IncidentStatus::PENDING_PARTS,
+        IncidentStatus::PENDING_INFO,
     ];
 
     /** States whose lifecycle closes with a formal historical SLA balance. */

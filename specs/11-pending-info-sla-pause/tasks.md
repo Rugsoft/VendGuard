@@ -22,10 +22,12 @@
   * **Nota de enmienda (2026-10-09):** La spec nombraba `014_pending_info_sla_pause.sql`, número ya ocupado por `014_location_access_code.sql` (hallazgo S-4) y seguido de `015_user_login_lockout.sql` (hallazgo S-3). Con aprobación del Product Owner, la migración se registra como `016_pending_info_sla_pause.sql` para preservar la numeración secuencial del repositorio.
   * **Verificación ejecutada:** Sonda sobre base desechable (27/27 aserciones: enum, tipos, nulabilidad, `is_active_ticket` virtual, `uq_machine_active_ticket` y rechazo de segundo ticket activo), aplicación real vía `MigrationRunner` sobre `vendguard_db` (13 filas preservadas) y `CloudDeploySchemaParityTest` (27/27).
 
-- [ ] **T-PAUSE-02: Extender `IncidentStatus.php` e implementar el enum `IncidentPauseReasonCategory.php`**
+- [x] **T-PAUSE-02: Extender `IncidentStatus.php` e implementar el enum `IncidentPauseReasonCategory.php`**
   * **Requisitos:** RF-01.1, RF-01.2, RF-06.2, RNF-01
   * **Dependencias:** T-PAUSE-01
   * **Hecho cuando:** `IncidentStatus.php` incluye el caso `PENDING_INFO = 'PENDING_INFO'`, etiqueta descriptiva `'Pendiente de información'`, confirma `isActive() === true`, valida transiciones legales desde `ASSIGNED`, `IN_PROGRESS`, `PENDING_PARTS` y `REOPENED` hacia `PENDING_INFO`, y desde `PENDING_INFO` hacia `ASSIGNED`, `IN_PROGRESS` y `CANCELLED` (prohibiendo expresamente la transición directa a `RESOLVED`); existe `src/Core/Domain/ValueObject/IncidentPauseReasonCategory.php` con los 4 motivos tipificados (`BUILDING_CLOSED_NO_ACCESS`, `MACHINE_LOCATION_NOT_FOUND`, `EXTERNAL_POWER_CUT`, `PENDING_SITE_AUTHORIZATION`); y el test unitario `IncidentStatusPendingInfoTest.php` pasa al 100% en verde.
+  * **Alineaciones del mismo commit (exigidas por el ciclo de vida):** guardián bilingüe `IncidentStateMachine` (sinónimos + grafo), `match` exhaustivo de `IncidentCommentService` (sin él, una parada en `PENDING_INFO` lanzaría `UnhandledMatchError`), `CoordinatorIncidentDetailService::ACTIVE_STATUSES` (6 estados: la cancelación por inactividad y la respuesta de sede siguen disponibles) y el espejo frontend `IncidentStatusPermissions.js` con su contrato técnico, conforme al §7 de `specs/technical/incident_status_permissions_contracts.md`.
+  * **Verificación ejecutada (2026-10-09):** `php tests/unit/IncidentStatusPendingInfoTest.php` (32 aserciones), `IncidentStatusPermissionsUtilTest.mjs` (49), `DomainEnumsTest.php` y `IncidentStateMachineTest.php` (36) en verde; `php tests/run_all.php` → **218 suites · 8.247 aserciones · 0 fallos**.
 
 - [ ] **T-PAUSE-03: Implementar DTOs inmutables `IncidentPauseRequestDto.php` e `IncidentPauseResponseDto.php`**
   * **Requisitos:** RF-01.2, RF-01.3, RF-03.2, RNF-01, Constitución Art. V.1

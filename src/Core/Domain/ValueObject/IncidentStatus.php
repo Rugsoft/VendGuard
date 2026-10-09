@@ -10,8 +10,13 @@ use InvalidArgumentException;
  * IncidentStatus
  * 
  * Ciclo de vida estricto de una incidencia en VendGuard.
- * Consta de 8 estados auditados. Estados CLOSED y CANCELLED son terminales
+ * Consta de 9 estados auditados. Estados CLOSED y CANCELLED son terminales
  * e inactivan el candado de unicidad por máquina.
+ *
+ * PENDING_INFO ("Pendiente de Información") es un estado operativo activo y no
+ * terminal: el trabajo está bloqueado por la sede cliente y el reloj contractual
+ * de SLA queda congelado (RF-01.1, RF-06.2). Resolver exige reanudar antes a
+ * IN_PROGRESS y registrar la intervención física (Art. V.1).
  */
 enum IncidentStatus: string
 {
@@ -19,6 +24,7 @@ enum IncidentStatus: string
     case ASSIGNED = 'ASSIGNED';
     case IN_PROGRESS = 'IN_PROGRESS';
     case PENDING_PARTS = 'PENDING_PARTS';
+    case PENDING_INFO = 'PENDING_INFO';
     case RESOLVED = 'RESOLVED';
     case REOPENED = 'REOPENED';
     case CLOSED = 'CLOSED';
@@ -34,6 +40,7 @@ enum IncidentStatus: string
             self::ASSIGNED => 'Asignada',
             self::IN_PROGRESS => 'En curso',
             self::PENDING_PARTS => 'Pendiente de repuestos',
+            self::PENDING_INFO => 'Pendiente de información',
             self::RESOLVED => 'Resuelta',
             self::REOPENED => 'Reabierta',
             self::CLOSED => 'Cerrada',
@@ -73,11 +80,14 @@ enum IncidentStatus: string
     {
         return match ($this) {
             self::REGISTERED => in_array($target, [self::ASSIGNED, self::CANCELLED], true),
-            self::ASSIGNED => in_array($target, [self::IN_PROGRESS, self::ASSIGNED, self::CANCELLED], true),
-            self::IN_PROGRESS => in_array($target, [self::PENDING_PARTS, self::RESOLVED, self::CANCELLED], true),
-            self::PENDING_PARTS => in_array($target, [self::IN_PROGRESS, self::CANCELLED], true),
+            self::ASSIGNED => in_array($target, [self::IN_PROGRESS, self::ASSIGNED, self::PENDING_INFO, self::CANCELLED], true),
+            self::IN_PROGRESS => in_array($target, [self::PENDING_PARTS, self::PENDING_INFO, self::RESOLVED, self::CANCELLED], true),
+            self::PENDING_PARTS => in_array($target, [self::IN_PROGRESS, self::PENDING_INFO, self::CANCELLED], true),
+            // Desde la pausa solo se reanuda (IN_PROGRESS/ASSIGNED) o se cancela:
+            // RESOLVED queda expresamente prohibido (RF-06.2, Art. V.1).
+            self::PENDING_INFO => in_array($target, [self::IN_PROGRESS, self::ASSIGNED, self::CANCELLED], true),
             self::RESOLVED => in_array($target, [self::CLOSED, self::REOPENED], true),
-            self::REOPENED => in_array($target, [self::ASSIGNED, self::IN_PROGRESS, self::CANCELLED], true),
+            self::REOPENED => in_array($target, [self::ASSIGNED, self::IN_PROGRESS, self::PENDING_INFO, self::CANCELLED], true),
             self::CLOSED, self::CANCELLED => false,
         };
     }

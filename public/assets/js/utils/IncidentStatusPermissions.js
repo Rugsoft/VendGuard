@@ -27,6 +27,7 @@ export const INCIDENT_STATUSES = Object.freeze({
   ASSIGNED: 'ASSIGNED',
   IN_PROGRESS: 'IN_PROGRESS',
   PENDING_PARTS: 'PENDING_PARTS',
+  PENDING_INFO: 'PENDING_INFO',
   RESOLVED: 'RESOLVED',
   REOPENED: 'REOPENED',
   CLOSED: 'CLOSED',
@@ -39,8 +40,12 @@ export const ASSIGNABLE_STATUSES = Object.freeze(['REGISTERED', 'REOPENED']);
 /** Statuses with a live responsible technician: reassignment flow (RF-07.3). */
 export const REASSIGNABLE_STATUSES = Object.freeze(['ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS']);
 
-/** Open statuses of the lifecycle, mirroring CoordinatorIncidentDetailService::ACTIVE_STATUSES. */
-export const ACTIVE_STATUSES = Object.freeze(['REGISTERED', 'REOPENED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS']);
+/**
+ * Open statuses of the lifecycle, mirroring CoordinatorIncidentDetailService::ACTIVE_STATUSES.
+ * PENDING_INFO is an active, non-terminal state: the SLA clock is frozen but the ticket
+ * stays open, so the quick "Descartar" (RF-04.3) and the site reply remain reachable.
+ */
+export const ACTIVE_STATUSES = Object.freeze(['REGISTERED', 'REOPENED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS', 'PENDING_INFO']);
 
 /** Statuses that end the lifecycle with a formal historical SLA balance. */
 export const TERMINAL_STATUSES = Object.freeze(['RESOLVED', 'CLOSED', 'CANCELLED']);
@@ -60,6 +65,9 @@ export const CANONICAL_STATUS_MAP = Object.freeze({
   PENDING_PARTS: 'PENDING_PARTS',
   PENDIENTE_REPUESTO: 'PENDING_PARTS',
   PENDIENTE_REPUESTOS: 'PENDING_PARTS',
+  PENDING_INFO: 'PENDING_INFO',
+  PENDIENTE_INFORMACION: 'PENDING_INFO',
+  PENDIENTE_DE_INFORMACION: 'PENDING_INFO',
   RESOLVED: 'RESOLVED',
   RESUELTA: 'RESOLVED',
   REOPENED: 'REOPENED',
@@ -146,6 +154,7 @@ export const STATUS_LABELS = Object.freeze({
   ASSIGNED: 'Asignada',
   IN_PROGRESS: 'En curso',
   PENDING_PARTS: 'Pendiente repuesto',
+  PENDING_INFO: 'Pendiente información',
   RESOLVED: 'Resuelta (Garantía)',
   REOPENED: 'Reabierta',
   CLOSED: 'Cerrada',
@@ -206,11 +215,18 @@ export function isCriticalUrgency(value) {
   return normalizeUrgency(value) === URGENCY_LEVELS.CRITICAL;
 }
 
+/**
+ * Amber technical tokens (RNF-04), declared once. The MEDIUM urgency badge and the
+ * PENDING_INFO status badge share them, so the paused state introduces no new
+ * hardcoded color to the design-token debt ratchet.
+ */
+const AMBER_TECHNICAL_TOKENS = Object.freeze({ bg: '#fef9c3', color: '#854d0e', border: '#fde047' });
+
 /** Docker-design palette per urgency (semantic colors + CSS class hook). */
 export const BADGE_URGENCY_PALETTE = Object.freeze({
   CRITICAL: Object.freeze({ cssClass: 'vg-badge-critical', bg: '#fee2e2', color: '#dc2626', border: '#fca5a5' }),
   HIGH: Object.freeze({ cssClass: 'vg-badge-high', bg: '#ffedd5', color: '#c2410c', border: '#fdba74' }),
-  MEDIUM: Object.freeze({ cssClass: 'vg-badge-medium', bg: '#fef9c3', color: '#854d0e', border: '#fde047' }),
+  MEDIUM: Object.freeze({ cssClass: 'vg-badge-medium', ...AMBER_TECHNICAL_TOKENS }),
   LOW: Object.freeze({ cssClass: 'vg-badge-low', bg: '#dbeafe', color: '#1d4ed8', border: '#93c5fd' })
 });
 
@@ -220,6 +236,9 @@ export const BADGE_STATUS_PALETTE = Object.freeze({
   ASSIGNED: Object.freeze({ bg: '#ede9fe', color: '#6d28d9', border: '#c4b5fd' }),
   IN_PROGRESS: Object.freeze({ bg: '#fef3c7', color: '#92400e', border: '#fcd34d' }),
   PENDING_PARTS: Object.freeze({ bg: '#ffedd5', color: '#c2410c', border: '#fdba74' }),
+  // Amber technical tokens (RNF-04), shared with the MEDIUM urgency badge: the frozen
+  // SLA reads as "waiting on the site", never as a resolved or failed ticket.
+  PENDING_INFO: AMBER_TECHNICAL_TOKENS,
   RESOLVED: Object.freeze({ bg: '#eaf8f1', color: '#065f46', border: '#86efac' }),
   REOPENED: Object.freeze({ bg: '#fee2e2', color: '#b91c1c', border: '#fca5a5' }),
   CLOSED: Object.freeze({ bg: '#f3f4f6', color: '#4b5563', border: '#d1d5db' }),

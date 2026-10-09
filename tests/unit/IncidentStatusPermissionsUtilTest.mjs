@@ -69,9 +69,10 @@ console.log('===================================================================
 // ---------------------------------------------------------------------
 console.log('--- Group 1: Status lists mirror the PHP lifecycle ---');
 
-assert('1.1 INCIDENT_STATUSES mirrors IncidentStatus.php exactly (8 statuses)',
+assert('1.1 INCIDENT_STATUSES mirrors IncidentStatus.php exactly (9 statuses)',
   INCIDENT_STATUSES.REGISTERED === 'REGISTERED' && INCIDENT_STATUSES.ASSIGNED === 'ASSIGNED' &&
   INCIDENT_STATUSES.IN_PROGRESS === 'IN_PROGRESS' && INCIDENT_STATUSES.PENDING_PARTS === 'PENDING_PARTS' &&
+  INCIDENT_STATUSES.PENDING_INFO === 'PENDING_INFO' &&
   INCIDENT_STATUSES.RESOLVED === 'RESOLVED' && INCIDENT_STATUSES.REOPENED === 'REOPENED' &&
   INCIDENT_STATUSES.CLOSED === 'CLOSED' && INCIDENT_STATUSES.CANCELLED === 'CANCELLED');
 
@@ -82,8 +83,9 @@ assert('1.3 REASSIGNABLE_STATUSES = ASSIGNED + IN_PROGRESS + PENDING_PARTS (RF-0
   REASSIGNABLE_STATUSES.length === 3 && REASSIGNABLE_STATUSES.includes('ASSIGNED') &&
   REASSIGNABLE_STATUSES.includes('IN_PROGRESS') && REASSIGNABLE_STATUSES.includes('PENDING_PARTS'));
 
-assert('1.4 ACTIVE_STATUSES = the five open statuses (PHP ACTIVE_STATUSES mirror)',
-  ACTIVE_STATUSES.length === 5 && ASSIGNABLE_STATUSES.every(s => ACTIVE_STATUSES.includes(s)) &&
+assert('1.4 ACTIVE_STATUSES = the six open statuses, PENDING_INFO included (PHP ACTIVE_STATUSES mirror)',
+  ACTIVE_STATUSES.length === 6 && ACTIVE_STATUSES.includes('PENDING_INFO') &&
+  ASSIGNABLE_STATUSES.every(s => ACTIVE_STATUSES.includes(s)) &&
   REASSIGNABLE_STATUSES.every(s => ACTIVE_STATUSES.includes(s)));
 
 assert('1.5 TERMINAL_STATUSES = RESOLVED + CLOSED + CANCELLED, disjoint from active',
@@ -105,13 +107,15 @@ assert('2.1 Every Spanish label maps to its canonical English status',
   normalizeIncidentStatus('EN_CURSO') === 'IN_PROGRESS' &&
   normalizeIncidentStatus('PENDIENTE_REPUESTO') === 'PENDING_PARTS' &&
   normalizeIncidentStatus('PENDIENTE_REPUESTOS') === 'PENDING_PARTS' &&
+  normalizeIncidentStatus('PENDIENTE_INFORMACION') === 'PENDING_INFO' &&
+  normalizeIncidentStatus('PENDIENTE_DE_INFORMACION') === 'PENDING_INFO' &&
   normalizeIncidentStatus('Resuelta') === 'RESOLVED' &&
   normalizeIncidentStatus('Reabierta') === 'REOPENED' &&
   normalizeIncidentStatus('Cerrada') === 'CLOSED' &&
   normalizeIncidentStatus('Cancelada') === 'CANCELLED');
 
 assert('2.2 Canonical English keys pass through unchanged',
-  ['REGISTERED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS', 'RESOLVED', 'REOPENED', 'CLOSED', 'CANCELLED']
+  ['REGISTERED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS', 'PENDING_INFO', 'RESOLVED', 'REOPENED', 'CLOSED', 'CANCELLED']
     .every(s => normalizeIncidentStatus(s) === s));
 
 assert('2.3 Casing and stray whitespace are tolerated',
@@ -132,7 +136,7 @@ assert('3.1 canQuickAssign: true only for assignable statuses (EARS 5.5)',
   !canQuickAssign(mk('CLOSED')) && !canQuickAssign(mk('CANCELLED')));
 
 assert('3.2 canQuickCancel: true for every active status (EARS 6.4)',
-  ['REGISTERED', 'REOPENED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS']
+  ['REGISTERED', 'REOPENED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS', 'PENDING_INFO']
     .every(s => canQuickCancel(mk(s))));
 
 assert('3.3 canQuickCancel: false for terminal statuses (both languages)',
@@ -153,7 +157,7 @@ assert('3.5b isResolvedStatus accurately identifies RESOLVED in both languages a
   isResolvedStatus(null) === false);
 
 assert('3.6 isActiveStatus is the exact complement of terminal for known statuses',
-  ['REGISTERED', 'REOPENED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS']
+  ['REGISTERED', 'REOPENED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS', 'PENDING_INFO']
     .every(s => isActiveStatus(s) && !isTerminalStatus(s)));
 
 assert('3.7 isPendingAssignment: assignable status or no technician (SLA rule)',
@@ -188,13 +192,14 @@ console.log('\n--- Group 5: Cross-check against PHP sources ---');
 const phpEnum = readFileSync('src/Core/Domain/ValueObject/IncidentStatus.php', 'utf8');
 const phpEnumCases = [...phpEnum.matchAll(/case ([A-Z_]+) = '/g)].map(m => m[1]);
 assert('5.1 Every PHP enum case exists in the shared JS lists',
-  phpEnumCases.length === 8 && phpEnumCases.every(s => Object.values(INCIDENT_STATUSES).includes(s)));
+  phpEnumCases.length === 9 && phpEnumCases.every(s => Object.values(INCIDENT_STATUSES).includes(s)));
 
 const phpService = readFileSync('src/Application/Service/CoordinatorIncidentDetailService.php', 'utf8');
 const phpActiveBlock = phpService.match(/ACTIVE_STATUSES\s*=\s*\[([^\]]+)\]/);
 const phpActive = phpActiveBlock ? [...phpActiveBlock[1].matchAll(/IncidentStatus::([A-Z_]+)/g)].map(m => m[1]) : [];
 assert('5.2 ACTIVE_STATUSES mirrors the PHP service constant exactly',
-  phpActive.length === 5 && phpActive.every(s => ACTIVE_STATUSES.includes(s)) &&
+  phpActive.length === 6 && phpActive.includes('PENDING_INFO') &&
+  phpActive.every(s => ACTIVE_STATUSES.includes(s)) &&
   ACTIVE_STATUSES.every(s => phpActive.includes(s)));
 
 const phpController = readFileSync('src/Presentation/Controller/CoordinatorController.php', 'utf8');
@@ -253,9 +258,10 @@ assert('6.2 The tray imports the shared module and exposes the gating facade',
 // ---------------------------------------------------------------------
 console.log('\n--- Group 7: Localized labels and badge palettes ---');
 
-assert('7.1 STATUS_LABELS covers the eight lifecycle statuses in Spanish',
+assert('7.1 STATUS_LABELS covers the nine lifecycle statuses in Spanish',
   STATUS_LABELS.REGISTERED === 'Registrada' && STATUS_LABELS.ASSIGNED === 'Asignada' &&
   STATUS_LABELS.IN_PROGRESS === 'En curso' && STATUS_LABELS.PENDING_PARTS === 'Pendiente repuesto' &&
+  STATUS_LABELS.PENDING_INFO === 'Pendiente información' &&
   STATUS_LABELS.RESOLVED === 'Resuelta (Garantía)' && STATUS_LABELS.REOPENED === 'Reabierta' &&
   STATUS_LABELS.CLOSED === 'Cerrada' && STATUS_LABELS.CANCELLED === 'Cancelada');
 
@@ -291,6 +297,8 @@ assert('7.3 BADGE_URGENCY_PALETTE: semantic colors survive byte-for-byte',
 assert('7.4 BADGE_STATUS_PALETTE: all per-status colors survive byte-for-byte',
   BADGE_STATUS_PALETTE.REGISTERED.bg === '#e5f2fc' && BADGE_STATUS_PALETTE.ASSIGNED.color === '#6d28d9' &&
   BADGE_STATUS_PALETTE.IN_PROGRESS.color === '#92400e' && BADGE_STATUS_PALETTE.PENDING_PARTS.bg === '#ffedd5' &&
+  BADGE_STATUS_PALETTE.PENDING_INFO.bg === '#fef9c3' && BADGE_STATUS_PALETTE.PENDING_INFO.color === '#854d0e' &&
+  BADGE_STATUS_PALETTE.PENDING_INFO.border === '#fde047' &&
   BADGE_STATUS_PALETTE.RESOLVED.color === '#065f46' && BADGE_STATUS_PALETTE.REOPENED.color === '#b91c1c' &&
   BADGE_STATUS_PALETTE.CLOSED.color === '#4b5563' && BADGE_STATUS_PALETTE.CANCELLED.color === '#9ca3af');
 
@@ -312,6 +320,8 @@ assert('8.1 resolveBadgeConfig(urgency) returns palette + localized label',
 
 assert('8.2 resolveBadgeConfig(status) resolves bilingual keys with the shared normalizer',
   resolveBadgeConfig('EN_CURSO', 'status').label === 'En curso' &&
+  resolveBadgeConfig('PENDIENTE_INFORMACION', 'status').label === 'Pendiente información' &&
+  resolveBadgeConfig('Pendiente de información', 'status').label === 'Pendiente información' &&
   resolveBadgeConfig('Resuelta', 'status').label === 'Resuelta (Garantía)' &&
   resolveBadgeConfig('EN CURSO', 'status').label === 'En curso'); // historical badge tolerance: whitespace folds to underscore
 

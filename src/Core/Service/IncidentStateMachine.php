@@ -16,11 +16,12 @@ use VendGuard\Core\Domain\ValueObject\IncidentStatus;
  * 
  * Grafo estricto de transiciones:
  * - REGISTERED    -> ASSIGNED, CANCELLED
- * - ASSIGNED      -> IN_PROGRESS, ASSIGNED (reasignación), CANCELLED
- * - IN_PROGRESS   -> PENDING_PARTS, RESOLVED, CANCELLED
- * - PENDING_PARTS -> IN_PROGRESS, CANCELLED
+ * - ASSIGNED      -> IN_PROGRESS, ASSIGNED (reasignación), PENDING_INFO, CANCELLED
+ * - IN_PROGRESS   -> PENDING_PARTS, PENDING_INFO, RESOLVED, CANCELLED
+ * - PENDING_PARTS -> IN_PROGRESS, PENDING_INFO, CANCELLED
+ * - PENDING_INFO  -> IN_PROGRESS, ASSIGNED, CANCELLED (resolver exige reanudar, RF-06.2)
  * - RESOLVED      -> CLOSED, REOPENED
- * - REOPENED      -> ASSIGNED, IN_PROGRESS, CANCELLED
+ * - REOPENED      -> ASSIGNED, IN_PROGRESS, PENDING_INFO, CANCELLED
  * - CLOSED        -> (Terminal)
  * - CANCELLED     -> (Terminal)
  */
@@ -38,6 +39,8 @@ class IncidentStateMachine
         'PENDIENTE_REPUESTO'     => IncidentStatus::PENDING_PARTS,
         'PENDIENTE_REPUESTOS'    => IncidentStatus::PENDING_PARTS,
         'PENDIENTE_DE_REPUESTOS' => IncidentStatus::PENDING_PARTS,
+        'PENDIENTE_INFORMACION'  => IncidentStatus::PENDING_INFO,
+        'PENDIENTE_INFO'         => IncidentStatus::PENDING_INFO,
         'RESUELTA'               => IncidentStatus::RESOLVED,
         'REABIERTA'              => IncidentStatus::REOPENED,
         'CERRADA'                => IncidentStatus::CLOSED,
@@ -48,6 +51,7 @@ class IncidentStateMachine
         'ASSIGNED'               => IncidentStatus::ASSIGNED,
         'IN_PROGRESS'            => IncidentStatus::IN_PROGRESS,
         'PENDING_PARTS'          => IncidentStatus::PENDING_PARTS,
+        'PENDING_INFO'           => IncidentStatus::PENDING_INFO,
         'RESOLVED'               => IncidentStatus::RESOLVED,
         'REOPENED'               => IncidentStatus::REOPENED,
         'CLOSED'                 => IncidentStatus::CLOSED,

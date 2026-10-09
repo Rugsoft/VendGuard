@@ -301,8 +301,13 @@ class IncidentCommentService
     /**
      * Máquina de estados del sellado de la conversación (plan.md §3.3, RF-05).
      *
-     * PuedeComentar = estado activo (REPORTED/ASSIGNED/IN_PROGRESS/PENDING_PARTS/REOPENED)
-     *                 o (RESOLVED y Δt desde la resolución ≤ 48 h).
+     * PuedeComentar = estado activo (REPORTED/ASSIGNED/IN_PROGRESS/PENDING_PARTS/
+     *                 PENDING_INFO/REOPENED) o (RESOLVED y Δt desde la resolución ≤ 48 h).
+     *
+     * PENDING_INFO admite comentarios por diseño: la respuesta de la sede es el
+     * mecanismo mismo de desbloqueo (RF-05.1/05.2) y las notas internas del taller
+     * no alteran la pausa (spec §6.5). El sellado estricto solo aplica a los
+     * estados terminales CLOSED/CANCELLED (RF-05.4, Art. III).
      *
      * @param array<string, mixed> $incidentRow
      */
@@ -318,6 +323,7 @@ class IncidentCommentService
             IncidentStatus::ASSIGNED,
             IncidentStatus::IN_PROGRESS,
             IncidentStatus::PENDING_PARTS,
+            IncidentStatus::PENDING_INFO,
             IncidentStatus::REOPENED => true,
             IncidentStatus::CLOSED,
             IncidentStatus::CANCELLED => false,

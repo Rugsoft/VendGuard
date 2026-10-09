@@ -93,14 +93,17 @@ if (UrgencyLevel::isValid('CRITICAL') && UrgencyLevel::isValid('low') && !Urgenc
 }
 
 // -------------------------------------------------------------
-// 2. Verificación de IncidentStatus (8 estados)
+// 2. Verificación de IncidentStatus (9 estados)
 // -------------------------------------------------------------
 echo "[2/4] Verificando IncidentStatus:\n";
+// PENDING_INFO (módulo 11, T-PAUSE-02) se suma al ciclo operativo como estado
+// activo y no terminal: pausa el SLA sin cerrar el expediente (RF-01.1).
 $expectedStatuses = [
     'REGISTERED',
     'ASSIGNED',
     'IN_PROGRESS',
     'PENDING_PARTS',
+    'PENDING_INFO',
     'RESOLVED',
     'REOPENED',
     'CLOSED',
@@ -109,9 +112,9 @@ $expectedStatuses = [
 $actualStatuses = IncidentStatus::values();
 
 if ($actualStatuses === $expectedStatuses) {
-    echo "      - Exactamente 8 estados del ciclo de vida presentes: [OK]\n";
+    echo "      - Exactamente 9 estados del ciclo de vida presentes: [OK]\n";
 } else {
-    echo "      - Estados distintos a los 8 esperados: [FALLO]\n";
+    echo "      - Estados distintos a los 9 esperados: [FALLO]\n";
     $failures++;
 }
 

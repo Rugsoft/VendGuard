@@ -15,12 +15,12 @@ La ficha de detalle **no** duplica listas: consume `permissions` calculados por 
 ### 2.1 Fuente única de listas (espejo de `IncidentStatus` PHP)
 
 ```js
-export const INCIDENT_STATUSES = Object.freeze({ REGISTERED: 'REGISTERED', ASSIGNED: 'ASSIGNED', IN_PROGRESS: 'IN_PROGRESS', PENDING_PARTS: 'PENDING_PARTS', RESOLVED: 'RESOLVED', REOPENED: 'REOPENED', CLOSED: 'CLOSED', CANCELLED: 'CANCELLED' });
+export const INCIDENT_STATUSES = Object.freeze({ REGISTERED: 'REGISTERED', ASSIGNED: 'ASSIGNED', IN_PROGRESS: 'IN_PROGRESS', PENDING_PARTS: 'PENDING_PARTS', PENDING_INFO: 'PENDING_INFO', RESOLVED: 'RESOLVED', REOPENED: 'REOPENED', CLOSED: 'CLOSED', CANCELLED: 'CANCELLED' });
 export const ASSIGNABLE_STATUSES = Object.freeze(['REGISTERED', 'REOPENED']);               // EARS 5.5 / guardia PHP assign
 export const REASSIGNABLE_STATUSES = Object.freeze(['ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS']); // RF-07.3 / guardia PHP reassign
-export const ACTIVE_STATUSES = Object.freeze(['REGISTERED', 'REOPENED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS']); // espejo CoordinatorIncidentDetailService::ACTIVE_STATUSES
+export const ACTIVE_STATUSES = Object.freeze(['REGISTERED', 'REOPENED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS', 'PENDING_INFO']); // espejo CoordinatorIncidentDetailService::ACTIVE_STATUSES
 export const TERMINAL_STATUSES = Object.freeze(['RESOLVED', 'CLOSED', 'CANCELLED']);
-export const CANONICAL_STATUS_MAP = Object.freeze({ REGISTERED: 'REGISTERED', REGISTRADA: 'REGISTERED', ASSIGNED: 'ASSIGNED', ASIGNADA: 'ASSIGNED', IN_PROGRESS: 'IN_PROGRESS', EN_CURSO: 'IN_PROGRESS', PENDING_PARTS: 'PENDING_PARTS', PENDIENTE_REPUESTO: 'PENDING_PARTS', PENDIENTE_REPUESTOS: 'PENDING_PARTS', RESOLVED: 'RESOLVED', RESUELTA: 'RESOLVED', REOPENED: 'REOPENED', REABIERTA: 'REOPENED', CLOSED: 'CLOSED', CERRADA: 'CLOSED', CANCELLED: 'CANCELLED', CANCELADA: 'CANCELLED' });
+export const CANONICAL_STATUS_MAP = Object.freeze({ REGISTERED: 'REGISTERED', REGISTRADA: 'REGISTERED', ASSIGNED: 'ASSIGNED', ASIGNADA: 'ASSIGNED', IN_PROGRESS: 'IN_PROGRESS', EN_CURSO: 'IN_PROGRESS', PENDING_PARTS: 'PENDING_PARTS', PENDIENTE_REPUESTO: 'PENDING_PARTS', PENDIENTE_REPUESTOS: 'PENDING_PARTS', PENDING_INFO: 'PENDING_INFO', PENDIENTE_INFORMACION: 'PENDING_INFO', PENDIENTE_DE_INFORMACION: 'PENDING_INFO', RESOLVED: 'RESOLVED', RESUELTA: 'RESOLVED', REOPENED: 'REOPENED', REABIERTA: 'REOPENED', CLOSED: 'CLOSED', CERRADA: 'CLOSED', CANCELLED: 'CANCELLED', CANCELADA: 'CANCELLED' });
 ```
 
 ### 2.2 Funciones puras
@@ -29,7 +29,7 @@ export const CANONICAL_STATUS_MAP = Object.freeze({ REGISTERED: 'REGISTERED', RE
 |---|---|
 | `normalizeIncidentStatus(value): string` | Acepta español o inglés, recorta, pasa a mayúsculas y devuelve el canónico en inglés; desconocidos quedan en mayúsculas tal cual (misma política que el mapa previo de la bandeja). |
 | `canQuickAssign(incident): boolean` | EARS 5.5: `true` solo si el estado canónico ∈ `ASSIGNABLE_STATUSES`. |
-| `canQuickCancel(incident): boolean` | EARS 6.4: `true` si el estado canónico ∈ `ACTIVE_STATUSES`; estado vacío o desconocido → `false` (fail-safe con acción destructiva). |
+| `canQuickCancel(incident): boolean` | EARS 6.4: `true` si el estado canónico ∈ `ACTIVE_STATUSES` (PENDING_INFO incluido: el ticket sigue abierto tras la pausa); estado vacío o desconocido → `false` (fail-safe con acción destructiva). |
 | `isTerminalStatus(value): boolean` | Estado canónico ∈ `TERMINAL_STATUSES`. |
 | `isResolvedStatus(value): boolean` | Estado canónico === `RESOLVED` (identificación de tickets resueltos para ventana de garantía y reaperturas). |
 | `isActiveStatus(value): boolean` | Estado canónico ∈ `ACTIVE_STATUSES`. |
@@ -69,3 +69,7 @@ Los componentes `IncidentBadge` y `MachineCard` quedan como puros mapeadores a m
 ## 7. Restricción de futuro
 
 Si el ciclo de vida cambia, la edición canónica es PHP (`IncidentStatus` + `CoordinatorIncidentDetailService`); este módulo y su suite espejo se actualizan en el mismo commit. Ninguna otra superficie del frontend debe volver a escribir listas de estado literales.
+
+### 7.1 Cambios aplicados por el módulo 11 (T-PAUSE-02, 2026-10-09)
+
+El estado operativo `PENDING_INFO` ("Pendiente de información", módulo 11) se suma al ciclo como estado **activo y no terminal**: `INCIDENT_STATUSES` y `ACTIVE_STATUSES` lo incorporan, `CANONICAL_STATUS_MAP` acepta sus formas en castellano y `STATUS_LABELS`/`BADGE_STATUS_PALETTE` reciben su etiqueta compacta y los tokens ámbar técnicos (`#fef9c3` / `#854d0e` / `#fde047`, RNF-04). `ASSIGNABLE_STATUSES`, `REASSIGNABLE_STATUSES` y `TERMINAL_STATUSES` **no** cambian aquí: la reasignación de un ticket en pausa (RF-06.3) pertenece a los endpoints de coordinación del mismo módulo.
