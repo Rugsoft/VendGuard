@@ -181,7 +181,7 @@ class QrReportService
                 'incident_code' => $created->getTicketCode(),
                 'ticket_code' => $created->getTicketCode(),
                 'merged' => false,
-                'status' => $created->getStatus()->value,
+                'status' => $this->getPublicStatusCode($created->getStatus()),
                 'status_label' => $this->getPublicStatusLabel($created->getStatus()),
                 'urgency' => $created->getUrgency()->value,
                 'urgency_label' => $created->getUrgency()->label(),
@@ -264,7 +264,7 @@ class QrReportService
             'incident_code' => $incident->getTicketCode(),
             'ticket_code' => $incident->getTicketCode(),
             'merged' => true,
-            'status' => $incident->getStatus()->value,
+            'status' => $this->getPublicStatusCode($incident->getStatus()),
             'status_label' => $this->getPublicStatusLabel($incident->getStatus()),
             'urgency' => $incident->getUrgency()->value,
             'urgency_label' => $incident->getUrgency()->label(),
@@ -283,6 +283,11 @@ class QrReportService
 
     /**
      * Devuelve una etiqueta amigable y tranquilizadora del estado para el consumidor.
+     *
+     * `PENDING_INFO` no tiene etiqueta propia de pausa: el ciudadano que acaba de
+     * reportar una avería sobre un expediente en espera de sede lee «En proceso de
+     * atención técnica», sin motivos internos de bloqueo ni llaves ausentes (RF-06.1,
+     * Art. V.4).
      */
     private function getPublicStatusLabel(IncidentStatus $status): string
     {
@@ -291,8 +296,24 @@ class QrReportService
             IncidentStatus::ASSIGNED => 'Técnico de guardia asignado en camino',
             IncidentStatus::IN_PROGRESS => 'Técnico interviniendo en la máquina',
             IncidentStatus::PENDING_PARTS => 'Aviso en espera de repuesto especializado',
+            IncidentStatus::PENDING_INFO => 'En proceso de atención técnica',
             IncidentStatus::REOPENED => 'Incidencia reabierta en revisión técnica',
             default => 'Aviso en gestión por el servicio técnico',
         };
+    }
+
+    /**
+     * Código público del estado del aviso (RF-06.1, Art. V.4).
+     *
+     * La pausa por bloqueo de sede se neutraliza como «en curso»: el identificador
+     * interno `PENDING_INFO` delata una espera de la operación con el inmueble que no
+     * debe asomar a la respuesta que recibe el consumidor. El resto de estados viajan
+     * con su propio código, que ya son públicos en el escaneo del QR.
+     */
+    private function getPublicStatusCode(IncidentStatus $status): string
+    {
+        return $status === IncidentStatus::PENDING_INFO
+            ? IncidentStatus::IN_PROGRESS->value
+            : $status->value;
     }
 }

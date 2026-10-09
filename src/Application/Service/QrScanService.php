@@ -268,7 +268,7 @@ class QrScanService
             'active_incident' => [
                 'ticket_code' => $incident->getTicketCode(),
                 'category' => $incident->getCategory()->value,
-                'public_status' => $incident->getStatus()->value,
+                'public_status' => $this->getPublicStatusCode($incident->getStatus()),
                 'status_label' => $this->getPublicStatusLabel($incident->getStatus()),
                 'reported_at' => $incident->getCreatedAt(),
             ],
@@ -338,6 +338,10 @@ class QrScanService
 
     /**
      * Mapea un estado técnico a una etiqueta amigable y tranquilizadora para el consumidor final.
+     *
+     * `PENDING_INFO` no tiene etiqueta propia de pausa: para el ciudadano la avería está
+     * «en proceso de atención técnica», sin motivos internos de bloqueo ni llaves ausentes
+     * (RF-06.1, Art. V.4).
      */
     private function getPublicStatusLabel(IncidentStatus $status): string
     {
@@ -346,8 +350,26 @@ class QrScanService
             IncidentStatus::ASSIGNED => 'Técnico de guardia asignado en camino',
             IncidentStatus::IN_PROGRESS => 'Técnico interviniendo en la máquina',
             IncidentStatus::PENDING_PARTS => 'Aviso en espera de repuesto especializado',
+            IncidentStatus::PENDING_INFO => 'En proceso de atención técnica',
             IncidentStatus::REOPENED => 'Incidencia reabierta en revisión técnica',
             default => 'Aviso en gestión por el servicio técnico',
         };
+    }
+
+    /**
+     * Código público del estado del aviso (RF-06.1, Art. V.4).
+     *
+     * Todos los estados operativos viajan con su propio código, que el ciudadano puede leer
+     * sin riesgo. La única excepción es la pausa por bloqueo de sede: `PENDING_INFO` se
+     * neutraliza como «en curso» porque su nombre delata una espera interna de la operación
+     * —acceso cerrado, llaves ausentes, discrepancias con el inmueble— que jamás debe
+     * asomar al escaneo público del QR. Lo que el ciudadano necesita saber es que el aviso
+     * está atendido, y eso es exactamente lo que declara este código.
+     */
+    private function getPublicStatusCode(IncidentStatus $status): string
+    {
+        return $status === IncidentStatus::PENDING_INFO
+            ? IncidentStatus::IN_PROGRESS->value
+            : $status->value;
     }
 }

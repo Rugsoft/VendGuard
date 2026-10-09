@@ -9,6 +9,7 @@ use VendGuard\Application\DTO\RefundReceiptDTO;
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\IbanValidationService;
 use VendGuard\Application\Service\IncidentCommentService;
+use VendGuard\Application\Service\IncidentPauseService;
 use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Core\Domain\Exception\ChronicIncidentException;
 use VendGuard\Core\Domain\Exception\ConversationSealedException;
@@ -68,6 +69,7 @@ class LocationPortalController
     private RefundManagementService $refundService;
     private IbanValidationService $ibanValidator;
     private ?IncidentCommentService $commentService;
+    private ?IncidentPauseService $pauseService;
     private ?AuditLogger $auditLogger;
 
     public function __construct(
@@ -78,7 +80,8 @@ class LocationPortalController
         ?RefundManagementService $refundService = null,
         ?IbanValidationService $ibanValidator = null,
         ?IncidentCommentService $commentService = null,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?IncidentPauseService $pauseService = null
     ) {
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
@@ -92,6 +95,7 @@ class LocationPortalController
         // comentarios abre conexión a MariaDB al instanciarse, y este controlador
         // también se construye en contextos unitarios sin base de datos.
         $this->commentService = $commentService;
+        $this->pauseService = $pauseService;
         $this->auditLogger = $auditLogger;
     }
 
@@ -113,6 +117,17 @@ class LocationPortalController
     private function comments(): IncidentCommentService
     {
         return $this->commentService ??= new IncidentCommentService($this->incidentRepo, null, $this->fileUploader);
+    }
+
+    /**
+     * Servicio de aplicación del ciclo de pausa (Módulo 11), resuelto bajo demanda.
+     *
+     * Se le inyecta el repositorio de incidencias ya resuelto del controlador para que la
+     * reactivación condicional de RF-02.1 escriba sobre la misma conexión PDO.
+     */
+    private function pauses(): IncidentPauseService
+    {
+        return $this->pauseService ??= new IncidentPauseService(incidentRepo: $this->incidentRepo);
     }
 
     /**
@@ -807,6 +822,10 @@ class LocationPortalController
         //    la deriva el servicio desde el nombre de la sede del expediente.
         $photoFile = $request->getFile('photo') ?? $request->getFile('image') ?? $request->getFile('file');
 
+        // 5.b Estado capturado ANTES de publicar: el comentario no transiciona nada, pero
+        //     sí lo hace la reactivación condicional que se encadena después (RF-02.1).
+        $wasPendingInfo = $incident->isPendingInfo();
+
         // 6. Orquestación del servicio de aplicación (fail-fast, sellado y auditoría)
         try {
             $thread = $this->comments()->addComment(
@@ -838,11 +857,52 @@ class LocationPortalController
             return Response::error('INCIDENT_NOT_FOUND', 'La incidencia solicitada no existe.', 404);
         }
 
-        // 7. Respuesta 201 Created con el hilo actualizado del expediente (RF-03.4)
+        // 7. Gancho de reactivación condicional (RF-02.1, RF-05.3): el mensaje de la sede es
+        //    la información que la avería esperaba, así que un expediente en pausa vuelve al
+        //    flujo operativo —a `IN_PROGRESS` si sigue en caliente (< 60 min, técnico libre y
+        //    sin reasignación) o a `ASSIGNED` en cualquier otro caso— con su reloj de SLA
+        //    desplazado en horario comercial. La ráfaga es idempotente: sólo el primer
+        //    mensaje transiciona y los siguientes se anexan como comentarios de seguimiento.
+        //
+        //    El orden es deliberado: primero se publica el comentario (hecho del que queda
+        //    rastro aunque el desplazamiento de SLA fallara) y después se reanuda. Un fallo en
+        //    la reanudación se declara con 500 para que la sede reintente, porque la operación
+        //    es idempotente y un reintento del mismo mensaje sí reactiva.
+        $pauseBlock = null;
+        if ($wasPendingInfo) {
+            try {
+                $pauseBlock = $this->pauses()->handleSiteCommentReactivation(
+                    (int)$incident->getId(),
+                    $commentText,
+                    (int)$location->getId()
+                )->toArray();
+            } catch (\DomainException | \RuntimeException $e) {
+                return Response::error('REACTIVATION_FAILED', $e->getMessage(), 500);
+            }
+        }
+
+        // 8. Respuesta 201 Created con el hilo actualizado y el resultado de la reactivación
+        //    (RF-03.4, plan.md §2.3). El bloque `auto_resumed` viaja siempre para que el
+        //    portal de sede pueda pintar la transición sin adivinar el estado anterior.
+        //
+        //    Cuando la avería se reactiva, la cabecera del hilo se reescribe con el estado
+        //    REAL que acaba de publicar el propio servicio de pausa: el hilo se construyó
+        //    antes de la transición, y devolver `PENDING_INFO` mientras el expediente ya está
+        //    en curso sería la misma ficción de estado que el módulo quiere erradicar.
+        $payload = $thread->jsonSerialize();
+        $payload['auto_resumed'] = $pauseBlock !== null;
+        if ($pauseBlock !== null) {
+            $payload['pause'] = $pauseBlock;
+            $payload['incident']['status'] = $pauseBlock['status'];
+            $payload['incident']['status_label'] = $pauseBlock['status_label'];
+        }
+
         return Response::json(
-            $thread->jsonSerialize(),
+            $payload,
             201,
-            'Comentario publicado en el hilo de conversación'
+            $pauseBlock !== null
+                ? 'Comentario publicado y avería reactivada automáticamente.'
+                : 'Comentario publicado en el hilo de conversación'
         );
     }
 

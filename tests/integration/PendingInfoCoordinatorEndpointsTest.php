@@ -563,6 +563,18 @@ try {
 
     // La cancelación se ejecuta aunque la pausa sea reciente: «facultar» no es un cerrojo
     // (decisión anotada en T-PAUSE-09) y la decisión sigue siendo humana y justificada.
+    //
+    // La cuenta de rastros se toma como DELTA sobre la foto previa: `audit_log` es
+    // append-only y el arnés no la purga (inviolabilidad del Art. III), así que una
+    // corrida anterior puede dejar filas huérfanas que reutilicen el mismo identificador
+    // de expediente tras el resembrado; contar por identificador a secas medía esas
+    // sobras ajenas además de las de esta suite.
+    $auditBaseline = [
+        'incident' => $auditCount('INCIDENT_CANCELLED', $guardIncidentId),
+        'machine'  => $auditCount('MACHINE_BLOCKED_NO_ACCESS', $guardMachineId, 'MACHINE'),
+        'refund'   => $auditCount('REFUND_DETACHED_BY_INACTIVITY', $refundId, 'REFUND_REQUEST'),
+    ];
+
     $res = $router->dispatch(new Request(
         method: 'POST',
         path: $cancelPath($guardIncidentId),
@@ -604,9 +616,9 @@ try {
 
     $assert(
         '4.10 El protocolo deja sus tres rastros inmutables (Art. III)',
-        $auditCount('INCIDENT_CANCELLED', $guardIncidentId) === 1
-            && $auditCount('MACHINE_BLOCKED_NO_ACCESS', $guardMachineId, 'MACHINE') === 1
-            && $auditCount('REFUND_DETACHED_BY_INACTIVITY', $refundId, 'REFUND_REQUEST') === 1
+        $auditCount('INCIDENT_CANCELLED', $guardIncidentId) - $auditBaseline['incident'] === 1
+            && $auditCount('MACHINE_BLOCKED_NO_ACCESS', $guardMachineId, 'MACHINE') - $auditBaseline['machine'] === 1
+            && $auditCount('REFUND_DETACHED_BY_INACTIVITY', $refundId, 'REFUND_REQUEST') - $auditBaseline['refund'] === 1
     );
     $assert(
         '4.11 El hilo del expediente cancelado queda sellado en solo lectura (RF-05.4)',
