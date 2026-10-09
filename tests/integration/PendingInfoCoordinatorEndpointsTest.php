@@ -705,6 +705,10 @@ try {
     }
 
     $purged = TestDataCleaner::purgeIncidentsMatchingTicket($pdo, 'TST-P13-%');
+    if ($guardMachineId > 0) {
+        $pdo->prepare('UPDATE `machines` SET `is_active` = 1, `is_blocked_no_access` = 0 WHERE `id` = :id')
+            ->execute([':id' => $guardMachineId]);
+    }
     echo '  [OK] Expedientes purgados con TestDataCleaner (patrón TST-P13-%) · filas de incidencias eliminadas: '
         . array_sum($purged) . " (máquinas y sedes intactas)\n";
 }
