@@ -25,7 +25,7 @@ const storageMock = (() => {
 globalThis.localStorage = storageMock;
 
 // Import modules
-import { ApiClient, ApiError, api } from '../../public/assets/js/api.js';
+import { ApiClient, ApiError, api, pauseIncidentPendingInfo, resumeIncidentPendingInfo, cancelIncidentInactivity } from '../../public/assets/js/api.js';
 import { store, state, setInternalSession, setSiteSession, clearSession, restoreSession, addAlert, removeAlert } from '../../public/assets/js/store.js';
 
 let assertions = 0;
@@ -381,6 +381,169 @@ assert('8.3 403 NOT_ASSIGNED_TO_TECHNICIAN surfaces as structured ApiError',
   historyForbiddenError instanceof ApiError
     && historyForbiddenError.status === 403
     && historyForbiddenError.code === 'NOT_ASSIGNED_TO_TECHNICIAN');
+
+// ---------------------------------------------------------------------
+// TEST GROUP 9: Pending-Info SLA Pause & Resume Methods (T-PAUSE-15, RF-01, RF-02, RF-04)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 9: Pending-Info Pause, Resume & Cancellation (T-PAUSE-15) ---');
+
+// 9.1: Technician pauseIncidentPendingInfo
+api.setToken('technician_token_abc');
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({
+    success: true,
+    data: {
+      incident_id: 142,
+      ticket_code: 'INC-2026-0142',
+      status: 'PENDING_INFO',
+      status_label: 'Pendiente de información',
+      is_sla_paused: true,
+      reason_category: 'BUILDING_CLOSED_NO_ACCESS'
+    }
+  })
+};
+
+const techPauseRes = await api.technician.pauseIncidentPendingInfo(142, 'BUILDING_CLOSED_NO_ACCESS', 'El conserje no tiene las llaves del acceso.');
+assert('9.1 api.technician.pauseIncidentPendingInfo dispatches POST to /technician/incidents/{id}/pause-pending-info',
+  lastFetchCall.url === '/api/technician/incidents/142/pause-pending-info' && lastFetchCall.options.method === 'POST');
+assert('9.2 Technician pause request body contains reason_category and reason_text',
+  JSON.parse(lastFetchCall.options.body).reason_category === 'BUILDING_CLOSED_NO_ACCESS' &&
+  JSON.parse(lastFetchCall.options.body).reason_text === 'El conserje no tiene las llaves del acceso.');
+assert('9.3 Technician pause retains Bearer token',
+  lastFetchCall.options.headers['Authorization'] === 'Bearer technician_token_abc');
+assert('9.4 Technician pause unpacks envelope data',
+  techPauseRes?.status === 'PENDING_INFO' && techPauseRes?.is_sla_paused === true);
+
+// 9.5: Technician resumeIncidentPendingInfo
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({
+    success: true,
+    data: {
+      incident_id: 142,
+      ticket_code: 'INC-2026-0142',
+      status: 'IN_PROGRESS',
+      is_sla_paused: false
+    }
+  })
+};
+
+const techResumeRes = await api.technician.resumeIncidentPendingInfo(142, 'IN_PROGRESS', 'Acceso facilitado');
+assert('9.5 api.technician.resumeIncidentPendingInfo dispatches POST to /technician/incidents/{id}/resume-pending-info',
+  lastFetchCall.url === '/api/technician/incidents/142/resume-pending-info' && lastFetchCall.options.method === 'POST');
+assert('9.6 Technician resume request body contains target_status and resume_note',
+  JSON.parse(lastFetchCall.options.body).target_status === 'IN_PROGRESS' &&
+  JSON.parse(lastFetchCall.options.body).resume_note === 'Acceso facilitado');
+assert('9.7 Technician resume unpacks envelope data',
+  techResumeRes?.status === 'IN_PROGRESS' && techResumeRes?.is_sla_paused === false);
+
+// 9.8: Coordinator pauseIncidentPendingInfo
+api.setToken('coordinator_token_xyz');
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({
+    success: true,
+    data: {
+      incident_id: 142,
+      status: 'PENDING_INFO',
+      is_sla_paused: true
+    }
+  })
+};
+
+const coordPauseRes = await api.coordinator.pauseIncidentPendingInfo(142, 'EXTERNAL_POWER_CUT', 'Corte general de suministro.');
+assert('9.8 api.coordinator.pauseIncidentPendingInfo dispatches POST to /coordinator/incidents/{id}/pause-pending-info',
+  lastFetchCall.url === '/api/coordinator/incidents/142/pause-pending-info' && lastFetchCall.options.method === 'POST');
+assert('9.9 Coordinator pause unpacks envelope data',
+  coordPauseRes?.status === 'PENDING_INFO');
+
+// 9.10: Coordinator resumeIncidentPendingInfo with default ASSIGNED target
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({
+    success: true,
+    data: {
+      incident_id: 142,
+      status: 'ASSIGNED',
+      is_sla_paused: false
+    }
+  })
+};
+
+const coordResumeRes = await api.coordinator.resumeIncidentPendingInfo(142);
+assert('9.10 api.coordinator.resumeIncidentPendingInfo dispatches POST to /coordinator/incidents/{id}/resume-pending-info',
+  lastFetchCall.url === '/api/coordinator/incidents/142/resume-pending-info' && lastFetchCall.options.method === 'POST');
+assert('9.11 Coordinator resume defaults target_status to ASSIGNED',
+  JSON.parse(lastFetchCall.options.body).target_status === 'ASSIGNED');
+assert('9.12 Coordinator resume unpacks envelope data',
+  coordResumeRes?.status === 'ASSIGNED');
+
+// 9.13: Coordinator cancelIncidentInactivity
+mockFetchResponse = {
+  ok: true,
+  status: 200,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({
+    success: true,
+    data: {
+      incident_id: 142,
+      status: 'CANCELLED',
+      machine: { operational_status: 'BLOCKED_NO_ACCESS' }
+    }
+  })
+};
+
+const cancelRes = await api.coordinator.cancelIncidentInactivity(142, 'Cancelación formal tras 72h hábiles sin acceso.');
+assert('9.13 api.coordinator.cancelIncidentInactivity dispatches POST to /coordinator/incidents/{id}/cancel-inactivity',
+  lastFetchCall.url === '/api/coordinator/incidents/142/cancel-inactivity' && lastFetchCall.options.method === 'POST');
+assert('9.14 Cancellation body contains cancellation_reason',
+  JSON.parse(lastFetchCall.options.body).cancellation_reason === 'Cancelación formal tras 72h hábiles sin acceso.');
+assert('9.15 Cancellation unpacks envelope data',
+  cancelRes?.status === 'CANCELLED');
+
+// 9.16: Named exports delegation (pauseIncidentPendingInfo, resumeIncidentPendingInfo, cancelIncidentInactivity)
+assert('9.16 pauseIncidentPendingInfo named export is a function', typeof pauseIncidentPendingInfo === 'function');
+assert('9.17 resumeIncidentPendingInfo named export is a function', typeof resumeIncidentPendingInfo === 'function');
+assert('9.18 cancelIncidentInactivity named export is a function', typeof cancelIncidentInactivity === 'function');
+
+// 9.19: Named exports dispatch correctly with role
+await pauseIncidentPendingInfo(142, 'BUILDING_CLOSED_NO_ACCESS', 'Sin acceso', 'COORDINATOR');
+assert('9.19 pauseIncidentPendingInfo with role COORDINATOR calls coordinator endpoint',
+  lastFetchCall.url === '/api/coordinator/incidents/142/pause-pending-info');
+
+await resumeIncidentPendingInfo(142, 'IN_PROGRESS', 'Nota', 'TECHNICIAN');
+assert('9.20 resumeIncidentPendingInfo with role TECHNICIAN calls technician endpoint',
+  lastFetchCall.url === '/api/technician/incidents/142/resume-pending-info');
+
+await cancelIncidentInactivity(142, 'Motivo de inactividad');
+assert('9.21 cancelIncidentInactivity calls coordinator cancel-inactivity endpoint',
+  lastFetchCall.url === '/api/coordinator/incidents/142/cancel-inactivity');
+
+// 9.22: Error propagation (ApiError on non-2xx)
+mockFetchResponse = {
+  ok: false,
+  status: 422,
+  headers: new Map([['content-type', 'application/json']]),
+  json: async () => ({ success: false, error: { code: 'INVALID_PAUSE_REQUEST', message: 'Justificación insuficiente' } })
+};
+
+let pauseError = null;
+try {
+  await api.coordinator.pauseIncidentPendingInfo(142, 'INVALID_CAT', 'Corta');
+} catch (e) {
+  pauseError = e;
+}
+assert('9.22 Error in pause method throws structured ApiError with status and code',
+  pauseError instanceof ApiError && pauseError.status === 422 && pauseError.code === 'INVALID_PAUSE_REQUEST');
 
 // Summary
 console.log('\n======================================================================');

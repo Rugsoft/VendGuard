@@ -202,10 +202,11 @@
 
 ## Fase 4: Componentes Frontend Vanilla Vue.js 3 ESM
 
-- [ ] **T-PAUSE-15: Extender cliente API frontend en `public/assets/js/api.js` con métodos de pausa y reanudación**
+- [x] **T-PAUSE-15: Extender cliente API frontend en `public/assets/js/api.js` con métodos de pausa y reanudación**
   * **Requisitos:** RF-01, RF-02, RF-04, RNF-02
   * **Dependencias:** T-PAUSE-12, T-PAUSE-13
   * **Hecho cuando:** El archivo `public/assets/js/api.js` exporta `pauseIncidentPendingInfo(incidentId, reasonCategory, reasonText)`, `resumeIncidentPendingInfo(incidentId, targetStatus, resumeNote)` y `cancelIncidentInactivity(incidentId, cancellationReason)`, gestionando tokens de autenticación Bearer y devolviendo los payloads deserializados o excepciones con el mensaje de error de la API.
+  * **Verificación ejecutada (2026-10-09):** `node tests/unit/FrontendApiStoreTest.mjs` → **81 aserciones (22 nuevas en Grupo 9) · exit 0**; `php tests/unit/FrontendApiStoreTest.php` → **17 aserciones · exit 0**; `php tests/run_all.php` → **229 suites · 8.775 aserciones · 0 fallos · cifras documentadas coherentes · exit 0**. Se implementaron los métodos en `api.coordinator` y `api.technician`, así como las funciones exportadas delegadas `pauseIncidentPendingInfo`, `resumeIncidentPendingInfo` y `cancelIncidentInactivity` adjuntas tanto a nivel módulo como al singleton `api`, gestionando inyección de Bearer, serialización JSON, desempaquetado de envelopes `{ success, data }` y propagación de errores mediante instancias `ApiError`.
 
 - [ ] **T-PAUSE-16: Implementar componente modal reutilizable `PendingInfoPauseModal.js`**
   * **Requisitos:** RF-01.2, RF-01.3, RNF-03, RNF-04, RNF-06, Constitución Art. V.1

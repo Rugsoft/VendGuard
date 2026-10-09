@@ -578,6 +578,51 @@ export class ApiClient {
     },
 
     /**
+     * Pauses an incident on "Pendiente de Información" with SLA freeze (Módulo 11, RF-01).
+     * @param {number|string} incidentId
+     * @param {string} reasonCategory
+     * @param {string} reasonText
+     * @returns {Promise<Object>} IncidentPauseResponseDto
+     */
+    pauseIncidentPendingInfo: (incidentId, reasonCategory, reasonText) => {
+      return this.post(`/coordinator/incidents/${encodeURIComponent(incidentId)}/pause-pending-info`, {
+        reason_category: reasonCategory,
+        reason_text: reasonText
+      });
+    },
+
+    /**
+     * Resumes an incident from "Pendiente de Información" (Módulo 11, RF-02.2, RF-02.3).
+     * Target status is optional and defaults to ASSIGNED (or IN_PROGRESS).
+     * @param {number|string} incidentId
+     * @param {string|null} [targetStatus='ASSIGNED']
+     * @param {string|null} [resumeNote=null]
+     * @returns {Promise<Object>} IncidentPauseResponseDto
+     */
+    resumeIncidentPendingInfo: (incidentId, targetStatus = 'ASSIGNED', resumeNote = null) => {
+      const body = {};
+      if (targetStatus !== null && targetStatus !== undefined && targetStatus !== '') {
+        body.target_status = targetStatus;
+      }
+      if (resumeNote !== null && resumeNote !== undefined && String(resumeNote).trim() !== '') {
+        body.resume_note = String(resumeNote).trim();
+      }
+      return this.post(`/coordinator/incidents/${encodeURIComponent(incidentId)}/resume-pending-info`, body);
+    },
+
+    /**
+     * Cancels an incident after prolonged client inactivity (72 business hours) (Módulo 11, RF-04.3).
+     * @param {number|string} incidentId
+     * @param {string} cancellationReason
+     * @returns {Promise<Object>}
+     */
+    cancelIncidentInactivity: (incidentId, cancellationReason) => {
+      return this.post(`/coordinator/incidents/${encodeURIComponent(incidentId)}/cancel-inactivity`, {
+        cancellation_reason: cancellationReason
+      });
+    },
+
+    /**
      * Retrieves the enriched detail file of one incident for the triage modal (Módulo 09, RF-01).
      * @param {number|string} incidentId Incident id or ticket code with optional '#'.
      * @returns {Promise<Object>}
@@ -917,6 +962,39 @@ export class ApiClient {
     },
 
     /**
+     * Pauses an incident on "Pendiente de Información" with SLA freeze by the assigned technician (Módulo 11, RF-01).
+     * @param {number|string} incidentId
+     * @param {string} reasonCategory
+     * @param {string} reasonText
+     * @returns {Promise<Object>} IncidentPauseResponseDto
+     */
+    pauseIncidentPendingInfo: (incidentId, reasonCategory, reasonText) => {
+      return this.post(`/technician/incidents/${encodeURIComponent(incidentId)}/pause-pending-info`, {
+        reason_category: reasonCategory,
+        reason_text: reasonText
+      });
+    },
+
+    /**
+     * Resumes an incident from "Pendiente de Información" in situ by the technician (Módulo 11, RF-02.2, RF-02.3).
+     * Automatically transitions to IN_PROGRESS.
+     * @param {number|string} incidentId
+     * @param {string|null} [targetStatus=null] Optional target status ('IN_PROGRESS')
+     * @param {string|null} [resumeNote=null] Optional note describing intervention resume
+     * @returns {Promise<Object>} IncidentPauseResponseDto
+     */
+    resumeIncidentPendingInfo: (incidentId, targetStatus = null, resumeNote = null) => {
+      const body = {};
+      if (targetStatus !== null && targetStatus !== undefined && targetStatus !== '') {
+        body.target_status = targetStatus;
+      }
+      if (resumeNote !== null && resumeNote !== undefined && String(resumeNote).trim() !== '') {
+        body.resume_note = String(resumeNote).trim();
+      }
+      return this.post(`/technician/incidents/${encodeURIComponent(incidentId)}/resume-pending-info`, body);
+    },
+
+    /**
      * Resolves incident with strict validation and optional spare parts (RF-08, RF-REP-05, RF-REP-06).
      * @param {number|string} incidentId
      * @param {string|Object} payloadOrDiagnosis
@@ -1241,4 +1319,78 @@ export class ApiClient {
 
 // Create default singleton instance
 export const api = new ApiClient('/api');
+
+/**
+ * Convenience role-aware function or direct client delegation for pending-info pause.
+ * Pauses an incident on "Pendiente de Información" with SLA freeze (Módulo 11, RF-01, T-PAUSE-15).
+ * Dispatches to coordinator or technician endpoint according to role or technician endpoint fallback.
+ * @param {number|string} incidentId
+ * @param {string} reasonCategory
+ * @param {string} reasonText
+ * @param {string|null} [role=null]
+ * @returns {Promise<Object>} IncidentPauseResponseDto
+ */
+export function pauseIncidentPendingInfo(incidentId, reasonCategory, reasonText, role = null) {
+  const normalizedRole = String(role || '').toUpperCase();
+  if (normalizedRole === 'COORDINATOR') {
+    return api.coordinator.pauseIncidentPendingInfo(incidentId, reasonCategory, reasonText);
+  }
+  if (normalizedRole === 'TECHNICIAN') {
+    return api.technician.pauseIncidentPendingInfo(incidentId, reasonCategory, reasonText);
+  }
+  // If role is unspecified, attempt technician route first; on 403 or if coordinator token, coordinator route
+  return api.post(`/technician/incidents/${encodeURIComponent(incidentId)}/pause-pending-info`, {
+    reason_category: reasonCategory,
+    reason_text: reasonText
+  }).catch((err) => {
+    if (err && err.status === 403) {
+      return api.coordinator.pauseIncidentPendingInfo(incidentId, reasonCategory, reasonText);
+    }
+    throw err;
+  });
+}
+
+/**
+ * Convenience role-aware function or direct client delegation for resuming a pending-info pause (Módulo 11, RF-02, T-PAUSE-15).
+ * @param {number|string} incidentId
+ * @param {string|null} [targetStatus=null] 'IN_PROGRESS' or 'ASSIGNED'
+ * @param {string|null} [resumeNote=null]
+ * @param {string|null} [role=null]
+ * @returns {Promise<Object>} IncidentPauseResponseDto
+ */
+export function resumeIncidentPendingInfo(incidentId, targetStatus = null, resumeNote = null, role = null) {
+  const normalizedRole = String(role || '').toUpperCase();
+  if (normalizedRole === 'COORDINATOR') {
+    return api.coordinator.resumeIncidentPendingInfo(incidentId, targetStatus || 'ASSIGNED', resumeNote);
+  }
+  if (normalizedRole === 'TECHNICIAN') {
+    return api.technician.resumeIncidentPendingInfo(incidentId, targetStatus, resumeNote);
+  }
+  return api.post(`/technician/incidents/${encodeURIComponent(incidentId)}/resume-pending-info`, {
+    ...(targetStatus ? { target_status: targetStatus } : {}),
+    ...(resumeNote ? { resume_note: resumeNote } : {})
+  }).catch((err) => {
+    if (err && err.status === 403) {
+      return api.coordinator.resumeIncidentPendingInfo(incidentId, targetStatus || 'ASSIGNED', resumeNote);
+    }
+    throw err;
+  });
+}
+
+/**
+ * Cancels an incident due to prolonged inactivity (72 business hours) (Módulo 11, RF-04.3, T-PAUSE-15).
+ * Available to Operations Coordinator.
+ * @param {number|string} incidentId
+ * @param {string} cancellationReason
+ * @returns {Promise<Object>}
+ */
+export function cancelIncidentInactivity(incidentId, cancellationReason) {
+  return api.coordinator.cancelIncidentInactivity(incidentId, cancellationReason);
+}
+
+// Attach functions to api singleton as well for both calling styles
+api.pauseIncidentPendingInfo = pauseIncidentPendingInfo;
+api.resumeIncidentPendingInfo = resumeIncidentPendingInfo;
+api.cancelIncidentInactivity = cancelIncidentInactivity;
+
 export default api;
