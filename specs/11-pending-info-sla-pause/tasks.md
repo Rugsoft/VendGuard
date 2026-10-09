@@ -68,10 +68,18 @@
 
 ## Fase 2: Servicios de Aplicación y Algoritmos de Dominio
 
-- [ ] **T-PAUSE-06: Implementar Algoritmo 3 de Desplazamiento Comercial de SLA en `IncidentPauseService.php`**
+- [x] **T-PAUSE-06: Implementar Algoritmo 3 de Desplazamiento Comercial de SLA en `IncidentPauseService.php`**
   * **Requisitos:** RF-03.1, RF-03.3, RNF-01
   * **Dependencias:** T-PAUSE-05
   * **Hecho cuando:** El método `IncidentPauseService::shiftSlaTargetInBusinessHours(DateTimeImmutable $currentDeadline, int $pauseDurationSeconds, int $locationId): DateTimeImmutable` calcula el nuevo vencimiento contractual sumando exclusivamente segundos hábiles comerciales (08:00 a 18:00, lunes a viernes), saltando fines de semana e intervalos nocturnos; y un test unitario dedicado verifica el cálculo exacto de saltos nocturnos y de fin de semana.
+  * **Verificación ejecutada (2026-10-09):** `php tests/unit/IncidentPauseServiceSlaShiftTest.php` (26 aserciones: caso base Jueves 12:15 + 90 min = Jueves 13:45, precisión de un segundo, borde de cierre 08:00 + 36.000 s = 18:00, salto nocturno Jueves 17:30 + 60 min = Viernes 08:30 y Jueves 23:00 + 10 min = Viernes 08:10, normalización de madrugada, salto de fin de semana Viernes 17:00 + 120 min = Lunes 09:00, vencimiento en sábado y en domingo, siete jornadas encadenadas, pausa de 25 horas hábiles atravesando un fin de semana, pausa nula que no altera el reloj, inmutabilidad de la entrada, matriz de nueve casos sin incumplir la ventana legal, conversión desde UTC a la zona de sede y cinco guardas Fail-Fast); `php tests/run_all.php` -> **222 suites · 8.372 aserciones · 0 fallos**.
+  * **Decisiones de diseño anotadas para las tareas siguientes:**
+    * **El cómputo es aritmética de SEGUNDOS, no de minutos.** El pseudocódigo del `plan.md` §3.3 trabaja en minutos por legibilidad, pero la firma de la tarea recibe segundos y RNF-01 exige precisión de segundos en base de datos: la implementación redondea a segundos por abajo, y el redondeo al minuto queda para la interfaz (RNF-01). No es una desviación del plan, es lo que fija el requisito no funcional.
+    * **Ventana CERRADA por arriba:** el intervalo legal es `[08:00, 18:00]`; un vencimiento exactamente a las 18:00 es el último segundo hábil del día y se acepta, mientras que cualquier instante posterior salta al siguiente día hábil a las 08:00. Se documenta porque un `>=` mal puesto desplazaría todas las pausas un día completo.
+    * **Zona horaria de la sede:** el calendario se resuelve en `Europe/Madrid` (la zona operativa del resto del sistema) y la fecha devuelta viaja en esa zona, de modo que el `format('Y-m-d H:i:s')` que persiste la columna `sla_target_at` es hora local de sede. Un vencimiento de entrada en UTC se interpreta correctamente.
+    * **La ventana es hoy uniforme para toda la red** (08:00-18:00, lunes a viernes), tal y como fija el requisito; el parámetro `$locationId` se valida como entero positivo en lugar de ignorarse, para que un identificador inválido no aplique en silencio el calendario por defecto, y queda como punto de extensión de calendarios por sede sin romper la firma.
+    * **Pausa de duración nula:** devuelve el vencimiento original intacto, incluso si cae de noche o en fin de semana. Sin tiempo pausado no hay nada que desplazar y normalizar la fecha alteraría el contrato sin causa (caso límite §6.1 de la especificación funcional).
+    * **`$locationId` no consulta repositorios ni tablas de horarios:** el esquema no define calendario por sede, así que el método es una función pura de calendario, verificable al segundo y sin I/O. `IncidentPauseService` sigue sin inyección de dependencias; las tareas 07-09 la añadirán al incorporar persistencia, sin cambiar esta firma.
 
 - [ ] **T-PAUSE-07: Implementar Algoritmo 4 de Doble Reloj y Salvaguarda Sanitaria (Art. II) en `IncidentPauseService.php`**
   * **Requisitos:** RF-03.4, RF-03.5, Constitución Art. II
