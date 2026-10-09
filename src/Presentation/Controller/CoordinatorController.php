@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
+use VendGuard\Application\DTO\IncidentPauseRequestDto;
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\CoordinatorIncidentDetailService;
 use VendGuard\Application\Service\IncidentCommentService;
+use VendGuard\Application\Service\IncidentPauseService;
 use VendGuard\Core\Domain\Exception\ConversationSealedException;
 use VendGuard\Core\Domain\Exception\InvalidCommentLengthException;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
@@ -51,11 +53,17 @@ class CoordinatorController
 
     /**
      * Estados con técnico responsable vigente que admiten cambio de profesional (RF-07.3).
+     *
+     * `PENDING_INFO` entra aquí por RF-06.3: cuando la sede bloquea el acceso, la avería
+     * puede cambiar de manos sin perder la pausa ni el motivo del bloqueo, de modo que el
+     * nuevo técnico hereda el contexto («la máquina está en la planta 3 y el conserje abre
+     * a las 8:00») en lugar de recibir un expediente descontextualizado.
      */
     private const REASSIGNMENT_STATUSES = [
         IncidentStatus::ASSIGNED,
         IncidentStatus::IN_PROGRESS,
         IncidentStatus::PENDING_PARTS,
+        IncidentStatus::PENDING_INFO,
     ];
 
     private IncidentRepositoryInterface $incidentRepo;
@@ -66,6 +74,7 @@ class CoordinatorController
     private AuditLogger $auditLogger;
     private LocalFileUploader $fileUploader;
     private ?IncidentCommentService $commentService;
+    private ?IncidentPauseService $pauseService;
 
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
@@ -75,7 +84,8 @@ class CoordinatorController
         ?CoordinatorIncidentDetailService $incidentDetailService = null,
         ?AuditLogger $auditLogger = null,
         ?LocalFileUploader $fileUploader = null,
-        ?IncidentCommentService $commentService = null
+        ?IncidentCommentService $commentService = null,
+        ?IncidentPauseService $pauseService = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->userRepo = $userRepo ?? new PdoUserRepository();
@@ -91,6 +101,11 @@ class CoordinatorController
         // también se construye en contextos unitarios sin base de datos.
         $this->fileUploader = $fileUploader ?? new LocalFileUploader();
         $this->commentService = $commentService;
+
+        // El ciclo de pausa se resuelve bajo demanda (ver pauses()): el servicio abre
+        // conexión a MariaDB al instanciarse y este controlador también se construye en
+        // contextos unitarios sin base de datos.
+        $this->pauseService = $pauseService;
     }
 
     /**
@@ -99,6 +114,22 @@ class CoordinatorController
     private function comments(): IncidentCommentService
     {
         return $this->commentService ??= new IncidentCommentService($this->incidentRepo, null, $this->fileUploader);
+    }
+
+    /**
+     * Servicio de aplicación del ciclo de pausa por bloqueo de sede (Módulo 11).
+     *
+     * Se le inyectan el repositorio de incidencias y el de máquinas ya resueltos del
+     * controlador, para no abrir una segunda conexión PDO ni resolver dos veces el mismo
+     * colaborador (la cancelación por inactividad bloquea la máquina en la misma unidad
+     * de trabajo).
+     */
+    private function pauses(): IncidentPauseService
+    {
+        return $this->pauseService ??= new IncidentPauseService(
+            incidentRepo: $this->incidentRepo,
+            machineRepo: $this->machineRepo
+        );
     }
 
     /**
@@ -356,7 +387,7 @@ class CoordinatorController
         if (!$isReassignment && !in_array($incident->getStatus(), [IncidentStatus::REGISTERED, IncidentStatus::REOPENED], true)) {
             return Response::error(
                 'INVALID_STATUS_FOR_ASSIGNMENT',
-                "Solo se pueden asignar incidencias en estado REGISTERED o REOPENED, o reasignar las que están en ASSIGNED, IN_PROGRESS o PENDING_PARTS. Estado actual: {$incident->getStatus()->value}.",
+                "Solo se pueden asignar incidencias en estado REGISTERED o REOPENED, o reasignar las que están en ASSIGNED, IN_PROGRESS, PENDING_PARTS o PENDING_INFO. Estado actual: {$incident->getStatus()->value}.",
                 422
             );
         }
@@ -554,6 +585,274 @@ class CoordinatorController
             'status'       => $cancelled->getStatus()->value,
             'cancelled_at' => $cancelled->getCancelledAt(),
         ], 200);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // RF-01 / RF-02 / RF-04 / RF-06 — Pausa, reanudación y cancelación por inactividad (Módulo 11: T-PAUSE-13)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * POST /api/coordinator/incidents/{id}/pause-pending-info
+     *
+     * Declara la pausa por bloqueo imputable a la sede desde central (RF-01.1 a
+     * RF-01.4, plan.md §2.1.B). A diferencia del técnico, el coordinador puede pausar
+     * **cualquier expediente activo** (`ASSIGNED`, `IN_PROGRESS`, `PENDING_PARTS` o
+     * `REOPENED`), porque es quien recibe por teléfono el aviso de la sede y conoce el
+     * bloqueo antes que la ruta. Exige causa tipificada del catálogo cerrado y
+     * justificación de al menos 20 caracteres reales (Art. V.1).
+     *
+     * Contrato HTTP: `200` pausa declarada; `400` identificador inválido o campo
+     * obligatorio ausente; `404` expediente inexistente; `422` causa fuera del catálogo,
+     * justificación corta o estado que no admite la pausa (terminal o doble pausa). El
+     * expediente terminal responde `422` y no `403`: la regla de asignación única del
+     * Art. V.2 no aplica a la coordinación.
+     */
+    public function pausePendingInfo(Request $request): Response
+    {
+        // 1. Identificador del expediente de la URL.
+        $rawId = $request->getRouteParam('id');
+        if ($rawId === null || !ctype_digit((string)$rawId)) {
+            return Response::error('INVALID_INCIDENT_ID', 'El ID de incidencia de la ruta no es válido.', 400);
+        }
+        $incidentId = (int)$rawId;
+
+        // 2. Cuerpo obligatorio: la AUSENCIA de campos es responsabilidad de esta capa
+        // (400); los VALORES inválidos los rechaza el DTO con 422 (T-PAUSE-03).
+        $body = $request->getParsedBody();
+        if (!array_key_exists('reason_category', $body) || !array_key_exists('reason_text', $body)) {
+            return Response::error(
+                'MISSING_PAUSE_FIELDS',
+                'La pausa exige una causa tipificada (reason_category) y un texto explicativo (reason_text) de al menos 20 caracteres.',
+                400
+            );
+        }
+
+        // 3. Existencia del expediente.
+        $incident = $this->incidentRepo->findById($incidentId);
+        if ($incident === null) {
+            return Response::error('INCIDENT_NOT_FOUND', "No se encontró ninguna incidencia con ID {$incidentId}.", 404);
+        }
+
+        // 4. Validación temprana del catálogo de causas y del umbral legal (Art. V.1).
+        try {
+            $pauseRequest = IncidentPauseRequestDto::fromPayload($body);
+        } catch (\InvalidArgumentException $e) {
+            return Response::error('INVALID_PAUSE_REQUEST', $e->getMessage(), 422);
+        }
+
+        // 5. Identidad del coordinador autenticado (el middleware ya exigió el rol).
+        $coordinatorId = $request->getAttribute('user_id');
+        if ($coordinatorId === null || !is_numeric($coordinatorId)) {
+            return Response::error('UNAUTHORIZED', 'No se pudo identificar al coordinador autenticado.', 401);
+        }
+
+        // 6. Unidad de trabajo del servicio: transición + rastro inmutable (Art. III).
+        try {
+            $paused = $this->pauses()->declarePendingInfoPause(
+                $incidentId,
+                (int)$coordinatorId,
+                $pauseRequest->reasonCategory,
+                $pauseRequest->normalizedReasonText()
+            );
+        } catch (\VendGuard\Core\Domain\Exception\InvalidTransitionException $e) {
+            return Response::error('INVALID_STATUS_FOR_PAUSE', $e->getMessage(), 422);
+        } catch (\InvalidArgumentException $e) {
+            return Response::error('INVALID_PAUSE_REQUEST', $e->getMessage(), 422);
+        } catch (\DomainException | \RuntimeException $e) {
+            return Response::error('PAUSE_FAILED', $e->getMessage(), 500);
+        }
+
+        return Response::json(
+            $paused->toArray(),
+            200,
+            'Incidencia pausada correctamente. Reloj contractual de SLA congelado.'
+        );
+    }
+
+    /**
+     * POST /api/coordinator/incidents/{id}/resume-pending-info
+     *
+     * Reanuda manualmente una pausa por bloqueo de sede desde central (RF-02.2,
+     * RF-02.3, RF-03.3, plan.md §2.2.B). El coordinador **elige el destino**, que es la
+     * diferencia real con el técnico in situ: `ASSIGNED` cuando el profesional debe
+     * desplazarse de nuevo (valor por defecto) o `IN_PROGRESS` cuando confirma que ya
+     * está trabajando en la máquina. En ambos casos el vencimiento contractual se
+     * desplaza en horario comercial la duración exacta que estuvo congelado.
+     *
+     * Cuerpo opcional: `target_status` (`ASSIGNED`/`IN_PROGRESS`) y `resume_note`. Un
+     * destino fuera de esos dos valores se rechaza con `422` en lugar de ignorarse.
+     */
+    public function resumePendingInfo(Request $request): Response
+    {
+        // 1. Identificador del expediente de la URL.
+        $rawId = $request->getRouteParam('id');
+        if ($rawId === null || !ctype_digit((string)$rawId)) {
+            return Response::error('INVALID_INCIDENT_ID', 'El ID de incidencia de la ruta no es válido.', 400);
+        }
+        $incidentId = (int)$rawId;
+
+        // 2. Existencia del expediente.
+        $incident = $this->incidentRepo->findById($incidentId);
+        if ($incident === null) {
+            return Response::error('INCIDENT_NOT_FOUND', "No se encontró ninguna incidencia con ID {$incidentId}.", 404);
+        }
+
+        // 3. Destino elegido por coordinación. Por defecto `ASSIGNED`: la respuesta tardía
+        //    de la sede obliga al técnico a personarse antes de reanudar el trabajo.
+        $body = $request->getParsedBody();
+        $rawTarget = $body['target_status'] ?? null;
+        $targetStatus = IncidentStatus::ASSIGNED;
+        if ($rawTarget !== null) {
+            $requestedTarget = is_string($rawTarget)
+                ? IncidentStatus::tryFrom(strtoupper(trim($rawTarget)))
+                : null;
+
+            if (!in_array($requestedTarget, [IncidentStatus::ASSIGNED, IncidentStatus::IN_PROGRESS], true)) {
+                return Response::error(
+                    'INVALID_RESUME_TARGET',
+                    'El destino de la reanudación debe ser "Asignada" (el técnico debe desplazarse) o "En curso" (ya está en la máquina).',
+                    422
+                );
+            }
+
+            $targetStatus = $requestedTarget;
+        }
+
+        $resumeNote = isset($body['resume_note']) && is_string($body['resume_note']) && trim($body['resume_note']) !== ''
+            ? trim($body['resume_note'])
+            : null;
+
+        // 4. Identidad del coordinador autenticado (el middleware ya exigió el rol).
+        $coordinatorId = $request->getAttribute('user_id');
+        if ($coordinatorId === null || !is_numeric($coordinatorId)) {
+            return Response::error('UNAUTHORIZED', 'No se pudo identificar al coordinador autenticado.', 401);
+        }
+
+        // 5. Unidad de trabajo del servicio: cierre del intervalo + desplazamiento de SLA.
+        try {
+            $resumed = $this->pauses()->resumePendingInfoManually(
+                $incidentId,
+                (int)$coordinatorId,
+                $targetStatus,
+                $resumeNote
+            );
+        } catch (\VendGuard\Core\Domain\Exception\InvalidTransitionException $e) {
+            return Response::error('INVALID_STATUS_FOR_RESUME', $e->getMessage(), 422);
+        } catch (\InvalidArgumentException $e) {
+            return Response::error('INVALID_RESUME_TARGET', $e->getMessage(), 422);
+        } catch (\DomainException | \RuntimeException $e) {
+            return Response::error('RESUME_FAILED', $e->getMessage(), 500);
+        }
+
+        return Response::json(
+            $resumed->toArray(),
+            200,
+            $targetStatus === IncidentStatus::ASSIGNED
+                ? 'Intervención reanudada en estado asignada. El técnico debe personarse para iniciar el trabajo.'
+                : 'Intervención reanudada en curso. Reloj contractual de SLA reactivado con desplazamiento aplicado.'
+        );
+    }
+
+    /**
+     * POST /api/coordinator/incidents/{id}/cancel-inactivity
+     *
+     * Cancelación formal supervisada de una avería que lleva más de 72 horas hábiles
+     * esperando a una sede que no responde ni facilita el acceso (RF-04.3, plan.md §2.4).
+     * El motivo justificado de al menos 20 caracteres reales es obligatorio (Art. V.1).
+     *
+     * El endpoint no decide el protocolo: lo ejecuta `IncidentPauseService` como UNA sola
+     * unidad de trabajo, porque cada escritura por separado deja un estado mentiroso —el
+     * ticket a `CANCELLED`, la máquina **fuera de servicio** por falta de acceso (RF-04.4,
+     * nunca de vuelta a "Operativa") y los reintegros del consumidor desvinculados y
+     * preservados para liquidación central (RF-04.5)—. Aquí sólo se autoriza, se valida el
+     * motivo y se publica el resultado real releído de la base de datos.
+     *
+     * Contrato HTTP: `200` cancelación ejecutada; `400` identificador inválido; `422` motivo
+     * ausente, motivo de menos de 20 caracteres reales o expediente que no está en pausa;
+     * `404` expediente inexistente; `500` si alguna de las escrituras del protocolo falla y
+     * la transacción se deshace entera.
+     */
+    public function cancelInactivity(Request $request): Response
+    {
+        // 1. Identificador del expediente de la URL.
+        $rawId = $request->getRouteParam('id');
+        if ($rawId === null || !ctype_digit((string)$rawId)) {
+            return Response::error('INVALID_INCIDENT_ID', 'El ID de incidencia de la ruta no es válido.', 400);
+        }
+        $incidentId = (int)$rawId;
+
+        // 2. Motivo obligatorio del cierre administrativo (RF-04.3, Art. V.1).
+        $body = $request->getParsedBody();
+        $reason = isset($body['cancellation_reason']) ? trim((string)$body['cancellation_reason']) : '';
+        if ($reason === '') {
+            return Response::error(
+                'MISSING_CANCELLATION_REASON',
+                'La cancelación por inactividad exige un motivo justificado (cancellation_reason obligatorio).',
+                422
+            );
+        }
+
+        // 3. Existencia del expediente.
+        $incident = $this->incidentRepo->findById($incidentId);
+        if ($incident === null) {
+            return Response::error('INCIDENT_NOT_FOUND', "No se encontró ninguna incidencia con ID {$incidentId}.", 404);
+        }
+
+        // 4. Identidad del coordinador autenticado (el middleware ya exigió el rol).
+        $coordinatorId = $request->getAttribute('user_id');
+        if ($coordinatorId === null || !is_numeric($coordinatorId)) {
+            return Response::error('UNAUTHORIZED', 'No se pudo identificar al coordinador autenticado.', 401);
+        }
+
+        // 5. Protocolo completo como una sola unidad de trabajo (Algoritmo 5).
+        try {
+            $this->pauses()->cancelByInactivity($incidentId, (int)$coordinatorId, $reason);
+        } catch (\VendGuard\Core\Domain\Exception\InvalidTransitionException $e) {
+            return Response::error('INVALID_STATUS_FOR_INACTIVITY_CANCELLATION', $e->getMessage(), 422);
+        } catch (\InvalidArgumentException $e) {
+            return Response::error('INVALID_CANCELLATION_REASON', $e->getMessage(), 422);
+        } catch (\DomainException | \RuntimeException $e) {
+            return Response::error('CANCELLATION_FAILED', $e->getMessage(), 500);
+        }
+
+        // 6. Evento inmutable del descarte del ticket, con el mismo contrato de auditoría
+        //    que el descarte genérico (Art. III.3, RNF-04): el bloqueo de máquina y la
+        //    custodia del reintegro ya los sella el servicio dentro de la transacción.
+        $this->auditLogger->logTicketEvent(
+            ticketId: $incidentId,
+            action: 'INCIDENT_CANCELLED',
+            user: $this->extractActor($request),
+            previousState: [
+                'status' => $incident->getStatus()->value,
+                'assigned_technician_id' => $incident->getAssignedTechnicianId(),
+            ],
+            newState: [
+                'status' => IncidentStatus::CANCELLED->value,
+                'cancellation_reason' => $reason,
+            ],
+            metadata: [
+                'ticket_code' => $incident->getTicketCode(),
+                'cancellation_channel' => 'INACTIVITY_72_BUSINESS_HOURS',
+            ]
+        );
+
+        // 7. Se publica el estado REAL releído de la base de datos, no una promesa del código.
+        $cancelled = $this->incidentRepo->findById($incidentId) ?? $incident;
+        $machine = $this->machineRepo->findById($incident->getMachineId());
+
+        return Response::json([
+            'id'           => $cancelled->getId(),
+            'ticket_code'  => $cancelled->getTicketCode(),
+            'status'       => $cancelled->getStatus()->value,
+            'cancelled_at' => $cancelled->getCancelledAt(),
+            'machine'      => [
+                'id'                    => $machine?->getId(),
+                'operational_status'    => $machine?->getOperationalStatus(),
+                'is_active'             => $machine?->isActive(),
+                'is_blocked_no_access'  => $machine?->isBlockedNoAccess(),
+            ],
+            'refunds_preserved' => true,
+        ], 200, 'Avería cancelada por inactividad de sede: la máquina queda fuera de servicio y los reintegros se conservan para liquidación central.');
     }
 
     // ────────────────────────────────────────────────────────────────────────

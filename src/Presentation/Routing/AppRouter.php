@@ -106,6 +106,13 @@ class AppRouter
         $router->get('/api/coordinator/incidents', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getIncidents'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/incidents/{id}/assign', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'assignTechnician'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/incidents/{id}/cancel', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'cancelIncident'], [$coordinatorAuth]);
+        // Pausa por bloqueo de sede, reanudación manual y cancelación por inactividad
+        // (Módulo 11: T-PAUSE-13). La coordinación puede pausar cualquier ticket activo y
+        // elegir si la reanudación devuelve la avería a "Asignada" o a "En curso"; la
+        // cancelación ejecuta el protocolo completo de las 72 horas hábiles (RF-04.3-04.5).
+        $router->post('/api/coordinator/incidents/{id}/pause-pending-info', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'pausePendingInfo'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/incidents/{id}/resume-pending-info', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'resumePendingInfo'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/incidents/{id}/cancel-inactivity', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'cancelInactivity'], [$coordinatorAuth]);
         // Modal de detalle integral de triaje (Módulo 09: T-IDM-07). La ficha y su
         // bitácora exigen rol COORDINATOR en el middleware; el propio controlador
         // refuerza el blindaje y enmascara los datos de pago (Art. V.4).

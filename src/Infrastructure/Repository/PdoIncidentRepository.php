@@ -1156,6 +1156,14 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
      * el hito oficial de asignación se conserva para no falsear los tiempos de
      * respuesta ya auditados, y el instante del cambio queda fechado por la propia
      * fila de historial (Art. III.1).
+     *
+     * Desde RF-06.3 (`T-PAUSE-13`) la reasignación alcanza también al expediente
+     * pausado por bloqueo de sede (`PENDING_INFO`): el nuevo responsable hereda el
+     * contexto (`pending_info_reason_category`, `pending_info_reason_text`, `paused_at`
+     * y los segundos acumulados viajan intactos, porque este método no toca ninguna
+     * columna de pausa) y la fila de historial queda con origen y destino
+     * `PENDING_INFO`, que es la huella estructural que `IncidentPauseService` lee para
+     * saber que la avería cambió de manos durante la pausa (RF-02.1).
      */
     public function assign(
         int $incidentId,
@@ -1180,11 +1188,16 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
             //    la asignación inicial y los estados con responsable vigente admiten el
             //    cambio de técnico sin retroceder el estado operativo.
             $assignmentStatuses = [IncidentStatus::REGISTERED, IncidentStatus::REOPENED];
-            $reassignmentStatuses = [IncidentStatus::ASSIGNED, IncidentStatus::IN_PROGRESS, IncidentStatus::PENDING_PARTS];
+            $reassignmentStatuses = [
+                IncidentStatus::ASSIGNED,
+                IncidentStatus::IN_PROGRESS,
+                IncidentStatus::PENDING_PARTS,
+                IncidentStatus::PENDING_INFO,
+            ];
             $isReassignment = in_array($incident->getStatus(), $reassignmentStatuses, true);
             if (!$isReassignment && !in_array($incident->getStatus(), $assignmentStatuses, true)) {
                 throw new InvalidTransitionException(
-                    "Solo las incidencias activas (REGISTRADA, REABIERTA, ASIGNADA, EN CURSO o PENDIENTE DE REPUESTOS) admiten asignación técnica. Estado actual: {$incident->getStatus()->value}.",
+                    "Solo las incidencias activas (REGISTRADA, REABIERTA, ASIGNADA, EN CURSO, PENDIENTE DE REPUESTOS o PENDIENTE DE INFORMACIÓN) admiten asignación técnica. Estado actual: {$incident->getStatus()->value}.",
                     $incident->getStatus(),
                     IncidentStatus::ASSIGNED
                 );
