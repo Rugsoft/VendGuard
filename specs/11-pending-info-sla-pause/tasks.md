@@ -15,10 +15,12 @@
 
 ## Fase 1: Dominio, Value Objects, DTOs y Extensión de Repositorios
 
-- [ ] **T-PAUSE-01: Crear migración de base de datos `014_pending_info_sla_pause.sql` y registrar campos de pausa**
+- [x] **T-PAUSE-01: Crear migración de base de datos `016_pending_info_sla_pause.sql` y registrar campos de pausa**
   * **Requisitos:** RF-01.1, RF-01.4, RF-04.1, RF-04.4, Constitución Art. III, Art. V.1
   * **Dependencias:** Ninguna
-  * **Hecho cuando:** Existe `database/migrations/014_pending_info_sla_pause.sql` con la sentencia `ALTER TABLE incidents` que amplía la columna `status` con el valor `'PENDING_INFO'` (preservando la columna virtual `is_active_ticket`), añade las columnas `pending_info_reason_category VARCHAR(64) NULL`, `pending_info_reason_text TEXT NULL`, `paused_at TIMESTAMP NULL`, `total_pending_info_seconds INT UNSIGNED NOT NULL DEFAULT 0`, `sla_target_at TIMESTAMP NULL`, y `MigrationRunner` la ejecuta sin errores en MariaDB.
+  * **Hecho cuando:** Existe `database/migrations/016_pending_info_sla_pause.sql` con la sentencia `ALTER TABLE incidents` que amplía la columna `status` con el valor `'PENDING_INFO'` (preservando la columna virtual `is_active_ticket`), añade las columnas `pending_info_reason_category VARCHAR(64) NULL`, `pending_info_reason_text TEXT NULL`, `paused_at TIMESTAMP NULL`, `total_pending_info_seconds INT UNSIGNED NOT NULL DEFAULT 0`, `sla_target_at TIMESTAMP NULL`, y `MigrationRunner` la ejecuta sin errores en MariaDB.
+  * **Nota de enmienda (2026-10-09):** La spec nombraba `014_pending_info_sla_pause.sql`, número ya ocupado por `014_location_access_code.sql` (hallazgo S-4) y seguido de `015_user_login_lockout.sql` (hallazgo S-3). Con aprobación del Product Owner, la migración se registra como `016_pending_info_sla_pause.sql` para preservar la numeración secuencial del repositorio.
+  * **Verificación ejecutada:** Sonda sobre base desechable (27/27 aserciones: enum, tipos, nulabilidad, `is_active_ticket` virtual, `uq_machine_active_ticket` y rechazo de segundo ticket activo), aplicación real vía `MigrationRunner` sobre `vendguard_db` (13 filas preservadas) y `CloudDeploySchemaParityTest` (27/27).
 
 - [ ] **T-PAUSE-02: Extender `IncidentStatus.php` e implementar el enum `IncidentPauseReasonCategory.php`**
   * **Requisitos:** RF-01.1, RF-01.2, RF-06.2, RNF-01
