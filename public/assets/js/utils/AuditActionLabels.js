@@ -106,6 +106,7 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'RESUME_SEASONAL_PAUSE', label: 'Pausa Estacional Finalizada', tone: 'success', group: 'preventive' },
   { code: 'ISSUE_SANITARY_CERTIFICATE', label: 'Emisión de Certificado Sanitario', tone: 'success', group: 'sanitary' },
   { code: 'SUSPEND_SANITARY_CERTIFICATE', label: 'Suspensión de Certificado Sanitario', tone: 'danger', group: 'sanitary' },
+  { code: 'SANITARY_QUARANTINE_AUTO_TRIGGERED', label: 'Cuarentena Sanitaria Automática', tone: 'danger', group: 'sanitary' },
   { code: 'REFUND_CASE_CREATED', label: 'Alta de Expediente de Reintegro', tone: 'primary', group: 'refund' },
   { code: 'REFUND_CONTACT_RECTIFIED', label: 'Contacto del Reintegro Rectificado', tone: 'warning', group: 'refund' },
   { code: 'REFUND_INSPECTED', label: 'Inspección de Reintegro', tone: 'info', group: 'refund' },

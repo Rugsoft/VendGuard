@@ -7,6 +7,12 @@ namespace VendGuard\Application\Service;
 use DateTimeImmutable;
 use DateTimeZone;
 use InvalidArgumentException;
+use RuntimeException;
+use VendGuard\Core\Domain\Model\Incident;
+use VendGuard\Core\Domain\Model\MachineType;
+use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Infrastructure\Repository\PdoPreventiveSettingsRepository;
 
 /**
  * IncidentPauseService — Orquestación del estado operativo "Pendiente de
@@ -53,12 +59,54 @@ use InvalidArgumentException;
  * 5. **Pausa de duración cero:** devuelve el vencimiento original intacto. Sin
  *    tiempo pausado no hay nada que desplazar y normalizar la fecha alteraría
  *    el contrato sin causa (caso límite §6.1 de la especificación funcional).
+ * 6. **Dependencias perezosas:** el constructor acepta el repositorio de ajustes
+ *    preventivos y el registrador de auditoría, pero si no se inyectan se crean
+ *    en el primer uso, no al construir. El cálculo de calendario del Algoritmo 3
+ *    queda así hermético (sin PDO ni red) incluso con `new IncidentPauseService()`,
+ *    que es justo lo que exige la suite unitaria de T-PAUSE-06.
+ * 7. **El reloj biológico es natural, no comercial:** el Algoritmo 4 cuenta
+ *    segundos corridos 24/7 desde la apertura del expediente y no descuenta
+ *    noches ni fines de semana, porque la pérdida de frío no descansa. Los dos
+ *    relojes del módulo conviven aquí sin confundirse (RF-03.3 frente a RF-03.4).
  *
  * Dogma Vanilla: PHP 8.2+ puro, tipado estricto, cero dependencias externas.
  * Dualismo Lingüístico: código en inglés, documentación y errores en castellano.
  */
 final class IncidentPauseService
 {
+    /**
+     * Umbral del Reloj Sanitario Biológico: 4 horas naturales continuas sin frío
+     * confirmado antes de la cuarentena automática (RF-03.5, Art. II).
+     */
+    public const SANITARY_BIOLOGICAL_CLOCK_SECONDS = 14400;
+
+    /** Estado higiénico-sanitario que declara la máquina fuera de servicio por riesgo térmico. */
+    public const SANITARY_STATUS_QUARANTINE = 'QUARANTINE';
+
+    /**
+     * Acción de auditoría inmutable del disparo automático del reloj biológico
+     * (RF-03.5). Nombre canónico para los consumidores que tengan que reconocer el
+     * evento; el punto de escritura usa el mismo valor como cadena literal porque
+     * `tests/unit/AuditActionCatalogTest.php` sólo enumera las acciones declaradas
+     * literalmente para contrastarlas con el catálogo del visor de auditoría. La
+     * suite de este módulo certifica que ambos valores no se separan.
+     */
+    public const ACTION_SANITARY_QUARANTINE_AUTO_TRIGGERED = 'SANITARY_QUARANTINE_AUTO_TRIGGERED';
+
+    /** Repositorio de ajustes preventivos; se resuelve en el primer uso si no se inyecta. */
+    private ?PreventiveSettingsRepositoryInterface $settingsRepo;
+
+    /** Registrador de auditoría inmutable; se resuelve en el primer uso si no se inyecta. */
+    private ?AuditLogger $auditLogger;
+
+    public function __construct(
+        ?PreventiveSettingsRepositoryInterface $settingsRepo = null,
+        ?AuditLogger $auditLogger = null
+    ) {
+        $this->settingsRepo = $settingsRepo;
+        $this->auditLogger = $auditLogger;
+    }
+
     /** Apertura de la jornada comercial de la sede. */
     private const BUSINESS_OPEN_HOUR = 8;
 
@@ -153,6 +201,129 @@ final class IncidentPauseService
     }
 
     /**
+     * Evalúa el Reloj Sanitario Biológico de una incidencia y dispara la cuarentena
+     * automática de la máquina si procede (Algoritmo 4, RF-03.4, RF-03.5, Art. II).
+     *
+     * El reloj es **natural y continuo 24/7**: cuenta los segundos corridos desde la
+     * apertura del expediente sin descontar noches ni fines de semana. Si la máquina
+     * dispensa alimentos perecederos y el contador alcanza las 4 horas
+     * (`SANITARY_BIOLOGICAL_CLOCK_SECONDS`), la máquina pasa a `QUARANTINE` y se
+     * registra el evento inmutable `SANITARY_QUARANTINE_AUTO_TRIGGERED` con la espera
+     * acumulada. La cuarentena es la que deja la máquina fuera de servicio para el
+     * ciudadano (bloqueo del QR y del certificado sanitario) y la que obliga a superar
+     * el checklist de reinspección del módulo 05 antes de devolverla al servicio; el
+     * formulario de resolución no puede cerrar la cadena de frío como si estuviera
+     * restablecida mientras la máquina siga en cuarentena.
+     *
+     * Reglas que muerde este método:
+     * 1. **Sólo perecederos.** Cualquier otra tipología (bebidas, snacks, mixta) progresa
+     *    únicamente con el reloj contractual: devuelve `false` sin tocar la máquina.
+     * 2. **Sólo averías vivas.** Un ticket `RESOLVED`, `CLOSED` o `CANCELLED` ya no puede
+     *    disparar la cuarentena: si la cadena de frío se restableció, cualquier bloqueo
+     *    posterior pertenece al flujo preventivo de reinspección, no a este reloj.
+     * 3. **Idempotencia.** Evaluar dos veces la misma máquina no duplica ni la escritura
+     *    ni el rastro: si ya está en `QUARANTINE`, devuelve `true` sin volver a auditar.
+     *
+     * La tipología se resuelve primero contra la máquina persistida y sólo después
+     * contra el campo enriquecido del expediente. Si ninguna de las dos la declara, el
+     * método se detiene con excepción en lugar de asumir un tipo: la salvaguarda
+     * sanitaria no puede depender de una suposición (Fail-Fast, Art. II).
+     *
+     * @param Incident $incident Incidencia viva cuya máquina se evalúa.
+     * @return bool `true` si la máquina queda (o permanece) en cuarentena sanitaria.
+     *
+     * @throws \DomainException Si no es posible determinar la tipología de la máquina
+     *                           o el expediente carece de marca de apertura válida.
+     * @throws RuntimeException Si el estado sanitario no se puede persistir.
+     */
+    public function evaluateSanitaryBiologicalClock(Incident $incident): bool
+    {
+        $machineId = $incident->getMachineId();
+        $settings = $this->settings()->getMachineSettings($machineId);
+
+        $machineTypeRaw = $settings['machine_type'] ?? $incident->getMachineType();
+        $machineType = is_string($machineTypeRaw) && $machineTypeRaw !== ''
+            ? MachineType::tryFrom(strtoupper(trim($machineTypeRaw)))
+            : null;
+
+        if ($machineType === null) {
+            throw new \DomainException(sprintf(
+                'No se pudo determinar la tipología de la máquina %d para evaluar el reloj sanitario biológico (Art. II).',
+                $machineId
+            ));
+        }
+
+        if (!$machineType->isPerishable()) {
+            return false;
+        }
+
+        if (in_array($incident->getStatus(), [
+            IncidentStatus::RESOLVED,
+            IncidentStatus::CLOSED,
+            IncidentStatus::CANCELLED,
+        ], true)) {
+            return false;
+        }
+
+        $openedAt = $this->parseDateTime($incident->getCreatedAt());
+        if ($openedAt === null) {
+            throw new \DomainException(sprintf(
+                'No se pudo evaluar el reloj sanitario biológico de la incidencia %s: carece de marca de apertura válida (Art. II).',
+                (string)$incident->getTicketCode()
+            ));
+        }
+
+        // Reloj natural: segundos corridos 24/7 desde la apertura del expediente, sin
+        // descuento de jornada comercial (eso es el Algoritmo 3, no éste).
+        $elapsedSeconds = (new DateTimeImmutable('now'))->getTimestamp() - $openedAt->getTimestamp();
+
+        if ($elapsedSeconds < self::SANITARY_BIOLOGICAL_CLOCK_SECONDS) {
+            return false;
+        }
+
+        $previousSanitaryStatus = (string)($settings['sanitary_status'] ?? '');
+
+        if ($previousSanitaryStatus === self::SANITARY_STATUS_QUARANTINE) {
+            return true;
+        }
+
+        if (!$this->settings()->updateSanitaryStatus($machineId, self::SANITARY_STATUS_QUARANTINE)) {
+            throw new RuntimeException(sprintf(
+                'No se pudo activar la cuarentena sanitaria de la máquina %d tras superar el umbral de 4 horas naturales (Art. II).',
+                $machineId
+            ));
+        }
+
+        $this->audit()->logMachineEvent(
+            $machineId,
+            // Literal deliberado: la guarda del catálogo de auditoría enumera las
+            // acciones escritas como cadena literal, y es ese contraste el que
+            // impide publicar un evento sin etiqueta en el visor del coordinador.
+            'SANITARY_QUARANTINE_AUTO_TRIGGERED',
+            [
+                'id' => null,
+                'role' => 'SYSTEM',
+                'name' => 'Sistema (Reloj Sanitario Biológico Art. II)',
+            ],
+            ['sanitary_status' => $previousSanitaryStatus !== '' ? $previousSanitaryStatus : 'OK'],
+            [
+                'sanitary_status' => self::SANITARY_STATUS_QUARANTINE,
+                'sanitary_checklist_required' => true,
+            ],
+            [
+                'incident_id' => $incident->getId(),
+                'ticket_code' => $incident->getTicketCode(),
+                'machine_id' => $machineId,
+                'elapsed_natural_seconds' => $elapsedSeconds,
+                'threshold_seconds' => self::SANITARY_BIOLOGICAL_CLOCK_SECONDS,
+                'reason' => 'Ruptura térmica prolongada: superadas las 4 horas naturales continuas sin frío confirmado (Art. II).',
+            ]
+        );
+
+        return true;
+    }
+
+    /**
      * Zona horaria operativa de la sede.
      */
     private function madridTimezone(): DateTimeZone
@@ -194,5 +365,43 @@ final class IncidentPauseService
         }
 
         return $opening;
+    }
+
+    /**
+     * Repositorio de ajustes preventivos, resuelto de forma perezosa.
+     *
+     * La instanciación diferida mantiene hermética la aritmética de calendario: un
+     * `new IncidentPauseService()` no abre ninguna conexión PDO hasta que el reloj
+     * sanitario la necesita de verdad.
+     */
+    private function settings(): PreventiveSettingsRepositoryInterface
+    {
+        return $this->settingsRepo ??= new PdoPreventiveSettingsRepository();
+    }
+
+    /**
+     * Registrador de auditoría inmutable, resuelto de forma perezosa (misma razón
+     * que `settings()`).
+     */
+    private function audit(): AuditLogger
+    {
+        return $this->auditLogger ??= new AuditLogger();
+    }
+
+    /**
+     * Interpreta una marca temporal persistida (`Y-m-d H:i:s`) como hora local de la
+     * sede, que es la zona en la que el sistema escribe las fechas.
+     */
+    private function parseDateTime(?string $value): ?DateTimeImmutable
+    {
+        if ($value === null || trim($value) === '') {
+            return null;
+        }
+
+        try {
+            return new DateTimeImmutable($value, $this->madridTimezone());
+        } catch (\Exception) {
+            return null;
+        }
     }
 }
