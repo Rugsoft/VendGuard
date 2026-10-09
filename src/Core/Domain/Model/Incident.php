@@ -7,8 +7,11 @@ namespace VendGuard\Core\Domain\Model;
 use ArrayAccess;
 use DateTimeImmutable;
 use DateTimeZone;
+use InvalidArgumentException;
 use JsonSerializable;
+use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
+use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
@@ -21,6 +24,13 @@ use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
  */
 class Incident implements ArrayAccess, JsonSerializable
 {
+    /**
+     * Ventana mínima de justificación real de la pausa (RF-01.3, Art. V.1).
+     * Espejo de `IncidentPauseRequestDto::MIN_REASON_TEXT_LENGTH`: el DTO la aplica
+     * al cuerpo HTTP crudo y la entidad la vuelve a exigir al cambiar de estado.
+     */
+    public const MIN_PAUSE_REASON_LENGTH = 20;
+
     private ?int $id;
     private string $ticketCode;
     private int $machineId;
@@ -49,6 +59,13 @@ class Incident implements ArrayAccess, JsonSerializable
     private ?string $createdAt;
     private ?string $updatedAt;
     private ?string $deletedAt;
+
+    // Campos del estado operativo "Pendiente de Información" con pausa de SLA (módulo 11)
+    private ?IncidentPauseReasonCategory $pendingInfoReasonCategory;
+    private ?string $pendingInfoReasonText;
+    private ?string $pausedAt;
+    private int $totalPendingInfoSeconds;
+    private ?string $slaTargetAt;
 
     // Campos enriquecidos opcionales (vía JOIN)
     private ?string $machineCode;
@@ -94,7 +111,12 @@ class Incident implements ArrayAccess, JsonSerializable
         ?string $locationName = null,
         ?string $locationSiteCode = null,
         ?string $technicianName = null,
-        ?string $technicianOperatorCode = null
+        ?string $technicianOperatorCode = null,
+        ?IncidentPauseReasonCategory $pendingInfoReasonCategory = null,
+        ?string $pendingInfoReasonText = null,
+        ?string $pausedAt = null,
+        int $totalPendingInfoSeconds = 0,
+        ?string $slaTargetAt = null
     ) {
         $this->id = $id;
         $this->ticketCode = strtoupper(trim($ticketCode));
@@ -131,6 +153,22 @@ class Incident implements ArrayAccess, JsonSerializable
         $this->locationSiteCode = $locationSiteCode;
         $this->technicianName = $technicianName;
         $this->technicianOperatorCode = $technicianOperatorCode;
+        $this->pendingInfoReasonCategory = $pendingInfoReasonCategory;
+        $this->pendingInfoReasonText = $pendingInfoReasonText !== null ? trim($pendingInfoReasonText) : null;
+        $this->pausedAt = $pausedAt;
+
+        // El acumulador nace a cero y sólo crece (RF-04.1): un valor negativo
+        // delataría una resta invertida y corrompería el descuento de MTTR, así
+        // que se rechaza en el borde de la entidad. La longitud de la
+        // justificación NO se valida aquí a propósito: la entidad debe poder
+        // hidratar cualquier fila persistida (histórico, tickets reanudados) sin
+        // reventar en lectura; esa regla muerde en `pausePendingInfo()`.
+        if ($totalPendingInfoSeconds < 0) {
+            throw new InvalidArgumentException('El tiempo acumulado en "Pendiente de Información" no puede ser negativo.');
+        }
+
+        $this->totalPendingInfoSeconds = $totalPendingInfoSeconds;
+        $this->slaTargetAt = $slaTargetAt;
     }
 
     /**
@@ -180,7 +218,14 @@ class Incident implements ArrayAccess, JsonSerializable
             isset($row['location_name']) && $row['location_name'] !== null ? (string)$row['location_name'] : null,
             isset($row['location_site_code']) && $row['location_site_code'] !== null ? (string)$row['location_site_code'] : null,
             isset($row['technician_name']) && $row['technician_name'] !== null ? (string)$row['technician_name'] : null,
-            isset($row['technician_operator_code']) && $row['technician_operator_code'] !== null ? (string)$row['technician_operator_code'] : null
+            isset($row['technician_operator_code']) && $row['technician_operator_code'] !== null ? (string)$row['technician_operator_code'] : null,
+            isset($row['pending_info_reason_category']) && $row['pending_info_reason_category'] !== null && $row['pending_info_reason_category'] !== ''
+                ? IncidentPauseReasonCategory::fromString((string)$row['pending_info_reason_category'])
+                : null,
+            isset($row['pending_info_reason_text']) && $row['pending_info_reason_text'] !== null ? (string)$row['pending_info_reason_text'] : null,
+            isset($row['paused_at']) && $row['paused_at'] !== null ? (string)$row['paused_at'] : null,
+            isset($row['total_pending_info_seconds']) ? (int)$row['total_pending_info_seconds'] : 0,
+            isset($row['sla_target_at']) && $row['sla_target_at'] !== null ? (string)$row['sla_target_at'] : null
         );
     }
 
@@ -387,6 +432,213 @@ class Incident implements ArrayAccess, JsonSerializable
         return $this->status === IncidentStatus::CLOSED;
     }
 
+    /**
+     * Indica si la incidencia está en el estado operativo "Pendiente de Información".
+     */
+    public function isPendingInfo(): bool
+    {
+        return $this->status === IncidentStatus::PENDING_INFO;
+    }
+
+    /**
+     * Indica si la incidencia tiene un intervalo de pausa abierto en este momento.
+     *
+     * `paused_at` es la marca autoritativa del intervalo vivo: se escribe al
+     * pausar y se limpia al reanudar (Algoritmo 2 del plan técnico).
+     */
+    public function isPaused(): bool
+    {
+        return $this->pausedAt !== null;
+    }
+
+    /**
+     * Causa tipificada del bloqueo de sede (RF-01.2). Conserva el último motivo
+     * conocido tras la reanudación; la bitácora inmutable de cada intervalo vive
+     * en `incident_history` (Art. III, T-PAUSE-05).
+     */
+    public function getPendingInfoReasonCategory(): ?IncidentPauseReasonCategory
+    {
+        return $this->pendingInfoReasonCategory;
+    }
+
+    /**
+     * Justificación textual del bloqueo (RF-01.3, Art. V.1).
+     */
+    public function getPendingInfoReasonText(): ?string
+    {
+        return $this->pendingInfoReasonText;
+    }
+
+    /**
+     * Marca temporal del inicio del intervalo de pausa vivo, o `null` si no hay pausa.
+     */
+    public function getPausedAt(): ?string
+    {
+        return $this->pausedAt;
+    }
+
+    /**
+     * Segundos acumulados en `PENDING_INFO` sumando todos los intervalos del ticket
+     * (RF-03.1, RF-04.1). Es la cifra exacta que MTTR y el SLA contractual descuentan.
+     */
+    public function getTotalPendingInfoSeconds(): int
+    {
+        return $this->totalPendingInfoSeconds;
+    }
+
+    /**
+     * Fecha límite contractual persistida, ya desplazada en horario comercial de la
+     * sede (RF-03.3). `null` mientras el ticket nunca haya sufrido una pausa.
+     */
+    public function getSlaTargetAt(): ?string
+    {
+        return $this->slaTargetAt;
+    }
+
+    /**
+     * Duración viva del intervalo de pausa abierto respecto a un instante de referencia.
+     *
+     * Alimenta tres lecturas del módulo: el reloj contractual visualmente congelado
+     * (RF-03.2), la evaluación de la reactivación en caliente de 60 minutos (RF-02.1)
+     * y el cómputo del desplazamiento comercial de SLA (RF-03.3). Sin pausa abierta
+     * devuelve 0 y nunca un valor negativo, ni siquiera si la referencia es anterior
+     * al inicio de la pausa (relojes desincronizados).
+     */
+    public function currentPauseDurationSeconds(DateTimeImmutable $reference): int
+    {
+        if (!$this->isPaused()) {
+            return 0;
+        }
+
+        $pauseStartedAt = strtotime((string)$this->pausedAt);
+        if ($pauseStartedAt === false) {
+            return 0;
+        }
+
+        return max(0, $reference->getTimestamp() - $pauseStartedAt);
+    }
+
+    /**
+     * Declara la pausa por bloqueo imputable a la sede y devuelve una NUEVA instancia
+     * (RF-01.1, RF-01.2, RF-01.3, RF-01.4).
+     *
+     * Reglas que muerde este método:
+     * 1. La transición debe ser legal según `IncidentStatus::canTransitionTo()`:
+     *    sólo se pausa desde `ASSIGNED`, `IN_PROGRESS`, `PENDING_PARTS` o `REOPENED`,
+     *    lo que además impide una doble pausa (PENDING_INFO -> PENDING_INFO).
+     * 2. La justificación debe contener al menos 20 caracteres reales medidos con
+     *    `mb_strlen()` sobre el texto recortado (Art. V.1).
+     *
+     * La instancia receptora no muta: el estado persistido sólo cambia cuando el
+     * repositorio graba el resultado (T-PAUSE-05).
+     *
+     * @throws InvalidTransitionException si el estado de origen no admite la pausa.
+     * @throws InvalidArgumentException si la justificación no alcanza el mínimo legal.
+     */
+    public function pausePendingInfo(
+        IncidentPauseReasonCategory $reasonCategory,
+        string $reasonText,
+        ?DateTimeImmutable $pausedAt = null
+    ): self {
+        if (!$this->status->canTransitionTo(IncidentStatus::PENDING_INFO)) {
+            throw new InvalidTransitionException(
+                sprintf(
+                    'No es legal pausar a "Pendiente de Información" desde el estado %s.',
+                    $this->status->value
+                ),
+                $this->status,
+                IncidentStatus::PENDING_INFO
+            );
+        }
+
+        $normalizedReason = trim($reasonText);
+        if (mb_strlen($normalizedReason) < self::MIN_PAUSE_REASON_LENGTH) {
+            throw new InvalidArgumentException(sprintf(
+                'La justificación de la pausa debe contener al menos %d caracteres reales; se recibieron %d.',
+                self::MIN_PAUSE_REASON_LENGTH,
+                mb_strlen($normalizedReason)
+            ));
+        }
+
+        $clone = clone $this;
+        $clone->status = IncidentStatus::PENDING_INFO;
+        $clone->pendingInfoReasonCategory = $reasonCategory;
+        $clone->pendingInfoReasonText = $normalizedReason;
+        $clone->pausedAt = ($pausedAt ?? new DateTimeImmutable())->format('Y-m-d H:i:s');
+
+        return $clone;
+    }
+
+    /**
+     * Cierra el intervalo de pausa vivo, acumula su duración y reingresa el ticket
+     * al flujo operativo (RF-02.3, RF-04.1, RF-06.2).
+     *
+     * El destino sólo puede ser `IN_PROGRESS` (técnico in situ o reanudación en
+     * caliente) o `ASSIGNED` (la respuesta llega tarde o el ticket fue reasignado);
+     * `RESOLVED` queda expresamente prohibido (RF-06.2, Art. V.1).
+     *
+     * No desplaza `sla_target_at`: el cálculo del horario comercial depende del
+     * calendario de la sede y vive en `IncidentPauseService` (T-PAUSE-06), que
+     * encadena este método con `shiftSlaTarget()`. La causa y el texto de la pausa
+     * se conservan como último bloqueo conocido; la auditoría inmutable de cada
+     * intervalo la graba el repositorio en `incident_history` (Art. III).
+     *
+     * @throws InvalidTransitionException si no hay pausa abierta o el destino no es legal.
+     */
+    public function resumePendingInfo(
+        IncidentStatus $targetStatus,
+        ?DateTimeImmutable $resumedAt = null
+    ): self {
+        $resumedMoment = $resumedAt ?? new DateTimeImmutable();
+
+        if (!$this->isPaused()) {
+            throw new InvalidTransitionException(
+                'La incidencia no tiene ninguna pausa abierta que reanudar.',
+                $this->status,
+                $targetStatus
+            );
+        }
+
+        if (!$this->status->canTransitionTo($targetStatus)
+            || !in_array($targetStatus, [IncidentStatus::IN_PROGRESS, IncidentStatus::ASSIGNED], true)
+        ) {
+            throw new InvalidTransitionException(
+                sprintf(
+                    'La reanudación sólo admite los estados %s o %s; se solicitó %s.',
+                    IncidentStatus::IN_PROGRESS->value,
+                    IncidentStatus::ASSIGNED->value,
+                    $targetStatus->value
+                ),
+                $this->status,
+                $targetStatus
+            );
+        }
+
+        $clone = clone $this;
+        $clone->status = $targetStatus;
+        $clone->totalPendingInfoSeconds += $this->currentPauseDurationSeconds($resumedMoment);
+        $clone->pausedAt = null;
+
+        return $clone;
+    }
+
+    /**
+     * Registra la nueva fecha límite contractual de SLA (RF-03.3).
+     *
+     * Este método es un mero grabador del resultado: el desplazamiento en ventana
+     * comercial (08:00 a 18:00, lunes a viernes, saltando noches y fines de semana)
+     * lo calcula el Algoritmo 3 en `IncidentPauseService` (T-PAUSE-06), que es quien
+     * conoce la sede y su calendario. Se permite fijar la fecha aunque el ticket no
+     * tuviera ninguna previa, para los tickets sin SLA contractual calculado.
+     */
+    public function shiftSlaTarget(DateTimeImmutable $newSlaTargetAt): self
+    {
+        $clone = clone $this;
+        $clone->slaTargetAt = $newSlaTargetAt->format('Y-m-d H:i:s');
+
+        return $clone;
+    }
+
     public function isCancelled(): bool
     {
         return $this->status === IncidentStatus::CANCELLED;
@@ -452,6 +704,13 @@ class Incident implements ArrayAccess, JsonSerializable
             'is_active_ticket' => $this->isActiveTicket,
             'is_active' => $this->isActive(),
             'is_in_warranty' => $this->isInWarranty(),
+            'pending_info_reason_category' => $this->pendingInfoReasonCategory?->value,
+            'pending_info_reason_category_label' => $this->pendingInfoReasonCategory?->label(),
+            'pending_info_reason_text' => $this->pendingInfoReasonText,
+            'paused_at' => $this->pausedAt,
+            'is_paused' => $this->isPaused(),
+            'total_pending_info_seconds' => $this->totalPendingInfoSeconds,
+            'sla_target_at' => $this->slaTargetAt,
             'created_at' => $this->createdAt,
             'updated_at' => $this->updatedAt,
             'deleted_at' => $this->deletedAt,

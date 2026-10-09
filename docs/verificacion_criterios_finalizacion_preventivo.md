@@ -1,7 +1,7 @@
 # Verificación de los Criterios de Finalización del Mantenimiento Preventivo
 
 **Fecha:** 2026-10-08 · **Rama:** `incident-comments` · **Pliego:** `specs/functional/preventive_maintenance_spec.md` §8 (Definition of Done)
-**Batería:** `php tests/run_all.php` → **batería global: 219 suites · 8.274 aserciones** · 0 fallos · exit 0 · base restaurada a semillas
+**Batería:** `php tests/run_all.php` → **batería global: 220 suites · 8.323 aserciones** · 0 fallos · exit 0 · base restaurada a semillas
 
 ## 1. Método
 
