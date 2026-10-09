@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace VendGuard\Core\Domain\Repository;
 
+use DateTimeImmutable;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\IncidentHistory;
+use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
+use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 
 /**
  * IncidentRepositoryInterface
@@ -274,6 +277,99 @@ interface IncidentRepositoryInterface
      * @return list<Incident> Lista de entidades actualizadas a CLOSED.
      */
     public function autoCloseResolvedIncidents(int $hours = 48): array;
+
+    /**
+     * Registra de forma inmutable el evento de inicio de la pausa por bloqueo de sede
+     * (RF-01.4, Art. III).
+     *
+     * El evento deja constancia del estado de origen, el usuario responsable, la causa
+     * tipificada, el texto de justificación y la marca temporal EXACTA del inicio del
+     * intervalo (precisión de segundos, RNF-01). La auditoría es de solo adición: este
+     * método nunca modifica ni borra eventos previos de `incident_history`.
+     *
+     * No altera el estado de la incidencia: la transición y la grabación de las columnas
+     * de pausa corresponden a `update()`. Quien necesite atomicidad entre ambas escrituras
+     * (la transición y su rastro) debe envolverlas en su propia transacción PDO; el servicio
+     * de pausa (T-PAUSE-06) es el responsable de esa unidad de trabajo.
+     *
+     * @param int $incidentId Incidencia pausada.
+     * @param int $userId Usuario que declara la pausa (técnico asignado o coordinador).
+     * @param IncidentStatus $fromStatus Estado operativo de origen de la pausa.
+     * @param IncidentPauseReasonCategory $category Causa tipificada del bloqueo (RF-01.2).
+     * @param string $reasonText Justificación declarada; el umbral legal de 20 caracteres
+     *   reales (RF-01.3) ya lo garantizan el DTO y la entidad antes de llegar aquí.
+     * @param DateTimeImmutable $pausedAt Marca temporal del inicio del intervalo.
+     * @throws \InvalidArgumentException si faltan el identificador o la justificación.
+     */
+    public function recordPauseEvent(
+        int $incidentId,
+        int $userId,
+        IncidentStatus $fromStatus,
+        IncidentPauseReasonCategory $category,
+        string $reasonText,
+        DateTimeImmutable $pausedAt
+    ): void;
+
+    /**
+     * Registra de forma inmutable el cierre del intervalo de pausa (RF-02.4, Art. III).
+     *
+     * El evento documenta el destino operativo (`IN_PROGRESS` si la intervención se
+     * retoma in situ o en caliente, `ASSIGNED` si el técnico debe desplazarse de nuevo),
+     * la duración EXACTA del intervalo cerrado en segundos y la marca temporal de la
+     * reanudación. La suma acumulada de todos los intervalos vive en
+     * `incidents.total_pending_info_seconds` (RF-04.1) y es el descuento que aplican el
+     * MTTR y el SLA contractual.
+     *
+     * @param int $incidentId Incidencia reanudada.
+     * @param int|null $userId Usuario que reanuda, o `null` cuando la reactivación es
+     *   automática por comentario de la sede (RF-02.1).
+     * @param IncidentStatus $targetStatus Estado operativo de destino real.
+     * @param int $pauseDurationSeconds Duración exacta del intervalo que se cierra.
+     * @param string|null $note Nota opcional de auditoría (motivo de la reanudación).
+     * @param DateTimeImmutable $resumedAt Marca temporal del cierre del intervalo.
+     * @throws \InvalidArgumentException si el identificador o la duración no son válidos.
+     */
+    public function recordResumeEvent(
+        int $incidentId,
+        ?int $userId,
+        IncidentStatus $targetStatus,
+        int $pauseDurationSeconds,
+        ?string $note,
+        DateTimeImmutable $resumedAt
+    ): void;
+
+    /**
+     * Recupera las incidencias en `PENDING_INFO` cuyo intervalo de pausa vivo supera el
+     * umbral indicado, para la alerta de espera prolongada y la auditoría de tickets
+     * inactivos (RF-04.2).
+     *
+     * El umbral se mide en horas NATURALES transcurridas desde `paused_at`, que es la
+     * única magnitud resoluble en SQL. El veredicto contractual de 72 horas HÁBILES
+     * (lunes a viernes, 08:00-18:00) pertenece a `IncidentPauseService`, que conoce el
+     * calendario de la sede: esta consulta entrega los candidatos pre-filtrados, no la
+     * insignia de espera prolongada.
+     *
+     * @param int $hours Umbral mínimo de horas naturales en pausa (al menos 1).
+     * @return list<array{
+     *   id: int,
+     *   ticket_code: string,
+     *   status: string,
+     *   urgency: string,
+     *   location_id: int,
+     *   location_name: string|null,
+     *   machine_id: int,
+     *   machine_code: string,
+     *   machine_type: string,
+     *   assigned_technician_id: int|null,
+     *   paused_at: string,
+     *   total_pending_info_seconds: int,
+     *   pending_info_reason_category: string|null,
+     *   pending_info_reason_category_label: string|null,
+     *   pending_info_reason_text: string|null
+     * }>
+     * @throws \InvalidArgumentException si el umbral es inferior a una hora.
+     */
+    public function getPendingInfoIncidentsOlderThanHours(int $hours): array;
 }
 
 

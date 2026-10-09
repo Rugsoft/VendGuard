@@ -526,6 +526,9 @@ class MockPrevIncidentRepo implements IncidentRepositoryInterface
     public function pauseIntervention(int $i, int $t, string $r): Incident { throw new RuntimeException("Stub"); }
     public function resolve(int $i, int $t, string $d, string $a): Incident { throw new RuntimeException("Stub"); }
     public function autoCloseResolvedIncidents(int $h = 48): array { return []; }
+    public function recordPauseEvent(int $incidentId, int $userId, \VendGuard\Core\Domain\ValueObject\IncidentStatus $fromStatus, \VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory $category, string $reasonText, \DateTimeImmutable $pausedAt): void { throw new LogicException('Not used.'); }
+    public function recordResumeEvent(int $incidentId, ?int $userId, \VendGuard\Core\Domain\ValueObject\IncidentStatus $targetStatus, int $pauseDurationSeconds, ?string $note, \DateTimeImmutable $resumedAt): void { throw new LogicException('Not used.'); }
+    public function getPendingInfoIncidentsOlderThanHours(int $hours): array { throw new LogicException('Not used.'); }
 }
 
 class MockPrevUserRepo implements UserRepositoryInterface

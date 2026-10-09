@@ -270,7 +270,15 @@ class PreventiveCoexistenceBridgeService
                 closedAt: $activeIncident->getClosedAt(),
                 cancellationReason: $activeIncident->getCancellationReason(),
                 cancelledAt: $activeIncident->getCancelledAt(),
-                isActiveTicket: $activeIncident->getIsActiveTicket()
+                isActiveTicket: $activeIncident->getIsActiveTicket(),
+                // La reconstrucción copia también el estado de pausa (módulo 11): si este
+                // puente elevase la urgencia de un ticket que está en `PENDING_INFO`,
+                // `update()` graba el agregado completo y la pausa viva debe sobrevivir.
+                pendingInfoReasonCategory: $activeIncident->getPendingInfoReasonCategory(),
+                pendingInfoReasonText: $activeIncident->getPendingInfoReasonText(),
+                pausedAt: $activeIncident->getPausedAt(),
+                totalPendingInfoSeconds: $activeIncident->getTotalPendingInfoSeconds(),
+                slaTargetAt: $activeIncident->getSlaTargetAt()
             );
 
             $this->incidentRepo->update($updatedIncident);

@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace VendGuard\Infrastructure\Repository;
 
+use DateTimeImmutable;
 use DomainException;
+use InvalidArgumentException;
 use PDO;
 use PDOException;
 use PDOStatement;
@@ -17,6 +19,7 @@ use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\IncidentHistory;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 
@@ -29,6 +32,22 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  */
 class PdoIncidentRepository implements IncidentRepositoryInterface
 {
+    /**
+     * Marcadores canónicos de las notas de auditoría de la pausa (RF-01.4).
+     *
+     * El detalle que no tiene columna propia (causa legible y justificación al pausar;
+     * duración y nota al reanudar) viaja dentro de `incident_history.action_note`. Se
+     * documentan aquí porque son el contrato de lectura de la línea de tiempo del
+     * expediente y de futuras auditorías, igual que el marcador `Motivo: ` de las
+     * reasignaciones. Se usa `Justificación: ` —y no `Motivo: `— a propósito: ese otro
+     * marcador ya identifica el motivo de reasignación en
+     * `CoordinatorIncidentDetailService::findReassignmentReason()`.
+     */
+    private const PAUSE_NOTE_CAUSE_MARKER = ' Causa: ';
+    private const PAUSE_NOTE_REASON_MARKER = ' Justificación: ';
+    private const RESUME_NOTE_DURATION_MARKER = ' Duración del intervalo de pausa: ';
+    private const RESUME_NOTE_NOTE_MARKER = ' Nota: ';
+
     private PDO $pdo;
 
     public function __construct(?PDO $pdo = null)
@@ -781,7 +800,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
                 `reopened_at` = :reopened_at,
                 `closed_at` = :closed_at,
                 `cancellation_reason` = :cancellation_reason,
-                `cancelled_at` = :cancelled_at
+                `cancelled_at` = :cancelled_at,
+                `pending_info_reason_category` = :pending_info_reason_category,
+                `pending_info_reason_text` = :pending_info_reason_text,
+                `paused_at` = :paused_at,
+                `total_pending_info_seconds` = :total_pending_info_seconds,
+                `sla_target_at` = :sla_target_at
             WHERE `id` = :id
               AND `deleted_at` IS NULL
         ";
@@ -806,6 +830,19 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
         $stmt->bindValue(':closed_at', $incident->getClosedAt(), $incident->getClosedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
         $stmt->bindValue(':cancellation_reason', $incident->getCancellationReason(), $incident->getCancellationReason() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
         $stmt->bindValue(':cancelled_at', $incident->getCancelledAt(), $incident->getCancelledAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        // Estado de pausa (módulo 11): el agregado es la única fuente de verdad y esta
+        // escritura es su persistencia completa. `total_pending_info_seconds` es el
+        // acumulador de todos los intervalos y sólo lo mueve `resumePendingInfo()`.
+        $pauseCategory = $incident->getPendingInfoReasonCategory();
+        $stmt->bindValue(
+            ':pending_info_reason_category',
+            $pauseCategory?->value,
+            $pauseCategory !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
+        );
+        $stmt->bindValue(':pending_info_reason_text', $incident->getPendingInfoReasonText(), $incident->getPendingInfoReasonText() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(':paused_at', $incident->getPausedAt(), $incident->getPausedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(':total_pending_info_seconds', $incident->getTotalPendingInfoSeconds(), PDO::PARAM_INT);
+        $stmt->bindValue(':sla_target_at', $incident->getSlaTargetAt(), $incident->getSlaTargetAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
 
         return $stmt->execute();
     }
@@ -1658,6 +1695,192 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
      * @param int $hours
      * @return list<Incident>
      */
+    public function recordPauseEvent(
+        int $incidentId,
+        int $userId,
+        IncidentStatus $fromStatus,
+        IncidentPauseReasonCategory $category,
+        string $reasonText,
+        DateTimeImmutable $pausedAt
+    ): void {
+        if ($incidentId < 1) {
+            throw new InvalidArgumentException('El evento de pausa exige una incidencia persistida (id positivo).');
+        }
+
+        $normalizedReason = trim($reasonText);
+        if ($normalizedReason === '') {
+            throw new InvalidArgumentException('El evento de pausa exige la justificación declarada.');
+        }
+
+        $actionNote = 'Pausa de SLA (Pendiente de Información).'
+            . self::PAUSE_NOTE_CAUSE_MARKER . $category->label() . ' [' . $category->value . '].'
+            . self::PAUSE_NOTE_REASON_MARKER . $normalizedReason;
+
+        $this->insertDatedHistoryEvent(
+            $incidentId,
+            $userId,
+            $fromStatus->value,
+            IncidentStatus::PENDING_INFO->value,
+            $actionNote,
+            $pausedAt
+        );
+    }
+
+    public function recordResumeEvent(
+        int $incidentId,
+        ?int $userId,
+        IncidentStatus $targetStatus,
+        int $pauseDurationSeconds,
+        ?string $note,
+        DateTimeImmutable $resumedAt
+    ): void {
+        if ($incidentId < 1) {
+            throw new InvalidArgumentException('El evento de reanudación exige una incidencia persistida (id positivo).');
+        }
+
+        if ($pauseDurationSeconds < 0) {
+            throw new InvalidArgumentException('La duración del intervalo de pausa no puede ser negativa.');
+        }
+
+        $actionNote = 'Reanudación desde "Pendiente de Información" a '
+            . $targetStatus->label() . ' [' . $targetStatus->value . '].'
+            . self::RESUME_NOTE_DURATION_MARKER . $pauseDurationSeconds . ' s.';
+
+        $normalizedNote = $note !== null ? trim($note) : '';
+        if ($normalizedNote !== '') {
+            $actionNote .= self::RESUME_NOTE_NOTE_MARKER . $normalizedNote;
+        }
+
+        $this->insertDatedHistoryEvent(
+            $incidentId,
+            $userId,
+            IncidentStatus::PENDING_INFO->value,
+            $targetStatus->value,
+            $actionNote,
+            $resumedAt
+        );
+    }
+
+    /**
+     * Recupera las incidencias pausadas cuyo intervalo vivo supera el umbral en horas
+     * naturales, de espera más larga a más corta (RF-04.2).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function getPendingInfoIncidentsOlderThanHours(int $hours): array
+    {
+        if ($hours < 1) {
+            throw new InvalidArgumentException('El umbral de inactividad debe ser de al menos 1 hora.');
+        }
+
+        $sql = "
+            SELECT
+                i.`id`,
+                i.`ticket_code`,
+                i.`status`,
+                i.`urgency`,
+                i.`location_id`,
+                i.`machine_id`,
+                i.`assigned_technician_id`,
+                i.`paused_at`,
+                i.`total_pending_info_seconds`,
+                i.`pending_info_reason_category`,
+                i.`pending_info_reason_text`,
+                m.`code` AS `machine_code`,
+                m.`machine_type`,
+                l.`name` AS `location_name`
+            FROM `incidents` i
+            INNER JOIN `machines` m ON m.`id` = i.`machine_id`
+            LEFT JOIN `locations` l ON l.`id` = i.`location_id`
+            WHERE i.`status` = :pending_status
+              AND i.`deleted_at` IS NULL
+              AND i.`paused_at` IS NOT NULL
+              AND i.`paused_at` <= DATE_SUB(NOW(), INTERVAL :hours HOUR)
+            ORDER BY i.`paused_at` ASC, i.`id` ASC
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':pending_status', IncidentStatus::PENDING_INFO->value, PDO::PARAM_STR);
+        $stmt->bindValue(':hours', $hours, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_map(static function (array $row): array {
+            $categoryValue = $row['pending_info_reason_category'] !== null
+                ? (string)$row['pending_info_reason_category']
+                : null;
+            $category = $categoryValue !== null ? IncidentPauseReasonCategory::tryFrom($categoryValue) : null;
+
+            return [
+                'id' => (int)$row['id'],
+                'ticket_code' => (string)$row['ticket_code'],
+                'status' => (string)$row['status'],
+                'urgency' => (string)$row['urgency'],
+                'location_id' => (int)$row['location_id'],
+                'location_name' => $row['location_name'] !== null ? (string)$row['location_name'] : null,
+                'machine_id' => (int)$row['machine_id'],
+                'machine_code' => (string)$row['machine_code'],
+                'machine_type' => (string)$row['machine_type'],
+                'assigned_technician_id' => $row['assigned_technician_id'] !== null ? (int)$row['assigned_technician_id'] : null,
+                'paused_at' => (string)$row['paused_at'],
+                'total_pending_info_seconds' => (int)$row['total_pending_info_seconds'],
+                'pending_info_reason_category' => $categoryValue,
+                'pending_info_reason_category_label' => $category?->label(),
+                'pending_info_reason_text' => $row['pending_info_reason_text'] !== null
+                    ? (string)$row['pending_info_reason_text']
+                    : null,
+            ];
+        }, $rows);
+    }
+
+    /**
+     * Inserta un evento de auditoría con marca temporal explícita (RNF-01).
+     *
+     * `insertHistory()` sella `created_at = CURRENT_TIMESTAMP` porque documenta el
+     * instante de la transición en curso; los eventos de pausa y reanudación, en cambio,
+     * reciben el instante exacto que el dominio calculó, de modo que el intervalo
+     * auditado y el acumulador descontable miden lo mismo al segundo. Escritura de solo
+     * adición: nunca actualiza ni borra filas previas (Art. III).
+     */
+    private function insertDatedHistoryEvent(
+        int $incidentId,
+        ?int $userId,
+        ?string $fromStatus,
+        string $toStatus,
+        string $actionNote,
+        DateTimeImmutable $occurredAt
+    ): int {
+        $sql = "
+            INSERT INTO `incident_history` (
+                `incident_id`,
+                `user_id`,
+                `from_status`,
+                `to_status`,
+                `action_note`,
+                `created_at`
+            ) VALUES (
+                :incident_id,
+                :user_id,
+                :from_status,
+                :to_status,
+                :action_note,
+                :created_at
+            )
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':incident_id', $incidentId, PDO::PARAM_INT);
+        $stmt->bindValue(':user_id', $userId, $userId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+        $stmt->bindValue(':from_status', $fromStatus, $fromStatus !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(':to_status', $toStatus, PDO::PARAM_STR);
+        $stmt->bindValue(':action_note', $actionNote, PDO::PARAM_STR);
+        $stmt->bindValue(':created_at', $occurredAt->format('Y-m-d H:i:s'), PDO::PARAM_STR);
+        $stmt->execute();
+
+        return (int)$this->pdo->lastInsertId();
+    }
+
     public function autoCloseResolvedIncidents(int $hours = 48): array
     {
         // 1. Buscar todas las incidencias en estado RESOLVED con más de 48h desde resolved_at
