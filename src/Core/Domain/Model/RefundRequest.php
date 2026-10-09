@@ -45,7 +45,7 @@ final readonly class RefundRequest implements JsonSerializable
 
     public function __construct(
         private ?int $id,
-        private int $incidentId,
+        private ?int $incidentId,
         private int $machineId,
         private int $locationId,
         private string $claimantName,
@@ -88,7 +88,12 @@ final readonly class RefundRequest implements JsonSerializable
             throw new InvalidArgumentException('El expediente requiere un identificador estrictamente positivo.');
         }
 
-        if ($incidentId < 1 || $machineId < 1 || $locationId < 1) {
+        // RF-04.5: la cancelación por inactividad de sede DESVINCULA el expediente
+        // de su avería (`incident_id = NULL`) para que la reclamación sobreviva y el
+        // consumidor cobre su dinero. `null` es por tanto un vínculo cortado a
+        // propósito, no un dato ausente. Máquina y sede siguen siendo obligatorias:
+        // toda reclamación nace en una ubicación física concreta.
+        if (($incidentId !== null && $incidentId < 1) || $machineId < 1 || $locationId < 1) {
             throw new InvalidArgumentException('Los identificadores del expediente deben ser enteros positivos.');
         }
 
@@ -324,7 +329,7 @@ final readonly class RefundRequest implements JsonSerializable
 
         return new self(
             id: isset($row['id']) ? (int)$row['id'] : null,
-            incidentId: (int)($row['incident_id'] ?? 0),
+            incidentId: isset($row['incident_id']) && $row['incident_id'] !== null ? (int)$row['incident_id'] : null,
             machineId: (int)($row['machine_id'] ?? 0),
             locationId: (int)($row['location_id'] ?? 0),
             claimantName: (string)($row['claimant_name'] ?? ''),
@@ -455,9 +460,23 @@ final readonly class RefundRequest implements JsonSerializable
         return $this->id;
     }
 
-    public function getIncidentId(): int
+    /**
+     * Avería vinculada, o `null` cuando el expediente fue desvinculado por la
+     * cancelación de su avería por inactividad de sede (RF-04.5).
+     */
+    public function getIncidentId(): ?int
     {
         return $this->incidentId;
+    }
+
+    /**
+     * Indica si el expediente quedó desvinculado de su avería técnica: la
+     * reclamación sigue viva en la bandeja de Coordinación para liquidación
+     * central, pero ya no cuelga de ningún ticket (RF-04.5).
+     */
+    public function isDetachedFromIncident(): bool
+    {
+        return $this->incidentId === null;
     }
 
     public function getMachineId(): int

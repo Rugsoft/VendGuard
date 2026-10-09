@@ -322,6 +322,13 @@ class MockSparePartRepository implements SparePartRepositoryInterface
         ));
     }
 
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool
     {
         return true;
@@ -382,6 +389,13 @@ class MockIncidentRepository implements IncidentRepositoryInterface
         $this->incidents[$incident->getId()] = $incident;
         return true;
     }
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool { return true; }
     public function insertHistory(int $incidentId, ?int $userId, ?string $fromStatus, string $toStatus, ?string $actionNote = null): int { return 1; }
     public function getHistory(int $incidentId): array { return []; }
@@ -484,6 +498,13 @@ class MockMachineRepository implements MachineRepositoryInterface
     public function findAll(array $filters = []): array { return []; }
     public function hasActiveTicketOrWarranty(int $machineId): bool { return false; }
     public function getActiveTicketOrWarranty(int $machineId): ?array { return null; }
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool { return true; }
 }
 

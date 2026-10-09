@@ -82,6 +82,13 @@ class MockTechMachineRepository implements MachineRepositoryInterface
     public function findAll(array $f = []): array { return []; }
     public function hasActiveTicketOrWarranty(int $m): bool { return false; }
     public function getActiveTicketOrWarranty(int $m): ?array { return null; }
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool { return true; }
 }
 
@@ -115,6 +122,13 @@ class MockTechSparePartRepository implements SparePartRepositoryInterface
         $id = (int)$s->getId();
         if (!isset($this->parts[$id])) return false;
         $this->parts[$id] = $s;
+        return true;
+    }
+
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
         return true;
     }
 
@@ -171,6 +185,13 @@ class MockTechIncidentRepository implements IncidentRepositoryInterface
     public function findAll(array $f = []): array { return []; }
     public function findAssignedToTechnician(int $t, array $s = []): array { return []; }
     public function update(Incident $i): bool { return true; }
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool { return true; }
     public function insertHistory(int $i, ?int $u, ?string $f, string $t, ?string $n = null): int { return 1; }
     public function getHistory(int $i): array { return []; }

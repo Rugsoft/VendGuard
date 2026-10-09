@@ -132,6 +132,13 @@ $incidentRepo = new class($stopOne, $stopTwo) implements IncidentRepositoryInter
     public function findAll(array $filters = []): array { return []; }
     public function findEnrichedDetailById(int|string $identifier): ?array { return null; }
     public function update(Incident $incident): bool { return false; }
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool { return false; }
     public function insertHistory(int $incidentId, ?int $userId, ?string $fromStatus, string $toStatus, ?string $actionNote = null): int { return 1; }
     public function getHistory(int $incidentId): array { return []; }
@@ -175,6 +182,13 @@ $machineRepo = new class($machineOne, $machineTwo) implements MachineRepositoryI
     public function findAll(array $filters = []): array { return []; }
     public function hasActiveTicketOrWarranty(int $machineId): bool { return false; }
     public function getActiveTicketOrWarranty(int $machineId): ?array { return null; }
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool { return false; }
 };
 
@@ -193,6 +207,13 @@ $locationRepo = new class($routeLocation) implements LocationRepositoryInterface
     public function findAll(string $status = 'all', ?string $search = null): array { return []; }
     public function create(array $data): Location { throw new RuntimeException('Stub.'); }
     public function update(int $id, array $data): bool { return false; }
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool { return false; }
     public function restore(int $id): bool { return false; }
     public function updateContactPhone(int $id, string $contactPhone): bool { return false; }

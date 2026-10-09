@@ -9,13 +9,23 @@ use DateTimeZone;
 use InvalidArgumentException;
 use RuntimeException;
 use VendGuard\Application\DTO\IncidentPauseResponseDto;
+use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\MachineType;
+use VendGuard\Core\Domain\Model\RefundRequest;
+use VendGuard\Core\Domain\Model\RefundStatus;
+use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
+use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
+use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoPreventiveSettingsRepository;
+use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
 
 /**
  * IncidentPauseService — Orquestación del estado operativo "Pendiente de
@@ -105,6 +115,39 @@ final class IncidentPauseService
      */
     public const HOT_REACTIVATION_WINDOW_SECONDS = 3600;
 
+    /**
+     * Longitud mínima del motivo de cancelación por inactividad (RF-04.3, Art. V.1).
+     *
+     * Veinte caracteres reales DESPUÉS de recortar los espacios de los extremos,
+     * que es exactamente lo que mide `Algoritmo 5` en el plan técnico
+     * (`LongitudReal(motivoCancelacion.trim())`).
+     */
+    public const MIN_CANCELLATION_REASON_LENGTH = 20;
+
+    /**
+     * Umbral de espera prolongada de cliente, en horas HÁBILES comerciales (RF-04.2).
+     *
+     * La alerta se enciende cuando la pausa acumula MÁS de 72 horas hábiles
+     * (08:00-18:00, lunes a viernes). El cronómetro natural no sirve aquí: un
+     * expediente pausado el viernes por la tarde no puede alcanzar el umbral
+     * durante el fin de semana, porque la sede no está abierta para responder.
+     */
+    public const PROLONGED_INACTIVITY_BUSINESS_HOURS = 72;
+
+    /**
+     * Acción de auditoría del bloqueo de máquina por falta de acceso (RF-04.4).
+     *
+     * El nombre canónico vive en esta constante y el evento se escribe con el
+     * literal equivalente: la guarda del catálogo de auditoría solo enumera
+     * literales, y la suite del módulo certifica que ambos valores no se separan.
+     */
+    public const ACTION_MACHINE_BLOCKED_NO_ACCESS = 'MACHINE_BLOCKED_NO_ACCESS';
+
+    /**
+     * Acción de auditoría de la desvinculación del reintegro (RF-04.5).
+     */
+    public const ACTION_REFUND_DETACHED_BY_INACTIVITY = 'REFUND_DETACHED_BY_INACTIVITY';
+
     /** Repositorio de ajustes preventivos; se resuelve en el primer uso si no se inyecta. */
     private ?PreventiveSettingsRepositoryInterface $settingsRepo;
 
@@ -113,6 +156,15 @@ final class IncidentPauseService
 
     /** Repositorio de incidencias; se resuelve en el primer uso si no se inyecta. */
     private ?IncidentRepositoryInterface $incidentRepo;
+
+    /** Repositorio de máquinas; se resuelve en el primer uso si no se inyecta. */
+    private ?MachineRepositoryInterface $machineRepo;
+
+    /** Repositorio de reintegros; se resuelve en el primer uso si no se inyecta. */
+    private ?RefundRequestRepositoryInterface $refundRepo;
+
+    /** Unidad de trabajo transaccional; se resuelve en el primer uso si no se inyecta. */
+    private ?TransactionManagerInterface $transactionManager;
 
     /**
      * El orden de los parámetros conserva la firma ya publicada por T-PAUSE-06/07
@@ -125,11 +177,17 @@ final class IncidentPauseService
     public function __construct(
         ?PreventiveSettingsRepositoryInterface $settingsRepo = null,
         ?AuditLogger $auditLogger = null,
-        ?IncidentRepositoryInterface $incidentRepo = null
+        ?IncidentRepositoryInterface $incidentRepo = null,
+        ?MachineRepositoryInterface $machineRepo = null,
+        ?RefundRequestRepositoryInterface $refundRepo = null,
+        ?TransactionManagerInterface $transactionManager = null
     ) {
         $this->settingsRepo = $settingsRepo;
         $this->auditLogger = $auditLogger;
         $this->incidentRepo = $incidentRepo;
+        $this->machineRepo = $machineRepo;
+        $this->refundRepo = $refundRepo;
+        $this->transactionManager = $transactionManager;
     }
 
     /** Apertura de la jornada comercial de la sede. */
@@ -495,6 +553,164 @@ final class IncidentPauseService
     }
 
     /**
+     * Espera prolongada de cliente: alerta de inactividad de 72 horas HÁBILES
+     * (Algoritmo 5, RF-04.2, Art. V.1).
+     *
+     * Mide el intervalo de pausa VIVO en horas hábiles comerciales (08:00-18:00,
+     * lunes a viernes) y devuelve verdadero solo cuando supera las 72 horas. Es la
+     * señal que enciende la insignia *"En espera prolongada de cliente"* y la
+     * alerta prioritaria de la bandeja de triaje; la cancelación formal es una
+     * decisión humana del coordinador (RF-04.3) y no se dispara sola.
+     *
+     * **Frontera del umbral:** el requisito ratificado habla de "más de 72 horas
+     * hábiles" (RF-04.2 y RF-04.3), así que el umbral es estricto (`> 72 h`). El
+     * pseudocódigo del `plan.md` §3.5 escribe `>= 72.0`; ante la discrepancia manda
+     * la especificación, que es la única fuente de verdad (Art. I).
+     *
+     * @param Incident $incident Incidencia a evaluar.
+     * @param DateTimeImmutable|null $now Instante de referencia (inyectable en pruebas).
+     * @return bool True si el expediente acumula más de 72 horas hábiles en pausa.
+     */
+    public function isProlongedInactivity(Incident $incident, ?DateTimeImmutable $now = null): bool
+    {
+        $pausedAt = $this->parseDateTime($incident->getPausedAt());
+        if ($pausedAt === null || !$incident->isPendingInfo()) {
+            return false;
+        }
+
+        $businessSeconds = $this->countBusinessSecondsBetween($pausedAt, $now ?? new DateTimeImmutable());
+
+        return $businessSeconds > self::PROLONGED_INACTIVITY_BUSINESS_HOURS * 3600;
+    }
+
+    /**
+     * Cancelación formal por inactividad de sede, con bloqueo de máquina y
+     * protección del reintegro (Algoritmo 5, RF-04.3 a RF-04.5, Art. V.1 y V.2).
+     *
+     * El coordinador cierra a mano un expediente que lleva más de 72 horas hábiles
+     * esperando a un cliente que no responde. El método ejecuta el protocolo
+     * completo como UNA sola unidad de trabajo, porque cada escritura por separado
+     * deja un estado mentiroso:
+     *
+     * 1. **Motivo justificado de 20 caracteres reales como mínimo** (Art. V.1). Un
+     *    descarte sin causa es un agujero en la auditoría, no una cancelación.
+     * 2. **El ticket pasa a `CANCELLED`** con su rastro inmutable en
+     *    `incident_history` (Art. III), que ya escribe el repositorio.
+     * 3. **La máquina NO vuelve a "Operativa":** queda bloqueada por falta de
+     *    acceso (`BLOCKED_NO_ACCESS`) e inactiva. Si nunca se pudo acceder a
+     *    reparar el fallo, pintarla en verde engañaría a los usuarios del inmueble
+     *    (RF-04.4). La vuelta al parque exige confirmación de acceso y aviso nuevo
+     *    (RF-04.6).
+     * 4. **El reintegro económico no se cancela:** se desvincula de la avería
+     *    (`incident_id = NULL`) y queda en la bandeja de Coordinación para
+     *    liquidación central, de modo que el consumidor final cobra su dinero
+     *    (RF-04.5).
+     *
+     * La cancelación exige que el expediente esté realmente en `PENDING_INFO`: es
+     * la única situación en la que "cancelar por falta de acceso" describe lo que
+     * pasó. Cualquier otro estado se rechaza con `InvalidTransitionException` en
+     * lugar de bloquear una máquina por un motivo que no ocurrió.
+     *
+     * @param int $incidentId Incidencia a cancelar.
+     * @param int $coordinatorUserId Coordinador que ejecuta la cancelación (auditoría).
+     * @param string $cancellationReason Motivo justificado (>= 20 caracteres reales).
+     * @return void
+     *
+     * @throws InvalidArgumentException Si los identificadores o el motivo no son válidos.
+     * @throws \DomainException Si la incidencia o su máquina no existen.
+     * @throws InvalidTransitionException Si el expediente no está en `PENDING_INFO`.
+     * @throws RuntimeException Si alguna de las escrituras del protocolo no se puede persistir.
+     */
+    public function cancelByInactivity(
+        int $incidentId,
+        int $coordinatorUserId,
+        string $cancellationReason
+    ): void {
+        if ($incidentId < 1) {
+            throw new InvalidArgumentException(
+                'La cancelación por inactividad exige una incidencia persistida (id positivo).'
+            );
+        }
+
+        if ($coordinatorUserId < 1) {
+            throw new InvalidArgumentException(
+                'La cancelación por inactividad exige el coordinador que la ejecuta para la auditoría (Art. III).'
+            );
+        }
+
+        $reason = trim($cancellationReason);
+        if (mb_strlen($reason) < self::MIN_CANCELLATION_REASON_LENGTH) {
+            throw new InvalidArgumentException(sprintf(
+                'El motivo de cancelación por inactividad debe contener al menos %d caracteres reales (Art. V.1); se recibieron %d.',
+                self::MIN_CANCELLATION_REASON_LENGTH,
+                mb_strlen($reason)
+            ));
+        }
+
+        $this->transactions()->runInTransaction(function () use ($incidentId, $coordinatorUserId, $reason): void {
+            $incident = $this->incidents()->findById($incidentId);
+            if ($incident === null) {
+                throw new \DomainException(sprintf(
+                    'No se encontró ninguna incidencia con ID %d para cancelar por inactividad de sede.',
+                    $incidentId
+                ));
+            }
+
+            if (!$incident->isPendingInfo()) {
+                throw new InvalidTransitionException(
+                    sprintf(
+                        'Solo se cancela por inactividad un expediente en pausa a la espera de la sede; la incidencia %s está en estado %s.',
+                        (string)$incident->getTicketCode(),
+                        $incident->getStatus()->value
+                    ),
+                    $incident->getStatus(),
+                    IncidentStatus::CANCELLED
+                );
+            }
+
+            $ticketCode = (string)$incident->getTicketCode();
+            $machineId = $incident->getMachineId();
+            $pausedBusinessSeconds = $this->countBusinessSecondsBetween(
+                $this->parseDateTime($incident->getPausedAt()) ?? new DateTimeImmutable(),
+                new DateTimeImmutable()
+            );
+
+            // 1. Cancelación formal del ticket (con su rastro en `incident_history`).
+            $this->incidents()->cancel($incidentId, $reason, $coordinatorUserId);
+
+            // 2. Protección del parque: la máquina no vuelve a "Operativa" (RF-04.4).
+            if (!$this->machines()->blockForNoAccess($machineId, $ticketCode)) {
+                throw new RuntimeException(sprintf(
+                    'No se pudo bloquear por falta de acceso la máquina %d tras cancelar la incidencia %s (RF-04.4).',
+                    $machineId,
+                    $ticketCode
+                ));
+            }
+
+            $this->audit()->logMachineEvent(
+                $machineId,
+                // Literal deliberado: la guarda del catálogo de auditoría enumera
+                // las acciones escritas como cadena literal (ver T-PAUSE-07).
+                'MACHINE_BLOCKED_NO_ACCESS',
+                $this->coordinatorActor($coordinatorUserId),
+                ['operational_status' => 'ACTIVE_INCIDENT', 'is_active' => true, 'is_blocked_no_access' => false],
+                ['operational_status' => 'BLOCKED_NO_ACCESS', 'is_active' => false, 'is_blocked_no_access' => true],
+                [
+                    'incident_id' => $incidentId,
+                    'ticket_code' => $ticketCode,
+                    'machine_id' => $machineId,
+                    'paused_business_seconds' => $pausedBusinessSeconds,
+                    'threshold_business_seconds' => self::PROLONGED_INACTIVITY_BUSINESS_HOURS * 3600,
+                    'reason' => 'Máquina fuera de servicio por falta de acceso tras cancelación por inactividad de sede (Art. V.1).',
+                ]
+            );
+
+            // 3. El consumidor final no pierde su dinero (RF-04.5).
+            $this->detachRefundsForInactivity($incidentId, $coordinatorUserId, $ticketCode);
+        });
+    }
+
+    /**
      * Zona horaria operativa de la sede.
      */
     private function madridTimezone(): DateTimeZone
@@ -586,6 +802,32 @@ final class IncidentPauseService
     }
 
     /**
+     * Repositorio de máquinas, resuelto de forma perezosa: el bloqueo por falta de
+     * acceso se escribe aquí (RF-04.4) y la calculadora de calendario sigue sin E/S.
+     */
+    private function machines(): MachineRepositoryInterface
+    {
+        return $this->machineRepo ??= new PdoMachineRepository();
+    }
+
+    /**
+     * Repositorio de reintegros, resuelto de forma perezosa (RF-04.5).
+     */
+    private function refunds(): RefundRequestRepositoryInterface
+    {
+        return $this->refundRepo ??= new PdoRefundRequestRepository();
+    }
+
+    /**
+     * Unidad de trabajo transaccional (Art. III): el protocolo de cancelación toca
+     * tres agregados y no puede quedar a medias.
+     */
+    private function transactions(): TransactionManagerInterface
+    {
+        return $this->transactionManager ??= new PdoTransactionManager();
+    }
+
+    /**
      * ¿Tiene el técnico asignado otra avería en intervención activa en este momento?
      *
      * Sólo cuenta `IN_PROGRESS`: es lo único que prueba que el profesional está
@@ -665,6 +907,137 @@ final class IncidentPauseService
             reasonCategory: $incident->getPendingInfoReasonCategory(),
             reasonText: $incident->getPendingInfoReasonText()
         );
+    }
+
+    /**
+     * Segundos hábiles comerciales transcurridos entre dos instantes (RF-04.2).
+     *
+     * Suma exclusivamente el tiempo que cae dentro de la ventana de la sede
+     * (08:00-18:00, lunes a viernes) en la zona horaria operativa, recorriendo el
+     * calendario día a día. Es el gemelo de `shiftSlaTargetInBusinessHours()`:
+     * aquel desplaza un vencimiento sumando segundos hábiles y éste los cuenta.
+     *
+     * @param DateTimeImmutable $from Inicio del intervalo.
+     * @param DateTimeImmutable $to Fin del intervalo.
+     * @return int Segundos hábiles; cero si el intervalo está vacío o invertido.
+     */
+    private function countBusinessSecondsBetween(DateTimeImmutable $from, DateTimeImmutable $to): int
+    {
+        $cursor = $from->setTimezone($this->madridTimezone());
+        $end = $to->setTimezone($this->madridTimezone());
+
+        if ($end <= $cursor) {
+            return 0;
+        }
+
+        $total = 0;
+
+        while ($cursor < $end) {
+            if ($this->isBusinessDay($cursor)) {
+                $dayOpen = $cursor->setTime(self::BUSINESS_OPEN_HOUR, 0, 0);
+                $dayClose = $cursor->setTime(self::BUSINESS_CLOSE_HOUR, 0, 0);
+
+                // Ventana recortada por los extremos reales del intervalo: ni el
+                // primer día se cuenta desde las 08:00 si la pausa empezó a las
+                // 10:00, ni el último se cuenta hasta las 18:00 si aún es mediodía.
+                $windowStart = $cursor > $dayOpen ? $cursor : $dayOpen;
+                $windowEnd = $end < $dayClose ? $end : $dayClose;
+
+                if ($windowEnd > $windowStart) {
+                    $total += $windowEnd->getTimestamp() - $windowStart->getTimestamp();
+                }
+            }
+
+            // Normalizar al arranque del día siguiente es lo que evita perder la
+            // primera hora de cada jornada: un cursor a las 09:00 saltaría, si no,
+            // a las 09:00 del día siguiente y se comería las 08:00.
+            $cursor = $cursor->modify('+1 day')->setTime(0, 0, 0);
+        }
+
+        return $total;
+    }
+
+    /**
+     * Actor de auditoría del coordinador que ejecuta la cancelación (Art. III).
+     *
+     * La operación llega con el identificador del usuario y no con su nombre, así
+     * que se sella con el rol y su etiqueta: la auditoría queda anónima a nivel de
+     * persona pero siempre trazable a la cuenta responsable.
+     *
+     * @param int $coordinatorUserId Usuario que ejecuta.
+     * @return array{id: int, role: string, name: string}
+     */
+    private function coordinatorActor(int $coordinatorUserId): array
+    {
+        return [
+            'id' => $coordinatorUserId,
+            'role' => UserRole::COORDINATOR->value,
+            'name' => UserRole::COORDINATOR->label(),
+        ];
+    }
+
+    /**
+     * Desvincula los expedientes de reintegro de la avería cancelada (RF-04.5).
+     *
+     * El dinero retenido por el consumidor NO se pierde porque la avería técnica
+     * se cierre: la reclamación se desvincula del ticket (`incident_id = NULL`) y
+     * el expediente que aún esperaba la inspección técnica —la que nunca podrá
+     * ocurrir, porque la máquina queda bloqueada— pasa a la bandeja de
+     * Coordinación para su liquidación central. Los expedientes que ya tenían su
+     * propio camino (efectivo depositado con PIN, contacto pendiente, pago en
+     * curso o estados terminales) conservan su estado: reiniciarlos abriría de
+     * nuevo una reclamación ya cerrada o borraría un PIN ya entregado.
+     *
+     * @param int $incidentId Avería cancelada.
+     * @param int $coordinatorUserId Coordinador que ejecuta.
+     * @param string $ticketCode Código visible del expediente, para la auditoría.
+     * @return void
+     * @throws RuntimeException Si un expediente no se puede desvincular.
+     */
+    private function detachRefundsForInactivity(int $incidentId, int $coordinatorUserId, string $ticketCode): void
+    {
+        $cases = $this->refunds()->findRestrictedByIncident($incidentId);
+        if ($cases === []) {
+            return;
+        }
+
+        $actor = $this->coordinatorActor($coordinatorUserId);
+
+        /** @var RefundRequest $case */
+        foreach ($cases as $case) {
+            $caseId = $case->getId();
+            if ($caseId === null || !$case->isActive()) {
+                continue;
+            }
+
+            $previousStatus = $case->getStatus();
+            $targetStatus = $previousStatus === RefundStatus::PENDING_INSPECTION
+                ? RefundStatus::REQUIRES_COORDINATOR_APPROVAL
+                : $previousStatus;
+
+            if (!$this->refunds()->detachFromIncident($caseId, $targetStatus)) {
+                throw new RuntimeException(sprintf(
+                    'No se pudo desvincular el expediente de reintegro %d de la avería %s cancelada por inactividad (RF-04.5).',
+                    $caseId,
+                    $ticketCode
+                ));
+            }
+
+            $this->audit()->logRefundEvent(
+                $caseId,
+                // Literal deliberado: la guarda del catálogo de auditoría solo
+                // enumera acciones escritas como cadena literal (ver T-PAUSE-07).
+                'REFUND_DETACHED_BY_INACTIVITY',
+                $actor,
+                ['status' => $previousStatus->value, 'incident_id' => $incidentId],
+                ['status' => $targetStatus->value, 'incident_id' => null],
+                [
+                    'ticket_code' => $ticketCode,
+                    'machine_id' => $case->getMachineId(),
+                    'reason' => 'Reintegro desvinculado de una avería cancelada por inactividad de sede; se mantiene para custodia y liquidación central (RF-04.5).',
+                ]
+            );
+        }
     }
 
     /**

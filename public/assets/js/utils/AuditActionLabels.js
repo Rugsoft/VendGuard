@@ -80,6 +80,7 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'MACHINE_TRANSFERRED', label: 'Traslado de Máquina', tone: 'info', group: 'machine' },
   { code: 'MACHINE_DEACTIVATED', label: 'Baja de Máquina', tone: 'danger', group: 'machine' },
   { code: 'MACHINE_REACTIVATED', label: 'Reactivación de Máquina', tone: 'success', group: 'machine' },
+  { code: 'MACHINE_BLOCKED_NO_ACCESS', label: 'Máquina Bloqueada por Falta de Acceso', tone: 'danger', group: 'machine' },
   { code: 'LOCATION_CREATED', label: 'Alta de Sede', tone: 'success', group: 'location' },
   { code: 'LOCATION_UPDATED', label: 'Modificación de Sede', tone: 'neutral', group: 'location' },
   { code: 'LOCATION_DEACTIVATED', label: 'Baja de Sede', tone: 'danger', group: 'location' },
@@ -116,6 +117,7 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'REFUND_DELIVERED_IN_HAND', label: 'Reintegro Entregado en Mano', tone: 'success', group: 'refund' },
   { code: 'REFUND_PAID_DIGITAL', label: 'Reintegro Pagado en Digital', tone: 'success', group: 'refund' },
   { code: 'UNCLAIMED_CASH_RECORDED', label: 'Efectivo No Reclamado Registrado', tone: 'warning', group: 'refund' },
+  { code: 'REFUND_DETACHED_BY_INACTIVITY', label: 'Reintegro Desvinculado por Inactividad', tone: 'warning', group: 'refund' },
   { code: 'EXPORT_SPARE_PARTS_CSV', label: 'Exportación CSV de Repuestos', tone: 'neutral', group: 'spare_parts' },
   { code: 'QR_LABEL_GENERATED', label: 'Etiqueta QR Generada (registro de demo)', tone: 'neutral', group: 'qr' }
 ]);

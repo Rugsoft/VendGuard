@@ -64,6 +64,13 @@ final class MachineHistoryStubMachineRepo implements MachineRepositoryInterface
     public function findAll(array $filters = []): array { throw new LogicException('Not used.'); }
     public function hasActiveTicketOrWarranty(int $machineId): bool { throw new LogicException('Not used.'); }
     public function getActiveTicketOrWarranty(int $machineId): ?array { throw new LogicException('Not used.'); }
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool { throw new LogicException('Not used.'); }
 }
 
@@ -107,6 +114,13 @@ final class MachineHistoryStubIncidentRepo implements IncidentRepositoryInterfac
     public function findAssignedToTechnician(int $technicianId, array $statuses = []): array { throw new LogicException('Not used.'); }
     public function findEnrichedDetailById(int|string $identifier): ?array { throw new LogicException('Not used.'); }
     public function update(Incident $incident): bool { throw new LogicException('Not used.'); }
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool { throw new LogicException('Not used.'); }
     public function insertHistory(int $incidentId, ?int $userId, ?string $fromStatus, string $toStatus, ?string $actionNote = null): int { throw new LogicException('Not used.'); }
     public function getHistory(int $incidentId): array { throw new LogicException('Not used.'); }

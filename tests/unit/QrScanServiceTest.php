@@ -116,6 +116,13 @@ class InMemoryMachineRepository implements MachineRepositoryInterface
         return null;
     }
 
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool
     {
         return true;
@@ -150,6 +157,13 @@ class InMemoryLocationRepository implements LocationRepositoryInterface
     public function findAllActive(): array
     {
         return array_values(array_filter($this->locations, fn(Location $l) => $l->isActive()));
+    }
+
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
     }
 
     public function softDelete(int $id): bool
@@ -231,6 +245,13 @@ class InMemoryIncidentRepository implements IncidentRepositoryInterface
     public function findAll(array $filters = []): array { return []; }
     public function findAssignedToTechnician(int $technicianId, array $statuses = []): array { return []; }
     public function update(Incident $incident): bool { return true; }
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool { return true; }
     public function insertHistory(int $incidentId, ?int $userId, ?string $fromStatus, string $toStatus, ?string $actionNote = null): int { return 1; }
     public function getHistory(int $incidentId): array { return []; }

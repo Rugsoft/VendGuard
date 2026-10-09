@@ -105,6 +105,27 @@ interface MachineRepositoryInterface
     public function getActiveTicketOrWarranty(int $machineId): ?array;
 
     /**
+     * Bloquea la máquina por falta de acceso tras una cancelación por inactividad
+     * de sede (RF-04.4, Art. V.1): marca `is_blocked_no_access = 1`, la deja
+     * inactiva (`is_active = 0`) y anota el ticket causante en las notas.
+     *
+     * La máquina NO vuelve a "Operativa": si nunca se pudo acceder a reparar el
+     * fallo, presentarla como apta para el servicio engañaría a los usuarios del
+     * inmueble. La vuelta al parque activo exige confirmación de acceso y aviso
+     * nuevo (RF-04.6).
+     *
+     * Es idempotente: repetir el bloqueo no duplica la anotación ni altera el
+     * primer ticket que lo motivó.
+     *
+     * @param int $machineId Máquina a bloquear.
+     * @param string $ticketCode Código del expediente cancelado que justifica el bloqueo.
+     * @return bool True si la máquina existe y el bloqueo quedó escrito.
+     * @throws \InvalidArgumentException Si el identificador o el ticket no son válidos.
+     * @throws \DomainException Si la máquina no existe.
+     */
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool;
+
+    /**
      * Aplica borrado lógico marcando is_active = 0 y deleted_at = CURRENT_TIMESTAMP (RNF-03, Art. III.1).
      *
      * @param int $id

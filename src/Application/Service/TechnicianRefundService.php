@@ -229,8 +229,12 @@ final class TechnicianRefundService
         // El tope agregado de la avería ya se aplica al aprobar y al liquidar,
         // así que aquí basta con registrar la parte que corresponde a este
         // expediente. Si es el único pendiente, recibe el total declarado.
-        $siblings = array_values(array_filter(
-            $this->refundRepo->findRestrictedByIncident($case->getIncidentId()),
+        // Un expediente desvinculado por inactividad de sede (RF-04.5) no tiene
+        // avería de la que repartir efectivo: es su propio y único hermano, así
+        // que recibe el importe declarado sin reparto entre reclamantes.
+        $incidentId = $case->getIncidentId();
+        $siblings = $incidentId === null ? [] : array_values(array_filter(
+            $this->refundRepo->findRestrictedByIncident($incidentId),
             static fn (RefundRequest $sibling): bool => $sibling->awaitsInspection()
         ));
         $recovered = $dto->recoveredAmount ?? 0.0;

@@ -40,7 +40,7 @@ final readonly class CoordinatorRefundViewDTO
 {
     public function __construct(
         public int $id,
-        public int $incidentId,
+        public ?int $incidentId,
         public ?string $incidentCode,
         public ?string $incidentStatus,
         public int $machineId,

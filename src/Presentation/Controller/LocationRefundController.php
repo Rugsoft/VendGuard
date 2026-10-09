@@ -281,7 +281,14 @@ class LocationRefundController
 
     private function resolveIncidentCode(RefundRequest $case): ?string
     {
-        $incident = $this->incidentRepo->findById($case->getIncidentId());
+        // RF-04.5: un expediente desvinculado de su avería ya no tiene ticket que
+        // mostrar; la sede conserva su reclamación sin que el portal se rompa.
+        $incidentId = $case->getIncidentId();
+        if ($incidentId === null) {
+            return null;
+        }
+
+        $incident = $this->incidentRepo->findById($incidentId);
 
         return $incident?->getTicketCode();
     }

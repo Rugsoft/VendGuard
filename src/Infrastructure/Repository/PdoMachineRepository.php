@@ -45,6 +45,7 @@ class PdoMachineRepository implements MachineRepositoryInterface
                 m.`floor_wing`,
                 m.`notes`,
                 m.`is_active`,
+                m.`is_blocked_no_access`,
                 m.`created_at`,
                 m.`updated_at`,
                 m.`deleted_at`,
@@ -98,6 +99,7 @@ class PdoMachineRepository implements MachineRepositoryInterface
                 m.`floor_wing`,
                 m.`notes`,
                 m.`is_active`,
+                m.`is_blocked_no_access`,
                 m.`created_at`,
                 m.`updated_at`,
                 m.`deleted_at`,
@@ -155,6 +157,7 @@ class PdoMachineRepository implements MachineRepositoryInterface
                 m.`floor_wing`,
                 m.`notes`,
                 m.`is_active`,
+                m.`is_blocked_no_access`,
                 m.`created_at`,
                 m.`updated_at`,
                 m.`deleted_at`,
@@ -376,6 +379,7 @@ class PdoMachineRepository implements MachineRepositoryInterface
                 m.`floor_wing`,
                 m.`notes`,
                 m.`is_active`,
+                m.`is_blocked_no_access`,
                 m.`sanitary_status`,
                 m.`next_sanitary_inspection_due`,
                 m.`is_seasonal_pause`,
@@ -523,6 +527,60 @@ class PdoMachineRepository implements MachineRepositoryInterface
             'ticket_code' => (string)$row['ticket_code'],
             'status'      => $status,
         ];
+    }
+
+    /**
+     * Bloquea la máquina por falta de acceso tras la cancelación de su avería por
+     * inactividad de sede (RF-04.4, Algoritmo 5 del plan técnico, Art. V.1).
+     *
+     * La semántica vive en el dominio (`Machine::blockForNoAccess()`): la entidad
+     * decide la anotación, la precedencia del estado y la idempotencia, y esta
+     * capa solo escribe la fila resultante. Escribir el UPDATE a mano habría
+     * duplicado el texto de la nota y el criterio de bloqueo.
+     *
+     * Una máquina dada de baja lógica no se bloquea: no hay parque que proteger.
+     *
+     * @param int $machineId
+     * @param string $ticketCode
+     * @return bool
+     * @throws \InvalidArgumentException
+     * @throws \DomainException
+     */
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        if ($machineId < 1) {
+            throw new \InvalidArgumentException('El bloqueo por falta de acceso exige el identificador de una máquina persistida.');
+        }
+
+        // La anotación se normaliza en el dominio antes de consultar nada, para
+        // que un ticket vacío no deje la máquina bloqueada sin rastro legible.
+        $annotation = Machine::noAccessBlockAnnotation($ticketCode);
+
+        $machine = $this->findById($machineId, false);
+        if ($machine === null) {
+            throw new \DomainException("No se encontró ninguna máquina activa con ID {$machineId} para bloquear por falta de acceso.");
+        }
+
+        $blocked = $machine->blockForNoAccess($ticketCode);
+
+        $stmt = $this->pdo->prepare("
+            UPDATE `machines`
+            SET `is_blocked_no_access` = 1,
+                `is_active` = 0,
+                `notes` = :notes,
+                `updated_at` = CURRENT_TIMESTAMP
+            WHERE `id` = :id
+              AND `deleted_at` IS NULL
+        ");
+        $stmt->execute([
+            ':notes' => $blocked->getNotes() ?? $annotation,
+            ':id' => $machineId,
+        ]);
+
+        // La reescritura idempotente de la MISMA fila devuelve 0 filas cambiadas
+        // en MySQL, así que el éxito se mide por la verdad escrita y no por
+        // `rowCount()`; el segundo bloqueo de una máquina ya bloqueada es válido.
+        return true;
     }
 
     /**

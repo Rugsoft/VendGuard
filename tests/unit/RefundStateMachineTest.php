@@ -198,6 +198,13 @@ final class InMemoryRefundRepository implements RefundRequestRepositoryInterface
         return true;
     }
 
+    public function detachFromIncident(int $id, \VendGuard\Core\Domain\Model\RefundStatus $newStatus): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la
+        // desvinculación real se certifica en la suite dedicada del modulo 11.
+        return true;
+    }
+
     public function deactivate(int $id): bool
     {
         if (!isset($this->rows[$id])) {

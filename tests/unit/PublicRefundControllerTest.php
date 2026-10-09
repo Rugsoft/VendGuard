@@ -174,6 +174,13 @@ final class TrackingRefundRepo implements RefundRequestRepositoryInterface
         return true;
     }
 
+    public function detachFromIncident(int $id, \VendGuard\Core\Domain\Model\RefundStatus $newStatus): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la
+        // desvinculación real se certifica en la suite dedicada del modulo 11.
+        return true;
+    }
+
     public function deactivate(int $id): bool
     {
         if (!isset($this->rows[$id])) {
@@ -242,6 +249,13 @@ final class TrackingMachineRepo implements MachineRepositoryInterface
         return null;
     }
 
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool
     {
         throw new LogicException('No used in this suite.');
@@ -282,6 +296,13 @@ final class TrackingLocationRepo implements LocationRepositoryInterface
     public function update(int $id, array $data): bool
     {
         throw new LogicException('No used in this suite.');
+    }
+
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
     }
 
     public function softDelete(int $id): bool

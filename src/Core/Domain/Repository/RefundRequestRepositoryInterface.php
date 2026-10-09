@@ -90,6 +90,22 @@ interface RefundRequestRepositoryInterface
     public function updateContactDetails(int $id, ?string $bizumPhone, ?string $iban): bool;
 
     /**
+     * Cuts the case loose from its incident without cancelling it (RF-04.5).
+     *
+     * Used when a ticket is cancelled for site inactivity: the money stays with
+     * the consumer, so the case keeps living in the coordination inbox while its
+     * `incident_id` becomes NULL. Cancelling the claim here would lose the
+     * consumer's money, which is exactly what the constitution forbids.
+     *
+     * @param int $id Case to detach.
+     * @param RefundStatus $newStatus State the case moves to, so the caller
+     *   decides whether it escalates to Coordination or keeps its own path.
+     * @return bool True when the row was rewritten; false when the case was not
+     *   attached, is not active, or the write changed nothing.
+     */
+    public function detachFromIncident(int $id, RefundStatus $newStatus): bool;
+
+    /**
      * Logically cancels a case. Rows are never physically deleted (Art. III).
      */
     public function deactivate(int $id): bool;

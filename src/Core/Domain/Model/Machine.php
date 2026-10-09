@@ -240,7 +240,7 @@ class Machine implements ArrayAccess, JsonSerializable
             return clone $this;
         }
 
-        $annotation = sprintf(self::BLOCKED_NO_ACCESS_NOTE_TEMPLATE, $normalizedTicketCode);
+        $annotation = self::noAccessBlockAnnotation($normalizedTicketCode);
         $previousNotes = $this->notes !== null && $this->notes !== '' ? $this->notes : null;
 
         $clone = clone $this;
@@ -249,6 +249,28 @@ class Machine implements ArrayAccess, JsonSerializable
         $clone->notes = $previousNotes !== null ? $previousNotes . ' ' . $annotation : $annotation;
 
         return $clone;
+    }
+
+    /**
+     * Anotación legible que deja constancia del ticket que bloqueó la máquina
+     * (RF-04.4, Algoritmo 5 del plan técnico).
+     *
+     * La expone la entidad porque es la única dueña del texto: la persistencia
+     * la reutiliza para escribir la columna `notes` sin duplicar el literal, de
+     * modo que la nota a pie de máquina y la entidad no pueden divergir.
+     *
+     * @param string $ticketCode Código visible del expediente que motiva el bloqueo.
+     * @return string Anotación normalizada en mayúsculas.
+     * @throws \InvalidArgumentException si falta el código de ticket.
+     */
+    public static function noAccessBlockAnnotation(string $ticketCode): string
+    {
+        $normalizedTicketCode = strtoupper(trim($ticketCode));
+        if ($normalizedTicketCode === '') {
+            throw new \InvalidArgumentException('El bloqueo por falta de acceso exige el código del ticket que lo motiva.');
+        }
+
+        return sprintf(self::BLOCKED_NO_ACCESS_NOTE_TEMPLATE, $normalizedTicketCode);
     }
 
     public function hasActiveIncident(): bool

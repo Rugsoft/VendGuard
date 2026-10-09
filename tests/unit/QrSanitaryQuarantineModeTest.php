@@ -84,6 +84,13 @@ class MockMachineRepository implements MachineRepositoryInterface
     public function update(int $id, array $data): bool { return true; }
     public function transfer(int $id, int $targetLocationId, string $floorWing, ?string $notes = null): bool { return true; }
     public function restoreWithLocation(int $id, ?int $newLocationId = null, ?string $newFloorWing = null): bool { return true; }
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool { return true; }
     public function countActiveByLocation(int $locationId): int { return 0; }
     public function findAll(array $filters = []): array { return array_values($this->machines); }
@@ -113,6 +120,13 @@ class MockLocationRepository implements LocationRepositoryInterface
     public function findAll(string $status = 'all', ?string $search = null): array { return []; }
     public function create(array $data): Location { throw new \BadMethodCallException(); }
     public function update(int $id, array $data): bool { return true; }
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool { return true; }
     public function restore(int $id): bool { return true; }
     public function updateContactPhone(int $id, string $contactPhone): bool { return true; }
@@ -158,6 +172,13 @@ class MockIncidentRepository implements IncidentRepositoryInterface
     public function findAll(array $filters = []): array { return []; }
     public function findAssignedToTechnician(int $technicianId, array $statuses = []): array { return []; }
     public function update(Incident $incident): bool { return true; }
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool { return true; }
     public function insertHistory(int $incidentId, ?int $userId, ?string $fromStatus, string $toStatus, ?string $actionNote = null): int { return 1; }
     public function getHistory(int $incidentId): array { return []; }

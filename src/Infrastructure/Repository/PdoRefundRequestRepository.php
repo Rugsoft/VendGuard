@@ -45,10 +45,11 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
 
     /**
      * Join needed by the coordination filters that look at the incident, such as
-     * `incident_status`. `refund_requests.incident_id` is NOT NULL behind a
-     * foreign key, so a LEFT JOIN never drops a row; it is LEFT only so that a
-     * future soft-deleted incident still returns its case instead of vanishing
-     * from the inbox.
+     * `incident_status`. Since migration 017 `refund_requests.incident_id` is
+     * NULLable on purpose (RF-04.5 detaches a case from a ticket cancelled for
+     * site inactivity so the money survives), so the LEFT JOIN is now load
+     * bearing in two ways: it never drops a detached case either, and the
+     * filter on the incident simply matches nothing for it.
      */
     private const COORDINATOR_INCIDENT_JOIN = ' LEFT JOIN `incidents` i ON i.`id` = r.`incident_id`';
 
@@ -403,7 +404,7 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
 
         return new RefundRequest(
             id: (int)$row['id'],
-            incidentId: (int)$row['incident_id'],
+            incidentId: isset($row['incident_id']) && $row['incident_id'] !== null ? (int)$row['incident_id'] : null,
             machineId: (int)$row['machine_id'],
             locationId: (int)$row['location_id'],
             claimantName: (string)$row['claimant_name'],
@@ -458,5 +459,41 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
         }
 
         return $result;
+    }
+
+    /**
+     * Cuts the link between a refund case and its incident (RF-04.5).
+     *
+     * The case is NOT cancelled: the money stays with the consumer, so the row
+     * only loses its parent ticket (`incident_id = NULL`) and moves to the
+     * state the caller declares (Coordination's inbox when the case was still
+     * awaiting the technical inspection that will never happen). The write is a
+     * single statement, so it is atomic on its own, and it participates in an
+     * outer transaction when the caller opened one — exactly like the rest of
+     * the repositories here.
+     *
+     * @param int $id Case to detach.
+     * @param RefundStatus $newStatus State the case moves to.
+     * @return bool True when the row was actually rewritten. A repeat call in
+     *   the same second returns false because MySQL reports no changed row,
+     *   which is why the caller treats it as a hard failure and rolls back.
+     */
+    public function detachFromIncident(int $id, RefundStatus $newStatus): bool
+    {
+        $stmt = $this->pdo->prepare("
+            UPDATE `refund_requests`
+            SET `incident_id` = NULL,
+                `status` = :status,
+                `updated_at` = CURRENT_TIMESTAMP
+            WHERE `id` = :id
+              AND `incident_id` IS NOT NULL
+              AND `is_active` = 1
+        ");
+        $stmt->execute([
+            ':status' => $newStatus->value,
+            ':id' => $id,
+        ]);
+
+        return $stmt->rowCount() === 1;
     }
 }

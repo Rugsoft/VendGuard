@@ -732,6 +732,14 @@ class CoordinatorRefundController
     private function resolveIncident(RefundRequest $case): ?Incident
     {
         $incidentId = $case->getIncidentId();
+
+        // Un expediente desvinculado por inactividad de sede (RF-04.5) no tiene
+        // avería que resolver: la bandeja lo pinta sin ticket asociado en lugar
+        // de intentar leer una fila con identificador nulo.
+        if ($incidentId === null) {
+            return null;
+        }
+
         if (!array_key_exists($incidentId, $this->incidentCache)) {
             $this->incidentCache[$incidentId] = $this->incidentRepo->findById($incidentId);
         }

@@ -683,7 +683,9 @@ final class RefundManagementService
     private function assertIncidentPayoutWithinRecovered(RefundRequest $case, float $candidateAmount): void
     {
         $incidentId = $case->getIncidentId();
-        if ($incidentId < 1) {
+        // Un expediente desvinculado por inactividad de sede (RF-04.5) ya no tiene
+        // avería con la que repartir efectivo recuperado: no hay techo que imponer.
+        if ($incidentId === null || $incidentId < 1) {
             return;
         }
 

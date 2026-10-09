@@ -97,6 +97,13 @@ class MockLocationRepoForSite implements LocationRepositoryInterface
     public function findAll(string $status = 'all', ?string $search = null): array { return array_values($this->locations); }
     public function create(array $data): Location { throw new DomainException('Not implemented'); }
     public function update(int $id, array $data): bool { return true; }
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool { return true; }
     public function restore(int $id): bool { return true; }
     public function updateContactPhone(int $id, string $contactPhone): bool { return true; }
@@ -141,6 +148,13 @@ class MockMachineRepoForSite implements MachineRepositoryInterface
     public function findAll(array $filters = []): array { return array_values($this->machines); }
     public function hasActiveTicketOrWarranty(int $machineId): bool { return false; }
     public function getActiveTicketOrWarranty(int $machineId): ?array { return null; }
+    public function blockForNoAccess(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del bloqueo vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
+
     public function softDelete(int $id): bool { return true; }
 }
 
