@@ -47,8 +47,9 @@ enum MachineType: string
      * Determina si la tipología queda bajo vigilancia del Reloj Sanitario Biológico
      * del Art. II (RF-03.4, RF-03.5).
      *
-     * Incluye la máquina mixta (`COMBO`) por enmienda del Product Owner ratificada en
-     * T-PAUSE-22: una combinada puede alojar producto fresco en su módulo refrigerado,
+     * Incluye la máquina mixta (`COMBO`) por la cláusula ratificada del Product Owner en
+     * `spec.md` RF-03.4/RF-03.5 (T-PAUSE-26): una combinada puede alojar producto fresco en
+     * su módulo refrigerado,
      * de modo que sufriría la misma pérdida de cadena de frío que una perecedera pura.
      * El criterio es deliberadamente más ancho que `isPerishable()` —que sigue nombrando
      * la máquina exclusiva de alimentos perecederos— y coincide con el que ya aplica el

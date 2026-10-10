@@ -569,7 +569,8 @@ try {
         ($machineRow($perishableMachine['machine_id'])['sanitary_status'] ?? '') === 'QUARANTINE'
     );
 
-    // 1.7 La enmienda del Product Owner: la máquina mixta (COMBO) también está bajo vigilancia sanitaria.
+    // 1.7 La máquina mixta (COMBO) queda bajo vigilancia sanitaria por la cláusula ratificada
+    //     del spec (RF-03.4/RF-03.5: `MachineType::requiresSanitaryWatch()`).
     $comboMachine = $comboPool[0];
     $touchMachine($comboMachine['machine_id']);
 
@@ -588,7 +589,7 @@ try {
     ));
 
     $assert(
-        '1.7 La mixta COMBO con 5 h naturales también bloquea el cierre y entra en QUARANTINE (enmienda ratificada)',
+        '1.7 La mixta COMBO con 5 h naturales también bloquea el cierre y entra en QUARANTINE (RF-03.4/03.5 ratificados)',
         $comboResponse->getStatusCode() === 422
             && ($comboResponse->getDecodedBody()['error']['code'] ?? '') === 'SANITARY_CHECKLIST_REQUIRED'
             && ($machineRow($comboMachine['machine_id'])['sanitary_status'] ?? '') === 'QUARANTINE'

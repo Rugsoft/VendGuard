@@ -354,9 +354,11 @@ Garantiza la supremacía de la seguridad alimentaria en máquinas de frío indep
 
 ```text
 ALGORITMO EvaluarDobleRelojSanitario(incidencia, maquina, ahora)
-    // 1. Evaluar si la máquina dispensa alimentos perecederos con cadena de frío
-    SI maquina.machine_type != "PERISHABLE_FOOD" ENTONCES:
-        RETORNAR // Máquina no perecedera (café, snacks): solo aplica reloj contractual
+    // 1. Evaluar si la máquina queda bajo vigilancia sanitaria (RF-03.4, ratificado en
+    //    T-PAUSE-26): perecederas PERISHABLE_FOOD y mixtas COMBO con módulo refrigerado.
+    //    Las bebidas frías y las tipologías sin producto fresco solo computan reloj contractual.
+    SI NOT requiresSanitaryWatch(maquina.machine_type) ENTONCES:
+        RETORNAR // Máquina fuera de la vigilancia sanitaria: solo aplica reloj contractual
     FIN SI
 
     // 2. Reloj Biológico Sanitario: tiempo natural 24/7 continuo desde el reporte inicial de frío
@@ -570,7 +572,7 @@ FIN ALGORITMO
 | **RF-03.1** | Descuento exacto de intervalos de pausa en MTTR. | `PdoMetricsRepository.php` | Test evaluando MTTR restando `total_pending_info_seconds`. |
 | **RF-03.2** | Reloj contractual visualmente congelado (`⏸️ SLA pausado`). | `CoordinatorIncidentDetailModal.js` | Test JS comprobando renderizado de insignia de pausa. |
 | **RF-03.3** | Desplazamiento de `sla_target_at` en horario comercial de sede. | `IncidentPauseService::shiftSlaTargetInBusinessHours()` | Test calculando salto de fin de semana y noches. |
-| **RF-03.4** | Reloj Sanitario Biológico continuo 24/7 en perecederos (Art. II). | `IncidentPauseService::evaluateSanitaryBiologicalClock()` | Test simulando 4 horas naturales continuas. |
+| **RF-03.4** | Reloj Sanitario Biológico continuo 24/7 en las máquinas bajo vigilancia sanitaria —perecederas `PERISHABLE_FOOD` y mixtas `COMBO` (Art. II, ratificado en T-PAUSE-26). | `IncidentPauseService::evaluateSanitaryBiologicalClock()` | Test simulando 4 horas naturales continuas. |
 | **RF-03.5** | Cuarentena automática a las 4h y bloqueo en resolución (Art. II). | `PdoPreventiveSettingsRepository`, validador resolución | Test verificando modo `QUARANTINE` y rechazo de resolución sin checklist. |
 | **RF-04.1** | Pausas múltiples acumulativas en un mismo ticket. | `PdoIncidentRepository.php` | Test acumulando dos pausas sucesivas en `total_pending_info_seconds`. |
 | **RF-04.2** | Detección de inactividad de 72 horas hábiles comerciales. | `IncidentPauseService::isProlongedInactivity()` | Test calculando 72h hábiles de 08:00 a 18:00. |
