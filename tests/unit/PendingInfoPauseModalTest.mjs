@@ -139,6 +139,42 @@ assert('3.1 Los botones de causa especifican altura mínima táctil minHeight: 4
   templateStr.includes("minHeight: '44px'"));
 assert('3.2 El botón de cerrar cabecera cumple altura y anchura mínima táctil de 44px',
   templateStr.includes('min-height: 44px') && templateStr.includes('min-width: 44px'));
+// 3.3.b Contrato de layout a 360 px (RNF-03, T-PAUSE-27): el modal debe caber y ser
+//       operable en el terminal más estrecho que declara la especificación.
+const modalTemplate = PendingInfoPauseModal.template;
+const minWidths = [...modalTemplate.matchAll(/min-width:\s*(\d+)px/g)].map(m => Number(m[1]));
+const fontSizes = [...modalTemplate.matchAll(/font-size:\s*(\d+)px/g)].map(m => Number(m[1]));
+
+// `max-width` no puede contar como ancho fijo: es justo la cota que hace fluido el diálogo.
+const fixedWidths = [...modalTemplate.matchAll(/(?<!max-)(?<!min-)\bwidth:\s*(\d+)px/g)].map(m => Number(m[1]));
+assert('3.3.b.1 El diálogo ocupa el 100 % del ancho disponible en vez de un ancho fijo',
+  modalTemplate.includes('width: 100%') && fixedWidths.length === 0,
+  `anchos fijos declarados: ${JSON.stringify(fixedWidths)}`);
+
+assert('3.3.b.2 El backdrop deja 16 px de margen por lado: a 360 px el diálogo mide 328 px',
+  modalTemplate.includes('padding: 16px') && modalTemplate.includes('box-sizing: border-box'));
+
+assert('3.3.b.3 Ningún min-width puede desbordar los 328 px útiles (el mayor es un botón de 140 px)',
+  minWidths.length > 0 && Math.max(...minWidths) <= 160,
+  `min-width declarados: ${JSON.stringify(minWidths)}`);
+
+assert('3.3.b.4 El cuerpo del formulario es de una sola columna',
+  modalTemplate.includes('flex-direction: column') && !modalTemplate.includes('grid-template-columns'));
+
+assert('3.3.b.5 El modal se desplaza en vertical en pantallas bajas en vez de desbordarlas',
+  modalTemplate.includes('max-height: 90vh') && modalTemplate.includes('overflow-y: auto'));
+
+assert('3.3.b.6 La tipografía nunca baja de 12 px en el terminal móvil',
+  fontSizes.length > 0 && Math.min(...fontSizes) >= 12,
+  `font-size declarados: ${JSON.stringify(fontSizes)}`);
+
+// Los cuatro botones de causa se pintan con la forma camelCase del binding de estilo; los
+// tres restantes (cerrar y pie de acciones) lo declaran como CSS en línea.
+const literalTouchTargets = (modalTemplate.match(/min-height: 44px/g) || []).length;
+assert('3.3.b.7 Los cuatro botones de causa y los tres de acción respetan el objetivo táctil de 44 px',
+  literalTouchTargets >= 3 && modalTemplate.includes("minHeight: '44px'"),
+  `min-height literales: ${literalTouchTargets} · binding de causas presente: ${modalTemplate.includes("minHeight: '44px'")}`);
+
 assert('3.3 Los botones de acción de pie cumplen min-height: 44px',
   templateStr.includes('min-height: 44px; min-width: 140px') && templateStr.includes('min-height: 44px; min-width: 90px'));
 
