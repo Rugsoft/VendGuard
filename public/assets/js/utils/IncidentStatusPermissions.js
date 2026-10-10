@@ -228,6 +228,16 @@ export function isCriticalUrgency(value) {
  */
 export const AMBER_TECHNICAL_TOKENS = Object.freeze({ bg: '#fef9c3', color: '#854d0e', border: '#fde047' });
 
+/**
+ * Rango térmico plausible del recinto de una máquina (RF-03.5.2, Constitución Art. II).
+ *
+ * Espejo en el cliente de `ResolutionValidator::MIN_PLAUSIBLE_TEMPERATURE_C` y
+ * `MAX_PLAUSIBLE_TEMPERATURE_C` del servidor. Se declara una sola vez para que el bloque
+ * de declaraciones sanitarias del cierre no pueda desincronizarse del validador que
+ * manda: el técnico no debe poder teclear una lectura que el servidor rechazará después.
+ */
+export const SANITARY_TEMPERATURE_RANGE = Object.freeze({ min: -40.0, max: 80.0 });
+
 /** Docker-design palette per urgency (semantic colors + CSS class hook). */
 export const BADGE_URGENCY_PALETTE = Object.freeze({
   CRITICAL: Object.freeze({ cssClass: 'vg-badge-critical', bg: '#fee2e2', color: '#dc2626', border: '#fca5a5' }),

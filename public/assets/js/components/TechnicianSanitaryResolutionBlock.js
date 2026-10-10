@@ -19,6 +19,8 @@
  * Dualismo Lingüístico: Código y propiedades en inglés, textos e interfaz en español.
  */
 
+import { SANITARY_TEMPERATURE_RANGE } from '../utils/IncidentStatusPermissions.js';
+
 export const TechnicianSanitaryResolutionBlock = {
   name: 'TechnicianSanitaryResolutionBlock',
   props: {
@@ -33,8 +35,10 @@ export const TechnicianSanitaryResolutionBlock = {
       temperatureC: '',
       stockDestroyed: false,
       hygieneChecklist: false,
-      minTemperature: -40.0,
-      maxTemperature: 80.0
+      // El rango plausible se declara una sola vez en el módulo compartido, para no
+      // poder desincronizarse del validador del servidor.
+      minTemperature: SANITARY_TEMPERATURE_RANGE.min,
+      maxTemperature: SANITARY_TEMPERATURE_RANGE.max
     };
   },
   computed: {
@@ -109,12 +113,22 @@ export const TechnicianSanitaryResolutionBlock = {
 
     /**
      * Payload normalizado conforme al contrato de resolución (RF-03.5.2).
+     *
+     * Se emite el estado REAL del bloque: mientras la lectura no sea válida viaja
+     * como `null` —en lugar de inventar un número a partir de una cadena no
+     * numérica— y cada confirmación refleja su casilla, no una constante. Sin esta
+     * guarda, el vigilante reactivo que emite en cada pulsación reventaba con
+     * `TypeError: Cannot read properties of null (reading 'toFixed')` al vaciar el
+     * campo o al escribir una letra, y además declaraba hechas las dos
+     * confirmaciones que el técnico todavía no había marcado.
      */
     getPayload() {
       return {
-        temperature_c: Number(this.parsedTemperature.toFixed(2)),
-        stock_destroyed: true,
-        hygiene_checklist: true
+        temperature_c: this.parsedTemperature === null
+          ? null
+          : Number(this.parsedTemperature.toFixed(2)),
+        stock_destroyed: this.stockDestroyed === true,
+        hygiene_checklist: this.hygieneChecklist === true
       };
     },
 

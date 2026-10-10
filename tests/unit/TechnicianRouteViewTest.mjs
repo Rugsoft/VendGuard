@@ -838,6 +838,88 @@ assert('9.26 Un fallo de reanudación se muestra y mantiene la parada en espera'
     && failedResumeView.isResumingPendingInfo === false);
 
 // ---------------------------------------------------------------------
+// TEST GROUP 10: Sanitary closure gate on the route (T-PAUSE-25, RF-03.5.2, Art. II)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 10: Puerta sanitaria del cierre en la vista (RF-03.5.2, Art. II) ---');
+
+assert('10.1 La vista registra el bloque de declaraciones sanitarias como componente',
+  Boolean(TechnicianRouteView.components?.TechnicianSanitaryResolutionBlock));
+
+assert('10.2 La plantilla monta el bloque sanitario con su referencia dentro del modal de resolución',
+  typeof TechnicianRouteView.template === 'string'
+    && TechnicianRouteView.template.includes('TechnicianSanitaryResolutionBlock')
+    && TechnicianRouteView.template.includes('resolutionSanitaryBlockRef'));
+
+const sanitaryView = createRouteInstance();
+let sanitaryCalledId = null;
+let sanitaryCalledPayload = null;
+api.technician.getRefundInspection = async () => ({ has_refund_requests: false, has_pending_verdict: false, requests: [] });
+api.technician.resolveIncident = async (id, payloadOrDiagnosis, actionTaken) => {
+  sanitaryCalledId = id;
+  sanitaryCalledPayload = typeof payloadOrDiagnosis === 'object' ? payloadOrDiagnosis : null;
+  return { success: true, data: { id, status: 'RESOLVED', resolved_at: '2026-10-10T10:00:00Z' } };
+};
+
+const quarantineIncident = {
+  ...JSON.parse(JSON.stringify(mockRouteIncidents.find(i => i.id === 102)),),
+  sanitary_resolution_required: true
+};
+await sanitaryView.openResolveModal(quarantineIncident);
+assert('10.3 La ruta que publica sanitary_resolution_required abre la puerta sanitaria',
+  sanitaryView.sanitaryResolutionRequired === true && sanitaryView.selectedIncident?.id === 102);
+
+sanitaryView.resolveDiagnosis = 'Sonda NTC descalibrada registrando 14 grados en cámara de frescos.';
+sanitaryView.resolveAction = 'Sustitución de sonda NTC y verificación del ciclo a 3,5 grados.';
+assert('10.4 Con los textos válidos y sin declaraciones sanitarias el cierre sigue bloqueado',
+  sanitaryView.isDiagnosisValid === true
+    && sanitaryView.isActionValid === true
+    && sanitaryView.canResolve === false);
+
+await sanitaryView.submitResolve();
+assert('10.5 Sin bloque sanitario válido el cierre se intercepta y no llega a la API',
+  sanitaryView.resolveError.length > 0 && sanitaryCalledId === null);
+
+sanitaryView.$refs = {
+  resolutionSanitaryBlockRef: {
+    validate: () => ({
+      isValid: true,
+      error: '',
+      payload: {
+        sanitary_declarations: { temperature_c: 3.5, stock_destroyed: true, hygiene_checklist: true }
+      }
+    })
+  }
+};
+sanitaryView.handleSanitaryChange({
+  isValid: true,
+  temperature_c: 3.5,
+  stock_destroyed: true,
+  hygiene_checklist: true
+});
+assert('10.6 El bloque válido habilita el cierre', sanitaryView.canResolve === true);
+
+await sanitaryView.submitResolve();
+assert('10.7 El cierre viaja con las tres declaraciones sanitarias en el payload',
+  sanitaryCalledId === 102
+    && sanitaryCalledPayload?.sanitary_declarations?.temperature_c === 3.5
+    && sanitaryCalledPayload?.sanitary_declarations?.stock_destroyed === true
+    && sanitaryCalledPayload?.sanitary_declarations?.hygiene_checklist === true,
+  JSON.stringify(sanitaryCalledPayload));
+
+// La vigilancia no es universal: sin la bandera del servidor el cierre sigue siendo el de siempre.
+const plainView = createRouteInstance();
+sanitaryCalledId = null;
+sanitaryCalledPayload = 'sin-llamar';
+await plainView.openResolveModal(JSON.parse(JSON.stringify(mockRouteIncidents.find(i => i.id === 101))));
+plainView.resolveDiagnosis = 'Monedero con el selector de monedas desgastado y sin retorno de cambio.';
+plainView.resolveAction = 'Sustitución del selector de monedas y prueba de ciclo completo de cobro.';
+assert('10.8 Sin bandera sanitaria la vista no exige las declaraciones (la vigilancia no es universal)',
+  plainView.sanitaryResolutionRequired === false && plainView.canResolve === true);
+await plainView.submitResolve();
+assert('10.9 El cierre ordinario conserva el contrato posicional, sin bloque sanitario añadido',
+  sanitaryCalledId === 101 && sanitaryCalledPayload === null);
+
+// ---------------------------------------------------------------------
 // SUMMARY
 // ---------------------------------------------------------------------
 console.log('\n======================================================================');
