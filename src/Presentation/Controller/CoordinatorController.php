@@ -292,6 +292,15 @@ class CoordinatorController
                 'sla_minutes_elapsed' => $minutesWaiting,
                 'waiting_minutes' => $minutesWaiting,
                 'sla_breached' => $slaBreached,
+                // Reloj contractual congelado de la bandeja (RF-03.2, RF-04.2): la fila
+                // sabe si el SLA está pausado, cuántos minutos lleva descontados y si la
+                // espera de sede ya supera las 72 horas hábiles que encienden la alerta
+                // prioritaria. El listado no hidrata agregados: la regla del umbral la
+                // publica el servicio del módulo 11 sobre las columnas crudas.
+                'is_sla_paused' => $incident->isPaused(),
+                'total_pending_info_minutes' => (int)round($incident->getTotalPendingInfoSeconds() / 60),
+                'is_prolonged_inactivity' => $incident->isPaused()
+                    && $this->pauses()->isProlongedInactivity($incident),
                 // Insignia de conversación de la fila de triaje (RF-01.1): el coordinador
                 // contabiliza la TOTALIDAD de mensajes, públicos y notas internas de taller,
                 // porque su canal tiene acceso legítimo a ambos (RF-02.3).

@@ -1,7 +1,7 @@
 # Handoff · Rama `incident-comments`
 
 **Fecha:** 2026-10-08 · **Cierre de contenido:** `a5005fa` + segunda tanda de triaje + cierre de S-4 (`f968d98`, `29f19ee`, `2ae2b63`) · **Publicado:** `origin/incident-comments` hasta `2ae2b63`; el arreglo del arranque desplegado de esta pasada está en el árbol, pendiente de commit · **Material ajeno no versionado:** `specs/11-*` y `pending_info_sla_pause_spec.md`
-**Batería:** `php tests/run_all.php` → **batería global: 231 suites · 8.852 aserciones** · 0 fallos · base restaurada a semillas
+**Batería:** `php tests/run_all.php` → **batería global: 231 suites · 8.907 aserciones** · 0 fallos · base restaurada a semillas
 *(la propia batería audita esta cifra: un desfase documental la pone en rojo vía `tests/Support/DocMetricsGuard.php`)*
 
 ---
@@ -64,7 +64,7 @@ El triaje completo, con criterios de aceptación y justificación por hallazgo, 
 * **Suites enfocadas del cierre:** `AuditFindingsSecondWaveClosureTest.php` 16/16 (S-5, H-5, V-6, T-1, §5.2, §6), `DesignTokenDebtRatchetTest.mjs` 3/3, `ConnectionFactoryTest` verde, `SeedDataTest` verde, `CoordinatorPreventiveApiTest.php` 53/53, `AuditFindingsClosureTest.php` 29/29 (primera tanda, sigue verde).
 * **V-6 verificado en comportamiento:** un token de sede recién emitido declara `exp = ahora + 86400` y el parámetro de TTL explícito sigue funcionando; la guarda estructural impide que vuelva el valor de 7 días.
 * **Comprobaciones manuales de S-5:** con `APP_ENV=production` y sin credenciales, `ConnectionFactory` lanza la política; con `root`/'' explícito también; en desarrollo conecta igual que antes.
-* **Pruebas de la pasada anterior (siguen verdes):** `CoordinatorDashboardViewTest.mjs` 105/105, `CoordinatorTerritorialMapTabTest.mjs` 92/92, `CoordinatorPreventiveComponentsTest.mjs` 67/67, `CoordinatorRouteMapApiTest.php` 50/50.
+* **Pruebas de la pasada anterior (siguen verdes):** `CoordinatorDashboardViewTest.mjs` 123/123, `CoordinatorTerritorialMapTabTest.mjs` 92/92, `CoordinatorPreventiveComponentsTest.mjs` 67/67, `CoordinatorRouteMapApiTest.php` 50/50.
 
 ## 6. Riesgos abiertos y pendientes vivos
 

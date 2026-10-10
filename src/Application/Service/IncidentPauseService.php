@@ -772,12 +772,42 @@ final class IncidentPauseService
      */
     public function isProlongedInactivity(Incident $incident, ?DateTimeImmutable $now = null): bool
     {
-        $pausedAt = $this->parseDateTime($incident->getPausedAt());
-        if ($pausedAt === null || !$incident->isPendingInfo()) {
+        return $this->isProlongedInactivitySince(
+            $incident->getPausedAt(),
+            $incident->isPendingInfo(),
+            $now
+        );
+    }
+
+    /**
+     * Misma regla de inactividad prolongada sobre las columnas crudas del expediente.
+     *
+     * Existe porque las superficies de **lectura** (bandeja de triaje y ficha de detalle)
+     * trabajan con filas asociativas de MariaDB y no hidratan un agregado `Incident` sólo
+     * para pintar una insignia. La regla de negocio no se duplica: este método es la
+     * única implementación del umbral y `isProlongedInactivity()` delega en él. La
+     * condición `isSlaPaused` es el `isPendingInfo()` del agregado: sin intervalo de
+     * pausa vivo (o fuera de `PENDING_INFO`) no hay espera de sede que medir.
+     *
+     * @param string|null $pausedAt Marca del intervalo de pausa vivo, en formato de base de datos.
+     * @param bool $isSlaPaused True solo si el expediente está en `PENDING_INFO` con pausa abierta.
+     * @param DateTimeImmutable|null $now Instante de referencia (inyectable en pruebas).
+     * @return bool True si el expediente acumula más de 72 horas hábiles en pausa.
+     */
+    public function isProlongedInactivitySince(
+        ?string $pausedAt,
+        bool $isSlaPaused,
+        ?DateTimeImmutable $now = null
+    ): bool {
+        $pauseStartedAt = $this->parseDateTime($pausedAt);
+        if ($pauseStartedAt === null || !$isSlaPaused) {
             return false;
         }
 
-        $businessSeconds = $this->countBusinessSecondsBetween($pausedAt, $now ?? new DateTimeImmutable());
+        $businessSeconds = $this->countBusinessSecondsBetween(
+            $pauseStartedAt,
+            $now ?? new DateTimeImmutable()
+        );
 
         return $businessSeconds > self::PROLONGED_INACTIVITY_BUSINESS_HOURS * 3600;
     }

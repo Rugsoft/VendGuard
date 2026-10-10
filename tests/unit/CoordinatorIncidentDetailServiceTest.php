@@ -361,6 +361,156 @@ $assert(
 );
 
 // =====================================================================
+// GRUPO 7: Pausa contractual de la espera de sede (T-PAUSE-19 / RF-03.2, RF-04.2)
+// =====================================================================
+echo "\n--- Grupo 7: Pausa contractual, reloj congelado y espera prolongada ---\n";
+
+/**
+ * Expediente real en pausa por bloqueo de sede: la avería nació el jueves 1 a las
+ * 08:15 (objetivo contractual a las 12:15) y el técnico encontró la puerta cerrada el
+ * jueves 8 a las 09:00, así que el reloj de frío debe quedarse ahí.
+ */
+$sitePauseIncident = array_merge($fixture['incident'], [
+    'status' => 'PENDING_INFO',
+    'paused_at' => '2026-10-01 09:00:00',
+    'total_pending_info_seconds' => 5400,
+    'pending_info_reason_category' => 'BUILDING_CLOSED_NO_ACCESS',
+    'pending_info_reason_text' => 'El conserje confirma que el centro permanece cerrado por obras toda la semana.',
+]);
+
+$sitePauseRepo = new CoordinatorIncidentDetailServiceStubRepo();
+$sitePauseRepo->fixture = array_merge($fixture, ['incident' => $sitePauseIncident]);
+$sitePauseService = new CoordinatorIncidentDetailService($sitePauseRepo);
+$pauseNow = new DateTimeImmutable('2026-10-01 11:00:00');
+$sitePauseDetail = $sitePauseService->buildDetail(142, $pauseNow)->toArray();
+$sitePauseBlock = $sitePauseDetail['technical_intervention']['pause'];
+
+$assert(
+    '7.1 El bloque de pausa publica marca, causa tipificada, justificación y los minutos descontados',
+    $sitePauseBlock['is_paused'] === true
+        && $sitePauseBlock['is_sla_paused'] === true
+        && $sitePauseBlock['paused_at'] === '2026-10-01 09:00:00'
+        && $sitePauseBlock['paused_minutes'] === 120
+        && $sitePauseBlock['accumulated_pause_minutes'] === 90
+        && $sitePauseBlock['reason_category'] === 'BUILDING_CLOSED_NO_ACCESS'
+        && $sitePauseBlock['reason_category_label'] === 'Edificio cerrado / Sin acceso a instalaciones'
+        && $sitePauseBlock['reason_text'] === 'El conserje confirma que el centro permanece cerrado por obras toda la semana.',
+    json_encode($sitePauseBlock)
+);
+
+$assert(
+    '7.2 Reloj contractual congelado: la cuenta atrás se detiene en el instante de la pausa (RF-03.2)',
+    $sitePauseDetail['sla']['is_frozen'] === true
+        && $sitePauseDetail['sla']['frozen_at'] === '2026-10-01 09:00:00'
+        && $sitePauseDetail['sla']['minutes_remaining'] === 195
+        && $sitePauseDetail['sla']['historical_balance'] === 'Tiempo restante: 3 h 15 min'
+        && $sitePauseDetail['sla']['is_breached'] === false,
+    json_encode($sitePauseDetail['sla'])
+);
+
+// La prueba del algodón del doble reloj: el mismo expediente sin pausa consume 75 min a la
+// misma hora, así que el congelado (195 min) no es un eco del reloj de pared.
+$liveSla = $sitePauseService->computeSlaStatus(
+    array_merge($sitePauseIncident, ['status' => 'IN_PROGRESS', 'paused_at' => null]),
+    $fixture['machine'],
+    ['created_at' => '2026-10-01 08:15:00', 'resolved_at' => null],
+    $pauseNow
+);
+$assert(
+    '7.2.b Sin pausa la misma avería consume 75 min: el congelado no es un eco del reloj de pared',
+    $liveSla['is_frozen'] === false && $liveSla['minutes_remaining'] === 75,
+    json_encode($liveSla)
+);
+
+$assert(
+    '7.3 El vencimiento congelado es el vigente al pausar y el recalculado suma la espera en horario hábil',
+    $sitePauseBlock['sla_target_frozen_at'] === '2026-10-01 12:15:00'
+        && $sitePauseBlock['sla_target_recalculated_at'] === '2026-10-01 15:45:00',
+    json_encode([$sitePauseBlock['sla_target_frozen_at'], $sitePauseBlock['sla_target_recalculated_at']])
+);
+
+$assert(
+    '7.4 Las dos acciones supervisadas se habilitan con la pausa viva (RF-04.3, RF-06.2)',
+    $sitePauseBlock['can_resume_pause'] === true
+        && $sitePauseBlock['can_cancel_inactivity'] === true
+        && $sitePauseBlock['inactivity_threshold_business_hours'] === \VendGuard\Application\Service\IncidentPauseService::PROLONGED_INACTIVITY_BUSINESS_HOURS
+);
+
+// Umbral de 72 horas hábiles (RF-04.2): de lunes 28-09 08:00 a lunes 05-10 10:00 son 60 h;
+// las 72 h exactas se alcanzan el miércoles 07-10 a las 10:00 y el aviso salta un segundo después.
+$longWaitIncident = array_merge($sitePauseIncident, ['paused_at' => '2026-09-28 08:00:00']);
+$longWaitRepo = new CoordinatorIncidentDetailServiceStubRepo();
+$longWaitService = new CoordinatorIncidentDetailService($longWaitRepo);
+$longWaitRepo->fixture = array_merge($fixture, ['incident' => $longWaitIncident]);
+
+$atExactThreshold = $longWaitService->buildDetail(142, new DateTimeImmutable('2026-10-07 10:00:00'))->toArray();
+$oneSecondOver = $longWaitService->buildDetail(142, new DateTimeImmutable('2026-10-07 10:00:01'))->toArray();
+$assert(
+    '7.5 Justo en el umbral no hay alerta: la espera prolongada exige superar las 72 h hábiles (RF-04.2)',
+    $atExactThreshold['technical_intervention']['pause']['is_prolonged_inactivity'] === false
+        && $atExactThreshold['sla']['is_frozen'] === true
+);
+$assert(
+    '7.6 Un segundo después del umbral la alerta prioritaria se enciende',
+    $oneSecondOver['technical_intervention']['pause']['is_prolonged_inactivity'] === true,
+    json_encode($oneSecondOver['technical_intervention']['pause'])
+);
+
+$assert(
+    '7.7 La pausa por repuestos conserva su lectura y nunca ofrece las acciones de sede',
+    $blocks['technical_intervention']['pause']['is_sla_paused'] === false
+        && $blocks['technical_intervention']['pause']['can_resume_pause'] === false
+        && $blocks['technical_intervention']['pause']['can_cancel_inactivity'] === false
+        && $blocks['technical_intervention']['pause']['is_prolonged_inactivity'] === false
+        && $blocks['technical_intervention']['pause']['sla_target_frozen_at'] === null
+        && $blocks['technical_intervention']['pause']['sla_target_recalculated_at'] === null
+        && $blocks['sla']['is_frozen'] === false
+        && $blocks['sla']['frozen_at'] === null
+);
+
+$pendingWithoutPause = array_merge($sitePauseIncident, ['paused_at' => null, 'total_pending_info_seconds' => 0]);
+$noPauseRepo = new CoordinatorIncidentDetailServiceStubRepo();
+$noPauseRepo->fixture = array_merge($fixture, ['incident' => $pendingWithoutPause]);
+$noPauseDetail = (new CoordinatorIncidentDetailService($noPauseRepo))->buildDetail(142, $pauseNow)->toArray();
+$assert(
+    '7.8 Sin marca de pausa no hay reloj congelado ni acciones supervisadas (fail-safe)',
+    $noPauseDetail['sla']['is_frozen'] === false
+        && $noPauseDetail['technical_intervention']['pause']['is_sla_paused'] === false
+        && $noPauseDetail['technical_intervention']['pause']['can_cancel_inactivity'] === false
+        && $noPauseDetail['technical_intervention']['pause']['paused_minutes'] === null
+);
+
+$nonPerishablePause = array_merge($fixture, [
+    'incident' => $sitePauseIncident,
+    'machine' => array_merge($fixture['machine'], ['machine_type' => 'HOT_DRINKS']),
+]);
+$noSlaRepo = new CoordinatorIncidentDetailServiceStubRepo();
+$noSlaRepo->fixture = $nonPerishablePause;
+$noSlaPauseBlock = (new CoordinatorIncidentDetailService($noSlaRepo))->buildDetail(142, $pauseNow)->toArray();
+$assert(
+    '7.9 Máquina sin objetivo de frío: la pausa se publica pero no se inventa una fecha contractual',
+    $noSlaPauseBlock['sla'] === ['has_sla_limit' => false]
+        && $noSlaPauseBlock['technical_intervention']['pause']['is_sla_paused'] === true
+        && $noSlaPauseBlock['technical_intervention']['pause']['sla_target_frozen_at'] === null
+        && $noSlaPauseBlock['technical_intervention']['pause']['sla_target_recalculated_at'] === null
+);
+
+$settledPauseRepo = new CoordinatorIncidentDetailServiceStubRepo();
+$settledPauseRepo->fixture = array_merge($fixture, ['incident' => array_merge(
+    $sitePauseIncident,
+    ['status' => 'CANCELLED', 'cancelled_at' => '2026-10-09 10:00:00', 'updated_at' => '2026-10-09 10:00:00']
+)]);
+$settledPauseDetail = (new CoordinatorIncidentDetailService($settledPauseRepo))->buildDetail(142, $pauseNow)->toArray();
+$assert(
+    '7.10 Expediente cancelado tras la inactividad: pausa cerrada, sin acciones y con balance histórico',
+    $settledPauseDetail['sla']['is_active_countdown'] === false
+        && $settledPauseDetail['sla']['is_frozen'] === false
+        && $settledPauseDetail['technical_intervention']['pause']['is_sla_paused'] === false
+        && $settledPauseDetail['technical_intervention']['pause']['can_resume_pause'] === false
+        && $settledPauseDetail['technical_intervention']['pause']['can_cancel_inactivity'] === false
+);
+
+// =====================================================================
 // RESUMEN DE EJECUCIÓN
 // =====================================================================
 echo "\n======================================================================\n";

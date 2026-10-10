@@ -11,6 +11,7 @@ use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\OldPartDestination;
 use VendGuard\Core\Domain\Model\RefundStatus;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 
@@ -21,8 +22,13 @@ use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
  * become the ten blocks of the modal contract (plan §2.1). It owns three rules:
  *
  * - The cold-chain SLA (RF-03, Art. II): a live countdown while the ticket is
- *   active on a perishable-food machine, and the formal historical balance once it
- *   is resolved, closed or discarded.
+ *   active on a perishable-food machine, the same countdown **frozen at the pause
+ *   instant** while the ticket waits for the client site (RF-03.2), and the formal
+ *   historical balance once it is resolved, closed or discarded.
+ * - The contractual pause block (module 11, RF-03.2 and RF-04.2): the frozen
+ *   deadline, the recalculated one after shifting the accumulated pause in business
+ *   hours, the prolonged-wait flag beyond 72 business hours and the two supervised
+ *   actions (resume the intervention, cancel by inactivity).
  * - Server-side masking of refund contact and payment data (RF-06, Art. V.4): the
  *   full phone and IBAN never leave this layer.
  * - The action matrix of the incident state machine (RF-07), including the
@@ -43,8 +49,7 @@ final class CoordinatorIncidentDetailService
      * States in which the ticket is still part of the active operational flow.
      *
      * The functional spec names the first one REPORTED; the implementation calls it
-     * REGISTERED, and REOPENED re-enters the flow after a warranty reopening.
-     * PENDING_INFO belongs here too: the pause does not close the ticket (the engine
+     * REGISTERED, and REOPENED re-enters the flow after a warranty reopening. *   PENDING_INFO belongs here too: the pause does not close the ticket (the engine
      * keeps `is_active_ticket = 1`), so cancelling after the 72-hour silence (RF-04.3)
      * and replying from the site portal (RF-05.1) must remain available.
      */
@@ -78,9 +83,30 @@ final class CoordinatorIncidentDetailService
         IncidentStatus::CLOSED,
     ];
 
+    /**
+     * Servicio del ciclo de pausa (módulo 11), resuelto de forma perezosa.
+     *
+     * Se inyecta desde el controlador y, si no llega, se construye sin colaboradores
+     * de persistencia: el servicio de pausa admite esa forma reducida y aquí sólo se
+     * usan sus dos reglas puras (umbral de 72 h hábiles y desplazamiento comercial de
+     * SLA), que no tocan la base de datos.
+     */
+    private ?IncidentPauseService $pauseService = null;
+
     public function __construct(
-        private readonly IncidentRepositoryInterface $incidentRepo
+        private readonly IncidentRepositoryInterface $incidentRepo,
+        ?IncidentPauseService $pauseService = null
     ) {
+        $this->pauseService = $pauseService;
+    }
+
+    /**
+     * Calculadora de calendario del módulo 11: umbral de 72 h hábiles y desplazamiento
+     * comercial del vencimiento contractual.
+     */
+    private function pauses(): IncidentPauseService
+    {
+        return $this->pauseService ??= new IncidentPauseService();
     }
 
     /**
@@ -101,6 +127,9 @@ final class CoordinatorIncidentDetailService
         $machine = $raw['machine'];
         $history = $raw['history'];
         $timeline = $this->buildTimelineBlock($incident, $history, $now);
+        // El bloque de SLA se deriva antes de la intervención técnica porque la pausa
+        // contractual publica su vencimiento congelado y el recalculado (RF-03.2).
+        $sla = $this->computeSlaStatus($incident, $machine, $timeline, $now);
 
         return new CoordinatorIncidentDetailDto(
             incident: $this->buildIncidentBlock($incident, $history),
@@ -108,12 +137,14 @@ final class CoordinatorIncidentDetailService
             machine: $this->buildMachineBlock($incident, $machine),
             technician: $this->buildTechnicianBlock($incident, $raw['technician'], $history),
             timeline: $timeline,
-            sla: $this->computeSlaStatus($incident, $machine, $timeline, $now),
+            sla: $sla,
             technicalIntervention: $this->buildTechnicalInterventionBlock(
                 $incident,
                 $raw['requested_parts'],
                 $raw['replaced_parts'],
-                $history
+                $history,
+                $sla,
+                $now
             ),
             comments: $this->buildCommentsBlock($raw['comments']),
             refund: $this->buildRefundBlock($raw['refund']),
@@ -127,6 +158,11 @@ final class CoordinatorIncidentDetailService
      * Perishable-food machines carry the mandatory 4-hour objective; any other machine
      * publishes `has_sla_limit: false` and the frontend hides the monitor. Settled
      * tickets get the immutable formal balance instead of a countdown.
+     *
+     * La pausa contractual (RF-03.2) no detiene la lectura: la **congela**. Un expediente
+     * en `PENDING_INFO` con pausa viva publica `is_frozen: true`, el instante congelado en
+     * `frozen_at` y la cuenta atrás tal y como estaba al pausar, para que el monitor deje de
+     * consumir el objetivo de cadena de frío mientras la culpa es de la sede.
      *
      * @param array<string, mixed> $incident Raw incident row.
      * @param array<string, mixed>|null $machine Raw machine row.
@@ -174,6 +210,8 @@ final class CoordinatorIncidentDetailService
                 'has_sla_limit' => true,
                 'sla_limit_hours' => (float)self::COLD_CHAIN_SLA_HOURS,
                 'is_active_countdown' => false,
+                'is_frozen' => false,
+                'frozen_at' => null,
                 'is_breached' => $isBreached,
                 'minutes_remaining' => 0,
                 'historical_balance' => $balanceText,
@@ -181,7 +219,15 @@ final class CoordinatorIncidentDetailService
             ];
         }
 
-        $secondsToTarget = $targetAt->getTimestamp() - $now->getTimestamp();
+        // Doble reloj (RF-03.2): mientras el expediente espera a la sede, el reloj
+        // contractual se congela en el instante de la pausa y no sigue consumiendo el
+        // objetivo de cadena de frío. El reloj biológico sanitario es otra lectura.
+        $isSlaPaused = $status === IncidentStatus::PENDING_INFO
+            && $this->parseDateTime($incident['paused_at'] ?? null) !== null;
+        $frozenAt = $isSlaPaused ? $this->parseDateTime($incident['paused_at'] ?? null) : null;
+        $evaluationInstant = $frozenAt ?? $now;
+
+        $secondsToTarget = $targetAt->getTimestamp() - $evaluationInstant->getTimestamp();
         $remainingMinutes = (int)round($secondsToTarget / 60);
 
         if ($secondsToTarget >= 0) {
@@ -196,6 +242,8 @@ final class CoordinatorIncidentDetailService
             'has_sla_limit' => true,
             'sla_limit_hours' => (float)self::COLD_CHAIN_SLA_HOURS,
             'is_active_countdown' => true,
+            'is_frozen' => $isSlaPaused,
+            'frozen_at' => $frozenAt?->format('Y-m-d H:i:s'),
             'is_breached' => $isBreached,
             'minutes_remaining' => $remainingMinutes,
             'historical_balance' => $balanceText,
@@ -417,25 +465,21 @@ final class CoordinatorIncidentDetailService
      * @param list<array<string, mixed>> $requestedParts
      * @param list<array<string, mixed>> $replacedParts
      * @param list<array<string, mixed>> $history
+     * @param array<string, mixed> $sla Already derived cold-chain SLA block.
      * @return array<string, mixed>
      */
     private function buildTechnicalInterventionBlock(
         array $incident,
         array $requestedParts,
         array $replacedParts,
-        array $history
+        array $history,
+        array $sla,
+        ?DateTimeImmutable $now = null
     ): array {
         $status = (string)($incident['status'] ?? '');
 
         return [
-            'pause' => [
-                'is_paused' => $status === IncidentStatus::PENDING_PARTS->value,
-                'reason' => $incident['pending_parts_reason'] ?? null,
-                'requested_parts' => array_map(
-                    fn(array $row): array => $this->mapRequestedPart($row),
-                    $requestedParts
-                ),
-            ],
+            'pause' => $this->buildPauseBlock($incident, $requestedParts, $sla, $now),
             'resolution' => [
                 'is_resolved' => in_array(
                     IncidentStatus::tryFrom($status),
@@ -462,6 +506,123 @@ final class CoordinatorIncidentDetailService
                 'reason' => $incident['cancellation_reason'] ?? null,
             ],
         ];
+    }
+
+    /**
+     * Bloque de pausa del expediente: espera de repuestos (RF-04.2) y espera de sede
+     * (RF-03.1, RF-03.2, RF-04.2, RF-04.3).
+     *
+     * Las dos pausas detienen la operación, pero sólo la de `PENDING_INFO` congela el reloj
+     * contractual: la espera de repuestos es una parada técnica imputable a la operación y
+     * sigue corriendo contra el SLA de cadena de frío. El bloque publica por eso los dos
+     * estados por separado (`is_paused` para la tarjeta de intervención, `is_sla_paused`
+     * para el monitor) y, cuando la pausa es de sede, todo lo que la ficha necesita para
+     * pintarla sin volver a preguntar al servidor: instante de inicio, minutos vivos y
+     * acumulados, umbral de inactividad, vencimiento contractual congelado, vencimiento
+     * recalculado en horario comercial de la sede y las dos acciones supervisadas.
+     *
+     * El vencimiento **congelado** es la fecha límite vigente cuando el técnico se topó con
+     * la puerta cerrada; el **recalculado** proyecta ese vencimiento desplazándolo por los
+     * segundos hábiles ya consumidos en pausa (Algoritmo 3), que es exactamente lo que hará
+     * la reanudación real al cerrar el intervalo (RF-03.3, RNF-01).
+     *
+     * @param array<string, mixed> $incident Raw incident row.
+     * @param list<array<string, mixed>> $requestedParts Requested spare parts of the pause.
+     * @param array<string, mixed> $sla Already derived cold-chain SLA block.
+     * @param DateTimeImmutable|null $now Reference instant for the live pause interval.
+     * @return array<string, mixed>
+     */
+    private function buildPauseBlock(
+        array $incident,
+        array $requestedParts,
+        array $sla,
+        ?DateTimeImmutable $now = null
+    ): array {
+        $status = IncidentStatus::tryFrom((string)($incident['status'] ?? ''));
+        $pausedAtRaw = $incident['paused_at'] ?? null;
+        $pausedAt = $this->parseDateTime(is_string($pausedAtRaw) ? $pausedAtRaw : null);
+
+        // Pausa contractual viva: el expediente espera a la sede y el reloj está congelado.
+        $isSlaPaused = $status === IncidentStatus::PENDING_INFO && $pausedAt !== null;
+        $accumulatedSeconds = max(0, (int)($incident['total_pending_info_seconds'] ?? 0));
+        $liveSeconds = $isSlaPaused
+            ? max(0, ($now ?? new DateTimeImmutable('now'))->getTimestamp() - $pausedAt->getTimestamp())
+            : 0;
+
+        $categoryValue = $incident['pending_info_reason_category'] ?? null;
+        $category = is_string($categoryValue) && trim($categoryValue) !== ''
+            ? IncidentPauseReasonCategory::tryFrom(strtoupper(trim($categoryValue)))
+            : null;
+
+        return [
+            'is_paused' => $status === IncidentStatus::PENDING_PARTS || $isSlaPaused,
+            'is_sla_paused' => $isSlaPaused,
+            'paused_at' => $isSlaPaused ? (string)$pausedAtRaw : null,
+            'paused_minutes' => $isSlaPaused ? (int)round($liveSeconds / 60) : null,
+            'accumulated_pause_minutes' => (int)round($accumulatedSeconds / 60),
+            'is_prolonged_inactivity' => $isSlaPaused && $this->pauses()->isProlongedInactivitySince(
+                is_string($pausedAtRaw) ? $pausedAtRaw : null,
+                $isSlaPaused,
+                $now
+            ),
+            'inactivity_threshold_business_hours' => IncidentPauseService::PROLONGED_INACTIVITY_BUSINESS_HOURS,
+            'sla_target_frozen_at' => $isSlaPaused ? ($sla['sla_target_at'] ?? null) : null,
+            'sla_target_recalculated_at' => $this->recalculatedSlaTargetAt(
+                $incident,
+                $sla,
+                $accumulatedSeconds + $liveSeconds,
+                $isSlaPaused
+            ),
+            // Acciones supervisadas de coordinación (RF-04.3, RF-06.2): sólo con pausa viva.
+            'can_resume_pause' => $isSlaPaused,
+            'can_cancel_inactivity' => $isSlaPaused,
+            'reason_category' => $category?->value ?? (is_string($categoryValue) ? $categoryValue : null),
+            'reason_category_label' => $category?->label(),
+            'reason_text' => $incident['pending_info_reason_text'] ?? null,
+            // Motivo de la pausa por repuestos, que es otra causa distinta (RF-04.2).
+            'reason' => $incident['pending_parts_reason'] ?? null,
+            'requested_parts' => array_map(
+                fn(array $row): array => $this->mapRequestedPart($row),
+                $requestedParts
+            ),
+        ];
+    }
+
+    /**
+     * Vencimiento contractual recalculado tras descontar la pausa de sede (RF-03.3).
+     *
+     * Devuelve `null` cuando no hay pausa contractual viva, cuando el expediente no tiene
+     * objetivo de cadena de frío derivado (máquina no perecedera) o cuando la fila no trae
+     * sede: sin calendario comercial no se inventa una fecha. El desplazamiento lo calcula
+     * el servicio del módulo 11, que es la única autoridad del horario hábil 08:00-18:00.
+     *
+     * @param array<string, mixed> $incident Raw incident row.
+     * @param array<string, mixed> $sla Already derived cold-chain SLA block.
+     * @param int $pauseSeconds Segundos de pausa acumulados más el intervalo vivo.
+     * @param bool $isSlaPaused Whether the contractual clock is actually frozen.
+     * @return string|null New contractual deadline in database format, or null.
+     */
+    private function recalculatedSlaTargetAt(
+        array $incident,
+        array $sla,
+        int $pauseSeconds,
+        bool $isSlaPaused
+    ): ?string {
+        if (!$isSlaPaused) {
+            return null;
+        }
+
+        $targetAt = $this->parseDateTime(
+            isset($sla['sla_target_at']) && is_string($sla['sla_target_at']) ? $sla['sla_target_at'] : null
+        );
+        $locationId = (int)($incident['location_id'] ?? 0);
+        if ($targetAt === null || $locationId < 1) {
+            return null;
+        }
+
+        return $this->pauses()
+            ->shiftSlaTargetInBusinessHours($targetAt, $pauseSeconds, $locationId)
+            ->format('Y-m-d H:i:s');
     }
 
     /**

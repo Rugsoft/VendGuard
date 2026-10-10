@@ -177,6 +177,20 @@ function createDashboardInstance(initialData = {}) {
   Object.defineProperty(instance, 'detailIncidentId', {
     get: () => CoordinatorDashboardView.computed.detailIncidentId.call(instance)
   });
+  // Contractual pause of the site wait (Módulo 11, T-PAUSE-19): the methods read the same
+  // computed getters Vue would expose, so the harness mirrors them as well.
+  for (const name of [
+    'pausedIncidents',
+    'prolongedInactivityIncidents',
+    'pausedTokens',
+    'inactivityReasonLength',
+    'isInactivityReasonValid'
+  ]) {
+    Object.defineProperty(instance, name, {
+      get: () => CoordinatorDashboardView.computed[name].call(instance),
+      configurable: true
+    });
+  }
 
   if (CoordinatorDashboardView.methods) {
     for (const [name, fn] of Object.entries(CoordinatorDashboardView.methods)) {
@@ -976,6 +990,189 @@ assert('15.8 A clean batch keeps the assignment wording in its success alert',
   copyAlerts.join(' | '));
 
 store.addAlert = originalAddAlert;
+
+// ---------------------------------------------------------------------
+// TEST GROUP 16: Contractual pause of the site wait (Módulo 11, T-PAUSE-19)
+// Frozen SLA badge and filter, urgent notice beyond 72 business hours and
+// the two supervised coordinator actions (RF-03.2, RF-04.2, RF-04.3, RF-06.2).
+// ---------------------------------------------------------------------
+console.log('\n--- Group 16: Frozen SLA, prolonged wait and supervised pause actions ---');
+
+const dashboardTemplate = CoordinatorDashboardView.template;
+const pausedApiRow = {
+  id: 91,
+  ticket_code: 'INC-2026-0091',
+  machine_id: 7,
+  machine_code: 'VEND-0701',
+  machine_model: 'Sanden Vendo G-Drink',
+  location_name: 'Hospital del Mar',
+  location_site_code: 'SEDE-BCN-01',
+  urgency: 'HIGH',
+  status: 'PENDING_INFO',
+  assigned_technician_id: 2,
+  technician_name: 'Jordi Cruz',
+  waiting_minutes: 90,
+  sla_breached: false,
+  is_sla_paused: true,
+  total_pending_info_minutes: 145,
+  is_prolonged_inactivity: false,
+  paused_at: '2026-10-07 09:00:00',
+  comments_count: 2
+};
+const prolongedApiRow = {
+  ...pausedApiRow,
+  id: 92,
+  ticket_code: 'INC-2026-0092',
+  total_pending_info_minutes: 2890,
+  is_prolonged_inactivity: true
+};
+const runningRow = {
+  ...pausedApiRow,
+  id: 93,
+  ticket_code: 'INC-2026-0093',
+  status: 'IN_PROGRESS',
+  is_sla_paused: false,
+  total_pending_info_minutes: 0,
+  paused_at: null
+};
+
+const pauseView = createDashboardInstance({ incidents: [pausedApiRow, prolongedApiRow, runningRow] });
+
+assert('16.1 isPausedRow trusts the API flag and falls back to the canonical PENDING_INFO state',
+  CoordinatorDashboardView.methods.isPausedRow.call(pauseView, pausedApiRow) === true &&
+  CoordinatorDashboardView.methods.isPausedRow.call(pauseView, runningRow) === false &&
+  CoordinatorDashboardView.methods.isPausedRow.call(pauseView, { id: 94, status: 'PENDING_INFO' }) === true &&
+  CoordinatorDashboardView.methods.isPausedRow.call(pauseView, null) === false);
+
+assert('16.2 pausedIncidents groups the frozen clock without touching the running rows',
+  CoordinatorDashboardView.computed.pausedIncidents.call(pauseView).map((row) => row.id).join(',') === '91,92');
+
+assert('16.3 prolongedInactivityIncidents selects only the wait beyond 72 business hours (RF-04.2)',
+  CoordinatorDashboardView.computed.prolongedInactivityIncidents.call(pauseView).map((row) => row.id).join(',') === '92');
+
+const pausedFilterView = createDashboardInstance({
+  incidents: [pausedApiRow, runningRow],
+  filterPausedOnly: true
+});
+assert('16.4 The quick pause filter narrows the tray to the frozen rows',
+  CoordinatorDashboardView.computed.filteredIncidents.call(pausedFilterView).map((row) => row.id).join(',') === '91');
+
+CoordinatorDashboardView.methods.clearFilters.call(pausedFilterView);
+assert('16.5 Clearing the filters also releases the pause filter',
+  pausedFilterView.filterPausedOnly === false);
+
+const pausedPalette = CoordinatorDashboardView.computed.pausedTokens.call(pauseView);
+assert('16.6 The frozen clock badge paints with the shared amber technical tokens (zero new colors)',
+  pausedPalette.bg === '#fef9c3' && pausedPalette.color === '#854d0e' && pausedPalette.border === '#fde047' &&
+  !dashboardTemplate.includes('vg-pause-alert-banner" style="background-color: #'),
+  JSON.stringify(pausedPalette));
+
+assert('16.7 Template: the row carries the ⏸️ SLA Pausado badge with the discounted minutes (RF-03.2)',
+  dashboardTemplate.includes('data-testid="row-sla-paused-badge"') &&
+  dashboardTemplate.includes('⏸️ SLA Pausado (+{{ inc.total_pending_info_minutes ?? 0 }} min desc.)') &&
+  dashboardTemplate.includes('v-if="inc.is_sla_paused"'));
+
+assert('16.8 Template: the prolonged wait adds its own badge and the row data attribute',
+  dashboardTemplate.includes('data-testid="row-prolonged-inactivity-badge"') &&
+  dashboardTemplate.includes('En espera prolongada de cliente (> 72 h hábiles)') &&
+  dashboardTemplate.includes(':data-prolonged-inactivity="inc.is_prolonged_inactivity ? \'true\' : \'false\'"'));
+
+assert('16.9 Template: the urgent notice counts the prolonged waits and offers the quick filter',
+  dashboardTemplate.includes('data-testid="prolonged-inactivity-banner"') &&
+  dashboardTemplate.includes('ESPERA PROLONGADA DE CLIENTE: {{ prolongedInactivityIncidents.length }}') &&
+  dashboardTemplate.includes('@click="filterPausedOnly = true"'));
+
+assert('16.10 Template: the row offers the two supervised actions (RF-06.2, RF-04.3)',
+  dashboardTemplate.includes('data-testid="btn-row-resume-pause"') &&
+  dashboardTemplate.includes('data-testid="btn-row-cancel-inactivity"') &&
+  dashboardTemplate.includes('🚫 Cancelar por inactividad de sede'));
+
+assert('16.11 Template: the inactivity cancellation is a supervised form with its own counter (Art. V.1)',
+  dashboardTemplate.includes('data-testid="inactivity-form"') &&
+  dashboardTemplate.includes('data-testid="inactivity-reason"') &&
+  dashboardTemplate.includes('{{ inactivityReasonLength }} / 20 caracteres') &&
+  dashboardTemplate.includes(':disabled="isCancellingInactivity || !isInactivityReasonValid"') &&
+  dashboardTemplate.includes('Confirmar Cancelación por Inactividad'));
+
+const reasonView = createDashboardInstance({ inactivityReason: 'A'.repeat(19) });
+const shortReasonInvalid = CoordinatorDashboardView.computed.isInactivityReasonValid.call(reasonView) === false;
+reasonView.inactivityReason = 'A'.repeat(20);
+assert('16.12 The cancellation reason turns valid exactly at 20 real characters',
+  shortReasonInvalid &&
+  CoordinatorDashboardView.computed.isInactivityReasonValid.call(reasonView) === true &&
+  CoordinatorDashboardView.computed.inactivityReasonLength.call(reasonView) === 20);
+
+let inactivityApiCalls = 0;
+let lastInactivityCall = null;
+api.coordinator.cancelIncidentInactivity = async (incidentId, reason) => {
+  inactivityApiCalls++;
+  lastInactivityCall = { incidentId, reason };
+  return { id: incidentId };
+};
+
+const shortReasonView = createDashboardInstance({ incidents: [pausedApiRow] });
+shortReasonView.showInactivityModal = true;
+shortReasonView.inactivityIncident = pausedApiRow;
+shortReasonView.inactivityReason = 'Sin respuesta';
+shortReasonView.refreshIncidentRow = async () => {};
+await CoordinatorDashboardView.methods.submitInactivityCancellation.call(shortReasonView);
+assert('16.13 A reason under 20 characters never reaches the API and the panel keeps the warning',
+  inactivityApiCalls === 0 && shortReasonView.showInactivityModal === true &&
+  shortReasonView.inactivityError.includes('20 caracteres'));
+
+let refreshedPauseRows = [];
+const inactivityView = createDashboardInstance({ incidents: [prolongedApiRow] });
+inactivityView.showInactivityModal = true;
+inactivityView.inactivityIncident = prolongedApiRow;
+inactivityView.inactivityReason = '  Cierre formal tras 72 horas hábiles sin respuesta de sede ni acceso facilitado.  ';
+inactivityView.refreshIncidentRow = async (incidentId) => { refreshedPauseRows.push(incidentId); };
+await CoordinatorDashboardView.methods.submitInactivityCancellation.call(inactivityView);
+assert('16.14 The supervised cancellation sends the trimmed reason and re-syncs the affected row (RF-04.3)',
+  inactivityApiCalls === 1 && lastInactivityCall.incidentId === 92 &&
+  lastInactivityCall.reason === 'Cierre formal tras 72 horas hábiles sin respuesta de sede ni acceso facilitado.' &&
+  refreshedPauseRows.join(',') === '92' &&
+  inactivityView.showInactivityModal === false && inactivityView.inactivityReason === '');
+
+api.coordinator.cancelIncidentInactivity = async () => {
+  throw new Error('El expediente no está en pausa por falta de información.');
+};
+const rejectedInactivityView = createDashboardInstance({ incidents: [prolongedApiRow] });
+rejectedInactivityView.showInactivityModal = true;
+rejectedInactivityView.inactivityIncident = prolongedApiRow;
+rejectedInactivityView.inactivityReason = 'Cierre formal tras 72 horas hábiles sin respuesta de sede ni acceso facilitado.';
+rejectedInactivityView.refreshIncidentRow = async () => {};
+await CoordinatorDashboardView.methods.submitInactivityCancellation.call(rejectedInactivityView);
+assert('16.15 A rejected cancellation keeps the panel open with the server message',
+  rejectedInactivityView.showInactivityModal === true &&
+  rejectedInactivityView.inactivityError.includes('no está en pausa') &&
+  rejectedInactivityView.inactivityReason.length > 20);
+
+let resumeCalls = [];
+api.coordinator.resumeIncidentPendingInfo = async (incidentId, targetStatus, resumeNote) => {
+  resumeCalls.push({ incidentId, targetStatus, resumeNote });
+  return { incident_id: incidentId, status: targetStatus };
+};
+const resumeView = createDashboardInstance({ incidents: [pausedApiRow] });
+resumeView.refreshIncidentRow = async () => {};
+await CoordinatorDashboardView.methods.resumePausedIncident.call(resumeView, pausedApiRow);
+assert('16.16 Resuming from the row returns the file to the technician route as ASSIGNED (RF-06.2)',
+  resumeCalls.length === 1 && resumeCalls[0].incidentId === 91 &&
+  resumeCalls[0].targetStatus === 'ASSIGNED' && resumeCalls[0].resumeNote === null);
+
+globalThis.confirm = () => false;
+await CoordinatorDashboardView.methods.resumePausedIncident.call(resumeView, pausedApiRow);
+assert('16.17 A refused confirmation leaves the frozen clock untouched (no request, no error)',
+  resumeCalls.length === 1 && resumeView.pauseActionError === '');
+delete globalThis.confirm;
+
+api.coordinator.resumeIncidentPendingInfo = async () => {
+  throw new Error('La incidencia no tiene una pausa abierta.');
+};
+await CoordinatorDashboardView.methods.resumePausedIncident.call(resumeView, pausedApiRow);
+assert('16.18 A rejected resume surfaces the server reason without losing the row',
+  resumeView.pauseActionError.includes('pausa abierta') &&
+  resumeView.resumingPauseIncidentId === null &&
+  dashboardTemplate.includes('data-testid="pause-action-error"'));
 
 // Summary
 console.log('\n======================================================================');

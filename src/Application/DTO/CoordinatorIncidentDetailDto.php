@@ -86,14 +86,30 @@ final readonly class CoordinatorIncidentDetailDto
      *   has_sla_limit: bool,
      *   sla_limit_hours?: float,
      *   is_active_countdown?: bool,
+     *   is_frozen?: bool,
+     *   frozen_at?: string|null,
      *   is_breached?: bool,
      *   minutes_remaining?: int,
      *   historical_balance?: string,
      *   sla_target_at?: string|null
-     * } $sla Cold-chain SLA evaluation, active or historical (RF-03, Art. II).
+     * } $sla Cold-chain SLA evaluation, active, frozen during a site pause or
+     *   historical (RF-03.2, RF-03.3, Art. II).
      * @param array{
      *   pause: array{
      *     is_paused: bool,
+     *     is_sla_paused: bool,
+     *     paused_at: string|null,
+     *     paused_minutes: int|null,
+     *     accumulated_pause_minutes: int,
+     *     is_prolonged_inactivity: bool,
+     *     inactivity_threshold_business_hours: int,
+     *     sla_target_frozen_at: string|null,
+     *     sla_target_recalculated_at: string|null,
+     *     can_resume_pause: bool,
+     *     can_cancel_inactivity: bool,
+     *     reason_category: string|null,
+     *     reason_category_label: string|null,
+     *     reason_text: string|null,
      *     reason: string|null,
      *     requested_parts: list<array{
      *       spare_part_id: int|null,

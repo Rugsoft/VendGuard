@@ -33,12 +33,20 @@
  * utils/IncidentStatusPermissions.js y sirve a las superficies de bandeja que solo
  * disponen del listado de filas.
  *
+ * Pausa contractual de la espera de sede (Módulo 11, RF-03.2, RF-04.2, RF-04.3, RF-06.2):
+ * el bloque de pausa publica la insignia `⏸️ SLA Pausado`, el reloj contractual congelado
+ * con su fecha recalculada en horario comercial de la sede, el aviso urgente de la espera
+ * prolongada de 72 horas hábiles y las dos acciones supervisadas del coordinador
+ * (reanudar la intervención y cancelar formalmente por inactividad). Las reglas son del
+ * servidor: aquí sólo se pintan los flags de `technical_intervention.pause`.
+ *
  * Dogma Vanilla: Vue 3 Options API vía ES Modules (cero dependencias externas).
  * Dualismo Lingüístico: código en inglés, interfaz y mensajes en español.
  */
 
 import { api } from '../api.js';
 import { IncidentBadge } from './IncidentBadge.js';
+import { AMBER_TECHNICAL_TOKENS } from '../utils/IncidentStatusPermissions.js';
 
 export const CoordinatorIncidentDetailModal = {
   name: 'CoordinatorIncidentDetailModal',
@@ -101,7 +109,19 @@ export const CoordinatorIncidentDetailModal = {
       /** Borrador del motivo de descarte y su envío lógico (Art. III.2, RF-07.4). */
       cancelReason: '',
       isSubmittingCancel: false,
-      cancelErrorMessage: ''
+      cancelErrorMessage: '',
+      /**
+       * Cancelación formal por inactividad de sede (Módulo 11, RF-04.3, Art. V.1): cierra
+       * el expediente, bloquea la máquina por falta de acceso y desvincula el reintegro,
+       * así que el motivo justificado es obligatorio en el propio panel.
+       */
+      isInactivityPanelOpen: false,
+      inactivityReason: '',
+      isSubmittingInactivity: false,
+      inactivityErrorMessage: '',
+      /** Reanudación de la pausa contractual desde la ficha (RF-06.2). */
+      isSubmittingResume: false,
+      pauseActionErrorMessage: ''
     };
   },
   computed: {
@@ -153,9 +173,77 @@ export const CoordinatorIncidentDetailModal = {
       return this.detail?.technical_intervention || null;
     },
 
-    /** Pausa estructurada por repuestos (RF-04.2). */
+    /** Pausa estructurada: repuestos (RF-04.2) o espera de sede con SLA congelado (RF-03.2). */
     pause() {
       return this.technicalIntervention?.pause || null;
+    },
+
+    /** Tokens ámbar técnicos compartidos con la tarjeta de sede y la ruta del técnico. */
+    pausedTokens() {
+      return AMBER_TECHNICAL_TOKENS;
+    },
+
+    /** La pausa viva es una espera de sede: el reloj contractual está congelado (RF-03.2). */
+    isSlaPaused() {
+      return Boolean(this.pause?.is_sla_paused);
+    },
+
+    /** Espera prolongada de cliente: más de 72 horas hábiles sin respuesta de sede (RF-04.2). */
+    isProlongedInactivity() {
+      return Boolean(this.pause?.is_prolonged_inactivity);
+    },
+
+    /** Acción supervisada de reanudación habilitada por el servidor con la pausa viva (RF-06.2). */
+    canResumePause() {
+      return Boolean(this.pause?.can_resume_pause);
+    },
+
+    /** Acción supervisada de cancelación por inactividad habilitada con la pausa viva (RF-04.3). */
+    canCancelInactivity() {
+      return Boolean(this.pause?.can_cancel_inactivity);
+    },
+
+    /** Minutos del intervalo de pausa vivo, con su lectura humana (`X h Y min`). */
+    pausedMinutesLabel() {
+      const minutes = Number(this.pause?.paused_minutes);
+      return Number.isFinite(minutes) ? this.formatMinutes(minutes) : '—';
+    },
+
+    /** Minutos ya descontados del cómputo contractual por pausas cerradas (RF-03.1). */
+    accumulatedPauseMinutesLabel() {
+      const minutes = Number(this.pause?.accumulated_pause_minutes);
+      return Number.isFinite(minutes) ? this.formatMinutes(minutes) : '0 min';
+    },
+
+    /** Fecha contractual vigente cuando empezó la pausa: el objetivo que no corre (RF-03.2). */
+    frozenSlaTargetLabel() {
+      return this.formatDateTime(this.pause?.sla_target_frozen_at);
+    },
+
+    /** Fecha contractual recalculada tras descontar la pausa en horario comercial (RF-03.3). */
+    recalculatedSlaTargetLabel() {
+      return this.formatDateTime(this.pause?.sla_target_recalculated_at);
+    },
+
+    /** Umbral publicado por el servidor para la espera prolongada (72 horas hábiles). */
+    inactivityThresholdHours() {
+      const hours = Number(this.pause?.inactivity_threshold_business_hours);
+      return Number.isFinite(hours) && hours > 0 ? hours : 72;
+    },
+
+    /** Existe un motivo de cancelación por inactividad en redacción (RF-08.1). */
+    hasUnsavedInactivityReason() {
+      return Boolean(this.isInactivityPanelOpen) && String(this.inactivityReason || '').trim().length > 0;
+    },
+
+    /** Caracteres reales (puntos de código Unicode) del motivo de cancelación por inactividad. */
+    inactivityReasonLength() {
+      return Array.from(String(this.inactivityReason || '').trim()).length;
+    },
+
+    /** La cancelación formal exige un motivo justificado de al menos 20 caracteres (Art. V.1). */
+    isInactivityReasonValid() {
+      return this.inactivityReasonLength >= 20;
     },
 
     /** Resolución documentada con costes congelados (RF-04.3). */
@@ -269,7 +357,10 @@ export const CoordinatorIncidentDetailModal = {
 
     /** Hay algún borrador en edición activa: el cierre exige confirmación explícita (RF-08.2). */
     isFormDirty() {
-      return this.hasUnsavedComment || this.hasUnsavedCancelReason || this.hasUnsavedAssignReason;
+      return this.hasUnsavedComment
+        || this.hasUnsavedCancelReason
+        || this.hasUnsavedAssignReason
+        || this.hasUnsavedInactivityReason;
     },
 
     /** Acción directa de descarte habilitada mientras el ticket siga activo (RF-07.1). */
@@ -530,6 +621,10 @@ export const CoordinatorIncidentDetailModal = {
       this.reassignReason = '';
       this.assignErrorMessage = '';
       this.cancelErrorMessage = '';
+      this.isInactivityPanelOpen = false;
+      this.inactivityReason = '';
+      this.inactivityErrorMessage = '';
+      this.pauseActionErrorMessage = '';
     },
 
     /**
@@ -684,6 +779,7 @@ export const CoordinatorIncidentDetailModal = {
      */
     openAssignPanel() {
       this.isCancelPanelOpen = false;
+      this.isInactivityPanelOpen = false;
       this.isAssignPanelOpen = true;
       this.assignErrorMessage = '';
       this.reassignReason = '';
@@ -707,8 +803,85 @@ export const CoordinatorIncidentDetailModal = {
      */
     openCancelPanel() {
       this.isAssignPanelOpen = false;
+      this.isInactivityPanelOpen = false;
       this.isCancelPanelOpen = true;
       this.cancelErrorMessage = '';
+    },
+
+    /**
+     * Abre el panel de cancelación formal por inactividad de sede (RF-04.3, Art. V.1) y
+     * cierra cualquier otro panel abierto: nunca hay dos acciones superpuestas (RNF-06).
+     */
+    openInactivityPanel() {
+      this.isAssignPanelOpen = false;
+      this.isCancelPanelOpen = false;
+      this.isInactivityPanelOpen = true;
+      this.inactivityErrorMessage = '';
+      this.pauseActionErrorMessage = '';
+    },
+
+    closeInactivityPanel() {
+      this.isInactivityPanelOpen = false;
+      this.inactivityErrorMessage = '';
+    },
+
+    /**
+     * Reanuda la intervención pausada desde la ficha (RF-06.2): el expediente vuelve a
+     * `ASSIGNED` (la ruta del técnico sin afirmar que ya está delante de la máquina) y el
+     * servicio del módulo 11 descuenta los minutos de espera del vencimiento contractual.
+     */
+    async confirmResumePause() {
+      const incidentId = this.actionableIncidentId;
+      if (incidentId === null || incidentId === undefined || incidentId === '') {
+        return;
+      }
+
+      this.pauseActionErrorMessage = '';
+      this.isSubmittingResume = true;
+
+      try {
+        await api.coordinator.resumeIncidentPendingInfo(incidentId, 'ASSIGNED', null);
+        await this.fetchDetail();
+        this.notifyIncidentUpdated({ reason: 'resume-pause' });
+      } catch (err) {
+        this.pauseActionErrorMessage = err?.message
+          || 'No se pudo reanudar la intervención. Inténtelo de nuevo.';
+      } finally {
+        this.isSubmittingResume = false;
+      }
+    },
+
+    /**
+     * Confirma la cancelación formal por inactividad de sede con motivo justificado
+     * (RF-04.3 a RF-04.5, Art. V.1): el contador reactivo impide enviar menos de 20
+     * caracteres reales, igual que el descarte ordinario, porque la traza es la misma.
+     */
+    async confirmInactivityCancellation() {
+      if (!this.isInactivityReasonValid) {
+        this.inactivityErrorMessage = 'El motivo de la cancelación debe contener al menos 20 caracteres reales (Art. V.1).';
+        return;
+      }
+
+      const incidentId = this.actionableIncidentId;
+      if (incidentId === null || incidentId === undefined || incidentId === '') {
+        return;
+      }
+
+      this.inactivityErrorMessage = '';
+      this.isSubmittingInactivity = true;
+
+      try {
+        await api.coordinator.cancelIncidentInactivity(incidentId, String(this.inactivityReason).trim());
+        this.inactivityReason = '';
+        this.isInactivityPanelOpen = false;
+        await this.fetchDetail();
+        this.notifyIncidentUpdated({ reason: 'cancel-inactivity' });
+      } catch (err) {
+        this.inactivityErrorMessage = err?.message
+          || 'No se pudo ejecutar la cancelación por inactividad. Inténtelo de nuevo.';
+      } finally {
+        this.isSubmittingInactivity = false;
+      }
     },
 
     closeCancelPanel() {
@@ -906,6 +1079,18 @@ export const CoordinatorIncidentDetailModal = {
                   style="display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; background-color: var(--color-warning-bg, #fef8e7); color: var(--color-warning-text, #92400e); border: 1px solid var(--color-warning, #f8b60f); border-radius: var(--radius-interactive, 4px); padding: 3px 8px;"
                 >
                   ⚠️ Reabierta en Garantía
+                </span>
+                <!--
+                  Frozen contractual clock (RF-03.2, Módulo 11): the site wait stops the
+                  cold-chain countdown, so the header states it before any other reading.
+                -->
+                <span
+                  v-if="isSlaPaused"
+                  class="badge badge-sla-paused"
+                  data-testid="incident-detail-sla-paused-chip"
+                  :style="{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontFamily: 'var(--font-body, Inter, sans-serif)', fontSize: '12px', fontWeight: '600', backgroundColor: pausedTokens.bg, color: pausedTokens.color, border: '1px solid ' + pausedTokens.border, borderRadius: 'var(--radius-interactive, 4px)', padding: '3px 8px' }"
+                >
+                  ⏸️ SLA Pausado
                 </span>
               </template>
             </div>
@@ -1142,8 +1327,15 @@ export const CoordinatorIncidentDetailModal = {
                     <strong :style="{ fontFamily: 'var(--font-display, DM Sans, sans-serif)', fontSize: '14px', fontWeight: '500', color: sla.is_breached ? 'var(--color-error-text, #b91c1c)' : 'var(--color-success-text, #065f46)' }">
                       SLA de Cadena de Frío ({{ sla.sla_limit_hours }} h)
                     </strong>
+                    <span
+                      v-if="isSlaPaused"
+                      data-testid="sla-paused-badge"
+                      :style="{ fontFamily: 'var(--font-body, Inter, sans-serif)', fontSize: '12px', fontWeight: '700', backgroundColor: pausedTokens.bg, color: pausedTokens.color, border: '1px solid ' + pausedTokens.border, borderRadius: 'var(--radius-interactive, 4px)', padding: '2px 6px' }"
+                    >
+                      ⏸️ SLA Pausado
+                    </span>
                     <span style="font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-ink-secondary, #434c5f);">
-                      {{ sla.is_active_countdown ? 'Cuenta atrás activa' : 'Balance histórico formal' }}
+                      {{ sla.is_active_countdown ? (sla.is_frozen ? 'Reloj contractual congelado · espera de sede' : 'Cuenta atrás activa') : 'Balance histórico formal' }}
                     </span>
                   </div>
                   <p data-testid="sla-balance" :style="{ margin: '8px 0 0', fontFamily: 'var(--font-body, Inter, sans-serif)', fontSize: '15px', fontWeight: '600', color: sla.is_breached ? 'var(--color-error-text, #b91c1c)' : 'var(--color-success-text, #065f46)' }">
@@ -1151,6 +1343,25 @@ export const CoordinatorIncidentDetailModal = {
                   </p>
                   <p v-if="sla.sla_target_at" style="margin: 4px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-ink-secondary, #434c5f);">
                     Objetivo de cumplimiento: {{ formatDateTime(sla.sla_target_at) }}
+                  </p>
+                  <!--
+                    Frozen clock and recalculated deadline (RF-03.2, RF-03.3): the counter
+                    stopped when the technician found the door closed, and the contractual
+                    date moves only through the business hours of the site.
+                  -->
+                  <p
+                    v-if="isSlaPaused"
+                    data-testid="sla-frozen-clock"
+                    style="margin: 4px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-warning-text);"
+                  >
+                    ⏸️ Reloj contractual congelado desde {{ formatDateTime(pause.paused_at) }} · {{ pausedMinutesLabel }} de espera de sede ({{ accumulatedPauseMinutesLabel }} descontados en total)
+                  </p>
+                  <p
+                    v-if="isSlaPaused && pause.sla_target_recalculated_at"
+                    data-testid="sla-target-recalculated"
+                    style="margin: 4px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-ink-secondary);"
+                  >
+                    Fecha SLA recalculada: <strong>{{ recalculatedSlaTargetLabel }}</strong> (objetivo congelado: {{ frozenSlaTargetLabel }})
                   </p>
                 </div>
               </section>
@@ -1185,9 +1396,49 @@ export const CoordinatorIncidentDetailModal = {
                   data-testid="pause-block"
                   style="background-color: var(--color-canvas, #f9fafb); border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-bottom: 12px;"
                 >
-                  <h4 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 14px; font-weight: 500; color: var(--color-ink, #000000); margin: 0 0 6px;">
-                    🧰 Pausa técnica por repuestos
-                  </h4>
+                  <!--
+                    Site wait pause (Módulo 11, RF-03.2 / RF-04.2): the contractual clock is
+                    frozen and the 72-business-hour count decides whether the formal
+                    cancellation is offered. The spare-parts pause keeps its own reading.
+                  -->
+                  <template v-if="pause.is_sla_paused">
+                    <h4 :style="{ fontFamily: 'var(--font-display, DM Sans, sans-serif)', fontSize: '14px', fontWeight: '500', color: pausedTokens.color, margin: '0 0 6px' }">
+                      ⏸️ Pausa por espera de sede (SLA pausado)
+                    </h4>
+                    <p v-if="pause.reason_category_label" data-testid="pause-reason-category" style="margin: 0 0 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate);">
+                      <strong>Causa tipificada:</strong> {{ pause.reason_category_label }}
+                    </p>
+                    <p v-if="pause.reason_text" data-testid="pause-reason-text" style="margin: 0 0 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate); line-height: 1.45;">
+                      <strong>Justificación del técnico:</strong> {{ pause.reason_text }}
+                    </p>
+                    <p data-testid="pause-since" style="margin: 0 0 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-secondary);">
+                      En pausa desde {{ formatDateTime(pause.paused_at) }}: {{ pausedMinutesLabel }} de espera de sede ({{ accumulatedPauseMinutesLabel }} descontados del cómputo contractual).
+                    </p>
+                    <p
+                      data-testid="pause-sla-recalculated"
+                      style="margin: 0 0 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-secondary);"
+                    >
+                      Objetivo contractual congelado: {{ frozenSlaTargetLabel }} · Fecha SLA recalculada: <strong>{{ recalculatedSlaTargetLabel || 'pendiente de la sede' }}</strong>
+                    </p>
+                    <div
+                      v-if="isProlongedInactivity"
+                      data-testid="pause-prolonged-inactivity"
+                      role="alert"
+                      style="margin: 8px 0 0; background-color: var(--color-error-bg); border: 1px solid var(--color-error); border-radius: var(--radius-interactive, 4px); padding: 10px 12px;"
+                    >
+                      <strong style="display: block; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-error-text);">
+                        ⚠️ Espera prolongada de cliente: más de {{ inactivityThresholdHours }} horas hábiles sin respuesta de sede (RF-04.2)
+                      </strong>
+                      <span style="font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-error-text); line-height: 1.45;">
+                        Puede reanudar la avería o cancelarla formalmente con motivo justificado; la máquina quedará fuera de servicio hasta que la sede confirme el acceso (Art. V.1).
+                      </span>
+                    </div>
+                  </template>
+
+                  <template v-else>
+                    <h4 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 14px; font-weight: 500; color: var(--color-ink, #000000); margin: 0 0 6px;">
+                      🧰 Pausa técnica por repuestos
+                    </h4>
                   <p v-if="pause.reason" style="margin: 0 0 10px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f); line-height: 1.45;">
                     {{ pause.reason }}
                   </p>
@@ -1217,6 +1468,7 @@ export const CoordinatorIncidentDetailModal = {
                   <p v-else style="margin: 0; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-muted, #6c7e9d);">
                     Sin piezas registradas durante la pausa.
                   </p>
+                  </template>
                 </div>
 
                 <!-- Resolución técnica documentada (RF-04.3) -->
@@ -1593,6 +1845,65 @@ export const CoordinatorIncidentDetailModal = {
                 </p>
               </div>
 
+              <!--
+                Panel de cancelación formal por inactividad de sede (RF-04.3 a RF-04.5,
+                Art. V.1): es la única cancelación que además bloquea la máquina por falta
+                de acceso y desvincula el reintegro, así que vive en su propio panel.
+              -->
+              <div
+                v-if="isInactivityPanelOpen"
+                class="inline-action-panel panel-danger"
+                data-testid="inactivity-panel"
+                style="border: 1px solid var(--color-error); border-radius: var(--radius-card, 8px); padding: 16px 20px; margin-bottom: 16px;"
+              >
+                <h4 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 14px; font-weight: 500; color: var(--color-error-text); margin: 0 0 10px;">
+                  🚫 Cancelar por Inactividad de Sede (más de {{ inactivityThresholdHours }} h hábiles)
+                </h4>
+                <p style="margin: 0 0 10px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-secondary); line-height: 1.45;">
+                  La avería pasa a <strong>CANCELADA</strong>, la máquina queda <strong>fuera de servicio (bloqueada por acceso)</strong> y el reintegro vinculado se desvincula para liquidación central. El motivo justificado queda sellado en el historial inmutable (Art. III).
+                </p>
+                <textarea
+                  v-model="inactivityReason"
+                  class="vg-textarea"
+                  data-testid="inactivity-reason"
+                  rows="3"
+                  placeholder="Motivo de la cancelación por inactividad (mínimo 20 caracteres)..."
+                  :disabled="isSubmittingInactivity"
+                  style="width: 100%; box-sizing: border-box; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate); background-color: var(--color-canvas); border: 1px solid var(--color-hairline-soft); border-radius: var(--radius-interactive, 4px); padding: 8px 12px; resize: vertical;"
+                ></textarea>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 6px; flex-wrap: wrap;">
+                  <span
+                    data-testid="inactivity-counter"
+                    :style="{ fontFamily: 'var(--font-body, Inter, sans-serif)', fontSize: '12px', fontWeight: '600', color: isInactivityReasonValid ? 'var(--color-success-text)' : 'var(--color-ink-muted)' }"
+                  >
+                    {{ inactivityReasonLength }} / 20 caracteres
+                  </span>
+                  <div style="display: flex; gap: 8px;">
+                    <button
+                      type="button"
+                      class="vg-btn vg-btn-secondary"
+                      data-testid="inactivity-dismiss"
+                      :disabled="isSubmittingInactivity"
+                      @click="closeInactivityPanel"
+                    >
+                      Volver
+                    </button>
+                    <button
+                      type="button"
+                      class="vg-btn vg-btn-danger"
+                      data-testid="inactivity-confirm"
+                      :disabled="!isInactivityReasonValid || isSubmittingInactivity"
+                      @click="confirmInactivityCancellation"
+                    >
+                      {{ isSubmittingInactivity ? 'Cancelando…' : 'Confirmar Cancelación por Inactividad' }}
+                    </button>
+                  </div>
+                </div>
+                <p v-if="inactivityErrorMessage" data-testid="inactivity-error" role="alert" style="margin: 8px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-error-text);">
+                  {{ inactivityErrorMessage }}
+                </p>
+              </div>
+
               <!-- Visor Integrado de Evidencia Gráfica (RNF-06: sin modales superpuestos) -->
               <div
                 v-if="photoZoomOpen"
@@ -1636,6 +1947,34 @@ export const CoordinatorIncidentDetailModal = {
             style="flex: 0 0 auto; background-color: #ffffff; justify-content: space-between; gap: 12px; flex-wrap: wrap;"
           >
             <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span
+                v-if="pauseActionErrorMessage"
+                data-testid="pause-action-error"
+                role="alert"
+                :style="{ fontFamily: 'var(--font-body, Inter, sans-serif)', fontSize: '12px', fontWeight: '600', color: 'var(--color-error-text)' }"
+              >
+                {{ pauseActionErrorMessage }}
+              </span>
+              <!-- Supervised actions of the frozen clock (Módulo 11, RF-06.2 / RF-04.3) -->
+              <button
+                v-if="canResumePause"
+                type="button"
+                class="vg-btn vg-btn-primary"
+                data-testid="incident-detail-resume-pause-trigger"
+                :disabled="isSubmittingResume"
+                @click="confirmResumePause"
+              >
+                {{ isSubmittingResume ? 'Reanudando…' : '▶️ Reanudar Intervención' }}
+              </button>
+              <button
+                v-if="canCancelInactivity && !isInactivityPanelOpen"
+                type="button"
+                class="vg-btn vg-btn-danger"
+                data-testid="incident-detail-cancel-inactivity-trigger"
+                @click="openInactivityPanel"
+              >
+                Cancelar por Inactividad de Sede
+              </button>
               <button
                 v-if="canAssign && !isAssignPanelOpen"
                 type="button"

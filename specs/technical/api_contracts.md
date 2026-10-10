@@ -392,11 +392,16 @@ Consulta el listado completo para supervisión y asignación (RF-05, RF-11).
       "assigned_technician": null,
       "sla_minutes_elapsed": 42,
       "sla_breached": false,
+      "is_sla_paused": false,
+      "total_pending_info_minutes": 0,
+      "is_prolonged_inactivity": false,
       "created_at": "2026-09-22T14:55:00Z"
     }
   ]
 }
 ```
+
+* **Extensión del Módulo 11 (T-PAUSE-19, RF-03.2, RF-04.2):** cada fila publica el estado del reloj contractual congelado para que la bandeja pinte la insignia `⏸️ SLA Pausado (+X min desc.)`, el filtro rápido de la espera de sede y el aviso urgente de la inactividad prolongada sin abrir una segunda petición por fila. `is_sla_paused` (la avería espera a la sede: el SLA no corre), `total_pending_info_minutes` (minutos ya descontados del cómputo contractual, RNF-01) y `is_prolonged_inactivity` (más de 72 horas hábiles sin respuesta ni acceso, medida en horario comercial de la sede) se suman a los campos de pausa que ya viajan desde `Incident::toArray()` (`paused_at`, `pending_info_reason_category`, `pending_info_reason_category_label`, `pending_info_reason_text`, `total_pending_info_seconds`).
 
 ---
 
@@ -501,8 +506,9 @@ Devuelve la ficha completa enriquecida que consume el modal de detalle del triaj
   * `machine`: máquina (`id`, `code`, `model`, `manufacturer`, `type`, `type_label`, `has_perishables`).
   * `technician`: profesional asignado (`assigned`, `technician_id`, `name`, `operator_code`, `assigned_at`, `assigned_by_name`, `reassignment_reason` — motivo justificado de la última reasignación leído del historial inmutable; `null` mientras el aviso conserve a su primer responsable).
   * `timeline`: hitos del ciclo de vida (`created_at`, `assigned_at`, `started_at`, `paused_at`, `resolved_at`, `closed_at` y tiempos derivados en minutos).
-  * `sla`: objetivo de cadena de frío (`has_sla_limit`, `sla_limit_hours`, `is_active_countdown`, `is_breached`, `minutes_remaining`, `historical_balance`, `sla_target_at`).
-  * `technical_intervention`: `pause` (motivo y piezas solicitadas), `resolution` (diagnóstico, acción correctiva y piezas sustituidas con coste congelado) y `cancellation`.
+  * `sla`: objetivo de cadena de frío (`has_sla_limit`, `sla_limit_hours`, `is_active_countdown`, `is_frozen` — el reloj contractual está detenido en la espera de sede (RF-03.2) —, `frozen_at` — instante congelado —, `is_breached`, `minutes_remaining`, `historical_balance`, `sla_target_at`).
+  * `technical_intervention`: `pause`, `resolution` (diagnóstico, acción correctiva y piezas sustituidas con coste congelado) y `cancellation`.
+    * `pause` publica la espera de repuestos (RF-04.2) y la espera de sede (RF-03.2, RF-04.2) en un único bloque estable: `is_paused` (cualquiera de las dos paradas), `is_sla_paused` (la contractual, con el reloj congelado), `paused_at`, `paused_minutes` (intervalo vivo), `accumulated_pause_minutes` (minutos ya descontados), `is_prolonged_inactivity`, `inactivity_threshold_business_hours` (72), `sla_target_frozen_at`, `sla_target_recalculated_at`, `can_resume_pause` y `can_cancel_inactivity` (las dos acciones supervisadas de la ficha, RF-04.3 y RF-06.2), `reason_category`, `reason_category_label`, `reason_text`, `reason` (motivo de la pausa por repuestos) y `requested_parts`.
   * `comments`: bitácora cronológica; `is_internal` distingue los comentarios públicos de las notas internas de taller.
   * `refund`: expediente de reintegro vinculado (`has_refund`, importe, estado y datos de contacto y pago enmascarados en servidor; Art. V.4).
   * `permissions`: matriz operativa del estado (`can_assign`, `can_reassign`, `can_cancel`, `can_add_comment`).
@@ -547,6 +553,7 @@ Devuelve la ficha completa enriquecida que consume el modal de detalle del triaj
 * **Consideraciones Técnicas:**
   * Endpoint estrictamente de lectura: abre una única transacción de lectura y no escribe ni muta nada (Art. III, RNF-04).
   * Los datos completos de teléfono e IBAN del consumidor nunca salen del servidor; el enmascaramiento se resuelve en el DTO (Art. V.4, RNF-05).
+  * **Doble reloj de la pausa de sede (T-PAUSE-19, RF-03.2, RF-03.3).** Con la avería esperando a la sede (`PENDING_INFO` con marca de pausa viva) el objetivo de cadena de frío **no sigue consumiéndose**: el bloque `sla` publica el instante congelado (`is_frozen`, `frozen_at`) y la cuenta atrás tal y como estaba al pausar, mientras el bloque `pause` publica la fecha contractual vigente en ese momento (`sla_target_frozen_at`) y la **recalculada** (`sla_target_recalculated_at`), desplazada en horario comercial 08:00-18:00 de lunes a viernes por los segundos de pausa ya acumulados más el intervalo vivo (Algoritmo 3 del plan del módulo 11). Ambas fechas viajan a `null` cuando la máquina no tiene objetivo de frío o cuando no hay pausa contractual viva. El reloj biológico sanitario (cuarentena de perecederos, Art. II) es una lectura independiente y no se detiene.
 
 ---
 

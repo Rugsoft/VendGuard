@@ -689,6 +689,163 @@ try {
             && ($incidentRow($partsIncidentId)['status'] ?? '') === 'ASSIGNED'
     );
 
+    // =========================================================================
+    // GRUPO 6: Bandeja y ficha con el reloj contractual congelado (T-PAUSE-19)
+    //          RF-03.2, RF-03.3, RF-04.2, RF-04.3, RF-06.2, RNF-01
+    // =========================================================================
+    echo "\n--- Grupo 6: SLA pausado, alerta de 72 h y acciones supervisadas en la bandeja ---\n";
+
+    /**
+     * Fila de triaje de un expediente concreto tal y como la ve el coordinador:
+     * `GET /api/coordinator/incidents` es la única fuente de la bandeja, así que se
+     * recorre su carga útil real en lugar de consultar columnas por SQL.
+     *
+     * @return array<string, mixed>
+     */
+    $boardRowFor = static function (int $incidentId) use ($router, $authHeader, $coordinatorToken): array {
+        $listRes = $router->dispatch(new Request(
+            method: 'GET',
+            path: '/api/coordinator/incidents',
+            headers: $authHeader($coordinatorToken)
+        ));
+
+        foreach (($listRes->getDecodedBody()['data'] ?? []) as $row) {
+            if ((int)($row['id'] ?? 0) === $incidentId) {
+                return $row;
+            }
+        }
+
+        return [];
+    };
+
+    // La cadena de frío exige una máquina perecedera libre: la pausa contractual sólo
+    // congela un objetivo de 4 h si la tipología lo tiene (Art. II).
+    $perishableMachineRow = $pdo->query(
+        "SELECT m.`id` AS machine_id, m.`location_id`
+           FROM `machines` m
+          WHERE m.`is_active` = 1
+            AND m.`machine_type` = 'PERISHABLE_FOOD'
+            AND NOT EXISTS (
+                SELECT 1 FROM `incidents` i
+                 WHERE i.`machine_id` = m.`id`
+                   AND i.`deleted_at` IS NULL
+                   AND i.`status` NOT IN ('CLOSED', 'CANCELLED')
+            )
+          ORDER BY m.`id`
+          LIMIT 1"
+    )->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    $assert(
+        '6.0 Premisa del banco de pruebas: hay una máquina perecedera activa y libre',
+        $perishableMachineRow !== [],
+        'La suite necesita una máquina PERISHABLE_FOOD sin expediente activo para medir el reloj congelado.'
+    );
+
+    $sequence++;
+    $frozenTicketCode = sprintf('TST-P13-%s-%02d', $suffix, $sequence);
+    $frozenIncident = $incidentRepo->create(new Incident(
+        id: null,
+        ticketCode: $frozenTicketCode,
+        machineId: (int)$perishableMachineRow['machine_id'],
+        locationId: (int)$perishableMachineRow['location_id'],
+        category: IncidentCategory::TEMPERATURE_COLD,
+        description: 'Pérdida de frío en el banco de pruebas del reloj contractual congelado.',
+        urgency: UrgencyLevel::CRITICAL,
+        status: IncidentStatus::REGISTERED,
+        assignedTechnicianId: null,
+        createdAt: null
+    ));
+    $frozenIncidentId = (int)$frozenIncident->getId();
+    $incidentRepo->assign($frozenIncidentId, $techId, $coordinatorId);
+
+    $pauseRes = $router->dispatch(new Request(
+        method: 'POST',
+        path: $pausePath($frozenIncidentId),
+        parsedBody: $pauseBody('BUILDING_CLOSED_NO_ACCESS', $validReason),
+        headers: $authHeader($coordinatorToken)
+    ));
+    $assert('6.1 La pausa de sede legal se declara sobre la máquina de frío (Art. II)', $pauseRes->getStatusCode() === 200);
+
+    $freshPauseBoardRow = $boardRowFor($frozenIncidentId);
+    $assert(
+        '6.2 La fila de triaje publica el reloj congelado, los minutos descontados y la causa tipificada',
+        ($freshPauseBoardRow['is_sla_paused'] ?? false) === true
+            && ($freshPauseBoardRow['total_pending_info_minutes'] ?? null) === 0
+            && ($freshPauseBoardRow['is_prolonged_inactivity'] ?? true) === false
+            && ($freshPauseBoardRow['paused_at'] ?? '') !== ''
+            && ($freshPauseBoardRow['pending_info_reason_category_label'] ?? '') === 'Edificio cerrado / Sin acceso a instalaciones',
+        json_encode($freshPauseBoardRow)
+    );
+
+    // Sembrado del silencio de sede: tres semanas naturales superan con holgura las 72 h
+    // hábiles que encienden el aviso urgente (RF-04.2).
+    $pdo->prepare('UPDATE `incidents` SET `paused_at` = :paused WHERE `id` = :id')->execute([
+        ':paused' => (new DateTimeImmutable('-21 days'))->format('Y-m-d H:i:s'),
+        ':id'     => $frozenIncidentId,
+    ]);
+
+    $prolongedBoardRow = $boardRowFor($frozenIncidentId);
+    $assert(
+        '6.3 Más de 72 h hábiles sin respuesta encienden la alerta prioritaria de la fila (RF-04.2)',
+        ($prolongedBoardRow['is_prolonged_inactivity'] ?? false) === true
+            && ($prolongedBoardRow['is_sla_paused'] ?? false) === true,
+        json_encode($prolongedBoardRow)
+    );
+
+    $detailRes = $router->dispatch(new Request(
+        method: 'GET',
+        path: "/api/coordinator/incidents/{$frozenIncidentId}/detail",
+        headers: $authHeader($coordinatorToken)
+    ));
+    $detailData = $detailRes->getDecodedBody()['data'] ?? [];
+    $detailPause = $detailData['technical_intervention']['pause'] ?? [];
+
+    $assert(
+        '6.4 La ficha de coordinación publica el bloque de pausa con su causa y las dos acciones supervisadas',
+        $detailRes->getStatusCode() === 200
+            && ($detailPause['is_sla_paused'] ?? false) === true
+            && ($detailPause['can_resume_pause'] ?? false) === true
+            && ($detailPause['can_cancel_inactivity'] ?? false) === true
+            && ($detailPause['is_prolonged_inactivity'] ?? false) === true
+            && ($detailPause['reason_category_label'] ?? '') === 'Edificio cerrado / Sin acceso a instalaciones'
+            && (int)($detailPause['inactivity_threshold_business_hours'] ?? 0) === IncidentPauseService::PROLONGED_INACTIVITY_BUSINESS_HOURS,
+        json_encode($detailPause)
+    );
+
+    $frozenTarget = $detailPause['sla_target_frozen_at'] ?? null;
+    $recalculatedTarget = $detailPause['sla_target_recalculated_at'] ?? null;
+    $recalculatedAt = is_string($recalculatedTarget) ? new DateTimeImmutable($recalculatedTarget) : null;
+    $assert(
+        '6.5 El SLA queda congelado al pausar y la fecha recalculada cae en jornada hábil 08:00-18:00 (RF-03.2, RF-03.3, RNF-01)',
+        ($detailData['sla']['is_frozen'] ?? false) === true
+            && ($detailData['sla']['frozen_at'] ?? null) === ($prolongedBoardRow['paused_at'] ?? null)
+            && is_string($frozenTarget)
+            && $recalculatedAt !== null
+            && $recalculatedTarget !== $frozenTarget
+            && $recalculatedTarget > $frozenTarget
+            && (int)$recalculatedAt->format('N') <= 5
+            && (int)$recalculatedAt->format('G') >= 8
+            && (int)$recalculatedAt->format('G') < 18,
+        json_encode([$frozenTarget, $recalculatedTarget])
+    );
+
+    $resumeRes = $router->dispatch(new Request(
+        method: 'POST',
+        path: $resumePath($frozenIncidentId),
+        parsedBody: ['target_status' => 'ASSIGNED'],
+        headers: $authHeader($coordinatorToken)
+    ));
+    $assert(
+        '6.6 Reanudar la avería devuelve el expediente a ASSIGNED y cierra la pausa (RF-06.2)',
+        $resumeRes->getStatusCode() === 200
+            && ($incidentRow($frozenIncidentId)['status'] ?? '') === 'ASSIGNED'
+            && ($incidentRow($frozenIncidentId)['paused_at'] ?? null) === null
+    );
+    $assert(
+        '6.7 Tras la reanudación la fila deja de estar congelada y el reloj vuelve a correr',
+        ($boardRowFor($frozenIncidentId)['is_sla_paused'] ?? true) === false
+    );
+
 } finally {
     echo "\n--- Limpieza de los expedientes propios de la suite ---\n";
     foreach ($refundIds as $refundId) {

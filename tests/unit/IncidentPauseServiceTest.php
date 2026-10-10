@@ -580,6 +580,22 @@ try {
     $unpaused = $service->isProlongedInactivity($domainIncident(IncidentStatus::IN_PROGRESS, null), $at('2026-10-09 18:00:00'));
     $assert('6.10 Un expediente sin pausa viva nunca está en espera prolongada', $unpaused === false);
 
+    // ---- Entrada por columnas crudas (T-PAUSE-19) ---------------------------
+    // Las superficies de lectura (bandeja de triaje y ficha de detalle) no hidratan el
+    // agregado, así que la MISMA regla de negocio se publica sobre las columnas de la fila.
+    $assert(
+        '6.10.b La consulta por columnas crudas reproduce el umbral de la instancia de dominio (una sola regla)',
+        $service->isProlongedInactivitySince('2026-09-28 08:00:00', true, $at('2026-10-07 10:00:00')) === false
+            && $service->isProlongedInactivitySince('2026-09-28 08:00:00', true, $at('2026-10-07 10:00:01')) === true
+            && $service->isProlongedInactivitySince('2026-09-28 08:00:00', true, $at('2026-10-09 18:00:00')) === true
+    );
+    $assert(
+        '6.10.c Sin marca de pausa o sin pausa viva la consulta cruda es fail-safe',
+        $service->isProlongedInactivitySince(null, true, $at('2026-10-09 18:00:00')) === false
+            && $service->isProlongedInactivitySince('', true, $at('2026-10-09 18:00:00')) === false
+            && $service->isProlongedInactivitySince('2026-09-28 08:00:00', false, $at('2026-10-09 18:00:00')) === false
+    );
+
     // ---- Cancelación real contra MariaDB -------------------------------------
     $cancelIncidentId = $insertIncident([
         'machine_type_snapshot' => 'SNACKS',

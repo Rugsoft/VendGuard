@@ -1313,6 +1313,218 @@ assert('18.6 No operational entry point escapes the permission gates (consultati
   (template.match(/@click="openAssignPanel"/g) || []).length === 2 &&
   (template.match(/@click="openCancelPanel"/g) || []).length === 1);
 
+// ---------------------------------------------------------------------
+// TEST GROUP 19: Frozen contractual clock, prolonged wait and the two
+// supervised pause actions inside the incident file (Módulo 11, T-PAUSE-19)
+// RF-03.2 / RF-04.2 / RF-04.3 / RF-06.2 / RNF-04
+// ---------------------------------------------------------------------
+console.log('\n--- Group 19: Frozen SLA, 72h alert and supervised pause actions ---');
+
+/** Site-wait pause block published by CoordinatorIncidentDetailService (RF-03.2). */
+const sitePauseBlock = {
+  is_paused: true,
+  is_sla_paused: true,
+  paused_at: '2026-10-07 09:00:00',
+  paused_minutes: 145,
+  accumulated_pause_minutes: 145,
+  is_prolonged_inactivity: false,
+  inactivity_threshold_business_hours: 72,
+  sla_target_frozen_at: '2026-10-01 12:15:00',
+  sla_target_recalculated_at: '2026-10-13 09:40:00',
+  can_resume_pause: true,
+  can_cancel_inactivity: true,
+  reason_category: 'BUILDING_CLOSED_NO_ACCESS',
+  reason_category_label: 'Edificio cerrado / Sin acceso a instalaciones',
+  reason_text: 'El conserje confirma que el centro permanece cerrado por obras toda la semana.',
+  reason: null,
+  requested_parts: []
+};
+
+const sitePauseDetail = {
+  ...detailFixture,
+  incident: { ...detailFixture.incident, status: 'PENDING_INFO', status_label: 'Pendiente de información' },
+  sla: {
+    ...detailFixture.sla,
+    is_frozen: true,
+    frozen_at: '2026-10-07 09:00:00',
+    historical_balance: 'Tiempo restante: 1 h 40 min'
+  },
+  technical_intervention: { ...detailFixture.technical_intervention, pause: sitePauseBlock },
+  permissions: { ...detailFixture.permissions, can_reassign: true }
+};
+
+const sitePauseInstance = createInstance({ detail: sitePauseDetail });
+
+assert('19.1 The pause block publishes the frozen clock and the two supervised actions (RF-03.2)',
+  computed(sitePauseInstance, 'isSlaPaused') === true &&
+  computed(sitePauseInstance, 'isProlongedInactivity') === false &&
+  computed(sitePauseInstance, 'canResumePause') === true &&
+  computed(sitePauseInstance, 'canCancelInactivity') === true);
+
+assert('19.2 Human readings: elapsed wait, discounted minutes and both contractual dates',
+  computed(sitePauseInstance, 'pausedMinutesLabel') === '2 h 25 min' &&
+  computed(sitePauseInstance, 'accumulatedPauseMinutesLabel') === '2 h 25 min' &&
+  computed(sitePauseInstance, 'frozenSlaTargetLabel') === '01/10/2026 12:15' &&
+  computed(sitePauseInstance, 'recalculatedSlaTargetLabel') === '13/10/2026 09:40',
+  JSON.stringify({
+    paused: computed(sitePauseInstance, 'pausedMinutesLabel'),
+    frozen: computed(sitePauseInstance, 'frozenSlaTargetLabel'),
+    recalculated: computed(sitePauseInstance, 'recalculatedSlaTargetLabel')
+  }));
+
+assert('19.3 Header: the ⏸️ SLA Pausado chip hangs from the server flag (RF-03.2)',
+  template.includes('data-testid="incident-detail-sla-paused-chip"') &&
+  template.includes('v-if="isSlaPaused"') &&
+  template.includes('⏸️ SLA Pausado'));
+
+assert('19.4 SLA monitor: frozen badge, frozen clock and the recalculated date travel together',
+  template.includes('data-testid="sla-paused-badge"') &&
+  template.includes('data-testid="sla-frozen-clock"') &&
+  template.includes('data-testid="sla-target-recalculated"') &&
+  template.includes('Reloj contractual congelado · espera de sede') &&
+  template.includes('Fecha SLA recalculada:'));
+
+assert('19.5 Pause block: the site wait branch coexists with the spare-parts branch (RF-04.2)',
+  template.includes('v-if="pause.is_sla_paused"') &&
+  template.includes('data-testid="pause-reason-category"') &&
+  template.includes('data-testid="pause-reason-text"') &&
+  template.includes('data-testid="pause-since"') &&
+  template.includes('data-testid="pause-sla-recalculated"') &&
+  template.includes('🧰 Pausa técnica por repuestos') &&
+  template.includes('⏸️ Pausa por espera de sede (SLA pausado)'));
+
+const prolongedPauseInstance = createInstance({
+  detail: {
+    ...sitePauseDetail,
+    technical_intervention: {
+      ...sitePauseDetail.technical_intervention,
+      pause: { ...sitePauseBlock, is_prolonged_inactivity: true, accumulated_pause_minutes: 2890 }
+    }
+  }
+});
+assert('19.6 Beyond 72 business hours the file raises the urgent notice with the server threshold (RF-04.2)',
+  computed(prolongedPauseInstance, 'isProlongedInactivity') === true &&
+  computed(prolongedPauseInstance, 'inactivityThresholdHours') === 72 &&
+  computed(prolongedPauseInstance, 'accumulatedPauseMinutesLabel') === '48 h 10 min' &&
+  template.includes('data-testid="pause-prolonged-inactivity"') &&
+  template.includes('más de {{ inactivityThresholdHours }} horas hábiles sin respuesta de sede'));
+
+assert('19.7 The footer offers resume and formal cancellation only with the frozen clock',
+  template.includes('v-if="canResumePause"') &&
+  template.includes('data-testid="incident-detail-resume-pause-trigger"') &&
+  template.includes('v-if="canCancelInactivity && !isInactivityPanelOpen"') &&
+  template.includes('data-testid="incident-detail-cancel-inactivity-trigger"'));
+
+assert('19.8 The inactivity panel keeps the 20-real-character rule of Art. V.1 and closes its siblings',
+  template.includes('data-testid="inactivity-panel"') &&
+  template.includes('{{ inactivityReasonLength }} / 20 caracteres') &&
+  template.includes(':disabled="!isInactivityReasonValid || isSubmittingInactivity"') &&
+  computed(createInstance({ detail: sitePauseDetail, inactivityReason: 'x'.repeat(19) }), 'isInactivityReasonValid') === false &&
+  computed(createInstance({ detail: sitePauseDetail, inactivityReason: 'x'.repeat(20) }), 'isInactivityReasonValid') === true);
+
+const exclusivePanelInstance = createInstance({ detail: sitePauseDetail });
+exclusivePanelInstance.isCancelPanelOpen = true;
+CoordinatorIncidentDetailModal.methods.openInactivityPanel.call(exclusivePanelInstance);
+assert('19.9 Opening the supervised cancellation closes any other inline panel (RNF-06)',
+  exclusivePanelInstance.isInactivityPanelOpen === true &&
+  exclusivePanelInstance.isCancelPanelOpen === false &&
+  exclusivePanelInstance.isAssignPanelOpen === false);
+
+let inactivityCalls = [];
+api.coordinator.cancelIncidentInactivity = async (incidentId, reason) => {
+  inactivityCalls.push({ incidentId, reason });
+  return { incident_id: incidentId };
+};
+
+const shortReasonInstance = createInstance({
+  detail: sitePauseDetail,
+  incidentId: 142,
+  isInactivityPanelOpen: true,
+  inactivityReason: 'Sede sin responder'
+});
+shortReasonInstance.fetchDetail = async () => {};
+await CoordinatorIncidentDetailModal.methods.confirmInactivityCancellation.call(shortReasonInstance);
+assert('19.10 A cancellation reason under 20 characters never leaves the modal',
+  inactivityCalls.length === 0 && shortReasonInstance.isInactivityPanelOpen === true &&
+  shortReasonInstance.inactivityErrorMessage.includes('20 caracteres'));
+
+const validReasonInstance = createInstance({
+  detail: sitePauseDetail,
+  incidentId: 142,
+  isInactivityPanelOpen: true,
+  inactivityReason: '  Tres semanas con la sede cerrada y sin respuesta ni acceso facilitado al técnico.  '
+});
+validReasonInstance.fetchDetail = async () => {};
+await CoordinatorIncidentDetailModal.methods.confirmInactivityCancellation.call(validReasonInstance);
+assert('19.11 The supervised cancellation sends the trimmed reason, closes the panel and refreshes the file (RF-04.3)',
+  inactivityCalls.length === 1 && inactivityCalls[0].incidentId === 142 &&
+  inactivityCalls[0].reason === 'Tres semanas con la sede cerrada y sin respuesta ni acceso facilitado al técnico.' &&
+  validReasonInstance.isInactivityPanelOpen === false && validReasonInstance.inactivityReason === '' &&
+  validReasonInstance.getEmitted().some((e) => e.event === 'incident-updated' && e.payload?.reason === 'cancel-inactivity'),
+  JSON.stringify(inactivityCalls));
+
+api.coordinator.cancelIncidentInactivity = async () => {
+  throw new Error('El expediente no está pendiente de información.');
+};
+const rejectedReasonInstance = createInstance({
+  detail: sitePauseDetail,
+  incidentId: 142,
+  isInactivityPanelOpen: true,
+  inactivityReason: 'Tres semanas con la sede cerrada y sin respuesta ni acceso facilitado al técnico.'
+});
+rejectedReasonInstance.fetchDetail = async () => {};
+await CoordinatorIncidentDetailModal.methods.confirmInactivityCancellation.call(rejectedReasonInstance);
+assert('19.12 A rejected cancellation keeps the panel, the draft and the server message',
+  rejectedReasonInstance.isInactivityPanelOpen === true &&
+  rejectedReasonInstance.inactivityReason.length > 20 &&
+  rejectedReasonInstance.inactivityErrorMessage.includes('pendiente de información'));
+
+let resumePauseCalls = [];
+api.coordinator.resumeIncidentPendingInfo = async (incidentId, targetStatus, resumeNote) => {
+  resumePauseCalls.push({ incidentId, targetStatus, resumeNote });
+  return { incident_id: incidentId, status: targetStatus };
+};
+const resumePauseInstance = createInstance({ detail: sitePauseDetail, incidentId: 142 });
+resumePauseInstance.fetchDetail = async () => {};
+await CoordinatorIncidentDetailModal.methods.confirmResumePause.call(resumePauseInstance);
+assert('19.13 Resuming from the file returns it to the technician route as ASSIGNED and refreshes it (RF-06.2)',
+  resumePauseCalls.length === 1 && resumePauseCalls[0].incidentId === 142 &&
+  resumePauseCalls[0].targetStatus === 'ASSIGNED' &&
+  resumePauseInstance.isSubmittingResume === false &&
+  resumePauseInstance.getEmitted().some((e) => e.event === 'incident-updated' && e.payload?.reason === 'resume-pause'));
+
+api.coordinator.resumeIncidentPendingInfo = async () => {
+  throw new Error('La incidencia no tiene una pausa abierta.');
+};
+await CoordinatorIncidentDetailModal.methods.confirmResumePause.call(resumePauseInstance);
+assert('19.14 A rejected resume surfaces the server reason in the file footer',
+  resumePauseInstance.pauseActionErrorMessage.includes('pausa abierta') &&
+  template.includes('data-testid="pause-action-error"'));
+
+const partsPauseInstance = createInstance({
+  detail: {
+    ...detailFixture,
+    technical_intervention: { ...detailFixture.technical_intervention, pause: { ...detailFixture.technical_intervention.pause } }
+  }
+});
+assert('19.15 A spare-parts pause keeps its own reading and never offers the site-wait actions',
+  computed(partsPauseInstance, 'isSlaPaused') === false &&
+  computed(partsPauseInstance, 'canResumePause') === false &&
+  computed(partsPauseInstance, 'canCancelInactivity') === false &&
+  computed(partsPauseInstance, 'isProlongedInactivity') === false);
+
+const draftGuardInstance = createInstance({
+  detail: sitePauseDetail,
+  isInactivityPanelOpen: true,
+  inactivityReason: 'Motivo en redacción'
+});
+assert('19.16 The dirty-form guard also protects the inactivity draft (RF-08.1)',
+  computed(draftGuardInstance, 'isFormDirty') === true &&
+  computed(draftGuardInstance, 'hasUnsavedInactivityReason') === true &&
+  computed(createInstance({ isInactivityPanelOpen: false, inactivityReason: 'Motivo' }), 'isFormDirty') === false &&
+  CoordinatorIncidentDetailModal.methods.resetDrafts.call(draftGuardInstance) === undefined &&
+  draftGuardInstance.inactivityReason === '' && draftGuardInstance.isInactivityPanelOpen === false);
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
