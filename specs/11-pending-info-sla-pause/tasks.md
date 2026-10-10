@@ -288,3 +288,56 @@
     * **Dos arneses que declaraban "cero base de datos" dejaron de poder mentir.** La puerta del reloj sanitario se cuela en todo cierre técnico, y `TechnicianRefundVerdictTest` y `TechnicianSparePartsControllerTest` construían el controlador sin servicio de pausa: con un PDO disponible devolvían `500 SANITARY_CLOCK_EVALUATION_FAILED` (y sin él, habrían dependido del entorno). Se les inyecta un doble en memoria de `PreventiveSettingsRepositoryInterface` con la tipología real de sus máquinas y el semáforo en `OK`, y al expediente del banco de reintegros se le añade su marca de apertura: la puerta sigue de pie —no se desactiva ni se relaja— y ambos arneses vuelven a ser deterministas sin MariaDB.
     * **Flake de auditoría evitado por delta, también aquí.** `audit_log` es append-only y el arnés no la purga entre suites, así que los seis eventos de la suite se cuentan por **delta** sobre un cursor (`MAX(id)`) tomado antes de cada acción, siguiendo el precedente de T-PAUSE-13/14/21. La primera corrida dio verde sólo porque la base estaba vacía; la segunda, ya con 34.000 filas huérfanas, delató el recuento absoluto y se corrigió el instrumento, no la aserción.
     * **Hallazgo para el Product Owner (no corregido aquí, fuera del alcance del módulo 11).** `SparePartTraceabilityService` escribe el evento `RESOLVE_INCIDENT` —el que congela las declaraciones sanitarias, el diagnóstico y la solución— sólo cuando recibe un `AuditLogger`. `TechnicianPreventiveController` y `CoordinatorSparePartsController` se lo pasan, pero **`TechnicianController` no**: en el cierre del técnico de ruta por HTTP el rastro vive en `incident_history` (que sí cumple la auditabilidad completa del Art. III.3: qué, quién, qué pieza y cuándo) pero **no** se emite evento en `audit_log`, de modo que el visor del coordinador no muestra `RESOLVE_INCIDENT` para esos cierres. Es una inconsistencia de cableado entre controladores, no una brecha de trazabilidad, y la resuelve el Product Owner: cablear el logger (una línea, con el evento ya etiquetado en el catálogo) o declarar el historial como única fuente de verdad del cierre. La suite no lo certifica como verde ni lo esconde: la aserción 1.5 se acota a lo que el sistema cumple hoy (eco del contrato + firma inmutable del historial).
+
+---
+
+## Fase 6: Remediación de la auditoría de trazabilidad (2026-10-10)
+
+> Origen: auditoría requisito por requisito de `spec.md` que localizó ocho huecos y desviaciones reales (caso límite de concurrencia, coberturas parciales de RNF-03 y RNF-04, validador sanitario sin prueba unitaria, bloque sanitario del técnico sin prueba —con dos defectos reales—, copy de cuarentena divergente, `isPerishable` frente a la vigilancia sobre `COMBO` y el evento `RESOLVE_INCIDENT` ausente de la auditoría del cierre de ruta). Cada tarea cierra un hueco con prueba ejecutable.
+
+- [x] **T-PAUSE-23: Cablear `AuditLogger` en el cierre de la ruta del técnico**
+  * **Requisitos:** Constitución Art. III (auditabilidad completa), RNF-05
+  * **Dependencias:** T-PAUSE-22
+  * **Hecho cuando:** El cierre técnico por `POST /api/technician/incidents/{id}/resolve` deja un evento `RESOLVE_INCIDENT` en `audit_log` con el actor técnico, el diagnóstico y las declaraciones sanitarias congeladas, y una aserción de integración lo certifica por delta sobre el cursor de auditoría.
+  * **Verificación ejecutada (2026-10-10):** `php tests/integration/PendingInfoConstitutionalTest.php` → **30 aserciones (1 nueva: 1.5.b) · 0 fallos · exit 0**; `php tests/unit/TechnicianSparePartsControllerTest.php`, `TechnicianCommentEndpointTest.php` (59), `TechnicianMachineHistoryServiceTest.php`, `TechnicianRefundVerdictTest.php` y `TechnicianRouteCommentsCounterTest.php` (13) → **exit 0** (el servicio de trazabilidad pasa a resolverse bajo demanda, así que las cinco suites unitarias que construyen el controlador siguen sin abrir conexión). `php tests/run_all.php` → **233 suites · 8.990 aserciones · 0 fallos**, con **7 desviaciones de cifras documentadas** declaradas como consecuencia prevista de la Fase 6 (cada suite nueva de la remediación mueve el total; la frase canónica se sincroniza una sola vez en T-PAUSE-31, tal y como fija el plan ratificado).
+  * **Decisión de diseño anotada:** el logger se inyecta en la construcción por defecto del servicio de trazabilidad, que ahora es perezosa (mismo patrón ya ratificado para el hilo de comentarios y el ciclo de pausa). La aserción 1.5.b es estricta —exige **exactamente un** evento con `user_id` del técnico— de modo que no puede pasar por accidente con el logger desconectado; se comprobó que el recuento era 0 antes del cableado.
+
+- [ ] **T-PAUSE-24: Bordes del validador de declaraciones sanitarias**
+  * **Requisitos:** RF-03.5.2, Constitución Art. II
+  * **Dependencias:** T-PAUSE-22
+  * **Hecho cuando:** `ResolutionValidatorTest.php` cubre unitariamente `validateSanitaryDeclarations()` y `getSanitaryDeclarationErrors()`: bloque ausente, temperatura vacía, no numérica y con coma decimal, bordes inclusivos −40,0 y 80,0 frente a −40,1 y 80,1, confirmaciones ausentes, `false` explícito y `"false"`, aceptación de `true` y `"true"`, y acumulación de los tres errores en un único mensaje.
+
+- [ ] **T-PAUSE-25: Corregir y cubrir el bloque sanitario del técnico**
+  * **Requisitos:** RF-03.5.2, RNF-03, Constitución Art. II
+  * **Dependencias:** T-PAUSE-22
+  * **Hecho cuando:** `TechnicianSanitaryResolutionBlock` deja de lanzar `TypeError` con la temperatura vacía o no numérica, emite el estado real de las casillas, y una suite ESM nueva más las aserciones de cableado de `TechnicianRouteViewTest.mjs` cubren validez, payload, objetivos táctiles y el bloqueo del cierre sin bloque válido.
+
+- [ ] **T-PAUSE-26: Ratificar la vigilancia sanitaria sobre perecederas y mixtas**
+  * **Requisitos:** RF-03.4, RF-03.5, Constitución Art. II
+  * **Dependencias:** T-PAUSE-22
+  * **Hecho cuando:** `spec.md`, el spec funcional y el plan nombran la vigilancia del Reloj Sanitario Biológico sobre alimentos perecederos **y máquinas mixtas** (`COMBO`), el criterio 3 de la Sección 8 deja de citar `isPerishable = true` y la nota de ambigüedad de T-PAUSE-07 queda ratificada; sin cambios en `src/`.
+
+- [ ] **T-PAUSE-27: Certificar el contrato de 360 px del modal de pausa**
+  * **Requisitos:** RNF-03
+  * **Dependencias:** T-PAUSE-20
+  * **Hecho cuando:** La suite ESM aserta el contrato de layout a 360 px (diálogo al 100 % de ancho, relleno de backdrop, ausencia de `min-width` que desborde, una sola columna, controles ≥ 44 px y tipografía ≥ 12 px) y la medición real en navegador a 360 × 640 queda documentada con sus anchos y captura.
+
+- [ ] **T-PAUSE-28: Certificar contraste WCAG AA de los tokens de estado**
+  * **Requisitos:** RNF-04
+  * **Dependencias:** T-PAUSE-22
+  * **Hecho cuando:** Una suite ESM nueva mide con la fórmula WCAG 2.1 el ratio texto/fondo de todas las parejas de estado (ámbar de pausa, urgencias, estados y semáforos), exige ≥ 4,5:1, ancla la pareja ámbar del módulo 11 al literal de la spec y declara en una lista de excepciones los dos contrastes preexistentes ajenos al módulo 11; la suite falla si aparece una pareja nueva sin medición.
+
+- [ ] **T-PAUSE-29: Adoptar el copy de cuarentena y mostrarlo en el portal de sede**
+  * **Requisitos:** RF-03.5.1, RF-06.1, Constitución Art. II y Art. V.4
+  * **Dependencias:** T-PAUSE-22
+  * **Hecho cuando:** El aviso del servidor y el modal QR usan el distintivo literal «Riesgo térmico: máquina en cuarentena preventiva», el portal de sede publica el estado sanitario de la máquina y su tarjeta lo pinta, y las aserciones certifican que el estado público sigue sin filtrar motivos internos de pausa.
+
+- [ ] **T-PAUSE-30: Serializar las reanudaciones concurrentes con bloqueo por fila**
+  * **Requisitos:** Caso límite §6.2 del spec, RF-02.1, RF-02.2, RNF-02
+  * **Dependencias:** T-PAUSE-08, T-PAUSE-12, T-PAUSE-14
+  * **Hecho cuando:** `IncidentPauseService` lee el expediente con bloqueo por fila (`SELECT ... FOR UPDATE`) dentro de una transacción tanto en la reanudación manual como en la reactivación por comentario de sede, y una suite de integración con dos conexiones PDO reales certifica que una sola transición y un solo rastro sobreviven a una carrera simultánea.
+
+- [ ] **T-PAUSE-31: Verificación global y cierre del registro de auditoría**
+  * **Requisitos:** Criterios de Finalización 9, RNF-05, DocMetricsGuard
+  * **Dependencias:** T-PAUSE-23 a T-PAUSE-30
+  * **Hecho cuando:** `php tests/run_all.php` termina 100 % en verde con las suites nuevas, las cifras canónicas quedan sincronizadas en el README y los cuatro documentos vivos, y el registro de hallazgos del módulo queda cerrado declarando las dos únicas excepciones (contrastes `CANCELLED` y `CRITICAL`, ajenos al módulo 11).

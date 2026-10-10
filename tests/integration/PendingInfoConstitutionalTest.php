@@ -52,6 +52,7 @@ require_once __DIR__ . '/../../src/Infrastructure/Database/ConnectionFactory.php
 require_once __DIR__ . '/../../src/Infrastructure/Database/SeedRunner.php';
 
 use VendGuard\Application\Service\AuthService;
+use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\User;
@@ -308,7 +309,7 @@ $auditCursor = static function () use ($pdo): int {
 /** @return list<array<string, mixed>> Eventos de auditoría nuevos desde el cursor. */
 $auditEvents = function (string $entityType, int $entityId, string $action, int $sinceId = 0) use ($pdo): array {
     $stmt = $pdo->prepare(
-        'SELECT `action`, `entity_type`, `entity_id`, `user_role`, `user_name`, `previous_state`, `new_state`, `metadata`, `created_at`
+        'SELECT `action`, `entity_type`, `entity_id`, `user_id`, `user_role`, `user_name`, `previous_state`, `new_state`, `metadata`, `created_at`
            FROM `audit_log`
           WHERE `entity_type` = :entity_type AND `entity_id` = :entity_id AND `action` = :action
             AND `id` > :since_id
@@ -507,6 +508,7 @@ try {
     );
 
     // 1.5 Con las tres declaraciones válidas, el cierre procede y queda congelado en auditoría.
+    $auditBeforeResolve = $auditCursor();
     $validResponse = $router->dispatch(new Request(
         method: 'POST',
         path: $resolvePath($sanitaryIncidentId),
@@ -541,6 +543,25 @@ try {
             && str_contains($resolveNote, $validAction),
         'HTTP ' . $validResponse->getStatusCode() . ' · respuesta: ' . json_encode($validResponse->getDecodedBody(), JSON_UNESCAPED_UNICODE)
             . ' · historial: ' . json_encode($resolveHistory, JSON_UNESCAPED_UNICODE)
+    );
+
+    // 1.5.b El cierre de la ruta del técnico también deja su evento en la auditoría del
+    //       coordinador (T-PAUSE-23, Art. III): sin el logger cableado, el rastro vivía
+    //       sólo en `incident_history` y el visor no mostraba RESOLVE_INCIDENT.
+    $resolveEvents = $auditEvents(AuditEvent::ENTITY_TICKET, $sanitaryIncidentId, 'RESOLVE_INCIDENT', $auditBeforeResolve);
+    $resolveEvent   = $resolveEvents[0] ?? [];
+    $resolveEventState = is_string($resolveEvent['new_state'] ?? null)
+        ? (json_decode((string)$resolveEvent['new_state'], true) ?: [])
+        : [];
+
+    $assert(
+        '1.5.b El cierre deja un único RESOLVE_INCIDENT en audit_log, con actor técnico y las declaraciones congeladas (Art. III)',
+        count($resolveEvents) === 1
+            && (int)($resolveEvent['user_id'] ?? 0) === $techId
+            && ($resolveEventState['status'] ?? '') === 'RESOLVED'
+            && ($resolveEventState['sanitary_declarations']['temperature_c'] ?? null) === 3.5
+            && ($resolveEventState['resolution_diagnosis'] ?? '') === $validDiagnosis,
+        'eventos nuevos: ' . json_encode($resolveEvents, JSON_UNESCAPED_UNICODE)
     );
 
     $assert(

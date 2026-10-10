@@ -7,6 +7,7 @@ namespace VendGuard\Presentation\Controller;
 use VendGuard\Application\DTO\IncidentPauseRequestDto;
 use VendGuard\Application\DTO\TechnicianRefundInspectionDTO;
 use VendGuard\Application\DTO\TechnicianRefundViewDTO;
+use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\IncidentCommentService;
 use VendGuard\Application\Service\IncidentPauseService;
 use VendGuard\Application\Service\RefundManagementService;
@@ -39,6 +40,7 @@ use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Service\ResolutionValidator;
+use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentReplacedPartRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
@@ -65,7 +67,7 @@ class TechnicianController
     private MachineRepositoryInterface $machineRepo;
     private LocationRepositoryInterface $locationRepo;
     private UserRepositoryInterface $userRepo;
-    private SparePartTraceabilityService $traceabilityService;
+    private ?SparePartTraceabilityService $traceabilityService;
     private RefundRequestRepositoryInterface $refundRepo;
     private TechnicianRefundService $refundService;
     private LocalFileUploader $fileUploader;
@@ -88,13 +90,10 @@ class TechnicianController
         $this->machineRepo  = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
         $this->userRepo     = $userRepo ?? new PdoUserRepository();
-        $this->traceabilityService = $traceabilityService ?? new SparePartTraceabilityService(
-            requestRepo: new PdoSparePartRequestRepository(),
-            replacedPartRepo: new PdoIncidentReplacedPartRepository(),
-            sparePartRepo: new PdoSparePartRepository(),
-            incidentRepo: $this->incidentRepo,
-            machineRepo: $this->machineRepo
-        );
+        // Igual que el hilo de comentarios y el ciclo de pausa: el servicio de
+        // trazabilidad se resuelve bajo demanda, porque su instancia por defecto abre
+        // conexión PDO y este controlador también se construye en suites unitarias.
+        $this->traceabilityService = $traceabilityService;
         $this->refundRepo = $refundRepo ?? new PdoRefundRequestRepository();
         $this->refundService = $refundService ?? new TechnicianRefundService(
             refundRepo: $this->refundRepo,
@@ -115,6 +114,27 @@ class TechnicianController
         // Igual que el servicio de comentarios: se resuelve bajo demanda para que el
         // controlador pueda construirse en suites unitarias sin abrir conexiones.
         $this->pauseService = $pauseService;
+    }
+
+    /**
+     * Servicio de aplicación de la trazabilidad de repuestos y del cierre técnico.
+     *
+     * Se le inyecta el `AuditLogger` de verdad (T-PAUSE-23): el cierre de la avería por
+     * la ruta del técnico tiene que dejar su evento `RESOLVE_INCIDENT` en `audit_log`
+     * —con las declaraciones sanitarias, el diagnóstico y la solución congelados— y no
+     * sólo el rastro de `incident_history`. Sin él, el visor de auditoría del
+     * coordinador quedaba ciego ante estos cierres (Art. III).
+     */
+    private function traceability(): SparePartTraceabilityService
+    {
+        return $this->traceabilityService ??= new SparePartTraceabilityService(
+            requestRepo: new PdoSparePartRequestRepository(),
+            replacedPartRepo: new PdoIncidentReplacedPartRepository(),
+            sparePartRepo: new PdoSparePartRepository(),
+            incidentRepo: $this->incidentRepo,
+            machineRepo: $this->machineRepo,
+            auditLogger: new AuditLogger(new PdoAuditLogRepository())
+        );
     }
 
     /**
@@ -398,7 +418,7 @@ class TechnicianController
         if ($isStructured) {
             $actor = $this->extractActor($request);
             try {
-                $result = $this->traceabilityService->pauseIncidentWithParts($incidentId, $techId, $body, $actor);
+                $result = $this->traceability()->pauseIncidentWithParts($incidentId, $techId, $body, $actor);
                 return Response::json($result, 200, 'Intervención pausada por repuestos correctamente.');
             } catch (IncompatibleSparePartException $e) {
                 return Response::error('INCOMPATIBLE_SPARE_PART', $e->getMessage(), 422);
@@ -769,7 +789,7 @@ class TechnicianController
         }
 
         try {
-            $result = $this->traceabilityService->resolveIncidentWithParts($incidentId, $techId, $body, $actor);
+            $result = $this->traceability()->resolveIncidentWithParts($incidentId, $techId, $body, $actor);
 
             return Response::json(
                 $result + $this->buildRefundSummary($incidentId, $refundOutcome, $unclaimedFindingId),
