@@ -391,3 +391,9 @@
   * **Cierre:** `LocationPortalController::sealedCommentMessage()` añade la guía al `403 CONVERSATION_SEALED` únicamente cuando el expediente está cancelado y la máquina sigue fuera de servicio por falta de acceso (RF-04.4); el resto de sellados (cierre manual, garantía vencida) conserva el mensaje genérico del dominio.
   * **Evidencia ejecutable:** aserción de integración `5.1.b` en `tests/integration/PendingInfoSiteReactivationTest.php` (34 aserciones) y contraste `5.2` en `tests/integration/AddIncidentCommentEndpointTest.php` (35), ambas por el enrutador real contra MariaDB.
   * **Verificación:** `php tests/run_all.php` → 237 suites · 9.145 aserciones · 0 fallos · cifras documentadas coherentes · exit 0.
+
+- [x] **Nota de cobertura posterior (2026-10-10): flujo JS del portal de sede**
+  * **Origen:** la reauditoría dejó anotado que la casilla de confirmación de acceso (RF-04.6) y el aviso de sellado (RF-05.4) solo tenían certificación de servidor, sin suite JS del portal de sede.
+  * **Cobertura añadida:** `tests/unit/LocationPortalAccessConfirmationAndSealedNoticeTest.mjs` (26 aserciones) certifica el bloqueo del envío sin la casilla, el payload JSON y multipart con `access_confirmed`, la máquina no bloqueada sin el campo, el montaje del hilo con `role="SITE_MANAGER"`, la rama sellada sin formulario editable y la llegada del `403 CONVERSATION_SEALED` con la guía de RF-05.4 al mensaje del modal.
+  * **Defecto corregido:** `IncidentReportModal.resetForm()` no limpiaba `accessConfirmed`, de modo que la confirmación formal sobrevivía a la reapertura del modal y viajaba a la máquina siguiente; ahora se limpia en cada apertura (RF-04.6, Art. V.2). Probado por mutación: sin la línea, las aserciones 3.2 y 3.3 fallan (24/26); restaurada, 26/26.
+  * **Verificación:** `php tests/run_all.php` → 238 suites · 9.171 aserciones · 0 fallos · cifras documentadas coherentes · exit 0.

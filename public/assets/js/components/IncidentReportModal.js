@@ -141,6 +141,10 @@ export const IncidentReportModal = {
       this.refundClaimValid = true;
       this.lastRefundReceipt = null;
       this.submittedSuccessData = null;
+
+      // La confirmación formal de acceso es un acto por aviso (RF-04.6, Art. V.2):
+      // no debe sobrevivir a la reapertura del modal ni viajar a la máquina siguiente.
+      this.accessConfirmed = false;
       this.commentText = '';
       this.commentPhotoFile = null;
       this.errorMessage = '';

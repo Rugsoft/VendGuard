@@ -1,7 +1,7 @@
 # Handoff · Rama `incident-comments`
 
 **Fecha:** 2026-10-08 · **Cierre de contenido:** `a5005fa` + segunda tanda de triaje + cierre de S-4 (`f968d98`, `29f19ee`, `2ae2b63`) · **Publicado:** `origin/incident-comments` hasta `2ae2b63`; el arreglo del arranque desplegado de esta pasada está en el árbol, pendiente de commit · **Material ajeno no versionado:** `specs/11-*` y `pending_info_sla_pause_spec.md`
-**Batería:** `php tests/run_all.php` → **batería global: 237 suites · 9.145 aserciones** · 0 fallos · base restaurada a semillas
+**Batería:** `php tests/run_all.php` → **batería global: 238 suites · 9.171 aserciones** · 0 fallos · base restaurada a semillas
 *(la propia batería audita esta cifra: un desfase documental la pone en rojo vía `tests/Support/DocMetricsGuard.php`)*
 
 ---
