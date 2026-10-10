@@ -184,11 +184,40 @@ class LocationPortalController
                 'machine_type' => $machine->getMachineType()->value,
                 'floor_wing' => $machine->getFloorWing(),
                 'notes' => $machine->getNotes(),
+                'is_blocked_no_access' => $machine->isBlockedNoAccess(),
+                'operational_status' => $machine->getOperationalStatus(),
                 'active_incident' => $this->withPublicCommentsCount(
                     $this->sanitizeIncidentForSite($machine->getActiveIncident())
                 ),
             ];
         }, $machines);
+
+        // RF-04.4 / RF-04.6: las máquinas bloqueadas por falta de acceso deben seguir
+        // viéndose en el portal —fuera de servicio, jamás como aptas— para que la sede
+        // pueda confirmar el acceso y abrir un aviso nuevo. No entran por el parque
+        // activo (están inactivas por definición), así que se incorporan desde el
+        // catálogo con su marca formal y SIN ticket activo: su expediente anterior
+        // terminó cancelado.
+        $blockedRows = array_values(array_filter(
+            $this->machineRepo->findAll(['location_id' => $location->getId(), 'status' => 'inactive']),
+            static fn(array $row): bool => (bool)($row['is_blocked_no_access'] ?? false)
+        ));
+
+        foreach ($blockedRows as $row) {
+            $payload[] = [
+                'id' => (int)$row['id'],
+                'code' => (string)$row['code'],
+                'model' => (string)$row['model'],
+                'machine_type' => (string)$row['machine_type'],
+                'floor_wing' => (string)$row['floor_wing'],
+                'notes' => $row['notes'] !== null ? (string)$row['notes'] : null,
+                'is_blocked_no_access' => true,
+                'operational_status' => Machine::OPERATIONAL_STATUS_BLOCKED_NO_ACCESS,
+                'active_incident' => null,
+            ];
+        }
+
+        usort($payload, static fn(array $left, array $right): int => strcmp((string)$left['code'], (string)$right['code']));
 
         return Response::json($payload, 200);
     }
@@ -293,8 +322,25 @@ class LocationPortalController
             );
         }
 
-        // Validar que la máquina esté activa
-        if (!$machine->isActive()) {
+        // RF-04.6 / Art. V.2: una máquina bloqueada por falta de acceso previo NO
+        // puede recibir un aviso nuevo sin la confirmación formal de la sede. La
+        // casilla impide bucles de avisos sobre un equipo al que nunca se pudo
+        // acceder y es un acto positivo: se exige marcada, no se asume por silencio.
+        $accessConfirmed = $machine->isBlockedNoAccess() && $this->hasAccessConfirmation($request);
+        if ($machine->isBlockedNoAccess() && !$accessConfirmed) {
+            return Response::error(
+                'ACCESS_CONFIRMATION_REQUIRED',
+                'Esta máquina figura fuera de servicio por falta de acceso en un aviso anterior. Para registrar un nuevo aviso debe marcar la casilla: «Confirmo formalmente que las instalaciones y la máquina se encuentran abiertas y accesibles para el servicio técnico» (RF-04.6, Art. V.2).',
+                422
+            );
+        }
+
+        // Validar que la máquina esté activa. Una máquina bloqueada por falta de
+        // acceso está inactiva por definición; con la confirmación marcada el aviso
+        // es legítimo y el bloqueo se levanta al registrarlo (RF-04.6). Una máquina
+        // retirada por coordinación sin bloqueo sigue rechazándose: no hay servicio
+        // que reabrir sobre una unidad dada de baja del parque.
+        if (!$machine->isActive() && !$accessConfirmed) {
             return Response::error(
                 'MACHINE_INACTIVE',
                 'La máquina seleccionada no se encuentra activa en el catálogo.',
@@ -450,6 +496,54 @@ class LocationPortalController
             );
         }
 
+        // 10.b RF-04.6: el aviso nuevo con confirmación de acceso devuelve la máquina
+        //      al parque activo. El levantamiento se escribe DESPUÉS del alta —el
+        //      aviso es la razón que lo legitima— y queda auditado de forma inmutable.
+        //      Si falla, el expediente YA existe: se reporta con honestidad y se
+        //      adjunta su código, en lugar de fingir que la máquina volvió a servicio.
+        if ($accessConfirmed) {
+            try {
+                $lifted = $this->machineRepo->clearNoAccessBlock(
+                    (int)$machine->getId(),
+                    (string)$created->getTicketCode()
+                );
+            } catch (\Throwable $e) {
+                return Response::error(
+                    'MACHINE_UNBLOCK_FAILED',
+                    'El aviso quedó registrado, pero la máquina no pudo devolverse al servicio: ' . $e->getMessage(),
+                    500,
+                    ['ticket_code' => $created->getTicketCode()]
+                );
+            }
+
+            if ($lifted) {
+                $this->audit()->logMachineEvent(
+                    machineId: (int)$machine->getId(),
+                    action: 'MACHINE_UNBLOCKED_BY_ACCESS_CONFIRMATION',
+                    user: [
+                        'id' => null,
+                        'role' => 'SITE_RESPONSIBLE',
+                        'name' => $location->getName(),
+                    ],
+                    previousState: [
+                        'operational_status' => Machine::OPERATIONAL_STATUS_BLOCKED_NO_ACCESS,
+                        'is_active' => false,
+                        'is_blocked_no_access' => true,
+                    ],
+                    newState: [
+                        'is_active' => true,
+                        'is_blocked_no_access' => false,
+                    ],
+                    metadata: [
+                        'ticket_code' => $created->getTicketCode(),
+                        'incident_id' => $created->getId(),
+                        'location_id' => $location->getId(),
+                        'reason' => 'Confirmación formal de acceso de la sede al registrar un aviso nuevo (RF-04.6, Art. V.2).',
+                    ]
+                );
+            }
+        }
+
         // 11. Apertura de expediente de reintegro formal si se solicitó (HU-02)
         $payload = $this->sanitizeIncidentForSite($created->toArray());
         if ($refundClaim !== null) {
@@ -471,6 +565,38 @@ class LocationPortalController
     // ─────────────────────────────────────────────────────────────────────
     // Internals: captura de reintegros de sede (HU-02 / RF-REF-01)
     // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Lee la casilla obligatoria de confirmación de acceso del aviso nuevo sobre
+     * máquina bloqueada (RF-04.6, Art. V.2).
+     *
+     * Acepta el booleano real y las formas escalares que un formulario HTML envía
+     * (`1`, `true`, `si`, `sí`, `yes`), con el mismo contrato tolerante que usa la
+     * captura de reintegros. Cualquier otra cosa —ausente, `0`, texto libre— se
+     * interpreta como casilla sin marcar: la confirmación es un acto positivo.
+     */
+    private function hasAccessConfirmation(Request $request): bool
+    {
+        $raw = $request->getBodyParam('access_confirmed');
+
+        if ($raw === null) {
+            return false;
+        }
+
+        if (is_bool($raw)) {
+            return $raw;
+        }
+
+        if (is_int($raw) || is_float($raw)) {
+            return (int)$raw === 1;
+        }
+
+        if (!is_string($raw)) {
+            return false;
+        }
+
+        return in_array(strtolower(trim($raw)), self::TRUTHY_VALUES, true);
+    }
 
     private function wantsRefund(Request $request): bool
     {

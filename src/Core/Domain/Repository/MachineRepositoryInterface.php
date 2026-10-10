@@ -126,6 +126,25 @@ interface MachineRepositoryInterface
     public function blockForNoAccess(int $machineId, string $ticketCode): bool;
 
     /**
+     * Levanta el bloqueo por falta de acceso tras la confirmación formal de acceso
+     * de la sede en un aviso nuevo (RF-04.6, Art. V.2): retira
+     * `is_blocked_no_access`, devuelve la máquina al parque activo (`is_active = 1`)
+     * y anexa a las notas la marca del levantamiento conservando la del bloqueo.
+     *
+     * El aviso nuevo es la razón de ser del levantamiento: la máquina vuelve al
+     * servicio con una avería viva asignable, no por una simple pulsación de
+     * reapertura. Es idempotente: sobre una máquina sin bloqueo devuelve `false`
+     * sin escribir ni duplicar la nota.
+     *
+     * @param int $machineId Máquina cuyo bloqueo se levanta.
+     * @param string $ticketCode Código del aviso nuevo con el que la sede confirmó el acceso.
+     * @return bool True si la máquina estaba bloqueada y el levantamiento quedó escrito.
+     * @throws \InvalidArgumentException Si el identificador o el ticket no son válidos.
+     * @throws \DomainException Si la máquina no existe.
+     */
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool;
+
+    /**
      * Aplica borrado lógico marcando is_active = 0 y deleted_at = CURRENT_TIMESTAMP (RNF-03, Art. III.1).
      *
      * @param int $id

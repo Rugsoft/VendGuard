@@ -248,7 +248,7 @@ class SparePartTraceabilityService
      *
      * @param int $incidentId Identificador de la incidencia a resolver.
      * @param int $technicianId Identificador del técnico autenticado responsable.
-     * @param array<string, mixed> $data Datos de resolución (diagnóstico, acción, replaced_parts_declared, replaced_parts).
+     * @param array<string, mixed> $data Datos de resolución (diagnóstico, acción, replaced_parts_declared, replaced_parts, sanitary_declarations).
      * @param array{id: int|null, role: string, name: string}|null $actor Metadatos del usuario actuante.
      * @return array<string, mixed>
      * 
@@ -289,6 +289,30 @@ class SparePartTraceabilityService
         $action = trim((string)($data['resolution_action'] ?? ($data['action_taken'] ?? '')));
 
         ResolutionValidator::validate($diagnosis, $action);
+
+        // 3.b Declaraciones sanitarias de cierre sobre máquina en cuarentena o con el
+        //     Reloj Sanitario Biológico vencido (RF-03.5.2, Art. II). La ruta HTTP
+        //     decide CUÁNDO son exigibles (`sanitaryResolutionRequirement()`); aquí se
+        //     garantiza que, si viajan, sean válidas y queden congeladas en el evento
+        //     inmutable de resolución. La máquina NO se desbloquea por declararlas: la
+        //     vuelta a `OK` pertenece a la reinspección del módulo 05.
+        $sanitaryRecord = null;
+        if (array_key_exists('sanitary_declarations', $data)) {
+            if (!is_array($data['sanitary_declarations'])) {
+                throw new InvalidResolutionException(
+                    'El bloque sanitary_declarations debe ser un objeto con las tres declaraciones sanitarias que exige el Art. II.',
+                    ['El bloque sanitary_declarations debe ser un objeto con las tres declaraciones sanitarias que exige el Art. II.']
+                );
+            }
+
+            ResolutionValidator::validateSanitaryDeclarations($data['sanitary_declarations']);
+
+            $sanitaryRecord = [
+                'temperature_c' => round((float)$data['sanitary_declarations']['temperature_c'], 2),
+                'stock_destroyed' => true,
+                'hygiene_checklist' => true,
+            ];
+        }
 
         // 4. Validar declaración obligatoria de sustitución de componentes (RF-REP-05)
         if (!isset($data['replaced_parts_declared'])) {
@@ -426,16 +450,18 @@ class SparePartTraceabilityService
                 action: 'RESOLVE_INCIDENT',
                 user: $actor ?? ['id' => $technicianId, 'role' => 'TECHNICIAN', 'name' => 'Técnico de Ruta'],
                 previousState: ['status' => IncidentStatus::IN_PROGRESS->value],
-                newState: [
+                newState: array_filter([
                     'status' => IncidentStatus::RESOLVED->value,
                     'resolution_diagnosis' => $diagnosis,
                     'resolution_action' => $action,
                     'replaced_parts_declared' => $replacedPartsDeclared,
                     'total_parts_cost' => round($totalPartsCost, 2),
-                ],
+                    'sanitary_declarations' => $sanitaryRecord,
+                ], static fn($value): bool => $value !== null),
                 metadata: [
                     'replaced_parts_count' => count($insertedParts),
                     'total_parts_cost' => round($totalPartsCost, 2),
+                    'sanitary_declarations_recorded' => $sanitaryRecord !== null,
                 ]
             );
         }
@@ -448,6 +474,7 @@ class SparePartTraceabilityService
             'replaced_parts_count' => count($insertedParts),
             'total_parts_cost' => round($totalPartsCost, 2),
             'replaced_parts' => array_map(fn(IncidentReplacedPart $p) => $p->toArray(), $insertedParts),
+            'sanitary_declarations' => $sanitaryRecord,
         ];
     }
 

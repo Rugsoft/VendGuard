@@ -416,6 +416,12 @@ class MockMachineRepoForCoord implements MachineRepositoryInterface
     }
     public function hasActiveTicketOrWarranty(int $machineId): bool { return false; }
     public function getActiveTicketOrWarranty(int $machineId): ?array { return null; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -466,6 +472,12 @@ class MockUserRepoForCoord implements UserRepositoryInterface
         return true;
     }
 
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica

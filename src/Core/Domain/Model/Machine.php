@@ -40,6 +40,16 @@ class Machine implements ArrayAccess, JsonSerializable
      */
     private const BLOCKED_NO_ACCESS_NOTE_TEMPLATE = '[Bloqueada por falta de acceso tras ticket %s]';
 
+    /**
+     * Anotación que deja constancia del aviso nuevo con el que la sede confirmó el
+     * acceso y devolvió la máquina al servicio (RF-04.6, Art. V.2).
+     *
+     * La nota del bloqueo NO se borra: es la prueba de por qué la máquina estuvo
+     * fuera de servicio, y borrarla reescribiría la historia del parque (Art. III).
+     * La marca de levantamiento se anexa detrás.
+     */
+    private const NO_ACCESS_BLOCK_LIFTED_NOTE_TEMPLATE = '[Bloqueo por falta de acceso levantado con el ticket %s tras confirmación de acceso de la sede]';
+
     private int $id;
     private int $locationId;
     private string $code;
@@ -249,6 +259,67 @@ class Machine implements ArrayAccess, JsonSerializable
         $clone->notes = $previousNotes !== null ? $previousNotes . ' ' . $annotation : $annotation;
 
         return $clone;
+    }
+
+    /**
+     * Levanta el bloqueo por falta de acceso y devuelve la máquina al parque activo
+     * (RF-04.6, Art. V.2).
+     *
+     * Es la transición inversa y espejo de `blockForNoAccess()`: sólo procede cuando la
+     * sede ha confirmado formalmente que las instalaciones y la máquina quedan abiertas
+     * y accesibles para el servicio técnico, y esa confirmación viaja con un aviso
+     * nuevo que abre el expediente de la siguiente intervención. La anotación del
+     * bloqueo se conserva y se le anexa la marca del levantamiento, de modo que la
+     * historia del equipo queda legible a pie de máquina sin perder el motivo que lo
+     * sacó de servicio.
+     *
+     * Es idempotente: una máquina sin bloqueo se devuelve intacta, sin duplicar la nota.
+     *
+     * @param string $ticketCode Código visible del aviso nuevo con el que se confirmó el acceso.
+     * @return self Copia desbloqueada de la máquina.
+     * @throws \InvalidArgumentException si falta el código de ticket que levanta el bloqueo.
+     */
+    public function clearNoAccessBlock(string $ticketCode): self
+    {
+        $normalizedTicketCode = strtoupper(trim($ticketCode));
+        if ($normalizedTicketCode === '') {
+            throw new \InvalidArgumentException('El levantamiento del bloqueo por falta de acceso exige el código del ticket que lo motiva.');
+        }
+
+        if (!$this->isBlockedNoAccess) {
+            return clone $this;
+        }
+
+        $annotation = self::noAccessBlockLiftedAnnotation($normalizedTicketCode);
+        $previousNotes = $this->notes !== null && $this->notes !== '' ? $this->notes : null;
+
+        $clone = clone $this;
+        $clone->isBlockedNoAccess = false;
+        $clone->isActive = true;
+        $clone->notes = $previousNotes !== null ? $previousNotes . ' ' . $annotation : $annotation;
+
+        return $clone;
+    }
+
+    /**
+     * Anotación legible del levantamiento del bloqueo (RF-04.6, Art. V.2).
+     *
+     * La expone la entidad por el mismo motivo que `noAccessBlockAnnotation()`: el
+     * texto tiene una única dueña y la persistencia lo reutiliza para escribir la
+     * columna `notes` sin duplicar el literal.
+     *
+     * @param string $ticketCode Código visible del aviso que confirma el acceso.
+     * @return string Anotación normalizada en mayúsculas.
+     * @throws \InvalidArgumentException si falta el código de ticket.
+     */
+    public static function noAccessBlockLiftedAnnotation(string $ticketCode): string
+    {
+        $normalizedTicketCode = strtoupper(trim($ticketCode));
+        if ($normalizedTicketCode === '') {
+            throw new \InvalidArgumentException('El levantamiento del bloqueo por falta de acceso exige el código del ticket que lo motiva.');
+        }
+
+        return sprintf(self::NO_ACCESS_BLOCK_LIFTED_NOTE_TEMPLATE, $normalizedTicketCode);
     }
 
     /**

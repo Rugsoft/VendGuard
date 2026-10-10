@@ -122,6 +122,12 @@ $machineRepo = new class($machineOperational, $machineWithIncident) implements M
     public function findAll(array $filters = []): array { return []; }
     public function hasActiveTicketOrWarranty(int $machineId): bool { return false; }
     public function getActiveTicketOrWarranty(int $machineId): ?array { return null; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -164,6 +170,12 @@ $incidentRepo = new class implements IncidentRepositoryInterface {
     public function findAssignedToTechnician(int $technicianId, array $statuses = []): array { return []; }
     public function findEnrichedDetailById(int|string $identifier): ?array { return null; }
     public function update(Incident $incident): bool { return false; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -303,6 +315,12 @@ $emptyMachineRepo = new class implements MachineRepositoryInterface {
     public function findAll(array $filters = []): array { return []; }
     public function hasActiveTicketOrWarranty(int $machineId): bool { return false; }
     public function getActiveTicketOrWarranty(int $machineId): ?array { return null; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -334,6 +352,12 @@ $countCallProbe = new class implements IncidentRepositoryInterface {
     public function findAssignedToTechnician(int $technicianId, array $statuses = []): array { return []; }
     public function findEnrichedDetailById(int|string $identifier): ?array { return null; }
     public function update(Incident $incident): bool { return false; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica

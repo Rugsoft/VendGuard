@@ -108,6 +108,16 @@ export const MachineCard = {
     },
     amberTokens() {
       return AMBER_TECHNICAL_TOKENS;
+    },
+    /**
+     * Máquina fuera de servicio por falta de acceso previo (RF-04.4, Art. V.1).
+     *
+     * No es una máquina operativa: figura en el portal precisamente para que la sede
+     * vea por qué está parada y pueda confirmar el acceso al pedir un aviso nuevo
+     * (RF-04.6), en lugar de desaparecer del parque como si estuviera sana.
+     */
+    isBlockedNoAccess() {
+      return this.machine?.is_blocked_no_access === true;
     }
   },
   methods: {
@@ -312,6 +322,22 @@ export const MachineCard = {
           </div>
           <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: #14532d; margin: 0; line-height: 1.3;">
             Reparada recientemente (garantía de 48h activa). Si el fallo persiste, puedes reabrir el caso.
+          </p>
+        </div>
+
+        <!-- Case 2.b: Machine out of service — no-access block after 72h cancellation
+             (RF-04.4, RF-04.6, Art. V.1 y V.2) -->
+        <div
+          v-else-if="isBlockedNoAccess"
+          style="background-color: var(--color-urgency-critical-bg); border: 1px solid var(--color-urgency-critical); border-radius: var(--radius-interactive, 4px); padding: 10px; margin-bottom: 14px;"
+          data-testid="machine-card-blocked-banner"
+        >
+          <div style="font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 700; color: var(--color-error-text); margin-bottom: 4px;">
+            ⛔ Fuera de servicio · Bloqueada por falta de acceso
+          </div>
+          <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-slate); margin: 0; line-height: 1.3;">
+            El aviso anterior se canceló tras 72 horas hábiles sin poder acceder a la máquina.
+            Al pedir asistencia deberá confirmar formalmente que queda accesible (Art. V.2).
           </p>
         </div>
 

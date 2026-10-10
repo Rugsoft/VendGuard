@@ -284,6 +284,18 @@ class PreventiveSettingsService
             throw new InvalidArgumentException("Máquina con ID {$machineId} no encontrada.");
         }
 
+        // Blindaje Art. II (T-PAUSE-22): el desbloqueo estacional NO puede retirar una
+        // cuarentena sanitaria. Si la máquina no está en pausa estacional, la petición
+        // se rechaza sin escribir nada y nombrando el estado real que la bloquea: sólo
+        // la reinspección reglamentaria del módulo 05 devuelve una máquina a `OK`.
+        if (($effective['sanitary_status'] ?? '') !== 'SEASONAL_PAUSE') {
+            throw new InvalidArgumentException(sprintf(
+                'La máquina %d no está en pausa estacional (estado sanitario real: %s). Una máquina en cuarentena sanitaria sólo recupera el servicio con la reinspección reglamentaria del módulo 05 (Art. II).',
+                $machineId,
+                (string)($effective['sanitary_status'] ?? 'desconocido')
+            ));
+        }
+
         $previousState = [
             'sanitary_status' => $effective['sanitary_status'],
             'is_seasonal_pause' => $effective['is_seasonal_pause'],

@@ -20,11 +20,13 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/autoload.php';
 
+use VendGuard\Application\Service\IncidentPauseService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentReplacedPart;
 use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\OldPartDestination;
+use VendGuard\Core\Domain\Model\PreventiveSetting;
 use VendGuard\Core\Domain\Model\SparePart;
 use VendGuard\Core\Domain\Model\SparePartCategory;
 use VendGuard\Core\Domain\Model\SparePartRequest;
@@ -34,6 +36,7 @@ use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\IncidentReplacedPartRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SparePartRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SparePartRequestRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
@@ -82,6 +85,12 @@ class MockTechMachineRepository implements MachineRepositoryInterface
     public function findAll(array $f = []): array { return []; }
     public function hasActiveTicketOrWarranty(int $m): bool { return false; }
     public function getActiveTicketOrWarranty(int $m): ?array { return null; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -125,6 +134,12 @@ class MockTechSparePartRepository implements SparePartRepositoryInterface
         return true;
     }
 
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -185,6 +200,12 @@ class MockTechIncidentRepository implements IncidentRepositoryInterface
     public function findAll(array $f = []): array { return []; }
     public function findAssignedToTechnician(int $t, array $s = []): array { return []; }
     public function update(Incident $i): bool { return true; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -419,6 +440,74 @@ class MockTechReplacedPartRepository implements IncidentReplacedPartRepositoryIn
     public function findAllForExport(?int $periodDays = null): array { return []; }
 }
 
+/**
+ * Doble en memoria de los ajustes preventivos (módulo 05).
+ *
+ * El cierre técnico consulta el Reloj Sanitario Biológico (Art. II) antes de
+ * escribir, y ese reloj necesita saber la tipología de la máquina. Esta suite es
+ * de repuestos y declara no tocar un PDO: el doble publica las dos máquinas del
+ * banco con su tipología real (bebidas calientes y snacks, ambas fuera de la
+ * vigilancia sanitaria) y el semáforo sanitario en OK, de modo que la puerta
+ * deja pasar el cierre sin abrir una conexión a MariaDB.
+ */
+final class MockTechPreventiveSettingsRepository implements PreventiveSettingsRepositoryInterface
+{
+    /** @var array<int, string> */
+    private const MACHINE_TYPES = [10 => 'HOT_DRINKS', 20 => 'SNACKS'];
+
+    public function findAll(): array
+    {
+        return [];
+    }
+
+    public function findByMachineType(string $machineType): ?PreventiveSetting
+    {
+        return null;
+    }
+
+    public function updateTypeSettings(
+        string $machineType,
+        int $defaultFrequencyDays,
+        int $maxAllowedDays,
+        int $advanceWarningDays = 5
+    ): bool {
+        return true;
+    }
+
+    public function updateMachineConfig(
+        int $machineId,
+        ?int $sanitaryFrequencyDays,
+        ?string $nextSanitaryInspectionDue = null
+    ): bool {
+        return true;
+    }
+
+    public function setSeasonalPause(int $machineId, string $reason, ?string $pauseUntil = null): bool
+    {
+        return true;
+    }
+
+    public function resumeSeasonalPause(int $machineId): bool
+    {
+        return true;
+    }
+
+    public function getMachineSettings(int $machineId): ?array
+    {
+        return [
+            'machine_id' => $machineId,
+            'machine_type' => self::MACHINE_TYPES[$machineId] ?? 'SNACKS',
+            'sanitary_status' => 'OK',
+            'sanitary_frequency_days' => 15,
+        ];
+    }
+
+    public function updateSanitaryStatus(int $machineId, string $status): bool
+    {
+        return true;
+    }
+}
+
 // =============================================================================
 // Helper de Configuración del Entorno de Pruebas
 // =============================================================================
@@ -537,7 +626,13 @@ function createTechTestEnvironment(): array
         machineRepo: $machineRepo,
         locationRepo: null,
         userRepo: null,
-        traceabilityService: $traceabilityService
+        traceabilityService: $traceabilityService,
+        // Puerta del Reloj Sanitario Biológico (Art. II) sobre ajustes en memoria:
+        // la suite es de repuestos y no abre conexión a base de datos.
+        pauseService: new IncidentPauseService(
+            settingsRepo: new MockTechPreventiveSettingsRepository(),
+            incidentRepo: $incidentRepo
+        )
     );
 
     $technicianUser = new User(

@@ -473,6 +473,7 @@ class PdoMachineRepository implements MachineRepositoryInterface
                 'floor_wing'           => (string)$row['floor_wing'],
                 'notes'                => $row['notes'] !== null ? (string)$row['notes'] : null,
                 'is_active'            => (bool)$row['is_active'] && $row['deleted_at'] === null,
+                'is_blocked_no_access' => (bool)$row['is_blocked_no_access'],
                 'has_active_ticket'    => $hasActiveTicket,
                 'active_ticket_code'   => $activeTicketCode,
                 'active_ticket_status' => $activeTicketStatus,
@@ -588,6 +589,60 @@ class PdoMachineRepository implements MachineRepositoryInterface
         // en MySQL, así que el éxito se mide por la verdad escrita y no por
         // `rowCount()`; el segundo bloqueo de una máquina ya bloqueada es válido.
         return true;
+    }
+
+    /**
+     * Levanta el bloqueo por falta de acceso y devuelve la máquina al parque activo
+     * (RF-04.6, Art. V.2).
+     *
+     * La semántica vive en el dominio (`Machine::clearNoAccessBlock()`): la entidad
+     * decide la anotación y la idempotencia, y esta capa solo escribe la fila
+     * resultante. El `WHERE` exige que la máquina esté realmente bloqueada, de modo
+     * que un desbloqueo sobre una máquina operativa no toca nada y devuelve `false`.
+     *
+     * @param int $machineId
+     * @param string $ticketCode Código del aviso nuevo con el que la sede confirmó el acceso.
+     * @return bool
+     * @throws \InvalidArgumentException
+     * @throws \DomainException
+     */
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        if ($machineId < 1) {
+            throw new \InvalidArgumentException('El levantamiento del bloqueo exige el identificador de una máquina persistida.');
+        }
+
+        // La anotación se normaliza en el dominio antes de consultar nada, para que
+        // un ticket vacío no levante el bloqueo sin rastro legible.
+        $annotation = Machine::noAccessBlockLiftedAnnotation($ticketCode);
+
+        $machine = $this->findById($machineId, false);
+        if ($machine === null) {
+            throw new \DomainException("No se encontró ninguna máquina con ID {$machineId} para levantar el bloqueo por falta de acceso.");
+        }
+
+        if (!$machine->isBlockedNoAccess()) {
+            return false;
+        }
+
+        $cleared = $machine->clearNoAccessBlock($ticketCode);
+
+        $stmt = $this->pdo->prepare("
+            UPDATE `machines`
+            SET `is_blocked_no_access` = 0,
+                `is_active` = 1,
+                `notes` = :notes,
+                `updated_at` = CURRENT_TIMESTAMP
+            WHERE `id` = :id
+              AND `is_blocked_no_access` = 1
+              AND `deleted_at` IS NULL
+        ");
+        $stmt->execute([
+            ':notes' => $cleared->getNotes() ?? $annotation,
+            ':id' => $machineId,
+        ]);
+
+        return $stmt->rowCount() > 0;
     }
 
     /**

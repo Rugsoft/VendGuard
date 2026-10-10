@@ -81,6 +81,7 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'MACHINE_DEACTIVATED', label: 'Baja de Máquina', tone: 'danger', group: 'machine' },
   { code: 'MACHINE_REACTIVATED', label: 'Reactivación de Máquina', tone: 'success', group: 'machine' },
   { code: 'MACHINE_BLOCKED_NO_ACCESS', label: 'Máquina Bloqueada por Falta de Acceso', tone: 'danger', group: 'machine' },
+  { code: 'MACHINE_UNBLOCKED_BY_ACCESS_CONFIRMATION', label: 'Máquina Desbloqueada por Confirmación de Acceso', tone: 'success', group: 'machine' },
   { code: 'LOCATION_CREATED', label: 'Alta de Sede', tone: 'success', group: 'location' },
   { code: 'LOCATION_UPDATED', label: 'Modificación de Sede', tone: 'neutral', group: 'location' },
   { code: 'LOCATION_DEACTIVATED', label: 'Baja de Sede', tone: 'danger', group: 'location' },

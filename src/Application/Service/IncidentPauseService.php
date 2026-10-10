@@ -338,7 +338,10 @@ final class IncidentPauseService
             ));
         }
 
-        if (!$machineType->isPerishable()) {
+        // Vigilancia sanitaria (no sólo la máquina exclusivamente perecedera): la
+        // mixta `COMBO` puede alojar producto fresco y entra por enmienda del
+        // Product Owner ratificada en T-PAUSE-22. Ver `requiresSanitaryWatch()`.
+        if (!$machineType->requiresSanitaryWatch()) {
             return false;
         }
 
@@ -406,6 +409,69 @@ final class IncidentPauseService
         );
 
         return true;
+    }
+
+    /**
+     * Determina qué exige el formulario de resolución técnica sobre esta avería
+     * viva (RF-03.5.2, Art. II) — consulta pura, sin escrituras.
+     *
+     * La regla muerde en dos supuestos:
+     *  1. La máquina ya está en `QUARANTINE`: una avería sobre una unidad fuera de
+     *     servicio por control higiénico-sanitario no puede cerrarse sin declarar
+     *     temperatura real, destrucción del stock y checklist de higienización.
+     *  2. El Reloj Sanitario Biológico ya venció (≥ 4 h naturales continuas) en una
+     *     máquina bajo vigilancia sanitaria, aunque la cuarentena todavía no se haya
+     *     escrito: el intento de cierre es precisamente el momento en que el reloj
+     *     se consume (`evaluateSanitaryBiologicalClock()`), y el formulario debe
+     *     pedir las declaraciones en la misma petición.
+     *
+     * NO escribe nada: el disparo persistente de la cuarentena y su evento inmutable
+     * pertenecen a `evaluateSanitaryBiologicalClock()`, que el consumidor HTTP debe
+     * invocar antes de exigir las declaraciones. Esta consulta existe para que la
+     * ruta del técnico pueda anticipar el bloqueo en la interfaz sin provocar
+     * escrituras de sistema al pintar una pantalla.
+     *
+     * **Degradación declarada:** a diferencia del reloj —que detiene el cierre con
+     * excepción si no puede determinar la tipología o la apertura (Fail-Fast, Art. II)—
+     * esta consulta de lectura devuelve `false` cuando la fila tampoco permite
+     * determinarlas. Una lista de ruta no puede teñirse de rojo por un dato incompleto:
+     * la puerta que muerde es la del cierre, y allí el reloj ya impone la parada estricta.
+     *
+     * @param Incident $incident Incidencia viva cuya máquina se evalúa.
+     * @return bool `true` si el cierre exige las tres declaraciones sanitarias.
+     */
+    public function sanitaryResolutionRequirement(Incident $incident): bool
+    {
+        $settings = $this->settings()->getMachineSettings($incident->getMachineId());
+
+        if (($settings['sanitary_status'] ?? '') === self::SANITARY_STATUS_QUARANTINE) {
+            return true;
+        }
+
+        $machineTypeRaw = $settings['machine_type'] ?? $incident->getMachineType();
+        $machineType = is_string($machineTypeRaw) && $machineTypeRaw !== ''
+            ? MachineType::tryFrom(strtoupper(trim($machineTypeRaw)))
+            : null;
+
+        if ($machineType === null || !$machineType->requiresSanitaryWatch()) {
+            return false;
+        }
+
+        if (in_array($incident->getStatus(), [
+            IncidentStatus::RESOLVED,
+            IncidentStatus::CLOSED,
+            IncidentStatus::CANCELLED,
+        ], true)) {
+            return false;
+        }
+
+        $openedAt = $this->parseDateTime($incident->getCreatedAt());
+        if ($openedAt === null) {
+            return false;
+        }
+
+        return ((new DateTimeImmutable('now'))->getTimestamp() - $openedAt->getTimestamp())
+            >= self::SANITARY_BIOLOGICAL_CLOCK_SECONDS;
     }
 
     /**

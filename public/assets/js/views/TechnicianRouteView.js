@@ -35,6 +35,7 @@ import { TechnicianReinspectionModal } from '../components/TechnicianReinspectio
 import { TechnicianSparePartsPauseModal } from '../components/TechnicianSparePartsPauseModal.js';
 import { TechnicianResolutionPartsBlock } from '../components/TechnicianResolutionPartsBlock.js';
 import { TechnicianResolutionRefundBlock } from '../components/TechnicianResolutionRefundBlock.js';
+import { TechnicianSanitaryResolutionBlock } from '../components/TechnicianSanitaryResolutionBlock.js';
 import { TechnicianRouteMapModal } from '../components/TechnicianRouteMapModal.js';
 import { TechnicianMachineHistoryModal } from '../components/TechnicianMachineHistoryModal.js';
 import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';
@@ -52,6 +53,7 @@ export const TechnicianRouteView = {
     TechnicianSparePartsPauseModal,
     TechnicianResolutionPartsBlock,
     TechnicianResolutionRefundBlock,
+    TechnicianSanitaryResolutionBlock,
     TechnicianRouteMapModal,
     TechnicianMachineHistoryModal,
     IncidentCommentThreadModal,
@@ -91,6 +93,11 @@ export const TechnicianRouteView = {
       resolveAction: '',
       resolvePartsData: { replaced_parts_declared: false, replaced_parts: [] },
       resolveRefundData: { isValid: true },
+      resolveSanitaryData: { isValid: false },
+      // Declaraciones sanitarias del cierre (RF-03.5.2, Art. II): la puerta se abre
+      // cuando la ruta publica `sanitary_resolution_required` o cuando el servidor
+      // la exige al intentar cerrar (el reloj biológico pudo vencer entre medias).
+      sanitaryResolutionRequired: false,
       refundRequests: [],
       hasPendingRefundVerdict: false,
       isLoadingRefundInspection: false,
@@ -219,7 +226,10 @@ export const TechnicianRouteView = {
       return this.actionLength >= 20;
     },
     canResolve() {
-      return this.isDiagnosisValid && this.isActionValid && this.resolveRefundData.isValid;
+      return this.isDiagnosisValid
+        && this.isActionValid
+        && this.resolveRefundData.isValid
+        && (!this.sanitaryResolutionRequired || this.resolveSanitaryData.isValid);
     },
 
     /**
@@ -694,6 +704,8 @@ export const TechnicianRouteView = {
       this.resolveAction = '';
       this.resolvePartsData = { replaced_parts_declared: false, replaced_parts: [] };
       this.resolveRefundData = { isValid: true };
+      this.resolveSanitaryData = { isValid: false };
+      this.sanitaryResolutionRequired = Boolean(incident?.sanitary_resolution_required);
       this.refundRequests = [];
       this.hasPendingRefundVerdict = false;
       this.refundInspectionFailed = false;
@@ -711,6 +723,8 @@ export const TechnicianRouteView = {
       this.resolveAction = '';
       this.resolvePartsData = { replaced_parts_declared: false, replaced_parts: [] };
       this.resolveRefundData = { isValid: true };
+      this.resolveSanitaryData = { isValid: false };
+      this.sanitaryResolutionRequired = false;
       this.refundRequests = [];
       this.hasPendingRefundVerdict = false;
       this.refundInspectionFailed = false;
@@ -771,6 +785,14 @@ export const TechnicianRouteView = {
     },
 
     /**
+     * Captura la validez del bloque de declaraciones sanitarias (RF-03.5.2, Art. II).
+     * @param {Object} payload
+     */
+    handleSanitaryChange(payload) {
+      this.resolveSanitaryData = payload && typeof payload === 'object' ? payload : { isValid: false };
+    },
+
+    /**
      * Submits technical resolution to API (RF-08 / EARS 8.1, 8.2, 8.3 / Art. V.1 / RF-REP-05, RF-REP-06).
      */
     async submitResolve() {
@@ -814,6 +836,20 @@ export const TechnicianRouteView = {
         return;
       }
 
+      // Bloqueo sanitario del cierre (RF-03.5.2, Art. II): si la máquina está en
+      // cuarentena o el reloj biológico venció, las tres declaraciones son
+      // obligatorias. El servidor vuelve a exigirlas: esta validación es la
+      // ergonomía de campo, no la puerta de seguridad.
+      let sanitaryPayload = {};
+      if (this.sanitaryResolutionRequired) {
+        const sanitaryVal = this.$refs?.resolutionSanitaryBlockRef?.validate?.();
+        if (!sanitaryVal || !sanitaryVal.isValid) {
+          this.resolveError = sanitaryVal?.error || 'No se pudo verificar el bloque de declaraciones sanitarias; vuelve a abrir la resolución para intentarlo de nuevo.';
+          return;
+        }
+        sanitaryPayload = sanitaryVal.payload || {};
+      }
+
       this.isResolving = true;
       this.resolveError = '';
 
@@ -823,14 +859,16 @@ export const TechnicianRouteView = {
         const payload = {
           diagnosis: diag,
           action_taken: act,
-          ...refundPayload
+          ...refundPayload,
+          ...sanitaryPayload
         };
         if (hasParts) {
           payload.replaced_parts_declared = true;
           payload.replaced_parts = replacedParts;
         }
         const hasRefundPayload = Object.keys(refundPayload).length > 0;
-        const res = hasParts || hasRefundPayload
+        const hasSanitaryPayload = Object.keys(sanitaryPayload).length > 0;
+        const res = hasParts || hasRefundPayload || hasSanitaryPayload
           ? await api.technician.resolveIncident(this.selectedIncident.id, payload)
           : await api.technician.resolveIncident(this.selectedIncident.id, diag, act);
         const resolvedAt = res?.data?.resolved_at || new Date().toISOString();
@@ -852,6 +890,12 @@ export const TechnicianRouteView = {
         // Remove from active route
         this.incidents = this.incidents.filter(inc => inc.id !== solvedId);
       } catch (err) {
+        // El reloj biológico pudo vencer entre la carga de la ruta y el intento de
+        // cierre: el servidor exige las declaraciones y la puerta se abre en el acto
+        // para que el técnico pueda completarlas sin reabrir el modal.
+        if (err?.code === 'SANITARY_CHECKLIST_REQUIRED') {
+          this.sanitaryResolutionRequired = true;
+        }
         this.resolveError = err?.message || 'No se pudo resolver la incidencia. Comprueba los requisitos de validación.';
       } finally {
         this.isResolving = false;
@@ -1554,6 +1598,14 @@ export const TechnicianRouteView = {
             :allow-unclaimed-cash="selectedIncident?.category === 'PAYMENT_SYSTEM'"
             :disabled="isResolving || refundInspectionFailed"
             @change="handleRefundInspectionChange"
+          />
+
+          <TechnicianSanitaryResolutionBlock
+            v-if="sanitaryResolutionRequired"
+            ref="resolutionSanitaryBlockRef"
+            :key="'sanitary-' + (selectedIncident?.id || 0)"
+            :disabled="isResolving"
+            @change="handleSanitaryChange"
           />
 
           <TechnicianResolutionPartsBlock

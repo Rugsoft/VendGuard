@@ -100,6 +100,12 @@ class MockControllerSparePartRepository implements SparePartRepositoryInterface
         return true;
     }
 
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -324,6 +330,12 @@ function createControllerEnvironment(): array {
         public function findAll(array $f = []): array { return []; }
         public function findAssignedToTechnician(int $t, array $s = []): array { return []; }
         public function update(\VendGuard\Core\Domain\Model\Incident $i): bool { return true; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
         public function blockForNoAccess(int $machineId, string $ticketCode): bool
         {
             // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -363,6 +375,12 @@ function createControllerEnvironment(): array {
         public function findAll(array $f = []): array { return []; }
         public function hasActiveTicketOrWarranty(int $m): bool { return false; }
         public function getActiveTicketOrWarranty(int $m): ?array { return null; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
         public function blockForNoAccess(int $machineId, string $ticketCode): bool
         {
             // Doble de prueba: el contrato de persistencia exige el método; la lógica

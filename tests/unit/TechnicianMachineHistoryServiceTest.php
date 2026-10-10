@@ -64,6 +64,12 @@ final class MachineHistoryStubMachineRepo implements MachineRepositoryInterface
     public function findAll(array $filters = []): array { throw new LogicException('Not used.'); }
     public function hasActiveTicketOrWarranty(int $machineId): bool { throw new LogicException('Not used.'); }
     public function getActiveTicketOrWarranty(int $machineId): ?array { throw new LogicException('Not used.'); }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -114,6 +120,12 @@ final class MachineHistoryStubIncidentRepo implements IncidentRepositoryInterfac
     public function findAssignedToTechnician(int $technicianId, array $statuses = []): array { throw new LogicException('Not used.'); }
     public function findEnrichedDetailById(int|string $identifier): ?array { throw new LogicException('Not used.'); }
     public function update(Incident $incident): bool { throw new LogicException('Not used.'); }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica

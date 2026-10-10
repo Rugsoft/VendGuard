@@ -182,7 +182,15 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
     public function resumeSeasonalPause(int $machineId): bool
     {
         // Al reactivarse el servicio, se transiciona a ATTENTION_REQUIRED con vencimiento hoy
-        // exigiendo la revisión higiénica previa reglamentaria (EARS 1.5)
+        // exigiendo la revisión higiénica previa reglamentaria (EARS 1.5).
+        //
+        // Blindaje Art. II (T-PAUSE-22): el desbloqueo estacional sólo muerde sobre una
+        // máquina que esté REALMENTE en pausa estacional. Antes, un `WHERE id = :id`
+        // desnudo retiraba la cuarentena sanitaria de una máquina averiada y la dejaba
+        // en ATTENTION_REQUIRED sin checklist: la puerta trasera por la que el Reloj
+        // Sanitario Biológico se podía esquivar desde el módulo 05. La cuarentena sólo
+        // se levanta con la reinspección reglamentaria del propio módulo 05
+        // (temperatura ≤ 4,0 °C + checklist de higienización).
         $stmt = $this->pdo->prepare("
             UPDATE `machines`
             SET 
@@ -192,10 +200,15 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
                 `sanitary_status` = 'ATTENTION_REQUIRED',
                 `next_sanitary_inspection_due` = CURRENT_DATE(),
                 `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id AND `deleted_at` IS NULL
+            WHERE `id` = :id
+              AND `deleted_at` IS NULL
+              AND `is_seasonal_pause` = 1
+              AND `sanitary_status` = 'SEASONAL_PAUSE'
         ");
 
-        return $stmt->execute([':id' => $machineId]);
+        $stmt->execute([':id' => $machineId]);
+
+        return $stmt->rowCount() > 0;
     }
 
     public function getMachineSettings(int $machineId): ?array

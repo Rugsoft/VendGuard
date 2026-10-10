@@ -84,6 +84,12 @@ class MockMachineRepository implements MachineRepositoryInterface
     public function update(int $id, array $data): bool { return true; }
     public function transfer(int $id, int $targetLocationId, string $floorWing, ?string $notes = null): bool { return true; }
     public function restoreWithLocation(int $id, ?int $newLocationId = null, ?string $newFloorWing = null): bool { return true; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -120,6 +126,12 @@ class MockLocationRepository implements LocationRepositoryInterface
     public function findAll(string $status = 'all', ?string $search = null): array { return []; }
     public function create(array $data): Location { throw new \BadMethodCallException(); }
     public function update(int $id, array $data): bool { return true; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -172,6 +184,12 @@ class MockIncidentRepository implements IncidentRepositoryInterface
     public function findAll(array $filters = []): array { return []; }
     public function findAssignedToTechnician(int $technicianId, array $statuses = []): array { return []; }
     public function update(Incident $incident): bool { return true; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica

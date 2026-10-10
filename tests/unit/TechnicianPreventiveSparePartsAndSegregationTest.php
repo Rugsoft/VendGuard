@@ -401,6 +401,12 @@ class MockPrevSparePartRepo implements SparePartRepositoryInterface
         return true;
     }
 
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -433,6 +439,12 @@ class MockPrevLocationRepo implements LocationRepositoryInterface
     public function findAll(string $status = 'all', ?string $search = null): array { return []; }
     public function create(array $data): Location { throw new \DomainException("Not implemented"); }
     public function update(int $id, array $data): bool { return true; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -462,6 +474,12 @@ class MockPrevMachineRepo implements MachineRepositoryInterface
     public function findAll(array $f = []): array { return []; }
     public function hasActiveTicketOrWarranty(int $m): bool { return false; }
     public function getActiveTicketOrWarranty(int $m): ?array { return null; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -510,6 +528,12 @@ class MockPrevIncidentRepo implements IncidentRepositoryInterface
     public function findAll(array $f = []): array { return []; }
     public function findAssignedToTechnician(int $t, array $s = []): array { return []; }
     public function update(Incident $i): bool { return true; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -582,6 +606,12 @@ class MockPrevUserRepo implements UserRepositoryInterface
     public function update(int $id, array $data): bool { return true; }
     public function updatePassword(int $id, string $newPassword): bool { return true; }
     public function resetPassword(int $id, string $newPassword): bool { return true; }
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica

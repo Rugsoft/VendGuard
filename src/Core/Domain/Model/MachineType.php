@@ -44,6 +44,28 @@ enum MachineType: string
     }
 
     /**
+     * Determina si la tipología queda bajo vigilancia del Reloj Sanitario Biológico
+     * del Art. II (RF-03.4, RF-03.5).
+     *
+     * Incluye la máquina mixta (`COMBO`) por enmienda del Product Owner ratificada en
+     * T-PAUSE-22: una combinada puede alojar producto fresco en su módulo refrigerado,
+     * de modo que sufriría la misma pérdida de cadena de frío que una perecedera pura.
+     * El criterio es deliberadamente más ancho que `isPerishable()` —que sigue nombrando
+     * la máquina exclusiva de alimentos perecederos— y coincide con el que ya aplica el
+     * flujo preventivo (`PreventiveCoexistenceBridgeService`) y el checklist de
+     * inspección (`PreventiveChecklistEvaluationService`) al tratar `COMBO` como
+     * perecedera. Una sola tipología no puede ser perecedera para la inspección y
+     * no serlo para la cuarentena automática sin abrir un hueco al riesgo térmico.
+     *
+     * Las bebidas frías quedan fuera a propósito: no alojan alimento perecedero y su
+     * tolerancia térmica es otra (`COLD_DRINKS` admite hasta 8,0 °C en el checklist).
+     */
+    public function requiresSanitaryWatch(): bool
+    {
+        return $this === self::PERISHABLE_FOOD || $this === self::COMBO;
+    }
+
+    /**
      * Determina si una avería de frío o apagado eléctrico supone riesgo alimentario crítico.
      */
     public function hasColdChainRisk(): bool

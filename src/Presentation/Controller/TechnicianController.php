@@ -203,6 +203,11 @@ class TechnicianController
                 // contabiliza la TOTALIDAD de mensajes, públicos y notas internas de
                 // taller, porque su canal sí tiene acceso legítimo a ambos (RF-02.3).
                 'comments_count'       => $this->incidentRepo->countComments($incident->getId(), true),
+                // Puerta sanitaria del cierre (RF-03.5.2, Art. II): la consulta es pura
+                // —sin escrituras al pintar la ruta— y anticipa en la interfaz el bloqueo
+                // que la resolución aplicará de verdad (máquina en cuarentena o reloj
+                // biológico vencido en tipología bajo vigilancia sanitaria).
+                'sanitary_resolution_required' => $this->pauses()->sanitaryResolutionRequirement($incident),
             ];
         }
 
@@ -681,7 +686,42 @@ class TechnicianController
             );
         }
 
-        // 7. Bloque de dictamen de saldo (RF-REF-04, RF-REF-05, contrato §4.2.2).
+        // 7. Puerta sanitaria del cierre (RF-03.5.2, Art. II): sobre una máquina en
+        //    cuarentena —o con el Reloj Sanitario Biológico vencido, que aquí se consume
+        //    de forma idempotente— la resolución exige declarar temperatura real,
+        //    retirada y destrucción del stock perecedero y checklist de higienización.
+        //    Corre ANTES de cualquier escritura (verdicto de saldo incluido), para que
+        //    una declaración ausente no deje rastro de dinero sin poder cerrar la avería.
+        try {
+            $this->pauses()->evaluateSanitaryBiologicalClock($incident);
+            $sanitaryRequired = $this->pauses()->sanitaryResolutionRequirement($incident);
+        } catch (\DomainException | \RuntimeException $e) {
+            return Response::error(
+                'SANITARY_CLOCK_EVALUATION_FAILED',
+                'No se pudo evaluar el estado higiénico-sanitario de la máquina: ' . $e->getMessage(),
+                500
+            );
+        }
+
+        if ($sanitaryRequired) {
+            $rawDeclarations = $body['sanitary_declarations'] ?? null;
+            $sanitaryErrors = ResolutionValidator::getSanitaryDeclarationErrors(
+                is_array($rawDeclarations) ? $rawDeclarations : null
+            );
+
+            if (!empty($sanitaryErrors)) {
+                return Response::error(
+                    'SANITARY_CHECKLIST_REQUIRED',
+                    'La máquina está fuera de servicio por control higiénico-sanitario (Art. II): ' . implode(' ', $sanitaryErrors),
+                    422,
+                    ['errors' => $sanitaryErrors]
+                );
+            }
+
+            $body['sanitary_declarations'] = $rawDeclarations;
+        }
+
+        // 8. Bloque de dictamen de saldo (RF-REF-04, RF-REF-05, contrato §4.2.2).
         //
         //    Orden deliberado: TODA la validación ocurre antes de la primera
         //    escritura y el dictamen se registra ANTES de resolver la avería.
@@ -712,7 +752,7 @@ class TechnicianController
             }
         }
 
-        // 8. Hallazgo de monedas de oficio (RF-REF-04): opcional e independiente
+        // 9. Hallazgo de monedas de oficio (RF-REF-04): opcional e independiente
         //    de que exista o no una reclamación previa.
         $unclaimedFindingId = null;
         if ($this->wantsUnclaimedCash($body)) {
@@ -722,7 +762,7 @@ class TechnicianController
             }
         }
 
-        // 9. Declaracion obligatoria de repuestos en la resolucion (RF-REP-05 / Modulo M2)
+        // 10. Declaracion obligatoria de repuestos en la resolucion (RF-REP-05 / Modulo M2)
         $actor = $this->extractActor($request);
         if (!array_key_exists('replaced_parts_declared', $body) && !array_key_exists('replaced_parts', $body)) {
             $body['replaced_parts_declared'] = false;

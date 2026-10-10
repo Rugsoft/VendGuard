@@ -51,6 +51,8 @@ export const IncidentReportModal = {
       refundClaim: { refund_requested: false },
       refundClaimValid: true,
       lastRefundReceipt: null,
+      // Casilla obligatoria de confirmación de acceso (RF-04.6, Art. V.2).
+      accessConfirmed: false,
 
       // Comment Form (for existing duplicate tickets)
       commentText: '',
@@ -102,6 +104,14 @@ export const IncidentReportModal = {
     },
     hasPhysicalReception() {
       return store.state.location?.has_physical_reception !== false;
+    },
+    /**
+     * La máquina figura fuera de servicio por falta de acceso previo: el aviso nuevo
+     * exige la confirmación formal de la sede (RF-04.6, Art. V.2) y el servidor la
+     * vuelve a exigir; la casilla es la constancia del acto, no una sugerencia.
+     */
+    requiresAccessConfirmation() {
+      return this.machine?.is_blocked_no_access === true;
     }
   },
   watch: {
@@ -166,6 +176,13 @@ export const IncidentReportModal = {
       if (!this.machine) return;
       if (this.refundRequested && !this.refundClaimValid) return;
 
+      // RF-04.6: sin la casilla marcada no hay aviso posible sobre una máquina
+      // bloqueada por falta de acceso; la confirmación viaja en el propio alta.
+      if (this.requiresAccessConfirmation && !this.accessConfirmed) {
+        this.errorMessage = 'Debe marcar la casilla de confirmación formal de acceso antes de registrar el aviso (RF-04.6).';
+        return;
+      }
+
       this.errorMessage = '';
       this.isSubmitting = true;
       store.setLoading(true);
@@ -188,6 +205,9 @@ export const IncidentReportModal = {
               payload.append(key, value === null || value === undefined ? '' : String(value));
             }
           }
+          if (this.requiresAccessConfirmation) {
+            payload.append('access_confirmed', 'true');
+          }
           payload.append('photo', this.photoFile);
         } else {
           // Standard JSON payload
@@ -197,7 +217,8 @@ export const IncidentReportModal = {
             description: this.description.trim(),
             reporter_name: this.reporterName.trim(),
             reporter_phone: this.reporterPhone.trim(),
-            ...(this.refundRequested ? this.refundClaim : {})
+            ...(this.refundRequested ? this.refundClaim : {}),
+            ...(this.requiresAccessConfirmation ? { access_confirmed: true } : {})
           };
           if (this.retainedMoney !== '' && this.retainedMoney !== null) {
             payload.retained_money_amount = Number(this.retainedMoney);
@@ -544,6 +565,36 @@ export const IncidentReportModal = {
           </div>
         </div>
 
+        <!-- 1.b Confirmación obligatoria de acceso (RF-04.6, Art. V.2) -->
+        <div
+          v-if="requiresAccessConfirmation"
+          style="background-color: var(--color-urgency-critical-bg); border: 1px solid var(--color-urgency-critical); border-radius: var(--radius-interactive, 4px); padding: 12px; margin-bottom: 16px;"
+          data-testid="access-confirmation-block"
+        >
+          <div style="font-size: 13px; font-weight: 700; color: var(--color-error-text); margin-bottom: 6px;">
+            ⚠️ Máquina fuera de servicio por falta de acceso
+          </div>
+          <div style="font-size: 12px; color: var(--color-slate); line-height: 1.4; margin-bottom: 10px;">
+            El aviso anterior se canceló tras 72 horas hábiles sin poder acceder a la máquina.
+            Para abrir uno nuevo es obligatorio confirmar formalmente el acceso (Art. V.2).
+          </div>
+          <label
+            style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px; background-color: var(--color-surface-card); border: 1px solid var(--color-urgency-critical); border-radius: 4px; cursor: pointer;"
+          >
+            <input
+              type="checkbox"
+              v-model="accessConfirmed"
+              :disabled="isSubmitting"
+              style="width: 22px; height: 22px; accent-color: var(--color-error-text);"
+              data-testid="access-confirmation-checkbox"
+            />
+            <span style="font-size: 13px; color: var(--color-slate); line-height: 1.35;">
+              <strong>Confirmo formalmente que las instalaciones y la máquina se encuentran
+              abiertas y accesibles para el servicio técnico.</strong>
+            </span>
+          </label>
+        </div>
+
         <!-- 2. Description (Mandatory) -->
         <div style="margin-bottom: 16px;">
           <label for="incident-description" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 4px;">
@@ -650,7 +701,7 @@ export const IncidentReportModal = {
           <button
             type="submit"
             class="vg-btn vg-btn-primary"
-            :disabled="isSubmitting || !description.trim() || !reporterName.trim() || !reporterPhone.trim()"
+            :disabled="isSubmitting || !description.trim() || !reporterName.trim() || !reporterPhone.trim() || (requiresAccessConfirmation && !accessConfirmed)"
           >
             <span v-if="!isSubmitting">Registrar aviso de avería</span>
             <span v-else>Enviando aviso...</span>

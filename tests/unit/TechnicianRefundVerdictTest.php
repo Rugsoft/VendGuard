@@ -32,6 +32,7 @@ require_once $baseDir . '/tests/bootstrap.php';
 
 use VendGuard\Application\DTO\CreateRefundRequestDTO;
 use VendGuard\Application\Service\AuditLogger;
+use VendGuard\Application\Service\IncidentPauseService;
 use VendGuard\Application\Service\IbanValidationService;
 use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
@@ -44,6 +45,7 @@ use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\MachineType;
+use VendGuard\Core\Domain\Model\PreventiveSetting;
 use VendGuard\Core\Domain\Model\RefundRequest;
 use VendGuard\Core\Domain\Model\RefundStatus;
 use VendGuard\Core\Domain\Model\TechnicianFinding;
@@ -52,6 +54,7 @@ use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UnclaimedCashFindingRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
@@ -161,6 +164,12 @@ final class VerdictMachineRepo implements MachineRepositoryInterface
         return null;
     }
 
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -210,6 +219,12 @@ final class VerdictLocationRepo implements LocationRepositoryInterface
         throw new LogicException('Not used in this suite.');
     }
 
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -260,8 +275,75 @@ function rebuildVerdictIncident(Incident $incident, array $overrides = []): Inci
         resolutionDiagnosis: $pick('resolutionDiagnosis', $incident->getResolutionDiagnosis()),
         resolutionAction: $pick('resolutionAction', $incident->getResolutionAction()),
         resolvedAt: $pick('resolvedAt', $incident->getResolvedAt()),
-        startedAt: $pick('startedAt', $incident->getStartedAt())
+        startedAt: $pick('startedAt', $incident->getStartedAt()),
+        createdAt: $pick('createdAt', $incident->getCreatedAt())
     );
+}
+
+/**
+ * Doble en memoria de los ajustes preventivos (módulo 05).
+ *
+ * El cierre técnico consume el Reloj Sanitario Biológico (Art. II) antes de
+ * escribir, y ese reloj necesita la tipología de la máquina y su semáforo
+ * sanitario. Esta suite es de reintegros y declara no abrir un PDO, así que el
+ * doble publica la máquina del banco con su tipología real —`COMBO`, que está
+ * bajo vigilancia por alojar producto fresco— y la cadena de frío en orden: la
+ * puerta deja pasar el cierre porque el expediente acaba de abrirse, no porque
+ * la puerta esté desactivada.
+ */
+final class VerdictPreventiveSettingsRepo implements PreventiveSettingsRepositoryInterface
+{
+    public function findAll(): array
+    {
+        return [];
+    }
+
+    public function findByMachineType(string $machineType): ?PreventiveSetting
+    {
+        return null;
+    }
+
+    public function updateTypeSettings(
+        string $machineType,
+        int $defaultFrequencyDays,
+        int $maxAllowedDays,
+        int $advanceWarningDays = 5
+    ): bool {
+        return true;
+    }
+
+    public function updateMachineConfig(
+        int $machineId,
+        ?int $sanitaryFrequencyDays,
+        ?string $nextSanitaryInspectionDue = null
+    ): bool {
+        return true;
+    }
+
+    public function setSeasonalPause(int $machineId, string $reason, ?string $pauseUntil = null): bool
+    {
+        return true;
+    }
+
+    public function resumeSeasonalPause(int $machineId): bool
+    {
+        return true;
+    }
+
+    public function getMachineSettings(int $machineId): ?array
+    {
+        return [
+            'machine_id' => $machineId,
+            'machine_type' => MachineType::COMBO->value,
+            'sanitary_status' => 'OK',
+            'sanitary_frequency_days' => 15,
+        ];
+    }
+
+    public function updateSanitaryStatus(int $machineId, string $status): bool
+    {
+        return true;
+    }
 }
 
 final class VerdictIncidentRepo implements IncidentRepositoryInterface
@@ -338,6 +420,12 @@ final class VerdictIncidentRepo implements IncidentRepositoryInterface
         return false;
     }
 
+    public function clearNoAccessBlock(int $machineId, string $ticketCode): bool
+    {
+        // Doble de prueba: el contrato de persistencia exige el método; la lógica
+        // del levantamiento vive en Machine y se certifica en su suite dedicada.
+        return true;
+    }
     public function blockForNoAccess(int $machineId, string $ticketCode): bool
     {
         // Doble de prueba: el contrato de persistencia exige el método; la lógica
@@ -723,7 +811,11 @@ $technicianController = new TechnicianController(
     userRepo: null,
     traceabilityService: $traceability,
     refundRepo: $refundRepo,
-    refundService: $refundService
+    refundService: $refundService,
+    pauseService: new IncidentPauseService(
+        settingsRepo: new VerdictPreventiveSettingsRepo(),
+        incidentRepo: $incidentRepo
+    )
 );
 $refundController = new TechnicianRefundController($incidentRepo, $refundRepo);
 
@@ -780,7 +872,10 @@ $makeIncident = static function (
         description: 'La máquina cobra y no entrega el producto.',
         urgency: UrgencyLevel::HIGH,
         status: $status,
-        assignedTechnicianId: $techId
+        assignedTechnicianId: $techId,
+        // Marca de apertura real: el Reloj Sanitario Biológico la necesita para
+        // medir las 4 h naturales continuas (Art. II) antes de dejar cerrar.
+        createdAt: date('Y-m-d H:i:s')
     ));
 
     return $id;
