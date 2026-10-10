@@ -160,6 +160,141 @@ $assert("3.3 Textos técnicos extensos y con caracteres UTF-8 son aceptados", $v
 $assert("3.4 getValidationErrors() devuelve array vacío para textos válidos", empty(ResolutionValidator::getValidationErrors($validDiagnosis, $validAction)));
 
 // =====================================================================
+// GRUPO 4: Declaraciones sanitarias obligatorias del cierre (T-PAUSE-24,
+//          RF-03.5.2, Constitución Art. II)
+// =====================================================================
+// La puerta del cierre sobre máquina en cuarentena no es una formalidad: las
+// tres declaraciones son actos positivos del técnico y este grupo fija el
+// contrato exacto que consume tanto el controlador de ruta como el servicio de
+// trazabilidad, con sus bordes medidos uno a uno.
+echo "\n--- Grupo 4: Declaraciones sanitarias obligatorias del cierre (RF-03.5.2, Art. II) ---\n";
+
+/** Bloque válido de referencia: una lectura plausible y las dos confirmaciones marcadas. */
+$validDeclarations = [
+    'temperature_c' => 3.5,
+    'stock_destroyed' => true,
+    'hygiene_checklist' => true,
+];
+
+// 4.1: El bloque ausente no puede pasar: sin declaraciones no hay cierre.
+$caught = false;
+try {
+    ResolutionValidator::validateSanitaryDeclarations([]);
+} catch (InvalidResolutionException $e) {
+    $caught = true;
+}
+$assert("4.1 Un bloque vacío se rechaza con InvalidResolutionException", $caught);
+$assert(
+    "4.2 getSanitaryDeclarationErrors(null) acusa las tres declaraciones en un único mensaje",
+    count(ResolutionValidator::getSanitaryDeclarationErrors(null)) === 1
+        && str_contains(ResolutionValidator::getSanitaryDeclarationErrors(null)[0], 'temperatura')
+        && str_contains(ResolutionValidator::getSanitaryDeclarationErrors(null)[0], 'destrucción')
+        && str_contains(ResolutionValidator::getSanitaryDeclarationErrors(null)[0], 'higienización')
+);
+
+// 4.3-4.5: La temperatura tiene que ser una lectura numérica real.
+$assert(
+    "4.3 La temperatura vacía se rechaza",
+    count(ResolutionValidator::getSanitaryDeclarationErrors(
+        ['temperature_c' => '', 'stock_destroyed' => true, 'hygiene_checklist' => true]
+    )) === 1
+);
+$assert(
+    "4.4 Una temperatura no numérica ('abc') se rechaza",
+    count(ResolutionValidator::getSanitaryDeclarationErrors(
+        ['temperature_c' => 'abc', 'stock_destroyed' => true, 'hygiene_checklist' => true]
+    )) === 1
+);
+$assert(
+    "4.5 La coma decimal de la interfaz ('3,5') no es válida en el contrato HTTP",
+    count(ResolutionValidator::getSanitaryDeclarationErrors(
+        ['temperature_c' => '3,5', 'stock_destroyed' => true, 'hygiene_checklist' => true]
+    )) === 1
+);
+
+// 4.6-4.9: Los bordes del rango plausible son inclusivos y el exterior se rechaza.
+$assert(
+    "4.6 El borde inferior −40,0 °C es plausible y se acepta",
+    ResolutionValidator::validateSanitaryDeclarations([
+        'temperature_c' => -40.0, 'stock_destroyed' => true, 'hygiene_checklist' => true,
+    ]) === true
+        && ResolutionValidator::MIN_PLAUSIBLE_TEMPERATURE_C === -40.0
+);
+$assert(
+    "4.7 Un grado por debajo del borde (−40,1 °C) se rechaza",
+    count(ResolutionValidator::getSanitaryDeclarationErrors([
+        'temperature_c' => -40.1, 'stock_destroyed' => true, 'hygiene_checklist' => true,
+    ])) === 1
+);
+$assert(
+    "4.8 El borde superior 80,0 °C es plausible y se acepta",
+    ResolutionValidator::validateSanitaryDeclarations([
+        'temperature_c' => 80.0, 'stock_destroyed' => true, 'hygiene_checklist' => true,
+    ]) === true
+        && ResolutionValidator::MAX_PLAUSIBLE_TEMPERATURE_C === 80.0
+);
+$assert(
+    "4.9 Una lectura increíble (120 °C) se rechaza nombrando el rango plausible",
+    count(ResolutionValidator::getSanitaryDeclarationErrors([
+        'temperature_c' => 120, 'stock_destroyed' => true, 'hygiene_checklist' => true,
+    ])) === 1
+        && str_contains(ResolutionValidator::getSanitaryDeclarationErrors([
+            'temperature_c' => 120, 'stock_destroyed' => true, 'hygiene_checklist' => true,
+        ])[0], '120.0')
+);
+
+// 4.10-4.13: Las dos confirmaciones exigen un acto positivo, no una omisión.
+$assert(
+    "4.10 La retirada del stock sin declarar se rechaza",
+    count(ResolutionValidator::getSanitaryDeclarationErrors(
+        ['temperature_c' => 3.5, 'hygiene_checklist' => true]
+    )) === 1
+);
+$assert(
+    "4.11 Un false explícito en la retirada del stock se rechaza igual que una omisión",
+    count(ResolutionValidator::getSanitaryDeclarationErrors(
+        ['temperature_c' => 3.5, 'stock_destroyed' => false, 'hygiene_checklist' => true]
+    )) === 1
+);
+$assert(
+    "4.12 La cadena 'false' y el 0 tampoco acreditan la retirada del stock",
+    count(ResolutionValidator::getSanitaryDeclarationErrors([
+        'temperature_c' => 3.5, 'stock_destroyed' => 'false', 'hygiene_checklist' => true,
+    ])) === 1
+        && count(ResolutionValidator::getSanitaryDeclarationErrors([
+            'temperature_c' => 3.5, 'stock_destroyed' => 0, 'hygiene_checklist' => true,
+        ])) === 1
+);
+$assert(
+    "4.13 El checklist de higienización sin marcar se rechaza y marcado se acepta",
+    count(ResolutionValidator::getSanitaryDeclarationErrors([
+        'temperature_c' => 3.5, 'stock_destroyed' => true, 'hygiene_checklist' => false,
+    ])) === 1
+        && ResolutionValidator::validateSanitaryDeclarations([
+            'temperature_c' => 3.5, 'stock_destroyed' => true, 'hygiene_checklist' => 'true',
+        ]) === true
+);
+
+// 4.14-4.16: Acumulación de errores y forma del rechazo.
+$assert(
+    "4.14 Faltando las tres declaraciones, el validador acusa las tres y no sólo la primera",
+    count(ResolutionValidator::getSanitaryDeclarationErrors([])) === 3
+);
+$assert(
+    "4.15 El bloque válido de referencia no produce ningún error",
+    ResolutionValidator::getSanitaryDeclarationErrors($validDeclarations) === []
+        && ResolutionValidator::validateSanitaryDeclarations($validDeclarations) === true
+);
+$caught = false;
+try {
+    ResolutionValidator::validateSanitaryDeclarations(['temperature_c' => 3.5]);
+} catch (InvalidResolutionException $e) {
+    $caught = str_contains($e->getMessage(), 'Declaraciones sanitarias insuficientes')
+        && count($e->getErrors()) === 2;
+}
+$assert("4.16 La excepción publica el recuento real de declaraciones faltantes", $caught);
+
+// =====================================================================
 // RESUMEN DE EJECUCIÓN
 // =====================================================================
 echo "\n======================================================================\n";
