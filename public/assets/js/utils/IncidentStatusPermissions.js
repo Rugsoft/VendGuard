@@ -238,6 +238,36 @@ export const AMBER_TECHNICAL_TOKENS = Object.freeze({ bg: '#fef9c3', color: '#85
  */
 export const SANITARY_TEMPERATURE_RANGE = Object.freeze({ min: -40.0, max: 80.0 });
 
+/**
+ * Estado higiénico-sanitario que enciende el bloqueo cautelar por riesgo térmico
+ * (RF-03.5.1, Constitución Art. II).
+ *
+ * Espejo en el cliente del valor que el servidor publica en `machines.sanitary_status`
+ * y que `QrScanService` lee para servir el modo SANITARY_QUARANTINE. El portal de sede
+ * lo recibe en cada máquina de su parque y lo pinta como distintivo de riesgo, de modo
+ * que técnico, coordinador y responsable de sede leen la misma cuarentena.
+ */
+export const SANITARY_STATUS_QUARANTINE = 'QUARANTINE';
+
+/**
+ * Distintivo literal del riesgo térmico que manda exhibir RF-03.5.1.
+ *
+ * El texto es contrato: se muestra idéntico en el escaneo QR público y en la tarjeta
+ * de la máquina del portal de sede, y las aserciones lo anclan al literal de la
+ * especificación en ambos canales para que una divergencia de copy rompa la batería.
+ */
+export const SANITARY_THERMAL_RISK_LABEL = 'Riesgo térmico: máquina en cuarentena preventiva';
+
+/**
+ * ¿La máquina está en cuarentena sanitaria?
+ *
+ * @param {string|undefined|null} value Valor crudo de `machine.sanitary_status`.
+ * @returns {boolean}
+ */
+export function isSanitaryQuarantine(value) {
+  return typeof value === 'string' && value.trim().toUpperCase() === SANITARY_STATUS_QUARANTINE;
+}
+
 /** Docker-design palette per urgency (semantic colors + CSS class hook). */
 export const BADGE_URGENCY_PALETTE = Object.freeze({
   CRITICAL: Object.freeze({ cssClass: 'vg-badge-critical', bg: '#fee2e2', color: '#dc2626', border: '#fca5a5' }),

@@ -474,6 +474,13 @@ class PdoMachineRepository implements MachineRepositoryInterface
                 'notes'                => $row['notes'] !== null ? (string)$row['notes'] : null,
                 'is_active'            => (bool)$row['is_active'] && $row['deleted_at'] === null,
                 'is_blocked_no_access' => (bool)$row['is_blocked_no_access'],
+                // Estado higiénico-sanitario de la máquina (RF-03.5.1, Art. II). Se publica
+                // normalizado a 'OK' cuando la columna viene vacía: quien lee el catálogo
+                // —portal de sede, administración— no debe tener que interpretar el silencio
+                // de la base de datos como una marca de riesgo térmico.
+                'sanitary_status'      => ($row['sanitary_status'] !== null && trim((string)$row['sanitary_status']) !== '')
+                    ? (string)$row['sanitary_status']
+                    : 'OK',
                 'has_active_ticket'    => $hasActiveTicket,
                 'active_ticket_code'   => $activeTicketCode,
                 'active_ticket_status' => $activeTicketStatus,

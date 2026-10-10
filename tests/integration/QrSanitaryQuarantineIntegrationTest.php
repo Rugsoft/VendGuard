@@ -125,6 +125,119 @@ $assert("1.8 active_incident contiene status_label", isset($dataQ['active_incide
 $assert("1.9 Art. IV: NO contiene notas de taller ni datos del técnico", !isset($dataQ['active_incident']['assigned_technician_id']) && !isset($dataQ['active_incident']['resolution_diagnosis']));
 
 // -------------------------------------------------------------------------
+// T-PAUSE-29: distintivo literal de riesgo térmico (RF-03.5.1) y no-filtrado
+// de la pausa interna en el canal ciudadano (RF-06.1, Art. V.4)
+// -------------------------------------------------------------------------
+
+$thermalRiskLabel = \VendGuard\Application\Service\QrScanService::THERMAL_RISK_BADGE_LABEL;
+$assert(
+    "1.10 RF-03.5.1: el aviso público publica el distintivo de riesgo térmico",
+    ($dataQ['alert']['thermal_risk_label'] ?? '') === $thermalRiskLabel,
+    'alert.thermal_risk_label: ' . ($dataQ['alert']['thermal_risk_label'] ?? 'AUSENTE')
+);
+$assert(
+    "1.11 El distintivo dice exactamente «Riesgo térmico: máquina en cuarentena preventiva»",
+    ($dataQ['alert']['thermal_risk_label'] ?? '') === 'Riesgo térmico: máquina en cuarentena preventiva',
+    'literal publicado: ' . ($dataQ['alert']['thermal_risk_label'] ?? 'AUSENTE')
+);
+
+/**
+ * Claves internas que la pausa por falta de acceso (módulo 11) escribe en el
+ * expediente y que JAMÁS deben viajar por el canal ciudadano (RF-06.1, Art. V.4).
+ *
+ * @var list<string> $forbiddenPauseKeys
+ */
+$forbiddenPauseKeys = [
+    'paused_at',
+    'pending_info_reason_category',
+    'pending_info_reason_category_label',
+    'pending_info_reason_text',
+    'total_pending_info_seconds',
+];
+
+/**
+ * Barrido recursivo de la carga útil pública en busca de claves internas de pausa.
+ *
+ * @param array<mixed> $payload
+ * @param list<string> $forbidden
+ * @return list<string> Claves prohibidas encontradas (vacío si el payload es limpio).
+ */
+$findForbiddenPauseKeys = function (array $payload, array $forbidden) use (&$findForbiddenPauseKeys): array {
+    $found = [];
+    foreach ($payload as $key => $value) {
+        if (is_string($key) && in_array($key, $forbidden, true)) {
+            $found[] = $key;
+        }
+        if (is_array($value)) {
+            $found = array_merge($found, $findForbiddenPauseKeys($value, $forbidden));
+        }
+    }
+
+    return array_values(array_unique($found));
+};
+
+$leakedPauseKeys = $findForbiddenPauseKeys($dataQ, $forbiddenPauseKeys);
+$assert(
+    "1.12 Art. V.4: la carga útil pública no filtra ni un solo campo interno de pausa",
+    $leakedPauseKeys === [],
+    'claves filtradas: ' . implode(', ', $leakedPauseKeys)
+);
+$assert(
+    "1.13 Art. V.4: tampoco asoma el literal interno PENDING_INFO",
+    !str_contains($resScanQ->getBody(), 'PENDING_INFO'),
+    'la respuesta pública contiene el estado interno'
+);
+
+// La prueba anterior se hace morder: el expediente de la máquina en cuarentena se
+// pausa de verdad (columnas del módulo 11 sembradas por SQL dirigido) y se vuelve a
+// escanear. Es el escenario real de RF-03.5.1 —máquina en cuarentena por rotura de
+// frío con el técnico esperando respuesta de la sede— y el único en el que el canal
+// ciudadano podría delatar la pausa si dejara de estar blindado.
+$pdo->exec(sprintf(
+    "UPDATE `incidents` SET `status` = 'PENDING_INFO', `paused_at` = NOW(), "
+    . "`pending_info_reason_category` = 'SITE_ACCESS_BLOCKED', "
+    . "`pending_info_reason_text` = 'Sede sin acceso al almacén (CONFIDENCIAL)' "
+    . "WHERE `id` = %d",
+    (int)$quarantineIncident->getId()
+));
+
+$resScanPaused = $router->dispatch(new Request('GET', '/api/qr/scan/VEND-0101'));
+$bodyPaused = json_decode($resScanPaused->getBody(), true);
+$dataPaused = $bodyPaused['data'] ?? [];
+$leakedPausedKeys = $findForbiddenPauseKeys($dataPaused, $forbiddenPauseKeys);
+
+$assert("1.14 Con el expediente pausado, el escaneo sigue sirviendo la cuarentena", ($dataPaused['status_mode'] ?? '') === 'SANITARY_QUARANTINE');
+$assert(
+    "1.15 El distintivo de riesgo térmico sigue viajando intacto con la pausa viva",
+    ($dataPaused['alert']['thermal_risk_label'] ?? '') === 'Riesgo térmico: máquina en cuarentena preventiva'
+);
+$assert(
+    "1.16 Art. V.4: ni un campo de pausa asoma con el expediente pausado",
+    $leakedPausedKeys === [],
+    'claves filtradas: ' . implode(', ', $leakedPausedKeys)
+);
+$assert(
+    "1.17 Art. V.4: el estado del expediente se publica neutral",
+    ($dataPaused['active_incident']['status_label'] ?? '') === 'Intervención técnica prioritaria en curso'
+    && !str_contains($resScanPaused->getBody(), 'PENDING_INFO'),
+    'status_label: ' . ($dataPaused['active_incident']['status_label'] ?? 'AUSENTE')
+);
+$assert(
+    "1.18 La nota interna de la pausa no viaja al ciudadano",
+    !str_contains($resScanPaused->getBody(), 'CONFIDENCIAL'),
+    'la respuesta pública contiene la justificación interna'
+);
+
+// Se cierra el intervalo de pausa recién sembrado para no dejar el expediente en un
+// estado que no le corresponde al resto del bloque (la incidencia se creó en curso).
+$pdo->exec(sprintf(
+    "UPDATE `incidents` SET `status` = 'IN_PROGRESS', `paused_at` = NULL, "
+    . "`pending_info_reason_category` = NULL, `pending_info_reason_text` = NULL "
+    . "WHERE `id` = %d",
+    (int)$quarantineIncident->getId()
+));
+
+// -------------------------------------------------------------------------
 // BLOQUE 2: Bloqueo de POST /api/qr/report en Cuarentena
 // -------------------------------------------------------------------------
 echo "\n--- BLOQUE 2: Bloqueo de Reporte en Cuarentena ---\n";

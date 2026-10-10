@@ -374,6 +374,113 @@ if ($location !== null) {
     $assert("7.16 Sin sede autenticada responde HTTP 401", $anonRes->getStatusCode() === 401, "HTTP {$anonRes->getStatusCode()}");
     $assert("7.17 El 401 expone UNAUTHORIZED", ($anonBody['error']['code'] ?? '') === 'UNAUTHORIZED');
 
+    // =====================================================================
+    // CASO 8 (T-PAUSE-29): estado higiénico-sanitario del parque de la sede
+    // =====================================================================
+    echo "\n--- Caso 8: Publicación del estado sanitario y distintivo de riesgo térmico ---\n";
+
+    $settingsRepo8 = new \VendGuard\Infrastructure\Repository\PdoPreventiveSettingsRepository($pdo);
+
+    /**
+     * Claves internas de la pausa por falta de acceso que el canal de sede SÍ conoce
+     * (RF-05.1) pero que no pueden aparecer fuera de la avería activa. El barrido
+     * existe para certificar que el estado sanitario nuevo no arrastró consigo ningún
+     * campo interno colado por otra vía.
+     *
+     * @var list<string> $forbiddenTopLevelKeys
+     */
+    $forbiddenTopLevelKeys = ['pending_info_reason_text_internal', 'cancellation_reason', 'internal_notes'];
+
+    $fetchPark = function () use ($router, $siteToken): array {
+        $response = $router->dispatch(new Request('GET', '/api/locations/SEDE-BCN-01/machines', [], [], [
+            'Authorization' => "Bearer {$siteToken}"
+        ]));
+
+        return [
+            'status' => $response->getStatusCode(),
+            'rows'   => $response->getDecodedBody()['data'] ?? [],
+            'raw'    => $response->getBody(),
+        ];
+    };
+
+    $park = $fetchPark();
+    $assert("8.1 La consulta del parque responde HTTP 200 OK", $park['status'] === 200);
+
+    $allowedSanitaryStatuses = ['OK', 'ATTENTION_REQUIRED', 'EXPIRED', 'QUARANTINE', 'SEASONAL_PAUSE'];
+    $rowsWithoutSanitaryStatus = array_values(array_filter(
+        $park['rows'],
+        static fn(array $row): bool => !array_key_exists('sanitary_status', $row)
+            || !in_array($row['sanitary_status'], $allowedSanitaryStatuses, true)
+    ));
+    $assert(
+        "8.2 Toda máquina del parque publica un estado sanitario del catálogo (RF-03.5.1)",
+        $park['rows'] !== [] && $rowsWithoutSanitaryStatus === [],
+        'filas sin estado válido: ' . count($rowsWithoutSanitaryStatus) . ' de ' . count($park['rows'])
+    );
+    $assert(
+        "8.3 El parque limpio no enciende ninguna cuarentena sanitaria",
+        array_values(array_filter($park['rows'], static fn(array $row): bool => $row['sanitary_status'] === 'QUARANTINE')) === []
+    );
+
+    // Se pone la primera máquina del parque en cuarentena REAL y se vuelve a consultar
+    // el portal por la ruta autenticada: la máquina debe publicarse marcada, y sólo ella.
+    $quarantineTarget = $park['rows'][0];
+    $settingsRepo8->updateSanitaryStatus((int)$quarantineTarget['id'], 'QUARANTINE');
+
+    $parkAfter = $fetchPark();
+    $quarantinedRow = null;
+    $otherRows = [];
+    foreach ($parkAfter['rows'] as $row) {
+        if ((int)$row['id'] === (int)$quarantineTarget['id']) {
+            $quarantinedRow = $row;
+            continue;
+        }
+        $otherRows[] = $row;
+    }
+
+    $assert(
+        "8.4 La máquina en cuarentena publica sanitary_status = QUARANTINE",
+        ($quarantinedRow['sanitary_status'] ?? '') === 'QUARANTINE',
+        'sanitary_status: ' . ($quarantinedRow['sanitary_status'] ?? 'AUSENTE')
+    );
+    $assert(
+        "8.5 El resto del parque sigue sin marca de riesgo térmico",
+        $otherRows !== [] && array_values(array_filter(
+            $otherRows,
+            static fn(array $row): bool => ($row['sanitary_status'] ?? '') !== 'OK'
+        )) === []
+    );
+    $assert(
+        "8.6 El estado sanitario convive con la avería activa sin desplazarla",
+        ($quarantinedRow['active_incident']['ticket_code'] ?? null) === ($quarantineTarget['active_incident']['ticket_code'] ?? null)
+    );
+
+    $parkPayload = json_encode($parkAfter['rows'], JSON_UNESCAPED_UNICODE) ?: '';
+    $leakedKeys = array_values(array_filter(
+        $forbiddenTopLevelKeys,
+        static fn(string $key): bool => str_contains($parkPayload, $key)
+    ));
+    $assert(
+        "8.7 El parque de la sede no filtra ningún campo interno ajeno al contrato",
+        $leakedKeys === [],
+        'claves filtradas: ' . implode(', ', $leakedKeys)
+    );
+
+    // Restitución del estado sanitario real de la máquina reservada.
+    $settingsRepo8->updateSanitaryStatus((int)$quarantineTarget['id'], 'OK');
+    $restored = $fetchPark();
+    $restoredRow = null;
+    foreach ($restored['rows'] as $row) {
+        if ((int)$row['id'] === (int)$quarantineTarget['id']) {
+            $restoredRow = $row;
+        }
+    }
+    $assert(
+        "8.8 La máquina reservada vuelve a OK al cerrar el caso",
+        ($restoredRow['sanitary_status'] ?? '') === 'OK',
+        'sanitary_status: ' . ($restoredRow['sanitary_status'] ?? 'AUSENTE')
+    );
+
     // Limpieza de datos de prueba
     TestDataCleaner::purgeIncident($pdo, (int)$createdIncident->getId());
 }

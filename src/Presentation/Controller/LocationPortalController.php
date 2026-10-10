@@ -57,6 +57,15 @@ class LocationPortalController
     public const ERROR_MISSING_REFUND_PAYMENT_DATA = 'MISSING_REFUND_PAYMENT_DATA';
     public const ERROR_INVALID_COMPENSATION_METHOD = 'INVALID_COMPENSATION_METHOD';
 
+    /**
+     * Estado higiénico-sanitario por defecto de una máquina sin marca sanitaria.
+     *
+     * Es el valor base de la columna `machines.sanitary_status`; el portal de sede
+     * publica el valor real de cada máquina y sólo `QUARANTINE` enciende el distintivo
+     * de riesgo térmico (RF-03.5.1, Art. II).
+     */
+    public const SANITARY_STATUS_OK = 'OK';
+
     public const MESSAGE_OVER_TELEPHONE_ADVICE =
         'Para importes superiores a 50,00 €, contacte con el departamento de atención al cliente de VendGuard.';
 
@@ -176,7 +185,19 @@ class LocationPortalController
         // Consultar máquinas con el estado activo/garantía de incidencia
         $machines = $this->machineRepo->findActiveByLocationId($location->getId());
 
-        $payload = array_map(function (Machine $machine): array {
+        // El catálogo de la sede se lee UNA sola vez para dos propósitos: publicar el
+        // estado higiénico-sanitario de cada máquina (RF-03.5.1, Art. II) y localizar
+        // las bloqueadas por falta de acceso (RF-04.4, RF-04.6). Hasta T-PAUSE-29 esta
+        // lectura existía sólo para las bloqueadas: el estado sanitario viaja en el
+        // mismo viaje a la base de datos, sin consulta adicional.
+        $catalogRows = $this->machineRepo->findAll(['location_id' => $location->getId()]);
+
+        $sanitaryStatusByMachineId = [];
+        foreach ($catalogRows as $row) {
+            $sanitaryStatusByMachineId[(int)$row['id']] = $this->normalizeSanitaryStatus($row['sanitary_status'] ?? null);
+        }
+
+        $payload = array_map(function (Machine $machine) use ($sanitaryStatusByMachineId): array {
             return [
                 'id' => $machine->getId(),
                 'code' => $machine->getCode(),
@@ -186,6 +207,12 @@ class LocationPortalController
                 'notes' => $machine->getNotes(),
                 'is_blocked_no_access' => $machine->isBlockedNoAccess(),
                 'operational_status' => $machine->getOperationalStatus(),
+                // Estado higiénico-sanitario de la máquina ('OK', 'ATTENTION_REQUIRED',
+                // 'EXPIRED', 'QUARANTINE', 'SEASONAL_PAUSE'). La tarjeta de sede lo pinta
+                // como distintivo de riesgo térmico cuando vale 'QUARANTINE', que es el
+                // mandato de RF-03.5.1. No es dato interno del expediente: es el mismo
+                // rótulo que el escaneo QR publica al ciudadano.
+                'sanitary_status' => $sanitaryStatusByMachineId[$machine->getId()] ?? self::SANITARY_STATUS_OK,
                 'active_incident' => $this->withPublicCommentsCount(
                     $this->sanitizeIncidentForSite($machine->getActiveIncident())
                 ),
@@ -197,10 +224,12 @@ class LocationPortalController
         // pueda confirmar el acceso y abrir un aviso nuevo. No entran por el parque
         // activo (están inactivas por definición), así que se incorporan desde el
         // catálogo con su marca formal y SIN ticket activo: su expediente anterior
-        // terminó cancelado.
+        // terminó cancelado. La condición de inactividad se preserva aquí en lugar de
+        // pedírsela al repositorio, porque el catálogo ya se trajo completo.
         $blockedRows = array_values(array_filter(
-            $this->machineRepo->findAll(['location_id' => $location->getId(), 'status' => 'inactive']),
+            $catalogRows,
             static fn(array $row): bool => (bool)($row['is_blocked_no_access'] ?? false)
+                && ((int)($row['is_active'] ?? 0) === 0 || ($row['deleted_at'] ?? null) !== null)
         ));
 
         foreach ($blockedRows as $row) {
@@ -213,6 +242,7 @@ class LocationPortalController
                 'notes' => $row['notes'] !== null ? (string)$row['notes'] : null,
                 'is_blocked_no_access' => true,
                 'operational_status' => Machine::OPERATIONAL_STATUS_BLOCKED_NO_ACCESS,
+                'sanitary_status' => $this->normalizeSanitaryStatus($row['sanitary_status'] ?? null),
                 'active_incident' => null,
             ];
         }
@@ -1263,6 +1293,23 @@ class LocationPortalController
      * @param array<string, mixed>|null $data
      * @return array<string, mixed>|null
      */
+    /**
+     * Normaliza el estado higiénico-sanitario leído de la base de datos.
+     *
+     * Una máquina sin marca sanitaria se publica como `OK` —nunca como nula— para que
+     * la tarjeta de sede no tenga que distinguir entre "no consta" y "sin incidencia
+     * térmica": el silencio del repositorio no puede convertirse en un aviso de riesgo.
+     *
+     * @param mixed $value Valor crudo de la columna `machines.sanitary_status`.
+     * @return string Estado sanitario publicado.
+     */
+    private function normalizeSanitaryStatus(mixed $value): string
+    {
+        $normalized = is_string($value) ? strtoupper(trim($value)) : '';
+
+        return $normalized !== '' ? $normalized : self::SANITARY_STATUS_OK;
+    }
+
     public function sanitizeIncidentForSite(?array $data): ?array
     {
         if ($data === null) {

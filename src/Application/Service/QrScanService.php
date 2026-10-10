@@ -36,6 +36,17 @@ use VendGuard\Infrastructure\Repository\PdoPreventiveSettingsRepository;
  */
 class QrScanService
 {
+    /**
+     * Distintivo literal del distintivo de riesgo térmico que RF-03.5.1 manda
+     * exhibir en el escaneo QR público de una máquina en cuarentena sanitaria.
+     *
+     * El texto es contrato, no copy decorativo: el portal de sede pinta el mismo
+     * rótulo sobre la tarjeta de la máquina y las aserciones lo anclan al literal
+     * de la especificación en ambos canales, de modo que una divergencia de copy
+     * entre servidor y ciudadano rompa la batería en lugar de pasar desapercibida.
+     */
+    public const THERMAL_RISK_BADGE_LABEL = 'Riesgo térmico: máquina en cuarentena preventiva';
+
     private MachineRepositoryInterface $machineRepo;
     private LocationRepositoryInterface $locationRepo;
     private IncidentRepositoryInterface $incidentRepo;
@@ -204,6 +215,9 @@ class QrScanService
                 'title' => 'MÁQUINA FUERA DE SERVICIO POR CONTROL HIGIÉNICO-SANITARIO',
                 'message' => 'Por imperativo del Artículo II de la Constitución (Seguridad Alimentaria), queda prohibida la adquisición y consumo de productos de esta unidad.',
                 'severity' => 'CRITICAL_DANGER',
+                // Distintivo literal de RF-03.5.1: el mismo rótulo que pinta la tarjeta
+                // de la máquina en el portal de sede.
+                'thermal_risk_label' => self::THERMAL_RISK_BADGE_LABEL,
             ],
             'can_report' => false,
             'active_incident' => $activeIncidentData,

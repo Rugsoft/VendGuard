@@ -12,6 +12,8 @@
  * - Dualismo Lingüístico: Lógica y propiedades en inglés; avisos y textos en español.
  */
 
+import { SANITARY_THERMAL_RISK_LABEL } from '../utils/IncidentStatusPermissions.js';
+
 export const QrSanitaryQuarantineModal = {
   name: 'QrSanitaryQuarantineModal',
   props: {
@@ -47,6 +49,15 @@ export const QrSanitaryQuarantineModal = {
     },
     incidentStatusLabel() {
       return this.activeIncident?.status_label || 'Intervención técnica prioritaria en curso';
+    },
+    /**
+     * Distintivo literal de riesgo térmico (RF-03.5.1, Art. II). El servidor publica
+     * `alert.thermal_risk_label`; si por cualquier motivo no llegara, se cae a la
+     * constante compartida con el portal de sede para que el aviso nunca se muestre
+     * mudo ni con un copy divergente del que lee el responsable de la máquina.
+     */
+    thermalRiskLabel() {
+      return this.alert?.thermal_risk_label || SANITARY_THERMAL_RISK_LABEL;
     }
   },
   methods: {
@@ -73,6 +84,15 @@ export const QrSanitaryQuarantineModal = {
         >
           ALERTA SANITARIA · ARTÍCULO II
         </span>
+      </div>
+
+      <!-- Thermal Risk Distinctive (RF-03.5.1, Art. II) -->
+      <div
+        class="qr-thermal-risk-chip"
+        data-testid="quarantine-thermal-risk-badge"
+        style="display: block; background-color: var(--color-urgency-critical-bg); border: 2px solid var(--color-urgency-critical); border-radius: 6px; padding: 10px 12px; margin-bottom: 16px; font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 14px; font-weight: 800; color: var(--color-error-text); line-height: 1.35;"
+      >
+        🌡️ {{ thermalRiskLabel }}
       </div>
 
       <!-- Alert Title -->

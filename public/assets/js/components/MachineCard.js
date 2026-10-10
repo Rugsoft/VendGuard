@@ -15,7 +15,7 @@
  */
 
 import { IncidentBadge } from './IncidentBadge.js';
-import { MACHINE_TYPE_LABELS, MACHINE_TYPE_ICONS, isPerishableMachineType, isResolvedStatus, isPendingInfoStatus, AMBER_TECHNICAL_TOKENS } from '../utils/IncidentStatusPermissions.js';
+import { MACHINE_TYPE_LABELS, MACHINE_TYPE_ICONS, isPerishableMachineType, isResolvedStatus, isPendingInfoStatus, isSanitaryQuarantine, SANITARY_THERMAL_RISK_LABEL, AMBER_TECHNICAL_TOKENS } from '../utils/IncidentStatusPermissions.js';
 import { PAUSE_REASON_CATEGORIES } from './PendingInfoPauseModal.js';
 
 // Machine-type labels, icons and the sanitary perishable rule live in the shared
@@ -78,7 +78,27 @@ export const MachineCard = {
       }
       return { label: type || 'Máquina', icon: '🎰', isPerishable: false };
     },
+    /**
+     * Máquina en cuarentena sanitaria (RF-03.5.1, Constitución Art. II).
+     *
+     * El servidor publica `sanitary_status` en cada máquina del parque de la sede; el
+     * distintivo de riesgo térmico se enciende sólo con el valor `QUARANTINE`. No es
+     * dato interno del expediente: es el mismo rótulo que recibe el ciudadano que
+     * escanea el QR, de modo que la sede sabe por qué su máquina está bloqueada sin
+     * conocer una sola causa de pausa interna (Art. V.4).
+     */
+    isSanitaryQuarantine() {
+      return isSanitaryQuarantine(this.machine?.sanitary_status);
+    },
+    thermalRiskLabel() {
+      return SANITARY_THERMAL_RISK_LABEL;
+    },
     cardBorderColor() {
+      if (this.isSanitaryQuarantine) {
+        // La cuarentena sanitaria manda sobre cualquier otro estado: una máquina en
+        // riesgo térmico no puede leerse como "avería en curso" a secas (Art. II).
+        return 'var(--color-urgency-critical)';
+      }
       if (this.hasActiveIncident) {
         if (this.isPendingInfo) {
           return AMBER_TECHNICAL_TOKENS.border; // Amber technical outline for pending info (RF-05.1, RNF-04)
@@ -197,6 +217,29 @@ export const MachineCard = {
             <circle cx="12" cy="10" r="3"></circle>
           </svg>
           <span style="font-weight: 500;">{{ machine.floor_wing || 'Ubicación no especificada' }}</span>
+        </div>
+
+        <!-- Middle: Sanitary Quarantine Banner (RF-03.5.1, Constitución Art. II) -->
+        <div
+          v-if="isSanitaryQuarantine"
+          class="vg-sanitary-quarantine-banner"
+          data-testid="machine-card-sanitary-quarantine-banner"
+          style="background-color: var(--color-urgency-critical-bg); border: 2px solid var(--color-urgency-critical); border-radius: var(--radius-interactive, 4px); padding: 10px; margin-bottom: 14px;"
+        >
+          <div
+            :style="{
+              fontFamily: 'var(--font-display, \\\'DM Sans\\\', sans-serif)',
+              fontWeight: '700',
+              color: 'var(--color-error-text)',
+              fontSize: '13px',
+              lineHeight: '1.3'
+            }"
+          >
+            🌡️ {{ thermalRiskLabel }}
+          </div>
+          <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-slate); margin: 6px 0 0 0; line-height: 1.35;">
+            La máquina está fuera de servicio hasta que se acredite el control higiénico-sanitario.
+          </p>
         </div>
 
         <!-- Middle: Incident Status Banner -->

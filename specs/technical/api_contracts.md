@@ -143,6 +143,7 @@ Obtiene el parque de máquinas instaladas en la sede para el formulario de repor
       "machine_type": "PERISHABLE_FOOD",
       "floor_wing": "Planta Baja - Urgencias",
       "notes": "Máquina de sándwiches y lácteos frescos",
+      "sanitary_status": "QUARANTINE",
       "active_incident": null
     },
     {
@@ -152,6 +153,7 @@ Obtiene el parque de máquinas instaladas en la sede para el formulario de repor
       "machine_type": "HOT_DRINKS",
       "floor_wing": "Planta 1 - Sala Médica",
       "notes": "Café en grano",
+      "sanitary_status": "OK",
       "active_incident": {
         "ticket_code": "INC-2026-0004",
         "status": "ASSIGNED",
@@ -162,6 +164,16 @@ Obtiene el parque de máquinas instaladas en la sede para el formulario de repor
   ]
 }
 ```
+
+* **`sanitary_status` (T-PAUSE-29, RF-03.5.1, Art. II):** cada máquina del parque —incluidas las
+  bloqueadas por falta de acceso, que viajan por la misma lista— publica su estado higiénico-sanitario
+  del catálogo `OK` · `ATTENTION_REQUIRED` · `EXPIRED` · `QUARANTINE` · `SEASONAL_PAUSE`. Una columna
+  vacía se normaliza a `OK`: el silencio de la base de datos jamás se interpreta como riesgo térmico.
+  Con `QUARANTINE` la tarjeta de sede pinta el distintivo literal
+  «Riesgo térmico: máquina en cuarentena preventiva», el mismo rótulo que el escaneo QR público sirve
+  al ciudadano (ver §7.2), de modo que ambos canales leen una sola cuarentena y no dos relatos.
+  El campo es estado de la máquina, no del expediente: no abre ninguna rendija a los datos internos
+  de una pausa por falta de acceso (Art. V.4).
 
 ---
 

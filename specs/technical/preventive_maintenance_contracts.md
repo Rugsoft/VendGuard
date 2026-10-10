@@ -900,7 +900,8 @@ Invocado tras resolver el correctivo (diagnóstico y acción $\ge 20$ caracteres
     "alert": {
       "title": "MÁQUINA FUERA DE SERVICIO POR CONTROL HIGIÉNICO-SANITARIO",
       "message": "Por imperativo del Artículo II de la Constitución (Seguridad Alimentaria), queda prohibida la adquisición y consumo de productos de esta unidad.",
-      "severity": "CRITICAL_DANGER"
+      "severity": "CRITICAL_DANGER",
+      "thermal_risk_label": "Riesgo térmico: máquina en cuarentena preventiva"
     },
     "can_report": false,
     "active_incident": {
@@ -910,6 +911,17 @@ Invocado tras resolver el correctivo (diagnóstico y acción $\ge 20$ caracteres
   }
 }
 ```
+
+* **`alert.thermal_risk_label` (T-PAUSE-29, RF-03.5.1, Art. II):** distintivo literal de riesgo térmico
+  que el aviso público publica siempre que la máquina está en cuarentena. Es el mismo texto que la
+  tarjeta de la máquina pinta en el portal de sede (ver §3.1 de
+  [`api_contracts.md`](./api_contracts.md)), declarado una sola vez por canal pero anclado por pruebas
+  al literal exacto de la especificación para que una divergencia de copy rompa la batería.
+* **Blindaje de la pausa interna en el canal ciudadano (RF-06.1, Art. V.4):** el modo cuarentena sirve
+  `active_incident` con **sólo** `ticket_code` y `status_label` neutral, incluso cuando el expediente
+  está en `PENDING_INFO` con su espera abierta: ni `paused_at`, ni la causa tipificada, ni la
+  justificación de la pausa, ni el acumulador de segundos viajan al ciudadano (certificado en
+  `tests/integration/QrSanitaryQuarantineIntegrationTest.php`, aserciones 1.14 a 1.18).
 
 #### Caso B: Máquina en Pausa Estacional (`200 OK`)
 ```json
