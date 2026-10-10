@@ -23,8 +23,10 @@ import {
   URGENCY_LEVELS,
   URGENCY_RANKS,
   isCriticalUrgency,
+  isPendingInfoStatus,
   normalizeIncidentStatus,
-  normalizeUrgency
+  normalizeUrgency,
+  AMBER_TECHNICAL_TOKENS
 } from '../utils/IncidentStatusPermissions.js';
 import { TechnicianMetricsView } from './TechnicianMetricsView.js';
 import { TechnicianPreventiveRouteTab } from '../components/TechnicianPreventiveRouteTab.js';
@@ -36,6 +38,7 @@ import { TechnicianResolutionRefundBlock } from '../components/TechnicianResolut
 import { TechnicianRouteMapModal } from '../components/TechnicianRouteMapModal.js';
 import { TechnicianMachineHistoryModal } from '../components/TechnicianMachineHistoryModal.js';
 import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';
+import { PendingInfoPauseModal, PAUSE_REASON_CATEGORIES } from '../components/PendingInfoPauseModal.js';
 
 export const TechnicianRouteView = {
   name: 'TechnicianRouteView',
@@ -51,7 +54,8 @@ export const TechnicianRouteView = {
     TechnicianResolutionRefundBlock,
     TechnicianRouteMapModal,
     TechnicianMachineHistoryModal,
-    IncidentCommentThreadModal
+    IncidentCommentThreadModal,
+    PendingInfoPauseModal
   },
   data() {
     return {
@@ -104,7 +108,13 @@ export const TechnicianRouteView = {
 
       // Modal 5: Hilo de conversación de la parada (Módulo 10, RF-01.1, RF-02.3)
       showCommentsModal: false,
-      selectedCommentIncident: null
+      selectedCommentIncident: null,
+
+      // Modal 6: Pausa por bloqueo de sede / falta de acceso (Módulo 11, T-PAUSE-18, RF-01.1)
+      showPendingInfoPauseModal: false,
+      pendingInfoIncident: null,
+      isResumingPendingInfo: false,
+      pendingInfoResumeError: ''
     };
   },
   computed: {
@@ -132,6 +142,7 @@ export const TechnicianRouteView = {
       let assigned = 0;
       let inProgress = 0;
       let pendingParts = 0;
+      let pendingInfo = 0;
       let critical = 0;
 
       for (const inc of this.incidents) {
@@ -139,10 +150,22 @@ export const TechnicianRouteView = {
         if (status === INCIDENT_STATUSES.ASSIGNED) assigned++;
         if (status === INCIDENT_STATUSES.IN_PROGRESS) inProgress++;
         if (status === INCIDENT_STATUSES.PENDING_PARTS) pendingParts++;
+        // Paradas pausadas por bloqueo de sede (Módulo 11, RF-05.5): siguen en la
+        // ruta del día, pero contabilizadas aparte de las intervenciones activas.
+        if (status === INCIDENT_STATUSES.PENDING_INFO) pendingInfo++;
         if (isCriticalUrgency(inc.urgency)) critical++;
       }
 
-      return { total, assigned, inProgress, pendingParts, critical };
+      return { total, assigned, inProgress, pendingParts, pendingInfo, critical };
+    },
+
+    /**
+     * Tokens ámbar técnicos (RNF-04) ya declarados en el módulo compartido, de modo
+     * que la insignia y el banner de la parada pausada no añaden un solo color
+     * hexadecimal nuevo al trinquete de deuda de tokens.
+     */
+    pendingInfoTokens() {
+      return AMBER_TECHNICAL_TOKENS;
     },
 
     /**
@@ -160,10 +183,18 @@ export const TechnicianRouteView = {
       const statusOrder = {
         [INCIDENT_STATUSES.IN_PROGRESS]: 1,
         [INCIDENT_STATUSES.ASSIGNED]: 2,
-        [INCIDENT_STATUSES.PENDING_PARTS]: 3
+        [INCIDENT_STATUSES.PENDING_PARTS]: 3,
+        [INCIDENT_STATUSES.PENDING_INFO]: 4
       };
 
       return list.sort((a, b) => {
+        // La parada pausada se desprioriza por delante de la urgencia (RF-05.5): el
+        // técnico no puede intervenir en ella hasta que la sede responda, así que no
+        // debe tapar el siguiente trabajo operativo ni aunque su criticidad sea máxima.
+        const pausedA = isPendingInfoStatus(a.status) ? 1 : 0;
+        const pausedB = isPendingInfoStatus(b.status) ? 1 : 0;
+        if (pausedA !== pausedB) return pausedA - pausedB;
+
         const uA = URGENCY_RANKS[normalizeUrgency(a.urgency)] || 99;
         const uB = URGENCY_RANKS[normalizeUrgency(b.urgency)] || 99;
         if (uA !== uB) return uA - uB;
@@ -313,6 +344,9 @@ export const TechnicianRouteView = {
       return normalizeIncidentStatus(incident?.status) === INCIDENT_STATUSES.PENDING_PARTS;
     },
     cardBorderLeft(incident) {
+      // La parada pausada lleva el filo ámbar técnico (RNF-04): se lee como "en
+      // espera de la sede", no como una avería crítica pendiente de intervención.
+      if (isPendingInfoStatus(incident?.status)) return '4px solid var(--color-warning)';
       const urg = normalizeUrgency(incident?.urgency);
       if (urg === URGENCY_LEVELS.CRITICAL) return '4px solid #dc2626';
       if (urg === URGENCY_LEVELS.HIGH) return '4px solid #f97316';
@@ -446,6 +480,178 @@ export const TechnicianRouteView = {
       this.$emit('paused', event);
       this.closePauseModal();
       this.loadRoute();
+    },
+
+    /**
+     * True si la parada está pausada esperando información de la sede (RF-05.5).
+     * @param {Object} incident
+     * @returns {boolean}
+     */
+    isPendingInfo(incident) {
+      return isPendingInfoStatus(incident?.status);
+    },
+
+    /**
+     * True si la parada admite la pausa por bloqueo imputable a la sede (RF-01.1):
+     * sólo desde asignada, en curso o pendiente de repuesto. Un expediente terminal
+     * o una pausa ya viva (doble pausa) nunca ofrecen el botón.
+     * @param {Object} incident
+     * @returns {boolean}
+     */
+    canPausePendingInfo(incident) {
+      const status = normalizeIncidentStatus(incident?.status);
+      return status === INCIDENT_STATUSES.ASSIGNED
+        || status === INCIDENT_STATUSES.IN_PROGRESS
+        || status === INCIDENT_STATUSES.PENDING_PARTS;
+    },
+
+    /**
+     * Abre el modal de pausa por falta de acceso (RF-01.2, RF-01.3, RNF-03).
+     * @param {Object} incident Parada de la ruta.
+     */
+    openPendingInfoPauseModal(incident) {
+      if (!incident) return;
+      this.pendingInfoIncident = incident;
+      this.pendingInfoResumeError = '';
+      this.showPendingInfoPauseModal = true;
+    },
+
+    closePendingInfoPauseModal() {
+      this.showPendingInfoPauseModal = false;
+      this.pendingInfoIncident = null;
+    },
+
+    /**
+     * Confirma la pausa declarada por el técnico (RF-01.4, RF-05.5): la parada pasa a
+     * "En espera de sede" con su insignia ámbar y su contador de tiempo pausado, se
+     * desprioriza en la lista y deja de bloquear el resto de visitas del día. El
+     * estado se reconcilia en segundo plano contra la API para leer el acumulado
+     * exacto en segundos (RNF-01).
+     * @param {Object} event Evento emitido por PendingInfoPauseModal.
+     */
+    handlePendingInfoPaused(event) {
+      const incidentId = event?.incidentId ?? this.pendingInfoIncident?.id ?? null;
+      const pauseData = event?.pauseData || {};
+      const target = this.incidents.find((inc) => inc.id === incidentId);
+
+      if (target) {
+        target.status = INCIDENT_STATUSES.PENDING_INFO;
+        target.paused_at = pauseData.paused_at || new Date().toISOString();
+
+        const accumulatedMinutes = Number.parseInt(pauseData.accumulated_pause_minutes, 10);
+        if (Number.isFinite(accumulatedMinutes) && accumulatedMinutes >= 0) {
+          target.total_pending_info_seconds = accumulatedMinutes * 60;
+        }
+
+        target.pending_info_reason_category = pauseData.reason_category || target.pending_info_reason_category || null;
+        target.pending_info_reason_category_label = pauseData.reason_category_label
+          || target.pending_info_reason_category_label
+          || null;
+        target.pending_info_reason_text = pauseData.reason_text || target.pending_info_reason_text || null;
+      }
+
+      this.feedbackMessage = 'Parada pausada en espera de sede: reloj de SLA congelado y ruta desbloqueada.';
+      this.$emit('pending-info-paused', event);
+      this.closePendingInfoPauseModal();
+      this.loadRoute();
+    },
+
+    /**
+     * Reanuda la intervención in situ con un solo toque (RF-02.2, RF-02.3): devuelve la
+     * parada a "En curso" y el servidor reactiva el reloj contractual con el
+     * desplazamiento comercial de los minutos pausados.
+     * @param {Object} incident Parada pausada.
+     */
+    async resumePendingInfoIntervention(incident) {
+      if (!incident?.id || this.isResumingPendingInfo) return;
+
+      this.isResumingPendingInfo = true;
+      this.pendingInfoResumeError = '';
+      this.errorMessage = '';
+
+      try {
+        const payload = await api.technician.resumeIncidentPendingInfo(
+          incident.id,
+          INCIDENT_STATUSES.IN_PROGRESS
+        ) || {};
+
+        incident.status = INCIDENT_STATUSES.IN_PROGRESS;
+        incident.paused_at = null;
+        if (!incident.started_at) {
+          incident.started_at = new Date().toISOString();
+        }
+
+        this.feedbackMessage = 'Intervención reanudada in situ. Reloj contractual de SLA reactivado.';
+        this.$emit('pending-info-resumed', {
+          incidentId: incident.id,
+          status: payload.status || INCIDENT_STATUSES.IN_PROGRESS
+        });
+      } catch (err) {
+        this.pendingInfoResumeError = err?.message || 'No se pudo reanudar la intervención. Inténtalo de nuevo.';
+      } finally {
+        this.isResumingPendingInfo = false;
+      }
+    },
+
+    /**
+     * Minutos transcurridos de la pausa viva (RF-05.5, RNF-01): la interfaz redondea
+     * al minuto lo que la base de datos guarda al segundo, y cae al acumulado cuando
+     * el intervalo ya se cerró.
+     * @param {Object} incident
+     * @returns {number}
+     */
+    pendingInfoElapsedMinutes(incident) {
+      const pausedAt = incident?.paused_at ? new Date(incident.paused_at) : null;
+      if (pausedAt && Number.isFinite(pausedAt.getTime())) {
+        const diffMs = Date.now() - pausedAt.getTime();
+        return diffMs > 0 ? Math.floor(diffMs / 60000) : 0;
+      }
+
+      const accumulatedSeconds = Number.parseInt(incident?.total_pending_info_seconds, 10);
+      return Number.isFinite(accumulatedSeconds) && accumulatedSeconds > 0
+        ? Math.floor(accumulatedSeconds / 60)
+        : 0;
+    },
+
+    /**
+     * Etiqueta del contador de tiempo pausado de la insignia (RF-05.5).
+     * @param {Object} incident
+     * @returns {string}
+     */
+    pendingInfoElapsedLabel(incident) {
+      const minutes = this.pendingInfoElapsedMinutes(incident);
+      if (minutes <= 0) return 'Pausada hace menos de 1 min';
+      if (minutes < 60) return `Pausada hace ${minutes} min`;
+
+      const hours = Math.floor(minutes / 60);
+      const rest = minutes % 60;
+      return rest === 0 ? `Pausada hace ${hours} h` : `Pausada hace ${hours} h ${rest} min`;
+    },
+
+    /**
+     * Causa tipificada de la pausa (RF-01.2), con el catálogo del modal como respaldo
+     * si el servidor no envió la etiqueta.
+     * @param {Object} incident
+     * @returns {string}
+     */
+    pendingInfoReasonLabel(incident) {
+      const direct = incident?.pending_info_reason_category_label;
+      if (typeof direct === 'string' && direct.trim() !== '') {
+        return direct;
+      }
+
+      const raw = incident?.pending_info_reason_category;
+      const found = raw ? PAUSE_REASON_CATEGORIES.find((cat) => cat.value === raw) : null;
+      return found ? found.label : 'Información pendiente de la sede';
+    },
+
+    /**
+     * Justificación íntegra declarada por el técnico al pausar (RF-01.4).
+     * @param {Object} incident
+     * @returns {string}
+     */
+    pendingInfoReasonText(incident) {
+      return incident?.pending_info_reason_text || '';
     },
 
     /**
@@ -940,6 +1146,16 @@ export const TechnicianRouteView = {
           >
             Repuestos ({{ routeMetrics.pendingParts }})
           </button>
+          <button
+            type="button"
+            class="vg-btn"
+            :class="filterStatus === 'PENDING_INFO' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            style="height: 32px; font-size: 12px; padding: 0 12px; white-space: nowrap; border-radius: 16px;"
+            data-testid="filter-pending-info"
+            @click="filterStatus = 'PENDING_INFO'"
+          >
+            En espera ({{ routeMetrics.pendingInfo }})
+          </button>
         </div>
 
         <!-- Loading State -->
@@ -1081,11 +1297,69 @@ export const TechnicianRouteView = {
               </div>
             </div>
 
+            <!-- 3. Parada pausada en espera de la sede (Módulo 11, RF-05.5, RNF-04) -->
+            <div
+              v-if="isPendingInfo(incident)"
+              class="vg-pending-info-stop"
+              data-testid="tech-stop-pending-info"
+              :style="{
+                backgroundColor: pendingInfoTokens.bg,
+                border: '1px solid ' + pendingInfoTokens.border,
+                color: pendingInfoTokens.color,
+                borderRadius: 'var(--radius-interactive, 4px)',
+                padding: '10px 12px',
+                fontSize: '12px',
+                marginBottom: '12px'
+              }"
+            >
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <strong data-testid="tech-stop-pending-info-badge" style="font-size: 13px; font-weight: 700;">
+                  ⏸️ En espera de sede
+                </strong>
+                <span data-testid="tech-stop-pending-info-timer" style="font-size: 12px; font-weight: 600;">
+                  {{ pendingInfoElapsedLabel(incident) }}
+                </span>
+              </div>
+              <div style="margin-top: 4px;">
+                <strong>Causa:</strong> {{ pendingInfoReasonLabel(incident) }}
+              </div>
+              <p
+                v-if="pendingInfoReasonText(incident)"
+                style="margin: 4px 0 0 0; font-style: italic; line-height: 1.35;"
+              >
+                "{{ pendingInfoReasonText(incident) }}"
+              </p>
+              <p style="margin: 6px 0 0 0; line-height: 1.35;">
+                Parada despriorizada: puede continuar con las siguientes visitas del día sin bloqueo de ruta.
+              </p>
+            </div>
+
             <!-- Action Buttons Bar (Large, Mobile Finger-Friendly Tap Targets >= 44px) -->
             <div style="border-top: 1px solid var(--color-hairline, #c8cfda); padding-top: 10px;">
+              <!-- Action Option 0: Reanudación in situ de la pausa con 1 toque (Módulo 11, RF-02.2, RF-02.3) -->
+              <button
+                v-if="isPendingInfo(incident)"
+                type="button"
+                class="vg-btn vg-btn-primary"
+                style="width: 100%; height: 46px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"
+                data-testid="btn-resume-pending-info"
+                :disabled="isResumingPendingInfo"
+                @click="resumePendingInfoIntervention(incident)"
+              >
+                <span v-if="!isResumingPendingInfo">▶ Reanudar intervención in situ</span>
+                <span v-else>Reanudando...</span>
+              </button>
+              <div
+                v-if="isPendingInfo(incident) && pendingInfoResumeError"
+                role="alert"
+                style="background-color: var(--color-error-bg); border: 1px solid var(--color-error); color: var(--color-error-text); padding: 8px 10px; border-radius: var(--radius-interactive, 4px); font-size: 12px; margin-top: 8px;"
+              >
+                ⚠️ {{ pendingInfoResumeError }}
+              </div>
+
               <!-- Action Option 1: Start Intervention (when ASSIGNED) -->
               <button
-                v-if="isAssigned(incident)"
+                v-else-if="isAssigned(incident)"
                 type="button"
                 class="vg-btn vg-btn-primary"
                 style="width: 100%; height: 46px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"
@@ -1128,6 +1402,19 @@ export const TechnicianRouteView = {
                 <span v-if="actionInProgressId !== incident.id">▶ Reanudar intervención</span>
                 <span v-else>Reanudando...</span>
               </button>
+
+              <!-- Action Option 4: Pausa por falta de acceso imputable a la sede (Módulo 11, RF-01.1) -->
+              <div v-if="canPausePendingInfo(incident)" style="margin-top: 8px;">
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-secondary"
+                  style="width: 100%; height: 46px; font-size: 14px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"
+                  data-testid="btn-pause-no-access"
+                  @click="openPendingInfoPauseModal(incident)"
+                >
+                  ⏸️ Pausar por falta de acceso
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1158,6 +1445,17 @@ export const TechnicianRouteView = {
         role="TECHNICIAN"
         @close="closeCommentsModal"
         @comment-added="onCommentAdded"
+      />
+
+      <!-- =================================================================== -->
+      <!-- MODAL 6: PAUSA POR FALTA DE ACCESO / BLOQUEO DE SEDE (Módulo 11, T-PAUSE-18) -->
+      <!-- =================================================================== -->
+      <PendingInfoPauseModal
+        :is-open="showPendingInfoPauseModal"
+        :incident="pendingInfoIncident"
+        role="TECHNICIAN"
+        @close="closePendingInfoPauseModal"
+        @paused="handlePendingInfoPaused"
       />
 
       <!-- =================================================================== -->

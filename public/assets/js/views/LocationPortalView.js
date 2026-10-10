@@ -475,7 +475,7 @@ export const LocationPortalView = {
               <div>
                 <div
                   :style="{
-                    fontFamily: 'var(--font-display, \'DM Sans\', sans-serif)',
+                    fontFamily: 'var(--font-display, \\'DM Sans\\', sans-serif)',
                     fontSize: '14px',
                     fontWeight: '700',
                     color: amberTokens.color

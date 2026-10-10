@@ -405,6 +405,100 @@ $jsonPause = json_decode((string)$rawPause, true) ?? [];
 $assert("7.6 cURL /pause => 200 OK", $codePause === 200);
 $assert("7.7 cURL /pause => status PENDING_PARTS", ($jsonPause['data']['status'] ?? null) === 'PENDING_PARTS');
 
+// =========================================================================
+// CASO 8: Parada pausada por bloqueo de sede en la ruta móvil del técnico
+// (Módulo 11: T-PAUSE-18, RF-01.1, RF-02.2, RF-02.3, RF-05.5)
+// La parada en PENDING_INFO NO desaparece de "Mi Ruta": viaja con su causa
+// tipificada, su justificación y la marca temporal de la pausa viva, de modo
+// que la tarjeta pueda mostrar la insignia "En espera de sede" con su contador
+// y ofrecer la reanudación in situ en un solo toque.
+// =========================================================================
+echo "\n--- Caso 8: Parada pausada en espera de sede dentro de Mi Ruta (RF-05.5) ---\n";
+
+$incPendingInfo = $makeAssignedIncident($mach3->getId(), $location2->getId(), $tech1Id);
+$pauseReason = 'El edificio de consultas externas está cerrado por festivo local sin conserje de guardia.';
+
+$reqPausePendingInfo = new Request(
+    method: 'POST',
+    path: "/api/technician/incidents/{$incPendingInfo->getId()}/pause-pending-info",
+    parsedBody: [
+        'reason_category' => 'BUILDING_CLOSED_NO_ACCESS',
+        'reason_text'     => $pauseReason,
+    ],
+    headers: ['Authorization' => "Bearer {$tech1Token}"]
+);
+$resPausePendingInfo = $router->dispatch($reqPausePendingInfo);
+$bodyPausePendingInfo = $resPausePendingInfo->getDecodedBody();
+
+$assert("8.1 La pausa por bloqueo de sede responde HTTP 200 OK", $resPausePendingInfo->getStatusCode() === 200);
+$assert("8.2 data.status => PENDING_INFO con la pausa viva sellada", 
+    ($bodyPausePendingInfo['data']['status'] ?? null) === 'PENDING_INFO'
+    && !empty($bodyPausePendingInfo['data']['paused_at'])
+    && ($bodyPausePendingInfo['data']['is_sla_paused'] ?? null) === true
+);
+
+// La parada pausada sigue perteneciendo a la ruta del día (RF-05.5)
+$reqRoutePaused = new Request(method: 'GET', path: '/api/technician/my-route', headers: ['Authorization' => "Bearer {$tech1Token}"]);
+$bodyRoutePaused = $router->dispatch($reqRoutePaused)->getDecodedBody();
+
+$pausedStop = null;
+foreach ($bodyRoutePaused['data'] ?? [] as $item) {
+    if (($item['id'] ?? null) === $incPendingInfo->getId()) {
+        $pausedStop = $item;
+        break;
+    }
+}
+
+$assert("8.3 La parada pausada sigue apareciendo en Mi Ruta (RF-05.5)", $pausedStop !== null);
+$assert("8.4 La parada viaja con su estado PENDING_INFO y la marca de pausa", 
+    ($pausedStop['status'] ?? null) === 'PENDING_INFO'
+    && !empty($pausedStop['paused_at'])
+    && ($pausedStop['total_pending_info_seconds'] ?? null) === 0
+);
+$assert("8.5 La parada publica la causa tipificada, su etiqueta y la justificación del técnico", 
+    ($pausedStop['pending_info_reason_category'] ?? null) === 'BUILDING_CLOSED_NO_ACCESS'
+    && ($pausedStop['pending_info_reason_category_label'] ?? null) === 'Edificio cerrado / Sin acceso a instalaciones'
+    && ($pausedStop['pending_info_reason_text'] ?? null) === $pauseReason
+);
+
+// Reanudación in situ con un solo toque (RF-02.2, RF-02.3)
+$reqResumePendingInfo = new Request(
+    method: 'POST',
+    path: "/api/technician/incidents/{$incPendingInfo->getId()}/resume-pending-info",
+    parsedBody: ['target_status' => 'IN_PROGRESS'],
+    headers: ['Authorization' => "Bearer {$tech1Token}"]
+);
+$resResumePendingInfo = $router->dispatch($reqResumePendingInfo);
+$bodyResumePendingInfo = $resResumePendingInfo->getDecodedBody();
+
+$assert("8.6 La reanudación in situ responde HTTP 200 OK", $resResumePendingInfo->getStatusCode() === 200);
+// `paused_at` viaja siempre en el DTO, aunque sea nulo: se comprueba la clave y el
+// valor, porque `??` convertiría el nulo legítimo en un fallo falso.
+$assert("8.7 La parada reanudada vuelve a IN_PROGRESS sin pausa viva", 
+    ($bodyResumePendingInfo['data']['status'] ?? null) === 'IN_PROGRESS'
+    && ($bodyResumePendingInfo['data']['is_sla_paused'] ?? null) === false
+    && array_key_exists('paused_at', $bodyResumePendingInfo['data'] ?? [])
+    && $bodyResumePendingInfo['data']['paused_at'] === null
+);
+
+$dbResumed = $pdo->query("SELECT status, paused_at FROM incidents WHERE id = {$incPendingInfo->getId()}")->fetch(PDO::FETCH_ASSOC);
+$assert("8.8 BD: la pausa viva se cierra y el expediente queda en curso", 
+    ($dbResumed['status'] ?? null) === 'IN_PROGRESS' && $dbResumed['paused_at'] === null);
+
+$histPendingInfo = $pdo->query("SELECT from_status, to_status, action_note FROM incident_history WHERE incident_id = {$incPendingInfo->getId()} ORDER BY id ASC")->fetchAll(PDO::FETCH_ASSOC);
+$pausedRow = null;
+foreach ($histPendingInfo as $row) {
+    if (($row['to_status'] ?? null) === 'PENDING_INFO') {
+        $pausedRow = $row;
+        break;
+    }
+}
+$assert("8.9 Auditoría inmutable: pausa desde ASSIGNED con causa y justificación (Art. III)", 
+    ($pausedRow['from_status'] ?? null) === 'ASSIGNED'
+    && str_contains((string)($pausedRow['action_note'] ?? ''), 'BUILDING_CLOSED_NO_ACCESS')
+    && str_contains((string)($pausedRow['action_note'] ?? ''), $pauseReason)
+);
+
 // ─── RESULTADO FINAL ──────────────────────────────────────────────────────────
 echo "\n" . str_repeat('=', 70) . "\n";
 if ($failures === 0) {

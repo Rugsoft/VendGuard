@@ -675,11 +675,18 @@ Devuelve la lista de incidencias asignadas al técnico autenticado (RF-07).
         "contact_phone": "600111222"
       },
       "category": "TEMPERATURE_COLD",
-      "description": "El display marca 14 grados y hay comida fresca dentro."
+      "description": "El display marca 14 grados y hay comida fresca dentro.",
+      "paused_at": null,
+      "total_pending_info_seconds": 0,
+      "pending_info_reason_category": null,
+      "pending_info_reason_category_label": null,
+      "pending_info_reason_text": null
     }
   ]
 }
 ```
+
+* **Extensión del Módulo 11 (T-PAUSE-18, RF-05.5):** la ruta incluye también las averías en `PENDING_INFO` (pausa por bloqueo imputable a la sede). Una parada pausada no desaparece de "Mi Ruta": viaja con `paused_at` (marca del intervalo vivo), `total_pending_info_seconds` (acumulado exacto en segundos, RNF-01), `pending_info_reason_category`, `pending_info_reason_category_label` y `pending_info_reason_text`, de modo que la tarjeta móvil pinte la insignia `⏸️ En espera de sede` con su contador y ofrezca la reanudación in situ (`POST /api/technician/incidents/{id}/resume-pending-info`). El resto de campos de pausa viajan a `null` cuando el expediente no está pausado.
 
 ---
 

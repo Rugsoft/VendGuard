@@ -7,6 +7,8 @@
  * - "Iniciar intervención" action (transitions to IN_PROGRESS).
  * - "Pausar por repuesto" modal requiring spare part description (EARS 7.2).
  * - "Resolver avería" modal strictly requiring >= 20 chars per field (EARS 8.1, 8.2).
+ * - Pausa por falta de acceso, despriorización de la parada y reanudación in situ
+ *   (Módulo 11: T-PAUSE-18, RF-01.1, RF-02.2, RF-02.3, RF-05.5, RNF-03, RNF-04).
  * 
  * Dogma Vanilla: Pure ES Module test runner without external dependencies.
  */
@@ -26,6 +28,8 @@ import { TechnicianRouteView } from '../../public/assets/js/views/TechnicianRout
 import { api } from '../../public/assets/js/api.js';
 import { TechnicianResolutionRefundBlock } from '../../public/assets/js/components/TechnicianResolutionRefundBlock.js';
 import { store, setInternalSession, clearSession } from '../../public/assets/js/store.js';
+import { PendingInfoPauseModal } from '../../public/assets/js/components/PendingInfoPauseModal.js';
+import { AMBER_TECHNICAL_TOKENS } from '../../public/assets/js/utils/IncidentStatusPermissions.js';
 
 console.log('======================================================================');
 console.log(' VendGuard: Frontend Test Suite - TechnicianRouteView (T-38)');
@@ -637,6 +641,201 @@ assert('8.7 El modal se renderiza una única vez, fuera del bucle de tarjetas (E
 const viewData = TechnicianRouteView.data();
 assert('8.8 Estado del modal declarado en data() con valores iniciales cerrados',
   viewData.showMachineHistoryModal === false && viewData.historyMachine === null);
+
+// ---------------------------------------------------------------------
+// GRUPO 9: PAUSA POR FALTA DE ACCESO Y DESPRIORIZACIÓN DE LA PARADA
+// (Módulo 11: T-PAUSE-18, RF-01.1, RF-02.2, RF-02.3, RF-05.5, RNF-03, RNF-04)
+// ---------------------------------------------------------------------
+console.log('\n--- Grupo 9: Pausa por falta de acceso y despriorización de la parada ---');
+
+assert('9.1 La vista registra el modal de pausa por falta de acceso',
+  TechnicianRouteView.components?.PendingInfoPauseModal === PendingInfoPauseModal);
+
+assert('9.2 El modal se monta con el estado, la parada y el canal del técnico',
+  TechnicianRouteView.template.includes('<PendingInfoPauseModal')
+    && TechnicianRouteView.template.includes(':is-open="showPendingInfoPauseModal"')
+    && TechnicianRouteView.template.includes(':incident="pendingInfoIncident"')
+    && TechnicianRouteView.template.includes('role="TECHNICIAN"')
+    && TechnicianRouteView.template.includes('@paused="handlePendingInfoPaused"'));
+
+assert('9.3 El modal se renderiza una única vez, fuera del bucle de tarjetas',
+  (TechnicianRouteView.template.match(/<PendingInfoPauseModal/g) || []).length === 1);
+
+const pendingInfoViewData = TechnicianRouteView.data();
+assert('9.4 data() declara el modal y los contadores de la pausa cerrados',
+  pendingInfoViewData.showPendingInfoPauseModal === false
+    && pendingInfoViewData.pendingInfoIncident === null
+    && pendingInfoViewData.isResumingPendingInfo === false);
+
+assert('9.5 La parada activa ofrece el botón "Pausar por falta de acceso"',
+  TechnicianRouteView.template.includes('data-testid="btn-pause-no-access"')
+    && TechnicianRouteView.template.includes('⏸️ Pausar por falta de acceso')
+    && TechnicianRouteView.template.includes('@click="openPendingInfoPauseModal(incident)"'));
+
+const pauseEligibilityView = createRouteInstance();
+assert('9.6 La pausa se ofrece desde ASSIGNED, IN_PROGRESS y PENDING_PARTS (RF-01.1)',
+  pauseEligibilityView.canPausePendingInfo({ status: 'ASSIGNED' }) === true
+    && pauseEligibilityView.canPausePendingInfo({ status: 'IN_PROGRESS' }) === true
+    && pauseEligibilityView.canPausePendingInfo({ status: 'PENDING_PARTS' }) === true);
+
+assert('9.7 La pausa se bloquea en estados terminales y en una pausa ya viva',
+  pauseEligibilityView.canPausePendingInfo({ status: 'PENDING_INFO' }) === false
+    && pauseEligibilityView.canPausePendingInfo({ status: 'RESOLVED' }) === false
+    && pauseEligibilityView.canPausePendingInfo({ status: 'CANCELLED' }) === false
+    && pauseEligibilityView.canPausePendingInfo(null) === false);
+
+const pausedRouteView = createRouteInstance();
+api.technician.getMyRoute = async () => JSON.parse(JSON.stringify(pausedRouteView.incidents));
+
+const stopToPause = pausedRouteView.incidents.find(i => i.id === 102);
+pausedRouteView.openPendingInfoPauseModal(stopToPause);
+assert('9.8 openPendingInfoPauseModal abre el modal con la parada seleccionada',
+  pausedRouteView.showPendingInfoPauseModal === true
+    && pausedRouteView.pendingInfoIncident?.id === 102);
+
+let pendingInfoPauseEmit = null;
+pausedRouteView.$emit = (evt, val) => { if (evt === 'pending-info-paused') pendingInfoPauseEmit = val; };
+
+pausedRouteView.handlePendingInfoPaused({
+  incidentId: 102,
+  ticketCode: stopToPause.ticket_code,
+  pauseData: {
+    incident_id: 102,
+    status: 'PENDING_INFO',
+    paused_at: '2026-10-10T09:15:00+00:00',
+    accumulated_pause_minutes: 0,
+    reason_category: 'BUILDING_CLOSED_NO_ACCESS',
+    reason_category_label: 'Edificio cerrado / Sin acceso a instalaciones',
+    reason_text: 'El edificio de consultas externas está cerrado por festivo local sin conserje.'
+  }
+});
+
+assert('9.9 Al confirmar la pausa, la parada pasa a PENDING_INFO',
+  stopToPause.status === 'PENDING_INFO' && stopToPause.paused_at === '2026-10-10T09:15:00+00:00');
+
+assert('9.10 La parada pausada conserva la causa tipificada y la justificación del técnico',
+  stopToPause.pending_info_reason_category === 'BUILDING_CLOSED_NO_ACCESS'
+    && stopToPause.pending_info_reason_category_label === 'Edificio cerrado / Sin acceso a instalaciones'
+    && stopToPause.pending_info_reason_text.startsWith('El edificio de consultas externas'));
+
+assert('9.11 La pausa se anuncia al contenedor y cierra el modal',
+  pendingInfoPauseEmit?.incidentId === 102
+    && pausedRouteView.showPendingInfoPauseModal === false
+    && pausedRouteView.pendingInfoIncident === null);
+
+assert('9.12 La pausa deja constancia al técnico de que la ruta queda desbloqueada',
+  pausedRouteView.feedbackMessage.includes('desbloqueada'));
+
+// Refresco en segundo plano del contador exacto (RNF-01)
+await new Promise((resolve) => setTimeout(resolve, 0));
+
+assert('9.13 El contador de paradas en espera separa la pausa de las intervenciones activas',
+  pausedRouteView.routeMetrics.pendingInfo === 1
+    && pausedRouteView.routeMetrics.total === 3
+    && pausedRouteView.routeMetrics.assigned === 1
+    && pausedRouteView.routeMetrics.pendingParts === 1);
+
+assert('9.14 La parada pausada se ordena la última aunque su urgencia sea CRÍTICA (RF-05.5)',
+  pausedRouteView.filteredIncidents[pausedRouteView.filteredIncidents.length - 1].status === 'PENDING_INFO'
+    && pausedRouteView.filteredIncidents[0].status !== 'PENDING_INFO');
+
+pausedRouteView.filterStatus = 'PENDING_INFO';
+assert('9.15 El filtro "En espera" aísla las paradas pausadas',
+  pausedRouteView.filteredIncidents.length === 1
+    && pausedRouteView.filteredIncidents[0].id === 102
+    && TechnicianRouteView.template.includes('data-testid="filter-pending-info"'));
+pausedRouteView.filterStatus = 'ALL';
+
+// RF-05.5: la siguiente visita programada sigue siendo operable sin bloqueo
+const nextStop = pausedRouteView.incidents.find(i => i.status === 'ASSIGNED');
+assert('9.16 La siguiente parada programada sigue disponible y se puede iniciar',
+  nextStop !== undefined
+    && pausedRouteView.filteredIncidents[0].id === nextStop.id);
+
+await pausedRouteView.startIntervention(nextStop);
+assert('9.17 Iniciar la siguiente visita funciona con una parada pausada en la ruta',
+  nextStop.status === 'IN_PROGRESS'
+    && api.technician.startIncident !== undefined);
+
+assert('9.18 La parada pausada no ofrece Iniciar ni Resolver: solo reanudar',
+  TechnicianRouteView.template.indexOf('v-if="isPendingInfo(incident)"')
+    < TechnicianRouteView.template.indexOf('v-else-if="isAssigned(incident)"')
+    && TechnicianRouteView.template.includes('data-testid="btn-resume-pending-info"')
+    && TechnicianRouteView.template.includes('▶ Reanudar intervención in situ'));
+
+assert('9.19 La tarjeta muestra la insignia "⏸️ En espera de sede" con la causa y el contador',
+  TechnicianRouteView.template.includes('data-testid="tech-stop-pending-info-badge"')
+    && TechnicianRouteView.template.includes('⏸️ En espera de sede')
+    && TechnicianRouteView.template.includes('data-testid="tech-stop-pending-info-timer"')
+    && TechnicianRouteView.template.includes('{{ pendingInfoElapsedLabel(incident) }}')
+    && TechnicianRouteView.template.includes('{{ pendingInfoReasonLabel(incident) }}'));
+
+const timerView = createRouteInstance();
+const tenMinutesAgo = new Date(Date.now() - 10 * 60000).toISOString();
+const ninetyMinutesAgo = new Date(Date.now() - 90 * 60000).toISOString();
+const timerStop = { paused_at: tenMinutesAgo, total_pending_info_seconds: 0 };
+assert('9.20 El contador de pausa se redondea al minuto y salta a horas (RNF-01)',
+  timerView.pendingInfoElapsedMinutes(timerStop) === 10
+    && timerView.pendingInfoElapsedLabel(timerStop) === 'Pausada hace 10 min'
+    && timerView.pendingInfoElapsedLabel({ paused_at: ninetyMinutesAgo }) === 'Pausada hace 1 h 30 min'
+    && timerView.pendingInfoElapsedLabel({ paused_at: null, total_pending_info_seconds: 7200 }) === 'Pausada hace 2 h');
+
+assert('9.21 La causa de la pausa usa la etiqueta del servidor con respaldo al catálogo',
+  timerView.pendingInfoReasonLabel({ pending_info_reason_category: 'MACHINE_LOCATION_NOT_FOUND' })
+    === 'Máquina no localizada en la planta indicada'
+    && timerView.pendingInfoReasonLabel({ pending_info_reason_category_label: 'Corte eléctrico ajeno' })
+    === 'Corte eléctrico ajeno'
+    && timerView.pendingInfoReasonLabel({}) === 'Información pendiente de la sede');
+
+assert('9.22 La insignia ámbar reutiliza los tokens compartidos, sin color nuevo (RNF-04)',
+  TechnicianRouteView.computed.pendingInfoTokens.call(timerView) === AMBER_TECHNICAL_TOKENS
+    && TechnicianRouteView.template.includes('pendingInfoTokens.bg')
+    && TechnicianRouteView.template.includes('pendingInfoTokens.border'));
+
+let resumeCalledId = null;
+let resumeCalledTarget = null;
+api.technician.resumeIncidentPendingInfo = async (id, targetStatus) => {
+  resumeCalledId = id;
+  resumeCalledTarget = targetStatus;
+  return {
+    incident_id: id,
+    status: 'IN_PROGRESS',
+    paused_at: null,
+    is_sla_paused: false,
+    accumulated_pause_minutes: 0
+  };
+};
+
+const resumedEmit = [];
+pausedRouteView.$emit = (evt, val) => { resumedEmit.push({ evt, val }); };
+
+await pausedRouteView.resumePendingInfoIntervention(stopToPause);
+
+assert('9.23 Reanudar in situ llama a la API con destino IN_PROGRESS (RF-02.3)',
+  resumeCalledId === 102 && resumeCalledTarget === 'IN_PROGRESS');
+
+assert('9.24 La parada vuelve a "En curso" y la pausa viva se cierra',
+  stopToPause.status === 'IN_PROGRESS' && stopToPause.paused_at === null);
+
+assert('9.25 La reanudación se anuncia y reactiva el reloj contractual',
+  resumedEmit.some(e => e.evt === 'pending-info-resumed' && e.val.incidentId === 102)
+    && pausedRouteView.feedbackMessage.includes('SLA reactivado')
+    && pausedRouteView.isResumingPendingInfo === false);
+
+const failedResumeView = createRouteInstance();
+api.technician.getMyRoute = async () => JSON.parse(JSON.stringify(failedResumeView.incidents));
+failedResumeView.$emit = () => {};
+failedResumeView.handlePendingInfoPaused({
+  incidentId: 101,
+  pauseData: { paused_at: '2026-10-10T08:00:00+00:00', reason_category: 'EXTERNAL_POWER_CUT' }
+});
+api.technician.resumeIncidentPendingInfo = async () => { throw new Error('La sede aún no ha respondido.'); };
+const failedStop = failedResumeView.incidents.find(i => i.id === 101);
+await failedResumeView.resumePendingInfoIntervention(failedStop);
+assert('9.26 Un fallo de reanudación se muestra y mantiene la parada en espera',
+  failedStop.status === 'PENDING_INFO'
+    && failedResumeView.pendingInfoResumeError === 'La sede aún no ha respondido.'
+    && failedResumeView.isResumingPendingInfo === false);
 
 // ---------------------------------------------------------------------
 // SUMMARY

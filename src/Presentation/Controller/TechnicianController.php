@@ -150,11 +150,15 @@ class TechnicianController
         }
         $techId = (int)$technicianId;
 
-        // Recuperar incidencias asignadas en estados activos de ruta (ASSIGNED, IN_PROGRESS, PENDING_PARTS)
+        // Recuperar incidencias asignadas en estados activos de ruta (ASSIGNED, IN_PROGRESS,
+        // PENDING_PARTS) más las pausadas por bloqueo de sede (PENDING_INFO). La parada en
+        // espera se sigue mostrando en "Mi Ruta" para que el técnico pueda omitirla y
+        // continuar con las siguientes visitas sin bloqueo (Módulo 11, RF-05.5).
         $incidents = $this->incidentRepo->findAssignedToTechnician($techId, [
             'ASSIGNED',
             'IN_PROGRESS',
             'PENDING_PARTS',
+            'PENDING_INFO',
         ]);
 
         $routeData = [];
@@ -187,6 +191,14 @@ class TechnicianController
                 'started_at'           => $incident->getStartedAt(),
                 'pending_parts_reason' => $incident->getPendingPartsReason(),
                 'created_at'           => $incident->getCreatedAt(),
+                // Estado de la pausa por bloqueo de sede (Módulo 11, RF-05.5): la tarjeta de
+                // la parada necesita la marca temporal del intervalo vivo, el acumulado de
+                // segundos pausados y el motivo tipificado que declaró el técnico.
+                'paused_at'                   => $incident->getPausedAt(),
+                'total_pending_info_seconds'  => $incident->getTotalPendingInfoSeconds(),
+                'pending_info_reason_category' => $incident->getPendingInfoReasonCategory()?->value,
+                'pending_info_reason_category_label' => $incident->getPendingInfoReasonCategory()?->label(),
+                'pending_info_reason_text'    => $incident->getPendingInfoReasonText(),
                 // Insignia de conversación de la parada (RF-01.1): el técnico de ruta
                 // contabiliza la TOTALIDAD de mensajes, públicos y notas internas de
                 // taller, porque su canal sí tiene acceso legítimo a ambos (RF-02.3).
