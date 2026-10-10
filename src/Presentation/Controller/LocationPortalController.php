@@ -995,7 +995,14 @@ class LocationPortalController
         } catch (InvalidCommentLengthException $e) {
             return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
         } catch (ConversationSealedException $e) {
-            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+            // RF-05.4: el sellado es estricto; cuando el expediente procede de una
+            // cancelación por inactividad de sede, el rechazo además indica cómo
+            // solicitar una nueva asistencia (confirmar el acceso, RF-04.6).
+            return Response::error(
+                $e->getErrorCode(),
+                $this->sealedCommentMessage($incident, $e->getMessage()),
+                $e->getHttpStatusCode()
+            );
         } catch (InvalidUploadException $e) {
             // RF-07.1: se devuelven los datos de texto íntegros para el reintento.
             return Response::error(
@@ -1060,6 +1067,35 @@ class LocationPortalController
                 ? 'Comentario publicado y avería reactivada automáticamente.'
                 : 'Comentario publicado en el hilo de conversación'
         );
+    }
+
+    /**
+     * Mensaje del rechazo por sellado para el portal de sede (RF-05.4).
+     *
+     * La especificación exige que el rechazo de un comentario sobre un expediente
+     * cancelado tras 72 horas hábiles indique a la sede que debe confirmar el acceso
+     * a la máquina para solicitar una nueva asistencia. Esa indicación solo aplica
+     * mientras la máquina sigue fuera de servicio por falta de acceso (RF-04.4):
+     * para el resto de sellados (cierre manual, garantía vencida) se conserva el
+     * mensaje genérico del dominio, sin filtrar la guía a conversaciones que no la
+     * necesitan.
+     */
+    private function sealedCommentMessage(Incident $incident, string $sealedMessage): string
+    {
+        if ($incident->getStatus() !== IncidentStatus::CANCELLED) {
+            return $sealedMessage;
+        }
+
+        $machine = $this->machineRepo->findById($incident->getMachineId());
+        if ($machine === null || !$machine->isBlockedNoAccess()) {
+            return $sealedMessage;
+        }
+
+        return $sealedMessage
+            . ' Para solicitar una nueva asistencia, confirme el acceso a la máquina'
+            . ' y registre un nuevo aviso marcando la casilla:'
+            . ' «Confirmo formalmente que las instalaciones y la máquina se encuentran'
+            . ' abiertas y accesibles para el servicio técnico».';
     }
 
     /**

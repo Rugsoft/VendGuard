@@ -305,6 +305,12 @@ $req5 = new Request(
 );
 $res5 = $router->dispatch($req5);
 $assert("5.1 Ticket CLOSED sellado => HTTP 403 CONVERSATION_SEALED (RF-05.3)", $res5->getStatusCode() === 403 && ($res5->getDecodedBody()['error']['code'] ?? '') === 'CONVERSATION_SEALED');
+$sealedMessage5 = (string)($res5->getDecodedBody()['error']['message'] ?? '');
+$assert(
+    "5.2 Un cierre manual conserva el mensaje genérico sin la guía de acceso de RF-05.4",
+    str_contains($sealedMessage5, 'no admite nuevos mensajes')
+        && !str_contains($sealedMessage5, 'nueva asistencia')
+);
 
 // =========================================================================
 // CASO 6: Segregación de sedes (403 Forbidden - SITE_MISMATCH)

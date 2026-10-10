@@ -314,7 +314,7 @@ Registra un nuevo aviso de avería con cálculo automático de urgencia y contro
   * `400 Bad Request` (`INVALID_LIMIT` / `INVALID_BEFORE_ID`): parámetros de consulta mal formados (`GET`).
   * `401 Unauthorized` (`UNAUTHORIZED`): no se ha podido verificar la sede autenticada.
   * `403 Forbidden` (`SITE_MISMATCH`): el expediente pertenece a otra sede.
-  * `403 Forbidden` (`CONVERSATION_SEALED`): expediente `CLOSED`/`CANCELLED`, o `RESOLVED` fuera de la ventana de garantía de 48 h. La lectura sigue disponible.
+  * `403 Forbidden` (`CONVERSATION_SEALED`): expediente `CLOSED`/`CANCELLED`, o `RESOLVED` fuera de la ventana de garantía de 48 h. La lectura sigue disponible. Si el expediente se canceló por inactividad de sede y la máquina sigue bloqueada por falta de acceso (RF-04.4), el mensaje del rechazo incluye además la guía de RF-05.4 —confirmar el acceso a la máquina al registrar un nuevo aviso—; el resto de sellados conserva el mensaje genérico.
   * `404 Not Found` (`INCIDENT_NOT_FOUND`): no existe ningún expediente con ese código o identificador.
   * `422 Unprocessable` (`INVALID_COMMENT_LENGTH`): texto con menos de 5 o más de 1.000 caracteres.
   * `422 Unprocessable` (`FILE_TOO_LARGE`): archivo adjunto de más de 5 MB.

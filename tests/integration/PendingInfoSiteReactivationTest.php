@@ -19,7 +19,9 @@ declare(strict_types=1);
  *   3. La ráfaga es idempotente (RF-05.3): sólo el primer mensaje transiciona y los
  *      siguientes se anexan al hilo como seguimiento normal sin tocar el estado.
  *   4. El expediente `CANCELLED` bloquea el comentario con HTTP 403 `CONVERSATION_SEALED`
- *      sin escribir una sola fila (RF-05.4, Art. III): el hilo queda sellado en solo lectura.
+ *      sin escribir una sola fila (RF-05.4, Art. III): el hilo queda sellado en solo lectura
+ *      y, cuando la máquina sigue bloqueada por falta de acceso, el rechazo indica a la sede
+ *      cómo solicitar una nueva asistencia (confirmar el acceso, RF-04.6).
  *   5. La proyección ciudadana del QR (escaneo y reporte concurrente) publica
  *      `PENDING_INFO` como «En proceso de atención técnica», sin el código interno del
  *      estado, sin motivo de pausa ni bloqueo de acceso (RF-06.1, Art. V.4).
@@ -496,6 +498,15 @@ try {
             && ($res->getDecodedBody()['error']['code'] ?? '') === 'CONVERSATION_SEALED'
             && $res->getDecodedBody()['error']['message'] !== ''
     );
+
+    $sealedMessage = (string)($res->getDecodedBody()['error']['message'] ?? '');
+    $assert(
+        '5.1.b RF-05.4: el rechazo indica a la sede confirmar el acceso para solicitar una nueva asistencia',
+        str_contains($sealedMessage, 'confirme el acceso a la máquina')
+            && str_contains($sealedMessage, 'nueva asistencia')
+            && str_contains($sealedMessage, 'abiertas y accesibles para el servicio técnico')
+    );
+
     $assert(
         '5.2 El rechazo no escribe comentario ni rastro alguno (Art. III)',
         $commentCount($cancelledId) === $commentsBefore
