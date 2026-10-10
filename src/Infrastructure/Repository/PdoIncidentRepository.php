@@ -10,6 +10,7 @@ use InvalidArgumentException;
 use PDO;
 use PDOException;
 use PDOStatement;
+use RuntimeException;
 use Throwable;
 use VendGuard\Core\Domain\Exception\ChronicIncidentException;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
@@ -19,6 +20,7 @@ use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\IncidentHistory;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -30,7 +32,7 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  * Garantiza transaccionalidad atómica en la creación, inmutabilidad de la auditoría y
  * cumplimiento estricto del mandato constitucional de Soft Delete (RNF-03).
  */
-class PdoIncidentRepository implements IncidentRepositoryInterface
+class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface
 {
     /**
      * Marcadores canónicos de las notas de auditoría de la pausa (RF-01.4).
@@ -229,6 +231,53 @@ class PdoIncidentRepository implements IncidentRepositoryInterface
      * Recupera una incidencia por su ID primario.
      */
     public function findById(int $id): ?Incident
+    {
+        return $this->findByIdUnlocked($id);
+    }
+
+    /**
+     * Recupera el expediente tomando un bloqueo exclusivo por fila que se mantiene hasta
+     * el final de la transacción en curso (RF-02.1, RF-02.2, caso límite §6.2).
+     *
+     * El bloqueo se pide en DOS pasos a propósito: primero se bloquea la fila del
+     * expediente con una sentencia mínima sobre `incidents` y sólo después se hidrata el
+     * agregado con sus uniones. Un `FOR UPDATE` sobre el `SELECT` completo —que une
+     * máquinas, sedes y usuarios— extendería el bloqueo exclusivo a filas maestras
+     * compartidas por toda la operación (la sede entera, el técnico entero), alargando el
+     * tiempo de retención mucho más allá del expediente que realmente se está serializando.
+     *
+     * @param int $id Identificador primario de la incidencia.
+     * @return Incident|null Entidad hidratada, o `null` si no existe o está borrada.
+     *
+     * @throws RuntimeException Si se invoca fuera de una transacción abierta.
+     */
+    public function findByIdForUpdate(int $id): ?Incident
+    {
+        if (!$this->pdo->inTransaction()) {
+            throw new RuntimeException(
+                'La lectura con bloqueo por fila exige una transacción abierta: sin ella el ' .
+                'bloqueo se libera al terminar la sentencia y la serialización sería ficticia.'
+            );
+        }
+
+        $lock = $this->pdo->prepare(
+            'SELECT `id` FROM `incidents` WHERE `id` = :id AND `deleted_at` IS NULL FOR UPDATE'
+        );
+        $lock->bindValue(':id', $id, PDO::PARAM_INT);
+        $lock->execute();
+
+        if ($lock->fetch(PDO::FETCH_ASSOC) === false) {
+            return null;
+        }
+
+        return $this->findByIdUnlocked($id);
+    }
+
+    /**
+     * Lectura ordinaria del agregado (sin bloqueo), compartida por `findById()` y por la
+     * hidratación posterior al bloqueo por fila.
+     */
+    private function findByIdUnlocked(int $id): ?Incident
     {
         $sql = "
             SELECT 

@@ -706,6 +706,7 @@ Devuelve la lista de incidencias asignadas al técnico autenticado (RF-07).
 ```
 
 * **Extensión del Módulo 11 (T-PAUSE-18, RF-05.5):** la ruta incluye también las averías en `PENDING_INFO` (pausa por bloqueo imputable a la sede). Una parada pausada no desaparece de "Mi Ruta": viaja con `paused_at` (marca del intervalo vivo), `total_pending_info_seconds` (acumulado exacto en segundos, RNF-01), `pending_info_reason_category`, `pending_info_reason_category_label` y `pending_info_reason_text`, de modo que la tarjeta móvil pinte la insignia `⏸️ En espera de sede` con su contador y ofrezca la reanudación in situ (`POST /api/technician/incidents/{id}/resume-pending-info`). El resto de campos de pausa viajan a `null` cuando el expediente no está pausado.
+* **Serialización de las reanudaciones (T-PAUSE-30, caso límite §6.2):** las dos vías que cierran una pausa —la reanudación manual del técnico o del coordinador y la reactivación automática por comentario público de sede (§3.3.2)— leen el expediente bajo bloqueo exclusivo por fila (`SELECT ... FOR UPDATE`) dentro de su transacción. Si las dos llegan a la vez sobre el mismo ticket, la segunda espera el bloqueo y, al entrar, decide sobre el estado ya confirmado por la primera: **una sola transición y un solo rastro inmutable sobreviven** a la carrera, sin doble descuento del reloj contractual ni estados inconsistentes. El bloqueo es de una fila: el resto del parque sigue operando con normalidad.
 
 ---
 

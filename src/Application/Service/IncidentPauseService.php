@@ -17,6 +17,7 @@ use VendGuard\Core\Domain\Model\RefundRequest;
 use VendGuard\Core\Domain\Model\RefundStatus;
 use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
@@ -501,6 +502,12 @@ final class IncidentPauseService
      * inexistente no provocan escrituras; los casos repetidos devuelven el estado real
      * del expediente en el mismo contrato de respuesta.
      *
+     * **Serialización (caso límite §6.2):** el expediente se lee bajo bloqueo exclusivo
+     * por fila dentro de una transacción, de modo que la carrera con la reanudación
+     * manual —el técnico pulsando «Reanudar intervención» en el mismo segundo— deja a
+     * una sola operación cerrar la pausa: la que llega después lee el estado ya
+     * confirmado y no repite la transición ni el rastro inmutable (Art. III).
+     *
      * @param int $incidentId Incidencia sobre la que se publica el comentario.
      * @param string $commentText Texto publicado por la sede.
      * @param int $siteUserId Referencia del actor de sede que publica (portal).
@@ -528,72 +535,87 @@ final class IncidentPauseService
         }
 
         $now = new DateTimeImmutable();
-        $incident = $this->incidents()->findById($incidentId);
 
-        if ($incident === null) {
-            throw new \DomainException(sprintf(
-                'No se encontró ninguna incidencia con ID %d para procesar el comentario de sede.',
-                $incidentId
-            ));
-        }
+        // La lectura del expediente va bajo bloqueo exclusivo por fila y dentro de una
+        // transacción (caso límite §6.2): si el técnico pulsa «Reanudar intervención» en
+        // el mismo segundo en que la sede publica su respuesta, la segunda operación en
+        // entrar lee el expediente DESPUÉS de que la primera haya confirmado —ya no hay
+        // pausa que cerrar— y el contrato devuelve la verdad del expediente sin repetir
+        // la transición ni duplicar el rastro inmutable (Art. III).
+        return $this->transactions()->runInTransaction(function () use (
+            $incidentId,
+            $commentText,
+            $siteUserId,
+            $now
+        ): IncidentPauseResponseDto {
+            $incident = $this->lockIncident($incidentId);
 
-        $normalizedComment = trim($commentText);
+            if ($incident === null) {
+                throw new \DomainException(sprintf(
+                    'No se encontró ninguna incidencia con ID %d para procesar el comentario de sede.',
+                    $incidentId
+                ));
+            }
 
-        // Sin reactivación: comentario sin sustancia descriptiva, expediente que no está
-        // en pausa o que ya fue reanudado por el primer mensaje de una ráfaga. Nada se
-        // escribe y el contrato devuelve la verdad del expediente.
-        if (mb_strlen($normalizedComment) < self::MIN_SITE_COMMENT_LENGTH || !$incident->isPendingInfo()) {
-            return $this->buildCurrentStateResponse($incident, $now);
-        }
+            $normalizedComment = trim($commentText);
 
-        $pauseDurationSeconds = $incident->currentPauseDurationSeconds($now);
-        $assignedTechnicianId = $incident->getAssignedTechnicianId();
-        $technicianIsBusy = $assignedTechnicianId !== null
-            && $this->technicianHasAnotherActiveIntervention($assignedTechnicianId, $incidentId);
-        $reassignedDuringPause = $this->wasReassignedDuringCurrentPause($incident);
-        $isHotResponse = $pauseDurationSeconds < self::HOT_REACTIVATION_WINDOW_SECONDS;
+            // Sin reactivación: comentario sin sustancia descriptiva, expediente que no
+            // está en pausa o que ya fue reanudado por el primer mensaje de una ráfaga
+            // (o por la reanudación con la que se perdió la carrera). Nada se escribe y
+            // el contrato devuelve la verdad del expediente.
+            if (mb_strlen($normalizedComment) < self::MIN_SITE_COMMENT_LENGTH || !$incident->isPendingInfo()) {
+                return $this->buildCurrentStateResponse($incident, $now);
+            }
 
-        $targetStatus = ($isHotResponse
-            && $assignedTechnicianId !== null
-            && !$technicianIsBusy
-            && !$reassignedDuringPause)
-            ? IncidentStatus::IN_PROGRESS
-            : IncidentStatus::ASSIGNED;
+            $pauseDurationSeconds = $incident->currentPauseDurationSeconds($now);
+            $assignedTechnicianId = $incident->getAssignedTechnicianId();
+            $technicianIsBusy = $assignedTechnicianId !== null
+                && $this->technicianHasAnotherActiveIntervention($assignedTechnicianId, $incidentId);
+            $reassignedDuringPause = $this->wasReassignedDuringCurrentPause($incident);
+            $isHotResponse = $pauseDurationSeconds < self::HOT_REACTIVATION_WINDOW_SECONDS;
 
-        $originalSlaTargetAt = $incident->getSlaTargetAt();
+            $targetStatus = ($isHotResponse
+                && $assignedTechnicianId !== null
+                && !$technicianIsBusy
+                && !$reassignedDuringPause)
+                ? IncidentStatus::IN_PROGRESS
+                : IncidentStatus::ASSIGNED;
 
-        // Rastro inmutable de solo adición. El actor va como `null` a propósito: el
-        // responsable de sede no es un usuario interno y `incident_history.user_id` es
-        // una clave foránea a `users`; su referencia viaja en la nota para no perder
-        // trazabilidad ni violar la integridad referencial (Art. III).
-        [$resumed, $shiftedSlaTargetAt] = $this->closePauseInterval(
-            $incident,
-            $targetStatus,
-            $pauseDurationSeconds,
-            null,
-            fn (?string $shiftedDeadline): string => $this->reactivationNote(
+            $originalSlaTargetAt = $incident->getSlaTargetAt();
+
+            // Rastro inmutable de solo adición. El actor va como `null` a propósito: el
+            // responsable de sede no es un usuario interno y `incident_history.user_id` es
+            // una clave foránea a `users`; su referencia viaja en la nota para no perder
+            // trazabilidad ni violar la integridad referencial (Art. III).
+            [$resumed, $shiftedSlaTargetAt] = $this->closePauseInterval(
+                $incident,
                 $targetStatus,
                 $pauseDurationSeconds,
-                $technicianIsBusy,
-                $reassignedDuringPause,
-                $assignedTechnicianId === null,
-                $siteUserId,
-                $originalSlaTargetAt,
-                $shiftedDeadline
-            ),
-            $now,
-            'tras el comentario de sede'
-        );
+                null,
+                fn (?string $shiftedDeadline): string => $this->reactivationNote(
+                    $targetStatus,
+                    $pauseDurationSeconds,
+                    $technicianIsBusy,
+                    $reassignedDuringPause,
+                    $assignedTechnicianId === null,
+                    $siteUserId,
+                    $originalSlaTargetAt,
+                    $shiftedDeadline
+                ),
+                $now,
+                'tras el comentario de sede'
+            );
 
-        return new IncidentPauseResponseDto(
-            incidentId: (int)$resumed->getId(),
-            ticketCode: $resumed->getTicketCode(),
-            status: $targetStatus,
-            isSlaPaused: false,
-            accumulatedPauseMinutes: (int)round($resumed->getTotalPendingInfoSeconds() / 60),
-            slaTargetAtOriginal: $originalSlaTargetAt,
-            slaTargetAtShifted: $shiftedSlaTargetAt
-        );
+            return new IncidentPauseResponseDto(
+                incidentId: (int)$resumed->getId(),
+                ticketCode: $resumed->getTicketCode(),
+                status: $targetStatus,
+                isSlaPaused: false,
+                accumulatedPauseMinutes: (int)round($resumed->getTotalPendingInfoSeconds() / 60),
+                slaTargetAtOriginal: $originalSlaTargetAt,
+                slaTargetAtShifted: $shiftedSlaTargetAt
+            );
+        });
     }
 
     /**
@@ -725,6 +747,12 @@ final class IncidentPauseService
      * prohibido: cerrar en falso sin intervención es la violación que persigue el
      * Art. V.1, y exige invertir la pausa con trabajo real documentado.
      *
+     * **Serialización (caso límite §6.2):** el expediente se lee bajo bloqueo exclusivo
+     * por fila dentro de la transacción que ya envuelve la reanudación, así que la
+     * guarda de estado se evalúa sobre el presente —no sobre una foto que la reactivación
+     * por comentario de sede pudo cambiar entre medias— y una sola transición sobrevive a
+     * la carrera simultánea.
+     *
      * @param int $incidentId Incidencia pausada que se reanuda.
      * @param int $actorUserId Usuario interno que reanuda (auditoría, Art. III).
      * @param IncidentStatus $targetStatus Estado operativo de destino (`IN_PROGRESS`/`ASSIGNED`).
@@ -770,7 +798,10 @@ final class IncidentPauseService
             $resumeNote,
             $now
         ): array {
-            $incident = $this->incidents()->findById($incidentId);
+            // Lectura bajo bloqueo exclusivo por fila: es lo que convierte la guarda de
+            // estado en una decisión sobre el presente y no sobre una foto que otra
+            // operación pudo cambiar entre medias (caso límite §6.2).
+            $incident = $this->lockIncident($incidentId);
             if ($incident === null) {
                 throw new \DomainException(sprintf(
                     'No se encontró ninguna incidencia con ID %d para reanudar su pausa.',
@@ -1094,6 +1125,37 @@ final class IncidentPauseService
     private function incidents(): IncidentRepositoryInterface
     {
         return $this->incidentRepo ??= new PdoIncidentRepository();
+    }
+
+    /**
+     * Lee el expediente para una reanudación, pidiendo el bloqueo exclusivo por fila
+     * cuando el repositorio declara esa capacidad (puerto `IncidentRowLockRepositoryInterface`,
+     * implementado por `PdoIncidentRepository`).
+     *
+     * Las dos reanudaciones del módulo —la manual del técnico/coordinación (RF-02.2) y la
+     * automática por comentario de sede (RF-02.1)— son las únicas transiciones que pueden
+     * dispararse a la vez sobre el MISMO expediente, y el análisis funcional exige
+     * resolver esa carrera atómicamente (caso límite §6.2). Leer la fila bloqueada es lo
+     * que hace que la segunda operación vea el resultado de la primera.
+     *
+     * El respaldo a la lectura ordinaria existe por la misma razón que el de
+     * `UserLockoutRepositoryInterface` en `AuthService`: los dobles en memoria de las
+     * suites unitarias no tienen filas que bloquear, y el cableado de producción usa
+     * siempre el repositorio PDO, que sí bloquea. La suite de concurrencia de MariaDB
+     * certifica la capacidad sobre conexiones reales.
+     *
+     * @param int $incidentId Expediente a leer.
+     * @return Incident|null Entidad con bloqueo vigente (o lectura simple sin capacidad).
+     */
+    private function lockIncident(int $incidentId): ?Incident
+    {
+        $repository = $this->incidents();
+
+        if ($repository instanceof IncidentRowLockRepositoryInterface) {
+            return $repository->findByIdForUpdate($incidentId);
+        }
+
+        return $repository->findById($incidentId);
     }
 
     /**

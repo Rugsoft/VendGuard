@@ -31,6 +31,8 @@ use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\IncidentHistory;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
@@ -72,7 +74,7 @@ $capture = static function (callable $action): array {
  * historial que el servicio consulta y registra cada escritura para poder certificar
  * que la ráfaga no duplica nada.
  */
-final class ReactivationIncidentRepo implements IncidentRepositoryInterface
+class ReactivationIncidentRepo implements IncidentRepositoryInterface
 {
     public ?Incident $incident = null;
 
@@ -580,6 +582,158 @@ $assert(
     '7.5 Los umbrales contractuales quedan fijados por constantes verificables',
     IncidentPauseService::MIN_SITE_COMMENT_LENGTH === 5
     && IncidentPauseService::HOT_REACTIVATION_WINDOW_SECONDS === 3600
+);
+
+// =====================================================================
+// GRUPO 8: Serialización de las reanudaciones (T-PAUSE-30, caso límite §6.2)
+// =====================================================================
+echo "\n--- Grupo 8: Bloqueo por fila en las dos reanudaciones (T-PAUSE-30) ---\n";
+
+/**
+ * Doble que declara la capacidad de bloqueo por fila del puerto
+ * `IncidentRowLockRepositoryInterface` y registra CÓMO se pidió la lectura de cada
+ * expediente: con bloqueo o por la puerta ordinaria, y si la petición ocurrió dentro de
+ * la ventana transaccional.
+ */
+final class LockingReactivationIncidentRepo extends ReactivationIncidentRepo implements IncidentRowLockRepositoryInterface
+{
+    public int $lockedReads = 0;
+    public int $plainReads = 0;
+    public int $lockedReadsInsideTransaction = 0;
+    public bool $transactionOpen = false;
+
+    public function findById(int $id): ?Incident
+    {
+        $this->plainReads++;
+
+        return parent::findById($id);
+    }
+
+    public function findByIdForUpdate(int $id): ?Incident
+    {
+        $this->lockedReads++;
+        if ($this->transactionOpen) {
+            $this->lockedReadsInsideTransaction++;
+        }
+
+        return parent::findById($id);
+    }
+}
+
+/**
+ * Unidad de trabajo de prueba: abre la ventana transaccional que el doble de bloqueo
+ * observa, para certificar que el `FOR UPDATE` se pide dentro de una transacción
+ * —fuera de ella el bloqueo se liberaría al terminar la sentencia—.
+ */
+final class RecordingTransactionManager implements TransactionManagerInterface
+{
+    public int $transactions = 0;
+
+    /** @param LockingReactivationIncidentRepo $flagHolder */
+    public function __construct(private LockingReactivationIncidentRepo $flagHolder)
+    {
+    }
+
+    public function runInTransaction(callable $operation): mixed
+    {
+        $this->transactions++;
+        $this->flagHolder->transactionOpen = true;
+
+        try {
+            return $operation();
+        } finally {
+            $this->flagHolder->transactionOpen = false;
+        }
+    }
+}
+
+$lockingRepo = new LockingReactivationIncidentRepo();
+$lockingRepo->incident = $makePausedIncident(20, '2026-10-08 12:15:00');
+$unitOfWork = new RecordingTransactionManager($lockingRepo);
+$lockingService = new IncidentPauseService(incidentRepo: $lockingRepo, transactionManager: $unitOfWork);
+
+$lockingResponse = $lockingService->handleSiteCommentReactivation(142, $validComment, 9001);
+
+$assert(
+    '8.1 La reactivación por comentario de sede lee el expediente CON bloqueo por fila',
+    $lockingRepo->lockedReads === 1 && $lockingRepo->plainReads === 0,
+    sprintf('bloqueadas=%d, ordinarias=%d', $lockingRepo->lockedReads, $lockingRepo->plainReads)
+);
+
+$assert(
+    '8.2 El bloqueo se pide dentro de la transacción (fuera de ella sería ficticio)',
+    $lockingRepo->lockedReadsInsideTransaction === 1 && $unitOfWork->transactions === 1,
+    sprintf('dentro=%d, transacciones=%d', $lockingRepo->lockedReadsInsideTransaction, $unitOfWork->transactions)
+);
+
+$assert(
+    '8.3 La lectura bloqueada no altera el contrato de la reactivación en caliente',
+    $lockingResponse->status === IncidentStatus::IN_PROGRESS
+    && $lockingResponse->isSlaPaused === false
+    && count($lockingRepo->resumeEvents) === 1,
+    $lockingResponse->status->value
+);
+
+$manualLockingRepo = new LockingReactivationIncidentRepo();
+$manualLockingRepo->incident = $makePausedIncident(45, '2026-10-08 12:15:00');
+$manualUnitOfWork = new RecordingTransactionManager($manualLockingRepo);
+$manualLockingService = new IncidentPauseService(
+    incidentRepo: $manualLockingRepo,
+    transactionManager: $manualUnitOfWork
+);
+
+$manualResponse = $manualLockingService->resumePendingInfoManually(
+    142,
+    42,
+    IncidentStatus::ASSIGNED,
+    'El técnico vuelve por la tarde con la llave de la sala.'
+);
+
+$assert(
+    '8.4 La reanudación manual también lee el expediente CON bloqueo por fila',
+    $manualLockingRepo->lockedReads === 1
+    && $manualLockingRepo->plainReads === 0
+    && $manualLockingRepo->lockedReadsInsideTransaction === 1
+    && $manualUnitOfWork->transactions === 1,
+    sprintf(
+        'bloqueadas=%d, ordinarias=%d, dentro=%d, transacciones=%d',
+        $manualLockingRepo->lockedReads,
+        $manualLockingRepo->plainReads,
+        $manualLockingRepo->lockedReadsInsideTransaction,
+        $manualUnitOfWork->transactions
+    )
+);
+
+$assert(
+    '8.5 La reanudación manual bloqueada conserva su destino declarado y su rastro',
+    $manualResponse->status === IncidentStatus::ASSIGNED
+    && count($manualLockingRepo->resumeEvents) === 1
+    && str_contains((string)($manualLockingRepo->resumeEvents[0]['note'] ?? ''), 'llave de la sala'),
+    $manualResponse->status->value
+);
+
+// Un repositorio sin la capacidad de bloqueo sigue resolviendo por lectura ordinaria:
+// es el respaldo declarado para los dobles de prueba y deja constancia de que la
+// serialización real la aporta el repositorio PDO, no una guarda en JavaScript.
+$plainRepo = new ReactivationIncidentRepo();
+$plainRepo->incident = $makePausedIncident(20, '2026-10-08 12:15:00');
+$plainService = new IncidentPauseService(incidentRepo: $plainRepo);
+$plainResponse = $plainService->handleSiteCommentReactivation(142, $validComment, 9001);
+
+$assert(
+    '8.6 Un repositorio sin capacidad de bloqueo degrada a lectura ordinaria sin romper',
+    $plainResponse->status === IncidentStatus::IN_PROGRESS && $plainRepo->updateCalls === 1,
+    $plainResponse->status->value
+);
+
+$pdoRepositorySource = (string)file_get_contents(__DIR__ . '/../../src/Infrastructure/Repository/PdoIncidentRepository.php');
+
+$assert(
+    '8.7 El repositorio PDO declara el puerto de bloqueo y rechaza usarlo fuera de transacción',
+    str_contains($pdoRepositorySource, 'implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface')
+    && str_contains($pdoRepositorySource, 'FOR UPDATE')
+    && str_contains($pdoRepositorySource, 'inTransaction()'),
+    'el repositorio PDO no implementa el puerto de bloqueo'
 );
 
 // =====================================================================
