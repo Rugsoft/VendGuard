@@ -1,17 +1,20 @@
 /**
  * VendGuard - PendingInfoPauseModal Reactive Unit Tests (PendingInfoPauseModalTest.mjs)
  * 
- * Verifica las condiciones de T-PAUSE-16 (y T-PAUSE-20):
+ * Verifica las condiciones de T-PAUSE-16 y la condición «Hecho cuando» de T-PAUSE-20:
  * 1. Renderizado y disponibilidad de las 4 causas tipificadas.
- * 2. Bloqueo del botón de envío con 0 a 19 caracteres (isValidLength: false, canSubmit: false).
+ * 2. Bloqueo del botón de envío con TODAS las longitudes de 0 a 19 caracteres reales
+ *    (barrido exhaustivo, isValidLength: false, canSubmit: false).
  * 3. Habilitación del botón con 20 caracteres reales y causa seleccionada.
  * 4. Botones táctiles con altura mínima de 44px (RNF-03).
  * 5. Guardián de borrador sucio solicitando confirmación si el usuario presiona Escape o hace clic en backdrop.
  * 6. Restablecimiento del formulario tras éxito o cierre limpio.
+ * 7. Contrato de la llamada de pausa por rol (técnico y coordinador) y camino de error:
+ *    un rechazo del servidor se muestra sin perder el borrador ni cerrar el modal (RNF-06, RF-08.4).
  */
 
 import { PendingInfoPauseModal, PAUSE_REASON_CATEGORIES } from '../../public/assets/js/components/PendingInfoPauseModal.js';
-import { api } from '../../public/assets/js/api.js';
+import { api, ApiError } from '../../public/assets/js/api.js';
 
 let assertions = 0;
 let failures = 0;
@@ -30,7 +33,7 @@ function assert(description, condition, details = '') {
 }
 
 console.log('======================================================================');
-console.log(' VendGuard: Frontend Test Suite - PendingInfoPauseModal (T-PAUSE-16)');
+console.log(' VendGuard: Frontend Test Suite - PendingInfoPauseModal (T-PAUSE-16, T-PAUSE-20)');
 console.log('======================================================================\n');
 
 // 1. Selector de 4 causas tipificadas
@@ -111,6 +114,24 @@ assert('2.7 Con 20 caracteres reales, isValidLength es true y remainingChars es 
 assert('2.8 canSubmit pasa a true con causa y 20 caracteres',
   modal.canSubmit === true);
 
+// 2.9 Barrido exhaustivo del rango legal (T-PAUSE-20): NINGUNA longitud de 0 a 19
+// caracteres reales habilita el envío, con la causa ya seleccionada.
+const blockedLengths = [];
+for (let length = 0; length <= 19; length++) {
+  modal.reasonText = 'x'.repeat(length);
+  if (modal.canSubmit !== false || modal.isValidLength !== false) {
+    blockedLengths.push(length);
+  }
+}
+assert('2.9 Con la causa seleccionada, ninguna justificación de 0 a 19 caracteres permite enviar',
+  blockedLengths.length === 0,
+  `Longitudes que escaparon del bloqueo: ${blockedLengths.join(', ')}`);
+
+// 2.10 El componente nunca confirma el envío por encima del mínimo con texto recortado.
+modal.reasonText = `  ${'y'.repeat(20)}  `;
+assert('2.10 Con espacios alrededor, los 20 caracteres reales siguen habilitando el envío',
+  modal.trimmedReasonLength === 20 && modal.canSubmit === true);
+
 // 3. Ergonomía móvil con botones >= 44px (RNF-03)
 console.log('\n--- Grupo 3: Ergonomía Táctil Móvil >= 44px (RNF-03) ---');
 const templateStr = PendingInfoPauseModal.template;
@@ -187,12 +208,88 @@ assert('5.2 submitPause emite evento "paused" con el payload y el identificador'
 assert('5.3 submitPause emite "close" y restablece el formulario tras el éxito',
   submitModal.emitted['close']?.length === 1 && submitModal.reasonText === '' && submitModal.selectedCategory === '');
 
+// 5.4 El contrato de la llamada viaja completo y con el texto recortado (RF-01.3, RNF-02).
+let pauseCall = null;
+api.pauseIncidentPendingInfo = async (id, category, text, role) => {
+  pauseCall = { id, category, text, role };
+  return { incident_id: id, status: 'PENDING_INFO', is_sla_paused: true };
+};
+
+const technicianModal = createInstance({ role: 'TECHNICIAN' });
+technicianModal.selectCategory('PENDING_SITE_AUTHORIZATION');
+technicianModal.reasonText = '  El conserje no ha dejado la llave y la sala sigue cerrada con llave.  ';
+await technicianModal.submitPause();
+assert('5.4 El técnico envía causa, justificación recortada y su rol al endpoint de pausa',
+  pauseCall?.id === 101 && pauseCall?.category === 'PENDING_SITE_AUTHORIZATION' &&
+  pauseCall?.text === 'El conserje no ha dejado la llave y la sala sigue cerrada con llave.' &&
+  pauseCall?.role === 'TECHNICIAN',
+  JSON.stringify(pauseCall));
+assert('5.5 Tras el éxito el formulario queda limpio y sin envío en curso',
+  technicianModal.reasonText === '' && technicianModal.selectedCategory === '' &&
+  technicianModal.isSubmitting === false && technicianModal.errorMessage === '');
+
+// 5.6 La misma instancia reutilizable sirve al canal de Coordinación (RF-01.1: ambos roles).
+const coordinatorModal = createInstance({ role: 'COORDINATOR' });
+coordinatorModal.selectCategory('EXTERNAL_POWER_CUT');
+coordinatorModal.reasonText = 'Corte eléctrico del cuadro general ajeno a la máquina y a la sede.';
+await coordinatorModal.submitPause();
+assert('5.6 La pausa declarada desde coordinación viaja con su propio rol',
+  pauseCall?.role === 'COORDINATOR' && pauseCall?.category === 'EXTERNAL_POWER_CUT',
+  JSON.stringify(pauseCall));
+
+// 6. Camino de error y guardián con el modal cerrado
+console.log('\n--- Grupo 6: Rechazo del servidor y guardián fuera de la pausa en curso ---');
+
+const rejectedModal = createInstance();
+rejectedModal.selectCategory('BUILDING_CLOSED_NO_ACCESS');
+rejectedModal.reasonText = 'El edificio permanece cerrado por obras y no hay acceso al cuarto de máquinas.';
+api.pauseIncidentPendingInfo = async () => {
+  throw new ApiError(422, 'INVALID_STATUS_FOR_PAUSE', 'La incidencia ya está pausada por bloqueo de sede.');
+};
+
+await rejectedModal.submitPause();
+assert('6.1 Un rechazo del servidor se muestra al usuario con el mensaje de la API (RF-08.4)',
+  rejectedModal.errorMessage === 'La incidencia ya está pausada por bloqueo de sede.');
+assert('6.2 El rechazo conserva íntegro el borrador y no cierra el modal',
+  rejectedModal.reasonText === 'El edificio permanece cerrado por obras y no hay acceso al cuarto de máquinas.' &&
+  rejectedModal.selectedCategory === 'BUILDING_CLOSED_NO_ACCESS' &&
+  !rejectedModal.emitted['close'] && !rejectedModal.emitted['paused']);
+assert('6.3 El indicador de envío en curso se libera también cuando la pausa falla',
+  rejectedModal.isSubmitting === false);
+assert('6.4 Un error sin envoltorio ApiError también publica su mensaje sin romper el modal',
+  await (async () => {
+    const genericModal = createInstance();
+    genericModal.selectCategory('MACHINE_LOCATION_NOT_FOUND');
+    genericModal.reasonText = 'La máquina no aparece en ninguna de las plantas indicadas por la sede.';
+    api.pauseIncidentPendingInfo = async () => { throw new Error('Red no disponible'); };
+    await genericModal.submitPause();
+    return genericModal.errorMessage === 'Red no disponible' && genericModal.isSubmitting === false;
+  })());
+
+// 6.5 Escape con el modal cerrado no dispara ninguna confirmación ni evento (isOpen false).
+const closedModal = createInstance({ isOpen: false });
+closedModal.reasonText = 'Borrador que no debe evaluarse';
+let closedConfirmCount = 0;
+const previousConfirm = globalThis.confirm;
+globalThis.confirm = () => { closedConfirmCount++; return true; };
+closedModal.handleKeyDown({ key: 'Escape', preventDefault() {} });
+globalThis.confirm = previousConfirm;
+assert('6.5 Escape fuera de la pausa en curso no pide confirmación ni cierra nada',
+  closedConfirmCount === 0 && !closedModal.emitted['close'] && closedModal.reasonText === 'Borrador que no debe evaluarse');
+assert('6.6 Seleccionar causa limpia el error anterior para no arrastrar avisos obsoletos',
+  await (async () => {
+    const reusableModal = createInstance();
+    reusableModal.errorMessage = 'Error anterior del servidor';
+    reusableModal.selectCategory('EXTERNAL_POWER_CUT');
+    return reusableModal.errorMessage === '';
+  })());
+
 // Resumen final
 console.log('\n======================================================================');
 console.log(` Total Aserciones: ${assertions} | Pasadas: ${assertions - failures} | Fallidas: ${failures}`);
 
 if (failures === 0) {
-  console.log(' RESULTADO: 100% EN VERDE. CONDICIÓN T-PAUSE-16 CUMPLIDA SATISFACTORIAMENTE.');
+  console.log(' RESULTADO: 100% EN VERDE. CONDICIONES T-PAUSE-16 Y T-PAUSE-20 CUMPLIDAS SATISFACTORIAMENTE.');
   console.log('======================================================================\n');
   process.exit(0);
 } else {
