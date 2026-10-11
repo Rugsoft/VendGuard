@@ -149,7 +149,8 @@ Establecer un **Estado Operativo Formal denominado "Pendiente de Información" (
 * **RF-05.5 [EARS - Estado]:**  
   MIENTRAS una parada en la vista móvil "Mi Ruta" se encuentre en `PENDING_INFO`, el sistema DEBE mostrar la insignia `⏸️ En espera de sede` junto con el contador de tiempo pausado, **permitiendo al técnico omitir dicha parada y continuar atendiendo las siguientes visitas programadas del día sin bloqueos ni penalizaciones**.
 * **RF-05.6 [EARS - Estado]:**  
-  MIENTRAS una parada en "Mi Ruta" esté en `PENDING_INFO` y la sede haya publicado algún comentario público posterior al inicio de la pausa vigente, la tarjeta DEBE mostrar el aviso *"✉️ La sede ha respondido · pendiente de tu reanudación"* junto a la insignia de pausa, para que el técnico sepa que la respuesta que esperaba ya está en el hilo y que la pausa solo termina cuando él reanude (RF-02.2, enmienda del Product Owner, 2026-10-11).
+  MIENTRAS una parada en "Mi Ruta" esté en `PENDING_INFO` y la sede haya publicado algún comentario público posterior al inicio de la pausa vigente, la tarjeta DEBE mostrar el aviso *"✉️ La sede ha respondido · pendiente de tu reanudación"* junto a la insignia de pausa, **con la acción de reanudación in situ (RF-02.2) incorporada al propio aviso**, para que el técnico cierre la pausa en el mismo punto donde lee que la respuesta que esperaba ya está en el hilo (enmienda del Product Owner, 2026-10-11).
+  * **Un solo control de reanudación por tarjeta (coherencia de RF-02.2 y RF-05.6):** mientras el aviso esté visible, la acción de reanudación vive dentro del aviso y no se repite en la barra de acciones; cuando no lo esté, la acción vuelve a su posición de botón primario de la tarjeta. La pausa nunca se queda sin salida manual: la acción está siempre disponible, cambie o no de sitio.
 
 ---
 

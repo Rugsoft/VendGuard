@@ -977,6 +977,66 @@ assert('12.4 Sin marca del servidor la parada pausada sigue sin prometer reactiv
     && !TechnicianRouteView.template.includes('Reactivación automática'));
 
 // ---------------------------------------------------------------------
+// TEST GROUP 13: The RF-05.6 notice carries the resume action (RF-02.2)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 13: La reanudación vive en el propio aviso de respuesta (RF-05.6, RF-02.2) ---');
+
+// Petición del Product Owner del 2026-10-11: leer «✉️ La sede ha respondido» y tener que
+// buscar la reanudación en otro punto de la tarjeta obliga a un salto de contexto justo
+// cuando el técnico ya tiene la información que esperaba. El aviso incorpora la acción de
+// RF-02.2 y, mientras está visible, la barra de acciones no repite el botón: un solo
+// control de reanudación por tarjeta.
+const noticeStart = TechnicianRouteView.template.indexOf('data-testid="tech-stop-site-response"');
+const noticeEnd = TechnicianRouteView.template.indexOf('</div>', noticeStart);
+const noticeBlock = noticeStart >= 0 && noticeEnd > noticeStart
+  ? TechnicianRouteView.template.slice(noticeStart, noticeEnd)
+  : '';
+
+assert('13.1 El aviso RF-05.6 incorpora la acción de reanudación in situ de RF-02.2',
+  noticeBlock.includes('data-testid="btn-resume-pending-info"')
+    && noticeBlock.includes('@click="resumePendingInfoIntervention(incident)"')
+    && noticeBlock.includes('▶ Reanudar intervención in situ')
+    && noticeBlock.includes('Reanudando...')
+    && noticeBlock.includes(':disabled="isResumingPendingInfo"'),
+  'El bloque del aviso no declara el botón de reanudación con su manejador y su estado de carga.');
+
+assert('13.2 Con el aviso visible la barra de acciones no repite el botón de reanudación',
+  TechnicianRouteView.template.includes('v-if="isPendingInfo(incident) && !hasSiteResponseSincePause(incident)"')
+    && TechnicianRouteView.template.indexOf('v-if="isPendingInfo(incident) && !hasSiteResponseSincePause(incident)"')
+      > noticeStart,
+  'La tarjeta mostraría dos controles de reanudación a la vez.');
+
+const noticeExitView = createRouteInstance();
+const answeredStop = { status: 'PENDING_INFO', paused_at: tenMinutesAgo, site_response_since_pause: true };
+const silentStop = { status: 'PENDING_INFO', paused_at: tenMinutesAgo, site_response_since_pause: false };
+assert('13.3 La pausa nunca se queda sin salida manual: una rama u otra, nunca ninguna',
+  noticeExitView.isPendingInfo(answeredStop) && noticeExitView.hasSiteResponseSincePause(answeredStop)
+    && noticeExitView.isPendingInfo(silentStop) && !noticeExitView.hasSiteResponseSincePause(silentStop),
+  'Alguna parada pausada caería fuera de las dos ramas de la acción de reanudación.');
+
+const noticeResumeView = createRouteInstance();
+noticeResumeView.$emit = () => {};
+let noticeResumeApi = null;
+api.technician.resumeIncidentPendingInfo = async (id, targetStatus) => {
+  noticeResumeApi = { id, targetStatus };
+  return { incident_id: id, status: 'IN_PROGRESS', paused_at: null, is_sla_paused: false };
+};
+const noticeStop = noticeResumeView.incidents.find(i => i.id === 102);
+noticeStop.status = 'PENDING_INFO';
+noticeStop.paused_at = tenMinutesAgo;
+noticeStop.site_response_since_pause = true;
+await noticeResumeView.resumePendingInfoIntervention(noticeStop);
+assert('13.4 La acción del aviso cierra la pausa en el acto con el mismo destino IN_PROGRESS (RF-02.3)',
+  noticeResumeApi !== null && noticeResumeApi.id === 102 && noticeResumeApi.targetStatus === 'IN_PROGRESS'
+    && noticeStop.status === 'IN_PROGRESS' && noticeStop.paused_at === null
+    && noticeResumeView.feedbackMessage.includes('SLA reactivado'));
+
+assert('13.5 El botón del aviso reutiliza las clases de botón, sin un solo color nuevo (RNF-04)',
+  noticeBlock.includes('class="vg-btn vg-btn-primary"')
+    && !/#[0-9a-fA-F]{3,8}/.test(noticeBlock),
+  'El bloque del aviso introduce un literal de color: debe entrar por token o por clase.');
+
+// ---------------------------------------------------------------------
 // SUMMARY
 // ---------------------------------------------------------------------
 console.log('\n======================================================================');

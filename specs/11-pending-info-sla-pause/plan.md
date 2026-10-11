@@ -517,6 +517,7 @@ FIN ALGORITMO
   * **Desacoplamiento de Ruta (RF-05.5):** La parada no bloquea el flujo; el botón *"Iniciar intervención"* de la siguiente parada programada permanece completamente operativo.
   * **Acción *"Reanudar intervención"*:** Botón visible en la tarjeta que abre un diálogo de confirmación y llama a `POST .../resume-pending-info`, volviendo a `IN_PROGRESS` si el técnico vuelve a estar in situ.
   * **Aviso de respuesta de la sede (RF-05.6):** cuando existe un comentario público de la sede posterior al inicio de la pausa vigente, la tarjeta añade *"✉️ La sede ha respondido · pendiente de tu reanudación"* (`site_response_since_pause` en la ruta técnica), sin ninguna transición automática.
+  * **Acción dentro del aviso (RF-05.6, enmienda del 2026-10-11):** el aviso no es un cartel inerte: lleva incorporada la reanudación in situ de RF-02.2, para que el técnico cierre la pausa desde el mismo punto donde lee la respuesta. Con el aviso visible la barra de acciones **no repite** el botón (un solo control por tarjeta); sin el aviso, la acción vuelve a ser el botón primario de la tarjeta. Ambas ramas comparten el mismo manejador `resumePendingInfoIntervention()` y el mismo destino `IN_PROGRESS`.
 
 ---
 
@@ -609,7 +610,7 @@ FIN ALGORITMO
 | **RF-05.3** | Idempotencia ante ráfagas de comentarios de sede. | `IncidentPauseService.php` | Test enviando 3 comentarios en 2 segundos sin fallos de estado. |
 | **RF-05.4** | Sellado en solo lectura tras cancelación de 72h (Art. III). | `LocationPortalController.php` | Test verificando rechazo de comentarios en tickets cancelados. |
 | **RF-05.5** | Despriorización de parada en ruta técnica sin bloqueos. | `TechnicianRouteView.js` | Test verificando avance a la siguiente parada de la ruta. |
-| **RF-05.6** | Aviso de respuesta de la sede en la tarjeta pausada del técnico (enmienda 2026-10-11). | `TechnicianRouteView.js` (con `site_response_since_pause`) | Test JS verificando el aviso con un comentario público posterior a la pausa. |
+| **RF-05.6** | Aviso de respuesta de la sede en la tarjeta pausada del técnico, con la acción de reanudación incorporada (enmienda 2026-10-11). | `TechnicianRouteView.js` (con `site_response_since_pause`) | Test JS verificando el aviso con un comentario público posterior a la pausa y la reanudación disparada desde el propio aviso, con un solo control por tarjeta. |
 | **RF-06.1** | Estado neutral en QR ciudadano sin causas internas (Art. V.4). | `QrScanController.php` | Test verificando respuesta *"En proceso de atención técnica"*. |
 | **RF-06.2** | Prohibición absoluta de resolver directo desde `PENDING_INFO`. | `IncidentStatus::canTransitionTo()` | Test intentando `PENDING_INFO` $\rightarrow$ `RESOLVED` esperando excepción. |
 | **RF-06.3** | Reasignación técnica conserva el estado `PENDING_INFO`. | `CoordinatorController::assignTechnician()` | Test reasignando técnico verificando que la pausa se mantiene. |

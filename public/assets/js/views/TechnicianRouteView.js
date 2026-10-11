@@ -1397,28 +1397,42 @@ export const TechnicianRouteView = {
               </p>
               <!-- Aviso de respuesta de la sede (RF-05.6, enmienda E-1): la respuesta
                    esperada ya está en el hilo y la pausa sigue viva hasta que el
-                   técnico la cierre in situ (o el coordinador desde central). -->
+                   técnico la cierre in situ (o el coordinador desde central). El aviso
+                   lleva incorporada la reanudación de RF-02.2 para que el técnico actúe
+                   donde lee: con el aviso visible la barra de acciones no repite el
+                   botón (un solo control de reanudación por tarjeta). -->
               <div
                 v-if="hasSiteResponseSincePause(incident)"
                 data-testid="tech-stop-site-response"
-                role="status"
                 :style="{
                   marginTop: '8px',
                   paddingTop: '8px',
                   borderTop: '1px dashed ' + pendingInfoTokens.border,
-                  fontWeight: 600,
                   lineHeight: 1.35
                 }"
               >
-                ✉️ La sede ha respondido · pendiente de tu reanudación
+                <strong role="status">✉️ La sede ha respondido · pendiente de tu reanudación</strong>
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-primary"
+                  style="width: 100%; height: 44px; margin-top: 8px; font-size: 14px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"
+                  data-testid="btn-resume-pending-info"
+                  :disabled="isResumingPendingInfo"
+                  @click="resumePendingInfoIntervention(incident)"
+                >
+                  <span v-if="!isResumingPendingInfo">▶ Reanudar intervención in situ</span>
+                  <span v-else>Reanudando...</span>
+                </button>
               </div>
             </div>
 
             <!-- Action Buttons Bar (Large, Mobile Finger-Friendly Tap Targets >= 44px) -->
             <div style="border-top: 1px solid var(--color-hairline, #c8cfda); padding-top: 10px;">
-              <!-- Action Option 0: Reanudación in situ de la pausa con 1 toque (Módulo 11, RF-02.2, RF-02.3) -->
+              <!-- Action Option 0: Reanudación in situ de la pausa con 1 toque (Módulo 11, RF-02.2, RF-02.3).
+                   Cuando el aviso RF-05.6 está visible la acción vive dentro del aviso y
+                   aquí no se repite: un solo control de reanudación por tarjeta. -->
               <button
-                v-if="isPendingInfo(incident)"
+                v-if="isPendingInfo(incident) && !hasSiteResponseSincePause(incident)"
                 type="button"
                 class="vg-btn vg-btn-primary"
                 style="width: 100%; height: 46px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"
