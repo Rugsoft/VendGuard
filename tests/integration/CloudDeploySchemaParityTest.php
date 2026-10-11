@@ -39,6 +39,11 @@ declare(strict_types=1);
  *    demands so no figure can be silently saturated.
  * 4. The guard bites: a schema built from the base DDL alone -- the deploy path
  *    as it was before the fix -- is detected as incomplete.
+ * 5. The base DDL declares every value of `IncidentStatus`. TiDB refuses to
+ *    widen an enum that a generated column depends on (error 8200) and
+ *    `incidents.status` feeds `is_active_ticket`, the engine-level duplicate
+ *    guard (Art. V.2): a state added only by migration is undeliverable on the
+ *    deployed engine, so the base DDL has to declare it.
  *
  * ## Why a scratch database
  * `vendguard_db` is the schema the application is tested against, so it is the
@@ -54,6 +59,7 @@ require_once __DIR__ . '/../bootstrap.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/ConnectionFactory.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/SqlScriptSplitter.php';
 
+use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SqlScriptSplitter;
 
@@ -591,6 +597,50 @@ try {
     $assert(
         $missingColumns($syntheticExpected, $syntheticActual) === ['paid_amount'],
         'El comparador de columnas senala una columna ausente aunque todo lo demas coincida'
+    );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Caso 4: el DDL base declara todos los estados que la aplicacion escribe
+    // ─────────────────────────────────────────────────────────────────────────
+    echo "\n--- Caso 4: el DDL base declara los estados de IncidentStatus ---\n";
+
+    // 2026-10-11: el primer arranque desplegado en TiDB se detuvo en la migracion
+    // 016 con `8200 Unsupported modify column: oldCol is a dependent column
+    // 'status' for generated column`. TiDB rechaza modificar una columna de la
+    // que depende una columna generada, y `incidents.is_active_ticket` -- la
+    // guardia de duplicados del Art. V.2 -- depende de `status`. En MySQL/MariaDB
+    // la ampliacion del enum pasa, asi que ninguna suite local podia verlo. La
+    // unica convergencia posible en ese motor es que `database/cloud_init.sql`,
+    // que reconstruye `incidents` en cada arranque, declare el estado. Esta
+    // guardia exige que los declare TODOS, no solo PENDING_INFO: el siguiente
+    // estado anadido solo por migracion volveria a romper el despliegue.
+
+    $baseOnlyStatusType = (string)$baseOnlyPdo->query(
+        "SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'incidents' AND COLUMN_NAME = 'status'"
+    )->fetchColumn();
+
+    $statusesMissingFrom = static function (string $enumType, array $statuses): array {
+        return array_values(array_filter(
+            $statuses,
+            static fn (string $status): bool => !str_contains($enumType, "'" . $status . "'")
+        ));
+    };
+    $applicationStatuses = IncidentStatus::values();
+
+    $missingFromBaseDdl = $statusesMissingFrom($baseOnlyStatusType, $applicationStatuses);
+    $assert(
+        $missingFromBaseDdl === [],
+        'El DDL base del despliegue declara todos los estados de IncidentStatus (TiDB no admite anadirlos en caliente)',
+        'faltan: ' . implode(', ', $missingFromBaseDdl)
+    );
+
+    // Prueba de mordida: el comprobador tiene que discriminar de verdad.
+    $syntheticMissing = $statusesMissingFrom("enum('REGISTERED','CLOSED')", $applicationStatuses);
+    $assert(
+        $syntheticMissing !== [] && in_array('PENDING_INFO', $syntheticMissing, true),
+        'El comparador de estados senala los que faltan en un enum incompleto',
+        'detectados: ' . implode(', ', $syntheticMissing)
     );
 } finally {
     // Las conexiones a las sondas se sueltan antes de borrarlas.

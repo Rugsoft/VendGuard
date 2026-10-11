@@ -15,14 +15,18 @@
 -- so he can unlock it. Module 11 spec: RF-01.1, RF-01.4, RF-04.1, RF-04.4,
 -- Constitution Art. III and Art. V.1.
 --
--- Why the enum must keep the virtual column
--- -----------------------------------------
+-- Why the base DDL declares the state as well
+-- --------------------------------------------
 -- `incidents.is_active_ticket` and its conditional unique key
 -- `uq_machine_active_ticket` are computed from `status` (the engine-level guard
 -- of the duplicate-detection rule, Art. V.2). PENDING_INFO is an ACTIVE,
 -- non-terminal ticket, so the generated expression must keep classifying it as
--- active: the virtual column and its unique key survive this migration
--- untouched, and the closing assertion proves it.
+-- active: the expression itself is not touched. What the engines cannot all do
+-- is widen the enum underneath it -- TiDB rejects modifying a column a
+-- generated column depends on (error 8200) -- so the deployed database, whose
+-- `incidents` table is rebuilt from `database/cloud_init.sql` on every boot,
+-- takes the state from there. This migration remains the convergence path for
+-- MySQL/MariaDB databases migrated in place, which do accept the widening.
 --
 -- What is stored here, and what is not
 -- ------------------------------------
@@ -46,6 +50,12 @@
 -- Placed after PENDING_PARTS (the other waiting state) and before RESOLVED, so
 -- the enum reads in operational order. Guarded on `column_type` and not on the
 -- column existing: an interrupted or repeated run must be a clean no-op.
+--
+-- This statement is the convergence path for MySQL/MariaDB databases created
+-- before the state existed. It cannot run on TiDB while `is_active_ticket`
+-- exists (error 8200: a generated column's dependency cannot be modified), and
+-- that is why `database/cloud_init.sql` -- which rebuilds `incidents` on every
+-- deployed boot -- declares PENDING_INFO in its own enum.
 SET @vg_col = IF(
     (SELECT COUNT(*) FROM information_schema.columns
      WHERE table_schema = DATABASE() AND table_name = 'incidents'
@@ -147,7 +157,8 @@ SET @vg_col = IF(
     AND (SELECT COUNT(*) FROM information_schema.columns
          WHERE table_schema = DATABASE() AND table_name = 'incidents'
            AND column_name = 'is_active_ticket'
-           AND extra LIKE '%GENERATED%') = 1,
+           AND (extra LIKE '%GENERATED%'
+                OR (generation_expression IS NOT NULL AND generation_expression <> ''))) = 1,
     'SELECT 1',
     'SIGNAL SQLSTATE ''45000'' SET MESSAGE_TEXT = ''incidents: falta el estado PENDING_INFO, sus columnas de pausa o la columna virtual de ticket activo; revise la migracion 016'''
 );
