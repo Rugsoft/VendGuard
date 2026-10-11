@@ -35,6 +35,7 @@ use VendGuard\Core\Domain\Exception\SparePartNotFoundException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\IncidentSiteResponseRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
@@ -219,6 +220,12 @@ class TechnicianController
                 'pending_info_reason_category' => $incident->getPendingInfoReasonCategory()?->value,
                 'pending_info_reason_category_label' => $incident->getPendingInfoReasonCategory()?->label(),
                 'pending_info_reason_text'    => $incident->getPendingInfoReasonText(),
+                // Respuesta de la sede durante la pausa (RF-05.6, enmienda E-1): marca
+                // DERIVADA —comentario público de sede posterior al inicio de la pausa
+                // vigente— que avisa al técnico de que la respuesta que esperaba ya está
+                // en el hilo. El comentario no transiciona nada; la pausa sólo la cierra
+                // la reanudación manual (RF-02.2/RF-02.3) o la cancelación (RF-04.3).
+                'site_response_since_pause'   => $this->siteResponseSincePause($incident),
                 // Insignia de conversación de la parada (RF-01.1): el técnico de ruta
                 // contabiliza la TOTALIDAD de mensajes, públicos y notas internas de
                 // taller, porque su canal sí tiene acceso legítimo a ambos (RF-02.3).
@@ -232,6 +239,24 @@ class TechnicianController
         }
 
         return Response::json($routeData, 200);
+    }
+
+    /**
+     * Marca de respuesta de la sede sobre la pausa vigente (RF-05.6, enmienda E-1).
+     *
+     * Capacidad opcional del repositorio (`IncidentSiteResponseRepositoryInterface`):
+     * los dobles de prueba que no la implementan devuelven `false`, que es el valor
+     * honesto —sin consulta no consta respuesta— y mantiene el contrato de la ruta
+     * estable para el frontend.
+     */
+    private function siteResponseSincePause(Incident $incident): bool
+    {
+        if (!$incident->isPendingInfo() || $incident->getId() === null) {
+            return false;
+        }
+
+        return $this->incidentRepo instanceof IncidentSiteResponseRepositoryInterface
+            && $this->incidentRepo->hasSiteResponseSinceCurrentPause((int)$incident->getId());
     }
 
     /**

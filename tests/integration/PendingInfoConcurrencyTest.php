@@ -6,13 +6,17 @@ declare(strict_types=1);
  * PendingInfoConcurrencyTest (T-PAUSE-30)
  *
  * Certifica, contra MariaDB real y con DOS CONEXIONES PDO independientes, la
- * serialización de las dos reanudaciones simultáneas del módulo 11 (caso límite §6.2 del
- * análisis funcional, RF-02.1, RF-02.2):
+ * serialización de las reanudaciones simultáneas del módulo 11 (caso límite §6.2 del
+ * análisis funcional, RF-02.2, RF-02.3):
  *
  *   - `IncidentPauseService::resumePendingInfoManually()` — la reanudación manual del
- *     técnico o del coordinador.
- *   - `IncidentPauseService::handleSiteCommentReactivation()` — la reactivación
- *     automática disparada por el comentario público de la sede.
+ *     técnico in situ y la del coordinador con destino explícito: las DOS únicas formas
+ *     de cerrar una pausa por acto humano.
+ *   - La reactivación automática por comentario público de la sede quedó DEROGADA por la
+ *     enmienda del Product Owner E-1 (2026-10-11), así que un comentario ya no compite
+ *     por la fila: el grupo 2 enfrenta ahora a las dos reanudaciones explícitas que sí
+ *     conviven en producción (el técnico delante de la máquina y la coordinación desde
+ *     central) y comprueba que el vencimiento contractual sólo se desplaza una vez.
  *
  * Qué prueba cada capa (declarado para no vender más de lo medido):
  *   1. **El bloqueo existe y muerde.** Con una conexión sosteniendo la fila del expediente,
@@ -428,49 +432,57 @@ $assert(
 );
 
 // =========================================================================
-// GRUPO 2: Carrera de la reactivación por comentario de sede (RF-02.1)
+// GRUPO 2: Carrera entre las dos reanudaciones EXPLÍCITAS (RF-02.2, RF-02.3)
+//          El comentario de sede fue derogado como camino de transición (E-1).
 // =========================================================================
-echo "\n--- Grupo 2: Reanudación manual contra la reactivación del comentario de sede ---\n";
+echo "\n--- Grupo 2: Reanudación del técnico contra la reanudación del coordinador ---\n";
 
 $commentCursor = $historyCursor($commentIncidentId);
-$siteComment   = 'Buenos días, la sala ya está abierta y el conserje tiene la llave.';
 
 $pdoA->beginTransaction();
 $lockStmt = $pdoA->prepare('SELECT `id` FROM `incidents` WHERE `id` = :id FOR UPDATE');
 $lockStmt->execute([':id' => $commentIncidentId]);
 
-$commentLoser = $captureThrowable(static fn () => $serviceB->handleSiteCommentReactivation(
+// La petición perdedora es ahora la de coordinación, que reanudaría con destino
+// explícito ASIGNADA (el técnico debe desplazarse de nuevo, RF-02.3).
+$commentLoser = $captureThrowable(static fn () => $serviceB->resumePendingInfoManually(
     $commentIncidentId,
-    $siteComment,
-    9001
+    $coordinatorId,
+    IncidentStatus::ASSIGNED,
+    'Reanudación de coordinación de la petición perdedora.'
 ));
 
 $commentLockWaitCode = $commentLoser instanceof PDOException ? (int)($commentLoser->errorInfo[1] ?? 0) : 0;
 
 $assert(
-    '2.1 La reactivación del comentario también espera el bloqueo por fila de la otra petición',
+    '2.1 La reanudación de coordinación espera el bloqueo por fila de la otra petición (1205)',
     $commentLoser instanceof PDOException
     && ($commentLockWaitCode === 1205 || str_contains($commentLoser->getMessage(), 'Lock wait timeout')),
     $commentLoser === null
-        ? 'la reactivación no esperó: ese camino no está serializado'
+        ? 'la coordinación no esperó: ese camino no está serializado'
         : $commentLoser::class . ': ' . $commentLoser->getMessage()
 );
 
 $assert(
-    '2.2 El comentario de la petición perdedora no deja ni rastro ni transición',
+    '2.2 La petición perdedora no deja ni rastro ni transición mientras espera',
     $resumeTraceCount($commentIncidentId, $commentCursor) === 0
     && ($incidentRow($commentIncidentId)['status'] ?? '') === 'PENDING_INFO'
 );
 
-$commentWinnerDto = $serviceA->handleSiteCommentReactivation($commentIncidentId, $siteComment, 9001);
+$commentWinnerDto = $serviceA->resumePendingInfoManually(
+    $commentIncidentId,
+    $technicianId,
+    IncidentStatus::IN_PROGRESS,
+    'Reanudación del técnico in situ de la petición ganadora.'
+);
 $pdoA->commit();
 
 $commentRow = $incidentRow($commentIncidentId);
 
 $assert(
-    '2.3 La reactivación ganadora cierra la pausa en una sola transición',
+    '2.3 La reanudación ganadora cierra la pausa en una sola transición hacia su destino',
     $commentWinnerDto->isSlaPaused === false
-    && in_array($commentWinnerDto->status, [IncidentStatus::IN_PROGRESS, IncidentStatus::ASSIGNED], true)
+    && $commentWinnerDto->status === IncidentStatus::IN_PROGRESS
     && ($commentRow['status'] ?? '') === $commentWinnerDto->status->value
     && ($commentRow['paused_at'] ?? null) === null
     && $resumeTraceCount($commentIncidentId, $commentCursor) === 1,
@@ -481,14 +493,20 @@ $assert(
     )
 );
 
-$commentLoserRetry = $serviceB->handleSiteCommentReactivation($commentIncidentId, $siteComment, 9001);
+$commentLoserRetry = $captureThrowable(static fn () => $serviceB->resumePendingInfoManually(
+    $commentIncidentId,
+    $coordinatorId,
+    IncidentStatus::ASSIGNED,
+    'Reintento de coordinación de la petición perdedora.'
+));
 
 $assert(
-    '2.4 El reintento de la perdedora devuelve el estado real sin repetir la transición',
-    $commentLoserRetry->isSlaPaused === false
-    && $commentLoserRetry->status === $commentWinnerDto->status
+    '2.4 El reintento de la perdedora se resuelve con la verdad: no queda pausa que cerrar',
+    $commentLoserRetry instanceof VendGuard\Core\Domain\Exception\InvalidTransitionException
     && $resumeTraceCount($commentIncidentId, $commentCursor) === 1,
-    $commentLoserRetry->status->value
+    $commentLoserRetry === null
+        ? 'la coordinación reabrió una transición ya cerrada'
+        : $commentLoserRetry::class
 );
 
 // =========================================================================

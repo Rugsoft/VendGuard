@@ -387,29 +387,50 @@ try {
 
     usleep(1_100_000); // Garantiza un intervalo de al menos un segundo real (RNF-01).
 
-    // Orillas del reloj real: el servicio lee su instante en algún punto entre ambas, de
-    // modo que la expectativa se expresa como rango de tiempo hábil (cierre de F-3).
-    $hotBefore = new DateTimeImmutable('now', $madrid);
     $res = $router->dispatch(new Request(
         method: 'POST',
         path: $commentPath($cycleId),
         parsedBody: ['comment_text' => 'La conserjería ya ha abierto la sala; el técnico puede acceder ahora mismo.'],
         headers: $authHeader($siteToken($cycleLocationId))
     ));
+    $hotCommentData = $res->getDecodedBody()['data'] ?? [];
+    $hotCommentRow  = $incidentRow($cycleId);
+
+    $assert(
+        '1.5 La respuesta de la sede NO reactiva el expediente: informa y deja la pausa viva (enmienda E-1)',
+        $res->getStatusCode() === 201
+            && !array_key_exists('auto_resumed', $hotCommentData)
+            && !array_key_exists('pause', $hotCommentData)
+            && ($hotCommentData['incident']['status'] ?? '') === 'PENDING_INFO'
+            && ($hotCommentRow['status'] ?? '') === 'PENDING_INFO'
+            && ($hotCommentRow['paused_at'] ?? null) === ($cycleRow['paused_at'] ?? null)
+    );
+
+    // La pausa la cierra ahora el técnico in situ (RF-02.2): es su reanudación MANUAL la
+    // que desplaza el vencimiento contractual del primer intervalo (RF-03.3).
+    // Orillas del reloj real: el servicio lee su instante en algún punto entre ambas, de
+    // modo que la expectativa se expresa como rango de tiempo hábil (cierre de F-3).
+    $hotBefore = new DateTimeImmutable('now', $madrid);
+    $res = $router->dispatch(new Request(
+        method: 'POST',
+        path: $resumePath($cycleId),
+        parsedBody: ['resume_note' => 'La sede avisa de que la sala está abierta; reanudo la intervención in situ.'],
+        headers: $authHeader($technicianToken)
+    ));
     $hotAfter = new DateTimeImmutable('now', $madrid);
     $hotData = $res->getDecodedBody()['data'] ?? [];
 
     $assert(
-        '1.5 El comentario de sede en caliente reactiva el expediente a IN_PROGRESS (RF-02.1)',
-        $res->getStatusCode() === 201
-            && ($hotData['auto_resumed'] ?? false) === true
-            && ($hotData['pause']['status'] ?? '') === 'IN_PROGRESS'
-            && ($hotData['incident']['status'] ?? '') === 'IN_PROGRESS'
+        '1.5.b La reanudación manual del técnico cierra el primer intervalo y reactiva el reloj (RF-02.2)',
+        $res->getStatusCode() === 200
+            && ($hotData['status'] ?? '') === 'IN_PROGRESS'
+            && ($hotData['is_sla_paused'] ?? true) === false
+            && $hotData['paused_at'] === null
     );
 
     $hotRow              = $incidentRow($cycleId);
     $firstIntervalSeconds = (int)($hotRow['total_pending_info_seconds'] ?? 0);
-    $shifted1            = (string)($hotData['pause']['sla_target_at_shifted'] ?? '');
+    $shifted1            = (string)($hotData['sla_target_at_shifted'] ?? '');
     $shifted1Seconds     = $shifted1 === '' ? -1 : $deadlineSeconds($commercialDeadline, $shifted1);
     // El vencimiento avanza el tiempo HÁBIL perdido en la ventana de pausa, calculado por el
     // calendario independiente del arnés: con el reloj real dentro de la jornada coincide con
@@ -445,7 +466,7 @@ try {
     );
     $assert(
         '1.8 El contrato conserva los segundos en base y redondea los minutos de la interfaz (RNF-01)',
-        (int)($hotData['pause']['accumulated_pause_minutes'] ?? -1) === (int)round($firstIntervalSeconds / 60)
+        (int)($hotData['accumulated_pause_minutes'] ?? -1) === (int)round($firstIntervalSeconds / 60)
     );
 
     $res = $router->dispatch(new Request(
@@ -536,16 +557,14 @@ try {
         count($manualRows) === 1
     );
 
-    $siteRows = array_values(array_filter(
+    $anonymousRows = array_values(array_filter(
         $historyRows($cycleId),
-        static fn (array $row): bool => $row['from_status'] === 'PENDING_INFO'
-            && $row['to_status'] === 'IN_PROGRESS'
-            && $row['user_id'] === null
+        static fn (array $row): bool => $row['from_status'] === 'PENDING_INFO' && $row['user_id'] === null
     ));
     $assert(
-        '1.14 La reactivación automática queda auditada como actor de sede sin usuario interno (Art. III)',
-        count($siteRows) === 1
-            && str_contains((string)($siteRows[0]['action_note'] ?? ''), sprintf('actor de sede #%d', $cycleLocationId))
+        '1.14 Ninguna reanudación del ciclo quedó sin usuario interno: la reactivación automática está derogada (E-1, Art. III)',
+        $anonymousRows === [],
+        'Filas anónimas encontradas: ' . json_encode($anonymousRows)
     );
 
     // =========================================================================
@@ -587,28 +606,49 @@ try {
         (int)$pdo->query("SELECT TIMESTAMPDIFF(SECOND, `paused_at`, NOW()) FROM `incidents` WHERE `id` = {$coldId}")->fetchColumn() >= 3600
     );
 
-    $coldBefore = new DateTimeImmutable('now', $madrid);
     $res = $router->dispatch(new Request(
         method: 'POST',
         path: $commentPath($coldId),
         parsedBody: ['comment_text' => 'Recepción confirma que el responsable del centro ya firmó la autorización de acceso.'],
         headers: $authHeader($siteToken($coldLocationId))
     ));
-    $coldAfter = new DateTimeImmutable('now', $madrid);
-    $coldData = $res->getDecodedBody()['data'] ?? [];
+    $coldCommentRow = $incidentRow($coldId);
 
     $assert(
-        '2.3 La respuesta desfasada devuelve el expediente a ASSIGNED con auto_resumed (RF-02.1)',
+        '2.3 La respuesta desfasada tampoco reactiva: el expediente sigue pausado con su vencimiento intacto (E-1)',
         $res->getStatusCode() === 201
-            && ($coldData['auto_resumed'] ?? false) === true
-            && ($coldData['pause']['status'] ?? '') === 'ASSIGNED'
-            && ($coldData['incident']['status'] ?? '') === 'ASSIGNED'
-            && ($coldData['pause']['ticket_code'] ?? '') === $coldTicketCode
+            && !array_key_exists('auto_resumed', $res->getDecodedBody()['data'] ?? [])
+            && ($coldCommentRow['status'] ?? '') === 'PENDING_INFO'
+            && ($coldCommentRow['paused_at'] ?? null) === $coldPausedAt
+            && ($coldCommentRow['sla_target_at'] ?? '') === $commercialDeadline
+    );
+
+    // La pausa desfasada la cierra la coordinación con destino explícito (RF-02.3): el
+    // expediente vuelve a ASIGNADA y el vencimiento se desplaza el tiempo hábil perdido.
+    $coldBefore = new DateTimeImmutable('now', $madrid);
+    $res = $router->dispatch(new Request(
+        method: 'POST',
+        path: $coordinatorResumePath($coldId),
+        parsedBody: [
+            'target_status' => 'ASSIGNED',
+            'resume_note'   => 'La autorización llegó tarde: el técnico debe desplazarse de nuevo a la sede.',
+        ],
+        headers: $authHeader($coordinatorToken)
+    ));
+    $coldAfter = new DateTimeImmutable('now', $madrid);
+    $coldData  = $res->getDecodedBody()['data'] ?? [];
+
+    $assert(
+        '2.3.b La coordinación devuelve el expediente a ASSIGNED y desplaza el vencimiento (RF-02.3, RF-03.3)',
+        $res->getStatusCode() === 200
+            && ($coldData['status'] ?? '') === 'ASSIGNED'
+            && ($coldData['ticket_code'] ?? '') === $coldTicketCode
+            && $coldData['paused_at'] === null
     );
 
     $coldRow     = $incidentRow($coldId);
     $coldSeconds = (int)($coldRow['total_pending_info_seconds'] ?? 0);
-    $coldShifted = (string)($coldData['pause']['sla_target_at_shifted'] ?? '');
+    $coldShifted = (string)($coldData['sla_target_at_shifted'] ?? '');
     $coldShiftSeconds = $coldShifted === '' ? -1 : $deadlineSeconds($commercialDeadline, $coldShifted);
     [$coldShiftMin, $coldShiftMax] = BusinessCalendar::shiftRange($coldPausedAt, $coldBefore, $coldAfter);
     $assert(
@@ -620,7 +660,7 @@ try {
             && $coldShiftSeconds <= $coldSeconds
             && ($coldRow['sla_target_at'] ?? '') === $coldShifted
             && $coldRow['paused_at'] === null
-            && (int)($coldData['pause']['accumulated_pause_minutes'] ?? -1) === (int)round($coldSeconds / 60),
+            && (int)($coldData['accumulated_pause_minutes'] ?? -1) === (int)round($coldSeconds / 60),
         sprintf(
             'acumulado=%d s, desplazamiento=%d s, tiempo hábil esperado=[%d..%d] s',
             $coldSeconds,
@@ -644,11 +684,12 @@ try {
         $historyRows($coldId),
         static fn (array $row): bool => $row['from_status'] === 'PENDING_INFO'
             && $row['to_status'] === 'ASSIGNED'
-            && str_contains((string)($row['action_note'] ?? ''), 'fuera de la ventana de 60 minutos')
     ));
     $assert(
-        '2.6 El rastro explica la reactivación desfasada y actúa sin usuario interno (Art. III)',
-        count($coldRows) === 1 && $coldRows[0]['user_id'] === null
+        '2.6 El rastro del retorno a ASIGNADA lo firma la coordinación, no un actor anónimo (Art. III)',
+        count($coldRows) === 1
+            && (int)($coldRows[0]['user_id'] ?? 0) === $coordinatorId
+            && !str_contains((string)($coldRows[0]['action_note'] ?? ''), 'ventana de 60 minutos')
     );
 
     // =========================================================================

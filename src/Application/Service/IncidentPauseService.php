@@ -40,7 +40,7 @@ use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
  * aislado como función pura de calendario: sin persistencia, sin red y sin
  * dependencias externas, de modo que el cálculo sea verificable al segundo.
  * Las tareas siguientes (T-PAUSE-07 a T-PAUSE-09) añadirán a esta misma clase la
- * orquestación con repositorios (reloj sanitario, reactivación condicional y
+ * orquestación con repositorios (reloj sanitario, reanudación manual y
  * cancelación por inactividad) sin que la firma de este método cambie.
  *
  * Regla de negocio que implementa:
@@ -110,15 +110,6 @@ final class IncidentPauseService
      */
     public const ACTION_SANITARY_QUARANTINE_AUTO_TRIGGERED = 'SANITARY_QUARANTINE_AUTO_TRIGGERED';
 
-    /** Longitud mínima de un comentario de sede para que active la reanudación (RF-02.1). */
-    public const MIN_SITE_COMMENT_LENGTH = 5;
-
-    /**
-     * Ventana de "respuesta en caliente": por debajo de una hora el técnico sigue
-     * presumiblemente en la sede y la avería vuelve a `IN_PROGRESS` (RF-02.1).
-     */
-    public const HOT_REACTIVATION_WINDOW_SECONDS = 3600;
-
     /**
      * Longitud mínima del motivo de cancelación por inactividad (RF-04.3, Art. V.1).
      *
@@ -173,7 +164,7 @@ final class IncidentPauseService
     /**
      * El orden de los parámetros conserva la firma ya publicada por T-PAUSE-06/07
      * (ajustes, auditoría) y añade al final el repositorio de incidencias que exige
-     * la reactivación condicional de T-PAUSE-08, para no romper a los consumidores
+     * la reanudación manual de T-PAUSE-08, para no romper a los consumidores
      * existentes. Todos los colaboradores son opcionales y se resuelven de forma
      * perezosa: un `new IncidentPauseService()` sigue siendo una calculadora de
      * calendario sin E/S.
@@ -477,158 +468,6 @@ final class IncidentPauseService
     }
 
     /**
-     * Reactivación condicional inteligente tras un comentario público de la sede
-     * (Algoritmo 2, RF-02.1, RF-05.3, Art. V.1).
-     *
-     * El portal de sede persiste el comentario y llama aquí: este método decide a qué
-     * estado vuelve la avería y lo deja grabado, sin volver a escribir el mensaje.
-     *
-     * Regla de destino, tal y como fija la especificación:
-     * - **Vuelve a `IN_PROGRESS`** sólo si la respuesta llega en caliente (< 60 minutos),
-     *   la avería sigue con técnico asignado, ese técnico no tiene otra intervención en
-     *   curso y nadie la reasignó durante la pausa. Es la única combinación en la que el
-     *   sistema puede afirmar sin mentir que el profesional sigue delante de la máquina.
-     * - **Vuelve a `ASSIGNED`** en el resto de casos con técnico responsable: respuesta
-     *   desfasada, técnico ocupado en otra avería o avería reasignada durante la pausa.
-     *   Devolverla a "En curso" sería una ficción operativa: obliga al técnico a pulsar
-     *   "Iniciar" al personarse.
-     * - **Reingresa a `REGISTERED`** si la avería no tiene técnico responsable (caso
-     *   límite §6.4, cierre de F-5): sin responsable, `ASSIGNED` describiría a un técnico
-     *   que no existe y el expediente vuelve a la cola de asignación formal, que es lo
-     *   que la bandeja de triaje lee como «pendiente de asignar».
-     *
-     * Además, cierra el intervalo de pausa (acumulando sus segundos exactos en el
-     * agregado), desplaza el vencimiento contractual en horario comercial de la sede
-     * con el Algoritmo 3 y deja el rastro inmutable de la reanudación en
-     * `incident_history` (Art. III).
-     *
-     * Idempotencia (RF-05.3): un comentario corto, un expediente que ya no está en
-     * `PENDING_INFO` —porque el primer mensaje de la ráfaga ya reanudó— o un expediente
-     * inexistente no provocan escrituras; los casos repetidos devuelven el estado real
-     * del expediente en el mismo contrato de respuesta.
-     *
-     * **Serialización (caso límite §6.2):** el expediente se lee bajo bloqueo exclusivo
-     * por fila dentro de una transacción, de modo que la carrera con la reanudación
-     * manual —el técnico pulsando «Reanudar intervención» en el mismo segundo— deja a
-     * una sola operación cerrar la pausa: la que llega después lee el estado ya
-     * confirmado y no repite la transición ni el rastro inmutable (Art. III).
-     *
-     * @param int $incidentId Incidencia sobre la que se publica el comentario.
-     * @param string $commentText Texto publicado por la sede.
-     * @param int $siteUserId Referencia del actor de sede que publica (portal).
-     * @param DateTimeImmutable|null $now Instante de referencia de la reanudación. Es una
-     *   costura de inyectabilidad —la misma que usan `isProlongedInactivitySince()` y la
-     *   ficha de detalle— y gobierna DOS decisiones que deben medirse sobre el mismo
-     *   instante: la ventana de calidez de 60 minutos (RF-02.1) y el tiempo hábil perdido
-     *   durante la pausa, que es lo que desplaza el vencimiento contractual (RF-03.3). Sin
-     *   él se usa el reloj real.
-     * @return IncidentPauseResponseDto Estado resultante en el contrato canónico del módulo.
-     *
-     * @throws InvalidArgumentException Si los identificadores no son válidos.
-     * @throws \DomainException Si la incidencia no existe.
-     * @throws RuntimeException Si la reanudación no se puede persistir.
-     */
-    public function handleSiteCommentReactivation(
-        int $incidentId,
-        string $commentText,
-        int $siteUserId,
-        ?DateTimeImmutable $now = null
-    ): IncidentPauseResponseDto {
-        if ($incidentId < 1) {
-            throw new InvalidArgumentException(
-                'La reactivación condicional exige una incidencia persistida (id positivo).'
-            );
-        }
-
-        if ($siteUserId < 1) {
-            throw new InvalidArgumentException(
-                'La reactivación condicional exige la referencia del actor de sede que publica el comentario.'
-            );
-        }
-
-        $now ??= new DateTimeImmutable();
-
-        // La lectura del expediente va bajo bloqueo exclusivo por fila y dentro de una
-        // transacción (caso límite §6.2): si el técnico pulsa «Reanudar intervención» en
-        // el mismo segundo en que la sede publica su respuesta, la segunda operación en
-        // entrar lee el expediente DESPUÉS de que la primera haya confirmado —ya no hay
-        // pausa que cerrar— y el contrato devuelve la verdad del expediente sin repetir
-        // la transición ni duplicar el rastro inmutable (Art. III).
-        return $this->transactions()->runInTransaction(function () use (
-            $incidentId,
-            $commentText,
-            $siteUserId,
-            $now
-        ): IncidentPauseResponseDto {
-            $incident = $this->lockIncident($incidentId);
-
-            if ($incident === null) {
-                throw new \DomainException(sprintf(
-                    'No se encontró ninguna incidencia con ID %d para procesar el comentario de sede.',
-                    $incidentId
-                ));
-            }
-
-            $normalizedComment = trim($commentText);
-
-            // Sin reactivación: comentario sin sustancia descriptiva, expediente que no
-            // está en pausa o que ya fue reanudado por el primer mensaje de una ráfaga
-            // (o por la reanudación con la que se perdió la carrera). Nada se escribe y
-            // el contrato devuelve la verdad del expediente.
-            if (mb_strlen($normalizedComment) < self::MIN_SITE_COMMENT_LENGTH || !$incident->isPendingInfo()) {
-                return $this->buildCurrentStateResponse($incident, $now);
-            }
-
-            $pauseDurationSeconds = $incident->currentPauseDurationSeconds($now);
-            $assignedTechnicianId = $incident->getAssignedTechnicianId();
-            $technicianIsBusy = $assignedTechnicianId !== null
-                && $this->technicianHasAnotherActiveIntervention($assignedTechnicianId, $incidentId);
-            $reassignedDuringPause = $this->wasReassignedDuringCurrentPause($incident);
-            $isHotResponse = $pauseDurationSeconds < self::HOT_REACTIVATION_WINDOW_SECONDS;
-
-            $targetStatus = $assignedTechnicianId === null
-                ? IncidentStatus::REGISTERED
-                : (($isHotResponse && !$technicianIsBusy && !$reassignedDuringPause)
-                    ? IncidentStatus::IN_PROGRESS
-                    : IncidentStatus::ASSIGNED);
-
-            $originalSlaTargetAt = $incident->getSlaTargetAt();
-
-            // Rastro inmutable de solo adición. El actor va como `null` a propósito: el
-            // responsable de sede no es un usuario interno y `incident_history.user_id` es
-            // una clave foránea a `users`; su referencia viaja en la nota para no perder
-            // trazabilidad ni violar la integridad referencial (Art. III).
-            [$resumed, $shiftedSlaTargetAt] = $this->closePauseInterval(
-                $incident,
-                $targetStatus,
-                $pauseDurationSeconds,
-                null,
-                fn (?string $shiftedDeadline): string => $this->reactivationNote(
-                    $targetStatus,
-                    $pauseDurationSeconds,
-                    $technicianIsBusy,
-                    $reassignedDuringPause,
-                    $siteUserId,
-                    $originalSlaTargetAt,
-                    $shiftedDeadline
-                ),
-                $now,
-                'tras el comentario de sede'
-            );
-
-            return new IncidentPauseResponseDto(
-                incidentId: (int)$resumed->getId(),
-                ticketCode: $resumed->getTicketCode(),
-                status: $targetStatus,
-                isSlaPaused: false,
-                accumulatedPauseMinutes: (int)round($resumed->getTotalPendingInfoSeconds() / 60),
-                slaTargetAtOriginal: $originalSlaTargetAt,
-                slaTargetAtShifted: $shiftedSlaTargetAt
-            );
-        });
-    }
-
-    /**
      * Declara la pausa por bloqueo imputable a la sede y deja el rastro inmutable
      * (RF-01.1 a RF-01.4, RNF-02, Art. III y Art. V.1).
      *
@@ -748,9 +587,9 @@ final class IncidentPauseService
      *
      * Cierra el intervalo vivo, acumula sus segundos exactos en el agregado, desplaza
      * el vencimiento contractual en horario comercial de la sede (Algoritmo 3) y sella
-     * el rastro inmutable. A diferencia de la reactivación por comentario de sede
-     * (RF-02.1), aquí no hay heurística de "calor": el destino lo decide quien reanuda
-     * y es su declaración la que queda auditada.
+     * el rastro inmutable. No hay heurística de "calor" ni inferencia de estado: el
+     * destino lo decide quien reanuda (RF-02.2/RF-02.3) y es su declaración la que
+     * queda auditada.
      *
      * **Destino legal acotado:** sólo `IN_PROGRESS` (el técnico está delante de la
      * máquina), `ASSIGNED` (debe desplazarse de nuevo) o `REGISTERED` (el expediente no
@@ -762,9 +601,8 @@ final class IncidentPauseService
      *
      * **Serialización (caso límite §6.2):** el expediente se lee bajo bloqueo exclusivo
      * por fila dentro de la transacción que ya envuelve la reanudación, así que la
-     * guarda de estado se evalúa sobre el presente —no sobre una foto que la reactivación
-     * por comentario de sede pudo cambiar entre medias— y una sola transición sobrevive a
-     * la carrera simultánea.
+     * guarda de estado se evalúa sobre el presente —no sobre una foto que otra reanudación
+     * pudo cambiar entre medias— y una sola transición sobrevive a la carrera simultánea.
      *
      * @param int $incidentId Incidencia pausada que se reanuda.
      * @param int $actorUserId Usuario interno que reanuda (auditoría, Art. III).
@@ -1201,9 +1039,9 @@ final class IncidentPauseService
      * cuando el repositorio declara esa capacidad (puerto `IncidentRowLockRepositoryInterface`,
      * implementado por `PdoIncidentRepository`).
      *
-     * Las dos reanudaciones del módulo —la manual del técnico/coordinación (RF-02.2) y la
-     * automática por comentario de sede (RF-02.1)— son las únicas transiciones que pueden
-     * dispararse a la vez sobre el MISMO expediente, y el análisis funcional exige
+     * Las reanudaciones del módulo —la del técnico in situ y la del coordinador— son las
+     * únicas transiciones que pueden dispararse a la vez sobre el MISMO expediente, y el
+     * análisis funcional exige
      * resolver esa carrera atómicamente (caso límite §6.2). Leer la fila bloqueada es lo
      * que hace que la segunda operación vea el resultado de la primera.
      *
@@ -1254,69 +1092,11 @@ final class IncidentPauseService
     }
 
     /**
-     * ¿Tiene el técnico asignado otra avería en intervención activa en este momento?
-     *
-     * Sólo cuenta `IN_PROGRESS`: es lo único que prueba que el profesional está
-     * físicamente trabajando en otra máquina. `PENDING_PARTS` significa esperando un
-     * repuesto, no delante de un equipo, así que no impide reanudar en curso.
-     */
-    private function technicianHasAnotherActiveIntervention(int $technicianId, int $currentIncidentId): bool
-    {
-        foreach ($this->incidents()->findAssignedToTechnician(
-            $technicianId,
-            [IncidentStatus::IN_PROGRESS->value]
-        ) as $incident) {
-            if ($incident->getId() !== null && $incident->getId() !== $currentIncidentId) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * ¿Se reasignó la avería a otro técnico mientras estaba en pausa? (RF-02.1)
-     *
-     * Marcador estructural: la reasignación conserva el estado operativo (no lo
-     * retrocede ni reescribe `assigned_at`), de modo que deja en `incident_history` una
-     * fila con origen y destino `PENDING_INFO` posterior al inicio de la pausa. Ninguna
-     * otra transición del expediente produce esa fila.
-     *
-     * **Alcance real hoy:** `PdoIncidentRepository::assign()` todavía rechaza reasignar
-     * un ticket en `PENDING_INFO` (RF-06.3 es alcance de T-PAUSE-13/19), así que esta
-     * comprobación siempre devuelve `false` en producción mientras esa puerta no se
-     * abra. Se implementa ya para que la regla muerda en cuanto exista la reasignación
-     * en pausa y para no dejar el criterio a medias.
-     */
-    private function wasReassignedDuringCurrentPause(Incident $incident): bool
-    {
-        $pausedAt = $this->parseDateTime($incident->getPausedAt());
-        if ($pausedAt === null || $incident->getId() === null) {
-            return false;
-        }
-
-        foreach ($this->incidents()->getHistory($incident->getId()) as $event) {
-            if ($event->getFromStatus() !== IncidentStatus::PENDING_INFO->value
-                || $event->getToStatus() !== IncidentStatus::PENDING_INFO->value
-            ) {
-                continue;
-            }
-
-            $occurredAt = $this->parseDateTime($event->getCreatedAt());
-            if ($occurredAt !== null && $occurredAt >= $pausedAt) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
      * Cierra el intervalo de pausa vivo: transición, acumulación de segundos, desplazamiento
      * comercial del vencimiento y rastro inmutable en `incident_history` (RF-02.4, RF-03.3, Art. III).
      *
-     * Los dos caminos que reanudan una pausa —la reactivación automática por comentario de
-     * sede y la reanudación manual de técnico o coordinador— comparten este cierre para que
+     * Los dos caminos que reanudan una pausa —la del técnico in situ y la del coordinador—
+     * comparten este cierre para que
      * la duración auditada, el acumulador descontable por MTTR (RF-04.1) y el vencimiento
      * desplazado no puedan divergir entre caminos. La única diferencia es quién queda
      * anotado como actor y qué nota viaja al historial.
@@ -1396,30 +1176,6 @@ final class IncidentPauseService
         );
 
         return [$resumed, $shiftedSlaTargetAt];
-    }
-
-    /**
-     * Proyección del estado real del expediente cuando no procede reactivar nada: un
-     * comentario sin sustancia, un expediente que no está en pausa o la segunda llamada
-     * de una ráfaga. La cifra acumulada incluye el intervalo vivo para que el reloj
-     * congelado que pinta la interfaz no pierda la espera en curso.
-     */
-    private function buildCurrentStateResponse(Incident $incident, DateTimeImmutable $now): IncidentPauseResponseDto
-    {
-        $liveSeconds = $incident->isPaused() ? $incident->currentPauseDurationSeconds($now) : 0;
-
-        return new IncidentPauseResponseDto(
-            incidentId: (int)$incident->getId(),
-            ticketCode: $incident->getTicketCode(),
-            status: $incident->getStatus(),
-            isSlaPaused: $incident->isPendingInfo(),
-            accumulatedPauseMinutes: (int)round(($incident->getTotalPendingInfoSeconds() + $liveSeconds) / 60),
-            slaTargetAtOriginal: $incident->getSlaTargetAt(),
-            slaTargetAtShifted: $incident->getSlaTargetAt(),
-            pausedAt: $incident->getPausedAt(),
-            reasonCategory: $incident->getPendingInfoReasonCategory(),
-            reasonText: $incident->getPendingInfoReasonText()
-        );
     }
 
     /**
@@ -1553,56 +1309,4 @@ final class IncidentPauseService
         }
     }
 
-    /**
-     * Nota inmutable que acompaña a la reanudación automática.
-     *
-     * Se evita a propósito el marcador canónico ` Motivo: ` que
-     * `CoordinatorIncidentDetailService` lee como motivo de reasignación: reutilizarlo
-     * contaminaría el bloque de técnico del modal de detalle.
-     */
-    private function reactivationNote(
-        IncidentStatus $targetStatus,
-        int $pauseDurationSeconds,
-        bool $technicianIsBusy,
-        bool $reassignedDuringPause,
-        int $siteUserId,
-        ?string $originalSlaTargetAt,
-        ?string $shiftedSlaTargetAt
-    ): string {
-        $note = sprintf(
-            'Reactivación automática por comentario público de sede (referencia del actor de sede #%d) tras %d min en pausa. ',
-            $siteUserId,
-            intdiv($pauseDurationSeconds, 60)
-        );
-
-        if ($targetStatus === IncidentStatus::REGISTERED) {
-            $note .= 'La avería vuelve a registrada sin técnico responsable: requiere una asignación formal antes de poder iniciar trabajos.';
-        } elseif ($targetStatus === IncidentStatus::IN_PROGRESS) {
-            $note .= 'Respuesta en caliente con el técnico asignado libre: la intervención se reanuda en curso.';
-        } else {
-            $causes = [];
-            if ($pauseDurationSeconds >= self::HOT_REACTIVATION_WINDOW_SECONDS) {
-                $causes[] = 'la respuesta llegó fuera de la ventana de 60 minutos';
-            }
-            if ($technicianIsBusy) {
-                $causes[] = 'el técnico asignado ya tenía otra intervención en curso';
-            }
-            if ($reassignedDuringPause) {
-                $causes[] = 'la avería fue reasignada durante la pausa';
-            }
-
-            $note .= 'La avería se devuelve a asignada para un inicio presencial';
-            $note .= $causes !== [] ? ': ' . implode('; ', $causes) . '.' : '.';
-        }
-
-        if ($originalSlaTargetAt !== null && $shiftedSlaTargetAt !== null) {
-            $note .= sprintf(
-                ' SLA contractual desplazado de %s a %s en horario comercial de la sede.',
-                $originalSlaTargetAt,
-                $shiftedSlaTargetAt
-            );
-        }
-
-        return $note;
-    }
 }

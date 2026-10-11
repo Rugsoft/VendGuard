@@ -419,8 +419,9 @@ $assert(
 // ─────────────────────────────────────────────────────────────────────────────────
 echo "\n{$cyan}--- Bloque B: funcionales (ramas no cubiertas por la batería) ---{$reset}\n";
 
-// B.1 RF-02.1 — El técnico ya inició otra parada: la respuesta en caliente NO puede
-//             devolver el expediente a EN CURSO, porque nadie está delante del equipo.
+// B.1 RF-02.1 enmendado (E-1) — El técnico ya inició otra parada: la respuesta de la sede
+//             NO transiciona nada; devuelve la avería a ASIGNADA la reanudación MANUAL
+//             de coordinación, porque nadie está delante del equipo.
 $busyPaused = $createTicket($techId, 'AUTO', true);
 $busyOther = $createTicket($techId);
 $busySite = $siteToken($busyPaused['site_code']);
@@ -432,15 +433,25 @@ $res = $api('PATCH', "/api/technician/incidents/{$busyOther['id']}/start", [], $
 $assert('B.1.2 Premisa: el mismo técnico arranca otra intervención de su jornada', $res->getStatusCode() === 200 && ($row($busyOther['id'])['status'] ?? '') === 'IN_PROGRESS');
 
 $res = $busySite !== null ? $siteComment($busyPaused['ticket'], 'La sala ya está abierta, puede pasar cuando quiera.', $busySite) : null;
-$busyBody = $res?->getDecodedBody() ?? [];
 $assert(
-    'B.1.3 RF-02.1: con el técnico ocupado en otra parada y respuesta en caliente, el retorno es ASIGNADA (no EN CURSO)',
-    ($busyBody['data']['pause']['status'] ?? $busyBody['data']['incident']['status'] ?? '') === 'ASSIGNED',
-    'estado observado: ' . ($busyBody['data']['pause']['status'] ?? $busyBody['data']['incident']['status'] ?? 'n/a')
+    'B.1.3 RF-02.1 enmendado (E-1): con el técnico ocupado, el mensaje de la sede deja la pausa viva (no hay transición automática)',
+    $res !== null && in_array($res->getStatusCode(), [200, 201], true)
+        && ($row($busyPaused['id'])['status'] ?? '') === 'PENDING_INFO'
+        && ($row($busyPaused['id'])['paused_at'] ?? null) !== null,
+    'estado observado: ' . ($row($busyPaused['id'])['status'] ?? 'n/a')
 );
+
+$res = $api('POST', "/api/coordinator/incidents/{$busyPaused['id']}/resume-pending-info", [
+    'target_status' => 'ASSIGNED',
+    'resume_note'   => 'El técnico está en otra parada: la avería vuelve a asignada para un inicio presencial.',
+], $coordinatorToken);
 $assert(
-    'B.1.4 RF-02.1: la parada queda cerrada y el expediente ya no figura en pausa',
-    ($row($busyPaused['id'])['status'] ?? '') === 'ASSIGNED' && ($row($busyPaused['id'])['paused_at'] ?? null) === null
+    'B.1.4 RF-02.3: la coordinación reanuda hacia ASIGNADA (ningún estado afirma que alguien está delante)',
+    $res->getStatusCode() === 200
+        && ($res->getDecodedBody()['data']['status'] ?? '') === 'ASSIGNED'
+        && ($row($busyPaused['id'])['status'] ?? '') === 'ASSIGNED'
+        && ($row($busyPaused['id'])['paused_at'] ?? null) === null,
+    'status=' . $res->getStatusCode() . ' estado=' . ($row($busyPaused['id'])['status'] ?? 'n/a')
 );
 $cleanProbe();
 
@@ -454,10 +465,23 @@ $pauseTicket($orphan['id'], 'PENDING_SITE_AUTHORIZATION', $reason, $techToken);
 $pdo->exec('UPDATE `incidents` SET `paused_at` = DATE_SUB(NOW(), INTERVAL 300 SECOND) WHERE `id` = ' . $orphan['id']);
 $pdo->exec('UPDATE `incidents` SET `assigned_technician_id` = NULL WHERE `id` = ' . $orphan['id']);
 $res = $orphanSite !== null ? $siteComment($orphan['ticket'], 'Aportamos la autorización firmada para entrar a la sala técnica.', $orphanSite) : null;
+$assert(
+    'B.2.0 Premisa enmendada (E-1): la autorización de la sede llega, pero la pausa sigue abierta y sin responsable',
+    $res !== null && in_array($res->getStatusCode(), [200, 201], true)
+        && ($row($orphan['id'])['status'] ?? '') === 'PENDING_INFO'
+        && ($row($orphan['id'])['paused_at'] ?? null) !== null
+        && ($row($orphan['id'])['assigned_technician_id'] ?? null) === null,
+    'estado observado: ' . ($row($orphan['id'])['status'] ?? 'n/a')
+);
+
+$res = $api('POST', "/api/coordinator/incidents/{$orphan['id']}/resume-pending-info", [
+    'target_status' => 'REGISTERED',
+    'resume_note'   => 'La sede aporta la autorización, pero el expediente no tiene técnico responsable: vuelve a la cola de asignación.',
+], $coordinatorToken);
 $orphanStatus = $row($orphan['id'])['status'] ?? '';
 
 $assert(
-    'B.2.1 §6.4: sin técnico responsable la reanudación reingresa a REGISTERED (ni EN CURSO ni ASIGNADA)',
+    'B.2.1 §6.4: sin técnico responsable la reanudación explícita reingresa a REGISTERED (ni EN CURSO ni ASIGNADA)',
     $orphanStatus === 'REGISTERED',
     "estado observado: {$orphanStatus}"
 );
@@ -473,9 +497,11 @@ $orphanResumeHistory = array_values(array_filter(
         && ($row['to_status'] ?? '') === 'REGISTERED'
 ));
 $assert(
-    'B.2.3 Coherencia de estado (cierre de F-5): el rastro sella PENDING_INFO -> REGISTERED, declara la causa y no inventa responsable',
+    'B.2.3 Coherencia de estado (cierre de F-5): el rastro sella PENDING_INFO -> REGISTERED, lo firma la coordinación y no inventa responsable',
     count($orphanResumeHistory) === 1
-        && str_contains((string)($orphanResumeHistory[0]['action_note'] ?? ''), 'sin técnico responsable')
+        && (int)($orphanResumeHistory[0]['user_id'] ?? 0) === $coordinatorId
+        && str_contains((string)($orphanResumeHistory[0]['action_note'] ?? ''), 'Reanudación manual de la intervención')
+        && str_contains((string)($orphanResumeHistory[0]['action_note'] ?? ''), 'Nota:')
         && array_key_exists('assigned_technician_id', $orphanRow)
         && $orphanRow['assigned_technician_id'] === null,
     'estado=' . $orphanStatus . ' técnico=' . json_encode($orphanRow['assigned_technician_id'] ?? null)
@@ -695,14 +721,40 @@ $assert(
     'parada: ' . json_encode($routeStop === null ? null : ['status' => $routeStop['status'], 'paused_at' => $routeStop['paused_at']], JSON_UNESCAPED_UNICODE)
 );
 
-$reactivated = $siteComment($flowTicket, 'Ya hemos abierto la sala de contadores; el técnico puede acceder cuando llegue.', $flowSite);
-$reactivatedData = $reactivated?->getDecodedBody()['data'] ?? [];
+$answered = $siteComment($flowTicket, 'Ya hemos abierto la sala de contadores; el técnico puede acceder cuando llegue.', $flowSite);
+$answeredData = $answered?->getDecodedBody()['data'] ?? [];
 $assert(
-    'C.8 RF-02.1: el comentario de sede en caliente reactiva a EN CURSO con auto_resumed',
-    $reactivated !== null && in_array($reactivated->getStatusCode(), [200, 201], true)
-        && ($reactivatedData['auto_resumed'] ?? false) === true
-        && ($reactivatedData['pause']['status'] ?? '') === 'IN_PROGRESS',
-    'status=' . ($reactivated?->getStatusCode() ?? 'sin respuesta') . ' cuerpo=' . json_encode($reactivatedData['pause']['status'] ?? null)
+    'C.8 RF-02.1 enmendado (E-1): el comentario de sede informa y NO despausa el expediente',
+    $answered !== null && in_array($answered->getStatusCode(), [200, 201], true)
+        && !array_key_exists('auto_resumed', $answeredData)
+        && !array_key_exists('pause', $answeredData)
+        && ($row($flowId)['status'] ?? '') === 'PENDING_INFO'
+        && ($row($flowId)['paused_at'] ?? null) !== null,
+    'status=' . ($answered?->getStatusCode() ?? 'sin respuesta') . ' estado=' . ($row($flowId)['status'] ?? 'n/a')
+);
+
+$routeAfterAnswer = $api('GET', '/api/technician/my-route', [], $techToken);
+$stopAfterAnswer = null;
+foreach ($routeAfterAnswer->getDecodedBody()['data'] ?? [] as $candidate) {
+    if ((int)($candidate['id'] ?? 0) === $flowId) {
+        $stopAfterAnswer = $candidate;
+        break;
+    }
+}
+$assert(
+    'C.8.b RF-05.6: la tarjeta del técnico estrena el aviso de respuesta de la sede (site_response_since_pause)',
+    $stopAfterAnswer !== null && ($stopAfterAnswer['site_response_since_pause'] ?? null) === true,
+    'parada: ' . json_encode($stopAfterAnswer === null ? null : ['site_response_since_pause' => $stopAfterAnswer['site_response_since_pause']], JSON_UNESCAPED_UNICODE)
+);
+
+$resumedManually = $api('POST', "/api/technician/incidents/{$flowId}/resume-pending-info", [
+    'resume_note' => 'La sede ha abierto la sala de contadores: reanudo la intervención in situ.',
+], $techToken);
+$assert(
+    'C.8.c RF-02.2: la pausa la cierra la reanudación manual del técnico, no el mensaje de la sede',
+    $resumedManually->getStatusCode() === 200
+        && ($resumedManually->getDecodedBody()['data']['status'] ?? '') === 'IN_PROGRESS',
+    'status=' . $resumedManually->getStatusCode() . ' estado=' . ($row($flowId)['status'] ?? 'n/a')
 );
 
 $detail = $api('GET', "/api/coordinator/incidents/{$flowId}/detail", [], $coordinatorToken);

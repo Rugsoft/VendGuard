@@ -21,6 +21,7 @@ use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\IncidentHistory;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
+use VendGuard\Core\Domain\Repository\IncidentSiteResponseRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -32,7 +33,7 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  * Garantiza transaccionalidad atómica en la creación, inmutabilidad de la auditoría y
  * cumplimiento estricto del mandato constitucional de Soft Delete (RNF-03).
  */
-class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface
+class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface
 {
     /**
      * Marcadores canónicos de las notas de auditoría de la pausa (RF-01.4).
@@ -271,6 +272,59 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         }
 
         return $this->findByIdUnlocked($id);
+    }
+
+    /**
+     * ¿Publicó la sede un comentario público posterior al inicio de la pausa vigente?
+     * (RF-05.6, enmienda del Product Owner E-1.)
+     *
+     * **Por qué la marca se lee del rastro inmutable y no de `incident_comments`.** La
+     * tabla de comentarios no distingue al responsable de sede de un informador
+     * ciudadano: los dos escriben `author_type = 'REPORTER'` con `user_id = NULL` —el
+     * portal de sede porque la sesión de sede no es un usuario interno, y el reporte
+     * ciudadano por QR porque `QrReportService` reutiliza el mismo tipo de autor—. Un
+     * filtro por esa columna encendería el aviso *«La sede ha respondido»* con un aviso
+     * ciudadano llegado en carrera (EARS 4.5), que es exactamente la ficción que la
+     * enmienda E-1 quiere erradicar. El único sitio donde la autoría queda con su rol
+     * verdadero es `audit_log`, que es append-only por mandato constitucional (Art. III)
+     * y registra el rol `SITE_MANAGER` en el mismo camino que publica el mensaje.
+     *
+     * La comparación temporal viaja al motor: `a.created_at >= i.paused_at` sobre la
+     * propia fila del expediente, de modo que el formato lo resuelve MariaDB y no el
+     * llamante. El límite es `>=` y no `>` a propósito: `incidents.paused_at` sólo tiene
+     * resolución de segundo, así que el orden dentro de un mismo segundo no es
+     * reconstruible —negar el aviso porque la sede escribió en el mismo segundo en que
+     * arrancó la pausa dejaría la respuesta del técnico pudriéndose en silencio hasta la
+     * cancelación de 72 h—, mientras que el falso positivo posible (un mensaje de sede
+     * del mismo segundo inmediatamente anterior a la pausa) describe una situación
+     * equivalente: la sede acaba de escribir y el técnico está pausado.
+     *
+     * Una incidencia sin pausa viva cae por `paused_at IS NOT NULL` y devuelve `false`;
+     * las notas internas de taller y los mensajes del técnico o de coordinación quedan
+     * fuera por su rol.
+     */
+    public function hasSiteResponseSinceCurrentPause(int $incidentId): bool
+    {
+        $sql = "
+            SELECT EXISTS (
+                SELECT 1
+                FROM `incidents` i
+                JOIN `audit_log` a
+                  ON a.`entity_type` = 'TICKET'
+                 AND a.`entity_id` = i.`id`
+                WHERE i.`id` = :incident_id
+                  AND i.`paused_at` IS NOT NULL
+                  AND a.`action` = 'INCIDENT_COMMENT_ADDED'
+                  AND a.`user_role` = 'SITE_MANAGER'
+                  AND a.`created_at` >= i.`paused_at`
+            )
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':incident_id', $incidentId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return (bool)$stmt->fetchColumn();
     }
 
     /**

@@ -321,8 +321,8 @@ interface IncidentRepositoryInterface
      * MTTR y el SLA contractual.
      *
      * @param int $incidentId Incidencia reanudada.
-     * @param int|null $userId Usuario que reanuda, o `null` cuando la reactivación es
-     *   automática por comentario de la sede (RF-02.1).
+     * @param int|null $userId Usuario que reanuda; el módulo 11 sólo reanuda por acto
+     *   explícito (la reactivación automática quedó derogada en la enmienda E-1).
      * @param IncidentStatus $targetStatus Estado operativo de destino real.
      * @param int $pauseDurationSeconds Duración exacta del intervalo que se cierra.
      * @param string|null $note Nota opcional de auditoría (motivo de la reanudación).

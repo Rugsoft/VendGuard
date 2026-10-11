@@ -12,6 +12,8 @@
  * 6. Quick telephone link (tel:) for immediate on-site coordinator or concierge contact.
  * 7. Mobile authentication screen for field technicians (RF-04).
  * 8. Native link to the printable A4 spare parts quick guide (public/docs asset, RF-REP-03, RF-REP-04).
+ * 9. Paused stop (Módulo 11): "En espera de sede" banner, in-situ resume, and the
+ *    RF-05.6 notice when the site already answered during the pause.
  */
 
 import { api } from '../api.js';
@@ -499,6 +501,23 @@ export const TechnicianRouteView = {
      */
     isPendingInfo(incident) {
       return isPendingInfoStatus(incident?.status);
+    },
+
+    /**
+     * True si la sede ya respondió dentro de la pausa vigente (RF-05.6).
+     *
+     * La marca llega derivada en `site_response_since_pause`: es `true` cuando existe
+     * un comentario público de la sede posterior al inicio de la pausa. El mensaje
+     * informa —nunca despausa: la pausa sólo la cierra el propio técnico con la
+     * reanudación in situ o el coordinador desde central (enmienda del Product Owner,
+     * 2026-10-11).
+     * @param {Object} incident
+     * @returns {boolean}
+     */
+    hasSiteResponseSincePause(incident) {
+      return incident?.site_response_since_pause === true
+        || incident?.site_response_since_pause === 1
+        || incident?.site_response_since_pause === '1';
     },
 
     /**
@@ -1376,6 +1395,23 @@ export const TechnicianRouteView = {
               <p style="margin: 6px 0 0 0; line-height: 1.35;">
                 Parada despriorizada: puede continuar con las siguientes visitas del día sin bloqueo de ruta.
               </p>
+              <!-- Aviso de respuesta de la sede (RF-05.6, enmienda E-1): la respuesta
+                   esperada ya está en el hilo y la pausa sigue viva hasta que el
+                   técnico la cierre in situ (o el coordinador desde central). -->
+              <div
+                v-if="hasSiteResponseSincePause(incident)"
+                data-testid="tech-stop-site-response"
+                role="status"
+                :style="{
+                  marginTop: '8px',
+                  paddingTop: '8px',
+                  borderTop: '1px dashed ' + pendingInfoTokens.border,
+                  fontWeight: 600,
+                  lineHeight: 1.35
+                }"
+              >
+                ✉️ La sede ha respondido · pendiente de tu reanudación
+              </div>
             </div>
 
             <!-- Action Buttons Bar (Large, Mobile Finger-Friendly Tap Targets >= 44px) -->

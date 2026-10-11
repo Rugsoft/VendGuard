@@ -797,21 +797,24 @@ try {
             && (int)($structuralRows[0]['user_id'] ?? 0) === $coordinatorId
     );
 
-    // La huella ya es alcanzable en producción: la respuesta de sede sobre un expediente
-    // reasignado durante la pausa devuelve la avería a ASSIGNED (RF-02.1) en lugar de
-    // afirmar que el nuevo técnico está delante de la máquina.
-    $pauseService = new IncidentPauseService(
-        incidentRepo: $incidentRepo,
-        machineRepo: $machineRepo
-    );
-    $reactivation = $pauseService->handleSiteCommentReactivation(
-        $partsIncidentId,
-        'La sede confirma que el conserje ya ha abierto el cuarto de máquinas.',
-        1
-    );
+    // Tras la reasignación, la pausa sigue siendo de la coordinación: no hay ninguna
+    // transición automática por comentario de sede (derogada en la enmienda E-1), así que
+    // el destino lo elige el coordinador con su reanudación manual y explícita (RF-02.3).
+    $res = $router->dispatch(new Request(
+        method: 'POST',
+        path: $resumePath($partsIncidentId),
+        parsedBody: [
+            'target_status' => 'ASSIGNED',
+            'resume_note'   => 'La sede confirma que el conserje ha abierto el cuarto de máquinas; el nuevo técnico debe acudir.',
+        ],
+        headers: $authHeader($coordinatorToken)
+    ));
+    $reassignedResume = $res->getDecodedBody()['data'] ?? [];
     $assert(
-        '5.5 La reactivación por comentario de sede detecta la reasignación y devuelve ASSIGNED',
-        $reactivation->status === IncidentStatus::ASSIGNED
+        '5.5 La pausa de un expediente reasignado sólo la cierra la reanudación explícita hacia ASSIGNED',
+        $res->getStatusCode() === 200
+            && ($reassignedResume['status'] ?? '') === 'ASSIGNED'
+            && ($reassignedResume['paused_at'] ?? null) === null
             && ($incidentRow($partsIncidentId)['status'] ?? '') === 'ASSIGNED'
     );
 

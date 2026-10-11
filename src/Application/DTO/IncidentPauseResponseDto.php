@@ -13,10 +13,9 @@ use VendGuard\Core\Domain\ValueObject\IncidentStatus;
  * IncidentPauseResponseDto — Proyección inmutable del estado de pausa y del
  * recálculo de SLA (Módulo 11, T-PAUSE-03).
  *
- * Es la respuesta única de los cuatro caminos que alteran la pausa (pausa de
- * técnico, pausa de coordinador, reanudación manual y reactivación automática
- * por comentario de sede), de modo que la interfaz de usuario lea siempre la
- * misma forma:
+ * Es la respuesta única de los caminos que alteran la pausa (pausa de técnico,
+ * pausa de coordinador y reanudación manual del técnico o del coordinador), de
+ * modo que la interfaz de usuario lea siempre la misma forma:
  *
  * - `is_sla_paused`: el reloj contractual está congelado en este instante (RF-03.2).
  * - `accumulated_pause_minutes`: minutos descontables de SLA y MTTR, redondeados

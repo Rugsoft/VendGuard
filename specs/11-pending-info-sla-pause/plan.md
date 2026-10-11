@@ -266,8 +266,10 @@ ALGORITMO MarcarRespuestaDeSede(incidencia, comentario, ahora)
         RETORNAR // comentario normal de seguimiento
     FIN SI
     // Sin transición, sin tocar el reloj contractual ni el acumulador.
-    // site_response_since_pause es DERIVADA en lectura: existe un comentario público
-    // de la sede con created_at posterior a paused_at del intervalo vigente.
+    // site_response_since_pause es DERIVADA en lectura: el actor de sede publicó un
+    // mensaje con posterioridad al paused_at del intervalo vigente. La autoría se lee
+    // del rastro inmutable (INCIDENT_COMMENT_ADDED con rol SITE_MANAGER), porque
+    // incident_comments.author_type no distingue a la sede de un aviso ciudadano por QR.
 FIN ALGORITMO
 ```
 

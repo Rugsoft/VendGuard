@@ -17,11 +17,11 @@ use VendGuard\Core\Domain\Model\Incident;
  * por el mismo principio de segregación de interfaces que ya rige
  * `UserLockoutRepositoryInterface`: la inmensa mayoría de consumidores del repositorio
  * (triaje, hilos, historial, métricas) sólo lee y no debe verse forzada a implementar
- * ni a simular una capacidad de bloqueo que no usa. Sólo dos casos de uso del módulo 11
- * la necesitan, y los dos son transiciones de estado sobre un expediente pausado:
- * la reanudación manual (RF-02.2) y la reactivación por comentario de sede (RF-02.1),
- * donde el caso límite §6.2 del análisis funcional exige resolver la carrera simultánea
- * «atómicamente, sin estados inconsistentes ni errores bloqueantes».
+ * ni a simular una capacidad de bloqueo que no usa. Sólo la necesitan las reanudaciones
+ * manuales del módulo 11 —la del técnico in situ (RF-02.2) y la del coordinador desde
+ * central—, transiciones de estado sobre un expediente pausado donde el caso límite §6.2
+ * del análisis funcional exige resolver la carrera simultánea «atómicamente, sin estados
+ * inconsistentes ni errores bloqueantes».
  *
  * El bloqueo por fila es la única forma de que la segunda operación lea el expediente
  * DESPUÉS de que la primera haya confirmado: sin él, ambas leen el mismo `PENDING_INFO`,

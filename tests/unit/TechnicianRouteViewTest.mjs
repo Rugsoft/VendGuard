@@ -941,6 +941,42 @@ assert('11.3 El filtro de pendientes sigue declarado y legible en la barra',
     && TechnicianRouteView.template.includes('En espera ({{ routeMetrics.pendingInfo }})'));
 
 // ---------------------------------------------------------------------
+// TEST GROUP 12: Site answer notice on the paused stop (RF-05.6, amendment E-1)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 12: Aviso de respuesta de la sede en la parada pausada (RF-05.6) ---');
+
+// El defecto reportado el 2026-10-11: el mensaje de la sede despausaba la avería y la
+// devolvía a «En curso». La enmienda E-1 derogó esa transición; la tarjeta pausada avisa
+// ahora de que la respuesta ya está en el hilo y deja la reanudación en manos del técnico.
+const siteResponseView = createRouteInstance();
+assert('12.1 La marca site_response_since_pause reconoce las formas que publica el servidor',
+  siteResponseView.hasSiteResponseSincePause({ site_response_since_pause: true }) === true
+    && siteResponseView.hasSiteResponseSincePause({ site_response_since_pause: 1 }) === true
+    && siteResponseView.hasSiteResponseSincePause({ site_response_since_pause: '1' }) === true
+    && siteResponseView.hasSiteResponseSincePause({ site_response_since_pause: false }) === false
+    && siteResponseView.hasSiteResponseSincePause({ site_response_since_pause: null }) === false
+    && siteResponseView.hasSiteResponseSincePause({ site_response_since_pause: '0' }) === false
+    && siteResponseView.hasSiteResponseSincePause({ paused_at: tenMinutesAgo }) === false);
+
+assert('12.2 La tarjeta pausada trae el aviso «La sede ha respondido · pendiente de tu reanudación»',
+  TechnicianRouteView.template.includes('data-testid="tech-stop-site-response"')
+    && TechnicianRouteView.template.includes('✉️ La sede ha respondido · pendiente de tu reanudación')
+    && TechnicianRouteView.template.includes('v-if="hasSiteResponseSincePause(incident)"')
+    && TechnicianRouteView.template.includes('role="status"'));
+
+assert('12.3 El aviso vive dentro del banner pausado y reutiliza el token ámbar (RNF-04)',
+  TechnicianRouteView.template.indexOf('data-testid="tech-stop-site-response"')
+    > TechnicianRouteView.template.indexOf('data-testid="tech-stop-pending-info-badge"')
+    && TechnicianRouteView.template.indexOf('data-testid="tech-stop-site-response"')
+      < TechnicianRouteView.template.indexOf('data-testid="btn-resume-pending-info"')
+    && TechnicianRouteView.template.includes("'1px dashed ' + pendingInfoTokens.border"));
+
+assert('12.4 Sin marca del servidor la parada pausada sigue sin prometer reactivación alguna',
+  !TechnicianRouteView.template.includes('se reanudará automáticamente')
+    && !TechnicianRouteView.template.includes('auto_resumed')
+    && !TechnicianRouteView.template.includes('Reactivación automática'));
+
+// ---------------------------------------------------------------------
 // SUMMARY
 // ---------------------------------------------------------------------
 console.log('\n======================================================================');

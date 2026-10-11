@@ -498,9 +498,8 @@ class Incident implements ArrayAccess, JsonSerializable
     /**
      * Duración viva del intervalo de pausa abierto respecto a un instante de referencia.
      *
-     * Alimenta tres lecturas del módulo: el reloj contractual visualmente congelado
-     * (RF-03.2), la evaluación de la reactivación en caliente de 60 minutos (RF-02.1)
-     * y el cómputo del desplazamiento comercial de SLA (RF-03.3). Sin pausa abierta
+     * Alimenta dos lecturas del módulo: el reloj contractual visualmente congelado
+     * (RF-03.2) y el cómputo del desplazamiento comercial de SLA (RF-03.3). Sin pausa abierta
      * devuelve 0 y nunca un valor negativo, ni siquiera si la referencia es anterior
      * al inicio de la pausa (relojes desincronizados).
      */
