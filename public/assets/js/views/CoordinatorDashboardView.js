@@ -1213,8 +1213,9 @@ export const CoordinatorDashboardView = {
       />
 
       <div v-else>
-        <!-- 0. Barra de Pestañas de Navegación del Coordinador (RF-FLEET-01) -->
-        <div style="display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--color-hairline, #c8cfda); padding-bottom: 8px;">
+        <!-- 0. Barra de Pestañas de Navegación del Coordinador (RF-FLEET-01). Las
+             pestañas envuelven en pantallas medianas en lugar de comprimirse. -->
+        <div class="vg-action-group" style="margin-bottom: 20px; border-bottom: 1px solid var(--color-hairline, #c8cfda); padding-bottom: 8px;">
           <button
             type="button"
             class="vg-btn"
@@ -1495,7 +1496,7 @@ export const CoordinatorDashboardView = {
           </div>
 
           <!-- Refresh and Polling status -->
-          <div style="display: flex; align-items: center; gap: 10px;">
+          <div class="vg-action-group" style="gap: 10px;">
             <button
               type="button"
               class="vg-btn vg-btn-secondary"
@@ -1759,9 +1760,9 @@ export const CoordinatorDashboardView = {
         <!-- Sub-barra de navegación con subpestañas operativas -->
         <div class="card mb-4 shadow-sm" style="border: 1px solid var(--color-hairline, #c8cfda); border-radius: var(--radius-card, 8px); background-color: #ffffff; padding: 10px 16px; margin-bottom: 20px;">
           <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-            <div style="display: flex; align-items: center; gap: 12px;">
+            <div class="vg-action-group" style="gap: 12px;">
               <span style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Módulo Preventivo:</span>
-              <div style="display: flex; gap: 6px;">
+              <div class="vg-action-group" style="gap: 6px;">
                 <button
                   type="button"
                   class="vg-btn"

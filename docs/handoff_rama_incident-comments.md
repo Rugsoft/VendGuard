@@ -1,7 +1,7 @@
 # Handoff · Rama `incident-comments`
 
 **Fecha:** 2026-10-08 · **Cierre de contenido:** `a5005fa` + segunda tanda de triaje + cierre de S-4 (`f968d98`, `29f19ee`, `2ae2b63`) · **Publicado:** `origin/incident-comments` hasta `2ae2b63`; el arreglo del arranque desplegado de esta pasada está en el árbol, pendiente de commit · **Material ajeno no versionado:** `specs/11-*` y `pending_info_sla_pause_spec.md`
-**Batería:** `php tests/run_all.php` → **batería global: 240 suites · 9.193 aserciones** · 0 fallos · base restaurada a semillas
+**Batería:** `php tests/run_all.php` → **batería global: 241 suites · 9.199 aserciones** · 0 fallos · base restaurada a semillas
 *(la propia batería audita esta cifra: un desfase documental la pone en rojo vía `tests/Support/DocMetricsGuard.php`)*
 
 ---
@@ -84,7 +84,7 @@ El triaje completo, con criterios de aceptación y justificación por hallazgo, 
 
 ```bash
 # Batería completa (requiere MariaDB local; reutiliza o arranca el servidor en 127.0.0.1:8000)
-php tests/run_all.php          # esperado: 240/240 suites, 9.193 aserciones, 0 fallos, exit 0
+php tests/run_all.php          # esperado: 241/241 suites, 9.199 aserciones, 0 fallos, exit 0
 
 # Guardas de las dos tandas de triaje
 php tests/unit/AuditFindingsClosureTest.php             # 29/29 (S-1, S-2, H-1, H-3)

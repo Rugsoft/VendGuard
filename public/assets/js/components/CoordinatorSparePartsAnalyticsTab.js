@@ -264,7 +264,7 @@ export const CoordinatorSparePartsAnalyticsTab = {
 
         <!-- Selector de Ventana Temporal (Período) -->
         <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #c8cfda;">
-          <div style="display: flex; align-items: center; gap: 8px;">
+          <div class="vg-action-group">
             <span style="font-size: 13px; font-weight: 600; color: #2c333f;">📅 Ventana de Análisis:</span>
             <div style="display: flex; gap: 6px; flex-wrap: wrap;">
               <button

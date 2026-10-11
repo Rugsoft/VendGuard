@@ -508,8 +508,9 @@ export const CoordinatorSparePartsTab = {
             </select>
           </div>
 
-          <!-- Filtro por estado operativo -->
-          <div style="display: flex; gap: 4px;">
+          <!-- Filtro por estado operativo: los chips envuelven (clase vg-action-group)
+               en lugar de comprimirse cuando la barra de filtros se estrecha. -->
+          <div class="vg-action-group" style="gap: 4px;">
             <button
               type="button"
               class="vg-btn"
@@ -674,9 +675,10 @@ export const CoordinatorSparePartsTab = {
                   </span>
                 </td>
 
-                <!-- Acciones -->
-                <td style="padding: 12px 16px; text-align: right; white-space: nowrap;">
-                  <div style="display: inline-flex; align-items: center; gap: 6px;">
+                <!-- Acciones: grupo envolvente, sin forzar una sola línea en la celda
+                     (misma regla que el triaje: un botón nunca parte su etiqueta). -->
+                <td style="padding: 12px 16px; text-align: right;">
+                  <div class="vg-row-actions" style="gap: 6px;">
                     <button
                       type="button"
                       class="vg-btn"

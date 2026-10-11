@@ -165,7 +165,7 @@ export const CoordinatorMetricsView = {
         </div>
 
         <!-- Botones de Acción: Informe y Exportación CSV -->
-        <div style="display: flex; gap: 10px; align-items: center;">
+        <div class="vg-action-group" style="gap: 10px;">
           <button
             type="button"
             @click="exportMetricsCsv"
@@ -186,8 +186,8 @@ export const CoordinatorMetricsView = {
 
       </div>
 
-      <!-- Pestañas de Navegación de Métricas -->
-      <div style="display: flex; gap: 8px; border-bottom: 2px solid #e5f2fc; padding-bottom: 2px;">
+      <!-- Pestañas de Navegación de Métricas: envuelven en pantallas medianas -->
+      <div class="vg-action-group" style="border-bottom: 2px solid #e5f2fc; padding-bottom: 2px;">
         <button
           type="button"
           @click="activeSubTab = 'kpis'"

@@ -31,11 +31,6 @@ const storageMock = (() => {
 })();
 globalThis.localStorage = storageMock;
 
-// El grupo de acciones de la fila vive en la hoja de tokens (no en el inline de la
-// plantilla), así que la suite la lee del disco para congelar sus dos mitades.
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-
 import { api } from '../../public/assets/js/api.js';
 import { store, clearSession, setInternalSession } from '../../public/assets/js/store.js';
 import { CoordinatorDashboardView } from '../../public/assets/js/views/CoordinatorDashboardView.js';
@@ -1184,24 +1179,16 @@ assert('16.18 A rejected resume surfaces the server reason without losing the ro
 // fijos, saliéndose por debajo del borde. La celda de acciones era un inline-flex sin
 // envoltura, así que la compresión la sufrían los botones. El grupo envuelve ahora sus
 // controles y cada botón conserva su ancho natural en una sola línea.
-const designTokensCss = readFileSync(
-  fileURLToPath(new URL('../../public/assets/css/design-tokens.css', import.meta.url)),
-  'utf8'
-);
-const rowActionsRule = (designTokensCss.match(/\.vg-row-actions \{[^}]*\}/) || [''])[0];
-const rowActionButtonRule = (designTokensCss.match(/\.vg-row-actions > \.vg-btn \{[^}]*\}/) || [''])[0];
-
+//
+// El contrato de la clase compartida —`flex-wrap: wrap` en el grupo y `white-space:
+// nowrap` con `flex-shrink: 0` en sus botones— se certifica en la guarda transversal
+// (`CoordinatorActionsWrapGuardTest.mjs`), que además audita los grupos de todo el panel
+// y se prueba a sí misma con una sonda sintética. Aquí queda la mitad que le toca a esta
+// vista: que su celda de acciones use la clase en lugar del grupo sin envoltura.
 assert('16.19 The action cell wraps instead of squeezing its buttons (RNF-03)',
   dashboardTemplate.includes('<div class="vg-row-actions">') &&
   !dashboardTemplate.includes('<div style="display: inline-flex; gap: 8px;">'),
   'La celda de acciones volvió a ser un grupo sin envoltura: los botones se comprimen y la etiqueta se parte.');
-
-assert('16.20 The action group wraps and keeps every button on a single line (RNF-03, design.md)',
-  rowActionsRule.includes('flex-wrap: wrap') &&
-  rowActionsRule.includes('justify-content: flex-end') &&
-  rowActionButtonRule.includes('white-space: nowrap') &&
-  rowActionButtonRule.includes('flex-shrink: 0'),
-  'Sin `flex-wrap` la fila comprime los botones; sin `white-space: nowrap` la etiqueta se parte dentro del botón.');
 
 // Summary
 console.log('\n======================================================================');

@@ -224,22 +224,33 @@ h4 { font-size: var(--font-size-heading-md); }
   background-color: #ef4444;
 }
 
-/* Grupo de acciones de una fila de tabla (triaje del coordinador).
-   Con la pausa de sede viva la fila llega a cinco controles (hilo, Ver detalle,
-   Imprimir QR, Reanudar y Descartar) y el grupo era un inline-flex sin envoltura:
-   la celda se comprimía, «🏷️ Imprimir QR» partía su etiqueta en dos líneas dentro
-   de un botón de 30 px fijos y el texto se salía por debajo del borde (reporte del
-   2026-10-11). El grupo envuelve sus botones —la acción sobrante baja a una segunda
-   línea— y cada botón conserva su ancho natural en una sola línea. */
+/* Grupo de botones que envuelve sus controles.
+
+   Origen (reporte del Product Owner, 2026-10-11): en una avería en pausa de sede la
+   fila del triaje llega a cinco controles (hilo, Ver detalle, Imprimir QR, Reanudar y
+   Descartar) y el grupo era un inline-flex sin envoltura. La compresión de la fila la
+   sufrían los botones: «🏷️ Imprimir QR» partía su etiqueta en dos líneas dentro de un
+   botón de 30 px fijos y el texto se salía por debajo del borde.
+
+   La regla es una sola y vale para toda tabla del panel: un grupo de botones envuelve
+   —la acción sobrante baja a la siguiente línea— y cada botón conserva su ancho natural
+   en una sola línea. Así ninguna tabla depende de tener pocos controles, y una etiqueta
+   larga nunca se parte dentro de su propio botón.
+   `vg-row-actions` es la variante alineada a la derecha para la celda de acciones. */
+.vg-action-group,
 .vg-row-actions {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
   gap: 8px;
   max-width: 100%;
 }
 
+.vg-row-actions {
+  justify-content: flex-end;
+}
+
+.vg-action-group > .vg-btn,
 .vg-row-actions > .vg-btn {
   flex-shrink: 0;
   white-space: nowrap;

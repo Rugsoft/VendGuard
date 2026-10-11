@@ -426,6 +426,8 @@ No 12 / 16 / 20px middle tier. No pill CTA. The entire button vocabulary — pri
 
 **Do** keep the button radius at `{rounded.xs}` 4px for primary and secondary CTAs. Bumping to 8px blurs the distinction between buttons (4px) and cards (8px). Bumping to a pill loses the "tool, not toy" signal entirely.
 
+**Do** wrap a group of row actions with `vg-action-group` (left-aligned toolbars, tab strips and filter bars) or `vg-row-actions` (the right-aligned actions cell of a table row). A row must never depend on having few controls: when the width runs out the extra action drops to the next line and every button keeps its natural width on a single line (`flex-shrink: 0` plus `white-space: nowrap`). A label that breaks inside its own 30–36px button overflows the border and reads as a rendering fault, which is exactly what happened in the coordinator triage row on 2026-10-11 once the site pause added its resume action.
+
 **Do** use Repro (or a DM Sans substitute) only for the 24px+ display tier. Below 24px, Inter's optical warmth at small sizes outperforms Repro's geometric proportions; switching Repro into body text reduces readability.
 
 **Do** treat the testimonial or partner-logo section as a credibility anchor rather than a design moment. Docker's logo wall renders partner marks in full color (not monochrome) — each partner brand retains its own visual identity, signaling that Docker integrates with real enterprise stacks rather than absorbing them.

@@ -712,13 +712,18 @@ export const CoordinatorPreventiveOrdersTab = {
                   <span v-else style="color: #94a3b8; font-size: 12px;">—</span>
                 </td>
 
-                <!-- Acciones -->
-                <td style="padding: 12px 16px; text-align: right; white-space: nowrap;">
+                <!-- Acciones: grupo envolvente. La celda forzaba una sola línea
+                     (white-space: nowrap) y separaba los botones a mano con
+                     margin-right: con tres controles la fila se estrechaba y los
+                     botones acababan saliendo de la tarjeta. Ahora el grupo
+                     envuelve y cada botón conserva su ancho natural. -->
+                <td style="padding: 12px 16px; text-align: right;">
+                  <div class="vg-row-actions">
                   <!-- Botón Ver detalle (RF-PD-01): lectura pura, disponible en cualquier estado -->
                   <button
                     type="button"
                     class="vg-btn"
-                    style="background: #eef2ff; color: #1e3a8a; border: 1px solid #c7d2fe; padding: 4px 8px; font-size: 12px; border-radius: 4px; cursor: pointer; margin-right: 6px;"
+                    style="background: #eef2ff; color: #1e3a8a; border: 1px solid #c7d2fe; padding: 4px 8px; font-size: 12px; border-radius: 4px; cursor: pointer;"
                     @click.stop="openDetailModal(order)"
                     title="Abrir la ficha integral de la orden preventiva"
                     data-testid="btn-view-order-detail"
@@ -732,7 +737,7 @@ export const CoordinatorPreventiveOrdersTab = {
                     v-if="['PENDING_ASSIGNMENT', 'SCHEDULED', 'EXPIRED'].includes(order.status)"
                     type="button"
                     class="vg-btn"
-                    style="background: #f1f5f9; color: #1e293b; border: 1px solid #cbd5e1; padding: 4px 8px; font-size: 12px; border-radius: 4px; cursor: pointer; margin-right: 6px;"
+                    style="background: #f1f5f9; color: #1e293b; border: 1px solid #cbd5e1; padding: 4px 8px; font-size: 12px; border-radius: 4px; cursor: pointer;"
                     @click="openAssignModal(order)"
                     :title="hasAssignedTechnician(order) ? 'Reasignar técnica o reprogramar la fecha de la orden' : 'Asignar o reprogramar técnico'"
                     data-testid="btn-assign-order"
@@ -752,6 +757,7 @@ export const CoordinatorPreventiveOrdersTab = {
                   >
                     ✕ Cancelar
                   </button>
+                  </div>
                 </td>
               </tr>
             </tbody>
