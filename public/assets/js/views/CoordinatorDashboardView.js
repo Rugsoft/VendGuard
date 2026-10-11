@@ -1645,8 +1645,12 @@ export const CoordinatorDashboardView = {
                   </td>
 
                   <!-- 7. Acciones -->
+                  <!-- El grupo envuelve sus botones y cada uno conserva su ancho natural en
+                       una línea (clase vg-row-actions). Con la pausa de sede viva la fila
+                       suma «Reanudar» y la etiqueta de «Imprimir QR» se partía dentro del
+                       botón, saliéndose por debajo del borde. -->
                   <td style="padding: 14px 16px; vertical-align: top; text-align: right;">
-                    <div style="display: inline-flex; gap: 8px;">
+                    <div class="vg-row-actions">
 
                       <!-- Conversation Thread Badge with the total message count (RF-01.1) -->
                       <button

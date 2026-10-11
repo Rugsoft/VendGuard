@@ -224,6 +224,27 @@ h4 { font-size: var(--font-size-heading-md); }
   background-color: #ef4444;
 }
 
+/* Grupo de acciones de una fila de tabla (triaje del coordinador).
+   Con la pausa de sede viva la fila llega a cinco controles (hilo, Ver detalle,
+   Imprimir QR, Reanudar y Descartar) y el grupo era un inline-flex sin envoltura:
+   la celda se comprimía, «🏷️ Imprimir QR» partía su etiqueta en dos líneas dentro
+   de un botón de 30 px fijos y el texto se salía por debajo del borde (reporte del
+   2026-10-11). El grupo envuelve sus botones —la acción sobrante baja a una segunda
+   línea— y cada botón conserva su ancho natural en una sola línea. */
+.vg-row-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.vg-row-actions > .vg-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 /* Formularios y Campos de Entrada (Bordes 4px) */
 .vg-input, .vg-select, .vg-textarea {
   width: 100%;
