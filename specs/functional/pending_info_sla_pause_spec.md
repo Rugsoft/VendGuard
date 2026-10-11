@@ -25,7 +25,7 @@ Hasta este momento, el reloj de SLA (Acuerdo de Nivel de Servicio) y el cómputo
 Establecer un **Estado Operativo Formal denominado "Pendiente de Información" (`PENDING_INFO`)** que permita:
 1. **Pausar de forma justificada el reloj de SLA contractual y descontar los tiempos de bloqueo del cómputo de MTTR**, protegiendo a la empresa operadora de penalizaciones injustas cuando el trabajo esté impedido por la sede cliente.
 2. **Proteger la salud del consumidor y la seguridad alimentaria (Art. II)**, introduciendo una arquitectura de **doble reloj**: un reloj contractual congelado para la facturación y un **reloj sanitario biológico continuo de 4 horas** que activa automáticamente la cuarentena sanitaria en máquinas de frío si la avería permanece bloqueada en exceso.
-3. **Establecer un canal de desbloqueo ágil y reactivación condicional inteligente**, diferenciando reactivaciones inmediatas in situ frente a retornos ordenados a estado asignado si el técnico ya ha abandonado las instalaciones o si el ticket fue reasignado.
+3. **Establecer un canal de desbloqueo ágil sin ficciones de estado**: el mensaje de la sede avisa al técnico de que tiene respuesta y la pausa se cierra siempre con una **reanudación explícita** —la del técnico in situ o la del coordinador—, nunca por inferencia del sistema (enmienda del Product Owner, 2026-10-11).
 4. **Garantizar la inmutabilidad histórica, el rigor operativo y la protección del consumidor (Art. III, Art. V.1 y Art. V.2)**, exigiendo motivos tipificados obligatorios de al menos 20 caracteres, impidiendo que una máquina cancelada por inactividad figure engañosamente como "Operativa", blindando las reclamaciones de reintegro económico pendientes y bloqueando bucles de reportes duplicados.
 
 ---
@@ -34,9 +34,9 @@ Establecer un **Estado Operativo Formal denominado "Pendiente de Información" (
 
 | Perfil / Actor | Permisos sobre la Pausa | Visibilidad de la Incidencia Pausada | Acciones Disponibles |
 | :--- | :--- | :--- | :--- |
-| **🏢 Responsable de Sede** | **No puede activar la pausa.** | Ve un banner destacado en su portal indicando que la avería requiere su ayuda, mostrando la causa del bloqueo. | Pulsa *"Aportar información / Responder al técnico"*, aporta aclaraciones en el hilo de conversación ($\ge 5$ caracteres) y provoca la **reactivación automática** del ticket. |
-| **📱 Técnico de Ruta / Campo** | **Puede activar y reanudar la pausa.** | Ve la parada marcada como `⏸️ En espera de sede` en su ruta móvil, con contador de tiempo pausado. | Activa la pausa indicando causa tipificada y motivo $\ge 20$ caracteres. Continúa atendiendo otras paradas del día sin bloqueo. Reanuda manualmente cuando obtiene acceso in situ. |
-| **📊 Coordinador de Operaciones** | **Control y supervisión total.** | Ve la incidencia con insignia de pausa y el reloj de SLA visualmente congelado en la bandeja de triaje. | Activa o reanuda la pausa, reasigna el ticket conservando el bloqueo, o ejecuta cancelación justificada si la sede no responde tras 72 horas hábiles de silencio. |
+| **🏢 Responsable de Sede** | **No puede activar la pausa.** | Ve un banner destacado en su portal indicando que la avería requiere su ayuda, mostrando la causa del bloqueo. | Pulsa *"Aportar información / Responder al técnico"* y aporta aclaraciones en el hilo de conversación ($\ge 5$ caracteres). Su mensaje **no altera el estado ni el reloj**: marca la respuesta para que el técnico reanude la intervención cuando confirme el acceso (enmienda del Product Owner, 2026-10-11). |
+| **📱 Técnico de Ruta / Campo** | **Puede activar y reanudar la pausa.** | Ve la parada marcada como `⏸️ En espera de sede` en su ruta móvil, con contador de tiempo pausado y, cuando la sede ya respondió, el aviso *"✉️ La sede ha respondido · pendiente de tu reanudación"* (RF-05.6). | Activa la pausa indicando causa tipificada y motivo $\ge 20$ caracteres. Continúa atendiendo otras paradas del día sin bloqueo. Reanuda manualmente cuando obtiene acceso in situ. |
+| **📊 Coordinador de Operaciones** | **Control y supervisión total.** | Ve la incidencia con insignia de pausa y el reloj de SLA visualmente congelado en la bandeja de triaje. | Activa o reanuda la pausa, reasigna el ticket conservando el bloqueo, o ejecuta cancelación justificada cuando la espera sin reanudación supera las 72 horas hábiles. |
 | **👥 Ciudadano / Usuario QR** | **Sin acceso a datos internos (Art. V.4).** | Ve un estado público neutro: *"En proceso de atención técnica"*. | Consulta el seguimiento de su reporte sin acceder a motivos internos de desencuentro con el edificio ni etiquetas técnicas de pausa. |
 
 ---
@@ -51,12 +51,12 @@ Establecer un **Estado Operativo Formal denominado "Pendiente de Información" (
 ### HU-02: Notificación Clara y Desbloqueo Ágil desde la Sede
 > **Como** Responsable de Sede,  
 > **quiero** ver un aviso destacado en la tarjeta de mi máquina informándome de por qué el técnico no ha podido intervenir y un botón directo para responderle,  
-> **para** facilitar la llave o aclarar la ubicación de inmediato, provocando la reanudación automática de la reparación sin necesidad de trámites complejos.
+> **para** facilitar la llave o aclarar la ubicación de inmediato, de modo que el técnico reanude la reparación en cuanto confirme el acceso, sin trámites complejos.
 
 ### HU-03: Reanudación Inteligente y Libre de Falsedades Operativas
 > **Como** Técnico de Campo o Coordinador de Operaciones,  
-> **quiero** que el sistema reanude a "En curso" si estoy físicamente en la máquina o a "Asignada" si la respuesta llega horas después o con otro técnico asignado,  
-> **para** reflejar con veracidad absoluta cuándo estoy trabajando en el equipo y cuándo debo desplazarme nuevamente.
+> **quiero** reanudar yo mismo a "En curso" cuando esté físicamente ante la máquina, o que el coordinador reanude desde central con el destino que corresponda,  
+> **para** reflejar con veracidad absoluta cuándo estoy trabajando en el equipo y cuándo debo desplazarme nuevamente: ningún mensaje ajeno puede declarar que estoy trabajando.
 
 ### HU-04: Supervisión de SLAs y Gestión de Abandonos en Coordinación
 > **Como** Coordinador de Operaciones,  
@@ -90,10 +90,8 @@ Establecer un **Estado Operativo Formal denominado "Pendiente de Información" (
 
 ### Módulo RF-02: Reactivación Condicional Inteligente y Reanudación Manual
 * **RF-02.1 [EARS - Dirigido por eventos]:**  
-  CUANDO la incidencia se encuentre en `PENDING_INFO` y el Responsable de Sede publique un comentario público con al menos 5 caracteres descriptivos reales (con o sin fotografía adjunta), el sistema DEBE **reactivar automáticamente** la incidencia de acuerdo con la siguiente regla condicional:
-    * **SI** la respuesta se produce en caliente (**menos de 60 minutos** desde la pausa) y el técnico asignado no ha iniciado otra intervención en su ruta diaria, el sistema DEBE transicionar la avería al estado en curso (`IN_PROGRESS`).
-    * **SI** han transcurrido **más de 60 minutos** desde la pausa, el técnico ya inició otra intervención en su ruta o la avería fue reasignada a otro técnico durante la pausa, el sistema DEBE transicionar la avería al estado asignada (`ASSIGNED`), notificando al técnico de la disponibilidad de acceso para que inicie la intervención al personarse ante el equipo.
-    * **SI** la avería no tiene técnico responsable en el momento de la respuesta (fue desasignada durante la pausa), el sistema DEBE devolverla a `REGISTERED` —la cola de asignación— y nunca a `ASSIGNED`: ningún estado puede afirmar un responsable que no existe. La regla manda sobre las anteriores y la impone el agregado, no la interfaz (enmienda del cierre de F-5, 2026-10-11).
+  CUANDO la incidencia se encuentre en `PENDING_INFO` y el Responsable de Sede publique un comentario público con al menos 5 caracteres descriptivos reales (con o sin fotografía adjunta), el sistema DEBE anexar el mensaje al hilo, **marcar la respuesta de la sede** para el técnico asignado (RF-05.6) y **NO DEBE transicionar el estado ni tocar el reloj contractual**: la pausa sigue vigente, el SLA continúa congelado y la única salida es la reanudación explícita (RF-02.2 y RF-02.3) o la cancelación justificada por inactividad (RF-04.3).  
+  > **Enmienda del Product Owner (2026-10-11).** Se deroga la reactivación automática condicional por respuesta de sede —las ramas «en caliente» a `IN_PROGRESS`, desfasada a `ASSIGNED` y el reingreso a `REGISTERED`—: declarar «En curso» a un profesional que puede seguir en la puerta de otro edificio era exactamente la ficción operativa que HU-03 quiere erradicar, y el mensaje de un cliente no puede reiniciar por inferencia un trabajo que solo el técnico sabe si puede retomar. La coherencia estado-responsable del cierre de F-5 sigue vigente para las reanudaciones manuales y la impone el agregado `Incident::resumePendingInfo()`.
 * **RF-02.2 [EARS - Estado]:**  
   MIENTRAS la incidencia se encuentre en `PENDING_INFO`, el sistema DEBE ofrecer al Técnico de Campo asignado y al Coordinador de Operaciones una acción manual explícita de *"Reanudar intervención"*.
 * **RF-02.3 [EARS - Dirigido por eventos]:**  
@@ -101,7 +99,7 @@ Establecer un **Estado Operativo Formal denominado "Pendiente de Información" (
     * Si la ejecuta el Técnico asignado in situ, el sistema DEBE transicionar a `IN_PROGRESS`.
     * Si la ejecuta el Coordinador desde la central, el sistema DEBE ofrecer seleccionar si reanuda a `ASSIGNED` (para que el técnico acuda) o a `IN_PROGRESS` (si confirma que el técnico ya está trabajando en la máquina). En un expediente sin técnico responsable el único destino legal es `REGISTERED`: la avería vuelve a la cola de asignación en lugar de declarar un responsable inexistente (enmienda del cierre de F-5, 2026-10-11).
 * **RF-02.4 [EARS - Ubicuo]:**  
-  Toda reanudación (automática o manual) DEBE registrar de forma inmutable la marca temporal de finalización del intervalo de pausa en la bitácora de auditoría.
+  Toda reanudación manual DEBE registrar de forma inmutable la marca temporal de finalización del intervalo de pausa en la bitácora de auditoría.
 
 ---
 
@@ -129,7 +127,8 @@ Establecer un **Estado Operativo Formal denominado "Pendiente de Información" (
 * **RF-04.1 [EARS - Opcional]:**  
   DONDE una incidencia requiera pausas sucesivas durante su ciclo de vida (p. ej., acceso inicial bloqueado y posterior corte eléctrico en la prueba), el sistema DEBE permitir registrar múltiples intervalos de `PENDING_INFO`, sumando acumulativamente todas sus duraciones al descuento total de SLA.
 * **RF-04.2 [EARS - Estado]:**  
-  MIENTRAS una incidencia acumule más de **72 horas hábiles comerciales** (lunes a viernes de 08:00 a 18:00) en estado `PENDING_INFO` sin respuesta de la Sede, el sistema DEBE clasificarla con la insignia destacada de *"En espera prolongada de cliente"* y generar una alerta prioritaria en la bandeja de triaje del Coordinador.
+  MIENTRAS una incidencia acumule más de **72 horas hábiles comerciales** (lunes a viernes de 08:00 a 18:00) en estado `PENDING_INFO` sin reanudación, el sistema DEBE clasificarla con la insignia destacada de *"En espera prolongada de cliente"* y generar una alerta prioritaria en la bandeja de triaje del Coordinador.
+  > **Nota de coherencia (enmienda del Product Owner, 2026-10-11).** La insignia y el umbral miden la **pausa sin reanudación**, no el silencio de la sede: con la reactivación automática derogada (RF-02.1), una sede que ya respondió sin que nadie reanude también acumula espera. El coordinador ve la respuesta en el hilo y decide; la cancelación exige siempre la misma medición del umbral (RF-04.3).
 * **RF-04.3 [EARS - Estado]:**  
   MIENTRAS una incidencia se encuentre en espera prolongada ($> 72\text{ h}$ hábiles), el sistema DEBE facultar al Coordinador de Operaciones para ejecutar una **cancelación justificada** (`CANCELLED`) con motivo obligatorio $\ge 20$ caracteres (ej. *"Cierre administrativo por inactividad y falta de acceso del cliente tras 72h hábiles"*).  
   > **Ratificación del Product Owner (2026-10-10, cierre de F-1).** El «MIENTRAS una incidencia se encuentre en espera prolongada» es **precondición**, no mera descripción del contexto: fuera de la ventana de las 72 horas hábiles la operación se rechaza con `422 INACTIVITY_THRESHOLD_NOT_REACHED` y **no se escribe nada** (ni ticket, ni máquina, ni reintegro, ni rastro). Se enmienda la decisión contraria anotada en `specs/11-pending-info-sla-pause/tasks.md` (T-PAUSE-09 y T-PAUSE-13), que leía el verbo «facultar» como una autorización sin cerrojo: el cierre administrativo que la bitácora inmutable certifica debe corresponder a una espera realmente medida, y un sistema que sella 72 horas hábiles inexistentes falsea el Art. III. La detección del umbral es la misma regla que enciende la insignia de RF-04.2, de modo que lectura y escritura no pueden discrepar.
@@ -148,11 +147,13 @@ Establecer un **Estado Operativo Formal denominado "Pendiente de Información" (
 * **RF-05.2 [EARS - Dirigido por eventos]:**  
   CUANDO el Responsable de Sede pulse *"Aportar información / Responder al técnico"*, el sistema DEBE abrir de inmediato el hilo de conversación de la avería, facilitando la redacción del mensaje.
 * **RF-05.3 [EARS - Ubicuo / Idempotencia]:**  
-  SI la Sede envía múltiples mensajes o fotografías en ráfaga (en intervalos de pocos segundos), el sistema DEBE procesar la reactivación en el primer mensaje de forma atómica y anexar los mensajes subsiguientes a la bitácora como comentarios normales de seguimiento, sin provocar errores ni intentos redundantes de cambio de estado.
+  SI la Sede envía múltiples mensajes o fotografías en ráfaga (en intervalos de pocos segundos), el sistema DEBE anexarlos todos a la bitácora como comentarios de seguimiento, sin transición alguna de estado que proteger ni errores por mensajes redundantes: la reanudación dejó de ser automática (RF-02.1 enmendado).
 * **RF-05.4 [EARS - Estado / Sellado]:**  
   SI una incidencia fue cancelada tras 72 horas hábiles, el hilo de conversación DEBE quedar **sellado en modo estricto de solo lectura** (Art. III y Módulo 10); cualquier intento de enviar comentarios posteriores debe ser rechazado, indicando a la sede que debe confirmar el acceso a la máquina para solicitar una nueva asistencia.
 * **RF-05.5 [EARS - Estado]:**  
   MIENTRAS una parada en la vista móvil "Mi Ruta" se encuentre en `PENDING_INFO`, el sistema DEBE mostrar la insignia `⏸️ En espera de sede` junto con el contador de tiempo pausado, **permitiendo al técnico omitir dicha parada y continuar atendiendo las siguientes visitas programadas del día sin bloqueos ni penalizaciones**.
+* **RF-05.6 [EARS - Estado]:**  
+  MIENTRAS una parada en "Mi Ruta" esté en `PENDING_INFO` y la sede haya publicado algún comentario público posterior al inicio de la pausa vigente, la tarjeta DEBE mostrar el aviso *"✉️ La sede ha respondido · pendiente de tu reanudación"* junto a la insignia de pausa, para que el técnico sepa que la respuesta que esperaba ya está en el hilo y que la pausa solo termina cuando él reanude (RF-02.2, enmienda del Product Owner, 2026-10-11).
 
 ---
 
@@ -188,13 +189,13 @@ Establecer un **Estado Operativo Formal denominado "Pendiente de Información" (
 1. **Reanudación instantánea por error del técnico:**  
    Si un técnico pausa a `PENDING_INFO` por error y reanuda inmediatamente en menos de 60 segundos, el sistema registra el evento en auditoría pero no altera de forma apreciable el reloj de SLA (duración de pausa $\approx 0$).
 2. **Reanudación concurrente simultánea:**  
-   Si el técnico pulsa *"Reanudar intervención"* en el mismo segundo en que la sede publica un comentario de respuesta, el sistema resuelve la concurrencia atómicamente garantizando que la avería pasa limpiamente al estado operativo activo sin estados inconsistentes ni errores bloqueantes.
+   El comentario de la sede ya no compite por el estado (RF-02.1 enmendado): si el técnico pulsa *"Reanudar intervención"* en el mismo segundo en que la sede publica su mensaje, el mensaje se anexa y la reanudación se aplica como cualquier otra, sin carrera de transiciones. Dos reanudaciones manuales simultáneas —técnico y coordinador— siguen serializadas por el bloqueo de fila (T-PAUSE-30): una sola cierra la pausa.
 3. **Cierre de jornada con ticket en pausa:**  
-   Si una avería queda en `PENDING_INFO` al finalizar la jornada laboral, el reloj de SLA permanece congelado durante la noche y el fin de semana hasta que se produzca la respuesta de la sede o la reactivación técnica dentro del horario hábil.
+   Si una avería queda en `PENDING_INFO` al finalizar la jornada laboral, el reloj de SLA permanece congelado durante la noche y el fin de semana hasta que el técnico asignado o el coordinador reanuden manualmente, dentro del horario hábil.
 4. **Intento de reanudación sin técnico asignado:**  
    Si una avería en `PENDING_INFO` fue desasignada por Coordinación, al reactivarse pasa forzosamente al estado `REGISTERED`, que la reingresa en la cola de asignación y exige una asignación formal antes de poder iniciar trabajos. Ni `ASSIGNED` ni `IN_PROGRESS` son destinos legales sin técnico responsable: describirían a un profesional que no existe. En el sentido inverso, un expediente con técnico tampoco puede disfrazarse de `REGISTERED` al reanudarse (enmienda del cierre de F-5, 2026-10-11; la coherencia la impone el agregado `Incident`).
 5. **Comentario interno de técnico mientras está en pausa:**  
-   Si un técnico o coordinador publica una nota interna de taller (`is_internal = true`) mientras el ticket está en `PENDING_INFO`, la avería **permanece en pausa**; únicamente los comentarios públicos de la Sede con $\ge 5$ caracteres activan la reanudación automática.
+   Si un técnico o coordinador publica una nota interna de taller (`is_internal = true`) mientras el ticket está en `PENDING_INFO`, la avería **permanece en pausa**, como con cualquier comentario público de la sede: ninguna publicación altera el estado ni el reloj (RF-02.1 enmendado) y la reanudación es siempre un acto explícito del técnico o del coordinador.
 6. **Transición desde `PENDING_PARTS` a `PENDING_INFO`:**  
    Si el técnico acude con el repuesto solicitado pero no puede acceder a las instalaciones, se autoriza la transición directa de `PENDING_PARTS` a `PENDING_INFO` registrando la causa tipificada y pausando el cómputo de SLA.
 
@@ -216,7 +217,7 @@ La especificación se considerará formalmente cumplida cuando:
 1. El Técnico y el Coordinador puedan pausar una incidencia en `ASSIGNED`, `IN_PROGRESS` o `PENDING_PARTS` seleccionando una causa tipificada y redactando un motivo de $\ge 20$ caracteres.
 2. El reloj contractual de SLA se congele visualmente y su fecha límite se aplace exactamente en la cantidad de minutos que dure la pausa, computados en horario comercial de la sede.
 3. En las máquinas bajo vigilancia sanitaria (`MachineType::requiresSanitaryWatch() = true`: alimentos perecederos `PERISHABLE_FOOD` y mixtas `COMBO`), el Reloj Sanitario Biológico active la cuarentena automática a las 4 horas naturales continuas sin frío confirmado y exija la retirada y destrucción del producto perecedero antes de cerrar la avería (Art. II).
-4. El Responsable de Sede visualice el banner explicativo en su tarjeta de máquina y pueda reactivar automáticamente la incidencia aportando un comentario público $\ge 5$ caracteres, devolviendo el ticket a `IN_PROGRESS` si ocurre en caliente (< 60 min), a `ASSIGNED` si ha transcurrido más tiempo y a `REGISTERED` (cola de asignación) cuando el expediente no tenga técnico responsable.
+4. El Responsable de Sede visualice el banner explicativo en su tarjeta de máquina y pueda responder en el hilo con un comentario público ($\ge 5$ caracteres) sin que el sistema altere el estado ni el reloj: el mensaje marca la respuesta y la parada queda con el aviso de respuesta pendiente (RF-05.6) hasta la reanudación explícita del técnico o del coordinador.
 5. El Técnico y el Coordinador dispongan de la opción manual de *"Reanudar intervención"*.
 6. Si la avería supera 72 horas hábiles de silencio, el Coordinador pueda cancelarla justificadamente sin que la máquina vuelva a figurar como "Operativa", desvinculando de forma segura los reintegros económicos pendientes y exigiendo confirmación de acceso en nuevos reportes (Art. V.1 y V.2).
 7. El seguimiento ciudadano por código QR oculte totalmente el estado de pausa y motivos internos, mostrando un estado público neutro (Art. V.4).

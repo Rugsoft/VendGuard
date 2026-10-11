@@ -49,7 +49,7 @@ gestor-incidencias-vending/
 │   │       └── PdoMetricsRepository.php         # Queries analíticas SQL descontando total_pending_info_seconds
 │   └── Presentation/
 │       ├── Controller/
-│       │   ├── LocationPortalController.php     # Gancho de reactivación automática al comentar la Sede
+│       │   ├── LocationPortalController.php     # Comentario de sede: anota la respuesta, sin transición (E-1)
 │       │   ├── TechnicianController.php         # Endpoints POST pause y resume para el técnico móvil
 │       │   └── CoordinatorController.php        # Endpoints POST pause, resume y cancel-inactivity para coordinación
 │       └── Routing/
@@ -165,18 +165,15 @@ Para cumplir con la precisión temporal requerida (RNF-01) y la respuesta ágil 
 
 ---
 
-### 2.3. Gancho de Reactivación Automática en Comentarios de Sede
+### 2.3. Respuesta de Sede en Comentarios (sin reactivación automática)
 
 * **Ruta Existente:** `POST /api/location/incidents/{id}/comments` (Módulo 10).
-* **Comportamiento Integrado:**
-  * Al procesar un comentario público válido ($\ge 5$ caracteres) de la Sede (`REPORTER`), el servicio `IncidentPauseService::handleSiteCommentReactivation()` evalúa el estado actual:
-    * Si la avería está en `PENDING_INFO`:
-      * Calcula el tiempo transcurrido desde la pausa.
-      * Si es **en caliente (< 60 minutos)** y el técnico no ha iniciado otra parada: transiciona a `IN_PROGRESS`.
-      * Si han pasado **$\ge 60$ minutos**, inició otra parada o fue reasignada: transiciona a `ASSIGNED`.
-      * Si la avería **no tiene técnico responsable** (fue desasignada durante la pausa): transiciona a `REGISTERED` —cola de asignación— y nunca a `ASSIGNED` (enmienda del cierre de F-5, §6.4).
-      * Desplaza la fecha límite `sla_target_at` en horario comercial y anexa el comentario a la bitácora con idempotencia ante ráfagas (RF-05.3).
-* **Payload de Respuesta:** Incluye el bloque `auto_resumed: true` con el nuevo estado asignado.
+* **Comportamiento Integrado (enmienda del Product Owner, 2026-10-11):**
+  * Al procesar un comentario público válido ($\ge 5$ caracteres) de la Sede, el sistema **anexa el mensaje al hilo y NO transiciona nada**: ni el estado, ni el reloj contractual, ni el acumulador. La pausa sigue viva y el SLA continúa congelado (RF-02.1 enmendado).
+  * La única huella derivada es la marca `site_response_since_pause` de la ruta técnica (§5.1 del contrato de API), que pinta el aviso de RF-05.6 en la tarjeta pausada del técnico.
+  * Las ráfagas se anexan sin más: ya no hay transición que proteger ni idempotencia de estado que garantizar (RF-05.3 enmendado).
+  * La pausa se cierra únicamente con la reanudación manual del técnico (`POST .../resume-pending-info`) o del coordinador (con destino elegido, RF-02.3), o con la cancelación justificada por inactividad (RF-04.3).
+* **Payload de Respuesta:** el hilo canónico del módulo 10 sin bloques añadidos; el par `auto_resumed`/`pause` de la versión anterior **desaparece** del contrato.
 
 ---
 
@@ -257,9 +254,22 @@ Hacia PENDING_INFO SE PERMITE DESDE:
 
 ---
 
-### 3.2. Algoritmo 2: Reactivación Condicional Inteligente tras Respuesta de Sede
+### 3.2. Algoritmo 2 (derogado): Reactivación Condicional Inteligente tras Respuesta de Sede
 
 Determina con precisión matemática y física a qué estado debe volver la avería al recibir información del cliente, eliminando ficciones operativas (Puntos 2, 6 y 7 de QA).
+
+> **Derogado por enmienda del Product Owner (2026-10-11, RF-02.1).** El pseudocódigo se conserva como historia del diseño, pero ya no rige: un comentario público de la sede **no** transiciona el estado. Lo que rige es el Algoritmo 2 bis: el mensaje solo se anexa y la pausa queda marcada como respondida para la tarjeta del técnico (RF-05.6).
+
+```text
+ALGORITMO MarcarRespuestaDeSede(incidencia, comentario, ahora)
+    SI incidencia.status != "PENDING_INFO" ENTONCES:
+        RETORNAR // comentario normal de seguimiento
+    FIN SI
+    // Sin transición, sin tocar el reloj contractual ni el acumulador.
+    // site_response_since_pause es DERIVADA en lectura: existe un comentario público
+    // de la sede con created_at posterior a paused_at del intervalo vigente.
+FIN ALGORITMO
+```
 
 ```text
 ALGORITMO ReactivarCondicionalmente(incidencia, comentarioSede, ahora)
@@ -494,7 +504,7 @@ FIN ALGORITMO
         </button>
       </div>
       ```
-* Al pulsar el botón, abre el modal de conversación del Módulo 10 (`IncidentCommentThreadModal.js`); al publicar un comentario de $\ge 5$ caracteres, se dispara la reactivación automática sin recargas manuales.
+* Al pulsar el botón, abre el modal de conversación del Módulo 10 (`IncidentCommentThreadModal.js`); publicar un comentario de $\ge 5$ caracteres anota la respuesta y **no** reanuda: la tarjeta del técnico muestra el aviso de respuesta pendiente (RF-05.6) y la pausa la cierra él o el coordinador (RF-02.1 enmendado).
 
 ---
 
@@ -504,6 +514,7 @@ FIN ALGORITMO
   * La tarjeta de parada muestra la insignia destacada `⏸️ En espera de sede (Pausada hace X min)`.
   * **Desacoplamiento de Ruta (RF-05.5):** La parada no bloquea el flujo; el botón *"Iniciar intervención"* de la siguiente parada programada permanece completamente operativo.
   * **Acción *"Reanudar intervención"*:** Botón visible en la tarjeta que abre un diálogo de confirmación y llama a `POST .../resume-pending-info`, volviendo a `IN_PROGRESS` si el técnico vuelve a estar in situ.
+  * **Aviso de respuesta de la sede (RF-05.6):** cuando existe un comentario público de la sede posterior al inicio de la pausa vigente, la tarjeta añade *"✉️ La sede ha respondido · pendiente de tu reanudación"* (`site_response_since_pause` en la ruta técnica), sin ninguna transición automática.
 
 ---
 
@@ -521,7 +532,7 @@ FIN ALGORITMO
 | :--- | :--- | :--- |
 | **Doble Reloj (Contractual congelado vs. Biológico 24/7 continuo).** | Reloj único pausado para todo o prohibición de pausar en frío. | Armoniza la equidad contractual con la **Supremacía Sanitaria del Artículo II**. Congelar la facturación protege a la empresa operadora de multas injustas por puertas cerradas; mantener el reloj biológico garantiza que a las 4 horas la máquina entre en cuarentena y los alimentos se desechen antes de abrir al público. |
 | **Desplazamiento de SLA en horario hábil de la sede (08:00 a 18:00).** | Desplazamiento ciego en minutos naturales 24/7. | Un cliente que reporta un viernes y cierra a las 18:00 no puede recibir un SLA aplazado que venza un sábado a las 03:00 AM. Computar en horario hábil refleja la realidad contractual y comercial de los contratos de vending con empresas y centros oficiales. |
-| **Reactivación condicional inteligente (< 60 min a `IN_PROGRESS` vs. $\ge 60$ min a `ASSIGNED`).** | Reanudar siempre a `IN_PROGRESS` o siempre a `ASSIGNED`. | Evita ficciones operativas. Si la sede responde dos días después, situar al técnico en `IN_PROGRESS` significaría que el sistema afirma que está reparando la máquina en ese instante (quizás estando en otra ciudad o fuera de turno). Devolver a `ASSIGNED` le exige pulsar "Iniciar" al llegar. |
+| **Reanudación siempre explícita (enmienda del Product Owner, 2026-10-11).** | Reactivación automática por respuesta de sede (< 60 min a `IN_PROGRESS` vs. $\ge 60$ min a `ASSIGNED`), derogada. | Evita ficciones operativas por la vía fuerte: el mensaje de la sede es información, no una orden. El sistema no puede afirmar que un profesional está delante de una máquina porque un tercero haya escrito; solo el técnico sabe si puede retomar el trabajo y el coordinador decide desde central con destino elegido (RF-02.3). |
 | **Máquina en "Fuera de servicio / Bloqueada por acceso" tras cancelación de 72h.** | Restablecer la máquina a "Operativa" en verde. | Violación flagrante del **Artículo V.1 (Cierre obligatoriamente justificado)**. Si la máquina tenía un fallo mecánico o eléctrico reportado y nunca se pudo acceder a repararla, ponerla en verde engañaría a los usuarios del edificio. Debe quedar inoperativa hasta que confirmen acceso. |
 | **Desvinculación protectora de reintegros económicos (Módulo 08).** | Cancelar la devolución de dinero si se cancela la avería técnica. | El consumidor que perdió su dinero en la máquina no tiene la culpa de que el conserje no haya abierto la puerta al técnico. Cancelar su dinero violaría el principio de equidad del Módulo 08. El reintegro debe pasar a liquidación central por transferencia Bizum/IBAN. |
 
@@ -538,7 +549,7 @@ FIN ALGORITMO
   * Comprueba que `isActive()` devuelva `true` y `isTerminal()` devuelva `false`.
 * **`IncidentPauseServiceTest.php`:**
   * Prueba de justificación: rechaza causas vacías o textos $< 20$ caracteres reales.
-  * Prueba de reactivación condicional: respuesta de sede a los 20 min reactiva a `IN_PROGRESS`; respuesta a los 90 min o con ticket reasignado reactiva a `ASSIGNED`.
+  * Prueba de la respuesta de sede (RF-02.1 enmendado): un comentario público a los 20 min y a los 90 min de la pausa deja el expediente intacto en `PENDING_INFO` —estado, reloj y acumulador— y marca la respuesta; la reanudación manual posterior sí cierra la pausa con su desplazamiento.
   * Prueba de desplazamiento de SLA comercial: verifica que los minutos de pausa aplacen `sla_target_at` saltando fines de semana y noches.
 * **`MetricsCalculationServiceTest.php`:**
   * Verifica que el cálculo de MTTR reste exactamente `total_pending_info_seconds` del tiempo transcurrido entre creación y resolución.
@@ -560,7 +571,7 @@ FIN ALGORITMO
 
 * **`PendingInfoApiTest.php`:**
   * `POST /api/technician/incidents/{id}/pause-pending-info` persiste estado, timestamps y causa en base de datos real.
-  * `POST /api/location/incidents/{id}/comments` con texto $\ge 5$ caracteres ejecuta la reactivación automática atómica e idéntica ante mensajes en ráfaga.
+  * `POST /api/location/incidents/{id}/comments` con texto $\ge 5$ caracteres anota la respuesta de la sede sin transicionar el estado ni tocar el reloj, e idéntico ante mensajes en ráfaga.
   * `POST /api/coordinator/incidents/{id}/cancel-inactivity` cancela tras 72h hábiles, transiciona la máquina a `BLOCKED_NO_ACCESS` y desvincula el reintegro económico.
 * **`PendingInfoConstitutionalTest.php`:**
   * **Blindaje Art. II:** En máquina de perecederos, simula 4 horas naturales de reloj biológico y verifica que `updateSanitaryStatus` active `QUARANTINE` y el formulario de resolución bloquee el cierre sin declaración sanitaria.
@@ -577,7 +588,7 @@ FIN ALGORITMO
 | **RF-01.2** | Exigencia obligatoria de causas tipificadas (4 opciones). | `IncidentPauseReasonCategory.php`, DTO de pausa | Test validando rechazo ante categorías ausentes o inválidas. |
 | **RF-01.3** | Justificación obligatoria $\ge 20$ caracteres reales (Art. V.1). | Validador en `IncidentPauseService.php` y modal | Test PHP y JS verificando bloqueo con 19 caracteres. |
 | **RF-01.4** | Auditoría inmutable de pausa en `incident_history` (Art. III). | `PdoIncidentRepository::recordPauseEvent()` | Test de integración verificando inserción en tabla de historial. |
-| **RF-02.1** | Reactivación condicional inteligente (< 60 min vs $\ge 60$ min). | `IncidentPauseService::handleSiteCommentReactivation()` | Test evaluando retorno a `IN_PROGRESS` a los 20 min y a `ASSIGNED` a los 90 min. |
+| **RF-02.1** | Respuesta de sede sin reactivación automática (enmienda 2026-10-11): marca la respuesta y conserva la pausa. | `LocationPortalController` (sin gancho de transición) y `site_response_since_pause` derivado en la ruta técnica | Test de que un comentario a los 20 min y a los 90 min deja el expediente en `PENDING_INFO` con el reloj intacto y la marca activa. |
 | **RF-02.2** | Reanudación manual para técnico y coordinador. | Controladores de Técnico y Coordinador | Test HTTP ejecutando `POST .../resume-pending-info`. |
 | **RF-02.3** | Reanudación in situ transiciona a `IN_PROGRESS`. | `TechnicianController::resumePendingInfo()` | Test verificando estado resultante `IN_PROGRESS`. |
 | **RF-03.1** | Descuento exacto de intervalos de pausa en MTTR. | `PdoMetricsRepository.php` | Test evaluando MTTR restando `total_pending_info_seconds`. |
@@ -596,6 +607,7 @@ FIN ALGORITMO
 | **RF-05.3** | Idempotencia ante ráfagas de comentarios de sede. | `IncidentPauseService.php` | Test enviando 3 comentarios en 2 segundos sin fallos de estado. |
 | **RF-05.4** | Sellado en solo lectura tras cancelación de 72h (Art. III). | `LocationPortalController.php` | Test verificando rechazo de comentarios en tickets cancelados. |
 | **RF-05.5** | Despriorización de parada en ruta técnica sin bloqueos. | `TechnicianRouteView.js` | Test verificando avance a la siguiente parada de la ruta. |
+| **RF-05.6** | Aviso de respuesta de la sede en la tarjeta pausada del técnico (enmienda 2026-10-11). | `TechnicianRouteView.js` (con `site_response_since_pause`) | Test JS verificando el aviso con un comentario público posterior a la pausa. |
 | **RF-06.1** | Estado neutral en QR ciudadano sin causas internas (Art. V.4). | `QrScanController.php` | Test verificando respuesta *"En proceso de atención técnica"*. |
 | **RF-06.2** | Prohibición absoluta de resolver directo desde `PENDING_INFO`. | `IncidentStatus::canTransitionTo()` | Test intentando `PENDING_INFO` $\rightarrow$ `RESOLVED` esperando excepción. |
 | **RF-06.3** | Reasignación técnica conserva el estado `PENDING_INFO`. | `CoordinatorController::assignTechnician()` | Test reasignando técnico verificando que la pausa se mantiene. |
