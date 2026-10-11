@@ -1,6 +1,8 @@
 -- =============================================================================
 -- VendGuard Module 11: "Pending Info" (PENDING_INFO) and the SLA pause
 -- Migration: 016_pending_info_sla_pause.sql
+-- Contract: specs/technical/generated_columns_contract.md (generated columns
+-- and the deployed engine: the rules this migration works around).
 --
 -- Turns a blocked visit into an honest, auditable state.
 --

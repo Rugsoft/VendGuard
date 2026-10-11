@@ -128,6 +128,7 @@ CREATE TABLE `incidents` (
   -- PENDING_INFO is declared here, not only in migration 016: TiDB refuses to
   -- widen an enum a generated column depends on (`is_active_ticket` below), and
   -- this file rebuilds the table on every deployed boot.
+  -- Contract: specs/technical/generated_columns_contract.md.
   `status` ENUM('REGISTERED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS', 'PENDING_INFO', 'RESOLVED', 'REOPENED', 'CLOSED', 'CANCELLED') NOT NULL DEFAULT 'REGISTERED',
   `assigned_at` TIMESTAMP NULL DEFAULT NULL,
   `started_at` TIMESTAMP NULL DEFAULT NULL,
