@@ -605,17 +605,23 @@ try {
 
     sleep(2);
 
+    // Orillas del reloj real: el servicio lee su instante en algún punto entre ambas, de modo
+    // que la expectativa del desplazamiento se expresa como rango de tiempo hábil (cierre de F-3).
+    $shiftPausedAt = (string)($shiftPauseData['paused_at'] ?? '');
+    $shiftBefore = new DateTimeImmutable('now', $madrid);
     $res = $router->dispatch(new Request(
         method: 'POST',
         path: $resumePath($shiftTicketId),
         headers: $authHeader($technicianToken)
     ));
+    $shiftAfter = new DateTimeImmutable('now', $madrid);
     $shiftData = $res->getDecodedBody()['data'] ?? [];
     $shiftedDeadline = (string)($shiftData['sla_target_at_shifted'] ?? '');
     $originalMoment = new DateTimeImmutable($originalDeadline, $madrid);
     $shiftedMoment = new DateTimeImmutable($shiftedDeadline, $madrid);
     $shiftSeconds = $shiftedMoment->getTimestamp() - $originalMoment->getTimestamp();
     $shiftAccumulated = (int)($incidentRow($shiftTicketId)['total_pending_info_seconds'] ?? 0);
+    [$shiftBusinessMin, $shiftBusinessMax] = BusinessCalendar::shiftRange($shiftPausedAt, $shiftBefore, $shiftAfter);
 
     $assert(
         '7.2 La reanudación publica el vencimiento desplazado y conserva el original',
@@ -624,9 +630,18 @@ try {
             && $shiftedDeadline !== ''
     );
     $assert(
-        '7.3 El desplazamiento equivale a los segundos exactos de pausa (RNF-01)',
-        $shiftSeconds === $shiftAccumulated && $shiftAccumulated >= 2,
-        sprintf('desplazamiento=%d s, acumulado=%d s', $shiftSeconds, $shiftAccumulated)
+        '7.3 El desplazamiento equivale al tiempo HÁBIL perdido y nunca lo excede (RF-03.3, RNF-01)',
+        $shiftSeconds >= $shiftBusinessMin
+            && $shiftSeconds <= $shiftBusinessMax
+            && $shiftSeconds <= $shiftAccumulated
+            && $shiftAccumulated >= 2,
+        sprintf(
+            'desplazamiento=%d s, acumulado=%d s, tiempo hábil esperado=[%d..%d] s',
+            $shiftSeconds,
+            $shiftAccumulated,
+            $shiftBusinessMin,
+            $shiftBusinessMax
+        )
     );
     $assert(
         '7.4 El nuevo vencimiento cae en día hábil y dentro de la jornada comercial',

@@ -15,7 +15,9 @@ declare(strict_types=1);
  * 3. El técnico ocupado en otra intervención en curso o una reasignación durante la
  *    pausa también devuelven la avería a `ASSIGNED`, aunque la respuesta sea inmediata:
  *    el sistema nunca afirma que alguien está delante de una máquina si no lo está.
- * 4. Una avería sin técnico responsable se reactiva a `ASSIGNED` (caso límite §6.4).
+ * 4. Una avería sin técnico responsable se reactiva a `REGISTERED` —cola de
+ *    asignación— y nunca a `ASSIGNED`/`IN_PROGRESS`, que afirmarían un responsable
+ *    inexistente (caso límite §6.4, cierre de F-5).
  * 5. Idempotencia ante ráfagas: comentarios sin sustancia, expedientes ya reanudados o
  *    mensajes repetidos no provocan escrituras ni dobles contabilizaciones de pausa.
  *
@@ -178,14 +180,21 @@ class ReactivationIncidentRepo implements IncidentRepositoryInterface
  * Construye la avería pausada de trabajo. Las marcas temporales se generan con la zona
  * horaria por defecto de PHP, que es la misma que usa
  * `Incident::currentPauseDurationSeconds()` al interpretar `paused_at`.
+ *
+ * `$reference` fija el instante virtual del expediente (mismo patrón que la ficha de
+ * detalle y `isProlongedInactivitySince()`). Desde el cierre de F-3 la reanudación
+ * desplaza el vencimiento por el tiempo HÁBIL perdido, no por la duración de pared, así
+ * que una suite que quiera un desplazamiento determinista necesita que la pausa viva
+ * caiga dentro de la jornada comercial de la sede; sin `$reference` manda el reloj real.
  */
 $makePausedIncident = static function (
     int $pausedMinutesAgo = 20,
     ?string $slaTargetAt = null,
     ?int $technicianId = 7,
-    int $totalPendingInfoSeconds = 0
+    int $totalPendingInfoSeconds = 0,
+    ?DateTimeImmutable $reference = null
 ): Incident {
-    $now = time();
+    $now = $reference?->getTimestamp() ?? time();
 
     return new Incident(
         id: 142,
@@ -233,11 +242,17 @@ $validComment = 'Buenos días, la sala ya está abierta y el conserje tiene la l
 // =====================================================================
 echo "--- Grupo 1: Reactivación en caliente (RF-02.1) ---\n";
 
+// Reloj virtual del grupo: jueves 8 (día hábil) a las 12:35, con la pausa abierta a las
+// 12:15. La ventana cae entera dentro de la jornada comercial, así que el tiempo hábil
+// medido coincide con el intervalo real (20 minutos) y el desplazamiento es determinista
+// con independencia del día en que se ejecute la suite.
+$hotReference = new DateTimeImmutable('2026-10-08 12:35:00', new DateTimeZone('Europe/Madrid'));
+
 $repo = new ReactivationIncidentRepo();
-$repo->incident = $makePausedIncident(20, '2026-10-08 12:15:00');
+$repo->incident = $makePausedIncident(20, '2026-10-08 12:15:00', reference: $hotReference);
 $service = new IncidentPauseService(incidentRepo: $repo);
 
-$hotResponse = $service->handleSiteCommentReactivation(142, $validComment, 9001);
+$hotResponse = $service->handleSiteCommentReactivation(142, $validComment, 9001, $hotReference);
 $hotEvent = $repo->resumeEvents[0] ?? [];
 $hotDuration = (int)($hotEvent['pause_duration_seconds'] ?? 0);
 $hotAccumulated = $repo->incident?->getTotalPendingInfoSeconds() ?? 0;
@@ -309,7 +324,28 @@ $assert(
 
 $assert(
     '1.9 Un comentario de exactamente 5 caracteres ya es respuesta válida (borde legal)',
-    $service->handleSiteCommentReactivation(142, 'Vale,', 9001)->status === IncidentStatus::IN_PROGRESS
+    $service->handleSiteCommentReactivation(142, 'Vale,', 9001, $hotReference)->status === IncidentStatus::IN_PROGRESS
+);
+
+// Cierre de F-3: la espera que transcurre fuera de la jornada comercial de la sede no
+// consume tiempo contractual. Antes la duración de pared se reinterpretaba como horas
+// comerciales y un fin de semana de espera dilataba la fecha límite hasta 4×.
+$weekendReference = new DateTimeImmutable('2026-10-10 12:20:00', new DateTimeZone('Europe/Madrid')); // sábado
+$weekendRepo = new ReactivationIncidentRepo();
+$weekendRepo->incident = $makePausedIncident(20, '2026-10-09 12:15:00', reference: $weekendReference);
+$weekendResponse = (new IncidentPauseService(incidentRepo: $weekendRepo))
+    ->handleSiteCommentReactivation(142, $validComment, 9001, $weekendReference);
+
+$assert(
+    '1.10 Una pausa que cae entera fuera de la jornada comercial no mueve el vencimiento (RF-03.3)',
+    $weekendResponse->slaTargetAtOriginal === '2026-10-09 12:15:00'
+    && $weekendResponse->slaTargetAtShifted === $weekendResponse->slaTargetAtOriginal
+    && ($weekendRepo->resumeEvents[0]['pause_duration_seconds'] ?? 0) === 1200,
+    json_encode([
+        'original' => $weekendResponse->slaTargetAtOriginal,
+        'desplazado' => $weekendResponse->slaTargetAtShifted,
+        'duracion_de_pared' => $weekendRepo->resumeEvents[0]['pause_duration_seconds'] ?? null,
+    ])
 );
 
 // =====================================================================
@@ -317,11 +353,15 @@ $assert(
 // =====================================================================
 echo "\n--- Grupo 2: Reactivación desfasada (RF-02.1) ---\n";
 
+// Mismo reloj virtual que el grupo 1, con la pausa abierta a las 09:00: hora y media de
+// espera que cae entera en la jornada comercial del jueves.
+$lateReference = new DateTimeImmutable('2026-10-08 10:30:00', new DateTimeZone('Europe/Madrid'));
+
 $repo = new ReactivationIncidentRepo();
-$repo->incident = $makePausedIncident(90, '2026-10-08 12:15:00');
+$repo->incident = $makePausedIncident(90, '2026-10-08 12:15:00', reference: $lateReference);
 $service = new IncidentPauseService(incidentRepo: $repo);
 
-$lateResponse = $service->handleSiteCommentReactivation(142, $validComment, 9001);
+$lateResponse = $service->handleSiteCommentReactivation(142, $validComment, 9001, $lateReference);
 $lateEvent = $repo->resumeEvents[0] ?? [];
 
 $assert(
@@ -350,9 +390,9 @@ $assert(
 );
 
 $assert(
-    '2.5 El SLA se desplaza igualmente: la espera de sede se descuenta siempre',
-    $lateResponse->slaTargetAtShifted !== null
-    && $lateResponse->slaTargetAtShifted !== $lateResponse->slaTargetAtOriginal
+    '2.5 El SLA se desplaza igualmente: la espera de sede se descuenta siempre (90 min hábiles -> 13:45)',
+    $lateResponse->slaTargetAtShifted === '2026-10-08 13:45:00',
+    sprintf('esperado=2026-10-08 13:45:00, obtenido=%s', (string)$lateResponse->slaTargetAtShifted)
 );
 
 // =====================================================================
@@ -453,14 +493,20 @@ $service = new IncidentPauseService(incidentRepo: $repo);
 $unassignedResponse = $service->handleSiteCommentReactivation(142, $validComment, 9001);
 
 $assert(
-    '5.1 Sin técnico asignado la avería no puede declararse en curso: vuelve a asignada (§6.4)',
-    $unassignedResponse->status === IncidentStatus::ASSIGNED,
+    '5.1 Sin técnico responsable la avería no puede declararse en curso ni asignada: reingresa a registrada (§6.4, cierre de F-5)',
+    $unassignedResponse->status === IncidentStatus::REGISTERED,
     $unassignedResponse->status->value
 );
 
 $assert(
-    '5.2 La nota declara que la avería quedó sin técnico responsable',
+    '5.2 La nota declara que la avería quedó sin técnico responsable y exige asignación formal',
     str_contains((string)($repo->resumeEvents[0]['note'] ?? ''), 'sin técnico responsable')
+    && str_contains((string)($repo->resumeEvents[0]['note'] ?? ''), 'asignación formal')
+);
+
+$assert(
+    '5.3 El rastro inmutable sella `REGISTERED` en lugar de un destino presencial',
+    ($repo->resumeEvents[0]['target_status'] ?? '') === IncidentStatus::REGISTERED->value
 );
 
 // =====================================================================

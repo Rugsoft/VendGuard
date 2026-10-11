@@ -198,9 +198,22 @@ export const CoordinatorIncidentDetailModal = {
       return Boolean(this.pause?.can_resume_pause);
     },
 
-    /** Acción supervisada de cancelación por inactividad habilitada con la pausa viva (RF-04.3). */
+    /**
+     * Acción supervisada de cancelación por inactividad. El servidor sólo la habilita
+     * cuando la espera ha SUPERADO el umbral de 72 h hábiles (RF-04.3): es la misma regla
+     * que admite la escritura en el endpoint, de modo que la ficha nunca ofrece un cierre
+     * que el servidor vaya a rechazar.
+     */
     canCancelInactivity() {
       return Boolean(this.pause?.can_cancel_inactivity);
+    },
+
+    /**
+     * Pausa de sede viva que todavía NO ha superado el umbral: la cancelación formal no se
+     * ofrece y la ficha explica la frontera en lugar de esconder la acción sin motivo.
+     */
+    inactivityThresholdPending() {
+      return this.isSlaPaused && !this.isProlongedInactivity;
     },
 
     /** Minutos del intervalo de pausa vivo, con su lectura humana (`X h Y min`). */
@@ -829,6 +842,11 @@ export const CoordinatorIncidentDetailModal = {
      * Reanuda la intervención pausada desde la ficha (RF-06.2): el expediente vuelve a
      * `ASSIGNED` (la ruta del técnico sin afirmar que ya está delante de la máquina) y el
      * servicio del módulo 11 descuenta los minutos de espera del vencimiento contractual.
+     *
+     * La responsabilidad manda en el destino (cierre de F-5, §6.4): sin técnico
+     * responsable no existe "Asignada" que reanudar, así que la avería reingresa a
+     * `REGISTERED` en la cola de asignación. Con responsable se conserva el destino
+     * histórico `ASSIGNED`.
      */
     async confirmResumePause() {
       const incidentId = this.actionableIncidentId;
@@ -836,11 +854,13 @@ export const CoordinatorIncidentDetailModal = {
         return;
       }
 
+      const targetStatus = this.technician?.assigned === false ? 'REGISTERED' : 'ASSIGNED';
+
       this.pauseActionErrorMessage = '';
       this.isSubmittingResume = true;
 
       try {
-        await api.coordinator.resumeIncidentPendingInfo(incidentId, 'ASSIGNED', null);
+        await api.coordinator.resumeIncidentPendingInfo(incidentId, targetStatus, null);
         await this.fetchDetail();
         this.notifyIncidentUpdated({ reason: 'resume-pause' });
       } catch (err) {
@@ -1420,6 +1440,17 @@ export const CoordinatorIncidentDetailModal = {
                     >
                       Objetivo contractual congelado: {{ frozenSlaTargetLabel }} · Fecha SLA recalculada: <strong>{{ recalculatedSlaTargetLabel || 'pendiente de la sede' }}</strong>
                     </p>
+                    <!-- Frontera del umbral (RF-04.3): mientras la espera no lo alcance, la
+                         acción supervisada no se ofrece y la ficha explica por qué. -->
+                    <div
+                      v-if="inactivityThresholdPending"
+                      data-testid="pause-inactivity-threshold-pending"
+                      style="margin: 8px 0 0; background-color: var(--color-warning-bg); border: 1px solid var(--color-warning); border-radius: var(--radius-interactive, 4px); padding: 10px 12px;"
+                    >
+                      <span style="font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-warning-text); line-height: 1.45;">
+                        ⏳ La cancelación por inactividad se habilita al superar las {{ inactivityThresholdHours }} horas hábiles de espera de sede (RF-04.3). Mientras tanto, la avería puede reanudarse.
+                      </span>
+                    </div>
                     <div
                       v-if="isProlongedInactivity"
                       data-testid="pause-prolonged-inactivity"

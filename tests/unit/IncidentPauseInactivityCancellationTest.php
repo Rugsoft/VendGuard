@@ -39,6 +39,7 @@ require_once __DIR__ . '/../bootstrap.php';
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\IncidentCommentService;
 use VendGuard\Application\Service\IncidentPauseService;
+use VendGuard\Core\Domain\Exception\InactivityThresholdNotReachedException;
 use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\CompensationMethod;
 use VendGuard\Core\Domain\Model\Incident;
@@ -89,10 +90,17 @@ $capture = static function (callable $action): array {
     try {
         $action();
     } catch (Throwable $exception) {
-        return ['threw' => true, 'class' => $exception::class, 'message' => $exception->getMessage()];
+        // El objeto completo viaja en el arnés: las excepciones de dominio con
+        // contrato publican detalles (espera medida, umbral) que la suite verifica.
+        return [
+            'threw' => true,
+            'class' => $exception::class,
+            'message' => $exception->getMessage(),
+            'exception' => $exception,
+        ];
     }
 
-    return ['threw' => false, 'class' => '', 'message' => ''];
+    return ['threw' => false, 'class' => '', 'message' => '', 'exception' => null];
 };
 
 /**
@@ -305,12 +313,18 @@ final class InactivityAuditRepo implements AuditLogRepositoryInterface
 
 /**
  * Avería pausada de trabajo (PENDING_INFO) lista para cancelarse por inactividad.
+ *
+ * La pausa por defecto es PROLONGADA (21 días naturales superan con holgura las 72 horas
+ * hábiles) porque, desde el cierre de F-1, la cancelación exige superar el umbral
+ * (RF-04.3) y sin él ningún camino feliz podría ejecutarse. Los casos de frontera del
+ * grupo 6 inyectan su propio instante con `pausedAtOverride`, y el 6.bis usa una pausa
+ * reciente para certificar que la puerta muerde y no escribe nada.
  */
 $makePausedIncident = static function (
     int $id = 142,
     string $ticketCode = 'INC-2026-00142',
     int $machineId = 10,
-    int $pausedMinutesAgo = 30,
+    int $pausedMinutesAgo = 30240, // 21 días naturales
     ?string $pausedAtOverride = null,
     IncidentStatus $status = IncidentStatus::PENDING_INFO
 ): Incident {
@@ -766,6 +780,65 @@ $assert(
 );
 
 // =====================================================================
+// GRUPO 6.bis: La puerta del umbral (RF-04.3, cierre de F-1)
+// =====================================================================
+// El umbral deja de ser una descripción y pasa a ser precondición: por debajo de las
+// 72 horas hábiles el protocolo NO se ejecuta y no escribe absolutamente nada (ni
+// ticket, ni máquina, ni reintegro, ni bitácora). Antes de F-1 el cierre se admitía con
+// cualquier pausa, de modo que la auditoría certificaba tres jornadas de silencio que
+// nunca existieron.
+echo "\n--- Grupo 6.bis: Precondición del umbral en la cancelación (RF-04.3) ---\n";
+
+$premature = $makeHarness($makePausedIncident(pausedMinutesAgo: 30), [
+    $makeRefundCase(950, RefundStatus::PENDING_INSPECTION),
+]);
+$prematureResult = $capture(static fn () => $premature['service']->cancelByInactivity(142, 3, $validReason));
+$assert(
+    '6.8 Una espera de 30 minutos se rechaza nombrando el umbral de 72 h hábiles',
+    $prematureResult['threw']
+        && $prematureResult['class'] === InactivityThresholdNotReachedException::class
+        && str_contains($prematureResult['message'], '72 horas hábiles'),
+    $prematureResult['message']
+);
+
+$assert(
+    '6.9 El rechazo por umbral no escribe nada: ni ticket, ni máquina, ni reintegro, ni auditoría',
+    $premature['incidentRepo']->cancelCalls === []
+        && $premature['machineRepo']->blockCalls === []
+        && $premature['refundRepo']->detachCalls === []
+        && $premature['auditRepo']->events === [],
+    json_encode([
+        'cancel' => $premature['incidentRepo']->cancelCalls,
+        'block' => $premature['machineRepo']->blockCalls,
+        'detach' => $premature['refundRepo']->detachCalls,
+        'audit' => count($premature['auditRepo']->events),
+    ])
+);
+
+$prematureDetails = $prematureResult['exception'] instanceof InactivityThresholdNotReachedException
+    ? $prematureResult['exception']->getDetails()
+    : [];
+$assert(
+    '6.10 El rechazo declara la espera medida y el umbral aplicado (error 422)',
+    ($prematureDetails['threshold_business_hours'] ?? 0) === IncidentPauseService::PROLONGED_INACTIVITY_BUSINESS_HOURS
+        && ($prematureDetails['paused_business_hours'] ?? 999) < IncidentPauseService::PROLONGED_INACTIVITY_BUSINESS_HOURS
+        && ($prematureResult['exception']->getHttpStatusCode() ?? 0) === 422
+        && ($prematureResult['exception']->getErrorCode() ?? '') === 'INACTIVITY_THRESHOLD_NOT_REACHED',
+    json_encode($prematureDetails)
+);
+
+$authorized = $makeHarness($makePausedIncident(), [
+    $makeRefundCase(951, RefundStatus::PENDING_INSPECTION),
+]);
+$measuredBusinessSeconds = $authorized['service']->cancelByInactivity(142, 3, $validReason);
+$assert(
+    '6.11 Con la espera prolongada el cierre se autoriza y publica la espera MEDIDA en segundos hábiles',
+    $measuredBusinessSeconds > IncidentPauseService::PROLONGED_INACTIVITY_BUSINESS_HOURS * 3600
+        && $authorized['incidentRepo']->cancelCalls !== [],
+    'segundos hábiles medidos: ' . $measuredBusinessSeconds
+);
+
+// =====================================================================
 // GRUPO 7: Vocabulario de auditoría (T-PAUSE-07 / AuditActionCatalogTest)
 // =====================================================================
 echo "\n--- Grupo 7: Vocabulario de auditoría ---\n";
@@ -834,7 +907,7 @@ $pdo->prepare("
     ) VALUES (
         :ticket, :machine, 'SNACKS', :location,
         'PAYMENT_SYSTEM', 'Avería del banco de pruebas de inactividad de sede.', 'HIGH', 'PENDING_INFO', NULL, NULL,
-        'BUILDING_CLOSED_NO_ACCESS', 'El edificio permaneció cerrado sin facilitar acceso al técnico.', NOW(), 0
+        'BUILDING_CLOSED_NO_ACCESS', 'El edificio permaneció cerrado sin facilitar acceso al técnico.', DATE_SUB(NOW(), INTERVAL 21 DAY), 0
     )
 ")->execute([
     ':ticket' => $testTicket,

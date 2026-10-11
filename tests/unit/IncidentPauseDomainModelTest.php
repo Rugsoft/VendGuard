@@ -69,7 +69,7 @@ $validReasonShort = 'Conserje ausente.'; // 17 caracteres: por debajo del mínim
  * agregado. Por defecto nace asignada, que es el origen operativo más habitual
  * de una pausa.
  */
-$makeIncident = function (IncidentStatus $status = IncidentStatus::ASSIGNED): Incident {
+$makeIncident = function (IncidentStatus $status = IncidentStatus::ASSIGNED, ?int $assignedTechnicianId = 7): Incident {
     return new Incident(
         id: 142,
         ticketCode: 'INC-2026-00142',
@@ -79,7 +79,7 @@ $makeIncident = function (IncidentStatus $status = IncidentStatus::ASSIGNED): In
         description: 'No dispensa producto y muestra error de motor.',
         urgency: UrgencyLevel::HIGH,
         status: $status,
-        assignedTechnicianId: 7,
+        assignedTechnicianId: $assignedTechnicianId,
         assignedAt: '2026-10-08 09:00:00',
         createdAt: '2026-10-08 08:30:00'
     );
@@ -409,9 +409,42 @@ foreach ([IncidentStatus::CANCELLED, IncidentStatus::PENDING_PARTS, IncidentStat
     }
 }
 $assert(
-    '4.5 La reanudación sólo admite IN_PROGRESS o ASSIGNED; ninguna otra puerta se abre',
+    '4.5 La reanudación sólo admite IN_PROGRESS, ASSIGNED o REGISTERED; ninguna otra puerta se abre',
     $illegalTargetsBlocked === 4,
     "bloqueados: {$illegalTargetsBlocked}/4"
+);
+
+// Cierre de F-5: la responsabilidad manda en el destino de la reanudación.
+$unassignedPausedIncident = $makeIncident(IncidentStatus::ASSIGNED, null)->pausePendingInfo(
+    IncidentPauseReasonCategory::BUILDING_CLOSED_NO_ACCESS,
+    $validReason,
+    $pausedAt
+);
+$unassignedResumed = $unassignedPausedIncident->resumePendingInfo(IncidentStatus::REGISTERED, $resumedAt);
+$assert(
+    '4.5.b Sin técnico responsable el único reingreso legal es REGISTERED (cola de asignación)',
+    $unassignedResumed->getStatus() === IncidentStatus::REGISTERED
+    && $unassignedResumed->isPaused() === false
+    && $unassignedResumed->getTotalPendingInfoSeconds() === 5400
+);
+
+$unassignedAffirmationsBlocked = 0;
+foreach ([IncidentStatus::ASSIGNED, IncidentStatus::IN_PROGRESS] as $forbiddenAffirmation) {
+    try {
+        $unassignedPausedIncident->resumePendingInfo($forbiddenAffirmation, $resumedAt);
+    } catch (InvalidTransitionException) {
+        $unassignedAffirmationsBlocked++;
+    }
+}
+$technicianDisguiseBlocked = false;
+try {
+    $pausedIncident->resumePendingInfo(IncidentStatus::REGISTERED, $resumedAt);
+} catch (InvalidTransitionException) {
+    $technicianDisguiseBlocked = true;
+}
+$assert(
+    '4.5.c Con técnico REGISTERED se rechaza y sin responsable ASIGNADA/EN CURSO también (cierre de F-5)',
+    $unassignedAffirmationsBlocked === 2 && $technicianDisguiseBlocked
 );
 
 $noPauseBlocked = false;

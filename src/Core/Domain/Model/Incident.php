@@ -574,8 +574,17 @@ class Incident implements ArrayAccess, JsonSerializable
      * al flujo operativo (RF-02.3, RF-04.1, RF-06.2).
      *
      * El destino sólo puede ser `IN_PROGRESS` (técnico in situ o reanudación en
-     * caliente) o `ASSIGNED` (la respuesta llega tarde o el ticket fue reasignado);
-     * `RESOLVED` queda expresamente prohibido (RF-06.2, Art. V.1).
+     * caliente), `ASSIGNED` (la respuesta llega tarde o el ticket fue reasignado) o
+     * `REGISTERED` (el ticket no tiene técnico responsable y reingresa a la cola de
+     * asignación); `RESOLVED` queda expresamente prohibido (RF-06.2, Art. V.1).
+     *
+     * **Verdad de la responsabilidad (cierre de F-5, §6.4 de la spec).** La reanudación
+     * no puede dejar el expediente en un estado que afirme un responsable inexistente:
+     * `ASSIGNED` e `IN_PROGRESS` exigen técnico asignado, y sin él la única reentrada
+     * legal es `REGISTERED`, que es el estado que leen la bandeja de asignación y el
+     * vacío de responsabilidad. En el sentido inverso, un expediente con técnico tampoco
+     * puede disfrazarse de `REGISTERED`: la reanudación debe devolverlo a la operación
+     * (`IN_PROGRESS`/`ASSIGNED`).
      *
      * No desplaza `sla_target_at`: el cálculo del horario comercial depende del
      * calendario de la sede y vive en `IncidentPauseService` (T-PAUSE-06), que
@@ -599,15 +608,51 @@ class Incident implements ArrayAccess, JsonSerializable
             );
         }
 
+        $allowedTargets = [
+            IncidentStatus::IN_PROGRESS,
+            IncidentStatus::ASSIGNED,
+            IncidentStatus::REGISTERED,
+        ];
+
         if (!$this->status->canTransitionTo($targetStatus)
-            || !in_array($targetStatus, [IncidentStatus::IN_PROGRESS, IncidentStatus::ASSIGNED], true)
+            || !in_array($targetStatus, $allowedTargets, true)
         ) {
             throw new InvalidTransitionException(
                 sprintf(
-                    'La reanudación sólo admite los estados %s o %s; se solicitó %s.',
+                    'La reanudación sólo admite los estados %s, %s o %s; se solicitó %s.',
                     IncidentStatus::IN_PROGRESS->value,
                     IncidentStatus::ASSIGNED->value,
+                    IncidentStatus::REGISTERED->value,
                     $targetStatus->value
+                ),
+                $this->status,
+                $targetStatus
+            );
+        }
+
+        // La responsabilidad viaja con la verdad: sin técnico no se puede afirmar
+        // «Asignada» ni «En curso»; con técnico no se puede disfrazar de «Registrada».
+        if ($this->assignedTechnicianId === null
+            && in_array($targetStatus, [IncidentStatus::IN_PROGRESS, IncidentStatus::ASSIGNED], true)
+        ) {
+            throw new InvalidTransitionException(
+                sprintf(
+                    'Un expediente sin técnico responsable no puede reanudarse a %s: sólo puede reingresar a %s hasta que exista una asignación formal (§6.4).',
+                    $targetStatus->value,
+                    IncidentStatus::REGISTERED->value
+                ),
+                $this->status,
+                $targetStatus
+            );
+        }
+
+        if ($this->assignedTechnicianId !== null && $targetStatus === IncidentStatus::REGISTERED) {
+            throw new InvalidTransitionException(
+                sprintf(
+                    'Un expediente con técnico responsable no puede reingresar a %s: la reanudación debe devolverlo a %s o %s.',
+                    IncidentStatus::REGISTERED->value,
+                    IncidentStatus::IN_PROGRESS->value,
+                    IncidentStatus::ASSIGNED->value
                 ),
                 $this->status,
                 $targetStatus

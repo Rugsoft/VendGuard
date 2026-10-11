@@ -301,7 +301,30 @@ try {
     $assert('1.10 Está prohibido resolver directo desde la pausa (RF-06.2)', !IncidentStatus::PENDING_INFO->canTransitionTo(IncidentStatus::RESOLVED));
     $exitTargets = array_map(static fn (IncidentStatus $status): string => $status->value, IncidentStatus::PENDING_INFO->allowedTransitions());
     sort($exitTargets);
-    $assert('1.11 Se sale de la pausa sólo hacia IN_PROGRESS, ASSIGNED o CANCELLED', $exitTargets === ['ASSIGNED', 'CANCELLED', 'IN_PROGRESS'], implode(',', $exitTargets));
+    $assert('1.11 Se sale de la pausa sólo hacia IN_PROGRESS, ASSIGNED, REGISTERED o CANCELLED', $exitTargets === ['ASSIGNED', 'CANCELLED', 'IN_PROGRESS', 'REGISTERED'], implode(',', $exitTargets));
+    // Cierre de F-5: la responsabilidad manda en el destino de la reanudación.
+    $unassignedPaused = $domainIncident(IncidentStatus::PENDING_INFO, '2026-10-09 08:00:00', null);
+    $unassignedBlocked = 0;
+    foreach ([IncidentStatus::ASSIGNED, IncidentStatus::IN_PROGRESS] as $forbiddenTarget) {
+        try {
+            $unassignedPaused->resumePendingInfo($forbiddenTarget);
+        } catch (InvalidTransitionException) {
+            $unassignedBlocked++;
+        }
+    }
+    $assignedPaused = $domainIncident(IncidentStatus::PENDING_INFO, '2026-10-09 08:00:00');
+    $registeredBlocked = false;
+    try {
+        $assignedPaused->resumePendingInfo(IncidentStatus::REGISTERED);
+    } catch (InvalidTransitionException) {
+        $registeredBlocked = true;
+    }
+    $assert(
+        '1.11.b Sin técnico no hay ASIGNADA/EN CURSO y con técnico no hay REGISTRADA; el reingreso legal sin responsable es REGISTERED (cierre de F-5)',
+        $unassignedBlocked === 2
+        && $registeredBlocked
+        && $unassignedPaused->resumePendingInfo(IncidentStatus::REGISTERED)->getStatus() === IncidentStatus::REGISTERED
+    );
 
     $illegalPause = $capture(fn () => $domainIncident(IncidentStatus::REGISTERED)->pausePendingInfo(
         IncidentPauseReasonCategory::BUILDING_CLOSED_NO_ACCESS,
@@ -355,35 +378,49 @@ try {
         'encontrados: ' . count($freeTechnicianIds)
     );
 
+    // Reloj virtual del grupo (cierre de F-3): el vencimiento contractual se desplaza por el
+    // tiempo HÁBIL perdido durante la pausa, así que la suite ancla su instante de referencia
+    // dentro de la jornada comercial con el calendario del arnés. La pausa sembrada son sus
+    // 20 minutos previos y ambos caen dentro de la jornada, de modo que el tiempo hábil
+    // medido es exactamente el intervalo, sea cual sea el día real de la corrida.
+    $businessNow = BusinessCalendar::businessSecondsBefore(1260);
+    $businessAgo = static fn (int $seconds): string => $businessNow->modify(sprintf('-%d seconds', $seconds))->format('Y-m-d H:i:s');
+    $businessAhead = static fn (int $seconds): string => $businessNow->modify(sprintf('+%d seconds', $seconds))->format('Y-m-d H:i:s');
+
     $hotIncidentId = $insertIncident([
         'machine_type_snapshot' => 'SNACKS',
         'status' => 'PENDING_INFO',
         'assigned_technician_id' => $freeTechnicianIds[0] ?? null,
-        'assigned_at' => $agoSeconds(3600),
-        'created_at' => $agoSeconds(4000),
-        'paused_at' => $agoSeconds(1200),                  // 20 minutos: respuesta en caliente
+        'assigned_at' => $businessAgo(3600),
+        'created_at' => $businessAgo(4000),
+        'paused_at' => $businessAgo(1200),                 // 20 minutos: respuesta en caliente
         'pending_info_reason_category' => 'BUILDING_CLOSED_NO_ACCESS',
         'pending_info_reason_text' => 'El responsable de sede no se presentó a abrir la sala técnica.',
         'total_pending_info_seconds' => 3600,              // una pausa anterior de 1 hora ya cerrada
-        'sla_target_at' => $aheadSeconds(18000),
+        'sla_target_at' => $businessAhead(18000),
     ]);
 
     $siteActorId = 424242;
 
-    $shortComment = $service->handleSiteCommentReactivation($hotIncidentId, 'Ok', $siteActorId);
+    $shortComment = $service->handleSiteCommentReactivation($hotIncidentId, 'Ok', $siteActorId, $businessNow);
     $assert('3.1 Un comentario sin sustancia no reanuda la avería', $shortComment->status === IncidentStatus::PENDING_INFO && $shortComment->isSlaPaused);
     $assert('3.2 El comentario corto no escribe historial alguno', count($historyRows($hotIncidentId)) === 0);
 
     $hot = $service->handleSiteCommentReactivation(
         $hotIncidentId,
         'El conserje ya está en la puerta con la llave del cuarto de máquinas.',
-        $siteActorId
+        $siteActorId,
+        $businessNow
     );
 
     $assert('3.3 Respuesta en caliente: la avería vuelve a IN_PROGRESS', $hot->status === IncidentStatus::IN_PROGRESS);
     $assert('3.4 El contrato declara el reloj contractual reactivado', $hot->isSlaPaused === false);
     $assert('3.5 La pausa acumulada suma la hora previa y los 20 minutos en caliente', $hot->accumulatedPauseMinutes >= 80 && $hot->accumulatedPauseMinutes <= 81, (string)$hot->accumulatedPauseMinutes);
     $assert('3.6 El vencimiento original viaja en el contrato', $hot->slaTargetAtOriginal !== null);
+    // El desplazamiento es el tiempo HÁBIL del intervalo vivo (20 minutos), no su duración de
+    // pared reinterpretada como horas comerciales: ambas coinciden aquí porque la ventana cae
+    // entera en la jornada, y el desplazamiento exacto lo certifica el caso 1.10 de
+    // `IncidentPauseReactivationTest` con una pausa de fin de semana.
     $assert('3.7 El vencimiento se desplaza hacia adelante en horario comercial', $hot->slaTargetAtShifted !== null && $hot->slaTargetAtShifted > $hot->slaTargetAtOriginal);
     $assert('3.8 El nuevo vencimiento jamás cae de madrugada ni en fin de semana', (function () use ($hot, $madrid): bool {
         $shifted = new DateTimeImmutable((string)$hot->slaTargetAtShifted, $madrid);
@@ -405,7 +442,7 @@ try {
     $assert('3.17 El rastro documenta la duración exacta del intervalo cerrado', preg_match('/Duración del intervalo de pausa: (12[0-9]{2}) s\./', $hotNote, $durationMatch) === 1, $hotNote);
     $assert('3.18 La duración auditada cuadra con los segundos acumulados por el agregado', (int)($durationMatch[1] ?? 0) === (int)$hotRow['total_pending_info_seconds'] - 3600);
 
-    $burst = $service->handleSiteCommentReactivation($hotIncidentId, 'Insisto: ya está abierto, avisad al técnico.', $siteActorId);
+    $burst = $service->handleSiteCommentReactivation($hotIncidentId, 'Insisto: ya está abierto, avisad al técnico.', $siteActorId, $businessNow);
     $assert('3.19 Idempotencia ante ráfagas: el segundo comentario no reescribe nada', count($historyRows($hotIncidentId)) === 1 && $burst->status === IncidentStatus::IN_PROGRESS);
 
     $noSlaIncidentId = $insertIncident([
@@ -484,7 +521,18 @@ try {
         'created_at' => $agoSeconds(900),
     ]);
     $unassigned = $service->handleSiteCommentReactivation($unassignedId, 'La sede responde pero la avería no tiene técnico responsable.', $siteActorId);
-    $assert('4.10 Caso límite: sin técnico responsable la reanudación no puede afirmar que está en curso', $unassigned->status === IncidentStatus::ASSIGNED);
+    $assert(
+        '4.10 Caso límite §6.4: sin técnico responsable la reanudación reingresa a REGISTERED (cola de asignación), no a ASIGNADA',
+        $unassigned->status === IncidentStatus::REGISTERED
+    );
+    $unassignedRow = $incidentRow($unassignedId);
+    $assert(
+        '4.10.b El contrato publica la etiqueta verdadera del reingreso y conserva la ausencia de responsable (cierre de F-5)',
+        $unassigned->status->label() === 'Registrada'
+        && array_key_exists('assigned_technician_id', $unassignedRow)
+        && $unassignedRow['assigned_technician_id'] === null
+        && $unassigned->isSlaPaused === false
+    );
 
     $missing = $capture(fn () => $service->handleSiteCommentReactivation(99999999, 'Comentario sobre un expediente inexistente.', $siteActorId));
     $assert('4.11 Un comentario sobre un expediente inexistente se declara con excepción, no se silencia', $missing['threw'] && $missing['class'] === \DomainException::class);

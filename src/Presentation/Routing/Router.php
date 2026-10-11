@@ -9,6 +9,7 @@ use DomainException;
 use Throwable;
 use VendGuard\Core\Domain\Exception\ChronicIncidentException;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
+use VendGuard\Core\Domain\Exception\InactivityThresholdNotReachedException;
 use VendGuard\Core\Domain\Exception\InvalidResolutionException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
@@ -223,6 +224,15 @@ class Router
                     'from_status' => $e->getFromStatus()?->value,
                     'to_status' => $e->getToStatus()?->value,
                 ]
+            );
+        } catch (InactivityThresholdNotReachedException $e) {
+            // Precondición del umbral de 72 h hábiles (RF-04.3): el rechazo viaja con la
+            // espera medida para que cualquier ruta lo explique sin recalcularla.
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                $e->getDetails()
             );
         } catch (WarrantyExpiredException $e) {
             return Response::error(

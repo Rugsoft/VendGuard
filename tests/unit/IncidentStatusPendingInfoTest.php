@@ -150,10 +150,16 @@ $assert(
     && IncidentStatus::CANCELLED->canTransitionTo(IncidentStatus::PENDING_INFO) === false
 );
 $assert(
-    '3.7 Reanudar desde PENDING_INFO es legal hacia ASSIGNED, IN_PROGRESS y CANCELLED',
+    '3.7 Reanudar desde PENDING_INFO es legal hacia ASSIGNED, IN_PROGRESS, REGISTERED y CANCELLED',
     IncidentStatus::PENDING_INFO->canTransitionTo(IncidentStatus::ASSIGNED) === true
     && IncidentStatus::PENDING_INFO->canTransitionTo(IncidentStatus::IN_PROGRESS) === true
+    && IncidentStatus::PENDING_INFO->canTransitionTo(IncidentStatus::REGISTERED) === true
     && IncidentStatus::PENDING_INFO->canTransitionTo(IncidentStatus::CANCELLED) === true
+);
+$assert(
+    '3.7.b REGISTERED es el reingreso a la cola de asignación sin técnico responsable (cierre de F-5)',
+    IncidentStatus::REGISTERED->canTransitionTo(IncidentStatus::ASSIGNED) === true
+    && IncidentStatus::PENDING_INFO->canTransitionTo(IncidentStatus::REGISTERED) === true
 );
 $assert(
     '3.8 PROHIBIDO resolver directamente desde PENDING_INFO (RF-06.2, Art. V.1)',
@@ -167,11 +173,11 @@ $assert(
     && IncidentStatus::PENDING_INFO->canTransitionTo(IncidentStatus::PENDING_PARTS) === false
 );
 $assert(
-    '3.10 allowedTransitions() de PENDING_INFO es exactamente [ASSIGNED, IN_PROGRESS, CANCELLED]',
+    '3.10 allowedTransitions() de PENDING_INFO es exactamente [REGISTERED, ASSIGNED, IN_PROGRESS, CANCELLED]',
     array_map(
         static fn(IncidentStatus $status): string => $status->value,
         IncidentStatus::PENDING_INFO->allowedTransitions()
-    ) === ['ASSIGNED', 'IN_PROGRESS', 'CANCELLED']
+    ) === ['REGISTERED', 'ASSIGNED', 'IN_PROGRESS', 'CANCELLED']
 );
 
 // =====================================================================

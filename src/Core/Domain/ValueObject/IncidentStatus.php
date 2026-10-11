@@ -83,9 +83,11 @@ enum IncidentStatus: string
             self::ASSIGNED => in_array($target, [self::IN_PROGRESS, self::ASSIGNED, self::PENDING_INFO, self::CANCELLED], true),
             self::IN_PROGRESS => in_array($target, [self::PENDING_PARTS, self::PENDING_INFO, self::RESOLVED, self::CANCELLED], true),
             self::PENDING_PARTS => in_array($target, [self::IN_PROGRESS, self::PENDING_INFO, self::CANCELLED], true),
-            // Desde la pausa solo se reanuda (IN_PROGRESS/ASSIGNED) o se cancela:
-            // RESOLVED queda expresamente prohibido (RF-06.2, Art. V.1).
-            self::PENDING_INFO => in_array($target, [self::IN_PROGRESS, self::ASSIGNED, self::CANCELLED], true),
+            // Desde la pausa solo se reanuda (IN_PROGRESS/ASSIGNED) o se reingresa a la
+            // cola de asignación (REGISTERED, únicamente cuando el expediente no tiene
+            // técnico responsable: cierre de F-5, §6.4 de la spec); RESOLVED queda
+            // expresamente prohibido (RF-06.2, Art. V.1).
+            self::PENDING_INFO => in_array($target, [self::IN_PROGRESS, self::ASSIGNED, self::REGISTERED, self::CANCELLED], true),
             self::RESOLVED => in_array($target, [self::CLOSED, self::REOPENED], true),
             self::REOPENED => in_array($target, [self::ASSIGNED, self::IN_PROGRESS, self::PENDING_INFO, self::CANCELLED], true),
             self::CLOSED, self::CANCELLED => false,

@@ -293,6 +293,7 @@ $pdoA->exec(sprintf(
     $manualIncidentId,
     $commentIncidentId
 ));
+$manualPausedAt = (string)($incidentRow($manualIncidentId)['paused_at'] ?? '');
 
 // La conexión perdedora falla rápido en lugar de quedarse 50 segundos esperando la fila.
 $pdoB->exec('SET SESSION innodb_lock_wait_timeout = 1');
@@ -337,12 +338,16 @@ $assert(
 
 // La operación ganadora se ejecuta sobre la MISMA conexión que sostiene el bloqueo: el
 // servicio participa en esa transacción (no la confirma) porque su dueño es quien la abrió.
+// Las dos orillas del reloj real acotan el tiempo hábil que la reanudación puede haber
+// medido (cierre de F-3: el vencimiento avanza jornada perdida, no duración de pared).
+$manualBefore = new DateTimeImmutable('now', BusinessCalendar::zone());
 $winnerDto = $serviceA->resumePendingInfoManually(
     $manualIncidentId,
     $technicianId,
     IncidentStatus::IN_PROGRESS,
     'Reanudación de la petición ganadora.'
 );
+$manualAfter = new DateTimeImmutable('now', BusinessCalendar::zone());
 
 $assert(
     '1.3 La operación ganadora entra en la transacción viva y no la confirma por su cuenta',
@@ -369,16 +374,27 @@ $assert(
 // La espera se sembró con 3 minutos exactos, pero el intervalo sigue vivo mientras la
 // suite orquesta la carrera, así que la duración acumulada es 180 s más lo que tarde la
 // operación. Lo que se certifica no es una cifra mágica, sino que el vencimiento se
-// desplaza EXACTAMENTE lo que dura la pausa y UNA sola vez (una segunda transición
-// habría desplazado el doble).
+// desplaza EXACTAMENTE el tiempo hábil de la pausa y UNA sola vez (una segunda transición
+// habría desplazado el doble). El tiempo hábil lo cuenta el calendario independiente del
+// arnés, de modo que la aserción no depende del día ni de la hora de la corrida.
 $manualAccumulated = (int)($manualRow['total_pending_info_seconds'] ?? 0);
-$manualShifted     = strtotime((string)($manualRow['sla_target_at'] ?? '')) - strtotime('2026-10-13 15:00:00');
+$manualShifted     = (new DateTimeImmutable((string)($manualRow['sla_target_at'] ?? ''), BusinessCalendar::zone()))->getTimestamp()
+    - (new DateTimeImmutable('2026-10-13 15:00:00', BusinessCalendar::zone()))->getTimestamp();
+[$shiftBusinessMin, $shiftBusinessMax] = BusinessCalendar::shiftRange($manualPausedAt, $manualBefore, $manualAfter);
 
 $assert(
     '1.5 La espera se descuenta del reloj contractual exactamente una vez (RF-03.1, RF-03.3)',
     $manualAccumulated >= 180 && $manualAccumulated <= 195
-    && $manualShifted === $manualAccumulated,
-    sprintf('acumulado=%d s, desplazamiento=%d s', $manualAccumulated, $manualShifted)
+    && $manualShifted >= $shiftBusinessMin
+    && $manualShifted <= $shiftBusinessMax
+    && $manualShifted <= $manualAccumulated,
+    sprintf(
+        'acumulado=%d s, desplazamiento=%d s, tiempo hábil esperado=[%d..%d] s',
+        $manualAccumulated,
+        $manualShifted,
+        $shiftBusinessMin,
+        $shiftBusinessMax
+    )
 );
 
 $loserRetry = $captureThrowable(static fn () => $serviceB->resumePendingInfoManually(
@@ -396,18 +412,18 @@ $assert(
 
 $finalRow      = $incidentRow($manualIncidentId);
 $finalAccumulated = (int)($finalRow['total_pending_info_seconds'] ?? 0);
-$finalShifted     = strtotime((string)($finalRow['sla_target_at'] ?? '')) - strtotime('2026-10-13 15:00:00');
 
 $assert(
-    '1.7 Tras la carrera sobrevive UNA sola transición y UN solo rastro inmutable',
+    '1.7 Tras la carrera sobrevive UNA sola transición, UN solo rastro y UN solo desplazamiento',
     $resumeTraceCount($manualIncidentId, $manualCursor) === 1
-    && $finalShifted === $finalAccumulated
-    && $finalAccumulated === $manualAccumulated,
+    && $finalAccumulated === $manualAccumulated
+    && ($finalRow['sla_target_at'] ?? '') === ($manualRow['sla_target_at'] ?? ''),
     sprintf(
-        'rastro=%d, acumulado=%d s, desplazamiento=%d s',
+        'rastro=%d, acumulado=%d s, vencimiento=%s (esperado=%s)',
         $resumeTraceCount($manualIncidentId, $manualCursor),
         $finalAccumulated,
-        $finalShifted
+        (string)($finalRow['sla_target_at'] ?? 'AUSENTE'),
+        (string)($manualRow['sla_target_at'] ?? 'AUSENTE')
     )
 );
 

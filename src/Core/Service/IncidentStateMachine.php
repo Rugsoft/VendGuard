@@ -19,7 +19,8 @@ use VendGuard\Core\Domain\ValueObject\IncidentStatus;
  * - ASSIGNED      -> IN_PROGRESS, ASSIGNED (reasignación), PENDING_INFO, CANCELLED
  * - IN_PROGRESS   -> PENDING_PARTS, PENDING_INFO, RESOLVED, CANCELLED
  * - PENDING_PARTS -> IN_PROGRESS, PENDING_INFO, CANCELLED
- * - PENDING_INFO  -> IN_PROGRESS, ASSIGNED, CANCELLED (resolver exige reanudar, RF-06.2)
+ * - PENDING_INFO  -> IN_PROGRESS, ASSIGNED, REGISTERED, CANCELLED (resolver exige reanudar, RF-06.2;
+ *                    REGISTERED sólo cuando el expediente no tiene técnico responsable, cierre de F-5)
  * - RESOLVED      -> CLOSED, REOPENED
  * - REOPENED      -> ASSIGNED, IN_PROGRESS, PENDING_INFO, CANCELLED
  * - CLOSED        -> (Terminal)

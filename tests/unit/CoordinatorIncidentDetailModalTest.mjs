@@ -1332,7 +1332,9 @@ const sitePauseBlock = {
   sla_target_frozen_at: '2026-10-01 12:15:00',
   sla_target_recalculated_at: '2026-10-13 09:40:00',
   can_resume_pause: true,
-  can_cancel_inactivity: true,
+  // Pausa viva por debajo del umbral: el servidor NO habilita la cancelación formal
+  // (RF-04.3, cierre de F-1), así que la ficha sólo ofrece la reanudación.
+  can_cancel_inactivity: false,
   reason_category: 'BUILDING_CLOSED_NO_ACCESS',
   reason_category_label: 'Edificio cerrado / Sin acceso a instalaciones',
   reason_text: 'El conserje confirma que el centro permanece cerrado por obras toda la semana.',
@@ -1355,11 +1357,12 @@ const sitePauseDetail = {
 
 const sitePauseInstance = createInstance({ detail: sitePauseDetail });
 
-assert('19.1 The pause block publishes the frozen clock and the two supervised actions (RF-03.2)',
+assert('19.1 The pause block publishes the frozen clock and only the resumption below the threshold (RF-03.2)',
   computed(sitePauseInstance, 'isSlaPaused') === true &&
   computed(sitePauseInstance, 'isProlongedInactivity') === false &&
   computed(sitePauseInstance, 'canResumePause') === true &&
-  computed(sitePauseInstance, 'canCancelInactivity') === true);
+  computed(sitePauseInstance, 'canCancelInactivity') === false &&
+  computed(sitePauseInstance, 'inactivityThresholdPending') === true);
 
 assert('19.2 Human readings: elapsed wait, discounted minutes and both contractual dates',
   computed(sitePauseInstance, 'pausedMinutesLabel') === '2 h 25 min' &&
@@ -1398,7 +1401,12 @@ const prolongedPauseInstance = createInstance({
     ...sitePauseDetail,
     technical_intervention: {
       ...sitePauseDetail.technical_intervention,
-      pause: { ...sitePauseBlock, is_prolonged_inactivity: true, accumulated_pause_minutes: 2890 }
+      pause: {
+        ...sitePauseBlock,
+        is_prolonged_inactivity: true,
+        accumulated_pause_minutes: 2890,
+        can_cancel_inactivity: true
+      }
     }
   }
 });
@@ -1406,8 +1414,15 @@ assert('19.6 Beyond 72 business hours the file raises the urgent notice with the
   computed(prolongedPauseInstance, 'isProlongedInactivity') === true &&
   computed(prolongedPauseInstance, 'inactivityThresholdHours') === 72 &&
   computed(prolongedPauseInstance, 'accumulatedPauseMinutesLabel') === '48 h 10 min' &&
+  computed(prolongedPauseInstance, 'canCancelInactivity') === true &&
+  computed(prolongedPauseInstance, 'inactivityThresholdPending') === false &&
   template.includes('data-testid="pause-prolonged-inactivity"') &&
   template.includes('más de {{ inactivityThresholdHours }} horas hábiles sin respuesta de sede'));
+
+assert('19.6.b Below the threshold the file explains the frontier instead of offering the action (RF-04.3)',
+  computed(sitePauseInstance, 'inactivityThresholdPending') === true &&
+  template.includes('data-testid="pause-inactivity-threshold-pending"') &&
+  template.includes('se habilita al superar las {{ inactivityThresholdHours }} horas hábiles'));
 
 assert('19.7 The footer offers resume and formal cancellation only with the frozen clock',
   template.includes('v-if="canResumePause"') &&
@@ -1500,6 +1515,28 @@ await CoordinatorIncidentDetailModal.methods.confirmResumePause.call(resumePause
 assert('19.14 A rejected resume surfaces the server reason in the file footer',
   resumePauseInstance.pauseActionErrorMessage.includes('pausa abierta') &&
   template.includes('data-testid="pause-action-error"'));
+
+// Cierre de F-5 (§6.4): sin técnico responsable no existe «Asignada» que reanudar; la
+// avería reingresa a REGISTERED para una asignación formal, que es lo que el servidor
+// admite en ese caso. La acción sigue disponible: una pausa sin técnico también se cierra.
+api.coordinator.resumeIncidentPendingInfo = async (incidentId, targetStatus, resumeNote) => {
+  resumePauseCalls.push({ incidentId, targetStatus, resumeNote });
+  return { incident_id: incidentId, status: targetStatus };
+};
+const unassignedResumeInstance = createInstance({
+  detail: {
+    ...sitePauseDetail,
+    technician: { ...sitePauseDetail.technician, assigned: false, technician_id: null, name: null }
+  },
+  incidentId: 142
+});
+unassignedResumeInstance.fetchDetail = async () => {};
+await CoordinatorIncidentDetailModal.methods.confirmResumePause.call(unassignedResumeInstance);
+assert('19.14.b Without a responsible technician the resume re-enters the queue as REGISTERED (F-5, §6.4)',
+  resumePauseCalls.length === 2 && resumePauseCalls[1].incidentId === 142 &&
+  resumePauseCalls[1].targetStatus === 'REGISTERED' &&
+  resumePauseCalls[1].resumeNote === null &&
+  unassignedResumeInstance.getEmitted().some((e) => e.event === 'incident-updated' && e.payload?.reason === 'resume-pause'));
 
 const partsPauseInstance = createInstance({
   detail: {

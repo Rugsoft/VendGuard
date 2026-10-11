@@ -18,6 +18,9 @@ declare(strict_types=1);
  *   - RF-06.3: la reasignación de un expediente pausado conserva `PENDING_INFO`, el contexto
  *     del bloqueo y deja la huella estructural que la reactivación por comentario de sede
  *     lee para devolver la avería a `ASSIGNED`.
+ *   - Cierre de F-5: un expediente pausado sin técnico responsable no puede reanudarse a
+ *     `ASSIGNED`/`IN_PROGRESS` (422 con la pausa intacta); el único destino legal es
+ *     `REGISTERED`, que lo reingresa a la cola de asignación.
  *
  * Cada expediente estrena máquina sembrada (`uq_machine_active_ticket` impide dos tickets
  * activos por equipo y todo el banco se purga con `TestDataCleaner`); las filas maestras
@@ -480,6 +483,71 @@ try {
             && $router->dispatch(new Request(method: 'POST', path: $resumePath(999999999), headers: $authHeader($coordinatorToken)))->getStatusCode() === 404
     );
 
+    // Cierre de F-5: sin técnico responsable no existe «Asignada» que reanudar.
+    [$orphanIncidentId] = $createAssignedTicket($techId);
+    $router->dispatch(new Request(
+        method: 'POST',
+        path: $pausePath($orphanIncidentId),
+        parsedBody: $pauseBody('PENDING_SITE_AUTHORIZATION', 'La sede no autoriza el acceso hasta que llegue su responsable de mantenimiento.'),
+        headers: $authHeader($coordinatorToken)
+    ));
+    $pdo->prepare('UPDATE `incidents` SET `assigned_technician_id` = NULL WHERE `id` = :id')
+        ->execute([':id' => $orphanIncidentId]);
+
+    $res = $router->dispatch(new Request(
+        method: 'POST',
+        path: $resumePath($orphanIncidentId),
+        headers: $authHeader($coordinatorToken)
+    ));
+    $orphanRejectedRow = $incidentRow($orphanIncidentId);
+    $assert(
+        '3.9 Sin técnico responsable el destino por defecto (ASSIGNED) se rechaza con la pausa intacta',
+        $res->getStatusCode() === 422
+            && ($res->getDecodedBody()['error']['code'] ?? '') === 'INVALID_STATUS_FOR_RESUME'
+            && ($orphanRejectedRow['status'] ?? '') === 'PENDING_INFO'
+            && ($orphanRejectedRow['paused_at'] ?? null) !== null
+    );
+
+    $res = $router->dispatch(new Request(
+        method: 'POST',
+        path: $resumePath($orphanIncidentId),
+        parsedBody: ['target_status' => 'REGISTERED'],
+        headers: $authHeader($coordinatorToken)
+    ));
+    $orphanResumeData = $res->getDecodedBody()['data'] ?? [];
+    $orphanResumedRow = $incidentRow($orphanIncidentId);
+    $orphanResumeRows = array_values(array_filter(
+        $historyRows($orphanIncidentId),
+        static fn (array $row): bool => $row['from_status'] === 'PENDING_INFO' && $row['to_status'] === 'REGISTERED'
+    ));
+    $assert(
+        '3.10 Con destino REGISTERED la reanudación devuelve la avería a la cola de asignación',
+        $res->getStatusCode() === 200
+            && ($orphanResumeData['status'] ?? '') === 'REGISTERED'
+            && ($orphanResumeData['status_label'] ?? '') === 'Registrada'
+            && ($orphanResumedRow['paused_at'] ?? null) === null
+            && count($orphanResumeRows) === 1
+            && (int)($orphanResumeRows[0]['user_id'] ?? 0) === $coordinatorId
+            && str_contains((string)($res->getDecodedBody()['message'] ?? ''), 'cola de asignación')
+    );
+
+    // ... y en el sentido inverso: con técnico responsable el disfraz de REGISTERED también
+    // se rechaza dejando la pausa intacta para que el grupo 4 pueda cancelarla después.
+    $res = $router->dispatch(new Request(
+        method: 'POST',
+        path: $resumePath($guardIncidentId),
+        parsedBody: ['target_status' => 'REGISTERED'],
+        headers: $authHeader($coordinatorToken)
+    ));
+    $guardRegisteredRow = $incidentRow($guardIncidentId);
+    $assert(
+        '3.11 Con técnico responsable el destino REGISTERED se rechaza y la pausa sigue viva',
+        $res->getStatusCode() === 422
+            && ($res->getDecodedBody()['error']['code'] ?? '') === 'INVALID_STATUS_FOR_RESUME'
+            && ($guardRegisteredRow['status'] ?? '') === 'PENDING_INFO'
+            && ($guardRegisteredRow['paused_at'] ?? null) !== null
+    );
+
     // =========================================================================
     // GRUPO 4: Cancelación por inactividad con protocolo completo (RF-04.3 a RF-04.5)
     // =========================================================================
@@ -561,9 +629,6 @@ try {
     $refundOwners[$refundId] = $guardIncidentId;
     $assert('4.5 Reintegro de partida vinculado a la avería en inspección', $refundId > 0);
 
-    // La cancelación se ejecuta aunque la pausa sea reciente: «facultar» no es un cerrojo
-    // (decisión anotada en T-PAUSE-09) y la decisión sigue siendo humana y justificada.
-    //
     // La cuenta de rastros se toma como DELTA sobre la foto previa: `audit_log` es
     // append-only y el arnés no la purga (inviolabilidad del Art. III), así que una
     // corrida anterior puede dejar filas huérfanas que reutilicen el mismo identificador
@@ -574,6 +639,66 @@ try {
         'machine'  => $auditCount('MACHINE_BLOCKED_NO_ACCESS', $guardMachineId, 'MACHINE'),
         'refund'   => $auditCount('REFUND_DETACHED_BY_INACTIVITY', $refundId, 'REFUND_REQUEST'),
     ];
+
+    // 4.6.a — El umbral es precondición (RF-04.3, cierre de F-1). La pausa de esta avería
+    // es RECIENTE, así que el protocolo debe rechazarse sin escribir nada: antes de F-1
+    // se ejecutaba igual y la bitácora sellaba 72 horas hábiles que nunca existieron.
+    $res = $router->dispatch(new Request(
+        method: 'POST',
+        path: $cancelPath($guardIncidentId),
+        parsedBody: ['cancellation_reason' => 'Cierre administrativo por inactividad y falta de acceso del cliente tras el plazo hábil.'.PHP_EOL],
+        headers: $authHeader($coordinatorToken)
+    ));
+    $rejectedBody = $res->getDecodedBody();
+    $rejectedDetails = $rejectedBody['error']['details'] ?? [];
+    $assert(
+        '4.6.a Con una pausa reciente la cancelación se rechaza con 422 INACTIVITY_THRESHOLD_NOT_REACHED',
+        $res->getStatusCode() === 422
+            && ($rejectedBody['error']['code'] ?? '') === 'INACTIVITY_THRESHOLD_NOT_REACHED'
+            && ($rejectedDetails['threshold_business_hours'] ?? 0) === IncidentPauseService::PROLONGED_INACTIVITY_BUSINESS_HOURS
+            && ($rejectedDetails['paused_business_hours'] ?? 999) < IncidentPauseService::PROLONGED_INACTIVITY_BUSINESS_HOURS,
+        json_encode($rejectedBody['error'] ?? [])
+    );
+
+    $rejectedRow = $incidentRow($guardIncidentId);
+    $rejectedMachine = $pdo->query('SELECT `is_active`, `is_blocked_no_access` FROM `machines` WHERE `id` = ' . $guardMachineId)->fetch(PDO::FETCH_ASSOC) ?: [];
+    $rejectedRefund = $pdo->query('SELECT `incident_id` FROM `refund_requests` WHERE `id` = ' . $refundId)->fetch(PDO::FETCH_ASSOC) ?: [];
+    $assert(
+        '4.6.b El rechazo por umbral no toca nada: expediente en pausa, máquina activa, reintegro vinculado y cero rastros nuevos',
+        ($rejectedRow['status'] ?? '') === 'PENDING_INFO'
+            && ($rejectedRow['paused_at'] ?? null) !== null
+            && (int)($rejectedMachine['is_active'] ?? 0) === 1
+            && (int)($rejectedMachine['is_blocked_no_access'] ?? 1) === 0
+            && (int)($rejectedRefund['incident_id'] ?? 0) === $guardIncidentId
+            && $auditCount('INCIDENT_CANCELLED', $guardIncidentId) === $auditBaseline['incident']
+            && $auditCount('MACHINE_BLOCKED_NO_ACCESS', $guardMachineId, 'MACHINE') === $auditBaseline['machine']
+            && $auditCount('REFUND_DETACHED_BY_INACTIVITY', $refundId, 'REFUND_REQUEST') === $auditBaseline['refund'],
+        json_encode([$rejectedRow, $rejectedMachine, $rejectedRefund])
+    );
+
+    // Sembrado del silencio de sede: tres semanas naturales superan con holgura las 72 h
+    // hábiles que autorizan el cierre (RF-04.3). La insignia del triaje es la MISMA regla
+    // que admite la escritura, así que se comprueba antes de ejecutar el protocolo.
+    $pdo->prepare('UPDATE `incidents` SET `paused_at` = :paused WHERE `id` = :id')->execute([
+        ':paused' => (new DateTimeImmutable('-21 days'))->format('Y-m-d H:i:s'),
+        ':id'     => $guardIncidentId,
+    ]);
+    $boardRes = $router->dispatch(new Request(
+        method: 'GET',
+        path: '/api/coordinator/incidents',
+        headers: $authHeader($coordinatorToken)
+    ));
+    $boardRow = [];
+    foreach (($boardRes->getDecodedBody()['data'] ?? []) as $row) {
+        if ((int)($row['id'] ?? 0) === $guardIncidentId) {
+            $boardRow = $row;
+        }
+    }
+    $assert(
+        '4.6.c Premisa del banco: la espera sembrada enciende la insignia de espera prolongada (RF-04.2)',
+        ($boardRow['is_prolonged_inactivity'] ?? false) === true,
+        json_encode($boardRow)
+    );
 
     $res = $router->dispatch(new Request(
         method: 'POST',
@@ -587,7 +712,8 @@ try {
         $res->getStatusCode() === 200
             && ($cancelledData['status'] ?? '') === 'CANCELLED'
             && ($cancelledData['machine']['is_blocked_no_access'] ?? false) === true
-            && ($cancelledData['refunds_preserved'] ?? false) === true
+            && ($cancelledData['refunds_preserved'] ?? false) === true,
+        json_encode($res->getDecodedBody()['error'] ?? [])
     );
 
     $cancelledRow = $incidentRow($guardIncidentId);
@@ -815,8 +941,16 @@ try {
     $frozenTarget = $detailPause['sla_target_frozen_at'] ?? null;
     $recalculatedTarget = $detailPause['sla_target_recalculated_at'] ?? null;
     $recalculatedAt = is_string($recalculatedTarget) ? new DateTimeImmutable($recalculatedTarget) : null;
+    // La fecha recalculada es la proyección del vencimiento con el tiempo HÁBIL del intervalo
+    // vivo (cierre de F-3), que es exactamente lo que grabará la reanudación al cerrar la pausa.
+    // Cae siempre dentro de la jornada 08:00-18:00; el borde de cierre es legal cuando el
+    // desplazamiento agota la jornada (una espera larga aterriza en las 18:00 exactas), así
+    // que se mide en segundos del día y se admite el cierre, no se exige abrir un día más.
+    $recalculatedSecondOfDay = $recalculatedAt !== null
+        ? (int)$recalculatedAt->format('G') * 3600 + (int)$recalculatedAt->format('i') * 60 + (int)$recalculatedAt->format('s')
+        : -1;
     $assert(
-        '6.5 El SLA queda congelado al pausar y la fecha recalculada cae en jornada hábil 08:00-18:00 (RF-03.2, RF-03.3, RNF-01)',
+        '6.5 El SLA queda congelado al pausar y la fecha recalculada cae en la jornada hábil 08:00-18:00 (RF-03.2, RF-03.3, RNF-01)',
         ($detailData['sla']['is_frozen'] ?? false) === true
             && ($detailData['sla']['frozen_at'] ?? null) === ($prolongedBoardRow['paused_at'] ?? null)
             && is_string($frozenTarget)
@@ -824,8 +958,8 @@ try {
             && $recalculatedTarget !== $frozenTarget
             && $recalculatedTarget > $frozenTarget
             && (int)$recalculatedAt->format('N') <= 5
-            && (int)$recalculatedAt->format('G') >= 8
-            && (int)$recalculatedAt->format('G') < 18,
+            && $recalculatedSecondOfDay >= 28800
+            && $recalculatedSecondOfDay <= 64800,
         json_encode([$frozenTarget, $recalculatedTarget])
     );
 

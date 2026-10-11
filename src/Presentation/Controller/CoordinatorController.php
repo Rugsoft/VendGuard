@@ -10,6 +10,7 @@ use VendGuard\Application\Service\CoordinatorIncidentDetailService;
 use VendGuard\Application\Service\IncidentCommentService;
 use VendGuard\Application\Service\IncidentPauseService;
 use VendGuard\Core\Domain\Exception\ConversationSealedException;
+use VendGuard\Core\Domain\Exception\InactivityThresholdNotReachedException;
 use VendGuard\Core\Domain\Exception\InvalidCommentLengthException;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Model\Incident;
@@ -688,8 +689,11 @@ class CoordinatorController
      * está trabajando en la máquina. En ambos casos el vencimiento contractual se
      * desplaza en horario comercial la duración exacta que estuvo congelado.
      *
-     * Cuerpo opcional: `target_status` (`ASSIGNED`/`IN_PROGRESS`) y `resume_note`. Un
-     * destino fuera de esos dos valores se rechaza con `422` en lugar de ignorarse.
+     * Cuerpo opcional: `target_status` (`ASSIGNED`/`IN_PROGRESS`/`REGISTERED`) y
+     * `resume_note`. Un destino fuera de esos tres valores se rechaza con `422` en lugar
+     * de ignorarse. `REGISTERED` sólo es legal para expedientes sin técnico responsable
+     * (cierre de F-5, §6.4): devuelve la avería a la cola de asignación; con técnico, el
+     * agregado rechaza el destino y sin técnico rechaza `ASSIGNED`/`IN_PROGRESS`.
      */
     public function resumePendingInfo(Request $request): Response
     {
@@ -707,7 +711,10 @@ class CoordinatorController
         }
 
         // 3. Destino elegido por coordinación. Por defecto `ASSIGNED`: la respuesta tardía
-        //    de la sede obliga al técnico a personarse antes de reanudar el trabajo.
+        //    de la sede obliga al técnico a personarse antes de reanudar el trabajo. En un
+        //    expediente sin técnico responsable el agregado rechaza `ASSIGNED`/`IN_PROGRESS`
+        //    y sólo admite `REGISTERED` (cierre de F-5, §6.4), de modo que el llamante
+        //    explícito conserva la verdad del estado.
         $body = $request->getParsedBody();
         $rawTarget = $body['target_status'] ?? null;
         $targetStatus = IncidentStatus::ASSIGNED;
@@ -716,10 +723,10 @@ class CoordinatorController
                 ? IncidentStatus::tryFrom(strtoupper(trim($rawTarget)))
                 : null;
 
-            if (!in_array($requestedTarget, [IncidentStatus::ASSIGNED, IncidentStatus::IN_PROGRESS], true)) {
+            if (!in_array($requestedTarget, [IncidentStatus::ASSIGNED, IncidentStatus::IN_PROGRESS, IncidentStatus::REGISTERED], true)) {
                 return Response::error(
                     'INVALID_RESUME_TARGET',
-                    'El destino de la reanudación debe ser "Asignada" (el técnico debe desplazarse) o "En curso" (ya está en la máquina).',
+                    'El destino de la reanudación debe ser "Asignada" (el técnico debe desplazarse), "En curso" (ya está en la máquina) o "Registrada" (la avería no tiene técnico responsable y vuelve a la cola de asignación).',
                     422
                 );
             }
@@ -756,9 +763,11 @@ class CoordinatorController
         return Response::json(
             $resumed->toArray(),
             200,
-            $targetStatus === IncidentStatus::ASSIGNED
-                ? 'Intervención reanudada en estado asignada. El técnico debe personarse para iniciar el trabajo.'
-                : 'Intervención reanudada en curso. Reloj contractual de SLA reactivado con desplazamiento aplicado.'
+            match ($targetStatus) {
+                IncidentStatus::REGISTERED => 'Intervención reanudada en estado registrada. La avería vuelve a la cola de asignación.',
+                IncidentStatus::IN_PROGRESS => 'Intervención reanudada en curso. Reloj contractual de SLA reactivado con desplazamiento aplicado.',
+                default => 'Intervención reanudada en estado asignada. El técnico debe personarse para iniciar el trabajo.',
+            }
         );
     }
 
@@ -776,10 +785,17 @@ class CoordinatorController
      * preservados para liquidación central (RF-04.5)—. Aquí sólo se autoriza, se valida el
      * motivo y se publica el resultado real releído de la base de datos.
      *
+     * **Precondición del umbral (RF-04.3).** El protocolo sólo se admite con más de 72
+     * horas hábiles de espera, medidas en horario comercial de la sede con la misma regla
+     * que enciende la insignia del triaje. El rechazo (`422
+     * INACTIVITY_THRESHOLD_NOT_REACHED`) lo lanza el servicio ANTES de la primera
+     * escritura y viaja con la espera medida, de modo que la máquina no queda fuera de
+     * servicio y la bitácora no sella un silencio de tres jornadas que no ocurrió.
+     *
      * Contrato HTTP: `200` cancelación ejecutada; `400` identificador inválido; `422` motivo
-     * ausente, motivo de menos de 20 caracteres reales o expediente que no está en pausa;
-     * `404` expediente inexistente; `500` si alguna de las escrituras del protocolo falla y
-     * la transacción se deshace entera.
+     * ausente, motivo de menos de 20 caracteres reales, expediente que no está en pausa o
+     * espera que no supera el umbral; `404` expediente inexistente; `500` si alguna de las
+     * escrituras del protocolo falla y la transacción se deshace entera.
      */
     public function cancelInactivity(Request $request): Response
     {
@@ -813,9 +829,19 @@ class CoordinatorController
             return Response::error('UNAUTHORIZED', 'No se pudo identificar al coordinador autenticado.', 401);
         }
 
-        // 5. Protocolo completo como una sola unidad de trabajo (Algoritmo 5).
+        // 5. Protocolo completo como una sola unidad de trabajo (Algoritmo 5). El servicio
+        //    devuelve la espera hábil MEDIDA, que es la cifra que firma la auditoría.
         try {
-            $this->pauses()->cancelByInactivity($incidentId, (int)$coordinatorId, $reason);
+            $pausedBusinessSeconds = $this->pauses()->cancelByInactivity($incidentId, (int)$coordinatorId, $reason);
+        } catch (InactivityThresholdNotReachedException $e) {
+            // La salvaguarda mordió: nada se ha escrito (ni ticket, ni máquina, ni
+            // reintegro, ni bitácora) y el cliente recibe la espera real para explicarla.
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                $e->getDetails()
+            );
         } catch (\VendGuard\Core\Domain\Exception\InvalidTransitionException $e) {
             return Response::error('INVALID_STATUS_FOR_INACTIVITY_CANCELLATION', $e->getMessage(), 422);
         } catch (\InvalidArgumentException $e) {
@@ -841,7 +867,11 @@ class CoordinatorController
             ],
             metadata: [
                 'ticket_code' => $incident->getTicketCode(),
+                // El canal deja de ser una afirmación: viaja con la espera que el servicio
+                // midió en horas hábiles para autorizar el cierre (Art. III, RNF-05).
                 'cancellation_channel' => 'INACTIVITY_72_BUSINESS_HOURS',
+                'inactivity_wait_business_hours' => round($pausedBusinessSeconds / 3600, 2),
+                'inactivity_threshold_business_hours' => IncidentPauseService::PROLONGED_INACTIVITY_BUSINESS_HOURS,
             ]
         );
 

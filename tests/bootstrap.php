@@ -26,3 +26,9 @@ require_once __DIR__ . '/../src/autoload.php';
 // incident_replaced_parts, unclaimed_cash_findings) puede volver a reventar un
 // `DELETE FROM incidents`. Ver specs/technical/testing_cleanup_contract.md
 require_once __DIR__ . '/Support/TestDataCleaner.php';
+
+// Calendario comercial del arnés (08:00-18:00, lunes a viernes, Europe/Madrid). Se
+// carga aquí por el mismo motivo: las suites que certifican el desplazamiento del
+// vencimiento contractual (RF-03.3, cierre de F-3) calculan su expectativa con esta
+// implementación independiente en lugar de reutilizar el servicio de producción.
+require_once __DIR__ . '/Support/BusinessCalendar.php';

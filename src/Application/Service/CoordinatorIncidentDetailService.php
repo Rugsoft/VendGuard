@@ -554,28 +554,36 @@ final class CoordinatorIncidentDetailService
             ? IncidentPauseReasonCategory::tryFrom(strtoupper(trim($categoryValue)))
             : null;
 
+        // El umbral se mide UNA vez y alimenta las tres caras de la misma regla: la insignia
+        // de la ficha, la lectura del triaje y la disponibilidad de la acción supervisada.
+        $isProlongedInactivity = $isSlaPaused && $this->pauses()->isProlongedInactivitySince(
+            is_string($pausedAtRaw) ? $pausedAtRaw : null,
+            $isSlaPaused,
+            $now
+        );
+
         return [
             'is_paused' => $status === IncidentStatus::PENDING_PARTS || $isSlaPaused,
             'is_sla_paused' => $isSlaPaused,
             'paused_at' => $isSlaPaused ? (string)$pausedAtRaw : null,
             'paused_minutes' => $isSlaPaused ? (int)round($liveSeconds / 60) : null,
             'accumulated_pause_minutes' => (int)round($accumulatedSeconds / 60),
-            'is_prolonged_inactivity' => $isSlaPaused && $this->pauses()->isProlongedInactivitySince(
-                is_string($pausedAtRaw) ? $pausedAtRaw : null,
-                $isSlaPaused,
-                $now
-            ),
+            'is_prolonged_inactivity' => $isProlongedInactivity,
             'inactivity_threshold_business_hours' => IncidentPauseService::PROLONGED_INACTIVITY_BUSINESS_HOURS,
             'sla_target_frozen_at' => $isSlaPaused ? ($sla['sla_target_at'] ?? null) : null,
             'sla_target_recalculated_at' => $this->recalculatedSlaTargetAt(
                 $incident,
                 $sla,
-                $accumulatedSeconds + $liveSeconds,
+                $now,
                 $isSlaPaused
             ),
-            // Acciones supervisadas de coordinación (RF-04.3, RF-06.2): sólo con pausa viva.
+            // Acciones supervisadas de coordinación (RF-04.3, RF-06.2). La reanudación sólo
+            // exige pausa viva; la cancelación por inactividad exige además haber SUPERADO el
+            // umbral, porque es exactamente la misma regla que admite la escritura en el
+            // endpoint (cierre de F-1). Publicarla aquí sin el umbral ofrecía en la ficha una
+            // acción que el servidor iba a rechazar con 422.
             'can_resume_pause' => $isSlaPaused,
-            'can_cancel_inactivity' => $isSlaPaused,
+            'can_cancel_inactivity' => $isSlaPaused && $isProlongedInactivity,
             'reason_category' => $category?->value ?? (is_string($categoryValue) ? $categoryValue : null),
             'reason_category_label' => $category?->label(),
             'reason_text' => $incident['pending_info_reason_text'] ?? null,
@@ -596,16 +604,24 @@ final class CoordinatorIncidentDetailService
      * sede: sin calendario comercial no se inventa una fecha. El desplazamiento lo calcula
      * el servicio del módulo 11, que es la única autoridad del horario hábil 08:00-18:00.
      *
+     * **Qué se desplaza (RF-03.3, enmendado en el cierre de F-3).** El vencimiento vigente
+     * (el congelado al pausar) se desplaza por el **tiempo hábil realmente perdido en el
+     * intervalo de pausa vivo**, no por su duración de pared: es la misma regla que aplica
+     * la reanudación al persistir el nuevo vencimiento, de modo que la ficha y la escritura
+     * no puedan discrepar (la discrepancia entre ambas caras fue justo el patrón que produjo
+     * F-1). Con la duración de pared reinterpretada como horas comerciales, una pausa de
+     * viernes a lunes dilataba el compromiso de SLA hasta 4×.
+     *
      * @param array<string, mixed> $incident Raw incident row.
      * @param array<string, mixed> $sla Already derived cold-chain SLA block.
-     * @param int $pauseSeconds Segundos de pausa acumulados más el intervalo vivo.
+     * @param DateTimeImmutable|null $now Reference instant for the live pause window.
      * @param bool $isSlaPaused Whether the contractual clock is actually frozen.
      * @return string|null New contractual deadline in database format, or null.
      */
     private function recalculatedSlaTargetAt(
         array $incident,
         array $sla,
-        int $pauseSeconds,
+        ?DateTimeImmutable $now,
         bool $isSlaPaused
     ): ?string {
         if (!$isSlaPaused) {
@@ -616,12 +632,15 @@ final class CoordinatorIncidentDetailService
             isset($sla['sla_target_at']) && is_string($sla['sla_target_at']) ? $sla['sla_target_at'] : null
         );
         $locationId = (int)($incident['location_id'] ?? 0);
-        if ($targetAt === null || $locationId < 1) {
+        $pausedAtRaw = $incident['paused_at'] ?? null;
+        if ($targetAt === null || $locationId < 1 || !is_string($pausedAtRaw)) {
             return null;
         }
 
+        $businessPauseSeconds = $this->pauses()->pauseBusinessSecondsSince($pausedAtRaw, $now);
+
         return $this->pauses()
-            ->shiftSlaTargetInBusinessHours($targetAt, $pauseSeconds, $locationId)
+            ->shiftSlaTargetInBusinessHours($targetAt, $businessPauseSeconds, $locationId)
             ->format('Y-m-d H:i:s');
     }
 

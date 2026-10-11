@@ -10,6 +10,7 @@ use InvalidArgumentException;
 use RuntimeException;
 use VendGuard\Application\DTO\IncidentPauseRequestDto;
 use VendGuard\Application\DTO\IncidentPauseResponseDto;
+use VendGuard\Core\Domain\Exception\InactivityThresholdNotReachedException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\MachineType;
@@ -487,10 +488,14 @@ final class IncidentPauseService
      *   la avería sigue con técnico asignado, ese técnico no tiene otra intervención en
      *   curso y nadie la reasignó durante la pausa. Es la única combinación en la que el
      *   sistema puede afirmar sin mentir que el profesional sigue delante de la máquina.
-     * - **Vuelve a `ASSIGNED`** en cualquier otro caso: respuesta desfasada, técnico
-     *   ocupado en otra avería, avería reasignada durante la pausa o avería sin técnico
-     *   responsable (caso límite §6.4). Devolverla a "En curso" sería una ficción
-     *   operativa: obliga al técnico a pulsar "Iniciar" al personarse.
+     * - **Vuelve a `ASSIGNED`** en el resto de casos con técnico responsable: respuesta
+     *   desfasada, técnico ocupado en otra avería o avería reasignada durante la pausa.
+     *   Devolverla a "En curso" sería una ficción operativa: obliga al técnico a pulsar
+     *   "Iniciar" al personarse.
+     * - **Reingresa a `REGISTERED`** si la avería no tiene técnico responsable (caso
+     *   límite §6.4, cierre de F-5): sin responsable, `ASSIGNED` describiría a un técnico
+     *   que no existe y el expediente vuelve a la cola de asignación formal, que es lo
+     *   que la bandeja de triaje lee como «pendiente de asignar».
      *
      * Además, cierra el intervalo de pausa (acumulando sus segundos exactos en el
      * agregado), desplaza el vencimiento contractual en horario comercial de la sede
@@ -511,6 +516,12 @@ final class IncidentPauseService
      * @param int $incidentId Incidencia sobre la que se publica el comentario.
      * @param string $commentText Texto publicado por la sede.
      * @param int $siteUserId Referencia del actor de sede que publica (portal).
+     * @param DateTimeImmutable|null $now Instante de referencia de la reanudación. Es una
+     *   costura de inyectabilidad —la misma que usan `isProlongedInactivitySince()` y la
+     *   ficha de detalle— y gobierna DOS decisiones que deben medirse sobre el mismo
+     *   instante: la ventana de calidez de 60 minutos (RF-02.1) y el tiempo hábil perdido
+     *   durante la pausa, que es lo que desplaza el vencimiento contractual (RF-03.3). Sin
+     *   él se usa el reloj real.
      * @return IncidentPauseResponseDto Estado resultante en el contrato canónico del módulo.
      *
      * @throws InvalidArgumentException Si los identificadores no son válidos.
@@ -520,7 +531,8 @@ final class IncidentPauseService
     public function handleSiteCommentReactivation(
         int $incidentId,
         string $commentText,
-        int $siteUserId
+        int $siteUserId,
+        ?DateTimeImmutable $now = null
     ): IncidentPauseResponseDto {
         if ($incidentId < 1) {
             throw new InvalidArgumentException(
@@ -534,7 +546,7 @@ final class IncidentPauseService
             );
         }
 
-        $now = new DateTimeImmutable();
+        $now ??= new DateTimeImmutable();
 
         // La lectura del expediente va bajo bloqueo exclusivo por fila y dentro de una
         // transacción (caso límite §6.2): si el técnico pulsa «Reanudar intervención» en
@@ -574,12 +586,11 @@ final class IncidentPauseService
             $reassignedDuringPause = $this->wasReassignedDuringCurrentPause($incident);
             $isHotResponse = $pauseDurationSeconds < self::HOT_REACTIVATION_WINDOW_SECONDS;
 
-            $targetStatus = ($isHotResponse
-                && $assignedTechnicianId !== null
-                && !$technicianIsBusy
-                && !$reassignedDuringPause)
-                ? IncidentStatus::IN_PROGRESS
-                : IncidentStatus::ASSIGNED;
+            $targetStatus = $assignedTechnicianId === null
+                ? IncidentStatus::REGISTERED
+                : (($isHotResponse && !$technicianIsBusy && !$reassignedDuringPause)
+                    ? IncidentStatus::IN_PROGRESS
+                    : IncidentStatus::ASSIGNED);
 
             $originalSlaTargetAt = $incident->getSlaTargetAt();
 
@@ -597,7 +608,6 @@ final class IncidentPauseService
                     $pauseDurationSeconds,
                     $technicianIsBusy,
                     $reassignedDuringPause,
-                    $assignedTechnicianId === null,
                     $siteUserId,
                     $originalSlaTargetAt,
                     $shiftedDeadline
@@ -743,9 +753,12 @@ final class IncidentPauseService
      * y es su declaración la que queda auditada.
      *
      * **Destino legal acotado:** sólo `IN_PROGRESS` (el técnico está delante de la
-     * máquina) o `ASSIGNED` (debe desplazarse de nuevo). `RESOLVED` queda expresamente
-     * prohibido: cerrar en falso sin intervención es la violación que persigue el
-     * Art. V.1, y exige invertir la pausa con trabajo real documentado.
+     * máquina), `ASSIGNED` (debe desplazarse de nuevo) o `REGISTERED` (el expediente no
+     * tiene técnico responsable y vuelve a la cola de asignación; cierre de F-5). La
+     * coherencia entre destino y responsabilidad la impone el agregado: sin técnico,
+     * `IN_PROGRESS`/`ASSIGNED` se rechazan; con técnico, `REGISTERED` también. `RESOLVED`
+     * queda expresamente prohibido: cerrar en falso sin intervención es la violación que
+     * persigue el Art. V.1, y exige invertir la pausa con trabajo real documentado.
      *
      * **Serialización (caso límite §6.2):** el expediente se lee bajo bloqueo exclusivo
      * por fila dentro de la transacción que ya envuelve la reanudación, así que la
@@ -755,7 +768,7 @@ final class IncidentPauseService
      *
      * @param int $incidentId Incidencia pausada que se reanuda.
      * @param int $actorUserId Usuario interno que reanuda (auditoría, Art. III).
-     * @param IncidentStatus $targetStatus Estado operativo de destino (`IN_PROGRESS`/`ASSIGNED`).
+     * @param IncidentStatus $targetStatus Estado operativo de destino (`IN_PROGRESS`/`ASSIGNED`/`REGISTERED`).
      * @param string|null $resumeNote Nota opcional de la reanudación.
      * @return IncidentPauseResponseDto Estado resultante y vencimiento desplazado.
      *
@@ -782,9 +795,9 @@ final class IncidentPauseService
             );
         }
 
-        if (!in_array($targetStatus, [IncidentStatus::IN_PROGRESS, IncidentStatus::ASSIGNED], true)) {
+        if (!in_array($targetStatus, [IncidentStatus::IN_PROGRESS, IncidentStatus::ASSIGNED, IncidentStatus::REGISTERED], true)) {
             throw new InvalidArgumentException(sprintf(
-                'La reanudación de una pausa sólo puede devolver el expediente a "En curso" o "Asignada"; se recibió %s.',
+                'La reanudación de una pausa sólo puede devolver el expediente a "En curso", "Asignada" o a "Registrada" (esta última reservada a expedientes sin técnico responsable); se recibió %s.',
                 $targetStatus->value
             ));
         }
@@ -896,17 +909,42 @@ final class IncidentPauseService
         bool $isSlaPaused,
         ?DateTimeImmutable $now = null
     ): bool {
-        $pauseStartedAt = $this->parseDateTime($pausedAt);
-        if ($pauseStartedAt === null || !$isSlaPaused) {
+        if (!$isSlaPaused) {
             return false;
         }
 
-        $businessSeconds = $this->countBusinessSecondsBetween(
+        return $this->pauseBusinessSecondsSince($pausedAt, $now)
+            > self::PROLONGED_INACTIVITY_BUSINESS_HOURS * 3600;
+    }
+
+    /**
+     * Espera hábil consumida por el intervalo de pausa vivo, en segundos.
+     *
+     * Es el **único** punto de medida del umbral: la insignia de espera prolongada
+     * (RF-04.2), la disponibilidad de la acción supervisada en la ficha, la
+     * admisión de la cancelación por inactividad (RF-04.3) y la cifra que se firma
+     * en la bitácora inmutable salen todas de aquí, de modo que lectura, escritura
+     * y auditoría no puedan discrepar. La regla no se duplica en ningún otro sitio.
+     *
+     * Suma exclusivamente la ventana comercial de la sede (08:00-18:00, lunes a
+     * viernes) y es el gemelo exacto de `countBusinessSecondsBetween()`; sin marca
+     * de pausa devuelve cero en lugar de inventar un intervalo.
+     *
+     * @param string|null $pausedAt Marca del intervalo de pausa vivo, en formato de base de datos.
+     * @param DateTimeImmutable|null $now Instante de referencia (inyectable en pruebas).
+     * @return int Segundos hábiles acumulados en pausa; cero sin pausa viva.
+     */
+    public function pauseBusinessSecondsSince(?string $pausedAt, ?DateTimeImmutable $now = null): int
+    {
+        $pauseStartedAt = $this->parseDateTime($pausedAt);
+        if ($pauseStartedAt === null) {
+            return 0;
+        }
+
+        return $this->countBusinessSecondsBetween(
             $pauseStartedAt,
             $now ?? new DateTimeImmutable()
         );
-
-        return $businessSeconds > self::PROLONGED_INACTIVITY_BUSINESS_HOURS * 3600;
     }
 
     /**
@@ -932,26 +970,42 @@ final class IncidentPauseService
      *    liquidación central, de modo que el consumidor final cobra su dinero
      *    (RF-04.5).
      *
-     * La cancelación exige que el expediente esté realmente en `PENDING_INFO`: es
-     * la única situación en la que "cancelar por falta de acceso" describe lo que
-     * pasó. Cualquier otro estado se rechaza con `InvalidTransitionException` en
-     * lugar de bloquear una máquina por un motivo que no ocurrió.
+     * La cancelación exige **dos precondiciones** que el método aplica dentro de su
+     * propia transacción, y ninguna de ellas se delega al cliente de la API:
+     *
+     * 1. **El expediente está realmente en `PENDING_INFO`.** Es la única situación en
+     *    la que "cancelar por falta de acceso" describe lo que pasó; cualquier otro
+     *    estado se rechaza con `InvalidTransitionException` en lugar de bloquear una
+     *    máquina por un motivo que no ocurrió.
+     * 2. **La espera supera las 72 horas hábiles (RF-04.3).** El umbral es la
+     *    precondición que da nombre al protocolo: el cierre bloquea la máquina para
+     *    el ciudadano, custodia el reintegro y se firma como un silencio de tres
+     *    jornadas laborales del cliente, así que ejecutarlo antes de tiempo dejaría
+     *    la bitácora inmutable certificando una espera que nunca existió (Art. III).
+     *    Fuera de la ventana se lanza `InactivityThresholdNotReachedException` y no
+     *    se escribe nada.
+     *
+     * La medición se toma con `pauseBusinessSecondsSince()`, la misma regla que
+     * enciende la insignia del triaje, de modo que la lectura y la admisión de la
+     * escritura no puedan discrepar.
      *
      * @param int $incidentId Incidencia a cancelar.
      * @param int $coordinatorUserId Coordinador que ejecuta la cancelación (auditoría).
      * @param string $cancellationReason Motivo justificado (>= 20 caracteres reales).
-     * @return void
+     * @return int Segundos hábiles de espera medidos al autorizar el cierre, para que la
+     *   auditoría firme la cifra real y no un literal.
      *
      * @throws InvalidArgumentException Si los identificadores o el motivo no son válidos.
      * @throws \DomainException Si la incidencia o su máquina no existen.
      * @throws InvalidTransitionException Si el expediente no está en `PENDING_INFO`.
+     * @throws InactivityThresholdNotReachedException Si la espera no supera las 72 h hábiles.
      * @throws RuntimeException Si alguna de las escrituras del protocolo no se puede persistir.
      */
     public function cancelByInactivity(
         int $incidentId,
         int $coordinatorUserId,
         string $cancellationReason
-    ): void {
+    ): int {
         if ($incidentId < 1) {
             throw new InvalidArgumentException(
                 'La cancelación por inactividad exige una incidencia persistida (id positivo).'
@@ -973,7 +1027,12 @@ final class IncidentPauseService
             ));
         }
 
-        $this->transactions()->runInTransaction(function () use ($incidentId, $coordinatorUserId, $reason): void {
+        // Un único instante de referencia para la precondición del umbral y para la
+        // cifra que se firma en la auditoría: medir dos veces por separado dejaría
+        // abierta la puerta a que el rastro y la puerta no hablen de la misma espera.
+        $now = new DateTimeImmutable();
+
+        return $this->transactions()->runInTransaction(function () use ($incidentId, $coordinatorUserId, $reason, $now): int {
             $incident = $this->incidents()->findById($incidentId);
             if ($incident === null) {
                 throw new \DomainException(sprintf(
@@ -994,12 +1053,20 @@ final class IncidentPauseService
                 );
             }
 
+            // Precondición del umbral (RF-04.3): la espera se mide en horas hábiles con
+            // la misma regla que la insignia del triaje. El rechazo ocurre ANTES de la
+            // primera escritura, así que un cierre prematuro no deja rastro alguno.
+            $pausedBusinessSeconds = $this->pauseBusinessSecondsSince($incident->getPausedAt(), $now);
+            if ($pausedBusinessSeconds <= self::PROLONGED_INACTIVITY_BUSINESS_HOURS * 3600) {
+                throw new InactivityThresholdNotReachedException(
+                    (string)$incident->getTicketCode(),
+                    $pausedBusinessSeconds,
+                    self::PROLONGED_INACTIVITY_BUSINESS_HOURS
+                );
+            }
+
             $ticketCode = (string)$incident->getTicketCode();
             $machineId = $incident->getMachineId();
-            $pausedBusinessSeconds = $this->countBusinessSecondsBetween(
-                $this->parseDateTime($incident->getPausedAt()) ?? new DateTimeImmutable(),
-                new DateTimeImmutable()
-            );
 
             // 1. Cancelación formal del ticket (con su rastro en `incident_history`).
             $this->incidents()->cancel($incidentId, $reason, $coordinatorUserId);
@@ -1033,6 +1100,8 @@ final class IncidentPauseService
 
             // 3. El consumidor final no pierde su dinero (RF-04.5).
             $this->detachRefundsForInactivity($incidentId, $coordinatorUserId, $ticketCode);
+
+            return $pausedBusinessSeconds;
         });
     }
 
@@ -1281,6 +1350,17 @@ final class IncidentPauseService
         $originalSlaTargetAt = $incident->getSlaTargetAt();
         $shiftedSlaTargetAt = null;
 
+        // Desplazamiento = tiempo HÁBIL realmente perdido durante la pausa (RF-03.3, enmendado
+        // en el cierre de F-3). Se mide la ventana de la pausa (paused_at -> reanudación) en el
+        // calendario comercial de la sede, NO la duración de pared: una espera que cae de
+        // viernes 18:00 a lunes 08:00 no mueve el compromiso contractual porque la jornada de
+        // la sede no corrió ni un segundo. Con la duración de pared reinterpretada como horas
+        // comerciales, el vencimiento se dilataba hasta 4× justo en el caso más habitual de la
+        // pausa (noche y fin de semana). El acumulador `total_pending_info_seconds` y la
+        // auditoría del intervalo siguen en segundos de pared, que es lo que RF-03.1 descuenta
+        // del MTTR contractual.
+        $slaShiftSeconds = $this->pauseBusinessSecondsSince($incident->getPausedAt(), $now);
+
         // El agregado cierra el intervalo y acumula sus segundos; la fecha límite se
         // graba aparte porque el desplazamiento comercial depende del calendario de sede.
         $resumed = $incident->resumePendingInfo($targetStatus, $now);
@@ -1290,7 +1370,7 @@ final class IncidentPauseService
             if ($originalDeadline !== null) {
                 $shiftedDeadline = $this->shiftSlaTargetInBusinessHours(
                     $originalDeadline,
-                    $pauseDurationSeconds,
+                    $slaShiftSeconds,
                     $resumed->getLocationId()
                 );
                 $shiftedSlaTargetAt = $shiftedDeadline->format('Y-m-d H:i:s');
@@ -1485,7 +1565,6 @@ final class IncidentPauseService
         int $pauseDurationSeconds,
         bool $technicianIsBusy,
         bool $reassignedDuringPause,
-        bool $withoutTechnician,
         int $siteUserId,
         ?string $originalSlaTargetAt,
         ?string $shiftedSlaTargetAt
@@ -1496,7 +1575,9 @@ final class IncidentPauseService
             intdiv($pauseDurationSeconds, 60)
         );
 
-        if ($targetStatus === IncidentStatus::IN_PROGRESS) {
+        if ($targetStatus === IncidentStatus::REGISTERED) {
+            $note .= 'La avería vuelve a registrada sin técnico responsable: requiere una asignación formal antes de poder iniciar trabajos.';
+        } elseif ($targetStatus === IncidentStatus::IN_PROGRESS) {
             $note .= 'Respuesta en caliente con el técnico asignado libre: la intervención se reanuda en curso.';
         } else {
             $causes = [];
@@ -1508,9 +1589,6 @@ final class IncidentPauseService
             }
             if ($reassignedDuringPause) {
                 $causes[] = 'la avería fue reasignada durante la pausa';
-            }
-            if ($withoutTechnician) {
-                $causes[] = 'la avería quedó sin técnico responsable';
             }
 
             $note .= 'La avería se devuelve a asignada para un inicio presencial';

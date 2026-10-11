@@ -372,13 +372,17 @@ try {
     $originalDeadline = (new DateTimeImmutable('next tuesday 12:15', $madrid))->format('Y-m-d H:i:s');
     $pdo->prepare('UPDATE `incidents` SET `sla_target_at` = :deadline, `paused_at` = DATE_SUB(NOW(), INTERVAL 90 MINUTE) WHERE `id` = :id')
         ->execute([':deadline' => $originalDeadline, ':id' => $coldIncidentId]);
+    $coldPausedAt = (string)$pdo->query("SELECT `paused_at` FROM `incidents` WHERE `id` = {$coldIncidentId}")->fetchColumn();
 
+    // Orillas del reloj real: el servicio lee su instante entre ambas (cierre de F-3).
+    $coldBefore = new DateTimeImmutable('now', $madrid);
     $res = $router->dispatch(new Request(
         method: 'POST',
         path: $commentPath($coldIncidentId),
         parsedBody: ['comment_text' => $validComment],
         headers: $siteHeader($siteToken($coldLocationId))
     ));
+    $coldAfter = new DateTimeImmutable('now', $madrid);
     $coldData = $res->getDecodedBody()['data'] ?? [];
     $coldRow  = $incidentRow($coldIncidentId);
 
@@ -402,14 +406,26 @@ try {
     $shiftedMoment   = new DateTimeImmutable($shiftedDeadline, $madrid);
     $shiftSeconds    = $shiftedMoment->getTimestamp() - $originalMoment->getTimestamp();
     $shiftAccumulated = (int)($coldRow['total_pending_info_seconds'] ?? 0);
+    // El vencimiento avanzado es el tiempo HÁBIL perdido, medido por el calendario independiente
+    // del arnés: en la jornada de sede coincide con los 90 minutos de pared sembrados y, en
+    // horario inhábil, es cero sin que el acumulador deje de registrar la espera real (cierre de F-3).
+    [$shiftBusinessMin, $shiftBusinessMax] = BusinessCalendar::shiftRange($coldPausedAt, $coldBefore, $coldAfter);
 
     $assert(
-        '3.4 El desplazamiento equivale a los segundos exactos de pausa (RNF-01)',
+        '3.4 El desplazamiento equivale al tiempo HÁBIL perdido y nunca excede la espera real (RF-03.3, RNF-01)',
         $shiftedDeadline !== ''
             && ($coldData['pause']['sla_target_at_original'] ?? '') === $originalDeadline
-            && $shiftSeconds === $shiftAccumulated
+            && $shiftSeconds >= $shiftBusinessMin
+            && $shiftSeconds <= $shiftBusinessMax
+            && $shiftSeconds <= $shiftAccumulated
             && $shiftAccumulated >= 5400,
-        sprintf('desplazamiento=%d s, acumulado=%d s', $shiftSeconds, $shiftAccumulated)
+        sprintf(
+            'desplazamiento=%d s, acumulado=%d s, tiempo hábil esperado=[%d..%d] s',
+            $shiftSeconds,
+            $shiftAccumulated,
+            $shiftBusinessMin,
+            $shiftBusinessMax
+        )
     );
     $assert(
         '3.5 El nuevo vencimiento cae en día hábil dentro de la jornada comercial',
@@ -468,6 +484,16 @@ try {
     [$cancelledId, , $cancelledMachineId, $cancelledLocationId] = $createAssignedTicket($techId);
     $cancelledMachineIds[] = $cancelledMachineId;
     $pause($cancelledId, $techId);
+
+    // El cierre por inactividad exige superar las 72 h hábiles (RF-04.3, enmendado en el
+    // cierre de F-1): se siembra el silencio de sede en lugar de esperar tres jornadas
+    // de reloj real. La puerta la certifican la suite unitaria del algoritmo y la de
+    // endpoints de coordinación; aquí la cancelación sólo prepara el escenario sellado.
+    $pdo->prepare('UPDATE `incidents` SET `paused_at` = :paused WHERE `id` = :id')->execute([
+        ':paused' => (new DateTimeImmutable('-21 days'))->format('Y-m-d H:i:s'),
+        ':id'     => $cancelledId,
+    ]);
+
     $pauseService->cancelByInactivity(
         $cancelledId,
         $coordinatorId,
@@ -583,6 +609,66 @@ try {
         '6.6 La fusión tampoco publica el estado interno de pausa al ciudadano',
         ($reportData['status'] ?? '') === 'IN_PROGRESS'
             && ($reportData['status_label'] ?? '') === 'En proceso de atención técnica'
+    );
+
+    // =========================================================================
+    // GRUPO 7: reactivación sin técnico responsable => REGISTERED (F-5, §6.4)
+    // =========================================================================
+    echo "\n--- Grupo 7: reanudación sin técnico responsable => REGISTERED (F-5) ---\n";
+
+    // El expediente desfasado del grupo 3 vuelve a pausarse y pierde su técnico (simula la
+    // desasignación de coordinación): la respuesta en caliente de la sede debe reingresarlo
+    // a la cola de asignación en lugar de declarar «Asignada» sin responsable.
+    $pause($coldIncidentId, $otherTechId);
+    $assert(
+        '7.1 Premisa: el expediente vuelve a quedar pausado por la vía canónica',
+        ($incidentRow($coldIncidentId)['status'] ?? '') === 'PENDING_INFO'
+            && ($incidentRow($coldIncidentId)['paused_at'] ?? null) !== null
+    );
+
+    $pdo->prepare('UPDATE `incidents` SET `assigned_technician_id` = NULL WHERE `id` = :id')
+        ->execute([':id' => $coldIncidentId]);
+
+    $res = $router->dispatch(new Request(
+        method: 'POST',
+        path: $commentPath($coldIncidentId),
+        parsedBody: ['comment_text' => 'La sala ya está abierta; no hay llave pendiente ni conserje que la guarde.'],
+        headers: $siteHeader($siteToken($coldLocationId))
+    ));
+    $orphanBody = $res->getDecodedBody();
+    $orphanData = $orphanBody['data'] ?? [];
+    $orphanRow = $incidentRow($coldIncidentId);
+
+    $assert(
+        '7.2 La reactivación sin técnico responsable no declara EN CURSO ni ASIGNADA',
+        $res->getStatusCode() === 201
+            && ($orphanData['auto_resumed'] ?? false) === true
+            && ($orphanData['pause']['status'] ?? '') === 'REGISTERED'
+            && ($orphanData['pause']['is_sla_paused'] ?? true) === false
+    );
+    $assert(
+        '7.3 La cabecera del hilo publica la verdad del reingreso: «Registrada», no «Asignada»',
+        ($orphanData['incident']['status'] ?? '') === 'REGISTERED'
+            && ($orphanData['incident']['status_label'] ?? '') === 'Registrada'
+    );
+    $assert(
+        '7.4 Persistencia real: REGISTERED con la pausa cerrada y sin responsable inventado',
+        ($orphanRow['status'] ?? '') === 'REGISTERED'
+            && $orphanRow['paused_at'] === null
+            && array_key_exists('assigned_technician_id', $orphanRow)
+            && $orphanRow['assigned_technician_id'] === null
+    );
+
+    $orphanHistory = array_values(array_filter(
+        $historyRows($coldIncidentId),
+        static fn (array $row): bool => $row['from_status'] === 'PENDING_INFO' && $row['to_status'] === 'REGISTERED'
+    ));
+    $assert(
+        '7.5 El rastro inmutable sella PENDING_INFO -> REGISTERED y declara la causa (Art. III)',
+        count($orphanHistory) === 1
+            && $orphanHistory[0]['user_id'] === null
+            && str_contains((string)$orphanHistory[0]['action_note'], 'sin técnico responsable')
+            && str_contains((string)$orphanHistory[0]['action_note'], 'asignación formal')
     );
 
 } finally {

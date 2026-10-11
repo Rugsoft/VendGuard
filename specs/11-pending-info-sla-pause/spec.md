@@ -93,12 +93,13 @@ Establecer un **Estado Operativo Formal denominado "Pendiente de Información" (
   CUANDO la incidencia se encuentre en `PENDING_INFO` y el Responsable de Sede publique un comentario público con al menos 5 caracteres descriptivos reales (con o sin fotografía adjunta), el sistema DEBE **reactivar automáticamente** la incidencia de acuerdo con la siguiente regla condicional:
     * **SI** la respuesta se produce en caliente (**menos de 60 minutos** desde la pausa) y el técnico asignado no ha iniciado otra intervención en su ruta diaria, el sistema DEBE transicionar la avería al estado en curso (`IN_PROGRESS`).
     * **SI** han transcurrido **más de 60 minutos** desde la pausa, el técnico ya inició otra intervención en su ruta o la avería fue reasignada a otro técnico durante la pausa, el sistema DEBE transicionar la avería al estado asignada (`ASSIGNED`), notificando al técnico de la disponibilidad de acceso para que inicie la intervención al personarse ante el equipo.
+    * **SI** la avería no tiene técnico responsable en el momento de la respuesta (fue desasignada durante la pausa), el sistema DEBE devolverla a `REGISTERED` —la cola de asignación— y nunca a `ASSIGNED`: ningún estado puede afirmar un responsable que no existe. La regla manda sobre las anteriores y la impone el agregado, no la interfaz (enmienda del cierre de F-5, 2026-10-11).
 * **RF-02.2 [EARS - Estado]:**  
   MIENTRAS la incidencia se encuentre en `PENDING_INFO`, el sistema DEBE ofrecer al Técnico de Campo asignado y al Coordinador de Operaciones una acción manual explícita de *"Reanudar intervención"*.
 * **RF-02.3 [EARS - Dirigido por eventos]:**  
   CUANDO el Técnico o el Coordinador confirmen manualmente la reanudación de la intervención:
     * Si la ejecuta el Técnico asignado in situ, el sistema DEBE transicionar a `IN_PROGRESS`.
-    * Si la ejecuta el Coordinador desde la central, el sistema DEBE ofrecer seleccionar si reanuda a `ASSIGNED` (para que el técnico acuda) o a `IN_PROGRESS` (si confirma que el técnico ya está trabajando en la máquina).
+    * Si la ejecuta el Coordinador desde la central, el sistema DEBE ofrecer seleccionar si reanuda a `ASSIGNED` (para que el técnico acuda) o a `IN_PROGRESS` (si confirma que el técnico ya está trabajando en la máquina). En un expediente sin técnico responsable el único destino legal es `REGISTERED`: la avería vuelve a la cola de asignación en lugar de declarar un responsable inexistente (enmienda del cierre de F-5, 2026-10-11).
 * **RF-02.4 [EARS - Ubicuo]:**  
   Toda reanudación (automática o manual) DEBE registrar de forma inmutable la marca temporal de finalización del intervalo de pausa en la bitácora de auditoría.
 
@@ -187,7 +188,7 @@ Establecer un **Estado Operativo Formal denominado "Pendiente de Información" (
 3. **Cierre de jornada con ticket en pausa:**  
    Si una avería queda en `PENDING_INFO` al finalizar la jornada laboral, el reloj de SLA permanece congelado durante la noche y el fin de semana hasta que se produzca la respuesta de la sede o la reactivación técnica dentro del horario hábil.
 4. **Intento de reanudación sin técnico asignado:**  
-   Si una avería en `PENDING_INFO` fue desasignada por Coordinación, al reactivarse pasa forzosamente al estado `ASSIGNED` o `REGISTERED` requiriendo una asignación formal antes de poder iniciar trabajos.
+   Si una avería en `PENDING_INFO` fue desasignada por Coordinación, al reactivarse pasa forzosamente al estado `REGISTERED`, que la reingresa en la cola de asignación y exige una asignación formal antes de poder iniciar trabajos. Ni `ASSIGNED` ni `IN_PROGRESS` son destinos legales sin técnico responsable: describirían a un profesional que no existe. En el sentido inverso, un expediente con técnico tampoco puede disfrazarse de `REGISTERED` al reanudarse (enmienda del cierre de F-5, 2026-10-11; la coherencia la impone el agregado `Incident`).
 5. **Comentario interno de técnico mientras está en pausa:**  
    Si un técnico o coordinador publica una nota interna de taller (`is_internal = true`) mientras el ticket está en `PENDING_INFO`, la avería **permanece en pausa**; únicamente los comentarios públicos de la Sede con $\ge 5$ caracteres activan la reanudación automática.
 6. **Transición desde `PENDING_PARTS` a `PENDING_INFO`:**  
@@ -211,7 +212,7 @@ La especificación se considerará formalmente cumplida cuando:
 1. El Técnico y el Coordinador puedan pausar una incidencia en `ASSIGNED`, `IN_PROGRESS` o `PENDING_PARTS` seleccionando una causa tipificada y redactando un motivo de $\ge 20$ caracteres.
 2. El reloj contractual de SLA se congele visualmente y su fecha límite se aplace exactamente en la cantidad de minutos que dure la pausa, computados en horario comercial de la sede.
 3. En las máquinas bajo vigilancia sanitaria (`MachineType::requiresSanitaryWatch() = true`: alimentos perecederos `PERISHABLE_FOOD` y mixtas `COMBO`), el Reloj Sanitario Biológico active la cuarentena automática a las 4 horas naturales continuas sin frío confirmado y exija la retirada y destrucción del producto perecedero antes de cerrar la avería (Art. II).
-4. El Responsable de Sede visualice el banner explicativo en su tarjeta de máquina y pueda reactivar automáticamente la incidencia aportando un comentario público $\ge 5$ caracteres, devolviendo el ticket a `IN_PROGRESS` si ocurre en caliente (< 60 min) o a `ASSIGNED` si ha transcurrido más tiempo.
+4. El Responsable de Sede visualice el banner explicativo en su tarjeta de máquina y pueda reactivar automáticamente la incidencia aportando un comentario público $\ge 5$ caracteres, devolviendo el ticket a `IN_PROGRESS` si ocurre en caliente (< 60 min), a `ASSIGNED` si ha transcurrido más tiempo y a `REGISTERED` (cola de asignación) cuando el expediente no tenga técnico responsable.
 5. El Técnico y el Coordinador dispongan de la opción manual de *"Reanudar intervención"*.
 6. Si la avería supera 72 horas hábiles de silencio, el Coordinador pueda cancelarla justificadamente sin que la máquina vuelva a figurar como "Operativa", desvinculando de forma segura los reintegros económicos pendientes y exigiendo confirmación de acceso en nuevos reportes (Art. V.1 y V.2).
 7. El seguimiento ciudadano por código QR oculte totalmente el estado de pausa y motivos internos, mostrando un estado público neutro (Art. V.4).

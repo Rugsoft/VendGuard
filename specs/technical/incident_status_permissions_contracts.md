@@ -73,3 +73,7 @@ Si el ciclo de vida cambia, la edición canónica es PHP (`IncidentStatus` + `Co
 ### 7.1 Cambios aplicados por el módulo 11 (T-PAUSE-02, 2026-10-09)
 
 El estado operativo `PENDING_INFO` ("Pendiente de información", módulo 11) se suma al ciclo como estado **activo y no terminal**: `INCIDENT_STATUSES` y `ACTIVE_STATUSES` lo incorporan, `CANONICAL_STATUS_MAP` acepta sus formas en castellano y `STATUS_LABELS`/`BADGE_STATUS_PALETTE` reciben su etiqueta compacta y los tokens ámbar técnicos (`#fef9c3` / `#854d0e` / `#fde047`, RNF-04). `ASSIGNABLE_STATUSES`, `REASSIGNABLE_STATUSES` y `TERMINAL_STATUSES` **no** cambian aquí: la reasignación de un ticket en pausa (RF-06.3) pertenece a los endpoints de coordinación del mismo módulo.
+
+### 7.2 Reingreso a la cola de asignación al reanudar sin técnico (cierre de F-5, 2026-10-11)
+
+Una avería en `PENDING_INFO` que perdió su técnico responsable vuelve a `REGISTERED` al reactivarse —automáticamente por comentario de sede o manualmente por coordinación— en lugar de declarar `ASSIGNED` sin nadie. `REGISTERED` ya pertenecía a `ASSIGNABLE_STATUSES` y el estado se lee como «pendiente de asignación» en la bandeja y en `CoordinatorIncidentDetailService::computePermissions()` (`can_assign`), así que el espejo frontend no cambia: sólo desaparece la ficción de una avería asignada sin responsable.

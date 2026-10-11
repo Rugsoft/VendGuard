@@ -282,7 +282,10 @@ $seedDeadline = function (int $incidentId, string $deadline) use ($pdo): void {
 
 /**
  * Segundos transcurridos entre dos marcas de la base interpretadas como hora local
- * de sede; es la aritmética con la que el desplazamiento comercial se mide al segundo.
+ * de sede. En los escenarios de esta suite el vencimiento sembrado es un martes a las
+ * 12:15 y el desplazamiento medido cabe en la misma jornada, así que la distancia de
+ * calendario entre el vencimiento original y el desplazado es el tiempo comercial que
+ * avanzó (cierre de F-3: el reloj contractual sólo corre en jornada de sede).
  */
 $deadlineSeconds = static function (string $from, string $to) use ($madrid): int {
     return (new DateTimeImmutable($to, $madrid))->getTimestamp()
@@ -384,12 +387,16 @@ try {
 
     usleep(1_100_000); // Garantiza un intervalo de al menos un segundo real (RNF-01).
 
+    // Orillas del reloj real: el servicio lee su instante en algún punto entre ambas, de
+    // modo que la expectativa se expresa como rango de tiempo hábil (cierre de F-3).
+    $hotBefore = new DateTimeImmutable('now', $madrid);
     $res = $router->dispatch(new Request(
         method: 'POST',
         path: $commentPath($cycleId),
         parsedBody: ['comment_text' => 'La conserjería ya ha abierto la sala; el técnico puede acceder ahora mismo.'],
         headers: $authHeader($siteToken($cycleLocationId))
     ));
+    $hotAfter = new DateTimeImmutable('now', $madrid);
     $hotData = $res->getDecodedBody()['data'] ?? [];
 
     $assert(
@@ -403,17 +410,27 @@ try {
     $hotRow              = $incidentRow($cycleId);
     $firstIntervalSeconds = (int)($hotRow['total_pending_info_seconds'] ?? 0);
     $shifted1            = (string)($hotData['pause']['sla_target_at_shifted'] ?? '');
+    $shifted1Seconds     = $shifted1 === '' ? -1 : $deadlineSeconds($commercialDeadline, $shifted1);
+    // El vencimiento avanza el tiempo HÁBIL perdido en la ventana de pausa, calculado por el
+    // calendario independiente del arnés: con el reloj real dentro de la jornada coincide con
+    // el intervalo, y de madrugada o en fin de semana es cero sin que el acumulador mienta
+    // (cierre de F-3: la duración de pared ya no se reinterpreta como horas comerciales).
+    [$shift1Min, $shift1Max] = BusinessCalendar::shiftRange((string)($cycleRow['paused_at'] ?? ''), $hotBefore, $hotAfter);
     $assert(
-        '1.6 El primer intervalo desplaza el vencimiento comercial al segundo exacto (RF-03.3, RNF-01)',
+        '1.6 El primer intervalo desplaza el vencimiento el tiempo HÁBIL perdido, nunca más (RF-03.3, RNF-01)',
         $firstIntervalSeconds >= 1
             && $shifted1 !== ''
-            && $deadlineSeconds($commercialDeadline, $shifted1) === $firstIntervalSeconds
+            && $shifted1Seconds >= $shift1Min
+            && $shifted1Seconds <= $shift1Max
+            && $shifted1Seconds <= $firstIntervalSeconds
             && $hotRow['paused_at'] === null
             && ($hotRow['sla_target_at'] ?? '') === $shifted1,
         sprintf(
-            'intervalo=%d s, desplazamiento=%d s',
+            'intervalo=%d s, desplazamiento=%d s, tiempo hábil esperado=[%d..%d] s',
             $firstIntervalSeconds,
-            $shifted1 === '' ? -1 : $deadlineSeconds($commercialDeadline, $shifted1)
+            $shifted1Seconds,
+            $shift1Min,
+            $shift1Max
         )
     );
 
@@ -451,12 +468,14 @@ try {
 
     usleep(1_100_000);
 
+    $secondBefore = new DateTimeImmutable('now', $madrid);
     $res = $router->dispatch(new Request(
         method: 'POST',
         path: $resumePath($cycleId),
         parsedBody: ['resume_note' => 'Acceso concedido: reanudo el trabajo delante de la máquina.'],
         headers: $authHeader($technicianToken)
     ));
+    $secondAfter = new DateTimeImmutable('now', $madrid);
     $resume2Data = $res->getDecodedBody()['data'] ?? [];
 
     $assert(
@@ -471,19 +490,27 @@ try {
     $cycleFinalRow = $incidentRow($cycleId);
     $totalSeconds  = (int)($cycleFinalRow['total_pending_info_seconds'] ?? 0);
     $finalDeadline = (string)($cycleFinalRow['sla_target_at'] ?? '');
+    $finalShiftSeconds = $finalDeadline === '' ? -1 : $deadlineSeconds($commercialDeadline, $finalDeadline);
+    // El acumulador suma la duración de PARED de los dos intervalos (RF-04.1, es lo que
+    // descuenta del MTTR) y el vencimiento avanza el tiempo HÁBIL de ambos (RF-03.3).
+    [$shift2Min, $shift2Max] = BusinessCalendar::shiftRange((string)($pause2Data['paused_at'] ?? ''), $secondBefore, $secondAfter);
     $assert(
-        '1.11 El desplazamiento acumulativo es la suma exacta de los dos intervalos (RF-04.1, RNF-01)',
+        '1.11 El desplazamiento acumulativo es la suma del tiempo hábil de los dos intervalos (RF-04.1, RNF-01)',
         $totalSeconds >= 2
             && $totalSeconds > $firstIntervalSeconds
             && $finalDeadline !== ''
-            && $deadlineSeconds($commercialDeadline, $finalDeadline) === $totalSeconds
+            && $finalShiftSeconds >= $shift1Min + $shift2Min
+            && $finalShiftSeconds <= $shift1Max + $shift2Max
+            && $finalShiftSeconds <= $totalSeconds
             && ($resume2Data['sla_target_at_shifted'] ?? '') === $finalDeadline
             && ($cycleFinalRow['status'] ?? '') === 'IN_PROGRESS',
         sprintf(
-            'total=%d s, primer intervalo=%d s, desplazamiento=%d s',
+            'total=%d s, primer intervalo=%d s, desplazamiento=%d s, tiempo hábil esperado=[%d..%d] s',
             $totalSeconds,
             $firstIntervalSeconds,
-            $finalDeadline === '' ? -1 : $deadlineSeconds($commercialDeadline, $finalDeadline)
+            $finalShiftSeconds,
+            $shift1Min + $shift2Min,
+            $shift1Max + $shift2Max
         )
     );
 
@@ -553,18 +580,21 @@ try {
     // instrumento es SQL dirigido sobre el expediente propio, como en las hermanas.
     $pdo->prepare('UPDATE `incidents` SET `paused_at` = DATE_SUB(NOW(), INTERVAL 90 MINUTE) WHERE `id` = :id')
         ->execute([':id' => $coldId]);
+    $coldPausedAt = (string)$pdo->query("SELECT `paused_at` FROM `incidents` WHERE `id` = {$coldId}")->fetchColumn();
 
     $assert(
         '2.2 Premisa del desfase: el intervalo vivo ya supera los 60 minutos (RF-02.1)',
         (int)$pdo->query("SELECT TIMESTAMPDIFF(SECOND, `paused_at`, NOW()) FROM `incidents` WHERE `id` = {$coldId}")->fetchColumn() >= 3600
     );
 
+    $coldBefore = new DateTimeImmutable('now', $madrid);
     $res = $router->dispatch(new Request(
         method: 'POST',
         path: $commentPath($coldId),
         parsedBody: ['comment_text' => 'Recepción confirma que el responsable del centro ya firmó la autorización de acceso.'],
         headers: $authHeader($siteToken($coldLocationId))
     ));
+    $coldAfter = new DateTimeImmutable('now', $madrid);
     $coldData = $res->getDecodedBody()['data'] ?? [];
 
     $assert(
@@ -579,18 +609,24 @@ try {
     $coldRow     = $incidentRow($coldId);
     $coldSeconds = (int)($coldRow['total_pending_info_seconds'] ?? 0);
     $coldShifted = (string)($coldData['pause']['sla_target_at_shifted'] ?? '');
+    $coldShiftSeconds = $coldShifted === '' ? -1 : $deadlineSeconds($commercialDeadline, $coldShifted);
+    [$coldShiftMin, $coldShiftMax] = BusinessCalendar::shiftRange($coldPausedAt, $coldBefore, $coldAfter);
     $assert(
-        '2.4 El desplazamiento comercial equivale al segundo a los 90 minutos pausados (RF-03.3, RNF-01)',
+        '2.4 El desplazamiento comercial equivale al tiempo HÁBIL de los 90 minutos pausados (RF-03.3, RNF-01)',
         $coldSeconds >= 5400
             && $coldShifted !== ''
-            && $deadlineSeconds($commercialDeadline, $coldShifted) === $coldSeconds
+            && $coldShiftSeconds >= $coldShiftMin
+            && $coldShiftSeconds <= $coldShiftMax
+            && $coldShiftSeconds <= $coldSeconds
             && ($coldRow['sla_target_at'] ?? '') === $coldShifted
             && $coldRow['paused_at'] === null
             && (int)($coldData['pause']['accumulated_pause_minutes'] ?? -1) === (int)round($coldSeconds / 60),
         sprintf(
-            'acumulado=%d s, desplazamiento=%d s',
+            'acumulado=%d s, desplazamiento=%d s, tiempo hábil esperado=[%d..%d] s',
             $coldSeconds,
-            $coldShifted === '' ? -1 : $deadlineSeconds($commercialDeadline, $coldShifted)
+            $coldShiftSeconds,
+            $coldShiftMin,
+            $coldShiftMax
         )
     );
 
@@ -637,6 +673,8 @@ try {
 
     usleep(1_100_000);
 
+    $manualPausedAt = (string)($incidentRow($manualId)['paused_at'] ?? '');
+    $manualBefore = new DateTimeImmutable('now', $madrid);
     $res = $router->dispatch(new Request(
         method: 'POST',
         path: $coordinatorResumePath($manualId),
@@ -646,6 +684,7 @@ try {
         ],
         headers: $authHeader($coordinatorToken)
     ));
+    $manualAfter = new DateTimeImmutable('now', $madrid);
     $manualData = $res->getDecodedBody()['data'] ?? [];
     $manualRow  = $incidentRow($manualId);
 
@@ -660,13 +699,24 @@ try {
     $manualSeconds  = (int)($manualRow['total_pending_info_seconds'] ?? 0);
     $manualOriginal = (string)($manualData['sla_target_at_original'] ?? '');
     $manualShifted  = (string)($manualData['sla_target_at_shifted'] ?? '');
+    $manualShiftSeconds = $manualShifted === '' ? -1 : $deadlineSeconds($commercialDeadline, $manualShifted);
+    [$manualShiftMin, $manualShiftMax] = BusinessCalendar::shiftRange($manualPausedAt, $manualBefore, $manualAfter);
     $assert(
-        '3.3 El desplazamiento del intervalo manual es exacto y queda persistido (RF-03.3, RNF-01)',
+        '3.3 El desplazamiento del intervalo manual es el tiempo HÁBIL perdido y queda persistido (RF-03.3, RNF-01)',
         $manualSeconds >= 1
             && $manualOriginal === $commercialDeadline
             && $manualShifted !== ''
-            && $deadlineSeconds($commercialDeadline, $manualShifted) === $manualSeconds
-            && ($manualRow['sla_target_at'] ?? '') === $manualShifted
+            && $manualShiftSeconds >= $manualShiftMin
+            && $manualShiftSeconds <= $manualShiftMax
+            && $manualShiftSeconds <= $manualSeconds
+            && ($manualRow['sla_target_at'] ?? '') === $manualShifted,
+        sprintf(
+            'intervalo=%d s, desplazamiento=%d s, tiempo hábil esperado=[%d..%d] s',
+            $manualSeconds,
+            $manualShiftSeconds,
+            $manualShiftMin,
+            $manualShiftMax
+        )
     );
 
     $manualMoment = new DateTimeImmutable($manualShifted, $madrid);

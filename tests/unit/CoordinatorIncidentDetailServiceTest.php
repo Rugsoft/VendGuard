@@ -422,18 +422,29 @@ $assert(
     json_encode($liveSla)
 );
 
+// El recalculado desplaza el vencimiento congelado por el tiempo HÁBIL perdido en el
+// intervalo vivo (09:00 -> 11:00 del jueves son 2 h comerciales), que es exactamente lo
+// que grabará la reanudación al cerrar la pausa (cierre de F-3): la ficha y la escritura
+// no pueden discrepar. El acumulador de pausas cerradas (1 h 30 min de pared) no entra en
+// este desplazamiento, porque ya está incorporado al vencimiento vigente.
 $assert(
-    '7.3 El vencimiento congelado es el vigente al pausar y el recalculado suma la espera en horario hábil',
+    '7.3 El vencimiento congelado es el vigente al pausar y el recalculado suma la espera hábil del intervalo vivo',
     $sitePauseBlock['sla_target_frozen_at'] === '2026-10-01 12:15:00'
-        && $sitePauseBlock['sla_target_recalculated_at'] === '2026-10-01 15:45:00',
+        && $sitePauseBlock['sla_target_recalculated_at'] === '2026-10-01 14:15:00',
     json_encode([$sitePauseBlock['sla_target_frozen_at'], $sitePauseBlock['sla_target_recalculated_at']])
 );
 
 $assert(
-    '7.4 Las dos acciones supervisadas se habilitan con la pausa viva (RF-04.3, RF-06.2)',
+    '7.4 Con la pausa viva pero sin superar el umbral, reanudar sí y cancelar por inactividad no (RF-04.3, RF-06.2)',
     $sitePauseBlock['can_resume_pause'] === true
-        && $sitePauseBlock['can_cancel_inactivity'] === true
-        && $sitePauseBlock['inactivity_threshold_business_hours'] === \VendGuard\Application\Service\IncidentPauseService::PROLONGED_INACTIVITY_BUSINESS_HOURS
+        && $sitePauseBlock['can_cancel_inactivity'] === false
+        && $sitePauseBlock['is_prolonged_inactivity'] === false
+        && $sitePauseBlock['inactivity_threshold_business_hours'] === \VendGuard\Application\Service\IncidentPauseService::PROLONGED_INACTIVITY_BUSINESS_HOURS,
+    json_encode([
+        'reanudar' => $sitePauseBlock['can_resume_pause'],
+        'cancelar' => $sitePauseBlock['can_cancel_inactivity'],
+        'prolongada' => $sitePauseBlock['is_prolonged_inactivity'],
+    ])
 );
 
 // Umbral de 72 horas hábiles (RF-04.2): de lunes 28-09 08:00 a lunes 05-10 10:00 son 60 h;
@@ -454,6 +465,19 @@ $assert(
     '7.6 Un segundo después del umbral la alerta prioritaria se enciende',
     $oneSecondOver['technical_intervention']['pause']['is_prolonged_inactivity'] === true,
     json_encode($oneSecondOver['technical_intervention']['pause'])
+);
+
+// La misma frontera gobierna la acción supervisada: la ficha no puede ofrecer un cierre
+// que el endpoint va a rechazar con 422 (una sola regla de lectura y escritura).
+$assert(
+    '7.6.b La frontera del umbral gobierna también la acción supervisada de la ficha',
+    $oneSecondOver['technical_intervention']['pause']['can_cancel_inactivity'] === true
+        && $atExactThreshold['technical_intervention']['pause']['can_cancel_inactivity'] === false
+        && $atExactThreshold['technical_intervention']['pause']['can_resume_pause'] === true,
+    json_encode([
+        'justo_en_el_umbral' => $atExactThreshold['technical_intervention']['pause']['can_cancel_inactivity'],
+        'un_segundo_despues' => $oneSecondOver['technical_intervention']['pause']['can_cancel_inactivity'],
+    ])
 );
 
 $assert(

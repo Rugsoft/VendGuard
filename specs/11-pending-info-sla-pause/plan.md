@@ -161,7 +161,7 @@ Para cumplir con la precisión temporal requerida (RNF-01) y la respuesta ágil 
     "resume_note": "Recepción confirma por teléfono que ya entregaron la llave al técnico de guardia."
   }
   ```
-  * `target_status`: `"ASSIGNED"` (por defecto si el técnico debe desplazarse) o `"IN_PROGRESS"` (si ya está en la máquina).
+  * `target_status`: `"ASSIGNED"` (por defecto si el técnico debe desplazarse), `"IN_PROGRESS"` (si ya está en la máquina) o `"REGISTERED"` (sólo cuando el expediente no tiene técnico responsable: la avería reingresa a la cola de asignación; cierre de F-5, §6.4). La coherencia entre destino y responsabilidad la impone el agregado: sin técnico, `ASSIGNED`/`IN_PROGRESS` responden `422 INVALID_STATUS_FOR_RESUME`; con técnico, `REGISTERED` hace lo propio.
 
 ---
 
@@ -174,6 +174,7 @@ Para cumplir con la precisión temporal requerida (RNF-01) y la respuesta ágil 
       * Calcula el tiempo transcurrido desde la pausa.
       * Si es **en caliente (< 60 minutos)** y el técnico no ha iniciado otra parada: transiciona a `IN_PROGRESS`.
       * Si han pasado **$\ge 60$ minutos**, inició otra parada o fue reasignada: transiciona a `ASSIGNED`.
+      * Si la avería **no tiene técnico responsable** (fue desasignada durante la pausa): transiciona a `REGISTERED` —cola de asignación— y nunca a `ASSIGNED` (enmienda del cierre de F-5, §6.4).
       * Desplaza la fecha límite `sla_target_at` en horario comercial y anexa el comentario a la bitácora con idempotencia ante ráfagas (RF-05.3).
 * **Payload de Respuesta:** Incluye el bloque `auto_resumed: true` con el nuevo estado asignado.
 
@@ -194,7 +195,9 @@ Para cumplir con la precisión temporal requerida (RNF-01) y la respuesta ágil 
   * `incidents.status` pasa a `'CANCELLED'`.
   * `machines.status` pasa a `'BLOCKED_NO_ACCESS'` (la máquina NO vuelve a `'Operativa'`).
   * Reintegros económicos vinculados: se desvinculan del ticket (`refund_requests.incident_id = NULL`), manteniéndose en estado `'PENDING_COORDINATOR'` para liquidación central sin perjudicar al usuario.
-* **Respuesta HTTP:** `200 OK` confirmando la cancelación, el bloqueo de máquina y la preservación del reintegro.
+* **Precondición del umbral (2026-10-10, cierre de F-1):** la operación sólo se admite con **más de 72 h hábiles** acumuladas en `PENDING_INFO`, medidas en horario comercial de la sede (08:00-18:00, lunes a viernes) con la misma regla que enciende la insignia de RF-04.2 (`IncidentPauseService::isProlongedInactivity()`). Fuera de la ventana, el servicio rechaza la operación **dentro de su transacción** y no escribe nada.
+* **Respuesta HTTP:** `200 OK` confirmando la cancelación, el bloqueo de máquina y la preservación del reintegro; `422 INACTIVITY_THRESHOLD_NOT_REACHED` cuando la espera no supera el umbral (con la espera medida y el umbral en `details`); `422 MISSING_CANCELLATION_REASON` / `422 INVALID_CANCELLATION_REASON` por el motivo obligatorio de $\ge 20$ caracteres reales; `422 INVALID_STATUS_FOR_INACTIVITY_CANCELLATION` si el expediente no está en pausa; `400 INVALID_INCIDENT_ID` y `404 INCIDENT_NOT_FOUND`.
+* **Rastro de auditoría:** el evento `INCIDENT_CANCELLED` sella el canal `INACTIVITY_72_BUSINESS_HOURS` **con la espera realmente medida** (`inactivity_wait_business_hours`) y el umbral aplicado, en lugar de afirmar el canal con un literal.
 
 ---
 
@@ -223,6 +226,7 @@ stateDiagram-v2
     
     PENDING_INFO --> IN_PROGRESS: Reanudación en caliente (< 60 min)
     PENDING_INFO --> ASSIGNED: Reanudación desfasada (>= 60 min o reasignado)
+    PENDING_INFO --> REGISTERED: Reingreso a la cola sin técnico responsable (F-5)
     PENDING_INFO --> CANCELLED: Cancelación formal justificada tras 72h hábiles
     
     IN_PROGRESS --> RESOLVED: Reparación justificada (Art. V.1)
@@ -241,6 +245,7 @@ stateDiagram-v2
 Desde PENDING_INFO SE PERMITE:
   -> IN_PROGRESS (Reanudación in situ o en caliente)
   -> ASSIGNED    (Reanudación desfasada, por coordinador o tras reasignación)
+  -> REGISTERED  (Reingreso a la cola de asignación: sólo sin técnico responsable; cierre de F-5)
   -> CANCELLED   (Cancelación formal por inactividad de 72h hábiles)
 
 Hacia PENDING_INFO SE PERMITE DESDE:
@@ -271,8 +276,12 @@ ALGORITMO ReactivarCondicionalmente(incidencia, comentarioSede, ahora)
     haIniciadoOtraIntervencion = ComprobarSiTecnicoTieneOtraParadaEnCurso(tecnicoAsignado, ahora)
     fueReasignadoEnPausa = incidencia.tecnico_cambiado_durante_pausa // Booleano auditado
 
-    // 4. Regla de Reactivación Inteligente (Puntos 2 y 6 de QA)
-    SI minutosEnPausa < 60 Y NO haIniciadoOtraIntervencion Y NO fueReasignadoEnPausa ENTONCES:
+    // 4. Regla de Reactivación Inteligente (Puntos 2 y 6 de QA; enmendada en el cierre de F-5)
+    SI tecnicoAsignado ES NULO ENTONCES:
+        // Sin responsable ningún estado puede afirmar que alguien va a trabajar (§6.4)
+        nuevoEstado = "REGISTERED"
+        notaAuditoria = "La avería vuelve a registrada sin técnico responsable: requiere una asignación formal antes de poder iniciar trabajos."
+    SINO SI minutosEnPausa < 60 Y NO haIniciadoOtraIntervencion Y NO fueReasignadoEnPausa ENTONCES:
         nuevoEstado = "IN_PROGRESS"
         notaAuditoria = "Reactivación automática en caliente tras respuesta de sede (< 60 min)."
     SINO:
@@ -301,6 +310,8 @@ FIN ALGORITMO
 ### 3.3. Algoritmo 3: Recálculo de SLA en Ventana de Horario Hábil Comercial
 
 Aplica el aplazamiento de la fecha límite respetando los horarios reales de apertura del cliente, impidiendo vencimientos de madrugada (Punto 3 de QA).
+
+> **Qué se le entrega como `minutosPausa` (2026-10-10, cierre de F-3).** El parámetro no es la duración de pared de la pausa sino el **tiempo hábil realmente perdido** durante ella: la pausa congela el reloj contractual (RF-03.2) y la reanudación sólo devuelve a la cuenta atrás lo que la jornada de la sede dejó de correr. El pseudocódigo recorre la jornada comercial hacia adelante, de modo que reinterpretar los segundos de pared como horas comerciales dilataba el compromiso hasta 4× en el caso más habitual (la parada de viernes a lunes de RF-01.1). La cifra la mide `IncidentPauseService::pauseBusinessSecondsSince()` —el gemelo inverso de este algoritmo— tanto al persistir el nuevo vencimiento como al publicar la fecha recalculada de la ficha, para que lectura y escritura no puedan discrepar. La duración de pared sigue siendo la que se audita en el intervalo y descuenta el MTTR (RF-03.1).
 
 ```text
 ALGORITMO DesplazarSlaHorarioComercial(fechaObjetivoOriginal, minutosPausa, locationId)
@@ -571,7 +582,7 @@ FIN ALGORITMO
 | **RF-02.3** | Reanudación in situ transiciona a `IN_PROGRESS`. | `TechnicianController::resumePendingInfo()` | Test verificando estado resultante `IN_PROGRESS`. |
 | **RF-03.1** | Descuento exacto de intervalos de pausa en MTTR. | `PdoMetricsRepository.php` | Test evaluando MTTR restando `total_pending_info_seconds`. |
 | **RF-03.2** | Reloj contractual visualmente congelado (`⏸️ SLA pausado`). | `CoordinatorIncidentDetailModal.js` | Test JS comprobando renderizado de insignia de pausa. |
-| **RF-03.3** | Desplazamiento de `sla_target_at` en horario comercial de sede. | `IncidentPauseService::shiftSlaTargetInBusinessHours()` | Test calculando salto de fin de semana y noches. |
+| **RF-03.3** | Desplazamiento de `sla_target_at` en horario comercial de sede por el **tiempo hábil realmente perdido** (nota de cierre de F-3 en §3.3). | `IncidentPauseService::shiftSlaTargetInBusinessHours()` + `pauseBusinessSecondsSince()` | Test calculando salto de fin de semana y noches, y pausa de fin de semana que no mueve el vencimiento. |
 | **RF-03.4** | Reloj Sanitario Biológico continuo 24/7 en las máquinas bajo vigilancia sanitaria —perecederas `PERISHABLE_FOOD` y mixtas `COMBO` (Art. II, ratificado en T-PAUSE-26). | `IncidentPauseService::evaluateSanitaryBiologicalClock()` | Test simulando 4 horas naturales continuas. |
 | **RF-03.5** | Cuarentena automática a las 4h y bloqueo en resolución (Art. II). | `PdoPreventiveSettingsRepository`, validador resolución | Test verificando modo `QUARANTINE` y rechazo de resolución sin checklist. |
 | **RF-04.1** | Pausas múltiples acumulativas en un mismo ticket. | `PdoIncidentRepository.php` | Test acumulando dos pausas sucesivas en `total_pending_info_seconds`. |

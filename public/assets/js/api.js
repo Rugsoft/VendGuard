@@ -593,7 +593,9 @@ export class ApiClient {
 
     /**
      * Resumes an incident from "Pendiente de Información" (Módulo 11, RF-02.2, RF-02.3).
-     * Target status is optional and defaults to ASSIGNED (or IN_PROGRESS).
+     * Target status is optional and defaults to ASSIGNED (or IN_PROGRESS); REGISTERED
+     * re-enters the assignment queue and is only legal when the incident has no
+     * responsible technician (cierre de F-5, §6.4).
      * @param {number|string} incidentId
      * @param {string|null} [targetStatus='ASSIGNED']
      * @param {string|null} [resumeNote=null]
