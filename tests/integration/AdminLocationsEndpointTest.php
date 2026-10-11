@@ -34,6 +34,17 @@ echo " VendGuard: Test de Integración - AdminLocationsEndpointTest (T-ADM-12)\n
 echo "======================================================================\n\n";
 
 $pdo = ConnectionFactory::getConnection();
+
+// Restitución del parque ante cualquier salida (contrato de limpieza §8.3): esta
+// suite crea sedes `SEDE-TEST-*`/`SEDE-MAP-VALID-*` y el gancho de apagado corre
+// también tras un error fatal, que es el camino en el que un `finally` no llega y
+// por el que el residuo se acumulaba (hallazgo F-4). Falla en voz alta si no
+// puede drenar: un residuo drenado en silencio es justo lo que persigue el
+// contrato.
+register_shutdown_function(static function () use ($pdo): void {
+    TestDataCleaner::purgeTestLocations($pdo);
+});
+
 $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedAll();
 

@@ -74,6 +74,15 @@ echo " VendGuard: Integración - PendingInfoConstitutionalTest (T-PAUSE-22)\n";
 echo "======================================================================\n\n";
 
 $pdo = ConnectionFactory::getConnection();
+
+// Restitución del parque ante cualquier salida (contrato de limpieza §8.3): esta
+// suite se aprovisiona las máquinas que el seed no le da (ver más abajo) en una
+// sede del banco de pruebas, y el gancho de apagado las drena también tras un
+// error fatal.
+register_shutdown_function(static function () use ($pdo): void {
+    TestDataCleaner::purgeTestLocations($pdo);
+});
+
 TestDataCleaner::purge($pdo);
 (new SeedRunner($pdo))->seedAll();
 
@@ -141,6 +150,31 @@ $freeMachinesByType = function (string $machineType, int $limit) use ($pdo): arr
         $stmt->fetchAll(PDO::FETCH_ASSOC)
     );
 };
+
+// Aprovisionamiento propio de la tipología que el seed no ofrece (hallazgo F-4).
+//
+// El parque canónico tiene UNA sola máquina de snacks libre y esta suite necesita
+// DOS. Hasta el cierre de F-4 las obtenía del parque residual que dejaban otras
+// suites —las `SEDE-MAP18-*` de `TechnicianRouteMapApiTest`—, de modo que su
+// verde dependía de un defecto ajeno al módulo y se desplomó en cuanto el arnés
+// empezó a restituir el parque de verdad. La suite no se debilita: se
+// aprovisiona lo que le falta en una sede del banco de pruebas (prefijo
+// reservado, contrato §8.1) que su gancho de apagado drena.
+$constSiteCode = 'SEDE-TEST-CONST-' . $suffix;
+$pdo->prepare(
+    "INSERT INTO `locations` (`site_code`, `name`, `address`, `latitude`, `longitude`, `contact_name`, `contact_phone`, `is_active`)
+     VALUES (:code, 'Sede de aprovisionamiento constitucional', 'Carrer de la Prova 1, Barcelona', 41.39, 2.19, 'Contacto Banco', '600000321', 1)
+     ON DUPLICATE KEY UPDATE `is_active` = 1, `deleted_at` = NULL"
+)->execute([':code' => $constSiteCode]);
+
+$plantMachine = $pdo->prepare(
+    "INSERT INTO `machines` (`location_id`, `code`, `model`, `machine_type`, `floor_wing`, `notes`, `is_active`, `sanitary_status`, `next_sanitary_inspection_due`)
+     VALUES ((SELECT `id` FROM `locations` WHERE `site_code` = :site_code LIMIT 1), :code, 'Modelo Banco', 'SNACKS', 'Planta 1', NULL, 1, 'CONFORME', DATE_ADD(CURDATE(), INTERVAL 30 DAY))
+     ON DUPLICATE KEY UPDATE `is_active` = 1, `deleted_at` = NULL"
+);
+foreach (['S1', 'S2'] as $index) {
+    $plantMachine->execute([':site_code' => $constSiteCode, ':code' => 'CONST-' . $suffix . '-' . $index]);
+}
 
 $perishablePool = $freeMachinesByType('PERISHABLE_FOOD', 3);
 $comboPool      = $freeMachinesByType('COMBO', 2);

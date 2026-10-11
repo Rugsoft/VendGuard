@@ -330,8 +330,37 @@ if ($serverStartedByRunner && is_resource($serverProcess)) {
 // La purga previa garantiza que cada ejecución termine con la BD en un estado
 // limpio conocido: pase lo que pase dentro de la corrida (incluido un fatal que
 // salte un `finally`), la siguiente arranca sin filas huérfanas.
+// Hallazgo de residuo del arnés, declarado antes del cierre para que exista
+// aunque el propio cierre falle a mitad.
+$harnessResidueFinding = null;
+
 try {
     $pdo = ConnectionFactory::getConnection();
+
+    // Red de cierre del residuo de sedes del arnés (contrato de limpieza §8.3).
+    // Cada suite creadora drena lo suyo en su gancho de apagado; si aquí queda
+    // algo, es que una suite nueva (o un proceso muerto) no restituyó su estado, y
+    // el banco lo diría en silencio acumulando filas corrida tras corrida —que fue
+    // exactamente el defecto F-4—. Se drena igualmente, para que la base quede
+    // sana, pero la corrida se declara EN ROJO: este es el único punto que puede
+    // ver una fuga de una suite sin gancho, porque el drenaje de cierre borra la
+    // evidencia antes de que la guarda pueda volver a medirla.
+    $residualLocations = TestDataCleaner::countTestLocations($pdo);
+    $drainedLocations = TestDataCleaner::purgeTestLocations($pdo);
+    $drainedLocationRows = array_sum(array_map('intval', $drainedLocations));
+    if ($residualLocations['total'] > 0) {
+        $harnessResidueFinding = sprintf(
+            'el banco de pruebas dejó %d sede(s) del arnés %s (%d fila(s) drenadas en el cierre, con sus máquinas y averías). '
+            . 'Alguna suite no restituyó su estado: revisa el contrato de limpieza §8.3.',
+            $residualLocations['total'],
+            json_encode($residualLocations['by_prefix'], JSON_UNESCAPED_UNICODE),
+            $drainedLocationRows
+        );
+        echo "  {$colorRed}[FAIL] {$harnessResidueFinding}{$colorReset}\n";
+    } else {
+        echo "  {$colorGreen}[OK] Ninguna sede del banco de pruebas quedó en el parque (contrato de limpieza §8).{$colorReset}\n";
+    }
+
     TestDataCleaner::purge($pdo);
 
     $seedRunner = new SeedRunner($pdo);
@@ -391,7 +420,7 @@ echo " Cifras documentadas        : " . ($docGuardDeviations === [] ? 'COHERENTE
 echo " Base de datos restablecida : " . ($dbResetOk ? "SÍ (Semillas intactas)" : "ADVERTENCIA") . "\n";
 echo "{$colorBold}======================================================================{$colorReset}\n";
 
-if ($totalFailed === 0 && $docGuardDeviations === []) {
+if ($totalFailed === 0 && $docGuardDeviations === [] && $harnessResidueFinding === null) {
     echo "{$colorBold}{$colorGreen} RESULTADO: 100% EN VERDE. (0 errors, 0 failures){$colorReset}\n";
     echo "{$colorBold}{$colorGreen} CONDICIÓN T-39 CUMPLIDA SATISFACTORIAMENTE.{$colorReset}\n";
     echo "{$colorBold}======================================================================{$colorReset}\n";
@@ -409,6 +438,9 @@ if ($docGuardDeviations !== []) {
     foreach ($docGuardDeviations as $deviation) {
         echo "   - {$deviation}\n";
     }
+}
+if ($harnessResidueFinding !== null) {
+    echo "{$colorBold}{$colorRed} RESULTADO: RESIDUO DE SEDES DEL ARNÉS — {$harnessResidueFinding}{$colorReset}\n";
 }
 echo "{$colorBold}======================================================================{$colorReset}\n";
 exit(1);

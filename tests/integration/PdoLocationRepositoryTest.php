@@ -24,6 +24,14 @@ echo "======================================================================\n\n
 
 $pdo = ConnectionFactory::getConnection();
 
+// Restitución del parque ante cualquier salida (contrato de limpieza §8.3): esta
+// suite crea sedes `SEDE-TEST-*` y el gancho de apagado corre también tras un
+// error fatal, que es el camino en el que un `finally` no llega y por el que el
+// residuo se acumulaba (hallazgo F-4).
+register_shutdown_function(static function () use ($pdo): void {
+    TestDataCleaner::purgeTestLocations($pdo);
+});
+
 // Asegurar datos semilla base
 $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedLocations();

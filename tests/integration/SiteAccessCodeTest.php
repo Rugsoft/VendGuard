@@ -36,6 +36,15 @@ echo " VendGuard: Test de Integración - SiteAccessCodeTest (hallazgo S-4)\n";
 echo "======================================================================\n\n";
 
 $pdo = ConnectionFactory::getConnection();
+
+// Restitución del parque ante cualquier salida (contrato de limpieza §8.3): esta
+// suite crea sedes `SEDE-TEST-*` para probar las claves de centro y el gancho de
+// apagado corre también tras un error fatal, que es el camino en el que un
+// `finally` no llega y por el que el residuo se acumulaba (hallazgo F-4).
+register_shutdown_function(static function () use ($pdo): void {
+    TestDataCleaner::purgeTestLocations($pdo);
+});
+
 (new SeedRunner($pdo))->seedAll();
 
 $router       = AppRouter::create();

@@ -86,6 +86,8 @@ Orden que produce hoy (12 tablas, `incidents` necesariamente la última):
 | `purgeIncidentsByMachine(PDO, int $machineId): array` | Ídem para todos los incidentes de una máquina. |
 | `purgeIncidentByTicket(PDO, string $ticketCode): array` | Ídem para un ticket concreto. |
 | `purgeIncidentsMatchingTicket(PDO, string $like): array` | Ídem para tickets que casan con un patrón `LIKE`. |
+| `countTestLocations(PDO): array` | **Detector de residuo.** Cuenta las sedes del banco de pruebas por familia de prefijo reservado (§8). Sólo lectura. |
+| `purgeTestLocations(PDO): array` | **Restitución del parque.** Drena el subárbol completo de las sedes del banco de pruebas (§8) sin tocar las sedes semilla. |
 | `deleteOrder(PDO): array` | Expone el plan de borrado. Sólo lectura; lo usan las aserciones. |
 
 Todas las operaciones de escritura van dentro de una transacción con
@@ -159,6 +161,12 @@ aserciones pasan a rojo, incluida la que reproduce el 1451 original. Un helper
 con el orden invertido sólo fallaría en producción, que es precisamente lo que
 esta sección evita.
 
+`tests/integration/HarnessResidueGuardTest.php` extiende esa misma mordida a las
+sedes del banco de pruebas (§8): certifica que el detector ve el residuo que se
+le planta, que la purga lo drena **con su subárbol** (máquina e incidencia
+colgadas por FK `RESTRICT`, que hacen fracasar el `DELETE` ingenuo) y que las diez
+sedes semilla `SEDE-BCN-*` siguen intactas y activas después.
+
 ---
 
 ## 6. Prohibiciones
@@ -200,3 +208,60 @@ deuda de infraestructura.
    contrato cambió.
 4. Si la tabla necesita limpieza dirigida, añadir un método `purgeXxxBy…`
    siguiendo el patrón de `purgeMatchingIncidents()`.
+
+---
+
+## 8. Las sedes del banco de pruebas (hallazgo F-4 del módulo 11)
+
+`purge()` protege `locations` porque son maestras: borrarlas rompería la
+integridad del parque sembrado. Ese mismo blindaje era el agujero del otro lado:
+las sedes que **crean las suites** no las retiraba nadie, y el banco acumulaba
+filas en cada corrida (206 filas frente a las 10 semilla al abrir el hallazgo F-4).
+
+### 8.1 El prefijo reservado
+
+> Toda sede cuyo `site_code` empiece por `SEDE-TEST-` o `SEDE-MAP` pertenece al
+> banco de pruebas, no al negocio: el seed canónico usa `SEDE-BCN-*` y sólo
+> `SEDE-BCN-*`.
+
+La regla es el criterio de pertenencia de `purgeTestLocations()` y también el de
+`countTestLocations()`, de modo que la lectura y la escritura del residuo no
+puedan discrepar. Las familias declaradas hoy son `SEDE-TEST-*` (alta genérica y
+claves de centro), `SEDE-MAP-*` (coordenadas territoriales), `SEDE-MAP17-*`
+(aceptación territorial) y `SEDE-MAP18-*` (ruta del técnico); basta el prefijo
+`SEDE-MAP` para cubrir las tres últimas, y una familia nueva se declara aquí
+antes de usarla.
+
+### 8.2 Qué drena y qué no
+
+`purgeTestLocations()` elimina **el subárbol completo** de esas sedes, con el
+orden derivado otra vez del grafo de claves foráneas: las seis tablas que
+referencian `locations` y las que cuelgan de ellas lo hacen todas con
+`ON DELETE RESTRICT` (`incidents`, `incident_replaced_parts`, `machines`,
+`preventive_orders`, `refund_requests`, `sanitary_certificates`, más
+`unclaimed_cash_findings` bajo `machines`). La condición de borrado de cada tabla
+se encadena por el grafo mediante subconsultas, así que **una FK nueva hacia
+`locations` o hacia sus hijas entra sola en el plan**, sin tocar el limpiador.
+
+Nunca toca una sede semilla: la condición raíz es una lista explícita de `id`
+obtenida por el prefijo reservado, y una lista vacía detiene la operación sin
+ejecutar una sola sentencia.
+
+### 8.3 Quién lo invoca
+
+| Punto | Motivo |
+|---|---|
+| `register_shutdown_function` en cada suite creadora | Se ejecuta **también tras un error fatal**, que es exactamente el camino en el que un `finally` no corre y por el que el residuo se acumulaba (F-4). Cubre la ejecución suelta de la suite (`php tests/integration/X.php`). |
+| Fase 5 de `tests/run_all.php` | Red de cierre: drena lo que una suite nueva (sin el gancho) o un proceso muerto hayan dejado y **declara la corrida en rojo** si encontró algo, porque un residuo drenado aquí significa que alguien no restituyó su estado. Es el único punto capaz de ver una fuga de una suite sin gancho: el drenaje borra la evidencia antes de que la guarda pueda volver a medirla. La base se restituye igualmente, para no envenenar la corrida siguiente. |
+
+Suites creadoras hoy: `AdminLocationsEndpointTest` (`SEDE-TEST-*`,
+`SEDE-MAP-VALID-*`), `CoordinatorRouteMapApiTest` (`SEDE-MAP17-*`),
+`PdoLocationRepositoryTest` (`SEDE-TEST-*`), `SiteAccessCodeTest` (`SEDE-TEST-*`)
+y `TechnicianRouteMapApiTest` (`SEDE-MAP18-*`).
+
+### 8.4 La mitad que ya estaba cerrada
+
+F-4 documentaba **dos** residuos. El de las máquinas («fuera de servicio» son dos
+marcas, `is_blocked_no_access` **e** `is_active`) lo cerró la propia sonda del
+módulo 11 al restituir ambas en su limpieza; esta sección cierra el de las sedes,
+que era ajeno a la sonda.

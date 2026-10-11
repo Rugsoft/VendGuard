@@ -44,6 +44,16 @@ echo "======================================================================\n\n
 // ─── Bootstrap: MariaDB real y semillas ───────────────────────────────────────
 $pdo = ConnectionFactory::getConnection();
 
+// Restitución del parque ante cualquier salida (contrato de limpieza §8.3): esta
+// suite crea sedes `SEDE-MAP18-*` con sus máquinas y averías, y el gancho de
+// apagado corre también tras un error fatal, que es el camino en el que un
+// `finally` no llega y por el que el residuo se acumulaba (hallazgo F-4). Aquí no
+// basta el borrado dirigido de abajo: sin drenar el subárbol, las cuatro sedes
+// activas quedaban en el banco con sus máquinas colgando.
+register_shutdown_function(static function () use ($pdo): void {
+    TestDataCleaner::purgeTestLocations($pdo);
+});
+
 // Limpieza operacional segura (orden derivado del grafo de FKs).
 TestDataCleaner::purge($pdo);
 

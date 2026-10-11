@@ -70,6 +70,27 @@ final class TestDataCleaner
         'spare_part_compatibilities',
     ];
 
+    /**
+     * Prefijos reservados de las sedes del banco de pruebas (contrato §8.1).
+     *
+     * El seed canónico usa `SEDE-BCN-*` y sólo `SEDE-BCN-*`; cualquier sede que
+     * empiece por estos prefijos la creó una suite y es del arnés. `SEDE-MAP`
+     * cubre las tres familias territoriales (`SEDE-MAP-*`, `SEDE-MAP17-*`,
+     * `SEDE-MAP18-*`) sin enumerarlas. Los prefijos NO se solapan entre sí, de
+     * modo que el recuento por familia no cuenta dos veces la misma fila.
+     */
+    private const TEST_LOCATION_PREFIXES = ['SEDE-TEST-%', 'SEDE-MAP%'];
+
+    /**
+     * Tablas protegidas que SÍ entran en el drenaje de las sedes del banco de
+     * pruebas. Son maestras para `purge()` —no deben vaciarse jamás—, pero aquí
+     * el borrado es dirigido: sólo las filas que cuelgan de una sede de prueba.
+     * El resto de `PROTECTED_TABLES` (users, route_settings,
+     * preventive_settings, audit_log) queda excluido aunque el grafo lo
+     * alcanzase, para que una FK nueva no pueda arrastrar una maestra.
+     */
+    private const TEST_LOCATION_PURGEABLE_MASTERS = ['locations', 'machines'];
+
     /** @var array<string, array<string, string>> tabla => (FK => tabla padre) caché por esquema */
     private static array $fkGraphCache = [];
 
@@ -248,6 +269,190 @@ final class TestDataCleaner
     public static function deleteOrder(PDO $pdo): array
     {
         return self::computeDeleteOrder($pdo);
+    }
+
+    /**
+     * Prefijos reservados de las sedes del banco de pruebas (contrato §8.1).
+     *
+     * @return list<string>
+     */
+    public static function testLocationPrefixes(): array
+    {
+        return self::TEST_LOCATION_PREFIXES;
+    }
+
+    /**
+     * Detector de residuo: cuántas sedes del banco de pruebas quedan en la base.
+     *
+     * Es la única lectura del criterio de pertenencia —el prefijo reservado— y
+     * `purgeTestLocations()` lo usa como puerta, de modo que lo que el detector
+     * ve y lo que la purga drena son exactamente el mismo conjunto. Sólo lee.
+     *
+     * @return array{total:int, by_prefix:array<string,int>}
+     */
+    public static function countTestLocations(PDO $pdo): array
+    {
+        $byPrefix = [];
+        $total = 0;
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM `locations` WHERE `site_code` LIKE :pattern');
+        foreach (self::TEST_LOCATION_PREFIXES as $prefix) {
+            $stmt->execute([':pattern' => $prefix]);
+            $count = (int)$stmt->fetchColumn();
+            $byPrefix[$prefix] = $count;
+            $total += $count;
+        }
+
+        return ['total' => $total, 'by_prefix' => $byPrefix];
+    }
+
+    /**
+     * Restitución del parque: drena el subárbol completo de las sedes del banco
+     * de pruebas y **nunca** toca una sede semilla `SEDE-BCN-*`.
+     *
+     * El blindaje de `PROTECTED_TABLES` sobre `locations` deja el otro lado
+     * descubierto: las sedes que crean las suites no las retiraba nadie y el
+     * banco acumulaba filas en cada corrida (hallazgo F-4 del módulo 11). Aquí el
+     * borrado es **dirigido por prefijo reservado**, no un vaciado de la maestra.
+     *
+     * Las seis tablas que referencian `locations` y las que cuelgan de ellas lo
+     * hacen con `ON DELETE RESTRICT`, así que un `DELETE FROM locations` a secas
+     * fracasa en cuanto la suite creó una máquina o una avería sobre su sede. El
+     * plan se deriva otra vez del grafo real y la condición de cada tabla se
+     * encadena con subconsultas hacia la condición raíz, de modo que una FK nueva
+     * hacia `locations` o hacia sus hijas entra sola en el plan.
+     *
+     * Sin sedes de prueba la operación no ejecuta una sola sentencia.
+     *
+     * @return array<string, int> tabla => filas borradas
+     */
+    public static function purgeTestLocations(PDO $pdo): array
+    {
+        $locationIds = self::testLocationIds($pdo);
+        if ($locationIds === []) {
+            return [];
+        }
+
+        $plan = self::testLocationSubtreePlan($pdo, $locationIds);
+        $order = self::topoSortChildrenFirst($pdo, array_keys($plan));
+
+        $pdo->beginTransaction();
+        try {
+            $deleted = self::withPurgeUnlocked($pdo, static function () use ($pdo, $order, $plan): array {
+                $deleted = [];
+                foreach ($order as $table) {
+                    // La condición jamás puede degradarse a un vaciado: siempre
+                    // nace de una lista explícita de id de sede de prueba.
+                    if (!isset($plan[$table]) || $plan[$table] === '') {
+                        throw new RuntimeException(
+                            'El plan de drenaje de sedes de prueba no tiene condición para la tabla `'
+                            . $table . '`; se aborta antes de borrar nada.'
+                        );
+                    }
+                    $stmt = $pdo->exec('DELETE FROM `' . $table . '` WHERE ' . $plan[$table]);
+                    $deleted[$table] = ($stmt === false) ? 0 : (int)$stmt;
+                }
+
+                return $deleted;
+            });
+            $pdo->commit();
+            return $deleted;
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Identificadores de las sedes del banco de pruebas, o lista vacía.
+     *
+     * @return list<int>
+     */
+    private static function testLocationIds(PDO $pdo): array
+    {
+        $parts = [];
+        $params = [];
+        foreach (self::TEST_LOCATION_PREFIXES as $index => $prefix) {
+            $parts[] = '`site_code` LIKE :pattern' . $index;
+            $params[':pattern' . $index] = $prefix;
+        }
+
+        $stmt = $pdo->prepare('SELECT `id` FROM `locations` WHERE ' . implode(' OR ', $parts) . ' ORDER BY `id`');
+        $stmt->execute($params);
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Plan de borrado del subárbol de las sedes de prueba: tabla => condición SQL.
+     *
+     * La condición de cada tabla se deriva del grafo real de claves foráneas
+     * encadenando subconsultas hacia la raíz (`locations` restringida a los id
+     * recibidos). Las hijas profundas —las que no tienen columna propia hacia la
+     * raíz— quedan cubiertas por esa cadena, que es lo que evita el error 1451.
+     *
+     * @param list<int> $locationIds
+     * @return array<string, string>
+     */
+    private static function testLocationSubtreePlan(PDO $pdo, array $locationIds): array
+    {
+        $graph = self::loadFkGraph($pdo);
+        $idList = implode(',', array_map('intval', $locationIds));
+
+        // Recorrido descendente desde la raíz: cada tabla alcanzada recuerda por
+        // qué columnas cuelga de una tabla ya alcanzada.
+        $affected = ['locations' => true];
+        $links = [];
+        $queue = ['locations'];
+        while ($queue !== []) {
+            $parent = array_shift($queue);
+            foreach ($graph[$parent]['children'] ?? [] as $child => $column) {
+                if (in_array($child, self::PROTECTED_TABLES, true)
+                    && !in_array($child, self::TEST_LOCATION_PURGEABLE_MASTERS, true)) {
+                    continue;
+                }
+                $links[$child][$column] = $parent;
+                if (!isset($affected[$child])) {
+                    $affected[$child] = true;
+                    $queue[] = $child;
+                }
+            }
+        }
+
+        $conditions = ['locations' => '`id` IN (' . $idList . ')'];
+        $resolving = [];
+        $resolve = function (string $table) use (&$resolve, &$conditions, &$resolving, $links): string {
+            if (isset($conditions[$table])) {
+                return $conditions[$table];
+            }
+            if (isset($resolving[$table])) {
+                throw new RuntimeException(
+                    'Ciclo de claves foráneas al derivar el plan de drenaje de la tabla `' . $table . '`.'
+                );
+            }
+            $resolving[$table] = true;
+
+            $parts = [];
+            foreach ($links[$table] ?? [] as $column => $parent) {
+                $parts[] = '`' . $column . '` IN (SELECT `id` FROM `' . $parent . '` WHERE ' . $resolve($parent) . ')';
+            }
+            unset($resolving[$table]);
+
+            if ($parts === []) {
+                throw new RuntimeException(
+                    'La tabla `' . $table . '` entró en el plan de drenaje de sedes sin vía hacia la raíz.'
+                );
+            }
+
+            return $conditions[$table] = '(' . implode(' OR ', $parts) . ')';
+        };
+
+        foreach (array_keys($affected) as $table) {
+            $resolve($table);
+        }
+
+        return $conditions;
     }
 
     // ─────────────────────────────────────────────────────────────────────
