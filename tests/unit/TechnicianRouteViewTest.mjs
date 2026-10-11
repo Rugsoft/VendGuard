@@ -920,6 +920,27 @@ assert('10.9 El cierre ordinario conserva el contrato posicional, sin bloque san
   sanitaryCalledId === 101 && sanitaryCalledPayload === null);
 
 // ---------------------------------------------------------------------
+// TEST GROUP 11: Route filter bar lays out inside the card (RNF-03, design.md)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 11: Barra de filtros de la ruta (usabilidad móvil, design.md) ---');
+
+// El corte del chip «En espera» (captura 2026-10-11): la fila era un scroll horizontal
+// con la barra oculta, de modo que el quinto filtro quedaba fuera de la tarjeta sin
+// ninguna señal de que se pudiera desplazar. La fila envuelve ahora sus chips.
+assert('11.1 La barra de filtros envuelve sus chips en la tarjeta, sin scroll horizontal oculto',
+  TechnicianRouteView.template.includes('display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;')
+    && !TechnicianRouteView.template.includes('scrollbar-width: none')
+    && !TechnicianRouteView.template.includes('overflow-x: auto; padding-bottom: 8px'));
+
+assert('11.2 Ningún chip de la barra usa radio píldora (design.md: chips a 4px por token)',
+  !TechnicianRouteView.template.includes('border-radius: 16px')
+    && TechnicianRouteView.template.includes('white-space: nowrap'));
+
+assert('11.3 El filtro de pendientes sigue declarado y legible en la barra',
+  TechnicianRouteView.template.includes('data-testid="filter-pending-info"')
+    && TechnicianRouteView.template.includes('En espera ({{ routeMetrics.pendingInfo }})'));
+
+// ---------------------------------------------------------------------
 // SUMMARY
 // ---------------------------------------------------------------------
 console.log('\n======================================================================');

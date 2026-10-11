@@ -1152,13 +1152,13 @@ export const TechnicianRouteView = {
           <button type="button" @click="errorMessage = ''" style="background: none; border: none; font-size: 14px; color: #b91c1c; cursor: pointer;">×</button>
         </div>
 
-        <!-- Mobile Filter Tabs (Touch Friendly) -->
-        <div style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 12px; scrollbar-width: none;">
+        <!-- Mobile Filter Tabs (Touch Friendly): wrap on the card so no chip ends cut -->
+        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
           <button
             type="button"
             class="vg-btn"
             :class="filterStatus === 'ALL' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 32px; font-size: 12px; padding: 0 12px; white-space: nowrap; border-radius: 16px;"
+            style="height: 32px; font-size: 12px; padding: 0 12px; white-space: nowrap;"
             @click="filterStatus = 'ALL'"
           >
             Todas ({{ routeMetrics.total }})
@@ -1167,7 +1167,7 @@ export const TechnicianRouteView = {
             type="button"
             class="vg-btn"
             :class="filterStatus === 'IN_PROGRESS' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 32px; font-size: 12px; padding: 0 12px; white-space: nowrap; border-radius: 16px;"
+            style="height: 32px; font-size: 12px; padding: 0 12px; white-space: nowrap;"
             @click="filterStatus = 'IN_PROGRESS'"
           >
             En curso ({{ routeMetrics.inProgress }})
@@ -1176,7 +1176,7 @@ export const TechnicianRouteView = {
             type="button"
             class="vg-btn"
             :class="filterStatus === 'ASSIGNED' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 32px; font-size: 12px; padding: 0 12px; white-space: nowrap; border-radius: 16px;"
+            style="height: 32px; font-size: 12px; padding: 0 12px; white-space: nowrap;"
             @click="filterStatus = 'ASSIGNED'"
           >
             Por iniciar ({{ routeMetrics.assigned }})
@@ -1185,7 +1185,7 @@ export const TechnicianRouteView = {
             type="button"
             class="vg-btn"
             :class="filterStatus === 'PENDING_PARTS' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 32px; font-size: 12px; padding: 0 12px; white-space: nowrap; border-radius: 16px;"
+            style="height: 32px; font-size: 12px; padding: 0 12px; white-space: nowrap;"
             @click="filterStatus = 'PENDING_PARTS'"
           >
             Repuestos ({{ routeMetrics.pendingParts }})
@@ -1194,7 +1194,7 @@ export const TechnicianRouteView = {
             type="button"
             class="vg-btn"
             :class="filterStatus === 'PENDING_INFO' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 32px; font-size: 12px; padding: 0 12px; white-space: nowrap; border-radius: 16px;"
+            style="height: 32px; font-size: 12px; padding: 0 12px; white-space: nowrap;"
             data-testid="filter-pending-info"
             @click="filterStatus = 'PENDING_INFO'"
           >
