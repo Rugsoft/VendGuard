@@ -10,8 +10,10 @@ use PDOException;
 use RuntimeException;
 use Throwable;
 use VendGuard\Application\DTO\SanitaryClockSweepResultDto;
+use VendGuard\Core\Domain\Repository\LockWaitBudgetInterface;
 use VendGuard\Core\Domain\Repository\SanitaryClockCandidateRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
+use VendGuard\Infrastructure\Database\PdoLockWaitBudget;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 
@@ -55,6 +57,12 @@ use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
  *    porque la decisión y la exclusión mutua viven en el reloj y en su transición
  *    idempotente. Este servicio puede, por tanto, ejecutarse con la cadencia que fije
  *    el planificador sin ningún efecto acumulativo.
+ * 6. **La pasada no se queda esperando a nadie (T-PAUSE-40).** Una fila que otro
+ *    consumidor sostiene no acapara la pasada: se corre con una cota de espera de
+ *    bloqueo corta (`LOCK_WAIT_BUDGET_SECONDS`, restituida al terminar), de modo que
+ *    el tenedor legítimamente corto se resuelve esperando —medido: la transacción
+ *    ganadora del cierre tarda milisegundos— y el que se alarga aparece como
+ *    aplazamiento visible en lugar de bloquear el lote hasta el valor del servidor.
  *
  * Dogma Vanilla: PHP 8.2+ puro, tipado estricto, cero dependencias externas.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
@@ -67,6 +75,18 @@ final class SanitaryClockSweepService
      * cuarentena, que en operación normal son unos pocos).
      */
     public const DEFAULT_CANDIDATE_LIMIT = 500;
+
+    /**
+     * Cota de espera de bloqueo de la pasada, en segundos (T-PAUSE-40).
+     *
+     * El valor sale de medir el tenedor legítimo, no de elegirlo a ojo: la unidad de
+     * trabajo ganadora del cierre —la que sostiene la fila— tarda p50 1,68 ms y
+     * p95 2,54 ms sobre 120 ejecuciones reales, así que 2 s son ~787× el p95, muy por
+     * debajo del valor de servidor (50 s) y suficiente para que ninguna contención
+     * legítima se convierta en aplazamiento. El detalle y las decisiones abiertas
+     * están en `docs/propuesta_politica_reintento_barrido_sanitario.md`.
+     */
+    public const LOCK_WAIT_BUDGET_SECONDS = 2;
 
     /**
      * Códigos de driver (MariaDB/MySQL) que significan «otro consumidor tiene la fila»:
@@ -90,6 +110,9 @@ final class SanitaryClockSweepService
     /** Unidad de trabajo transaccional; se resuelve en el primer uso si no se inyecta. */
     private ?TransactionManagerInterface $transactionManager;
 
+    /** Cota de espera de bloqueo de la pasada; se resuelve en el primer uso si no se inyecta. */
+    private ?LockWaitBudgetInterface $lockWaitBudget;
+
     /**
      * Todos los colaboradores son opcionales y se resuelven de forma perezosa, igual
      * que en `IncidentPauseService`: el servicio es construible sin base de datos y el
@@ -98,11 +121,13 @@ final class SanitaryClockSweepService
     public function __construct(
         ?SanitaryClockCandidateRepositoryInterface $candidateRepo = null,
         ?IncidentPauseService $pauseService = null,
-        ?TransactionManagerInterface $transactionManager = null
+        ?TransactionManagerInterface $transactionManager = null,
+        ?LockWaitBudgetInterface $lockWaitBudget = null
     ) {
         $this->candidateRepo = $candidateRepo;
         $this->pauseService = $pauseService;
         $this->transactionManager = $transactionManager;
+        $this->lockWaitBudget = $lockWaitBudget;
     }
 
     /**
@@ -125,6 +150,25 @@ final class SanitaryClockSweepService
             );
         }
 
+        // La pasada entera corre bajo una cota corta de espera de bloqueo (T-PAUSE-40):
+        // un tenedor que se alarga se convierte en aplazamiento visible en lugar de
+        // dejar el lote parado hasta el valor del servidor. La validación de arriba
+        // ocurre ANTES de tocar la sesión (Fail-Fast): una cota imposible no llega a la
+        // base de datos.
+        return $this->lockBudget()->runWithLockWaitBudget(
+            self::LOCK_WAIT_BUDGET_SECONDS,
+            fn (): SanitaryClockSweepResultDto => $this->sweepCandidates($limit)
+        );
+    }
+
+    /**
+     * Pasada propiamente dicha: publica candidatos y consume el reloj uno a uno.
+     *
+     * Vive separada del método público para que `sweep()` pueda envolverla en la cota
+     * de espera de bloqueo sin que la regla de negocio cambie una coma.
+     */
+    private function sweepCandidates(int $limit): SanitaryClockSweepResultDto
+    {
         $startedAt = microtime(true);
         $thresholdSeconds = IncidentPauseService::SANITARY_BIOLOGICAL_CLOCK_SECONDS;
 
@@ -213,6 +257,15 @@ final class SanitaryClockSweepService
     private function transactions(): TransactionManagerInterface
     {
         return $this->transactionManager ??= new PdoTransactionManager();
+    }
+
+    /**
+     * Cota de espera de bloqueo de la pasada, resuelta de forma perezosa sobre la
+     * sesión PDO compartida (T-PAUSE-40).
+     */
+    private function lockBudget(): LockWaitBudgetInterface
+    {
+        return $this->lockWaitBudget ??= new PdoLockWaitBudget();
     }
 
     /**

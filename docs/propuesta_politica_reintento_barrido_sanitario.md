@@ -19,7 +19,7 @@ Lo entregado, sin cambiar ni una regla de negocio:
 4. **Identidad contable verificada.** `candidates = evaluated + failures_count + contended_count`, comprobada en el constructor del DTO: un resumen que no cuadra no llega al planificador.
 5. **La máquina aplazada no se toca.** Un candidato aplazado no escribe estado sanitario ni deja rastro de auditoría: el único consumidor que escribe sigue siendo el que ganó el bloqueo.
 
-**Evidencia ejecutable (2026-10-12):** `php tests/unit/SanitaryClockSweepServiceTest.php` → **30 aserciones** (grupo 6 «contención de fila y fallo real»: `1205` aplazado sin alerta, deadlock `1213`/`40001` aplazado, tabla ausente en `failures` pese a un texto que imita un bloqueo, las dos naturalezas conviviendo en la misma pasada, DTO que rechaza el resumen incoherente y veinte aplazamientos sin alerta). `php tests/integration/SanitaryClockSweepEndpointTest.php` → **29 aserciones**. `php tests/integration/SanitaryClockConsumerRaceTest.php` → **23 aserciones** (grupo 3 reclasificado: la transición del barrido muere en el `1205` real y se publica como aplazamiento, con `failures_count = 0` y la identidad contable cuadrando sobre la respuesta HTTP real).
+**Evidencia ejecutable (2026-10-12):** `php tests/unit/SanitaryClockSweepServiceTest.php` → **35 aserciones** (grupo 6 «contención de fila y fallo real»: `1205` aplazado sin alerta, deadlock `1213`/`40001` aplazado, tabla ausente en `failures` pese a un texto que imita un bloqueo, las dos naturalezas conviviendo en la misma pasada, DTO que rechaza el resumen incoherente y veinte aplazamientos sin alerta). `php tests/integration/SanitaryClockSweepEndpointTest.php` → **33 aserciones**. `php tests/integration/SanitaryClockConsumerRaceTest.php` → **24 aserciones** (grupo 3 reclasificado: la transición del barrido muere en el `1205` real y se publica como aplazamiento, con `failures_count = 0` y la identidad contable cuadrando sobre la respuesta HTTP real).
 
 ---
 
@@ -67,7 +67,7 @@ El prefiltro del repositorio vuelve a publicar al candidato en la pasada siguien
 
 **Qué mejora:** la máquina que hoy esperaría hasta 15 minutos vuelve a la cuarentena en la misma pasada en la inmensa mayoría de los solapes, con lo que el límite efectivo de detección se queda donde estaba («4 h + hasta 15 min») en vez de duplicarse.
 
-### Capa C — Cota del tiempo de espera de bloqueo (**decisión del Product Owner**)
+### Capa C — Cota del tiempo de espera de bloqueo (**decidida con medición · implementada en T-PAUSE-40**)
 
 Con el valor de servidor de `innodb_lock_wait_timeout` (**50 s** por defecto en MariaDB; medido en el entorno del proyecto: `SELECT @@innodb_lock_wait_timeout` ⇒ `50`), una fila contendida **no** produce un `1205` inmediato: el barrido **espera**. Eso tiene dos lecturas opuestas:
 
@@ -76,7 +76,19 @@ Con el valor de servidor de `innodb_lock_wait_timeout` (**50 s** por defecto en 
 
 **Medición del caso extremo (2026-10-12, instrumento no versionado `scratch/_cli_contention_proof.php`, retirado tras la corrida).** Con la fila de la máquina sostenida por el cierre técnico **sin confirmar**, el CLI real (`php bin/sanitary_clock_sweep.php`) como **proceso aparte** esperó el bloqueo **51,27 s** (los 50 s del servidor más el coste de la pasada: `duration_ms` = 51.154,97) antes de morir en el `1205`. Ese es, hoy, el precio por candidato contendido cuando el tenedor se alarga: no lo acota el código, lo acota el servidor. Con la Capa C2 ese tiempo pasaría a ser el de la cota elegida.
 
-**Recomendación:** **C2 con el valor a ratificar**, y sólo como ajuste de la **sesión del barrido** (nunca del servidor). Un valor demasiado bajo convertiría en aplazamiento lo que hoy se resuelve esperando, así que el número debe salir de medir el tiempo real de la transacción del cierre, no de elegirlo a ojo. **Límite declarado:** esta propuesta no ha medido todavía la duración de la transacción ganadora; es el primer dato a tomar si se aprueba C2.
+**Medición del tenedor legítimo (2026-10-12, instrumento no versionado `scratch/_winner_transaction_proof.php`, retirado tras la corrida).** La unidad de trabajo que sostiene la fila en el caso normal —`SELECT` de ajustes + compare-and-set `UPDATE machines` + `INSERT` en `audit_log` + `COMMIT`, por el camino real de producción— se midió **120 veces** sobre las máquinas del parque sembrado, con 120/120 cuarentenas escritas de verdad:
+
+| Ventana medida | min | p50 | p90 | p95 | p99 | máx |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `begin` → `commit` (lo que espera un contendiente peor situado) | 1,47 ms | 1,68 ms | 2,31 ms | **2,54 ms** | 3,11 ms | **3,97 ms** |
+| Trabajo → `commit` (cola, cota inferior de la ventana) | 0,49 ms | 0,58 ms | 0,74 ms | 0,83 ms | 1,17 ms | 1,30 ms |
+
+**Decisión (C2, implementada):** la pasada usa una cota de **2 s** para su sesión (`SanitaryClockSweepService::LOCK_WAIT_BUDGET_SECONDS`) y **restituye** el valor anterior al terminar, sin elevar nunca una cota ya más estricta. El número se elige con el dato, no a ojo:
+
+* **Cota inferior:** 2 s son **~787× el p95** medido (2,54 ms) y ~500× el máximo (3,97 ms), de modo que ninguna contención legítima se convierte en aplazamiento: el barrido sigue esperando al tenedor corto, como hoy.
+* **Cota superior:** 25× por debajo del valor de servidor (50 s). El peor caso de la pasada queda acotado en `candidates × cota` —500 × 2 s ≈ 16,7 min teóricos, frente a las ~7 h de hoy—, y la regla de escalado de la Capa D avisa mucho antes de llegar a ese extremo.
+* **Margen por latencia de producción:** la medición es contra una base **local**; el margen de ~500-800× absorbe con holgura el coste de red y de `fsync` de un entorno desplegado, donde la misma transacción son unos pocos milisegundos más.
+* **Una sola constante:** el valor vive en el servicio, es trivial de revisar y su efecto está certificado por la suite de carrera y por la medición del CLI como proceso aparte (51,27 s antes → **~2 s** después, §4 y T-PAUSE-40).
 
 ### Capa D — Regla de escalado del planificador (**recomendación operativa**)
 
@@ -108,7 +120,7 @@ Si se aprueba la Capa B, los umbrales deben contarse sobre el **residuo** (lo qu
 | # | Decisión | Opciones | Recomendación |
 | :--- | :--- | :--- | :--- |
 | D1 | ¿Se implementa el reintento dentro de la pasada? | Sí / No (sólo Capa A) | **Sí** (Capa B) |
-| D2 | ¿Se acota el tiempo de espera de bloqueo de la sesión del barrido? | C1 mantener 50 s · C2 cota baja | **C2**, con el valor medido y ratificado |
+| D2 | ¿Se acota el tiempo de espera de bloqueo de la sesión del barrido? | C1 mantener 50 s · C2 cota baja | **C2 · decidida e implementada: 2 s** (≈787× el p95 medido del tenedor ganador) |
 | D3 | Umbrales de escalado de la Capa D | Los propuestos / otros | **Los propuestos**, sobre el residuo |
 | D4 | ¿Se añade un código de salida propio para «pasada con contención» (p. ej. `3`)? | Sí / No | **No**: la contención no alerta; el detalle ya viaja en el resumen y en la línea informativa del CLI. Un código propio invitaría a confundirlo con un fallo |
 
@@ -119,7 +131,7 @@ Si se aprueba la Capa B, los umbrales deben contarse sobre el **residuo** (lo qu
 1. **El reintento de la Capa B no está implementado**: hoy todo aplazamiento se resuelve en la pasada siguiente (Capa A).
 2. **La contención certificada es la de la carrera contra el cierre técnico** (dos conexiones PDO reales, `1205` real). No se ha medido la contención contra otros escritores (reasignación de coordinador, edición de la configuración preventiva, reintegros), que deberían comportarse igual por construcción —el bloqueo es de la misma fila— pero no están certificados caso por caso.
 3. **La cadencia de 15 minutos es criterio de contrato, no una promesa del código**: depende de que el planificador esté configurado fuera del repositorio.
-4. **No se ha medido la duración real de la transacción del cierre** (dato necesario para ratificar C2).
+4. La duración del tenedor ganador **ya está medida** (n=120: p95 2,54 ms · máx 3,97 ms), pero **contra una base local** y no contra la latencia de un despliegue real; el margen de ~787× de la cota elegida existe precisamente por eso, y el dato no cubre a otros escritores del parque (una reasignación o un reintegro que retenga una fila se aplaza, no se mide).
 5. El artefacto de línea de comandos **sí** se ha ejecutado como proceso aparte contra una fila realmente bloqueada (§4, Capa C: `exit 0`, línea `APLAZADO`, `Fallos reales: 0` y un solo rastro tras la confirmación del dueño) — pero fue una **medición puntual con instrumento no versionado**, no una suite de la batería: la regresión permanente de esa semántica son la clasificación unitaria (`grupo 6`) y la carrera HTTP (`3.3`), más las aserciones de contrato del CLI (`6.3`/`6.4`).
 
 ---
@@ -130,4 +142,4 @@ Si se aprueba la Capa B, los umbrales deben contarse sobre el **residuo** (lo qu
 2. Con la fila sostenida **más allá de los reintentos**, el candidato se publica como `contended` con `failures_count = 0` y **sin** rastro duplicado (una sola cuarentena y un solo evento por máquina).
 3. El reintento que llega **después** de que otro consumidor confirme no escribe nada nuevo y se resuelve como `skipped`.
 4. La pasada mantiene la identidad contable `candidates = evaluated + failures + contended` en todos los casos.
-5. Si se aprueba C2: la pasada no puede quedar bloqueada más allá de la cota fijada, medido con una transacción que retiene la fila.
+5. La pasada **no** puede quedar bloqueada más allá de la cota fijada (2 s): se certifica con una transacción que retiene la fila (`SanitaryClockConsumerRaceTest`, grupo 3, que ahora mide la pasada viva en lugar de ajustar la sesión a mano) y con el CLI real como proceso aparte contra la misma fila bloqueada.

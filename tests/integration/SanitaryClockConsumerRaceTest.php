@@ -31,7 +31,10 @@ declare(strict_types=1);
  *      bloqueo (`1205`), viaja a **`contended`** —aplazada, no fallada: sin alerta y con
  *      reintento en la pasada siguiente (T-PAUSE-39)— y en la MISMA pasada la otra máquina,
  *      libre, sí entra en cuarentena. El aislamiento es por fila, no un bloqueo global, y el
- *      perdedor no deja rastro del expediente ajeno.
+ *      perdedor no deja rastro del expediente ajeno. La pasada se mide además **viva** para
+ *      certificar la cota de espera de bloqueo del servicio (T-PAUSE-40): la suite ya no
+ *      ajusta la sesión a mano, y `3.3.ter` comprueba que la espera queda por debajo de la
+ *      cota declarada y que la sesión se restituye al terminar.
  *   4. **Después del ganador, nadie más escribe.** Confirmada la cuarentena del cierre, la
  *      pasada siguiente del barrido no añade ni una cuarentena ni un evento.
  *
@@ -57,6 +60,7 @@ require_once __DIR__ . '/../../src/Infrastructure/Database/SeedRunner.php';
 
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\IncidentPauseService;
+use VendGuard\Application\Service\SanitaryClockSweepService;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\PreventiveSetting;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
@@ -390,8 +394,12 @@ $closureConsumer = static function (?PreventiveSettingsRepositoryInterface $sett
     );
 };
 
-// La conexión del barrido falla rápido en lugar de esperar 50 s a la fila del grupo 3.
-$pdoSweep->exec('SET SESSION innodb_lock_wait_timeout = 1');
+// La suite NO ajusta la sesión del barrido para el grupo 3: la cota de espera de bloqueo la
+// pone el propio servicio (T-PAUSE-40) y aquí se mide su efecto. Si el mecanismo
+// desapareciera, la pasada contendida volvería a esperar el valor de servidor y la
+// medición de 3.3.ter la delataría. El valor de partida se captura para certificar
+// que la sesión queda restituida.
+$serverLockWaitSeconds = (int)$pdoSweep->query('SELECT @@SESSION.innodb_lock_wait_timeout')->fetchColumn();
 
 try {
     // =====================================================================
@@ -586,7 +594,9 @@ try {
         sprintf('estado leído=%s', $machineStatus($contendedMachineId))
     );
 
+    $contendedStartedAt = microtime(true);
     $contendedSweep = $sweep();
+    $contendedElapsedMs = (microtime(true) - $contendedStartedAt) * 1000;
     $contendedData = $contendedSweep->getDecodedBody()['data'] ?? [];
     $contendedQuarantined = array_map('intval', array_column($contendedData['quarantined'] ?? [], 'machine_id'));
     $deferredTickets = array_map(
@@ -619,6 +629,21 @@ try {
         ($contendedData['contended'][0]['incident_id'] ?? null) === $contendedIncident->getId()
         && ($contendedData['evaluated'] + $contendedData['failures_count'] + $contendedData['contended_count']) === $contendedData['candidates'],
         json_encode($contendedData, JSON_UNESCAPED_UNICODE)
+    );
+
+    $sessionAfterPass = (int)$pdoSweep->query('SELECT @@SESSION.innodb_lock_wait_timeout')->fetchColumn();
+
+    $assert(
+        '3.3.ter La cota del servicio corta la espera (T-PAUSE-40) y la sesión queda restituida',
+        $contendedElapsedMs < SanitaryClockSweepService::LOCK_WAIT_BUDGET_SECONDS * 3000
+        && $sessionAfterPass === $serverLockWaitSeconds,
+        sprintf(
+            'pasada=%.0f ms (cota declarada=%d s), cota de sesión tras la pasada=%d s (antes=%d s)',
+            $contendedElapsedMs,
+            SanitaryClockSweepService::LOCK_WAIT_BUDGET_SECONDS,
+            $sessionAfterPass,
+            $serverLockWaitSeconds
+        )
     );
 
     $assert(
@@ -684,9 +709,10 @@ try {
         )
     );
 } finally {
-    // Sesión y transacciones del banco de pruebas: se deja el entorno como estaba.
-    $pdoSweep->exec('SET SESSION innodb_lock_wait_timeout = 50');
-
+    // Sesión y transacciones del banco de pruebas: se deja el entorno como estaba. La cota de
+    // espera de bloqueo no se toca aquí a propósito —el servicio la restituye él mismo y la
+    // suite lo certifica en 3.3.ter—, de modo que este bloque no puede tapar un fallo de
+    // restitución.
     if ($pdoClosure->inTransaction()) {
         $pdoClosure->rollBack();
     }

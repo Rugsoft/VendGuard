@@ -42,6 +42,7 @@ use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\PreventiveSetting;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
+use VendGuard\Core\Domain\Repository\LockWaitBudgetInterface;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SanitaryClockCandidateRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
@@ -233,6 +234,38 @@ final class SweepAuditRepo implements AuditLogRepositoryInterface
 }
 
 /**
+ * Doble de la cota de espera de bloqueo (T-PAUSE-40): registra la cota con la que se le
+ * invoca, ejecuta la operación como haría el adaptador real y deja constancia de que
+ * restituyó la sesión incluso cuando la operación estalla.
+ */
+final class SweepLockBudget implements LockWaitBudgetInterface
+{
+    /** @var list<int> Cotas recibidas, en orden. */
+    public array $budgets = [];
+
+    /** Número de veces que se abrió una ventana de cota. */
+    public int $entered = 0;
+
+    public bool $restored = false;
+
+    public function runWithLockWaitBudget(int $seconds, callable $operation): mixed
+    {
+        if ($seconds < 1) {
+            throw new InvalidArgumentException('La cota de espera de bloqueo debe ser positiva (doble).');
+        }
+
+        $this->budgets[] = $seconds;
+        $this->entered++;
+
+        try {
+            return $operation();
+        } finally {
+            $this->restored = true;
+        }
+    }
+}
+
+/**
  * Doble de la unidad de trabajo: cuenta las unidades abiertas, puede hacer estallar la
  * enésima con un fallo no contemplado (para certificar que no se traga) y puede hacer
  * morir la enésima con un **error de PDO real** —el bloqueo de fila que otro consumidor
@@ -315,7 +348,8 @@ $makeIncident = static function (
  *   candidates: SweepCandidateRepo,
  *   settings: SweepSettingsRepo,
  *   audit: SweepAuditRepo,
- *   transactions: SweepTransactionManager
+ *   transactions: SweepTransactionManager,
+ *   budget: SweepLockBudget
  * }
  */
 $makeBench = static function (): array {
@@ -326,12 +360,15 @@ $makeBench = static function (): array {
 
     $pauseService = new IncidentPauseService($settings, new AuditLogger($audit));
 
+    $budget = new SweepLockBudget();
+
     return [
-        'service' => new SanitaryClockSweepService($candidates, $pauseService, $transactions),
+        'service' => new SanitaryClockSweepService($candidates, $pauseService, $transactions, $budget),
         'candidates' => $candidates,
         'settings' => $settings,
         'audit' => $audit,
         'transactions' => $transactions,
+        'budget' => $budget,
     ];
 };
 
@@ -764,6 +801,70 @@ $assert(
     && $wide->requiresOperatorAttention() === false
     && $wide->hasContention() === true,
     json_encode(['contended' => $wide->contendedCount, 'failures' => $wide->failuresCount], JSON_UNESCAPED_UNICODE)
+);
+
+// =====================================================================
+// GRUPO 7: Cota de espera de bloqueo de la pasada (T-PAUSE-40)
+// =====================================================================
+echo "\n--- Grupo 7: Cota de espera de bloqueo de la pasada ---\n";
+
+$bench = $makeBench();
+$bench['settings']->register(10, 'PERISHABLE_FOOD');
+$bench['candidates']->candidates = [$makeIncident(170, 'INC-2026-00170', 10, $agedOpening(18000))];
+
+$budgeted = $bench['service']->sweep();
+
+$assert(
+    '7.1 La pasada entera corre dentro de la cota de espera de bloqueo declarada por el servicio',
+    $bench['budget']->budgets === [SanitaryClockSweepService::LOCK_WAIT_BUDGET_SECONDS]
+    && $bench['budget']->entered === 1
+    && $budgeted instanceof SanitaryClockSweepResultDto
+    && count($budgeted->quarantined) === 1,
+    json_encode($bench['budget']->budgets, JSON_UNESCAPED_UNICODE)
+);
+
+$assert(
+    '7.2 La cota es corta y está por debajo del valor de servidor (50 s): la pasada no se queda esperando',
+    SanitaryClockSweepService::LOCK_WAIT_BUDGET_SECONDS >= 1
+    && SanitaryClockSweepService::LOCK_WAIT_BUDGET_SECONDS < 50,
+    (string)SanitaryClockSweepService::LOCK_WAIT_BUDGET_SECONDS . ' s'
+);
+
+$guardBench = $makeBench();
+$badBudget = $capture(static fn () => $guardBench['service']->sweep(0));
+
+$assert(
+    '7.3 Una cota de lote imposible se rechaza ANTES de tocar la sesión (Fail-Fast)',
+    $badBudget['threw'] === true
+    && $badBudget['class'] === InvalidArgumentException::class
+    && $guardBench['budget']->budgets === [],
+    sprintf('cota recibida por el puerto: %s', json_encode($guardBench['budget']->budgets, JSON_UNESCAPED_UNICODE))
+);
+
+$explodingBench = $makeBench();
+$explodingBench['candidates']->candidates = [$makeIncident(171, 'INC-2026-00171', 10, $agedOpening(18000))];
+$explodingBench['transactions']->throwOnTransaction = 1;
+$exploded = $capture(static fn () => $explodingBench['service']->sweep());
+
+$assert(
+    '7.4 Un fallo dentro de la pasada se propaga con la cota ya restituida (la sesión no queda tocada)',
+    $exploded['threw'] === true
+    && $exploded['class'] === LogicException::class
+    && $explodingBench['budget']->entered === 1
+    && $explodingBench['budget']->restored === true,
+    sprintf('excepción=%s, restituida=%s', $exploded['class'], var_export($explodingBench['budget']->restored, true))
+);
+
+$sweepSource = (string)file_get_contents(
+    dirname(__DIR__, 2) . '/src/Application/Service/SanitaryClockSweepService.php'
+);
+
+$assert(
+    '7.5 El barrido conserva la cota como dependencia declarada y no la aplica por su cuenta',
+    str_contains($sweepSource, 'LockWaitBudgetInterface')
+    && str_contains($sweepSource, 'runWithLockWaitBudget')
+    && !str_contains($sweepSource, 'innodb_lock_wait_timeout'),
+    'El servicio debe depender del puerto, no ejecutar SET SESSION él mismo'
 );
 
 // =====================================================================

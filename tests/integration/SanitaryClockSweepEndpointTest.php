@@ -37,6 +37,7 @@ use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Infrastructure\Config\SecretProvider;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Database\PdoLockWaitBudget;
 use VendGuard\Infrastructure\Database\SeedRunner;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
@@ -549,6 +550,77 @@ try {
         && str_contains($cliSource, 'hasContention')
         && !preg_match('/contendedCount\s*>\s*0\s*\?\s*1/', $cliSource),
         'El código de salida del CLI no puede decidirse por el recuento de contención'
+    );
+
+    // =====================================================================
+    // CASO 7: Cota de espera de bloqueo de la sesión (T-PAUSE-40)
+    // =====================================================================
+    echo "\n--- Caso 7: Cota de espera de bloqueo de la sesión ---\n";
+
+    $lockBudget = new PdoLockWaitBudget($pdo);
+    $sessionValue = static fn (): int => (int)$pdo->query('SELECT @@SESSION.innodb_lock_wait_timeout')->fetchColumn();
+    $serverValue = $sessionValue();
+
+    $insideBudget = null;
+    $budgetResult = $lockBudget->runWithLockWaitBudget(2, static function () use ($sessionValue, &$insideBudget): string {
+        $insideBudget = $sessionValue();
+
+        return 'operación acotada';
+    });
+
+    $assert(
+        '7.1 Dentro de la cota la sesión espera lo pedido y al salir se restituye el valor anterior',
+        $insideBudget === 2
+        && $sessionValue() === $serverValue
+        && $budgetResult === 'operación acotada',
+        sprintf(
+            'dentro=%s, antes=%d, después=%d',
+            var_export($insideBudget, true),
+            $serverValue,
+            $sessionValue()
+        )
+    );
+
+    $pdo->exec('SET SESSION innodb_lock_wait_timeout = 3');
+    $insideWide = null;
+    $lockBudget->runWithLockWaitBudget(100, static function () use ($sessionValue, &$insideWide): void {
+        $insideWide = $sessionValue();
+    });
+    $afterWide = $sessionValue();
+    $pdo->exec(sprintf('SET SESSION innodb_lock_wait_timeout = %d', $serverValue));
+
+    $assert(
+        '7.2 Una cota más ancha que la de la sesión no la eleva (la elección del operador se respeta)',
+        $insideWide === 3 && $afterWide === 3,
+        sprintf('dentro=%s, después=%d', var_export($insideWide, true), $afterWide)
+    );
+
+    $badBudgetMessage = null;
+    try {
+        $lockBudget->runWithLockWaitBudget(0, static fn (): string => 'no debería correr');
+    } catch (InvalidArgumentException $exception) {
+        $badBudgetMessage = $exception->getMessage();
+    }
+
+    $assert(
+        '7.3 Una cota imposible se rechaza sin ejecutar la operación ni tocar la sesión',
+        $badBudgetMessage !== null && $sessionValue() === $serverValue,
+        (string)$badBudgetMessage
+    );
+
+    $sessionAfterFailure = null;
+    try {
+        $lockBudget->runWithLockWaitBudget(1, static function (): void {
+            throw new RuntimeException('Fallo de la operación acotada (sonda).');
+        });
+    } catch (RuntimeException $exception) {
+        $sessionAfterFailure = $sessionValue();
+    }
+
+    $assert(
+        '7.4 Si la operación estalla, la cota se restituye igualmente',
+        $sessionAfterFailure === $serverValue,
+        sprintf('cota tras el fallo=%s (antes=%d)', var_export($sessionAfterFailure, true), $serverValue)
     );
 } finally {
     // Restitución del estado sanitario de TODO el parque: el barrido escribe sobre
