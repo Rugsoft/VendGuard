@@ -1191,8 +1191,7 @@ export const CoordinatorDashboardView = {
 
           <button
             type="submit"
-            class="vg-btn vg-btn-primary"
-            style="width: 100%; height: 40px; font-size: 15px; border-radius: var(--radius-interactive, 4px);"
+            class="vg-btn vg-btn-lg vg-btn-primary w-100"
             :disabled="isLoggingIn"
           >
             <span v-if="!isLoggingIn">Entrar al panel de triaje</span>
@@ -1220,7 +1219,6 @@ export const CoordinatorDashboardView = {
             type="button"
             class="vg-btn"
             :class="activeTab === 'incidents' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
             @click="activeTab = 'incidents'"
             data-testid="tab-incidents"
           >
@@ -1237,7 +1235,6 @@ export const CoordinatorDashboardView = {
             type="button"
             class="vg-btn"
             :class="activeTab === 'fleet' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
             @click="activeTab = 'fleet'"
             data-testid="tab-fleet"
           >
@@ -1248,7 +1245,6 @@ export const CoordinatorDashboardView = {
             type="button"
             class="vg-btn"
             :class="activeTab === 'mapa-territorial' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
             @click="activeTab = 'mapa-territorial'"
             data-testid="tab-mapa-territorial"
           >
@@ -1259,7 +1255,6 @@ export const CoordinatorDashboardView = {
             type="button"
             class="vg-btn"
             :class="activeTab === 'preventive' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
             @click="activeTab = 'preventive'"
             data-testid="tab-preventive"
           >
@@ -1270,7 +1265,6 @@ export const CoordinatorDashboardView = {
             type="button"
             class="vg-btn"
             :class="activeTab === 'repuestos' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
             @click="activeTab = 'repuestos'"
             data-testid="tab-repuestos"
           >
@@ -1281,7 +1275,6 @@ export const CoordinatorDashboardView = {
             type="button"
             class="vg-btn"
             :class="activeTab === 'analitica-repuestos' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
             @click="activeTab = 'analitica-repuestos'"
             data-testid="tab-analitica-repuestos"
           >
@@ -1292,7 +1285,6 @@ export const CoordinatorDashboardView = {
             type="button"
             class="vg-btn"
             :class="activeTab === 'refunds' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
             @click="activeTab = 'refunds'"
             data-testid="tab-refunds"
           >
@@ -1303,7 +1295,6 @@ export const CoordinatorDashboardView = {
             type="button"
             class="vg-btn"
             :class="activeTab === 'admin' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
             @click="activeTab = 'admin'"
             data-testid="tab-admin"
           >
@@ -1314,7 +1305,6 @@ export const CoordinatorDashboardView = {
             type="button"
             class="vg-btn"
             :class="activeTab === 'metrics' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 38px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px;"
             @click="activeTab = 'metrics'"
             data-testid="tab-metrics"
           >
@@ -1344,8 +1334,7 @@ export const CoordinatorDashboardView = {
 
           <button
             type="button"
-            class="vg-btn"
-            style="background-color: #dc2626; color: #ffffff; border-color: #b91c1c; border-radius: var(--radius-interactive, 4px); font-weight: 700; height: 36px; padding: 0 16px;"
+            class="vg-btn vg-btn-danger"
             @click="filterBySlaBreach"
           >
             Ver incidencias en riesgo SLA
@@ -1371,10 +1360,12 @@ export const CoordinatorDashboardView = {
             </div>
           </div>
 
+          <!-- El mando que abre la cola de cautela viste el tono de aviso del sistema.
+               Antes se pintaba ámbar a mano con el token de estado del banner, de modo que
+               el mismo ámbar tenía dos definiciones en la misma tarjeta. -->
           <button
             type="button"
-            class="vg-btn vg-btn-secondary"
-            :style="{ borderColor: pausedTokens.color, color: pausedTokens.color, fontWeight: '700', height: '36px', padding: '0 16px', borderRadius: 'var(--radius-interactive, 4px)' }"
+            class="vg-btn vg-btn-warning-soft"
             data-testid="filter-prolonged-inactivity"
             @click="filterPausedOnly = true"
           >
@@ -1487,8 +1478,7 @@ export const CoordinatorDashboardView = {
             <button
               v-if="filterStatus || filterUrgency || filterSearch || filterSlaOnly || filterPausedOnly"
               type="button"
-              class="vg-btn vg-btn-secondary"
-              style="height: 32px; font-size: 12px;"
+              class="vg-btn vg-btn-sm vg-btn-secondary"
               @click="clearFilters"
             >
               Limpiar filtros
@@ -1500,7 +1490,6 @@ export const CoordinatorDashboardView = {
             <button
               type="button"
               class="vg-btn vg-btn-secondary"
-              style="height: 36px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px;"
               @click="openQrBatchPrint(1, 'Hospital del Mar - Edificio Central')"
               title="Emitir cuadrícula de etiquetas A4 para la sede"
               data-testid="btn-batch-print"
@@ -1514,7 +1503,6 @@ export const CoordinatorDashboardView = {
             <button
               type="button"
               class="vg-btn vg-btn-secondary"
-              style="height: 36px; font-size: 13px;"
               :disabled="isLoading"
               @click="() => loadIncidents(false)"
             >
@@ -1656,8 +1644,7 @@ export const CoordinatorDashboardView = {
                       <!-- Conversation Thread Badge with the total message count (RF-01.1) -->
                       <button
                         type="button"
-                        class="vg-btn vg-btn-secondary vg-row-comments-badge"
-                        style="height: 30px; font-size: 12px; padding: 0 8px; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 4px;"
+                        class="vg-btn vg-btn-sm vg-btn-secondary vg-row-comments-badge"
                         @click.stop="openCommentsModal(inc)"
                         :title="'Abrir el hilo de conversación del expediente (' + commentCountOf(inc) + ' mensajes)'"
                         data-testid="btn-row-comments"
@@ -1668,8 +1655,7 @@ export const CoordinatorDashboardView = {
                       <!-- View Detail Button (RF-01.1 / T-IDM-14) -->
                       <button
                         type="button"
-                        class="vg-btn vg-btn-secondary"
-                        style="height: 30px; font-size: 12px; padding: 0 8px; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 4px;"
+                        class="vg-btn vg-btn-sm vg-btn-secondary"
                         @click.stop="openDetailModal(inc)"
                         title="Ver el detalle integral de la incidencia"
                         data-testid="btn-view-detail"
@@ -1680,8 +1666,7 @@ export const CoordinatorDashboardView = {
                       <!-- Imprimir Etiqueta QR Button (RF-01 / T-QR-14) -->
                       <button
                         type="button"
-                        class="vg-btn vg-btn-secondary"
-                        style="height: 30px; font-size: 12px; padding: 0 8px; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 4px;"
+                        class="vg-btn vg-btn-sm vg-btn-secondary"
                         @click="openQrLabelModal(inc)"
                         title="Previsualizar, personalizar e imprimir etiqueta con código QR"
                         data-testid="btn-print-qr"
@@ -1693,8 +1678,7 @@ export const CoordinatorDashboardView = {
                       <button
                         v-if="canQuickAssign(inc)"
                         type="button"
-                        class="vg-btn vg-btn-primary"
-                        style="height: 30px; font-size: 12px; padding: 0 10px; border-radius: var(--radius-interactive, 4px);"
+                        class="vg-btn vg-btn-sm vg-btn-primary"
                         @click="openAssignModal(inc)"
                         title="Asignar o reclasificar técnico"
                       >
@@ -1705,8 +1689,7 @@ export const CoordinatorDashboardView = {
                       <button
                         v-if="inc.is_sla_paused"
                         type="button"
-                        class="vg-btn vg-btn-primary"
-                        style="height: 30px; font-size: 12px; padding: 0 8px; border-radius: var(--radius-interactive, 4px);"
+                        class="vg-btn vg-btn-sm vg-btn-primary"
                         :disabled="resumingPauseIncidentId === inc.id"
                         @click.stop="resumePausedIncident(inc)"
                         title="Reanudar la intervención y descongelar el reloj contractual"
@@ -1719,8 +1702,7 @@ export const CoordinatorDashboardView = {
                       <button
                         v-if="inc.is_prolonged_inactivity"
                         type="button"
-                        class="vg-btn vg-btn-danger"
-                        style="height: 30px; font-size: 12px; padding: 0 8px; border-radius: var(--radius-interactive, 4px);"
+                        class="vg-btn vg-btn-sm vg-btn-danger"
                         @click.stop="openInactivityModal(inc)"
                         title="Cancelar la avería por inactividad de sede (máquina fuera de servicio hasta confirmar acceso)"
                         data-testid="btn-row-cancel-inactivity"
@@ -1732,8 +1714,7 @@ export const CoordinatorDashboardView = {
                       <button
                         v-if="canQuickCancel(inc)"
                         type="button"
-                        class="vg-btn vg-btn-secondary"
-                        style="height: 30px; font-size: 12px; padding: 0 8px; color: #dc2626; border-radius: var(--radius-interactive, 4px);"
+                        class="vg-btn vg-btn-sm vg-btn-danger-soft"
                         @click="openCancelModal(inc)"
                         title="Descartar incidencia (Soft Delete)"
                       >
@@ -1767,7 +1748,6 @@ export const CoordinatorDashboardView = {
                   type="button"
                   class="vg-btn"
                   :class="activePreventiveSubTab === 'dashboard' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-                  style="height: 34px; font-size: 13px; font-weight: 600; padding: 0 14px; border-radius: var(--radius-interactive, 4px);"
                   @click="activePreventiveSubTab = 'dashboard'"
                   data-testid="subtab-preventive-dashboard"
                 >
@@ -1777,7 +1757,6 @@ export const CoordinatorDashboardView = {
                   type="button"
                   class="vg-btn"
                   :class="activePreventiveSubTab === 'orders' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-                  style="height: 34px; font-size: 13px; font-weight: 600; padding: 0 14px; border-radius: var(--radius-interactive, 4px);"
                   @click="activePreventiveSubTab = 'orders'"
                   data-testid="subtab-preventive-orders"
                 >
@@ -1815,12 +1794,11 @@ export const CoordinatorDashboardView = {
           <div class="card-body py-2 px-3 d-flex flex-wrap align-items-center justify-content-between gap-3">
             <div class="d-flex align-items-center gap-3">
               <span class="text-muted small fw-bold text-uppercase" style="letter-spacing: 0.05em; font-size: 12px;">Submódulos:</span>
-              <div class="btn-group" role="group" aria-label="Submódulos de Administración" style="box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
+              <div class="vg-action-group" role="group" aria-label="Submódulos de Administración">
                 <button
                   type="button"
-                  class="btn"
-                  :class="activeAdminSubTab === 'locations' ? 'btn-primary' : 'btn-outline-primary'"
-                  style="height: 34px; font-size: 13px; font-weight: 600; padding: 0 14px;"
+                  class="vg-btn"
+                  :class="activeAdminSubTab === 'locations' ? 'vg-btn-primary' : 'vg-btn-secondary'"
                   @click="activeAdminSubTab = 'locations'"
                   data-testid="subtab-locations"
                 >
@@ -1828,9 +1806,8 @@ export const CoordinatorDashboardView = {
                 </button>
                 <button
                   type="button"
-                  class="btn"
-                  :class="activeAdminSubTab === 'machines' ? 'btn-primary' : 'btn-outline-primary'"
-                  style="height: 34px; font-size: 13px; font-weight: 600; padding: 0 14px;"
+                  class="vg-btn"
+                  :class="activeAdminSubTab === 'machines' ? 'vg-btn-primary' : 'vg-btn-secondary'"
                   @click="activeAdminSubTab = 'machines'"
                   data-testid="subtab-machines"
                 >
@@ -1838,9 +1815,8 @@ export const CoordinatorDashboardView = {
                 </button>
                 <button
                   type="button"
-                  class="btn"
-                  :class="activeAdminSubTab === 'users' ? 'btn-primary' : 'btn-outline-primary'"
-                  style="height: 34px; font-size: 13px; font-weight: 600; padding: 0 14px;"
+                  class="vg-btn"
+                  :class="activeAdminSubTab === 'users' ? 'vg-btn-primary' : 'vg-btn-secondary'"
                   @click="activeAdminSubTab = 'users'"
                   data-testid="subtab-users"
                 >

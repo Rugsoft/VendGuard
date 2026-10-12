@@ -296,15 +296,20 @@ export const CoordinatorPreventiveSettingsModal = {
               Gestión de periodicidades legales y salvaguarda de alimentos perecederos (Art. II Constitución).
             </p>
           </div>
-          <button type="button" @click="close" style="background: none; border: none; font-size: 20px; cursor: pointer; color: #64748b; line-height: 1;">✕</button>
+          <button
+            type="button"
+            class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-muted"
+            @click="close"
+            title="Cerrar el diálogo"
+          >✕</button>
         </div>
 
         <!-- Pestañas de navegación interna del Modal -->
         <div style="display: flex; border-bottom: 1px solid #e2e8f0; background: #ffffff; padding: 0 24px;">
           <button
             type="button"
-            style="padding: 12px 16px; border: none; background: none; font-size: 14px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s ease;"
-            :style="{ color: activeTab === 'types' ? '#2560ff' : '#64748b', borderBottomColor: activeTab === 'types' ? '#2560ff' : 'transparent' }"
+            class="vg-btn vg-btn-tab"
+            :class="{ 'vg-btn-tab-active': activeTab === 'types' }"
             @click="activeTab = 'types'"
             data-testid="tab-settings-types"
           >
@@ -312,8 +317,8 @@ export const CoordinatorPreventiveSettingsModal = {
           </button>
           <button
             type="button"
-            style="padding: 12px 16px; border: none; background: none; font-size: 14px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s ease;"
-            :style="{ color: activeTab === 'machine' ? '#2560ff' : '#64748b', borderBottomColor: activeTab === 'machine' ? '#2560ff' : 'transparent' }"
+            class="vg-btn vg-btn-tab"
+            :class="{ 'vg-btn-tab-active': activeTab === 'machine' }"
             @click="activeTab = 'machine'"
             data-testid="tab-settings-machine"
           >
@@ -326,12 +331,22 @@ export const CoordinatorPreventiveSettingsModal = {
           <!-- Mensajes de éxito y error global -->
           <div v-if="successMessage" style="background: #dcfce7; border: 1px solid #86efac; color: #166534; padding: 10px 14px; border-radius: 4px; font-size: 13px; display: flex; justify-content: space-between; align-items: center;">
             <span>✅ {{ successMessage }}</span>
-            <button type="button" @click="successMessage = ''" style="background: none; border: none; font-size: 14px; cursor: pointer; color: #166534;">✕</button>
+            <button
+              type="button"
+              class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-success"
+              @click="successMessage = ''"
+              title="Cerrar el aviso"
+            >✕</button>
           </div>
 
           <div v-if="errorMessage" style="background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; padding: 10px 14px; border-radius: 4px; font-size: 13px; display: flex; justify-content: space-between; align-items: center;">
             <span>⚠️ {{ errorMessage }}</span>
-            <button type="button" @click="errorMessage = ''" style="background: none; border: none; font-size: 14px; cursor: pointer; color: #991b1b;">✕</button>
+            <button
+              type="button"
+              class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-danger"
+              @click="errorMessage = ''"
+              title="Cerrar el aviso"
+            >✕</button>
           </div>
 
           <!-- ============================================================= -->
@@ -375,8 +390,7 @@ export const CoordinatorPreventiveSettingsModal = {
                   <td style="padding: 10px 12px; text-align: right;">
                     <button
                       type="button"
-                      class="vg-btn"
-                      style="background: #f1f5f9; color: #1e293b; border: 1px solid #cbd5e1; padding: 4px 8px; font-size: 12px; border-radius: 4px; cursor: pointer;"
+                      class="vg-btn vg-btn-sm vg-btn-neutral"
                       @click="selectTypeForEdit(s)"
                       data-testid="btn-edit-type"
                     >
@@ -397,7 +411,12 @@ export const CoordinatorPreventiveSettingsModal = {
                 <h4 style="margin: 0; font-size: 14px; color: #1e293b;">
                   Editar Frecuencias: <strong>{{ getTypeLabel(typeForm.machine_type) }}</strong>
                 </h4>
-                <button type="button" @click="selectedTypeSetting = null" style="background: none; border: none; font-size: 14px; cursor: pointer; color: #64748b;">✕</button>
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-muted"
+                  @click="selectedTypeSetting = null"
+                  title="Cerrar el formulario"
+                >✕</button>
               </div>
 
               <div v-if="typeError" style="background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; padding: 8px 12px; border-radius: 4px; font-size: 12px;" data-testid="type-error-msg">
@@ -440,16 +459,14 @@ export const CoordinatorPreventiveSettingsModal = {
               <div style="display: flex; justify-content: flex-end; gap: 8px;">
                 <button
                   type="button"
-                  class="vg-btn"
-                  style="background: #ffffff; color: #475569; border: 1px solid #cbd5e1; height: 34px; padding: 0 12px; font-size: 12px; border-radius: 4px; cursor: pointer;"
+                  class="vg-btn vg-btn-neutral"
                   @click="selectedTypeSetting = null"
                 >
                   Cancelar
                 </button>
                 <button
                   type="button"
-                  class="vg-btn"
-                  style="background: #2560ff; color: #ffffff; border: 1px solid #1a4cd8; height: 34px; padding: 0 14px; font-size: 12px; font-weight: 600; border-radius: 4px; cursor: pointer;"
+                  class="vg-btn vg-btn-primary"
                   :disabled="isSaving"
                   @click="saveTypeSettings"
                   data-testid="btn-save-type"
@@ -581,8 +598,7 @@ export const CoordinatorPreventiveSettingsModal = {
               <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
                 <button
                   type="button"
-                  class="vg-btn"
-                  style="background: #2560ff; color: #ffffff; border: 1px solid #1a4cd8; height: 38px; padding: 0 16px; font-weight: 600; border-radius: 4px; cursor: pointer;"
+                  class="vg-btn vg-btn-primary"
                   :disabled="isSaving"
                   @click="saveMachineConfig"
                   data-testid="btn-save-machine-config"
@@ -599,8 +615,7 @@ export const CoordinatorPreventiveSettingsModal = {
         <div style="padding: 14px 24px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; background: #f8fafc;">
           <button
             type="button"
-            class="vg-btn"
-            style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; height: 36px; padding: 0 16px; border-radius: 4px; cursor: pointer;"
+            class="vg-btn vg-btn-neutral"
             @click="close"
           >
             Cerrar

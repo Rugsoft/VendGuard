@@ -37,6 +37,7 @@ import { fileURLToPath } from 'url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DASHBOARD_PATH = path.resolve(HERE, '../../public/assets/js/views/CoordinatorDashboardView.js');
 const DETAIL_MODAL_PATH = path.resolve(HERE, '../../public/assets/js/components/CoordinatorIncidentDetailModal.js');
+const DESIGN_TOKENS_PATH = path.resolve(HERE, '../../public/assets/css/design-tokens.css');
 
 const { store, clearSession, setInternalSession } = await import('../../public/assets/js/store.js');
 const { CoordinatorDashboardView } = await import('../../public/assets/js/views/CoordinatorDashboardView.js');
@@ -46,6 +47,9 @@ const dashboardSource = fs.readFileSync(DASHBOARD_PATH, 'utf8');
 const detailSource = fs.readFileSync(DETAIL_MODAL_PATH, 'utf8');
 const dashboardTemplate = String(CoordinatorDashboardView.template || '');
 const detailTemplate = String(CoordinatorIncidentDetailModal.template || '');
+
+// La hoja de tokens entra en la medición: la insignia ya no declara su radio en línea, lo hereda de `.vg-btn`.
+const designTokensCss = fs.readFileSync(DESIGN_TOKENS_PATH, 'utf8');
 
 let assertions = 0;
 let failures = 0;
@@ -184,9 +188,19 @@ assert('1.6 La insignia declara identificador estable y descripción del total',
     && dashboardTemplate.includes("'Abrir el hilo de conversación del expediente (' + commentCountOf(inc) + ' mensajes)'"),
   'Se esperaban el data-testid y el title con el recuento total.');
 
-assert('1.7 La insignia respeta el radio interactivo de 4px del sistema de diseño (RNF-04)',
-  /vg-row-comments-badge[\s\S]{0,400}var\(--radius-interactive, 4px\)/.test(dashboardTemplate),
-  'Se esperaba `--radius-interactive, 4px` en la insignia.');
+const badgeTag = (dashboardTemplate.match(/<button\b[\s\S]{0,700}?vg-row-comments-badge[\s\S]{0,300}?>/) || [''])[0];
+const badgeClasses = (((badgeTag.match(/\sclass="([^"]*)"/) || ['', ''])[1]) || '').split(/\s+/).filter(Boolean);
+const baseButtonRule = (designTokensCss.match(/\.vg-btn\s*\{[^}]*\}/) || [''])[0];
+const badgeOwnRadius = /border-?radius/i.test(badgeTag);
+
+// La insignia ya no fija su radio: lo hereda de la variante del sistema, y esa variante lo lee
+// del token interactivo. Esta aserción recorre el camino entero (insignia -> `vg-btn` -> token) en
+// lugar de exigir que el 4px vuelva a escribirse a mano en la plantilla.
+assert('1.7 La insignia hereda el radio interactivo de 4px del sistema de diseño (RNF-04)',
+  badgeClasses.includes('vg-btn')
+    && baseButtonRule.includes('border-radius: var(--radius-interactive)')
+    && !badgeOwnRadius,
+  `clases medidas: ${badgeClasses.join(' ')} | radio propio: ${badgeOwnRadius}`);
 
 // ─── Grupo 2: Contador total de mensajes (RF-01.1, RF-02.3) ──────────────────
 console.log('\n--- Grupo 2: Contador total de la avería (públicos + notas internas) ---');

@@ -163,11 +163,11 @@ export const QrSanitaryQuarantineModal = {
         No es necesario remitir un nuevo aviso: el servicio técnico ya ha sido movilizado con máxima urgencia.
       </p>
 
-      <!-- Action Button -->
+      <!-- Action Button: la cuarentena sanitaria es una acción de riesgo, así que la
+           salida viste el tono destructivo del sistema con el peldaño a ancho completo. -->
       <button
         type="button"
-        class="btn btn-primary qr-btn-block"
-        style="width: 100%; height: 42px; font-size: 14px; font-weight: 700; border-radius: var(--radius-interactive, 4px); background-color: #dc2626; border-color: #b91c1c; color: #ffffff;"
+        class="vg-btn vg-btn-lg vg-btn-danger w-100"
         @click="handleGoHome"
       >
         Entendido / Salir

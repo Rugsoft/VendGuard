@@ -7,7 +7,7 @@
  *
  * Verifies:
  * 1. Component contract: name, props, emits and template testids of the nine blocks.
- * 2. Exactly ONE close glyph in the header (shared `.btn-close` ::before convention).
+ * 2. Exactly ONE close glyph in the header (shared `.vg-btn-close` ::before convention).
  * 3. Strictly read-only: no assignment, cancellation or inspection controls inside.
  * 4. Computed projections: header code, badges, validity countdown and checklist items.
  * 5. Lifecycle: close signals, integrated evidence viewer and Escape precedence.
@@ -275,15 +275,15 @@ console.log('\n--- Group 2: Single close glyph and read-only guarantee ---');
 const closeButtonMatch = TEMPLATE.match(
   /data-testid="preventive-detail-close"[\s\S]{0,300}?><\/button>/
 );
-assert('2.1 The header close button carries the shared btn-close class',
-  TEMPLATE.includes('class="vg-btn vg-btn-secondary btn-close"')
+assert('2.1 The header close button carries the shared vg-btn-close class',
+  TEMPLATE.includes('class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close"')
   && TEMPLATE.includes('data-testid="preventive-detail-close"'));
 assert('2.2 The close button renders an EMPTY body so the ::before glyph is the only ✕',
   Boolean(closeButtonMatch), 'No empty close button found in the header template');
-assert('2.3 The design system injects exactly one close glyph through .btn-close::before',
+assert('2.3 The design system injects exactly one close glyph through .vg-btn-close::before',
   (() => {
     const css = fs.readFileSync(CSS_PATH, 'utf8');
-    const glyphs = css.match(/\.btn-close::before\s*\{[^}]*content:\s*'✕'/g) || [];
+    const glyphs = css.match(/\.vg-btn-close::before\s*\{[^}]*content:\s*'✕'/g) || [];
     return glyphs.length === 1;
   })());
 assert('2.4 No assignment, reassignment, cancellation or inspection control inside the ficha',

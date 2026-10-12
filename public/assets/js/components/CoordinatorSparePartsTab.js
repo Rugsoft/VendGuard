@@ -394,7 +394,12 @@ export const CoordinatorSparePartsTab = {
         style="background-color: #fddfdf; border: 1px solid #ff5757; color: #991b1b; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; display: flex; align-items: center; justify-content: space-between;"
       >
         <span>⚠️ {{ errorMessage }}</span>
-        <button type="button" @click="errorMessage = ''" style="background: none; border: none; font-size: 16px; cursor: pointer; color: #991b1b;">&times;</button>
+        <button
+          type="button"
+          class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-danger"
+          @click="errorMessage = ''"
+          title="Cerrar el aviso"
+        >&times;</button>
       </div>
 
       <div
@@ -402,7 +407,12 @@ export const CoordinatorSparePartsTab = {
         style="background-color: #ecfdf5; border: 1px solid #38bd7d; color: #065f46; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; display: flex; align-items: center; justify-content: space-between;"
       >
         <span>✅ {{ successMessage }}</span>
-        <button type="button" @click="successMessage = ''" style="background: none; border: none; font-size: 16px; cursor: pointer; color: #065f46;">&times;</button>
+        <button
+          type="button"
+          class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-success"
+          @click="successMessage = ''"
+          title="Cerrar el aviso"
+        >&times;</button>
       </div>
 
       <!-- Tarjetas métricas KPI de catálogo (Docs/design.md) -->
@@ -443,8 +453,7 @@ export const CoordinatorSparePartsTab = {
           <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
             <button
               type="button"
-              class="vg-btn"
-              style="height: 38px; font-size: 13px; font-weight: 600; background-color: #ffffff; color: #2c333f; border: 1px solid #c8cfda; border-radius: 4px; padding: 0 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;"
+              class="vg-btn vg-btn-secondary"
               @click="handleOpenAnalytics"
               data-testid="btn-open-analytics"
               title="Ir al panel analítico de consumos y averías crónicas"
@@ -454,8 +463,7 @@ export const CoordinatorSparePartsTab = {
 
             <button
               type="button"
-              class="vg-btn"
-              style="height: 38px; font-size: 13px; font-weight: 600; background-color: #2560ff; color: #ffffff; border: none; border-radius: 4px; padding: 0 16px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;"
+              class="vg-btn vg-btn-primary"
               @click="openCreateModal"
               data-testid="btn-open-create-part"
             >
@@ -513,19 +521,8 @@ export const CoordinatorSparePartsTab = {
           <div class="vg-action-group" style="gap: 4px;">
             <button
               type="button"
-              class="vg-btn"
-              :style="{
-                height: '36px',
-                fontSize: '12px',
-                fontWeight: '600',
-                padding: '0 12px',
-                borderRadius: '4px',
-                border: '1px solid',
-                cursor: 'pointer',
-                borderColor: statusFilter === 'ALL' ? '#2560ff' : '#c8cfda',
-                backgroundColor: statusFilter === 'ALL' ? '#2560ff' : '#ffffff',
-                color: statusFilter === 'ALL' ? '#ffffff' : '#2c333f'
-              }"
+              class="vg-btn vg-btn-sm"
+              :class="statusFilter === 'ALL' ? 'vg-btn-primary' : 'vg-btn-secondary'"
               @click="statusFilter = 'ALL'"
               data-testid="spare-parts-status-filter-all"
             >
@@ -533,19 +530,8 @@ export const CoordinatorSparePartsTab = {
             </button>
             <button
               type="button"
-              class="vg-btn"
-              :style="{
-                height: '36px',
-                fontSize: '12px',
-                fontWeight: '600',
-                padding: '0 12px',
-                borderRadius: '4px',
-                border: '1px solid',
-                cursor: 'pointer',
-                borderColor: statusFilter === 'ACTIVE' ? '#2560ff' : '#c8cfda',
-                backgroundColor: statusFilter === 'ACTIVE' ? '#2560ff' : '#ffffff',
-                color: statusFilter === 'ACTIVE' ? '#ffffff' : '#2c333f'
-              }"
+              class="vg-btn vg-btn-sm"
+              :class="statusFilter === 'ACTIVE' ? 'vg-btn-primary' : 'vg-btn-secondary'"
               @click="statusFilter = 'ACTIVE'"
               data-testid="spare-parts-status-filter-active"
             >
@@ -553,19 +539,8 @@ export const CoordinatorSparePartsTab = {
             </button>
             <button
               type="button"
-              class="vg-btn"
-              :style="{
-                height: '36px',
-                fontSize: '12px',
-                fontWeight: '600',
-                padding: '0 12px',
-                borderRadius: '4px',
-                border: '1px solid',
-                cursor: 'pointer',
-                borderColor: statusFilter === 'INACTIVE' ? '#2560ff' : '#c8cfda',
-                backgroundColor: statusFilter === 'INACTIVE' ? '#2560ff' : '#ffffff',
-                color: statusFilter === 'INACTIVE' ? '#ffffff' : '#2c333f'
-              }"
+              class="vg-btn vg-btn-sm"
+              :class="statusFilter === 'INACTIVE' ? 'vg-btn-primary' : 'vg-btn-secondary'"
               @click="statusFilter = 'INACTIVE'"
               data-testid="spare-parts-status-filter-inactive"
             >
@@ -681,8 +656,7 @@ export const CoordinatorSparePartsTab = {
                   <div class="vg-row-actions" style="gap: 6px;">
                     <button
                       type="button"
-                      class="vg-btn"
-                      style="height: 30px; font-size: 12px; font-weight: 600; background-color: #ffffff; color: #2c333f; border: 1px solid #c8cfda; border-radius: 4px; padding: 0 10px; cursor: pointer;"
+                      class="vg-btn vg-btn-sm vg-btn-secondary"
                       @click="openEditModal(part)"
                       :data-testid="'btn-edit-part-' + part.id"
                       title="Editar especificaciones y compatibilidad"
@@ -692,19 +666,8 @@ export const CoordinatorSparePartsTab = {
 
                     <button
                       type="button"
-                      class="vg-btn"
-                      :style="{
-                        height: '30px',
-                        fontSize: '12px',
-                        fontWeight: '600',
-                        borderRadius: '4px',
-                        padding: '0 10px',
-                        cursor: 'pointer',
-                        border: '1px solid',
-                        backgroundColor: part.is_active ? '#ffffff' : '#ecfdf5',
-                        borderColor: part.is_active ? '#ff5757' : '#38bd7d',
-                        color: part.is_active ? '#991b1b' : '#065f46'
-                      }"
+                      class="vg-btn vg-btn-sm"
+                      :class="part.is_active ? 'vg-btn-danger-soft' : 'vg-btn-success-soft'"
                       @click="toggleStatus(part)"
                       :data-testid="'btn-toggle-status-' + part.id"
                       :title="part.is_active ? 'Desactivar repuesto (baja lógica)' : 'Reactivar repuesto en el catálogo'"
@@ -735,8 +698,8 @@ export const CoordinatorSparePartsTab = {
             </h3>
             <button
               type="button"
+              class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-muted"
               @click="closeModal"
-              style="background: none; border: none; font-size: 20px; font-weight: 700; color: #6c7e9d; cursor: pointer;"
               data-testid="modal-btn-close-header"
             >
               &times;
@@ -854,17 +817,8 @@ export const CoordinatorSparePartsTab = {
                       v-for="model in availableModelsForSelection"
                       :key="model"
                       type="button"
-                      :style="{
-                        fontSize: '12px',
-                        padding: '3px 8px',
-                        borderRadius: '4px',
-                        border: '1px solid',
-                        cursor: 'pointer',
-                        borderColor: formData.compatible_models.includes(model) ? '#2560ff' : '#c8cfda',
-                        backgroundColor: formData.compatible_models.includes(model) ? '#e5f2fc' : '#ffffff',
-                        color: formData.compatible_models.includes(model) ? '#003db5' : '#2c333f',
-                        fontWeight: formData.compatible_models.includes(model) ? '600' : 'normal'
-                      }"
+                      class="vg-btn vg-btn-sm"
+                      :class="formData.compatible_models.includes(model) ? 'vg-btn-info-soft' : 'vg-btn-secondary'"
                       @click="toggleModelSelection(model)"
                       :data-testid="'model-chip-' + model"
                     >
@@ -885,8 +839,7 @@ export const CoordinatorSparePartsTab = {
                     />
                     <button
                       type="button"
-                      class="vg-btn"
-                      style="height: 32px; font-size: 12px; font-weight: 600; background-color: #ffffff; color: #2560ff; border: 1px solid #2560ff; border-radius: 4px; padding: 0 10px; cursor: pointer;"
+                      class="vg-btn vg-btn-sm vg-btn-primary-outline"
                       @click="addCustomModel"
                       data-testid="modal-btn-add-custom-model"
                     >
@@ -932,8 +885,7 @@ export const CoordinatorSparePartsTab = {
           <div style="padding: 14px 20px; border-top: 1px solid #c8cfda; background-color: #f9fafb; display: flex; align-items: center; justify-content: flex-end; gap: 10px;">
             <button
               type="button"
-              class="vg-btn"
-              style="height: 36px; font-size: 13px; font-weight: 600; background-color: #ffffff; color: #2c333f; border: 1px solid #c8cfda; border-radius: 4px; padding: 0 16px; cursor: pointer;"
+              class="vg-btn vg-btn-secondary"
               @click="closeModal"
               :disabled="modalLoading"
               data-testid="modal-btn-cancel"
@@ -942,8 +894,7 @@ export const CoordinatorSparePartsTab = {
             </button>
             <button
               type="button"
-              class="vg-btn"
-              style="height: 36px; font-size: 13px; font-weight: 600; background-color: #2560ff; color: #ffffff; border: none; border-radius: 4px; padding: 0 20px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;"
+              class="vg-btn vg-btn-primary"
               @click="savePart"
               :disabled="modalLoading"
               data-testid="modal-btn-save"

@@ -662,7 +662,7 @@ export const AdminMachinesTab = {
           <div>
             <button 
               type="button" 
-              class="btn btn-primary d-inline-flex align-items-center gap-2"
+              class="vg-btn vg-btn-primary"
               @click="openCreateModal"
             >
               <span>➕</span>
@@ -675,12 +675,12 @@ export const AdminMachinesTab = {
       <!-- Notificaciones de Éxito o Error -->
       <div v-if="successMessage" class="alert alert-success alert-dismissible fade show" role="alert">
         <span>✅ {{ successMessage }}</span>
-        <button type="button" class="btn-close" @click="successMessage = ''" aria-label="Cerrar"></button>
+        <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" @click="successMessage = ''" aria-label="Cerrar"></button>
       </div>
 
       <div v-if="errorMessage" class="alert alert-danger alert-dismissible fade show" role="alert">
         <span>⚠️ {{ errorMessage }}</span>
-        <button type="button" class="btn-close" @click="errorMessage = ''" aria-label="Cerrar"></button>
+        <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" @click="errorMessage = ''" aria-label="Cerrar"></button>
       </div>
 
       <!-- Barra de Filtros Cruzados y Búsqueda -->
@@ -700,7 +700,7 @@ export const AdminMachinesTab = {
                 />
                 <button 
                   v-if="searchQuery" 
-                  class="btn btn-outline-secondary" 
+                  class="vg-btn vg-btn-secondary" 
                   type="button" 
                   @click="searchQuery = ''; loadMachines()"
                 >✕</button>
@@ -786,7 +786,7 @@ export const AdminMachinesTab = {
                       <span class="font-monospace fw-bold text-dark">{{ m.code }}</span>
                       <button 
                         type="button" 
-                        class="btn btn-sm btn-link p-0 text-muted" 
+                        class="vg-btn vg-btn-sm vg-btn-ghost vg-btn-ghost-muted" 
                         title="Ver etiqueta QR"
                         @click="openQrModal(m)"
                       >
@@ -850,12 +850,12 @@ export const AdminMachinesTab = {
 
                   <!-- Acciones -->
                   <td class="text-end pe-3">
-                    <div class="btn-group btn-group-sm">
+                    <div class="vg-row-actions">
                       <!-- Acciones para máquina activa -->
                       <template v-if="m.is_active">
                         <button 
                           type="button" 
-                          class="btn btn-outline-primary"
+                          class="vg-btn vg-btn-sm vg-btn-primary-outline"
                           title="Editar modelo y notas"
                           @click="openEditModal(m)"
                         >
@@ -863,7 +863,7 @@ export const AdminMachinesTab = {
                         </button>
                         <button 
                           type="button" 
-                          class="btn btn-outline-warning"
+                          class="vg-btn vg-btn-sm vg-btn-warning-soft"
                           title="Trasladar a otra sede"
                           @click="openTransferModal(m)"
                         >
@@ -871,7 +871,7 @@ export const AdminMachinesTab = {
                         </button>
                         <button 
                           type="button" 
-                          class="btn btn-outline-danger"
+                          class="vg-btn vg-btn-sm vg-btn-danger-soft"
                           title="Dar de baja lógica"
                           @click="openDeactivateModal(m)"
                         >
@@ -883,7 +883,7 @@ export const AdminMachinesTab = {
                       <template v-else>
                         <button 
                           type="button" 
-                          class="btn btn-outline-success"
+                          class="vg-btn vg-btn-sm vg-btn-success-soft"
                           title="Reactivación asistida"
                           @click="openReactivateModal(m)"
                         >
@@ -894,7 +894,7 @@ export const AdminMachinesTab = {
                       <!-- Visor QR -->
                       <button 
                         type="button" 
-                        class="btn btn-outline-secondary"
+                        class="vg-btn vg-btn-sm vg-btn-secondary"
                         title="Ver código QR"
                         @click="openQrModal(m)"
                       >
@@ -916,7 +916,7 @@ export const AdminMachinesTab = {
           <div class="modal-content border-0 shadow">
             <div class="modal-header bg-primary text-white">
               <h5 class="modal-title fw-bold">➕ Alta de Máquina Dispensadora</h5>
-              <button type="button" class="btn-close btn-close-white" @click="closeCreateModal" aria-label="Cerrar"></button>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-ghost-inverse vg-btn-icon vg-btn-close" @click="closeCreateModal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
               <div v-if="createErrors.general" class="alert alert-danger mb-3 small">
@@ -1020,8 +1020,8 @@ export const AdminMachinesTab = {
                 </div>
 
                 <div class="modal-footer px-0 pb-0 pt-3 border-top mt-3">
-                  <button type="button" class="btn btn-secondary" @click="closeCreateModal">Cancelar</button>
-                  <button type="submit" class="btn btn-primary" :disabled="isSubmittingCreate">
+                  <button type="button" class="vg-btn vg-btn-secondary" @click="closeCreateModal">Cancelar</button>
+                  <button type="submit" class="vg-btn vg-btn-primary" :disabled="isSubmittingCreate">
                     <span v-if="isSubmittingCreate" class="spinner-border spinner-border-sm me-1" role="status"></span>
                     <span>Registrar Máquina</span>
                   </button>
@@ -1039,7 +1039,7 @@ export const AdminMachinesTab = {
           <div class="modal-content border-0 shadow">
             <div class="modal-header bg-primary text-white">
               <h5 class="modal-title fw-bold">✏️ Editar Máquina: {{ editForm.code }}</h5>
-              <button type="button" class="btn-close btn-close-white" @click="closeEditModal" aria-label="Cerrar"></button>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-ghost-inverse vg-btn-icon vg-btn-close" @click="closeEditModal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
               <div v-if="editErrors.general" class="alert alert-danger mb-3 small">
@@ -1129,8 +1129,8 @@ export const AdminMachinesTab = {
                 </div>
 
                 <div class="modal-footer px-0 pb-0 pt-3 border-top mt-3">
-                  <button type="button" class="btn btn-secondary" @click="closeEditModal">Cancelar</button>
-                  <button type="submit" class="btn btn-primary" :disabled="isSubmittingEdit">
+                  <button type="button" class="vg-btn vg-btn-secondary" @click="closeEditModal">Cancelar</button>
+                  <button type="submit" class="vg-btn vg-btn-primary" :disabled="isSubmittingEdit">
                     <span v-if="isSubmittingEdit" class="spinner-border spinner-border-sm me-1" role="status"></span>
                     <span>Actualizar Máquina</span>
                   </button>
@@ -1148,7 +1148,7 @@ export const AdminMachinesTab = {
           <div class="modal-content border-0 shadow">
             <div class="modal-header bg-warning text-dark">
               <h5 class="modal-title fw-bold">🚚 Traslado Físico de Máquina: {{ transferForm.code }}</h5>
-              <button type="button" class="btn-close" @click="closeTransferModal" aria-label="Cerrar"></button>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" @click="closeTransferModal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
               <!-- Alerta bloqueante si tiene averías abiertas o en garantía -->
@@ -1215,10 +1215,10 @@ export const AdminMachinesTab = {
                 </div>
 
                 <div class="modal-footer px-0 pb-0 pt-3 border-top">
-                  <button type="button" class="btn btn-secondary" @click="closeTransferModal">Cancelar</button>
+                  <button type="button" class="vg-btn vg-btn-secondary" @click="closeTransferModal">Cancelar</button>
                   <button 
                     type="submit" 
-                    class="btn btn-warning text-dark fw-bold" 
+                    class="vg-btn vg-btn-warning" 
                     :disabled="!canConfirmTransfer || isSubmittingTransfer"
                   >
                     <span v-if="isSubmittingTransfer" class="spinner-border spinner-border-sm me-1" role="status"></span>
@@ -1237,7 +1237,7 @@ export const AdminMachinesTab = {
           <div class="modal-content border-0 shadow">
             <div class="modal-header bg-danger text-white">
               <h5 class="modal-title fw-bold">⚠️ Confirmar Baja Lógica de Máquina</h5>
-              <button type="button" class="btn-close btn-close-white" @click="closeDeactivateModal" aria-label="Cerrar"></button>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-ghost-inverse vg-btn-icon vg-btn-close" @click="closeDeactivateModal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
               <!-- Alerta bloqueante si contiene averías activas -->
@@ -1263,10 +1263,10 @@ export const AdminMachinesTab = {
               </p>
             </div>
             <div class="modal-footer border-top">
-              <button type="button" class="btn btn-secondary" @click="closeDeactivateModal">Cancelar</button>
+              <button type="button" class="vg-btn vg-btn-secondary" @click="closeDeactivateModal">Cancelar</button>
               <button 
                 type="button" 
-                class="btn btn-danger" 
+                class="vg-btn vg-btn-danger" 
                 :disabled="!canConfirmDeactivate || isSubmittingDeactivate"
                 @click="confirmDeactivate"
               >
@@ -1285,7 +1285,7 @@ export const AdminMachinesTab = {
           <div class="modal-content border-0 shadow">
             <div class="modal-header bg-success text-white">
               <h5 class="modal-title fw-bold">🔄 Reactivación Asistida: {{ reactivateForm.code }}</h5>
-              <button type="button" class="btn-close btn-close-white" @click="closeReactivateModal" aria-label="Cerrar"></button>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-ghost-inverse vg-btn-icon vg-btn-close" @click="closeReactivateModal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
               <div v-if="reactivateErrors.general" class="alert alert-danger mb-3 small">
@@ -1348,10 +1348,10 @@ export const AdminMachinesTab = {
                 </div>
 
                 <div class="modal-footer px-0 pb-0 pt-3 border-top">
-                  <button type="button" class="btn btn-secondary" @click="closeReactivateModal">Cancelar</button>
+                  <button type="button" class="vg-btn vg-btn-secondary" @click="closeReactivateModal">Cancelar</button>
                   <button 
                     type="submit" 
-                    class="btn btn-success" 
+                    class="vg-btn vg-btn-primary" 
                     :disabled="!canConfirmReactivate || isSubmittingReactivate"
                   >
                     <span v-if="isSubmittingReactivate" class="spinner-border spinner-border-sm me-1" role="status"></span>
@@ -1370,7 +1370,7 @@ export const AdminMachinesTab = {
           <div class="modal-content border-0 shadow text-center">
             <div class="modal-header bg-light">
               <h5 class="modal-title fw-bold text-dark">📱 Código QR: {{ qrMachine.code }}</h5>
-              <button type="button" class="btn-close" @click="closeQrModal" aria-label="Cerrar"></button>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" @click="closeQrModal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body py-4">
               <div class="mb-3">
@@ -1384,16 +1384,16 @@ export const AdminMachinesTab = {
               <p class="text-muted small mb-3">{{ qrMachine.floor_wing }} ({{ qrMachine.model }})</p>
 
               <div class="d-flex justify-content-center gap-2">
-                <a :href="'/api/qr/download/' + qrMachine.code" download class="btn btn-outline-primary btn-sm">
+                <a :href="'/api/qr/download/' + qrMachine.code" download class="vg-btn vg-btn-sm vg-btn-primary-outline">
                   ⬇️ Descargar SVG
                 </a>
-                <a :href="'/api/qr/view/' + qrMachine.code" target="_blank" class="btn btn-outline-secondary btn-sm">
+                <a :href="'/api/qr/view/' + qrMachine.code" target="_blank" class="vg-btn vg-btn-sm vg-btn-secondary">
                   🖨️ Imprimir
                 </a>
               </div>
             </div>
             <div class="modal-footer border-top justify-content-center">
-              <button type="button" class="btn btn-secondary" @click="closeQrModal">Cerrar</button>
+              <button type="button" class="vg-btn vg-btn-secondary" @click="closeQrModal">Cerrar</button>
             </div>
           </div>
         </div>

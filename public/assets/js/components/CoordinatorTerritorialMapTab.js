@@ -432,7 +432,7 @@ export const CoordinatorTerritorialMapTab = {
   <div class="territorial-map-tab">
     <div class="d-flex justify-content-between align-items-center mb-2">
       <h5 class="fw-bold mb-0">🗺️ Mapa Territorial de Averías</h5>
-      <button type="button" class="btn btn-outline-primary btn-sm" data-testid="btn-refresh-territorial" @click="loadTerritorialData()" :disabled="isLoading">
+      <button type="button" class="vg-btn vg-btn-sm vg-btn-primary-outline" data-testid="btn-refresh-territorial" @click="loadTerritorialData()" :disabled="isLoading">
         <span v-if="isLoading" class="spinner-border spinner-border-sm me-1" role="status"></span>
         🔄 Actualizar
       </button>
@@ -525,9 +525,9 @@ export const CoordinatorTerritorialMapTab = {
             </svg>
             <div class="territorial-map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</div>
             <div class="territorial-map-controls">
-              <button type="button" class="territorial-map-btn" data-testid="btn-zoom-in" :disabled="view.scale >= zoomMaxScale" @click="zoomIn" aria-label="Acercar el mapa">+</button>
-              <button type="button" class="territorial-map-btn" data-testid="btn-zoom-out" :disabled="view.scale <= zoomMinScale" @click="zoomOut" aria-label="Alejar el mapa">−</button>
-              <button type="button" class="territorial-map-btn" data-testid="btn-fit-territory" :disabled="view.scale <= zoomMinScale" @click="resetView" aria-label="Ver el territorio completo">⤢</button>
+              <button type="button" class="vg-btn vg-btn-icon vg-btn-secondary territorial-map-btn" data-testid="btn-zoom-in" :disabled="view.scale >= zoomMaxScale" @click="zoomIn" aria-label="Acercar el mapa">+</button>
+              <button type="button" class="vg-btn vg-btn-icon vg-btn-secondary territorial-map-btn" data-testid="btn-zoom-out" :disabled="view.scale <= zoomMinScale" @click="zoomOut" aria-label="Alejar el mapa">−</button>
+              <button type="button" class="vg-btn vg-btn-icon vg-btn-secondary territorial-map-btn" data-testid="btn-fit-territory" :disabled="view.scale <= zoomMinScale" @click="resetView" aria-label="Ver el territorio completo">⤢</button>
             </div>
           </div>
           <div class="territorial-map-legend small">
@@ -559,7 +559,7 @@ export const CoordinatorTerritorialMapTab = {
             <button
               v-if="isUnassignedSite(site) || isConsolidableSite(site)"
               type="button"
-              class="btn btn-primary btn-sm"
+              class="vg-btn vg-btn-sm vg-btn-primary"
               data-testid="btn-assign-site"
               @click="handleSiteClick(site)"
             >

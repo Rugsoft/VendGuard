@@ -486,8 +486,7 @@ export const CoordinatorPreventiveOrdersTab = {
           <div style="display: flex; gap: 10px; flex-wrap: wrap;">
             <button
               type="button"
-              class="vg-btn"
-              style="background: #2560ff; color: #ffffff; border: 1px solid #1a4cd8; height: 38px; padding: 0 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); cursor: pointer; display: inline-flex; align-items: center; gap: 6px;"
+              class="vg-btn vg-btn-primary"
               :disabled="isActionLoading"
               @click="handleGenerateDue"
               data-testid="btn-orders-generate-due"
@@ -497,8 +496,7 @@ export const CoordinatorPreventiveOrdersTab = {
 
             <button
               type="button"
-              class="vg-btn"
-              style="background: #ffffff; color: var(--color-ink, #1e293b); border: 1px solid var(--color-border, #cbd5e1); height: 38px; padding: 0 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); cursor: pointer; display: inline-flex; align-items: center; gap: 6px;"
+              class="vg-btn vg-btn-secondary"
               @click="openCreateModal"
               data-testid="btn-create-order"
             >
@@ -507,8 +505,7 @@ export const CoordinatorPreventiveOrdersTab = {
 
             <button
               type="button"
-              class="vg-btn"
-              style="background: #f8fafc; color: var(--color-ink, #334155); border: 1px solid var(--color-border, #cbd5e1); height: 38px; padding: 0 12px; font-weight: 600; border-radius: var(--radius-interactive, 4px); cursor: pointer;"
+              class="vg-btn vg-btn-neutral"
               :disabled="isLoading"
               @click="loadOrders"
               title="Recargar órdenes"
@@ -576,12 +573,22 @@ export const CoordinatorPreventiveOrdersTab = {
       <!-- Alertas de éxito y error -->
       <div v-if="successMessage" style="background: #dcfce7; border: 1px solid #86efac; color: #166534; padding: 12px 16px; border-radius: var(--radius-interactive, 4px); font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
         <span>✅ {{ successMessage }}</span>
-        <button type="button" @click="successMessage = ''" style="background: none; border: none; font-size: 16px; cursor: pointer; color: #166534;">✕</button>
+        <button
+          type="button"
+          class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-success"
+          @click="successMessage = ''"
+          title="Cerrar el aviso"
+        >✕</button>
       </div>
 
       <div v-if="errorMessage" style="background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; padding: 12px 16px; border-radius: var(--radius-interactive, 4px); font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
         <span>⚠️ {{ errorMessage }}</span>
-        <button type="button" @click="errorMessage = ''" style="background: none; border: none; font-size: 16px; cursor: pointer; color: #991b1b;">✕</button>
+        <button
+          type="button"
+          class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-danger"
+          @click="errorMessage = ''"
+          title="Cerrar el aviso"
+        >✕</button>
       </div>
 
       <!-- 2. Tabla de Órdenes Preventivas -->
@@ -722,8 +729,7 @@ export const CoordinatorPreventiveOrdersTab = {
                   <!-- Botón Ver detalle (RF-PD-01): lectura pura, disponible en cualquier estado -->
                   <button
                     type="button"
-                    class="vg-btn"
-                    style="background: #eef2ff; color: #1e3a8a; border: 1px solid #c7d2fe; padding: 4px 8px; font-size: 12px; border-radius: 4px; cursor: pointer;"
+                    class="vg-btn vg-btn-sm vg-btn-info-soft"
                     @click.stop="openDetailModal(order)"
                     title="Abrir la ficha integral de la orden preventiva"
                     data-testid="btn-view-order-detail"
@@ -736,8 +742,7 @@ export const CoordinatorPreventiveOrdersTab = {
                   <button
                     v-if="['PENDING_ASSIGNMENT', 'SCHEDULED', 'EXPIRED'].includes(order.status)"
                     type="button"
-                    class="vg-btn"
-                    style="background: #f1f5f9; color: #1e293b; border: 1px solid #cbd5e1; padding: 4px 8px; font-size: 12px; border-radius: 4px; cursor: pointer;"
+                    class="vg-btn vg-btn-sm vg-btn-neutral"
                     @click="openAssignModal(order)"
                     :title="hasAssignedTechnician(order) ? 'Reasignar técnica o reprogramar la fecha de la orden' : 'Asignar o reprogramar técnico'"
                     data-testid="btn-assign-order"
@@ -749,8 +754,7 @@ export const CoordinatorPreventiveOrdersTab = {
                   <button
                     v-if="!['COMPLETED', 'CANCELLED'].includes(order.status)"
                     type="button"
-                    class="vg-btn"
-                    style="background: #fff5f5; color: #b91c1c; border: 1px solid #fecaca; padding: 4px 8px; font-size: 12px; border-radius: 4px; cursor: pointer;"
+                    class="vg-btn vg-btn-sm vg-btn-danger-soft"
                     @click="openCancelModal(order)"
                     title="Cancelar orden con justificación histórica"
                     data-testid="btn-cancel-order"
@@ -788,7 +792,12 @@ export const CoordinatorPreventiveOrdersTab = {
             <h3 style="margin: 0; font-size: 18px; color: #1e293b;">
               {{ hasAssignedTechnician(selectedOrderToAssign) ? '🔁 Reasignar Orden Preventiva' : '👤 Asignar Orden Preventiva' }}
             </h3>
-            <button type="button" @click="closeAssignModal" style="background: none; border: none; font-size: 18px; cursor: pointer; color: #64748b;">✕</button>
+            <button
+              type="button"
+              class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-muted"
+              @click="closeAssignModal"
+              title="Cerrar el diálogo"
+            >✕</button>
           </div>
 
           <p style="margin: 0; font-size: 13px; color: #64748b;">
@@ -849,8 +858,7 @@ export const CoordinatorPreventiveOrdersTab = {
           <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px;">
             <button
               type="button"
-              class="vg-btn"
-              style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; height: 38px; padding: 0 16px; border-radius: 4px; cursor: pointer;"
+              class="vg-btn vg-btn-neutral"
               @click="closeAssignModal"
             >
               Cancelar
@@ -858,8 +866,7 @@ export const CoordinatorPreventiveOrdersTab = {
 
             <button
               type="button"
-              class="vg-btn"
-              style="background: #2560ff; color: #ffffff; border: 1px solid #1a4cd8; height: 38px; padding: 0 16px; font-weight: 600; border-radius: 4px; cursor: pointer;"
+              class="vg-btn vg-btn-primary"
               :disabled="isActionLoading"
               @click="submitAssignOrder"
               data-testid="btn-confirm-assign"
@@ -884,7 +891,12 @@ export const CoordinatorPreventiveOrdersTab = {
             <h3 style="margin: 0; font-size: 18px; color: #991b1b; display: flex; align-items: center; gap: 6px;">
               <span>✕</span> Cancelar Orden Preventiva
             </h3>
-            <button type="button" @click="closeCancelModal" style="background: none; border: none; font-size: 18px; cursor: pointer; color: #64748b;">✕</button>
+            <button
+              type="button"
+              class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-muted"
+              @click="closeCancelModal"
+              title="Cerrar el diálogo"
+            >✕</button>
           </div>
 
           <div style="background: #f8fafc; border-left: 4px solid #0284c7; padding: 10px 14px; font-size: 12px; color: #334155; border-radius: 2px;">
@@ -914,8 +926,7 @@ export const CoordinatorPreventiveOrdersTab = {
           <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px;">
             <button
               type="button"
-              class="vg-btn"
-              style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; height: 38px; padding: 0 16px; border-radius: 4px; cursor: pointer;"
+              class="vg-btn vg-btn-neutral"
               @click="closeCancelModal"
             >
               Volver
@@ -923,8 +934,7 @@ export const CoordinatorPreventiveOrdersTab = {
 
             <button
               type="button"
-              class="vg-btn"
-              style="background: #dc2626; color: #ffffff; border: 1px solid #b91c1c; height: 38px; padding: 0 16px; font-weight: 600; border-radius: 4px; cursor: pointer;"
+              class="vg-btn vg-btn-danger"
               :disabled="isActionLoading"
               @click="submitCancelOrder"
               data-testid="btn-confirm-cancel"
@@ -949,7 +959,12 @@ export const CoordinatorPreventiveOrdersTab = {
             <h3 style="margin: 0; font-size: 18px; color: #1e293b;">
               ➕ Nueva Orden Preventiva Manual
             </h3>
-            <button type="button" @click="closeCreateModal" style="background: none; border: none; font-size: 18px; cursor: pointer; color: #64748b;">✕</button>
+            <button
+              type="button"
+              class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-muted"
+              @click="closeCreateModal"
+              title="Cerrar el diálogo"
+            >✕</button>
           </div>
 
           <div v-if="createError" style="background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; padding: 10px; border-radius: 4px; font-size: 13px;">
@@ -1038,8 +1053,7 @@ export const CoordinatorPreventiveOrdersTab = {
           <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px;">
             <button
               type="button"
-              class="vg-btn"
-              style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; height: 38px; padding: 0 16px; border-radius: 4px; cursor: pointer;"
+              class="vg-btn vg-btn-neutral"
               @click="closeCreateModal"
             >
               Cancelar
@@ -1047,8 +1061,7 @@ export const CoordinatorPreventiveOrdersTab = {
 
             <button
               type="button"
-              class="vg-btn"
-              style="background: #2560ff; color: #ffffff; border: 1px solid #1a4cd8; height: 38px; padding: 0 16px; font-weight: 600; border-radius: 4px; cursor: pointer;"
+              class="vg-btn vg-btn-primary"
               :disabled="isActionLoading"
               @click="submitCreateOrder"
               data-testid="btn-confirm-create"

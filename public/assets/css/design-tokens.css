@@ -114,6 +114,36 @@
   --spacing-2xl: 40px;
   --spacing-3xl: 48px;
 
+  /* --- Geometría de Controles (botones y chips) ---
+     Una sola escalera para todo el panel: la altura, el relleno horizontal y el
+     cuerpo de la etiqueta de un botón se leen de aquí, no se repiten botón a botón
+     en un `style=""`. Tres peldaños, cada uno con un papel:
+       - sm: dentro de una fila de tabla o un chip de filtro (densidad máxima).
+       - md: control estándar de una barra de acciones o de un diálogo.
+       - lg: acción principal a ancho completo. */
+  --control-height-sm: 30px;
+  --control-height-md: 36px;
+  --control-height-lg: 40px;
+  --control-padding-sm: 10px;   /* relleno horizontal del peldaño compacto */
+  --control-padding-md: 16px;   /* relleno horizontal del control y de la pestaña */
+  --control-padding-lg: 20px;
+  --control-gap-sm: 4px;        /* separación icono-etiqueta en el peldaño compacto */
+  --control-gap-md: 6px;
+  --control-font-sm: var(--font-size-caption);   /* 12px */
+  --control-font-md: var(--font-size-body-sm);   /* 14px */
+  --control-font-lg: var(--font-size-body-md);   /* 16px */
+
+  /* --- Tintes de acción (botones suaves y fichas de estado) ---
+     Los tonos suaves llevan el fondo y el texto del triplete semántico y un borde
+     propio que no existía como token: el borde de un tinte nunca es el color pleno
+     —competiría con el voltaje azul interactivo— sino su versión clara. */
+  --color-neutral-bg: #f1f5f9;
+  --color-neutral-border: #cbd5e1;
+  --color-info-border: #c7d2fe;
+  --color-error-border: #fecaca;
+  --color-warning-border: #f9d67a;  /* borde del tinte de aviso: su versión clara */
+  --color-warning-dark: #c78f06;    /* ámbar oscurecido: borde y realce del tono sólido */
+
   /* --- Sombras y Elevación --- */
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
   --shadow-card-hover: 0 4px 12px rgba(37, 96, 255, 0.08);
@@ -178,8 +208,9 @@ h4 { font-size: var(--font-size-heading-md); }
   font-family: var(--font-body);
   font-size: var(--font-size-label-md);
   font-weight: 500;
-  height: 36px;
+  height: var(--control-height-md);
   padding: var(--spacing-sm) var(--spacing-md);
+  gap: var(--control-gap-md);
   border-radius: var(--radius-interactive);
   border: 1px solid transparent;
   cursor: pointer;
@@ -222,6 +253,228 @@ h4 { font-size: var(--font-size-heading-md); }
 
 .vg-btn-danger:hover:not(:disabled) {
   background-color: #ef4444;
+}
+
+/* Tono de aviso: la acción que pide cautela sin ser destructiva (trasladar una máquina
+   que arrastra una avería abierta, reabrir una reparación en garantía). El relleno es
+   el ámbar del sistema y la etiqueta va en tinta slate: el blanco sobre ámbar no
+   alcanza contraste, y el borde oscurecido es lo que le da el filo de los otros tonos
+   sólidos. */
+.vg-btn-warning {
+  background-color: var(--color-warning);
+  color: var(--color-slate);
+  border-color: var(--color-warning-dark);
+}
+
+.vg-btn-warning:hover:not(:disabled) {
+  background-color: var(--color-warning-dark);
+}
+
+/* Peldaños de tamaño del control.
+
+   Un botón del panel ya no declara su altura, su relleno ni el cuerpo de su etiqueta:
+   los hereda del peldaño que le toca. `vg-btn-sm` es la acción dentro de una fila de
+   tabla o un chip de filtro; el `.vg-btn` sin modificador es el control estándar de una
+   barra de acciones y de un diálogo; `vg-btn-lg` es la acción principal a ancho completo.
+   La etiqueta de los peldaños extremos va en 600: a 12 px y a 16 px la lectura en una
+   tabla densa lo agradece, y el control estándar conserva el 500 del sistema. */
+.vg-btn-sm {
+  height: var(--control-height-sm);
+  padding: 0 var(--control-padding-sm);
+  font-size: var(--control-font-sm);
+  font-weight: 600;
+  gap: var(--control-gap-sm);
+}
+
+.vg-btn-lg {
+  height: var(--control-height-lg);
+  padding: 0 var(--control-padding-lg);
+  font-size: var(--control-font-lg);
+  font-weight: 600;
+  gap: var(--control-gap-md);
+}
+
+/* Tonos de acción. `vg-btn-primary`, `vg-btn-secondary` y `vg-btn-danger` son los
+   canónicos; los tintes suaves existen porque el panel los usaba en línea con hex
+   propios en cada plantilla (una acción informativa, una destructiva de bajo énfasis,
+   un contador). El borde de un tinte es su versión clara, nunca el color pleno. */
+.vg-btn-neutral {
+  background-color: var(--color-neutral-bg);
+  color: var(--color-slate);
+  border-color: var(--color-neutral-border);
+}
+
+.vg-btn-neutral:hover:not(:disabled) {
+  background-color: var(--color-surface-1);
+  border-color: var(--color-hairline-soft);
+}
+
+.vg-btn-info-soft {
+  background-color: var(--color-info-bg);
+  color: var(--color-info-text);
+  border-color: var(--color-info-border);
+}
+
+/* Contorno del voltaje interactivo: una acción principal que no quiere competir con la
+   acción principal real de su barra (por ejemplo, añadir a una lista dentro de un
+   formulario). El relleno llega al apuntarla, nunca en reposo. */
+.vg-btn-primary-outline {
+  background-color: var(--color-surface-card);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.vg-btn-primary-outline:hover:not(:disabled) {
+  background-color: var(--color-primary-subtle);
+}
+
+.vg-btn-info-soft:hover:not(:disabled) {
+  border-color: var(--color-primary);
+}
+
+.vg-btn-success-soft {
+  background-color: var(--color-success-bg);
+  color: var(--color-success-text);
+  border-color: var(--color-success);
+}
+
+.vg-btn-success-soft:hover:not(:disabled) {
+  border-color: var(--color-success-text);
+}
+
+.vg-btn-danger-soft {
+  background-color: var(--color-error-bg);
+  color: var(--color-error-text);
+  border-color: var(--color-error-border);
+}
+
+.vg-btn-danger-soft:hover:not(:disabled) {
+  border-color: var(--color-error);
+}
+
+.vg-btn-warning-soft {
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  border-color: var(--color-warning-border);
+}
+
+.vg-btn-warning-soft:hover:not(:disabled) {
+  border-color: var(--color-warning);
+}
+
+/* Botón fantasma: sin fondo ni borde mientras no se apunta.
+
+   Es el control de un cierre de aviso (✕) o de una acción terciaria de icono, donde un
+   relleno permanente competiría con la acción real de la barra. El tono lo aporta el
+   modificador de color; `vg-btn-icon` lo cuadra cuando no lleva etiqueta. */
+.vg-btn-ghost {
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--color-ink-secondary);
+}
+
+.vg-btn-ghost:hover:not(:disabled) {
+  background-color: var(--color-surface-1);
+}
+
+.vg-btn-ghost-danger { color: var(--color-error-text); }
+.vg-btn-ghost-success { color: var(--color-success-text); }
+.vg-btn-ghost-muted { color: var(--color-ink-muted); }
+
+/* Sobre una superficie oscura —la cabecera de un diálogo en voltaje azul— el tono
+   fantasma se invierte: el glifo pasa a blanco y su realce es una veladura clara, no
+   el gris de lienzo con el que el fantasma estándar se ilumina. */
+.vg-btn-ghost-inverse { color: #ffffff; }
+
+.vg-btn-ghost-inverse:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+.vg-btn-icon {
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  padding: 0;
+  gap: 0;
+  font-size: var(--control-font-lg);
+}
+
+/* Glifo de cierre compartido por los diálogos y los avisos descartables.
+
+   El aspa es lo único que no puede repetirse en cada plantilla: la caja la aporta
+   `vg-btn-icon` y el tono `vg-btn-ghost` (o `vg-btn-ghost-inverse` sobre cabecera
+   oscura), así que un cierre mide y se ilumina como cualquier otro mando de icono.
+   Las plantillas dejan el botón vacío y el glifo llega desde aquí: una sola ✕. */
+.vg-btn-close::before {
+  content: '✕';
+  font-size: var(--font-size-label-md);
+  font-weight: 700;
+}
+
+/* Pestaña interna del panel (métricas, ajustes).
+
+   Comparte el peldaño de relleno del control estándar pero no su caja: la pestaña vive
+   sobre la línea inferior de su franja y el estado activo lo marca el subrayado, no el
+   relleno. Por eso no admite los modificadores de tono. */
+.vg-btn-tab {
+  padding: var(--spacing-sm) var(--control-padding-md);
+  border: none;
+  border-bottom: 3px solid transparent;
+  border-radius: var(--radius-none);
+  background-color: transparent;
+  font-size: var(--control-font-md);
+  font-weight: 700;
+  color: var(--color-ink-muted);
+}
+
+.vg-btn-tab:hover:not(:disabled) {
+  color: var(--color-primary);
+}
+
+.vg-btn-tab-active {
+  border-bottom-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+/* Chip de estado o de contador del panel.
+
+   Es un control interactivo que se lee como la ficha de KPI que tiene al lado: misma
+   geometría (radio de tarjeta, relleno de la franja) y misma altura automática, así que
+   acompaña a sus hermanas no interactivas en lugar de parecer un botón perdido en la
+   fila. Los tintes son los de las fichas: neutro y los tres semánticos. */
+.vg-chip {
+  height: auto;
+  padding: var(--spacing-sm) var(--control-padding-md);
+  border-radius: var(--radius-card);
+  border-color: var(--color-hairline);
+  background-color: var(--color-surface-card);
+  font-size: var(--control-font-md);
+  font-weight: 400;
+  color: var(--color-ink-secondary);
+}
+
+/* Un contador sin nada que contar se queda legible y sin realce: no es un control
+   apagado a medias, es una cifra en cero, así que no se atenúa ni invita a pulsarlo. */
+.vg-chip:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.vg-chip-warning {
+  border-color: var(--color-warning);
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+.vg-chip-success {
+  border-color: var(--color-success);
+  background-color: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.vg-chip-danger {
+  border-color: var(--color-error);
+  background-color: var(--color-urgency-critical-bg);
+  color: var(--color-error-text);
 }
 
 /* Grupo de botones que envuelve sus controles.
@@ -509,173 +762,17 @@ h4 { font-size: var(--font-size-heading-md); }
 }
 
 /* ─── 7. Sistema de Botones y Botoneras ────────────────────────────────────── */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font-family: var(--font-body, Inter, sans-serif);
-  font-size: var(--font-size-label-md, 14px);
-  font-weight: 500;
-  height: 36px;
-  padding: 0 14px;
-  border-radius: var(--radius-interactive, 4px);
-  border: 1px solid transparent;
-  cursor: pointer;
-  text-decoration: none;
-  user-select: none;
-  transition: all var(--transition-fast, 0.15s ease-in-out);
-  line-height: 1;
-  background-color: transparent;
-  color: var(--color-slate, #2c333f);
-}
+/* Paleta heredada retirada (2026-10-12).
 
-.btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.btn-sm {
-  height: 30px;
-  font-size: 12px;
-  padding: 0 10px;
-  border-radius: var(--radius-interactive, 4px);
-}
-
-.btn-primary {
-  background-color: var(--color-primary, #2560ff);
-  color: #ffffff;
-  border-color: var(--color-primary-dark, #003db5);
-}
-
-.btn-primary:hover:not(:disabled) {
-  background-color: var(--color-primary-hover, #0d4df2);
-  color: #ffffff;
-}
-
-.btn-secondary {
-  background-color: #ffffff;
-  color: var(--color-slate, #2c333f);
-  border-color: var(--color-hairline, #c8cfda);
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background-color: var(--color-surface-1, #efefef);
-  border-color: var(--color-hairline-soft, #a9b4c6);
-}
-
-.btn-danger {
-  background-color: #dc2626;
-  color: #ffffff;
-  border-color: #b91c1c;
-}
-
-.btn-danger:hover:not(:disabled) {
-  background-color: #ef4444;
-  color: #ffffff;
-}
-
-.btn-outline-primary {
-  background-color: #ffffff;
-  color: var(--color-primary, #2560ff);
-  border-color: var(--color-primary, #2560ff);
-}
-
-.btn-outline-primary:hover:not(:disabled) {
-  background-color: var(--color-primary-subtle, #e5f2fc);
-  color: var(--color-primary-dark, #003db5);
-}
-
-.btn-outline-secondary {
-  background-color: #ffffff;
-  color: var(--color-ink-secondary, #434c5f);
-  border-color: var(--color-hairline, #c8cfda);
-}
-
-.btn-outline-secondary:hover:not(:disabled) {
-  background-color: #f1f5f9;
-  color: var(--color-slate, #2c333f);
-  border-color: var(--color-hairline-soft, #a9b4c6);
-}
-
-.btn-outline-danger {
-  background-color: #ffffff;
-  color: #dc2626;
-  border-color: #fca5a5;
-}
-
-.btn-outline-danger:hover:not(:disabled) {
-  background-color: #fee2e2;
-  border-color: #dc2626;
-  color: #991b1b;
-}
-
-.btn-outline-success {
-  background-color: #ffffff;
-  color: #059669;
-  border-color: #a7f3d0;
-}
-
-.btn-outline-success:hover:not(:disabled) {
-  background-color: #ecfdf5;
-  border-color: #059669;
-  color: #065f46;
-}
-
-.btn-link {
-  background: transparent;
-  border-color: transparent;
-  color: var(--color-primary, #2560ff);
-  cursor: pointer;
-}
-
-.btn-group {
-  display: inline-flex;
-  vertical-align: middle;
-  border-radius: var(--radius-interactive, 4px);
-  border: 1px solid var(--color-hairline, #c8cfda);
-  overflow: hidden;
-}
-
-.btn-group > .btn {
-  border-radius: 0;
-  border: none;
-  border-right: 1px solid var(--color-hairline, #c8cfda);
-}
-
-.btn-group > .btn:last-child {
-  border-right: none;
-}
-
-.btn-group-sm > .btn {
-  height: 30px;
-  font-size: 12px;
-  padding: 0 10px;
-}
-
-.btn-close {
-  background: transparent;
-  border: none;
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  color: var(--color-ink-muted, #6c7e9d);
-  padding: 4px;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.btn-close::before {
-  content: '✕';
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.btn-close-white {
-  color: #ffffff !important;
-}
+   Aquí vivía un segundo sistema de botones en paralelo al vocabulario `vg-btn`:
+   `.btn`, `.btn-primary`, `.btn-outline-*`, `.btn-sm`, `.btn-group`, `.btn-close`,
+   `.btn-link` y compañía, con su propia altura (36 px), sus propios tonos hex y sus
+   propios redondeos. Las plantillas `Admin*`, la barra superior, el portal de sede y
+   la vista del técnico elegían entre uno y otro según quien las escribiera, de modo
+   que la misma acción se veía distinta en cada pantalla y ningún cambio de diseño se
+   propagaba. El vocabulario vigente es el de §4 (`.vg-btn`, sus peldaños y sus tonos)
+   y la guarda `LegacyButtonPaletteRetirementTest` impide que el prefijo vuelva a las
+   plantillas o a esta hoja. */
 
 /* ─── 8. Sistema de Tablas de Datos (Tables) ──────────────────────────────── */
 .table-responsive {
@@ -829,7 +926,7 @@ textarea.form-control {
   border-bottom-left-radius: 0;
 }
 
-.input-group > .btn {
+.input-group > .vg-btn {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
 }
@@ -972,7 +1069,7 @@ textarea.form-control {
   position: relative;
 }
 
-.alert-dismissible .btn-close {
+.alert-dismissible .vg-btn-close {
   position: absolute;
   top: 14px;
   right: 14px;
@@ -1433,16 +1530,6 @@ textarea.form-control {
   font-weight: 600;
 }
 
-.qr-btn-block {
-  width: 100%;
-  padding: 14px;
-  font-size: var(--font-size-body-md);
-  font-weight: 600;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  display: block;
-}
-
 .qr-footer {
   text-align: center;
   padding: 20px;
@@ -1798,22 +1885,14 @@ textarea.form-control {
   gap: 4px;
 }
 
+/* Mando de zoom flotante sobre el lienzo del mapa territorial.
+   Su caja (30 × 30, radio 4, relleno 0) era una copia literal del peldaño compacto
+   con icono; ahora la aporta `vg-btn-icon` y aquí sólo queda lo que es del mando:
+   el glifo en negrita sobre una línea y la sombra que lo despega del mapa. */
 .territorial-map-btn {
-  width: 30px;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--radius-xs);
-  background-color: #ffffff;
-  color: var(--color-slate, #2c333f);
-  font-size: 16px;
   font-weight: 700;
   line-height: 1;
-  cursor: pointer;
   box-shadow: 0 1px 3px rgba(44, 51, 63, 0.18);
-  padding: 0;
 }
 
 .territorial-map-btn:hover:not(:disabled) {

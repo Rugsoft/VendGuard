@@ -374,7 +374,7 @@ export const TechnicianRouteMapModal = {
     <div class="route-map-modal" role="dialog" aria-modal="true" aria-labelledby="routeMapTitle">
       <div class="route-map-header d-flex align-items-center justify-content-between">
         <h5 id="routeMapTitle" class="fw-bold mb-0">🗺️ Mi Ruta de Hoy</h5>
-        <button type="button" class="btn-close btn-close-white" aria-label="Cerrar mapa" @click="close"></button>
+        <button type="button" class="vg-btn vg-btn-ghost vg-btn-ghost-inverse vg-btn-icon vg-btn-close" aria-label="Cerrar mapa" @click="close"></button>
       </div>
 
       <div class="route-map-body">
@@ -477,7 +477,7 @@ export const TechnicianRouteMapModal = {
 
             <!-- Full-day navigation with waypoints (RF-MAP-08) -->
             <div class="d-grid mb-3">
-              <button type="button" class="btn btn-primary" @click="navigateFullRoute">
+              <button type="button" class="vg-btn vg-btn-primary" @click="navigateFullRoute">
                 🚗 Abrir ruta completa en Google Maps
               </button>
             </div>
@@ -524,14 +524,14 @@ export const TechnicianRouteMapModal = {
                     <span class="ms-2">{{ progressLabel(selectedStop) }}</span>
                   </p>
                 </div>
-                <button type="button" class="btn-close" aria-label="Cerrar ficha" @click="clearSelection"></button>
+                <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" aria-label="Cerrar ficha" @click="clearSelection"></button>
               </div>
               <ul class="small text-muted ps-3 mb-2">
                 <li v-for="task in selectedStop.tasks" :key="task.type + '-' + task.id">
                   {{ task.type === 'PREVENTIVE' ? 'Preventivo' : 'Avería' }} · {{ task.machine_code }} · {{ task.floor_location || selectedStop.location.name }}
                 </li>
               </ul>
-              <button type="button" class="btn btn-primary w-100" @click="navigateToStop(selectedStop)">
+              <button type="button" class="vg-btn vg-btn-primary w-100" @click="navigateToStop(selectedStop)">
                 🧭 Navegar con GPS
               </button>
             </div>

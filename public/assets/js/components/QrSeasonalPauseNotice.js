@@ -100,11 +100,11 @@ export const QrSeasonalPauseNotice = {
         No es necesario registrar avisos de avería: la unidad reanudará su servicio automáticamente tras la inspección preventiva reglamentaria previa.
       </p>
 
-      <!-- Action Button -->
+      <!-- Action Button: la acción viste el peldaño grande del sistema a ancho completo;
+           la tarjeta describe la pausa, no la dibuja el botón. -->
       <button
         type="button"
-        class="btn btn-primary qr-btn-block"
-        style="width: 100%; height: 40px; font-size: 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); background-color: #0284c7; border-color: #0369a1; color: #ffffff;"
+        class="vg-btn vg-btn-lg vg-btn-primary w-100"
         @click="handleGoHome"
       >
         Entendido

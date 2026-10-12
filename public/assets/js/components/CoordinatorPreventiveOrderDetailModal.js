@@ -478,12 +478,13 @@ export const CoordinatorPreventiveOrderDetailModal = {
               </button>
               <!--
                 El glifo de cierre lo aporta el pseudo-elemento ::before de la clase
-                compartida .btn-close (design-tokens.css): el botón se deja vacío para
-                no duplicar la ✕ (una sola aspa en la cabecera).
+                compartida .vg-btn-close (design-tokens.css): el botón se deja vacío para
+                no duplicar la ✕ (una sola aspa en la cabecera). La caja y el tono son
+                los del sistema: un mando de icono fantasma, como cualquier otro cierre.
               -->
               <button
                 type="button"
-                class="vg-btn vg-btn-secondary btn-close"
+                class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close"
                 data-testid="preventive-detail-close"
                 aria-label="Cerrar la ficha de la orden preventiva"
                 @click="requestClose"

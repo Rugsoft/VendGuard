@@ -637,7 +637,7 @@ export const AdminLocationsTab = {
           <div>
             <button 
               type="button" 
-              class="btn btn-primary d-inline-flex align-items-center gap-2"
+              class="vg-btn vg-btn-primary"
               @click="openCreateModal"
             >
               <span>➕</span>
@@ -650,12 +650,12 @@ export const AdminLocationsTab = {
       <!-- Notificaciones de Éxito o Error -->
       <div v-if="successMessage" class="alert alert-success alert-dismissible fade show" role="alert">
         <span>✅ {{ successMessage }}</span>
-        <button type="button" class="btn-close" @click="successMessage = ''" aria-label="Cerrar"></button>
+        <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" @click="successMessage = ''" aria-label="Cerrar"></button>
       </div>
 
       <div v-if="errorMessage" class="alert alert-danger alert-dismissible fade show" role="alert">
         <span>⚠️ {{ errorMessage }}</span>
-        <button type="button" class="btn-close" @click="errorMessage = ''" aria-label="Cerrar"></button>
+        <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" @click="errorMessage = ''" aria-label="Cerrar"></button>
       </div>
 
       <!-- Barra de Filtros y Búsqueda -->
@@ -674,7 +674,7 @@ export const AdminLocationsTab = {
                 />
                 <button 
                   v-if="searchQuery" 
-                  class="btn btn-outline-secondary" 
+                  class="vg-btn vg-btn-secondary" 
                   type="button" 
                   @click="searchQuery = ''; loadLocations()"
                 >✕</button>
@@ -783,11 +783,11 @@ export const AdminLocationsTab = {
 
                 <!-- Acciones -->
                 <td class="text-end">
-                  <div class="btn-group btn-group-sm" role="group">
+                  <div class="vg-row-actions" role="group">
                     <!-- Editar -->
                     <button 
                       type="button" 
-                      class="btn btn-outline-secondary"
+                      class="vg-btn vg-btn-sm vg-btn-secondary"
                       title="Editar datos descriptivos de la sede"
                       @click="openEditModal(loc)"
                     >
@@ -798,7 +798,7 @@ export const AdminLocationsTab = {
                     <button 
                       v-if="loc.is_active" 
                       type="button" 
-                      class="btn btn-outline-primary"
+                      class="vg-btn vg-btn-sm vg-btn-primary-outline"
                       title="Reemitir la clave de centro (invalida la anterior)"
                       @click="openReissueModal(loc)"
                     >
@@ -809,7 +809,7 @@ export const AdminLocationsTab = {
                     <button 
                       v-if="!loc.is_active" 
                       type="button" 
-                      class="btn btn-outline-success"
+                      class="vg-btn vg-btn-sm vg-btn-success-soft"
                       title="Reactivar sede dada de baja"
                       :disabled="isReactivatingId === loc.id"
                       @click="reactivateLocation(loc)"
@@ -822,7 +822,7 @@ export const AdminLocationsTab = {
                     <button 
                       v-else 
                       type="button" 
-                      class="btn btn-outline-danger"
+                      class="vg-btn vg-btn-sm vg-btn-danger-soft"
                       title="Dar de baja lógica a la sede"
                       @click="openDeactivateModal(loc)"
                     >
@@ -842,7 +842,7 @@ export const AdminLocationsTab = {
           <div class="modal-content border-0 shadow">
             <div class="modal-header bg-primary text-white">
               <h5 class="modal-title fw-bold">➕ Alta de Nueva Sede</h5>
-              <button type="button" class="btn-close btn-close-white" @click="closeCreateModal" aria-label="Cerrar"></button>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-ghost-inverse vg-btn-icon vg-btn-close" @click="closeCreateModal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
               <div v-if="createErrors.general" class="alert alert-danger py-2 small mb-3">
@@ -900,7 +900,7 @@ export const AdminLocationsTab = {
 
                 <!-- Geocodificación asistida de la dirección (RF-MAP-01) -->
                 <div class="mb-3">
-                  <button type="button" class="btn btn-outline-primary btn-sm" @click="geocodeAddress('create')" :disabled="isGeocodingCreate">
+                  <button type="button" class="vg-btn vg-btn-sm vg-btn-primary-outline" @click="geocodeAddress('create')" :disabled="isGeocodingCreate">
                     <span v-if="isGeocodingCreate" class="spinner-border spinner-border-sm me-1" role="status"></span>
                     📍 Geocodificar dirección
                   </button>
@@ -909,8 +909,8 @@ export const AdminLocationsTab = {
                     <strong>Coordenadas sugeridas:</strong> {{ createSuggestion.latitude }}, {{ createSuggestion.longitude }}
                     <div class="text-muted">{{ createSuggestion.label }}</div>
                     <div class="mt-2">
-                      <button type="button" class="btn btn-primary btn-sm me-2" @click="applyGeocodeSuggestion('create')">Usar coordenadas</button>
-                      <button type="button" class="btn btn-secondary btn-sm" @click="dismissGeocodeSuggestion('create')">Descartar</button>
+                      <button type="button" class="vg-btn vg-btn-sm vg-btn-primary me-2" @click="applyGeocodeSuggestion('create')">Usar coordenadas</button>
+                      <button type="button" class="vg-btn vg-btn-sm vg-btn-secondary" @click="dismissGeocodeSuggestion('create')">Descartar</button>
                     </div>
                   </div>
                 </div>
@@ -955,8 +955,8 @@ export const AdminLocationsTab = {
                 </div>
 
                 <div class="modal-footer px-0 pb-0 pt-3 border-top">
-                  <button type="button" class="btn btn-secondary" @click="closeCreateModal">Cancelar</button>
-                  <button type="submit" class="btn btn-primary" :disabled="isSubmittingCreate">
+                  <button type="button" class="vg-btn vg-btn-secondary" @click="closeCreateModal">Cancelar</button>
+                  <button type="submit" class="vg-btn vg-btn-primary" :disabled="isSubmittingCreate">
                     <span v-if="isSubmittingCreate" class="spinner-border spinner-border-sm me-1" role="status"></span>
                     <span>Guardar Sede</span>
                   </button>
@@ -973,7 +973,7 @@ export const AdminLocationsTab = {
           <div class="modal-content border-0 shadow">
             <div class="modal-header bg-secondary text-white">
               <h5 class="modal-title fw-bold">✏️ Editar Sede</h5>
-              <button type="button" class="btn-close btn-close-white" @click="closeEditModal" aria-label="Cerrar"></button>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-ghost-inverse vg-btn-icon vg-btn-close" @click="closeEditModal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
               <div v-if="editErrors.general" class="alert alert-danger py-2 small mb-3">
@@ -1026,7 +1026,7 @@ export const AdminLocationsTab = {
 
                 <!-- Geocodificación asistida de la dirección (RF-MAP-01) -->
                 <div class="mb-3">
-                  <button type="button" class="btn btn-outline-primary btn-sm" @click="geocodeAddress('edit')" :disabled="isGeocodingEdit">
+                  <button type="button" class="vg-btn vg-btn-sm vg-btn-primary-outline" @click="geocodeAddress('edit')" :disabled="isGeocodingEdit">
                     <span v-if="isGeocodingEdit" class="spinner-border spinner-border-sm me-1" role="status"></span>
                     📍 Geocodificar dirección
                   </button>
@@ -1035,8 +1035,8 @@ export const AdminLocationsTab = {
                     <strong>Coordenadas sugeridas:</strong> {{ editSuggestion.latitude }}, {{ editSuggestion.longitude }}
                     <div class="text-muted">{{ editSuggestion.label }}</div>
                     <div class="mt-2">
-                      <button type="button" class="btn btn-primary btn-sm me-2" @click="applyGeocodeSuggestion('edit')">Usar coordenadas</button>
-                      <button type="button" class="btn btn-secondary btn-sm" @click="dismissGeocodeSuggestion('edit')">Descartar</button>
+                      <button type="button" class="vg-btn vg-btn-sm vg-btn-primary me-2" @click="applyGeocodeSuggestion('edit')">Usar coordenadas</button>
+                      <button type="button" class="vg-btn vg-btn-sm vg-btn-secondary" @click="dismissGeocodeSuggestion('edit')">Descartar</button>
                     </div>
                   </div>
                 </div>
@@ -1079,8 +1079,8 @@ export const AdminLocationsTab = {
                 </div>
 
                 <div class="modal-footer px-0 pb-0 pt-3 border-top">
-                  <button type="button" class="btn btn-secondary" @click="closeEditModal">Cancelar</button>
-                  <button type="submit" class="btn btn-primary" :disabled="isSubmittingEdit">
+                  <button type="button" class="vg-btn vg-btn-secondary" @click="closeEditModal">Cancelar</button>
+                  <button type="submit" class="vg-btn vg-btn-primary" :disabled="isSubmittingEdit">
                     <span v-if="isSubmittingEdit" class="spinner-border spinner-border-sm me-1" role="status"></span>
                     <span>Actualizar Sede</span>
                   </button>
@@ -1097,7 +1097,7 @@ export const AdminLocationsTab = {
           <div class="modal-content border-0 shadow">
             <div class="modal-header bg-danger text-white">
               <h5 class="modal-title fw-bold">⚠️ Confirmar Baja Lógica de Sede</h5>
-              <button type="button" class="btn-close btn-close-white" @click="closeDeactivateModal" aria-label="Cerrar"></button>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-ghost-inverse vg-btn-icon vg-btn-close" @click="closeDeactivateModal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
               <!-- Alerta bloqueante si contiene máquinas activas -->
@@ -1123,10 +1123,10 @@ export const AdminLocationsTab = {
               </p>
             </div>
             <div class="modal-footer border-top">
-              <button type="button" class="btn btn-secondary" @click="closeDeactivateModal">Cancelar</button>
+              <button type="button" class="vg-btn vg-btn-secondary" @click="closeDeactivateModal">Cancelar</button>
               <button 
                 type="button" 
-                class="btn btn-danger" 
+                class="vg-btn vg-btn-danger" 
                 :disabled="!canConfirmDeactivate || isSubmittingDeactivate"
                 @click="confirmDeactivate"
               >
@@ -1144,7 +1144,7 @@ export const AdminLocationsTab = {
           <div class="modal-content border-0 shadow">
             <div class="modal-header bg-primary text-white">
               <h5 class="modal-title fw-bold">🔑 Reemitir Clave de Centro</h5>
-              <button type="button" class="btn-close btn-close-white" @click="closeReissueModal" aria-label="Cerrar"></button>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-ghost-inverse vg-btn-icon vg-btn-close" @click="closeReissueModal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
               <div class="alert alert-warning mb-3 small">
@@ -1159,10 +1159,10 @@ export const AdminLocationsTab = {
               </p>
             </div>
             <div class="modal-footer border-top">
-              <button type="button" class="btn btn-secondary" @click="closeReissueModal">Cancelar</button>
+              <button type="button" class="vg-btn vg-btn-secondary" @click="closeReissueModal">Cancelar</button>
               <button 
                 type="button" 
-                class="btn btn-primary" 
+                class="vg-btn vg-btn-primary" 
                 :disabled="isSubmittingReissue"
                 @click="confirmReissue"
               >
@@ -1180,7 +1180,7 @@ export const AdminLocationsTab = {
           <div class="modal-content border-0 shadow">
             <div class="modal-header bg-dark text-white">
               <h5 class="modal-title fw-bold">🔑 Clave de Centro de {{ accessCodeSite }}</h5>
-              <button type="button" class="btn-close btn-close-white" @click="closeAccessCodeModal" aria-label="Cerrar"></button>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-ghost-inverse vg-btn-icon vg-btn-close" @click="closeAccessCodeModal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body text-center">
               <p class="small text-muted mb-2">
@@ -1194,8 +1194,8 @@ export const AdminLocationsTab = {
               </p>
             </div>
             <div class="modal-footer border-top">
-              <button type="button" class="btn btn-outline-secondary" @click="copyIssuedAccessCode">Copiar</button>
-              <button type="button" class="btn btn-primary" @click="closeAccessCodeModal">Entregada, cerrar</button>
+              <button type="button" class="vg-btn vg-btn-secondary" @click="copyIssuedAccessCode">Copiar</button>
+              <button type="button" class="vg-btn vg-btn-primary" @click="closeAccessCodeModal">Entregada, cerrar</button>
             </div>
           </div>
         </div>

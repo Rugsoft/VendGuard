@@ -112,7 +112,7 @@ export const QrInactiveMachineNotice = {
       <div v-if="effectivePhone" class="qr-support-box mb-3 small text-muted">
         <span>Para incidencias de sede o consultas generales:</span>
         <div class="mt-1">
-          <a :href="'tel:' + effectivePhone" class="btn btn-outline-secondary btn-sm fw-bold">
+          <a :href="'tel:' + effectivePhone" class="vg-btn vg-btn-sm vg-btn-secondary">
             📞 Llamar a Asistencia ({{ effectivePhone }})
           </a>
         </div>
@@ -122,7 +122,7 @@ export const QrInactiveMachineNotice = {
       <div class="mt-4">
         <button 
           type="button" 
-          class="btn btn-primary w-100 py-2 fw-semibold" 
+          class="vg-btn vg-btn-lg vg-btn-primary w-100" 
           @click="handleGoHome"
           data-testid="btn-inactive-home"
         >

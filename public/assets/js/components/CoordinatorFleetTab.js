@@ -188,7 +188,6 @@ export const CoordinatorFleetTab = {
             <button
               type="button"
               class="vg-btn vg-btn-primary"
-              style="height: 38px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;"
               @click="handleOpenBatchPrint"
               :disabled="!selectedLocation || machines.length === 0"
               title="Emitir hoja A4 con todos los códigos QR de esta sede"
@@ -237,36 +236,32 @@ export const CoordinatorFleetTab = {
         <div style="display: flex; flex-wrap: wrap; gap: 8px;">
           <button
             type="button"
-            class="vg-btn"
+            class="vg-btn vg-btn-sm"
             :class="filterStatus === 'ALL' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 32px; font-size: 12px; padding: 0 10px;"
             @click="filterStatus = 'ALL'"
           >
             Todas ({{ metrics.total }})
           </button>
           <button
             type="button"
-            class="vg-btn"
+            class="vg-btn vg-btn-sm"
             :class="filterStatus === 'OPERATIONAL' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 32px; font-size: 12px; padding: 0 10px;"
             @click="filterStatus = 'OPERATIONAL'"
           >
             🟢 Operativas ({{ metrics.operational }})
           </button>
           <button
             type="button"
-            class="vg-btn"
+            class="vg-btn vg-btn-sm"
             :class="filterStatus === 'INCIDENT' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 32px; font-size: 12px; padding: 0 10px;"
             @click="filterStatus = 'INCIDENT'"
           >
             🔴 Con Avería ({{ metrics.incidents }})
           </button>
           <button
             type="button"
-            class="vg-btn"
+            class="vg-btn vg-btn-sm"
             :class="filterStatus === 'PERISHABLE' ? 'vg-btn-primary' : 'vg-btn-secondary'"
-            style="height: 32px; font-size: 12px; padding: 0 10px;"
             @click="filterStatus = 'PERISHABLE'"
           >
             ❄️ Alimentos Frescos ({{ metrics.perishables }})
@@ -352,8 +347,7 @@ export const CoordinatorFleetTab = {
           <div style="margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--color-hairline, #c8cfda); display: flex; align-items: center; justify-content: flex-end;">
             <button
               type="button"
-              class="vg-btn vg-btn-secondary"
-              style="height: 32px; font-size: 12px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; font-weight: 600;"
+              class="vg-btn vg-btn-sm vg-btn-secondary"
               @click="handleOpenQr(mach)"
               :title="'Previsualizar, personalizar e imprimir etiqueta de la máquina ' + mach.code"
               :data-testid="'btn-qr-' + mach.code"

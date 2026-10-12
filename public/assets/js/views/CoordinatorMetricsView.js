@@ -156,8 +156,8 @@ export const CoordinatorMetricsView = {
             />
             <button
               type="button"
+              class="vg-btn vg-btn-sm vg-btn-primary"
               @click="applyCustomRange"
-              style="padding: 6px 12px; background: #2560ff; color: #ffffff; border: none; border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer;"
             >
               Aplicar
             </button>
@@ -168,8 +168,8 @@ export const CoordinatorMetricsView = {
         <div class="vg-action-group" style="gap: 10px;">
           <button
             type="button"
+            class="vg-btn vg-btn-secondary"
             @click="exportMetricsCsv"
-            style="display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; background: #ffffff; border: 1px solid #c8cfda; border-radius: 4px; font-size: 13px; font-weight: 600; color: #2c333f; cursor: pointer; transition: all 0.2s ease;"
             title="Descargar archivo plano CSV con codificación UTF-8 BOM"
           >
             <span>📥 Exportar CSV</span>
@@ -177,8 +177,8 @@ export const CoordinatorMetricsView = {
 
           <button
             type="button"
+            class="vg-btn vg-btn-primary"
             @click="showExecutiveModal = true"
-            style="display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: #2560ff; color: #ffffff; border: none; border-radius: 4px; font-size: 13px; font-weight: 700; cursor: pointer; transition: background 0.2s ease;"
           >
             <span>📄 Generar Informe Ejecutivo</span>
           </button>
@@ -190,24 +190,27 @@ export const CoordinatorMetricsView = {
       <div class="vg-action-group" style="border-bottom: 2px solid #e5f2fc; padding-bottom: 2px;">
         <button
           type="button"
+          class="vg-btn vg-btn-tab"
+          :class="{ 'vg-btn-tab-active': activeSubTab === 'kpis' }"
           @click="activeSubTab = 'kpis'"
-          :style="{ padding: '8px 16px', fontSize: '14px', fontWeight: '700', border: 'none', background: 'transparent', cursor: 'pointer', borderBottom: activeSubTab === 'kpis' ? '3px solid #2560ff' : '3px solid transparent', color: activeSubTab === 'kpis' ? '#2560ff' : '#6c7e9d' }"
         >
           📊 Cuadro de Mandos (KPIs)
         </button>
 
         <button
           type="button"
+          class="vg-btn vg-btn-tab"
+          :class="{ 'vg-btn-tab-active': activeSubTab === 'breakdown' }"
           @click="activeSubTab = 'breakdown'"
-          :style="{ padding: '8px 16px', fontSize: '14px', fontWeight: '700', border: 'none', background: 'transparent', cursor: 'pointer', borderBottom: activeSubTab === 'breakdown' ? '3px solid #2560ff' : '3px solid transparent', color: activeSubTab === 'breakdown' ? '#2560ff' : '#6c7e9d' }"
         >
           🗂️ Desglose Multidimensional
         </button>
 
         <button
           type="button"
+          class="vg-btn vg-btn-tab"
+          :class="{ 'vg-btn-tab-active': activeSubTab === 'audit' }"
           @click="activeSubTab = 'audit'"
-          :style="{ padding: '8px 16px', fontSize: '14px', fontWeight: '700', border: 'none', background: 'transparent', cursor: 'pointer', borderBottom: activeSubTab === 'audit' ? '3px solid #2560ff' : '3px solid transparent', color: activeSubTab === 'audit' ? '#2560ff' : '#6c7e9d' }"
         >
           🛡️ Pistas de Auditoría
         </button>

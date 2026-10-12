@@ -212,7 +212,12 @@ export const CoordinatorSparePartsAnalyticsTab = {
         style="background-color: #fddfdf; border: 1px solid #ff5757; color: #991b1b; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; display: flex; align-items: center; justify-content: space-between;"
       >
         <span>⚠️ {{ errorMessage }}</span>
-        <button type="button" @click="errorMessage = ''" style="background: none; border: none; font-size: 16px; cursor: pointer; color: #991b1b;">&times;</button>
+        <button
+          type="button"
+          class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-danger"
+          @click="errorMessage = ''"
+          title="Cerrar el aviso"
+        >&times;</button>
       </div>
 
       <div
@@ -220,7 +225,12 @@ export const CoordinatorSparePartsAnalyticsTab = {
         style="background-color: #ecfdf5; border: 1px solid #38bd7d; color: #065f46; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; display: flex; align-items: center; justify-content: space-between;"
       >
         <span>✅ {{ successMessage }}</span>
-        <button type="button" @click="successMessage = ''" style="background: none; border: none; font-size: 16px; cursor: pointer; color: #065f46;">&times;</button>
+        <button
+          type="button"
+          class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-success"
+          @click="successMessage = ''"
+          title="Cerrar el aviso"
+        >&times;</button>
       </div>
 
       <!-- Barra superior: Título, Filtro de período y Acciones -->
@@ -237,8 +247,7 @@ export const CoordinatorSparePartsAnalyticsTab = {
             <!-- Botón hacia el Catálogo Maestro -->
             <button
               type="button"
-              class="vg-btn"
-              style="height: 38px; font-size: 13px; font-weight: 600; background-color: #ffffff; color: #2c333f; border: 1px solid #c8cfda; border-radius: 4px; padding: 0 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;"
+              class="vg-btn vg-btn-secondary"
               @click="handleOpenCatalog"
               data-testid="btn-open-catalog"
               title="Volver a la gestión del catálogo maestro de piezas"
@@ -249,8 +258,7 @@ export const CoordinatorSparePartsAnalyticsTab = {
             <!-- Botón de Exportación CSV (RF-REP-09) -->
             <button
               type="button"
-              class="vg-btn"
-              style="height: 38px; font-size: 13px; font-weight: 600; background-color: #2560ff; color: #ffffff; border: none; border-radius: 4px; padding: 0 16px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;"
+              class="vg-btn vg-btn-primary"
               @click="exportCsv"
               :disabled="isExporting"
               data-testid="btn-export-spare-parts-csv"
@@ -270,18 +278,7 @@ export const CoordinatorSparePartsAnalyticsTab = {
               <button
                 type="button"
                 class="vg-btn"
-                :style="{
-                  height: '32px',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  padding: '0 12px',
-                  borderRadius: '4px',
-                  border: '1px solid',
-                  cursor: 'pointer',
-                  borderColor: selectedPeriod === 30 ? '#2560ff' : '#c8cfda',
-                  backgroundColor: selectedPeriod === 30 ? '#2560ff' : '#ffffff',
-                  color: selectedPeriod === 30 ? '#ffffff' : '#2c333f'
-                }"
+                :class="selectedPeriod === 30 ? 'vg-btn-primary' : 'vg-btn-secondary'"
                 @click="changePeriod(30)"
                 data-testid="period-btn-30"
               >
@@ -290,18 +287,7 @@ export const CoordinatorSparePartsAnalyticsTab = {
               <button
                 type="button"
                 class="vg-btn"
-                :style="{
-                  height: '32px',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  padding: '0 12px',
-                  borderRadius: '4px',
-                  border: '1px solid',
-                  cursor: 'pointer',
-                  borderColor: selectedPeriod === 90 ? '#2560ff' : '#c8cfda',
-                  backgroundColor: selectedPeriod === 90 ? '#2560ff' : '#ffffff',
-                  color: selectedPeriod === 90 ? '#ffffff' : '#2c333f'
-                }"
+                :class="selectedPeriod === 90 ? 'vg-btn-primary' : 'vg-btn-secondary'"
                 @click="changePeriod(90)"
                 data-testid="period-btn-90"
               >
@@ -310,18 +296,7 @@ export const CoordinatorSparePartsAnalyticsTab = {
               <button
                 type="button"
                 class="vg-btn"
-                :style="{
-                  height: '32px',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  padding: '0 12px',
-                  borderRadius: '4px',
-                  border: '1px solid',
-                  cursor: 'pointer',
-                  borderColor: selectedPeriod === 180 ? '#2560ff' : '#c8cfda',
-                  backgroundColor: selectedPeriod === 180 ? '#2560ff' : '#ffffff',
-                  color: selectedPeriod === 180 ? '#ffffff' : '#2c333f'
-                }"
+                :class="selectedPeriod === 180 ? 'vg-btn-primary' : 'vg-btn-secondary'"
                 @click="changePeriod(180)"
                 data-testid="period-btn-180"
               >
@@ -330,18 +305,7 @@ export const CoordinatorSparePartsAnalyticsTab = {
               <button
                 type="button"
                 class="vg-btn"
-                :style="{
-                  height: '32px',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  padding: '0 12px',
-                  borderRadius: '4px',
-                  border: '1px solid',
-                  cursor: 'pointer',
-                  borderColor: selectedPeriod === 365 ? '#2560ff' : '#c8cfda',
-                  backgroundColor: selectedPeriod === 365 ? '#2560ff' : '#ffffff',
-                  color: selectedPeriod === 365 ? '#ffffff' : '#2c333f'
-                }"
+                :class="selectedPeriod === 365 ? 'vg-btn-primary' : 'vg-btn-secondary'"
                 @click="changePeriod(365)"
                 data-testid="period-btn-365"
               >
@@ -350,18 +314,7 @@ export const CoordinatorSparePartsAnalyticsTab = {
               <button
                 type="button"
                 class="vg-btn"
-                :style="{
-                  height: '32px',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  padding: '0 12px',
-                  borderRadius: '4px',
-                  border: '1px solid',
-                  cursor: 'pointer',
-                  borderColor: selectedPeriod === null ? '#2560ff' : '#c8cfda',
-                  backgroundColor: selectedPeriod === null ? '#2560ff' : '#ffffff',
-                  color: selectedPeriod === null ? '#ffffff' : '#2c333f'
-                }"
+                :class="selectedPeriod === null ? 'vg-btn-primary' : 'vg-btn-secondary'"
                 @click="changePeriod(null)"
                 data-testid="period-btn-all"
               >
@@ -558,8 +511,7 @@ export const CoordinatorSparePartsAnalyticsTab = {
                 <td style="padding: 10px 14px; text-align: right; white-space: nowrap;">
                   <button
                     type="button"
-                    class="vg-btn"
-                    style="height: 30px; font-size: 12px; font-weight: 600; background-color: #ffffff; color: #2560ff; border: 1px solid #2560ff; border-radius: 4px; padding: 0 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;"
+                    class="vg-btn vg-btn-sm vg-btn-primary-outline"
                     @click="handleCreatePartFromRequest(req)"
                     :data-testid="'btn-catalog-request-' + req.request_id"
                     title="Dar de alta esta pieza en el catálogo maestro e iniciar homologación"

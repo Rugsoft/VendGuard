@@ -722,40 +722,25 @@ export const CoordinatorRefundsTab = {
         </div>
 
         <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
-          <div style="padding: 8px 14px; border-radius: var(--radius-card, 8px); border: 1px solid var(--color-hairline, var(--color-hairline)); background: var(--color-surface-card); font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-secondary);">
+          <div class="vg-chip">
             Expedientes: <strong style="color: var(--color-ink-slate);">{{ total }}</strong>
           </div>
           <div
             data-testid="approval-pending-counter"
-            :style="{
-              padding: '8px 14px',
-              borderRadius: 'var(--radius-card, 8px)',
-              border: '1px solid ' + (hasApprovalPending ? 'var(--color-warning)' : 'var(--color-hairline)'),
-              background: hasApprovalPending ? 'var(--color-warning-bg)' : 'var(--color-surface-card)',
-              fontFamily: 'var(--font-body, Inter, sans-serif)',
-              fontSize: '13px',
-              color: hasApprovalPending ? 'var(--color-warning-text)' : 'var(--color-ink-secondary)'
-            }"
+            class="vg-chip"
+            :class="hasApprovalPending ? 'vg-chip-warning' : ''"
           >
             Pendientes de visto bueno: <strong>{{ requiresApprovalTotal }}</strong>
           </div>
-          <div style="padding: 8px 14px; border-radius: var(--radius-card, 8px); border: 1px solid var(--color-success); background: var(--color-success-bg); font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-success-text);">
+          <div class="vg-chip vg-chip-success">
             Pendiente de pago: <strong>{{ formatAmount(totals.payable_amount) }}</strong>
           </div>
           <button
             type="button"
             data-testid="stranded-counter"
             :aria-pressed="strandedOnly ? 'true' : 'false'"
-            :style="{
-              padding: '8px 14px',
-              borderRadius: 'var(--radius-card, 8px)',
-              border: '1px solid ' + (hasStranded ? 'var(--color-error)' : 'var(--color-hairline)'),
-              background: hasStranded ? 'var(--color-urgency-critical-bg)' : 'var(--color-surface-card)',
-              fontFamily: 'var(--font-body, Inter, sans-serif)',
-              fontSize: '13px',
-              color: hasStranded ? 'var(--color-error-text)' : 'var(--color-ink-secondary)',
-              cursor: hasStranded ? 'pointer' : 'default'
-            }"
+            class="vg-btn vg-chip"
+            :class="hasStranded ? 'vg-chip-danger' : ''"
             :disabled="!hasStranded"
             @click="hasStranded && toggleStrandedOnly(true)"
           >
@@ -764,7 +749,6 @@ export const CoordinatorRefundsTab = {
           <button
             type="button"
             class="vg-btn vg-btn-secondary"
-            style="border-radius: var(--radius-interactive, 4px); font-size: 13px; height: 36px;"
             :disabled="loading"
             @click="loadRefunds"
           >
@@ -971,13 +955,12 @@ export const CoordinatorRefundsTab = {
                 </td>
 
                 <td style="padding: 12px 16px; text-align: right;">
-                  <div style="display: inline-flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end;">
+                  <div class="vg-row-actions">
                     <button
                       v-if="canApprove(refund)"
                       type="button"
-                      class="vg-btn vg-btn-primary"
+                      class="vg-btn vg-btn-sm vg-btn-primary"
                       :data-testid="'approve-refund-' + refund.id"
-                      style="font-size: 12px; min-height: 36px; padding: 0 12px; border-radius: var(--radius-interactive, 4px);"
                       @click="openApprovalModal(refund)"
                     >
                       Dar visto bueno
@@ -985,9 +968,8 @@ export const CoordinatorRefundsTab = {
                     <button
                       v-if="canPay(refund)"
                       type="button"
-                      class="vg-btn vg-btn-primary"
+                      class="vg-btn vg-btn-sm vg-btn-primary"
                       :data-testid="'pay-refund-' + refund.id"
-                      style="font-size: 12px; min-height: 36px; padding: 0 12px; border-radius: var(--radius-interactive, 4px);"
                       @click="openPaymentModal(refund)"
                     >
                       Registrar pago
@@ -995,9 +977,8 @@ export const CoordinatorRefundsTab = {
                     <button
                       v-if="canReject(refund)"
                       type="button"
-                      class="vg-btn vg-btn-secondary"
+                      class="vg-btn vg-btn-sm vg-btn-danger-soft"
                       :data-testid="'reject-refund-' + refund.id"
-                      style="font-size: 12px; min-height: 36px; padding: 0 10px; border-radius: var(--radius-interactive, 4px); color: var(--color-error-text);"
                       @click="openRejectModal(refund)"
                     >
                       Desestimar
@@ -1005,9 +986,8 @@ export const CoordinatorRefundsTab = {
                     <button
                       v-if="canRegularize(refund)"
                       type="button"
-                      class="vg-btn vg-btn-secondary"
+                      class="vg-btn vg-btn-sm vg-btn-secondary"
                       :data-testid="'regularize-refund-' + refund.id"
-                      style="font-size: 12px; min-height: 36px; padding: 0 10px; border-radius: var(--radius-interactive, 4px);"
                       @click="openRegularizeModal(refund)"
                     >
                       Regularizar dictamen

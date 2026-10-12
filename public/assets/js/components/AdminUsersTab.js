@@ -546,7 +546,7 @@ export const AdminUsersTab = {
           <div>
             <button 
               type="button" 
-              class="btn btn-primary d-inline-flex align-items-center gap-2"
+              class="vg-btn vg-btn-primary"
               @click="openCreateModal"
             >
               <span>➕</span>
@@ -559,12 +559,12 @@ export const AdminUsersTab = {
       <!-- Notificaciones de Éxito o Error -->
       <div v-if="successMessage" class="alert alert-success alert-dismissible fade show" role="alert">
         <span>✅ {{ successMessage }}</span>
-        <button type="button" class="btn-close" @click="successMessage = ''" aria-label="Cerrar"></button>
+        <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" @click="successMessage = ''" aria-label="Cerrar"></button>
       </div>
 
       <div v-if="errorMessage" class="alert alert-danger alert-dismissible fade show" role="alert">
         <span>⚠️ {{ errorMessage }}</span>
-        <button type="button" class="btn-close" @click="errorMessage = ''" aria-label="Cerrar"></button>
+        <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" @click="errorMessage = ''" aria-label="Cerrar"></button>
       </div>
 
       <!-- Barra de Filtros Cruzados y Búsqueda -->
@@ -584,7 +584,7 @@ export const AdminUsersTab = {
                 />
                 <button 
                   v-if="searchQuery" 
-                  class="btn btn-outline-secondary" 
+                  class="vg-btn vg-btn-secondary" 
                   type="button" 
                   @click="searchQuery = ''; loadUsers()"
                 >✕</button>
@@ -712,12 +712,12 @@ export const AdminUsersTab = {
 
                   <!-- Acciones -->
                   <td class="text-end pe-3">
-                    <div class="btn-group btn-group-sm">
+                    <div class="vg-row-actions">
                       <!-- Acciones para usuario activo -->
                       <template v-if="u.is_active">
                         <button 
                           type="button" 
-                          class="btn btn-outline-primary"
+                          class="vg-btn vg-btn-sm vg-btn-primary-outline"
                           title="Editar datos de contacto"
                           @click="openEditModal(u)"
                         >
@@ -725,7 +725,7 @@ export const AdminUsersTab = {
                         </button>
                         <button 
                           type="button" 
-                          class="btn btn-outline-secondary"
+                          class="vg-btn vg-btn-sm vg-btn-secondary"
                           title="Restablecer contraseña de acceso"
                           @click="openResetPasswordModal(u)"
                         >
@@ -733,7 +733,7 @@ export const AdminUsersTab = {
                         </button>
                         <button 
                           type="button" 
-                          class="btn btn-outline-danger"
+                          class="vg-btn vg-btn-sm vg-btn-danger-soft"
                           title="Dar de baja lógica"
                           @click="openDeactivateModal(u)"
                         >
@@ -745,7 +745,7 @@ export const AdminUsersTab = {
                       <template v-else>
                         <button 
                           type="button" 
-                          class="btn btn-outline-success"
+                          class="vg-btn vg-btn-sm vg-btn-success-soft"
                           title="Reactivar usuario"
                           :disabled="isReactivatingId === u.id"
                           @click="reactivateUser(u)"
@@ -770,7 +770,7 @@ export const AdminUsersTab = {
           <div class="modal-content border-0 shadow">
             <div class="modal-header bg-primary text-white">
               <h5 class="modal-title fw-bold">➕ Alta de Personal Interno</h5>
-              <button type="button" class="btn-close btn-close-white" @click="closeCreateModal" aria-label="Cerrar"></button>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-ghost-inverse vg-btn-icon vg-btn-close" @click="closeCreateModal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
               <div v-if="createErrors.general" class="alert alert-danger mb-3 small">
@@ -849,8 +849,8 @@ export const AdminUsersTab = {
                 </div>
 
                 <div class="modal-footer px-0 pb-0 pt-3 border-top mt-3">
-                  <button type="button" class="btn btn-secondary" @click="closeCreateModal">Cancelar</button>
-                  <button type="submit" class="btn btn-primary" :disabled="isSubmittingCreate">
+                  <button type="button" class="vg-btn vg-btn-secondary" @click="closeCreateModal">Cancelar</button>
+                  <button type="submit" class="vg-btn vg-btn-primary" :disabled="isSubmittingCreate">
                     <span v-if="isSubmittingCreate" class="spinner-border spinner-border-sm me-1" role="status"></span>
                     <span>Dar de Alta Usuario</span>
                   </button>
@@ -868,7 +868,7 @@ export const AdminUsersTab = {
           <div class="modal-content border-0 shadow">
             <div class="modal-header bg-primary text-white">
               <h5 class="modal-title fw-bold">✏️ Editar Usuario: {{ editForm.name }}</h5>
-              <button type="button" class="btn-close btn-close-white" @click="closeEditModal" aria-label="Cerrar"></button>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-ghost-inverse vg-btn-icon vg-btn-close" @click="closeEditModal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
               <div v-if="editErrors.general" class="alert alert-danger mb-3 small">
@@ -915,8 +915,8 @@ export const AdminUsersTab = {
                 </div>
 
                 <div class="modal-footer px-0 pb-0 pt-3 border-top">
-                  <button type="button" class="btn btn-secondary" @click="closeEditModal">Cancelar</button>
-                  <button type="submit" class="btn btn-primary" :disabled="isSubmittingEdit">
+                  <button type="button" class="vg-btn vg-btn-secondary" @click="closeEditModal">Cancelar</button>
+                  <button type="submit" class="vg-btn vg-btn-primary" :disabled="isSubmittingEdit">
                     <span v-if="isSubmittingEdit" class="spinner-border spinner-border-sm me-1" role="status"></span>
                     <span>Actualizar Usuario</span>
                   </button>
@@ -934,7 +934,7 @@ export const AdminUsersTab = {
           <div class="modal-content border-0 shadow">
             <div class="modal-header bg-secondary text-white">
               <h5 class="modal-title fw-bold">🔑 Restablecer Contraseña: {{ resetPasswordForm.name }}</h5>
-              <button type="button" class="btn-close btn-close-white" @click="closeResetPasswordModal" aria-label="Cerrar"></button>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-ghost-inverse vg-btn-icon vg-btn-close" @click="closeResetPasswordModal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
               <div class="alert alert-info small mb-3">
@@ -962,8 +962,8 @@ export const AdminUsersTab = {
                 </div>
 
                 <div class="modal-footer px-0 pb-0 pt-3 border-top">
-                  <button type="button" class="btn btn-secondary" @click="closeResetPasswordModal">Cancelar</button>
-                  <button type="submit" class="btn btn-primary" :disabled="isSubmittingResetPassword">
+                  <button type="button" class="vg-btn vg-btn-secondary" @click="closeResetPasswordModal">Cancelar</button>
+                  <button type="submit" class="vg-btn vg-btn-primary" :disabled="isSubmittingResetPassword">
                     <span v-if="isSubmittingResetPassword" class="spinner-border spinner-border-sm me-1" role="status"></span>
                     <span>Actualizar Contraseña</span>
                   </button>
@@ -980,7 +980,7 @@ export const AdminUsersTab = {
           <div class="modal-content border-0 shadow">
             <div class="modal-header bg-danger text-white">
               <h5 class="modal-title fw-bold">⚠️ Confirmar Baja Lógica de Personal</h5>
-              <button type="button" class="btn-close btn-close-white" @click="closeDeactivateModal" aria-label="Cerrar"></button>
+              <button type="button" class="vg-btn vg-btn-ghost vg-btn-ghost-inverse vg-btn-icon vg-btn-close" @click="closeDeactivateModal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
               <!-- Alerta bloqueante si no puede desactivarse -->
@@ -1006,10 +1006,10 @@ export const AdminUsersTab = {
               </p>
             </div>
             <div class="modal-footer border-top">
-              <button type="button" class="btn btn-secondary" @click="closeDeactivateModal">Cancelar</button>
+              <button type="button" class="vg-btn vg-btn-secondary" @click="closeDeactivateModal">Cancelar</button>
               <button 
                 type="button" 
-                class="btn btn-danger" 
+                class="vg-btn vg-btn-danger" 
                 :disabled="!canConfirmDeactivate || isSubmittingDeactivate"
                 @click="confirmDeactivate"
               >

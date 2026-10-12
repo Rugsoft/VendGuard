@@ -134,8 +134,7 @@ export const CoordinatorPreventiveDashboard = {
         <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
           <button
             type="button"
-            class="vg-btn"
-            style="background: #2560ff; color: #ffffff; border: 1px solid #1a4cd8; height: 38px; padding: 0 16px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px; cursor: pointer;"
+            class="vg-btn vg-btn-primary"
             :disabled="isGenerating"
             @click="handleGenerateDue"
             data-testid="btn-generate-due"
@@ -146,8 +145,7 @@ export const CoordinatorPreventiveDashboard = {
 
           <button
             type="button"
-            class="vg-btn"
-            style="background: #ffffff; color: var(--color-ink, #1e293b); border: 1px solid var(--color-border, #cbd5e1); height: 38px; padding: 0 14px; font-weight: 600; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px; cursor: pointer;"
+            class="vg-btn vg-btn-secondary"
             @click="openSettingsModal"
             data-testid="btn-preventive-settings"
           >
@@ -156,8 +154,7 @@ export const CoordinatorPreventiveDashboard = {
 
           <button
             type="button"
-            class="vg-btn"
-            style="background: #f8fafc; color: var(--color-ink, #334155); border: 1px solid var(--color-border, #cbd5e1); height: 38px; padding: 0 12px; font-weight: 600; border-radius: var(--radius-interactive, 4px); cursor: pointer;"
+            class="vg-btn vg-btn-neutral"
             :disabled="isLoading"
             @click="loadDashboard"
             title="Actualizar datos"
@@ -171,12 +168,22 @@ export const CoordinatorPreventiveDashboard = {
       <!-- Alertas de estado / retroalimentación -->
       <div v-if="successMessage" style="background: #dcfce7; border: 1px solid #86efac; color: #166534; padding: 12px 16px; border-radius: var(--radius-interactive, 4px); font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
         <span>✅ {{ successMessage }}</span>
-        <button type="button" @click="successMessage = ''" style="background: none; border: none; font-size: 16px; cursor: pointer; color: #166534;">✕</button>
+        <button
+          type="button"
+          class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-success"
+          @click="successMessage = ''"
+          title="Cerrar el aviso"
+        >✕</button>
       </div>
 
       <div v-if="errorMessage" style="background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; padding: 12px 16px; border-radius: var(--radius-interactive, 4px); font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
         <span>⚠️ {{ errorMessage }}</span>
-        <button type="button" @click="errorMessage = ''" style="background: none; border: none; font-size: 16px; cursor: pointer; color: #991b1b;">✕</button>
+        <button
+          type="button"
+          class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-danger"
+          @click="errorMessage = ''"
+          title="Cerrar el aviso"
+        >✕</button>
       </div>
 
       <!-- 2. BANNER PRIORITARIO: Cuarentena Sanitaria Activa (Art. II / RF-PREV-04) -->
@@ -201,8 +208,7 @@ export const CoordinatorPreventiveDashboard = {
 
           <button
             type="button"
-            class="vg-btn"
-            style="background: #dc2626; color: #ffffff; border: 1px solid #b91c1c; border-radius: var(--radius-interactive, 4px); font-weight: 700; height: 36px; padding: 0 16px; cursor: pointer;"
+            class="vg-btn vg-btn-danger"
             @click="navigateToOrders('EXPIRED')"
           >
             Ver órdenes prioritarias

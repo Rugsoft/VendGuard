@@ -4,7 +4,10 @@
  * Cierra por congelacion el hallazgo §6 del informe de auditoria arquitectonica: los
  * componentes JS acumulan colores hex hardcodeados en lugar de consumir los tokens de
  * `public/assets/css/design-tokens.css`. La deuda no es un riesgo funcional, pero **crecia**:
- * 2.063 literales el 30/09 y 2.466 el 08/10 (+403 en ocho dias).
+ * 2.063 literales el 30/09, 2.466 el 08/10 (+403 en ocho dias), 2.277 el 12/10
+ * (-189 en cuatro dias: la migracion de los botones del panel) y 2.271 el 12/10
+ * (-6 mas al retirar la paleta heredada `.btn`: los dos botones de aviso del QR
+ * dejaron de pintar su propia caja y su propio hex en linea).
  *
  * Regla de conteo (deliberadamente simple y reproducible):
  *   - Raiz: `public/assets/js`, recursivo.
@@ -17,8 +20,13 @@
  *     token (`var(--color-...)`) o el autor debe subir el techo de forma visible en revision.
  *   - Si el contador BAJA (refactor por componentes), hay que bajar CEILING en el mismo commit
  *     para que la mejora quede fijada. La suite imprime el contador actual para ello.
- *   - El refactor completo (extraer los `style=` inline de los cinco componentes mas densos)
- *     sigue en backlog; esta suite solo evita que la deuda siga creciendo.
+ *   - Los dos tramos cerrados el 2026-10-12: los 149 botones del panel del coordinador no declaran
+ *     geometria ni color en linea (sus variantes viven en `design-tokens.css` y las vigila
+ *     `CoordinatorButtonVariantsGuardTest`) y la paleta heredada `.btn` se retiro del frontend
+ *     (plantillas `Admin*`, barra superior, portal de sede, vista del tecnico y paginas QR; lo vigila
+ *     `LegacyButtonPaletteRetirementTest`). Ambos bajaron el techo. Queda en backlog la geometria en
+ *     linea que todavia declaran algunos botones fuera del panel: esta suite solo evita que la deuda
+ *     vuelva a crecer.
  *
  * Dogma Vanilla: Node.js native ESM, zero external dependencies, zero network in tests.
  */
@@ -34,11 +42,12 @@ const EXCLUDED_DIR = 'vendor';
 const HEX_PATTERN = /#[0-9a-fA-F]{3,8}\b/g;
 
 /**
- * Techo congelado el 2026-10-08 con el contador medido en esa fecha y registrado en el acta
- * de triaje (`specs/technical/auditoria_arquitectura_triage.md` §6).
+ * Techo congelado el 2026-10-12 con el contador medido en esa fecha y registrado en el acta
+ * de triaje (`specs/technical/auditoria_arquitectura_triage.md` §6): 2.271 literales tras
+ * retirar la paleta heredada `.btn`.
  * Bajarlo es la direccion esperada; subirlo exige una decision explicita en el commit.
  */
-const CEILING = 2466;
+const CEILING = 2271;
 
 let assertions = 0;
 let failures = 0;

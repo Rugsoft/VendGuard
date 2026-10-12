@@ -399,7 +399,7 @@ export const QrReportView = {
             <a
               v-if="submittedTicket.refund.tracking_url"
               :href="submittedTicket.refund.tracking_url"
-              class="btn btn-secondary qr-btn-block"
+              class="vg-btn vg-btn-lg vg-btn-secondary w-100"
               data-testid="refund-tracking-link"
             >Consultar el estado de tu devolución</a>
           </section>
@@ -408,7 +408,7 @@ export const QrReportView = {
             <p>🙏 Gracias por tu colaboración para mantener el servicio en perfecto estado.</p>
           </div>
 
-          <button type="button" class="btn btn-primary qr-btn-block" @click="goHome">
+          <button type="button" class="vg-btn vg-btn-lg vg-btn-primary w-100" @click="goHome">
             Cerrar ventana
           </button>
         </div>
@@ -452,7 +452,7 @@ export const QrReportView = {
             <span>Teléfono de asistencia:</span>
             <a :href="'tel:' + location.contact_phone" class="qr-support-phone">📞 {{ location.contact_phone }}</a>
           </div>
-          <button type="button" class="btn btn-secondary qr-btn-block" @click="goHome">
+          <button type="button" class="vg-btn vg-btn-lg vg-btn-secondary w-100" @click="goHome">
             Ir a la portada del servicio
           </button>
         </div>
@@ -515,7 +515,7 @@ export const QrReportView = {
             <!-- Formulario Desplegable para Añadir Observación Adicional (EARS 4.2) -->
             <div class="qr-additional-comment-section">
               <div v-if="!showCommentForm && !commentSubmitted">
-                <button type="button" class="btn btn-secondary qr-btn-block" @click="showCommentForm = true" data-testid="btn-add-comment">
+                <button type="button" class="vg-btn vg-btn-lg vg-btn-secondary w-100" @click="showCommentForm = true" data-testid="btn-add-comment">
                   💬 Aportar comentario adicional o dinero retenido
                 </button>
               </div>
@@ -557,8 +557,8 @@ export const QrReportView = {
                 <div v-if="submitError" class="alert-error">{{ submitError }}</div>
 
                 <div class="qr-form-actions">
-                  <button type="button" class="btn btn-ghost" @click="showCommentForm = false">Cancelar</button>
-                  <button type="submit" class="btn btn-primary" :disabled="!commentText.trim() || isSubmitting">
+                  <button type="button" class="vg-btn vg-btn-ghost" @click="showCommentForm = false">Cancelar</button>
+                  <button type="submit" class="vg-btn vg-btn-primary" :disabled="!commentText.trim() || isSubmitting">
                     {{ isSubmitting ? 'Enviando...' : 'Añadir al ticket' }}
                   </button>
                 </div>
@@ -573,7 +573,7 @@ export const QrReportView = {
             <p class="qr-warranty-desc">
               Esta máquina fue reparada el {{ resolvedIncident?.resolved_at }}. Si la avería ha vuelto a reproducirse, puedes solicitar la reapertura inmediata.
             </p>
-            <button type="button" class="btn btn-warning qr-btn-block" @click="statusMode = 'CAN_REPORT'">
+            <button type="button" class="vg-btn vg-btn-lg vg-btn-warning w-100" @click="statusMode = 'CAN_REPORT'">
               🔄 El problema continúa / Solicitar reapertura
             </button>
           </div>
@@ -674,7 +674,7 @@ export const QrReportView = {
               <!-- Botón de Envío -->
               <button
                 type="submit"
-                class="btn btn-primary qr-btn-block qr-btn-submit"
+                class="vg-btn vg-btn-lg vg-btn-primary w-100"
                 :disabled="!isDescriptionValid || isSubmitting || (refundRequested && !refundClaimValid)"
                 data-testid="submit-report-btn"
               >
