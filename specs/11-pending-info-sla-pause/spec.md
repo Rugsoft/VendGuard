@@ -165,6 +165,32 @@ Establecer un **Estado Operativo Formal denominado "Pendiente de Información" (
 
 ---
 
+### Módulo RF-07: Visibilidad Operativa del Barrido Sanitario y Escalado por Contención Persistente (Art. II y Art. III)
+
+> **Origen (2026-10-12, T-PAUSE-41).** El barrido de fondo de RF-03.5 ya distingue un **aplazamiento por contención de fila** de un **fallo real** (T-PAUSE-39) y ya no espera al tenedor más de su cota medida (T-PAUSE-40), pero esa información vivía **sólo en la respuesta de la pasada** —un JSON de máquina y una línea de consola—. La Capa D de `docs/propuesta_politica_reintento_barrido_sanitario.md` dejaba escrito el hueco: *«cuando un candidato queda aplazado, ¿qué debe hacer el sistema para que la máquina no se quede publicada como operativa más de lo necesario?»*. La contención sostenida significa que la latencia de detección sanitaria se está **duplicando de verdad** (un escritor retiene filas de máquina), y hasta ahora nadie podía verlo: la Coordinación no tiene acceso a la respuesta del planificador. Este módulo convierte esa señal en **superficie operativa** y en **alerta de escalado cuando el aplazamiento persiste**, sin cambiar ni una regla de negocio del reloj ni la clasificación de T-PAUSE-39.
+
+* **RF-07.1 [EARS - Ubicuo]:**  
+  El sistema DEBE registrar **cada pasada** del barrido con su marca de apertura y de cierre, sus recuentos (candidatos, evaluados, máquinas en cuarentena, aplazamientos por contención y fallos reales) y su duración medida, de modo que la operación pueda distinguir tres situaciones que hasta ahora se veían igual desde el panel: *el barrido corre y no encuentra nada*, *el barrido corre y aplaza candidatos* y *el barrido no está corriendo*.
+  > **Por qué al final de la pasada.** El libro de la pasada se escribe **después** de consumir el reloj, no antes: la salvaguarda sanitaria (Art. II) no puede quedar condicionada a una tabla de observabilidad. Si el registro falla, las cuarentenas ya confirmadas quedan firmes e idempotentes y el fallo se propaga **en voz alta** (la pasada responde error y el planificador alerta); lo que nunca ocurre es que una máquina con riesgo térmico deje de cuarentenarse porque no se pudo apuntar la pasada en un libro.
+
+* **RF-07.2 [EARS - Dirigido por eventos]:**  
+  CUANDO un candidato quede **aplazado por contención de fila** (T-PAUSE-39), el sistema DEBE abrir —o reabrir— un **seguimiento por expediente** con la máquina, la marca de la primera detección, la de la última, el número de **pasadas consecutivas** en las que ese mismo expediente volvió a aplazarse y el número total de aplazamientos acumulados. La contención sigue sin contar como fallo (RF-03.5 de T-PAUSE-39 intacto) y sigue sin alertar al planificador: lo que cambia es que ahora **se puede ver**.
+
+* **RF-07.3 [EARS - Estado]:**  
+  MIENTRAS un expediente acumule **3 pasadas consecutivas** aplazado por contención —unos 45 minutos con la cadencia ratificada de 15 minutos, es decir un tenedor que no es una transacción corta—, el sistema DEBE marcarlo como **escalado** con la marca temporal del escalado, y la Coordinación DEBE verlo en su superficie con el aviso de que la latencia de detección sanitaria se está duplicando.
+  > **Por qué tres y no uno.** Un aplazamiento aislado es la prueba de que otro consumidor está actuando sobre la fila ahora mismo (T-PAUSE-39): es operación normal y ya está declarado como tal. Tres pasadas consecutivas —45 minutos— ya no pueden explicarse por el tenedor corto medido (p95 de **2,54 ms**, T-PAUSE-40): son un escritor **reteniendo** filas de máquina, y eso sí exige que alguien mire.
+
+* **RF-07.4 [EARS - Excepcional]:**  
+  SI una sola pasada publica **más de 5 aplazamientos por contención**, el sistema DEBE elevar la señal a **escalado de parque** en la superficie del coordinador, porque esa cifra no describe un solape casual sino un escritor sosteniendo filas de varias máquinas del mismo parque.
+
+* **RF-07.5 [EARS - Ubicuo]:**  
+  El escalado DEBE ser **auto-resolutivo**: CUANDO una pasada posterior ya no aplaza a ese expediente, el sistema DEBE cerrar su seguimiento y la alerta DEBE desaparecer sin intervención manual, conservando el rastro de lo ocurrido. La superficie DEBE distinguir además el estado **`CLEAR`** (ningún seguimiento abierto), **`MONITORED`** (aplazamientos vivos, ninguno escalado) y **`ESCALATED`** (al menos un expediente escalado o un escalado de parque).
+
+* **RF-07.6 [EARS - Estado / Segregación - Art. V.4]:**  
+  La superficie de RF-07 es **exclusivamente interna**: vive bajo el rol `COORDINATOR` y no se publica en el portal de sede ni en el escaneo ciudadano. El ciudadano sigue viendo el estado neutro de RF-06.1 y la sede, su propia máquina: el detalle de contención del barrido es instrumentación de operación (qué fila sostiene qué escritor), no información pública.
+
+---
+
 ## 5. Requisitos No Funcionales (RNF)
 
 * **RNF-01 (Precisión en el Cómputo de Tiempos):**  
@@ -221,9 +247,10 @@ La especificación se considerará formalmente cumplida cuando:
 7. El seguimiento ciudadano por código QR oculte totalmente el estado de pausa y motivos internos, mostrando un estado público neutro (Art. V.4).
 8. Quede bloqueada cualquier transición directa desde `PENDING_INFO` hacia `RESOLVED` sin pasar por `IN_PROGRESS` (Art. V.1).
 9. Se verifiquen al 100% todos los requisitos funcionales (RF-01 a RF-06) y no funcionales (RNF-01 a RNF-06) con pruebas automatizadas completas.
+10. La Coordinación disponga de una **superficie operativa del barrido** (RF-07) que distinga «no hay nada que hacer» de «el barrido no está corriendo», muestre los aplazamientos por contención con sus pasadas consecutivas y **escale a alerta cuando el aplazamiento persiste** (3 pasadas consecutivas o más de 5 aplazamientos en una pasada), desapareciendo sola cuando la contención se resuelve.
 
 ---
 
 ## 9. Dudas Abiertas
 
-* **Ninguna duda abierta.** Todas las definiciones operativas, actores autorizados, causas tipificadas, cálculo de SLA comercial, doble reloj biológico con cuarentena automática (Art. II), límites de inactividad de 72 horas hábiles, preservación de estado de máquina y reintegros (Art. V.1) y visibilidad pública segregada han sido unánimemente acordadas, validadas y blindadas tras la auditoría QA.
+* **Ninguna duda abierta** sobre lo especificado en RF-01 a RF-07. Queda **fuera de este incremento** la Capa B de `docs/propuesta_politica_reintento_barrido_sanitario.md` —el reintento acotado dentro de la pasada (1 + 2 intentos con espera creciente y jitter, decisión **D1**)—: sigue siendo una propuesta pendiente de ratificación del Product Owner. Lo entregado en RF-07 es la **visibilidad** de esa capa (Capa D), no el reintento. La **decisión D4** queda ratificada en su recomendación: la contención —persista o no— **no** recibe un código de salida propio en el planificador (el escalado vive en la superficie del coordinador, que es donde alguien puede actuar sobre él). Todas las definiciones operativas, actores autorizados, causas tipificadas, cálculo de SLA comercial, doble reloj biológico con cuarentena automática (Art. II), límites de inactividad de 72 horas hábiles, preservación de estado de máquina y reintegros (Art. V.1) y visibilidad pública segregada han sido unánimemente acordadas, validadas y blindadas tras la auditoría QA.

@@ -1012,5 +1012,77 @@ y la pasada siguiente la latencia queda acotada en «4 h naturales + hasta 15 mi
 * **Cota de espera de bloqueo de la pasada (T-PAUSE-40):** durante la pasada, la sesión del barrido usa una **cota de espera de bloqueo de 2 s** (`SanitaryClockSweepService::LOCK_WAIT_BUDGET_SECONDS`), muy por debajo del valor de servidor (50 s), y la **restituye** al terminar —sin elevar nunca una cota ya más estricta—. La justificación es medida, no elegida a ojo: la transacción ganadora del cierre (la que sostiene la fila) tarda **p50 1,68 ms · p95 2,54 ms · máx 3,97 ms** sobre **120 ejecuciones reales** del camino de producción, así que la cota de 2 s es ~787× el p95 y un tenedor legítimo sigue resolviéndose **esperando**; lo que cambia es que un tenedor que se alarga deja de bloquear la pasada (hasta 50 s por fila) y se convierte en un **aplazamiento visible** (`contended`). Peor caso declarado de la pasada: `candidates × cota` (500 × 2 s ≈ 16,7 min teóricos, frente a ~7 h con el valor de servidor), con la regla de escalado de la contención avisando mucho antes.
 * **Respuesta de Error (`401 Unauthorized`):** credencial ausente o inválida, o controlador invocado sin pasar por el middleware (código `UNAUTHORIZED`).
 * **Efectos y garantías:** la transición del estado sanitario es **idempotente (compare-and-set)** y cada candidato se evalúa dentro de su propia unidad de trabajo, de modo que el estado y su evidencia inmutable caen juntos (Art. III) y dos consumidores simultáneos —este barrido y la puerta sanitaria del cierre (§5.4.1)— dejan una sola cuarentena y un solo evento (exclusión mutua certificada con **dos conexiones PDO reales** por `SanitaryClockConsumerRaceTest`: carrera en los dos sentidos, contención por fila con `1205` y un solo rastro por máquina). Un fallo de una máquina no aborta el lote: viaja en `failures` y el equivalente de línea de comandos (`bin/sanitary_clock_sweep.php`) termina con código distinto de cero para que el planificador pueda alertar.
-* **Regla de alerta (una sola en el código):** `SanitaryClockSweepResultDto::requiresOperatorAttention()` es la única autoridad sobre qué enciende el planificador —`true` sólo con fallos reales—, y el CLI deriva de ella su código de salida (`0` sin fallos reales, `1` con ellos). La política de reintento y de escalado de la contención se propone en `docs/propuesta_politica_reintento_barrido_sanitario.md`.
+* **Regla de alerta (una sola en el código):** `SanitaryClockSweepResultDto::requiresOperatorAttention()` es la única autoridad sobre qué enciende el planificador —`true` sólo con fallos reales—, y el CLI deriva de ella su código de salida (`0` sin fallos reales, `1` con ellos). La contención **no** enciende esa alerta, persista o no: su escalado vive en la superficie de §6.3, que es donde alguien puede actuar sobre él (decisión D4 de `docs/propuesta_politica_reintento_barrido_sanitario.md`, ratificada en su recomendación).
+* **Libro de la pasada (T-PAUSE-41):** cada pasada queda registrada con su apertura, su cierre, sus recuentos y su duración, y cada candidato aplazado abre un seguimiento por expediente con sus **pasadas consecutivas**. El registro se escribe **después** de consumir el reloj: la observabilidad nunca puede impedir una cuarentena (Art. II). Si el libro no se puede escribir, la pasada falla en voz alta (`failures`/`500`/`exit 1` según el canal) y las cuarentenas ya confirmadas quedan firmes e idempotentes.
 * **Equivalente de línea de comandos:** `php bin/sanitary_clock_sweep.php` (mismos datos y mismos códigos de salida) para programadores que no disponen de HTTP.
+
+### 6.3 `GET /api/coordinator/sanitary-sweep/contention` (Superficie Operativa del Barrido · T-PAUSE-41)
+
+Superficie de **sólo lectura** de la contención del barrido de §6.2 (RF-07): responde qué pasadas se han registrado, cuánta contención hubo en las últimas 24 h y qué expedientes siguen **aplazados**, con la alerta de escalado encendida cuando el aplazamiento persiste.
+
+* **Seguridad:** `InternalAuthMiddleware(UserRole::COORDINATOR)`. Es instrumentación interna —identifica máquinas, sedes y expedientes frente a un escritor que retiene filas— y **no** se publica en el portal de sede ni en el escaneo ciudadano (Art. V.4).
+* **Respuesta Exitosa (`200 OK`):**
+```json
+{
+  "success": true,
+  "data": {
+    "generated_at": "2026-10-12 18:20:00",
+    "cadence_minutes": 15,
+    "escalation": {
+      "level": "ESCALATED",
+      "requires_attention": true,
+      "consecutive_passes_threshold": 3,
+      "per_pass_threshold": 5,
+      "open_contentions": 2,
+      "escalated_contentions": 1,
+      "level_label": "Contención persistente: la detección sanitaria se está retrasando"
+    },
+    "sweep": {
+      "last_pass": {
+        "pass_id": 412,
+        "started_at": "2026-10-12 18:15:00",
+        "finished_at": "2026-10-12 18:15:01",
+        "candidates": 4,
+        "evaluated": 2,
+        "quarantined_count": 1,
+        "contended_count": 2,
+        "failures_count": 0,
+        "duration_ms": 812.34
+      },
+      "minutes_since_last_pass": 5,
+      "is_stale": false,
+      "window_hours": 24,
+      "passes_in_window": 96,
+      "passes_with_contention": 3,
+      "deferrals_in_window": 7,
+      "failures_in_window": 0,
+      "quarantines_in_window": 31,
+      "contention_rate_percent": 3.13
+    },
+    "contentions": [
+      {
+        "id": 9,
+        "incident_id": 142,
+        "ticket_code": "INC-2026-00142",
+        "machine_id": 14,
+        "machine_code": "VEND-0101",
+        "location_name": "Hospital del Mar",
+        "floor_wing": "Planta Baja - Urgencias",
+        "incident_status": "IN_PROGRESS",
+        "machine_sanitary_status": "OK",
+        "first_detected_at": "2026-10-12 17:15:00",
+        "last_detected_at": "2026-10-12 18:15:00",
+        "consecutive_passes": 5,
+        "total_passes": 5,
+        "escalated": true,
+        "escalated_at": "2026-10-12 17:45:00",
+        "age_minutes": 65,
+        "minutes_since_last_detection": 5
+      }
+    ]
+  }
+}
+```
+* **Semántica de las claves:** `escalation.level` vale **`CLEAR`** (sin seguimientos abiertos), **`MONITORED`** (hay aplazamientos vivos, ninguno persistente) o **`ESCALATED`** (algún expediente alcanzó el umbral de pasadas consecutivas, o la última pasada superó el umbral de parque de 5 aplazamientos). `requires_attention` es la **única autoridad** de la alerta. `sweep.last_pass` es la última pasada del libro; `minutes_since_last_pass` es `null` cuando nunca se ha registrado una pasada y `is_stale` se enciende cuando han transcurrido más de **dos cadencias** sin pasada, porque *el barrido no está corriendo* es una situación distinta de *no encuentra nada*. `sweep.window` agrega las últimas 24 h del libro (pasadas, pasadas con aplazamiento, aplazamientos, fallos reales, cuarentenas y la tasa de contención) para poder ver **tendencia** antes de que escale. `contentions` lista los seguimientos **abiertos** —los que una pasada posterior ya no volvió a aplazar quedan cerrados y no viajan—, ordenados por escalado y antigüedad, con el expediente, la máquina, la sede, la planta, el estado del expediente, el estado sanitario de la máquina y las pasadas consecutivas.
+* **Auto-resolución:** el escalado **no** exige acuse de recibo ni se apaga a mano: la primera pasada que ya no aplaza al expediente cierra su seguimiento y la alerta desaparece sola, conservando el rastro en el libro (Art. III). El acuse explícito del coordinador queda fuera de alcance de este incremento.
+* **Respuesta de Error:** `401 Unauthorized` (`UNAUTHORIZED`) sin credencial válida, `403 Forbidden` (`FORBIDDEN`) con un token de rol distinto de `COORDINATOR` y `500 Internal Server Error` (`SWEEP_VISIBILITY_UNAVAILABLE`) si el libro de pasadas no se puede leer. Este último describe **sólo** un fallo de lectura de la superficie: la salvaguarda sanitaria no está afectada —el barrido sigue evaluando candidatos y activando cuarentenas con el mismo reloj—, y así viaja en su propio mensaje para que nadie confunda un panel vacío con un parque sin vigilancia.

@@ -46,6 +46,7 @@ import { AdminUsersTab } from '../components/AdminUsersTab.js';
 import { CoordinatorPreventiveDashboard } from '../components/CoordinatorPreventiveDashboard.js';
 import { CoordinatorPreventiveOrdersTab } from '../components/CoordinatorPreventiveOrdersTab.js';
 import { CoordinatorPreventiveSettingsModal } from '../components/CoordinatorPreventiveSettingsModal.js';
+import { CoordinatorSanitarySweepPanel } from '../components/CoordinatorSanitarySweepPanel.js';
 import { CoordinatorSparePartsTab } from '../components/CoordinatorSparePartsTab.js';
 import { CoordinatorSparePartsAnalyticsTab } from '../components/CoordinatorSparePartsAnalyticsTab.js';
 import { CoordinatorTerritorialMapTab } from '../components/CoordinatorTerritorialMapTab.js';
@@ -69,6 +70,7 @@ export const CoordinatorDashboardView = {
     CoordinatorPreventiveDashboard,
     CoordinatorPreventiveOrdersTab,
     CoordinatorPreventiveSettingsModal,
+    CoordinatorSanitarySweepPanel,
     CoordinatorSparePartsTab,
     CoordinatorSparePartsAnalyticsTab,
     CoordinatorTerritorialMapTab,
@@ -82,7 +84,7 @@ export const CoordinatorDashboardView = {
       // Navigation Tabs (RF-FLEET-01, RF-03, RF-05, RF-PREV-02, RF-REP-01, RF-REP-09)
       activeTab: 'incidents', // 'incidents' | 'fleet' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'refunds' | 'admin' | 'metrics'
       activeAdminSubTab: 'locations', // 'locations' | 'machines' | 'users'
-      activePreventiveSubTab: 'dashboard', // 'dashboard' | 'orders'
+      activePreventiveSubTab: 'dashboard', // 'dashboard' | 'orders' | 'sweep'
       showPreventiveSettingsModal: false,
 
       // Login Form
@@ -164,6 +166,13 @@ export const CoordinatorDashboardView = {
       // ficha de detalle comparten el mismo hilo con canal 'COORDINATOR'.
       showCommentsModal: false,
       selectedCommentIncident: null,
+
+      // Superficie operativa del barrido sanitario (Módulo 11: T-PAUSE-41, RF-07). La
+      // vista es la ÚNICA que pide el payload y lo pasa al panel: sin dos verdades ni dos
+      // consultas por pantalla. Sobrevive al refresco al entrar en la sub-pestaña.
+      sweepVisibility: null,
+      isLoadingSweepVisibility: false,
+      sweepVisibilityError: '',
 
       // QR Label & Batch Print State (T-QR-14)
       showQrLabelModal: false,
@@ -291,12 +300,31 @@ export const CoordinatorDashboardView = {
         unassigned: unassigned.length,
         pendingParts: pendingParts.length
       };
+    },
+
+    /**
+     * Escalated sanitary sweep follow-ups (Módulo 11: T-PAUSE-41). Drives the badge of the
+     * preventive sub-tab: the count comes from the backend decision (`requires_attention`),
+     * never from a rule re-derived in the browser.
+     */
+    sweepEscalationCount() {
+      if (this.sweepVisibility?.escalation?.requires_attention !== true) {
+        return 0;
+      }
+
+      return Number(this.sweepVisibility?.escalation?.escalated_contentions || 0) || 1;
+    },
+    sweepOpenContentionCount() {
+      return Number(this.sweepVisibility?.escalation?.open_contentions || 0);
     }
   },
   mounted() {
     if (this.isAuthenticated) {
       this.loadIncidents();
       this.loadTechnicians();
+      // El latido del barrido sanitario se pide al montar, no al abrir la sub-pestaña: el
+      // distintivo de escalado tiene que verse ANTES de entrar a mirar (RF-07.3).
+      this.loadSanitarySweepVisibility();
       this.startPolling();
     }
   },
@@ -345,6 +373,7 @@ export const CoordinatorDashboardView = {
         this.loginPassword = '';
         await this.loadIncidents();
         this.loadTechnicians();
+        this.loadSanitarySweepVisibility();
         this.startPolling();
       } catch (err) {
         this.loginError = err.message || 'Credenciales incorrectas o usuario inactivo.';
@@ -376,6 +405,29 @@ export const CoordinatorDashboardView = {
           this.isLoading = false;
           store.setLoading(false);
         }
+      }
+    },
+
+    /**
+     * Reads the sanitary sweep visibility surface (Módulo 11: T-PAUSE-41, RF-07).
+     *
+     * Single source of truth of the panel: the payload feeds both the escalation badge of
+     * the sub-tab and the panel itself, so the coordinator can see that something needs
+     * attention without opening the sub-tab. A read failure never breaks the triage queue:
+     * it is reported inside the panel (and the sanitary safeguard is unaffected either
+     * way, which the backend states in its own message).
+     */
+    async loadSanitarySweepVisibility() {
+      this.isLoadingSweepVisibility = true;
+      this.sweepVisibilityError = '';
+
+      try {
+        const response = await api.coordinator.getSanitarySweepContention();
+        this.sweepVisibility = response?.data || response || null;
+      } catch (err) {
+        this.sweepVisibilityError = err.message || 'Error al leer la superficie del barrido sanitario.';
+      } finally {
+        this.isLoadingSweepVisibility = false;
       }
     },
 
@@ -1762,6 +1814,25 @@ export const CoordinatorDashboardView = {
                 >
                   📋 Listado de Órdenes
                 </button>
+                <!-- Superficie operativa del barrido sanitario (T-PAUSE-41, RF-07): el distintivo
+                     de escalado se ve sin entrar a la sub-pestaña, igual que la insignia de SLA
+                     del triaje. -->
+                <button
+                  type="button"
+                  class="vg-btn"
+                  :class="activePreventiveSubTab === 'sweep' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+                  @click="activePreventiveSubTab = 'sweep'"
+                  data-testid="subtab-preventive-sweep"
+                >
+                  🩺 Barrido Sanitario
+                  <span
+                    v-if="sweepEscalationCount > 0"
+                    data-testid="subtab-preventive-sweep-badge"
+                    style="background-color: var(--color-error); color: var(--color-surface-card); font-size: 11px; padding: 1px 6px; border-radius: 10px;"
+                  >
+                    {{ sweepEscalationCount }}
+                  </span>
+                </button>
               </div>
             </div>
             <div style="font-size: 12px; color: #64748b;">
@@ -1783,6 +1854,18 @@ export const CoordinatorDashboardView = {
           v-else-if="activePreventiveSubTab === 'orders'"
           @order-assigned="loadIncidents(true)"
           @order-cancelled="loadIncidents(true)"
+          @open-incident-detail="openIncidentDetailFromPreventive"
+        />
+
+        <!-- Subpestaña 3: Superficie Operativa del Barrido Sanitario (T-PAUSE-41, RF-07).
+             Presentación pura: la vista es la única que consulta y el panel solo pinta y
+             pide recarga. Abrir la ficha reutiliza el modal de detalle ya montado. -->
+        <CoordinatorSanitarySweepPanel
+          v-else-if="activePreventiveSubTab === 'sweep'"
+          :visibility="sweepVisibility"
+          :is-loading="isLoadingSweepVisibility"
+          :error-message="sweepVisibilityError"
+          @refresh="loadSanitarySweepVisibility"
           @open-incident-detail="openIncidentDetailFromPreventive"
         />
       </div>

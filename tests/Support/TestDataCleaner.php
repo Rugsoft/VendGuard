@@ -37,6 +37,12 @@ final class TestDataCleaner
         'incidents',
         'spare_parts',
         'preventive_orders',
+        // Latido del barrido sanitario (T-PAUSE-41): es un libro operativo sin
+        // claves foráneas —no cuelga de `incidents`, a propósito: registra pasadas,
+        // no expedientes—, así que el grafo de FKs no puede alcanzarlo y entra como
+        // raíz propia. Dejar sus filas entre suites haría que la ventana de
+        // tendencia de una prueba contase pasadas de otra.
+        'sanitary_sweep_passes',
     ];
 
     /**
@@ -67,6 +73,7 @@ final class TestDataCleaner
         'unclaimed_cash_findings',
         'preventive_order_items',
         'sanitary_certificates',
+        'sanitary_sweep_contentions',
         'spare_part_compatibilities',
     ];
 

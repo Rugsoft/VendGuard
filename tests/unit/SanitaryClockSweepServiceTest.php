@@ -26,10 +26,16 @@ declare(strict_types=1);
  *    de modo que el estado sanitario y su evidencia caen juntos.
  * 6. El DTO publica exactamente las claves del contrato documentado en
  *    `specs/11-pending-info-sla-pause/plan.md` §2.5 y en `api_contracts.md`.
+ * 7. La pasada se publica para la operación (T-PAUSE-41, RF-07): cada pasada deja
+ *    su libro con los recuentos del resumen y cada aplazamiento abre -o continúa-
+ *    un seguimiento por expediente con sus pasadas consecutivas, que escala a la
+ *    tercera. El libro se escribe DESPUÉS de consumir el reloj: si su escritura
+ *    falla, el fallo se propaga, pero la cuarentena ya confirmada sigue escrita.
  *
  * Dogma Vanilla: PHP 8.2+ puro, sin librerías externas ni red. El puerto de
- * candidatos, el repositorio de ajustes, la unidad de trabajo y la auditoría se
- * sustituyen por dobles en memoria; el reloj es el servicio real.
+ * candidatos, el repositorio de ajustes, la unidad de trabajo, la auditoría y el
+ * libro de pasadas se sustituyen por dobles en memoria; el reloj, la política del
+ * escalado y el servicio del barrido son los reales.
  */
 
 require_once __DIR__ . '/../bootstrap.php';
@@ -41,11 +47,15 @@ use VendGuard\Application\Service\SanitaryClockSweepService;
 use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\PreventiveSetting;
+use VendGuard\Core\Domain\Model\SanitarySweepContention;
+use VendGuard\Core\Domain\Model\SanitarySweepPass;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LockWaitBudgetInterface;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SanitaryClockCandidateRepositoryInterface;
+use VendGuard\Core\Domain\Repository\SanitarySweepVisibilityRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
+use VendGuard\Core\Service\SanitarySweepEscalationPolicy;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
@@ -238,6 +248,144 @@ final class SweepAuditRepo implements AuditLogRepositoryInterface
  * invoca, ejecuta la operación como haría el adaptador real y deja constancia de que
  * restituyó la sesión incluso cuando la operación estalla.
  */
+/**
+ * Doble del libro de pasadas y de los seguimientos de contención (T-PAUSE-41).
+ *
+ * Reproduce el contrato del puerto en memoria: la clave del seguimiento es el
+ * expediente (un episodio por expediente, reutilizando la fila), la resolución se
+ * hace por IDENTIDAD —se cierra lo que la pasada no aplazó, sin comparar marcas de
+ * tiempo— y la escritura del libro puede hacerse fallar a propósito para certificar
+ * que el barrido la propaga en voz alta en lugar de tragársela.
+ */
+final class SweepVisibilityRepo implements SanitarySweepVisibilityRepositoryInterface
+{
+    /** @var list<SanitarySweepPass> Pasadas registradas, en orden. */
+    public array $passes = [];
+
+    /** @var array<int, SanitarySweepContention> Seguimiento vigente por expediente. */
+    public array $contentions = [];
+
+    /** @var list<array{detected: list<int>, resolved_at: string}> Cierres ejecutados. */
+    public array $resolutions = [];
+
+    /** Lecturas del seguimiento vigente (una por aplazamiento). */
+    public int $reads = 0;
+
+    /** Cuando es `true`, el libro no se puede escribir: reproduce el fallo de observabilidad. */
+    public bool $failOnRecordPass = false;
+
+    /**
+     * Cuando es `true`, el seguimiento no se puede escribir porque **el mismo tenedor**
+     * que provocó el aplazamiento sigue bloqueando una fila padre: es el `1205` real de
+     * la observación, que no puede teñir la pasada de rojo.
+     */
+    public bool $failOnSaveWithLock = false;
+
+    /** Cuando es `true`, el seguimiento falla por algo que NO es un bloqueo (observabilidad rota). */
+    public bool $failOnSaveGeneric = false;
+
+    public function recordPass(SanitarySweepPass $pass): SanitarySweepPass
+    {
+        if ($this->failOnRecordPass) {
+            throw new RuntimeException('Fallo de observabilidad simulado al registrar la pasada.');
+        }
+
+        $stored = new SanitarySweepPass(
+            id: count($this->passes) + 1,
+            startedAt: $pass->startedAt,
+            finishedAt: $pass->finishedAt,
+            candidates: $pass->candidates,
+            evaluated: $pass->evaluated,
+            quarantinedCount: $pass->quarantinedCount,
+            contendedCount: $pass->contendedCount,
+            failuresCount: $pass->failuresCount,
+            durationMs: $pass->durationMs,
+        );
+        $this->passes[] = $stored;
+
+        return $stored;
+    }
+
+    public function findContentionByIncident(int $incidentId): ?SanitarySweepContention
+    {
+        $this->reads++;
+
+        return $this->contentions[$incidentId] ?? null;
+    }
+
+    public function saveContentionDetection(SanitarySweepContention $contention): void
+    {
+        if ($this->failOnSaveWithLock) {
+            $exception = new PDOException(
+                'SQLSTATE[HY000]: General error: 1205 Lock wait timeout exceeded; try restarting transaction'
+            );
+            $exception->errorInfo = ['HY000', 1205, 'Lock wait timeout exceeded; try restarting transaction'];
+
+            throw $exception;
+        }
+
+        if ($this->failOnSaveGeneric) {
+            throw new RuntimeException('Fallo de observabilidad simulado al escribir el seguimiento.');
+        }
+
+        $this->contentions[$contention->incidentId] = $contention;
+    }
+
+    public function resolveContentionsNotDetectedIn(array $detectedIncidentIds, DateTimeImmutable $resolvedAt): int
+    {
+        $detected = array_map('intval', array_values($detectedIncidentIds));
+        $this->resolutions[] = [
+            'detected' => $detected,
+            'resolved_at' => $resolvedAt->format('Y-m-d H:i:s'),
+        ];
+
+        $closed = 0;
+        foreach ($this->contentions as $incidentId => $contention) {
+            if (!$contention->isOpen() || in_array((int)$incidentId, $detected, true)) {
+                continue;
+            }
+
+            $this->contentions[$incidentId] = new SanitarySweepContention(
+                id: $contention->id,
+                incidentId: $contention->incidentId,
+                machineId: $contention->machineId,
+                firstDetectedAt: $contention->firstDetectedAt,
+                lastDetectedAt: $contention->lastDetectedAt,
+                consecutivePasses: $contention->consecutivePasses,
+                totalPasses: $contention->totalPasses,
+                escalatedAt: $contention->escalatedAt,
+                resolvedAt: $resolvedAt->format('Y-m-d H:i:s'),
+            );
+            $closed++;
+        }
+
+        return $closed;
+    }
+
+    public function findOpenContentions(): array
+    {
+        return array_values(array_filter(
+            $this->contentions,
+            static fn (SanitarySweepContention $contention): bool => $contention->isOpen()
+        ));
+    }
+
+    public function findLatestPass(): ?SanitarySweepPass
+    {
+        return $this->passes === [] ? null : $this->passes[count($this->passes) - 1];
+    }
+
+    public function findPassesSince(DateTimeImmutable $since): array
+    {
+        $from = $since->format('Y-m-d H:i:s');
+
+        return array_values(array_filter(
+            $this->passes,
+            static fn (SanitarySweepPass $pass): bool => $pass->startedAt >= $from
+        ));
+    }
+}
+
 final class SweepLockBudget implements LockWaitBudgetInterface
 {
     /** @var list<int> Cotas recibidas, en orden. */
@@ -349,7 +497,8 @@ $makeIncident = static function (
  *   settings: SweepSettingsRepo,
  *   audit: SweepAuditRepo,
  *   transactions: SweepTransactionManager,
- *   budget: SweepLockBudget
+ *   budget: SweepLockBudget,
+ *   visibility: SweepVisibilityRepo
  * }
  */
 $makeBench = static function (): array {
@@ -357,18 +506,27 @@ $makeBench = static function (): array {
     $settings = new SweepSettingsRepo();
     $audit = new SweepAuditRepo();
     $transactions = new SweepTransactionManager();
+    $visibility = new SweepVisibilityRepo();
 
     $pauseService = new IncidentPauseService($settings, new AuditLogger($audit));
 
     $budget = new SweepLockBudget();
 
     return [
-        'service' => new SanitaryClockSweepService($candidates, $pauseService, $transactions, $budget),
+        'service' => new SanitaryClockSweepService(
+            $candidates,
+            $pauseService,
+            $transactions,
+            $budget,
+            $visibility,
+            new SanitarySweepEscalationPolicy()
+        ),
         'candidates' => $candidates,
         'settings' => $settings,
         'audit' => $audit,
         'transactions' => $transactions,
         'budget' => $budget,
+        'visibility' => $visibility,
     ];
 };
 
@@ -865,6 +1023,228 @@ $assert(
     && str_contains($sweepSource, 'runWithLockWaitBudget')
     && !str_contains($sweepSource, 'innodb_lock_wait_timeout'),
     'El servicio debe depender del puerto, no ejecutar SET SESSION él mismo'
+);
+
+// =====================================================================
+// GRUPO 8: Libro de la pasada y seguimiento de la contención (T-PAUSE-41)
+// =====================================================================
+echo "\n--- Grupo 8: Libro de pasadas y escalado de la contención ---\n";
+
+// 8.1/8.2 Cada pasada deja su libro con los recuentos EXACTOS del resumen y cada
+// aplazamiento abre su seguimiento; el candidato que sí se evalúa no abre ninguno.
+$bench = $makeBench();
+$bench['settings']->register(10, 'PERISHABLE_FOOD');
+$bench['settings']->register(11, 'PERISHABLE_FOOD');
+$bench['candidates']->candidates = [
+    $makeIncident(180, 'INC-2026-00180', 10, $agedOpening(18000)),
+    $makeIncident(181, 'INC-2026-00181', 11, $agedOpening(18000)),
+];
+$bench['transactions']->throwPdoOnTransaction = 2;
+$recorded = $bench['service']->sweep();
+
+$assert(
+    '8.1 La pasada queda en el libro con los recuentos del resumen y su duración medida',
+    count($bench['visibility']->passes) === 1
+    && $bench['visibility']->passes[0]->candidates === $recorded->candidates
+    && $bench['visibility']->passes[0]->evaluated === $recorded->evaluated
+    && $bench['visibility']->passes[0]->quarantinedCount === count($recorded->quarantined)
+    && $bench['visibility']->passes[0]->contendedCount === $recorded->contendedCount
+    && $bench['visibility']->passes[0]->failuresCount === $recorded->failuresCount
+    && $bench['visibility']->passes[0]->durationMs === $recorded->durationMs
+    && $bench['visibility']->passes[0]->finishedAt !== null,
+    json_encode($bench['visibility']->passes[0]->toArray(), JSON_UNESCAPED_UNICODE)
+);
+
+$contention = $bench['visibility']->contentions[181] ?? null;
+
+$assert(
+    '8.2 El aplazamiento abre su seguimiento (máquina y una pasada) y el candidato evaluado no abre nada',
+    $contention instanceof SanitarySweepContention
+    && $contention->machineId === 11
+    && $contention->consecutivePasses === 1
+    && $contention->totalPasses === 1
+    && $contention->isEscalated() === false
+    && $contention->isOpen() === true
+    && !isset($bench['visibility']->contentions[180]),
+    json_encode($contention?->toArray(new DateTimeImmutable('now', $madrid)) ?? [], JSON_UNESCAPED_UNICODE)
+);
+
+// 8.3 La persistencia no decide el escalado: lo hace la política del dominio, que es la
+// única autoridad del umbral (el barrido sólo la consulta).
+$assert(
+    '8.3 El barrido consulta la política del escalado y no duplica su umbral',
+    str_contains($sweepSource, 'SanitarySweepEscalationPolicy')
+    && str_contains($sweepSource, 'nextDetection')
+    && !str_contains($sweepSource, 'CONSECUTIVE_PASSES_THRESHOLD'),
+    'El umbral debe vivir sólo en la política (T-PAUSE-41)'
+);
+
+// 8.4 Tres pasadas consecutivas del MISMO expediente aplazado: las dos primeras no escalan y
+// la tercera sella el escalado. El seguimiento se reutiliza fila a fila, no se acumula.
+$bench = $makeBench();
+$bench['settings']->register(20, 'PERISHABLE_FOOD');
+$bench['settings']->failWrites = true; // el reloj nunca puede escribir: siempre aplazado
+$bench['candidates']->candidates = [$makeIncident(190, 'INC-2026-00190', 20, $agedOpening(18000))];
+
+$firstPass = $bench['service']->sweep();
+$secondPass = $bench['service']->sweep();
+$secondState = $bench['visibility']->contentions[190];
+$thirdPass = $bench['service']->sweep();
+$thirdState = $bench['visibility']->contentions[190];
+
+$assert(
+    '8.4 La contención repetida acumula pasadas consecutivas y escala a la tercera',
+    $firstPass->contendedCount === 1 && $secondPass->contendedCount === 1 && $thirdPass->contendedCount === 1
+    && $secondState->consecutivePasses === 2
+    && $secondState->isEscalated() === false
+    && $thirdState->consecutivePasses === 3
+    && $thirdState->isEscalated() === true
+    && $thirdState->escalatedAt !== null
+    && $thirdState->totalPasses === 3,
+    sprintf(
+        'estados: %d no escalado=%s, %d escalado=%s, escalated_at=%s',
+        $secondState->consecutivePasses,
+        var_export($secondState->isEscalated(), true),
+        $thirdState->consecutivePasses,
+        var_export($thirdState->isEscalated(), true),
+        (string)$thirdState->escalatedAt
+    )
+);
+
+// 8.5 La pasada que ya NO aplaza cierra el seguimiento, y el aplazamiento posterior arranca un
+// episodio nuevo: contadores del episodio a 1 y acumulado histórico intacto.
+$bench['settings']->failWrites = false;
+$recovered = $bench['service']->sweep();
+$closedState = $bench['visibility']->contentions[190];
+$closingResolution = $bench['visibility']->resolutions[count($bench['visibility']->resolutions) - 1];
+
+$assert(
+    '8.5 Una pasada que ya no aplaza cierra el seguimiento y la alerta desaparece sola',
+    $recovered->contendedCount === 0
+    && $closedState->isOpen() === false
+    && $bench['visibility']->findOpenContentions() === []
+    && $closingResolution['detected'] === [],
+    sprintf(
+        'resoluciones: %s',
+        json_encode($bench['visibility']->resolutions, JSON_UNESCAPED_UNICODE)
+    )
+);
+
+// La máquina volvió a servicio (reinspección del módulo 05) y un nuevo escritor la retiene: el
+// reloj vuelve a aplazarla. El retroceso a `OK` es necesario para que el escenario sea posible:
+// con la máquina ya en cuarentena el reloj confirma la cuarentena sin escribir (compare-and-set)
+// y no habría contención que seguir.
+$bench['settings']->machines[20]['sanitary_status'] = 'OK';
+$bench['settings']->failWrites = true;
+$bench['service']->sweep();
+$newEpisode = $bench['visibility']->contentions[190];
+
+$assert(
+    '8.6 El aplazamiento posterior abre episodio nuevo (contadores a 1) sin perder el acumulado histórico',
+    $newEpisode->consecutivePasses === 1
+    && $newEpisode->totalPasses === 4
+    && $newEpisode->isEscalated() === false
+    && $newEpisode->escalatedAt === null
+    && $newEpisode->isOpen() === true,
+    sprintf(
+        'episodio: %d pasadas consecutivas, %d acumuladas, escalado=%s',
+        $newEpisode->consecutivePasses,
+        $newEpisode->totalPasses,
+        var_export($newEpisode->isEscalated(), true)
+    )
+);
+
+// 8.7 El libro se escribe DESPUÉS de consumir el reloj (Art. II): si la observabilidad falla, la
+// cuarentena ya está escrita, el fallo se propaga en voz alta y la pasada deja de publicarse.
+$bench = $makeBench();
+$bench['settings']->register(30, 'PERISHABLE_FOOD');
+$bench['candidates']->candidates = [$makeIncident(200, 'INC-2026-00200', 30, $agedOpening(18000))];
+$bench['visibility']->failOnRecordPass = true;
+$observabilityFailure = $capture(static fn () => $bench['service']->sweep());
+
+$assert(
+    '8.7 Si el libro no se puede escribir, la cuarentena ya está escrita y el fallo se propaga (Art. II)',
+    $observabilityFailure['threw'] === true
+    && $observabilityFailure['class'] === RuntimeException::class
+    && str_contains($observabilityFailure['message'], 'observabilidad')
+    && $bench['settings']->statusWrites === [['machine_id' => 30, 'status' => 'QUARANTINE']]
+    && $bench['visibility']->passes === [],
+    sprintf(
+        'excepción=%s, escrituras=%s',
+        $observabilityFailure['message'],
+        json_encode($bench['settings']->statusWrites, JSON_UNESCAPED_UNICODE)
+    )
+);
+
+// 8.8 El cierre es por identidad: la pasada cierra exactamente lo que ella NO aplazó, y deja
+// intacto el seguimiento del expediente que sí volvió a aplazar en esa misma pasada.
+$bench = $makeBench();
+$bench['settings']->register(40, 'PERISHABLE_FOOD');
+$bench['settings']->register(41, 'PERISHABLE_FOOD');
+$bench['settings']->failWrites = true;
+$bench['candidates']->candidates = [
+    $makeIncident(210, 'INC-2026-00210', 40, $agedOpening(18000)),
+    $makeIncident(211, 'INC-2026-00211', 41, $agedOpening(18000)),
+];
+$bench['service']->sweep();
+
+// Segunda pasada: solo el 210 vuelve a aplazarse (el 211 deja de ser candidato).
+$bench['candidates']->candidates = [$makeIncident(210, 'INC-2026-00210', 40, $agedOpening(18000))];
+$bench['service']->sweep();
+
+$secondResolution = $bench['visibility']->resolutions[1];
+
+$assert(
+    '8.8 El cierre es por identidad: la pasada cierra lo que no aplazó y conserva el seguimiento vivo',
+    count($bench['visibility']->resolutions) === 2
+    && $secondResolution['detected'] === [210]
+    && ($bench['visibility']->contentions[210] ?? null)?->isOpen() === true
+    && ($bench['visibility']->contentions[211] ?? null)?->isOpen() === false
+    && (($bench['visibility']->contentions[210] ?? null)?->consecutivePasses ?? 0) === 2,
+    json_encode($bench['visibility']->resolutions, JSON_UNESCAPED_UNICODE)
+);
+
+// 8.9 El rastro del aplazamiento no puede convertir un aplazamiento en un fallo: si la propia
+// escritura de la observación choca con el MISMO bloqueo que provocó el aplazamiento, la pasada
+// sigue (el expediente ya viaja en `contended` con su motivo y su aplazamiento ya cuenta en el
+// libro) y el prefiltro vuelve a ofrecerlo en la pasada siguiente. Sin esta tolerancia, un
+// solape legítimo terminaba en una alerta roja del planificador: el falso positivo que anula
+// T-PAUSE-39.
+$bench = $makeBench();
+$bench['settings']->register(50, 'PERISHABLE_FOOD');
+$bench['settings']->failWrites = true;
+$bench['candidates']->candidates = [$makeIncident(220, 'INC-2026-00220', 50, $agedOpening(18000))];
+$bench['visibility']->failOnSaveWithLock = true;
+$blockedFollowUp = $bench['service']->sweep();
+
+$assert(
+    '8.9 Un seguimiento que no se puede escribir por el mismo bloqueo no enciende la alerta ni pierde el aplazamiento',
+    $blockedFollowUp->contendedCount === 1
+    && $blockedFollowUp->failuresCount === 0
+    && $blockedFollowUp->requiresOperatorAttention() === false
+    && $blockedFollowUp->contended[0]['incident_id'] === 220
+    && count($bench['visibility']->passes) === 1
+    && $bench['visibility']->passes[0]->contendedCount === 1
+    && $bench['visibility']->contentions === [],
+    json_encode($blockedFollowUp->toArray(), JSON_UNESCAPED_UNICODE)
+);
+
+// 8.10 Fail-safe de la observación: un fallo que NO es un bloqueo —tabla ausente, disco lleno—
+// sí viaja en voz alta, igual que el libro de la pasada. La tolerancia de 8.9 se limita al mismo
+// bloqueo que ya se clasificó como aplazamiento.
+$bench = $makeBench();
+$bench['settings']->register(51, 'PERISHABLE_FOOD');
+$bench['settings']->failWrites = true;
+$bench['candidates']->candidates = [$makeIncident(221, 'INC-2026-00221', 51, $agedOpening(18000))];
+$bench['visibility']->failOnSaveGeneric = true;
+$brokenFollowUp = $capture(static fn () => $bench['service']->sweep());
+
+$assert(
+    '8.10 Un fallo de observabilidad que no es bloqueo sí se propaga (la tolerancia no es una mordaza)',
+    $brokenFollowUp['threw'] === true
+    && $brokenFollowUp['class'] === RuntimeException::class
+    && str_contains($brokenFollowUp['message'], 'seguimiento'),
+    $brokenFollowUp['message']
 );
 
 // =====================================================================

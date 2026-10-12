@@ -1005,5 +1005,50 @@ CREATE TABLE IF NOT EXISTS `unclaimed_cash_findings` (
     INDEX `idx_unclaimed_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Sanitary sweep operational visibility (T-PAUSE-41, Module 11, Art. II/III):
+-- the heartbeat of the background sweep and the per-ticket deferral follow-up.
+-- Declared here as well as in database/migrations/018_sanitary_sweep_visibility.sql
+-- because this file rebuilds the schema of a deployed boot; the migration is the
+-- convergence path for a database that already exists. Both statements are
+-- idempotent, so the boot path (base DDL + migrations) executes them twice
+-- without effect.
+CREATE TABLE IF NOT EXISTS `sanitary_sweep_passes` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `started_at` DATETIME NOT NULL,
+    `finished_at` DATETIME NULL DEFAULT NULL,
+    `candidates` INT UNSIGNED NOT NULL DEFAULT 0,
+    `evaluated` INT UNSIGNED NOT NULL DEFAULT 0,
+    `quarantined_count` INT UNSIGNED NOT NULL DEFAULT 0,
+    `contended_count` INT UNSIGNED NOT NULL DEFAULT 0,
+    `failures_count` INT UNSIGNED NOT NULL DEFAULT 0,
+    `duration_ms` DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    PRIMARY KEY (`id`),
+    INDEX `idx_sanitary_sweep_passes_started` (`started_at`),
+    INDEX `idx_sanitary_sweep_passes_contended` (`contended_count`, `started_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- `machine_id` carries NO foreign key on purpose (T-PAUSE-41): inserting a child
+-- row takes a shared lock on its parents, so an FK to `machines` made the
+-- follow-up unwritable while another consumer retained the machine row -- exactly
+-- the situation it exists to record. The FK to `incidents` stays, and the surface
+-- joins `machines` anyway.
+CREATE TABLE IF NOT EXISTS `sanitary_sweep_contentions` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `incident_id` INT UNSIGNED NOT NULL,
+    `machine_id` INT UNSIGNED NOT NULL,
+    `first_detected_at` DATETIME NOT NULL,
+    `last_detected_at` DATETIME NOT NULL,
+    `consecutive_passes` INT UNSIGNED NOT NULL DEFAULT 1,
+    `total_passes` INT UNSIGNED NOT NULL DEFAULT 1,
+    `escalated_at` DATETIME NULL DEFAULT NULL,
+    `resolved_at` DATETIME NULL DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_sanitary_sweep_contention_incident` (`incident_id`),
+    INDEX `idx_sanitary_sweep_contentions_open` (`resolved_at`, `escalated_at`),
+    INDEX `idx_sanitary_sweep_contentions_machine` (`machine_id`),
+    CONSTRAINT `fk_sanitary_sweep_contention_incident` FOREIGN KEY (`incident_id`)
+        REFERENCES `incidents` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 

@@ -172,6 +172,12 @@ class AppRouter
         $router->patch('/api/coordinator/preventive/settings', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'updateSettings'], [$coordinatorAuth]);
         $router->get('/api/coordinator/machines/{id}/preventive-config', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'getMachinePreventiveConfig'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/machines/{id}/preventive-config', [\VendGuard\Presentation\Controller\CoordinatorPreventiveController::class, 'updateMachinePreventiveConfig'], [$coordinatorAuth]);
+        // Superficie operativa del barrido sanitario (Módulo 11: T-PAUSE-41, RF-07).
+        // Solo lectura: el latido del barrido, la tendencia de 24 h, los expedientes
+        // aplazados por contención de fila y el nivel de escalado cuando el aplazamiento
+        // persiste. Instrumentación interna: no se publica en sede ni en el canal
+        // ciudadano (Art. V.4).
+        $router->get('/api/coordinator/sanitary-sweep/contention', [\VendGuard\Presentation\Controller\CoordinatorSanitarySweepController::class, 'getContention'], [$coordinatorAuth]);
 
         // Gestión de Repuestos y Trazabilidad (Módulo 06: Coordinación - T-SPARE-10, T-SPARE-13)
         $router->get('/api/coordinator/spare-parts', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'getCatalog'], [$coordinatorAuth]);

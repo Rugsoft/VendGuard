@@ -169,6 +169,30 @@ Establecer un **Estado Operativo Formal denominado "Pendiente de Información" (
 
 ---
 
+### Módulo RF-07: Visibilidad Operativa del Barrido Sanitario y Escalado por Contención Persistente (Art. II y Art. III)
+
+> **Origen (2026-10-12, T-PAUSE-41).** La clasificación de la contención de fila como aplazamiento (T-PAUSE-39) y la cota de espera de la pasada (T-PAUSE-40) existían, pero su señal vivía sólo en la respuesta del planificador, que la Coordinación no lee. Este módulo la convierte en **superficie operativa** y en **alerta de escalado cuando el aplazamiento persiste**, sin tocar la regla del reloj biológico ni la salvaguarda sanitaria (Art. II).
+
+* **RF-07.1 [EARS - Ubicuo]:**  
+  El sistema DEBE registrar **cada pasada** del barrido con su marca de apertura y de cierre, sus recuentos (candidatos, evaluados, cuarentenas, aplazamientos por contención y fallos reales) y su duración medida, de modo que la Coordinación pueda distinguir tres situaciones que antes se veían igual: *no hay nada que hacer*, *el barrido corre pero aplaza candidatos* y *el barrido no está corriendo*. El registro se escribe **después** de consumir el reloj: la salvaguarda sanitaria nunca queda condicionada a la observabilidad.
+
+* **RF-07.2 [EARS - Dirigido por eventos]:**  
+  CUANDO un candidato quede **aplazado por contención de fila** (T-PAUSE-39), el sistema DEBE abrir —o reabrir— un **seguimiento por expediente** con la máquina, la marca de la primera detección, la de la última, el número de **pasadas consecutivas** en las que ese expediente volvió a aplazarse y el total de aplazamientos acumulados. La contención sigue **sin** contar como fallo y sigue sin alertar al planificador: lo que cambia es que ahora **se puede ver**.
+
+* **RF-07.3 [EARS - Estado]:**  
+  MIENTRAS un expediente acumule **3 pasadas consecutivas** aplazado por contención —unos 45 minutos con la cadencia ratificada de 15 minutos—, el sistema DEBE marcarlo como **escalado** con la marca temporal del escalado, y la Coordinación DEBE verlo en su superficie con el aviso de que la latencia de detección sanitaria se está duplicando.
+
+* **RF-07.4 [EARS - Excepcional]:**  
+  SI una sola pasada publica **más de 5 aplazamientos** por contención, el sistema DEBE elevar la señal a **escalado de parque** en la superficie del coordinador.
+
+* **RF-07.5 [EARS - Ubicuo]:**  
+  El escalado DEBE ser **auto-resolutivo**: CUANDO una pasada posterior ya no aplaza a ese expediente, el sistema DEBE cerrar su seguimiento y la alerta DEBE desaparecer sin intervención manual, conservando el rastro de lo ocurrido. La superficie DEBE distinguir además el estado **`CLEAR`** (ningún seguimiento abierto), **`MONITORED`** (aplazamientos vivos, ninguno escalado) y **`ESCALATED`** (al menos un expediente escalado o un escalado de parque).
+
+* **RF-07.6 [EARS - Estado / Segregación - Art. V.4]:**  
+  La superficie de RF-07 es **exclusivamente interna**: vive bajo el rol `COORDINATOR` y no se publica en el portal de sede ni en el escaneo ciudadano, que siguen viendo el estado neutro de RF-06.1: el detalle de contención del barrido es instrumentación de operación, no información pública.
+
+---
+
 ## 5. Requisitos No Funcionales (RNF)
 
 * **RNF-01 (Precisión en el Cómputo de Tiempos):**  
@@ -225,9 +249,11 @@ La especificación se considerará formalmente cumplida cuando:
 7. El seguimiento ciudadano por código QR oculte totalmente el estado de pausa y motivos internos, mostrando un estado público neutro (Art. V.4).
 8. Quede bloqueada cualquier transición directa desde `PENDING_INFO` hacia `RESOLVED` sin pasar por `IN_PROGRESS` (Art. V.1).
 9. Se verifiquen al 100% todos los requisitos funcionales (RF-01 a RF-06) y no funcionales (RNF-01 a RNF-06) con pruebas automatizadas completas.
+10. La Coordinación disponga de una **superficie operativa del barrido** (RF-07) que distinga «no hay nada que hacer» de «el barrido no está corriendo», muestre los aplazamientos por contención con sus pasadas consecutivas y **escale a alerta cuando el aplazamiento persiste** (3 pasadas consecutivas o más de 5 aplazamientos en una pasada), desapareciendo sola cuando la contención se resuelve.
 
 ---
 
 ## 9. Dudas Abiertas
 
-* **Ninguna duda abierta.** Todas las definiciones operativas, actores autorizados, causas tipificadas, cálculo de SLA comercial, doble reloj biológico con cuarentena automática (Art. II), límites de inactividad de 72 horas hábiles, preservación de estado de máquina y reintegros (Art. V.1) y visibilidad pública segregada han sido unánimemente acordadas, validadas y blindadas tras la auditoría QA.
+* **Ninguna duda abierta** sobre lo especificado en RF-01 a RF-07. Queda **fuera de este incremento** la Capa B de `docs/propuesta_politica_reintento_barrido_sanitario.md` —el reintento acotado dentro de la pasada (1 + 2 intentos con espera creciente y jitter, decisión **D1**)—: sigue siendo una propuesta pendiente de ratificación del Product Owner. Lo entregado en RF-07 es la **visibilidad** de esa capa (Capa D), no el reintento. La **decisión D4** queda ratificada en su recomendación: la contención —persista o no— **no** recibe un código de salida propio en el planificador (el escalado vive en la superficie del coordinador, que es donde alguien puede actuar sobre él).
+* Todas las definiciones operativas, actores autorizados, causas tipificadas, cálculo de SLA comercial, doble reloj biológico con cuarentena automática (Art. II), límites de inactividad de 72 horas hábiles, preservación de estado de máquina y reintegros (Art. V.1) y visibilidad pública segregada han sido unánimemente acordadas, validadas y blindadas tras la auditoría QA.

@@ -234,9 +234,95 @@ El barrido comparte la fila de la máquina con el cierre técnico (§5.4.1 del c
 
 * **Decisión implementada (T-PAUSE-39):** la contención tiene su propia clave (`contended`/`contended_count`), **no** enciende la alerta y no toca el estado de la máquina; la identidad contable del resumen se verifica en el DTO (Fail-Fast).
 * **Cota de espera de bloqueo de la pasada (T-PAUSE-40, decidida con medición):** la pasada fija una cota de **2 s** para la sesión del barrido (`SanitaryClockSweepService::LOCK_WAIT_BUDGET_SECONDS`) y la restituye al terminar, sin elevar nunca una cota más estricta. La medición que la sostiene —120 ejecuciones reales de la unidad de trabajo ganadora del cierre: **p50 1,68 ms · p90 2,31 ms · p95 2,54 ms · p99 3,11 ms · máx 3,97 ms**, con 120/120 cuarentenas escritas— deja la cota en ~787× el p95: el tenedor legítimo sigue resolviéndose esperando (como hoy) y sólo un tenedor anormalmente largo se convierte en aplazamiento visible, que es justamente la señal que interesa. El instrumento y su informe están declarados en `tasks.md` (T-PAUSE-40).
-* **Política de reintento propuesta (pendiente de ratificación):** reintento acotado dentro de la pasada (1 + 2 intentos con espera creciente y jitter), red de seguridad por cadencia (el prefiltro vuelve a publicar al candidato aplazado mientras siga vencido y sin cuarentena, así que la pérdida máxima es de una cadencia) y regla de escalado para el planificador (aviso con contención; escalada si persiste en 3 pasadas consecutivas o supera 5 aplazamientos en una pasada). El razonamiento, los valores y las decisiones que quedan en manos del Product Owner están en `docs/propuesta_politica_reintento_barrido_sanitario.md`.
+* **Política de reintento propuesta (pendiente de ratificación):** reintento acotado dentro de la pasada (1 + 2 intentos con espera creciente y jitter) y red de seguridad por cadencia (el prefiltro vuelve a publicar al candidato aplazado mientras siga vencido y sin cuarentena, así que la pérdida máxima es de una cadencia). El razonamiento, los valores y las decisiones que quedan en manos del Product Owner están en `docs/propuesta_politica_reintento_barrido_sanitario.md`.
+* **Regla de escalado (Capa D, implementada en T-PAUSE-41 como superficie operativa):** la contención ya no se lee sólo en la respuesta del planificador. Cada pasada queda registrada y cada expediente aplazado abre un seguimiento por pasadas consecutivas; a partir de **3 pasadas consecutivas** (≈45 min con la cadencia ratificada) el expediente queda **escalado** y la Coordinación lo ve en su superficie (`§2.6`), junto con la señal de **parque** cuando una sola pasada supera **5 aplazamientos**. Un aplazamiento que no persiste no escala y el seguimiento se cierra solo en la primera pasada que ya no lo aplaza. El escalado **no** cambia el código de salida del planificador (decisión D4 ratificada en su recomendación): vive donde alguien puede actuar sobre él.
 
 La cadencia operativa (**15 minutos**, ratificada por el Product Owner) y el comando de programación se documentan en `README.md`. **Límite declarado:** la activación automática depende de que el planificador esté configurado fuera del repositorio; hasta entonces el mecanismo queda entregado y probado, pero no activo.
+
+---
+
+### 2.6. Endpoint de Visibilidad Operativa del Barrido (`GET /api/coordinator/sanitary-sweep/contention`)
+
+Superficie operativa de la contención del barrido (T-PAUSE-41, RF-07). Protegida por `InternalAuthMiddleware(UserRole::COORDINATOR)`: es instrumentación interna —qué fila de máquina sostiene qué escritor y cuánto tiempo— y por eso **no** se publica en el portal de sede ni en el escaneo ciudadano (Art. V.4). No estrena códigos de error: reutiliza `UNAUTHORIZED` y `FORBIDDEN` ya documentados en `api_contracts.md` §1.3 y §1.4.
+
+```json
+{
+  "success": true,
+  "data": {
+    "generated_at": "2026-10-12 18:20:00",
+    "cadence_minutes": 15,
+    "escalation": {
+      "level": "ESCALATED",
+      "requires_attention": true,
+      "consecutive_passes_threshold": 3,
+      "per_pass_threshold": 5,
+      "open_contentions": 2,
+      "escalated_contentions": 1,
+      "level_label": "Escalado: la contención persiste y la detección sanitaria se está retrasando"
+    },
+    "sweep": {
+      "last_pass": {
+        "pass_id": 412,
+        "started_at": "2026-10-12 18:15:00",
+        "finished_at": "2026-10-12 18:15:01",
+        "candidates": 4,
+        "evaluated": 2,
+        "quarantined_count": 1,
+        "contended_count": 2,
+        "failures_count": 0,
+        "duration_ms": 812.34
+      },
+      "minutes_since_last_pass": 5,
+      "is_stale": false,
+      "window_hours": 24,
+      "passes_in_window": 96,
+      "passes_with_contention": 3,
+      "deferrals_in_window": 7,
+      "failures_in_window": 0,
+      "quarantines_in_window": 31,
+      "contention_rate_percent": 3.13
+    },
+    "contentions": [
+      {
+        "id": 9,
+        "incident_id": 142,
+        "ticket_code": "INC-2026-00142",
+        "machine_id": 14,
+        "machine_code": "VEND-0101",
+        "location_name": "Hospital del Mar",
+        "floor_wing": "Planta Baja - Urgencias",
+        "incident_status": "IN_PROGRESS",
+        "machine_sanitary_status": "OK",
+        "first_detected_at": "2026-10-12 17:15:00",
+        "last_detected_at": "2026-10-12 18:15:00",
+        "consecutive_passes": 5,
+        "total_passes": 5,
+        "escalated": true,
+        "escalated_at": "2026-10-12 17:45:00",
+        "age_minutes": 65,
+        "minutes_since_last_detection": 5
+      }
+    ]
+  }
+}
+```
+
+* `escalation.level`: **`CLEAR`** (sin seguimientos abiertos), **`MONITORED`** (hay aplazamientos vivos, ninguno persistente) o **`ESCALATED`** (algún expediente alcanzó el umbral de pasadas consecutivas o la última pasada superó el umbral de parque). `requires_attention` es la **única autoridad** de la alerta, igual que `requiresOperatorAttention()` lo es en la respuesta del barrido.
+* `sweep.last_pass`: la última pasada registrada. `is_stale` se enciende cuando han pasado más de **dos cadencias** sin ninguna pasada —el barrido no está corriendo, que es una situación distinta de «no encuentra nada»— y `minutes_since_last_pass` es `null` sólo si nunca se ha registrado una pasada.
+* `sweep.window`: agregados de las últimas 24 h sobre el libro de pasadas, para poder ver **tendencia** (una contención que no escala pero crece se ve aquí antes de escalar).
+* `contentions`: seguimientos **abiertos** (los que una pasada posterior ya no volvió a aplazar quedan cerrados y no viajan), ordenados por escalado y antigüedad. Muestran el expediente, la máquina, la sede, la planta/ala, el estado del expediente, el estado sanitario de la máquina y las pasadas consecutivas; `escalated_at` sólo está presente cuando se alcanzó el umbral.
+* **Sin códigos nuevos y sin escritura:** el endpoint es de **sólo lectura**. El acuse de recibo del escalado (marcar «visto») queda **fuera de alcance** de este incremento, declarado en `tasks.md` como extensión natural.
+
+#### 2.6.1. Modelo de datos del libro de pasadas y de los seguimientos
+
+Migración `018_sanitary_sweep_visibility.sql` (aditiva e idempotente: `CREATE TABLE IF NOT EXISTS`, y el DDL base `database/cloud_init.sql` las declara también, porque ese fichero reconstruye el esquema de un arranque desplegado nuevo y las migraciones son la vía de convergencia de una base existente).
+
+| Tabla | Columnas | Por qué |
+| :--- | :--- | :--- |
+| `sanitary_sweep_passes` | `id`, `started_at`, `finished_at`, `candidates`, `evaluated`, `quarantined_count`, `contended_count`, `failures_count`, `duration_ms` | El **latido** del barrido y su tendencia. `finished_at` nulo delata una pasada interrumpida; la ausencia de filas recientes delata un barrido que no corre (lo que ninguna otra tabla puede decir). Sin FK: es un libro append-only, no una relación con el parque. |
+| `sanitary_sweep_contentions` | `id`, `incident_id` (único), `machine_id`, `first_detected_at`, `last_detected_at`, `consecutive_passes`, `total_passes`, `escalated_at`, `resolved_at` | El **seguimiento** por expediente: cuántas pasadas seguidas lleva aplazado, desde cuándo, si ya escaló y si sigue abierto. Clave única por expediente con **reutilización**: un episodio nuevo resetea los contadores y limpia `escalated_at`/`resolved_at`, de modo que no se acumulan filas por máquina y el histórico completo se conserva. FK `RESTRICT` a `incidents` (cero borrado físico, Art. III.1). **`machine_id` no lleva clave foránea a propósito:** insertar una fila hija toma un bloqueo compartido de su padre, de modo que un seguimiento que apuntara a `machines` quedaría sin poder escribirse justo mientras otro consumidor retiene esa fila —la única situación que la tabla existe para registrar— y el barrido convertiría un aplazamiento en un fallo. La referencia se conserva desnormalizada y la superficie lee `machines` por unión. Hallazgo de la propia suite de integración de T-PAUSE-41, no del razonamiento. |
+
+La **resolución** de un seguimiento es una sola sentencia por pasada y va **por identidad, no por marca de tiempo**: se cierran los abiertos cuyo expediente no viaja en la lista de aplazados de esa pasada —es decir, exactamente los que **esta** pasada ya no aplazó—. Se descartó comparar contra el inicio de pasada porque las marcas tienen resolución de segundo y dos pasadas de milisegundos pueden caer dentro del mismo; preguntar «¿a quién TOQUÉ?» es exacto, mientras que «¿qué es más antiguo que yo?» depende de una precisión que no existe. `last_detected_at` queda como presentación de la última detección, no como corte.
 
 ---
 
@@ -571,6 +657,14 @@ FIN ALGORITMO
 * **Reloj Congelado:** En la columna de SLA, se muestra el icono `⏸️` con el texto *"Pausado (+X min desc.)"*.
 * **Alerta de 72h:** Si acumula $> 72\text{ h}$ hábiles, la fila destaca con borde rojo y botón de acción directa *"Cancelar por inactividad de sede"*.
 
+### 4.5. Superficie Operativa del Barrido Sanitario (`CoordinatorSanitarySweepPanel.js`)
+
+* **Dónde vive:** tercera sub-pestaña de *Mantenimiento Preventivo* (`activePreventiveSubTab = 'sweep'`, `data-testid="subtab-preventive-sweep"`). El barrido sanitario es una salvaguarda del módulo preventivo y su instrumentación pertenece ahí, no a una pestaña nueva del panel.
+* **Reparto de responsabilidades:** la vista `CoordinatorDashboardView` es la **única** que pide el payload (`api.coordinator.getSanitarySweepContention()`) y lo pasa al panel como propiedad; el panel es de presentación pura (props + computadas + `emit('refresh')`), de modo que no hay dos verdades ni dos consultas por pantalla.
+* **Distintivo de alerta:** el botón de la sub-pestaña muestra el contador de expedientes escalados cuando `escalation.requires_attention` está encendido, **sin** que el coordinador tenga que entrar a mirar (misma mecánica que la insignia de SLA del triaje).
+* **Tres bloques:** (1) **latido del barrido** —última pasada, minutos transcurridos, aviso cuando `is_stale` porque el barrido dejó de correr—; (2) **tendencia de 24 h** —pasadas, pasadas con aplazamiento, aplazamientos, cuarentenas y fallos reales—; (3) **seguimientos abiertos** —expediente, máquina, sede, planta, pasadas consecutivas y antigüedad, con el estado de escalado y un botón que abre la ficha integral del ticket reutilizando el modal de detalle ya existente (`openIncidentDetailFromPreventive`)—.
+* **Sistema de diseño:** variantes `vg-btn`/`vg-btn-primary`/`vg-btn-secondary` y tokens de aviso (`--color-warning*`, `--color-error*`), sin geometría en línea y **sin un solo literal hexadecimal nuevo** (trinquete de deuda de tokens y guarda de variantes de botón del panel).
+
 ---
 
 ## 5. Decisiones Técnicas Justificadas y Alternativas Descartadas
@@ -605,12 +699,24 @@ FIN ALGORITMO
   * Idempotencia: un segundo barrido sobre el mismo parque no vuelve a escribir ni a auditar.
   * Aislamiento: un candidato indecidible viaja a `failures` sin abortar el resto del lote, y el lote respeta su cota.
   * **Contención de fila (T-PAUSE-39):** el candidato cuya transición muere esperando el bloqueo ajeno (`1205`, `1213`/`40001`) viaja a `contended` —no a `failures`— y no enciende la alerta; un error de persistencia sin código de bloqueo sigue siendo fallo real (fail-safe), y la identidad contable `candidates = evaluated + failures_count + contended_count` la verifica el propio DTO.
+  * **Libro de la pasada y escalado (T-PAUSE-41):** cada pasada deja su registro con los recuentos del resumen y su duración; el expediente aplazado abre seguimiento con sus pasadas consecutivas; a la tercera pasada consecutiva queda escalado; una pasada que ya no lo aplaza cierra el seguimiento; y el libro se escribe **después** de consumir el reloj, para que la observabilidad no pueda impedir una cuarentena.
+* **`SanitarySweepVisibilityServiceTest.php`:**
+  * Niveles de la superficie: `CLEAR` sin seguimientos, `MONITORED` con aplazamientos vivos, `ESCALATED` con un expediente escalado o un escalado de parque.
+  * Latido: `is_stale` con más de dos cadencias sin pasada y `minutes_since_last_pass` nulo cuando nunca ha habido pasada.
+  * Agregados de 24 h: pasadas, pasadas con aplazamiento, aplazamientos, fallos y cuarentenas del libro, con la tasa de contención redondeada.
+  * Contrato del DTO: claves exactas y `toArray()` estable; sólo lectura (el servicio no escribe nada).
+* **`SanitarySweepEscalationPolicyTest.php`:** la política pura del escalado —umbral de pasadas consecutivas, reapertura tras resolución, acumulación del total y escalado de parque por pasada— sin tocar la base de datos.
 * **`IncidentPauseSanitaryClockTest.php` (ampliación):**
   * Exclusión mutua: con dos consumidores simultáneos sobre la misma máquina, un solo evento inmutable y ninguna segunda escritura.
   * Fallo real de escritura: sigue lanzando excepción y no deja rastro de cuarentena.
 
 ### 6.2. Pruebas Unitarias Reactivas Frontend (Node.js ESM)
 
+* **`CoordinatorSanitarySweepPanelTest.mjs`:**
+  * Los tres niveles del aviso (`CLEAR` sin seguimientos, `MONITORED` con aplazamientos vivos, `ESCALATED` con escalado persistente) renderizan el copy correcto y el aviso sólo es destacado cuando `requires_attention`.
+  * El latido del barrido se anuncia como «sin pasada registrada» cuando nunca ha correr y como «el barrido no está corriendo» cuando `is_stale`.
+  * Las pasadas consecutivas, la antigüedad y los agregados de 24 h se pintan desde el payload, sin cálculos duplicados en la interfaz.
+  * El botón de cada seguimiento emite `open-incident-detail` con el identificador del expediente y el panel no introduce ningún literal hexadecimal nuevo.
 * **`PendingInfoPauseModalTest.mjs`:**
   * Renderizado de las 4 causas tipificadas.
   * Contador reactivo de caracteres: botón deshabilitado con 19 caracteres y habilitado con 20.
@@ -641,6 +747,12 @@ FIN ALGORITMO
   * **Exclusión mutua con dos conexiones PDO reales:** el barrido (por su ruta real) y el cierre técnico (sobre una segunda conexión) compiten por la misma máquina y sólo uno escribe y sólo uno deja el evento; el perdedor confirma la cuarentena ajena sin excepción, sin segundo rastro y sin abrir la puerta del cierre (RF-03.5.2).
   * **Contención real por fila:** con el ganador sin confirmar, la transición del perdedor muere en `1205 Lock wait timeout` y se publica como **aplazamiento** (`contended`, `failures_count = 0`, sin alerta al planificador — T-PAUSE-39) sin cuarentenar la máquina, mientras la misma pasada cuarentena a la máquina libre (el aislamiento es por fila, no un bloqueo global); el resumen cuadra sobre la respuesta HTTP real (`candidates = evaluated + fallos + aplazados`).
   * El rastro total es uno por máquina en los dos sentidos de la carrera y la pasada siguiente no añade cuarentenas ni eventos.
+* **`SanitarySweepVisibilityEndpointTest.php`:**
+  * Control de acceso del endpoint de superficie: sin credencial `401`, token de técnico `403`, sesión de coordinación `200`.
+  * **La desviación que se cierra:** con una fila de máquina realmente sostenida por el cierre técnico sin confirmar, la pasada aplaza el candidato, **queda registrada** en el libro con sus recuentos y el seguimiento del expediente aparece **abierto** en la superficie del coordinador con una pasada consecutiva.
+  * Repetición: dos pasadas contenidas dejan el seguimiento en **2** pasadas y sin escalar; la **tercera** lo escala con su marca de escalado y la superficie lo declara `ESCALATED` con `requires_attention`.
+  * Auto-resolución: confirmado el dueño, la pasada siguiente ya no aplaza a nadie, **cierra** el seguimiento y la superficie vuelve a `CLEAR` sin dejar de publicar la pasada en el libro (tendencia de 24 h intacta).
+  * El registro de la pasada **no** altera el resultado del barrido: mismos `quarantined`/`contended_count`/`failures_count` que antes de existir la superficie.
 
 ---
 

@@ -96,6 +96,7 @@ sequenceDiagram
 6. **Idempotencia:** una segunda pasada del barrido no vuelve a declarar la máquina ni añade rastro (`quarantined` sin ella y sin eventos nuevos).
 7. **Vuelta al servicio:** la cuarentena sólo se levanta con la reinspección del módulo 05 (temperatura ≤ 4,0 °C más checklist de higienización) sobre la orden que abre coordinación; el barrido no la desbloquea nunca.
 8. **Programación en operación:** el barrido se programa cada **15 minutos** —`curl -sS -X POST -H "X-Cron-Secret: $CRON_SECRET" https://<host>/api/cron/sanitary-clock-sweep` o `php bin/sanitary_clock_sweep.php`—, de modo que la latencia de detección queda acotada en «4 h naturales + hasta 15 minutos».
+9. **Superficie operativa del barrido (T-PAUSE-41, RF-07):** `GET /api/coordinator/sanitary-sweep/contention` con la sesión de coordinación devuelve el **latido** (`sweep.last_pass`, `sweep.minutes_since_last_pass`, `sweep.is_stale`), la **tendencia** de 24 h y los **seguimientos abiertos**. Tras el paso 2 el latido refleja la pasada recién ejecutada y el nivel es `CLEAR`; si la fila de la máquina está retenida por otro consumidor, el expediente aparece en `contentions` con sus pasadas consecutivas y el nivel `MONITORED` (**sin** alerta: la contención no es un fallo); a las tres pasadas consecutivas el nivel sube a `ESCALATED` con `requires_attention: true`. El seguimiento se cierra **solo**: la primera pasada que ya no aplaza al expediente lo deja con `resolved_at` y la superficie vuelve a `CLEAR`, sin ninguna acción manual.
 
 ---
 
@@ -104,4 +105,4 @@ El recorrido funcional de extremo a extremo ha sido ejecutado satisfactoriamente
 
 > **Nota (08/10/2026):** el guion se ejecuta además en la **Fase 4** de `php tests/run_all.php`, con el servidor HTTP todavía en marcha, de modo que una regresión de flujo rompe ya la batería global. Cifra vigente de la batería completa:
 >
-> batería global: 246 suites · 9.334 aserciones
+> batería global: 249 suites · 9.425 aserciones

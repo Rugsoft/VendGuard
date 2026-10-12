@@ -19,7 +19,7 @@ $pdo->exec("DELETE FROM incidents");
 ```
 
 Ese orden sólo es válido **mientras ninguna tabla hija de `incidents` tenga
-filas**. Hoy hay seis tablas que referencian `incidents.id`, y cuatro de ellas
+filas**. Hoy hay siete tablas que referencian `incidents.id`, y cinco de ellas
 con `ON DELETE RESTRICT`:
 
 | Tabla hija | `ON DELETE` | Migración de origen |
@@ -30,6 +30,7 @@ con `ON DELETE RESTRICT`:
 | `spare_part_requests` | **`RESTRICT`** | `006_spare_parts_catalog_and_traceability.sql` |
 | `refund_requests` | **`RESTRICT`** | `008_refund_management.sql` (T-REF-01) |
 | `unclaimed_cash_findings` | **`RESTRICT`** | `008_refund_management.sql` (T-REF-01) |
+| `sanitary_sweep_contentions` | **`RESTRICT`** | `018_sanitary_sweep_visibility.sql` (T-PAUSE-41) |
 
 **El fallo no fue culpa de T-REF-01.** La primera grieta la introdujo
 `006_spare_parts`: a partir de ahí, una única fila huérfana de
@@ -59,20 +60,28 @@ que es exactamente por lo que el defecto era invisible en el día a día.
 El orden de borrado **no está hardcodeado**. `TestDataCleaner` lee el grafo real
 de claves foráneas desde `information_schema`, descubre transitivamente el
 subárbol a purgar desde sus raíces (`incidents`, `spare_parts`,
-`preventive_orders`) y lo topologiza con el algoritmo de Kahn. Por tanto:
+`preventive_orders`, `sanitary_sweep_passes`) y lo topologiza con el algoritmo
+de Kahn. Por tanto:
 
 > **Una clave foránea nueva con `ON DELETE RESTRICT` queda cubierta
 > automáticamente, sin modificar `TestDataCleaner`.**
 
-Orden que produce hoy (12 tablas, `incidents` necesariamente la última):
+`sanitary_sweep_passes` entra como **raíz propia** y no por el grafo: es el
+latido del barrido (T-PAUSE-41), un libro operativo **sin claves foráneas** —no
+cuelga de `incidents` a propósito, porque registra pasadas, no expedientes—, así
+que ninguna otra raíz lo alcanza. Dejar sus filas entre suites haría que la
+ventana de tendencia de una prueba contase las pasadas de otra.
+
+Orden que produce hoy (14 tablas, `incidents` necesariamente la última):
 
 ```
- 1. incident_comments          7. preventive_orders
- 2. incident_history           8. spare_part_compatibilities
- 3. incident_replaced_parts    9. spare_part_requests
- 4. preventive_order_items    10. spare_parts
- 5. refund_requests           11. unclaimed_cash_findings
- 6. sanitary_certificates     12. incidents
+ 1. incident_comments          8. sanitary_sweep_contentions
+ 2. incident_history           9. sanitary_sweep_passes
+ 3. incident_replaced_parts   10. spare_part_compatibilities
+ 4. preventive_order_items    11. spare_part_requests
+ 5. refund_requests           12. spare_parts
+ 6. sanitary_certificates     13. unclaimed_cash_findings
+ 7. preventive_orders         14. incidents
 ```
 
 ---
@@ -81,7 +90,7 @@ Orden que produce hoy (12 tablas, `incidents` necesariamente la última):
 
 | Método | Uso |
 |---|---|
-| `purge(PDO): array` | Reinicio operacional completo. Vacía las 12 tablas transitorias en orden seguro y devuelve las filas borradas por tabla. |
+| `purge(PDO): array` | Reinicio operacional completo. Vacía las 14 tablas transitorias en orden seguro y devuelve las filas borradas por tabla. |
 | `purgeIncident(PDO, int $id): array` | Purga dirigida de un incidente y **todas** sus hijas por `incident_id`. |
 | `purgeIncidentsByMachine(PDO, int $machineId): array` | Ídem para todos los incidentes de una máquina. |
 | `purgeIncidentByTicket(PDO, string $ticketCode): array` | Ídem para un ticket concreto. |
@@ -142,19 +151,19 @@ ingenuo a propósito para demostrar que falla (§5).
 
 ## 5. Prueba de mordida
 
-`tests/integration/TestDataCleanerIsolationTest.php` (45 aserciones) es lo que
+`tests/integration/TestDataCleanerIsolationTest.php` (50 aserciones) es lo que
 impide que este contrato se degrade de nuevo en un helper que "parece" funcionar.
 Verifica:
 
-1. Las cuatro hijas `RESTRICT` admiten filas ligadas a un incidente vivo.
+1. Las cinco hijas `RESTRICT` admiten filas ligadas a un incidente vivo.
 2. El plan derivado del grafo coloca siempre `incidents` la última, y cada hija
    antes que su padre, incluidos los padres dobles (`incident_replaced_parts`
    referencia `incidents`, `preventive_orders` **y** `spare_parts`).
 3. **El orden ingenuo falla.** Reproduce el borrado histórico y afirma que lanza
    el error 1451 de MariaDB.
-4. `purge()` drena las cuatro hijas sin excepción y sin tocar las maestras.
+4. `purge()` drena las cinco hijas sin excepción y sin tocar las maestras.
 5. `purgeIncident()` drena un incidente sin afectar a los demás.
-6. Autoverificación de no-fuga: la suite no deja filas en las cuatro hijas.
+6. Autoverificación de no-fuga: la suite no deja filas en las cinco hijas.
 
 **Verificado por sabotaje:** invirtiendo el orden en `TestDataCleaner`, 15
 aserciones pasan a rojo, incluida la que reproduce el 1451 original. Un helper
@@ -203,10 +212,13 @@ deuda de infraestructura.
 2. **No hace falta tocar `TestDataCleaner`.** El grafo se lee en tiempo de
    ejecución y la tabla entra sola en el plan de purgado.
 3. Ejecutar `php tests/integration/TestDataCleanerIsolationTest.php`: la
-   aserción 2.7 exige que el plan siga teniendo 12 tablas, así que una tabla
+   aserción 2.7 exige que el plan siga teniendo 14 tablas, así que una tabla
    nueva obliga a actualizarla. Eso es intencionado: es el aviso de que el
    contrato cambió.
-4. Si la tabla necesita limpieza dirigida, añadir un método `purgeXxxBy…`
+4. **Excepción: tablas sin claves foráneas.** Una tabla suelta (como
+   `sanitary_sweep_passes`, el latido del barrido) no la descubre el grafo: hay
+   que declararla como raíz en `PURGE_ROOTS` o quedará fuera de `purge()`.
+5. Si la tabla necesita limpieza dirigida, añadir un método `purgeXxxBy…`
    siguiendo el patrón de `purgeMatchingIncidents()`.
 
 ---

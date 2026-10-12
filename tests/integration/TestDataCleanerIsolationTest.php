@@ -14,13 +14,13 @@ declare(strict_types=1);
  * base limpia y sólo explotaría en producción.
  *
  * Escenarios cubiertos:
- *   1. Las cuatro hijas con ON DELETE RESTRICT admiten filas y son drenadas.
+ *   1. Las cinco hijas con ON DELETE RESTRICT admiten filas y son drenadas.
  *   2. El orden derivado del grafo coloca siempre a las hijas antes que al padre.
  *   3. El orden inverso falla (el test muerde si alguien invierte el helper).
  *   4. El limpiador respeta las tablas maestras y las declaradas por el contrato.
  *   5. `purgeIncident()` drena un incidente concreto sin tocar los demás.
  *
- * Hecho cuando: el limpiador drena las 4 hijas RESTRICT, el orden es correcto y
+ * Hecho cuando: el limpiador drena las 5 hijas RESTRICT, el orden es correcto y
  * el orden ingenuo está demostrado como roto.
  */
 
@@ -44,7 +44,13 @@ $assert = static function (string $label, bool $condition, string $detail = '') 
 };
 
 /** Tablas hijas de `incidents` cuya FK es ON DELETE RESTRICT. */
-$restrictChildren = ['incident_replaced_parts', 'refund_requests', 'spare_part_requests', 'unclaimed_cash_findings'];
+$restrictChildren = [
+    'incident_replaced_parts',
+    'refund_requests',
+    'spare_part_requests',
+    'sanitary_sweep_contentions',
+    'unclaimed_cash_findings',
+];
 
 $countRows = static fn (string $table): int => (int)$pdo->query('SELECT COUNT(*) FROM `' . $table . '`')->fetchColumn();
 
@@ -102,10 +108,19 @@ try {
          VALUES ('CORRECTIVE', :iid, :mid, :lid, :tid, :pid, 1, 0.00, 'RECICLADO')"
     )->execute([':iid' => $incidentId, ':mid' => $machineId, ':lid' => $locationId, ':tid' => $technicianId, ':pid' => $partId]);
 
+    // El seguimiento de contención del barrido sanitario (T-PAUSE-41) es la quinta hija
+    // RESTRICT: también bloquea el borrado ingenuo de `incidents`.
+    $pdo->prepare(
+        "INSERT INTO `sanitary_sweep_contentions` (`incident_id`, `machine_id`, `first_detected_at`, `last_detected_at`,
+            `consecutive_passes`, `total_passes`)
+         VALUES (:iid, :mid, NOW(), NOW(), 1, 1)"
+    )->execute([':iid' => $incidentId, ':mid' => $machineId]);
+
     $assert('1.1 La tabla `refund_requests` admite una fila ligada a un incidente', $countRows('refund_requests') >= 1);
     $assert('1.2 La tabla `unclaimed_cash_findings` admite una fila ligada a un incidente', $countRows('unclaimed_cash_findings') >= 1);
     $assert('1.3 La tabla `spare_part_requests` admite una fila ligada a un incidente', $countRows('spare_part_requests') >= 1);
     $assert('1.4 La tabla `incident_replaced_parts` admite una fila ligada a un incidente', $countRows('incident_replaced_parts') >= 1);
+    $assert('1.5 La tabla `sanitary_sweep_contentions` admite una fila ligada a un incidente', $countRows('sanitary_sweep_contentions') >= 1);
 
     $pdo->rollBack();
 } catch (Throwable $e) {
@@ -152,7 +167,7 @@ $assert(
         && $position['incident_history'] < $position['incidents']
 );
 
-$assert('2.7 El plan cubre las 12 tablas transitorias del contrato', count($order) === 12, 'obtenidas: ' . count($order));
+$assert('2.7 El plan cubre las 14 tablas transitorias del contrato', count($order) === 14, 'obtenidas: ' . count($order));
 
 echo "\n--- 3. PRUEBA DE MORDIDA: el orden ingenuo debe fallar con 1451 ---\n";
 

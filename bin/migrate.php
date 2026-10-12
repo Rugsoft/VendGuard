@@ -73,7 +73,10 @@ try {
         'incident_replaced_parts',
         'route_settings',
         'refund_requests',
-        'unclaimed_cash_findings'
+        'unclaimed_cash_findings',
+        // Visibilidad operativa del barrido sanitario (Módulo 11: T-PAUSE-41)
+        'sanitary_sweep_passes',
+        'sanitary_sweep_contentions'
     ];
 
     echo "[4/4] Verificando esquema e integridad en vendguard_db:\n";

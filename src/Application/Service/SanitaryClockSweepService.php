@@ -4,18 +4,25 @@ declare(strict_types=1);
 
 namespace VendGuard\Application\Service;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use DomainException;
 use InvalidArgumentException;
 use PDOException;
 use RuntimeException;
 use Throwable;
 use VendGuard\Application\DTO\SanitaryClockSweepResultDto;
+use VendGuard\Core\Domain\Model\Incident;
+use VendGuard\Core\Domain\Model\SanitarySweepPass;
 use VendGuard\Core\Domain\Repository\LockWaitBudgetInterface;
 use VendGuard\Core\Domain\Repository\SanitaryClockCandidateRepositoryInterface;
+use VendGuard\Core\Domain\Repository\SanitarySweepVisibilityRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
+use VendGuard\Core\Service\SanitarySweepEscalationPolicy;
 use VendGuard\Infrastructure\Database\PdoLockWaitBudget;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
+use VendGuard\Infrastructure\Repository\PdoSanitarySweepVisibilityRepository;
 
 /**
  * SanitaryClockSweepService — Caso de uso del **barrido de fondo** del Reloj Sanitario
@@ -63,6 +70,21 @@ use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
  *    el tenedor legítimamente corto se resuelve esperando —medido: la transacción
  *    ganadora del cierre tarda milisegundos— y el que se alarga aparece como
  *    aplazamiento visible en lugar de bloquear el lote hasta el valor del servidor.
+ * 7. **La pasada se publica para la operación (T-PAUSE-41).** Cada pasada deja su
+ *    libro —apertura, cierre, recuentos y duración— y cada aplazamiento deja un
+ *    seguimiento por expediente con sus pasadas consecutivas, para que la
+ *    Coordinación pueda ver la contención persistente sin leer la respuesta del
+ *    planificador (RF-07). El libro se escribe **después** de consumir el reloj:
+ *    la salvaguarda sanitaria no puede depender de una tabla de observabilidad
+ *    (Art. II). Si esa escritura falla, el fallo viaja en voz alta y las
+ *    cuarentenas ya confirmadas quedan firmes e idempotentes. La pasada cierra los
+ *    seguimientos que **ella misma** no aplazó —por identidad, no por marca de
+ *    tiempo—, de modo que el cierre es exacto aunque dos pasadas caigan en el
+ *    mismo segundo. Escribir el rastro de un aplazamiento tampoco puede
+ *    convertirlo en un fallo: si esa escritura choca con el mismo bloqueo que
+ *    provocó el aplazamiento, la pasada sigue, el aplazamiento queda publicado
+ *    con su motivo y el prefiltro vuelve a ofrecer el candidato en la pasada
+ *    siguiente (cualquier otro fallo de observabilidad sí viaja en voz alta).
  *
  * Dogma Vanilla: PHP 8.2+ puro, tipado estricto, cero dependencias externas.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
@@ -89,6 +111,12 @@ final class SanitaryClockSweepService
     public const LOCK_WAIT_BUDGET_SECONDS = 2;
 
     /**
+     * Zona operativa del sistema: la misma que usan el reloj y la auditoría, para
+     * que las marcas del libro de pasadas sean comparables con el resto del dominio.
+     */
+    private const OPERATIONAL_TIMEZONE = 'Europe/Madrid';
+
+    /**
      * Códigos de driver (MariaDB/MySQL) que significan «otro consumidor tiene la fila»:
      * `ER_LOCK_WAIT_TIMEOUT` (1205) y `ER_LOCK_DEADLOCK` (1213).
      */
@@ -113,6 +141,12 @@ final class SanitaryClockSweepService
     /** Cota de espera de bloqueo de la pasada; se resuelve en el primer uso si no se inyecta. */
     private ?LockWaitBudgetInterface $lockWaitBudget;
 
+    /** Libro de pasadas y seguimientos de contención (T-PAUSE-41); se resuelve en el primer uso. */
+    private ?SanitarySweepVisibilityRepositoryInterface $visibilityRepo;
+
+    /** Regla del escalado, resuelta en el primer uso si no se inyecta. */
+    private ?SanitarySweepEscalationPolicy $escalationPolicy;
+
     /**
      * Todos los colaboradores son opcionales y se resuelven de forma perezosa, igual
      * que en `IncidentPauseService`: el servicio es construible sin base de datos y el
@@ -122,12 +156,16 @@ final class SanitaryClockSweepService
         ?SanitaryClockCandidateRepositoryInterface $candidateRepo = null,
         ?IncidentPauseService $pauseService = null,
         ?TransactionManagerInterface $transactionManager = null,
-        ?LockWaitBudgetInterface $lockWaitBudget = null
+        ?LockWaitBudgetInterface $lockWaitBudget = null,
+        ?SanitarySweepVisibilityRepositoryInterface $visibilityRepo = null,
+        ?SanitarySweepEscalationPolicy $escalationPolicy = null
     ) {
         $this->candidateRepo = $candidateRepo;
         $this->pauseService = $pauseService;
         $this->transactionManager = $transactionManager;
         $this->lockWaitBudget = $lockWaitBudget;
+        $this->visibilityRepo = $visibilityRepo;
+        $this->escalationPolicy = $escalationPolicy;
     }
 
     /**
@@ -170,6 +208,12 @@ final class SanitaryClockSweepService
     private function sweepCandidates(int $limit): SanitaryClockSweepResultDto
     {
         $startedAt = microtime(true);
+        // Instante de arranque de la pasada (T-PAUSE-41). Se captura ANTES de tocar la
+        // base y es la marca de apertura del libro y el instante de cada detección; el
+        // cierre de los seguimientos no depende de él —se cierra por identidad: los
+        // expedientes que ESTA pasada no aplazó— precisamente porque las marcas tienen
+        // resolución de segundo y dos pasadas pueden caer dentro del mismo.
+        $passStartedAt = self::now();
         $thresholdSeconds = IncidentPauseService::SANITARY_BIOLOGICAL_CLOCK_SECONDS;
 
         $candidates = $this->candidates()->findSanitaryClockCandidates($thresholdSeconds, $limit);
@@ -214,13 +258,21 @@ final class SanitaryClockSweepService
 
                 if (self::isRowContention($exception)) {
                     $contended[] = $entry;
+
+                    // Seguimiento operativo del aplazamiento (T-PAUSE-41): el que pierde
+                    // la carrera no deja estado ni auditoría —es el diseño de T-PAUSE-38/39—,
+                    // así que su rastro operativo se escribe aquí, y sólo aquí. No decide
+                    // nada: la política calcula el siguiente estado y el puerto lo guarda.
+                    $this->recordContention($incident, $passStartedAt);
                 } else {
                     $failures[] = $entry;
                 }
             }
         }
 
-        return new SanitaryClockSweepResultDto(
+        $durationMs = round((microtime(true) - $startedAt) * 1000, 2);
+
+        $result = new SanitaryClockSweepResultDto(
             candidates: count($candidates),
             evaluated: $evaluated,
             quarantined: $quarantined,
@@ -230,8 +282,93 @@ final class SanitaryClockSweepService
             contended: $contended,
             contendedCount: count($contended),
             thresholdSeconds: $thresholdSeconds,
-            durationMs: round((microtime(true) - $startedAt) * 1000, 2),
+            durationMs: $durationMs,
         );
+
+        // Libro de la pasada (T-PAUSE-41), SIEMPRE al final y con el resumen ya en la
+        // mano: primero se resuelven los seguimientos que esta pasada ya no aplazó —por
+        // identidad de los expedientes que sí aplazó— y después se registra el latido con
+        // los recuentos exactos del resumen. Si algo de esto falla, el fallo se propaga en
+        // voz alta —el planificador alerta— pero ninguna cuarentena deja de escribirse por
+        // culpa de la observabilidad (Art. II).
+        $this->visibility()->resolveContentionsNotDetectedIn(
+            array_map(
+                static fn (array $entry): int => (int)$entry['incident_id'],
+                $contended
+            ),
+            self::now()
+        );
+        $this->visibility()->recordPass(new SanitarySweepPass(
+            id: null,
+            startedAt: $passStartedAt->format('Y-m-d H:i:s'),
+            finishedAt: self::now()->format('Y-m-d H:i:s'),
+            candidates: $result->candidates,
+            evaluated: $result->evaluated,
+            quarantinedCount: count($result->quarantined),
+            contendedCount: $result->contendedCount,
+            failuresCount: $result->failuresCount,
+            durationMs: $durationMs,
+        ));
+
+        return $result;
+    }
+
+    /**
+     * Abre o continúa el seguimiento de contención del expediente aplazado (RF-07.2).
+     *
+     * El estado vigente se lee para distinguir una racha en curso de un episodio
+     * nuevo tras una resolución; el siguiente estado lo calcula la política, que es la
+     * única autoridad sobre el umbral de escalado.
+     *
+     * **El rastro del aplazamiento no puede convertir un aplazamiento en un fallo.**
+     * Si la propia escritura de la observación muere esperando el bloqueo que retiene
+     * otro consumidor —el mismo fenómeno que acabamos de clasificar como contención—,
+     * el seguimiento se salta en ESTA pasada y nada más: el expediente sigue publicado
+     * en `contended` con su motivo y su aplazamiento sigue contado en el libro de
+     * pasadas, de modo que la pérdida es un contador que arranca de nuevo cuando el
+     * prefiltro vuelva a ofrecer el candidato (la pasada siguiente, por construcción).
+     * La alternativa —abortar la pasada— convertía un aplazamiento normal en una alerta
+     * roja del planificador, que es exactamente el falso positivo que anula T-PAUSE-39.
+     *
+     * Sólo se tolera el bloqueo: **cualquier otro error de persistencia viaja en voz
+     * alta** (tabla ausente, disco lleno, columna inexistente), igual que en el libro de
+     * la pasada, porque una observabilidad rota es un problema real y no un aplazamiento.
+     */
+    private function recordContention(Incident $incident, DateTimeImmutable $passStartedAt): void
+    {
+        $incidentId = (int)$incident->getId();
+        if ($incidentId < 1) {
+            // Un candidato sin identificador no puede sostener un seguimiento y, además,
+            // no puede venir del prefiltro real: no se inventa una fila para él.
+            throw new RuntimeException(
+                'El barrido no puede registrar la contención de un candidato sin identificador de expediente.'
+            );
+        }
+
+        try {
+            $current = $this->visibility()->findContentionByIncident($incidentId);
+
+            $this->visibility()->saveContentionDetection(
+                $this->escalation()->nextDetection(
+                    $current,
+                    $incidentId,
+                    (int)$incident->getMachineId(),
+                    $passStartedAt
+                )
+            );
+        } catch (Throwable $exception) {
+            if (!self::isRowContention($exception)) {
+                throw $exception;
+            }
+        }
+    }
+
+    /**
+     * Instante operativo del sistema (zona de la sede), como el resto del dominio.
+     */
+    private static function now(): DateTimeImmutable
+    {
+        return new DateTimeImmutable('now', new DateTimeZone(self::OPERATIONAL_TIMEZONE));
     }
 
     /**
@@ -266,6 +403,23 @@ final class SanitaryClockSweepService
     private function lockBudget(): LockWaitBudgetInterface
     {
         return $this->lockWaitBudget ??= new PdoLockWaitBudget();
+    }
+
+    /**
+     * Libro de pasadas y seguimientos de contención, resuelto de forma perezosa
+     * sobre el repositorio PDO (T-PAUSE-41).
+     */
+    private function visibility(): SanitarySweepVisibilityRepositoryInterface
+    {
+        return $this->visibilityRepo ??= new PdoSanitarySweepVisibilityRepository();
+    }
+
+    /**
+     * Política del escalado, resuelta de forma perezosa: es pura y sin estado.
+     */
+    private function escalation(): SanitarySweepEscalationPolicy
+    {
+        return $this->escalationPolicy ??= new SanitarySweepEscalationPolicy();
     }
 
     /**

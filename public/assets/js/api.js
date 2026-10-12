@@ -740,6 +740,17 @@ export class ApiClient {
       return this.patch(`/coordinator/machines/${machineId}/preventive-config`, payload);
     },
 
+    /**
+     * Operación del barrido sanitario (Módulo 11: T-PAUSE-41, RF-07). Lectura única: el
+     * latido del barrido, la tendencia de 24 h, los expedientes aplazados por contención
+     * de fila y el nivel de escalado cuando el aplazamiento persiste. Sin escrituras: el
+     * seguimiento lo cierra el propio barrido en la primera pasada que ya no aplaza.
+     * @returns {Promise<Object>}
+     */
+    getSanitarySweepContention: () => {
+      return this.get('/coordinator/sanitary-sweep/contention');
+    },
+
     // Máquinas y Personal para Mantenimiento y Operaciones (RF-02, RF-03)
     getMachines: (params = {}) => {
       const q = new URLSearchParams(params).toString();
