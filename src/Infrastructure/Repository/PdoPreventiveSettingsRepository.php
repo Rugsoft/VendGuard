@@ -265,17 +265,37 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
      */
     public function updateSanitaryStatus(int $machineId, string $status): bool
     {
+        // Transición idempotente (compare-and-set): sólo toca la fila cuando el valor
+        // cambia, de modo que el retorno es una promesa fuerte —«esta llamada es la que
+        // escribió el estado»— y no un simple «la sentencia no falló». Es lo que permite
+        // al Reloj Sanitario Biológico arbitrar la carrera entre sus dos consumidores
+        // —la puerta sanitaria del cierre técnico y el barrido de fondo (T-PAUSE-38)— y
+        // garantizar un único rastro inmutable por cuarentena (Art. III).
+        // Dos marcadores distintos para el mismo valor a propósito: con prepares nativos
+        // (sin `ATTR_EMULATE_PREPARES`) un nombre repetido se aplana a marcadores
+        // posicionales y PDO no puede resolverlo (`SQLSTATE[HY093]: Invalid parameter
+        // number`). El contrato es el mismo —escribir sólo si el valor cambia— y cada
+        // `?` viaja con su binding.
         $stmt = $this->pdo->prepare("
             UPDATE `machines`
-            SET `sanitary_status` = :status,
+            SET `sanitary_status` = :new_status,
                 `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id AND `deleted_at` IS NULL
+            WHERE `id` = :id
+              AND `deleted_at` IS NULL
+              AND `sanitary_status` <> :previous_status
         ");
 
-        return $stmt->execute([
-            ':status' => $status,
+        $stmt->execute([
+            ':new_status' => $status,
+            ':previous_status' => $status,
             ':id' => $machineId,
         ]);
+
+        // `rowCount()` sobre un UPDATE cuenta sólo las filas realmente modificadas
+        // (el proyecto no activa `PDO::MYSQL_ATTR_FOUND_ROWS`), que es exactamente la
+        // pregunta del compare-and-set. MySQL reevalúa el `WHERE` tras tomar el bloqueo
+        // de la fila, así que de dos escritores simultáneos uno solo ve la transición.
+        return $stmt->rowCount() === 1;
     }
 
     /**

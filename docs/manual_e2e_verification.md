@@ -86,6 +86,17 @@ sequenceDiagram
    * **Reglas de Desasignación y Reloj:** El estado pasa a `REOPENED`, `assigned_technician_id` pasa a `null` para nuevo triaje y el reloj de 48 horas se reinicia a 0 (`resolved_at = null`).
 3. **Auditabilidad Inmutable (Art. III):** Comprobación en `incident_history` del registro secuencial inalterado de todos los estados: `REGISTERED` ➔ `ASSIGNED` ➔ `IN_PROGRESS` ➔ `RESOLVED` ➔ `REOPENED`. La reapertura deja además su evento inmutable `REOPEN_TICKET` en `audit_log` (`user_role = SITE_MANAGER`), que es el que alimenta el filtro *"Reapertura de Ticket"* del visor de auditoría (EARS 5.1.2).
 
+### Paso 5: Activación Automática de la Cuarentena Sanitaria (`POST /api/cron/sanitary-clock-sweep`, T-PAUSE-38)
+1. **Preparación:** máquina bajo vigilancia sanitaria (`PERISHABLE_FOOD` o `COMBO`) sin cuarentena, con un expediente vivo abierto hace más de 4 h naturales y **sin ningún intento de cierre**.
+2. **Disparo del barrido:** `POST /api/cron/sanitary-clock-sweep` con la cabecera `X-Cron-Secret` (o, sin HTTP, `php bin/sanitary_clock_sweep.php`).
+   * **Resultado:** HTTP 200 OK con `candidates`, `evaluated`, `quarantined`, `skipped`, `failures`, `failures_count`, `threshold_seconds` (14.400) y `duration_ms`. La máquina objetivo aparece en `quarantined` y `failures_count` es 0.
+3. **Comprobación sanitaria:** la máquina queda en `QUARANTINE` con **un solo** evento `SANITARY_QUARANTINE_AUTO_TRIGGERED` (actor `SYSTEM`) en el visor de auditoría, que lo etiqueta como *Cuarentena Sanitaria Automática*.
+4. **Publicación ciudadana y de sede:** `GET /api/qr/scan/{code}` devuelve `status_mode: "SANITARY_QUARANTINE"`, `can_report: false` y el distintivo «Riesgo térmico: máquina en cuarentena preventiva»; el portal de sede publica el estado sanitario de la máquina en su tarjeta.
+5. **Puerta del cierre (RF-03.5.2):** `POST /api/technician/incidents/{id}/resolve` sin declaraciones responde `422 SANITARY_CHECKLIST_REQUIRED` y el expediente permanece en `IN_PROGRESS`.
+6. **Idempotencia:** una segunda pasada del barrido no vuelve a declarar la máquina ni añade rastro (`quarantined` sin ella y sin eventos nuevos).
+7. **Vuelta al servicio:** la cuarentena sólo se levanta con la reinspección del módulo 05 (temperatura ≤ 4,0 °C más checklist de higienización) sobre la orden que abre coordinación; el barrido no la desbloquea nunca.
+8. **Programación en operación:** el barrido se programa cada **15 minutos** —`curl -sS -X POST -H "X-Cron-Secret: $CRON_SECRET" https://<host>/api/cron/sanitary-clock-sweep` o `php bin/sanitary_clock_sweep.php`—, de modo que la latencia de detección queda acotada en «4 h naturales + hasta 15 minutos».
+
 ---
 
 ## 4. Conclusión de la Tarea T-40
@@ -93,4 +104,4 @@ El recorrido funcional de extremo a extremo ha sido ejecutado satisfactoriamente
 
 > **Nota (08/10/2026):** el guion se ejecuta además en la **Fase 4** de `php tests/run_all.php`, con el servidor HTTP todavía en marcha, de modo que una regresión de flujo rompe ya la batería global. Cifra vigente de la batería completa:
 >
-> batería global: 243 suites · 9.239 aserciones
+> batería global: 245 suites · 9.290 aserciones

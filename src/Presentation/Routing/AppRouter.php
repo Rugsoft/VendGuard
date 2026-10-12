@@ -233,6 +233,11 @@ class AppRouter
         // CronAuthMiddleware y el controlador exige la marca de autorización (hallazgo S-2).
         $cronAuth = new \VendGuard\Presentation\Http\Middleware\CronAuthMiddleware();
         $router->post('/api/cron/auto-close', [\VendGuard\Presentation\Controller\CronController::class, 'autoClose'], [$cronAuth]);
+        // Barrido de fondo del Reloj Sanitario Biológico (T-PAUSE-38, RF-03.5.1, Art. II): activa
+        // la cuarentena automática sin que nadie intente cerrar la avería. Misma credencial de
+        // máquina y mismo controlador fail-closed que el auto-cierre; la cadencia ratificada es
+        // de 15 minutos.
+        $router->post('/api/cron/sanitary-clock-sweep', [\VendGuard\Presentation\Controller\CronController::class, 'sweepSanitaryClock'], [$cronAuth]);
 
         // -----------------------------------------------------------------
         // 7. Módulo de Códigos QR - Rutas Públicas (T-QR-10)

@@ -19,9 +19,11 @@ use VendGuard\Core\Domain\Exception\WarrantyExpiredException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\IncidentHistory;
+use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentSiteResponseRepositoryInterface;
+use VendGuard\Core\Domain\Repository\SanitaryClockCandidateRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -33,7 +35,7 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  * Garantiza transaccionalidad atómica en la creación, inmutabilidad de la auditoría y
  * cumplimiento estricto del mandato constitucional de Soft Delete (RNF-03).
  */
-class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface
+class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface
 {
     /**
      * Marcadores canónicos de las notas de auditoría de la pausa (RF-01.4).
@@ -2067,6 +2069,114 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         }
 
         return $closedIncidents;
+    }
+
+    /**
+     * Expedientes candidatos al barrido de fondo del Reloj Sanitario Biológico
+     * (T-PAUSE-38, RF-03.5.1, Art. II): vivos, sobre una máquina bajo vigilancia
+     * sanitaria y con la apertura por encima del umbral indicado.
+     *
+     * El prefiltro es **capacidad, no decisión**: deja fuera lo que el reloj no puede
+     * considerar —tipologías sin producto fresco, expedientes liquidados y máquinas ya
+     * en cuarentena— y ordena por antigüedad para que una pasada acotada atienda primero
+     * lo más urgente. La regla sigue viviendo en
+     * `IncidentPauseService::evaluateSanitaryBiologicalClock()`, que revalida tipología,
+     * estado, apertura y umbral sobre cada entidad hidratada, de modo que un candidato
+     * devuelto aquí puede legítimamente no entrar en cuarentena.
+     *
+     * Los dos criterios del `WHERE` se derivan de sus únicas autoridades —la vigilancia
+     * sanitaria de `MachineType::requiresSanitaryWatch()` y el ciclo de vida de
+     * `IncidentStatus::isTerminal()`— y no se escriben a mano, para que una tipología o
+     * un estado nuevo no queden fuera del barrido por un descuido de esta consulta. El
+     * literal `QUARANTINE` de la exclusión es el valor del `ENUM` de la columna.
+     *
+     * La hidratación replica la lista de columnas de `findByIdUnlocked()` (incluidas
+     * `m.machine_type`, `l.name` y `u.name`) para que el agregado llegue completo al
+     * reloj, que usa la tipología enriquecida como respaldo cuando no hay ficha.
+     *
+     * @param int $thresholdSeconds Umbral del reloj en segundos naturales (14.400 s = 4 h).
+     * @param int $limit Cota superior del lote, para acotar el coste de una pasada.
+     * @return list<Incident> Candidatos ordenados por apertura ascendente.
+     *
+     * @throws InvalidArgumentException Si el umbral o la cota no son valores positivos.
+     */
+    public function findSanitaryClockCandidates(int $thresholdSeconds, int $limit = 500): array
+    {
+        if ($thresholdSeconds < 1) {
+            throw new InvalidArgumentException('El umbral del barrido sanitario debe ser de al menos un segundo.');
+        }
+
+        if ($limit < 1) {
+            throw new InvalidArgumentException('La cota del barrido sanitario debe ser de al menos un expediente.');
+        }
+
+        $watchTypes = array_values(array_map(
+            static fn (MachineType $type): string => $type->value,
+            array_filter(MachineType::cases(), static fn (MachineType $type): bool => $type->requiresSanitaryWatch())
+        ));
+
+        // Estados vivos: el catálogo menos los terminales (`isTerminal()`) y la resolución
+        // técnica (`isResolved()`), que es exactamente el trío —`RESOLVED`, `CLOSED`,
+        // `CANCELLED`— que el reloj descarta antes de disparar. `RESOLVED` queda fuera a
+        // propósito: un expediente ya resuelto no dispara esta cuarentena, así que no se
+        // gasta una evaluación en él.
+        $liveStatuses = array_values(array_map(
+            static fn (IncidentStatus $status): string => $status->value,
+            array_filter(
+                IncidentStatus::cases(),
+                static fn (IncidentStatus $status): bool => !$status->isTerminal() && !$status->isResolved()
+            )
+        ));
+
+        $typePlaceholders = implode(', ', array_map(
+            static fn (int $index): string => ':watch_type_' . $index,
+            array_keys($watchTypes)
+        ));
+        $statusPlaceholders = implode(', ', array_map(
+            static fn (int $index): string => ':live_status_' . $index,
+            array_keys($liveStatuses)
+        ));
+
+        $sql = "
+            SELECT
+                i.*,
+                m.code AS machine_code,
+                m.model AS machine_model,
+                m.machine_type AS machine_type,
+                l.name AS location_name,
+                l.site_code AS location_site_code,
+                u.name AS technician_name
+            FROM `incidents` i
+            INNER JOIN `machines` m ON m.id = i.machine_id
+            LEFT JOIN `locations` l ON l.id = i.location_id
+            LEFT JOIN `users` u ON u.id = i.assigned_technician_id
+            WHERE i.deleted_at IS NULL
+              AND m.deleted_at IS NULL
+              AND m.sanitary_status <> 'QUARANTINE'
+              AND m.machine_type IN ({$typePlaceholders})
+              AND i.status IN ({$statusPlaceholders})
+              AND i.created_at <= DATE_SUB(NOW(), INTERVAL :threshold_seconds SECOND)
+            ORDER BY i.created_at ASC, i.id ASC
+            LIMIT {$limit}
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+
+        foreach ($watchTypes as $index => $machineType) {
+            $stmt->bindValue(':watch_type_' . $index, $machineType, PDO::PARAM_STR);
+        }
+
+        foreach ($liveStatuses as $index => $liveStatus) {
+            $stmt->bindValue(':live_status_' . $index, $liveStatus, PDO::PARAM_STR);
+        }
+
+        $stmt->bindValue(':threshold_seconds', $thresholdSeconds, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return array_map(
+            static fn (array $row): Incident => Incident::fromDatabaseRow($row),
+            $stmt->fetchAll(PDO::FETCH_ASSOC)
+        );
     }
 }
 

@@ -294,13 +294,25 @@ final class IncidentPauseService
      * restablecida mientras la máquina siga en cuarentena.
      *
      * Reglas que muerde este método:
-     * 1. **Sólo perecederos.** Cualquier otra tipología (bebidas, snacks, mixta) progresa
-     *    únicamente con el reloj contractual: devuelve `false` sin tocar la máquina.
+     * 1. **Sólo máquinas bajo vigilancia sanitaria.** Las perecederas (`PERISHABLE_FOOD`)
+     *    y las mixtas con módulo refrigerado (`COMBO`) progresan con el reloj biológico
+     *    (RF-03.4, ratificado en T-PAUSE-26). Bebidas frías, snacks y bebidas calientes
+     *    sólo tienen reloj contractual: devuelve `false` sin tocar la máquina.
      * 2. **Sólo averías vivas.** Un ticket `RESOLVED`, `CLOSED` o `CANCELLED` ya no puede
      *    disparar la cuarentena: si la cadena de frío se restableció, cualquier bloqueo
      *    posterior pertenece al flujo preventivo de reinspección, no a este reloj.
-     * 3. **Idempotencia.** Evaluar dos veces la misma máquina no duplica ni la escritura
-     *    ni el rastro: si ya está en `QUARANTINE`, devuelve `true` sin volver a auditar.
+     * 3. **Idempotencia de verdad (compare-and-set).** Evaluar dos veces la misma máquina
+     *    no duplica ni la escritura ni el rastro: si ya está en `QUARANTINE`, devuelve
+     *    `true` sin volver a auditar, y si la transición no fue la que cambió el valor
+     *    —porque otro consumidor ganó la carrera— confirma la cuarentena **sin** emitir
+     *    un segundo evento inmutable (Art. III).
+     *
+     * **Dos consumidores, una sola decisión.** El reloj se consume desde la puerta
+     * sanitaria del cierre técnico (`TechnicianController::resolveIncident()`, T-PAUSE-22)
+     * y desde el barrido de fondo (`SanitaryClockSweepService`, T-PAUSE-38), que es el
+     * que materializa la activación automática de RF-03.5.1 sin que nadie intente cerrar.
+     * Ninguno de los dos reimplementa la regla: ambos entregan el expediente a este
+     * método, que sigue siendo la única autoridad sobre la decisión.
      *
      * La tipología se resuelve primero contra la máquina persistida y sólo después
      * contra el campo enriquecido del expediente. Si ninguna de las dos la declara, el
@@ -369,6 +381,17 @@ final class IncidentPauseService
         }
 
         if (!$this->settings()->updateSanitaryStatus($machineId, self::SANITARY_STATUS_QUARANTINE)) {
+            // Transición idempotente (compare-and-set): un `false` no significa «la
+            // escritura falló» sino «esta llamada no cambió el valor». Si el estado
+            // fresco ya está en cuarentena, otro consumidor —el barrido de fondo o el
+            // cierre técnico— ganó la carrera y su rastro inmutable ya existe: confirmar
+            // sin auditar es lo correcto y evita el evento duplicado. Si sigue sin estar
+            // en cuarentena, la fila no se pudo tocar y el método se detiene en lugar de
+            // fingir que la máquina quedó fuera de servicio (Fail-Fast, Art. II).
+            if ($this->isSanitaryQuarantined($machineId)) {
+                return true;
+            }
+
             throw new RuntimeException(sprintf(
                 'No se pudo activar la cuarentena sanitaria de la máquina %d tras superar el umbral de 4 horas naturales (Art. II).',
                 $machineId
@@ -402,6 +425,27 @@ final class IncidentPauseService
         );
 
         return true;
+    }
+
+    /**
+     * Relectura del estado sanitario de una máquina para arbitrar la carrera del disparo
+     * automático (T-PAUSE-38, Art. III).
+     *
+     * Sólo se invoca cuando la transición idempotente devolvió `false`: es el caso en que
+     * el valor no lo cambió esta llamada, y la única forma honesta de distinguir «otro
+     * consumidor acaba de ponerla en cuarentena» (éxito compartido, sin segundo rastro)
+     * de «la fila no se pudo tocar» (fallo real, que debe detener el cierre) es volver a
+     * preguntar por el estado persistido.
+     *
+     * @param int $machineId Máquina cuyo estado sanitario se relee.
+     * @return bool `true` si la máquina está ya en cuarentena sanitaria.
+     */
+    private function isSanitaryQuarantined(int $machineId): bool
+    {
+        $fresh = $this->settings()->getMachineSettings($machineId);
+
+        return is_array($fresh)
+            && (string)($fresh['sanitary_status'] ?? '') === self::SANITARY_STATUS_QUARANTINE;
     }
 
     /**

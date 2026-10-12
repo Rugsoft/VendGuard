@@ -198,6 +198,36 @@ Para cumplir con la precisión temporal requerida (RNF-01) y la respuesta ágil 
 
 ---
 
+### 2.5. Endpoint de Barrido del Reloj Sanitario (`POST /api/cron/sanitary-clock-sweep`)
+
+Consumidor de fondo del Algoritmo 4 (T-PAUSE-38, RF-03.5.1). Protegido por `CronAuthMiddleware` —mismo contrato que `/api/cron/auto-close`: cabecera `X-Cron-Secret`, `Bearer <CRON_SECRET>` o sesión de `COORDINATOR`— y **fail-closed**: el controlador sin la marca `cron_authenticated` responde `401` aunque el secreto sea válido. No estrena códigos de error: reutiliza el `UNAUTHORIZED` ya documentado en `api_contracts.md` §1.3.
+
+```json
+{
+  "success": true,
+  "data": {
+    "candidates": 2,
+    "evaluated": 2,
+    "quarantined": [{ "incident_id": 41, "ticket_code": "INC-2026-000041", "machine_id": 7 }],
+    "skipped": 1,
+    "failures": [{ "incident_id": 44, "ticket_code": "INC-2026-000044", "reason": "..." }],
+    "failures_count": 1,
+    "threshold_seconds": 14400,
+    "duration_ms": 12.4
+  }
+}
+```
+
+* `candidates`: expedientes devueltos por el prefiltro del repositorio (capacidad y economía de consulta, **no** decisión: la decisión la toma el reloj).
+* `evaluated`: candidatos evaluados de verdad por el reloj (candidatos − fallos).
+* `quarantined`: máquinas que el reloj reporta en cuarentena tras la evaluación. El disparo de **esta** corrida queda sellado, además, como evento `SANITARY_QUARANTINE_AUTO_TRIGGERED` en la bitácora inmutable (Art. III).
+* `skipped`: evaluados que no requieren cuarentena (umbral no alcanzado en la relectura del reloj o expediente liquidado en carrera con otro consumidor).
+* `failures` / `failures_count`: candidatos cuya evaluación no pudo decidirse (tipología o apertura ilegibles) o cuya escritura no se pudo persistir; **nunca** se silencian, viajan en la respuesta y el CLI termina con `exit 1` si hay alguno.
+
+La cadencia operativa (**15 minutos**, ratificada por el Product Owner) y el comando de programación se documentan en `README.md`. **Límite declarado:** la activación automática depende de que el planificador esté configurado fuera del repositorio; hasta entonces el mecanismo queda entregado y probado, pero no activo.
+
+---
+
 ## 3. Algoritmos Clave en Pseudocódigo y Máquinas de Estado
 
 ### 3.1. Algoritmo 1: Máquina de Estados Ampliada con `PENDING_INFO`
@@ -410,6 +440,8 @@ ALGORITMO EvaluarDobleRelojSanitario(incidencia, maquina, ahora)
 FIN ALGORITMO
 ```
 
+> **Consumidor de fondo (T-PAUSE-38, 2026-10-12).** El Algoritmo 4 se consume hoy desde dos caminos: la puerta sanitaria del cierre técnico (T-PAUSE-22, RF-03.5.2) y el **barrido periódico** de §2.5, que es el que materializa la activación automática de RF-03.5.1 **sin interacción humana**. El barrido no decide nada por su cuenta: selecciona candidatos (expediente vivo, máquina bajo vigilancia, sin cuarentena previa y con más de 4 h naturales desde la apertura) y llama al mismo `IncidentPauseService::evaluateSanitaryBiologicalClock()`, dentro de una transacción por expediente para que el estado y su rastro inmutable sean una sola unidad de trabajo (Art. III). La escritura del estado es una **transición idempotente (compare-and-set)**: de dos consumidores simultáneos sobre la misma máquina, sólo uno escribe y sólo uno deja el evento, de modo que la cuarentena no puede duplicar su rastro. La marca `incidencia.sanitary_quarantine_triggered` del pseudocódigo no se persiste como columna: el bloqueo del formulario se deriva en lectura (`IncidentPauseService::sanitaryResolutionRequirement()`), tal y como certifica T-PAUSE-25.
+
 ---
 
 ### 3.5. Algoritmo 5: Detección de Inactividad de 72h Hábiles y Cancelación Segura (Art. V.1 y V.2)
@@ -556,6 +588,13 @@ FIN ALGORITMO
   * Prueba de desplazamiento de SLA comercial: verifica que los minutos de pausa aplacen `sla_target_at` saltando fines de semana y noches.
 * **`MetricsCalculationServiceTest.php`:**
   * Verifica que el cálculo de MTTR reste exactamente `total_pending_info_seconds` del tiempo transcurrido entre creación y resolución.
+* **`SanitaryClockSweepServiceTest.php`:**
+  * Barrido con candidatos elegibles: una máquina entra en cuarentena una sola vez y su rastro inmutable se emite una sola vez.
+  * Idempotencia: un segundo barrido sobre el mismo parque no vuelve a escribir ni a auditar.
+  * Aislamiento: un candidato indecidible viaja a `failures` sin abortar el resto del lote, y el lote respeta su cota.
+* **`IncidentPauseSanitaryClockTest.php` (ampliación):**
+  * Exclusión mutua: con dos consumidores simultáneos sobre la misma máquina, un solo evento inmutable y ninguna segunda escritura.
+  * Fallo real de escritura: sigue lanzando excepción y no deja rastro de cuarentena.
 
 ### 6.2. Pruebas Unitarias Reactivas Frontend (Node.js ESM)
 
@@ -580,6 +619,10 @@ FIN ALGORITMO
   * **Blindaje Art. II:** En máquina de perecederos, simula 4 horas naturales de reloj biológico y verifica que `updateSanitaryStatus` active `QUARANTINE` y el formulario de resolución bloquee el cierre sin declaración sanitaria.
   * **Blindaje Art. III:** Historial inmutable en `incident_history` sin sobreescrituras ni sentencias `DELETE FROM`.
   * **Blindaje Art. V.4:** Petición pública `GET /api/qr/scan/{code}` verifica que el ciudadano solo recibe *"En proceso de atención técnica"*, sin causas internas de bloqueo de puerta ni etiquetas de pausa.
+* **`SanitaryClockSweepEndpointTest.php`:**
+  * `POST /api/cron/sanitary-clock-sweep` sin credencial ⇒ `401`; con `X-Cron-Secret` y con sesión de coordinador ⇒ `200`; el controlador sin la marca del middleware ⇒ `401` (fail-closed).
+  * **Prueba decisiva (la desviación que se cierra):** expediente vivo de máquina perecedera abierto hace más de 4 h naturales, máquina en `OK` y **ningún intento de cierre**: el barrido deja la máquina en `QUARANTINE` con **un** evento `SANITARY_QUARANTINE_AUTO_TRIGGERED`, y la publicación de sede y el escaneo ciudadano ya muestran el bloqueo.
+  * Controles negativos: bebidas frías, snacks, expedientes liquidados y umbrales no alcanzados no despiertan; el segundo barrido no añade rastro.
 
 ---
 
@@ -598,7 +641,7 @@ FIN ALGORITMO
 | **RF-03.2** | Reloj contractual visualmente congelado (`⏸️ SLA pausado`). | `CoordinatorIncidentDetailModal.js` | Test JS comprobando renderizado de insignia de pausa. |
 | **RF-03.3** | Desplazamiento de `sla_target_at` en horario comercial de sede por el **tiempo hábil realmente perdido** (nota de cierre de F-3 en §3.3). | `IncidentPauseService::shiftSlaTargetInBusinessHours()` + `pauseBusinessSecondsSince()` | Test calculando salto de fin de semana y noches, y pausa de fin de semana que no mueve el vencimiento. |
 | **RF-03.4** | Reloj Sanitario Biológico continuo 24/7 en las máquinas bajo vigilancia sanitaria —perecederas `PERISHABLE_FOOD` y mixtas `COMBO` (Art. II, ratificado en T-PAUSE-26). | `IncidentPauseService::evaluateSanitaryBiologicalClock()` | Test simulando 4 horas naturales continuas. |
-| **RF-03.5** | Cuarentena automática a las 4h y bloqueo en resolución (Art. II). | `PdoPreventiveSettingsRepository`, validador resolución | Test verificando modo `QUARANTINE` y rechazo de resolución sin checklist. |
+| **RF-03.5** | Cuarentena automática a las 4h (activada por el barrido de fondo de §2.5, sin intento de cierre) y bloqueo en resolución (Art. II). | `SanitaryClockSweepService`, `CronController`, `PdoPreventiveSettingsRepository` (transición idempotente), validador de resolución | Test verificando modo `QUARANTINE` y rechazo de resolución sin checklist; `SanitaryClockSweepEndpointTest` certifica la activación **sin intento de cierre** y el rastro único. |
 | **RF-04.1** | Pausas múltiples acumulativas en un mismo ticket. | `PdoIncidentRepository.php` | Test acumulando dos pausas sucesivas en `total_pending_info_seconds`. |
 | **RF-04.2** | Detección de inactividad de 72 horas hábiles comerciales. | `IncidentPauseService::isProlongedInactivity()` | Test calculando 72h hábiles de 08:00 a 18:00. |
 | **RF-04.3** | Cancelación justificada supervisada por Coordinador ($\ge 20$ chars). | `CoordinatorController::cancelInactivity()` | Test validando cancelación formal con motivo obligatorio. |

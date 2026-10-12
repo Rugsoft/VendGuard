@@ -97,9 +97,20 @@ interface PreventiveSettingsRepositoryInterface
     /**
      * Actualiza el estado higiénico-sanitario de una máquina ('OK', 'ATTENTION_REQUIRED', 'EXPIRED', 'QUARANTINE', 'SEASONAL_PAUSE').
      *
+     * La transición es **idempotente (compare-and-set)**: sólo escribe cuando el valor
+     * cambia y devuelve `true` únicamente cuando esta llamada es la que lo cambió. Un
+     * `false` significa, por tanto, «el valor ya estaba aplicado» o «la fila no existe
+     * o no es modificable» — nunca «la sentencia falló», porque los errores de PDO se
+     * propagan como excepción.
+     *
+     * Esa promesa fuerte es la que permite al Reloj Sanitario Biológico arbitrar la
+     * carrera entre sus dos consumidores —la puerta sanitaria del cierre técnico
+     * (RF-03.5.2) y el barrido de fondo (RF-03.5.1, T-PAUSE-38)— y garantizar un único
+     * rastro inmutable por cuarentena (Art. III).
+     *
      * @param int $machineId
      * @param string $status
-     * @return bool
+     * @return bool `true` si esta llamada cambió el estado; `false` si ya estaba aplicado.
      */
     public function updateSanitaryStatus(int $machineId, string $status): bool;
 }

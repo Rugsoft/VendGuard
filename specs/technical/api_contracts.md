@@ -880,7 +880,7 @@ Petición completa de un cierre sobre máquina en cuarentena:
   * Declarar **no desbloquea** la máquina: sigue en `QUARANTINE` y sólo la reinspección reglamentaria del módulo 05 (temperatura ≤ 4,0 °C más checklist de higienización) la devuelve a `OK`.
   * El cierre queda congelado en la auditoría inmutable (Art. III): el evento `RESOLVE_INCIDENT` guarda las declaraciones en su estado resultante y marca `sanitary_declarations_recorded: true` en sus metadatos, con el actor técnico.
 
-* **Límite declarado (medido, 2026-10-12):** la cuarentena por reloj biológico se materializa al **intentar** el cierre, porque es el único punto que consume el reloj; no hay planificador de fondo. Entre las 4 h naturales y ese primer intento, la máquina sigue publicándose como `OK` en el portal de sede y en el escaneo ciudadano: es la única desviación viva sobre RF-03.5.1 (enmienda de T-PAUSE-18 en `specs/11-pending-info-sla-pause/tasks.md`).
+* **CERRADO (2026-10-12, T-PAUSE-38): la activación automática ya no espera al intento de cierre.** El reloj biológico estrena un **segundo consumidor de fondo** —el barrido periódico `POST /api/cron/sanitary-clock-sweep` (§6.2), con su equivalente `bin/sanitary_clock_sweep.php`— que evalúa las máquinas bajo vigilancia cada **15 minutos** sin que nadie intente cerrar la avería: la máquina se publica bloqueada en el portal de sede y en el escaneo ciudadano en cuanto el umbral de 4 h naturales se supera. La medición de antes del arreglo —18.000 s naturales sin interacción ⇒ `sanitary_status = OK` y el escaneo ciudadano en `ACTIVE_INCIDENT`— queda sustituida por una **latencia acotada de hasta 15 minutos** (criterio de contrato de RF-03.5 en `specs/functional/pending_info_sla_pause_spec.md`). Este cierre técnico (§5.4.1) sigue consumiendo el mismo reloj como puerta del formulario, y la transición sanitaria es idempotente: dos consumidores simultáneos sobre la misma máquina dejan una sola cuarentena y **un solo** evento `SANITARY_QUARANTINE_AUTO_TRIGGERED` (Art. III).
 ### 5.5 `GET|POST /api/technician/incidents/{id}/comments` (Hilo de Conversación de la Ruta)
 
 Hilo de conversación del expediente en la vista móvil *Mi Ruta*: el técnico consulta la conversación completa
@@ -979,3 +979,32 @@ Ejecutado periódicamente por el sistema para archivar incidencias resueltas tra
   }
 }
 ```
+### 6.2 `POST /api/cron/sanitary-clock-sweep` (Barrido del Reloj Sanitario Biológico · T-PAUSE-38)
+
+Ejecutado periódicamente por el sistema —cadencia ratificada: **15 minutos**— para consumir el Reloj
+Sanitario Biológico **sin que nadie intente cerrar la avería** y activar la cuarentena de las máquinas bajo
+vigilancia sanitaria (`PERISHABLE_FOOD` y `COMBO`) con más de 4 h naturales sin frío confirmado
+(RF-03.5.1, RF-03.4, Art. II). Es el consumidor que materializa la activación automática: entre el umbral
+y la pasada siguiente la latencia queda acotada en «4 h naturales + hasta 15 minutos».
+
+* **Autenticación:** `CronAuthMiddleware`, con las mismas credenciales que §6.1 —cabecera `X-Cron-Secret`, `Authorization: Bearer <CRON_SECRET>` o sesión de `COORDINATOR`— y el controlador es **fail-closed**: sin la marca `cron_authenticated` responde `401` aunque el secreto sea válido.
+* **Respuesta Exitosa (`200 OK`):**
+```json
+{
+  "success": true,
+  "data": {
+    "candidates": 2,
+    "evaluated": 2,
+    "quarantined": [{"incident_id": 41, "ticket_code": "INC-2026-000041", "machine_id": 7}],
+    "skipped": 1,
+    "failures": [{"incident_id": 44, "ticket_code": "INC-2026-000044", "reason": "..."}],
+    "failures_count": 1,
+    "threshold_seconds": 14400,
+    "duration_ms": 12.4
+  }
+}
+```
+* **Semántica de las claves:** `candidates` son los expedientes que publicó el prefiltro del repositorio (capacidad y economía de consulta, **no** decisión); `evaluated` son los que el reloj evaluó de verdad; `quarantined` son las máquinas que quedan en cuarentena tras la pasada —el disparo concreto queda sellado como evento `SANITARY_QUARANTINE_AUTO_TRIGGERED` en la bitácora inmutable, que es la fuente de verdad de qué máquina entró y cuándo—; `skipped` son los evaluados que no requieren cuarentena (umbral no alcanzado en la relectura del reloj o expediente liquidado en carrera); y `failures`/`failures_count` son los candidatos cuya evaluación no pudo decidirse (tipología o apertura ilegibles) o cuya escritura no se pudo persistir.
+* **Respuesta de Error (`401 Unauthorized`):** credencial ausente o inválida, o controlador invocado sin pasar por el middleware (código `UNAUTHORIZED`).
+* **Efectos y garantías:** la transición del estado sanitario es **idempotente (compare-and-set)** y cada candidato se evalúa dentro de su propia unidad de trabajo, de modo que el estado y su evidencia inmutable caen juntos (Art. III) y dos consumidores simultáneos —este barrido y la puerta sanitaria del cierre (§5.4.1)— dejan una sola cuarentena y un solo evento. Un fallo de una máquina no aborta el lote: viaja en `failures` y el equivalente de línea de comandos (`bin/sanitary_clock_sweep.php`) termina con código distinto de cero para que el planificador pueda alertar.
+* **Equivalente de línea de comandos:** `php bin/sanitary_clock_sweep.php` (mismos datos y mismos códigos de salida) para programadores que no disponen de HTTP.

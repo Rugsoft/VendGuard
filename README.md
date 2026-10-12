@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/MariaDB-10.11%2B%20%7C%20MySQL%208.0-003545?style=flat-square&logo=mariadb&logoColor=white)](https://mariadb.org/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-243%20Suites%20%7C%209.239%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-245%20Suites%20%7C%209.290%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -40,6 +40,7 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 * **Modal de Detalle Integral en Triaje:** Ficha completa de solo lectura de cada avería (máquina y sede, bitácora de evidencias, piezas, SLA y cronología de auditoría con atribución) conforme a la especificación [`specs/09-incident-detail-modal/`](specs/09-incident-detail-modal/spec.md).
 * **Vista Móvil "Mi Ruta" para Técnicos:** Interfaz vertical optimizada para smartphone (uso con una sola mano), inicio de intervención in situ, pausa estructurada por repuestos, resolución técnica justificada con declaración de piezas sustituidas y consulta de métricas individuales.
 * **Cron Automatizado de Garantía:** Cierre definitivo de tickets resueltos transcurridas 48h sin reclamaciones (`/api/cron/auto-close`).
+* **Barrido Automático de Cuarentena Sanitaria:** Consumo de fondo del Reloj Sanitario Biológico cada 15 min (`/api/cron/sanitary-clock-sweep` y `bin/sanitary_clock_sweep.php`): activa la cuarentena de las máquinas de frío con más de 4 h naturales sin frío confirmado **sin** esperar a un intento de cierre (RF-03.5.1, Art. II).
 
 ### 2. Ecosistema de Códigos QR Físicos
 * **Generador Nativo de QR en SVG:** Renderizado vectorial puro conforme a la especificación ISO/IEC 18004 con corrección de errores Reed-Solomon (Nivel M/Q).
@@ -160,6 +161,23 @@ php -S 127.0.0.1:8000 -t public public/index.php
 Abre en tu navegador:
 👉 **[http://127.0.0.1:8000/](http://127.0.0.1:8000/)**
 
+### 4. Programar los Procesos de Fondo (Cron)
+
+Los dos procesos batch del sistema se disparan desde fuera de la aplicación: VendGuard **no** lleva planificador propio, de modo que su activación real depende de la tarea programada que se configure aquí. La credencial es la cabecera `X-Cron-Secret` (variable de entorno `CRON_SECRET`; en desarrollo vale la clave local `vendguard-dev-cron-key-local-only`) y las dos rutas son fail-closed: sin la marca del middleware responden `401` aunque la ruta se registre mal.
+
+| Proceso | Cadencia ratificada | Comando |
+| :--- | :--- | :--- |
+| **Barrido del Reloj Sanitario Biológico** (RF-03.5.1, Art. II): activa la cuarentena de las máquinas bajo vigilancia con más de 4 h naturales sin frío confirmado **sin** esperar a un intento de cierre. | **Cada 15 minutos** — acota la latencia de detección en «4 h naturales + hasta 15 min». | `php bin/sanitary_clock_sweep.php` *(o `POST /api/cron/sanitary-clock-sweep`)* |
+| **Cierre definitivo de garantía** (RF-10): archiva a `CERRADA` los expedientes resueltos que superan las 48 h sin reclamación. | Una vez al día | `POST /api/cron/auto-close` |
+
+```bash
+# crontab -e  (Linux / macOS)
+*/15 * * * * cd /ruta/a/gestor-incidencias-vending && CRON_SECRET=... php bin/sanitary_clock_sweep.php >> /var/log/vendguard-sweep.log 2>&1
+0 3 * * *     curl -s -X POST -H "X-Cron-Secret: $CRON_SECRET" https://tu-dominio/api/cron/auto-close
+```
+
+El equivalente de línea de comandos del barrido devuelve código de salida **distinto de cero** si alguna máquina no pudo evaluarse, de modo que un planificador o un supervisor de tareas puede alertar sobre él; el mismo barrido sigue disponible por HTTP para entornos sin acceso a la consola del servidor.
+
 ---
 
 ## 🔌 Resumen de Endpoints de la API REST
@@ -194,6 +212,7 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `PATCH`| `/api/technician/incidents/{id}/pause` | `TECHNICIAN` | Pausa estructurada por repuestos (`PENDING_PARTS`) con selección compatible o pieza fuera de catálogo. |
 | `POST`| `/api/technician/incidents/{id}/resolve`| `TECHNICIAN` | Resolución técnica documentada ($\ge 20$ chars diagnóstico y acción). |
 | `POST`| `/api/cron/auto-close` | Clave Cron | Cierre definitivo automático tras 48h de garantía. |
+| `POST`| `/api/cron/sanitary-clock-sweep` | Clave Cron | Barrido de fondo del Reloj Sanitario Biológico: activa la cuarentena sin intento de cierre (latencia ≤ 15 min). |
 | `GET` | `/api/qr/scan/{code}` | Público | Consulta ciudadana de estado de máquina por código QR. |
 | `POST`| `/api/qr/report` | Público | Envío directo de incidencia ciudadana desde lectura QR. |
 
@@ -270,20 +289,20 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 243 suites · 9.239 aserciones
+batería global: 245 suites · 9.290 aserciones
 
 ```text
 ======================================================================
  RESUMEN DE EJECUCIÓN GLOBAL (T-39)
 ======================================================================
  Tiempo de ejecución total : 112.33 segundos  (variable en cada corrida)
- Suites de pruebas PHP Unit : 106 / 106 pasadas
+ Suites de pruebas PHP Unit : 107 / 107 pasadas
  Suites de pruebas JS Unit  : 63 / 63 pasadas
- Suites de Integración PHP  : 73 / 73 pasadas
+ Suites de Integración PHP  : 74 / 74 pasadas
  Suites E2E Manuales (T-40): 1 / 1 pasadas
  ──────────────────────────────────────────────────────────────────
- Total Suites Ejecutadas    : 243
- Total Aserciones Evaluadas : 9.239
+ Total Suites Ejecutadas    : 245
+ Total Aserciones Evaluadas : 9.290
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
@@ -371,7 +390,7 @@ gestor-incidencias-vending/
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 243 suites (100% verde)
+    ├── run_all.php               # Ejecutor global de la batería de 245 suites (100% verde)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)
     ├── unit/                     # Pruebas unitarias de lógica pura, geometría y contratos

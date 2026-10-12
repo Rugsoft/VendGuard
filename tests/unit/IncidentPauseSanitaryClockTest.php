@@ -86,6 +86,14 @@ final class SanitaryClockSettingsRepo implements PreventiveSettingsRepositoryInt
 
     public bool $failWrites = false;
 
+    /**
+     * Simula a un consumidor concurrente que ganó la carrera: el estado ya está
+     * escrito por otro (la transición lo ve aplicado) pero **esta** llamada no fue
+     * la que lo cambió, así que devuelve `false` sin registrar escritura propia.
+     * Es la forma de certificar que el perdedor no duplica el rastro inmutable.
+     */
+    public bool $simulateConcurrentWriter = false;
+
     public function register(int $machineId, string $machineType, string $sanitaryStatus = 'OK'): void
     {
         $this->machines[$machineId] = [
@@ -147,6 +155,21 @@ final class SanitaryClockSettingsRepo implements PreventiveSettingsRepositoryInt
             return false;
         }
 
+        if ($this->simulateConcurrentWriter) {
+            if (isset($this->machines[$machineId])) {
+                $this->machines[$machineId]['sanitary_status'] = $status;
+            }
+
+            return false;
+        }
+
+        // Transición idempotente (compare-and-set) del contrato real: sólo escribe
+        // cuando el valor cambia, y el resultado declara si esta llamada fue la que
+        // lo cambió. Un segundo consumidor sobre la misma máquina devuelve `false`.
+        if (isset($this->machines[$machineId]) && $this->machines[$machineId]['sanitary_status'] === $status) {
+            return false;
+        }
+
         $this->statusWrites[] = ['machine_id' => $machineId, 'status' => $status];
         if (isset($this->machines[$machineId])) {
             $this->machines[$machineId]['sanitary_status'] = $status;
@@ -200,11 +223,13 @@ $makeIncident = static function (
     IncidentStatus $status,
     ?string $createdAt,
     ?string $machineType = 'PERISHABLE_FOOD',
-    int $machineId = 10
+    int $machineId = 10,
+    int $id = 142,
+    string $ticketCode = 'INC-2026-00142'
 ): Incident {
     return new Incident(
-        id: 142,
-        ticketCode: 'INC-2026-00142',
+        id: $id,
+        ticketCode: $ticketCode,
         machineId: $machineId,
         locationId: 1,
         category: IncidentCategory::TEMPERATURE_COLD,
@@ -501,6 +526,62 @@ $assert(
     '6.3 El catálogo del visor de auditoría conoce la acción nueva (guarda bidireccional)',
     str_contains($catalogSource, "code: 'SANITARY_QUARANTINE_AUTO_TRIGGERED'"),
     'Falta la entrada SANITARY_QUARANTINE_AUTO_TRIGGERED en AuditActionLabels.js'
+);
+
+// =====================================================================
+// GRUPO 7: Exclusión mutua del disparo (T-PAUSE-38, Art. III)
+// =====================================================================
+echo "\n--- Grupo 7: Exclusión mutua del disparo automático ---\n";
+
+$raceSettings = new SanitaryClockSettingsRepo();
+$raceSettings->register(10, 'PERISHABLE_FOOD');
+$raceSettings->simulateConcurrentWriter = true;
+$raceAudit = new SanitaryClockAuditRepo();
+$raceService = $makeService($raceSettings, $raceAudit);
+
+$raceResult = $raceService->evaluateSanitaryBiologicalClock(
+    $makeIncident(IncidentStatus::PENDING_INFO, $agoInSeconds(18000))
+);
+
+$assert(
+    '7.1 Si otro consumidor escribió la cuarentena primero, esta evaluación la confirma sin duplicar el rastro',
+    $raceResult === true && $raceSettings->statusWrites === [] && $raceAudit->events === [],
+    sprintf('resultado=%s, escrituras=%d, eventos=%d', var_export($raceResult, true), count($raceSettings->statusWrites), count($raceAudit->events))
+);
+
+$failedRaceSettings = new SanitaryClockSettingsRepo();
+$failedRaceSettings->register(10, 'PERISHABLE_FOOD');
+$failedRaceSettings->failWrites = true;
+$failedRaceAudit = new SanitaryClockAuditRepo();
+$failedRaceService = $makeService($failedRaceSettings, $failedRaceAudit);
+$failedRace = $capture(static fn () => $failedRaceService->evaluateSanitaryBiologicalClock(
+    $makeIncident(IncidentStatus::PENDING_INFO, $agoInSeconds(18000))
+));
+
+$assert(
+    '7.2 Una transición que no se puede persistir no deja un evento huérfano de cuarentena',
+    $failedRace['threw'] === true
+    && $failedRace['class'] === RuntimeException::class
+    && $failedRaceAudit->events === [],
+    sprintf('excepción=%s, eventos=%d', $failedRace['class'], count($failedRaceAudit->events))
+);
+
+$twoTicketsSettings = new SanitaryClockSettingsRepo();
+$twoTicketsSettings->register(10, 'PERISHABLE_FOOD');
+$twoTicketsAudit = new SanitaryClockAuditRepo();
+$twoTicketsService = $makeService($twoTicketsSettings, $twoTicketsAudit);
+
+$twoTicketsService->evaluateSanitaryBiologicalClock(
+    $makeIncident(IncidentStatus::IN_PROGRESS, $agoInSeconds(18000))
+);
+$twoTicketsService->evaluateSanitaryBiologicalClock(
+    $makeIncident(IncidentStatus::IN_PROGRESS, $agoInSeconds(19000), 'PERISHABLE_FOOD', 10, 143, 'INC-2026-00143')
+);
+
+$assert(
+    '7.3 Dos expedientes vivos de la misma máquina producen una sola escritura y un solo evento',
+    count($twoTicketsSettings->statusWrites) === 1 && count($twoTicketsAudit->events) === 1,
+    sprintf('escrituras=%d, eventos=%d', count($twoTicketsSettings->statusWrites), count($twoTicketsAudit->events))
 );
 
 // =====================================================================
