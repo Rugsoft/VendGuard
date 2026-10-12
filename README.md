@@ -99,6 +99,21 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 * **Protocolo de Reclamación Ciudadana y PIN Secreto:** Solicitud opcional de reintegro en el reporte QR por fallo de pago o dinero tragado, con generación de PIN secreto de 4 dígitos para entrega presencial en conserjería o transferencia digital (Bizum/IBAN validado nativamente mediante Módulo 97 ISO 7064). Seguimiento ciudadano anónimo por token con rectificación de datos de cobro, y freno antifuerza del PIN: bloqueo temporal del expediente (`423 PICKUP_PIN_LOCKED`) tras cinco intentos fallidos de entrega.
 * **Custodia y Desacoplamiento (Art. II y III):** Dictamen económico desacoplado de la resolución técnica del ticket, custodia central forzada para importes $> 10,00\ \text{€}$ y bandeja de coordinación para liquidación administrativa con registro inmutable.
 
+### 9. Hilo de Conversación del Expediente y Evidencias Selladas (Módulo 10)
+* **Conversación bidireccional sobre el propio expediente:** sede, técnico y coordinación dialogan en un único hilo auditable, sin canales paralelos, con contadores de conversación segregados por rol y paginación por cursor para históricos extensos (RF-01).
+* **Privacidad del técnico y notas internas (Art. V.4):** el portal de sede **jamás** recibe notas internas de taller ni la identidad del técnico; el técnico y la coordinación ven el hilo íntegro, y la interfaz móvil preselecciona «Nota Interna de Taller» para las anotaciones de campo.
+* **Evidencias fotográficas endurecidas (Art. III y V.5):** el servidor valida la cabecera real del archivo y el límite de **5 MB**; un fichero que no sea un gráfico válido se rechaza con `422` **sin dejar residuo en disco**.
+* **Sellado y trazabilidad (Art. III):** cada publicación deja su evento inmutable `INCIDENT_COMMENT_ADDED` con autoría, y el hilo de un expediente cerrado queda sellado a nuevas publicaciones conservando la ventana de garantía de 48 h.
+* **Señalización visual y resiliencia:** los contadores de conversación activa aparecen en la tarjeta de máquina y en el triaje sin filtrar contenido, y un envío fallido avisa y conserva el borrador en pantalla (RF-07).
+
+### 10. Pausa Contractual de Espera de Sede (Módulo 11)
+* **Estado operativo `PENDING_INFO` («Pendiente de información»):** el técnico o el coordinador aparcan la avería cuando falta acceso al inmueble o información de la sede, con causa tipificada y motivo de ≥ 20 caracteres. La pausa **congela el reloj contractual de SLA** y su vencimiento se desplaza en horario comercial de la sede.
+* **Reanudación siempre humana y coherente:** la reactivación automática por comentario de sede quedó derogada; sin técnico asignado el expediente vuelve a `REGISTERED` (cola de asignación) y **nunca** a `ASSIGNED`/`IN_PROGRESS`, para no declarar un responsable inexistente.
+* **Cancelación supervisada por inactividad:** superadas **72 horas hábiles** de silencio, la coordinación puede cancelar el expediente de forma justificada sin que la máquina vuelva a figurar como «Operativa», desvinculando con seguridad los reintegros pendientes (Art. V.1 y V.2).
+* **Doble reloj sanitario (Art. II):** sobre máquinas perecederas y mixtas corre en paralelo el Reloj Sanitario Biológico — **4 horas naturales** sin frío confirmado activan la cuarentena y bloquean el cierre hasta declarar temperatura real, retirada y destrucción del stock y checklist de higienización.
+* **Barrido de fondo y su superficie operativa:** la activación automática no espera a un intento de cierre (`php bin/sanitary_clock_sweep.php` o `POST /api/cron/sanitary-clock-sweep` cada 15 minutos, con cota de espera de bloqueo de 2 s y la contención publicada como aplazamiento, nunca como fallo); la pestaña *🩺 Barrido Sanitario* publica el latido, la tendencia de 24 h y el **escalado cuando el aplazamiento persiste** (RF-07).
+* **Segregación pública y transición prohibida (Art. V.4 y V.1):** el escaneo ciudadano muestra un estado neutro («En proceso de atención técnica») y **nunca** el motivo de la pausa, y queda prohibido cerrar directamente desde `PENDING_INFO` sin registrar la intervención física.
+
 ---
 
 ## 👥 Actores del Sistema y Credenciales de Demostración
@@ -108,8 +123,8 @@ La aplicación cuenta con un conmutador de perfiles en la barra superior para al
 | Perfil / Actor | Identificador / Email | Contraseña / Código | Función Principal |
 | :--- | :--- | :--- | :--- |
 | **🏢 1. Responsable de Sede** | `SEDE-BCN-01` *(Hospital del Mar)*<br>`SEDE-BCN-02` *(Torre Glòries)* | Código + `DEV-<site_code>` *(clave de desarrollo, ver nota)* | Supervisa máquinas del edificio, reporta averías (< 2 min), anexa evidencias y reabre en garantía. |
-| **📊 2. Coordinador de Operaciones** | `coordinacion@vendguard.internal` | `Password123!` | Triaje central, supervisión 24/7 de SLAs, administración del parque y personal, preventivos y certificados sanitarios, catálogo y analítica de repuestos, cuadro de mando de métricas y visor de auditoría. |
-| **📱 3. Técnico de Ruta de Campo** | `jordi.ruta@vendguard.internal`<br>`marta.ruta@vendguard.internal` | `Password123!` | Interfaz vertical *mobile-first*, gestión de averías en ruta, inicio de intervención, pausa estructurada por repuestos, resolución justificada con piezas sustituidas, inspecciones preventivas y consulta de métricas individuales. |
+| **📊 2. Coordinador de Operaciones** | `coordinacion@vendguard.internal` | `Password123!` | Triaje central, supervisión 24/7 de SLAs, administración del parque y personal, preventivos y certificados sanitarios, catálogo y analítica de repuestos, cuadro de mando de métricas y visor de auditoría. Supervisa además la pausa de espera de sede (reanudación manual y cancelación por inactividad) y la superficie operativa del barrido sanitario. |
+| **📱 3. Técnico de Ruta de Campo** | `jordi.ruta@vendguard.internal`<br>`marta.ruta@vendguard.internal` | `Password123!` | Interfaz vertical *mobile-first*, gestión de averías en ruta, inicio de intervención, pausa estructurada por repuestos o por falta de acceso al inmueble (pausa de sede), resolución justificada con piezas sustituidas, hilo de conversación del expediente, inspecciones preventivas, consulta del historial de la máquina y métricas individuales. |
 | **🤳 4. Usuario / Consumidor Final** | Enlace QR (`?code=VEND-0101`) | *Público / Sin registro* | Reporte inmediato in situ escaneando la pegatina de la máquina, con feedback de estado si ya estaba reportada. |
 
 > **Clave de centro de desarrollo (cierre de S-4).** En pruebas, las semillas emiten una clave determinista por sede; para el trabajo manual en local hay que pedirla de forma explícita (`VENDGUARD_DEV_SITE_KEYS=1 php bin/seed.php`). La regla es `DEV-<site_code>` (p. ej. `DEV-SEDE-BCN-01`). En producción el campo no se siembra jamás: cada sede recibe su clave aleatoria al alta o al reemitirse desde coordinación, se muestra una sola vez y solo se guarda su huella bcrypt. Sin clave emitida, el acceso de la sede falla en cerrado.
@@ -119,7 +134,7 @@ La aplicación cuenta con un conmutador de perfiles en la barra superior para al
 ## 🚀 Puesta en Marcha Rápida
 
 ### Requisitos Previos
-* **PHP:** 8.2 o superior con extensiones `pdo_mysql`, `mbstring`, `curl` habilitadas.
+* **PHP:** 8.2 o superior con extensiones `pdo_mysql` y `mbstring` habilitadas (la imagen oficial ya compila `mbstring`; el [Dockerfile](Dockerfile) instala `pdo_mysql`).
 * **Base de Datos:** MySQL 8.0+ o MariaDB 10.5+ (local, Docker o Cloud como TiDB Serverless).
 * **Navegador:** Chrome, Edge, Firefox o Safari con soporte de módulos ES.
 
@@ -130,9 +145,10 @@ La aplicación cuenta con un conmutador de perfiles en la barra superior para al
 # Crear la base de datos:
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS vendguard_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
-# Opción recomendada: migrador DDL idempotente (esquema base + migraciones 003-014
-# de auditoría, CRUD, preventivos, repuestos, mapa, reintegros, freno del PIN y clave
-# de centro (S-4), con verificación de integridad final):
+# Opción recomendada: migrador DDL idempotente (esquema base + migraciones 003-018
+# de auditoría, CRUD, preventivos, repuestos, mapa, reintegros, freno del PIN, clave
+# de centro (S-4), bloqueo de login, pausa de sede, cancelación por inactividad y
+# visibilidad del barrido sanitario, con verificación de integridad final):
 php bin/migrate.php
 
 # Cargar semillas (sedes, máquinas, usuarios, preventivos y catálogo de repuestos).
@@ -147,7 +163,7 @@ php bin/seed_demo_metrics.php
 ```
 
 #### Entorno Cloud / Producción (Render, TiDB Cloud, Aiven):
-El script [`bin/init_cloud_db.php`](bin/init_cloud_db.php) ejecuta automáticamente el esquema DDL y siembra todas las sedes, máquinas, técnicos, averías históricas y eventos de auditoría de forma tolerante e idempotente:
+El script [`bin/init_cloud_db.php`](bin/init_cloud_db.php) ejecuta automáticamente el esquema DDL, **aplica todas las migraciones incrementales** (hoy 003-018, de ahí que una base de datos ya desplegada converja en cada arranque) y siembra sedes, máquinas, técnicos, averías históricas y eventos de auditoría de forma tolerante e idempotente:
 ```powershell
 DB_HOST=gateway... DB_USER=xxx DB_PASSWORD=yyy DB_NAME=vendguard DB_PORT=4000 DB_SSL=1 php bin/init_cloud_db.php
 ```
@@ -178,6 +194,33 @@ Los dos procesos batch del sistema se disparan desde fuera de la aplicación: Ve
 
 El equivalente de línea de comandos del barrido devuelve código de salida **distinto de cero** si alguna máquina no pudo evaluarse, de modo que un planificador o un supervisor de tareas puede alertar sobre él; el mismo barrido sigue disponible por HTTP para entornos sin acceso a la consola del servidor. La cadencia se **comprueba** desde el panel de coordinación: la pestaña *🩺 Barrido Sanitario* publica el latido (última pasada y minutos transcurridos), la tendencia de 24 h y los expedientes aplazados por contención de fila, con la alerta de escalado cuando un aplazamiento persiste tres pasadas consecutivas (RF-07).
 
+### 5. Despliegue en Contenedor (Render) y Variables de Entorno
+El contenedor declara dos pasos y ninguno es opcional:
+```dockerfile
+CMD ["sh", "-c", "php bin/init_cloud_db.php ; php -S 0.0.0.0:${PORT} -t public public/index.php"]
+```
+* **Paso 1 — convergencia de la base de datos:** `init_cloud_db.php` ejecuta `cloud_init.sql` (creación de tablas con `CREATE TABLE IF NOT EXISTS`) **y todas las migraciones de `database/migrations/` en orden**, sentencia a sentencia y sin abortar el resto si un motor cloud no soporta triggers. Es lo que hace que una base **ya existente** reciba las columnas y tablas nuevas de cada despliegue; si este paso falla, el servidor arranca igual (el `;` no corta la cadena) pero el esquema se queda atrás.
+* **Paso 2 — servidor web:** `php -S` sirviendo `public/index.php`, que despacha tanto la API como los assets estáticos con su MIME y `Cache-Control: no-cache` para JS/CSS (un despliegue no se queda a medias por caché del navegador). El puerto lo inyecta la plataforma (`PORT`, por defecto 8080).
+* **Imagen y extensiones:** `php:8.2-cli-alpine` trae `mbstring` compilada de serie y el [Dockerfile](Dockerfile) instala `pdo_mysql`; no hace falta ninguna otra extensión (Dogma Vanilla: cero `composer`, cero `npm` en runtime).
+
+**Variables de entorno** (única fuente de verdad: [`SecretProvider`](src/Infrastructure/Config/SecretProvider.php) y [`ConnectionFactory`](src/Infrastructure/Database/ConnectionFactory.php)):
+
+| Variable | Obligatoria en producción | Efecto |
+| :--- | :--- | :--- |
+| `SECRET_KEY` | **Sí** con `APP_ENV=production` | Firma HMAC de los tokens de sesión. Sin ella y sin entorno declarado se usa una clave **exclusiva de desarrollo**. |
+| `CRON_SECRET` | **Sí** con `APP_ENV=production` | Credencial `X-Cron-Secret` de los dos procesos batch. |
+| `APP_ENV` ó `VENDGUARD_ENV` | Recomendada | `production`/`prod` activan el **fallo en cerrado**: sin claves el sistema no arranca y `root` sin contraseña se rechaza (hallazgos S-1 y S-5). |
+| `DATABASE_URL` / `MYSQL_URL` | Alternativa | Cadena única del PaaS (`mysql://usuario:clave@host:puerto/base`). Tiene prioridad sobre `DB_*`. |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Sí (o la cadena única) | Credenciales sueltas; se aceptan también `DB_DATABASE`, `DB_USERNAME` y `DB_PASS`. |
+| `DB_SSL` | Según proveedor | `1`/`true` fuerza TLS; se activa solo si el host contiene `tidbcloud`/`aivencloud`. |
+| `PORT` | La inyecta la plataforma | Puerto del servidor embebido. |
+| `APP_BASE_URL` | Opcional | Host público canónico para las URLs impresas en las etiquetas QR (si falta, se resuelve por la petición). |
+| `VENDGUARD_DEV_SITE_KEYS` | **Nunca** en producción | Solo en local: siembra claves de centro deterministas `DEV-<site_code>`. En producción no se siembra ninguna: cada sede recibe su clave aleatoria al alta o al reemitirse desde coordinación. |
+
+**Cron en la plataforma:** un *Cron Job* con la misma imagen ejecutando `php bin/sanitary_clock_sweep.php` cada 15 minutos (o una llamada externa a `POST /api/cron/sanitary-clock-sweep` con la cabecera `X-Cron-Secret`) y `POST /api/cron/auto-close` una vez al día. Sin el barrido programado, la pestaña *🩺 Barrido Sanitario* lo delata con el latido envejecido: la superficie distingue «no hay nada que hacer» de «el barrido no está corriendo».
+
+> **Credenciales de demostración en el despliegue.** El paso 1 siembra el personal interno con la contraseña de demostración, de modo que `coordinacion@vendguard.internal` / `Password123!` funciona nada más desplegar. Las claves de centro, en cambio, **no** se siembran en producción (arriba).
+
 ---
 
 ## 🔌 Resumen de Endpoints de la API REST
@@ -207,8 +250,10 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `GET` | `/api/coordinator/audit-log` | `COORDINATOR` | Consulta cronológica paginada y filtrable del registro inmutable. |
 | `GET` | `/api/coordinator/audit-log/export` | `COORDINATOR` | Descarga CSV del registro inmutable (máx. 10.000 filas). |
 | `GET` | `/api/coordinator/sanitary-sweep/contention` | `COORDINATOR` | Superficie operativa del barrido sanitario: latido, tendencia de 24 h, expedientes aplazados por contención de fila y alerta de escalado cuando el aplazamiento persiste (RF-07). |
+| `GET` | `/api/coordinator/incidents/{id}/detail` | `COORDINATOR` | Ficha integral de solo lectura del expediente: sede y máquina, ciclo de vida, SLA de frío, intervención, bitácora, piezas y matriz de permisos (Módulo 09). |
 | `GET` | `/api/technician/my-route` | `TECHNICIAN` | Hoja de ruta móvil ordenada por criticidad. |
 | `GET` | `/api/technician/my-metrics` | `TECHNICIAN` | Autoconsulta individual protegida de rendimiento (Art. V.4). |
+| `GET` | `/api/technician/machines/{id}/history` | `TECHNICIAN` | Historial de averías de la máquina de la ruta (solo lectura, Art. V.4). |
 | `PATCH`| `/api/technician/incidents/{id}/start` | `TECHNICIAN` | Inicio de intervención física in situ (`started_at`). |
 | `PATCH`| `/api/technician/incidents/{id}/pause` | `TECHNICIAN` | Pausa estructurada por repuestos (`PENDING_PARTS`) con selección compatible o pieza fuera de catálogo. |
 | `POST`| `/api/technician/incidents/{id}/resolve`| `TECHNICIAN` | Resolución técnica documentada ($\ge 20$ chars diagnóstico y acción). |
@@ -221,6 +266,7 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | Método | Endpoint | Descripción del Recurso |
 | :--- | :--- | :--- |
 | `GET/POST/PATCH` | `/api/coordinator/locations[/{id}][/deactivate\|/reactivate]` | CRUD de sedes clientes con bajas lógicas. |
+| `POST` | `/api/coordinator/locations/{id}/access-code` | Reemisión de la clave de centro de una sede: se muestra una sola vez y solo se guarda su huella bcrypt (S-4). |
 | `GET/POST/PATCH` | `/api/coordinator/machines[/{id}][/transfer\|/deactivate\|/reactivate]` | CRUD de máquinas con transferencias auditadas entre sedes. |
 | `GET/POST/PATCH` | `/api/coordinator/users[/{id}][/reset-password\|/deactivate\|/reactivate]` | CRUD de personal interno con reseteo de credenciales y contador informativo de garantía 48h (`warranty_incidents_count`). |
 
@@ -275,6 +321,22 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `GET` | `/api/coordinator/refunds` | `COORDINATOR` | Bandeja de liquidación administrativa de reintegros custodiados. |
 | `POST` | `/api/coordinator/refunds/{id}/approve\|/pay\|/reject\|/regularize` | `COORDINATOR` | Aprobación, pago, rechazo y regularización con registro inmutable. |
 
+#### Hilo de Conversación del Expediente (Módulo 10)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET/POST` | `/api/location/incidents/{id}/comments` | `LOCATION_MANAGER` | Hilo del expediente desde el portal de sede, con alias retrocompatible por código de ticket (`/api/incidents/{ticket_code}/comments`). **Nunca** incluye notas internas ni el nombre del técnico (Art. V.4). |
+| `GET/POST` | `/api/technician/incidents/{id}/comments` | `TECHNICIAN` | Hilo íntegro para el técnico, notas internas incluidas, con selector de privacidad preseleccionado en «Nota Interna de Taller». |
+| `GET/POST` | `/api/coordinator/incidents/{id}/comments` | `COORDINATOR` | Inspección total del diálogo y publicación de notas internas o públicas durante el triaje. |
+
+#### Pausa Contractual de Espera de Sede (Módulo 11)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/technician/incidents/{id}/pause-pending-info` | `TECHNICIAN` | Pausa por falta de acceso o información del inmueble: causa tipificada, motivo ≥ 20 caracteres y **reloj de SLA congelado**. |
+| `POST` | `/api/technician/incidents/{id}/resume-pending-info` | `TECHNICIAN` | Reanudación manual in situ con el vencimiento desplazado en horario comercial. |
+| `POST` | `/api/coordinator/incidents/{id}/pause-pending-info` | `COORDINATOR` | Pausa supervisada sobre cualquier ticket activo. |
+| `POST` | `/api/coordinator/incidents/{id}/resume-pending-info` | `COORDINATOR` | Reanudación manual: devuelve el expediente a `ASSIGNED` o a `REGISTERED` según haya responsable o no. |
+| `POST` | `/api/coordinator/incidents/{id}/cancel-inactivity` | `COORDINATOR` | Cancelación justificada tras **72 horas hábiles** de silencio, desvinculando los reintegros pendientes (Art. V.1 y V.2). |
+
 ---
 
 ## 🧪 Batería Completa de Pruebas Automatizadas (T-39 & Módulos 02, 03, 04, M1, M2 y M4)
@@ -323,6 +385,7 @@ Entre las suites de certificación destacan:
 * **`CoordinatorRouteMapApiTest` / `TechnicianRouteMapApiTest` (T-MAP-17/18)** — integración HTTP contra MariaDB del ciclo cartográfico completo, fallback a Base Central y cálculo de enlaces universales de navegación.
 * **`CoordinatorButtonVariantsGuardTest.mjs`** — los 149 botones del panel del coordinador visten la escalera `--control-*` y ningún botón declara geometría ni color en línea (sí una colocación o un color de estado); la guarda se prueba contra muestras sintéticas y cae también si alguna variante declarada queda muerta.
 * **`CoordinatorActionsWrapGuardTest.mjs`** — ningún grupo de acciones del panel depende de tener pocos controles: el grupo envuelve y la etiqueta nunca se parte dentro de su propio botón.
+* **`SanitarySweepVisibilityServiceTest` / `CoordinatorSanitarySweepEndpointTest` (T-PAUSE-41)** — la superficie del barrido sanitario: umbrales de escalado a las tres pasadas consecutivas, cierre del seguimiento **por identidad** y el ciclo completo contra MariaDB sobre dos conexiones PDO reales (aplazamiento → cuarentena → cierre → alerta apagada).
 
 > **Nota operativa:** las suites de integración incluyen pruebas de HTTP real contra `127.0.0.1:8000`. Si el puerto está ocupado por un servidor obsoleto, arránquelo antes con `php -S 127.0.0.1:8000 -t public public/index.php`.
 
@@ -342,11 +405,12 @@ gestor-incidencias-vending/
 │   ├── migrate.php               # Migrador DDL idempotente (esquema + migraciones 003-013)
 │   ├── seed.php                  # Sembrador CLI del catálogo base
 │   ├── seed_demo_metrics.php     # Sembrador de métricas históricas y auditoría
-│   └── create_bizum_case.php     # Script CLI de caso demo de reintegro por Bizum
+│   ├── create_bizum_case.php     # Script CLI de caso demo de reintegro por Bizum
+│   └── sanitary_clock_sweep.php  # Barrido CLI del Reloj Sanitario Biológico (mismo reloj que el endpoint cron)
 ├── database/
 │   ├── schema.sql                # DDL MariaDB del núcleo operativo
 │   ├── cloud_init.sql            # Script unificado integral para despliegues cloud
-│   ├── migrations/               # DDL incrementales (003 auditoría, 004 CRUD, 005 preventivos, 006 repuestos, 007 mapa, 008-013 reintegros y PIN)
+│   ├── migrations/               # DDL incrementales idempotentes 003-018 (auditoría, CRUD, preventivos, repuestos, mapa, reintegros y PIN, bloqueo de login, pausa de sede, cancelación por inactividad y visibilidad del barrido sanitario)
 │   ├── seeds.sql                 # Semillas SQL del catálogo base (referencia)
 │   └── DemoMetricsSeeder.php     # Generador de histórico de averías, reaperturas por garantía y auditoría
 ├── docs/
@@ -356,6 +420,10 @@ gestor-incidencias-vending/
 │   ├── manual_modulo_m2_repuestos.md # Manual de usuario del Módulo M2 (coordinador y técnico)
 │   ├── features_pendientes.md        # Catálogo de features pendientes y roadmap
 │   ├── auditoria_arquitectura.md     # Auditoría de arquitectura
+│   ├── verificacion_*.md             # Informes de verificación (criterios de cierre, hitos H2/H4, humo de flujos, usabilidad 360px)
+│   ├── propuesta_*.md                # Propuestas y decisiones pendientes del Product Owner (política de reintento del barrido, accesos de sede)
+│   ├── informe_sonda_humo_flujo_modulo_11.md # Sonda de humo del flujo de pausa de sede
+│   ├── handoff_rama_incident-comments.md     # Handoff de la rama de trabajo
 │   └── constitutional_audit_report.md# Dictamen formal de auditoría
 ├── specs/
 │   ├── 02-qr-codes/              # Especificación del módulo de códigos QR
@@ -366,6 +434,8 @@ gestor-incidencias-vending/
 │   ├── 07-route-map/             # Especificación del mapa interactivo de rutas y logística territorial (M4)
 │   ├── 08-refunds/               # Especificación y plan del módulo de reintegros y dinero tragado (M5)
 │   ├── 09-incident-detail-modal/ # Especificación del modal de detalle integral de incidencias
+│   ├── 10-incident-comments/     # Especificación del hilo de conversación del expediente
+│   ├── 11-pending-info-sla-pause/# Especificación de la pausa contractual de sede y del barrido sanitario
 │   ├── functional/               # Especificaciones funcionales EARS transversales
 │   └── technical/                # Contratos de API, DDL y esquemas de base de datos
 ├── src/
