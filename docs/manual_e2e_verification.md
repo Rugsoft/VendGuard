@@ -89,7 +89,7 @@ sequenceDiagram
 ### Paso 5: Activación Automática de la Cuarentena Sanitaria (`POST /api/cron/sanitary-clock-sweep`, T-PAUSE-38)
 1. **Preparación:** máquina bajo vigilancia sanitaria (`PERISHABLE_FOOD` o `COMBO`) sin cuarentena, con un expediente vivo abierto hace más de 4 h naturales y **sin ningún intento de cierre**.
 2. **Disparo del barrido:** `POST /api/cron/sanitary-clock-sweep` con la cabecera `X-Cron-Secret` (o, sin HTTP, `php bin/sanitary_clock_sweep.php`).
-   * **Resultado:** HTTP 200 OK con `candidates`, `evaluated`, `quarantined`, `skipped`, `failures`, `failures_count`, `threshold_seconds` (14.400) y `duration_ms`. La máquina objetivo aparece en `quarantined` y `failures_count` es 0.
+   * **Resultado:** HTTP 200 OK con `candidates`, `evaluated`, `quarantined`, `skipped`, `failures`, `failures_count`, `contended`, `contended_count`, `threshold_seconds` (14.400) y `duration_ms`. La máquina objetivo aparece en `quarantined` y `failures_count` es 0. Si otro consumidor (el cierre técnico) sostuviera la fila de la máquina en ese instante, el expediente aparecería en `contended` —aplazado, **sin** alerta y sin cuarentena duplicada— y el prefiltro volvería a publicarlo en la pasada siguiente (T-PAUSE-39).
 3. **Comprobación sanitaria:** la máquina queda en `QUARANTINE` con **un solo** evento `SANITARY_QUARANTINE_AUTO_TRIGGERED` (actor `SYSTEM`) en el visor de auditoría, que lo etiqueta como *Cuarentena Sanitaria Automática*.
 4. **Publicación ciudadana y de sede:** `GET /api/qr/scan/{code}` devuelve `status_mode: "SANITARY_QUARANTINE"`, `can_report: false` y el distintivo «Riesgo térmico: máquina en cuarentena preventiva»; el portal de sede publica el estado sanitario de la máquina en su tarjeta.
 5. **Puerta del cierre (RF-03.5.2):** `POST /api/technician/incidents/{id}/resolve` sin declaraciones responde `422 SANITARY_CHECKLIST_REQUIRED` y el expediente permanece en `IN_PROGRESS`.
@@ -104,4 +104,4 @@ El recorrido funcional de extremo a extremo ha sido ejecutado satisfactoriamente
 
 > **Nota (08/10/2026):** el guion se ejecuta además en la **Fase 4** de `php tests/run_all.php`, con el servidor HTTP todavía en marcha, de modo que una regresión de flujo rompe ya la batería global. Cifra vigente de la batería completa:
 >
-> batería global: 245 suites · 9.290 aserciones
+> batería global: 246 suites · 9.324 aserciones

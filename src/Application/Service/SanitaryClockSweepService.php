@@ -6,7 +6,9 @@ namespace VendGuard\Application\Service;
 
 use DomainException;
 use InvalidArgumentException;
+use PDOException;
 use RuntimeException;
+use Throwable;
 use VendGuard\Application\DTO\SanitaryClockSweepResultDto;
 use VendGuard\Core\Domain\Repository\SanitaryClockCandidateRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
@@ -39,7 +41,17 @@ use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
  *    publica en el resumen. No se traga nunca —el CLI termina en rojo— pero tampoco
  *    aborta el lote: la salvaguarda sanitaria es de todas las máquinas, no de la
  *    primera que tropiece (Art. II).
- * 4. **Idempotencia de verdad.** Repetir la pasada no duplica cuarentenas ni rastros,
+ * 4. **La contención de fila no es un fallo (T-PAUSE-39).** Cuando otro consumidor
+ *    —el cierre técnico, otro barrido o cualquier escritor del parque— sostiene el
+ *    bloqueo exclusivo de la máquina, la transición muere esperando el lock
+ *    (`1205`/`1213`/`SQLSTATE 40001`). Eso NO se cuenta como fallo: es la prueba de que
+ *    alguien está actuando sobre esa fila ahora mismo, y el reloj ya garantiza que el
+ *    rastro siga siendo uno. Viaja en `contended` y se resuelve en la pasada siguiente
+ *    (el prefiltro vuelve a ofrecerlo). La clasificación es **estricta y fail-safe**:
+ *    sólo se aplaza con un código estructurado de bloqueo; ante cualquier otro error de
+ *    persistencia —o ante la duda— la pasada alerta como fallo real, porque un problema
+ *    que se disfraza de contención es peor que un aviso de más.
+ * 5. **Idempotencia de verdad.** Repetir la pasada no duplica cuarentenas ni rastros,
  *    porque la decisión y la exclusión mutua viven en el reloj y en su transición
  *    idempotente. Este servicio puede, por tanto, ejecutarse con la cadencia que fije
  *    el planificador sin ningún efecto acumulativo.
@@ -55,6 +67,19 @@ final class SanitaryClockSweepService
      * cuarentena, que en operación normal son unos pocos).
      */
     public const DEFAULT_CANDIDATE_LIMIT = 500;
+
+    /**
+     * Códigos de driver (MariaDB/MySQL) que significan «otro consumidor tiene la fila»:
+     * `ER_LOCK_WAIT_TIMEOUT` (1205) y `ER_LOCK_DEADLOCK` (1213).
+     */
+    private const CONTENTION_DRIVER_CODES = [1205, 1213];
+
+    /**
+     * Estados SQL de bloqueo/serialización: `40001` (serialization failure, el que
+     * MariaDB usa en el deadlock) y `40P01` (deadlock de PostgreSQL, por completitud
+     * del estándar). Sólo se consultan como respaldo del código de driver.
+     */
+    private const CONTENTION_SQL_STATES = ['40001', '40P01'];
 
     /** Puerto de candidatos; se resuelve en el primer uso si no se inyecta. */
     private ?SanitaryClockCandidateRepositoryInterface $candidateRepo;
@@ -111,6 +136,9 @@ final class SanitaryClockSweepService
         /** @var list<array{incident_id: int|null, ticket_code: string, reason: string}> $failures */
         $failures = [];
 
+        /** @var list<array{incident_id: int|null, ticket_code: string, reason: string}> $contended */
+        $contended = [];
+
         $evaluated = 0;
 
         foreach ($candidates as $incident) {
@@ -129,13 +157,22 @@ final class SanitaryClockSweepService
                     ];
                 }
             } catch (DomainException | RuntimeException $exception) {
-                // Aislamiento con voz: el fallo de una máquina no detiene el barrido de
-                // las demás, pero viaja en el resumen con su motivo y su expediente.
-                $failures[] = [
+                // Aislamiento con voz: ni el fallo de una máquina ni la contención de su
+                // fila detienen el barrido de las demás. Cada uno viaja en SU bucket del
+                // resumen con su motivo y su expediente: el aplazamiento por contención es
+                // operación normal (se reintenta en la pasada siguiente) y el fallo real es
+                // lo único que enciende al planificador.
+                $entry = [
                     'incident_id' => $incident->getId(),
                     'ticket_code' => (string)$incident->getTicketCode(),
                     'reason' => $exception->getMessage(),
                 ];
+
+                if (self::isRowContention($exception)) {
+                    $contended[] = $entry;
+                } else {
+                    $failures[] = $entry;
+                }
             }
         }
 
@@ -146,6 +183,8 @@ final class SanitaryClockSweepService
             skipped: $evaluated - count($quarantined),
             failures: $failures,
             failuresCount: count($failures),
+            contended: $contended,
+            contendedCount: count($contended),
             thresholdSeconds: $thresholdSeconds,
             durationMs: round((microtime(true) - $startedAt) * 1000, 2),
         );
@@ -174,5 +213,37 @@ final class SanitaryClockSweepService
     private function transactions(): TransactionManagerInterface
     {
         return $this->transactionManager ??= new PdoTransactionManager();
+    }
+
+    /**
+     * ¿La excepción es contención por fila (otro consumidor tiene la máquina bloqueada)
+     * o un fallo de verdad?
+     *
+     * La regla se lee del **código estructurado** del error, nunca del texto: son los
+     * códigos que MariaDB emite cuando una sentencia espera un bloqueo exclusivo ajeno
+     * (`1205`), cuando el gestor resuelve un deadlock matando una de las transacciones
+     * (`1213`) o cuando el estado SQL es el de fallo de serialización (`40001`/`40P01`).
+     *
+     * Es deliberadamente **conservadora (fail-safe)**: un `PDOException` con cualquier otro
+     * código —tabla ausente, columna inexistente, clave duplicada, conexión caída— es un
+     * fallo real y alerta, aunque su mensaje se parezca al de un bloqueo. Equivocarse por
+     * ese lado cuesta un aviso de más; equivocarse por el otro lado escondería un problema
+     * real detrás de una etiqueta de «aplazado» (Art. II).
+     */
+    private static function isRowContention(Throwable $exception): bool
+    {
+        if (!$exception instanceof PDOException) {
+            return false;
+        }
+
+        $errorInfo = is_array($exception->errorInfo) ? $exception->errorInfo : [];
+        $driverCode = $errorInfo[1] ?? null;
+        $sqlState = (string)($errorInfo[0] ?? $exception->getCode());
+
+        if (is_numeric($driverCode) && in_array((int)$driverCode, self::CONTENTION_DRIVER_CODES, true)) {
+            return true;
+        }
+
+        return in_array($sqlState, self::CONTENTION_SQL_STATES, true);
     }
 }

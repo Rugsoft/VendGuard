@@ -993,18 +993,23 @@ y la pasada siguiente la latencia queda acotada en «4 h naturales + hasta 15 mi
 {
   "success": true,
   "data": {
-    "candidates": 2,
-    "evaluated": 2,
+    "candidates": 3,
+    "evaluated": 1,
     "quarantined": [{"incident_id": 41, "ticket_code": "INC-2026-000041", "machine_id": 7}],
-    "skipped": 1,
+    "skipped": 0,
     "failures": [{"incident_id": 44, "ticket_code": "INC-2026-000044", "reason": "..."}],
     "failures_count": 1,
+    "contended": [{"incident_id": 46, "ticket_code": "INC-2026-000046", "reason": "SQLSTATE[HY000]: General error: 1205 Lock wait timeout exceeded; try restarting transaction"}],
+    "contended_count": 1,
     "threshold_seconds": 14400,
     "duration_ms": 12.4
   }
 }
 ```
-* **Semántica de las claves:** `candidates` son los expedientes que publicó el prefiltro del repositorio (capacidad y economía de consulta, **no** decisión); `evaluated` son los que el reloj evaluó de verdad; `quarantined` son las máquinas que quedan en cuarentena tras la pasada —el disparo concreto queda sellado como evento `SANITARY_QUARANTINE_AUTO_TRIGGERED` en la bitácora inmutable, que es la fuente de verdad de qué máquina entró y cuándo—; `skipped` son los evaluados que no requieren cuarentena (umbral no alcanzado en la relectura del reloj o expediente liquidado en carrera); y `failures`/`failures_count` son los candidatos cuya evaluación no pudo decidirse (tipología o apertura ilegibles) o cuya escritura no se pudo persistir.
+* **Semántica de las claves:** `candidates` son los expedientes que publicó el prefiltro del repositorio (capacidad y economía de consulta, **no** decisión); `evaluated` son los que el reloj evaluó de verdad; `quarantined` son las máquinas que quedan en cuarentena tras la pasada —el disparo concreto queda sellado como evento `SANITARY_QUARANTINE_AUTO_TRIGGERED` en la bitácora inmutable, que es la fuente de verdad de qué máquina entró y cuándo—; `skipped` son los evaluados que no requieren cuarentena (umbral no alcanzado en la relectura del reloj o expediente liquidado en carrera); `failures`/`failures_count` son los candidatos cuya evaluación no pudo decidirse (tipología o apertura ilegibles) o cuya escritura no se pudo persistir; y `contended`/`contended_count` son los candidatos **aplazados por contención de fila**, es decir, cuya transición murió esperando el bloqueo exclusivo que otro consumidor sostiene sobre la misma máquina (`1205 Lock wait timeout` o `1213 Deadlock`, `SQLSTATE 40001`).
+* **Contención de fila ≠ fallo (distinción de contrato):** la contención es la prueba de que **otro escritor está actuando sobre esa máquina ahora mismo** —el cierre técnico con su compare-and-set y su evento de auditoría (certificado con dos conexiones PDO reales por `SanitaryClockConsumerRaceTest`)—, no un error del proceso. Por eso viaja en su propia clave y **no alerta**: el resumen la publica para que el planificador la vea y el reintento de la pasada siguiente la resuelva, mientras que `failures_count > 0` sigue siendo la única señal de alerta. La clasificación es **estricta y fail-safe**: sólo se marca contención si el código estructurado del error es de bloqueo (`errorInfo[1]` ∈ {1205, 1213} o `SQLSTATE 40001`); cualquier otro error de persistencia —incluido uno con texto similar— se clasifica como **fallo real**.
+* **Identidad contable del resumen (Fail-Fast):** `candidates = evaluated + failures_count + contended_count`. El DTO rechaza (`InvalidArgumentException`) cualquier resumen que no cuadre, de modo que un recuento incoherente no puede llegar al planificador como si fuera una pasada válida.
 * **Respuesta de Error (`401 Unauthorized`):** credencial ausente o inválida, o controlador invocado sin pasar por el middleware (código `UNAUTHORIZED`).
-* **Efectos y garantías:** la transición del estado sanitario es **idempotente (compare-and-set)** y cada candidato se evalúa dentro de su propia unidad de trabajo, de modo que el estado y su evidencia inmutable caen juntos (Art. III) y dos consumidores simultáneos —este barrido y la puerta sanitaria del cierre (§5.4.1)— dejan una sola cuarentena y un solo evento. Un fallo de una máquina no aborta el lote: viaja en `failures` y el equivalente de línea de comandos (`bin/sanitary_clock_sweep.php`) termina con código distinto de cero para que el planificador pueda alertar.
+* **Efectos y garantías:** la transición del estado sanitario es **idempotente (compare-and-set)** y cada candidato se evalúa dentro de su propia unidad de trabajo, de modo que el estado y su evidencia inmutable caen juntos (Art. III) y dos consumidores simultáneos —este barrido y la puerta sanitaria del cierre (§5.4.1)— dejan una sola cuarentena y un solo evento (exclusión mutua certificada con **dos conexiones PDO reales** por `SanitaryClockConsumerRaceTest`: carrera en los dos sentidos, contención por fila con `1205` y un solo rastro por máquina). Un fallo de una máquina no aborta el lote: viaja en `failures` y el equivalente de línea de comandos (`bin/sanitary_clock_sweep.php`) termina con código distinto de cero para que el planificador pueda alertar.
+* **Regla de alerta (una sola en el código):** `SanitaryClockSweepResultDto::requiresOperatorAttention()` es la única autoridad sobre qué enciende el planificador —`true` sólo con fallos reales—, y el CLI deriva de ella su código de salida (`0` sin fallos reales, `1` con ellos). La política de reintento y de escalado de la contención se propone en `docs/propuesta_politica_reintento_barrido_sanitario.md`.
 * **Equivalente de línea de comandos:** `php bin/sanitary_clock_sweep.php` (mismos datos y mismos códigos de salida) para programadores que no disponen de HTTP.

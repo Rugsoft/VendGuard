@@ -16,6 +16,10 @@ declare(strict_types=1);
  * 3. Un candidato indecidible se aísla en `failures` con su motivo y **no** aborta
  *    el resto del lote; una excepción de infraestructura no contemplada se propaga
  *    en lugar de tragarse.
+ * 3.bis. La **contención de fila** (otro consumidor sostiene el bloqueo de la máquina:
+ *    `1205`, `1213`, `SQLSTATE 40001`) NO se cuenta como fallo: viaja en `contended`,
+ *    no enciende la alerta y no toca la máquina. La clasificación es estricta y
+ *    **fail-safe**: cualquier otro error de persistencia se queda en `failures`.
  * 4. El barrido no reimplementa el umbral: lo pide al reloj, lo publica en el
  *    resumen y lo usa como criterio del puerto de candidatos.
  * 5. Cada candidato se evalúa dentro de su propia unidad de trabajo (Art. III),
@@ -109,6 +113,13 @@ final class SweepSettingsRepo implements PreventiveSettingsRepositoryInterface
     /** @var list<array{machine_id: int, status: string}> */
     public array $statusWrites = [];
 
+    /**
+     * Cuando es `true`, la transición idempotente muere esperando el bloqueo que otro
+     * consumidor sostiene sobre la misma fila: es el `1205` real que PDO entrega desde el
+     * `UPDATE` del repositorio de producción.
+     */
+    public bool $failWrites = false;
+
     public function register(int $machineId, string $machineType, string $sanitaryStatus = 'OK'): void
     {
         $this->machines[$machineId] = [
@@ -166,6 +177,15 @@ final class SweepSettingsRepo implements PreventiveSettingsRepositoryInterface
 
     public function updateSanitaryStatus(int $machineId, string $status): bool
     {
+        if ($this->failWrites) {
+            $exception = new PDOException(
+                'SQLSTATE[HY000]: General error: 1205 Lock wait timeout exceeded; try restarting transaction'
+            );
+            $exception->errorInfo = ['HY000', 1205, 'Lock wait timeout exceeded; try restarting transaction'];
+
+            throw $exception;
+        }
+
         if (isset($this->machines[$machineId]) && $this->machines[$machineId]['sanitary_status'] === $status) {
             return false;
         }
@@ -213,8 +233,10 @@ final class SweepAuditRepo implements AuditLogRepositoryInterface
 }
 
 /**
- * Doble de la unidad de trabajo: cuenta las unidades abiertas y puede hacer
- * estallar la enésima para certificar que un fallo de infraestructura no se traga.
+ * Doble de la unidad de trabajo: cuenta las unidades abiertas, puede hacer estallar la
+ * enésima con un fallo no contemplado (para certificar que no se traga) y puede hacer
+ * morir la enésima con un **error de PDO real** —el bloqueo de fila que otro consumidor
+ * sostiene—, con el `errorInfo` que la suite elija.
  */
 final class SweepTransactionManager implements TransactionManagerInterface
 {
@@ -222,11 +244,31 @@ final class SweepTransactionManager implements TransactionManagerInterface
 
     public ?int $throwOnTransaction = null;
 
+    /** Unidad de trabajo en la que se simula un error de persistencia (PDOException). */
+    public ?int $throwPdoOnTransaction = null;
+
+    /** @var array{0: string, 1: int|string, 2: string} */
+    public array $pdoErrorInfo = ['HY000', 1205, 'Lock wait timeout exceeded; try restarting transaction'];
+
     public function runInTransaction(callable $operation): mixed
     {
         $this->transactions++;
         if ($this->throwOnTransaction !== null && $this->transactions === $this->throwOnTransaction) {
             throw new LogicException('Fallo de infraestructura simulado en la unidad de trabajo.');
+        }
+
+        if ($this->throwPdoOnTransaction !== null && $this->transactions === $this->throwPdoOnTransaction) {
+            // Se reproduce el error tal y como lo entrega PDO en producción: mensaje con
+            // el estado SQL y el código del driver, y el `errorInfo` estructurado.
+            $exception = new PDOException(sprintf(
+                'SQLSTATE[%s]: General error: %d %s',
+                (string)$this->pdoErrorInfo[0],
+                (int)$this->pdoErrorInfo[1],
+                (string)$this->pdoErrorInfo[2]
+            ));
+            $exception->errorInfo = $this->pdoErrorInfo;
+
+            throw $exception;
         }
 
         return $operation();
@@ -472,6 +514,8 @@ $expectedKeys = [
     'skipped',
     'failures',
     'failures_count',
+    'contended',
+    'contended_count',
     'threshold_seconds',
     'duration_ms',
 ];
@@ -492,6 +536,10 @@ $assert(
     && $empty->quarantined === []
     && $empty->failures === []
     && $empty->failuresCount === 0
+    && $empty->contended === []
+    && $empty->contendedCount === 0
+    && $empty->requiresOperatorAttention() === false
+    && $empty->hasContention() === false
 );
 
 $assert(
@@ -535,6 +583,187 @@ $assert(
     '5.3 El barrido respeta el aislamiento por candidato y la unidad de trabajo del proyecto',
     str_contains($serviceSource, 'runInTransaction')
     && str_contains($serviceSource, 'SanitaryClockCandidateRepositoryInterface')
+);
+
+// =====================================================================
+// GRUPO 6: Contención de fila frente a fallo real (T-PAUSE-39)
+// =====================================================================
+echo "\n--- Grupo 6: Contención de fila y fallo real ---\n";
+
+// 6.1/6.2 La máquina cuya transición muere esperando el bloqueo que otro consumidor
+// sostiene (el `1205` real de MariaDB) se APLAZA: no es un fallo, no alerta y no se toca.
+$bench = $makeBench();
+$bench['settings']->register(10, 'PERISHABLE_FOOD');
+$bench['settings']->register(11, 'PERISHABLE_FOOD');
+$bench['candidates']->candidates = [
+    $makeIncident(160, 'INC-2026-00160', 10, $agedOpening(18000)),
+    $makeIncident(161, 'INC-2026-00161', 11, $agedOpening(18000)),
+];
+$bench['transactions']->throwPdoOnTransaction = 2;
+$contended = $bench['service']->sweep();
+
+$assert(
+    '6.1 La transición que muere esperando el bloqueo ajeno (1205) se aplaza en lugar de contarse como fallo',
+    $contended->contendedCount === 1
+    && $contended->contended[0] === [
+        'incident_id' => 161,
+        'ticket_code' => 'INC-2026-00161',
+        'reason' => 'SQLSTATE[HY000]: General error: 1205 Lock wait timeout exceeded; try restarting transaction',
+    ]
+    && $contended->failures === []
+    && $contended->failuresCount === 0
+    && $contended->candidates === 2
+    && $contended->evaluated === 1
+    && $contended->evaluated + $contended->failuresCount + $contended->contendedCount === $contended->candidates,
+    json_encode($contended->toArray(), JSON_UNESCAPED_UNICODE)
+);
+
+$assert(
+    '6.2 La contención no alerta al planificador y deja la máquina aplazada intacta',
+    $contended->requiresOperatorAttention() === false
+    && $contended->hasContention() === true
+    && ($bench['settings']->machines[11]['sanitary_status'] ?? null) === 'OK'
+    && $bench['settings']->statusWrites === [['machine_id' => 10, 'status' => 'QUARANTINE']]
+    && count($bench['audit']->events) === 1,
+    json_encode($contended->toArray(), JSON_UNESCAPED_UNICODE)
+);
+
+// 6.3 El deadlock (1213 con `SQLSTATE 40001`) es la otra cara del mismo estado de bloqueo.
+$bench = $makeBench();
+$bench['settings']->register(12, 'COMBO');
+$bench['candidates']->candidates = [$makeIncident(162, 'INC-2026-00162', 12, $agedOpening(18000), 'COMBO')];
+$bench['transactions']->throwPdoOnTransaction = 1;
+$bench['transactions']->pdoErrorInfo = ['40001', 1213, 'Deadlock found when trying to get lock; try restarting transaction'];
+$deadlock = $bench['service']->sweep();
+
+$assert(
+    '6.3 El deadlock (1213 / SQLSTATE 40001) también se aplaza: mismo estado de bloqueo, otro código',
+    $deadlock->contendedCount === 1
+    && $deadlock->failuresCount === 0
+    && str_contains((string)$deadlock->contended[0]['reason'], 'Deadlock')
+    && $deadlock->requiresOperatorAttention() === false,
+    json_encode($deadlock->toArray(), JSON_UNESCAPED_UNICODE)
+);
+
+// 6.4 Fail-safe: un error de persistencia ajeno al bloqueo —aquí una tabla ausente— sigue
+// siendo un FALLO REAL aunque su mensaje se parezca al de un bloqueo. La clasificación se
+// lee del código estructurado, nunca del texto.
+$bench = $makeBench();
+$bench['settings']->register(13, 'PERISHABLE_FOOD');
+$bench['candidates']->candidates = [$makeIncident(163, 'INC-2026-00163', 13, $agedOpening(18000))];
+$bench['transactions']->throwPdoOnTransaction = 1;
+$bench['transactions']->pdoErrorInfo = ['42S02', 1146, "Table 'vendguard.machines' doesn't exist (Lock wait timeout.)"];
+$notContention = $bench['service']->sweep();
+
+$assert(
+    '6.4 Fail-safe: un error de persistencia sin código de bloqueo se queda en fallos y sí alerta',
+    $notContention->contendedCount === 0
+    && $notContention->contended === []
+    && $notContention->failuresCount === 1
+    && $notContention->failures[0]['incident_id'] === 163
+    && str_contains((string)$notContention->failures[0]['reason'], "doesn't exist")
+    && $notContention->requiresOperatorAttention() === true,
+    json_encode($notContention->toArray(), JSON_UNESCAPED_UNICODE)
+);
+
+// 6.5/6.6 Las dos naturalezas conviven en la misma pasada: el aplazamiento se publica, el
+// fallo real enciende la alerta y la máquina que sí procede entra en cuarentena.
+$bench = $makeBench();
+$bench['settings']->register(14, 'PERISHABLE_FOOD');
+$bench['settings']->register(15, 'PERISHABLE_FOOD');
+$bench['candidates']->candidates = [
+    $makeIncident(164, 'INC-2026-00164', 14, $agedOpening(18000)),
+    $makeIncident(165, 'INC-2026-00165', 16, $agedOpening(18000), null),
+    $makeIncident(166, 'INC-2026-00166', 15, $agedOpening(18000)),
+];
+$bench['transactions']->throwPdoOnTransaction = 1;
+$mixed = $bench['service']->sweep();
+
+$assert(
+    '6.5 Aplazamiento y fallo real conviven en la misma pasada, con la identidad contable intacta',
+    $mixed->candidates === 3
+    && $mixed->evaluated === 1
+    && $mixed->failuresCount === 1
+    && $mixed->contendedCount === 1
+    && count($mixed->quarantined) === 1
+    && $mixed->quarantined[0]['machine_id'] === 15
+    && $mixed->evaluated + $mixed->failuresCount + $mixed->contendedCount === $mixed->candidates
+    && $mixed->requiresOperatorAttention() === true,
+    json_encode($mixed->toArray(), JSON_UNESCAPED_UNICODE)
+);
+
+$assert(
+    '6.6 Ni el fallo ni el aplazamiento abortan el lote: la máquina que sí procede entra en cuarentena',
+    ($bench['settings']->machines[15]['sanitary_status'] ?? null) === 'QUARANTINE'
+    && ($bench['settings']->machines[14]['sanitary_status'] ?? null) === 'OK'
+    && count($bench['audit']->events) === 1,
+    json_encode($mixed->toArray(), JSON_UNESCAPED_UNICODE)
+);
+
+// 6.7/6.8 La identidad contable del resumen se verifica en el propio DTO: un recuento que no
+// cuadra no puede llegar al planificador vestido de pasada válida.
+$incoherent = $capture(static fn () => new SanitaryClockSweepResultDto(
+    candidates: 3,
+    evaluated: 2,
+    quarantined: [],
+    skipped: 2,
+    failures: [],
+    failuresCount: 0,
+    contended: [],
+    contendedCount: 0,
+    thresholdSeconds: 14400,
+    durationMs: 1.0,
+));
+
+$assert(
+    '6.7 Un resumen que no cuadra se rechaza en el constructor en lugar de publicarse como válido',
+    $incoherent['threw'] === true && $incoherent['class'] === InvalidArgumentException::class,
+    $incoherent['message']
+);
+
+$unmirrored = $capture(static fn () => new SanitaryClockSweepResultDto(
+    candidates: 1,
+    evaluated: 0,
+    quarantined: [],
+    skipped: 0,
+    failures: [],
+    failuresCount: 0,
+    contended: [],
+    contendedCount: 1,
+    thresholdSeconds: 14400,
+    durationMs: 1.0,
+));
+
+$assert(
+    '6.8 El espejo de la contención también se verifica: no se declara un aplazamiento que no se publica',
+    $unmirrored['threw'] === true && $unmirrored['class'] === InvalidArgumentException::class,
+    $unmirrored['message']
+);
+
+// 6.9 La regla de alerta no depende del volumen del lote: veinte aplazamientos por contención
+// —la transición muriendo en el `UPDATE` real del repositorio, que es por donde llega el
+// bloqueo en producción— no encienden al planificador.
+$wideBench = $makeBench();
+for ($machineId = 100; $machineId < 120; $machineId++) {
+    $wideBench['settings']->register($machineId, 'PERISHABLE_FOOD');
+    $wideBench['candidates']->candidates[] = $makeIncident(
+        200 + $machineId,
+        sprintf('INC-2026-%05d', 200 + $machineId),
+        $machineId,
+        $agedOpening(18000)
+    );
+}
+$wideBench['settings']->failWrites = true;
+$wide = $wideBench['service']->sweep();
+
+$assert(
+    '6.9 Veinte aplazamientos sin fallos no encienden la alerta (la contención no es un problema)',
+    $wide->candidates === 20
+    && $wide->contendedCount === 20
+    && $wide->failuresCount === 0
+    && $wide->requiresOperatorAttention() === false
+    && $wide->hasContention() === true,
+    json_encode(['contended' => $wide->contendedCount, 'failures' => $wide->failuresCount], JSON_UNESCAPED_UNICODE)
 );
 
 // =====================================================================

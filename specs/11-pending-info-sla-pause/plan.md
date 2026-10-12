@@ -206,12 +206,14 @@ Consumidor de fondo del Algoritmo 4 (T-PAUSE-38, RF-03.5.1). Protegido por `Cron
 {
   "success": true,
   "data": {
-    "candidates": 2,
-    "evaluated": 2,
+    "candidates": 3,
+    "evaluated": 1,
     "quarantined": [{ "incident_id": 41, "ticket_code": "INC-2026-000041", "machine_id": 7 }],
-    "skipped": 1,
+    "skipped": 0,
     "failures": [{ "incident_id": 44, "ticket_code": "INC-2026-000044", "reason": "..." }],
     "failures_count": 1,
+    "contended": [{ "incident_id": 46, "ticket_code": "INC-2026-000046", "reason": "SQLSTATE[HY000]: General error: 1205 Lock wait timeout exceeded; try restarting transaction" }],
+    "contended_count": 1,
     "threshold_seconds": 14400,
     "duration_ms": 12.4
   }
@@ -219,10 +221,19 @@ Consumidor de fondo del Algoritmo 4 (T-PAUSE-38, RF-03.5.1). Protegido por `Cron
 ```
 
 * `candidates`: expedientes devueltos por el prefiltro del repositorio (capacidad y economía de consulta, **no** decisión: la decisión la toma el reloj).
-* `evaluated`: candidatos evaluados de verdad por el reloj (candidatos − fallos).
+* `evaluated`: candidatos evaluados de verdad por el reloj.
 * `quarantined`: máquinas que el reloj reporta en cuarentena tras la evaluación. El disparo de **esta** corrida queda sellado, además, como evento `SANITARY_QUARANTINE_AUTO_TRIGGERED` en la bitácora inmutable (Art. III).
 * `skipped`: evaluados que no requieren cuarentena (umbral no alcanzado en la relectura del reloj o expediente liquidado en carrera con otro consumidor).
 * `failures` / `failures_count`: candidatos cuya evaluación no pudo decidirse (tipología o apertura ilegibles) o cuya escritura no se pudo persistir; **nunca** se silencian, viajan en la respuesta y el CLI termina con `exit 1` si hay alguno.
+* `contended` / `contended_count`: candidatos **aplazados por contención de fila** —la transición murió esperando el bloqueo exclusivo que otro consumidor sostiene sobre esa misma máquina (`1205 Lock wait timeout`, `1213 Deadlock`, `SQLSTATE 40001`)—. Se separan de `failures` porque la contención no es un error del barrido sino la prueba de que otro escritor está actuando sobre la máquina ahora mismo: no alerta al planificador y se resuelve en la pasada siguiente. La clasificación es **estricta y fail-safe** (sólo códigos de bloqueo; cualquier otro error de persistencia es `failures`), y la identidad contable `candidates = evaluated + failures_count + contended_count` la verifica el propio DTO, que rechaza un resumen que no cuadre.
+* **Una sola regla de alerta:** `SanitaryClockSweepResultDto::requiresOperatorAttention()` es la única autoridad sobre qué enciende el planificador (`true` sólo con fallos reales) y el CLI deriva de ahí su código de salida.
+
+#### 2.5.1. Contención de fila del barrido y política de reintento (propuesta)
+
+El barrido comparte la fila de la máquina con el cierre técnico (§5.4.1 del contrato de API) y con cualquier otro escritor del parque, así que **la contención es un estado normal de operación, no un fallo**: el reloj arbitra la carrera con su transición idempotente y el rastro inmutable sigue siendo **uno por máquina** (certificado con dos conexiones PDO reales en `SanitaryClockConsumerRaceTest`). Lo que faltaba no era la exclusión mutua sino su **lectura operativa**: hasta T-PAUSE-39 un candidato que perdía el bloqueo se contaba como `failures` y teñía de rojo la pasada, con lo que el planificador alertaba en cada solape legítimo y el aviso perdía valor.
+
+* **Decisión implementada (T-PAUSE-39):** la contención tiene su propia clave (`contended`/`contended_count`), **no** enciende la alerta y no toca el estado de la máquina; la identidad contable del resumen se verifica en el DTO (Fail-Fast).
+* **Política de reintento propuesta (pendiente de ratificación):** reintento acotado dentro de la pasada (1 + 2 intentos con espera creciente y jitter), red de seguridad por cadencia (el prefiltro vuelve a publicar al candidato aplazado mientras siga vencido y sin cuarentena, así que la pérdida máxima es de una cadencia) y regla de escalado para el planificador (aviso con contención; escalada si persiste en 3 pasadas consecutivas o supera 5 aplazamientos en una pasada). El razonamiento, los valores recomendados, el coste medido y las decisiones que quedan en manos del Product Owner están en `docs/propuesta_politica_reintento_barrido_sanitario.md`.
 
 La cadencia operativa (**15 minutos**, ratificada por el Product Owner) y el comando de programación se documentan en `README.md`. **Límite declarado:** la activación automática depende de que el planificador esté configurado fuera del repositorio; hasta entonces el mecanismo queda entregado y probado, pero no activo.
 
@@ -592,6 +603,7 @@ FIN ALGORITMO
   * Barrido con candidatos elegibles: una máquina entra en cuarentena una sola vez y su rastro inmutable se emite una sola vez.
   * Idempotencia: un segundo barrido sobre el mismo parque no vuelve a escribir ni a auditar.
   * Aislamiento: un candidato indecidible viaja a `failures` sin abortar el resto del lote, y el lote respeta su cota.
+  * **Contención de fila (T-PAUSE-39):** el candidato cuya transición muere esperando el bloqueo ajeno (`1205`, `1213`/`40001`) viaja a `contended` —no a `failures`— y no enciende la alerta; un error de persistencia sin código de bloqueo sigue siendo fallo real (fail-safe), y la identidad contable `candidates = evaluated + failures_count + contended_count` la verifica el propio DTO.
 * **`IncidentPauseSanitaryClockTest.php` (ampliación):**
   * Exclusión mutua: con dos consumidores simultáneos sobre la misma máquina, un solo evento inmutable y ninguna segunda escritura.
   * Fallo real de escritura: sigue lanzando excepción y no deja rastro de cuarentena.
@@ -623,6 +635,11 @@ FIN ALGORITMO
   * `POST /api/cron/sanitary-clock-sweep` sin credencial ⇒ `401`; con `X-Cron-Secret` y con sesión de coordinador ⇒ `200`; el controlador sin la marca del middleware ⇒ `401` (fail-closed).
   * **Prueba decisiva (la desviación que se cierra):** expediente vivo de máquina perecedera abierto hace más de 4 h naturales, máquina en `OK` y **ningún intento de cierre**: el barrido deja la máquina en `QUARANTINE` con **un** evento `SANITARY_QUARANTINE_AUTO_TRIGGERED`, y la publicación de sede y el escaneo ciudadano ya muestran el bloqueo.
   * Controles negativos: bebidas frías, snacks, expedientes liquidados y umbrales no alcanzados no despiertan; el segundo barrido no añade rastro.
+  * **Contrato del resumen (T-PAUSE-39):** las diez claves documentadas en orden —incluidas `contended`/`contended_count`—, la identidad contable sobre datos reales y un CLI cuyo código de salida se deriva de `requiresOperatorAttention()` (la contención no alerta).
+* **`SanitaryClockConsumerRaceTest.php`:**
+  * **Exclusión mutua con dos conexiones PDO reales:** el barrido (por su ruta real) y el cierre técnico (sobre una segunda conexión) compiten por la misma máquina y sólo uno escribe y sólo uno deja el evento; el perdedor confirma la cuarentena ajena sin excepción, sin segundo rastro y sin abrir la puerta del cierre (RF-03.5.2).
+  * **Contención real por fila:** con el ganador sin confirmar, la transición del perdedor muere en `1205 Lock wait timeout` y se publica como **aplazamiento** (`contended`, `failures_count = 0`, sin alerta al planificador — T-PAUSE-39) sin cuarentenar la máquina, mientras la misma pasada cuarentena a la máquina libre (el aislamiento es por fila, no un bloqueo global); el resumen cuadra sobre la respuesta HTTP real (`candidates = evaluated + fallos + aplazados`).
+  * El rastro total es uno por máquina en los dos sentidos de la carrera y la pasada siguiente no añade cuarentenas ni eventos.
 
 ---
 

@@ -19,9 +19,21 @@ declare(strict_types=1);
  * (`IncidentPauseService::evaluateSanitaryBiologicalClock()`), que es la única autoridad
  * sobre la regla y el único punto que escribe el estado y su rastro inmutable.
  *
+ * Qué separa esta salida (T-PAUSE-39):
+ *   - **Contención de fila** (`contended`): otro consumidor —el cierre técnico, otro barrido
+ *     o cualquier escritor del parque— sostenía el bloqueo de esa máquina, así que su
+ *     transición quedó aplazada. Es operación normal, no un error: se informa aparte y el
+ *     candidato se reintenta en la pasada siguiente. **No** enciende la alerta.
+ *   - **Fallo real** (`failures`): la evaluación no se pudo decidir o la escritura no se pudo
+ *     persistir. Es lo único que hace terminar el proceso en rojo.
+ *
+ * La decisión de qué alerta no se toma aquí: la dicta
+ * `SanitaryClockSweepResultDto::requiresOperatorAttention()`, para que el endpoint y el CLI
+ * compartan un único criterio.
+ *
  * Códigos de salida:
- *   0 = pasada completada sin fallos.
- *   1 = la pasada reportó fallos (el planificador debe poder alertar) o excepción fatal.
+ *   0 = pasada completada sin fallos reales (con o sin contención de fila).
+ *   1 = la pasada reportó fallos reales (el planificador debe poder alertar) o excepción fatal.
  */
 
 require_once __DIR__ . '/../src/autoload.php';
@@ -36,7 +48,7 @@ try {
     $result = (new SanitaryClockSweepService())->sweep();
 
     echo sprintf(
-        "[1/2] Candidatos evaluados: %d de %d (umbral %d s naturales, %.2f ms)\n",
+        "[1/3] Candidatos evaluados: %d de %d (umbral %d s naturales, %.2f ms)\n",
         $result->evaluated,
         $result->candidates,
         $result->thresholdSeconds,
@@ -51,8 +63,17 @@ try {
         );
     }
 
+    // Aplazamiento por contención de fila: informativo, nunca motivo de alerta.
+    foreach ($result->contended as $entry) {
+        echo sprintf(
+            "      APLAZADO  · expediente %s (%s): la fila está bloqueada por otro consumidor; se reintenta en la pasada siguiente\n",
+            $entry['ticket_code'],
+            $entry['incident_id'] === null ? 'sin id' : (string)$entry['incident_id']
+        );
+    }
+
     if ($result->failures !== []) {
-        echo sprintf("[2/2] Fallos: %d\n", $result->failuresCount);
+        echo sprintf("[2/3] Fallos reales: %d\n", $result->failuresCount);
         foreach ($result->failures as $failure) {
             echo sprintf(
                 "      · expediente %s (%s): %s\n",
@@ -62,15 +83,29 @@ try {
             );
         }
     } else {
-        echo "[2/2] Fallos: 0\n";
+        echo "[2/3] Fallos reales: 0\n";
     }
 
-    $exitCode = $result->failuresCount > 0 ? 1 : 0;
+    echo sprintf(
+        "[3/3] Contención de fila: %d aplazados (no es un fallo; se reintentan en la pasada siguiente)\n",
+        $result->contendedCount
+    );
+
+    // Regla de alerta única: vive en el DTO, no aquí.
+    $exitCode = $result->requiresOperatorAttention() ? 1 : 0;
 
     echo "\n" . str_repeat('=', 56) . "\n";
-    echo $exitCode === 0
-        ? sprintf(" Barrido completado. Cuarentenas activadas: %d\n", count($result->quarantined))
-        : " Barrido completado CON FALLOS: revisar los expedientes listados.\n";
+    if ($exitCode !== 0) {
+        echo " Barrido completado CON FALLOS: revisar los expedientes listados.\n";
+    } elseif ($result->hasContention()) {
+        echo sprintf(
+            " Barrido completado con contención de fila: %d aplazado(s), %d cuarentena(s) activada(s).\n",
+            $result->contendedCount,
+            count($result->quarantined)
+        );
+    } else {
+        echo sprintf(" Barrido completado. Cuarentenas activadas: %d\n", count($result->quarantined));
+    }
     echo str_repeat('=', 56) . "\n";
 
     exit($exitCode);

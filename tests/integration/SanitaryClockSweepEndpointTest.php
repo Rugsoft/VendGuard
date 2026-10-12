@@ -330,10 +330,20 @@ try {
             'skipped',
             'failures',
             'failures_count',
+            'contended',
+            'contended_count',
             'threshold_seconds',
             'duration_ms',
         ],
         json_encode(array_keys($sweepData), JSON_UNESCAPED_UNICODE)
+    );
+
+    $assert(
+        '2.2.bis El resumen cuadra sobre datos reales: candidates = evaluated + fallos + aplazados',
+        ($sweepData['contended'] ?? null) === []
+        && ($sweepData['contended_count'] ?? -1) === 0
+        && ($sweepData['evaluated'] + $sweepData['failures_count'] + $sweepData['contended_count']) === $sweepData['candidates'],
+        json_encode($sweepData, JSON_UNESCAPED_UNICODE)
     );
 
     $quarantinedMachines = array_column($sweepData['quarantined'] ?? [], 'machine_id');
@@ -528,9 +538,17 @@ try {
         && !str_contains($cliSource, 'updateSanitaryStatus')
     );
     $assert(
-        '6.3 El CLI declara fallo al planificador cuando el barrido reporta fallos',
-        str_contains($cliSource, 'failuresCount') && preg_match('/exit\(\s*\\$exitCode\s*\)/', $cliSource) === 1,
-        'El CLI debe terminar en código distinto de cero con fallos'
+        '6.3 El CLI declara fallo al planificador cuando el barrido reporta fallos reales',
+        str_contains($cliSource, 'requiresOperatorAttention') && preg_match('/exit\(\s*\\$exitCode\s*\)/', $cliSource) === 1,
+        'El CLI debe terminar en código distinto de cero con fallos reales'
+    );
+
+    $assert(
+        '6.4 El CLI NO alerta por contención de fila y la informa como aplazamiento',
+        str_contains($cliSource, 'contended')
+        && str_contains($cliSource, 'hasContention')
+        && !preg_match('/contendedCount\s*>\s*0\s*\?\s*1/', $cliSource),
+        'El código de salida del CLI no puede decidirse por el recuento de contención'
     );
 } finally {
     // Restitución del estado sanitario de TODO el parque: el barrido escribe sobre
