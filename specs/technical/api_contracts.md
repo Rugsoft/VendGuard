@@ -49,7 +49,7 @@
 | `403 Forbidden` | No autorizado | Técnico intentando cancelar una incidencia (solo Coordinador) |
 | `404 Not Found` | No encontrado | Máquina, sede o incidencia inexistente |
 | `409 Conflict` | Conflicto de estado | **EARS 2.1:** Intento de crear ticket en máquina con incidencia activa |
-| `422 Unprocessable`| Validación fallida | **EARS 8.2:** Diagnóstico < 20 caracteres; **EARS 9.2:** Reapertura tras 48h |
+| `422 Unprocessable`| Validación fallida | **EARS 8.2:** Diagnóstico < 20 caracteres; **EARS 9.2:** Reapertura tras 48h; **RF-03.5.2:** Declaraciones sanitarias obligatorias del cierre (§5.4.1) |
 | `500 Server Error` | Error de servidor | Fallo de conexión o excepción no controlada |
 
 ---
@@ -794,6 +794,93 @@ Cierre técnico con validación estricta de informe diagnóstico (RF-08).
     }
     ```
 
+#### 5.4.1 Bloque sanitario obligatorio del cierre (RF-03.5.2 · Art. II)
+
+Sobre una máquina **bajo vigilancia sanitaria** —alimentos perecederos (`PERISHABLE_FOOD`) y mixtas (`COMBO`), que es lo que devuelve `MachineType::requiresSanitaryWatch()`— el cierre técnico exige, además del diagnóstico y la acción correctiva, declarar qué se ha hecho con el producto que perdió la cadena de frío. La puerta se impone en `TechnicianController::resolveIncident()` **antes de cualquier escritura** del cierre (el dictamen de saldo incluido) y la evalúa `ResolutionValidator::getSanitaryDeclarationErrors()`.
+
+**Cuándo es exigible.** El bloque es obligatorio cuando se cumple cualquiera de estas dos condiciones:
+
+1. La máquina está en cuarentena sanitaria (`machines.sanitary_status = 'QUARANTINE'`), venga del Reloj Sanitario Biológico o de una decisión del módulo 05.
+2. La máquina es de vigilancia sanitaria, el expediente no está cerrado y han transcurrido **≥ 4 horas naturales** (14.400 s) desde su apertura. El reloj se consume aquí de forma idempotente (`IncidentPauseService::evaluateSanitaryBiologicalClock()`): si vence en este intento, la máquina pasa a `QUARANTINE` y queda el evento inmutable `SANITARY_QUARANTINE_AUTO_TRIGGERED` con su umbral y el actor `SYSTEM`.
+
+En snacks, bebidas frías o calientes y en cualquier otra tipología el bloque no es exigible, y aun así se valida si viaja: un contrato no acepta declaraciones mal formadas.
+
+**Campo de petición `sanitary_declarations` (objeto; obligatorio cuando la puerta está activa):**
+
+| Campo | Tipo | Obligatorio | Regla |
+| :--- | :--- | :--- | :--- |
+| `temperature_c` | número | Sí | Lectura real del recinto térmico, dentro del rango físicamente plausible **[-40,0, 80,0] °C** (`ResolutionValidator::MIN_PLAUSIBLE_TEMPERATURE_C` y `MAX_PLAUSIBLE_TEMPERATURE_C`). Ausente, no numérica o increíble (p. ej. `120`) ⇒ rechazo. |
+| `stock_destroyed` | booleano | Sí | Confirmación de la retirada y destrucción del stock perecedero deteriorado por la rotura de frío. Debe llegar **marcado**: un `false` explícito se rechaza con el mismo rigor que una omisión. |
+| `hygiene_checklist` | booleano | Sí | Confirmación de la ejecución del checklist de higienización sanitaria. Mismas reglas que el anterior. |
+
+Petición completa de un cierre sobre máquina en cuarentena:
+
+```json
+{
+  "resolution_diagnosis": "Rotura de frío por compresor agarrotado en la cámara de perecederos.",
+  "resolution_action": "Sustituido el relé de arranque, verificado el ciclo de frío y anotada la temperatura de la sonda.",
+  "replaced_parts_declared": true,
+  "replaced_parts": [
+    { "spare_part_id": 7, "quantity": 1, "old_part_destination": "DESGUACE" }
+  ],
+  "sanitary_declarations": {
+    "temperature_c": 3.5,
+    "stock_destroyed": true,
+    "hygiene_checklist": true
+  }
+}
+```
+
+* **Respuesta Exitosa (`200 OK`):** además de los campos ya documentados en 5.4, el cierre devuelve el bloque congelado, con la temperatura redondeada a dos decimales:
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 14,
+    "ticket_code": "INC-2026-0014",
+    "status": "RESOLVED",
+    "resolved_at": "2026-10-12 11:20:00",
+    "replaced_parts_count": 1,
+    "total_parts_cost": 18.4,
+    "sanitary_declarations": {
+      "temperature_c": 3.5,
+      "stock_destroyed": true,
+      "hygiene_checklist": true
+    }
+  },
+  "message": "Incidencia resuelta con registro de repuestos."
+}
+```
+
+* **Errores de Validación / Negocio:**
+  * `422 Unprocessable` (`SANITARY_CHECKLIST_REQUIRED`): el cierre llega sin el bloque, sin alguno de sus tres campos o con una declaración inválida **cuando la puerta estaba activa**. El `message` enumera los motivos y `details.errors` los repite uno a uno, en el mismo orden en que los produce el validador; el expediente y la máquina quedan **intactos** (ni una columna escrita, ni rastro de dinero):
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "SANITARY_CHECKLIST_REQUIRED",
+    "message": "La máquina está fuera de servicio por control higiénico-sanitario (Art. II): Debe confirmar la retirada y destrucción del stock perecedero deteriorado por la rotura de frío (campo stock_destroyed).",
+    "details": {
+      "errors": [
+        "Debe declarar la temperatura real del recinto térmico en grados Celsius (campo temperature_c).",
+        "Debe confirmar la retirada y destrucción del stock perecedero deteriorado por la rotura de frío (campo stock_destroyed).",
+        "Debe confirmar la ejecución del checklist de higienización sanitaria (campo hygiene_checklist)."
+      ]
+    }
+  }
+}
+```
+
+  * El catálogo de mensajes es literalmente el del validador de dominio: `Debe declarar la temperatura real del recinto térmico en grados Celsius (campo temperature_c).`, `La temperatura declarada (120.0 °C) queda fuera del rango físicamente plausible [-40.0, 80.0] °C; registre la lectura real del termómetro.`, `Debe confirmar la retirada y destrucción del stock perecedero deteriorado por la rotura de frío (campo stock_destroyed).` y `Debe confirmar la ejecución del checklist de higienización sanitaria (campo hygiene_checklist).` Si el bloque falta por completo, la lista trae **un único** mensaje que pide las tres declaraciones juntas.
+  * `422 Unprocessable` (`INVALID_RESOLUTION`): el bloque viaja en un cierre donde no era exigible y su contenido no es válido, o `sanitary_declarations` no es un objeto. `details.errors` lleva la lista del validador igual que en el caso anterior.
+
+* **Efectos en el expediente y en la máquina:**
+  * Declarar **no desbloquea** la máquina: sigue en `QUARANTINE` y sólo la reinspección reglamentaria del módulo 05 (temperatura ≤ 4,0 °C más checklist de higienización) la devuelve a `OK`.
+  * El cierre queda congelado en la auditoría inmutable (Art. III): el evento `RESOLVE_INCIDENT` guarda las declaraciones en su estado resultante y marca `sanitary_declarations_recorded: true` en sus metadatos, con el actor técnico.
+
+* **Límite declarado (medido, 2026-10-12):** la cuarentena por reloj biológico se materializa al **intentar** el cierre, porque es el único punto que consume el reloj; no hay planificador de fondo. Entre las 4 h naturales y ese primer intento, la máquina sigue publicándose como `OK` en el portal de sede y en el escaneo ciudadano: es la única desviación viva sobre RF-03.5.1 (enmienda de T-PAUSE-18 en `specs/11-pending-info-sla-pause/tasks.md`).
 ### 5.5 `GET|POST /api/technician/incidents/{id}/comments` (Hilo de Conversación de la Ruta)
 
 Hilo de conversación del expediente en la vista móvil *Mi Ruta*: el técnico consulta la conversación completa

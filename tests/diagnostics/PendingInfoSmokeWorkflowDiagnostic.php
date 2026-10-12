@@ -16,7 +16,7 @@ declare(strict_types=1);
  *      `PENDING_INFO`, doble reanudación sin duplicar rastro y el descuento de pausas
  *      en el MTTR (RF-03.1).
  *   C. **Flujo de trabajo completo:** reporte de sede ➔ triaje y asignación ➔ pausa del
- *      técnico ➔ banner de sede ➔ reactivación automática ➔ resolución ➔ reapertura ➔
+ *      técnico ➔ banner de sede ➔ aviso de respuesta y reanudación manual (E-1) ➔ resolución ➔ reapertura ➔
  *      pausa desde `REOPENED` ➔ 72 h hábiles sin respuesta ➔ cancelación por inactividad ➔
  *      máquina fuera de servicio ➔ aviso nuevo con confirmación de acceso ➔ hilo sellado ➔
  *      seguimiento ciudadano neutral, cerrando con las invariantes de base de datos.
@@ -520,7 +520,7 @@ $afterInternal = $row($internal['id']);
 
 $assert('B.3.1 §6.5: la nota interna se publica (200/201)', in_array($res->getStatusCode(), [200, 201], true), "status={$res->getStatusCode()}");
 $assert(
-    'B.3.2 §6.5: la avería PERMANECE en pausa tras la nota interna (solo la sede reactiva)',
+    'B.3.2 §6.5 + E-1: la avería PERMANECE en pausa tras la nota interna (ninguna publicación la despausa)',
     ($afterInternal['status'] ?? '') === 'PENDING_INFO' && $afterInternal['paused_at'] === $beforeInternal['paused_at'],
     'estado observado: ' . ($afterInternal['status'] ?? 'n/a')
 );
