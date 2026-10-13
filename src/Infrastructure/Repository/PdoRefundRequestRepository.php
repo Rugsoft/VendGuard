@@ -14,6 +14,7 @@ use VendGuard\Core\Domain\Model\RefundStatus;
 use VendGuard\Core\Domain\Model\TechnicianFinding;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
  * PDO persistence for consumer refund cases.
@@ -22,26 +23,31 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  * projection never names `iban` or `bizum_phone`, so those values are not even
  * fetched from the server for the site desk or the field technician. Filtering
  * them out after the fetch would leave them in memory and in any debug dump.
+ *
+ * Los identificadores se escriben desnudos —los dos motores admiten así todo el esquema— y la
+ * única diferencia declarada que este repositorio tiene, el literal booleano de `is_active`
+ * (D-3), se le pide al adaptador de dialecto, que es el punto único de traducción (RF-01.5,
+ * T-HYBRID-25).
  */
 final class PdoRefundRequestRepository implements RefundRequestRepositoryInterface
 {
     /** Full projection: Coordination only. */
-    private const FULL_COLUMNS = 'r.`id`, r.`incident_id`, r.`machine_id`, r.`location_id`,
-        r.`claimant_name`, r.`claimant_contact`, r.`claimed_amount`, r.`product_attempted`,
-        r.`compensation_method`, r.`bizum_phone`, r.`iban`, r.`pickup_pin`,
-        r.`pickup_attempts`, r.`pickup_locked_until`, r.`tracking_token`,
-        r.`status`, r.`technician_finding`, r.`recovered_amount`, r.`cash_custody_action`,
-        r.`receptionist_name`, r.`technician_justification`, r.`approved_amount`,
-        r.`payment_reference`, r.`paid_amount`, r.`coordinator_decision`, r.`coordinator_justification`,
-        r.`paid_at`, r.`is_active`, r.`created_at`, r.`updated_at`';
+    private const FULL_COLUMNS = 'r.id, r.incident_id, r.machine_id, r.location_id,
+        r.claimant_name, r.claimant_contact, r.claimed_amount, r.product_attempted,
+        r.compensation_method, r.bizum_phone, r.iban, r.pickup_pin,
+        r.pickup_attempts, r.pickup_locked_until, r.tracking_token,
+        r.status, r.technician_finding, r.recovered_amount, r.cash_custody_action,
+        r.receptionist_name, r.technician_justification, r.approved_amount,
+        r.payment_reference, r.paid_amount, r.coordinator_decision, r.coordinator_justification,
+        r.paid_at, r.is_active, r.created_at, r.updated_at';
 
     /** Restricted projection: never selects the financial columns (Art. V.4). */
-    private const RESTRICTED_COLUMNS = 'r.`id`, r.`incident_id`, r.`machine_id`, r.`location_id`,
-        r.`claimant_name`, r.`claimant_contact`, r.`claimed_amount`, r.`product_attempted`,
-        r.`compensation_method`, r.`pickup_pin`, r.`tracking_token`,
-        r.`status`, r.`technician_finding`, r.`recovered_amount`, r.`cash_custody_action`,
-        r.`receptionist_name`, r.`technician_justification`, r.`approved_amount`,
-        r.`payment_reference`, r.`paid_amount`, r.`is_active`, r.`created_at`, r.`updated_at`';
+    private const RESTRICTED_COLUMNS = 'r.id, r.incident_id, r.machine_id, r.location_id,
+        r.claimant_name, r.claimant_contact, r.claimed_amount, r.product_attempted,
+        r.compensation_method, r.pickup_pin, r.tracking_token,
+        r.status, r.technician_finding, r.recovered_amount, r.cash_custody_action,
+        r.receptionist_name, r.technician_justification, r.approved_amount,
+        r.payment_reference, r.paid_amount, r.is_active, r.created_at, r.updated_at';
 
     /**
      * Join needed by the coordination filters that look at the incident, such as
@@ -51,7 +57,7 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
      * bearing in two ways: it never drops a detached case either, and the
      * filter on the incident simply matches nothing for it.
      */
-    private const COORDINATOR_INCIDENT_JOIN = ' LEFT JOIN `incidents` i ON i.`id` = r.`incident_id`';
+    private const COORDINATOR_INCIDENT_JOIN = ' LEFT JOIN incidents i ON i.id = r.incident_id';
 
     /** Columns a transition is allowed to write. Anything else is ignored. */
     private const WRITABLE_FIELDS = [
@@ -84,22 +90,25 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
 
     private PDO $pdo;
 
+    private SqlDialectAdapter $dialect;
+
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
+        $this->dialect = SqlDialectAdapter::forConnection($this->pdo);
     }
 
     public function insert(RefundRequest $refundRequest): int
     {
         $stmt = $this->pdo->prepare("
-            INSERT INTO `refund_requests` (
-                `incident_id`, `machine_id`, `location_id`,
-                `claimant_name`, `claimant_contact`, `claimed_amount`, `product_attempted`,
-                `compensation_method`, `bizum_phone`, `iban`, `pickup_pin`,
-                `pickup_attempts`, `pickup_locked_until`, `tracking_token`,
-                `status`, `technician_finding`, `recovered_amount`, `cash_custody_action`,
-                `receptionist_name`, `technician_justification`, `approved_amount`,
-                `payment_reference`, `is_active`
+            INSERT INTO refund_requests (
+                incident_id, machine_id, location_id,
+                claimant_name, claimant_contact, claimed_amount, product_attempted,
+                compensation_method, bizum_phone, iban, pickup_pin,
+                pickup_attempts, pickup_locked_until, tracking_token,
+                status, technician_finding, recovered_amount, cash_custody_action,
+                receptionist_name, technician_justification, approved_amount,
+                payment_reference, is_active
             ) VALUES (
                 :incident_id, :machine_id, :location_id,
                 :claimant_name, :claimant_contact, :claimed_amount, :product_attempted,
@@ -111,41 +120,55 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
             )
         ");
 
-        $stmt->execute([
-            ':incident_id' => $refundRequest->getIncidentId(),
-            ':machine_id' => $refundRequest->getMachineId(),
-            ':location_id' => $refundRequest->getLocationId(),
-            ':claimant_name' => $refundRequest->getClaimantName(),
-            ':claimant_contact' => $refundRequest->getClaimantContact(),
-            ':claimed_amount' => $refundRequest->getClaimedAmount(),
-            ':product_attempted' => $refundRequest->getProductAttempted(),
-            ':compensation_method' => $refundRequest->getCompensationMethod()->value,
-            ':bizum_phone' => $refundRequest->getBizumPhone(),
-            ':iban' => $refundRequest->getIban(),
-            ':pickup_pin' => $refundRequest->getPickupPin(),
-            ':pickup_attempts' => $refundRequest->getPickupAttempts(),
-            ':pickup_locked_until' => $refundRequest->getPickupLockedUntil(),
-            ':tracking_token' => $refundRequest->getTrackingToken(),
-            ':status' => $refundRequest->getStatus()->value,
-            ':technician_finding' => $refundRequest->getTechnicianFinding()?->value,
-            ':recovered_amount' => $refundRequest->getRecoveredAmount(),
-            ':cash_custody_action' => $refundRequest->getCashCustodyAction()?->value,
-            ':receptionist_name' => $refundRequest->getReceptionistName(),
-            ':technician_justification' => $refundRequest->getTechnicianJustification(),
-            ':approved_amount' => $refundRequest->getApprovedAmount(),
-            ':payment_reference' => $refundRequest->getPaymentReference(),
-            ':is_active' => $refundRequest->isActive() ? 1 : 0,
-        ]);
+        // El booleano cruza como parámetro enlazado con `PDO::PARAM_BOOL` (D-3) y todos los valores
+        // se enlazan por nombre: mezclar `bindValue()` con un array de ejecución hace que PDO
+        // pierda la cuenta de los parámetros ya enlazados (`HY093`).
+        $stmt->bindValue(':incident_id', $refundRequest->getIncidentId(), $refundRequest->getIncidentId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+        $stmt->bindValue(':machine_id', $refundRequest->getMachineId(), PDO::PARAM_INT);
+        $stmt->bindValue(':location_id', $refundRequest->getLocationId(), PDO::PARAM_INT);
+        $stmt->bindValue(':claimant_name', $refundRequest->getClaimantName(), PDO::PARAM_STR);
+        $stmt->bindValue(':claimant_contact', $refundRequest->getClaimantContact(), PDO::PARAM_STR);
+        $stmt->bindValue(':claimed_amount', $refundRequest->getClaimedAmount(), PDO::PARAM_STR);
+        $stmt->bindValue(':product_attempted', $refundRequest->getProductAttempted(), PDO::PARAM_STR);
+        $stmt->bindValue(':compensation_method', $refundRequest->getCompensationMethod()->value, PDO::PARAM_STR);
+        $this->bindNullableText($stmt, ':bizum_phone', $refundRequest->getBizumPhone());
+        $this->bindNullableText($stmt, ':iban', $refundRequest->getIban());
+        $this->bindNullableText($stmt, ':pickup_pin', $refundRequest->getPickupPin());
+        $stmt->bindValue(':pickup_attempts', $refundRequest->getPickupAttempts(), PDO::PARAM_INT);
+        $this->bindNullableText($stmt, ':pickup_locked_until', $refundRequest->getPickupLockedUntil());
+        $stmt->bindValue(':tracking_token', $refundRequest->getTrackingToken(), PDO::PARAM_STR);
+        $stmt->bindValue(':status', $refundRequest->getStatus()->value, PDO::PARAM_STR);
+        $this->bindNullableText($stmt, ':technician_finding', $refundRequest->getTechnicianFinding()?->value);
+        $stmt->bindValue(':recovered_amount', $refundRequest->getRecoveredAmount(), $refundRequest->getRecoveredAmount() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $this->bindNullableText($stmt, ':cash_custody_action', $refundRequest->getCashCustodyAction()?->value);
+        $this->bindNullableText($stmt, ':receptionist_name', $refundRequest->getReceptionistName());
+        $this->bindNullableText($stmt, ':technician_justification', $refundRequest->getTechnicianJustification());
+        $stmt->bindValue(':approved_amount', $refundRequest->getApprovedAmount(), $refundRequest->getApprovedAmount() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $this->bindNullableText($stmt, ':payment_reference', $refundRequest->getPaymentReference());
+        $stmt->bindValue(':is_active', $refundRequest->isActive(), PDO::PARAM_BOOL);
+        $stmt->execute();
 
         return (int)$this->pdo->lastInsertId();
+    }
+
+    /**
+     * Enlaza un valor de texto que puede ser nulo con el tipo que le corresponde.
+     *
+     * Es una línea de fontanería, no una regla: el tipo del enlace tiene que decir la verdad —un
+     * nulo no es una cadena vacía— y repetir el ternario veintitrés veces convertiría la inserción
+     * en una lista de ruido donde un enlace mal tipado no se vería.
+     */
+    private function bindNullableText(PDOStatement $stmt, string $parameter, ?string $value): void
+    {
+        $stmt->bindValue($parameter, $value, $value !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
     }
 
     public function findById(int $id): ?RefundRequest
     {
         $stmt = $this->pdo->prepare("
             SELECT " . self::FULL_COLUMNS . "
-            FROM `refund_requests` r
-            WHERE r.`id` = :id
+            FROM refund_requests r
+            WHERE r.id = :id
             LIMIT 1
         ");
         $stmt->execute([':id' => $id]);
@@ -158,9 +181,9 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
     {
         $stmt = $this->pdo->prepare("
             SELECT " . self::RESTRICTED_COLUMNS . "
-            FROM `refund_requests` r
-            WHERE r.`tracking_token` = :token
-              AND r.`is_active` = 1
+            FROM refund_requests r
+            WHERE r.tracking_token = :token
+              AND r.is_active = {$this->dialect->booleanLiteral(true)}
             LIMIT 1
         ");
         $stmt->execute([':token' => $trackingToken]);
@@ -174,10 +197,10 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
     {
         $stmt = $this->pdo->prepare("
             SELECT " . self::RESTRICTED_COLUMNS . "
-            FROM `refund_requests` r
-            WHERE r.`incident_id` = :incident_id
-              AND r.`is_active` = 1
-            ORDER BY r.`created_at` DESC, r.`id` DESC
+            FROM refund_requests r
+            WHERE r.incident_id = :incident_id
+              AND r.is_active = {$this->dialect->booleanLiteral(true)}
+            ORDER BY r.created_at DESC, r.id DESC
         ");
         $stmt->execute([':incident_id' => $incidentId]);
 
@@ -188,18 +211,18 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
     {
         $sql = "
             SELECT " . self::RESTRICTED_COLUMNS . "
-            FROM `refund_requests` r
-            WHERE r.`location_id` = :location_id
-              AND r.`is_active` = 1
+            FROM refund_requests r
+            WHERE r.location_id = :location_id
+              AND r.is_active = {$this->dialect->booleanLiteral(true)}
         ";
         $params = [':location_id' => $locationId];
 
         if ($status !== null) {
-            $sql .= ' AND r.`status` = :status';
+            $sql .= ' AND r.status = :status';
             $params[':status'] = $status->value;
         }
 
-        $sql .= ' ORDER BY r.`created_at` DESC, r.`id` DESC';
+        $sql .= ' ORDER BY r.created_at DESC, r.id DESC';
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
@@ -213,9 +236,9 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
 
         $stmt = $this->pdo->prepare("
             SELECT " . self::FULL_COLUMNS . "
-            FROM `refund_requests` r" . self::COORDINATOR_INCIDENT_JOIN . "
+            FROM refund_requests r" . self::COORDINATOR_INCIDENT_JOIN . "
             {$where}
-            ORDER BY r.`created_at` DESC, r.`id` DESC
+            ORDER BY r.created_at DESC, r.id DESC
             LIMIT :limit OFFSET :offset
         ");
         $stmt->bindValue(':limit', max(1, $limit), PDO::PARAM_INT);
@@ -238,7 +261,7 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
         [$where, $params] = $this->buildCoordinatorFilters($filters);
 
         $stmt = $this->pdo->prepare(
-            'SELECT COUNT(*) FROM `refund_requests` r' . self::COORDINATOR_INCIDENT_JOIN . " {$where}"
+            'SELECT COUNT(*) FROM refund_requests r' . self::COORDINATOR_INCIDENT_JOIN . " {$where}"
         );
         foreach ($params as $key => $value) {
             $stmt->bindValue($key, $value);
@@ -254,7 +277,7 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
         RefundStatus $newStatus,
         array $fields = []
     ): bool {
-        $assignments = ['`status` = :new_status'];
+        $assignments = ['status = :new_status'];
         $params = [
             ':id' => $id,
             ':expected_status' => $expectedStatus->value,
@@ -268,17 +291,17 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
                 continue;
             }
 
-            $assignments[] = "`{$column}` = :{$column}";
+            $assignments[] = "{$column} = :{$column}";
             $params[":{$column}"] = $value;
         }
 
-        $assignments[] = '`updated_at` = CURRENT_TIMESTAMP';
+        $assignments[] = 'updated_at = CURRENT_TIMESTAMP';
 
-        $sql = 'UPDATE `refund_requests`
+        $sql = 'UPDATE refund_requests
                 SET ' . implode(', ', $assignments) . '
-                WHERE `id` = :id
-                  AND `status` = :expected_status
-                  AND `is_active` = 1';
+                WHERE id = :id
+                  AND status = :expected_status
+                  AND is_active = ' . $this->dialect->booleanLiteral(true);
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
@@ -292,12 +315,12 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
         $params = [':id' => $id];
 
         if ($bizumPhone !== null) {
-            $assignments[] = '`bizum_phone` = :bizum_phone';
+            $assignments[] = 'bizum_phone = :bizum_phone';
             $params[':bizum_phone'] = $bizumPhone;
         }
 
         if ($iban !== null) {
-            $assignments[] = '`iban` = :iban';
+            $assignments[] = 'iban = :iban';
             $params[':iban'] = $iban;
         }
 
@@ -305,14 +328,14 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
             return false;
         }
 
-        $assignments[] = '`updated_at` = CURRENT_TIMESTAMP';
+        $assignments[] = 'updated_at = CURRENT_TIMESTAMP';
 
         $stmt = $this->pdo->prepare('
-            UPDATE `refund_requests`
+            UPDATE refund_requests
             SET ' . implode(', ', $assignments) . '
-            WHERE `id` = :id
-              AND `status` = :status
-              AND `is_active` = 1
+            WHERE id = :id
+              AND status = :status
+              AND is_active = ' . $this->dialect->booleanLiteral(true) . '
         ');
         $params[':status'] = RefundStatus::PENDING_CONTACT->value;
         $stmt->execute($params);
@@ -324,11 +347,11 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
     {
         // Art. III: logical cancellation only, the row and its history remain.
         $stmt = $this->pdo->prepare("
-            UPDATE `refund_requests`
-            SET `is_active` = 0,
-                `deleted_at` = CURRENT_TIMESTAMP,
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
+            UPDATE refund_requests
+            SET is_active = {$this->dialect->booleanLiteral(false)},
+                deleted_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
         ");
         $stmt->execute([':id' => $id]);
 
@@ -345,17 +368,17 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
         $params = [];
 
         if (isset($filters['status']) && $filters['status'] !== '') {
-            $clauses[] = 'r.`status` = :status';
+            $clauses[] = 'r.status = :status';
             $params[':status'] = (string)$filters['status'];
         }
 
         if (isset($filters['location_id']) && (int)$filters['location_id'] > 0) {
-            $clauses[] = 'r.`location_id` = :location_id';
+            $clauses[] = 'r.location_id = :location_id';
             $params[':location_id'] = (int)$filters['location_id'];
         }
 
         if (isset($filters['machine_id']) && (int)$filters['machine_id'] > 0) {
-            $clauses[] = 'r.`machine_id` = :machine_id';
+            $clauses[] = 'r.machine_id = :machine_id';
             $params[':machine_id'] = (int)$filters['machine_id'];
         }
 
@@ -376,21 +399,21 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
             }
 
             if ($placeholders !== []) {
-                $clauses[] = 'i.`status` IN (' . implode(', ', $placeholders) . ')';
+                $clauses[] = 'i.status IN (' . implode(', ', $placeholders) . ')';
             }
         }
 
         if (isset($filters['from']) && $filters['from'] !== '') {
-            $clauses[] = 'r.`created_at` >= :from';
+            $clauses[] = 'r.created_at >= :from';
             $params[':from'] = (string)$filters['from'];
         }
 
         if (isset($filters['to']) && $filters['to'] !== '') {
-            $clauses[] = 'r.`created_at` <= :to';
+            $clauses[] = 'r.created_at <= :to';
             $params[':to'] = (string)$filters['to'];
         }
 
-        $clauses[] = 'r.`is_active` = 1';
+        $clauses[] = 'r.is_active = ' . $this->dialect->booleanLiteral(true);
 
         return ['WHERE ' . implode(' AND ', $clauses), $params];
     }
@@ -481,13 +504,13 @@ final class PdoRefundRequestRepository implements RefundRequestRepositoryInterfa
     public function detachFromIncident(int $id, RefundStatus $newStatus): bool
     {
         $stmt = $this->pdo->prepare("
-            UPDATE `refund_requests`
-            SET `incident_id` = NULL,
-                `status` = :status,
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
-              AND `incident_id` IS NOT NULL
-              AND `is_active` = 1
+            UPDATE refund_requests
+            SET incident_id = NULL,
+                status = :status,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND incident_id IS NOT NULL
+              AND is_active = {$this->dialect->booleanLiteral(true)}
         ");
         $stmt->execute([
             ':status' => $newStatus->value,

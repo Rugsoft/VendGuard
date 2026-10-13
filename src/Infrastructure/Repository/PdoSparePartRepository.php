@@ -11,6 +11,7 @@ use VendGuard\Core\Domain\Model\SparePart;
 use VendGuard\Core\Domain\Model\SparePartCategory;
 use VendGuard\Core\Domain\Repository\SparePartRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
  * PdoSparePartRepository
@@ -18,14 +19,43 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  * Implementación PDO del repositorio de catálogo maestro de repuestos y compatibilidades.
  * Cumple con el Artículo III (prohibición de borrado físico, soft delete con deleted_at)
  * y garantiza transacciones atómicas para relaciones con modelos de máquinas.
+ *
+ * Los identificadores se escriben desnudos —los dos motores admiten así todo el esquema— y las
+ * dos diferencias declaradas que este repositorio tiene se le piden al adaptador de dialecto
+ * (RF-01.5, T-HYBRID-25): el literal booleano (D-3) y la cláusula de upsert de las
+ * compatibilidades, que es **una regla** —afirmar la relación y sanear su baja lógica— escrita
+ * una sola vez y renderizada en la forma de cada motor.
  */
 class PdoSparePartRepository implements SparePartRepositoryInterface
 {
     private PDO $pdo;
 
+    private SqlDialectAdapter $dialect;
+
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
+        $this->dialect = SqlDialectAdapter::forConnection($this->pdo);
+    }
+
+    /**
+     * Cláusula de upsert de las compatibilidades repuesto–modelo.
+     *
+     * La regla es una sola —reafirmar la relación y sanear su baja lógica si ya existía— y el
+     * adaptador la renderiza en la forma de cada motor: `ON CONFLICT (spare_part_id, machine_model)
+     * DO UPDATE ...` en PostgreSQL y `ON DUPLICATE KEY UPDATE ...` en MariaDB. Se declara aquí una
+     * vez porque las dos altas que la usan —crear el repuesto y actualizarlo— no pueden divergir:
+     * escribir la cláusula dos veces sería declarar dos reglas donde hay una.
+     */
+    private function compatibilityUpsertClause(): string
+    {
+        return $this->dialect->upsertAssignments(
+            ['spare_part_id', 'machine_model'],
+            [
+                'is_active' => $this->dialect->booleanLiteral(true),
+                'deleted_at' => 'NULL',
+            ]
+        );
     }
 
     /**
@@ -37,16 +67,16 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
 
         try {
             $sql = "
-                INSERT INTO `spare_parts` (
-                    `part_code`,
-                    `name`,
-                    `category`,
-                    `manufacturer`,
-                    `reference_cost`,
-                    `is_active`,
-                    `notes`,
-                    `created_at`,
-                    `updated_at`
+                INSERT INTO spare_parts (
+                    part_code,
+                    name,
+                    category,
+                    manufacturer,
+                    reference_cost,
+                    is_active,
+                    notes,
+                    created_at,
+                    updated_at
                 ) VALUES (
                     :part_code,
                     :name,
@@ -60,24 +90,28 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
                 )
             ";
 
+            // El booleano cruza como parámetro enlazado con `PDO::PARAM_BOOL`: es la forma que los
+            // dos drivers traducen al tipo de cada motor (D-3), mientras que un `1`/`0` por el
+            // array de ejecución llega al motor nuevo como texto y su tipo `BOOLEAN` lo rechaza.
+            // Los valores se enlazan todos por nombre: mezclar `bindValue()` con un array de
+            // ejecución hace que PDO pierda la cuenta de los parámetros ya enlazados (`HY093`).
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([
-                ':part_code'      => $sparePart->getPartCode(),
-                ':name'           => $sparePart->getName(),
-                ':category'       => $sparePart->getCategory()->value,
-                ':manufacturer'   => $sparePart->getManufacturer(),
-                ':reference_cost' => $sparePart->getReferenceCost(),
-                ':is_active'      => $sparePart->isActive() ? 1 : 0,
-                ':notes'          => $sparePart->getNotes(),
-            ]);
+            $stmt->bindValue(':part_code', $sparePart->getPartCode(), PDO::PARAM_STR);
+            $stmt->bindValue(':name', $sparePart->getName(), PDO::PARAM_STR);
+            $stmt->bindValue(':category', $sparePart->getCategory()->value, PDO::PARAM_STR);
+            $stmt->bindValue(':manufacturer', $sparePart->getManufacturer(), PDO::PARAM_STR);
+            $stmt->bindValue(':reference_cost', $sparePart->getReferenceCost(), PDO::PARAM_STR);
+            $stmt->bindValue(':is_active', $sparePart->isActive(), PDO::PARAM_BOOL);
+            $stmt->bindValue(':notes', $sparePart->getNotes(), $sparePart->getNotes() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            $stmt->execute();
 
             $id = (int)$this->pdo->lastInsertId();
 
             // Insertar compatibilidades con modelos
             $compatSql = "
-                INSERT INTO `spare_part_compatibilities` (`spare_part_id`, `machine_model`, `is_active`, `created_at`, `deleted_at`)
-                VALUES (:spare_part_id, :machine_model, 1, NOW(), NULL)
-                ON DUPLICATE KEY UPDATE `is_active` = 1, `deleted_at` = NULL
+                INSERT INTO spare_part_compatibilities (spare_part_id, machine_model, is_active, created_at, deleted_at)
+                VALUES (:spare_part_id, :machine_model, {$this->dialect->booleanLiteral(true)}, NOW(), NULL)
+                {$this->compatibilityUpsertClause()}
             ";
             $compatStmt = $this->pdo->prepare($compatSql);
 
@@ -118,40 +152,43 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
 
         try {
             $sql = "
-                UPDATE `spare_parts` SET
-                    `name` = :name,
-                    `category` = :category,
-                    `manufacturer` = :manufacturer,
-                    `reference_cost` = :reference_cost,
-                    `is_active` = :is_active,
-                    `notes` = :notes,
-                    `updated_at` = NOW()
-                WHERE `id` = :id
+                UPDATE spare_parts SET
+                    name = :name,
+                    category = :category,
+                    manufacturer = :manufacturer,
+                    reference_cost = :reference_cost,
+                    is_active = :is_active,
+                    notes = :notes,
+                    updated_at = NOW()
+                WHERE id = :id
             ";
 
+            // El booleano cruza con `PDO::PARAM_BOOL` (D-3) y todos los valores se enlazan por
+            // nombre: mezclar `bindValue()` con un array de ejecución hace que PDO pierda la
+            // cuenta de los parámetros ya enlazados (`HY093`).
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([
-                ':id'             => $sparePart->getId(),
-                ':name'           => $sparePart->getName(),
-                ':category'       => $sparePart->getCategory()->value,
-                ':manufacturer'   => $sparePart->getManufacturer(),
-                ':reference_cost' => $sparePart->getReferenceCost(),
-                ':is_active'      => $sparePart->isActive() ? 1 : 0,
-                ':notes'          => $sparePart->getNotes(),
-            ]);
+            $stmt->bindValue(':id', $sparePart->getId(), PDO::PARAM_INT);
+            $stmt->bindValue(':name', $sparePart->getName(), PDO::PARAM_STR);
+            $stmt->bindValue(':category', $sparePart->getCategory()->value, PDO::PARAM_STR);
+            $stmt->bindValue(':manufacturer', $sparePart->getManufacturer(), PDO::PARAM_STR);
+            $stmt->bindValue(':reference_cost', $sparePart->getReferenceCost(), PDO::PARAM_STR);
+            $stmt->bindValue(':is_active', $sparePart->isActive(), PDO::PARAM_BOOL);
+            $notes = $sparePart->getNotes();
+            $stmt->bindValue(':notes', $notes, $notes !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            $stmt->execute();
 
             // Sincronizar compatibilidades sin borrado físico (Constitución Art. III)
             $deactivateCompat = $this->pdo->prepare("
-                UPDATE `spare_part_compatibilities`
-                SET `is_active` = 0, `deleted_at` = NOW()
-                WHERE `spare_part_id` = :id
+                UPDATE spare_part_compatibilities
+                SET is_active = {$this->dialect->booleanLiteral(false)}, deleted_at = NOW()
+                WHERE spare_part_id = :id
             ");
             $deactivateCompat->execute([':id' => $sparePart->getId()]);
 
             $compatSql = "
-                INSERT INTO `spare_part_compatibilities` (`spare_part_id`, `machine_model`, `is_active`, `created_at`, `deleted_at`)
-                VALUES (:spare_part_id, :machine_model, 1, NOW(), NULL)
-                ON DUPLICATE KEY UPDATE `is_active` = 1, `deleted_at` = NULL
+                INSERT INTO spare_part_compatibilities (spare_part_id, machine_model, is_active, created_at, deleted_at)
+                VALUES (:spare_part_id, :machine_model, {$this->dialect->booleanLiteral(true)}, NOW(), NULL)
+                {$this->compatibilityUpsertClause()}
             ";
             $compatStmt = $this->pdo->prepare($compatSql);
 
@@ -178,11 +215,11 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
     public function softDelete(int $id): bool
     {
         $sql = "
-            UPDATE `spare_parts` SET
-                `is_active` = 0,
-                `deleted_at` = NOW(),
-                `updated_at` = NOW()
-            WHERE `id` = :id
+            UPDATE spare_parts SET
+                is_active = {$this->dialect->booleanLiteral(false)},
+                deleted_at = NOW(),
+                updated_at = NOW()
+            WHERE id = :id
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -195,19 +232,22 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
     public function updateStatus(int $id, bool $isActive): bool
     {
         $sql = "
-            UPDATE `spare_parts` SET
-                `is_active` = :is_active,
-                `deleted_at` = :deleted_at,
-                `updated_at` = NOW()
-            WHERE `id` = :id
+            UPDATE spare_parts SET
+                is_active = :is_active,
+                deleted_at = :deleted_at,
+                updated_at = NOW()
+            WHERE id = :id
         ";
 
+        // El booleano cruza con `PDO::PARAM_BOOL` (D-3) y todos los valores se enlazan por nombre:
+        // mezclar `bindValue()` con un array de ejecución pierde la cuenta de los parámetros (`HY093`).
+        $deletedAt = $isActive ? null : date('Y-m-d H:i:s');
         $stmt = $this->pdo->prepare($sql);
-        return $stmt->execute([
-            ':id'         => $id,
-            ':is_active'  => $isActive ? 1 : 0,
-            ':deleted_at' => $isActive ? null : date('Y-m-d H:i:s'),
-        ]);
+        $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+        $stmt->bindValue(':is_active', $isActive, PDO::PARAM_BOOL);
+        $stmt->bindValue(':deleted_at', $deletedAt, $deletedAt !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+
+        return $stmt->execute();
     }
 
     /**
@@ -218,8 +258,8 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
         $sql = "
             SELECT 
                 sp.*,
-                COALESCE((SELECT SUM(quantity) FROM `incident_replaced_parts` WHERE `spare_part_id` = sp.id), 0) AS total_installed_units
-            FROM `spare_parts` sp
+                COALESCE((SELECT SUM(quantity) FROM incident_replaced_parts WHERE spare_part_id = sp.id), 0) AS total_installed_units
+            FROM spare_parts sp
             WHERE sp.id = :id
         ";
 
@@ -243,8 +283,8 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
         $sql = "
             SELECT 
                 sp.*,
-                COALESCE((SELECT SUM(quantity) FROM `incident_replaced_parts` WHERE `spare_part_id` = sp.id), 0) AS total_installed_units
-            FROM `spare_parts` sp
+                COALESCE((SELECT SUM(quantity) FROM incident_replaced_parts WHERE spare_part_id = sp.id), 0) AS total_installed_units
+            FROM spare_parts sp
             WHERE sp.part_code = :part_code
         ";
 
@@ -265,11 +305,11 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
      */
     public function isCodeExists(string $partCode, ?int $excludeId = null): bool
     {
-        $sql = "SELECT COUNT(*) FROM `spare_parts` WHERE `part_code` = :part_code";
+        $sql = "SELECT COUNT(*) FROM spare_parts WHERE part_code = :part_code";
         $params = [':part_code' => trim($partCode)];
 
         if ($excludeId !== null) {
-            $sql .= " AND `id` != :exclude_id";
+            $sql .= " AND id != :exclude_id";
             $params[':exclude_id'] = $excludeId;
         }
 
@@ -291,8 +331,8 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
         $sql = "
             SELECT 
                 sp.*,
-                COALESCE((SELECT SUM(quantity) FROM `incident_replaced_parts` WHERE `spare_part_id` = sp.id), 0) AS total_installed_units
-            FROM `spare_parts` sp
+                COALESCE((SELECT SUM(quantity) FROM incident_replaced_parts WHERE spare_part_id = sp.id), 0) AS total_installed_units
+            FROM spare_parts sp
             WHERE 1 = 1
         ";
         $params = [];
@@ -311,13 +351,14 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
         }
 
         if ($machineModel !== null && trim($machineModel) !== '') {
-            $sql .= " AND sp.id IN (SELECT spare_part_id FROM `spare_part_compatibilities` WHERE machine_model = :machine_model AND is_active = 1)";
+            $sql .= " AND sp.id IN (SELECT spare_part_id FROM spare_part_compatibilities WHERE machine_model = :machine_model AND is_active = {$this->dialect->booleanLiteral(true)})";
             $params[':machine_model'] = trim($machineModel);
         }
 
         if ($isActive !== null) {
-            $sql .= " AND sp.is_active = :is_active";
-            $params[':is_active'] = $isActive ? 1 : 0;
+            // El filtro cruzaba como parámetro enlazado con `1`/`0`, que el motor nuevo rechaza en
+            // una columna `BOOLEAN` (D-3): la comparación se escribe con el literal de cada motor.
+            $sql .= " AND sp.is_active = {$this->dialect->booleanLiteral($isActive)}";
         }
 
         $sql .= " ORDER BY sp.name ASC";
@@ -351,15 +392,15 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
         $sql = "
             SELECT 
                 sp.*,
-                COALESCE((SELECT SUM(quantity) FROM `incident_replaced_parts` WHERE `spare_part_id` = sp.id), 0) AS total_installed_units
-            FROM `spare_parts` sp
-            INNER JOIN `spare_part_compatibilities` spc ON spc.spare_part_id = sp.id AND spc.is_active = 1
+                COALESCE((SELECT SUM(quantity) FROM incident_replaced_parts WHERE spare_part_id = sp.id), 0) AS total_installed_units
+            FROM spare_parts sp
+            INNER JOIN spare_part_compatibilities spc ON spc.spare_part_id = sp.id AND spc.is_active = {$this->dialect->booleanLiteral(true)}
             WHERE spc.machine_model = :machine_model
         ";
         $params = [':machine_model' => trim($machineModel)];
 
         if ($onlyActive) {
-            $sql .= " AND sp.is_active = 1";
+            $sql .= " AND sp.is_active = {$this->dialect->booleanLiteral(true)}";
         }
 
         $sql .= " ORDER BY sp.name ASC";
@@ -391,13 +432,13 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
     public function findDistinctMachineModels(): array
     {
         $sql = "
-            SELECT DISTINCT `model` AS machine_model 
-            FROM `machines` 
-            WHERE `deleted_at` IS NULL
+            SELECT DISTINCT model AS machine_model 
+            FROM machines 
+            WHERE deleted_at IS NULL
             UNION
-            SELECT DISTINCT `machine_model` 
-            FROM `spare_part_compatibilities`
-            WHERE `is_active` = 1
+            SELECT DISTINCT machine_model 
+            FROM spare_part_compatibilities
+            WHERE is_active = {$this->dialect->booleanLiteral(true)}
             ORDER BY machine_model ASC
         ";
 
@@ -415,7 +456,7 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
      */
     private function fetchCompatibleModels(int $sparePartId): array
     {
-        $stmt = $this->pdo->prepare("SELECT machine_model FROM `spare_part_compatibilities` WHERE spare_part_id = :id AND is_active = 1 ORDER BY machine_model ASC");
+        $stmt = $this->pdo->prepare("SELECT machine_model FROM spare_part_compatibilities WHERE spare_part_id = :id AND is_active = {$this->dialect->booleanLiteral(true)} ORDER BY machine_model ASC");
         $stmt->execute([':id' => $sparePartId]);
         return $stmt->fetchAll(PDO::FETCH_COLUMN);
     }
@@ -433,7 +474,7 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
         }
 
         $inClause = implode(',', array_fill(0, count($partIds), '?'));
-        $sql = "SELECT spare_part_id, machine_model FROM `spare_part_compatibilities` WHERE spare_part_id IN ({$inClause}) AND is_active = 1 ORDER BY machine_model ASC";
+        $sql = "SELECT spare_part_id, machine_model FROM spare_part_compatibilities WHERE spare_part_id IN ({$inClause}) AND is_active = {$this->dialect->booleanLiteral(true)} ORDER BY machine_model ASC";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($partIds);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);

@@ -11,6 +11,7 @@ use VendGuard\Core\Domain\Model\IncidentReplacedPart;
 use VendGuard\Core\Domain\Model\OldPartDestination;
 use VendGuard\Core\Domain\Repository\IncidentReplacedPartRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
  * PdoIncidentReplacedPartRepository
@@ -18,14 +19,22 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  * Implementación PDO del repositorio de consumos de piezas sustituidas.
  * Registra snapshots inmutables de coste en resoluciones correctivas y preventivas (RF-REP-06, RF-REP-07),
  * y proporciona agregaciones analíticas y detección de fallos crónicos (RF-REP-08, RF-REP-09).
+ *
+ * Los identificadores se escriben desnudos —los dos motores admiten así todo el esquema— y las dos
+ * diferencias declaradas que este repositorio tiene se le piden al adaptador de dialecto (RF-01.5,
+ * T-HYBRID-25): el literal booleano (D-3) y las ventanas temporales de las agregaciones, que se
+ * desplazan hacia atrás con la aritmética de intervalos de cada motor.
  */
 class PdoIncidentReplacedPartRepository implements IncidentReplacedPartRepositoryInterface
 {
     private PDO $pdo;
 
+    private SqlDialectAdapter $dialect;
+
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
+        $this->dialect = SqlDialectAdapter::forConnection($this->pdo);
     }
 
     /**
@@ -84,11 +93,11 @@ class PdoIncidentReplacedPartRepository implements IncidentReplacedPartRepositor
                 m.model AS machine_model,
                 loc.name AS location_name,
                 u.name AS technician_name
-            FROM `incident_replaced_parts` irp
-            LEFT JOIN `spare_parts` sp ON sp.id = irp.spare_part_id
-            INNER JOIN `machines` m ON m.id = irp.machine_id
-            INNER JOIN `locations` loc ON loc.id = irp.location_id
-            LEFT JOIN `users` u ON u.id = irp.technician_id
+            FROM incident_replaced_parts irp
+            LEFT JOIN spare_parts sp ON sp.id = irp.spare_part_id
+            INNER JOIN machines m ON m.id = irp.machine_id
+            INNER JOIN locations loc ON loc.id = irp.location_id
+            LEFT JOIN users u ON u.id = irp.technician_id
             WHERE irp.id = :id
         ";
 
@@ -117,11 +126,11 @@ class PdoIncidentReplacedPartRepository implements IncidentReplacedPartRepositor
                 m.model AS machine_model,
                 loc.name AS location_name,
                 u.name AS technician_name
-            FROM `incident_replaced_parts` irp
-            LEFT JOIN `spare_parts` sp ON sp.id = irp.spare_part_id
-            INNER JOIN `machines` m ON m.id = irp.machine_id
-            INNER JOIN `locations` loc ON loc.id = irp.location_id
-            LEFT JOIN `users` u ON u.id = irp.technician_id
+            FROM incident_replaced_parts irp
+            LEFT JOIN spare_parts sp ON sp.id = irp.spare_part_id
+            INNER JOIN machines m ON m.id = irp.machine_id
+            INNER JOIN locations loc ON loc.id = irp.location_id
+            LEFT JOIN users u ON u.id = irp.technician_id
             WHERE irp.incident_id = :incident_id
             ORDER BY irp.installed_at ASC, irp.id ASC
         ";
@@ -152,11 +161,11 @@ class PdoIncidentReplacedPartRepository implements IncidentReplacedPartRepositor
                 m.model AS machine_model,
                 loc.name AS location_name,
                 u.name AS technician_name
-            FROM `incident_replaced_parts` irp
-            LEFT JOIN `spare_parts` sp ON sp.id = irp.spare_part_id
-            INNER JOIN `machines` m ON m.id = irp.machine_id
-            INNER JOIN `locations` loc ON loc.id = irp.location_id
-            LEFT JOIN `users` u ON u.id = irp.technician_id
+            FROM incident_replaced_parts irp
+            LEFT JOIN spare_parts sp ON sp.id = irp.spare_part_id
+            INNER JOIN machines m ON m.id = irp.machine_id
+            INNER JOIN locations loc ON loc.id = irp.location_id
+            LEFT JOIN users u ON u.id = irp.technician_id
             WHERE irp.preventive_order_id = :preventive_order_id
             ORDER BY irp.installed_at ASC, irp.id ASC
         ";
@@ -184,14 +193,14 @@ class PdoIncidentReplacedPartRepository implements IncidentReplacedPartRepositor
                 COUNT(DISTINCT irp.machine_id) AS machines_count,
                 COALESCE(SUM(irp.quantity), 0) AS units_replaced,
                 ROUND(COALESCE(SUM(irp.total_cost_snapshot), 0.00), 2) AS total_cost
-            FROM `incident_replaced_parts` irp
-            INNER JOIN `machines` m ON m.id = irp.machine_id
+            FROM incident_replaced_parts irp
+            INNER JOIN machines m ON m.id = irp.machine_id
             WHERE 1 = 1
         ";
         $params = [];
 
         if ($periodDays !== null && $periodDays > 0) {
-            $sql .= " AND irp.installed_at >= DATE_SUB(NOW(), INTERVAL :period_days DAY)";
+            $sql .= " AND irp.installed_at >= {$this->dialect->subtractInterval('NOW()', ':period_days', 'DAY')}";
             $params[':period_days'] = $periodDays;
         }
 
@@ -222,14 +231,14 @@ class PdoIncidentReplacedPartRepository implements IncidentReplacedPartRepositor
                 loc.name AS location_name,
                 COALESCE(SUM(irp.quantity), 0) AS units_replaced,
                 ROUND(COALESCE(SUM(irp.total_cost_snapshot), 0.00), 2) AS total_cost
-            FROM `incident_replaced_parts` irp
-            INNER JOIN `locations` loc ON loc.id = irp.location_id
+            FROM incident_replaced_parts irp
+            INNER JOIN locations loc ON loc.id = irp.location_id
             WHERE 1 = 1
         ";
         $params = [];
 
         if ($periodDays !== null && $periodDays > 0) {
-            $sql .= " AND irp.installed_at >= DATE_SUB(NOW(), INTERVAL :period_days DAY)";
+            $sql .= " AND irp.installed_at >= {$this->dialect->subtractInterval('NOW()', ':period_days', 'DAY')}";
             $params[':period_days'] = $periodDays;
         }
 
@@ -263,14 +272,14 @@ class PdoIncidentReplacedPartRepository implements IncidentReplacedPartRepositor
                 ROUND(COALESCE(SUM(irp.total_cost_snapshot), 0.00), 2) AS accumulated_cost,
                 COALESCE(SUM(CASE WHEN irp.old_part_destination = 'DESGUACE' THEN irp.quantity ELSE 0 END), 0) AS desguace_units,
                 COALESCE(SUM(CASE WHEN irp.old_part_destination = 'TALLER' THEN irp.quantity ELSE 0 END), 0) AS taller_units
-            FROM `incident_replaced_parts` irp
-            LEFT JOIN `spare_parts` sp ON sp.id = irp.spare_part_id
+            FROM incident_replaced_parts irp
+            LEFT JOIN spare_parts sp ON sp.id = irp.spare_part_id
             WHERE 1 = 1
         ";
         $params = [];
 
         if ($periodDays !== null && $periodDays > 0) {
-            $sql .= " AND irp.installed_at >= DATE_SUB(NOW(), INTERVAL :period_days DAY)";
+            $sql .= " AND irp.installed_at >= {$this->dialect->subtractInterval('NOW()', ':period_days', 'DAY')}";
             $params[':period_days'] = $periodDays;
         }
 
@@ -305,6 +314,10 @@ class PdoIncidentReplacedPartRepository implements IncidentReplacedPartRepositor
      */
     public function findChronicFailureAlerts(int $windowDays = 90, int $threshold = 3): array
     {
+        // El `HAVING` repite el agregado en lugar de citar el alias `replacements_count`: MariaDB
+        // admite el alias en `HAVING` y PostgreSQL no —solo `GROUP BY` y `ORDER BY` ven los nombres
+        // de salida—, así que la condición se escribe donde los dos motores la entienden. En el
+        // `ORDER BY` el alias sí se usa: allí es portable.
         $sql = "
             SELECT 
                 irp.machine_id,
@@ -317,11 +330,11 @@ class PdoIncidentReplacedPartRepository implements IncidentReplacedPartRepositor
                 COUNT(irp.id) AS replacements_count,
                 MIN(irp.installed_at) AS first_replacement_at,
                 MAX(irp.installed_at) AS last_replacement_at
-            FROM `incident_replaced_parts` irp
-            INNER JOIN `machines` m ON m.id = irp.machine_id
-            INNER JOIN `locations` loc ON loc.id = irp.location_id
-            LEFT JOIN `spare_parts` sp ON sp.id = irp.spare_part_id
-            WHERE irp.installed_at >= DATE_SUB(NOW(), INTERVAL :window_days DAY)
+            FROM incident_replaced_parts irp
+            INNER JOIN machines m ON m.id = irp.machine_id
+            INNER JOIN locations loc ON loc.id = irp.location_id
+            LEFT JOIN spare_parts sp ON sp.id = irp.spare_part_id
+            WHERE irp.installed_at >= {$this->dialect->subtractInterval('NOW()', ':window_days', 'DAY')}
             GROUP BY 
                 irp.machine_id,
                 m.code,
@@ -329,7 +342,7 @@ class PdoIncidentReplacedPartRepository implements IncidentReplacedPartRepositor
                 loc.name,
                 COALESCE(sp.part_code, 'OUT_OF_CATALOG'),
                 COALESCE(sp.name, irp.custom_part_name, 'Pieza fuera de catálogo')
-            HAVING replacements_count > :threshold
+            HAVING COUNT(irp.id) > :threshold
             ORDER BY replacements_count DESC, last_replacement_at DESC
         ";
 
@@ -392,19 +405,19 @@ class PdoIncidentReplacedPartRepository implements IncidentReplacedPartRepositor
                 irp.old_part_destination AS destino_retirado,
                 COALESCE(u.operator_code, u.name, 'N/A') AS codigo_tecnico,
                 COALESCE(irp.notes, '') AS notas
-            FROM `incident_replaced_parts` irp
-            LEFT JOIN `incidents` inc ON inc.id = irp.incident_id
-            LEFT JOIN `preventive_orders` po ON po.id = irp.preventive_order_id
-            INNER JOIN `machines` m ON m.id = irp.machine_id
-            INNER JOIN `locations` loc ON loc.id = irp.location_id
-            LEFT JOIN `users` u ON u.id = irp.technician_id
-            LEFT JOIN `spare_parts` sp ON sp.id = irp.spare_part_id
+            FROM incident_replaced_parts irp
+            LEFT JOIN incidents inc ON inc.id = irp.incident_id
+            LEFT JOIN preventive_orders po ON po.id = irp.preventive_order_id
+            INNER JOIN machines m ON m.id = irp.machine_id
+            INNER JOIN locations loc ON loc.id = irp.location_id
+            LEFT JOIN users u ON u.id = irp.technician_id
+            LEFT JOIN spare_parts sp ON sp.id = irp.spare_part_id
             WHERE 1 = 1
         ";
         $params = [];
 
         if ($periodDays !== null && $periodDays > 0) {
-            $sql .= " AND irp.installed_at >= DATE_SUB(NOW(), INTERVAL :period_days DAY)";
+            $sql .= " AND irp.installed_at >= {$this->dialect->subtractInterval('NOW()', ':period_days', 'DAY')}";
             $params[':period_days'] = $periodDays;
         }
 
@@ -425,22 +438,22 @@ class PdoIncidentReplacedPartRepository implements IncidentReplacedPartRepositor
     private function insertSingle(IncidentReplacedPart $part): IncidentReplacedPart
     {
         $sql = "
-            INSERT INTO `incident_replaced_parts` (
-                `intervention_type`,
-                `incident_id`,
-                `preventive_order_id`,
-                `machine_id`,
-                `location_id`,
-                `technician_id`,
-                `spare_part_id`,
-                `is_out_of_catalog`,
-                `custom_part_name`,
-                `quantity`,
-                `unit_cost_snapshot`,
-                `old_part_destination`,
-                `notes`,
-                `installed_at`,
-                `created_at`
+            INSERT INTO incident_replaced_parts (
+                intervention_type,
+                incident_id,
+                preventive_order_id,
+                machine_id,
+                location_id,
+                technician_id,
+                spare_part_id,
+                is_out_of_catalog,
+                custom_part_name,
+                quantity,
+                unit_cost_snapshot,
+                old_part_destination,
+                notes,
+                installed_at,
+                created_at
             ) VALUES (
                 :intervention_type,
                 :incident_id,
@@ -463,23 +476,28 @@ class PdoIncidentReplacedPartRepository implements IncidentReplacedPartRepositor
         try {
             $installedAt = !empty($part->getInstalledAt()) ? $part->getInstalledAt() : date('Y-m-d H:i:s');
 
+            // El booleano cruza como parámetro enlazado con `PDO::PARAM_BOOL`: es la forma que los
+            // dos drivers traducen al tipo de cada motor (D-3). Los valores se enlazan todos por
+            // nombre y la sentencia se ejecuta sin array: mezclar `bindValue()` con un array de
+            // ejecución hace que PDO pierda la cuenta de los parámetros ya enlazados (`HY093`).
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([
-                ':intervention_type'    => $part->getInterventionType(),
-                ':incident_id'          => $part->getIncidentId(),
-                ':preventive_order_id'  => $part->getPreventiveOrderId(),
-                ':machine_id'           => $part->getMachineId(),
-                ':location_id'          => $part->getLocationId(),
-                ':technician_id'        => $part->getTechnicianId(),
-                ':spare_part_id'        => $part->getSparePartId(),
-                ':is_out_of_catalog'    => $part->isOutOfCatalog() ? 1 : 0,
-                ':custom_part_name'     => $part->getCustomPartName(),
-                ':quantity'             => $part->getQuantity(),
-                ':unit_cost_snapshot'   => $part->getUnitCostSnapshot(),
-                ':old_part_destination' => $part->getOldPartDestination()->value,
-                ':notes'                => $part->getNotes(),
-                ':installed_at'         => $installedAt,
-            ]);
+            $stmt->bindValue(':intervention_type', $part->getInterventionType(), PDO::PARAM_STR);
+            $stmt->bindValue(':incident_id', $part->getIncidentId(), $part->getIncidentId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+            $stmt->bindValue(':preventive_order_id', $part->getPreventiveOrderId(), $part->getPreventiveOrderId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+            $stmt->bindValue(':machine_id', $part->getMachineId(), PDO::PARAM_INT);
+            $stmt->bindValue(':location_id', $part->getLocationId(), PDO::PARAM_INT);
+            $stmt->bindValue(':technician_id', $part->getTechnicianId(), PDO::PARAM_INT);
+            $stmt->bindValue(':spare_part_id', $part->getSparePartId(), $part->getSparePartId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+            $stmt->bindValue(':is_out_of_catalog', $part->isOutOfCatalog(), PDO::PARAM_BOOL);
+            $customPartName = $part->getCustomPartName();
+            $stmt->bindValue(':custom_part_name', $customPartName, $customPartName !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            $stmt->bindValue(':quantity', $part->getQuantity(), PDO::PARAM_INT);
+            $stmt->bindValue(':unit_cost_snapshot', $part->getUnitCostSnapshot(), PDO::PARAM_STR);
+            $stmt->bindValue(':old_part_destination', $part->getOldPartDestination()->value, PDO::PARAM_STR);
+            $notes = $part->getNotes();
+            $stmt->bindValue(':notes', $notes, $notes !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            $stmt->bindValue(':installed_at', $installedAt, PDO::PARAM_STR);
+            $stmt->execute();
 
             $id = (int)$this->pdo->lastInsertId();
 

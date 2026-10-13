@@ -690,12 +690,6 @@ echo "\n--- Grupo 5: frontera del punto único de traducción (inventario pendie
  * tiene que seguir siendo cierta).
  */
 const PENDING_INVENTORY = [
-    // Tanda 2 · Reintegros, Repuestos, Piezas Sustituidas, Métricas (T-HYBRID-10)
-    'src/Infrastructure/Repository/PdoRefundRequestRepository.php' => ['backtick' => 63],
-    'src/Infrastructure/Repository/PdoSparePartRepository.php' => ['backtick' => 73, 'upsert' => 2],
-    'src/Infrastructure/Repository/PdoSparePartRequestRepository.php' => ['backtick' => 31],
-    'src/Infrastructure/Repository/PdoIncidentReplacedPartRepository.php' => ['backtick' => 48, 'temporal' => 5],
-    'src/Infrastructure/Repository/PdoMetricsRepository.php' => ['backtick' => 144, 'temporal' => 9],
     // Tanda 3 · Preventivo, Rutas, Sanitario, Auditoría (T-HYBRID-11)
     'src/Infrastructure/Repository/PdoPreventiveSettingsRepository.php' => ['backtick' => 85],
     'src/Infrastructure/Repository/PdoPreventiveOrderRepository.php' => ['backtick' => 190, 'temporal' => 4],
@@ -735,6 +729,12 @@ const DRAINED_INVENTORY = [
     'src/Infrastructure/Repository/PdoMachineRepository.php' => ['drained_by' => 'T-HYBRID-09', 'families' => ['backtick' => 182]],
     'src/Infrastructure/Repository/PdoLocationRepository.php' => ['drained_by' => 'T-HYBRID-09', 'families' => ['backtick' => 116]],
     'src/Infrastructure/Repository/PdoUserRepository.php' => ['drained_by' => 'T-HYBRID-09', 'families' => ['backtick' => 124, 'temporal' => 2]],
+    // Tanda 2 · Reintegros, Repuestos, Piezas Sustituidas, Métricas (T-HYBRID-10)
+    'src/Infrastructure/Repository/PdoRefundRequestRepository.php' => ['drained_by' => 'T-HYBRID-10', 'families' => ['backtick' => 63]],
+    'src/Infrastructure/Repository/PdoSparePartRepository.php' => ['drained_by' => 'T-HYBRID-10', 'families' => ['backtick' => 73, 'upsert' => 2]],
+    'src/Infrastructure/Repository/PdoSparePartRequestRepository.php' => ['drained_by' => 'T-HYBRID-10', 'families' => ['backtick' => 31]],
+    'src/Infrastructure/Repository/PdoIncidentReplacedPartRepository.php' => ['drained_by' => 'T-HYBRID-10', 'families' => ['backtick' => 48, 'temporal' => 5]],
+    'src/Infrastructure/Repository/PdoMetricsRepository.php' => ['drained_by' => 'T-HYBRID-10', 'families' => ['backtick' => 144, 'temporal' => 9]],
 ];
 
 /** Fichero con hallazgos => tarea (o motivo declarado) que lo drena. */

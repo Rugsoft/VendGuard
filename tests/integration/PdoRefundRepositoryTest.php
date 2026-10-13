@@ -396,19 +396,24 @@ try {
         !str_contains(strtoupper($repoSource), 'DELETE FROM')
     );
 
+    // Las proyecciones se comparan por **columna calificada** (`r.iban`), no por la grafía con
+    // acentos graves que exigía el motor heredado: desde T-HYBRID-10 los identificadores se
+    // escriben desnudos para que la misma sentencia valga en MariaDB y en PostgreSQL. La
+    // aserción no se relaja —sigue anclada al alias y al nombre exacto de la columna—, sólo deja
+    // de medir un detalle de dialecto.
     $assert(
         '9.2 La proyección restringida NO menciona `iban` en su lista de columnas',
-        !str_contains(extractConstant($repoSource, 'RESTRICTED_COLUMNS'), '`iban`')
+        !preg_match('/\br\.iban\b/', extractConstant($repoSource, 'RESTRICTED_COLUMNS'))
     );
 
     $assert(
         '9.3 La proyección restringida NO menciona `bizum_phone` en su lista de columnas',
-        !str_contains(extractConstant($repoSource, 'RESTRICTED_COLUMNS'), '`bizum_phone`')
+        !preg_match('/\br\.bizum_phone\b/', extractConstant($repoSource, 'RESTRICTED_COLUMNS'))
     );
 
     $assert(
         '9.4 La proyección completa SÍ menciona `iban` (Coordinación la necesita)',
-        str_contains(extractConstant($repoSource, 'FULL_COLUMNS'), '`iban`')
+        (bool)preg_match('/\br\.iban\b/', extractConstant($repoSource, 'FULL_COLUMNS'))
     );
 
     $findingSource = (string)file_get_contents(dirname(__DIR__, 2) . '/src/Infrastructure/Repository/PdoUnclaimedCashFindingRepository.php');

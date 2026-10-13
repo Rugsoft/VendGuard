@@ -12,6 +12,7 @@ use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\MetricFilter;
 use VendGuard\Core\Domain\Repository\MetricsRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
  * PdoMetricsRepository
@@ -25,15 +26,24 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  * `MetricsCalculationService`, salvo en el recuento de brechas de SLA, donde el umbral se decide
  * ticket a ticket y no puede descomponerse en una media: allí se netea dentro del SQL.
  * 
+ * Los identificadores se escriben desnudos —los dos motores admiten así todo el esquema— y la
+ * única diferencia que estas agregaciones tienen se le pide al adaptador de dialecto (RF-01.5,
+ * T-HYBRID-25): la diferencia entre dos instantes, que respeta el truncamiento hacia cero que el
+ * motor local aplica y el motor nuevo reproduce. El resto de la sentencia —`ROUND`, `AVG`,
+ * `COUNT`, `GREATEST`, `GROUP BY`, `LEFT JOIN`— es común y no se envuelve.
+ * 
  * Cumple con RNF-02 (rendimiento analítico < 1.5s) y el Dogma Vanilla (PHP 8.2+ puro).
  */
 class PdoMetricsRepository implements MetricsRepositoryInterface
 {
     private PDO $pdo;
 
+    private SqlDialectAdapter $dialect;
+
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
+        $this->dialect = SqlDialectAdapter::forConnection($this->pdo);
     }
 
     /**
@@ -46,7 +56,7 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
     {
         [$scope, $params] = $this->buildResolvedSampleScope($filter, $machineType);
 
-        $sql = "SELECT ROUND(AVG(TIMESTAMPDIFF(SECOND, i.`created_at`, i.`resolved_at`))) AS avg_seconds"
+        $sql = "SELECT ROUND(AVG({$this->dialect->timestampDifference('SECOND', 'i.created_at', 'i.resolved_at')})) AS avg_seconds"
              . $scope;
 
         try {
@@ -74,7 +84,7 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
     {
         [$scope, $params] = $this->buildResolvedSampleScope($filter, $machineType);
 
-        $sql = "SELECT ROUND(AVG(i.`total_pending_info_seconds`)) AS avg_pause_seconds"
+        $sql = "SELECT ROUND(AVG(i.total_pending_info_seconds)) AS avg_pause_seconds"
              . $scope;
 
         try {
@@ -101,15 +111,15 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
      */
     private function buildResolvedSampleScope(MetricFilter $filter, ?MachineType $machineType): array
     {
-        $from = "\n                FROM `incidents` i";
+        $from = "\n                FROM incidents i";
         if ($machineType !== null) {
-            $from .= "\n                INNER JOIN `machines` m ON i.`machine_id` = m.`id`";
+            $from .= "\n                INNER JOIN machines m ON i.machine_id = m.id";
         }
 
-        $where = "\n                WHERE i.`resolved_at` IS NOT NULL
-                  AND i.`status` IN ('RESOLVED', 'CLOSED')
-                  AND i.`resolved_at` >= :from_date
-                  AND i.`resolved_at` <= :to_date";
+        $where = "\n                WHERE i.resolved_at IS NOT NULL
+                  AND i.status IN ('RESOLVED', 'CLOSED')
+                  AND i.resolved_at >= :from_date
+                  AND i.resolved_at <= :to_date";
 
         $params = [
             ':from_date' => $filter->getFrom()->format('Y-m-d H:i:s'),
@@ -117,17 +127,17 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
         ];
 
         if ($filter->getLocationId() !== null) {
-            $where .= "\n                  AND i.`location_id` = :location_id";
+            $where .= "\n                  AND i.location_id = :location_id";
             $params[':location_id'] = $filter->getLocationId();
         }
 
         if ($filter->getTechnicianId() !== null) {
-            $where .= "\n                  AND i.`assigned_technician_id` = :technician_id";
+            $where .= "\n                  AND i.assigned_technician_id = :technician_id";
             $params[':technician_id'] = $filter->getTechnicianId();
         }
 
         if ($machineType !== null) {
-            $where .= "\n                  AND m.`machine_type` = :machine_type";
+            $where .= "\n                  AND m.machine_type = :machine_type";
             $params[':machine_type'] = $machineType->value;
         }
 
@@ -139,9 +149,9 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
      */
     public function countCreatedTickets(MetricFilter $filter): int
     {
-        $sql = "SELECT COUNT(*) FROM `incidents`
-                WHERE `created_at` >= :from_date
-                  AND `created_at` <= :to_date";
+        $sql = "SELECT COUNT(*) FROM incidents
+                WHERE created_at >= :from_date
+                  AND created_at <= :to_date";
 
         $params = [
             ':from_date' => $filter->getFrom()->format('Y-m-d H:i:s'),
@@ -149,12 +159,12 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
         ];
 
         if ($filter->getLocationId() !== null) {
-            $sql .= " AND `location_id` = :location_id";
+            $sql .= " AND location_id = :location_id";
             $params[':location_id'] = $filter->getLocationId();
         }
 
         if ($filter->getTechnicianId() !== null) {
-            $sql .= " AND `assigned_technician_id` = :technician_id";
+            $sql .= " AND assigned_technician_id = :technician_id";
             $params[':technician_id'] = $filter->getTechnicianId();
         }
 
@@ -172,11 +182,11 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
      */
     public function countResolvedTickets(MetricFilter $filter): int
     {
-        $sql = "SELECT COUNT(*) FROM `incidents`
-                WHERE `resolved_at` IS NOT NULL
-                  AND `status` IN ('RESOLVED', 'CLOSED')
-                  AND `resolved_at` >= :from_date
-                  AND `resolved_at` <= :to_date";
+        $sql = "SELECT COUNT(*) FROM incidents
+                WHERE resolved_at IS NOT NULL
+                  AND status IN ('RESOLVED', 'CLOSED')
+                  AND resolved_at >= :from_date
+                  AND resolved_at <= :to_date";
 
         $params = [
             ':from_date' => $filter->getFrom()->format('Y-m-d H:i:s'),
@@ -184,12 +194,12 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
         ];
 
         if ($filter->getLocationId() !== null) {
-            $sql .= " AND `location_id` = :location_id";
+            $sql .= " AND location_id = :location_id";
             $params[':location_id'] = $filter->getLocationId();
         }
 
         if ($filter->getTechnicianId() !== null) {
-            $sql .= " AND `assigned_technician_id` = :technician_id";
+            $sql .= " AND assigned_technician_id = :technician_id";
             $params[':technician_id'] = $filter->getTechnicianId();
         }
 
@@ -207,8 +217,8 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
      */
     public function countActiveBacklog(): int
     {
-        $sql = "SELECT COUNT(*) FROM `incidents`
-                WHERE `status` IN ('REGISTERED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS', 'REOPENED')";
+        $sql = "SELECT COUNT(*) FROM incidents
+                WHERE status IN ('REGISTERED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS', 'REOPENED')";
 
         try {
             $stmt = $this->pdo->query($sql);
@@ -223,18 +233,18 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
      */
     public function countCriticalSlaBreaches(MetricFilter $filter): int
     {
-        $sql = "SELECT COUNT(*) FROM `incidents` i
-                INNER JOIN `machines` m ON i.`machine_id` = m.`id`
-                WHERE i.`resolved_at` IS NOT NULL
-                  AND i.`status` IN ('RESOLVED', 'CLOSED')
-                  AND i.`resolved_at` >= :from_date
-                  AND i.`resolved_at` <= :to_date
+        $sql = "SELECT COUNT(*) FROM incidents i
+                INNER JOIN machines m ON i.machine_id = m.id
+                WHERE i.resolved_at IS NOT NULL
+                  AND i.status IN ('RESOLVED', 'CLOSED')
+                  AND i.resolved_at >= :from_date
+                  AND i.resolved_at <= :to_date
                   AND (
-                    (m.`machine_type` = 'PERISHABLE_FOOD'
-                     AND GREATEST(0, TIMESTAMPDIFF(SECOND, i.`created_at`, i.`resolved_at`) - i.`total_pending_info_seconds`) > 240 * 60)
+                    (m.machine_type = 'PERISHABLE_FOOD'
+                     AND GREATEST(0, {$this->dialect->timestampDifference('SECOND', 'i.created_at', 'i.resolved_at')} - i.total_pending_info_seconds) > 240 * 60)
                     OR
-                    (m.`machine_type` != 'PERISHABLE_FOOD'
-                     AND GREATEST(0, TIMESTAMPDIFF(SECOND, i.`created_at`, i.`resolved_at`) - i.`total_pending_info_seconds`) > 1440 * 60)
+                    (m.machine_type != 'PERISHABLE_FOOD'
+                     AND GREATEST(0, {$this->dialect->timestampDifference('SECOND', 'i.created_at', 'i.resolved_at')} - i.total_pending_info_seconds) > 1440 * 60)
                   )";
 
         try {
@@ -255,21 +265,21 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
     public function getBreakdownByLocation(MetricFilter $filter): array
     {
         $sql = "SELECT 
-                    l.`id` AS location_id,
-                    l.`site_code`,
-                    l.`name` AS location_name,
-                    l.`is_active`,
-                    COUNT(i.`id`) AS tickets_resolved,
-                    ROUND(AVG(TIMESTAMPDIFF(SECOND, i.`created_at`, i.`resolved_at`))) AS avg_gross_seconds,
-                    ROUND(AVG(i.`total_pending_info_seconds`)) AS avg_pause_seconds
-                FROM `locations` l
-                LEFT JOIN `incidents` i ON i.`location_id` = l.`id`
-                    AND i.`resolved_at` IS NOT NULL
-                    AND i.`status` IN ('RESOLVED', 'CLOSED')
-                    AND i.`resolved_at` >= :from_date
-                    AND i.`resolved_at` <= :to_date
-                GROUP BY l.`id`, l.`site_code`, l.`name`, l.`is_active`
-                ORDER BY tickets_resolved DESC, l.`name` ASC";
+                    l.id AS location_id,
+                    l.site_code,
+                    l.name AS location_name,
+                    l.is_active,
+                    COUNT(i.id) AS tickets_resolved,
+                    ROUND(AVG({$this->dialect->timestampDifference('SECOND', 'i.created_at', 'i.resolved_at')})) AS avg_gross_seconds,
+                    ROUND(AVG(i.total_pending_info_seconds)) AS avg_pause_seconds
+                FROM locations l
+                LEFT JOIN incidents i ON i.location_id = l.id
+                    AND i.resolved_at IS NOT NULL
+                    AND i.status IN ('RESOLVED', 'CLOSED')
+                    AND i.resolved_at >= :from_date
+                    AND i.resolved_at <= :to_date
+                GROUP BY l.id, l.site_code, l.name, l.is_active
+                ORDER BY tickets_resolved DESC, l.name ASC";
 
         try {
             $stmt = $this->pdo->prepare($sql);
@@ -310,19 +320,19 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
     public function getBreakdownByTechnician(MetricFilter $filter): array
     {
         $sql = "SELECT 
-                    u.`id` AS technician_id,
-                    u.`name` AS technician_name,
-                    u.`is_active`,
-                    COUNT(i.`id`) AS tickets_resolved,
-                    COUNT(rh.`incident_id`) AS warranty_reopens,
-                    ROUND(AVG(TIMESTAMPDIFF(SECOND, i.`created_at`, i.`resolved_at`))) AS avg_gross_seconds,
-                    ROUND(AVG(i.`total_pending_info_seconds`)) AS avg_pause_seconds
-                FROM `users` u
-                LEFT JOIN `incidents` i ON i.`assigned_technician_id` = u.`id`
-                    AND i.`resolved_at` IS NOT NULL
-                    AND i.`status` IN ('RESOLVED', 'CLOSED')
-                    AND i.`resolved_at` >= :from_date
-                    AND i.`resolved_at` <= :to_date
+                    u.id AS technician_id,
+                    u.name AS technician_name,
+                    u.is_active,
+                    COUNT(i.id) AS tickets_resolved,
+                    COUNT(rh.incident_id) AS warranty_reopens,
+                    ROUND(AVG({$this->dialect->timestampDifference('SECOND', 'i.created_at', 'i.resolved_at')})) AS avg_gross_seconds,
+                    ROUND(AVG(i.total_pending_info_seconds)) AS avg_pause_seconds
+                FROM users u
+                LEFT JOIN incidents i ON i.assigned_technician_id = u.id
+                    AND i.resolved_at IS NOT NULL
+                    AND i.status IN ('RESOLVED', 'CLOSED')
+                    AND i.resolved_at >= :from_date
+                    AND i.resolved_at <= :to_date
                 LEFT JOIN (
                     -- Reintervenciones por garantía (Art. V.6): reaperturas dentro de las
                     -- 48 h posteriores a una resolución, atribuidas al técnico que firmó la
@@ -330,23 +340,23 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
                     -- user_id = NULL (reopen() desasigna al técnico), de modo que la
                     -- atribución se deriva del evento RESOLVED inmediatamente anterior de
                     -- la misma avería; con created_at (marca del evento, no del expediente).
-                    SELECT h.`incident_id`, h.`created_at`,
-                           (SELECT h2.`user_id`
-                              FROM `incident_history` h2
-                             WHERE h2.`incident_id` = h.`incident_id`
-                               AND h2.`to_status` IN ('RESOLVED', 'RESUELTA')
-                               AND (h2.`created_at` < h.`created_at`
-                                    OR (h2.`created_at` = h.`created_at` AND h2.`id` < h.`id`))
-                             ORDER BY h2.`created_at` DESC, h2.`id` DESC
+                    SELECT h.incident_id, h.created_at,
+                           (SELECT h2.user_id
+                              FROM incident_history h2
+                             WHERE h2.incident_id = h.incident_id
+                               AND h2.to_status IN ('RESOLVED', 'RESUELTA')
+                               AND (h2.created_at < h.created_at
+                                    OR (h2.created_at = h.created_at AND h2.id < h.id))
+                             ORDER BY h2.created_at DESC, h2.id DESC
                              LIMIT 1) AS resolver_technician_id
-                      FROM `incident_history` h
-                     WHERE h.`to_status` IN ('REOPENED', 'REABIERTA')
-                       AND h.`created_at` >= :reopens_from_date
-                       AND h.`created_at` <= :reopens_to_date
-                ) rh ON rh.`resolver_technician_id` = u.`id`
-                WHERE u.`role` = 'TECHNICIAN'
-                GROUP BY u.`id`, u.`name`, u.`is_active`
-                ORDER BY tickets_resolved DESC, u.`name` ASC";
+                      FROM incident_history h
+                     WHERE h.to_status IN ('REOPENED', 'REABIERTA')
+                       AND h.created_at >= :reopens_from_date
+                       AND h.created_at <= :reopens_to_date
+                ) rh ON rh.resolver_technician_id = u.id
+                WHERE u.role = 'TECHNICIAN'
+                GROUP BY u.id, u.name, u.is_active
+                ORDER BY tickets_resolved DESC, u.name ASC";
 
         try {
             $stmt = $this->pdo->prepare($sql);
@@ -391,17 +401,17 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
     public function getBreakdownByMachineType(MetricFilter $filter): array
     {
         $sql = "SELECT 
-                    m.`machine_type`,
-                    COUNT(i.`id`) AS tickets_resolved,
-                    ROUND(AVG(TIMESTAMPDIFF(SECOND, i.`created_at`, i.`resolved_at`))) AS avg_gross_seconds,
-                    ROUND(AVG(i.`total_pending_info_seconds`)) AS avg_pause_seconds
-                FROM `incidents` i
-                INNER JOIN `machines` m ON i.`machine_id` = m.`id`
-                WHERE i.`resolved_at` IS NOT NULL
-                  AND i.`status` IN ('RESOLVED', 'CLOSED')
-                  AND i.`resolved_at` >= :from_date
-                  AND i.`resolved_at` <= :to_date
-                GROUP BY m.`machine_type`
+                    m.machine_type,
+                    COUNT(i.id) AS tickets_resolved,
+                    ROUND(AVG({$this->dialect->timestampDifference('SECOND', 'i.created_at', 'i.resolved_at')})) AS avg_gross_seconds,
+                    ROUND(AVG(i.total_pending_info_seconds)) AS avg_pause_seconds
+                FROM incidents i
+                INNER JOIN machines m ON i.machine_id = m.id
+                WHERE i.resolved_at IS NOT NULL
+                  AND i.status IN ('RESOLVED', 'CLOSED')
+                  AND i.resolved_at >= :from_date
+                  AND i.resolved_at <= :to_date
+                GROUP BY m.machine_type
                 ORDER BY tickets_resolved DESC";
 
         try {
@@ -455,16 +465,16 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
     public function getBreakdownByCategory(MetricFilter $filter): array
     {
         $sql = "SELECT 
-                    i.`category`,
-                    COUNT(i.`id`) AS tickets_resolved,
-                    ROUND(AVG(TIMESTAMPDIFF(SECOND, i.`created_at`, i.`resolved_at`))) AS avg_gross_seconds,
-                    ROUND(AVG(i.`total_pending_info_seconds`)) AS avg_pause_seconds
-                FROM `incidents` i
-                WHERE `resolved_at` IS NOT NULL
-                  AND `status` IN ('RESOLVED', 'CLOSED')
-                  AND `resolved_at` >= :from_date
-                  AND `resolved_at` <= :to_date
-                GROUP BY `category`
+                    i.category,
+                    COUNT(i.id) AS tickets_resolved,
+                    ROUND(AVG({$this->dialect->timestampDifference('SECOND', 'i.created_at', 'i.resolved_at')})) AS avg_gross_seconds,
+                    ROUND(AVG(i.total_pending_info_seconds)) AS avg_pause_seconds
+                FROM incidents i
+                WHERE resolved_at IS NOT NULL
+                  AND status IN ('RESOLVED', 'CLOSED')
+                  AND resolved_at >= :from_date
+                  AND resolved_at <= :to_date
+                GROUP BY category
                 ORDER BY tickets_resolved DESC";
 
         try {
@@ -519,28 +529,28 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
         //    descontables (RF-03.1). El neto lo compone el servicio.
         $mttrSql = "SELECT 
                         COUNT(*) AS total_resolved,
-                        ROUND(AVG(TIMESTAMPDIFF(SECOND, `created_at`, `resolved_at`))) AS avg_gross_seconds,
-                        ROUND(AVG(`total_pending_info_seconds`)) AS avg_pause_seconds
-                    FROM `incidents`
-                    WHERE `assigned_technician_id` = :tech_id
-                      AND `resolved_at` IS NOT NULL
-                      AND `status` IN ('RESOLVED', 'CLOSED')
-                      AND `resolved_at` >= :from_date
-                      AND `resolved_at` <= :to_date";
+                        ROUND(AVG({$this->dialect->timestampDifference('SECOND', 'created_at', 'resolved_at')})) AS avg_gross_seconds,
+                        ROUND(AVG(total_pending_info_seconds)) AS avg_pause_seconds
+                    FROM incidents
+                    WHERE assigned_technician_id = :tech_id
+                      AND resolved_at IS NOT NULL
+                      AND status IN ('RESOLVED', 'CLOSED')
+                      AND resolved_at >= :from_date
+                      AND resolved_at <= :to_date";
 
         // 2. Tickets actualmente en curso asignados
-        $inProgressSql = "SELECT COUNT(*) FROM `incidents`
-                          WHERE `assigned_technician_id` = :tech_id
-                            AND `status` = 'IN_PROGRESS'";
+        $inProgressSql = "SELECT COUNT(*) FROM incidents
+                          WHERE assigned_technician_id = :tech_id
+                            AND status = 'IN_PROGRESS'";
 
         // 3. Tiempo de primera respuesta (created_at hasta started_at en minutos)
         $firstResponseSql = "SELECT 
-                                 ROUND(AVG(TIMESTAMPDIFF(MINUTE, `created_at`, `started_at`))) AS avg_response_minutes
-                             FROM `incidents`
-                             WHERE `assigned_technician_id` = :tech_id
-                               AND `started_at` IS NOT NULL
-                               AND `created_at` >= :from_date
-                               AND `created_at` <= :to_date";
+                                 ROUND(AVG({$this->dialect->timestampDifference('MINUTE', 'created_at', 'started_at')})) AS avg_response_minutes
+                             FROM incidents
+                             WHERE assigned_technician_id = :tech_id
+                               AND started_at IS NOT NULL
+                               AND created_at >= :from_date
+                               AND created_at <= :to_date";
 
         try {
             $stmtMttr = $this->pdo->prepare($mttrSql);

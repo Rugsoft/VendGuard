@@ -70,7 +70,7 @@
   * **Dependencias:** T-HYBRID-06, T-HYBRID-25
   * **Hecho cuando:** `PdoIncidentRepository.php`, `PdoMachineRepository.php`, `PdoLocationRepository.php` y `PdoUserRepository.php` eliminan backticks (\`), resuelven sus cálculos de fecha y sus lecturas de JSON a través del adaptador de dialecto (`DATE_SUB(NOW(), INTERVAL ...)` $\rightarrow$ `(CURRENT_TIMESTAMP - INTERVAL ...)`), adaptan columnas `is_active` con `PDO::PARAM_BOOL`, **escriben la clave canónica** en cada alta o modificación de `users` y `locations` (EARS-08.5) y ejecutan sin fallos en ambos motores relacionales.
 
-- [ ] **T-HYBRID-10: Normalizar dialecto SQL ANSI en repositorios PDO (Grupo 2: Reintegros, Repuestos, Piezas Sustituidas, Métricas)**
+- [x] **T-HYBRID-10: Normalizar dialecto SQL ANSI en repositorios PDO (Grupo 2: Reintegros, Repuestos, Piezas Sustituidas, Métricas)**
   * **Requisitos:** RF-01.1, RF-08.1, Constitución Art. III.1
   * **Dependencias:** T-HYBRID-06
   * **Hecho cuando:** `PdoRefundRequestRepository.php`, `PdoSparePartRepository.php`, `PdoSparePartRequestRepository.php`, `PdoIncidentReplacedPartRepository.php` y `PdoMetricsRepository.php` resuelven sus diferencias de dialecto —diferencias temporales, intervalos y upsert— **consumiendo el adaptador de dialecto** (T-HYBRID-25) y no repitiendo la traducción en cada repositorio; ninguna regla de negocio se define dos veces y `SqlDialectPortabilityTest` certifica que no queda SQL privativo fuera del adaptador.

@@ -11,6 +11,7 @@ use VendGuard\Core\Domain\Model\SparePartRequest;
 use VendGuard\Core\Domain\Model\SparePartRequestStatus;
 use VendGuard\Core\Domain\Repository\SparePartRequestRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
  * PdoSparePartRequestRepository
@@ -18,14 +19,21 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  * Implementación PDO del repositorio de solicitudes estructuradas de repuesto.
  * Registra solicitudes durante pausas técnicas (RF-REP-03 / RF-REP-04) y gestiona
  * transiciones atómicas de ciclo de vida sin borrado físico (Art. III).
+ *
+ * Los identificadores se escriben desnudos —los dos motores admiten así todo el esquema— y la
+ * única diferencia declarada que este repositorio tiene, el literal booleano (D-3), se le pide al
+ * adaptador de dialecto, que es el punto único de traducción (RF-01.5, T-HYBRID-25).
  */
 class PdoSparePartRequestRepository implements SparePartRequestRepositoryInterface
 {
     private PDO $pdo;
 
+    private SqlDialectAdapter $dialect;
+
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
+        $this->dialect = SqlDialectAdapter::forConnection($this->pdo);
     }
 
     /**
@@ -34,16 +42,16 @@ class PdoSparePartRequestRepository implements SparePartRequestRepositoryInterfa
     public function createRequest(SparePartRequest $request): SparePartRequest
     {
         $sql = "
-            INSERT INTO `spare_part_requests` (
-                `incident_id`,
-                `spare_part_id`,
-                `is_out_of_catalog`,
-                `custom_part_description`,
-                `quantity`,
-                `status`,
-                `requested_by_user_id`,
-                `created_at`,
-                `updated_at`
+            INSERT INTO spare_part_requests (
+                incident_id,
+                spare_part_id,
+                is_out_of_catalog,
+                custom_part_description,
+                quantity,
+                status,
+                requested_by_user_id,
+                created_at,
+                updated_at
             ) VALUES (
                 :incident_id,
                 :spare_part_id,
@@ -58,16 +66,20 @@ class PdoSparePartRequestRepository implements SparePartRequestRepositoryInterfa
         ";
 
         try {
+            // El booleano cruza como parámetro enlazado con `PDO::PARAM_BOOL`: es la forma que los
+            // dos drivers traducen al tipo de cada motor (D-3). Los valores se enlazan todos por
+            // nombre y la sentencia se ejecuta sin array: mezclar `bindValue()` con un array de
+            // ejecución hace que PDO pierda la cuenta de los parámetros ya enlazados (`HY093`).
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([
-                ':incident_id'              => $request->getIncidentId(),
-                ':spare_part_id'            => $request->getSparePartId(),
-                ':is_out_of_catalog'        => $request->isOutOfCatalog() ? 1 : 0,
-                ':custom_part_description'  => $request->getCustomPartDescription(),
-                ':quantity'                 => $request->getQuantity(),
-                ':status'                   => $request->getStatus()->value,
-                ':requested_by_user_id'     => $request->getRequestedByUserId(),
-            ]);
+            $stmt->bindValue(':incident_id', $request->getIncidentId(), PDO::PARAM_INT);
+            $stmt->bindValue(':spare_part_id', $request->getSparePartId(), $request->getSparePartId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+            $stmt->bindValue(':is_out_of_catalog', $request->isOutOfCatalog(), PDO::PARAM_BOOL);
+            $customDescription = $request->getCustomPartDescription();
+            $stmt->bindValue(':custom_part_description', $customDescription, $customDescription !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            $stmt->bindValue(':quantity', $request->getQuantity(), PDO::PARAM_INT);
+            $stmt->bindValue(':status', $request->getStatus()->value, PDO::PARAM_STR);
+            $stmt->bindValue(':requested_by_user_id', $request->getRequestedByUserId(), $request->getRequestedByUserId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+            $stmt->execute();
 
             $id = (int)$this->pdo->lastInsertId();
 
@@ -102,9 +114,9 @@ class PdoSparePartRequestRepository implements SparePartRequestRepositoryInterfa
                 sp.part_code,
                 sp.name AS part_name,
                 u.name AS technician_name
-            FROM `spare_part_requests` spr
-            LEFT JOIN `spare_parts` sp ON sp.id = spr.spare_part_id
-            LEFT JOIN `users` u ON u.id = spr.requested_by_user_id
+            FROM spare_part_requests spr
+            LEFT JOIN spare_parts sp ON sp.id = spr.spare_part_id
+            LEFT JOIN users u ON u.id = spr.requested_by_user_id
             WHERE spr.id = :id
         ";
 
@@ -130,9 +142,9 @@ class PdoSparePartRequestRepository implements SparePartRequestRepositoryInterfa
                 sp.part_code,
                 sp.name AS part_name,
                 u.name AS technician_name
-            FROM `spare_part_requests` spr
-            LEFT JOIN `spare_parts` sp ON sp.id = spr.spare_part_id
-            LEFT JOIN `users` u ON u.id = spr.requested_by_user_id
+            FROM spare_part_requests spr
+            LEFT JOIN spare_parts sp ON sp.id = spr.spare_part_id
+            LEFT JOIN users u ON u.id = spr.requested_by_user_id
             WHERE spr.incident_id = :incident_id
             ORDER BY spr.created_at ASC, spr.id ASC
         ";
@@ -155,12 +167,12 @@ class PdoSparePartRequestRepository implements SparePartRequestRepositoryInterfa
     public function markAttendedByIncident(int $incidentId): int
     {
         $sql = "
-            UPDATE `spare_part_requests`
+            UPDATE spare_part_requests
             SET 
-                `status` = 'ATTENDED',
-                `updated_at` = NOW()
-            WHERE `incident_id` = :incident_id
-              AND `status` = 'PENDING'
+                status = 'ATTENDED',
+                updated_at = NOW()
+            WHERE incident_id = :incident_id
+              AND status = 'PENDING'
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -175,12 +187,12 @@ class PdoSparePartRequestRepository implements SparePartRequestRepositoryInterfa
     public function markCancelledByIncident(int $incidentId): int
     {
         $sql = "
-            UPDATE `spare_part_requests`
+            UPDATE spare_part_requests
             SET 
-                `status` = 'CANCELLED',
-                `updated_at` = NOW()
-            WHERE `incident_id` = :incident_id
-              AND `status` = 'PENDING'
+                status = 'CANCELLED',
+                updated_at = NOW()
+            WHERE incident_id = :incident_id
+              AND status = 'PENDING'
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -206,12 +218,12 @@ class PdoSparePartRequestRepository implements SparePartRequestRepositoryInterfa
                 spr.custom_part_description,
                 spr.created_at AS requested_at,
                 inc.status AS incident_status
-            FROM `spare_part_requests` spr
-            INNER JOIN `incidents` inc ON inc.id = spr.incident_id
-            INNER JOIN `machines` m ON m.id = inc.machine_id
-            INNER JOIN `locations` loc ON loc.id = m.location_id
-            LEFT JOIN `users` u ON u.id = spr.requested_by_user_id
-            WHERE spr.is_out_of_catalog = 1
+            FROM spare_part_requests spr
+            INNER JOIN incidents inc ON inc.id = spr.incident_id
+            INNER JOIN machines m ON m.id = inc.machine_id
+            INNER JOIN locations loc ON loc.id = m.location_id
+            LEFT JOIN users u ON u.id = spr.requested_by_user_id
+            WHERE spr.is_out_of_catalog = {$this->dialect->booleanLiteral(true)}
               AND spr.status = 'PENDING'
             ORDER BY spr.created_at ASC
         ";

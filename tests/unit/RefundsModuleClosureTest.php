@@ -648,7 +648,7 @@ $assert(
     str_contains($doctrine['refund_service'], "'paid_amount' => \$dto->paidAmount")
     && str_contains($doctrine['refund_service'], 'payableAmount')
     && str_contains($doctrine['refund_service'], 'isCentExact')
-    && str_contains($doctrine['repository'], 'r.`paid_amount`'),
+    && str_contains($doctrine['repository'], 'r.paid_amount'),
     'registerDigitalPayment() escribe paid_amount y lo iguala con payableAmount()'
 );
 $assert(
