@@ -20,12 +20,30 @@
 #                        de modo que cada pasada quede también en el registro
 #                        de la plataforma.
 #
+# Reintento            : una invocación fallida se reintenta dentro de la MISMA
+#                        pasada con espera progresiva (0, 30, 60 y 120 s), que es
+#                        lo que exige EARS-06.5 de todo programador periódico. Un
+#                        fallo transitorio de enlace no cuesta, por tanto, una
+#                        ventana entera de 15 minutos al reloj biológico.
+#                        Reintentar es seguro por construcción: la pasada del
+#                        servicio canónico es idempotente (no duplica cuarentenas
+#                        ni rastros), así que el segundo intento de una pasada que
+#                        ya había avanzado no repite nada. Agotados los cuatro
+#                        intentos el proceso termina en **1**, de modo que el
+#                        fallo queda en el registro de la plataforma y el vigilante
+#                        externo lo ve como ventana perdida y alerta. El techo de
+#                        la cadena (30 + 60 + 120 s) queda muy por debajo de la
+#                        ventana de 15 minutos: dos pasadas nunca se solapan.
+#
 # La lógica de cálculo NO vive aquí: este reloj solo invoca el CLI canónico,
 # que ejecuta SanitaryClockSweepService como única fuente de verdad (Art. I.3).
 # Queda prohibido añadir a esta entrada cualquier regla de escalado, consulta
-# SQL o procedimiento almacenado paralelo.
+# SQL o procedimiento almacenado paralelo. El reintento es orquestación, no
+# cálculo: no decide umbrales, no interpreta estados y no escribe nada.
 # =============================================================================
 
-# */15 — ventana del reloj biológico de 4 h (14.400 s), con reintento y alerta
-# en el vigilante externo (EARS-06.5). Rejilla de 5 campos de cron estándar.
-*/15 * * * * . /etc/vendguard/cron.env 2>/dev/null; cd /var/www/html && php bin/sanitary_clock_sweep.php >> /proc/1/fd/1 2>&1
+# */15 — ventana del reloj biológico de 4 h (14.400 s), con reintento con espera
+# progresiva y alerta en el vigilante externo (EARS-06.5). Rejilla de 5 campos de
+# cron estándar. El `exit 1` final es deliberado: sin él, agotar los reintentos
+# dejaría un código de salida 0 y el fallo moriría en silencio.
+*/15 * * * * . /etc/vendguard/cron.env 2>/dev/null; cd /var/www/html && for delay in 0 30 60 120; do [ "$delay" = 0 ] || sleep "$delay"; php bin/sanitary_clock_sweep.php >> /proc/1/fd/1 2>&1 && exit 0; done; exit 1

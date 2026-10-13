@@ -25,6 +25,38 @@ proveedor), porque el programador interno corre dentro de la base que se suspend
 `crond` forma parte de busybox y está presente en la imagen Alpine con la que ya se
 construye: no añade dependencias externas (Dogma Vanilla, Art. IV).
 
+### Reintento con espera progresiva
+
+La entrada reintenta la invocación fallida dentro de la misma pasada, con esperas de
+**0, 30, 60 y 120 segundos**, y termina en **1** si agota los cuatro intentos (EARS-06.5).
+Reintentar es seguro por construcción: la pasada de `SanitaryClockSweepService` es
+idempotente, de modo que el segundo intento de una pasada que ya había avanzado no
+duplica cuarentenas ni rastros. El techo de la cadena (210 s) queda muy por debajo de la
+ventana de 15 minutos, así que dos pasadas nunca se solapan; y el `exit 1` final es lo que
+hace que el fallo **no muera en silencio**: queda en el registro de la plataforma y el
+vigilante externo lo ve como ventana perdida y alerta.
+
+## La variante `pg_cron` + `pg_net` (admitida, no canónica)
+
+EARS-06.6 la admite como orquestador alternativo y aquí queda documentada con sus
+condiciones, que son dos y no negociables:
+
+1. **La credencial se lee en tiempo de ejecución de un almacén de secretos del proveedor
+   (Vault).** Queda expresamente prohibido incorporar el secreto al DDL versionado, a
+   `database/supabase_init.sql`, a una migración o a cualquier fichero del repositorio.
+2. **No se instala de forma incondicional.** `pg_cron` (y `pg_net`) solo van en el DDL de
+   la variante que decide usarlas; el DDL base no las declara, porque el motor local de la
+   categoría de certificación no las ofrece y escribirlas ahí rompería la certificación
+   precisamente en el motor donde se ejecuta (plan §8).
+
+Y no es el reloj canónico, por un motivo que no depende de la configuración: **su
+programador corre dentro del motor que se suspende**, y `pg_net` llama con 2 s de timeout
+a un contenedor que también puede estar dormido. Un barrido sanitario que no se ejecuta en
+silencio es el peor fallo posible para el Art. II, así que el reloj canónico sigue siendo
+este del contenedor, con el vigilante externo encima. Habilitarla exigiría además
+documentar el aprovisionamiento de la extensión y del secreto en el Vault, que hoy no
+cubre ninguna tarea del plan.
+
 ## Cómo se verifica que el reloj existe y late
 
 1. **El artefacto existe y está instalado:** el fichero está en el repositorio y en
@@ -36,6 +68,8 @@ construye: no añade dependencias externas (Dogma Vanilla, Art. IV).
 4. **El vigilante muerde:** si se detiene el demonio con el contenedor en pie, la
    siguiente ejecución del flujo programado detecta la ventana perdida, invoca el
    barrido por el endpoint autenticado y deja constancia del incidente.
+5. **Reintenta y falla en voz alta:** con el enlace caído, una invocación se reintenta con
+   espera progresiva y, si agota los cuatro intentos, el proceso termina en `1` (no en 0).
 
 Ninguna de estas comprobaciones se apoya en «lo he configurado en un panel»: las
 cuatro son observables desde el repositorio y desde el propio registro de pasadas.
