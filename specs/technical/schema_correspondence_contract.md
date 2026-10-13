@@ -6,7 +6,7 @@
 **Requisitos que lo exigen:** spec §8 criterio 7, RNF-04 · T-HYBRID-24 (`SchemaConvergenceParityTest`), T-HYBRID-01 y T-HYBRID-02 (DDL que debe cumplirlo)  
 **Decisiones vinculantes:** [plan.md](../12-hybrid-supabase-migration/plan.md) §4, §6 y §8  
 **Normativa Suprema:** [constitution.md](../../constitution.md) (Artículos I, II, III, V y VI)  
-**Estado:** Contrato declarado · *lo que falta es el DDL que lo materialice (T-HYBRID-01/02)*  
+**Estado:** Contrato declarado · **materializado en su Parte 1** por `database/supabase_init.sql` (T-HYBRID-01: 10 tablas, 12 tipos del dominio, disparadores y claves canónicas) · *la Parte 2 (10 tablas restantes) es T-HYBRID-02*  
 **Procedencia del inventario:** esquema **desplegado** `vendguard_db` del motor local MariaDB (consultado a través de `information_schema` el 2026-10-13) y los 16 ficheros de `database/migrations/`  
 **Fuente del lado PostgreSQL:** plan §4 (blindaje constitucional, claves canónicas, índice único parcial, disparadores) y las tareas T-HYBRID-01/02
 
@@ -212,11 +212,12 @@ Aplica a **todas** las columnas (281 en el snapshot). Es el único mapeo autoriz
 | `INT UNSIGNED` (identidad, `AUTO_INCREMENT`) | 72 (`int`) | `BIGINT GENERATED ALWAYS AS IDENTITY` | **D-1** |
 | `BIGINT UNSIGNED` (identidad) | 3 (`bigint`) | `BIGINT GENERATED ALWAYS AS IDENTITY` | **D-1** (`audit_log`, `sanitary_sweep_passes`, `sanitary_sweep_contentions`) |
 | `INT UNSIGNED` (clave foránea o valor) | — | `BIGINT` | Consecuencia de **D-1**: la columna referenciada debe admitir el valor |
+| `TINYINT(3) UNSIGNED` (contador) | 3 | `SMALLINT` | Contadores de intentos de acceso: el rango local (0..255) cabe entero en `SMALLINT`, que además pertenece a la misma familia entera corta |
 | `VARCHAR(n)` | 49 | `VARCHAR(n)` | Misma longitud declarada |
 | `TEXT` | 21 | `TEXT` | — |
 | `LONGTEXT` (JSON con `json_valid`) | 3 | `JSONB` | **D-4** (`audit_log.previous_state`, `new_state`, `metadata`) |
 | `DECIMAL(p,s)` | 20 | `NUMERIC(p,s)` | Importes y cantidades: sin pérdida de escala |
-| `TINYINT(1)` (booleano) | 18 | `BOOLEAN` | **D-3** |
+| `TINYINT(1)` (booleano) | 14 | `BOOLEAN` | **D-3**. La columna derivada `incidents.is_active_ticket` (`TINYINT(4)`) no entra aquí: la sustituye el índice único parcial de **D-6** |
 | `DATETIME` | 42 | `TIMESTAMPTZ` | **D-2** |
 | `TIMESTAMP` | 23 | `TIMESTAMPTZ` | **D-2** |
 | `DATE` | 5 | `DATE` | — |
@@ -231,7 +232,7 @@ Cada diferencia lleva su forma exacta en cada motor y **qué certifica la suite 
 | ID | Diferencia aceptada | MariaDB | PostgreSQL | Por qué se acepta | Qué certifica la suite |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **D-1** | Identidad de fila | `INT/BIGINT UNSIGNED AUTO_INCREMENT` | `BIGINT GENERATED ALWAYS AS IDENTITY` | No hay `AUTO_INCREMENT` en PostgreSQL ni `IDENTITY` en MariaDB; la función (identidad monótona generada por el motor) coincide | Que la identidad se genera sin intervención de la aplicación y que la columna referenciada admite el valor |
-| **D-2** | Tipos temporales y auto-actualización | `DATETIME`/`TIMESTAMP`; **11** columnas `updated_at` con `ON UPDATE CURRENT_TIMESTAMP`, **30** columnas con `DEFAULT CURRENT_TIMESTAMP` | `TIMESTAMPTZ`; por defecto `CURRENT_TIMESTAMP` | PostgreSQL **no tiene** `ON UPDATE` en la definición de columna, y `DATETIME` no lleva desplazamiento horario | Que el instante es correcto en UTC (RF-09) y que, **en un `UPDATE` real, `updated_at` avanza**: se certifica el comportamiento, no la definición |
+| **D-2** | Tipos temporales y auto-actualización | `DATETIME`/`TIMESTAMP`; **11** columnas `updated_at` con `ON UPDATE CURRENT_TIMESTAMP`, **30** columnas con `DEFAULT CURRENT_TIMESTAMP` | `TIMESTAMPTZ`; por defecto `CURRENT_TIMESTAMP`; la auto-actualización se materializa con un disparador `BEFORE UPDATE` que invoca `touch_updated_at()` —`trg_touch_<tabla>`—, escribe `statement_timestamp()` (el análogo del instante de **sentencia** que usa el motor local: `CURRENT_TIMESTAMP` sería el de transacción y la marca no avanzaría entre dos `UPDATE` de la misma transacción) y **respeta** el valor cuando la sentencia ya escribe `updated_at` | PostgreSQL **no tiene** `ON UPDATE` en la definición de columna, y `DATETIME` no lleva desplazamiento horario | Que el instante es correcto en UTC (RF-09) y que, **en un `UPDATE` real, `updated_at` avanza**: se certifica el comportamiento, no la definición. La forma PostgreSQL de esa certificación (el disparador, y no una cláusula inexistente) queda declarada aquí, en la fila, al escribirse el DDL (T-HYBRID-01) |
 | **D-3** | Booleanos | `TINYINT(1)` | `BOOLEAN` | Homologación de tipo, no de significado | Que los valores escritos y leídos por la aplicación conservan verdadero/falso con `PDO::PARAM_BOOL` |
 | **D-4** | Documentos JSON | `LONGTEXT` + `CHECK json_valid(...)` + colación `utf8mb4_bin` | `JSONB` | El `CHECK` es la forma de MariaDB de garantizar validez; el tipo `jsonb` la hace estructural en PostgreSQL | Que escribir JSON inválido **falla** en ambos motores y que el contenido escrito se recupera igual |
 | **D-5** | Unicidad de texto | `utf8mb4_unicode_ci`: unicidad insensible a mayúsculas **y** acentos | Claves canónicas `A-1`/`A-2` con `UNIQUE` sobre la clave | `citext`/`lower()` sólo cubren mayúsculas: el motor nuevo quedaría con una regla **más débil** que la certificada | Que `Ana@X.com` y `ana@x.com` **colisionan** en ambos motores y que la semántica es la misma |
@@ -249,9 +250,9 @@ Existen **únicamente** en el motor nuevo, son deliberadas y la suite debe **exi
 
 | ID | Adición | Requisito | Qué debe certificar la suite |
 | :--- | :--- | :--- | :--- |
-| **A-1** | Columna `email_key` en `users` con `UNIQUE` | EARS-08.5, **D-5** | Que la colisión de identidad se rechaza igual que en MariaDB y que la clave se escribe en cada alta y modificación |
-| **A-2** | Columna `site_code_key` en `locations` con `UNIQUE` | EARS-08.5, **D-5** | Ídem para el código de sede |
-| **A-3** | Restricciones `CHECK` de longitud mínima (Art. V.1) en los campos de cierre y justificación | Art. V.1, plan §4.5 | Que una justificación por debajo del mínimo **es rechazada por la base**, no sólo por el servicio. *La lista exacta de columnas y el mínimo se fijan al escribir el DDL (T-HYBRID-01) y se anotan aquí en el mismo commit.* |
+| **A-1** | Columna `email_key` en `users` (`VARCHAR(150) NOT NULL`) con `UNIQUE (uq_users_email_key`) | EARS-08.5, **D-5** | Que la colisión de identidad se rechaza igual que en MariaDB y que la clave se escribe en cada alta y modificación (`NOT NULL`: una fila sin clave normalizada no es un duplicado invisible, es un alta incompleta) |
+| **A-2** | Columna `site_code_key` en `locations` (`VARCHAR(32) NOT NULL`) con `UNIQUE (uq_locations_site_code_key)` | EARS-08.5, **D-5** | Ídem para el código de sede |
+| **A-3** | Restricciones `CHECK` de longitud mínima (Art. V.1) en los campos de cierre y justificación | Art. V.1, plan §4.5 | Que una justificación por debajo del mínimo **es rechazada por la base**, no sólo por el servicio. **Lista fijada al escribir el DDL (T-HYBRID-01):** mínimo de **20 caracteres reales tras recortar** —`char_length(trim(...)) >= 20`— sobre cuatro columnas de `incidents`, con el patrón `IS NULL OR …` porque el campo solo se llena al cerrar, pausar o cancelar: `chk_resolution_diagnosis_len` (`resolution_diagnosis`), `chk_resolution_action_len` (`resolution_action`), `chk_pending_info_reason_text_len` (`pending_info_reason_text`) y `chk_cancellation_reason_len` (`cancellation_reason`). El umbral no se inventa: reproduce el que el dominio ya exige (`ResolutionValidator::MIN_LENGTH`, `Incident::MIN_PAUSE_REASON_LENGTH`, `IncidentPauseService::MIN_CANCELLATION_REASON_LENGTH`). `preventive_orders.cancellation_reason` no recibe `CHECK` porque su cancelación no tiene mínimo declarado en el servicio. T-HYBRID-02 aplica el mismo mínimo a los campos equivalentes de la Parte 2, y en ambos casos rige el mismo criterio: **solo se blinda en la base el umbral que el dominio ya exige**, nunca uno nuevo |
 | **A-4** | **20** disparadores `BEFORE DELETE` sobre `prevent_hard_delete()` | Art. III.1, **D-8** | Que `DELETE FROM` sobre cada una de las 20 tablas falla con `SQLSTATE '45000'` y que la señal de purga del arnés lo levanta |
 | **A-5** | Libro del ejecutor de migraciones (`PostgresMigrationRunner`) | EARS-02.4, T-HYBRID-23 | Que el esquema **converge** al aplicar una migración posterior. *Si el ejecutor necesita tabla propia, su nombre se declara aquí al escribirlo; este contrato no lo impone.* |
 
