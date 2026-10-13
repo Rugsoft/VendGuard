@@ -26,7 +26,7 @@
   * **Dependencias:** T-HYBRID-01
   * **Hecho cuando:** El archivo `database/supabase_init.sql` incluye las definiciones completas con tipos nativos y disparadores `BEFORE DELETE` para: `preventive_order_items`, `sanitary_certificates`, `spare_parts`, `spare_part_compatibilities`, `spare_part_requests`, `incident_replaced_parts`, `refund_requests`, `unclaimed_cash_findings`, `sanitary_sweep_passes` y `sanitary_sweep_contentions`, verificando que el script SQL completo de las 20 tablas compila limpiamente en PostgreSQL 15+ y que el inventario resultante satisface el contrato de correspondencia declarado con MariaDB ([`schema_correspondence_contract.md`](../technical/schema_correspondence_contract.md)).
 
-- [ ] **T-HYBRID-03: Crear script de semillas maestras para arranque en limpio `database/supabase_seeds.sql`**
+- [x] **T-HYBRID-03: Crear script de semillas maestras para arranque en limpio `database/supabase_seeds.sql`**
   * **Requisitos:** RF-02.1, RF-02.2, RF-02.3, Constitución Art. V.4
   * **Dependencias:** T-HYBRID-02
   * **Hecho cuando:** Existe `database/supabase_seeds.sql` con sentencias de inserción cuya sintaxis de upsert resuelve el **adaptador de dialecto** (T-HYBRID-25) —`ON CONFLICT ... DO UPDATE` en PostgreSQL, `ON DUPLICATE KEY UPDATE` en MariaDB, con una sola definición de la regla— que cargan las 10 sedes iniciales, las 13 máquinas maestras, el personal interno con contraseñas seguras hasheadas, y el catálogo maestro de repuestos con compatibilidades por modelo, sin insertar ninguna incidencia activa ni expediente histórico previo (*Fresh Start* estricto).
