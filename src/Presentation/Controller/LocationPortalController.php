@@ -38,6 +38,7 @@ use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
+use VendGuard\Infrastructure\Storage\FileStorageCompensator;
 use VendGuard\Infrastructure\Storage\LocalFileUploader;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -79,6 +80,9 @@ class LocationPortalController
     private ?IncidentCommentService $commentService;
     private ?AuditLogger $auditLogger;
 
+    /** Transaccionalidad compensatoria del fichero (EARS-05.3); se resuelve bajo demanda. */
+    private ?FileStorageCompensator $fileCompensator;
+
     public function __construct(
         ?MachineRepositoryInterface $machineRepo = null,
         ?LocationRepositoryInterface $locationRepo = null,
@@ -87,12 +91,14 @@ class LocationPortalController
         ?RefundManagementService $refundService = null,
         ?IbanValidationService $ibanValidator = null,
         ?IncidentCommentService $commentService = null,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?FileStorageCompensator $fileCompensator = null
     ) {
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->fileUploader = $fileUploader ?? new LocalFileUploader();
+        $this->fileCompensator = $fileCompensator;
         $this->ibanValidator = $ibanValidator ?? new IbanValidationService();
         $this->refundService = $refundService
             ?? new RefundManagementService(new PdoRefundRequestRepository(), $this->ibanValidator);
@@ -121,7 +127,25 @@ class LocationPortalController
      */
     private function comments(): IncidentCommentService
     {
-        return $this->commentService ??= new IncidentCommentService($this->incidentRepo, null, $this->fileUploader);
+        // El servicio del hilo recibe el MISMO subidor y el MISMO compensador que este
+        // controlador: la ruta de comentarios de la Sede comparte una sola implementación
+        // de la compensación y ninguna parte reimplementa el borrado (EARS-05.3).
+        return $this->commentService ??= new IncidentCommentService(
+            $this->incidentRepo,
+            null,
+            $this->fileUploader,
+            $this->compensator()
+        );
+    }
+
+    /**
+     * Compensador del fichero de evidencia, resuelto bajo demanda y compuesto sobre el
+     * mismo subidor que escribe las fotografías de este controlador (ver
+     * `FileStorageCompensator`).
+     */
+    private function compensator(): FileStorageCompensator
+    {
+        return $this->fileCompensator ??= new FileStorageCompensator($this->fileUploader);
     }
 
     /**
@@ -444,13 +468,18 @@ class LocationPortalController
             }
         }
 
-        // 6. Procesar archivo adjunto si se envía (RNF-05, EARS 3.9)
+        // 6. Procesar archivo adjunto si se envía (RNF-05, EARS 3.9).
+        //    `$uploadedPhotoPath` sólo recoge la ruta que ESTA petición acaba de escribir:
+        //    es la única compensable, porque retirar una ruta que llegó ya hecha en el
+        //    cuerpo del formulario destruiría la evidencia de otro expediente.
         $photoPath = null;
+        $uploadedPhotoPath = null;
         $photoFile = $request->getFile('photo') ?? $request->getFile('image') ?? $request->getFile('file');
 
         if ($photoFile !== null && isset($photoFile['error']) && $photoFile['error'] !== UPLOAD_ERR_NO_FILE && !empty($photoFile['tmp_name'])) {
             try {
                 $photoPath = $this->fileUploader->upload($photoFile);
+                $uploadedPhotoPath = $photoPath;
             } catch (InvalidUploadException $e) {
                 // EARS 3.9: Preservar íntegros los datos de texto introducidos en el formulario
                 return Response::error(
@@ -473,32 +502,38 @@ class LocationPortalController
             $photoPath = trim((string)$request->getBodyParam('photo_path'));
         }
 
-        // 7. Cálculo automático de urgencia (Constitución Art. II, RF-03 / EARS 3.2-3.7)
-        $urgency = UrgencyCalculator::calculate($machine->getMachineType(), $category);
-
-        // 8. Generar código de ticket único (INC-YYYY-XXXX)
-        $ticketCode = TicketCode::generate()->value();
-
-        // 9. Construir la entidad de dominio Incident
-        $incident = new Incident(
-            id: null,
-            ticketCode: $ticketCode,
-            machineId: $machine->getId(),
-            locationId: $location->getId(),
-            category: $category,
-            description: $description,
-            urgency: $urgency,
-            status: IncidentStatus::REGISTERED,
-            assignedTechnicianId: null,
-            reporterName: $reporterName,
-            reporterPhone: $reporterPhone,
-            retainedMoneyAmount: $retainedMoney,
-            photoPath: $photoPath
-        );
-
-        // 10. Persistir atómicamente con prevención de duplicados (RF-02)
+        // 7-10. Urgencia automática (Constitución Art. II, RF-03 / EARS 3.2-3.7), código de
+        //       ticket, entidad de dominio y persistencia atómica con prevención de
+        //       duplicados (RF-02), todo bajo la transaccionalidad compensatoria del archivo
+        //       (EARS-05.3): si el alta no llega a confirmarse —tiempo de espera del motor
+        //       remoto, enlace caído o duplicado detectado— la fotografía recién escrita se
+        //       retira en lugar de quedarse huérfana, y la causa original sigue su camino.
         try {
-            $created = $this->incidentRepo->create($incident, null, 'Aviso registrado desde el portal de sede');
+            $created = $this->compensator()->executeWithCompensatingFile(
+                (string)$uploadedPhotoPath,
+                function () use ($machine, $category, $location, $description, $reporterName, $reporterPhone, $retainedMoney, $photoPath): Incident {
+                    $urgency = UrgencyCalculator::calculate($machine->getMachineType(), $category);
+                    $ticketCode = TicketCode::generate()->value();
+
+                    $incident = new Incident(
+                        id: null,
+                        ticketCode: $ticketCode,
+                        machineId: $machine->getId(),
+                        locationId: $location->getId(),
+                        category: $category,
+                        description: $description,
+                        urgency: $urgency,
+                        status: IncidentStatus::REGISTERED,
+                        assignedTechnicianId: null,
+                        reporterName: $reporterName,
+                        reporterPhone: $reporterPhone,
+                        retainedMoneyAmount: $retainedMoney,
+                        photoPath: $photoPath
+                    );
+
+                    return $this->incidentRepo->create($incident, null, 'Aviso registrado desde el portal de sede');
+                }
+            );
         } catch (DuplicateIncidentException $e) {
             return Response::error(
                 $e->getErrorCode(),

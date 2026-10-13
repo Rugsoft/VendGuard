@@ -12,6 +12,7 @@ use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Infrastructure\Storage\FileStorageCompensator;
 use VendGuard\Infrastructure\Storage\LocalFileUploader;
 
 /**
@@ -75,14 +76,31 @@ class IncidentCommentService
     private AuditLogger $auditLogger;
     private LocalFileUploader $fileUploader;
 
+    /** Transaccionalidad compensatoria del fichero (EARS-05.3); se resuelve bajo demanda. */
+    private ?FileStorageCompensator $fileCompensator;
+
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?AuditLogger $auditLogger = null,
-        ?LocalFileUploader $fileUploader = null
+        ?LocalFileUploader $fileUploader = null,
+        ?FileStorageCompensator $fileCompensator = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new \VendGuard\Infrastructure\Repository\PdoIncidentRepository();
         $this->auditLogger = $auditLogger ?? new AuditLogger();
         $this->fileUploader = $fileUploader ?? new LocalFileUploader();
+        $this->fileCompensator = $fileCompensator;
+    }
+
+    /**
+     * Compensador del fichero de evidencia, resuelto bajo demanda.
+     *
+     * Se compone sobre el MISMO subidor que escribió la fotografía —no sobre una copia—
+     * porque la ruta pública que devolvió la subida sólo es resoluble por el componente
+     * que la entregó: aquí no se reimplementa `unlink()` ni se adivina el directorio.
+     */
+    private function compensator(): FileStorageCompensator
+    {
+        return $this->fileCompensator ??= new FileStorageCompensator($this->fileUploader);
     }
 
     /**
@@ -239,14 +257,9 @@ class IncidentCommentService
             ? false
             : ($isInternal ?? true);
 
-        // 5. Evidencia fotográfica opcional con validación binaria en servidor
-        //    (Art. V.5 / RF-04.2): tamaño ≤ 5 MB y magic bytes reales.
-        $photoPath = null;
-        if ($photo !== null && ($photo['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
-            $photoPath = $this->fileUploader->upload($photo);
-        }
-
-        // 6. Autoría e identidad visible según el perfil (RF-02.2, RF-02.3).
+        // 5. Autoría e identidad visible según el perfil (RF-02.2, RF-02.3). Se resuelve
+        //    ANTES de escribir la evidencia: un dato de autor ausente es un fallo de
+        //    programación y no puede dejar una fotografía huérfana en disco (EARS-05.3).
         if ($isSiteManager) {
             $authorType = self::AUTHOR_TYPE_REPORTER;
             $authorUserId = null;
@@ -262,19 +275,33 @@ class IncidentCommentService
             }
         }
 
-        // 7. Persistencia append-only del mensaje (Art. III, RF-06.1, RF-06.2).
-        $comment = $this->incidentRepo->addComment(new IncidentComment(
-            id: null,
-            incidentId: $incidentId,
-            authorType: $authorType,
-            userId: $authorUserId > 0 ? $authorUserId : null,
-            authorName: $authorName,
-            commentText: $trimmedText,
-            photoPath: $photoPath,
-            isInternal: $effectiveInternal,
-            createdAt: date('Y-m-d H:i:s'),
-            ticketCode: (string)($incidentRow['ticket_code'] ?? '')
-        ));
+        // 6. Evidencia fotográfica opcional con validación binaria en servidor
+        //    (Art. V.5 / RF-04.2): tamaño ≤ 5 MB y magic bytes reales.
+        $photoPath = null;
+        if ($photo !== null && ($photo['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+            $photoPath = $this->fileUploader->upload($photo);
+        }
+
+        // 7. Persistencia append-only del mensaje (Art. III, RF-06.1, RF-06.2) bajo la
+        //    transaccionalidad compensatoria del archivo (EARS-05.3): si la inserción no
+        //    llega a confirmarse —tiempo de espera agotado o enlace caído—, la fotografía
+        //    recién escrita se retira en lugar de quedarse huérfana, y la excepción sigue
+        //    su camino con su causa verdadera.
+        $comment = $this->compensator()->executeWithCompensatingFile(
+            (string)$photoPath,
+            fn (): IncidentComment => $this->incidentRepo->addComment(new IncidentComment(
+                id: null,
+                incidentId: $incidentId,
+                authorType: $authorType,
+                userId: $authorUserId > 0 ? $authorUserId : null,
+                authorName: $authorName,
+                commentText: $trimmedText,
+                photoPath: $photoPath,
+                isInternal: $effectiveInternal,
+                createdAt: date('Y-m-d H:i:s'),
+                ticketCode: (string)($incidentRow['ticket_code'] ?? '')
+            ))
+        );
 
         // 8. Evento inmutable de auditoría (RF-06.3 / Art. III.3).
         $this->auditLogger->logTicketEvent(

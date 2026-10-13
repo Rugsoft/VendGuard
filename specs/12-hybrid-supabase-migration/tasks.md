@@ -55,7 +55,7 @@
   * **Dependencias:** T-HYBRID-06
   * **Hecho cuando:** `src/Infrastructure/Database/PdoLockWaitBudget.php` detecta el driver activo: si es `pgsql`, gestiona la cota mediante `current_setting('lock_timeout')` y `SET LOCAL lock_timeout = ...` dentro de la transacción activa; si es `mysql`, preserva la lógica de `@@SESSION.innodb_lock_wait_timeout`.
 
-- [ ] **T-HYBRID-08: Implementar `FileStorageCompensator.php` para transaccionalidad compensatoria de archivos**
+- [x] **T-HYBRID-08: Implementar `FileStorageCompensator.php` para transaccionalidad compensatoria de archivos**
   * **Requisitos:** RF-05.2, RF-05.3, RF-05.4, RNF-03
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existe `src/Infrastructure/Storage/FileStorageCompensator.php` con el método `executeWithCompensatingFile(string $publicPath, callable $dbOperation): mixed` que ejecuta la operación de base de datos dentro de un bloque `try/catch` y, ante excepción o fallo de red, **delega el borrado físico** en [`LocalFileUploader::delete()`](../../src/Infrastructure/Storage/LocalFileUploader.php) a partir de la **ruta pública** que devolvió la subida —sin reimplementar `unlink()`—, evitando fugas de archivos huérfanos. El compensador queda **conectado a los cinco puntos de uso reales de la subida** (`IncidentCommentService`, `CoordinatorController`, `LocationPortalController`, `QrScanController` y `TechnicianController`), con una prueba que demuestra que, tras un fallo de persistencia, el fichero **ya no existe** en disco.

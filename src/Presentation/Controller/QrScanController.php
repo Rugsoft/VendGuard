@@ -20,6 +20,7 @@ use VendGuard\Core\Domain\Model\CompensationMethod;
 use VendGuard\Application\Service\QrReportService;
 use VendGuard\Application\Service\QrScanService;
 use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
+use VendGuard\Infrastructure\Storage\FileStorageCompensator;
 use VendGuard\Infrastructure\Storage\LocalFileUploader;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -103,6 +104,9 @@ class QrScanController
     private RefundManagementService $refundService;
     private IbanValidationService $ibanValidator;
 
+    /** Transaccionalidad compensatoria del fichero (EARS-05.3); se resuelve bajo demanda. */
+    private ?FileStorageCompensator $fileCompensator;
+
     public function __construct(
         ?QrScanService $qrScanService = null,
         ?QrReportService $qrReportService = null,
@@ -110,16 +114,28 @@ class QrScanController
         ?MachineRepositoryInterface $machineRepo = null,
         ?PreventiveSettingsRepositoryInterface $settingsRepo = null,
         ?RefundManagementService $refundService = null,
-        ?IbanValidationService $ibanValidator = null
+        ?IbanValidationService $ibanValidator = null,
+        ?FileStorageCompensator $fileCompensator = null
     ) {
         $this->settingsRepo = $settingsRepo;
         $this->qrScanService = $qrScanService ?? new QrScanService(null, null, null, $settingsRepo);
         $this->qrReportService = $qrReportService ?? new QrReportService();
         $this->fileUploader = $fileUploader ?? new LocalFileUploader();
+        $this->fileCompensator = $fileCompensator;
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->ibanValidator = $ibanValidator ?? new IbanValidationService();
         $this->refundService = $refundService
             ?? new RefundManagementService(new PdoRefundRequestRepository(), $this->ibanValidator);
+    }
+
+    /**
+     * Compensador del fichero de evidencia, resuelto bajo demanda y compuesto sobre el
+     * mismo subidor que escribe las fotografías de este controlador (ver
+     * `FileStorageCompensator`).
+     */
+    private function compensator(): FileStorageCompensator
+    {
+        return $this->fileCompensator ??= new FileStorageCompensator($this->fileUploader);
     }
 
     private function getSettingsRepo(): ?PreventiveSettingsRepositoryInterface
@@ -281,13 +297,18 @@ class QrScanController
             }
         }
 
-        // 6. Manejo de archivo adjunto de evidencia (fotografía)
+        // 6. Manejo de archivo adjunto de evidencia (fotografía).
+        //    `$uploadedPhotoPath` sólo recoge la ruta que ESTA petición acaba de escribir:
+        //    es la única compensable, porque retirar una ruta que llegó ya hecha en el
+        //    cuerpo del formulario destruiría la evidencia de otro expediente.
         $photoPath = null;
+        $uploadedPhotoPath = null;
         $photoFile = $request->getFile('photo') ?? $request->getFile('image') ?? $request->getFile('file');
 
         if ($photoFile !== null && isset($photoFile['error']) && $photoFile['error'] !== UPLOAD_ERR_NO_FILE && !empty($photoFile['tmp_name'])) {
             try {
                 $photoPath = $this->fileUploader->upload($photoFile);
+                $uploadedPhotoPath = $photoPath;
             } catch (InvalidUploadException $e) {
                 return Response::error(
                     $e->getErrorCode(),
@@ -309,8 +330,15 @@ class QrScanController
             'photo_path' => $photoPath,
         ];
 
+        // 7. Alta del aviso bajo la transaccionalidad compensatoria del archivo
+        //    (EARS-05.3): si el registro no llega a confirmarse —tiempo de espera del motor
+        //    remoto, enlace caído o datos rechazados en la validación del servicio—, la
+        //    fotografía recién escrita se retira en lugar de quedarse huérfana.
         try {
-            $result = $this->qrReportService->report($payload);
+            $result = $this->compensator()->executeWithCompensatingFile(
+                (string)$uploadedPhotoPath,
+                fn (): array => $this->qrReportService->report($payload)
+            );
         } catch (MachineNotFoundException $e) {
             return Response::error(
                 $e->getErrorCode(),

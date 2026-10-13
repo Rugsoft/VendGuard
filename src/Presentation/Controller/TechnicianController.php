@@ -49,6 +49,7 @@ use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRequestRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
+use VendGuard\Infrastructure\Storage\FileStorageCompensator;
 use VendGuard\Infrastructure\Storage\LocalFileUploader;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -75,6 +76,9 @@ class TechnicianController
     private ?IncidentCommentService $commentService;
     private ?IncidentPauseService $pauseService;
 
+    /** Transaccionalidad compensatoria del fichero (EARS-05.3); se resuelve bajo demanda. */
+    private ?FileStorageCompensator $fileCompensator;
+
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?MachineRepositoryInterface $machineRepo = null,
@@ -85,7 +89,8 @@ class TechnicianController
         ?TechnicianRefundService $refundService = null,
         ?LocalFileUploader $fileUploader = null,
         ?IncidentCommentService $commentService = null,
-        ?IncidentPauseService $pauseService = null
+        ?IncidentPauseService $pauseService = null,
+        ?FileStorageCompensator $fileCompensator = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->machineRepo  = $machineRepo ?? new PdoMachineRepository();
@@ -106,6 +111,7 @@ class TechnicianController
         );
 
         $this->fileUploader = $fileUploader ?? new LocalFileUploader();
+        $this->fileCompensator = $fileCompensator;
 
         // Inicialización perezosa: el AuditLogger por defecto del servicio de
         // comentarios abre conexión a MariaDB al instanciarse, y este controlador
@@ -140,10 +146,30 @@ class TechnicianController
 
     /**
      * Servicio de aplicación del hilo de comentarios, resuelto bajo demanda.
+     *
+     * La fotografía in situ la escribe el servicio, punto único de las rutas de comentario
+     * de los tres perfiles; el controlador le entrega el MISMO subidor y el MISMO
+     * compensador que posee, de modo que la compensación del fichero (EARS-05.3) tiene una
+     * sola implementación en toda la ruta y nadie reimplementa el borrado.
      */
     private function comments(): IncidentCommentService
     {
-        return $this->commentService ??= new IncidentCommentService($this->incidentRepo, null, $this->fileUploader);
+        return $this->commentService ??= new IncidentCommentService(
+            $this->incidentRepo,
+            null,
+            $this->fileUploader,
+            $this->compensator()
+        );
+    }
+
+    /**
+     * Compensador del fichero de evidencia, resuelto bajo demanda y compuesto sobre el
+     * mismo subidor que escribe las fotografías de este controlador (ver
+     * `FileStorageCompensator`).
+     */
+    private function compensator(): FileStorageCompensator
+    {
+        return $this->fileCompensator ??= new FileStorageCompensator($this->fileUploader);
     }
 
     /**
