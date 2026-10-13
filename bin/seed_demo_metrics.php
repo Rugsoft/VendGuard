@@ -13,14 +13,19 @@ declare(strict_types=1);
 // claves de centro (S-4) con `SiteAccessCodeGenerator`; sin ellas este script muere
 // con «Class not found» antes de tocar la base de datos.
 // La guarda `CloudDeploySchemaParityTest` lo certifica en proceso limpio.
+// `SqlDialectAdapter` (T-HYBRID-25) traduce las diferencias temporales que este
+// resumen escribe en el idioma del motor vivo: `TIMESTAMPDIFF` no existe en
+// PostgreSQL y `EXTRACT(EPOCH FROM ...)` no existe en MariaDB.
 require_once __DIR__ . '/../src/Infrastructure/Config/SecretProvider.php';
 require_once __DIR__ . '/../src/Core/Domain/Service/SiteAccessCodeGenerator.php';
 require_once __DIR__ . '/../src/Infrastructure/Database/ConnectionFactory.php';
+require_once __DIR__ . '/../src/Infrastructure/Dialect/SqlDialectAdapter.php';
 require_once __DIR__ . '/../src/Infrastructure/Database/SeedRunner.php';
 require_once __DIR__ . '/../database/DemoMetricsSeeder.php';
 
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SeedRunner;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 use VendGuard\Database\DemoMetricsSeeder;
 
 echo "======================================================================\n";
@@ -50,10 +55,16 @@ try {
     echo " Resumen de Métricas Disponibles en la Base de Datos:\n";
     echo "======================================================================\n";
 
+    // Las dos diferencias temporales del resumen salen del adaptador de dialecto: la
+    // regla («minutos completos transcurridos entre el alta y la resolución») se
+    // declara una vez y el motor decide su sintaxis.
+    $dialect = SqlDialectAdapter::forConnection($pdo);
+    $elapsedMinutes = static fn (string $startColumn, string $endColumn): string => $dialect->timestampDifference('MINUTE', $startColumn, $endColumn);
+
     $stmt = $pdo->query("
         SELECT 
             COUNT(*) as total_resolved,
-            ROUND(AVG(TIMESTAMPDIFF(MINUTE, created_at, resolved_at))) as avg_mttr_minutes
+            ROUND(AVG({$elapsedMinutes('created_at', 'resolved_at')})) as avg_mttr_minutes
         FROM incidents
         WHERE resolved_at IS NOT NULL AND status IN ('RESOLVED', 'CLOSED')
     ");
@@ -68,7 +79,7 @@ try {
     $stmtPerish = $pdo->query("
         SELECT 
             COUNT(*) as total_perish,
-            ROUND(AVG(TIMESTAMPDIFF(MINUTE, i.created_at, i.resolved_at))) as avg_mttr_minutes
+            ROUND(AVG({$elapsedMinutes('i.created_at', 'i.resolved_at')})) as avg_mttr_minutes
         FROM incidents i
         JOIN machines m ON i.machine_id = m.id
         WHERE i.resolved_at IS NOT NULL 
