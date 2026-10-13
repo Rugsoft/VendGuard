@@ -1,0 +1,328 @@
+name: Supabase · latido, estado del proyecto y auto-restauración
+
+# =============================================================================
+# Latido desatendido del enlace con la base de datos en la nube (módulo 12:
+# RF-03 / EARS-03.1, EARS-03.2, EARS-03.3 y EARS-02.5).
+#
+# Qué hace, en este orden, cada día a las 06:00 UTC:
+#
+#   1. LATE: pide `GET /api/status` con la credencial de proceso batch que ya
+#      existe. Esa llamada ES la actividad que ve el proveedor, porque el
+#      endpoint de diagnóstico verifica el enlace con una consulta sobre una
+#      tabla real del dominio (EARS-03.2). Este flujo no abre una conexión a la
+#      base ni custodia credenciales de base de datos: no las necesita.
+#
+#   2. PREGUNTA el estado del proyecto a la API DE GESTIÓN de Supabase, y **no**
+#      lo deduce del código HTTP de la aplicación. La aplicación no puede
+#      observar el `540` de un proyecto pausado: desde fuera, un proyecto
+#      suspendido y un contenedor caído se parecen demasiado (un 503, un fallo
+#      de conexión o un 404), así que deducir el estado de ese código sería
+#      adivinar. Si la API de gestión no responde, el flujo **falla en voz
+#      alta**: no se da por bueno un latido que no se ha podido interpretar.
+#
+#   3. RESTAURA si el estado declarado es de proyecto en frío: invoca
+#      `POST /v1/projects/{ref}/restore` con `SUPABASE_ACCESS_TOKEN` (secreto,
+#      jamás escrito en el registro) y espera —con plazo acotado— a que el
+#      estado vuelva a ser activo.
+#
+#   4. PROVOCA LA RE-INICIALIZACIÓN Y VERIFICA EL ESQUEMA antes de declarar el
+#      servicio recuperado (EARS-02.5): despierta la aplicación y exige la
+#      respuesta canónica del diagnóstico con `status: HEALTHY`. El arranque del
+#      contenedor ejecuta el inicializador `php bin/init_cloud_db.php`
+#      (Dockerfile: `CMD`), que aplica el DDL base y las migraciones del motor y
+#      **sale con error si el esquema no queda verificado**: por eso aquí no se
+#      reimplementa ni una línea de esquema. Este flujo provoca el arranque
+#      canónico y no declara recuperado nada que no pueda verificar; queda
+#      prohibido añadirle SQL, DDL o reglas de negocio (Art. I.3).
+#
+#   5. NOTIFICA el desenlace por un canal distinto del propio log: el resumen de
+#      la ejecución siempre, y un webhook de canal real cuando hay anomalía —una
+#      restauración lo es: el proyecto llegó a pausarse— o cuando el desenlace
+#      es un fallo. El latido diario normal no dispara webhook, para que el canal
+#      de alerta no se convierta en ruido.
+#
+# Criterio de color: verde = proyecto activo y esquema verificado. Rojo = el
+# estado no pudo determinarse, la restauración fue rechazada, o el servicio no
+# quedó verificado. Un latido que se apaga en silencio es exactamente el fallo
+# que este flujo existe para impedir.
+#
+# Requisitos de configuración (una sola vez, en el despliegue):
+#   secret VENDGUARD_APP_URL        URL pública de la aplicación
+#   secret CRON_SECRET              credencial del proceso batch (ya existente)
+#   secret SUPABASE_ACCESS_TOKEN    personal access token de la cuenta Supabase
+#   secret SUPABASE_PROJECT_REF     referencia del proyecto (la del pooler)
+#   secret VENDGUARD_ALERT_WEBHOOK  opcional: webhook de un canal real
+# =============================================================================
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: supabase-keepalive
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  APP_URL: ${{ secrets.VENDGUARD_APP_URL }}
+  CRON_SECRET: ${{ secrets.CRON_SECRET }}
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+  ALERT_WEBHOOK: ${{ secrets.VENDGUARD_ALERT_WEBHOOK }}
+
+  # Endpoint de la API de gestión de Supabase. Aquí sí se declara una constante:
+  # es la ruta de un proveedor, no una regla de negocio.
+  MANAGEMENT_API: 'https://api.supabase.com/v1'
+
+  # Política de clasificación del estado del proyecto. La API de gestión no
+  # publica una enumeración exhaustiva de estados, así que la clasificación es
+  # una DECISIÓN DECLARADA aquí —y no una igualdad literal repartida por el
+  # guion—: lo que no encaja en ella se declara `unknown` y se trata como tal
+  # (espera acotada y, si no se resuelve, fallo en voz alta). Nunca se supone
+  # activo lo que no se ha podido leer.
+  ACTIVE_STATUS_PREFIX: 'ACTIVE_'
+  COLD_STATUSES: 'INACTIVE PAUSED'
+  TRANSITIONAL_STATUSES: 'PAUSING GOING_DOWN COMING_UP RESTORING'
+
+  # Plazos acotados: la restauración tarda del orden de minutos y el arranque en
+  # frío del contenedor (con su inicializador de esquema) tiene su propio margen.
+  RESTORE_WAIT_SECONDS: '900'
+  VERIFY_WAIT_SECONDS: '600'
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Comprobar configuración (fallo cerrado)
+        run: |
+          set -euo pipefail
+          missing=0
+          if [ -z "${APP_URL}" ]; then
+            echo "::error::Latido no configurado: falta el secreto VENDGUARD_APP_URL."
+            missing=1
+          fi
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "::error::Latido no configurado: falta el secreto CRON_SECRET."
+            missing=1
+          fi
+          if [ -z "${SUPABASE_ACCESS_TOKEN}" ]; then
+            echo "::error::Latido no configurado: falta el secreto SUPABASE_ACCESS_TOKEN, sin el cual el estado del proyecto no puede determinarse."
+            missing=1
+          fi
+          if [ -z "${SUPABASE_PROJECT_REF}" ]; then
+            echo "::error::Latido no configurado: falta el secreto SUPABASE_PROJECT_REF."
+            missing=1
+          fi
+          if [ "${missing}" = "1" ]; then
+            echo "Sin configuración no hay latido: se falla en cerrado en lugar de omitirse en silencio."
+            exit 1
+          fi
+
+      - name: Preparar canal de notificación
+        run: |
+          set -euo pipefail
+          cat > /tmp/notify.sh <<'SH'
+          # Canal de notificación del latido, con tres niveles para que la anomalía
+          # se vea sin convertir el latido diario en ruido:
+          #   error → ejecución en rojo y webhook (el desenlace es un fallo)
+          #   alert → aviso en la ejecución y webhook (anomalía: hubo restauración)
+          #   info  → resumen de la ejecución, sin webhook (latido normal)
+          # El token de gestión no viaja nunca en un mensaje.
+          notify() {
+            local message="$1"
+            local level="${2:-info}"
+            case "${level}" in
+              error) echo "::error::${message}" ;;
+              alert) echo "::warning::${message}" ;;
+            esac
+            {
+              echo "### Supabase · latido y auto-restauración"
+              echo ""
+              echo "[${level}] ${message}"
+            } >> "${GITHUB_STEP_SUMMARY}"
+            if [ "${level}" != "info" ] && [ -n "${ALERT_WEBHOOK:-}" ]; then
+              if ! jq -n --arg text "${message}" '{text:$text}' \
+                | curl -sS -m 20 -X POST -H 'Content-Type: application/json' --data @- "${ALERT_WEBHOOK}"; then
+                echo "::warning::El webhook de notificación no respondió; el desenlace queda igualmente en el resumen de la ejecución."
+              fi
+            fi
+          }
+          SH
+
+      - name: Preparar la lectura del estado por la API de gestión
+        run: |
+          set -euo pipefail
+          cat > /tmp/project_api.sh <<'SH'
+          # Lectura del estado del proyecto por la API DE GESTIÓN, nunca por el
+          # código HTTP de la aplicación: un proyecto pausado devuelve 540 en su
+          # API, y desde la aplicación eso es indistinguible de un contenedor
+          # caído.
+          #
+          #   project_status() → la cadena de estado, o '000' si la API no responde
+          #   project_state()  → active | cold | transitional | unknown
+          project_status() {
+            local code status
+            code=$(curl -sS -m 30 -o /tmp/project.json -w '%{http_code}' \
+              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+              -H 'Accept: application/json' \
+              "${MANAGEMENT_API}/projects/${SUPABASE_PROJECT_REF}" || echo '000')
+            if [ "${code}" != '200' ]; then
+              echo "000"
+              return 0
+            fi
+            status=$(jq -r '.status // empty' /tmp/project.json 2>/dev/null || echo '')
+            echo "${status:-unknown}"
+          }
+
+          project_state() {
+            local status="$1"
+            if [[ "${status}" == "${ACTIVE_STATUS_PREFIX}"* ]]; then
+              echo 'active'
+              return 0
+            fi
+            if [[ " ${COLD_STATUSES} " == *" ${status} "* ]]; then
+              echo 'cold'
+              return 0
+            fi
+            if [[ " ${TRANSITIONAL_STATUSES} " == *" ${status} "* ]]; then
+              echo 'transitional'
+              return 0
+            fi
+            echo 'unknown'
+          }
+          SH
+
+      - name: 'Latido: registrar actividad real en la base de datos'
+        id: heartbeat
+        run: |
+          set -euo pipefail
+          # El latido es esta llamada: el endpoint de diagnóstico verifica el enlace
+          # con una consulta sobre una tabla real del dominio, de modo que la
+          # actividad que ve el proveedor es actividad real y no un `SELECT 1`
+          # sintético (EARS-03.2).
+          code="000"
+          for attempt in 1 2 3; do
+            code=$(curl -sS -m 30 -o /tmp/heartbeat.json -w '%{http_code}' \
+              -H "X-Cron-Secret: ${CRON_SECRET}" -H 'Accept: application/json' \
+              "${APP_URL%/}/api/status" || echo '000')
+            if [ "${code}" = "200" ]; then break; fi
+            echo "Intento ${attempt}/3 del latido: GET /api/status devolvió ${code}."
+            if [ "${attempt}" -lt 3 ]; then sleep $((attempt * 10)); fi
+          done
+          # Un latido fallido aquí NO decide nada por sí solo: si el proyecto está
+          # pausado, la aplicación no puede responder, y quién lo dice es la API de
+          # gestión en el paso siguiente. Lo que nunca ocurre es dar por bueno el
+          # silencio.
+          echo "Latido: GET /api/status → HTTP ${code}."
+          echo "code=${code}" >> "${GITHUB_OUTPUT}"
+
+      - name: Resolver el estado del proyecto y restaurarlo si está en frío
+        id: project
+        run: |
+          set -euo pipefail
+          source /tmp/notify.sh
+          source /tmp/project_api.sh
+
+          restored=0
+          status=$(project_status)
+          if [ "${status}" = '000' ]; then
+            notify "No se pudo leer el estado del proyecto por la API de gestión: el GET no respondió 200. Sin ese dato el latido no puede concluir si el proyecto está activo o en frío, así que se falla en voz alta en lugar de darlo por bueno." error
+            exit 1
+          fi
+
+          deadline=$(( $(date -u +%s) + RESTORE_WAIT_SECONDS ))
+          while :; do
+            state=$(project_state "${status}")
+            echo "Estado del proyecto según la API de gestión: '${status}' → '${state}'."
+
+            if [ "${state}" = 'active' ]; then
+              break
+            fi
+
+            if [ "${state}" = 'cold' ] && [ "${restored}" = '0' ]; then
+              # El endpoint de restauración no lleva cuerpo y se autentica con el
+              # token de gestión, que jamás se escribe en el registro.
+              code=$(curl -sS -m 60 -o /tmp/restore.json -w '%{http_code}' -X POST \
+                -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+                -H 'Accept: application/json' \
+                "${MANAGEMENT_API}/projects/${SUPABASE_PROJECT_REF}/restore" || echo '000')
+              if [ "${code}" != '200' ]; then
+                notify "La API de gestión rechazó la restauración del proyecto en frío (HTTP ${code}). El servicio sigue sin base de datos y requiere intervención." error
+                exit 1
+              fi
+              restored=1
+              echo "Restauración aceptada por la API de gestión (HTTP 200) para el proyecto en estado '${status}'."
+            fi
+
+            if [ "$(date -u +%s)" -ge "${deadline}" ]; then
+              notify "El proyecto no alcanzó el estado activo en el plazo declarado (${RESTORE_WAIT_SECONDS} s). Último estado leído: '${status}'; restauración solicitada: ${restored}. Requiere intervención." error
+              exit 1
+            fi
+
+            sleep 30
+            status=$(project_status)
+            if [ "${status}" = '000' ]; then
+              echo "La API de gestión no respondió en este intento; se reintenta antes de dar el estado por perdido."
+              status='unknown'
+            fi
+          done
+
+          echo "restored=${restored}" >> "${GITHUB_OUTPUT}"
+          echo "status=${status}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verificar el esquema y el servicio antes de declararlo recuperado
+        id: verify
+        run: |
+          set -euo pipefail
+          source /tmp/notify.sh
+          # Ésta es la puerta de EARS-02.5: el arranque del contenedor ejecuta el
+          # inicializador canónico `php bin/init_cloud_db.php` (Dockerfile: CMD), que
+          # aplica el DDL base y las migraciones del motor y sale con error si el
+          # esquema no queda verificado. El flujo provoca ese arranque y exige la
+          # respuesta canónica con `status: HEALTHY`; no declara recuperado nada que
+          # no pueda verificar y no implementa esquema por su cuenta (Art. I.3).
+          deadline=$(( $(date -u +%s) + VERIFY_WAIT_SECONDS ))
+          attempt=0
+          code="000"; health=""; driver=""
+          while :; do
+            attempt=$(( attempt + 1 ))
+            code=$(curl -sS -m 30 -o /tmp/verify.json -w '%{http_code}' \
+              -H "X-Cron-Secret: ${CRON_SECRET}" -H 'Accept: application/json' \
+              "${APP_URL%/}/api/status" || echo '000')
+            if [ "${code}" = '200' ]; then
+              health=$(jq -r '.data.status // empty' /tmp/verify.json 2>/dev/null || echo '')
+              driver=$(jq -r '.data.database_driver // empty' /tmp/verify.json 2>/dev/null || echo '')
+              if [ "${health}" = 'HEALTHY' ]; then break; fi
+            fi
+            if [ "$(date -u +%s)" -ge "${deadline}" ]; then
+              notify "El servicio no quedó verificado tras ${attempt} intentos (HTTP ${code}, estado '${health:-<sin dato>}'). No se declara recuperado: hay que revisar el arranque del contenedor y el inicializador del esquema." error
+              exit 1
+            fi
+            echo "Intento ${attempt}: GET /api/status → HTTP ${code}, estado '${health:-<sin dato>}'. Se reintenta."
+            sleep 20
+          done
+          echo "Verificación correcta en el intento ${attempt}: HTTP 200, estado HEALTHY, driver '${driver:-<sin telemetría>}'."
+          echo "code=${code}" >> "${GITHUB_OUTPUT}"
+          echo "health=${health}" >> "${GITHUB_OUTPUT}"
+          echo "driver=${driver}" >> "${GITHUB_OUTPUT}"
+
+      - name: Notificar el desenlace
+        env:
+          RESTORED: ${{ steps.project.outputs.restored }}
+          PROJECT_STATUS: ${{ steps.project.outputs.status }}
+          HEARTBEAT_CODE: ${{ steps.heartbeat.outputs.code }}
+          VERIFY_CODE: ${{ steps.verify.outputs.code }}
+          VERIFY_DRIVER: ${{ steps.verify.outputs.driver }}
+        run: |
+          set -euo pipefail
+          source /tmp/notify.sh
+          if [ "${RESTORED}" = '1' ]; then
+            notify "El proyecto de Supabase estaba en frío ('${PROJECT_STATUS}') y el flujo lo restauró. El esquema quedó verificado (HTTP ${VERIFY_CODE}, driver '${VERIFY_DRIVER:-<sin telemetría>}') y el servicio se declara recuperado. La pausa es una ANOMALÍA: revísense la actividad diaria del proyecto y la cadencia del latido." alert
+          else
+            notify "Latido correcto: el proyecto está activo ('${PROJECT_STATUS}') y el esquema quedó verificado (HTTP ${VERIFY_CODE}, driver '${VERIFY_DRIVER:-<sin telemetría>}'). Latido previo al diagnóstico: HTTP ${HEARTBEAT_CODE}." info
+          fi
