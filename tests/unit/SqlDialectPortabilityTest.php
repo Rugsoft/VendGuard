@@ -690,16 +690,6 @@ echo "\n--- Grupo 5: frontera del punto único de traducción (inventario pendie
  * tiene que seguir siendo cierta).
  */
 const PENDING_INVENTORY = [
-    // Tanda 3 · Preventivo, Rutas, Sanitario, Auditoría (T-HYBRID-11)
-    'src/Infrastructure/Repository/PdoPreventiveSettingsRepository.php' => ['backtick' => 85],
-    'src/Infrastructure/Repository/PdoPreventiveOrderRepository.php' => ['backtick' => 190, 'temporal' => 4],
-    'src/Infrastructure/Repository/PdoPreventiveItemRepository.php' => ['backtick' => 42],
-    'src/Infrastructure/Repository/PdoRouteSettingsRepository.php' => ['backtick' => 26],
-    'src/Infrastructure/Repository/PdoSanitaryCertificateRepository.php' => ['backtick' => 136],
-    'src/Infrastructure/Repository/PdoSanitarySweepVisibilityRepository.php' => ['backtick' => 63, 'upsert' => 1],
-    'src/Infrastructure/Repository/PdoAuditLogRepository.php' => ['backtick' => 40],
-    'src/Infrastructure/Repository/PdoSiteAccessCodeRepository.php' => ['backtick' => 30, 'temporal' => 1],
-    'src/Infrastructure/Repository/PdoUnclaimedCashFindingRepository.php' => ['backtick' => 20],
     // Sembrado (T-HYBRID-12): de aquí el adaptador toma la sintaxis de upsert que las semillas declaran.
     'src/Infrastructure/Database/SeedRunner.php' => ['backtick' => 275, 'json' => 2, 'temporal' => 19, 'upsert' => 9],
     // Semilla de métricas del arnés: fixture local de MariaDB, sin tarea de normalización en el
@@ -735,6 +725,16 @@ const DRAINED_INVENTORY = [
     'src/Infrastructure/Repository/PdoSparePartRequestRepository.php' => ['drained_by' => 'T-HYBRID-10', 'families' => ['backtick' => 31]],
     'src/Infrastructure/Repository/PdoIncidentReplacedPartRepository.php' => ['drained_by' => 'T-HYBRID-10', 'families' => ['backtick' => 48, 'temporal' => 5]],
     'src/Infrastructure/Repository/PdoMetricsRepository.php' => ['drained_by' => 'T-HYBRID-10', 'families' => ['backtick' => 144, 'temporal' => 9]],
+    // Tanda 3 · Preventivo, Rutas, Sanitario, Auditoría (T-HYBRID-11)
+    'src/Infrastructure/Repository/PdoPreventiveSettingsRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 85]],
+    'src/Infrastructure/Repository/PdoPreventiveOrderRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 190, 'temporal' => 4]],
+    'src/Infrastructure/Repository/PdoPreventiveItemRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 42]],
+    'src/Infrastructure/Repository/PdoRouteSettingsRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 26]],
+    'src/Infrastructure/Repository/PdoSanitaryCertificateRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 136]],
+    'src/Infrastructure/Repository/PdoSanitarySweepVisibilityRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 63, 'upsert' => 1]],
+    'src/Infrastructure/Repository/PdoAuditLogRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 40]],
+    'src/Infrastructure/Repository/PdoSiteAccessCodeRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 30, 'temporal' => 1]],
+    'src/Infrastructure/Repository/PdoUnclaimedCashFindingRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 20]],
 ];
 
 /** Fichero con hallazgos => tarea (o motivo declarado) que lo drena. */

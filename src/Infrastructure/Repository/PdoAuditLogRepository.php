@@ -38,8 +38,8 @@ class PdoAuditLogRepository implements AuditLogRepositoryInterface
      */
     public function log(AuditEvent $event): AuditEvent
     {
-        $sql = "INSERT INTO `audit_log` 
-                (`entity_type`, `entity_id`, `action`, `user_id`, `user_role`, `user_name`, `previous_state`, `new_state`, `metadata`, `created_at`)
+        $sql = "INSERT INTO audit_log 
+                (entity_type, entity_id, action, user_id, user_role, user_name, previous_state, new_state, metadata, created_at)
                 VALUES 
                 (:entity_type, :entity_id, :action, :user_id, :user_role, :user_name, :previous_state, :new_state, :metadata, :created_at)";
 
@@ -98,11 +98,11 @@ class PdoAuditLogRepository implements AuditLogRepositoryInterface
         [$whereClauses, $params] = $this->buildWhereClauses($filters);
 
         $whereSql = !empty($whereClauses) ? 'WHERE ' . implode(' AND ', $whereClauses) : '';
-        $sql = "SELECT `id`, `entity_type`, `entity_id`, `action`, `user_id`, `user_role`, `user_name`, 
-                       `previous_state`, `new_state`, `metadata`, `created_at`
-                FROM `audit_log`
+        $sql = "SELECT id, entity_type, entity_id, action, user_id, user_role, user_name, 
+                       previous_state, new_state, metadata, created_at
+                FROM audit_log
                 {$whereSql}
-                ORDER BY `created_at` DESC, `id` DESC
+                ORDER BY created_at DESC, id DESC
                 LIMIT :limit OFFSET :offset";
 
         try {
@@ -144,7 +144,7 @@ class PdoAuditLogRepository implements AuditLogRepositoryInterface
         [$whereClauses, $params] = $this->buildWhereClauses($filters);
 
         $whereSql = !empty($whereClauses) ? 'WHERE ' . implode(' AND ', $whereClauses) : '';
-        $sql = "SELECT COUNT(*) FROM `audit_log` {$whereSql}";
+        $sql = "SELECT COUNT(*) FROM audit_log {$whereSql}";
 
         try {
             $stmt = $this->pdo->prepare($sql);
@@ -167,11 +167,11 @@ class PdoAuditLogRepository implements AuditLogRepositoryInterface
      */
     public function findByEntity(string $entityType, int $entityId): array
     {
-        $sql = "SELECT `id`, `entity_type`, `entity_id`, `action`, `user_id`, `user_role`, `user_name`, 
-                       `previous_state`, `new_state`, `metadata`, `created_at`
-                FROM `audit_log`
-                WHERE `entity_type` = :entity_type AND `entity_id` = :entity_id
-                ORDER BY `created_at` ASC, `id` ASC";
+        $sql = "SELECT id, entity_type, entity_id, action, user_id, user_role, user_name, 
+                       previous_state, new_state, metadata, created_at
+                FROM audit_log
+                WHERE entity_type = :entity_type AND entity_id = :entity_id
+                ORDER BY created_at ASC, id ASC";
 
         try {
             $stmt = $this->pdo->prepare($sql);
@@ -201,22 +201,22 @@ class PdoAuditLogRepository implements AuditLogRepositoryInterface
         $params = [];
 
         if (!empty($filters['entity_type'])) {
-            $where[] = '`entity_type` = :entity_type';
+            $where[] = 'entity_type = :entity_type';
             $params[':entity_type'] = (string)$filters['entity_type'];
         }
 
         if (!empty($filters['entity_id'])) {
-            $where[] = '`entity_id` = :entity_id';
+            $where[] = 'entity_id = :entity_id';
             $params[':entity_id'] = (int)$filters['entity_id'];
         }
 
         if (!empty($filters['action'])) {
-            $where[] = '`action` = :action';
+            $where[] = 'action = :action';
             $params[':action'] = (string)$filters['action'];
         }
 
         if (!empty($filters['user_id'])) {
-            $where[] = '`user_id` = :user_id';
+            $where[] = 'user_id = :user_id';
             $params[':user_id'] = (int)$filters['user_id'];
         }
 
@@ -225,7 +225,7 @@ class PdoAuditLogRepository implements AuditLogRepositoryInterface
             if (strlen($fromStr) === 10) {
                 $fromStr .= ' 00:00:00';
             }
-            $where[] = '`created_at` >= :from_date';
+            $where[] = 'created_at >= :from_date';
             $params[':from_date'] = $fromStr;
         }
 
@@ -234,7 +234,7 @@ class PdoAuditLogRepository implements AuditLogRepositoryInterface
             if (strlen($toStr) === 10) {
                 $toStr .= ' 23:59:59';
             }
-            $where[] = '`created_at` <= :to_date';
+            $where[] = 'created_at <= :to_date';
             $params[':to_date'] = $toStr;
         }
 

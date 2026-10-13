@@ -10,6 +10,7 @@ use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Exception\PerishableFrequencyLimitException;
 use VendGuard\Core\Domain\Exception\SeasonalPauseMissingReasonException;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
  * PdoPreventiveSettingsRepository
@@ -20,10 +21,12 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
 class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInterface
 {
     private PDO $pdo;
+    private SqlDialectAdapter $dialect;
 
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
+        $this->dialect = SqlDialectAdapter::forConnection($this->pdo);
     }
 
     /**
@@ -32,9 +35,9 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
     public function findAll(): array
     {
         $stmt = $this->pdo->query("
-            SELECT `id`, `machine_type`, `default_frequency_days`, `max_allowed_days`, `advance_warning_days`, `created_at`, `updated_at`
-            FROM `preventive_settings`
-            ORDER BY `id` ASC
+            SELECT id, machine_type, default_frequency_days, max_allowed_days, advance_warning_days, created_at, updated_at
+            FROM preventive_settings
+            ORDER BY id ASC
         ");
 
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -50,9 +53,9 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
     public function findByMachineType(string $machineType): ?PreventiveSetting
     {
         $stmt = $this->pdo->prepare("
-            SELECT `id`, `machine_type`, `default_frequency_days`, `max_allowed_days`, `advance_warning_days`, `created_at`, `updated_at`
-            FROM `preventive_settings`
-            WHERE `machine_type` = :machine_type
+            SELECT id, machine_type, default_frequency_days, max_allowed_days, advance_warning_days, created_at, updated_at
+            FROM preventive_settings
+            WHERE machine_type = :machine_type
             LIMIT 1
         ");
 
@@ -85,13 +88,13 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
         }
 
         $stmt = $this->pdo->prepare("
-            UPDATE `preventive_settings`
+            UPDATE preventive_settings
             SET 
-                `default_frequency_days` = :default_freq,
-                `max_allowed_days` = :max_days,
-                `advance_warning_days` = :adv_warning,
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `machine_type` = :machine_type
+                default_frequency_days = :default_freq,
+                max_allowed_days = :max_days,
+                advance_warning_days = :adv_warning,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE machine_type = :machine_type
         ");
 
         return $stmt->execute([
@@ -109,9 +112,9 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
     ): bool {
         // Consultar la tipología de la máquina para validar reglas de perecederos
         $stmtCheck = $this->pdo->prepare("
-            SELECT `id`, `machine_type`
-            FROM `machines`
-            WHERE `id` = :id AND `deleted_at` IS NULL
+            SELECT id, machine_type
+            FROM machines
+            WHERE id = :id AND deleted_at IS NULL
             LIMIT 1
         ");
         $stmtCheck->execute([':id' => $machineId]);
@@ -132,12 +135,12 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
         }
 
         $sql = "
-            UPDATE `machines`
+            UPDATE machines
             SET 
-                `sanitary_frequency_days` = :frequency,
-                `next_sanitary_inspection_due` = COALESCE(:due, `next_sanitary_inspection_due`),
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id AND `deleted_at` IS NULL
+                sanitary_frequency_days = :frequency,
+                next_sanitary_inspection_due = COALESCE(:due, next_sanitary_inspection_due),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id AND deleted_at IS NULL
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -162,14 +165,14 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
         }
 
         $stmt = $this->pdo->prepare("
-            UPDATE `machines`
+            UPDATE machines
             SET 
-                `is_seasonal_pause` = 1,
-                `seasonal_pause_reason` = :reason,
-                `seasonal_pause_until` = :pause_until,
-                `sanitary_status` = 'SEASONAL_PAUSE',
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id AND `deleted_at` IS NULL
+                is_seasonal_pause = {$this->dialect->booleanLiteral(true)},
+                seasonal_pause_reason = :reason,
+                seasonal_pause_until = :pause_until,
+                sanitary_status = 'SEASONAL_PAUSE',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id AND deleted_at IS NULL
         ");
 
         return $stmt->execute([
@@ -192,18 +195,18 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
         // se levanta con la reinspección reglamentaria del propio módulo 05
         // (temperatura ≤ 4,0 °C + checklist de higienización).
         $stmt = $this->pdo->prepare("
-            UPDATE `machines`
+            UPDATE machines
             SET 
-                `is_seasonal_pause` = 0,
-                `seasonal_pause_reason` = NULL,
-                `seasonal_pause_until` = NULL,
-                `sanitary_status` = 'ATTENTION_REQUIRED',
-                `next_sanitary_inspection_due` = CURRENT_DATE(),
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
-              AND `deleted_at` IS NULL
-              AND `is_seasonal_pause` = 1
-              AND `sanitary_status` = 'SEASONAL_PAUSE'
+                is_seasonal_pause = {$this->dialect->booleanLiteral(false)},
+                seasonal_pause_reason = NULL,
+                seasonal_pause_until = NULL,
+                sanitary_status = 'ATTENTION_REQUIRED',
+                next_sanitary_inspection_due = CURRENT_DATE,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND deleted_at IS NULL
+              AND is_seasonal_pause = {$this->dialect->booleanLiteral(true)}
+              AND sanitary_status = 'SEASONAL_PAUSE'
         ");
 
         $stmt->execute([':id' => $machineId]);
@@ -215,23 +218,23 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
     {
         $stmt = $this->pdo->prepare("
             SELECT 
-                m.`id` AS `machine_id`,
-                m.`code` AS `machine_code`,
-                m.`machine_type`,
-                m.`sanitary_status`,
-                m.`sanitary_frequency_days`,
-                m.`last_sanitary_inspection_at`,
-                m.`next_sanitary_inspection_due`,
-                m.`is_seasonal_pause`,
-                m.`seasonal_pause_reason`,
-                m.`seasonal_pause_until`,
-                ps.`default_frequency_days`,
-                ps.`max_allowed_days`,
-                ps.`advance_warning_days`,
-                COALESCE(m.`sanitary_frequency_days`, ps.`default_frequency_days`) AS `effective_frequency_days`
-            FROM `machines` m
-            LEFT JOIN `preventive_settings` ps ON m.`machine_type` = ps.`machine_type`
-            WHERE m.`id` = :id AND m.`deleted_at` IS NULL
+                m.id AS machine_id,
+                m.code AS machine_code,
+                m.machine_type,
+                m.sanitary_status,
+                m.sanitary_frequency_days,
+                m.last_sanitary_inspection_at,
+                m.next_sanitary_inspection_due,
+                m.is_seasonal_pause,
+                m.seasonal_pause_reason,
+                m.seasonal_pause_until,
+                ps.default_frequency_days,
+                ps.max_allowed_days,
+                ps.advance_warning_days,
+                COALESCE(m.sanitary_frequency_days, ps.default_frequency_days) AS effective_frequency_days
+            FROM machines m
+            LEFT JOIN preventive_settings ps ON m.machine_type = ps.machine_type
+            WHERE m.id = :id AND m.deleted_at IS NULL
             LIMIT 1
         ");
 
@@ -277,12 +280,12 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
         // number`). El contrato es el mismo —escribir sólo si el valor cambia— y cada
         // `?` viaja con su binding.
         $stmt = $this->pdo->prepare("
-            UPDATE `machines`
-            SET `sanitary_status` = :new_status,
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
-              AND `deleted_at` IS NULL
-              AND `sanitary_status` <> :previous_status
+            UPDATE machines
+            SET sanitary_status = :new_status,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND deleted_at IS NULL
+              AND sanitary_status <> :previous_status
         ");
 
         $stmt->execute([

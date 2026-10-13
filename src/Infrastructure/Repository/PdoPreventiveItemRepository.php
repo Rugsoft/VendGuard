@@ -43,33 +43,33 @@ class PdoPreventiveItemRepository implements PreventiveItemRepositoryInterface
 
         try {
             $checkStmt = $this->pdo->prepare("
-                SELECT `id` 
-                FROM `preventive_order_items` 
-                WHERE `preventive_order_id` = :order_id 
-                  AND `item_code` = :item_code 
+                SELECT id 
+                FROM preventive_order_items 
+                WHERE preventive_order_id = :order_id 
+                  AND item_code = :item_code 
                 LIMIT 1
             ");
 
             $updateStmt = $this->pdo->prepare("
-                UPDATE `preventive_order_items`
+                UPDATE preventive_order_items
                 SET 
-                    `item_description` = :item_description,
-                    `is_critical` = :is_critical,
-                    `status` = :status,
-                    `observations` = :observations,
-                    `photo_path` = COALESCE(:photo_path, `photo_path`)
-                WHERE `id` = :id
+                    item_description = :item_description,
+                    is_critical = :is_critical,
+                    status = :status,
+                    observations = :observations,
+                    photo_path = COALESCE(:photo_path, photo_path)
+                WHERE id = :id
             ");
 
             $insertStmt = $this->pdo->prepare("
-                INSERT INTO `preventive_order_items` (
-                    `preventive_order_id`,
-                    `item_code`,
-                    `item_description`,
-                    `is_critical`,
-                    `status`,
-                    `observations`,
-                    `photo_path`
+                INSERT INTO preventive_order_items (
+                    preventive_order_id,
+                    item_code,
+                    item_description,
+                    is_critical,
+                    status,
+                    observations,
+                    photo_path
                 ) VALUES (
                     :preventive_order_id,
                     :item_code,
@@ -138,9 +138,9 @@ class PdoPreventiveItemRepository implements PreventiveItemRepositoryInterface
     {
         $stmt = $this->pdo->prepare("
             SELECT *
-            FROM `preventive_order_items`
-            WHERE `preventive_order_id` = :order_id
-            ORDER BY `is_critical` DESC, `id` ASC
+            FROM preventive_order_items
+            WHERE preventive_order_id = :order_id
+            ORDER BY is_critical DESC, id ASC
         ");
 
         $stmt->execute([':order_id' => $orderId]);
@@ -161,8 +161,8 @@ class PdoPreventiveItemRepository implements PreventiveItemRepositoryInterface
     {
         $stmt = $this->pdo->prepare("
             SELECT *
-            FROM `preventive_order_items`
-            WHERE `id` = :id
+            FROM preventive_order_items
+            WHERE id = :id
             LIMIT 1
         ");
 
@@ -182,9 +182,9 @@ class PdoPreventiveItemRepository implements PreventiveItemRepositoryInterface
     public function attachPhoto(int $itemId, string $photoPath): bool
     {
         $stmt = $this->pdo->prepare("
-            UPDATE `preventive_order_items`
-            SET `photo_path` = :photo_path
-            WHERE `id` = :id
+            UPDATE preventive_order_items
+            SET photo_path = :photo_path
+            WHERE id = :id
         ");
 
         return $stmt->execute([
@@ -199,10 +199,10 @@ class PdoPreventiveItemRepository implements PreventiveItemRepositoryInterface
     public function attachPhotoByItemCode(int $orderId, string $itemCode, string $photoPath): bool
     {
         $stmt = $this->pdo->prepare("
-            UPDATE `preventive_order_items`
-            SET `photo_path` = :photo_path
-            WHERE `preventive_order_id` = :order_id
-              AND `item_code` = :item_code
+            UPDATE preventive_order_items
+            SET photo_path = :photo_path
+            WHERE preventive_order_id = :order_id
+              AND item_code = :item_code
         ");
 
         return $stmt->execute([
@@ -219,11 +219,11 @@ class PdoPreventiveItemRepository implements PreventiveItemRepositoryInterface
     {
         $stmt = $this->pdo->prepare("
             SELECT *
-            FROM `preventive_order_items`
-            WHERE `preventive_order_id` = :order_id
-              AND `is_critical` = 1
-              AND `status` = 'FAIL'
-            ORDER BY `id` ASC
+            FROM preventive_order_items
+            WHERE preventive_order_id = :order_id
+              AND is_critical = 1
+              AND status = 'FAIL'
+            ORDER BY id ASC
         ");
 
         $stmt->execute([':order_id' => $orderId]);
@@ -244,10 +244,10 @@ class PdoPreventiveItemRepository implements PreventiveItemRepositoryInterface
     {
         $stmt = $this->pdo->prepare("
             SELECT COUNT(*)
-            FROM `preventive_order_items`
-            WHERE `preventive_order_id` = :order_id
-              AND `is_critical` = 1
-              AND `status` = 'FAIL'
+            FROM preventive_order_items
+            WHERE preventive_order_id = :order_id
+              AND is_critical = 1
+              AND status = 'FAIL'
         ");
 
         $stmt->execute([':order_id' => $orderId]);

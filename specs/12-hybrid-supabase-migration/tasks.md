@@ -75,7 +75,7 @@
   * **Dependencias:** T-HYBRID-06
   * **Hecho cuando:** `PdoRefundRequestRepository.php`, `PdoSparePartRepository.php`, `PdoSparePartRequestRepository.php`, `PdoIncidentReplacedPartRepository.php` y `PdoMetricsRepository.php` resuelven sus diferencias de dialecto —diferencias temporales, intervalos y upsert— **consumiendo el adaptador de dialecto** (T-HYBRID-25) y no repitiendo la traducción en cada repositorio; ninguna regla de negocio se define dos veces y `SqlDialectPortabilityTest` certifica que no queda SQL privativo fuera del adaptador.
 
-- [ ] **T-HYBRID-11: Normalizar dialecto SQL ANSI en repositorios PDO (Grupo 3: Mantenimiento Preventivo, Rutas, Sanitario, Auditoría)**
+- [x] **T-HYBRID-11: Normalizar dialecto SQL ANSI en repositorios PDO (Grupo 3: Mantenimiento Preventivo, Rutas, Sanitario, Auditoría)**
   * **Requisitos:** RF-01.1, RF-06.3, RF-08.1, Constitución Art. II, Art. III.1
   * **Dependencias:** T-HYBRID-06
   * **Hecho cuando:** `PdoPreventiveSettingsRepository.php`, `PdoPreventiveOrderRepository.php`, `PdoPreventiveItemRepository.php`, `PdoRouteSettingsRepository.php`, `PdoSanitaryCertificateRepository.php`, `PdoSanitarySweepVisibilityRepository.php`, `PdoAuditLogRepository.php`, `PdoSiteAccessCodeRepository.php` y `PdoUnclaimedCashFindingRepository.php` completan la normalización de los 18 repositorios del proyecto consumiendo el **adaptador de dialecto** (T-HYBRID-25), sin SQL privativo fuera de él y sin duplicar la definición de ninguna regla.

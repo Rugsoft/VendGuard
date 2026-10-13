@@ -9,6 +9,7 @@ use PDO;
 use VendGuard\Core\Domain\Model\SanitaryCertificate;
 use VendGuard\Core\Domain\Repository\SanitaryCertificateRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
  * Repositorio PDO de Certificados Sanitarios Oficiales
@@ -19,11 +20,13 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
 class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryInterface
 {
     private PDO $pdo;
+    private SqlDialectAdapter $dialect;
 
     public function __construct(
         ?PDO $pdo = null
     ) {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
+        $this->dialect = SqlDialectAdapter::forConnection($this->pdo);
     }
 
     /**
@@ -33,7 +36,7 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
     {
         $code = $data['certificate_code'] ?? null;
         if (empty($code)) {
-            $stmtSeq = $this->pdo->query("SELECT COALESCE(MAX(`id`), 0) + 1 FROM `sanitary_certificates`");
+            $stmtSeq = $this->pdo->query("SELECT COALESCE(MAX(id), 0) + 1 FROM sanitary_certificates");
             $nextId = (int)$stmtSeq->fetchColumn();
             $code = sprintf('CERT-%s-%04d', date('Y'), $nextId);
         }
@@ -42,7 +45,7 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
         $operatorCode = $data['technician_operator_code'] ?? null;
 
         if (empty($technicianName) || empty($operatorCode)) {
-            $stmtU = $this->pdo->prepare("SELECT `name`, `operator_code` FROM `users` WHERE `id` = :id");
+            $stmtU = $this->pdo->prepare("SELECT name, operator_code FROM users WHERE id = :id");
             $stmtU->execute([':id' => (int)$data['technician_id']]);
             $uRow = $stmtU->fetch(PDO::FETCH_ASSOC);
             if ($uRow) {
@@ -61,21 +64,21 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
         }
 
         $sql = "
-            INSERT INTO `sanitary_certificates` (
-                `certificate_code`,
-                `preventive_order_id`,
-                `machine_id`,
-                `location_id`,
-                `technician_id`,
-                `technician_name`,
-                `technician_operator_code`,
-                `inspection_date`,
-                `valid_until`,
-                `temperature_measured`,
-                `result`,
-                `status`,
-                `created_at`,
-                `updated_at`
+            INSERT INTO sanitary_certificates (
+                certificate_code,
+                preventive_order_id,
+                machine_id,
+                location_id,
+                technician_id,
+                technician_name,
+                technician_operator_code,
+                inspection_date,
+                valid_until,
+                temperature_measured,
+                result,
+                status,
+                created_at,
+                updated_at
             ) VALUES (
                 :certificate_code,
                 :preventive_order_id,
@@ -123,7 +126,7 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
      */
     public function findById(int $id): ?SanitaryCertificate
     {
-        $sql = $this->getBaseSelectQuery() . " WHERE sc.`id` = :id LIMIT 1";
+        $sql = $this->getBaseSelectQuery() . " WHERE sc.id = :id LIMIT 1";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':id' => $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -143,7 +146,7 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
      */
     public function findByCertificateCode(string $code): ?SanitaryCertificate
     {
-        $sql = $this->getBaseSelectQuery() . " WHERE sc.`certificate_code` = :code LIMIT 1";
+        $sql = $this->getBaseSelectQuery() . " WHERE sc.certificate_code = :code LIMIT 1";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':code' => trim($code)]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -164,11 +167,11 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
     public function findActiveByMachineCode(string $machineCode): ?SanitaryCertificate
     {
         $sql = $this->getBaseSelectQuery() . "
-            WHERE m.`code` = :machine_code
-              AND sc.`status` = 'VALID'
-              AND sc.`valid_until` >= CURRENT_DATE()
-              AND sc.`deleted_at` IS NULL
-            ORDER BY sc.`inspection_date` DESC, sc.`id` DESC
+            WHERE m.code = :machine_code
+              AND sc.status = 'VALID'
+              AND sc.valid_until >= CURRENT_DATE
+              AND sc.deleted_at IS NULL
+            ORDER BY sc.inspection_date DESC, sc.id DESC
             LIMIT 1
         ";
 
@@ -192,11 +195,11 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
     public function findActiveByMachineId(int $machineId): ?SanitaryCertificate
     {
         $sql = $this->getBaseSelectQuery() . "
-            WHERE sc.`machine_id` = :machine_id
-              AND sc.`status` = 'VALID'
-              AND sc.`valid_until` >= CURRENT_DATE()
-              AND sc.`deleted_at` IS NULL
-            ORDER BY sc.`inspection_date` DESC, sc.`id` DESC
+            WHERE sc.machine_id = :machine_id
+              AND sc.status = 'VALID'
+              AND sc.valid_until >= CURRENT_DATE
+              AND sc.deleted_at IS NULL
+            ORDER BY sc.inspection_date DESC, sc.id DESC
             LIMIT 1
         ";
 
@@ -220,9 +223,9 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
     public function findLatestByMachineId(int $machineId): ?SanitaryCertificate
     {
         $sql = $this->getBaseSelectQuery() . "
-            WHERE sc.`machine_id` = :machine_id
-              AND sc.`deleted_at` IS NULL
-            ORDER BY sc.`inspection_date` DESC, sc.`id` DESC
+            WHERE sc.machine_id = :machine_id
+              AND sc.deleted_at IS NULL
+            ORDER BY sc.inspection_date DESC, sc.id DESC
             LIMIT 1
         ";
 
@@ -246,15 +249,15 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
     public function suspendByMachineId(int $machineId, string $reason): int
     {
         $stmt = $this->pdo->prepare("
-            UPDATE `sanitary_certificates`
+            UPDATE sanitary_certificates
             SET 
-                `status` = 'SUSPENDED',
-                `suspended_reason` = :reason,
-                `suspended_at` = CURRENT_TIMESTAMP,
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `machine_id` = :machine_id
-              AND `status` = 'VALID'
-              AND `deleted_at` IS NULL
+                status = 'SUSPENDED',
+                suspended_reason = :reason,
+                suspended_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE machine_id = :machine_id
+              AND status = 'VALID'
+              AND deleted_at IS NULL
         ");
 
         $stmt->execute([
@@ -271,15 +274,15 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
     public function revokeByMachineId(int $machineId, string $reason): int
     {
         $stmt = $this->pdo->prepare("
-            UPDATE `sanitary_certificates`
+            UPDATE sanitary_certificates
             SET 
-                `status` = 'REVOKED',
-                `suspended_reason` = :reason,
-                `suspended_at` = CURRENT_TIMESTAMP,
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `machine_id` = :machine_id
-              AND `status` IN ('VALID', 'SUSPENDED')
-              AND `deleted_at` IS NULL
+                status = 'REVOKED',
+                suspended_reason = :reason,
+                suspended_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE machine_id = :machine_id
+              AND status IN ('VALID', 'SUSPENDED')
+              AND deleted_at IS NULL
         ");
 
         $stmt->execute([
@@ -297,9 +300,9 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
     {
         // 1. Obtener datos de la sede
         $stmtLoc = $this->pdo->prepare("
-            SELECT `id`, `site_code`, `name`, `address`
-            FROM `locations`
-            WHERE `id` = :id
+            SELECT id, site_code, name, address
+            FROM locations
+            WHERE id = :id
             LIMIT 1
         ");
         $stmtLoc->execute([':id' => $locationId]);
@@ -312,18 +315,18 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
         // 2. Obtener todas las máquinas activas en la sede
         $stmtMach = $this->pdo->prepare("
             SELECT 
-                m.`id`, 
-                m.`code`, 
-                m.`model`, 
-                m.`machine_type`, 
-                m.`floor_wing`, 
-                m.`sanitary_status`,
-                m.`next_sanitary_inspection_due`
-            FROM `machines` m
-            WHERE m.`location_id` = :location_id
-              AND m.`is_active` = 1
-              AND m.`deleted_at` IS NULL
-            ORDER BY m.`floor_wing` ASC, m.`code` ASC
+                m.id, 
+                m.code, 
+                m.model, 
+                m.machine_type, 
+                m.floor_wing, 
+                m.sanitary_status,
+                m.next_sanitary_inspection_due
+            FROM machines m
+            WHERE m.location_id = :location_id
+              AND m.is_active = {$this->dialect->booleanLiteral(true)}
+              AND m.deleted_at IS NULL
+            ORDER BY m.floor_wing ASC, m.code ASC
         ");
         $stmtMach->execute([':location_id' => $locationId]);
         $machines = $stmtMach->fetchAll(PDO::FETCH_ASSOC);
@@ -335,18 +338,18 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
 
         $stmtCert = $this->pdo->prepare("
             SELECT 
-                sc.`id`,
-                sc.`certificate_code`,
-                sc.`inspection_date`,
-                sc.`valid_until`,
-                sc.`temperature_measured`,
-                sc.`result`,
-                sc.`status`,
-                sc.`suspended_reason`
-            FROM `sanitary_certificates` sc
-            WHERE sc.`machine_id` = :machine_id
-              AND sc.`deleted_at` IS NULL
-            ORDER BY sc.`inspection_date` DESC, sc.`id` DESC
+                sc.id,
+                sc.certificate_code,
+                sc.inspection_date,
+                sc.valid_until,
+                sc.temperature_measured,
+                sc.result,
+                sc.status,
+                sc.suspended_reason
+            FROM sanitary_certificates sc
+            WHERE sc.machine_id = :machine_id
+              AND sc.deleted_at IS NULL
+            ORDER BY sc.inspection_date DESC, sc.id DESC
             LIMIT 1
         ");
 
@@ -469,35 +472,35 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
     {
         return "
             SELECT 
-                sc.`id`,
-                sc.`certificate_code`,
-                sc.`preventive_order_id`,
-                sc.`machine_id`,
-                sc.`location_id`,
-                sc.`technician_id`,
-                sc.`technician_name`,
-                sc.`technician_operator_code`,
-                sc.`inspection_date`,
-                sc.`valid_until`,
-                sc.`temperature_measured`,
-                sc.`result`,
-                sc.`status`,
-                sc.`suspended_reason`,
-                sc.`suspended_at`,
-                sc.`created_at`,
-                sc.`updated_at`,
-                sc.`deleted_at`,
-                m.`code` AS `machine_code`,
-                m.`model` AS `machine_model`,
-                m.`machine_type`,
-                l.`site_code` AS `location_site_code`,
-                l.`name` AS `location_name`,
-                l.`address` AS `location_address`,
-                po.`order_code`
-            FROM `sanitary_certificates` sc
-            INNER JOIN `machines` m ON sc.`machine_id` = m.`id`
-            INNER JOIN `locations` l ON sc.`location_id` = l.`id`
-            INNER JOIN `preventive_orders` po ON sc.`preventive_order_id` = po.`id`
+                sc.id,
+                sc.certificate_code,
+                sc.preventive_order_id,
+                sc.machine_id,
+                sc.location_id,
+                sc.technician_id,
+                sc.technician_name,
+                sc.technician_operator_code,
+                sc.inspection_date,
+                sc.valid_until,
+                sc.temperature_measured,
+                sc.result,
+                sc.status,
+                sc.suspended_reason,
+                sc.suspended_at,
+                sc.created_at,
+                sc.updated_at,
+                sc.deleted_at,
+                m.code AS machine_code,
+                m.model AS machine_model,
+                m.machine_type,
+                l.site_code AS location_site_code,
+                l.name AS location_name,
+                l.address AS location_address,
+                po.order_code
+            FROM sanitary_certificates sc
+            INNER JOIN machines m ON sc.machine_id = m.id
+            INNER JOIN locations l ON sc.location_id = l.id
+            INNER JOIN preventive_orders po ON sc.preventive_order_id = po.id
         ";
     }
 
@@ -555,10 +558,10 @@ class PdoSanitaryCertificateRepository implements SanitaryCertificateRepositoryI
     private function getInspectedItemsForOrder(int $orderId): array
     {
         $stmt = $this->pdo->prepare("
-            SELECT `item_code`, `item_description`, `is_critical`, `status`, `observations`
-            FROM `preventive_order_items`
-            WHERE `preventive_order_id` = :order_id
-            ORDER BY `is_critical` DESC, `id` ASC
+            SELECT item_code, item_description, is_critical, status, observations
+            FROM preventive_order_items
+            WHERE preventive_order_id = :order_id
+            ORDER BY is_critical DESC, id ASC
         ");
 
         $stmt->execute([':order_id' => $orderId]);

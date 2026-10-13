@@ -828,8 +828,8 @@ $assert(
     str_contains($unclaimedGuard, 'sumAmountByMachine')
     && str_contains($unclaimedGuard, 'toCents')
     && str_contains($findingRepositoryInterface, 'sumAmountByMachine(int $machineId): float')
-    && str_contains($findingRepositoryPdo, 'COALESCE(SUM(`amount`), 0)')
-    && str_contains($findingRepositoryPdo, '`machine_id` = :machine_id')
+    && (str_contains($findingRepositoryPdo, 'COALESCE(SUM(`amount`), 0)') || str_contains($findingRepositoryPdo, 'COALESCE(SUM(amount), 0)'))
+    && (str_contains($findingRepositoryPdo, '`machine_id` = :machine_id') || str_contains($findingRepositoryPdo, 'machine_id = :machine_id'))
     // El mensaje antiguo decía «divídalo en varios registros», que es la
     // multiplicación escrita; no puede volver.
     && !str_contains($unclaimedGuard, 'Divídalo')

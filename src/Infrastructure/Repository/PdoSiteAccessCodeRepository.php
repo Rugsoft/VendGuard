@@ -7,12 +7,13 @@ namespace VendGuard\Infrastructure\Repository;
 use PDO;
 use VendGuard\Core\Domain\Repository\SiteAccessCodeRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
  * PdoSiteAccessCodeRepository
  *
  * Adaptador PDO del puerto `SiteAccessCodeRepositoryInterface` (hallazgo S-4).
- * Persiste el hash bcrypt de la clave de centro en `locations`, junto al sello de
+ * Persiste el hash bcrypt de la clave de centro en locations, junto al sello de
  * emisión y el freno de intentos, reutilizando la sede como agregado propietario:
  * no se crea tabla nueva porque la clave es un atributo de acceso de la sede.
  *
@@ -26,10 +27,12 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
 final class PdoSiteAccessCodeRepository implements SiteAccessCodeRepositoryInterface
 {
     private PDO $pdo;
+    private SqlDialectAdapter $dialect;
 
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
+        $this->dialect = SqlDialectAdapter::forConnection($this->pdo);
     }
 
     /**
@@ -39,13 +42,13 @@ final class PdoSiteAccessCodeRepository implements SiteAccessCodeRepositoryInter
     {
         $sql = "
             SELECT
-                `access_code_hash` AS hash,
-                `access_code_issued_at` AS issued_at,
-                `login_attempts` AS attempts,
-                (`login_locked_until` IS NOT NULL AND `login_locked_until` > NOW()) AS is_locked
-            FROM `locations`
-            WHERE `id` = :id
-              AND `deleted_at` IS NULL
+                access_code_hash AS hash,
+                access_code_issued_at AS issued_at,
+                login_attempts AS attempts,
+                (login_locked_until IS NOT NULL AND login_locked_until > NOW()) AS is_locked
+            FROM locations
+            WHERE id = :id
+              AND deleted_at IS NULL
             LIMIT 1
         ";
 
@@ -71,13 +74,13 @@ final class PdoSiteAccessCodeRepository implements SiteAccessCodeRepositoryInter
     public function storeAccessCodeHash(int $locationId, string $hash): void
     {
         $sql = "
-            UPDATE `locations`
+            UPDATE locations
             SET
-                `access_code_hash` = :hash,
-                `access_code_issued_at` = CURRENT_TIMESTAMP,
-                `login_attempts` = 0,
-                `login_locked_until` = NULL
-            WHERE `id` = :id
+                access_code_hash = :hash,
+                access_code_issued_at = CURRENT_TIMESTAMP,
+                login_attempts = 0,
+                login_locked_until = NULL
+            WHERE id = :id
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -91,11 +94,11 @@ final class PdoSiteAccessCodeRepository implements SiteAccessCodeRepositoryInter
     {
         // Un bloqueo ya vencido no debe seguir penalizando: se limpia antes de contar.
         $clearExpiredSql = "
-            UPDATE `locations`
-            SET `login_attempts` = 0, `login_locked_until` = NULL
-            WHERE `id` = :id
-              AND `login_locked_until` IS NOT NULL
-              AND `login_locked_until` <= NOW()
+            UPDATE locations
+            SET login_attempts = 0, login_locked_until = NULL
+            WHERE id = :id
+              AND login_locked_until IS NOT NULL
+              AND login_locked_until <= NOW()
         ";
         $this->pdo->prepare($clearExpiredSql)->execute([':id' => $locationId]);
 
@@ -103,15 +106,15 @@ final class PdoSiteAccessCodeRepository implements SiteAccessCodeRepositoryInter
         // asignaciones en orden, así que mover el incremento delante activaría el bloqueo
         // un intento antes de lo previsto.
         $sql = "
-            UPDATE `locations`
+            UPDATE locations
             SET
-                `login_locked_until` = IF(
-                    `login_attempts` + 1 >= :max_attempts,
-                    TIMESTAMPADD(SECOND, :lock_seconds, NOW()),
-                    NULL
-                ),
-                `login_attempts` = `login_attempts` + 1
-            WHERE `id` = :id
+                login_locked_until = CASE
+                    WHEN (login_attempts + 1) >= :max_attempts
+                    THEN {$this->dialect->addInterval('NOW()', ':lock_seconds', 'SECOND')}
+                    ELSE NULL
+                END,
+                login_attempts = login_attempts + 1
+            WHERE id = :id
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -127,9 +130,9 @@ final class PdoSiteAccessCodeRepository implements SiteAccessCodeRepositoryInter
     public function resetLoginAttempts(int $locationId): void
     {
         $sql = "
-            UPDATE `locations`
-            SET `login_attempts` = 0, `login_locked_until` = NULL
-            WHERE `id` = :id
+            UPDATE locations
+            SET login_attempts = 0, login_locked_until = NULL
+            WHERE id = :id
         ";
 
         $stmt = $this->pdo->prepare($sql);

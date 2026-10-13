@@ -15,8 +15,8 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  */
 final class PdoUnclaimedCashFindingRepository implements UnclaimedCashFindingRepositoryInterface
 {
-    private const COLUMNS = '`id`, `incident_id`, `machine_id`, `technician_id`,
-        `amount`, `notes`, `created_at`';
+    private const COLUMNS = 'id, incident_id, machine_id, technician_id,
+        amount, notes, created_at';
 
     private PDO $pdo;
 
@@ -28,8 +28,8 @@ final class PdoUnclaimedCashFindingRepository implements UnclaimedCashFindingRep
     public function insert(UnclaimedCashFinding $finding): int
     {
         $stmt = $this->pdo->prepare("
-            INSERT INTO `unclaimed_cash_findings` (
-                `incident_id`, `machine_id`, `technician_id`, `amount`, `notes`, `created_at`
+            INSERT INTO unclaimed_cash_findings (
+                incident_id, machine_id, technician_id, amount, notes, created_at
             ) VALUES (
                 :incident_id, :machine_id, :technician_id, :amount, :notes, :created_at
             )
@@ -50,8 +50,8 @@ final class PdoUnclaimedCashFindingRepository implements UnclaimedCashFindingRep
     public function findById(int $id): ?UnclaimedCashFinding
     {
         $stmt = $this->pdo->prepare('SELECT ' . self::COLUMNS . '
-            FROM `unclaimed_cash_findings`
-            WHERE `id` = :id
+            FROM unclaimed_cash_findings
+            WHERE id = :id
             LIMIT 1
         ');
         $stmt->execute([':id' => $id]);
@@ -63,9 +63,9 @@ final class PdoUnclaimedCashFindingRepository implements UnclaimedCashFindingRep
     public function findByIncident(int $incidentId): array
     {
         $stmt = $this->pdo->prepare('SELECT ' . self::COLUMNS . '
-            FROM `unclaimed_cash_findings`
-            WHERE `incident_id` = :incident_id
-            ORDER BY `created_at` DESC, `id` DESC
+            FROM unclaimed_cash_findings
+            WHERE incident_id = :incident_id
+            ORDER BY created_at DESC, id DESC
         ');
         $stmt->execute([':incident_id' => $incidentId]);
 
@@ -75,9 +75,9 @@ final class PdoUnclaimedCashFindingRepository implements UnclaimedCashFindingRep
     public function findByTechnician(int $technicianId, int $limit = 50): array
     {
         $stmt = $this->pdo->prepare('SELECT ' . self::COLUMNS . '
-            FROM `unclaimed_cash_findings`
-            WHERE `technician_id` = :technician_id
-            ORDER BY `created_at` DESC, `id` DESC
+            FROM unclaimed_cash_findings
+            WHERE technician_id = :technician_id
+            ORDER BY created_at DESC, id DESC
             LIMIT :limit
         ');
         $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
@@ -90,7 +90,7 @@ final class PdoUnclaimedCashFindingRepository implements UnclaimedCashFindingRep
     public function sumAmountByMachine(int $machineId): float
     {
         $stmt = $this->pdo->prepare(
-            'SELECT COALESCE(SUM(`amount`), 0) FROM `unclaimed_cash_findings` WHERE `machine_id` = :machine_id'
+            'SELECT COALESCE(SUM(amount), 0) FROM unclaimed_cash_findings WHERE machine_id = :machine_id'
         );
         $stmt->bindValue(':machine_id', $machineId, PDO::PARAM_INT);
         $stmt->execute();

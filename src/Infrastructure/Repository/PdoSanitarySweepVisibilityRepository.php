@@ -11,6 +11,7 @@ use VendGuard\Core\Domain\Model\SanitarySweepContention;
 use VendGuard\Core\Domain\Model\SanitarySweepPass;
 use VendGuard\Core\Domain\Repository\SanitarySweepVisibilityRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
  * PdoSanitarySweepVisibilityRepository — Adaptador PDO del libro de pasadas y de
@@ -45,6 +46,7 @@ final class PdoSanitarySweepVisibilityRepository implements SanitarySweepVisibil
 {
     /** Conexión compartida; se resuelve en el primer uso si no se inyecta. */
     private ?PDO $pdo;
+    private ?SqlDialectAdapter $dialect = null;
 
     public function __construct(?PDO $pdo = null)
     {
@@ -57,9 +59,9 @@ final class PdoSanitarySweepVisibilityRepository implements SanitarySweepVisibil
     public function recordPass(SanitarySweepPass $pass): SanitarySweepPass
     {
         $statement = $this->connection()->prepare(
-            'INSERT INTO `sanitary_sweep_passes`
-                (`started_at`, `finished_at`, `candidates`, `evaluated`,
-                 `quarantined_count`, `contended_count`, `failures_count`, `duration_ms`)
+            'INSERT INTO sanitary_sweep_passes
+                (started_at, finished_at, candidates, evaluated,
+                 quarantined_count, contended_count, failures_count, duration_ms)
              VALUES
                 (:started_at, :finished_at, :candidates, :evaluated,
                  :quarantined_count, :contended_count, :failures_count, :duration_ms)'
@@ -99,7 +101,7 @@ final class PdoSanitarySweepVisibilityRepository implements SanitarySweepVisibil
         }
 
         $statement = $this->connection()->prepare(
-            'SELECT * FROM `sanitary_sweep_contentions` WHERE `incident_id` = :incident_id LIMIT 1'
+            'SELECT * FROM sanitary_sweep_contentions WHERE incident_id = :incident_id LIMIT 1'
         );
         $statement->execute([':incident_id' => $incidentId]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
@@ -112,22 +114,26 @@ final class PdoSanitarySweepVisibilityRepository implements SanitarySweepVisibil
      */
     public function saveContentionDetection(SanitarySweepContention $contention): void
     {
-        $statement = $this->connection()->prepare(
-            'INSERT INTO `sanitary_sweep_contentions`
-                (`incident_id`, `machine_id`, `first_detected_at`, `last_detected_at`,
-                 `consecutive_passes`, `total_passes`, `escalated_at`, `resolved_at`)
+        $sql = "INSERT INTO sanitary_sweep_contentions
+                (incident_id, machine_id, first_detected_at, last_detected_at,
+                 consecutive_passes, total_passes, escalated_at, resolved_at)
              VALUES
                 (:incident_id, :machine_id, :first_detected_at, :last_detected_at,
-                 :consecutive_passes, :total_passes, :escalated_at, NULL)
-             ON DUPLICATE KEY UPDATE
-                `machine_id` = VALUES(`machine_id`),
-                `first_detected_at` = VALUES(`first_detected_at`),
-                `last_detected_at` = VALUES(`last_detected_at`),
-                `consecutive_passes` = VALUES(`consecutive_passes`),
-                `total_passes` = VALUES(`total_passes`),
-                `escalated_at` = VALUES(`escalated_at`),
-                `resolved_at` = NULL'
-        );
+                 :consecutive_passes, :total_passes, :escalated_at, NULL) "
+             . $this->dialect()->upsertAssignments(
+                 ['incident_id'],
+                 [
+                     'machine_id' => SqlDialectAdapter::PROPOSED_VALUE,
+                     'first_detected_at' => SqlDialectAdapter::PROPOSED_VALUE,
+                     'last_detected_at' => SqlDialectAdapter::PROPOSED_VALUE,
+                     'consecutive_passes' => SqlDialectAdapter::PROPOSED_VALUE,
+                     'total_passes' => SqlDialectAdapter::PROPOSED_VALUE,
+                     'escalated_at' => SqlDialectAdapter::PROPOSED_VALUE,
+                     'resolved_at' => 'NULL',
+                 ]
+             );
+
+        $statement = $this->connection()->prepare($sql);
 
         $statement->execute([
             ':incident_id' => $contention->incidentId,
@@ -158,13 +164,13 @@ final class PdoSanitarySweepVisibilityRepository implements SanitarySweepVisibil
         }
 
         if ($placeholders !== []) {
-            $exclusion = ' AND `incident_id` NOT IN (' . implode(', ', $placeholders) . ')';
+            $exclusion = ' AND incident_id NOT IN (' . implode(', ', $placeholders) . ')';
         }
 
         $statement = $this->connection()->prepare(
-            'UPDATE `sanitary_sweep_contentions`
-                SET `resolved_at` = :resolved_at
-              WHERE `resolved_at` IS NULL' . $exclusion
+            'UPDATE sanitary_sweep_contentions
+                SET resolved_at = :resolved_at
+              WHERE resolved_at IS NULL' . $exclusion
         );
 
         $statement->execute($params);
@@ -179,19 +185,19 @@ final class PdoSanitarySweepVisibilityRepository implements SanitarySweepVisibil
     {
         $statement = $this->connection()->query(
             "SELECT c.*,
-                    i.`ticket_code` AS ticket_code,
-                    i.`status` AS incident_status,
-                    m.`code` AS machine_code,
-                    m.`sanitary_status` AS machine_sanitary_status,
-                    l.`name` AS location_name,
-                    m.`floor_wing` AS floor_wing
-               FROM `sanitary_sweep_contentions` c
-               INNER JOIN `incidents` i ON i.`id` = c.`incident_id`
-               INNER JOIN `machines` m ON m.`id` = c.`machine_id`
-               LEFT JOIN `locations` l ON l.`id` = m.`location_id`
-              WHERE c.`resolved_at` IS NULL
-              ORDER BY (c.`escalated_at` IS NULL) ASC, c.`escalated_at` ASC,
-                       c.`first_detected_at` ASC, c.`id` ASC"
+                    i.ticket_code AS ticket_code,
+                    i.status AS incident_status,
+                    m.code AS machine_code,
+                    m.sanitary_status AS machine_sanitary_status,
+                    l.name AS location_name,
+                    m.floor_wing AS floor_wing
+               FROM sanitary_sweep_contentions c
+               INNER JOIN incidents i ON i.id = c.incident_id
+               INNER JOIN machines m ON m.id = c.machine_id
+               LEFT JOIN locations l ON l.id = m.location_id
+              WHERE c.resolved_at IS NULL
+              ORDER BY (c.escalated_at IS NULL) ASC, c.escalated_at ASC,
+                       c.first_detected_at ASC, c.id ASC"
         );
 
         if ($statement === false) {
@@ -212,7 +218,7 @@ final class PdoSanitarySweepVisibilityRepository implements SanitarySweepVisibil
     public function findLatestPass(): ?SanitarySweepPass
     {
         $statement = $this->connection()->query(
-            'SELECT * FROM `sanitary_sweep_passes` ORDER BY `id` DESC LIMIT 1'
+            'SELECT * FROM sanitary_sweep_passes ORDER BY id DESC LIMIT 1'
         );
 
         if ($statement === false) {
@@ -230,9 +236,9 @@ final class PdoSanitarySweepVisibilityRepository implements SanitarySweepVisibil
     public function findPassesSince(DateTimeImmutable $since): array
     {
         $statement = $this->connection()->prepare(
-            'SELECT * FROM `sanitary_sweep_passes`
-              WHERE `started_at` >= :since
-              ORDER BY `started_at` ASC, `id` ASC'
+            'SELECT * FROM sanitary_sweep_passes
+              WHERE started_at >= :since
+              ORDER BY started_at ASC, id ASC'
         );
         $statement->execute([':since' => $since->format('Y-m-d H:i:s')]);
 
@@ -302,5 +308,14 @@ final class PdoSanitarySweepVisibilityRepository implements SanitarySweepVisibil
     private function connection(): PDO
     {
         return $this->pdo ??= ConnectionFactory::getConnection();
+    }
+
+    private function dialect(): SqlDialectAdapter
+    {
+        if ($this->dialect === null) {
+            $this->dialect = SqlDialectAdapter::forConnection($this->connection());
+        }
+
+        return $this->dialect;
     }
 }

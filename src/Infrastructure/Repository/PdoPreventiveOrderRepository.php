@@ -9,6 +9,7 @@ use VendGuard\Core\Domain\Model\PreventiveOrder;
 use VendGuard\Core\Domain\Repository\PreventiveOrderRepositoryInterface;
 use VendGuard\Core\Domain\Exception\PreventiveOrderAlreadyAssignedException;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
  * PdoPreventiveOrderRepository
@@ -19,34 +20,36 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
 class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
 {
     private PDO $pdo;
+    private SqlDialectAdapter $dialect;
 
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
+        $this->dialect = SqlDialectAdapter::forConnection($this->pdo);
     }
 
     public function create(array $data): PreventiveOrder
     {
         $orderCode = $data['order_code'] ?? null;
         if (empty($orderCode)) {
-            $stmtSeq = $this->pdo->query("SELECT COALESCE(MAX(`id`), 0) + 1 FROM `preventive_orders`");
+            $stmtSeq = $this->pdo->query("SELECT COALESCE(MAX(id), 0) + 1 FROM preventive_orders");
             $nextId = (int)$stmtSeq->fetchColumn();
             $orderCode = sprintf('PREV-%s-%04d', date('Y'), $nextId);
         }
 
         $sql = "
-            INSERT INTO `preventive_orders` (
-                `order_code`,
-                `machine_id`,
-                `location_id`,
-                `assigned_technician_id`,
-                `status`,
-                `order_type`,
-                `scheduled_date`,
-                `due_date`,
-                `notes`,
-                `created_at`,
-                `updated_at`
+            INSERT INTO preventive_orders (
+                order_code,
+                machine_id,
+                location_id,
+                assigned_technician_id,
+                status,
+                order_type,
+                scheduled_date,
+                due_date,
+                notes,
+                created_at,
+                updated_at
             ) VALUES (
                 :order_code,
                 :machine_id,
@@ -91,9 +94,9 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
 
     public function findById(int $id, bool $allowCancelled = true): ?PreventiveOrder
     {
-        $sql = $this->getBaseSelectQuery() . " WHERE po.`id` = :id";
+        $sql = $this->getBaseSelectQuery() . " WHERE po.id = :id";
         if (!$allowCancelled) {
-            $sql .= " AND po.`status` != 'CANCELLED' AND po.`deleted_at` IS NULL";
+            $sql .= " AND po.status != 'CANCELLED' AND po.deleted_at IS NULL";
         }
         $sql .= " LIMIT 1";
 
@@ -110,9 +113,9 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
 
     public function findByCode(string $orderCode, bool $allowCancelled = true): ?PreventiveOrder
     {
-        $sql = $this->getBaseSelectQuery() . " WHERE po.`order_code` = :order_code";
+        $sql = $this->getBaseSelectQuery() . " WHERE po.order_code = :order_code";
         if (!$allowCancelled) {
-            $sql .= " AND po.`status` != 'CANCELLED' AND po.`deleted_at` IS NULL";
+            $sql .= " AND po.status != 'CANCELLED' AND po.deleted_at IS NULL";
         }
         $sql .= " LIMIT 1";
 
@@ -131,10 +134,10 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
     {
         $stmt = $this->pdo->prepare("
             SELECT COUNT(*) 
-            FROM `preventive_orders`
-            WHERE `machine_id` = :machine_id
-              AND `status` IN ('PENDING_ASSIGNMENT', 'SCHEDULED', 'IN_INSPECTION')
-              AND `deleted_at` IS NULL
+            FROM preventive_orders
+            WHERE machine_id = :machine_id
+              AND status IN ('PENDING_ASSIGNMENT', 'SCHEDULED', 'IN_INSPECTION')
+              AND deleted_at IS NULL
         ");
         $stmt->execute([':machine_id' => $machineId]);
         return ((int)$stmt->fetchColumn()) > 0;
@@ -143,15 +146,15 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
     public function assignTechnician(int $orderId, int $technicianId, string $scheduledDate): bool
     {
         $stmt = $this->pdo->prepare("
-            UPDATE `preventive_orders`
+            UPDATE preventive_orders
             SET 
-                `assigned_technician_id` = :technician_id,
-                `scheduled_date` = :scheduled_date,
-                `status` = 'SCHEDULED',
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
-              AND `status` IN ('PENDING_ASSIGNMENT', 'SCHEDULED', 'EXPIRED')
-              AND `deleted_at` IS NULL
+                assigned_technician_id = :technician_id,
+                scheduled_date = :scheduled_date,
+                status = 'SCHEDULED',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND status IN ('PENDING_ASSIGNMENT', 'SCHEDULED', 'EXPIRED')
+              AND deleted_at IS NULL
         ");
 
         return $stmt->execute([
@@ -165,15 +168,15 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
     {
         // Actualización atómica con guarda de estado PENDING_ASSIGNMENT
         $stmt = $this->pdo->prepare("
-            UPDATE `preventive_orders`
+            UPDATE preventive_orders
             SET 
-                `assigned_technician_id` = :technician_id,
-                `scheduled_date` = CURRENT_DATE(),
-                `status` = 'SCHEDULED',
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
-              AND `status` = 'PENDING_ASSIGNMENT'
-              AND `deleted_at` IS NULL
+                assigned_technician_id = :technician_id,
+                scheduled_date = CURRENT_DATE,
+                status = 'SCHEDULED',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND status = 'PENDING_ASSIGNMENT'
+              AND deleted_at IS NULL
         ");
 
         $stmt->execute([
@@ -183,9 +186,9 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
 
         if ($stmt->rowCount() === 0) {
             $stmtCheck = $this->pdo->prepare("
-                SELECT `status`, `assigned_technician_id` 
-                FROM `preventive_orders` 
-                WHERE `id` = :id
+                SELECT status, assigned_technician_id 
+                FROM preventive_orders 
+                WHERE id = :id
             ");
             $stmtCheck->execute([':id' => $orderId]);
             $current = $stmtCheck->fetch(PDO::FETCH_ASSOC);
@@ -204,15 +207,15 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
     public function startInspection(int $orderId, int $technicianId): bool
     {
         $stmt = $this->pdo->prepare("
-            UPDATE `preventive_orders`
+            UPDATE preventive_orders
             SET 
-                `status` = 'IN_INSPECTION',
-                `started_at` = CURRENT_TIMESTAMP,
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
-              AND `assigned_technician_id` = :technician_id
-              AND `status` IN ('SCHEDULED', 'EXPIRED')
-              AND `deleted_at` IS NULL
+                status = 'IN_INSPECTION',
+                started_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND assigned_technician_id = :technician_id
+              AND status IN ('SCHEDULED', 'EXPIRED')
+              AND deleted_at IS NULL
         ");
 
         return $stmt->execute([
@@ -230,17 +233,17 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
         ?string $notes = null
     ): bool {
         $stmt = $this->pdo->prepare("
-            UPDATE `preventive_orders`
+            UPDATE preventive_orders
             SET 
-                `status` = 'COMPLETED',
-                `result` = :result,
-                `temperature_measured` = :temperature_measured,
-                `is_quarantine_triggered` = :is_quarantine,
-                `linked_incident_id` = :linked_incident_id,
-                `notes` = COALESCE(:notes, `notes`),
-                `completed_at` = CURRENT_TIMESTAMP,
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
+                status = 'COMPLETED',
+                result = :result,
+                temperature_measured = :temperature_measured,
+                is_quarantine_triggered = :is_quarantine,
+                linked_incident_id = :linked_incident_id,
+                notes = COALESCE(:notes, notes),
+                completed_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
         ");
 
         return $stmt->execute([
@@ -256,10 +259,10 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
     public function linkIncident(int $orderId, int $incidentId): bool
     {
         $stmt = $this->pdo->prepare("
-            UPDATE `preventive_orders`
-            SET `linked_incident_id` = :incident_id,
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
+            UPDATE preventive_orders
+            SET linked_incident_id = :incident_id,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
         ");
 
         return $stmt->execute([
@@ -272,14 +275,14 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
     {
         // Cancelación puramente lógica en estricto cumplimiento del Artículo III
         $stmt = $this->pdo->prepare("
-            UPDATE `preventive_orders`
+            UPDATE preventive_orders
             SET 
-                `status` = 'CANCELLED',
-                `cancellation_reason` = :reason,
-                `deleted_at` = CURRENT_TIMESTAMP,
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
-              AND `status` != 'COMPLETED'
+                status = 'CANCELLED',
+                cancellation_reason = :reason,
+                deleted_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND status != 'COMPLETED'
         ");
 
         return $stmt->execute([
@@ -294,31 +297,31 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
         $params = [];
 
         if (!empty($filters['status'])) {
-            $sql .= " AND po.`status` = :status";
+            $sql .= " AND po.status = :status";
             $params[':status'] = $filters['status'];
         }
 
         if (!empty($filters['machine_id'])) {
-            $sql .= " AND po.`machine_id` = :machine_id";
+            $sql .= " AND po.machine_id = :machine_id";
             $params[':machine_id'] = (int)$filters['machine_id'];
         }
 
         if (!empty($filters['location_id'])) {
-            $sql .= " AND po.`location_id` = :location_id";
+            $sql .= " AND po.location_id = :location_id";
             $params[':location_id'] = (int)$filters['location_id'];
         }
 
         if (!empty($filters['technician_id'])) {
-            $sql .= " AND po.`assigned_technician_id` = :technician_id";
+            $sql .= " AND po.assigned_technician_id = :technician_id";
             $params[':technician_id'] = (int)$filters['technician_id'];
         }
 
         if (!empty($filters['search'])) {
-            $sql .= " AND (po.`order_code` LIKE :search OR m.`code` LIKE :search OR l.`name` LIKE :search)";
+            $sql .= " AND (po.order_code LIKE :search OR m.code LIKE :search OR l.name LIKE :search)";
             $params[':search'] = '%' . $filters['search'] . '%';
         }
 
-        $sql .= " ORDER BY po.`due_date` ASC, po.`id` DESC";
+        $sql .= " ORDER BY po.due_date ASC, po.id DESC";
 
         // Paginación con placeholders vinculados como enteros (hallazgo H-5). La conexión
         // usa prepares nativos (`ATTR_EMULATE_PREPARES = false`), de modo que LIMIT/OFFSET
@@ -357,35 +360,35 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
     {
         $sql = "
             SELECT COUNT(*) 
-            FROM `preventive_orders` po
-            INNER JOIN `machines` m ON po.`machine_id` = m.`id`
-            INNER JOIN `locations` l ON po.`location_id` = l.`id`
+            FROM preventive_orders po
+            INNER JOIN machines m ON po.machine_id = m.id
+            INNER JOIN locations l ON po.location_id = l.id
             WHERE 1=1
         ";
         $params = [];
 
         if (!empty($filters['status'])) {
-            $sql .= " AND po.`status` = :status";
+            $sql .= " AND po.status = :status";
             $params[':status'] = $filters['status'];
         }
 
         if (!empty($filters['machine_id'])) {
-            $sql .= " AND po.`machine_id` = :machine_id";
+            $sql .= " AND po.machine_id = :machine_id";
             $params[':machine_id'] = (int)$filters['machine_id'];
         }
 
         if (!empty($filters['location_id'])) {
-            $sql .= " AND po.`location_id` = :location_id";
+            $sql .= " AND po.location_id = :location_id";
             $params[':location_id'] = (int)$filters['location_id'];
         }
 
         if (!empty($filters['technician_id'])) {
-            $sql .= " AND po.`assigned_technician_id` = :technician_id";
+            $sql .= " AND po.assigned_technician_id = :technician_id";
             $params[':technician_id'] = (int)$filters['technician_id'];
         }
 
         if (!empty($filters['search'])) {
-            $sql .= " AND (po.`order_code` LIKE :search OR m.`code` LIKE :search OR l.`name` LIKE :search)";
+            $sql .= " AND (po.order_code LIKE :search OR m.code LIKE :search OR l.name LIKE :search)";
             $params[':search'] = '%' . $filters['search'] . '%';
         }
 
@@ -397,18 +400,18 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
     public function findForTechnicianRoute(int $technicianId, ?int $locationId = null): array
     {
         $sql = $this->getBaseSelectQuery() . " WHERE (
-            (po.`assigned_technician_id` = :tech_id AND po.`status` IN ('SCHEDULED', 'IN_INSPECTION', 'EXPIRED'))
+            (po.assigned_technician_id = :tech_id AND po.status IN ('SCHEDULED', 'IN_INSPECTION', 'EXPIRED'))
         ";
 
         $params = [':tech_id' => $technicianId];
 
         // Si se provee la sede donde el técnico está in situ, incluir preventivos pendientes de claim (EARS 2.3)
         if ($locationId !== null) {
-            $sql .= " OR (po.`location_id` = :loc_id AND po.`status` = 'PENDING_ASSIGNMENT' AND po.`deleted_at` IS NULL)";
+            $sql .= " OR (po.location_id = :loc_id AND po.status = 'PENDING_ASSIGNMENT' AND po.deleted_at IS NULL)";
             $params[':loc_id'] = $locationId;
         }
 
-        $sql .= ") ORDER BY po.`due_date` ASC, po.`scheduled_date` ASC";
+        $sql .= ") ORDER BY po.due_date ASC, po.scheduled_date ASC";
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
@@ -425,48 +428,48 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
     public function getDashboardSummary(): array
     {
         // 1. Conteo de semáforos por estado sanitario de máquinas
-        $stmtStatus = $this->pdo->query("
+        $statusSql = "
             SELECT 
-                COUNT(*) AS `total`,
-                SUM(CASE WHEN `sanitary_status` = 'OK' AND DATEDIFF(COALESCE(`next_sanitary_inspection_due`, CURRENT_DATE()), CURRENT_DATE()) > 5 THEN 1 ELSE 0 END) AS `green`,
-                SUM(CASE WHEN `sanitary_status` = 'ATTENTION_REQUIRED' OR (`sanitary_status` = 'OK' AND DATEDIFF(COALESCE(`next_sanitary_inspection_due`, CURRENT_DATE()), CURRENT_DATE()) BETWEEN 0 AND 5) THEN 1 ELSE 0 END) AS `yellow`,
-                SUM(CASE WHEN `sanitary_status` = 'EXPIRED' OR DATEDIFF(COALESCE(`next_sanitary_inspection_due`, CURRENT_DATE()), CURRENT_DATE()) < 0 THEN 1 ELSE 0 END) AS `red`,
-                SUM(CASE WHEN `sanitary_status` = 'QUARANTINE' THEN 1 ELSE 0 END) AS `quarantine`,
-                SUM(CASE WHEN `sanitary_status` = 'SEASONAL_PAUSE' THEN 1 ELSE 0 END) AS `seasonal_pause`
-            FROM `machines`
-            WHERE `deleted_at` IS NULL AND `is_active` = 1
-        ");
+                COUNT(*) AS total,
+                SUM(CASE WHEN sanitary_status = 'OK' AND COALESCE(next_sanitary_inspection_due, CURRENT_DATE) > " . $this->dialect->addInterval('CURRENT_DATE', 5, 'DAY') . " THEN 1 ELSE 0 END) AS green,
+                SUM(CASE WHEN sanitary_status = 'ATTENTION_REQUIRED' OR (sanitary_status = 'OK' AND COALESCE(next_sanitary_inspection_due, CURRENT_DATE) BETWEEN CURRENT_DATE AND " . $this->dialect->addInterval('CURRENT_DATE', 5, 'DAY') . ") THEN 1 ELSE 0 END) AS yellow,
+                SUM(CASE WHEN sanitary_status = 'EXPIRED' OR COALESCE(next_sanitary_inspection_due, CURRENT_DATE) < CURRENT_DATE THEN 1 ELSE 0 END) AS red,
+                SUM(CASE WHEN sanitary_status = 'QUARANTINE' THEN 1 ELSE 0 END) AS quarantine,
+                SUM(CASE WHEN sanitary_status = 'SEASONAL_PAUSE' THEN 1 ELSE 0 END) AS seasonal_pause
+            FROM machines
+            WHERE deleted_at IS NULL AND is_active = " . $this->dialect->booleanLiteral(true);
+        $stmtStatus = $this->pdo->query($statusSql);
         $counts = $stmtStatus->fetch(PDO::FETCH_ASSOC) ?: [];
 
         // 2. Órdenes vencidas y próximas a vencer
-        $stmtOrders = $this->pdo->query("
+        $ordersSql = "
             SELECT
-                SUM(CASE WHEN `status` = 'EXPIRED' OR (`status` IN ('PENDING_ASSIGNMENT', 'SCHEDULED') AND `due_date` < CURRENT_DATE()) THEN 1 ELSE 0 END) AS `expired_orders`,
-                SUM(CASE WHEN `status` IN ('PENDING_ASSIGNMENT', 'SCHEDULED') AND `due_date` BETWEEN CURRENT_DATE() AND DATE_ADD(CURRENT_DATE(), INTERVAL 5 DAY) THEN 1 ELSE 0 END) AS `due_soon_orders`
-            FROM `preventive_orders`
-            WHERE `deleted_at` IS NULL
-        ");
+                SUM(CASE WHEN status = 'EXPIRED' OR (status IN ('PENDING_ASSIGNMENT', 'SCHEDULED') AND due_date < CURRENT_DATE) THEN 1 ELSE 0 END) AS expired_orders,
+                SUM(CASE WHEN status IN ('PENDING_ASSIGNMENT', 'SCHEDULED') AND due_date BETWEEN CURRENT_DATE AND " . $this->dialect->addInterval('CURRENT_DATE', 5, 'DAY') . " THEN 1 ELSE 0 END) AS due_soon_orders
+            FROM preventive_orders
+            WHERE deleted_at IS NULL";
+        $stmtOrders = $this->pdo->query($ordersSql);
         $orderCounts = $stmtOrders->fetch(PDO::FETCH_ASSOC) ?: [];
 
         // 3. Máquinas en cuarentena urgente
-        $stmtQuarantine = $this->pdo->query("
+        $quarantineSql = "
             SELECT 
-                m.`id` AS `machine_id`,
-                m.`code` AS `machine_code`,
-                m.`model`,
-                m.`floor_wing`,
-                l.`name` AS `location_name`,
-                po.`order_code`,
-                po.`temperature_measured`,
-                po.`completed_at` AS `since`,
-                inc.`ticket_code` AS `active_incident_code`
-            FROM `machines` m
-            INNER JOIN `locations` l ON m.`location_id` = l.`id`
-            LEFT JOIN `preventive_orders` po ON m.`id` = po.`machine_id` AND po.`is_quarantine_triggered` = 1
-            LEFT JOIN `incidents` inc ON inc.`machine_id` = m.`id` AND inc.`is_active_ticket` = 1
-            WHERE m.`sanitary_status` = 'QUARANTINE' AND m.`deleted_at` IS NULL
-            ORDER BY po.`completed_at` DESC
-        ");
+                m.id AS machine_id,
+                m.code AS machine_code,
+                m.model,
+                m.floor_wing,
+                l.name AS location_name,
+                po.order_code,
+                po.temperature_measured,
+                po.completed_at AS since,
+                inc.ticket_code AS active_incident_code
+            FROM machines m
+            INNER JOIN locations l ON m.location_id = l.id
+            LEFT JOIN preventive_orders po ON m.id = po.machine_id AND po.is_quarantine_triggered = " . $this->dialect->booleanLiteral(true) . "
+            LEFT JOIN incidents inc ON inc.machine_id = m.id AND " . $this->dialect->activeTicketCondition('inc') . "
+            WHERE m.sanitary_status = 'QUARANTINE' AND m.deleted_at IS NULL
+            ORDER BY po.completed_at DESC";
+        $stmtQuarantine = $this->pdo->query($quarantineSql);
         $quarantineList = $stmtQuarantine->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
         $total = (int)($counts['total'] ?? 0);
@@ -495,40 +498,40 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
     {
         return "
             SELECT 
-                po.`id`,
-                po.`order_code`,
-                po.`machine_id`,
-                po.`location_id`,
-                po.`assigned_technician_id`,
-                po.`status`,
-                po.`order_type`,
-                po.`scheduled_date`,
-                po.`due_date`,
-                po.`started_at`,
-                po.`completed_at`,
-                po.`temperature_measured`,
-                po.`result`,
-                po.`linked_incident_id`,
-                po.`is_quarantine_triggered`,
-                po.`notes`,
-                po.`cancellation_reason`,
-                po.`created_at`,
-                po.`updated_at`,
-                po.`deleted_at`,
-                m.`code` AS `machine_code`,
-                m.`model` AS `machine_model`,
-                m.`machine_type`,
-                m.`floor_wing` AS `machine_floor_wing`,
-                m.`sanitary_status` AS `machine_sanitary_status`,
-                l.`site_code` AS `location_site_code`,
-                l.`name` AS `location_name`,
-                l.`address` AS `location_address`,
-                u.`name` AS `technician_name`,
-                u.`operator_code` AS `technician_operator_code`
-            FROM `preventive_orders` po
-            INNER JOIN `machines` m ON po.`machine_id` = m.`id`
-            INNER JOIN `locations` l ON po.`location_id` = l.`id`
-            LEFT JOIN `users` u ON po.`assigned_technician_id` = u.`id`
+                po.id,
+                po.order_code,
+                po.machine_id,
+                po.location_id,
+                po.assigned_technician_id,
+                po.status,
+                po.order_type,
+                po.scheduled_date,
+                po.due_date,
+                po.started_at,
+                po.completed_at,
+                po.temperature_measured,
+                po.result,
+                po.linked_incident_id,
+                po.is_quarantine_triggered,
+                po.notes,
+                po.cancellation_reason,
+                po.created_at,
+                po.updated_at,
+                po.deleted_at,
+                m.code AS machine_code,
+                m.model AS machine_model,
+                m.machine_type,
+                m.floor_wing AS machine_floor_wing,
+                m.sanitary_status AS machine_sanitary_status,
+                l.site_code AS location_site_code,
+                l.name AS location_name,
+                l.address AS location_address,
+                u.name AS technician_name,
+                u.operator_code AS technician_operator_code
+            FROM preventive_orders po
+            INNER JOIN machines m ON po.machine_id = m.id
+            INNER JOIN locations l ON po.location_id = l.id
+            LEFT JOIN users u ON po.assigned_technician_id = u.id
         ";
     }
 
@@ -596,12 +599,12 @@ class PdoPreventiveOrderRepository implements PreventiveOrderRepositoryInterface
     public function expireOverdueOrders(): int
     {
         $stmt = $this->pdo->prepare("
-            UPDATE `preventive_orders`
-            SET `status` = 'EXPIRED',
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `status` IN ('PENDING_ASSIGNMENT', 'SCHEDULED')
-              AND `due_date` < CURRENT_DATE()
-              AND `deleted_at` IS NULL
+            UPDATE preventive_orders
+            SET status = 'EXPIRED',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE status IN ('PENDING_ASSIGNMENT', 'SCHEDULED')
+              AND due_date < CURRENT_DATE
+              AND deleted_at IS NULL
         ");
 
         $stmt->execute();
