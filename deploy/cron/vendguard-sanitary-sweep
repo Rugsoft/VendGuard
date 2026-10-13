@@ -1,0 +1,31 @@
+# =============================================================================
+# VendGuard · Reloj canónico del barrido sanitario (Art. II y Art. I.3)
+# =============================================================================
+# Artefacto versionado del reloj que exige la especificación del módulo 12
+# (EARS-06.2). Su presencia en el repositorio es la prueba de que el reloj está
+# declarado: no depende de que un proveedor ofrezca cron ni de que nadie lo
+# configure a mano en un panel. El despertador y vigilante externo que lo cubre
+# vive en .github/workflows/sanitary-clock.yml y se documenta en
+# specs/12-hybrid-supabase-migration/plan.md §7.
+#
+# Destino en la imagen : /etc/crontabs/root      (busybox crond de Alpine)
+# Propietario/permisos : root:root, modo 600
+# Instalación          : Dockerfile (tarea T-HYBRID-12): COPY + chmod + crond
+# Entorno              : /etc/vendguard/cron.env, generado en el arranque del
+#                        contenedor a partir de su propio entorno, porque los
+#                        trabajos de crond NO heredan el entorno de PID 1.
+#                        Si ese fichero falta, el CLI canónico falla en cerrado
+#                        y el vigilante externo lo detecta y alerta.
+# Salida               : redirigida al stdout del contenedor (/proc/1/fd/1),
+#                        de modo que cada pasada quede también en el registro
+#                        de la plataforma.
+#
+# La lógica de cálculo NO vive aquí: este reloj solo invoca el CLI canónico,
+# que ejecuta SanitaryClockSweepService como única fuente de verdad (Art. I.3).
+# Queda prohibido añadir a esta entrada cualquier regla de escalado, consulta
+# SQL o procedimiento almacenado paralelo.
+# =============================================================================
+
+# */15 — ventana del reloj biológico de 4 h (14.400 s), con reintento y alerta
+# en el vigilante externo (EARS-06.5). Rejilla de 5 campos de cron estándar.
+*/15 * * * * . /etc/vendguard/cron.env 2>/dev/null; cd /var/www/html && php bin/sanitary_clock_sweep.php >> /proc/1/fd/1 2>&1

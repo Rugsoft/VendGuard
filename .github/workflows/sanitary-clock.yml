@@ -1,0 +1,148 @@
+name: Sanitary clock · despertador y vigilante
+
+# =============================================================================
+# Reloj externo del barrido sanitario (módulo 12, EARS-06.2 y EARS-06.5).
+#
+# Este flujo NO implementa la lógica del barrido: no contiene reglas de
+# escalado, consultas SQL ni cálculos. Su único trabajo es:
+#   1. despertar el contenedor de aplicaciones si el proveedor lo ha suspendido;
+#   2. comprobar que el reloj canónico del contenedor
+#      (deploy/cron/vendguard-sanitary-sweep) no ha perdido su ventana;
+#   3. si la ha perdido, invocar el MISMO servicio canónico por el endpoint
+#      autenticado (POST /api/cron/sanitary-clock-sweep) y dejar constancia;
+#   4. alertar por un canal que no sea un log que nadie lee.
+#
+# Criterio de color: verde = el reloj del contenedor cumplió su ventana.
+# Rojo = el barrido necesitó intervención externa o no pudo ejecutarse. Art. II
+# no admite un fallo silencioso, así que la intervención del vigilante se marca
+# como anomalía en lugar de esconderse.
+#
+# Requisitos de configuración (una sola vez, en el despliegue):
+#   secret VENDGUARD_APP_URL        URL pública de la aplicación
+#   secret CRON_SECRET              credencial del proceso batch (la que ya
+#                                   exige CronAuthMiddleware y SecretProvider)
+#   secret VENDGUARD_ALERT_WEBHOOK  opcional: webhook de un canal real
+# =============================================================================
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: sanitary-clock
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Ventana de tolerancia: una ventana perdida (15 min) más el margen de
+  # arranque en frío del contenedor.
+  STALE_MINUTES: '35'
+  APP_URL: ${{ secrets.VENDGUARD_APP_URL }}
+  CRON_SECRET: ${{ secrets.CRON_SECRET }}
+  ALERT_WEBHOOK: ${{ secrets.VENDGUARD_ALERT_WEBHOOK }}
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Comprobar configuración (fallo cerrado)
+        run: |
+          set -euo pipefail
+          missing=0
+          if [ -z "${APP_URL}" ]; then
+            echo "::error::Reloj no configurado: falta el secreto VENDGUARD_APP_URL."
+            missing=1
+          fi
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "::error::Reloj no configurado: falta el secreto CRON_SECRET."
+            missing=1
+          fi
+          if [ "${missing}" = "1" ]; then
+            echo "Sin configuración no hay reloj: se falla en cerrado en lugar de omitirse en silencio."
+            exit 1
+          fi
+
+      - name: Preparar canal de alerta
+        run: |
+          set -euo pipefail
+          cat > /tmp/alert.sh <<'SH'
+          alert() {
+            local message="$1"
+            echo "::error::${message}"
+            {
+              echo "### Reloj sanitario · intervención"
+              echo ""
+              echo "${message}"
+            } >> "${GITHUB_STEP_SUMMARY}"
+            if [ -n "${ALERT_WEBHOOK:-}" ]; then
+              jq -n --arg text "${message}" '{text:$text}' \
+                | curl -sS -m 20 -X POST -H 'Content-Type: application/json' --data @- "${ALERT_WEBHOOK}" \
+                || echo "::warning::El webhook de alerta no respondió; la ejecución del flujo queda igualmente en rojo."
+            fi
+          }
+          SH
+
+      - name: Despertar el contenedor y leer la telemetría
+        id: status
+        run: |
+          set -euo pipefail
+          source /tmp/alert.sh
+          code="000"
+          for attempt in 1 2 3; do
+            code=$(curl -sS -m 120 -o /tmp/status.json -w '%{http_code}' \
+              -H "X-Cron-Secret: ${CRON_SECRET}" -H 'Accept: application/json' \
+              "${APP_URL%/}/api/status" || echo '000')
+            if [ "${code}" = "200" ]; then break; fi
+            echo "Intento ${attempt}/3: GET /api/status devolvió ${code}."
+            if [ "${attempt}" -lt 3 ]; then sleep $((attempt * 10)); fi
+          done
+          if [ "${code}" != "200" ]; then
+            alert "El endpoint de diagnóstico respondió ${code} tras 3 intentos: el barrido sanitario no puede confirmarse."
+            exit 1
+          fi
+          last=$(jq -r '.data.sanitary_clock.last_pass_at // empty' /tmp/status.json)
+          stale=1
+          age="desconocida"
+          if [ -n "${last}" ]; then
+            last_epoch=$(date -u -d "${last}" +%s 2>/dev/null || echo 0)
+            now_epoch=$(date -u +%s)
+            age_seconds=$(( now_epoch - last_epoch ))
+            age="$(( age_seconds / 60 )) min"
+            if [ "${last_epoch}" != "0" ] && [ "${age_seconds}" -le $(( STALE_MINUTES * 60 )) ]; then stale=0; fi
+          fi
+          echo "Última pasada del reloj interno: ${last:-<sin registro>} (antigüedad: ${age}); ventana perdida: ${stale}."
+          echo "stale=${stale}" >> "${GITHUB_OUTPUT}"
+          echo "last=${last}" >> "${GITHUB_OUTPUT}"
+
+      - name: Invocar el barrido canónico si la ventana se perdió
+        if: steps.status.outputs.stale == '1'
+        env:
+          LAST_PASS: ${{ steps.status.outputs.last }}
+        run: |
+          set -euo pipefail
+          source /tmp/alert.sh
+          code="000"
+          for attempt in 1 2 3; do
+            code=$(curl -sS -m 180 -o /tmp/sweep.json -w '%{http_code}' -X POST \
+              -H "X-Cron-Secret: ${CRON_SECRET}" -H 'Accept: application/json' \
+              "${APP_URL%/}/api/cron/sanitary-clock-sweep" || echo '000')
+            if [ "${code}" = "200" ]; then break; fi
+            echo "Intento ${attempt}/3: POST /api/cron/sanitary-clock-sweep devolvió ${code}."
+            if [ "${attempt}" -lt 3 ]; then sleep $((attempt * 15)); fi
+          done
+          if [ "${code}" = "200" ]; then
+            alert "El reloj del contenedor perdió su ventana (última pasada: ${LAST_PASS:-<ninguna>}). El vigilante externo ejecutó el barrido canónico; revísese el demonio crond del contenedor (deploy/cron/README.md)."
+            exit 1
+          fi
+          alert "Ventana perdida y el barrido canónico no pudo ejecutarse (último código ${code}). El reloj biológico queda sin cobertura: requiere intervención."
+          exit 1
+
+      - name: Ventana cubierta por el reloj canónico
+        if: steps.status.outputs.stale != '1'
+        run: |
+          echo "El reloj del contenedor cumplió su ventana; el vigilante no interviene." >> "${GITHUB_STEP_SUMMARY}"
