@@ -11,20 +11,28 @@ use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\UserLockoutRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
  * PdoUserRepository
  * 
  * Implementación PDO para el acceso y autenticación de usuarios internos.
  * Utiliza sentencias preparadas nativas y filtrado de soft delete (RF-03, RF-04 / RNF-03).
+ *
+ * El dialecto no se escribe aquí: las diferencias que el motor no sabe resolver sólo
+ * —booleano literal (D-3), ventana temporal del periodo de garantía y clave canónica de
+ * identidad (D-5)— se le piden al adaptador, que es el punto único de traducción (RF-01.5).
  */
 class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositoryInterface
 {
     private PDO $pdo;
 
+    private SqlDialectAdapter $dialect;
+
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
+        $this->dialect = SqlDialectAdapter::forConnection($this->pdo);
     }
 
     /**
@@ -37,36 +45,43 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
      */
     public function findByEmail(string $email, bool $onlyActive = true, bool $allowDeleted = false): ?User
     {
-        $normalizedEmail = strtolower(trim($email));
+        // «El mismo login» es una sola regla con dos formas (D-5): donde la colación local compara
+        // sin distinguir mayúsculas ni acentos, aquí se compara por la clave canónica, que es la
+        // columna indexada del motor nuevo. El valor enlazado es el mismo en los dos casos, y se
+        // recorta por delante y por detrás antes de calcular la clave: el recorte de la entrada es
+        // una regla del repositorio —un login entre espacios sigue siendo el mismo login— y la
+        // clave sólo añade el plegado que la colación local hacía por su cuenta.
+        $emailKey = $this->dialect->identityKey(trim($email));
+        $identityColumn = $this->dialect->requiresCanonicalIdentityColumns() ? 'email_key' : 'email';
 
         $sql = "
             SELECT 
-                `id`, 
-                `name`, 
-                `email`, 
-                `password_hash`, 
-                `role`, 
-                `phone`, 
-                `is_active`, 
-                `created_at`, 
-                `updated_at`, 
-                `deleted_at`
-            FROM `users`
-            WHERE `email` = :email
+                id, 
+                name, 
+                email, 
+                password_hash, 
+                role, 
+                phone, 
+                is_active, 
+                created_at, 
+                updated_at, 
+                deleted_at
+            FROM users
+            WHERE {$identityColumn} = :email_key
         ";
 
         if (!$allowDeleted) {
-            $sql .= " AND `deleted_at` IS NULL";
+            $sql .= " AND deleted_at IS NULL";
         }
 
         if ($onlyActive) {
-            $sql .= " AND `is_active` = 1";
+            $sql .= " AND is_active = {$this->dialect->booleanLiteral(true)}";
         }
 
         $sql .= " LIMIT 1";
 
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([':email' => $normalizedEmail]);
+        $stmt->execute([':email_key' => $emailKey]);
         $row = $stmt->fetch();
 
         if ($row === false) {
@@ -88,26 +103,26 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
     {
         $sql = "
             SELECT 
-                `id`, 
-                `name`, 
-                `email`, 
-                `password_hash`, 
-                `role`, 
-                `phone`, 
-                `is_active`, 
-                `created_at`, 
-                `updated_at`, 
-                `deleted_at`
-            FROM `users`
-            WHERE `id` = :id
+                id, 
+                name, 
+                email, 
+                password_hash, 
+                role, 
+                phone, 
+                is_active, 
+                created_at, 
+                updated_at, 
+                deleted_at
+            FROM users
+            WHERE id = :id
         ";
 
         if (!$allowDeleted) {
-            $sql .= " AND `deleted_at` IS NULL";
+            $sql .= " AND deleted_at IS NULL";
         }
 
         if ($onlyActive) {
-            $sql .= " AND `is_active` = 1";
+            $sql .= " AND is_active = {$this->dialect->booleanLiteral(true)}";
         }
 
         $sql .= " LIMIT 1";
@@ -133,26 +148,26 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
     {
         $sql = "
             SELECT 
-                `id`, 
-                `name`, 
-                `email`, 
-                `password_hash`, 
-                `role`, 
-                `phone`, 
-                `is_active`, 
-                `created_at`, 
-                `updated_at`, 
-                `deleted_at`
-            FROM `users`
-            WHERE `role` = 'TECHNICIAN'
-              AND `deleted_at` IS NULL
+                id, 
+                name, 
+                email, 
+                password_hash, 
+                role, 
+                phone, 
+                is_active, 
+                created_at, 
+                updated_at, 
+                deleted_at
+            FROM users
+            WHERE role = 'TECHNICIAN'
+              AND deleted_at IS NULL
         ";
 
         if ($onlyActive) {
-            $sql .= " AND `is_active` = 1";
+            $sql .= " AND is_active = {$this->dialect->booleanLiteral(true)}";
         }
 
-        $sql .= " ORDER BY `name` ASC";
+        $sql .= " ORDER BY name ASC";
 
         $stmt = $this->pdo->query($sql);
         $rows = $stmt->fetchAll();
@@ -173,24 +188,39 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
             ? (string)$data['password_hash']
             : password_hash((string)($data['password'] ?? ''), PASSWORD_BCRYPT, ['cost' => 10]);
 
+        $email = strtolower(trim((string)$data['email']));
+
+        // La clave canónica acompaña a la identidad desde el alta (A-1, EARS-08.5): donde el motor
+        // la exige como columna `NOT NULL` con índice único, una fila sin clave no sería un
+        // duplicado invisible sino un alta incompleta, y la base la rechazaría. Donde no existe la
+        // columna, la regla la aplica la colación y escribirla sería un error de columna.
+        $identityColumns = '';
+        $identityValues = '';
+        $identityParams = [];
+        if ($this->dialect->requiresCanonicalIdentityColumns()) {
+            $identityColumns = "email_key,\n                ";
+            $identityValues = ":email_key,\n                ";
+            $identityParams[':email_key'] = $this->dialect->identityKey($email);
+        }
+
         $sql = "
-            INSERT INTO `users` (
-                `name`,
-                `email`,
-                `password_hash`,
-                `role`,
-                `phone`,
-                `is_active`,
-                `created_at`,
-                `updated_at`,
-                `deleted_at`
+            INSERT INTO users (
+                name,
+                email,
+                {$identityColumns}password_hash,
+                role,
+                phone,
+                is_active,
+                created_at,
+                updated_at,
+                deleted_at
             ) VALUES (
                 :name,
                 :email,
-                :password_hash,
+                {$identityValues}:password_hash,
                 :role,
                 :phone,
-                1,
+                {$this->dialect->booleanLiteral(true)},
                 CURRENT_TIMESTAMP,
                 CURRENT_TIMESTAMP,
                 NULL
@@ -198,9 +228,9 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
         ";
 
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([
+        $stmt->execute($identityParams + [
             ':name'          => trim((string)$data['name']),
-            ':email'         => strtolower(trim((string)$data['email'])),
+            ':email'         => $email,
             ':password_hash' => $passwordHash,
             ':role'          => strtoupper(trim((string)$data['role'])),
             ':phone'         => isset($data['phone']) && $data['phone'] !== '' ? trim((string)$data['phone']) : null,
@@ -228,11 +258,11 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
         $params = [':id' => $id];
 
         if (array_key_exists('name', $data)) {
-            $fields[] = "`name` = :name";
+            $fields[] = "name = :name";
             $params[':name'] = trim((string)$data['name']);
         }
         if (array_key_exists('phone', $data)) {
-            $fields[] = "`phone` = :phone";
+            $fields[] = "phone = :phone";
             $params[':phone'] = $data['phone'] !== null && $data['phone'] !== '' ? trim((string)$data['phone']) : null;
         }
 
@@ -240,9 +270,9 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
             return false;
         }
 
-        $fields[] = "`updated_at` = CURRENT_TIMESTAMP";
+        $fields[] = "updated_at = CURRENT_TIMESTAMP";
 
-        $sql = "UPDATE `users` SET " . implode(', ', $fields) . " WHERE `id` = :id";
+        $sql = "UPDATE users SET " . implode(', ', $fields) . " WHERE id = :id";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
@@ -261,10 +291,10 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
         $passwordHash = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => 10]);
 
         $sql = "
-            UPDATE `users`
-            SET `password_hash` = :password_hash,
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
+            UPDATE users
+            SET password_hash = :password_hash,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -297,11 +327,11 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
     public function softDelete(int $id): bool
     {
         $sql = "
-            UPDATE `users`
-            SET `is_active` = 0,
-                `deleted_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
-              AND `deleted_at` IS NULL
+            UPDATE users
+            SET is_active = {$this->dialect->booleanLiteral(false)},
+                deleted_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND deleted_at IS NULL
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -319,12 +349,12 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
     public function restore(int $id): bool
     {
         $sql = "
-            UPDATE `users`
-            SET `is_active` = 1,
-                `deleted_at` = NULL,
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
-              AND `deleted_at` IS NOT NULL
+            UPDATE users
+            SET is_active = {$this->dialect->booleanLiteral(true)},
+                deleted_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND deleted_at IS NOT NULL
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -360,33 +390,33 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
     {
         $sql = "
             SELECT 
-                u.`id`,
-                u.`name`,
-                u.`email`,
-                u.`role`,
-                u.`phone`,
-                u.`is_active`,
-                u.`created_at`,
-                u.`updated_at`,
-                u.`deleted_at`,
-                COALESCE(inc.active_count, 0) AS `active_assigned_incidents_count`,
-                COALESCE(war.warranty_count, 0) AS `warranty_incidents_count`
-            FROM `users` u
+                u.id,
+                u.name,
+                u.email,
+                u.role,
+                u.phone,
+                u.is_active,
+                u.created_at,
+                u.updated_at,
+                u.deleted_at,
+                COALESCE(inc.active_count, 0) AS active_assigned_incidents_count,
+                COALESCE(war.warranty_count, 0) AS warranty_incidents_count
+            FROM users u
             LEFT JOIN (
-                SELECT `assigned_technician_id`, COUNT(*) as `active_count`
-                FROM `incidents`
-                WHERE `deleted_at` IS NULL
-                  AND `status` IN ('ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS')
-                GROUP BY `assigned_technician_id`
-            ) inc ON inc.`assigned_technician_id` = u.`id`
+                SELECT assigned_technician_id, COUNT(*) as active_count
+                FROM incidents
+                WHERE deleted_at IS NULL
+                  AND status IN ('ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS')
+                GROUP BY assigned_technician_id
+            ) inc ON inc.assigned_technician_id = u.id
             LEFT JOIN (
-                SELECT `assigned_technician_id`, COUNT(*) as `warranty_count`
-                FROM `incidents`
-                WHERE `deleted_at` IS NULL
-                  AND `status` = 'RESOLVED'
-                  AND `resolved_at` >= DATE_SUB(NOW(), INTERVAL 48 HOUR)
-                GROUP BY `assigned_technician_id`
-            ) war ON war.`assigned_technician_id` = u.`id`
+                SELECT assigned_technician_id, COUNT(*) as warranty_count
+                FROM incidents
+                WHERE deleted_at IS NULL
+                  AND status = 'RESOLVED'
+                  AND resolved_at >= {$this->dialect->subtractInterval('NOW()', 48, 'HOUR')}
+                GROUP BY assigned_technician_id
+            ) war ON war.assigned_technician_id = u.id
             WHERE 1=1
         ";
 
@@ -394,29 +424,29 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
         $status = $filters['status'] ?? 'all';
 
         if ($status === 'active') {
-            $sql .= " AND u.`is_active` = 1 AND u.`deleted_at` IS NULL";
+            $sql .= " AND u.is_active = {$this->dialect->booleanLiteral(true)} AND u.deleted_at IS NULL";
         } elseif ($status === 'inactive') {
-            $sql .= " AND (u.`is_active` = 0 OR u.`deleted_at` IS NOT NULL)";
+            $sql .= " AND (u.is_active = {$this->dialect->booleanLiteral(false)} OR u.deleted_at IS NOT NULL)";
         }
 
         if (!empty($filters['role']) && $filters['role'] !== 'all') {
-            $sql .= " AND u.`role` = :role";
+            $sql .= " AND u.role = :role";
             $params[':role'] = strtoupper(trim((string)$filters['role']));
         }
 
         if (!empty($filters['search'])) {
             $term = '%' . trim((string)$filters['search']) . '%';
             $sql .= " AND (
-                u.`name` LIKE :s1
-                OR u.`email` LIKE :s2
-                OR u.`phone` LIKE :s3
+                u.name LIKE :s1
+                OR u.email LIKE :s2
+                OR u.phone LIKE :s3
             )";
             $params[':s1'] = $term;
             $params[':s2'] = $term;
             $params[':s3'] = $term;
         }
 
-        $sql .= " ORDER BY u.`name` ASC";
+        $sql .= " ORDER BY u.name ASC";
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
@@ -454,10 +484,10 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
 
         $sql = "
             SELECT COUNT(*) 
-            FROM `users`
-            WHERE `role` = :role
-              AND `is_active` = 1
-              AND `deleted_at` IS NULL
+            FROM users
+            WHERE role = :role
+              AND is_active = {$this->dialect->booleanLiteral(true)}
+              AND deleted_at IS NULL
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -483,10 +513,10 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
         // ya no tiene nada pendiente.
         $sql = "
             SELECT COUNT(*) 
-            FROM `incidents`
-            WHERE `assigned_technician_id` = :user_id
-              AND `deleted_at` IS NULL
-              AND `status` IN ('ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS')
+            FROM incidents
+            WHERE assigned_technician_id = :user_id
+              AND deleted_at IS NULL
+              AND status IN ('ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS')
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -513,12 +543,12 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
     {
         $sql = "
             SELECT 
-                `login_attempts` AS attempts,
-                `login_locked_until` AS locked_until,
-                (`login_locked_until` IS NOT NULL AND `login_locked_until` > NOW()) AS is_locked
-            FROM `users`
-            WHERE `id` = :id
-              AND `deleted_at` IS NULL
+                login_attempts AS attempts,
+                login_locked_until AS locked_until,
+                (login_locked_until IS NOT NULL AND login_locked_until > NOW()) AS is_locked
+            FROM users
+            WHERE id = :id
+              AND deleted_at IS NULL
             LIMIT 1
         ";
 
@@ -544,25 +574,25 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
     {
         // Limpiar bloqueo expirado si ya transcurrió el tiempo de penalización
         $clearExpiredSql = "
-            UPDATE `users`
-            SET `login_attempts` = 0, `login_locked_until` = NULL
-            WHERE `id` = :id
-              AND `login_locked_until` IS NOT NULL
-              AND `login_locked_until` <= NOW()
+            UPDATE users
+            SET login_attempts = 0, login_locked_until = NULL
+            WHERE id = :id
+              AND login_locked_until IS NOT NULL
+              AND login_locked_until <= NOW()
         ";
         $this->pdo->prepare($clearExpiredSql)->execute([':id' => $userId]);
 
         // Registrar fallo e incrementar contador. Si llega al umbral, bloquear
         $sql = "
-            UPDATE `users`
+            UPDATE users
             SET
-                `login_locked_until` = CASE
-                    WHEN (`login_attempts` + 1) >= :max_attempts
-                    THEN DATE_ADD(NOW(), INTERVAL :lock_seconds SECOND)
+                login_locked_until = CASE
+                    WHEN (login_attempts + 1) >= :max_attempts
+                    THEN {$this->dialect->addInterval('NOW()', ':lock_seconds', 'SECOND')}
                     ELSE NULL
                 END,
-                `login_attempts` = `login_attempts` + 1
-            WHERE `id` = :id
+                login_attempts = login_attempts + 1
+            WHERE id = :id
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -579,11 +609,11 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
     public function resetLoginAttempts(int $userId): void
     {
         $sql = "
-            UPDATE `users`
+            UPDATE users
             SET
-                `login_attempts` = 0,
-                `login_locked_until` = NULL
-            WHERE `id` = :id
+                login_attempts = 0,
+                login_locked_until = NULL
+            WHERE id = :id
         ";
 
         $this->pdo->prepare($sql)->execute([':id' => $userId]);

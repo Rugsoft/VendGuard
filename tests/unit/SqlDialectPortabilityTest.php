@@ -45,6 +45,12 @@ declare(strict_types=1);
  *      crezcas»: si el inventario baja y no se actualiza la declaración, la suite se pone en
  *      rojo, porque una cifra declarada que ya no es cierta deja de ser una prueba.
  *
+ *      Un fichero drenado **no desaparece** de la declaración: pasa al inventario drenado, que
+ *      cita la cifra que tenía cuando se declaró su deuda —la prueba del descenso— y convierte
+ *      el cero en una afirmación activa: si el fichero recupera dialecto, la suite se pone en
+ *      rojo por regresión, no por una cifra desactualizada. Sin esa mitad, «ya está drenado»
+ *      sería una promesa que nadie vigila.
+ *
  * QUÉ NO SE CERTIFICA AQUÍ (declarado, no omitido)
  *
  *   La ejecución semántica de la rama PostgreSQL **dentro de esta suite**. La batería es
@@ -684,11 +690,6 @@ echo "\n--- Grupo 5: frontera del punto único de traducción (inventario pendie
  * tiene que seguir siendo cierta).
  */
 const PENDING_INVENTORY = [
-    // Tanda 1 · Incidencias, Máquinas, Sedes, Usuarios (T-HYBRID-09)
-    'src/Infrastructure/Repository/PdoIncidentRepository.php' => ['backtick' => 234, 'temporal' => 4],
-    'src/Infrastructure/Repository/PdoMachineRepository.php' => ['backtick' => 182],
-    'src/Infrastructure/Repository/PdoLocationRepository.php' => ['backtick' => 116],
-    'src/Infrastructure/Repository/PdoUserRepository.php' => ['backtick' => 124, 'temporal' => 2],
     // Tanda 2 · Reintegros, Repuestos, Piezas Sustituidas, Métricas (T-HYBRID-10)
     'src/Infrastructure/Repository/PdoRefundRequestRepository.php' => ['backtick' => 63],
     'src/Infrastructure/Repository/PdoSparePartRepository.php' => ['backtick' => 73, 'upsert' => 2],
@@ -716,6 +717,24 @@ const PENDING_INVENTORY = [
     // ejercita corre sobre SQLite en memoria (tests/unit/CoordinatorRouteMapControllerTest.php) y
     // el adaptador sólo traduce los dos motores del sistema, a propósito.
     'src/Presentation/Controller/CoordinatorRouteMapController.php' => ['backtick' => 3],
+];
+
+/**
+ * Inventario ya drenado, con la cifra que declaraba el pendiente en el momento de drenarlo.
+ *
+ * No es una expectativa —la expectativa es cero— sino la prueba del descenso y la mitad activa
+ * del trinquete: el fichero sigue declarado aquí, de modo que volver a escribir dialecto en él
+ * pone la suite en rojo en la aserción 5.4, y no en una cifra que ya nadie compara.
+ *
+ * `families` conserva el recuento histórico por familia rastreada; `drained_by` cita la tarea
+ * que lo drenó, para que el descenso se pueda atribuir igual que antes se atribuía la deuda.
+ */
+const DRAINED_INVENTORY = [
+    // Tanda 1 · Incidencias, Máquinas, Sedes, Usuarios (T-HYBRID-09)
+    'src/Infrastructure/Repository/PdoIncidentRepository.php' => ['drained_by' => 'T-HYBRID-09', 'families' => ['backtick' => 234, 'temporal' => 4]],
+    'src/Infrastructure/Repository/PdoMachineRepository.php' => ['drained_by' => 'T-HYBRID-09', 'families' => ['backtick' => 182]],
+    'src/Infrastructure/Repository/PdoLocationRepository.php' => ['drained_by' => 'T-HYBRID-09', 'families' => ['backtick' => 116]],
+    'src/Infrastructure/Repository/PdoUserRepository.php' => ['drained_by' => 'T-HYBRID-09', 'families' => ['backtick' => 124, 'temporal' => 2]],
 ];
 
 /** Fichero con hallazgos => tarea (o motivo declarado) que lo drena. */
@@ -858,7 +877,7 @@ function scanPrivateSqlInventory(string $projectRoot, array $directories): array
 $inventory = scanPrivateSqlInventory($projectRoot, ['src', 'database', 'bin']);
 
 $declaredRepositories = array_keys(array_filter(
-    PENDING_INVENTORY,
+    PENDING_INVENTORY + DRAINED_INVENTORY,
     static fn (string $path): bool => str_starts_with($path, 'src/Infrastructure/Repository/'),
     ARRAY_FILTER_USE_KEY
 ));
@@ -866,7 +885,7 @@ $repositoriesOnDisk = glob($projectRoot . '/src/Infrastructure/Repository/*.php'
 $assert(
     '5.1 La superficie rastreada incluye los 18 repositorios PDO del proyecto',
     count($declaredRepositories) === 18 && count($repositoriesOnDisk) === 18,
-    sprintf('declarados: %d · en disco: %d', count($declaredRepositories), count($repositoriesOnDisk))
+    sprintf('declarados: %d (pendientes %d + drenados %d) · en disco: %d', count($declaredRepositories), count(PENDING_INVENTORY), count(DRAINED_INVENTORY), count($repositoriesOnDisk))
 );
 
 $assert(
@@ -876,15 +895,21 @@ $assert(
 );
 
 $assert(
-    '5.3 El inventario no contiene ningún fichero fuera de los declarados',
-    array_diff(array_keys($inventory), array_keys(PENDING_INVENTORY)) === [],
-    'nuevos: ' . implode(', ', array_diff(array_keys($inventory), array_keys(PENDING_INVENTORY)))
+    '5.3 El inventario no contiene ningún fichero fuera de los declarados (pendientes o drenados)',
+    array_diff(array_keys($inventory), array_keys(PENDING_INVENTORY + DRAINED_INVENTORY)) === [],
+    'nuevos: ' . implode(', ', array_diff(array_keys($inventory), array_keys(PENDING_INVENTORY + DRAINED_INVENTORY)))
 );
 
+$drainedWithDialect = array_values(array_intersect(array_keys(DRAINED_INVENTORY), array_keys($inventory)));
+$pendingButClean = array_values(array_diff(array_keys(PENDING_INVENTORY), array_keys($inventory)));
 $assert(
-    '5.4 Ningún fichero declarado se ha quedado limpio sin actualizar la declaración',
-    array_diff(array_keys(PENDING_INVENTORY), array_keys($inventory)) === [],
-    'declarados y ya limpios: ' . implode(', ', array_diff(array_keys(PENDING_INVENTORY), array_keys($inventory)))
+    '5.4 Ningún fichero drenado recupera dialecto, y ningún pendiente se queda limpio sin declararlo',
+    $drainedWithDialect === [] && $pendingButClean === [],
+    sprintf(
+        'regresiones en drenados: %s · pendientes que se quedaron limpios: %s',
+        $drainedWithDialect === [] ? '(ninguna)' : implode(', ', $drainedWithDialect),
+        $pendingButClean === [] ? '(ninguno)' : implode(', ', $pendingButClean)
+    )
 );
 
 $pendingTotals = ['backtick' => 0, 'temporal' => 0, 'upsert' => 0, 'json' => 0, 'jsonop' => 0];
@@ -919,6 +944,33 @@ echo sprintf(
     $pendingTotals['temporal'],
     $pendingTotals['upsert'],
     $pendingTotals['json'] + $pendingTotals['jsonop']
+);
+
+$drainedTotals = ['backtick' => 0, 'temporal' => 0, 'upsert' => 0, 'json' => 0, 'jsonop' => 0];
+$drainedByOwner = [];
+foreach (DRAINED_INVENTORY as $path => $drained) {
+    foreach ($drained['families'] as $family => $count) {
+        $drainedTotals[$family] += $count;
+        $drainedByOwner[$drained['drained_by']] = ($drainedByOwner[$drained['drained_by']] ?? 0) + $count;
+    }
+}
+
+echo "\n  Inventario ya drenado (a cero, con la cifra que declaró su deuda):\n";
+foreach ($drainedByOwner as $owner => $count) {
+    $files = 0;
+    foreach (DRAINED_INVENTORY as $drained) {
+        if ($drained['drained_by'] === $owner) {
+            $files++;
+        }
+    }
+    echo sprintf("    · %-60s %d fichero(s) · %d construcción(es)\n", $owner, $files, $count);
+}
+echo sprintf(
+    "    · total drenado: %d acentos graves, %d expresiones temporales, %d upserts y %d lecturas de JSON\n",
+    $drainedTotals['backtick'],
+    $drainedTotals['temporal'],
+    $drainedTotals['upsert'],
+    $drainedTotals['json'] + $drainedTotals['jsonop']
 );
 
 // El punto único tiene que ser el punto único: las familias rastreadas viven todas en el adaptador,

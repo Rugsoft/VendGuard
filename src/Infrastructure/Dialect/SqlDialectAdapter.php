@@ -35,6 +35,21 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  *    `DATE_SUB` y `TIMESTAMPDIFF`. La equivalencia es exacta, incluido el truncamiento hacia
  *    cero que `TIMESTAMPDIFF` aplica y que `TRUNC` reproduce.
  *
+ * Y las tres diferencias de **significado** que el contrato de correspondencia declara y que no
+ * se resuelven con sintaxis estándar, porque el motor local las resolvía por su cuenta:
+ *
+ * 4. **Booleano literal (D-3).** `TINYINT(1)` acepta `1` y `0`; el tipo `BOOLEAN` de PostgreSQL
+ *    los rechaza y sólo entiende `TRUE` y `FALSE`.
+ * 5. **Expediente activo de una máquina (D-6, Art. V.2 y V.6).** MariaDB guarda una columna
+ *    generada `is_active_ticket` y la compara con `1`; PostgreSQL **no tiene esa columna**: su
+ *    forma es el predicado sobre el estado, que es el que sostiene el índice único parcial.
+ * 6. **Identidad de login y de código de sede (D-5, EARS-08.5).** MariaDB resuelve la unicidad
+ *    insensible a mayúsculas y acentos con la colación `utf8mb4_unicode_ci`; PostgreSQL no tiene
+ *    esa semántica ni con `citext` ni con `lower()`, así que la regla se materializa en una
+ *    clave canónica que calcula la aplicación (columnas `email_key` y `site_code_key`, A-1/A-2).
+ *    La regla —qué dos textos son la misma identidad— se declara **una vez**, aquí, y el motor
+ *    decide si la aplica él o si hay que escribirle la clave.
+ *
  * **Qué no traduce, a propósito.** Todo lo que ya es común —`NOW()`, `CURRENT_DATE`,
  * `CURRENT_TIMESTAMP`, `COALESCE`, `SUM`, `ROUND`— se escribe igual en los dos motores y no
  * necesita pasar por aquí. El adaptador no envuelve lo portable: sólo lo que no lo es. Las
@@ -95,6 +110,34 @@ final class SqlDialectAdapter
 
     /** Marcador de posición nombrado de PDO (`:period_days`). */
     private const PARAMETER_PATTERN = '/^:[A-Za-z_][A-Za-z0-9_]*$/';
+
+    /**
+     * Letras que la colación local pliega sobre su letra base (D-5).
+     *
+     * No es una lista de "letras con acentos": es la lista **certificada contra el motor**. Las
+     * que la colación `utf8mb4_unicode_ci` no considera iguales se quedan fuera a propósito,
+     * porque plegarlas de más uniría dos identidades distintas y abriría un duplicado invisible:
+     * `ø` no es `o`, `ł` no es `l`, `đ` no es `d`, `þ` no es `th`, `æ` no es `ae`, `ı` no es `i`
+     * y `€` no es `e`. Las mayúsculas no aparecen porque el plegado pasa antes por minúsculas.
+     * `ß` y `œ` sí están, y expanden a dos letras, tal y como las trata la colación.
+     */
+    private const FOLDED_LETTERS = [
+        'à' => 'a', 'á' => 'a', 'â' => 'a', 'ä' => 'a', 'ã' => 'a', 'å' => 'a', 'ā' => 'a', 'ă' => 'a', 'ą' => 'a', 'ª' => 'a',
+        'è' => 'e', 'é' => 'e', 'ê' => 'e', 'ë' => 'e', 'ē' => 'e', 'ė' => 'e', 'ę' => 'e', 'ě' => 'e',
+        'ì' => 'i', 'í' => 'i', 'î' => 'i', 'ï' => 'i', 'ī' => 'i', 'į' => 'i',
+        'ò' => 'o', 'ó' => 'o', 'ô' => 'o', 'ö' => 'o', 'õ' => 'o', 'ō' => 'o', 'ő' => 'o', 'º' => 'o',
+        'ù' => 'u', 'ú' => 'u', 'û' => 'u', 'ü' => 'u', 'ū' => 'u', 'ů' => 'u', 'ű' => 'u',
+        'ñ' => 'n', 'ń' => 'n', 'ň' => 'n',
+        'ç' => 'c', 'ć' => 'c', 'č' => 'c', 'ĉ' => 'c', 'ċ' => 'c',
+        'š' => 's', 'ś' => 's', 'ş' => 's', 'ș' => 's',
+        'ž' => 'z', 'ź' => 'z', 'ż' => 'z',
+        'ý' => 'y', 'ÿ' => 'y',
+        'ţ' => 't', 'ť' => 't', 'ț' => 't',
+        'ğ' => 'g', 'ĝ' => 'g', 'ġ' => 'g',
+        'ĺ' => 'l', 'ľ' => 'l',
+        'ď' => 'd',
+        'ß' => 'ss', 'œ' => 'oe',
+    ];
 
     /** Clave de un camino JSON: se admite el guion porque el proyecto lo usa en sus claves. */
     private const JSON_KEY_PATTERN = '/^[A-Za-z0-9_-]+$/';
@@ -384,6 +427,97 @@ final class SqlDialectAdapter
         $elapsed = sprintf('TRUNC(EXTRACT(EPOCH FROM (%s - %s))', $end, $start);
 
         return $unitSpec['seconds'] === 1 ? $elapsed . ')' : sprintf('%s / %d)', $elapsed, $unitSpec['seconds']);
+    }
+
+    /**
+     * Familia 4 · Literal booleano (D-3).
+     *
+     * MariaDB guarda los booleanos en `TINYINT(1)` y los compara con `1` y `0`; PostgreSQL usa el
+     * tipo `BOOLEAN`, que **rechaza** esos números: `is_active = 1` no es un operador válido allí.
+     * La regla es la misma —verdadero o falso— y cada motor la escribe como la entiende.
+     *
+     * Los valores que cruzan como **parámetro enlazado** no pasan por aquí: ésos van con
+     * `PDO::PARAM_BOOL`, que es la forma que los dos drivers traducen correctamente.
+     */
+    public function booleanLiteral(bool $value): string
+    {
+        if ($this->isPostgres()) {
+            return $value ? 'TRUE' : 'FALSE';
+        }
+
+        return $value ? '1' : '0';
+    }
+
+    /**
+     * Familia 5 · Condición de «expediente activo» de una máquina (D-6, Art. V.2 y V.6).
+     *
+     * MariaDB materializa la condición en una columna generada `is_active_ticket`
+     * (`IF(status IN ('CLOSED','CANCELLED'), NULL, 1)`), que es la que entra en su índice único
+     * compuesto. PostgreSQL no necesita esa columna y **no la tiene**: su forma es el predicado
+     * sobre el estado, el mismo que sostiene el índice único parcial
+     * `uq_machine_active_ticket`. Escribir `is_active_ticket = 1` contra PostgreSQL no sería una
+     * consulta lenta: sería una columna inexistente.
+     *
+     * El alias se compone **sin citar**, para que el fragmento case con la sentencia donde se
+     * inserta —el llamante escribe sus nombres tal cual—; su forma se valida aquí para que no
+     * pueda viajar nada que no sea un nombre simple.
+     *
+     * @throws InvalidArgumentException Si el alias no es un nombre simple.
+     */
+    public function activeTicketCondition(?string $alias = null): string
+    {
+        $prefix = '';
+        if ($alias !== null) {
+            $trimmed = trim($alias);
+            if ($trimmed === '' || preg_match(self::IDENTIFIER_PATTERN, $trimmed) !== 1 || str_contains($trimmed, '.')) {
+                throw new InvalidArgumentException(sprintf(
+                    'Alias no admitido («%s») en la condición de expediente activo: se espera un nombre simple, sin citar y sin cualificar (T-HYBRID-25).',
+                    $alias
+                ));
+            }
+            $prefix = $trimmed . '.';
+        }
+
+        return $this->isPostgres()
+            ? sprintf("%sstatus NOT IN ('CLOSED', 'CANCELLED')", $prefix)
+            : sprintf('%sis_active_ticket = 1', $prefix);
+    }
+
+    /**
+     * Familia 6 · Clave canónica de identidad (D-5, EARS-08.5).
+     *
+     * Reproduce, en la aplicación, la misma identidad que la colación `utf8mb4_unicode_ci`
+     * resuelve sola en el motor local: dos logins o dos códigos de sede que sólo difieren en
+     * mayúsculas, en acentos o en espacios **finales** son la misma identidad, y un duplicado
+     * tiene que seguir siendo imposible en los dos motores.
+     *
+     * Los espacios finales se recortan porque la colación local compara con relleno (`PAD SPACE`)
+     * y PostgreSQL no: sin recortarlos, `'ana@x.com '` y `'ana@x.com'` colisionarían en MariaDB
+     * y no en el motor nuevo, que es exactamente la divergencia que D-5 prohíbe. Los espacios
+     * **iniciales** sí distinguen en los dos motores y por eso no se tocan.
+     *
+     * La clave se calcula igual en los dos motores —la regla es una— aunque sólo se use como
+     * columna donde el motor la necesita: ver {@see requiresCanonicalIdentityColumns()}.
+     */
+    public function identityKey(string $value): string
+    {
+        $withoutTrailingSpaces = rtrim($value);
+        $lowered = mb_strtolower($withoutTrailingSpaces, 'UTF-8');
+
+        return strtr($lowered, self::FOLDED_LETTERS);
+    }
+
+    /**
+     * Familia 6 · ¿El esquema de este motor exige escribir la clave canónica en su columna?
+     *
+     * En PostgreSQL sí: `email_key` y `site_code_key` son columnas `NOT NULL` con índice único
+     * (A-1/A-2), de modo que una fila sin clave no es un duplicado invisible, es un alta
+     * incompleta y la base la rechaza. En MariaDB no existen esas columnas: allí la unicidad la
+     * aplica la colación, y escribirlas sería una columna inexistente.
+     */
+    public function requiresCanonicalIdentityColumns(): bool
+    {
+        return $this->isPostgres();
     }
 
     /**

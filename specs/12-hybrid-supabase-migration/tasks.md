@@ -65,7 +65,7 @@
   * **Dependencias:** T-HYBRID-06
   * **Hecho cuando:** Existe `src/Infrastructure/Dialect/SqlDialectAdapter.php` que, según el driver activo, resuelve las construcciones que **carecen** de forma estándar común: cláusula de upsert (`ON CONFLICT ... DO UPDATE` con `EXCLUDED` frente a `ON DUPLICATE KEY UPDATE` con `VALUES()`), extracción de JSON (`->>`/`jsonb` frente a `JSON_UNQUOTE(JSON_EXTRACT(...))`) y aritmética de intervalos y diferencias temporales (`CURRENT_TIMESTAMP - INTERVAL` y `EXTRACT(EPOCH FROM ...)` frente a `DATE_SUB`/`TIMESTAMPDIFF`). Los repositorios consumen ese adaptador en lugar de duplicar queries divergentes, y `SqlDialectPortabilityTest` certifica que no queda SQL privativo **fuera** del adaptador. Se abandona formalmente la premisa de «una consulta ANSI para todo».
 
-- [ ] **T-HYBRID-09: Normalizar dialecto SQL ANSI en repositorios PDO (Grupo 1: Incidencias, Máquinas, Sedes, Usuarios)**
+- [x] **T-HYBRID-09: Normalizar dialecto SQL ANSI en repositorios PDO (Grupo 1: Incidencias, Máquinas, Sedes, Usuarios)**
   * **Requisitos:** RF-01.1, RF-01.5, RF-08.1, RF-08.2, RF-08.3, RF-08.5, Constitución Art. III.1, Art. V.1, Art. V.2
   * **Dependencias:** T-HYBRID-06, T-HYBRID-25
   * **Hecho cuando:** `PdoIncidentRepository.php`, `PdoMachineRepository.php`, `PdoLocationRepository.php` y `PdoUserRepository.php` eliminan backticks (\`), resuelven sus cálculos de fecha y sus lecturas de JSON a través del adaptador de dialecto (`DATE_SUB(NOW(), INTERVAL ...)` $\rightarrow$ `(CURRENT_TIMESTAMP - INTERVAL ...)`), adaptan columnas `is_active` con `PDO::PARAM_BOOL`, **escriben la clave canónica** en cada alta o modificación de `users` y `locations` (EARS-08.5) y ejecutan sin fallos en ambos motores relacionales.

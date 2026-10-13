@@ -11,20 +11,30 @@ use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
  * PdoMachineRepository
  * 
  * Implementación nativa con PDO para la gestión del parque de máquinas dispensadoras.
  * Enriquecimiento automático de estado de aviso activo / ventana de garantía (RF-01, RF-02).
+ *
+ * Los identificadores se escriben desnudos —los dos motores admiten así todo el esquema— y las
+ * cuatro diferencias que no tienen forma común se le piden al adaptador de dialecto, que es el
+ * punto único de traducción (RF-01.5, T-HYBRID-25): el booleano literal (D-3) y la condición de
+ * expediente activo (D-6, Art. V.2 y V.6), que en el motor local es una columna generada y en el
+ * nuevo el predicado sobre el estado.
  */
 class PdoMachineRepository implements MachineRepositoryInterface
 {
     private PDO $pdo;
 
+    private SqlDialectAdapter $dialect;
+
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
+        $this->dialect = SqlDialectAdapter::forConnection($this->pdo);
     }
 
     /**
@@ -38,35 +48,35 @@ class PdoMachineRepository implements MachineRepositoryInterface
     {
         $sql = "
             SELECT 
-                m.`id`,
-                m.`location_id`,
-                m.`code`,
-                m.`model`,
-                m.`machine_type`,
-                m.`floor_wing`,
-                m.`notes`,
-                m.`is_active`,
-                m.`is_blocked_no_access`,
-                m.`created_at`,
-                m.`updated_at`,
-                m.`deleted_at`,
-                i.`id` AS inc_id,
-                i.`ticket_code` AS inc_ticket_code,
-                i.`status` AS inc_status,
-                i.`category` AS inc_category,
-                i.`urgency` AS inc_urgency,
-                i.`created_at` AS inc_created_at,
-                i.`resolved_at` AS inc_resolved_at,
-                i.`pending_info_reason_category` AS inc_pending_info_reason_category,
-                i.`pending_info_reason_text` AS inc_pending_info_reason_text
-            FROM `machines` m
-            LEFT JOIN `incidents` i ON i.`machine_id` = m.`id`
-                AND i.`deleted_at` IS NULL
-                AND i.`is_active_ticket` = 1
-            WHERE m.`location_id` = :location_id
-              AND m.`deleted_at` IS NULL
-              AND m.`is_active` = 1
-            ORDER BY m.`code` ASC
+                m.id,
+                m.location_id,
+                m.code,
+                m.model,
+                m.machine_type,
+                m.floor_wing,
+                m.notes,
+                m.is_active,
+                m.is_blocked_no_access,
+                m.created_at,
+                m.updated_at,
+                m.deleted_at,
+                i.id AS inc_id,
+                i.ticket_code AS inc_ticket_code,
+                i.status AS inc_status,
+                i.category AS inc_category,
+                i.urgency AS inc_urgency,
+                i.created_at AS inc_created_at,
+                i.resolved_at AS inc_resolved_at,
+                i.pending_info_reason_category AS inc_pending_info_reason_category,
+                i.pending_info_reason_text AS inc_pending_info_reason_text
+            FROM machines m
+            LEFT JOIN incidents i ON i.machine_id = m.id
+                AND i.deleted_at IS NULL
+                AND {$this->dialect->activeTicketCondition('i')}
+            WHERE m.location_id = :location_id
+              AND m.deleted_at IS NULL
+              AND m.is_active = {$this->dialect->booleanLiteral(true)}
+            ORDER BY m.code ASC
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -94,36 +104,36 @@ class PdoMachineRepository implements MachineRepositoryInterface
     {
         $sql = "
             SELECT 
-                m.`id`,
-                m.`location_id`,
-                m.`code`,
-                m.`model`,
-                m.`machine_type`,
-                m.`floor_wing`,
-                m.`notes`,
-                m.`is_active`,
-                m.`is_blocked_no_access`,
-                m.`created_at`,
-                m.`updated_at`,
-                m.`deleted_at`,
-                i.`id` AS inc_id,
-                i.`ticket_code` AS inc_ticket_code,
-                i.`status` AS inc_status,
-                i.`category` AS inc_category,
-                i.`urgency` AS inc_urgency,
-                i.`created_at` AS inc_created_at,
-                i.`resolved_at` AS inc_resolved_at,
-                i.`pending_info_reason_category` AS inc_pending_info_reason_category,
-                i.`pending_info_reason_text` AS inc_pending_info_reason_text
-            FROM `machines` m
-            LEFT JOIN `incidents` i ON i.`machine_id` = m.`id`
-                AND i.`deleted_at` IS NULL
-                AND i.`is_active_ticket` = 1
-            WHERE m.`id` = :id
+                m.id,
+                m.location_id,
+                m.code,
+                m.model,
+                m.machine_type,
+                m.floor_wing,
+                m.notes,
+                m.is_active,
+                m.is_blocked_no_access,
+                m.created_at,
+                m.updated_at,
+                m.deleted_at,
+                i.id AS inc_id,
+                i.ticket_code AS inc_ticket_code,
+                i.status AS inc_status,
+                i.category AS inc_category,
+                i.urgency AS inc_urgency,
+                i.created_at AS inc_created_at,
+                i.resolved_at AS inc_resolved_at,
+                i.pending_info_reason_category AS inc_pending_info_reason_category,
+                i.pending_info_reason_text AS inc_pending_info_reason_text
+            FROM machines m
+            LEFT JOIN incidents i ON i.machine_id = m.id
+                AND i.deleted_at IS NULL
+                AND {$this->dialect->activeTicketCondition('i')}
+            WHERE m.id = :id
         ";
 
         if (!$allowDeleted) {
-            $sql .= " AND m.`deleted_at` IS NULL";
+            $sql .= " AND m.deleted_at IS NULL";
         }
 
         $sql .= " LIMIT 1";
@@ -154,36 +164,36 @@ class PdoMachineRepository implements MachineRepositoryInterface
 
         $sql = "
             SELECT 
-                m.`id`,
-                m.`location_id`,
-                m.`code`,
-                m.`model`,
-                m.`machine_type`,
-                m.`floor_wing`,
-                m.`notes`,
-                m.`is_active`,
-                m.`is_blocked_no_access`,
-                m.`created_at`,
-                m.`updated_at`,
-                m.`deleted_at`,
-                i.`id` AS inc_id,
-                i.`ticket_code` AS inc_ticket_code,
-                i.`status` AS inc_status,
-                i.`category` AS inc_category,
-                i.`urgency` AS inc_urgency,
-                i.`created_at` AS inc_created_at,
-                i.`resolved_at` AS inc_resolved_at,
-                i.`pending_info_reason_category` AS inc_pending_info_reason_category,
-                i.`pending_info_reason_text` AS inc_pending_info_reason_text
-            FROM `machines` m
-            LEFT JOIN `incidents` i ON i.`machine_id` = m.`id`
-                AND i.`deleted_at` IS NULL
-                AND i.`is_active_ticket` = 1
-            WHERE m.`code` = :code
+                m.id,
+                m.location_id,
+                m.code,
+                m.model,
+                m.machine_type,
+                m.floor_wing,
+                m.notes,
+                m.is_active,
+                m.is_blocked_no_access,
+                m.created_at,
+                m.updated_at,
+                m.deleted_at,
+                i.id AS inc_id,
+                i.ticket_code AS inc_ticket_code,
+                i.status AS inc_status,
+                i.category AS inc_category,
+                i.urgency AS inc_urgency,
+                i.created_at AS inc_created_at,
+                i.resolved_at AS inc_resolved_at,
+                i.pending_info_reason_category AS inc_pending_info_reason_category,
+                i.pending_info_reason_text AS inc_pending_info_reason_text
+            FROM machines m
+            LEFT JOIN incidents i ON i.machine_id = m.id
+                AND i.deleted_at IS NULL
+                AND {$this->dialect->activeTicketCondition('i')}
+            WHERE m.code = :code
         ";
 
         if (!$allowDeleted) {
-            $sql .= " AND m.`deleted_at` IS NULL";
+            $sql .= " AND m.deleted_at IS NULL";
         }
 
         $sql .= " LIMIT 1";
@@ -210,17 +220,17 @@ class PdoMachineRepository implements MachineRepositoryInterface
     public function create(array $data): Machine
     {
         $sql = "
-            INSERT INTO `machines` (
-                `location_id`,
-                `code`,
-                `model`,
-                `machine_type`,
-                `floor_wing`,
-                `notes`,
-                `is_active`,
-                `created_at`,
-                `updated_at`,
-                `deleted_at`
+            INSERT INTO machines (
+                location_id,
+                code,
+                model,
+                machine_type,
+                floor_wing,
+                notes,
+                is_active,
+                created_at,
+                updated_at,
+                deleted_at
             ) VALUES (
                 :location_id,
                 :code,
@@ -228,22 +238,28 @@ class PdoMachineRepository implements MachineRepositoryInterface
                 :machine_type,
                 :floor_wing,
                 :notes,
-                1,
+                :is_active,
                 CURRENT_TIMESTAMP,
                 CURRENT_TIMESTAMP,
                 NULL
             )
         ";
 
+        // El booleano cruza como parámetro enlazado con `PDO::PARAM_BOOL`: es la forma que los dos
+        // drivers traducen al tipo de cada motor (D-3), mientras que el `1` de MariaDB no es
+        // siquiera un operador válido en el motor nuevo. Los valores se enlazan todos por nombre y
+        // la sentencia se ejecuta sin array: mezclar `bindValue()` con un array de ejecución hace
+        // que PDO pierda la cuenta de los parámetros ya enlazados (`HY093`).
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([
-            ':location_id'  => (int)$data['location_id'],
-            ':code'         => strtoupper(trim((string)$data['code'])),
-            ':model'        => trim((string)$data['model']),
-            ':machine_type' => trim((string)$data['machine_type']),
-            ':floor_wing'   => trim((string)$data['floor_wing']),
-            ':notes'        => isset($data['notes']) && $data['notes'] !== '' ? trim((string)$data['notes']) : null,
-        ]);
+        $stmt->bindValue(':location_id', (int)$data['location_id'], PDO::PARAM_INT);
+        $stmt->bindValue(':code', strtoupper(trim((string)$data['code'])), PDO::PARAM_STR);
+        $stmt->bindValue(':model', trim((string)$data['model']), PDO::PARAM_STR);
+        $stmt->bindValue(':machine_type', trim((string)$data['machine_type']), PDO::PARAM_STR);
+        $stmt->bindValue(':floor_wing', trim((string)$data['floor_wing']), PDO::PARAM_STR);
+        $notes = isset($data['notes']) && $data['notes'] !== '' ? trim((string)$data['notes']) : null;
+        $stmt->bindValue(':notes', $notes, $notes !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(':is_active', true, PDO::PARAM_BOOL);
+        $stmt->execute();
 
         $newId = (int)$this->pdo->lastInsertId();
         $created = $this->findById($newId, false, true);
@@ -267,19 +283,19 @@ class PdoMachineRepository implements MachineRepositoryInterface
         $params = [':id' => $id];
 
         if (array_key_exists('model', $data)) {
-            $fields[] = "`model` = :model";
+            $fields[] = "model = :model";
             $params[':model'] = trim((string)$data['model']);
         }
         if (array_key_exists('machine_type', $data)) {
-            $fields[] = "`machine_type` = :machine_type";
+            $fields[] = "machine_type = :machine_type";
             $params[':machine_type'] = trim((string)$data['machine_type']);
         }
         if (array_key_exists('floor_wing', $data)) {
-            $fields[] = "`floor_wing` = :floor_wing";
+            $fields[] = "floor_wing = :floor_wing";
             $params[':floor_wing'] = trim((string)$data['floor_wing']);
         }
         if (array_key_exists('notes', $data)) {
-            $fields[] = "`notes` = :notes";
+            $fields[] = "notes = :notes";
             $params[':notes'] = $data['notes'] !== null && $data['notes'] !== '' ? trim((string)$data['notes']) : null;
         }
 
@@ -287,9 +303,9 @@ class PdoMachineRepository implements MachineRepositoryInterface
             return false;
         }
 
-        $fields[] = "`updated_at` = CURRENT_TIMESTAMP";
+        $fields[] = "updated_at = CURRENT_TIMESTAMP";
 
-        $sql = "UPDATE `machines` SET " . implode(', ', $fields) . " WHERE `id` = :id";
+        $sql = "UPDATE machines SET " . implode(', ', $fields) . " WHERE id = :id";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
@@ -308,12 +324,12 @@ class PdoMachineRepository implements MachineRepositoryInterface
     public function transfer(int $id, int $targetLocationId, string $floorWing, ?string $notes = null): bool
     {
         $sql = "
-            UPDATE `machines`
-            SET `location_id` = :target_location_id,
-                `floor_wing` = :floor_wing,
-                `notes` = COALESCE(:notes, `notes`),
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
+            UPDATE machines
+            SET location_id = :target_location_id,
+                floor_wing = :floor_wing,
+                notes = COALESCE(:notes, notes),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -339,13 +355,13 @@ class PdoMachineRepository implements MachineRepositoryInterface
     {
         if ($newLocationId !== null && $newFloorWing !== null) {
             $sql = "
-                UPDATE `machines`
-                SET `is_active` = 1,
-                    `deleted_at` = NULL,
-                    `location_id` = :location_id,
-                    `floor_wing` = :floor_wing,
-                    `updated_at` = CURRENT_TIMESTAMP
-                WHERE `id` = :id
+                UPDATE machines
+                SET is_active = {$this->dialect->booleanLiteral(true)},
+                    deleted_at = NULL,
+                    location_id = :location_id,
+                    floor_wing = :floor_wing,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id
             ";
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute([
@@ -355,11 +371,11 @@ class PdoMachineRepository implements MachineRepositoryInterface
             ]);
         } else {
             $sql = "
-                UPDATE `machines`
-                SET `is_active` = 1,
-                    `deleted_at` = NULL,
-                    `updated_at` = CURRENT_TIMESTAMP
-                WHERE `id` = :id
+                UPDATE machines
+                SET is_active = {$this->dialect->booleanLiteral(true)},
+                    deleted_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id
             ";
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute([':id' => $id]);
@@ -378,31 +394,31 @@ class PdoMachineRepository implements MachineRepositoryInterface
     {
         $sql = "
             SELECT 
-                m.`id`,
-                m.`location_id`,
-                m.`code`,
-                m.`model`,
-                m.`machine_type`,
-                m.`floor_wing`,
-                m.`notes`,
-                m.`is_active`,
-                m.`is_blocked_no_access`,
-                m.`sanitary_status`,
-                m.`next_sanitary_inspection_due`,
-                m.`is_seasonal_pause`,
-                m.`created_at`,
-                m.`updated_at`,
-                m.`deleted_at`,
-                l.`name` AS location_name,
-                l.`site_code` AS location_site_code,
-                i.`ticket_code` AS inc_ticket_code,
-                i.`status` AS inc_status,
-                i.`resolved_at` AS inc_resolved_at
-            FROM `machines` m
-            LEFT JOIN `locations` l ON m.`location_id` = l.`id`
-            LEFT JOIN `incidents` i ON i.`machine_id` = m.`id`
-                AND i.`deleted_at` IS NULL
-                AND i.`is_active_ticket` = 1
+                m.id,
+                m.location_id,
+                m.code,
+                m.model,
+                m.machine_type,
+                m.floor_wing,
+                m.notes,
+                m.is_active,
+                m.is_blocked_no_access,
+                m.sanitary_status,
+                m.next_sanitary_inspection_due,
+                m.is_seasonal_pause,
+                m.created_at,
+                m.updated_at,
+                m.deleted_at,
+                l.name AS location_name,
+                l.site_code AS location_site_code,
+                i.ticket_code AS inc_ticket_code,
+                i.status AS inc_status,
+                i.resolved_at AS inc_resolved_at
+            FROM machines m
+            LEFT JOIN locations l ON m.location_id = l.id
+            LEFT JOIN incidents i ON i.machine_id = m.id
+                AND i.deleted_at IS NULL
+                AND {$this->dialect->activeTicketCondition('i')}
             WHERE 1=1
         ";
 
@@ -410,29 +426,29 @@ class PdoMachineRepository implements MachineRepositoryInterface
         $status = $filters['status'] ?? 'all';
 
         if ($status === 'active') {
-            $sql .= " AND m.`is_active` = 1 AND m.`deleted_at` IS NULL";
+            $sql .= " AND m.is_active = {$this->dialect->booleanLiteral(true)} AND m.deleted_at IS NULL";
         } elseif ($status === 'inactive') {
-            $sql .= " AND (m.`is_active` = 0 OR m.`deleted_at` IS NOT NULL)";
+            $sql .= " AND (m.is_active = {$this->dialect->booleanLiteral(false)} OR m.deleted_at IS NOT NULL)";
         }
 
         if (!empty($filters['location_id'])) {
-            $sql .= " AND m.`location_id` = :location_id";
+            $sql .= " AND m.location_id = :location_id";
             $params[':location_id'] = (int)$filters['location_id'];
         }
 
         if (!empty($filters['machine_type'])) {
-            $sql .= " AND m.`machine_type` = :machine_type";
+            $sql .= " AND m.machine_type = :machine_type";
             $params[':machine_type'] = trim((string)$filters['machine_type']);
         }
 
         if (!empty($filters['search'])) {
             $term = '%' . trim((string)$filters['search']) . '%';
             $sql .= " AND (
-                m.`code` LIKE :s1 
-                OR m.`model` LIKE :s2 
-                OR m.`floor_wing` LIKE :s3 
-                OR m.`notes` LIKE :s4 
-                OR l.`name` LIKE :s5
+                m.code LIKE :s1 
+                OR m.model LIKE :s2 
+                OR m.floor_wing LIKE :s3 
+                OR m.notes LIKE :s4 
+                OR l.name LIKE :s5
             )";
             $params[':s1'] = $term;
             $params[':s2'] = $term;
@@ -441,7 +457,7 @@ class PdoMachineRepository implements MachineRepositoryInterface
             $params[':s5'] = $term;
         }
 
-        $sql .= " ORDER BY m.`code` ASC";
+        $sql .= " ORDER BY m.code ASC";
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
@@ -512,12 +528,12 @@ class PdoMachineRepository implements MachineRepositoryInterface
     public function getActiveTicketOrWarranty(int $machineId): ?array
     {
         $sql = "
-            SELECT `ticket_code`, `status`, `resolved_at`
-            FROM `incidents`
-            WHERE `machine_id` = :machine_id
-              AND `deleted_at` IS NULL
-              AND `is_active_ticket` = 1
-            ORDER BY `id` DESC
+            SELECT ticket_code, status, resolved_at
+            FROM incidents
+            WHERE machine_id = :machine_id
+              AND deleted_at IS NULL
+              AND {$this->dialect->activeTicketCondition()}
+            ORDER BY id DESC
             LIMIT 1
         ";
 
@@ -579,13 +595,13 @@ class PdoMachineRepository implements MachineRepositoryInterface
         $blocked = $machine->blockForNoAccess($ticketCode);
 
         $stmt = $this->pdo->prepare("
-            UPDATE `machines`
-            SET `is_blocked_no_access` = 1,
-                `is_active` = 0,
-                `notes` = :notes,
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
-              AND `deleted_at` IS NULL
+            UPDATE machines
+            SET is_blocked_no_access = {$this->dialect->booleanLiteral(true)},
+                is_active = {$this->dialect->booleanLiteral(false)},
+                notes = :notes,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND deleted_at IS NULL
         ");
         $stmt->execute([
             ':notes' => $blocked->getNotes() ?? $annotation,
@@ -635,14 +651,14 @@ class PdoMachineRepository implements MachineRepositoryInterface
         $cleared = $machine->clearNoAccessBlock($ticketCode);
 
         $stmt = $this->pdo->prepare("
-            UPDATE `machines`
-            SET `is_blocked_no_access` = 0,
-                `is_active` = 1,
-                `notes` = :notes,
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
-              AND `is_blocked_no_access` = 1
-              AND `deleted_at` IS NULL
+            UPDATE machines
+            SET is_blocked_no_access = {$this->dialect->booleanLiteral(false)},
+                is_active = {$this->dialect->booleanLiteral(true)},
+                notes = :notes,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND is_blocked_no_access = {$this->dialect->booleanLiteral(true)}
+              AND deleted_at IS NULL
         ");
         $stmt->execute([
             ':notes' => $cleared->getNotes() ?? $annotation,
@@ -661,11 +677,11 @@ class PdoMachineRepository implements MachineRepositoryInterface
     public function softDelete(int $id): bool
     {
         $sql = "
-            UPDATE `machines`
-            SET `is_active` = 0,
-                `deleted_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
-              AND `deleted_at` IS NULL
+            UPDATE machines
+            SET is_active = {$this->dialect->booleanLiteral(false)},
+                deleted_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND deleted_at IS NULL
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -683,12 +699,12 @@ class PdoMachineRepository implements MachineRepositoryInterface
     public function restore(int $id): bool
     {
         $sql = "
-            UPDATE `machines`
-            SET `is_active` = 1,
-                `deleted_at` = NULL,
-                `updated_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
-              AND `deleted_at` IS NOT NULL
+            UPDATE machines
+            SET is_active = {$this->dialect->booleanLiteral(true)},
+                deleted_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND deleted_at IS NOT NULL
         ";
 
         $stmt = $this->pdo->prepare($sql);

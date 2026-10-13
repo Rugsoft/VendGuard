@@ -26,7 +26,9 @@ use VendGuard\Core\Domain\Repository\IncidentSiteResponseRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SanitaryClockCandidateRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
  * PdoIncidentRepository
@@ -34,6 +36,13 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  * Implementación de persistencia con PDO para el ciclo de vida de Incidencias e Historial.
  * Garantiza transaccionalidad atómica en la creación, inmutabilidad de la auditoría y
  * cumplimiento estricto del mandato constitucional de Soft Delete (RNF-03).
+ *
+ * Los identificadores se escriben desnudos —los dos motores admiten así todo el esquema— y las
+ * diferencias que no tienen forma común se le piden al adaptador de dialecto, que es el punto
+ * único de traducción (RF-01.5, T-HYBRID-25): el booleano literal (D-3), la condición de
+ * expediente activo (D-6, Art. V.2 y V.6) y la aritmética de intervalos de las ventanas de 48 h.
+ * El orden del triaje no es una diferencia de dialecto —tiene forma común—, pero tampoco se
+ * escribe a mano dos veces: se deriva del rango de prioridad que declara el dominio.
  */
 class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface
 {
@@ -55,9 +64,39 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
     private PDO $pdo;
 
+    private SqlDialectAdapter $dialect;
+
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
+        $this->dialect = SqlDialectAdapter::forConnection($this->pdo);
+    }
+
+    /**
+     * Orden declarado del triaje: la criticidad que el dominio ya jerarquiza (RF-05, EARS 5.1).
+     *
+     * El motor local ordena con `FIELD()`, que no existe en el motor nuevo; el orden, en cambio,
+     * no es una diferencia de dialecto: es una regla del dominio —`UrgencyLevel::priorityRank()`—
+     * y tiene una forma común a los dos motores, la expresión `CASE`. Se compone una sola vez aquí,
+     * en orden ascendente de posición (mayor prioridad primero) y con `ELSE 0`, que reproduce el
+     * cero que `FIELD` devuelve para un valor fuera de la lista, de modo que la consulta no
+     * duplica la regla ni cambia de comportamiento según el motor.
+     */
+    private function triageOrderExpression(): string
+    {
+        $byPriority = [];
+        foreach (UrgencyLevel::cases() as $urgency) {
+            $byPriority[$urgency->priorityRank()] = $urgency->value;
+        }
+        krsort($byPriority);
+
+        $cases = [];
+        $position = 1;
+        foreach ($byPriority as $urgencyValue) {
+            $cases[] = sprintf("WHEN '%s' THEN %d", $urgencyValue, $position++);
+        }
+
+        return 'CASE i.urgency ' . implode(' ', $cases) . ' ELSE 0 END';
     }
 
     /**
@@ -106,30 +145,30 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             }
 
             $sql = "
-                INSERT INTO `incidents` (
-                    `ticket_code`,
-                    `machine_id`,
-                    `location_id`,
-                    `assigned_technician_id`,
-                    `reporter_name`,
-                    `reporter_phone`,
-                    `category`,
-                    `description`,
-                    `retained_money_amount`,
-                    `photo_path`,
-                    `urgency`,
-                    `status`,
-                    `assigned_at`,
-                    `started_at`,
-                    `pending_parts_reason`,
-                    `resolution_diagnosis`,
-                    `resolution_action`,
-                    `resolved_at`,
-                    `reopen_reason`,
-                    `reopened_at`,
-                    `closed_at`,
-                    `cancellation_reason`,
-                    `cancelled_at`
+                INSERT INTO incidents (
+                    ticket_code,
+                    machine_id,
+                    location_id,
+                    assigned_technician_id,
+                    reporter_name,
+                    reporter_phone,
+                    category,
+                    description,
+                    retained_money_amount,
+                    photo_path,
+                    urgency,
+                    status,
+                    assigned_at,
+                    started_at,
+                    pending_parts_reason,
+                    resolution_diagnosis,
+                    resolution_action,
+                    resolved_at,
+                    reopen_reason,
+                    reopened_at,
+                    closed_at,
+                    cancellation_reason,
+                    cancelled_at
                 ) VALUES (
                     :ticket_code,
                     :machine_id,
@@ -264,7 +303,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         }
 
         $lock = $this->pdo->prepare(
-            'SELECT `id` FROM `incidents` WHERE `id` = :id AND `deleted_at` IS NULL FOR UPDATE'
+            'SELECT id FROM incidents WHERE id = :id AND deleted_at IS NULL FOR UPDATE'
         );
         $lock->bindValue(':id', $id, PDO::PARAM_INT);
         $lock->execute();
@@ -310,15 +349,15 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         $sql = "
             SELECT EXISTS (
                 SELECT 1
-                FROM `incidents` i
-                JOIN `audit_log` a
-                  ON a.`entity_type` = 'TICKET'
-                 AND a.`entity_id` = i.`id`
-                WHERE i.`id` = :incident_id
-                  AND i.`paused_at` IS NOT NULL
-                  AND a.`action` = 'INCIDENT_COMMENT_ADDED'
-                  AND a.`user_role` = 'SITE_MANAGER'
-                  AND a.`created_at` >= i.`paused_at`
+                FROM incidents i
+                JOIN audit_log a
+                  ON a.entity_type = 'TICKET'
+                 AND a.entity_id = i.id
+                WHERE i.id = :incident_id
+                  AND i.paused_at IS NOT NULL
+                  AND a.action = 'INCIDENT_COMMENT_ADDED'
+                  AND a.user_role = 'SITE_MANAGER'
+                  AND a.created_at >= i.paused_at
             )
         ";
 
@@ -344,10 +383,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 l.name AS location_name,
                 l.site_code AS location_site_code,
                 u.name AS technician_name
-            FROM `incidents` i
-            LEFT JOIN `machines` m ON i.machine_id = m.id
-            LEFT JOIN `locations` l ON i.location_id = l.id
-            LEFT JOIN `users` u ON i.assigned_technician_id = u.id
+            FROM incidents i
+            LEFT JOIN machines m ON i.machine_id = m.id
+            LEFT JOIN locations l ON i.location_id = l.id
+            LEFT JOIN users u ON i.assigned_technician_id = u.id
             WHERE i.id = :id
               AND i.deleted_at IS NULL
             LIMIT 1
@@ -381,10 +420,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 l.name AS location_name,
                 l.site_code AS location_site_code,
                 u.name AS technician_name
-            FROM `incidents` i
-            LEFT JOIN `machines` m ON i.machine_id = m.id
-            LEFT JOIN `locations` l ON i.location_id = l.id
-            LEFT JOIN `users` u ON i.assigned_technician_id = u.id
+            FROM incidents i
+            LEFT JOIN machines m ON i.machine_id = m.id
+            LEFT JOIN locations l ON i.location_id = l.id
+            LEFT JOIN users u ON i.assigned_technician_id = u.id
             WHERE i.ticket_code = :ticket_code
               AND i.deleted_at IS NULL
             LIMIT 1
@@ -416,12 +455,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 l.name AS location_name,
                 l.site_code AS location_site_code,
                 u.name AS technician_name
-            FROM `incidents` i
-            LEFT JOIN `machines` m ON i.machine_id = m.id
-            LEFT JOIN `locations` l ON i.location_id = l.id
-            LEFT JOIN `users` u ON i.assigned_technician_id = u.id
+            FROM incidents i
+            LEFT JOIN machines m ON i.machine_id = m.id
+            LEFT JOIN locations l ON i.location_id = l.id
+            LEFT JOIN users u ON i.assigned_technician_id = u.id
             WHERE i.machine_id = :machine_id
-              AND i.is_active_ticket = 1
+              AND {$this->dialect->activeTicketCondition('i')}
               AND i.deleted_at IS NULL
             LIMIT 1
         ";
@@ -459,14 +498,14 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 l.name AS location_name,
                 l.site_code AS location_site_code,
                 u.name AS technician_name
-            FROM `incidents` i
-            LEFT JOIN `machines` m ON i.machine_id = m.id
-            LEFT JOIN `locations` l ON i.location_id = l.id
-            LEFT JOIN `users` u ON i.assigned_technician_id = u.id
+            FROM incidents i
+            LEFT JOIN machines m ON i.machine_id = m.id
+            LEFT JOIN locations l ON i.location_id = l.id
+            LEFT JOIN users u ON i.assigned_technician_id = u.id
             WHERE i.machine_id = :machine_id
               AND i.status = 'RESOLVED'
               AND i.resolved_at IS NOT NULL
-              AND i.resolved_at >= DATE_SUB(NOW(), INTERVAL 48 HOUR)
+              AND i.resolved_at >= {$this->dialect->subtractInterval('NOW()', 48, 'HOUR')}
               AND i.deleted_at IS NULL
             ORDER BY i.resolved_at DESC
             LIMIT 1
@@ -502,16 +541,16 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 l.name AS location_name,
                 l.site_code AS location_site_code,
                 u.name AS technician_name
-            FROM `incidents` i
-            LEFT JOIN `machines` m ON i.machine_id = m.id
-            LEFT JOIN `locations` l ON i.location_id = l.id
-            LEFT JOIN `users` u ON i.assigned_technician_id = u.id
+            FROM incidents i
+            LEFT JOIN machines m ON i.machine_id = m.id
+            LEFT JOIN locations l ON i.location_id = l.id
+            LEFT JOIN users u ON i.assigned_technician_id = u.id
             WHERE i.location_id = :location_id
               AND i.deleted_at IS NULL
         ";
 
         if ($activeOnly) {
-            $sql .= " AND i.is_active_ticket = 1";
+            $sql .= " AND {$this->dialect->activeTicketCondition('i')}";
         }
 
         $sql .= " ORDER BY i.created_at DESC";
@@ -545,10 +584,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 l.name AS location_name,
                 l.site_code AS location_site_code,
                 u.name AS technician_name
-            FROM `incidents` i
-            LEFT JOIN `machines` m ON i.machine_id = m.id
-            LEFT JOIN `locations` l ON i.location_id = l.id
-            LEFT JOIN `users` u ON i.assigned_technician_id = u.id
+            FROM incidents i
+            LEFT JOIN machines m ON i.machine_id = m.id
+            LEFT JOIN locations l ON i.location_id = l.id
+            LEFT JOIN users u ON i.assigned_technician_id = u.id
             WHERE i.machine_id = :machine_id
               AND i.deleted_at IS NULL
         ";
@@ -589,10 +628,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 l.site_code AS location_site_code,
                 u.name AS technician_name,
                 u.operator_code AS technician_operator_code
-            FROM `incidents` i
-            LEFT JOIN `machines` m ON i.machine_id = m.id
-            LEFT JOIN `locations` l ON i.location_id = l.id
-            LEFT JOIN `users` u ON i.assigned_technician_id = u.id
+            FROM incidents i
+            LEFT JOIN machines m ON i.machine_id = m.id
+            LEFT JOIN locations l ON i.location_id = l.id
+            LEFT JOIN users u ON i.assigned_technician_id = u.id
             WHERE i.deleted_at IS NULL
         ";
 
@@ -629,11 +668,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         }
 
         if (isset($filters['active_only']) && $filters['active_only'] === true) {
-            $sql .= " AND i.is_active_ticket = 1";
+            $sql .= " AND {$this->dialect->activeTicketCondition('i')}";
         }
 
         // Ordenar con máxima prioridad a CRITICAL, luego HIGH, MEDIUM, LOW, y por fecha de creación
-        $sql .= " ORDER BY FIELD(i.urgency, 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'), i.created_at ASC";
+        $sql .= " ORDER BY {$this->triageOrderExpression()}, i.created_at ASC";
 
         $stmt = $this->pdo->prepare($sql);
         foreach ($params as $param => $val) {
@@ -663,10 +702,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 l.name AS location_name,
                 l.site_code AS location_site_code,
                 u.name AS technician_name
-            FROM `incidents` i
-            LEFT JOIN `machines` m ON i.machine_id = m.id
-            LEFT JOIN `locations` l ON i.location_id = l.id
-            LEFT JOIN `users` u ON i.assigned_technician_id = u.id
+            FROM incidents i
+            LEFT JOIN machines m ON i.machine_id = m.id
+            LEFT JOIN locations l ON i.location_id = l.id
+            LEFT JOIN users u ON i.assigned_technician_id = u.id
             WHERE i.assigned_technician_id = :technician_id
               AND i.deleted_at IS NULL
         ";
@@ -684,7 +723,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         }
 
         // Ruta ordenada por criticidad y antigüedad
-        $sql .= " ORDER BY FIELD(i.urgency, 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'), i.created_at ASC";
+        $sql .= " ORDER BY {$this->triageOrderExpression()}, i.created_at ASC";
 
         $stmt = $this->pdo->prepare($sql);
         foreach ($params as $key => $val) {
@@ -760,7 +799,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
         try {
             $incident = $this->fetchSingleRow(
-                "SELECT i.* FROM `incidents` i WHERE i.deleted_at IS NULL"
+                "SELECT i.* FROM incidents i WHERE i.deleted_at IS NULL"
                 . ($ticketCode !== null ? " AND i.ticket_code = :ticket_code" : " AND i.id = :incident_id")
                 . " LIMIT 1",
                 $ticketCode !== null ? [':ticket_code' => $ticketCode] : [':incident_id' => $incidentId]
@@ -782,35 +821,35 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $result = [
                 'incident' => $incident,
                 'machine' => $this->fetchSingleRow(
-                    "SELECT id, location_id, code, model, machine_type, floor_wing, sanitary_status, notes, is_active\r\n                     FROM `machines` WHERE id = :machine_id LIMIT 1",
+                    "SELECT id, location_id, code, model, machine_type, floor_wing, sanitary_status, notes, is_active\r\n                     FROM machines WHERE id = :machine_id LIMIT 1",
                     [':machine_id' => (int)$incident['machine_id']]
                 ),
                 'location' => $this->fetchSingleRow(
-                    "SELECT id, site_code, name, address, has_physical_reception, latitude, longitude\r\n                     FROM `locations` WHERE id = :location_id LIMIT 1",
+                    "SELECT id, site_code, name, address, has_physical_reception, latitude, longitude\r\n                     FROM locations WHERE id = :location_id LIMIT 1",
                     [':location_id' => (int)$incident['location_id']]
                 ),
                 'technician' => $technicianId === null ? null : $this->fetchSingleRow(
-                    "SELECT id, name, operator_code, role, is_active\r\n                     FROM `users` WHERE id = :technician_id LIMIT 1",
+                    "SELECT id, name, operator_code, role, is_active\r\n                     FROM users WHERE id = :technician_id LIMIT 1",
                     [':technician_id' => $technicianId]
                 ),
                 'history' => $this->fetchAllRows(
-                    "SELECT h.id, h.user_id, h.from_status, h.to_status, h.action_note, h.created_at,\r\n                            u.name AS user_name, u.role AS user_role\r\n                     FROM `incident_history` h\r\n                     LEFT JOIN `users` u ON h.user_id = u.id\r\n                     WHERE h.incident_id = :incident_id\r\n                     ORDER BY h.created_at ASC, h.id ASC",
+                    "SELECT h.id, h.user_id, h.from_status, h.to_status, h.action_note, h.created_at,\r\n                            u.name AS user_name, u.role AS user_role\r\n                     FROM incident_history h\r\n                     LEFT JOIN users u ON h.user_id = u.id\r\n                     WHERE h.incident_id = :incident_id\r\n                     ORDER BY h.created_at ASC, h.id ASC",
                     [':incident_id' => $incidentId]
                 ),
                 'comments' => $this->fetchAllRows(
-                    "SELECT c.id, c.author_type, c.user_id, c.author_name, c.comment_text,\r\n                            c.photo_path, c.is_internal, c.created_at\r\n                     FROM `incident_comments` c\r\n                     WHERE c.incident_id = :incident_id\r\n                     ORDER BY c.created_at ASC, c.id ASC",
+                    "SELECT c.id, c.author_type, c.user_id, c.author_name, c.comment_text,\r\n                            c.photo_path, c.is_internal, c.created_at\r\n                     FROM incident_comments c\r\n                     WHERE c.incident_id = :incident_id\r\n                     ORDER BY c.created_at ASC, c.id ASC",
                     [':incident_id' => $incidentId]
                 ),
                 'requested_parts' => $this->fetchAllRows(
-                    "SELECT r.id, r.spare_part_id, r.is_out_of_catalog, r.custom_part_description,\r\n                            r.quantity, r.status, r.created_at, p.part_code, p.name AS part_name\r\n                     FROM `spare_part_requests` r\r\n                     LEFT JOIN `spare_parts` p ON r.spare_part_id = p.id\r\n                     WHERE r.incident_id = :incident_id\r\n                     ORDER BY r.created_at ASC, r.id ASC",
+                    "SELECT r.id, r.spare_part_id, r.is_out_of_catalog, r.custom_part_description,\r\n                            r.quantity, r.status, r.created_at, p.part_code, p.name AS part_name\r\n                     FROM spare_part_requests r\r\n                     LEFT JOIN spare_parts p ON r.spare_part_id = p.id\r\n                     WHERE r.incident_id = :incident_id\r\n                     ORDER BY r.created_at ASC, r.id ASC",
                     [':incident_id' => $incidentId]
                 ),
                 'replaced_parts' => $this->fetchAllRows(
-                    "SELECT rp.id, rp.spare_part_id, rp.is_out_of_catalog, rp.custom_part_name,\r\n                            rp.quantity, rp.unit_cost_snapshot, rp.total_cost_snapshot, rp.old_part_destination,\r\n                            rp.notes, rp.installed_at, rp.created_at, p.part_code, p.name AS part_name\r\n                     FROM `incident_replaced_parts` rp\r\n                     LEFT JOIN `spare_parts` p ON rp.spare_part_id = p.id\r\n                     WHERE rp.incident_id = :incident_id AND rp.intervention_type = 'INCIDENT'\r\n                     ORDER BY rp.installed_at ASC, rp.id ASC",
+                    "SELECT rp.id, rp.spare_part_id, rp.is_out_of_catalog, rp.custom_part_name,\r\n                            rp.quantity, rp.unit_cost_snapshot, rp.total_cost_snapshot, rp.old_part_destination,\r\n                            rp.notes, rp.installed_at, rp.created_at, p.part_code, p.name AS part_name\r\n                     FROM incident_replaced_parts rp\r\n                     LEFT JOIN spare_parts p ON rp.spare_part_id = p.id\r\n                     WHERE rp.incident_id = :incident_id AND rp.intervention_type = 'INCIDENT'\r\n                     ORDER BY rp.installed_at ASC, rp.id ASC",
                     [':incident_id' => $incidentId]
                 ),
                 'refund' => $this->fetchSingleRow(
-                    "SELECT id, incident_id, machine_id, location_id, claimant_name, claimant_contact,\r\n                            claimed_amount, product_attempted, compensation_method, bizum_phone, iban, status,\r\n                            technician_finding, recovered_amount, cash_custody_action, technician_justification,\r\n                            technician_inspected_at, technician_id, coordinator_decision, approved_amount,\r\n                            coordinator_justification, coordinator_id, payment_reference, paid_amount, paid_at,\r\n                            hand_delivered_at, created_at, updated_at\r\n                     FROM `refund_requests`\r\n                     WHERE incident_id = :incident_id AND deleted_at IS NULL\r\n                     ORDER BY id DESC\r\n                     LIMIT 1",
+                    "SELECT id, incident_id, machine_id, location_id, claimant_name, claimant_contact,\r\n                            claimed_amount, product_attempted, compensation_method, bizum_phone, iban, status,\r\n                            technician_finding, recovered_amount, cash_custody_action, technician_justification,\r\n                            technician_inspected_at, technician_id, coordinator_decision, approved_amount,\r\n                            coordinator_justification, coordinator_id, payment_reference, paid_amount, paid_at,\r\n                            hand_delivered_at, created_at, updated_at\r\n                     FROM refund_requests\r\n                     WHERE incident_id = :incident_id AND deleted_at IS NULL\r\n                     ORDER BY id DESC\r\n                     LIMIT 1",
                     [':incident_id' => $incidentId]
                 ),
             ];
@@ -887,32 +926,32 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         }
 
         $sql = "
-            UPDATE `incidents` SET
-                `assigned_technician_id` = :assigned_technician_id,
-                `category` = :category,
-                `description` = :description,
-                `retained_money_amount` = :retained_money_amount,
-                `photo_path` = :photo_path,
-                `urgency` = :urgency,
-                `status` = :status,
-                `assigned_at` = :assigned_at,
-                `started_at` = :started_at,
-                `pending_parts_reason` = :pending_parts_reason,
-                `resolution_diagnosis` = :resolution_diagnosis,
-                `resolution_action` = :resolution_action,
-                `resolved_at` = :resolved_at,
-                `reopen_reason` = :reopen_reason,
-                `reopened_at` = :reopened_at,
-                `closed_at` = :closed_at,
-                `cancellation_reason` = :cancellation_reason,
-                `cancelled_at` = :cancelled_at,
-                `pending_info_reason_category` = :pending_info_reason_category,
-                `pending_info_reason_text` = :pending_info_reason_text,
-                `paused_at` = :paused_at,
-                `total_pending_info_seconds` = :total_pending_info_seconds,
-                `sla_target_at` = :sla_target_at
-            WHERE `id` = :id
-              AND `deleted_at` IS NULL
+            UPDATE incidents SET
+                assigned_technician_id = :assigned_technician_id,
+                category = :category,
+                description = :description,
+                retained_money_amount = :retained_money_amount,
+                photo_path = :photo_path,
+                urgency = :urgency,
+                status = :status,
+                assigned_at = :assigned_at,
+                started_at = :started_at,
+                pending_parts_reason = :pending_parts_reason,
+                resolution_diagnosis = :resolution_diagnosis,
+                resolution_action = :resolution_action,
+                resolved_at = :resolved_at,
+                reopen_reason = :reopen_reason,
+                reopened_at = :reopened_at,
+                closed_at = :closed_at,
+                cancellation_reason = :cancellation_reason,
+                cancelled_at = :cancelled_at,
+                pending_info_reason_category = :pending_info_reason_category,
+                pending_info_reason_text = :pending_info_reason_text,
+                paused_at = :paused_at,
+                total_pending_info_seconds = :total_pending_info_seconds,
+                sla_target_at = :sla_target_at
+            WHERE id = :id
+              AND deleted_at IS NULL
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -958,10 +997,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
     public function softDelete(int $id): bool
     {
         $sql = "
-            UPDATE `incidents`
-            SET `deleted_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
-              AND `deleted_at` IS NULL
+            UPDATE incidents
+            SET deleted_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND deleted_at IS NULL
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -982,13 +1021,13 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         ?string $actionNote = null
     ): int {
         $sql = "
-            INSERT INTO `incident_history` (
-                `incident_id`,
-                `user_id`,
-                `from_status`,
-                `to_status`,
-                `action_note`,
-                `created_at`
+            INSERT INTO incident_history (
+                incident_id,
+                user_id,
+                from_status,
+                to_status,
+                action_note,
+                created_at
             ) VALUES (
                 :incident_id,
                 :user_id,
@@ -1023,8 +1062,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 h.*,
                 u.name AS user_name,
                 u.role AS user_role
-            FROM `incident_history` h
-            LEFT JOIN `users` u ON h.user_id = u.id
+            FROM incident_history h
+            LEFT JOIN users u ON h.user_id = u.id
             WHERE h.incident_id = :incident_id
             ORDER BY h.created_at ASC, h.id ASC
         ";
@@ -1044,15 +1083,15 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
     public function addComment(IncidentComment $comment): IncidentComment
     {
         $sql = "
-            INSERT INTO `incident_comments` (
-                `incident_id`,
-                `author_type`,
-                `user_id`,
-                `author_name`,
-                `comment_text`,
-                `photo_path`,
-                `is_internal`,
-                `created_at`
+            INSERT INTO incident_comments (
+                incident_id,
+                author_type,
+                user_id,
+                author_name,
+                comment_text,
+                photo_path,
+                is_internal,
+                created_at
             ) VALUES (
                 :incident_id,
                 :author_type,
@@ -1072,15 +1111,15 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         $stmt->bindValue(':author_name', $comment->getAuthorName(), PDO::PARAM_STR);
         $stmt->bindValue(':comment_text', $comment->getCommentText(), PDO::PARAM_STR);
         $stmt->bindValue(':photo_path', $comment->getPhotoPath(), $comment->getPhotoPath() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
-        $stmt->bindValue(':is_internal', $comment->isInternal() ? 1 : 0, PDO::PARAM_INT);
+        $stmt->bindValue(':is_internal', $comment->isInternal(), PDO::PARAM_BOOL);
 
         $stmt->execute();
         $id = (int)$this->pdo->lastInsertId();
 
         $fetchStmt = $this->pdo->prepare("
             SELECT c.*, i.ticket_code 
-            FROM `incident_comments` c
-            JOIN `incidents` i ON c.incident_id = i.id
+            FROM incident_comments c
+            JOIN incidents i ON c.incident_id = i.id
             WHERE c.id = :id
             LIMIT 1
         ");
@@ -1116,13 +1155,13 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
     {
         $sql = "
             SELECT c.*, i.ticket_code
-            FROM `incident_comments` c
-            JOIN `incidents` i ON c.incident_id = i.id
+            FROM incident_comments c
+            JOIN incidents i ON c.incident_id = i.id
             WHERE c.incident_id = :incident_id
         ";
 
         if (!$includeInternal) {
-            $sql .= " AND c.is_internal = 0";
+            $sql .= " AND c.is_internal = {$this->dialect->booleanLiteral(false)}";
         }
 
         $sql .= " ORDER BY c.created_at ASC, c.id ASC";
@@ -1149,14 +1188,14 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
     {
         $sql = "
             SELECT c.*, i.ticket_code
-            FROM `incident_comments` c
-            JOIN `incidents` i ON c.incident_id = i.id
+            FROM incident_comments c
+            JOIN incidents i ON c.incident_id = i.id
             WHERE c.incident_id = :incident_id
         ";
 
         // Segregación estricta de notas internas ante perfiles de Sede (Art. V.4).
         if (!$includeInternal) {
-            $sql .= " AND c.is_internal = 0";
+            $sql .= " AND c.is_internal = {$this->dialect->booleanLiteral(false)}";
         }
 
         // Paginación retrospectiva por cursor: solo mensajes más antiguos que el
@@ -1187,15 +1226,15 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
     /**
      * Cuenta los comentarios de una incidencia con recuentos segregados
      * (Módulo 10, T-COM-02 · RF-01.1): solo públicos para la Sede
-     * (`is_internal = 0`) o el total público + interno para Técnicos y
-     * Coordinadores (`is_internal IN (0, 1)`).
+     * (las notas internas se excluyen) o el total público + interno para Técnicos y
+     * Coordinadores (sin filtro).
      */
     public function countComments(int $incidentId, bool $includeInternal): int
     {
-        $sql = "SELECT COUNT(*) FROM `incident_comments` WHERE incident_id = :incident_id";
+        $sql = "SELECT COUNT(*) FROM incident_comments WHERE incident_id = :incident_id";
 
         if (!$includeInternal) {
-            $sql .= " AND is_internal = 0";
+            $sql .= " AND is_internal = {$this->dialect->booleanLiteral(false)}";
         }
 
         $stmt = $this->pdo->prepare($sql);
@@ -1211,9 +1250,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
     {
         $sql = "
             SELECT COUNT(*) 
-            FROM `incident_history` 
-            WHERE `incident_id` = :incident_id 
-              AND `to_status` IN ('REOPENED', 'REABIERTA')
+            FROM incident_history 
+            WHERE incident_id = :incident_id 
+              AND to_status IN ('REOPENED', 'REABIERTA')
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -1228,10 +1267,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
     public function markAsChronic(int $incidentId): bool
     {
         $sql = "
-            UPDATE `incidents`
-            SET `reopen_reason` = CONCAT(IFNULL(`reopen_reason`, ''), ' [AVERÍA CRÓNICA]')
-            WHERE `id` = :id
-              AND `deleted_at` IS NULL
+            UPDATE incidents
+            SET reopen_reason = CONCAT(COALESCE(reopen_reason, ''), ' [AVERÍA CRÓNICA]')
+            WHERE id = :id
+              AND deleted_at IS NULL
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -1333,13 +1372,13 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             //    inicial se fija además el estado ASSIGNED y la fecha oficial; en la
             //    reasignación se preservan estado y fecha para no reescribir hitos auditados.
             $setClause = $isReassignment
-                ? "`assigned_technician_id` = :technician_id,\n                    `urgency` = :urgency"
-                : "`status` = 'ASSIGNED',\n                    `assigned_technician_id` = :technician_id,\n                    `assigned_at` = CURRENT_TIMESTAMP,\n                    `urgency` = :urgency";
+                ? "assigned_technician_id = :technician_id,\n                    urgency = :urgency"
+                : "status = 'ASSIGNED',\n                    assigned_technician_id = :technician_id,\n                    assigned_at = CURRENT_TIMESTAMP,\n                    urgency = :urgency";
             $sql = "
-                UPDATE `incidents`
+                UPDATE incidents
                 SET {$setClause}
-                WHERE `id` = :id
-                  AND `deleted_at` IS NULL
+                WHERE id = :id
+                  AND deleted_at IS NULL
             ";
 
             $stmt = $this->pdo->prepare($sql);
@@ -1454,15 +1493,15 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             // 4. Actualizar registro: status = REOPENED, desasignar técnico, reiniciar reloj 48h (resolved_at = NULL)
             $sql = "
-                UPDATE `incidents`
-                SET `status` = 'REOPENED',
-                    `assigned_technician_id` = NULL,
-                    `assigned_at` = NULL,
-                    `reopened_at` = CURRENT_TIMESTAMP,
-                    `reopen_reason` = :reopen_reason,
-                    `resolved_at` = NULL
-                WHERE `id` = :id
-                  AND `deleted_at` IS NULL
+                UPDATE incidents
+                SET status = 'REOPENED',
+                    assigned_technician_id = NULL,
+                    assigned_at = NULL,
+                    reopened_at = CURRENT_TIMESTAMP,
+                    reopen_reason = :reopen_reason,
+                    resolved_at = NULL
+                WHERE id = :id
+                  AND deleted_at IS NULL
             ";
 
             $stmt = $this->pdo->prepare($sql);
@@ -1533,12 +1572,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             // 3. Actualizar la incidencia a CANCELLED preservando la fila en base de datos (EARS 6.2, RNF-03, Artículo III)
             $sql = "
-                UPDATE `incidents`
-                SET `status` = 'CANCELLED',
-                    `cancellation_reason` = :reason,
-                    `cancelled_at` = CURRENT_TIMESTAMP
-                WHERE `id` = :id
-                  AND `deleted_at` IS NULL
+                UPDATE incidents
+                SET status = 'CANCELLED',
+                    cancellation_reason = :reason,
+                    cancelled_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+                  AND deleted_at IS NULL
             ";
 
             $stmt = $this->pdo->prepare($sql);
@@ -1606,11 +1645,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             // 3. Actualizar estado a IN_PROGRESS y fijar started_at (conservando si ya existía)
             $sql = "
-                UPDATE `incidents`
-                SET `status` = 'IN_PROGRESS',
-                    `started_at` = COALESCE(`started_at`, CURRENT_TIMESTAMP)
-                WHERE `id` = :id
-                  AND `deleted_at` IS NULL
+                UPDATE incidents
+                SET status = 'IN_PROGRESS',
+                    started_at = COALESCE(started_at, CURRENT_TIMESTAMP)
+                WHERE id = :id
+                  AND deleted_at IS NULL
             ";
 
             $stmt = $this->pdo->prepare($sql);
@@ -1687,11 +1726,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             // 4. Actualizar estado a PENDING_PARTS y registrar motivo
             $sql = "
-                UPDATE `incidents`
-                SET `status` = 'PENDING_PARTS',
-                    `pending_parts_reason` = :reason
-                WHERE `id` = :id
-                  AND `deleted_at` IS NULL
+                UPDATE incidents
+                SET status = 'PENDING_PARTS',
+                    pending_parts_reason = :reason
+                WHERE id = :id
+                  AND deleted_at IS NULL
             ";
 
             $stmt = $this->pdo->prepare($sql);
@@ -1763,13 +1802,13 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
             // 4. Actualizar estado a RESOLVED, registrar informe técnico y fijar resolved_at
             $sql = "
-                UPDATE `incidents`
-                SET `status` = 'RESOLVED',
-                    `resolution_diagnosis` = :diagnosis,
-                    `resolution_action` = :action,
-                    `resolved_at` = CURRENT_TIMESTAMP
-                WHERE `id` = :id
-                  AND `deleted_at` IS NULL
+                UPDATE incidents
+                SET status = 'RESOLVED',
+                    resolution_diagnosis = :diagnosis,
+                    resolution_action = :action,
+                    resolved_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+                  AND deleted_at IS NULL
             ";
 
             $stmt = $this->pdo->prepare($sql);
@@ -1893,28 +1932,28 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
         $sql = "
             SELECT
-                i.`id`,
-                i.`ticket_code`,
-                i.`status`,
-                i.`urgency`,
-                i.`location_id`,
-                i.`machine_id`,
-                i.`assigned_technician_id`,
-                i.`paused_at`,
-                i.`total_pending_info_seconds`,
-                i.`pending_info_reason_category`,
-                i.`pending_info_reason_text`,
-                m.`code` AS `machine_code`,
-                m.`machine_type`,
-                l.`name` AS `location_name`
-            FROM `incidents` i
-            INNER JOIN `machines` m ON m.`id` = i.`machine_id`
-            LEFT JOIN `locations` l ON l.`id` = i.`location_id`
-            WHERE i.`status` = :pending_status
-              AND i.`deleted_at` IS NULL
-              AND i.`paused_at` IS NOT NULL
-              AND i.`paused_at` <= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-            ORDER BY i.`paused_at` ASC, i.`id` ASC
+                i.id,
+                i.ticket_code,
+                i.status,
+                i.urgency,
+                i.location_id,
+                i.machine_id,
+                i.assigned_technician_id,
+                i.paused_at,
+                i.total_pending_info_seconds,
+                i.pending_info_reason_category,
+                i.pending_info_reason_text,
+                m.code AS machine_code,
+                m.machine_type,
+                l.name AS location_name
+            FROM incidents i
+            INNER JOIN machines m ON m.id = i.machine_id
+            LEFT JOIN locations l ON l.id = i.location_id
+            WHERE i.status = :pending_status
+              AND i.deleted_at IS NULL
+              AND i.paused_at IS NOT NULL
+              AND i.paused_at <= {$this->dialect->subtractInterval('NOW()', ':hours', 'HOUR')}
+            ORDER BY i.paused_at ASC, i.id ASC
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -1970,13 +2009,13 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         DateTimeImmutable $occurredAt
     ): int {
         $sql = "
-            INSERT INTO `incident_history` (
-                `incident_id`,
-                `user_id`,
-                `from_status`,
-                `to_status`,
-                `action_note`,
-                `created_at`
+            INSERT INTO incident_history (
+                incident_id,
+                user_id,
+                from_status,
+                to_status,
+                action_note,
+                created_at
             ) VALUES (
                 :incident_id,
                 :user_id,
@@ -2003,12 +2042,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
     {
         // 1. Buscar todas las incidencias en estado RESOLVED con más de 48h desde resolved_at
         $sqlSelect = "
-            SELECT id FROM `incidents`
-            WHERE `status` = 'RESOLVED'
-              AND `resolved_at` IS NOT NULL
-              AND `resolved_at` <= DATE_SUB(NOW(), INTERVAL :hours HOUR)
-              AND `deleted_at` IS NULL
-            ORDER BY `resolved_at` ASC
+            SELECT id FROM incidents
+            WHERE status = 'RESOLVED'
+              AND resolved_at IS NOT NULL
+              AND resolved_at <= {$this->dialect->subtractInterval('NOW()', ':hours', 'HOUR')}
+              AND deleted_at IS NULL
+            ORDER BY resolved_at ASC
         ";
 
         $stmt = $this->pdo->prepare($sqlSelect);
@@ -2032,12 +2071,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             try {
                 // Actualizar a CLOSED
                 $sqlUpdate = "
-                    UPDATE `incidents`
-                    SET `status` = 'CLOSED',
-                        `closed_at` = CURRENT_TIMESTAMP
-                    WHERE `id` = :id
-                      AND `status` = 'RESOLVED'
-                      AND `deleted_at` IS NULL
+                    UPDATE incidents
+                    SET status = 'CLOSED',
+                        closed_at = CURRENT_TIMESTAMP
+                    WHERE id = :id
+                      AND status = 'RESOLVED'
+                      AND deleted_at IS NULL
                 ";
                 $updateStmt = $this->pdo->prepare($sqlUpdate);
                 $updateStmt->bindValue(':id', $id, PDO::PARAM_INT);
@@ -2146,16 +2185,16 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 l.name AS location_name,
                 l.site_code AS location_site_code,
                 u.name AS technician_name
-            FROM `incidents` i
-            INNER JOIN `machines` m ON m.id = i.machine_id
-            LEFT JOIN `locations` l ON l.id = i.location_id
-            LEFT JOIN `users` u ON u.id = i.assigned_technician_id
+            FROM incidents i
+            INNER JOIN machines m ON m.id = i.machine_id
+            LEFT JOIN locations l ON l.id = i.location_id
+            LEFT JOIN users u ON u.id = i.assigned_technician_id
             WHERE i.deleted_at IS NULL
               AND m.deleted_at IS NULL
               AND m.sanitary_status <> 'QUARANTINE'
               AND m.machine_type IN ({$typePlaceholders})
               AND i.status IN ({$statusPlaceholders})
-              AND i.created_at <= DATE_SUB(NOW(), INTERVAL :threshold_seconds SECOND)
+              AND i.created_at <= {$this->dialect->subtractInterval('NOW()', ':threshold_seconds', 'SECOND')}
             ORDER BY i.created_at ASC, i.id ASC
             LIMIT {$limit}
         ";
