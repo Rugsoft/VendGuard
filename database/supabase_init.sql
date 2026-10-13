@@ -1,17 +1,21 @@
 -- =============================================================================
--- VendGuard · DDL canónico del motor nuevo · PARTE 1 de 2
+-- VendGuard · DDL canónico del motor nuevo · COMPLETO (20 tablas)
 -- PostgreSQL 15+ (certificado contra PostgreSQL 16.15 en deploy/local/postgres/)
 -- Fichero: database/supabase_init.sql
--- Módulo: 12-hybrid-supabase-migration · T-HYBRID-01 (Parte 2: T-HYBRID-02)
+-- Módulo: 12-hybrid-supabase-migration · T-HYBRID-01 (tablas 1-10) y T-HYBRID-02 (tablas 11-20)
 -- =============================================================================
 --
 -- QUÉ ES ESTE FICHERO
 --   La creación del esquema relacional del motor nuevo: extensiones, los tipos
 --   `ENUM` del dominio con su tabla de correspondencia, las funciones canónicas
---   de blindaje y las diez primeras tablas —`locations`, `machines`, `users`,
+--   de blindaje y **las 20 tablas** con sus claves, restricciones, índices y
+--   disparadores. La Parte 1 (§4) cubre `locations`, `machines`, `users`,
 --   `incidents`, `incident_history`, `incident_comments`, `audit_log`,
---   `route_settings`, `preventive_settings` y `preventive_orders`— con sus
---   claves, restricciones, índices y disparadores.
+--   `route_settings`, `preventive_settings` y `preventive_orders`; la Parte 2
+--   (§5) cubre `preventive_order_items`, `sanitary_certificates`, `spare_parts`,
+--   `spare_part_compatibilities`, `spare_part_requests`, `incident_replaced_parts`,
+--   `refund_requests`, `unclaimed_cash_findings`, `sanitary_sweep_passes` y
+--   `sanitary_sweep_contentions`.
 --
 -- CONTRATO QUE LO RIGE (no al revés)
 --   specs/technical/schema_correspondence_contract.md. Este DDL se escribe
@@ -44,10 +48,6 @@
 --   migración, no editando la línea de la tabla.
 --
 -- QUÉ NO VA AQUÍ
---   · Las diez tablas restantes (`preventive_order_items`, `sanitary_certificates`,
---     `spare_parts`, `spare_part_compatibilities`, `spare_part_requests`,
---     `incident_replaced_parts`, `refund_requests`, `unclaimed_cash_findings`,
---     `sanitary_sweep_passes`, `sanitary_sweep_contentions`) → Parte 2, T-HYBRID-02.
 --   · Las semillas maestras → `database/supabase_seeds.sql` (T-HYBRID-03).
 --   · Las migraciones incrementales → `database/supabase_migrations/` (T-HYBRID-23).
 --   · `pg_cron` y `pg_net` → SOLO en el DDL de la variante de orquestador interno
@@ -95,7 +95,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- -----------------------------------------------------------------------------
 -- TABLA DE CORRESPONDENCIA DE LOS 24 CONJUNTOS (25 columnas locales)
 -- -----------------------------------------------------------------------------
--- | # | Tipo nativo en PostgreSQL         | Conjunto local (mismo orden)                                  | Columna(s) local(es)                                                             | Materializado |
+-- | # | Tipo nativo en PostgreSQL         | Conjunto local (mismo orden)                                  | Columna(s) local(es)                                                             | Declarado en  |
 -- |--:|:----------------------------------|:--------------------------------------------------------------|:---------------------------------------------------------------------------------|:--------------|
 -- |  1| approval_decision                 | ('APPROVED','REJECTED')                                       | refund_requests.coordinator_decision                                            | Parte 2       |
 -- |  2| conformity_verdict                | ('CONFORME','CONFORME_CON_OBSERVACIONES')                     | sanitary_certificates.result                                                     | Parte 2       |
@@ -132,8 +132,8 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- |   |                                   |  'SANITARY_CERTIFICATE','REFUND_REQUEST','UNCLAIMED_CASH_FINDING')|                                                                            |               |
 -- | 24| certificate_status                | ('VALID','SUSPENDED','REVOKED')                              | sanitary_certificates.status                                                     | Parte 2       |
 --
--- Reparto del trabajo: 12 conjuntos (13 columnas) en esta Parte 1 y 12 conjuntos
--- en la Parte 2 (T-HYBRID-02), que añade sus filas a esta misma tabla.
+-- Reparto del trabajo: 12 conjuntos (13 columnas) se declaran en la Parte 1 y los
+-- 12 restantes en la Parte 2, y los 24 están materializados en este mismo fichero.
 --
 -- -----------------------------------------------------------------------------
 -- MOTIVO DEL BLOQUE `DO`: PostgreSQL no tiene `CREATE TYPE IF NOT EXISTS`
@@ -222,6 +222,86 @@ BEGIN
     CREATE TYPE inspection_result AS ENUM (
         'CONFORME', 'CONFORME_CON_OBSERVACIONES', 'NO_CONFORME', 'NO_EVALUABLE_POR_CAUSA_EXTERNA'
     );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+-- ---- Tipos que declaran las tablas de la Parte 2 (§5) ----------------------
+
+DO $do$
+BEGIN
+    CREATE TYPE approval_decision AS ENUM ('APPROVED', 'REJECTED');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE conformity_verdict AS ENUM ('CONFORME', 'CONFORME_CON_OBSERVACIONES');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE part_destination AS ENUM ('DESGUACE', 'TALLER');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE compensation_method AS ENUM ('EN_MANO_SEDE', 'BIZUM', 'TRANSFERENCIA_BANCARIA');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE technician_finding AS ENUM ('FOUND_PHYSICAL', 'CONFIRMED_NO_CASH', 'UNVERIFIED_NO_CASH');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE spare_part_category AS ENUM (
+        'HYDRAULIC', 'THERMAL', 'ELECTRONIC', 'MECHANICAL', 'PAYMENT_SYSTEM', 'CONSUMABLE', 'OTHER'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE intervention_type AS ENUM ('INCIDENT', 'PREVENTIVE');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE cash_custody_action AS ENUM ('LEFT_AT_RECEPTION', 'HELD_FOR_CENTRAL');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE item_check_status AS ENUM ('PASS', 'WARN', 'FAIL', 'NOT_APPLICABLE');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE request_status AS ENUM ('PENDING', 'ATTENDED', 'CANCELLED');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE refund_status AS ENUM (
+        'PENDING_INSPECTION', 'DEPOSITED_AT_RECEPTION', 'VERIFIED_PENDING_PAYMENT',
+        'REQUIRES_COORDINATOR_APPROVAL', 'PENDING_CONTACT', 'PAID_DIGITAL',
+        'REFUNDED_IN_HAND', 'REJECTED'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE certificate_status AS ENUM ('VALID', 'SUSPENDED', 'REVOKED');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
 
@@ -733,16 +813,470 @@ CREATE OR REPLACE TRIGGER trg_touch_preventive_orders
 
 
 -- =============================================================================
--- RESULTADO DE ESTA PARTE
+-- SECCIÓN 5 · Tablas 11 a 20
 -- =============================================================================
--- 10 tablas · 12 tipos del dominio (13 columnas `ENUM`) · 2 funciones canónicas
--- 17 disparadores: 10 `BEFORE DELETE` (`trg_no_delete_*`) y 7 `BEFORE UPDATE` (`trg_touch_*`)
--- 18 restricciones nombradas (10 claves primarias y 8 únicas)
--- 4 restricciones `CHECK` de longitud mínima · 11 claves foráneas
--- 21 índices secundarios —uno por índice no único del esquema local y con las
--- mismas columnas (D-9)— más el índice único parcial `uq_machine_active_ticket`
--- 2 columnas canónicas (`site_code_key`, `email_key`) con índice único propio
+-- Mismo mapeo de tipos y mismas reglas de blindaje que la Sección 4. Dos puntos
+-- propios de esta mitad, ambos declarados en el contrato:
+--   · **D-7 · importe derivado.** `incident_replaced_parts.total_cost_snapshot` es
+--     en el motor local una columna `STORED GENERATED` (`quantity * unit_cost_snapshot`);
+--     aquí se declara con la misma función y la misma sintaxis nativa
+--     (`GENERATED ALWAYS AS (...) STORED`). No se escribe a mano en ninguno de los
+--     dos motores: el importe lo calcula el motor y el histórico conserva el precio
+--     del día de la intervención.
+--   · **A-3 · longitud mínima en los campos de justificación.** Tres columnas de
+--     esta mitad reciben el mismo umbral de 20 caracteres reales que el dominio ya
+--     exige: `refund_requests.coordinator_justification` y
+--     `refund_requests.technician_justification` (`JustificationTooShortException::MINIMUM_LENGTH`)
+--     y `spare_part_requests.custom_part_description`
+--     (`SparePartTraceabilityService`, repuesto fuera de catálogo).
+--     `incident_replaced_parts.custom_part_name` **no** lo recibe: su regla de dominio
+--     es un mínimo de 3 caracteres y describe un nombre de pieza, no una justificación.
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 11 · preventive_order_items — checklist de la orden preventiva
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS preventive_order_items (
+    id                  BIGINT GENERATED ALWAYS AS IDENTITY,
+    preventive_order_id BIGINT NOT NULL,
+    item_code           VARCHAR(50) NOT NULL,
+    item_description    VARCHAR(255) NOT NULL,
+    is_critical         BOOLEAN NOT NULL DEFAULT FALSE,
+    status              item_check_status NOT NULL,
+    observations        TEXT,
+    photo_path          VARCHAR(255),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_preventive_order_items PRIMARY KEY (id),
+    CONSTRAINT fk_order_items_order FOREIGN KEY (preventive_order_id)
+        REFERENCES preventive_orders (id) ON DELETE RESTRICT ON UPDATE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_items_order_critical
+    ON preventive_order_items (preventive_order_id, is_critical);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_preventive_order_items
+    BEFORE DELETE ON preventive_order_items
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 12 · sanitary_certificates — certificados sanitarios de inspección
+-- -----------------------------------------------------------------------------
+-- `technician_name` y `technician_operator_code` son copias textuales del
+-- profesional que firmó: el certificado es un documento y debe poder leerse
+-- aunque el usuario cambie de nombre o cause baja (Art. III.3).
+
+CREATE TABLE IF NOT EXISTS sanitary_certificates (
+    id                       BIGINT GENERATED ALWAYS AS IDENTITY,
+    certificate_code         VARCHAR(40) NOT NULL,
+    preventive_order_id      BIGINT NOT NULL,
+    machine_id               BIGINT NOT NULL,
+    location_id              BIGINT NOT NULL,
+    technician_id            BIGINT NOT NULL,
+    technician_name          VARCHAR(150) NOT NULL,
+    technician_operator_code VARCHAR(30) NOT NULL,
+    inspection_date          TIMESTAMPTZ NOT NULL,
+    valid_until              DATE NOT NULL,
+    temperature_measured     NUMERIC(3, 1),
+    result                   conformity_verdict NOT NULL,
+    status                   certificate_status NOT NULL DEFAULT 'VALID',
+    suspended_reason         TEXT,
+    suspended_at             TIMESTAMPTZ,
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at               TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at               TIMESTAMPTZ,
+    CONSTRAINT pk_sanitary_certificates PRIMARY KEY (id),
+    CONSTRAINT uq_certificates_code UNIQUE (certificate_code),
+    CONSTRAINT fk_certificates_location FOREIGN KEY (location_id)
+        REFERENCES locations (id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+    CONSTRAINT fk_certificates_machine FOREIGN KEY (machine_id)
+        REFERENCES machines (id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+    CONSTRAINT fk_certificates_prev_order FOREIGN KEY (preventive_order_id)
+        REFERENCES preventive_orders (id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+    CONSTRAINT fk_certificates_technician FOREIGN KEY (technician_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_certificates_location
+    ON sanitary_certificates (location_id);
+CREATE INDEX IF NOT EXISTS idx_certificates_machine_status
+    ON sanitary_certificates (machine_id, status);
+-- Las dos columnas foráneas restantes necesitan índice explícito: el motor local
+-- lo crea al declarar la clave foránea y PostgreSQL no, de modo que sin estas dos
+-- líneas la correspondencia de columnas indexadas de D-9 no se cumpliría.
+CREATE INDEX IF NOT EXISTS idx_certificates_prev_order
+    ON sanitary_certificates (preventive_order_id);
+CREATE INDEX IF NOT EXISTS idx_certificates_technician
+    ON sanitary_certificates (technician_id);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_sanitary_certificates
+    BEFORE DELETE ON sanitary_certificates
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_touch_sanitary_certificates
+    BEFORE UPDATE ON sanitary_certificates
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 13 · spare_parts — catálogo maestro de repuestos
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS spare_parts (
+    id             BIGINT GENERATED ALWAYS AS IDENTITY,
+    part_code      VARCHAR(50) NOT NULL,
+    name           VARCHAR(150) NOT NULL,
+    category       spare_part_category NOT NULL DEFAULT 'OTHER',
+    manufacturer   VARCHAR(100) NOT NULL,
+    reference_cost NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    is_active      BOOLEAN NOT NULL DEFAULT TRUE,
+    notes          TEXT,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at     TIMESTAMPTZ,
+    CONSTRAINT pk_spare_parts PRIMARY KEY (id),
+    CONSTRAINT uq_spare_parts_part_code UNIQUE (part_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_spare_parts_active_cat ON spare_parts (is_active, category);
+CREATE INDEX IF NOT EXISTS idx_spare_parts_name ON spare_parts (name);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_spare_parts
+    BEFORE DELETE ON spare_parts
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_touch_spare_parts
+    BEFORE UPDATE ON spare_parts
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 14 · spare_part_compatibilities — compatibilidad repuesto ↔ modelo
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS spare_part_compatibilities (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY,
+    spare_part_id BIGINT NOT NULL,
+    machine_model VARCHAR(100) NOT NULL,
+    is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at    TIMESTAMPTZ,
+    CONSTRAINT pk_spare_part_compatibilities PRIMARY KEY (id),
+    CONSTRAINT uq_part_model UNIQUE (spare_part_id, machine_model),
+    CONSTRAINT fk_compat_spare_part FOREIGN KEY (spare_part_id)
+        REFERENCES spare_parts (id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_part_compat_active
+    ON spare_part_compatibilities (spare_part_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_part_compat_model
+    ON spare_part_compatibilities (machine_model);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_spare_part_compatibilities
+    BEFORE DELETE ON spare_part_compatibilities
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 15 · spare_part_requests — solicitudes de repuesto de una incidencia
+-- -----------------------------------------------------------------------------
+-- El `CASCADE` de la clave foránea del repuesto es el único del esquema que borra
+-- arrastrando: retirar un repuesto del catálogo elimina sus compatibilidades, no
+-- sus solicitudes ni su histórico de sustituciones (esas van con `RESTRICT`).
+
+CREATE TABLE IF NOT EXISTS spare_part_requests (
+    id                      BIGINT GENERATED ALWAYS AS IDENTITY,
+    incident_id             BIGINT NOT NULL,
+    spare_part_id           BIGINT,
+    is_out_of_catalog       BOOLEAN NOT NULL DEFAULT FALSE,
+    custom_part_description TEXT,
+    quantity                BIGINT NOT NULL DEFAULT 1,
+    status                  request_status NOT NULL DEFAULT 'PENDING',
+    requested_by_user_id    BIGINT NOT NULL,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_spare_part_requests PRIMARY KEY (id),
+    CONSTRAINT chk_custom_part_description_len CHECK (
+        custom_part_description IS NULL OR char_length(trim(custom_part_description)) >= 20
+    ),
+    CONSTRAINT fk_requests_incident FOREIGN KEY (incident_id)
+        REFERENCES incidents (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_requests_spare_part FOREIGN KEY (spare_part_id)
+        REFERENCES spare_parts (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_requests_user FOREIGN KEY (requested_by_user_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_requests_incident ON spare_part_requests (incident_id);
+CREATE INDEX IF NOT EXISTS idx_requests_part ON spare_part_requests (spare_part_id);
+CREATE INDEX IF NOT EXISTS idx_requests_status ON spare_part_requests (status);
+CREATE INDEX IF NOT EXISTS idx_requests_user ON spare_part_requests (requested_by_user_id);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_spare_part_requests
+    BEFORE DELETE ON spare_part_requests
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_touch_spare_part_requests
+    BEFORE UPDATE ON spare_part_requests
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 16 · incident_replaced_parts — piezas sustituidas y su importe derivado
+-- -----------------------------------------------------------------------------
+-- El importe total no se escribe: lo calcula el motor (D-7) a partir de la
+-- cantidad y del coste congelado en el momento de la intervención. Esa copia del
+-- coste es lo que permite que un cambio de tarifa del catálogo no reescriba lo
+-- que ya se facturó.
+
+CREATE TABLE IF NOT EXISTS incident_replaced_parts (
+    id                  BIGINT GENERATED ALWAYS AS IDENTITY,
+    intervention_type   intervention_type NOT NULL,
+    incident_id         BIGINT,
+    preventive_order_id BIGINT,
+    machine_id          BIGINT NOT NULL,
+    location_id         BIGINT NOT NULL,
+    technician_id       BIGINT NOT NULL,
+    spare_part_id       BIGINT,
+    is_out_of_catalog   BOOLEAN NOT NULL DEFAULT FALSE,
+    custom_part_name    VARCHAR(255),
+    quantity            BIGINT NOT NULL DEFAULT 1,
+    unit_cost_snapshot  NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    total_cost_snapshot NUMERIC(10, 2) GENERATED ALWAYS AS (quantity * unit_cost_snapshot) STORED,
+    old_part_destination part_destination NOT NULL,
+    notes               TEXT,
+    installed_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_incident_replaced_parts PRIMARY KEY (id),
+    CONSTRAINT fk_replaced_incident FOREIGN KEY (incident_id)
+        REFERENCES incidents (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_replaced_location FOREIGN KEY (location_id)
+        REFERENCES locations (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_replaced_machine FOREIGN KEY (machine_id)
+        REFERENCES machines (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_replaced_preventive FOREIGN KEY (preventive_order_id)
+        REFERENCES preventive_orders (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_replaced_spare_part FOREIGN KEY (spare_part_id)
+        REFERENCES spare_parts (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_replaced_technician FOREIGN KEY (technician_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_replaced_incident ON incident_replaced_parts (incident_id);
+CREATE INDEX IF NOT EXISTS idx_replaced_location_date
+    ON incident_replaced_parts (location_id, installed_at);
+CREATE INDEX IF NOT EXISTS idx_replaced_machine_part_date
+    ON incident_replaced_parts (machine_id, spare_part_id, installed_at);
+CREATE INDEX IF NOT EXISTS idx_replaced_preventive
+    ON incident_replaced_parts (preventive_order_id);
+CREATE INDEX IF NOT EXISTS idx_replaced_technician
+    ON incident_replaced_parts (technician_id);
+CREATE INDEX IF NOT EXISTS idx_replaced_spare_part
+    ON incident_replaced_parts (spare_part_id);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_incident_replaced_parts
+    BEFORE DELETE ON incident_replaced_parts
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 17 · refund_requests — reintegros (módulo 8)
+-- -----------------------------------------------------------------------------
+-- Es la única tabla que ya tenía un guardián anti-borrado en el motor local
+-- (`trg_refund_requests_no_hard_delete`, D-8). Aquí no necesita ninguna forma
+-- especial: es la misma función `prevent_hard_delete()` que el resto.
 --
--- La Parte 2 (T-HYBRID-02) completa las 20 tablas y sus disparadores. La
--- verificación de correspondencia entre motores y la convergencia del esquema
--- desplegado son T-HYBRID-23 y T-HYBRID-24.
+-- `idx_refund_tracking_token` es un índice redundante que el esquema local
+-- declara **además** del único sobre la misma columna. Se refleja a propósito:
+-- el contrato §2.3 declara 56 índices secundarios y la correspondencia se
+-- certifica sobre columnas indexadas, así que omitirlo dejaría el recuento
+-- dependiendo de una interpretación. Es la única redundancia copiada del motor
+-- local, y desaparecería el día que el local la retire.
+
+CREATE TABLE IF NOT EXISTS refund_requests (
+    id                      BIGINT GENERATED ALWAYS AS IDENTITY,
+    incident_id             BIGINT,
+    machine_id              BIGINT NOT NULL,
+    location_id             BIGINT NOT NULL,
+    claimant_name           VARCHAR(100) NOT NULL,
+    claimant_contact        VARCHAR(100) NOT NULL,
+    claimed_amount          NUMERIC(10, 2) NOT NULL,
+    product_attempted       VARCHAR(100),
+    compensation_method     compensation_method NOT NULL,
+    bizum_phone             VARCHAR(15),
+    iban                    VARCHAR(34),
+    pickup_pin              VARCHAR(4),
+    pickup_attempts         SMALLINT NOT NULL DEFAULT 0,
+    pickup_locked_until     TIMESTAMPTZ,
+    tracking_token          VARCHAR(64) NOT NULL,
+    status                  refund_status NOT NULL DEFAULT 'PENDING_INSPECTION',
+    technician_finding      technician_finding,
+    recovered_amount        NUMERIC(10, 2),
+    cash_custody_action     cash_custody_action,
+    receptionist_name       VARCHAR(100),
+    technician_justification TEXT,
+    technician_inspected_at TIMESTAMPTZ,
+    technician_id           BIGINT,
+    coordinator_decision    approval_decision,
+    approved_amount         NUMERIC(10, 2),
+    coordinator_justification TEXT,
+    coordinator_id          BIGINT,
+    payment_reference       VARCHAR(100),
+    paid_amount             NUMERIC(10, 2),
+    paid_at                 TIMESTAMPTZ,
+    hand_delivered_at       TIMESTAMPTZ,
+    is_active               BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at              TIMESTAMPTZ,
+    CONSTRAINT pk_refund_requests PRIMARY KEY (id),
+    CONSTRAINT tracking_token UNIQUE (tracking_token),
+    CONSTRAINT chk_coordinator_justification_len CHECK (
+        coordinator_justification IS NULL OR char_length(trim(coordinator_justification)) >= 20
+    ),
+    CONSTRAINT chk_technician_justification_len CHECK (
+        technician_justification IS NULL OR char_length(trim(technician_justification)) >= 20
+    ),
+    CONSTRAINT fk_refund_coordinator FOREIGN KEY (coordinator_id)
+        REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT fk_refund_incident FOREIGN KEY (incident_id)
+        REFERENCES incidents (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_refund_location FOREIGN KEY (location_id)
+        REFERENCES locations (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_refund_machine FOREIGN KEY (machine_id)
+        REFERENCES machines (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_refund_technician FOREIGN KEY (technician_id)
+        REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_refund_created_at ON refund_requests (created_at);
+CREATE INDEX IF NOT EXISTS idx_refund_incident ON refund_requests (incident_id);
+CREATE INDEX IF NOT EXISTS idx_refund_status_location ON refund_requests (status, location_id);
+CREATE INDEX IF NOT EXISTS idx_refund_tracking_token ON refund_requests (tracking_token);
+CREATE INDEX IF NOT EXISTS idx_refund_coordinator ON refund_requests (coordinator_id);
+CREATE INDEX IF NOT EXISTS idx_refund_location ON refund_requests (location_id);
+CREATE INDEX IF NOT EXISTS idx_refund_machine ON refund_requests (machine_id);
+CREATE INDEX IF NOT EXISTS idx_refund_technician ON refund_requests (technician_id);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_refund_requests
+    BEFORE DELETE ON refund_requests
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_touch_refund_requests
+    BEFORE UPDATE ON refund_requests
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 18 · unclaimed_cash_findings — hallazgos de efectivo no reclamado
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS unclaimed_cash_findings (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY,
+    incident_id   BIGINT NOT NULL,
+    machine_id    BIGINT NOT NULL,
+    technician_id BIGINT NOT NULL,
+    amount        NUMERIC(10, 2) NOT NULL,
+    notes         TEXT,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_unclaimed_cash_findings PRIMARY KEY (id),
+    CONSTRAINT fk_unclaimed_incident FOREIGN KEY (incident_id)
+        REFERENCES incidents (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_unclaimed_machine FOREIGN KEY (machine_id)
+        REFERENCES machines (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_unclaimed_technician FOREIGN KEY (technician_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_unclaimed_created_at ON unclaimed_cash_findings (created_at);
+CREATE INDEX IF NOT EXISTS idx_unclaimed_incident ON unclaimed_cash_findings (incident_id);
+CREATE INDEX IF NOT EXISTS idx_unclaimed_machine ON unclaimed_cash_findings (machine_id);
+CREATE INDEX IF NOT EXISTS idx_unclaimed_technician ON unclaimed_cash_findings (technician_id);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_unclaimed_cash_findings
+    BEFORE DELETE ON unclaimed_cash_findings
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 19 · sanitary_sweep_passes — registro de pasadas del barrido (módulo 11)
+-- -----------------------------------------------------------------------------
+-- Es la traza de la que el vigilante externo lee `last_pass_at`: una pasada sin
+-- fila aquí es una ventana que no se ejecutó, y eso genera alerta (Art. II).
+-- Por eso no tiene clave foránea ni actualizaciones: se escribe una vez.
+
+CREATE TABLE IF NOT EXISTS sanitary_sweep_passes (
+    id                BIGINT GENERATED ALWAYS AS IDENTITY,
+    started_at        TIMESTAMPTZ NOT NULL,
+    finished_at       TIMESTAMPTZ,
+    candidates        BIGINT NOT NULL DEFAULT 0,
+    evaluated         BIGINT NOT NULL DEFAULT 0,
+    quarantined_count BIGINT NOT NULL DEFAULT 0,
+    contended_count   BIGINT NOT NULL DEFAULT 0,
+    failures_count    BIGINT NOT NULL DEFAULT 0,
+    duration_ms       NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    CONSTRAINT pk_sanitary_sweep_passes PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sanitary_sweep_passes_contended
+    ON sanitary_sweep_passes (contended_count, started_at);
+CREATE INDEX IF NOT EXISTS idx_sanitary_sweep_passes_started
+    ON sanitary_sweep_passes (started_at);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_sanitary_sweep_passes
+    BEFORE DELETE ON sanitary_sweep_passes
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 20 · sanitary_sweep_contentions — contención leída como aplazamiento
+-- -----------------------------------------------------------------------------
+-- Una fila por incidencia: el contador de pasadas consecutivas es lo que decide
+-- cuándo un bloqueo de fila sostenido deja de ser un aplazamiento técnico y pasa
+-- a ser una anomalía que se escala.
+
+CREATE TABLE IF NOT EXISTS sanitary_sweep_contentions (
+    id                  BIGINT GENERATED ALWAYS AS IDENTITY,
+    incident_id         BIGINT NOT NULL,
+    machine_id          BIGINT NOT NULL,
+    first_detected_at   TIMESTAMPTZ NOT NULL,
+    last_detected_at    TIMESTAMPTZ NOT NULL,
+    consecutive_passes  BIGINT NOT NULL DEFAULT 1,
+    total_passes        BIGINT NOT NULL DEFAULT 1,
+    escalated_at        TIMESTAMPTZ,
+    resolved_at         TIMESTAMPTZ,
+    CONSTRAINT pk_sanitary_sweep_contentions PRIMARY KEY (id),
+    CONSTRAINT uq_sanitary_sweep_contention_incident UNIQUE (incident_id),
+    CONSTRAINT fk_sanitary_sweep_contention_incident FOREIGN KEY (incident_id)
+        REFERENCES incidents (id) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_sanitary_sweep_contentions_machine
+    ON sanitary_sweep_contentions (machine_id);
+CREATE INDEX IF NOT EXISTS idx_sanitary_sweep_contentions_open
+    ON sanitary_sweep_contentions (resolved_at, escalated_at);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_sanitary_sweep_contentions
+    BEFORE DELETE ON sanitary_sweep_contentions
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+
+-- =============================================================================
+-- RESULTADO DEL FICHERO COMPLETO
+-- =============================================================================
+-- 20 tablas (las 20 del contrato de correspondencia) · 24 tipos del dominio en sus
+-- 25 columnas `ENUM` · 2 funciones canónicas de blindaje
+-- 31 disparadores: 20 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1) y 11
+-- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2)
+-- 33 restricciones nombradas: 20 claves primarias y 13 únicas. El motor local declara
+-- 32 (20 + 12): la duodécima suya es la compuesta de D-6, que aquí no es una
+-- restricción sino el índice único parcial, y en cambio las dos claves canónicas
+-- (A-1 y A-2) suman dos únicas que allí no existen
+-- 7 restricciones `CHECK` de longitud mínima (A-3: 4 en `incidents`, 2 en
+-- `refund_requests`, 1 en `spare_part_requests`) · 35 claves foráneas con las reglas
+-- declaradas en el contrato §2.4
+-- 56 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- columnas (D-9)— más el índice único parcial `uq_machine_active_ticket` (D-6)
+-- 2 columnas canónicas (`site_code_key`, `email_key`) con índice único propio (A-1/A-2)
+-- 1 columna derivada (`incident_replaced_parts.total_cost_snapshot`, D-7)
+-- 3 columnas `JSONB` en `audit_log` (D-4)
+--
+-- La verificación de correspondencia entre motores y la convergencia del esquema
+-- desplegado son T-HYBRID-23 y T-HYBRID-24; las semillas maestras, T-HYBRID-03.
