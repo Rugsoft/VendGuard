@@ -3,6 +3,7 @@
 **Documento:** `specs/technical/database_schema.md`  
 **Motor:** MariaDB 10.5+ / MySQL 8.0+ (Motor InnoDB)  
 **Codificación:** `utf8mb4_unicode_ci`  
+**Esquema dual:** la correspondencia con el esquema PostgreSQL del motor nuevo (módulo 12) está declarada en [`schema_correspondence_contract.md`](schema_correspondence_contract.md). Este diccionario cubre las tablas del DDL base; el inventario de las 20 tablas desplegadas es el del contrato y el de `database/migrations/`.
 **Metodología:** SDD (Specification-Driven Development)  
 
 ---

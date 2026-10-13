@@ -269,13 +269,13 @@ Los once hallazgos se han incorporado a los documentos del módulo 12 **sin toca
 | **R3-4** Política de credenciales en ambos drivers | Nuevo EARS-01.6, criterio §8.6, Algoritmo 1 con el bloque de política S-5, decisión nueva y T-HYBRID-06 | Documental |
 | **R3-5** Compensador con dueño | EARS-05.3, §6.2, criterio §8.5 y T-HYBRID-08 con los cinco puntos de uso, `LocalFileUploader::delete()` y la prueba de borrado | Documental |
 | **R3-6** Predicado no fatal | EARS-07.3, plan §2.1 y T-HYBRID-14 con `hasBatchCredential(Request)` reutilizado | Documental |
-| **R3-7** Correspondencia de esquema | Criterio §8.7 reescrito, T-HYBRID-24 y T-HYBRID-01 (24 conjuntos `ENUM`) | Documental |
+| **R3-7** Correspondencia de esquema | Criterio §8.7 reescrito, T-HYBRID-24 y T-HYBRID-01 (24 conjuntos `ENUM`); el contrato existe ya y está verificado contra el esquema desplegado (revisión 3.4, §8.3) | Documental |
 | **R3-8** N-7 propagado | EARS-02.1, T-HYBRID-03, T-HYBRID-10/11, título de la Fase 2 y comentario del árbol | Documental |
 | **R3-9** Contradicciones internas | Árbol del plan: «27 tareas», `ConnectionFactoryTest` solo en `tests/integration/`, Fase 2 reordenada (26 tras sus dependencias) | Documental |
 | **R3-10** Reloj del barrido | **Decidido y materializado (revisión 3.2):** reloj canónico en el contenedor ([`deploy/cron/vendguard-sanitary-sweep`](../deploy/cron/vendguard-sanitary-sweep)) con despertador y vigilante externo ([`.github/workflows/sanitary-clock.yml`](../.github/workflows/sanitary-clock.yml)); EARS-06.2/06.5, criterio §8.3, plan §7 y T-HYBRID-04/12 | Documental **y ejecutable**: los artefactos existen y su comportamiento está probado |
-| **R3-11** Orden y dudas | RF-06 y RF-07 reordenados por número y §9 con las tres dudas abiertas reales | Documental |
+| **R3-11** Orden y dudas | RF-06 y RF-07 reordenados por número y §9 con las dudas abiertas reales: el reloj (cerrada en 3.2), el aprovisionamiento del motor (cerrada en su parte local en 3.3) y las diferencias de esquema aceptadas | Documental |
 
-**Lo que esta reparación no demuestra:** sigue sin haber una línea de SQL ni de PHP nuevo, ni una sola suite de la batería ejecutada; las dos categorías de certificación están especificadas y **no** instrumentadas; y las dos dudas que quedan en spec §9 (aprovisionamiento del motor nuevo y diferencias de esquema aceptadas) no se cierran desde la documentación.
+**Lo que esta reparación no demuestra:** sigue sin haber una línea de SQL ni de PHP nuevo, ni una sola suite de la batería ejecutada; las dos categorías de certificación están especificadas y **no** instrumentadas; y las dos dudas que quedan en spec §9 (aprovisionamiento del motor nuevo y diferencias de esquema aceptadas) no se cierran desde la documentación. De esas dos, la primera se cierra **parcialmente y por ejecución** en la revisión 3.3 (§8.2): el motor local de la categoría ya existe, responde y su sonda falla en cerrado; su mitad remota sigue abierta.
 
 ### 8.1 Cierre de R3-10: la decisión del reloj y sus artefactos (revisión 3.2)
 
@@ -291,6 +291,38 @@ La duda que este informe dejó abierta —«dónde vive el reloj del barrido»�
 **Comprobado ejecutando los cinco bloques `run:` reales del flujo** contra un servidor HTTP simulado, con las mismas variables que usa el runner: sin configuración falla en cerrado **sin emitir ninguna llamada de red**; con la ventana cubierta la ejecución queda **verde y sin duplicar** la pasada del reloj interno; con la ventana perdida invoca el barrido autenticado, alerta y deja la ejecución **en rojo**; y sin registro de pasada hace lo mismo. Además se validaron el YAML, la sintaxis de los cinco scripts y el formato de cinco campos de la entrada de crontab. Reproducción del arnés y modos de fallo cubiertos: plan §7.
 
 **Riesgo que la decisión no elimina, y que queda escrito:** si la aplicación entera está caída, ningún reloj puede ejecutar lo que la aplicación no puede atender. El diseño garantiza que el fallo sea **visible** (ejecución en rojo y telemetría obsoleta) y que la recuperación sea **idempotente** (el barrido pone en cuarentena las máquinas vencidas en la primera pasada tras el retorno).
+
+### 8.2 Cierre de la parte local de la duda 1: el motor de la categoría del motor nuevo (revisión 3.3)
+
+La duda 1 de spec §9 —«cómo se aprovisiona el motor nuevo para su certificación»— no se cierra redactando: se cierra **ejecutando**. El motor local de la categoría existe, responde y su puerta falla en cerrado.
+
+| Pieza | Artefacto | Qué resuelve |
+| :--- | :--- | :--- |
+| Aprovisionamiento | [`deploy/local/postgres/provision.sh`](../deploy/local/postgres/provision.sh) | Espera al motor, crea el rol de aplicación no superusuario y su base, rota las credenciales y escribe el contrato de entorno; sin credencial de superusuario no improvisa ninguna |
+| Sonda de disponibilidad | [`deploy/local/postgres/verify.php`](../deploy/local/postgres/verify.php) | Conexión real por `pdo_pgsql`, versión, ausencia de privilegios administrativos y capacidad de DDL y DML con reversión sin residuo; sin `PG_TEST_DSN` termina en **1** |
+| Instrucciones y límites | [`deploy/local/postgres/README.md`](../deploy/local/postgres/README.md) y plan §8 | Reproducción paso a paso y qué **no** ofrece este motor |
+
+**Comprobado ejecutando:** PostgreSQL 16.15 como servicio nativo (`postgresql-x64-16`, puerto 5432, autenticación sólo loopback con `scram-sha-256`); `pdo_pgsql` activo en el PHP local, confirmado con `PDO::getAvailableDrivers()`; aprovisionamiento reejecutado sobre el mismo motor (idempotente, con rotación de credenciales) y sonda en verde en una sesión nueva; sonda en **rojo con código 1** sin la variable de entorno; y **cero** tablas de usuario en la base de la categoría tras la prueba.
+
+**Hallazgo que condiciona una tarea:** este motor **no** ofrece `pg_cron` ni `pg_net`, y T-HYBRID-01 las enumeraba entre las extensiones del DDL base. Instalarlas de forma incondicional rompería la certificación precisamente en el motor donde se ejecuta; sólo tienen sentido en la variante de orquestador interno admitida (decisión del §8.1). Queda anotado en T-HYBRID-01.
+
+**Lo que sigue abierto:** la mitad remota de la duda —la medición de RNF-01 por el camino real— exige un proyecto Supabase con credenciales custodiadas; el pooler Supavisor no se puede certificar localmente; la categoría todavía **no** tiene suites ni canal instrumentado (T-HYBRID-21 y T-HYBRID-22); y el `pdo_pgsql` de la imagen es T-HYBRID-12.
+
+### 8.3 Cierre de la duda 2: el contrato de correspondencia entre esquemas (revisión 3.4)
+
+La duda 2 de spec §9 —«qué diferencias de esquema entre motores se aceptan como permanentes»— deja de ser una promesa pendiente de redacción: las diferencias están **declaradas** con su forma exacta en cada motor, junto con lo que debe corresponder uno a uno.
+
+| Pieza | Artefacto | Qué resuelve |
+| :--- | :--- | :--- |
+| Contrato declarado | [`schema_correspondence_contract.md`](../specs/technical/schema_correspondence_contract.md) | Correspondencia obligatoria (20 tablas, 281 columnas, 32 claves únicas, 56 índices secundarios, 35 foráneas con sus reglas, 3 restricciones `CHECK`, 24 conjuntos `ENUM`), mapeo de tipos y las diez diferencias aceptadas `D-1` a `D-10` frente a las cinco adiciones declaradas `A-1` a `A-5` |
+| Regla de deriva | §1 y §6 del contrato | Todo elemento recibe un veredicto declarado o es fallo; se prohíbe exigir igualdad literal de inventarios; los inventarios se leen de los catálogos **vivos**, no de los ficheros `.sql` |
+| Autoridad | §1 y §8 del contrato | El DDL se escribe conforme al contrato; una divergencia inevitable se declara **primero** en el contrato, nunca en el DDL en silencio (AGENTS.md §5.5) |
+
+**Comprobado ejecutando:** el inventario del contrato se contrastó contra el esquema MariaDB **desplegado** (`information_schema` de `vendguard_db`) con **92 comprobaciones** —tabla por tabla con su recuento de columnas, las 32 claves únicas una a una, las 35 foráneas con su `ON DELETE`/`ON UPDATE`, los 24 conjuntos `ENUM` y las once cifras del snapshot— y terminó con **0 fallos**.
+
+**Hallazgos que el contraste deja escritos:** las restricciones `CHECK` del esquema vivo son **tres** y todas son `json_valid` de `audit_log`, de modo que las condiciones de longitud mínima del Art. V.1 son una **adición** del motor nuevo y no una correspondencia; hay **once** columnas `updated_at` que en MariaDB se auto-actualizan y en PostgreSQL no tienen mecanismo de columna equivalente (diferencia `D-2`, que se certifica por comportamiento); y el diccionario de [`database_schema.md`](../specs/technical/database_schema.md) sólo documentaba las tablas del DDL base, no las 20 desplegadas.
+
+**Lo que sigue abierto:** el DDL no existe todavía (T-HYBRID-01/02/23), así que la correspondencia está declarada pero **no materializada**; la convergencia del esquema desplegado y la suite que consume el contrato son T-HYBRID-23/24; y ninguna de las dos dudas de spec §9 desaparece por escribir un documento: la primera sigue esperando su mitad remota y la segunda, su DDL.
 
 ---
 
