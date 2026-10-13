@@ -9,7 +9,10 @@ declare(strict_types=1);
  * según el triaje aprobado en `specs/technical/auditoria_arquitectura_triage.md` §6:
  *
  * - **S-5** Credenciales de base de datos: en producción no se admite el acceso administrativo
- *   implícito (`root` sin contraseña); en desarrollo se conserva el XAMPP local.
+ *   implícito (`root` sin contraseña); en desarrollo se conserva el XAMPP local. Desde la
+ *   migración al motor nuevo, la **misma** política se certifica también en la rama PostgreSQL
+ *   (`postgres` sin contraseña), sin necesidad de red: la política se resuelve antes de
+ *   intentar conectar (EARS-01.6).
  * - **H-5** Paginación de preventivos con placeholders vinculados como enteros.
  * - **T-1** El plan técnico describe el mecanismo real de privacidad (RNF-04) en lugar de
  *   artefactos que nunca existieron, y el endpoint especulado no está en el router.
@@ -56,9 +59,9 @@ $projectRoot = dirname(__DIR__, 2);
 // ── Entorno controlado: se guarda y se restaura al final ──────────────────────
 $envNames = [
     'APP_ENV', 'VENDGUARD_ENV',
-    'DATABASE_URL', 'MYSQL_URL',
+    'DATABASE_URL', 'SUPABASE_DB_URL', 'MYSQL_URL',
     'DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_DATABASE',
-    'DB_USER', 'DB_USERNAME', 'DB_PASS', 'DB_PASSWORD', 'DB_SSL',
+    'DB_USER', 'DB_USERNAME', 'DB_PASS', 'DB_PASSWORD', 'DB_SSL', 'DB_SSL_ROOT_CERT',
 ];
 $savedEnv = [];
 foreach ($envNames as $envName) {
@@ -80,7 +83,7 @@ echo "--- Grupo 1: S-5 Credenciales de base de datos (fail-closed en producción
 
 // Escenario de producción sin credenciales explícitas.
 $setEnv('APP_ENV', 'production');
-foreach (['DATABASE_URL', 'MYSQL_URL', 'DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_DATABASE', 'DB_USER', 'DB_USERNAME', 'DB_PASS', 'DB_PASSWORD', 'DB_SSL'] as $envName) {
+foreach (['DATABASE_URL', 'SUPABASE_DB_URL', 'MYSQL_URL', 'DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_DATABASE', 'DB_USER', 'DB_USERNAME', 'DB_PASS', 'DB_PASSWORD', 'DB_SSL', 'DB_SSL_ROOT_CERT'] as $envName) {
     $unsetEnv($envName);
 }
 
@@ -123,6 +126,59 @@ $assert(
         && !str_contains($explicitFailure->getMessage(), 'insegura en producción')
         && str_contains($explicitFailure->getMessage(), 'Fallo de conexión'),
     $explicitFailure === null ? 'No lanzó excepción' : $explicitFailure->getMessage()
+);
+
+// Escenario del motor nuevo (PostgreSQL) en producción: la misma política, sin red. El DSN del
+// plan concede a `postgres` una contraseña vacía por defecto, y por aquí es por donde no pasa
+// (hallazgo S-5, EARS-01.6).
+$setEnv('DATABASE_URL', 'postgres://127.0.0.1:6543/postgres');
+
+$postgresFailure = null;
+try {
+    ConnectionFactory::getConnection([], true);
+} catch (RuntimeException $e) {
+    $postgresFailure = $e;
+}
+$assert(
+    "1.5 En producción, un `postgres://` sin contraseña se rechaza antes de conectar (usuario administrativo del motor nuevo, S-5.2, EARS-01.6)",
+    $postgresFailure instanceof RuntimeException
+        && str_contains($postgresFailure->getMessage(), 'postgres sin contraseña')
+        && str_contains($postgresFailure->getMessage(), 'usuario administrativo de pgsql')
+        && !str_contains($postgresFailure->getMessage(), 'Fallo de conexión'),
+    $postgresFailure === null ? 'No lanzó excepción' : $postgresFailure->getMessage()
+);
+
+$unsetEnv('DATABASE_URL');
+
+$postgresExplicitFailure = null;
+try {
+    ConnectionFactory::getConnection([
+        'driver' => 'pgsql',
+        'host' => '127.0.0.1',
+        'port' => '1',
+        'dbname' => 'postgres',
+        'user' => 'vendguard_probe',
+        'password' => 'probe',
+    ], true);
+} catch (RuntimeException $e) {
+    $postgresExplicitFailure = $e;
+}
+$assert(
+    "1.6 En la rama pgsql, con credenciales explícitas la política no bloquea: el fallo es de conexión, no de configuración (S-5.2, EARS-01.6)",
+    $postgresExplicitFailure instanceof RuntimeException
+        && !str_contains($postgresExplicitFailure->getMessage(), 'insegura en producción')
+        && str_contains($postgresExplicitFailure->getMessage(), 'Fallo de conexión'),
+    $postgresExplicitFailure === null ? 'No lanzó excepción' : $postgresExplicitFailure->getMessage()
+);
+
+$assert(
+    "1.7 La política de credenciales es la misma en los dos drivers: solo cambian el usuario administrativo y el motor (EARS-01.6)",
+    $rootFailure instanceof RuntimeException
+        && $postgresFailure instanceof RuntimeException
+        && str_contains($rootFailure->getMessage(), 'usuario administrativo de mysql')
+        && str_contains($postgresFailure->getMessage(), 'usuario administrativo de pgsql')
+        && $rootFailure->getMessage() !== $postgresFailure->getMessage(),
+    'La política de credenciales diverge entre los dos motores'
 );
 
 // Escenario de desarrollo: la configuración local (XAMPP) sigue funcionando.

@@ -45,7 +45,7 @@
 
 ## Fase 2: Infraestructura de Conexión, Normalización de Dialecto por Adaptador, Presupuesto de Espera y Docker
 
-- [ ] **T-HYBRID-06: Refactorizar `ConnectionFactory.php` con autodetección de driver `pdo_pgsql` vs `pdo_mysql`, Supavisor y SSL**
+- [x] **T-HYBRID-06: Refactorizar `ConnectionFactory.php` con autodetección de driver `pdo_pgsql` vs `pdo_mysql`, Supavisor y SSL**
   * **Requisitos:** RF-01.2, RF-01.4, RF-09.1, RNF-01, RNF-05, EARS-01.6 (Constitución Art. VI)
   * **Dependencias:** T-HYBRID-01
   * **Hecho cuando:** `src/Infrastructure/Database/ConnectionFactory.php` detecta esquemas `postgres://` o `pgsql:` en `DATABASE_URL`, se conecta mediante `pdo_pgsql` al puerto 6543 (Supavisor) con `sslmode=verify-full` y la CA declarada (`sslrootcert`) —prohibido degradar a `require`, `prefer`, `allow` o `disable`—, `ATTR_TIMEOUT => 5`, `ATTR_EMULATE_PREPARES => true` (obligatorio para evitar errores de sentencias preparadas en el pooler), aplica la **política de credenciales S-5 de forma idéntica a los dos drivers** (fuente explícita obligatoria en producción; rechazo del usuario administrativo sin contraseña) y la resuelve **antes** de intentar conectar, sin valores por defecto silenciosos (`postgres` con contraseña vacía no conecta); `AuditFindingsSecondWaveClosureTest` se amplía para certificar esa política también en la rama `pgsql` sin necesidad de red, y el funcionamiento de `pdo_mysql` ante URLs locales de MariaDB permanece intacto.
