@@ -50,7 +50,7 @@
   * **Dependencias:** T-HYBRID-01
   * **Hecho cuando:** `src/Infrastructure/Database/ConnectionFactory.php` detecta esquemas `postgres://` o `pgsql:` en `DATABASE_URL`, se conecta mediante `pdo_pgsql` al puerto 6543 (Supavisor) con `sslmode=verify-full` y la CA declarada (`sslrootcert`) —prohibido degradar a `require`, `prefer`, `allow` o `disable`—, `ATTR_TIMEOUT => 5`, `ATTR_EMULATE_PREPARES => true` (obligatorio para evitar errores de sentencias preparadas en el pooler), aplica la **política de credenciales S-5 de forma idéntica a los dos drivers** (fuente explícita obligatoria en producción; rechazo del usuario administrativo sin contraseña) y la resuelve **antes** de intentar conectar, sin valores por defecto silenciosos (`postgres` con contraseña vacía no conecta); `AuditFindingsSecondWaveClosureTest` se amplía para certificar esa política también en la rama `pgsql` sin necesidad de red, y el funcionamiento de `pdo_mysql` ante URLs locales de MariaDB permanece intacto.
 
-- [ ] **T-HYBRID-07: Adaptar `PdoLockWaitBudget.php` con soporte dual para PostgreSQL (`lock_timeout`) y MySQL (`innodb_lock_wait_timeout`)**
+- [x] **T-HYBRID-07: Adaptar `PdoLockWaitBudget.php` con soporte dual para PostgreSQL (`lock_timeout`) y MySQL (`innodb_lock_wait_timeout`)**
   * **Requisitos:** RF-01.1, RF-09.3, RNF-01
   * **Dependencias:** T-HYBRID-06
   * **Hecho cuando:** `src/Infrastructure/Database/PdoLockWaitBudget.php` detecta el driver activo: si es `pgsql`, gestiona la cota mediante `current_setting('lock_timeout')` y `SET LOCAL lock_timeout = ...` dentro de la transacción activa; si es `mysql`, preserva la lógica de `@@SESSION.innodb_lock_wait_timeout`.

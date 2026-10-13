@@ -16,6 +16,14 @@ use Throwable;
  * La conexión se resuelve de forma perezosa desde `ConnectionFactory` para que
  * el objeto sea construible sin base de datos y para no fijar la conexión antes
  * de que el proceso haya configurado el entorno.
+ *
+ * Es también la **frontera donde nace la transacción**, y por eso el único punto
+ * desde el que se puede acotar la espera de bloqueo en motores cuya cota es local a
+ * la transacción (PostgreSQL, `lock_timeout`). Al abrir cada unidad de trabajo
+ * consume la cota ambiente declarada por [`PdoLockWaitBudget`](PdoLockWaitBudget.php)
+ * —la que el barrido sanitario pide por operación— y la aplica dentro de la
+ * transacción, que es donde el motor la respeta. En MariaDB la cota viaja por sesión
+ * y esta frontera no interviene.
  */
 class PdoTransactionManager implements \VendGuard\Core\Domain\Repository\TransactionManagerInterface
 {
@@ -43,6 +51,7 @@ class PdoTransactionManager implements \VendGuard\Core\Domain\Repository\Transac
 
         if ($this->ownsTransaction) {
             $pdo->beginTransaction();
+            PdoLockWaitBudget::applyToCurrentTransaction($pdo, ConnectionFactory::ambientLockWaitSeconds());
         }
 
         try {

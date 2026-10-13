@@ -103,6 +103,19 @@ class ConnectionFactory
     private static ?PDO $instance = null;
 
     /**
+     * Cota ambiente de espera de bloqueo declarada por el proceso, en segundos, o `null` si
+     * no hay ninguna vigente (T-HYBRID-07).
+     *
+     * Es el canal entre el presupuesto de espera de bloqueo y la frontera transaccional: en
+     * PostgreSQL la cota sólo puede aplicarse **dentro** de una transacción —fuera de ella el
+     * motor ignora `SET LOCAL` en silencio— y quien abre esa transacción es el gestor
+     * transaccional, no el proceso que pide la cota. Pertenece a la factoría porque describe
+     * el estado del **proceso** sobre la sesión compartida, exactamente como la instancia
+     * cacheada de arriba.
+     */
+    private static ?int $ambientLockWaitSeconds = null;
+
+    /**
      * Obtiene una conexión PDO configurada.
      *
      * @param array<string, mixed> $customConfig Configuración opcional para sobrescribir variables de entorno.
@@ -162,11 +175,39 @@ class ConnectionFactory
     }
 
     /**
-     * Restablece la instancia en caché (útil para suites de test).
+     * Restablece la instancia en caché y la cota ambiente (útil para suites de test).
      */
     public static function reset(): void
     {
         self::$instance = null;
+        self::$ambientLockWaitSeconds = null;
+    }
+
+    /**
+     * Declara la cota ambiente de espera de bloqueo del proceso y devuelve la anterior, para
+     * que quien la declara pueda restituirla al terminar (`null` retira la cota vigente).
+     *
+     * No abre ninguna conexión ni toca la sesión: sólo deja constancia del presupuesto con el
+     * que deben correr las transacciones que se abran a partir de aquí.
+     *
+     * @param int|null $seconds Cota en segundos, o `null` para retirarla.
+     * @return int|null La cota anterior.
+     */
+    public static function declareAmbientLockWaitSeconds(?int $seconds): ?int
+    {
+        $previous = self::$ambientLockWaitSeconds;
+        self::$ambientLockWaitSeconds = $seconds;
+
+        return $previous;
+    }
+
+    /**
+     * Cota ambiente de espera de bloqueo vigente, o `null` si el proceso no ha declarado
+     * ninguna y las transacciones deben correr con la cota del motor.
+     */
+    public static function ambientLockWaitSeconds(): ?int
+    {
+        return self::$ambientLockWaitSeconds;
     }
 
     /**
