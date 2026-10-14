@@ -854,7 +854,30 @@ Petición completa de un cierre sobre máquina en cuarentena:
 ```
 
 * **Errores de Validación / Negocio:**
-  * `422 Unprocessable` (`SANITARY_CHECKLIST_REQUIRED`): el cierre llega sin el bloque, sin alguno de sus tres campos o con una declaración inválida **cuando la puerta estaba activa**. El `message` enumera los motivos y `details.errors` los repite uno a uno, en el mismo orden en que los produce el validador; el expediente y la máquina quedan **intactos** (ni una columna escrita, ni rastro de dinero):
+  * `422 Unprocessable` (`SANITARY_QUARANTINE_OVERTAKEN`): **cuarentena biológica sobrevenida** (RF-10, EARS-10.1, Art. II y Art. III). La máquina ya estaba en `QUARANTINE` cuando llegó esta resolución —la declaró la central mientras el técnico trabajaba— y la petición no trae el protocolo sanitario: el formulario de campo se abrió cuando la unidad aún estaba en `OK`, de modo que el técnico no está omitiendo nada. El cierre se **suspende**, el parte redactado se guarda como evento inmutable sobre el expediente y se le pide el protocolo de higienización sin borrar una sola letra:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "SANITARY_QUARANTINE_OVERTAKEN",
+    "message": "La máquina entró en CUARENTENA sanitaria automática a las 4 h naturales (Art. II) mientras esta intervención estaba en curso: la avería NO se ha cerrado y el informe ya redactado —diagnóstico, acción y repuestos— queda salvaguardado. Complete el protocolo obligatorio de higienización —temperatura real del recinto, retirada y destrucción del stock perecedero y checklist de higienización— para consolidar el cierre sin volver a redactar los datos técnicos.",
+    "details": {
+      "draft_safeguarded": true,
+      "safeguarded_fields": ["diagnosis", "action_taken", "replaced_parts_declared", "replaced_parts"],
+      "errors": [
+        "Debe registrar las tres declaraciones sanitarias que exige el Art. II antes de cerrar una avería sobre una máquina en cuarentena: temperatura real del recinto térmico, retirada y destrucción del stock perecedero deteriorado, y ejecución del checklist de higienización."
+      ]
+    }
+  }
+}
+```
+
+    * **Qué queda salvaguardado:** exactamente los campos de la lista blanca del resguardo —`diagnosis`, `action_taken`, `replaced_parts_declared`, `replaced_parts`, `refund_inspection` y `unclaimed_cash_found`— que la petición declare; `safeguarded_fields` enumera los que se guardaron de verdad. El listado se guarda en el estado del evento inmutable de auditoría (`action = SANITARY_QUARANTINE_REPORT_SAFEGUARDED`, `entity_type = TICKET`), **sin transicionar el expediente**: sigue en `IN_PROGRESS`.
+    * **Idempotencia:** reintentar el mismo formulario responde igual y **no** añade un segundo evento. El parte se guarda una vez por contenido, de modo que quince reintentos sin cobertura no ensucian la auditoría.
+    * **Recuperación (EARS-10.2):** cuando el técnico vuelve con el protocolo sanitario firmado —aunque mande **sólo** el bloque `sanitary_declarations`— el cierre se completa con el parte a resguardo: recupera los textos y las piezas que ya había escrito, y lo que la petición **sí** traiga gana siempre sobre el resguardo (la palabra más reciente de quien está delante de la máquina).
+    * **Distinción declarada:** con el protocolo presente —aunque venga incompleto— el rechazo es `SANITARY_CHECKLIST_REQUIRED` y no hay resguardo: si el técnico manda el bloque, sabe qué le piden y lo que necesita es el detalle campo a campo.
+  * `422 Unprocessable` (`SANITARY_CHECKLIST_REQUIRED`): el cierre llega sin algún campo del bloque o con una declaración inválida **cuando la puerta estaba activa**. El `message` enumera los motivos y `details.errors` los repite uno a uno, en el mismo orden en que los produce el validador; el expediente y la máquina quedan **intactos** (ni una columna escrita, ni rastro de dinero):
 
 ```json
 {

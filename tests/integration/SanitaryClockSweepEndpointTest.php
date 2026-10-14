@@ -404,11 +404,47 @@ try {
         ],
         headers: $authHeader($technicianToken)
     ));
+    // El código del rechazo cambió aquí con RF-10 (EARS-10.1, módulo 12): cuando el
+    // barrido ya declaró la cuarentena y el técnico presenta su resolución ORDINARIA —sin
+    // bloque sanitario, porque su formulario se abrió cuando la máquina aún estaba en OK—,
+    // el servidor nombra la situación exacta (`SANITARY_QUARANTINE_OVERTAKEN`) y salvaguarda
+    // el parte en lugar de pedirle las declaraciones como si las hubiera omitido por
+    // descuido. La puerta sigue mordiendo igual: nada se cierra y nada se escribe.
+    $gateBody = $gateResponse->getDecodedBody();
     $assert(
-        '2.8 La puerta sanitaria del cierre sigue mordiendo (422 SANITARY_CHECKLIST_REQUIRED, Art. II)',
+        '2.8 La puerta sanitaria del cierre sigue mordiendo: cuarentena sobrevenida (422 SANITARY_QUARANTINE_OVERTAKEN, RF-10/EARS-10.1, Art. II)',
         $gateResponse->getStatusCode() === 422
-        && ($gateResponse->getDecodedBody()['error']['code'] ?? '') === 'SANITARY_CHECKLIST_REQUIRED'
+        && ($gateBody['error']['code'] ?? '') === 'SANITARY_QUARANTINE_OVERTAKEN'
+        && ($gateBody['error']['details']['draft_safeguarded'] ?? false) === true
         && ($incidentRow($sanitaryTicketId)['status'] ?? '') === 'IN_PROGRESS'
+        && $historyCount($sanitaryTicketId) === $historyBefore,
+        'HTTP ' . $gateResponse->getStatusCode() . ' · respuesta: ' . json_encode($gateBody, JSON_UNESCAPED_UNICODE)
+    );
+
+    // La rama del módulo 11 sigue viva y con el mismo contrato: cuando el técnico SÍ sabe
+    // que la máquina está fuera de servicio y manda el protocolo a medias, lo que necesita
+    // es el detalle campo a campo, no una salvaguarda.
+    $incompleteProtocol = $router->dispatch(new Request(
+        method: 'POST',
+        path: '/api/technician/incidents/' . $sanitaryTicketId . '/resolve',
+        parsedBody: [
+            'resolution_diagnosis' => 'Termostato descalibrado con lectura real de 11 grados en el recinto.',
+            'resolution_action'    => 'Sustituida sonda NTC y estabilizado el ciclo de frío a 3,5 grados.',
+            'sanitary_declarations' => [
+                'stock_destroyed'   => true,
+                'hygiene_checklist' => true,
+            ],
+        ],
+        headers: $authHeader($technicianToken)
+    ));
+    $assert(
+        '2.8.bis Con el protocolo a medias la puerta responde el detalle campo a campo (422 SANITARY_CHECKLIST_REQUIRED, RF-03.5.2)',
+        $incompleteProtocol->getStatusCode() === 422
+        && ($incompleteProtocol->getDecodedBody()['error']['code'] ?? '') === 'SANITARY_CHECKLIST_REQUIRED'
+        && count($incompleteProtocol->getDecodedBody()['error']['details']['errors'] ?? []) === 1
+        && ($incidentRow($sanitaryTicketId)['status'] ?? '') === 'IN_PROGRESS',
+        'HTTP ' . $incompleteProtocol->getStatusCode() . ' · respuesta: '
+            . json_encode($incompleteProtocol->getDecodedBody(), JSON_UNESCAPED_UNICODE)
     );
 
     // =====================================================================

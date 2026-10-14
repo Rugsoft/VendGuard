@@ -11,6 +11,7 @@ use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\IncidentCommentService;
 use VendGuard\Application\Service\IncidentPauseService;
 use VendGuard\Application\Service\RefundManagementService;
+use VendGuard\Application\Service\SanitaryReportSafeguardService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
 use VendGuard\Application\Service\TechnicianRefundService;
 use VendGuard\Core\Domain\Exception\ConversationSealedException;
@@ -65,6 +66,21 @@ use VendGuard\Presentation\Http\Response;
  */
 class TechnicianController
 {
+    /**
+     * Mensaje del 422 de cuarentena sobrevenida (RF-10.1, Art. II).
+     *
+     * Nombra las tres cosas que el técnico necesita saber en ese momento, en este orden:
+     * qué ha pasado (la máquina entró en cuarentena a las 4 h), qué NO ha pasado (la avería
+     * sigue abierta) y qué tiene que hacer (el protocolo de higienización), añadiendo la
+     * única promesa que hace posible que no se sienta castigado: su parte está a resguardo y
+     * no tendrá que redactarlo otra vez (EARS-10.2).
+     */
+    public const QUARANTINE_OVERTAKEN_MESSAGE = 'La máquina entró en CUARENTENA sanitaria automática a las 4 h naturales (Art. II) '
+        . 'mientras esta intervención estaba en curso: la avería NO se ha cerrado y el informe ya redactado '
+        . '—diagnóstico, acción y repuestos— queda salvaguardado. Complete el protocolo obligatorio de higienización '
+        . '—temperatura real del recinto, retirada y destrucción del stock perecedero y checklist de higienización— '
+        . 'para consolidar el cierre sin volver a redactar los datos técnicos.';
+
     private IncidentRepositoryInterface $incidentRepo;
     private MachineRepositoryInterface $machineRepo;
     private LocationRepositoryInterface $locationRepo;
@@ -75,6 +91,9 @@ class TechnicianController
     private LocalFileUploader $fileUploader;
     private ?IncidentCommentService $commentService;
     private ?IncidentPauseService $pauseService;
+
+    /** Borrador seguro del parte ante cuarentena sobrevenida (RF-10); se resuelve bajo demanda. */
+    private ?SanitaryReportSafeguardService $sanitarySafeguard;
 
     /** Transaccionalidad compensatoria del fichero (EARS-05.3); se resuelve bajo demanda. */
     private ?FileStorageCompensator $fileCompensator;
@@ -90,7 +109,8 @@ class TechnicianController
         ?LocalFileUploader $fileUploader = null,
         ?IncidentCommentService $commentService = null,
         ?IncidentPauseService $pauseService = null,
-        ?FileStorageCompensator $fileCompensator = null
+        ?FileStorageCompensator $fileCompensator = null,
+        ?SanitaryReportSafeguardService $sanitarySafeguard = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->machineRepo  = $machineRepo ?? new PdoMachineRepository();
@@ -121,6 +141,7 @@ class TechnicianController
         // Igual que el servicio de comentarios: se resuelve bajo demanda para que el
         // controlador pueda construirse en suites unitarias sin abrir conexiones.
         $this->pauseService = $pauseService;
+        $this->sanitarySafeguard = $sanitarySafeguard;
     }
 
     /**
@@ -181,6 +202,18 @@ class TechnicianController
     private function pauses(): IncidentPauseService
     {
         return $this->pauseService ??= new IncidentPauseService(incidentRepo: $this->incidentRepo);
+    }
+
+    /**
+     * Borrador seguro del parte técnico ante una cuarentena biológica sobrevenida (RF-10).
+     *
+     * Se resuelve bajo demanda, como el resto de colaboradores opcionales: su instancia por
+     * defecto abre conexión con el motor de auditoría y este controlador también se construye
+     * en suites unitarias sin base de datos.
+     */
+    private function safeguards(): SanitaryReportSafeguardService
+    {
+        return $this->sanitarySafeguard ??= new SanitaryReportSafeguardService();
     }
 
     /**
@@ -700,6 +733,13 @@ class TechnicianController
      * - Declaración de piezas sustituidas (Sí/No) con snapshot inmutable de costes (Art. III).
      * Si no se cumplen los requisitos mínimos, rechaza la operación y mantiene el estado EN_CURSO (EARS 8.2).
      * Si es válida, transiciona a RESUELTA y activa la ventana de garantía de 48 horas (EARS 8.3).
+     *
+     * **Cuarentena biológica sobrevenida (RF-10, EARS-10.1 y EARS-10.2, Art. II).** Si la
+     * máquina entró en cuarentena sanitaria en la central mientras el técnico trabajaba sin
+     * cobertura, el cierre ordinario no puede prosperar: su parte se guarda a resguardo y el
+     * 422 nombra la situación exacta (`SANITARY_QUARANTINE_OVERTAKEN`) pidiendo el protocolo
+     * de higienización. Cuando vuelve a intentarlo con el protocolo firmado, el informe
+     * redactado se recupera del resguardo y no tiene que escribirlo otra vez.
      */
     public function resolveIncident(Request $request): Response
     {
@@ -726,8 +766,24 @@ class TechnicianController
             ? trim((string)$body['resolution_action']) 
             : (isset($body['action_taken']) ? trim((string)$body['action_taken']) : '');
 
-        // Validar textos con ResolutionValidator (mínimo 20 caracteres descriptivos en cada campo)
+        // Validar textos con ResolutionValidator (mínimo 20 caracteres descriptivos en cada campo).
+        //
+        // EARS-10.2 — Antes de rechazar un informe incompleto se intenta recomponerlo desde el
+        // borrador salvaguardado: es el caso del técnico que ya redactó su parte y sólo le
+        // queda firmar el protocolo sanitario. La consulta al resguardo se hace **sólo** por
+        // este camino (el cuerpo no valida), de modo que el cierre ordinario no paga ni una
+        // lectura más.
         $validationErrors = ResolutionValidator::getValidationErrors($diagnosis, $action);
+        if (!empty($validationErrors)) {
+            $recomposed = $this->recomposeFromSafeguardedReport($incidentId, $body);
+            if ($recomposed !== $body) {
+                $body = $recomposed;
+                $diagnosis = trim((string)($body['diagnosis'] ?? ''));
+                $action    = trim((string)($body['action_taken'] ?? ''));
+                $validationErrors = ResolutionValidator::getValidationErrors($diagnosis, $action);
+            }
+        }
+
         if (!empty($validationErrors)) {
             return Response::error(
                 'INVALID_RESOLUTION',
@@ -757,13 +813,18 @@ class TechnicianController
             );
         }
 
-        // 7. Puerta sanitaria del cierre (RF-03.5.2, Art. II): sobre una máquina en
+        // 7. Puerta sanitaria del cierre (RF-03.5.2 y RF-10, Art. II): sobre una máquina en
         //    cuarentena —o con el Reloj Sanitario Biológico vencido, que aquí se consume
         //    de forma idempotente— la resolución exige declarar temperatura real,
         //    retirada y destrucción del stock perecedero y checklist de higienización.
         //    Corre ANTES de cualquier escritura (verdicto de saldo incluido), para que
         //    una declaración ausente no deje rastro de dinero sin poder cerrar la avería.
         try {
+            // La cuarentena declarada por la central se lee ANTES de consumir el reloj: es
+            // la única forma honesta de distinguir la cuarentena sobrevenida —la que el
+            // barrido escribió mientras el técnico trabajaba sin cobertura— de la que este
+            // mismo intento de cierre dispara, y las dos no se responden igual (RF-10.1).
+            $quarantineOnArrival = $this->pauses()->isSanitaryQuarantineInForce($incident);
             $this->pauses()->evaluateSanitaryBiologicalClock($incident);
             $sanitaryRequired = $this->pauses()->sanitaryResolutionRequirement($incident);
         } catch (\DomainException | \RuntimeException $e) {
@@ -776,6 +837,40 @@ class TechnicianController
 
         if ($sanitaryRequired) {
             $rawDeclarations = $body['sanitary_declarations'] ?? null;
+            $protocolDeclared = is_array($rawDeclarations) && $rawDeclarations !== [];
+
+            // EARS-10.1 — Salvaguarda del parte ante cuarentena sobrevenida. El técnico
+            // registra la resolución ORDINARIA —su diagnóstico y sus repuestos, sin el
+            // protocolo sanitario— sobre una máquina que ya estaba en cuarentena cuando él
+            // llegó: su formulario no la conocía. En ese caso el cierre se suspende, el
+            // informe se guarda a resguardo y el 422 nombra la situación exacta. Si en cambio
+            // el protocolo sí viene —aunque venga incompleto—, el técnico sabe lo que le
+            // piden y lo que necesita es el detalle campo a campo de la puerta ordinaria.
+            if ($quarantineOnArrival && !$protocolDeclared) {
+                // El resguardo guarda el parte en su forma canónica (`diagnosis` / 
+                // `action_taken`) sea cual sea la forma admitida por la que el cliente lo
+                // mandó: los alias `resolution_diagnosis` / `resolution_action` son del
+                // contrato del endpoint, y aquí ya se leyeron los dos. Sin esta
+                // normalización, un informe que viajó sólo por los alias se guardaría sin
+                // sus textos y el técnico tendría que redactarlo otra vez, que es
+                // exactamente lo que EARS-10.2 prohíbe.
+                $body['diagnosis'] = $diagnosis;
+                $body['action_taken'] = $action;
+
+                $draft = $this->safeguards()->safeguard($incident, $body, $this->extractActor($request));
+
+                return Response::error(
+                    'SANITARY_QUARANTINE_OVERTAKEN',
+                    self::QUARANTINE_OVERTAKEN_MESSAGE,
+                    422,
+                    [
+                        'draft_safeguarded' => true,
+                        'safeguarded_fields' => array_keys($draft),
+                        'errors' => ResolutionValidator::getSanitaryDeclarationErrors(null),
+                    ]
+                );
+            }
+
             $sanitaryErrors = ResolutionValidator::getSanitaryDeclarationErrors(
                 is_array($rawDeclarations) ? $rawDeclarations : null
             );
@@ -874,6 +969,30 @@ class TechnicianController
                 : 'OPERATION_FAILED';
             return Response::error($errCode, $e->getMessage(), 500);
         }
+    }
+
+    /**
+     * Recompone el informe técnico desde el borrador salvaguardado (EARS-10.2).
+     *
+     * Sólo se consulta cuando el cuerpo **no** trae el informe completo, y el expediente se
+     * relee aquí para no recomponer nada sobre una avería que ya no admite cierre: un cierre
+     * sobre un ticket ya resuelto debe seguir fallando por su estado, no por el texto. Si el
+     * expediente no existe o no admite resolución, devuelve el cuerpo tal cual y la
+     * validación ordinaria sigue decidiendo, exactamente como antes de RF-10.
+     *
+     * @param int $incidentId Identificador del expediente de la ruta.
+     * @param array<string, mixed> $body Cuerpo de la petición de cierre.
+     * @return array<string, mixed> Cuerpo completado con el parte a resguardo, si lo había.
+     */
+    private function recomposeFromSafeguardedReport(int $incidentId, array $body): array
+    {
+        $incident = $this->incidentRepo->findById($incidentId);
+
+        if ($incident === null || !$incident->getStatus()->canTransitionTo(IncidentStatus::RESOLVED)) {
+            return $body;
+        }
+
+        return $this->safeguards()->completeReport($incident, $body);
     }
 
     // ────────────────────────────────────────────────────────────────────────

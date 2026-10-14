@@ -912,7 +912,13 @@ export const TechnicianRouteView = {
         // El reloj biológico pudo vencer entre la carga de la ruta y el intento de
         // cierre: el servidor exige las declaraciones y la puerta se abre en el acto
         // para que el técnico pueda completarlas sin reabrir el modal.
-        if (err?.code === 'SANITARY_CHECKLIST_REQUIRED') {
+        //
+        // Y si la cuarentena fue sobrevenida —la declaró la central mientras él trabajaba
+        // sin cobertura— el código es SANITARY_QUARANTINE_OVERTAKEN y la puerta debe abrirse
+        // igual: el servidor ya guardó su parte a resguardo, así que lo único que le falta
+        // para cerrar es el protocolo sanitario que el formulario ni siquiera mostraba
+        // (RF-10.1/EARS-10.2, Art. II). El informe redactado sigue en memoria: nada se borra.
+        if (err?.code === 'SANITARY_CHECKLIST_REQUIRED' || err?.code === 'SANITARY_QUARANTINE_OVERTAKEN') {
           this.sanitaryResolutionRequired = true;
         }
         this.resolveError = err?.message || 'No se pudo resolver la incidencia. Comprueba los requisitos de validación.';

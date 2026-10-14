@@ -25,7 +25,7 @@ globalThis.sessionStorage = { ...globalThis.localStorage };
 
 // 2. Import components and store
 import { TechnicianRouteView } from '../../public/assets/js/views/TechnicianRouteView.js';
-import { api } from '../../public/assets/js/api.js';
+import { api, ApiError } from '../../public/assets/js/api.js';
 import { TechnicianResolutionRefundBlock } from '../../public/assets/js/components/TechnicianResolutionRefundBlock.js';
 import { store, setInternalSession, clearSession } from '../../public/assets/js/store.js';
 import { PendingInfoPauseModal } from '../../public/assets/js/components/PendingInfoPauseModal.js';
@@ -1035,6 +1035,103 @@ assert('13.5 El botón del aviso reutiliza las clases de botón, sin un solo col
   noticeBlock.includes('class="vg-btn vg-btn-primary"')
     && !/#[0-9a-fA-F]{3,8}/.test(noticeBlock),
   'El bloque del aviso introduce un literal de color: debe entrar por token o por clase.');
+
+// ---------------------------------------------------------------------
+// TEST GROUP 14: Salvaguarda del parte ante cuarentena sobrevenida (RF-10.1/EARS-10.2, Art. II)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 14: Cuarentena sobrevenida y salvaguarda del parte (RF-10.1) ---');
+
+// El caso de campo: el técnico abrió el formulario cuando la máquina aún estaba en OK y fue
+// la central quien declaró la cuarentena mientras él redactaba. El servidor salvaguarda su
+// parte y responde `SANITARY_QUARANTINE_OVERTAKEN`; la vista tiene que abrir el bloque
+// sanitario SIN borrar una sola letra de lo ya escrito, porque volver a redactarlo es
+// exactamente lo que EARS-10.2 prohíbe.
+api.technician.getRefundInspection = async () => ({ has_refund_requests: false, has_pending_verdict: false, requests: [] });
+
+const overtakenView = createRouteInstance();
+let overtakenCalls = 0;
+let overtakenPayload = null;
+api.technician.resolveIncident = async (id, payloadOrDiagnosis) => {
+  overtakenCalls++;
+  overtakenPayload = typeof payloadOrDiagnosis === 'object' ? payloadOrDiagnosis : null;
+  if (overtakenCalls === 1) {
+    throw new ApiError(
+      422,
+      'SANITARY_QUARANTINE_OVERTAKEN',
+      'La máquina entró en CUARENTENA sanitaria automática a las 4 h naturales (Art. II): su informe queda salvaguardado.',
+      { draft_safeguarded: true }
+    );
+  }
+  return { success: true, data: { id, status: 'RESOLVED', resolved_at: '2026-10-14T10:00:00Z' } };
+};
+
+await overtakenView.openResolveModal(JSON.parse(JSON.stringify(mockRouteIncidents.find(i => i.id === 101))));
+const overtakenDiagnosis = 'Sonda NTC descalibrada con lectura real de 14 grados en el recinto térmico.';
+const overtakenAction = 'Sustitución de la sonda NTC y verificación del ciclo completo de frío a 3,5 grados.';
+overtakenView.resolveDiagnosis = overtakenDiagnosis;
+overtakenView.resolveAction = overtakenAction;
+
+assert('14.1 La parada sin bandera sanitaria abre la resolución por el camino ordinario',
+  overtakenView.sanitaryResolutionRequired === false && overtakenView.canResolve === true);
+
+await overtakenView.submitResolve();
+
+assert('14.2 La cuarentena sobrevenida abre la puerta sanitaria con el código nuevo',
+  overtakenView.sanitaryResolutionRequired === true,
+  'Sin ese camino el técnico vería un error y ningún bloque que completar.');
+
+assert('14.3 El parte redactado sobrevive intacto y el modal sigue abierto',
+  overtakenView.resolveDiagnosis === overtakenDiagnosis
+    && overtakenView.resolveAction === overtakenAction
+    && overtakenView.showResolveModal === true
+    && overtakenView.selectedIncident?.id === 101
+    && overtakenView.isResolving === false,
+  JSON.stringify({
+    diagnosis: overtakenView.resolveDiagnosis,
+    action: overtakenView.resolveAction,
+    modal: overtakenView.showResolveModal
+  }));
+
+assert('14.4 El motivo del servidor se muestra tal cual, sin mensaje genérico',
+  overtakenView.resolveError.includes('salvaguardado') && overtakenView.resolveError.includes('CUARENTENA'));
+
+// El segundo intento conserva el informe y sólo añade el protocolo: el mismo formulario
+// que estaba en pantalla sigue vivo, con sus textos, y ahora viaja completo.
+overtakenView.$refs = {
+  resolutionSanitaryBlockRef: {
+    validate: () => ({
+      isValid: true,
+      error: '',
+      payload: {
+        sanitary_declarations: { temperature_c: 3.5, stock_destroyed: true, hygiene_checklist: true }
+      }
+    })
+  }
+};
+overtakenView.handleSanitaryChange({ isValid: true, temperature_c: 3.5, stock_destroyed: true, hygiene_checklist: true });
+await overtakenView.submitResolve();
+
+assert('14.5 El reintento viaja con el informe salvaguardado y el protocolo sanitario (EARS-10.2)',
+  overtakenPayload?.diagnosis === overtakenDiagnosis
+    && overtakenPayload?.action_taken === overtakenAction
+    && overtakenPayload?.sanitary_declarations?.temperature_c === 3.5
+    && overtakenPayload?.sanitary_declarations?.hygiene_checklist === true,
+  JSON.stringify(overtakenPayload));
+
+// Control negativo: un error que no es de la puerta sanitaria no puede pintar el bloque,
+// o el técnico rellenaría un protocolo de higienización que nadie le ha pedido.
+const unrelatedView = createRouteInstance();
+api.technician.resolveIncident = async () => {
+  throw new ApiError(422, 'INVALID_STATUS_FOR_RESOLUTION', 'La intervención no está en curso.');
+};
+await unrelatedView.openResolveModal(JSON.parse(JSON.stringify(mockRouteIncidents.find(i => i.id === 101))));
+unrelatedView.resolveDiagnosis = overtakenDiagnosis;
+unrelatedView.resolveAction = overtakenAction;
+await unrelatedView.submitResolve();
+
+assert('14.6 Un rechazo ajeno a la cuarentena no abre el bloque sanitario (control negativo)',
+  unrelatedView.sanitaryResolutionRequired === false
+    && unrelatedView.resolveError === 'La intervención no está en curso.');
 
 // ---------------------------------------------------------------------
 // SUMMARY

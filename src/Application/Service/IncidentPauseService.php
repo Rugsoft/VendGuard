@@ -449,6 +449,45 @@ final class IncidentPauseService
     }
 
     /**
+     * ¿La máquina está ya en cuarentena sanitaria **antes** de esta operación?
+     *
+     * Consulta pura, sin escrituras, y deliberadamente separada de
+     * `evaluateSanitaryBiologicalClock()`: ese método declara la cuarentena cuando el reloj
+     * vence, de modo que su respuesta es `true` tanto si la acaba de escribir como si ya
+     * estaba. La ruta del técnico necesita distinguir las dos cosas, porque no significan lo
+     * mismo (RF-10.1, Art. II): una cuarentena que ya estaba es la que la central declaró
+     * mientras él trabajaba sin cobertura —su formulario no la conocía y su parte debe
+     * salvaguardarse—, mientras que la que este mismo intento de cierre dispara se resuelve
+     * en la misma petición, con el técnico delante de la máquina y el formulario abierto.
+     *
+     * **Falla en voz alta:** si el estado sanitario no se puede leer, la excepción sube y el
+     * llamante detiene el cierre. Es la misma política que el reloj biológico y por el mismo
+     * motivo: una salvaguarda sanitaria no puede decidirse sobre un dato que no se tiene.
+     *
+     * @param Incident $incident Incidencia viva cuya máquina se consulta.
+     * @return bool `true` si la máquina ya figura en `QUARANTINE`.
+     */
+    public function isSanitaryQuarantineInForce(Incident $incident): bool
+    {
+        return self::settingsAreQuarantined($this->settings()->getMachineSettings($incident->getMachineId()));
+    }
+
+    /**
+     * Una sola definición de «la máquina está en cuarentena sanitaria».
+     *
+     * Existe para que la consulta de la ruta y la salvaguarda del parte no mantengan dos
+     * lecturas de la misma regla, y para no pagar dos veces la lectura de ajustes cuando
+     * `sanitaryResolutionRequirement()` se evalúa parada a parada al pintar la ruta móvil.
+     *
+     * @param array<string, mixed>|mixed $settings Ajustes de la máquina tal y como los entrega el repositorio.
+     */
+    private static function settingsAreQuarantined(mixed $settings): bool
+    {
+        return is_array($settings)
+            && (string)($settings['sanitary_status'] ?? '') === self::SANITARY_STATUS_QUARANTINE;
+    }
+
+    /**
      * Determina qué exige el formulario de resolución técnica sobre esta avería
      * viva (RF-03.5.2, Art. II) — consulta pura, sin escrituras.
      *
@@ -481,7 +520,11 @@ final class IncidentPauseService
     {
         $settings = $this->settings()->getMachineSettings($incident->getMachineId());
 
-        if (($settings['sanitary_status'] ?? '') === self::SANITARY_STATUS_QUARANTINE) {
+        // Supuesto 1: la máquina ya está fuera de servicio por control higiénico-sanitario.
+        // La regla vive en `settingsAreQuarantined()`, que es también la que consulta
+        // `isSanitaryQuarantineInForce()` para la salvaguarda del parte (RF-10.1): una sola
+        // definición de qué significa «en cuarentena» y una sola lectura de ajustes.
+        if (self::settingsAreQuarantined($settings)) {
             return true;
         }
 
