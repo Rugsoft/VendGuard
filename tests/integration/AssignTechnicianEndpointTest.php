@@ -586,6 +586,9 @@ $assert(
     $directThrew !== null ? get_class($directThrew) . ': ' . $directThrew->getMessage() : 'No lanzó ninguna excepción'
 );
 
+// Limpieza final de datos de prueba para no dejar incidentes en garantía en el arnés
+TestDataCleaner::purge($pdo);
+
 // ─── RESULTADO FINAL ──────────────────────────────────────────────────────────
 
 echo "\n" . str_repeat('=', 70) . "\n";

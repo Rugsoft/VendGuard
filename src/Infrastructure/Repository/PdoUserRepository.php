@@ -29,6 +29,14 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
 
     private SqlDialectAdapter $dialect;
 
+    /** @var array<string, ?User> Cache en memoria por clave para reducir round-trips en lecturas repetidas */
+    private static array $cacheById = [];
+
+    public static function clearCache(): void
+    {
+        self::$cacheById = [];
+    }
+
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
@@ -101,6 +109,11 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
      */
     public function findById(int $id, bool $onlyActive = true, bool $allowDeleted = false): ?User
     {
+        $cacheKey = "{$id}_" . ($onlyActive ? '1' : '0') . '_' . ($allowDeleted ? '1' : '0');
+        if (array_key_exists($cacheKey, self::$cacheById)) {
+            return self::$cacheById[$cacheKey];
+        }
+
         $sql = "
             SELECT 
                 id, 
@@ -132,10 +145,13 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
         $row = $stmt->fetch();
 
         if ($row === false) {
+            self::$cacheById[$cacheKey] = null;
             return null;
         }
 
-        return User::fromDatabaseRow($row);
+        $user = User::fromDatabaseRow($row);
+        self::$cacheById[$cacheKey] = $user;
+        return $user;
     }
 
     /**
@@ -242,6 +258,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
             throw new RuntimeException("Error al recuperar el usuario recién creado con ID {$newId}");
         }
 
+        self::clearCache();
         return $created;
     }
 
@@ -276,6 +293,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
+        self::clearCache();
         return $stmt->rowCount() >= 0;
     }
 
@@ -303,6 +321,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
             ':id'            => $id,
         ]);
 
+        self::clearCache();
         return $stmt->rowCount() > 0;
     }
 
@@ -337,6 +356,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':id' => $id]);
 
+        self::clearCache();
         return $stmt->rowCount() > 0;
     }
 
@@ -360,6 +380,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':id' => $id]);
 
+        self::clearCache();
         return $stmt->rowCount() > 0;
     }
 

@@ -478,7 +478,7 @@ class CoordinatorController
         // 9. Realizar la asignación o reasignación transaccional en el repositorio
         try {
             $assigned = $this->incidentRepo->assign(
-                incidentId: $incidentId,
+                incidentId: $incident,
                 technicianId: $technicianId,
                 coordinatorId: $coordinatorId !== null ? (int)$coordinatorId : null,
                 urgencyOverride: ($urgencyOverride !== null && $urgencyOverride !== '') ? $urgencyOverride : null,
@@ -747,11 +747,8 @@ class CoordinatorController
         }
         $incidentId = (int)$rawId;
 
-        // 2. Existencia del expediente.
-        $incident = $this->incidentRepo->findById($incidentId);
-        if ($incident === null) {
-            return Response::error('INCIDENT_NOT_FOUND', "No se encontró ninguna incidencia con ID {$incidentId}.", 404);
-        }
+        // 2. Existencia del expediente se valida dentro de la transacción de la reanudación (T-HYBRID-27)
+        // para ahorrar una ida y vuelta redundante contra el motor remoto.
 
         // 3. Destino elegido por coordinación. Por defecto `ASSIGNED`: la respuesta tardía
         //    de la sede obliga al técnico a personarse antes de reanudar el trabajo. En un
@@ -799,7 +796,12 @@ class CoordinatorController
             return Response::error('INVALID_STATUS_FOR_RESUME', $e->getMessage(), 422);
         } catch (\InvalidArgumentException $e) {
             return Response::error('INVALID_RESUME_TARGET', $e->getMessage(), 422);
-        } catch (\DomainException | \RuntimeException $e) {
+        } catch (\DomainException $e) {
+            if (str_contains($e->getMessage(), 'No se encontró ninguna incidencia')) {
+                return Response::error('INCIDENT_NOT_FOUND', "No se encontró ninguna incidencia con ID {$incidentId}.", 404);
+            }
+            return Response::error('RESUME_FAILED', $e->getMessage(), 500);
+        } catch (\RuntimeException $e) {
             return Response::error('RESUME_FAILED', $e->getMessage(), 500);
         }
 

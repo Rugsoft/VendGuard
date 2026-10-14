@@ -121,6 +121,163 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         }
 
         try {
+            if ($this->dialect->isPostgres()) {
+                $sql = "
+                    WITH existing_check AS (
+                        SELECT id AS ex_id, ticket_code AS ex_ticket_code, status AS ex_status, resolved_at AS ex_resolved_at
+                        FROM incidents i
+                        WHERE i.machine_id = :machine_id
+                          AND i.deleted_at IS NULL
+                          AND (
+                              (i.status NOT IN ('CLOSED', 'CANCELLED'))
+                              OR (i.status = 'RESOLVED' AND i.resolved_at IS NOT NULL AND i.resolved_at >= NOW() - INTERVAL '48 HOUR')
+                          )
+                        ORDER BY CASE WHEN i.status != 'RESOLVED' THEN 0 ELSE 1 END ASC, i.resolved_at DESC, i.id DESC
+                        LIMIT 1
+                    ),
+                    new_inc AS (
+                        INSERT INTO incidents (
+                            ticket_code,
+                            machine_id,
+                            location_id,
+                            assigned_technician_id,
+                            reporter_name,
+                            reporter_phone,
+                            category,
+                            description,
+                            retained_money_amount,
+                            photo_path,
+                            urgency,
+                            status,
+                            assigned_at,
+                            started_at,
+                            pending_parts_reason,
+                            resolution_diagnosis,
+                            resolution_action,
+                            resolved_at,
+                            reopen_reason,
+                            reopened_at,
+                            closed_at,
+                            cancellation_reason,
+                            cancelled_at
+                        )
+                        SELECT
+                            :ticket_code,
+                            :machine_id,
+                            :location_id,
+                            :assigned_technician_id,
+                            :reporter_name,
+                            :reporter_phone,
+                            :category,
+                            :description,
+                            :retained_money_amount,
+                            :photo_path,
+                            :urgency,
+                            :status,
+                            :assigned_at,
+                            :started_at,
+                            :pending_parts_reason,
+                            :resolution_diagnosis,
+                            :resolution_action,
+                            :resolved_at,
+                            :reopen_reason,
+                            :reopened_at,
+                            :closed_at,
+                            :cancellation_reason,
+                            :cancelled_at
+                        WHERE NOT EXISTS (SELECT 1 FROM existing_check)
+                        RETURNING id, status
+                    ),
+                    new_hist AS (
+                        INSERT INTO incident_history (
+                            incident_id,
+                            user_id,
+                            from_status,
+                            to_status,
+                            action_note
+                        )
+                        SELECT
+                            new_inc.id,
+                            :user_id,
+                            NULL,
+                            new_inc.status,
+                            :action_note
+                        FROM new_inc
+                        RETURNING id
+                    )
+                    SELECT 
+                        new_inc.id AS created_id,
+                        ex.ex_ticket_code,
+                        ex.ex_status
+                    FROM (SELECT 1) _dummy
+                    LEFT JOIN new_inc ON true
+                    LEFT JOIN existing_check ex ON true;
+                ";
+
+                $stmt = $this->pdo->prepare($sql);
+                $stmt->bindValue(':ticket_code', $incident->getTicketCode(), PDO::PARAM_STR);
+                $stmt->bindValue(':machine_id', $incident->getMachineId(), PDO::PARAM_INT);
+                $stmt->bindValue(':location_id', $incident->getLocationId(), PDO::PARAM_INT);
+                $stmt->bindValue(':assigned_technician_id', $incident->getAssignedTechnicianId(), $incident->getAssignedTechnicianId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+                $stmt->bindValue(':reporter_name', $incident->getReporterName(), $incident->getReporterName() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':reporter_phone', $incident->getReporterPhone(), $incident->getReporterPhone() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':category', $incident->getCategory()->value, PDO::PARAM_STR);
+                $stmt->bindValue(':description', $incident->getDescription(), PDO::PARAM_STR);
+                $stmt->bindValue(':retained_money_amount', $incident->getRetainedMoneyAmount(), $incident->getRetainedMoneyAmount() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':photo_path', $incident->getPhotoPath(), $incident->getPhotoPath() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':urgency', $incident->getUrgency()->value, PDO::PARAM_STR);
+                $stmt->bindValue(':status', $incident->getStatus()->value, PDO::PARAM_STR);
+                $stmt->bindValue(':assigned_at', $incident->getAssignedAt(), $incident->getAssignedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':started_at', $incident->getStartedAt(), $incident->getStartedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':pending_parts_reason', $incident->getPendingPartsReason(), $incident->getPendingPartsReason() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':resolution_diagnosis', $incident->getResolutionDiagnosis(), $incident->getResolutionDiagnosis() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':resolution_action', $incident->getResolutionAction(), $incident->getResolutionAction() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':resolved_at', $incident->getResolvedAt(), $incident->getResolvedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':reopen_reason', $incident->getReopenReason(), $incident->getReopenReason() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':reopened_at', $incident->getReopenedAt(), $incident->getReopenedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':closed_at', $incident->getClosedAt(), $incident->getClosedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':cancellation_reason', $incident->getCancellationReason(), $incident->getCancellationReason() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':cancelled_at', $incident->getCancelledAt(), $incident->getCancelledAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':user_id', $userId, $userId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+                $note = $initialNote ?? 'Aviso creado por el responsable de sede';
+                $stmt->bindValue(':action_note', $note, PDO::PARAM_STR);
+
+                $stmt->execute();
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                if ($row && isset($row['created_id']) && $row['created_id'] !== null) {
+                    if ($isOwnTransaction) {
+                        $this->pdo->commit();
+                    }
+                    return $incident->withId((int)$row['created_id']);
+                }
+
+                if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                    $this->pdo->rollBack();
+                }
+
+                $ticket = (string)($row['ex_ticket_code'] ?? 'ACTIVO');
+                $st = (string)($row['ex_status'] ?? 'REGISTERED');
+
+                if ($st === \VendGuard\Core\Domain\ValueObject\IncidentStatus::RESOLVED->value) {
+                    throw new DuplicateIncidentException(
+                        'MACHINE_IN_WARRANTY',
+                        "Esta máquina fue reparada recientemente (Ticket #{$ticket}). Si el fallo persiste, pulsa en 'Reabrir incidencia'.",
+                        $ticket,
+                        $st,
+                        409
+                    );
+                }
+
+                throw new DuplicateIncidentException(
+                    'MACHINE_HAS_ACTIVE_INCIDENT',
+                    "Esta máquina ya cuenta con un aviso activo (Ticket #{$ticket}) en estado {$st}.",
+                    $ticket,
+                    $st,
+                    409
+                );
+            }
+
             // 1. Detección preventiva de duplicados y control de garantía (Artículo V Constitución / Algoritmo 3.2)
             $existing = $this->findActiveOrResolvedByMachineId($incident->getMachineId());
             if ($existing !== null) {
@@ -241,7 +398,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $this->pdo->commit();
             }
 
-            return $this->findById($newId) ?? $incident->withId($newId);
+            // Evitar round-trip redundante de relectura completa tras inserción (T-HYBRID-27)
+            return $incident->withId($newId);
         } catch (PDOException $e) {
             if ($isOwnTransaction && $this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
@@ -303,6 +461,37 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 'La lectura con bloqueo por fila exige una transacción abierta: sin ella el ' .
                 'bloqueo se libera al terminar la sentencia y la serialización sería ficticia.'
             );
+        }
+
+        if ($this->dialect->isPostgres()) {
+            $sql = "
+                SELECT 
+                    i.*,
+                    m.code AS machine_code,
+                    m.model AS machine_model,
+                    m.machine_type AS machine_type,
+                    l.name AS location_name,
+                    l.site_code AS location_site_code,
+                    u.name AS technician_name
+                FROM incidents i
+                LEFT JOIN machines m ON i.machine_id = m.id
+                LEFT JOIN locations l ON i.location_id = l.id
+                LEFT JOIN users u ON i.assigned_technician_id = u.id
+                WHERE i.id = :id
+                  AND i.deleted_at IS NULL
+                FOR UPDATE OF i
+                LIMIT 1
+            ";
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+            $stmt->execute();
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($row === false) {
+                return null;
+            }
+
+            return Incident::fromDatabaseRow($row);
         }
 
         $lock = $this->pdo->prepare(
@@ -494,16 +683,16 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
     /**
      * Recupera la incidencia activa o resuelta en garantía para una máquina dispensadora.
+     *
+     * Se resuelve en UNA sola consulta combinada (Módulo 12 · T-HYBRID-27 · RNF-01):
+     * pedir primero la activa y luego la resuelta sumaba dos idas y vueltas secuenciales
+     * en cada intento de creación o triaje.
      */
     public function findActiveOrResolvedByMachineId(int $machineId): ?Incident
     {
-        // 1. Primero comprobar si hay una incidencia activa
-        $active = $this->findActiveByMachineId($machineId);
-        if ($active !== null) {
-            return $active;
-        }
+        $activeCond = $this->dialect->activeTicketCondition('i');
+        $subInterval = $this->dialect->subtractInterval('NOW()', 48, 'HOUR');
 
-        // 2. Si no hay activa, comprobar si la última resuelta está en garantía (< 48h)
         $sql = "
             SELECT 
                 i.*,
@@ -518,11 +707,15 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             LEFT JOIN locations l ON i.location_id = l.id
             LEFT JOIN users u ON i.assigned_technician_id = u.id
             WHERE i.machine_id = :machine_id
-              AND i.status = 'RESOLVED'
-              AND i.resolved_at IS NOT NULL
-              AND i.resolved_at >= {$this->dialect->subtractInterval('NOW()', 48, 'HOUR')}
               AND i.deleted_at IS NULL
-            ORDER BY i.resolved_at DESC
+              AND (
+                  ({$activeCond})
+                  OR (i.status = 'RESOLVED' AND i.resolved_at IS NOT NULL AND i.resolved_at >= {$subInterval})
+              )
+            ORDER BY 
+              CASE WHEN ({$activeCond}) THEN 0 ELSE 1 END ASC,
+              i.resolved_at DESC,
+              i.id DESC
             LIMIT 1
         ";
 
@@ -1581,7 +1774,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
      * saber que la avería cambió de manos durante la pausa (RF-02.1).
      */
     public function assign(
-        int $incidentId,
+        int|Incident $incidentId,
         int $technicianId,
         ?int $coordinatorId = null,
         ?string $urgencyOverride = null,
@@ -1594,10 +1787,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         }
 
         try {
-            $incident = $this->findById($incidentId);
+            $incident = $incidentId instanceof Incident ? $incidentId : $this->findById($incidentId);
             if ($incident === null) {
                 throw new DomainException("No se encontró ninguna incidencia con ID {$incidentId}.");
             }
+            $numericId = (int)$incident->getId();
 
             // 1. Validar transición legal (EARS 5.1, RF-07.3): REGISTERED/REOPENED admiten
             //    la asignación inicial y los estados con responsable vigente admiten el
@@ -1645,6 +1839,122 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $setClause = $isReassignment
                 ? "assigned_technician_id = :technician_id,\n                    urgency = :urgency"
                 : "status = 'ASSIGNED',\n                    assigned_technician_id = :technician_id,\n                    assigned_at = CURRENT_TIMESTAMP,\n                    urgency = :urgency";
+
+            // En PostgreSQL consolidamos el UPDATE de la incidencia y la inserción del
+            // evento en incident_history en un único round-trip atómico con CTE (T-HYBRID-27).
+            if ($this->dialect->isPostgres()) {
+                if ($isReassignment) {
+                    $actionNote = 'Reasignación técnica: del técnico ID '
+                        . ($incident->getAssignedTechnicianId() ?? 0)
+                        . " al técnico ID {$technicianId}.";
+                    if ($urgencyChanged) {
+                        $actionNote .= " Reclasificación de urgencia de {$incident->getUrgency()->value} a {$finalUrgency}.";
+                    }
+                    $actionNote .= ' Motivo: ' . $cleanReassignmentReason;
+                } else {
+                    $actionNote = "Incidencia asignada al técnico ID {$technicianId}.";
+                    if ($urgencyChanged) {
+                        $actionNote .= " Urgencia reclasificada de {$incident->getUrgency()->value} a {$finalUrgency}. Motivo: " . trim((string)$urgencyReason);
+                    }
+                }
+
+                $sql = "
+                    WITH updated AS (
+                        UPDATE incidents
+                        SET {$setClause}
+                        WHERE id = :id
+                          AND deleted_at IS NULL
+                        RETURNING *
+                    ),
+                    new_hist AS (
+                        INSERT INTO incident_history (
+                            incident_id,
+                            user_id,
+                            from_status,
+                            to_status,
+                            action_note
+                        )
+                        SELECT
+                            id,
+                            :user_id,
+                            :from_status,
+                            :to_status,
+                            :action_note
+                        FROM updated
+                        RETURNING id
+                    )
+                    SELECT * FROM updated;
+                ";
+
+                $stmt = $this->pdo->prepare($sql);
+                $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+                $stmt->bindValue(':urgency', $finalUrgency, PDO::PARAM_STR);
+                $stmt->bindValue(':id', $numericId, PDO::PARAM_INT);
+                $stmt->bindValue(':user_id', $coordinatorId, $coordinatorId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+                $stmt->bindValue(':from_status', $incident->getStatus()->value, PDO::PARAM_STR);
+                $stmt->bindValue(':to_status', $isReassignment ? $incident->getStatus()->value : 'ASSIGNED', PDO::PARAM_STR);
+                $stmt->bindValue(':action_note', $actionNote, PDO::PARAM_STR);
+                $stmt->execute();
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                if ($urgencyChanged && $urgencyReason !== null && trim($urgencyReason) !== '') {
+                    $this->insertHistory(
+                        $numericId,
+                        $coordinatorId,
+                        'ASSIGNED',
+                        'ASSIGNED',
+                        "Reclasificación de urgencia a {$finalUrgency} registrada en auditoría. Justificación del coordinador: " . trim($urgencyReason)
+                    );
+                }
+
+                if ($isOwnTransaction) {
+                    $this->pdo->commit();
+                }
+
+                return new Incident(
+                    id: $numericId,
+                    ticketCode: $incident->getTicketCode(),
+                    machineId: $incident->getMachineId(),
+                    locationId: $incident->getLocationId(),
+                    category: $incident->getCategory(),
+                    description: $incident->getDescription(),
+                    urgency: UrgencyLevel::fromString($finalUrgency),
+                    status: $isReassignment ? $incident->getStatus() : IncidentStatus::ASSIGNED,
+                    assignedTechnicianId: $technicianId,
+                    reporterName: $incident->getReporterName(),
+                    reporterPhone: $incident->getReporterPhone(),
+                    retainedMoneyAmount: $incident->getRetainedMoneyAmount(),
+                    photoPath: $incident->getPhotoPath(),
+                    assignedAt: $isReassignment ? $incident->getAssignedAt() : (isset($row['assigned_at']) ? (string)$row['assigned_at'] : date('Y-m-d H:i:s')),
+                    startedAt: $incident->getStartedAt(),
+                    pendingPartsReason: $incident->getPendingPartsReason(),
+                    resolutionDiagnosis: $incident->getResolutionDiagnosis(),
+                    resolutionAction: $incident->getResolutionAction(),
+                    resolvedAt: $incident->getResolvedAt(),
+                    reopenReason: $incident->getReopenReason(),
+                    reopenedAt: $incident->getReopenedAt(),
+                    closedAt: $incident->getClosedAt(),
+                    cancellationReason: $incident->getCancellationReason(),
+                    cancelledAt: $incident->getCancelledAt(),
+                    isActiveTicket: $incident->getIsActiveTicket(),
+                    createdAt: $incident->getCreatedAt(),
+                    updatedAt: isset($row['updated_at']) ? (string)$row['updated_at'] : date('Y-m-d H:i:s'),
+                    deletedAt: $incident->getDeletedAt(),
+                    machineCode: $incident->getMachineCode(),
+                    machineModel: $incident->getMachineModel(),
+                    machineType: $incident->getMachineType(),
+                    locationName: $incident->getLocationName(),
+                    locationSiteCode: $incident->getLocationSiteCode(),
+                    technicianName: $incident->getTechnicianName(),
+                    technicianOperatorCode: $incident->getTechnicianOperatorCode(),
+                    pendingInfoReasonCategory: $incident->getPendingInfoReasonCategory(),
+                    pendingInfoReasonText: $incident->getPendingInfoReasonText(),
+                    pausedAt: $incident->getPausedAt(),
+                    totalPendingInfoSeconds: $incident->getTotalPendingInfoSeconds(),
+                    slaTargetAt: $incident->getSlaTargetAt()
+                );
+            }
+
             $sql = "
                 UPDATE incidents
                 SET {$setClause}
@@ -1655,7 +1965,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $stmt = $this->pdo->prepare($sql);
             $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
             $stmt->bindValue(':urgency', $finalUrgency, PDO::PARAM_STR);
-            $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+            $stmt->bindValue(':id', $numericId, PDO::PARAM_INT);
             $stmt->execute();
 
             // 4. Registrar el evento de asignación o reasignación en el historial inmutable.
@@ -1677,7 +1987,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 }
             }
             $this->insertHistory(
-                $incidentId,
+                $numericId,
                 $coordinatorId,
                 $incident->getStatus()->value,
                 $isReassignment ? $incident->getStatus()->value : 'ASSIGNED',
@@ -1687,7 +1997,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             // 5. Si se cambió la urgencia, registrar también un evento de auditoría de reclasificación
             if ($urgencyChanged && $urgencyReason !== null && trim($urgencyReason) !== '') {
                 $this->insertHistory(
-                    $incidentId,
+                    $numericId,
                     $coordinatorId,
                     'ASSIGNED',
                     'ASSIGNED',
@@ -1699,7 +2009,52 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $this->pdo->commit();
             }
 
-            $assigned = $this->findById($incidentId);
+            if ($this->dialect->isPostgres()) {
+                return new Incident(
+                    id: (int)$incident->getId(),
+                    ticketCode: $incident->getTicketCode(),
+                    machineId: $incident->getMachineId(),
+                    locationId: $incident->getLocationId(),
+                    category: $incident->getCategory(),
+                    description: $incident->getDescription(),
+                    urgency: UrgencyLevel::fromString($finalUrgency),
+                    status: $isReassignment ? $incident->getStatus() : IncidentStatus::ASSIGNED,
+                    assignedTechnicianId: $technicianId,
+                    reporterName: $incident->getReporterName(),
+                    reporterPhone: $incident->getReporterPhone(),
+                    retainedMoneyAmount: $incident->getRetainedMoneyAmount(),
+                    photoPath: $incident->getPhotoPath(),
+                    assignedAt: $isReassignment ? $incident->getAssignedAt() : date('Y-m-d H:i:s'),
+                    startedAt: $incident->getStartedAt(),
+                    pendingPartsReason: $incident->getPendingPartsReason(),
+                    resolutionDiagnosis: $incident->getResolutionDiagnosis(),
+                    resolutionAction: $incident->getResolutionAction(),
+                    resolvedAt: $incident->getResolvedAt(),
+                    reopenReason: $incident->getReopenReason(),
+                    reopenedAt: $incident->getReopenedAt(),
+                    closedAt: $incident->getClosedAt(),
+                    cancellationReason: $incident->getCancellationReason(),
+                    cancelledAt: $incident->getCancelledAt(),
+                    isActiveTicket: $incident->getIsActiveTicket(),
+                    createdAt: $incident->getCreatedAt(),
+                    updatedAt: date('Y-m-d H:i:s'),
+                    deletedAt: $incident->getDeletedAt(),
+                    machineCode: $incident->getMachineCode(),
+                    machineModel: $incident->getMachineModel(),
+                    machineType: $incident->getMachineType(),
+                    locationName: $incident->getLocationName(),
+                    locationSiteCode: $incident->getLocationSiteCode(),
+                    technicianName: $incident->getTechnicianName(),
+                    technicianOperatorCode: $incident->getTechnicianOperatorCode(),
+                    pendingInfoReasonCategory: $incident->getPendingInfoReasonCategory(),
+                    pendingInfoReasonText: $incident->getPendingInfoReasonText(),
+                    pausedAt: $incident->getPausedAt(),
+                    totalPendingInfoSeconds: $incident->getTotalPendingInfoSeconds(),
+                    slaTargetAt: $incident->getSlaTargetAt()
+                );
+            }
+
+            $assigned = $this->findById($numericId);
             if ($assigned === null) {
                 throw new DomainException("Error al recuperar la incidencia asignada.");
             }
