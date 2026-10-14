@@ -204,6 +204,70 @@ if ($bcn01 !== null) {
     $assert("9.2 Conteo de máquinas activas en SEDE-BCN-01 es >= 1", $activeCount >= 1);
 }
 
+// =====================================================================
+// 10. Lectura por lote de sedes (findManyByIds, T-HYBRID-27)
+// =====================================================================
+// La bandeja de ruta del técnico resolvía la sede de cada parada con una consulta propia: contra
+// el motor remoto era una de las tres vueltas por parada que agotaban el presupuesto de RNF-01.
+// Este caso certifica contra MariaDB que la forma por lote publica el mismo dato que la lectura
+// individual, que descarta las sedes dadas de baja lógica y que no inventa filas.
+echo "\n--- Caso 10: Lectura por lote de sedes (findManyByIds) ---\n";
+
+$batchLocA = $repository->create([
+    'site_code' => 'SEDE-TEST-BATCH-A',
+    'name' => 'Centro Cívico Lote A',
+    'address' => 'Calle del Lote 1, BCN',
+    'contact_phone' => '655000111',
+]);
+$batchLocB = $repository->create([
+    'site_code' => 'SEDE-TEST-BATCH-B',
+    'name' => 'Centro Cívico Lote B',
+    'address' => 'Calle del Lote 2, BCN',
+    'contact_phone' => '655000222',
+]);
+$batchLocC = $repository->create([
+    'site_code' => 'SEDE-TEST-BATCH-C',
+    'name' => 'Centro Cívico Lote C',
+    'address' => 'Calle del Lote 3, BCN',
+    'contact_phone' => '655000333',
+]);
+$repository->softDelete($batchLocC->getId());
+
+$batchLocations = $repository->findManyByIds([
+    $batchLocA->getId(),
+    $batchLocB->getId(),
+    $batchLocC->getId(),
+    $batchLocA->getId(),
+    0,
+    -7,
+    999999999,
+]);
+
+$assert("10.1 findManyByIds() devuelve un mapa indexado por id", array_keys($batchLocations) === [$batchLocA->getId(), $batchLocB->getId()]);
+$assert("10.2 La sede dada de baja lógica queda fuera del lote", !array_key_exists($batchLocC->getId(), $batchLocations));
+$assert("10.3 Identificadores repetidos e imposibles no alteran el resultado", count($batchLocations) === 2);
+
+$singleLocation = $repository->findById($batchLocA->getId());
+$assert(
+    "10.4 El lote publica el MISMO dato que findById() para la misma sede",
+    $singleLocation !== null
+        && $batchLocations[$batchLocA->getId()]->getSiteCode() === $singleLocation->getSiteCode()
+        && $batchLocations[$batchLocA->getId()]->getName() === $singleLocation->getName()
+        && $batchLocations[$batchLocA->getId()]->getAddress() === $singleLocation->getAddress()
+        && $batchLocations[$batchLocA->getId()]->getContactPhone() === $singleLocation->getContactPhone()
+        && $batchLocations[$batchLocA->getId()]->getLatitude() === $singleLocation->getLatitude()
+        && $batchLocations[$batchLocA->getId()]->getLongitude() === $singleLocation->getLongitude()
+);
+
+$assert("10.5 Un lote vacío no consulta nada y devuelve mapa vacío", $repository->findManyByIds([]) === []);
+
+// Las tres sedes del caso se retiran enteras: la red de seguridad del apagado
+// (`purgeTestLocations`) no debe ser la única que limpia cuando la suite termina normalmente.
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $batchLocA, $batchLocB, $batchLocC): void {
+    $pdo->prepare("DELETE FROM `locations` WHERE `id` IN (:a, :b, :c)")
+        ->execute([':a' => $batchLocA->getId(), ':b' => $batchLocB->getId(), ':c' => $batchLocC->getId()]);
+});
+
 // Limpieza de la sede de test creada
 TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $createdLoc): void {
     $pdo->prepare("DELETE FROM `locations` WHERE `id` = :id")->execute([':id' => $createdLoc->getId()]);

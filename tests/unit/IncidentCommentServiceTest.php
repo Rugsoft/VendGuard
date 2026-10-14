@@ -72,6 +72,7 @@ final class CommentThreadStubIncidentRepo implements IncidentRepositoryInterface
         return $rows;
     }
 
+    public function countCommentsForIncidents(array $incidentIds, bool $includeInternal): array { return []; }
     public function countComments(int $incidentId, bool $includeInternal): int
     {
         $rows = array_filter(

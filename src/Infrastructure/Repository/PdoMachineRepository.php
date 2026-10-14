@@ -8,6 +8,7 @@ use PDO;
 use RuntimeException;
 use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\MachineType;
+use VendGuard\Core\Domain\Repository\MachineBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -24,8 +25,13 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * punto único de traducción (RF-01.5, T-HYBRID-25): el booleano literal (D-3) y la condición de
  * expediente activo (D-6, Art. V.2 y V.6), que en el motor local es una columna generada y en el
  * nuevo el predicado sobre el estado.
+ *
+ * Además del contrato principal, declara la capacidad de lote
+ * (`MachineBatchRepositoryInterface::findManyByIds()`), que existe para la bandeja de ruta del
+ * técnico: leer el parque de una parada en una consulta por parada era un N+1 medido contra el
+ * motor remoto (Módulo 12 · T-HYBRID-27).
  */
-class PdoMachineRepository implements MachineRepositoryInterface
+class PdoMachineRepository implements MachineRepositoryInterface, MachineBatchRepositoryInterface
 {
     private PDO $pdo;
 
@@ -208,6 +214,98 @@ class PdoMachineRepository implements MachineRepositoryInterface
 
         $activeIncident = $withIncident ? $this->extractActiveIncident($row) : null;
         return Machine::fromDatabaseRow($row, $activeIncident);
+    }
+
+    /**
+     * Máquinas de un lote de identificadores en UNA sola consulta (Módulo 12 · T-HYBRID-27).
+     *
+     * Es la forma por lotes de `findById(..., withIncident: true, allowDeleted: false)`: mismas
+     * columnas, mismo enriquecimiento del aviso activo (o en garantía) y mismo descarte de bajas
+     * lógicas, pero con una sola ida y vuelta para toda la bandeja. La ruta del técnico pagaba
+     * esta lectura una vez por parada y, contra el motor remoto, sus tres lecturas por parada eran
+     * el presupuesto entero de RNF-01.
+     *
+     * Los identificadores viajan como marcadores nombrados enlazados con `PDO::PARAM_INT` —la
+     * forma que los dos drivers traducen a su tipo entero—, nunca interpolados en la sentencia.
+     * Se deduplican y se descartan los imposibles, de modo que la consulta no lleva huecos.
+     *
+     * @param array<int, int|string> $machineIds
+     * @return array<int, Machine> Mapa `id de máquina => Machine`, sólo con las encontradas.
+     */
+    public function findManyByIds(array $machineIds): array
+    {
+        $ids = [];
+        foreach ($machineIds as $machineId) {
+            $id = (int)$machineId;
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+
+        if ($ids === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = [];
+        foreach (array_values($ids) as $index => $id) {
+            $key = ":machine_batch_{$index}";
+            $placeholders[] = $key;
+            $params[$key] = $id;
+        }
+
+        $sql = "
+            SELECT 
+                m.id,
+                m.location_id,
+                m.code,
+                m.model,
+                m.machine_type,
+                m.floor_wing,
+                m.notes,
+                m.is_active,
+                m.is_blocked_no_access,
+                m.created_at,
+                m.updated_at,
+                m.deleted_at,
+                i.id AS inc_id,
+                i.ticket_code AS inc_ticket_code,
+                i.status AS inc_status,
+                i.category AS inc_category,
+                i.urgency AS inc_urgency,
+                i.created_at AS inc_created_at,
+                i.resolved_at AS inc_resolved_at,
+                i.pending_info_reason_category AS inc_pending_info_reason_category,
+                i.pending_info_reason_text AS inc_pending_info_reason_text
+            FROM machines m
+            LEFT JOIN incidents i ON i.machine_id = m.id
+                AND i.deleted_at IS NULL
+                AND {$this->dialect->activeTicketCondition('i')}
+            WHERE m.id IN (" . implode(', ', $placeholders) . ")
+              AND m.deleted_at IS NULL
+            ORDER BY m.id ASC, i.id ASC
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        $machines = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $id = (int)$row['id'];
+            // `findById()` publica UNA fila por máquina (`LIMIT 1`) y la primera del JOIN es la
+            // que gana; el lote conserva esa misma promesa —la de menor `i.id`— en lugar de
+            // dejar que una segunda fila pise a la primera y cambie el aviso publicado.
+            if (isset($machines[$id])) {
+                continue;
+            }
+
+            $machines[$id] = Machine::fromDatabaseRow($row, $this->extractActiveIncident($row));
+        }
+
+        return $machines;
     }
 
     /**

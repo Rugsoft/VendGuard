@@ -148,6 +148,7 @@ $incidentRepo = new class implements IncidentRepositoryInterface {
     /** @var list<array{id: int, includeInternal: bool}> */
     public array $countCalls = [];
 
+    public function countCommentsForIncidents(array $incidentIds, bool $includeInternal): array { return []; }
     public function countComments(int $incidentId, bool $includeInternal): int
     {
         $this->countCalls[] = ['id' => $incidentId, 'includeInternal' => $includeInternal];
@@ -334,6 +335,7 @@ $emptyMachineRepo = new class implements MachineRepositoryInterface {
 $countCallProbe = new class implements IncidentRepositoryInterface {
     public int $calls = 0;
 
+    public function countCommentsForIncidents(array $incidentIds, bool $includeInternal): array { return []; }
     public function countComments(int $incidentId, bool $includeInternal): int
     {
         $this->calls++;

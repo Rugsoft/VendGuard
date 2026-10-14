@@ -34,11 +34,16 @@ use VendGuard\Core\Domain\Exception\InvalidResolutionException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Exception\SparePartNotFoundException;
 use VendGuard\Core\Domain\Model\Incident;
+use VendGuard\Core\Domain\Model\Location;
+use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentSiteResponseRepositoryInterface;
+use VendGuard\Core\Domain\Repository\LocationBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
+use VendGuard\Core\Domain\Repository\MachineBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TechnicianRouteBoardRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Service\ResolutionValidator;
@@ -230,74 +235,270 @@ class TechnicianController
         }
         $techId = (int)$technicianId;
 
-        // Recuperar incidencias asignadas en estados activos de ruta (ASSIGNED, IN_PROGRESS,
-        // PENDING_PARTS) más las pausadas por bloqueo de sede (PENDING_INFO). La parada en
-        // espera se sigue mostrando en "Mi Ruta" para que el técnico pueda omitirla y
-        // continuar con las siguientes visitas sin bloqueo (Módulo 11, RF-05.5).
-        $incidents = $this->incidentRepo->findAssignedToTechnician($techId, [
-            'ASSIGNED',
-            'IN_PROGRESS',
-            'PENDING_PARTS',
-            'PENDING_INFO',
-        ]);
+        // Estados activos de ruta (ASSIGNED, IN_PROGRESS, PENDING_PARTS) más las pausadas por
+        // bloqueo de sede (PENDING_INFO). La parada en espera se sigue mostrando en "Mi Ruta"
+        // para que el técnico pueda omitirla y continuar con las siguientes visitas sin bloqueo
+        // (Módulo 11, RF-05.5).
+        $routeStatuses = ['ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS', 'PENDING_INFO'];
+
+        // Dos caminos y UN solo payload (Módulo 12 · T-HYBRID-27 · RNF-01): si el repositorio
+        // declara el tablero, la bandeja entera se lee en UNA sola consulta —el presupuesto de
+        // 250 ms admite 5,7 vueltas con el enlace medido y la composición costaba seis—; si no
+        // lo declara (dobles de prueba, motores sin la capacidad), la parada se compone con las
+        // lecturas ordinarias, por lote cuando existen. Los dos caminos publican exactamente los
+        // mismos campos, porque la tarjeta se construye en un único sitio (`stopPayload()`).
+        $routeData = $this->incidentRepo instanceof TechnicianRouteBoardRepositoryInterface
+            ? $this->routeFromBoard($techId, $routeStatuses)
+            : $this->routeFromReads($techId, $routeStatuses);
+
+        return Response::json($routeData, 200);
+    }
+
+    /**
+     * La bandeja compuesta con las lecturas ordinarias (camino de reserva).
+     *
+     * Es el camino que corre para todo repositorio que no declare el tablero —los dobles de las
+     * suites unitarias, sin ir más lejos— y conserva la cura por lotes de T-HYBRID-27: una sola
+     * lectura por familia y ninguna por parada cuando la capacidad existe, y una lectura por
+     * identificador único cuando no.
+     *
+     * @param int $technicianId
+     * @param list<string> $routeStatuses
+     * @return list<array<string, mixed>>
+     */
+    private function routeFromReads(int $technicianId, array $routeStatuses): array
+    {
+        $incidents = $this->incidentRepo->findAssignedToTechnician($technicianId, $routeStatuses);
+
+        // Recuento agregado de las conversaciones de TODA la ruta en una sola consulta
+        // (RF-01.1 · T-HYBRID-27): pedirlo parada a parada costaba una ida y vuelta por
+        // expediente —patrón N+1, medido como la causa de que «Mi Ruta» fuera la peor de
+        // las operaciones contra el motor remoto—. El mapa se resuelve una vez y la parada
+        // publica 0 cuando el expediente no tiene hilo.
+        $incidentIds = [];
+        $machineIds = [];
+        $locationIds = [];
+        foreach ($incidents as $incident) {
+            $id = $incident->getId();
+            if ($id !== null) {
+                $incidentIds[] = $id;
+            }
+
+            $machineIds[$incident->getMachineId()] = true;
+            $locationIds[$incident->getLocationId()] = true;
+        }
+
+        $commentCounts = $this->incidentRepo->countCommentsForIncidents($incidentIds, true);
+
+        // Las otras tres lecturas de la parada —máquina, sede y ajustes preventivos de la
+        // puerta sanitaria— se resuelven también por LOTES, y por el mismo motivo medido:
+        // contra el motor remoto cada una costaba una ida y vuelta por parada (patrón N+1,
+        // Módulo 12 · T-HYBRID-27), y eran esas tres vueltas por parada las que agotaban el
+        // presupuesto de RNF-01. La lectura de lote es del repositorio real; si un doble de
+        // prueba no declara la capacidad, cada parada conserva su lectura individual y el
+        // contrato publicado no cambia.
+        $machines             = $this->machinesByIds(array_keys($machineIds));
+        $locations            = $this->locationsByIds(array_keys($locationIds));
+        $sanitaryRequirements = $this->pauses()->sanitaryResolutionRequirements($incidents);
 
         $routeData = [];
         foreach ($incidents as $incident) {
-            $machine = $this->machineRepo->findById($incident->getMachineId());
-            $location = $this->locationRepo->findById($incident->getLocationId());
-
-            $routeData[] = [
-                'id'          => $incident->getId(),
-                'ticket_code' => $incident->getTicketCode(),
-                'urgency'     => $incident->getUrgency()->value,
-                'status'      => $incident->getStatus()->value,
-                'machine'     => [
-                    'id'         => $machine?->getId(),
-                    'code'       => $machine?->getCode() ?? $incident->getMachineCode(),
-                    'model'      => $machine?->getModel() ?? $incident->getMachineModel(),
-                    'floor_wing' => $machine?->getFloorWing(),
-                ],
-                'location'    => [
-                    'id'            => $location?->getId(),
-                    'name'          => $location?->getName() ?? $incident->getLocationName(),
-                    'address'       => $location?->getAddress(),
-                    'contact_phone' => $location?->getContactPhone(),
-                    // Coordinates for the one-tap GPS navigation button (RF-MAP-08).
-                    'latitude'      => $location?->getLatitude(),
-                    'longitude'     => $location?->getLongitude(),
-                ],
-                'category'             => $incident->getCategory()->value,
-                'description'          => $incident->getDescription(),
-                'started_at'           => $incident->getStartedAt(),
-                'pending_parts_reason' => $incident->getPendingPartsReason(),
-                'created_at'           => $incident->getCreatedAt(),
-                // Estado de la pausa por bloqueo de sede (Módulo 11, RF-05.5): la tarjeta de
-                // la parada necesita la marca temporal del intervalo vivo, el acumulado de
-                // segundos pausados y el motivo tipificado que declaró el técnico.
-                'paused_at'                   => $incident->getPausedAt(),
-                'total_pending_info_seconds'  => $incident->getTotalPendingInfoSeconds(),
-                'pending_info_reason_category' => $incident->getPendingInfoReasonCategory()?->value,
-                'pending_info_reason_category_label' => $incident->getPendingInfoReasonCategory()?->label(),
-                'pending_info_reason_text'    => $incident->getPendingInfoReasonText(),
-                // Respuesta de la sede durante la pausa (RF-05.6, enmienda E-1): marca
-                // DERIVADA —comentario público de sede posterior al inicio de la pausa
-                // vigente— que avisa al técnico de que la respuesta que esperaba ya está
-                // en el hilo. El comentario no transiciona nada; la pausa sólo la cierra
-                // la reanudación manual (RF-02.2/RF-02.3) o la cancelación (RF-04.3).
-                'site_response_since_pause'   => $this->siteResponseSincePause($incident),
-                // Insignia de conversación de la parada (RF-01.1): el técnico de ruta
-                // contabiliza la TOTALIDAD de mensajes, públicos y notas internas de
-                // taller, porque su canal sí tiene acceso legítimo a ambos (RF-02.3).
-                'comments_count'       => $this->incidentRepo->countComments($incident->getId(), true),
-                // Puerta sanitaria del cierre (RF-03.5.2, Art. II): la consulta es pura
-                // —sin escrituras al pintar la ruta— y anticipa en la interfaz el bloqueo
-                // que la resolución aplicará de verdad (máquina en cuarentena o reloj
-                // biológico vencido en tipología bajo vigilancia sanitaria).
-                'sanitary_resolution_required' => $this->pauses()->sanitaryResolutionRequirement($incident),
-            ];
+            $routeData[] = $this->stopPayload(
+                $incident,
+                $machines[$incident->getMachineId()] ?? null,
+                $locations[$incident->getLocationId()] ?? null,
+                $commentCounts[(int)$incident->getId()] ?? 0,
+                $this->siteResponseSincePause($incident),
+                $sanitaryRequirements[(int)$incident->getId()] ?? false
+            );
         }
 
-        return Response::json($routeData, 200);
+        return $routeData;
+    }
+
+    /**
+     * La bandeja leída de UNA sola vez por el tablero del repositorio (camino del motor real).
+     *
+     * El tablero entrega, por parada, el expediente y sus hechos ya hidratados: la máquina, la
+     * sede, los ajustes preventivos de la puerta sanitaria, el recuento de conversación y la marca
+     * de respuesta de la sede. Con ellos no queda ninguna lectura que hacer aquí: la única decisión
+     * que se toma es la sanitaria, y se toma con el MISMO predicado que el cierre
+     * (`sanitaryResolutionRequirements()`, que recibe los ajustes ya leídos en lugar de volver a
+     * consultarlos).
+     *
+     * @param int $technicianId
+     * @param list<string> $routeStatuses
+     * @return list<array<string, mixed>>
+     */
+    private function routeFromBoard(int $technicianId, array $routeStatuses): array
+    {
+        if (!$this->incidentRepo instanceof TechnicianRouteBoardRepositoryInterface) {
+            // El llamante ya comprobó la capacidad: esta guarda sólo evita que una llamada suelta
+            // a este método ejecute una lectura que el repositorio no sabe hacer.
+            return $this->routeFromReads($technicianId, $routeStatuses);
+        }
+
+        $board = $this->incidentRepo->findRouteBoard($technicianId, $routeStatuses);
+
+        $incidents         = [];
+        $settingsByMachine = [];
+        foreach ($board as $stop) {
+            $incidents[] = $stop['incident'];
+            // Si dos paradas comparten máquina, los ajustes son los mismos: el mapa los resuelve
+            // una vez y la regla sanitaria los lee de aquí sin volver a consultar nada.
+            $settingsByMachine[$stop['incident']->getMachineId()] = $stop['settings'];
+        }
+
+        $sanitaryRequirements = $this->pauses()->sanitaryResolutionRequirements($incidents, $settingsByMachine);
+
+        $routeData = [];
+        foreach ($board as $stop) {
+            $incident = $stop['incident'];
+
+            $routeData[] = $this->stopPayload(
+                $incident,
+                $stop['machine'],
+                $stop['location'],
+                $stop['comments_total'],
+                $stop['site_response_since_pause'],
+                $sanitaryRequirements[(int)$incident->getId()] ?? false
+            );
+        }
+
+        return $routeData;
+    }
+
+    /**
+     * La tarjeta de una parada: UNA sola definición del payload de la ruta (RF-07, RF-MAP-08).
+     *
+     * Existe para que los dos caminos de lectura —el tablero de una consulta y la composición por
+     * lecturas— no puedan publicar campos distintos ni en orden distinto: la cura de rendimiento
+     * (Módulo 12 · T-HYBRID-27) no puede convertirse en una deriva del contrato.
+     *
+     * @param Incident $incident Expediente de la parada.
+     * @param Machine|null $machine Máquina viva, o `null` si ya no existe (se publica el dato
+     *        denormalizado del expediente).
+     * @param Location|null $location Sede viva, o `null` por el mismo motivo.
+     * @param int $commentsCount Totalidad de mensajes del hilo (públicos y notas internas, RF-02.3).
+     * @param bool $siteResponseSincePause Marca derivada de RF-05.6 (respuesta pública de sede
+     *        posterior al inicio de la pausa vigente).
+     * @param bool $sanitaryResolutionRequired Puerta sanitaria del cierre (RF-03.5.2, Art. II).
+     * @return array<string, mixed>
+     */
+    private function stopPayload(
+        Incident $incident,
+        ?Machine $machine,
+        ?Location $location,
+        int $commentsCount,
+        bool $siteResponseSincePause,
+        bool $sanitaryResolutionRequired
+    ): array
+    {
+        return [
+            'id'          => $incident->getId(),
+            'ticket_code' => $incident->getTicketCode(),
+            'urgency'     => $incident->getUrgency()->value,
+            'status'      => $incident->getStatus()->value,
+            'machine'     => [
+                'id'         => $machine?->getId(),
+                'code'       => $machine?->getCode() ?? $incident->getMachineCode(),
+                'model'      => $machine?->getModel() ?? $incident->getMachineModel(),
+                'floor_wing' => $machine?->getFloorWing(),
+            ],
+            'location'    => [
+                'id'            => $location?->getId(),
+                'name'          => $location?->getName() ?? $incident->getLocationName(),
+                'address'       => $location?->getAddress(),
+                'contact_phone' => $location?->getContactPhone(),
+                // Coordinates for the one-tap GPS navigation button (RF-MAP-08).
+                'latitude'      => $location?->getLatitude(),
+                'longitude'     => $location?->getLongitude(),
+            ],
+            'category'             => $incident->getCategory()->value,
+            'description'          => $incident->getDescription(),
+            'started_at'           => $incident->getStartedAt(),
+            'pending_parts_reason' => $incident->getPendingPartsReason(),
+            'created_at'           => $incident->getCreatedAt(),
+            // Estado de la pausa por bloqueo de sede (Módulo 11, RF-05.5): la tarjeta de
+            // la parada necesita la marca temporal del intervalo vivo, el acumulado de
+            // segundos pausados y el motivo tipificado que declaró el técnico.
+            'paused_at'                   => $incident->getPausedAt(),
+            'total_pending_info_seconds'  => $incident->getTotalPendingInfoSeconds(),
+            'pending_info_reason_category' => $incident->getPendingInfoReasonCategory()?->value,
+            'pending_info_reason_category_label' => $incident->getPendingInfoReasonCategory()?->label(),
+            'pending_info_reason_text'    => $incident->getPendingInfoReasonText(),
+            // Respuesta de la sede durante la pausa (RF-05.6, enmienda E-1): marca DERIVADA
+            // —comentario público de sede posterior al inicio de la pausa vigente— que avisa
+            // al técnico de que la respuesta que esperaba ya está en el hilo. Viaja resuelta
+            // por el camino que la obtuvo: el tablero la trae de su única consulta y la
+            // composición la pregunta por parada pausada.
+            'site_response_since_pause'   => $siteResponseSincePause,
+            // Insignia de conversación de la parada (RF-01.1): el técnico de ruta contabiliza
+            // la TOTALIDAD de mensajes, públicos y notas internas de taller, porque su canal sí
+            // tiene acceso legítimo a ambos (RF-02.3). El número llega resuelto por el camino
+            // que lo obtuvo —agregado por lote o recuento del tablero— y sin hilo la parada
+            // publica 0, nunca un valor ausente.
+            'comments_count'       => $commentsCount,
+            // Puerta sanitaria del cierre (RF-03.5.2, Art. II): la consulta es pura
+            // —sin escrituras al pintar la ruta— y anticipa en la interfaz el bloqueo
+            // que la resolución aplicará de verdad (máquina en cuarentena o reloj
+            // biológico vencido en tipología bajo vigilancia sanitaria).
+            'sanitary_resolution_required' => $sanitaryResolutionRequired,
+        ];
+    }
+
+    /**
+     * Máquinas de las paradas leídas por LOTE cuando el repositorio declara la capacidad
+     * (`MachineBatchRepositoryInterface`), y una por una —deduplicada— cuando no la declara.
+     *
+     * La reserva está al servicio de los dobles de prueba que sólo implementan el contrato
+     * principal, igual que `siteResponseSincePause()`; el camino que corre contra el motor remoto
+     * es el de lote, que es el que certifica la medición de RNF-01 (Módulo 12 · T-HYBRID-27).
+     *
+     * @param list<int> $machineIds
+     * @return array<int, Machine|null> Mapa `id de máquina => máquina o null`.
+     */
+    private function machinesByIds(array $machineIds): array
+    {
+        if ($machineIds === []) {
+            return [];
+        }
+
+        if ($this->machineRepo instanceof MachineBatchRepositoryInterface) {
+            return $this->machineRepo->findManyByIds($machineIds);
+        }
+
+        $byId = [];
+        foreach ($machineIds as $machineId) {
+            $byId[(int)$machineId] = $this->machineRepo->findById((int)$machineId);
+        }
+
+        return $byId;
+    }
+
+    /**
+     * Sedes de las paradas leídas por LOTE cuando el repositorio declara la capacidad
+     * (`LocationBatchRepositoryInterface`), y una por una —deduplicada— cuando no la declara.
+     *
+     * @param list<int> $locationIds
+     * @return array<int, Location|null> Mapa `id de sede => sede o null`.
+     */
+    private function locationsByIds(array $locationIds): array
+    {
+        if ($locationIds === []) {
+            return [];
+        }
+
+        if ($this->locationRepo instanceof LocationBatchRepositoryInterface) {
+            return $this->locationRepo->findManyByIds($locationIds);
+        }
+
+        $byId = [];
+        foreach ($locationIds as $locationId) {
+            $byId[(int)$locationId] = $this->locationRepo->findById((int)$locationId);
+        }
+
+        return $byId;
     }
 
     /**

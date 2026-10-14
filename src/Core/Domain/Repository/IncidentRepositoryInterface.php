@@ -177,6 +177,26 @@ interface IncidentRepositoryInterface
     public function countComments(int $incidentId, bool $includeInternal): int;
 
     /**
+     * Cuenta en UNA sola consulta los comentarios de un conjunto de incidencias
+     * (RF-01.1) y devuelve el mapa `id de incidencia => recuento`.
+     *
+     * Es la forma agregada de `countComments()` para los listados: pedir el recuento
+     * dentro del bucle cuesta una ida y vuelta por expediente (patrón N+1), invisible
+     * contra un motor local pero letal contra un motor remoto (T-HYBRID-27, RNF-01).
+     * Los expedientes sin comentarios no aparecen en el mapa: el consumidor publica
+     * un 0 explícito, nunca la ausencia del dato.
+     *
+     * La segregación es la misma que la del recuento individual: con
+     * `$includeInternal = false` sólo se cuentan los públicos (Art. V.4); con `true`,
+     * públicos y notas internas de taller.
+     *
+     * @param list<int> $incidentIds Identificadores de las incidencias del listado.
+     * @param bool $includeInternal Si es true, suma también las notas internas.
+     * @return array<int, int> Mapa `id de incidencia => número de comentarios`; los IDs sin comentarios se omiten.
+     */
+    public function countCommentsForIncidents(array $incidentIds, bool $includeInternal): array;
+
+    /**
      * Cuenta el número de eventos de reapertura previos registrados en la auditoría (RF-09 / EARS 9.3).
      */
     public function countReopenEvents(int $incidentId): int;

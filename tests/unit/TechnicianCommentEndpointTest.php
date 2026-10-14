@@ -89,6 +89,7 @@ final class TechnicianCommentStubIncidentRepo implements IncidentRepositoryInter
         return array_slice($rows, -$limit, $limit);
     }
 
+    public function countCommentsForIncidents(array $incidentIds, bool $includeInternal): array { return []; }
     public function countComments(int $incidentId, bool $includeInternal): int
     {
         return count(array_filter(

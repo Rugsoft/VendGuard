@@ -19,11 +19,14 @@ use VendGuard\Core\Domain\Exception\WarrantyExpiredException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\IncidentHistory;
+use VendGuard\Core\Domain\Model\Location;
+use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentSiteResponseRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SanitaryClockCandidateRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TechnicianRouteBoardRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
@@ -44,7 +47,7 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * El orden del triaje no es una diferencia de dialecto —tiene forma común—, pero tampoco se
  * escribe a mano dos veces: se deriva del rango de prioridad que declara el dominio.
  */
-class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface
+class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, TechnicianRouteBoardRepositoryInterface
 {
     /**
      * Marcadores canónicos de las notas de auditoría de la pausa (RF-01.4).
@@ -346,26 +349,38 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
      */
     public function hasSiteResponseSinceCurrentPause(int $incidentId): bool
     {
-        $sql = "
-            SELECT EXISTS (
-                SELECT 1
-                FROM incidents i
-                JOIN audit_log a
-                  ON a.entity_type = 'TICKET'
-                 AND a.entity_id = i.id
-                WHERE i.id = :incident_id
-                  AND i.paused_at IS NOT NULL
-                  AND a.action = 'INCIDENT_COMMENT_ADDED'
-                  AND a.user_role = 'SITE_MANAGER'
-                  AND a.created_at >= i.paused_at
-            )
-        ";
+        $sql = "SELECT {$this->siteResponseSincePauseExpression('i')} FROM incidents i WHERE i.id = :incident_id";
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->bindValue(':incident_id', $incidentId, PDO::PARAM_INT);
         $stmt->execute();
 
         return (bool)$stmt->fetchColumn();
+    }
+
+    /**
+     * Una sola definición de la marca «la sede ya respondió en la pausa vigente» (RF-05.6, E-1).
+     *
+     * La marca es DERIVADA y su definición no es trivial —la autoría se resuelve contra el rastro
+     * inmutable y no contra `incident_comments.author_type`—, así que no puede escribirse dos veces:
+     * la comparten la consulta de una parada (`hasSiteResponseSinceCurrentPause()`) y el tablero de
+     * ruta (`findRouteBoard()`), que la incluye para NO pagar una ida y vuelta por parada pausada
+     * (Módulo 12 · T-HYBRID-27).
+     *
+     * @param string $incidentAlias Alias de la tabla `incidents` en la consulta llamante.
+     */
+    private function siteResponseSincePauseExpression(string $incidentAlias): string
+    {
+        return "EXISTS (
+                SELECT 1
+                FROM audit_log a
+                WHERE a.entity_type = 'TICKET'
+                  AND a.entity_id = {$incidentAlias}.id
+                  AND {$incidentAlias}.paused_at IS NOT NULL
+                  AND a.action = 'INCIDENT_COMMENT_ADDED'
+                  AND a.user_role = 'SITE_MANAGER'
+                  AND a.created_at >= {$incidentAlias}.paused_at
+            )";
     }
 
     /**
@@ -733,6 +748,199 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         return array_map(fn(array $row) => Incident::fromDatabaseRow($row), $rows);
+    }
+
+    /**
+     * Tablero de ruta del técnico: la bandeja entera en UNA sola ida y vuelta
+     * (Módulo 12 · T-HYBRID-27 · RNF-01).
+     *
+     * Cada parada publicaba cinco lecturas fijas —expedientes, recuento de conversaciones, máquina,
+     * sede y ajustes preventivos— y el presupuesto de RNF-01 admite, con el enlace medido, 5,7
+     * vueltas por petición: por muy barata que fuera cada una, cinco viajes no caben. Este método
+     * las resuelve todas en un solo `SELECT` —el patrón que ya usa `findEnrichedDetailById()` para
+     * la ficha del modal del coordinador— y devuelve las **entidades hidratadas** (no filas) para
+     * que el controlador siga construyendo el payload con el mismo contrato de siempre.
+     *
+     * No decide nada por su cuenta (la puerta sanitaria del Art. II sigue siendo
+     * `IncidentPauseService::requirementFromSettings()`): entrega los hechos, y los ajustes
+     * preventivos viajan en crudo con la misma forma que publica
+     * `PdoPreventiveSettingsRepository::getMachineSettings()` porque la hidratación es la misma
+     * —una sola definición de la estructura—.
+     *
+     * La máquina viaja sin el enriquecimiento de aviso activo: la tarjeta de la ruta no lo publica
+     * y pedirlo obligaría a un JOIN que la bandeja no necesita. Los alias `machine_code`,
+     * `machine_model`, `machine_type`, `location_name` y `location_site_code` se conservan
+     * idénticos a los de `findAssignedToTechnician()` para que el expediente hidratado —y por tanto
+     * su payload— sea el mismo por los dos caminos.
+     *
+     * @param int $technicianId
+     * @param list<string> $statuses
+     * @return array<int, array{incident: Incident, machine: Machine|null, location: Location|null, settings: array<string, mixed>|null, comments_total: int, site_response_since_pause: bool}>
+     */
+    public function findRouteBoard(int $technicianId, array $statuses = []): array
+    {
+        $params = [':technician_id' => $technicianId];
+
+        $sql = "
+            SELECT 
+                i.*,
+                m.code AS machine_code,
+                m.model AS machine_model,
+                m.machine_type AS machine_type,
+                l.name AS location_name,
+                l.site_code AS location_site_code,
+                m.id AS board_machine_id,
+                m.location_id AS board_machine_location_id,
+                m.floor_wing AS board_machine_floor_wing,
+                m.notes AS board_machine_notes,
+                m.is_active AS board_machine_is_active,
+                m.is_blocked_no_access AS board_machine_is_blocked_no_access,
+                m.created_at AS board_machine_created_at,
+                m.updated_at AS board_machine_updated_at,
+                m.deleted_at AS board_machine_deleted_at,
+                m.sanitary_status AS board_settings_sanitary_status,
+                m.sanitary_frequency_days AS board_settings_sanitary_frequency_days,
+                m.last_sanitary_inspection_at AS board_settings_last_sanitary_inspection_at,
+                m.next_sanitary_inspection_due AS board_settings_next_sanitary_inspection_due,
+                m.is_seasonal_pause AS board_settings_is_seasonal_pause,
+                m.seasonal_pause_reason AS board_settings_seasonal_pause_reason,
+                m.seasonal_pause_until AS board_settings_seasonal_pause_until,
+                ps.default_frequency_days AS board_settings_default_frequency_days,
+                ps.max_allowed_days AS board_settings_max_allowed_days,
+                ps.advance_warning_days AS board_settings_advance_warning_days,
+                COALESCE(m.sanitary_frequency_days, ps.default_frequency_days) AS board_settings_effective_frequency_days,
+                l.id AS board_location_id,
+                l.address AS board_location_address,
+                l.latitude AS board_location_latitude,
+                l.longitude AS board_location_longitude,
+                l.contact_name AS board_location_contact_name,
+                l.contact_phone AS board_location_contact_phone,
+                l.has_physical_reception AS board_location_has_physical_reception,
+                l.is_active AS board_location_is_active,
+                l.created_at AS board_location_created_at,
+                l.updated_at AS board_location_updated_at,
+                l.deleted_at AS board_location_deleted_at,
+                (SELECT COUNT(*) FROM incident_comments c WHERE c.incident_id = i.id) AS board_comments_total,
+                {$this->siteResponseSincePauseExpression('i')} AS board_site_response_since_pause
+            FROM incidents i
+            LEFT JOIN machines m ON i.machine_id = m.id
+            LEFT JOIN locations l ON i.location_id = l.id
+            LEFT JOIN preventive_settings ps
+                ON {$this->dialect->castToText('ps.machine_type')} = {$this->dialect->castToText('m.machine_type')}
+            WHERE i.assigned_technician_id = :technician_id
+              AND i.deleted_at IS NULL
+        ";
+
+        if (!empty($statuses)) {
+            $placeholders = [];
+            foreach ($statuses as $idx => $st) {
+                $key = ":board_st_{$idx}";
+                $placeholders[] = $key;
+                $params[$key] = (string)$st;
+            }
+            $sql .= " AND i.status IN (" . implode(', ', $placeholders) . ")";
+        }
+
+        $sql .= " ORDER BY {$this->triageOrderExpression()}, i.created_at ASC";
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($params as $key => $val) {
+            $stmt->bindValue($key, $val);
+        }
+        $stmt->execute();
+
+        $board = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $machine = $this->hydrateBoardMachine($row);
+
+            $board[] = [
+                'incident' => Incident::fromDatabaseRow($row),
+                'machine' => $machine,
+                'location' => $this->hydrateBoardLocation($row),
+                // Los ajustes efectivos sólo tienen sentido con la máquina delante: sin ella no hay
+                // tipología que resolver y el controlador publica la degradación ya declarada.
+                'settings' => $machine === null
+                    ? null
+                    : PdoPreventiveSettingsRepository::hydrateMachineSettings([
+                        'machine_id' => $row['board_machine_id'],
+                        'machine_code' => $row['machine_code'],
+                        'machine_type' => $row['machine_type'],
+                        'sanitary_status' => $row['board_settings_sanitary_status'],
+                        'sanitary_frequency_days' => $row['board_settings_sanitary_frequency_days'],
+                        'last_sanitary_inspection_at' => $row['board_settings_last_sanitary_inspection_at'],
+                        'next_sanitary_inspection_due' => $row['board_settings_next_sanitary_inspection_due'],
+                        'is_seasonal_pause' => $row['board_settings_is_seasonal_pause'],
+                        'seasonal_pause_reason' => $row['board_settings_seasonal_pause_reason'],
+                        'seasonal_pause_until' => $row['board_settings_seasonal_pause_until'],
+                        'default_frequency_days' => $row['board_settings_default_frequency_days'],
+                        'max_allowed_days' => $row['board_settings_max_allowed_days'],
+                        'advance_warning_days' => $row['board_settings_advance_warning_days'],
+                        'effective_frequency_days' => $row['board_settings_effective_frequency_days'],
+                    ]),
+                'comments_total' => (int)$row['board_comments_total'],
+                'site_response_since_pause' => (bool)$row['board_site_response_since_pause'],
+            ];
+        }
+
+        return $board;
+    }
+
+    /**
+     * Máquina de una fila del tablero, o `null` si el expediente apunta a una máquina ausente.
+     *
+     * Se hidrata con el mismo constructor que usa `PdoMachineRepository` (`Machine::fromDatabaseRow`)
+     * y sin el enriquecimiento de aviso activo, que la tarjeta de la ruta no publica.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function hydrateBoardMachine(array $row): ?Machine
+    {
+        if (!isset($row['board_machine_id']) || $row['board_machine_id'] === null) {
+            return null;
+        }
+
+        return Machine::fromDatabaseRow([
+            'id' => $row['board_machine_id'],
+            'location_id' => $row['board_machine_location_id'],
+            'code' => $row['machine_code'],
+            'model' => $row['machine_model'],
+            'machine_type' => $row['machine_type'],
+            'floor_wing' => $row['board_machine_floor_wing'],
+            'notes' => $row['board_machine_notes'],
+            'is_active' => $row['board_machine_is_active'],
+            'is_blocked_no_access' => $row['board_machine_is_blocked_no_access'],
+            'created_at' => $row['board_machine_created_at'],
+            'updated_at' => $row['board_machine_updated_at'],
+            'deleted_at' => $row['board_machine_deleted_at'],
+        ]);
+    }
+
+    /**
+     * Sede de una fila del tablero, o `null` si el expediente apunta a una sede ausente.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function hydrateBoardLocation(array $row): ?Location
+    {
+        if (!isset($row['board_location_id']) || $row['board_location_id'] === null) {
+            return null;
+        }
+
+        return Location::fromDatabaseRow([
+            'id' => $row['board_location_id'],
+            'site_code' => $row['location_site_code'],
+            'name' => $row['location_name'],
+            'address' => $row['board_location_address'],
+            'latitude' => $row['board_location_latitude'],
+            'longitude' => $row['board_location_longitude'],
+            'contact_name' => $row['board_location_contact_name'],
+            'contact_phone' => $row['board_location_contact_phone'],
+            'has_physical_reception' => $row['board_location_has_physical_reception'],
+            'is_active' => $row['board_location_is_active'],
+            'created_at' => $row['board_location_created_at'],
+            'updated_at' => $row['board_location_updated_at'],
+            'deleted_at' => $row['board_location_deleted_at'],
+        ]);
     }
 
     /**
@@ -1241,6 +1449,69 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         $stmt->execute([':incident_id' => $incidentId]);
 
         return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * Cuenta los comentarios de un conjunto de incidencias en UNA sola ida y vuelta
+     * (Módulo 10, RF-01.1; T-HYBRID-27 · RNF-01).
+     *
+     * Es la forma agregada de `countComments()` para los listados: un único
+     * `GROUP BY incident_id` sirve los recuentos de todos los expedientes en lugar de
+     * una consulta por fila. La bandeja de triaje pagaba 14,2 idas y vueltas contra el
+     * motor remoto por este patrón N+1; con el agregado el coste deja de crecer con el
+     * número de filas. Sólo aparecen en el mapa los expedientes con comentarios: el
+     * consumidor publica 0 para los ausentes.
+     *
+     * @param list<int> $incidentIds
+     * @param bool $includeInternal
+     * @return array<int, int> Mapa `id de incidencia => recuento`.
+     */
+    public function countCommentsForIncidents(array $incidentIds, bool $includeInternal): array
+    {
+        // Deduplicado y saneado: el agregado no repite expedientes ni acepta IDs que
+        // no pueden existir, de modo que la sentencia nunca lleva huecos ni ceros.
+        $ids = [];
+        foreach ($incidentIds as $rawId) {
+            $id = (int)$rawId;
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+
+        if ($ids === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = [];
+        foreach (array_values($ids) as $index => $id) {
+            $key = ":comment_incident_{$index}";
+            $placeholders[] = $key;
+            $params[$key] = $id;
+        }
+
+        $sql = 'SELECT incident_id, COUNT(*) AS comments_total'
+            . ' FROM incident_comments'
+            . ' WHERE incident_id IN (' . implode(', ', $placeholders) . ')';
+
+        if (!$includeInternal) {
+            $sql .= " AND is_internal = {$this->dialect->booleanLiteral(false)}";
+        }
+
+        $sql .= ' GROUP BY incident_id';
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        $counts = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $counts[(int)$row['incident_id']] = (int)$row['comments_total'];
+        }
+
+        return $counts;
     }
 
     /**

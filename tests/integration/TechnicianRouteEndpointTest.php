@@ -29,6 +29,7 @@ use VendGuard\Infrastructure\Database\SeedRunner;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoPreventiveSettingsRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Routing\AppRouter;
@@ -497,9 +498,122 @@ $assert("8.9 Auditoría inmutable: pausa desde ASSIGNED con causa y justificaci�
     ($pausedRow['from_status'] ?? null) === 'ASSIGNED'
     && str_contains((string)($pausedRow['action_note'] ?? ''), 'BUILDING_CLOSED_NO_ACCESS')
     && str_contains((string)($pausedRow['action_note'] ?? ''), $pauseReason)
+);// =========================================================================
+// CASO 9: Paridad del tablero de ruta (Módulo 12 · T-HYBRID-27 · RNF-01)
+// La bandeja del técnico se lee en UNA sola consulta (`findRouteBoard()`), y este caso certifica
+// contra MariaDB que esa lectura única publica EXACTAMENTE los mismos hechos que las lecturas
+// individuales: mismos expedientes y en el mismo orden, misma máquina, misma sede, mismos ajustes
+// preventivos (comparados como estructuras), mismo recuento de conversación y misma marca de
+// respuesta de la sede. Sin esta paridad, la cura de rendimiento sería una deriva del contrato.
+// =========================================================================
+
+echo "\n--- Caso 9: Paridad del tablero de ruta con las lecturas individuales ---\n";
+
+$settingsRepoForParity = new PdoPreventiveSettingsRepository($pdo);
+$routeStatusesForBoard  = ['ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS', 'PENDING_INFO'];
+
+$boardStops   = $incidentRepo->findRouteBoard($tech1Id, $routeStatusesForBoard);
+$listingStops = $incidentRepo->findAssignedToTechnician($tech1Id, $routeStatusesForBoard);
+
+$boardIds   = array_map(static fn(array $stop): int => (int)$stop['incident']->getId(), $boardStops);
+$listingIds = array_map(static fn($incident): int => (int)$incident->getId(), $listingStops);
+
+$sortedBoardIds   = $boardIds;
+$sortedListingIds = $listingIds;
+sort($sortedBoardIds);
+sort($sortedListingIds);
+
+$assert(
+    "9.1 El tablero entrega exactamente las mismas paradas que el listado ordinario",
+    $sortedBoardIds === $sortedListingIds && $sortedBoardIds !== [],
+    'Tablero: ' . json_encode($boardIds) . ' · listado: ' . json_encode($listingIds)
 );
 
+// La ruta es una bandeja priorizada: el orden no es decorativo, es triaje. Se compara la
+// proyección del criterio de orden (criticidad, antigüedad) elemento a elemento, de modo que dos
+// expedientes empatados —que pueden permutarse sin romper nada— no conviertan la paridad en un
+// falso fallo, mientras que un orden distinto de verdad sí se delata.
+$sortKey = static fn(Incident $incident): array => [
+    $incident->getUrgency()->value,
+    (string)($incident->getCreatedAt() ?? ''),
+];
+$boardOrderProjection   = array_map(static fn(array $stop): array => $sortKey($stop['incident']), $boardStops);
+$listingOrderProjection = array_map($sortKey, $listingStops);
+
+$assert(
+    "9.2 El tablero respeta el mismo criterio de triaje que el listado ordinario",
+    $boardOrderProjection === $listingOrderProjection,
+    'Tablero: ' . json_encode($boardOrderProjection) . ' · listado: ' . json_encode($listingOrderProjection)
+);
+
+$machineMismatches  = [];
+$locationMismatches = [];
+$settingsMismatches = [];
+$commentMismatches  = [];
+$responseMismatches = [];
+
+foreach ($boardStops as $stop) {
+    $incident = $stop['incident'];
+    $incidentId = (int)$incident->getId();
+
+    // 9.3 Máquina: los campos que la tarjeta publica, contra `findById()` máquina a máquina.
+    $machineById = $machineRepo->findById($incident->getMachineId(), withIncident: false);
+    $boardMachine = $stop['machine'];
+    if (
+        $machineById === null || $boardMachine === null
+        || $boardMachine->getId() !== $machineById->getId()
+        || $boardMachine->getCode() !== $machineById->getCode()
+        || $boardMachine->getModel() !== $machineById->getModel()
+        || $boardMachine->getFloorWing() !== $machineById->getFloorWing()
+        || $boardMachine->getLocationId() !== $machineById->getLocationId()
+        || $boardMachine->isActive() !== $machineById->isActive()
+    ) {
+        $machineMismatches[] = $incidentId;
+    }
+
+    // 9.4 Sede: los campos que la tarjeta publica, contra `findById()` sede a sede.
+    $locationById = $locationRepo->findById($incident->getLocationId());
+    $boardLocation = $stop['location'];
+    if (
+        $locationById === null || $boardLocation === null
+        || $boardLocation->getId() !== $locationById->getId()
+        || $boardLocation->getSiteCode() !== $locationById->getSiteCode()
+        || $boardLocation->getName() !== $locationById->getName()
+        || $boardLocation->getAddress() !== $locationById->getAddress()
+        || $boardLocation->getContactPhone() !== $locationById->getContactPhone()
+        || $boardLocation->getLatitude() !== $locationById->getLatitude()
+        || $boardLocation->getLongitude() !== $locationById->getLongitude()
+    ) {
+        $locationMismatches[] = $incidentId;
+    }
+
+    // 9.5 Ajustes preventivos: la estructura ENTERA, contra la lectura individual del módulo 05.
+    $settingsById = $settingsRepoForParity->getMachineSettings($incident->getMachineId());
+    if ($stop['settings'] !== $settingsById) {
+        $settingsMismatches[] = $incidentId;
+    }
+
+    // 9.6 Recuento de conversación: la totalidad de mensajes del hilo (RF-02.3).
+    $countById = $incidentRepo->countCommentsForIncidents([$incidentId], true)[$incidentId] ?? 0;
+    if ($stop['comments_total'] !== $countById) {
+        $commentMismatches[] = $incidentId;
+    }
+
+    // 9.7 Marca de respuesta de la sede (RF-05.6): la misma definición derivada.
+    $responseById = $incidentRepo->hasSiteResponseSinceCurrentPause($incidentId);
+    if ($stop['site_response_since_pause'] !== $responseById) {
+        $responseMismatches[] = $incidentId;
+    }
+}
+
+$assert("9.3 La máquina del tablero coincide con `findById()` en toda la bandeja", $machineMismatches === [], 'Expedientes con desvío: ' . json_encode($machineMismatches));
+$assert("9.4 La sede del tablero coincide con `findById()` en toda la bandeja", $locationMismatches === [], 'Expedientes con desvío: ' . json_encode($locationMismatches));
+$assert("9.5 Los ajustes preventivos del tablero son la MISMA estructura que `getMachineSettings()`", $settingsMismatches === [], 'Expedientes con desvío: ' . json_encode($settingsMismatches));
+$assert("9.6 El recuento de conversación del tablero coincide con el agregado de la ruta", $commentMismatches === [], 'Expedientes con desvío: ' . json_encode($commentMismatches));
+$assert("9.7 La marca de respuesta de la sede coincide con `hasSiteResponseSinceCurrentPause()`", $responseMismatches === [], 'Expedientes con desvío: ' . json_encode($responseMismatches));
+
 // ─── RESULTADO FINAL ──────────────────────────────────────────────────────────
+
 echo "\n" . str_repeat('=', 70) . "\n";
 if ($failures === 0) {
     echo " RESULTADO: ¡TODAS LAS PRUEBAS PASARON EXITOSAMENTE (0 fallos)!\n";

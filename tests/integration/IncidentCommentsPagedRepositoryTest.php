@@ -241,6 +241,28 @@ $assert("6.2 Hilo vacío: recuentos a cero en ambas segregaciones",
     $incidentRepo->countComments((int)$emptyIncident->getId(), true) === 0
         && $incidentRepo->countComments((int)$emptyIncident->getId(), false) === 0);
 
+// =========================================================================
+// CASO 7: Recuento agregado de un lote de expedientes (RF-01.1 · T-HYBRID-27)
+// =========================================================================
+// La bandeja de triaje cuenta la conversación de TODAS sus filas. Pedirlo fila a
+// fila cuesta una ida y vuelta por expediente (N+1, medido como la causa de que el
+// listado fuera la peor operación contra el motor remoto); el agregado lo resuelve
+// en una sola consulta y debe devolver exactamente los mismos números.
+echo "\n--- Caso 7: Recuento agregado de un lote (countCommentsForIncidents) ---\n";
+
+$emptyIncidentId = (int)$emptyIncident->getId();
+
+$assert("7.1 El agregado del lote devuelve el total público + interno del expediente (7)",
+    $incidentRepo->countCommentsForIncidents([$incidentId], true) === [$incidentId => 7]);
+$assert("7.2 El agregado respeta la segregación de la Sede (solo públicos = 4)",
+    $incidentRepo->countCommentsForIncidents([$incidentId], false) === [$incidentId => 4]);
+$assert("7.3 Un expediente sin hilo se omite del mapa (el consumidor publica 0, no ausencia)",
+    $incidentRepo->countCommentsForIncidents([$emptyIncidentId], true) === []);
+$assert("7.4 El lote deduplica IDs y descarta los imposibles sin alterar el recuento",
+    $incidentRepo->countCommentsForIncidents([$incidentId, $incidentId, 0, -5], true) === [$incidentId => 7]);
+$assert("7.5 Un lote vacío devuelve un mapa vacío sin emitir una sentencia inválida",
+    $incidentRepo->countCommentsForIncidents([], true) === []);
+
 // ─── Limpieza final (convención de la batería) ─────────────────────────────
 // La suite deja la base resembrada para que la siguiente prueba del runner
 // encuentre el estado canónico de semillas (evita colisiones del arnés de

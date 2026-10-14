@@ -13,8 +13,12 @@ declare(strict_types=1);
  * Condición "Hecho cuando" cubierta en servidor:
  * - Cada parada publica un `comments_count` real, calculado por el repositorio
  *   sobre el expediente de esa parada (RF-01.1, Constitución Art. I.3).
+ * - El recuento de la ruta entera se resuelve en UNA sola llamada agregada
+ *   (`countCommentsForIncidents()`, Módulo 10 · T-HYBRID-27): el recuento parada
+ *   a parada era un patrón N+1 que contra el motor remoto costaba una ida y
+ *   vuelta por expediente. El recuento individual sigue existiendo para el detalle.
  * - El recuento es la TOTALIDAD de mensajes, públicos y notas internas de
- *   taller (`countComments($id, true)`): el técnico de campo tiene acceso
+ *   taller (`includeInternal = true`): el técnico de campo tiene acceso
  *   legítimo a ambos canales (RF-02.3), al contrario que la Sede, cuyo contador
  *   permanece segregado solo a públicos (Art. V.4).
  *
@@ -99,6 +103,9 @@ $incidentRepo = new class($stopOne, $stopTwo) implements IncidentRepositoryInter
     /** @var list<array{id: int, includeInternal: bool}> */
     public array $countCalls = [];
 
+    /** @var list<array{ids: list<int>, includeInternal: bool}> */
+    public array $batchCalls = [];
+
     /** @var array<int, array{public: int, internal: int}> */
     public array $threadCounts = [
         501 => ['public' => 3, 'internal' => 4],
@@ -112,6 +119,22 @@ $incidentRepo = new class($stopOne, $stopTwo) implements IncidentRepositoryInter
     public function findAssignedToTechnician(int $technicianId, array $statuses = []): array
     {
         return [$this->stopOne, $this->stopTwo];
+    }
+
+    public function countCommentsForIncidents(array $incidentIds, bool $includeInternal): array
+    {
+        $this->batchCalls[] = ['ids' => array_values($incidentIds), 'includeInternal' => $includeInternal];
+
+        $counts = [];
+        foreach ($incidentIds as $incidentId) {
+            $row = $this->threadCounts[(int)$incidentId] ?? ['public' => 0, 'internal' => 0];
+            $total = $includeInternal ? $row['public'] + $row['internal'] : $row['public'];
+            if ($total > 0) {
+                $counts[(int)$incidentId] = $total;
+            }
+        }
+
+        return $counts;
     }
 
     public function countComments(int $incidentId, bool $includeInternal): int
@@ -304,20 +327,17 @@ $assert(
 echo "\n--- Grupo 2: Totalidad de mensajes en el canal del técnico (RF-02.3) ---\n";
 
 $assert(
-    '2.1 Se consulta el recuento de cada expediente de la ruta',
-    count($incidentRepo->countCalls) === 2
-        && $incidentRepo->countCalls[0]['id'] === 501
-        && $incidentRepo->countCalls[1]['id'] === 502,
-    'Consultas registradas: ' . json_encode($incidentRepo->countCalls)
+    '2.1 La ruta entera se cuenta en UNA sola llamada agregada (N+1 eliminado)',
+    $incidentRepo->batchCalls === [
+        ['ids' => [501, 502], 'includeInternal' => true],
+    ],
+    'Consultas agregadas: ' . json_encode($incidentRepo->batchCalls)
 );
 
 $assert(
-    '2.2 El técnico pide el recuento TOTAL (includeInternal = true)',
-    $incidentRepo->countCalls === [
-        ['id' => 501, 'includeInternal' => true],
-        ['id' => 502, 'includeInternal' => true],
-    ],
-    'Consultas registradas: ' . json_encode($incidentRepo->countCalls)
+    '2.2 El controlador ya no pide el recuento parada a parada (una consulta por expediente)',
+    $incidentRepo->countCalls === [],
+    'Consultas por parada registradas: ' . json_encode($incidentRepo->countCalls)
 );
 
 $assert(
@@ -344,7 +364,7 @@ $assert(
 // =====================================================================
 echo "\n--- Grupo 3: Blindaje de identidad del técnico autenticado ---\n";
 
-$callsBefore = count($incidentRepo->countCalls);
+$callsBefore = count($incidentRepo->batchCalls);
 $anonymousRequest = new Request('GET', '/api/technician/my-route');
 $anonymousResponse = $controller->getMyRoute($anonymousRequest);
 $anonymousBody = $anonymousResponse->getDecodedBody() ?? [];
@@ -357,8 +377,8 @@ $assert(
 
 $assert(
     '3.2 Una petición anónima no consulta ningún hilo de conversación',
-    count($incidentRepo->countCalls) === $callsBefore,
-    'Consultas acumuladas: ' . count($incidentRepo->countCalls)
+    count($incidentRepo->batchCalls) === $callsBefore && $incidentRepo->countCalls === [],
+    'Consultas acumuladas: ' . count($incidentRepo->batchCalls)
 );
 
 // =====================================================================

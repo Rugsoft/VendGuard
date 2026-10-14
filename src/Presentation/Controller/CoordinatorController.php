@@ -269,6 +269,21 @@ class CoordinatorController
         // 6. Consultar repositorio con los filtros aplicados
         $incidents = $this->incidentRepo->findAll($filters);
 
+        // 6.b Recuento agregado de las conversaciones de TODA la bandeja en una sola
+        //     consulta (RF-01.1): el recuento por fila costaba una ida y vuelta por
+        //     expediente —patrón N+1, medido en T-HYBRID-27 como la causa de que el
+        //     listado fuera la peor de las operaciones contra el motor remoto—. El mapa
+        //     se resuelve una vez y la fila publica 0 cuando el expediente no tiene hilo.
+        $incidentIds = [];
+        foreach ($incidents as $incident) {
+            $id = $incident->getId();
+            if ($id !== null) {
+                $incidentIds[] = $id;
+            }
+        }
+
+        $commentCounts = $this->incidentRepo->countCommentsForIncidents($incidentIds, true);
+
         // 7. Enriquecer con cálculo de minutos de espera y evaluación de SLA 24/7 (RF-11 / EARS 11.1)
         $now = time();
         $formattedIncidents = [];
@@ -330,8 +345,10 @@ class CoordinatorController
                     && $this->pauses()->isProlongedInactivity($incident),
                 // Insignia de conversación de la fila de triaje (RF-01.1): el coordinador
                 // contabiliza la TOTALIDAD de mensajes, públicos y notas internas de taller,
-                // porque su canal tiene acceso legítimo a ambos (RF-02.3).
-                'comments_count' => $this->incidentRepo->countComments((int)$incident->getId(), true),
+                // porque su canal tiene acceso legítimo a ambos (RF-02.3). El número sale
+                // del agregado resuelto una sola vez para la bandeja entera (paso 6.b);
+                // sin hilo, la fila publica 0 y nunca un valor ausente.
+                'comments_count' => $commentCounts[(int)$incident->getId()] ?? 0,
             ]);
 
             $formattedIncidents[] = $item;

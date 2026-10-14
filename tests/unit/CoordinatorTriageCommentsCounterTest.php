@@ -13,8 +13,12 @@ declare(strict_types=1);
  * Condición "Hecho cuando" cubierta en servidor:
  * - Cada fila publica un `comments_count` real, calculado por el repositorio
  *   sobre el expediente de esa avería (RF-01.1, Constitución Art. I.3).
+ * - El recuento de la bandeja entera se resuelve en UNA sola llamada agregada
+ *   (`countCommentsForIncidents()`, Módulo 10 · T-HYBRID-27): el recuento fila a
+ *   fila era un patrón N+1 que contra el motor remoto costaba una ida y vuelta
+ *   por expediente. El recuento individual sigue existiendo para el detalle.
  * - El recuento es la TOTALIDAD de mensajes, públicos y notas internas de
- *   taller (`countComments($id, true)`), porque el canal de coordinación tiene
+ *   taller (`includeInternal = true`), porque el canal de coordinación tiene
  *   acceso legítimo a ambos (RF-02.3). La Sede, en cambio, mantiene su contador
  *   segregado solo a públicos (Art. V.4).
  *
@@ -82,6 +86,9 @@ $incidentRepo = new class($rowOne, $rowTwo) implements IncidentRepositoryInterfa
     /** @var list<array{id: int, includeInternal: bool}> */
     public array $countCalls = [];
 
+    /** @var list<array{ids: list<int>, includeInternal: bool}> */
+    public array $batchCalls = [];
+
     /** @var array<int, array{public: int, internal: int}> */
     public array $threadCounts = [
         901 => ['public' => 2, 'internal' => 5],
@@ -103,6 +110,22 @@ $incidentRepo = new class($rowOne, $rowTwo) implements IncidentRepositoryInterfa
         $row = $this->threadCounts[$incidentId] ?? ['public' => 0, 'internal' => 0];
 
         return $includeInternal ? $row['public'] + $row['internal'] : $row['public'];
+    }
+
+    public function countCommentsForIncidents(array $incidentIds, bool $includeInternal): array
+    {
+        $this->batchCalls[] = ['ids' => array_values($incidentIds), 'includeInternal' => $includeInternal];
+
+        $counts = [];
+        foreach ($incidentIds as $incidentId) {
+            $row = $this->threadCounts[(int)$incidentId] ?? ['public' => 0, 'internal' => 0];
+            $total = $includeInternal ? $row['public'] + $row['internal'] : $row['public'];
+            if ($total > 0) {
+                $counts[(int)$incidentId] = $total;
+            }
+        }
+
+        return $counts;
     }
 
     public function create(Incident $incident, ?int $userId = null, ?string $initialNote = null): Incident { return $incident; }
@@ -198,20 +221,17 @@ $assert(
 echo "\n--- Grupo 2: Totalidad de mensajes en el canal de coordinación (RF-02.3) ---\n";
 
 $assert(
-    '2.1 Se consulta el recuento de cada expediente listado',
-    count($incidentRepo->countCalls) === 2
-        && $incidentRepo->countCalls[0]['id'] === 901
-        && $incidentRepo->countCalls[1]['id'] === 902,
-    'Consultas registradas: ' . json_encode($incidentRepo->countCalls)
+    '2.1 La bandeja entera se cuenta en UNA sola llamada agregada (N+1 eliminado)',
+    $incidentRepo->batchCalls === [
+        ['ids' => [901, 902], 'includeInternal' => true],
+    ],
+    'Consultas agregadas: ' . json_encode($incidentRepo->batchCalls)
 );
 
 $assert(
-    '2.2 El coordinador pide el recuento TOTAL (includeInternal = true)',
-    $incidentRepo->countCalls === [
-        ['id' => 901, 'includeInternal' => true],
-        ['id' => 902, 'includeInternal' => true],
-    ],
-    'Consultas registradas: ' . json_encode($incidentRepo->countCalls)
+    '2.2 El controlador ya no pide el recuento fila a fila (una consulta por expediente)',
+    $incidentRepo->countCalls === [],
+    'Consultas por fila registradas: ' . json_encode($incidentRepo->countCalls)
 );
 
 $assert(
@@ -249,11 +269,11 @@ $assert(
     'Código recibido: ' . $invalidStatusResponse->getStatusCode()
 );
 
-$callsAfterInvalidFilter = count($incidentRepo->countCalls);
+$callsAfterInvalidFilter = count($incidentRepo->batchCalls);
 
 $assert(
     '3.2 Una petición rechazada no consulta ningún hilo de conversación',
-    $callsAfterInvalidFilter === 2,
+    $callsAfterInvalidFilter === 1 && $incidentRepo->countCalls === [],
     'Consultas acumuladas: ' . $callsAfterInvalidFilter
 );
 

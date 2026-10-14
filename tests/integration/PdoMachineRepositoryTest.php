@@ -311,6 +311,98 @@ if ($loc1 !== null) {
     $bySearch = $machineRepo->findAll(['search' => $testCode]);
     $assert("10.9 Filtro search por código encuentra la máquina de prueba", count($bySearch) === 1 && $bySearch[0]['code'] === $testCode);
 
+    // =====================================================================
+    // CASO 11: Lectura por lote de máquinas (findManyByIds, T-HYBRID-27)
+    // =====================================================================
+    // La bandeja de ruta del técnico leía la máquina de cada parada con una consulta por parada:
+    // contra el motor remoto eso era una de las tres vueltas por parada que agotaban el
+    // presupuesto de RNF-01. Este caso certifica contra MariaDB que la forma por lote devuelve el
+    // MISMO dato que la lectura individual, que descarta bajas lógicas y que no inventa filas.
+    echo "\n--- Caso 11: Lectura por lote de máquinas (findManyByIds) ---\n";
+
+    $batchCodeA = 'VEND-BATCH-A';
+    $batchCodeB = 'VEND-BATCH-B';
+    $batchCodeC = 'VEND-BATCH-C';
+    TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $batchCodeA, $batchCodeB, $batchCodeC): void {
+        $pdo->prepare("DELETE FROM `machines` WHERE `code` IN (:a, :b, :c)")
+            ->execute([':a' => $batchCodeA, ':b' => $batchCodeB, ':c' => $batchCodeC]);
+    });
+
+    $batchMachineA = $machineRepo->create([
+        'location_id'  => $locId,
+        'code'         => $batchCodeA,
+        'model'        => 'Necta Kikko Max',
+        'machine_type' => 'COLD_DRINKS',
+        'floor_wing'   => 'Planta 1 - Vestíbulo',
+    ]);
+    $batchMachineB = $machineRepo->create([
+        'location_id'  => $locId,
+        'code'         => $batchCodeB,
+        'model'        => 'Necta Kikko Max',
+        'machine_type' => 'SNACKS',
+        'floor_wing'   => 'Planta 2 - Pasillo',
+    ]);
+    $batchMachineC = $machineRepo->create([
+        'location_id'  => $locId,
+        'code'         => $batchCodeC,
+        'model'        => 'Necta Kikko Max',
+        'machine_type' => 'SNACKS',
+        'floor_wing'   => 'Planta 2 - Pasillo',
+    ]);
+    $machineRepo->softDelete($batchMachineC->getId());
+
+    $batch = $machineRepo->findManyByIds([
+        $batchMachineA->getId(),
+        $batchMachineB->getId(),
+        $batchMachineC->getId(),
+        $batchMachineA->getId(),
+        0,
+        -3,
+        999999999,
+    ]);
+
+    $assert("11.1 findManyByIds() devuelve un mapa indexado por id", array_keys($batch) === [$batchMachineA->getId(), $batchMachineB->getId()]);
+    $assert("11.2 La máquina borrada lógicamente queda fuera del lote", !array_key_exists($batchMachineC->getId(), $batch));
+    $assert("11.3 Los identificadores imposibles y repetidos no alteran el resultado", count($batch) === 2);
+
+    $single = $machineRepo->findById($batchMachineA->getId());
+    $assert(
+        "11.4 El lote publica el MISMO dato que findById() para la misma máquina",
+        $single !== null
+            && $batch[$batchMachineA->getId()]->getCode() === $single->getCode()
+            && $batch[$batchMachineA->getId()]->getModel() === $single->getModel()
+            && $batch[$batchMachineA->getId()]->getMachineType()->value === $single->getMachineType()->value
+            && $batch[$batchMachineA->getId()]->getFloorWing() === $single->getFloorWing()
+            && $batch[$batchMachineA->getId()]->getLocationId() === $single->getLocationId()
+            && $batch[$batchMachineA->getId()]->isActive() === $single->isActive()
+    );
+
+    $assert("11.5 Un lote vacío no consulta nada y devuelve mapa vacío", $machineRepo->findManyByIds([]) === []);
+
+    // Enriquecimiento de aviso activo: el lote conserva la promesa de findById().
+    $ticketCodeBatch = 'INC-TEST-BATCH-01';
+    TestDataCleaner::purgeIncidentByTicket($pdo, $ticketCodeBatch);
+    $pdo->prepare("
+        INSERT INTO `incidents` (`ticket_code`, `machine_id`, `location_id`, `category`, `description`, `urgency`, `status`)
+        VALUES (:tc, :mid, :lid, 'PAYMENT_FAILURE', 'Fallo validador monedas (lote)', 'MEDIUM', 'IN_PROGRESS')
+    ")->execute([':tc' => $ticketCodeBatch, ':mid' => $batchMachineB->getId(), ':lid' => $locId]);
+    $batchIncidentId = (int)$pdo->lastInsertId();
+
+    $batchWithIncident = $machineRepo->findManyByIds([$batchMachineB->getId()]);
+    $batchMachineBReloaded = $batchWithIncident[$batchMachineB->getId()] ?? null;
+    $assert(
+        "11.6 El lote enriquece el aviso activo igual que la lectura individual",
+        $batchMachineBReloaded !== null && $batchMachineBReloaded->hasActiveIncident() === true
+    );
+    TestDataCleaner::purgeIncident($pdo, $batchIncidentId);
+
+    // Las tres filas del caso se retiran con la ventana de purga abierta: la baja lógica de C no
+    // la saca de la tabla y dejar residuo aquí ensuciaría los recuentos de las suites siguientes.
+    TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $batchMachineA, $batchMachineB, $batchMachineC): void {
+        $pdo->prepare("DELETE FROM `machines` WHERE `id` IN (:a, :b, :c)")
+            ->execute([':a' => $batchMachineA->getId(), ':b' => $batchMachineB->getId(), ':c' => $batchMachineC->getId()]);
+    });
+
     // Limpieza final de máquina de prueba
     TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $createdId): void {
         $pdo->prepare("DELETE FROM `machines` WHERE `id` = :id")->execute([':id' => $createdId]);

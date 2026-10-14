@@ -7,6 +7,7 @@ namespace VendGuard\Infrastructure\Repository;
 use PDO;
 use RuntimeException;
 use VendGuard\Core\Domain\Model\Location;
+use VendGuard\Core\Domain\Repository\LocationBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
@@ -21,8 +22,13 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * comillas de un motor son sintaxis privativa del otro—, y las diferencias que no tienen forma
  * común —booleano literal (D-3), clave canónica del código de sede (D-5, EARS-08.5)— se le piden
  * al adaptador de dialecto, que es el punto único de traducción (RF-01.5, T-HYBRID-25).
+ *
+ * Además del contrato principal, declara la capacidad de lote
+ * (`LocationBatchRepositoryInterface::findManyByIds()`), que existe para la bandeja de ruta del
+ * técnico: resolver la sede de cada parada con una consulta por parada era un N+1 medido contra el
+ * motor remoto (Módulo 12 · T-HYBRID-27).
  */
-class PdoLocationRepository implements LocationRepositoryInterface
+class PdoLocationRepository implements LocationRepositoryInterface, LocationBatchRepositoryInterface
 {
     private PDO $pdo;
 
@@ -135,6 +141,78 @@ class PdoLocationRepository implements LocationRepositoryInterface
         }
 
         return Location::fromDatabaseRow($row);
+    }
+
+    /**
+     * Sedes de un lote de identificadores en UNA sola consulta (Módulo 12 · T-HYBRID-27).
+     *
+     * Es la forma por lotes de `findById(..., allowDeleted: false)`: mismas columnas y mismo
+     * descarte de bajas lógicas, pero con una sola ida y vuelta para toda la bandeja. La ruta del
+     * técnico resolvía la sede de cada parada por separado, y contra el motor remoto esa lectura
+     * era una de las tres vueltas por parada que agotaban el presupuesto de RNF-01.
+     *
+     * Los identificadores viajan como marcadores nombrados enlazados con `PDO::PARAM_INT` —la
+     * forma que los dos drivers traducen a su tipo entero—, nunca interpolados en la sentencia.
+     * Se deduplican y se descartan los imposibles, de modo que la consulta no lleva huecos.
+     *
+     * @param array<int, int|string> $locationIds
+     * @return array<int, Location> Mapa `id de sede => Location`, sólo con las encontradas.
+     */
+    public function findManyByIds(array $locationIds): array
+    {
+        $ids = [];
+        foreach ($locationIds as $locationId) {
+            $id = (int)$locationId;
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+
+        if ($ids === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = [];
+        foreach (array_values($ids) as $index => $id) {
+            $key = ":location_batch_{$index}";
+            $placeholders[] = $key;
+            $params[$key] = $id;
+        }
+
+        $sql = "
+            SELECT 
+                id, 
+                site_code, 
+                name, 
+                address,
+                latitude,
+                longitude,
+                contact_name, 
+                contact_phone, 
+                has_physical_reception,
+                is_active, 
+                created_at, 
+                updated_at, 
+                deleted_at
+            FROM locations
+            WHERE id IN (" . implode(', ', $placeholders) . ")
+              AND deleted_at IS NULL
+            ORDER BY id ASC
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        $locations = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $locations[(int)$row['id']] = Location::fromDatabaseRow($row);
+        }
+
+        return $locations;
     }
 
     /**

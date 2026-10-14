@@ -521,6 +521,33 @@ final class SqlDialectAdapter
     }
 
     /**
+     * Familia 7 · Comparación textual entre dos tipos enumerados DISTINTOS.
+     *
+     * El esquema nuevo declara dos tipos enumerados cuyos conjuntos comparten miembros pero **no
+     * identidad**: `machine_type` (máquinas y expedientes) y `preventive_machine_type` (ajustes
+     * preventivos), porque el contrato de correspondencia (§2.1, líneas 8 y 18) prohíbe unificarlos
+     * por parecido. En PostgreSQL eso convierte `m.machine_type = ps.machine_type` en una consulta
+     * **sin operador**: son dos tipos diferentes y el motor la rechaza con «No operator matches the
+     * given name and argument types. You might need to add explicit type casts.». En MariaDB el
+     * ENUM ya compara por **etiqueta**, de modo que el mismo JOIN funciona y el defecto queda
+     * invisible en la batería hermética —lo encontró la medición contra el motor remoto: la ruta
+     * del técnico devolvía HTTP 500 entera (T-HYBRID-27)—.
+     *
+     * La regla es una —comparar por etiqueta— y cada motor la escribe como la entiende: PostgreSQL
+     * exige el cast explícito a `text`; MariaDB ya la aplica, así que su sentencia se deja intacta
+     * para no cambiar la forma de lo que hoy está certificado.
+     *
+     * Sólo para expresiones de columna o literales ya controlados por el llamante: el texto se
+     * inserta entre paréntesis tal cual, así que aquí no puede viajar una entrada de usuario.
+     */
+    public function castToText(string $expression): string
+    {
+        return $this->isPostgres()
+            ? sprintf('(%s)::text', $expression)
+            : $expression;
+    }
+
+    /**
      * Renderizado común de la aritmética de intervalos.
      *
      * MariaDB exige la función envolvente (`DATE_ADD`/`DATE_SUB`) y PostgreSQL la aritmética

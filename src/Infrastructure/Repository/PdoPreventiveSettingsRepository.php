@@ -6,6 +6,7 @@ namespace VendGuard\Infrastructure\Repository;
 
 use PDO;
 use VendGuard\Core\Domain\Model\PreventiveSetting;
+use VendGuard\Core\Domain\Repository\PreventiveSettingsBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Exception\PerishableFrequencyLimitException;
 use VendGuard\Core\Domain\Exception\SeasonalPauseMissingReasonException;
@@ -17,8 +18,13 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * 
  * Implementación PDO del repositorio de configuraciones sanitarias y pausas estacionales.
  * Garantiza cumplimiento de reglas constitucionales (Art. II) y persistencia segura en MariaDB/MySQL.
+ *
+ * Además del contrato principal, declara la capacidad de lote
+ * (`PreventiveSettingsBatchRepositoryInterface::getMachineSettingsForMany()`), que existe para la
+ * puerta sanitaria de la bandeja de ruta del técnico: resolver los ajustes de cada parada con una
+ * consulta por parada era un N+1 medido contra el motor remoto (Módulo 12 · T-HYBRID-27).
  */
-class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInterface
+class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInterface, PreventiveSettingsBatchRepositoryInterface
 {
     private PDO $pdo;
     private SqlDialectAdapter $dialect;
@@ -216,6 +222,11 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
 
     public function getMachineSettings(int $machineId): ?array
     {
+        // El JOIN entre los dos conjuntos enumerados se resuelve por ETIQUETA en ambos motores:
+        // PostgreSQL rechaza el operador directo entre `machine_type` y `preventive_machine_type`
+        // —son tipos distintos por contrato— y MariaDB ya compara por etiqueta, así que su
+        // sentencia queda intacta. Lo encontró la medición contra el motor remoto: sin el cast,
+        // «Mi Ruta» respondía HTTP 500 entera (T-HYBRID-27).
         $stmt = $this->pdo->prepare("
             SELECT 
                 m.id AS machine_id,
@@ -233,7 +244,8 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
                 ps.advance_warning_days,
                 COALESCE(m.sanitary_frequency_days, ps.default_frequency_days) AS effective_frequency_days
             FROM machines m
-            LEFT JOIN preventive_settings ps ON m.machine_type = ps.machine_type
+            LEFT JOIN preventive_settings ps
+                ON {$this->dialect->castToText('ps.machine_type')} = {$this->dialect->castToText('m.machine_type')}
             WHERE m.id = :id AND m.deleted_at IS NULL
             LIMIT 1
         ");
@@ -245,6 +257,100 @@ class PdoPreventiveSettingsRepository implements PreventiveSettingsRepositoryInt
             return null;
         }
 
+        return self::hydrateMachineSettings($row);
+    }
+
+    /**
+     * Ajustes preventivos efectivos de un lote de máquinas en UNA sola consulta
+     * (Módulo 12 · T-HYBRID-27).
+     *
+     * Es la forma por lotes de `getMachineSettings()`: misma sentencia —incluido el JOIN entre los
+     * dos conjuntos enumerados, que se resuelve por ETIQUETA en ambos motores— sobre `m.id IN (...)`, y
+     * la misma estructura publicada. La puerta sanitaria de la ruta del técnico leía los ajustes
+     * de una en una al pintar cada parada, y contra el motor remoto esa lectura era una de las
+     * tres vueltas por parada que agotaban el presupuesto de RNF-01.
+     *
+     * Los identificadores viajan como marcadores nombrados enlazados con `PDO::PARAM_INT` —la
+     * forma que los dos drivers traducen a su tipo entero—, nunca interpolados en la sentencia.
+     * Se deduplican y se descartan los imposibles, de modo que la consulta no lleva huecos.
+     *
+     * @param array<int, int|string> $machineIds
+     * @return array<int, array<string, mixed>> Mapa `id de máquina => ajustes`, sólo con las
+     *         máquinas encontradas.
+     */
+    public function getMachineSettingsForMany(array $machineIds): array
+    {
+        $ids = [];
+        foreach ($machineIds as $machineId) {
+            $id = (int)$machineId;
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+
+        if ($ids === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = [];
+        foreach (array_values($ids) as $index => $id) {
+            $key = ":settings_batch_{$index}";
+            $placeholders[] = $key;
+            $params[$key] = $id;
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT 
+                m.id AS machine_id,
+                m.code AS machine_code,
+                m.machine_type,
+                m.sanitary_status,
+                m.sanitary_frequency_days,
+                m.last_sanitary_inspection_at,
+                m.next_sanitary_inspection_due,
+                m.is_seasonal_pause,
+                m.seasonal_pause_reason,
+                m.seasonal_pause_until,
+                ps.default_frequency_days,
+                ps.max_allowed_days,
+                ps.advance_warning_days,
+                COALESCE(m.sanitary_frequency_days, ps.default_frequency_days) AS effective_frequency_days
+            FROM machines m
+            LEFT JOIN preventive_settings ps
+                ON {$this->dialect->castToText('ps.machine_type')} = {$this->dialect->castToText('m.machine_type')}
+            WHERE m.id IN (" . implode(', ', $placeholders) . ")
+              AND m.deleted_at IS NULL
+            ORDER BY m.id ASC
+        ");
+
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        $settings = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $settings[(int)$row['machine_id']] = self::hydrateMachineSettings($row);
+        }
+
+        return $settings;
+    }
+
+    /**
+     * Hidrata la fila de ajustes efectivos de una máquina.
+     *
+     * Una sola definición de la estructura publicada: la comparten la lectura individual
+     * (`getMachineSettings()`), la lectura por lotes (`getMachineSettingsForMany()`) y el tablero de
+     * ruta del técnico (`PdoIncidentRepository::findRouteBoard()`, Módulo 12 · T-HYBRID-27), que
+     * resuelve los ajustes de toda la bandeja en su única consulta. De ahí que sea `public static`:
+     * la estructura se define aquí y en ningún otro sitio, y ningún consumidor la reimplementa.
+     *
+     * @param array<string, mixed> $row Fila con las columnas que esta clase publica.
+     * @return array<string, mixed>
+     */
+    public static function hydrateMachineSettings(array $row): array
+    {
         return [
             'machine_id' => (int)$row['machine_id'],
             'machine_code' => (string)$row['machine_code'],

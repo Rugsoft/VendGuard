@@ -395,6 +395,43 @@ $assert("10.5 GET preventive-config retorna HTTP 200", $resGetConfig->getStatusC
 $bodyGetConfig = json_decode($resGetConfig->getBody(), true);
 $assert("10.6 Respuesta contiene datos de la máquina", ($bodyGetConfig['success'] ?? false) === true);
 
+// =========================================================================
+// BLOQUE 11: Lectura por lote de ajustes preventivos (getMachineSettingsForMany, T-HYBRID-27)
+// =========================================================================
+// La puerta sanitaria de la bandeja de ruta del técnico leía los ajustes de una en una, parada a
+// parada: contra el motor remoto era una de las tres vueltas por parada que agotaban el
+// presupuesto de RNF-01. Este bloque certifica contra MariaDB que la forma por lote publica el
+// mismo dato que `getMachineSettings()` y que no inventa filas.
+echo "\n--- BLOQUE 11: Lectura por lote de ajustes preventivos (getMachineSettingsForMany) ---\n";
+
+$idMachine1 = $machine1->getId();
+$idMachine2 = $machine2->getId();
+$batchSettings = $settingsRepo->getMachineSettingsForMany([$idMachine1, $idMachine2, $idMachine1, 0, -4, 999999999]);
+
+$assert("11.1 El lote devuelve un mapa indexado por id de máquina", array_keys($batchSettings) === [$idMachine1, $idMachine2]);
+$assert("11.2 Identificadores repetidos e imposibles no alteran el resultado", count($batchSettings) === 2);
+
+$singleSettings = $settingsRepo->getMachineSettings($idMachine1);
+$assert(
+    "11.3 El lote publica el MISMO dato que getMachineSettings() para la misma máquina",
+    $singleSettings !== null
+        && $batchSettings[$idMachine1]['machine_code'] === $singleSettings['machine_code']
+        && $batchSettings[$idMachine1]['machine_type'] === $singleSettings['machine_type']
+        && $batchSettings[$idMachine1]['sanitary_status'] === $singleSettings['sanitary_status']
+        && $batchSettings[$idMachine1]['effective_frequency_days'] === $singleSettings['effective_frequency_days']
+        && $batchSettings[$idMachine1]['is_seasonal_pause'] === $singleSettings['is_seasonal_pause']
+);
+
+$perishableBatch = $batchSettings[$idMachine1] ?? null;
+$assert(
+    "11.4 El lote no relaja el tope normativo de perecederos (max_allowed_days <= 15, Art. II)",
+    $perishableBatch !== null
+        && ($perishableBatch['machine_type'] ?? '') === 'PERISHABLE_FOOD'
+        && (int)($perishableBatch['max_allowed_days'] ?? 999) <= 15,
+    'Ajustes publicados por el lote: ' . json_encode($perishableBatch)
+);
+$assert("11.5 Un lote vacío no consulta nada y devuelve mapa vacío", $settingsRepo->getMachineSettingsForMany([]) === []);
+
 // Limpieza operacional segura (orden derivado del grafo de FKs).
 TestDataCleaner::purge($pdo);
 

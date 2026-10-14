@@ -409,6 +409,7 @@ final class CaptureIncidentRepo implements IncidentRepositoryInterface
         return $this->comments;
     }
     public function getCommentsPaged(int $incidentId, bool $includeInternal, int $limit = 50, ?int $beforeId = null): array { return []; }
+    public function countCommentsForIncidents(array $incidentIds, bool $includeInternal): array { return []; }
     public function countComments(int $incidentId, bool $includeInternal): int { return 0; }
 
     public function countReopenEvents(int $incidentId): int

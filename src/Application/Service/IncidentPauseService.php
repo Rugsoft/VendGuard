@@ -20,6 +20,7 @@ use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Core\Domain\Repository\PreventiveSettingsBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
@@ -476,8 +477,9 @@ final class IncidentPauseService
      * Una sola definición de «la máquina está en cuarentena sanitaria».
      *
      * Existe para que la consulta de la ruta y la salvaguarda del parte no mantengan dos
-     * lecturas de la misma regla, y para no pagar dos veces la lectura de ajustes cuando
-     * `sanitaryResolutionRequirement()` se evalúa parada a parada al pintar la ruta móvil.
+     * lecturas de la misma regla, y para que la bandeja de ruta no pague dos lecturas de
+     * ajustes por parada al pintarse (`sanitaryResolutionRequirements()`, Módulo 12 ·
+     * T-HYBRID-27): la regla es una y la lectura es una sola para toda la ruta.
      *
      * @param array<string, mixed>|mixed $settings Ajustes de la máquina tal y como los entrega el repositorio.
      */
@@ -518,8 +520,109 @@ final class IncidentPauseService
      */
     public function sanitaryResolutionRequirement(Incident $incident): bool
     {
-        $settings = $this->settings()->getMachineSettings($incident->getMachineId());
+        return $this->requirementFromSettings(
+            $incident,
+            $this->settings()->getMachineSettings($incident->getMachineId())
+        );
+    }
 
+    /**
+     * Veredicto de la puerta sanitaria para un LOTE de paradas, con una sola lectura de ajustes
+     * (Módulo 12 · T-HYBRID-27 · RNF-01).
+     *
+     * Es la forma por lotes de `sanitaryResolutionRequirement()` para la bandeja de ruta del
+     * técnico, y no una segunda regla: cada veredicto lo resuelve el MISMO predicado puro
+     * (`requirementFromSettings()`), de modo que la pantalla y el cierre no puedan discrepar. Lo
+     * que cambia es el número de viajes: los ajustes preventivos de todas las paradas se leen una
+     * sola vez —`getMachineSettingsForMany()` cuando el repositorio declara la capacidad de lote—
+     * en lugar de una vez por parada, que contra el motor remoto agotaba el presupuesto de RNF-01.
+     *
+     * **Degradación declarada, la misma que la lectura individual:** una máquina cuyos ajustes no
+     * se pueden leer queda con `null` y el predicado devuelve `false` salvo que la propia avería
+     * aporte la tipología; la puerta que muerde de verdad es la del cierre.
+     *
+     * **Ajustes ya leídos:** el tablero de ruta (`findRouteBoard()`) entrega los ajustes de toda la
+     * bandeja dentro de su única consulta, así que el llamante puede pasarlos y ahorrarse la lectura
+     * entera. Cuando no viajan —o viajan incompletos— se leen aquí, por lote si el repositorio
+     * declara la capacidad. La regla se aplica igual en los dos casos: son los mismos hechos.
+     *
+     * @param list<Incident> $incidents Paradas vivas de la ruta.
+     * @param array<int, array<string, mixed>|null>|null $settingsByMachine Ajustes ya resueltos por
+     *        máquina (`machine_id => ajustes o null`), o `null` para resolverlos aquí.
+     * @return array<int, bool> Mapa `id de incidencia => veredicto`. Las paradas sin identificador
+     *         persistido no aparecen en el mapa y quien consume publica `false` para ellas.
+     */
+    public function sanitaryResolutionRequirements(array $incidents, ?array $settingsByMachine = null): array
+    {
+        if ($settingsByMachine === null) {
+            $machineIds = [];
+            foreach ($incidents as $incident) {
+                $machineIds[$incident->getMachineId()] = true;
+            }
+
+            $settingsByMachine = $this->settingsForMachines(array_keys($machineIds));
+        }
+
+        $verdicts = [];
+        foreach ($incidents as $incident) {
+            $incidentId = $incident->getId();
+            if ($incidentId === null) {
+                continue;
+            }
+
+            $verdicts[(int)$incidentId] = $this->requirementFromSettings(
+                $incident,
+                $settingsByMachine[$incident->getMachineId()] ?? null
+            );
+        }
+
+        return $verdicts;
+    }
+
+    /**
+     * Ajustes preventivos de un lote de máquinas, con UNA lectura cuando el repositorio declara la
+     * capacidad de lote y con una lectura por máquina —deduplicada— cuando no la declara.
+     *
+     * La reserva existe por el mismo motivo que la de `IncidentSiteResponseRepositoryInterface`: los
+     * dobles de prueba que sólo implementan el contrato principal siguen funcionando, y el camino de
+     * lote es el que usa el repositorio real contra el motor remoto.
+     *
+     * @param list<int> $machineIds
+     * @return array<int, array<string, mixed>|null> Mapa `id de máquina => ajustes o null`.
+     */
+    private function settingsForMachines(array $machineIds): array
+    {
+        if ($machineIds === []) {
+            return [];
+        }
+
+        $settingsRepo = $this->settings();
+
+        if ($settingsRepo instanceof PreventiveSettingsBatchRepositoryInterface) {
+            return $settingsRepo->getMachineSettingsForMany($machineIds);
+        }
+
+        $byMachine = [];
+        foreach ($machineIds as $machineId) {
+            $byMachine[(int)$machineId] = $settingsRepo->getMachineSettings((int)$machineId);
+        }
+
+        return $byMachine;
+    }
+
+    /**
+     * La regla pura de la puerta sanitaria sobre unos ajustes ya leídos.
+     *
+     * Una sola definición del veredicto: la comparten la lectura de una parada
+     * (`sanitaryResolutionRequirement()`) y la lectura por lotes (`sanitaryResolutionRequirements()`),
+     * de modo que la pantalla que anticipa el bloqueo y el cierre que lo aplica no puedan discrepar.
+     *
+     * @param Incident $incident Incidencia viva cuya máquina se evalúa.
+     * @param array<string, mixed>|mixed $settings Ajustes de la máquina, o `null` si no se pudieron leer.
+     * @return bool `true` si el cierre exige las tres declaraciones sanitarias.
+     */
+    private function requirementFromSettings(Incident $incident, mixed $settings): bool
+    {
         // Supuesto 1: la máquina ya está fuera de servicio por control higiénico-sanitario.
         // La regla vive en `settingsAreQuarantined()`, que es también la que consulta
         // `isSanitaryQuarantineInForce()` para la salvaguarda del parte (RF-10.1): una sola

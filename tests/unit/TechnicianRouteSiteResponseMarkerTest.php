@@ -197,6 +197,7 @@ $portIncidentRepo = new class($pausedStop, $activeStop) implements IncidentRepos
         return $this->siteResponses[$incidentId] ?? false;
     }
 
+    public function countCommentsForIncidents(array $incidentIds, bool $includeInternal): array { return []; }
     public function countComments(int $incidentId, bool $includeInternal): int { return 0; }
     public function create(Incident $incident, ?int $userId = null, ?string $initialNote = null): Incident { return $incident; }
     public function findById(int $id): ?Incident { return null; }
@@ -244,6 +245,7 @@ $plainIncidentRepo = new class($pausedStop, $activeStop) implements IncidentRepo
         return [$this->paused, $this->active];
     }
 
+    public function countCommentsForIncidents(array $incidentIds, bool $includeInternal): array { return []; }
     public function countComments(int $incidentId, bool $includeInternal): int { return 0; }
     public function create(Incident $incident, ?int $userId = null, ?string $initialNote = null): Incident { return $incident; }
     public function findById(int $id): ?Incident { return null; }

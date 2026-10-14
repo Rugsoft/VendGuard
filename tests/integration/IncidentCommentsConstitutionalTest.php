@@ -96,7 +96,12 @@ $assert = function (string $caseTitle, bool $condition, string $message = '') us
 // =========================================================================
 echo "--- Bloque 1: Art. III - Prohibición de mutación (append-only) ---\n";
 
-$expectedCommentMethods = ['addComment', 'countComments', 'getComments', 'getCommentsPaged'];
+// Lista blanca de operaciones del hilo: alta y consulta, nada más. El recuento
+// agregado (`countCommentsForIncidents`) es una lectura de solo consulta que la
+// bandeja de triaje usa para contar toda la página en una única sentencia
+// (RF-01.1 · T-HYBRID-27); no muta ni una fila, así que convive con el Art. III
+// sin ensanchar la superficie de escritura.
+$expectedCommentMethods = ['addComment', 'countComments', 'countCommentsForIncidents', 'getComments', 'getCommentsPaged'];
 
 $collectCommentMethods = static function (string $className) : array {
     $methods = array_map(
