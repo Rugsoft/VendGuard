@@ -34,9 +34,19 @@
  *
  * El problema real que hay que vigilar es el JavaScript embebido en la
  * plantilla: los `{{ }}`, los `:attr`, los `@event`, los `v-if`/`v-for`. Esos sí
- * se pueden extraer y comprobar sin DOM, y se comprueban TODOS, en las 46
+ * se pueden extraer y comprobar sin DOM, y se comprueban TODOS, en las 55
  * plantillas, con el mismo criterio. Un detector que cubre el 100 % es más útil
  * que uno que cubre el 70 % en más detalle.
+ *
+ * ## El barrido incluye la raíz (2026-10-14, T-HYBRID-18)
+ *
+ * El descubrimiento solo miraba `components/` y `views/`, de modo que `app.js`
+ * —la plantilla MÁS GRANDE del proyecto, la que monta todas las demás— no la
+ * compilaba nadie. Se descubrió al montar el banner de conexión en la raíz y
+ * escribir un comentario con acentos graves dentro del literal de plantilla: el
+ * módulo dejó de importarse (`Unexpected identifier 'idle'`) y ninguna otra suite
+ * lo vio. La raíz entra ahora en el barrido, y su entrada se cuenta una sola vez
+ * porque el mismo objeto se exporta como `App` y como `default`.
  *
  * ## El control de no-vacuidad
  *
@@ -69,6 +79,15 @@ function assert(description, condition, details = '') {
 }
 
 /**
+ * La raíz de la aplicación: no vive en `components/` ni en `views/`, así que el barrido por
+ * directorio no la veía. `app.js` lleva la plantilla MÁS GRANDE del proyecto —el contenedor raíz
+ * con su barra, su selector de perfil, sus avisos y sus cinco vistas— y era la única que nadie
+ * compilaba: el mismo defecto que este arnés existe para cazar podía esconderse justo en la
+ * plantilla que monta todas las demás.
+ */
+const ROOT_MODULES = ['app.js'];
+
+/**
  * Every ES module under the frontend, so a component is covered the day it is
  * written and not the day somebody remembers to add it to a list.
  *
@@ -82,6 +101,9 @@ function discoverModules() {
     for (const entry of fs.readdirSync(absolute).sort()) {
       if (entry.endsWith('.js')) found.push(`${dir}/${entry}`);
     }
+  }
+  for (const entry of ROOT_MODULES) {
+    if (fs.existsSync(path.join(JS_ROOT, entry))) found.push(entry);
   }
   return found;
 }
@@ -206,8 +228,8 @@ console.log('\n--- 2. Todas las plantillas del frontend son JavaScript válido -
 
 const modules = discoverModules();
 assert(
-  '2.1 El descubrimiento por directorio encuentra los componentes y las vistas',
-  modules.length >= 40,
+  '2.1 El descubrimiento por directorio encuentra los componentes, las vistas y la raíz',
+  modules.length >= 40 && modules.includes('app.js'),
   `módulos encontrados: ${modules.length}`
 );
 
@@ -215,6 +237,9 @@ const broken = [];
 const withTemplate = [];
 const importFailures = [];
 let totalExpressions = 0;
+// El mismo componente puede exportarse dos veces (`App` y `default`): sin esta identidad, la
+// plantilla de la raíz se contaría —y se comprobaría— por duplicado.
+const seenTemplates = new Set();
 
 for (const relative of modules) {
   let exported;
@@ -229,6 +254,8 @@ for (const relative of modules) {
 
   for (const [name, value] of Object.entries(exported)) {
     if (!value || typeof value !== 'object' || typeof value.template !== 'string') continue;
+    if (seenTemplates.has(value)) continue;
+    seenTemplates.add(value);
 
     withTemplate.push(`${relative} [${name}]`);
     for (const expression of extractExpressions(value.template)) {
@@ -257,6 +284,17 @@ assert(
   '2.4 Ninguna plantilla del frontend lleva JavaScript inválido',
   broken.length === 0,
   broken.slice(0, 5).join(' | ')
+);
+
+// La cobertura nueva tiene que notarse. Una guarda que se satisface por no mirar dónde se le
+// manda mirar es exactamente el defecto que este arnés existe para evitar, así que se comprueba
+// que la plantilla de la raíz se ha recorrido de verdad —y una sola vez: el mismo objeto de
+// componente se exporta como `App` y como `default`.
+const rootTemplates = withTemplate.filter((entry) => entry.startsWith('app.js ['));
+assert(
+  '2.5 La plantilla de la raíz de la aplicación se compila, y se cuenta una sola vez',
+  rootTemplates.length === 1,
+  `entradas de la raíz: ${JSON.stringify(rootTemplates)}`
 );
 
 // ---------------------------------------------------------------------

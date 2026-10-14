@@ -2,7 +2,7 @@
  * VendGuard - Frontend Unit Test Suite (ConnectionStateBannerTest.mjs)
  *
  * Certifica el componente global del estado de conexión (RF-04.3, RF-04.4, RNF-06;
- * tarea T-HYBRID-16) sin navegador, sin red y sin dependencias npm:
+ * tareas T-HYBRID-16 y T-HYBRID-18) sin navegador, sin red y sin dependencias npm:
  *
  *  - **Contrato del módulo:** módulo ES nativo (cero `import`), nombre canónico, escucha del
  *    evento `vendguard:network-status` y los tres estados declarados.
@@ -20,6 +20,12 @@
  *    retira el aviso**: mentir sobre una conexión rota es peor que insistir.
  *  - **Ciclo de vida:** el listener se registra y se retira con el mismo manejador, y la
  *    retirada diferida queda cancelada al desmontar.
+ *  - **Integración en la raíz (T-HYBRID-18):** un componente correcto que nadie monta no protege
+ *    a nadie. La raíz de la aplicación registra **este mismo** módulo, lo monta **una sola vez**
+ *    y **fuera de toda guarda de vista** —tiene que existir en las cinco, incluidas las dos
+ *    públicas que ocultan cabecera y pie—, ninguna vista monta una segunda capa flotante, y el
+ *    documento que lo hospeda declara el contenedor y sirve la hoja con todos los tokens que el
+ *    aviso consume, para que no pueda quedarse pintándose en transparente.
  *
  * Aislamiento del arnés: cada caso crea su propia instancia y la conduce **por su propio
  * manejador** (`handleNetworkStatus`), de modo que un caso no puede contaminar a otro. El camino
@@ -30,7 +36,7 @@
  * Dogma Vanilla: Node.js native ESM, zero external dependencies, zero network in tests.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const SOURCE_PATH = fileURLToPath(new URL('../../public/assets/js/components/ConnectionStateBanner.js', import.meta.url));
@@ -69,7 +75,7 @@ const { ConnectionStateBanner, CONNECTION_STATUS_EVENT, CONNECTION_STATES, RECON
   await import('../../public/assets/js/components/ConnectionStateBanner.js');
 
 console.log('======================================================================');
-console.log(' VendGuard: Frontend Test Suite - ConnectionStateBanner (T-HYBRID-16)');
+console.log(' VendGuard: Frontend Test Suite - ConnectionStateBanner (T-HYBRID-16 · T-HYBRID-18)');
 console.log('======================================================================\n');
 
 let assertions = 0;
@@ -427,10 +433,85 @@ assert('6.5 Módulo ES nativo sin una sola dependencia externa (Dogma Vanilla)',
   !/^\s*import\s/m.test(SOURCE) && !SOURCE.includes('require('));
 
 // ---------------------------------------------------------------------
+// GRUPO 7: Integración en la raíz de la aplicación (T-HYBRID-18)
+// ---------------------------------------------------------------------
+//
+// Un componente correcto que nadie monta no protege a nadie. Este grupo certifica el otro
+// extremo del contrato: que la raíz de la aplicación registra ESTE módulo (el que certifica el
+// resto de la suite, no un doble con la misma forma), lo monta UNA vez y fuera de toda guarda de
+// vista —tiene que existir en las cinco, incluidas las dos públicas que ocultan cabecera y pie—,
+// y que el documento que lo hospeda sirve la hoja con los tokens que el aviso consume, para que
+// no pueda quedarse sin pintar.
+console.log('\n--- Grupo 7: Integración en la raíz de la aplicación ---');
+
+const { App } = await import('../../public/assets/js/app.js');
+const APP_SOURCE = readFileSync(fileURLToPath(new URL('../../public/assets/js/app.js', import.meta.url)), 'utf8');
+const ROOT_TEMPLATE = App.template;
+const APP_MOUNT_TAG = (ROOT_TEMPLATE.match(/<ConnectionStateBanner[^>]*>/) ?? [''])[0];
+const APP_MOUNT_INDEX = ROOT_TEMPLATE.indexOf('<ConnectionStateBanner');
+
+assert('7.1 La raíz registra este mismo componente, no un doble con la misma forma',
+  App.components?.ConnectionStateBanner === ConnectionStateBanner);
+
+assert('7.2 La raíz lo monta una sola vez y como elemento autocerrado',
+  ROOT_TEMPLATE.split('<ConnectionStateBanner').length === 2 && APP_MOUNT_TAG === '<ConnectionStateBanner />',
+  `etiqueta encontrada: ${JSON.stringify(APP_MOUNT_TAG)}`);
+
+assert('7.3 El montaje no depende de la vista ni de ninguna condición',
+  APP_MOUNT_INDEX >= 0 && !APP_MOUNT_TAG.includes('v-if') && !APP_MOUNT_TAG.includes('v-show'));
+
+// Fuera del contenedor dinámico de vistas y antes de la barra: es hermano de las vistas, no hijo
+// de ninguna, y por eso las cubre a las cinco.
+const APP_MAIN_INDEX = ROOT_TEMPLATE.indexOf('<main');
+const APP_NAVBAR_INDEX = ROOT_TEMPLATE.indexOf('<AppNavbar');
+assert('7.4 Se monta en la raíz, fuera del contenedor de vistas y antes de la barra',
+  APP_MOUNT_INDEX >= 0 && APP_MAIN_INDEX > APP_MOUNT_INDEX && APP_NAVBAR_INDEX > APP_MOUNT_INDEX,
+  `banner=${APP_MOUNT_INDEX} · main=${APP_MAIN_INDEX} · navbar=${APP_NAVBAR_INDEX}`);
+
+const ROOT_VIEW_TAGS = ['<LocationPortalView', '<CoordinatorDashboardView', '<TechnicianRouteView', '<QrReportView', '<PublicRefundTrackingView'];
+assert('7.5 Las cinco vistas de la aplicación quedan por debajo del montaje',
+  ROOT_VIEW_TAGS.length === 5
+    && ROOT_VIEW_TAGS.every((tag) => ROOT_TEMPLATE.indexOf(tag) > APP_MOUNT_INDEX),
+  ROOT_VIEW_TAGS.filter((tag) => ROOT_TEMPLATE.indexOf(tag) <= APP_MOUNT_INDEX).join(' · '));
+
+// Una sola capa flotante: si una vista montara su propia copia, dos avisos se pisarían en la
+// misma esquina y el reintento de uno podría dispararse desde el otro.
+const VIEWS_DIR = fileURLToPath(new URL('../../public/assets/js/views/', import.meta.url));
+const VIEWS_MOUNTING_THE_BANNER = readdirSync(VIEWS_DIR)
+  .filter((entry) => entry.endsWith('.js'))
+  .filter((entry) => readFileSync(VIEWS_DIR + entry, 'utf8').includes('ConnectionStateBanner'));
+assert('7.6 Ninguna vista monta una segunda copia del banner (una sola capa flotante)',
+  VIEWS_MOUNTING_THE_BANNER.length === 0,
+  VIEWS_MOUNTING_THE_BANNER.join(' · '));
+
+assert('7.7 La aplicación se monta en el contenedor que declara el documento',
+  APP_SOURCE.includes("createApp(App).mount('#app')"));
+
+const INDEX_HTML = readFileSync(fileURLToPath(new URL('../../public/index.html', import.meta.url)), 'utf8');
+assert('7.8 El documento declara ese contenedor y carga la raíz como módulo ES',
+  INDEX_HTML.includes('id="app"') && /<script[^>]+type="module"[^>]+src="\/assets\/js\/app\.js"/.test(INDEX_HTML));
+
+// El aviso ámbar se pinta con tokens del sistema. Si el documento del banner dejara de servir la
+// hoja que los declara, el componente seguiría «funcionando» y se vería transparente: un fallo
+// que ninguna aserción sobre el componente puede ver, porque el color no vive en él.
+const LINKED_SHEETS = [...INDEX_HTML.matchAll(/<link[^>]+href="([^"]+\.css)"/g)].map((match) => match[1]);
+const SHEETS_CSS = LINKED_SHEETS
+  .map((href) => readFileSync(fileURLToPath(new URL('../../public' + href, import.meta.url)), 'utf8'))
+  .join('\n');
+const CONSUMED_TOKENS = [...new Set([...SOURCE.matchAll(/var\((--[a-z0-9-]+)/g)].map((match) => match[1]))];
+const MISSING_TOKENS = CONSUMED_TOKENS.filter((token) => !SHEETS_CSS.includes(`${token}:`));
+
+assert('7.9 Todas las hojas enlazadas por el documento existen', LINKED_SHEETS.length >= 1);
+
+assert('7.10 El documento declara todos los tokens que consume el aviso (no se pinta en transparente)',
+  CONSUMED_TOKENS.length >= 10 && MISSING_TOKENS.length === 0,
+  `tokens sin declarar: ${JSON.stringify(MISSING_TOKENS)}`);
+
+// ---------------------------------------------------------------------
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 if (failures === 0) {
-  console.log(' RESULT: 100% IN GREEN. CONDITION T-HYBRID-16 FULFILLED SUCCESSFULLY.');
+  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-HYBRID-16 / T-HYBRID-18 FULFILLED.');
   console.log('======================================================================\n');
   process.exit(0);
 } else {

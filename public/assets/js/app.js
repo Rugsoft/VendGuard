@@ -12,6 +12,7 @@
 import { createApp } from './vendor/vue.esm-browser.prod.js';
 import { store, restoreSession } from './store.js';
 import { AppNavbar } from './components/AppNavbar.js';
+import { ConnectionStateBanner } from './components/ConnectionStateBanner.js';
 import { LocationPortalView } from './views/LocationPortalView.js';
 import { CoordinatorDashboardView } from './views/CoordinatorDashboardView.js';
 import { TechnicianRouteView } from './views/TechnicianRouteView.js';
@@ -22,6 +23,7 @@ export const App = {
   name: 'VendGuardApp',
   components: {
     AppNavbar,
+    ConnectionStateBanner,
     LocationPortalView,
     CoordinatorDashboardView,
     TechnicianRouteView,
@@ -98,6 +100,16 @@ export const App = {
   },
   template: `
     <div style="min-height: 100vh; display: flex; flex-direction: column; background-color: var(--color-canvas, #f9fafb);">
+      <!--
+        Banner flotante global del estado de conexión (RF-04.3, RF-04.4, RNF-06; T-HYBRID-18).
+        Se monta en la RAÍZ y sin guarda de vista a propósito: tiene que existir en las cinco
+        vistas —Sede, Coordinador, Técnico, Portal QR y seguimiento público—, incluidas las dos
+        públicas que ocultan cabecera, selector de perfil y pie. No cambia la navegación
+        ordinaria porque en estado 'idle' no pinta nada y su capa no captura clics
+        (pointer-events: none), y no ocupa hueco en el flujo: su capa es position: fixed.
+      -->
+      <ConnectionStateBanner />
+
       <!-- Global Top Navbar (Oculto en las vistas públicas QR y seguimiento) -->
       <AppNavbar v-if="currentView !== 'qr' && currentView !== 'tracking'" @logout="handleLogout" @navigate-home="currentView = 'portal'" />
 
