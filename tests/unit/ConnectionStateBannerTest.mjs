@@ -2,7 +2,7 @@
  * VendGuard - Frontend Unit Test Suite (ConnectionStateBannerTest.mjs)
  *
  * Certifica el componente global del estado de conexión (RF-04.3, RF-04.4, RNF-06;
- * tareas T-HYBRID-16 y T-HYBRID-18) sin navegador, sin red y sin dependencias npm:
+ * tareas T-HYBRID-16, T-HYBRID-18 y T-HYBRID-20) sin navegador, sin red y sin dependencias npm:
  *
  *  - **Contrato del módulo:** módulo ES nativo (cero `import`), nombre canónico, escucha del
  *    evento `vendguard:network-status` y los tres estados declarados.
@@ -11,8 +11,11 @@
  *    flotante no se queda con los clics de nadie (`pointer-events: none`).
  *  - **`disconnected`:** aviso ámbar con los tokens del sistema de diseño (ni un literal
  *    hexadecimal, que es lo que mantiene congelado el techo de `DesignTokenDebtRatchetTest`),
- *    `role="alert"`, el recordatorio de que el borrador sigue guardado y el botón *Reintentar*
- *    con objetivo táctil ≥ 44 px (EARS-04.4).
+ *    `role="alert"`, el recordatorio de que el borrador sigue guardado y el botón *Reintentar* con
+ *    un objetivo táctil ≥ 44 px (EARS-04.4) **medido numéricamente sobre su declaración
+ *    efectiva**, no sobre la presencia literal de una cadena: el contrato es una desigualdad, de
+ *    modo que un objetivo más generoso cumple igual y una declaración posterior más estrecha
+ *    —la que de verdad manda en el navegador— no puede colarse.
  *  - **`reconnected`:** confirmación verde que se retira sola a los 3.000 ms, con un único
  *    temporizador que se reemplaza (nunca dos).
  *  - **Reintento:** invoca el callback publicado por el transporte —el mismo cuerpo, la misma
@@ -144,6 +147,73 @@ function createBanner() {
   return instance;
 }
 
+// ---------------------------------------------------------------------
+// Objetivo táctil: se certifica la declaración que MANDA, como desigualdad.
+// ---------------------------------------------------------------------
+
+/** Suelo táctil del botón de reintento, en píxeles (EARS-04.4). */
+const TOUCH_TARGET_MIN_PX = 44;
+
+/**
+ * Declaraciones en línea del botón de reintento, tal como las escribe la plantilla.
+ *
+ * Se aísla la etiqueta que lleva el marcador en lugar de buscar la subcadena en todo el módulo:
+ * una declaración correcta en otro elemento no es el objetivo táctil de nadie.
+ *
+ * @param {string} template
+ * @returns {string|null} El atributo `style` del botón, o `null` si no existe.
+ */
+function retryButtonDeclarations(template = ConnectionStateBanner.template) {
+  const markerIndex = template.indexOf('data-testid="connection-state-retry"');
+  if (markerIndex === -1) return null;
+
+  const tag = template.slice(markerIndex, template.indexOf('>', markerIndex));
+  const style = tag.match(/style="([^"]*)"/);
+
+  return style ? style[1] : null;
+}
+
+/**
+ * Valor efectivo de una propiedad CSS declarada en línea, en píxeles.
+ *
+ * Gana la **última** declaración, que es la que el navegador aplica: ésa es la diferencia que
+ * impide certificar una altura que una declaración posterior más estrecha ha dejado sin efecto.
+ *
+ * @param {string} declarations
+ * @param {string} property
+ * @returns {number|null}
+ */
+function effectivePx(declarations, property) {
+  const pattern = new RegExp(`${property}\\s*:\\s*([0-9.]+)px`, 'g');
+  let value = null;
+  for (const match of declarations.matchAll(pattern)) {
+    value = Number(match[1]);
+  }
+
+  return value;
+}
+
+/**
+ * ¿Las declaraciones dadas alcanzan el suelo táctil en ambos ejes?
+ *
+ * El contrato es una desigualdad (`≥ 44 px`), no una coincidencia literal: un objetivo más
+ * generoso cumple igual, y una cifra por debajo del suelo no cumple aunque en algún punto del
+ * texto aparezca una mayor.
+ *
+ * @param {string|null} declarations
+ * @param {number} minimumPx
+ * @returns {boolean}
+ */
+function declaresTouchTarget(declarations, minimumPx = TOUCH_TARGET_MIN_PX) {
+  if (typeof declarations !== 'string' || declarations.trim() === '') return false;
+
+  const height = effectivePx(declarations, 'min-height');
+  const width = effectivePx(declarations, 'min-width');
+
+  return typeof height === 'number' && typeof width === 'number'
+    && height >= minimumPx && width >= minimumPx;
+}
+
 const RETRY_ONE = () => Promise.resolve('usado');
 
 // ---------------------------------------------------------------------
@@ -254,9 +324,23 @@ assert('3.6 El botón Reintentar vive sólo en el aviso de desconexión',
     && ConnectionStateBanner.template.includes('data-testid="connection-state-retry"')
     && ConnectionStateBanner.template.includes('Reintentar'));
 
+const retryDeclarations = retryButtonDeclarations();
+
 assert('3.7 El objetivo táctil del botón alcanza los 44 px de alto y de ancho (EARS-04.4)',
-  ConnectionStateBanner.template.includes('min-height: 44px')
-    && ConnectionStateBanner.template.includes('min-width: 44px'));
+  declaresTouchTarget(retryDeclarations),
+  `declaración=${JSON.stringify(retryDeclarations)} · alto=${effectivePx(retryDeclarations ?? '', 'min-height')} px`
+    + ` · ancho=${effectivePx(retryDeclarations ?? '', 'min-width')} px`);
+
+assert('3.7.bis La comprobación del objetivo táctil tiene dientes: lo estrecho se rechaza',
+  declaresTouchTarget('min-height: 42px; min-width: 44px;') === false
+    && declaresTouchTarget('min-height: 44px; min-width: 42px;') === false
+    && declaresTouchTarget('min-height: 44px; min-width: 44px; min-height: 20px;') === false,
+  'Una cifra por debajo del suelo —o una declaración posterior que la deja sin efecto— no pasa como objetivo táctil.');
+
+assert('3.7.ter Un objetivo más generoso cumple igual y la ausencia de declaración no cumple',
+  declaresTouchTarget('min-height: 48px; min-width: 48px;') === true
+    && declaresTouchTarget(null) === false,
+  'El contrato es una desigualdad: 48 px cumple y no declarar nada no cumple.');
 
 assert('3.8 El botón viste el tono de cautela del sistema y no declara color propio',
   ConnectionStateBanner.template.includes('class="vg-btn vg-btn-warning"')
@@ -511,7 +595,7 @@ assert('7.10 El documento declara todos los tokens que consume el aviso (no se p
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 if (failures === 0) {
-  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-HYBRID-16 / T-HYBRID-18 FULFILLED.');
+  console.log(' RESULT: 100% IN GREEN. CONDITIONS T-HYBRID-16 / T-HYBRID-18 / T-HYBRID-20 FULFILLED.');
   console.log('======================================================================\n');
   process.exit(0);
 } else {

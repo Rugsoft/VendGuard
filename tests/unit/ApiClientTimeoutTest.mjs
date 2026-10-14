@@ -1,8 +1,8 @@
 /**
  * VendGuard - Frontend Unit Test Suite (ApiClientTimeoutTest.mjs)
  *
- * Certifica el interceptor de resiliencia del cliente HTTP (RF-04.1 a RF-04.4, RNF-01; tarea
- * T-HYBRID-17) sin navegador, sin red y sin dependencias npm:
+ * Certifica el interceptor de resiliencia del cliente HTTP (RF-04.1 a RF-04.4, RNF-01; tareas
+ * T-HYBRID-17 y T-HYBRID-20) sin navegador, sin red y sin dependencias npm:
  *
  *  - **Tiempo de espera ordinario estricto de 5,0 s (EARS-04.1):** la constante es 5.000 ms, la
  *    petición viaja con una señal de aborto, y el corte se **mide de verdad** —con el reloj real
