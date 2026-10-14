@@ -1071,15 +1071,20 @@ try {
 
     TestDataCleaner::purgeIncident($pdo, $testIncidentId);
 
-    $pdo->prepare('DELETE FROM `audit_log` WHERE (`entity_type` = :mtype AND `entity_id` = :machine) OR (`entity_type` = :rtype AND `entity_id` = :refund)')
-        ->execute([':mtype' => 'MACHINE', ':machine' => $testMachine->getId(), ':rtype' => 'REFUND_REQUEST', ':refund' => $testRefundId]);
+    // Todo el barrido de filas maestras de esta suite se emite con la ventana de purga
+    // abierta (T-HYBRID-26): la señal la declara TestDataCleaner en la forma del motor
+    // activo, y la ventana se cierra sola aunque una sentencia falle.
+    TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $testMachine, $testRefundId): void {
+        $pdo->prepare('DELETE FROM `audit_log` WHERE (`entity_type` = :mtype AND `entity_id` = :machine) OR (`entity_type` = :rtype AND `entity_id` = :refund)')
+            ->execute([':mtype' => 'MACHINE', ':machine' => $testMachine->getId(), ':rtype' => 'REFUND_REQUEST', ':refund' => $testRefundId]);
 
-    // Las hijas de la máquina se borran antes que ella: si el sembrador de
-    // demostración emitió un certificado sanitario mientras la fila de prueba
-    // existía, el FK del certificado impediría borrar la máquina y la limpieza
-    // quedaría a medias.
-    $pdo->prepare('DELETE FROM `sanitary_certificates` WHERE `machine_id` = :id')->execute([':id' => $testMachine->getId()]);
-    $pdo->prepare('DELETE FROM `machines` WHERE `id` = :id')->execute([':id' => $testMachine->getId()]);
+        // Las hijas de la máquina se borran antes que ella: si el sembrador de
+        // demostración emitió un certificado sanitario mientras la fila de prueba
+        // existía, el FK del certificado impediría borrar la máquina y la limpieza
+        // quedaría a medias.
+        $pdo->prepare('DELETE FROM `sanitary_certificates` WHERE `machine_id` = :id')->execute([':id' => $testMachine->getId()]);
+        $pdo->prepare('DELETE FROM `machines` WHERE `id` = :id')->execute([':id' => $testMachine->getId()]);
+    });
 }
 
 // =====================================================================

@@ -429,7 +429,8 @@ $assert('4.1 Ningún fichero de `src/` ejecuta un DELETE FROM (Art. III.1)', $ha
 
 $purgeUnlockers = [];
 foreach ($srcFiles as $path) {
-    if (str_contains((string)file_get_contents($path), '@vendguard_purge')) {
+    $content = (string)file_get_contents($path);
+    if (str_contains($content, '@vendguard_purge') || str_contains($content, 'vendguard.purge')) {
         $purgeUnlockers[] = basename($path);
     }
 }
@@ -452,6 +453,8 @@ $assert(
     '4.4 Sólo el arnés de pruebas abre la ventana, y siempre la cierra',
     substr_count($cleaner, '@vendguard_purge') === 2
     && str_contains($cleaner, 'SET @vendguard_purge = 0')
+    && str_contains($cleaner, "vendguard.purge")
+    && str_contains($cleaner, "set_config('vendguard.purge', :val, false)")
 );
 
 $runAll = $read('tests/run_all.php');

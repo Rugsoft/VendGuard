@@ -491,16 +491,28 @@ try {
         return (int)$pdo->lastInsertId();
     };
 
+    // Lectura de la señal de purga EN LA FORMA DEL MOTOR ACTIVO: `vendguard.purge`
+    // en PostgreSQL, `@vendguard_purge` en MariaDB. Las dos formas se certifican,
+    // ninguna sustituye a la otra (T-HYBRID-12, T-HYBRID-26).
+    $readPurgeSignal = static function (PDO $pdo): string {
+        if ((string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql') {
+            $row = $pdo->query("SELECT current_setting('vendguard.purge', true) AS v")->fetch(PDO::FETCH_ASSOC);
+
+            return strtolower((string)($row['v'] ?? ''));
+        }
+        $row = $pdo->query('SELECT @vendguard_purge AS v')->fetch(PDO::FETCH_ASSOC);
+
+        return (string)($row['v'] ?? '0');
+    };
+
     // El arnés de pruebas debe poder seguir limpiando: es el único que puede
-    // abrir la ventana, y su código vive fuera de src/.
+    // abrir la ventana, y su código vive fuera de src/. La señal la declara el
+    // único ayudante del limpiador, que la escribe en la forma del motor activo.
     $purgeCaseId = $makeDisposableCase('Fila desechable para la ventana de purga');
-    $pdo->exec('SET @vendguard_purge = 1');
-    try {
+    TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $purgeCaseId): void {
         $pdo->exec('DELETE FROM `refund_requests` WHERE `id` = ' . $purgeCaseId);
-        $purged = (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests` WHERE `id` = ' . $purgeCaseId)->fetchColumn() === 0;
-    } finally {
-        $pdo->exec('SET @vendguard_purge = 0');
-    }
+    });
+    $purged = (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests` WHERE `id` = ' . $purgeCaseId)->fetchColumn() === 0;
     $assert('6.6 Sólo la ventana explícita de purga del arnés puede vaciar la tabla',
         $purgeCaseId > 0 && $purged,
         'id: ' . $purgeCaseId);
@@ -518,12 +530,26 @@ try {
         && (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests` WHERE `id` = ' . $controlCaseId)->fetchColumn() === 1,
         'id: ' . $controlCaseId . ' rechazó: ' . var_export($refusedAgain, true));
 
-    // La ventana de purga no puede quedar abierta para el resto de la corrida.
-    $assert('6.8 La variable de purga queda desactivada al terminar la comprobación',
-        (int)((($pdo->query('SELECT @vendguard_purge AS v')->fetch(PDO::FETCH_ASSOC) ?: [])['v']) ?? 0) === 0);
+    // La ventana de purga no puede quedar abierta para el resto de la corrida, y
+    // se lee en la forma del motor activo.
+    $signalAfterWindow = $readPurgeSignal($pdo);
+    $assert('6.8 La señal de purga queda desactivada al terminar la comprobación',
+        in_array($signalAfterWindow, ['0', 'off', ''], true),
+        'forma declarada al cerrar: ' . var_export($signalAfterWindow, true));
 
     // El guardián no puede abrirse desde el código de producción: la única
     // escritor de la variable vive en el arnés de pruebas, nunca en producción.
+    // El ayudante del limpiador sí declara la señal, y la declara en las dos
+    // formas: si una sola de ellas desapareciera, la purga dejaría de funcionar
+    // en el motor correspondiente.
+    $cleanerSource = (string)file_get_contents(dirname(__DIR__, 2) . '/tests/Support/TestDataCleaner.php');
+    $assert('6.9b El único ayudante declara la señal en las dos formas del motor',
+        str_contains($cleanerSource, 'SET @vendguard_purge = 1')
+        && str_contains($cleanerSource, 'SET @vendguard_purge = 0')
+        && str_contains($cleanerSource, "set_config('vendguard.purge', :val, false)")
+        && str_contains($cleanerSource, "'off'")
+        && str_contains($cleanerSource, "'on'"));
+
     $srcRoot = dirname(__DIR__, 2) . '/src';
     $srcOffenders = [];
     $directory = new RecursiveDirectoryIterator($srcRoot, FilesystemIterator::SKIP_DOTS);
@@ -531,7 +557,8 @@ try {
         if ($fileInfo->getExtension() !== 'php') {
             continue;
         }
-        if (str_contains((string)file_get_contents($fileInfo->getPathname()), '@vendguard_purge')) {
+        $fileSource = (string)file_get_contents($fileInfo->getPathname());
+        if (str_contains($fileSource, '@vendguard_purge') || str_contains($fileSource, 'vendguard.purge')) {
             $srcOffenders[] = $fileInfo->getFilename();
         }
     }

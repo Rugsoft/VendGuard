@@ -154,19 +154,32 @@ $naiveDelete = function (PDO $pdo, string $sql, array $params) : array {
     }
 };
 
+// El rechazo del borrado ingenuo se reconoce en la forma de cada motor: en MariaDB
+// muerde primero la FK RESTRICT (`1451`), en PostgreSQL el disparador `Art. III.1`
+// (`45000`) —ambas formas se certifican, ninguna se sustituye por la otra—.
+$refusedNaiveDelete = static function (array $outcome): bool {
+    if (($outcome['failed'] ?? false) !== true) {
+        return false;
+    }
+    $message = (string)($outcome['message'] ?? '');
+
+    return str_contains($message, '1451')
+        || str_contains($message, 'foreign key constraint fails')
+        || str_contains($message, '45000')
+        || str_contains($message, 'ART_III_1_VIOLATION');
+};
+
 $naiveLocation = $naiveDelete($pdo, 'DELETE FROM `locations` WHERE `site_code` = :code', [':code' => $activeCode]);
 $assert(
     '2.1 El DELETE ingenuo de la sede fracasa con el 1451 de las FK RESTRICT',
-    $naiveLocation['failed']
-        && (str_contains($naiveLocation['message'], '1451') || str_contains($naiveLocation['message'], 'foreign key constraint fails')),
+    $refusedNaiveDelete($naiveLocation),
     'la sentencia debía fracasar y no lo hizo: sin subárbol no hay limpieza real'
 );
 
 $naiveMachine = $naiveDelete($pdo, 'DELETE FROM `machines` WHERE `code` = :code', [':code' => 'GUARD-A1']);
 $assert(
     '2.2 El DELETE ingenuo de la máquina fracasa por la avería colgada',
-    $naiveMachine['failed']
-        && (str_contains($naiveMachine['message'], '1451') || str_contains($naiveMachine['message'], 'foreign key constraint fails')),
+    $refusedNaiveDelete($naiveMachine),
     'mensaje: ' . $naiveMachine['message']
 );
 

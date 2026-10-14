@@ -611,9 +611,13 @@ try {
 
 
     foreach ($machineIds as $machineId) {
-        $pdo->prepare('DELETE FROM `sanitary_certificates` WHERE `machine_id` = :id')->execute([':id' => $machineId]);
-        $pdo->prepare("DELETE FROM `audit_log` WHERE `entity_type` = 'MACHINE' AND `entity_id` = :id")->execute([':id' => $machineId]);
-        $pdo->prepare('DELETE FROM `machines` WHERE `id` = :id')->execute([':id' => $machineId]);
+        // Las tres filas maestras se retiran con la ventana de purga del arnés abierta
+        // (T-HYBRID-26): la señal la declara TestDataCleaner en la forma del motor activo.
+        TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $machineId): void {
+            $pdo->prepare('DELETE FROM `sanitary_certificates` WHERE `machine_id` = :id')->execute([':id' => $machineId]);
+            $pdo->prepare("DELETE FROM `audit_log` WHERE `entity_type` = 'MACHINE' AND `entity_id` = :id")->execute([':id' => $machineId]);
+            $pdo->prepare('DELETE FROM `machines` WHERE `id` = :id')->execute([':id' => $machineId]);
+        });
     }
 
     echo '  [OK] Expedientes: ' . count($incidentIds) . ' · Reintegros: ' . count($refundIds) . ' · Máquinas: ' . count($machineIds) . " (purgados sin tocar las filas sembradas)\n";

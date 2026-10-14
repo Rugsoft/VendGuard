@@ -109,8 +109,11 @@ if ($tempLoc !== null) {
     $assert("3.4 El registro físico NO fue destruido (prohibición física DELETE)", $rawRow !== false);
     $assert("3.5 deleted_at contiene marca temporal válida", $rawRow !== false && !empty($rawRow['deleted_at']));
 
-    // Limpieza final de la sede de test
-    $pdo->prepare("DELETE FROM `locations` WHERE `id` = :id")->execute([':id' => $tempLoc->getId()]);
+    // Limpieza final de la sede de test. El borrado de una fila maestra se emite con
+    // la ventana de purga abierta (T-HYBRID-26); la señal vive en TestDataCleaner.
+    TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $tempLoc): void {
+        $pdo->prepare("DELETE FROM `locations` WHERE `id` = :id")->execute([':id' => $tempLoc->getId()]);
+    });
 }
 
 // =====================================================================
@@ -202,7 +205,9 @@ if ($bcn01 !== null) {
 }
 
 // Limpieza de la sede de test creada
-$pdo->prepare("DELETE FROM `locations` WHERE `id` = :id")->execute([':id' => $createdLoc->getId()]);
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $createdLoc): void {
+    $pdo->prepare("DELETE FROM `locations` WHERE `id` = :id")->execute([':id' => $createdLoc->getId()]);
+});
 
 // =====================================================================
 // RESUMEN DE EJECUCIÓN

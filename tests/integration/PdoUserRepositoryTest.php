@@ -114,8 +114,12 @@ if ($tempUser !== null) {
 
     $assert("4.4 Fila física intacta en la base de datos (RNF-03)", $rawRow !== false && !empty($rawRow['deleted_at']));
 
-    // Limpieza
-    $pdo->prepare("DELETE FROM `users` WHERE `id` = :id")->execute([':id' => $tempUser->getId()]);
+    // Limpieza. El borrado de una fila maestra se emite con la ventana de purga del
+    // arnés abierta (T-HYBRID-26): la señal la declara el limpiador en la forma del
+    // motor activo, no esta suite.
+    TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $tempUser): void {
+        $pdo->prepare("DELETE FROM `users` WHERE `id` = :id")->execute([':id' => $tempUser->getId()]);
+    });
 }
 
 // =====================================================================
@@ -138,7 +142,9 @@ $assert("5.2 Todos los usuarios listados tienen rol TECHNICIAN (ningún coordina
 // =====================================================================
 echo "\n--- Caso 6: Creación de usuario con Bcrypt (create) ---\n";
 $newTechEmail = 'alberto.nuevo@vendguard.internal';
-$pdo->prepare("DELETE FROM `users` WHERE `email` = :e")->execute([':e' => $newTechEmail]);
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $newTechEmail): void {
+    $pdo->prepare("DELETE FROM `users` WHERE `email` = :e")->execute([':e' => $newTechEmail]);
+});
 
 $createdUser = $userRepo->create([
     'name'     => 'Alberto Nuevo Técnico',
@@ -207,7 +213,9 @@ $assert("10.1b Inicialmente 0 incidencias activas con alias countPendingIncident
 
 // Crear máquina temporal dedicada para el test de incidencia asignada
 $tempMachineCode = 'VEND-TMP-USERTEST-10';
-$pdo->prepare("DELETE FROM `machines` WHERE `code` = :c")->execute([':c' => $tempMachineCode]);
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $tempMachineCode): void {
+    $pdo->prepare("DELETE FROM `machines` WHERE `code` = :c")->execute([':c' => $tempMachineCode]);
+});
 $pdo->prepare("
     INSERT INTO `machines` (`location_id`, `code`, `model`, `machine_type`, `floor_wing`, `is_active`)
     VALUES (1, :c, 'Test Temp Model', 'COMBO', 'Planta Test', 1)
@@ -241,7 +249,9 @@ $assert("10.2b Detecta 1 incidencia activa asignada (countPendingIncidents)", $u
 // no es carga de trabajo del técnico (Decisión QA 2: solo ASSIGNED/IN_PROGRESS/PENDING_PARTS).
 // Requiere máquina propia: uq_machine_active_ticket impide dos tickets activos por máquina.
 $resolvedMachineCode = 'VEND-TMP-USERTEST-10B';
-$pdo->prepare("DELETE FROM `machines` WHERE `code` = :c")->execute([':c' => $resolvedMachineCode]);
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $resolvedMachineCode): void {
+    $pdo->prepare("DELETE FROM `machines` WHERE `code` = :c")->execute([':c' => $resolvedMachineCode]);
+});
 $pdo->prepare("
     INSERT INTO `machines` (`location_id`, `code`, `model`, `machine_type`, `floor_wing`, `is_active`)
     VALUES (1, :c, 'Test Temp Model B', 'COMBO', 'Planta Test', 1)
@@ -305,8 +315,10 @@ $assert("10.6b La garantía informativa persiste tras CLOSED de la otra avería 
 // Limpieza de incidencias y máquinas temporales
 TestDataCleaner::purgeIncident($pdo, (int)$assignedIncId);
 TestDataCleaner::purgeIncident($pdo, (int)$resolvedIncId);
-$pdo->prepare("DELETE FROM `machines` WHERE `id` = :id")->execute([':id' => $tempMachineId]);
-$pdo->prepare("DELETE FROM `machines` WHERE `id` = :id")->execute([':id' => $resolvedMachineId]);
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $tempMachineId, $resolvedMachineId): void {
+    $pdo->prepare("DELETE FROM `machines` WHERE `id` = :id")->execute([':id' => $tempMachineId]);
+    $pdo->prepare("DELETE FROM `machines` WHERE `id` = :id")->execute([':id' => $resolvedMachineId]);
+});
 
 // =====================================================================
 // CASO 11: Baja lógica y Reactivación (softDelete / restore)
@@ -357,7 +369,9 @@ $searchUsers = $userRepo->findAll(['search' => 'Alberto']);
 $assert("12.6 Búsqueda por término encuentra al usuario creado", count($searchUsers) === 1 && $searchUsers[0]['email'] === $newTechEmail);
 
 // Limpieza final del usuario de prueba
-$pdo->prepare("DELETE FROM `users` WHERE `id` = :id")->execute([':id' => $newUserId]);
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $newUserId): void {
+    $pdo->prepare("DELETE FROM `users` WHERE `id` = :id")->execute([':id' => $newUserId]);
+});
 
 // =====================================================================
 // RESUMEN DE EJECUCIÓN

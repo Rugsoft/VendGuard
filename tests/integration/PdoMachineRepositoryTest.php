@@ -163,7 +163,11 @@ if ($loc1 !== null) {
     // =====================================================================
     echo "\n--- Caso 5: Creación de máquina (create) ---\n";
     $testCode = 'VEND-TEST-9901';
-    $pdo->prepare("DELETE FROM `machines` WHERE `code` = :c")->execute([':c' => $testCode]);
+    // La fila maestra se retira con la ventana de purga abierta (T-HYBRID-26): la
+    // señal la declara TestDataCleaner en la forma del motor activo.
+    TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $testCode): void {
+        $pdo->prepare("DELETE FROM `machines` WHERE `code` = :c")->execute([':c' => $testCode]);
+    });
 
     $newMachine = $machineRepo->create([
         'location_id'  => $locId,
@@ -308,7 +312,9 @@ if ($loc1 !== null) {
     $assert("10.9 Filtro search por código encuentra la máquina de prueba", count($bySearch) === 1 && $bySearch[0]['code'] === $testCode);
 
     // Limpieza final de máquina de prueba
-    $pdo->prepare("DELETE FROM `machines` WHERE `id` = :id")->execute([':id' => $createdId]);
+    TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $createdId): void {
+        $pdo->prepare("DELETE FROM `machines` WHERE `id` = :id")->execute([':id' => $createdId]);
+    });
 }
 
 // Restaurar métricas de demo si existe el seeder
