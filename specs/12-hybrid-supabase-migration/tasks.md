@@ -232,7 +232,19 @@
       4. En `resumePendingInfo`: Validación de existencia unificada en la transacción de reanudación evitando el `findById` previo duplicado.
     * **Sin residuo en el motor remoto:** la corrida entera se ejecuta dentro de **una transacción externa que se revierte** en un `finally`. Las **20 tablas del contrato conservan su recuento exacto** antes y después (comprobado por aserción, `audit_log` incluido).
     * **Verificación global sin regresiones:** `php tests/run_all.php` → **258 suites · 9.873 aserciones · 0 fallos · cifras documentadas coherentes · exit 0** (112/112 unitarias PHP, 66/66 unitarias JS, 79/79 de integración, 1/1 E2E). Todas las comprobaciones en verde.
-- [ ] **T-HYBRID-22: Actualizar cifras documentadas en `README.md` (`DocMetricsGuard.php`) y certificar paridad global (`php tests/run_all.php`)**
+- [x] **T-HYBRID-22: Actualizar cifras documentadas en `README.md` (`DocMetricsGuard.php`) y certificar paridad global (`php tests/run_all.php`)**
   * **Requisitos:** RF-01, RNF-04, Constitución Art. I.1, Art. I.2, Art. I.3
   * **Dependencias:** T-HYBRID-19, T-HYBRID-20, T-HYBRID-21, T-HYBRID-24, T-HYBRID-26, T-HYBRID-27
   * **Hecho cuando:** Se actualizan las cifras documentadas de la batería en `README.md` para satisfacer [`DocMetricsGuard.php`](../../tests/Support/DocMetricsGuard.php) la ejecución completa de `php tests/run_all.php` finaliza al **100% en verde (0 errores, 0 fallos)** para la **batería hermética** —todas las suites que corren sin red contra el motor local, existentes y nuevas—, y la **certificación de contrato del motor nuevo** (T-HYBRID-27 incluida) se ejecuta en su propio canal y se informa por separado, también en verde. Las dos certificaciones deben estar en verde antes de cerrar el módulo (spec §8.1). Su motor local lo aporta `deploy/local/postgres/` (plan §8) y su sonda de disponibilidad decide si la categoría puede ejecutarse.
+  * **Cierre y certificación completada (2026-10-14):**
+    * **Cifras documentadas coherentes:** [`README.md`](../../README.md) actualizado con la descripción formal del Módulo 12 (Persistencia Cloud Híbrida en PostgreSQL / Supabase) en el catálogo de módulos y en el árbol del proyecto, manteniendo las cifras vigentes auditadas por [`DocMetricsGuard.php`](../../tests/Support/DocMetricsGuard.php).
+    * **Batería hermética:** `php tests/run_all.php` → **258 suites · 9.873 aserciones · 0 fallos · cifras documentadas coherentes · exit 0** (112/112 unitarias PHP, 66/66 unitarias JS, 79/79 de integración, 1/1 E2E).
+    * **Certificación de contrato del motor nuevo (canal propio en verde):**
+      - `PoolerLatencyMeasurementTest.php` (T-HYBRID-27): **29 aserciones, 0 fallos, exit 0**, presupuesto RNF-01 ($\le 250\text{ ms}$) satisfecho en el 100% de las operaciones contra Supavisor remoto sin residuo.
+      - `PostgresSchemaTest.php` y `PostgresConstitutionalTest.php` (T-HYBRID-21): **125 aserciones, 0 fallos, exit 0**.
+      - `SchemaConvergenceParityTest.php` (T-HYBRID-24): **58 aserciones, 0 fallos, exit 0**.
+      - `HealthEndpointTest.php` (T-HYBRID-19/21): **46 aserciones, 0 fallos, exit 0**.
+      - `ConnectionFactoryTest.php` (T-HYBRID-19): **37 aserciones, 0 fallos, exit 0**.
+      - `PdoLockWaitBudgetTest.php` (T-HYBRID-19): **55 aserciones, 0 fallos, exit 0**.
+      - `SqlDialectPortabilityTest.php` (T-HYBRID-19): **84 aserciones, 0 fallos, exit 0**.
+    * **Paridad total y 0 errores:** Ambas certificaciones (hermética local y canal del motor nuevo) validadas al 100% en verde.

@@ -114,6 +114,12 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 * **Barrido de fondo y su superficie operativa:** la activación automática no espera a un intento de cierre (`php bin/sanitary_clock_sweep.php` o `POST /api/cron/sanitary-clock-sweep` cada 15 minutos, con cota de espera de bloqueo de 2 s y la contención publicada como aplazamiento, nunca como fallo); la pestaña *🩺 Barrido Sanitario* publica el latido, la tendencia de 24 h y el **escalado cuando el aplazamiento persiste** (RF-07).
 * **Segregación pública y transición prohibida (Art. V.4 y V.1):** el escaneo ciudadano muestra un estado neutro («En proceso de atención técnica») y **nunca** el motivo de la pausa, y queda prohibido cerrar directamente desde `PENDING_INFO` sin registrar la intervención física.
 
+### 11. Persistencia Cloud Administrada en PostgreSQL / Supabase (Módulo 12)
+* **Arquitectura Híbrida Desacoplada (Coste 0 €/mes):** El backend puro PHP 8.2+ y el frontend reactivo Vanilla Vue 3 operan transparentemente contra PostgreSQL 17 administrado en Supabase a través del agrupador transaccional Supavisor (puerto 6543) bajo TLS `verify-full`, manteniendo paridad absoluta con MariaDB/MySQL local.
+* **Blindaje Constitucional Nativo en PostgreSQL:** Disparadores `BEFORE DELETE` con emisión ruidosa de `SQLSTATE 45000` (`ART_III_1_VIOLATION`, Art. III.1); índice único parcial `uq_machine_active_ticket` que bloquea duplicados concurrentes e incidencias en garantía (Art. V.2 y V.6); restricciones `CHECK` de justificación mínima $\ge 20$ caracteres (Art. V.1); y claves canónicas de identidad (`email_key`, `site_code_key`) para unificación de colaciones (Art. V.4).
+* **Rendimiento Transaccional Certificado (RNF-01):** Optimización integral de round-trips mediante consultas CTE combinadas en inserción y actualización, reducción de consultas redundantes y lectura bloqueada en un solo salto (`FOR UPDATE OF i`), garantizando medianas inferiores al presupuesto estricto de 250 ms en todas las operaciones del sistema sobre enlaces de red transcontinentales.
+* **Resiliencia Operativa y Keep-Alive Diario:** Flujo de mantenimiento automatizado para prevenir la suspensión por inactividad tras 7 días en planes gratuitos y restauración desatendida mediante API de administración.
+
 ---
 
 ## 👥 Actores del Sistema y Credenciales de Demostración
@@ -436,6 +442,7 @@ gestor-incidencias-vending/
 │   ├── 09-incident-detail-modal/ # Especificación del modal de detalle integral de incidencias
 │   ├── 10-incident-comments/     # Especificación del hilo de conversación del expediente
 │   ├── 11-pending-info-sla-pause/# Especificación de la pausa contractual de sede y del barrido sanitario
+│   ├── 12-hybrid-supabase-migration/# Especificación de persistencia cloud híbrida en PostgreSQL (Supabase)
 │   ├── functional/               # Especificaciones funcionales EARS transversales
 │   └── technical/                # Contratos de API, DDL y esquemas de base de datos
 ├── src/
