@@ -215,13 +215,31 @@ mide lo mismo que en el cliente local: acepta las dos formas del SAN y rechaza l
    net stop postgresql-x64-16 && net start postgresql-x64-16
    ```
 
-## Lo que todavía no está cableado
+## Canal propio de la categoría (las suites ya existen)
 
-Este directorio aporta el motor, el contrato y la sonda. La **marca de categoría** de las
-suites y el **canal propio** de ejecución e informe —de modo que `run_all.php` no las
-confunda con suites herméticas— corresponden a T-HYBRID-21 y T-HYBRID-22. Mientras esas
-suites no existan, la categoría no tiene suites que ejecutar: su puerta ya está disponible
-y se comprueba con la sonda.
+Este directorio aporta el motor, el contrato y la sonda; las **suites** de la categoría
+declaran su marca (`const VENDGUARD_TEST_CATEGORY = 'new_engine';`), de modo que
+`run_all.php` las enumera en voz alta y **no** las mezcla con la batería hermética. El canal
+se ejecuta con la sonda como puerta y las tres suites juntas (T-HYBRID-21):
+
+```bash
+# Motor nativo (loopback, sin TLS): es el que se usó para la evidencia de T-HYBRID-21
+bash deploy/local/postgres/provision.sh
+source deploy/local/postgres/.env.local
+php deploy/local/postgres/verify.php                     # puerta: sin verde, no se ejecuta nada
+php tests/integration/PostgresSchemaTest.php              # 65 aserciones · CRUD de las 20 tablas
+php tests/integration/PostgresConstitutionalTest.php      # 60 aserciones · Art. III.1, V.1, V.2, V.4
+php tests/integration/SchemaConvergenceParityTest.php     # 21 aserciones · convergencia y correspondencia
+```
+
+La ruta equivalente con el motor TLS en contenedor (`provision-tls-engine.sh` y
+`.env.docker-tls`) sirve el **mismo** contrato: la sonda no cambia y las suites tampoco, porque
+leen `PG_TEST_DSN` y no la forma en que el motor se aprovisionó.
+
+Sin `PG_TEST_DSN` —o con el motor inalcanzable— las tres se declaran **no ejecutables** con
+código de salida `2` en lugar de omitirse en silencio. El **informe** agregado del canal (la
+certificación de cierre del módulo) es T-HYBRID-22; lo que T-HYBRID-21 cierra es la ejecución
+con su evidencia.
 
 ## Credenciales
 
