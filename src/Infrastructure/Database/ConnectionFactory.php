@@ -83,6 +83,7 @@ class ConnectionFactory
      * histórico (la CA incluida en el proyecto primero) para no alterar el comportamiento vivo.
      */
     private const PGSQL_SSL_CA_CANDIDATES = [
+        __DIR__ . '/prod-ca-2021.crt',
         '/etc/ssl/certs/ca-certificates.crt',
         __DIR__ . '/isrgrootx1.pem',
     ];
