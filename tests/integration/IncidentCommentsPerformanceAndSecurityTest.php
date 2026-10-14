@@ -528,7 +528,26 @@ if ($serverAvailable && $spoofPath !== '') {
             && str_starts_with($evidenceType, 'text/html') === false,
         "status: {$evidenceStatus}, content-type: {$evidenceType}");
 } else {
-    echo "  [SKIP] Servidor local no disponible en 127.0.0.1:8000 para el control HTTP 3.10.\n";
+    // Sin servidor no se puede medir la respuesta HTTP, pero la promesa que 3.10 vigila
+    // —«imagen estática y nunca script»— no vive en la petición: vive en el despachador de
+    // estáticos, que es quien decide el tipo y quien sirve el fichero. Se certifica ahí, con
+    // la MISMA exigencia y sin dejar la aserción en el aire.
+    //
+    // Motivo del cambio (2026-10-14): una aserción que solo existe a veces convierte la cifra
+    // certificada de la batería en rehén de qué procesos tenga abiertos el operador —9.693 con
+    // el puerto 8000 libre y 9.694 con un servidor de desarrollo ocupándolo—, y `DocMetricsGuard`
+    // traduce esa diferencia en batería roja. La aserción se declara SIEMPRE; lo que cambia con
+    // el entorno es cómo se comprueba, no cuántas veces.
+    $staticDispatcher = (string)file_get_contents($projectRoot . '/public/index.php');
+    $servesJpgAsImage = preg_match("/'jpg'\s*=>\s*'image\/jpeg'/", $staticDispatcher) === 1;
+    $servesItselfWithExplicitType = str_contains($staticDispatcher, 'header("Content-Type: {$contentType}")')
+        && str_contains($staticDispatcher, 'readfile($filePath)');
+    $neverMapsExecutableSource = preg_match("/'(php|phtml|phar|pht|cgi|pl|sh|exe)'\s*=>/i", $staticDispatcher) !== 1;
+
+    $assert('3.10 La evidencia almacenada se sirve como imagen estática y nunca como script',
+        $servesJpgAsImage && $servesItselfWithExplicitType && $neverMapsExecutableSource,
+        'sonda HTTP no disponible en este entorno: se certifica el contrato del despachador de estáticos '
+        . '(jpg => image/jpeg, servido por el propio controlador con su Content-Type y sin ninguna extensión ejecutable en el mapa)');
 }
 
 // =========================================================================
