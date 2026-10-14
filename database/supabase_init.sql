@@ -495,7 +495,12 @@ CREATE TABLE IF NOT EXISTS users (
     deleted_at         TIMESTAMPTZ,
     CONSTRAINT pk_users PRIMARY KEY (id),
     CONSTRAINT uq_users_email UNIQUE (email),
-    CONSTRAINT uq_users_email_key UNIQUE (email_key)
+    CONSTRAINT uq_users_email_key UNIQUE (email_key),
+    -- Enmienda 2026-10-14 (T-HYBRID-24): el catálogo vivo del motor local declara
+    -- `uq_users_operator_code` y el contrato la declara ahora en su §2.3. Es una
+    -- regla de negocio —un código de operador, un técnico— y por eso se materializa
+    -- aquí en vez de quedar como diferencia: la misma regla en los dos motores.
+    CONSTRAINT uq_users_operator_code UNIQUE (operator_code)
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_role ON users (role, is_active);

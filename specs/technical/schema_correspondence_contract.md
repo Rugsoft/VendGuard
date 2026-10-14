@@ -6,7 +6,7 @@
 **Requisitos que lo exigen:** spec §8 criterio 7, RNF-04 · T-HYBRID-24 (`SchemaConvergenceParityTest`), T-HYBRID-01 y T-HYBRID-02 (DDL que debe cumplirlo)  
 **Decisiones vinculantes:** [plan.md](../12-hybrid-supabase-migration/plan.md) §4, §6 y §8  
 **Normativa Suprema:** [constitution.md](../../constitution.md) (Artículos I, II, III, V y VI)  
-**Estado:** Contrato declarado y **materializado por completo** en `database/supabase_init.sql` (T-HYBRID-01: tablas 1-10 · T-HYBRID-02: tablas 11-20 y el script de las 20 compilando y correspondiendo)  
+**Estado:** Contrato declarado y **materializado por completo** en `database/supabase_init.sql` (T-HYBRID-01: tablas 1-10 · T-HYBRID-02: tablas 11-20 y el script de las 20 compilando y correspondiendo), más la adición `A-5` —el libro del ejecutor de migraciones— que materializa `database/supabase_migrations/001_initial_baseline.sql` (T-HYBRID-23)  
 **Procedencia del inventario:** esquema **desplegado** `vendguard_db` del motor local MariaDB (consultado a través de `information_schema` el 2026-10-13) y los 16 ficheros de `database/migrations/`  
 **Fuente del lado PostgreSQL:** plan §4 (blindaje constitucional, claves canónicas, índice único parcial, disparadores) y las tareas T-HYBRID-01/02
 
@@ -71,9 +71,9 @@ El conjunto de tablas debe ser **idéntico** en ambos motores, con los mismos no
 - Una columna cuyo tipo no corresponda según el §3 y que no esté declarada como `D-n` ⇒ **fallo**.
 - Una columna con el mismo nombre pero distinta nulabilidad ⇒ **fallo**, salvo las excepciones declaradas en el §4.
 
-### 2.3 Claves primarias y restricciones únicas (32)
+### 2.3 Claves primarias y restricciones únicas (33)
 
-Todas deben existir en ambos motores con las mismas columnas y la misma semántica de unicidad. Las **12 restricciones nombradas** además codifican reglas de negocio constitucionales: no son índices de rendimiento y no pueden desaparecer.
+Todas deben existir en ambos motores con las mismas columnas y la misma semántica de unicidad. Las **13 restricciones nombradas** además codifican reglas de negocio constitucionales: no son índices de rendimiento y no pueden desaparecer.
 
 | Tabla | Restricción | Columnas | Regla que protege |
 | :--- | :--- | :--- | :--- |
@@ -83,6 +83,7 @@ Todas deben existir en ambos motores con las mismas columnas y la misma semánti
 | `machines` | `uq_machines_code` | `code` | Una máquina, un código |
 | `users` | `PRIMARY` | `id` | Identidad de fila |
 | `users` | `uq_users_email` | `email` | Un login, una identidad (**D-5**) |
+| `users` | `uq_users_operator_code` | `operator_code` | Un código de operador, un técnico: el código identifica al profesional en certificados y auditoría y no puede repetirse entre dos cuentas (enmienda 2026-10-14: declarada al descubrirla el contraste de catálogos vivos de T-HYBRID-24; el motor nuevo la incorpora en `database/supabase_init.sql`) |
 | `incidents` | `PRIMARY` | `id` | Identidad de fila |
 | `incidents` | `uq_incidents_ticket_code` | `ticket_code` | Un expediente, un código |
 | `incidents` | `uq_machine_active_ticket` | `machine_id`, `is_active_ticket` | **Un único ticket activo por máquina** (Art. V.2/V.6) — **D-6** |
@@ -254,7 +255,7 @@ Existen **únicamente** en el motor nuevo, son deliberadas y la suite debe **exi
 | **A-2** | Columna `site_code_key` en `locations` (`VARCHAR(32) NOT NULL`) con `UNIQUE (uq_locations_site_code_key)` | EARS-08.5, **D-5** | Ídem para el código de sede |
 | **A-3** | Restricciones `CHECK` de longitud mínima (Art. V.1) en los campos de cierre y justificación | Art. V.1, plan §4.5 | Que una justificación por debajo del mínimo **es rechazada por la base**, no sólo por el servicio. **Lista fijada al escribir el DDL (T-HYBRID-01):** mínimo de **20 caracteres reales tras recortar** —`char_length(trim(...)) >= 20`— sobre cuatro columnas de `incidents`, con el patrón `IS NULL OR …` porque el campo solo se llena al cerrar, pausar o cancelar: `chk_resolution_diagnosis_len` (`resolution_diagnosis`), `chk_resolution_action_len` (`resolution_action`), `chk_pending_info_reason_text_len` (`pending_info_reason_text`) y `chk_cancellation_reason_len` (`cancellation_reason`). El umbral no se inventa: reproduce el que el dominio ya exige (`ResolutionValidator::MIN_LENGTH`, `Incident::MIN_PAUSE_REASON_LENGTH`, `IncidentPauseService::MIN_CANCELLATION_REASON_LENGTH`). `preventive_orders.cancellation_reason` no recibe `CHECK` porque su cancelación no tiene mínimo declarado en el servicio. **Lista de la Parte 2 (T-HYBRID-02):** mismo mínimo de 20 caracteres reales en `chk_coordinator_justification_len` (`refund_requests.coordinator_justification`, `JustificationTooShortException::MINIMUM_LENGTH`) y `chk_technician_justification_len` (`refund_requests.technician_justification`, el veredicto `UNVERIFIED_NO_CASH` que exige explicación escrita), y `chk_custom_part_description_len` (`spare_part_requests.custom_part_description`, repuesto fuera de catálogo). `incident_replaced_parts.custom_part_name` **no** lo recibe: su regla de dominio es de 3 caracteres y describe una pieza, no una justificación. Criterio único en las dos partes: **solo se blinda en la base el umbral que el dominio ya exige**, nunca uno nuevo |
 | **A-4** | **20** disparadores `BEFORE DELETE` sobre `prevent_hard_delete()` | Art. III.1, **D-8** | Que `DELETE FROM` sobre cada una de las 20 tablas falla con `SQLSTATE '45000'` y que la señal de purga del arnés lo levanta |
-| **A-5** | Libro del ejecutor de migraciones (`PostgresMigrationRunner`) | EARS-02.4, T-HYBRID-23 | Que el esquema **converge** al aplicar una migración posterior. *Si el ejecutor necesita tabla propia, su nombre se declara aquí al escribirlo; este contrato no lo impone.* |
+| **A-5** | Libro del ejecutor de migraciones (`PostgresMigrationRunner`): tabla `schema_migrations` con `id` (`BIGINT GENERATED ALWAYS AS IDENTITY`), `filename` (`VARCHAR(255) NOT NULL`, único), `checksum` (`CHAR(64) NOT NULL`) y `applied_at` (`TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`) | EARS-02.4, T-HYBRID-23 | Que el esquema **converge** al aplicar una migración posterior; que una base construida **solo** con el DDL base se detecta como incompleta (le falta la tabla del libro y no tiene ninguna migración aplicada); y que una migración ya aplicada cuyo contenido cambie **no** pasa en silencio —la huella guardada lo delata—. La tabla **no** lleva disparador `BEFORE DELETE`: la guarda del Art. III.1 cubre las 20 tablas del dominio (A-4), no el libro contable del ejecutor |
 
 **Adiciones que no se admiten:** cualquier columna, tabla, índice o restricción extra que no figure en esta tabla ni en el §3. Una adición no declarada es deriva, igual que una ausencia.
 
@@ -312,7 +313,7 @@ Foto del esquema MariaDB desplegado, tomada de `information_schema`. **No es la 
 | :--- | ---: | :--- |
 | Tablas | 20 | §2.1 |
 | Columnas | 281 | §2.2 |
-| Claves primarias y restricciones únicas | 32 (20 `PRIMARY` + 12 nombradas) | §2.3 |
+| Claves primarias y restricciones únicas | 33 (20 `PRIMARY` + 13 nombradas) | §2.3 |
 | Índices secundarios no únicos | 56 | §2.3 (**D-9**) |
 | Claves foráneas | 35 | §2.4 |
 | Restricciones `CHECK` | 3 (`json_valid` en `audit_log`) | §2.5 (**D-4**) |

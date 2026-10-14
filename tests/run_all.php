@@ -55,6 +55,19 @@ $failedFiles = [];
 $totalAssertions = 0;
 
 /**
+ * Suites declaradas con marca de categoría propia.
+ *
+ * Algunas suites exigen un motor que la batería hermética no tiene: la categoría
+ * `new_engine` necesita un PostgreSQL real además del MariaDB local (RNF-04, spec
+ * §8.1). Se declaran con `const VENDGUARD_TEST_CATEGORY = '<categoria>';` y esta
+ * batería **no las ejecuta**: las enumera en voz alta y las deriva a su canal, de
+ * modo que ninguna se cuele en el verde hermético ni se omita en silencio.
+ *
+ * @var array<string, string> fichero => categoría declarada
+ */
+$categorySuites = [];
+
+/**
  * Ejecuta un archivo de prueba en un proceso aislado y captura su resultado.
  */
 function runTestProcess(string $command, string $label, string &$outputSummary = ''): bool
@@ -260,8 +273,19 @@ if (is_resource($socket)) {
 $integrationFiles = glob(__DIR__ . '/integration/*.php');
 sort($integrationFiles);
 
+/** Categorías propias declaradas por las suites que esta batería hermética no ejecuta. */
+$categorySuites = [];
+
 foreach ($integrationFiles as $filePath) {
     $fileName = basename($filePath);
+
+    // Marca de categoría propia: ni se ejecuta aquí ni se calla. Su canal la ejecuta
+    // con el motor que necesita y su informe va aparte (T-HYBRID-21/22).
+    if (preg_match('/const\s+VENDGUARD_TEST_CATEGORY\s*=\s*\'([a-z0-9_]+)\';/i', (string)file_get_contents($filePath), $categoryMatch) === 1) {
+        $categorySuites[$fileName] = $categoryMatch[1];
+        continue;
+    }
+
     $stats['integration_php']['total']++;
 
     $cmd = 'php "' . $filePath . '"';
@@ -412,6 +436,11 @@ echo " Suites de pruebas PHP Unit : {$stats['unit_php']['passed']} / {$stats['un
 echo " Suites de pruebas JS Unit  : {$stats['unit_mjs']['passed']} / {$stats['unit_mjs']['total']} pasadas\n";
 echo " Suites de Integración PHP  : {$stats['integration_php']['passed']} / {$stats['integration_php']['total']} pasadas\n";
 echo " Suites E2E Manuales (T-40): {$stats['manual_e2e']['passed']} / {$stats['manual_e2e']['total']} pasadas\n";
+if ($categorySuites !== []) {
+    foreach ($categorySuites as $suiteName => $categoryName) {
+        echo " Categoría propia «{$categoryName}» : {$suiteName} (canal aparte, no ejecutada aquí)\n";
+    }
+}
 echo " ──────────────────────────────────────────────────────────────────\n";
 echo " Total Suites Ejecutadas    : {$totalSuites}\n";
 echo " Total Aserciones Evaluadas : {$totalAssertions}\n";
