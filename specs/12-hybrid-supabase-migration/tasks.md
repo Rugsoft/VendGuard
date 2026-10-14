@@ -177,7 +177,7 @@
 
 ## Fase 5: Estrategia de Pruebas Unitarias, Integración, Blindaje Constitucional y Certificación Global
 
-- [ ] **T-HYBRID-19: Ampliar la suite existente `ConnectionFactoryTest.php` e implementar las pruebas unitarias PHP `HealthCheckServiceTest.php`, `PdoLockWaitBudgetTest.php` y `SqlDialectPortabilityTest.php`**
+- [x] **T-HYBRID-19: Ampliar la suite existente `ConnectionFactoryTest.php` e implementar las pruebas unitarias PHP `HealthCheckServiceTest.php`, `PdoLockWaitBudgetTest.php` y `SqlDialectPortabilityTest.php`**
   * **Requisitos:** RF-01, RF-07, RF-09.3, RNF-01, RNF-04, RNF-05
   * **Dependencias:** T-HYBRID-06, T-HYBRID-07, T-HYBRID-11, T-HYBRID-13, T-HYBRID-25
   * **Hecho cuando:** Se amplía la suite ya existente [`ConnectionFactoryTest.php`](../../tests/integration/ConnectionFactoryTest.php) —que hoy verifica atributos PDO y consulta el motor con sintaxis exclusiva de MySQL (`SHOW VARIABLES`, `SELECT DATABASE()`) y **no se duplica** creando otro fichero homónimo en `tests/unit/`— con la autodetección de driver, los timeouts, `ATTR_EMULATE_PREPARES => true` y la comprobación equivalente por driver, y la ejecución de `php tests/unit/HealthCheckServiceTest.php`, `php tests/unit/PdoLockWaitBudgetTest.php` y `php tests/unit/SqlDialectPortabilityTest.php` pasa al 100% en verde, validando los presupuestos de espera por driver, la consulta a tabla real y la ofuscación de credenciales en el health check, y la ausencia de sintaxis privativa fuera del adaptador de dialecto en los 18 repositorios PDO.
