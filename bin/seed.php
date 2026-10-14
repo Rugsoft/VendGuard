@@ -11,11 +11,13 @@ declare(strict_types=1);
 // Script sin autoloader: cada dependencia de la cadena se declara a mano.
 // `ConnectionFactory` resuelve S-5 con `SecretProvider` y `SeedRunner` hashea las
 // claves de centro (S-4) con `SiteAccessCodeGenerator`; sin ellas este script muere
-// con «Class not found» antes de tocar la base de datos.
+// con «Class not found» antes de tocar la base de datos. `SeedRunner` resuelve su
+// dialecto con `SqlDialectAdapter` (T-HYBRID-25), que también entra en la cadena.
 // La guarda `CloudDeploySchemaParityTest` lo certifica en proceso limpio.
 require_once __DIR__ . '/../src/Infrastructure/Config/SecretProvider.php';
 require_once __DIR__ . '/../src/Core/Domain/Service/SiteAccessCodeGenerator.php';
 require_once __DIR__ . '/../src/Infrastructure/Database/ConnectionFactory.php';
+require_once __DIR__ . '/../src/Infrastructure/Dialect/SqlDialectAdapter.php';
 require_once __DIR__ . '/../src/Infrastructure/Database/SeedRunner.php';
 
 use VendGuard\Infrastructure\Database\ConnectionFactory;

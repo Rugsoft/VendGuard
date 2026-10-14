@@ -690,8 +690,6 @@ echo "\n--- Grupo 5: frontera del punto único de traducción (inventario pendie
  * tiene que seguir siendo cierta).
  */
 const PENDING_INVENTORY = [
-    // Sembrado (T-HYBRID-12): de aquí el adaptador toma la sintaxis de upsert que las semillas declaran.
-    'src/Infrastructure/Database/SeedRunner.php' => ['backtick' => 275, 'json' => 2, 'temporal' => 19, 'upsert' => 9],
     // Semilla de métricas del arnés: fixture local de MariaDB, sin tarea de normalización en el
     // módulo. Su SQL sigue siendo del motor local a propósito, y por eso está declarado, no oculto.
     'database/DemoMetricsSeeder.php' => ['backtick' => 144, 'upsert' => 2],
@@ -735,6 +733,8 @@ const DRAINED_INVENTORY = [
     'src/Infrastructure/Repository/PdoAuditLogRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 40]],
     'src/Infrastructure/Repository/PdoSiteAccessCodeRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 30, 'temporal' => 1]],
     'src/Infrastructure/Repository/PdoUnclaimedCashFindingRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 20]],
+    // Sembrado (T-HYBRID-12): de aquí el adaptador toma la sintaxis de upsert que las semillas declaran.
+    'src/Infrastructure/Database/SeedRunner.php' => ['drained_by' => 'T-HYBRID-12', 'families' => ['backtick' => 275, 'json' => 2, 'temporal' => 19, 'upsert' => 9]],
 ];
 
 /** Fichero con hallazgos => tarea (o motivo declarado) que lo drena. */

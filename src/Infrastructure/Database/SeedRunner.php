@@ -8,12 +8,21 @@ use PDO;
 use PDOException;
 use RuntimeException;
 use VendGuard\Core\Domain\Service\SiteAccessCodeGenerator;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
  * SeedRunner
  * 
- * Gestiona la inserción y actualización de datos semilla (Seed Data) en MariaDB/MySQL.
- * Garantiza idempotencia (ON DUPLICATE KEY UPDATE) y cifrado seguro Bcrypt para contraseñas.
+ * Gestiona la inserción y actualización de datos semilla (Seed Data) en los dos motores
+ * del sistema (MariaDB/MySQL y PostgreSQL).
+ * Garantiza idempotencia —la cláusula de upsert la renderiza el adaptador de dialecto en
+ * la forma de cada motor (T-HYBRID-25)— y cifrado seguro Bcrypt para contraseñas.
+ *
+ * El dialecto no se escribe aquí: los identificadores se escriben desnudos —ambos motores
+ * los admiten así en todo el esquema—, los booleanos se declaran con el literal que cada
+ * motor entiende (D-3), la aritmética temporal se pide al adaptador y, donde el esquema del
+ * motor nuevo lo exige, se escribe además la clave canónica de identidad (`site_code_key`,
+ * `email_key`, EARS-08.5).
  * 
  * Respeta el Dogma Vanilla y el principio de Clean Architecture.
  */
@@ -21,9 +30,12 @@ class SeedRunner
 {
     private PDO $pdo;
 
+    private SqlDialectAdapter $dialect;
+
     public function __construct(PDO $pdo)
     {
         $this->pdo = $pdo;
+        $this->dialect = SqlDialectAdapter::forConnection($pdo);
     }
 
     /**
@@ -192,30 +204,56 @@ class SeedRunner
         ];
 
         $seedDevAccessCodes = self::devAccessCodeSeedingEnabled();
-        $extraColumns = $seedDevAccessCodes
-            ? ', `access_code_hash`, `access_code_issued_at`, `login_attempts`, `login_locked_until`'
-            : '';
-        $extraValues = $seedDevAccessCodes ? ', :access_code_hash, CURRENT_TIMESTAMP, 0, NULL' : '';
-        $extraUpdates = $seedDevAccessCodes
-            ? ",
-                `access_code_hash` = VALUES(`access_code_hash`),
-                `access_code_issued_at` = VALUES(`access_code_issued_at`),
-                `login_attempts` = 0,
-                `login_locked_until` = NULL"
-            : '';
+        $writesCanonicalKey = $this->dialect->requiresCanonicalIdentityColumns();
 
-        $sql = "
-            INSERT INTO `locations` (`site_code`, `name`, `address`, `latitude`, `longitude`, `contact_name`, `contact_phone`, `is_active`{$extraColumns})
-            VALUES (:site_code, :name, :address, :latitude, :longitude, :contact_name, :contact_phone, 1{$extraValues})
-            ON DUPLICATE KEY UPDATE
-                `name` = VALUES(`name`),
-                `address` = VALUES(`address`),
-                `latitude` = VALUES(`latitude`),
-                `longitude` = VALUES(`longitude`),
-                `contact_name` = VALUES(`contact_name`),
-                `contact_phone` = VALUES(`contact_phone`),
-                `deleted_at` = NULL{$extraUpdates}
-        ";
+        $columns = [
+            'site_code', 'name', 'address', 'latitude', 'longitude',
+            'contact_name', 'contact_phone', 'is_active',
+        ];
+        $placeholders = [
+            ':site_code', ':name', ':address', ':latitude', ':longitude',
+            ':contact_name', ':contact_phone', $this->dialect->booleanLiteral(true),
+        ];
+
+        if ($writesCanonicalKey) {
+            $columns[] = 'site_code_key';
+            $placeholders[] = ':site_code_key';
+        }
+
+        if ($seedDevAccessCodes) {
+            $columns = array_merge($columns, ['access_code_hash', 'access_code_issued_at', 'login_attempts', 'login_locked_until']);
+            $placeholders = array_merge($placeholders, [':access_code_hash', 'CURRENT_TIMESTAMP', '0', 'NULL']);
+        }
+
+        // La regla del reencuentro: refrescar la ficha con la fila propuesta —y la clave
+        // canónica donde existe—, reactivar la sede dada de baja y rearmar su clave de centro.
+        $assignments = [
+            'name' => SqlDialectAdapter::PROPOSED_VALUE,
+            'address' => SqlDialectAdapter::PROPOSED_VALUE,
+            'latitude' => SqlDialectAdapter::PROPOSED_VALUE,
+            'longitude' => SqlDialectAdapter::PROPOSED_VALUE,
+            'contact_name' => SqlDialectAdapter::PROPOSED_VALUE,
+            'contact_phone' => SqlDialectAdapter::PROPOSED_VALUE,
+            'deleted_at' => 'NULL',
+        ];
+
+        if ($writesCanonicalKey) {
+            $assignments['site_code_key'] = SqlDialectAdapter::PROPOSED_VALUE;
+        }
+
+        if ($seedDevAccessCodes) {
+            $assignments['access_code_hash'] = SqlDialectAdapter::PROPOSED_VALUE;
+            $assignments['access_code_issued_at'] = SqlDialectAdapter::PROPOSED_VALUE;
+            $assignments['login_attempts'] = '0';
+            $assignments['login_locked_until'] = 'NULL';
+        }
+
+        $sql = sprintf(
+            'INSERT INTO locations (%s) VALUES (%s) %s',
+            implode(', ', $columns),
+            implode(', ', $placeholders),
+            $this->dialect->upsertAssignments(['site_code'], $assignments)
+        );
 
         $stmt = $this->pdo->prepare($sql);
         $count = 0;
@@ -230,6 +268,9 @@ class SeedRunner
                 ':contact_name' => $loc['contact_name'],
                 ':contact_phone' => $loc['contact_phone'],
             ];
+            if ($writesCanonicalKey) {
+                $params[':site_code_key'] = $this->dialect->identityKey($loc['site_code']);
+            }
             if ($seedDevAccessCodes) {
                 // Se hashea la forma normalizada, la misma que compara `AuthService::loginSite()`,
                 // de modo que `DEV-SEDE-BCN-01` y `devsede bcn 01` abren la misma sede.
@@ -254,15 +295,12 @@ class SeedRunner
      */
     public function seedRouteSettings(): int
     {
+        // Fila singleton: se inserta sólo si no existe. La guarda portable evita además
+        // escribir un identificador de identidad que el motor nuevo no admite a mano.
         $sql = "
-            INSERT INTO `route_settings` (
-                `id`, `base_name`, `base_address`, `base_latitude`, `base_longitude`,
-                `operational_radius_km`, `min_latitude`, `max_latitude`, `min_longitude`, `max_longitude`
-            ) VALUES (
-                1, :base_name, :base_address, :base_latitude, :base_longitude,
-                100, 27.0, 44.5, -18.5, 5.0
-            )
-            ON DUPLICATE KEY UPDATE `id` = VALUES(`id`)
+            INSERT INTO route_settings (base_name, base_address, base_latitude, base_longitude)
+            SELECT :base_name, :base_address, :base_latitude, :base_longitude
+            WHERE NOT EXISTS (SELECT 1 FROM route_settings)
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -390,28 +428,32 @@ class SeedRunner
             ],
         ];
 
-        $sql = "
-            INSERT INTO `machines` (`location_id`, `code`, `model`, `machine_type`, `floor_wing`, `notes`, `is_active`, `sanitary_status`, `next_sanitary_inspection_due`)
+        $sql = sprintf(
+            "INSERT INTO machines (location_id, code, model, machine_type, floor_wing, notes, is_active, sanitary_status, next_sanitary_inspection_due)
             VALUES (
-                (SELECT `id` FROM `locations` WHERE `site_code` = :site_code LIMIT 1),
+                (SELECT id FROM locations WHERE site_code = :site_code LIMIT 1),
                 :code,
                 :model,
                 :machine_type,
                 :floor_wing,
                 :notes,
-                1,
+                %s,
                 'OK',
-                DATE_ADD(CURRENT_DATE(), INTERVAL :due_days DAY)
+                %s
             )
-            ON DUPLICATE KEY UPDATE
-                `model` = VALUES(`model`),
-                `machine_type` = VALUES(`machine_type`),
-                `floor_wing` = VALUES(`floor_wing`),
-                `notes` = VALUES(`notes`),
-                `sanitary_status` = VALUES(`sanitary_status`),
-                `next_sanitary_inspection_due` = VALUES(`next_sanitary_inspection_due`),
-                `deleted_at` = NULL
-        ";
+            %s",
+            $this->dialect->booleanLiteral(true),
+            $this->dialect->addInterval('CURRENT_DATE()', ':due_days', 'DAY'),
+            $this->dialect->upsertAssignments(['code'], [
+                'model' => SqlDialectAdapter::PROPOSED_VALUE,
+                'machine_type' => SqlDialectAdapter::PROPOSED_VALUE,
+                'floor_wing' => SqlDialectAdapter::PROPOSED_VALUE,
+                'notes' => SqlDialectAdapter::PROPOSED_VALUE,
+                'sanitary_status' => SqlDialectAdapter::PROPOSED_VALUE,
+                'next_sanitary_inspection_due' => SqlDialectAdapter::PROPOSED_VALUE,
+                'deleted_at' => 'NULL',
+            ])
+        );
 
         $stmt = $this->pdo->prepare($sql);
         $count = 0;
@@ -494,30 +536,55 @@ class SeedRunner
             ],
         ];
 
-        $sql = "
-            INSERT INTO `users` (`name`, `email`, `password_hash`, `role`, `operator_code`, `phone`, `is_active`)
-            VALUES (:name, :email, :password_hash, :role, :operator_code, :phone, 1)
-            ON DUPLICATE KEY UPDATE
-                `name` = VALUES(`name`),
-                `password_hash` = VALUES(`password_hash`),
-                `role` = VALUES(`role`),
-                `operator_code` = VALUES(`operator_code`),
-                `phone` = VALUES(`phone`),
-                `deleted_at` = NULL
-        ";
+        $writesCanonicalKey = $this->dialect->requiresCanonicalIdentityColumns();
+
+        $columns = ['name', 'email', 'password_hash', 'role', 'operator_code', 'phone', 'is_active'];
+        $placeholders = [
+            ':name', ':email', ':password_hash', ':role', ':operator_code', ':phone',
+            $this->dialect->booleanLiteral(true),
+        ];
+
+        if ($writesCanonicalKey) {
+            $columns[] = 'email_key';
+            $placeholders[] = ':email_key';
+        }
+
+        $assignments = [
+            'name' => SqlDialectAdapter::PROPOSED_VALUE,
+            'password_hash' => SqlDialectAdapter::PROPOSED_VALUE,
+            'role' => SqlDialectAdapter::PROPOSED_VALUE,
+            'operator_code' => SqlDialectAdapter::PROPOSED_VALUE,
+            'phone' => SqlDialectAdapter::PROPOSED_VALUE,
+            'deleted_at' => 'NULL',
+        ];
+
+        if ($writesCanonicalKey) {
+            $assignments['email_key'] = SqlDialectAdapter::PROPOSED_VALUE;
+        }
+
+        $sql = sprintf(
+            'INSERT INTO users (%s) VALUES (%s) %s',
+            implode(', ', $columns),
+            implode(', ', $placeholders),
+            $this->dialect->upsertAssignments(['email'], $assignments)
+        );
 
         $stmt = $this->pdo->prepare($sql);
         $count = 0;
 
         foreach ($users as $user) {
-            $stmt->execute([
+            $params = [
                 ':name' => $user['name'],
                 ':email' => $user['email'],
                 ':password_hash' => $user['password_hash'],
                 ':role' => $user['role'],
                 ':operator_code' => $user['operator_code'],
                 ':phone' => $user['phone'],
-            ]);
+            ];
+            if ($writesCanonicalKey) {
+                $params[':email_key'] = $this->dialect->identityKey($user['email']);
+            }
+            $stmt->execute($params);
             $count++;
         }
 
@@ -539,14 +606,16 @@ class SeedRunner
             ['machine_type' => 'COMBO',            'default_frequency_days' => 15, 'max_allowed_days' => 45, 'advance_warning_days' => 5],
         ];
 
-        $sql = "
-            INSERT INTO `preventive_settings` (`machine_type`, `default_frequency_days`, `max_allowed_days`, `advance_warning_days`)
+        $sql = sprintf(
+            "INSERT INTO preventive_settings (machine_type, default_frequency_days, max_allowed_days, advance_warning_days)
             VALUES (:machine_type, :default_frequency_days, :max_allowed_days, :advance_warning_days)
-            ON DUPLICATE KEY UPDATE
-                `default_frequency_days` = VALUES(`default_frequency_days`),
-                `max_allowed_days` = VALUES(`max_allowed_days`),
-                `advance_warning_days` = VALUES(`advance_warning_days`)
-        ";
+            %s",
+            $this->dialect->upsertAssignments(['machine_type'], [
+                'default_frequency_days' => SqlDialectAdapter::PROPOSED_VALUE,
+                'max_allowed_days' => SqlDialectAdapter::PROPOSED_VALUE,
+                'advance_warning_days' => SqlDialectAdapter::PROPOSED_VALUE,
+            ])
+        );
 
         $stmt = $this->pdo->prepare($sql);
         $count = 0;
@@ -571,132 +640,157 @@ class SeedRunner
      */
     public function seedPreventiveOrdersAndCertificates(): array
     {
-        $sqlOrders = "
-            INSERT INTO `preventive_orders` (
-                `order_code`, `machine_id`, `location_id`, `assigned_technician_id`,
-                `status`, `order_type`, `scheduled_date`, `due_date`, `started_at`, `completed_at`,
-                `temperature_measured`, `result`, `is_quarantine_triggered`, `notes`
+        $sqlOrders = sprintf(
+            "INSERT INTO preventive_orders (
+                order_code, machine_id, location_id, assigned_technician_id,
+                status, order_type, scheduled_date, due_date, started_at, completed_at,
+                temperature_measured, result, is_quarantine_triggered, notes
             ) VALUES
             (
                 'ORD-PREV-2026-0001',
-                (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0101' LIMIT 1),
-                (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-01' LIMIT 1),
-                (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+                (SELECT id FROM machines WHERE code = 'VEND-0101' LIMIT 1),
+                (SELECT id FROM locations WHERE site_code = 'SEDE-BCN-01' LIMIT 1),
+                (SELECT id FROM users WHERE email = 'jordi.ruta@vendguard.internal' LIMIT 1),
                 'COMPLETED',
                 'ROUTINE',
-                DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY),
-                CURRENT_DATE(),
-                DATE_SUB(NOW(), INTERVAL 1 DAY),
-                DATE_SUB(NOW(), INTERVAL 1 DAY),
+                %s,
+                CURRENT_DATE,
+                %s,
+                %s,
                 3.2,
                 'CONFORME',
-                0,
+                %s,
                 'Inspección higiénico-sanitaria inicial conforme. Temperatura en rango seguro (Art. II).'
             ),
             (
                 'ORD-PREV-2026-0002',
-                (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0201' LIMIT 1),
-                (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-02' LIMIT 1),
-                (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+                (SELECT id FROM machines WHERE code = 'VEND-0201' LIMIT 1),
+                (SELECT id FROM locations WHERE site_code = 'SEDE-BCN-02' LIMIT 1),
+                (SELECT id FROM users WHERE email = 'jordi.ruta@vendguard.internal' LIMIT 1),
                 'COMPLETED',
                 'ROUTINE',
-                DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY),
-                CURRENT_DATE(),
-                DATE_SUB(NOW(), INTERVAL 2 DAY),
-                DATE_SUB(NOW(), INTERVAL 2 DAY),
+                %s,
+                CURRENT_DATE,
+                %s,
+                %s,
                 3.8,
                 'CONFORME',
-                0,
+                %s,
                 'Inspección periódica inicial conforme.'
             ),
             (
                 'ORD-PREV-2026-0003',
-                (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0102' LIMIT 1),
-                (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-01' LIMIT 1),
+                (SELECT id FROM machines WHERE code = 'VEND-0102' LIMIT 1),
+                (SELECT id FROM locations WHERE site_code = 'SEDE-BCN-01' LIMIT 1),
                 NULL,
                 'PENDING_ASSIGNMENT',
                 'ROUTINE',
-                DATE_ADD(CURRENT_DATE(), INTERVAL 2 DAY),
-                DATE_ADD(CURRENT_DATE(), INTERVAL 2 DAY),
+                %s,
+                %s,
                 NULL,
                 NULL,
                 NULL,
                 NULL,
-                0,
+                %s,
                 'Revisión preventiva inminente pendiente de asignación técnica.'
             )
-            ON DUPLICATE KEY UPDATE
-                `status` = VALUES(`status`),
-                `result` = VALUES(`result`)
-        ";
+            %s",
+            $this->dialect->subtractInterval('CURRENT_DATE()', 1, 'DAY'),
+            $this->dialect->subtractInterval('NOW()', 1, 'DAY'),
+            $this->dialect->subtractInterval('NOW()', 1, 'DAY'),
+            $this->dialect->booleanLiteral(false),
+            $this->dialect->subtractInterval('CURRENT_DATE()', 2, 'DAY'),
+            $this->dialect->subtractInterval('NOW()', 2, 'DAY'),
+            $this->dialect->subtractInterval('NOW()', 2, 'DAY'),
+            $this->dialect->booleanLiteral(false),
+            $this->dialect->addInterval('CURRENT_DATE()', 2, 'DAY'),
+            $this->dialect->addInterval('CURRENT_DATE()', 2, 'DAY'),
+            $this->dialect->booleanLiteral(false),
+            $this->dialect->upsertAssignments(['order_code'], [
+                'status' => SqlDialectAdapter::PROPOSED_VALUE,
+                'result' => SqlDialectAdapter::PROPOSED_VALUE,
+            ])
+        );
 
         $this->pdo->exec($sqlOrders);
 
-        $sqlCerts = "
-            INSERT INTO `sanitary_certificates` (
-                `certificate_code`, `preventive_order_id`, `machine_id`, `location_id`,
-                `technician_id`, `technician_name`, `technician_operator_code`,
-                `inspection_date`, `valid_until`, `temperature_measured`,
-                `result`, `status`
+        $sqlCerts = sprintf(
+            "INSERT INTO sanitary_certificates (
+                certificate_code, preventive_order_id, machine_id, location_id,
+                technician_id, technician_name, technician_operator_code,
+                inspection_date, valid_until, temperature_measured,
+                result, status
             ) VALUES
             (
                 'CERT-2026-0001',
-                (SELECT `id` FROM `preventive_orders` WHERE `order_code` = 'ORD-PREV-2026-0001' LIMIT 1),
-                (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0101' LIMIT 1),
-                (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-01' LIMIT 1),
-                (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+                (SELECT id FROM preventive_orders WHERE order_code = 'ORD-PREV-2026-0001' LIMIT 1),
+                (SELECT id FROM machines WHERE code = 'VEND-0101' LIMIT 1),
+                (SELECT id FROM locations WHERE site_code = 'SEDE-BCN-01' LIMIT 1),
+                (SELECT id FROM users WHERE email = 'jordi.ruta@vendguard.internal' LIMIT 1),
                 'Jordi Técnico Ruta BCN',
                 'OP-01',
-                DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY),
-                DATE_ADD(CURRENT_DATE(), INTERVAL 14 DAY),
+                %s,
+                %s,
                 3.2,
                 'CONFORME',
                 'VALID'
             ),
             (
                 'CERT-2026-0002',
-                (SELECT `id` FROM `preventive_orders` WHERE `order_code` = 'ORD-PREV-2026-0002' LIMIT 1),
-                (SELECT `id` FROM `machines` WHERE `code` = 'VEND-0201' LIMIT 1),
-                (SELECT `id` FROM `locations` WHERE `site_code` = 'SEDE-BCN-02' LIMIT 1),
-                (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+                (SELECT id FROM preventive_orders WHERE order_code = 'ORD-PREV-2026-0002' LIMIT 1),
+                (SELECT id FROM machines WHERE code = 'VEND-0201' LIMIT 1),
+                (SELECT id FROM locations WHERE site_code = 'SEDE-BCN-02' LIMIT 1),
+                (SELECT id FROM users WHERE email = 'jordi.ruta@vendguard.internal' LIMIT 1),
                 'Jordi Técnico Ruta BCN',
                 'OP-01',
-                DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY),
-                DATE_ADD(CURRENT_DATE(), INTERVAL 13 DAY),
+                %s,
+                %s,
                 3.8,
                 'CONFORME',
                 'VALID'
             )
-            ON DUPLICATE KEY UPDATE
-                `valid_until` = VALUES(`valid_until`),
-                `status` = VALUES(`status`)
-        ";
+            %s",
+            $this->dialect->subtractInterval('CURRENT_DATE()', 1, 'DAY'),
+            $this->dialect->addInterval('CURRENT_DATE()', 14, 'DAY'),
+            $this->dialect->subtractInterval('CURRENT_DATE()', 2, 'DAY'),
+            $this->dialect->addInterval('CURRENT_DATE()', 13, 'DAY'),
+            $this->dialect->upsertAssignments(['certificate_code'], [
+                'valid_until' => SqlDialectAdapter::PROPOSED_VALUE,
+                'status' => SqlDialectAdapter::PROPOSED_VALUE,
+            ])
+        );
 
         $this->pdo->exec($sqlCerts);
 
-        $this->pdo->exec("
-            UPDATE `machines` SET
-                `last_sanitary_inspection_at` = DATE_SUB(NOW(), INTERVAL 1 DAY),
-                `next_sanitary_inspection_due` = DATE_ADD(CURRENT_DATE(), INTERVAL 14 DAY),
-                `sanitary_status` = 'OK'
-            WHERE `code` = 'VEND-0101'
-        ");
+        $this->pdo->exec(sprintf(
+            "UPDATE machines SET
+                last_sanitary_inspection_at = %s,
+                next_sanitary_inspection_due = %s,
+                sanitary_status = 'OK'
+            WHERE code = 'VEND-0101'",
+            $this->dialect->subtractInterval('NOW()', 1, 'DAY'),
+            $this->dialect->addInterval('CURRENT_DATE()', 14, 'DAY')
+        ));
 
-        $this->pdo->exec("
-            UPDATE `machines` SET
-                `last_sanitary_inspection_at` = DATE_SUB(NOW(), INTERVAL 2 DAY),
-                `next_sanitary_inspection_due` = DATE_ADD(CURRENT_DATE(), INTERVAL 13 DAY),
-                `sanitary_status` = 'OK'
-            WHERE `code` = 'VEND-0201'
-        ");
+        $this->pdo->exec(sprintf(
+            "UPDATE machines SET
+                last_sanitary_inspection_at = %s,
+                next_sanitary_inspection_due = %s,
+                sanitary_status = 'OK'
+            WHERE code = 'VEND-0201'",
+            $this->dialect->subtractInterval('NOW()', 2, 'DAY'),
+            $this->dialect->addInterval('CURRENT_DATE()', 13, 'DAY')
+        ));
 
-        $this->pdo->exec("
-            UPDATE `machines` SET
-                `last_sanitary_inspection_at` = DATE_SUB(NOW(), INTERVAL 28 DAY),
-                `next_sanitary_inspection_due` = DATE_ADD(CURRENT_DATE(), INTERVAL 2 DAY),
-                `sanitary_status` = 'OK'
-            WHERE `code` = 'VEND-0102'
-        ");
+        $this->pdo->exec(sprintf(
+            "UPDATE machines SET
+                last_sanitary_inspection_at = %s,
+                next_sanitary_inspection_due = %s,
+                sanitary_status = 'OK'
+            WHERE code = 'VEND-0102'",
+            $this->dialect->subtractInterval('NOW()', 28, 'DAY'),
+            $this->dialect->addInterval('CURRENT_DATE()', 2, 'DAY')
+        ));
 
         return ['orders' => 3, 'certificates' => 2];
     }
@@ -709,7 +803,8 @@ class SeedRunner
      * `PdoPreventiveItemRepository::saveOrderItems()` —actualiza la respuesta existente o
      * inserta la nueva, sin borrar nunca físicamente (Art. III)— pero con SQL propio: esta
      * capa se ejecuta en arranques mínimos (por ejemplo el contenedor de despliegue) donde
-     * no hay autoloader cargado, así que no puede depender de otras clases del proyecto.
+     * el bootstrap carga las clases una a una, así que el `SqlDialectAdapter` que sostiene
+     * su dialecto tiene que estar requerido allí (`bin/init_cloud_db.php` lo hace).
      *
      * Sin estas respuestas, la ficha de detalle de la orden mostraría el bloque de
      * checklist vacío y no habría nada que auditar desde Coordinación.
@@ -719,35 +814,35 @@ class SeedRunner
     public function seedPreventiveChecklistItems(): int
     {
         $selectOrder = $this->pdo->prepare("
-            SELECT `id`
-            FROM `preventive_orders`
-            WHERE `order_code` = :order_code
+            SELECT id
+            FROM preventive_orders
+            WHERE order_code = :order_code
             LIMIT 1
         ");
         $selectItem = $this->pdo->prepare("
-            SELECT `id`
-            FROM `preventive_order_items`
-            WHERE `preventive_order_id` = :order_id
-              AND `item_code` = :item_code
+            SELECT id
+            FROM preventive_order_items
+            WHERE preventive_order_id = :order_id
+              AND item_code = :item_code
             LIMIT 1
         ");
         $updateItem = $this->pdo->prepare("
-            UPDATE `preventive_order_items`
+            UPDATE preventive_order_items
             SET
-                `item_description` = :item_description,
-                `is_critical` = :is_critical,
-                `status` = :status,
-                `observations` = :observations
-            WHERE `id` = :id
+                item_description = :item_description,
+                is_critical = :is_critical,
+                status = :status,
+                observations = :observations
+            WHERE id = :id
         ");
         $insertItem = $this->pdo->prepare("
-            INSERT INTO `preventive_order_items` (
-                `preventive_order_id`,
-                `item_code`,
-                `item_description`,
-                `is_critical`,
-                `status`,
-                `observations`
+            INSERT INTO preventive_order_items (
+                preventive_order_id,
+                item_code,
+                item_description,
+                is_critical,
+                status,
+                observations
             ) VALUES (
                 :order_id,
                 :item_code,
@@ -814,24 +909,24 @@ class SeedRunner
     public function seedPreventiveAuditTrail(): int
     {
         $selectOrder = $this->pdo->prepare("
-            SELECT `id`, `order_code`, `machine_id`, `status`, `assigned_technician_id`, `completed_at`
-            FROM `preventive_orders`
-            WHERE `order_code` = :order_code
+            SELECT id, order_code, machine_id, status, assigned_technician_id, completed_at
+            FROM preventive_orders
+            WHERE order_code = :order_code
             LIMIT 1
         ");
         $existsEvent = $this->pdo->prepare("
-            SELECT `id`
-            FROM `audit_log`
-            WHERE `entity_type` = 'MACHINE'
-              AND `entity_id` = :machine_id
-              AND `action` = :action
-              AND JSON_UNQUOTE(JSON_EXTRACT(`metadata`, '$.\"order_code\"')) = :order_code
+            SELECT id
+            FROM audit_log
+            WHERE entity_type = 'MACHINE'
+              AND entity_id = :machine_id
+              AND action = :action
+              AND {$this->dialect->jsonExtract('metadata', 'order_code')} = :order_code
             LIMIT 1
         ");
         $insertEvent = $this->pdo->prepare("
-            INSERT INTO `audit_log` (
-                `entity_type`, `entity_id`, `action`, `user_id`, `user_role`, `user_name`,
-                `previous_state`, `new_state`, `metadata`, `created_at`
+            INSERT INTO audit_log (
+                entity_type, entity_id, action, user_id, user_role, user_name,
+                previous_state, new_state, metadata, created_at
             ) VALUES (
                 'MACHINE', :machine_id, :action, :user_id, :user_role, :user_name,
                 :previous_state, :new_state, :metadata, :created_at
@@ -839,10 +934,10 @@ class SeedRunner
         ");
 
         $coordinatorId = (int)($this->pdo->query(
-            "SELECT `id` FROM `users` WHERE `email` = 'coordinacion@vendguard.internal' LIMIT 1"
+            "SELECT id FROM users WHERE email = 'coordinacion@vendguard.internal' LIMIT 1"
         )->fetchColumn() ?: 1);
         $technicianId = (int)($this->pdo->query(
-            "SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1"
+            "SELECT id FROM users WHERE email = 'jordi.ruta@vendguard.internal' LIMIT 1"
         )->fetchColumn() ?: 1);
 
         $seeded = 0;
@@ -1225,24 +1320,22 @@ class SeedRunner
             ],
         ];
 
-        $sqlPart = "
-            INSERT INTO `spare_parts` (`part_code`, `name`, `category`, `manufacturer`, `reference_cost`, `is_active`, `notes`)
+        $sqlPart = sprintf(
+            "INSERT INTO spare_parts (part_code, name, category, manufacturer, reference_cost, is_active, notes)
             VALUES (:part_code, :name, :category, :manufacturer, :reference_cost, :is_active, :notes)
-            ON DUPLICATE KEY UPDATE
-                `name` = VALUES(`name`),
-                `category` = VALUES(`category`),
-                `manufacturer` = VALUES(`manufacturer`),
-                `reference_cost` = VALUES(`reference_cost`),
-                `is_active` = VALUES(`is_active`),
-                `notes` = VALUES(`notes`)
-        ";
+            %s",
+            $this->dialect->upsertFromInsertedRow(['part_code'], [
+                'name', 'category', 'manufacturer', 'reference_cost', 'is_active', 'notes',
+            ])
+        );
         $stmtPart = $this->pdo->prepare($sqlPart);
 
-        $sqlCompat = "
-            INSERT INTO `spare_part_compatibilities` (`spare_part_id`, `machine_model`)
-            VALUES ((SELECT `id` FROM `spare_parts` WHERE `part_code` = :part_code LIMIT 1), :machine_model)
-            ON DUPLICATE KEY UPDATE `machine_model` = VALUES(`machine_model`)
-        ";
+        $sqlCompat = sprintf(
+            'INSERT INTO spare_part_compatibilities (spare_part_id, machine_model)
+            VALUES ((SELECT id FROM spare_parts WHERE part_code = :part_code LIMIT 1), :machine_model)
+            %s',
+            $this->dialect->upsertDoNothing(['spare_part_id', 'machine_model'])
+        );
         $stmtCompat = $this->pdo->prepare($sqlCompat);
 
         $partCount = 0;

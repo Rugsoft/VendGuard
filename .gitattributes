@@ -1,0 +1,8 @@
+# Finales de línea de los scripts de aprovisionamiento.
+#
+# Este equipo trabaja con `core.autocrlf=true`, que convertiría a CRLF los ficheros de texto
+# al pasar por el árbol de trabajo. Un script de bash con CRLF no se ejecuta —`bash: $'\r':
+# command not found`—, así que los `.sh` del repositorio se declaran LF en el árbol de trabajo
+# y en el índice. El resto de extensiones conservan el comportamiento por defecto: no hay
+# `* text=auto` a propósito, para no renormalizar ficheros que no lo necesitan.
+*.sh text eol=lf

@@ -81,6 +81,110 @@ env -u PG_TEST_DSN php deploy/local/postgres/verify.php; echo "exit=$?"   # exit
 Sin credencial no hay verde ni omisión silenciosa: hay un mensaje explícito y código de
 salida 1.
 
+## Ruta alternativa: el mismo motor en contenedor, con TLS (T-HYBRID-12)
+
+El motor de arriba no sirve TLS, y la ruta PostgreSQL de `ConnectionFactory` exige
+`sslmode=verify-full` con CA declarada **sin excepción de loopback** (RNF-05). Esa
+combinación dejaba el camino feliz de `bin/init_cloud_db.php` —DDL base, migraciones del
+motor, semillas y puerta de verificación— sin poder ejecutarse contra PostgreSQL en local, y
+su certificación quedaba en inspección de código. Esta ruta levanta un motor equivalente que
+sí habla TLS, para poder ejercitarlo de verdad:
+
+```bash
+bash deploy/local/postgres/provision-tls-engine.sh
+source deploy/local/postgres/.env.docker-tls
+DATABASE_URL="$PG_TEST_DSN" php bin/init_cloud_db.php   # ya lo ejecuta el aprovisionamiento
+```
+
+Qué hace el aprovisionamiento, y por qué así:
+
+- Genera una **CA local efímera** y un certificado de servidor con `subjectAltName =
+  IP:127.0.0.1, DNS:localhost` (siempre que falten o no verifiquen: es idempotente).
+- Construye `deploy/local/postgres/tls/Dockerfile` (PostgreSQL 16 + TLS) y levanta el
+  contenedor `vendguard-pg-tls` en el puerto **55433** —el 5432 lo ocupa el motor nativo—
+  con un volumen propio (`vendguard_pg_tls_data`).
+- Crea el **rol de aplicación** `vendguard_pg` **sin** `SUPERUSER`, `CREATEDB`, `CREATEROLE`
+  ni `INHERIT`, y le cede la propiedad de la base. La credencial administrativa del motor
+  sólo sirve para eso: PostgreSQL 16 se niega a degradar al superusuario de arranque, así
+  que la imagen no lo usa como rol de la categoría (misma política S-5 que el motor
+  nativo).
+- Escribe `.env.docker-tls` (modo 600) con **sólo** `PG_TEST_DSN`. `DATABASE_URL` **no** se
+  exporta a propósito: `ConnectionFactory` la lee antes que nada y haría que la batería
+  hermética resolviera contra este motor. El inicializador la recibe delante, en su propio
+  proceso.
+- Ejecuta la **puerta de identidad del cliente local** antes de la sonda y del inicializador:
+  exige una libpq que verifique direcciones del SAN, comprueba las dos formas del SAN y
+  rechaza un nombre no declarado. Es lo que garantiza que este motor se use con la misma
+  verificación que la imagen desplegada, y no con una más laxa.
+
+Evidencia que deja una pasada (no una promesa): 136 sentencias del DDL base, las 20 tablas
+del dominio más el libro `schema_migrations`, la migración `001_initial_baseline.sql`
+aplicada y el esquema **convergido**, las semillas maestras, la puerta de catálogo
+(10 sedes · 13 máquinas · 6 usuarios · 13 repuestos · 3/3 columnas de reintegros) y el
+guardián del Art. III.1 respondiendo `45000` a un borrado sin ventana y cediendo sólo con la
+señal de sesión. Todo ello con el cliente local ya alineado: el DSN del contrato abre por
+`host=127.0.0.1` —la dirección del SAN—, así que la pasada del inicializador ejerce la
+verificación que antes no podía. La categoría del motor nuevo también corre contra este
+motor: `php tests/integration/SchemaConvergenceParityTest.php` (21/21).
+
+Para retirarlo: `bash deploy/local/postgres/provision-tls-engine.sh --down` (el volumen de
+datos se conserva; `docker volume rm vendguard_pg_tls_data` para borrarlo también).
+
+## Cliente PostgreSQL del PHP local, alineado con la imagen
+
+`verify-full` es una exigencia de las dos partes: el motor declara su identidad y el
+**cliente** la comprueba. El PHP de XAMPP enlazaba **libpq 11.4**, que verifica el nombre
+contra los `dNSName` del SAN pero **no** contra las direcciones `iPAddress` (capacidad
+incorporada en PostgreSQL 12): con esa librería, abrir por `127.0.0.1` rechazaba un
+certificado válido —`server certificate for "localhost" does not match host name
+"127.0.0.1"`— y el cliente local quedaba verificando **menos** que la imagen desplegada
+(`php:8.2-cli-alpine`, libpq moderna). El desvío está cerrado:
+
+```bash
+bash deploy/local/postgres/upgrade-local-libpq.sh           # alinea y certifica (idempotente)
+bash deploy/local/postgres/upgrade-local-libpq.sh --check    # sólo comprueba; falla en cerrado
+bash deploy/local/postgres/upgrade-local-libpq.sh --restore  # vuelve al respaldo
+```
+
+- **Qué sustituye:** `libpq.dll` por la del cliente PostgreSQL 16 ya instalado en el equipo
+  (`C:\Program Files\PostgreSQL\16\bin`; ninguna descarga) y las dependencias que la nueva
+  librería **importa de verdad** —leídas de su propia tabla de importación, no supuestas:
+  `libintl-9.dll`, `libwinpthread-1.dll` y `libiconv-2.dll`.
+- **Qué no toca:** `libcrypto-3-x64.dll` ni `libssl-3-x64.dll` del PHP. Verificar direcciones
+  del SAN es una capacidad de **libpq**, no de OpenSSL (libpq la ejerce con
+  `X509_check_ip_asc`), y sustituir OpenSSL perturbaría a `php_openssl`, compilado contra
+  3.0.x. El libpq nuevo se enlaza contra el OpenSSL que el PHP ya carga.
+- **Respaldo y reversión:** `C:\xampp\php\libpq-backup-<versión respaldada>\` con
+  `MANIFEST.txt`, que anota qué fichero se sustituyó y cuál se añadió, y
+  `C:\xampp\php\libpq-alignment.state`, que registra **qué respaldo** es el de esta
+  alineación. Es lo que permite volver atrás cuando la versión actual ya no es la respaldada:
+  sin ese estado, restaurar tendría que adivinar el directorio por el nombre y una segunda
+  pasada fabricaría un respaldo falso con la versión nueva dentro. Si la certificación falla
+  después del cambio, el script **restaura el respaldo por su cuenta** y sale con error: no
+  se queda un PHP con un cliente que no cumple.
+- **Idempotente y con modo comprobación:** si el PHP ya enlaza la versión del cliente de
+  origen, no sustituye nada y sólo certifica; una pasada posterior **reutiliza** el respaldo
+  de la primera alineación. `--check` no toca ningún fichero y termina en **1** si el cliente
+  enlazado no verifica direcciones del SAN, así que sirve de puerta antes de aprovisionar.
+- **Puerta de identidad** ([`check-local-libpq.php`](check-local-libpq.php)): se ejecuta
+  también dentro de `provision-tls-engine.sh`, de modo que aprovisionar con un cliente
+  antiguo **falla en cerrado** con la instrucción para actualizarlo. Certifica tres cosas:
+  que la forma con nombre verifica (`DNS:localhost`), que la forma con dirección verifica
+  (`IP:127.0.0.1`) y que un nombre que el certificado **no** declara (`127.0.0.2`, la misma
+  máquina) es **rechazado** por el propio certificado. Sin el caso negativo, un cliente que
+  no verificase nada también aprobaría el positivo.
+
+Resultado en este equipo: `libpq 11.4 → 16.15`, confirmado por
+`PDO::ATTR_CLIENT_VERSION` de la conexión en vivo, y el contrato abre por `host=127.0.0.1`
+—la dirección del SAN— en vez de por el nombre. La versión del cliente es del entorno, no
+del repositorio: en otra máquina el aprovisionamiento exigirá la misma capacidad y dirá
+cómo conseguirla.
+
+La paridad con la imagen no se da por supuesta: dentro de `vendguard:local` (la imagen
+construida desde el `Dockerfile`) la libpq es la **18.6**, y conectando desde ella al mismo
+motor —por `127.0.0.1`, por `localhost` y por un nombre que el certificado no declara— se
+mide lo mismo que en el cliente local: acepta las dos formas del SAN y rechaza la tercera.
+
 ## Límites y hallazgos de este motor local
 
 1. **`pg_cron` y `pg_net` no existen en esta instalación.** T-HYBRID-01 enumera `pg_cron`
@@ -95,8 +199,11 @@ salida 1.
 3. **La medición de RNF-01 sigue abierta.** Este aprovisionamiento cubre la ejecución
    **ordinaria** de la categoría; la medición de latencia contra el motor remoto exige un
    proyecto Supabase con credenciales y se informa por separado (T-HYBRID-27).
-4. **`pdo_pgsql` del contenedor es otra tarea.** Aquí se ha activado el driver del PHP
-   local de XAMPP; la imagen sigue necesitando su propia instalación (T-HYBRID-12).
+4. **`pdo_pgsql` del contenedor: hecho y verificado.** La imagen de la aplicación instala
+   `postgresql-dev` con la cadena de `$PHPIZE_DEPS` y compila `pdo_pgsql`; dentro de la
+   imagen construida, `PDO::getAvailableDrivers()` devuelve `mysql` y `pgsql`. Falta que
+   este motor local sea el que sirve la ruta PostgreSQL de la aplicación: aquí se ha
+   activado el driver del PHP de XAMPP.
 5. **Endurecimiento opcional pendiente de decidir:** el instalador deja
    `listen_addresses = '*'` en `postgresql.conf`. La autenticación ya está limitada a
    loopback por `pg_hba.conf`, así que ninguna conexión externa puede autenticarse; si se

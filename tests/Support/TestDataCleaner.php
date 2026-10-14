@@ -117,7 +117,7 @@ final class TestDataCleaner
 
         $pdo->beginTransaction();
         try {
-            $deleted = self::withPurgeUnlocked($pdo, static function () use ($pdo, $order): array {
+            $deleted = self::withPurgeWindow($pdo, static function () use ($pdo, $order): array {
                 $deleted = [];
                 foreach ($order as $table) {
                     $stmt = $pdo->exec('DELETE FROM `' . $table . '`');
@@ -137,6 +137,30 @@ final class TestDataCleaner
     }
 
     /**
+     * Activa o desactiva la señal de purga a nivel de sesión según el driver de la conexión (T-HYBRID-12).
+     * En PostgreSQL: set_config('vendguard.purge', 'on'/'off', false).
+     * En MariaDB / MySQL: la variable de usuario de la purga en 1 o 0.
+     */
+    public static function setSessionPurgeSignal(PDO $pdo, bool $enabled): void
+    {
+        $driver = (string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        if ($driver === 'pgsql') {
+            $value = $enabled ? 'on' : 'off';
+            $stmt = $pdo->prepare("SELECT set_config('vendguard.purge', :val, false)");
+            $stmt->execute([':val' => $value]);
+            if ($stmt instanceof PDOStatement) {
+                $stmt->closeCursor();
+            }
+        } else {
+            if ($enabled) {
+                $pdo->exec('SET @vendguard_purge = 1');
+            } else {
+                $pdo->exec('SET @vendguard_purge = 0');
+            }
+        }
+    }
+
+    /**
      * Runs a block with the Art. III.1 purge window open.
      *
      * `refund_requests` carries a BEFORE DELETE trigger that refuses physical
@@ -149,18 +173,23 @@ final class TestDataCleaner
      * The window is always closed again in a `finally`, so one failing purge
      * cannot leave the guard disabled for whatever runs next in this process.
      *
+     * Punto de entrada PÚBLICO y único de la ventana (T-HYBRID-26): lo usan tanto
+     * las purgas de este limpiador como las suites que emiten sus propios borrados
+     * de filas maestras sin transacción explícita, de modo que la señal se declara
+     * en un solo sitio y en la forma del motor activo siempre.
+     *
      * @template T
      * @param callable(): T $work
      * @return T
      */
-    private static function withPurgeUnlocked(PDO $pdo, callable $work): mixed
+    public static function withPurgeWindow(PDO $pdo, callable $work): mixed
     {
-        $pdo->exec('SET @vendguard_purge = 1');
+        self::setSessionPurgeSignal($pdo, true);
 
         try {
             return $work();
         } finally {
-            $pdo->exec('SET @vendguard_purge = 0');
+            self::setSessionPurgeSignal($pdo, false);
         }
     }
 
@@ -188,7 +217,7 @@ final class TestDataCleaner
 
         $pdo->beginTransaction();
         try {
-            $deleted = self::withPurgeUnlocked($pdo, static function () use ($pdo, $order, $incidentId): array {
+            $deleted = self::withPurgeWindow($pdo, static function () use ($pdo, $order, $incidentId): array {
                 $deleted = [];
                 foreach ($order as $table) {
                     $stmt = $pdo->prepare('DELETE FROM `' . $table . '` WHERE `incident_id` = :id');
@@ -344,7 +373,7 @@ final class TestDataCleaner
 
         $pdo->beginTransaction();
         try {
-            $deleted = self::withPurgeUnlocked($pdo, static function () use ($pdo, $order, $plan): array {
+            $deleted = self::withPurgeWindow($pdo, static function () use ($pdo, $order, $plan): array {
                 $deleted = [];
                 foreach ($order as $table) {
                     // La condición jamás puede degradarse a un vaciado: siempre

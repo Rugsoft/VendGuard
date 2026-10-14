@@ -487,7 +487,11 @@ $seedRunnerContent = (string)file_get_contents($baseDir . '/src/Infrastructure/D
 $assert(
     "3.5 SeedRunner incorpora semillas maestras de repuestos y compatibilidades por modelo",
     str_contains($seedRunnerContent, 'seedSpareParts')
-        && str_contains($seedRunnerContent, '`spare_part_compatibilities`')
+        // La tabla se reconoce en las dos formas del dialecto: la normalización ANSI
+        // (T-HYBRID-11) retiró los backticks del sembrador y esta guarda debe medir
+        // que la semilla está, no con qué juego de comillas se escribe (T-HYBRID-26).
+        && (str_contains($seedRunnerContent, '`spare_part_compatibilities`')
+            || str_contains($seedRunnerContent, 'spare_part_compatibilities'))
         && str_contains($seedRunnerContent, "'part_code' => 'VALV-ULKA-01'")
 );
 

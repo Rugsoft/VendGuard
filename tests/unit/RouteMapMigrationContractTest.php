@@ -74,8 +74,16 @@ $assert('cloud_init seeds canonical Barcelona coordinates and the central base',
     str_contains($cloudInit, '41.3853120, 2.1932450')
     && str_contains($cloudInit, '41.4036290, 2.1895120')
     && str_contains($cloudInit, '41.3935000, 2.1890000'));
+// La lista de columnas del INSERT se acepta en las dos formas del dialecto: la
+// normalización ANSI (T-HYBRID-09) retiró los backticks de los repositorios y del
+// sembrador, así que exigir sólo la forma MySQL dejaría la guarda midiendo el motor
+// equivocado. Lo que la aserción protege —que las coordenadas viajen en el INSERT—
+// se conserva en ambas.
+$coordinatesInSeedColumns = str_contains($seedRunner, "`latitude`, `longitude`")
+    || str_contains($seedRunner, "'latitude', 'longitude'")
+    || str_contains($seedRunner, 'latitude, longitude');
 $assert('SeedRunner persists coordinates and initializes route settings as part of seedAll',
-    str_contains($seedRunner, "`latitude`, `longitude`")
+    $coordinatesInSeedColumns
     && str_contains($seedRunner, 'public function seedRouteSettings(): int')
     && str_contains($seedRunner, '$this->seedRouteSettings();'));
 
