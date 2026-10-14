@@ -33,6 +33,135 @@ export class ApiError extends Error {
 }
 
 /**
+ * Tiempo de espera ordinario estricto de toda petición HTTP contra el backend (EARS-04.1).
+ *
+ * Cinco segundos en el cliente **y** cinco segundos en el tiempo de conexión del driver PDO
+ * (`ATTR_TIMEOUT`): la coherencia temporal es extremo a extremo a propósito. Un cliente más
+ * paciente que el servidor sólo consigue que el operario espere por una respuesta que ya no
+ * va a llegar, y un cliente más impaciente corta operaciones que el motor sí iba a completar.
+ */
+export const REQUEST_TIMEOUT_MS = 5000;
+
+/**
+ * Evento nativo con el que el transporte publica el estado de la conexión (RF-04.3, RF-04.4).
+ *
+ * El consumidor canónico es `components/ConnectionStateBanner.js`, que reconoce los estados
+ * `idle`, `disconnected` y `reconnected`. Un estado que el banner no conozca lo deja donde
+ * estaba: aquí se emite lo que ha pasado de verdad, no lo que al banner le convenga.
+ */
+export const NETWORK_STATUS_EVENT = 'vendguard:network-status';
+
+/**
+ * Evento nativo con el que el transporte publica si tiene operaciones en curso (RF-04.2).
+ *
+ * Sirve a las superficies que quieran reflejar el trabajo pendiente (y a cualquier botón que
+ * deba apagarse mientras hay un envío vivo). Es un canal **aparte** del de conexión porque
+ * `idle` ya significa «no hay nada que contar» en el banner, y completar una petición con
+ * éxito no es lo mismo que recuperar la conexión.
+ */
+export const REQUEST_STATE_EVENT = 'vendguard:request-state';
+
+/**
+ * Construye la señal de aborto del tiempo de espera ordinario (EARS-04.1).
+ *
+ * Se prefiere el reloj del navegador (`AbortSignal.timeout`), que es el mecanismo nativo y no
+ * necesita limpieza. Donde no existe se levanta un `AbortController` con su temporizador, y el
+ * `cancel()` devuelto permite apagarlo cuando la respuesta llega antes: un temporizador vivo
+ * sobre una petición ya resuelta es una fuga silenciosa.
+ *
+ * El tiempo es un parámetro (y no la constante a pelo) para que la certificación pueda medir el
+ * mecanismo con un reloj corto en lugar de esperar cinco segundos reales por caso.
+ *
+ * @param {number} [timeoutMs=REQUEST_TIMEOUT_MS] Tiempo de espera en milisegundos.
+ * @returns {{signal: (AbortSignal|undefined), hasTimedOut: (function(): boolean), cancel: (function(): void)}}
+ */
+export function buildTimeoutSignal(timeoutMs = REQUEST_TIMEOUT_MS) {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return {
+      signal: AbortSignal.timeout(timeoutMs),
+      hasTimedOut: () => false,
+      cancel: () => {}
+    };
+  }
+
+  if (typeof AbortController !== 'undefined') {
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+
+    return {
+      signal: controller.signal,
+      hasTimedOut: () => timedOut,
+      cancel: () => clearTimeout(timer)
+    };
+  }
+
+  return { signal: undefined, hasTimedOut: () => false, cancel: () => {} };
+}
+
+/**
+ * Combina la señal del llamante con el reloj ordinario de la casa (EARS-04.1).
+ *
+ * Que una pantalla quiera poder cancelar su petición **no puede desactivar el techo de 5,0
+ * segundos**: el contrato es que toda petición al backend tiene plazo, y una señal ajena que
+ * sustituyese al reloj abriría un agujero silencioso por el que una consulta colgada se queda
+ * esperando indefinidamente. Aquí se encadenan las dos: la primera que salte decide, y el motivo
+ * de cada una llega intacto —`AbortError` si canceló quien pidió, `TimeoutError` si venció el
+ * plazo— porque de ese nombre depende que el sistema sepa si debe avisar al operario.
+ *
+ * @param {(AbortSignal|undefined)} callerSignal Señal del llamante, si la trajo.
+ * @param {{signal: (AbortSignal|undefined), hasTimedOut: Function, cancel: Function}} timeout Reloj de la casa.
+ * @returns {{signal: (AbortSignal|undefined), hasTimedOut: Function, cancel: Function}}
+ */
+export function combineWithTimeoutSignal(callerSignal, timeout) {
+  const timeoutSignal = timeout?.signal;
+  const timedOut = () => (typeof timeout?.hasTimedOut === 'function' ? timeout.hasTimedOut() === true : false);
+
+  if (!callerSignal || typeof AbortController === 'undefined') {
+    return {
+      signal: callerSignal ?? timeoutSignal,
+      hasTimedOut: timedOut,
+      cancel: () => timeout?.cancel?.()
+    };
+  }
+
+  const controller = new AbortController();
+  const abortFromCaller = () => controller.abort(callerSignal.reason);
+  const abortFromTimeout = () => controller.abort(
+    typeof DOMException !== 'undefined'
+      ? new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+      : undefined
+  );
+
+  if (callerSignal.aborted) {
+    abortFromCaller();
+  } else {
+    callerSignal.addEventListener('abort', abortFromCaller, { once: true });
+  }
+
+  if (timeoutSignal) {
+    if (timeoutSignal.aborted) {
+      abortFromTimeout();
+    } else {
+      timeoutSignal.addEventListener('abort', abortFromTimeout, { once: true });
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    hasTimedOut: timedOut,
+    cancel: () => {
+      callerSignal.removeEventListener?.('abort', abortFromCaller);
+      timeoutSignal?.removeEventListener?.('abort', abortFromTimeout);
+      timeout?.cancel?.();
+    }
+  };
+}
+
+/**
  * Bloque de mensajes que carga cada petición del hilo: los 50 más recientes del
  * expediente (Módulo 10, RF-01.2 de specs/10-incident-comments/spec.md).
  */
@@ -108,6 +237,27 @@ export class ApiClient {
     this.token = null;
     this.siteCode = null;
     this.onUnauthorized = null;
+    /**
+     * Operaciones de escritura vivas, por clave de duplicado (RF-04.2).
+     *
+     * Un doble clic accidental —o un formulario que se reenvía porque el operario no vio
+     * ninguna señal— no puede convertirse en dos altas. La segunda entrega idéntica mientras
+     * la primera sigue en el aire **recibe la respuesta de la primera** en lugar de salir a la
+     * red otra vez: es la forma del transporte de impedir la petición duplicada.
+     *
+     * @type {Map<string, Promise<any>>}
+     */
+    this.pendingMutations = new Map();
+    /** @type {number} Peticiones en curso (lecturas incluidas), para quien quiera reflejarlas. */
+    this.pendingRequests = 0;
+    /**
+     * ¿La conexión está caída según este cliente?
+     *
+     * Se levanta al publicar `disconnected` y se baja con el **primer éxito posterior**, que es
+     * la única prueba honesta de que la conexión ha vuelto: nadie firma la recuperación sin
+     * haber recibido una respuesta.
+     */
+    this.networkIsDown = false;
   }
 
   /**
@@ -199,17 +349,87 @@ export class ApiClient {
       body
     };
 
+    // EARS-04.1 — Tiempo de espera ordinario estricto en TODA petición. Si el llamante trae su
+    // propia señal se encadenan las dos: quien cancela sigue pudiendo cancelar y el plazo de
+    // 5,0 s sigue mordiendo. El motivo de cada una viaja distinto para que el sistema sepa si
+    // tiene que avisar al operario (avería) o callarse (cancelación deliberada).
+    const timeout = buildTimeoutSignal();
+    const linkedSignal = combineWithTimeoutSignal(options.signal, timeout);
+    config.signal = linkedSignal.signal;
+
+    // EARS-04.2 — Una segunda entrega idéntica mientras la primera sigue viva no sale a la red:
+    // recibe la respuesta de la primera. Sin esto, un doble clic accidental son dos altas.
+    const duplicateKey = this.duplicateRequestKey(method, url, config.body);
+    const inFlight = duplicateKey === null ? undefined : this.pendingMutations.get(duplicateKey);
+    if (inFlight !== undefined) {
+      return inFlight;
+    }
+
+    const operation = this.dispatchRequest({
+      endpoint,
+      url,
+      config,
+      callerOptions: options,
+      callerSignal: options.signal,
+      hasTimedOut: linkedSignal.hasTimedOut,
+      cancelTimeout: linkedSignal.cancel
+    });
+
+    if (duplicateKey !== null) {
+      this.pendingMutations.set(duplicateKey, operation);
+      // La limpieza no puede dejar una promesa rechazada sin dueño: el `catch` explícito se
+      // queda con el fallo (que el llamante ya está viendo) antes de retirar la clave.
+      operation.catch(() => {}).then(() => this.pendingMutations.delete(duplicateKey));
+    }
+
+    return operation;
+  }
+
+  /**
+   * Ejecuta la petición ya construida y traduce sus desenlaces (EARS-04.1 a EARS-04.4).
+   *
+   * Vive separada de `request()` porque éste tiene que poder **registrar** la promesa antes de
+   * que nadie la espere: un guardián de duplicados que se instala después del `await` llega
+   * tarde justo en el caso que existe para cubrir.
+   *
+   * @param {{endpoint: string, url: string, config: Object, callerOptions: Object,
+   *   callerSignal: (AbortSignal|undefined), hasTimedOut: Function, cancelTimeout: Function}} transport
+   * @returns {Promise<any>}
+   */
+  async dispatchRequest(transport) {
+    const { endpoint, url, config, callerOptions, callerSignal, hasTimedOut, cancelTimeout } = transport;
+
+    this.pendingRequests++;
+    this.announceRequestState();
+
     let response;
     try {
       response = await fetch(url, config);
     } catch (networkError) {
-      throw new ApiError(
-        0,
-        'NETWORK_ERROR',
-        'Error de conexión con el servidor. Compruebe su conexión a internet.',
-        null,
-        networkError
-      );
+      const failure = this.describeTransportFailure(networkError, { hasTimedOut, callerSignal });
+
+      // Una cancelación deliberada no es una avería de red: quien canceló ya lo sabe, y anunciar
+      // una desconexión global por su decisión sería mentir al resto de la aplicación.
+      if (failure.announce) {
+        this.networkIsDown = true;
+        this.announceNetworkStatus('disconnected', {
+          message: failure.error.message,
+          retry: () => this.request(endpoint, callerOptions)
+        });
+      }
+
+      throw failure.error;
+    } finally {
+      cancelTimeout();
+      this.pendingRequests = Math.max(0, this.pendingRequests - 1);
+      this.announceRequestState();
+    }
+
+    // EARS-04.3 — El primer éxito después de una caída es la prueba de que la conexión volvió:
+    // aquí es el transporte quien firma la recuperación, no un temporizador que la suponga.
+    if (this.networkIsDown) {
+      this.networkIsDown = false;
+      this.announceNetworkStatus('reconnected');
     }
 
     // Handle 204 No Content
@@ -255,6 +475,152 @@ export class ApiClient {
     }
 
     return null;
+  }
+
+  // --- Resiliencia de red (RF-04, EARS-04.1 a EARS-04.4) ---
+
+  /**
+   * Clave de duplicado de una operación de escritura, o `null` si no se vigila.
+   *
+   * Las lecturas no se vigilan nunca: dos consultas iguales simultáneas son legítimas y
+   * compartir su respuesta sería ahorrar por la vía de mentir. Las escrituras sí, porque ahí el
+   * segundo envío idéntico es, por definición, el mismo hecho dos veces.
+   *
+   * **Las subidas de archivo quedan fuera a propósito.** Su cuerpo es un `FormData`, y dos
+   * ficheros distintos viajan al mismo endpoint: fusionarlos entregaría al primero la respuesta
+   * del segundo y descartaría una evidencia en silencio, que es peor que una petición de más.
+   *
+   * @param {string} method
+   * @param {string} url
+   * @param {*} body Cuerpo ya serializado (o sin serializar si no es JSON).
+   * @returns {string|null}
+   */
+  duplicateRequestKey(method, url, body) {
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+      return null;
+    }
+    if (body === undefined || body === null) {
+      return `${method} ${url}`;
+    }
+    if (typeof body === 'string') {
+      return `${method} ${url} ${body}`;
+    }
+    return null;
+  }
+
+  /**
+   * Traduce un fallo de transporte a la excepción de la aplicación y decide si es una avería
+   * que deba anunciarse (EARS-04.1, EARS-04.3).
+   *
+   * Los tres desenlaces que de verdad existen son distintos y no se pueden mezclar: una
+   * **cancelación deliberada** (el llamante abortó: no se anuncia nada a nadie), un **tiempo de
+   * espera agotado** (el servidor no llegó a responder en el plazo estricto) y una **caída de
+   * red** (la petición no encontró a nadie). Los dos últimos sí se anuncian, porque el operario
+   * tiene que saber que lo suyo no se ha perdido.
+   *
+   * @param {*} networkError Error lanzado por `fetch`.
+   * @param {{hasTimedOut?: Function, callerSignal?: AbortSignal}} [transport={}]
+   * @returns {{announce: boolean, error: ApiError}}
+   */
+  describeTransportFailure(networkError, transport = {}) {
+    const timedOut = (typeof transport.hasTimedOut === 'function' && transport.hasTimedOut() === true)
+      || networkError?.name === 'TimeoutError';
+    const callerAborted = networkError?.name === 'AbortError'
+      && transport.callerSignal?.aborted === true;
+
+    if (callerAborted) {
+      return {
+        announce: false,
+        error: new ApiError(
+          0,
+          'REQUEST_ABORTED',
+          'La petición se canceló antes de completarse.',
+          null,
+          networkError
+        )
+      };
+    }
+
+    const seconds = (REQUEST_TIMEOUT_MS / 1000).toFixed(1).replace('.', ',');
+    const message = timedOut
+      ? `El servidor ha tardado más de ${seconds} segundos en responder. Lo que has escrito sigue en el formulario: reintenta cuando recuperes la conexión.`
+      : 'Error de conexión con el servidor. Lo que has escrito sigue en el formulario: comprueba tu conexión y reintenta.';
+
+    return {
+      announce: true,
+      error: new ApiError(
+        0,
+        timedOut ? 'REQUEST_TIMEOUT' : 'NETWORK_ERROR',
+        message,
+        null,
+        networkError
+      )
+    };
+  }
+
+  /**
+   * Publica un evento nativo en la ventana, si hay ventana que lo reciba.
+   *
+   * El transporte tiene que poder correr también fuera del navegador (las suites de Node
+   * importan este módulo), así que la ausencia de ventana no es un error: simplemente nadie
+   * escucha.
+   *
+   * @param {string} eventName
+   * @param {Object} detail
+   * @returns {void}
+   */
+  announce(eventName, detail) {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') {
+      return;
+    }
+    if (typeof CustomEvent === 'undefined') {
+      return;
+    }
+    window.dispatchEvent(new CustomEvent(eventName, { detail }));
+  }
+
+  /**
+   * Anuncia el estado de la conexión al banner global (RF-04.3, RF-04.4).
+   *
+   * @param {string} status `disconnected` o `reconnected`.
+   * @param {{message?: string, retry?: Function}} [detail={}]
+   * @returns {void}
+   */
+  announceNetworkStatus(status, detail = {}) {
+    this.announce(NETWORK_STATUS_EVENT, { status, ...detail });
+  }
+
+  /**
+   * Anuncia cuántas operaciones hay en curso (RF-04.2).
+   *
+   * @returns {void}
+   */
+  announceRequestState() {
+    this.announce(REQUEST_STATE_EVENT, {
+      pending: this.pendingRequests,
+      isBusy: this.pendingRequests > 0
+    });
+  }
+
+  /**
+   * Peticiones en curso ahora mismo.
+   *
+   * @returns {number}
+   */
+  getPendingRequestCount() {
+    return this.pendingRequests;
+  }
+
+  /**
+   * ¿Hay alguna operación viva?
+   *
+   * Es la señal con la que una superficie puede apagar sus envíos mientras otro está en el aire
+   * y evitar así la petición duplicada accidental (EARS-04.2).
+   *
+   * @returns {boolean}
+   */
+  isBusy() {
+    return this.pendingRequests > 0;
   }
 
   // --- Convenience HTTP Verbs ---
@@ -315,7 +681,30 @@ export class ApiClient {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
-    const response = await fetch(url, { method: 'GET', headers });
+    // EARS-04.1 — La descarga es una operación de red como cualquier otra: el mismo reloj
+    // estricto, o una exportación colgada deja al coordinador esperando sin saberlo.
+    const timeout = buildTimeoutSignal();
+
+    let response;
+    try {
+      response = await fetch(url, { method: 'GET', headers, signal: timeout.signal });
+    } catch (networkError) {
+      timeout.cancel();
+      const failure = this.describeTransportFailure(networkError, { hasTimedOut: timeout.hasTimedOut });
+
+      if (failure.announce) {
+        this.networkIsDown = true;
+        this.announceNetworkStatus('disconnected', {
+          message: failure.error.message,
+          retry: () => this.downloadFile(endpoint, defaultFilename, params)
+        });
+      }
+
+      throw failure.error;
+    }
+
+    timeout.cancel();
+
     if (!response.ok) {
       let errorMsg = `Error al descargar archivo (${response.status})`;
       try {
@@ -323,6 +712,12 @@ export class ApiClient {
         errorMsg = json?.error?.message || errorMsg;
       } catch (e) {}
       throw new ApiError(response.status, 'DOWNLOAD_ERROR', errorMsg);
+    }
+
+    // La descarga también es una prueba de que la conexión volvió (EARS-04.3).
+    if (this.networkIsDown) {
+      this.networkIsDown = false;
+      this.announceNetworkStatus('reconnected');
     }
 
     let filename = defaultFilename;
