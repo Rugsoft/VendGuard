@@ -6,6 +6,7 @@ namespace VendGuard\Presentation\Routing;
 
 use VendGuard\Presentation\Controller\CoordinatorRefundController;
 use VendGuard\Presentation\Controller\CoordinatorRouteMapController;
+use VendGuard\Presentation\Controller\HealthController;
 use VendGuard\Presentation\Controller\LocationRefundController;
 use VendGuard\Presentation\Controller\PublicRefundController;
 use VendGuard\Presentation\Controller\TechnicianRefundController;
@@ -51,6 +52,15 @@ class AppRouter
 
         $router->get('/', $healthHandler);
         $router->get('/api/health', $healthHandler);
+
+        // Diagnóstico técnico con verificación real contra el motor de persistencia
+        // (RF-07, EARS-07.1 a EARS-07.5; T-HYBRID-14). Es una ruta NUEVA a propósito: el
+        // contrato vivo de `/api/health` —envoltura JSON de identificación del servicio y
+        // servicio del documento de la aplicación ante `Accept: text/html`— queda intacto,
+        // porque cinco suites lo usan como sonda de arranque y ningún consumidor se merece
+        // que le cambien la carga útil debajo. La ausencia de credencial batch no rechaza
+        // la petición: sólo reduce la respuesta a su proyección pública.
+        $router->get('/api/status', [HealthController::class, 'check']);
 
         // -----------------------------------------------------------------
         // 2. Módulo de Autenticación y Acceso (T-20)
