@@ -29,6 +29,10 @@ namespace VendGuard\Infrastructure\Database;
  *   NO_BACKSLASH_ESCAPES.
  * - Bloques de sentencias compuestas (BEGIN ... END en CREATE TRIGGER),
  *   evitando que los puntos y coma internos dividan la sentencia antes de tiempo.
+ * - El acotado por signos de dólar de PostgreSQL (`$$ ... $$` y `$etiqueta$ ...
+ *   $etiqueta$`), que es como el motor nuevo escribe los cuerpos de función y
+ *   los bloques `DO`: sin esto, los puntos y coma de dentro partirían la
+ *   sentencia por la mitad y ninguna migración del motor nuevo llegaría entera.
  *
  * Dogma Vanilla: sin dependencias, sin estado y sin tocar la base de datos.
  */
@@ -57,11 +61,32 @@ final class SqlScriptSplitter
         $statements = [];
         $current = '';
         $quote = null;
+        $dollarQuote = null;
         $blockDepth = 0;
         $length = strlen($raw);
 
         for ($index = 0; $index < $length; $index++) {
             $char = $raw[$index];
+
+            if ($dollarQuote !== null) {
+                if (substr($raw, $index, strlen($dollarQuote)) === $dollarQuote) {
+                    $current .= $dollarQuote;
+                    $index += strlen($dollarQuote) - 1;
+                    $dollarQuote = null;
+                    continue;
+                }
+
+                $current .= $char;
+                continue;
+            }
+
+            if ($char === '$' && $quote === null
+                && preg_match('/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/', substr($raw, $index), $tagMatch) === 1) {
+                $dollarQuote = $tagMatch[0];
+                $current .= $dollarQuote;
+                $index += strlen($dollarQuote) - 1;
+                continue;
+            }
 
             if ($quote !== null) {
                 if ($char === $quote) {
