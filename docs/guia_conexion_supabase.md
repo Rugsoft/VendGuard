@@ -318,11 +318,12 @@ previo (línea roja 5 de [AGENTS.md](../AGENTS.md)). Si quieres, los enmiendo en
 
 ## 11. Cargar datos de prueba (histórico de averías atendidas)
 
-El arranque desplegado es *Fresh Start* estricto (EARS-02.1): crea el catálogo maestro y **no** siembra ni una
-incidencia. Eso es lo correcto para producción y pobre para una demostración, así que el histórico de prueba entra por
-una puerta aparte y **explícita**: hay dos formas declaradas y ninguna se activa sola.
+El arranque desplegado crea el catálogo maestro (EARS-02.1) y, a continuación, carga el histórico de demostración
+—**en cada arranque y por defecto** (EARS-02.6)—: es lo que hace que un redespliegue devuelva las diecisiete averías a
+su sitio sin depender de que nadie recuerde declarar una variable. Además de la vía del arranque, el histórico se puede
+reafirmar a mano sin arrancar el servicio.
 
-### 11.1 Puntual (la vía normal)
+### 11.1 Puntual (reafirmar sin arrancar)
 
 ```bash
 # Contra el motor que declare el entorno: Supabase (DATABASE_URL=postgres://…) o MariaDB local
@@ -334,7 +335,8 @@ máquinas del parque, con categoría, urgencia y técnico variados, y con el cic
 triaje y asignación, intervención, resolución con diagnóstico y solución y —en las trece averías completadas— cierre
 dentro de la ventana de garantía de 48 h. Añade además su traza de estados (`incident_history`) y su rastro de
 auditoría (`audit_log`): 4 o 5 filas en una avería de una sola vuelta y 8 o 9 en una reabierta. Es **idempotente**:
-reejecutarlo reafirma las mismas filas por `ticket_code` y no duplica trazas.
+reejecutarlo reafirma las mismas filas por `ticket_code`, no duplica trazas y desplaza su traza y su auditoría junto con
+las fechas del expediente (§11.2.1).
 
 Cuatro de las diecisiete siguen **en garantía** (`RESOLVED`, sin cierre y resueltas dentro de las 48 h), y dos de
 ellas **reabrieron de verdad**: su traza encadena resolución → reapertura justificada por la sede → reasignación →
@@ -347,16 +349,35 @@ Las trece averías completadas nacen `CLOSED` a propósito: el índice único pa
 máquinas distintas entre sí y sin ningún otro expediente abierto. Un histórico de demostración no puede dejar el
 parque «ocupado» antes de que empieces a probar, pero sí tiene que mostrar una máquina con avería en garantía.
 
-### 11.2 En el arranque del contenedor (*opt-in*)
+### 11.2 En el arranque del contenedor (por defecto, con *opt-out*)
+
+`bin/init_cloud_db.php` ejecuta el mismo sembrador al final de **cada arranque** (`[6/6]`) y lo declara en su salida con
+los conteos reales, de modo que un redespliegue deja las diecisiete averías en su sitio sin configurar nada (EARS-02.6).
+Solo un «no» explícito lo apaga:
 
 ```bash
-# Variable de entorno del servicio (Render → Environment). Sin ella, el paso 6/6 no siembra nada.
-VENDGUARD_DEMO_HISTORY=1
+# Variable de entorno del servicio (Render → Environment): arranque en limpio estricto.
+VENDGUARD_DEMO_HISTORY=0
 ```
 
-Con esa variable, `bin/init_cloud_db.php` ejecuta el mismo sembrador al final del arranque y lo declara en su salida
-(`[6/6]`) con los conteos reales. Quitarla devuelve el arranque al comportamiento estricto de la especificación sin
-tocar una línea de código.
+### 11.2.1 La pasada sobre un histórico ya sembrado
+
+Las fechas del fixture son relativas —«hace tres días», «ayer a las 21:30»— y se materializan al sembrar, así que cada
+pasada *mueve* el expediente hacia adelante. La traza y la auditoría no se borran nunca (Art. III.1 y III.3), de modo
+que una pasada que moviera el expediente y dejara su traza anclada en la fecha anterior contaría la historia **antes**
+del alta y el detalle del coordinador leería el orden al revés. La pasada que reafirma un expediente reafirma también
+sus marcas: la traza y la auditoría se desplazan en bloque al esquema temporal vigente, fila a fila y con `UPDATE`
+—cada fila conserva su identidad—, nunca con un borrado.
+
+* **Sólo la traza del fixture.** Se reafirma el expediente cuya traza almacenada *es* la del fixture: mismo número de
+  eventos, mismas transiciones, mismos actores y mismas acciones, en el mismo orden. En cuanto la traza ya no es ésa
+  —la sede reabrió la avería desde el portal, el coordinador la canceló, el fixture cambió de forma entre versiones—
+  el expediente **no se toca**: ni su traza ni sus fechas. La salida del arranque lo declara como «sin tocar».
+* **El parque manda.** Una avería en garantía del fixture ocupa una máquina viva (`uq_machine_active_ticket`, Art. V.2
+  y V.6). Si esa máquina ya está ocupada por otro expediente vivo —un aviso real de la demostración—, el fixture no se
+  inventa el sitio: se omite, se cuenta y se declara. Un aviso en garantía no tumba el arranque del servicio.
+* **La ventana de purga del arnés no se usa.** `vendguard.purge` es del limpiador de pruebas y la aplicación no la
+  activa jamás (T-HYBRID-12 y T-HYBRID-26): la reafirmación no borra filas, las desplaza.
 
 ### 11.3 Qué no hace
 

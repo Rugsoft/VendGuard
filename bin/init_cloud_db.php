@@ -289,7 +289,7 @@ function initializeMysqlDatabase(PDO $pdo, SqlDialectAdapter $dialect): array
 
 /**
  * Ruta de despliegue del motor nuevo: DDL base + `database/supabase_migrations/` +
- * semillas maestras del arranque en limpio.
+ * semillas maestras del arranque en limpio + histórico de demostración (EARS-02.6).
  *
  * @return array<string, mixed> Resumen de la verificación.
  */
@@ -377,27 +377,40 @@ function initializePostgresDatabase(PDO $pdo, SqlDialectAdapter $dialect): array
 
     echo "[6/6] Histórico de averías de demostración...\n";
 
-    // El arranque en limpio es estricto (EARS-02.1) y sigue siendo el comportamiento por
-    // defecto: sin el opt-in explícito, este paso no escribe ni una incidencia. El histórico
-    // de demostración —para probar el cuadro de mandos sin inventar averías a mano— entra
-    // sólo si el operador lo pide, y se pide de dos formas declaradas: la variable de
-    // entorno del sembrador, o la ejecución puntual de `php bin/seed_demo_history.php`.
-    // La regla del opt-in vive en el propio sembrador, para que su suite la ejerza.
+    // El histórico de demostración entra en **cada arranque** (EARS-02.6): es lo que hace que
+    // un redespliegue deje las diecisiete averías en su sitio sin depender de que nadie recuerde
+    // una variable. La puerta es *opt-out* —`VENDGUARD_DEMO_HISTORY=0` devuelve el arranque en
+    // limpio estricto de la especificación— y la regla vive en el propio sembrador, para que su
+    // suite la ejerza. La reafirmación de las marcas y la guardia de forma que la acompaña son
+    // suyas también: aquí sólo se informa de lo que devolvió.
     require_once __DIR__ . '/../database/DemoHistorySeeder.php';
 
-    if (!\VendGuard\Database\DemoHistorySeeder::requestedByEnvironment()) {
-        echo "      · Sin sembrar: el arranque en limpio no hereda incidencias ni expedientes previos.\n";
-        echo "      · Para cargar datos de prueba: php bin/seed_demo_history.php\n";
-        echo '        o declarar ' . \VendGuard\Database\DemoHistorySeeder::ENVIRONMENT_FLAG . "=1 en el entorno del servicio.\n\n";
+    if (!\VendGuard\Database\DemoHistorySeeder::enabledByEnvironment()) {
+        echo '      · Histórico de demostración desactivado por '
+            . \VendGuard\Database\DemoHistorySeeder::ENVIRONMENT_FLAG . ": el arranque se queda en limpio.\n";
+        echo "      · Para cargarlo igualmente: php bin/seed_demo_history.php\n\n";
 
         return $verified;
     }
 
     $demoSummary = (new \VendGuard\Database\DemoHistorySeeder($pdo))->seed();
-    echo "      ✓ Averías escritas/actualizadas: {$demoSummary['incidents']}\n";
-    echo "      ✓ Eventos de traza de estados (incident_history): {$demoSummary['history_events']}\n";
-    echo "      ✓ Registros de auditoría (audit_log): {$demoSummary['audit_events']}\n";
-    echo "      · Opt-in declarado en VENDGUARD_DEMO_HISTORY: sin esa variable el arranque no siembra histórico.\n\n";
+    echo "      ✓ Averías reafirmadas: {$demoSummary['incidents']}\n";
+    echo '      ✓ Traza de estados: ' . $demoSummary['history_events'] . ' eventos nuevos · '
+        . $demoSummary['history_realigned'] . " marcas desplazadas al esquema temporal vigente\n";
+    echo '      ✓ Auditoría: ' . $demoSummary['audit_events'] . ' registros nuevos · '
+        . $demoSummary['audit_realigned'] . " registros desplazados\n";
+
+    if ($demoSummary['preserved'] !== []) {
+        echo '      ⚠ ' . count($demoSummary['preserved']) . ' expediente(s) con traza ajena al fixture: no se han tocado ('
+            . implode(', ', $demoSummary['preserved']) . ").\n";
+    }
+
+    if ($demoSummary['skipped'] !== []) {
+        echo '      ⚠ ' . count($demoSummary['skipped']) . ' avería(s) en garantía sin sembrar: su máquina está ocupada por otro aviso vivo ('
+            . implode(', ', $demoSummary['skipped']) . ").\n";
+    }
+
+    echo "\n";
 
     return $verified;
 }

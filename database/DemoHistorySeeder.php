@@ -46,16 +46,43 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  *   los dos motores.
  *
  * CUÁNDO SE EJECUTA — Y CUÁNDO NO
- *   **Nunca** en el arranque por defecto: el arranque en limpio es estricto
- *   (EARS-02.1) y mete el catálogo maestro *sin incidencias ni historiales
- *   previos*. Se ejecuta a mano, cuando el operador quiere datos de prueba:
+ *   **En cada arranque del despliegue**, como paso [6/6] del inicializador: las
+ *   diecisiete averías se reafirman en cada redespliegue sin depender de que nadie
+ *   recuerde declarar una variable (EARS-02.6). La puerta sigue existiendo, ahora
+ *   como *opt-out*: `VENDGUARD_DEMO_HISTORY=0` en el entorno del servicio deja el
+ *   arranque en limpio estricto que exige la especificación.
+ *
+ *   También se ejecuta a mano, cuando el operador quiere reafirmarlo sin arrancar:
  *
  *       php bin/seed_demo_history.php
  *
- *   o, si se prefiere que el contenedor los cargue al arrancar, declarando el
- *   opt-in explícito `VENDGUARD_DEMO_HISTORY=1` en el entorno del servicio
- *   (ver `docs/guia_conexion_supabase.md` §11). Sin esa variable, `bin/init_cloud_db.php`
- *   no siembra ni una fila de histórico.
+ * CÓMO SIGUE SIENDO COHERENTE EN CADA PASADA (EARS-02.6)
+ *   Las fechas del fixture son relativas —«hace tres días», «ayer a las 21:30»— y se
+ *   materializan al sembrar, así que cada pasada *mueve* el expediente hacia adelante.
+ *   La traza y la auditoría son inmutables por diseño (Art. III.1 y III.3: nada se
+ *   borra), de modo que una pasada que moviera el expediente y dejara su traza anclada
+ *   en la fecha anterior dejaría la historia **antes** del alta que cuenta, y el detalle
+ *   del coordinador leería el orden al revés. Por eso la pasada que reafirma un
+ *   expediente **reafirma también sus marcas**: el mismo hecho, con la misma traza,
+ *   desplazado en bloque al esquema temporal vigente.
+ *
+ *   Y no todo vale para hacerlo:
+ *     · **Nunca un borrado.** Ni `DELETE` ni `TRUNCATE`: la reafirmación es un `UPDATE`
+ *       fila a fila y cada fila conserva su identidad. La señal de purga es del arnés y la
+ *       aplicación no la activa jamás (T-HYBRID-12 y T-HYBRID-26), así que este camino no la
+ *       usa ni la nombra.
+ *     · **Sólo la traza del fixture.** Se reafirma el expediente cuya traza almacenada
+ *       *es* la del fixture —mismo número de eventos, mismas transiciones con los mismos
+ *       actores y mismas acciones de auditoría, en el mismo orden—. En cuanto la traza
+ *       almacenada deja de ser ésa (la sede reabrió la avería desde el portal, el
+ *       coordinador la canceló, el fixture cambió de forma), ese expediente no se toca.
+ *     · **Sólo expedientes de demostración.** Todo lo que este sembrador escribe o
+ *       reafirma cuelga de sus propios `ticket_code` (`INC-DEMO-11xx`/`12xx`): la traza
+ *       de una avería real no está a su alcance.
+ *     · **El parque manda.** Una avería viva del fixture ocupa una máquina viva: si esa
+ *       máquina ya está ocupada por otro expediente vivo —un aviso real de la
+ *       demostración—, el fixture no se inventa el sitio. Se omite, se cuenta y se
+ *       declara.
  *
  * REGLAS QUE RESPETA (y que la suite unitaria certifica sin base de datos)
  *   · Una sola incidencia viva por máquina: las cuatro averías en garantía ocupan
@@ -86,17 +113,18 @@ final class DemoHistorySeeder
     public const PARK_TIMEZONE = 'Europe/Madrid';
 
     /**
-     * Variable de entorno que pide el histórico en el arranque del contenedor.
+     * Variable de entorno que gobierna el histórico de demostración en el arranque.
      *
-     * Es la mitad *opt-in* de la política: ausente significa «no», siempre. El
-     * arranque en una base vacía registra el catálogo maestro «sin incidencias
-     * activas ni historiales previos» (EARS-02.1), y esa exigencia no se relaja
-     * por comodidad de pruebas.
+     * Es la mitad *opt-out* de la política (EARS-02.6): el despliegue vigente siembra
+     * el histórico **siempre**, en cada arranque, y el operador conserva la puerta para
+     * apagarlo cuando quiera un arranque en limpio estricto declarando
+     * `VENDGUARD_DEMO_HISTORY=0`. El «no» también se reconoce como `false`, `off` o
+     * `no`, sin distinguir mayúsculas.
      */
     public const ENVIRONMENT_FLAG = 'VENDGUARD_DEMO_HISTORY';
 
-    /** Formas en que el entorno declara el «sí» del histórico de demostración. */
-    private const ENVIRONMENT_TRUTHY = ['1', 'true', 'on', 'yes'];
+    /** Formas en que el entorno declara el «no» del histórico de demostración. */
+    private const ENVIRONMENT_FALSY = ['0', 'false', 'off', 'no'];
 
     /** Longitud mínima real de un diagnóstico o una solución (Art. V.1). */
     public const MIN_JUSTIFICATION_LENGTH = 20;
@@ -137,24 +165,25 @@ final class DemoHistorySeeder
     }
 
     /**
-     * ¿El entorno ha pedido expresamente el histórico de demostración?
+     * ¿Hay que sembrar el histórico de demostración en este arranque?
      *
-     * El valor por defecto es **no**: cualquier ausencia, cadena vacía o valor que
-     * no esté en la lista declarada deja el arranque en limpio tal y como la
-     * especificación lo exige. La regla vive aquí, en un único sitio, para que el
-     * arranque del contenedor y su suite la ejerzan sin duplicarla.
+     * El valor por defecto es **sí** (EARS-02.6): el despliegue vigente carga las
+     * diecisiete averías en cada redespliegue sin que nadie tenga que recordar una
+     * variable, y sólo una declaración explícita de «no» lo apaga. La regla vive aquí,
+     * en un único sitio, para que el arranque del contenedor y su suite la ejerzan sin
+     * duplicarla.
      *
      * @param string|null $value Valor a interpretar; si es `null` se lee del entorno.
      */
-    public static function requestedByEnvironment(?string $value = null): bool
+    public static function enabledByEnvironment(?string $value = null): bool
     {
         $declared = $value ?? getenv(self::ENVIRONMENT_FLAG);
 
         if ($declared === false || trim((string)$declared) === '') {
-            return false;
+            return true;
         }
 
-        return in_array(strtolower(trim((string)$declared)), self::ENVIRONMENT_TRUTHY, true);
+        return !in_array(strtolower(trim((string)$declared)), self::ENVIRONMENT_FALSY, true);
     }
 
     /**
@@ -564,7 +593,26 @@ final class DemoHistorySeeder
     /**
      * Escribe el histórico completo: averías, traza de estados y auditoría.
      *
-     * @return array{incidents: int, history_events: int, audit_events: int}
+     * Cada expediente del fixture se resuelve en uno de tres modos (EARS-02.6):
+     *
+     *   · **Alta**: el expediente no existía. Se escribe con su traza y su auditoría
+     *     completas.
+     *   · **Reafirmación**: existía y su traza almacenada sigue siendo la del fixture.
+     *     Se reafirman sus fechas y se desplaza su traza y su auditoría al mismo esquema
+     *     temporal, fila a fila y con `UPDATE` —nunca con un borrado—, para que la
+     *     historia no quede anclada antes del alta que cuenta.
+     *   · **Preservación**: existía y su traza ya no es la del fixture —la sede la
+     *     reabrió, el coordinador la canceló, el fixture cambió de forma—. No se toca
+     *     nada de ese expediente y se declara en el resumen.
+     *
+     * Y una avería **viva** del fixture (en garantía) no se reafirma si su máquina está
+     * ocupada por otro aviso vivo: el sitio lo manda el parque (`uq_machine_active_ticket`,
+     * Art. V.2 y V.6). Se declara y se sigue; un aviso en garantía no puede tumbar el
+     * arranque del servicio.
+     *
+     * @return array{incidents: int, history_events: int, audit_events: int,
+     *               history_realigned: int, audit_realigned: int,
+     *               preserved: list<string>, skipped: list<string>}
      *
      * @throws RuntimeException Si el catálogo maestro no está aplicado o el motor rechaza el alta.
      */
@@ -580,6 +628,10 @@ final class DemoHistorySeeder
             $incidentCount = 0;
             $historyCount = 0;
             $auditCount = 0;
+            $historyRealigned = 0;
+            $auditRealigned = 0;
+            $preserved = [];
+            $skipped = [];
 
             foreach (self::fixtures() as $fixture) {
                 $machine = $machines[$fixture['machine_code']] ?? null;
@@ -600,13 +652,43 @@ final class DemoHistorySeeder
 
                 $timeline = $this->timeline($fixture);
 
+                $historyEvents = $this->historyEvents($fixture, $technicianId, $coordinator, $timeline);
+                $auditEvents = $this->auditEvents($fixture, $machine, $technicianId, $coordinator, $timeline);
+
+                $existingId = $this->incidentIdOrNull($fixture['ticket_code']);
+                $storedHistory = $existingId === null ? [] : $this->storedHistory($existingId);
+                $storedAudit = $existingId === null ? [] : $this->storedAudit($existingId);
+
+                // El parque manda: una avería viva del fixture necesita su máquina libre, y
+                // el índice parcial `uq_machine_active_ticket` no admite dos expedientes vivos
+                // sobre la misma máquina (Art. V.2 y V.6). Se comprueba antes de escribir —con
+                // el propio ticket excluido— para que el choque no aborte el arranque entero.
+                if ($fixture['status'] === 'RESOLVED'
+                    && $this->machineOccupiedByOtherIncident($machine['id'], $fixture['ticket_code'])) {
+                    $skipped[] = $fixture['ticket_code'];
+                    continue;
+                }
+
+                // La traza del fixture se reafirma; la que ya no es la suya, no se toca.
+                if ($existingId !== null
+                    && !$this->matchesFixtureShape($storedHistory, $historyEvents, $storedAudit, $auditEvents)) {
+                    $preserved[] = $fixture['ticket_code'];
+                    continue;
+                }
+
                 $this->upsertIncident($fixture, $machine, $technicianId, $timeline);
                 $incidentCount++;
 
                 $incidentId = $this->incidentId($fixture['ticket_code']);
 
-                $historyCount += $this->seedHistory($incidentId, $fixture, $technicianId, $coordinator, $timeline);
-                $auditCount += $this->seedAudit($incidentId, $fixture, $machine, $technicianId, $coordinator, $timeline);
+                if ($existingId === null) {
+                    $historyCount += $this->insertHistory($incidentId, $historyEvents);
+                    $auditCount += $this->insertAudit($incidentId, $auditEvents);
+                    continue;
+                }
+
+                $historyRealigned += $this->realignHistory($incidentId, $historyEvents, $storedHistory);
+                $auditRealigned += $this->realignAudit($incidentId, $auditEvents, $storedAudit);
             }
 
             $this->pdo->commit();
@@ -615,6 +697,10 @@ final class DemoHistorySeeder
                 'incidents' => $incidentCount,
                 'history_events' => $historyCount,
                 'audit_events' => $auditCount,
+                'history_realigned' => $historyRealigned,
+                'audit_realigned' => $auditRealigned,
+                'preserved' => $preserved,
+                'skipped' => $skipped,
             ];
         } catch (PDOException $e) {
             if ($this->pdo->inTransaction()) {
@@ -686,11 +772,15 @@ final class DemoHistorySeeder
     }
 
     /**
-     * Traza de estados del expediente, sólo si aún no la tenía.
+     * Eventos de traza de estados que el fixture declara para un expediente.
      *
-     * La guardia de existencia es lo que hace idempotente al sembrador: el
-     * histórico de estados es inmutable por diseño, de modo que reejecutarlo no
-     * puede añadir una segunda pasada por los mismos estados.
+     * El sembrador no los escribe a ciegas: los devuelve como lista ordenada, y quien los
+     * escribe comprueba antes si el expediente ya existe y si su traza almacenada sigue
+     * siendo **esta misma** —mismo número de eventos, mismas transiciones y mismos
+     * actores, en el mismo orden—. Cuando lo es, la desplaza con `UPDATE` al esquema
+     * temporal vigente en lugar de añadir una segunda pasada por los mismos estados: el
+     * histórico de estados es inmutable por diseño, se amplía o se desplaza, nunca se
+     * borra (Art. III.1).
      *
      * El triaje inicial se anota en la marca en que ocurrió (`first_assigned`), no en
      * la de la última asignación: en una avería reabierta el expediente vuelve a
@@ -707,19 +797,14 @@ final class DemoHistorySeeder
      *
      * @param array<string, mixed> $fixture
      * @param array<string, string> $timeline
-     * @return int Número de eventos escritos.
+     * @return list<array{user_id: ?int, from_status: ?string, to_status: string, action_note: string, created_at: string}>
      */
-    private function seedHistory(
-        int $incidentId,
+    private function historyEvents(
         array $fixture,
         int $technicianId,
         int $coordinatorId,
         array $timeline
-    ): int {
-        if ($this->hasHistory($incidentId)) {
-            return 0;
-        }
-
+    ): array {
         $events = [
             [
                 'user_id' => null,
@@ -799,6 +884,17 @@ final class DemoHistorySeeder
             ];
         }
 
+        return $events;
+    }
+
+    /**
+     * Escribe la traza completa de un expediente nuevo.
+     *
+     * @param list<array{user_id: ?int, from_status: ?string, to_status: string, action_note: string, created_at: string}> $events
+     * @return int Número de eventos escritos.
+     */
+    private function insertHistory(int $incidentId, array $events): int
+    {
         $sql = 'INSERT INTO incident_history (incident_id, user_id, from_status, to_status, action_note, created_at)'
             . ' VALUES (:incident_id, :user_id, :from_status, :to_status, :action_note, :created_at)';
         $statement = $this->pdo->prepare($sql);
@@ -818,7 +914,54 @@ final class DemoHistorySeeder
     }
 
     /**
-     * Rastro de auditoría del expediente, sólo si aún no lo tenía.
+     * Desplaza la traza almacenada al esquema temporal vigente, fila a fila.
+     *
+     * Sólo se invoca cuando la traza almacenada **es** la del fixture —la guardia de forma
+     * lo certifica antes—, de modo que la correspondencia es uno a uno por orden de
+     * escritura (`id`) y ninguna fila cambia de identidad. El `UPDATE` es la única
+     * operación que el Art. III.1 admite sobre una traza: el borrado lo rechaza el propio
+     * motor con `SQLSTATE 45000` y la ventana de purga es del arnés (T-HYBRID-12 y
+     * T-HYBRID-26), no de la aplicación.
+     *
+     * El conteo es el de **marcas procesadas**, no el de `rowCount()`: el motor heredado
+     * devuelve cero cuando el `UPDATE` reafirma los mismos valores, y una pasada dentro del
+     * mismo minuto no cambia ni una marca.
+     *
+     * @param list<array{user_id: ?int, from_status: ?string, to_status: string, action_note: string, created_at: string}> $expected
+     * @param list<array{id: int, user_id: ?int, from_status: ?string, to_status: string, action_note: ?string}> $stored
+     * @return int Número de marcas desplazadas.
+     */
+    private function realignHistory(int $incidentId, array $expected, array $stored): int
+    {
+        $sql = 'UPDATE incident_history'
+            . ' SET user_id = :user_id, from_status = :from_status, to_status = :to_status,'
+            . ' action_note = :action_note, created_at = :created_at'
+            . ' WHERE id = :id AND incident_id = :incident_id';
+
+        $statement = $this->pdo->prepare($sql);
+
+        foreach ($expected as $index => $event) {
+            $statement->execute([
+                ':user_id' => $event['user_id'],
+                ':from_status' => $event['from_status'],
+                ':to_status' => $event['to_status'],
+                ':action_note' => $event['action_note'],
+                ':created_at' => $event['created_at'],
+                ':id' => $stored[$index]['id'],
+                ':incident_id' => $incidentId,
+            ]);
+        }
+
+        return count($expected);
+    }
+
+    /**
+     * Eventos de auditoría que el fixture declara para un expediente.
+     *
+     * Quien los escribe comprueba antes si el expediente ya existe y si su rastro
+     * almacenado sigue siendo este mismo —mismas acciones, en el mismo orden—; cuando lo
+     * es, lo desplaza con `UPDATE` al mismo esquema temporal que la avería, para que la
+     * auditoría cuente *cuándo* ocurrió con la cronología del expediente.
      *
      * El vocabulario combina el que la aplicación sí escribe con el que todavía no
      * audita: `REOPEN_TICKET` es literal —lo emite el portal de la sede al reabrir,
@@ -831,20 +974,15 @@ final class DemoHistorySeeder
      * @param array<string, mixed> $fixture
      * @param array{id: int, location_id: int, machine_type: string} $machine
      * @param array<string, string> $timeline
-     * @return int Número de eventos escritos.
+     * @return list<array<string, mixed>>
      */
-    private function seedAudit(
-        int $incidentId,
+    private function auditEvents(
         array $fixture,
         array $machine,
         int $technicianId,
         int $coordinatorId,
         array $timeline
-    ): int {
-        if ($this->hasAuditTrail($incidentId)) {
-            return 0;
-        }
-
+    ): array {
         $technicianName = $this->userName($technicianId);
         $coordinatorName = $this->userName($coordinatorId);
 
@@ -979,6 +1117,17 @@ final class DemoHistorySeeder
             ];
         }
 
+        return $events;
+    }
+
+    /**
+     * Escribe el rastro de auditoría completo de un expediente nuevo.
+     *
+     * @param list<array<string, mixed>> $events
+     * @return int Número de registros escritos.
+     */
+    private function insertAudit(int $incidentId, array $events): int
+    {
         $sql = 'INSERT INTO audit_log (entity_type, entity_id, action, user_id, user_role, user_name,'
             . ' previous_state, new_state, metadata, created_at)'
             . ' VALUES (:entity_type, :entity_id, :action, :user_id, :user_role, :user_name,'
@@ -993,16 +1142,61 @@ final class DemoHistorySeeder
                 ':user_id' => $event['user_id'],
                 ':user_role' => $event['user_role'],
                 ':user_name' => $event['user_name'],
-                ':previous_state' => $event['previous_state'] === null
-                    ? null
-                    : (string)json_encode($event['previous_state'], JSON_UNESCAPED_UNICODE),
-                ':new_state' => (string)json_encode($event['new_state'], JSON_UNESCAPED_UNICODE),
-                ':metadata' => (string)json_encode($event['metadata'], JSON_UNESCAPED_UNICODE),
+                ':previous_state' => $this->encodeJson($event['previous_state']),
+                ':new_state' => $this->encodeJson($event['new_state']),
+                ':metadata' => $this->encodeJson($event['metadata']),
                 ':created_at' => $event['created_at'],
             ]);
         }
 
         return count($events);
+    }
+
+    /**
+     * Desplaza el rastro de auditoría almacenado al esquema temporal vigente.
+     *
+     * Mismo contrato que la traza: sólo se invoca con la guardia de forma satisfecha, la
+     * correspondencia es uno a uno por orden de escritura y la fila conserva su identidad.
+     * El registro se reafirma entero —incluidos `previous_state` y `new_state`, que llevan
+     * dentro marcas del expediente— porque es la única forma de que la auditoría cuente
+     * *cuándo* ocurrió con la misma cronología que la avería.
+     *
+     * @param list<array<string, mixed>> $expected
+     * @param list<array{id: int, action: string}> $stored
+     * @return int Número de registros desplazados.
+     */
+    private function realignAudit(int $incidentId, array $expected, array $stored): int
+    {
+        $sql = 'UPDATE audit_log'
+            . ' SET user_id = :user_id, user_role = :user_role, user_name = :user_name,'
+            . ' previous_state = :previous_state, new_state = :new_state, metadata = :metadata,'
+            . ' created_at = :created_at'
+            . ' WHERE id = :id AND entity_type = :entity_type AND entity_id = :entity_id';
+
+        $statement = $this->pdo->prepare($sql);
+
+        foreach ($expected as $index => $event) {
+            $statement->execute([
+                ':user_id' => $event['user_id'],
+                ':user_role' => $event['user_role'],
+                ':user_name' => $event['user_name'],
+                ':previous_state' => $this->encodeJson($event['previous_state']),
+                ':new_state' => $this->encodeJson($event['new_state']),
+                ':metadata' => $this->encodeJson($event['metadata']),
+                ':created_at' => $event['created_at'],
+                ':id' => $stored[$index]['id'],
+                ':entity_type' => 'TICKET',
+                ':entity_id' => $incidentId,
+            ]);
+        }
+
+        return count($expected);
+    }
+
+    /** Payload JSONB en la forma que el motor acepta, o `null` si el evento no declara estado previo. */
+    private function encodeJson(mixed $value): ?string
+    {
+        return $value === null ? null : (string)json_encode($value, JSON_UNESCAPED_UNICODE);
     }
 
     /**
@@ -1122,36 +1316,143 @@ final class DemoHistorySeeder
             : $moment->format('Y-m-d H:i:s');
     }
 
-    private function incidentId(string $ticketCode): int
+    private function incidentIdOrNull(string $ticketCode): ?int
     {
         $statement = $this->pdo->prepare('SELECT id FROM incidents WHERE ticket_code = :ticket_code');
         $statement->execute([':ticket_code' => $ticketCode]);
         $id = $statement->fetchColumn();
 
-        if ($id === false) {
+        return $id === false ? null : (int)$id;
+    }
+
+    private function incidentId(string $ticketCode): int
+    {
+        $id = $this->incidentIdOrNull($ticketCode);
+
+        if ($id === null) {
             throw new RuntimeException(sprintf(
                 'El motor no devolvió el expediente «%s» que se acaba de escribir: el histórico no puede colgar de un identificador inexistente.',
                 $ticketCode
             ));
         }
 
-        return (int)$id;
+        return $id;
     }
 
-    private function hasHistory(int $incidentId): bool
-    {
-        $statement = $this->pdo->prepare('SELECT COUNT(*) FROM incident_history WHERE incident_id = :incident_id');
-        $statement->execute([':incident_id' => $incidentId]);
-
-        return (int)$statement->fetchColumn() > 0;
-    }
-
-    private function hasAuditTrail(int $incidentId): bool
+    /**
+     * Traza de estados almacenada de un expediente, en orden de escritura.
+     *
+     * Se lee entera porque la guardia de forma la necesita completa: la comparación es de
+     * secuencia —evento contra evento—, no de presencia.
+     *
+     * @return list<array{id: int, user_id: ?int, from_status: ?string, to_status: string, action_note: ?string}>
+     */
+    private function storedHistory(int $incidentId): array
     {
         $statement = $this->pdo->prepare(
-            "SELECT COUNT(*) FROM audit_log WHERE entity_type = 'TICKET' AND entity_id = :incident_id"
+            'SELECT id, user_id, from_status, to_status, action_note FROM incident_history'
+            . ' WHERE incident_id = :incident_id ORDER BY id'
         );
         $statement->execute([':incident_id' => $incidentId]);
+
+        return $statement->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Rastro de auditoría almacenado de un expediente, en orden de escritura.
+     *
+     * @return list<array{id: int, action: string}>
+     */
+    private function storedAudit(int $incidentId): array
+    {
+        $statement = $this->pdo->prepare(
+            "SELECT id, action FROM audit_log WHERE entity_type = 'TICKET' AND entity_id = :incident_id ORDER BY id"
+        );
+        $statement->execute([':incident_id' => $incidentId]);
+
+        return $statement->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * ¿La traza y el rastro almacenados siguen siendo los del fixture?
+     *
+     * La comparación es de **forma**: mismo número de filas, mismas transiciones de estado con
+     * los mismos actores y mismas acciones de auditoría, en el mismo orden de escritura. Las
+     * marcas temporales no se comparan —ésa es justo la deriva que hay que corregir— y tampoco
+     * los textos: si el fixture cambia una nota, la reafirmación la actualiza.
+     *
+     * La guardia es también la que protege al histórico que ya no es del fixture: en cuanto el
+     * expediente recibe un evento que el fixture no declara —una reapertura de la sede desde el
+     * portal, una cancelación del coordinador, un cierre automático del reloj sanitario, o el
+     * propio fixture cambiando de forma entre versiones—, deja de ser reafirmable y el sembrador
+     * no lo toca.
+     *
+     * @param list<array{id: int, user_id: ?int, from_status: ?string, to_status: string, action_note: ?string}> $storedHistory
+     * @param list<array<string, mixed>> $expectedHistory
+     * @param list<array{id: int, action: string}> $storedAudit
+     * @param list<array<string, mixed>> $expectedAudit
+     */
+    private function matchesFixtureShape(
+        array $storedHistory,
+        array $expectedHistory,
+        array $storedAudit,
+        array $expectedAudit
+    ): bool {
+        if (count($storedHistory) !== count($expectedHistory) || count($storedAudit) !== count($expectedAudit)) {
+            return false;
+        }
+
+        foreach ($expectedHistory as $index => $event) {
+            if (!$this->sameMarker($storedHistory[$index]['from_status'], $event['from_status'])
+                || !$this->sameMarker($storedHistory[$index]['to_status'], $event['to_status'])
+                || !$this->sameMarker($storedHistory[$index]['user_id'], $event['user_id'])) {
+                return false;
+            }
+        }
+
+        foreach ($expectedAudit as $index => $event) {
+            if ((string)$storedAudit[$index]['action'] !== (string)$event['action']) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Comparación de una marca del fixture contra la almacenada, tolerando el `NULL`.
+     *
+     * Vale para los estados —el alta no tiene estado previo y el cierre automático no tiene
+     * causante— y para el `user_id` de la reapertura, que va nulo porque la sede no tiene cuenta
+     * interna. Los identificadores se comparan como cadena porque cada motor los devuelve con su
+     * propio tipo.
+     */
+    private function sameMarker(mixed $stored, mixed $expected): bool
+    {
+        if ($stored === null || $expected === null) {
+            return $stored === null && $expected === null;
+        }
+
+        return (string)$stored === (string)$expected;
+    }
+
+    /**
+     * ¿La máquina ya está ocupada por **otro** expediente vivo?
+     *
+     * `uq_machine_active_ticket` admite una sola incidencia activa por máquina (Art. V.2 y V.6),
+     * de modo que una avería viva del fixture —una en garantía— no puede ocupar el sitio que ya
+     * ocupa un aviso de verdad. La consulta copia la condición del índice y excluye el propio
+     * ticket del fixture: el sitio lo manda el parque, y el sembrador se aparta en vez de intentar
+     * el alta y abortar el arranque del servicio.
+     */
+    private function machineOccupiedByOtherIncident(int $machineId, string $ticketCode): bool
+    {
+        $statement = $this->pdo->prepare(
+            "SELECT COUNT(*) FROM incidents"
+            . " WHERE machine_id = :machine_id AND ticket_code <> :ticket_code"
+            . " AND status NOT IN ('CLOSED', 'CANCELLED')"
+        );
+        $statement->execute([':machine_id' => $machineId, ':ticket_code' => $ticketCode]);
 
         return (int)$statement->fetchColumn() > 0;
     }

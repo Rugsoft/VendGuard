@@ -48,6 +48,19 @@ declare(strict_types=1);
  *      una reabierta— y la segunda pasada no las duplica: el histórico de estados
  *      es inmutable por diseño.
  *
+ *   7. **Una pasada posterior reafirma en vez de dejar la traza atrás** (EARS-02.6): el
+ *      escenario se envejece diez días —expediente, traza y auditoría, que es lo que deja un
+ *      despliegue anterior— y la siembra lo devuelve al esquema temporal del fixture. La
+ *      traza de cada expediente vuelve a empezar en su alta y a acabar en su última marca,
+ *      sin duplicar ni borrar una sola fila.
+ *
+ *   8. **Las dos guardias de la reafirmación se miden, no se prometen**: un expediente cuya
+ *      traza dejó de ser la del fixture —la aplicación la amplió, como cuando la sede reabre
+ *      una avería en garantía— no se toca, ni sus fechas ni su traza; y una avería **viva**
+ *      del fixture cuya máquina está ocupada por otro aviso vivo se declara y se omite, en
+ *      lugar de chocar con `uq_machine_active_ticket` y abortar el arranque del servicio
+ *      (Art. V.2 y V.6).
+ *
  * CATEGORÍA: `new_engine`
  *   Exige un PostgreSQL disponible (el motor de `deploy/local/postgres/`). NO
  *   pertenece a la batería hermética (RNF-04, spec §8.1): se declara con su marca
@@ -358,6 +371,147 @@ try {
         'El desglose reparte las averías resueltas de la ventana de 30 días sobre el histórico sembrado',
         $resolvedInWindow === $expectedInWindow && $resolvedInWindow >= 12,
         "en la ventana: {$resolvedInWindow} de " . count(DemoHistorySeeder::fixtures()) . ' averías sembradas'
+    );
+    // ─────────────────────────────────────────────────────────────────────────
+    // La pasada sobre un histórico ya sembrado: la deriva de fechas y sus guardias
+    // ─────────────────────────────────────────────────────────────────────────
+    //
+    // (EARS-02.6) Las fechas del fixture son relativas y se materializan al sembrar, así que
+    // cada pasada mueve el expediente. La traza y la auditoría no se borran nunca (Art. III.1),
+    // de modo que la pasada que reafirma un expediente tiene que desplazar sus marcas al mismo
+    // esquema temporal —y no puede tocar ni la traza que dejó de ser la del fixture ni la avería
+    // viva cuya máquina esté ocupada por otro aviso—. Las tres cosas se miden aquí.
+
+    echo "\n--- Deriva de fechas: la pasada posterior reafirma la traza, no la deja atrás ---\n";
+
+    // Un despliegue anterior deja el escenario entero diez días atrás: expediente, traza y
+    // auditoría. Se envejece sólo el histórico de demostración, que es lo que el sembrador
+    // escribe y reafirma.
+    $agedDays = 10;
+    foreach (['created_at', 'assigned_at', 'started_at', 'resolved_at', 'reopened_at', 'closed_at'] as $agedColumn) {
+        $pgPdo->exec("UPDATE incidents SET {$agedColumn} = {$agedColumn} - interval '{$agedDays} days'"
+            . " WHERE {$agedColumn} IS NOT NULL AND ticket_code LIKE 'INC-DEMO-%'");
+    }
+    $pgPdo->exec("UPDATE incident_history SET created_at = created_at - interval '{$agedDays} days'"
+        . " WHERE incident_id IN (SELECT id FROM incidents WHERE ticket_code LIKE 'INC-DEMO-%')");
+    $pgPdo->exec("UPDATE audit_log SET created_at = created_at - interval '{$agedDays} days'"
+        . " WHERE entity_type = 'TICKET' AND entity_id IN (SELECT id FROM incidents WHERE ticket_code LIKE 'INC-DEMO-%')");
+
+    $agedOldest = $scalar("SELECT MIN(created_at) FROM incidents WHERE ticket_code LIKE 'INC-DEMO-%'");
+    $agedRun = $seeder->seed();
+
+    $assert(
+        'La pasada sobre un histórico envejecido reafirma las filas existentes y no duplica ninguna (EARS-02.6)',
+        $agedRun['incidents'] === 17 && $agedRun['history_events'] === 0 && $agedRun['audit_events'] === 0
+        && $agedRun['history_realigned'] === 89 && $agedRun['audit_realigned'] === 89
+        && $agedRun['preserved'] === [] && $agedRun['skipped'] === [],
+        json_encode($agedRun, JSON_UNESCAPED_UNICODE) ?: ''
+    );
+
+    // La coherencia que la deriva rompía: la traza de cada expediente tiene que empezar en su
+    // alta y acabar en su última marca efectiva (`closed_at` cuando cerró, `resolved_at` cuando
+    // sigue en garantía). Se mide con las dos parejas —traza de estados y auditoría— porque las
+    // dos son la misma cronología contada dos veces.
+    $assert(
+        'La traza y la auditoría de cada expediente vuelven al esquema temporal del fixture: empiezan en el alta y acaban en su última marca',
+        $scalar("SELECT COUNT(*) FROM incidents i WHERE i.ticket_code LIKE 'INC-DEMO-%'"
+            . " AND ((SELECT MIN(h.created_at) FROM incident_history h WHERE h.incident_id = i.id) IS DISTINCT FROM i.created_at"
+            . " OR (SELECT MAX(h.created_at) FROM incident_history h WHERE h.incident_id = i.id)"
+            . " IS DISTINCT FROM COALESCE(i.closed_at, i.resolved_at))") === '0'
+        && $scalar("SELECT COUNT(*) FROM incidents i WHERE i.ticket_code LIKE 'INC-DEMO-%'"
+            . " AND ((SELECT MIN(a.created_at) FROM audit_log a WHERE a.entity_type = 'TICKET' AND a.entity_id = i.id) IS DISTINCT FROM i.created_at"
+            . " OR (SELECT MAX(a.created_at) FROM audit_log a WHERE a.entity_type = 'TICKET' AND a.entity_id = i.id)"
+            . " IS DISTINCT FROM COALESCE(i.closed_at, i.resolved_at))") === '0'
+    );
+
+    // Y el envejecimiento se deshace: ninguna avería queda por detrás del horizonte que declara
+    // el fixture. El horizonte se deriva del propio fixture en lugar de copiarse a mano.
+    $oldestFixtureDays = 0;
+    foreach (DemoHistorySeeder::fixtures() as $fixture) {
+        $oldestFixtureDays = min($oldestFixtureDays, (int)$fixture['day_offset']);
+    }
+
+    $assert(
+        'La pasada devuelve el histórico a su horizonte relativo: ninguna avería queda por detrás del fixture',
+        $scalar("SELECT COUNT(*) FROM incidents WHERE ticket_code LIKE 'INC-DEMO-%'"
+            . " AND (created_at AT TIME ZONE 'Europe/Madrid')::date < ((now() AT TIME ZONE 'Europe/Madrid')::date - "
+            . (abs($oldestFixtureDays) + 1) . ')') === '0',
+        'la avería más antigua del escenario envejecido: ' . $agedOldest
+    );
+
+    echo "\n--- Preservación: una traza que dejó de ser la del fixture no se toca ---\n";
+
+    // Se simula lo que hace la aplicación cuando la sede reabre una avería en garantía: la traza
+    // recibe un evento que el fixture no declara. Ese expediente deja de ser reafirmable —no se
+    // puede desplazar una traza que ya no es suya ni dejar sus fechas atrás— y el sembrador tiene
+    // que apartarse de él, dejarlo entero y seguir con los demás.
+    $pgPdo->exec('INSERT INTO incident_history (incident_id, user_id, from_status, to_status, action_note, created_at)'
+        . " SELECT id, NULL, 'RESOLVED', 'REOPENED', 'Reapertura solicitada por la sede (2ª reincidencia). Motivo: la máquina volvió a fallar en el mismo punto.', now()"
+        . " FROM incidents WHERE ticket_code = 'INC-DEMO-1205'");
+    $pgPdo->exec('INSERT INTO audit_log (entity_type, entity_id, action, user_id, user_role, user_name, previous_state, new_state, metadata, created_at)'
+        . " SELECT 'TICKET', id, 'REOPEN_TICKET', NULL, 'SITE_MANAGER', 'Responsable de Sede' ,"
+        . " '{\"status\": \"RESOLVED\"}'::jsonb,"
+        . " '{\"status\": \"REOPENED\", \"reopen_reason\": \"La máquina volvió a fallar en el mismo punto.\", \"reopened_at\": null}'::jsonb,"
+        . " '{\"ticket_code\": \"INC-DEMO-1205\", \"reopen_count\": 2}'::jsonb, now()"
+        . " FROM incidents WHERE ticket_code = 'INC-DEMO-1205'");
+    $pgPdo->exec("UPDATE incidents SET created_at = created_at - interval '{$agedDays} days', resolved_at = resolved_at - interval '{$agedDays} days'"
+        . " WHERE ticket_code = 'INC-DEMO-1205'");
+    $pgPdo->exec("UPDATE incident_history SET created_at = created_at - interval '{$agedDays} days'"
+        . " WHERE incident_id = (SELECT id FROM incidents WHERE ticket_code = 'INC-DEMO-1205')");
+    $pgPdo->exec("UPDATE audit_log SET created_at = created_at - interval '{$agedDays} days'"
+        . " WHERE entity_type = 'TICKET' AND entity_id = (SELECT id FROM incidents WHERE ticket_code = 'INC-DEMO-1205')");
+
+    $preservedAnchorBefore = $scalar("SELECT created_at::text FROM incidents WHERE ticket_code = 'INC-DEMO-1205'");
+    $preservedRun = $seeder->seed();
+    $preservedAnchorAfter = $scalar("SELECT created_at::text FROM incidents WHERE ticket_code = 'INC-DEMO-1205'");
+
+    $assert(
+        'Un expediente con traza ajena al fixture no se reafirma: ni sus fechas ni su traza se tocan, y se declara',
+        $preservedRun['preserved'] === ['INC-DEMO-1205']
+        && $preservedAnchorBefore === $preservedAnchorAfter
+        && $preservedRun['incidents'] === 16
+        && $preservedRun['history_realigned'] === 81 && $preservedRun['audit_realigned'] === 81,
+        json_encode($preservedRun, JSON_UNESCAPED_UNICODE) ?: ''
+    );
+
+    $assert(
+        'La traza ampliada por la aplicación sigue entera: el sembrador no la recorta (Art. III.1)',
+        $scalar("SELECT COUNT(*) FROM incident_history h JOIN incidents i ON i.id = h.incident_id WHERE i.ticket_code = 'INC-DEMO-1205'") === '9'
+        && $scalar("SELECT COUNT(*) FROM audit_log a JOIN incidents i ON i.id = a.entity_id WHERE i.ticket_code = 'INC-DEMO-1205' AND a.entity_type = 'TICKET'") === '9'
+    );
+
+    echo "\n--- El parque manda: una máquina ocupada por otro aviso vivo no se pisa ---\n";
+
+    // El caso que tiene que resistir el arranque de un despliegue: la avería en garantía del
+    // fixture se canceló desde la aplicación —sin dejar rastro en la traza, que es lo que la
+    // haría indistinguible de una traza ajena— y su máquina la ocupa ya un aviso vivo de verdad.
+    $pgPdo->exec("UPDATE incidents SET status = 'CANCELLED', cancellation_reason = 'Aviso cancelado por la sede durante la demostración: la máquina se liberó.'"
+        . " WHERE ticket_code = 'INC-DEMO-1201'");
+    $pgPdo->exec('INSERT INTO incidents (ticket_code, machine_id, machine_type_snapshot, location_id, reporter_name, reporter_phone, category, description, urgency, status, created_at, updated_at)'
+        . " SELECT 'INC-2026-DEMO1', machine_id, machine_type_snapshot, location_id, 'Aviso vivo de la demostración', '600000111', category,"
+        . " 'Aviso vivo plantado para certificar que el sembrador se aparta de una máquina ocupada.', urgency, 'REGISTERED', now(), now()"
+        . " FROM incidents WHERE ticket_code = 'INC-DEMO-1201'");
+
+    $occupancyRun = $seeder->seed();
+
+    // La aritmética de la pasada: de las diecisiete averías del fixture, 1205 sigue preservada
+    // por su traza ampliada (bloque anterior) y 1201 se declara por la máquina ocupada. Las 15
+    // restantes se reafirman, con sus 77 eventos de traza y sus 77 registros de auditoría.
+    $assert(
+        'Una avería en garantía cuya máquina ya está ocupada se declara y no se escribe: el arranque del servicio no se aborta',
+        $occupancyRun['skipped'] === ['INC-DEMO-1201']
+        && $occupancyRun['preserved'] === ['INC-DEMO-1205']
+        && $occupancyRun['incidents'] === 15
+        && $occupancyRun['history_realigned'] === 77 && $occupancyRun['audit_realigned'] === 77,
+        json_encode($occupancyRun, JSON_UNESCAPED_UNICODE) ?: ''
+    );
+
+    $assert(
+        'Ni la avería cancelada ni el aviso vivo que ocupa su máquina se han tocado, y la máquina conserva un solo expediente vivo',
+        $scalar("SELECT status FROM incidents WHERE ticket_code = 'INC-DEMO-1201'") === 'CANCELLED'
+        && $scalar("SELECT COUNT(*) FROM incidents WHERE ticket_code = 'INC-2026-DEMO1' AND status = 'REGISTERED'") === '1'
+        && $scalar("SELECT COUNT(*) FROM incidents WHERE machine_id = (SELECT machine_id FROM incidents WHERE ticket_code = 'INC-DEMO-1201')"
+            . " AND status NOT IN ('CLOSED', 'CANCELLED')") === '1'
     );
 } catch (Throwable $exception) {
     $crash = $exception;

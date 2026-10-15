@@ -201,6 +201,30 @@ $assert(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Caso 1d: el histórico de demostración entra por defecto en el arranque desplegado
+// ─────────────────────────────────────────────────────────────────────────────
+// 2026-10-15 (EARS-02.6): el paso [6/6] del arranque dejó de ser *opt-in*. El despliegue
+// cargaba las diecisiete averías solo si alguien declaraba `VENDGUARD_DEMO_HISTORY=1`, de modo
+// que una instalación recién hecha podía nacer con el cuadro de mandos vacío; y la pasada sobre
+// un histórico ya sembrado reafirmaba las fechas del expediente dejando su traza anclada en la
+// fecha anterior. Se certifica aquí, sin motor, que el arranque lo pide **por defecto** y que
+// declara lo que hizo, de modo que la política no pueda volver a invertirse en silencio.
+echo "\n--- Caso 1d: el histórico de demostración entra por defecto en el arranque ---\n";
+
+$assert(
+    str_contains($bootScript, '\\VendGuard\\Database\\DemoHistorySeeder::enabledByEnvironment()')
+    && str_contains($bootScript, 'if (!\\VendGuard\\Database\\DemoHistorySeeder::enabledByEnvironment())'),
+    'El arranque desplegado carga el histórico de demostración por defecto (opt-out, EARS-02.6)'
+);
+$assert(
+    str_contains($bootScript, "history_realigned")
+    && str_contains($bootScript, "audit_realigned")
+    && str_contains($bootScript, "preserved")
+    && str_contains($bootScript, "skipped"),
+    'El arranque declara lo que hizo: marcas desplazadas, expedientes preservados y averías omitidas'
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Caso 1c: la cadena de arranque se resuelve sin autoloader
 // ─────────────────────────────────────────────────────────────────────────────
 echo "\n--- Caso 1c: el arranque resuelve su cadena de clases sin autoloader ---\n";

@@ -28,10 +28,13 @@ declare(strict_types=1);
  * motor local. El fixture del arnés (`DemoMetricsSeeder`) sigue siendo el del
  * motor local y no se toca.
  *
- * No se ejecuta en el arranque por defecto: el arranque en limpio es estricto
- * (EARS-02.1, sin incidencias ni historiales previos). Para que el contenedor lo
- * cargue al arrancar hay un opt-in explícito y declarado:
- * `VENDGUARD_DEMO_HISTORY=1` en el entorno del servicio.
+ * El arranque del contenedor ya lo ejecuta por su cuenta en cada redespliegue
+ * (EARS-02.6): este comando sirve para reafirmarlo sin arrancar. Para el arranque en
+ * limpio estricto hay un opt-out declarado: `VENDGUARD_DEMO_HISTORY=0` en el entorno
+ * del servicio. En una pasada sobre un histórico ya sembrado las averías no se
+ * duplican: se reafirman sus fechas y su traza se desplaza con ellas al esquema
+ * temporal vigente —con `UPDATE`, nunca con un borrado—, de modo que la historia no
+ * queda anclada antes del alta que cuenta.
  *
  * Script sin autoloader, como el resto de `bin/`: cada dependencia de la cadena se
  * declara a mano (`ConnectionFactory` → `SecretProvider` por S-5; `SeedRunner` no
@@ -77,9 +80,21 @@ try {
         . " {$reopened} con reincidencia por garantía)...\n";
     $seeder = new DemoHistorySeeder($pdo);
     $summary = $seeder->seed();
-    echo "      - Averías escritas/actualizadas: {$summary['incidents']}\n";
-    echo "      - Eventos de traza de estados (incident_history): {$summary['history_events']}\n";
-    echo "      - Registros de auditoría (audit_log): {$summary['audit_events']}\n\n";
+    echo "      - Averías reafirmadas: {$summary['incidents']}\n";
+    echo '      - Traza de estados (incident_history): ' . $summary['history_events'] . ' eventos nuevos · '
+        . $summary['history_realigned'] . " marcas desplazadas\n";
+    echo '      - Auditoría (audit_log): ' . $summary['audit_events'] . ' registros nuevos · '
+        . $summary['audit_realigned'] . " registros desplazados\n";
+
+    if ($summary['preserved'] !== []) {
+        echo '      - Sin tocar (con traza ajena al fixture): ' . implode(', ', $summary['preserved']) . "\n";
+    }
+
+    if ($summary['skipped'] !== []) {
+        echo '      - Sin sembrar (máquina ocupada por otro aviso vivo): ' . implode(', ', $summary['skipped']) . "\n";
+    }
+
+    echo "\n";
 
     echo "[3/3] Comprobando lo que el cuadro de mandos va a leer...\n";
 
