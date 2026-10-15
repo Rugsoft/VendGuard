@@ -569,7 +569,7 @@ try {
     // El cierre por inactividad exige superar las 72 h hábiles (RF-04.3): se siembra el
     // silencio de sede en lugar de esperar tres jornadas de reloj real.
     $pdo->prepare('UPDATE incidents SET paused_at = :paused WHERE id = :id')->execute([
-        ':paused' => (new DateTimeImmutable('-21 days'))->format('Y-m-d H:i:s'),
+        ':paused' => EngineClock::shift(-21 * 86400),
         ':id'     => $cancelledId,
     ]);
 

@@ -150,6 +150,26 @@ las hijas; de ahí que exista `purgeIncident*()` en lugar de un `DELETE` suelto.
 Única excepción: `TestDataCleanerIsolationTest.php`, que reproduce el borrado
 ingenuo a propósito para demostrar que falla (§5).
 
+### 4.1 El puerto del servidor de pruebas es del ejecutor
+
+Las suites de integración incluyen pruebas de HTTP real contra `127.0.0.1:8000`, y ese
+servidor lo arranca el ejecutor durante **una** corrida: es un recurso suyo y tiene que
+poder reclamarlo. Dos reglas, las dos nacidas de un defecto medido:
+
+* **Se arranca en forma de vector de argumentos, no como cadena de comando.**
+  `proc_open` con una cadena pasa por un intérprete intermedio —`cmd.exe /c` en
+  Windows—, de modo que `proc_terminate()` mataba al intérprete y dejaba el servidor
+  **huérfano** escuchando. Medido: tras una corrida quedaba vivo un
+  `php -S 127.0.0.1:8000 -t <árbol>/public` de otro árbol, y la corrida siguiente
+  —que encuentra el puerto ocupado y por tanto no arranca el suyo— medía todos sus
+  casos HTTP contra ese servidor, con el contrato de credenciales de otro árbol y sin
+  que nada en la salida lo dijera.
+* **El cierre se comprueba, y un servidor ajeno se nombra.** El ejecutor verifica que
+  el puerto quedó libre tras terminar; si no lo está, avisa. Y si al arrancar la Fase 3
+  el puerto ya estaba ocupado, lo declara en voz alta: la batería puede seguir —el
+  README documenta levantar un servidor para desarrollo—, pero no puede fingir que ese
+  servidor es el suyo.
+
 ---
 
 ## 5. Prueba de mordida
@@ -351,3 +371,77 @@ aborta nombrando la tabla y las identidades culpables.
 Las dos fugas vivas que el criterio retirado no veía —la sede `SEDE-TEMP-97B8` y la
 cuenta `tecnico.nuevo.b27c@vendguard.internal`, dejadas por suites que murieron antes de
 su limpieza manual— se drenaron en la primera pasada del criterio nuevo.
+
+---
+
+## 9. El reloj del arnés y los instantes que cruzan al motor
+
+La limpieza deja el banco en un estado conocido; el **reloj** decide qué mide cada
+suite sobre ese estado. Este apartado fija las dos reglas que lo hacen determinista.
+
+### 9.1 El reloj se declara, no se hereda
+
+`tests/bootstrap.php` declara el reloj del arnés en la **zona operativa del parque**
+(`EngineClock::OPERATIONAL_TIMEZONE`) en lugar de aceptar el `date.timezone` del
+`php.ini` de la máquina. Sin esa declaración, cada `new DateTimeImmutable()` y cada
+`date()` desnudos de las suites tomaban el huso del desarrollador y **el veredicto de la
+batería cambiaba de máquina en máquina**: medido con el mismo código y el mismo banco, la
+suite del tablero de coordinación daba 6 fallos en `Europe/Berlin` y 2 en `UTC`. Una
+batería cuya constante de color depende del `php.ini` de quien la ejecuta no es hermética
+(EARS-13.5) y no puede certificar nada (EARS-13.6).
+
+La zona declarada es la **operativa**, no la del motor, porque es la que el sistema
+documenta para sus instantes locales (`IncidentPauseService` §2 de sus decisiones de
+diseño, `AuditEvent`, `MetricFilter`) y porque es la única elección que **no cambia el
+significado de los renders desnudos que ya existen**: `Europe/Berlin` y `Europe/Madrid`
+comparten huso y reglas de horario de verano, de modo que la declaración no altera
+ninguno de los 260 veredictos y sí elimina la dependencia de la máquina.
+
+### 9.2 Un instante que cruza al motor se escribe en la zona del motor
+
+Las marcas del esquema son `timestamptz` y la sesión del motor va en **UTC** (PostgreSQL
+por defecto, y el contenedor desplegado, cuyo `php.ini` tampoco declara zona). Un
+`'Y-m-d H:i:s'` sin zona no dice lo que parece: el motor lo interpreta en *su* zona, de
+modo que el instante guardado queda el huso entero por delante del que la suite quería
+sembrar. El idioma correcto vive en un único punto, `tests/Support/EngineClock.php`:
+
+* `EngineClock::now()` — el reloj real con el huso del motor explícito;
+* `EngineClock::stamp($instante)` — la marca `Y-m-d H:i:s` de un instante en la zona del motor;
+* `EngineClock::shift($segundos)` — «hace N segundos», para sembrar antigüedades.
+
+La dirección contraria no necesita regla: una lectura de `timestamptz` viaja con su
+desfase (`2026-10-15 20:40:00+00`), así que `strtotime()` la interpreta en su instante
+real con cualquier reloj local. La guarda lo comprueba para que no se dé por supuesto.
+
+### 9.3 Lo que esto NO decide
+
+El contrato del **vencimiento de sede** (`sla_target_at`) y las marcas del libro de
+pausas siguen escribiéndose hoy como pared local de sede. Mientras esa reconciliación no
+se decida —si el dominio sigue persistiendo pared de sede o pasa a persistir instantes,
+y cómo publica la API cada una— esos sitios quedan **declarados** en el ratchet de la
+guarda con su dueño, no reparados a medias: reparar la siembra de una suite sin decidir
+la forma que publica el motor dejaría el caso en rojo por una razón distinta y ocultaría
+la decisión (EARS-13.10).
+
+### 9.4 La guarda
+
+`tests/unit/HarnessClockContractTest.php` certifica cinco cosas: la declaración del
+reloj; que la zona que el arnés declara para el motor es la que informa la sesión viva
+(`SHOW TimeZone`); que un render en hora local se mide el huso entero por delante, es
+decir **que el defecto es real y de qué magnitud**; que las lecturas viajan con desfase; y
+el **censo** de renders locales en ficheros con conexión viva al motor, contrastado contra
+un ratchet declarado con motivo y dueño por entrada. La guarda exige que el censo real
+coincida **exactamente** con el saldo: un sitio nuevo la pone en rojo y reparar un sitio
+sin retirar su entrada también. El detector se prueba contra un espécimen con el defecto y
+contra el mismo espécimen curado, de modo que una guarda que no distingue no certifique.
+
+**Evidencia medida (2026-10-15, motor único PostgreSQL).**
+
+| Medición | Antes | Después |
+|---|---|---|
+| Reloj de la máquina frente al del arnés | `php.ini` (`Europe/Berlin`) decidía cada render desnudo | declarado en `Europe/Madrid`; la corrida imprime `reloj: Europe/Madrid (motor en UTC)` |
+| Veredicto de `CoordinatorIncidentsEndpointTest` | 6 fallos en `Europe/Berlin` · 2 en `UTC`: **dependía de la máquina** | **verde, 36 aserciones**, con el mismo veredicto bajo la zona de la máquina, `UTC`, `America/New_York` y `Pacific/Auckland` |
+| Minutos de espera y `sla_breached` (casos 3.8, 3.9, 3.12 y 4.1) | instantes sembrados 2 h en el futuro: 0 minutos medidos y alerta apagada | minutos reales (75/90/15) y `sla_breached` encendido donde el caso lo exige |
+| Sitios de la clase en ficheros con conexión viva | **51 sitios en 21 ficheros** | **36 reparados** (escritos por `EngineClock`) y **15 declarados** en 7 ficheros, todos con dueño y motivo; censo contrastado por la guarda |
+| Suites sanadas, por diferencia de dos corridas completas | línea base: 260 suites · 8.503 aserciones · **59 rojas** | 261 · 8.525 · **57 rojas**, con **las mismas rojas menos dos** (`CoordinatorIncidentsEndpointTest` y `CronAutoCloseEndpointTest`) y **cero regresiones** |
+| Mordida de la guarda | — | con el reloj sin declarar: 1.1 en rojo nombrando `Europe/Berlin`; con una suite degradada: 4.1 enumerando sus 5 sitios

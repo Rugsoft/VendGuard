@@ -120,8 +120,11 @@ $createResolvedIncident = function (
     );
     $created = $incidentRepo->create($inc);
 
-    // Actualizar a RESOLVED con fecha simulada en el pasado
-    $pastResolvedAt = date('Y-m-d H:i:s', time() - ($hoursAgo * 3600));
+    // Actualizar a RESOLVED con fecha simulada en el pasado. El render va en la zona del motor
+    // (`EngineClock`): la regla de cierre compara `resolved_at` contra `NOW()` en SQL, así que un
+    // render en hora local hacía que «hace 49 horas» el motor lo midiera como 47 y el cierre de
+    // las 48 h no cerrara nada.
+    $pastResolvedAt = EngineClock::shift(-$hoursAgo * 3600);
     $pdo->prepare("
         UPDATE incidents 
         SET status = 'RESOLVED',

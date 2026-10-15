@@ -115,7 +115,7 @@ $incident = $incidentRepo->create(new Incident(
     assignedTechnicianId: $technicianId,
     reporterName: 'Conserjería Principal',
     reporterPhone: '633444555',
-    assignedAt: date('Y-m-d H:i:s'),
+    assignedAt: EngineClock::stamp(EngineClock::now()),
     createdAt: null
 ));
 

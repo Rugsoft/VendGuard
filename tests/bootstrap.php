@@ -105,11 +105,24 @@ putenv('DATABASE_URL=' . $engine['dsn']);
 $_ENV['DATABASE_URL'] = $engine['dsn'];
 $_SERVER['DATABASE_URL'] = $engine['dsn'];
 
+require_once __DIR__ . '/Support/EngineClock.php';
+
+// El reloj del arnés también se declara, no se hereda. Sin esta línea cada `new
+// DateTimeImmutable()` y cada `date()` desnudos de las suites tomaban la zona del `php.ini` del
+// desarrollador —`Europe/Berlin` en la máquina donde se midió este defecto—, de modo que el
+// veredicto de la batería dependía de la máquina: la misma suite medía distinto en local que en
+// CI (EARS-13.5 y 13.6: la batería es hermética y no improvisa). Se declara en la zona operativa
+// del parque, que es la que el sistema documenta para sus instantes locales (`IncidentPauseService`,
+// `AuditEvent`, `MetricFilter`), y las marcas que cruzan al motor se escriben por `EngineClock`,
+// único punto donde vive la zona de la sesión del motor (`UTC`, la de sus columnas con zona).
+date_default_timezone_set(EngineClock::OPERATIONAL_TIMEZONE);
+
 // La declaración se imprime una sola vez —en el proceso que arranca la corrida— y se marca en
 // el entorno para que las 259 suites hijas no la repitan en cada línea de la salida.
 if (getenv('VENDGUARD_TEST_ENGINE_DECLARED') === false) {
     echo ' Arnés: motor único ' . vendguardDescribeTestEngine($engine['dsn'])
-        . ' · contrato: ' . $engine['source'] . "\n";
+        . ' · contrato: ' . $engine['source']
+        . ' · reloj: ' . date_default_timezone_get() . " (motor en " . EngineClock::SESSION_TIMEZONE . ")\n";
     putenv('VENDGUARD_TEST_ENGINE_DECLARED=1');
     $_ENV['VENDGUARD_TEST_ENGINE_DECLARED'] = '1';
 }

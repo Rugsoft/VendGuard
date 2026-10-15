@@ -99,8 +99,12 @@ $tokenLoc2 = $authService->generateSiteToken($location2);
 // =========================================================================
 echo "\n--- Caso 1: 1ª Reapertura en garantía (HTTP 200) ---\n";
 
-// Crear un ticket resuelto hace 2 horas asignado a técnico1
-$now = new DateTimeImmutable();
+// Crear un ticket resuelto hace 2 horas asignado a técnico1. Los tres instantes del caso se
+// calculan en la **zona del motor** (`EngineClock`): `incidents.resolved_at` es `timestamptz` y
+// un render en hora local se reinterpretaba un huso por delante, de modo que «hace 50 horas»
+// medía exactamente la ventana de 48 h y el caso del borde dependía del segundo en que corriera la
+// suite (el mismo defecto que la guarda del portal de sede ya dejó medido).
+$now = EngineClock::now();
 $resolvedAtRecent = $now->sub(new DateInterval('PT2H'))->format('Y-m-d H:i:s');
 
 $incident1 = new Incident(
@@ -199,7 +203,7 @@ $assert("1.9 Historial: registrado evento REOPENED con '1ª reincidencia'",
 echo "\n--- Caso 2: 2ª Reapertura en garantía (HTTP 200) ---\n";
 
 // Simular resolución de la 1ª reincidencia por el técnico
-$resolvedAt2 = (new DateTimeImmutable())->sub(new DateInterval('PT1H'))->format('Y-m-d H:i:s');
+$resolvedAt2 = $now->sub(new DateInterval('PT1H'))->format('Y-m-d H:i:s');
 $pdo->prepare("
     UPDATE incidents 
     SET status = 'RESOLVED', 
@@ -240,7 +244,7 @@ $assert("2.5 Contador de reaperturas es 2", $reopenCountAfter2 === 2);
 echo "\n--- Caso 3: 3ª Reapertura bloqueada como 'Avería Crónica' (HTTP 422) ---\n";
 
 // Simular resolución de la 2ª reincidencia
-$resolvedAt3 = (new DateTimeImmutable())->sub(new DateInterval('PT30M'))->format('Y-m-d H:i:s');
+$resolvedAt3 = $now->sub(new DateInterval('PT30M'))->format('Y-m-d H:i:s');
 $pdo->prepare("
     UPDATE incidents 
     SET status = 'RESOLVED', 
@@ -307,7 +311,7 @@ $targetMachine2 = $machinesLoc2[1] ?? $targetMachine;
 // O usamos la máquina 2
 $machine2 = $machines[1];
 
-$resolvedAtExpired = (new DateTimeImmutable())->sub(new DateInterval('PT50H'))->format('Y-m-d H:i:s');
+$resolvedAtExpired = $now->sub(new DateInterval('PT50H'))->format('Y-m-d H:i:s');
 
 $incidentExpired = new Incident(
     id: null,

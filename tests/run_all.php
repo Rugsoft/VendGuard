@@ -301,17 +301,30 @@ foreach ($unitMjsFiles as $filePath) {
 echo "\n{$colorBold}--- Fase 3: Pruebas de Integración (motor único, Repositorios y API HTTP) ---{$colorReset}\n";
 
 // Asegurar servidor HTTP para pruebas con cURL
+//
+// El servidor se arranca entre **suites**, no como servicio del sistema: es un recurso del
+// ejecutor y debe poder reclamarse al terminar. Se lanza en forma de vector y no con una cadena
+// de comando porque `proc_open` con una cadena pasa por un intérprete intermedio —`cmd.exe /c` en
+// Windows—: `proc_terminate()` mataba al intérprete y dejaba el servidor huérfano.** Medido:**
+// una corrida dejaba `php -S 127.0.0.1:8000 -t <otro árbol>/public` escuchando, y la corrida
+// siguiente —que encuentra el puerto ocupado y por tanto no arranca el suyo— medía sus casos HTTP
+// contra un servidor de otro árbol, con otro contrato de credenciales. Con el vector, el proceso
+// hijo es el propio servidor y se reclama con `proc_terminate()`.
 $serverProcess = null;
 $serverPipes = [];
 $serverStartedByRunner = false;
 $socket = @fsockopen('127.0.0.1', 8000, $errNo, $errStr, 0.5);
 if (is_resource($socket)) {
     fclose($socket);
+    // Un servidor ajeno sirviendo los casos HTTP cambia lo que la batería mide. Ni se rechaza
+    // —el README documenta arrancar uno para desarrollo— ni se calla: se nombra.
+    echo "  {$colorRed}[AVISO] El puerto 8000 ya estaba ocupado: los casos HTTP medirán contra ese"
+        . " servidor, no contra el del ejecutor. Si es un servidor obsoleto, deténlo para que el"
+        . " ejecutor sea dueño de su puerto.{$colorReset}\n";
 } else {
     $publicDir = realpath(__DIR__ . '/../public');
     $nullDevice = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN' ? 'NUL' : '/dev/null';
-    $serverCmd = 'php -S 127.0.0.1:8000 -t "' . $publicDir . '"';
-    $serverProcess = proc_open($serverCmd, [
+    $serverProcess = proc_open([PHP_BINARY, '-S', '127.0.0.1:8000', '-t', $publicDir], [
         0 => ["pipe", "r"],
         1 => ["file", $nullDevice, "w"],
         2 => ["file", $nullDevice, "w"]
@@ -391,13 +404,33 @@ foreach ($manualFiles as $filePath) {
     }
 }
 
-// Cierre del servidor HTTP temporal si fue iniciado por el ejecutor
+// Cierre del servidor HTTP temporal si fue iniciado por el ejecutor. El cierre se **comprueba**:
+// un servidor que sobreviva a la corrida sirve de tapadera a la siguiente —ocupa su puerto y le
+// contesta los casos HTTP con el contrato de este árbol—, así que el ejecutor no puede dar por
+// hecho que lo reclamó.
 if ($serverStartedByRunner && is_resource($serverProcess)) {
     if (isset($serverPipes[0]) && is_resource($serverPipes[0])) {
         fclose($serverPipes[0]);
     }
     proc_terminate($serverProcess);
     proc_close($serverProcess);
+
+    $releasedServer = false;
+    for ($attempt = 0; $attempt < 10 && !$releasedServer; $attempt++) {
+        usleep(200000);
+        $probe = @fsockopen('127.0.0.1', 8000, $probeErrNo, $probeErrStr, 0.3);
+        if (!is_resource($probe)) {
+            $releasedServer = true;
+            break;
+        }
+        fclose($probe);
+    }
+
+    if (!$releasedServer) {
+        echo "  {$colorRed}[WARN] El servidor HTTP del ejecutor sigue escuchando en 127.0.0.1:8000 tras"
+            . " el cierre: deténlo antes de la próxima corrida o sus casos HTTP medirán contra él."
+            . "{$colorReset}\n";
+    }
 }
 
 // =====================================================================

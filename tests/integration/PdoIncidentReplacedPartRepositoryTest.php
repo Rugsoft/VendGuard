@@ -271,7 +271,7 @@ for ($i = 0; $i < 3; $i++) {
         28.50,
         OldPartDestination::DESGUACE,
         "Sustitución repetitiva {$i} para test de fallo crónico",
-        date('Y-m-d H:i:s', strtotime("-" . ($i * 10) . " days"))
+        EngineClock::shift(-$i * 10 * 86400)
     );
     $replacedRepo->insertReplacedPart($chronicPart);
 }

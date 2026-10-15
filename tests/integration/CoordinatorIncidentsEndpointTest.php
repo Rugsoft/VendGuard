@@ -119,7 +119,11 @@ $assert("1.3 Técnico intentando acceder a bandeja de coordinador responde HTTP 
 // =========================================================================
 echo "\n--- Caso 2: Población de Incidencias para Pruebas de SLA ---\n";
 
-$now = new DateTimeImmutable();
+// Los instantes retroactivos se calculan en la **zona del motor** (`EngineClock`), que es la que
+// interpreta la columna `timestamptz` al escribir: con un render en hora local el motor leía el
+// instante un huso por delante y las tres averías nacían en el futuro, de modo que los minutos de
+// espera salían 120 minutos cortos y `sla_breached` no llegaba a encenderse donde el caso lo exige.
+$now = EngineClock::now();
 
 // Incidencia 1: CRÍTICA, REGISTRADA, creada hace 75 minutos (>60 min) -> SLA BREACHED: TRUE
 $created75m = $now->sub(new DateInterval('PT75M'))->format('Y-m-d H:i:s');

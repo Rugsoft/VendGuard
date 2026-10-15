@@ -182,7 +182,11 @@ $seedComments = function (int $from, int $to) use ($pdo, $insertComment, $incide
         $insertComment->execute([
             ':incident_id' => $incidentId,
             ':comment_text' => 'Mensaje de carga número ' . str_pad((string)$index, 5, '0', STR_PAD_LEFT) . ' del expediente de rendimiento.',
-            ':created_at' => date('Y-m-d H:i:s', strtotime('2026-10-01 00:00:00') + $index),
+            // La ráfaga se siembra desde una base fija en la **zona del motor**, no desde la hora
+            // local de la máquina: son instantes de columna con zona, no pared de sede.
+            ':created_at' => EngineClock::stamp(
+                (new DateTimeImmutable('2026-10-01 00:00:00', EngineClock::zone()))->modify(sprintf('+%d seconds', $index))
+            ),
         ]);
     }
     $pdo->commit();

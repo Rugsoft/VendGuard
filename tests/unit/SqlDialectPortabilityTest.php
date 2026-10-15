@@ -492,14 +492,16 @@ try {
     );
 
     $boundaries = [0, 59, 60, 61, 119, 121, -59, -60, -61, 3661];
-    $anchor = new DateTimeImmutable('2026-01-10 12:00:00');
+    // Ancla y extremos en la **zona del motor** (`EngineClock`): los dos bordes de la sonda viajan
+    // a columnas con zona, y un render en hora local desplazaba ambos el mismo huso.
+    $anchor = new DateTimeImmutable('2026-01-10 12:00:00', EngineClock::zone());
     foreach ($boundaries as $index => $offsetSeconds) {
         $code = sprintf('VG-D%02d', $index + 1);
         $insertDifference->execute([
             ':code' => $code,
             ':name' => 'borde',
-            ':start' => $anchor->modify(sprintf('%+d seconds', $offsetSeconds))->format('Y-m-d H:i:s'),
-            ':end' => $anchor->format('Y-m-d H:i:s'),
+            ':start' => EngineClock::stamp($anchor->modify(sprintf('%+d seconds', $offsetSeconds))),
+            ':end' => EngineClock::stamp($anchor),
         ]);
         $differenceStatement->execute([':code' => $code]);
         $engineValue = $differenceStatement->fetchColumn();

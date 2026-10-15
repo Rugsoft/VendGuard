@@ -186,7 +186,7 @@ $insertIncident = function (array $overrides) use ($pdo, $locationId, $suffix, &
     ];
 
     $values = array_merge($defaults, $overrides);
-    $values['created_at'] = $values['created_at'] ?? $values['paused_at'] ?? date('Y-m-d H:i:s');
+    $values['created_at'] = $values['created_at'] ?? $values['paused_at'] ?? EngineClock::stamp(EngineClock::now());
 
     $columns = array_keys($values);
     $placeholders = array_map(static fn (string $column): string => ':' . $column, $columns);
@@ -492,8 +492,10 @@ try {
         'machine_type_snapshot' => 'SNACKS',
         'status' => 'PENDING_INFO',
         'assigned_technician_id' => $freeTechnicianIds[0] ?? null,
-        'paused_at' => $now->modify('-21 days')->format('Y-m-d H:i:s'),   // > 72 h hábiles con holgura
-        'created_at' => $now->modify('-22 days')->format('Y-m-d H:i:s'),
+        // Los dos instantes van en la zona del motor: son columnas con zona y el caso mide
+        // inactividad real, no pared de sede.
+        'paused_at' => EngineClock::shift(-21 * 86400),   // > 72 h hábiles con holgura
+        'created_at' => EngineClock::shift(-22 * 86400),
         'pending_info_reason_category' => 'BUILDING_CLOSED_NO_ACCESS',
         'pending_info_reason_text' => 'El edificio permaneció cerrado sin facilitar acceso al técnico.',
         'sla_target_at' => $aheadSeconds(3600),

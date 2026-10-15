@@ -680,7 +680,7 @@ try {
     // hábiles que autorizan el cierre (RF-04.3). La insignia del triaje es la MISMA regla
     // que admite la escritura, así que se comprueba antes de ejecutar el protocolo.
     $pdo->prepare('UPDATE incidents SET paused_at = :paused WHERE id = :id')->execute([
-        ':paused' => (new DateTimeImmutable('-21 days'))->format('Y-m-d H:i:s'),
+        ':paused' => EngineClock::shift(-21 * 86400),
         ':id'     => $guardIncidentId,
     ]);
     $boardRes = $router->dispatch(new Request(
@@ -909,7 +909,7 @@ try {
     // Sembrado del silencio de sede: tres semanas naturales superan con holgura las 72 h
     // hábiles que encienden el aviso urgente (RF-04.2).
     $pdo->prepare('UPDATE incidents SET paused_at = :paused WHERE id = :id')->execute([
-        ':paused' => (new DateTimeImmutable('-21 days'))->format('Y-m-d H:i:s'),
+        ':paused' => EngineClock::shift(-21 * 86400),
         ':id'     => $frozenIncidentId,
     ]);
 

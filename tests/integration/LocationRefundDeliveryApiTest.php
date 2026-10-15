@@ -793,10 +793,13 @@ try {
         'respuesta: ' . substr((string)$deskListing->getBody(), 0, 200)
     );
 
-    // El bloqueo es temporal: agotado el plazo, el consumidor vuelve a cobrar.
+    // El bloqueo es temporal: agotado el plazo, el consumidor vuelve a cobrar. El plazo vencido se
+    // escribe en la **zona del motor** (`EngineClock`): un minuto de plazo renderizado en hora
+    // local se guardaba dos horas en el futuro y el candado seguía puesto donde el caso pide que
+    // ya no lo esté.
     $pdo->prepare('UPDATE refund_requests SET pickup_locked_until = :until WHERE id = :id')
         ->execute([
-            ':until' => date('Y-m-d H:i:s', strtotime('-1 minute')),
+            ':until' => EngineClock::shift(-60),
             ':id' => $bruteCaseId,
         ]);
 

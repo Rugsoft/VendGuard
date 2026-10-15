@@ -365,7 +365,7 @@ for ($i = 1; $i <= 3; $i++) {
         ':unit_cost_snapshot'    => 28.50,
         ':old_part_destination'  => 'DESGUACE',
         ':notes'                 => 'Bobinas quemadas ' . $i,
-        ':installed_at'          => date('Y-m-d H:i:s', strtotime('-' . ($i * 5) . ' days')),
+        ':installed_at'          => EngineClock::shift(-$i * 5 * 86400),
     ]);
 }
 
@@ -384,7 +384,7 @@ $stmtInsertPart->execute([
     ':unit_cost_snapshot'    => 28.50,
     ':old_part_destination'  => 'TALLER',
     ':notes'                 => 'Para reacondicionamiento en taller',
-    ':installed_at'          => date('Y-m-d H:i:s', strtotime('-2 days')),
+    ':installed_at'          => EngineClock::shift(-2 * 86400),
 ]);
 
 // 5. Sustitución 5: DESGUACE (Sonda NTC 15.20 €)
@@ -402,7 +402,7 @@ $stmtInsertPart->execute([
     ':unit_cost_snapshot'    => 15.20,
     ':old_part_destination'  => 'DESGUACE',
     ':notes'                 => 'Descalibrada',
-    ':installed_at'          => date('Y-m-d H:i:s', strtotime('-10 days')),
+    ':installed_at'          => EngineClock::shift(-10 * 86400),
 ]);
 
 // Consulta de analítica para 90 días

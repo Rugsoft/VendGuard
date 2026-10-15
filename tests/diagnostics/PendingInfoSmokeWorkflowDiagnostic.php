@@ -609,8 +609,8 @@ $scope = $pdo->prepare(
         AND i.`assigned_technician_id` = :tech"
 );
 $scope->execute([
-    ':from_date' => $windowFrom->format('Y-m-d H:i:s'),
-    ':to_date'   => $windowTo->format('Y-m-d H:i:s'),
+    ':from_date' => EngineClock::stamp($windowFrom),
+    ':to_date'   => EngineClock::stamp($windowTo),
     ':tech'      => $effectiveMttrTechId,
 ]);
 $scopeRow = $scope->fetch(PDO::FETCH_ASSOC) ?: [];

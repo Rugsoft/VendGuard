@@ -149,7 +149,7 @@ $activeIncident = new Incident(
     '600123456',
     null,
     null,
-    date('Y-m-d H:i:s')
+    EngineClock::stamp(EngineClock::now())
 );
 $incidentRepo->create($activeIncident);
 
@@ -180,12 +180,12 @@ $warrantyIncident = new Incident(
     '699112233',
     null,
     null,
-    date('Y-m-d H:i:s', time() - 3600),
-    date('Y-m-d H:i:s', time() - 3000),
+    EngineClock::shift(-3600),
+    EngineClock::shift(-3000),
     null,
     'Compresor congelado',
     'Sustitución de válvula',
-    date('Y-m-d H:i:s', time() - 1800)
+    EngineClock::shift(-1800)
 );
 $incidentRepo->create($warrantyIncident);
 
