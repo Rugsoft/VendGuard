@@ -316,6 +316,16 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
 
     /**
      * Desglose agrupado por técnico resolutor final (EARS 2.3).
+     *
+     * Los dos conteos van con `DISTINCT` a propósito y no es un adorno: el desglose
+     * cruza dos agregados distintos por el mismo técnico —sus resoluciones y sus
+     * reaperturas—, y un `LEFT JOIN` sin duplicados no existe cuando cada lado tiene
+     * varias filas. Sin el `DISTINCT`, cada avería del técnico se cuenta una vez por
+     * cada reincidencia suya (y cada reincidencia una vez por cada avería): un
+     * profesional con cinco resoluciones y dos reaperturas declaraba diez y diez.
+     * Las medias no se ven afectadas —todas las averías se duplican por el mismo
+     * factor, así que la media no se mueve—, pero los conteos sí, y son los que el
+     * coordinador lee.
      */
     public function getBreakdownByTechnician(MetricFilter $filter): array
     {
@@ -323,8 +333,8 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
                     u.id AS technician_id,
                     u.name AS technician_name,
                     u.is_active,
-                    COUNT(i.id) AS tickets_resolved,
-                    COUNT(rh.incident_id) AS warranty_reopens,
+                    COUNT(DISTINCT i.id) AS tickets_resolved,
+                    COUNT(DISTINCT rh.event_id) AS warranty_reopens,
                     ROUND(AVG({$this->dialect->timestampDifference('SECOND', 'i.created_at', 'i.resolved_at')})) AS avg_gross_seconds,
                     ROUND(AVG(i.total_pending_info_seconds)) AS avg_pause_seconds
                 FROM users u
@@ -340,7 +350,7 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
                     -- user_id = NULL (reopen() desasigna al técnico), de modo que la
                     -- atribución se deriva del evento RESOLVED inmediatamente anterior de
                     -- la misma avería; con created_at (marca del evento, no del expediente).
-                    SELECT h.incident_id, h.created_at,
+                    SELECT h.id AS event_id, h.incident_id, h.created_at,
                            (SELECT h2.user_id
                               FROM incident_history h2
                              WHERE h2.incident_id = h.incident_id

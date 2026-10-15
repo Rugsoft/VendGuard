@@ -375,9 +375,29 @@ function initializePostgresDatabase(PDO $pdo, SqlDialectAdapter $dialect): array
 
     assertCatalogVerified($verified);
 
-    echo "[6/6] Sin sembrado de histórico en el motor nuevo.\n";
-    echo "      · El arranque en limpio es estricto (EARS-02.1): ni incidencias ni expedientes previos.\n";
-    echo "      · El histórico de averías del arnés vive en el motor local y no se hereda aquí.\n\n";
+    echo "[6/6] Histórico de averías de demostración...\n";
+
+    // El arranque en limpio es estricto (EARS-02.1) y sigue siendo el comportamiento por
+    // defecto: sin el opt-in explícito, este paso no escribe ni una incidencia. El histórico
+    // de demostración —para probar el cuadro de mandos sin inventar averías a mano— entra
+    // sólo si el operador lo pide, y se pide de dos formas declaradas: la variable de
+    // entorno del sembrador, o la ejecución puntual de `php bin/seed_demo_history.php`.
+    // La regla del opt-in vive en el propio sembrador, para que su suite la ejerza.
+    require_once __DIR__ . '/../database/DemoHistorySeeder.php';
+
+    if (!\VendGuard\Database\DemoHistorySeeder::requestedByEnvironment()) {
+        echo "      · Sin sembrar: el arranque en limpio no hereda incidencias ni expedientes previos.\n";
+        echo "      · Para cargar datos de prueba: php bin/seed_demo_history.php\n";
+        echo '        o declarar ' . \VendGuard\Database\DemoHistorySeeder::ENVIRONMENT_FLAG . "=1 en el entorno del servicio.\n\n";
+
+        return $verified;
+    }
+
+    $demoSummary = (new \VendGuard\Database\DemoHistorySeeder($pdo))->seed();
+    echo "      ✓ Averías escritas/actualizadas: {$demoSummary['incidents']}\n";
+    echo "      ✓ Eventos de traza de estados (incident_history): {$demoSummary['history_events']}\n";
+    echo "      ✓ Registros de auditoría (audit_log): {$demoSummary['audit_events']}\n";
+    echo "      · Opt-in declarado en VENDGUARD_DEMO_HISTORY: sin esa variable el arranque no siembra histórico.\n\n";
 
     return $verified;
 }

@@ -313,3 +313,56 @@ previo (línea roja 5 de [AGENTS.md](../AGENTS.md)). Si quieres, los enmiendo en
    y `VENDGUARD_APP_URL` son decisión tuya.
 4. **Rollback en un minuto** — quitar `DATABASE_URL` (y `DB_SSL_ROOT_CERT`) del entorno: la aplicación vuelve a
    MariaDB sin tocar una línea de código.
+
+---
+
+## 11. Cargar datos de prueba (histórico de averías atendidas)
+
+El arranque desplegado es *Fresh Start* estricto (EARS-02.1): crea el catálogo maestro y **no** siembra ni una
+incidencia. Eso es lo correcto para producción y pobre para una demostración, así que el histórico de prueba entra por
+una puerta aparte y **explícita**: hay dos formas declaradas y ninguna se activa sola.
+
+### 11.1 Puntual (la vía normal)
+
+```bash
+# Contra el motor que declare el entorno: Supabase (DATABASE_URL=postgres://…) o MariaDB local
+php bin/seed_demo_history.php
+```
+
+Escribe **17 averías** (`INC-DEMO-1101` … `INC-DEMO-1205`, de 35 a 1 día de antigüedad) repartidas por las **13**
+máquinas del parque, con categoría, urgencia y técnico variados, y con el ciclo completo de cada expediente: alta,
+triaje y asignación, intervención, resolución con diagnóstico y solución y —en las trece averías completadas— cierre
+dentro de la ventana de garantía de 48 h. Añade además su traza de estados (`incident_history`) y su rastro de
+auditoría (`audit_log`): 4 o 5 filas en una avería de una sola vuelta y 8 o 9 en una reabierta. Es **idempotente**:
+reejecutarlo reafirma las mismas filas por `ticket_code` y no duplica trazas.
+
+Cuatro de las diecisiete siguen **en garantía** (`RESOLVED`, sin cierre y resueltas dentro de las 48 h), y dos de
+ellas **reabrieron de verdad**: su traza encadena resolución → reapertura justificada por la sede → reasignación →
+reintervención, que es exactamente lo que alimenta el **indicador de reincidencias** (`warranty_reopens`) del
+desglose por técnico de Métricas (EARS 2.3.1). Una de las dos ya cerró al expirar su garantía; la otra sigue
+reabrible desde el portal de la sede.
+
+Las trece averías completadas nacen `CLOSED` a propósito: el índice único parcial `uq_machine_active_ticket` admite
+**una sola** incidencia activa por máquina (Art. V.2 y V.6), así que las cuatro averías en garantía —vivas— ocupan
+máquinas distintas entre sí y sin ningún otro expediente abierto. Un histórico de demostración no puede dejar el
+parque «ocupado» antes de que empieces a probar, pero sí tiene que mostrar una máquina con avería en garantía.
+
+### 11.2 En el arranque del contenedor (*opt-in*)
+
+```bash
+# Variable de entorno del servicio (Render → Environment). Sin ella, el paso 6/6 no siembra nada.
+VENDGUARD_DEMO_HISTORY=1
+```
+
+Con esa variable, `bin/init_cloud_db.php` ejecuta el mismo sembrador al final del arranque y lo declara en su salida
+(`[6/6]`) con los conteos reales. Quitarla devuelve el arranque al comportamiento estricto de la especificación sin
+tocar una línea de código.
+
+### 11.3 Qué no hace
+
+* **No migra ningún expediente anterior:** el trasvase de históricos está fuera de alcance (spec §7).
+* **No sustituye al fixture del arnés:** `database/DemoMetricsSeeder.php` sigue siendo el del motor local (con su
+  dialecto declarado en el inventario de portabilidad) y no se toca.
+* **No inventa parque:** cada máquina y cada técnico del histórico existen en `database/supabase_seeds.sql`, y la suite
+  `tests/unit/DemoHistorySeederTest.php` lo certifica sin base de datos, junto con el mínimo de 20 caracteres de
+  diagnóstico y solución (Art. V.1), la monotonía de las fechas y el SLA de 4 h de los perecederos (Art. II).

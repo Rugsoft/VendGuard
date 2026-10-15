@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/MariaDB-10.11%2B%20%7C%20MySQL%208.0-003545?style=flat-square&logo=mariadb&logoColor=white)](https://mariadb.org/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-258%20Suites%20%7C%209.873%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-259%20Suites%20%7C%209.893%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -166,6 +166,11 @@ php -r "require 'src/autoload.php'; require 'src/Infrastructure/Database/Connect
 
 # Sembrar histórico representativo de métricas, reparaciones y log de auditoría:
 php bin/seed_demo_metrics.php
+
+# Cargar el histórico de averías atendidas —completadas, en garantía y reabiertas— para
+# probar las estadísticas, el indicador de reincidencias y el desglose por técnico
+# contra el motor activo (PostgreSQL en Supabase o MariaDB local):
+php bin/seed_demo_history.php
 ```
 
 #### Entorno Cloud / Producción (Render, TiDB Cloud, Aiven):
@@ -358,20 +363,20 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 258 suites · 9.873 aserciones
+batería global: 259 suites · 9.893 aserciones
 
 ```text
 ======================================================================
  RESUMEN DE EJECUCIÓN GLOBAL (T-39)
 ======================================================================
  Tiempo de ejecución total : 142.00 segundos  (variable en cada corrida)
- Suites de pruebas PHP Unit : 112 / 112 pasadas
+ Suites de pruebas PHP Unit : 113 / 113 pasadas
  Suites de pruebas JS Unit  : 66 / 66 pasadas
  Suites de Integración PHP  : 79 / 79 pasadas
  Suites E2E Manuales (T-40): 1 / 1 pasadas
  ──────────────────────────────────────────────────────────────────
- Total Suites Ejecutadas    : 258
- Total Aserciones Evaluadas : 9.873
+ Total Suites Ejecutadas    : 259
+ Total Aserciones Evaluadas : 9.893
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
@@ -410,7 +415,8 @@ gestor-incidencias-vending/
 │   ├── init_cloud_db.php         # Inicializador automático para MySQL/TiDB Cloud
 │   ├── migrate.php               # Migrador DDL idempotente (esquema + migraciones 003-013)
 │   ├── seed.php                  # Sembrador CLI del catálogo base
-│   ├── seed_demo_metrics.php     # Sembrador de métricas históricas y auditoría
+│   ├── seed_demo_metrics.php     # Sembrador de métricas históricas y auditoría (fixture del motor local)
+│   ├── seed_demo_history.php     # Histórico de averías atendidas (garantías y reincidencias) para probar estadísticas (ambos motores)
 │   ├── create_bizum_case.php     # Script CLI de caso demo de reintegro por Bizum
 │   └── sanitary_clock_sweep.php  # Barrido CLI del Reloj Sanitario Biológico (mismo reloj que el endpoint cron)
 ├── database/
@@ -418,7 +424,8 @@ gestor-incidencias-vending/
 │   ├── cloud_init.sql            # Script unificado integral para despliegues cloud
 │   ├── migrations/               # DDL incrementales idempotentes 003-018 (auditoría, CRUD, preventivos, repuestos, mapa, reintegros y PIN, bloqueo de login, pausa de sede, cancelación por inactividad y visibilidad del barrido sanitario)
 │   ├── seeds.sql                 # Semillas SQL del catálogo base (referencia)
-│   └── DemoMetricsSeeder.php     # Generador de histórico de averías, reaperturas por garantía y auditoría
+│   ├── DemoMetricsSeeder.php     # Generador de histórico de averías, reaperturas por garantía y auditoría
+│   └── DemoHistorySeeder.php     # Histórico de demostración portable: 17 averías (13 cerradas y 4 en garantía, dos reabiertas), traza y auditoría
 ├── docs/
 │   ├── design.md                 # Especificación de tokens visuales Docker
 │   ├── manual_0_analisis_problema.md # Análisis de negocio y reglas de vending
@@ -468,7 +475,7 @@ gestor-incidencias-vending/
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 258 suites (100% verde)
+    ├── run_all.php               # Ejecutor global de la batería de 259 suites (100% verde)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)
     ├── unit/                     # Pruebas unitarias de lógica pura, geometría y contratos
