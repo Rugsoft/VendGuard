@@ -192,7 +192,16 @@ $reopenRequest = function (int $slotIndex, string $ticketCode, string $reason) u
 // =====================================================================
 echo "\n--- Caso 1: Reapertura efectiva emite un único REOPEN_TICKET ---\n";
 
-$recentResolvedAt = (new DateTimeImmutable())->sub(new DateInterval('PT2H'))->format('Y-m-d H:i:s');
+// Los instantes del escenario se calculan en **UTC**, no en la hora local de la máquina:
+// `incidents.resolved_at` es `timestamptz` y la sesión del banco va en UTC, así que un instante
+// escrito en hora local se reinterpreta como UTC y la ventana de 48 h se desplaza el huso
+// entero. El caso de la garantía vencida quedaba **justo en el borde** —50 h locales se
+// convertían en 48 h exactas— y su veredicto dependía del segundo en que corriera la suite. En
+// UTC, «50 h» son 50 h y el caso es determinista (EARS-13.10: la divergencia se resuelve a favor
+// del contrato del motor único, cuya columna lleva zona horaria).
+$utcNow = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+
+$recentResolvedAt = $utcNow->sub(new DateInterval('PT2H'))->format('Y-m-d H:i:s');
 $ticket1 = $createResolved(0, 'INC-2026-AUD01', $recentResolvedAt);
 $incident1 = $incidentRepo->findByTicketCode($ticket1);
 
@@ -253,7 +262,7 @@ $assert('1.9 El registro de auditoría es de solo adición: el emisor no expone 
 // =====================================================================
 echo "\n--- Caso 2: Reapertura fuera de la ventana de 48 h ---\n";
 
-$expiredResolvedAt = (new DateTimeImmutable())->sub(new DateInterval('PT50H'))->format('Y-m-d H:i:s');
+$expiredResolvedAt = $utcNow->sub(new DateInterval('PT50H'))->format('Y-m-d H:i:s');
 $ticket2 = $createResolved(1, 'INC-2026-AUD02', $expiredResolvedAt);
 $eventsBeforeExpired = count($auditSink->events);
 
@@ -270,7 +279,7 @@ $assert('2.2 La reapertura rechazada no deja evento de auditoría',
 // =====================================================================
 echo "\n--- Caso 3: Tercera reincidencia bloqueada como Avería Crónica ---\n";
 
-$ticket3 = $createResolved(2, 'INC-2026-AUD03', (new DateTimeImmutable())->sub(new DateInterval('PT1H'))->format('Y-m-d H:i:s'));
+$ticket3 = $createResolved(2, 'INC-2026-AUD03', $utcNow->sub(new DateInterval('PT1H'))->format('Y-m-d H:i:s'));
 $incident3 = $incidentRepo->findByTicketCode($ticket3);
 if ($incident3 !== null) {
     // Dos reaperturas previas registradas en el historial inmutable (EARS 9.3).

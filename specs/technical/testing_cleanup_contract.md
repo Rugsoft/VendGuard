@@ -286,7 +286,7 @@ culpable **antes** de borrar nada (§8.5).
 Suites que crean maestras y declaran el gancho hoy: `AdminLocationsEndpointTest`,
 `AdminMachinesEndpointTest`, `AdminUsersEndpointTest`, `CoordinatorRouteMapApiTest`,
 `PdoLocationRepositoryTest`, `PdoUserRepositoryTest`, `PendingInfoConstitutionalTest`,
-`ResolveIncidentEndpointTest`, `SiteAccessCodeTest`,
+`ResolveIncidentEndpointTest`, `SeedRunnerSingleEngineTest`, `SiteAccessCodeTest`,
 `SiteManagerRouteDataSegregationTest`, `TechnicianRouteEndpointTest`,
 `TechnicianRouteMapApiTest` y la propia `HarnessResidueGuardTest`.
 
@@ -295,6 +295,14 @@ Las suites que limpian a mano en su camino feliz —`AdminMachinesEndpointTest` 
 precisamente para el camino que no llega al final: un error fatal a mitad dejaba la
 sede y la cuenta en el banco, que es la fuga que se midió en vivo antes de este
 cierre.
+
+**Alcance del estado que se restituye.** El freno de intentos de las **cuentas** del
+catálogo (`users.login_attempts`, `users.login_locked_until`) forma parte de la
+restitución; el de las **sedes** (`locations.login_attempts`,
+`locations.login_locked_until`) no: lo rearma el reencuentro del sembrador en la fase
+de cierre. Una suite que bloquee una sede limpia su propio bloqueo al terminar
+—`SiteAccessCodeTest` lo hace sobre `SEDE-BCN-02`, que es del catálogo— y no puede
+confiar el de la sede al gancho.
 
 ### 8.4 La mitad que ya estaba cerrada
 
