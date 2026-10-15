@@ -41,9 +41,7 @@ $pdo = ConnectionFactory::getConnection();
 // suite crea sedes `SEDE-TEST-*` para probar las claves de centro y el gancho de
 // apagado corre también tras un error fatal, que es el camino en el que un
 // `finally` no llega y por el que el residuo se acumulaba (hallazgo F-4).
-register_shutdown_function(static function () use ($pdo): void {
-    TestDataCleaner::purgeTestLocations($pdo);
-});
+TestDataCleaner::registerShutdownRestitution();
 
 (new SeedRunner($pdo))->seedAll();
 

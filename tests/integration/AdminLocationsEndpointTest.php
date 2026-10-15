@@ -41,9 +41,7 @@ $pdo = ConnectionFactory::getConnection();
 // por el que el residuo se acumulaba (hallazgo F-4). Falla en voz alta si no
 // puede drenar: un residuo drenado en silencio es justo lo que persigue el
 // contrato.
-register_shutdown_function(static function () use ($pdo): void {
-    TestDataCleaner::purgeTestLocations($pdo);
-});
+TestDataCleaner::registerShutdownRestitution();
 
 $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedAll();

@@ -110,98 +110,7 @@ class SeedRunner
      */
     public function seedLocations(): int
     {
-        $locations = [
-            [
-                'site_code' => 'SEDE-BCN-01',
-                'name' => 'Hospital del Mar - Edificio Central',
-                'address' => 'Passeig Marítim 25, Barcelona',
-                'latitude' => 41.3853120,
-                'longitude' => 2.1932450,
-                'contact_name' => 'Laura Sanitaria',
-                'contact_phone' => '600111222',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-02',
-                'name' => 'Torre Glòries - Planta 4 Oficinas',
-                'address' => 'Avinguda Diagonal 211, Barcelona',
-                'latitude' => 41.4036290,
-                'longitude' => 2.1895120,
-                'contact_name' => 'Marc Recepción',
-                'contact_phone' => '600333444',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-03',
-                'name' => 'Hospital Universitari de Bellvitge',
-                'address' => 'Carrer de la Feixa Llarga s/n, L\'Hospitalet de Llobregat',
-                'latitude' => 41.3458200,
-                'longitude' => 2.1075400,
-                'contact_name' => 'Carles Coordinador',
-                'contact_phone' => '600555666',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-04',
-                'name' => 'World Trade Center Barcelona',
-                'address' => 'Moll de Barcelona s/n, Barcelona',
-                'latitude' => 41.3725000,
-                'longitude' => 2.1819000,
-                'contact_name' => 'Núria Port',
-                'contact_phone' => '600777888',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-05',
-                'name' => 'Campus Nord UPC - Edifici Nexus',
-                'address' => 'Carrer del Gran Capità 2, Barcelona',
-                'latitude' => 41.3888000,
-                'longitude' => 2.1123000,
-                'contact_name' => 'Albert Campus',
-                'contact_phone' => '600999000',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-06',
-                'name' => 'Parc Tecnològic Barcelona Activa',
-                'address' => 'Carrer Marie Curie 8, Nou Barris, Barcelona',
-                'latitude' => 41.4392000,
-                'longitude' => 2.1758000,
-                'contact_name' => 'Clara Innovació',
-                'contact_phone' => '611222333',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-07',
-                'name' => 'Badalona Centre Mèdic Can Ruti',
-                'address' => 'Carretera de Canyet s/n, Badalona',
-                'latitude' => 41.4645000,
-                'longitude' => 2.2421000,
-                'contact_name' => 'Sergi Logística',
-                'contact_phone' => '611444555',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-08',
-                'name' => 'Sant Cugat Trade Center',
-                'address' => 'Avinguda de les Corts Catalanes 5, Sant Cugat del Vallès',
-                'latitude' => 41.4712000,
-                'longitude' => 2.0689000,
-                'contact_name' => 'Gemma Gestió',
-                'contact_phone' => '611666777',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-09',
-                'name' => 'Fira Gran Via - Pavelló 1',
-                'address' => 'Avinguda Joan Carles I 64, L\'Hospitalet de Llobregat',
-                'latitude' => 41.3547000,
-                'longitude' => 2.1284000,
-                'contact_name' => 'Pau Esdeveniments',
-                'contact_phone' => '611888999',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-10',
-                'name' => 'WTC Almeda Park Cornellà',
-                'address' => 'Plaça de la Pau s/n, Cornellà de Llobregat',
-                'latitude' => 41.3533000,
-                'longitude' => 2.0862000,
-                'contact_name' => 'Mireia Serveis',
-                'contact_phone' => '622111222',
-            ],
-        ];
+        $locations = self::canonicalLocationRows();
 
         $seedDevAccessCodes = self::devAccessCodeSeedingEnabled();
         $writesCanonicalKey = $this->dialect->requiresCanonicalIdentityColumns();
@@ -321,112 +230,7 @@ class SeedRunner
      */
     public function seedMachines(): int
     {
-        $machines = [
-            [
-                'site_code' => 'SEDE-BCN-01',
-                'code' => 'VEND-0101',
-                'model' => 'Sanden Vendo G-Drink',
-                'machine_type' => 'PERISHABLE_FOOD',
-                'floor_wing' => 'Planta Baja - Urgencias',
-                'notes' => 'Máquina de sándwiches y lácteos frescos',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-01',
-                'code' => 'VEND-0102',
-                'model' => 'Bianchi Gaia Espresso',
-                'machine_type' => 'HOT_DRINKS',
-                'floor_wing' => 'Planta 1 - Sala Médica',
-                'notes' => 'Café en grano y bebidas calientes',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-02',
-                'code' => 'VEND-0201',
-                'model' => 'Necta Samba Combo',
-                'machine_type' => 'COMBO',
-                'floor_wing' => 'Planta 4 - Office Este',
-                'notes' => 'Snacks y refrescos variados',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-03',
-                'code' => 'VEND-0301',
-                'model' => 'Sanden Vendo G-Drink',
-                'machine_type' => 'PERISHABLE_FOOD',
-                'floor_wing' => 'Edificio Principal - Hall Consultas',
-                'notes' => 'Comida fresca y ensaladas preparadas',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-03',
-                'code' => 'VEND-0302',
-                'model' => 'Bianchi Gaia Espresso',
-                'machine_type' => 'HOT_DRINKS',
-                'floor_wing' => 'Planta 2 - Sala Descanso Personal',
-                'notes' => 'Café de especialidad e infusiones',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-04',
-                'code' => 'VEND-0401',
-                'model' => 'Necta Samba Combo',
-                'machine_type' => 'COMBO',
-                'floor_wing' => 'Edifici Est - Planta Baixa Lobby',
-                'notes' => 'Bebidas isotónicas y aperitivos saludables',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-05',
-                'code' => 'VEND-0501',
-                'model' => 'Fas Fast 900',
-                'machine_type' => 'SNACKS',
-                'floor_wing' => 'Edifici Nexus I - Entrada Estudiants',
-                'notes' => 'Aperitivos, frutos secos y barritas energéticas',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-05',
-                'code' => 'VEND-0502',
-                'model' => 'Fas Perla',
-                'machine_type' => 'HOT_DRINKS',
-                'floor_wing' => 'Edifici Nexus I - Sala Professorat',
-                'notes' => 'Café largo, cortado y chocolate',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-06',
-                'code' => 'VEND-0601',
-                'model' => 'Azkoyen Palma+',
-                'machine_type' => 'COLD_DRINKS',
-                'floor_wing' => 'Coworking Principal - Zona Cafeteria',
-                'notes' => 'Aguas minerales, zumos y refrescos en lata/botella',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-07',
-                'code' => 'VEND-0701',
-                'model' => 'Sanden Vendo G-Drink',
-                'machine_type' => 'PERISHABLE_FOOD',
-                'floor_wing' => 'Planta 0 - Accés Visitants',
-                'notes' => 'Sandwiches envasados y yogures refrigerados',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-08',
-                'code' => 'VEND-0801',
-                'model' => 'Necta Samba Combo',
-                'machine_type' => 'COMBO',
-                'floor_wing' => 'Atri Central - Planta Baixa',
-                'notes' => 'Bebidas frías y aperitivos mixtos',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-09',
-                'code' => 'VEND-0901',
-                'model' => 'Azkoyen Palma+',
-                'machine_type' => 'COLD_DRINKS',
-                'floor_wing' => 'Pavelló 1 - Porta Nord',
-                'notes' => 'Bebidas frías de alta rotación para ferias',
-            ],
-            [
-                'site_code' => 'SEDE-BCN-10',
-                'code' => 'VEND-1001',
-                'model' => 'Bianchi Gaia Espresso',
-                'machine_type' => 'HOT_DRINKS',
-                'floor_wing' => 'Planta 1 - Mòdul B Corporatiu',
-                'notes' => 'Servicio de café continuo para oficinas',
-            ],
-        ];
+        $machines = self::canonicalMachineRows();
 
         $sql = sprintf(
             "INSERT INTO machines (location_id, code, model, machine_type, floor_wing, notes, is_active, sanitary_status, next_sanitary_inspection_due)
@@ -485,56 +289,7 @@ class SeedRunner
     {
         $passwordHash = password_hash($plainPassword, PASSWORD_BCRYPT, ['cost' => 10]);
 
-        $users = [
-            [
-                'name' => 'Sara Coordinadora',
-                'email' => 'coordinacion@vendguard.internal',
-                'password_hash' => $passwordHash,
-                'role' => 'COORDINATOR',
-                'operator_code' => null,
-                'phone' => '677000111',
-            ],
-            [
-                'name' => 'Jordi Técnico Ruta BCN',
-                'email' => 'jordi.ruta@vendguard.internal',
-                'password_hash' => $passwordHash,
-                'role' => 'TECHNICIAN',
-                'operator_code' => 'OP-01',
-                'phone' => '677222333',
-            ],
-            [
-                'name' => 'Marta Técnica Ruta BCN',
-                'email' => 'marta.ruta@vendguard.internal',
-                'password_hash' => $passwordHash,
-                'role' => 'TECHNICIAN',
-                'operator_code' => 'OP-02',
-                'phone' => '677444555',
-            ],
-            [
-                'name' => 'Carlos Técnico Ruta Sud',
-                'email' => 'carlos.ruta@vendguard.internal',
-                'password_hash' => $passwordHash,
-                'role' => 'TECHNICIAN',
-                'operator_code' => 'OP-03',
-                'phone' => '677666777',
-            ],
-            [
-                'name' => 'Elena Técnica Ruta Nord',
-                'email' => 'elena.ruta@vendguard.internal',
-                'password_hash' => $passwordHash,
-                'role' => 'TECHNICIAN',
-                'operator_code' => 'OP-04',
-                'phone' => '677888999',
-            ],
-            [
-                'name' => 'Marc Técnico Express BCN',
-                'email' => 'marc.ruta@vendguard.internal',
-                'password_hash' => $passwordHash,
-                'role' => 'TECHNICIAN',
-                'operator_code' => 'OP-05',
-                'phone' => '677112233',
-            ],
-        ];
+        $users = self::canonicalUserRows($passwordHash);
 
         $writesCanonicalKey = $this->dialect->requiresCanonicalIdentityColumns();
 
@@ -1404,5 +1159,336 @@ class SeedRunner
             }
             throw new RuntimeException("Error en transacción de semillas: " . $e->getMessage(), (int)$e->getCode(), $e);
         }
+    }
+
+    /**
+     * Catálogo canónico de sedes del parque.
+     *
+     * Es la ÚNICA declaración de las sedes que el sistema considera de negocio: la
+     * siembra las escribe y el criterio de residuo del arnés las lee de aquí
+     * (`canonicalIdentities()`). Una lista paralela en el limpiador sería una segunda
+     * verdad que se degradaría en silencio en cuanto una sede nueva entrara al catálogo.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function canonicalLocationRows(): array
+    {
+        return [
+            [
+                'site_code' => 'SEDE-BCN-01',
+                'name' => 'Hospital del Mar - Edificio Central',
+                'address' => 'Passeig Marítim 25, Barcelona',
+                'latitude' => 41.3853120,
+                'longitude' => 2.1932450,
+                'contact_name' => 'Laura Sanitaria',
+                'contact_phone' => '600111222',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-02',
+                'name' => 'Torre Glòries - Planta 4 Oficinas',
+                'address' => 'Avinguda Diagonal 211, Barcelona',
+                'latitude' => 41.4036290,
+                'longitude' => 2.1895120,
+                'contact_name' => 'Marc Recepción',
+                'contact_phone' => '600333444',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-03',
+                'name' => 'Hospital Universitari de Bellvitge',
+                'address' => 'Carrer de la Feixa Llarga s/n, L\'Hospitalet de Llobregat',
+                'latitude' => 41.3458200,
+                'longitude' => 2.1075400,
+                'contact_name' => 'Carles Coordinador',
+                'contact_phone' => '600555666',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-04',
+                'name' => 'World Trade Center Barcelona',
+                'address' => 'Moll de Barcelona s/n, Barcelona',
+                'latitude' => 41.3725000,
+                'longitude' => 2.1819000,
+                'contact_name' => 'Núria Port',
+                'contact_phone' => '600777888',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-05',
+                'name' => 'Campus Nord UPC - Edifici Nexus',
+                'address' => 'Carrer del Gran Capità 2, Barcelona',
+                'latitude' => 41.3888000,
+                'longitude' => 2.1123000,
+                'contact_name' => 'Albert Campus',
+                'contact_phone' => '600999000',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-06',
+                'name' => 'Parc Tecnològic Barcelona Activa',
+                'address' => 'Carrer Marie Curie 8, Nou Barris, Barcelona',
+                'latitude' => 41.4392000,
+                'longitude' => 2.1758000,
+                'contact_name' => 'Clara Innovació',
+                'contact_phone' => '611222333',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-07',
+                'name' => 'Badalona Centre Mèdic Can Ruti',
+                'address' => 'Carretera de Canyet s/n, Badalona',
+                'latitude' => 41.4645000,
+                'longitude' => 2.2421000,
+                'contact_name' => 'Sergi Logística',
+                'contact_phone' => '611444555',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-08',
+                'name' => 'Sant Cugat Trade Center',
+                'address' => 'Avinguda de les Corts Catalanes 5, Sant Cugat del Vallès',
+                'latitude' => 41.4712000,
+                'longitude' => 2.0689000,
+                'contact_name' => 'Gemma Gestió',
+                'contact_phone' => '611666777',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-09',
+                'name' => 'Fira Gran Via - Pavelló 1',
+                'address' => 'Avinguda Joan Carles I 64, L\'Hospitalet de Llobregat',
+                'latitude' => 41.3547000,
+                'longitude' => 2.1284000,
+                'contact_name' => 'Pau Esdeveniments',
+                'contact_phone' => '611888999',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-10',
+                'name' => 'WTC Almeda Park Cornellà',
+                'address' => 'Plaça de la Pau s/n, Cornellà de Llobregat',
+                'latitude' => 41.3533000,
+                'longitude' => 2.0862000,
+                'contact_name' => 'Mireia Serveis',
+                'contact_phone' => '622111222',
+            ],
+        ];
+    }
+
+    /**
+     * Catálogo canónico de máquinas del parque, ligadas a su sede por `site_code`.
+     *
+     * La identidad de una máquina es su `code`: es lo que el contrato de limpieza usa
+     * para distinguir una máquina del parque sembrado de una que creó una suite.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function canonicalMachineRows(): array
+    {
+        return [
+            [
+                'site_code' => 'SEDE-BCN-01',
+                'code' => 'VEND-0101',
+                'model' => 'Sanden Vendo G-Drink',
+                'machine_type' => 'PERISHABLE_FOOD',
+                'floor_wing' => 'Planta Baja - Urgencias',
+                'notes' => 'Máquina de sándwiches y lácteos frescos',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-01',
+                'code' => 'VEND-0102',
+                'model' => 'Bianchi Gaia Espresso',
+                'machine_type' => 'HOT_DRINKS',
+                'floor_wing' => 'Planta 1 - Sala Médica',
+                'notes' => 'Café en grano y bebidas calientes',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-02',
+                'code' => 'VEND-0201',
+                'model' => 'Necta Samba Combo',
+                'machine_type' => 'COMBO',
+                'floor_wing' => 'Planta 4 - Office Este',
+                'notes' => 'Snacks y refrescos variados',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-03',
+                'code' => 'VEND-0301',
+                'model' => 'Sanden Vendo G-Drink',
+                'machine_type' => 'PERISHABLE_FOOD',
+                'floor_wing' => 'Edificio Principal - Hall Consultas',
+                'notes' => 'Comida fresca y ensaladas preparadas',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-03',
+                'code' => 'VEND-0302',
+                'model' => 'Bianchi Gaia Espresso',
+                'machine_type' => 'HOT_DRINKS',
+                'floor_wing' => 'Planta 2 - Sala Descanso Personal',
+                'notes' => 'Café de especialidad e infusiones',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-04',
+                'code' => 'VEND-0401',
+                'model' => 'Necta Samba Combo',
+                'machine_type' => 'COMBO',
+                'floor_wing' => 'Edifici Est - Planta Baixa Lobby',
+                'notes' => 'Bebidas isotónicas y aperitivos saludables',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-05',
+                'code' => 'VEND-0501',
+                'model' => 'Fas Fast 900',
+                'machine_type' => 'SNACKS',
+                'floor_wing' => 'Edifici Nexus I - Entrada Estudiants',
+                'notes' => 'Aperitivos, frutos secos y barritas energéticas',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-05',
+                'code' => 'VEND-0502',
+                'model' => 'Fas Perla',
+                'machine_type' => 'HOT_DRINKS',
+                'floor_wing' => 'Edifici Nexus I - Sala Professorat',
+                'notes' => 'Café largo, cortado y chocolate',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-06',
+                'code' => 'VEND-0601',
+                'model' => 'Azkoyen Palma+',
+                'machine_type' => 'COLD_DRINKS',
+                'floor_wing' => 'Coworking Principal - Zona Cafeteria',
+                'notes' => 'Aguas minerales, zumos y refrescos en lata/botella',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-07',
+                'code' => 'VEND-0701',
+                'model' => 'Sanden Vendo G-Drink',
+                'machine_type' => 'PERISHABLE_FOOD',
+                'floor_wing' => 'Planta 0 - Accés Visitants',
+                'notes' => 'Sandwiches envasados y yogures refrigerados',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-08',
+                'code' => 'VEND-0801',
+                'model' => 'Necta Samba Combo',
+                'machine_type' => 'COMBO',
+                'floor_wing' => 'Atri Central - Planta Baixa',
+                'notes' => 'Bebidas frías y aperitivos mixtos',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-09',
+                'code' => 'VEND-0901',
+                'model' => 'Azkoyen Palma+',
+                'machine_type' => 'COLD_DRINKS',
+                'floor_wing' => 'Pavelló 1 - Porta Nord',
+                'notes' => 'Bebidas frías de alta rotación para ferias',
+            ],
+            [
+                'site_code' => 'SEDE-BCN-10',
+                'code' => 'VEND-1001',
+                'model' => 'Bianchi Gaia Espresso',
+                'machine_type' => 'HOT_DRINKS',
+                'floor_wing' => 'Planta 1 - Mòdul B Corporatiu',
+                'notes' => 'Servicio de café continuo para oficinas',
+            ],
+        ];
+    }
+
+    /**
+     * Catálogo canónico de cuentas del parque (coordinación y técnicos de ruta).
+     *
+     * El hash entra por parámetro —y por defecto vacío— porque leer la identidad del
+     * catálogo (su `email`) no debe costar un bcrypt: quien siembra pasa el hash real,
+     * quien sólo enumera identidades no lo calcula.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function canonicalUserRows(string $passwordHash = ''): array
+    {
+        return [
+            [
+                'name' => 'Sara Coordinadora',
+                'email' => 'coordinacion@vendguard.internal',
+                'password_hash' => $passwordHash,
+                'role' => 'COORDINATOR',
+                'operator_code' => null,
+                'phone' => '677000111',
+            ],
+            [
+                'name' => 'Jordi Técnico Ruta BCN',
+                'email' => 'jordi.ruta@vendguard.internal',
+                'password_hash' => $passwordHash,
+                'role' => 'TECHNICIAN',
+                'operator_code' => 'OP-01',
+                'phone' => '677222333',
+            ],
+            [
+                'name' => 'Marta Técnica Ruta BCN',
+                'email' => 'marta.ruta@vendguard.internal',
+                'password_hash' => $passwordHash,
+                'role' => 'TECHNICIAN',
+                'operator_code' => 'OP-02',
+                'phone' => '677444555',
+            ],
+            [
+                'name' => 'Carlos Técnico Ruta Sud',
+                'email' => 'carlos.ruta@vendguard.internal',
+                'password_hash' => $passwordHash,
+                'role' => 'TECHNICIAN',
+                'operator_code' => 'OP-03',
+                'phone' => '677666777',
+            ],
+            [
+                'name' => 'Elena Técnica Ruta Nord',
+                'email' => 'elena.ruta@vendguard.internal',
+                'password_hash' => $passwordHash,
+                'role' => 'TECHNICIAN',
+                'operator_code' => 'OP-04',
+                'phone' => '677888999',
+            ],
+            [
+                'name' => 'Marc Técnico Express BCN',
+                'email' => 'marc.ruta@vendguard.internal',
+                'password_hash' => $passwordHash,
+                'role' => 'TECHNICIAN',
+                'operator_code' => 'OP-05',
+                'phone' => '677112233',
+            ],
+        ];
+    }
+
+    /**
+     * Identidad del catálogo canónico del parque, por tabla maestra.
+     *
+     * Devuelve, para cada maestra que el sembrador posee, la columna que la
+     * identifica y los valores canónicos: `tabla => [columna => list<string>]`.
+     *
+     * El contrato de limpieza del arnés lo usa como criterio de pertenencia:
+     * todo lo que está en una maestra y NO aparece aquí lo creó una suite —o
+     * quedó de una corrida muerta—, y la restitución del parque lo drena con su
+     * subárbol. Se deriva de los mismos literales de siembra, así que no puede
+     * desviarse del parque que el sembrador escribe.
+     *
+     * @return array<string, array<string, list<string>>>
+     */
+    public static function canonicalIdentities(): array
+    {
+        return [
+            'locations' => ['site_code' => array_column(self::canonicalLocationRows(), 'site_code')],
+            'machines' => ['code' => array_column(self::canonicalMachineRows(), 'code')],
+            'users' => ['email' => array_column(self::canonicalUserRows(), 'email')],
+        ];
+    }
+
+    /**
+     * Sede canónica de cada máquina del parque: `code => site_code`.
+     *
+     * La identidad dice QUÉ es del catálogo; este mapa dice DÓNDE está. Lo necesita la
+     * restitución del arnés: una máquina del catálogo que una suite reubicó en una sede de
+     * pruebas no se reconstruye adivinando, se devuelve a la sede que declara el propio
+     * sembrador. El mapa sale de los mismos literales que la siembra, así que no puede
+     * desviarse del parque que `seedMachines()` escribe.
+     *
+     * @return array<string, string>
+     */
+    public static function canonicalMachineSites(): array
+    {
+        $sites = [];
+        foreach (self::canonicalMachineRows() as $machine) {
+            $sites[(string)$machine['code']] = (string)$machine['site_code'];
+        }
+
+        return $sites;
     }
 }

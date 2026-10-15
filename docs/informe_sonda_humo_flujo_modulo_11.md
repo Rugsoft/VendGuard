@@ -132,3 +132,12 @@ Recomendación: que cada suite que bloquee, dé de baja o cree sedes restituya e
 - El tiempo hábil del cierre de F-3 (`D.3.4`) se cuenta con `tests/Support/BusinessCalendar.php`, la implementación independiente que el arnés usa también en las suites de integración; la sonda la carga por el bootstrap de pruebas, no la reimplementa.
 - El literal del canal de auditoría de F-1 se verifica **leyendo el controlador**; no se descodifica la fila de `audit_log` desde la sonda.
 - La muestra de MTTR se contrasta replicando la consulta analítica con el mismo ámbito (técnico y ventana), no con un expediente aislado.
+
+---
+
+**Nota de vigencia (2026-10-15).** El §8 del contrato de limpieza que cita este informe se
+rectificó. El criterio de residuo ya no es el prefijo reservado de sedes sino la **identidad
+contra el catálogo canónico del sembrador** (contrato de limpieza §8.1, §8.5), porque el
+prefijo era una lista paralela al catálogo que dejaba fuera familias como `SEDE-TEMP-*` y,
+sobre todo, todo lo que una suite colgase de una **sede semilla**. La guarda
+`HarnessResidueGuardTest` mide hoy el criterio nuevo y conserva el retirado como testigo.

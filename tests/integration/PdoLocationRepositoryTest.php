@@ -28,9 +28,7 @@ $pdo = ConnectionFactory::getConnection();
 // suite crea sedes `SEDE-TEST-*` y el gancho de apagado corre también tras un
 // error fatal, que es el camino en el que un `finally` no llega y por el que el
 // residuo se acumulaba (hallazgo F-4).
-register_shutdown_function(static function () use ($pdo): void {
-    TestDataCleaner::purgeTestLocations($pdo);
-});
+TestDataCleaner::registerShutdownRestitution();
 
 // Asegurar datos semilla base
 $seedRunner = new SeedRunner($pdo);
@@ -262,15 +260,15 @@ $assert(
 $assert("10.5 Un lote vacío no consulta nada y devuelve mapa vacío", $repository->findManyByIds([]) === []);
 
 // Las tres sedes del caso se retiran enteras: la red de seguridad del apagado
-// (`purgeTestLocations`) no debe ser la única que limpia cuando la suite termina normalmente.
+// (`restorePark`) no debe ser la única que limpia cuando la suite termina normalmente.
 TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $batchLocA, $batchLocB, $batchLocC): void {
-    $pdo->prepare("DELETE FROM `locations` WHERE `id` IN (:a, :b, :c)")
+    $pdo->prepare("DELETE FROM locations WHERE id IN (:a, :b, :c)")
         ->execute([':a' => $batchLocA->getId(), ':b' => $batchLocB->getId(), ':c' => $batchLocC->getId()]);
 });
 
 // Limpieza de la sede de test creada
 TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $createdLoc): void {
-    $pdo->prepare("DELETE FROM `locations` WHERE `id` = :id")->execute([':id' => $createdLoc->getId()]);
+    $pdo->prepare("DELETE FROM locations WHERE id = :id")->execute([':id' => $createdLoc->getId()]);
 });
 
 // =====================================================================

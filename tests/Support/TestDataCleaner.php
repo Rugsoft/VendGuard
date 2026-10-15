@@ -9,10 +9,17 @@ declare(strict_types=1);
  * suites de integración. Resuelve la fragilidad histórica en la que cada suite
  * repetía a mano un bloque `DELETE FROM incidents` que, en cuanto una tabla
  * hija con FK ON DELETE RESTRICT quedaba con filas (por un fatal previo que
- * saltó el `finally` de otra suite), reventaba con error 1451.
+ * saltó el `finally` de otra suite), reventaba con el error de clave foránea del
+ * motor (23503).
  *
- * Estrategia (causa raíz, no parche):*   - El orden de borrado NO está hardcodeado: se deriva del grafo real de
-     *     claves foráneas leído de `information_schema`, y las tablas se topologizan
+ * **Motor único (módulo 13):** este limpiador escribe el dialecto del motor que sirve
+ * producción —identificadores desnudos, grafo de claves foráneas leído de `pg_constraint`—,
+ * porque el arnés resuelve su persistencia con la misma ruta que la aplicación. No hay
+ * segunda sintaxis que traducir ni segunda verdad que certificar.
+ *
+ * Estrategia (causa raíz, no parche):
+ *   - El orden de borrado NO está hardcodeado: se deriva del grafo real de
+     *     claves foráneas leído del catálogo del motor, y las tablas se topologizan
      *     para borrar siempre hijas antes que padres.
  *   - El conjunto de tablas a purgar se descubre transitivamente: se parte de
  *     unas raíces y se sigue el grafo de FKs hacia las hijas. Cualquier FK RESTRICT
@@ -22,9 +29,11 @@ declare(strict_types=1);
  *     modo que un fallo a media limpieza no deja la base a medias y no envenena
  *     las siguientes suites.
  *
- * Palabras prohibidas: no se usa `SET FOREIGN_KEY_CHECKS=0` (deja filas huérfanas
- * silenciosas, que es la ceguera que causó el problema) ni se tocan las tablas
- * maestras (users, machines, locations, settings).
+ * Palabras prohibidas: no se desactivan los disparadores ni las restricciones del motor
+ * (`session_replication_role`, `ALTER TABLE … DISABLE TRIGGER`), que dejarían filas
+ * huérfanas silenciosas y saltarían el blindaje del Art. III.1, ni se **vacían** las
+ * maestras (users, machines, locations, settings, audit_log): la restitución del parque
+ * sólo drena sus filas fuera del catálogo canónico del sembrador (§8.5).
  */
 
 final class TestDataCleaner
@@ -77,27 +86,6 @@ final class TestDataCleaner
         'spare_part_compatibilities',
     ];
 
-    /**
-     * Prefijos reservados de las sedes del banco de pruebas (contrato §8.1).
-     *
-     * El seed canónico usa `SEDE-BCN-*` y sólo `SEDE-BCN-*`; cualquier sede que
-     * empiece por estos prefijos la creó una suite y es del arnés. `SEDE-MAP`
-     * cubre las tres familias territoriales (`SEDE-MAP-*`, `SEDE-MAP17-*`,
-     * `SEDE-MAP18-*`) sin enumerarlas. Los prefijos NO se solapan entre sí, de
-     * modo que el recuento por familia no cuenta dos veces la misma fila.
-     */
-    private const TEST_LOCATION_PREFIXES = ['SEDE-TEST-%', 'SEDE-MAP%'];
-
-    /**
-     * Tablas protegidas que SÍ entran en el drenaje de las sedes del banco de
-     * pruebas. Son maestras para `purge()` —no deben vaciarse jamás—, pero aquí
-     * el borrado es dirigido: sólo las filas que cuelgan de una sede de prueba.
-     * El resto de `PROTECTED_TABLES` (users, route_settings,
-     * preventive_settings, audit_log) queda excluido aunque el grafo lo
-     * alcanzase, para que una FK nueva no pueda arrastrar una maestra.
-     */
-    private const TEST_LOCATION_PURGEABLE_MASTERS = ['locations', 'machines'];
-
     /** @var array<string, array<string, string>> tabla => (FK => tabla padre) caché por esquema */
     private static array $fkGraphCache = [];
 
@@ -120,7 +108,7 @@ final class TestDataCleaner
             $deleted = self::withPurgeWindow($pdo, static function () use ($pdo, $order): array {
                 $deleted = [];
                 foreach ($order as $table) {
-                    $stmt = $pdo->exec('DELETE FROM `' . $table . '`');
+                    $stmt = $pdo->exec('DELETE FROM ' . $table);
                     $deleted[$table] = ($stmt === false) ? 0 : (int)$stmt;
                 }
 
@@ -137,26 +125,20 @@ final class TestDataCleaner
     }
 
     /**
-     * Activa o desactiva la señal de purga a nivel de sesión según el driver de la conexión (T-HYBRID-12).
-     * En PostgreSQL: set_config('vendguard.purge', 'on'/'off', false).
-     * En MariaDB / MySQL: la variable de usuario de la purga en 1 o 0.
+     * Abre o cierra la ventana de purga del arnés (Art. III.1) en su **única** forma: el
+     * parámetro de sesión `vendguard.purge` del motor único.
+     *
+     * La forma es una sola —el motor también— porque una regla con dos sintaxis es una regla
+     * con dos verdades: la que se certifica no es la que sirve producción. Nada bajo `src/`
+     * declara este parámetro, de modo que un `DELETE` de la aplicación sigue fallando en voz
+     * alta contra el disparador.
      */
     public static function setSessionPurgeSignal(PDO $pdo, bool $enabled): void
     {
-        $driver = (string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
-        if ($driver === 'pgsql') {
-            $value = $enabled ? 'on' : 'off';
-            $stmt = $pdo->prepare("SELECT set_config('vendguard.purge', :val, false)");
-            $stmt->execute([':val' => $value]);
-            if ($stmt instanceof PDOStatement) {
-                $stmt->closeCursor();
-            }
-        } else {
-            if ($enabled) {
-                $pdo->exec('SET @vendguard_purge = 1');
-            } else {
-                $pdo->exec('SET @vendguard_purge = 0');
-            }
+        $stmt = $pdo->prepare("SELECT set_config('vendguard.purge', :val, false)");
+        $stmt->execute([':val' => $enabled ? 'on' : 'off']);
+        if ($stmt instanceof PDOStatement) {
+            $stmt->closeCursor();
         }
     }
 
@@ -220,11 +202,11 @@ final class TestDataCleaner
             $deleted = self::withPurgeWindow($pdo, static function () use ($pdo, $order, $incidentId): array {
                 $deleted = [];
                 foreach ($order as $table) {
-                    $stmt = $pdo->prepare('DELETE FROM `' . $table . '` WHERE `incident_id` = :id');
+                    $stmt = $pdo->prepare('DELETE FROM ' . $table . ' WHERE incident_id = :id');
                     $stmt->execute([':id' => $incidentId]);
                     $deleted[$table] = $stmt->rowCount();
                 }
-                $stmt = $pdo->prepare('DELETE FROM `incidents` WHERE `id` = :id');
+                $stmt = $pdo->prepare('DELETE FROM incidents WHERE id = :id');
                 $stmt->execute([':id' => $incidentId]);
                 $deleted['incidents'] = $stmt->rowCount();
 
@@ -251,7 +233,7 @@ final class TestDataCleaner
      */
     public static function purgeIncidentsByMachine(PDO $pdo, int $machineId): array
     {
-        return self::purgeMatchingIncidents($pdo, '`machine_id` = :target', [':target' => $machineId]);
+        return self::purgeMatchingIncidents($pdo, 'machine_id = :target', [':target' => $machineId]);
     }
 
     /**
@@ -261,7 +243,7 @@ final class TestDataCleaner
      */
     public static function purgeIncidentByTicket(PDO $pdo, string $ticketCode): array
     {
-        return self::purgeMatchingIncidents($pdo, '`ticket_code` = :target', [':target' => $ticketCode]);
+        return self::purgeMatchingIncidents($pdo, 'ticket_code = :target', [':target' => $ticketCode]);
     }
 
     /**
@@ -271,7 +253,7 @@ final class TestDataCleaner
      */
     public static function purgeIncidentsMatchingTicket(PDO $pdo, string $likePattern): array
     {
-        return self::purgeMatchingIncidents($pdo, '`ticket_code` LIKE :target', [':target' => $likePattern]);
+        return self::purgeMatchingIncidents($pdo, 'ticket_code LIKE :target', [':target' => $likePattern]);
     }
 
     /**
@@ -283,7 +265,7 @@ final class TestDataCleaner
      */
     private static function purgeMatchingIncidents(PDO $pdo, string $condition, array $params): array
     {
-        $stmt = $pdo->prepare('SELECT `id` FROM `incidents` WHERE ' . $condition);
+        $stmt = $pdo->prepare('SELECT id FROM incidents WHERE ' . $condition);
         $stmt->execute($params);
         $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
 
@@ -308,67 +290,213 @@ final class TestDataCleaner
     }
 
     /**
-     * Prefijos reservados de las sedes del banco de pruebas (contrato §8.1).
+     * Maestras del parque que el criterio de residuo vigila y la restitución drena.
+     *
+     * Se deriva del catálogo canónico —la tabla que el sembrador posee es, por
+     * definición, la que el arnés puede restituir—, así que no hay lista paralela
+     * que pueda desviarse.
      *
      * @return list<string>
      */
-    public static function testLocationPrefixes(): array
+    private static function parkMasters(): array
     {
-        return self::TEST_LOCATION_PREFIXES;
+        return array_keys(self::catalogIdentities());
     }
 
     /**
-     * Detector de residuo: cuántas sedes del banco de pruebas quedan en la base.
+     * Identidad canónica del parque, declarada por el propio sembrador.
      *
-     * Es la única lectura del criterio de pertenencia —el prefijo reservado— y
-     * `purgeTestLocations()` lo usa como puerta, de modo que lo que el detector
-     * ve y lo que la purga drena son exactamente el mismo conjunto. Sólo lee.
-     *
-     * @return array{total:int, by_prefix:array<string,int>}
+     * @return array<string, array<string, list<string>>>
      */
-    public static function countTestLocations(PDO $pdo): array
+    private static function catalogIdentities(): array
     {
-        $byPrefix = [];
+        return \VendGuard\Infrastructure\Database\SeedRunner::canonicalIdentities();
+    }
+
+    /**
+     * Detector de residuo del parque (contrato §8.5): filas de las maestras del
+     * catálogo que NO pertenecen al catálogo canónico del sembrador.
+     *
+     * Es el único lugar donde se lee el criterio de pertenencia, y `restorePark()` lo
+     * usa como puerta, de modo que lo que el detector ve y lo que la restitución drena
+     * son exactamente el mismo conjunto. Sólo lee.
+     *
+     * @return array{total:int, by_table:array<string,int>, samples:array<string,list<string>>}
+     */
+    public static function countParkResidue(PDO $pdo): array
+    {
+        $byTable = [];
+        $samples = [];
         $total = 0;
-        $stmt = $pdo->prepare('SELECT COUNT(*) FROM `locations` WHERE `site_code` LIKE :pattern');
-        foreach (self::TEST_LOCATION_PREFIXES as $prefix) {
-            $stmt->execute([':pattern' => $prefix]);
-            $count = (int)$stmt->fetchColumn();
-            $byPrefix[$prefix] = $count;
+
+        foreach (self::parkResidueSpecs($pdo) as $table => $spec) {
+            $count = count($spec['residue_ids']);
+            $byTable[$table] = $count;
             $total += $count;
+
+            if ($count > 0) {
+                $values = $spec['residue_values'];
+                sort($values, SORT_STRING);
+                $samples[$table] = array_slice($values, 0, 5);
+            }
         }
 
-        return ['total' => $total, 'by_prefix' => $byPrefix];
+        return ['total' => $total, 'by_table' => $byTable, 'samples' => $samples];
     }
 
     /**
-     * Restitución del parque: drena el subárbol completo de las sedes del banco
-     * de pruebas y **nunca** toca una sede semilla `SEDE-BCN-*`.
+     * Restitución del catálogo: devuelve a su sede canónica las máquinas del parque que una
+     * suite haya reubicado y que, de otro modo, entrarían en el plan de drenaje como hijas
+     * de una sede del arnés.
      *
-     * El blindaje de `PROTECTED_TABLES` sobre `locations` deja el otro lado
-     * descubierto: las sedes que crean las suites no las retiraba nadie y el
-     * banco acumulaba filas en cada corrida (hallazgo F-4 del módulo 11). Aquí el
-     * borrado es **dirigido por prefijo reservado**, no un vaciado de la maestra.
+     * La sede de destino **no se adivina**: la declara el mismo catálogo que siembra el
+     * parque (`SeedRunner::canonicalMachineSites()`), de modo que la restitución devuelve la
+     * fila al estado que el sembrador escribe. El síndrome que esto cierra no es teórico:
+     * `AdminMachinesEndpointTest` traslada `VEND-0101` a su sede de pruebas y sólo lo devuelve
+     * al final de su camino feliz, así que una muerte a mitad dejaba una máquina de negocio
+     * apuntando a una sede del arnés —y el sembrador no repara ese vínculo, porque su upsert
+     * no reescribe `location_id`—.
      *
-     * Las seis tablas que referencian `locations` y las que cuelgan de ellas lo
-     * hacen con `ON DELETE RESTRICT`, así que un `DELETE FROM locations` a secas
-     * fracasa en cuanto la suite creó una máquina o una avería sobre su sede. El
-     * plan se deriva otra vez del grafo real y la condición de cada tabla se
-     * encadena con subconsultas hacia la condición raíz, de modo que una FK nueva
-     * hacia `locations` o hacia sus hijas entra sola en el plan.
+     * Si la sede canónica no existiera, la fila no se toca —devolverla pondría `location_id`
+     * en nulo, que es peor que el desvío— y el drenaje lo denuncia en su comprobación previa.
+     * Con el parque en su sitio no ejecuta ninguna sentencia.
      *
-     * Sin sedes de prueba la operación no ejecuta una sola sentencia.
-     *
-     * @return array<string, int> tabla => filas borradas
+     * @return array<string, string> código de máquina => sede canónica a la que se devolvió
      */
-    public static function purgeTestLocations(PDO $pdo): array
+    public static function restituteCatalogMachines(PDO $pdo): array
     {
-        $locationIds = self::testLocationIds($pdo);
-        if ($locationIds === []) {
+        $sites = \VendGuard\Infrastructure\Database\SeedRunner::canonicalMachineSites();
+        if ($sites === []) {
             return [];
         }
 
-        $plan = self::testLocationSubtreePlan($pdo, $locationIds);
+        $update = $pdo->prepare(
+            'UPDATE machines SET location_id = (SELECT id FROM locations WHERE site_code = :site)'
+            . ' WHERE code = :code'
+            . ' AND (SELECT id FROM locations WHERE site_code = :site) IS NOT NULL'
+            . ' AND location_id IS DISTINCT FROM (SELECT id FROM locations WHERE site_code = :site)'
+        );
+
+        $moved = [];
+        foreach ($sites as $code => $site) {
+            $update->execute([':site' => $site, ':code' => $code]);
+            if ($update->rowCount() > 0) {
+                $moved[$code] = $site;
+            }
+        }
+
+        return $moved;
+    }
+
+    /**
+     * Restitución de las cuentas del catálogo: el freno de intentos fallidos y el bloqueo
+     * temporal de las cuentas internas vuelven a cero.
+     *
+     * El sembrador limpia ese freno en las **sedes** —lo dice su propio docblock, para que la
+     * batería parta siempre del mismo estado— pero no en las cuentas internas, así que una
+     * suite que prueba el bloqueo por intentos fallidos y muere antes de reiniciarlo deja una
+     * cuenta semilla cerrada para la corrida siguiente: la suite que se autentica con ella
+     * falla con `ACCOUNT_LOCKED` (423) y el defecto parece suyo. Es el mismo síndrome que F-4
+     * —estado del catálogo que nadie restituye—, medido en vivo: `UserLoginLockoutTest`
+     * bloquea `jordi.ruta@vendguard.internal` y muere en su aserción 103, y `AuthControllerTest`
+     * —que sólo inicia sesión— fallaba en la corrida siguiente con «cuenta temporalmente
+     * bloqueada».
+     *
+     * Sólo escribe si hay algo que reiniciar.
+     *
+     * @return list<string> cuentas del catálogo cuyo freno se reinició
+     */
+    public static function restituteCatalogUsers(PDO $pdo): array
+    {
+        $catalog = self::catalogIdentities();
+        $emails = array_map(
+            static fn($email): string => (string)$email,
+            $catalog['users']['email'] ?? []
+        );
+        if ($emails === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = [];
+        foreach ($emails as $index => $email) {
+            $key = ':catalogEmail' . $index;
+            $placeholders[] = $key;
+            $params[$key] = $email;
+        }
+        $inCatalog = 'email IN (' . implode(', ', $placeholders) . ')';
+
+        $stmt = $pdo->prepare(
+            'SELECT email FROM users WHERE ' . $inCatalog
+            . ' AND (login_attempts <> 0 OR login_locked_until IS NOT NULL)'
+        );
+        $stmt->execute($params);
+        $drifted = array_map(static fn($email): string => (string)$email, $stmt->fetchAll(PDO::FETCH_COLUMN));
+
+        if ($drifted === []) {
+            return [];
+        }
+
+        $pdo->prepare(
+            'UPDATE users SET login_attempts = 0, login_locked_until = NULL WHERE ' . $inCatalog
+        )->execute($params);
+
+        return $drifted;
+    }
+
+    /**
+     * Restitución del parque: drena el subárbol completo de todo lo que NO pertenece
+     * al catálogo canónico, y **nunca** toca una fila del catálogo.
+     *
+     * El blindaje de `PROTECTED_TABLES` sobre las maestras dejaba el otro lado
+     * descubierto: lo que crean las suites no lo retiraba nadie y el banco acumulaba
+     * filas en cada corrida (hallazgo F-4 del módulo 11). El criterio del prefijo
+     * reservado cerró parte de ese agujero y dejó el resto: una suite que nombrara su
+     * sede de otra forma quedaba fuera, y nada veía lo que otra colgase de una **sede
+     * semilla** (una máquina nueva en una sede del catálogo) ni una cuenta creada por
+     * una suite. El criterio es ahora la identidad contra el catálogo del sembrador
+     * —una sola verdad, la que el sembrador escribe— y por eso alcanza las tres
+     * maestras del parque: sedes, máquinas y cuentas.
+     *
+     * La condición de borrado de cada tabla se encadena por el grafo real de claves
+     * foráneas hacia las identidades fuera de catálogo, así que **una FK nueva hacia
+     * cualquiera de las maestras o hacia sus hijas entra sola en el plan**.
+     *
+     * Antes de borrar, el catálogo se restituye y se comprueba. **Restituir:** una máquina del
+     * catálogo que una suite reubicó en una sede del arnés vuelve a la sede que el catálogo
+     * declara (`restituteCatalogMachines()`), porque el drenaje la arrastraría como hija y
+     * destruiría parque de negocio en silencio. **Comprobar (§8.5):** si después de la
+     * restitución alguna identidad canónica siguiese dentro del plan —sólo posible si el
+     * catálogo no puede situarla—, se aborta nombrando al culpable antes de borrar nada.
+     *
+     * Sin residuo la operación no ejecuta una sola sentencia.
+     *
+     * @return array<string, int> tabla => filas borradas
+     */
+    public static function restorePark(PDO $pdo): array
+    {
+        $specs = self::parkResidueSpecs($pdo);
+
+        $roots = [];
+        foreach ($specs as $table => $spec) {
+            if ($spec['residue_ids'] !== []) {
+                $roots[$table] = 'id IN (' . implode(', ', array_map('intval', $spec['residue_ids'])) . ')';
+            }
+        }
+
+        if ($roots === []) {
+            return [];
+        }
+
+        // Antes de planificar el drenaje, el parque se restituye: una máquina del catálogo que
+        // una suite reubicó en una sede del arnés volvería al plan como hija, y el drenaje la
+        // arrastraría. Se la devuelve a la sede que declara el catálogo y sólo después se
+        // planifica el borrado; el catálogo nunca se drena, se restituye.
+        self::restituteCatalogMachines($pdo);
+
+        $plan = self::parkSubtreePlan($pdo, $roots, self::parkMasters());
+        self::assertCatalogOutOfPlan($pdo, $plan, $specs, $roots);
+
         $order = self::topoSortChildrenFirst($pdo, array_keys($plan));
 
         $pdo->beginTransaction();
@@ -376,15 +504,15 @@ final class TestDataCleaner
             $deleted = self::withPurgeWindow($pdo, static function () use ($pdo, $order, $plan): array {
                 $deleted = [];
                 foreach ($order as $table) {
-                    // La condición jamás puede degradarse a un vaciado: siempre
-                    // nace de una lista explícita de id de sede de prueba.
+                    // La condición jamás puede degradarse a un vaciado: siempre nace de
+                    // las identidades fuera de catálogo, encadenadas por el grafo.
                     if (!isset($plan[$table]) || $plan[$table] === '') {
                         throw new RuntimeException(
-                            'El plan de drenaje de sedes de prueba no tiene condición para la tabla `'
+                            'El plan de restitución del parque no tiene condición para la tabla `'
                             . $table . '`; se aborta antes de borrar nada.'
                         );
                     }
-                    $stmt = $pdo->exec('DELETE FROM `' . $table . '` WHERE ' . $plan[$table]);
+                    $stmt = $pdo->exec('DELETE FROM ' . $table . ' WHERE ' . $plan[$table]);
                     $deleted[$table] = ($stmt === false) ? 0 : (int)$stmt;
                 }
 
@@ -401,51 +529,110 @@ final class TestDataCleaner
     }
 
     /**
-     * Identificadores de las sedes del banco de pruebas, o lista vacía.
+     * Registra la restitución del parque al apagarse el proceso (contrato §8.3).
      *
-     * @return list<int>
+     * Es el gancho que toda suite creadora necesita y el único sitio donde se declara:
+     * corre **también tras un error fatal** —el camino por el que un `finally` no
+     * llega y por el que el residuo se acumulaba (F-4)— y cubre por igual la ejecución
+     * suelta de la suite (`php tests/integration/X.php`). Restituye las dos mitades del
+     * parque: el estado de las cuentas del catálogo y el residuo fuera de catálogo.
+     *
+     * Un fallo del drenaje en el apagado no se silencia: se deja subir, de modo que la
+     * suite termina con error visible en lugar de declararse en verde sobre un banco
+     * que acaba de quedar sucio. La red de cierre de `run_all.php` vuelve a medirlo
+     * pase lo que pase.
      */
-    private static function testLocationIds(PDO $pdo): array
+    public static function registerShutdownRestitution(): void
     {
-        $parts = [];
-        $params = [];
-        foreach (self::TEST_LOCATION_PREFIXES as $index => $prefix) {
-            $parts[] = '`site_code` LIKE :pattern' . $index;
-            $params[':pattern' . $index] = $prefix;
+        static $registered = false;
+        if ($registered) {
+            return;
         }
+        $registered = true;
 
-        $stmt = $pdo->prepare('SELECT `id` FROM `locations` WHERE ' . implode(' OR ', $parts) . ' ORDER BY `id`');
-        $stmt->execute($params);
+        register_shutdown_function(static function (): void {
+            $pdo = \VendGuard\Infrastructure\Database\ConnectionFactory::getConnection();
 
-        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+            // El freno de intentos de las cuentas del catálogo es estado, no residuo: una suite
+            // que prueba el bloqueo y muere a mitad no deja ninguna fila fuera de catálogo, pero
+            // sí una cuenta semilla cerrada para la corrida siguiente. Se restituye siempre.
+            self::restituteCatalogUsers($pdo);
+            self::restorePark($pdo);
+        });
     }
 
     /**
-     * Plan de borrado del subárbol de las sedes de prueba: tabla => condición SQL.
+     * Especificación del residuo por maestra: columna de identidad, valores canónicos
+     * y las filas que quedan fuera del catálogo (con su `id`, que es la raíz del
+     * drenaje).
+     *
+     * @return array<string, array{column:string, canonical:list<string>, residue_ids:list<int>, residue_values:list<string>, condition:string, params:array<string,string>}>
+     */
+    private static function parkResidueSpecs(PDO $pdo): array
+    {
+        $specs = [];
+
+        foreach (self::catalogIdentities() as $table => $identity) {
+            foreach ($identity as $column => $canonical) {
+                $values = array_map(static fn($value): string => (string)$value, array_values($canonical));
+
+                $placeholders = [];
+                $params = [];
+                foreach ($values as $index => $value) {
+                    $key = ':catalog' . $index;
+                    $placeholders[] = $key;
+                    $params[$key] = $value;
+                }
+
+                // `IS NULL` viaja con el `NOT IN`: una fila sin identidad tampoco está
+                // en el catálogo, y `NOT IN` sola no la vería (semántica de NULL).
+                $condition = '(' . $column . ' NOT IN (' . implode(', ', $placeholders) . ') OR ' . $column . ' IS NULL)';
+
+                $stmt = $pdo->prepare('SELECT id, ' . $column . ' FROM ' . $table . ' WHERE ' . $condition);
+                $stmt->execute($params);
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                $specs[$table] = [
+                    'column' => $column,
+                    'canonical' => $values,
+                    'residue_ids' => array_map(static fn(array $row): int => (int)$row['id'], $rows),
+                    'residue_values' => array_map(static fn(array $row): string => (string)$row[$column], $rows),
+                    'condition' => $condition,
+                    'params' => $params,
+                ];
+            }
+        }
+
+        return $specs;
+    }
+
+    /**
+     * Plan de borrado del subárbol del residuo: tabla => condición SQL.
      *
      * La condición de cada tabla se deriva del grafo real de claves foráneas
-     * encadenando subconsultas hacia la raíz (`locations` restringida a los id
-     * recibidos). Las hijas profundas —las que no tienen columna propia hacia la
-     * raíz— quedan cubiertas por esa cadena, que es lo que evita el error 1451.
+     * encadenando subconsultas hacia las condiciones raíz —las identidades fuera de
+     * catálogo de cada maestra—. Las hijas profundas —las que no tienen columna propia
+     * hacia una raíz— quedan cubiertas por esa cadena, que es lo que evita el error de
+     * clave foránea del motor al retirar una sede con parque.
      *
-     * @param list<int> $locationIds
+     * @param array<string, string> $roots tabla raíz => condición
+     * @param list<string> $purgeableMasters maestras que sí se pueden drenar
      * @return array<string, string>
      */
-    private static function testLocationSubtreePlan(PDO $pdo, array $locationIds): array
+    private static function parkSubtreePlan(PDO $pdo, array $roots, array $purgeableMasters): array
     {
         $graph = self::loadFkGraph($pdo);
-        $idList = implode(',', array_map('intval', $locationIds));
 
-        // Recorrido descendente desde la raíz: cada tabla alcanzada recuerda por
-        // qué columnas cuelga de una tabla ya alcanzada.
-        $affected = ['locations' => true];
+        // Recorrido descendente desde cada raíz: cada tabla alcanzada recuerda por qué
+        // columnas cuelga de una tabla ya alcanzada.
+        $affected = array_fill_keys(array_keys($roots), true);
         $links = [];
-        $queue = ['locations'];
+        $queue = array_keys($roots);
         while ($queue !== []) {
             $parent = array_shift($queue);
             foreach ($graph[$parent]['children'] ?? [] as $child => $column) {
                 if (in_array($child, self::PROTECTED_TABLES, true)
-                    && !in_array($child, self::TEST_LOCATION_PURGEABLE_MASTERS, true)) {
+                    && !in_array($child, $purgeableMasters, true)) {
                     continue;
                 }
                 $links[$child][$column] = $parent;
@@ -456,7 +643,7 @@ final class TestDataCleaner
             }
         }
 
-        $conditions = ['locations' => '`id` IN (' . $idList . ')'];
+        $conditions = $roots;
         $resolving = [];
         $resolve = function (string $table) use (&$resolve, &$conditions, &$resolving, $links): string {
             if (isset($conditions[$table])) {
@@ -464,20 +651,20 @@ final class TestDataCleaner
             }
             if (isset($resolving[$table])) {
                 throw new RuntimeException(
-                    'Ciclo de claves foráneas al derivar el plan de drenaje de la tabla `' . $table . '`.'
+                    'Ciclo de claves foráneas al derivar el plan de restitución de la tabla `' . $table . '`.'
                 );
             }
             $resolving[$table] = true;
 
             $parts = [];
             foreach ($links[$table] ?? [] as $column => $parent) {
-                $parts[] = '`' . $column . '` IN (SELECT `id` FROM `' . $parent . '` WHERE ' . $resolve($parent) . ')';
+                $parts[] = $column . ' IN (SELECT id FROM ' . $parent . ' WHERE ' . $resolve($parent) . ')';
             }
             unset($resolving[$table]);
 
             if ($parts === []) {
                 throw new RuntimeException(
-                    'La tabla `' . $table . '` entró en el plan de drenaje de sedes sin vía hacia la raíz.'
+                    'La tabla `' . $table . '` entró en el plan de restitución sin vía hacia una raíz.'
                 );
             }
 
@@ -489,6 +676,50 @@ final class TestDataCleaner
         }
 
         return $conditions;
+    }
+
+    /**
+     * Red del catálogo (contrato §8.5), previa a cualquier borrado: después de restituir el
+     * vínculo declarado, ninguna fila de identidad canónica puede quedar dentro del plan de
+     * drenaje. Lo que aquí salta es lo que el catálogo **no** puede situar (una sede canónica
+     * ausente en el banco), y por eso se denuncia en vez de resolverse en silencio.
+     *
+     * @param array<string, string> $plan
+     * @param array<string, array{column:string, canonical:list<string>, residue_ids:list<int>, residue_values:list<string>, condition:string, params:array<string,string>}> $specs
+     * @param array<string, string> $roots
+     */
+    private static function assertCatalogOutOfPlan(PDO $pdo, array $plan, array $specs, array $roots): void
+    {
+        foreach ($specs as $table => $spec) {
+            if (isset($roots[$table]) || !isset($plan[$table])) {
+                continue;
+            }
+
+            $placeholders = [];
+            $params = [];
+            foreach ($spec['canonical'] as $index => $value) {
+                $key = ':canonical' . $index;
+                $placeholders[] = $key;
+                $params[$key] = $value;
+            }
+
+            $stmt = $pdo->prepare(
+                'SELECT ' . $spec['column'] . ' FROM ' . $table
+                . ' WHERE (' . $plan[$table] . ') AND ' . $spec['column'] . ' IN (' . implode(', ', $placeholders) . ')'
+            );
+            $stmt->execute($params);
+            $trapped = array_map(static fn($value): string => (string)$value, $stmt->fetchAll(PDO::FETCH_COLUMN));
+
+            if ($trapped !== []) {
+                throw new RuntimeException(sprintf(
+                    'Restitución del parque abortada: %d fila(s) del catálogo canónico de `%s` (%s) sigue(n) dentro del plan de drenaje y el borrado las arrastraría. '
+                    . 'El catálogo no puede situarlas (¿falta su sede canónica en el banco?): repón el parque sembrado o retíralas del alcance de la suite que las movió (contrato de limpieza §8.5).',
+                    count($trapped),
+                    $table,
+                    implode(', ', array_slice($trapped, 0, 5))
+                ));
+            }
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -508,15 +739,23 @@ final class TestDataCleaner
      */
     private static function loadFkGraph(PDO $pdo): array
     {
-        $schema = (string)$pdo->query('SELECT DATABASE()')->fetchColumn();
+        $schema = (string)$pdo->query('SELECT current_schema()')->fetchColumn();
         $cacheKey = $schema;
         if (isset(self::$fkGraphCache[$cacheKey])) {
             return self::$fkGraphCache[$cacheKey];
         }
 
-        $sql = 'SELECT k.TABLE_NAME AS child, k.COLUMN_NAME AS col, k.REFERENCED_TABLE_NAME AS parent
-                FROM information_schema.KEY_COLUMN_USAGE k
-                WHERE k.REFERENCED_TABLE_SCHEMA = :schema AND k.REFERENCED_TABLE_NAME IS NOT NULL';
+        // El grafo se lee del catálogo real de PostgreSQL (`pg_constraint`), no de
+        // `information_schema.key_column_usage`: esa vista es de MySQL y en el motor único
+        // no declara a qué tabla apunta cada clave foránea.
+        $sql = 'SELECT rel.relname AS child, att.attname AS col, pref.relname AS parent
+                FROM pg_constraint con
+                JOIN pg_class rel ON rel.oid = con.conrelid
+                JOIN pg_class pref ON pref.oid = con.confrelid
+                JOIN pg_namespace ns ON ns.oid = con.connamespace
+                JOIN LATERAL unnest(con.conkey) AS k(attnum) ON TRUE
+                JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = k.attnum
+                WHERE con.contype = \'f\' AND ns.nspname = :schema';
         $stmt = $pdo->prepare($sql);
         $stmt->execute([':schema' => $schema]);
 

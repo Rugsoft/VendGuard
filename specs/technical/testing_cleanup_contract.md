@@ -95,8 +95,11 @@ Orden que produce hoy (14 tablas, `incidents` necesariamente la última):
 | `purgeIncidentsByMachine(PDO, int $machineId): array` | Ídem para todos los incidentes de una máquina. |
 | `purgeIncidentByTicket(PDO, string $ticketCode): array` | Ídem para un ticket concreto. |
 | `purgeIncidentsMatchingTicket(PDO, string $like): array` | Ídem para tickets que casan con un patrón `LIKE`. |
-| `countTestLocations(PDO): array` | **Detector de residuo.** Cuenta las sedes del banco de pruebas por familia de prefijo reservado (§8). Sólo lectura. |
-| `purgeTestLocations(PDO): array` | **Restitución del parque.** Drena el subárbol completo de las sedes del banco de pruebas (§8) sin tocar las sedes semilla. |
+| `countParkResidue(PDO): array` | **Detector de residuo.** Cuenta las filas de las maestras del parque (sedes, máquinas y cuentas) que no pertenecen al catálogo canónico del sembrador (§8), con la identidad de las muestras. Sólo lectura. |
+| `restorePark(PDO): array` | **Restitución del parque.** Restituye el vínculo máquina→sede del catálogo y drena el subárbol completo de las filas fuera de catálogo (§8.2), sin tocar una sola fila del catálogo. Aborta sólo lo que el catálogo no puede situar (§8.5). |
+| `restituteCatalogMachines(PDO): array` | **Restitución del vínculo.** Devuelve a su sede canónica las máquinas del parque que una suite reubicó (§8.5); la invoca `restorePark()`. Devuelve `code => site_code` de las devueltas. |
+| `restituteCatalogUsers(PDO): array` | **Restitución del freno de intentos.** Reinicia `login_attempts` y `login_locked_until` de las cuentas del catálogo (§8.5); la invocan el gancho de apagado y el cierre de la batería. Devuelve las cuentas reiniciadas. |
+| `registerShutdownRestitution(): void` | Gancho de apagado de la restitución (§8.3): lo invoca cada suite que toca maestras. Restituye el estado de las cuentas y drena el residuo. |
 | `deleteOrder(PDO): array` | Expone el plan de borrado. Sólo lectura; lo usan las aserciones. |
 
 Todas las operaciones de escritura van dentro de una transacción con
@@ -230,46 +233,68 @@ integridad del parque sembrado. Ese mismo blindaje era el agujero del otro lado:
 las sedes que **crean las suites** no las retiraba nadie, y el banco acumulaba
 filas en cada corrida (206 filas frente a las 10 semilla al abrir el hallazgo F-4).
 
-### 8.1 El prefijo reservado
+### 8.1 El catálogo canónico
 
-> Toda sede cuyo `site_code` empiece por `SEDE-TEST-` o `SEDE-MAP` pertenece al
-> banco de pruebas, no al negocio: el seed canónico usa `SEDE-BCN-*` y sólo
-> `SEDE-BCN-*`.
+> Una fila de una maestra del parque —`locations`, `machines`, `users`— que no
+> figura en el catálogo canónico del sembrador la creó una suite: es residuo del
+> arnés, y se drena con su subárbol.
 
-La regla es el criterio de pertenencia de `purgeTestLocations()` y también el de
-`countTestLocations()`, de modo que la lectura y la escritura del residuo no
-puedan discrepar. Las familias declaradas hoy son `SEDE-TEST-*` (alta genérica y
-claves de centro), `SEDE-MAP-*` (coordenadas territoriales), `SEDE-MAP17-*`
-(aceptación territorial) y `SEDE-MAP18-*` (ruta del técnico); basta el prefijo
-`SEDE-MAP` para cubrir las tres últimas, y una familia nueva se declara aquí
-antes de usarla.
+El catálogo lo declara el propio sembrador (`SeedRunner::canonicalIdentities()`,
+derivado de los mismos literales que `seedAll()` escribe), así que **lo que se
+siembra es lo que se protege** y no hay una segunda lista que mantener. La regla es
+el criterio de pertenencia de `restorePark()` y también el de `countParkResidue()`,
+de modo que la lectura y la escritura del residuo no puedan discrepar.
+
+#### La regla que se retiró, y por qué
+
+El primer cierre de F-4 midió el residuo con un **prefijo reservado**
+(`SEDE-TEST-*`, `SEDE-MAP*` frente al seed `SEDE-BCN-*`). Era una lista paralela al
+catálogo y, por serlo, se degradaba en silencio: una suite que nombrara su sede de
+otra forma quedaba fuera —`AdminMachinesEndpointTest` usa `SEDE-TEMP-*`— y ninguna
+regla de nombres podía ver lo que otra suite colgase de una **sede semilla** (una
+máquina nueva en una sede del catálogo) ni una **cuenta** creada por una suite. El
+banco real lo mostró: tenía la sede `SEDE-TEMP-97B8` y la cuenta
+`tecnico.nuevo.b27c@…`, y el detector declaraba que no había residuo. La aserción
+`1.6` de la guarda conserva el criterio retirado como testigo: mide cuántas raíces
+del residuo alcanzaba.
 
 ### 8.2 Qué drena y qué no
 
-`purgeTestLocations()` elimina **el subárbol completo** de esas sedes, con el
-orden derivado otra vez del grafo de claves foráneas: las seis tablas que
-referencian `locations` y las que cuelgan de ellas lo hacen todas con
-`ON DELETE RESTRICT` (`incidents`, `incident_replaced_parts`, `machines`,
-`preventive_orders`, `refund_requests`, `sanitary_certificates`, más
-`unclaimed_cash_findings` bajo `machines`). La condición de borrado de cada tabla
-se encadena por el grafo mediante subconsultas, así que **una FK nueva hacia
-`locations` o hacia sus hijas entra sola en el plan**, sin tocar el limpiador.
+`restorePark()` elimina **el subárbol completo** de esas filas, con el orden
+derivado otra vez del grafo real de claves foráneas: las tablas que referencian
+`locations`, `machines` o `users` y las que cuelgan de ellas lo hacen todas con
+`ON DELETE RESTRICT` (`incidents`, `incident_replaced_parts`, `preventive_orders`,
+`refund_requests`, `sanitary_certificates`, más `unclaimed_cash_findings` bajo
+`machines`). La condición de borrado de cada tabla se encadena por el grafo
+mediante subconsultas, así que **una FK nueva hacia una maestra o hacia sus hijas
+entra sola en el plan**, sin tocar el limpiador.
 
-Nunca toca una sede semilla: la condición raíz es una lista explícita de `id`
-obtenida por el prefijo reservado, y una lista vacía detiene la operación sin
-ejecutar una sola sentencia.
+Nunca toca una fila del catálogo: la condición raíz es una lista explícita de `id`
+obtenida por identidad contra el catálogo, y una lista vacía detiene la operación
+sin ejecutar una sola sentencia. Si una fila del catálogo quedase **dentro** del
+plan —una máquina semilla que una suite reubicó en su sede de pruebas— el drenaje
+la arrastraría como hija, así que la operación aborta nombrando la identidad
+culpable **antes** de borrar nada (§8.5).
 
 ### 8.3 Quién lo invoca
 
 | Punto | Motivo |
 |---|---|
-| `register_shutdown_function` en cada suite creadora | Se ejecuta **también tras un error fatal**, que es exactamente el camino en el que un `finally` no corre y por el que el residuo se acumulaba (F-4). Cubre la ejecución suelta de la suite (`php tests/integration/X.php`). |
+| `TestDataCleaner::registerShutdownRestitution()` en cada suite creadora | Declara el gancho de apagado en **un solo sitio** y se ejecuta **también tras un error fatal**, que es exactamente el camino en el que un `finally` no corre y por el que el residuo se acumulaba (F-4). Cubre la ejecución suelta de la suite (`php tests/integration/X.php`). Si no puede drenar deja subir el fallo: una suite no se declara en verde sobre un banco que acaba de quedar sucio. |
 | Fase 5 de `tests/run_all.php` | Red de cierre: drena lo que una suite nueva (sin el gancho) o un proceso muerto hayan dejado y **declara la corrida en rojo** si encontró algo, porque un residuo drenado aquí significa que alguien no restituyó su estado. Es el único punto capaz de ver una fuga de una suite sin gancho: el drenaje borra la evidencia antes de que la guarda pueda volver a medirla. La base se restituye igualmente, para no envenenar la corrida siguiente. |
 
-Suites creadoras hoy: `AdminLocationsEndpointTest` (`SEDE-TEST-*`,
-`SEDE-MAP-VALID-*`), `CoordinatorRouteMapApiTest` (`SEDE-MAP17-*`),
-`PdoLocationRepositoryTest` (`SEDE-TEST-*`), `SiteAccessCodeTest` (`SEDE-TEST-*`)
-y `TechnicianRouteMapApiTest` (`SEDE-MAP18-*`).
+Suites que crean maestras y declaran el gancho hoy: `AdminLocationsEndpointTest`,
+`AdminMachinesEndpointTest`, `AdminUsersEndpointTest`, `CoordinatorRouteMapApiTest`,
+`PdoLocationRepositoryTest`, `PdoUserRepositoryTest`, `PendingInfoConstitutionalTest`,
+`ResolveIncidentEndpointTest`, `SiteAccessCodeTest`,
+`SiteManagerRouteDataSegregationTest`, `TechnicianRouteEndpointTest`,
+`TechnicianRouteMapApiTest` y la propia `HarnessResidueGuardTest`.
+
+Las suites que limpian a mano en su camino feliz —`AdminMachinesEndpointTest` y
+`AdminUsersEndpointTest` retiran su sede y su cuenta al final— declaran el gancho
+precisamente para el camino que no llega al final: un error fatal a mitad dejaba la
+sede y la cuenta en el banco, que es la fuga que se midió en vivo antes de este
+cierre.
 
 ### 8.4 La mitad que ya estaba cerrada
 
@@ -277,3 +302,44 @@ F-4 documentaba **dos** residuos. El de las máquinas («fuera de servicio» son
 marcas, `is_blocked_no_access` **e** `is_active`) lo cerró la propia sonda del
 módulo 11 al restituir ambas en su limpieza; esta sección cierra el de las sedes,
 que era ajeno a la sonda.
+
+### 8.5 El catálogo no se drena: se restituye
+
+El criterio ensanchado hace posible por primera vez que una fila del catálogo quede
+**dentro** del plan de drenaje, y el arnés también puede degradar el catálogo sin
+dejar residuo alguno. Las dos caras se cierran **restituyendo** antes de borrar:
+
+* **El vínculo máquina→sede.** Una suite que reubica una máquina del catálogo en su
+  sede de pruebas y muere antes de devolverla deja la máquina dentro del plan como
+  hija de esa sede, y el drenaje la arrastraría. `restituteCatalogMachines()` la
+  devuelve a la sede que declara el catálogo (`SeedRunner::canonicalMachineSites()`,
+  el mismo literal que siembra) antes de planificar. El síndrome está medido:
+  `AdminMachinesEndpointTest` traslada `VEND-0101` y sólo lo devuelve al final de su
+  camino feliz, y el sembrador no repara ese vínculo —su upsert no reescribe
+  `location_id`—.
+* **El freno de intentos de las cuentas.** Una suite que prueba el bloqueo por
+  intentos fallidos y muere antes de reiniciarlo no deja ninguna fila de más, pero sí
+  una cuenta semilla cerrada: la suite que sólo inicia sesión falla con
+  `ACCOUNT_LOCKED` (423) y el defecto parece suyo. `restituteCatalogUsers()` reinicia
+  `login_attempts` y `login_locked_until` de las cuentas del catálogo. El sembrador ya
+  limpia ese freno en las **sedes**; ésta es la mitad que faltaba.
+
+Ninguna de las dos adivina: el destino —la sede— y el valor —el freno a cero— salen
+del catálogo y del estado canónico que el propio sembrador define.
+
+Lo que el catálogo **no puede situar** —una máquina del catálogo cuya sede canónica no
+existe en el banco— no se resuelve en silencio: `restorePark()` comprueba, antes de
+ejecutar una sola sentencia, que ninguna identidad canónica siga dentro del plan, y
+aborta nombrando la tabla y las identidades culpables.
+
+**Evidencia medida (2026-10-15, motor único PostgreSQL).**
+
+| Medición | Antes | Después |
+|---|---|---|
+| Parque del banco | 11 sedes · 7 cuentas (dos fugas invisibles al prefijo) | **10 sedes · 13 máquinas · 6 cuentas** |
+| Guarda `HarnessResidueGuardTest` | 14/14, midiendo sedes por prefijo | **25/25**: identidad, las tres familias del residuo, restitución del vínculo y del freno |
+| Red de cierre de la batería | anunciaba «Ninguna sede del banco de pruebas» con residuo vivo | «**Ninguna maestra quedó fuera del catálogo canónico**», con el parque restituido |
+
+Las dos fugas vivas que el criterio retirado no veía —la sede `SEDE-TEMP-97B8` y la
+cuenta `tecnico.nuevo.b27c@vendguard.internal`, dejadas por suites que murieron antes de
+su limpieza manual— se drenaron en la primera pasada del criterio nuevo.

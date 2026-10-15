@@ -79,9 +79,7 @@ $pdo = ConnectionFactory::getConnection();
 // suite se aprovisiona las máquinas que el seed no le da (ver más abajo) en una
 // sede del banco de pruebas, y el gancho de apagado las drena también tras un
 // error fatal.
-register_shutdown_function(static function () use ($pdo): void {
-    TestDataCleaner::purgeTestLocations($pdo);
-});
+TestDataCleaner::registerShutdownRestitution();
 
 TestDataCleaner::purge($pdo);
 (new SeedRunner($pdo))->seedAll();

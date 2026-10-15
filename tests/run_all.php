@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Ejecutor unificado de todas las suites de prueba:
  * 1. Pruebas Unitarias Backend y Contratos Frontend (PHP CLI).
  * 2. Pruebas Unitarias Dinámicas Reactivas Frontend (Node.js ESM).
- * 3. Pruebas de Integración con MariaDB y API REST HTTP real (PHP CLI / cURL).
+ * 3. Pruebas de Integración con el motor único (PostgreSQL) y API REST HTTP real (PHP CLI / cURL).
  * 4. Guion E2E de extremo a extremo de los 3 perfiles (tests/Manual, T-40).
  * 
  * Requisitos:
@@ -188,6 +188,44 @@ if ($cleanupViolations !== []) {
 echo "  [OK] Todas las suites respetan el contrato de limpieza.\n";
 
 // =====================================================================
+// FASE 0b: Disponibilidad del banco de la batería (motor único)
+// =====================================================================
+// EARS-13.6: si el motor del arnés no responde, la batería lo declara en voz alta y
+// sale con código distinto de cero. No omite suites en silencio ni degrada la corrida a
+// verde, y no se apoya en que el motor «esté ahí»: pregunta tres veces, con espera, y si
+// las tres fallan, esto termina aquí.
+echo "\n{$colorBold}--- Fase 0b: Disponibilidad del banco de la batería ---{$colorReset}\n";
+
+$engineReady = false;
+$engineFailure = '';
+for ($engineAttempt = 1; $engineAttempt <= 3; $engineAttempt++) {
+    try {
+        $enginePdo = ConnectionFactory::getConnection([], true);
+        $enginePdo->query('SELECT 1');
+        $engineName = (string)$enginePdo->query('SELECT current_database()')->fetchColumn();
+        $engineReady = true;
+        break;
+    } catch (\Throwable $engineException) {
+        $engineFailure = $engineException->getMessage();
+        if ($engineAttempt < 3) {
+            usleep(500000);
+        }
+    }
+}
+
+if (!$engineReady) {
+    echo "  {$colorRed}[BLOQUEO] El banco de la batería no responde: {$engineFailure}{$colorReset}\n";
+    echo "         Arranca y carga el contrato del banco:\n";
+    echo "           bash deploy/local/postgres/provision-tls-engine.sh\n";
+    echo "           source deploy/local/postgres/.env.battery\n";
+    echo "\n{$colorBold}{$colorRed} BATERÍA ABORTADA: el arnés no se ejecuta sin su motor.{$colorReset}\n";
+    echo "{$colorBold}======================================================================{$colorReset}\n";
+    exit(1);
+}
+
+echo "  [OK] Banco de la batería disponible: {$engineName} (motor único, sin red).\n";
+
+// =====================================================================
 // FASE 1: Pruebas Unitarias Backend y Contratos Frontend (PHP)
 // =====================================================================
 echo "{$colorBold}--- Fase 1: Pruebas Unitarias PHP (Lógica de Dominio y Contratos) ---{$colorReset}\n";
@@ -246,7 +284,7 @@ foreach ($unitMjsFiles as $filePath) {
 // =====================================================================
 // FASE 3: Pruebas de Integración con MariaDB y API REST (PHP)
 // =====================================================================
-echo "\n{$colorBold}--- Fase 3: Pruebas de Integración (MariaDB, Repositorios y API HTTP) ---{$colorReset}\n";
+echo "\n{$colorBold}--- Fase 3: Pruebas de Integración (motor único, Repositorios y API HTTP) ---{$colorReset}\n";
 
 // Asegurar servidor HTTP para pruebas con cURL
 $serverProcess = null;
@@ -361,38 +399,49 @@ $harnessResidueFinding = null;
 try {
     $pdo = ConnectionFactory::getConnection();
 
-    // Red de cierre del residuo de sedes del arnés (contrato de limpieza §8.3).
-    // Cada suite creadora drena lo suyo en su gancho de apagado; si aquí queda
-    // algo, es que una suite nueva (o un proceso muerto) no restituyó su estado, y
-    // el banco lo diría en silencio acumulando filas corrida tras corrida —que fue
-    // exactamente el defecto F-4—. Se drena igualmente, para que la base quede
-    // sana, pero la corrida se declara EN ROJO: este es el único punto que puede
-    // ver una fuga de una suite sin gancho, porque el drenaje de cierre borra la
-    // evidencia antes de que la guarda pueda volver a medirla.
-    $residualLocations = TestDataCleaner::countTestLocations($pdo);
-    $drainedLocations = TestDataCleaner::purgeTestLocations($pdo);
-    $drainedLocationRows = array_sum(array_map('intval', $drainedLocations));
-    if ($residualLocations['total'] > 0) {
+    // Red de cierre del residuo del parque (contrato de limpieza §8.3 y §8.5). Cada suite
+    // creadora drena lo suyo en su gancho de apagado; si aquí queda algo, es que una suite
+    // nueva (o un proceso muerto) no restituyó su estado, y el banco lo diría en silencio
+    // acumulando filas corrida tras corrida —que fue exactamente el defecto F-4—. Se drena
+    // igualmente, para que la base quede sana, pero la corrida se declara EN ROJO: este es el
+    // único punto que puede ver una fuga de una suite sin gancho, porque el drenaje de cierre
+    // borra la evidencia antes de que la guarda pueda volver a medirla.
+    // El criterio es la identidad contra el catálogo canónico del sembrador, no una lista de
+    // nombres: alcanza la sede que el prefijo no miraba, la máquina colgada de una sede semilla
+    // y la cuenta que creó una suite.
+    $residualMasters = TestDataCleaner::countParkResidue($pdo);
+    $drainedMasters = TestDataCleaner::restorePark($pdo);
+    $drainedMasterRows = array_sum(array_map('intval', $drainedMasters));
+    if ($residualMasters['total'] > 0) {
         $harnessResidueFinding = sprintf(
-            'el banco de pruebas dejó %d sede(s) del arnés %s (%d fila(s) drenadas en el cierre, con sus máquinas y averías). '
+            'el banco de pruebas dejó %d fila(s) fuera del catálogo canónico %s (%d fila(s) drenadas en el cierre, con sus subárboles). '
             . 'Alguna suite no restituyó su estado: revisa el contrato de limpieza §8.3.',
-            $residualLocations['total'],
-            json_encode($residualLocations['by_prefix'], JSON_UNESCAPED_UNICODE),
-            $drainedLocationRows
+            $residualMasters['total'],
+            json_encode(
+                ['por_tabla' => $residualMasters['by_table'], 'muestras' => $residualMasters['samples']],
+                JSON_UNESCAPED_UNICODE
+            ),
+            $drainedMasterRows
         );
         echo "  {$colorRed}[FAIL] {$harnessResidueFinding}{$colorReset}\n";
     } else {
-        echo "  {$colorGreen}[OK] Ninguna sede del banco de pruebas quedó en el parque (contrato de limpieza §8).{$colorReset}\n";
+        echo "  {$colorGreen}[OK] Ninguna maestra quedó fuera del catálogo canónico (contrato de limpieza §8).{$colorReset}\n";
     }
+
+    // El freno de intentos de las cuentas del catálogo se restituye aquí también: es estado,
+    // no residuo, y ninguna suite lo reinicia por sí sola (§8.5).
+    TestDataCleaner::restituteCatalogUsers($pdo);
 
     TestDataCleaner::purge($pdo);
 
+    // El catálogo del arnés lo restituye su propio sembrador, que escribe el dialecto del
+    // motor único. El sembrador de métricas de demostración (`DemoMetricsSeeder`) queda
+    // fuera a propósito: es del motor heredado y su histórico de demostración no forma
+    // parte del contrato del arnés —el del despliegue es `DemoHistorySeeder`, que ya escribe
+    // PostgreSQL y entra por el arranque, no por aquí—. Se retira con el resto del camino
+    // heredado (T-13-16).
     $seedRunner = new SeedRunner($pdo);
     $seedRunner->seedAll();
-
-    require_once __DIR__ . '/../database/DemoMetricsSeeder.php';
-    $demoSeeder = new \VendGuard\Database\DemoMetricsSeeder($pdo);
-    $demoSeeder->seed();
 
     $dbResetOk = true;
 } catch (\Throwable $e) {
