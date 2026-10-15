@@ -111,15 +111,15 @@ $created = $incidentRepo->create($incident, null, 'Aviso registrado mediante có
 $incidentId = (int)$created->getId();
 
 $pdo->prepare(
-    "UPDATE `incidents`
-     SET `status` = 'PENDING_PARTS',
-         `assigned_technician_id` = :technician_id,
-         `assigned_at` = '2026-10-01 08:30:00',
-         `started_at` = '2026-10-01 09:10:00',
-         `pending_parts_reason` = :pause_reason,
-         `reopen_reason` = :reopen_reason,
-         `reopened_at` = '2026-10-02 11:30:00'
-     WHERE `id` = :id"
+    "UPDATE incidents
+     SET status = 'PENDING_PARTS',
+         assigned_technician_id = :technician_id,
+         assigned_at = '2026-10-01 08:30:00',
+         started_at = '2026-10-01 09:10:00',
+         pending_parts_reason = :pause_reason,
+         reopen_reason = :reopen_reason,
+         reopened_at = '2026-10-02 11:30:00'
+     WHERE id = :id"
 )->execute([
     ':technician_id' => $technician->getId(),
     ':pause_reason' => 'Fallo en condensador de arranque y relé térmico del compresor.',
@@ -142,11 +142,11 @@ $incidentRepo->insertHistory(
     'Pausa técnica por repuestos pendientes.'
 );
 
-$sparePartId = (int)$pdo->query("SELECT id FROM `spare_parts` WHERE `part_code` = 'VALV-ULKA-01'")->fetchColumn();
+$sparePartId = (int)$pdo->query("SELECT id FROM spare_parts WHERE part_code = 'VALV-ULKA-01'")->fetchColumn();
 
 $pdo->prepare(
-    "INSERT INTO `spare_part_requests`
-        (`incident_id`, `spare_part_id`, `is_out_of_catalog`, `custom_part_description`, `quantity`, `status`, `requested_by_user_id`)
+    "INSERT INTO spare_part_requests
+        (incident_id, spare_part_id, is_out_of_catalog, custom_part_description, quantity, status, requested_by_user_id)
      VALUES (:incident_id, :spare_part_id, 0, NULL, 1, 'PENDING', :technician_id)"
 )->execute([
     ':incident_id' => $incidentId,
@@ -155,8 +155,8 @@ $pdo->prepare(
 ]);
 
 $pdo->prepare(
-    "INSERT INTO `spare_part_requests`
-        (`incident_id`, `spare_part_id`, `is_out_of_catalog`, `custom_part_description`, `quantity`, `status`, `requested_by_user_id`)
+    "INSERT INTO spare_part_requests
+        (incident_id, spare_part_id, is_out_of_catalog, custom_part_description, quantity, status, requested_by_user_id)
      VALUES (:incident_id, NULL, 1, :custom_description, 1, 'PENDING', :technician_id)"
 )->execute([
     ':incident_id' => $incidentId,
@@ -165,9 +165,9 @@ $pdo->prepare(
 ]);
 
 $pdo->prepare(
-    "INSERT INTO `incident_replaced_parts`
-        (`intervention_type`, `incident_id`, `machine_id`, `location_id`, `technician_id`, `spare_part_id`,
-         `is_out_of_catalog`, `quantity`, `unit_cost_snapshot`, `old_part_destination`, `notes`)
+    "INSERT INTO incident_replaced_parts
+        (intervention_type, incident_id, machine_id, location_id, technician_id, spare_part_id,
+         is_out_of_catalog, quantity, unit_cost_snapshot, old_part_destination, notes)
      VALUES ('INCIDENT', :incident_id, :machine_id, :location_id, :technician_id, :spare_part_id,
              0, 1, 28.50, 'DESGUACE', :notes)"
 )->execute([
@@ -180,8 +180,8 @@ $pdo->prepare(
 ]);
 
 $pdo->prepare(
-    "INSERT INTO `incident_comments`
-        (`incident_id`, `author_type`, `user_id`, `author_name`, `comment_text`, `photo_path`, `is_internal`)
+    "INSERT INTO incident_comments
+        (incident_id, author_type, user_id, author_name, comment_text, photo_path, is_internal)
      VALUES (:incident_id, 'REPORTER', NULL, 'Conserjería Hospital', :text, NULL, 0)"
 )->execute([
     ':incident_id' => $incidentId,
@@ -189,8 +189,8 @@ $pdo->prepare(
 ]);
 
 $pdo->prepare(
-    "INSERT INTO `incident_comments`
-        (`incident_id`, `author_type`, `user_id`, `author_name`, `comment_text`, `photo_path`, `is_internal`)
+    "INSERT INTO incident_comments
+        (incident_id, author_type, user_id, author_name, comment_text, photo_path, is_internal)
      VALUES (:incident_id, 'TECHNICIAN', :user_id, :author_name, :text, NULL, 1)"
 )->execute([
     ':incident_id' => $incidentId,
@@ -200,9 +200,9 @@ $pdo->prepare(
 ]);
 
 $pdo->prepare(
-    "INSERT INTO `refund_requests`
-        (`incident_id`, `machine_id`, `location_id`, `claimant_name`, `claimant_contact`, `claimed_amount`,
-         `product_attempted`, `compensation_method`, `bizum_phone`, `status`, `tracking_token`)
+    "INSERT INTO refund_requests
+        (incident_id, machine_id, location_id, claimant_name, claimant_contact, claimed_amount,
+         product_attempted, compensation_method, bizum_phone, status, tracking_token)
      VALUES (:incident_id, :machine_id, :location_id, 'Ciudadano Anónimo', '600000000', 2.50,
              'Sándwich de pavo', 'BIZUM', '612345789', 'REQUIRES_COORDINATOR_APPROVAL', :tracking_token)"
 )->execute([
@@ -416,7 +416,7 @@ $assert(
 
 TestDataCleaner::purgeIncident($pdo, $incidentId);
 
-$rawStmt = $pdo->prepare('SELECT COUNT(*) FROM `incidents` WHERE `id` = :id');
+$rawStmt = $pdo->prepare('SELECT COUNT(*) FROM incidents WHERE id = :id');
 $rawStmt->execute([':id' => $incidentId]);
 $assert('3.2 Limpieza del arnés completada (fila física eliminada por el limpiador)', (int)$rawStmt->fetchColumn() === 0);
 

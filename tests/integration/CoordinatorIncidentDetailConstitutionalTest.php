@@ -183,9 +183,9 @@ $assert(
 // de purga @vendguard_purge, reservada al arnés de pruebas).
 $incGuard = $makeIncident($mach1->getId(), $location1->getId());
 $pdo->prepare(
-    "INSERT INTO `refund_requests`
-        (`incident_id`, `machine_id`, `location_id`, `claimant_name`, `claimant_contact`, `claimed_amount`,
-         `product_attempted`, `compensation_method`, `bizum_phone`, `iban`, `status`, `tracking_token`)
+    "INSERT INTO refund_requests
+        (incident_id, machine_id, location_id, claimant_name, claimant_contact, claimed_amount,
+         product_attempted, compensation_method, bizum_phone, iban, status, tracking_token)
      VALUES (:incident_id, :machine_id, :location_id, 'Ciudadano Anónimo', '600000000', 2.50,
              'Sándwich de pavo', 'BIZUM', :bizum_phone, :iban, 'REQUIRES_COORDINATOR_APPROVAL', :tracking_token)"
 )->execute([
@@ -217,7 +217,7 @@ $assert(
     'Respuesta del servidor: ' . substr($deleteMessage, 0, 160)
 );
 
-$refundCountStmt = $pdo->prepare('SELECT COUNT(*) FROM `refund_requests` WHERE `id` = :id');
+$refundCountStmt = $pdo->prepare('SELECT COUNT(*) FROM refund_requests WHERE id = :id');
 $refundCountStmt->execute([':id' => $refundGuardId]);
 $assert(
     '1.3 La fila del reintegro sobrevive íntegra al intento de borrado físico',
@@ -314,9 +314,9 @@ echo "\n--- Caso 3: Enmascaramiento irrevocable de teléfono e IBAN (Art. V.4) -
 
 $incMasked = $makeIncident($mach3->getId(), $location2->getId());
 $pdo->prepare(
-    "INSERT INTO `refund_requests`
-        (`incident_id`, `machine_id`, `location_id`, `claimant_name`, `claimant_contact`, `claimed_amount`,
-         `product_attempted`, `compensation_method`, `bizum_phone`, `iban`, `status`, `tracking_token`)
+    "INSERT INTO refund_requests
+        (incident_id, machine_id, location_id, claimant_name, claimant_contact, claimed_amount,
+         product_attempted, compensation_method, bizum_phone, iban, status, tracking_token)
      VALUES (:incident_id, :machine_id, :location_id, 'Ciudadano Anónimo', '600000000', 2.50,
              'Bocadillo mixto', 'BIZUM', :bizum_phone, :iban, 'REQUIRES_COORDINATOR_APPROVAL', :tracking_token)"
 )->execute([

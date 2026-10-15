@@ -85,8 +85,8 @@ if ($loc1 !== null) {
 
     // Insertar incidencia de prueba en estado REGISTERED
     $stmt = $pdo->prepare("
-        INSERT INTO `incidents` (
-            `ticket_code`, `machine_id`, `location_id`, `category`, `description`, `urgency`, `status`
+        INSERT INTO incidents (
+            ticket_code, machine_id, location_id, category, description, urgency, status
         ) VALUES (
             :tc, :mid, :lid, 'TEMPERATURE_COLD', 'Fallo de prueba en refrigeración', 'CRITICAL', 'REGISTERED'
         )
@@ -119,10 +119,10 @@ if ($loc1 !== null) {
     // =====================================================================
     echo "\n--- Caso 3: Detección de aviso en garantía (RESOLVED < 48h) ---\n";
     $pdo->prepare("
-        UPDATE `incidents` 
-        SET `status` = 'RESOLVED', 
-            `resolved_at` = CURRENT_TIMESTAMP 
-        WHERE `id` = :id
+        UPDATE incidents 
+        SET status = 'RESOLVED', 
+            resolved_at = CURRENT_TIMESTAMP 
+        WHERE id = :id
     ")->execute([':id' => $incidentId]);
 
     $machinesInWarranty = $machineRepo->findActiveByLocationId($locId);
@@ -141,10 +141,10 @@ if ($loc1 !== null) {
     // =====================================================================
     echo "\n--- Caso 4: Cierre definitivo (CLOSED inactiva el aviso en la máquina) ---\n";
     $pdo->prepare("
-        UPDATE `incidents` 
-        SET `status` = 'CLOSED', 
-            `closed_at` = CURRENT_TIMESTAMP 
-        WHERE `id` = :id
+        UPDATE incidents 
+        SET status = 'CLOSED', 
+            closed_at = CURRENT_TIMESTAMP 
+        WHERE id = :id
     ")->execute([':id' => $incidentId]);
 
     $machinesAfterClosed = $machineRepo->findActiveByLocationId($locId);
@@ -166,7 +166,7 @@ if ($loc1 !== null) {
     // La fila maestra se retira con la ventana de purga abierta (T-HYBRID-26): la
     // señal la declara TestDataCleaner en la forma del motor activo.
     TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $testCode): void {
-        $pdo->prepare("DELETE FROM `machines` WHERE `code` = :c")->execute([':c' => $testCode]);
+        $pdo->prepare("DELETE FROM machines WHERE code = :c")->execute([':c' => $testCode]);
     });
 
     $newMachine = $machineRepo->create([
@@ -230,7 +230,7 @@ if ($loc1 !== null) {
     $ticketCodeTest = 'INC-TEST-ATW-01';
     TestDataCleaner::purgeIncidentByTicket($pdo, $ticketCodeTest);
     $stmt = $pdo->prepare("
-        INSERT INTO `incidents` (`ticket_code`, `machine_id`, `location_id`, `category`, `description`, `urgency`, `status`)
+        INSERT INTO incidents (ticket_code, machine_id, location_id, category, description, urgency, status)
         VALUES (:tc, :mid, :lid, 'PAYMENT_FAILURE', 'Fallo validador monedas', 'MEDIUM', 'IN_PROGRESS')
     ");
     $stmt->execute([':tc' => $ticketCodeTest, ':mid' => $createdId, ':lid' => $locId]);
@@ -242,12 +242,12 @@ if ($loc1 !== null) {
     $assert("8.5 getActiveTicketOrWarranty retorna status IN_PROGRESS", ($ticketInfo['status'] ?? null) === 'IN_PROGRESS');
 
     // Cambiar a RESOLVED (en garantía de 48h)
-    $pdo->prepare("UPDATE `incidents` SET `status` = 'RESOLVED', `resolved_at` = CURRENT_TIMESTAMP WHERE `id` = :id")
+    $pdo->prepare("UPDATE incidents SET status = 'RESOLVED', resolved_at = CURRENT_TIMESTAMP WHERE id = :id")
         ->execute([':id' => $incAtwId]);
     $assert("8.6 hasActiveTicketOrWarranty detecta ticket en garantía (RESOLVED)", $machineRepo->hasActiveTicketOrWarranty($createdId) === true);
 
     // Cambiar a CLOSED
-    $pdo->prepare("UPDATE `incidents` SET `status` = 'CLOSED', `closed_at` = CURRENT_TIMESTAMP WHERE `id` = :id")
+    $pdo->prepare("UPDATE incidents SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP WHERE id = :id")
         ->execute([':id' => $incAtwId]);
     $assert("8.7 hasActiveTicketOrWarranty retorna false tras CLOSED", $machineRepo->hasActiveTicketOrWarranty($createdId) === false);
     $assert("8.8 getActiveTicketOrWarranty retorna null tras CLOSED", $machineRepo->getActiveTicketOrWarranty($createdId) === null);
@@ -324,7 +324,7 @@ if ($loc1 !== null) {
     $batchCodeB = 'VEND-BATCH-B';
     $batchCodeC = 'VEND-BATCH-C';
     TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $batchCodeA, $batchCodeB, $batchCodeC): void {
-        $pdo->prepare("DELETE FROM `machines` WHERE `code` IN (:a, :b, :c)")
+        $pdo->prepare("DELETE FROM machines WHERE code IN (:a, :b, :c)")
             ->execute([':a' => $batchCodeA, ':b' => $batchCodeB, ':c' => $batchCodeC]);
     });
 
@@ -383,7 +383,7 @@ if ($loc1 !== null) {
     $ticketCodeBatch = 'INC-TEST-BATCH-01';
     TestDataCleaner::purgeIncidentByTicket($pdo, $ticketCodeBatch);
     $pdo->prepare("
-        INSERT INTO `incidents` (`ticket_code`, `machine_id`, `location_id`, `category`, `description`, `urgency`, `status`)
+        INSERT INTO incidents (ticket_code, machine_id, location_id, category, description, urgency, status)
         VALUES (:tc, :mid, :lid, 'PAYMENT_FAILURE', 'Fallo validador monedas (lote)', 'MEDIUM', 'IN_PROGRESS')
     ")->execute([':tc' => $ticketCodeBatch, ':mid' => $batchMachineB->getId(), ':lid' => $locId]);
     $batchIncidentId = (int)$pdo->lastInsertId();
@@ -399,13 +399,13 @@ if ($loc1 !== null) {
     // Las tres filas del caso se retiran con la ventana de purga abierta: la baja lógica de C no
     // la saca de la tabla y dejar residuo aquí ensuciaría los recuentos de las suites siguientes.
     TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $batchMachineA, $batchMachineB, $batchMachineC): void {
-        $pdo->prepare("DELETE FROM `machines` WHERE `id` IN (:a, :b, :c)")
+        $pdo->prepare("DELETE FROM machines WHERE id IN (:a, :b, :c)")
             ->execute([':a' => $batchMachineA->getId(), ':b' => $batchMachineB->getId(), ':c' => $batchMachineC->getId()]);
     });
 
     // Limpieza final de máquina de prueba
     TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $createdId): void {
-        $pdo->prepare("DELETE FROM `machines` WHERE `id` = :id")->execute([':id' => $createdId]);
+        $pdo->prepare("DELETE FROM machines WHERE id = :id")->execute([':id' => $createdId]);
     });
 }
 

@@ -119,12 +119,12 @@ $techId = (int)$technician->getId();
 
 $assignToRoute = static function (int $incidentId) use ($pdo, $techId): void {
     $pdo->prepare("
-        UPDATE `incidents`
-        SET `assigned_technician_id` = :tech_id,
-            `status` = 'IN_PROGRESS',
-            `assigned_at` = CURRENT_TIMESTAMP,
-            `started_at` = CURRENT_TIMESTAMP
-        WHERE `id` = :id
+        UPDATE incidents
+        SET assigned_technician_id = :tech_id,
+            status = 'IN_PROGRESS',
+            assigned_at = CURRENT_TIMESTAMP,
+            started_at = CURRENT_TIMESTAMP
+        WHERE id = :id
     ")->execute([':tech_id' => $techId, ':id' => $incidentId]);
 };
 
@@ -429,12 +429,12 @@ try {
     // Reapertura dentro de la ventana de 48 h (Art. V.6): la avería vuelve a
     // IN_PROGRESS y el técnico la atiende de nuevo.
     $pdo->prepare("
-        UPDATE `incidents`
-        SET `status` = 'IN_PROGRESS',
-            `resolved_at` = NULL,
-            `assigned_technician_id` = :tech_id,
-            `started_at` = CURRENT_TIMESTAMP
-        WHERE `id` = :id
+        UPDATE incidents
+        SET status = 'IN_PROGRESS',
+            resolved_at = NULL,
+            assigned_technician_id = :tech_id,
+            started_at = CURRENT_TIMESTAMP
+        WHERE id = :id
     ")->execute([':tech_id' => $techId, ':id' => (int)$incidentD->getId()]);
 
     // Un segundo consumidor abre expediente tras la reapertura.

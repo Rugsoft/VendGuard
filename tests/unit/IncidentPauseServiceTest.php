@@ -122,13 +122,13 @@ if ($coordinatorId === 0) {
 // caliente: cada reanudación deja al profesional con una intervención en curso, y
 // reutilizar el mismo convertiría las siguientes pruebas en "técnico ocupado".
 $freeTechnicianIds = array_map('intval', $pdo->query("
-    SELECT u.`id` FROM `users` u
-    WHERE u.`role` = 'TECHNICIAN' AND u.`deleted_at` IS NULL
+    SELECT u.id FROM users u
+    WHERE u.role = 'TECHNICIAN' AND u.deleted_at IS NULL
       AND NOT EXISTS (
-          SELECT 1 FROM `incidents` i
-          WHERE i.`assigned_technician_id` = u.`id` AND i.`status` = 'IN_PROGRESS'
+          SELECT 1 FROM incidents i
+          WHERE i.assigned_technician_id = u.id AND i.status = 'IN_PROGRESS'
       )
-    ORDER BY u.`id` LIMIT 3
+    ORDER BY u.id LIMIT 3
 ")->fetchAll(PDO::FETCH_COLUMN));
 
 $machineIds = [];
@@ -192,8 +192,8 @@ $insertIncident = function (array $overrides) use ($pdo, $locationId, $suffix, &
     $placeholders = array_map(static fn (string $column): string => ':' . $column, $columns);
 
     $statement = $pdo->prepare(sprintf(
-        'INSERT INTO `incidents` (`%s`) VALUES (%s)',
-        implode('`, `', $columns),
+        'INSERT INTO incidents (%s) VALUES (%s)',
+        implode(', ', $columns),
         implode(', ', $placeholders)
     ));
 
@@ -207,7 +207,7 @@ $insertIncident = function (array $overrides) use ($pdo, $locationId, $suffix, &
 
 /** Fila cruda del expediente, la verdad persistida que leen los veredictos. */
 $incidentRow = function (int $id) use ($pdo): array {
-    $stmt = $pdo->prepare('SELECT * FROM `incidents` WHERE `id` = :id');
+    $stmt = $pdo->prepare('SELECT * FROM incidents WHERE id = :id');
     $stmt->execute([':id' => $id]);
 
     return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -215,7 +215,7 @@ $incidentRow = function (int $id) use ($pdo): array {
 
 /** Eventos inmutables de `incident_history` del expediente, en orden de escritura. */
 $historyRows = function (int $id) use ($pdo): array {
-    $stmt = $pdo->prepare('SELECT * FROM `incident_history` WHERE `incident_id` = :id ORDER BY `id` ASC');
+    $stmt = $pdo->prepare('SELECT * FROM incident_history WHERE incident_id = :id ORDER BY id ASC');
     $stmt->execute([':id' => $id]);
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -223,7 +223,7 @@ $historyRows = function (int $id) use ($pdo): array {
 
 /** Contador de eventos de auditoría por entidad y acción. */
 $auditCount = function (string $entityType, int $entityId, string $action) use ($pdo): int {
-    $stmt = $pdo->prepare('SELECT COUNT(*) FROM `audit_log` WHERE `entity_type` = :type AND `entity_id` = :entity AND `action` = :action');
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM audit_log WHERE entity_type = :type AND entity_id = :entity AND action = :action');
     $stmt->execute([':type' => $entityType, ':entity' => $entityId, ':action' => $action]);
 
     return (int)$stmt->fetchColumn();
@@ -231,7 +231,7 @@ $auditCount = function (string $entityType, int $entityId, string $action) use (
 
 /** Último evento de auditoría concreto, para leer su payload. */
 $auditRow = function (string $entityType, int $entityId, string $action) use ($pdo): array {
-    $stmt = $pdo->prepare('SELECT * FROM `audit_log` WHERE `entity_type` = :type AND `entity_id` = :entity AND `action` = :action ORDER BY `id` DESC LIMIT 1');
+    $stmt = $pdo->prepare('SELECT * FROM audit_log WHERE entity_type = :type AND entity_id = :entity AND action = :action ORDER BY id DESC LIMIT 1');
     $stmt->execute([':type' => $entityType, ':entity' => $entityId, ':action' => $action]);
 
     return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -506,10 +506,10 @@ try {
     // otro con el efectivo YA entregado en recepción (su PIN no puede reiniciarse).
     $insertRefund = function (int $incidentId, string $status, string $token) use ($pdo, $guardMachineId, $locationId, &$refundIds, &$refundOwners): int {
         $pdo->prepare("
-            INSERT INTO `refund_requests` (
-                `incident_id`, `machine_id`, `location_id`, `claimant_name`, `claimant_contact`,
-                `claimed_amount`, `product_attempted`, `compensation_method`, `bizum_phone`,
-                `tracking_token`, `status`
+            INSERT INTO refund_requests (
+                incident_id, machine_id, location_id, claimant_name, claimant_contact,
+                claimed_amount, product_attempted, compensation_method, bizum_phone,
+                tracking_token, status
             ) VALUES (
                 :incident, :machine, :location, 'Consumidor de la suite integral', '600000011',
                 2.50, 'Sándwich de pollo', 'BIZUM', '600000011',
@@ -546,7 +546,7 @@ try {
 
     $notPaused = $capture(fn () => $service->cancelByInactivity($otherIncidentId, $coordinatorId, 'Cierre administrativo por inactividad y falta de acceso del cliente.'));
     $assert('6.13 Cancelar un expediente que no está en pausa se rechaza con InvalidTransitionException', $notPaused['threw'] && $notPaused['class'] === InvalidTransitionException::class);
-    $assert('6.14 El rechazo por estado no bloqueó la máquina de otra avería', (int)($pdo->query('SELECT `is_blocked_no_access` FROM `machines` WHERE `id` = ' . $guardMachineId)->fetchColumn() ?: 0) === 0);
+    $assert('6.14 El rechazo por estado no bloqueó la máquina de otra avería', (int)($pdo->query('SELECT is_blocked_no_access FROM machines WHERE id = ' . $guardMachineId)->fetchColumn() ?: 0) === 0);
 
     $cancelReason = 'Cierre administrativo por inactividad y falta de acceso del cliente tras 72 horas hábiles.';
     $cancellation = $capture(fn () => $service->cancelByInactivity($cancelIncidentId, $coordinatorId, $cancelReason));
@@ -557,7 +557,7 @@ try {
     $assert('6.17 La cancelación conserva su motivo justificado', str_contains((string)$cancelledRow['cancellation_reason'], 'falta de acceso del cliente'));
     $assert('6.18 La cancelación queda fechada', $cancelledRow['cancelled_at'] !== null);
 
-    $machineRow = $pdo->query('SELECT * FROM `machines` WHERE `id` = ' . $guardMachineId)->fetch(PDO::FETCH_ASSOC) ?: [];
+    $machineRow = $pdo->query('SELECT * FROM machines WHERE id = ' . $guardMachineId)->fetch(PDO::FETCH_ASSOC) ?: [];
     $assert('6.19 La máquina queda FUERA DE SERVICIO (nunca de vuelta a Operativa)', (int)$machineRow['is_active'] === 0);
     $assert('6.20 La máquina queda marcada como bloqueada por falta de acceso', (int)$machineRow['is_blocked_no_access'] === 1);
     $assert('6.21 La nota de la máquina cita el ticket que provocó el bloqueo', str_contains((string)$machineRow['notes'], $cancelTicketCode));
@@ -573,9 +573,9 @@ try {
     // =====================================================================
     echo "\n--- Grupo 7: Preservación de reintegros del consumidor ---\n";
 
-    $inspectionRefund = $pdo->query('SELECT * FROM `refund_requests` WHERE `id` = ' . $inspectionRefundId)->fetch(PDO::FETCH_ASSOC) ?: [];
-    $depositedRefund = $pdo->query('SELECT * FROM `refund_requests` WHERE `id` = ' . $depositedRefundId)->fetch(PDO::FETCH_ASSOC) ?: [];
-    $untouchedRefund = $pdo->query('SELECT * FROM `refund_requests` WHERE `id` = ' . $untouchedRefundId)->fetch(PDO::FETCH_ASSOC) ?: [];
+    $inspectionRefund = $pdo->query('SELECT * FROM refund_requests WHERE id = ' . $inspectionRefundId)->fetch(PDO::FETCH_ASSOC) ?: [];
+    $depositedRefund = $pdo->query('SELECT * FROM refund_requests WHERE id = ' . $depositedRefundId)->fetch(PDO::FETCH_ASSOC) ?: [];
+    $untouchedRefund = $pdo->query('SELECT * FROM refund_requests WHERE id = ' . $untouchedRefundId)->fetch(PDO::FETCH_ASSOC) ?: [];
 
     $assert('7.1 El reintegro no se borra: el consumidor conserva su expediente', $inspectionRefund !== [] && $depositedRefund !== []);
     $assert('7.2 El reintegro en inspección queda desvinculado de la avería', $inspectionRefund['incident_id'] === null);
@@ -601,7 +601,7 @@ try {
             continue;
         }
 
-        $pdo->prepare('UPDATE `refund_requests` SET `incident_id` = :incident WHERE `id` = :refund')
+        $pdo->prepare('UPDATE refund_requests SET incident_id = :incident WHERE id = :refund')
             ->execute([':incident' => $owner, ':refund' => $refundId]);
     }
 
@@ -614,9 +614,9 @@ try {
         // Las tres filas maestras se retiran con la ventana de purga del arnés abierta
         // (T-HYBRID-26): la señal la declara TestDataCleaner en la forma del motor activo.
         TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $machineId): void {
-            $pdo->prepare('DELETE FROM `sanitary_certificates` WHERE `machine_id` = :id')->execute([':id' => $machineId]);
-            $pdo->prepare("DELETE FROM `audit_log` WHERE `entity_type` = 'MACHINE' AND `entity_id` = :id")->execute([':id' => $machineId]);
-            $pdo->prepare('DELETE FROM `machines` WHERE `id` = :id')->execute([':id' => $machineId]);
+            $pdo->prepare('DELETE FROM sanitary_certificates WHERE machine_id = :id')->execute([':id' => $machineId]);
+            $pdo->prepare("DELETE FROM audit_log WHERE entity_type = 'MACHINE' AND entity_id = :id")->execute([':id' => $machineId]);
+            $pdo->prepare('DELETE FROM machines WHERE id = :id')->execute([':id' => $machineId]);
         });
     }
 

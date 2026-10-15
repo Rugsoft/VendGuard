@@ -119,22 +119,22 @@ $sequence = 0;
 /** @return list<array{machine_id: int, location_id: int, code: string}> */
 $freeMachinesByType = function (string $machineType, int $limit) use ($pdo): array {
     $stmt = $pdo->prepare(
-        "SELECT m.`id` AS machine_id, m.`location_id`, m.`code`
-           FROM `machines` m
-           JOIN `locations` l ON l.`id` = m.`location_id`
-          WHERE m.`is_active` = 1
-            AND m.`is_blocked_no_access` = 0
-            AND m.`deleted_at` IS NULL
-            AND l.`is_active` = 1
-            AND l.`deleted_at` IS NULL
-            AND m.`machine_type` = :machine_type
+        "SELECT m.id AS machine_id, m.location_id, m.code
+           FROM machines m
+           JOIN locations l ON l.id = m.location_id
+          WHERE m.is_active = 1
+            AND m.is_blocked_no_access = 0
+            AND m.deleted_at IS NULL
+            AND l.is_active = 1
+            AND l.deleted_at IS NULL
+            AND m.machine_type = :machine_type
             AND NOT EXISTS (
-                SELECT 1 FROM `incidents` i
-                 WHERE i.`machine_id` = m.`id`
-                   AND i.`deleted_at` IS NULL
-                   AND i.`status` NOT IN ('CLOSED', 'CANCELLED')
+                SELECT 1 FROM incidents i
+                 WHERE i.machine_id = m.id
+                   AND i.deleted_at IS NULL
+                   AND i.status NOT IN ('CLOSED', 'CANCELLED')
             )
-          ORDER BY m.`id`
+          ORDER BY m.id
           LIMIT {$limit}"
     );
     $stmt->execute([':machine_type' => $machineType]);
@@ -197,9 +197,9 @@ if (count($perishablePool) < 1 || count($comboPool) < 1 || count($snackPool) < 2
 }
 
 $technicianRows = $pdo->query(
-    "SELECT `id` FROM `users`
-      WHERE `role` = 'TECHNICIAN' AND `deleted_at` IS NULL
-      ORDER BY `id` LIMIT 1"
+    "SELECT id FROM users
+      WHERE role = 'TECHNICIAN' AND deleted_at IS NULL
+      ORDER BY id LIMIT 1"
 )->fetchAll(PDO::FETCH_COLUMN);
 
 $technician  = $userRepo->findById((int)($technicianRows[0] ?? 0));
@@ -287,7 +287,7 @@ $createAssignedTicket = function (array $machine) use ($incidentRepo, $techId, $
 
 /** Siembra el envejecimiento natural del expediente propio (instrumento de la suite). */
 $backdateOpening = function (int $incidentId, int $hours) use ($pdo): void {
-    $pdo->prepare('UPDATE `incidents` SET `created_at` = NOW() - INTERVAL :hours HOUR WHERE `id` = :id')
+    $pdo->prepare('UPDATE incidents SET created_at = NOW() - INTERVAL :hours HOUR WHERE id = :id')
         ->execute([':hours' => $hours, ':id' => $incidentId]);
 };
 
@@ -299,12 +299,12 @@ $backdateOpening = function (int $incidentId, int $hours) use ($pdo): void {
  * queda superada sea cual sea el día y la hora en que corra la suite).
  */
 $backdatePause = function (int $incidentId, int $days) use ($pdo): void {
-    $pdo->prepare('UPDATE `incidents` SET `paused_at` = NOW() - INTERVAL :days DAY WHERE `id` = :id')
+    $pdo->prepare('UPDATE incidents SET paused_at = NOW() - INTERVAL :days DAY WHERE id = :id')
         ->execute([':days' => $days, ':id' => $incidentId]);
 };
 
 $incidentRow = function (int $incidentId) use ($pdo): array {
-    $stmt = $pdo->prepare('SELECT * FROM `incidents` WHERE `id` = :id');
+    $stmt = $pdo->prepare('SELECT * FROM incidents WHERE id = :id');
     $stmt->execute([':id' => $incidentId]);
 
     return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -312,7 +312,7 @@ $incidentRow = function (int $incidentId) use ($pdo): array {
 
 $machineRow = function (int $machineId) use ($pdo): array {
     $stmt = $pdo->prepare(
-        'SELECT `id`, `code`, `machine_type`, `is_active`, `is_blocked_no_access`, `sanitary_status`, `notes` FROM `machines` WHERE `id` = :id'
+        'SELECT id, code, machine_type, is_active, is_blocked_no_access, sanitary_status, notes FROM machines WHERE id = :id'
     );
     $stmt->execute([':id' => $machineId]);
 
@@ -321,8 +321,8 @@ $machineRow = function (int $machineId) use ($pdo): array {
 
 $historyRows = function (int $incidentId) use ($pdo): array {
     $stmt = $pdo->prepare(
-        'SELECT `id`, `incident_id`, `user_id`, `from_status`, `to_status`, `action_note`, `created_at`
-           FROM `incident_history` WHERE `incident_id` = :id ORDER BY `id` ASC'
+        'SELECT id, incident_id, user_id, from_status, to_status, action_note, created_at
+           FROM incident_history WHERE incident_id = :id ORDER BY id ASC'
     );
     $stmt->execute([':id' => $incidentId]);
 
@@ -335,17 +335,17 @@ $historyRows = function (int $incidentId) use ($pdo): array {
  * (precedente ratificado en T-PAUSE-13/14 y declarado en T-PAUSE-21).
  */
 $auditCursor = static function () use ($pdo): int {
-    return (int)$pdo->query('SELECT COALESCE(MAX(`id`), 0) FROM `audit_log`')->fetchColumn();
+    return (int)$pdo->query('SELECT COALESCE(MAX(id), 0) FROM audit_log')->fetchColumn();
 };
 
 /** @return list<array<string, mixed>> Eventos de auditoría nuevos desde el cursor. */
 $auditEvents = function (string $entityType, int $entityId, string $action, int $sinceId = 0) use ($pdo): array {
     $stmt = $pdo->prepare(
-        'SELECT `action`, `entity_type`, `entity_id`, `user_id`, `user_role`, `user_name`, `previous_state`, `new_state`, `metadata`, `created_at`
-           FROM `audit_log`
-          WHERE `entity_type` = :entity_type AND `entity_id` = :entity_id AND `action` = :action
-            AND `id` > :since_id
-          ORDER BY `id` ASC'
+        'SELECT action, entity_type, entity_id, user_id, user_role, user_name, previous_state, new_state, metadata, created_at
+           FROM audit_log
+          WHERE entity_type = :entity_type AND entity_id = :entity_id AND action = :action
+            AND id > :since_id
+          ORDER BY id ASC'
     );
     $stmt->execute([':entity_type' => $entityType, ':entity_id' => $entityId, ':action' => $action, ':since_id' => $sinceId]);
 
@@ -354,8 +354,8 @@ $auditEvents = function (string $entityType, int $entityId, string $action, int 
 
 $machineSnapshot = function (int $machineId) use ($pdo): array {
     $stmt = $pdo->prepare(
-        'SELECT `is_active`, `is_blocked_no_access`, `sanitary_status`, `notes`, `next_sanitary_inspection_due`
-           FROM `machines` WHERE `id` = :id'
+        'SELECT is_active, is_blocked_no_access, sanitary_status, notes, next_sanitary_inspection_due
+           FROM machines WHERE id = :id'
     );
     $stmt->execute([':id' => $machineId]);
 
@@ -368,13 +368,13 @@ $restoreMachine = function (int $machineId, array $snapshot) use ($pdo): void {
     }
 
     $pdo->prepare(
-        'UPDATE `machines`
-            SET `is_active` = :is_active,
-                `is_blocked_no_access` = :is_blocked,
-                `sanitary_status` = :sanitary_status,
-                `notes` = :notes,
-                `next_sanitary_inspection_due` = :next_due
-          WHERE `id` = :id'
+        'UPDATE machines
+            SET is_active = :is_active,
+                is_blocked_no_access = :is_blocked,
+                sanitary_status = :sanitary_status,
+                notes = :notes,
+                next_sanitary_inspection_due = :next_due
+          WHERE id = :id'
     )->execute([
         ':is_active'       => (int)$snapshot['is_active'],
         ':is_blocked'      => (int)$snapshot['is_blocked_no_access'],
@@ -825,7 +825,7 @@ try {
 
     $blockedMachineId  = $stalledMachine['machine_id'];
     $blockedLocationId = $stalledMachine['location_id'];
-    $blockedSiteCode   = (string)($pdo->query("SELECT `site_code` FROM `locations` WHERE `id` = {$blockedLocationId}")->fetchColumn() ?: '');
+    $blockedSiteCode   = (string)($pdo->query("SELECT site_code FROM locations WHERE id = {$blockedLocationId}")->fetchColumn() ?: '');
     $blockedMachineRow = $machineRow($blockedMachineId);
     $blockAnnotation   = (string)($blockedMachineRow['notes'] ?? '');
 
@@ -868,10 +868,10 @@ try {
     ));
 
     $openTicketsAfterRejection = (int)$pdo->query(
-        "SELECT COUNT(*) FROM `incidents`
-          WHERE `machine_id` = {$blockedMachineId}
-            AND `deleted_at` IS NULL
-            AND `status` NOT IN ('CLOSED', 'CANCELLED')"
+        "SELECT COUNT(*) FROM incidents
+          WHERE machine_id = {$blockedMachineId}
+            AND deleted_at IS NULL
+            AND status NOT IN ('CLOSED', 'CANCELLED')"
     )->fetchColumn();
 
     $assert(

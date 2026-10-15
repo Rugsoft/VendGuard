@@ -49,9 +49,7 @@ $pdo = ConnectionFactory::getConnection();
 // suite crea sedes `SEDE-MAP17-*` y el gancho de apagado corre también tras un
 // error fatal, que es el camino en el que un `finally` no llega y por el que el
 // residuo se acumulaba (hallazgo F-4).
-register_shutdown_function(static function () use ($pdo): void {
-    TestDataCleaner::purgeTestLocations($pdo);
-});
+TestDataCleaner::registerShutdownRestitution();
 
 // Limpieza operacional segura (orden derivado del grafo de FKs).
 TestDataCleaner::purge($pdo);

@@ -466,7 +466,7 @@ echo "\n--- 4. El vocabulario persistido coincide con el catálogo (MariaDB real
 
 try {
     $pdo = \VendGuard\Infrastructure\Database\ConnectionFactory::getConnection();
-    $persisted = $pdo->query('SELECT DISTINCT `action` FROM `audit_log`')->fetchAll(PDO::FETCH_COLUMN);
+    $persisted = $pdo->query('SELECT DISTINCT action FROM audit_log')->fetchAll(PDO::FETCH_COLUMN);
     $persisted = array_values(array_unique(array_map('strval', $persisted)));
     sort($persisted);
 

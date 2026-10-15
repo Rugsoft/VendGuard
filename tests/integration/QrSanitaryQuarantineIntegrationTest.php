@@ -194,10 +194,10 @@ $assert(
 // frío con el técnico esperando respuesta de la sede— y el único en el que el canal
 // ciudadano podría delatar la pausa si dejara de estar blindado.
 $pdo->exec(sprintf(
-    "UPDATE `incidents` SET `status` = 'PENDING_INFO', `paused_at` = NOW(), "
-    . "`pending_info_reason_category` = 'SITE_ACCESS_BLOCKED', "
-    . "`pending_info_reason_text` = 'Sede sin acceso al almacén (CONFIDENCIAL)' "
-    . "WHERE `id` = %d",
+    "UPDATE incidents SET status = 'PENDING_INFO', paused_at = NOW(), "
+    . "pending_info_reason_category = 'SITE_ACCESS_BLOCKED', "
+    . "pending_info_reason_text = 'Sede sin acceso al almacén (CONFIDENCIAL)' "
+    . "WHERE id = %d",
     (int)$quarantineIncident->getId()
 ));
 
@@ -231,9 +231,9 @@ $assert(
 // Se cierra el intervalo de pausa recién sembrado para no dejar el expediente en un
 // estado que no le corresponde al resto del bloque (la incidencia se creó en curso).
 $pdo->exec(sprintf(
-    "UPDATE `incidents` SET `status` = 'IN_PROGRESS', `paused_at` = NULL, "
-    . "`pending_info_reason_category` = NULL, `pending_info_reason_text` = NULL "
-    . "WHERE `id` = %d",
+    "UPDATE incidents SET status = 'IN_PROGRESS', paused_at = NULL, "
+    . "pending_info_reason_category = NULL, pending_info_reason_text = NULL "
+    . "WHERE id = %d",
     (int)$quarantineIncident->getId()
 ));
 

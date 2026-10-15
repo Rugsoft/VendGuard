@@ -100,7 +100,7 @@ if ($tempLoc !== null) {
     $assert("3.3 findBySiteCode() devuelve null para sede con deleted_at IS NOT NULL", $deletedLocSearch === null);
 
     // Verificar en BD que el registro SIGUE EXISTIENDO FÍSICAMENTE (RNF-03)
-    $stmtRaw = $pdo->prepare("SELECT id, deleted_at FROM `locations` WHERE `id` = :id");
+    $stmtRaw = $pdo->prepare("SELECT id, deleted_at FROM locations WHERE id = :id");
     $stmtRaw->execute([':id' => $tempLoc->getId()]);
     $rawRow = $stmtRaw->fetch();
 
@@ -110,7 +110,7 @@ if ($tempLoc !== null) {
     // Limpieza final de la sede de test. El borrado de una fila maestra se emite con
     // la ventana de purga abierta (T-HYBRID-26); la señal vive en TestDataCleaner.
     TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $tempLoc): void {
-        $pdo->prepare("DELETE FROM `locations` WHERE `id` = :id")->execute([':id' => $tempLoc->getId()]);
+        $pdo->prepare("DELETE FROM locations WHERE id = :id")->execute([':id' => $tempLoc->getId()]);
     });
 }
 

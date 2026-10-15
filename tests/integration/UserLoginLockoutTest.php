@@ -28,6 +28,14 @@ require_once __DIR__ . '/../bootstrap.php';
 
 $pdo = ConnectionFactory::getConnection();
 
+// Restitución del parque ante cualquier salida (contrato de limpieza §8.3): esta suite
+// BLOQUEA una cuenta del catálogo (`jordi.ruta@vendguard.internal`) y sólo la reinicia si
+// llega al final de su camino feliz, así que sin gancho deja la cuenta cerrada para la
+// corrida siguiente y la suite que sólo inicia sesión falla con `ACCOUNT_LOCKED`. El gancho
+// corre también tras un error fatal, que es el camino por el que el residuo se acumulaba
+// (hallazgo F-4).
+\TestDataCleaner::registerShutdownRestitution();
+
 echo "======================================================================\n";
 echo " VendGuard: Test de Integración - UserLoginLockoutTest (S-3)\n";
 echo "======================================================================\n";

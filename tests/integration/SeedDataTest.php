@@ -32,7 +32,7 @@ $runner->seedAll('Password123!');
 $failures = 0;
 
 // 1. Verificar Sedes (al menos SEDE-BCN-01 y SEDE-BCN-02)
-$stmt = $pdo->prepare("SELECT * FROM `locations` WHERE `site_code` IN ('SEDE-BCN-01', 'SEDE-BCN-02') AND `deleted_at` IS NULL");
+$stmt = $pdo->prepare("SELECT * FROM locations WHERE site_code IN ('SEDE-BCN-01', 'SEDE-BCN-02') AND deleted_at IS NULL");
 $stmt->execute();
 $locations = $stmt->fetchAll();
 
@@ -61,7 +61,7 @@ if (count($locations) === 2 && $failures === 0) {
     echo "1. Coordenadas reales validadas para las sedes de Barcelona: [OK]\n";
 }
 
-$routeSettings = $pdo->query("SELECT `id`, `base_latitude`, `base_longitude` FROM `route_settings` WHERE `id` = 1")->fetch(PDO::FETCH_ASSOC);
+$routeSettings = $pdo->query("SELECT id, base_latitude, base_longitude FROM route_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
 if ($routeSettings !== false
     && (string)$routeSettings['base_latitude'] === '41.3935000'
     && (string)$routeSettings['base_longitude'] === '2.1890000') {
@@ -72,7 +72,7 @@ if ($routeSettings !== false
 }
 
 // 2. Verificar Máquinas (al menos 3 máquinas, incluyendo PERISHABLE_FOOD)
-$stmt = $pdo->prepare("SELECT * FROM `machines` WHERE `code` IN ('VEND-0101', 'VEND-0102', 'VEND-0201') AND `deleted_at` IS NULL");
+$stmt = $pdo->prepare("SELECT * FROM machines WHERE code IN ('VEND-0101', 'VEND-0102', 'VEND-0201') AND deleted_at IS NULL");
 $stmt->execute();
 $machines = $stmt->fetchAll();
 
@@ -104,7 +104,7 @@ $testUsers = [
 ];
 
 foreach ($testUsers as $email => $expectedRole) {
-    $stmt = $pdo->prepare("SELECT * FROM `users` WHERE `email` = :email AND `deleted_at` IS NULL");
+    $stmt = $pdo->prepare("SELECT * FROM users WHERE email = :email AND deleted_at IS NULL");
     $stmt->execute([':email' => $email]);
     $user = $stmt->fetch();
 

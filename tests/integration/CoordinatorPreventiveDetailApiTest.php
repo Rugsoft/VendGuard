@@ -78,9 +78,9 @@ $techToken = $authService->generateInternalToken($technician);
 
 // Orden completada con checklist sembrado y certificado vinculado.
 $completedOrderRow = $pdo->query("
-    SELECT `id`, `order_code`
-    FROM `preventive_orders`
-    WHERE `order_code` = 'ORD-PREV-2026-0001'
+    SELECT id, order_code
+    FROM preventive_orders
+    WHERE order_code = 'ORD-PREV-2026-0001'
     LIMIT 1
 ")->fetch(PDO::FETCH_ASSOC);
 $assert('0.2 Orden completada semilla encontrada', $completedOrderRow !== false);
@@ -91,9 +91,9 @@ if ($completedOrderRow === false) {
 
 // Orden pendiente de asignación (sin checklist ni certificado asociado a la inspección).
 $pendingOrderRow = $pdo->query("
-    SELECT `id`, `order_code`
-    FROM `preventive_orders`
-    WHERE `order_code` = 'ORD-PREV-2026-0003'
+    SELECT id, order_code
+    FROM preventive_orders
+    WHERE order_code = 'ORD-PREV-2026-0003'
     LIMIT 1
 ")->fetch(PDO::FETCH_ASSOC);
 $assert('0.3 Orden pendiente semilla encontrada', $pendingOrderRow !== false);
@@ -192,9 +192,9 @@ $assert('4.2 La avería vinculada es nula cuando la inspección no abrió correc
 // acciones preventivas y atribuida por `metadata.order_code`.
 $auditRows = $pdo->query("
     SELECT COUNT(*)
-    FROM `audit_log`
-    WHERE `entity_type` = 'MACHINE'
-      AND `entity_id` = (SELECT `machine_id` FROM `preventive_orders` WHERE `id` = {$completedOrderId})
+    FROM audit_log
+    WHERE entity_type = 'MACHINE'
+      AND entity_id = (SELECT machine_id FROM preventive_orders WHERE id = {$completedOrderId})
       AND `action` IN (
         'CREATE_PREVENTIVE_ORDER', 'ASSIGN_PREVENTIVE_ORDER', 'CLAIM_PREVENTIVE_ORDER',
         'START_PREVENTIVE_INSPECTION', 'EVALUATE_PREVENTIVE_CHECKLIST',

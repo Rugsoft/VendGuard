@@ -89,7 +89,7 @@ $assert = function (string $caseTitle, bool $condition, string $message = '') us
 
 /** @var array<int, string> Estado sanitario de TODO el parque al arrancar la suite. */
 $sanitarySnapshot = [];
-foreach ($pdo->query('SELECT `id`, `sanitary_status` FROM `machines` WHERE `deleted_at` IS NULL') as $row) {
+foreach ($pdo->query('SELECT id, sanitary_status FROM machines WHERE deleted_at IS NULL') as $row) {
     $sanitarySnapshot[(int)$row['id']] = (string)$row['sanitary_status'];
 }
 
@@ -100,22 +100,22 @@ foreach ($pdo->query('SELECT `id`, `sanitary_status` FROM `machines` WHERE `dele
  */
 $freeMachinesByType = function (string $machineType, int $limit = 3) use ($pdo): array {
     $stmt = $pdo->prepare(
-        "SELECT m.`id` AS machine_id, m.`location_id`, m.`code`, m.`machine_type`
-           FROM `machines` m
-           JOIN `locations` l ON l.`id` = m.`location_id`
-          WHERE m.`is_active` = 1
-            AND m.`is_blocked_no_access` = 0
-            AND m.`deleted_at` IS NULL
-            AND l.`is_active` = 1
-            AND l.`deleted_at` IS NULL
-            AND m.`machine_type` = :machine_type
+        "SELECT m.id AS machine_id, m.location_id, m.code, m.machine_type
+           FROM machines m
+           JOIN locations l ON l.id = m.location_id
+          WHERE m.is_active = 1
+            AND m.is_blocked_no_access = 0
+            AND m.deleted_at IS NULL
+            AND l.is_active = 1
+            AND l.deleted_at IS NULL
+            AND m.machine_type = :machine_type
             AND NOT EXISTS (
-                SELECT 1 FROM `incidents` i
-                 WHERE i.`machine_id` = m.`id`
-                   AND i.`deleted_at` IS NULL
-                   AND i.`status` NOT IN ('CLOSED', 'CANCELLED')
+                SELECT 1 FROM incidents i
+                 WHERE i.machine_id = m.id
+                   AND i.deleted_at IS NULL
+                   AND i.status NOT IN ('CLOSED', 'CANCELLED')
             )
-          ORDER BY m.`id`
+          ORDER BY m.id
           LIMIT {$limit}"
     );
     $stmt->execute([':machine_type' => $machineType]);
@@ -137,9 +137,9 @@ $coldPool       = $freeMachinesByType('COLD_DRINKS');
 $snackPool      = $freeMachinesByType('SNACKS');
 
 $technicianRows = $pdo->query(
-    "SELECT `id` FROM `users`
-      WHERE `role` = 'TECHNICIAN' AND `deleted_at` IS NULL
-      ORDER BY `id` LIMIT 1"
+    "SELECT id FROM users
+      WHERE role = 'TECHNICIAN' AND deleted_at IS NULL
+      ORDER BY id LIMIT 1"
 )->fetchAll(PDO::FETCH_COLUMN);
 
 $technician  = $userRepo->findById((int)($technicianRows[0] ?? 0));
@@ -207,26 +207,26 @@ $createInProgressTicket = function (array $machine) use ($incidentRepo, $techId,
 
 /** Envejece la apertura del expediente propio (instrumento de la suite). */
 $backdateOpening = function (int $incidentId, int $hours) use ($pdo): void {
-    $pdo->prepare('UPDATE `incidents` SET `created_at` = NOW() - INTERVAL :hours HOUR WHERE `id` = :id')
+    $pdo->prepare('UPDATE incidents SET created_at = NOW() - INTERVAL :hours HOUR WHERE id = :id')
         ->execute([':hours' => $hours, ':id' => $incidentId]);
 };
 
 $incidentRow = function (int $incidentId) use ($pdo): array {
-    $stmt = $pdo->prepare('SELECT * FROM `incidents` WHERE `id` = :id');
+    $stmt = $pdo->prepare('SELECT * FROM incidents WHERE id = :id');
     $stmt->execute([':id' => $incidentId]);
 
     return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 };
 
 $machineRow = function (int $machineId) use ($pdo): array {
-    $stmt = $pdo->prepare('SELECT `id`, `code`, `machine_type`, `sanitary_status` FROM `machines` WHERE `id` = :id');
+    $stmt = $pdo->prepare('SELECT id, code, machine_type, sanitary_status FROM machines WHERE id = :id');
     $stmt->execute([':id' => $machineId]);
 
     return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 };
 
 $historyCount = function (int $incidentId) use ($pdo): int {
-    $stmt = $pdo->prepare('SELECT COUNT(*) FROM `incident_history` WHERE `incident_id` = :id');
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM incident_history WHERE incident_id = :id');
     $stmt->execute([':id' => $incidentId]);
 
     return (int)$stmt->fetchColumn();
@@ -238,17 +238,17 @@ $historyCount = function (int $incidentId) use ($pdo): int {
  * (precedente ratificado en T-PAUSE-13/14 y declarado en T-PAUSE-21).
  */
 $auditCursor = static function () use ($pdo): int {
-    return (int)$pdo->query('SELECT COALESCE(MAX(`id`), 0) FROM `audit_log`')->fetchColumn();
+    return (int)$pdo->query('SELECT COALESCE(MAX(id), 0) FROM audit_log')->fetchColumn();
 };
 
 /** @return list<array<string, mixed>> Eventos de auditoría nuevos desde el cursor. */
 $auditEvents = function (string $entityType, int $entityId, string $action, int $sinceId = 0) use ($pdo): array {
     $stmt = $pdo->prepare(
-        'SELECT `action`, `entity_type`, `entity_id`, `user_id`, `user_role`, `new_state`, `metadata`, `created_at`
-           FROM `audit_log`
-          WHERE `entity_type` = :entity_type AND `entity_id` = :entity_id AND `action` = :action
-            AND `id` > :since_id
-          ORDER BY `id` ASC'
+        'SELECT action, entity_type, entity_id, user_id, user_role, new_state, metadata, created_at
+           FROM audit_log
+          WHERE entity_type = :entity_type AND entity_id = :entity_id AND action = :action
+            AND id > :since_id
+          ORDER BY id ASC'
     );
     $stmt->execute([':entity_type' => $entityType, ':entity_id' => $entityId, ':action' => $action, ':since_id' => $sinceId]);
 
@@ -509,12 +509,12 @@ try {
 
     $settledTicketId = $createInProgressTicket($comboPool[1] ?? $combo);
     $pdo->prepare(
-        "UPDATE `incidents`
-            SET `status` = 'RESOLVED',
-                `resolved_at` = NOW() - INTERVAL 6 HOUR,
-                `resolution_diagnosis` = 'Compresor sin presión por fuga en la línea de baja.',
-                `resolution_action` = 'Recargado el circuito y verificado el ciclo completo de frío.'
-          WHERE `id` = :id"
+        "UPDATE incidents
+            SET status = 'RESOLVED',
+                resolved_at = NOW() - INTERVAL 6 HOUR,
+                resolution_diagnosis = 'Compresor sin presión por fuga en la línea de baja.',
+                resolution_action = 'Recargado el circuito y verificado el ciclo completo de frío.'
+          WHERE id = :id"
     )->execute([':id' => $settledTicketId]);
     $backdateOpening($settledTicketId, 8);
     $settledMachineId = (int)($incidentRow($settledTicketId)['machine_id'] ?? 0);
@@ -662,7 +662,7 @@ try {
     // Restitución del estado sanitario de TODO el parque: el barrido escribe sobre
     // filas maestras que otras suites esperan intactas.
     if ($sanitarySnapshot !== []) {
-        $restore = $pdo->prepare('UPDATE `machines` SET `sanitary_status` = :status WHERE `id` = :id');
+        $restore = $pdo->prepare('UPDATE machines SET sanitary_status = :status WHERE id = :id');
         foreach ($sanitarySnapshot as $machineId => $status) {
             $restore->execute([':status' => $status, ':id' => $machineId]);
         }

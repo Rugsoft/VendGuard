@@ -100,21 +100,21 @@ $assert = function (string $caseTitle, bool $condition, string $message = '') us
 // Grupo 0: banco de pruebas sobre la flota activa y libre del parque
 // -----------------------------------------------------------------------
 $machinePool = $pdo->query(
-    "SELECT m.`id` AS machine_id, m.`code` AS machine_code, m.`location_id`
-       FROM `machines` m
-       JOIN `locations` l ON l.`id` = m.`location_id`
-      WHERE m.`is_active` = 1
-        AND m.`is_blocked_no_access` = 0
-        AND m.`deleted_at` IS NULL
-        AND l.`is_active` = 1
-        AND l.`deleted_at` IS NULL
+    "SELECT m.id AS machine_id, m.code AS machine_code, m.location_id
+       FROM machines m
+       JOIN locations l ON l.id = m.location_id
+      WHERE m.is_active = 1
+        AND m.is_blocked_no_access = 0
+        AND m.deleted_at IS NULL
+        AND l.is_active = 1
+        AND l.deleted_at IS NULL
         AND NOT EXISTS (
-            SELECT 1 FROM `incidents` i
-             WHERE i.`machine_id` = m.`id`
-               AND i.`deleted_at` IS NULL
-               AND i.`status` NOT IN ('CLOSED', 'CANCELLED')
+            SELECT 1 FROM incidents i
+             WHERE i.machine_id = m.id
+               AND i.deleted_at IS NULL
+               AND i.status NOT IN ('CLOSED', 'CANCELLED')
         )
-      ORDER BY m.`id`"
+      ORDER BY m.id"
 )->fetchAll(PDO::FETCH_ASSOC);
 
 $assert(
@@ -129,9 +129,9 @@ if (count($machinePool) < 6) {
 }
 
 $technicianRows = $pdo->query(
-    "SELECT `id` FROM `users`
-      WHERE `role` = 'TECHNICIAN' AND `deleted_at` IS NULL
-      ORDER BY `id` LIMIT 2"
+    "SELECT id FROM users
+      WHERE role = 'TECHNICIAN' AND deleted_at IS NULL
+      ORDER BY id LIMIT 2"
 )->fetchAll(PDO::FETCH_COLUMN);
 
 $primaryTech = isset($technicianRows[0]) ? $userRepo->findById((int)$technicianRows[0]) : null;
@@ -158,10 +158,10 @@ $otherTechToken  = $authService->generateInternalToken($otherTech);
 // El técnico primario no debe arrastrar otra intervención activa: la suite mide que la
 // pausa sobrevive, y una intervención ajena previa contaminaría el escenario.
 $activeForPrimary = (int)$pdo->query(
-    "SELECT COUNT(*) FROM `incidents`
-      WHERE `assigned_technician_id` = {$techId}
-        AND `deleted_at` IS NULL
-        AND `status` NOT IN ('CLOSED', 'CANCELLED')"
+    "SELECT COUNT(*) FROM incidents
+      WHERE assigned_technician_id = {$techId}
+        AND deleted_at IS NULL
+        AND status NOT IN ('CLOSED', 'CANCELLED')"
 )->fetchColumn();
 
 $assert('0.3 El técnico primario no arrastra intervenciones activas previas', $activeForPrimary === 0);
@@ -228,14 +228,14 @@ $createAssignedTicket = function (int $technicianId) use (
 };
 
 $incidentRow = function (int $incidentId) use ($pdo): array {
-    $stmt = $pdo->prepare('SELECT * FROM `incidents` WHERE `id` = :id');
+    $stmt = $pdo->prepare('SELECT * FROM incidents WHERE id = :id');
     $stmt->execute([':id' => $incidentId]);
 
     return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 };
 
 $historyRows = function (int $incidentId) use ($pdo): array {
-    $stmt = $pdo->prepare('SELECT * FROM `incident_history` WHERE `incident_id` = :id ORDER BY `id` ASC');
+    $stmt = $pdo->prepare('SELECT * FROM incident_history WHERE incident_id = :id ORDER BY id ASC');
     $stmt->execute([':id' => $incidentId]);
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -250,7 +250,7 @@ $resumeHistoryRows = function (int $incidentId) use ($historyRows): array {
 };
 
 $commentCount = function (int $incidentId) use ($pdo): int {
-    $stmt = $pdo->prepare('SELECT COUNT(*) FROM `incident_comments` WHERE `incident_id` = :id');
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM incident_comments WHERE incident_id = :id');
     $stmt->execute([':id' => $incidentId]);
 
     return (int)$stmt->fetchColumn();
@@ -568,7 +568,7 @@ try {
 
     // El cierre por inactividad exige superar las 72 h hábiles (RF-04.3): se siembra el
     // silencio de sede en lugar de esperar tres jornadas de reloj real.
-    $pdo->prepare('UPDATE `incidents` SET `paused_at` = :paused WHERE `id` = :id')->execute([
+    $pdo->prepare('UPDATE incidents SET paused_at = :paused WHERE id = :id')->execute([
         ':paused' => (new DateTimeImmutable('-21 days'))->format('Y-m-d H:i:s'),
         ':id'     => $cancelledId,
     ]);
@@ -586,8 +586,8 @@ try {
     $assert(
         '6.0 El expediente queda cancelado y la máquina bloqueada sin acceso (RF-04.4)',
         ($cancelledRow['status'] ?? '') === 'CANCELLED'
-            && (int)($pdo->query("SELECT `is_active` FROM `machines` WHERE `id` = {$cancelledMachineId}")->fetchColumn()) === 0
-            && (int)($pdo->query("SELECT `is_blocked_no_access` FROM `machines` WHERE `id` = {$cancelledMachineId}")->fetchColumn()) === 1
+            && (int)($pdo->query("SELECT is_active FROM machines WHERE id = {$cancelledMachineId}")->fetchColumn()) === 0
+            && (int)($pdo->query("SELECT is_blocked_no_access FROM machines WHERE id = {$cancelledMachineId}")->fetchColumn()) === 1
     );
 
     $sealed = $postSiteComment($cancelledId, $cancelledLocationId, $validComment);
@@ -625,7 +625,7 @@ try {
 
     [$qrIncidentId, $qrTicketCode, $qrMachineId, $qrLocationId] = $createAssignedTicket($techId);
     $pause($qrIncidentId, $techId);
-    $qrMachineCode = (string)$pdo->query("SELECT `code` FROM `machines` WHERE `id` = {$qrMachineId}")->fetchColumn();
+    $qrMachineCode = (string)$pdo->query("SELECT code FROM machines WHERE id = {$qrMachineId}")->fetchColumn();
 
     // El reporte ciudadano en carrera (EARS 4.5) escribe su mensaje con el MISMO tipo de
     // autor que la sede (`REPORTER`, `user_id = NULL`). No puede encender el aviso: el
@@ -695,14 +695,14 @@ try {
     $assert(
         '7.4 El expediente sigue siendo el mismo y la máquina permanece en el parque',
         ($scanData['active_incident']['ticket_code'] ?? '') === $qrTicketCode
-            && (int)($pdo->query("SELECT `is_active` FROM `machines` WHERE `id` = {$qrMachineId}")->fetchColumn()) === 1
+            && (int)($pdo->query("SELECT is_active FROM machines WHERE id = {$qrMachineId}")->fetchColumn()) === 1
     );
 
 } finally {
     // La máquina del escenario cancelado queda fuera de servicio (RF-04.4) y las filas
     // maestras las protege el arnés: se restituye antes de purgar los expedientes.
     foreach ($cancelledMachineIds as $machineId) {
-        $pdo->prepare('UPDATE `machines` SET `is_active` = 1, `is_blocked_no_access` = 0 WHERE `id` = :id')
+        $pdo->prepare('UPDATE machines SET is_active = 1, is_blocked_no_access = 0 WHERE id = :id')
             ->execute([':id' => $machineId]);
     }
 

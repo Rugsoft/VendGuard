@@ -35,22 +35,22 @@ $requestRepo = new PdoSparePartRequestRepository($pdo);
 $sparePartRepo = new PdoSparePartRepository($pdo);
 
 // Obtener datos existentes para el test
-$incStmt = $pdo->query("SELECT id, ticket_code FROM `incidents` LIMIT 2");
+$incStmt = $pdo->query("SELECT id, ticket_code FROM incidents LIMIT 2");
 $incidents = $incStmt->fetchAll(PDO::FETCH_ASSOC);
 
 if (count($incidents) < 2) {
-    $mach = $pdo->query("SELECT id, location_id, machine_type FROM `machines` LIMIT 1")->fetch(PDO::FETCH_ASSOC);
-    $techUser = $pdo->query("SELECT id FROM `users` WHERE role = 'TECHNICIAN' LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $mach = $pdo->query("SELECT id, location_id, machine_type FROM machines LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $techUser = $pdo->query("SELECT id FROM users WHERE role = 'TECHNICIAN' LIMIT 1")->fetch(PDO::FETCH_ASSOC);
     $machId = $mach ? (int)$mach['id'] : 1;
     $locId = $mach ? (int)$mach['location_id'] : 1;
     $machType = $mach ? $mach['machine_type'] : 'HOT_DRINKS';
     $tId = $techUser ? (int)$techUser['id'] : null;
 
     $ins = $pdo->prepare("
-        INSERT INTO `incidents` (
-            `ticket_code`, `machine_id`, `machine_type_snapshot`, `location_id`,
-            `assigned_technician_id`, `reporter_phone`, `category`, `description`,
-            `urgency`, `status`, `created_at`, `updated_at`
+        INSERT INTO incidents (
+            ticket_code, machine_id, machine_type_snapshot, location_id,
+            assigned_technician_id, reporter_phone, category, description,
+            urgency, status, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, '600000000', 'PAYMENT_SYSTEM', 'Incidencia para test autocontenido de repuestos', 'MEDIUM', 'CLOSED', NOW(), NOW())
     ");
     $time = time();
@@ -68,7 +68,7 @@ if (count($incidents) < 2) {
 $inc1Id = (int)$incidents[0]['id'];
 $inc2Id = (int)$incidents[1]['id'];
 
-$techStmt = $pdo->query("SELECT id, name FROM `users` WHERE role = 'TECHNICIAN' LIMIT 1");
+$techStmt = $pdo->query("SELECT id, name FROM users WHERE role = 'TECHNICIAN' LIMIT 1");
 $tech = $techStmt->fetch(PDO::FETCH_ASSOC);
 $techId = (int)$tech['id'];
 
@@ -80,7 +80,7 @@ if ($part === null || $part->getId() === null) {
 $partId = $part->getId();
 
 // Limpiar solicitudes previas de estas incidencias para aislamiento del test
-$pdo->prepare("DELETE FROM `spare_part_requests` WHERE `incident_id` IN (?, ?)")->execute([$inc1Id, $inc2Id]);
+$pdo->prepare("DELETE FROM spare_part_requests WHERE incident_id IN (?, ?)")->execute([$inc1Id, $inc2Id]);
 
 $failures = 0;
 $assertions = 0;
@@ -225,7 +225,7 @@ $reloadedInc2 = $requestRepo->findById((int)$createdInc2->getId());
 $assert("7.2 Estado de solicitud cancelada es CANCELLED", $reloadedInc2 !== null && $reloadedInc2->getStatus() === SparePartRequestStatus::CANCELLED);
 
 // Limpieza de datos de prueba
-$pdo->prepare("DELETE FROM `spare_part_requests` WHERE `incident_id` IN (?, ?)")->execute([$inc1Id, $inc2Id]);
+$pdo->prepare("DELETE FROM spare_part_requests WHERE incident_id IN (?, ?)")->execute([$inc1Id, $inc2Id]);
 
 echo "\n----------------------------------------------------------------------\n";
 echo "Total Aserciones: {$assertions}\n";

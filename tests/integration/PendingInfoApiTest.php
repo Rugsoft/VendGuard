@@ -118,21 +118,21 @@ const TRANSITION_OUTLIER_CEILING_MS = 600.0;
 // Grupo 0: banco de pruebas sobre la flota activa y libre del parque
 // -----------------------------------------------------------------------
 $machinePool = $pdo->query(
-    "SELECT m.`id` AS machine_id, m.`location_id`
-       FROM `machines` m
-       JOIN `locations` l ON l.`id` = m.`location_id`
-      WHERE m.`is_active` = 1
-        AND m.`is_blocked_no_access` = 0
-        AND m.`deleted_at` IS NULL
-        AND l.`is_active` = 1
-        AND l.`deleted_at` IS NULL
+    "SELECT m.id AS machine_id, m.location_id
+       FROM machines m
+       JOIN locations l ON l.id = m.location_id
+      WHERE m.is_active = 1
+        AND m.is_blocked_no_access = 0
+        AND m.deleted_at IS NULL
+        AND l.is_active = 1
+        AND l.deleted_at IS NULL
         AND NOT EXISTS (
-            SELECT 1 FROM `incidents` i
-             WHERE i.`machine_id` = m.`id`
-               AND i.`deleted_at` IS NULL
-               AND i.`status` NOT IN ('CLOSED', 'CANCELLED')
+            SELECT 1 FROM incidents i
+             WHERE i.machine_id = m.id
+               AND i.deleted_at IS NULL
+               AND i.status NOT IN ('CLOSED', 'CANCELLED')
         )
-      ORDER BY m.`id`"
+      ORDER BY m.id"
 )->fetchAll(PDO::FETCH_ASSOC);
 
 $assert(
@@ -147,9 +147,9 @@ if (count($machinePool) < 5) {
 }
 
 $technicianRows = $pdo->query(
-    "SELECT `id` FROM `users`
-      WHERE `role` = 'TECHNICIAN' AND `deleted_at` IS NULL
-      ORDER BY `id` LIMIT 2"
+    "SELECT id FROM users
+      WHERE role = 'TECHNICIAN' AND deleted_at IS NULL
+      ORDER BY id LIMIT 2"
 )->fetchAll(PDO::FETCH_COLUMN);
 
 $primaryTech = isset($technicianRows[0]) ? $userRepo->findById((int)$technicianRows[0]) : null;
@@ -174,10 +174,10 @@ $coordinatorId = (int)$coordinator->getId();
 // degradara la primera reactivación a ASSIGNED y la suite mediría una causa ajena
 // a la rama en caliente que quiere certificar.
 $activeForPrimary = (int)$pdo->query(
-    "SELECT COUNT(*) FROM `incidents`
-      WHERE `assigned_technician_id` = {$techId}
-        AND `deleted_at` IS NULL
-        AND `status` NOT IN ('CLOSED', 'CANCELLED')"
+    "SELECT COUNT(*) FROM incidents
+      WHERE assigned_technician_id = {$techId}
+        AND deleted_at IS NULL
+        AND status NOT IN ('CLOSED', 'CANCELLED')"
 )->fetchColumn();
 
 $assert('0.3 El técnico primario no arrastra intervenciones activas previas', $activeForPrimary === 0);
@@ -254,21 +254,21 @@ $createAssignedTicket = function (int $technicianId) use (
 };
 
 $incidentRow = function (int $incidentId) use ($pdo): array {
-    $stmt = $pdo->prepare('SELECT * FROM `incidents` WHERE `id` = :id');
+    $stmt = $pdo->prepare('SELECT * FROM incidents WHERE id = :id');
     $stmt->execute([':id' => $incidentId]);
 
     return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 };
 
 $historyRows = function (int $incidentId) use ($pdo): array {
-    $stmt = $pdo->prepare('SELECT * FROM `incident_history` WHERE `incident_id` = :id ORDER BY `id` ASC');
+    $stmt = $pdo->prepare('SELECT * FROM incident_history WHERE incident_id = :id ORDER BY id ASC');
     $stmt->execute([':id' => $incidentId]);
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 };
 
 $commentCount = function (int $incidentId) use ($pdo): int {
-    $stmt = $pdo->prepare('SELECT COUNT(*) FROM `incident_comments` WHERE `incident_id` = :id');
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM incident_comments WHERE incident_id = :id');
     $stmt->execute([':id' => $incidentId]);
 
     return (int)$stmt->fetchColumn();
@@ -276,7 +276,7 @@ $commentCount = function (int $incidentId) use ($pdo): int {
 
 /** Siembra el vencimiento contractual del expediente propio (instrumento de la suite). */
 $seedDeadline = function (int $incidentId, string $deadline) use ($pdo): void {
-    $pdo->prepare('UPDATE `incidents` SET `sla_target_at` = :deadline WHERE `id` = :id')
+    $pdo->prepare('UPDATE incidents SET sla_target_at = :deadline WHERE id = :id')
         ->execute([':deadline' => $deadline, ':id' => $incidentId]);
 };
 
@@ -370,7 +370,7 @@ try {
             && ($cycleRow['pending_info_reason_text'] ?? '') === $pauseReason
             && (int)($cycleRow['total_pending_info_seconds'] ?? -1) === 0
             && ($cycleRow['sla_target_at'] ?? '') === $commercialDeadline
-            && (int)$pdo->query("SELECT `is_active` FROM `machines` WHERE `id` = {$cycleMachineId}")->fetchColumn() === 1
+            && (int)$pdo->query("SELECT is_active FROM machines WHERE id = {$cycleMachineId}")->fetchColumn() === 1
     );
 
     $pauseRows = array_values(array_filter(
@@ -599,7 +599,7 @@ try {
     // instrumento es SQL dirigido sobre el expediente propio, como en las hermanas.
     $pdo->prepare('UPDATE `incidents` SET `paused_at` = DATE_SUB(NOW(), INTERVAL 90 MINUTE) WHERE `id` = :id')
         ->execute([':id' => $coldId]);
-    $coldPausedAt = (string)$pdo->query("SELECT `paused_at` FROM `incidents` WHERE `id` = {$coldId}")->fetchColumn();
+    $coldPausedAt = (string)$pdo->query("SELECT paused_at FROM incidents WHERE id = {$coldId}")->fetchColumn();
 
     $assert(
         '2.2 Premisa del desfase: el intervalo vivo ya supera los 60 minutos (RF-02.1)',
@@ -818,10 +818,10 @@ try {
 
     // Reintegro del consumidor en inspección: debe sobrevivir a la cancelación.
     $pdo->prepare("
-        INSERT INTO `refund_requests` (
-            `incident_id`, `machine_id`, `location_id`, `claimant_name`, `claimant_contact`,
-            `claimed_amount`, `product_attempted`, `compensation_method`, `bizum_phone`,
-            `tracking_token`, `status`
+        INSERT INTO refund_requests (
+            incident_id, machine_id, location_id, claimant_name, claimant_contact,
+            claimed_amount, product_attempted, compensation_method, bizum_phone,
+            tracking_token, status
         ) VALUES (
             :incident, :machine, :location, 'Consumidor de la suite de ciclo de vida', '600000023',
             3.20, 'Bocadillo de atún', 'BIZUM', '600000023',
@@ -843,7 +843,7 @@ try {
     // corrida anterior puede dejar filas huérfanas que reutilicen los mismos
     // identificadores tras el resembrado.
     $auditCount = function (string $action, int $entityId, string $entityType = 'TICKET') use ($pdo): int {
-        $stmt = $pdo->prepare('SELECT COUNT(*) FROM `audit_log` WHERE `action` = :action AND `entity_type` = :type AND `entity_id` = :entity');
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM audit_log WHERE action = :action AND entity_type = :type AND entity_id = :entity');
         $stmt->execute([':action' => $action, ':type' => $entityType, ':entity' => $entityId]);
 
         return (int)$stmt->fetchColumn();
@@ -879,7 +879,7 @@ try {
             && (int)($cancelledRow['total_pending_info_seconds'] ?? -1) === $totalSeconds
     );
 
-    $machineRow = $pdo->query('SELECT `is_active`, `is_blocked_no_access` FROM `machines` WHERE `id` = ' . $cycleMachineId)->fetch(PDO::FETCH_ASSOC) ?: [];
+    $machineRow = $pdo->query('SELECT is_active, is_blocked_no_access FROM machines WHERE id = ' . $cycleMachineId)->fetch(PDO::FETCH_ASSOC) ?: [];
     $assert(
         '4.6 La máquina NO vuelve a Operativa: fuera de servicio por falta de acceso (RF-04.4, Art. V.1)',
         (int)($machineRow['is_active'] ?? 1) === 0
@@ -887,7 +887,7 @@ try {
             && ($cancelData['machine']['operational_status'] ?? '') === 'BLOCKED_NO_ACCESS'
     );
 
-    $refundRow = $pdo->query('SELECT * FROM `refund_requests` WHERE `id` = ' . $refundId)->fetch(PDO::FETCH_ASSOC) ?: [];
+    $refundRow = $pdo->query('SELECT * FROM refund_requests WHERE id = ' . $refundId)->fetch(PDO::FETCH_ASSOC) ?: [];
     $assert(
         '4.7 El reintegro del consumidor se preserva desvinculado y activo (RF-04.5)',
         array_key_exists('incident_id', $refundRow)
@@ -1023,14 +1023,14 @@ try {
     // Los reintegros desvinculados quedan con `incident_id = NULL`: se reenganchan a su
     // avería para que el purgado dirigido los arrastre como hijas.
     foreach ($refundIds as $refundId) {
-        $pdo->prepare('UPDATE `refund_requests` SET `incident_id` = :incident WHERE `id` = :refund')
+        $pdo->prepare('UPDATE refund_requests SET incident_id = :incident WHERE id = :refund')
             ->execute([':incident' => $cycleId, ':refund' => $refundId]);
     }
 
     // La cancelación por inactividad deja la máquina fuera de servicio (RF-04.4): se
     // restituye para no desviar el inventario de las suites posteriores.
     if ($cycleMachineId > 0) {
-        $pdo->prepare('UPDATE `machines` SET `is_active` = 1, `is_blocked_no_access` = 0 WHERE `id` = :id')
+        $pdo->prepare('UPDATE machines SET is_active = 1, is_blocked_no_access = 0 WHERE id = :id')
             ->execute([':id' => $cycleMachineId]);
     }
 

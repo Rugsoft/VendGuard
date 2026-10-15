@@ -36,6 +36,13 @@ echo " VendGuard: Test de Integración - AdminMachinesEndpointTest (T-ADM-12)\n"
 echo "======================================================================\n\n";
 
 $pdo = ConnectionFactory::getConnection();
+
+// Restitución del parque ante cualquier salida (contrato de limpieza §8.3): esta
+// suite crea una sede y una máquina fuera del catálogo canónico, y el borrado
+// dirigido de más abajo sólo corre si la suite llega al final. El gancho de apagado
+// corre también tras un error fatal, que es el camino en el que un `finally` no llega
+// y por el que el residuo se acumulaba (hallazgo F-4).
+TestDataCleaner::registerShutdownRestitution();
 $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedAll();
 

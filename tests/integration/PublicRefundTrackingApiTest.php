@@ -173,7 +173,7 @@ try {
 
     $caseRow = $refunds->findById((int)($receipt['id'] ?? 0));
     $storedToken = (string)$pdo->query(
-        "SELECT `tracking_token` FROM `refund_requests` WHERE `id` = " . (int)($receipt['id'] ?? 0)
+        "SELECT tracking_token FROM refund_requests WHERE id = " . (int)($receipt['id'] ?? 0)
     )->fetchColumn();
 
     $assert(
@@ -424,7 +424,7 @@ try {
     // ─────────────────────────────────────────────────────────────────────
     echo "\n--- 5. Inviolabilidad y rastro de auditoría (Art. III, RNF-REF-01) ---\n";
 
-    $refundCount = (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests`')->fetchColumn();
+    $refundCount = (int)$pdo->query('SELECT COUNT(*) FROM refund_requests')->fetchColumn();
     $assert(
         '5.1 Los dos expedientes existen y ninguna operación pública ha borrado nada',
         $refundCount === 2,
@@ -432,8 +432,8 @@ try {
     );
 
     $auditActions = $pdo->query(
-        "SELECT `action` FROM `audit_log`
-         WHERE `entity_type` = 'REFUND_REQUEST' AND `entity_id` IN ({$digitalCaseId}, " . (int)($receipt['id'] ?? 0) . ")"
+        "SELECT action FROM audit_log
+         WHERE entity_type = 'REFUND_REQUEST' AND entity_id IN ({$digitalCaseId}, " . (int)($receipt['id'] ?? 0) . ")"
     )->fetchAll(PDO::FETCH_COLUMN);
     $assert(
         '5.2 La apertura y la rectificación quedan auditadas de forma inmutable',
@@ -443,8 +443,8 @@ try {
     );
 
     $auditBlob = implode("\n", $pdo->query(
-        "SELECT CONCAT(COALESCE(`metadata`, ''), '|', COALESCE(`previous_state`, ''), '|', COALESCE(`new_state`, ''))
-         FROM `audit_log` WHERE `entity_type` = 'REFUND_REQUEST'"
+        "SELECT CONCAT(COALESCE(metadata, ''), '|', COALESCE(previous_state, ''), '|', COALESCE(new_state, ''))
+         FROM audit_log WHERE entity_type = 'REFUND_REQUEST'"
     )->fetchAll(PDO::FETCH_COLUMN));
     $assert(
         '5.3 El rastro de auditoría no arrastra datos bancarios (Art. V.4)',

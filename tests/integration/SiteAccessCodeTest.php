@@ -148,7 +148,7 @@ try {
     // ─────────────────────────────────────────────────────────────────────────
 
     $pdo->prepare("
-        INSERT INTO `locations` (`site_code`, `name`, `address`, `latitude`, `longitude`, `contact_name`, `contact_phone`, `is_active`)
+        INSERT INTO locations (site_code, name, address, latitude, longitude, contact_name, contact_phone, is_active)
         VALUES ('SEDE-TEST-NOKEY', 'Sede de prueba sin clave S-4', 'Carrer de Prova 1, Barcelona', 41.3850640, 2.1734035, 'Prueba', '600000000', 1)
     ")->execute();
 
@@ -158,7 +158,7 @@ try {
         && ($noKey->getDecodedBody()['error']['code'] ?? '') === 'INVALID_SITE_CREDENTIALS');
 
     $pdo->prepare("
-        INSERT INTO `locations` (`site_code`, `name`, `address`, `latitude`, `longitude`, `contact_name`, `contact_phone`, `is_active`, `access_code_hash`, `access_code_issued_at`)
+        INSERT INTO locations (site_code, name, address, latitude, longitude, contact_name, contact_phone, is_active, access_code_hash, access_code_issued_at)
         VALUES ('SEDE-TEST-OFF', 'Sede de prueba inactiva S-4', 'Carrer de Prova 2, Barcelona', 41.3850640, 2.1734035, 'Prueba', '600000001', 0, :hash, NOW())
     ")->execute([':hash' => password_hash(SiteAccessCodeGenerator::normalize('OFF-SEDE-KEY01'), PASSWORD_BCRYPT, ['cost' => 4])]);
 

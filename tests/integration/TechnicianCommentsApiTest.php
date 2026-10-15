@@ -194,7 +194,7 @@ $assert('2.3 La autoría nominal real del técnico viaja en la marca del taller 
     ($newInternal['author_name'] ?? '') === $technician->getName()
         && ($newInternal['author_type'] ?? '') === 'TECHNICIAN');
 
-$stmtInternal = $pdo->prepare("SELECT author_type, user_id, author_name, is_internal FROM `incident_comments` WHERE id = :id");
+$stmtInternal = $pdo->prepare("SELECT author_type, user_id, author_name, is_internal FROM incident_comments WHERE id = :id");
 $stmtInternal->execute([':id' => (int)($newInternal['id'] ?? 0)]);
 $rowInternal = $stmtInternal->fetch(PDO::FETCH_ASSOC) ?: [];
 
@@ -217,8 +217,8 @@ $resFailSafe = $router->dispatch(new Request(
     parsedBody: ['comment_text' => 'Sin selector de privacidad el mensaje debe ser interno.'],
     headers: ['Authorization' => 'Bearer ' . $techToken]
 ));
-$failSafeId = (int)$pdo->query("SELECT id FROM `incident_comments` WHERE incident_id = {$incidentId} ORDER BY id DESC LIMIT 1")->fetchColumn();
-$failSafeFlag = (int)$pdo->query("SELECT is_internal FROM `incident_comments` WHERE id = {$failSafeId}")->fetchColumn();
+$failSafeId = (int)$pdo->query("SELECT id FROM incident_comments WHERE incident_id = {$incidentId} ORDER BY id DESC LIMIT 1")->fetchColumn();
+$failSafeFlag = (int)$pdo->query("SELECT is_internal FROM incident_comments WHERE id = {$failSafeId}")->fetchColumn();
 
 $assert('3.1 Sin campo is_internal la nota se clasifica como interna (RF-03.3)',
     $resFailSafe->getStatusCode() === 201 && $failSafeFlag === 1,
@@ -234,8 +234,8 @@ $resPublic = $router->dispatch(new Request(
     ],
     headers: ['Authorization' => 'Bearer ' . $techToken]
 ));
-$publicId = (int)$pdo->query("SELECT id FROM `incident_comments` WHERE incident_id = {$incidentId} ORDER BY id DESC LIMIT 1")->fetchColumn();
-$publicFlag = (int)$pdo->query("SELECT is_internal FROM `incident_comments` WHERE id = {$publicId}")->fetchColumn();
+$publicId = (int)$pdo->query("SELECT id FROM incident_comments WHERE incident_id = {$incidentId} ORDER BY id DESC LIMIT 1")->fetchColumn();
+$publicFlag = (int)$pdo->query("SELECT is_internal FROM incident_comments WHERE id = {$publicId}")->fetchColumn();
 
 $assert('3.2 Con is_internal = 0 el mensaje se persiste como público',
     $resPublic->getStatusCode() === 201 && $publicFlag === 0,
@@ -391,7 +391,7 @@ $assert('6.2 La evidencia se almacena bajo /uploads/ con nombre hash',
 $assert('6.3 El archivo físico existe en public/uploads/',
     $photoPath !== '' && is_file(dirname(__DIR__, 2) . '/public' . $photoPath));
 
-$photoRow = $pdo->query("SELECT photo_path, is_internal FROM `incident_comments` WHERE incident_id = {$incidentId} ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC) ?: [];
+$photoRow = $pdo->query("SELECT photo_path, is_internal FROM incident_comments WHERE incident_id = {$incidentId} ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC) ?: [];
 
 $assert('6.4 La BD persiste la ruta de la foto y conserva la clasificación interna',
     ($photoRow['photo_path'] ?? '') === $photoPath && (int)($photoRow['is_internal'] ?? -1) === 1,
@@ -419,7 +419,7 @@ foreach ($routeStops as $routeStop) {
     }
 }
 
-$dbTotal = (int)$pdo->query("SELECT COUNT(*) FROM `incident_comments` WHERE incident_id = {$incidentId}")->fetchColumn();
+$dbTotal = (int)$pdo->query("SELECT COUNT(*) FROM incident_comments WHERE incident_id = {$incidentId}")->fetchColumn();
 
 $assert('7.1 La parada del expediente aparece en la ruta del técnico',
     $resRoute->getStatusCode() === 200 && $stop !== null,
@@ -493,7 +493,7 @@ $resReopen = $router->dispatch(new Request(
     headers: ['Authorization' => 'Bearer ' . $siteToken]
 ));
 $reopenBody = $resReopen->getDecodedBody()['data'] ?? [];
-$dbAfterReopen = $pdo->query("SELECT status, assigned_technician_id FROM `incidents` WHERE id = {$incidentId}")->fetch(PDO::FETCH_ASSOC) ?: [];
+$dbAfterReopen = $pdo->query("SELECT status, assigned_technician_id FROM incidents WHERE id = {$incidentId}")->fetch(PDO::FETCH_ASSOC) ?: [];
 $assert('9.1 La reapertura devuelve REOPENED y desasigna al técnico',
     $resReopen->getStatusCode() === 200
     && ($reopenBody['status'] ?? '') === 'REOPENED'
@@ -504,7 +504,7 @@ $assert('9.1 La reapertura devuelve REOPENED y desasigna al técnico',
     'reopen: ' . $resReopen->getStatusCode() . ' cuerpo: ' . json_encode($reopenBody) . ' fila: ' . json_encode($dbAfterReopen));
 
 $reopenAuditRow = $pdo->query(
-    "SELECT action, user_role FROM `audit_log` WHERE entity_type = 'TICKET' AND entity_id = {$incidentId} AND action = 'REOPEN_TICKET'"
+    "SELECT action, user_role FROM audit_log WHERE entity_type = 'TICKET' AND entity_id = {$incidentId} AND action = 'REOPEN_TICKET'"
 )->fetch(PDO::FETCH_ASSOC) ?: [];
 $assert('9.2 La reapertura queda auditada como REOPEN_TICKET con actor de sede',
     ($reopenAuditRow['action'] ?? '') === 'REOPEN_TICKET' && ($reopenAuditRow['user_role'] ?? '') === 'SITE_MANAGER',
@@ -542,7 +542,7 @@ $resReopenedPost = $router->dispatch(new Request(
 $assert('9.6 El POST del técnico desasignado sigue rechazándose con 403 sin persistir',
     $resReopenedPost->getStatusCode() === 403
     && ($resReopenedPost->getDecodedBody()['error']['code'] ?? '') === 'NOT_ASSIGNED_TO_TECHNICIAN'
-    && (int)$pdo->query("SELECT COUNT(*) FROM `incident_comments` WHERE incident_id = {$incidentId} AND comment_text LIKE 'Nota del técnico antes%'")->fetchColumn() === 0,
+    && (int)$pdo->query("SELECT COUNT(*) FROM incident_comments WHERE incident_id = {$incidentId} AND comment_text LIKE 'Nota del técnico antes%'")->fetchColumn() === 0,
     'status: ' . $resReopenedPost->getStatusCode());
 
 // 9.7 Tras la reasignación del coordinador, el técnico recupera la publicación.

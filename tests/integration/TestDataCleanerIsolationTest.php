@@ -76,43 +76,43 @@ echo "\n--- 1. Escenario: las 4 hijas con ON DELETE RESTRICT admiten filas ---\n
 
 $pdo->beginTransaction();
 try {
-    $incidentId = (int)$pdo->query('SELECT `id` FROM `incidents` ORDER BY `id` LIMIT 1')->fetchColumn();
-    $machineId = (int)$pdo->query('SELECT `id` FROM `machines` ORDER BY `id` LIMIT 1')->fetchColumn();
-    $locationId = (int)$pdo->query('SELECT `id` FROM `locations` ORDER BY `id` LIMIT 1')->fetchColumn();
-    $technicianId = (int)$pdo->query("SELECT `id` FROM `users` WHERE `role` = 'TECHNICIAN' ORDER BY `id` LIMIT 1")->fetchColumn();
-    $partId = (int)$pdo->query('SELECT `id` FROM `spare_parts` ORDER BY `id` LIMIT 1')->fetchColumn();
+    $incidentId = (int)$pdo->query('SELECT id FROM incidents ORDER BY id LIMIT 1')->fetchColumn();
+    $machineId = (int)$pdo->query('SELECT id FROM machines ORDER BY id LIMIT 1')->fetchColumn();
+    $locationId = (int)$pdo->query('SELECT id FROM locations ORDER BY id LIMIT 1')->fetchColumn();
+    $technicianId = (int)$pdo->query("SELECT id FROM users WHERE role = 'TECHNICIAN' ORDER BY id LIMIT 1")->fetchColumn();
+    $partId = (int)$pdo->query('SELECT id FROM spare_parts ORDER BY id LIMIT 1')->fetchColumn();
 
     $assert('1.0 Existen datos maestros sembrados para construir el escenario', $incidentId > 0 && $machineId > 0 && $locationId > 0 && $technicianId > 0 && $partId > 0);
 
     // Un refund pegado a un incidente vivo: exactamente el huérfano que reventaba
     // las 22 suites cuando T-REF-01 añadió `fk_refund_incident` con RESTRICT.
     $pdo->prepare(
-        "INSERT INTO `refund_requests` (`incident_id`, `machine_id`, `location_id`, `claimant_name`, `claimant_contact`,
-            `claimed_amount`, `compensation_method`, `pickup_pin`, `tracking_token`)
+        "INSERT INTO refund_requests (incident_id, machine_id, location_id, claimant_name, claimant_contact,
+            claimed_amount, compensation_method, pickup_pin, tracking_token)
          VALUES (:iid, :mid, :lid, 'Cliente Huérfano', '600000000', 2.50, 'EN_MANO_SEDE', '1234', :token)"
     )->execute([':iid' => $incidentId, ':mid' => $machineId, ':lid' => $locationId, ':token' => bin2hex(random_bytes(32))]);
 
     $pdo->prepare(
-        "INSERT INTO `unclaimed_cash_findings` (`incident_id`, `machine_id`, `technician_id`, `amount`)
+        "INSERT INTO unclaimed_cash_findings (incident_id, machine_id, technician_id, amount)
          VALUES (:iid, :mid, :tid, 1.75)"
     )->execute([':iid' => $incidentId, ':mid' => $machineId, ':tid' => $technicianId]);
 
     $pdo->prepare(
-        "INSERT INTO `spare_part_requests` (`incident_id`, `spare_part_id`, `quantity`, `status`, `requested_by_user_id`)
+        "INSERT INTO spare_part_requests (incident_id, spare_part_id, quantity, status, requested_by_user_id)
          VALUES (:iid, :pid, 1, 'PENDING', :uid)"
     )->execute([':iid' => $incidentId, ':pid' => $partId, ':uid' => $technicianId]);
 
     $pdo->prepare(
-        "INSERT INTO `incident_replaced_parts` (`intervention_type`, `incident_id`, `machine_id`, `location_id`,
-            `technician_id`, `spare_part_id`, `quantity`, `unit_cost_snapshot`, `old_part_destination`)
+        "INSERT INTO incident_replaced_parts (intervention_type, incident_id, machine_id, location_id,
+            technician_id, spare_part_id, quantity, unit_cost_snapshot, old_part_destination)
          VALUES ('CORRECTIVE', :iid, :mid, :lid, :tid, :pid, 1, 0.00, 'RECICLADO')"
     )->execute([':iid' => $incidentId, ':mid' => $machineId, ':lid' => $locationId, ':tid' => $technicianId, ':pid' => $partId]);
 
     // El seguimiento de contención del barrido sanitario (T-PAUSE-41) es la quinta hija
     // RESTRICT: también bloquea el borrado ingenuo de `incidents`.
     $pdo->prepare(
-        "INSERT INTO `sanitary_sweep_contentions` (`incident_id`, `machine_id`, `first_detected_at`, `last_detected_at`,
-            `consecutive_passes`, `total_passes`)
+        "INSERT INTO sanitary_sweep_contentions (incident_id, machine_id, first_detected_at, last_detected_at,
+            consecutive_passes, total_passes)
          VALUES (:iid, :mid, NOW(), NOW(), 1, 1)"
     )->execute([':iid' => $incidentId, ':mid' => $machineId]);
 
@@ -176,13 +176,13 @@ echo "\n--- 3. PRUEBA DE MORDIDA: el orden ingenuo debe fallar con 1451 ---\n";
 // alguien invierte el orden en TestDataCleaner, esta aserción se pone roja.
 $pdo->beginTransaction();
 try {
-    $incidentId = (int)$pdo->query('SELECT `id` FROM `incidents` ORDER BY `id` LIMIT 1')->fetchColumn();
-    $machineId = (int)$pdo->query('SELECT `id` FROM `machines` ORDER BY `id` LIMIT 1')->fetchColumn();
-    $locationId = (int)$pdo->query('SELECT `id` FROM `locations` ORDER BY `id` LIMIT 1')->fetchColumn();
+    $incidentId = (int)$pdo->query('SELECT id FROM incidents ORDER BY id LIMIT 1')->fetchColumn();
+    $machineId = (int)$pdo->query('SELECT id FROM machines ORDER BY id LIMIT 1')->fetchColumn();
+    $locationId = (int)$pdo->query('SELECT id FROM locations ORDER BY id LIMIT 1')->fetchColumn();
 
     $pdo->prepare(
-        "INSERT INTO `refund_requests` (`incident_id`, `machine_id`, `location_id`, `claimant_name`, `claimant_contact`,
-            `claimed_amount`, `compensation_method`, `pickup_pin`, `tracking_token`)
+        "INSERT INTO refund_requests (incident_id, machine_id, location_id, claimant_name, claimant_contact,
+            claimed_amount, compensation_method, pickup_pin, tracking_token)
          VALUES (:iid, :mid, :lid, 'Cliente Huérfano', '600000000', 2.50, 'EN_MANO_SEDE', '1234', :token)"
     )->execute([':iid' => $incidentId, ':mid' => $machineId, ':lid' => $locationId, ':token' => bin2hex(random_bytes(32))]);
 
@@ -190,7 +190,7 @@ try {
     $naiveFailed = false;
     $naiveMessage = '';
     try {
-        $pdo->exec('DELETE FROM `incidents`');
+        $pdo->exec('DELETE FROM incidents');
     } catch (PDOException $e) {
         $naiveFailed = true;
         $naiveMessage = $e->getMessage();
@@ -232,21 +232,21 @@ $locationsSeeded = $countRows('locations');
 $usersSeeded = $countRows('users');
 
 // Un huérfano real, ya fuera de transacción.
-$incidentId = (int)$pdo->query('SELECT `id` FROM `incidents` ORDER BY `id` LIMIT 1')->fetchColumn();
-$machineId = (int)$pdo->query('SELECT `id` FROM `machines` ORDER BY `id` LIMIT 1')->fetchColumn();
-$locationId = (int)$pdo->query('SELECT `id` FROM `locations` ORDER BY `id` LIMIT 1')->fetchColumn();
-$technicianId = (int)$pdo->query("SELECT `id` FROM `users` WHERE `role` = 'TECHNICIAN' ORDER BY `id` LIMIT 1")->fetchColumn();
-$partId = (int)$pdo->query('SELECT `id` FROM `spare_parts` ORDER BY `id` LIMIT 1')->fetchColumn();
+$incidentId = (int)$pdo->query('SELECT id FROM incidents ORDER BY id LIMIT 1')->fetchColumn();
+$machineId = (int)$pdo->query('SELECT id FROM machines ORDER BY id LIMIT 1')->fetchColumn();
+$locationId = (int)$pdo->query('SELECT id FROM locations ORDER BY id LIMIT 1')->fetchColumn();
+$technicianId = (int)$pdo->query("SELECT id FROM users WHERE role = 'TECHNICIAN' ORDER BY id LIMIT 1")->fetchColumn();
+$partId = (int)$pdo->query('SELECT id FROM spare_parts ORDER BY id LIMIT 1')->fetchColumn();
 
 if ($incidentId > 0 && $partId > 0 && $technicianId > 0) {
     $pdo->prepare(
-        "INSERT INTO `refund_requests` (`incident_id`, `machine_id`, `location_id`, `claimant_name`, `claimant_contact`,
-            `claimed_amount`, `compensation_method`, `pickup_pin`, `tracking_token`)
+        "INSERT INTO refund_requests (incident_id, machine_id, location_id, claimant_name, claimant_contact,
+            claimed_amount, compensation_method, pickup_pin, tracking_token)
          VALUES (:iid, :mid, :lid, 'Cliente Huérfano', '600000000', 2.50, 'EN_MANO_SEDE', '1234', :token)"
     )->execute([':iid' => $incidentId, ':mid' => $machineId, ':lid' => $locationId, ':token' => bin2hex(random_bytes(32))]);
 
     $pdo->prepare(
-        "INSERT INTO `unclaimed_cash_findings` (`incident_id`, `machine_id`, `technician_id`, `amount`)
+        "INSERT INTO unclaimed_cash_findings (incident_id, machine_id, technician_id, amount)
          VALUES (:iid, :mid, :tid, 1.75)"
     )->execute([':iid' => $incidentId, ':mid' => $machineId, ':tid' => $technicianId]);
 
@@ -287,13 +287,13 @@ if ($incidentId > 0 && $partId > 0 && $technicianId > 0) {
 
     echo "\n--- 5. purgeIncident() drena un incidente sin tocar los demás ---\n";
 
-    $machineA = (int)$pdo->query('SELECT `id` FROM `machines` ORDER BY `id` LIMIT 1')->fetchColumn();
-    $machineB = (int)$pdo->query('SELECT `id` FROM `machines` ORDER BY `id` LIMIT 1 OFFSET 1')->fetchColumn();
-    $locationId = (int)$pdo->query('SELECT `id` FROM `locations` ORDER BY `id` LIMIT 1')->fetchColumn();
+    $machineA = (int)$pdo->query('SELECT id FROM machines ORDER BY id LIMIT 1')->fetchColumn();
+    $machineB = (int)$pdo->query('SELECT id FROM machines ORDER BY id LIMIT 1 OFFSET 1')->fetchColumn();
+    $locationId = (int)$pdo->query('SELECT id FROM locations ORDER BY id LIMIT 1')->fetchColumn();
 
     $insertIncident = static function (PDO $pdo, string $code, int $machineId, int $locationId): int {
         $pdo->prepare(
-            "INSERT INTO `incidents` (`ticket_code`, `machine_id`, `location_id`, `category`, `description`, `urgency`, `status`)
+            "INSERT INTO incidents (ticket_code, machine_id, location_id, category, description, urgency, status)
              VALUES (:tc, :mid, :lid, 'OTHER', 'Incidencia de prueba de aislamiento', 'LOW', 'REGISTERED')"
         )->execute([':tc' => $code, ':mid' => $machineId, ':lid' => $locationId]);
         return (int)$pdo->lastInsertId();
@@ -304,8 +304,8 @@ if ($incidentId > 0 && $partId > 0 && $technicianId > 0) {
 
     // Sólo el incidente A tiene retegro colgado: es el que hay que drenar.
     $pdo->prepare(
-        "INSERT INTO `refund_requests` (`incident_id`, `machine_id`, `location_id`, `claimant_name`, `claimant_contact`,
-            `claimed_amount`, `compensation_method`, `pickup_pin`, `tracking_token`)
+        "INSERT INTO refund_requests (incident_id, machine_id, location_id, claimant_name, claimant_contact,
+            claimed_amount, compensation_method, pickup_pin, tracking_token)
          VALUES (:iid, :mid, :lid, 'Cliente A', '600000000', 2.50, 'EN_MANO_SEDE', '1234', :token)"
     )->execute([':iid' => $incA, ':mid' => $machineA, ':lid' => $locationId, ':token' => bin2hex(random_bytes(32))]);
 

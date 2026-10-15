@@ -77,7 +77,7 @@ $assert = function (string $caseTitle, bool $condition, string $message = '') us
 
 // ─── Usuarios, tokens y flota sembrada ─────────────────────────────────────────
 $technicianRows = $pdo->query(
-    "SELECT `id` FROM `users` WHERE `role` = 'TECHNICIAN' AND `deleted_at` IS NULL ORDER BY `id` LIMIT 2"
+    "SELECT id FROM users WHERE role = 'TECHNICIAN' AND deleted_at IS NULL ORDER BY id LIMIT 2"
 )->fetchAll(PDO::FETCH_COLUMN);
 
 $coordinator = $userRepo->findByEmail('coordinacion@vendguard.internal');
@@ -99,16 +99,16 @@ if (!$coordinator instanceof User || !$primaryTech instanceof User || !$otherTec
 // `uq_machine_active_ticket` impide dos averías vivas sobre el mismo equipo, así que
 // cada expediente del banco de pruebas estrena máquina y hereda la sede real de ésta.
 $machinePool = $pdo->query(
-    "SELECT m.`id` AS machine_id, m.`location_id` AS location_id
-       FROM `machines` m
-      WHERE m.`is_active` = 1
+    "SELECT m.id AS machine_id, m.location_id AS location_id
+       FROM machines m
+      WHERE m.is_active = 1
         AND NOT EXISTS (
-            SELECT 1 FROM `incidents` i
-             WHERE i.`machine_id` = m.`id`
-               AND i.`deleted_at` IS NULL
-               AND i.`status` NOT IN ('CLOSED', 'CANCELLED')
+            SELECT 1 FROM incidents i
+             WHERE i.machine_id = m.id
+               AND i.deleted_at IS NULL
+               AND i.status NOT IN ('CLOSED', 'CANCELLED')
         )
-      ORDER BY m.`id`"
+      ORDER BY m.id"
 )->fetchAll(PDO::FETCH_ASSOC);
 
 $assert(
@@ -186,7 +186,7 @@ $createAssignedTicket = function (int $technicianId) use (
 
 /** Fila cruda del expediente, para verificar lo que quedó persistido. */
 $incidentRow = function (int $incidentId) use ($pdo): array {
-    $stmt = $pdo->prepare('SELECT * FROM `incidents` WHERE `id` = :id');
+    $stmt = $pdo->prepare('SELECT * FROM incidents WHERE id = :id');
     $stmt->execute([':id' => $incidentId]);
 
     return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -194,7 +194,7 @@ $incidentRow = function (int $incidentId) use ($pdo): array {
 
 /** Filas de historial inmutable del expediente, en orden de escritura (Art. III). */
 $historyRows = function (int $incidentId) use ($pdo): array {
-    $stmt = $pdo->prepare('SELECT * FROM `incident_history` WHERE `incident_id` = :id ORDER BY `id` ASC');
+    $stmt = $pdo->prepare('SELECT * FROM incident_history WHERE incident_id = :id ORDER BY id ASC');
     $stmt->execute([':id' => $incidentId]);
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -411,7 +411,7 @@ try {
     $assert('3.8 El contrato emite ambos extremos del vencimiento de SLA', array_key_exists('sla_target_at_original', $data) && array_key_exists('sla_target_at_shifted', $data));
 
     $pausedRow = $incidentRow($mainIncidentId);
-    $machineActive = $pdo->query('SELECT `is_active` FROM `machines` WHERE `id` = ' . (int)$pausedRow['machine_id'])->fetchColumn();
+    $machineActive = $pdo->query('SELECT is_active FROM machines WHERE id = ' . (int)$pausedRow['machine_id'])->fetchColumn();
     $assert('3.9 Persistencia: estado PENDING_INFO con pausa viva', ($pausedRow['status'] ?? '') === 'PENDING_INFO' && ($pausedRow['paused_at'] ?? null) !== null);
     $assert('3.10 Persistencia: causa tipificada y justificación íntegra', ($pausedRow['pending_info_reason_category'] ?? '') === 'BUILDING_CLOSED_NO_ACCESS' && ($pausedRow['pending_info_reason_text'] ?? '') === $validReason);
     $assert('3.11 Persistencia: el acumulador arranca en cero (intervalo vivo)', (int)($pausedRow['total_pending_info_seconds'] ?? -1) === 0);
@@ -585,7 +585,7 @@ try {
     // Martes a las 12:15, dentro de la jornada comercial (08:00-18:00, lunes a viernes):
     // el desplazamiento de unos segundos debe quedarse en el mismo día hábil.
     $originalDeadline = (new DateTimeImmutable('next tuesday 12:15', $madrid))->format('Y-m-d H:i:s');
-    $pdo->prepare('UPDATE `incidents` SET `sla_target_at` = :deadline WHERE `id` = :id')
+    $pdo->prepare('UPDATE incidents SET sla_target_at = :deadline WHERE id = :id')
         ->execute([':deadline' => $originalDeadline, ':id' => $shiftTicketId]);
 
     $res = $router->dispatch(new Request(

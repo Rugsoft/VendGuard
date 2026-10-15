@@ -919,10 +919,10 @@ $testIncidentId = (int)$pdo->lastInsertId();
 
 $refundToken = 'tst09-' . bin2hex(random_bytes(8));
 $pdo->prepare("
-    INSERT INTO `refund_requests` (
-        `incident_id`, `machine_id`, `location_id`, `claimant_name`, `claimant_contact`,
-        `claimed_amount`, `product_attempted`, `compensation_method`, `bizum_phone`,
-        `tracking_token`, `status`
+    INSERT INTO refund_requests (
+        incident_id, machine_id, location_id, claimant_name, claimant_contact,
+        claimed_amount, product_attempted, compensation_method, bizum_phone,
+        tracking_token, status
     ) VALUES (
         :incident, :machine, :location, 'Consumidor de la suite', '600000000',
         2.50, 'Café solo', 'BIZUM', '600000000',
@@ -1029,10 +1029,10 @@ try {
     );
 
     $auditActions = $pdo->prepare("
-        SELECT COUNT(*) FROM `audit_log`
-        WHERE `action` IN ('MACHINE_BLOCKED_NO_ACCESS', 'REFUND_DETACHED_BY_INACTIVITY')
-          AND ((`entity_type` = 'MACHINE' AND `entity_id` = :machine)
-            OR (`entity_type` = 'REFUND_REQUEST' AND `entity_id` = :refund))
+        SELECT COUNT(*) FROM audit_log
+        WHERE action IN ('MACHINE_BLOCKED_NO_ACCESS', 'REFUND_DETACHED_BY_INACTIVITY')
+          AND ((entity_type = 'MACHINE' AND entity_id = :machine)
+            OR (entity_type = 'REFUND_REQUEST' AND entity_id = :refund))
     ");
     $auditActions->execute([':machine' => $testMachine->getId(), ':refund' => $testRefundId]);
     $assert(
@@ -1067,7 +1067,7 @@ try {
     // navega por `incident_id`, así que primero se reengancha a su avería para que el
     // limpiador compartido lo arrastre como hija y abra la ventana de purga que exige
     // el disparador del Art. III.1 (los expedientes no se borran a pelo).
-    $pdo->prepare('UPDATE `refund_requests` SET `incident_id` = :incident WHERE `id` = :refund')
+    $pdo->prepare('UPDATE refund_requests SET incident_id = :incident WHERE id = :refund')
         ->execute([':incident' => $testIncidentId, ':refund' => $testRefundId]);
 
     TestDataCleaner::purgeIncident($pdo, $testIncidentId);
@@ -1076,15 +1076,15 @@ try {
     // abierta (T-HYBRID-26): la señal la declara TestDataCleaner en la forma del motor
     // activo, y la ventana se cierra sola aunque una sentencia falle.
     TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $testMachine, $testRefundId): void {
-        $pdo->prepare('DELETE FROM `audit_log` WHERE (`entity_type` = :mtype AND `entity_id` = :machine) OR (`entity_type` = :rtype AND `entity_id` = :refund)')
+        $pdo->prepare('DELETE FROM audit_log WHERE (entity_type = :mtype AND entity_id = :machine) OR (entity_type = :rtype AND entity_id = :refund)')
             ->execute([':mtype' => 'MACHINE', ':machine' => $testMachine->getId(), ':rtype' => 'REFUND_REQUEST', ':refund' => $testRefundId]);
 
         // Las hijas de la máquina se borran antes que ella: si el sembrador de
         // demostración emitió un certificado sanitario mientras la fila de prueba
         // existía, el FK del certificado impediría borrar la máquina y la limpieza
         // quedaría a medias.
-        $pdo->prepare('DELETE FROM `sanitary_certificates` WHERE `machine_id` = :id')->execute([':id' => $testMachine->getId()]);
-        $pdo->prepare('DELETE FROM `machines` WHERE `id` = :id')->execute([':id' => $testMachine->getId()]);
+        $pdo->prepare('DELETE FROM sanitary_certificates WHERE machine_id = :id')->execute([':id' => $testMachine->getId()]);
+        $pdo->prepare('DELETE FROM machines WHERE id = :id')->execute([':id' => $testMachine->getId()]);
     });
 }
 

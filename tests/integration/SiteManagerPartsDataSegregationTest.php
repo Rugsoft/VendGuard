@@ -123,13 +123,13 @@ $assert("0.2 Repuesto semilla VALV-ULKA-01 recuperado para las fugas controladas
 $insertContaminatingRows = function (int $incidentId, int $machineId, int $locationId) use ($pdo, $ulkaPartId): void {
     // Piezas SOLICITADAS en pausa técnica (spare_part_requests): una catalogada y una fuera de catálogo
     $pdo->prepare("
-        INSERT INTO `spare_part_requests`
-            (`incident_id`, `spare_part_id`, `is_out_of_catalog`, `custom_part_description`, `quantity`, `status`, `requested_by_user_id`)
+        INSERT INTO spare_part_requests
+            (incident_id, spare_part_id, is_out_of_catalog, custom_part_description, quantity, status, requested_by_user_id)
         VALUES
             (:incident_id_a, :spare_part_id, 0, NULL, 2, 'PENDING',
-             (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1)),
+             (SELECT id FROM users WHERE email = 'jordi.ruta@vendguard.internal' LIMIT 1)),
             (:incident_id_b, NULL, 1, 'Sensor infrarrojo reflectante para detección de producto en bandeja inferior', 1, 'PENDING',
-             (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1))
+             (SELECT id FROM users WHERE email = 'jordi.ruta@vendguard.internal' LIMIT 1))
     ")->execute([
         ':incident_id_a' => $incidentId,
         ':spare_part_id' => $ulkaPartId,
@@ -138,15 +138,15 @@ $insertContaminatingRows = function (int $incidentId, int $machineId, int $locat
 
     // Piezas SUSTITUIDAS con snapshot de coste (incident_replaced_parts): DESGUACE 28.50 € y TALLER 0.00 €
     $pdo->prepare("
-        INSERT INTO `incident_replaced_parts`
-            (`intervention_type`, `incident_id`, `machine_id`, `location_id`, `technician_id`, `spare_part_id`,
-             `is_out_of_catalog`, `custom_part_name`, `quantity`, `unit_cost_snapshot`, `old_part_destination`, `notes`)
+        INSERT INTO incident_replaced_parts
+            (intervention_type, incident_id, machine_id, location_id, technician_id, spare_part_id,
+             is_out_of_catalog, custom_part_name, quantity, unit_cost_snapshot, old_part_destination, notes)
         VALUES
             ('INCIDENT', :incident_id_a, :machine_id_a, :location_id_a,
-             (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1), :spare_part_id,
+             (SELECT id FROM users WHERE email = 'jordi.ruta@vendguard.internal' LIMIT 1), :spare_part_id,
              0, NULL, 2, 28.50, 'DESGUACE', 'Cambio de electroválvula por avería en campo'),
             ('INCIDENT', :incident_id_b, :machine_id_b, :location_id_b,
-             (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1), NULL,
+             (SELECT id FROM users WHERE email = 'jordi.ruta@vendguard.internal' LIMIT 1), NULL,
              1, 'Abrazadera especial de apriete rápido 16mm', 1, 0.00, 'TALLER', 'Para revisión en taller central')
     ")->execute([
         ':incident_id_a' => $incidentId,
@@ -165,13 +165,13 @@ $insertContaminatingRows = function (int $incidentId, int $machineId, int $locat
 $createContaminatedIncident = function (int $machineId, int $locationId, string $status) use ($pdo, $insertContaminatingRows): int {
     $ticketCode = 'SP20' . strtoupper(substr(uniqid(), -6));
     $stmt = $pdo->prepare("
-        INSERT INTO `incidents` (
-            `ticket_code`, `machine_id`, `location_id`, `assigned_technician_id`,
-            `reporter_name`, `reporter_phone`, `category`, `description`,
-            `urgency`, `status`, `pending_parts_reason`, `started_at`, `created_at`, `updated_at`
+        INSERT INTO incidents (
+            ticket_code, machine_id, location_id, assigned_technician_id,
+            reporter_name, reporter_phone, category, description,
+            urgency, status, pending_parts_reason, started_at, created_at, updated_at
         ) VALUES (
             :ticket_code, :machine_id, :location_id,
-            (SELECT `id` FROM `users` WHERE `email` = 'jordi.ruta@vendguard.internal' LIMIT 1),
+            (SELECT id FROM users WHERE email = 'jordi.ruta@vendguard.internal' LIMIT 1),
             'Laura Sanitaria', '600111222', 'ELECTRICAL_OFF', 'Pantalla táctil sin respuesta al seleccionar producto',
             'HIGH', :status, 'Electroválvula de entrada de agua bloqueada por cal',
             NOW(), NOW(), NOW()
@@ -316,9 +316,9 @@ if ($createdIncidentId > 0) {
     $insertContaminatingRows($createdIncidentId, $m2Id, $m2LocId);
 
     $pdo->prepare("
-        INSERT INTO `incident_comments` (`incident_id`, `author_type`, `user_id`, `author_name`, `comment_text`, `is_internal`)
+        INSERT INTO incident_comments (incident_id, author_type, user_id, author_name, comment_text, is_internal)
         VALUES (:incident_id, 'COORDINATOR',
-                (SELECT `id` FROM `users` WHERE `email` = 'coordinacion@vendguard.internal' LIMIT 1),
+                (SELECT id FROM users WHERE email = 'coordinacion@vendguard.internal' LIMIT 1),
                 'Sara Coordinadora', 'Nota interna de taller: el monedero exige revisión en taller central antes de reemplazo', 1)
     ")->execute([':incident_id' => $createdIncidentId]);
 }
@@ -349,11 +349,11 @@ $assert("3.5 La bitácora pública no expone la nota interna de taller", !$hasIn
 
 // 3.6 Reapertura dentro de la ventana de garantía (el ticket debe resolverse previamente)
 $pdo->prepare("
-    UPDATE `incidents`
-    SET `status` = 'RESOLVED', `resolved_at` = NOW(),
-        `resolution_diagnosis` = 'Fallo intermitente de electrónica de potencia del monedero',
-        `resolution_action` = 'Reparación de placa de control y verificación completa del monedero'
-    WHERE `id` = :id
+    UPDATE incidents
+    SET status = 'RESOLVED', resolved_at = NOW(),
+        resolution_diagnosis = 'Fallo intermitente de electrónica de potencia del monedero',
+        resolution_action = 'Reparación de placa de control y verificación completa del monedero'
+    WHERE id = :id
 ")->execute([':id' => $createdIncidentId]);
 
 $reqReopen = new Request('POST', "/api/incidents/{$ticketCode}/reopen", [], [

@@ -218,7 +218,7 @@ $ticketCode = $incident->getTicketCode();
 $technicianName = $technician->getName();
 
 // Datos privados que jamás deben cruzar hacia el cliente (Art. V.4).
-$technicianPhones = $pdo->query("SELECT phone FROM `users` WHERE role = 'TECHNICIAN' AND phone IS NOT NULL")
+$technicianPhones = $pdo->query("SELECT phone FROM users WHERE role = 'TECHNICIAN' AND phone IS NOT NULL")
     ->fetchAll(PDO::FETCH_COLUMN) ?: [];
 $siteToken = $authService->generateSiteToken($location);
 
@@ -230,8 +230,8 @@ $internalTexts = [
 $internalPhotoPath = '/uploads/nota_interna_confidencial.jpg';
 
 $insert = $pdo->prepare("
-    INSERT INTO `incident_comments`
-        (`incident_id`, `author_type`, `user_id`, `author_name`, `comment_text`, `photo_path`, `is_internal`, `created_at`)
+    INSERT INTO incident_comments
+        (incident_id, author_type, user_id, author_name, comment_text, photo_path, is_internal, created_at)
     VALUES
         (:incident_id, :author_type, :user_id, :author_name, :comment_text, :photo_path, :is_internal, :created_at)
 ");
@@ -325,7 +325,7 @@ $assert('2.10 La marca is_internal enviada por el cliente se ignora y no contami
         && count($forcedComments) === 3,
     "status: {$resSiteForced->getStatusCode()}, mensajes: " . count($forcedComments));
 
-$forcedFlag = (int)$pdo->query("SELECT is_internal FROM `incident_comments` WHERE incident_id = {$incidentId} ORDER BY id DESC LIMIT 1")->fetchColumn();
+$forcedFlag = (int)$pdo->query("SELECT is_internal FROM incident_comments WHERE incident_id = {$incidentId} ORDER BY id DESC LIMIT 1")->fetchColumn();
 $assert('2.11 El mensaje forzado por el cliente se persiste como público (is_internal = 0)',
     $forcedFlag === 0);
 
@@ -345,7 +345,7 @@ $tempFile = static function (string $suffix, string $contents) use (&$tempFiles)
     return $path;
 };
 
-$commentCountBefore = static fn(): int => (int)$pdo->query("SELECT COUNT(*) FROM `incident_comments` WHERE incident_id = {$incidentId}")->fetchColumn();
+$commentCountBefore = static fn(): int => (int)$pdo->query("SELECT COUNT(*) FROM incident_comments WHERE incident_id = {$incidentId}")->fetchColumn();
 
 $fakeMagicFile = $tempFile('.jpg', '<?php echo "cabecera binaria falsa"; ?>');
 $uploadsBeforeFake = $countUploads();
@@ -478,9 +478,9 @@ $assert('3.9 Control: el archivo legítimo queda almacenado en public/uploads/',
 // =========================================================================
 echo "\n--- Bloque 4: Trazabilidad append-only del módulo ---\n";
 
-$persistedComments = (int)$pdo->query("SELECT COUNT(*) FROM `incident_comments` WHERE incident_id = {$incidentId}")->fetchColumn();
+$persistedComments = (int)$pdo->query("SELECT COUNT(*) FROM incident_comments WHERE incident_id = {$incidentId}")->fetchColumn();
 $auditRows = $pdo->query(
-    "SELECT new_state FROM `audit_log`
+    "SELECT new_state FROM audit_log
      WHERE entity_type = 'TICKET' AND entity_id = {$incidentId} AND action = 'INCIDENT_COMMENT_ADDED'
      ORDER BY id ASC"
 )->fetchAll(PDO::FETCH_COLUMN);
@@ -493,7 +493,7 @@ foreach ($auditRows as $auditPayloadJson) {
 sort($auditedCommentIds);
 
 $apiCommentIds = array_map('intval', $pdo->query(
-    "SELECT id FROM `incident_comments` WHERE incident_id = {$incidentId} ORDER BY id DESC LIMIT 2"
+    "SELECT id FROM incident_comments WHERE incident_id = {$incidentId} ORDER BY id DESC LIMIT 2"
 )->fetchAll(PDO::FETCH_COLUMN));
 sort($apiCommentIds);
 

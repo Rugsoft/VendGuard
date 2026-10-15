@@ -297,7 +297,7 @@ $invalidUpdateCases = [
 ];
 foreach ($invalidUpdateCases as [$caseName, $coordinates, $expectedCode]) {
     $beforeUpdate = $locationRepo->findById($newLocationId);
-    $auditCountStatement = $pdo->prepare("SELECT COUNT(*) FROM `audit_log` WHERE `entity_type` = 'LOCATION' AND `entity_id` = :id AND `action` = 'LOCATION_UPDATED'");
+    $auditCountStatement = $pdo->prepare("SELECT COUNT(*) FROM audit_log WHERE entity_type = 'LOCATION' AND entity_id = :id AND action = 'LOCATION_UPDATED'");
     $auditCountStatement->execute([':id' => $newLocationId]);
     $auditBeforeUpdate = $auditCountStatement->fetchColumn();
     $response = $router->dispatch($updateLocationRequest($coordinates));

@@ -168,8 +168,8 @@ $siteToken = $authService->generateSiteToken($location);
 $assert('0.2 Expediente de carga creado', $incidentId > 0);
 
 $insertComment = $pdo->prepare("
-    INSERT INTO `incident_comments`
-        (`incident_id`, `author_type`, `user_id`, `author_name`, `comment_text`, `is_internal`, `created_at`)
+    INSERT INTO incident_comments
+        (incident_id, author_type, user_id, author_name, comment_text, is_internal, created_at)
     VALUES (:incident_id, 'REPORTER', NULL, 'Conserjería Principal', :comment_text, 0, :created_at)
 ");
 
@@ -275,8 +275,8 @@ $explainPlan = static function (string $sql, array $params) use ($pdo): array {
 
 $commentsTablePlan = $explainPlan(
     "SELECT c.*, i.ticket_code
-     FROM `incident_comments` c
-     JOIN `incidents` i ON c.incident_id = i.id
+     FROM incident_comments c
+     JOIN incidents i ON c.incident_id = i.id
      WHERE c.incident_id = :incident_id AND c.is_internal = 0
      ORDER BY c.created_at DESC, c.id DESC
      LIMIT 51",
@@ -294,7 +294,7 @@ $assert('1.8 El índice idx_comments_incident está disponible y es aplicable al
 echo "\n--- Bloque 2 (H-1): RNF-02 escalado a 10.000 mensajes ---\n";
 
 $seedComments(1001, 10000);
-$totalComments = (int)$pdo->query("SELECT COUNT(*) FROM `incident_comments` WHERE incident_id = {$incidentId}")->fetchColumn();
+$totalComments = (int)$pdo->query("SELECT COUNT(*) FROM incident_comments WHERE incident_id = {$incidentId}")->fetchColumn();
 
 $scaledResponse = $router->dispatch($threadRequest());
 $scaledBody = $scaledResponse->getDecodedBody();
@@ -319,8 +319,8 @@ $assert('2.3 RNF-02 a escala: el peor caso respeta el guardián de outliers',
 
 $scaledPlan = $explainPlan(
     "SELECT c.*, i.ticket_code
-     FROM `incident_comments` c
-     JOIN `incidents` i ON c.incident_id = i.id
+     FROM incident_comments c
+     JOIN incidents i ON c.incident_id = i.id
      WHERE c.incident_id = :incident_id AND c.is_internal = 0
      ORDER BY c.created_at DESC, c.id DESC
      LIMIT 51",

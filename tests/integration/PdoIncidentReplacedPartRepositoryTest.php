@@ -35,8 +35,8 @@ $replacedRepo = new PdoIncidentReplacedPartRepository($pdo);
 $sparePartRepo = new PdoSparePartRepository($pdo);
 
 // Obtener máquina, sede y técnico base
-$machine = $pdo->query("SELECT id, location_id FROM `machines` WHERE deleted_at IS NULL LIMIT 1")->fetch(PDO::FETCH_ASSOC);
-$tech = $pdo->query("SELECT id FROM `users` WHERE role = 'TECHNICIAN' LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+$machine = $pdo->query("SELECT id, location_id FROM machines WHERE deleted_at IS NULL LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+$tech = $pdo->query("SELECT id FROM users WHERE role = 'TECHNICIAN' LIMIT 1")->fetch(PDO::FETCH_ASSOC);
 
 if (!$machine || !$tech) {
     echo "  [ERROR] Se requiere al menos 1 máquina y 1 técnico para el test.\n";
@@ -44,15 +44,15 @@ if (!$machine || !$tech) {
 }
 
 // Asegurar que existe una incidencia con técnico asignado
-$incStmt = $pdo->query("SELECT id, machine_id, location_id, assigned_technician_id FROM `incidents` WHERE assigned_technician_id IS NOT NULL LIMIT 1");
+$incStmt = $pdo->query("SELECT id, machine_id, location_id, assigned_technician_id FROM incidents WHERE assigned_technician_id IS NOT NULL LIMIT 1");
 $inc = $incStmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$inc) {
     $stmt = $pdo->prepare("
-        INSERT INTO `incidents` (
-            `ticket_code`, `machine_id`, `location_id`, `assigned_technician_id`,
-            `reporter_name`, `reporter_phone`, `category`, `description`, `urgency`,
-            `status`, `assigned_at`, `started_at`, `created_at`, `updated_at`
+        INSERT INTO incidents (
+            ticket_code, machine_id, location_id, assigned_technician_id,
+            reporter_name, reporter_phone, category, description, urgency,
+            status, assigned_at, started_at, created_at, updated_at
         ) VALUES (
             'INC-TEST-REP06', :machine_id, :location_id, :tech_id,
             'Tester', '600000000', 'OTHER', 'Test de sustitución de repuestos para T-SPARE-06', 'MEDIUM',
@@ -76,14 +76,14 @@ if (!$inc) {
 }
 
 // Asegurar orden preventiva existente
-$poStmt = $pdo->query("SELECT id, machine_id, location_id, assigned_technician_id FROM `preventive_orders` WHERE assigned_technician_id IS NOT NULL LIMIT 1");
+$poStmt = $pdo->query("SELECT id, machine_id, location_id, assigned_technician_id FROM preventive_orders WHERE assigned_technician_id IS NOT NULL LIMIT 1");
 $po = $poStmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$po) {
     $stmtPo = $pdo->prepare("
-        INSERT INTO `preventive_orders` (
-            `order_code`, `machine_id`, `location_id`, `assigned_technician_id`,
-            `status`, `maintenance_type`, `due_date`, `created_at`, `updated_at`
+        INSERT INTO preventive_orders (
+            order_code, machine_id, location_id, assigned_technician_id,
+            status, maintenance_type, due_date, created_at, updated_at
         ) VALUES (
             'ORD-TEST-REP06', :machine_id, :location_id, :tech_id,
             'IN_PROGRESS', 'ROUTINE', CURRENT_DATE(), NOW(), NOW()
@@ -108,7 +108,7 @@ if ($part === null || $part->getId() === null) {
 $partId = $part->getId();
 
 // Limpiar consumos previos del test
-$pdo->prepare("DELETE FROM `incident_replaced_parts` WHERE `incident_id` = ? OR `preventive_order_id` = ?")->execute([$incId, $poId]);
+$pdo->prepare("DELETE FROM incident_replaced_parts WHERE incident_id = ? OR preventive_order_id = ?")->execute([$incId, $poId]);
 
 $failures = 0;
 $assertions = 0;
@@ -314,7 +314,7 @@ $assert("10.2 Fila de exportación contiene todas las columnas requeridas por RF
 );
 
 // Limpieza de datos de prueba
-$pdo->prepare("DELETE FROM `incident_replaced_parts` WHERE `incident_id` = ? OR `preventive_order_id` = ?")->execute([$incId, $poId ?? 0]);
+$pdo->prepare("DELETE FROM incident_replaced_parts WHERE incident_id = ? OR preventive_order_id = ?")->execute([$incId, $poId ?? 0]);
 
 echo "\n----------------------------------------------------------------------\n";
 echo "Total Aserciones: {$assertions}\n";

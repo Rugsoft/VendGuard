@@ -407,7 +407,7 @@ try {
     $hardDeleteRefused = false;
     $refusalMessage = '';
     try {
-        $pdo->exec("DELETE FROM `refund_requests` WHERE `id` = " . (int)$refundId);
+        $pdo->exec("DELETE FROM refund_requests WHERE id = " . (int)$refundId);
     } catch (Throwable $e) {
         $hardDeleteRefused = true;
         $refusalMessage = $e->getMessage();
@@ -421,7 +421,7 @@ try {
         'mensaje: ' . $refusalMessage);
 
     $assert('6.3 El expediente sobrevive intacto al intento de borrado',
-        (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests` WHERE `id` = ' . (int)$refundId . ' AND `is_active` = 1')->fetchColumn() === 1
+        (int)$pdo->query('SELECT COUNT(*) FROM refund_requests WHERE id = ' . (int)$refundId . ' AND is_active = 1')->fetchColumn() === 1
         && $refunds->findById($refundId)?->getIban() === 'ES9121000418450200051332');
 
     // Un borrado "de mentira" (0 filas afectadas) no dispara un trigger FOR EACH
@@ -429,7 +429,7 @@ try {
     // confunda un DELETE inocuo con un guardián funcionando.
     $noRowDelete = 'ok';
     try {
-        $pdo->exec('DELETE FROM `refund_requests` WHERE `id` = 4294967295');
+        $pdo->exec('DELETE FROM refund_requests WHERE id = 4294967295');
     } catch (Throwable $e) {
         $noRowDelete = 'rechazado';
     }
@@ -440,14 +440,14 @@ try {
     // La anulación es la vía legítima: se conservan la fila y su motivo.
     $rejectedReason = 'Corte de caja sin cobro coincidente en la auditoría de ventas.';
     $pdo->prepare('
-        UPDATE `refund_requests`
-        SET `status` = \'REJECTED\', `is_active` = 0, `coordinator_justification` = :reason
-        WHERE `id` = :id
+        UPDATE refund_requests
+        SET status = \'REJECTED\', is_active = 0, coordinator_justification = :reason
+        WHERE id = :id
     ')->execute([':reason' => $rejectedReason, ':id' => (int)$refundId]);
 
     $softDeleted = $pdo->prepare('
-        SELECT `status`, `is_active`, `coordinator_justification`
-        FROM `refund_requests` WHERE `id` = :id
+        SELECT status, is_active, coordinator_justification
+        FROM refund_requests WHERE id = :id
     ');
     $softDeleted->execute([':id' => (int)$refundId]);
     $softRow = $softDeleted->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -463,8 +463,8 @@ try {
     // guardián y desaparecen con el rollback de la suite.
     $makeDisposableCase = static function (string $name) use ($pdo): int {
         $seed = $pdo->query('
-            SELECT `incident_id`, `machine_id`, `location_id`
-            FROM `refund_requests` ORDER BY `id` LIMIT 1
+            SELECT incident_id, machine_id, location_id
+            FROM refund_requests ORDER BY id LIMIT 1
         ')->fetch(PDO::FETCH_ASSOC) ?: [];
 
         if ($seed === []) {
@@ -472,9 +472,9 @@ try {
         }
 
         $pdo->prepare('
-            INSERT INTO `refund_requests`
-                (`incident_id`, `machine_id`, `location_id`, `claimant_name`, `claimant_contact`,
-                 `claimed_amount`, `compensation_method`, `pickup_pin`, `tracking_token`, `status`, `is_active`)
+            INSERT INTO refund_requests
+                (incident_id, machine_id, location_id, claimant_name, claimant_contact,
+                 claimed_amount, compensation_method, pickup_pin, tracking_token, status, is_active)
             VALUES (:i, :m, :l, :n, :c, 1.00, :cm, :pin, :tok, :st, 1)
         ')->execute([
             ':i' => (int)$seed['incident_id'],
@@ -510,9 +510,9 @@ try {
     // único ayudante del limpiador, que la escribe en la forma del motor activo.
     $purgeCaseId = $makeDisposableCase('Fila desechable para la ventana de purga');
     TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $purgeCaseId): void {
-        $pdo->exec('DELETE FROM `refund_requests` WHERE `id` = ' . $purgeCaseId);
+        $pdo->exec('DELETE FROM refund_requests WHERE id = ' . $purgeCaseId);
     });
-    $purged = (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests` WHERE `id` = ' . $purgeCaseId)->fetchColumn() === 0;
+    $purged = (int)$pdo->query('SELECT COUNT(*) FROM refund_requests WHERE id = ' . $purgeCaseId)->fetchColumn() === 0;
     $assert('6.6 Sólo la ventana explícita de purga del arnés puede vaciar la tabla',
         $purgeCaseId > 0 && $purged,
         'id: ' . $purgeCaseId);
@@ -520,14 +520,14 @@ try {
     $controlCaseId = $makeDisposableCase('Fila de control tras cerrar la ventana');
     $refusedAgain = false;
     try {
-        $pdo->exec('DELETE FROM `refund_requests` WHERE `id` = ' . $controlCaseId);
+        $pdo->exec('DELETE FROM refund_requests WHERE id = ' . $controlCaseId);
     } catch (Throwable $e) {
         $refusedAgain = true;
     }
     $assert('6.7 Tras cerrarla, el guardián vuelve a estar activo',
         $controlCaseId > 0
         && $refusedAgain
-        && (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests` WHERE `id` = ' . $controlCaseId)->fetchColumn() === 1,
+        && (int)$pdo->query('SELECT COUNT(*) FROM refund_requests WHERE id = ' . $controlCaseId)->fetchColumn() === 1,
         'id: ' . $controlCaseId . ' rechazó: ' . var_export($refusedAgain, true));
 
     // La ventana de purga no puede quedar abierta para el resto de la corrida, y

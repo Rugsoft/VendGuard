@@ -27,8 +27,8 @@ echo "======================================================================\n\n
 $pdo = ConnectionFactory::getConnection();
 
 // Limpiar repuestos residuales de tests previos
-$pdo->exec("DELETE FROM `spare_part_compatibilities` WHERE `spare_part_id` IN (SELECT id FROM `spare_parts` WHERE `part_code` LIKE 'TEST-%')");
-$pdo->exec("DELETE FROM `spare_parts` WHERE `part_code` LIKE 'TEST-%'");
+$pdo->exec("DELETE FROM spare_part_compatibilities WHERE spare_part_id IN (SELECT id FROM spare_parts WHERE part_code LIKE 'TEST-%')");
+$pdo->exec("DELETE FROM spare_parts WHERE part_code LIKE 'TEST-%'");
 
 // Asegurar semillas limpias
 $seedRunner = new SeedRunner($pdo);
@@ -176,8 +176,8 @@ $models = $repo->findDistinctMachineModels();
 $assert("9.1 findDistinctMachineModels retorna modelos sin duplicados", count($models) >= 4 && in_array('Bianchi Gaia Espresso', $models, true));
 
 // Limpieza de datos de prueba
-$pdo->prepare("DELETE FROM `spare_part_compatibilities` WHERE `spare_part_id` = :id")->execute([':id' => $created->getId()]);
-$pdo->prepare("DELETE FROM `spare_parts` WHERE `id` = :id")->execute([':id' => $created->getId()]);
+$pdo->prepare("DELETE FROM spare_part_compatibilities WHERE spare_part_id = :id")->execute([':id' => $created->getId()]);
+$pdo->prepare("DELETE FROM spare_parts WHERE id = :id")->execute([':id' => $created->getId()]);
 
 echo "\n----------------------------------------------------------------------\n";
 echo "Total Aserciones: {$assertions}\n";

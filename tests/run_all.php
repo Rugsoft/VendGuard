@@ -69,29 +69,43 @@ $categorySuites = [];
 
 /**
  * Ejecuta un archivo de prueba en un proceso aislado y captura su resultado.
+ *
+ * Las dos salidas se recogen en ficheros temporales y **no** en tuberías: el runner leía
+ * `stdout` hasta el fin de flujo y sólo después tocaba `stderr`, así que una suite que
+ * escribiera por el canal de errores más de un búfer de tubería —una traza por cada
+ * expediente que el escenario repite— se quedaba bloqueada escribiendo mientras el runner
+ * la esperaba leyendo, y la batería entera se colgaba sin plazo ni aviso. Ya ocurrió: 203
+ * trazas del mismo expediente (646 KB por `stderr`) dejaron la corrida parada en
+ * `LocationRefundDeliveryApiTest` hasta que se mató el proceso a mano.
  */
 function runTestProcess(string $command, string $label, string &$outputSummary = ''): bool
 {
+    $stdoutPath = (string)tempnam(sys_get_temp_dir(), 'vendguard_test_out_');
+    $stderrPath = (string)tempnam(sys_get_temp_dir(), 'vendguard_test_err_');
+
     $descriptorspec = [
         0 => ["pipe", "r"],
-        1 => ["pipe", "w"],
-        2 => ["pipe", "w"]
+        1 => ["file", $stdoutPath, "w"],
+        2 => ["file", $stderrPath, "w"]
     ];
 
     $process = proc_open($command, $descriptorspec, $pipes);
     if (!is_resource($process)) {
+        @unlink($stdoutPath);
+        @unlink($stderrPath);
         $outputSummary = "No se pudo iniciar el proceso de prueba.";
         return false;
     }
 
     fclose($pipes[0]);
-    $stdout = stream_get_contents($pipes[1]);
-    fclose($pipes[1]);
-    $stderr = stream_get_contents($pipes[2]);
-    fclose($pipes[2]);
-
     $exitCode = proc_close($process);
-    $combinedOutput = (string)$stdout . (string)$stderr;
+
+    $stdout = (string)file_get_contents($stdoutPath);
+    $stderr = (string)file_get_contents($stderrPath);
+    @unlink($stdoutPath);
+    @unlink($stderrPath);
+
+    $combinedOutput = $stdout . $stderr;
     $outputSummary = $combinedOutput;
 
     return $exitCode === 0;

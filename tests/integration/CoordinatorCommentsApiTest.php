@@ -132,13 +132,13 @@ $siteToken = $authService->generateSiteToken($location);
 
 $auditCount = static function () use ($pdo, $incidentId): int {
     return (int)$pdo->query(
-        "SELECT COUNT(*) FROM `audit_log`
+        "SELECT COUNT(*) FROM audit_log
          WHERE entity_type = 'TICKET' AND entity_id = {$incidentId} AND action = 'INCIDENT_COMMENT_ADDED'"
     )->fetchColumn();
 };
 
 $commentCount = static function () use ($pdo, $incidentId): int {
-    return (int)$pdo->query("SELECT COUNT(*) FROM `incident_comments` WHERE incident_id = {$incidentId}")->fetchColumn();
+    return (int)$pdo->query("SELECT COUNT(*) FROM incident_comments WHERE incident_id = {$incidentId}")->fetchColumn();
 };
 
 // =========================================================================
@@ -260,7 +260,7 @@ $assert('3.3 La autoría es el coordinador autenticado con su nombre nominal (RF
         && ($publicComment['author_name'] ?? '') === $coordinatorName
         && ($publicComment['is_own_message'] ?? false) === true);
 
-$stmtPublic = $pdo->prepare("SELECT author_type, user_id, author_name, is_internal FROM `incident_comments` WHERE id = :id");
+$stmtPublic = $pdo->prepare("SELECT author_type, user_id, author_name, is_internal FROM incident_comments WHERE id = :id");
 $stmtPublic->execute([':id' => $publicCommentId]);
 $publicRow = $stmtPublic->fetch(PDO::FETCH_ASSOC) ?: [];
 
@@ -294,7 +294,7 @@ $assert('3.5 La nota interna responde HTTP 201 con su mensaje de taller',
 $assert('3.6 La nota interna llega marcada con el candado is_internal === true',
     array_key_exists('is_internal', $internalComment) && $internalComment['is_internal'] === true);
 
-$internalFlag = (int)$pdo->query("SELECT is_internal FROM `incident_comments` WHERE id = {$internalCommentId}")->fetchColumn();
+$internalFlag = (int)$pdo->query("SELECT is_internal FROM incident_comments WHERE id = {$internalCommentId}")->fetchColumn();
 $assert('3.7 En BD la nota queda con is_internal = 1',
     $internalFlag === 1);
 
@@ -305,8 +305,8 @@ $resFailSafe = $router->dispatch(new Request(
     parsedBody: ['comment_text' => 'Sin selector de privacidad la nota debe ser interna.'],
     headers: ['Authorization' => 'Bearer ' . $coordToken]
 ));
-$failSafeCommentId = (int)$pdo->query("SELECT id FROM `incident_comments` WHERE incident_id = {$incidentId} ORDER BY id DESC LIMIT 1")->fetchColumn();
-$failSafeFlag = (int)$pdo->query("SELECT is_internal FROM `incident_comments` WHERE id = {$failSafeCommentId}")->fetchColumn();
+$failSafeCommentId = (int)$pdo->query("SELECT id FROM incident_comments WHERE incident_id = {$incidentId} ORDER BY id DESC LIMIT 1")->fetchColumn();
+$failSafeFlag = (int)$pdo->query("SELECT is_internal FROM incident_comments WHERE id = {$failSafeCommentId}")->fetchColumn();
 
 $assert('3.8 Fail-safe: sin campo is_internal la nota se clasifica interna (RF-03.3)',
     $resFailSafe->getStatusCode() === 201 && $failSafeFlag === 1,
@@ -335,7 +335,7 @@ $assert('3.10 La petición inválida no persiste mensaje ni genera auditoría',
 echo "\n--- Caso 4: Eventos inmutables INCIDENT_COMMENT_ADDED en audit_log ---\n";
 
 $auditStmt = $pdo->prepare("
-    SELECT * FROM `audit_log`
+    SELECT * FROM audit_log
     WHERE entity_type = 'TICKET' AND entity_id = :incident_id AND action = 'INCIDENT_COMMENT_ADDED'
     ORDER BY id ASC
 ");
@@ -408,7 +408,7 @@ $auditedCommentIds = array_map(
 );
 $persistedCommentIds = array_map(
     static fn(array $row): int => (int)$row['id'],
-    $pdo->query("SELECT id FROM `incident_comments` WHERE incident_id = {$incidentId} ORDER BY id ASC")->fetchAll(PDO::FETCH_ASSOC)
+    $pdo->query("SELECT id FROM incident_comments WHERE incident_id = {$incidentId} ORDER BY id ASC")->fetchAll(PDO::FETCH_ASSOC)
 );
 
 sort($auditedCommentIds);
@@ -461,7 +461,7 @@ $assert('5.1 La nota con evidencia responde HTTP 201 y la foto se guarda en /upl
 $assert('5.2 El archivo físico existe en public/uploads/',
     $storedUploadPath !== '' && is_file(dirname(__DIR__, 2) . '/public' . $storedUploadPath));
 
-$photoRow = $pdo->prepare("SELECT photo_path, is_internal FROM `incident_comments` WHERE id = :id");
+$photoRow = $pdo->prepare("SELECT photo_path, is_internal FROM incident_comments WHERE id = :id");
 $photoRow->execute([':id' => $photoCommentId]);
 $photoDbRow = $photoRow->fetch(PDO::FETCH_ASSOC) ?: [];
 
@@ -469,7 +469,7 @@ $assert('5.3 La BD persiste la ruta de la evidencia junto a la clasificación in
     ($photoDbRow['photo_path'] ?? '') === $storedUploadPath && (int)($photoDbRow['is_internal'] ?? -1) === 1);
 
 $lastAuditStmt = $pdo->query("
-    SELECT * FROM `audit_log`
+    SELECT * FROM audit_log
     WHERE entity_type = 'TICKET' AND entity_id = {$incidentId} AND action = 'INCIDENT_COMMENT_ADDED'
     ORDER BY id DESC
     LIMIT 1
@@ -487,7 +487,7 @@ $assert('5.5 Append-only: las 4 filas de auditoría permanecen tras la última p
     $auditCount() === 4 && count($auditRows) === 3,
     'auditorías reales: ' . $auditCount());
 
-$pristineFirstRow = $pdo->query("SELECT * FROM `audit_log` WHERE id = " . (int)($firstAudit['id'] ?? 0))->fetch(PDO::FETCH_ASSOC) ?: [];
+$pristineFirstRow = $pdo->query("SELECT * FROM audit_log WHERE id = " . (int)($firstAudit['id'] ?? 0))->fetch(PDO::FETCH_ASSOC) ?: [];
 $assert('5.6 Inmutabilidad: la fila más antigua conserva íntegros sus campos originales',
     $pristineFirstRow == $firstAudit,
     'antes: ' . json_encode($firstAudit) . ' | después: ' . json_encode($pristineFirstRow));
@@ -544,7 +544,7 @@ $assert('6.5 Cero fugas hacia la Sede: sin is_internal ni textos de taller en el
 // =========================================================================
 echo "\n--- Caso 7: Sellado de auditoría en solo lectura ---\n";
 
-$pdo->prepare("UPDATE `incidents` SET status = 'CLOSED', closed_at = NOW() WHERE id = :id")
+$pdo->prepare("UPDATE incidents SET status = 'CLOSED', closed_at = NOW() WHERE id = :id")
     ->execute([':id' => $incidentId]);
 
 $auditBeforeSealed = $auditCount();

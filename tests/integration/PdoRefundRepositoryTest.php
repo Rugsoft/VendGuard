@@ -55,13 +55,13 @@ $buildRefund = static function (array $overrides = []): RefundRequest {
     ], $overrides));
 };
 
-$rowsBefore = (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests`')->fetchColumn();
-$findingsBefore = (int)$pdo->query('SELECT COUNT(*) FROM `unclaimed_cash_findings`')->fetchColumn();
+$rowsBefore = (int)$pdo->query('SELECT COUNT(*) FROM refund_requests')->fetchColumn();
+$findingsBefore = (int)$pdo->query('SELECT COUNT(*) FROM unclaimed_cash_findings')->fetchColumn();
 
 $pdo->beginTransaction();
 
 try {
-    $incidentId = (int)$pdo->query('SELECT `id` FROM `incidents` ORDER BY `id` LIMIT 1')->fetchColumn();
+    $incidentId = (int)$pdo->query('SELECT id FROM incidents ORDER BY id LIMIT 1')->fetchColumn();
     if ($incidentId <= 0) {
         $mRow = $pdo->query('SELECT id, location_id, machine_type FROM machines ORDER BY id LIMIT 1')->fetch(PDO::FETCH_ASSOC);
         $tRow = $pdo->query("SELECT id FROM users WHERE role = 'TECHNICIAN' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
@@ -73,9 +73,9 @@ try {
         $ins->execute([$tCode, (int)$mRow['id'], $mRow['machine_type'] ?? 'HOT_DRINKS', (int)$mRow['location_id'], (int)$tRow['id']]);
         $incidentId = (int)$pdo->lastInsertId();
     }
-    $machineId = (int)$pdo->query('SELECT `id` FROM `machines` ORDER BY `id` LIMIT 1')->fetchColumn();
-    $locationId = (int)$pdo->query('SELECT `id` FROM `locations` ORDER BY `id` LIMIT 1')->fetchColumn();
-    $technicianId = (int)$pdo->query("SELECT `id` FROM `users` WHERE `role` = 'TECHNICIAN' ORDER BY `id` LIMIT 1")->fetchColumn();
+    $machineId = (int)$pdo->query('SELECT id FROM machines ORDER BY id LIMIT 1')->fetchColumn();
+    $locationId = (int)$pdo->query('SELECT id FROM locations ORDER BY id LIMIT 1')->fetchColumn();
+    $technicianId = (int)$pdo->query("SELECT id FROM users WHERE role = 'TECHNICIAN' ORDER BY id LIMIT 1")->fetchColumn();
 
     $assert('1.0 El entorno de pruebas tiene datos maestros sembrados', $incidentId > 0 && $machineId > 0 && $locationId > 0);
 
@@ -140,7 +140,7 @@ try {
 
     // The strongest check available: prove the rows exist with their IBAN, and
     // that a restricted read cannot return it.
-    $storedIban = $pdo->query("SELECT `iban` FROM `refund_requests` WHERE `id` = " . (int)$withIbanId)->fetchColumn();
+    $storedIban = $pdo->query("SELECT iban FROM refund_requests WHERE id = " . (int)$withIbanId)->fetchColumn();
     $assert(
         '3.1 La fila SÍ contiene el IBAN en la base de datos (control del test)',
         $storedIban === 'ES9121000418450200051332',
@@ -335,7 +335,7 @@ try {
 
     $assert('7.4 deactivate() realiza la baja lógica', $refundRepo->deactivate($rectifiedId) === true);
 
-    $deletedRow = $pdo->query('SELECT `is_active`, `deleted_at` FROM `refund_requests` WHERE `id` = ' . (int)$rectifiedId)->fetch();
+    $deletedRow = $pdo->query('SELECT is_active, deleted_at FROM refund_requests WHERE id = ' . (int)$rectifiedId)->fetch();
     $assert(
         '7.5 La fila NO se borra físicamente: permanece con is_active = 0 (Art. III)',
         $deletedRow !== false
@@ -352,7 +352,7 @@ try {
     $assert(
         '7.7 Un expediente dado de baja deja de ser localizable por su token',
         $refundRepo->findByTrackingToken(
-            (string)$pdo->query('SELECT `tracking_token` FROM `refund_requests` WHERE `id` = ' . (int)$rectifiedId)->fetchColumn()
+            (string)$pdo->query('SELECT tracking_token FROM refund_requests WHERE id = ' . (int)$rectifiedId)->fetchColumn()
         ) === null
     );
 
@@ -436,8 +436,8 @@ try {
 // Autoverificación de aislamiento: la reversión debe devolver la tabla a su
 // estado previo. Una fuga aquí rompería los 20+ tests de integración que
 // vacían `incidents` con DELETE, porque la FK de `refund_requests` lo impide.
-$rowsAfter = (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests`')->fetchColumn();
-$findingsAfter = (int)$pdo->query('SELECT COUNT(*) FROM `unclaimed_cash_findings`')->fetchColumn();
+$rowsAfter = (int)$pdo->query('SELECT COUNT(*) FROM refund_requests')->fetchColumn();
+$findingsAfter = (int)$pdo->query('SELECT COUNT(*) FROM unclaimed_cash_findings')->fetchColumn();
 
 $assertions++;
 if ($rowsAfter === $rowsBefore && $findingsAfter === $findingsBefore) {

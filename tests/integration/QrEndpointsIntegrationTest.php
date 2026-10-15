@@ -236,7 +236,7 @@ $pdo->prepare("UPDATE machines SET is_active = 1 WHERE code = 'VEND-0201'")->exe
 echo "\n--- BLOQUE 2: POST /api/qr/report ---\n";
 
 // Limpiamos incidencias activas en VEND-0201 para probar creación limpia
-$vend0201Id = (int)$pdo->query("SELECT `id` FROM `machines` WHERE `code` = 'VEND-0201'")->fetchColumn();
+$vend0201Id = (int)$pdo->query("SELECT id FROM machines WHERE code = 'VEND-0201'")->fetchColumn();
 TestDataCleaner::purgeIncidentsByMachine($pdo, $vend0201Id);
 
 // 2.1 Creación de ticket inicial sobre máquina limpia
@@ -352,7 +352,7 @@ $assert("2B.1 El resguardo incluye la URL de seguimiento con el token", ($receip
 $assert("2B.1 El resguardo refleja importe y vía", (float)($receipt['claimed_amount'] ?? 0) === 2.00 && ($receipt['compensation_method'] ?? '') === 'EN_MANO_SEDE');
 
 // 2B.2 Persistencia real en MariaDB
-$stmtRefund = $pdo->prepare("SELECT * FROM `refund_requests` WHERE `tracking_token` = :token");
+$stmtRefund = $pdo->prepare("SELECT * FROM refund_requests WHERE tracking_token = :token");
 $stmtRefund->execute([':token' => $receipt['tracking_token'] ?? '']);
 $rowRefund = $stmtRefund->fetch(PDO::FETCH_ASSOC);
 $assert("2B.2 El expediente de reintegro queda persistido en MariaDB", is_array($rowRefund));
@@ -401,8 +401,8 @@ $assert("2B.4 El nombre del reclamante NO se devuelve (Art. V.4)", !str_contains
 $assert("2B.4 pickup_pin existe y vale null en vía digital", array_key_exists('pickup_pin', json_decode($rawBizumBody, true)['data']['refund'] ?? []) && json_decode($rawBizumBody, true)['data']['refund']['pickup_pin'] === null);
 
 // 2B.5 Un importe por encima del tope se rechaza SIN dejar avería huérfana
-$incidentsBeforeReject = (int)$pdo->query("SELECT COUNT(*) FROM `incidents` WHERE `machine_id` = " . $vend0201Id)->fetchColumn();
-$refundsBeforeReject = (int)$pdo->query("SELECT COUNT(*) FROM `refund_requests`")->fetchColumn();
+$incidentsBeforeReject = (int)$pdo->query("SELECT COUNT(*) FROM incidents WHERE machine_id = " . $vend0201Id)->fetchColumn();
+$refundsBeforeReject = (int)$pdo->query("SELECT COUNT(*) FROM refund_requests")->fetchColumn();
 $postOverCap = [
     'machine_code' => 'VEND-0201',
     'category' => 'PAYMENT_SYSTEM',
@@ -419,13 +419,13 @@ $assert("2B.5 Importe superior al tope de 50,00 € retorna HTTP 422", $resOverC
 $bodyOverCap = json_decode($resOverCap->getBody(), true);
 $assert("2B.5 Código de error INVALID_REFUND_AMOUNT", ($bodyOverCap['error']['code'] ?? '') === 'INVALID_REFUND_AMOUNT');
 $assert("2B.5 RF-REF-03 remite a atención al cliente", str_contains((string)($bodyOverCap['error']['message'] ?? ''), 'atención al cliente'));
-$incidentsAfterReject = (int)$pdo->query("SELECT COUNT(*) FROM `incidents` WHERE `machine_id` = " . $vend0201Id)->fetchColumn();
-$refundsAfterReject = (int)$pdo->query("SELECT COUNT(*) FROM `refund_requests`")->fetchColumn();
+$incidentsAfterReject = (int)$pdo->query("SELECT COUNT(*) FROM incidents WHERE machine_id = " . $vend0201Id)->fetchColumn();
+$refundsAfterReject = (int)$pdo->query("SELECT COUNT(*) FROM refund_requests")->fetchColumn();
 $assert("2B.5 NO queda ninguna avería huérfana sin su reclamación", $incidentsAfterReject === $incidentsBeforeReject, 'antes: ' . $incidentsBeforeReject . ' ahora: ' . $incidentsAfterReject);
 $assert("2B.5 NO queda ningún expediente de reintegro", $refundsAfterReject === $refundsBeforeReject, 'antes: ' . $refundsBeforeReject . ' ahora: ' . $refundsAfterReject);
 
 // 2B.6 RNF-REF-01: la creación queda auditada de forma inmutable
-$auditRefund = $pdo->prepare("SELECT COUNT(*) FROM `audit_log` WHERE `entity_type` = 'REFUND_REQUEST' AND `entity_id` = :id");
+$auditRefund = $pdo->prepare("SELECT COUNT(*) FROM audit_log WHERE entity_type = 'REFUND_REQUEST' AND entity_id = :id");
 $auditRefund->execute([':id' => (int)($rowRefund['id'] ?? 0)]);
 $assert("2B.6 La apertura del expediente dejó evento en audit_log", (int)$auditRefund->fetchColumn() >= 1);
 

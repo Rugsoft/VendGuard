@@ -88,7 +88,7 @@ TestDataCleaner::purge($pdoSweep);
 
 /** @var array<int, string> Estado sanitario del parque al arrancar (restituido al final). */
 $sanitarySnapshot = [];
-foreach ($pdoSweep->query('SELECT `id`, `sanitary_status` FROM `machines` WHERE `deleted_at` IS NULL') as $row) {
+foreach ($pdoSweep->query('SELECT id, sanitary_status FROM machines WHERE deleted_at IS NULL') as $row) {
     $sanitarySnapshot[(int)$row['id']] = (string)$row['sanitary_status'];
 }
 
@@ -119,22 +119,22 @@ $technicianId     = (int)$technician->getId();
 // Máquinas libres bajo vigilancia sanitaria (perecederas y mixtas), sin expediente vivo: son
 // las únicas que el reloj biológico puede poner en cuarentena.
 $watchPool = $pdoSweep->query(
-    "SELECT m.`id` AS machine_id, m.`location_id`, m.`code`, m.`machine_type`
-       FROM `machines` m
-       JOIN `locations` l ON l.`id` = m.`location_id`
-      WHERE m.`is_active` = 1
-        AND m.`is_blocked_no_access` = 0
-        AND m.`deleted_at` IS NULL
-        AND l.`is_active` = 1
-        AND l.`deleted_at` IS NULL
-        AND m.`machine_type` IN ('PERISHABLE_FOOD', 'COMBO')
+    "SELECT m.id AS machine_id, m.location_id, m.code, m.machine_type
+       FROM machines m
+       JOIN locations l ON l.id = m.location_id
+      WHERE m.is_active = 1
+        AND m.is_blocked_no_access = 0
+        AND m.deleted_at IS NULL
+        AND l.is_active = 1
+        AND l.deleted_at IS NULL
+        AND m.machine_type IN ('PERISHABLE_FOOD', 'COMBO')
         AND NOT EXISTS (
-            SELECT 1 FROM `incidents` i
-             WHERE i.`machine_id` = m.`id`
-               AND i.`deleted_at` IS NULL
-               AND i.`status` NOT IN ('CLOSED', 'CANCELLED')
+            SELECT 1 FROM incidents i
+             WHERE i.machine_id = m.id
+               AND i.deleted_at IS NULL
+               AND i.status NOT IN ('CLOSED', 'CANCELLED')
         )
-      ORDER BY m.`id`"
+      ORDER BY m.id"
 )->fetchAll(PDO::FETCH_ASSOC);
 
 $assert(
@@ -191,14 +191,14 @@ $createExpiredTicket = function (array $machine, int $hours = 5) use (
     $incidentRepo->startIntervention($incidentId, $technicianId);
 
     $pdoSweep->prepare(
-        'UPDATE `incidents` SET `created_at` = NOW() - INTERVAL :hours HOUR WHERE `id` = :id'
+        'UPDATE incidents SET created_at = NOW() - INTERVAL :hours HOUR WHERE id = :id'
     )->execute([':hours' => $hours, ':id' => $incidentId]);
 
     return $incidentRepo->findById($incidentId);
 };
 
 $machineStatus = static function (int $machineId) use ($pdoSweep): string {
-    $stmt = $pdoSweep->prepare('SELECT `sanitary_status` FROM `machines` WHERE `id` = :id');
+    $stmt = $pdoSweep->prepare('SELECT sanitary_status FROM machines WHERE id = :id');
     $stmt->execute([':id' => $machineId]);
 
     return (string)$stmt->fetchColumn();
@@ -226,7 +226,7 @@ $sweep = static function () use ($router, $cronSecret) {
 
 $contentionRow = static function (int $incidentId) use ($pdoSweep): ?array {
     $stmt = $pdoSweep->prepare(
-        'SELECT * FROM `sanitary_sweep_contentions` WHERE `incident_id` = :id LIMIT 1'
+        'SELECT * FROM sanitary_sweep_contentions WHERE incident_id = :id LIMIT 1'
     );
     $stmt->execute([':id' => $incidentId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -236,7 +236,7 @@ $contentionRow = static function (int $incidentId) use ($pdoSweep): ?array {
 
 $latestPass = static function () use ($pdoSweep): ?array {
     $row = $pdoSweep->query(
-        'SELECT * FROM `sanitary_sweep_passes` ORDER BY `id` DESC LIMIT 1'
+        'SELECT * FROM sanitary_sweep_passes ORDER BY id DESC LIMIT 1'
     )->fetch(PDO::FETCH_ASSOC);
 
     return is_array($row) ? $row : null;
@@ -386,7 +386,7 @@ try {
     // La fila de la máquina queda retenida por una transacción VIVA de la segunda conexión:
     // es el escritor que el barrido no puede esperar (T-PAUSE-39/40).
     $pdoHolder->beginTransaction();
-    $pdoHolder->prepare('SELECT `id` FROM `machines` WHERE `id` = :id FOR UPDATE')
+    $pdoHolder->prepare('SELECT id FROM machines WHERE id = :id FOR UPDATE')
         ->execute([':id' => $contendedMachineId]);
 
     $startedAt = microtime(true);
@@ -521,9 +521,9 @@ try {
     echo "\n--- Grupo 5: Escalado de parque y orden ---\n";
 
     $pdoSweep->prepare(
-        'INSERT INTO `sanitary_sweep_passes`
-            (`started_at`, `finished_at`, `candidates`, `evaluated`, `quarantined_count`,
-             `contended_count`, `failures_count`, `duration_ms`)
+        'INSERT INTO sanitary_sweep_passes
+            (started_at, finished_at, candidates, evaluated, quarantined_count,
+             contended_count, failures_count, duration_ms)
          VALUES (NOW(), NOW(), 7, 1, 0, 6, 0, 12.50)'
     )->execute();
     $fleetPassId = (int)$pdoSweep->lastInsertId();
@@ -541,7 +541,7 @@ try {
         json_encode($fleetPayload['escalation'], JSON_UNESCAPED_UNICODE)
     );
 
-    $pdoSweep->prepare('DELETE FROM `sanitary_sweep_passes` WHERE `id` = :id')
+    $pdoSweep->prepare('DELETE FROM sanitary_sweep_passes WHERE id = :id')
         ->execute([':id' => $fleetPassId]);
 
     // Dos seguimientos sembrados a mano —el camino de lectura es lo que se certifica aquí—, con
@@ -551,9 +551,9 @@ try {
     $youngerTicket = $createExpiredTicket($youngerBookMachine, 5);
 
     $pdoSweep->prepare(
-        'INSERT INTO `sanitary_sweep_contentions`
-            (`incident_id`, `machine_id`, `first_detected_at`, `last_detected_at`,
-             `consecutive_passes`, `total_passes`, `escalated_at`, `resolved_at`)
+        'INSERT INTO sanitary_sweep_contentions
+            (incident_id, machine_id, first_detected_at, last_detected_at,
+             consecutive_passes, total_passes, escalated_at, resolved_at)
          VALUES (:incident_id, :machine_id, NOW() - INTERVAL 90 MINUTE, NOW() - INTERVAL 5 MINUTE, 2, 2, NULL, NULL)'
     )->execute([
         ':incident_id' => (int)$olderTicket->getId(),
@@ -561,9 +561,9 @@ try {
     ]);
 
     $pdoSweep->prepare(
-        'INSERT INTO `sanitary_sweep_contentions`
-            (`incident_id`, `machine_id`, `first_detected_at`, `last_detected_at`,
-             `consecutive_passes`, `total_passes`, `escalated_at`, `resolved_at`)
+        'INSERT INTO sanitary_sweep_contentions
+            (incident_id, machine_id, first_detected_at, last_detected_at,
+             consecutive_passes, total_passes, escalated_at, resolved_at)
          VALUES (:incident_id, :machine_id, NOW() - INTERVAL 30 MINUTE, NOW() - INTERVAL 5 MINUTE, 4, 4, NOW() - INTERVAL 20 MINUTE, NULL)'
     )->execute([
         ':incident_id' => (int)$youngerTicket->getId(),
@@ -601,7 +601,7 @@ try {
 
     TestDataCleaner::purge($pdoSweep);
 
-    $restore = $pdoSweep->prepare('UPDATE `machines` SET `sanitary_status` = :status WHERE `id` = :id');
+    $restore = $pdoSweep->prepare('UPDATE machines SET sanitary_status = :status WHERE id = :id');
     foreach ($sanitarySnapshot as $machineId => $status) {
         $restore->execute([':status' => $status, ':id' => $machineId]);
     }

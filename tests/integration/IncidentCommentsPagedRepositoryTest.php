@@ -102,8 +102,8 @@ $commentsSeed = [
     [7, 'TECHNICIAN', 1, '2026-10-03 10:00:00'],
 ];
 $insert = $pdo->prepare("
-    INSERT INTO `incident_comments`
-        (`incident_id`, `author_type`, `user_id`, `author_name`, `comment_text`, `is_internal`, `created_at`)
+    INSERT INTO incident_comments
+        (incident_id, author_type, user_id, author_name, comment_text, is_internal, created_at)
     VALUES
         (:incident_id, :author_type, NULL, :author_name, :comment_text, :is_internal, :created_at)
 ");

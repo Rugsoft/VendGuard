@@ -176,12 +176,12 @@ try {
         ));
 
         $pdo->prepare('
-            UPDATE `incidents`
-            SET `status` = :status,
-                `assigned_technician_id` = :tech_id,
-                `assigned_at` = CURRENT_TIMESTAMP,
-                `started_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
+            UPDATE incidents
+            SET status = :status,
+                assigned_technician_id = :tech_id,
+                assigned_at = CURRENT_TIMESTAMP,
+                started_at = CURRENT_TIMESTAMP
+            WHERE id = :id
         ')->execute([
             ':status' => IncidentStatus::IN_PROGRESS->value,
             ':tech_id' => $techId,
@@ -315,7 +315,7 @@ try {
         && $readyPin !== $secondPin
     );
 
-    $refundRowsBefore = (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests`')->fetchColumn();
+    $refundRowsBefore = (int)$pdo->query('SELECT COUNT(*) FROM refund_requests')->fetchColumn();
 
     // ─────────────────────────────────────────────────────────────────────
     echo "\n--- 1. Listado anonimizado de conserjería (RF-REF-06, RF-REF-10, Art. V.4) ---\n";
@@ -459,9 +459,9 @@ try {
     );
 
     $handover = $pdo->prepare('
-        SELECT `hand_delivered_at`, `is_active`
-        FROM `refund_requests`
-        WHERE `id` = :id
+        SELECT hand_delivered_at, is_active
+        FROM refund_requests
+        WHERE id = :id
     ');
     $handover->execute([':id' => $secondCaseId]);
     $handoverRow = $handover->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -472,12 +472,12 @@ try {
     );
 
     $handoverAudit = $pdo->prepare('
-        SELECT `previous_state`, `new_state`, `user_role`
-        FROM `audit_log`
-        WHERE `entity_type` = \'REFUND_REQUEST\'
-          AND `entity_id` = :id
-          AND `action` = \'REFUND_DELIVERED_IN_HAND\'
-        ORDER BY `id` DESC
+        SELECT previous_state, new_state, user_role
+        FROM audit_log
+        WHERE entity_type = \'REFUND_REQUEST\'
+          AND entity_id = :id
+          AND action = \'REFUND_DELIVERED_IN_HAND\'
+        ORDER BY id DESC
         LIMIT 1
     ');
     $handoverAudit->execute([':id' => $secondCaseId]);
@@ -553,7 +553,7 @@ try {
         $intactRow?->getStatus() === RefundStatus::DEPOSITED_AT_RECEPTION
         && !$intactRow->getStatus()->isTerminal()
     );
-    $intactHandover = $pdo->prepare('SELECT `hand_delivered_at` FROM `refund_requests` WHERE `id` = :id');
+    $intactHandover = $pdo->prepare('SELECT hand_delivered_at FROM refund_requests WHERE id = :id');
     $intactHandover->execute([':id' => $readyCaseId]);
     $assert(
         '3.2 No se ha estampado ninguna hora de entrega tras los intentos fallidos',
@@ -562,10 +562,10 @@ try {
     $assert(
         '3.3 Un PIN erróneo no deja ni un solo apunte de entrega en la auditoría',
         (int)$pdo->query('
-            SELECT COUNT(*) FROM `audit_log`
-            WHERE `entity_type` = \'REFUND_REQUEST\'
-              AND `entity_id` = ' . $readyCaseId . '
-              AND `action` = \'REFUND_DELIVERED_IN_HAND\'
+            SELECT COUNT(*) FROM audit_log
+            WHERE entity_type = \'REFUND_REQUEST\'
+              AND entity_id = ' . $readyCaseId . '
+              AND action = \'REFUND_DELIVERED_IN_HAND\'
         ')->fetchColumn() === 0
     );
 
@@ -647,7 +647,7 @@ try {
     // ─────────────────────────────────────────────────────────────────────
     echo "\n--- 5. Blindaje constitucional de la entrega (Art. III, Art. V.4) ---\n";
 
-    $refundRowsAfter = (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests`')->fetchColumn();
+    $refundRowsAfter = (int)$pdo->query('SELECT COUNT(*) FROM refund_requests')->fetchColumn();
     $assert(
         '5.1 Ni una entrega ni un rechazo ha borrado físicamente un expediente (Art. III.1)',
         $refundRowsAfter === $refundRowsBefore,
@@ -655,9 +655,9 @@ try {
     );
     $assert(
         '5.1 Los tres expedientes siguen existiendo y con su PIN original (Art. III.2)',
-        (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests` WHERE `id` IN ('
+        (int)$pdo->query('SELECT COUNT(*) FROM refund_requests WHERE id IN ('
             . (int)$readyCaseId . ', ' . (int)$secondCaseId . ', ' . (int)$foreignCaseId
-            . ') AND `pickup_pin` IS NOT NULL')->fetchColumn() === 3
+            . ') AND pickup_pin IS NOT NULL')->fetchColumn() === 3
     );
 
     $allSiteResponses = implode('', [
@@ -687,10 +687,10 @@ try {
     // Se cuentan sólo los expedientes de esta suite: otras pruebas del módulo
     // confirman entregas reales y dejan sus propios apuntes en la misma tabla.
     $audits = (int)$pdo->query('
-        SELECT COUNT(*) FROM `audit_log`
-        WHERE `entity_type` = \'REFUND_REQUEST\'
-          AND `action` = \'REFUND_DELIVERED_IN_HAND\'
-          AND `entity_id` IN (' . (int)$readyCaseId . ', ' . (int)$secondCaseId . ')
+        SELECT COUNT(*) FROM audit_log
+        WHERE entity_type = \'REFUND_REQUEST\'
+          AND action = \'REFUND_DELIVERED_IN_HAND\'
+          AND entity_id IN (' . (int)$readyCaseId . ', ' . (int)$secondCaseId . ')
     ')->fetchColumn();
     $assert(
         '5.4 Sólo las dos entregas de esta suite dejaron apunte en la auditoría',
@@ -753,7 +753,7 @@ try {
     $afterLock = $dispatch('POST', "/api/location/refunds/{$bruteCaseId}/deliver", [
         'pickup_pin' => $brutePin,
     ], $siteHeaders);
-    $bruteRow = $pdo->prepare('SELECT `status`, `pickup_attempts`, `pickup_locked_until` FROM `refund_requests` WHERE `id` = :id');
+    $bruteRow = $pdo->prepare('SELECT status, pickup_attempts, pickup_locked_until FROM refund_requests WHERE id = :id');
     $bruteRow->execute([':id' => $bruteCaseId]);
     $bruteRowData = $bruteRow->fetch(PDO::FETCH_ASSOC) ?: [];
 
@@ -794,7 +794,7 @@ try {
     );
 
     // El bloqueo es temporal: agotado el plazo, el consumidor vuelve a cobrar.
-    $pdo->prepare('UPDATE `refund_requests` SET `pickup_locked_until` = :until WHERE `id` = :id')
+    $pdo->prepare('UPDATE refund_requests SET pickup_locked_until = :until WHERE id = :id')
         ->execute([
             ':until' => date('Y-m-d H:i:s', strtotime('-1 minute')),
             ':id' => $bruteCaseId,

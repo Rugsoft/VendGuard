@@ -180,12 +180,12 @@ try {
         ));
 
         $pdo->prepare('
-            UPDATE `incidents`
-            SET `status` = :status,
-                `assigned_technician_id` = :tech_id,
-                `assigned_at` = CURRENT_TIMESTAMP,
-                `started_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
+            UPDATE incidents
+            SET status = :status,
+                assigned_technician_id = :tech_id,
+                assigned_at = CURRENT_TIMESTAMP,
+                started_at = CURRENT_TIMESTAMP
+            WHERE id = :id
         ')->execute([
             ':status' => IncidentStatus::IN_PROGRESS->value,
             ':tech_id' => $techId,
@@ -249,7 +249,7 @@ try {
         && str_contains($routerSource, '$technicianAuth')
     );
 
-    $refundRowsBefore = (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests`')->fetchColumn();
+    $refundRowsBefore = (int)$pdo->query('SELECT COUNT(*) FROM refund_requests')->fetchColumn();
 
     // ─────────────────────────────────────────────────────────────────────
     echo "\n--- 1. Consulta del técnico antes de(dictaminar (RF-REF-04, Art. V.4) ---\n";
@@ -477,9 +477,9 @@ try {
     );
 
     $deskStored = $pdo->prepare('
-        SELECT `technician_id`, `technician_inspected_at`
-        FROM `refund_requests`
-        WHERE `id` = :id
+        SELECT technician_id, technician_inspected_at
+        FROM refund_requests
+        WHERE id = :id
     ');
     $deskStored->execute([':id' => $deskCaseId]);
     $deskAuditRow = $deskStored->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -490,10 +490,10 @@ try {
     );
 
     $deskAudit = $pdo->prepare('
-        SELECT `previous_state`, `new_state`, `user_id`, `user_role`
-        FROM `audit_log`
-        WHERE `entity_type` = \'REFUND_REQUEST\' AND `entity_id` = :id AND `action` = \'REFUND_INSPECTED\'
-        ORDER BY `id` DESC
+        SELECT previous_state, new_state, user_id, user_role
+        FROM audit_log
+        WHERE entity_type = \'REFUND_REQUEST\' AND entity_id = :id AND action = \'REFUND_INSPECTED\'
+        ORDER BY id DESC
         LIMIT 1
     ');
     $deskAudit->execute([':id' => $deskCaseId]);
@@ -686,8 +686,8 @@ try {
     );
     $assert(
         '5.2 El expediente sobrevive al cierre técnico y sigue activo (Art. III.1)',
-        (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests` WHERE `id` = ' . $digitalCaseId
-            . ' AND `is_active` = 1')->fetchColumn() === 1
+        (int)$pdo->query('SELECT COUNT(*) FROM refund_requests WHERE id = ' . $digitalCaseId
+            . ' AND is_active = 1')->fetchColumn() === 1
     );
 
     $coordinatorInbox = $dispatch(
@@ -708,7 +708,7 @@ try {
         "HTTP {$coordinatorInbox->getStatusCode()} " . json_encode($data($coordinatorInbox))
     );
 
-    $refundRowsAfter = (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests`')->fetchColumn();
+    $refundRowsAfter = (int)$pdo->query('SELECT COUNT(*) FROM refund_requests')->fetchColumn();
     $assert(
         '5.3 Ni un solo expediente se ha borrado físicamente en todo el recorrido (Art. III.1)',
         $refundRowsAfter === $refundRowsBefore + 5,
@@ -732,7 +732,7 @@ try {
     $assert(
         '6.1 Un importe inválido no deja ni un céntimo sin registrar ni cierra la avería',
         $incidents->findById((int)$officeIncident->getId())?->getStatus() === IncidentStatus::IN_PROGRESS
-        && (int)$pdo->query('SELECT COUNT(*) FROM `unclaimed_cash_findings` WHERE `incident_id` = '
+        && (int)$pdo->query('SELECT COUNT(*) FROM unclaimed_cash_findings WHERE incident_id = '
             . (int)$officeIncident->getId())->fetchColumn() === 0
     );
 
@@ -756,9 +756,9 @@ try {
     $assert('6.2 La respuesta expone el hallazgo de oficio registrado', $findingId > 0);
 
     $findingStatement = $pdo->prepare('
-        SELECT `incident_id`, `machine_id`, `technician_id`, `amount`, `notes`
-        FROM `unclaimed_cash_findings`
-        WHERE `id` = :id
+        SELECT incident_id, machine_id, technician_id, amount, notes
+        FROM unclaimed_cash_findings
+        WHERE id = :id
     ');
     $findingStatement->execute([':id' => $findingId]);
     $findingRow = $findingStatement->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -776,18 +776,18 @@ try {
     $assert(
         '6.4 El hallazgo de oficio se audita como entidad propia (Art. III.3)',
         (int)$pdo->query('
-            SELECT COUNT(*) FROM `audit_log`
-            WHERE `entity_type` = \'UNCLAIMED_CASH_FINDING\'
-              AND `entity_id` = ' . $findingId . '
-              AND `action` = \'UNCLAIMED_CASH_RECORDED\'
-              AND `user_id` = ' . $techId
+            SELECT COUNT(*) FROM audit_log
+            WHERE entity_type = \'UNCLAIMED_CASH_FINDING\'
+              AND entity_id = ' . $findingId . '
+              AND action = \'UNCLAIMED_CASH_RECORDED\'
+              AND user_id = ' . $techId
         )->fetchColumn() === 1
     );
     $assert(
         '6.4 El efectivo de oficio no se confunde con un reintegro de un reclamante',
-        (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests` WHERE `id` = ' . $findingId)->fetchColumn() === 0
-            && (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests` WHERE `incident_id` = '
-                . (int)$officeIncident->getId() . ' AND `is_active` = 1')->fetchColumn() === 0
+        (int)$pdo->query('SELECT COUNT(*) FROM refund_requests WHERE id = ' . $findingId)->fetchColumn() === 0
+            && (int)$pdo->query('SELECT COUNT(*) FROM refund_requests WHERE incident_id = '
+                . (int)$officeIncident->getId() . ' AND is_active = 1')->fetchColumn() === 0
     );
 
     // ─────────────────────────────────────────────────────────────────────
@@ -810,8 +810,8 @@ try {
     );
 
     $inspectedCount = (int)$pdo->query('
-        SELECT COUNT(*) FROM `audit_log`
-        WHERE `entity_type` = \'REFUND_REQUEST\' AND `action` = \'REFUND_INSPECTED\'
+        SELECT COUNT(*) FROM audit_log
+        WHERE entity_type = \'REFUND_REQUEST\' AND action = \'REFUND_INSPECTED\'
     ')->fetchColumn();
     $assert(
         '7.2 Cada uno de los cinco dictamines emitidos dejó su rastro inmutable',
@@ -820,10 +820,10 @@ try {
     );
 
     $deskHistory = $pdo->prepare('
-        SELECT `action_note`
-        FROM `incident_history`
-        WHERE `incident_id` = :id
-        ORDER BY `id` DESC
+        SELECT action_note
+        FROM incident_history
+        WHERE incident_id = :id
+        ORDER BY id DESC
         LIMIT 1
     ');
     $deskHistory->execute([':id' => (int)$deskIncident->getId()]);
@@ -961,9 +961,9 @@ try {
 
     // Fotografía del expediente cerrado, para comparar tras la reapertura.
     $closedSnapshot = $pdo->prepare('
-        SELECT `status`, `is_active`, `claimed_amount`, `payment_reference`, `paid_at`,
-               `technician_finding`, `recovered_amount`, `updated_at`
-        FROM `refund_requests` WHERE `id` = :id
+        SELECT status, is_active, claimed_amount, payment_reference, paid_at,
+               technician_finding, recovered_amount, updated_at
+        FROM refund_requests WHERE id = :id
     ');
     $closedSnapshot->execute([':id' => $reopenCaseId]);
     $closedRow = $closedSnapshot->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -1143,7 +1143,7 @@ try {
     // se apaga la bandera de la sede semilla y se repite el escenario de 9.4
     // pidiendo conserjería. La transacción reversible la restaura al final.
     $locationId = (int)$location->getId();
-    $pdo->prepare('UPDATE `locations` SET `has_physical_reception` = 0 WHERE `id` = :id')
+    $pdo->prepare('UPDATE locations SET has_physical_reception = 0 WHERE id = :id')
         ->execute([':id' => $locationId]);
 
     $deskMachine = $makeMachine('TREF20L-', MachineType::HOT_DRINKS);
@@ -1178,7 +1178,7 @@ try {
 
     // Con la Reception devuelta, la MISMA regla deja el sobre donde el técnico
     // pidió: lo que decide es la bandera de la sede, no el cableado.
-    $pdo->prepare('UPDATE `locations` SET `has_physical_reception` = 1 WHERE `id` = :id')
+    $pdo->prepare('UPDATE locations SET has_physical_reception = 1 WHERE id = :id')
         ->execute([':id' => $locationId]);
 
     $withDesk = $dispatch('POST', "/api/technician/incidents/{$deskIncident->getId()}/resolve", [
@@ -1240,10 +1240,10 @@ try {
     $assert(
         '11.2 NO queda ni una fila de efectivo no reclamado para esa avería',
         (int)$pdo->query(
-            "SELECT COUNT(*) FROM `unclaimed_cash_findings` WHERE `incident_id` = " . (int)$doubleIncident->getId()
+            "SELECT COUNT(*) FROM unclaimed_cash_findings WHERE incident_id = " . (int)$doubleIncident->getId()
         )->fetchColumn() === 0,
         'filas: ' . $pdo->query(
-            "SELECT COUNT(*) FROM `unclaimed_cash_findings` WHERE `incident_id` = " . (int)$doubleIncident->getId()
+            "SELECT COUNT(*) FROM unclaimed_cash_findings WHERE incident_id = " . (int)$doubleIncident->getId()
         )->fetchColumn()
     );
 
@@ -1300,11 +1300,11 @@ try {
         }
 
         $pdo->prepare('
-            UPDATE `incidents`
-            SET `status` = :status,
-                `assigned_technician_id` = :tech_id,
-                `started_at` = CURRENT_TIMESTAMP
-            WHERE `id` = :id
+            UPDATE incidents
+            SET status = :status,
+                assigned_technician_id = :tech_id,
+                started_at = CURRENT_TIMESTAMP
+            WHERE id = :id
         ')->execute([
             ':status' => IncidentStatus::IN_PROGRESS->value,
             ':tech_id' => $techId,

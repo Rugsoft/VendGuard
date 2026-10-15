@@ -230,10 +230,10 @@ $incidentRepo = new PdoIncidentRepository($pdoSweep);
 $incidentRepoClosure = new PdoIncidentRepository($pdoClosure);
 
 $technicianId = (int)$pdoSweep->query(
-    "SELECT `id` FROM `users` WHERE `role` = 'TECHNICIAN' AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1"
+    "SELECT id FROM users WHERE role = 'TECHNICIAN' AND deleted_at IS NULL ORDER BY id LIMIT 1"
 )->fetchColumn();
 $coordinatorId = (int)$pdoSweep->query(
-    "SELECT `id` FROM `users` WHERE `email` = 'coordinacion@vendguard.internal'"
+    "SELECT id FROM users WHERE email = 'coordinacion@vendguard.internal'"
 )->fetchColumn();
 
 $assert(
@@ -250,29 +250,29 @@ if ($technicianId <= 0 || $coordinatorId <= 0) {
 
 /** @var array<int, string> Estado sanitario de TODO el parque al arrancar la suite. */
 $sanitarySnapshot = [];
-foreach ($pdoSweep->query('SELECT `id`, `sanitary_status` FROM `machines` WHERE `deleted_at` IS NULL') as $row) {
+foreach ($pdoSweep->query('SELECT id, sanitary_status FROM machines WHERE deleted_at IS NULL') as $row) {
     $sanitarySnapshot[(int)$row['id']] = (string)$row['sanitary_status'];
 }
 
 // Máquinas libres bajo vigilancia sanitaria (`MachineType::requiresSanitaryWatch()`), sin
 // expediente vivo: son las únicas que el reloj biológico puede poner en cuarentena.
 $watchPool = $pdoSweep->query(
-    "SELECT m.`id` AS machine_id, m.`location_id`, m.`code`, m.`machine_type`
-       FROM `machines` m
-       JOIN `locations` l ON l.`id` = m.`location_id`
-      WHERE m.`is_active` = 1
-        AND m.`is_blocked_no_access` = 0
-        AND m.`deleted_at` IS NULL
-        AND l.`is_active` = 1
-        AND l.`deleted_at` IS NULL
-        AND m.`machine_type` IN ('PERISHABLE_FOOD', 'COMBO')
+    "SELECT m.id AS machine_id, m.location_id, m.code, m.machine_type
+       FROM machines m
+       JOIN locations l ON l.id = m.location_id
+      WHERE m.is_active = 1
+        AND m.is_blocked_no_access = 0
+        AND m.deleted_at IS NULL
+        AND l.is_active = 1
+        AND l.deleted_at IS NULL
+        AND m.machine_type IN ('PERISHABLE_FOOD', 'COMBO')
         AND NOT EXISTS (
-            SELECT 1 FROM `incidents` i
-             WHERE i.`machine_id` = m.`id`
-               AND i.`deleted_at` IS NULL
-               AND i.`status` NOT IN ('CLOSED', 'CANCELLED')
+            SELECT 1 FROM incidents i
+             WHERE i.machine_id = m.id
+               AND i.deleted_at IS NULL
+               AND i.status NOT IN ('CLOSED', 'CANCELLED')
         )
-      ORDER BY m.`id`"
+      ORDER BY m.id"
 )->fetchAll(PDO::FETCH_ASSOC);
 
 $assert(
@@ -338,14 +338,14 @@ $createExpiredTicket = function (array $machine, int $hours = 5) use (
     // Envejecimiento del expediente propio: instrumento del banco de pruebas, no una vía de
     // producción (el reloj mide desde `created_at`, no desde una columna aparte).
     $pdoSweep->prepare(
-        'UPDATE `incidents` SET `created_at` = NOW() - INTERVAL :hours HOUR WHERE `id` = :id'
+        'UPDATE incidents SET created_at = NOW() - INTERVAL :hours HOUR WHERE id = :id'
     )->execute([':hours' => $hours, ':id' => $incidentId]);
 
     return $incidentRepo->findById($incidentId);
 };
 
 $machineStatus = static function (int $machineId) use ($pdoSweep): string {
-    $stmt = $pdoSweep->prepare('SELECT `sanitary_status` FROM `machines` WHERE `id` = :id');
+    $stmt = $pdoSweep->prepare('SELECT sanitary_status FROM machines WHERE id = :id');
     $stmt->execute([':id' => $machineId]);
 
     return (string)$stmt->fetchColumn();
@@ -356,15 +356,15 @@ $machineStatus = static function (int $machineId) use ($pdoSweep): string {
  * el cursor, como manda el protocolo ratificado (T-PAUSE-13/14/21).
  */
 $auditCursor = static function () use ($pdoSweep): int {
-    return (int)$pdoSweep->query('SELECT COALESCE(MAX(`id`), 0) FROM `audit_log`')->fetchColumn();
+    return (int)$pdoSweep->query('SELECT COALESCE(MAX(id), 0) FROM audit_log')->fetchColumn();
 };
 
 $quarantineEventsSince = static function (int $machineId, int $since) use ($pdoSweep): int {
     $stmt = $pdoSweep->prepare(
-        "SELECT COUNT(*) FROM `audit_log`
-          WHERE `entity_type` = 'MACHINE' AND `entity_id` = :id
-            AND `action` = 'SANITARY_QUARANTINE_AUTO_TRIGGERED'
-            AND `id` > :since"
+        "SELECT COUNT(*) FROM audit_log
+          WHERE entity_type = 'MACHINE' AND entity_id = :id
+            AND action = 'SANITARY_QUARANTINE_AUTO_TRIGGERED'
+            AND id > :since"
     );
     $stmt->execute([':id' => $machineId, ':since' => $since]);
 
@@ -724,7 +724,7 @@ try {
     // Restitución del estado sanitario de TODO el parque: la carrera escribe sobre filas
     // maestras que otras suites esperan intactas.
     if ($sanitarySnapshot !== []) {
-        $restore = $pdoSweep->prepare('UPDATE `machines` SET `sanitary_status` = :status WHERE `id` = :id');
+        $restore = $pdoSweep->prepare('UPDATE machines SET sanitary_status = :status WHERE id = :id');
         foreach ($sanitarySnapshot as $machineId => $status) {
             $restore->execute([':status' => $status, ':id' => $machineId]);
         }

@@ -133,8 +133,8 @@ $assert('0.3 Expediente de prueba creado en estado REGISTERED', $incidentId > 0 
 
 // Sembrado directo en BD: 5 filas con 2 notas internas confidenciales.
 $insert = $pdo->prepare("
-    INSERT INTO `incident_comments`
-        (`incident_id`, `author_type`, `user_id`, `author_name`, `comment_text`, `is_internal`, `created_at`)
+    INSERT INTO incident_comments
+        (incident_id, author_type, user_id, author_name, comment_text, is_internal, created_at)
     VALUES
         (:incident_id, :author_type, :user_id, :author_name, :comment_text, :is_internal, :created_at)
 ");
@@ -303,7 +303,7 @@ $assert('3.4 La autoría de la Sede es corporativa con el nombre de la sede (RF-
 
 $dbPhotoRow = $pdo->prepare("
     SELECT author_type, is_internal, photo_path
-    FROM `incident_comments`
+    FROM incident_comments
     WHERE incident_id = :incident_id
     ORDER BY id DESC
     LIMIT 1
@@ -332,7 +332,7 @@ $resForce = $router->dispatch(new Request(
     ],
     headers: ['Authorization' => 'Bearer ' . $siteToken]
 ));
-$forcedRow = $pdo->query("SELECT is_internal FROM `incident_comments` WHERE incident_id = {$incidentId} ORDER BY id DESC LIMIT 1")->fetchColumn();
+$forcedRow = $pdo->query("SELECT is_internal FROM incident_comments WHERE incident_id = {$incidentId} ORDER BY id DESC LIMIT 1")->fetchColumn();
 
 $assert('4.1 La marca is_internal enviada por la Sede se ignora y se persiste como público',
     $resForce->getStatusCode() === 201 && (int)$forcedRow === 0,
@@ -413,8 +413,8 @@ $assert('6.3 Expediente inexistente => HTTP 404 INCIDENT_NOT_FOUND',
 // =========================================================================
 echo "\n--- Caso 7: Trazabilidad del hilo en base de datos ---\n";
 
-$totalRows = (int)$pdo->query("SELECT COUNT(*) FROM `incident_comments` WHERE incident_id = {$incidentId}")->fetchColumn();
-$internalRows = (int)$pdo->query("SELECT COUNT(*) FROM `incident_comments` WHERE incident_id = {$incidentId} AND is_internal = 1")->fetchColumn();
+$totalRows = (int)$pdo->query("SELECT COUNT(*) FROM incident_comments WHERE incident_id = {$incidentId}")->fetchColumn();
+$internalRows = (int)$pdo->query("SELECT COUNT(*) FROM incident_comments WHERE incident_id = {$incidentId} AND is_internal = 1")->fetchColumn();
 $latestThread = $router->dispatch(new Request(
     method: 'GET',
     path: "/api/location/incidents/{$incidentId}/comments",

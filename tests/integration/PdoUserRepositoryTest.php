@@ -114,7 +114,7 @@ if ($tempUser !== null) {
     $assert("4.3 findByEmail() devuelve null tras soft delete", $deletedUserSearch === null);
 
     // Comprobar persistencia física
-    $stmtRaw = $pdo->prepare("SELECT id, deleted_at FROM `users` WHERE `id` = :id");
+    $stmtRaw = $pdo->prepare("SELECT id, deleted_at FROM users WHERE id = :id");
     $stmtRaw->execute([':id' => $tempUser->getId()]);
     $rawRow = $stmtRaw->fetch();
 
@@ -124,7 +124,7 @@ if ($tempUser !== null) {
     // arnés abierta (T-HYBRID-26): la señal la declara el limpiador en la forma del
     // motor activo, no esta suite.
     TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $tempUser): void {
-        $pdo->prepare("DELETE FROM `users` WHERE `id` = :id")->execute([':id' => $tempUser->getId()]);
+        $pdo->prepare("DELETE FROM users WHERE id = :id")->execute([':id' => $tempUser->getId()]);
     });
 }
 
@@ -149,7 +149,7 @@ $assert("5.2 Todos los usuarios listados tienen rol TECHNICIAN (ningún coordina
 echo "\n--- Caso 6: Creación de usuario con Bcrypt (create) ---\n";
 $newTechEmail = 'alberto.nuevo@vendguard.internal';
 TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $newTechEmail): void {
-    $pdo->prepare("DELETE FROM `users` WHERE `email` = :e")->execute([':e' => $newTechEmail]);
+    $pdo->prepare("DELETE FROM users WHERE email = :e")->execute([':e' => $newTechEmail]);
 });
 
 $createdUser = $userRepo->create([
@@ -220,10 +220,10 @@ $assert("10.1b Inicialmente 0 incidencias activas con alias countPendingIncident
 // Crear máquina temporal dedicada para el test de incidencia asignada
 $tempMachineCode = 'VEND-TMP-USERTEST-10';
 TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $tempMachineCode): void {
-    $pdo->prepare("DELETE FROM `machines` WHERE `code` = :c")->execute([':c' => $tempMachineCode]);
+    $pdo->prepare("DELETE FROM machines WHERE code = :c")->execute([':c' => $tempMachineCode]);
 });
 $pdo->prepare("
-    INSERT INTO `machines` (`location_id`, `code`, `model`, `machine_type`, `floor_wing`, `is_active`)
+    INSERT INTO machines (location_id, code, model, machine_type, floor_wing, is_active)
     VALUES (1, :c, 'Test Temp Model', 'COMBO', 'Planta Test', 1)
 ")->execute([':c' => $tempMachineCode]);
 $tempMachineId = (int)$pdo->lastInsertId();
@@ -233,8 +233,8 @@ $testTicketCode = 'INC-USER-TEST-01';
 TestDataCleaner::purgeIncidentByTicket($pdo, $testTicketCode);
 
 $stmtInc = $pdo->prepare("
-    INSERT INTO `incidents` (
-        `ticket_code`, `machine_id`, `location_id`, `category`, `description`, `urgency`, `status`, `assigned_technician_id`
+    INSERT INTO incidents (
+        ticket_code, machine_id, location_id, category, description, urgency, status, assigned_technician_id
     ) VALUES (
         :tc, :mid, :lid, 'OTHER', 'Test técnico asignado', 'LOW', 'IN_PROGRESS', :tech_id
     )
@@ -256,10 +256,10 @@ $assert("10.2b Detecta 1 incidencia activa asignada (countPendingIncidents)", $u
 // Requiere máquina propia: uq_machine_active_ticket impide dos tickets activos por máquina.
 $resolvedMachineCode = 'VEND-TMP-USERTEST-10B';
 TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $resolvedMachineCode): void {
-    $pdo->prepare("DELETE FROM `machines` WHERE `code` = :c")->execute([':c' => $resolvedMachineCode]);
+    $pdo->prepare("DELETE FROM machines WHERE code = :c")->execute([':c' => $resolvedMachineCode]);
 });
 $pdo->prepare("
-    INSERT INTO `machines` (`location_id`, `code`, `model`, `machine_type`, `floor_wing`, `is_active`)
+    INSERT INTO machines (location_id, code, model, machine_type, floor_wing, is_active)
     VALUES (1, :c, 'Test Temp Model B', 'COMBO', 'Planta Test', 1)
 ")->execute([':c' => $resolvedMachineCode]);
 $resolvedMachineId = (int)$pdo->lastInsertId();
@@ -283,7 +283,7 @@ $stmtResolved->execute([
 $resolvedIncId = (int)$pdo->lastInsertId();
 
 // Sanity: la avería RESOLVED en garantía sigue siendo expediente activo de la máquina.
-$stmtFlag = $pdo->prepare("SELECT `is_active_ticket` FROM `incidents` WHERE `id` = :id");
+$stmtFlag = $pdo->prepare("SELECT is_active_ticket FROM incidents WHERE id = :id");
 $stmtFlag->execute([':id' => $resolvedIncId]);
 $activeFlag = (int)$stmtFlag->fetchColumn();
 $assert("10.3 La avería RESOLVED en garantía sigue siendo expediente activo (is_active_ticket = 1)", $activeFlag === 1);
@@ -304,7 +304,7 @@ $assert("10.5 findAll() reporta carga 1 en el directorio con la avería RESOLVED
 $assert("10.5b findAll() expone warranty_incidents_count = 1 (informativo, solo lectura)", $listedWarrantyCount === 1);
 
 // Cerrar la incidencia
-$pdo->prepare("UPDATE `incidents` SET `status` = 'CLOSED', `closed_at` = CURRENT_TIMESTAMP WHERE `id` = :id")
+$pdo->prepare("UPDATE incidents SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP WHERE id = :id")
     ->execute([':id' => $assignedIncId]);
 $assert("10.6 Detecta 0 incidencias activas tras CLOSED (la RESOLVED tampoco cuenta)", $userRepo->countActiveAssignedIncidents($newUserId) === 0);
 
@@ -322,8 +322,8 @@ $assert("10.6b La garantía informativa persiste tras CLOSED de la otra avería 
 TestDataCleaner::purgeIncident($pdo, (int)$assignedIncId);
 TestDataCleaner::purgeIncident($pdo, (int)$resolvedIncId);
 TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $tempMachineId, $resolvedMachineId): void {
-    $pdo->prepare("DELETE FROM `machines` WHERE `id` = :id")->execute([':id' => $tempMachineId]);
-    $pdo->prepare("DELETE FROM `machines` WHERE `id` = :id")->execute([':id' => $resolvedMachineId]);
+    $pdo->prepare("DELETE FROM machines WHERE id = :id")->execute([':id' => $tempMachineId]);
+    $pdo->prepare("DELETE FROM machines WHERE id = :id")->execute([':id' => $resolvedMachineId]);
 });
 
 // =====================================================================
@@ -376,7 +376,7 @@ $assert("12.6 Búsqueda por término encuentra al usuario creado", count($search
 
 // Limpieza final del usuario de prueba
 TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $newUserId): void {
-    $pdo->prepare("DELETE FROM `users` WHERE `id` = :id")->execute([':id' => $newUserId]);
+    $pdo->prepare("DELETE FROM users WHERE id = :id")->execute([':id' => $newUserId]);
 });
 
 // =====================================================================

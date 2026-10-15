@@ -118,7 +118,7 @@ $authService  = new AuthService($locationRepo, $userRepo);
 
 $coordinator = $userRepo->findByEmail('coordinacion@vendguard.internal');
 $technicianRow = $pdoA->query(
-    "SELECT `id` FROM `users` WHERE `role` = 'TECHNICIAN' AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1"
+    "SELECT id FROM users WHERE role = 'TECHNICIAN' AND deleted_at IS NULL ORDER BY id LIMIT 1"
 )->fetchColumn();
 $technician = $technicianRow !== false ? $userRepo->findById((int)$technicianRow) : null;
 
@@ -139,16 +139,16 @@ $technicianToken   = $authService->generateInternalToken($technician);
 $technicianHeaders = ['Authorization' => 'Bearer ' . $technicianToken];
 
 $machinePool = $pdoA->query(
-    "SELECT m.`id` AS machine_id, m.`location_id` AS location_id
-       FROM `machines` m
-      WHERE m.`is_active` = 1
+    "SELECT m.id AS machine_id, m.location_id AS location_id
+       FROM machines m
+      WHERE m.is_active = 1
         AND NOT EXISTS (
-            SELECT 1 FROM `incidents` i
-             WHERE i.`machine_id` = m.`id`
-               AND i.`deleted_at` IS NULL
-               AND i.`status` NOT IN ('CLOSED', 'CANCELLED')
+            SELECT 1 FROM incidents i
+             WHERE i.machine_id = m.id
+               AND i.deleted_at IS NULL
+               AND i.status NOT IN ('CLOSED', 'CANCELLED')
         )
-      ORDER BY m.`id`"
+      ORDER BY m.id"
 )->fetchAll(PDO::FETCH_ASSOC);
 
 $assert(
@@ -216,7 +216,7 @@ $pauseThroughRoute = static function (int $incidentId) use ($router, $technician
 
 /** Fila cruda del expediente, leída por la conexión canónica. */
 $incidentRow = static function (int $incidentId) use ($pdoA): array {
-    $stmt = $pdoA->prepare('SELECT * FROM `incidents` WHERE `id` = :id');
+    $stmt = $pdoA->prepare('SELECT * FROM incidents WHERE id = :id');
     $stmt->execute([':id' => $incidentId]);
 
     return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -225,10 +225,10 @@ $incidentRow = static function (int $incidentId) use ($pdoA): array {
 /** Rastro inmutable posterior a un cursor: sólo lo que la operación bajo prueba escribió. */
 $resumeTraceCount = static function (int $incidentId, int $cursor) use ($pdoA): int {
     $stmt = $pdoA->prepare(
-        "SELECT COUNT(*) FROM `incident_history`
-          WHERE `incident_id` = :id
-            AND `id` > :cursor
-            AND `from_status` = 'PENDING_INFO'"
+        "SELECT COUNT(*) FROM incident_history
+          WHERE incident_id = :id
+            AND id > :cursor
+            AND from_status = 'PENDING_INFO'"
     );
     $stmt->execute([':id' => $incidentId, ':cursor' => $cursor]);
 
@@ -236,7 +236,7 @@ $resumeTraceCount = static function (int $incidentId, int $cursor) use ($pdoA): 
 };
 
 $historyCursor = static function (int $incidentId) use ($pdoA): int {
-    $stmt = $pdoA->prepare('SELECT COALESCE(MAX(`id`), 0) FROM `incident_history` WHERE `incident_id` = :id');
+    $stmt = $pdoA->prepare('SELECT COALESCE(MAX(id), 0) FROM incident_history WHERE incident_id = :id');
     $stmt->execute([':id' => $incidentId]);
 
     return (int)$stmt->fetchColumn();
@@ -289,11 +289,11 @@ $assert(
 // La espera se siembra con una duración conocida (3 minutos) para que el desplazamiento
 // contractual posterior sea verificable al segundo y no dependa de lo que tarde la suite.
 $pdoA->exec(sprintf(
-    "UPDATE `incidents`
-        SET `paused_at` = NOW() - INTERVAL 180 SECOND,
-            `total_pending_info_seconds` = 0,
-            `sla_target_at` = '2026-10-13 15:00:00'
-      WHERE `id` IN (%d, %d)",
+    "UPDATE incidents
+        SET paused_at = NOW() - INTERVAL 180 SECOND,
+            total_pending_info_seconds = 0,
+            sla_target_at = '2026-10-13 15:00:00'
+      WHERE id IN (%d, %d)",
     $manualIncidentId,
     $commentIncidentId
 ));
@@ -312,7 +312,7 @@ $manualCursor = $historyCursor($manualIncidentId);
 // La conexión A se convierte en la operación "en vuelo": toma el bloqueo exclusivo por
 // fila del expediente y lo mantiene dentro de su transacción.
 $pdoA->beginTransaction();
-$lockStmt = $pdoA->prepare('SELECT `id` FROM `incidents` WHERE `id` = :id FOR UPDATE');
+$lockStmt = $pdoA->prepare('SELECT id FROM incidents WHERE id = :id FOR UPDATE');
 $lockStmt->execute([':id' => $manualIncidentId]);
 
 $loserException = $captureThrowable(static fn () => $serviceB->resumePendingInfoManually(
@@ -440,7 +440,7 @@ echo "\n--- Grupo 2: Reanudación del técnico contra la reanudación del coordi
 $commentCursor = $historyCursor($commentIncidentId);
 
 $pdoA->beginTransaction();
-$lockStmt = $pdoA->prepare('SELECT `id` FROM `incidents` WHERE `id` = :id FOR UPDATE');
+$lockStmt = $pdoA->prepare('SELECT id FROM incidents WHERE id = :id FOR UPDATE');
 $lockStmt->execute([':id' => $commentIncidentId]);
 
 // La petición perdedora es ahora la de coordinación, que reanudaría con destino
@@ -515,13 +515,13 @@ $assert(
 echo "\n--- Grupo 3: El bloqueo es de una fila, no del parque; y exige transacción ---\n";
 
 $pdoA->beginTransaction();
-$lockStmt = $pdoA->prepare('SELECT `id` FROM `incidents` WHERE `id` = :id FOR UPDATE');
+$lockStmt = $pdoA->prepare('SELECT id FROM incidents WHERE id = :id FOR UPDATE');
 $lockStmt->execute([':id' => $commentIncidentId]);
 
 $bystanderException = $captureThrowable(static function () use ($pdoB, $bystanderIncidentId): void {
     $pdoB->beginTransaction();
     try {
-        $lock = $pdoB->prepare('SELECT `id` FROM `incidents` WHERE `id` = :id FOR UPDATE');
+        $lock = $pdoB->prepare('SELECT id FROM incidents WHERE id = :id FOR UPDATE');
         $lock->execute([':id' => $bystanderIncidentId]);
         $pdoB->commit();
     } catch (Throwable $exception) {
@@ -587,7 +587,7 @@ $assert(
 $dirtyCursor = $historyCursor($dirtyReadIncidentId);
 
 $pdoA->beginTransaction();
-$lockStmt = $pdoA->prepare('SELECT `id` FROM `incidents` WHERE `id` = :id FOR UPDATE');
+$lockStmt = $pdoA->prepare('SELECT id FROM incidents WHERE id = :id FOR UPDATE');
 $lockStmt->execute([':id' => $dirtyReadIncidentId]);
 
 // La ganadora completa su transición SIN confirmar: su estado ya es IN_PROGRESS dentro de

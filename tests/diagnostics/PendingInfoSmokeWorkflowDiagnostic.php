@@ -132,7 +132,7 @@ $api = static fn (string $method, string $path, array $body = [], ?string $token
 // selección nunca tropieza con un expediente ajeno ni corre el riesgo de borrar uno suyo
 // mientras está en juego. Solo se retiran las averías VIVAS; el historial resuelto y las
 // muestras de métricas se conservan intactos.
-foreach ($pdo->query("SELECT `id` FROM `incidents` WHERE `deleted_at` IS NULL AND `status` NOT IN ('CLOSED', 'CANCELLED')")->fetchAll(PDO::FETCH_COLUMN) as $liveId) {
+foreach ($pdo->query("SELECT id FROM incidents WHERE deleted_at IS NULL AND status NOT IN ('CLOSED', 'CANCELLED')")->fetchAll(PDO::FETCH_COLUMN) as $liveId) {
     TestDataCleaner::purgeIncident($pdo, (int)$liveId);
 }
 
@@ -148,14 +148,14 @@ foreach ($pdo->query("SELECT `id` FROM `incidents` WHERE `deleted_at` IS NULL AN
 // marcas. `deleted_at IS NULL` distingue esta avería operativa de la baja administrativa
 // deliberada, que sí sella `deleted_at` y no se toca.
 $pdo->exec(
-    "UPDATE `machines` m SET m.`is_blocked_no_access` = 0, m.`is_active` = 1
-      WHERE m.`is_blocked_no_access` = 1
-        AND m.`deleted_at` IS NULL
+    "UPDATE machines m SET m.is_blocked_no_access = 0, m.is_active = 1
+      WHERE m.is_blocked_no_access = 1
+        AND m.deleted_at IS NULL
         AND NOT EXISTS (
-            SELECT 1 FROM `incidents` i
-             WHERE i.`machine_id` = m.`id`
-               AND i.`deleted_at` IS NULL
-               AND i.`status` NOT IN ('CLOSED', 'CANCELLED')
+            SELECT 1 FROM incidents i
+             WHERE i.machine_id = m.id
+               AND i.deleted_at IS NULL
+               AND i.status NOT IN ('CLOSED', 'CANCELLED')
         )"
 );
 
@@ -172,26 +172,26 @@ $pdo->exec(
  * la primera con hueco: el parque sembrado no siempre expone todas.
  */
 $freeMachine = function (string $machineType, bool $needsPortal) use ($pdo): array {
-    $portalClause = $needsPortal ? "AND l.`access_code_hash` IS NOT NULL" : '';
+    $portalClause = $needsPortal ? "AND l.access_code_hash IS NOT NULL" : '';
     $types = $machineType === 'AUTO'
         ? ['HOT_DRINKS', 'COLD_DRINKS', 'SNACKS', 'PERISHABLE_FOOD', 'COMBO']
         : [$machineType];
 
     foreach ($types as $candidateType) {
         $machine = $pdo->query(sprintf(
-            "SELECT m.`id` AS machine_id, m.`location_id` AS location_id, l.`site_code` AS site_code
-               FROM `machines` m
-               INNER JOIN `locations` l ON l.`id` = m.`location_id`
-              WHERE m.`is_active` = 1
-                AND m.`machine_type` = '%s'
+            "SELECT m.id AS machine_id, m.location_id AS location_id, l.site_code AS site_code
+               FROM machines m
+               INNER JOIN locations l ON l.id = m.location_id
+              WHERE m.is_active = 1
+                AND m.machine_type = '%s'
                 %s
                 AND NOT EXISTS (
-                    SELECT 1 FROM `incidents` i
-                     WHERE i.`machine_id` = m.`id`
-                       AND i.`deleted_at` IS NULL
-                       AND i.`status` NOT IN ('CLOSED', 'CANCELLED')
+                    SELECT 1 FROM incidents i
+                     WHERE i.machine_id = m.id
+                       AND i.deleted_at IS NULL
+                       AND i.status NOT IN ('CLOSED', 'CANCELLED')
                 )
-              ORDER BY m.`id` ASC LIMIT 1",
+              ORDER BY m.id ASC LIMIT 1",
             $candidateType,
             $portalClause
         ))->fetch(PDO::FETCH_ASSOC);
@@ -249,14 +249,14 @@ $siteToken = function (string $siteCode) use ($api): ?string {
 };
 
 $row = function (int $incidentId) use ($pdo): array {
-    $stmt = $pdo->prepare('SELECT * FROM `incidents` WHERE `id` = :id');
+    $stmt = $pdo->prepare('SELECT * FROM incidents WHERE id = :id');
     $stmt->execute([':id' => $incidentId]);
 
     return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 };
 
 $history = function (int $incidentId) use ($pdo): array {
-    $stmt = $pdo->prepare('SELECT * FROM `incident_history` WHERE `incident_id` = :id ORDER BY `id` ASC');
+    $stmt = $pdo->prepare('SELECT * FROM incident_history WHERE incident_id = :id ORDER BY id ASC');
     $stmt->execute([':id' => $incidentId]);
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -463,7 +463,7 @@ $pauseTicket($orphan['id'], 'PENDING_SITE_AUTHORIZATION', $reason, $techToken);
 // Intervalo real de cinco minutos: una pausa de milisegundos no permite comprobar que el
 // acumulador recibe el intervalo cerrado.
 $pdo->exec('UPDATE `incidents` SET `paused_at` = DATE_SUB(NOW(), INTERVAL 300 SECOND) WHERE `id` = ' . $orphan['id']);
-$pdo->exec('UPDATE `incidents` SET `assigned_technician_id` = NULL WHERE `id` = ' . $orphan['id']);
+$pdo->exec('UPDATE incidents SET assigned_technician_id = NULL WHERE id = ' . $orphan['id']);
 $res = $orphanSite !== null ? $siteComment($orphan['ticket'], 'Aportamos la autorización firmada para entrar a la sala técnica.', $orphanSite) : null;
 $assert(
     'B.2.0 Premisa enmendada (E-1): la autorización de la sede llega, pero la pausa sigue abierta y sin responsable',
@@ -823,7 +823,7 @@ $cancelled = $api('POST', "/api/coordinator/incidents/{$flowId}/cancel-inactivit
     'cancellation_reason' => 'Cierre administrativo por inactividad y falta de acceso del cliente tras 72 h hábiles sin respuesta.',
 ], $coordinatorToken);
 $flowRow = $row($flowId);
-$machineRow = $pdo->query("SELECT `is_blocked_no_access` FROM `machines` WHERE `id` = {$flow['machine_id']}")->fetch(PDO::FETCH_ASSOC);
+$machineRow = $pdo->query("SELECT is_blocked_no_access FROM machines WHERE id = {$flow['machine_id']}")->fetch(PDO::FETCH_ASSOC);
 $assert('C.14 RF-04.3: la cancelación por inactividad se ejecuta (200 CANCELADA)', $cancelled->getStatusCode() === 200 && ($flowRow['status'] ?? '') === 'CANCELLED', "status={$cancelled->getStatusCode()} estado=" . ($flowRow['status'] ?? 'n/a'));
 $assert(
     'C.15 RF-04.4: la máquina NO vuelve a Operativa: queda fuera de servicio por falta de acceso',
@@ -869,7 +869,7 @@ $withConfirmation = $api('POST', '/api/incidents', [
     'access_confirmed' => true,
 ], $flowSite);
 $newTicket = $withConfirmation->getDecodedBody()['data']['ticket_code'] ?? null;
-$machineAfter = $pdo->query("SELECT `is_blocked_no_access` FROM `machines` WHERE `id` = {$flow['machine_id']}")->fetch(PDO::FETCH_ASSOC);
+$machineAfter = $pdo->query("SELECT is_blocked_no_access FROM machines WHERE id = {$flow['machine_id']}")->fetch(PDO::FETCH_ASSOC);
 $assert(
     'C.18 RF-04.6: con la confirmación marcada el aviso se registra (201) y la máquina vuelve al servicio',
     $withConfirmation->getStatusCode() === 201 && (int)($machineAfter['is_blocked_no_access'] ?? 1) === 0,
@@ -885,7 +885,7 @@ $assert(
 );
 
 if ($newTicket !== null) {
-    $qrMachineCode = (string)$pdo->query("SELECT `code` FROM `machines` WHERE `id` = {$flow['machine_id']}")->fetchColumn();
+    $qrMachineCode = (string)$pdo->query("SELECT code FROM machines WHERE id = {$flow['machine_id']}")->fetchColumn();
     $public = $api('GET', '/api/qr/scan/' . $qrMachineCode);
     $publicRaw = json_encode($public->getDecodedBody(), JSON_UNESCAPED_UNICODE) ?: '';
     $assert(
@@ -972,9 +972,9 @@ $cleanProbe();
 $foreign = $createTicket($techId, 'AUTO', true);
 $pauseTicket($foreign['id'], 'BUILDING_CLOSED_NO_ACCESS', $reason, $techToken);
 $foreignSiteCodes = $pdo->query(
-    "SELECT `site_code` FROM `locations`
-      WHERE `site_code` LIKE 'SEDE-BCN-%' AND `access_code_hash` IS NOT NULL AND `site_code` <> '" . $foreign['site_code'] . "'
-      ORDER BY `site_code` LIMIT 1"
+    "SELECT site_code FROM locations
+      WHERE site_code LIKE 'SEDE-BCN-%' AND access_code_hash IS NOT NULL AND site_code <> '" . $foreign['site_code'] . "'
+      ORDER BY site_code LIMIT 1"
 )->fetchColumn();
 $foreignToken = $foreignSiteCodes !== false ? $siteToken((string)$foreignSiteCodes) : null;
 $foreignAttempt = $foreignToken !== null
@@ -1000,14 +1000,14 @@ $weekend = $createTicket($techId);
 $zone = new DateTimeZone('Europe/Madrid');
 $fridayDeadline = (new DateTimeImmutable('now', $zone))->modify('next friday')->setTime(17, 0, 0);
 $pdo->exec(
-    "UPDATE `incidents` SET `sla_target_at` = '" . $fridayDeadline->format('Y-m-d H:i:s') . "' WHERE `id` = " . $weekend['id']
+    "UPDATE incidents SET sla_target_at = '" . $fridayDeadline->format('Y-m-d H:i:s') . "' WHERE id = " . $weekend['id']
 );
 
 $declared = $pauseTicket($weekend['id'], 'BUILDING_CLOSED_NO_ACCESS', $reason, $techToken);
 $declaredData = $declared->getDecodedBody()['data'] ?? [];
 $pauseSecondsSeeded = 62 * 3600; // De viernes 18:00 a lunes 08:00: dos días y medio de espera real.
 $pdo->exec("UPDATE `incidents` SET `paused_at` = DATE_SUB(NOW(), INTERVAL 62 HOUR) WHERE `id` = " . $weekend['id']);
-$f3PausedAt = (string)$pdo->query("SELECT `paused_at` FROM `incidents` WHERE `id` = " . $weekend['id'])->fetchColumn();
+$f3PausedAt = (string)$pdo->query("SELECT paused_at FROM incidents WHERE id = " . $weekend['id'])->fetchColumn();
 // Orillas del reloj real: el servicio lee su instante entre ambas (cierre de F-3).
 $f3Before = new DateTimeImmutable('now', $zone);
 $resumedWeekend = $resumeTicket($weekend['id'], $techToken);
@@ -1117,7 +1117,7 @@ $thresholdProbe = function (int $businessHours) use ($createTicket, $techId, $pa
     $ticket = $createTicket($techId);
     $pauseTicket($ticket['id'], 'BUILDING_CLOSED_NO_ACCESS', $reason, $techToken);
     $pausedAt = $businessSecondsAgo($businessHours * 3600);
-    $pdo->exec("UPDATE `incidents` SET `paused_at` = '{$pausedAt}' WHERE `id` = " . $ticket['id']);
+    $pdo->exec("UPDATE incidents SET paused_at = '{$pausedAt}' WHERE id = " . $ticket['id']);
 
     $triage = $api('GET', '/api/coordinator/incidents', [], $coordinatorToken);
     $flagged = false;
@@ -1184,12 +1184,12 @@ $windowProbe = function (int $hoursAgo) use ($createTicket, $techId, $incidentRe
         'Diagnóstico del banco de pruebas de la frontera de garantía del hilo de conversación.',
         'Acción correctiva del banco de pruebas con la longitud mínima exigida por el pliego.'
     );
-    $pdo->exec("UPDATE `incidents` SET `resolved_at` = DATE_SUB(NOW(), INTERVAL {$hoursAgo} HOUR) WHERE `id` = " . $ticket['id']);
+    $pdo->exec("UPDATE `incidents` SET `resolved_at` = DATE_SUB(NOW(), INTERVAL {$hoursAgo} HOUR) WHERE id = " . $ticket['id']);
 
     $token = $siteToken($ticket['site_code']);
     $comment = $siteComment($ticket['ticket'], 'Aportamos una nota de seguimiento sobre el cierre técnico reciente.', $token);
 
-    return ['status' => $comment?->getStatusCode(), 'code' => $comment?->getDecodedBody()['error']['code'] ?? null, 'state' => $pdo->query("SELECT `status` FROM `incidents` WHERE `id` = {$ticket['id']}")->fetchColumn()];
+    return ['status' => $comment?->getStatusCode(), 'code' => $comment?->getDecodedBody()['error']['code'] ?? null, 'state' => $pdo->query("SELECT status FROM incidents WHERE id = {$ticket['id']}")->fetchColumn()];
 };
 
 $inside = $windowProbe(47);
@@ -1238,14 +1238,14 @@ TestDataCleaner::purge($pdo);
 // en rojo por un banco mutilado y no por el código. La baja administrativa deliberada
 // (`deleted_at` sellado) queda fuera del restablecimiento a propósito.
 $pdo->exec(
-    "UPDATE `machines` m SET m.`is_blocked_no_access` = 0, m.`is_active` = 1
-      WHERE m.`is_blocked_no_access` = 1
-        AND m.`deleted_at` IS NULL
+    "UPDATE machines m SET m.is_blocked_no_access = 0, m.is_active = 1
+      WHERE m.is_blocked_no_access = 1
+        AND m.deleted_at IS NULL
         AND NOT EXISTS (
-            SELECT 1 FROM `incidents` i
-             WHERE i.`machine_id` = m.`id`
-               AND i.`deleted_at` IS NULL
-               AND i.`status` NOT IN ('CLOSED', 'CANCELLED')
+            SELECT 1 FROM incidents i
+             WHERE i.machine_id = m.id
+               AND i.deleted_at IS NULL
+               AND i.status NOT IN ('CLOSED', 'CANCELLED')
         )"
 );
 

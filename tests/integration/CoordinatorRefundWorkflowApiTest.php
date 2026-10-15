@@ -76,7 +76,7 @@ $assert = static function (string $label, bool $condition, string $detail = '') 
     }
 };
 
-$requestsBefore = (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests`')->fetchColumn();
+$requestsBefore = (int)$pdo->query('SELECT COUNT(*) FROM refund_requests')->fetchColumn();
 
 $pdo->beginTransaction();
 
@@ -99,8 +99,8 @@ try {
         'notes' => 'Máquina creada dentro de la transacción reversible de T-REF-22.',
     ])?->getId() ?? 0);
 
-    $coordinatorId = (int)$pdo->query("SELECT `id` FROM `users` WHERE `role` = 'COORDINATOR' ORDER BY `id` LIMIT 1")->fetchColumn();
-    $technicianId = (int)$pdo->query("SELECT `id` FROM `users` WHERE `role` = 'TECHNICIAN' ORDER BY `id` LIMIT 1")->fetchColumn();
+    $coordinatorId = (int)$pdo->query("SELECT id FROM users WHERE role = 'COORDINATOR' ORDER BY id LIMIT 1")->fetchColumn();
+    $technicianId = (int)$pdo->query("SELECT id FROM users WHERE role = 'TECHNICIAN' ORDER BY id LIMIT 1")->fetchColumn();
 
     // La incidencia se crea DENTRO de la transacción: `seedAll()` no siembra
     // incidencias y las suites anteriores pueden haber purgado las que había.
@@ -272,7 +272,7 @@ $bizumContact = $lastClaimantContact;
     ));
     $onlyApprovalBody = $decode($onlyApproval);
     $expectedApprovals = (int)$pdo->query(
-        "SELECT COUNT(*) FROM `refund_requests` WHERE `status` = 'REQUIRES_COORDINATOR_APPROVAL' AND `is_active` = 1"
+        "SELECT COUNT(*) FROM refund_requests WHERE status = 'REQUIRES_COORDINATOR_APPROVAL' AND is_active = 1"
     )->fetchColumn();
 
     $assert(
@@ -338,8 +338,8 @@ $bizumContact = $lastClaimantContact;
     );
     $assert(
         '3.6 BD: la decisión queda firmada por el coordinador autenticado',
-        (int)$pdo->query("SELECT `coordinator_id` FROM `refund_requests` WHERE `id` = {$transferCaseId}")->fetchColumn() === $coordinatorId,
-        'coordinator_id: ' . var_export($pdo->query("SELECT `coordinator_id` FROM `refund_requests` WHERE `id` = {$transferCaseId}")->fetchColumn(), true)
+        (int)$pdo->query("SELECT coordinator_id FROM refund_requests WHERE id = {$transferCaseId}")->fetchColumn() === $coordinatorId,
+        'coordinator_id: ' . var_export($pdo->query("SELECT coordinator_id FROM refund_requests WHERE id = {$transferCaseId}")->fetchColumn(), true)
     );
 
     $payRes = $controller->pay($request(
@@ -352,7 +352,7 @@ $bizumContact = $lastClaimantContact;
     ));
     $payBody = $decode($payRes);
     $payRow = $repo->findById($transferCaseId);
-    $paidAtDb = $pdo->query("SELECT `paid_at` FROM `refund_requests` WHERE `id` = {$transferCaseId}")->fetchColumn();
+    $paidAtDb = $pdo->query("SELECT paid_at FROM refund_requests WHERE id = {$transferCaseId}")->fetchColumn();
 
     $assert('3.7 La liquidación responde HTTP 200', $payRes->getStatusCode() === 200, (string)$payRes->getBody());
     $assert('3.8 BD: status pasa a PAID_DIGITAL', ($payRow?->getStatus()->value ?? '') === 'PAID_DIGITAL');
@@ -370,8 +370,8 @@ $bizumContact = $lastClaimantContact;
     $assert(
         '3.12 BD: audit_log deja el rastro del ciclo (RNF-REF-01)',
         (int)$pdo->query(
-            "SELECT COUNT(*) FROM `audit_log` WHERE `entity_type` = 'REFUND_REQUEST' AND `entity_id` = {$transferCaseId}
-             AND `action` IN ('REFUND_CASE_CREATED', 'REFUND_APPROVED', 'REFUND_PAID_DIGITAL')"
+            "SELECT COUNT(*) FROM audit_log WHERE entity_type = 'REFUND_REQUEST' AND entity_id = {$transferCaseId}
+             AND action IN ('REFUND_CASE_CREATED', 'REFUND_APPROVED', 'REFUND_PAID_DIGITAL')"
         )->fetchColumn() === 3
     );
     // `fetchAll()` devuelve un array: hay que unirlo, porque un `(string)` sobre
@@ -379,8 +379,8 @@ $bizumContact = $lastClaimantContact;
     // nada. El rastro se lee de las tres columnas de estado, no sólo de
     // `metadata`: el apunte de un pago no guarda ahí ningún detalle.
     $auditRows = $pdo->query(
-        "SELECT COALESCE(`metadata`, ''), COALESCE(`previous_state`, ''), COALESCE(`new_state`, '')
-         FROM `audit_log` WHERE `entity_type` = 'REFUND_REQUEST' AND `entity_id` = {$transferCaseId}"
+        "SELECT COALESCE(metadata, ''), COALESCE(previous_state, ''), COALESCE(new_state, '')
+         FROM audit_log WHERE entity_type = 'REFUND_REQUEST' AND entity_id = {$transferCaseId}"
     )->fetchAll(PDO::FETCH_NUM);
     $auditBlob = implode("\n", array_map(
         static fn (array $row): string => implode(' | ', array_map(strval(...), $row)),
@@ -422,15 +422,15 @@ $bizumContact = $lastClaimantContact;
     $assert('4.3 BD: coordinator_decision = REJECTED', ($rejectRow?->getCoordinatorDecision()?->value ?? '') === 'REJECTED');
     $assert(
         '4.4 BD: el motivo supera los 20 caracteres (RF-REF-08)',
-        mb_strlen((string)$pdo->query("SELECT `coordinator_justification` FROM `refund_requests` WHERE `id` = {$bizumCaseId}")->fetchColumn()) >= 20
+        mb_strlen((string)$pdo->query("SELECT coordinator_justification FROM refund_requests WHERE id = {$bizumCaseId}")->fetchColumn()) >= 20
     );
     $assert(
         '4.5 BD: la fila se conserva íntegra con su importe (Art. III, cero borrado físico)',
-        $rejectRow !== null && $rejectRow->isActive() && (float)$pdo->query("SELECT `claimed_amount` FROM `refund_requests` WHERE `id` = {$bizumCaseId}")->fetchColumn() === 30.00
+        $rejectRow !== null && $rejectRow->isActive() && (float)$pdo->query("SELECT claimed_amount FROM refund_requests WHERE id = {$bizumCaseId}")->fetchColumn() === 30.00
     );
     $assert(
         '4.6 BD: el rechazo queda auditado',
-        (int)$pdo->query("SELECT COUNT(*) FROM `audit_log` WHERE `entity_type` = 'REFUND_REQUEST' AND `entity_id` = {$bizumCaseId} AND `action` = 'REFUND_REJECTED'")->fetchColumn() === 1
+        (int)$pdo->query("SELECT COUNT(*) FROM audit_log WHERE entity_type = 'REFUND_REQUEST' AND entity_id = {$bizumCaseId} AND action = 'REFUND_REJECTED'")->fetchColumn() === 1
     );
 
     $shortRes = $controller->reject($request(
@@ -514,14 +514,14 @@ $bizumContact = $lastClaimantContact;
 
     $assert(
         '5.7 BD: ninguno de los intentos fallidos ha movido dinero',
-        (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$bizumCaseId}")->fetchColumn() === 'REJECTED'
-        && (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$freshCaseId}")->fetchColumn() === 'PENDING_INSPECTION'
+        (string)$pdo->query("SELECT status FROM refund_requests WHERE id = {$bizumCaseId}")->fetchColumn() === 'REJECTED'
+        && (string)$pdo->query("SELECT status FROM refund_requests WHERE id = {$freshCaseId}")->fetchColumn() === 'PENDING_INSPECTION'
     );
 
     // ─────────────────────────────────────────────────────────────────────
     echo "\n--- 6. Inviolabilidad del histórico (Art. III) ---\n";
 
-    $requestsAfter = (int)$pdo->query('SELECT COUNT(*) FROM `refund_requests`')->fetchColumn();
+    $requestsAfter = (int)$pdo->query('SELECT COUNT(*) FROM refund_requests')->fetchColumn();
     $assert(
         '6.1 Sólo hay filas nuevas: ninguna operación ha borrado nada',
         $requestsAfter === $requestsBefore + 3,
@@ -529,7 +529,7 @@ $bizumContact = $lastClaimantContact;
     );
     $assert(
         '6.2 Los expedientes desestimados siguen consultables para auditoría',
-        (int)$pdo->query("SELECT COUNT(*) FROM `refund_requests` WHERE `status` = 'REJECTED' AND `coordinator_justification` IS NOT NULL")->fetchColumn() >= 1
+        (int)$pdo->query("SELECT COUNT(*) FROM refund_requests WHERE status = 'REJECTED' AND coordinator_justification IS NOT NULL")->fetchColumn() >= 1
     );
 
     // ─────────────────────────────────────────────────────────────────────
@@ -661,9 +661,9 @@ $bizumContact = $lastClaimantContact;
 
     $assert(
         '8.3 El rechazo del exceso deja el expediente sin tocar',
-        (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$cappedCaseId}")->fetchColumn() === 'VERIFIED_PENDING_PAYMENT'
-        && $pdo->query("SELECT `paid_amount` FROM `refund_requests` WHERE `id` = {$cappedCaseId}")->fetchColumn() === null,
-        'estado: ' . (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$cappedCaseId}")->fetchColumn()
+        (string)$pdo->query("SELECT status FROM refund_requests WHERE id = {$cappedCaseId}")->fetchColumn() === 'VERIFIED_PENDING_PAYMENT'
+        && $pdo->query("SELECT paid_amount FROM refund_requests WHERE id = {$cappedCaseId}")->fetchColumn() === null,
+        'estado: ' . (string)$pdo->query("SELECT status FROM refund_requests WHERE id = {$cappedCaseId}")->fetchColumn()
     );
 
     // Without an approval behind it the ceiling is the 50,00 block. The audit
@@ -714,7 +714,7 @@ $bizumContact = $lastClaimantContact;
         'COORDINATOR'
     ));
     $stored = $pdo->query(
-        "SELECT `paid_amount`, `payment_reference`, `status` FROM `refund_requests` WHERE `id` = {$paidCaseId}"
+        "SELECT paid_amount, payment_reference, status FROM refund_requests WHERE id = {$paidCaseId}"
     )->fetch(PDO::FETCH_ASSOC);
 
     $assert(
@@ -761,15 +761,15 @@ $bizumContact = $lastClaimantContact;
         $coordinatorId,
         'COORDINATOR'
     ));
-    $wideStored = $pdo->query("SELECT `paid_amount` FROM `refund_requests` WHERE `id` = {$wideCaseId}")->fetchColumn();
+    $wideStored = $pdo->query("SELECT paid_amount FROM refund_requests WHERE id = {$wideCaseId}")->fetchColumn();
 
     $assert(
         '8.8 Un importe en el rango ampliado se guarda INTEGRO, sin saturar a 9999,99',
         (float)$wideStored === 20.00
         && (string)$pdo->query(
-            "SELECT `column_type` FROM `information_schema`.`columns`
-             WHERE `table_schema` = DATABASE() AND `table_name` = 'refund_requests'
-               AND `column_name` = 'paid_amount'"
+            "SELECT column_type FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'refund_requests'
+               AND column_name = 'paid_amount'"
         )->fetchColumn() === 'decimal(10,2)',
         'guardado: ' . var_export($wideStored, true)
     );
@@ -811,9 +811,9 @@ $bizumContact = $lastClaimantContact;
 
     $assert(
         '8.9b El rechazo de la liquidación parcial deja el expediente SIN liquidar',
-        (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$partialCaseId}")->fetchColumn() === 'VERIFIED_PENDING_PAYMENT'
-        && $pdo->query("SELECT `paid_amount` FROM `refund_requests` WHERE `id` = {$partialCaseId}")->fetchColumn() === null,
-        'estado: ' . (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$partialCaseId}")->fetchColumn()
+        (string)$pdo->query("SELECT status FROM refund_requests WHERE id = {$partialCaseId}")->fetchColumn() === 'VERIFIED_PENDING_PAYMENT'
+        && $pdo->query("SELECT paid_amount FROM refund_requests WHERE id = {$partialCaseId}")->fetchColumn() === null,
+        'estado: ' . (string)$pdo->query("SELECT status FROM refund_requests WHERE id = {$partialCaseId}")->fetchColumn()
     );
 
     $assert(
@@ -852,8 +852,8 @@ $bizumContact = $lastClaimantContact;
     $assert(
         '8.10 Liquidar exactamente lo aprobado sí funciona y persiste el importe',
         $exact->getStatusCode() === 200
-        && (float)$pdo->query("SELECT `paid_amount` FROM `refund_requests` WHERE `id` = {$partialCaseId}")->fetchColumn() === 4.00
-        && (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$partialCaseId}")->fetchColumn() === 'PAID_DIGITAL',
+        && (float)$pdo->query("SELECT paid_amount FROM refund_requests WHERE id = {$partialCaseId}")->fetchColumn() === 4.00
+        && (string)$pdo->query("SELECT status FROM refund_requests WHERE id = {$partialCaseId}")->fetchColumn() === 'PAID_DIGITAL',
         'HTTP ' . $exact->getStatusCode() . ' ' . (string)$exact->getBody()
     );
 
@@ -929,9 +929,9 @@ $bizumContact = $lastClaimantContact;
         // Y lo importante: el rechazo NO deja el expediente listo para cobrar.
         $assert(
             sprintf('9.%s El expediente sigue SIN aprobar tras el rechazo', $claim === 4.00 ? '1c' : '2c'),
-            (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$overCaseId}")->fetchColumn() === 'REQUIRES_COORDINATOR_APPROVAL'
-            && $pdo->query("SELECT `approved_amount` FROM `refund_requests` WHERE `id` = {$overCaseId}")->fetchColumn() === null,
-            'estado: ' . (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$overCaseId}")->fetchColumn()
+            (string)$pdo->query("SELECT status FROM refund_requests WHERE id = {$overCaseId}")->fetchColumn() === 'REQUIRES_COORDINATOR_APPROVAL'
+            && $pdo->query("SELECT approved_amount FROM refund_requests WHERE id = {$overCaseId}")->fetchColumn() === null,
+            'estado: ' . (string)$pdo->query("SELECT status FROM refund_requests WHERE id = {$overCaseId}")->fetchColumn()
         );
     }
 
@@ -977,7 +977,7 @@ $bizumContact = $lastClaimantContact;
     $assert(
         '9.4 Bajar el importe aprobado sigue siendo la forma de pagar menos',
         $lowerPay->getStatusCode() === 200
-        && (float)$pdo->query("SELECT `paid_amount` FROM `refund_requests` WHERE `id` = {$lowerCaseId}")->fetchColumn() === 6.00,
+        && (float)$pdo->query("SELECT paid_amount FROM refund_requests WHERE id = {$lowerCaseId}")->fetchColumn() === 6.00,
         'HTTP ' . $lowerPay->getStatusCode() . ' ' . (string)$lowerPay->getBody()
     );
 
@@ -1016,9 +1016,9 @@ $bizumContact = $lastClaimantContact;
 
     $assert(
         '10.2 El expediente no queda liquidado con un importe que nadie firmó',
-        (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$halfCentCaseId}")->fetchColumn() === 'VERIFIED_PENDING_PAYMENT'
-        && $pdo->query("SELECT `paid_amount` FROM `refund_requests` WHERE `id` = {$halfCentCaseId}")->fetchColumn() === null,
-        'estado: ' . (string)$pdo->query("SELECT `status` FROM `refund_requests` WHERE `id` = {$halfCentCaseId}")->fetchColumn()
+        (string)$pdo->query("SELECT status FROM refund_requests WHERE id = {$halfCentCaseId}")->fetchColumn() === 'VERIFIED_PENDING_PAYMENT'
+        && $pdo->query("SELECT paid_amount FROM refund_requests WHERE id = {$halfCentCaseId}")->fetchColumn() === null,
+        'estado: ' . (string)$pdo->query("SELECT status FROM refund_requests WHERE id = {$halfCentCaseId}")->fetchColumn()
     );
 
     // Y el importe exacto sigue funcionando tras endurecer el borde.
@@ -1034,7 +1034,7 @@ $bizumContact = $lastClaimantContact;
     $assert(
         '10.3 El importe exacto sigue liquidando tras endurecer el borde',
         $exactCent->getStatusCode() === 200
-        && (float)$pdo->query("SELECT `paid_amount` FROM `refund_requests` WHERE `id` = {$halfCentCaseId}")->fetchColumn() === 4.00,
+        && (float)$pdo->query("SELECT paid_amount FROM refund_requests WHERE id = {$halfCentCaseId}")->fetchColumn() === 4.00,
         'HTTP ' . $exactCent->getStatusCode() . ' ' . (string)$exactCent->getBody()
     );
 

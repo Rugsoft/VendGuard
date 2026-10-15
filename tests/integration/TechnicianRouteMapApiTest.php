@@ -50,9 +50,7 @@ $pdo = ConnectionFactory::getConnection();
 // `finally` no llega y por el que el residuo se acumulaba (hallazgo F-4). Aquí no
 // basta el borrado dirigido de abajo: sin drenar el subárbol, las cuatro sedes
 // activas quedaban en el banco con sus máquinas colgando.
-register_shutdown_function(static function () use ($pdo): void {
-    TestDataCleaner::purgeTestLocations($pdo);
-});
+TestDataCleaner::registerShutdownRestitution();
 
 // Limpieza operacional segura (orden derivado del grafo de FKs).
 TestDataCleaner::purge($pdo);

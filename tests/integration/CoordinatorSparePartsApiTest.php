@@ -494,19 +494,19 @@ $createdIncidentId = null;
 if (!$testIncidentId) {
     $uniqueTicket = 'INC-' . date('Ymd') . '-' . substr(uniqid(), -4);
     $stmtCreateInc = $pdo->prepare("
-        INSERT INTO `incidents` (
-            `ticket_code`,
-            `machine_id`,
-            `location_id`,
-            `assigned_technician_id`,
-            `reporter_name`,
-            `reporter_phone`,
-            `category`,
-            `description`,
-            `urgency`,
-            `status`,
-            `created_at`,
-            `updated_at`
+        INSERT INTO incidents (
+            ticket_code,
+            machine_id,
+            location_id,
+            assigned_technician_id,
+            reporter_name,
+            reporter_phone,
+            category,
+            description,
+            urgency,
+            status,
+            created_at,
+            updated_at
         ) VALUES (
             :ticket_code,
             :machine_id,

@@ -32,6 +32,13 @@ $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedAll();
 
 $router = AppRouter::create();
+
+// Restitución del parque ante cualquier salida (contrato de limpieza §8.3): esta suite
+// incrementa el freno de intentos de las cuentas del catálogo —prueba la contraseña
+// incorrecta a propósito— y ese freno es estado de la maestra, no residuo. Sin gancho, cada
+// corrida lo sube hasta bloquear la cuenta y la corrida siguiente falla con `ACCOUNT_LOCKED`
+// en una suite que sólo inicia sesión. El gancho corre también tras un error fatal.
+\TestDataCleaner::registerShutdownRestitution();
 $authService = new AuthService();
 
 $failures = 0;

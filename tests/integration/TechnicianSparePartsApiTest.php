@@ -132,10 +132,10 @@ $createTestIncident = function (int $machineId, int $locationId, ?int $assignedT
 
     $uniqueCode = 'TICK-' . date('Ymd') . '-' . substr(uniqid(), -5);
     $stmt = $pdo->prepare("
-        INSERT INTO `incidents` (
-            `ticket_code`, `machine_id`, `location_id`, `assigned_technician_id`,
-            `reporter_name`, `reporter_phone`, `category`, `description`,
-            `urgency`, `status`, `started_at`, `created_at`, `updated_at`
+        INSERT INTO incidents (
+            ticket_code, machine_id, location_id, assigned_technician_id,
+            reporter_name, reporter_phone, category, description,
+            urgency, status, started_at, created_at, updated_at
         ) VALUES (
             :ticket_code, :machine_id, :location_id, :assigned_tech_id,
             'Operador Test', '600112233', 'ELECTRICAL_OFF', 'Avería de prueba técnica para trazabilidad de repuestos',

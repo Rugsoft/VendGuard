@@ -219,7 +219,7 @@ try {
         "Enum actual: {$enumType}"
     );
 
-    $orphanCount = (int)$pdo->query("SELECT COUNT(*) FROM `audit_log` WHERE `entity_type` IS NULL")->fetchColumn();
+    $orphanCount = (int)$pdo->query("SELECT COUNT(*) FROM audit_log WHERE entity_type IS NULL")->fetchColumn();
     $assert(
         '4.4 Ninguna fila de auditoría quedó con entity_type nulo tras la ampliación',
         $orphanCount === 0,
@@ -243,7 +243,7 @@ try {
         'Tipos que el dominio acepta y la BD no: ' . implode(', ', $missingInDatabase)
     );
 
-    $distinctTypes = $pdo->query("SELECT DISTINCT `entity_type` FROM `audit_log`")->fetchAll(\PDO::FETCH_COLUMN);
+    $distinctTypes = $pdo->query("SELECT DISTINCT entity_type FROM audit_log")->fetchAll(\PDO::FETCH_COLUMN);
     $unknownTypes = array_diff($distinctTypes, [
         'TICKET', 'MACHINE', 'LOCATION', 'USER',
         'PREVENTIVE_ORDER', 'SANITARY_CERTIFICATE',
@@ -256,7 +256,7 @@ try {
     );
 
     $preventiveLegacyCount = (int)$pdo->query(
-        "SELECT COUNT(*) FROM `audit_log` WHERE `entity_type` IN ('PREVENTIVE_ORDER', 'SANITARY_CERTIFICATE')"
+        "SELECT COUNT(*) FROM audit_log WHERE entity_type IN ('PREVENTIVE_ORDER', 'SANITARY_CERTIFICATE')"
     )->fetchColumn();
     $assert(
         '4.9 El histórico preventivo sigue registrado bajo MACHINE/TICKET (sin reetiquetar)',
