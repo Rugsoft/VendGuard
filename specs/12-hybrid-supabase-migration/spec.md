@@ -3,6 +3,7 @@
 **Documento:** `specs/12-hybrid-supabase-migration/spec.md`  
 **Referencia de Módulo:** Módulo 12 (`12-hybrid-supabase-migration`)  
 **Estado:** Especificación Formal Ratificada y Blindada tras Auditoría Técnica Adversarial (`docs/auditoria_plan_migracion_supabase_hibrida.md`)  
+**Enmienda propuesta (2026-10-15, pendiente de aprobación):** el módulo [`13-single-engine-supabase`](../13-single-engine-supabase/spec.md) propone retirar el camino MariaDB/MySQL del sistema. Al aprobarse, los requisitos que presuponen **dos** motores (EARS-01.1, EARS-01.3, EARS-01.5, EARS-01.6, EARS-02.1, EARS-02.2, EARS-02.4 y los criterios 1, 2, 6 y 7 de §8) quedan sustituidos por el contrato del motor único, con la tabla de enmiendas de §4.1 de su especificación; RNF-04 se conserva en su sustancia (batería sin red, ahora contra el motor PostgreSQL local). Mientras la puerta de aprobación de ese módulo no se abra, **este documento rige sin cambios** (AGENTS.md §5.5).  
 **Fecha:** Octubre 2026  
 **Proyecto:** VendGuard · Gestor de Incidencias de Vending  
 **Normativa Suprema:** [`constitution.md`](../../constitution.md) (Artículos I al VII, especialmente Art. I.3, Art. II, Art. III.1, Art. V.1, Art. V.2, Art. V.6 y Art. VI.1)  
