@@ -26,11 +26,20 @@
 #      `verify.php` y después el inicializador completo, y comprueba el resultado por su
 #      cuenta: inventario de tablas, libro de migraciones y guardián anti-borrado del
 #      Art. III.1 respondiendo con `45000`.
+#   7. Aprovisiona el **banco de la batería hermética**: una base propia (por defecto
+#      `vendguard_battery`) con el **mismo** esquema y catálogo canónicos, en arranque en
+#      limpio estricto (`VENDGUARD_DEMO_HISTORY=0`), y escribe su contrato en `.env.battery`
+#      (no versionado, modo 600) con `DATABASE_URL` en forma TLS. Base distinta de la de la
+#      categoría: el arnés crea sedes, máquinas y averías, y no puede contaminar la base
+#      sobre la que la categoría mide el catálogo sembrado.
 #
 # Uso:
 #   bash deploy/local/postgres/provision-tls-engine.sh
 #   source deploy/local/postgres/.env.docker-tls
 #   bash deploy/local/postgres/provision-tls-engine.sh --down    # retira el contenedor
+#
+# Banco de la batería (módulo 13, RNF-04):
+#   source deploy/local/postgres/.env.battery     # declara DATABASE_URL (TLS verify-full)
 #
 # Variables:
 #   PG_TLS_PORT       Opcional. Puerto publicado en el host. Por defecto 55433 (el 5432
@@ -150,7 +159,7 @@ echo "======================================================================"
 echo
 
 # --- 1. Material TLS ----------------------------------------------------------
-echo "=== 1/6 · Material TLS (CA y certificado del servidor con SAN IP:${TLS_HOST}) ==="
+echo "=== 1/7 · Material TLS (CA y certificado del servidor con SAN IP:${TLS_HOST}) ==="
 mkdir -p "${CERTS_DIR}"
 
 # Consulta dentro del contenedor como el rol de aplicación, nunca como el superusuario del
@@ -232,14 +241,14 @@ fi
 
 # --- 2. Imagen ----------------------------------------------------------------
 echo
-echo "=== 2/6 · Imagen del motor (PostgreSQL 16 + TLS) ==="
+echo "=== 2/7 · Imagen del motor (PostgreSQL 16 + TLS) ==="
 docker build -t "${IMAGE_NAME}" "${TLS_DIR}" >/dev/null \
     || fail "La construcción de la imagen falló (revisa deploy/local/postgres/tls/Dockerfile)."
 ok "Imagen «${IMAGE_NAME}» construida"
 
 # --- 3. Contenedor ------------------------------------------------------------
 echo
-echo "=== 3/6 · Contenedor «${CONTAINER_NAME}» en el puerto ${HOST_PORT} ==="
+echo "=== 3/7 · Contenedor «${CONTAINER_NAME}» en el puerto ${HOST_PORT} ==="
 if [ -f "${PASSWORD_FILE}" ]; then
     APP_PASSWORD="$(cat "${PASSWORD_FILE}")"
 else
@@ -273,7 +282,7 @@ fi
 
 # --- 4. Disponibilidad y política S-5 ----------------------------------------
 echo
-echo "=== 4/6 · Disponibilidad del motor y rol de aplicación ==="
+echo "=== 4/7 · Disponibilidad del motor y rol de aplicación ==="
 ready=0
 for _attempt in $(seq 1 30); do
     if docker exec "${CONTAINER_NAME}" pg_isready -h "${TLS_HOST}" -q >/dev/null 2>&1; then
@@ -305,7 +314,7 @@ ok "Motor disponible y rol «${APP_ROLE}» sin SUPERUSER, CREATEDB, CREATEROLE n
 
 # --- 5. Contrato de entorno ---------------------------------------------------
 echo
-echo "=== 5/6 · Contrato de entorno (no versionado, modo 600) ==="
+echo "=== 5/7 · Contrato de entorno de la categoría (no versionado, modo 600) ==="
 CERTS_WIN="$(cd "${CERTS_DIR}" && pwd -W)" \
     || fail "No se pudo resolver la ruta de Windows del material TLS (¿bash de Git?)."
 
@@ -346,7 +355,7 @@ ok "Sonda verify.php en verde contra el motor TLS"
 
 # --- 6. Inicializador completo ------------------------------------------------
 echo
-echo "=== 6/6 · Inicializador completo contra el motor (DDL + migraciones + semillas) ==="
+echo "=== 6/7 · Inicializador completo contra el motor (DDL + migraciones + semillas) ==="
 INIT_LOG="$(mktemp)"
 # DATABASE_URL se declara sólo para este proceso: la batería hermética del shell no la ve.
 if ! DATABASE_URL="${TLS_DSN}" php "${PROJECT_ROOT}/bin/init_cloud_db.php" >"${INIT_LOG}" 2>&1; then
@@ -388,19 +397,127 @@ PURGED="$(psql_app -tA -c "SELECT COUNT(*) FROM locations WHERE site_code = 'SED
 SEEDED="$(psql_app -tA -c 'SELECT COUNT(*) FROM locations WHERE deleted_at IS NULL')"
 [ "${SEEDED}" = "10" ] || fail "El catálogo sembrado no quedó intacto tras las comprobaciones (${SEEDED} sedes)."
 
+# --- 7. Banco de la batería hermética ----------------------------------------
+# La batería hermética (RNF-04) necesita su **propio** banco. Corre las suites del arnés,
+# que crean sedes, máquinas, usuarios y averías; si compartiera base con la categoría, una
+# corrida dejaría a la categoría midiendo un catálogo contaminado —`SchemaConvergenceParityTest`
+# cuenta precisamente las 10 sedes sembradas—. Mismo esquema y mismo catálogo canónicos
+# (los aplica el inicializador), base distinta.
+echo
+echo "=== 7/7 · Banco de la batería hermética (base propia del arnés) ==="
+
+BATTERY_DATABASE="${PG_BATTERY_DATABASE:-vendguard_battery}"
+BATTERY_ENV_FILE="${SCRIPT_DIR}/.env.battery"
+
+BATTERY_EXISTS="$(docker exec "${CONTAINER_NAME}" \
+    psql -U "${BOOTSTRAP_ROLE}" -d postgres -tA \
+    -c "SELECT 1 FROM pg_database WHERE datname = '${BATTERY_DATABASE}'")"
+if [ "${BATTERY_EXISTS}" = "1" ]; then
+    ok "Base «${BATTERY_DATABASE}» ya existía"
+else
+    docker exec "${CONTAINER_NAME}" \
+        psql -U "${BOOTSTRAP_ROLE}" -d postgres -v ON_ERROR_STOP=1 \
+        -c "CREATE DATABASE ${BATTERY_DATABASE} OWNER ${APP_ROLE} ENCODING 'UTF8' TEMPLATE template0" >/dev/null \
+        || fail "No se pudo crear la base de la batería (${BATTERY_DATABASE})."
+    ok "Base «${BATTERY_DATABASE}» creada con «${APP_ROLE}» como propietario"
+fi
+
+# El DSN del banco se reconstruye en vez de retocar el de la categoría: así el puerto, la
+# CA y la verificación son literalmente los mismos y ninguna sustitución de cadena puede
+# dejarlos apuntando a otro sitio.
+BATTERY_DSN="pgsql:host=${TLS_HOST_CLIENT};port=${HOST_PORT};dbname=${BATTERY_DATABASE};user=${APP_ROLE};password=${APP_PASSWORD};sslmode=verify-full;sslrootcert=${CERTS_WIN}/ca.crt"
+
+# Arranque en limpio estricto (EARS-02.6): catálogo maestro completo y **ninguna** avería de
+# demostración. Las diecisiete `INC-DEMO-*` ocupan su máquina durante la ventana de garantía
+# de 48 h (`uq_machine_active_ticket`, Art. V.2 y V.6) y las fixtures del arnés crean sus
+# averías sobre las máquinas del catálogo: con historial, el banco no sería más completo,
+# sería un banco con colisiones.
+BATTERY_LOG="$(mktemp)"
+if ! VENDGUARD_DEMO_HISTORY=0 DATABASE_URL="${BATTERY_DSN}" \
+    php "${PROJECT_ROOT}/bin/init_cloud_db.php" >"${BATTERY_LOG}" 2>&1; then
+    cat "${BATTERY_LOG}" >&2
+    rm -f "${BATTERY_LOG}"
+    fail "El inicializador falló contra la base de la batería: el banco no quedó verificado."
+fi
+sed -n 's/^/      /p' "${BATTERY_LOG}"
+rm -f "${BATTERY_LOG}"
+
+# Comprobación independiente del inicializador, y en la base de la batería: inventario,
+# libro de migraciones, catálogo del arranque en limpio y ausencia de histórico.
+psql_battery() {
+    docker exec "${CONTAINER_NAME}" \
+        psql -U "${APP_ROLE}" -d "${BATTERY_DATABASE}" -v ON_ERROR_STOP=1 "$@"
+}
+
+BATTERY_TABLES="$(psql_battery -tA -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'")"
+BATTERY_LEDGER="$(psql_battery -tA -c 'SELECT COUNT(*) FROM schema_migrations')"
+BATTERY_LOCATIONS="$(psql_battery -tA -c 'SELECT COUNT(*) FROM locations WHERE deleted_at IS NULL')"
+BATTERY_MACHINES="$(psql_battery -tA -c 'SELECT COUNT(*) FROM machines WHERE deleted_at IS NULL')"
+BATTERY_USERS="$(psql_battery -tA -c 'SELECT COUNT(*) FROM users WHERE deleted_at IS NULL')"
+BATTERY_INCIDENTS="$(psql_battery -tA -c 'SELECT COUNT(*) FROM incidents')"
+
+echo "      · Esquema: ${BATTERY_TABLES} tablas en public · libro: ${BATTERY_LEDGER} migración(es)"
+echo "      · Catálogo: ${BATTERY_LOCATIONS} sedes · ${BATTERY_MACHINES} máquinas · ${BATTERY_USERS} usuarios · averías: ${BATTERY_INCIDENTS}"
+[ "${BATTERY_TABLES}" = "21" ] \
+    || fail "Inventario inesperado en el banco de la batería (${BATTERY_TABLES} tablas, esperadas 21)."
+[ "${BATTERY_LEDGER}" -ge 1 ] \
+    || fail "El libro de migraciones del banco de la batería quedó vacío."
+[ "${BATTERY_LOCATIONS}" = "10" ] \
+    || fail "El catálogo del banco no tiene las 10 sedes del arranque en limpio (${BATTERY_LOCATIONS})."
+[ "${BATTERY_MACHINES}" -ge 13 ] \
+    || fail "El catálogo del banco no tiene las 13 máquinas del arranque en limpio (${BATTERY_MACHINES})."
+[ "${BATTERY_USERS}" -ge 6 ] \
+    || fail "El catálogo del banco no tiene los 6 usuarios internos del arranque en limpio (${BATTERY_USERS})."
+[ "${BATTERY_INCIDENTS}" = "0" ] \
+    || fail "El banco de la batería arrancó con histórico de demostración (${BATTERY_INCIDENTS} averías)."
+
+(
+    umask 077
+    printf '%s\n' \
+        "# Generado por deploy/local/postgres/provision-tls-engine.sh — NO versionado." \
+        "# Contrato de entorno del BANCO DE LA BATERÍA HERMÉTICA (RNF-04 · módulo 13)." \
+        "#" \
+        "# Motor: PostgreSQL 16 con TLS en el contenedor ${CONTAINER_NAME}, puerto ${HOST_PORT}." \
+        "# Base: ${BATTERY_DATABASE} (propia del arnés; la categoría del motor nuevo usa" \
+        "# ${APP_DATABASE}). Esquema y catálogo canónicos, en arranque en limpio: sin las" \
+        "# averías de demostración de EARS-02.6." \
+        "#" \
+        "# Se declara DATABASE_URL —y no PG_TEST_DSN— porque es la variable que" \
+        "# ConnectionFactory lee primero: la batería tiene que resolver su motor por la misma" \
+        "# ruta que la aplicación. La verificación de identidad es la del despliegue" \
+        "# (verify-full contra la CA local), sin excepción de loopback (RNF-05)." \
+        "#" \
+        "# Uso: source deploy/local/postgres/.env.battery" \
+        "export DATABASE_URL='${BATTERY_DSN}'" \
+        > "${BATTERY_ENV_FILE}"
+)
+# `chmod 600` se aplica donde el sistema de ficheros lo honra (POSIX). En Windows no impone
+# permisos de acceso: allí la protección del contrato es la regla de .gitignore, que el
+# aprovisionamiento comprueba en vez de suponerla.
+chmod 600 "${BATTERY_ENV_FILE}" 2>/dev/null || true
+if git -C "${PROJECT_ROOT}" check-ignore -q "deploy/local/postgres/$(basename "${BATTERY_ENV_FILE}")"; then
+    ok "Escrito ${BATTERY_ENV_FILE} (excluido por git; chmod 600 donde el sistema lo honra)"
+else
+    fail "El contrato del banco (${BATTERY_ENV_FILE}) no está excluido por .gitignore: una credencial podría versionarse."
+fi
+
 echo
 echo "======================================================================"
-echo " MOTOR TLS LISTO · inicializador verificado"
+echo " MOTOR TLS LISTO · inicializador verificado · banco de la batería aprovisionado"
 echo "======================================================================"
 echo " Contenedor        : ${CONTAINER_NAME} (puerto ${HOST_PORT} → 5432)"
 echo " Base / rol        : ${APP_DATABASE} / ${APP_ROLE} (sin privilegios administrativos)"
 echo " Contrato entorno  : ${ENV_FILE}"
 echo " Guardián Art. III.1: responde 45000 y cede sólo con la ventana de purga"
 echo " Identidad del cliente: verify-full contra DNS:localhost e IP:127.0.0.1"
+echo " Banco de la batería: ${BATTERY_DATABASE} · contrato en ${BATTERY_ENV_FILE}"
 echo
 echo " Para usarlo en la categoría del motor nuevo:"
 echo "   source deploy/local/postgres/.env.docker-tls"
 echo "   php deploy/local/postgres/verify.php"
+echo
+echo " Para usarlo como banco de la batería hermética:"
+echo "   source deploy/local/postgres/.env.battery"
 echo
 echo " Para retirarlo:"
 echo "   bash deploy/local/postgres/provision-tls-engine.sh --down"

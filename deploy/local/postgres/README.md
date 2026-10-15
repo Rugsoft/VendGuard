@@ -11,6 +11,11 @@ ella sin romper el verde offline o sin saltarse suites en silencio, así que for
 categoría propia con su canal y su informe. Este directorio aporta lo que esa categoría
 necesitaba y no existía: un motor real, disponible y comprobable.
 
+**Actualización (módulo 13 · 2026-10-15):** con la retirada del camino MariaDB decidida por el
+Product Owner, este motor deja de ser el banco *exclusivo* de la categoría del motor nuevo y pasa a
+ser también el **banco de la batería hermética** —ver «Banco de la batería hermética» más abajo—.
+La separación por categorías con canal propio se conserva mientras dure el porte del arnés.
+
 ## Qué queda aprovisionado
 
 | Pieza | Estado |
@@ -33,11 +38,76 @@ Una sola variable, sin valor por defecto y sin credenciales en código versionad
 PG_TEST_DSN = pgsql:host=127.0.0.1;port=5432;dbname=vendguard_pg_test;user=vendguard_pg;password=…
 ```
 
-- La **batería hermética no la lee nunca**: sigue usando el motor local de MariaDB.
+- La **batería hermética no la lee**: resuelve su motor con `DATABASE_URL` del contrato
+  `deploy/local/postgres/.env.battery` —ver «Banco de la batería hermética» más abajo—.
 - Las suites de la categoría del motor nuevo leen `PG_TEST_DSN` y **no** tienen valores
   por defecto: si falta, la categoría se declara no ejecutable en vez de omitirse.
 - El valor lo genera el aprovisionamiento; `PG_TEST_DSN` no se escribe jamás en un
   archivo versionado ni en un informe.
+
+## Banco de la batería hermética (módulo 13)
+
+El mismo motor TLS alberga **dos** bases, con el mismo esquema y el mismo catálogo canónicos —los
+aplica el inicializador del repositorio— y distinto destinatario:
+
+| Base | Para quién | Contrato | Arranque |
+| :--- | :--- | :--- | :--- |
+| `vendguard_pg_test` | Categoría de contrato del motor nuevo (T-HYBRID-21/24) | `.env.docker-tls` (`PG_TEST_DSN`) | Con el histórico de demostración de EARS-02.6 |
+| `vendguard_battery` | **Batería hermética** (RNF-04 · módulo 13) | `.env.battery` (`DATABASE_URL`) | **Arranque en limpio estricto** (`VENDGUARD_DEMO_HISTORY=0`) |
+
+**Por qué dos bases y no una:** el arnés crea sedes, máquinas, usuarios y averías en cada corrida, y
+la categoría mide exactamente eso —`SchemaConvergenceParityTest` cuenta las 10 sedes sembradas—, de
+modo que compartir base haría que una corrida de la batería invalidara la certificación de la
+categoría. El catálogo es el mismo; la base, no.
+
+**Por qué el banco arranca sin las diecisiete averías `INC-DEMO-*`:** ocupan su máquina durante la
+ventana de garantía de 48 h del índice único parcial (`uq_machine_active_ticket`, Art. V.2 y V.6) y
+las fixtures del arnés crean sus averías sobre las máquinas del catálogo. Con historial, el banco no
+sería más completo: sería un banco con colisiones.
+
+### Contrato de entorno del banco
+
+Una sola variable, no versionada, modo 600:
+
+```text
+DATABASE_URL = pgsql:host=127.0.0.1;port=55433;dbname=vendguard_battery;user=vendguard_pg;password=…;sslmode=verify-full;sslrootcert=<CA local>
+```
+
+**Sobre el «modo 600»:** el aprovisionamiento ejecuta `chmod 600` sobre el contrato y lo honra en
+POSIX, pero **en Windows/Git Bash `chmod` no impone permisos de acceso** —el sistema de ficheros no
+tiene modos POSIX y `ls -l` devuelve `-rw-r--r--` en este equipo, no `-rw-------`—. Ahí la protección
+real del contrato es la regla de [`.gitignore`](../../../.gitignore) —comprobada con
+`git check-ignore`— y que el fichero vive en el equipo del operador, no el modo declarado. La misma
+situación afecta a `.env.local` y a `.env.docker-tls`, que declaran lo mismo desde su creación.
+
+Se declara `DATABASE_URL` —y **no** `PG_TEST_DSN`— porque es la variable que `ConnectionFactory` lee
+primero: el banco de la batería tiene que resolverse por la **misma** ruta que la aplicación, no por
+un canal lateral. La verificación de identidad es la del despliegue, sin excepción de loopback
+(RNF-05).
+
+```bash
+bash deploy/local/postgres/provision-tls-engine.sh   # crea y aprovisiona el banco (idempotente)
+source deploy/local/postgres/.env.battery
+```
+
+### Lo que está verificado, no supuesto
+
+| Comprobación | Resultado medido (2026-10-15) |
+| :--- | :--- |
+| Aprovisionamiento canónico del banco | 136 sentencias de DDL base · 21 tablas en `public` · libro `schema_migrations` con la línea base aplicada · catálogo 10 sedes · 13 máquinas · 6 usuarios · 13 repuestos · **0 averías** |
+| La aplicación conecta por su propia factoría | `driver=pgsql` · base `vendguard_battery` · rol `vendguard_pg` · PostgreSQL 16.15 |
+| El enlace va cifrado y verificado | `pg_stat_ssl` del backend: `ssl=true` · `TLSv1.3` |
+| Una CA ajena no verifica el certificado | Rechaza en la conexión (`SSL error`) |
+| `sslmode=require` | Rechaza **antes** de conectar: «Modo TLS no admitido («require») para el motor en la nube (RNF-05)» |
+| Una CA declarada inexistente | Rechaza en cerrado: «La CA declarada para el motor en la nube no existe» |
+| Control (contrato sin tocar) | Conecta y declara `vendguard_battery` |
+| El contrato no puede versionarse | `git check-ignore` responde con la regla que lo excluye (`deploy/local/postgres/.env.battery`) |
+
+**Estado:** banco provisionado, contrato verificado y ya resuelto por el arnés:
+[`tests/bootstrap.php`](../../../tests/bootstrap.php) lee `DATABASE_URL` del entorno del proceso o de
+este contrato —en ese orden— y se declara no ejecutable (código 1) si ninguno de los dos declara un
+motor, o si el declarado es el heredado (T-13-03 de
+[`specs/13-single-engine-supabase/tasks.md`](../../../specs/13-single-engine-supabase/tasks.md)).
 
 ## Cómo se aprovisiona
 
