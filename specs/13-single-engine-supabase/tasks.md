@@ -316,10 +316,25 @@ Cada lote cierra con `php tests/run_all.php` en verde, cifras por lote anotadas 
       * **Cifras documentadas: COHERENTES** (0 desviaciones) sincronizadas en [README.md](../../README.md) y documentación viva.
       * **Base de datos restablecida:** SÍ (Semillas intactas, 0 residuo de parque).
       * ¡Primera vez en la historia del proyecto que la batería hermética completa corre **100% EN VERDE con 0 fallos sobre el motor único PostgreSQL**!
-- [ ] **T-13-15: Arranque, scripts de operación e imagen con un solo driver**
+- [x] **T-13-15: Arranque, scripts de operación e imagen con un solo driver**
   * **Requisitos:** EARS-13.3, EARS-13.9
   * **Dependencias:** T-13-14
   * **Hecho cuando:** [`bin/init_cloud_db.php`](../../bin/init_cloud_db.php) tiene una sola ruta de arranque (DDL base, migraciones, catálogo, histórico de demostración de EARS-02.6) y su salida no nombra dos motores; `bin/migrate.php` usa el ejecutor del motor único; `bin/seed.php` y `bin/seed_demo_metrics.php` se retiran; el [`Dockerfile`](../../Dockerfile) instala solo `pdo_pgsql`.
+  * **Cerrado (2026-10-16), con evidencia de ejecución:**
+    * **Inicializador único de arranque ([bin/init_cloud_db.php](../../bin/init_cloud_db.php)):**
+      * Eliminada la bifurcación condicional de motores y la función completa `initializeMysqlDatabase()`.
+      * Opera en una sola ruta canónica sobre PostgreSQL: DDL base (`database/supabase_init.sql`), migraciones incrementales (`PostgresMigrationRunner`), catálogo maestro (`database/supabase_seeds.sql`), verificación de catálogo y columnas sobre `pg_attribute`/`pg_class`, e histórico de demostración con opt-out (`DemoHistorySeeder`, EARS-02.6). Su salida no nombra MariaDB ni dos motores.
+    * **Retirada de scripts de operación heredados:**
+      * Eliminados del repositorio `bin/seed.php` y `bin/seed_demo_metrics.php` (`git rm`). Su funcionalidad vive en el inicializador canónico y en `bin/seed_demo_history.php` del motor único.
+    * **Contenedor con driver único ([Dockerfile](../../Dockerfile)):**
+      * Actualizado `docker-php-ext-install pdo pdo_pgsql`: se retiró completamente `pdo_mysql`.
+    * **Guarda de dialecto actualizada en el mismo commit:**
+      * La entrada de `bin/init_cloud_db.php` pasó de deuda a **drenado** (`drained_occurrences => ['catalog' => 1, 'legacy_database' => 1]`).
+      * [`SqlDialectPortabilityTest`](../../tests/unit/SqlDialectPortabilityTest.php) verificado en **97/97 aserciones, exit 0**.
+    * **Medición de cierre con batería completa (`php tests/run_all.php`):**
+      * **261 suites · 9.947 aserciones · 0 fallos (100% PASS)**.
+      * **Cifras documentadas: COHERENTES** (0 desviaciones).
+      * **Base de datos restablecida:** SÍ (Semillas intactas, 0 residuo de parque).
 - [ ] **T-13-16: Retirada del DDL, las migraciones y los sembradores heredados; contrato de esquema único**
   * **Requisitos:** EARS-13.3, EARS-13.9
   * **Dependencias:** T-13-15

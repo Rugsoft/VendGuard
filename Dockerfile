@@ -5,7 +5,7 @@ FROM php:8.2-cli-alpine
 # - postgresql-dev para soporte compilado de PostgreSQL
 # - $PHPIZE_DEPS para la cadena de compilación de extensiones
 RUN apk add --no-cache ca-certificates postgresql-dev $PHPIZE_DEPS \
-    && docker-php-ext-install pdo pdo_mysql pdo_pgsql \
+    && docker-php-ext-install pdo pdo_pgsql \
     && apk del $PHPIZE_DEPS
 
 # Establecer directorio de trabajo

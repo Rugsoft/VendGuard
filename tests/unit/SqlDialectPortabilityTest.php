@@ -734,10 +734,9 @@ const CONSTRUCTION_PAIRS = [
 const LEGACY_DIALECT = [
     // ---------- Superficie de ejecución: `src`, `database` y `bin` ----------
     'bin/init_cloud_db.php' => [
-        'kind' => KIND_DEBT,
-        'owner' => 'T-13-15',
-        'census' => ['catalog' => 1, 'legacy_database' => 1],
-        'why' => 'la rama de arranque del motor heredado cuenta columnas en el catálogo de ese motor y nombra su base; T-13-15 deja una sola ruta de arranque',
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-15', 'census' => [],
+        'drained_occurrences' => ['catalog' => 1, 'legacy_database' => 1],
+        'why' => 'la rama de arranque del motor heredado contaba columnas en el catálogo de ese motor y nombraba su base; T-13-15 deja una sola ruta de arranque y lee pg_attribute en PostgreSQL',
     ],
     'bin/migrate.php' => [
         'kind' => KIND_DRAINED, 'owner' => 'T-13-14', 'census' => [],
