@@ -607,10 +607,10 @@ $bizumContact = $lastClaimantContact;
     // Los índices que sostienen esa latencia están declarados en la migración;
     // sin ellos la consulta degrada a un barrido completo en cuanto la tabla
     // crezca, que es justo lo que el requisito pretende evitar.
-    $indexed = (int)$pdo->query('
-        SELECT COUNT(*) FROM information_schema.statistics
-        WHERE table_schema = DATABASE() AND table_name = \'refund_requests\'
-    ')->fetchColumn();
+    $indexed = (int)$pdo->query("
+        SELECT COUNT(*) FROM pg_indexes
+        WHERE schemaname = current_schema() AND tablename = 'refund_requests'
+    ")->fetchColumn();
     $assert(
         '7.6 La tabla tiene los índices que hacen posible el rendimiento (008)',
         $indexed >= 2,
@@ -767,10 +767,13 @@ $bizumContact = $lastClaimantContact;
         '8.8 Un importe en el rango ampliado se guarda INTEGRO, sin saturar a 9999,99',
         (float)$wideStored === 20.00
         && (string)$pdo->query(
-            "SELECT column_type FROM information_schema.columns
-             WHERE table_schema = DATABASE() AND table_name = 'refund_requests'
-               AND column_name = 'paid_amount'"
-        )->fetchColumn() === 'decimal(10,2)',
+            "SELECT format_type(a.atttypid, a.atttypmod)
+               FROM pg_attribute a
+               JOIN pg_class c ON c.oid = a.attrelid
+               JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = current_schema() AND c.relname = 'refund_requests'
+                AND a.attname = 'paid_amount' AND a.attnum > 0"
+        )->fetchColumn() === 'numeric(10,2)',
         'guardado: ' . var_export($wideStored, true)
     );
 

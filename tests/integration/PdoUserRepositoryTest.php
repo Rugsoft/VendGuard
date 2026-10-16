@@ -97,11 +97,17 @@ $testUserEmail = 'test.softdel@vendguard.internal';
 $testHash = password_hash('Password123!', PASSWORD_BCRYPT);
 
 // Insertar usuario temporal
+// Upsert del motor único: `email` es la clave del conflicto y `email_key` va declarada porque es
+// `NOT NULL` (A-1). El correo de la fixture es ASCII en minúsculas, que es su clave canónica.
 $pdo->prepare("
-    INSERT INTO `users` (`name`, `email`, `password_hash`, `role`, `is_active`)
-    VALUES ('Usuario Temporal SoftDel', :email, :hash, 'TECHNICIAN', 1)
-    ON DUPLICATE KEY UPDATE `deleted_at` = NULL
-")->execute([':email' => $testUserEmail, ':hash' => $testHash]);
+    INSERT INTO users (name, email, email_key, password_hash, role, is_active)
+    VALUES ('Usuario Temporal SoftDel', :email, :email_key, :hash, 'TECHNICIAN', TRUE)
+    ON CONFLICT (email) DO UPDATE SET deleted_at = NULL
+")->execute([
+    ':email' => $testUserEmail,
+    ':email_key' => strtolower($testUserEmail),
+    ':hash' => $testHash,
+]);
 
 $tempUser = $userRepo->findByEmail($testUserEmail);
 $assert("4.1 Usuario temporal insertado y localizado activamente", $tempUser instanceof User);
@@ -268,10 +274,10 @@ $resolvedTicketCode = 'INC-USER-TEST-02';
 TestDataCleaner::purgeIncidentByTicket($pdo, $resolvedTicketCode);
 
 $stmtResolved = $pdo->prepare("
-    INSERT INTO `incidents` (
-        `ticket_code`, `machine_id`, `location_id`, `category`, `description`, `urgency`, `status`, `assigned_technician_id`, `resolved_at`
+    INSERT INTO incidents (
+        ticket_code, machine_id, location_id, category, description, urgency, status, assigned_technician_id, resolved_at
     ) VALUES (
-        :tc, :mid, :lid, 'OTHER', 'Test garantia 48h', 'LOW', 'RESOLVED', :tech_id, DATE_SUB(NOW(), INTERVAL 2 HOUR)
+        :tc, :mid, :lid, 'OTHER', 'Test garantia 48h', 'LOW', 'RESOLVED', :tech_id, NOW() - INTERVAL '2 hours'
     )
 ");
 $stmtResolved->execute([

@@ -597,13 +597,13 @@ try {
     // Silencio de sede sembrado: 90 minutos naturales desde la pausa. Rebasar en
     // tiempo real la ventana en caliente de 60 minutos no cabe en una suite; el
     // instrumento es SQL dirigido sobre el expediente propio, como en las hermanas.
-    $pdo->prepare('UPDATE `incidents` SET `paused_at` = DATE_SUB(NOW(), INTERVAL 90 MINUTE) WHERE `id` = :id')
+    $pdo->prepare("UPDATE incidents SET paused_at = NOW() - INTERVAL '90 minutes' WHERE id = :id")
         ->execute([':id' => $coldId]);
     $coldPausedAt = (string)$pdo->query("SELECT paused_at FROM incidents WHERE id = {$coldId}")->fetchColumn();
 
     $assert(
         '2.2 Premisa del desfase: el intervalo vivo ya supera los 60 minutos (RF-02.1)',
-        (int)$pdo->query("SELECT TIMESTAMPDIFF(SECOND, `paused_at`, NOW()) FROM `incidents` WHERE `id` = {$coldId}")->fetchColumn() >= 3600
+        (int)$pdo->query("SELECT TRUNC(EXTRACT(EPOCH FROM (NOW() - paused_at))) FROM incidents WHERE id = {$coldId}")->fetchColumn() >= 3600
     );
 
     $res = $router->dispatch(new Request(
@@ -804,7 +804,7 @@ try {
     // Catorce días naturales contienen siempre 90 horas de ventana comercial (dos
     // semanas completas menos el recorte de los extremos), de modo que la alerta de
     // espera prolongada es verdadera sin depender del día en que corra la suite.
-    $pdo->prepare('UPDATE `incidents` SET `paused_at` = DATE_SUB(NOW(), INTERVAL 14 DAY) WHERE `id` = :id')
+    $pdo->prepare("UPDATE incidents SET paused_at = NOW() - INTERVAL '14 days' WHERE id = :id")
         ->execute([':id' => $cycleId]);
     $cyclePausedRow = $incidentRow($cycleId);
 

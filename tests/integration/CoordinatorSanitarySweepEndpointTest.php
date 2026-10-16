@@ -79,7 +79,7 @@ $pdoHolder  = ConnectionFactory::getConnection([], true);
 $assert(
     '0.1 Dos conexiones PDO REALES e independientes sobre la misma base de datos',
     $pdoSweep !== $pdoHolder
-    && $pdoSweep->query('SELECT DATABASE()')->fetchColumn() === $pdoHolder->query('SELECT DATABASE()')->fetchColumn(),
+    && $pdoSweep->query('SELECT current_database()')->fetchColumn() === $pdoHolder->query('SELECT current_database()')->fetchColumn(),
     'las dos conexiones del banco de pruebas no son independientes'
 );
 

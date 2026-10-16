@@ -462,7 +462,7 @@ $orphanSite = $siteToken($orphan['site_code']);
 $pauseTicket($orphan['id'], 'PENDING_SITE_AUTHORIZATION', $reason, $techToken);
 // Intervalo real de cinco minutos: una pausa de milisegundos no permite comprobar que el
 // acumulador recibe el intervalo cerrado.
-$pdo->exec('UPDATE `incidents` SET `paused_at` = DATE_SUB(NOW(), INTERVAL 300 SECOND) WHERE `id` = ' . $orphan['id']);
+$pdo->exec("UPDATE incidents SET paused_at = NOW() - INTERVAL '300 seconds' WHERE id = " . $orphan['id']);
 $pdo->exec('UPDATE incidents SET assigned_technician_id = NULL WHERE id = ' . $orphan['id']);
 $res = $orphanSite !== null ? $siteComment($orphan['ticket'], 'Aportamos la autorización firmada para entrar a la sala técnica.', $orphanSite) : null;
 $assert(
@@ -560,14 +560,14 @@ $cleanProbe();
 
 // B.6 RF-03.1 — El MTTR de la ruta descuenta la pausa imputable a la sede.
 $metricsTechId = (int)$pdo->query(
-    "SELECT u.`id` FROM `users` u
-      WHERE u.`role` = 'TECHNICIAN' AND u.`deleted_at` IS NULL
+    "SELECT u.id FROM users u
+      WHERE u.role = 'TECHNICIAN' AND u.deleted_at IS NULL
         AND NOT EXISTS (
-            SELECT 1 FROM `incidents` i
-             WHERE i.`assigned_technician_id` = u.`id`
-               AND i.`resolved_at` >= DATE_SUB(CURDATE(), INTERVAL 29 DAY)
+            SELECT 1 FROM incidents i
+             WHERE i.assigned_technician_id = u.id
+               AND i.resolved_at >= CURRENT_DATE - INTERVAL '29 days'
         )
-      ORDER BY u.`id` LIMIT 1"
+      ORDER BY u.id LIMIT 1"
 )->fetchColumn();
 
 $effectiveMttrTechId = $metricsTechId > 0 ? $metricsTechId : $techId;
@@ -580,7 +580,7 @@ $mttrTicket = $createTicket($effectiveMttrTechId);
 $pauseTicket($mttrTicket['id'], 'EXTERNAL_POWER_CUT', $reason, $effectiveMttrToken);
 
 // Pausa de una hora real y vida bruta de tres horas.
-$pdo->exec("UPDATE `incidents` SET `paused_at` = DATE_SUB(NOW(), INTERVAL 3600 SECOND), `created_at` = DATE_SUB(NOW(), INTERVAL 10800 SECOND) WHERE `id` = " . $mttrTicket['id']);
+$pdo->exec("UPDATE incidents SET paused_at = NOW() - INTERVAL '3600 seconds', created_at = NOW() - INTERVAL '10800 seconds' WHERE id = " . $mttrTicket['id']);
 $api('POST', "/api/technician/incidents/{$mttrTicket['id']}/resume-pending-info", [], $effectiveMttrToken);
 $api('POST', "/api/technician/incidents/{$mttrTicket['id']}/resolve", [
     'resolution_diagnosis' => 'El cuadro eléctrico de la sala general disparó por sobretensión en la acometida del inmueble.',
@@ -589,7 +589,7 @@ $api('POST', "/api/technician/incidents/{$mttrTicket['id']}/resolve", [
 
 $mttrRow = $row($mttrTicket['id']);
 $pauseSeconds = (int)$mttrRow['total_pending_info_seconds'];
-$ownGross = (int)$pdo->query("SELECT TIMESTAMPDIFF(SECOND, `created_at`, `resolved_at`) FROM `incidents` WHERE `id` = {$mttrTicket['id']}")->fetchColumn();
+$ownGross = (int)$pdo->query("SELECT TRUNC(EXTRACT(EPOCH FROM (resolved_at - created_at))) FROM incidents WHERE id = {$mttrTicket['id']}")->fetchColumn();
 
 // La esperanza se replica con la MISMA forma de la consulta analítica (mismo técnico y
 // misma ventana de 30 días), de modo que la comparación es exacta aunque la muestra
@@ -598,15 +598,15 @@ $zone = new DateTimeZone('Europe/Madrid');
 $windowFrom = (new DateTimeImmutable('now', $zone))->modify('-29 days')->setTime(0, 0, 0);
 $windowTo = (new DateTimeImmutable('now', $zone))->setTime(23, 59, 59);
 $scope = $pdo->prepare(
-    "SELECT ROUND(AVG(TIMESTAMPDIFF(SECOND, i.`created_at`, i.`resolved_at`))) AS gross,
-            ROUND(AVG(i.`total_pending_info_seconds`)) AS pause,
+    "SELECT ROUND(AVG(TRUNC(EXTRACT(EPOCH FROM (i.resolved_at - i.created_at))))) AS gross,
+            ROUND(AVG(i.total_pending_info_seconds)) AS pause,
             COUNT(*) AS n
-       FROM `incidents` i
-      WHERE i.`resolved_at` IS NOT NULL
-        AND i.`status` IN ('RESOLVED', 'CLOSED')
-        AND i.`resolved_at` >= :from_date
-        AND i.`resolved_at` <= :to_date
-        AND i.`assigned_technician_id` = :tech"
+       FROM incidents i
+      WHERE i.resolved_at IS NOT NULL
+        AND i.status IN ('RESOLVED', 'CLOSED')
+        AND i.resolved_at >= :from_date
+        AND i.resolved_at <= :to_date
+        AND i.assigned_technician_id = :tech"
 );
 $scope->execute([
     ':from_date' => EngineClock::stamp($windowFrom),
@@ -682,7 +682,7 @@ $paused = $pauseTicket($flowId, 'BUILDING_CLOSED_NO_ACCESS', $reason, $techToken
 $pausedData = $paused->getDecodedBody()['data'] ?? [];
 // El intervalo vivo se retrasa cinco minutos para que el desplazamiento de SLA y el
 // acumulador sean medibles (una pausa de milisegundos redondea a cero minutos).
-$pdo->exec("UPDATE `incidents` SET `paused_at` = DATE_SUB(NOW(), INTERVAL 300 SECOND) WHERE `id` = {$flowId}");
+$pdo->exec("UPDATE incidents SET paused_at = NOW() - INTERVAL '300 seconds' WHERE id = {$flowId}");
 $assert(
     'C.5 RF-01.2/01.3: la pausa se declara con causa tipificada y reloj congelado',
     $paused->getStatusCode() === 200 && ($pausedData['status'] ?? '') === 'PENDING_INFO' && ($pausedData['is_sla_paused'] ?? false) === true,
@@ -804,7 +804,7 @@ $assert(
 );
 
 // RF-04.2: se envejece la pausa viva para superar con holgura las 72 h hábiles de silencio.
-$pdo->exec("UPDATE `incidents` SET `paused_at` = DATE_SUB(NOW(), INTERVAL 12 DAY) WHERE `id` = {$flowId}");
+$pdo->exec("UPDATE incidents SET paused_at = NOW() - INTERVAL '12 days' WHERE id = {$flowId}");
 $triageAfter = $api('GET', '/api/coordinator/incidents', [], $coordinatorToken);
 $prolongedRow = null;
 foreach ($triageAfter->getDecodedBody()['data'] ?? [] as $candidate) {
@@ -1006,7 +1006,7 @@ $pdo->exec(
 $declared = $pauseTicket($weekend['id'], 'BUILDING_CLOSED_NO_ACCESS', $reason, $techToken);
 $declaredData = $declared->getDecodedBody()['data'] ?? [];
 $pauseSecondsSeeded = 62 * 3600; // De viernes 18:00 a lunes 08:00: dos días y medio de espera real.
-$pdo->exec("UPDATE `incidents` SET `paused_at` = DATE_SUB(NOW(), INTERVAL 62 HOUR) WHERE `id` = " . $weekend['id']);
+$pdo->exec("UPDATE incidents SET paused_at = NOW() - INTERVAL '62 hours' WHERE id = " . $weekend['id']);
 $f3PausedAt = (string)$pdo->query("SELECT paused_at FROM incidents WHERE id = " . $weekend['id'])->fetchColumn();
 // Orillas del reloj real: el servicio lee su instante entre ambas (cierre de F-3).
 $f3Before = new DateTimeImmutable('now', $zone);
@@ -1184,7 +1184,7 @@ $windowProbe = function (int $hoursAgo) use ($createTicket, $techId, $incidentRe
         'Diagnóstico del banco de pruebas de la frontera de garantía del hilo de conversación.',
         'Acción correctiva del banco de pruebas con la longitud mínima exigida por el pliego.'
     );
-    $pdo->exec("UPDATE `incidents` SET `resolved_at` = DATE_SUB(NOW(), INTERVAL {$hoursAgo} HOUR) WHERE id = " . $ticket['id']);
+    $pdo->exec("UPDATE incidents SET resolved_at = NOW() - INTERVAL '{$hoursAgo} hours' WHERE id = " . $ticket['id']);
 
     $token = $siteToken($ticket['site_code']);
     $comment = $siteComment($ticket['ticket'], 'Aportamos una nota de seguimiento sobre el cierre técnico reciente.', $token);

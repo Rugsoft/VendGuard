@@ -118,12 +118,21 @@ $routeSites = [
 ];
 
 $insertLocation = $pdo->prepare("
-    INSERT INTO `locations` (`site_code`, `name`, `address`, `latitude`, `longitude`, `contact_name`, `contact_phone`, `is_active`)
-    VALUES (:site_code, :name, :address, :lat, :lng, 'Contacto Mapa 18', '672000111', 1)
-    ON DUPLICATE KEY UPDATE `latitude` = VALUES(`latitude`), `longitude` = VALUES(`longitude`), `is_active` = 1
+    INSERT INTO locations (site_code, site_code_key, name, address, latitude, longitude, contact_name, contact_phone, is_active)
+    VALUES (:site_code, :site_code_key, :name, :address, :lat, :lng, 'Contacto Mapa 18', '672000111', TRUE)
+    ON CONFLICT (site_code) DO UPDATE SET
+        latitude = EXCLUDED.latitude, longitude = EXCLUDED.longitude, is_active = TRUE
 ");
 foreach ($routeSites as $siteCode => [$name, $address, $lat, $lng]) {
-    $insertLocation->execute([':site_code' => $siteCode, ':name' => $name, ':address' => $address, ':lat' => $lat, ':lng' => $lng]);
+    // El código de sede es ASCII, así que su clave canónica es su forma en minúsculas.
+    $insertLocation->execute([
+        ':site_code' => $siteCode,
+        ':site_code_key' => strtolower($siteCode),
+        ':name' => $name,
+        ':address' => $address,
+        ':lat' => $lat,
+        ':lng' => $lng,
+    ]);
 }
 
 $routeMachines = [
@@ -134,9 +143,9 @@ $routeMachines = [
     ['MAP18-D1', 'SEDE-MAP18-D', 'HOT_DRINKS'],
 ];
 $insertMachine = $pdo->prepare("
-    INSERT INTO `machines` (`location_id`, `code`, `model`, `machine_type`, `floor_wing`, `notes`, `is_active`, `sanitary_status`, `next_sanitary_inspection_due`)
-    VALUES ((SELECT `id` FROM `locations` WHERE `site_code` = :site_code LIMIT 1), :code, 'Modelo Mapa 18', :type, 'Planta 1', NULL, 1, 'CONFORME', DATE_ADD(CURDATE(), INTERVAL 30 DAY))
-    ON DUPLICATE KEY UPDATE `machine_type` = VALUES(`machine_type`), `is_active` = 1
+    INSERT INTO machines (location_id, code, model, machine_type, floor_wing, notes, is_active, sanitary_status, next_sanitary_inspection_due)
+    VALUES ((SELECT id FROM locations WHERE site_code = :site_code LIMIT 1), :code, 'Modelo Mapa 18', :type, 'Planta 1', NULL, TRUE, 'CONFORME', CURRENT_DATE + INTERVAL '30 days')
+    ON CONFLICT (code) DO UPDATE SET machine_type = EXCLUDED.machine_type, is_active = TRUE
 ");
 foreach ($routeMachines as [$code, $siteCode, $type]) {
     $insertMachine->execute([':site_code' => $siteCode, ':code' => $code, ':type' => $type]);
@@ -193,7 +202,7 @@ $makeRouteIncident = function (
 
     $pdo->prepare("UPDATE incidents
                    SET status = :status, assigned_technician_id = :tech_id,
-                       created_at = DATE_SUB(NOW(), INTERVAL {$createdMinutesAgo})
+                       created_at = NOW() - INTERVAL '{$createdMinutesAgo} minutes'
                    WHERE id = :id")
         ->execute([
             ':status'  => $status->value,

@@ -444,4 +444,60 @@ contra el mismo espécimen curado, de modo que una guarda que no distingue no ce
 | Minutos de espera y `sla_breached` (casos 3.8, 3.9, 3.12 y 4.1) | instantes sembrados 2 h en el futuro: 0 minutos medidos y alerta apagada | minutos reales (75/90/15) y `sla_breached` encendido donde el caso lo exige |
 | Sitios de la clase en ficheros con conexión viva | **51 sitios en 21 ficheros** | **36 reparados** (escritos por `EngineClock`) y **15 declarados** en 7 ficheros, todos con dueño y motivo; censo contrastado por la guarda |
 | Suites sanadas, por diferencia de dos corridas completas | línea base: 260 suites · 8.503 aserciones · **59 rojas** | 261 · 8.525 · **57 rojas**, con **las mismas rojas menos dos** (`CoordinatorIncidentsEndpointTest` y `CronAutoCloseEndpointTest`) y **cero regresiones** |
-| Mordida de la guarda | — | con el reloj sin declarar: 1.1 en rojo nombrando `Europe/Berlin`; con una suite degradada: 4.1 enumerando sus 5 sitios
+| Mordida de la guarda | — | con el reloj sin declarar: 1.1 en rojo nombrando `Europe/Berlin`; con una suite degradada: 4.1 enumerando sus 5 sitios---
+
+## 10. El dialecto del SQL de la batería
+
+### 10.1 La regla
+
+El SQL que las suites escriben **se escribe en la sintaxis del motor único**, incluido el de
+las fixtures: una suite que redacta sentencias en el dialecto retirado no certifica el
+sistema que sirve producción, y mientras el porte no esté hecho mide el dialecto en lugar
+de la conducta. La regla es de forma, no de fondo: la sentencia puede seguir siendo la
+misma consulta, escrita como la entiende el motor.
+
+**La unidad del porte es la sentencia.** Un literal que se reescribe se deja **entero** en
+la sintaxis del motor, incluidas las partes que no son el motivo de la reescritura —el
+literal booleano (D-3), la clave canónica (A-1)— porque una sentencia a medias no se puede
+medir: el caso quedaría en rojo por una razón distinta de la que se estaba reparando. Las
+sentencias que no portan dialecto **no se tocan**: su clase pertenece a otro lote y
+mezclarla aquí ocultaría los dos defectos.
+
+### 10.2 Lo que este contrato NO toca (declarado, no omitido)
+
+| Sitio | Por qué no se toca aquí | Dueño |
+|---|---|---|
+| `tests/unit/SqlDialectPortabilityTest.php` | Es la **guarda del dialecto**: renderiza las dos formas a propósito y rastrea el saldo de `src`, `database` y `bin`. Su sentido se invierte con la tarea que retira el motor heredado | T-13-06 |
+| `tests/unit/RouteMapMigrationContractTest.php`, `RefundsModuleClosureTest` (§4.3) | Comparan contra el **contenido de los `.sql` heredados**, que siguen existiendo y no han cambiado: invertirlas ahora certificaría un fichero que aún no se ha retirado | T-13-16 |
+| `SchemaConvergenceParityTest`, `PostgresConstitutionalTest`, `PostgresSchemaTest`, `DemoHistorySeederPostgresTest`, `PoolerLatencyMeasurementTest` | Categoría propia del **motor nuevo** y el **contrato de correspondencia entre motores**: se retiran o se reescriben con la retirada, no antes | T-13-13, T-13-16 |
+| `CloudDeploySchemaParityTest` | Guarda del **DDL de despliegue heredado** (`cloud_init.sql`), con su propio esquema de sonda | T-13-13, T-13-16 |
+| `ConnectionFactoryTest` (rama del driver heredado) | Rama **inalcanzable** hoy: la suya es la factoría de una sola rama | T-13-14 |
+| `PostgresFixtureBuilder` **no registra hallazgo**: lee `information_schema` **en minúsculas**, que es la forma que el motor entiende | Por eso no cuenta como dialecto, y la regla afinada del censo no lo marca | — |
+| Literal booleano (D-3) y clave canónica (A-1) en sentencias que no portan dialecto | Su clase no es la de este contrato: es la semántica de esquema que drena cada lote de porte | T-13-07 a T-13-12 |
+
+El **censo de la clase** —literales de cadena tokenizados, comentarios y docblocks fuera— es
+lo que hace comprobable la regla: se cuenta por familia, en literales y no en líneas, y los
+ficheros con hallazgos tienen que estar todos en la tabla de arriba.
+
+**Evidencia medida (2026-10-16, motor único PostgreSQL).**
+
+| Familia del dialecto heredado | Antes | Después |
+|---|---|---|
+| Identificador entre acentos graves | 43 literales | **12**, en las guardas y expectativas declaradas |
+| Upsert heredado (`ON DUPLICATE KEY`) | 18 | **8**, en las mismas |
+| `VALUES(columna)` heredado | 7 | **5**, en las mismas |
+| Aritmética temporal (`DATE_ADD`, `DATE_SUB`, `TIMESTAMPDIFF`, `CURDATE`) | 23 | **0** |
+| Extracción JSON (`JSON_EXTRACT`, `JSON_UNQUOTE`) | 0 | **0** |
+| Funciones de texto (`DATABASE()`, `GROUP_CONCAT`) | 15 | **5**, en las suites declaradas |
+| Catálogo de metadatos en su grafía heredada | 11 | **9**, en el contrato de correspondencia y la guarda del despliegue |
+| Ventana de purga (`SET @vendguard_purge`) | 4 | **0** (la única forma es `set_config('vendguard.purge', …, false)`, §3) |
+| `SHOW COLUMNS` | 1 | **0** (se lee `pg_enum`) |
+| **Total** | **122 literales en 30 ficheros** | **39 literales en 7 ficheros**, los 7 declarados con dueño en esta tabla |
+
+La corrida completa antes y después de este porte fija el efecto: **261 suites · 8.802
+aserciones · 47 rojas** frente a la línea base de **261 · 8.525 · 57 rojas**, con **diez
+suites sanadas y cero regresiones**. Las diez: `CoordinatorIncidentDetailConstitutionalTest`,
+`CoordinatorRouteMapApiTest`, `IncidentCommentsPagedRepositoryTest`,
+`PdoLocationRepositoryTest`, `ResolveIncidentEndpointTest`, `TechnicianRouteEndpointTest`,
+`UserLoginLockoutTest`, `AuditEntityTypesTest`, `IncidentPauseInactivityCancellationTest` y
+`RefundsModuleClosureTest`.

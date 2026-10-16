@@ -190,33 +190,41 @@ echo "\n--- 4. El enum de la base de datos admite los nuevos valores ---\n";
 
 try {
     $pdo = \VendGuard\Infrastructure\Database\ConnectionFactory::getConnection();
-    $stmt = $pdo->query("SHOW COLUMNS FROM `audit_log` LIKE 'entity_type'");
-    $column = $stmt->fetch();
-    $enumType = $column === false ? '' : (string)$column['Type'];
+    // Las etiquetas del tipo enumerado se leen del catálogo del motor único (`pg_enum`): en este
+    // esquema `entity_type` es un tipo nativo, no una columna de texto con una restricción.
+    $enumValues = $pdo->query(
+        "SELECT e.enumlabel
+           FROM pg_enum e
+           JOIN pg_type t ON t.oid = e.enumtypid
+          WHERE t.typname = 'audit_entity_type'
+          ORDER BY e.enumsortorder"
+    )->fetchAll(\PDO::FETCH_COLUMN);
+    $dbEnumValues = array_map('strval', $enumValues);
+    $enumType = implode(' · ', $dbEnumValues);
 
-    $hasRefundEnum = str_contains($enumType, "'REFUND_REQUEST'");
-    $hasUnclaimedEnum = str_contains($enumType, "'UNCLAIMED_CASH_FINDING'");
-    $hasLegacyEnum = str_contains($enumType, "'TICKET'")
-        && str_contains($enumType, "'MACHINE'")
-        && str_contains($enumType, "'LOCATION'")
-        && str_contains($enumType, "'USER'");
+    $hasRefundEnum = in_array('REFUND_REQUEST', $dbEnumValues, true);
+    $hasUnclaimedEnum = in_array('UNCLAIMED_CASH_FINDING', $dbEnumValues, true);
+    $hasLegacyEnum = in_array('TICKET', $dbEnumValues, true)
+        && in_array('MACHINE', $dbEnumValues, true)
+        && in_array('LOCATION', $dbEnumValues, true)
+        && in_array('USER', $dbEnumValues, true);
 
     $assert(
         '4.1 El enum de audit_log incluye REFUND_REQUEST',
         $hasRefundEnum,
-        "Enum actual: {$enumType}"
+        "Etiquetas actuales: {$enumType}"
     );
 
     $assert(
         '4.2 El enum de audit_log incluye UNCLAIMED_CASH_FINDING',
         $hasUnclaimedEnum,
-        "Enum actual: {$enumType}"
+        "Etiquetas actuales: {$enumType}"
     );
 
     $assert(
         '4.3 La ampliación no elimina los valores preexistentes (TICKET, MACHINE, LOCATION, USER)',
         $hasLegacyEnum,
-        "Enum actual: {$enumType}"
+        "Etiquetas actuales: {$enumType}"
     );
 
     $orphanCount = (int)$pdo->query("SELECT COUNT(*) FROM audit_log WHERE entity_type IS NULL")->fetchColumn();
@@ -225,9 +233,6 @@ try {
         $orphanCount === 0,
         "Filas huérfanas: {$orphanCount}"
     );
-
-    preg_match_all("/'([A-Z_]+)'/", $enumType, $matches);
-    $dbEnumValues = $matches[1];
 
     $missingInDomain = array_diff($dbEnumValues, AuditEvent::ENTITY_TYPES);
     $assert(
@@ -265,7 +270,7 @@ try {
     );
 } catch (Throwable $e) {
     $assert(
-        '4.x Se puede inspeccionar el enum de audit_log contra MariaDB real',
+        '4.x Se puede inspeccionar el enum de audit_log contra el motor real',
         false,
         $e->getMessage()
     );

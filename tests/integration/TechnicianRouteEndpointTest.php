@@ -85,11 +85,17 @@ if ($tech1 === null || $coordinator === null) {
 }
 
 // Crear un segundo técnico para validar segregación de rutas
+// Upsert del motor único: clave del conflicto `email`, clave canónica declarada (`email_key`
+// es `NOT NULL`, A-1) y booleano en la forma del motor.
 $pdo->prepare("
-    INSERT INTO `users` (`name`, `email`, `password_hash`, `role`, `phone`, `is_active`)
-    VALUES ('Carlos Técnico Segundo', 'carlos.segundo@vendguard.internal', :hash, 'TECHNICIAN', '688999000', 1)
-    ON DUPLICATE KEY UPDATE `is_active` = 1
-")->execute([':hash' => password_hash('Password123!', PASSWORD_BCRYPT)]);
+    INSERT INTO users (name, email, email_key, password_hash, role, phone, is_active)
+    VALUES ('Carlos Técnico Segundo', :email, :email_key, :hash, 'TECHNICIAN', '688999000', TRUE)
+    ON CONFLICT (email) DO UPDATE SET is_active = TRUE
+")->execute([
+    ':email' => 'carlos.segundo@vendguard.internal',
+    ':email_key' => 'carlos.segundo@vendguard.internal',
+    ':hash' => password_hash('Password123!', PASSWORD_BCRYPT),
+]);
 
 $tech2 = $userRepo->findByEmail('carlos.segundo@vendguard.internal');
 $assert("0. Segundo técnico preparado", $tech2 !== null);

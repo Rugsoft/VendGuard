@@ -107,7 +107,7 @@ $resUnknown = $router->dispatch($reqUnknown);
 $assert('Correo inexistente responde 401 INVALID_CREDENTIALS', $resUnknown->getStatusCode() === 401 && ($resUnknown->getDecodedBody()['error']['code'] ?? '') === 'INVALID_CREDENTIALS');
 
 // 6. Simular expiración del bloqueo y acceso correcto que reinicia contador
-$pdo->prepare("UPDATE `users` SET `login_locked_until` = DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE `id` = :id")
+$pdo->prepare("UPDATE users SET login_locked_until = NOW() - INTERVAL '1 second' WHERE id = :id")
     ->execute([':id' => $userId]);
 
 $reqGood = new Request('POST', '/api/auth/login', [], [

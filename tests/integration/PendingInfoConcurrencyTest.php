@@ -103,7 +103,7 @@ $captureThrowable = static function (callable $action): ?Throwable {
 $assert(
     '0.1 Dos conexiones PDO REALES e independientes sobre la misma base de datos',
     $pdoA !== $pdoB
-    && $pdoA->query('SELECT DATABASE()')->fetchColumn() === $pdoB->query('SELECT DATABASE()')->fetchColumn(),
+    && $pdoA->query('SELECT current_database()')->fetchColumn() === $pdoB->query('SELECT current_database()')->fetchColumn(),
     'las conexiones del banco de pruebas no son independientes'
 );
 

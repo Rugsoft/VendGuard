@@ -180,7 +180,7 @@ $assert(
 
 // 1.2 Guardia física real: el trigger BEFORE DELETE de la migración 010 rechaza el
 // borrado físico de un expediente de reintegro (la única vía de salida es la válvula
-// de purga @vendguard_purge, reservada al arnés de pruebas).
+// de purga `vendguard.purge`, reservada al arnés de pruebas).
 $incGuard = $makeIncident($mach1->getId(), $location1->getId());
 $pdo->prepare(
     "INSERT INTO refund_requests
@@ -198,7 +198,7 @@ $pdo->prepare(
 ]);
 $refundGuardId = (int)$pdo->lastInsertId();
 
-$pdo->exec('SET @vendguard_purge = 0');
+TestDataCleaner::setSessionPurgeSignal($pdo, false);
 $deleteBlocked = false;
 $deleteMessage = '';
 try {

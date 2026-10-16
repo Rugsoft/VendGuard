@@ -443,7 +443,7 @@ try {
     // Martes a las 12:15, dentro de la jornada comercial: si el comentario desplazase el
     // vencimiento (como hacía la reactivación derogada), el cambio sería visible al instante.
     $originalDeadline = (new DateTimeImmutable('next tuesday 12:15', $madrid))->format('Y-m-d H:i:s');
-    $pdo->prepare('UPDATE `incidents` SET `sla_target_at` = :deadline, `paused_at` = DATE_SUB(NOW(), INTERVAL 90 MINUTE) WHERE `id` = :id')
+    $pdo->prepare("UPDATE incidents SET sla_target_at = :deadline, paused_at = NOW() - INTERVAL '90 minutes' WHERE id = :id")
         ->execute([':deadline' => $originalDeadline, ':id' => $coldIncidentId]);
 
     $coldRowBefore      = $incidentRow($coldIncidentId);

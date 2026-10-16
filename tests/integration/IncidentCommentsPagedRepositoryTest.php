@@ -201,18 +201,24 @@ $assert("4.2 Recuento para Sede (solo públicos, is_internal = 0) = 4",
 // =========================================================================
 echo "\n--- Caso 5: Índice idx_comments_incident presente ---\n";
 
+// El catálogo de índices del motor único: su definición lleva la lista de columnas entre
+// paréntesis y la primera de ellas es la que lidera el índice.
 $indexRow = $pdo->query("
-    SELECT INDEX_NAME, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS columns_csv
-    FROM information_schema.STATISTICS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'incident_comments'
-      AND INDEX_NAME = 'idx_comments_incident'
-    GROUP BY INDEX_NAME
+    SELECT indexname, indexdef
+    FROM pg_indexes
+    WHERE schemaname = current_schema()
+      AND tablename = 'incident_comments'
+      AND indexname = 'idx_comments_incident'
 ")->fetch(PDO::FETCH_ASSOC);
+
+$indexLead = '';
+if ($indexRow !== false && preg_match('/\(([^)]*)\)/', (string)$indexRow['indexdef'], $found) === 1) {
+    $indexLead = trim((string)$found[1]);
+}
 
 $assert("5.1 El índice idx_comments_incident existe en incident_comments", $indexRow !== false);
 $assert("5.2 El índice está liderado por incident_id (filtro del hilo)",
-    $indexRow !== false && str_starts_with((string)$indexRow['columns_csv'], 'incident_id'));
+    $indexRow !== false && str_starts_with($indexLead, 'incident_id'));
 
 // =========================================================================
 // CASO 6: Expediente sin comentarios (caso límite del hilo vacío)

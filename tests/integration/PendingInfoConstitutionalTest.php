@@ -160,15 +160,15 @@ $freeMachinesByType = function (string $machineType, int $limit) use ($pdo): arr
 // reservado, contrato §8.1) que su gancho de apagado drena.
 $constSiteCode = 'SEDE-TEST-CONST-' . $suffix;
 $pdo->prepare(
-    "INSERT INTO `locations` (`site_code`, `name`, `address`, `latitude`, `longitude`, `contact_name`, `contact_phone`, `is_active`)
-     VALUES (:code, 'Sede de aprovisionamiento constitucional', 'Carrer de la Prova 1, Barcelona', 41.39, 2.19, 'Contacto Banco', '600000321', 1)
-     ON DUPLICATE KEY UPDATE `is_active` = 1, `deleted_at` = NULL"
-)->execute([':code' => $constSiteCode]);
+    "INSERT INTO locations (site_code, site_code_key, name, address, latitude, longitude, contact_name, contact_phone, is_active)
+     VALUES (:code, :site_code_key, 'Sede de aprovisionamiento constitucional', 'Carrer de la Prova 1, Barcelona', 41.39, 2.19, 'Contacto Banco', '600000321', TRUE)
+     ON CONFLICT (site_code) DO UPDATE SET is_active = TRUE, deleted_at = NULL"
+)->execute([':code' => $constSiteCode, ':site_code_key' => strtolower($constSiteCode)]);
 
 $plantMachine = $pdo->prepare(
-    "INSERT INTO `machines` (`location_id`, `code`, `model`, `machine_type`, `floor_wing`, `notes`, `is_active`, `sanitary_status`, `next_sanitary_inspection_due`)
-     VALUES ((SELECT `id` FROM `locations` WHERE `site_code` = :site_code LIMIT 1), :code, 'Modelo Banco', 'SNACKS', 'Planta 1', NULL, 1, 'CONFORME', DATE_ADD(CURDATE(), INTERVAL 30 DAY))
-     ON DUPLICATE KEY UPDATE `is_active` = 1, `deleted_at` = NULL"
+    "INSERT INTO machines (location_id, code, model, machine_type, floor_wing, notes, is_active, sanitary_status, next_sanitary_inspection_due)
+     VALUES ((SELECT id FROM locations WHERE site_code = :site_code LIMIT 1), :code, 'Modelo Banco', 'SNACKS', 'Planta 1', NULL, TRUE, 'CONFORME', CURRENT_DATE + INTERVAL '30 days')
+     ON CONFLICT (code) DO UPDATE SET is_active = TRUE, deleted_at = NULL"
 );
 foreach (['S1', 'S2'] as $index) {
     $plantMachine->execute([':site_code' => $constSiteCode, ':code' => 'CONST-' . $suffix . '-' . $index]);
@@ -748,7 +748,7 @@ try {
     // silencio de sede (dos semanas completas contienen 90 h de ventana comercial).
     $backdatePause($stalledIncidentId, 14);
     $stalledPauseHours = (int)$pdo->query(
-        "SELECT TIMESTAMPDIFF(HOUR, `paused_at`, NOW()) FROM `incidents` WHERE `id` = {$stalledIncidentId}"
+        "SELECT TRUNC(EXTRACT(EPOCH FROM (NOW() - paused_at)) / 3600) FROM incidents WHERE id = {$stalledIncidentId}"
     )->fetchColumn();
     $assert(
         '3.1.b Premisa del banco: la espera sembrada supera con holgura la frontera de 72 h hábiles',

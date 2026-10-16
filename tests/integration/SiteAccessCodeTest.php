@@ -222,7 +222,7 @@ try {
         && ($lockedCorrect->getDecodedBody()['error']['code'] ?? '') === 'INVALID_SITE_CREDENTIALS');
 
     // El bloqueo es temporal: al expirar, el contador se reinicia con el siguiente fallo.
-    $pdo->prepare('UPDATE locations SET login_locked_until = DATE_SUB(NOW(), INTERVAL 1 MINUTE) WHERE site_code = :code')
+    $pdo->prepare("UPDATE locations SET login_locked_until = NOW() - INTERVAL '1 minute' WHERE site_code = :code")
         ->execute([':code' => $guardedSite]);
 
     $siteLogin($guardedSite, 'K7M4P-2QX9R');

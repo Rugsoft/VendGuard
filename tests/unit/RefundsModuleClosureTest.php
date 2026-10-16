@@ -448,13 +448,15 @@ $assert(
     && str_contains($guardMigration, '45000')
 );
 
+// Guarda invertida con el motor (módulo 13): la señal se declara en la forma del motor único y
+// la forma heredada queda prohibida, de modo que volver a ella ponga la suite en rojo.
 $cleaner = $read('tests/Support/TestDataCleaner.php');
 $assert(
     '4.4 Sólo el arnés de pruebas abre la ventana, y siempre la cierra',
-    substr_count($cleaner, '@vendguard_purge') === 2
-    && str_contains($cleaner, 'SET @vendguard_purge = 0')
-    && str_contains($cleaner, "vendguard.purge")
-    && str_contains($cleaner, "set_config('vendguard.purge', :val, false)")
+    str_contains($cleaner, "set_config('vendguard.purge', :val, false)")
+    && str_contains($cleaner, 'withPurgeWindow')
+    && str_contains($cleaner, 'setSessionPurgeSignal($pdo, false)')
+    && !str_contains($cleaner, '@vendguard_purge')
 );
 
 $runAll = $read('tests/run_all.php');

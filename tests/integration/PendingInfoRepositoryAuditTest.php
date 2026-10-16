@@ -340,8 +340,8 @@ $assert(
 $repositorySource = (string)file_get_contents(__DIR__ . '/../../src/Infrastructure/Repository/PdoIncidentRepository.php');
 $assert(
     '4.3 El repositorio no contiene ningún UPDATE ni DELETE sobre incident_history',
-    !preg_match('/UPDATE\s+`incident_history`/i', $repositorySource)
-    && !preg_match('/DELETE\s+FROM\s+`incident_history`/i', $repositorySource)
+    !preg_match('/UPDATE\s+incident_history/i', $repositorySource)
+    && !preg_match('/DELETE\s+FROM\s+incident_history/i', $repositorySource)
 );
 
 // =====================================================================
@@ -383,7 +383,7 @@ $pausedNow = $reloaded->pausePendingInfo(
     new DateTimeImmutable('2026-10-08 14:00:00')
 );
 $incidentRepo->update($pausedNow);
-$pdo->exec("UPDATE incidents SET paused_at = DATE_SUB(NOW(), INTERVAL 80 HOUR) WHERE id = {$incidentId}");
+$pdo->exec("UPDATE incidents SET paused_at = NOW() - INTERVAL '80 hours' WHERE id = {$incidentId}");
 
 $oldRows = $incidentRepo->getPendingInfoIncidentsOlderThanHours(72);
 $matching = array_values(array_filter($oldRows, static fn(array $row): bool => $row['id'] === $incidentId));
@@ -431,7 +431,7 @@ $recentRepo->update($recentRepo->findById($recentId)->pausePendingInfo(
     'Falta la autorización de seguridad para entrar en la sala restringida.',
     new DateTimeImmutable('2026-10-08 12:00:00')
 ));
-$pdo->exec("UPDATE incidents SET paused_at = DATE_SUB(NOW(), INTERVAL 2 HOUR) WHERE id = {$recentId}");
+$pdo->exec("UPDATE incidents SET paused_at = NOW() - INTERVAL '2 hours' WHERE id = {$recentId}");
 
 $oldRowsAfter = $incidentRepo->getPendingInfoIncidentsOlderThanHours(72);
 $recentIds = array_column($oldRowsAfter, 'id');

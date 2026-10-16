@@ -81,11 +81,13 @@ echo "\n--- Caso 3: Respeto estricto de Soft Delete (deleted_at IS NOT NULL) ---
 
 // Crear sede de prueba para borrado lógico
 $testSiteCode = 'SEDE-TEST-SOFTDEL';
+// Upsert del motor único: `site_code` es la clave del conflicto y `site_code_key` va declarada
+// porque es `NOT NULL` (A-2). El código es ASCII, así que su clave es su forma en minúsculas.
 $pdo->prepare("
-    INSERT INTO `locations` (`site_code`, `name`, `address`, `is_active`)
-    VALUES (:code, 'Sede Temporal Test', 'Calle Test 123, BCN', 1)
-    ON DUPLICATE KEY UPDATE `deleted_at` = NULL
-")->execute([':code' => $testSiteCode]);
+    INSERT INTO locations (site_code, site_code_key, name, address, is_active)
+    VALUES (:code, :site_code_key, 'Sede Temporal Test', 'Calle Test 123, BCN', TRUE)
+    ON CONFLICT (site_code) DO UPDATE SET deleted_at = NULL
+")->execute([':code' => $testSiteCode, ':site_code_key' => strtolower($testSiteCode)]);
 
 $tempLoc = $repository->findBySiteCode($testSiteCode);
 $assert("3.1 Sede temporal creada y encontrada activamente", $tempLoc instanceof Location);

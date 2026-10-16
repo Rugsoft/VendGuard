@@ -92,11 +92,17 @@ if ($coordinator === null || $tech1 === null) {
 }
 
 // Segundo técnico para el escenario multi-técnico
+// Upsert del motor único: clave del conflicto `email`, clave canónica declarada (`email_key`
+// es `NOT NULL`, A-1) y booleano en la forma del motor.
 $pdo->prepare("
-    INSERT INTO `users` (`name`, `email`, `password_hash`, `role`, `phone`, `is_active`)
-    VALUES ('Marta Técnica Mapa', 'marta.mapa@vendguard.internal', :hash, 'TECHNICIAN', '687000111', 1)
-    ON DUPLICATE KEY UPDATE `is_active` = 1
-")->execute([':hash' => password_hash('Password123!', PASSWORD_BCRYPT)]);
+    INSERT INTO users (name, email, email_key, password_hash, role, phone, is_active)
+    VALUES ('Marta Técnica Mapa', :email, :email_key, :hash, 'TECHNICIAN', '687000111', TRUE)
+    ON CONFLICT (email) DO UPDATE SET is_active = TRUE
+")->execute([
+    ':email' => 'marta.mapa@vendguard.internal',
+    ':email_key' => 'marta.mapa@vendguard.internal',
+    ':hash' => password_hash('Password123!', PASSWORD_BCRYPT),
+]);
 
 $tech2 = $userRepo->findByEmail('marta.mapa@vendguard.internal');
 $assert('0.3 Segundo técnico preparado', $tech2 !== null);

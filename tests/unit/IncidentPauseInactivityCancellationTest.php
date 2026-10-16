@@ -901,14 +901,14 @@ $testMachine = $machineRepo->create([
 
 $testTicket = 'TST-P09-' . $suffix;
 $pdo->prepare("
-    INSERT INTO `incidents` (
-        `ticket_code`, `machine_id`, `machine_type_snapshot`, `location_id`,
-        `category`, `description`, `urgency`, `status`, `assigned_technician_id`, `assigned_at`,
-        `pending_info_reason_category`, `pending_info_reason_text`, `paused_at`, `total_pending_info_seconds`
+    INSERT INTO incidents (
+        ticket_code, machine_id, machine_type_snapshot, location_id,
+        category, description, urgency, status, assigned_technician_id, assigned_at,
+        pending_info_reason_category, pending_info_reason_text, paused_at, total_pending_info_seconds
     ) VALUES (
         :ticket, :machine, 'SNACKS', :location,
         'PAYMENT_SYSTEM', 'Avería del banco de pruebas de inactividad de sede.', 'HIGH', 'PENDING_INFO', NULL, NULL,
-        'BUILDING_CLOSED_NO_ACCESS', 'El edificio permaneció cerrado sin facilitar acceso al técnico.', DATE_SUB(NOW(), INTERVAL 21 DAY), 0
+        'BUILDING_CLOSED_NO_ACCESS', 'El edificio permaneció cerrado sin facilitar acceso al técnico.', NOW() - INTERVAL '21 days', 0
     )
 ")->execute([
     ':ticket' => $testTicket,

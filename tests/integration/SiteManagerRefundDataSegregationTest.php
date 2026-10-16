@@ -373,7 +373,7 @@ try {
     $assert('5.9 GET coordinación con token de sede responde 401', $coordIndexSite->getStatusCode() === 401);
 
     // Confirma que la suite realmente crea datos de pago que se ocultaron antes.
-    $assert('5.10 Control de no-vacuidad: el IBAN guardado sigue existiendo en MariaDB',
+    $assert('5.10 Control de no-vacuidad: el IBAN guardado sigue existiendo en el motor',
         $refunds->findById($refundId)?->getIban() === 'ES9121000418450200051332');
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -383,23 +383,28 @@ try {
     // descuidado en cualquier ruta habría destruido un registro económico sin
     // que nada se quejara. La Constitución lo prohíbe sobre las ENTIDADES, no
     // sobre los caminos de código, así que la regla se instala donde vive el
-    // dato. Se certifica contra MariaDB real, no leyendo el fichero de la
+    // dato. Se certifica contra el motor real, no leyendo el fichero de la
     // migración.
+    //
+    // El guardián se lee de `pg_trigger`, el catálogo del motor único: lo que se
+    // certifica es que exista un disparador BEFORE DELETE sobre la tabla —no un nombre
+    // concreto, que es del motor—, y su definición la rinde el propio motor.
+    $guardTrigger = (string)($pdo->query("
+        SELECT pg_get_triggerdef(t.oid)
+        FROM pg_trigger t
+        JOIN pg_class c ON c.oid = t.tgrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE NOT t.tgisinternal
+          AND n.nspname = current_schema()
+          AND c.relname = 'refund_requests'
+          AND pg_get_triggerdef(t.oid) LIKE '%BEFORE DELETE%'
+        LIMIT 1
+    ")->fetchColumn() ?: '');
 
-    $triggerName = 'trg_refund_requests_no_hard_delete';
-    $triggerRow = $pdo->prepare('
-        SELECT ACTION_TIMING, EVENT_MANIPULATION, EVENT_OBJECT_TABLE
-        FROM information_schema.TRIGGERS
-        WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = :name
-    ');
-    $triggerRow->execute([':name' => $triggerName]);
-    $trigger = $triggerRow->fetch(PDO::FETCH_ASSOC) ?: [];
-
-    $assert('6.1 La tabla `refund_requests` tiene montado su guardián BEFORE DELETE',
-        ($trigger['ACTION_TIMING'] ?? '') === 'BEFORE'
-        && ($trigger['EVENT_MANIPULATION'] ?? '') === 'DELETE'
-        && ($trigger['EVENT_OBJECT_TABLE'] ?? '') === 'refund_requests',
-        json_encode($trigger));
+    $assert('6.1 La tabla refund_requests tiene montado su guardián BEFORE DELETE',
+        str_contains($guardTrigger, 'BEFORE DELETE ON ')
+        && str_contains($guardTrigger, 'refund_requests'),
+        'definición del guardián: ' . var_export($guardTrigger, true));
 
     // El objetivo real de esta sección: intentar BORRAR de verdad el expediente
     // que la suite acaba de crear (el mismo que lleva el IBAN) y comprobar que
@@ -491,18 +496,12 @@ try {
         return (int)$pdo->lastInsertId();
     };
 
-    // Lectura de la señal de purga EN LA FORMA DEL MOTOR ACTIVO: `vendguard.purge`
-    // en PostgreSQL, `@vendguard_purge` en MariaDB. Las dos formas se certifican,
-    // ninguna sustituye a la otra (T-HYBRID-12, T-HYBRID-26).
+    // Lectura de la señal de purga en su forma única: el parámetro de sesión
+    // `vendguard.purge` del motor único (contrato del arnés §4.1).
     $readPurgeSignal = static function (PDO $pdo): string {
-        if ((string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql') {
-            $row = $pdo->query("SELECT current_setting('vendguard.purge', true) AS v")->fetch(PDO::FETCH_ASSOC);
+        $row = $pdo->query("SELECT current_setting('vendguard.purge', true) AS v")->fetch(PDO::FETCH_ASSOC);
 
-            return strtolower((string)($row['v'] ?? ''));
-        }
-        $row = $pdo->query('SELECT @vendguard_purge AS v')->fetch(PDO::FETCH_ASSOC);
-
-        return (string)($row['v'] ?? '0');
+        return strtolower((string)($row['v'] ?? ''));
     };
 
     // El arnés de pruebas debe poder seguir limpiando: es el único que puede
@@ -537,18 +536,17 @@ try {
         in_array($signalAfterWindow, ['0', 'off', ''], true),
         'forma declarada al cerrar: ' . var_export($signalAfterWindow, true));
 
-    // El guardián no puede abrirse desde el código de producción: la única
-    // escritor de la variable vive en el arnés de pruebas, nunca en producción.
-    // El ayudante del limpiador sí declara la señal, y la declara en las dos
-    // formas: si una sola de ellas desapareciera, la purga dejaría de funcionar
-    // en el motor correspondiente.
+    // El guardián no puede abrirse desde el código de producción: el único
+    // escritor de la señal vive en el arnés de pruebas, nunca en producción.
+    // El ayudante del limpiador la declara en la forma del motor único, y esta
+    // guarda se invierte con el motor: exige esa forma y prohíbe la heredada, de
+    // modo que un retorno a la sintaxis retirada no pueda pasar inadvertido.
     $cleanerSource = (string)file_get_contents(dirname(__DIR__, 2) . '/tests/Support/TestDataCleaner.php');
-    $assert('6.9b El único ayudante declara la señal en las dos formas del motor',
-        str_contains($cleanerSource, 'SET @vendguard_purge = 1')
-        && str_contains($cleanerSource, 'SET @vendguard_purge = 0')
-        && str_contains($cleanerSource, "set_config('vendguard.purge', :val, false)")
+    $assert('6.9b El único ayudante declara la señal en la forma del motor único y no en la heredada',
+        str_contains($cleanerSource, "set_config('vendguard.purge', :val, false)")
         && str_contains($cleanerSource, "'off'")
-        && str_contains($cleanerSource, "'on'"));
+        && str_contains($cleanerSource, "'on'")
+        && !str_contains($cleanerSource, '@vendguard_purge'));
 
     $srcRoot = dirname(__DIR__, 2) . '/src';
     $srcOffenders = [];
