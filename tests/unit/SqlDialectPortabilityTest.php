@@ -782,9 +782,9 @@ const LEGACY_DIALECT = [
     ],
     'tests/integration/PostgresConstitutionalTest.php' => [
         'kind' => KIND_CONTRACT,
-        'owner' => 'T-13-16',
+        'owner' => 'T-13-18',
         'census' => ['legacy_database' => 1],
-        'why' => 'contrasta el blindaje constitucional contra el motor heredado; se retira con el contrato de correspondencia entre motores',
+        'why' => 'contrasta el blindaje constitucional contra el motor heredado; pertenece al canal remoto/categoría propia del módulo y se recertifica en T-13-18',
     ],
     'tests/integration/SanitaryClockConsumerRaceTest.php' => [
         'kind' => KIND_DRAINED, 'owner' => 'T-13-12', 'census' => [],
@@ -798,10 +798,10 @@ const LEGACY_DIALECT = [
     ],
     'tests/integration/SchemaConvergenceParityTest.php' => [
         'kind' => KIND_CONTRACT,
-        'owner' => 'T-13-16',
+        'owner' => 'T-13-18',
         'mixed' => true,
         'census' => ['catalog' => 9, 'legacy_database' => 1, 'text_function' => 1],
-        'why' => 'certifica la correspondencia entre los dos esquemas: lee el catálogo del motor heredado en su grafía y el del motor único, para compararlos; muere con el contrato de correspondencia',
+        'why' => 'certifica la correspondencia entre los dos esquemas: lee el catálogo del motor heredado en su grafía y el del motor único; pertenece al canal de categoría que se recertifica en T-13-18',
     ],
     'tests/integration/SeedRunnerSingleEngineTest.php' => [
         'kind' => KIND_GUARD,

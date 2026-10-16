@@ -483,7 +483,7 @@ Para cumplir incondicionalmente con la **autonomía de la suite de pruebas local
 
 1. **Cero Dependencia de Red en Tests de Integración:**
    - Todas las sedes de prueba (`SEDE-BCN-01`, `SEDE-BCN-02`) incorporan coordenadas físicas reales en `SeedRunner.php`.
-   - Los tests de API de ruta del técnico (`TechnicianRouteMapApiTest.php`) y del coordinador (`CoordinatorRouteMapApiTest.php`) ejecutan el algoritmo contra MariaDB real comprobando:
+   - Los tests de API de ruta del técnico (`TechnicianRouteMapApiTest.php`) y del coordinador (`CoordinatorRouteMapApiTest.php`) ejecutan el algoritmo contra el motor del arnés comprobando:
      - Detección de parada `#1` para averías en `IN_PROGRESS`.
      - Priorización absoluta de paradas con máquinas perecederas (`CRITICAL`) sobre ordinarias.
      - Ordenación correcta por proximidad de paradas ordinarias sucesivas.

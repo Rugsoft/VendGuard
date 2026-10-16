@@ -758,7 +758,7 @@ custodia no es válida.
 
 Para garantizar la ejecución 100% autónoma en local (`php tests/run_all.php`):
 1. **Pruebas Unitarias de Validación:** Algoritmo nativo de Módulo 97 para IBAN (válidos, erróneos y con checksum falso) sin llamadas de red.
-2. **Pruebas de Integración con MariaDB Real:**
+2. **Pruebas de Integración con el motor del arnés:**
    - Flujo QR público completo: registro con generación de PIN y token de seguimiento.
    - Flujo móvil de técnico: resolución con dictamen `FOUND_PHYSICAL` y custodia forzada `HELD_FOR_CENTRAL` si $> 10\ \text{€}$.
    - Flujo de conserjería: validación de PIN de 4 dígitos y rechazo de PIN incorrecto.

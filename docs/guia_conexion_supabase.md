@@ -43,7 +43,7 @@ Medido en tu máquina, no supuesto:
 | Comprobación | Resultado |
 | :--- | :--- |
 | PHP | `8.2.12 (cli)`, ZTS, Windows |
-| Drivers PDO | `mysql, pgsql, sqlite` → **`pdo_pgsql` ya está activo** |
+| Drivers PDO | `pgsql, sqlite` → **`pdo_pgsql` activo** |
 | `openssl` y `curl` | disponibles en `/mingw64/bin` |
 | Herramientas de GitHub | **`gh` no está instalado** → los secretos se escriben en la web |
 | Cliente PostgreSQL local | `psql` 16 (instalación nativa `postgresql-x64-16`) |
@@ -187,7 +187,7 @@ si el esquema no queda comprobado. No hay ningún paso de «pegar el SQL en el e
   (`countCommentsForIncidents()`, un único `GROUP BY incident_id`): la serie de muestras deja de crecer con las filas
   —de 167,6 ms con una fila a 1.094,3 ms con veinte **antes**, frente a 127–215 ms con las mismas veinte
   **después**— y **la operación «listar» cumple ya el presupuesto de 250 ms**, con la insignia de conversación
-  intacta: el agregado devuelve el mismo total (certificado contra MariaDB real en el Caso 7 de
+  intacta: el agregado devuelve el mismo total (certificado contra el motor en el Caso 7 de
   `IncidentCommentsPagedRepositoryTest.php`) y el blindaje constitucional del módulo 10 sigue en verde con la
   lectura agregada en su lista blanca de solo consulta.
 
@@ -202,7 +202,7 @@ si el esquema no queda comprobado. No hay ningún paso de «pegar el SQL en el e
   La primera cura quitó lo que debía —una ida y vuelta por parada— (**−34,7 %**), y la bandeja seguía muy por
   encima del presupuesto por **las tres lecturas que le quedaban por parada** —máquina, sede y ajustes preventivos
   de la puerta sanitaria—. Esas tres eran el candidato ya medido, y ya están curadas: la bandeja entera se lee en
-  **UNA sola consulta** (`PdoIncidentRepository::findRouteBoard()`, certificada contra MariaDB real en el Caso 9 de
+  **UNA sola consulta** (`PdoIncidentRepository::findRouteBoard()`, certificada contra el motor en el Caso 9 de
   `TechnicianRouteEndpointTest.php`, parada por parada y campo por campo contra las lecturas individuales), y con
   la misma bandeja de 13 paradas la mediana pasa de **1.739,3 ms a 88,2 ms** —**−94,9 %**, de **40,2× a 2,0×**
   idas y vueltas—: **la operación «ruta» cumple el presupuesto de RNF-01** (aserción 5.1 en verde), con el mismo
@@ -211,7 +211,7 @@ si el esquema no queda comprobado. No hay ningún paso de «pegar el SQL en el e
 
   Además, la sonda destapó un **defecto de portabilidad real**: contra PostgreSQL, `GET /api/technician/my-route`
   respondía **HTTP 500 entera** porque el JOIN comparaba `machine_type` con `preventive_machine_type` —dos tipos
-  enumerados distintos por contrato— y el motor no tiene operador entre ellos; en MariaDB el ENUM compara por
+  enumerados distintos por contrato— y el motor no tiene operador entre ellos; en el motor heredado el ENUM comparaba por
   etiqueta y el defecto era invisible a la batería hermética. Se reparó con un cast dialectal nuevo
   (`SqlDialectAdapter::castToText()`), certificado contra el motor remoto con sonda efímera (con cast: 1 fila; sin
   cast: `42883 operator does not exist`).
@@ -312,7 +312,7 @@ previo (línea roja 5 de [AGENTS.md](../AGENTS.md)). Si quieres, los enmiendo en
 3. **Despliegue en contenedor** — el `CMD` ya ejecuta el inicializador antes del servidor web; el destino (Render u otro)
    y `VENDGUARD_APP_URL` son decisión tuya.
 4. **Rollback en un minuto** — quitar `DATABASE_URL` (y `DB_SSL_ROOT_CERT`) del entorno: la aplicación vuelve a
-   MariaDB sin tocar una línea de código.
+   el motor previo sin tocar una línea de código.
 
 ---
 
@@ -326,7 +326,7 @@ reafirmar a mano sin arrancar el servicio.
 ### 11.1 Puntual (reafirmar sin arrancar)
 
 ```bash
-# Contra el motor que declare el entorno: Supabase (DATABASE_URL=postgres://…) o MariaDB local
+# Contra el motor único PostgreSQL (DATABASE_URL=postgres://…):
 php bin/seed_demo_history.php
 ```
 

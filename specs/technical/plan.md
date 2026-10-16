@@ -22,7 +22,7 @@ gestor-incidencias-vending/
 │   ├── functional/
 │   │   └── mvp_functional_spec.md      # Especificación funcional formal (EARS)
 │   └── technical/
-│       ├── database_schema.md          # Esquema relacional MariaDB y DDL
+│       ├── database_schema.md          # Esquema relacional PostgreSQL y DDL
 │       ├── api_contracts.md            # Contratos REST JSON de la API
 │       └── plan.md                     # Este Plan Maestro de Ingeniería
 ├── public/                             # Raíz web pública (DocumentRoot de Apache/Nginx)
@@ -81,7 +81,7 @@ gestor-incidencias-vending/
 │   │       └── ResolveIncidentDTO.php
 │   ├── Infrastructure/                 # Capa de Infraestructura (Adaptadores y Persistencia)
 │   │   ├── Database/
-│   │   │   ├── ConnectionFactory.php   # Conexión PDO a MariaDB segura (Prepared Statements)
+│   │   │   ├── ConnectionFactory.php   # Conexión PDO a PostgreSQL segura (Prepared Statements)
 │   │   │   └── MigrationRunner.php     # Ejecutor del script DDL
 │   │   ├── Repository/                 # Repositorios PDO
 │   │   │   ├── PdoIncidentRepository.php
@@ -113,7 +113,7 @@ gestor-incidencias-vending/
     │   ├── UrgencyCalculatorTest.php
     │   ├── IncidentStateMachineTest.php
     │   └── ResolutionValidatorTest.php
-    ├── Integration/                    # Pruebas de Integración con MariaDB
+    ├── Integration/                    # Pruebas de Integración con el motor del arnés
     │   ├── DuplicateIncidentConstraintTest.php
     │   ├── PdoIncidentRepositoryTest.php
     │   └── SoftDeleteIntegrityTest.php
@@ -125,7 +125,7 @@ gestor-incidencias-vending/
 
 ## 2. Mapeo del Modelo de Datos y Contratos API
 
-La correspondencia entre las tablas de **MariaDB** (`database_schema.md`) y los endpoints REST (`api_contracts.md`) se estructura de forma unívoca:
+La correspondencia entre las tablas del motor único (`database_schema.md`) y los endpoints REST (`api_contracts.md`) se estructura de forma unívoca:
 
 | Entidad / Tabla | Repositorio PDO | Controlador REST | Endpoint API | Método HTTP | Códigos HTTP |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -396,7 +396,7 @@ Los componentes implementan estrictamente las clases y variables CSS extraídas 
 | Decisión Adoptada | Justificación Técnica | Alternativa Descartada | Motivo del Descarte |
 | :--- | :--- | :--- | :--- |
 | **PHP 8.2+ Moderno Puro (Vanilla POO)** | Control absoluto del código, cero sobrecarga, arranque instantáneo y aprendizaje de arquitectura limpia aplicable al certificado MF0493_3. | Frameworks pesados (Laravel, Symfony) | Viola el Dogma Vanilla y el Artículo IV de la Constitución; sobredimensiona el proyecto con miles de archivos ajenos. |
-| **Índice Único Condicional en MariaDB (`uq_machine_active_ticket`)** | Garantiza la regla de duplicados a nivel atómico de motor relacional mediante una columna virtual. Imposible de burlar por condiciones de carrera. | Validación únicamente en código PHP | Si dos peticiones HTTP entran en el mismo milisegundo, la validación en PHP puede dar falso positivo y crear dos registros duplicados en BD. |
+| **Índice Único Parcial (`uq_machine_active_ticket`)** | Garantiza la regla de duplicados a nivel atómico en PostgreSQL mediante un índice único parcial. Imposible de burlar por condiciones de carrera. | Validación únicamente en código PHP | Si dos peticiones HTTP entran en el mismo milisegundo, la validación en PHP puede dar falso positivo y crear dos registros duplicados en BD. |
 | **Vue.js 3 (Composition API modular)** | Reactividad ágil, fácil aprendizaje viniendo de JS/HTML y soporte nativo para migrar a PWA/Capacitor sin reescribir nada. | React / Angular | Curva de aprendizaje mucho más empinada, mayor sobrecarga de bundling y necesidad de JSX/TypeScript obligatorio. |
 | **Cliente HTTP fetch nativo** | Los navegadores modernos soportan `fetch()` nativo y `FormData` para envío asíncrono y multipart sin librerías. | Axios / JQuery | Dependencias externas innecesarias que violan la Constitución. |
 | **Sondeo ligero (*Polling* de 60s) en Dashboard** | Resuelve el 100% de la necesidad de actualización de SLA del coordinador sin requerir infraestructura adicional. | WebSockets / Socket.io | Complejidad innecesaria de configuración de servidor demonio para el alcance del MVP (Principio YAGNI). |
@@ -421,11 +421,11 @@ Prueban la lógica de negocio pura de forma aislada, sin conexión a base de dat
    * Prueba transiciones permitidas: `REGISTRADA` ➔ `ASIGNADA` ➔ `EN_CURSO` ➔ `RESUELTA` ➔ `CERRADA`.
    * Prueba transiciones ilegales: `REGISTRADA` ➔ `RESUELTA` (lanza `InvalidTransitionException`).
 
-### 6.2 Pruebas de Integración con MariaDB (`tests/Integration/`)
+### 6.2 Pruebas de Integración con el motor del arnés (`tests/Integration/`)
 Prueban la persistencia real, restricciones y transacciones:
 1. `DuplicateIncidentConstraintTest.php`:
    * Inserta un ticket activo para la máquina 1.
-   * Intenta insertar un segundo ticket en estado `REGISTRADA` para la misma máquina y verifica que MariaDB lanza error `1062 Duplicate entry`.
+   * Intenta insertar un segundo ticket en estado `REGISTRADA` para la misma máquina y verifica que el motor único lanza error de unicidad `23505`.
    * Cambia el primer ticket a `CLOSED` e intenta insertar de nuevo: verifica que ahora sí lo permite.
 2. `SoftDeleteIntegrityTest.php`:
    * Ejecuta borrado lógico de una sede y comprueba que `deleted_at` no es nulo pero la fila sigue existiendo físicamente en la tabla.

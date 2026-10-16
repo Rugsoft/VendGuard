@@ -6,15 +6,10 @@ T-HYBRID-27).
 
 **Por qué vive aquí y no en la batería hermética:** `php tests/run_all.php` descubre por
 `glob` y no tiene canal de omisión, y RNF-04 exige que la batería completa corra sin red
-contra el motor local (MariaDB). Las suites que exigen PostgreSQL no pueden mezclarse con
-ella sin romper el verde offline o sin saltarse suites en silencio, así que forman una
-categoría propia con su canal y su informe. Este directorio aporta lo que esa categoría
-necesitaba y no existía: un motor real, disponible y comprobable.
+contra el motor PostgreSQL local en contenedor TLS (puerto 55433). El camino anterior ha sido retirado por completo del sistema (Módulo 13).
 
-**Actualización (módulo 13 · 2026-10-15):** con la retirada del camino MariaDB decidida por el
-Product Owner, este motor deja de ser el banco *exclusivo* de la categoría del motor nuevo y pasa a
-ser también el **banco de la batería hermética** —ver «Banco de la batería hermética» más abajo—.
-La separación por categorías con canal propio se conserva mientras dure el porte del arnés.
+**Actualización (módulo 13 · 2026-10-15):** con la enmienda de motor único decidida por el
+Product Owner, este motor es el **banco único de la batería hermética** —ver «Banco de la batería hermética» más abajo— y del entorno local.
 
 ## Qué queda aprovisionado
 
@@ -271,9 +266,7 @@ mide lo mismo que en el cliente local: acepta las dos formas del SAN y rechaza l
    proyecto Supabase con credenciales y se informa por separado (T-HYBRID-27).
 4. **`pdo_pgsql` del contenedor: hecho y verificado.** La imagen de la aplicación instala
    `postgresql-dev` con la cadena de `$PHPIZE_DEPS` y compila `pdo_pgsql`; dentro de la
-   imagen construida, `PDO::getAvailableDrivers()` devuelve `mysql` y `pgsql`. Falta que
-   este motor local sea el que sirve la ruta PostgreSQL de la aplicación: aquí se ha
-   activado el driver del PHP de XAMPP.
+   imagen construida, `PDO::getAvailableDrivers()` devuelve exclusivamente `pgsql` (motor heredado retirado).
 5. **Endurecimiento opcional pendiente de decidir:** el instalador deja
    `listen_addresses = '*'` en `postgresql.conf`. La autenticación ya está limitada a
    loopback por `pg_hba.conf`, así que ninguna conexión externa puede autenticarse; si se

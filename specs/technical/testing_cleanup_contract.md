@@ -183,7 +183,7 @@ Verifica:
    antes que su padre, incluidos los padres dobles (`incident_replaced_parts`
    referencia `incidents`, `preventive_orders` **y** `spare_parts`).
 3. **El orden ingenuo falla.** Reproduce el borrado histórico y afirma que lanza
-   el error 1451 de MariaDB.
+   el error 23503 de PostgreSQL.
 4. `purge()` drena las cinco hijas sin excepción y sin tocar las maestras.
 5. `purgeIncident()` drena un incidente sin afectar a los demás.
 6. Autoverificación de no-fuga: la suite no deja filas en las cinco hijas.

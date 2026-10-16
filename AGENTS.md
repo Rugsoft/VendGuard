@@ -66,8 +66,9 @@ El proyecto adopta una arquitectura **API-First desacoplada** orientada a Clean 
 * **Backend & API:** **PHP 8+ Moderno Puro (Vanilla POO)**.
   * Estructura modular y limpia sin frameworks pesados: Router frontal ligero, Controladores de API (`json_encode`), Servicios de aplicación y Repositorios con **PDO**.
   * Tipado estricto (`declare(strict_types=1);`), clases inmutables/DTOs y separación estricta de responsabilidades.
-* **Base de Datos:** **MariaDB / MySQL**.
-  * Modelado relacional normalizado con claves foráneas, restricciones de integridad y transacciones para cambios de estado críticos.
+* **Base de Datos:** **PostgreSQL (Supabase)**.
+  * Modelado relacional normalizado con claves foráneas, restricciones de integridad, 24 tipos `ENUM` nativos, disparadores de blindaje constitucional y transacciones para cambios de estado críticos.
+  * Persistencia unificada con PDO nativo (`pdo_pgsql`), operando en producción vía agrupador transaccional Supavisor (puerto 6543) bajo TLS `verify-full`, y en certificación/desarrollo contra el motor PostgreSQL local sin dependencias externas.
 * **Frontend Web:** **Vue.js 3 (Composition API)**.
   * Interfaz reactiva basada en componentes, gestión de estado limpia y consumo de la API REST mediante `fetch()`.
   * **Sistema de Diseño Visual:** Guiado estrictamente por [`docs/design.md`](file:///C:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/docs/design.md) (basado en el sistema Docker):
@@ -84,7 +85,7 @@ El proyecto adopta una arquitectura **API-First desacoplada** orientada a Clean 
 2. **Separación de Responsabilidades (Clean Architecture):**
    * **Core / Domain:** Entidades y reglas de negocio puras (estados de incidencia, cálculo de SLA, validación de asignación).
    * **Application:** Casos de uso (`ReportIncident`, `AssignTechnician`, `ResolveIncident`).
-   * **Infrastructure:** Conexión PDO a MariaDB, almacenamiento de imágenes y repositorios.
+   * **Infrastructure:** Conexión PDO a PostgreSQL (Supabase), almacenamiento de imágenes y repositorios.
    * **Presentation / API:** Router HTTP y controladores REST.
 3. **Validación Temprana (Fail-Fast):** Validar entradas y reglas de negocio antes de persistir cualquier cambio.
 

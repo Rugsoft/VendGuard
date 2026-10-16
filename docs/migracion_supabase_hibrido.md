@@ -1,9 +1,12 @@
-# PLAN DE MIGRACIÓN: ENFOQUE HÍBRIDO (BACKEND PHP 8.2 + SUPABASE POSTGRESQL FREE TIER)
+# ACTA HISTÓRICA · PLAN DE MIGRACIÓN HÍBRIDA (MÓDULO 12 - CERRADA)
+
+> [!NOTE]
+> **Documento Histórico:** Este plan documenta la migración híbrida ejecutada en el Módulo 12. Con la aprobación de la enmienda de motor único (Módulo 13, EARS-13.1 a EARS-13.10), el camino dual ha sido retirado definitivamente y PostgreSQL (Supabase) es el único motor del sistema. El rollback a MariaDB queda derogado y se gestiona mediante PITR y copias lógicas en Supabase (§7).
 
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
 **Documento:** `docs/migracion_supabase_hibrido.md`  
 **Fecha:** Octubre 2026  
-**Estrategia:** Enfoque A (Arquitectura Híbrida)  
+**Estrategia:** Enfoque A (Arquitectura Híbrida - Hoy culminada en Motor Único)  
 **Normativa Suprema:** [`constitution.md`](../constitution.md) (Artículos I al VII)  
 **Directrices Operativas:** [`AGENTS.md`](../AGENTS.md) (Dogma Vanilla, Dualismo Lingüístico)  
 
@@ -11,7 +14,7 @@
 
 ## 1. Visión Ejecutiva y Objetivos de la Migración
 
-El **Enfoque Híbrido** traslada la persistencia de datos relacionales desde el motor actual (MariaDB local / TiDB en Render) a la infraestructura administrada de **PostgreSQL en Supabase (Plan Gratuito)**, **manteniendo al 100% el backend en PHP 8.2+ Clean Architecture y el frontend Vanilla Vue 3**.
+El **Enfoque Híbrido** trasladó la persistencia de datos relacionales desde el motor previo a la infraestructura administrada de **PostgreSQL en Supabase (Plan Gratuito)**, **manteniendo al 100% el backend en PHP 8.2+ Clean Architecture y el frontend Vanilla Vue 3**.
 
 ```mermaid
 flowchart LR
@@ -677,13 +680,15 @@ jobs:
 
 ---
 
-## 7. Plan de Rollback y Contingencia
+## 7. Plan de Rollback y Recuperación (PostgreSQL / Supabase)
 
-Si durante la puesta en marcha con Supabase surgiera cualquier incidencia imprevista (latencia de red, límites de conexión o errores en producción):
+Con la unificación en motor único (Módulo 13, EARS-13.9), el camino heredado hacia MariaDB ha sido retirado. La estrategia de rollback y contingencia se gestiona íntegramente sobre PostgreSQL / Supabase:
 
-1. **Rollback en 1 minuto:** Cambiar la variable `DATABASE_URL` en el archivo `.env` para volver a apuntar a la base de datos MariaDB previa.
-2. **Persistencia dual temporal:** Durante las primeras 48 horas de producción, mantener un cron de backup exportando datos mediante `pg_dump` para salvaguardar cualquier nuevo ticket creado.
-3. **Autonomía:** El proyecto no depende de ninguna librería cerrada de Supabase; la base de datos es un PostgreSQL estándar exportable a cualquier otro proveedor (Neon, Railway, AWS RDS, o un VPS propio con Docker).
+1. **Point-In-Time Recovery (PITR) de Supabase:** En entornos de producción gestionados, restaurar el estado de la base de datos al instante exacto previo a la incidencia mediante el panel de Supabase o la CLI (`supabase db restore --timestamp ...`).
+2. **Restauración de copias lógicas (`pg_dump` / `psql`):**
+   * Volcado de contingencia: `pg_dump -Fc --no-owner --no-acl $DATABASE_URL > backup_contingency.dump`
+   * Restauración limpia: `pg_restore --clean --if-exists --no-owner --no-acl -d $DATABASE_URL backup_contingency.dump`
+3. **Autonomía y portabilidad de motor:** Al basarse exclusivamente en PostgreSQL estándar vanilla con extensiones de catálogo abierto (`uuid-ossp`, `pgcrypto`) y sin librerías privativas, la persistencia puede reubicarse inmediatamente a cualquier proveedor PostgreSQL estándar o contenedor local ante caída de servicio.
 
 ---
 

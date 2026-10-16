@@ -2,7 +2,7 @@
 
 [![PHP Version](https://img.shields.io/badge/PHP-8.2%2B%20Vanilla%20POO-777BB4?style=flat-square&logo=php&logoColor=white)](https://php.net/)
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
-[![Database](https://img.shields.io/badge/MariaDB-10.11%2B%20%7C%20MySQL%208.0-003545?style=flat-square&logo=mariadb&logoColor=white)](https://mariadb.org/)
+[![Database](https://img.shields.io/badge/Database-PostgreSQL%2016%2B%20%7C%20Supabase-3ecf8e?style=flat-square&logo=postgresql&logoColor=white)](https://supabase.com/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
 [![Tests Status](https://img.shields.io/badge/Tests-261%20Suites%20%7C%209.941%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
@@ -115,7 +115,7 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 * **Segregación pública y transición prohibida (Art. V.4 y V.1):** el escaneo ciudadano muestra un estado neutro («En proceso de atención técnica») y **nunca** el motivo de la pausa, y queda prohibido cerrar directamente desde `PENDING_INFO` sin registrar la intervención física.
 
 ### 11. Persistencia Cloud Administrada en PostgreSQL / Supabase (Módulo 12)
-* **Arquitectura Híbrida Desacoplada (Coste 0 €/mes):** El backend puro PHP 8.2+ y el frontend reactivo Vanilla Vue 3 operan transparentemente contra PostgreSQL 17 administrado en Supabase a través del agrupador transaccional Supavisor (puerto 6543) bajo TLS `verify-full`, manteniendo paridad absoluta con MariaDB/MySQL local.
+* **Arquitectura Desacoplada con Motor Único (Coste 0 €/mes):** El backend puro PHP 8.2+ y el frontend reactivo Vanilla Vue 3 operan de forma homogénea contra PostgreSQL 16+ administrado en Supabase a través del agrupador transaccional Supavisor (puerto 6543) bajo TLS `verify-full`, y en local contra el motor PostgreSQL del arnés de pruebas sin dependencias externas.
 * **Blindaje Constitucional Nativo en PostgreSQL:** Disparadores `BEFORE DELETE` con emisión ruidosa de `SQLSTATE 45000` (`ART_III_1_VIOLATION`, Art. III.1); índice único parcial `uq_machine_active_ticket` que bloquea duplicados concurrentes e incidencias en garantía (Art. V.2 y V.6); restricciones `CHECK` de justificación mínima $\ge 20$ caracteres (Art. V.1); y claves canónicas de identidad (`email_key`, `site_code_key`) para unificación de colaciones (Art. V.4).
 * **Rendimiento Transaccional Certificado (RNF-01):** Optimización integral de round-trips mediante consultas CTE combinadas en inserción y actualización, reducción de consultas redundantes y lectura bloqueada en un solo salto (`FOR UPDATE OF i`), garantizando medianas inferiores al presupuesto estricto de 250 ms en todas las operaciones del sistema sobre enlaces de red transcontinentales.
 * **Resiliencia Operativa y Keep-Alive Diario:** Flujo de mantenimiento automatizado para prevenir la suspensión por inactividad tras 7 días en planes gratuitos y restauración desatendida mediante API de administración.
@@ -140,36 +140,22 @@ La aplicación cuenta con un conmutador de perfiles en la barra superior para al
 ## 🚀 Puesta en Marcha Rápida
 
 ### Requisitos Previos
-* **PHP:** 8.2 o superior con extensiones `pdo_mysql` y `mbstring` habilitadas (la imagen oficial ya compila `mbstring`; el [Dockerfile](Dockerfile) instala `pdo_mysql`).
-* **Base de Datos:** MySQL 8.0+ o MariaDB 10.5+ (local, Docker o Cloud como TiDB Serverless).
+* **PHP:** 8.2 o superior con extensiones `pdo_pgsql` y `mbstring` habilitadas (la imagen oficial ya compila `mbstring`; el [Dockerfile](Dockerfile) instala `pdo_pgsql`).
+* **Base de Datos:** PostgreSQL 16+ (Supabase en despliegue; motor PostgreSQL local en contenedor para desarrollo y pruebas).
 * **Navegador:** Chrome, Edge, Firefox o Safari con soporte de módulos ES.
 
 ### 1. Configuración de Base de Datos y Semillas
 
-#### Entorno Local (MariaDB / MySQL):
+#### Entorno Local (PostgreSQL):
 ```powershell
-# Crear la base de datos:
-mysql -u root -e "CREATE DATABASE IF NOT EXISTS vendguard_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+# Opción recomendada: inicialización canónica en un solo paso
+# (DDL base, migraciones incrementales, catálogo maestro e histórico de demostración):
+php bin/init_cloud_db.php
 
-# Opción recomendada: migrador DDL idempotente (esquema base + migraciones 003-018
-# de auditoría, CRUD, preventivos, repuestos, mapa, reintegros, freno del PIN, clave
-# de centro (S-4), bloqueo de login, pausa de sede, cancelación por inactividad y
-# visibilidad del barrido sanitario, con verificación de integridad final):
+# O ejecutar migraciones de forma independiente:
 php bin/migrate.php
 
-# Cargar semillas (sedes, máquinas, usuarios, preventivos y catálogo de repuestos).
-# Opción recomendada: sembrador CLI con verificación de integridad T-04 y contraseñas demo:
-php bin/seed.php
-
-# Alternativa equivalente en una sola línea:
-php -r "require 'src/autoload.php'; require 'src/Infrastructure/Database/ConnectionFactory.php'; require 'src/Infrastructure/Database/SeedRunner.php'; \$pdo = VendGuard\Infrastructure\Database\ConnectionFactory::getConnection(); \$s = new VendGuard\Infrastructure\Database\SeedRunner(\$pdo); \$s->seedAll(); echo 'Base de datos inicializada.';"
-
-# Sembrar histórico representativo de métricas, reparaciones y log de auditoría:
-php bin/seed_demo_metrics.php
-
-# Cargar el histórico de averías atendidas —completadas, en garantía y reabiertas— para
-# probar las estadísticas, el indicador de reincidencias y el desglose por técnico
-# contra el motor activo (PostgreSQL en Supabase o MariaDB local):
+# Cargar el histórico de demostración portable (17 averías canónicas INC-DEMO-*):
 php bin/seed_demo_history.php
 ```
 
@@ -214,7 +200,7 @@ CMD ["sh", "-c", "php bin/init_cloud_db.php ; php -S 0.0.0.0:${PORT} -t public p
 ```
 * **Paso 1 — convergencia de la base de datos:** `init_cloud_db.php` ejecuta `cloud_init.sql` (creación de tablas con `CREATE TABLE IF NOT EXISTS`) **y todas las migraciones de `database/migrations/` en orden**, sentencia a sentencia y sin abortar el resto si un motor cloud no soporta triggers. Es lo que hace que una base **ya existente** reciba las columnas y tablas nuevas de cada despliegue; si este paso falla, el servidor arranca igual (el `;` no corta la cadena) pero el esquema se queda atrás.
 * **Paso 2 — servidor web:** `php -S` sirviendo `public/index.php`, que despacha tanto la API como los assets estáticos con su MIME y `Cache-Control: no-cache` para JS/CSS (un despliegue no se queda a medias por caché del navegador). El puerto lo inyecta la plataforma (`PORT`, por defecto 8080).
-* **Imagen y extensiones:** `php:8.2-cli-alpine` trae `mbstring` compilada de serie y el [Dockerfile](Dockerfile) instala `pdo_mysql`; no hace falta ninguna otra extensión (Dogma Vanilla: cero `composer`, cero `npm` en runtime).
+* **Imagen y extensiones:** `php:8.2-cli-alpine` trae `mbstring` compilada de serie y el [Dockerfile](Dockerfile) instala `pdo_pgsql`; no hace falta ninguna otra extensión (Dogma Vanilla: cero `composer`, cero `npm` en runtime).
 
 **Variables de entorno** (única fuente de verdad: [`SecretProvider`](src/Infrastructure/Config/SecretProvider.php) y [`ConnectionFactory`](src/Infrastructure/Database/ConnectionFactory.php)):
 
@@ -223,7 +209,7 @@ CMD ["sh", "-c", "php bin/init_cloud_db.php ; php -S 0.0.0.0:${PORT} -t public p
 | `SECRET_KEY` | **Sí** con `APP_ENV=production` | Firma HMAC de los tokens de sesión. Sin ella y sin entorno declarado se usa una clave **exclusiva de desarrollo**. |
 | `CRON_SECRET` | **Sí** con `APP_ENV=production` | Credencial `X-Cron-Secret` de los dos procesos batch. |
 | `APP_ENV` ó `VENDGUARD_ENV` | Recomendada | `production`/`prod` activan el **fallo en cerrado**: sin claves el sistema no arranca y `root` sin contraseña se rechaza (hallazgos S-1 y S-5). |
-| `DATABASE_URL` / `MYSQL_URL` | Alternativa | Cadena única del PaaS (`mysql://usuario:clave@host:puerto/base`). Tiene prioridad sobre `DB_*`. |
+| `DATABASE_URL` / `SUPABASE_DB_URL` | Alternativa | Cadena única de PostgreSQL (`postgres://usuario:clave@host:puerto/base?sslmode=verify-full`). Tiene prioridad sobre `DB_*`. |
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Sí (o la cadena única) | Credenciales sueltas; se aceptan también `DB_DATABASE`, `DB_USERNAME` y `DB_PASS`. |
 | `DB_SSL` | Según proveedor | `1`/`true` fuerza TLS; se activa solo si el host contiene `tidbcloud`/`aivencloud`. |
 | `PORT` | La inyecta la plataforma | Puerto del servidor embebido. |
@@ -395,10 +381,10 @@ Entre las suites de certificación destacan:
 * **`SiteManagerRouteDataSegregationTest` (T-MAP-19)** — blindaje del Art. V.4: bloqueo 403 Forbidden para responsables de sede frente a rutas de campo y prohibición de rastreo en segundo plano del personal.
 * **`RouteOptimizationServiceTest` (T-MAP-07)** — verificación matemática de la heurística de optimización de rutas (Haversine, paradas prioritarias por SLA < 4h, parada activa `#1` y exclusión de `PENDING_PARTS`).
 * **`MapZoomPanUtilTest.mjs` (T-MAP-21)** — controlador gestual reactivo puro: anclaje, límites de escala, clamp de encuadre, gestos táctiles *pinch-to-zoom* y recentrado interactivo `focusOn`.
-* **`CoordinatorRouteMapApiTest` / `TechnicianRouteMapApiTest` (T-MAP-17/18)** — integración HTTP contra MariaDB del ciclo cartográfico completo, fallback a Base Central y cálculo de enlaces universales de navegación.
+* **`CoordinatorRouteMapApiTest` / `TechnicianRouteMapApiTest` (T-MAP-17/18)** — integración HTTP contra el motor del arnés del ciclo cartográfico completo, fallback a Base Central y cálculo de enlaces universales de navegación.
 * **`CoordinatorButtonVariantsGuardTest.mjs`** — los 149 botones del panel del coordinador visten la escalera `--control-*` y ningún botón declara geometría ni color en línea (sí una colocación o un color de estado); la guarda se prueba contra muestras sintéticas y cae también si alguna variante declarada queda muerta.
 * **`CoordinatorActionsWrapGuardTest.mjs`** — ningún grupo de acciones del panel depende de tener pocos controles: el grupo envuelve y la etiqueta nunca se parte dentro de su propio botón.
-* **`SanitarySweepVisibilityServiceTest` / `CoordinatorSanitarySweepEndpointTest` (T-PAUSE-41)** — la superficie del barrido sanitario: umbrales de escalado a las tres pasadas consecutivas, cierre del seguimiento **por identidad** y el ciclo completo contra MariaDB sobre dos conexiones PDO reales (aplazamiento → cuarentena → cierre → alerta apagada).
+* **`SanitarySweepVisibilityServiceTest` / `CoordinatorSanitarySweepEndpointTest` (T-PAUSE-41)** — la superficie del barrido sanitario: umbrales de escalado a las tres pasadas consecutivas, cierre del seguimiento **por identidad** y el ciclo completo contra el motor del arnés sobre dos conexiones PDO reales (aplazamiento → cuarentena → cierre → alerta apagada).
 
 > **Nota operativa:** las suites de integración incluyen pruebas de HTTP real contra `127.0.0.1:8000`. Si el puerto está ocupado por un servidor obsoleto, arránquelo antes con `php -S 127.0.0.1:8000 -t public public/index.php`.
 
@@ -414,19 +400,15 @@ gestor-incidencias-vending/
 ├── router.php                    # Router del servidor embebido de PHP (php -S ... router.php)
 ├── README.md                     # Esta guía maestra de entrega y operaciones
 ├── bin/
-│   ├── init_cloud_db.php         # Inicializador automático para MySQL/TiDB Cloud
-│   ├── migrate.php               # Migrador DDL idempotente (esquema + migraciones 003-013)
-│   ├── seed.php                  # Sembrador CLI del catálogo base
-│   ├── seed_demo_metrics.php     # Sembrador de métricas históricas y auditoría (fixture del motor local)
-│   ├── seed_demo_history.php     # Histórico de averías atendidas (garantías y reincidencias) para probar estadísticas (ambos motores)
+│   ├── init_cloud_db.php         # Inicializador del arranque desplegado (una sola ruta: DDL base, migraciones, catálogo, histórico de demostración)
+│   ├── migrate.php               # Migrador incremental del motor único (PostgresMigrationRunner)
+│   ├── seed_demo_history.php     # Histórico de demostración (17 averías INC-DEMO-*, traza y auditoría)
 │   ├── create_bizum_case.php     # Script CLI de caso demo de reintegro por Bizum
 │   └── sanitary_clock_sweep.php  # Barrido CLI del Reloj Sanitario Biológico (mismo reloj que el endpoint cron)
 ├── database/
-│   ├── schema.sql                # DDL MariaDB del núcleo operativo
-│   ├── cloud_init.sql            # Script unificado integral para despliegues cloud
-│   ├── migrations/               # DDL incrementales idempotentes 003-018 (auditoría, CRUD, preventivos, repuestos, mapa, reintegros y PIN, bloqueo de login, pausa de sede, cancelación por inactividad y visibilidad del barrido sanitario)
-│   ├── seeds.sql                 # Semillas SQL del catálogo base (referencia)
-│   ├── DemoMetricsSeeder.php     # Generador de histórico de averías, reaperturas por garantía y auditoría
+│   ├── supabase_init.sql         # DDL canónico de PostgreSQL (20 tablas, 24 enumerados, disparadores)
+│   ├── supabase_migrations/      # Migraciones incrementales canónicas del motor único
+│   ├── supabase_seeds.sql        # Catálogo maestro de semillas del motor único
 │   └── DemoHistorySeeder.php     # Histórico de demostración portable: 17 averías (13 cerradas y 4 en garantía, dos reabiertas), traza y auditoría
 ├── docs/
 │   ├── design.md                 # Especificación de tokens visuales Docker
@@ -481,7 +463,7 @@ gestor-incidencias-vending/
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)
     ├── unit/                     # Pruebas unitarias de lógica pura, geometría y contratos
-    └── integration/              # Pruebas de persistencia real en MariaDB y API HTTP
+    └── integration/              # Pruebas de persistencia real en el motor del arnés y API HTTP
 ```
 
 ---

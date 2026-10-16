@@ -367,11 +367,34 @@ Cada lote cierra con `php tests/run_all.php` en verde, cifras por lote anotadas 
 
 ## Fase 5 · Documentación viva y rollback
 
-- [ ] **T-13-17: Enmendar la documentación vigente y redefinir el rollback**
+- [x] **T-13-17: Enmendar la documentación vigente y redefinir el rollback**
   * **Requisitos:** EARS-13.9, criterios 5 y 6 de aceptación
   * **Dependencias:** T-13-16
   * **Entrada:** [`docs/auditoria_documentacion_motor_unico.md`](../../docs/auditoria_documentacion_motor_unico.md) — el inventario cerrado: 14 documentos vivos con su línea exacta y su redacción de destino, 33 históricos preservados y el orden de enmienda.
   * **Hecho cuando:** el patrón de búsqueda de la auditoría devuelve **cero documentos vivos** que nombren el motor heredado; [`README.md`](../../README.md) declara una sola ruta de arranque y una sola forma de levantar desarrollo; [`AGENTS.md`](../../AGENTS.md) §4 declara PostgreSQL (Supabase) con el visto bueno del Product Owner; el «rollback en un minuto» del motor heredado se sustituye por el procedimiento de restauración de copia y *point-in-time* de Supabase; y las actas históricas quedan intactas.
+  * **Cerrado (2026-10-16), con evidencia de ejecución:**
+    * **Enmienda de directrices operativas ([AGENTS.md](../../AGENTS.md)):**
+      * §4 actualizado con visto bueno del Product Owner: Base de datos declarada como PostgreSQL (Supabase), persistencia PDO nativa (`pdo_pgsql`), agrupador transaccional Supavisor (puerto 6543) bajo TLS `verify-full` e infraestructura sin dependencias del motor heredado.
+    * **Enmienda del portal maestro ([README.md](../../README.md)):**
+      * Badge actualizado a `PostgreSQL 16+ | Supabase`.
+      * Arquitectura declarada como desacoplada con motor único (sin paridad dual que mantener).
+      * Requisitos del sistema actualizados a `pdo_pgsql` y PostgreSQL 16+.
+      * Sección de base de datos local unificada en PostgreSQL (`bin/init_cloud_db.php`, `bin/migrate.php` y `bin/seed_demo_history.php`).
+      * Variables de entorno unificadas a `DATABASE_URL` y `SUPABASE_DB_URL` (eliminada `MYSQL_URL`).
+      * Árbol de directorios y resúmenes de suites alineados a la realidad del motor único.
+    * **Guías de despliegue y desarrollo:**
+      * [`deploy/local/postgres/README.md`](../../deploy/local/postgres/README.md): Documentado como el banco local de pruebas hermético en contenedor TLS (puerto 55433).
+      * [`docs/guia_conexion_supabase.md`](../../docs/guia_conexion_supabase.md): Reenfocada al motor único y su conectividad.
+      * [`docs/migracion_supabase_hibrido.md`](../../docs/migracion_supabase_hibrido.md): Convertido en acta histórica del Módulo 12 y sustituido el rollback heredado por el procedimiento de contingencia real de Supabase (PITR y restauración lógica `pg_dump`/`psql`).
+    * **Contratos técnicos de arquitectura y módulos:**
+      * Saneadas menciones a MariaDB y códigos de error heredados (1062, 1451) por los correspondientes de PostgreSQL (23505, 23503) en [`specs/technical/plan.md`](../../specs/technical/plan.md), [`specs/technical/refunds_contracts.md`](../../specs/technical/refunds_contracts.md), [`specs/technical/route_map_contracts.md`](../../specs/technical/route_map_contracts.md), [`specs/technical/spare_parts_contracts.md`](../../specs/technical/spare_parts_contracts.md) y [`specs/technical/testing_cleanup_contract.md`](../../specs/technical/testing_cleanup_contract.md).
+    * **Auditoría documental y de dialecto:**
+      * El barrido de búsqueda sobre documentos vivos confirma **0 menciones al motor heredado en documentación viva**. Los documentos históricos preservan su contenido original intacto.
+      * [`SqlDialectPortabilityTest.php`](../../tests/unit/SqlDialectPortabilityTest.php) verificado en **97/97 aserciones, exit 0**.
+    * **Medición de cierre con batería completa (`php tests/run_all.php`):**
+      * **261 suites · 9.941 aserciones · 0 fallos (100% PASS)**.
+      * **Cifras documentadas: COHERENTES** (0 desviaciones).
+      * **Base de datos restablecida:** SÍ (Semillas intactas, 0 residuo de parque).
 
 ---
 

@@ -128,7 +128,7 @@ stateDiagram-v2
 
 ---
 
-## 3. Modelo de Datos Relacional (DDL MariaDB 10.4+ / MySQL 8.0+)
+## 3. Modelo de Datos Relacional (DDL PostgreSQL / Supabase)
 
 ### 3.1 Migración DDL: `006_spare_parts_catalog_and_traceability.sql`
 
