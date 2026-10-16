@@ -3,71 +3,62 @@
 declare(strict_types=1);
 
 /**
- * SqlDialectPortabilityTest — certificación del punto único de traducción de dialecto.
+ * SqlDialectPortabilityTest — guarda del dialecto: **prohíbe** el del motor retirado y **exige** el único.
  *
- * Tarea: T-HYBRID-25 · Requisitos: RF-01.1, RF-01.5, EARS-01.1, EARS-01.5 · Constitución Art. I.3.
+ * Tarea: T-13-06 (invierte el inventario de T-HYBRID-25) · Requisitos: EARS-13.4, EARS-13.10
+ * Constitución Art. I.3 · Contrato: [`single_engine_dialect_contract.md`](../../specs/technical/single_engine_dialect_contract.md)
  *
- * QUÉ SE CERTIFICA AQUÍ (cuatro cosas distintas, y por eso son cuatro grupos)
+ * QUÉ CERTIFICA, Y EN QUÉ SENTIDO
  *
- *   1. **Los dos renderizados de cada construcción sin forma común.** PostgreSQL y MariaDB
- *      escriben distinto el upsert, la lectura de JSON, la aritmética temporal y la cita de
- *      identificadores, y ninguna redacción ANSI los unifica. El adaptador es el único sitio
- *      donde vive esa traducción: una regla, dos formas. El grupo fija las formas exactas,
- *      carácter a carácter, para que un cambio de traducción no pueda pasar inadvertido.
+ *   1. **El punto único de traducción sigue siendo único.** Mientras la rama del motor retirado
+ *      exista, el adaptador la renderiza y esta guarda la fija carácter a carácter: una regla, dos
+ *      formas. Esa segunda forma es el **dialecto heredado declarado**, con dueño (T-13-14/T-13-16:
+ *      la rama muere con su último consumidor) y no una tolerancia. Cuando la rama desaparezca, este
+ *      grupo se reduce solo: su censo está declarado y no admite cifras que ya no sean ciertas.
  *
- *   2. **La ejecución real contra el motor vivo.** Las formas se *ejecutan* —tablas temporales
- *      de sesión, sin tocar esquema ni datos del dominio— y su resultado se contrasta con un
- *      oráculo independiente escrito en PHP: el upsert refresca y el de sólo-existencia no pisa
- *      nada, la extracción de JSON devuelve texto —también en caminos anidados—, los intervalos
- *      se desplazan en la cantidad pedida y con el sentido pedido, y la diferencia temporal
- *      reproduce el truncamiento **hacia cero** de `TIMESTAMPDIFF`, bordes incluidos (0, 59, 60,
- *      61, 119, 121 segundos y sus negativos). El grupo es agnóstico de motor a propósito:
- *      certifica el motor sobre el que corre la batería, y el mismo código certificaría el otro.
+ *   2. **La ejecución real contra el motor vivo** (grupo 3) y **la conformidad con la tabla de upsert
+ *      que declaran las semillas** (grupo 4) se conservan tal cual: son la certificación semántica del
+ *      adaptador, y el motor sobre el que corren es el que sirve producción.
  *
- *   3. **La conformidad con la tabla de upsert declarada en las semillas.** `T-HYBRID-03`
- *      congeló en [`database/supabase_seeds.sql`](../../database/supabase_seeds.sql) la regla de
- *      upsert de cada tabla del catálogo y ordenó que el adaptador se escriba **conforme a
- *      ella**, no al revés. El grupo lee esa tabla del fichero real —sin copiarla aquí— y
- *      comprueba que el adaptador reproduce cada cláusula entera, con sus asignaciones de
- *      procedencia mixta (la fila propuesta y el literal `deleted_at = NULL` en la misma
- *      cláusula), y que **los dos dialectos expresan la misma regla**: mismas columnas, mismo
- *      orden, mismo origen del valor.
+ *   3. **La frontera, invertida (grupos 5, 6 y 7).** El inventario de excepciones toleradas se
+ *      sustituye por una **prohibición con declaración**: el dialecto heredado no puede aparecer en
+ *      ninguna de las cuatro superficies rastreadas —`src`, `database`, `bin` y **`tests`**— salvo en
+ *      los sitios declarados, y cada sitio declarado tiene que decir **qué es** (una deuda que un lote
+ *      todavía debe, una guarda que nombra el dialecto para prohibirlo, un contrato que compara contra
+ *      el artefacto heredado que aún no se ha retirado, o un sitio fuera del alcance del motor único)
+ *      y **quién lo cierra**. Una deuda cuyo dueño ya está cerrado en `tasks.md` pone la guarda en
+ *      rojo: una excepción con el plazo cumplido es una excepción que ya debería estar pagada.
  *
- *   4. **La frontera: que no quede SQL privativo *nuevo* fuera del adaptador.** Un rastreador
- *      léxico (`token_get_all`) recorre los literales de cadena del código de aplicación
- *      —los comentarios no cuentan, y por eso el rastreo no se confunde con la documentación
- *      que cita sintaxis— y compara el inventario resultante con el **inventario pendiente
- *      declarado**. Mientras las tandas de normalización están sin hacer, el pendiente es
- *      exactamente su trabajo y está atribuido fichero a fichero a la tarea que lo drena
- *      (T-HYBRID-09/10/11 en los repositorios, T-HYBRID-12 en el sembrado); cuando esas tareas
- *      cierren, el pendiente queda a cero y esta misma afirmación se vuelve la ausencia absoluta
- *      que promete el «Hecho cuando». La comparación es **de igualdad estricta**, no de «no
- *      crezcas»: si el inventario baja y no se actualiza la declaración, la suite se pone en
- *      rojo, porque una cifra declarada que ya no es cierta deja de ser una prueba.
+ *      La prohibición se mide, no se declara en prosa: el censo de la clase —**literales de cadena
+ *      tokenizados**, comentarios y docblocks fuera— lo publica `tests/Support/DialectCensus.php`,
+ *      de modo que la guarda y su medición de cierre son el mismo *rule set*. El censo cubre la
+ *      superficie entera y compara **exactamente**: un literal heredado nuevo, un literal que
+ *      desaparece sin retirar su entrada, o una cifra que se queda atrás, ponen la suite en rojo.
  *
- *      Un fichero drenado **no desaparece** de la declaración: pasa al inventario drenado, que
- *      cita la cifra que tenía cuando se declaró su deuda —la prueba del descenso— y convierte
- *      el cero en una afirmación activa: si el fichero recupera dialecto, la suite se pone en
- *      rojo por regresión, no por una cifra desactualizada. Sin esa mitad, «ya está drenado»
- *      sería una promesa que nadie vigila.
+ *   4. **El detector distingue (grupo 6).** El censo se prueba contra especímenes: cada familia
+ *      heredada tiene el suyo y **se dispara**; cada forma del motor único se comprueba contra las
+ *      nueve familias prohibidas y **no se dispara**; la grafía minúscula del catálogo que el motor
+ *      único sí tiene no cuenta y la mayúscula sí; un comentario no cuenta; y una cita heredada
+ *      dentro de un **fragmento interpolado** se ve —que es como se nombra por primera vez el sitio
+ *      de `CoordinatorPreventiveDetailApiTest`, invisible al censo del lote anterior—.
  *
- * QUÉ NO SE CERTIFICA AQUÍ (declarado, no omitido)
+ *   5. **El dialecto del motor único se exige (grupo 7).** No basta con que el heredado no esté: las
+ *      construcciones que el sistema realiza tienen que estar escritas en la grafía que el motor
+ *      entiende, y la ventana de purga del arnés tiene **una sola forma** (`set_config('vendguard.purge', …)`).
  *
- *   La ejecución semántica de la rama PostgreSQL **dentro de esta suite**. La batería es
- *   hermética (RNF-04) y no puede exigir un motor que no está en todos los puestos. La rama
- *   `pgsql` se certifica aquí de forma estructural (sus formas exactas y su conformidad con las
- *   semillas) y su semántica pertenece a la categoría del motor nuevo, con su canal y su
- *   informe (`T-HYBRID-21`, `T-HYBRID-24`). Además se certificó fuera de banda contra el
- *   PostgreSQL 16.15 local de [`deploy/local/postgres/`](../../deploy/local/postgres/README.md)
- *   el 13/10/2026: los cuatro escenarios del grupo 3 arrojaron los mismos valores que MariaDB
- *   en los mismos diez bordes de diferencia temporal, negativos incluidos. Esa corrida no se
- *   versiona —su sitio es el canal del motor nuevo— y no se cuenta como verde de esta suite.
+ * QUÉ NO DECIDE
+ *
+ *   El porte de las deudas declaradas: cada una pertenece a su lote (T-13-09 a T-13-14) y se mide
+ *   cuando le toca. Esta guarda las **nombra** con su dueño y su cifra exacta, que es lo que permite
+ *   saber si el lote avanzó; mezclar aquí su reparación habría ocultado qué se estaba midiendo
+ *   (EARS-13.10). Tampoco decide el respaldo SQLite del mapa territorial (`CoordinatorRouteMapController`),
+ *   fuera del alcance declarado del adaptador, ni la retirada de la rama heredada del adaptador.
  *
  * Dogma Vanilla: PHP 8.2+ puro, sin dependencias externas ni bundlers.
  * Dualismo Lingüístico: identificadores y código en inglés, documentación y mensajes en castellano.
  */
-
 require_once __DIR__ . '/../bootstrap.php';
+require_once __DIR__ . '/../Support/DialectCensus.php';
 
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
@@ -79,7 +70,7 @@ $projectRoot = dirname(__DIR__, 2);
 // =====================================================================
 
 echo "======================================================================\n";
-echo " VendGuard: Suite de Pruebas Unitarias - SqlDialectPortabilityTest (T-HYBRID-25)\n";
+echo " VendGuard: Suite de Pruebas Unitarias - SqlDialectPortabilityTest (T-13-06 · guarda invertida)\n";
 echo "======================================================================\n\n";
 
 $assertions = 0;
@@ -310,7 +301,7 @@ $assertThrows(
     'Motor no admitido'
 );
 $assertThrows(
-    '2.2 El rechazo nombra la tarea que fija el contrato',
+    '2.2 El rechazo nombra la tarea que fijó el contrato del adaptador (la retirada de la rama la enmienda)',
     static fn (): SqlDialectAdapter => new SqlDialectAdapter('oracle'),
     'T-HYBRID-25'
 );
@@ -675,323 +666,728 @@ $assert(
     $doNothingRules === 1 && $refreshRules === 5,
     sprintf('DO NOTHING: %d · refrescos: %d', $doNothingRules, $refreshRules)
 );
-
 // =====================================================================
-// GRUPO 5 — La frontera: no queda SQL privativo *nuevo* fuera del adaptador
+// GRUPO 5 — La superficie rastreada y el dialecto heredado que queda declarado
 // =====================================================================
 
-echo "\n--- Grupo 5: frontera del punto único de traducción (inventario pendiente declarado) ---\n";
+echo "\n--- Grupo 5: la superficie rastreada y el dialecto declarado, con dueño ---\n";
 
-/**
- * Inventario pendiente declarado.
- *
- * Cada entrada es el recuento de construcciones privativas que **quedan hoy** fuera del adaptador
- * en los literales de cadena de ese fichero, con la tarea que las drena. La comparación es de
- * igualdad estricta: un recuento nuevo pone la suite en rojo (nadie introduce dialecto fuera del
- * adaptador), y un recuento que baje sin actualizar esta declaración también (la cifra declarada
- * tiene que seguir siendo cierta).
- */
-const PENDING_INVENTORY = [
-    // Semilla de métricas del arnés: fixture local de MariaDB, sin tarea de normalización en el
-    // módulo. Su SQL sigue siendo del motor local a propósito, y por eso está declarado, no oculto.
-    'database/DemoMetricsSeeder.php' => ['backtick' => 144, 'upsert' => 2],
-    // Ejecutor de migraciones del motor local, sin tarea de normalización en el módulo.
-    'bin/migrate.php' => ['backtick' => 14],
-    // Consulta de respaldo del mapa territorial, fuera del alcance declarado: la suite que la
-    // ejercita corre sobre SQLite en memoria (tests/unit/CoordinatorRouteMapControllerTest.php) y
-    // el adaptador sólo traduce los dos motores del sistema, a propósito.
-    'src/Presentation/Controller/CoordinatorRouteMapController.php' => ['backtick' => 3],
-];
+/** Superficie rastreada: el código que ejecuta el sistema y la batería que lo mide. */
+const TRACED_SURFACES = ['src', 'database', 'bin', 'tests'];
 
-/**
- * Inventario ya drenado, con la cifra que declaraba el pendiente en el momento de drenarlo.
- *
- * No es una expectativa —la expectativa es cero— sino la prueba del descenso y la mitad activa
- * del trinquete: el fichero sigue declarado aquí, de modo que volver a escribir dialecto en él
- * pone la suite en rojo en la aserción 5.4, y no en una cifra que ya nadie compara.
- *
- * `families` conserva el recuento histórico por familia rastreada; `drained_by` cita la tarea
- * que lo drenó, para que el descenso se pueda atribuir igual que antes se atribuía la deuda.
- */
-const DRAINED_INVENTORY = [
-    // Tanda 1 · Incidencias, Máquinas, Sedes, Usuarios (T-HYBRID-09)
-    'src/Infrastructure/Repository/PdoIncidentRepository.php' => ['drained_by' => 'T-HYBRID-09', 'families' => ['backtick' => 234, 'temporal' => 4]],
-    'src/Infrastructure/Repository/PdoMachineRepository.php' => ['drained_by' => 'T-HYBRID-09', 'families' => ['backtick' => 182]],
-    'src/Infrastructure/Repository/PdoLocationRepository.php' => ['drained_by' => 'T-HYBRID-09', 'families' => ['backtick' => 116]],
-    'src/Infrastructure/Repository/PdoUserRepository.php' => ['drained_by' => 'T-HYBRID-09', 'families' => ['backtick' => 124, 'temporal' => 2]],
-    // Tanda 2 · Reintegros, Repuestos, Piezas Sustituidas, Métricas (T-HYBRID-10)
-    'src/Infrastructure/Repository/PdoRefundRequestRepository.php' => ['drained_by' => 'T-HYBRID-10', 'families' => ['backtick' => 63]],
-    'src/Infrastructure/Repository/PdoSparePartRepository.php' => ['drained_by' => 'T-HYBRID-10', 'families' => ['backtick' => 73, 'upsert' => 2]],
-    'src/Infrastructure/Repository/PdoSparePartRequestRepository.php' => ['drained_by' => 'T-HYBRID-10', 'families' => ['backtick' => 31]],
-    'src/Infrastructure/Repository/PdoIncidentReplacedPartRepository.php' => ['drained_by' => 'T-HYBRID-10', 'families' => ['backtick' => 48, 'temporal' => 5]],
-    'src/Infrastructure/Repository/PdoMetricsRepository.php' => ['drained_by' => 'T-HYBRID-10', 'families' => ['backtick' => 144, 'temporal' => 9]],
-    // Tanda 3 · Preventivo, Rutas, Sanitario, Auditoría (T-HYBRID-11)
-    'src/Infrastructure/Repository/PdoPreventiveSettingsRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 85]],
-    'src/Infrastructure/Repository/PdoPreventiveOrderRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 190, 'temporal' => 4]],
-    'src/Infrastructure/Repository/PdoPreventiveItemRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 42]],
-    'src/Infrastructure/Repository/PdoRouteSettingsRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 26]],
-    'src/Infrastructure/Repository/PdoSanitaryCertificateRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 136]],
-    'src/Infrastructure/Repository/PdoSanitarySweepVisibilityRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 63, 'upsert' => 1]],
-    'src/Infrastructure/Repository/PdoAuditLogRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 40]],
-    'src/Infrastructure/Repository/PdoSiteAccessCodeRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 30, 'temporal' => 1]],
-    'src/Infrastructure/Repository/PdoUnclaimedCashFindingRepository.php' => ['drained_by' => 'T-HYBRID-11', 'families' => ['backtick' => 20]],
-    // Sembrado (T-HYBRID-12): de aquí el adaptador toma la sintaxis de upsert que las semillas declaran.
-    'src/Infrastructure/Database/SeedRunner.php' => ['drained_by' => 'T-HYBRID-12', 'families' => ['backtick' => 275, 'json' => 2, 'temporal' => 19, 'upsert' => 9]],
-];
-
-/** Fichero con hallazgos => tarea (o motivo declarado) que lo drena. */
-const INVENTORY_OWNERS = [
-    'src/Infrastructure/Repository/PdoIncidentRepository.php' => 'T-HYBRID-09',
-    'src/Infrastructure/Repository/PdoMachineRepository.php' => 'T-HYBRID-09',
-    'src/Infrastructure/Repository/PdoLocationRepository.php' => 'T-HYBRID-09',
-    'src/Infrastructure/Repository/PdoUserRepository.php' => 'T-HYBRID-09',
-    'src/Infrastructure/Repository/PdoRefundRequestRepository.php' => 'T-HYBRID-10',
-    'src/Infrastructure/Repository/PdoSparePartRepository.php' => 'T-HYBRID-10',
-    'src/Infrastructure/Repository/PdoSparePartRequestRepository.php' => 'T-HYBRID-10',
-    'src/Infrastructure/Repository/PdoIncidentReplacedPartRepository.php' => 'T-HYBRID-10',
-    'src/Infrastructure/Repository/PdoMetricsRepository.php' => 'T-HYBRID-10',
-    'src/Infrastructure/Repository/PdoPreventiveSettingsRepository.php' => 'T-HYBRID-11',
-    'src/Infrastructure/Repository/PdoPreventiveOrderRepository.php' => 'T-HYBRID-11',
-    'src/Infrastructure/Repository/PdoPreventiveItemRepository.php' => 'T-HYBRID-11',
-    'src/Infrastructure/Repository/PdoRouteSettingsRepository.php' => 'T-HYBRID-11',
-    'src/Infrastructure/Repository/PdoSanitaryCertificateRepository.php' => 'T-HYBRID-11',
-    'src/Infrastructure/Repository/PdoSanitarySweepVisibilityRepository.php' => 'T-HYBRID-11',
-    'src/Infrastructure/Repository/PdoAuditLogRepository.php' => 'T-HYBRID-11',
-    'src/Infrastructure/Repository/PdoSiteAccessCodeRepository.php' => 'T-HYBRID-11',
-    'src/Infrastructure/Repository/PdoUnclaimedCashFindingRepository.php' => 'T-HYBRID-11',
-    'src/Infrastructure/Database/SeedRunner.php' => 'T-HYBRID-12',
-    'database/DemoMetricsSeeder.php' => 'fixture local del arnés (sin tarea asignada en el módulo)',
-    'bin/migrate.php' => 'ejecutor de migraciones del motor local (sin tarea asignada en el módulo)',
-    'src/Presentation/Controller/CoordinatorRouteMapController.php' => 'respaldo compatible con SQLite (fuera del alcance del adaptador)',
-];
-
-/** Dónde vive el dialecto: el fichero que se excluye del rastreo por ser el punto único. */
+/** Donde el dialecto vive por diseño: el punto único de traducción, fuera del rastro del censo. */
 const DIALECT_HOME = 'src/Infrastructure/Dialect/SqlDialectAdapter.php';
 
-/** Familias rastreadas y su patrón dentro de un literal de cadena. */
-const PRIVATE_SQL_FAMILIES = [
-    'temporal' => '/\b(DATE_SUB|DATE_ADD|ADDDATE|SUBDATE|DATEDIFF|TIMESTAMPDIFF|TIMESTAMPADD|EXTRACT\s*\(\s*EPOCH)\s*\(/i',
-    'upsert' => '/\bON\s+(DUPLICATE\s+KEY\s+UPDATE|CONFLICT)\b/i',
-    'json' => '/\b(JSON_EXTRACT|JSON_UNQUOTE|JSON_SET|JSON_OBJECT|JSON_ARRAY)\s*\(/i',
-    'jsonop' => '/-\>\>?\s*[\'"][A-Za-z0-9_]/',
-    'backtick' => '/`[A-Za-z_][A-Za-z0-9_]*`/',
+/** Donde viven las familias del censo: el *rule set*, y por el mismo motivo fuera del censo. */
+const CENSUS_HOME = 'tests/Support/DialectCensus.php';
+
+/** El plan de tareas del módulo: de ahí sale si el dueño de una deuda sigue abierto. */
+const TASK_PLAN = 'specs/13-single-engine-supabase/tasks.md';
+
+/** Las tareas de la retirada: las únicas que pueden cerrar una deuda de la superficie de ejecución. */
+const RETIREMENT_TASKS = ['T-13-14', 'T-13-15', 'T-13-16'];
+
+/** Naturaleza admitida de una aparición declarada del dialecto heredado. */
+const KIND_DEBT = 'deuda';
+const KIND_GUARD = 'guarda';
+const KIND_CONTRACT = 'contrato';
+const KIND_OUT_OF_SCOPE = 'fuera de alcance';
+const KIND_DRAINED = 'drenado';
+
+/** @var list<string> */
+const DECLARED_KINDS = [KIND_DEBT, KIND_GUARD, KIND_CONTRACT, KIND_OUT_OF_SCOPE, KIND_DRAINED];
+
+/**
+ * Construcciones cuya **segunda grafía en el mismo fichero** delata un híbrido.
+ *
+ * Un fichero que pregunta lo mismo en los dos dialectos —el caso de una suite a medio portar— no es
+ * una tolerancia: es un estado con dueño. Se declara con `'mixed' => true` y su motivo, y un fichero
+ * que empiece a mezclar sin declararlo pone la guarda en rojo.
+ *
+ * @var list<array{0: string, 1: string}>
+ */
+const CONSTRUCTION_PAIRS = [
+    ['upsert', 'conflict'],
+    ['values', 'excluded'],
+    ['json', 'json_operator'],
+    ['temporal', 'interval_literal'],
+    ['temporal', 'epoch_extract'],
+    ['catalog', 'catalog_view'],
+    ['show', 'catalog_view'],
+    ['legacy_database', 'current_database'],
+    ['purge_window', 'purge_setting'],
 ];
 
 /**
- * Rastrea los literales de cadena del código de aplicación —comentarios excluidos, de modo que la
- * documentación que cita sintaxis privativa no cuenta como dialecto— y devuelve el inventario por
- * fichero y familia.
+ * Declaración del dialecto heredado que queda, fichero a fichero y familia a familia.
  *
- * @param list<string> $directories
- * @return array<string, array<string, int>>
+ * `census` es **exacto**: el número de literales de ese fichero que contienen esa familia, medido por
+ * el censo del repositorio. La declaración no admite cifras que ya no sean ciertas —ni al alza ni a
+ * la baja— porque una cifra declarada que ha dejado de ser cierta no prueba nada.
+ *
+ * `drained_occurrences` es de otra clase a propósito: la cifra que midió el **tool del porte** de la
+ * tanda que lo drenó (ocurrencias de la familia en el fichero, no literales). Es la prueba del
+ * descenso, y no se compara con el censo de esta guarda.
+ *
+ * @var array<string, array{kind: string, owner: ?string, census: array<string, int>, why: string, mixed?: bool, drained_occurrences?: array<string, int>}>
  */
-function scanPrivateSqlInventory(string $projectRoot, array $directories): array
-{
-    $sqlVerbs = '/\b(SELECT|INSERT|UPDATE|DELETE|SET|FROM|WHERE|JOIN|INTO|VALUES|CREATE|ALTER)\b/i';
-    $inventory = [];
+const LEGACY_DIALECT = [
+    // ---------- Superficie de ejecución: `src`, `database` y `bin` ----------
+    'bin/init_cloud_db.php' => [
+        'kind' => KIND_DEBT,
+        'owner' => 'T-13-15',
+        'census' => ['catalog' => 1, 'legacy_database' => 1],
+        'why' => 'la rama de arranque del motor heredado cuenta columnas en el catálogo de ese motor y nombra su base; T-13-15 deja una sola ruta de arranque',
+    ],
+    'bin/migrate.php' => [
+        'kind' => KIND_DEBT,
+        'owner' => 'T-13-15',
+        'census' => ['backtick' => 13, 'show' => 12],
+        'why' => 'ejecutor de migraciones del motor heredado: sondea sus columnas e índices con la introspección retirada y cita con acentos graves; T-13-15 reapunta el arranque al ejecutor del motor único',
+    ],
+    'database/DemoMetricsSeeder.php' => [
+        'kind' => KIND_DEBT,
+        'owner' => 'T-13-16',
+        'census' => ['backtick' => 15, 'upsert' => 2, 'values' => 2],
+        'why' => 'fixture de métricas escrito entero para el motor heredado y sin ruta en el motor único: se retira con el camino heredado',
+    ],
+    'src/Infrastructure/Database/MigrationRunner.php' => [
+        'kind' => KIND_DEBT,
+        'owner' => 'T-13-14',
+        'census' => ['legacy_database' => 1],
+        'why' => 'el ejecutor del motor heredado comprueba la existencia de sus tablas en el catálogo de ese motor; se retira a favor del ejecutor del motor único',
+    ],
+    'src/Infrastructure/Database/PdoLockWaitBudget.php' => [
+        'kind' => KIND_DEBT,
+        'owner' => 'T-13-14',
+        'census' => ['catalog' => 1],
+        'why' => 'la ruta del motor heredado lee su presupuesto de espera del estado de sesión de ese motor; T-13-14 conserva solo la ruta del motor único',
+    ],
+    'src/Presentation/Controller/CoordinatorRouteMapController.php' => [
+        'kind' => KIND_OUT_OF_SCOPE,
+        'owner' => null,
+        'census' => ['backtick' => 1],
+        'why' => 'respaldo del mapa territorial sobre SQLite en memoria, fuera del alcance declarado del adaptador (que traduce los motores del sistema, no un tercero)',
+    ],
+    // ---------- Superficie de la batería: `tests` ----------
+    'tests/integration/CloudDeploySchemaParityTest.php' => [
+        'kind' => KIND_CONTRACT,
+        'owner' => 'T-13-16',
+        'census' => ['catalog' => 3, 'legacy_database' => 1],
+        'why' => 'guarda del DDL de despliegue heredado: lee su catálogo en la grafía de ese motor para compararlo; se retira con el artefacto',
+    ],
+    'tests/integration/ConnectionFactoryTest.php' => [
+        'kind' => KIND_DEBT,
+        'owner' => 'T-13-14',
+        'mixed' => true,
+        'census' => ['legacy_database' => 1],
+        'why' => 'la rama inalcanzable del driver heredado de la factoría pregunta a qué base está conectada, y la suite pregunta lo mismo al motor único en su propia grafía; su dueño es la factoría de una sola rama',
+    ],
+    'tests/integration/CoordinatorPreventiveDetailApiTest.php' => [
+        'kind' => KIND_DEBT,
+        'owner' => 'T-13-09',
+        'census' => ['json' => 1],
+        'why' => 'la consulta de la traza de auditoría lee el metadato con la extracción de JSON del motor retirado; el censo invertido lo nombra por primera vez —vive en un fragmento interpolado— y el lote preventivo lo porta',
+    ],
+    'tests/integration/PendingInfoConcurrencyTest.php' => [
+        'kind' => KIND_DEBT,
+        'owner' => 'T-13-11',
+        'census' => ['catalog' => 2],
+        'why' => 'la sonda de aislamiento de la carrera pregunta el nivel de aislamiento al estado de sesión del motor heredado',
+    ],
+    'tests/integration/PostgresConstitutionalTest.php' => [
+        'kind' => KIND_CONTRACT,
+        'owner' => 'T-13-16',
+        'census' => ['legacy_database' => 1],
+        'why' => 'contrasta el blindaje constitucional contra el motor heredado; se retira con el contrato de correspondencia entre motores',
+    ],
+    'tests/integration/SanitaryClockConsumerRaceTest.php' => [
+        'kind' => KIND_DEBT,
+        'owner' => 'T-13-12',
+        'census' => ['catalog' => 2],
+        'why' => 'la sonda de contención lee el presupuesto de espera del estado de sesión del motor heredado',
+    ],
+    'tests/integration/SanitaryClockSweepEndpointTest.php' => [
+        'kind' => KIND_DEBT,
+        'owner' => 'T-13-12',
+        'census' => ['catalog' => 1],
+        'why' => 'la misma sonda de contención del barrido sanitario, en su endpoint',
+    ],
+    'tests/integration/SchemaConvergenceParityTest.php' => [
+        'kind' => KIND_CONTRACT,
+        'owner' => 'T-13-16',
+        'mixed' => true,
+        'census' => ['catalog' => 9, 'legacy_database' => 1, 'text_function' => 1],
+        'why' => 'certifica la correspondencia entre los dos esquemas: lee el catálogo del motor heredado en su grafía y el del motor único, para compararlos; muere con el contrato de correspondencia',
+    ],
+    'tests/integration/SeedRunnerSingleEngineTest.php' => [
+        'kind' => KIND_GUARD,
+        'owner' => null,
+        'mixed' => true,
+        'census' => ['upsert' => 1],
+        'why' => 'guarda del sembrador: nombra la cláusula heredada para prohibirla y exige la del motor único, que es su otra grafía',
+    ],
+    'tests/unit/PdoLockWaitBudgetTest.php' => [
+        'kind' => KIND_DEBT,
+        'owner' => 'T-13-14',
+        'census' => ['catalog' => 6],
+        'why' => 'la suite fija la sentencia de la ruta heredada contra el doble de conexión; se retira con esa ruta',
+    ],
+    'tests/unit/RefundsModuleClosureTest.php' => [
+        'kind' => KIND_CONTRACT,
+        'owner' => 'T-13-16',
+        'census' => ['backtick' => 1],
+        'why' => 'compara el guardián del Art. III.1 contra el contenido del `.sql` heredado, que sigue existiendo y no ha cambiado',
+    ],
+    'tests/unit/RouteMapMigrationContractTest.php' => [
+        'kind' => KIND_CONTRACT,
+        'owner' => 'T-13-16',
+        'census' => ['backtick' => 6, 'upsert' => 1, 'values' => 1],
+        'why' => 'compara contra el contenido de la migración heredada de rutas y mapa, que sigue existiendo',
+    ],
+    'tests/unit/SqlDialectPortabilityTest.php' => [
+        'kind' => KIND_GUARD,
+        'owner' => null,
+        'mixed' => true,
+        'census' => [
+            'backtick' => 7, 'catalog' => 1, 'json' => 5, 'legacy_database' => 1, 'purge_window' => 1,
+            'show' => 1, 'temporal' => 5, 'text_function' => 1, 'upsert' => 8, 'values' => 7,
+        ],
+        'why' => 'es esta guarda: renderiza la forma del motor retirado para certificar el punto único de traducción y cita cada familia en su espécimen para probar que el detector distingue —de ahí una ocurrencia de cada familia, que se retira cuando muera la rama del adaptador—',
+    ],
+    // ---------- Drenado: a cero, y declarado para que un retorno ponga la guarda en rojo ----------
+    'src/Infrastructure/Repository/PdoIncidentRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-09', 'census' => [],
+        'drained_occurrences' => ['backtick' => 234, 'temporal' => 4], 'why' => 'porte de la tanda 1',
+    ],
+    'src/Infrastructure/Repository/PdoMachineRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-09', 'census' => [],
+        'drained_occurrences' => ['backtick' => 182], 'why' => 'porte de la tanda 1',
+    ],
+    'src/Infrastructure/Repository/PdoLocationRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-09', 'census' => [],
+        'drained_occurrences' => ['backtick' => 116], 'why' => 'porte de la tanda 1',
+    ],
+    'src/Infrastructure/Repository/PdoUserRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-09', 'census' => [],
+        'drained_occurrences' => ['backtick' => 124, 'temporal' => 2], 'why' => 'porte de la tanda 1',
+    ],
+    'src/Infrastructure/Repository/PdoRefundRequestRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-10', 'census' => [],
+        'drained_occurrences' => ['backtick' => 63], 'why' => 'porte de la tanda 2',
+    ],
+    'src/Infrastructure/Repository/PdoSparePartRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-10', 'census' => [],
+        'drained_occurrences' => ['backtick' => 73, 'upsert' => 2], 'why' => 'porte de la tanda 2',
+    ],
+    'src/Infrastructure/Repository/PdoSparePartRequestRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-10', 'census' => [],
+        'drained_occurrences' => ['backtick' => 31], 'why' => 'porte de la tanda 2',
+    ],
+    'src/Infrastructure/Repository/PdoIncidentReplacedPartRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-10', 'census' => [],
+        'drained_occurrences' => ['backtick' => 48, 'temporal' => 5], 'why' => 'porte de la tanda 2',
+    ],
+    'src/Infrastructure/Repository/PdoMetricsRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-10', 'census' => [],
+        'drained_occurrences' => ['backtick' => 144, 'temporal' => 9], 'why' => 'porte de la tanda 2',
+    ],
+    'src/Infrastructure/Repository/PdoPreventiveSettingsRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-11', 'census' => [],
+        'drained_occurrences' => ['backtick' => 85], 'why' => 'porte de la tanda 3',
+    ],
+    'src/Infrastructure/Repository/PdoPreventiveOrderRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-11', 'census' => [],
+        'drained_occurrences' => ['backtick' => 190, 'temporal' => 4], 'why' => 'porte de la tanda 3',
+    ],
+    'src/Infrastructure/Repository/PdoPreventiveItemRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-11', 'census' => [],
+        'drained_occurrences' => ['backtick' => 42], 'why' => 'porte de la tanda 3',
+    ],
+    'src/Infrastructure/Repository/PdoRouteSettingsRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-11', 'census' => [],
+        'drained_occurrences' => ['backtick' => 26], 'why' => 'porte de la tanda 3',
+    ],
+    'src/Infrastructure/Repository/PdoSanitaryCertificateRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-11', 'census' => [],
+        'drained_occurrences' => ['backtick' => 136], 'why' => 'porte de la tanda 3',
+    ],
+    'src/Infrastructure/Repository/PdoSanitarySweepVisibilityRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-11', 'census' => [],
+        'drained_occurrences' => ['backtick' => 63, 'upsert' => 1], 'why' => 'porte de la tanda 3',
+    ],
+    'src/Infrastructure/Repository/PdoAuditLogRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-11', 'census' => [],
+        'drained_occurrences' => ['backtick' => 40], 'why' => 'porte de la tanda 3',
+    ],
+    'src/Infrastructure/Repository/PdoSiteAccessCodeRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-11', 'census' => [],
+        'drained_occurrences' => ['backtick' => 30, 'temporal' => 1], 'why' => 'porte de la tanda 3',
+    ],
+    'src/Infrastructure/Repository/PdoUnclaimedCashFindingRepository.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-11', 'census' => [],
+        'drained_occurrences' => ['backtick' => 20], 'why' => 'porte de la tanda 3',
+    ],
+    'src/Infrastructure/Database/SeedRunner.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-12', 'census' => [],
+        'drained_occurrences' => ['backtick' => 275, 'json' => 2, 'temporal' => 19, 'upsert' => 9],
+        'why' => 'el sembrador del arnés: de aquí el adaptador toma la sintaxis de upsert que las semillas declaran',
+    ],
+];
 
-    foreach ($directories as $directory) {
-        $base = $projectRoot . '/' . $directory;
-        if (!is_dir($base)) {
-            continue;
-        }
+/** Ficheros que la superficie rastreada tiene que estar viendo, además de los 18 repositorios PDO. */
+const REQUIRED_IN_SURFACE = [
+    DIALECT_HOME,
+    CENSUS_HOME,
+    'tests/bootstrap.php',
+    'tests/run_all.php',
+    'tests/Support/TestDataCleaner.php',
+    'tests/diagnostics/PendingInfoSmokeWorkflowDiagnostic.php',
+    'src/Infrastructure/Database/SeedRunner.php',
+    'database/DemoMetricsSeeder.php',
+    'bin/migrate.php',
+];
 
-        $paths = [];
-        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($base, FilesystemIterator::SKIP_DOTS));
-        foreach ($iterator as $file) {
-            if ($file->isFile() && $file->getExtension() === 'php') {
-                $paths[] = $file->getPathname();
-            }
-        }
-        sort($paths);
+$legacyCensus = DialectCensus::inventory($projectRoot, TRACED_SURFACES, DialectCensus::LEGACY_FAMILIES, [DIALECT_HOME, CENSUS_HOME]);
+$engineCensus = DialectCensus::inventory($projectRoot, TRACED_SURFACES, DialectCensus::ENGINE_FAMILIES, [DIALECT_HOME, CENSUS_HOME]);
+$legacyTotals = DialectCensus::totals($legacyCensus);
+$engineTotals = DialectCensus::totals($engineCensus);
+$tracedSurface = DialectCensus::surface($projectRoot, TRACED_SURFACES);
 
-        foreach ($paths as $path) {
-            $relative = ltrim(str_replace('\\', '/', substr($path, strlen($projectRoot))), '/');
-            if ($relative === DIALECT_HOME) {
-                continue; // Aquí es donde el dialecto tiene que estar: es el punto único.
-            }
-
-            $literals = [];
-            $inHeredoc = false;
-            $buffer = '';
-
-            foreach (token_get_all((string)file_get_contents($path)) as $token) {
-                if (is_array($token)) {
-                    [$id, $text] = $token;
-
-                    if ($id === T_COMMENT || $id === T_DOC_COMMENT) {
-                        continue;
-                    }
-                    if ($id === T_START_HEREDOC) {
-                        $inHeredoc = true;
-                        $buffer = '';
-                        continue;
-                    }
-                    if ($id === T_END_HEREDOC) {
-                        $literals[] = $buffer;
-                        $inHeredoc = false;
-                        $buffer = '';
-                        continue;
-                    }
-                    if ($inHeredoc) {
-                        $buffer .= $text;
-                        continue;
-                    }
-                    if ($id === T_CONSTANT_ENCAPSED_STRING) {
-                        $literals[] = substr($text, 1, -1);
-                        continue;
-                    }
-                    if ($id === T_ENCAPSED_AND_WHITESPACE) {
-                        $literals[] = $text;
-                    }
-                    continue;
-                }
-
-                if ($inHeredoc) {
-                    $buffer .= $token;
-                }
-            }
-
-            foreach ($literals as $literal) {
-                $looksLikeSql = preg_match($sqlVerbs, $literal) === 1;
-
-                foreach (PRIVATE_SQL_FAMILIES as $family => $pattern) {
-                    // Las comillas y los operadores JSON sólo cuentan dentro de un literal que es
-                    // SQL: si no, cualquier copia con acentos graves parecería dialecto.
-                    if (($family === 'backtick' || $family === 'jsonop') && !$looksLikeSql) {
-                        continue;
-                    }
-
-                    $hits = preg_match_all($pattern, $literal);
-                    if ($hits > 0) {
-                        $inventory[$relative][$family] = ($inventory[$relative][$family] ?? 0) + $hits;
-                    }
-                }
-            }
-        }
-    }
-
-    ksort($inventory);
-
-    return $inventory;
-}
-
-$inventory = scanPrivateSqlInventory($projectRoot, ['src', 'database', 'bin']);
-
-$declaredRepositories = array_keys(array_filter(
-    PENDING_INVENTORY + DRAINED_INVENTORY,
-    static fn (string $path): bool => str_starts_with($path, 'src/Infrastructure/Repository/'),
-    ARRAY_FILTER_USE_KEY
-));
-$repositoriesOnDisk = glob($projectRoot . '/src/Infrastructure/Repository/*.php') ?: [];
+$missingFromSurface = array_values(array_diff(REQUIRED_IN_SURFACE, $tracedSurface));
 $assert(
-    '5.1 La superficie rastreada incluye los 18 repositorios PDO del proyecto',
-    count($declaredRepositories) === 18 && count($repositoriesOnDisk) === 18,
-    sprintf('declarados: %d (pendientes %d + drenados %d) · en disco: %d', count($declaredRepositories), count(PENDING_INVENTORY), count(DRAINED_INVENTORY), count($repositoriesOnDisk))
-);
-
-$assert(
-    '5.2 Todo fichero con hallazgos tiene declarado quién lo drena (o por qué queda fuera)',
-    array_diff(array_keys($inventory), array_keys(INVENTORY_OWNERS)) === [],
-    'sin atribución: ' . implode(', ', array_diff(array_keys($inventory), array_keys(INVENTORY_OWNERS)))
-);
-
-$assert(
-    '5.3 El inventario no contiene ningún fichero fuera de los declarados (pendientes o drenados)',
-    array_diff(array_keys($inventory), array_keys(PENDING_INVENTORY + DRAINED_INVENTORY)) === [],
-    'nuevos: ' . implode(', ', array_diff(array_keys($inventory), array_keys(PENDING_INVENTORY + DRAINED_INVENTORY)))
-);
-
-$drainedWithDialect = array_values(array_intersect(array_keys(DRAINED_INVENTORY), array_keys($inventory)));
-$pendingButClean = array_values(array_diff(array_keys(PENDING_INVENTORY), array_keys($inventory)));
-$assert(
-    '5.4 Ningún fichero drenado recupera dialecto, y ningún pendiente se queda limpio sin declararlo',
-    $drainedWithDialect === [] && $pendingButClean === [],
+    '5.1 La superficie rastreada cubre la ejecución del sistema y la batería que lo mide',
+    $missingFromSurface === []
+    && in_array('src/Infrastructure/Repository/PdoIncidentRepository.php', $tracedSurface, true),
     sprintf(
-        'regresiones en drenados: %s · pendientes que se quedaron limpios: %s',
-        $drainedWithDialect === [] ? '(ninguna)' : implode(', ', $drainedWithDialect),
-        $pendingButClean === [] ? '(ninguno)' : implode(', ', $pendingButClean)
+        '%d ficheros PHP rastreados · ausentes: %s',
+        count($tracedSurface),
+        $missingFromSurface === [] ? '(ninguno)' : implode(', ', $missingFromSurface)
     )
 );
 
-$pendingTotals = ['backtick' => 0, 'temporal' => 0, 'upsert' => 0, 'json' => 0, 'jsonop' => 0];
-$pendingByOwner = [];
-
-foreach (PENDING_INVENTORY as $path => $declared) {
-    $found = $inventory[$path] ?? [];
-    ksort($found);
-    $declaredSorted = $declared;
-    ksort($declaredSorted);
-
-    $owner = INVENTORY_OWNERS[$path] ?? '(sin atribución declarada)';
-    foreach ($declaredSorted as $family => $count) {
-        $pendingTotals[$family] += $count;
-        $pendingByOwner[$owner] = ($pendingByOwner[$owner] ?? 0) + $count;
-    }
-
-    $assert(
-        sprintf('5.5 %s · inventario declarado y real coinciden (%s)', $path, $owner),
-        $found === $declaredSorted,
-        sprintf('declarado: %s · real: %s', json_encode($declaredSorted), json_encode($found))
-    );
-}
-
-echo "\n  Inventario pendiente declarado (la misma regla, aún sin traducir):\n";
-foreach ($pendingByOwner as $owner => $count) {
-    echo sprintf("    · %-60s %d construcción(es)\n", $owner, $count);
-}
-echo sprintf(
-    "    · total: %d acentos graves, %d expresiones temporales, %d upserts y %d lecturas de JSON\n",
-    $pendingTotals['backtick'],
-    $pendingTotals['temporal'],
-    $pendingTotals['upsert'],
-    $pendingTotals['json'] + $pendingTotals['jsonop']
+// El punto único y el rule set citan el dialecto por diseño, y por eso quedan fuera del censo. Una
+// exclusión que no se comprueba es un escondite: ninguno de los dos puede estar ejecutando SQL.
+$adapterSource = (string)file_get_contents($projectRoot . '/' . DIALECT_HOME);
+$censusSource = (string)file_get_contents($projectRoot . '/' . CENSUS_HOME);
+$executesSql = static fn (string $source): bool => preg_match('/new\s+PDO|->\s*(query|exec|prepare|fetchAll|fetchColumn)\s*\(/i', $source) === 1;
+$assert(
+    '5.2 El punto único del dialecto y el rule set del censo no ejecutan SQL (su exclusión no esconde una sentencia)',
+    $executesSql($adapterSource) === false && $executesSql($censusSource) === false,
+    'el adaptador y el censo tienen que ser definición, no ejecución'
 );
 
-$drainedTotals = ['backtick' => 0, 'temporal' => 0, 'upsert' => 0, 'json' => 0, 'jsonop' => 0];
-$drainedByOwner = [];
-foreach (DRAINED_INVENTORY as $path => $drained) {
-    foreach ($drained['families'] as $family => $count) {
-        $drainedTotals[$family] += $count;
-        $drainedByOwner[$drained['drained_by']] = ($drainedByOwner[$drained['drained_by']] ?? 0) + $count;
+$undeclared = array_values(array_diff(array_keys($legacyCensus), array_keys(LEGACY_DIALECT)));
+$assert(
+    '5.3 Todo fichero con dialecto heredado está declarado',
+    $undeclared === [],
+    'sin declarar: ' . implode(', ', $undeclared)
+);
+
+$declaredMismatch = [];
+foreach (LEGACY_DIALECT as $path => $declaration) {
+    $found = $legacyCensus[$path] ?? [];
+    ksort($found);
+    $declared = $declaration['census'];
+    ksort($declared);
+    if ($found !== $declared) {
+        $declaredMismatch[] = sprintf('%s (declarado %s · real %s)', $path, json_encode($declared), json_encode($found));
+    }
+}
+$assert(
+    '5.4 El censo declarado coincide exactamente con el real, fichero a fichero y familia a familia',
+    $declaredMismatch === [],
+    implode(' · ', $declaredMismatch)
+);
+
+$drainedWithDialect = array_values(array_intersect(array_keys($legacyCensus), array_keys(array_filter(
+    LEGACY_DIALECT,
+    static fn (array $declaration): bool => $declaration['kind'] === KIND_DRAINED
+))));
+$drainedWithoutDescent = [];
+foreach (LEGACY_DIALECT as $path => $declaration) {
+    if ($declaration['kind'] !== KIND_DRAINED) {
+        continue;
+    }
+    $occurrences = $declaration['drained_occurrences'] ?? [];
+    if ($occurrences === [] || array_sum($occurrences) <= 0) {
+        $drainedWithoutDescent[] = $path;
+    }
+}
+$assert(
+    '5.5 Ningún fichero drenado recupera dialecto, y todo drenado cita el descenso que declaró su deuda',
+    $drainedWithDialect === [] && $drainedWithoutDescent === [],
+    sprintf(
+        'regresiones: %s · sin descenso citado: %s',
+        $drainedWithDialect === [] ? '(ninguna)' : implode(', ', $drainedWithDialect),
+        $drainedWithoutDescent === [] ? '(ninguno)' : implode(', ', $drainedWithoutDescent)
+    )
+);
+
+// El plan de tareas es la autoridad del dueño: una deuda cuyo dueño ya está cerrado es una deuda que
+// debería estar pagada, y por eso pone la guarda en rojo en lugar de quedarse declarada para siempre.
+$taskPlanSource = (string)file_get_contents($projectRoot . '/' . TASK_PLAN);
+preg_match_all('/^- \[( |x)\]\s+\*\*(T-13-\d+)/m', $taskPlanSource, $taskRows, PREG_SET_ORDER);
+$openTasks = [];
+$knownTasks = [];
+foreach ($taskRows as $row) {
+    $knownTasks[$row[2]] = true;
+    if ($row[1] === ' ') {
+        $openTasks[$row[2]] = true;
     }
 }
 
-echo "\n  Inventario ya drenado (a cero, con la cifra que declaró su deuda):\n";
-foreach ($drainedByOwner as $owner => $count) {
-    $files = 0;
-    foreach (DRAINED_INVENTORY as $drained) {
-        if ($drained['drained_by'] === $owner) {
-            $files++;
+$unknownKind = [];
+$missingOwner = [];
+$closedOwner = [];
+$unexpectedOwner = [];
+foreach (LEGACY_DIALECT as $path => $declaration) {
+    $kind = $declaration['kind'];
+    if (!in_array($kind, DECLARED_KINDS, true)) {
+        $unknownKind[] = $path;
+        continue;
+    }
+    $owner = $declaration['owner'];
+    if ($kind === KIND_DEBT || $kind === KIND_CONTRACT) {
+        // Un contrato también se atribuye: su dueño es la tarea que retira el artefacto heredado
+        // contra el que compara, y hasta entonces el contrato tiene sentido.
+        if ($owner === null || !isset($knownTasks[$owner])) {
+            $missingOwner[] = $path . ' (' . (string)$owner . ')';
+            continue;
+        }
+        if (!isset($openTasks[$owner])) {
+            $closedOwner[] = $path . ' (' . $owner . ')';
+        }
+        continue;
+    }
+    if ($owner !== null && $kind !== KIND_DRAINED) {
+        $unexpectedOwner[] = $path . ' (' . $owner . ')';
+    }
+}
+$assert(
+    '5.6 Toda aparición declara una naturaleza admitida (deuda, guarda, contrato, fuera de alcance o drenado)',
+    $unknownKind === [],
+    'naturalezas desconocidas: ' . implode(', ', $unknownKind)
+);
+$assert(
+    '5.7 Toda deuda y todo contrato tienen dueño, y su dueño existe en el plan de tareas del módulo',
+    $missingOwner === [],
+    'sin dueño o con dueño inexistente: ' . implode(', ', $missingOwner)
+);
+$assert(
+    '5.8 Ni una deuda ni un contrato tienen el dueño ya cerrado: una excepción con el plazo cumplido es una excepción sin pagar',
+    $closedOwner === [],
+    sprintf(
+        'deudas con dueño cerrado (de %d tareas, %d abiertas): %s',
+        count($knownTasks),
+        count($openTasks),
+        implode(', ', $closedOwner)
+    )
+);
+$assert(
+    '5.9 Ni una guarda ni un sitio fuera de alcance se atribuyen a una tarea del porte: no hay tarea que los cierre',
+    $unexpectedOwner === [],
+    'declaraciones con dueño improcedente: ' . implode(', ', $unexpectedOwner)
+);
+
+// La mezcla de las dos grafías de una misma construcción se declara: un híbrido sin declarar es un
+// fichero midiendo el dialecto en lugar de la conducta.
+$mixedUndeclared = [];
+$mixedDeclared = [];
+foreach (array_unique(array_merge(array_keys($legacyCensus), array_keys($engineCensus))) as $path) {
+    $legacyFamilies = $legacyCensus[$path] ?? [];
+    $engineFamilies = $engineCensus[$path] ?? [];
+    $constructionMix = [];
+    foreach (CONSTRUCTION_PAIRS as [$legacyFamily, $engineFamily]) {
+        if (isset($legacyFamilies[$legacyFamily]) && isset($engineFamilies[$engineFamily])) {
+            $constructionMix[] = $legacyFamily . '+' . $engineFamily;
         }
     }
-    echo sprintf("    · %-60s %d fichero(s) · %d construcción(es)\n", $owner, $files, $count);
+    if ($constructionMix === []) {
+        continue;
+    }
+    if ((LEGACY_DIALECT[$path]['mixed'] ?? false) === true) {
+        $mixedDeclared[] = $path;
+        continue;
+    }
+    $mixedUndeclared[] = $path . ' (' . implode(', ', $constructionMix) . ')';
+}
+$assert(
+    '5.10 Ningún fichero mezcla las dos grafías de una misma construcción sin declararlo',
+    $mixedUndeclared === [],
+    'mezcla sin declarar: ' . implode(', ', $mixedUndeclared)
+);
+
+echo "\n  Dialecto heredado declarado (fichero · naturaleza · dueño · censo):\n";
+foreach (LEGACY_DIALECT as $path => $declaration) {
+    $censusLabel = $declaration['census'] === []
+        ? 'a cero'
+        : implode(' ', array_map(
+            static fn (string $family, int $count): string => $family . '=' . $count,
+            array_keys($declaration['census']),
+            $declaration['census']
+        ));
+    echo sprintf("    · %-64s %-14s %-12s %s\n", $path, $declaration['kind'], $declaration['owner'] ?? '—', $censusLabel);
 }
 echo sprintf(
-    "    · total drenado: %d acentos graves, %d expresiones temporales, %d upserts y %d lecturas de JSON\n",
-    $drainedTotals['backtick'],
-    $drainedTotals['temporal'],
-    $drainedTotals['upsert'],
-    $drainedTotals['json'] + $drainedTotals['jsonop']
+    "  Saldo declarado: %d literales en %d ficheros · %s\n",
+    $legacyTotals['literals'],
+    $legacyTotals['files'],
+    implode(' · ', array_map(
+        static fn (string $family, int $count): string => $family . '=' . $count,
+        array_keys($legacyTotals['families']),
+        $legacyTotals['families']
+    ))
+);
+echo sprintf("  Mezcla de grafías declarada: %s\n", $mixedDeclared === [] ? '(ninguna)' : implode(', ', $mixedDeclared));
+
+// =====================================================================
+// GRUPO 6 — El detector distingue: especímenes con el defecto y con su cura
+// =====================================================================
+
+echo "\n--- Grupo 6: el detector distingue (especímenes, no suposiciones) ---\n";
+
+$specimenDir = sys_get_temp_dir() . '/vg_dialect_specimen_' . bin2hex(random_bytes(4));
+$inheritedSpecimenPath = $specimenDir . '/InheritedSpecimen.php';
+$singleEngineSpecimenPath = $specimenDir . '/SingleEngineSpecimen.php';
+
+// El espécimen del dialecto retirado: cada familia con su literal, un comentario que la cita sin ser
+// dialecto medible y una cita heredada dentro de un **fragmento interpolado** —el defecto real que
+// este censo nombra por primera vez en la batería—.
+$inheritedSpecimen = <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+// Comentario y docblock con el dialecto retirado, que NO cuenta: ON DUPLICATE KEY UPDATE, SHOW COLUMNS
+// y una consulta de ejemplo con `code` entre acentos graves que tampoco es un literal medible.
+
+$inherited = [
+    'backtick' => 'SELECT `id` FROM `incidents` WHERE `status` = 1',
+    'upsert' => 'INSERT INTO users (email) VALUES (:email) ON DUPLICATE KEY UPDATE email = :email',
+    'values' => 'INSERT INTO spare_part_compatibilities (a) VALUES (1) ON DUPLICATE KEY UPDATE a = VALUES(a)',
+    'temporal' => 'SELECT DATE_SUB(NOW(), INTERVAL 7 DAY) FROM incidents',
+    'json' => 'SELECT JSON_UNQUOTE(JSON_EXTRACT(`metadata`, \'$.order_code\')) FROM audit_log',
+    'text_function' => 'SELECT GROUP_CONCAT(name) FROM machines GROUP BY location_id',
+    'legacy_database' => 'SELECT DATABASE() AS schema_name',
+    'catalog' => 'SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = :schema',
+    'show' => 'SHOW COLUMNS FROM incidents LIKE \'status\'',
+    'purge_window' => 'SET @vendguard_purge = 1',
+];
+
+$fragment = "    AND JSON_UNQUOTE(JSON_EXTRACT(`metadata`, '$.order_code')) = '{$orderCode}'\n";
+PHP;
+
+// El espécimen del motor único: la forma que el sistema tiene que usar en cada construcción, más dos
+// casos que **no** pueden contar como dialecto —la grafía minúscula del catálogo, que el motor único
+// sí tiene, y su propia forma de preguntar por la base— y acentos graves en prosa que no es SQL.
+$singleEngineSpecimen = <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+$singleEngine = [
+    'conflict' => 'INSERT INTO users (email) VALUES (:email) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email',
+    'json_operator' => 'SELECT metadata ->> \'order_code\' FROM audit_log',
+    'interval_literal' => 'SELECT NOW() - INTERVAL \'7 days\' FROM incidents',
+    'epoch_extract' => 'SELECT EXTRACT(EPOCH FROM (resolved_at - created_at)) / 60 FROM incidents',
+    'catalog_view' => 'SELECT enumlabel FROM pg_enum WHERE enumtypid = :enum_oid',
+    'current_database' => 'SELECT current_database() AS schema_name',
+    'purge_setting' => 'SELECT set_config(\'vendguard.purge\', \'on\', false)',
+];
+
+$honest = [
+    'lowercase_catalog' => 'SELECT column_name FROM information_schema.columns WHERE table_name = :table',
+    'prose' => 'usa `code` entre acentos graves como ejemplo de prosa, no como dialecto',
+];
+PHP;
+
+/**
+ * Censo declarado del espécimen del dialecto retirado: literales por familia.
+ *
+ * Las diez familias aparecen; `backtick`, `upsert` y `json` aparecen dos veces porque tres especímenes
+ * llevan más de una —los acentos graves del espécimen de extracción de JSON y los del fragmento, y la
+ * cláusula heredada del espécimen de `VALUES`—. Si el censo dejara entrar los comentarios, estas
+ * cifras subirían: es la mitad del espécimen que prueba que los comentarios no cuentan.
+ *
+ * @var array<string, int>
+ */
+const INHERITED_SPECIMEN_CENSUS = [
+    'backtick' => 2,
+    'upsert' => 2,
+    'values' => 1,
+    'temporal' => 1,
+    'json' => 2,
+    'text_function' => 1,
+    'legacy_database' => 1,
+    'catalog' => 1,
+    'show' => 1,
+    'purge_window' => 1,
+];
+
+@mkdir($specimenDir, 0700, true);
+file_put_contents($inheritedSpecimenPath, $inheritedSpecimen);
+file_put_contents($singleEngineSpecimenPath, $singleEngineSpecimen);
+
+try {
+    $specimenLegacy = DialectCensus::inventory(sys_get_temp_dir(), [basename($specimenDir)], DialectCensus::LEGACY_FAMILIES);
+    $specimenEngine = DialectCensus::inventory(sys_get_temp_dir(), [basename($specimenDir)], DialectCensus::ENGINE_FAMILIES);
+
+    $inheritedKey = basename($specimenDir) . '/InheritedSpecimen.php';
+    $singleEngineKey = basename($specimenDir) . '/SingleEngineSpecimen.php';
+
+    $foundInherited = $specimenLegacy[$inheritedKey] ?? [];
+    ksort($foundInherited);
+    $expectedInherited = INHERITED_SPECIMEN_CENSUS;
+    ksort($expectedInherited);
+
+    $assert(
+        '6.1 El espécimen del dialecto retirado dispara cada familia con la cifra declarada (y sin contar comentarios)',
+        $foundInherited === $expectedInherited,
+        sprintf('declarado %s · real %s', json_encode($expectedInherited), json_encode($foundInherited))
+    );
+    $assert(
+        '6.2 El espécimen del motor único no dispara NINGUNA familia heredada (ni la grafía minúscula del catálogo, ni su forma de preguntar por su base, ni la prosa con acentos graves)',
+        !isset($specimenLegacy[$singleEngineKey]),
+        'falsos positivos: ' . json_encode($specimenLegacy[$singleEngineKey] ?? [])
+    );
+
+    $engineFamiliesMissing = array_values(array_diff(
+        array_keys(DialectCensus::ENGINE_FAMILIES),
+        array_keys($specimenEngine[$singleEngineKey] ?? [])
+    ));
+    $assert(
+        '6.3 Y el espécimen del motor único declara las ocho construcciones que el sistema usa',
+        $engineFamiliesMissing === [],
+        'sin reconocer: ' . implode(', ', $engineFamiliesMissing)
+    );
+
+    // La cita heredada de un fragmento interpolado: no parece SQL y aun así es dialecto. Es el sitio
+    // de `CoordinatorPreventiveDetailApiTest`, invisible al censo ad hoc del lote anterior.
+    $inheritedLiterals = DialectCensus::literals($inheritedSpecimenPath);
+    $fragmentsWithJsonCite = array_filter(
+        $inheritedLiterals,
+        static fn (string $literal): bool => DialectCensus::flags($literal, 'json') === true
+            && DialectCensus::looksLikeSql($literal) === false
+    );
+    $assert(
+        '6.4 Una cita heredada dentro de un fragmento interpolado se ve, aunque el fragmento no parezca SQL',
+        count($fragmentsWithJsonCite) === 1,
+        'fragmentos que la llevan sin parecer SQL: ' . count($fragmentsWithJsonCite)
+    );
+    $assert(
+        '6.5 El comentario del espécimen no es un literal: el dialecto que cita no se cuenta',
+        count(array_filter(
+            $inheritedLiterals,
+            static fn (string $literal): bool => str_contains($literal, 'Comentario y docblock')
+        )) === 0
+    );
+} finally {
+    @unlink($inheritedSpecimenPath);
+    @unlink($singleEngineSpecimenPath);
+    @rmdir($specimenDir);
+}
+
+$assert(
+    '6.6 El espécimen no deja residuo: su directorio temporal se retira',
+    !is_dir($specimenDir) && !is_file($inheritedSpecimenPath)
 );
 
-// El punto único tiene que ser el punto único: las familias rastreadas viven todas en el adaptador,
-// y el adaptador no las deja vivir en ningún otro sitio.
-$dialectSource = (string)file_get_contents($projectRoot . '/' . DIALECT_HOME);
+// =====================================================================
+// GRUPO 7 — La exigencia: el dialecto del motor único es el que se escribe
+// =====================================================================
+
+echo "\n--- Grupo 7: el dialecto del motor único, exigido ---\n";
+
+$absentEngineFamilies = array_values(array_diff(
+    array_keys(DialectCensus::ENGINE_FAMILIES),
+    array_keys($engineTotals['families'])
+));
 $assert(
-    '5.6 El adaptador es el único fichero que renderiza las cuatro familias (y por eso se excluye)',
-    str_contains($dialectSource, 'ON CONFLICT')
-    && str_contains($dialectSource, 'ON DUPLICATE KEY UPDATE')
-    && str_contains($dialectSource, 'JSON_UNQUOTE(JSON_EXTRACT')
-    && str_contains($dialectSource, "->> '%s'")
-    && str_contains($dialectSource, 'DATE_SUB')
-    && str_contains($dialectSource, 'TIMESTAMPDIFF')
-    && str_contains($dialectSource, 'EXTRACT(EPOCH FROM')
+    '7.1 Las ocho construcciones del motor único están presentes en la superficie rastreada',
+    $absentEngineFamilies === [],
+    'ausentes: ' . implode(', ', $absentEngineFamilies)
+);
+// La única aparición admitida de la ventana de purga heredada es la guarda que la cita en su
+// espécimen; cualquier otra —una suite que la declare de verdad, la aplicación— no se declara: se repara.
+$purgeWindowOutsideGuards = array_values(array_filter(
+    array_keys($legacyCensus),
+    static fn (string $path): bool => isset($legacyCensus[$path]['purge_window'])
+        && LEGACY_DIALECT[$path]['kind'] !== KIND_GUARD
+));
+$assert(
+    '7.2 La ventana de purga del arnés tiene una sola forma: la heredada no queda en ninguna superficie fuera de la guarda que la cita',
+    $purgeWindowOutsideGuards === [] && ($engineTotals['families']['purge_setting'] ?? 0) > 0,
+    sprintf(
+        'purga heredada fuera de las guardas: %s · declaración del motor en %d ficheros',
+        $purgeWindowOutsideGuards === [] ? '(ninguna)' : implode(', ', $purgeWindowOutsideGuards),
+        $engineTotals['families']['purge_setting'] ?? 0
+    )
+);
+
+// La superficie de ejecución no «tiene deuda»: solo está lo que la retirada va a retirar. Un sitio de
+// dialecto en un fichero que se queda —un repositorio, un servicio, el arranque— no se declara: se repara.
+$executionSurfaceDebts = [];
+foreach ($legacyCensus as $path => $families) {
+    if (!preg_match('#^(src|database|bin)/#', $path)) {
+        continue;
+    }
+    $declaration = LEGACY_DIALECT[$path];
+    if ($declaration['kind'] === KIND_OUT_OF_SCOPE) {
+        continue;
+    }
+    if ($declaration['kind'] !== KIND_DEBT || !in_array($declaration['owner'], RETIREMENT_TASKS, true)) {
+        $executionSurfaceDebts[] = $path . ' (' . $declaration['kind'] . ' · ' . (string)$declaration['owner'] . ')';
+    }
+}
+$assert(
+    '7.3 En la superficie de ejecución, el dialecto heredado solo permanece donde la retirada lo va a retirar',
+    $executionSurfaceDebts === [],
+    'sitios que no son de la retirada: ' . implode(', ', $executionSurfaceDebts)
+);
+
+// Y la batería no introduce dialecto nuevo: cada hallazgo suyo es una guarda que lo nombra, un contrato
+// que compara contra el artefacto heredado o una deuda con lote abierto. «Fuera de alcance» no vale aquí.
+$batchUndeclared = [];
+foreach ($legacyCensus as $path => $families) {
+    if (str_starts_with($path, 'tests/') === false) {
+        continue;
+    }
+    $declaration = LEGACY_DIALECT[$path];
+    if ($declaration['kind'] === KIND_OUT_OF_SCOPE || $declaration['kind'] === KIND_DRAINED) {
+        $batchUndeclared[] = $path . ' (' . $declaration['kind'] . ')';
+    }
+}
+$assert(
+    '7.4 La batería no introduce dialecto nuevo: todo hallazgo suyo es guarda, contrato o deuda con lote abierto',
+    $batchUndeclared === [],
+    'hallazgos sin cobertura declarada: ' . implode(', ', $batchUndeclared)
 );
 
 $assert(
-    '5.7 El adaptador no declara un tercer motor ni modos de compatibilidad que no se usan',
-    !str_contains($dialectSource, "'sqlite") && !str_contains($dialectSource, 'ANSI_QUOTES')
+    '7.5 El adaptador es el único sitio que renderiza las cuatro familias del dialecto',
+    str_contains($adapterSource, 'ON CONFLICT')
+    && str_contains($adapterSource, 'ON DUPLICATE KEY UPDATE')
+    && str_contains($adapterSource, 'JSON_UNQUOTE(JSON_EXTRACT')
+    && str_contains($adapterSource, "->> '%s'")
+    && str_contains($adapterSource, 'DATE_SUB')
+    && str_contains($adapterSource, 'TIMESTAMPDIFF')
+    && str_contains($adapterSource, 'EXTRACT(EPOCH FROM')
+);
+$assert(
+    '7.6 El adaptador no declara un tercer motor ni modos de compatibilidad que no se usan',
+    !str_contains($adapterSource, "'sqlite") && !str_contains($adapterSource, 'ANSI_QUOTES')
+);
+
+echo sprintf(
+    "  Saldo del motor único: %d literales en %d ficheros · %s\n",
+    $engineTotals['literals'],
+    $engineTotals['files'],
+    implode(' · ', array_map(
+        static fn (string $family, int $count): string => $family . '=' . $count,
+        array_keys($engineTotals['families']),
+        $engineTotals['families']
+    ))
 );
 
 // =====================================================================
@@ -1002,7 +1398,7 @@ echo "\n======================================================================\n
 echo " Total Aserciones: {$assertions} | Exitosas: " . ($assertions - $failures) . " | Fallidas: {$failures}\n";
 
 if ($failures === 0) {
-    echo " RESULTADO: 100% EN VERDE. CONDICIÓN T-HYBRID-25 CUMPLIDA CON ÉXITO.\n";
+    echo " RESULTADO: 100% EN VERDE. GUARDA DEL DIALECTO INVERTIDA (T-13-06) CUMPLIDA.\n";
     echo "======================================================================\n";
     exit(0);
 }

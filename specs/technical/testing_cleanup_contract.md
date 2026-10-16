@@ -467,7 +467,7 @@ mezclarla aquí ocultaría los dos defectos.
 
 | Sitio | Por qué no se toca aquí | Dueño |
 |---|---|---|
-| `tests/unit/SqlDialectPortabilityTest.php` | Es la **guarda del dialecto**: renderiza las dos formas a propósito y rastrea el saldo de `src`, `database` y `bin`. Su sentido se invierte con la tarea que retira el motor heredado | T-13-06 |
+| `tests/unit/SqlDialectPortabilityTest.php` | Es la **guarda del dialecto**, ya **invertida** (T-13-06): renderiza las dos formas a propósito —el punto único de traducción— y **cita cada familia en su espécimen** para probar que el detector distingue. Su mitad heredada se reduce cuando muera la rama del adaptador | T-13-14/T-13-16 |
 | `tests/unit/RouteMapMigrationContractTest.php`, `RefundsModuleClosureTest` (§4.3) | Comparan contra el **contenido de los `.sql` heredados**, que siguen existiendo y no han cambiado: invertirlas ahora certificaría un fichero que aún no se ha retirado | T-13-16 |
 | `SchemaConvergenceParityTest`, `PostgresConstitutionalTest`, `PostgresSchemaTest`, `DemoHistorySeederPostgresTest`, `PoolerLatencyMeasurementTest` | Categoría propia del **motor nuevo** y el **contrato de correspondencia entre motores**: se retiran o se reescriben con la retirada, no antes | T-13-13, T-13-16 |
 | `CloudDeploySchemaParityTest` | Guarda del **DDL de despliegue heredado** (`cloud_init.sql`), con su propio esquema de sonda | T-13-13, T-13-16 |
@@ -477,22 +477,40 @@ mezclarla aquí ocultaría los dos defectos.
 
 El **censo de la clase** —literales de cadena tokenizados, comentarios y docblocks fuera— es
 lo que hace comprobable la regla: se cuenta por familia, en literales y no en líneas, y los
-ficheros con hallazgos tienen que estar todos en la tabla de arriba.
+ficheros con hallazgos tienen que estar todos en la tabla de arriba. Desde T-13-06 el censo
+**reproducible** lo publica la guarda y vive en
+[`DialectCensus`](../../tests/Support/DialectCensus.php); el saldo declarado y sus dueños, en
+[`single_engine_dialect_contract.md`](single_engine_dialect_contract.md).
 
 **Evidencia medida (2026-10-16, motor único PostgreSQL).**
 
-| Familia del dialecto heredado | Antes | Después |
-|---|---|---|
-| Identificador entre acentos graves | 43 literales | **12**, en las guardas y expectativas declaradas |
-| Upsert heredado (`ON DUPLICATE KEY`) | 18 | **8**, en las mismas |
-| `VALUES(columna)` heredado | 7 | **5**, en las mismas |
-| Aritmética temporal (`DATE_ADD`, `DATE_SUB`, `TIMESTAMPDIFF`, `CURDATE`) | 23 | **0** |
-| Extracción JSON (`JSON_EXTRACT`, `JSON_UNQUOTE`) | 0 | **0** |
-| Funciones de texto (`DATABASE()`, `GROUP_CONCAT`) | 15 | **5**, en las suites declaradas |
-| Catálogo de metadatos en su grafía heredada | 11 | **9**, en el contrato de correspondencia y la guarda del despliegue |
-| Ventana de purga (`SET @vendguard_purge`) | 4 | **0** (la única forma es `set_config('vendguard.purge', …, false)`, §3) |
-| `SHOW COLUMNS` | 1 | **0** (se lee `pg_enum`) |
-| **Total** | **122 literales en 30 ficheros** | **39 literales en 7 ficheros**, los 7 declarados con dueño en esta tabla |
+El censo con el que este lote midió su avance era **ad hoc**: sólo la superficie de la batería, sin
+las sondas del estado de sesión del motor heredado y sin resolver las comillas escapadas del código
+fuente. Aquéllas y éste son de la misma clase y **no son comparables cifra a cifra**; el reproducible
+mide las **cuatro superficies** y es el que la guarda congela:
+
+| Familia del dialecto heredado | Antes | Después | De lo que queda, en la guarda |
+|---|---|---|---|
+| Identificador entre acentos graves | 72 | **43** | 7 |
+| Catálogo de metadatos en su grafía heredada | 27 | **26** | 1 |
+| Aritmética temporal (`DATE_ADD`, `DATE_SUB`, `TIMESTAMPDIFF`, `CURDATE`) | 27 | **5** | 5 — **cero fuera de la guarda** |
+| Introspección de columnas (`SHOW COLUMNS`, `SHOW INDEX`) | 13 | **13** | 1 — las 12 restantes, en el ejecutor de migraciones heredado |
+| Upsert heredado (`ON DUPLICATE KEY`) | 21 | **12** | 8 |
+| `VALUES(columna)` heredado | 11 | **10** | 7 |
+| Base del motor heredado (`DATABASE()`) | 16 | **7** | 1 |
+| Extracción JSON (`JSON_EXTRACT`, `JSON_UNQUOTE`) | 5 | **6** | 5 |
+| Funciones de texto (`DATABASE()`, `GROUP_CONCAT`) | 2 | **2** | 1 |
+| Ventana de purga (`SET @vendguard_purge`) | 4 | **1** | 1 — **cero fuera de la guarda** (la única forma es `set_config('vendguard.purge', …, false)`, §3) |
+| **Total** | **198 literales en 40 ficheros** | **125 en 19** | **37** — los otros **88, en 18 ficheros**, son deudas y contratos con dueño |
+
+Las cuatro familias que nombra el «hecho cuando» de T-13-05 —acentos graves fuera de las guardas y
+de los contratos, `ON DUPLICATE KEY`, `DATE_ADD`/`DATE_SUB` y `JSON_EXTRACT`— quedan a **cero en el
+SQL que las suites ejecutan**: lo que sobrevive son guardas que lo citan para prohibirlo, contratos
+que comparan contra los `.sql` heredados que aún existen y deudas con dueño abierto. El censo
+reproducible nombra además dos sitios que el ad hoc no veía —la extracción de JSON del motor
+retirado dentro de un fragmento interpolado de `CoordinatorPreventiveDetailApiTest` (dueño T-13-09)
+y las sondas del estado de sesión del motor heredado en las suites de contención y de aislamiento
+(dueños T-13-11 y T-13-12)—: ninguno es un defecto nuevo, y los tres tienen lote abierto.
 
 La corrida completa antes y después de este porte fija el efecto: **261 suites · 8.802
 aserciones · 47 rojas** frente a la línea base de **261 · 8.525 · 57 rojas**, con **diez
