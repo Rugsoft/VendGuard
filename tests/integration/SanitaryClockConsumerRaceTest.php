@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * SanitaryClockConsumerRaceTest (T-PAUSE-38)
  *
- * Certifica, contra MariaDB real y con DOS CONEXIONES PDO independientes, que los DOS
+ * Certifica, contra PostgreSQL real y con DOS CONEXIONES PDO independientes, que los DOS
  * consumidores del Reloj Sanitario Biológico no pueden duplicar la cuarentena de la misma
  * máquina (RF-03.5.1, RF-03.5.2, Constitución Art. II y Art. III):
  *
@@ -28,7 +28,8 @@ declare(strict_types=1);
  *      UNO: la exclusión mutua funciona en los dos sentidos.
  *   3. **Contención real por fila.** Con la fila de la máquina sostenida por el cierre sin
  *      confirmar, el barrido NO puede duplicar el disparo: su transición muere esperando el
- *      bloqueo (`1205`), viaja a **`contended`** —aplazada, no fallada: sin alerta y con
+ *      bloqueo (`55P03`, `lock_not_available`: lo cancela la cota de espera del servicio,
+ *      T-PAUSE-40), viaja a **`contended`** —aplazada, no fallada: sin alerta y con
  *      reintento en la pasada siguiente (T-PAUSE-39)— y en la MISMA pasada la otra máquina,
  *      libre, sí entra en cuarentena. El aislamiento es por fila, no un bloqueo global, y el
  *      perdedor no deja rastro del expediente ajeno. La pasada se mide además **viva** para
@@ -69,6 +70,7 @@ use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Infrastructure\Config\SecretProvider;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Database\PdoLockWaitBudget;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Database\SeedRunner;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
@@ -255,15 +257,17 @@ foreach ($pdoSweep->query('SELECT id, sanitary_status FROM machines WHERE delete
 }
 
 // Máquinas libres bajo vigilancia sanitaria (`MachineType::requiresSanitaryWatch()`), sin
-// expediente vivo: son las únicas que el reloj biológico puede poner en cuarentena.
+// expediente vivo: son las únicas que el reloj biológico puede poner en cuarentena. Los tres
+// booleanos van en la forma del motor único (clase D-3 del porte): `boolean = integer` no es una
+// comparación que el motor admita (`42883`).
 $watchPool = $pdoSweep->query(
     "SELECT m.id AS machine_id, m.location_id, m.code, m.machine_type
        FROM machines m
        JOIN locations l ON l.id = m.location_id
-      WHERE m.is_active = 1
-        AND m.is_blocked_no_access = 0
+      WHERE m.is_active = TRUE
+        AND m.is_blocked_no_access = FALSE
         AND m.deleted_at IS NULL
-        AND l.is_active = 1
+        AND l.is_active = TRUE
         AND l.deleted_at IS NULL
         AND m.machine_type IN ('PERISHABLE_FOOD', 'COMBO')
         AND NOT EXISTS (
@@ -399,7 +403,16 @@ $closureConsumer = static function (?PreventiveSettingsRepositoryInterface $sett
 // desapareciera, la pasada contendida volvería a esperar el valor de servidor y la
 // medición de 3.3.ter la delataría. El valor de partida se captura para certificar
 // que la sesión queda restituida.
-$serverLockWaitSeconds = (int)$pdoSweep->query('SELECT @@SESSION.innodb_lock_wait_timeout')->fetchColumn();
+//
+// La cota se lee del **motor único** (`current_setting('lock_timeout')`, que es como la
+// devuelve y como la escribe el adaptador) y su duración la traduce su punto único
+// (`PdoLockWaitBudget::parsePostgresDuration`), de modo que la suite mide en milisegundos —la
+// unidad del motor— sin reimplementar la conversión. La lectura del estado de sesión del motor
+// heredado que había aquí era deuda declarada de este lote en la guarda del dialecto.
+$lockWaitMs = static fn (): int => PdoLockWaitBudget::parsePostgresDuration(
+    (string)$pdoSweep->query("SELECT current_setting('lock_timeout')")->fetchColumn()
+);
+$serverLockWaitMs = $lockWaitMs();
 
 try {
     // =====================================================================
@@ -614,7 +627,11 @@ try {
         && ($contendedData['contended_count'] ?? -1) === 1
         && ($contendedData['failures_count'] ?? -1) === 0
         && in_array((string)$contendedIncident->getTicketCode(), $deferredTickets, true)
-        && (str_contains($deferredReasons, '1205') || str_contains($deferredReasons, 'Lock wait timeout'))
+        // El motivo de la espera agotada lo declara el motor único por su SQLSTATE (`55P03`,
+        // `lock_not_available`): el `1205` era el errno del motor retirado. La pregunta de la
+        // suite no cambia al cambiar de motor —la perdedora ESPERA el bloqueo en lugar de
+        // decidir sobre una foto vieja—, pero sí la forma de reconocerlo.
+        && str_contains($deferredReasons, '55P03')
         && !in_array($contendedMachineId, $contendedQuarantined, true),
         sprintf(
             'aplazados=%s, motivos=%s, cuarentenadas=%s',
@@ -631,18 +648,18 @@ try {
         json_encode($contendedData, JSON_UNESCAPED_UNICODE)
     );
 
-    $sessionAfterPass = (int)$pdoSweep->query('SELECT @@SESSION.innodb_lock_wait_timeout')->fetchColumn();
+    $sessionAfterPass = $lockWaitMs();
 
     $assert(
         '3.3.ter La cota del servicio corta la espera (T-PAUSE-40) y la sesión queda restituida',
         $contendedElapsedMs < SanitaryClockSweepService::LOCK_WAIT_BUDGET_SECONDS * 3000
-        && $sessionAfterPass === $serverLockWaitSeconds,
+        && $sessionAfterPass === $serverLockWaitMs,
         sprintf(
-            'pasada=%.0f ms (cota declarada=%d s), cota de sesión tras la pasada=%d s (antes=%d s)',
+            'pasada=%.0f ms (cota declarada=%d s), cota de sesión tras la pasada=%d ms (antes=%d ms)',
             $contendedElapsedMs,
             SanitaryClockSweepService::LOCK_WAIT_BUDGET_SECONDS,
             $sessionAfterPass,
-            $serverLockWaitSeconds
+            $serverLockWaitMs
         )
     );
 

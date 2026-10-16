@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * TechnicianRouteMapApiTest (T-MAP-18)
  *
- * Integration HTTP test for the technician route map endpoint against real MariaDB
+ * Integration HTTP test for the technician route map endpoint against real PostgreSQL
  * (RF-MAP-03 to RF-MAP-06, RF-MAP-08, RNF-MAP-01, RNF-MAP-03, RNF-MAP-04):
  * 1. RBAC: 401 without token, 403 for non-technician roles.
  * 2. Hybrid deterministic sequencing: IN_PROGRESS stop pinned as #1, critical perishable
@@ -16,7 +16,7 @@ declare(strict_types=1);
  *    and 422 for malformed origin query values.
  * 6. Universal Google Maps links per stop and full day route with waypoints.
  *
- * Autonomous local suite: real MariaDB, zero outgoing network calls (Art. I, Art. IV).
+ * Autonomous local suite: real PostgreSQL, zero outgoing network calls (Art. I, Art. IV).
  */
 
 require_once __DIR__ . '/../bootstrap.php';
@@ -41,7 +41,7 @@ echo "======================================================================\n";
 echo " VendGuard: Test de Integración - TechnicianRouteMapApiTest (T-MAP-18)\n";
 echo "======================================================================\n\n";
 
-// ─── Bootstrap: MariaDB real y semillas ───────────────────────────────────────
+// ─── Bootstrap: PostgreSQL real y semillas ───────────────────────────────────
 $pdo = ConnectionFactory::getConnection();
 
 // Restitución del parque ante cualquier salida (contrato de limpieza §8.3): esta
@@ -56,9 +56,13 @@ TestDataCleaner::registerShutdownRestitution();
 TestDataCleaner::purge($pdo);
 
 // Restos físicos de suites anteriores: los soft-delete dejan filas huérfanas que
-// findBySiteCode/findByCode no devuelven, rompiendo la reejecución idempotente.
-$pdo->exec("DELETE FROM machines WHERE code LIKE 'MAP18-%'");
-$pdo->exec("DELETE FROM locations WHERE site_code LIKE 'SEDE-MAP18-%'");
+// findBySiteCode/findByCode no devuelven, rompiendo la reejecución idempotente. Los dos borrados
+// van por la **ventana de purga** del contrato de limpieza (§3): el guardián del Art. III.1 muerde
+// cualquier `DELETE` en crudo de una maestra, y en el motor retirado esa puerta no existía.
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo): void {
+    $pdo->exec("DELETE FROM machines WHERE code LIKE 'MAP18-%'");
+    $pdo->exec("DELETE FROM locations WHERE site_code LIKE 'SEDE-MAP18-%'");
+});
 
 $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedAll();
@@ -101,8 +105,11 @@ $tech1Token       = $authService->generateInternalToken($tech1);
 $coordinatorToken = $authService->generateInternalToken($coordinator);
 $tech1Id          = $tech1->getId();
 
-// Limpieza de tickets abiertos previos del técnico (restos de otras suites de test)
-$pdo->prepare("UPDATE incidents SET deleted_at = NOW(), is_active_ticket = 0
+// Limpieza de tickets abiertos previos del técnico (restos de otras suites de test): se cierran
+// **por su estado**, que es la puerta del motor único —la columna derivada `is_active_ticket` era
+// del retirado y aquí no existe (`42703`), de modo que la máquina no se liberaba por ella sino por
+// el estado que declara el índice único parcial `uq_machine_active_ticket` (D-6)—.
+$pdo->prepare("UPDATE incidents SET status = 'CANCELLED', deleted_at = NOW()
                WHERE assigned_technician_id = :tid AND deleted_at IS NULL AND status NOT IN ('CLOSED', 'CANCELLED')")
     ->execute([':tid' => $tech1Id]);
 
@@ -144,7 +151,7 @@ $routeMachines = [
 ];
 $insertMachine = $pdo->prepare("
     INSERT INTO machines (location_id, code, model, machine_type, floor_wing, notes, is_active, sanitary_status, next_sanitary_inspection_due)
-    VALUES ((SELECT id FROM locations WHERE site_code = :site_code LIMIT 1), :code, 'Modelo Mapa 18', :type, 'Planta 1', NULL, TRUE, 'CONFORME', CURRENT_DATE + INTERVAL '30 days')
+    VALUES ((SELECT id FROM locations WHERE site_code = :site_code LIMIT 1), :code, 'Modelo Mapa 18', :type, 'Planta 1', NULL, TRUE, 'OK', CURRENT_DATE + INTERVAL '30 days')
     ON CONFLICT (code) DO UPDATE SET machine_type = EXCLUDED.machine_type, is_active = TRUE
 ");
 foreach ($routeMachines as [$code, $siteCode, $type]) {
@@ -180,8 +187,9 @@ $makeRouteIncident = function (
 ) use ($incidentRepo, $pdo, $machinesByCode, $tech1Id): Incident {
     $machineId = $machinesByCode[$machineCode]->getId();
 
-    // Liberar ticket previo en la máquina (único ticket activo por máquina)
-    $pdo->prepare("UPDATE incidents SET status = 'CANCELLED', deleted_at = NOW(), is_active_ticket = 0
+    // Liberar ticket previo en la máquina (único ticket activo por máquina): el estado es la puerta
+    // del motor único (D-6), así que la cancelación basta y no hay columna derivada que escribir.
+    $pdo->prepare("UPDATE incidents SET status = 'CANCELLED', deleted_at = NOW()
                    WHERE machine_id = ? AND deleted_at IS NULL AND status NOT IN ('CLOSED', 'CANCELLED')")
         ->execute([$machineId]);
 

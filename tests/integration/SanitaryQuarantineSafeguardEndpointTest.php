@@ -6,7 +6,7 @@ declare(strict_types=1);
  * SanitaryQuarantineSafeguardEndpointTest (T-HYBRID-15)
  *
  * Suite de integración de RF-10 (EARS-10.1 y EARS-10.2, Art. II, Art. III y Art. V.1),
- * despachada por el enrutador real —con sus middlewares— contra MariaDB:
+ * despachada por el enrutador real —con sus middlewares— contra PostgreSQL:
  *
  *   - **Cuarentena sobrevenida (EARS-10.1).** La central declara la cuarentena mientras el
  *     técnico tiene la avería en curso; su resolución ordinaria no puede cerrar, pero
@@ -93,14 +93,16 @@ foreach ($pdo->query('SELECT id, sanitary_status FROM machines WHERE deleted_at 
  * @return list<array{machine_id: int, location_id: int, code: string, machine_type: string}>
  */
 $freeMachinesByType = function (string $machineType, int $limit = 3) use ($pdo): array {
+    // Los tres booleanos van en la forma del motor único (clase D-3 del porte): `boolean = integer`
+    // no es una comparación que el motor admita (`42883`).
     $stmt = $pdo->prepare(
         "SELECT m.id AS machine_id, m.location_id, m.code, m.machine_type
            FROM machines m
            JOIN locations l ON l.id = m.location_id
-          WHERE m.is_active = 1
-            AND m.is_blocked_no_access = 0
+          WHERE m.is_active = TRUE
+            AND m.is_blocked_no_access = FALSE
             AND m.deleted_at IS NULL
-            AND l.is_active = 1
+            AND l.is_active = TRUE
             AND l.deleted_at IS NULL
             AND m.machine_type = :machine_type
             AND NOT EXISTS (

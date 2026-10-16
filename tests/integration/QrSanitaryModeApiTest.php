@@ -94,26 +94,27 @@ echo "\n--- BLOQUE 1: GET /api/qr/scan/{code} - Cuarentena Sanitaria ---\n";
 $settingsRepo->updateSanitaryStatus($mach1->getId(), 'QUARANTINE');
 
 // Crear incidencia activa asociada
+// El expediente se declara **por nombre de parámetro** y no por posición: los campos internos
+// comparten tipo `?string` con las marcas del intervalo, de modo que la lista posicional ponía un
+// texto donde va un instante —el motor lo rechaza con `22007`, y con él moría la suite entera
+// antes de medir nada—. Con nombre, el fixture dice lo que quiere decir. El texto confidencial es
+// deliberado: el escaneo público no puede revelarlo (Art. IV).
 $quarantineIncident = new Incident(
-    null,
-    'INC-2026-0091',
-    $mach1->getId(),
-    $mach1->getLocationId(),
-    IncidentCategory::TEMPERATURE_COLD,
-    'Rotura térmica detectada en inspección preventiva. Temperatura 6.8 °C.',
-    UrgencyLevel::CRITICAL,
-    IncidentStatus::IN_PROGRESS,
-    1,
-    'Sistema Preventivo',
-    '600123456',
-    null,
-    null,
-    EngineClock::stamp(EngineClock::now()),
-    EngineClock::stamp(EngineClock::now()),
-    null,
-    null,
-    'Compresor averiado (CONFIDENCIAL)',
-    'En proceso de cambio (CONFIDENCIAL)'
+    id: null,
+    ticketCode: 'INC-2026-0091',
+    machineId: $mach1->getId(),
+    locationId: $mach1->getLocationId(),
+    category: IncidentCategory::TEMPERATURE_COLD,
+    description: 'Rotura térmica detectada en inspección preventiva. Temperatura 6.8 °C.',
+    urgency: UrgencyLevel::CRITICAL,
+    status: IncidentStatus::IN_PROGRESS,
+    assignedTechnicianId: 1,
+    reporterName: 'Sistema Preventivo',
+    reporterPhone: '600123456',
+    assignedAt: EngineClock::stamp(EngineClock::now()),
+    startedAt: EngineClock::stamp(EngineClock::now()),
+    resolutionDiagnosis: 'Compresor averiado (CONFIDENCIAL)',
+    resolutionAction: 'En proceso de cambio (CONFIDENCIAL)',
 );
 $incidentRepo->create($quarantineIncident);
 

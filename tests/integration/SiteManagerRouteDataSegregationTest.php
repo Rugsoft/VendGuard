@@ -17,7 +17,7 @@ declare(strict_types=1);
  * 4. Segregation: each technician only sees their own assigned stops, and the technician
  *    view never exposes internal-note or parts-cost fields of other sites.
  *
- * Autonomous local suite: real MariaDB, zero outgoing network calls (Art. I, Art. IV).
+ * Autonomous local suite: real PostgreSQL, zero outgoing network calls (Art. I, Art. IV).
  */
 
 require_once __DIR__ . '/../bootstrap.php';
@@ -42,7 +42,7 @@ echo "======================================================================\n";
 echo " VendGuard: Blindaje Constitucional - SiteManagerRouteDataSegregationTest (T-MAP-19)\n";
 echo "======================================================================\n\n";
 
-// ─── Bootstrap: MariaDB real y semillas ───────────────────────────────────────
+// ─── Bootstrap: PostgreSQL real y semillas ───────────────────────────────────
 $pdo = ConnectionFactory::getConnection();
 
 // Restitución del parque ante cualquier salida (contrato de limpieza §8.3): esta
@@ -106,7 +106,10 @@ $mach1 = $machines1[0];
 $mach2 = $machines2[0];
 
 $makeAssignedIncident = function (int $machineId, int $locationId, int $technicianId, UrgencyLevel $urgency) use ($incidentRepo, $pdo): Incident {
-    $pdo->prepare("UPDATE incidents SET status = 'CANCELLED', deleted_at = NOW(), is_active_ticket = 0
+    // El cierre del ticket previo va **por su estado**, que es la puerta del motor único: la columna
+    // derivada `is_active_ticket` era del retirado y aquí no existe (`42703`); la máquina queda libre
+    // por el estado que declara el índice único parcial `uq_machine_active_ticket` (D-6).
+    $pdo->prepare("UPDATE incidents SET status = 'CANCELLED', deleted_at = NOW()
                    WHERE machine_id = ? AND deleted_at IS NULL AND status NOT IN ('CLOSED', 'CANCELLED')")
         ->execute([$machineId]);
 

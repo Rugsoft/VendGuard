@@ -118,7 +118,7 @@ final class SanitaryReportSafeguardService
         $draft = $this->extractDraft($body);
         $current = $this->latestDraft($incident);
 
-        if ($current !== null && $current === $draft) {
+        if ($current !== null && $this->isSameReport($current, $draft)) {
             return $current;
         }
 
@@ -200,6 +200,49 @@ final class SanitaryReportSafeguardService
         }
 
         return $body;
+    }
+
+    /**
+     * ¿Los dos partes son el mismo informe?
+     *
+     * La comparación es **por contenido**, nunca por la forma del array. El parte se guarda
+     * dentro de `new_state`, que en el motor único es una columna `jsonb`: el motor
+     * **normaliza el orden de las claves** (primero las cortas) y un parte idéntico vuelve
+     * del registro con las claves en otro orden. Comparar los arrays con `===` —lo que hacía
+     * esta puerta— daba «distinto» a lo que es el mismo parte, y el reintento escribía un
+     * segundo evento inmutable: justo el rastro duplicado que esta clase promete no dejar.
+     * El orden de las claves de un JSON no es información del parte; el contenido sí.
+     *
+     * Las **listas** conservan su orden —el motor no lo toca y el orden de los repuestos es
+     * dato del parte—, así que sólo se ordenan las claves de los mapas.
+     *
+     * @param array<string, mixed> $current Parte que ya estaba en el registro.
+     * @param array<string, mixed> $draft Parte que acaba de llegar.
+     */
+    private function isSameReport(array $current, array $draft): bool
+    {
+        return $this->canonicalReport($current) === $this->canonicalReport($draft);
+    }
+
+    /**
+     * Forma canónica de un parte: las claves de cada mapa en orden, los valores intactos.
+     *
+     * @param mixed $value
+     * @return mixed
+     */
+    private function canonicalReport(mixed $value): mixed
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+
+        $normalized = array_map(fn (mixed $item): mixed => $this->canonicalReport($item), $value);
+
+        if (!array_is_list($normalized)) {
+            ksort($normalized, SORT_STRING);
+        }
+
+        return $normalized;
     }
 
     /**

@@ -795,15 +795,13 @@ const LEGACY_DIALECT = [
         'why' => 'contrasta el blindaje constitucional contra el motor heredado; se retira con el contrato de correspondencia entre motores',
     ],
     'tests/integration/SanitaryClockConsumerRaceTest.php' => [
-        'kind' => KIND_DEBT,
-        'owner' => 'T-13-12',
-        'census' => ['catalog' => 2],
-        'why' => 'la sonda de contención lee el presupuesto de espera del estado de sesión del motor heredado',
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-12', 'census' => [],
+        'drained_occurrences' => ['catalog' => 2],
+        'why' => 'porte del lote de ruta, mapa y barrido sanitario: la sonda de contención leía el presupuesto de espera del estado de sesión del motor heredado (sus dos grafías) y ahora lo lee del motor único por el punto que lo traduce, además de reconocer la espera agotada por el SQLSTATE del motor y no por el errno del retirado',
     ],
     'tests/integration/SanitaryClockSweepEndpointTest.php' => [
-        'kind' => KIND_DEBT,
-        'owner' => 'T-13-12',
-        'census' => ['catalog' => 1],
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-12', 'census' => [],
+        'drained_occurrences' => ['catalog' => 1],
         'why' => 'la misma sonda de contención del barrido sanitario, en su endpoint',
     ],
     'tests/integration/SchemaConvergenceParityTest.php' => [

@@ -53,7 +53,8 @@ use VendGuard\Infrastructure\Repository\PdoSanitarySweepVisibilityRepository;
  * 4. **La contención de fila no es un fallo (T-PAUSE-39).** Cuando otro consumidor
  *    —el cierre técnico, otro barrido o cualquier escritor del parque— sostiene el
  *    bloqueo exclusivo de la máquina, la transición muere esperando el lock
- *    (`1205`/`1213`/`SQLSTATE 40001`). Eso NO se cuenta como fallo: es la prueba de que
+ *    (`55P03`: lo cancela la cota de la pasada, no el tenedor; `40001`/`40P01`: fallo de
+ *    serialización e interbloqueo). Eso NO se cuenta como fallo: es la prueba de que
  *    alguien está actuando sobre esa fila ahora mismo, y el reloj ya garantiza que el
  *    rastro siga siendo uno. Viaja en `contended` y se resuelve en la pasada siguiente
  *    (el prefiltro vuelve a ofrecerlo). La clasificación es **estricta y fail-safe**:
@@ -117,17 +118,22 @@ final class SanitaryClockSweepService
     private const OPERATIONAL_TIMEZONE = 'Europe/Madrid';
 
     /**
-     * Códigos de driver (MariaDB/MySQL) que significan «otro consumidor tiene la fila»:
+     * Códigos de driver que significan «otro consumidor tiene la fila» en el motor retirado:
      * `ER_LOCK_WAIT_TIMEOUT` (1205) y `ER_LOCK_DEADLOCK` (1213).
+     *
+     * Se conservan como **tolerancia declarada** —ningún motor del sistema los emite ya, porque
+     * el motor único declara la misma situación por su `SQLSTATE` (`CONTENTION_SQL_STATES`)— y
+     * mueren con la rama heredada de la factoría (T-13-14), no con este servicio.
      */
     private const CONTENTION_DRIVER_CODES = [1205, 1213];
 
     /**
-     * Estados SQL de bloqueo/serialización: `40001` (serialization failure, el que
-     * MariaDB usa en el deadlock) y `40P01` (deadlock de PostgreSQL, por completitud
-     * del estándar). Sólo se consultan como respaldo del código de driver.
+     * Estados SQL de bloqueo/serialización: `40001` (serialization failure), `40P01` (deadlock)
+     * y **`55P03`** (`lock_not_available`: la espera por el bloqueo ajeno agotó su cota, que es
+     * como el motor único manifiesta el `1205` del retirado —el `lock_timeout` de la pasada es
+     * quien cancela la espera—). Sólo se consultan como respaldo del código de driver.
      */
-    private const CONTENTION_SQL_STATES = ['40001', '40P01'];
+    private const CONTENTION_SQL_STATES = ['40001', '40P01', '55P03'];
 
     /** Puerto de candidatos; se resuelve en el primer uso si no se inyecta. */
     private ?SanitaryClockCandidateRepositoryInterface $candidateRepo;
@@ -426,10 +432,11 @@ final class SanitaryClockSweepService
      * ¿La excepción es contención por fila (otro consumidor tiene la máquina bloqueada)
      * o un fallo de verdad?
      *
-     * La regla se lee del **código estructurado** del error, nunca del texto: son los
-     * códigos que MariaDB emite cuando una sentencia espera un bloqueo exclusivo ajeno
-     * (`1205`), cuando el gestor resuelve un deadlock matando una de las transacciones
-     * (`1213`) o cuando el estado SQL es el de fallo de serialización (`40001`/`40P01`).
+     * La regla se lee del **código estructurado** del error, nunca del texto: el motor único
+     * declara la espera agotada por su `SQLSTATE` —**`55P03`**, `lock_not_available`, que lo
+     * cancela la cota de la pasada y no el tenedor—, el fallo de serialización por `40001` y el
+     * interbloqueo resuelto por `40P01`. Los códigos de driver del motor retirado siguen
+     * declarados como tolerancia (`CONTENTION_DRIVER_CODES`).
      *
      * Es deliberadamente **conservadora (fail-safe)**: un `PDOException` con cualquier otro
      * código —tabla ausente, columna inexistente, clave duplicada, conexión caída— es un

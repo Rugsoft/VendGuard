@@ -7,7 +7,7 @@ declare(strict_types=1);
  *
  * Suite de integración de la **superficie operativa de la contención del barrido
  * sanitario** (RF-07.1 a RF-07.5, Art. II y Art. III), por el enrutador real y
- * contra MariaDB, con DOS conexiones PDO independientes:
+ * contra PostgreSQL, con DOS conexiones PDO independientes:
  *
  * 1. **Control de acceso (Art. V.4):** sin credencial `401`, token corrupto `401`,
  *    token de técnico `403` y sesión de coordinación `200`; el payload no se
@@ -18,7 +18,7 @@ declare(strict_types=1);
  *    fila real (`MONITORED`, con el seguimiento abierto del expediente).
  * 3. **El ciclo completo del incremento, medido y no supuesto:** con la fila de
  *    la máquina retenida por una transacción viva de la segunda conexión, el
- *    barrido —por su ruta real— muere en el `1205` y publica un aplazamiento; la
+ *    barrido —por su ruta real— muere en el `55P03` y publica un aplazamiento; la
  *    superficie lo muestra con su presentación (expediente, máquina, sede, planta,
  *    estados) y **sin** encender la alerta; liberado el tenedor, la pasada
  *    siguiente sí evalúa y la superficie vuelve a `CLEAR` **cerrando el
@@ -27,7 +27,7 @@ declare(strict_types=1);
  *    eleva la superficie a `ESCALATED` sin ningún seguimiento abierto, y los
  *    seguimientos escalados viajan por delante de los que no lo están.
  *
- * Autónoma: MariaDB real, cero llamadas de red salientes (Art. I y Art. IV), y
+ * Autónoma: PostgreSQL real, cero llamadas de red salientes (Art. I y Art. IV), y
  * el parque queda restituido a las semillas al terminar.
  */
 
@@ -117,15 +117,17 @@ $coordinatorId    = (int)$coordinator->getId();
 $technicianId     = (int)$technician->getId();
 
 // Máquinas libres bajo vigilancia sanitaria (perecederas y mixtas), sin expediente vivo: son
-// las únicas que el reloj biológico puede poner en cuarentena.
+// las únicas que el reloj biológico puede poner en cuarentena. Los dos booleanos y el de la sede
+// van en la forma que el motor único declara (clase D-3 del porte): el literal numérico frente a
+// un `boolean` no es una comparación que el motor admita (`42883`).
 $watchPool = $pdoSweep->query(
     "SELECT m.id AS machine_id, m.location_id, m.code, m.machine_type
        FROM machines m
        JOIN locations l ON l.id = m.location_id
-      WHERE m.is_active = 1
-        AND m.is_blocked_no_access = 0
+      WHERE m.is_active = TRUE
+        AND m.is_blocked_no_access = FALSE
         AND m.deleted_at IS NULL
-        AND l.is_active = 1
+        AND l.is_active = TRUE
         AND l.deleted_at IS NULL
         AND m.machine_type IN ('PERISHABLE_FOOD', 'COMBO')
         AND NOT EXISTS (
@@ -394,7 +396,7 @@ try {
     $elapsedMs = (microtime(true) - $startedAt) * 1000;
     $contendedData = $contendedSweep->getDecodedBody()['data'] ?? [];
 
-    // La cota declarada es de 2 s (T-PAUSE-40) y MariaDB la sobrepasa hasta en 1 s al comprobar
+    // La cota declarada es de 2 s (T-PAUSE-40) y el motor la sobrepasa hasta en 1 s al comprobar
     // el vencimiento: el margen de la aserción es el mismo que ya fija la suite de la carrera
     // (< 3× la cota) y sigue estando un orden de magnitud por debajo del valor de servidor (50 s).
     $creditBoundMs = SanitaryClockSweepService::LOCK_WAIT_BUDGET_SECONDS * 3000;
@@ -541,8 +543,13 @@ try {
         json_encode($fleetPayload['escalation'], JSON_UNESCAPED_UNICODE)
     );
 
-    $pdoSweep->prepare('DELETE FROM sanitary_sweep_passes WHERE id = :id')
-        ->execute([':id' => $fleetPassId]);
+    // El borrado del libro de pasadas va por la **ventana de purga** del contrato de limpieza (§3):
+    // el guardián del Art. III.1 muerde cualquier `DELETE` en crudo —también sobre el libro de
+    // pasadas— y en el motor retirado esa puerta no existía (`45000` no es un código de su catálogo).
+    TestDataCleaner::withPurgeWindow($pdoSweep, static function () use ($pdoSweep, $fleetPassId): void {
+        $pdoSweep->prepare('DELETE FROM sanitary_sweep_passes WHERE id = :id')
+            ->execute([':id' => $fleetPassId]);
+    });
 
     // Dos seguimientos sembrados a mano —el camino de lectura es lo que se certifica aquí—, con
     // el escalado en el MÁS RECIENTE: la lista debe poner primero el escalado, porque la alerta
@@ -550,21 +557,23 @@ try {
     $olderTicket   = $createExpiredTicket($olderBookMachine, 5);
     $youngerTicket = $createExpiredTicket($youngerBookMachine, 5);
 
+    // La aritmética temporal va en la forma del motor único (el intervalo con su unidad como
+    // literal); el retirado escribía `INTERVAL 90 MINUTE`, que aquí no se parsea.
     $pdoSweep->prepare(
-        'INSERT INTO sanitary_sweep_contentions
+        "INSERT INTO sanitary_sweep_contentions
             (incident_id, machine_id, first_detected_at, last_detected_at,
              consecutive_passes, total_passes, escalated_at, resolved_at)
-         VALUES (:incident_id, :machine_id, NOW() - INTERVAL 90 MINUTE, NOW() - INTERVAL 5 MINUTE, 2, 2, NULL, NULL)'
+         VALUES (:incident_id, :machine_id, NOW() - INTERVAL '90 minutes', NOW() - INTERVAL '5 minutes', 2, 2, NULL, NULL)"
     )->execute([
         ':incident_id' => (int)$olderTicket->getId(),
         ':machine_id'  => (int)$olderTicket->getMachineId(),
     ]);
 
     $pdoSweep->prepare(
-        'INSERT INTO sanitary_sweep_contentions
+        "INSERT INTO sanitary_sweep_contentions
             (incident_id, machine_id, first_detected_at, last_detected_at,
              consecutive_passes, total_passes, escalated_at, resolved_at)
-         VALUES (:incident_id, :machine_id, NOW() - INTERVAL 30 MINUTE, NOW() - INTERVAL 5 MINUTE, 4, 4, NOW() - INTERVAL 20 MINUTE, NULL)'
+         VALUES (:incident_id, :machine_id, NOW() - INTERVAL '30 minutes', NOW() - INTERVAL '5 minutes', 4, 4, NOW() - INTERVAL '20 minutes', NULL)"
     )->execute([
         ':incident_id' => (int)$youngerTicket->getId(),
         ':machine_id'  => (int)$youngerTicket->getMachineId(),

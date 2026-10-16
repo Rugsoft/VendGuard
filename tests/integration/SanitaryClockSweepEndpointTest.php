@@ -7,7 +7,7 @@ declare(strict_types=1);
  *
  * Suite de integración del barrido de fondo del Reloj Sanitario Biológico
  * (RF-03.5.1, RF-03.4, Art. II y Art. III). Certifica, por el enrutador real y
- * contra MariaDB, el hueco que el módulo declaraba abierto:
+ * contra PostgreSQL, el hueco que el módulo declaraba abierto:
  *
  *   - `POST /api/cron/sanitary-clock-sweep` está protegido por `CronAuthMiddleware`
  *     (secreto de cron, Bearer del secreto o sesión de coordinación) y el controlador
@@ -99,14 +99,16 @@ foreach ($pdo->query('SELECT id, sanitary_status FROM machines WHERE deleted_at 
  * @return list<array{machine_id: int, location_id: int, code: string, machine_type: string}>
  */
 $freeMachinesByType = function (string $machineType, int $limit = 3) use ($pdo): array {
+    // Los tres booleanos van en la forma del motor único (clase D-3 del porte): `boolean = integer`
+    // no es una comparación que el motor admita (`42883`).
     $stmt = $pdo->prepare(
         "SELECT m.id AS machine_id, m.location_id, m.code, m.machine_type
            FROM machines m
            JOIN locations l ON l.id = m.location_id
-          WHERE m.is_active = 1
-            AND m.is_blocked_no_access = 0
+          WHERE m.is_active = TRUE
+            AND m.is_blocked_no_access = FALSE
             AND m.deleted_at IS NULL
-            AND l.is_active = 1
+            AND l.is_active = TRUE
             AND l.deleted_at IS NULL
             AND m.machine_type = :machine_type
             AND NOT EXISTS (
@@ -511,7 +513,7 @@ try {
     $pdo->prepare(
         "UPDATE incidents
             SET status = 'RESOLVED',
-                resolved_at = NOW() - INTERVAL 6 HOUR,
+                resolved_at = NOW() - INTERVAL '6 hours',
                 resolution_diagnosis = 'Compresor sin presión por fuga en la línea de baja.',
                 resolution_action = 'Recargado el circuito y verificado el ciclo completo de frío.'
           WHERE id = :id"
@@ -593,41 +595,54 @@ try {
     // =====================================================================
     echo "\n--- Caso 7: Cota de espera de bloqueo de la sesión ---\n";
 
+    // La cota se mide en la forma del motor único: `lock_timeout` es un valor de **transacción**
+    // (`SET LOCAL`), de modo que la cota pedida está vigente **dentro** de la unidad de trabajo y
+    // muere con ella, dejando la sesión como estaba. Su duración la traduce el punto único del
+    // módulo (`PdoLockWaitBudget::parsePostgresDuration`), y la lectura es la que el motor publica
+    // (`current_setting`) — la sonda del estado de sesión del motor heredado que había aquí era
+    // deuda declarada de este lote en la guarda del dialecto.
     $lockBudget = new PdoLockWaitBudget($pdo);
-    $sessionValue = static fn (): int => (int)$pdo->query('SELECT @@SESSION.innodb_lock_wait_timeout')->fetchColumn();
+    $sessionValue = static fn (): int => PdoLockWaitBudget::parsePostgresDuration(
+        (string)$pdo->query("SELECT current_setting('lock_timeout')")->fetchColumn()
+    );
     $serverValue = $sessionValue();
 
     $insideBudget = null;
+    $pdo->beginTransaction();
     $budgetResult = $lockBudget->runWithLockWaitBudget(2, static function () use ($sessionValue, &$insideBudget): string {
         $insideBudget = $sessionValue();
 
         return 'operación acotada';
     });
+    $pdo->rollBack();
+    $afterBudget = $sessionValue();
 
     $assert(
-        '7.1 Dentro de la cota la sesión espera lo pedido y al salir se restituye el valor anterior',
-        $insideBudget === 2
-        && $sessionValue() === $serverValue
+        '7.1 Dentro de la cota la transacción espera lo pedido y al cerrarse la sesión conserva su valor',
+        $insideBudget === 2000
+        && $afterBudget === $serverValue
         && $budgetResult === 'operación acotada',
         sprintf(
             'dentro=%s, antes=%d, después=%d',
             var_export($insideBudget, true),
             $serverValue,
-            $sessionValue()
+            $afterBudget
         )
     );
 
-    $pdo->exec('SET SESSION innodb_lock_wait_timeout = 3');
+    $pdo->exec("SET SESSION lock_timeout = '3s'");
     $insideWide = null;
+    $pdo->beginTransaction();
     $lockBudget->runWithLockWaitBudget(100, static function () use ($sessionValue, &$insideWide): void {
         $insideWide = $sessionValue();
     });
+    $pdo->rollBack();
     $afterWide = $sessionValue();
-    $pdo->exec(sprintf('SET SESSION innodb_lock_wait_timeout = %d', $serverValue));
+    $pdo->exec(sprintf("SET SESSION lock_timeout = '%dms'", $serverValue));
 
     $assert(
         '7.2 Una cota más ancha que la de la sesión no la eleva (la elección del operador se respeta)',
-        $insideWide === 3 && $afterWide === 3,
+        $insideWide === 3000 && $afterWide === 3000,
         sprintf('dentro=%s, después=%d', var_export($insideWide, true), $afterWide)
     );
 
@@ -646,10 +661,14 @@ try {
 
     $sessionAfterFailure = null;
     try {
+        $pdo->beginTransaction();
         $lockBudget->runWithLockWaitBudget(1, static function (): void {
             throw new RuntimeException('Fallo de la operación acotada (sonda).');
         });
     } catch (RuntimeException $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         $sessionAfterFailure = $sessionValue();
     }
 

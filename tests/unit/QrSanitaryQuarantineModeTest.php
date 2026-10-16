@@ -275,26 +275,27 @@ $settingsRepo->machineSettings[14] = [
 ];
 
 // Incidencia correctiva vinculada a la cuarentena (rotura de frío)
+// El expediente se declara **por nombre de parámetro**: los campos internos comparten tipo
+// `?string` con las marcas del intervalo, de modo que la lista posicional ponía un texto donde va
+// un instante —el diagnóstico quedaba vacío y su texto caía en `resolved_at`—. Con nombre, el
+// fixture dice lo que quiere decir: la suite no cambia de veredicto, pero mide el expediente que
+// declara medir.
 $incidentQuarantine = new Incident(
-    91,
-    'INC-2026-0091',
-    14,
-    10,
-    IncidentCategory::TEMPERATURE_COLD,
-    'Rotura térmica detectada en inspección preventiva. Temperatura 6.8 °C.',
-    UrgencyLevel::CRITICAL,
-    IncidentStatus::IN_PROGRESS,
-    3, // ID técnico (CONFIDENCIAL Art. IV)
-    'Sistema Preventivo',
-    '000000000',
-    null,
-    null,
-    '2026-09-27 10:00:00',
-    '2026-09-27 10:05:00',
-    '2026-09-27 10:10:00',
-    null,
-    'Compresor averiado (CONFIDENCIAL)',
-    'En proceso de cambio (CONFIDENCIAL)'
+    id: 91,
+    ticketCode: 'INC-2026-0091',
+    machineId: 14,
+    locationId: 10,
+    category: IncidentCategory::TEMPERATURE_COLD,
+    description: 'Rotura térmica detectada en inspección preventiva. Temperatura 6.8 °C.',
+    urgency: UrgencyLevel::CRITICAL,
+    status: IncidentStatus::IN_PROGRESS,
+    assignedTechnicianId: 3, // ID técnico (CONFIDENCIAL Art. IV)
+    reporterName: 'Sistema Preventivo',
+    reporterPhone: '000000000',
+    assignedAt: '2026-09-27 10:00:00',
+    startedAt: '2026-09-27 10:05:00',
+    resolutionDiagnosis: 'Compresor averiado (CONFIDENCIAL)',
+    resolutionAction: 'En proceso de cambio (CONFIDENCIAL)',
 );
 $incidentRepo->incidents[] = $incidentQuarantine;
 
