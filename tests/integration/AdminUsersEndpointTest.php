@@ -339,7 +339,12 @@ $assert("8.4 Evento USER_REACTIVATED en audit_log", $auditReactUsr !== false);
 
 // Limpieza de datos temporales de prueba
 TestDataCleaner::purgeIncidentByTicket($pdo, 'INC-TECH-BLOCKED');
-$pdo->prepare("DELETE FROM users WHERE id = :id")->execute([':id' => $newUserId]);
+
+// El borrado de la cuenta de prueba va con la ventana de purga abierta (contrato de
+// limpieza §3): el guardián del Art. III.1 rechaza el DELETE en crudo.
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $newUserId): void {
+    $pdo->prepare("DELETE FROM users WHERE id = :id")->execute([':id' => $newUserId]);
+});
 
 // =========================================================================
 // RESUMEN FINAL

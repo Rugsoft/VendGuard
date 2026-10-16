@@ -21,11 +21,13 @@ declare(strict_types=1);
 require_once __DIR__ . '/../bootstrap.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/ConnectionFactory.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/SeedRunner.php';
+require_once __DIR__ . '/../../src/Infrastructure/Dialect/SqlDialectAdapter.php';
 
 use VendGuard\Application\Service\AuthService;
 use VendGuard\Core\Domain\Service\SiteAccessCodeGenerator;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SeedRunner;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
@@ -36,6 +38,7 @@ echo " VendGuard: Test de Integración - SiteAccessCodeTest (hallazgo S-4)\n";
 echo "======================================================================\n\n";
 
 $pdo = ConnectionFactory::getConnection();
+$dialect = SqlDialectAdapter::forConnection($pdo);
 
 // Restitución del parque ante cualquier salida (contrato de limpieza §8.3): esta
 // suite crea sedes `SEDE-TEST-*` para probar las claves de centro y el gancho de
@@ -147,10 +150,12 @@ try {
     echo "\n--- 3. Fallo en cerrado y sede inactiva ---\n";
     // ─────────────────────────────────────────────────────────────────────────
 
+    // La clave canónica de identidad la declara la sentencia (A-1): el motor único no la
+    // deriva sola y su valor sale del punto único que la calcula.
     $pdo->prepare("
-        INSERT INTO locations (site_code, name, address, latitude, longitude, contact_name, contact_phone, is_active)
-        VALUES ('SEDE-TEST-NOKEY', 'Sede de prueba sin clave S-4', 'Carrer de Prova 1, Barcelona', 41.3850640, 2.1734035, 'Prueba', '600000000', 1)
-    ")->execute();
+        INSERT INTO locations (site_code, site_code_key, name, address, latitude, longitude, contact_name, contact_phone, is_active)
+        VALUES ('SEDE-TEST-NOKEY', :site_code_key, 'Sede de prueba sin clave S-4', 'Carrer de Prova 1, Barcelona', 41.3850640, 2.1734035, 'Prueba', '600000000', TRUE)
+    ")->execute([':site_code_key' => $dialect->identityKey('SEDE-TEST-NOKEY')]);
 
     $noKey = $siteLogin('SEDE-TEST-NOKEY', $devCode);
     $assert('3.1 Una sede sin clave emitida no puede entrar (fallo en cerrado)',
@@ -158,9 +163,12 @@ try {
         && ($noKey->getDecodedBody()['error']['code'] ?? '') === 'INVALID_SITE_CREDENTIALS');
 
     $pdo->prepare("
-        INSERT INTO locations (site_code, name, address, latitude, longitude, contact_name, contact_phone, is_active, access_code_hash, access_code_issued_at)
-        VALUES ('SEDE-TEST-OFF', 'Sede de prueba inactiva S-4', 'Carrer de Prova 2, Barcelona', 41.3850640, 2.1734035, 'Prueba', '600000001', 0, :hash, NOW())
-    ")->execute([':hash' => password_hash(SiteAccessCodeGenerator::normalize('OFF-SEDE-KEY01'), PASSWORD_BCRYPT, ['cost' => 4])]);
+        INSERT INTO locations (site_code, site_code_key, name, address, latitude, longitude, contact_name, contact_phone, is_active, access_code_hash, access_code_issued_at)
+        VALUES ('SEDE-TEST-OFF', :site_code_key, 'Sede de prueba inactiva S-4', 'Carrer de Prova 2, Barcelona', 41.3850640, 2.1734035, 'Prueba', '600000001', FALSE, :hash, NOW())
+    ")->execute([
+        ':site_code_key' => $dialect->identityKey('SEDE-TEST-OFF'),
+        ':hash' => password_hash(SiteAccessCodeGenerator::normalize('OFF-SEDE-KEY01'), PASSWORD_BCRYPT, ['cost' => 4]),
+    ]);
 
     $inactive = $siteLogin('SEDE-TEST-OFF', 'OFF-SEDE-KEY01');
     $assert('3.2 Una sede inactiva no puede entrar aunque su clave sea correcta',

@@ -22,6 +22,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../bootstrap.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/ConnectionFactory.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/SeedRunner.php';
+require_once __DIR__ . '/../../src/Infrastructure/Dialect/SqlDialectAdapter.php';
 
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
 use VendGuard\Core\Domain\Model\Incident;
@@ -30,6 +31,7 @@ use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SeedRunner;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
@@ -46,6 +48,7 @@ $seedRunner->seedAll();
 
 $locationRepo = new PdoLocationRepository($pdo);
 $machineRepo = new PdoMachineRepository($pdo);
+$dialect = SqlDialectAdapter::forConnection($pdo);
 $incidentRepo = new PdoIncidentRepository($pdo);
 
 $failures = 0;
@@ -174,7 +177,7 @@ if ($location !== null && $targetMachine !== null && $secondMachine !== null) {
 
     // Intentar una inserción directa por SQL saltándose cualquier validación PHP
     $dbConstraintCaught = false;
-    $dbErrorCode = 0;
+    $dbErrorCode = '';
 
     try {
         $rawStmt = $pdo->prepare("
@@ -187,12 +190,12 @@ if ($location !== null && $targetMachine !== null && $secondMachine !== null) {
         $rawStmt->execute([':machine_id' => $machineId, ':location_id' => $locId]);
     } catch (PDOException $e) {
         $dbConstraintCaught = true;
-        $dbErrorCode = (int)($e->errorInfo[1] ?? 0);
+        $dbErrorCode = (string)($e->errorInfo[0] ?? $e->getCode());
     }
 
     $assert(
-        "2.1 MariaDB rechaza la inserción con error 1062 (Duplicate entry)",
-        $dbConstraintCaught && $dbErrorCode === 1062,
+        "2.1 El motor único rechaza la inserción con violación de unicidad (SQLSTATE 23505)",
+        $dbConstraintCaught && $dbErrorCode === '23505',
         "Error BD capturado: {$dbErrorCode}"
     );
 
@@ -205,14 +208,12 @@ if ($location !== null && $targetMachine !== null && $secondMachine !== null) {
     $updateStmt = $pdo->prepare("UPDATE incidents SET status = 'CLOSED', closed_at = NOW() WHERE id = :id");
     $updateStmt->execute([':id' => $created1->getId()]);
 
-    // Verificar que is_active_ticket en MariaDB es NULL para ese ticket
-    $checkStmt = $pdo->prepare("SELECT is_active_ticket, status FROM incidents WHERE id = :id");
-    $checkStmt->execute([':id' => $created1->getId()]);
-    $rowClosed = $checkStmt->fetch(PDO::FETCH_ASSOC);
-
+    // El cierre libera el candado de la máquina. La columna generada `is_active_ticket`
+    // era del motor retirado (D-6), así que la pregunta se hace a la puerta que usa la
+    // guardia de duplicados, no a una columna que aquí no existe.
     $assert(
-        "3.1 Columna virtual is_active_ticket es NULL cuando status = CLOSED",
-        $rowClosed !== false && $rowClosed['is_active_ticket'] === null
+        "3.1 El cierre libera el candado de la máquina para nuevos avisos",
+        $machineRepo->hasActiveTicketOrWarranty($machineId) === false
     );
 
     // Intentar crear un nuevo aviso tras el cierre
@@ -327,7 +328,7 @@ if ($location !== null && $targetMachine !== null && $secondMachine !== null) {
     ));
 
     // Limpiar posibles incidencias en máquina B (VEND-0101)
-    $pdo->prepare("UPDATE incidents SET status = 'CLOSED' WHERE machine_id = :mid AND is_active_ticket = 1")
+    $pdo->prepare("UPDATE incidents SET status = 'CLOSED' WHERE machine_id = :mid AND " . $dialect->activeTicketCondition())
         ->execute([':mid' => $secondMachine->getId()]);
 
     // Crear ticket simultáneo para VEND-0101 (máquina B)

@@ -209,7 +209,7 @@ $pdo->prepare("
     SET status = 'RESOLVED', 
         assigned_technician_id = :tech_id, 
         resolved_at = :resolved_at,
-        resolution_diagnosis = 'Segundo diagnóstico',
+        resolution_diagnosis = 'Segundo diagnóstico tras la reincidencia',
         resolution_action = 'Sustitución de resorte'
     WHERE ticket_code = 'INC-2026-T2401'
 ")->execute([':tech_id' => $technician->getId(), ':resolved_at' => $resolvedAt2]);
@@ -250,8 +250,8 @@ $pdo->prepare("
     SET status = 'RESOLVED', 
         assigned_technician_id = :tech_id, 
         resolved_at = :resolved_at,
-        resolution_diagnosis = 'Tercer diagnóstico',
-        resolution_action = 'Ajuste de sensor'
+        resolution_diagnosis = 'Tercer diagnóstico de la misma avería',
+        resolution_action = 'Ajuste del sensor de temperatura'
     WHERE ticket_code = 'INC-2026-T2401'
 ")->execute([':tech_id' => $technician->getId(), ':resolved_at' => $resolvedAt3]);
 

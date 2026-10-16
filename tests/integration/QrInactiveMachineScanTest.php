@@ -72,7 +72,7 @@ $assert("1.3 Código de error es MACHINE_NOT_FOUND_OR_INACTIVE", ($bodyNotFound[
 echo "\n--- BLOQUE 2: GET /api/qr/scan/VEND-0201 Inactiva (200 OK) ---\n";
 
 // Marcamos VEND-0201 como inactiva en BD
-$pdo->prepare("UPDATE machines SET is_active = 0, deleted_at = NULL WHERE code = 'VEND-0201'")->execute();
+$pdo->prepare("UPDATE machines SET is_active = FALSE, deleted_at = NULL WHERE code = 'VEND-0201'")->execute();
 
 $reqInactive = new Request('GET', '/api/qr/scan/VEND-0201');
 $resInactive = $router->dispatch($reqInactive);
@@ -94,7 +94,7 @@ $assert("2.9 Contiene metadatos de modelo y sede", !empty($bodyInactive['data'][
 echo "\n--- BLOQUE 3: GET /api/qr/scan/VEND-0201 Soft-Deleted (200 OK) ---\n";
 
 // Marcamos VEND-0201 con borrado lógico (is_active = 0, deleted_at = NOW())
-$pdo->prepare("UPDATE machines SET is_active = 0, deleted_at = NOW() WHERE code = 'VEND-0201'")->execute();
+$pdo->prepare("UPDATE machines SET is_active = FALSE, deleted_at = NOW() WHERE code = 'VEND-0201'")->execute();
 
 $reqDeleted = new Request('GET', '/api/qr/scan/VEND-0201');
 $resDeleted = $router->dispatch($reqDeleted);
@@ -111,8 +111,8 @@ $assert("3.4 is_active es false", ($bodyDeleted['data']['is_active'] ?? true) ==
 echo "\n--- BLOQUE 4: GET /api/qr/scan/VEND-0102 con Sede Inactiva (200 OK) ---\n";
 
 // Restauramos VEND-0201 y desactivamos la sede de VEND-0102 (SEDE-BCN-01)
-$pdo->prepare("UPDATE machines SET is_active = 1, deleted_at = NULL WHERE code = 'VEND-0201'")->execute();
-$pdo->prepare("UPDATE locations SET is_active = 0, deleted_at = NOW() WHERE site_code = 'SEDE-BCN-01'")->execute();
+$pdo->prepare("UPDATE machines SET is_active = TRUE, deleted_at = NULL WHERE code = 'VEND-0201'")->execute();
+$pdo->prepare("UPDATE locations SET is_active = FALSE, deleted_at = NOW() WHERE site_code = 'SEDE-BCN-01'")->execute();
 
 $reqLocInactive = new Request('GET', '/api/qr/scan/VEND-0102');
 $resLocInactive = $router->dispatch($reqLocInactive);
@@ -123,7 +123,7 @@ $assert("4.2 status_mode es INACTIVE", ($bodyLocInactive['data']['status_mode'] 
 $assert("4.3 allow_reporting es false", ($bodyLocInactive['data']['allow_reporting'] ?? true) === false);
 
 // Restauramos la sede
-$pdo->prepare("UPDATE locations SET is_active = 1, deleted_at = NULL WHERE site_code = 'SEDE-BCN-01'")->execute();
+$pdo->prepare("UPDATE locations SET is_active = TRUE, deleted_at = NULL WHERE site_code = 'SEDE-BCN-01'")->execute();
 
 // =========================================================================
 // BLOQUE 5: POST /api/qr/report - Bloqueo de Reporte sobre Máquina Inactiva (422)
@@ -131,7 +131,7 @@ $pdo->prepare("UPDATE locations SET is_active = 1, deleted_at = NULL WHERE site_
 echo "\n--- BLOQUE 5: POST /api/qr/report sobre Máquina Inactiva (422) ---\n";
 
 // Dejamos VEND-0201 inactiva
-$pdo->prepare("UPDATE machines SET is_active = 0, deleted_at = NULL WHERE code = 'VEND-0201'")->execute();
+$pdo->prepare("UPDATE machines SET is_active = FALSE, deleted_at = NULL WHERE code = 'VEND-0201'")->execute();
 
 $totalIncidentsBefore = (int)$pdo->query("SELECT COUNT(*) FROM incidents")->fetchColumn();
 
@@ -157,7 +157,7 @@ $assert("5.5 No se crea ninguna fila en la tabla incidents", $totalIncidentsAfte
 // =========================================================================
 echo "\n--- BLOQUE 6: POST /api/qr/report sobre Máquina Soft-Deleted (422) ---\n";
 
-$pdo->prepare("UPDATE machines SET is_active = 0, deleted_at = NOW() WHERE code = 'VEND-0201'")->execute();
+$pdo->prepare("UPDATE machines SET is_active = FALSE, deleted_at = NOW() WHERE code = 'VEND-0201'")->execute();
 
 $reqReportDeleted = new Request('POST', '/api/qr/report', [], [
     'machine_code'   => 'VEND-0201',
@@ -175,7 +175,7 @@ $totalIncidentsFinal = (int)$pdo->query("SELECT COUNT(*) FROM incidents")->fetch
 $assert("6.3 Sigue sin insertarse ninguna incidencia", $totalIncidentsFinal === $totalIncidentsBefore);
 
 // Restauramos VEND-0201 al parque activo
-$pdo->prepare("UPDATE machines SET is_active = 1, deleted_at = NULL WHERE code = 'VEND-0201'")->execute();
+$pdo->prepare("UPDATE machines SET is_active = TRUE, deleted_at = NULL WHERE code = 'VEND-0201'")->execute();
 
 // =========================================================================
 // RESUMEN FINAL

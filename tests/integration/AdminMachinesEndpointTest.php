@@ -387,11 +387,16 @@ $assert("8.8 is_active es true tras reactivación asistida", ($bodyReactAssisted
 
 // Limpieza de datos temporales de prueba para preservar semillas puras
 TestDataCleaner::purgeIncidentByTicket($pdo, 'INC-TEST-BLOCKED');
-$pdo->prepare("DELETE FROM machines WHERE id IN (:id1, :id2)")->execute([':id1' => $newMachineId, ':id2' => $tempMacId]);
-$pdo->prepare("DELETE FROM locations WHERE id = :locId")->execute([':locId' => $tempLocId]);
+
+// Los borrados de las filas maestras de prueba van con la ventana de purga abierta
+// (contrato de limpieza §3): el guardián del Art. III.1 rechaza el DELETE en crudo.
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $newMachineId, $tempMacId, $tempLocId): void {
+    $pdo->prepare("DELETE FROM machines WHERE id IN (:id1, :id2)")->execute([':id1' => $newMachineId, ':id2' => $tempMacId]);
+    $pdo->prepare("DELETE FROM locations WHERE id = :locId")->execute([':locId' => $tempLocId]);
+});
 
 // Restaurar máquinas semilla a su sede original
-$pdo->prepare("UPDATE machines SET location_id = :bcnId, is_active = 1, deleted_at = NULL WHERE code = 'VEND-0101'")->execute([':bcnId' => $bcnId]);
+$pdo->prepare("UPDATE machines SET location_id = :bcnId, is_active = TRUE, deleted_at = NULL WHERE code = 'VEND-0101'")->execute([':bcnId' => $bcnId]);
 
 // =========================================================================
 // RESUMEN FINAL

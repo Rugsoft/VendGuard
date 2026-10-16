@@ -183,7 +183,7 @@ $warrantyIncident = new Incident(
     EngineClock::shift(-3600),
     EngineClock::shift(-3000),
     null,
-    'Compresor congelado',
+    'Compresor congelado por falta de gas refrigerante',
     'Sustitución de válvula',
     EngineClock::shift(-1800)
 );
@@ -206,7 +206,7 @@ $bodyNotFound = json_decode($resNotFound->getBody(), true);
 $assert("1.5 Código de error es MACHINE_NOT_FOUND_OR_INACTIVE", ($bodyNotFound['error']['code'] ?? '') === 'MACHINE_NOT_FOUND_OR_INACTIVE');
 
 // 1.6 Máquina inactiva (T-ADM-11)
-$pdo->prepare("UPDATE machines SET is_active = 0 WHERE code = 'VEND-0201'")->execute();
+$pdo->prepare("UPDATE machines SET is_active = FALSE WHERE code = 'VEND-0201'")->execute();
 $reqInactive = new Request('GET', '/api/qr/scan/VEND-0201');
 $resInactive = $router->dispatch($reqInactive);
 $assert("1.6 Máquina inactiva retorna HTTP 200 OK", $resInactive->getStatusCode() === 200);
@@ -228,7 +228,7 @@ $bodyReportInactive = json_decode($resReportInactive->getBody(), true);
 $assert("1.6c Error code es MACHINE_INACTIVE", ($bodyReportInactive['error']['code'] ?? '') === 'MACHINE_INACTIVE');
 
 // Restauramos máquina
-$pdo->prepare("UPDATE machines SET is_active = 1 WHERE code = 'VEND-0201'")->execute();
+$pdo->prepare("UPDATE machines SET is_active = TRUE WHERE code = 'VEND-0201'")->execute();
 
 // =========================================================================
 // BLOQUE 2: POST /api/qr/report (Reporte Ciudadano / Usuario Final)

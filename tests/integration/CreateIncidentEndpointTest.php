@@ -147,7 +147,10 @@ $dbStmt = $pdo->prepare("SELECT * FROM incidents WHERE id = :id");
 $dbStmt->execute([':id' => $createdIncidentId]);
 $dbRow = $dbStmt->fetch();
 $assert("1.9 Registro presente en tabla incidents", $dbRow !== false);
-$assert("1.10 is_active_ticket = 1", (int)($dbRow['is_active_ticket'] ?? 0) === 1);
+// El expediente activo de la máquina se pregunta por su contrato real (D-6): la columna
+// generada `is_active_ticket` era del motor retirado y aquí no existe —su forma es el
+// predicado sobre el estado—, así que se pide a la puerta que usa la guardia de duplicados.
+$assert("1.10 El expediente creado ocupa la máquina", $machineRepo->hasActiveTicketOrWarranty($perishableMachine->getId()) === true);
 
 $histStmt = $pdo->prepare("SELECT * FROM incident_history WHERE incident_id = :id");
 $histStmt->execute([':id' => $createdIncidentId]);
@@ -246,8 +249,8 @@ echo "\n--- Caso 4: Rechazo en ventana de garantía de 48 horas (EARS 2.2) ---\n
 
 // Simular resolución de la máquina de bebidas calientes
 $pdo->prepare("
-    UPDATE incidents 
-    SET status = 'RESOLVED', resolved_at = NOW(), is_active_ticket = 1
+    UPDATE incidents
+    SET status = 'RESOLVED', resolved_at = NOW()
     WHERE id = :id
 ")->execute([':id' => $data2['id']]);
 
