@@ -781,10 +781,9 @@ const LEGACY_DIALECT = [
         'why' => 'porte del lote de comentarios y pausas: la sonda de aislamiento de la carrera preguntaba el nivel de aislamiento al estado de sesión del motor heredado (las dos grafías de la variable de sesión) y ahora lo lee del catálogo del motor único; el «lector sucio» se mide en la orilla más permisiva que el motor admite, no en una que no implementa',
     ],
     'tests/integration/PostgresConstitutionalTest.php' => [
-        'kind' => KIND_CONTRACT,
-        'owner' => 'T-13-18',
-        'census' => ['legacy_database' => 1],
-        'why' => 'contrasta el blindaje constitucional contra el motor heredado; pertenece al canal remoto/categoría propia del módulo y se recertifica en T-13-18',
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-18', 'census' => [],
+        'drained_occurrences' => ['legacy_database' => 1],
+        'why' => 'certifica el blindaje constitucional directamente sobre el motor único PostgreSQL',
     ],
     'tests/integration/SanitaryClockConsumerRaceTest.php' => [
         'kind' => KIND_DRAINED, 'owner' => 'T-13-12', 'census' => [],
@@ -797,11 +796,9 @@ const LEGACY_DIALECT = [
         'why' => 'la misma sonda de contención del barrido sanitario, en su endpoint',
     ],
     'tests/integration/SchemaConvergenceParityTest.php' => [
-        'kind' => KIND_CONTRACT,
-        'owner' => 'T-13-18',
-        'mixed' => true,
-        'census' => ['catalog' => 9, 'legacy_database' => 1, 'text_function' => 1],
-        'why' => 'certifica la correspondencia entre los dos esquemas: lee el catálogo del motor heredado en su grafía y el del motor único; pertenece al canal de categoría que se recertifica en T-13-18',
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-18', 'census' => [],
+        'drained_occurrences' => ['catalog' => 9, 'legacy_database' => 1, 'text_function' => 1],
+        'why' => 'certifica la convergencia del esquema y el contrato canónico sobre el motor único PostgreSQL',
     ],
     'tests/integration/SeedRunnerSingleEngineTest.php' => [
         'kind' => KIND_GUARD,

@@ -135,14 +135,9 @@ echo "======================================================================\n";
 
 $pgPdo = PostgresFixtureBuilder::gateOrExit();
 
-$mariaPdo = ConnectionFactory::getConnection(['dbname' => null], true);
-$mariaSchema = (string)$mariaPdo->query('SELECT DATABASE()')->fetchColumn();
-$mariaPdo->exec('USE `' . $mariaSchema . '`');
-
 $rows = [];
 $crash = null;
 $parityRowsCreated = false;
-$mariaCleanup = ['users' => 0, 'locations' => 0];
 $noWindowDeleteState = '';
 $windowDeleteState = '';
 $signalInsideWindow = null;
@@ -505,9 +500,9 @@ try {
     );
 
     $pgUsers = new PdoUserRepository($pgPdo);
-    $mariaUsers = new PdoUserRepository($mariaPdo);
+    
     $pgLocations = new PdoLocationRepository($pgPdo);
-    $mariaLocations = new PdoLocationRepository($mariaPdo);
+    
 
     $createUser = static fn (PdoUserRepository $repository, string $email) => $repository->create([
         'name' => 'Paridad canónica H21',
@@ -523,27 +518,26 @@ try {
     ]);
 
     $pgUserCreated = $createUser($pgUsers, PARITY_USER_EMAIL);
-    $mariaUserCreated = $createUser($mariaUsers, PARITY_USER_EMAIL);
+    
     $parityRowsCreated = true;
 
     $assert(
         'El mismo login se da de alta en los dos motores con el repositorio real',
-        $pgUserCreated->getEmail() === PARITY_USER_EMAIL && $mariaUserCreated->getEmail() === PARITY_USER_EMAIL,
-        'motor nuevo=' . $pgUserCreated->getEmail() . ' · motor local=' . $mariaUserCreated->getEmail()
+        $pgUserCreated->getEmail() === PARITY_USER_EMAIL,
+        'email=' . $pgUserCreated->getEmail()
     );
 
     $pgLookup = $pgUsers->findByEmail(mb_strtoupper(PARITY_USER_EMAIL_FOLDED_VARIANT));
-    $mariaLookup = $mariaUsers->findByEmail(mb_strtoupper(PARITY_USER_EMAIL_FOLDED_VARIANT));
+    
 
     $assert(
         'La búsqueda del mismo login escrito con acentos y mayúsculas encuentra la fila en los dos motores',
-        $pgLookup !== null && $mariaLookup !== null
-            && $pgLookup->getEmail() === PARITY_USER_EMAIL && $mariaLookup->getEmail() === PARITY_USER_EMAIL,
-        'motor nuevo=' . json_encode($pgLookup?->getEmail()) . ' · motor local=' . json_encode($mariaLookup?->getEmail())
+        $pgLookup !== null && $pgLookup->getEmail() === PARITY_USER_EMAIL,
+        'email=' . json_encode($pgLookup?->getEmail())
     );
 
     $pgUserDuplicate = PostgresFixtureBuilder::expectRejection(static fn () => $createUser($pgUsers, PARITY_USER_EMAIL_FOLDED_VARIANT));
-    $mariaUserDuplicate = PostgresFixtureBuilder::expectRejection(static fn () => $createUser($mariaUsers, PARITY_USER_EMAIL_FOLDED_VARIANT));
+    
 
     $assert(
         'El motor nuevo rechaza la variante con acentos del mismo login por la clave canónica (email_key)',
@@ -553,24 +547,17 @@ try {
         $pgUserDuplicate === null ? 'la variante se admitió' : mb_substr(str_replace("\n", ' ', $pgUserDuplicate['message']), 0, 110)
     );
 
-    $assert(
-        'El motor local rechaza la misma variante: la regla de unicidad es la misma en los dos motores',
-        $mariaUserDuplicate !== null
-            && str_contains($mariaUserDuplicate['message'], 'uq_users_email'),
-        $mariaUserDuplicate === null ? 'la variante se admitió' : mb_substr(str_replace("\n", ' ', $mariaUserDuplicate['message']), 0, 110)
-    );
-
     $pgLocationCreated = $createLocation($pgLocations, PARITY_LOCATION_CODE);
-    $mariaLocationCreated = $createLocation($mariaLocations, PARITY_LOCATION_CODE);
+    
 
     $assert(
         'El mismo código de sede se da de alta en los dos motores con el repositorio real',
-        $pgLocationCreated->getSiteCode() === PARITY_LOCATION_CODE && $mariaLocationCreated->getSiteCode() === PARITY_LOCATION_CODE,
-        'motor nuevo=' . $pgLocationCreated->getSiteCode() . ' · motor local=' . $mariaLocationCreated->getSiteCode()
+        $pgLocationCreated->getSiteCode() === PARITY_LOCATION_CODE,
+        'site_code=' . $pgLocationCreated->getSiteCode()
     );
 
     $pgLocationDuplicate = PostgresFixtureBuilder::expectRejection(static fn () => $createLocation($pgLocations, PARITY_LOCATION_CODE_FOLDED_VARIANT));
-    $mariaLocationDuplicate = PostgresFixtureBuilder::expectRejection(static fn () => $createLocation($mariaLocations, PARITY_LOCATION_CODE_FOLDED_VARIANT));
+    
     $parityRowsCreated = $parityRowsCreated && $pgLocationCreated->getSiteCode() === PARITY_LOCATION_CODE;
 
     $assert(
@@ -581,40 +568,16 @@ try {
         $pgLocationDuplicate === null ? 'la variante se admitió' : mb_substr(str_replace("\n", ' ', $pgLocationDuplicate['message']), 0, 110)
     );
 
-    $assert(
-        'El motor local rechaza la misma variante plegada del código de sede',
-        $mariaLocationDuplicate !== null && str_contains($mariaLocationDuplicate['message'], 'uq_locations_site_code'),
-        $mariaLocationDuplicate === null ? 'la variante se admitió' : mb_substr(str_replace("\n", ' ', $mariaLocationDuplicate['message']), 0, 110)
-    );
-
     $pgDistinct = PostgresFixtureBuilder::expectRejection(static fn () => $createUser($pgUsers, PARITY_USER_EMAIL_DISTINCT));
-    $mariaDistinct = PostgresFixtureBuilder::expectRejection(static fn () => $createUser($mariaUsers, PARITY_USER_EMAIL_DISTINCT));
 
     $assert(
-        'Control positivo: un login genuinamente distinto se admite en los dos motores',
-        $pgDistinct === null && $mariaDistinct === null,
-        'motor nuevo=' . ($pgDistinct === null ? 'admitido' : 'rechazado con ' . $pgDistinct['state'])
-            . ' · motor local=' . ($mariaDistinct === null ? 'admitido' : 'rechazado con ' . $mariaDistinct['state'])
+        'Control positivo: un login genuinamente distinto se admite en el motor único',
+        $pgDistinct === null,
+        $pgDistinct === null ? 'admitido' : 'rechazado con ' . $pgDistinct['state']
     );
 } catch (Throwable $exception) {
     $crash = $exception;
 } finally {
-    // La limpieza del motor local es explícita y bajo la ventana del arnés: `users` y `locations`
-    // son maestras y ninguna suite las vacía por su cuenta. La sede usa el prefijo reservado
-    // `SEDE-TEST-`, de modo que el drenaje de cierre del banco también la reconocería como suya.
-    try {
-        TestDataCleaner::withPurgeWindow($mariaPdo, static function () use ($mariaPdo, &$mariaCleanup): void {
-            $mariaCleanup['users'] = (int)$mariaPdo->exec(
-                "DELETE FROM users WHERE email IN ('" . PARITY_USER_EMAIL . "', '" . PARITY_USER_EMAIL_DISTINCT . "')"
-            );
-            $mariaCleanup['locations'] = (int)$mariaPdo->exec(
-                "DELETE FROM locations WHERE site_code LIKE 'SEDE-TEST-H21%'"
-            );
-        });
-    } catch (Throwable $cleanupFailure) {
-        $crash ??= $cleanupFailure;
-    }
-
     try {
         PostgresFixtureBuilder::dropIsolationSchema($pgPdo);
     } catch (Throwable $cleanupFailure) {
@@ -622,28 +585,14 @@ try {
     }
 }
 
-echo "\n--- Limpieza y residuo de los dos motores ---\n";
+echo "\n--- Limpieza y residuo ---\n";
 
 $pgResidue = $pgPdo->query("SELECT to_regclass('" . PostgresFixtureBuilder::ISOLATION_SCHEMA . ".incidents')")->fetchColumn();
-$mariaResidue = (int)$mariaPdo->query("SELECT COUNT(*) FROM users WHERE email LIKE 'parity.h21%' OR email LIKE 'paríty.h21%'")->fetchColumn();
-$mariaLocationResidue = (int)$mariaPdo->query("SELECT COUNT(*) FROM locations WHERE site_code LIKE 'SEDE-TEST-H21%'")->fetchColumn();
 
 $assert(
-    'El escenario del motor nuevo se retira entero (esquema aislado inexistente)',
+    'El escenario del motor único se retira entero (esquema aislado inexistente)',
     $pgResidue === null,
     'la sonda de residuo encontró ' . json_encode($pgResidue)
-);
-
-$assert(
-    'El motor local queda sin residuo de la prueba de paridad: ni usuarios ni sedes del arnés',
-    $mariaResidue === 0
-        && $mariaLocationResidue === 0
-        && (!$parityRowsCreated || ($mariaCleanup['users'] === 2 && $mariaCleanup['locations'] === 1)),
-    sprintf('usuarios=%d · sedes=%d · retirados en el cierre: %d usuarios y %d sedes',
-        $mariaResidue,
-        $mariaLocationResidue,
-        $mariaCleanup['users'],
-        $mariaCleanup['locations'])
 );
 
 if ($crash !== null) {
@@ -656,11 +605,11 @@ echo "\n======================================================================\n
 echo " Total Aserciones: {$assertions} | Exitosas: " . ($assertions - $failures) . " | Fallidas: {$failures}\n";
 
 if ($failures === 0) {
-    echo " RESULT: 100% EN VERDE. T-HYBRID-21 (blindaje constitucional del motor nuevo) CUMPLIDA.\n";
+    echo " RESULT: 100% EN VERDE. T-HYBRID-21 (blindaje constitucional del motor único) CUMPLIDA.\n";
     echo "======================================================================\n";
     exit(0);
 }
 
-echo " RESULT: FALLOS DETECTADOS EN EL BLINDAJE DEL MOTOR NUEVO.\n";
+echo " RESULT: FALLOS DETECTADOS EN EL BLINDAJE DEL MOTOR ÚNICO.\n";
 echo "======================================================================\n";
 exit(1);

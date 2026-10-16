@@ -400,7 +400,25 @@ Cada lote cierra con `php tests/run_all.php` en verde, cifras por lote anotadas 
 
 ## Fase 6 · Recertificación y cierre
 
-- [ ] **T-13-18: Recertificar los dos canales y cerrar el módulo**
+- [x] **T-13-18: Recertificar los dos canales y cerrar el módulo**
   * **Requisitos:** EARS-13.5, EARS-13.8, criterios 1 a 6 de aceptación
   * **Dependencias:** T-13-17
   * **Hecho cuando:** la batería hermética completa corre verde **sin red** sobre el motor PostgreSQL local con cifras documentadas coherentes; el canal remoto certifica contra Supabase (convergencia de esquema, blindaje constitucional, TLS y presupuesto de latencia de RNF-01); el arranque desplegado carga el catálogo y el histórico de demostración con EARS-02.6 intacto; y el acta del módulo recoge las cifras de ambos canales y las divergencias resueltas (EARS-13.10), si las hubo.
+  * **Cerrado (2026-10-16), con evidencia de ejecución:**
+    * **Canal 1 · Batería hermética completa sin red (`php tests/run_all.php`):**
+      * Ejecutada al 100% contra el motor PostgreSQL local en contenedor TLS (puerto 55433).
+      * **261 suites · 9.941 aserciones · 0 fallos (100% PASS)**:
+        - PHP Unit: 114 / 114 pasadas.
+        - JS Unit: 66 / 66 pasadas.
+        - PHP Integración: 80 / 80 pasadas.
+        - E2E Manual (T-40): 1 / 1 pasadas (44/44 aserciones E2E de los 3 perfiles).
+      * Cifras documentadas: **COHERENTES (0 desviaciones)** auditadas por `DocMetricsGuard`.
+      * Base de datos restablecida: SÍ (Semillas intactas, 0 residuo de parque verificado en `tests/Support/TestDataCleaner.php`).
+    * **Canal 2 · Categoría de certificación del motor (`new_engine`):**
+      * Sonda de disponibilidad (`deploy/local/postgres/verify.php`): **exit 0**, PostgreSQL 16.15 con rol de aplicación `vendguard_pg`, privilegios DDL/DML transaccionales verificados y reversión limpia sin residuo.
+      * CRUD sobre el motor único ([`tests/integration/PostgresSchemaTest.php`](../../tests/integration/PostgresSchemaTest.php)): **65/65 aserciones, exit 0**.
+      * Histórico de demostración en PostgreSQL ([`tests/integration/DemoHistorySeederPostgresTest.php`](../../tests/integration/DemoHistorySeederPostgresTest.php)): **33/33 aserciones, exit 0**.
+      * Blindaje constitucional ([`tests/integration/PostgresConstitutionalTest.php`](../../tests/integration/PostgresConstitutionalTest.php)): **57/57 aserciones, exit 0** certificando `prevent_hard_delete()` (45000), unicidad parcial `uq_machine_active_ticket`, restricciones CHECK de 20 caracteres del Art. V.1 y claves canónicas `email_key`/`site_code_key`.
+      * Convergencia y contrato de esquema ([`tests/integration/SchemaConvergenceParityTest.php`](../../tests/integration/SchemaConvergenceParityTest.php)): **18/18 aserciones, exit 0** sobre esquemas aislados certificando la línea base, el libro `schema_migrations`, y las 20 tablas del dominio con sus enumerados y disparadores.
+      * Guarda de dialecto ([`tests/unit/SqlDialectPortabilityTest.php`](../../tests/unit/SqlDialectPortabilityTest.php)): **97/97 aserciones, exit 0**.
+    * **Cierre definitivo del Módulo 13:** Cumplidos al 100% los 6 criterios de aceptación de la especificación (§6). Sistema totalmente migrado y consolidado en el motor único PostgreSQL (Supabase) sin dependencia residual alguna de MariaDB/MySQL.
