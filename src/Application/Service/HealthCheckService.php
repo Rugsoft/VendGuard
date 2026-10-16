@@ -142,7 +142,7 @@ final class HealthCheckService
         // La configuración se describe SIN abrir conexión: permite publicar el motor y el
         // camino (agrupador o directo) incluso cuando la conexión es lo que ha fallado.
         $configuration = ConnectionFactory::describeConnection();
-        $driver = (string)($configuration['driver'] ?? ConnectionFactory::DRIVER_MYSQL);
+        $driver = (string)($configuration['driver'] ?? ConnectionFactory::DRIVER_PGSQL);
         $pooler = self::connectionPoolerLabel($configuration);
 
         $startedAt = hrtime(true);
@@ -239,9 +239,9 @@ final class HealthCheckService
      *                       zona operativa y el motor nuevo entrega el desplazamiento
      *                       explícito, que PHP respeta por encima de esta omisión.
      */
-    public static function sweepInstantToUtc(string $storedInstant, string $driver): string
+    public static function sweepInstantToUtc(string $storedInstant, ?string $driver = null): string
     {
-        $defaultZone = $driver === ConnectionFactory::DRIVER_PGSQL
+        $defaultZone = ($driver === null || $driver === ConnectionFactory::DRIVER_PGSQL)
             ? self::PUBLICATION_TIMEZONE_UTC
             : self::OPERATIONAL_TIMEZONE;
 

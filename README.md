@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/MariaDB-10.11%2B%20%7C%20MySQL%208.0-003545?style=flat-square&logo=mariadb&logoColor=white)](https://mariadb.org/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-261%20Suites%20%7C%209.958%20Pass-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-261%20Suites%20%7C%209.947%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -365,27 +365,26 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 261 suites · 9.958 aserciones
+batería global: 261 suites · 9.947 aserciones
 
 ```text
 ======================================================================
  RESUMEN DE EJECUCIÓN GLOBAL (T-39)
 ======================================================================
- Tiempo de ejecución total : 150.00 segundos  (variable en cada corrida)
- Suites de pruebas PHP Unit : 113 / 114 pasadas
+ Tiempo de ejecución total : 142.00 segundos  (variable en cada corrida)
+ Suites de pruebas PHP Unit : 114 / 114 pasadas
  Suites de pruebas JS Unit  : 66 / 66 pasadas
- Suites de Integración PHP  : 79 / 80 pasadas
+ Suites de Integración PHP  : 80 / 80 pasadas
  Suites E2E Manuales (T-40): 1 / 1 pasadas
  ──────────────────────────────────────────────────────────────────
  Total Suites Ejecutadas    : 261
- Total Aserciones Evaluadas : 9.958
- Fallos Detectados          : 2
+ Total Aserciones Evaluadas : 9.947
+ Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
 ======================================================================
- RESULTADO: 2 SUITE(S) FALLIDAS (módulo 13 en curso, con dueño declarado):
-   - unit/HealthCheckServiceTest.php        (sin adjudicar, declarada al cerrar T-13-12)
-   - integration/ConnectionFactoryTest.php  (T-13-14, factoría de una sola rama)
+ RESULTADO: 100% EN VERDE. (0 errors, 0 failures)
+ CONDICIÓN T-39 CUMPLIDA SATISFACTORIAMENTE.
 ======================================================================
 ```
 
@@ -478,7 +477,7 @@ gestor-incidencias-vending/
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 261 suites (módulo 13 en curso)
+    ├── run_all.php               # Ejecutor global de la batería de 261 suites (100% verde)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)
     ├── unit/                     # Pruebas unitarias de lógica pura, geometría y contratos

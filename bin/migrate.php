@@ -3,177 +3,50 @@
 declare(strict_types=1);
 
 /**
- * VendGuard - Script CLI de Migración DDL
+ * VendGuard - Script CLI de Migración DDL del motor único (PostgreSQL / Supabase)
+ * (T-13-14)
  * 
  * Uso: php bin/migrate.php
  */
 
-require_once __DIR__ . '/../src/Infrastructure/Database/MigrationRunner.php';
+require_once __DIR__ . '/../src/Infrastructure/Config/SecretProvider.php';
+require_once __DIR__ . '/../src/Infrastructure/Database/ConnectionFactory.php';
+require_once __DIR__ . '/../src/Infrastructure/Database/SqlScriptSplitter.php';
+require_once __DIR__ . '/../src/Infrastructure/Database/PostgresMigrationRunner.php';
 
-use VendGuard\Infrastructure\Database\MigrationRunner;
+use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Database\PostgresMigrationRunner;
 
 echo "========================================================\n";
-echo " VendGuard: Iniciando migración DDL en MariaDB/MySQL\n";
+echo " VendGuard: Migración incremental DDL en PostgreSQL\n";
 echo "========================================================\n\n";
 
-$host = getenv('DB_HOST') ?: '127.0.0.1';
-$port = getenv('DB_PORT') ?: '3306';
-$user = getenv('DB_USER') ?: 'root';
-$password = getenv('DB_PASS') !== false ? getenv('DB_PASS') : '';
-
 try {
-    // Conexión inicial al servidor sin base de datos específica para permitir crearla si no existe
-    $dsn = "mysql:host={$host};port={$port};charset=utf8mb4";
-    $pdo = new PDO($dsn, $user, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false,
-    ]);
+    $pdo = ConnectionFactory::getConnection();
 
-    echo "[1/3] Conexión establecida con MariaDB en {$host}:{$port}\n";
+    echo "[1/3] Conexión establecida con el motor PostgreSQL (Supabase)\n";
 
-    $runner = new MigrationRunner($pdo);
-    $schemaFile = __DIR__ . '/../database/schema.sql';
+    $runner = new PostgresMigrationRunner($pdo);
 
-    echo "[2/4] Ejecutando script DDL base: database/schema.sql ...\n";
-    $runner->runSqlFile($schemaFile);
-    echo "      Script DDL ejecutado con éxito.\n";
+    echo "[2/3] Aplicando migraciones incrementales pendientes...\n";
+    $applied = $runner->runAll();
 
-    // Conectar a vendguard_db
-    $pdo->exec("USE `vendguard_db`");
-
-    // Ejecutar migraciones incrementales en database/migrations/
-    echo "[3/4] Ejecutando migraciones incrementales (database/migrations/) ...\n";
-    $migrationsDir = __DIR__ . '/../database/migrations';
-    if (is_dir($migrationsDir)) {
-        $migrationFiles = glob($migrationsDir . '/*.sql');
-        sort($migrationFiles);
-        foreach ($migrationFiles as $mFile) {
-            $baseName = basename($mFile);
-            echo "      - Aplicando migración: {$baseName} ...\n";
-            $runner->runSqlFile($mFile);
-        }
-    }
-
-    $expectedTables = [
-        'locations',
-        'machines',
-        'users',
-        'incidents',
-        'incident_history',
-        'incident_comments',
-        'audit_log',
-        'preventive_settings',
-        'preventive_orders',
-        'preventive_order_items',
-        'sanitary_certificates',
-        'spare_parts',
-        'spare_part_compatibilities',
-        'spare_part_requests',
-        'incident_replaced_parts',
-        'route_settings',
-        'refund_requests',
-        'unclaimed_cash_findings',
-        // Visibilidad operativa del barrido sanitario (Módulo 11: T-PAUSE-41)
-        'sanitary_sweep_passes',
-        'sanitary_sweep_contentions'
-    ];
-
-    echo "[4/4] Verificando esquema e integridad en vendguard_db:\n";
-    $allTablesExist = true;
-
-    foreach ($expectedTables as $table) {
-        $exists = $runner->tableExists($table);
-        $status = $exists ? "OK" : "FALTA";
-        echo "      - Tabla `{$table}`: [{$status}]\n";
-        if (!$exists) {
-            $allTablesExist = false;
-        }
-    }
-
-    // Verificar la columna virtual y el índice único condicional
-    $stmt = $pdo->query("SHOW COLUMNS FROM `incidents` LIKE 'is_active_ticket'");
-    $col = $stmt->fetch();
-    $hasVirtualCol = ($col !== false);
-
-    $stmt = $pdo->query("SHOW INDEX FROM `incidents` WHERE Key_name = 'uq_machine_active_ticket'");
-    $idx = $stmt->fetch();
-    $hasUniqueIndex = ($idx !== false);
-
-    // Verificar columna machine_type_snapshot (Módulo 04 / Art. II)
-    $stmt = $pdo->query("SHOW COLUMNS FROM `incidents` LIKE 'machine_type_snapshot'");
-    $colSnapshot = $stmt->fetch();
-    $hasSnapshotCol = ($colSnapshot !== false);
-
-    // Verificar enum USER en audit_log (Módulo 04 / Art. III y V)
-    $stmt = $pdo->query("SHOW COLUMNS FROM `audit_log` LIKE 'entity_type'");
-    $colAuditEnum = $stmt->fetch();
-    $hasUserEnum = ($colAuditEnum !== false && str_contains((string)($colAuditEnum['Type'] ?? ''), "'USER'"));
-
-    // Verificar extensiones de Módulo 05 (Preventivo y Sanitario)
-    $stmt = $pdo->query("SHOW COLUMNS FROM `users` LIKE 'operator_code'");
-    $hasOperatorCode = ($stmt->fetch() !== false);
-
-    $stmt = $pdo->query("SHOW COLUMNS FROM `machines` LIKE 'sanitary_status'");
-    $hasSanitaryStatus = ($stmt->fetch() !== false);
-
-    $stmt = $pdo->query("SHOW COLUMNS FROM `incidents` LIKE 'preventive_order_id'");
-    $hasPreventiveOrderCol = ($stmt->fetch() !== false);
-
-    $hasPreventiveAuditEnum = ($colAuditEnum !== false && str_contains((string)($colAuditEnum['Type'] ?? ''), "'PREVENTIVE_ORDER'"));
-
-    // Verificar extensiones del mapa logístico (Módulo 07 / T-MAP-01)
-    $stmt = $pdo->query("SHOW COLUMNS FROM `locations` LIKE 'latitude'");
-    $hasLocationLatitude = ($stmt->fetch() !== false);
-    $stmt = $pdo->query("SHOW COLUMNS FROM `locations` LIKE 'longitude'");
-    $hasLocationLongitude = ($stmt->fetch() !== false);
-    $stmt = $pdo->query("SHOW INDEX FROM `locations` WHERE Key_name = 'idx_locations_lat_lng'");
-    $hasLocationCoordinateIndex = ($stmt->fetch() !== false);
-    $routeSettingsCount = (int)$pdo->query("SELECT COUNT(*) FROM `route_settings` WHERE `id` = 1")->fetchColumn();
-    $hasRouteSettingsSingleton = ($routeSettingsCount === 1);
-
-    // Verificar extensiones del módulo de reintegros (Módulo 08 / T-REF-01)
-    $stmt = $pdo->query("SHOW COLUMNS FROM `locations` LIKE 'has_physical_reception'");
-    $hasPhysicalReceptionCol = ($stmt->fetch() !== false);
-
-    $stmt = $pdo->query("SHOW INDEX FROM `refund_requests` WHERE Key_name = 'idx_refund_tracking_token'");
-    $hasRefundTrackingIndex = ($stmt->fetch() !== false);
-
-    // Verificar entidades de reintegro en el enum de audit_log (Módulo 08 / RNF-REF-01)
-    $hasRefundAuditEnum = ($colAuditEnum !== false
-        && str_contains((string)($colAuditEnum['Type'] ?? ''), "'REFUND_REQUEST'")
-        && str_contains((string)($colAuditEnum['Type'] ?? ''), "'UNCLAIMED_CASH_FINDING'"));
-
-    echo "      - Columna virtual `is_active_ticket`: [" . ($hasVirtualCol ? "OK" : "FALTA") . "]\n";
-    echo "      - Índice único `uq_machine_active_ticket`: [" . ($hasUniqueIndex ? "OK" : "FALTA") . "]\n";
-    echo "      - Columna `machine_type_snapshot` en incidents: [" . ($hasSnapshotCol ? "OK" : "FALTA") . "]\n";
-    echo "      - Soporte entidad `USER` en audit_log: [" . ($hasUserEnum ? "OK" : "FALTA") . "]\n";
-    echo "      - Columna `operator_code` en users: [" . ($hasOperatorCode ? "OK" : "FALTA") . "]\n";
-    echo "      - Columna `sanitary_status` en machines: [" . ($hasSanitaryStatus ? "OK" : "FALTA") . "]\n";
-    echo "      - Columna `preventive_order_id` en incidents: [" . ($hasPreventiveOrderCol ? "OK" : "FALTA") . "]\n";
-    echo "      - Soporte entidad `PREVENTIVE_ORDER` en audit_log: [" . ($hasPreventiveAuditEnum ? "OK" : "FALTA") . "]\n";
-    echo "      - Columnas `latitude` y `longitude` en locations: [" . ($hasLocationLatitude && $hasLocationLongitude ? "OK" : "FALTA") . "]\n";
-    echo "      - Índice `idx_locations_lat_lng`: [" . ($hasLocationCoordinateIndex ? "OK" : "FALTA") . "]\n";
-    echo "      - Fila singleton `route_settings` (id=1): [" . ($hasRouteSettingsSingleton ? "OK" : "FALTA") . "]\n";
-    echo "      - Columna `has_physical_reception` en locations: [" . ($hasPhysicalReceptionCol ? "OK" : "FALTA") . "]\n";
-    echo "      - Índice `idx_refund_tracking_token`: [" . ($hasRefundTrackingIndex ? "OK" : "FALTA") . "]\n";
-    echo "      - Entidades `REFUND_REQUEST` y `UNCLAIMED_CASH_FINDING` en audit_log: [" . ($hasRefundAuditEnum ? "OK" : "FALTA") . "]\n\n";
-
-    $isMigrationComplete = $allTablesExist && $hasVirtualCol && $hasUniqueIndex && $hasSnapshotCol && $hasUserEnum
-        && $hasOperatorCode && $hasSanitaryStatus && $hasPreventiveOrderCol && $hasPreventiveAuditEnum
-        && $hasLocationLatitude && $hasLocationLongitude && $hasLocationCoordinateIndex && $hasRouteSettingsSingleton
-        && $hasPhysicalReceptionCol && $hasRefundTrackingIndex && $hasRefundAuditEnum;
-
-    if ($isMigrationComplete) {
-        echo "========================================================\n";
-        echo " Migración completada exitosamente. Condiciones T-SPARE-01, T-MAP-01 y T-REF-01 CUMPLIDAS.\n";
-        echo "========================================================\n";
-        exit(0);
+    if ($applied === []) {
+        echo "      ✓ El esquema ya convergía: 0 migraciones pendientes.\n";
     } else {
-        echo "ERROR: Algunas tablas, columnas o índices no se crearon correctamente.\n";
-        exit(1);
+        foreach ($applied as $migrationFile) {
+            echo "      ✓ Migración aplicada: {$migrationFile}\n";
+        }
     }
 
+    echo "[3/3] Verificando convergencia completa del esquema...\n";
+    $runner->assertConverged();
+    echo "      ✓ Esquema 100% convergido según libro schema_migrations (EARS-02.4).\n\n";
+
+    echo "========================================================\n";
+    echo " Migración completada exitosamente.\n";
+    echo "========================================================\n";
+    exit(0);
 } catch (Throwable $e) {
     echo "\n[ERROR FATAL]: " . $e->getMessage() . "\n";
     exit(1);

@@ -6,35 +6,27 @@ namespace VendGuard\Infrastructure\Database;
 
 use InvalidArgumentException;
 use PDO;
-use PDOException;
 use RuntimeException;
 use VendGuard\Core\Domain\Repository\LockWaitBudgetInterface;
 
 /**
  * PdoLockWaitBudget — adaptador nativo de la cota de espera de bloqueo de la
- * sesión PDO compartida por la infraestructura (T-PAUSE-40, T-HYBRID-07, Art. II).
+ * sesión PDO compartida por la infraestructura para el motor único PostgreSQL (T-13-14, T-PAUSE-40, Art. II).
  *
  * La sesión no se abre aquí: se resuelve de forma perezosa desde
  * `ConnectionFactory`, exactamente la misma conexión que usan los repositorios
  * del proceso —acotar otra sesión no serviría de nada— y de modo que el objeto
  * sea construible sin base de datos, como el resto de la infraestructura.
  *
- * **Dos motores, dos formas técnicas, una sola regla** (EARS-09.3). El puerto
- * describe la regla —acotar la operación, no elevar una cota más estricta y no
- * tocar nunca el valor del servidor— y cada motor la escribe como puede:
- *
- * 1. **MariaDB/MySQL:** la cota es un valor de sesión (`innodb_lock_wait_timeout`).
- *    Se lee, se baja con `SET SESSION` si procede y se restituye en un `finally`.
- * 2. **PostgreSQL:** la cota es `lock_timeout` y su única forma fiable bajo el
- *    agrupador transaccional es `SET LOCAL`, que vale **dentro de la transacción**.
- *    Fuera de una transacción el motor ignora `SET LOCAL` **en silencio** (medido)
- *    y la forma de sesión no sirve: un `SET` de sesión puede caer en un backend
- *    distinto del que después toma el bloqueo, y deja el valor pegado a un backend
- *    compartido por otros clientes del agrupador. Por eso, cuando la operación no
- *    está dentro de una transacción, la cota se declara **ambiente** en la factoría
- *    y la consume [`PdoTransactionManager`](PdoTransactionManager.php) al abrir cada
- *    unidad de trabajo, que es donde la transacción existe. El valor local se
- *    revierte solo, con la transacción: no hay nada que restituir.
+ * **Forma técnica en PostgreSQL** (EARS-09.3):
+ * La cota es `lock_timeout` y su única forma fiable bajo el agrupador transaccional
+ * es `SET LOCAL`, que vale **dentro de la transacción**. Fuera de una transacción el motor
+ * ignora `SET LOCAL` **en silencio** (medido) y la forma de sesión no sirve: un `SET` de
+ * sesión puede caer en un backend distinto del que después toma el bloqueo, y deja el
+ * valor pegado a un backend compartido por otros clientes del agrupador. Por eso, cuando
+ * la operación no está dentro de una transacción, la cota se declara **ambiente** en la factoría
+ * y la consume [`PdoTransactionManager`](PdoTransactionManager.php) al abrir cada unidad de
+ * trabajo, que es donde la transacción existe. El valor local se revierte solo con la transacción.
  *
  * **Alcance declarado:** en PostgreSQL la cota es de alcance transaccional, no de
  * proceso. Una operación que no abra ninguna transacción no recibe cota —no hay
@@ -84,34 +76,7 @@ final class PdoLockWaitBudget implements LockWaitBudgetInterface
 
         $pdo = $this->connection();
 
-        return self::driverOf($pdo) === ConnectionFactory::DRIVER_PGSQL
-            ? $this->runWithPostgresBudget($pdo, $seconds, $operation)
-            : $this->runWithMysqlBudget($pdo, $seconds, $operation);
-    }
-
-    /**
-     * Rama MariaDB/MySQL: la cota es un valor de sesión que se baja y se restituye.
-     *
-     * El valor del **servidor** no se toca nunca: el barrido es un proceso de fondo y no
-     * tiene autoridad para cambiar cómo esperan los demás. Si la sesión ya esperaba menos
-     * que la cota pedida, no se eleva.
-     */
-    private function runWithMysqlBudget(PDO $pdo, int $seconds, callable $operation): mixed
-    {
-        $previous = (int)$pdo->query('SELECT @@SESSION.innodb_lock_wait_timeout')->fetchColumn();
-        $lowered = $previous > $seconds;
-
-        if ($lowered) {
-            $pdo->exec(sprintf('SET SESSION innodb_lock_wait_timeout = %d', $seconds));
-        }
-
-        try {
-            return $operation();
-        } finally {
-            if ($lowered) {
-                $this->restoreMysqlBudget($pdo, $previous);
-            }
-        }
+        return $this->runWithPostgresBudget($pdo, $seconds, $operation);
     }
 
     /**
@@ -138,67 +103,72 @@ final class PdoLockWaitBudget implements LockWaitBudgetInterface
     }
 
     /**
-     * Aplica la cota a la **transacción activa** con la forma del motor.
+     * Aplica la cota a la transacción activa mediante `SET LOCAL lock_timeout`.
      *
-     * Único punto donde vive el `SET LOCAL` de PostgreSQL: lo usan el propio adaptador
-     * cuando la operación ya corre en una transacción y [`PdoTransactionManager`](PdoTransactionManager.php)
-     * al abrir cada unidad de trabajo del lote, de modo que la cota cae dentro de la
-     * transacción que realmente toma el bloqueo y no hay dos definiciones de la forma.
+     * No toca la sesión fuera de la transacción y no eleva una cota más restrictiva
+     * que la sesión ya tuviera declarada. Si falla al aplicar la cota (por ejemplo,
+     * porque el motor no admite la instrucción), la operación aborta en lugar de
+     * correr desprotegida: la garantía de T-PAUSE-40/Art. II es estricta.
      *
-     * Se respeta la regla del puerto de **no elevar** una cota más estricta: si la
-     * transacción ya corre con una cota igual o menor —incluida la que fije el propio motor
-     * por rol o base de datos—, se deja como está. Un valor `0` significa «sin límite», es
-     * decir, la cota más laxa posible, y por eso sí se baja.
-     *
-     * En MariaDB no hace nada: allí la cota se aplica por sesión desde el adaptador.
-     *
-     * @param int|null $seconds Cota en segundos, o `null` si el proceso no ha declarado
-     *                          ninguna: entonces no hay nada que acotar y la transacción
-     *                          corre con la cota del motor.
-     *
-     * @throws RuntimeException Si se invoca sin transacción activa en el motor nuevo, donde
-     *                          la forma local se ignoraría en silencio (Fail-Fast).
+     * @throws RuntimeException Si `SET LOCAL lock_timeout` falla dentro de la transacción.
      */
     public static function applyToCurrentTransaction(PDO $pdo, ?int $seconds): void
     {
-        if ($seconds === null || self::driverOf($pdo) !== ConnectionFactory::DRIVER_PGSQL) {
+        if ($seconds === null || $seconds < 1) {
             return;
         }
 
         if (!$pdo->inTransaction()) {
             throw new RuntimeException(
-                'La cota de espera de bloqueo de PostgreSQL sólo puede aplicarse dentro de una transacción: fuera de ella el motor ignora `SET LOCAL` en silencio (T-HYBRID-07).'
+                'No se puede aplicar lock_timeout fuera de una transacción: PostgreSQL ignora SET LOCAL en silencio fuera de una transacción (T-HYBRID-07).'
             );
         }
 
-        $milliseconds = $seconds * self::MILLISECONDS_PER_SECOND;
-        $current = self::readPostgresLockWaitMilliseconds($pdo);
+        $timeoutMs = $seconds * self::MILLISECONDS_PER_SECOND;
 
-        if ($current !== 0 && $current <= $milliseconds) {
-            return;
+        try {
+            $effectiveMs = self::resolveEffectiveTimeoutMs($pdo, $timeoutMs);
+            if ($effectiveMs !== null) {
+                $pdo->exec(sprintf("SET LOCAL lock_timeout = '%dms'", $effectiveMs));
+            }
+        } catch (RuntimeException $exception) {
+            throw $exception;
+        } catch (\Throwable $exception) {
+            throw new RuntimeException(
+                'No se pudo aplicar la cota de espera de bloqueo a la transacción activa (T-HYBRID-07): ' . $exception->getMessage(),
+                0,
+                $exception
+            );
+        }
+    }
+
+    /**
+     * Resuelve la cota efectiva en milisegundos sin superar una cota previa más restrictiva.
+     * Devuelve null si la cota previa ya es igual o más estricta que la pedida (evita emitir SET LOCAL redundante).
+     */
+    private static function resolveEffectiveTimeoutMs(PDO $pdo, int $requestedMs): ?int
+    {
+        $currentSetting = (string)$pdo->query("SELECT current_setting('lock_timeout')")->fetchColumn();
+
+        if (trim($currentSetting) === '') {
+            return $requestedMs;
         }
 
-        $pdo->exec(sprintf("SET LOCAL lock_timeout = '%dms'", $milliseconds));
+        $currentMs = self::parsePostgresDuration($currentSetting);
+
+        if ($currentMs === 0) {
+            return $requestedMs;
+        }
+
+        if ($currentMs <= $requestedMs) {
+            return null; // Ya es igual o más estricta: no se modifica
+        }
+
+        return $requestedMs;
     }
 
     /**
-     * Cota de espera de bloqueo vigente en la sesión o en la transacción activa, en
-     * milisegundos (`0` significa «sin límite»).
-     */
-    private static function readPostgresLockWaitMilliseconds(PDO $pdo): int
-    {
-        $value = (string)$pdo->query("SELECT current_setting('lock_timeout')")->fetchColumn();
-
-        return self::parsePostgresDuration($value);
-    }
-
-    /**
-     * Traduce una duración de PostgreSQL a milisegundos.
-     *
-     * Es la forma en la que el motor devuelve `current_setting('lock_timeout')`:
-     * `0`, `1500ms`, `2s`, `1min`... Un valor que no se entienda **no se interpreta
-     * a la ligera**: se rechaza en voz alta, porque suponerlo «sin límite» acabaría
-     * pisando una cota que el operador sí había fijado.
+     * Parsea una duración de PostgreSQL (por ejemplo `2s`, `1500ms`, `0`) a milisegundos.
      *
      * @throws RuntimeException Si la duración no tiene la forma que el motor documenta.
      */
@@ -210,7 +180,7 @@ final class PdoLockWaitBudget implements LockWaitBudgetInterface
             throw new RuntimeException('PostgreSQL devolvió una duración vacía para la cota de espera de bloqueo (T-HYBRID-07).');
         }
 
-        if (!preg_match('/^([0-9]+(?:\.[0-9]+)?)\s*([a-zµ]*)$/', $normalized, $matches)) {
+        if (!preg_match('/^([0-9]+(?:\\.[0-9]+)?)\\s*([a-zµ]*)$/', $normalized, $matches)) {
             throw new RuntimeException(sprintf(
                 'Duración de PostgreSQL no reconocida («%s») para la cota de espera de bloqueo: se rechaza en lugar de suponer un valor (T-HYBRID-07).',
                 $duration
@@ -233,31 +203,6 @@ final class PdoLockWaitBudget implements LockWaitBudgetInterface
         }
 
         return (int)round($amount * self::POSTGRES_MILLISECONDS_PER_UNIT[$unit]);
-    }
-
-    /**
-     * Restituye la cota anterior de la sesión en MariaDB.
-     *
-     * Degradación declarada: si la sesión ya no admite sentencias —el caso de la
-     * conexión perdida, que es justo uno de los motivos por los que la operación
-     * puede haber lanzado— no hay nada que restituir y la excepción original es la
-     * que debe llegar al llamante, no una segunda que la enmascare.
-     */
-    private function restoreMysqlBudget(PDO $pdo, int $previous): void
-    {
-        try {
-            $pdo->exec(sprintf('SET SESSION innodb_lock_wait_timeout = %d', $previous));
-        } catch (PDOException) {
-            // Declarado arriba: la sesión no admite sentencias; el fallo original viaja.
-        }
-    }
-
-    /**
-     * Driver activo de la conexión compartida.
-     */
-    private static function driverOf(PDO $pdo): string
-    {
-        return (string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
     }
 
     /**

@@ -292,10 +292,30 @@ Cada lote cierra con `php tests/run_all.php` en verde, cifras por lote anotadas 
 
 ## Fase 4 · Retirada del camino heredado
 
-- [ ] **T-13-14: Factoría de conexión de una sola rama**
+- [x] **T-13-14: Factoría de conexión de una sola rama**
   * **Requisitos:** EARS-13.1, EARS-13.2
   * **Dependencias:** T-13-13
   * **Hecho cuando:** [`ConnectionFactory`](../../src/Infrastructure/Database/ConnectionFactory.php) no conserva rama, valor por defecto, credencial ni variable del motor heredado; `MigrationRunner` se retira a favor de `PostgresMigrationRunner`; `PdoLockWaitBudget` conserva solo su ruta PostgreSQL; y la suite de la factoría sigue verde.
+  * **Cerrado (2026-10-16), con evidencia de ejecución:**
+    * **Factoría unificada al motor único ([ConnectionFactory.php](../../src/Infrastructure/Database/ConnectionFactory.php)):**
+      * Eliminada la rama MariaDB/MySQL, valores por defecto de puerto 3306 y base de datos `vendguard_db`, y variables de entorno del motor retirado (`MYSQL_URL`).
+      * Resuelve exclusivamente `pgsql` (puerto por defecto 6543 del pooler Supavisor o directo). Cualquier intento de configurar un driver o esquema alternativo (`mysql://`, `mariadb`, etc.) es rechazado en voz alta con excepción (EARS-13.1).
+      * Política S-5/EARS-13.2 de credenciales obligatorias en producción aplicada sobre el usuario administrativo único `postgres` (fail-closed, rechazo fail-fast < 250 ms).
+    * **Retirada de código heredado de infraestructura:**
+      * Eliminado `src/Infrastructure/Database/MigrationRunner.php` (`git rm`).
+      * Actualizado [`bin/migrate.php`](../../bin/migrate.php) para operar exclusivamente con [`PostgresMigrationRunner`](../../src/Infrastructure/Database/PostgresMigrationRunner.php) y `ConnectionFactory`.
+      * Saneado [`PdoLockWaitBudget.php`](../../src/Infrastructure/Database/PdoLockWaitBudget.php): eliminada la rama MySQL y consultas `innodb_lock_wait_timeout`; conserva exclusivamente la gestión transaccional con `SET LOCAL lock_timeout` y cota ambiente en la factoría (T-HYBRID-07, T-PAUSE-40, Art. II).
+    * **Suites portadas y 100% verdes:**
+      * [`ConnectionFactoryTest`](../../tests/integration/ConnectionFactoryTest.php): **33/33 aserciones, exit 0**. Certifica la conexión viva con el motor único, resolución DSN/URL, puerto 6543, rechazo de motores ajenos (EARS-13.1), TLS verify-full con CA y política S-5.
+      * [`PdoLockWaitBudgetTest`](../../tests/unit/PdoLockWaitBudgetTest.php): **37/37 aserciones, exit 0**. Certifica `SET LOCAL lock_timeout` en transacción, no elevación de cota más estricta, cota ambiente fuera de transacción y parseo estricto de duraciones.
+      * [`HealthCheckServiceTest`](../../tests/unit/HealthCheckServiceTest.php): **31/31 aserciones, exit 0**. Alineado con el motor único y la publicación horaria UTC del latido del barrido.
+      * [`AuditFindingsSecondWaveClosureTest`](../../tests/unit/AuditFindingsSecondWaveClosureTest.php): **19/19 aserciones, exit 0**. Alineado con la política S-5 de motor único.
+      * [`SqlDialectPortabilityTest`](../../tests/unit/SqlDialectPortabilityTest.php): **97/97 aserciones, exit 0**. Las 4 entradas de T-13-14 (`bin/migrate.php`, `MigrationRunner.php`, `PdoLockWaitBudget.php` y `ConnectionFactoryTest.php`) pasan de deuda a **drenado**.
+    * **Medición de cierre (`php tests/run_all.php`, dos corridas consecutivas idénticas):**
+      * **261 suites · 9.947 aserciones · 0 fallos (100% PASS)**.
+      * **Cifras documentadas: COHERENTES** (0 desviaciones) sincronizadas en [README.md](../../README.md) y documentación viva.
+      * **Base de datos restablecida:** SÍ (Semillas intactas, 0 residuo de parque).
+      * ¡Primera vez en la historia del proyecto que la batería hermética completa corre **100% EN VERDE con 0 fallos sobre el motor único PostgreSQL**!
 - [ ] **T-13-15: Arranque, scripts de operación e imagen con un solo driver**
   * **Requisitos:** EARS-13.3, EARS-13.9
   * **Dependencias:** T-13-14

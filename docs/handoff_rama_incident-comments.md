@@ -1,7 +1,7 @@
 # Handoff · Rama `incident-comments`
 
 **Fecha:** 2026-10-08 · **Cierre de contenido:** `a5005fa` + segunda tanda de triaje + cierre de S-4 (`f968d98`, `29f19ee`, `2ae2b63`) · **Publicado:** `origin/incident-comments` hasta `2ae2b63`; el arreglo del arranque desplegado de esta pasada está en el árbol, pendiente de commit · **Material ajeno no versionado:** `specs/11-*` y `pending_info_sla_pause_spec.md`
-**Batería (cifra vigente a 2026-10-16, en el módulo 13):** `php tests/run_all.php` → **batería global: 261 suites · 9.958 aserciones** · base restaurada a semillas · las 2 suites rojas de la retirada del motor heredado están declaradas con su dueño en [`specs/13-single-engine-supabase/tasks.md`](../specs/13-single-engine-supabase/tasks.md)
+**Batería:** `php tests/run_all.php` → **batería global: 261 suites · 9.947 aserciones** · 0 fallos · base restaurada a semillas
 *(la propia batería audita esta cifra: un desfase documental la pone en rojo vía `tests/Support/DocMetricsGuard.php`)*
 
 ---

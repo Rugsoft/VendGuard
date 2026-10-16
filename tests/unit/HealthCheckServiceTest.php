@@ -115,7 +115,7 @@ final class FakeProbeConnection extends PDO
     public ?FakeProbeStatement $lastStatement = null;
 
     public function __construct(
-        private string $driver = ConnectionFactory::DRIVER_MYSQL,
+        private string $driver = ConnectionFactory::DRIVER_PGSQL,
         private string $behavior = 'ok',
         private int $sleepMicroseconds = 0,
         private ?Throwable $failure = null,
@@ -210,8 +210,8 @@ final class FakeSweepBook implements SanitarySweepVisibilityRepositoryInterface
 /** Pasada del barrido de mentira, cerrada y sin fallos: el desenlace que no alerta. */
 $healthyPass = new SanitarySweepPass(
     id: 7,
-    startedAt: '2026-10-14 12:00:00',
-    finishedAt: '2026-10-14 12:00:04',
+    startedAt: '2026-10-14 10:00:00+00:00',
+    finishedAt: '2026-10-14 10:00:04+00:00',
     candidates: 3,
     evaluated: 3,
     quarantinedCount: 0,
@@ -403,8 +403,8 @@ $assert(
 );
 
 $assert(
-    '3.10 La conversión horaria respeta la zona del motor y publica siempre UTC',
-    HealthCheckService::sweepInstantToUtc('2031-01-01 12:00:00', ConnectionFactory::DRIVER_MYSQL) === '2031-01-01T11:00:00Z'
+    '3.10 La conversión horaria publica siempre UTC a partir de la marca del motor',
+    HealthCheckService::sweepInstantToUtc('2031-01-01 12:00:00+00') === '2031-01-01T12:00:00Z'
         && HealthCheckService::sweepInstantToUtc('2031-01-01T12:00:00+00:00', ConnectionFactory::DRIVER_PGSQL) === '2031-01-01T12:00:00Z'
 );
 

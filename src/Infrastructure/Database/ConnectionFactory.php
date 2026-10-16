@@ -12,17 +12,16 @@ use VendGuard\Infrastructure\Config\SecretProvider;
 /**
  * ConnectionFactory
  *
- * Factoría única de conexiones PDO, con **detección automática de motor** (EARS-01.4): la misma
- * aplicación opera indistintamente contra PostgreSQL administrado en la nube —por el agrupador
- * transaccional Supavisor, puerto 6543— o contra MariaDB/MySQL local, sin que la lógica de
- * dominio ni el frontend cambien una línea.
+ * Factoría única de conexiones PDO para el **motor único del sistema: PostgreSQL (Supabase)**
+ * (EARS-13.1, EARS-13.2).
  *
- * El motor lo declara la propia configuración: una cadena de conexión con esquema
- * `postgres://`, `postgresql://` o `pgsql:` —en forma de URL o de DSN de PDO— activa la rama
- * PostgreSQL; cualquier otra cosa conserva la rama MariaDB/MySQL de siempre, que es la de todos
- * los entornos locales y la del arnés hermético.
+ * La persistencia opera de forma homogénea contra PostgreSQL administrado en la nube
+ * —por el agrupador transaccional Supavisor, puerto 6543, o directo— o contra el motor
+ * PostgreSQL local del arnés y desarrollo. No se conservan ramas, valores por defecto ni
+ * credenciales del motor heredado MariaDB/MySQL.
  *
- * Contrato de la rama PostgreSQL (EARS-01.2 y RNF-05):
+ * Contrato de persistencia (EARS-01.2, RNF-05, EARS-13.1, EARS-13.2):
+ * - **Driver único**: `pgsql` (PostgreSQL).
  * - **Agrupador transaccional**: `PDO::ATTR_EMULATE_PREPARES => true`. Sin emulación, las
  *   sentencias preparadas del servidor no sobreviven al cambio de conexión física del agrupador
  *   y la operación muere con «prepared statement does not exist».
@@ -34,20 +33,18 @@ use VendGuard\Infrastructure\Config\SecretProvider;
  * - **Presupuesto de conexión de 5 s** (`ATTR_TIMEOUT`), coherente extremo a extremo con el
  *   timeout ordinario que ya aplica el cliente (EARS-04.1).
  *
- * Política de credenciales (hallazgo S-5), **idéntica en los dos drivers** (EARS-01.6): en
- * desarrollo se conserva el acceso local (`root` sin contraseña sobre XAMPP), pero cuando el
- * entorno se declara de producción la factoría **falla en cerrado antes de intentar conectar**:
- * exige una fuente explícita de credenciales (`DATABASE_URL`/`SUPABASE_DB_URL`/`MYSQL_URL` o
- * `DB_USER`/`DB_PASSWORD`) y rechaza al usuario administrativo de cada motor —`root` en MySQL,
- * `postgres` en PostgreSQL— sin contraseña. No hay valores por defecto silenciosos: un
- * `postgres://` de producción sin contraseña falla aquí, con su nombre y su motivo, y no en un
- * error genérico de autenticación al final del arranque.
+ * Política de credenciales (hallazgo S-5, EARS-13.2):
+ * En producción la factoría **falla en cerrado antes de intentar conectar**: exige una fuente
+ * explícita de credenciales (`DATABASE_URL`, `SUPABASE_DB_URL` o `DB_USER`/`DB_PASSWORD`) y
+ * rechaza al usuario administrativo del motor (`postgres`) sin contraseña. No hay valores por
+ * defecto silenciosos: un `postgres://` de producción sin contraseña falla aquí, con su nombre
+ * y su motivo, y no en un error genérico de autenticación al final del arranque.
  *
- * Cumple con Dogma Vanilla (sin dependencias externas) y Clean Architecture.
+ * Dogma Vanilla: PHP 8.2+ puro, PDO, sin dependencias externas.
  */
 class ConnectionFactory
 {
-    /** Motores relacionales admitidos. */
+    /** Motor relacional único del sistema (EARS-13.1). */
     public const DRIVER_PGSQL = 'pgsql';
     public const DRIVER_MYSQL = 'mysql';
 
@@ -60,44 +57,30 @@ class ConnectionFactory
     /** Presupuesto de conexión del driver, en segundos (EARS-04.1). */
     public const CONNECT_TIMEOUT_SECONDS = 5;
 
-    /** Esquemas y prefijos que declaran cada motor en la cadena de conexión. */
+    /** Esquemas y prefijos que declaran el motor PostgreSQL. */
     private const PGSQL_SCHEMES = ['postgres', 'postgresql', 'pgsql'];
-    private const MYSQL_SCHEMES = ['mysql', 'mariadb'];
 
-    /** Puerto y base de datos por defecto de cada motor. */
-    private const DEFAULT_PORT_MYSQL = '3306';
-    private const DEFAULT_DATABASE_MYSQL = 'vendguard_db';
+    /** Puerto y base de datos por defecto de PostgreSQL. */
+    private const DEFAULT_PORT_PGSQL = '6543';
     private const DEFAULT_DATABASE_PGSQL = 'postgres';
 
-    /** Usuario administrativo de cada motor: sin contraseña no se admite en producción (S-5). */
-    private const ADMINISTRATIVE_USERS = [
-        self::DRIVER_MYSQL => 'root',
-        self::DRIVER_PGSQL => 'postgres',
-    ];
+    /** Usuario administrativo del motor PostgreSQL (S-5). */
+    private const ADMINISTRATIVE_USER = 'postgres';
 
     /**
-     * Almacenes de CA candidatos, en el orden en que cada rama los prefiere.
-     *
-     * PostgreSQL: primero el almacén que instala la imagen (`ca-certificates`) y después la CA
-     * que el proyecto ya versiona para el motor heredado (`RNF-05`). MySQL: se conserva el orden
-     * histórico (la CA incluida en el proyecto primero) para no alterar el comportamiento vivo.
+     * Almacenes de CA candidatos para verificar la identidad del servidor (RNF-05).
      */
     private const PGSQL_SSL_CA_CANDIDATES = [
         __DIR__ . '/prod-ca-2021.crt',
         '/etc/ssl/certs/ca-certificates.crt',
         __DIR__ . '/isrgrootx1.pem',
     ];
-    private const MYSQL_SSL_CA_CANDIDATES = [
-        __DIR__ . '/isrgrootx1.pem',
-        '/etc/ssl/certs/ca-certificates.crt',
-    ];
 
     /**
      * Claves de configuración que constituyen una fuente explícita de credenciales (S-5).
-     * `driver` queda fuera a propósito: declarar el motor no es declarar credenciales.
      */
     private const CREDENTIAL_CONFIG_KEYS = [
-        'host', 'port', 'dbname', 'database', 'charset',
+        'host', 'port', 'dbname', 'database',
         'user', 'password', 'ssl', 'sslmode', 'ssl_mode', 'sslrootcert', 'ssl_root_cert',
     ];
 
@@ -105,24 +88,17 @@ class ConnectionFactory
 
     /**
      * Cota ambiente de espera de bloqueo declarada por el proceso, en segundos, o `null` si
-     * no hay ninguna vigente (T-HYBRID-07).
-     *
-     * Es el canal entre el presupuesto de espera de bloqueo y la frontera transaccional: en
-     * PostgreSQL la cota sólo puede aplicarse **dentro** de una transacción —fuera de ella el
-     * motor ignora `SET LOCAL` en silencio— y quien abre esa transacción es el gestor
-     * transaccional, no el proceso que pide la cota. Pertenece a la factoría porque describe
-     * el estado del **proceso** sobre la sesión compartida, exactamente como la instancia
-     * cacheada de arriba.
+     * no hay ninguna vigente (T-HYBRID-07, T-PAUSE-40).
      */
     private static ?int $ambientLockWaitSeconds = null;
 
     /**
-     * Obtiene una conexión PDO configurada.
+     * Obtiene una conexión PDO configurada contra el motor único PostgreSQL.
      *
      * @param array<string, mixed> $customConfig Configuración opcional para sobrescribir variables de entorno.
      * @param bool $fresh Si es true, fuerza la creación de una nueva instancia en lugar de reutilizar la existente.
      * @return PDO
-     * @throws RuntimeException Si la configuración es insegura en producción o la conexión falla.
+     * @throws RuntimeException Si la configuración no es PostgreSQL, es insegura en producción o la conexión falla.
      */
     public static function getConnection(array $customConfig = [], bool $fresh = false): PDO
     {
@@ -132,8 +108,7 @@ class ConnectionFactory
 
         $configuration = self::resolveConnection($customConfig);
 
-        // La política se resuelve ANTES de abrir la conexión: en producción no se llega a
-        // intentar conectar con credenciales inseguras (hallazgo S-5, EARS-01.6).
+        // La política se resuelve ANTES de abrir la conexión (EARS-13.2, S-5).
         self::assertCredentialPolicy($configuration);
 
         try {
@@ -157,14 +132,9 @@ class ConnectionFactory
     /**
      * Resuelve la configuración efectiva de conexión **sin abrir ninguna conexión**.
      *
-     * Superficie de certificación: permite comprobar el driver detectado, el DSN construido, las
-     * opciones PDO y el modo TLS sin depender de que el motor esté disponible ni de que la red lo
-     * permita —es la única vía de certificar la rama PostgreSQL en la batería hermética, donde no
-     * hay motor nuevo—. La contraseña nunca se devuelve; se informa de si quedó declarada.
-     *
      * @param array<string, mixed> $customConfig Configuración opcional para sobrescribir variables de entorno.
      * @return array<string, mixed>
-     * @throws RuntimeException Si el TLS pedido degrada la verificación de identidad (RNF-05).
+     * @throws RuntimeException Si el driver no es PostgreSQL o si el TLS degrada la verificación de identidad (RNF-05).
      */
     public static function describeConnection(array $customConfig = []): array
     {
@@ -185,11 +155,7 @@ class ConnectionFactory
     }
 
     /**
-     * Declara la cota ambiente de espera de bloqueo del proceso y devuelve la anterior, para
-     * que quien la declara pueda restituirla al terminar (`null` retira la cota vigente).
-     *
-     * No abre ninguna conexión ni toca la sesión: sólo deja constancia del presupuesto con el
-     * que deben correr las transacciones que se abran a partir de aquí.
+     * Declara la cota ambiente de espera de bloqueo del proceso y devuelve la anterior.
      *
      * @param int|null $seconds Cota en segundos, o `null` para retirarla.
      * @return int|null La cota anterior.
@@ -203,8 +169,7 @@ class ConnectionFactory
     }
 
     /**
-     * Cota ambiente de espera de bloqueo vigente, o `null` si el proceso no ha declarado
-     * ninguna y las transacciones deben correr con la cota del motor.
+     * Cota ambiente de espera de bloqueo vigente, o `null` si el proceso no ha declarado ninguna.
      */
     public static function ambientLockWaitSeconds(): ?int
     {
@@ -212,9 +177,7 @@ class ConnectionFactory
     }
 
     /**
-     * Resuelve driver, credenciales, TLS y opciones a partir de la configuración explícita y del
-     * entorno. No abre conexión ni lanza la política de credenciales: eso lo decide el llamante,
-     * de modo que la resolución pueda certificarse sin red.
+     * Resuelve driver, credenciales, TLS y opciones a partir de la configuración explícita y del entorno.
      *
      * @param array<string, mixed> $customConfig
      * @return array<string, mixed>
@@ -222,14 +185,14 @@ class ConnectionFactory
     private static function resolveConnection(array $customConfig): array
     {
         $connectionString = self::firstNonEmpty(
+            $customConfig['DATABASE_URL'] ?? null,
+            $customConfig['connection_string'] ?? null,
             self::readEnvironmentValue('DATABASE_URL'),
-            self::readEnvironmentValue('SUPABASE_DB_URL'),
-            self::readEnvironmentValue('MYSQL_URL')
+            self::readEnvironmentValue('SUPABASE_DB_URL')
         );
 
         $declared = $connectionString !== null ? self::parseConnectionString($connectionString) : [];
         $driver = self::resolveDriver($declared, $customConfig);
-        $isPostgres = $driver === self::DRIVER_PGSQL;
 
         $host = (string)self::firstNonEmpty(
             $customConfig['host'] ?? null,
@@ -238,13 +201,12 @@ class ConnectionFactory
             '127.0.0.1'
         );
 
-        // El puerto por defecto de PostgreSQL es el del agrupador transaccional (6543): el plan
-        // ratificado descarta el 5432 en la nube porque no pasa por Supavisor (EARS-01.2).
+        // Puerto por defecto: agrupador transaccional (6543)
         $port = (string)self::firstNonEmpty(
             $customConfig['port'] ?? null,
             $declared['port'] ?? null,
             self::readEnvironmentValue('DB_PORT'),
-            $isPostgres ? self::POOLER_PORT : self::DEFAULT_PORT_MYSQL
+            self::DEFAULT_PORT_PGSQL
         );
 
         $database = (string)self::firstNonEmpty(
@@ -252,7 +214,7 @@ class ConnectionFactory
             $declared['database'] ?? null,
             self::readEnvironmentValue('DB_NAME'),
             self::readEnvironmentValue('DB_DATABASE'),
-            $isPostgres ? self::DEFAULT_DATABASE_PGSQL : self::DEFAULT_DATABASE_MYSQL
+            self::DEFAULT_DATABASE_PGSQL
         );
 
         $user = (string)self::firstNonEmpty(
@@ -260,11 +222,9 @@ class ConnectionFactory
             $declared['user'] ?? null,
             self::readEnvironmentValue('DB_USER'),
             self::readEnvironmentValue('DB_USERNAME'),
-            self::ADMINISTRATIVE_USERS[$driver]
+            self::ADMINISTRATIVE_USER
         );
 
-        // Una contraseña declarada y vacía es una declaración, no una ausencia: no puede caer en
-        // un valor por defecto (política S-5).
         $password = (string)self::firstDeclared(
             $customConfig['password'] ?? null,
             $declared['password'] ?? null,
@@ -272,62 +232,36 @@ class ConnectionFactory
             self::readEnvironmentValue('DB_PASSWORD')
         );
 
-        $charset = (string)self::firstNonEmpty($customConfig['charset'] ?? null, 'utf8mb4');
-
         $options = [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            // El agrupador en modo transacción exige emulación en PostgreSQL; MariaDB conserva
-            // las sentencias preparadas nativas de siempre (EARS-01.2).
-            PDO::ATTR_EMULATE_PREPARES => $isPostgres,
+            PDO::ATTR_EMULATE_PREPARES => true,
             PDO::ATTR_TIMEOUT => self::CONNECT_TIMEOUT_SECONDS,
         ];
 
-        $sslRootCertificate = null;
+        $ssl = self::resolvePostgresTls([
+            'mode' => self::firstNonEmpty(
+                $customConfig['sslmode'] ?? null,
+                $customConfig['ssl_mode'] ?? null,
+                $declared['ssl_mode'] ?? null
+            ),
+            'root_certificate' => self::firstNonEmpty(
+                $customConfig['sslrootcert'] ?? null,
+                $customConfig['ssl_root_cert'] ?? null,
+                $declared['ssl_root_cert'] ?? null,
+                self::readEnvironmentValue('DB_SSL_ROOT_CERT')
+            ),
+            'disable_requested' => array_key_exists('ssl', $customConfig) && $customConfig['ssl'] === false,
+        ]);
 
-        if ($isPostgres) {
-            $ssl = self::resolvePostgresTls([
-                'mode' => self::firstNonEmpty(
-                    $customConfig['sslmode'] ?? null,
-                    $customConfig['ssl_mode'] ?? null,
-                    $declared['ssl_mode'] ?? null
-                ),
-                'root_certificate' => self::firstNonEmpty(
-                    $customConfig['sslrootcert'] ?? null,
-                    $customConfig['ssl_root_cert'] ?? null,
-                    $declared['ssl_root_cert'] ?? null,
-                    self::readEnvironmentValue('DB_SSL_ROOT_CERT')
-                ),
-                'disable_requested' => array_key_exists('ssl', $customConfig) && $customConfig['ssl'] === false,
-            ]);
+        $sslRootCertificate = $ssl['root_certificate'];
 
-            $sslRootCertificate = $ssl['root_certificate'];
-
-            // UTF-8 es la codificación del motor y de la base creada por el DDL: el DSN de
-            // PostgreSQL no admite el parámetro `charset` de MySQL.
-            $dsn = 'pgsql:host=' . $host
-                . ';port=' . $port
-                . ';dbname=' . $database
-                . ';sslmode=' . $ssl['mode']
-                . ';sslrootcert=' . $sslRootCertificate
-                . self::buildExtraDsnParameters($declared['parameters'] ?? []);
-        } else {
-            $dsn = "mysql:host={$host};port={$port};dbname={$database};charset={$charset}";
-            $options[PDO::MYSQL_ATTR_INIT_COMMAND] = "SET NAMES {$charset} COLLATE {$charset}_unicode_ci";
-
-            // TLS opcional del motor heredado (TiDB Cloud, Aiven, ...): se conserva tal cual.
-            // Este camino no hereda la tolerancia al certificado del motor nuevo: allí RNF-05
-            // exige verificación de identidad y aquí se mantiene el comportamiento vivo.
-            $enableSsl = self::resolveMysqlSslFlag($customConfig, $host);
-            if ($enableSsl) {
-                $ca = self::firstExistingFile(self::MYSQL_SSL_CA_CANDIDATES);
-                if ($ca !== null) {
-                    $options[PDO::MYSQL_ATTR_SSL_CA] = $ca;
-                }
-                $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
-                $sslRootCertificate = $ca;
-            }
-        }
+        $dsn = 'pgsql:host=' . $host
+            . ';port=' . $port
+            . ';dbname=' . $database
+            . ';sslmode=' . $ssl['mode']
+            . ';sslrootcert=' . $sslRootCertificate
+            . self::buildExtraDsnParameters($declared['parameters'] ?? []);
 
         return [
             'driver' => $driver,
@@ -337,39 +271,17 @@ class ConnectionFactory
             'database' => $database,
             'user' => $user,
             'password' => $password,
-            'charset' => $charset,
             'options' => $options,
-            'ssl_mode' => $isPostgres ? self::REQUIRED_SSL_MODE : null,
+            'ssl_mode' => self::REQUIRED_SSL_MODE,
             'ssl_root_certificate' => $sslRootCertificate,
-            'uses_pooler' => $isPostgres && $port === self::POOLER_PORT,
-            'administrative_user' => self::ADMINISTRATIVE_USERS[$driver],
+            'uses_pooler' => $port === self::POOLER_PORT,
+            'administrative_user' => self::ADMINISTRATIVE_USER,
             'has_explicit_credential_source' => self::hasExplicitCredentialSource($customConfig, $connectionString),
         ];
     }
 
     /**
-     * ¿Se activa TLS en la rama MariaDB/MySQL? Declaración explícita, variable de entorno o
-     * proveedores gestionados conocidos, exactamente como hasta ahora.
-     *
-     * @param array<string, mixed> $customConfig
-     */
-    private static function resolveMysqlSslFlag(array $customConfig, string $host): bool
-    {
-        if (array_key_exists('ssl', $customConfig) && $customConfig['ssl'] !== null) {
-            return (bool)$customConfig['ssl'];
-        }
-
-        return in_array(self::readEnvironmentValue('DB_SSL'), ['true', '1'], true)
-            || str_contains($host, 'tidbcloud.com')
-            || str_contains($host, 'aivencloud.com');
-    }
-
-    /**
-     * Política de credenciales del proyecto (hallazgo S-5), igual para los dos drivers.
-     *
-     * Se resuelve antes de conectar y sin valores por defecto silenciosos: en producción hace
-     * falta una fuente explícita de credenciales, y el usuario administrativo del motor
-     * —`root` en MySQL, `postgres` en PostgreSQL— no se admite sin contraseña.
+     * Política de credenciales del proyecto (hallazgo S-5, EARS-13.2).
      *
      * @param array<string, mixed> $configuration
      */
@@ -381,7 +293,7 @@ class ConnectionFactory
 
         if ($configuration['has_explicit_credential_source'] !== true) {
             throw new RuntimeException(
-                'Configuración de base de datos insegura en producción (hallazgo S-5): no hay credenciales explícitas. Define DATABASE_URL/MYSQL_URL o DB_USER/DB_PASSWORD antes de desplegar.'
+                'Configuración de base de datos insegura en producción (hallazgo S-5): no hay credenciales explícitas. Define DATABASE_URL o DB_USER/DB_PASSWORD antes de desplegar.'
             );
         }
 
@@ -395,8 +307,7 @@ class ConnectionFactory
     }
 
     /**
-     * Fuente explícita de credenciales: configuración que las declare, cadena de conexión del
-     * entorno o variables de usuario/contraseña. Declarar solo el motor no cuenta.
+     * Fuente explícita de credenciales.
      *
      * @param array<string, mixed> $customConfig
      */
@@ -422,33 +333,46 @@ class ConnectionFactory
     }
 
     /**
-     * Driver activo: lo declara la cadena de conexión y, si no, la configuración explícita. Sin
-     * declaración, el motor heredado (MariaDB/MySQL), que es el de todos los entornos locales.
+     * Resuelve el driver validando que sea el motor único PostgreSQL (EARS-13.1).
+     * Cualquier configuración o intento de usar otro motor es rechazado.
      *
      * @param array<string, mixed> $declared
      * @param array<string, mixed> $customConfig
+     * @throws RuntimeException Si se intenta configurar un motor distinto a PostgreSQL.
      */
     private static function resolveDriver(array $declared, array $customConfig): string
     {
+        $rawDriver = null;
         if (isset($declared['driver'])) {
-            return (string)$declared['driver'];
+            $rawDriver = (string)$declared['driver'];
+        } elseif (isset($customConfig['driver'])) {
+            $rawDriver = (string)$customConfig['driver'];
         }
 
-        if (isset($customConfig['driver'])) {
-            $declaredDriver = self::driverFromScheme(strtolower(trim((string)$customConfig['driver'])));
-            if ($declaredDriver !== null) {
-                return $declaredDriver;
+        if ($rawDriver !== null) {
+            $normalized = strtolower(trim($rawDriver));
+            $resolved = self::driverFromScheme($normalized);
+            if ($resolved !== self::DRIVER_PGSQL) {
+                throw new RuntimeException(sprintf(
+                    'Motor de base de datos no admitido («%s»): el sistema opera exclusivamente con PostgreSQL (Supabase) bajo el contrato de motor único (EARS-13.1).',
+                    $rawDriver
+                ));
             }
+
+            return self::DRIVER_PGSQL;
         }
 
-        return self::DRIVER_MYSQL;
+        if (isset($customConfig['user']) && $customConfig['user'] === 'root') {
+            throw new RuntimeException(sprintf(
+                'Motor de base de datos no admitido («mysql/root»): el sistema opera exclusivamente con PostgreSQL (Supabase) bajo el contrato de motor único (EARS-13.1).'
+            ));
+        }
+
+        return self::DRIVER_PGSQL;
     }
 
     /**
-     * Interpreta la cadena de conexión en sus dos formas admitidas: URL
-     * (`postgres://usuario:clave@host:6543/base?sslmode=verify-full`) o DSN de PDO
-     * (`pgsql:host=…;port=…;dbname=…;user=…;password=…`), que es la forma que declara la
-     * categoría de certificación del motor nuevo.
+     * Interpreta la cadena de conexión en formato URL o DSN.
      *
      * @return array<string, mixed>
      */
@@ -461,8 +385,14 @@ class ConnectionFactory
 
         $scheme = isset($parsed['scheme']) ? strtolower((string)$parsed['scheme']) : '';
         $driver = self::driverFromScheme($scheme);
+        if ($scheme !== '' && $driver === null) {
+            throw new RuntimeException(sprintf(
+                'Motor de base de datos no admitido («%s»): el sistema opera exclusivamente con PostgreSQL (Supabase) bajo el contrato de motor único (EARS-13.1).',
+                $scheme
+            ));
+        }
 
-        // Forma DSN: el prefijo declara el motor y los parámetros viajan en la ruta.
+        // Forma DSN: pgsql:host=...
         if ($driver !== null && !isset($parsed['host']) && isset($parsed['path']) && str_contains((string)$parsed['path'], '=')) {
             return self::parseDsnString($driver, (string)$parsed['path']);
         }
@@ -494,8 +424,7 @@ class ConnectionFactory
     }
 
     /**
-     * Separa los parámetros de consulta de una URL entre los que la factoría resuelve (TLS) y los
-     * que se delegan al driver.
+     * Parámetros de consulta de la URL.
      *
      * @return array{declared: array<string, string>, extra: array<string, string>}
      */
@@ -527,7 +456,6 @@ class ConnectionFactory
 
     /**
      * Interpreta una cadena en forma de DSN de PDO (`host=…;port=…;dbname=…;user=…;password=…`).
-     * Las credenciales se extraen del texto para no reemitirlas dentro del DSN.
      *
      * @return array<string, mixed>
      */
@@ -585,8 +513,7 @@ class ConnectionFactory
     }
 
     /**
-     * Concatena al DSN de PostgreSQL los parámetros extra que declare la cadena de conexión
-     * (`application_name`, `connect_timeout`, ...), que libpq entiende.
+     * Concatena parámetros adicionales en el DSN de PostgreSQL.
      *
      * @param array<string, string> $parameters
      */
@@ -598,9 +525,6 @@ class ConnectionFactory
             $name = (string)$name;
             $value = (string)$value;
 
-            // Un valor con separadores o comillas permitiría reinyectar una cláusula posterior
-            // (`sslmode=disable`) y anular en silencio la verificación de identidad del motor:
-            // RNF-05 se defiende aquí, rechazando en voz alta en lugar de degradar.
             if (preg_match('/^[a-z_][a-z0-9_]*$/', $name) !== 1 || preg_match('/[;\'"\\\\\r\n]/', $value) === 1) {
                 throw new RuntimeException(sprintf(
                     'Parámetro de conexión no admitido («%s»): un valor con separadores o comillas podría reescribir las cláusulas obligatorias del DSN (sslmode/sslrootcert) y anular la verificación de identidad del motor en la nube (RNF-05).',
@@ -615,7 +539,7 @@ class ConnectionFactory
     }
 
     /**
-     * Bloque TLS obligatorio de la rama PostgreSQL (RNF-05): modo verificado y CA declarada.
+     * Bloque TLS obligatorio de PostgreSQL (RNF-05).
      *
      * @param array<string, mixed> $declared
      * @return array{mode: string, root_certificate: string}
@@ -648,9 +572,7 @@ class ConnectionFactory
     }
 
     /**
-     * CA con la que se verifica la identidad del motor en la nube. Si se declara una, esa manda y
-     * tiene que existir; si no, se usa la primera candidata disponible. Sin CA no hay conexión:
-     * `verify-full` sin raíz de confianza no verifica nada.
+     * CA de confianza para PostgreSQL.
      */
     private static function resolvePostgresRootCertificate(?string $declaredCertificate): string
     {
@@ -676,7 +598,7 @@ class ConnectionFactory
     }
 
     /**
-     * Primer fichero existente de la lista, o `null` si no hay ninguno.
+     * Primer fichero existente de la lista.
      *
      * @param list<string> $candidates
      */
@@ -691,21 +613,19 @@ class ConnectionFactory
         return null;
     }
 
-    /** Driver al que corresponde un esquema o prefijo de conexión, o `null` si no declara ninguno. */
+    /**
+     * Valida el esquema del motor. Devuelve DRIVER_PGSQL o null.
+     */
     private static function driverFromScheme(string $scheme): ?string
     {
         if (in_array($scheme, self::PGSQL_SCHEMES, true)) {
             return self::DRIVER_PGSQL;
         }
 
-        if (in_array($scheme, self::MYSQL_SCHEMES, true)) {
-            return self::DRIVER_MYSQL;
-        }
-
         return null;
     }
 
-    /** Primer valor declarado no vacío: los ausentes y los vacíos no deciden. */
+    /** Primer valor declarado no vacío. */
     private static function firstNonEmpty(mixed ...$candidates): ?string
     {
         foreach ($candidates as $candidate) {
@@ -720,7 +640,7 @@ class ConnectionFactory
         return null;
     }
 
-    /** Primer valor declarado, aunque sea la cadena vacía: una contraseña vacía es una declaración. */
+    /** Primer valor declarado, aunque sea cadena vacía. */
     private static function firstDeclared(mixed ...$candidates): ?string
     {
         foreach ($candidates as $candidate) {
@@ -732,11 +652,7 @@ class ConnectionFactory
         return null;
     }
 
-    /**
-     * Lee una variable de entorno de las fuentes habituales de PHP. Devuelve `null` si no está
-     * definida y la cadena vacía si está definida y vacía: la diferencia decide la política de
-     * credenciales (una contraseña vacía declarada no es lo mismo que una contraseña ausente).
-     */
+    /** Lee una variable de entorno. */
     private static function readEnvironmentValue(string $name): ?string
     {
         $value = getenv($name);

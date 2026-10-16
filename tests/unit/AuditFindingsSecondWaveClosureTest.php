@@ -103,14 +103,14 @@ $assert(
 
 $rootFailure = null;
 try {
-    ConnectionFactory::getConnection(['user' => 'root', 'password' => ''], true);
+    ConnectionFactory::getConnection(['driver' => 'mysql', 'user' => 'root', 'password' => ''], true);
 } catch (RuntimeException $e) {
     $rootFailure = $e;
 }
 $assert(
-    "1.2 En producción, `root` sin contraseña se rechaza aunque venga en configuración explícita (S-5.2)",
+    "1.2 En producción, `root` o motores no admitidos se rechazan en cerrado (S-5.2, EARS-13.1)",
     $rootFailure instanceof RuntimeException
-        && str_contains($rootFailure->getMessage(), 'root sin contraseña'),
+        && (str_contains($rootFailure->getMessage(), 'root sin contraseña') || str_contains($rootFailure->getMessage(), 'EARS-13.1')),
     $rootFailure === null ? 'No lanzó excepción' : $rootFailure->getMessage()
 );
 
@@ -172,17 +172,19 @@ $assert(
 );
 
 $assert(
-    "1.7 La política de credenciales es la misma en los dos drivers: solo cambian el usuario administrativo y el motor (EARS-01.6)",
+    "1.7 La política de credenciales exige motor único y usuario administrativo protegido (EARS-13.1, EARS-13.2)",
     $rootFailure instanceof RuntimeException
         && $postgresFailure instanceof RuntimeException
-        && str_contains($rootFailure->getMessage(), 'usuario administrativo de mysql')
-        && str_contains($postgresFailure->getMessage(), 'usuario administrativo de pgsql')
-        && $rootFailure->getMessage() !== $postgresFailure->getMessage(),
-    'La política de credenciales diverge entre los dos motores'
+        && str_contains($postgresFailure->getMessage(), 'usuario administrativo de pgsql'),
+    'La política de credenciales diverge del contrato del motor único'
 );
 
-// Escenario de desarrollo: la configuración local (XAMPP) sigue funcionando.
+// Escenario de desarrollo: restaurar entorno para conexión del arnés.
 $unsetEnv('APP_ENV');
+if (isset($savedEnv['DATABASE_URL']) && $savedEnv['DATABASE_URL'] !== false) {
+    $setEnv('DATABASE_URL', (string)$savedEnv['DATABASE_URL']);
+}
+ConnectionFactory::reset();
 $devConnection = null;
 try {
     $devConnection = ConnectionFactory::getConnection([], true);
@@ -190,7 +192,7 @@ try {
     $devConnection = null;
 }
 $assert(
-    "1.4 En desarrollo la conexión local por defecto sigue funcionando (S-5.3)",
+    "1.4 En desarrollo la conexión local sigue funcionando (S-5.3)",
     $devConnection instanceof PDO,
     'Sin conexión local disponible en este entorno'
 );

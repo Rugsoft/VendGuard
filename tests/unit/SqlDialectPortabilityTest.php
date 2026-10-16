@@ -740,10 +740,9 @@ const LEGACY_DIALECT = [
         'why' => 'la rama de arranque del motor heredado cuenta columnas en el catálogo de ese motor y nombra su base; T-13-15 deja una sola ruta de arranque',
     ],
     'bin/migrate.php' => [
-        'kind' => KIND_DEBT,
-        'owner' => 'T-13-15',
-        'census' => ['backtick' => 13, 'show' => 12],
-        'why' => 'ejecutor de migraciones del motor heredado: sondea sus columnas e índices con la introspección retirada y cita con acentos graves; T-13-15 reapunta el arranque al ejecutor del motor único',
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-14', 'census' => [],
+        'drained_occurrences' => ['backtick' => 13, 'show' => 12],
+        'why' => 'ejecutor de migraciones CLI adaptado al motor único con PostgresMigrationRunner: se retiran todas las introspecciones MySQL SHOW y los acentos graves',
     ],
     'database/DemoMetricsSeeder.php' => [
         'kind' => KIND_DEBT,
@@ -752,16 +751,14 @@ const LEGACY_DIALECT = [
         'why' => 'fixture de métricas escrito entero para el motor heredado y sin ruta en el motor único: se retira con el camino heredado',
     ],
     'src/Infrastructure/Database/MigrationRunner.php' => [
-        'kind' => KIND_DEBT,
-        'owner' => 'T-13-14',
-        'census' => ['legacy_database' => 1],
-        'why' => 'el ejecutor del motor heredado comprueba la existencia de sus tablas en el catálogo de ese motor; se retira a favor del ejecutor del motor único',
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-14', 'census' => [],
+        'drained_occurrences' => ['legacy_database' => 1],
+        'why' => 'el ejecutor del motor heredado comprobaba la existencia de sus tablas en el catálogo de ese motor; se retira el archivo a favor de PostgresMigrationRunner',
     ],
     'src/Infrastructure/Database/PdoLockWaitBudget.php' => [
-        'kind' => KIND_DEBT,
-        'owner' => 'T-13-14',
-        'census' => ['catalog' => 1],
-        'why' => 'la ruta del motor heredado lee su presupuesto de espera del estado de sesión de ese motor; T-13-14 conserva solo la ruta del motor único',
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-14', 'census' => [],
+        'drained_occurrences' => ['catalog' => 1],
+        'why' => 'la ruta del motor heredado leía su presupuesto de espera del estado de sesión de ese motor; T-13-14 retira esa rama y conserva solo la ruta PostgreSQL',
     ],
     'src/Presentation/Controller/CoordinatorRouteMapController.php' => [
         'kind' => KIND_OUT_OF_SCOPE,
@@ -776,11 +773,9 @@ const LEGACY_DIALECT = [
         'why' => 'porte del lote de esquema y despliegue: la guarda construía dos bases de sonda del motor retirado —su DROP/CREATE DATABASE y su catálogo en la grafía de ese motor— para comparar el esquema del despliegue; ahora levanta esquemas de sonda del motor único, los construye con el DDL y el ejecutor del repositorio y lee el catálogo de PostgreSQL (pg_class, pg_attribute, pg_enum)',
     ],
     'tests/integration/ConnectionFactoryTest.php' => [
-        'kind' => KIND_DEBT,
-        'owner' => 'T-13-14',
-        'mixed' => true,
-        'census' => ['legacy_database' => 1],
-        'why' => 'la rama inalcanzable del driver heredado de la factoría pregunta a qué base está conectada, y la suite pregunta lo mismo al motor único en su propia grafía; su dueño es la factoría de una sola rama',
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-14', 'census' => [],
+        'drained_occurrences' => ['legacy_database' => 1],
+        'why' => 'la suite certifica la factoría de conexión del motor único; se retiraron las ramas y consultas del motor heredado',
     ],
     'tests/integration/PendingInfoConcurrencyTest.php' => [
         'kind' => KIND_DRAINED, 'owner' => 'T-13-11', 'census' => [],
@@ -818,10 +813,9 @@ const LEGACY_DIALECT = [
         'why' => 'guarda del sembrador: nombra la cláusula heredada para prohibirla y exige la del motor único, que es su otra grafía',
     ],
     'tests/unit/PdoLockWaitBudgetTest.php' => [
-        'kind' => KIND_DEBT,
-        'owner' => 'T-13-14',
-        'census' => ['catalog' => 6],
-        'why' => 'la suite fija la sentencia de la ruta heredada contra el doble de conexión; se retira con esa ruta',
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-14', 'census' => [],
+        'drained_occurrences' => ['catalog' => 6],
+        'why' => 'la suite fijaba la sentencia de la ruta heredada contra el doble de conexión; T-13-14 retira esa ruta y certifica solo la del motor único',
     ],
     'tests/unit/RefundsModuleClosureTest.php' => [
         'kind' => KIND_CONTRACT,
