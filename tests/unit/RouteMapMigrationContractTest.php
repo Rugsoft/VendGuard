@@ -5,14 +5,13 @@ declare(strict_types=1);
 /**
  * RouteMapMigrationContractTest
  *
- * Verifies the route-map migration and seed contract without modifying a database.
+ * Verifies the route-map schema and seed contract on PostgreSQL without modifying a database.
  */
 
 require_once __DIR__ . '/../bootstrap.php';
 
 $baseDir = dirname(__DIR__, 2);
-$migrationPath = $baseDir . '/database/migrations/007_field_logistics_map.sql';
-$cloudInitPath = $baseDir . '/database/cloud_init.sql';
+$supabaseInitPath = $baseDir . '/database/supabase_init.sql';
 $seedRunnerPath = $baseDir . '/src/Infrastructure/Database/SeedRunner.php';
 
 $assertions = 0;
@@ -25,22 +24,17 @@ $assert = static function (string $name, bool $condition) use (&$assertions, &$f
     }
 };
 
-$migration = is_file($migrationPath) ? (string)file_get_contents($migrationPath) : '';
-$cloudInit = is_file($cloudInitPath) ? (string)file_get_contents($cloudInitPath) : '';
+$supabaseInit = is_file($supabaseInitPath) ? (string)file_get_contents($supabaseInitPath) : '';
 $seedRunner = is_file($seedRunnerPath) ? (string)file_get_contents($seedRunnerPath) : '';
 
-$assert('Migration 007 exists and uses strict SQL idempotency guards for coordinate columns',
-    $migration !== ''
-    && substr_count($migration, 'information_schema.columns') >= 2
-    && str_contains($migration, "column_name = 'latitude'")
-    && str_contains($migration, "column_name = 'longitude'"));
-$assert('Migration 007 conditionally creates the location coordinate index',
-    str_contains($migration, 'information_schema.statistics')
-    && str_contains($migration, "index_name = 'idx_locations_lat_lng'")
-    && str_contains($migration, 'CREATE INDEX `idx_locations_lat_lng`'));
-$assert('Migration 007 creates route_settings idempotently and preserves the singleton row',
-    str_contains($migration, 'CREATE TABLE IF NOT EXISTS `route_settings`')
-    && str_contains($migration, 'ON DUPLICATE KEY UPDATE `id` = VALUES(`id`)'));
+$assert('supabase_init defines coordinate columns and index in locations',
+    str_contains($supabaseInit, 'latitude')
+    && str_contains($supabaseInit, 'longitude')
+    && str_contains($supabaseInit, 'idx_locations_lat_lng'));
+$assert('supabase_init conditionally creates the location coordinate index',
+    str_contains($supabaseInit, 'CREATE INDEX IF NOT EXISTS idx_locations_lat_lng ON locations'));
+$assert('supabase_init creates route_settings table idempotently',
+    str_contains($supabaseInit, 'CREATE TABLE IF NOT EXISTS route_settings'));
 
 $seedCoordinates = [
     'SEDE-BCN-01' => [41.3853120, 2.1932450],
@@ -51,34 +45,15 @@ foreach ($seedCoordinates as $siteCode => [$latitude, $longitude]) {
         && $longitude >= -18.5 && $longitude <= 5.0
         && !($latitude === 0.0 && $longitude === 0.0);
     $assert("{$siteCode} seed coordinates are inside the approved operational bounds", $coordinatesAreValid);
-    $assert("Migration 007 backfills {$siteCode} with its canonical coordinates",
-        str_contains($migration, "'{$siteCode}'")
-        && str_contains($migration, number_format($latitude, 7, '.', ''))
-        && str_contains($migration, number_format($longitude, 7, '.', '')));
-    $assert("cloud_init seeds {$siteCode} with its canonical coordinates",
-        str_contains($cloudInit, "'{$siteCode}'")
-        && str_contains($cloudInit, number_format($latitude, 7, '.', ''))
-        && str_contains($cloudInit, number_format($longitude, 7, '.', '')));
     $assert("SeedRunner carries {$siteCode} coordinates in its location seeds",
         str_contains($seedRunner, "'site_code' => '{$siteCode}'")
         && str_contains($seedRunner, "'latitude' => " . number_format($latitude, 7, '.', ''))
         && str_contains($seedRunner, "'longitude' => " . number_format($longitude, 7, '.', '')));
 }
 
-$assert('cloud_init defines coordinate columns and index in locations',
-    preg_match('/CREATE TABLE `locations`\s*\([\s\S]*?`latitude` DECIMAL\(10, 7\)[\s\S]*?`longitude` DECIMAL\(11, 7\)[\s\S]*?INDEX `idx_locations_lat_lng`/', $cloudInit) === 1);
-$assert('cloud_init creates and seeds the central route settings singleton',
-    str_contains($cloudInit, 'CREATE TABLE IF NOT EXISTS `route_settings`')
-    && preg_match('/INSERT INTO `route_settings`\s*\([\s\S]*?VALUES\s*\(1,/', $cloudInit) === 1);
-$assert('cloud_init seeds canonical Barcelona coordinates and the central base',
-    str_contains($cloudInit, '41.3853120, 2.1932450')
-    && str_contains($cloudInit, '41.4036290, 2.1895120')
-    && str_contains($cloudInit, '41.3935000, 2.1890000'));
-// La lista de columnas del INSERT se acepta en las dos formas del dialecto: la
-// normalización ANSI (T-HYBRID-09) retiró los backticks de los repositorios y del
-// sembrador, así que exigir sólo la forma MySQL dejaría la guarda midiendo el motor
-// equivocado. Lo que la aserción protege —que las coordenadas viajen en el INSERT—
-// se conserva en ambas.
+$assert('supabase_init creates route_settings table',
+    str_contains($supabaseInit, 'CREATE TABLE IF NOT EXISTS route_settings'));
+
 $coordinatesInSeedColumns = str_contains($seedRunner, "`latitude`, `longitude`")
     || str_contains($seedRunner, "'latitude', 'longitude'")
     || str_contains($seedRunner, 'latitude, longitude');
@@ -89,3 +64,4 @@ $assert('SeedRunner persists coordinates and initializes route settings as part 
 
 printf("Total assertions: %d | Failures: %d\n", $assertions, $failures);
 exit($failures === 0 ? 0 : 1);
+

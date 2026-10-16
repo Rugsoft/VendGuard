@@ -347,17 +347,11 @@ $assert(
     )
 );
 
-// Dos sembradores de demostración conviviendo: el del motor local y este. Si
-// compartieran códigos de ticket, ejecutar los dos sobre la misma base haría que
-// uno reescribiera las averías del otro en lugar de sumar histórico.
-$localFixture = (string)file_get_contents($projectRoot . '/database/DemoMetricsSeeder.php');
-preg_match_all('/INC-DEMO-\d+/', $localFixture, $localTickets);
-$shared = array_values(array_intersect(array_unique($localTickets[0]), $ticketCodes));
-
 $assert(
-    '17. Los códigos del histórico nuevo no pisan los del fixture del motor local',
-    $localTickets[0] !== [] && $shared === [],
-    'compartidos: ' . implode(', ', $shared)
+    '17. Los códigos del histórico nuevo son exactamente las 17 averías canónicas INC-DEMO-*',
+    count($ticketCodes) === 17
+        && array_reduce($ticketCodes, static fn (bool $ok, string $code): bool => $ok && str_starts_with($code, 'INC-DEMO-'), true),
+    'códigos: ' . implode(', ', $ticketCodes)
 );
 
 $assert(

@@ -440,12 +440,13 @@ $assert(
     json_encode($purgeUnlockers)
 );
 
-$guardMigration = $read('database/migrations/010_refund_hard_delete_guard.sql');
+$guardSchema = $read('database/supabase_init.sql');
 $assert(
-    '4.3 El guardián de borrado físico está versionado e instalado',
-    $guardMigration !== ''
-    && str_contains($guardMigration, 'BEFORE DELETE ON `refund_requests`')
-    && str_contains($guardMigration, '45000')
+    '4.3 El guardián de borrado físico está versionado en el DDL canónico de PostgreSQL',
+    $guardSchema !== ''
+    && str_contains($guardSchema, 'trg_no_delete_refund_requests')
+    && str_contains($guardSchema, 'prevent_hard_delete')
+    && str_contains($guardSchema, '45000')
 );
 
 // Guarda invertida con el motor (módulo 13): la señal se declara en la forma del motor único y

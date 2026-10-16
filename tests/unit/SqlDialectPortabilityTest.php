@@ -744,10 +744,9 @@ const LEGACY_DIALECT = [
         'why' => 'ejecutor de migraciones CLI adaptado al motor único con PostgresMigrationRunner: se retiran todas las introspecciones MySQL SHOW y los acentos graves',
     ],
     'database/DemoMetricsSeeder.php' => [
-        'kind' => KIND_DEBT,
-        'owner' => 'T-13-16',
-        'census' => ['backtick' => 15, 'upsert' => 2, 'values' => 2],
-        'why' => 'fixture de métricas escrito entero para el motor heredado y sin ruta en el motor único: se retira con el camino heredado',
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-16', 'census' => [],
+        'drained_occurrences' => ['backtick' => 15, 'upsert' => 2, 'values' => 2],
+        'why' => 'fixture de métricas del motor heredado retirado del repositorio; el histórico se siembra exclusivamente por DemoHistorySeeder',
     ],
     'src/Infrastructure/Database/MigrationRunner.php' => [
         'kind' => KIND_DRAINED, 'owner' => 'T-13-14', 'census' => [],
@@ -817,16 +816,14 @@ const LEGACY_DIALECT = [
         'why' => 'la suite fijaba la sentencia de la ruta heredada contra el doble de conexión; T-13-14 retira esa ruta y certifica solo la del motor único',
     ],
     'tests/unit/RefundsModuleClosureTest.php' => [
-        'kind' => KIND_CONTRACT,
-        'owner' => 'T-13-16',
-        'census' => ['backtick' => 1],
-        'why' => 'compara el guardián del Art. III.1 contra el contenido del `.sql` heredado, que sigue existiendo y no ha cambiado',
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-16', 'census' => [],
+        'drained_occurrences' => ['backtick' => 1],
+        'why' => 'la suite comparaba contra la migración heredada; T-13-16 retira esa migración y contrasta el guardián de borrado físico contra supabase_init.sql',
     ],
     'tests/unit/RouteMapMigrationContractTest.php' => [
-        'kind' => KIND_CONTRACT,
-        'owner' => 'T-13-16',
-        'census' => ['backtick' => 6, 'upsert' => 1, 'values' => 1],
-        'why' => 'compara contra el contenido de la migración heredada de rutas y mapa, que sigue existiendo',
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-16', 'census' => [],
+        'drained_occurrences' => ['backtick' => 6, 'upsert' => 1, 'values' => 1],
+        'why' => 'la suite comparaba contra la migración heredada 007; T-13-16 retira la migración y certifica las coordenadas en supabase_init.sql y SeedRunner',
     ],
     'tests/unit/SqlDialectPortabilityTest.php' => [
         'kind' => KIND_GUARD,
@@ -935,7 +932,6 @@ const REQUIRED_IN_SURFACE = [
     'tests/Support/TestDataCleaner.php',
     'tests/diagnostics/PendingInfoSmokeWorkflowDiagnostic.php',
     'src/Infrastructure/Database/SeedRunner.php',
-    'database/DemoMetricsSeeder.php',
     'bin/migrate.php',
 ];
 

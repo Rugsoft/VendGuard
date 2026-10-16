@@ -335,10 +335,33 @@ Cada lote cierra con `php tests/run_all.php` en verde, cifras por lote anotadas 
       * **261 suites · 9.947 aserciones · 0 fallos (100% PASS)**.
       * **Cifras documentadas: COHERENTES** (0 desviaciones).
       * **Base de datos restablecida:** SÍ (Semillas intactas, 0 residuo de parque).
-- [ ] **T-13-16: Retirada del DDL, las migraciones y los sembradores heredados; contrato de esquema único**
+- [x] **T-13-16: Retirada del DDL, las migraciones y los sembradores heredados; contrato de esquema único**
   * **Requisitos:** EARS-13.3, EARS-13.9
   * **Dependencias:** T-13-15
   * **Hecho cuando:** **antes** de retirar nada se certifica que cada `CREATE TABLE` y cada `ADD COLUMN` de los 16 ficheros de `database/migrations/` está absorbido por `database/supabase_init.sql`, se declara por escrito que la convergencia futura del motor único vive en `supabase_migrations/`, y solo entonces se retiran `database/cloud_init.sql`, `database/schema.sql`, `database/seeds.sql`, `database/migrations/**` y `database/DemoMetricsSeeder.php`; el contrato de correspondencia pasa a ser contrato de esquema del motor único; `generated_columns_contract.md` (D-6) se retira; `database_schema.md` se reescribe; y ninguna suite referencia artefactos retirados.
+  * **Cerrado (2026-10-16), con evidencia de ejecución:**
+    * **Certificación de absorción completa (100% verificado antes del borrado):**
+      * Ejecutado análisis exhaustivo de los 16 ficheros de `database/migrations/*.sql`: cada una de las tablas creadas y cada una de las columnas añadidas mediante `ALTER TABLE ... ADD` están presentes en [`database/supabase_init.sql`](../../database/supabase_init.sql). Ninguna definición de esquema se pierde.
+      * Se declara formalmente que a partir de este punto la **convergencia futura** del motor único reside exclusivamente en `database/supabase_migrations/NNN_<nombre>.sql` con su seguimiento en `schema_migrations` (`EARS-02.4`, `EARS-13.3`).
+    * **Retirada física de artefactos heredados:**
+      * Eliminados mediante `git rm`: `database/cloud_init.sql`, `database/schema.sql`, `database/seeds.sql`, `database/DemoMetricsSeeder.php`, la carpeta completa `database/migrations/` (16 ficheros) y el contrato de columnas virtuales retirado [`specs/technical/generated_columns_contract.md`](../../specs/technical/generated_columns_contract.md).
+    * **Reescritura de contratos técnicos al motor único:**
+      * [`specs/technical/database_schema.md`](../../specs/technical/database_schema.md) reescrito íntegramente para PostgreSQL 16+ (Supabase): inventario de 20 tablas canónicas, 24 tipos `ENUM`, disparadores de borrado constitucional (`prevent_hard_delete`), disparadores de actualización (`touch_updated_at`) y unicidad parcial (`uq_machine_active_ticket`).
+      * [`specs/technical/schema_correspondence_contract.md`](../../specs/technical/schema_correspondence_contract.md) transformado de contrato comparativo dual a Contrato de Esquema de Base de Datos Canónico del motor único.
+    * **Saneamiento de suites de pruebas:**
+      * [`tests/unit/AuditEntityTypesTest.php`](../../tests/unit/AuditEntityTypesTest.php): certifica la inmutabilidad de `audit_log` y los tipos de entidad en `database/supabase_init.sql` (37/37 aserciones, exit 0).
+      * [`tests/unit/ConstitutionalAuditTest.php`](../../tests/unit/ConstitutionalAuditTest.php): verifica la regla de duplicados atómicos `uq_machine_active_ticket` en `database/supabase_init.sql` (44/44 aserciones, exit 0).
+      * [`tests/integration/SiteManagerRefundDataSegregationTest.php`](../../tests/integration/SiteManagerRefundDataSegregationTest.php): verifica el disparador guardián en `database/supabase_init.sql` (65/65 aserciones, exit 0).
+      * [`tests/unit/RefundsModuleClosureTest.php`](../../tests/unit/RefundsModuleClosureTest.php): verifica el guardián en `database/supabase_init.sql` (60/60 aserciones, exit 0).
+      * [`tests/unit/RouteMapMigrationContractTest.php`](../../tests/unit/RouteMapMigrationContractTest.php): verifica la tabla `route_settings` y coordenadas en `database/supabase_init.sql` y `SeedRunner.php` (9/9 aserciones, exit 0).
+      * [`tests/unit/SparePartsModuleComplianceTest.php`](../../tests/unit/SparePartsModuleComplianceTest.php): verifica las 4 tablas de repuestos en `database/supabase_init.sql` (32/32 aserciones, exit 0).
+      * [`tests/unit/DemoHistorySeederTest.php`](../../tests/unit/DemoHistorySeederTest.php): verifica que las 17 averías canónicas son las de `INC-DEMO-*` de forma autosuficiente (23/23 aserciones, exit 0).
+      * [`public/assets/js/utils/AuditActionLabels.js`](../../public/assets/js/utils/AuditActionLabels.js) y [`tests/unit/AuditActionCatalogTest.php`](../../tests/unit/AuditActionCatalogTest.php): retiradas las 2 acciones demo exclusivas del sembrador heredado (`LOCATION_INSPECTED`, `QR_LABEL_GENERATED`) y el grupo huérfano `qr`, dejando el catálogo 100% sincronizado con los escritores reales (26/26 aserciones, exit 0).
+      * [`tests/unit/SqlDialectPortabilityTest.php`](../../tests/unit/SqlDialectPortabilityTest.php): `database/DemoMetricsSeeder.php`, `RefundsModuleClosureTest.php` y `RouteMapMigrationContractTest.php` pasan a **drenado**. Saldo verificado en 97/97 aserciones, exit 0.
+    * **Medición de cierre con batería completa (`php tests/run_all.php`):**
+      * **261 suites · 9.941 aserciones · 0 fallos (100% PASS)**.
+      * **Cifras documentadas: COHERENTES** (0 desviaciones) sincronizadas en [README.md](../../README.md) y documentación viva.
+      * **Base de datos restablecida:** SÍ (Semillas intactas, 0 residuo de parque).
 
 ---
 

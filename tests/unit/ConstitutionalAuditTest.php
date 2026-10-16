@@ -216,7 +216,7 @@ $assert(
     str_contains($resolutionValContent, "mb_strlen")
 );
 
-$schemaContent = (string)file_get_contents($baseDir . '/database/schema.sql');
+$schemaContent = (string)file_get_contents($baseDir . '/database/supabase_init.sql');
 $assert(
     "6.2 Regla RF-02: Índice único condicional para bloqueo atómico de duplicados en BD",
     str_contains($schemaContent, "uq_machine_active_ticket")

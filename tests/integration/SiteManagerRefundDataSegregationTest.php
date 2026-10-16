@@ -573,14 +573,14 @@ try {
         $srcOffenders === [],
         'escritores: ' . json_encode($srcOffenders));
 
-    $migrationSource = (string)file_get_contents(
-        dirname(__DIR__, 2) . '/database/migrations/010_refund_hard_delete_guard.sql'
+    $schemaSource = (string)file_get_contents(
+        dirname(__DIR__, 2) . '/database/supabase_init.sql'
     );
-    $assert('6.10 La migración del guardián está versionada y es idempotente',
-        $migrationSource !== ''
-        && str_contains($migrationSource, 'CREATE TRIGGER')
-        && str_contains($migrationSource, 'information_schema.triggers')
-        && str_contains($migrationSource, '45000'));
+    $assert('6.10 La regla del guardián está versionada en el DDL canónico de PostgreSQL',
+        $schemaSource !== ''
+        && str_contains($schemaSource, 'trg_no_delete_refund_requests')
+        && str_contains($schemaSource, 'prevent_hard_delete')
+        && str_contains($schemaSource, '45000'));
 } finally {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();

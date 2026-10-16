@@ -321,22 +321,21 @@ $assert(
     'Mutaciones detectadas en: ' . implode(', ', $forbiddenPatterns)
 );
 
-$migrationSource = (string)file_get_contents($baseDir . '/database/migrations/009_refund_audit_entity.sql');
+$supabaseInit = (string)file_get_contents($baseDir . '/database/supabase_init.sql');
 
 $assert(
-    '5.6 La migración de auditoría no borra filas existentes (sólo MODIFY COLUMN)',
-    !str_contains(strtoupper($migrationSource), 'DELETE')
+    '5.6 El DDL canónico de PostgreSQL no contiene sentencias DELETE sobre audit_log',
+    !preg_match('/DELETE\s+FROM\s+("?audit_log"?)/i', $supabaseInit)
 );
 
 $assert(
-    '5.7 La migración de auditoría no actualiza filas existentes (sólo MODIFY COLUMN)',
-    !str_contains(strtoupper($migrationSource), 'UPDATE ')
+    '5.7 El DDL canónico de PostgreSQL no contiene sentencias UPDATE sobre audit_log',
+    !preg_match('/UPDATE\s+("?audit_log"?)/i', $supabaseInit)
 );
 
-$cloudInit = (string)file_get_contents($baseDir . '/database/cloud_init.sql');
 $assert(
-    '5.8 cloud_init.sql declara los mismos tipos de entidad que la migración',
-    str_contains($cloudInit, "'REFUND_REQUEST'") && str_contains($cloudInit, "'UNCLAIMED_CASH_FINDING'")
+    '5.8 supabase_init.sql declara los tipos de entidad de reintegros en audit_entity_type',
+    str_contains($supabaseInit, "'REFUND_REQUEST'") && str_contains($supabaseInit, "'UNCLAIMED_CASH_FINDING'")
 );
 
 echo "\n" . str_repeat('=', 90) . "\n";

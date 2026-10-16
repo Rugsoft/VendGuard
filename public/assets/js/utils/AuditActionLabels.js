@@ -29,8 +29,7 @@ export const AUDIT_ACTION_GROUPS = Object.freeze({
   preventive: 'Mantenimiento Preventivo',
   sanitary: 'Sanidad Alimentaria',
   refund: 'Reintegros y Efectivo',
-  spare_parts: 'Repuestos',
-  qr: 'Etiquetas QR'
+  spare_parts: 'Repuestos'
 });
 
 /** Badge palette of the design system, keyed by semantic tone. */
@@ -88,7 +87,6 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'LOCATION_REACTIVATED', label: 'Reactivación de Sede', tone: 'success', group: 'location' },
   { code: 'LOCATION_ACCESS_CODE_ISSUED', label: 'Emisión de Clave de Centro', tone: 'success', group: 'location' },
   { code: 'LOCATION_ACCESS_CODE_REISSUED', label: 'Reemisión de Clave de Centro', tone: 'warning', group: 'location' },
-  { code: 'LOCATION_INSPECTED', label: 'Inspección de Sede (registro de demo)', tone: 'info', group: 'location' },
   { code: 'USER_CREATED', label: 'Alta de Usuario', tone: 'success', group: 'user' },
   { code: 'USER_UPDATED', label: 'Modificación de Usuario', tone: 'neutral', group: 'user' },
   { code: 'USER_DEACTIVATED', label: 'Baja de Usuario', tone: 'danger', group: 'user' },
@@ -121,7 +119,6 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'UNCLAIMED_CASH_RECORDED', label: 'Efectivo No Reclamado Registrado', tone: 'warning', group: 'refund' },
   { code: 'REFUND_DETACHED_BY_INACTIVITY', label: 'Reintegro Desvinculado por Inactividad', tone: 'warning', group: 'refund' },
   { code: 'EXPORT_SPARE_PARTS_CSV', label: 'Exportación CSV de Repuestos', tone: 'neutral', group: 'spare_parts' },
-  { code: 'QR_LABEL_GENERATED', label: 'Etiqueta QR Generada (registro de demo)', tone: 'neutral', group: 'qr' }
 ]);
 
 const CATALOG_BY_CODE = Object.freeze(
