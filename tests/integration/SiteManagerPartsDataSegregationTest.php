@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Requisitos: RF-REP-10 y Constitución Art. V.4 (Privacidad y Segregación de Datos).
  *
  * Valida la condición "Hecho cuando:" de T-SPARE-20:
- * Certifica, contra MariaDB real y el enrutamiento HTTP completo, que NINGÚN endpoint
+ * Certifica, contra el motor único real y el enrutamiento HTTP completo, que NINGÚN endpoint
  * accesible por el rol LOCATION_MANAGER (Responsable de Ubicación / Sede) expone
  * piezas solicitadas, componentes sustituidos, destinos de taller ni costes económicos.
  *
@@ -126,9 +126,9 @@ $insertContaminatingRows = function (int $incidentId, int $machineId, int $locat
         INSERT INTO spare_part_requests
             (incident_id, spare_part_id, is_out_of_catalog, custom_part_description, quantity, status, requested_by_user_id)
         VALUES
-            (:incident_id_a, :spare_part_id, 0, NULL, 2, 'PENDING',
+            (:incident_id_a, :spare_part_id, FALSE, NULL, 2, 'PENDING',
              (SELECT id FROM users WHERE email = 'jordi.ruta@vendguard.internal' LIMIT 1)),
-            (:incident_id_b, NULL, 1, 'Sensor infrarrojo reflectante para detección de producto en bandeja inferior', 1, 'PENDING',
+            (:incident_id_b, NULL, TRUE, 'Sensor infrarrojo reflectante para detección de producto en bandeja inferior', 1, 'PENDING',
              (SELECT id FROM users WHERE email = 'jordi.ruta@vendguard.internal' LIMIT 1))
     ")->execute([
         ':incident_id_a' => $incidentId,
@@ -144,10 +144,10 @@ $insertContaminatingRows = function (int $incidentId, int $machineId, int $locat
         VALUES
             ('INCIDENT', :incident_id_a, :machine_id_a, :location_id_a,
              (SELECT id FROM users WHERE email = 'jordi.ruta@vendguard.internal' LIMIT 1), :spare_part_id,
-             0, NULL, 2, 28.50, 'DESGUACE', 'Cambio de electroválvula por avería en campo'),
+             FALSE, NULL, 2, 28.50, 'DESGUACE', 'Cambio de electroválvula por avería en campo'),
             ('INCIDENT', :incident_id_b, :machine_id_b, :location_id_b,
              (SELECT id FROM users WHERE email = 'jordi.ruta@vendguard.internal' LIMIT 1), NULL,
-             1, 'Abrazadera especial de apriete rápido 16mm', 1, 0.00, 'TALLER', 'Para revisión en taller central')
+             TRUE, 'Abrazadera especial de apriete rápido 16mm', 1, 0.00, 'TALLER', 'Para revisión en taller central')
     ")->execute([
         ':incident_id_a' => $incidentId,
         ':machine_id_a'  => $machineId,
@@ -319,7 +319,7 @@ if ($createdIncidentId > 0) {
         INSERT INTO incident_comments (incident_id, author_type, user_id, author_name, comment_text, is_internal)
         VALUES (:incident_id, 'COORDINATOR',
                 (SELECT id FROM users WHERE email = 'coordinacion@vendguard.internal' LIMIT 1),
-                'Sara Coordinadora', 'Nota interna de taller: el monedero exige revisión en taller central antes de reemplazo', 1)
+                'Sara Coordinadora', 'Nota interna de taller: el monedero exige revisión en taller central antes de reemplazo', TRUE)
     ")->execute([':incident_id' => $createdIncidentId]);
 }
 

@@ -195,13 +195,13 @@ $auditRows = $pdo->query("
     FROM audit_log
     WHERE entity_type = 'MACHINE'
       AND entity_id = (SELECT machine_id FROM preventive_orders WHERE id = {$completedOrderId})
-      AND `action` IN (
+      AND action IN (
         'CREATE_PREVENTIVE_ORDER', 'ASSIGN_PREVENTIVE_ORDER', 'CLAIM_PREVENTIVE_ORDER',
         'START_PREVENTIVE_INSPECTION', 'EVALUATE_PREVENTIVE_CHECKLIST',
         'CANCEL_PREVENTIVE_ORDER', 'ISSUE_SANITARY_CERTIFICATE',
         'SUSPEND_SANITARY_CERTIFICATE', 'REINSPECTION_COMPLETED'
       )
-      AND JSON_UNQUOTE(JSON_EXTRACT(`metadata`, '$.\"order_code\"')) = '{$completedOrderCode}'
+      AND metadata ->> 'order_code' = '{$completedOrderCode}'
 ")->fetchColumn();
 $assert('4.3 La cronología de auditoría refleja las filas reales de la orden (entidad MACHINE + order_code)',
     is_array($data['audit_trail'] ?? null)
@@ -277,7 +277,13 @@ if ($pendingOrderId > 0) {
 echo "\n--- BLOQUE 6: Lectura pura de la ficha ---\n";
 
 $countRows = static function (PDO $pdo, string $table): int {
-    return (int)$pdo->query("SELECT COUNT(*) FROM `{$table}`")->fetchColumn();
+    // El identificador va desnudo (motor único) y el nombre se valida antes de interpolar
+    // la plantilla: así el censo deja de ser ciego a un nombre que llega por variable.
+    if (preg_match('/^[a-z_][a-z0-9_]*$/', $table) !== 1) {
+        throw new InvalidArgumentException("Nombre de tabla no admisible en el censo: '{$table}'");
+    }
+
+    return (int)$pdo->query("SELECT COUNT(*) FROM {$table}")->fetchColumn();
 };
 
 $before = [

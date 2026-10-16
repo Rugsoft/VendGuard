@@ -128,7 +128,12 @@ $createTestIncident = function (int $machineId, int $locationId, ?int $assignedT
     // Limpiar incidencias previas en esta máquina para respetar la restricción única uq_machine_active_ticket
     // (purga dirigida FK-segura: incluye las hijas RESTRICT antes que `incidents`)
     TestDataCleaner::purgeIncidentsByMachine($pdo, (int)$machineId);
-    $pdo->exec("DELETE FROM incident_replaced_parts WHERE machine_id = {$machineId}");
+    // El borrado de las sustituciones propias va con la ventana de purga abierta (contrato
+    // de limpieza §3): el guardián del Art. III.1 rechaza el DELETE en crudo en cuanto la
+    // máquina tenga filas —que hoy no las tiene, y por eso el defecto estaba latente—.
+    TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $machineId): void {
+        $pdo->exec("DELETE FROM incident_replaced_parts WHERE machine_id = {$machineId}");
+    });
 
     $uniqueCode = 'TICK-' . date('Ymd') . '-' . substr(uniqid(), -5);
     $stmt = $pdo->prepare("
@@ -251,7 +256,7 @@ $reqPauseL4 = new Request('PATCH', "/api/technician/incidents/{$incLimit4}/pause
 $router->dispatch($reqPauseL4);
 
 // Ahora el coordinador desactiva VALV-ULKA-01 en el catálogo
-$pdo->exec("UPDATE spare_parts SET is_active = 0 WHERE id = {$ulkaPartId}");
+$pdo->exec("UPDATE spare_parts SET is_active = FALSE WHERE id = {$ulkaPartId}");
 
 // Consulta estándar de catálogo sin incident_id: VALV-ULKA-01 no debe figurar por estar inactiva
 $resCatWithoutInc = $router->dispatch(new Request('GET', '/api/technician/spare-parts/catalog', ['machine_id' => (string)$m2Id], [], ['Authorization' => 'Bearer ' . $techToken]));
@@ -269,7 +274,7 @@ $foundDeactivatedPreserved = in_array('VALV-ULKA-01', array_column($partsWithInc
 $assert("2.11 Repuesto desactivado SÍ figura al incluir incident_id en PENDING_PARTS (Caso Límite 4)", $foundDeactivatedPreserved);
 
 // Restaurar repuesto a activo para siguientes pruebas
-$pdo->exec("UPDATE spare_parts SET is_active = 1 WHERE id = {$ulkaPartId}");
+$pdo->exec("UPDATE spare_parts SET is_active = TRUE WHERE id = {$ulkaPartId}");
 
 // =========================================================================
 // BLOQUE 3: Pausa Técnica Estructurada (RF-REP-03, RF-REP-04)
@@ -348,7 +353,7 @@ $dataPauseOk = $bodyPauseOk['data'] ?? [];
 $assert("3.10 Incidencia pasa al estado PENDING_PARTS", ($dataPauseOk['status'] ?? '') === 'PENDING_PARTS');
 $assert("3.11 Respuesta incluye lista de solicitudes generadas (2 solicitudes)", count($dataPauseOk['requests'] ?? []) === 2);
 
-// Verificar persistencia en base de datos MariaDB
+// Verificar persistencia en base de datos del motor único
 $dbRequests = $pdo->query("SELECT * FROM spare_part_requests WHERE incident_id = {$testInc1}")->fetchAll(PDO::FETCH_ASSOC);
 $assert("3.12 Fila física creada en spare_part_requests con status PENDING", count($dbRequests) === 2 && $dbRequests[0]['status'] === 'PENDING');
 $assert("3.13 Solicitud guarda requested_by_user_id correspondiente al técnico", (int)$dbRequests[0]['requested_by_user_id'] === $techId);
@@ -364,8 +369,8 @@ $reqOutOfCat = new Request('PATCH', "/api/technician/incidents/{$testInc2}/pause
 $resOutOfCat = $router->dispatch($reqOutOfCat);
 
 $assert("3.14 Pausa estructurada fuera de catálogo retorna HTTP 200", $resOutOfCat->getStatusCode() === 200);
-$dbOutOfCat = $pdo->query("SELECT * FROM spare_part_requests WHERE incident_id = {$testInc2} AND is_out_of_catalog = 1")->fetch(PDO::FETCH_ASSOC);
-$assert("3.15 Solicitud fuera de catálogo persistida con is_out_of_catalog=1", $dbOutOfCat !== false && (int)$dbOutOfCat['is_out_of_catalog'] === 1);
+$dbOutOfCat = $pdo->query("SELECT * FROM spare_part_requests WHERE incident_id = {$testInc2} AND is_out_of_catalog = TRUE")->fetch(PDO::FETCH_ASSOC);
+$assert("3.15 Solicitud fuera de catálogo persistida con is_out_of_catalog = true", $dbOutOfCat !== false && $dbOutOfCat['is_out_of_catalog'] === true);
 $assert("3.16 Justificación técnica íntegramente guardada en custom_part_description", ($dbOutOfCat['custom_part_description'] ?? '') === $longJustification);
 
 // =========================================================================
@@ -495,7 +500,7 @@ $assert("4.11 Conteo de piezas sustituidas es 2", ($dataResolve['replaced_parts_
 // 2 unidades de VALV-ULKA-01 a 28.50 € = 57.00 €, fuera de catálogo a 0.00 €
 $assert("4.12 Coste total calculado es 57.00 €", (float)($dataResolve['total_parts_cost'] ?? 0) === 57.00);
 
-// Verificación en base de datos MariaDB
+// Verificación en la base de datos del motor único
 $dbReplaced = $pdo->query("SELECT * FROM incident_replaced_parts WHERE incident_id = {$testInc1} ORDER BY id ASC")->fetchAll(PDO::FETCH_ASSOC);
 $assert("4.13 Se insertaron exactamente 2 filas físicas en incident_replaced_parts", count($dbReplaced) === 2);
 
@@ -506,7 +511,7 @@ $assert("4.16 Snapshot total calculado en 57.00 €", (float)($rowCatalog['total
 $assert("4.17 Destino DESGUACE correctamente almacenado", ($rowCatalog['old_part_destination'] ?? '') === 'DESGUACE');
 
 $rowOutOfCat = $dbReplaced[1] ?? [];
-$assert("4.18 Pieza fuera de catálogo guardada con is_out_of_catalog = 1", (int)($rowOutOfCat['is_out_of_catalog'] ?? 0) === 1);
+$assert("4.18 Pieza fuera de catálogo guardada con is_out_of_catalog = true", ($rowOutOfCat['is_out_of_catalog'] ?? false) === true);
 $assert("4.19 Coste snapshot fijado en 0.00 € para pieza no catalogada", (float)($rowOutOfCat['unit_cost_snapshot'] ?? 0) === 0.00);
 $assert("4.20 Destino TALLER correctamente almacenado", ($rowOutOfCat['old_part_destination'] ?? '') === 'TALLER');
 
@@ -612,7 +617,7 @@ if ($prevOrderId !== null) {
     $assert("5.6 Conteo de repuestos en respuesta preventiva es 1", ($dataPrev['replaced_parts_count'] ?? 0) === 1);
     $assert("5.7 Coste total de piezas en preventivo es 8.50 €", (float)($dataPrev['total_parts_cost'] ?? 0) === 8.50);
 
-    // Verificación en MariaDB
+    // Verificación en el motor único
     $dbPrevReplaced = $pdo->query("SELECT * FROM incident_replaced_parts WHERE preventive_order_id = {$prevOrderId}")->fetch(PDO::FETCH_ASSOC);
     $assert("5.8 Fila física creada en incident_replaced_parts con intervention_type = PREVENTIVE",
         $dbPrevReplaced !== false && ($dbPrevReplaced['intervention_type'] ?? '') === 'PREVENTIVE'

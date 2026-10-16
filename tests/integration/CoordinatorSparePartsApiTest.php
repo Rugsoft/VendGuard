@@ -308,8 +308,8 @@ $assert("5.2 Respuesta de baja lógica indica is_active=false", ($bodyDel['data'
 $stmtCheck = $pdo->prepare("SELECT id, is_active FROM spare_parts WHERE id = :id");
 $stmtCheck->execute([':id' => $createdId]);
 $dbPart = $stmtCheck->fetch(\PDO::FETCH_ASSOC);
-$assert("5.3 Fila física existe en MariaDB tras DELETE (Art. III)", $dbPart !== false);
-$assert("5.4 Columna is_active es 0 en base de datos", (int)($dbPart['is_active'] ?? 1) === 0);
+$assert("5.3 Fila física existe en el motor único tras DELETE (Art. III)", $dbPart !== false);
+$assert("5.4 Columna is_active es false en base de datos", ($dbPart['is_active'] ?? true) === false);
 
 // 5.4 Reactivación con PATCH /api/coordinator/spare-parts/{id}/status (is_active = true)
 $reqReactivate = new Request('PATCH', "/api/coordinator/spare-parts/{$createdId}/status", [], ['is_active' => true], ['Authorization' => 'Bearer ' . $coordToken]);
@@ -336,7 +336,7 @@ $assert("5.10 PATCH status repuesto inexistente retorna HTTP 404", $router->disp
 // =========================================================================
 echo "\n--- BLOQUE 6: Panel Analítico de Fiabilidad y Averías Crónicas (RF-REP-08) ---\n";
 
-// Insertar datos controlados de sustitución de repuestos en MariaDB para probar analítica
+// Insertar datos controlados de sustitución de repuestos en el motor único para probar analítica
 // Crearemos 4 sustituciones en la máquina 1 dentro de los últimos 30 días para activar alerta crónica (> 3)
 $stmtInsertPart = $pdo->prepare("
     INSERT INTO incident_replaced_parts 
@@ -345,13 +345,33 @@ $stmtInsertPart = $pdo->prepare("
     (:intervention_type, :incident_id, :preventive_order_id, :machine_id, :location_id, :technician_id, :spare_part_id, :is_out_of_catalog, :custom_part_name, :quantity, :unit_cost_snapshot, :old_part_destination, :notes, :installed_at)
 ");
 
+// El booleano cruza como parámetro enlazado con `PDO::PARAM_BOOL` —la forma que el adaptador
+// declara para la familia 4— porque el agrupador transaccional emula las sentencias y no
+// deduce el tipo por sí solo: sin ese tipo el valor viaja como cadena vacía y el motor único
+// lo rechaza con 22P02. El resto viaja como texto, y nulo cuando el valor es nulo.
+$executeReplacedPart = static function (PDOStatement $stmt, array $row): void {
+    foreach ($row as $parameter => $value) {
+        $stmt->bindValue(
+            $parameter,
+            $value,
+            match (true) {
+                $parameter === ':is_out_of_catalog' => PDO::PARAM_BOOL,
+                $value === null => PDO::PARAM_NULL,
+                default => PDO::PARAM_STR,
+            }
+        );
+    }
+
+    $stmt->execute();
+};
+
 $locationId = (int)$machine1->getLocationId();
 $machineId = (int)$machine1->getId();
 $technicianId = (int)$technician->getId();
 
 // 1-3. Sustituciones 1 a 3: DESGUACE (Electroválvula 28.50 €)
 for ($i = 1; $i <= 3; $i++) {
-    $stmtInsertPart->execute([
+    $executeReplacedPart($stmtInsertPart, [
         ':intervention_type'     => 'INCIDENT',
         ':incident_id'           => null,
         ':preventive_order_id'   => null,
@@ -359,7 +379,7 @@ for ($i = 1; $i <= 3; $i++) {
         ':location_id'           => $locationId,
         ':technician_id'         => $technicianId,
         ':spare_part_id'         => $partUlkaId,
-        ':is_out_of_catalog'     => 0,
+        ':is_out_of_catalog'     => false,
         ':custom_part_name'      => null,
         ':quantity'              => 1,
         ':unit_cost_snapshot'    => 28.50,
@@ -370,7 +390,7 @@ for ($i = 1; $i <= 3; $i++) {
 }
 
 // 4. Sustitución 4: TALLER (Electroválvula 28.50 €) -> Total 4 sustituciones de la misma pieza en máquina 1 (> 3)
-$stmtInsertPart->execute([
+$executeReplacedPart($stmtInsertPart, [
     ':intervention_type'     => 'PREVENTIVE',
     ':incident_id'           => null,
     ':preventive_order_id'   => null,
@@ -378,7 +398,7 @@ $stmtInsertPart->execute([
     ':location_id'           => $locationId,
     ':technician_id'         => $technicianId,
     ':spare_part_id'         => $partUlkaId,
-    ':is_out_of_catalog'     => 0,
+    ':is_out_of_catalog'     => false,
     ':custom_part_name'      => null,
     ':quantity'              => 1,
     ':unit_cost_snapshot'    => 28.50,
@@ -388,7 +408,7 @@ $stmtInsertPart->execute([
 ]);
 
 // 5. Sustitución 5: DESGUACE (Sonda NTC 15.20 €)
-$stmtInsertPart->execute([
+$executeReplacedPart($stmtInsertPart, [
     ':intervention_type'     => 'INCIDENT',
     ':incident_id'           => null,
     ':preventive_order_id'   => null,
@@ -396,7 +416,7 @@ $stmtInsertPart->execute([
     ':location_id'           => $locationId,
     ':technician_id'         => $technicianId,
     ':spare_part_id'         => $partSondId,
-    ':is_out_of_catalog'     => 0,
+    ':is_out_of_catalog'     => false,
     ':custom_part_name'      => null,
     ':quantity'              => 1,
     ':unit_cost_snapshot'    => 15.20,
@@ -493,6 +513,10 @@ $createdIncidentId = null;
 
 if (!$testIncidentId) {
     $uniqueTicket = 'INC-' . date('Ymd') . '-' . substr(uniqid(), -4);
+    // La categoría tiene que ser una que declare el enumerado del motor único: el retirado
+    // tampoco declaraba «MECHANICAL» en incidents.category —sus cinco etiquetas son las
+    // mismas—, de modo que la fixture escribía un valor fuera de contrato que ninguna
+    // aserción leía. «Otras averías» es la que cubre una avería mecánica.
     $stmtCreateInc = $pdo->prepare("
         INSERT INTO incidents (
             ticket_code,
@@ -514,7 +538,7 @@ if (!$testIncidentId) {
             :assigned_technician_id,
             'Control Calidad',
             '611223344',
-            'MECHANICAL',
+            'OTHER',
             'Avería mecánica para validación de repuestos',
             'MEDIUM',
             'PENDING_PARTS',
@@ -538,7 +562,7 @@ $stmtReq = $pdo->prepare("
     INSERT INTO spare_part_requests
     (incident_id, spare_part_id, is_out_of_catalog, custom_part_description, quantity, status, requested_by_user_id, created_at)
     VALUES
-    (:incident_id, NULL, 1, :custom_desc, 1, 'PENDING', :requested_by, NOW())
+    (:incident_id, NULL, TRUE, :custom_desc, 1, 'PENDING', :requested_by, NOW())
 ");
 $stmtReq->execute([
     ':incident_id'   => $testIncidentId,
@@ -566,13 +590,17 @@ $assert("8.3 La solicitud pendiente contiene la justificación técnica exacta d
 // =========================================================================
 // Limpieza final
 // =========================================================================
-$pdo->exec("DELETE FROM spare_part_requests WHERE custom_part_description = '{$customDesc}'");
+// Los borrados de las filas propias van con la ventana de purga abierta (contrato de
+// limpieza §3): el guardián del Art. III.1 rechaza el DELETE en crudo, y esta suite crea
+// solicitudes y sustituciones en cada corrida.
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $customDesc, $machineId): void {
+    $pdo->exec("DELETE FROM spare_part_requests WHERE custom_part_description = '{$customDesc}'");
+    $pdo->exec("DELETE FROM incident_replaced_parts WHERE machine_id = {$machineId}");
+});
+
 if ($createdIncidentId !== null) {
-    if ($createdIncidentId !== null) {
     TestDataCleaner::purgeIncident($pdo, (int)$createdIncidentId);
 }
-}
-$pdo->exec("DELETE FROM incident_replaced_parts WHERE machine_id = {$machineId}");
 
 echo "\n======================================================================\n";
 if ($failures === 0) {

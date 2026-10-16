@@ -783,12 +783,6 @@ const LEGACY_DIALECT = [
         'census' => ['legacy_database' => 1],
         'why' => 'la rama inalcanzable del driver heredado de la factoría pregunta a qué base está conectada, y la suite pregunta lo mismo al motor único en su propia grafía; su dueño es la factoría de una sola rama',
     ],
-    'tests/integration/CoordinatorPreventiveDetailApiTest.php' => [
-        'kind' => KIND_DEBT,
-        'owner' => 'T-13-09',
-        'census' => ['json' => 1],
-        'why' => 'la consulta de la traza de auditoría lee el metadato con la extracción de JSON del motor retirado; el censo invertido lo nombra por primera vez —vive en un fragmento interpolado— y el lote preventivo lo porta',
-    ],
     'tests/integration/PendingInfoConcurrencyTest.php' => [
         'kind' => KIND_DEBT,
         'owner' => 'T-13-11',
@@ -932,6 +926,14 @@ const LEGACY_DIALECT = [
         'kind' => KIND_DRAINED, 'owner' => 'T-HYBRID-12', 'census' => [],
         'drained_occurrences' => ['backtick' => 275, 'json' => 2, 'temporal' => 19, 'upsert' => 9],
         'why' => 'el sembrador del arnés: de aquí el adaptador toma la sintaxis de upsert que las semillas declaran',
+    ],
+    // La superficie de la batería también se drena, y un retorno aquí también pone la guarda en rojo:
+    // éste es el sitio que el censo ad hoc de T-13-05 no veía —una cita heredada dentro de un fragmento
+    // interpolado—, y el lote preventivo lo portó.
+    'tests/integration/CoordinatorPreventiveDetailApiTest.php' => [
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-09', 'census' => [],
+        'drained_occurrences' => ['backtick' => 2, 'json' => 2],
+        'why' => 'porte del lote preventivo: la traza de auditoría lee el metadato con el operador del motor único, los dos identificadores entre acentos graves van desnudos y la plantilla del censo de la lectura pura valida el nombre antes de interpolarlo',
     ],
 ];
 
