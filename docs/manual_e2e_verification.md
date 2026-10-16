@@ -17,7 +17,7 @@ sequenceDiagram
     actor Coord as Coordinador
     actor Tech as Técnico de Ruta
     participant API as VendGuard REST API
-    participant DB as MariaDB
+    participant DB as PostgreSQL (Supabase)
 
     Resp->>API: 1. POST /api/auth/site-login (SEDE-BCN-01 + clave de centro)
     Resp->>API: 2. POST /api/incidents (VEND-0101, Frio Alimentos)
@@ -106,4 +106,4 @@ El recorrido funcional de extremo a extremo ha sido ejecutado satisfactoriamente
 
 > **Nota (08/10/2026):** el guion se ejecuta además en la **Fase 4** de `php tests/run_all.php`, con el servidor HTTP todavía en marcha, de modo que una regresión de flujo rompe ya la batería global. Cifra vigente de la batería completa:
 >
-> batería global: 259 suites · 9.898 aserciones
+> batería global: 261 suites · 9.958 aserciones

@@ -109,7 +109,7 @@ function makeHttpRequest(string $method, string $url, array $data = [], ?string 
 // ─────────────────────────────────────────────────────────────────────────
 // FASE 0: PREPARACIÓN DEL ENTORNO LIMPIO
 // ─────────────────────────────────────────────────────────────────────────
-echo "{$colorCyan}--- Paso 0: Preparación de Datos Semilla en MariaDB ---{$colorReset}\n";
+echo "{$colorCyan}--- Paso 0: Preparación de Datos Semilla en el motor único ---{$colorReset}\n";
 
 $pdo = ConnectionFactory::getConnection();
 
@@ -120,7 +120,7 @@ $seedRunner = new SeedRunner($pdo);
 $seedRunner->seedAll();
 
 $checkMachines = $pdo->query("SELECT id, code, machine_type FROM machines WHERE code = 'VEND-0101'")->fetch(PDO::FETCH_ASSOC);
-$assert("0.1 Entorno inicializado y máquina VEND-0101 confirmada en MariaDB", !empty($checkMachines['id']));
+$assert("0.1 Entorno inicializado y máquina VEND-0101 confirmada en el motor único", !empty($checkMachines['id']));
 $vend0101Id = (int)$checkMachines['id'];
 
 // ─────────────────────────────────────────────────────────────────────────

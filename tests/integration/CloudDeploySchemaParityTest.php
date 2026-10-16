@@ -3,73 +3,99 @@
 declare(strict_types=1);
 
 /**
- * CloudDeploySchemaParityTest (T-REF-27)
+ * CloudDeploySchemaParityTest (T-REF-27 · ruta de despliegue portada al motor único en T-13-13)
  *
  * Guards the schema the DEPLOYED server ends up with.
  *
  * ## The failure this exists for
- * 2026-10-03: the refunds inbox answered 500 on the Render deployment
- * ("Ha ocurrido un error interno no controlado en el servidor") while the whole
- * local environment and every other suite were green. The container boots with
- * `php bin/init_cloud_db.php`, which executed only `database/cloud_init.sql`.
- * That file creates every table with `CREATE TABLE IF NOT EXISTS`, so it can
- * define the schema of a database that does not exist yet and nothing else:
- * `refund_requests` had been created before `paid_amount`, `pickup_attempts`
- * and `pickup_locked_until` were declared, `database/migrations/` never ran on
- * the server, and the listing -- which selects all three -- died with
- * `Unknown column`. The three columns had been in the migrations all along; the
- * deployment simply never applied them.
+ * 2026-10-03: the refunds inbox answered 500 on the deploy while the whole local
+ * environment and every other suite were green. The container boots with
+ * `php bin/init_cloud_db.php`, which back then executed only the base DDL
+ * (`database/cloud_init.sql`). That file creates every table with `CREATE TABLE
+ * IF NOT EXISTS`, so it can define the schema of a database that does not exist
+ * yet and nothing else: `refund_requests` had been created before `paid_amount`,
+ * `pickup_attempts` and `pickup_locked_until` were declared, the incremental
+ * layer never ran on the server, and the listing -- which selects all three --
+ * died. The three columns had been in the migrations all along; the deployment
+ * simply never applied them.
  *
- * A green battery could not see it by construction: every suite runs against
- * the local schema, which is migrated. The deployment runs against a schema
- * that is created, not migrated. That gap is what this suite closes.
+ * A green battery could not see it by construction: every suite runs against the
+ * local schema, which is migrated. The deployment runs against a schema that is
+ * created, not migrated. That gap is what this suite closes.
  *
- * ## What it certifies
- * 1. The boot script applies `database/migrations/*.sql`, statement by
- *    statement and with the shared splitter, so a database that already exists
- *    converges to the repository schema instead of staying frozen at its first
- *    boot.
- * 2. The shared splitter survives the two escaping forms the migration set
- *    actually contains -- `\''` in 009 and `''...;...''` in 013 -- because a
- *    splitter that gets either wrong cuts a migration in half and the deploy
- *    aborts halfway through.
- * 3. A schema built from the deploy path (base DDL + migrations) declares every
- *    column the tested schema has, for the two refunds tables, with the same
- *    types -- including the widened DECIMAL(10,2) amounts migration 011
- *    demands so no figure can be silently saturated.
- * 4. The guard bites: a schema built from the base DDL alone -- the deploy path
- *    as it was before the fix -- is detected as incomplete.
- * 5. The base DDL declares every value of `IncidentStatus`. TiDB refuses to
- *    widen an enum that a generated column depends on (error 8200) and
- *    `incidents.status` feeds `is_active_ticket`, the engine-level duplicate
- *    guard (Art. V.2): a state added only by migration is undeliverable on the
- *    deployed engine, so the base DDL has to declare it.
+ * ## What changed in the single engine (T-13-13)
+ * The route of record is now the one of the engine the system runs on:
+ * `database/supabase_init.sql` + `database/supabase_migrations/` through
+ * `PostgresMigrationRunner`, plus `database/supabase_seeds.sql` for the master
+ * catalogue. The difference is not cosmetic: the retired route had **no**
+ * convergence book, so nothing could tell a created schema from a converged one.
+ * The single engine's route has a ledger (`schema_migrations`), a baseline that
+ * refuses to run over a schema whose base DDL is missing, and a gate
+ * (`assertConverged()`) that the boot script calls before serving. This suite
+ * therefore certifies the route of record -- not a replica of it -- and its
+ * failure modes are the ones of that route:
  *
- * ## Why a scratch database
- * `vendguard_db` is the schema the application is tested against, so it is the
- * yardstick, not the subject. This suite never mutates it: it creates its own
- * throwaway schemas, builds them from the deployment's own SQL, compares, and
- * drops them. It is the only suite that opens a connection without a database,
- * because creating a database is the one thing it has to do.
+ * 1. The boot script applies the base DDL, then the incremental layer **with the
+ *    repository's own runner and splitter**, then the seeds, and it declares
+ *    convergence as a gate (EARS-02.4/EARS-13.3).
+ * 2. The shared splitter survives the single engine's escaping form -- the
+ *    dollar-quoted bodies of `DO $$ ... $$` and `$$ ... $$ LANGUAGE plpgsql`,
+ *    which carry semicolons of their own. A splitter that loses that awareness
+ *    cuts every enum declaration and both trigger functions in half, and the
+ *    deploy aborts halfway through.
+ * 3. A schema built by the deploy route inside a scratch schema declares every
+ *    table, every column and every type the tested schema has -- including the
+ *    `NUMERIC(10,2)` amounts, so no figure can be silently saturated -- and both
+ *    declare the same `ENUM` sets.
+ * 4. The guard bites, in the three directions that matter: a schema built from
+ *    the base DDL alone is **not** convergent (no ledger, baseline pending) and
+ *    its gate fails in the open; the incremental layer applied with no base DDL
+ *    **raises** naming the missing tables instead of declaring convergence over
+ *    a schema that does not exist; and the comparators signal a column, a type or
+ *    an enum label that goes missing.
  *
- * Requirements: RF-REF-01, RF-REF-10 (Art. III.1), RNF-REF-01.
+ * ## Why a scratch schema and not a scratch database
+ * The deployment target is a database whose owner is the application role, and
+ * that role has no `CREATEDB` (`provision-tls-engine.sh` grants it
+ * `NOSUPERUSER NOCREATEDB NOCREATEROLE`): the faithful probe of "a fresh deploy"
+ * is a fresh **schema**, with `public` in its search path because the extensions
+ * (`uuid-ossp`, `pgcrypto`) live there and the DDL installs them idempotently.
+ * The battery's own bank is the yardstick and is never written to: probes are
+ * created, measured and dropped.
+ *
+ * Requirements: RF-REF-01, RF-REF-10 (Art. III.1), RNF-REF-01, EARS-02.4,
+ * EARS-02.5, EARS-13.3.
  */
 
 require_once __DIR__ . '/../bootstrap.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/ConnectionFactory.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/SqlScriptSplitter.php';
+require_once __DIR__ . '/../../src/Infrastructure/Database/PostgresMigrationRunner.php';
 
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Database\PostgresMigrationRunner;
 use VendGuard\Infrastructure\Database\SqlScriptSplitter;
 
 $baseDir = dirname(__DIR__, 2);
-$liveSchema = 'vendguard_db';
-$deploySchema = 'vendguard_deploy_probe';
+
+// Los tres esquemas de sonda. Viven en la base del arnés, que es el banco contra el
+// que corre toda la batería, y se crean y se borran en cada ejecución.
+$probeSchema = 'vendguard_deploy_probe';
 $baseOnlySchema = 'vendguard_deploy_probe_base';
+$emptySchema = 'vendguard_deploy_probe_empty';
+
+// El esquema probado: el que la batería usa de verdad. Es el rasero, no el sujeto.
+$yardstickSchema = 'public';
+
+$deployDdlFile = $baseDir . '/database/supabase_init.sql';
+$migrationsDirectory = $baseDir . '/database/supabase_migrations';
+$seedsFile = $baseDir . '/database/supabase_seeds.sql';
+$baselineFilename = '001_initial_baseline.sql';
 
 echo "======================================================================\n";
 echo " VendGuard: Test de Integración - CloudDeploySchemaParityTest (T-REF-27)\n";
+echo " Ruta de despliegue del motor único (T-13-13)\n";
 echo "======================================================================\n";
 
 $assertionCount = 0;
@@ -85,40 +111,101 @@ $assert = function (bool $condition, string $message, string $detail = '') use (
 };
 
 /**
- * MySQL reports integer display widths (`tinyint(3)`, `int(10)`) that carry no
- * contract; they are normalised away so the comparison is about the type. The
- * digits of DECIMAL(10,2) and VARCHAR(100) are NOT touched: those widths are
- * exactly what a silent saturation bug hides behind.
+ * Forma canónica de un tipo, tal como la publica el catálogo del motor.
+ *
+ * `format_type()` cualifica con su esquema el tipo de usuario que no está en la
+ * ruta de búsqueda -- es el caso del enumerado de una sonda frente al de
+ * `public` --, y el esquema no es parte del contrato: la forma del tipo sí. Los
+ * dígitos de `numeric(10,2)` y de `character varying(100)` NO se tocan: esas
+ * anchuras son exactamente lo que un defecto de saturación silenciosa esconde.
  */
 $normalizeType = static function (string $type): string {
     $normalized = strtolower(trim($type));
 
-    return (string)preg_replace('/\b(tinyint|smallint|mediumint|int|bigint)\(\d+\)/', '$1', $normalized);
+    return (string)preg_replace('/^[a-z_][a-z0-9_]*\./', '', $normalized);
 };
 
+/** Columnas de una tabla: nombre => forma canónica del tipo, ordenadas por nombre. */
 $columnMap = static function (PDO $pdo, string $schema, string $table) use ($normalizeType): array {
     $stmt = $pdo->prepare(
-        "SELECT COLUMN_NAME, COLUMN_TYPE
-           FROM information_schema.COLUMNS
-          WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table"
+        'SELECT a.attname AS column_name, format_type(a.atttypid, a.atttypmod) AS column_type
+           FROM pg_attribute a
+           JOIN pg_class c ON c.oid = a.attrelid
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = :schema
+            AND c.relname = :table
+            AND a.attnum > 0
+            AND NOT a.attisdropped
+          ORDER BY a.attname'
     );
     $stmt->execute([':schema' => $schema, ':table' => $table]);
 
     $map = [];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $map[(string)$row['COLUMN_NAME']] = $normalizeType((string)$row['COLUMN_TYPE']);
+        $map[(string)$row['column_name']] = $normalizeType((string)$row['column_type']);
     }
+    ksort($map);
+    $stmt->closeCursor();
+
+    return $map;
+};
+
+/** Tablas de un esquema: nombre => columnas. */
+$tableMap = static function (PDO $pdo, string $schema) use ($columnMap): array {
+    $stmt = $pdo->prepare(
+        "SELECT c.relname AS table_name
+           FROM pg_class c
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = :schema
+            AND c.relkind = 'r'
+          ORDER BY c.relname"
+    );
+    $stmt->execute([':schema' => $schema]);
+
+    $tables = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $tableName = (string)$row['table_name'];
+        $tables[$tableName] = $columnMap($pdo, $schema, $tableName);
+    }
+    $stmt->closeCursor();
+    ksort($tables);
+
+    return $tables;
+};
+
+/** Conjuntos `ENUM` de un esquema: tipo => etiquetas en su ordinal declarado. */
+$enumMap = static function (PDO $pdo, string $schema): array {
+    $stmt = $pdo->prepare(
+        'SELECT t.typname AS type_name, e.enumlabel AS label
+           FROM pg_type t
+           JOIN pg_namespace n ON n.oid = t.typnamespace
+           JOIN pg_enum e ON e.enumtypid = t.oid
+          WHERE n.nspname = :schema
+          ORDER BY t.typname, e.enumsortorder'
+    );
+    $stmt->execute([':schema' => $schema]);
+
+    $map = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $map[(string)$row['type_name']][] = (string)$row['label'];
+    }
+    $stmt->closeCursor();
     ksort($map);
 
     return $map;
 };
 
-/** Columns the expected schema has and the actual one does not. */
-$missingColumns = static function (array $expected, array $actual): array {
+/** Tablas que el rasero declara y el sujeto no. */
+$tablesAbsentFrom = static function (array $yardstick, array $subject): array {
+    return array_values(array_diff(array_keys($yardstick), array_keys($subject)));
+};
+
+/** Columnas que el rasero tiene y el sujeto no. */
+$columnsAbsentFrom = static function (array $expected, array $actual): array {
     return array_values(array_diff(array_keys($expected), array_keys($actual)));
 };
 
-/** Columns present in both schemas but declared with a different type. */
+/** Columnas presentes en los dos pero declaradas con otra forma. */
 $typeMismatches = static function (array $expected, array $actual): array {
     $mismatches = [];
     foreach ($expected as $column => $type) {
@@ -130,15 +217,22 @@ $typeMismatches = static function (array $expected, array $actual): array {
     return $mismatches;
 };
 
+/** Etiquetas del dominio que el conjunto declarado no tiene. */
+$labelsAbsentFrom = static function (array $declared, array $expected): array {
+    return array_values(array_filter(
+        $expected,
+        static fn (string $label): bool => !in_array($label, $declared, true)
+    ));
+};
+
 /**
- * Runs one statement the way the container does: through `PDO::query()` with
- * the cursor closed afterwards.
+ * Ejecuta una sentencia como lo hace el arranque del contenedor: `PDO::query()`
+ * y cierre del cursor.
  *
- * The migrations close each kernel check with `SELECT 1`, and an unread result
- * set makes the next statement of the same connection fail with «2014 Cannot
- * execute queries while other unbuffered queries are active». Mirroring the
- * boot here is what makes the scratch schema a faithful replica of the
- * deployed one.
+ * No es un detalle: las migraciones cierran sus comprobaciones de kernel con
+ * `SELECT 1`, y un resultado sin leer deja la conexión inutilizable para la
+ * sentencia siguiente. Replicarlo es lo que hace de la sonda un fiel del
+ * despliegue.
  */
 $runStatement = static function (PDO $pdo, string $statement): void {
     $result = $pdo->query($statement);
@@ -147,15 +241,12 @@ $runStatement = static function (PDO $pdo, string $statement): void {
     }
 };
 
-/** Applies a script statement by statement, skipping seeds (schema only). */
+/** Aplica un script del repositorio sentencia a sentencia, con el troceador compartido. */
 $applySqlFile = static function (PDO $pdo, string $path) use ($runStatement): int {
     $sql = (string)file_get_contents($path);
     $executed = 0;
 
     foreach (SqlScriptSplitter::split($sql) as $statement) {
-        if (strtoupper((string)strtok($statement, " \t\n\r")) === 'INSERT') {
-            continue;
-        }
         $runStatement($pdo, $statement);
         $executed++;
     }
@@ -163,41 +254,64 @@ $applySqlFile = static function (PDO $pdo, string $path) use ($runStatement): in
     return $executed;
 };
 
-$migrationFiles = glob($baseDir . '/database/migrations/*.sql') ?: [];
+$migrationFiles = glob($migrationsDirectory . '/*.sql') ?: [];
 sort($migrationFiles);
 $migrationSql = '';
 foreach ($migrationFiles as $migrationFile) {
     $migrationSql .= (string)file_get_contents($migrationFile);
 }
+$deploySql = (string)file_get_contents($deployDdlFile) . $migrationSql;
+$baselinePath = $migrationsDirectory . '/' . $baselineFilename;
 
 // Las tres columnas que la API consultaba contra un esquema que no las tenía.
 $columnsThatBrokeTheDeployment = ['paid_amount', 'pickup_attempts', 'pickup_locked_until'];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Caso 1: el arranque del despliegue aplica las migraciones incrementales
+// Caso 1: el arranque desplegado aplica la ruta del motor único y la declara convergida
 // ─────────────────────────────────────────────────────────────────────────────
 echo "\n--- Caso 1: el arranque desplegado hace converger el esquema ---\n";
 
 $bootScript = (string)file_get_contents($baseDir . '/bin/init_cloud_db.php');
 
 $assert(
-    str_contains($bootScript, 'database/migrations'),
-    'El arranque del contenedor (bin/init_cloud_db.php) aplica database/migrations/'
+    str_contains($bootScript, 'database/supabase_init.sql'),
+    'El arranque del contenedor (bin/init_cloud_db.php) aplica el DDL base del motor único'
+);
+$assert(
+    str_contains($bootScript, 'database/supabase_migrations'),
+    'El arranque aplica la capa incremental del motor único (database/supabase_migrations/)'
+);
+$assert(
+    str_contains($bootScript, 'PostgresMigrationRunner'),
+    'El arranque aplica las migraciones con el ejecutor del motor único'
 );
 $assert(
     str_contains($bootScript, 'SqlScriptSplitter::split('),
     'El arranque aplica las migraciones con el troceador compartido, sentencia a sentencia'
 );
 $assert(
-    $migrationFiles !== [] && count($migrationFiles) >= 11,
-    'El repositorio declara las migraciones incrementales de todos los modulos',
-    'encontradas: ' . count($migrationFiles)
+    str_contains($bootScript, '$runner->assertConverged()'),
+    'El arranque declara la convergencia como puerta y no como deseo (EARS-02.4)'
 );
 $assert(
-    str_contains($migrationSql, '`paid_amount`')
-    && str_contains($migrationSql, '`pickup_attempts`')
-    && str_contains($migrationSql, '`pickup_locked_until`'),
-    'Las tres columnas que rompieron el despliegue viven en la capa incremental'
+    str_contains($bootScript, 'database/supabase_seeds.sql'),
+    'El arranque carga el catálogo maestro del arranque en limpio (EARS-02.1)'
+);
+$assert(
+    $migrationFiles !== [],
+    'El repositorio declara la capa incremental del motor único',
+    'ficheros: ' . count($migrationFiles)
+);
+$assert(
+    is_file($baselinePath)
+    && str_contains((string)file_get_contents($baselinePath), 'Baseline del motor nuevo incompleto'),
+    'La línea base del libro existe y es la guarda de completitud de un arranque sin DDL base (EARS-02.4)'
+);
+$assert(
+    str_contains($deploySql, 'paid_amount')
+    && str_contains($deploySql, 'pickup_attempts')
+    && str_contains($deploySql, 'pickup_locked_until'),
+    'Las tres columnas que rompieron el despliegue viven en la ruta de despliegue del motor único'
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -370,9 +484,8 @@ $assert(
 // ─────────────────────────────────────────────────────────────────────────────
 echo "\n--- Caso 1c-bis: los demas scripts de bin/ resuelven su cadena ---\n";
 
-// `bin/seed.php` y `bin/seed_demo_metrics.php` son la vía documentada para sembrar
-// a mano y `bin/migrate.php` la de migrar: los tres declaran a mano las clases que
-// usan, y los tres heredaron las mismas dependencias que rompieron el contenedor
+// `bin/seed.php`, `bin/seed_demo_metrics.php` y `bin/migrate.php` declaran a mano las clases
+// que usan, y heredaron las mismas dependencias que rompieron el contenedor
 // (`SecretProvider` por S-5, `SiteAccessCodeGenerator` por S-4). El script del
 // despliegue ya tiene su propia certificación arriba; esta recorre el resto para
 // que ninguna herramienta del repositorio vuelva a morir con «Class not found»
@@ -443,239 +556,360 @@ $assert(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Caso 1b: el troceador sobrevive a los escapes que usan las migraciones
+// Caso 1b: el troceador respeta el acotado por signos de dólar
 // ─────────────────────────────────────────────────────────────────────────────
-echo "\n--- Caso 1b: el troceador respeta comillas escapadas ---\n";
+echo "\n--- Caso 1b: el troceador respeta los cuerpos acotados por dolar ---\n";
 
-// 009 cierra su SIGNAL con `\'` seguido de la comilla de cierre: si el
-// troceador mira antes la duplicación que la barra invertida, se come el cierre
-// y el resto del fichero queda dentro de una cadena.
-$statement009 = SqlScriptSplitter::split((string)file_get_contents($baseDir . '/database/migrations/009_refund_audit_entity.sql'));
+// El DDL base declara sus 24 conjuntos `ENUM` y sus dos funciones de disparador
+// dentro de cuerpos acotados por dólar (`DO $do$ ... $do$`, `$$ ... $$ LANGUAGE
+// plpgsql`), y esos cuerpos llevan puntos y coma propios. Si el troceador no
+// reconociera el acotado, cada uno de esos bloques se partiría por la mitad y el
+// arranque abortaría en la primera sentencia cortada.
+$deployDdlSql = (string)file_get_contents($deployDdlFile);
+$deployDdlStatements = SqlScriptSplitter::split($deployDdlSql);
 
-$assert(
-    count($statement009) >= 5
-    && count(array_filter($statement009, static fn (string $s): bool => str_starts_with(trim($s), 'PREPARE vg_refund_audit_statement'))) === 1,
-    'La migracion 009 se trocea en sentencias separadas pese a cerrar un literal con barra invertida',
-    'sentencias: ' . count($statement009)
-);
-$assert(
-    count(array_filter($statement009, static fn (string $s): bool => str_contains($s, 'SIGNAL SQLSTATE') && str_contains($s, 'no admite nulos'))) === 1,
-    'El SIGNAL escapado de la migracion 009 llega intacto a una sola sentencia'
-);
-
-// 013 mete un `;` dentro de un literal con comillas duplicadas: si el troceador
-// no entiende `''`, parte el MESSAGE_TEXT por la mitad y el arranque aborta.
-// 010 mete un `;` dentro de un literal con comillas duplicadas (`''`), que es la
-// otra forma que tiene SQL de escapar una comilla.
-$statement010 = SqlScriptSplitter::split((string)file_get_contents($baseDir . '/database/migrations/010_refund_hard_delete_guard.sql'));
-
-$assert(
-    count(array_filter($statement010, static fn (string $s): bool => str_contains($s, 'SIGNAL SQLSTATE') && str_contains($s, 'is_active = 0'))) === 1,
-    'El punto y coma dentro del literal duplicado de la migracion 010 no trocea la sentencia'
-);
-
-// 013 usa la misma forma con otro mensaje: `recogida; revise`.
-$statement013 = SqlScriptSplitter::split((string)file_get_contents($baseDir . '/database/migrations/013_refund_pickup_pin_lockout.sql'));
+$dollarBlocks = array_values(array_filter(
+    $deployDdlStatements,
+    static fn (string $statement): bool => str_starts_with(strtoupper(ltrim($statement)), 'DO ')
+));
+$dollarBlocksWithoutGuard = array_values(array_filter(
+    $dollarBlocks,
+    static fn (string $statement): bool => !str_contains($statement, 'EXCEPTION WHEN duplicate_object')
+));
+$dollarBlocksUnclosed = array_values(array_filter(
+    $dollarBlocks,
+    static fn (string $statement): bool => !str_ends_with(rtrim($statement), 'END $do$')
+));
 
 $assert(
-    count(array_filter($statement013, static fn (string $s): bool => str_contains($s, 'SIGNAL SQLSTATE') && str_contains($s, 'recogida; revise'))) === 1,
-    'El punto y coma dentro del literal duplicado de la migracion 013 no trocea la sentencia'
+    count($dollarBlocks) >= 20,
+    'Los bloques DO del DDL base llegan sentencia a sentencia, sin cortarse por sus puntos y coma internos',
+    'bloques: ' . count($dollarBlocks)
+);
+$assert(
+    $dollarBlocksWithoutGuard === [],
+    'Cada bloque DO conserva su cuerpo completo: la declaracion del enumerado y su tolerancia al objeto duplicado',
+    'bloques truncados: ' . count($dollarBlocksWithoutGuard)
+);
+$assert(
+    $dollarBlocksUnclosed === [],
+    'Cada bloque DO cierra con su propio delimitador, no con el de la sentencia siguiente',
+    'bloques sin cierre: ' . count($dollarBlocksUnclosed)
+);
+$assert(
+    count($deployDdlStatements) < substr_count($deployDdlSql, ';'),
+    'La cuenta de sentencias es menor que la de puntos y coma: los de dentro de los cuerpos no trocean',
+    'sentencias: ' . count($deployDdlStatements) . ' · puntos y coma: ' . substr_count($deployDdlSql, ';')
 );
 
-$unbalanced = array_values(array_filter(
-    array_merge($statement010, $statement013),
-    static fn (string $s): bool => substr_count($s, "'") % 2 !== 0
+// Prueba de mordida: sin conciencia del acotado por dólar, ningún bloque llega
+// entero. El medidor tiene que discriminar de verdad.
+$naiveFragments = array_values(array_filter(
+    array_map('trim', explode(';', $deployDdlSql)),
+    static fn (string $fragment): bool => $fragment !== ''
+));
+$naiveCompleteBlocks = count(array_filter(
+    $naiveFragments,
+    static fn (string $fragment): bool => str_starts_with(strtoupper($fragment), 'DO ')
+        && str_ends_with($fragment, 'END $do$')
 ));
 $assert(
-    $unbalanced === [],
-    'Ninguna sentencia de las migraciones 010 y 013 queda con comillas simples desequilibradas',
-    'desequilibradas: ' . count($unbalanced)
+    $naiveCompleteBlocks === 0 && count($dollarBlocks) >= 20,
+    'El medidor discrimina: un troceado ingenuo por punto y coma no deja ni un bloque entero y el troceador compartido los deja todos',
+    'bloques enteros con troceado ingenuo: ' . $naiveCompleteBlocks
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Caso 2: el esquema del despliegue cubre el esquema probado
-// ─────────────────────────────────────────────────────────────────────────────
-echo "\n--- Caso 2: el esquema desplegado cubre el esquema de la aplicacion ---\n";
-
-$serverPdo = ConnectionFactory::getConnection(['dbname' => 'mysql'], true);
-
-foreach ([$deploySchema, $baseOnlySchema] as $scratchSchema) {
-    $serverPdo->exec("DROP DATABASE IF EXISTS `{$scratchSchema}`");
-    $serverPdo->exec("CREATE DATABASE `{$scratchSchema}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-}
-
+// La línea base del libro es el otro cuerpo acotado de la ruta: consulta catálogos
+// y decide si el arranque puede declararse convergido.
+$baselineStatements = SqlScriptSplitter::split((string)file_get_contents($baselinePath));
+$baselineGuards = array_values(array_filter(
+    $baselineStatements,
+    static fn (string $statement): bool => str_contains($statement, 'Baseline del motor nuevo incompleto')
+));
 $assert(
-    true,
-    'Las bases de datos de sonda se crean desde cero y no tocan vendguard_db'
+    count($baselineGuards) === 1
+    && str_starts_with($baselineGuards[0], 'DO $$')
+    && str_contains($baselineGuards[0], 'RAISE EXCEPTION')
+    && substr_count($baselineGuards[0], ';') >= 3,
+    'La guarda de completitud de la linea base llega en una sola sentencia, con sus puntos y coma internos',
+    'sentencias: ' . count($baselineStatements)
 );
 
-$livePdo = ConnectionFactory::getConnection();
-
-$deployPdo = ConnectionFactory::getConnection(['dbname' => $deploySchema], true);
-$baseOnlyPdo = ConnectionFactory::getConnection(['dbname' => $baseOnlySchema], true);
-
-$baseDdlFile = $baseDir . '/database/cloud_init.sql';
+// ─────────────────────────────────────────────────────────────────────────────
+// Casos 2 a 4: la ruta de despliegue se construye de verdad, en esquemas de sonda
+// ─────────────────────────────────────────────────────────────────────────────
+$definitionsPdo = null;
+$yardstickPdo = null;
+$probePdo = null;
+$baseOnlyPdo = null;
+$emptyPdo = null;
 
 try {
-    // Ruta de despliegue real: DDL base + migraciones incrementales, las dos
-    // con el mismo troceador y la misma forma de ejecución que el contenedor.
-    $applySqlFile($deployPdo, $baseDdlFile);
-    foreach ($migrationFiles as $migrationFile) {
-        $applySqlFile($deployPdo, $migrationFile);
+    // El rasero: el esquema contra el que corre toda la batería. No se toca.
+    $yardstickPdo = ConnectionFactory::getConnection();
+    $yardstickTables = $tableMap($yardstickPdo, $yardstickSchema);
+    $yardstickColumns = array_sum(array_map('count', $yardstickTables));
+    $yardstickEnums = $enumMap($yardstickPdo, $yardstickSchema);
+
+    $definitionsPdo = ConnectionFactory::getConnection([], true);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Caso 2: el esquema que construye la ruta de despliegue cubre el esquema probado
+    // ─────────────────────────────────────────────────────────────────────────
+    echo "\n--- Caso 2: la ruta de despliegue cubre el esquema probado ---\n";
+
+    $assert(
+        count($yardstickTables) >= 20 && $yardstickColumns >= 150,
+        'El esquema probado declara el parque de tablas y columnas del contrato',
+        'tablas: ' . count($yardstickTables) . ' (rasero; incluye el libro del ejecutor) · columnas: ' . $yardstickColumns
+    );
+
+    foreach ([$probeSchema, $baseOnlySchema, $emptySchema] as $scratchSchema) {
+        $definitionsPdo->exec("DROP SCHEMA IF EXISTS {$scratchSchema} CASCADE");
+        $definitionsPdo->exec("CREATE SCHEMA {$scratchSchema}");
     }
-
-    // Ruta de despliegue anterior al arreglo: solo el DDL base. Se construye
-    // para demostrar que la diferencia es observable, no teórica.
-    $applySqlFile($baseOnlyPdo, $baseDdlFile);
-
-    // El yardstick: el esquema contra el que corre toda la batería.
-    $liveRefund = $columnMap($livePdo, $liveSchema, 'refund_requests');
-    $liveUnclaimed = $columnMap($livePdo, $liveSchema, 'unclaimed_cash_findings');
-
     $assert(
-        count($liveRefund) >= 30 && count($liveUnclaimed) >= 7,
-        'El esquema probado declara las dos tablas de reintegros con sus columnas',
-        'refund_requests: ' . count($liveRefund) . ', unclaimed_cash_findings: ' . count($liveUnclaimed)
+        true,
+        'Los esquemas de sonda se crean desde cero y no tocan el esquema probado'
     );
 
-    $deployRefund = $columnMap($deployPdo, $deploySchema, 'refund_requests');
-    $deployUnclaimed = $columnMap($deployPdo, $deploySchema, 'unclaimed_cash_findings');
+    // El despliegue real: DDL base, capa incremental por el ejecutor del repositorio,
+    // todo dentro del esquema de sonda. `public` va en la ruta de búsqueda porque las
+    // extensiones viven ahí y el DDL las instala de forma idempotente.
+    $probePdo = ConnectionFactory::getConnection([], true);
+    $probePdo->exec("SET search_path TO {$probeSchema}, public");
 
-    $missingRefund = $missingColumns($liveRefund, $deployRefund);
+    $deployStatements = $applySqlFile($probePdo, $deployDdlFile);
+    $probeRunner = new PostgresMigrationRunner($probePdo);
+    $appliedNow = $probeRunner->runAll();
+
     $assert(
-        $missingRefund === [],
-        'El esquema del despliegue declara todas las columnas de refund_requests que usa la aplicacion',
-        'faltan: ' . implode(', ', $missingRefund)
+        $deployStatements >= 100 && $appliedNow === array_map('basename', $migrationFiles),
+        'La ruta de despliegue aplica el DDL base y la capa incremental completa del repositorio',
+        'sentencias: ' . $deployStatements . ' · migraciones: ' . implode(', ', $appliedNow)
     );
 
-    $refundTypeMismatches = $typeMismatches($liveRefund, $deployRefund);
+    $convergenceFailure = '';
+    try {
+        $probeRunner->assertConverged();
+    } catch (Throwable $exception) {
+        $convergenceFailure = $exception->getMessage();
+    }
     $assert(
-        $refundTypeMismatches === [],
-        'Las columnas de refund_requests tienen el mismo tipo en el despliegue que en el entorno probado',
-        json_encode($refundTypeMismatches, JSON_UNESCAPED_UNICODE) ?: ''
+        $convergenceFailure === '',
+        'Tras aplicar el libro, la ruta de despliegue declara el esquema convergido (EARS-02.4)',
+        $convergenceFailure
     );
 
-    $missingUnclaimed = $missingColumns($liveUnclaimed, $deployUnclaimed);
+    $probeTables = $tableMap($probePdo, $probeSchema);
+    $tablesAbsent = $tablesAbsentFrom($yardstickTables, $probeTables);
+
     $assert(
-        $missingUnclaimed === [],
-        'El esquema del despliegue declara todas las columnas de unclaimed_cash_findings',
-        'faltan: ' . implode(', ', $missingUnclaimed)
+        $tablesAbsent === [],
+        'La ruta de despliegue declara todas las tablas que usa la aplicacion',
+        'faltan: ' . implode(', ', $tablesAbsent)
     );
 
-    $unclaimedTypeMismatches = $typeMismatches($liveUnclaimed, $deployUnclaimed);
+    $columnDeviations = [];
+    foreach ($yardstickTables as $tableName => $expectedColumns) {
+        if (!isset($probeTables[$tableName])) {
+            continue;
+        }
+
+        foreach ($columnsAbsentFrom($expectedColumns, $probeTables[$tableName]) as $column) {
+            $columnDeviations[] = "{$tableName}.{$column} ausente";
+        }
+        foreach ($typeMismatches($expectedColumns, $probeTables[$tableName]) as $column => $mismatch) {
+            $columnDeviations[] = "{$tableName}.{$column} {$mismatch}";
+        }
+    }
     $assert(
-        $unclaimedTypeMismatches === [],
-        'Las columnas de unclaimed_cash_findings tienen el mismo tipo en el despliegue',
-        json_encode($unclaimedTypeMismatches, JSON_UNESCAPED_UNICODE) ?: ''
+        $columnDeviations === [],
+        'Cada tabla declara las mismas columnas y la misma forma de tipo en el despliegue que en el esquema probado',
+        implode(' | ', array_slice($columnDeviations, 0, 8))
     );
+
+    $probeRefund = $probeTables['refund_requests'] ?? [];
+    $probeUnclaimed = $probeTables['unclaimed_cash_findings'] ?? [];
 
     foreach ($columnsThatBrokeTheDeployment as $column) {
         $assert(
-            isset($deployRefund[$column]),
-            "La columna `{$column}` existe en el esquema que construye el arranque desplegado"
+            isset($probeRefund[$column]),
+            "La columna `{$column}` existe en el esquema que construye la ruta de despliegue"
         );
     }
 
-    // DECIMAL(10,2) no es un detalle de estilo: con DECIMAL(6,2) y este servidor
-    // sin STRICT_TRANS_TABLES, 999999.00 se guardaba como 9999.99 sin avisar
-    // (migracion 011_refund_amount_integrity.sql).
+    // NUMERIC(10,2) no es un detalle de estilo: un importe declarado con menos
+    // dígitos deja que una cifra alta se guarde truncada sin avisar. Las tres
+    // columnas del incidente son de esta tabla.
     $assert(
-        ($deployRefund['claimed_amount'] ?? '') === 'decimal(10,2)'
-        && ($deployRefund['recovered_amount'] ?? '') === 'decimal(10,2)'
-        && ($deployRefund['approved_amount'] ?? '') === 'decimal(10,2)'
-        && ($deployRefund['paid_amount'] ?? '') === 'decimal(10,2)'
-        && ($deployUnclaimed['amount'] ?? '') === 'decimal(10,2)',
-        'Los importes del despliegue son DECIMAL(10,2) y no pueden saturar en silencio',
+        ($probeRefund['claimed_amount'] ?? '') === 'numeric(10,2)'
+        && ($probeRefund['recovered_amount'] ?? '') === 'numeric(10,2)'
+        && ($probeRefund['approved_amount'] ?? '') === 'numeric(10,2)'
+        && ($probeRefund['paid_amount'] ?? '') === 'numeric(10,2)'
+        && ($probeUnclaimed['amount'] ?? '') === 'numeric(10,2)',
+        'Los importes del despliegue son NUMERIC(10,2) y no pueden saturar en silencio',
         json_encode([
-            'claimed_amount' => $deployRefund['claimed_amount'] ?? null,
-            'paid_amount' => $deployRefund['paid_amount'] ?? null,
-            'unclaimed.amount' => $deployUnclaimed['amount'] ?? null,
+            'claimed_amount' => $probeRefund['claimed_amount'] ?? null,
+            'paid_amount' => $probeRefund['paid_amount'] ?? null,
+            'unclaimed.amount' => $probeUnclaimed['amount'] ?? null,
         ]) ?: ''
     );
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Caso 3: la guardia muerde (el esquema sin migraciones se detecta)
-    // ─────────────────────────────────────────────────────────────────────────
-    echo "\n--- Caso 3: la guardia detecta el despliegue sin migraciones ---\n";
-
-    $baseOnlyRefund = $columnMap($baseOnlyPdo, $baseOnlySchema, 'refund_requests');
-    $baseOnlyMissing = $missingColumns($liveRefund, $baseOnlyRefund);
-
+    // Prueba de mordida en memoria: el comparador no puede pasar por vacío.
+    $syntheticActual = $probeTables['refund_requests'];
+    unset($syntheticActual['paid_amount']);
     $assert(
-        $baseOnlyMissing !== [],
-        'Un esquema construido solo con el DDL base se detecta como incompleto',
+        $columnsAbsentFrom($yardstickTables['refund_requests'], $syntheticActual) === ['paid_amount'],
+        'El comparador de columnas senala una columna ausente aunque todo lo demas coincida'
+    );
+    $assert(
+        $typeMismatches(['paid_amount' => 'numeric(10,2)'], ['paid_amount' => 'numeric(6,2)'])
+            === ['paid_amount' => 'numeric(10,2) != numeric(6,2)'],
+        'El comparador de tipos senala el ensanchamiento de un importe, no solo su ausencia'
+    );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Caso 3: la guardia muerde
+    // ─────────────────────────────────────────────────────────────────────────
+    echo "\n--- Caso 3: la guardia detecta el despliegue sin convergencia ---\n";
+
+    // Dirección A: solo el DDL base. Es la ruta anterior al arreglo: crea el esquema
+    // entero y **no** deja libro, de modo que nada puede declararla convergida.
+    $baseOnlyPdo = ConnectionFactory::getConnection([], true);
+    $baseOnlyPdo->exec("SET search_path TO {$baseOnlySchema}, public");
+    $applySqlFile($baseOnlyPdo, $deployDdlFile);
+    $baseOnlyRunner = new PostgresMigrationRunner($baseOnlyPdo);
+
+    $baseOnlyReport = $baseOnlyRunner->convergenceReport();
+    $assert(
+        $baseOnlyReport['converged'] === false
+        && in_array($baselineFilename, $baseOnlyReport['pending'], true),
+        'Un esquema construido solo con el DDL base se declara NO convergido: el despliegue anterior al arreglo se detecta',
+        'pendientes: ' . implode(', ', $baseOnlyReport['pending'])
+    );
+    $assert(
+        $baseOnlyRunner->ledgerExists() === false,
+        'Sin la capa incremental no hay libro del ejecutor: la convergencia no se puede declarar por accidente'
+    );
+
+    $baseOnlyGateFailed = '';
+    try {
+        $baseOnlyRunner->assertConverged();
+    } catch (Throwable $exception) {
+        $baseOnlyGateFailed = $exception->getMessage();
+    }
+    $assert(
+        $baseOnlyGateFailed !== '' && str_contains($baseOnlyGateFailed, 'EARS-02.4'),
+        'La puerta de convergencia del arranque falla en voz alta sobre el despliegue sin migraciones',
+        $baseOnlyGateFailed
+    );
+
+    $baseOnlyTables = $tableMap($baseOnlyPdo, $baseOnlySchema);
+    $baseOnlyMissing = $tablesAbsentFrom($yardstickTables, $baseOnlyTables);
+    $assert(
+        $baseOnlyMissing === ['schema_migrations'],
+        'El unico objeto que el DDL base no declara es el libro del ejecutor, y esa ausencia es la que delata la falta de convergencia',
         'faltan: ' . implode(', ', $baseOnlyMissing)
     );
 
-    $stillMissing = array_values(array_intersect($columnsThatBrokeTheDeployment, $baseOnlyMissing));
+    // Dirección B: la capa incremental sin el DDL base. La ruta tiene que **fallar en
+    // voz alta** en lugar de registrar la convergencia sobre un esquema que no existe:
+    // es exactamente el modo de fallo que EARS-02.4/EARS-02.5 prohiben.
+    $emptyPdo = ConnectionFactory::getConnection([], true);
+    $emptyPdo->exec("SET search_path TO {$emptySchema}, public");
+    $emptyRunner = new PostgresMigrationRunner($emptyPdo);
+
+    $bitMessage = '';
+    try {
+        $emptyRunner->runAll();
+    } catch (Throwable $exception) {
+        $bitMessage = $exception->getMessage();
+    }
     $assert(
-        count($stillMissing) === count($columnsThatBrokeTheDeployment),
-        'Las tres columnas del incidente de Render son exactamente las que faltan sin migraciones',
-        'detectadas: ' . implode(', ', $stillMissing)
+        str_contains($bitMessage, 'Baseline del motor nuevo incompleto'),
+        'Sin el DDL base, la capa incremental falla en voz alta en lugar de declarar convergido un esquema que no existe',
+        $bitMessage
+    );
+    $assert(
+        str_contains($bitMessage, $baselineFilename),
+        'El fallo nombra la migracion que lo declaro'
     );
 
-    // Prueba de mordida en memoria: el comparador no puede pasar por vacío.
-    $syntheticExpected = $liveRefund;
-    $syntheticActual = $deployRefund;
-    unset($syntheticActual['paid_amount']);
+    $emptyTables = $tableMap($emptyPdo, $emptySchema);
+    $emptyReport = $emptyRunner->convergenceReport();
     $assert(
-        $missingColumns($syntheticExpected, $syntheticActual) === ['paid_amount'],
-        'El comparador de columnas senala una columna ausente aunque todo lo demas coincida'
+        array_diff(array_keys($emptyTables), [PostgresMigrationRunner::LEDGER_TABLE]) === []
+        && $emptyReport['converged'] === false
+        && $emptyReport['pending'] !== [],
+        'Tras el rechazo, el esquema sigue declarandose no convergido: la transaccion de la migracion no dejo rastro',
+        'tablas: ' . implode(', ', array_keys($emptyTables))
     );
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Caso 4: el DDL base declara todos los estados que la aplicacion escribe
+    // Caso 4: los conjuntos ENUM de la ruta de despliegue son los del dominio
     // ─────────────────────────────────────────────────────────────────────────
-    echo "\n--- Caso 4: el DDL base declara los estados de IncidentStatus ---\n";
+    echo "\n--- Caso 4: los ENUM del despliegue declaran los valores del dominio ---\n";
 
-    // 2026-10-11: el primer arranque desplegado en TiDB se detuvo en la migracion
-    // 016 con `8200 Unsupported modify column: oldCol is a dependent column
-    // 'status' for generated column`. TiDB rechaza modificar una columna de la
-    // que depende una columna generada, y `incidents.is_active_ticket` -- la
-    // guardia de duplicados del Art. V.2 -- depende de `status`. En MySQL/MariaDB
-    // la ampliacion del enum pasa, asi que ninguna suite local podia verlo. La
-    // unica convergencia posible en ese motor es que `database/cloud_init.sql`,
-    // que reconstruye `incidents` en cada arranque, declare el estado. Esta
-    // guardia exige que los declare TODOS, no solo PENDING_INFO: el siguiente
-    // estado anadido solo por migracion volveria a romper el despliegue.
+    // El DDL base **crea** los 24 conjuntos, de modo que un valor que solo viviera en
+    // una migracion posterior no estaria en un arranque en limpio. La guarda compara
+    // conjuntos, no ordinales: el contrato declara el mismo conjunto de miembros en
+    // los dos motores y no fija el orden como parte de la regla.
+    $assert(
+        count($yardstickEnums) >= 24,
+        'El esquema probado declara los conjuntos ENUM del contrato',
+        'conjuntos: ' . count($yardstickEnums)
+    );
 
-    $baseOnlyStatusType = (string)$baseOnlyPdo->query(
-        "SELECT COLUMN_TYPE FROM information_schema.COLUMNS
-          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'incidents' AND COLUMN_NAME = 'status'"
-    )->fetchColumn();
+    $probeEnums = $enumMap($probePdo, $probeSchema);
+    $assert(
+        $probeEnums === $yardstickEnums,
+        'La ruta de despliegue declara los mismos conjuntos ENUM, con las mismas etiquetas, que el esquema probado',
+        'desviaciones: ' . json_encode(array_keys(array_diff_key($yardstickEnums, $probeEnums))) ?: ''
+    );
 
-    $statusesMissingFrom = static function (string $enumType, array $statuses): array {
-        return array_values(array_filter(
-            $statuses,
-            static fn (string $status): bool => !str_contains($enumType, "'" . $status . "'")
-        ));
-    };
     $applicationStatuses = IncidentStatus::values();
-
-    $missingFromBaseDdl = $statusesMissingFrom($baseOnlyStatusType, $applicationStatuses);
+    $statusDeviations = [];
+    foreach ([$yardstickSchema => $yardstickEnums, $probeSchema => $probeEnums] as $schemaName => $enums) {
+        $declared = $enums['incident_status'] ?? [];
+        if ($declared === []) {
+            $statusDeviations[] = "{$schemaName} no declara el enumerado incident_status";
+            continue;
+        }
+        $missing = $labelsAbsentFrom($declared, $applicationStatuses);
+        if ($missing !== []) {
+            $statusDeviations[] = "{$schemaName} sin " . implode(', ', $missing);
+        }
+    }
     $assert(
-        $missingFromBaseDdl === [],
-        'El DDL base del despliegue declara todos los estados de IncidentStatus (TiDB no admite anadirlos en caliente)',
-        'faltan: ' . implode(', ', $missingFromBaseDdl)
+        $statusDeviations === [],
+        'Los dos esquemas declaran todos los estados de IncidentStatus que la aplicacion escribe',
+        implode(' | ', $statusDeviations)
     );
 
-    // Prueba de mordida: el comprobador tiene que discriminar de verdad.
-    $syntheticMissing = $statusesMissingFrom("enum('REGISTERED','CLOSED')", $applicationStatuses);
+    // Prueba de mordida: el comparador tiene que discriminar de verdad.
+    $syntheticMissing = $labelsAbsentFrom(['REGISTERED', 'CLOSED'], $applicationStatuses);
     $assert(
         $syntheticMissing !== [] && in_array('PENDING_INFO', $syntheticMissing, true),
-        'El comparador de estados senala los que faltan en un enum incompleto',
+        'El comparador de estados senala los que faltan en un enumerado incompleto',
         'detectados: ' . implode(', ', $syntheticMissing)
     );
 } finally {
-    // Las conexiones a las sondas se sueltan antes de borrarlas.
-    $deployPdo = null;
+    // Las conexiones a las sondas se sueltan antes de borrarlas. El borrado va por una
+    // conexion propia para no depender de la que quedó apuntando al esquema de sonda.
+    $yardstickPdo = null;
+    $probePdo = null;
     $baseOnlyPdo = null;
-    foreach ([$deploySchema, $baseOnlySchema] as $scratchSchema) {
-        $serverPdo->exec("DROP DATABASE IF EXISTS `{$scratchSchema}`");
+    $emptyPdo = null;
+
+    if ($definitionsPdo instanceof PDO) {
+        foreach ([$probeSchema, $baseOnlySchema, $emptySchema] as $scratchSchema) {
+            $definitionsPdo->exec("DROP SCHEMA IF EXISTS {$scratchSchema} CASCADE");
+        }
     }
 }
 
 echo "\n======================================================================\n";
 echo " RESUMEN: {$assertionCount} aserciones superadas exitosamente (100% PASS).\n";
-echo " CONDICIÓN T-REF-27 VERIFICADA SATISFACTORIAMENTE.\n";
+echo " CONDICIÓN T-REF-27 VERIFICADA SATISFACTORIAMENTE (motor único).\n";
 echo "======================================================================\n";

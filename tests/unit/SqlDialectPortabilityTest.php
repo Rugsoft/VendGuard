@@ -771,10 +771,9 @@ const LEGACY_DIALECT = [
     ],
     // ---------- Superficie de la batería: `tests` ----------
     'tests/integration/CloudDeploySchemaParityTest.php' => [
-        'kind' => KIND_CONTRACT,
-        'owner' => 'T-13-16',
-        'census' => ['catalog' => 3, 'legacy_database' => 1],
-        'why' => 'guarda del DDL de despliegue heredado: lee su catálogo en la grafía de ese motor para compararlo; se retira con el artefacto',
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-13', 'census' => [],
+        'drained_occurrences' => ['catalog' => 3, 'legacy_database' => 1],
+        'why' => 'porte del lote de esquema y despliegue: la guarda construía dos bases de sonda del motor retirado —su DROP/CREATE DATABASE y su catálogo en la grafía de ese motor— para comparar el esquema del despliegue; ahora levanta esquemas de sonda del motor único, los construye con el DDL y el ejecutor del repositorio y lee el catálogo de PostgreSQL (pg_class, pg_attribute, pg_enum)',
     ],
     'tests/integration/ConnectionFactoryTest.php' => [
         'kind' => KIND_DEBT,

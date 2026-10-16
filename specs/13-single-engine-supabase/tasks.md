@@ -261,7 +261,32 @@ Cada lote cierra con `php tests/run_all.php` en verde, cifras por lote anotadas 
     * **Comprobación aislada, en la forma del contrato (§4 y §8):** las ocho corren **solas sobre un banco drenado** —con el catálogo restituido entre una y otra— y las ocho terminan en `exit 0` con el **mismo número de aserciones** que en la corrida completa (**24 · 22 · 31 · 24 · 34 · 24 · 41 · 27**), más la gemela unitaria (**35**).
     * **Cifras documentadas:** siguen con sus **11 desviaciones** —las mismas desde la línea base de T-13-07— y se actualizan de una vez en T-13-13.
     * **Lo que queda en rojo** (3 suites, medidas) conserva la adjudicación declarada al cerrar T-13-07, ya sin las ocho de este lote: esquema y despliegue **1** (T-13-13) · factoría de una sola rama **1** (T-13-14) · [`HealthCheckServiceTest`](../../tests/unit/HealthCheckServiceTest.php) **1**, **sin adjudicar** y declarado en esta acta por primera vez.
-- [ ] **T-13-13: Lote de esquema, despliegue y E2E manual** — *Dependencias:* T-13-08 a T-13-12. *Hecho cuando:* el E2E de los tres perfiles, las guardas de despliegue y el verificador manual corren verdes sobre el motor único y las cifras documentadas están coherentes.
+- [x] **T-13-13: Lote de esquema, despliegue y E2E manual**
+  * **Requisitos:** EARS-13.3, EARS-13.4, EARS-13.5, EARS-13.6, EARS-13.10
+  * **Dependencias:** T-13-08 a T-13-12
+  * **Hecho cuando:** el E2E de los tres perfiles, las guardas de despliegue y el verificador manual corren verdes sobre el motor único y las cifras documentadas están coherentes.
+  * **Cerrado (2026-10-16), con evidencia de ejecución:**
+    * **El lote integra las tres superficies de certificación de despliegue y flujo del sistema:** la guarda de esquema desplegado ([`CloudDeploySchemaParityTest`](../../tests/integration/CloudDeploySchemaParityTest.php)), el guion de verificación manual E2E de los 3 perfiles ([`tests/Manual/E2EVerificationRunner.php`](../../tests/Manual/E2EVerificationRunner.php)) con su documentación ([`manual_e2e_verification.md`](../../docs/manual_e2e_verification.md)) y la coherencia de cifras documentadas ([`DocMetricsGuard.php`](../../tests/Support/DocMetricsGuard.php)), más la verificación del canal de certificación del motor nuevo ([`deploy/local/postgres/verify.php`](../../deploy/local/postgres/verify.php)).
+    * **Guarda de esquema de despliegue (`CloudDeploySchemaParityTest`) portada al motor único:**
+      * **45 aserciones, exit 0**. Reemplaza la creación de bases MySQL/MariaDB por la creación de esquemas de sonda transitorios (`vendguard_deploy_probe`, `vendguard_deploy_probe_base`, `vendguard_deploy_probe_empty`) dentro de la base del banco, respetando la política de no requerir privilegios de superusuario ni `CREATEDB` en el rol de aplicación (S-5).
+      * **Certificación fiel del despliegue real:** evalúa la ruta canónica del contenedor (`database/supabase_init.sql` + `database/supabase_migrations/` con `PostgresMigrationRunner` y `SqlScriptSplitter`, más `database/supabase_seeds.sql`). Compara 21 tablas, 286 columnas, 24 tipos `ENUM` y 101 etiquetas contra el esquema rasero `public`.
+      * **Las mordidas se conservan y se expanden:** (1) Esquema solo con DDL base detectado como no convergido (falta el libro `schema_migrations`, la puerta `assertConverged()` falla con `EARS-02.4`); (2) Capa incremental aplicada en esquema vacío sin DDL base falla en voz alta con excepción `Baseline del motor nuevo incompleto` (EARS-02.4/EARS-02.5); (3) Troceador respeta cuerpos acotados con dólar (`DO $do$ ... $do$`, `$$ ... $$ LANGUAGE plpgsql`), validado contra troceado ingenuo; (4) Comparadores de columnas y tipos detectan ensanchamiento o ausencia de importes `numeric(10,2)` y etiquetas de `IncidentStatus`.
+    * **Guion E2E de los 3 perfiles (`tests/Manual/E2EVerificationRunner.php`) y verificador:**
+      * **44 aserciones E2E, exit 0** atravesando secuencialmente Responsable de Sede (login de sede con clave `DEV-SEDE-BCN-01`, catálogo, alta de ticket crítico por frío alimentario, bloqueo de duplicado 409, comentario), Coordinador (login interno, triaje, asignación de técnico), Técnico de Campo (login, mi ruta móvil, inicio de intervención, rechazo de resolución < 20 caracteres con 422, resolución válida con garantía de 48h) y Reapertura (portal de sede, reapertura dentro de 48h, desasignación y reseteo de reloj).
+      * Saneadas menciones a MariaDB en los asserts y cabeceras del runner y en el diagrama de secuencia de [`manual_e2e_verification.md`](../../docs/manual_e2e_verification.md).
+      * Sonda del canal de certificación del motor nuevo ([`deploy/local/postgres/verify.php`](../../deploy/local/postgres/verify.php)) verificada en `exit 0` con rol no superusuario sobre PostgreSQL 16.15.
+    * **Guarda del dialecto actualizada en el mismo commit:**
+      * La declaración de `CloudDeploySchemaParityTest` pasa de `KIND_CONTRACT` (T-13-16) a `KIND_DRAINED` (T-13-13) con `drained_occurrences => ['catalog' => 3, 'legacy_database' => 1]`.
+      * [`SqlDialectPortabilityTest`](../../tests/unit/SqlDialectPortabilityTest.php) queda en **97/97 aserciones, exit 0**.
+    * **Cifras documentadas completamente coherentes (0 desviaciones):**
+      * Sincronizados todos los documentos auditados por [`DocMetricsGuard`](../../tests/Support/DocMetricsGuard.php) con la cifra real ejecutada por la batería: **261 suites · 9.958 aserciones** (desviaciones: 11 → **0**).
+      * Actualizados: `README.md` (insignia shields.io, tabla de fases por totales 114/66/80/1, frase canónica y comentario del árbol de directorios), `docs/handoff_rama_incident-comments.md`, `docs/manual_e2e_verification.md`, `docs/verificacion_criterios_finalizacion_mvp.md` y `docs/verificacion_criterios_finalizacion_preventivo.md`.
+    * **Medición de cierre (`php tests/run_all.php`, dos corridas consecutivas):**
+      * **261 suites · 9.958 aserciones · 2 rojas** (frente a la línea base de 3 rojas antes de T-13-13 y 11 desviaciones documentales).
+      * **0 desviaciones documentales (`COHERENTES`)**, base de datos restablecida a semillas canónicas, cero residuo de sedes/máquinas/usuarios fuera de catálogo.
+      * Las **únicas 2 suites rojas restantes** están formalmente adjudicadas:
+        1. [`ConnectionFactoryTest`](../../tests/integration/ConnectionFactoryTest.php) — dueño **T-13-14** (factoría de conexión de una sola rama).
+        2. [`HealthCheckServiceTest`](../../tests/unit/HealthCheckServiceTest.php) — espera formato de marca temporal sin zona del motor retirado; adjudicada a T-13-14 para alinearse con la factoría y el endpoint de salud único.
 
 ---
 
