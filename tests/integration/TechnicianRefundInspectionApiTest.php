@@ -7,8 +7,8 @@ declare(strict_types=1);
  *
  * Integration suite for the field technician verdict (T-REF-20).
  *
- * It exercises the on-site money verdict through the real `AppRouter` and real
- * MariaDB, exactly as the technician reaches it from a phone in a foreign site
+ * It exercises the on-site money verdict through the real `AppRouter` and the single engine's real
+ * database, exactly as the technician reaches it from a phone in a foreign site
  * (RF-REF-04, RF-REF-05, RF-REF-09, RNF-REF-04):
  *
  * 1. `GET /api/technician/incidents/{id}/refund`, which must tell the technician
@@ -687,7 +687,7 @@ try {
     $assert(
         '5.2 El expediente sobrevive al cierre técnico y sigue activo (Art. III.1)',
         (int)$pdo->query('SELECT COUNT(*) FROM refund_requests WHERE id = ' . $digitalCaseId
-            . ' AND is_active = 1')->fetchColumn() === 1
+            . ' AND is_active = TRUE')->fetchColumn() === 1
     );
 
     $coordinatorInbox = $dispatch(
@@ -787,7 +787,7 @@ try {
         '6.4 El efectivo de oficio no se confunde con un reintegro de un reclamante',
         (int)$pdo->query('SELECT COUNT(*) FROM refund_requests WHERE id = ' . $findingId)->fetchColumn() === 0
             && (int)$pdo->query('SELECT COUNT(*) FROM refund_requests WHERE incident_id = '
-                . (int)$officeIncident->getId() . ' AND is_active = 1')->fetchColumn() === 0
+                . (int)$officeIncident->getId() . ' AND is_active = TRUE')->fetchColumn() === 0
     );
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1143,7 +1143,7 @@ try {
     // se apaga la bandera de la sede semilla y se repite el escenario de 9.4
     // pidiendo conserjería. La transacción reversible la restaura al final.
     $locationId = (int)$location->getId();
-    $pdo->prepare('UPDATE locations SET has_physical_reception = 0 WHERE id = :id')
+    $pdo->prepare('UPDATE locations SET has_physical_reception = FALSE WHERE id = :id')
         ->execute([':id' => $locationId]);
 
     $deskMachine = $makeMachine('TREF20L-', MachineType::HOT_DRINKS);
@@ -1178,7 +1178,7 @@ try {
 
     // Con la Reception devuelta, la MISMA regla deja el sobre donde el técnico
     // pidió: lo que decide es la bandera de la sede, no el cableado.
-    $pdo->prepare('UPDATE locations SET has_physical_reception = 1 WHERE id = :id')
+    $pdo->prepare('UPDATE locations SET has_physical_reception = TRUE WHERE id = :id')
         ->execute([':id' => $locationId]);
 
     $withDesk = $dispatch('POST', "/api/technician/incidents/{$deskIncident->getId()}/resolve", [

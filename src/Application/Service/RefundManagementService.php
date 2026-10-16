@@ -343,7 +343,14 @@ final class RefundManagementService
     public function deliverInHand(int $id, string $pin, array $actor = []): RefundRequest
     {
         $case = $this->loadCase($id);
-        $now = date('Y-m-d H:i:s');
+        // Un solo reloj para toda la operación: el instante que decide si el candado está puesto, el
+        // que se persiste como entrega y el vencimiento que la respuesta anuncia salen del mismo
+        // `time()`, de modo que el plazo anunciado y el guardado no puedan diferir en un segundo.
+        $attemptTimestamp = time();
+        $now = $this->engineInstant($attemptTimestamp);
+        $lockedUntil = $this->engineInstant(
+            $attemptTimestamp + (RefundRequest::PICKUP_PIN_LOCK_MINUTES * 60)
+        );
 
         // The lock is checked BEFORE the secret, so a locked case never even
         // compares. That ordering matters: it stops a locked case from being
@@ -361,13 +368,10 @@ final class RefundManagementService
             // the desk should learn that the door just closed, and until when,
             // on the very request that closed it. Answering 422 would leave the
             // receptionist (and the consumer) guessing for one more round trip.
-            if ($this->registerFailedPickupAttempt($case, $now, $actor)) {
+            if ($this->registerFailedPickupAttempt($case, $lockedUntil, $actor)) {
                 throw new PickupPinLockedException(
                     failedAttempts: $case->getPickupAttempts() + 1,
-                    lockedUntil: date(
-                        'Y-m-d H:i:s',
-                        strtotime($now . ' +' . RefundRequest::PICKUP_PIN_LOCK_MINUTES . ' minutes')
-                    )
+                    lockedUntil: $lockedUntil
                 );
             }
 
@@ -375,6 +379,8 @@ final class RefundManagementService
         }
 
         $this->transitionCase($case, RefundStatus::REFUNDED_IN_HAND, 'DELIVER_IN_HAND', [
+            // `$now` es un instante **con desfase** (`engineInstant()`), no una pared: la columna lleva
+            // zona horaria y el motor publica lo que lee con su desfase.
             'hand_delivered_at' => $now,
             // Un acierto borra el historial de intentos: el contador mide la
             // racha fallida, no la vida del expediente, y dejarlo acumulado
@@ -418,21 +424,20 @@ final class RefundManagementService
      * method and a new column comparison in every test double, to shave one
      * guess off a 10.000 key space that the lock already denies.
      *
+     * The deadline arrives as a parameter instead of being computed here so that the value the 423
+     * response announces and the one this write persists are the same instant, not two calls to the
+     * clock that a second boundary could separate.
+     *
+     * @param string $lockedUntil Engine-bound instant for the lock, in the form a with-zone column
+     *                            carries.
      * @param array{id?: int|null, role?: string, name?: string} $actor
      * @return bool Whether THIS attempt is the one that closed the door.
      */
-    private function registerFailedPickupAttempt(RefundRequest $case, string $now, array $actor): bool
+    private function registerFailedPickupAttempt(RefundRequest $case, string $lockedUntil, array $actor): bool
     {
         $attempts = $case->getPickupAttempts() + 1;
-        $lockedUntil = null;
         $justLocked = $attempts >= RefundRequest::PICKUP_PIN_MAX_ATTEMPTS;
-
-        if ($justLocked) {
-            $lockedUntil = date(
-                'Y-m-d H:i:s',
-                strtotime($now . ' +' . RefundRequest::PICKUP_PIN_LOCK_MINUTES . ' minutes')
-            );
-        }
+        $lockedUntil = $justLocked ? $lockedUntil : null;
 
         $this->refundRepo->transitionStatus(
             (int)$case->getId(),
@@ -461,6 +466,23 @@ final class RefundManagementService
         );
 
         return $justLocked;
+    }
+
+    /**
+     * Marca de un instante para una columna CON zona horaria (EARS-13.10).
+     *
+     * Las marcas que este módulo persiste —la entrega en mano, la liquidación digital y el
+     * vencimiento del candado del PIN— viven en columnas `timestamptz`, y el motor interpreta **en
+     * la zona de su sesión** (UTC) un `'Y-m-d H:i:s'` desnudo: el instante guardado quedaba el huso
+     * entero por delante del que el servicio quería escribir, de modo que el candado del PIN duraba
+     * dos horas y cuarto en vez de quince minutos. La marca viaja con su desfase —la forma en que el
+     * motor devuelve lo que lee y la que el contrato de reintegros publica—, así que el instante es
+     * el mismo aunque cambie la zona del despliegue: el desfase que `P` rinde es el de la zona que
+     * la aplicación declare, y no interviene en la aritmética.
+     */
+    private function engineInstant(int $timestamp): string
+    {
+        return date('Y-m-d\TH:i:sP', $timestamp);
     }
 
     /**
@@ -630,7 +652,7 @@ final class RefundManagementService
         $this->transitionCase($case, RefundStatus::PAID_DIGITAL, 'PAY', [
             'paid_amount' => $dto->paidAmount,
             'payment_reference' => trim($dto->paymentReference),
-            'paid_at' => date('Y-m-d H:i:s'),
+            'paid_at' => $this->engineInstant(time()),
         ]);
 
         $this->auditLogger->logRefundEvent(

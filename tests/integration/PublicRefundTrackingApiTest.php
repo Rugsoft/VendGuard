@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Integration suite for the public consumer journey (T-REF-19).
  *
  * It exercises the two public endpoints end to end through the real
- * `AppRouter` and real MariaDB, exactly as the anonymous consumer reaches them
+ * `AppRouter` and the single engine's real database, exactly as the anonymous consumer reaches them
  * (RF-REF-01, RF-REF-02, RF-REF-03):
  *
  * 1. `POST /api/qr/report` with the optional refund block, which must return the
@@ -176,8 +176,7 @@ try {
         "SELECT tracking_token FROM refund_requests WHERE id = " . (int)($receipt['id'] ?? 0)
     )->fetchColumn();
 
-    $assert(
-        '1.7 El PIN del resguardo es el PIN realmente persistido en MariaDB',
+    $assert(          '1.7 El PIN del resguardo es el PIN realmente persistido en el motor único',
         $caseRow !== null && $caseRow->getPickupPin() === $pickupPin,
         'resguardo: ' . $pickupPin . ' bd: ' . var_export($caseRow?->getPickupPin(), true)
     );
@@ -381,8 +380,7 @@ try {
     );
 
     $correctedRow = $refunds->findById($digitalCaseId);
-    $assert(
-        '4.9 El IBAN validado por el algoritmo Módulo 97 queda persistido en MariaDB',
+    $assert(          '4.9 El IBAN validado por el algoritmo Módulo 97 queda persistido en el motor único',
         $correctedRow !== null && $correctedRow->getIban() === $correctIban,
         'iban bd: ' . var_export($correctedRow?->getIban(), true)
     );
@@ -442,8 +440,11 @@ try {
         'acciones: ' . implode(', ', $auditActions)
     );
 
+    // Las tres columnas de estado de `audit_log` son `JSONB` en el motor único: el `COALESCE(…, '')`
+    // de la forma retirada obliga al motor a leer la cadena vacía **como json** y lo rechaza
+    // (`22P02`); el porte a texto es lo que deja el rastro comparable como una sola cadena.
     $auditBlob = implode("\n", $pdo->query(
-        "SELECT CONCAT(COALESCE(metadata, ''), '|', COALESCE(previous_state, ''), '|', COALESCE(new_state, ''))
+        "SELECT CONCAT(COALESCE(metadata::text, ''), '|', COALESCE(previous_state::text, ''), '|', COALESCE(new_state::text, ''))
          FROM audit_log WHERE entity_type = 'REFUND_REQUEST'"
     )->fetchAll(PDO::FETCH_COLUMN));
     $assert(

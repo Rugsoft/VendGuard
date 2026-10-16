@@ -17,8 +17,8 @@ declare(strict_types=1);
  * endpoints de Coordinación; ésta certifica la lógica de estado y el SQL que
  * hay detrás. Juntas cierran las dos capas.
  *
- * Everything here runs against real MariaDB inside a transaction that is always
- * rolled back, so the suite exercises the actual SQL: the column list of
+ * Everything here runs against the single engine's real database inside a transaction that is
+ * always rolled back, so the suite exercises the actual SQL: the column list of
  * `findForCoordinator()` (which is what decides whether the IBAN reaches
  * Coordination), the optimistic `WHERE status = :expected` guard of
  * `transitionStatus()` and the audit rows that back RNF-REF-01.
@@ -212,8 +212,7 @@ $bizumContact = $lastClaimantContact;
     $inboxRaw = (string)$inbox->getBody();
 
     $assert('1.1 La bandeja responde HTTP 200', $inbox->getStatusCode() === 200, 'HTTP ' . $inbox->getStatusCode() . ' ' . $inboxRaw);
-    $assert(
-        '1.2 El total sale del COUNT real de MariaDB',
+    $assert(          '1.2 El total sale del COUNT real del motor único',
         (int)($inboxBody['data']['total'] ?? 0) === $requestsBefore + 3,
         'total: ' . ($inboxBody['data']['total'] ?? 'AUSENTE') . ' esperado: ' . ($requestsBefore + 3)
     );
@@ -272,7 +271,7 @@ $bizumContact = $lastClaimantContact;
     ));
     $onlyApprovalBody = $decode($onlyApproval);
     $expectedApprovals = (int)$pdo->query(
-        "SELECT COUNT(*) FROM refund_requests WHERE status = 'REQUIRES_COORDINATOR_APPROVAL' AND is_active = 1"
+        "SELECT COUNT(*) FROM refund_requests WHERE status = 'REQUIRES_COORDINATOR_APPROVAL' AND is_active = TRUE"
     )->fetchColumn();
 
     $assert(
@@ -315,7 +314,7 @@ $bizumContact = $lastClaimantContact;
     $assert('2.6 Un estado inventado se rechaza con 422', $badFilter->getStatusCode() === 422, 'HTTP ' . $badFilter->getStatusCode());
 
     // ─────────────────────────────────────────────────────────────────────
-    echo "\n--- 3. Visto bueno y liquidación contra MariaDB ---\n";
+    echo "\n--- 3. Visto bueno y liquidación contra el motor único ---\n";
 
     $approveRes = $controller->approve($request(
         'POST',
@@ -356,12 +355,16 @@ $bizumContact = $lastClaimantContact;
 
     $assert('3.7 La liquidación responde HTTP 200', $payRes->getStatusCode() === 200, (string)$payRes->getBody());
     $assert('3.8 BD: status pasa a PAID_DIGITAL', ($payRow?->getStatus()->value ?? '') === 'PAID_DIGITAL');
-    $assert('3.9 BD: payment_reference persistido', ($payRow?->getPaymentReference() ?? '') === 'TRANSF-2026-0001');
-    $assert(
-        '3.10 BD: paid_at persistido (contrato §4.4.3)',
-        is_string($paidAtDb) && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $paidAtDb) === 1,
-        'paid_at: ' . var_export($paidAtDb, true)
-    );
+    $assert('3.9 BD: payment_reference persistido', ($payRow?->getPaymentReference() ?? '') === 'TRANSF-2026-0001');      // `paid_at` es `timestamptz` en el motor único y su columna guarda un INSTANTE: la forma que se
+      // medía antes —pared sin zona, la del `DATETIME` retirado— no distingue un instante correcto de
+      // uno desplazado el huso entero, que es el defecto que este porte corrige. Se mide el instante.
+      $assert(
+          '3.10 BD: paid_at persistido en su instante (contrato §4.4.3)',
+          is_string($paidAtDb)
+          && strtotime($paidAtDb) !== false
+          && abs(time() - (int)strtotime($paidAtDb)) < 120,
+          'paid_at: ' . var_export($paidAtDb, true)
+      );
     $assert(
         '3.11 La respuesta es la del contrato §4.4.3',
         ($payBody['message'] ?? '') === 'Pago digital registrado con éxito. Expediente de reintegro liquidado.'
@@ -378,9 +381,11 @@ $bizumContact = $lastClaimantContact;
     // un array produce la cadena "Array" y la comprobación pasaría sin mirar
     // nada. El rastro se lee de las tres columnas de estado, no sólo de
     // `metadata`: el apunte de un pago no guarda ahí ningún detalle.
-    $auditRows = $pdo->query(
-        "SELECT COALESCE(metadata, ''), COALESCE(previous_state, ''), COALESCE(new_state, '')
-         FROM audit_log WHERE entity_type = 'REFUND_REQUEST' AND entity_id = {$transferCaseId}"
+    $auditRows = $pdo->query(          // Las tres columnas de estado son `JSONB` en el motor único: sin el porte a texto, el
+          // `COALESCE(…, '')` intenta escribir la cadena vacía **como json** y el motor la rechaza
+          // (`22P02`). El motor retirado lo toleraba porque su `JSON` era texto con formato.
+          "SELECT COALESCE(metadata::text, ''), COALESCE(previous_state::text, ''), COALESCE(new_state::text, '')
+           FROM audit_log WHERE entity_type = 'REFUND_REQUEST' AND entity_id = {$transferCaseId}"
     )->fetchAll(PDO::FETCH_NUM);
     $auditBlob = implode("\n", array_map(
         static fn (array $row): string => implode(' | ', array_map(strval(...), $row)),
@@ -404,7 +409,7 @@ $bizumContact = $lastClaimantContact;
     );
 
     // ─────────────────────────────────────────────────────────────────────
-    echo "\n--- 4. Desestimación motivada contra MariaDB ---\n";
+    echo "\n--- 4. Desestimación motivada contra el motor único ---\n";
 
     $rejectRes = $controller->reject($request(
         'POST',

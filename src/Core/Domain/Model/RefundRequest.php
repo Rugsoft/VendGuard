@@ -43,6 +43,21 @@ final readonly class RefundRequest implements JsonSerializable
     /** How long the pickup PIN stays locked, in minutes (RF-REF-02). */
     public const PICKUP_PIN_LOCK_MINUTES = 15;
 
+    /**
+     * The shapes an engine-bound instant may arrive in.
+     *
+     * Dates in this domain travel as text, and the single engine publishes a
+     * `timestamptz` with its offset and microsecond precision. The pattern admits
+     * the bare engine-zone wall the retired engine also produced, and the
+     * offset-carrying forms the single engine reads and the module writes; it
+     * stays anchored on both ends so that a corrupted value —trailing text, a
+     * glued extra field— is still refused rather than silently reinterpreted.
+     *
+     * `declare(strict_types=1)`; the pattern is a literal so the check costs one
+     * `preg_match()` per guarded field.
+     */
+    private const ENGINE_INSTANT_PATTERN = '/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}(?::?\d{2})?)?$/';
+
     public function __construct(
         private ?int $id,
         private ?int $incidentId,
@@ -154,7 +169,13 @@ final readonly class RefundRequest implements JsonSerializable
             throw new InvalidArgumentException('El contador de intentos del PIN debe estar entre 0 y 255.');
         }
 
-        if ($pickupLockedUntil !== null && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $pickupLockedUntil) !== 1) {
+        // El candado vive en una columna CON zona horaria (`pickup_locked_until` es `timestamptz`
+        // en el motor único), así que la marca que se lee viaja con su desfase
+        // (`2026-10-16 08:51:18+00`) y la que se escribe puede llevarlo (`2026-10-16T10:51:18+02:00`).
+        // La puerta exige un instante **estructurado** —no cualquier texto que `strtotime()`
+        // retuerza— y admite las dos formas que el motor publica; la forma sin zona sigue valiendo
+        // porque es la que denota una pared del motor, y el motor retirado no publicaba otra.
+        if ($pickupLockedUntil !== null && preg_match(self::ENGINE_INSTANT_PATTERN, $pickupLockedUntil) !== 1) {
             throw new InvalidArgumentException('El bloqueo del PIN debe ser una fecha y hora válidas.');
         }
 
@@ -286,13 +307,22 @@ final readonly class RefundRequest implements JsonSerializable
     /**
      * Whether the pickup PIN is locked at `$now` (RF-REF-02).
      *
-     * The comparison is a string one on purpose: both sides are
-     * `Y-m-d H:i:s` in the same timezone, and lexicographic order IS
-     * chronological order for that format.
+     * The comparison is chronological, not lexicographic. It used to be a
+     * `strcmp()` because both sides were bare `Y-m-d H:i:s` walls in the same
+     * timezone — a premise the retired engine's `DATETIME` column made true and
+     * that the single engine's `timestamptz` column breaks: the lock comes back
+     * carrying its offset, so two marks of the same instant can order backwards
+     * as text. `strtotime()` reads each side in its real instant instead (the
+     * bare side falls in the application's declared zone), which is what the
+     * harness' clock contract states for a with-zone read.
      */
     public function isPickupLockedAt(string $now): bool
     {
-        return $this->pickupLockedUntil !== null && strcmp($this->pickupLockedUntil, $now) > 0;
+        if ($this->pickupLockedUntil === null) {
+            return false;
+        }
+
+        return (int)strtotime($this->pickupLockedUntil) > (int)strtotime($now);
     }
 
     /**

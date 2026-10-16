@@ -8,8 +8,8 @@ declare(strict_types=1);
  * RNF-REF-03, Constitution Art. V.4 and Art. III).
  *
  * It exercises all eleven refund-related routes through the real AppRouter and
- * real MariaDB repositories: public QR/report and token tracking, technician,
- * site reception, and coordinator finance. No controller is invoked directly
+ * the single engine's real repositories: public QR/report and token tracking,
+ * technician, site reception, and coordinator finance. No controller is invoked directly
  * and no collaborators are injected, so missing route registrations,
  * middleware omissions, and production-constructor wiring cannot hide behind
  * a unit-only pass.
@@ -406,17 +406,36 @@ try {
         && str_contains($guardTrigger, 'refund_requests'),
         'definición del guardián: ' . var_export($guardTrigger, true));
 
+    // El motor único **aborta la transacción** en cuanto una sentencia falla, así que el borrado
+    // que el guardián rechaza dejaba la sesión inutilizable (`25P02`) y las comprobaciones
+    // siguientes —que miden justo lo contrario, que la fila sigue ahí— morían por el estrago y no
+    // por su causa. Cada punto de guardia se abre dentro de su **punto de salvaguarda** y se vuelve
+    // a él tras el rechazo: lo que se mide es la mordida, y la transacción de la suite sobrevive.
+    $expectRefusal = static function (PDO $pdo, string $statement): array {
+        $savepoint = 'guard_bite_' . bin2hex(random_bytes(4));
+        $pdo->exec('SAVEPOINT ' . $savepoint);
+
+        try {
+            $pdo->exec($statement);
+        } catch (Throwable $e) {
+            $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
+            $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+
+            return [true, $e->getMessage()];
+        }
+
+        $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+
+        return [false, ''];
+    };
+
     // El objetivo real de esta sección: intentar BORRAR de verdad el expediente
     // que la suite acaba de crear (el mismo que lleva el IBAN) y comprobar que
     // la base de datos se niega.
-    $hardDeleteRefused = false;
-    $refusalMessage = '';
-    try {
-        $pdo->exec("DELETE FROM refund_requests WHERE id = " . (int)$refundId);
-    } catch (Throwable $e) {
-        $hardDeleteRefused = true;
-        $refusalMessage = $e->getMessage();
-    }
+    [$hardDeleteRefused, $refusalMessage] = $expectRefusal(
+        $pdo,
+        "DELETE FROM refund_requests WHERE id = " . (int)$refundId
+    );
 
     $assert('6.2 Un DELETE FROM refund_requests sobre un expediente real es rechazado por la BD',
         $hardDeleteRefused,
@@ -426,18 +445,14 @@ try {
         'mensaje: ' . $refusalMessage);
 
     $assert('6.3 El expediente sobrevive intacto al intento de borrado',
-        (int)$pdo->query('SELECT COUNT(*) FROM refund_requests WHERE id = ' . (int)$refundId . ' AND is_active = 1')->fetchColumn() === 1
+        (int)$pdo->query('SELECT COUNT(*) FROM refund_requests WHERE id = ' . (int)$refundId . ' AND is_active = TRUE')->fetchColumn() === 1
         && $refunds->findById($refundId)?->getIban() === 'ES9121000418450200051332');
 
     // Un borrado "de mentira" (0 filas afectadas) no dispara un trigger FOR EACH
     // ROW, así que se comprueba también sobre un id inexistente para que nadie
     // confunda un DELETE inocuo con un guardián funcionando.
-    $noRowDelete = 'ok';
-    try {
-        $pdo->exec('DELETE FROM refund_requests WHERE id = 4294967295');
-    } catch (Throwable $e) {
-        $noRowDelete = 'rechazado';
-    }
+    [$noRowRefused] = $expectRefusal($pdo, 'DELETE FROM refund_requests WHERE id = 4294967295');
+    $noRowDelete = $noRowRefused ? 'rechazado' : 'ok';
     $assert('6.4 Control de no-vacuidad: el guardián muerde sobre filas reales, no sobre un id inexistente',
         $noRowDelete === 'ok' && $hardDeleteRefused === true,
         'id inexistente: ' . $noRowDelete);
@@ -446,7 +461,7 @@ try {
     $rejectedReason = 'Corte de caja sin cobro coincidente en la auditoría de ventas.';
     $pdo->prepare('
         UPDATE refund_requests
-        SET status = \'REJECTED\', is_active = 0, coordinator_justification = :reason
+        SET status = \'REJECTED\', is_active = FALSE, coordinator_justification = :reason
         WHERE id = :id
     ')->execute([':reason' => $rejectedReason, ':id' => (int)$refundId]);
 
@@ -459,7 +474,7 @@ try {
 
     $assert('6.5 La anulación lógica conserva la fila y su motivo para la auditoría (Art. III.2)',
         ($softRow['status'] ?? '') === 'REJECTED'
-        && (int)($softRow['is_active'] ?? 1) === 0
+        && ($softRow['is_active'] ?? true) === false
         && ($softRow['coordinator_justification'] ?? '') === $rejectedReason);
 
     // A partir de aquí se usan filas desechables: el expediente original ya
@@ -479,8 +494,7 @@ try {
         $pdo->prepare('
             INSERT INTO refund_requests
                 (incident_id, machine_id, location_id, claimant_name, claimant_contact,
-                 claimed_amount, compensation_method, pickup_pin, tracking_token, status, is_active)
-            VALUES (:i, :m, :l, :n, :c, 1.00, :cm, :pin, :tok, :st, 1)
+                 claimed_amount, compensation_method, pickup_pin, tracking_token, status, is_active)              VALUES (:i, :m, :l, :n, :c, 1.00, :cm, :pin, :tok, :st, TRUE)
         ')->execute([
             ':i' => (int)$seed['incident_id'],
             ':m' => (int)$seed['machine_id'],
@@ -517,12 +531,7 @@ try {
         'id: ' . $purgeCaseId);
 
     $controlCaseId = $makeDisposableCase('Fila de control tras cerrar la ventana');
-    $refusedAgain = false;
-    try {
-        $pdo->exec('DELETE FROM refund_requests WHERE id = ' . $controlCaseId);
-    } catch (Throwable $e) {
-        $refusedAgain = true;
-    }
+    [$refusedAgain] = $expectRefusal($pdo, 'DELETE FROM refund_requests WHERE id = ' . $controlCaseId);
     $assert('6.7 Tras cerrarla, el guardián vuelve a estar activo',
         $controlCaseId > 0
         && $refusedAgain

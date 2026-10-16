@@ -1315,9 +1315,13 @@ $paidRow = $refundRepo->findById((int)$payable->getId());
 $assert('6.1 La liquidación responde HTTP 200', $paid->getStatusCode() === 200, $detail($paid));
 $assert('6.2 El expediente pasa a PAID_DIGITAL', $paidRow?->getStatus() === RefundStatus::PAID_DIGITAL);
 $assert('6.3 La referencia bancaria queda registrada', $paidRow?->getPaymentReference() === 'BIZUM-20261001-998822');
+// La fecha de pago es un INSTANTE (`timestamptz` en el motor único) y viaja con su desfase: la forma
+// sin zona que se medía antes no distinguía una marca correcta de una desplazada el huso entero.
 $assert(
-    '6.4 Queda registrada la fecha de pago (contrato §4.4.3)',
-    preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', (string)$paidRow?->getPaidAt()) === 1,
+    '6.4 Queda registrada la fecha de pago, en su instante (contrato §4.4.3)',
+    is_string($paidRow?->getPaidAt())
+    && strtotime((string)$paidRow?->getPaidAt()) !== false
+    && abs(time() - (int)strtotime((string)$paidRow?->getPaidAt())) < 120,
     'paid_at: ' . var_export($paidRow?->getPaidAt(), true)
 );
 $assert(

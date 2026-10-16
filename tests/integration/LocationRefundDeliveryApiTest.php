@@ -7,8 +7,8 @@ declare(strict_types=1);
  *
  * Integration suite for the reception desk handover (T-REF-21).
  *
- * It exercises the site-facing endpoints through the real `AppRouter` and real
- * MariaDB, exactly as the concierge reaches them on a shared terminal at the
+ * It exercises the site-facing endpoints through the real `AppRouter` and the single engine's real
+ * database, exactly as the concierge reaches them on a shared terminal at the
  * counter (RF-REF-06, RF-REF-10, RNF-REF-05):
  *
  * 1. `GET /api/location/refunds`, which must list the envelopes waiting on the
@@ -465,10 +465,16 @@ try {
     ');
     $handover->execute([':id' => $secondCaseId]);
     $handoverRow = $handover->fetch(PDO::FETCH_ASSOC) ?: [];
+    // `hand_delivered_at` es `timestamptz`: la columna guarda un instante y el motor publica lo que lee
+    // con su desfase, así que la marca se mide **como instante** —la entrega acaba de ocurrir— y no por
+    // su forma textual, que es lo único que distinguía una marca correcta de una desplazada el huso.
+    $handDeliveredAt = trim((string)($handoverRow['hand_delivered_at'] ?? ''));
     $assert(
         '2.2 Queda sellada la hora de la entrega y el expediente sigue activo para la auditoría',
-        trim((string)($handoverRow['hand_delivered_at'] ?? '')) !== ''
-        && (int)($handoverRow['is_active'] ?? 0) === 1
+        $handDeliveredAt !== ''
+        && strtotime($handDeliveredAt) !== false
+        && abs(time() - (int)strtotime($handDeliveredAt)) < 120
+        && ($handoverRow['is_active'] ?? false) === true
     );
 
     $handoverAudit = $pdo->prepare('
@@ -768,6 +774,19 @@ try {
         (int)($bruteRowData['pickup_attempts'] ?? 0) === RefundRequest::PICKUP_PIN_MAX_ATTEMPTS
         && trim((string)($bruteRowData['pickup_locked_until'] ?? '')) !== '',
         'intentos: ' . (string)($bruteRowData['pickup_attempts'] ?? '')
+    );
+
+    // El bloqueo vence a los **quince minutos** de su instante (RF-REF-02), y un `timestamptz` no admite
+    // que se le escriba una pared: el motor la lee en la zona de su sesión y el vencimiento queda el huso
+    // entero más allá —dos horas y cuarto de puerta cerrada—. Se mide la distancia, que es lo que la
+    // forma textual no podía distinguir.
+    $lockSeconds = (int)strtotime((string)($bruteRowData['pickup_locked_until'] ?? '')) - time();
+    $assert(
+        '6.4 El candado vence en su instante: los quince minutos de RF-REF-02, sin el huso de más',
+        $lockSeconds > (RefundRequest::PICKUP_PIN_LOCK_MINUTES * 60) - 60
+        && $lockSeconds <= RefundRequest::PICKUP_PIN_LOCK_MINUTES * 60,
+        'vencimiento: ' . var_export($bruteRowData['pickup_locked_until'] ?? null, true)
+            . ' (' . $lockSeconds . ' s)'
     );
 
     // Seguir insistiendo no cuela: 200 intentos más siguen sin mover el expediente.

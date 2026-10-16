@@ -5,8 +5,8 @@ declare(strict_types=1);
 /**
  * VendGuard — Prueba funcional E2E del módulo de Reintegros.
  *
- * Ejercita el flujo completo por la superficie HTTP REAL (AppRouter) contra
- * MariaDB real, dentro de una transacción que siempre se revierte.
+ * Ejercita el flujo completo por la superficie HTTP REAL (AppRouter) contra el
+ * motor único, dentro de una transacción que siempre se revierte.
  *
  * Cubre las tres correcciones que nacieron de esta misma prueba:
  * - RF-REF-08: reparto proporcional del efectivo recuperado entre varios
@@ -567,7 +567,10 @@ try {
         assignedTechnicianId: null,
         createdAt: null
     ));
-    $pdo->prepare("UPDATE incidents SET status = 'CANCELLED', is_active_ticket = 0 WHERE id = :id")
+    // La máquina se libera por el **estado**: el motor único sustituye la columna derivada del
+    // retirado (`is_active_ticket`) por el índice único parcial `uq_machine_active_ticket` (D-6),
+    // que declara libre a la máquina en cuanto la incidencia sale de `CLOSED`/`CANCELLED`.
+    $pdo->prepare("UPDATE incidents SET status = 'CANCELLED' WHERE id = :id")
         ->execute([':id' => (int)$incidentF->getId()]);
 
     $caseF = $refundService->createCase(new CreateRefundRequestDTO(
@@ -621,7 +624,7 @@ try {
     $directCount = (int)$pdo->query("
         SELECT COUNT(*) FROM refund_requests r
         JOIN incidents i ON i.id = r.incident_id
-        WHERE r.is_active = 1 AND r.status = 'PENDING_INSPECTION'
+        WHERE r.is_active = TRUE AND r.status = 'PENDING_INSPECTION'
           AND i.status IN ('CLOSED','CANCELLED')
     ")->fetchColumn();
     $assert('E.6 stranded_total coincide con el COUNT directo en SQL',

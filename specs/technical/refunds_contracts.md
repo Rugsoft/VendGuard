@@ -79,6 +79,16 @@ Para evitar entregas erróneas o accesos indebidos en conserjería:
   6. `pickup_attempts` y `pickup_locked_until` **no** se proyectan en la vista restringida ni en ningún DTO de salida: cuántas combinaciones quedan es tan sensible como el PIN.
   7. El intento fallido se audita como `REFUND_PICKUP_PIN_REJECTED` **sin el PIN introducido** (Art. V.4).
 
+### 1.4 Instantes del módulo frente al motor único
+
+Las marcas temporales de este módulo —`hand_delivered_at`, `paid_at` y `pickup_locked_until`— viven en columnas **con zona horaria** (`timestamptz`) y el motor las interpreta **en la zona de su sesión** cuando reciben un `'Y-m-d H:i:s'` sin desfase. De ahí la regla del módulo, decidida en el lote de porte (T-13-10, EARS-13.10):
+
+* **Al escribir**, el instante viaja **con su desfase** (`date('Y-m-d\TH:i:sP')`, p. ej. `2026-10-16T11:11:27+02:00`), que es la forma que el propio motor devuelve al leer y la que este contrato publica en sus respuestas. Una pared sin zona guardaba el instante el huso entero por delante: el candado del PIN vencía a los **134 minutos** en lugar de a los 15 que declara §1.3, y el apunte de pago y la entrega en mano quedaban desplazados igual.
+* **Al leer**, la marca llega del motor **con su desfase**, y el dominio la compara **como instante**, nunca como texto: dos marcas del mismo instante pueden ordenarse al revés como cadenas.
+* **Al anunciar**, el `details.locked_until` del `423 PICKUP_PIN_LOCKED` es **el mismo instante** que se acaba de persistir, no una segunda lectura del reloj.
+
+La forma sin zona sigue siendo válida para una marca que denota una pared del motor (es la que sembraba el motor retirado), de modo que el contrato no se rompe por el lado de los datos históricos; lo que no se admite es **escribirla** en una columna con zona.
+
 ---
 
 ## 2. Modificaciones al Esquema de Base de Datos (DDL)
