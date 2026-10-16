@@ -107,8 +107,11 @@ if ($part === null || $part->getId() === null) {
 }
 $partId = $part->getId();
 
-// Limpiar consumos previos del test
-$pdo->prepare("DELETE FROM incident_replaced_parts WHERE incident_id = ? OR preventive_order_id = ?")->execute([$incId, $poId]);
+// Limpiar consumos previos del test, con la ventana de purga abierta (contrato de limpieza §3):
+// la tabla lleva el guardián del Art. III.1 y el motor único rechaza el DELETE en crudo.
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $incId, $poId): void {
+    $pdo->prepare("DELETE FROM incident_replaced_parts WHERE incident_id = ? OR preventive_order_id = ?")->execute([$incId, $poId]);
+});
 
 $failures = 0;
 $assertions = 0;
@@ -313,8 +316,10 @@ $assert("10.2 Fila de exportación contiene todas las columnas requeridas por RF
     )
 );
 
-// Limpieza de datos de prueba
-$pdo->prepare("DELETE FROM incident_replaced_parts WHERE incident_id = ? OR preventive_order_id = ?")->execute([$incId, $poId ?? 0]);
+// Limpieza de datos de prueba, con la ventana de purga abierta (contrato de limpieza §3).
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $incId, $poId): void {
+    $pdo->prepare("DELETE FROM incident_replaced_parts WHERE incident_id = ? OR preventive_order_id = ?")->execute([$incId, $poId ?? 0]);
+});
 
 echo "\n----------------------------------------------------------------------\n";
 echo "Total Aserciones: {$assertions}\n";

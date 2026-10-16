@@ -147,7 +147,7 @@ $sparePartId = (int)$pdo->query("SELECT id FROM spare_parts WHERE part_code = 'V
 $pdo->prepare(
     "INSERT INTO spare_part_requests
         (incident_id, spare_part_id, is_out_of_catalog, custom_part_description, quantity, status, requested_by_user_id)
-     VALUES (:incident_id, :spare_part_id, 0, NULL, 1, 'PENDING', :technician_id)"
+     VALUES (:incident_id, :spare_part_id, FALSE, NULL, 1, 'PENDING', :technician_id)"
 )->execute([
     ':incident_id' => $incidentId,
     ':spare_part_id' => $sparePartId,
@@ -157,7 +157,7 @@ $pdo->prepare(
 $pdo->prepare(
     "INSERT INTO spare_part_requests
         (incident_id, spare_part_id, is_out_of_catalog, custom_part_description, quantity, status, requested_by_user_id)
-     VALUES (:incident_id, NULL, 1, :custom_description, 1, 'PENDING', :technician_id)"
+     VALUES (:incident_id, NULL, TRUE, :custom_description, 1, 'PENDING', :technician_id)"
 )->execute([
     ':incident_id' => $incidentId,
     ':custom_description' => 'Abrazadera reforzada antivibración para circuito de cobre',
@@ -169,7 +169,7 @@ $pdo->prepare(
         (intervention_type, incident_id, machine_id, location_id, technician_id, spare_part_id,
          is_out_of_catalog, quantity, unit_cost_snapshot, old_part_destination, notes)
      VALUES ('INCIDENT', :incident_id, :machine_id, :location_id, :technician_id, :spare_part_id,
-             0, 1, 28.50, 'DESGUACE', :notes)"
+             FALSE, 1, 28.50, 'DESGUACE', :notes)"
 )->execute([
     ':incident_id' => $incidentId,
     ':machine_id' => $machine->getId(),
@@ -182,7 +182,7 @@ $pdo->prepare(
 $pdo->prepare(
     "INSERT INTO incident_comments
         (incident_id, author_type, user_id, author_name, comment_text, photo_path, is_internal)
-     VALUES (:incident_id, 'REPORTER', NULL, 'Conserjería Hospital', :text, NULL, 0)"
+     VALUES (:incident_id, 'REPORTER', NULL, 'Conserjería Hospital', :text, NULL, FALSE)"
 )->execute([
     ':incident_id' => $incidentId,
     ':text' => 'El agua gotea por debajo de la máquina.',
@@ -191,7 +191,7 @@ $pdo->prepare(
 $pdo->prepare(
     "INSERT INTO incident_comments
         (incident_id, author_type, user_id, author_name, comment_text, photo_path, is_internal)
-     VALUES (:incident_id, 'TECHNICIAN', :user_id, :author_name, :text, NULL, 1)"
+     VALUES (:incident_id, 'TECHNICIAN', :user_id, :author_name, :text, NULL, TRUE)"
 )->execute([
     ':incident_id' => $incidentId,
     ':user_id' => $technician->getId(),

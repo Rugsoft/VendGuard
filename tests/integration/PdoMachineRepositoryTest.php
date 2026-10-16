@@ -229,9 +229,11 @@ if ($loc1 !== null) {
     // Insertar ticket en progreso
     $ticketCodeTest = 'INC-TEST-ATW-01';
     TestDataCleaner::purgeIncidentByTicket($pdo, $ticketCodeTest);
+    // Las etiquetas son las del enumerado del motor único: `incident_category` no tiene
+    // `PAYMENT_FAILURE` —esa era la etiqueta del motor retirado—, sino `PAYMENT_SYSTEM`.
     $stmt = $pdo->prepare("
         INSERT INTO incidents (ticket_code, machine_id, location_id, category, description, urgency, status)
-        VALUES (:tc, :mid, :lid, 'PAYMENT_FAILURE', 'Fallo validador monedas', 'MEDIUM', 'IN_PROGRESS')
+        VALUES (:tc, :mid, :lid, 'PAYMENT_SYSTEM', 'Fallo validador monedas', 'MEDIUM', 'IN_PROGRESS')
     ");
     $stmt->execute([':tc' => $ticketCodeTest, ':mid' => $createdId, ':lid' => $locId]);
     $incAtwId = (int)$pdo->lastInsertId();
@@ -384,7 +386,7 @@ if ($loc1 !== null) {
     TestDataCleaner::purgeIncidentByTicket($pdo, $ticketCodeBatch);
     $pdo->prepare("
         INSERT INTO incidents (ticket_code, machine_id, location_id, category, description, urgency, status)
-        VALUES (:tc, :mid, :lid, 'PAYMENT_FAILURE', 'Fallo validador monedas (lote)', 'MEDIUM', 'IN_PROGRESS')
+        VALUES (:tc, :mid, :lid, 'PAYMENT_SYSTEM', 'Fallo validador monedas (lote)', 'MEDIUM', 'IN_PROGRESS')
     ")->execute([':tc' => $ticketCodeBatch, ':mid' => $batchMachineB->getId(), ':lid' => $locId]);
     $batchIncidentId = (int)$pdo->lastInsertId();
 
@@ -409,12 +411,9 @@ if ($loc1 !== null) {
     });
 }
 
-// Restaurar métricas de demo si existe el seeder
-if (file_exists(__DIR__ . '/../../database/DemoMetricsSeeder.php')) {
-    require_once __DIR__ . '/../../database/DemoMetricsSeeder.php';
-    $demoSeeder = new \VendGuard\Database\DemoMetricsSeeder($pdo);
-    $demoSeeder->seed();
-}
+// La suite no invoca el sembrador de métricas de demostración del motor retirado: el
+// contrato del arnés ya lo retiró de su cierre (T-13-03) —una suite no restituye datos de
+// demostración— y su retirada formal, con el DDL heredado, es de T-13-16.
 
 // =====================================================================
 // RESUMEN DE EJECUCIÓN

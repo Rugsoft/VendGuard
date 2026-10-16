@@ -26,9 +26,13 @@ echo "======================================================================\n\n
 
 $pdo = ConnectionFactory::getConnection();
 
-// Limpiar repuestos residuales de tests previos
-$pdo->exec("DELETE FROM spare_part_compatibilities WHERE spare_part_id IN (SELECT id FROM spare_parts WHERE part_code LIKE 'TEST-%')");
-$pdo->exec("DELETE FROM spare_parts WHERE part_code LIKE 'TEST-%'");
+// Limpiar repuestos residuales de tests previos. Los borrados van con la ventana de purga
+// abierta (contrato de limpieza §3): el motor único rechaza un DELETE en crudo sobre las
+// tablas maestras —es el guardián del Art. III.1— y su único desbloqueo es esa señal.
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo): void {
+    $pdo->exec("DELETE FROM spare_part_compatibilities WHERE spare_part_id IN (SELECT id FROM spare_parts WHERE part_code LIKE 'TEST-%')");
+    $pdo->exec("DELETE FROM spare_parts WHERE part_code LIKE 'TEST-%'");
+});
 
 // Asegurar semillas limpias
 $seedRunner = new SeedRunner($pdo);
@@ -175,9 +179,11 @@ foreach ($compatibles as $c) {
 $models = $repo->findDistinctMachineModels();
 $assert("9.1 findDistinctMachineModels retorna modelos sin duplicados", count($models) >= 4 && in_array('Bianchi Gaia Espresso', $models, true));
 
-// Limpieza de datos de prueba
-$pdo->prepare("DELETE FROM spare_part_compatibilities WHERE spare_part_id = :id")->execute([':id' => $created->getId()]);
-$pdo->prepare("DELETE FROM spare_parts WHERE id = :id")->execute([':id' => $created->getId()]);
+// Limpieza de datos de prueba, con la ventana de purga abierta (contrato de limpieza §3).
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $created): void {
+    $pdo->prepare("DELETE FROM spare_part_compatibilities WHERE spare_part_id = :id")->execute([':id' => $created->getId()]);
+    $pdo->prepare("DELETE FROM spare_parts WHERE id = :id")->execute([':id' => $created->getId()]);
+});
 
 echo "\n----------------------------------------------------------------------\n";
 echo "Total Aserciones: {$assertions}\n";

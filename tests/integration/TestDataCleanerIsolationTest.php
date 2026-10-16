@@ -52,7 +52,16 @@ $restrictChildren = [
     'unclaimed_cash_findings',
 ];
 
-$countRows = static fn (string $table): int => (int)$pdo->query('SELECT COUNT(*) FROM `' . $table . '`')->fetchColumn();
+// El nombre de tabla viaja desnudo, como lo escribe el motor único. Esta plantilla citaba los
+// identificadores entre acentos graves y sobrevivió al porte porque el censo sólo ve un
+// identificador **entre** acentos graves: aquí el nombre llega por variable (hallazgo de T-13-07).
+$countRows = static function (string $table) use ($pdo): int {
+    if (preg_match('/^[a-z_]+$/', $table) !== 1) {
+        throw new InvalidArgumentException("Nombre de tabla no admisible en el censo: «{$table}»");
+    }
+
+    return (int)$pdo->query('SELECT COUNT(*) FROM ' . $table)->fetchColumn();
+};
 
 echo "======================================================================\n";
 echo " VendGuard: Test de Integración - TestDataCleanerIsolationTest\n";
@@ -64,13 +73,32 @@ echo "======================================================================\n\n
 // viene a eliminar.
 echo "--- 0. Estado de partida garantizado ---\n";
 (new SeedRunner($pdo))->seedAll();
-require_once __DIR__ . '/../../database/DemoMetricsSeeder.php';
-(new \VendGuard\Database\DemoMetricsSeeder($pdo))->seed();
 
-$seededIncidents = $countRows('incidents');
-$seededMachines = $countRows('machines');
-$assert('0.1 Hay al menos una incidencia sembrada para colgar los huérfanos', $seededIncidents > 0, 'incidencias: ' . $seededIncidents);
-$assert('0.2 Hay máquinas y sedes sembradas', $seededMachines > 0 && $countRows('locations') > 0);
+// El expediente sobre el que colgar los huérfanos lo construye la propia suite —el contrato
+// de limpieza manda que cada una cree y drene lo suyo— y no el sembrador de métricas del motor
+// retirado, que la batería ya no invoca (T-13-03) y cuya retirada formal es de T-13-16.
+$insertIsolationIncident = static function (PDO $pdo, string $code, int $machineId, int $locationId): int {
+    $pdo->prepare(
+        "INSERT INTO incidents (ticket_code, machine_id, location_id, category, description, urgency, status)
+         VALUES (:tc, :mid, :lid, 'OTHER', 'Expediente del arnés para colgar huérfanos', 'LOW', 'REGISTERED')"
+    )->execute([':tc' => $code, ':mid' => $machineId, ':lid' => $locationId]);
+
+    return (int)$pdo->lastInsertId();
+};
+
+if ($countRows('incidents') === 0) {
+    $insertIsolationIncident(
+        $pdo,
+        'INC-CLEANER-SEED',
+        (int)$pdo->query('SELECT id FROM machines ORDER BY id LIMIT 1')->fetchColumn(),
+        (int)$pdo->query('SELECT id FROM locations ORDER BY id LIMIT 1')->fetchColumn()
+    );
+}
+
+$availableIncidents = $countRows('incidents');
+$availableMachines = $countRows('machines');
+$assert('0.1 Hay al menos un expediente sobre el que colgar los huérfanos', $availableIncidents > 0, 'incidencias: ' . $availableIncidents);
+$assert('0.2 Hay máquinas y sedes en el catálogo', $availableMachines > 0 && $countRows('locations') > 0);
 
 echo "\n--- 1. Escenario: las 4 hijas con ON DELETE RESTRICT admiten filas ---\n";
 
@@ -105,7 +133,7 @@ try {
     $pdo->prepare(
         "INSERT INTO incident_replaced_parts (intervention_type, incident_id, machine_id, location_id,
             technician_id, spare_part_id, quantity, unit_cost_snapshot, old_part_destination)
-         VALUES ('CORRECTIVE', :iid, :mid, :lid, :tid, :pid, 1, 0.00, 'RECICLADO')"
+         VALUES ('INCIDENT', :iid, :mid, :lid, :tid, :pid, 1, 0.00, 'DESGUACE')"
     )->execute([':iid' => $incidentId, ':mid' => $machineId, ':lid' => $locationId, ':tid' => $technicianId, ':pid' => $partId]);
 
     // El seguimiento de contención del barrido sanitario (T-PAUSE-41) es la quinta hija
@@ -169,54 +197,48 @@ $assert(
 
 $assert('2.7 El plan cubre las 14 tablas transitorias del contrato', count($order) === 14, 'obtenidas: ' . count($order));
 
-echo "\n--- 3. PRUEBA DE MORDIDA: el orden ingenuo debe fallar con 1451 ---\n";
+echo "\n--- 3. PRUEBA DE MORDIDA: el orden ingenuo debe fallar por la FK RESTRICT ---\n";
 
-// Se reconstruye el huérfano dentro de una transacción y se intenta el borrado
-// con el orden QUE USABAN las 29 suites antes de este arreglo. Si algún día
-// alguien invierte el orden en TestDataCleaner, esta aserción se pone roja.
-$pdo->beginTransaction();
+// Se reconstruye el huérfano y se intenta el borrado con el orden QUE USABAN las suites antes
+// de este arreglo: si algún día alguien invierte el orden en TestDataCleaner, esta aserción se
+// pone roja. El intento va con la ventana de purga ABIERTA —lo que se mide es el ORDEN, no el
+// guardián del Art. III.1, que también rechazaría el borrado— y sin transacción propia: un
+// borrado rechazado dentro de una deja la sesión abortada y no se podría leer el estado para
+// la comprobación siguiente.
+$biteIncidentId = (int)$pdo->query('SELECT id FROM incidents ORDER BY id LIMIT 1')->fetchColumn();
+$biteMachineId = (int)$pdo->query('SELECT id FROM machines ORDER BY id LIMIT 1')->fetchColumn();
+$biteLocationId = (int)$pdo->query('SELECT id FROM locations ORDER BY id LIMIT 1')->fetchColumn();
+
+$pdo->prepare(
+    "INSERT INTO refund_requests (incident_id, machine_id, location_id, claimant_name, claimant_contact,
+        claimed_amount, compensation_method, pickup_pin, tracking_token)
+     VALUES (:iid, :mid, :lid, 'Cliente Huérfano', '600000000', 2.50, 'EN_MANO_SEDE', '1234', :token)"
+)->execute([':iid' => $biteIncidentId, ':mid' => $biteMachineId, ':lid' => $biteLocationId, ':token' => bin2hex(random_bytes(32))]);
+
+$biteError = null;
+TestDataCleaner::setSessionPurgeSignal($pdo, true);
 try {
-    $incidentId = (int)$pdo->query('SELECT id FROM incidents ORDER BY id LIMIT 1')->fetchColumn();
-    $machineId = (int)$pdo->query('SELECT id FROM machines ORDER BY id LIMIT 1')->fetchColumn();
-    $locationId = (int)$pdo->query('SELECT id FROM locations ORDER BY id LIMIT 1')->fetchColumn();
-
-    $pdo->prepare(
-        "INSERT INTO refund_requests (incident_id, machine_id, location_id, claimant_name, claimant_contact,
-            claimed_amount, compensation_method, pickup_pin, tracking_token)
-         VALUES (:iid, :mid, :lid, 'Cliente Huérfano', '600000000', 2.50, 'EN_MANO_SEDE', '1234', :token)"
-    )->execute([':iid' => $incidentId, ':mid' => $machineId, ':lid' => $locationId, ':token' => bin2hex(random_bytes(32))]);
-
     // Orden histórico de las suites: primero `incidents`, luego sus hijas.
-    $naiveFailed = false;
-    $naiveMessage = '';
-    try {
-        $pdo->exec('DELETE FROM incidents');
-    } catch (PDOException $e) {
-        $naiveFailed = true;
-        $naiveMessage = $e->getMessage();
-    }
-
-    $assert(
-        '3.1 `DELETE FROM incidents` a pelo FALLA con la FK RESTRICT activa',
-        $naiveFailed,
-        'no falló: el huérfano no llegó a bloquear nada, la prueba no valdría'
-    );
-    $assert(
-        '3.2 El fallo es el error 1451 de MariaDB (violación de integridad referencial)',
-        str_contains($naiveMessage, '1451'),
-        'mensaje: ' . $naiveMessage
-    );
-    $assert('3.3 El intento fallido NO ha borrado la fila huérfana', $countRows('refund_requests') >= 1);
-
-    $pdo->rollBack();
-} catch (Throwable $e) {
-    if ($pdo->inTransaction()) {
-        $pdo->rollBack();
-    }
-    echo "\n[ERROR FATAL en la prueba de mordida] " . $e->getMessage() . "\n";
-    $failures++;
+    $pdo->exec('DELETE FROM incidents');
+} catch (PDOException $e) {
+    $biteError = $e;
+} finally {
+    TestDataCleaner::setSessionPurgeSignal($pdo, false);
 }
 
+$biteCode = $biteError === null ? '' : (string)($biteError->errorInfo[0] ?? $biteError->getCode());
+
+$assert(
+    '3.1 `DELETE FROM incidents` a pelo FALLA con la FK RESTRICT activa',
+    $biteError !== null,
+    'no falló: el huérfano no llegó a bloquear nada, la prueba no valdría'
+);
+$assert(
+    '3.2 El fallo es la violación de integridad referencial del motor único (SQLSTATE 23503)',
+    $biteCode === '23503',
+    'código: ' . $biteCode . ' · mensaje: ' . ($biteError === null ? '' : $biteError->getMessage())
+);
+$assert('3.3 El intento fallido NO ha borrado la fila huérfana', $countRows('refund_requests') >= 1);
 echo "\n--- 4. purge() drena las hijas RESTRICT y respeta las maestras ---\n";
 
 $machinesBefore = $countRows('machines');
@@ -344,13 +366,11 @@ foreach ($restrictChildren as $child) {
     }
 }
 
-// Se devuelven las semillas y las métricas de demo para no fastidiar a nadie.
+// Se devuelven las semillas del catálogo. El sembrador de métricas del motor retirado no se
+// invoca: su retirada, con el DDL heredado, es de T-13-16.
 try {
     (new SeedRunner($pdo))->seedAll();
-    require_once __DIR__ . '/../../database/DemoMetricsSeeder.php';
-    (new \VendGuard\Database\DemoMetricsSeeder($pdo))->seed();
-} catch (Throwable $e) {
-    echo "  [WARN] Re-siembra final: " . $e->getMessage() . "\n";
+} catch (Throwable $e) {    echo "  [WARN] Re-siembra final: " . $e->getMessage() . "\n";
 }
 
 echo "\n======================================================================\n";

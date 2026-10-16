@@ -79,8 +79,12 @@ if ($part === null || $part->getId() === null) {
 }
 $partId = $part->getId();
 
-// Limpiar solicitudes previas de estas incidencias para aislamiento del test
-$pdo->prepare("DELETE FROM spare_part_requests WHERE incident_id IN (?, ?)")->execute([$inc1Id, $inc2Id]);
+// Limpiar solicitudes previas de estas incidencias para aislamiento del test. El borrado va
+// con la ventana de purga abierta (contrato de limpieza §3): la tabla lleva el guardián del
+// Art. III.1 y el motor único rechaza el DELETE en crudo.
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $inc1Id, $inc2Id): void {
+    $pdo->prepare("DELETE FROM spare_part_requests WHERE incident_id IN (?, ?)")->execute([$inc1Id, $inc2Id]);
+});
 
 $failures = 0;
 $assertions = 0;
@@ -224,8 +228,10 @@ $assert("7.1 markCancelledByIncident actualiza 1 solicitud a CANCELLED", $cancel
 $reloadedInc2 = $requestRepo->findById((int)$createdInc2->getId());
 $assert("7.2 Estado de solicitud cancelada es CANCELLED", $reloadedInc2 !== null && $reloadedInc2->getStatus() === SparePartRequestStatus::CANCELLED);
 
-// Limpieza de datos de prueba
-$pdo->prepare("DELETE FROM spare_part_requests WHERE incident_id IN (?, ?)")->execute([$inc1Id, $inc2Id]);
+// Limpieza de datos de prueba, con la ventana de purga abierta (contrato de limpieza §3).
+TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $inc1Id, $inc2Id): void {
+    $pdo->prepare("DELETE FROM spare_part_requests WHERE incident_id IN (?, ?)")->execute([$inc1Id, $inc2Id]);
+});
 
 echo "\n----------------------------------------------------------------------\n";
 echo "Total Aserciones: {$assertions}\n";

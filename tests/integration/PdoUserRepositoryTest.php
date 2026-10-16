@@ -12,9 +12,11 @@ declare(strict_types=1);
 require_once __DIR__ . '/../bootstrap.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/ConnectionFactory.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/SeedRunner.php';
+require_once __DIR__ . '/../../src/Infrastructure/Dialect/SqlDialectAdapter.php';
 
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SeedRunner;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
@@ -223,14 +225,15 @@ echo "\n--- Caso 10: Conteo de incidencias activas asignadas ---\n";
 $assert("10.1 Inicialmente 0 incidencias activas para el nuevo técnico", $userRepo->countActiveAssignedIncidents($newUserId) === 0);
 $assert("10.1b Inicialmente 0 incidencias activas con alias countPendingIncidents", $userRepo->countPendingIncidents($newUserId) === 0);
 
-// Crear máquina temporal dedicada para el test de incidencia asignada
+// Crear máquina temporal dedicada para el test de incidencia asignada. El literal
+// booleano va en la grafía del motor único (D-3): su columna es `BOOLEAN`, no un entero.
 $tempMachineCode = 'VEND-TMP-USERTEST-10';
 TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $tempMachineCode): void {
     $pdo->prepare("DELETE FROM machines WHERE code = :c")->execute([':c' => $tempMachineCode]);
 });
 $pdo->prepare("
     INSERT INTO machines (location_id, code, model, machine_type, floor_wing, is_active)
-    VALUES (1, :c, 'Test Temp Model', 'COMBO', 'Planta Test', 1)
+    VALUES (1, :c, 'Test Temp Model', 'COMBO', 'Planta Test', TRUE)
 ")->execute([':c' => $tempMachineCode]);
 $tempMachineId = (int)$pdo->lastInsertId();
 
@@ -257,8 +260,9 @@ $assert("10.2 Detecta 1 incidencia activa asignada (countActiveAssignedIncidents
 $assert("10.2b Detecta 1 incidencia activa asignada (countPendingIncidents)", $userRepo->countPendingIncidents($newUserId) === 1);
 
 // Regresión (bug del directorio): una avería RESOLVED dentro de su ventana de garantía
-// de 48 h sigue siendo expediente activo de la máquina (is_active_ticket = 1), pero ya
-// no es carga de trabajo del técnico (Decisión QA 2: solo ASSIGNED/IN_PROGRESS/PENDING_PARTS).
+// de 48 h sigue siendo expediente activo de la máquina (el predicado que el motor único
+// usa donde el retirado materializaba `is_active_ticket`), pero ya no es carga de trabajo
+// del técnico (Decisión QA 2: solo ASSIGNED/IN_PROGRESS/PENDING_PARTS).
 // Requiere máquina propia: uq_machine_active_ticket impide dos tickets activos por máquina.
 $resolvedMachineCode = 'VEND-TMP-USERTEST-10B';
 TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $resolvedMachineCode): void {
@@ -266,7 +270,7 @@ TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $resolvedMa
 });
 $pdo->prepare("
     INSERT INTO machines (location_id, code, model, machine_type, floor_wing, is_active)
-    VALUES (1, :c, 'Test Temp Model B', 'COMBO', 'Planta Test', 1)
+    VALUES (1, :c, 'Test Temp Model B', 'COMBO', 'Planta Test', TRUE)
 ")->execute([':c' => $resolvedMachineCode]);
 $resolvedMachineId = (int)$pdo->lastInsertId();
 
@@ -288,11 +292,18 @@ $stmtResolved->execute([
 ]);
 $resolvedIncId = (int)$pdo->lastInsertId();
 
-// Sanity: la avería RESOLVED en garantía sigue siendo expediente activo de la máquina.
-$stmtFlag = $pdo->prepare("SELECT is_active_ticket FROM incidents WHERE id = :id");
+// Sanity: la avería RESOLVED en garantía sigue siendo expediente activo de la máquina. La
+// pregunta se hace por el predicado del motor único (D-6): `is_active_ticket` era una columna
+// generada del motor retirado y aquí no existe, pero la regla es la misma —y se pide en su
+// único punto de traducción, no reescrita en la fixture—.
+$dialect = SqlDialectAdapter::forConnection($pdo);
+$stmtFlag = $pdo->prepare(sprintf(
+    'SELECT %s AS is_active_ticket FROM incidents WHERE id = :id',
+    $dialect->activeTicketCondition()
+));
 $stmtFlag->execute([':id' => $resolvedIncId]);
 $activeFlag = (int)$stmtFlag->fetchColumn();
-$assert("10.3 La avería RESOLVED en garantía sigue siendo expediente activo (is_active_ticket = 1)", $activeFlag === 1);
+$assert("10.3 La avería RESOLVED en garantía sigue siendo expediente activo de la máquina (misma regla que la columna retirada)", $activeFlag === 1);
 $assert("10.4 El conteo ignora la avería RESOLVED en garantía (sigue en 1, countActiveAssignedIncidents)", $userRepo->countActiveAssignedIncidents($newUserId) === 1);
 $assert("10.4b El conteo ignora la avería RESOLVED en garantía (countPendingIncidents)", $userRepo->countPendingIncidents($newUserId) === 1);
 
