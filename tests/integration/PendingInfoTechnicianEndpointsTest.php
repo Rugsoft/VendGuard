@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * PendingInfoTechnicianEndpointsTest (T-PAUSE-12)
  *
- * Verifica la condición "Hecho cuando" de T-PAUSE-12 contra MariaDB real, a través del
+ * Verifica la condición "Hecho cuando" de T-PAUSE-12 contra el motor único real, a través del
  * enrutador y de los middlewares de verdad (no se invoca el controlador a mano):
  *
  *   - `TechnicianController::pausePendingInfo()` en
@@ -101,7 +101,7 @@ if (!$coordinator instanceof User || !$primaryTech instanceof User || !$otherTec
 $machinePool = $pdo->query(
     "SELECT m.id AS machine_id, m.location_id AS location_id
        FROM machines m
-      WHERE m.is_active = 1
+      WHERE m.is_active = TRUE
         AND NOT EXISTS (
             SELECT 1 FROM incidents i
              WHERE i.machine_id = m.id
@@ -583,10 +583,14 @@ try {
     [$shiftTicketId] = $createAssignedTicket($techId);
     $madrid = new DateTimeZone('Europe/Madrid');
     // Martes a las 12:15, dentro de la jornada comercial (08:00-18:00, lunes a viernes):
-    // el desplazamiento de unos segundos debe quedarse en el mismo día hábil.
-    $originalDeadline = (new DateTimeImmutable('next tuesday 12:15', $madrid))->format('Y-m-d H:i:s');
+    // el desplazamiento de unos segundos debe quedarse en el mismo día hábil. Se siembra
+    // **anclado** a la zona operativa, que es la forma en que la aplicación persiste el
+    // vencimiento, y la pared de sede se guarda aparte para las expectativas que la miden
+    // (Contrato del Reloj Operativo, §1).
+    $originalDeadlineMoment = new DateTimeImmutable('next tuesday 12:15', $madrid);
+    $originalDeadline       = $originalDeadlineMoment->format('Y-m-d H:i:s');
     $pdo->prepare('UPDATE incidents SET sla_target_at = :deadline WHERE id = :id')
-        ->execute([':deadline' => $originalDeadline, ':id' => $shiftTicketId]);
+        ->execute([':deadline' => $originalDeadlineMoment->format('Y-m-d\TH:i:sP'), ':id' => $shiftTicketId]);
 
     $res = $router->dispatch(new Request(
         method: 'POST',
@@ -653,7 +657,12 @@ try {
     );
     $assert(
         '7.5 El vencimiento desplazado queda persistido en el expediente',
-        ($incidentRow($shiftTicketId)['sla_target_at'] ?? '') === $shiftedDeadline
+        // La fila trae la marca como el motor la publica —con su desfase— y la respuesta publica la
+        // pared de sede del vencimiento: compararlas es comparar el instante que ambas denotan
+        // (Contrato del Reloj Operativo, §1 y §4).
+        strtotime((string)($incidentRow($shiftTicketId)['sla_target_at'] ?? '')) === $shiftedMoment->getTimestamp(),
+        'persistido: ' . var_export($incidentRow($shiftTicketId)['sla_target_at'] ?? null, true)
+            . ' · publicado: ' . $shiftedDeadline
     );
     $assert('7.6 El reloj contractual queda reactivado tras el desplazamiento', ($shiftData['is_sla_paused'] ?? true) === false);
 } finally {

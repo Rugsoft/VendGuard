@@ -6,7 +6,7 @@ declare(strict_types=1);
  * VendGuard — Sonda exploratoria del módulo 11 (RF-01 … RF-06, RNF-01 … RNF-06)
  *
  * Ejecuta tres bloques sobre el sistema REAL (enrutador y middlewares de verdad contra
- * MariaDB, sin dobles):
+ * el motor único, sin dobles):
  *
  *   A. **Humo:** el servidor de desarrollo responde, los assets del módulo se sirven con
  *      su MIME y ninguna respuesta de la superficie del módulo devuelve un 5xx.
@@ -141,15 +141,18 @@ foreach ($pdo->query("SELECT id FROM incidents WHERE deleted_at IS NULL AND stat
 // deja en el estado de partida del protocolo: ninguna máquina bloqueada sin avería viva.
 //
 // «Fuera de servicio» son DOS marcas, no una: `blockForNoAccess()` pone
-// `is_blocked_no_access = 1` y ADEMÁS `is_active = 0`, y la máquina no vuelve sola a
+// `is_blocked_no_access = TRUE` y ADEMÁS `is_active = FALSE`, y la máquina no vuelve sola a
 // «Operativa». Deshacer solo el bloqueo deja el parque cojo en silencio —una sede
 // sembrada con dos máquinas se queda con una— y todas las suites que exigen dos máquinas
 // activas en la misma sede caen por culpa del banco, no del módulo. Se restauran las dos
 // marcas. `deleted_at IS NULL` distingue esta avería operativa de la baja administrativa
 // deliberada, que sí sella `deleted_at` y no se toca.
+// Las dos marcas y el predicado van en la forma que el motor único declara para una columna
+// booleana: el literal numérico frente a un `boolean` no es una comparación que el motor admita
+// (clase D-3 del porte), y la sonda mide el módulo, no su dialecto.
 $pdo->exec(
-    "UPDATE machines m SET m.is_blocked_no_access = 0, m.is_active = 1
-      WHERE m.is_blocked_no_access = 1
+    "UPDATE machines m SET m.is_blocked_no_access = FALSE, m.is_active = TRUE
+      WHERE m.is_blocked_no_access = TRUE
         AND m.deleted_at IS NULL
         AND NOT EXISTS (
             SELECT 1 FROM incidents i
@@ -182,7 +185,7 @@ $freeMachine = function (string $machineType, bool $needsPortal) use ($pdo): arr
             "SELECT m.id AS machine_id, m.location_id AS location_id, l.site_code AS site_code
                FROM machines m
                INNER JOIN locations l ON l.id = m.location_id
-              WHERE m.is_active = 1
+              WHERE m.is_active = TRUE
                 AND m.machine_type = '%s'
                 %s
                 AND NOT EXISTS (
@@ -999,8 +1002,12 @@ $cleanProbe();
 $weekend = $createTicket($techId);
 $zone = new DateTimeZone('Europe/Madrid');
 $fridayDeadline = (new DateTimeImmutable('now', $zone))->modify('next friday')->setTime(17, 0, 0);
+// El vencimiento se siembra **anclado** a la zona operativa, que es la forma que la aplicación
+// persiste: la columna lleva zona horaria y el motor interpretaría en la suya una pared sin zona,
+// de modo que la sonda mediría un punto de partida que la sede no declaró (Contrato del Reloj
+// Operativo, §1).
 $pdo->exec(
-    "UPDATE incidents SET sla_target_at = '" . $fridayDeadline->format('Y-m-d H:i:s') . "' WHERE id = " . $weekend['id']
+    "UPDATE incidents SET sla_target_at = '" . $fridayDeadline->format('Y-m-d\TH:i:sP') . "' WHERE id = " . $weekend['id']
 );
 
 $declared = $pauseTicket($weekend['id'], 'BUILDING_CLOSED_NO_ACCESS', $reason, $techToken);
@@ -1078,6 +1085,10 @@ echo "\n{$cyan}--- Bloque E: fronteras de 72 h hábiles y de la garantía de 48 
  * Es la traducción inversa de `countBusinessSecondsBetween()` y permite colocar una pausa
  * justo a un lado y a otro del umbral: si la implementación contase horas de calendario en
  * lugar de horas hábiles, la sonda de 71 h hábiles (~10 días naturales) lo delataría.
+ *
+ * La marca que devuelve viaja **anclada** (con el desfase de la zona operativa): sus llamantes
+ * la escriben en `incidents.paused_at`, que lleva zona horaria, así que una pared sin zona haría
+ * que el motor la interpretase en la suya (Contrato del Reloj Operativo, §1).
  */
 $businessSecondsAgo = function (int $businessSeconds) use ($zone): string {
     $cursor = new DateTimeImmutable('now', $zone);
@@ -1103,14 +1114,14 @@ $businessSecondsAgo = function (int $businessSeconds) use ($zone): string {
 
         $available = $secondOfDay - 28800;
         if ($remaining <= $available) {
-            return $cursor->modify("-{$remaining} seconds")->format('Y-m-d H:i:s');
+            return $cursor->modify("-{$remaining} seconds")->format('Y-m-d\TH:i:sP');
         }
 
         $remaining -= $available;
         $cursor = $cursor->modify('-1 day')->setTime(18, 0, 0);
     }
 
-    return $cursor->format('Y-m-d H:i:s');
+    return $cursor->format('Y-m-d\TH:i:sP');
 };
 
 $thresholdProbe = function (int $businessHours) use ($createTicket, $techId, $pauseTicket, $techToken, $reason, $pdo, $businessSecondsAgo, $api, $coordinatorToken, $row): array {
@@ -1232,14 +1243,15 @@ TestDataCleaner::purge($pdo);
 // quedan sin avería viva: sin esto, el banco de pruebas dejaría el parque degradado para
 // cualquier suite posterior.
 //
-// La restitución tiene que cubrir las DOS marcas de «fuera de servicio» (`is_active = 0`
-// y `is_blocked_no_access = 1`). Deshacer solo el bloqueo es el defecto silencioso: la
+// La restitución tiene que cubrir las DOS marcas de «fuera de servicio» (`is_active = FALSE`
+// y `is_blocked_no_access = TRUE`). Deshacer solo el bloqueo es el defecto silencioso: la
 // máquina queda de baja, el parque pierde capacidad en cada corrida y la batería acaba
 // en rojo por un banco mutilado y no por el código. La baja administrativa deliberada
 // (`deleted_at` sellado) queda fuera del restablecimiento a propósito.
+// Las dos marcas y el predicado, en la forma del motor único (clase D-3 del porte).
 $pdo->exec(
-    "UPDATE machines m SET m.is_blocked_no_access = 0, m.is_active = 1
-      WHERE m.is_blocked_no_access = 1
+    "UPDATE machines m SET m.is_blocked_no_access = FALSE, m.is_active = TRUE
+      WHERE m.is_blocked_no_access = TRUE
         AND m.deleted_at IS NULL
         AND NOT EXISTS (
             SELECT 1 FROM incidents i

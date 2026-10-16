@@ -1537,7 +1537,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 commentText: $comment->getCommentText(),
                 photoPath: $comment->getPhotoPath(),
                 isInternal: $comment->isInternal(),
-                createdAt: date('Y-m-d H:i:s'),
+                createdAt: date('Y-m-d\TH:i:sP'),
                 ticketCode: $comment->getTicketCode()
             );
         }
@@ -2658,7 +2658,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         $stmt->bindValue(':from_status', $fromStatus, $fromStatus !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
         $stmt->bindValue(':to_status', $toStatus, PDO::PARAM_STR);
         $stmt->bindValue(':action_note', $actionNote, PDO::PARAM_STR);
-        $stmt->bindValue(':created_at', $occurredAt->format('Y-m-d H:i:s'), PDO::PARAM_STR);
+        // La marca del hito del historial viaja **anclada** (con el desfase de la zona en que ocurrió):
+        // `incident_history.created_at` lleva zona horaria y el motor interpreta en la suya una pared
+        // sin zona, de modo que el intervalo de pausa quedaba datado el huso entero por delante del
+        // instante que el servicio declaró (Contrato del Reloj Operativo, §1).
+        $stmt->bindValue(':created_at', $occurredAt->format('Y-m-d\TH:i:sP'), PDO::PARAM_STR);
         $stmt->execute();
 
         return (int)$this->pdo->lastInsertId();

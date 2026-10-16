@@ -784,10 +784,9 @@ const LEGACY_DIALECT = [
         'why' => 'la rama inalcanzable del driver heredado de la factoría pregunta a qué base está conectada, y la suite pregunta lo mismo al motor único en su propia grafía; su dueño es la factoría de una sola rama',
     ],
     'tests/integration/PendingInfoConcurrencyTest.php' => [
-        'kind' => KIND_DEBT,
-        'owner' => 'T-13-11',
-        'census' => ['catalog' => 2],
-        'why' => 'la sonda de aislamiento de la carrera pregunta el nivel de aislamiento al estado de sesión del motor heredado',
+        'kind' => KIND_DRAINED, 'owner' => 'T-13-11', 'census' => [],
+        'drained_occurrences' => ['catalog' => 2],
+        'why' => 'porte del lote de comentarios y pausas: la sonda de aislamiento de la carrera preguntaba el nivel de aislamiento al estado de sesión del motor heredado (las dos grafías de la variable de sesión) y ahora lo lee del catálogo del motor único; el «lector sucio» se mide en la orilla más permisiva que el motor admite, no en una que no implementa',
     ],
     'tests/integration/PostgresConstitutionalTest.php' => [
         'kind' => KIND_CONTRACT,

@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * PendingInfoConcurrencyTest (T-PAUSE-30)
  *
- * Certifica, contra MariaDB real y con DOS CONEXIONES PDO independientes, la
+ * Certifica, contra el motor único PostgreSQL y con DOS CONEXIONES PDO independientes, la
  * serialización de las reanudaciones simultáneas del módulo 11 (caso límite §6.2 del
  * análisis funcional, RF-02.2, RF-02.3):
  *
@@ -20,9 +20,9 @@ declare(strict_types=1);
  *
  * Qué prueba cada capa (declarado para no vender más de lo medido):
  *   1. **El bloqueo existe y muerde.** Con una conexión sosteniendo la fila del expediente,
- *      la operación de la segunda conexión espera y termina en `Lock wait timeout exceeded`
- *      (`ER_LOCK_WAIT_TIMEOUT`, 1205) sin haber escrito nada. Sin bloqueo por fila esa espera
- *      no puede ocurrir.
+ *      la operación de la segunda conexión espera y termina en el aviso de espera agotada
+ *      (`55P03`, `lock_not_available`: el `lock_timeout` que la propia suite le impone) sin
+ *      haber escrito nada. Sin bloqueo por fila esa espera no puede ocurrir.
  *   2. **El bloqueo es de una fila, no del parque.** Mientras el expediente reservado está
  *      bloqueado, otra conexión bloquea y escribe sobre OTRO expediente sin esperar.
  *   3. **Sobrevive UNA sola transición y UN solo rastro.** Tras confirmar la operación
@@ -100,6 +100,26 @@ $captureThrowable = static function (callable $action): ?Throwable {
     return null;
 };
 
+/**
+ * ¿La excepción es la del motor cuando la espera por el bloqueo se agota?
+ *
+ * El `1205`/`ER_LOCK_WAIT_TIMEOUT` era el errno del motor retirado; el motor único lo declara
+ * por su SQLSTATE —**`55P03`**, `lock_not_available`—, porque es el propio `lock_timeout` que la
+ * suite le impone el que cancela la espera. La pregunta de la suite no cambia al cambiar de
+ * motor: la perdedora ESPERA el bloqueo en lugar de decidir sobre una foto vieja.
+ */
+$isLockWaitTimeout = static function (?Throwable $error): bool {
+    if (!$error instanceof PDOException) {
+        return false;
+    }
+
+    $message = strtolower($error->getMessage());
+
+    return ($error->errorInfo[0] ?? '') === '55P03'
+        || str_contains($message, 'lock timeout')
+        || str_contains($message, 'lock wait timeout');
+};
+
 $assert(
     '0.1 Dos conexiones PDO REALES e independientes sobre la misma base de datos',
     $pdoA !== $pdoB
@@ -141,7 +161,7 @@ $technicianHeaders = ['Authorization' => 'Bearer ' . $technicianToken];
 $machinePool = $pdoA->query(
     "SELECT m.id AS machine_id, m.location_id AS location_id
        FROM machines m
-      WHERE m.is_active = 1
+      WHERE m.is_active = TRUE
         AND NOT EXISTS (
             SELECT 1 FROM incidents i
              WHERE i.machine_id = m.id
@@ -288,11 +308,14 @@ $assert(
 
 // La espera se siembra con una duración conocida (3 minutos) para que el desplazamiento
 // contractual posterior sea verificable al segundo y no dependa de lo que tarde la suite.
+// La aritmética y la marca van en la forma del motor único: el intervalo con su unidad como
+// literal y el vencimiento **anclado** a la zona operativa, que es como lo persiste la
+// aplicación en una columna con zona (Contrato del Reloj Operativo, §1).
 $pdoA->exec(sprintf(
     "UPDATE incidents
-        SET paused_at = NOW() - INTERVAL 180 SECOND,
+        SET paused_at = NOW() - INTERVAL '180 seconds',
             total_pending_info_seconds = 0,
-            sla_target_at = '2026-10-13 15:00:00'
+            sla_target_at = '2026-10-13T15:00:00+02:00'
       WHERE id IN (%d, %d)",
     $manualIncidentId,
     $commentIncidentId
@@ -300,7 +323,7 @@ $pdoA->exec(sprintf(
 $manualPausedAt = (string)($incidentRow($manualIncidentId)['paused_at'] ?? '');
 
 // La conexión perdedora falla rápido en lugar de quedarse 50 segundos esperando la fila.
-$pdoB->exec('SET SESSION innodb_lock_wait_timeout = 1');
+$pdoB->exec("SET SESSION lock_timeout = '1s'");
 
 // =========================================================================
 // GRUPO 1: Carrera de la reanudación manual (RF-02.2)
@@ -322,12 +345,9 @@ $loserException = $captureThrowable(static fn () => $serviceB->resumePendingInfo
     'Reanudación de la petición perdedora.'
 ));
 
-$lockWaitCode = $loserException instanceof PDOException ? (int)($loserException->errorInfo[1] ?? 0) : 0;
-
 $assert(
-    '1.1 La segunda reanudación ESPERA al bloqueo por fila de la primera (1205 Lock wait timeout)',
-    $loserException instanceof PDOException
-    && ($lockWaitCode === 1205 || str_contains($loserException->getMessage(), 'Lock wait timeout')),
+    '1.1 La segunda reanudación ESPERA al bloqueo por fila de la primera (55P03 lock timeout)',
+    $isLockWaitTimeout($loserException),
     $loserException === null
         ? 'la perdedora no esperó: no hay bloqueo por fila que la frene'
         : $loserException::class . ': ' . $loserException->getMessage()
@@ -452,12 +472,9 @@ $commentLoser = $captureThrowable(static fn () => $serviceB->resumePendingInfoMa
     'Reanudación de coordinación de la petición perdedora.'
 ));
 
-$commentLockWaitCode = $commentLoser instanceof PDOException ? (int)($commentLoser->errorInfo[1] ?? 0) : 0;
-
 $assert(
-    '2.1 La reanudación de coordinación espera el bloqueo por fila de la otra petición (1205)',
-    $commentLoser instanceof PDOException
-    && ($commentLockWaitCode === 1205 || str_contains($commentLoser->getMessage(), 'Lock wait timeout')),
+    '2.1 La reanudación de coordinación espera el bloqueo por fila de la otra petición (55P03)',
+    $isLockWaitTimeout($commentLoser),
     $commentLoser === null
         ? 'la coordinación no esperó: ese camino no está serializado'
         : $commentLoser::class . ': ' . $commentLoser->getMessage()
@@ -569,18 +586,20 @@ echo "\n--- Grupo 4: El bloqueo por fila manda sobre el nivel de aislamiento ---
 // leyera sin bloquear, vería el estado SIN CONFIRMAR de la transacción ganadora —que ya
 // está en IN_PROGRESS— y se resolvería con una excepción de transición inválida en
 // lugar de esperar. Que ESPERE demuestra que la fila se bloquea ANTES de leer.
-$pdoB->exec('SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED');
+// La orilla más permisiva que el motor único declara es `read committed`: PostgreSQL no implementa
+// lectura sucia (acepta el nombre y lo degrada a `read committed`), de modo que el «lector sucio» de
+// la forma retirada se mide aquí en la orilla más débil que el motor tiene. Lo que el grupo
+// certifica no es el nivel —el bloqueo por fila manda sobre él— sino que la perdedora ESPERA.
+$pdoB->exec('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED');
 
-$isolationLevel = 'DESCONOCIDO';
-try {
-    $isolationLevel = (string)$pdoB->query('SELECT @@transaction_isolation')->fetchColumn();
-} catch (PDOException) {
-    $isolationLevel = (string)$pdoB->query('SELECT @@tx_isolation')->fetchColumn();
-}
+// El nivel se lee del catálogo del motor único (`SHOW`), y se normaliza a una sola palabra para que
+// el juicio no dependa de cómo lo escriba el motor.
+$isolationLevel = (string)$pdoB->query('SHOW transaction_isolation')->fetchColumn();
+$isolationToken = (string)preg_replace('/[^A-Z]/', '', strtoupper($isolationLevel));
 
 $assert(
-    '4.1 La conexión perdedora queda en lectura sucia para la prueba',
-    str_contains(strtoupper($isolationLevel), 'READ-UNCOMMITTED') || str_contains(strtoupper($isolationLevel), 'READ-UNCOMMITTED'),
+    '4.1 La conexión perdedora queda en la orilla más permisiva que el motor admite (read committed)',
+    $isolationToken === 'READCOMMITTED',
     'nivel de aislamiento obtenido: ' . $isolationLevel
 );
 
@@ -606,12 +625,9 @@ $dirtyLoser = $captureThrowable(static fn () => $serviceB->resumePendingInfoManu
     'Reanudación perdedora con lectura sucia.'
 ));
 
-$dirtyLoserCode = $dirtyLoser instanceof PDOException ? (int)($dirtyLoser->errorInfo[1] ?? 0) : 0;
-
 $assert(
     '4.2 Aun leyendo en sucio, la perdedora ESPERA el bloqueo en lugar de decidir sobre el estado sin confirmar',
-    $dirtyLoser instanceof PDOException
-    && ($dirtyLoserCode === 1205 || str_contains($dirtyLoser->getMessage(), 'Lock wait timeout')),
+    $isLockWaitTimeout($dirtyLoser),
     $dirtyLoser === null
         ? 'la perdedora decidió sin esperar: leyó el estado sin confirmar de la ganadora'
         : $dirtyLoser::class . ': ' . $dirtyLoser->getMessage()
@@ -632,12 +648,10 @@ $assert(
     sprintf('rastro nuevo=%d', $resumeTraceCount($dirtyReadIncidentId, $dirtyCursor))
 );
 
-$pdoB->exec('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED');
-
 // =========================================================================
 // Limpieza del banco de pruebas
 // =========================================================================
-$pdoB->exec('SET SESSION innodb_lock_wait_timeout = 50');
+$pdoB->exec("SET SESSION lock_timeout = '50s'");
 
 if ($pdoA->inTransaction()) {
     $pdoA->rollBack();

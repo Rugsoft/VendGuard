@@ -445,6 +445,12 @@ class Incident implements ArrayAccess, JsonSerializable
      *
      * `paused_at` es la marca autoritativa del intervalo vivo: se escribe al
      * pausar y se limpia al reanudar (Algoritmo 2 del plan técnico).
+     *
+     * Su forma la fija el Contrato del Reloj Operativo (`specs/technical/operational_clock_contract.md`):
+     * **instante anclado** (con su desfase), nunca una pared sin zona, porque la columna lleva zona
+     * horaria y el motor interpretaría la pared en la suya. Al leer, la marca vuelve del motor con su
+     * desfase y se compara **como instante** —`currentPauseDurationSeconds()` ya lo hace con
+     * `strtotime()`—, nunca como texto.
      */
     public function isPaused(): bool
     {
@@ -563,7 +569,11 @@ class Incident implements ArrayAccess, JsonSerializable
         $clone->status = IncidentStatus::PENDING_INFO;
         $clone->pendingInfoReasonCategory = $reasonCategory;
         $clone->pendingInfoReasonText = $normalizedReason;
-        $clone->pausedAt = ($pausedAt ?? new DateTimeImmutable())->format('Y-m-d H:i:s');
+        // Instante **anclado** (con su desfase), no una pared desnuda: `paused_at` es `timestamptz` y el
+        // motor interpreta en la zona de su sesión (UTC) un `'Y-m-d H:i:s'` sin zona, de modo que la
+        // marca del intervalo quedaba el huso entero por delante del instante que el servicio declaró y
+        // la espera de sede se medía con dos horas de menos (Contrato del Reloj Operativo, §2).
+        $clone->pausedAt = ($pausedAt ?? new DateTimeImmutable())->format('Y-m-d\TH:i:sP');
 
         return $clone;
     }
@@ -674,11 +684,17 @@ class Incident implements ArrayAccess, JsonSerializable
      * lo calcula el Algoritmo 3 en `IncidentPauseService` (T-PAUSE-06), que es quien
      * conoce la sede y su calendario. Se permite fijar la fecha aunque el ticket no
      * tuviera ninguna previa, para los tickets sin SLA contractual calculado.
+     *
+     * La marca se graba **anclada** (con el desfase de la zona en que el calendario la resolvió): una
+     * pared sin zona obligaba al motor a interpretarla en la suya, así que el vencimiento persistido no
+     * era el que el calendario de la sede había calculado y cada nuevo desplazamiento partía de una hora
+     * ya contaminada. El calendario comercial vuelve a la zona operativa antes de razonar, de modo que el
+     * viaje es ida y vuelta sobre el mismo instante (Contrato del Reloj Operativo, §2 y §3).
      */
     public function shiftSlaTarget(DateTimeImmutable $newSlaTargetAt): self
     {
         $clone = clone $this;
-        $clone->slaTargetAt = $newSlaTargetAt->format('Y-m-d H:i:s');
+        $clone->slaTargetAt = $newSlaTargetAt->format('Y-m-d\TH:i:sP');
 
         return $clone;
     }

@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * VendGuard - LocationCommentsApiTest
  *
- * Test de integración HTTP contra MariaDB real del hilo de conversación visto desde
+ * Test de integración HTTP contra el motor único real del hilo de conversación visto desde
  * el Responsable de Sede (Módulo 10, T-COM-18 · RF-01, RF-02, RF-03, RF-04, RF-05,
  * RNF-01, Constitución Art. V.4 y Art. V.5).
  *
@@ -141,28 +141,32 @@ $insert = $pdo->prepare("
 
 $commentsSeed = [
     // [author_type, user_id, author_name, texto, is_internal, created_at]
-    ['REPORTER',    null,           'Conserjería Principal',   'El datáfono rechaza las tarjetas de banda magnética.', 0, '2026-10-05 08:10:00'],
-    ['TECHNICIAN',  $technicianId,  $technician->getName(),    'Reviso el lector de tarjetas al llegar a la sede.',     0, '2026-10-05 09:00:00'],
-    ['TECHNICIAN',  $technicianId,  $technician->getName(),    'NOTA-INTERNA: el fusible del datáfono está recalentado.', 1, '2026-10-05 09:30:00'],
-    ['COORDINATOR', $coordinatorId, $coordinator->getName(),   'Coordinación autoriza la sustitución del datáfono.',    0, '2026-10-05 10:15:00'],
-    ['COORDINATOR', $coordinatorId, $coordinator->getName(),   'NOTA-INTERNA: negociar descuento con el proveedor.',    1, '2026-10-05 10:45:00'],
+    ['REPORTER',    null,           'Conserjería Principal',   'El datáfono rechaza las tarjetas de banda magnética.', false, '2026-10-05 08:10:00'],
+    ['TECHNICIAN',  $technicianId,  $technician->getName(),    'Reviso el lector de tarjetas al llegar a la sede.',     false, '2026-10-05 09:00:00'],
+    ['TECHNICIAN',  $technicianId,  $technician->getName(),    'NOTA-INTERNA: el fusible del datáfono está recalentado.', true, '2026-10-05 09:30:00'],
+    ['COORDINATOR', $coordinatorId, $coordinator->getName(),   'Coordinación autoriza la sustitución del datáfono.',    false, '2026-10-05 10:15:00'],
+    ['COORDINATOR', $coordinatorId, $coordinator->getName(),   'NOTA-INTERNA: negociar descuento con el proveedor.',    true, '2026-10-05 10:45:00'],
 ];
 
 $internalTexts = [];
 foreach ($commentsSeed as [$authorType, $userId, $authorName, $text, $isInternal, $createdAt]) {
-    $insert->execute([
-        ':incident_id'  => $incidentId,
-        ':author_type'  => $authorType,
-        ':user_id'      => $userId,
-        ':author_name'  => $authorName,
-        ':comment_text' => $text,
-        ':is_internal'  => $isInternal,
-        ':created_at'   => $createdAt,
-    ]);
-    if ($isInternal === 1) {
+    // El booleano cruza **enlazado y con su tipo** (`PDO::PARAM_BOOL`), que es la forma que el
+    // contrato declara para una columna `boolean` (D-3): un entero a secas obliga al motor a
+    // rechazar la sentencia (`42804`) porque `boolean` e `integer` no son la misma familia.
+    $insert->bindValue(':incident_id', $incidentId, PDO::PARAM_INT);
+    $insert->bindValue(':author_type', $authorType, PDO::PARAM_STR);
+    $insert->bindValue(':user_id', $userId, $userId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+    $insert->bindValue(':author_name', $authorName, PDO::PARAM_STR);
+    $insert->bindValue(':comment_text', $text, PDO::PARAM_STR);
+    $insert->bindValue(':is_internal', $isInternal, PDO::PARAM_BOOL);
+    $insert->bindValue(':created_at', $createdAt, PDO::PARAM_STR);
+    $insert->execute();
+
+    if ($isInternal === true) {
         $internalTexts[] = $text;
     }
 }
+$insert->closeCursor();
 
 $siteToken = $authService->generateSiteToken($location);
 $otherSiteToken = $authService->generateSiteToken($otherLocation);
@@ -414,7 +418,7 @@ $assert('6.3 Expediente inexistente => HTTP 404 INCIDENT_NOT_FOUND',
 echo "\n--- Caso 7: Trazabilidad del hilo en base de datos ---\n";
 
 $totalRows = (int)$pdo->query("SELECT COUNT(*) FROM incident_comments WHERE incident_id = {$incidentId}")->fetchColumn();
-$internalRows = (int)$pdo->query("SELECT COUNT(*) FROM incident_comments WHERE incident_id = {$incidentId} AND is_internal = 1")->fetchColumn();
+$internalRows = (int)$pdo->query("SELECT COUNT(*) FROM incident_comments WHERE incident_id = {$incidentId} AND is_internal = TRUE")->fetchColumn();
 $latestThread = $router->dispatch(new Request(
     method: 'GET',
     path: "/api/location/incidents/{$incidentId}/comments",

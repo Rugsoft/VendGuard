@@ -20,7 +20,12 @@ declare(strict_types=1);
  *    segundos, sólo admite `IN_PROGRESS` o `ASSIGNED` y bloquea expresamente
  *    `RESOLVED` (RF-06.2, Art. V.1). Las pausas sucesivas se suman (RF-04.1).
  * 4. `shiftSlaTarget()` graba la fecha desplazada que calculará el Algoritmo 3
- *    (RF-03.3), porque el calendario de la sede pertenece al servicio.
+ *    (RF-03.3), porque el calendario de la sede pertenece al servicio. Las dos
+ *    marcas que el agregado escribe —el inicio del intervalo (`paused_at`) y el
+ *    vencimiento (`sla_target_at`)— viajan **ancladas** a su zona, que es la forma
+ *    que el motor publica y la única que una columna con zona admite: una pared
+ *    desnuda deja el instante a merced de la zona del proceso (Contrato del Reloj
+ *    Operativo, `specs/technical/operational_clock_contract.md` §1).
  * 5. `Machine` soporta el estado formal "Fuera de servicio / Bloqueada por falta
  *    de acceso" (`BLOCKED_NO_ACCESS`), con precedencia sobre cualquier otra
  *    lectura operativa: una máquina nunca vuelve a leerse como apta para el
@@ -63,6 +68,23 @@ $assert = function (string $caseTitle, bool $condition, string $message = '') us
 /** Justificación válida de 20 caracteres reales exactos. */
 $validReason = 'Edificio cerrado por festivo local.';
 $validReasonShort = 'Conserje ausente.'; // 17 caracteres: por debajo del mínimo legal.
+
+/**
+ * ¿La marca que el agregado grabó denota el instante declarado, y lo hace **anclada**?
+ *
+ * Las dos condiciones son la misma regla vista por sus dos mitades: la forma con desfase es la que
+ * el motor publica y la que no depende de la zona del proceso, y la igualdad de instantes es lo que
+ * la marca tiene que denotar. Comparar el texto de una pared contra un literal medía la zona del
+ * arnés, no el contrato del dominio.
+ *
+ * @param string|null        $mark     Marca grabada por el agregado.
+ * @param DateTimeImmutable  $expected Instante que la suite declaró.
+ */
+$isAnchoredMark = static function (?string $mark, DateTimeImmutable $expected): bool {
+    return $mark !== null
+        && preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/', $mark) === 1
+        && strtotime($mark) === $expected->getTimestamp();
+};
 
 /**
  * Construye una incidencia de trabajo con los campos mínimos que exige el
@@ -227,9 +249,9 @@ $assert(
 );
 
 $assert(
-    '2.3 La marca de inicio del intervalo se formatea con precisión de segundos (RNF-01)',
-    $pausedIncident->getPausedAt() === '2026-10-08 10:15:00'
-    && $pausedIncident->getPausedAt() === $pausedAt->format('Y-m-d H:i:s')
+    '2.3 La marca de inicio del intervalo se graba anclada y con precisión de segundos (RNF-01)',
+    $isAnchoredMark($pausedIncident->getPausedAt(), $pausedAt),
+    'paused_at: ' . var_export($pausedIncident->getPausedAt(), true)
 );
 
 foreach ([
@@ -496,14 +518,15 @@ $newDeadline = new DateTimeImmutable('2026-10-08 13:45:00');
 $shiftedIncident = $resumedIncident->shiftSlaTarget($newDeadline);
 
 $assert(
-    '5.1 shiftSlaTarget graba la fecha y no muta la instancia receptora',
-    $shiftedIncident->getSlaTargetAt() === '2026-10-08 13:45:00'
-    && $resumedIncident->getSlaTargetAt() === null
+    '5.1 shiftSlaTarget graba la fecha anclada y no muta la instancia receptora',
+    $isAnchoredMark($shiftedIncident->getSlaTargetAt(), $newDeadline)
+    && $resumedIncident->getSlaTargetAt() === null,
+    'sla_target_at: ' . var_export($shiftedIncident->getSlaTargetAt(), true)
 );
 
 $assert(
     '5.2 Un ticket sin SLA contractual previo puede recibir su primera fecha límite',
-    $makeIncident()->shiftSlaTarget($newDeadline)->getSlaTargetAt() === '2026-10-08 13:45:00'
+    $isAnchoredMark($makeIncident()->shiftSlaTarget($newDeadline)->getSlaTargetAt(), $newDeadline)
 );
 
 $composedFlow = $makeIncident(IncidentStatus::IN_PROGRESS)
@@ -515,7 +538,7 @@ $assert(
     '5.3 El flujo encadenado que usará IncidentPauseService produce acumulado y SLA nuevos',
     $composedFlow->getStatus() === IncidentStatus::IN_PROGRESS
     && $composedFlow->getTotalPendingInfoSeconds() === 5400
-    && $composedFlow->getSlaTargetAt() === '2026-10-08 13:45:00'
+    && $isAnchoredMark($composedFlow->getSlaTargetAt(), new DateTimeImmutable('2026-10-08 13:45:00'))
     && $composedFlow->isPaused() === false,
     json_encode($composedFlow->toArray(), JSON_UNESCAPED_UNICODE)
 );

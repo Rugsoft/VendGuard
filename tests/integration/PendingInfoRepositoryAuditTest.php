@@ -6,7 +6,7 @@ declare(strict_types=1);
  * PendingInfoRepositoryAuditTest
  *
  * Test de integración del contrato de pausa del repositorio de incidencias
- * (tarea T-PAUSE-05) contra MariaDB real. Certifica cuatro cosas que sólo se
+ * (tarea T-PAUSE-05) contra el motor único real. Certifica cuatro cosas que sólo se
  * pueden demostrar con la base de datos delante:
  *
  * 1. `recordPauseEvent()` escribe una fila inmutable en `incident_history` con el
@@ -195,8 +195,12 @@ $assert(
 
 $assert(
     '2.4 La marca temporal es EXACTA al segundo declarado (RNF-01)',
-    $rawPause !== false && $rawPause['created_at'] === $pausedAt->format('Y-m-d H:i:s'),
+    // El hito del historial viaja como el motor lo publica —**con su desfase**— y la expectativa se
+    // expresa como **instante**, no como forma: comparar el texto mediría el render y no el segundo
+    // declarado (Contrato del Reloj Operativo, §1 y §2).
+    $rawPause !== false && strtotime((string)$rawPause['created_at']) === $pausedAt->getTimestamp(),
     'created_at: ' . var_export($rawPause['created_at'] ?? null, true)
+        . ' · declarado: ' . $pausedAt->format('Y-m-d\TH:i:sP')
 );
 
 $pauseNote = (string)($rawPause['action_note'] ?? '');
@@ -257,8 +261,8 @@ $assert(
 $assert(
     '3.3 La nota opcional de reanudación se anexa con su marcador canónico',
     str_contains($resumeNote, 'Nota: Conserjería entrega la llave al técnico de guardia.')
-    && $rawResume['created_at'] === $resumedAt->format('Y-m-d H:i:s'),
-    $resumeNote
+    && strtotime((string)$rawResume['created_at']) === $resumedAt->getTimestamp(),
+    $resumeNote . ' · created_at: ' . var_export($rawResume['created_at'] ?? null, true)
 );
 
 // Reactivación automática por comentario de sede (RF-02.1): no hay usuario humano.
@@ -372,7 +376,10 @@ $assert(
     && $reloaded->getTotalPendingInfoSeconds() === 5400
     && $reloaded->getPendingInfoReasonCategory() === IncidentPauseReasonCategory::MACHINE_LOCATION_NOT_FOUND
     && $reloaded->getPendingInfoReasonText() === 'La máquina fue reubicada en la planta sin avisar al servicio técnico.'
-    && $reloaded->getSlaTargetAt() === '2026-10-08 13:45:00',
+    // El vencimiento se grabó **anclado** a la zona en que el calendario lo resolvió, así que la fila
+    // vuelve con el desfase del motor y el viaje se mide sobre el instante —el mismo que el dominio
+    // escribió— y no sobre su forma (Contrato del Reloj Operativo, §1 y §2).
+    && strtotime((string)$reloaded->getSlaTargetAt()) === (new DateTimeImmutable('2026-10-08 13:45:00'))->getTimestamp(),
     json_encode($reloaded->toArray(), JSON_UNESCAPED_UNICODE)
 );
 

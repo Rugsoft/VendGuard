@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * PendingInfoSiteCommentNoReactivationTest (T-PAUSE-32, enmienda E-1 del 2026-10-11)
  *
- * Certifica por el camino real —MariaDB y el enrutador con sus middlewares de verdad,
+ * Certifica por el camino real —el motor único y el enrutador con sus middlewares de verdad,
  * sin invocar ningún controlador a mano— el comportamiento que el Product Owner declaró
  * correcto el 2026-10-11, después de reportar el defecto:
  *
@@ -103,10 +103,10 @@ $machinePool = $pdo->query(
     "SELECT m.id AS machine_id, m.code AS machine_code, m.location_id
        FROM machines m
        JOIN locations l ON l.id = m.location_id
-      WHERE m.is_active = 1
-        AND m.is_blocked_no_access = 0
+      WHERE m.is_active = TRUE
+        AND m.is_blocked_no_access = FALSE
         AND m.deleted_at IS NULL
-        AND l.is_active = 1
+        AND l.is_active = TRUE
         AND l.deleted_at IS NULL
         AND NOT EXISTS (
             SELECT 1 FROM incidents i
@@ -442,9 +442,13 @@ try {
     $madrid = new DateTimeZone('Europe/Madrid');
     // Martes a las 12:15, dentro de la jornada comercial: si el comentario desplazase el
     // vencimiento (como hacía la reactivación derogada), el cambio sería visible al instante.
-    $originalDeadline = (new DateTimeImmutable('next tuesday 12:15', $madrid))->format('Y-m-d H:i:s');
+    // El vencimiento se siembra **anclado** a la zona operativa —la forma en que la aplicación lo
+    // persiste— y la pared de sede se guarda aparte: la fila llevará el instante con el desfase que
+    // el motor publica y la respuesta publicará su hora de jornada (Contrato del Reloj Operativo, §1).
+    $originalDeadlineMoment = new DateTimeImmutable('next tuesday 12:15', $madrid);
+    $originalDeadline       = $originalDeadlineMoment->format('Y-m-d H:i:s');
     $pdo->prepare("UPDATE incidents SET sla_target_at = :deadline, paused_at = NOW() - INTERVAL '90 minutes' WHERE id = :id")
-        ->execute([':deadline' => $originalDeadline, ':id' => $coldIncidentId]);
+        ->execute([':deadline' => $originalDeadlineMoment->format('Y-m-d\TH:i:sP'), ':id' => $coldIncidentId]);
 
     $coldRowBefore      = $incidentRow($coldIncidentId);
     $coldPausedAtBefore = (string)$coldRowBefore['paused_at'];
@@ -468,7 +472,7 @@ try {
     );
     $assert(
         '3.3 El vencimiento contractual NO se desplaza con el comentario (RF-03.2, RF-03.3)',
-        ($coldRow['sla_target_at'] ?? null) === $originalDeadline
+        strtotime((string)($coldRow['sla_target_at'] ?? '')) === $originalDeadlineMoment->getTimestamp()
             && ($coldRow['sla_target_at'] ?? null) === ($coldRowBefore['sla_target_at'] ?? null)
     );
     $assert(
@@ -702,7 +706,7 @@ try {
     // La máquina del escenario cancelado queda fuera de servicio (RF-04.4) y las filas
     // maestras las protege el arnés: se restituye antes de purgar los expedientes.
     foreach ($cancelledMachineIds as $machineId) {
-        $pdo->prepare('UPDATE machines SET is_active = 1, is_blocked_no_access = 0 WHERE id = :id')
+        $pdo->prepare('UPDATE machines SET is_active = TRUE, is_blocked_no_access = FALSE WHERE id = :id')
             ->execute([':id' => $machineId]);
     }
 

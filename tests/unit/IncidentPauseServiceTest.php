@@ -22,7 +22,7 @@ declare(strict_types=1);
  * ahora en `IncidentPauseSiteCommentRepealTest.php` (guarda de la derogación) y
  * `PendingInfoSiteCommentNoReactivationTest.php` (comportamiento por el camino real).
  *
- * Los grupos 5 a 7 trabajan contra MariaDB real porque su veredicto es un ESTADO
+ * Los grupos 5 a 7 trabajan contra el motor único real porque su veredicto es un ESTADO
  * PERSISTIDO (ticket reanudado, máquina en cuarentena, máquina fuera de servicio,
  * reintegro desvinculado), no un valor de retorno: un doble en memoria no puede
  * certificar que el parque quedó como dice el expediente. Las filas de prueba son
@@ -102,8 +102,15 @@ $service = new IncidentPauseService(
 
 $madrid = new DateTimeZone('Europe/Madrid');
 $now = new DateTimeImmutable('now', $madrid);
-$agoSeconds = static fn (int $seconds): string => $now->modify(sprintf('-%d seconds', $seconds))->format('Y-m-d H:i:s');
-$aheadSeconds = static fn (int $seconds): string => $now->modify(sprintf('+%d seconds', $seconds))->format('Y-m-d H:i:s');
+
+// Las marcas de siembra salen del **reloj del motor** (`EngineClock`), no del render local de sede:
+// `created_at`, `paused_at` y `sla_target_at` son columnas con zona horaria y el motor interpreta en
+// la suya una pared sin zona, de modo que un render local las colocaba el huso entero en el futuro y
+// el reloj biológico de 4 h medía dos horas de menos —una avería «de hace 4 h 05 min» no llegaba a
+// disparar la cuarentena—. Es la regla del Contrato del Reloj Operativo y la que certifica el censo
+// de `HarnessClockContractTest`.
+$agoSeconds = static fn (int $seconds): string => EngineClock::shift(-$seconds);
+$aheadSeconds = static fn (int $seconds): string => EngineClock::shift($seconds);
 
 $suffix = strtoupper(bin2hex(random_bytes(3)));
 $sequence = 0;
@@ -250,7 +257,10 @@ $domainIncident = static function (IncidentStatus $status, ?string $pausedAt = n
         status: $status,
         assignedTechnicianId: $assignedTechnicianId,
         pausedAt: $pausedAt,
-        slaTargetAt: (new DateTimeImmutable('2026-10-12 12:00:00', $madrid))->format('Y-m-d H:i:s')
+        // El expediente de dominio de la suite declara su vencimiento **anclado**, que es la forma que
+        // el dominio graba ahora: una pared sin zona dejaría el instante a merced de la zona del
+        // proceso (Contrato del Reloj Operativo, §1).
+        slaTargetAt: (new DateTimeImmutable('2026-10-12 12:00:00', $madrid))->format('Y-m-d\TH:i:sP')
     );
 };
 
@@ -297,7 +307,18 @@ try {
     $assert('1.4 PENDING_INFO es un estado activo y no terminal', $pausedDeclaration->isPendingInfo() && $pausedDeclaration->getStatus()->isActive() && !$pausedDeclaration->getStatus()->isTerminal());
     $assert('1.5 La causa tipificada se conserva', $pausedDeclaration->getPendingInfoReasonCategory() === IncidentPauseReasonCategory::BUILDING_CLOSED_NO_ACCESS);
     $assert('1.6 La justificación se guarda recortada', $pausedDeclaration->getPendingInfoReasonText() === 'El conserje no abrió el acceso al edificio durante la visita programada.');
-    $assert('1.7 El intervalo vivo arranca en la marca declarada', $pausedDeclaration->isPaused() && $pausedDeclaration->getPausedAt() === '2026-10-09 09:30:00');
+    // La marca del intervalo vivo arranca en el instante declarado y **anclada** (con el desfase de la
+    // zona que la declaró): es la forma que el motor devuelve al leer y la que no deja el instante a
+    // merced de la zona del proceso, que es lo que el Contrato del Reloj Operativo exige de toda marca
+    // que cruza a una columna con zona.
+    $assert(
+        '1.7 El intervalo vivo arranca en la marca declarada y anclada a su zona',
+        $pausedDeclaration->isPaused()
+            && strtotime((string)$pausedDeclaration->getPausedAt())
+                === (new DateTimeImmutable('2026-10-09 09:30:00', $madrid))->getTimestamp()
+            && preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/', (string)$pausedDeclaration->getPausedAt()) === 1,
+        'paused_at: ' . var_export($pausedDeclaration->getPausedAt(), true)
+    );
     $assert('1.8 El acumulador de pausa nace intacto (sólo crece al cerrar el intervalo)', $pausedDeclaration->getTotalPendingInfoSeconds() === 0);
     $assert('1.9 La instancia receptora no muta: el agregado es inmutable', $domainIncident(IncidentStatus::IN_PROGRESS)->getStatus() === IncidentStatus::IN_PROGRESS);
 
@@ -487,7 +508,7 @@ try {
             && $service->isProlongedInactivitySince('2026-09-28 08:00:00', false, $at('2026-10-09 18:00:00')) === false
     );
 
-    // ---- Cancelación real contra MariaDB -------------------------------------
+    // ---- Cancelación real contra el motor único ------------------------------
     $cancelIncidentId = $insertIncident([
         'machine_type_snapshot' => 'SNACKS',
         'status' => 'PENDING_INFO',
@@ -589,7 +610,18 @@ try {
     $assert('7.8 La desvinculación es selectiva: el reintegro de otra avería conserva su vínculo', (int)$untouchedRefund['incident_id'] === $otherIncidentId && $untouchedRefund['status'] === RefundStatus::PENDING_INSPECTION->value);
     $assert('7.9 Cada desvinculación deja su evento inmutable', $auditCount('REFUND_REQUEST', $inspectionRefundId, 'REFUND_DETACHED_BY_INACTIVITY') === 1 && $auditCount('REFUND_REQUEST', $depositedRefundId, 'REFUND_DETACHED_BY_INACTIVITY') === 1);
     $refundAudit = $auditRow('REFUND_REQUEST', $inspectionRefundId, 'REFUND_DETACHED_BY_INACTIVITY');
-    $assert('7.10 El evento atestigua el corte del vínculo y la conservación del estado', str_contains((string)$refundAudit['previous_state'], 'PENDING_INSPECTION') && str_contains((string)$refundAudit['new_state'], 'incident_id":null'));
+    // Las tres columnas de estado de `audit_log` son `JSONB` en el motor único (D-4), y el motor
+    // normaliza la separación canónica (`{"incident_id": null}`): el corte del vínculo se mide sobre
+    // el documento decodificado y no sobre su texto, que es lo que la forma retirada dejaba comparar.
+    $detachedState = json_decode((string)($refundAudit['new_state'] ?? ''), true);
+    $assert(
+        '7.10 El evento atestigua el corte del vínculo y la conservación del estado',
+        str_contains((string)$refundAudit['previous_state'], 'PENDING_INSPECTION')
+            && is_array($detachedState)
+            && array_key_exists('incident_id', $detachedState)
+            && $detachedState['incident_id'] === null,
+        'new_state: ' . (string)($refundAudit['new_state'] ?? 'ausente')
+    );
 
 } finally {
     echo "\n--- Limpieza de las filas propias de la suite ---\n";    // Los reintegros desvinculados quedan con `incident_id = NULL`, así que se

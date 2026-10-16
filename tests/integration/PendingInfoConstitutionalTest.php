@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * PendingInfoConstitutionalTest (T-PAUSE-22)
  *
- * Certifica el BLINDAJE CONSTITUCIONAL del módulo 11 contra MariaDB real y a través
+ * Certifica el BLINDAJE CONSTITUCIONAL del módulo 11 contra el motor único real y a través
  * del enrutador con sus middlewares de verdad (sin invocar ningún controlador a mano),
  * cubriendo los cinco puntos del «Hecho cuando» de la tarea más la integridad del
  * Art. II que las decisiones ratificadas por el Product Owner en T-PAUSE-22 exigen:
@@ -122,10 +122,10 @@ $freeMachinesByType = function (string $machineType, int $limit) use ($pdo): arr
         "SELECT m.id AS machine_id, m.location_id, m.code
            FROM machines m
            JOIN locations l ON l.id = m.location_id
-          WHERE m.is_active = 1
-            AND m.is_blocked_no_access = 0
+          WHERE m.is_active = TRUE
+            AND m.is_blocked_no_access = FALSE
             AND m.deleted_at IS NULL
-            AND l.is_active = 1
+            AND l.is_active = TRUE
             AND l.deleted_at IS NULL
             AND m.machine_type = :machine_type
             AND NOT EXISTS (
@@ -167,7 +167,7 @@ $pdo->prepare(
 
 $plantMachine = $pdo->prepare(
     "INSERT INTO machines (location_id, code, model, machine_type, floor_wing, notes, is_active, sanitary_status, next_sanitary_inspection_due)
-     VALUES ((SELECT id FROM locations WHERE site_code = :site_code LIMIT 1), :code, 'Modelo Banco', 'SNACKS', 'Planta 1', NULL, TRUE, 'CONFORME', CURRENT_DATE + INTERVAL '30 days')
+     VALUES ((SELECT id FROM locations WHERE site_code = :site_code LIMIT 1), :code, 'Modelo Banco', 'SNACKS', 'Planta 1', NULL, TRUE, 'OK', CURRENT_DATE + INTERVAL '30 days')
      ON CONFLICT (code) DO UPDATE SET is_active = TRUE, deleted_at = NULL"
 );
 foreach (['S1', 'S2'] as $index) {
@@ -367,7 +367,10 @@ $restoreMachine = function (int $machineId, array $snapshot) use ($pdo): void {
         return;
     }
 
-    $pdo->prepare(
+    // Los dos booleanos vuelven **enlazados y con su tipo** (`PDO::PARAM_BOOL`), que es la forma que
+    // el contrato declara para una columna `boolean` (D-3): un entero por inferencia de tipo obliga al
+    // motor a rechazar la sentencia (`42804`) porque `boolean` e `integer` no son la misma familia.
+    $restore = $pdo->prepare(
         'UPDATE machines
             SET is_active = :is_active,
                 is_blocked_no_access = :is_blocked,
@@ -375,14 +378,15 @@ $restoreMachine = function (int $machineId, array $snapshot) use ($pdo): void {
                 notes = :notes,
                 next_sanitary_inspection_due = :next_due
           WHERE id = :id'
-    )->execute([
-        ':is_active'       => (int)$snapshot['is_active'],
-        ':is_blocked'      => (int)$snapshot['is_blocked_no_access'],
-        ':sanitary_status' => (string)$snapshot['sanitary_status'],
-        ':notes'           => $snapshot['notes'],
-        ':next_due'        => $snapshot['next_sanitary_inspection_due'],
-        ':id'              => $machineId,
-    ]);
+    );
+    $restore->bindValue(':is_active', (bool)$snapshot['is_active'], PDO::PARAM_BOOL);
+    $restore->bindValue(':is_blocked', (bool)$snapshot['is_blocked_no_access'], PDO::PARAM_BOOL);
+    $restore->bindValue(':sanitary_status', (string)$snapshot['sanitary_status'], PDO::PARAM_STR);
+    $restore->bindValue(':notes', $snapshot['notes'], $snapshot['notes'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+    $restore->bindValue(':next_due', $snapshot['next_sanitary_inspection_due'], $snapshot['next_sanitary_inspection_due'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+    $restore->bindValue(':id', $machineId, PDO::PARAM_INT);
+    $restore->execute();
+    $restore->closeCursor();
 };
 
 $validDiagnosis = 'Termostato descalibrado con lectura real de 11 grados en el recinto.';

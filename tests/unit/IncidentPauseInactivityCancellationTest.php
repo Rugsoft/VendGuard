@@ -341,12 +341,15 @@ $makePausedIncident = static function (
         urgency: UrgencyLevel::HIGH,
         status: $status,
         assignedTechnicianId: 7,
-        assignedAt: date('Y-m-d H:i:s', $now - 7200),
+        // Las marcas del expediente de prueba viajan **ancladas** (con su desfase), que es la forma que
+        // el dominio graba y que el motor devuelve: una pared sin zona dejaría el instante a merced de
+        // la zona del proceso (Contrato del Reloj Operativo, §1).
+        assignedAt: date('Y-m-d\TH:i:sP', $now - 7200),
         machineType: 'SNACKS',
-        createdAt: date('Y-m-d H:i:s', $now - 9000),
+        createdAt: date('Y-m-d\TH:i:sP', $now - 9000),
         pendingInfoReasonCategory: IncidentPauseReasonCategory::BUILDING_CLOSED_NO_ACCESS,
         pendingInfoReasonText: 'El edificio estaba cerrado y el conserje no pudo facilitar la llave de acceso.',
-        pausedAt: $pausedAtOverride ?? date('Y-m-d H:i:s', $now - ($pausedMinutesAgo * 60)),
+        pausedAt: $pausedAtOverride ?? date('Y-m-d\TH:i:sP', $now - ($pausedMinutesAgo * 60)),
         totalPendingInfoSeconds: 0
     );
 };

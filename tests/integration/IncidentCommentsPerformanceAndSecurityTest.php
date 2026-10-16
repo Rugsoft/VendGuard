@@ -10,7 +10,7 @@ declare(strict_types=1);
  *
  * - **H-1 · RNF-02 (carga < 250 ms):** ninguna suite medía la latencia del hilo. Aquí se
  *   siembra un expediente con 1.000 mensajes (volumen exigido por la especificación) y se
- *   mide el endpoint GET del hilo y la consulta cursorizada del repositorio contra MariaDB
+ *   mide el endpoint GET del hilo y la consulta cursorizada del repositorio contra el motor único
  *   real. Se añade una segunda medición con 10.000 mensajes para demostrar el escalado y
  *   para fijar el plan de ejecución indexado como trampa de regresión.
  *
@@ -170,7 +170,7 @@ $assert('0.2 Expediente de carga creado', $incidentId > 0);
 $insertComment = $pdo->prepare("
     INSERT INTO incident_comments
         (incident_id, author_type, user_id, author_name, comment_text, is_internal, created_at)
-    VALUES (:incident_id, 'REPORTER', NULL, 'Conserjería Principal', :comment_text, 0, :created_at)
+    VALUES (:incident_id, 'REPORTER', NULL, 'Conserjería Principal', :comment_text, FALSE, :created_at)
 ");
 
 /**
@@ -264,33 +264,36 @@ $assert('1.7 RF-01.3 bajo carga: la paginación retrospectiva por cursor respeta
     $cursorBenchmark['median'] < PERFORMANCE_BUDGET_MS,
     sprintf('mediana real: %.2f ms', $cursorBenchmark['median']));
 
-$explainPlan = static function (string $sql, array $params) use ($pdo): array {
+/**
+ * Plan del motor para una consulta del hilo, en el idioma del motor único.
+ *
+ * El retirado publicaba el plan por columnas —`type`, `key`, `possible_keys`—, que aquí no
+ * existen: el motor único devuelve el árbol textual del planificador, así que la pregunta del
+ * bloque —«¿recorre el hilo por su índice y no por un escaneo completo?»— se responde sobre ese
+ * texto, que además es lo que el informe imprime para poder leerlo sin abrir un cliente.
+ */
+$enginePlan = static function (string $sql, array $params) use ($pdo): string {
     $statement = $pdo->prepare('EXPLAIN ' . $sql);
     $statement->execute($params);
-    $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($rows as $row) {
-        if (($row['table'] ?? '') === 'c') {
-            return $row;
-        }
-    }
 
-    return $rows[0] ?? [];
+    return implode("\n", $statement->fetchAll(PDO::FETCH_COLUMN));
 };
+$planSummary = static fn (string $plan): string => str_replace("\n", ' · ', $plan);
 
-$commentsTablePlan = $explainPlan(
+$commentsTablePlan = $enginePlan(
     "SELECT c.*, i.ticket_code
      FROM incident_comments c
      JOIN incidents i ON c.incident_id = i.id
-     WHERE c.incident_id = :incident_id AND c.is_internal = 0
+     WHERE c.incident_id = :incident_id AND c.is_internal = FALSE
      ORDER BY c.created_at DESC, c.id DESC
      LIMIT 51",
     [':incident_id' => $incidentId]
 );
-echo "  [MEDICIÓN] Plan del motor con 1.000 mensajes: " . json_encode($commentsTablePlan, JSON_UNESCAPED_UNICODE) . "\n";
+echo "  [MEDICIÓN] Plan del motor con 1.000 mensajes: {$planSummary($commentsTablePlan)}\n";
 
 $assert('1.8 El índice idx_comments_incident está disponible y es aplicable al filtro del hilo',
-    in_array('idx_comments_incident', explode(',', (string)($commentsTablePlan['possible_keys'] ?? '')), true),
-    'possible_keys reales: ' . ($commentsTablePlan['possible_keys'] ?? '—'));
+    str_contains($commentsTablePlan, 'idx_comments_incident'),
+    'plan real: ' . $planSummary($commentsTablePlan));
 
 // =========================================================================
 // BLOQUE 2 (H-1): RNF-02 — escalado a 10.000 mensajes y plan indexado
@@ -321,21 +324,21 @@ $assert('2.3 RNF-02 a escala: el peor caso respeta el guardián de outliers',
     $scaledBenchmark['max'] < OUTLIER_CEILING_MS,
     sprintf('peor caso real: %.2f ms', $scaledBenchmark['max']));
 
-$scaledPlan = $explainPlan(
+$scaledPlan = $enginePlan(
     "SELECT c.*, i.ticket_code
      FROM incident_comments c
      JOIN incidents i ON c.incident_id = i.id
-     WHERE c.incident_id = :incident_id AND c.is_internal = 0
+     WHERE c.incident_id = :incident_id AND c.is_internal = FALSE
      ORDER BY c.created_at DESC, c.id DESC
      LIMIT 51",
     [':incident_id' => $incidentId]
 );
-echo "  [MEDICIÓN] Plan del motor con 10.000 mensajes: " . json_encode($scaledPlan, JSON_UNESCAPED_UNICODE) . "\n";
+echo "  [MEDICIÓN] Plan del motor con 10.000 mensajes: {$planSummary($scaledPlan)}\n";
 
 $assert('2.4 Trampa de regresión: a escala el motor recorre el hilo por idx_comments_incident, sin escaneo completo',
-    ($scaledPlan['type'] ?? '') !== 'ALL'
-        && ($scaledPlan['key'] ?? '') === 'idx_comments_incident',
-    'plan real: ' . json_encode($scaledPlan, JSON_UNESCAPED_UNICODE));
+    str_contains($scaledPlan, 'idx_comments_incident')
+        && !str_contains($scaledPlan, 'Seq Scan on incident_comments'),
+    'plan real: ' . $planSummary($scaledPlan));
 
 $scaledCursorBenchmark = $benchmark(static fn() => $router->dispatch($cursorRequest()), 5);
 echo "  [MEDICIÓN] Endpoint GET con cursor (10.000 mensajes): " . $formatBenchmark($scaledCursorBenchmark) . "\n";
@@ -577,31 +580,36 @@ $assert('4.1 La suite no deja residuos en public/uploads/',
     $countUploads() === $uploadsAtStart,
     "antes: {$uploadsAtStart}, después: " . $countUploads());
 
-// Restauración canónica idéntica a la que aplica el runner global al terminar la
-// batería (purga + semillas base + métricas de demostración), de modo que esta suite
-// no solo no deja residuos, sino que devuelve la base al estado exportable.
+// Restauración canónica idéntica a la que aplica el runner global al terminar la batería (purga +
+// semillas base), de modo que esta suite no solo no deja residuos, sino que devuelve la base al
+// estado exportable. El sembrador de métricas de demostración queda **fuera a propósito**, igual que
+// en el runner: es del motor heredado —sus sentencias citan con acentos graves y su upsert es el
+// retirado— y su histórico de demostración no forma parte del contrato del arnés; lo retira el lote
+// que cierra el camino heredado (T-13-16).
 TestDataCleaner::purge($pdo);
 $seedRunner->seedAll();
-require_once __DIR__ . '/../../database/DemoMetricsSeeder.php';
-(new \VendGuard\Database\DemoMetricsSeeder($pdo))->seed();
 
 $baseline = [];
 foreach (['locations', 'machines', 'users', 'incidents', 'incident_comments'] as $table) {
-    $baseline[$table] = (int)$pdo->query("SELECT COUNT(*) FROM `{$table}`")->fetchColumn();
+    $baseline[$table] = (int)$pdo->query("SELECT COUNT(*) FROM {$table}")->fetchColumn();
 }
 
+// El suelo canónico del motor único lo produce `SeedRunner::seedAll()`: el catálogo de maestras
+// (10 sedes, 13 máquinas, 6 usuarios internos) y **cero expedientes**, porque el histórico de
+// demostración del despliegue entra por `DemoHistorySeeder`, no por el arnés. El cero es lo que esta
+// aserción mide de verdad: que la prueba de carga no dejó ni un mensaje ni un expediente detrás.
 $assert('4.2 No queda ni un mensaje ni un expediente de la prueba de carga',
-    $baseline['incident_comments'] === 0 && $baseline['incidents'] === 13,
+    $baseline['incident_comments'] === 0 && $baseline['incidents'] === 0,
     'estado real: ' . json_encode($baseline));
 
 // Las tablas maestras (locations, machines, users) están protegidas por diseño en
 // TestDataCleaner::purge(): no se purgan nunca, de modo que otras suites pueden
 // haber añadido filas propias. Se exige el suelo canónico de la semilla, no un valor
 // exacto que dependería del orden de ejecución de la batería. El suelo son las filas
-// que produce `SeedRunner::seedAll()` (10 sedes, 13 máquinas, 7 usuarios internos) más
-// las que añade `DemoMetricsSeeder`: cualquier suite posterior solo puede sumar.
+// que produce `SeedRunner::seedAll()` —10 sedes, 13 máquinas y 6 usuarios internos,
+// que es el catálogo canónico del motor único—: cualquier suite posterior solo puede sumar.
 $assert('4.3 Las tablas maestras conservan al menos la semilla canónica del proyecto',
-    $baseline['locations'] >= 10 && $baseline['machines'] >= 13 && $baseline['users'] >= 7,
+    $baseline['locations'] >= 10 && $baseline['machines'] >= 13 && $baseline['users'] >= 6,
     'estado real: ' . json_encode($baseline));
 
 echo "\nBase de datos restablecida a las semillas (limpieza de la suite).\n";

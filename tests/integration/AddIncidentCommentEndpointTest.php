@@ -293,7 +293,11 @@ if (file_exists($fakeFile)) {
 // =========================================================================
 echo "\n--- Caso 5: Bloqueo en tickets cerrados / cancelados (403 CONVERSATION_SEALED) ---\n";
 
-$pdo->prepare("UPDATE incidents SET status = 'CLOSED', is_active_ticket = NULL WHERE id = :id")
+// El cierre se declara **por el estado**, que es la puerta del motor único: la columna derivada
+// `is_active_ticket` era del motor retirado y aquí no existe —su forma es el índice único parcial
+// `uq_machine_active_ticket` (D-6)—, de modo que escribirla no cerraba nada y sólo abortaba la
+// sentencia (`42703`).
+$pdo->prepare("UPDATE incidents SET status = 'CLOSED' WHERE id = :id")
     ->execute([':id' => $createdIncident->getId()]);
 
 $req5 = new Request(
@@ -318,7 +322,7 @@ $assert(
 echo "\n--- Caso 6: Segregación de sedes (HTTP 403 Forbidden) ---\n";
 
 // Reactivar la incidencia para probar la restricción de sede
-$pdo->prepare("UPDATE incidents SET status = 'REGISTERED', is_active_ticket = 1 WHERE id = :id")
+$pdo->prepare("UPDATE incidents SET status = 'REGISTERED' WHERE id = :id")
     ->execute([':id' => $createdIncident->getId()]);
 
 // Petición con credenciales de SEDE-BCN-02 a un ticket de SEDE-BCN-01

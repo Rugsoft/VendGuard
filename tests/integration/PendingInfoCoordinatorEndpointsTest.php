@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * PendingInfoCoordinatorEndpointsTest (T-PAUSE-13)
  *
- * Verifica la condición "Hecho cuando" de T-PAUSE-13 contra MariaDB real, a través del
+ * Verifica la condición "Hecho cuando" de T-PAUSE-13 contra el motor único real, a través del
  * enrutador y de los middlewares de verdad (no se invoca el controlador a mano):
  *
  *   - `CoordinatorController::pausePendingInfo()` en POST .../pause-pending-info.
@@ -100,7 +100,7 @@ if (!$coordinator instanceof User || !$primaryTech instanceof User || !$otherTec
 $machinePool = $pdo->query(
     "SELECT m.id AS machine_id, m.location_id AS location_id
        FROM machines m
-      WHERE m.is_active = 1
+      WHERE m.is_active = TRUE
         AND NOT EXISTS (
             SELECT 1 FROM incidents i
              WHERE i.machine_id = m.id
@@ -852,7 +852,7 @@ try {
     $perishableMachineRow = $pdo->query(
         "SELECT m.id AS machine_id, m.location_id
            FROM machines m
-          WHERE m.is_active = 1
+          WHERE m.is_active = TRUE
             AND m.machine_type = 'PERISHABLE_FOOD'
             AND NOT EXISTS (
                 SELECT 1 FROM incidents i
@@ -955,7 +955,10 @@ try {
     $assert(
         '6.5 El SLA queda congelado al pausar y la fecha recalculada cae en la jornada hábil 08:00-18:00 (RF-03.2, RF-03.3, RNF-01)',
         ($detailData['sla']['is_frozen'] ?? false) === true
-            && ($detailData['sla']['frozen_at'] ?? null) === ($prolongedBoardRow['paused_at'] ?? null)
+            // La ficha publica la pared de sede del instante en que se congeló el reloj y el tablero
+            // trae la marca del motor con su desfase: la comparación es de instantes, no de formas
+            // (Contrato del Reloj Operativo, §1 y §4).
+            && strtotime((string)($detailData['sla']['frozen_at'] ?? '')) === strtotime((string)($prolongedBoardRow['paused_at'] ?? ''))
             && is_string($frozenTarget)
             && $recalculatedAt !== null
             && $recalculatedTarget !== $frozenTarget
@@ -1000,7 +1003,7 @@ try {
 
     $purged = TestDataCleaner::purgeIncidentsMatchingTicket($pdo, 'TST-P13-%');
     if ($guardMachineId > 0) {
-        $pdo->prepare('UPDATE machines SET is_active = 1, is_blocked_no_access = 0 WHERE id = :id')
+        $pdo->prepare('UPDATE machines SET is_active = TRUE, is_blocked_no_access = FALSE WHERE id = :id')
             ->execute([':id' => $guardMachineId]);
     }
     echo '  [OK] Expedientes purgados con TestDataCleaner (patrón TST-P13-%) · filas de incidencias eliminadas: '

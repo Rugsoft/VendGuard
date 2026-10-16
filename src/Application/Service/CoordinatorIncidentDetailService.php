@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Application\Service;
 
 use DateTimeImmutable;
+use DateTimeZone;
 use VendGuard\Application\DTO\CoordinatorIncidentDetailDto;
 use VendGuard\Core\Domain\Model\CompensationMethod;
 use VendGuard\Core\Domain\Model\MachineType;
@@ -41,6 +42,13 @@ final class CoordinatorIncidentDetailService
 {
     /** Cold-chain SLA for perishable-food machines (Art. II, RF-03.2). */
     private const COLD_CHAIN_SLA_HOURS = 4;
+
+    /**
+     * Zona operativa del parque: la de la jornada comercial (08:00-18:00) y la de las marcas que
+     * esta ficha publica. Es la misma que aplican el calendario del módulo 11 y el reloj del arnés
+     * (Contrato del Reloj Operativo).
+     */
+    private const OPERATIONAL_TIMEZONE = 'Europe/Madrid';
 
     /** Comment window on a resolved ticket (Art. V.6, RF-07.2). */
     private const COMMENT_GUARANTEE_HOURS = 48;
@@ -215,7 +223,7 @@ final class CoordinatorIncidentDetailService
                 'is_breached' => $isBreached,
                 'minutes_remaining' => 0,
                 'historical_balance' => $balanceText,
-                'sla_target_at' => $targetAt->format('Y-m-d H:i:s'),
+                'sla_target_at' => $this->siteWall($targetAt),
             ];
         }
 
@@ -243,11 +251,11 @@ final class CoordinatorIncidentDetailService
             'sla_limit_hours' => (float)self::COLD_CHAIN_SLA_HOURS,
             'is_active_countdown' => true,
             'is_frozen' => $isSlaPaused,
-            'frozen_at' => $frozenAt?->format('Y-m-d H:i:s'),
+            'frozen_at' => $this->siteWall($frozenAt),
             'is_breached' => $isBreached,
             'minutes_remaining' => $remainingMinutes,
             'historical_balance' => $balanceText,
-            'sla_target_at' => $targetAt->format('Y-m-d H:i:s'),
+            'sla_target_at' => $this->siteWall($targetAt),
         ];
     }
 
@@ -639,9 +647,9 @@ final class CoordinatorIncidentDetailService
 
         $businessPauseSeconds = $this->pauses()->pauseBusinessSecondsSince($pausedAtRaw, $now);
 
-        return $this->pauses()
-            ->shiftSlaTargetInBusinessHours($targetAt, $businessPauseSeconds, $locationId)
-            ->format('Y-m-d H:i:s');
+        return $this->siteWall(
+            $this->pauses()->shiftSlaTargetInBusinessHours($targetAt, $businessPauseSeconds, $locationId)
+        );
     }
 
     /**
@@ -928,6 +936,23 @@ final class CoordinatorIncidentDetailService
         return max(0, (int)round(($to->getTimestamp() - $from->getTimestamp()) / 60));
     }
 
+    /**
+     * Zona operativa del parque: la de la jornada comercial y la de las marcas que esta ficha publica.
+     */
+    private function operationalTimezone(): DateTimeZone
+    {
+        return new DateTimeZone(self::OPERATIONAL_TIMEZONE);
+    }
+
+    /**
+     * Instante de una marca del expediente, con la zona operativa como zona por defecto.
+     *
+     * El motor publica sus columnas con zona horaria **con su desfase**, y esa marca se lee en su
+     * instante real sin depender de dónde corra el proceso; una marca histórica sin zona —la que
+     * sembraba el motor retirado— se lee como la pared de sede que siempre quiso decir. Las dos
+     * convenciones caben en la misma puerta porque una marca con desfase manda sobre la zona por
+     * defecto (Contrato del Reloj Operativo, §1).
+     */
     private function parseDateTime(?string $value): ?DateTimeImmutable
     {
         if ($value === null || trim($value) === '') {
@@ -935,9 +960,21 @@ final class CoordinatorIncidentDetailService
         }
 
         try {
-            return new DateTimeImmutable($value);
+            return new DateTimeImmutable($value, $this->operationalTimezone());
         } catch (\Exception) {
             return null;
         }
+    }
+
+    /**
+     * Pared de sede de un instante: la hora de la jornada que lee el operador.
+     *
+     * Es la forma que esta ficha publica para el vencimiento contractual y para la marca en que el
+     * reloj quedó congelado —los dos campos que se leen como «hora del compromiso»—, y es una lectura
+     * del instante en la zona operativa, nunca una segunda forma de escribirla.
+     */
+    private function siteWall(?DateTimeImmutable $moment): ?string
+    {
+        return $moment?->setTimezone($this->operationalTimezone())->format('Y-m-d H:i:s');
     }
 }

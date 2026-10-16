@@ -298,7 +298,11 @@ class IncidentCommentService
                 commentText: $trimmedText,
                 photoPath: $photoPath,
                 isInternal: $effectiveInternal,
-                createdAt: date('Y-m-d H:i:s'),
+                // La marca del mensaje viaja **anclada**, como todas las del módulo: la columna lleva zona
+                // horaria y la fila se fecha con el reloj del motor (`CURRENT_TIMESTAMP`), de modo que la
+                // marca que el dominio arrastra en memoria tiene que denotar el mismo instante y no una
+                // pared que dependa de la zona del proceso (Contrato del Reloj Operativo, §1).
+                createdAt: date('Y-m-d\TH:i:sP'),
                 ticketCode: (string)($incidentRow['ticket_code'] ?? '')
             ))
         );

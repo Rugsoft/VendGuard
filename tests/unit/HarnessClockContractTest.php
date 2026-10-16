@@ -28,7 +28,11 @@ declare(strict_types=1);
  *   5. **El censo.** Ningún fichero de pruebas con conexión viva al motor puede quedar con un
  *      render de instante en hora local fuera del ratchet declarado, y **ninguna entrada del
  *      ratchet puede quedar obsoleta**: si un lote repara un sitio, la guarda exige retirar su
- *      entrada en el mismo commit en lugar de dejar el saldo desfasado.
+ *      entrada en el mismo commit en lugar de dejar el saldo desfasado. Cada entrada declara,
+ *      además de su motivo y su dueño, su **naturaleza**: la clase no es homogénea —una siembra que
+ *      no cruzaba anclada es una deuda del lote que la porta, y la **pared de sede publicada** que
+ *      una suite usa como expectativa es la forma que el Contrato del Reloj Operativo fija para la
+ *      respuesta—, y declarar las dos como si fueran lo mismo convertiría el ratchet en un cajón.
  *
  * Fuera de su alcance, declarado: los ficheros que no abren conexión al motor (los que resuelven su
  * persistencia con repositorios en memoria) no cruzan ningún instante al banco; su determinismo lo
@@ -60,55 +64,66 @@ $assert = function (string $caseTitle, bool $condition, string $message = '') us
 $root = dirname(__DIR__, 2);
 
 /**
+ * Naturaleza de la **pared de sede publicada**: el render no siembra ni escribe nada en el motor,
+ * es la hora de la jornada que el Contrato del Reloj Operativo fija como forma de la respuesta (el
+ * vencimiento contractual) y la suite lo usa como expectativa. No hay tarea que lo cierre porque no
+ * es deuda: es la forma publicada.
+ */
+const NATURALEZA_PUBLICADA = 'pared publicada';
+
+/**
+ * Naturaleza de **deuda**: un sitio que cruza —o puede cruzar— un instante al motor sin anclarlo y
+ * cuyo lote lo porta. Nombra la tarea abierta que lo cierra.
+ */
+const NATURALEZA_DEUDA = 'deuda de un lote';
+
+/**
+ * Naturaleza **sin cruce al motor**: el fichero abre conexión, pero este render alimenta una
+ * expectativa que nunca llega a una columna.
+ */
+const NATURALEZA_SIN_MOTOR = 'sin cruce al motor';
+
+/**
  * Ratchet de la clase: sitios con render en hora local que hoy **no** cruzan al motor o cuya
- * reconciliación pertenece a otro lote. Cada entrada declara su motivo y su dueño; la guarda exige
- * que el censo real coincida exactamente con este saldo, de modo que reparar un sitio sin retirar
- * su entrada la pone en rojo (nada de saldos desfasados) y añadir un sitio nuevo también.
+ * reconciliación pertenece a otro lote. Cada entrada declara su naturaleza, su motivo y su dueño; la
+ * guarda exige que el censo real coincida exactamente con este saldo, de modo que reparar un sitio
+ * sin retirar su entrada la pone en rojo (nada de saldos desfasados) y añadir un sitio nuevo también.
  *
- * @var array<string, array{hits: int, motivo: string, dueno: string}>
+ * El saldo del lote T-13-11: las cinco suites y la sonda que sembraban el vencimiento de sede como
+ * pared local siembran y miden ya en la lengua del motor —anclado al escribir, instante al comparar—,
+ * y lo único que queda son las **paredes publicadas** que las suites usan como expectativa de la
+ * respuesta. La decisión está declarada en `specs/technical/operational_clock_contract.md`.
+ *
+ * @var array<string, array{hits: int, naturaleza: string, motivo: string, dueno: string}>
  */
 $ratchet = [
     'tests/integration/PendingInfoApiTest.php' => [
         'hits' => 1,
-        'motivo' => 'Vencimiento contractual de sede (martes 12:15) sembrado como pared local: la '
-            . 'columna guarda un instante y el DTO publica una hora de sede. Decidir esa '
-            . 'reconciliación (instante frente a pared) es del contrato del motor único.',
-        'dueno' => 'T-13-11 (lote de pausas, SLA y reloj sanitario)',
+        'naturaleza' => NATURALEZA_PUBLICADA,
+        'motivo' => 'El vencimiento comercial de la suite (martes 12:15) se siembra **anclado** a la '
+            . 'zona operativa y este render es su **pared de sede**: la hora de la jornada que la API '
+            . 'publica y la suite compara como expectativa, no una marca que cruce al motor.',
+        'dueno' => '— (la forma la fija el Contrato del Reloj Operativo, §4)',
     ],
     'tests/integration/PendingInfoSiteCommentNoReactivationTest.php' => [
         'hits' => 1,
-        'motivo' => 'Mismo vencimiento de sede que `PendingInfoApiTest`.',
-        'dueno' => 'T-13-11',
+        'naturaleza' => NATURALEZA_PUBLICADA,
+        'motivo' => 'Mismo vencimiento publicado que `PendingInfoApiTest`: la expectativa es la pared '
+            . 'de sede de la marca que se sembró anclada.',
+        'dueno' => '— (Contrato del Reloj Operativo, §4)',
     ],
     'tests/integration/PendingInfoTechnicianEndpointsTest.php' => [
         'hits' => 1,
-        'motivo' => 'Mismo vencimiento de sede que `PendingInfoApiTest`.',
-        'dueno' => 'T-13-11',
-    ],
-    'tests/integration/PendingInfoRepositoryAuditTest.php' => [
-        'hits' => 2,
-        'motivo' => 'Expectativas del libro de pausas comparadas contra la marca que publica el '
-            . 'motor, que viaja con su desfase: la forma de la marca la fija el mismo contrato del '
-            . 'vencimiento de sede.',
-        'dueno' => 'T-13-11',
-    ],
-    'tests/unit/IncidentPauseServiceTest.php' => [
-        'hits' => 3,
-        'motivo' => 'Ayudantes de pared de sede para el vencimiento contractual y su expectativa, '
-            . 'los dos lados del mismo contrato.',
-        'dueno' => 'T-13-11',
-    ],
-    'tests/unit/IncidentPauseInactivityCancellationTest.php' => [
-        'hits' => 3,
-        'motivo' => 'El expediente de esta suite vive en repositorios en memoria: su render nunca '
-            . 'cruza al motor. Se normalizará al decidir el contrato de las marcas de pausa.',
-        'dueno' => 'T-13-11',
+        'naturaleza' => NATURALEZA_PUBLICADA,
+        'motivo' => 'Mismo vencimiento publicado que `PendingInfoApiTest`.',
+        'dueno' => '— (Contrato del Reloj Operativo, §4)',
     ],
     'tests/diagnostics/PendingInfoSmokeWorkflowDiagnostic.php' => [
-        'hits' => 4,
-        'motivo' => 'Sonda de humo del módulo 11: escribe el vencimiento de sede y compara la marca '
-            . 'que el motor publica con la pared de sede. Mismo contrato que las suites anteriores.',
-        'dueno' => 'T-13-11',
+        'hits' => 1,
+        'naturaleza' => NATURALEZA_PUBLICADA,
+        'motivo' => 'La sonda siembra el vencimiento del viernes **anclado** y compara la respuesta '
+            . 'con su **pared de sede**: es la expectativa publicada, no una marca que cruce al motor.',
+        'dueno' => '— (Contrato del Reloj Operativo, §4)',
     ],
 ];
 
@@ -329,16 +344,33 @@ $assert(
     $stale === [],
     $stale === [] ? '' : 'entradas sin censo: ' . json_encode($stale, JSON_UNESCAPED_UNICODE)
 );
+$naturalesValidas = [NATURALEZA_PUBLICADA, NATURALEZA_DEUDA, NATURALEZA_SIN_MOTOR];
+$sinNaturaleza = array_keys(array_filter(
+    $ratchet,
+    static fn (array $entry): bool => !in_array($entry['naturaleza'], $naturalesValidas, true)
+));
 $assert(
-    '4.4 El saldo de la clase está contado y cada entrada declara su dueño',
+    '4.4 El saldo de la clase está contado y cada entrada declara naturaleza, motivo y dueño',
     $totalHits === array_sum(array_map(static fn (array $entry): int => $entry['hits'], $ratchet))
-        && count(array_filter($ratchet, static fn (array $entry): bool => $entry['dueno'] !== '')) === count($ratchet),
-    sprintf('censo: %d · declarado: %d', $totalHits, array_sum(array_map(static fn (array $entry): int => $entry['hits'], $ratchet)))
+        && count(array_filter($ratchet, static fn (array $entry): bool => $entry['dueno'] !== '' && $entry['motivo'] !== '')) === count($ratchet)
+        && $sinNaturaleza === [],
+    sprintf(
+        'censo: %d · declarado: %d · naturalezas inválidas: %s',
+        $totalHits,
+        array_sum(array_map(static fn (array $entry): int => $entry['hits'], $ratchet)),
+        json_encode($sinNaturaleza, JSON_UNESCAPED_UNICODE)
+    )
 );
 
 echo "  Saldo declarado de la clase: {$totalHits} sitio(s) en " . count($hits) . " fichero(s).\n";
 foreach ($ratchet as $file => $entry) {
-    echo sprintf("    · %s — %d sitio(s), dueño %s\n", $file, $entry['hits'], $entry['dueno']);
+    echo sprintf(
+        "    · %s — %d sitio(s) · %s · dueño %s\n",
+        $file,
+        $entry['hits'],
+        $entry['naturaleza'],
+        $entry['dueno']
+    );
 }
 
 // =========================================================================

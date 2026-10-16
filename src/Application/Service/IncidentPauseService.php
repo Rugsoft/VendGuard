@@ -62,8 +62,11 @@ use VendGuard\Infrastructure\Repository\PdoRefundRequestRepository;
  * 2. **Zona horaria de la sede:** el calendario comercial se resuelve en
  *    `Europe/Madrid`, que es la zona operativa del sistema (la misma que usan
  *    `AuditEvent`, `MetricFilter` y `CoordinatorPreventiveDetailService`). La
- *    fecha devuelta viaja en esa zona, de modo que el `format('Y-m-d H:i:s')`
- *    que se persiste es siempre hora local de sede.
+ *    fecha devuelta viaja en esa zona y se persiste **anclada** (con su desfase),
+ *    que es la forma que el motor devuelve al leer; la **pared de sede** —la hora de
+ *    la jornada— es lo que se publica y lo que documenta la nota inmutable, y es
+ *    siempre una lectura del instante en la zona operativa, nunca otra forma de
+ *    escribirla (Contrato del Reloj Operativo).
  * 3. **Ventana cerrada por arriba:** el intervalo legal es `[08:00, 18:00]`; un
  *    vencimiento exactamente a las 18:00 es el borde del último segundo hábil
  *    del día y se acepta. Cualquier instante posterior salta al siguiente día
@@ -763,7 +766,7 @@ final class IncidentPauseService
             status: $paused->getStatus(),
             isSlaPaused: true,
             accumulatedPauseMinutes: (int)round($paused->getTotalPendingInfoSeconds() / 60),
-            slaTargetAtOriginal: $paused->getSlaTargetAt(),
+            slaTargetAtOriginal: $this->siteWall($paused->getSlaTargetAt()),
             slaTargetAtShifted: null,
             pausedAt: $paused->getPausedAt(),
             reasonCategory: $paused->getPendingInfoReasonCategory(),
@@ -881,7 +884,7 @@ final class IncidentPauseService
             status: $targetStatus,
             isSlaPaused: false,
             accumulatedPauseMinutes: (int)round($resumed->getTotalPendingInfoSeconds() / 60),
-            slaTargetAtOriginal: $originalSlaTargetAt,
+            slaTargetAtOriginal: $this->siteWall($originalSlaTargetAt),
             slaTargetAtShifted: $shiftedSlaTargetAt,
             pausedAt: null,
             reasonCategory: $resumed->getPendingInfoReasonCategory(),
@@ -1142,6 +1145,24 @@ final class IncidentPauseService
     }
 
     /**
+     * Pared de sede de una marca persistida: la hora de la jornada del compromiso contractual.
+     *
+     * El SLA del módulo se documenta en horas de la jornada de la sede, así que es esa pared —y no el
+     * instante crudo— lo que publican la respuesta de la pausa y la nota del historial; la comparación
+     * contra «ahora» se hace aparte, como instante. La marca que entra puede venir anclada del motor
+     * (`2026-10-08T11:45:00+00:00`) o de una fila histórica sembrada como pared: ambas denotan un instante
+     * y esta función lo rinde en la zona operativa. Sin marca legible devuelve `null` en lugar de inventar
+     * una fecha (Contrato del Reloj Operativo, §4).
+     *
+     * @param string|null $mark Marca del vencimiento, con desfase o en la forma heredada sin zona.
+     * @return string|null Pared de sede (`Y-m-d H:i:s`), o `null`.
+     */
+    private function siteWall(?string $mark): ?string
+    {
+        return $this->parseDateTime($mark)?->setTimezone($this->madridTimezone())->format('Y-m-d H:i:s');
+    }
+
+    /**
      * Indica si la fecha cae en día hábil (lunes a viernes).
      */
     private function isBusinessDay(DateTimeImmutable $moment): bool
@@ -1343,7 +1364,13 @@ final class IncidentPauseService
                     $slaShiftSeconds,
                     $resumed->getLocationId()
                 );
-                $shiftedSlaTargetAt = $shiftedDeadline->format('Y-m-d H:i:s');
+                // El anuncio —la nota inmutable y la respuesta de la pausa— viaja en **pared de sede**:
+                // es la hora de la jornada la que documenta el compromiso contractual (08:00 a 18:00,
+                // lunes a viernes). El instante que se persiste justo debajo es el ancla de esa pared, y
+                // la pared es su lectura en la zona operativa, nunca una segunda forma de escribirla.
+                $shiftedSlaTargetAt = $shiftedDeadline
+                    ->setTimezone($this->madridTimezone())
+                    ->format('Y-m-d H:i:s');
                 $resumed = $resumed->shiftSlaTarget($shiftedDeadline);
             }
         }

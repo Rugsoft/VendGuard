@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * PendingInfoApiTest (T-PAUSE-21)
  *
- * Certifica de extremo a extremo, contra MariaDB real y a través del enrutador con
+ * Certifica de extremo a extremo, contra el motor único real y a través del enrutador con
  * sus middlewares de verdad (sin invocar ningún controlador a mano), el ciclo de
  * vida completo del módulo 11 que exige la condición "Hecho cuando" de la tarea:
  *
@@ -29,7 +29,7 @@ declare(strict_types=1);
  *      acceso, el reintegro del consumidor se preserva desvinculado y el hilo
  *      queda sellado (RF-05.4).
  *   6. **RNF-02 medido**: la pausa y la reanudación se completan por debajo de los
- *      200 ms. La medición es en proceso (router + PDO contra MariaDB local), de
+ *      200 ms. La medición es en proceso (router + PDO contra el motor único local), de
  *      modo que mide la transición real de negocio sin sumar la latencia de red
  *      de un cliente remoto; la mediana de siete muestras es el estadístico que
  *      exige el proyecto (precedente de `IncidentCommentsPerformanceAndSecurityTest`).
@@ -121,10 +121,10 @@ $machinePool = $pdo->query(
     "SELECT m.id AS machine_id, m.location_id
        FROM machines m
        JOIN locations l ON l.id = m.location_id
-      WHERE m.is_active = 1
-        AND m.is_blocked_no_access = 0
+      WHERE m.is_active = TRUE
+        AND m.is_blocked_no_access = FALSE
         AND m.deleted_at IS NULL
-        AND l.is_active = 1
+        AND l.is_active = TRUE
         AND l.deleted_at IS NULL
         AND NOT EXISTS (
             SELECT 1 FROM incidents i
@@ -281,6 +281,27 @@ $seedDeadline = function (int $incidentId, string $deadline) use ($pdo): void {
 };
 
 /**
+ * ¿La marca del expediente y la pared de sede publicada por la API son el mismo instante?
+ *
+ * La fila trae la marca como el motor la publica —**con su desfase**— y la respuesta publica la
+ * **pared de sede** del vencimiento; compararlas como texto mediría su forma y no su contrato, así
+ * que la comparación se hace sobre el instante, que es lo que ambas denotan (Contrato del Reloj
+ * Operativo, §1 y §4).
+ */
+$sameDeadline = static function (?string $stored, ?string $wall) use ($madrid): bool {
+    if ($stored === null || $wall === null || trim($stored) === '' || trim($wall) === '') {
+        return false;
+    }
+
+    try {
+        return (new DateTimeImmutable($stored, $madrid))->getTimestamp()
+            === (new DateTimeImmutable($wall, $madrid))->getTimestamp();
+    } catch (\Exception) {
+        return false;
+    }
+};
+
+/**
  * Segundos transcurridos entre dos marcas de la base interpretadas como hora local
  * de sede. En los escenarios de esta suite el vencimiento sembrado es un martes a las
  * 12:15 y el desplazamiento medido cabe en la misma jornada, así que la distancia de
@@ -306,8 +327,13 @@ $pauseBody            = static fn (string $category, string $reason): array => [
 // El vencimiento comercial de la suite: martes a las 12:15, dentro de la ventana
 // 08:00-18:00 y con margen de sobra para que los desplazamientos de los escenarios
 // (segundos o 90 minutos) aterricen en el mismo día hábil.
-$commercialDeadline = (new DateTimeImmutable('next tuesday 12:15', $madrid))->format('Y-m-d H:i:s');
-$deadlineMoment     = new DateTimeImmutable($commercialDeadline, $madrid);
+//
+// Dos formas del MISMO instante, y cada una para lo suyo (Contrato del Reloj Operativo): la
+// **pared de sede** es lo que publica la API y lo que el operador lee, y la marca **anclada** es
+// lo que se escribe en la columna con zona, que es la forma en que la aplicación la persiste.
+$deadlineMoment           = new DateTimeImmutable('next tuesday 12:15', $madrid);
+$commercialDeadline       = $deadlineMoment->format('Y-m-d H:i:s');
+$commercialDeadlineStored = $deadlineMoment->format('Y-m-d\TH:i:sP');
 
 $cycleId        = 0;
 $cycleMachineId = 0;
@@ -323,7 +349,7 @@ try {
     echo "\n--- Grupo 1: ciclo del técnico con respuesta de sede en caliente ---\n";
 
     [$cycleId, $cycleTicketCode, $cycleMachineId, $cycleLocationId] = $createAssignedTicket($techId);
-    $seedDeadline($cycleId, $commercialDeadline);
+    $seedDeadline($cycleId, $commercialDeadlineStored);
 
     $assert(
         '1.0 Premisa del banco: el vencimiento sembrado cae en jornada comercial (martes 12:15)',
@@ -369,7 +395,7 @@ try {
             && ($cycleRow['pending_info_reason_category'] ?? '') === 'BUILDING_CLOSED_NO_ACCESS'
             && ($cycleRow['pending_info_reason_text'] ?? '') === $pauseReason
             && (int)($cycleRow['total_pending_info_seconds'] ?? -1) === 0
-            && ($cycleRow['sla_target_at'] ?? '') === $commercialDeadline
+            && $sameDeadline($cycleRow['sla_target_at'] ?? null, $commercialDeadline)
             && (int)$pdo->query("SELECT is_active FROM machines WHERE id = {$cycleMachineId}")->fetchColumn() === 1
     );
 
@@ -445,7 +471,7 @@ try {
             && $shifted1Seconds <= $shift1Max
             && $shifted1Seconds <= $firstIntervalSeconds
             && $hotRow['paused_at'] === null
-            && ($hotRow['sla_target_at'] ?? '') === $shifted1,
+            && $sameDeadline($hotRow['sla_target_at'] ?? null, $shifted1),
         sprintf(
             'intervalo=%d s, desplazamiento=%d s, tiempo hábil esperado=[%d..%d] s',
             $firstIntervalSeconds,
@@ -523,7 +549,7 @@ try {
             && $finalShiftSeconds >= $shift1Min + $shift2Min
             && $finalShiftSeconds <= $shift1Max + $shift2Max
             && $finalShiftSeconds <= $totalSeconds
-            && ($resume2Data['sla_target_at_shifted'] ?? '') === $finalDeadline
+            && $sameDeadline($resume2Data['sla_target_at_shifted'] ?? null, $finalDeadline)
             && ($cycleFinalRow['status'] ?? '') === 'IN_PROGRESS',
         sprintf(
             'total=%d s, primer intervalo=%d s, desplazamiento=%d s, tiempo hábil esperado=[%d..%d] s',
@@ -574,7 +600,7 @@ try {
     echo "\n--- Grupo 2: pausa de coordinación y respuesta desfasada de la sede ---\n";
 
     [$coldId, $coldTicketCode, , $coldLocationId] = $createAssignedTicket($otherTechId);
-    $seedDeadline($coldId, $commercialDeadline);
+    $seedDeadline($coldId, $commercialDeadlineStored);
 
     $res = $router->dispatch(new Request(
         method: 'POST',
@@ -620,7 +646,7 @@ try {
             && !array_key_exists('auto_resumed', $res->getDecodedBody()['data'] ?? [])
             && ($coldCommentRow['status'] ?? '') === 'PENDING_INFO'
             && ($coldCommentRow['paused_at'] ?? null) === $coldPausedAt
-            && ($coldCommentRow['sla_target_at'] ?? '') === $commercialDeadline
+            && $sameDeadline($coldCommentRow['sla_target_at'] ?? null, $commercialDeadline)
     );
 
     // La pausa desfasada la cierra la coordinación con destino explícito (RF-02.3): el
@@ -658,7 +684,7 @@ try {
             && $coldShiftSeconds >= $coldShiftMin
             && $coldShiftSeconds <= $coldShiftMax
             && $coldShiftSeconds <= $coldSeconds
-            && ($coldRow['sla_target_at'] ?? '') === $coldShifted
+            && $sameDeadline($coldRow['sla_target_at'] ?? null, $coldShifted)
             && $coldRow['paused_at'] === null
             && (int)($coldData['accumulated_pause_minutes'] ?? -1) === (int)round($coldSeconds / 60),
         sprintf(
@@ -698,7 +724,7 @@ try {
     echo "\n--- Grupo 3: reanudación manual de coordinación con destino elegido ---\n";
 
     [$manualId, , , ] = $createAssignedTicket($techId);
-    $seedDeadline($manualId, $commercialDeadline);
+    $seedDeadline($manualId, $commercialDeadlineStored);
 
     $res = $router->dispatch(new Request(
         method: 'POST',
@@ -750,7 +776,7 @@ try {
             && $manualShiftSeconds >= $manualShiftMin
             && $manualShiftSeconds <= $manualShiftMax
             && $manualShiftSeconds <= $manualSeconds
-            && ($manualRow['sla_target_at'] ?? '') === $manualShifted,
+            && $sameDeadline($manualRow['sla_target_at'] ?? null, $manualShifted),
         sprintf(
             'intervalo=%d s, desplazamiento=%d s, tiempo hábil esperado=[%d..%d] s',
             $manualSeconds,
@@ -1030,7 +1056,7 @@ try {
     // La cancelación por inactividad deja la máquina fuera de servicio (RF-04.4): se
     // restituye para no desviar el inventario de las suites posteriores.
     if ($cycleMachineId > 0) {
-        $pdo->prepare('UPDATE machines SET is_active = 1, is_blocked_no_access = 0 WHERE id = :id')
+        $pdo->prepare('UPDATE machines SET is_active = TRUE, is_blocked_no_access = FALSE WHERE id = :id')
             ->execute([':id' => $cycleMachineId]);
     }
 

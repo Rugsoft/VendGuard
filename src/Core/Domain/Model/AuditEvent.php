@@ -142,7 +142,13 @@ class AuditEvent implements JsonSerializable
         $this->previousState = $previousState;
         $this->newState = $newState;
         $this->metadata = $metadata;
-        $this->createdAt = $createdAt ?? (new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid')))->format('Y-m-d H:i:s');
+        // La marca del rastro se rinde **anclada** (con el desfase de la zona operativa), no como pared
+        // desnuda: `audit_log.created_at` lleva zona horaria y el motor interpreta en la suya una marca
+        // sin zona, de modo que el evento quedaba el huso entero en el futuro. La marca del rastro es la
+        // que compara la consulta de «la sede ya respondió en la pausa vigente» —`a.created_at >=
+        // i.paused_at`— y la que data el historial del expediente (Contrato del Reloj Operativo, §1).
+        $this->createdAt = $createdAt
+            ?? (new DateTimeImmutable('now', new DateTimeZone('Europe/Madrid')))->format('Y-m-d\TH:i:sP');
     }
 
     public function getId(): ?int
