@@ -57,6 +57,11 @@ final class NotificationPayloadSanitizer
         'technician_email',
         'technician_phone',
         'technician_personal_phone',
+        // La etiqueta de presentación del técnico puede venir con su nombre real
+        // delante del alias («Jordi Técnico Ruta BCN · Servicio Técnico Oficial ·
+        // Operador #02»), así que para un rol externo se descarta y se sustituye
+        // por la etiqueta neutra `technical_service_label` (Art. V.4).
+        'technician_label',
     ];
 
     /** Claves prohibidas adicionalmente para CITIZEN_QR (proyección pública mínima neutra). */
@@ -109,7 +114,11 @@ final class NotificationPayloadSanitizer
         }
 
         // Sanitizar referencias al técnico: transformar a identificador neutro oficial
-        if (isset($sanitized['technician_id']) || isset($rawPayload['technician_name'])) {
+        if (
+            isset($sanitized['technician_id'])
+            || isset($rawPayload['technician_name'])
+            || isset($rawPayload['technician_label'])
+        ) {
             $techId = (int)($sanitized['technician_id'] ?? 0);
             $operatorCode = isset($sanitized['operator_code']) && is_string($sanitized['operator_code']) && trim($sanitized['operator_code']) !== ''
                 ? trim($sanitized['operator_code'])

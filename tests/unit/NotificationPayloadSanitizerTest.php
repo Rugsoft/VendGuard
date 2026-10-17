@@ -49,6 +49,7 @@ $rawPayloadComplete = [
     'technician_email' => 'carlos@vendguard.internal',
     'technician_phone' => '+34699887766',
     'technician_personal_phone' => '+34699887766',
+    'technician_label' => 'Carlos Técnico · Servicio Técnico Oficial · Operador #07',
     'resolution_diagnosis' => 'Compresor quemado por sobretensión en relé de arranque',
     'resolution_action' => 'Sustitución de compresor Danfoss y termostato digital',
     'is_internal' => true,
@@ -80,6 +81,10 @@ $assert('LOCATION no contiene technician_name', !isset($locationPayload['technic
 $assert('LOCATION no contiene technician_email', !isset($locationPayload['technician_email']));
 $assert('LOCATION no contiene technician_phone', !isset($locationPayload['technician_phone']));
 $assert(
+    'LOCATION no contiene technician_label con el nombre real del técnico',
+    !isset($locationPayload['technician_label'])
+);
+$assert(
     'LOCATION reemplaza técnico por etiqueta técnica oficial neutra',
     $locationPayload['technical_service_label'] === 'Servicio Técnico Oficial · Operador #07'
 );
@@ -94,6 +99,7 @@ echo "--- Blindaje Art. V.4 para rol CITIZEN_QR (Consumidor) ---\n";
 
 $qrPayload = NotificationPayloadSanitizer::sanitize('CITIZEN_QR', 'INCIDENT_OPENED_CITIZEN_QR', $rawPayloadComplete);
 $assert('CITIZEN_QR no contiene datos internos de técnicos o costes', !isset($qrPayload['cost_snapshot']) && !isset($qrPayload['resolution_diagnosis']));
+$assert('CITIZEN_QR no contiene technician_label con el nombre real', !isset($qrPayload['technician_label']));
 $assert('CITIZEN_QR no contiene reporter_name', !isset($qrPayload['reporter_name']));
 $assert('CITIZEN_QR no contiene reporter_phone', !isset($qrPayload['reporter_phone']));
 $assert('CITIZEN_QR no contiene description libre de terceros', !isset($qrPayload['description']));
