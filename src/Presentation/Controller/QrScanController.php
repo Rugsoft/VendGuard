@@ -291,6 +291,23 @@ class QrScanController
         $reporterPhone = $request->getBodyParam('reporter_phone');
         $retainedMoney = $request->getBodyParam('retained_money_amount');
 
+        // 4.1 RF-02.2 / RF-05.9: correo opcional del ciudadano. Se valida ANTES de
+        //     escribir nada —ni fila ni fotografía— para que un correo mal formado
+        //     no deje un expediente sin confirmación posible. Vacío no cambia nada:
+        //     el aviso sigue siendo anónimo y solo la Sede recibe la proyección.
+        $reporterEmail = null;
+        $reporterEmailRaw = $request->getBodyParam('reporter_email');
+        if ($reporterEmailRaw !== null && trim((string)$reporterEmailRaw) !== '') {
+            $reporterEmail = strtolower(trim((string)$reporterEmailRaw));
+            if (filter_var($reporterEmail, FILTER_VALIDATE_EMAIL) === false) {
+                return Response::error(
+                    'INVALID_REPORTER_EMAIL',
+                    'El correo electrónico del informador no tiene un formato válido.',
+                    422
+                );
+            }
+        }
+
         // 5. Bloque de reintegro. Se valida ANTES de cualquier efecto: ni una
         // fila ni un fichero subido. Un expediente de reintegro que colgara de
         // una avería ya creada dejaría al consumidor sin respuesta, que es
@@ -332,6 +349,7 @@ class QrScanController
             'description' => $description,
             'reporter_name' => $reporterName,
             'reporter_phone' => $reporterPhone,
+            'reporter_email' => $reporterEmail,
             'retained_money_amount' => $retainedMoney,
             'photo_path' => $photoPath,
         ];

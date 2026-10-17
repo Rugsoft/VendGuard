@@ -159,6 +159,21 @@ class AppRouter
         $router->patch('/api/coordinator/users/{id}/reset-password', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'resetUserPassword'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/users/{id}/deactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'deactivateUser'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/users/{id}/reactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'reactivateUser'], [$coordinatorAuth]);
+        // Guardia de alertas críticas de frío (Módulo 14: T-NOTIF-08, RF-02.5).
+        // Sólo Técnicos de Campo en activo pueden lucir la marca; la baja de personal
+        // ya la retira en el repositorio y cancela sus avisos pendientes (RF-02.6).
+        $router->patch('/api/coordinator/users/{id}/on-call', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'updateUserOnCall'], [$coordinatorAuth]);
+
+        // Centro de Notificaciones: bandeja de salida, supervisión y canal corporativo
+        // (Módulo 14: T-NOTIF-08, RF-06). La ruta estática de reintento masivo se
+        // registra antes que la paramétrica para que "{id}" no la capture.
+        $router->get('/api/coordinator/notifications/outbox', [\VendGuard\Presentation\Controller\CoordinatorNotificationController::class, 'listOutbox'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/notifications/outbox/retry-all-failed', [\VendGuard\Presentation\Controller\CoordinatorNotificationController::class, 'retryAllFailed'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/notifications/outbox/{id}/retry', [\VendGuard\Presentation\Controller\CoordinatorNotificationController::class, 'retryItem'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/notifications/outbox/{id}/cancel', [\VendGuard\Presentation\Controller\CoordinatorNotificationController::class, 'cancelItem'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/notifications/settings', [\VendGuard\Presentation\Controller\CoordinatorNotificationController::class, 'getSettings'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/notifications/settings', [\VendGuard\Presentation\Controller\CoordinatorNotificationController::class, 'updateSettings'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/notifications/settings/test-webhook', [\VendGuard\Presentation\Controller\CoordinatorNotificationController::class, 'testWebhook'], [$coordinatorAuth]);
 
         // Rutas existentes de Parque y QR
         $router->get('/api/coordinator/locations/{id}/machines', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getLocationMachines'], [$coordinatorAuth]);
@@ -254,6 +269,10 @@ class AppRouter
         // máquina y mismo controlador fail-closed que el auto-cierre; la cadencia ratificada es
         // de 15 minutos.
         $router->post('/api/cron/sanitary-clock-sweep', [\VendGuard\Presentation\Controller\CronController::class, 'sweepSanitaryClock'], [$cronAuth]);
+        // Despachador del Centro de Notificaciones (Módulo 14: T-NOTIF-08, RF-01.3,
+        // RF-01.4, RF-04): misma credencial de máquina y mismo controlador fail-closed
+        // que el resto de procesos batch. Una pasada por invocación.
+        $router->post('/api/cron/notifications-dispatch', [\VendGuard\Presentation\Controller\CronController::class, 'dispatchNotifications'], [$cronAuth]);
 
         // -----------------------------------------------------------------
         // 7. Módulo de Códigos QR - Rutas Públicas (T-QR-10)

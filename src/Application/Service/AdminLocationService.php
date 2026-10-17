@@ -97,6 +97,15 @@ class AdminLocationService
         $contactName = isset($data['contact_name']) && $data['contact_name'] !== '' ? trim((string)$data['contact_name']) : null;
         $contactPhone = isset($data['contact_phone']) && $data['contact_phone'] !== '' ? trim((string)$data['contact_phone']) : null;
 
+        // RF-02.1: buzón oficial de la Sede, destinatario de todos sus avisos.
+        // Si no llega en el alta se conserva el valor por defecto del esquema; si
+        // llega, se valida antes de escribir para no dejar la Sede sin dirección
+        // de entrega válida.
+        $contactEmail = null;
+        if (array_key_exists('contact_email', $data)) {
+            $contactEmail = $this->normalizeContactEmail((string)($data['contact_email'] ?? ''));
+        }
+
         $this->validateSiteCode($siteCode);
         $this->validateName($name);
         $this->validateAddress($address);
@@ -133,6 +142,9 @@ class AdminLocationService
             'contact_name'  => $contactName,
             'contact_phone' => $contactPhone,
         ];
+        if ($contactEmail !== null) {
+            $locationData['contact_email'] = $contactEmail;
+        }
         if (array_key_exists('latitude', $data) && array_key_exists('longitude', $data)) {
             $locationData['latitude'] = (float)$data['latitude'];
             $locationData['longitude'] = (float)$data['longitude'];
@@ -159,6 +171,7 @@ class AdminLocationService
                 'longitude'     => $created->getLongitude(),
                 'contact_name'  => $created->getContactName(),
                 'contact_phone' => $created->getContactPhone(),
+                'contact_email' => $created->getContactEmail(),
             ],
             !empty($metadata) ? $metadata : null
         );
@@ -318,6 +331,17 @@ class AdminLocationService
             }
         }
 
+        // RF-02.1: correo oficial editable. Un cambio de buzón no reenvía los
+        // avisos ya entregados, pero el siguiente aviso y cualquier reintento
+        // manual (RF-06.4) salen ya a la dirección corregida.
+        if (array_key_exists('contact_email', $data)) {
+            $contactEmail = $this->normalizeContactEmail((string)($data['contact_email'] ?? ''));
+            $cleanData['contact_email'] = $contactEmail;
+            if ($contactEmail !== $location->getContactEmail()) {
+                $changedFields[] = 'contact_email';
+            }
+        }
+
         if (empty($changedFields)) {
             return $location;
         }
@@ -329,6 +353,7 @@ class AdminLocationService
             'longitude'     => $location->getLongitude(),
             'contact_name'  => $location->getContactName(),
             'contact_phone' => $location->getContactPhone(),
+            'contact_email' => $location->getContactEmail(),
         ];
 
         $this->locationRepo->update($id, $cleanData);
@@ -344,6 +369,7 @@ class AdminLocationService
             'longitude'     => $updated->getLongitude(),
             'contact_name'  => $updated->getContactName(),
             'contact_phone' => $updated->getContactPhone(),
+            'contact_email' => $updated->getContactEmail(),
         ];
 
         // Auditoría inmutable sincrónica (RF-05, EARS 4.2)
@@ -480,5 +506,31 @@ class AdminLocationService
                 "El número de teléfono de contacto '{$phone}' no tiene un formato válido."
             );
         }
+    }
+
+    /**
+     * Normaliza y valida el buzón oficial de la Sede (RF-02.1).
+     *
+     * Se guarda en minúsculas —el motor compara direcciones sin distinguir
+     * mayúsculas y el doble destinatario de RF-02.3 se decide comparando el
+     * correo del informador con este— y nunca se acepta una cadena vacía: vaciar
+     * el buzón dejaría a la Sede sin destinatario para todos sus avisos.
+     *
+     * @throws InvalidArgumentException Si el correo está vacío o mal formado.
+     */
+    private function normalizeContactEmail(string $email): string
+    {
+        $normalized = strtolower(trim($email));
+        if ($normalized === '') {
+            throw new InvalidArgumentException('El correo electrónico oficial de la sede es obligatorio.');
+        }
+
+        if (filter_var($normalized, FILTER_VALIDATE_EMAIL) === false) {
+            throw new InvalidArgumentException(
+                "El correo electrónico oficial de la sede '{$email}' no tiene un formato válido."
+            );
+        }
+
+        return $normalized;
     }
 }

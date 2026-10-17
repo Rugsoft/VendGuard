@@ -13,12 +13,14 @@ use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\GeoDistanceService;
 use VendGuard\Core\Domain\Exception\ActiveMachinesBlockedException;
 use VendGuard\Core\Domain\Exception\CannotDeactivateSelfException;
+use VendGuard\Core\Domain\Exception\CannotSetOnCallInactiveUserException;
 use VendGuard\Core\Domain\Exception\InactiveRecordCollisionException;
 use VendGuard\Core\Domain\Exception\LocationNotFoundException;
 use VendGuard\Core\Domain\Exception\MachineNotFoundException;
 use VendGuard\Core\Domain\Exception\MachineTransferBlockedException;
 use VendGuard\Core\Domain\Exception\MachineTypeChangeBlockedException;
 use VendGuard\Core\Domain\Exception\MinimumActiveStaffException;
+use VendGuard\Core\Domain\Exception\OnCallOnlyForTechniciansException;
 use VendGuard\Core\Domain\Exception\PendingIncidentsBlockedException;
 use VendGuard\Core\Domain\Exception\UserNotFoundException;
 use VendGuard\Core\Domain\Model\User;
@@ -466,6 +468,46 @@ class CoordinatorAdminController
     }
 
     /**
+     * PATCH /api/coordinator/users/{id}/on-call
+     *
+     * Activa o desactiva la marca de «Técnico de guardia» (RF-02.5). Sólo se
+     * admite sobre Técnicos de Campo en activo: la guardia alimenta los
+     * destinatarios de las alertas críticas de frío (Art. II) y una entrada
+     * inválida dejaría el blindaje sanitario apuntando a quien no atiende la ruta.
+     */
+    public function updateUserOnCall(Request $request): Response
+    {
+        return $this->handleExecution(function () use ($request): Response {
+            $id = $this->extractIdFromRoute($request);
+            $body = $request->getParsedBody();
+
+            if (!array_key_exists('is_on_call', $body)) {
+                return $this->errorResponse(400, 'VALIDATION_ERROR', 'El campo is_on_call es obligatorio.');
+            }
+
+            $isOnCall = $body['is_on_call'];
+            if (!is_bool($isOnCall)) {
+                // Aceptar "true"/"1" como texto abriría la puerta a que un cliente
+                // convierta un valor erróneo en una guardia activa sin querer.
+                return $this->errorResponse(400, 'VALIDATION_ERROR', 'El campo is_on_call debe ser un valor booleano.');
+            }
+
+            $actor = $this->extractActor($request);
+            $ip = $this->extractClientIp($request);
+
+            $updated = $this->userService->updateOnCall($id, $isOnCall, $actor, $ip);
+
+            return Response::json([
+                'id'         => $updated->getId(),
+                'is_on_call' => $updated->isOnCall(),
+                'role'       => $updated->getRole()->value,
+            ], 200, $updated->isOnCall()
+                ? 'Técnico marcado como de guardia para las alertas críticas de frío.'
+                : 'Técnico retirado de la guardia de alertas críticas de frío.');
+        });
+    }
+
+    /**
      * PATCH /api/coordinator/users/{id}/deactivate
      * Da de baja lógica a un usuario interno con salvaguardas de auto-baja, guardias mínimas y averías activas.
      */
@@ -551,6 +593,10 @@ class CoordinatorAdminController
             );
         } catch (CannotDeactivateSelfException $e) {
             return $this->errorResponse($e->getHttpStatusCode(), $e->getErrorCode(), $e->getMessage());
+        } catch (OnCallOnlyForTechniciansException $e) {
+            return $this->errorResponse($e->getHttpStatusCode(), $e->getErrorCode(), $e->getMessage(), $e->getDetails());
+        } catch (CannotSetOnCallInactiveUserException $e) {
+            return $this->errorResponse($e->getHttpStatusCode(), $e->getErrorCode(), $e->getMessage(), $e->getDetails());
         } catch (MinimumActiveStaffException $e) {
             return $this->errorResponse($e->getHttpStatusCode(), $e->getErrorCode(), $e->getMessage(), [
                 'role' => $e->getRole(),

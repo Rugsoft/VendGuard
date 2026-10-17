@@ -95,6 +95,7 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'USER_DEACTIVATED', label: 'Baja de Usuario', tone: 'danger', group: 'user' },
   { code: 'USER_REACTIVATED', label: 'Reactivación de Usuario', tone: 'success', group: 'user' },
   { code: 'USER_PASSWORD_RESET', label: 'Restablecimiento de Contraseña', tone: 'warning', group: 'user' },
+  { code: 'USER_ON_CALL_UPDATED', label: 'Cambio de Guardia del Técnico', tone: 'purple', group: 'user' },
   { code: 'CREATE_PREVENTIVE_ORDER', label: 'Alta de Orden Preventiva', tone: 'primary', group: 'preventive' },
   { code: 'ASSIGN_PREVENTIVE_ORDER', label: 'Asignación de Orden Preventiva', tone: 'purple', group: 'preventive' },
   { code: 'START_PREVENTIVE_INSPECTION', label: 'Inicio de Inspección Preventiva', tone: 'info', group: 'preventive' },

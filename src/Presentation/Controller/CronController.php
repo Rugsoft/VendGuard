@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
+use VendGuard\Application\Service\NotificationDispatcherService;
 use VendGuard\Application\Service\SanitaryClockSweepService;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Infrastructure\Notification\NotificationDispatcherFactory;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -36,12 +38,17 @@ class CronController
     /** Barrido de fondo del Reloj Sanitario Biológico (T-PAUSE-38); se resuelve en el primer uso. */
     private ?SanitaryClockSweepService $sweepService;
 
+    /** Despachador del Centro de Notificaciones (Módulo 14: T-NOTIF-08); perezoso. */
+    private ?NotificationDispatcherService $notificationDispatcher;
+
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
-        ?SanitaryClockSweepService $sweepService = null
+        ?SanitaryClockSweepService $sweepService = null,
+        ?NotificationDispatcherService $notificationDispatcher = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->sweepService = $sweepService;
+        $this->notificationDispatcher = $notificationDispatcher;
     }
 
     /**
@@ -107,6 +114,50 @@ class CronController
         }
 
         return Response::json($this->sweeps()->sweep()->toArray(), 200);
+    }
+
+    /**
+     * POST /api/cron/notifications-dispatch
+     *
+     * Pasada única del despachador del Centro de Notificaciones (Módulo 14:
+     * T-NOTIF-08, RF-01.3, RF-01.4, RF-04 y RF-06): rescata los envíos atrapados
+     * en tránsito, vigila los umbrales de SLA sanitario de 2 h y 3 h, reclama el
+     * lote con prioridad `CRITICAL_SANITARY` y entrega con backoff progresivo.
+     *
+     * Es el mismo `runPass()` que ejecuta el worker CLI: el controlador no
+     * duplica reglas ni transportes, solo publica el resumen canónico del DTO.
+     *
+     * Requisito de entrada: contexto `cron_authenticated` inyectado por `CronAuthMiddleware`.
+     */
+    public function dispatchNotifications(Request $request): Response
+    {
+        // Defensa en profundidad idéntica a la del auto-cierre: sin credencial verificada
+        // por el middleware no se ejecuta el proceso batch (hallazgo S-2).
+        if ($request->getAttribute('cron_authenticated') !== true) {
+            return Response::error(
+                'UNAUTHORIZED',
+                'Acceso no autorizado al proceso cron. Se requiere cabecera X-Cron-Secret o token válido.',
+                401
+            );
+        }
+
+        $rawBatchSize = $request->getQuery('batch_size') ?? $request->getBodyParam('batch_size');
+        $batchSize = NotificationDispatcherService::DEFAULT_BATCH_SIZE;
+        if ($rawBatchSize !== null && trim((string)$rawBatchSize) !== '') {
+            $candidate = trim((string)$rawBatchSize);
+            if (!ctype_digit($candidate) || (int)$candidate < 1 || (int)$candidate > 200) {
+                return Response::error(
+                    'INVALID_BATCH_SIZE',
+                    'El tamaño del lote de despacho debe ser un número entero entre 1 y 200 notificaciones.',
+                    422
+                );
+            }
+            $batchSize = (int)$candidate;
+        }
+
+        $this->notificationDispatcher ??= NotificationDispatcherFactory::create();
+
+        return Response::json($this->notificationDispatcher->runPass($batchSize)->toArray(), 200);
     }
 
     /**

@@ -5,13 +5,17 @@ declare(strict_types=1);
 namespace VendGuard\Application\Service;
 
 use InvalidArgumentException;
+use RuntimeException;
 use VendGuard\Core\Domain\Exception\CannotDeactivateSelfException;
+use VendGuard\Core\Domain\Exception\CannotSetOnCallInactiveUserException;
 use VendGuard\Core\Domain\Exception\InactiveRecordCollisionException;
 use VendGuard\Core\Domain\Exception\MinimumActiveStaffException;
+use VendGuard\Core\Domain\Exception\OnCallOnlyForTechniciansException;
 use VendGuard\Core\Domain\Exception\PendingIncidentsBlockedException;
 use VendGuard\Core\Domain\Exception\UserNotFoundException;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
+use VendGuard\Core\Domain\Repository\OnCallTechnicianRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 
 /**
@@ -31,12 +35,21 @@ class AdminUserService
     private UserRepositoryInterface $userRepo;
     private AuditLogger $auditLogger;
 
+    /**
+     * Puente de guardia: el repositorio de usuarios de producción también
+     * satisface este puerto, pero el servicio no lo exige para no arrastrar a
+     * todos los dobles de prueba de administración a implementarlo.
+     */
+    private ?OnCallTechnicianRepositoryInterface $onCallRepo;
+
     public function __construct(
         UserRepositoryInterface $userRepo,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?OnCallTechnicianRepositoryInterface $onCallRepo = null
     ) {
         $this->userRepo = $userRepo;
         $this->auditLogger = $auditLogger ?? new AuditLogger();
+        $this->onCallRepo = $onCallRepo;
     }
 
     /**
@@ -222,6 +235,84 @@ class AdminUserService
         );
 
         return $updated;
+    }
+
+    /**
+     * Activa o desactiva la condición de «Técnico de guardia» (RF-02.5, RF-02.6).
+     *
+     * La guardia es la lista de destinatarios de las alertas críticas de frío:
+     * marcar a un coordinador o a una cuenta dada de baja dejaría el blindaje
+     * sanitario apuntando a quien no atiende la ruta, así que ambas situaciones
+     * se rechazan con el código del contrato. La baja de personal ya retira la
+     * marca y cancela los avisos pendientes en el propio repositorio (RF-02.6).
+     *
+     * @param int $id ID del usuario a marcar o desmarcar.
+     * @param bool $isOnCall Nuevo estado de la condición de guardia.
+     * @param array{id: int|null, role: string, name: string} $actor Coordinador actuante.
+     * @param string|null $clientIp Dirección IP del cliente para auditoría.
+     * @return User Usuario con la marca ya persistida.
+     * @throws UserNotFoundException Si el usuario no existe.
+     * @throws OnCallOnlyForTechniciansException Si el usuario no es Técnico de Campo.
+     * @throws CannotSetOnCallInactiveUserException Si se intenta activar la guardia de una cuenta inactiva.
+     */
+    public function updateOnCall(int $id, bool $isOnCall, array $actor, ?string $clientIp = null): User
+    {
+        $targetUser = $this->getUser($id, allowDeleted: true);
+
+        if (!$targetUser->isTechnician()) {
+            throw new OnCallOnlyForTechniciansException($id, $targetUser->getRole()->value);
+        }
+
+        if ($isOnCall && !$targetUser->isActive()) {
+            throw new CannotSetOnCallInactiveUserException($id);
+        }
+
+        $previous = $targetUser->isOnCall();
+
+        if ($previous !== $isOnCall) {
+            if (!$this->onCalls()->setOnCall($id, $isOnCall)) {
+                // El puerto sólo actualiza técnicos activos: si la fila no cambió, la
+                // cuenta dejó de ser elegible entre la validación y la escritura.
+                throw new CannotSetOnCallInactiveUserException($id);
+            }
+        }
+
+        $updated = $this->getUser($id, allowDeleted: true);
+
+        $metadata = ['role' => $targetUser->getRole()->value];
+        if ($clientIp !== null && $clientIp !== '') {
+            $metadata['ip'] = $clientIp;
+        }
+
+        $this->auditLogger->logUserEvent(
+            $id,
+            'USER_ON_CALL_UPDATED',
+            $actor,
+            ['is_on_call' => $previous],
+            ['is_on_call' => $updated->isOnCall()],
+            $metadata
+        );
+
+        return $updated;
+    }
+
+    /**
+     * Puente de guardia resuelto desde el repositorio de usuarios cuando no se
+     * inyectó explícitamente.
+     *
+     * @throws RuntimeException Si la composición no ofrece un repositorio capaz de escribir la marca.
+     */
+    private function onCalls(): OnCallTechnicianRepositoryInterface
+    {
+        if ($this->onCallRepo !== null) {
+            return $this->onCallRepo;
+        }
+
+        if ($this->userRepo instanceof OnCallTechnicianRepositoryInterface) {
+            return $this->onCallRepo = $this->userRepo;
+        }
+
+        throw new RuntimeException('El repositorio de usuarios no implementa la escritura de la marca de guardia.');
     }
 
     /**
