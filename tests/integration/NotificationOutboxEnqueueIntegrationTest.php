@@ -5,7 +5,8 @@ declare(strict_types=1);
 /**
  * NotificationOutboxEnqueueIntegrationTest
  *
- * Certificación de integración de T-NOTIF-06 sobre el motor único PostgreSQL.
+ * Certificación de integración de T-NOTIF-06 y del censo de T-NOTIF-10 sobre el
+ * motor único PostgreSQL.
  *
  * El «Hecho cuando» exige que `NotificationOutboxEnqueuerService` encole de forma
  * atómica los eventos del catálogo: apertura (con doble destinatario de Sede y
@@ -38,6 +39,7 @@ use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Core\Domain\ValueObject\NotificationTemplate;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -615,6 +617,30 @@ $assert(
     (int)$pdo->query("SELECT COUNT(*) FROM notification_outbox WHERE incident_id = {$cancelId} AND status = 'CANCELLED_OBSOLETE'")->fetchColumn() === 2
 );
 
+// La cancelación de un expediente nacido por QR también cierra el canal ciudadano:
+// quien reportó la avería recibe el aviso de cierre sin ver la proyección de Sede.
+$qrCancel = $fixture('PRODUCT_JAM', 'MEDIUM', $citizenEmail, true);
+$qrCancelId = (int)$qrCancel['incident']->getId();
+$enqueuer->enqueueIncidentOpened($qrCancel['incident'], null, null, NotificationOutboxEnqueuerService::ORIGIN_CITIZEN_QR, $citizenEmail);
+$qrCancelled = $incidents->cancel(
+    $qrCancelId,
+    'Cierre administrativo del aviso ciudadano en la certificación T-NOTIF-10.',
+    $coordinatorId
+);
+$enqueuer->enqueueCancellation($qrCancelled, false);
+$qrCancelRows = $fetchRows($qrCancelId, 'INCIDENT_CANCELLED_CITIZEN_QR');
+$qrCancelSiteRows = $fetchRows($qrCancelId, 'INCIDENT_CANCELLED_SITE');
+$assert(
+    'RF-05.8: la cancelación de un expediente QR cierra el canal ciudadano',
+    count($qrCancelRows) === 1
+        && (string)$qrCancelRows[0]['recipient'] === strtolower($citizenEmail)
+        && (string)$qrCancelRows[0]['recipient_role'] === 'CITIZEN_QR'
+        && !in_array(strtolower($citizenEmail), $column($qrCancelSiteRows, 'recipient'), true),
+    'Ciudadanas: ' . count($qrCancelRows)
+        . ' · Site: ' . count($qrCancelSiteRows)
+        . ' · Destinatarios sitio: ' . implode(', ', $column($qrCancelSiteRows, 'recipient'))
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 10. RF-05.9 — Acuse puntual al segundo informador QR
 // ─────────────────────────────────────────────────────────────────────────────
@@ -736,6 +762,39 @@ try {
         $fetchRows($atomicId, 'INCIDENT_CANCELLED_SITE') === []
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 15. T-NOTIF-10 — Censo del catálogo: los 19 eventos tienen sus 19 plantillas
+// ─────────────────────────────────────────────────────────────────────────────
+$expectedBusinessTemplates = array_values(array_filter(
+    array_map(static fn (NotificationTemplate $template): string => $template->value, NotificationTemplate::cases()),
+    static fn (string $value): bool => !in_array($value, [
+        NotificationTemplate::SLA_IMMINENCE_2H_UNASSIGNED->value,
+        NotificationTemplate::SLA_IMMINENCE_3H_UNSTARTED->value,
+    ], true)
+));
+$observedTemplates = array_map(
+    'strval',
+    $pdo->query('SELECT DISTINCT template FROM notification_outbox WHERE deleted_at IS NULL')->fetchAll(PDO::FETCH_COLUMN)
+);
+sort($expectedBusinessTemplates);
+sort($observedTemplates);
+
+$assert(
+    'T-NOTIF-10: el catálogo cerrado mantiene exactamente 19 plantillas',
+    count(NotificationTemplate::cases()) === 19
+);
+$assert(
+    'T-NOTIF-10: los 17 eventos de negocio del catálogo quedan encolados por esta suite',
+    $observedTemplates === $expectedBusinessTemplates,
+    'Faltan: [' . implode(', ', array_diff($expectedBusinessTemplates, $observedTemplates)) . ']'
+        . ' · Sobran: [' . implode(', ', array_diff($observedTemplates, $expectedBusinessTemplates)) . ']'
+);
+$assert(
+    'T-NOTIF-10: las dos plantillas de inminencia de SLA no nacen de un evento de negocio',
+    !in_array(NotificationTemplate::SLA_IMMINENCE_2H_UNASSIGNED->value, $observedTemplates, true)
+        && !in_array(NotificationTemplate::SLA_IMMINENCE_3H_UNSTARTED->value, $observedTemplates, true)
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cierre y limpieza

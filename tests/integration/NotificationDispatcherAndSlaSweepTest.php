@@ -419,6 +419,52 @@ $assert(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 4.1 RF-04.3 — Ventana nocturna: el umbral se mide en tiempo natural 24/7
+// ─────────────────────────────────────────────────────────────────────────────
+// El ciclo arranca a las 00:20 y la pasada se evalúa a las 03:25. Si la regla
+// consultase un calendario comercial —como hace el módulo de pausas— esas tres
+// horas de madrugada no contarían y la alerta no existiría. Ambas referencias se
+// fijan en hora de Madrid, la del arnés, para que el cálculo no dependa del huso
+// con el que el motor escriba la columna.
+$madrid = new DateTimeZone('Europe/Madrid');
+$nightDate = (new DateTimeImmutable('today', $madrid))->format('Y-m-d');
+$nightNow = new DateTimeImmutable($nightDate . ' 03:25:00', $madrid);
+// La columna es `timestamptz` y el motor evalúa en UTC: el inicio del ciclo se
+// escribe con su desplazamiento explícito (+02:00 en octubre) para que el
+// instante absoluto sea el de la madrugada de Madrid y no el de la madrugada UTC.
+$nightCycleStart = (new DateTimeImmutable($nightDate . ' 00:20:00', $madrid))->format('Y-m-d H:i:sP');
+
+$nightIncident = $newSanitaryIncident('REGISTERED', null, 200);
+$nightId = (int)$nightIncident->getId();
+
+$nightStmt = $pdo->prepare("
+    UPDATE incidents
+    SET cycle_started_at = :cycle_started_at,
+        sla_2h_alert_sent_at = NULL,
+        sla_3h_alert_sent_at = NULL
+    WHERE id = :id
+");
+$nightStmt->execute([':cycle_started_at' => $nightCycleStart, ':id' => $nightId]);
+
+$nightPass = $dispatcher->runPass(100, $nightNow);
+$nightTwoHourRows = $fetchRows($nightId, 'SLA_IMMINENCE_2H_UNASSIGNED');
+$nightThreeHourRows = $fetchRows($nightId, 'SLA_IMMINENCE_3H_UNSTARTED');
+
+$assert(
+    'RF-04.3: un ciclo iniciado de madrugada también cruza el umbral de 2h',
+    $nightPass->sla2hAlertsEnqueued === 1 && $nightTwoHourRows !== []
+);
+$assert(
+    'RF-04.3: el umbral de 3h se evalúa en tiempo natural continuo, sin calendario comercial',
+    $nightPass->sla3hAlertsEnqueued === 1 && $nightThreeHourRows !== []
+);
+$assert(
+    'RF-04.3: la alerta nocturna de 2h sale con prioridad sanitaria y su sello de ciclo',
+    (string)$nightTwoHourRows[0]['priority'] === 'CRITICAL_SANITARY'
+        && $incidents->findById($nightId)?->getSla2hAlertSentAt() !== null
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 5. RF-07.1 — Obsolescencia evaluada justo antes del envío
 // ─────────────────────────────────────────────────────────────────────────────
 $obsoleteItem = $enqueueSimple(
@@ -460,6 +506,8 @@ $backoffId = (int)$backoffItem->getId();
 
 $emailTransport->scriptOutcomes(
     $backoffRecipient,
+    TransportDeliveryResult::transientFailure('SMTP 451 greylisting temporal'),
+    TransportDeliveryResult::transientFailure('SMTP 451 greylisting temporal'),
     TransportDeliveryResult::transientFailure('SMTP 451 greylisting temporal'),
     TransportDeliveryResult::transientFailure('SMTP 451 greylisting temporal'),
     TransportDeliveryResult::transientFailure('SMTP 451 greylisting temporal')
@@ -508,17 +556,52 @@ $assert(
 );
 $assert('El diagnóstico del proveedor se conserva en last_error', str_contains((string)$backoffRow2['last_error'], '451'));
 
-$forceReady($backoffId, 4);
+$forceReady($backoffId);
 $backoffPass3 = $dispatcher->runPass(1);
 $backoffRow3 = $outboxRow($backoffId);
+$delay3 = (new DateTimeImmutable((string)$backoffRow3['next_attempt_at']))->getTimestamp()
+    - (new DateTimeImmutable('now'))->getTimestamp();
+
+$assert(
+    'El tercer fallo escala la espera a 15 minutos con tres intentos',
+    (string)$backoffRow3['status'] === 'PENDING_RETRY'
+        && (int)$backoffRow3['attempts'] === 3
+        && $delay3 >= 890
+        && $delay3 <= 910,
+    "Retardo medido: {$delay3} s"
+);
+
+$forceReady($backoffId);
+$backoffPass4 = $dispatcher->runPass(1);
+$backoffRow4 = $outboxRow($backoffId);
+$delay4 = (new DateTimeImmutable((string)$backoffRow4['next_attempt_at']))->getTimestamp()
+    - (new DateTimeImmutable('now'))->getTimestamp();
+
+$assert(
+    'El cuarto fallo escala la espera a 60 minutos con cuatro intentos',
+    (string)$backoffRow4['status'] === 'PENDING_RETRY'
+        && (int)$backoffRow4['attempts'] === 4
+        && $delay4 >= 3590
+        && $delay4 <= 3610,
+    "Retardo medido: {$delay4} s"
+);
+
+$forceReady($backoffId);
+$backoffPass5 = $dispatcher->runPass(1);
+$backoffRow5 = $outboxRow($backoffId);
 $auditFailures = (int)$pdo->query("SELECT COUNT(*) FROM audit_log WHERE action = 'NOTIFICATION_PERMANENT_FAILURE'")->fetchColumn();
 
 $assert(
     'RF-06.2: el quinto intento pasa a FAILED_PERMANENT',
-    (string)$backoffRow3['status'] === 'FAILED_PERMANENT' && (int)$backoffRow3['attempts'] === 5
+    (string)$backoffRow5['status'] === 'FAILED_PERMANENT' && (int)$backoffRow5['attempts'] === 5
 );
 $assert('RF-06.2: el fallo definitivo queda auditado en audit_log', $auditFailures >= 1);
-$assert('El resumen contabiliza el fallo definitivo', $backoffPass3->failedPermanentCount === 1);
+$assert(
+    'El resumen contabiliza el fallo definitivo tras recorrer la curva completa',
+    $backoffPass3->retryScheduledCount === 1
+        && $backoffPass4->retryScheduledCount === 1
+        && $backoffPass5->failedPermanentCount === 1
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 7. Identidad contable del resumen de la pasada
@@ -539,6 +622,21 @@ $assert(
         'rescued_stuck_count', 'sla_2h_alerts_enqueued', 'sla_3h_alerts_enqueued', 'claimed_count',
         'sent_count', 'retry_scheduled_count', 'failed_permanent_count', 'cancelled_obsolete_count', 'duration_ms',
     ]
+);
+
+// Censo del catálogo: el vigilante es la única vía de las dos plantillas de
+// inminencia de SLA; el resto de las 19 las cubre la suite de encolado.
+$slaTemplatesCertified = $pdo->query("
+    SELECT DISTINCT template
+    FROM notification_outbox
+    WHERE deleted_at IS NULL
+      AND template IN ('SLA_IMMINENCE_2H_UNASSIGNED', 'SLA_IMMINENCE_3H_UNSTARTED')
+    ORDER BY template ASC
+")->fetchAll(PDO::FETCH_COLUMN);
+$assert(
+    'RF-04: las dos plantillas de inminencia de SLA quedan certificadas por el vigilante',
+    $slaTemplatesCertified === ['SLA_IMMINENCE_2H_UNASSIGNED', 'SLA_IMMINENCE_3H_UNSTARTED'],
+    'Plantillas observadas: ' . implode(', ', $slaTemplatesCertified)
 );
 
 TestDataCleaner::purge($pdo);
