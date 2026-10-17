@@ -861,6 +861,112 @@ export class ApiClient {
   };
 
   /**
+   * 3a. Notification Center: Outbox & Corporate Emergency Channel (Módulo 14).
+   *
+   * Superficie de Coordinación para supervisar la bandeja de salida garantizada
+   * (RF-06.3), reencolar o cancelar envíos con destino refrescado (RF-06.4) y
+   * configurar y probar el Webhook corporativo (RF-06.5). Las rutas y los sobres
+   * son los del contrato técnico §4.1 a §4.6; el cliente devuelve `data` ya
+   * desenvuelto, igual que el resto de dominios.
+   */
+  notifications = {
+    /**
+     * Lists the outbox with summary counters, filters and pagination (RF-06.3).
+     * @param {Object} [filters={}] - { status, channel, priority, ticket_code, limit, offset }
+     * @returns {Promise<{summary: Object, items: Array<Object>, pagination: Object}>}
+     */
+    getOutbox: (filters = {}) => {
+      const allowed = ['status', 'channel', 'priority', 'ticket_code', 'limit', 'offset'];
+      const params = new URLSearchParams();
+      for (const key of allowed) {
+        const value = filters[key];
+        if (value !== undefined && value !== null && String(value).trim() !== '') {
+          params.append(key, String(value).trim());
+        }
+      }
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      return this.get(`/coordinator/notifications/outbox${qs}`);
+    },
+
+    /**
+     * Requeues one failed notification, refreshing its recipient with the current
+     * site mailbox or webhook URL (RF-06.4).
+     * @param {number|string} id
+     * @returns {Promise<Object>}
+     */
+    retryItem: (id) => {
+      return this.post(`/coordinator/notifications/outbox/${encodeURIComponent(id)}/retry`);
+    },
+
+    /**
+     * Requeues every notification currently in FAILED_PERMANENT (RF-06.4).
+     * @returns {Promise<{retried_count: number, retried_ids: Array<number>}>}
+     */
+    retryAllFailed: () => {
+      return this.post('/coordinator/notifications/outbox/retry-all-failed');
+    },
+
+    /**
+     * Cancels a pending or failed notification, documenting the reason (RF-06.4).
+     * @param {number|string} id
+     * @param {string|null} [reason=null]
+     * @returns {Promise<Object>}
+     */
+    cancelItem: (id, reason = null) => {
+      const trimmed = reason === null || reason === undefined ? '' : String(reason).trim();
+      return this.post(
+        `/coordinator/notifications/outbox/${encodeURIComponent(id)}/cancel`,
+        trimmed !== '' ? { reason: trimmed } : {}
+      );
+    },
+
+    /**
+     * Reads the corporate emergency channel set-up and the active on-call list (RF-06.5).
+     * @returns {Promise<Object>}
+     */
+    getSettings: () => {
+      return this.get('/coordinator/notifications/settings');
+    },
+
+    /**
+     * Saves the corporate emergency channel (webhook name, HTTPS URL and switch).
+     * The server re-validates the destination against SSRF (RF-06.5.1).
+     * @param {{webhook_name?: string, webhook_url?: string|null, is_webhook_enabled: boolean}} payload
+     * @returns {Promise<Object>}
+     */
+    updateSettings: (payload = {}) => {
+      const body = {
+        is_webhook_enabled: Boolean(payload.is_webhook_enabled)
+      };
+      if (payload.webhook_name !== undefined && payload.webhook_name !== null) {
+        body.webhook_name = String(payload.webhook_name).trim();
+      }
+      if (payload.webhook_url !== undefined && payload.webhook_url !== null) {
+        const url = String(payload.webhook_url).trim();
+        body.webhook_url = url;
+      }
+      return this.put('/coordinator/notifications/settings', body);
+    },
+
+    /**
+     * Runs the interactive connection test against the corporate channel, with the
+     * 5-second timeout enforced by the server (RF-06.5.2).
+     * @param {{webhook_name?: string, webhook_url?: string}} [payload={}]
+     * @returns {Promise<{test_passed: boolean, status: string, http_code: ?number, duration_ms: number, tested_at: string, error: ?string}>}
+     */
+    testWebhook: (payload = {}) => {
+      const body = {};
+      if (payload.webhook_name !== undefined && payload.webhook_name !== null && String(payload.webhook_name).trim() !== '') {
+        body.webhook_name = String(payload.webhook_name).trim();
+      }
+      if (payload.webhook_url !== undefined && payload.webhook_url !== null && String(payload.webhook_url).trim() !== '') {
+        body.webhook_url = String(payload.webhook_url).trim();
+      }
+      return this.post('/coordinator/notifications/settings/test-webhook', body);
+    }
+  };
+
+  /**
    * 3. Incidents (Reporting, Comments, Reopening)
    */
   incidents = {
@@ -1721,6 +1827,18 @@ export class ApiClient {
     },
     reactivateUser: (id) => {
       return this.patch(`/coordinator/users/${id}/reactivate`);
+    },
+    /**
+     * Activates or removes the on-call duty flag of a field technician (RF-02.5).
+     * The server rejects Coordinators, inactive accounts and non-boolean input.
+     * @param {number|string} id
+     * @param {boolean} isOnCall
+     * @returns {Promise<Object>}
+     */
+    setUserOnCall: (id, isOnCall) => {
+      return this.patch(`/coordinator/users/${encodeURIComponent(id)}/on-call`, {
+        is_on_call: Boolean(isOnCall)
+      });
     }
   };
 }
