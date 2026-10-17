@@ -39,13 +39,16 @@ declare(strict_types=1);
 require_once __DIR__ . '/../src/autoload.php';
 
 use VendGuard\Application\Service\SanitaryClockSweepService;
+use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 
 echo "========================================================\n";
 echo " VendGuard: Barrido del Reloj Sanitario Biológico\n";
 echo "========================================================\n\n";
 
 try {
-    $result = (new SanitaryClockSweepService())->sweep();
+    $result = (new SanitaryClockSweepService(
+        notificationEnqueuer: NotificationOutboxEnqueuerFactory::createOrNull()
+    ))->sweep();
 
     echo sprintf(
         "[1/3] Candidatos evaluados: %d de %d (umbral %d s naturales, %.2f ms)\n",

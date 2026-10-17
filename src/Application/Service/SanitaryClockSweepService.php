@@ -153,6 +153,9 @@ final class SanitaryClockSweepService
     /** Regla del escalado, resuelta en el primer uso si no se inyecta. */
     private ?SanitarySweepEscalationPolicy $escalationPolicy;
 
+    /** Encolado del Centro de Notificaciones; `null` en el arnés sin outbox. */
+    private ?NotificationOutboxEnqueuerService $notificationEnqueuer;
+
     /**
      * Todos los colaboradores son opcionales y se resuelven de forma perezosa, igual
      * que en `IncidentPauseService`: el servicio es construible sin base de datos y el
@@ -164,7 +167,8 @@ final class SanitaryClockSweepService
         ?TransactionManagerInterface $transactionManager = null,
         ?LockWaitBudgetInterface $lockWaitBudget = null,
         ?SanitarySweepVisibilityRepositoryInterface $visibilityRepo = null,
-        ?SanitarySweepEscalationPolicy $escalationPolicy = null
+        ?SanitarySweepEscalationPolicy $escalationPolicy = null,
+        ?NotificationOutboxEnqueuerService $notificationEnqueuer = null
     ) {
         $this->candidateRepo = $candidateRepo;
         $this->pauseService = $pauseService;
@@ -172,6 +176,7 @@ final class SanitaryClockSweepService
         $this->lockWaitBudget = $lockWaitBudget;
         $this->visibilityRepo = $visibilityRepo;
         $this->escalationPolicy = $escalationPolicy;
+        $this->notificationEnqueuer = $notificationEnqueuer;
     }
 
     /**
@@ -353,15 +358,35 @@ final class SanitaryClockSweepService
 
         try {
             $current = $this->visibility()->findContentionByIncident($incidentId);
-
-            $this->visibility()->saveContentionDetection(
-                $this->escalation()->nextDetection(
-                    $current,
-                    $incidentId,
-                    (int)$incident->getMachineId(),
-                    $passStartedAt
-                )
+            $next = $this->escalation()->nextDetection(
+                $current,
+                $incidentId,
+                (int)$incident->getMachineId(),
+                $passStartedAt
             );
+
+            $enqueuer = $this->notificationEnqueuer;
+            $persist = function () use ($next, $enqueuer, $current, $incident): void {
+                $this->visibility()->saveContentionDetection($next);
+
+                // RF-03.4: una única alerta por episodio de escalado. El episodio
+                // empieza en `first_detected_at`; el paso de MONITORED a ESCALATED
+                // es la transición que dispara el aviso.
+                $wasEscalated = $current !== null && $current->isEscalated();
+                if ($enqueuer !== null && $next->isEscalated() && !$wasEscalated) {
+                    $enqueuer->enqueueSanitarySweepEscalated(
+                        $incident,
+                        $next->consecutivePasses,
+                        $next->firstDetectedAt
+                    );
+                }
+            };
+
+            if ($enqueuer === null) {
+                $persist();
+            } else {
+                $this->transactions()->runInTransaction($persist);
+            }
         } catch (Throwable $exception) {
             if (!self::isRowContention($exception)) {
                 throw $exception;
@@ -390,7 +415,9 @@ final class SanitaryClockSweepService
      */
     private function pauses(): IncidentPauseService
     {
-        return $this->pauseService ??= new IncidentPauseService();
+        return $this->pauseService ??= new IncidentPauseService(
+            notificationEnqueuer: $this->notificationEnqueuer
+        );
     }
 
     /**

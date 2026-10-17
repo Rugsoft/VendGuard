@@ -14,10 +14,12 @@ use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Core\Service\UrgencyCalculator;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
@@ -41,15 +43,26 @@ class QrReportService
     private MachineRepositoryInterface $machineRepo;
     private LocationRepositoryInterface $locationRepo;
     private IncidentRepositoryInterface $incidentRepo;
+    private ?NotificationOutboxEnqueuerService $notificationEnqueuer;
+    private ?TransactionManagerInterface $transactionManager;
 
     public function __construct(
         ?MachineRepositoryInterface $machineRepo = null,
         ?LocationRepositoryInterface $locationRepo = null,
-        ?IncidentRepositoryInterface $incidentRepo = null
+        ?IncidentRepositoryInterface $incidentRepo = null,
+        ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
+        ?TransactionManagerInterface $transactionManager = null
     ) {
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
+        $this->notificationEnqueuer = $notificationEnqueuer;
+        $this->transactionManager = $transactionManager;
+    }
+
+    private function transactions(): TransactionManagerInterface
+    {
+        return $this->transactionManager ??= new PdoTransactionManager();
     }
 
     /**
@@ -117,6 +130,16 @@ class QrReportService
             ? trim((string)$payload['reporter_phone'])
             : null;
 
+        // RF-02.2 / RF-02.4: correo opcional del ciudadano, validado antes de
+        // aceptar el aviso; si falta, el expediente sigue sin destinatario externo.
+        $reporterEmail = null;
+        if (isset($payload['reporter_email']) && trim((string)$payload['reporter_email']) !== '') {
+            $reporterEmail = strtolower(trim((string)$payload['reporter_email']));
+            if (filter_var($reporterEmail, FILTER_VALIDATE_EMAIL) === false) {
+                throw new InvalidArgumentException('El correo electrónico del informador no tiene un formato válido.');
+            }
+        }
+
         $retainedMoney = null;
         if (isset($payload['retained_money_amount']) && $payload['retained_money_amount'] !== null && trim((string)$payload['retained_money_amount']) !== '') {
             if (!is_numeric($payload['retained_money_amount'])) {
@@ -142,6 +165,7 @@ class QrReportService
                 $location,
                 $description,
                 $reporterName,
+                $reporterEmail,
                 $retainedMoney,
                 $photoPath
             );
@@ -167,12 +191,27 @@ class QrReportService
             reporterName: $reporterName,
             reporterPhone: $reporterPhone,
             retainedMoneyAmount: $retainedMoney,
-            photoPath: $photoPath
+            photoPath: $photoPath,
+            reporterEmail: $reporterEmail
         );
 
         // 10. Persistencia atómica con captura de condición de carrera
         try {
-            $created = $this->incidentRepo->create($newIncident, null, 'Aviso registrado mediante código QR');
+            $enqueuer = $this->notificationEnqueuer;
+            $created = $enqueuer === null
+                ? $this->incidentRepo->create($newIncident, null, 'Aviso registrado mediante código QR')
+                : $this->transactions()->runInTransaction(function () use ($newIncident, $machine, $location, $reporterEmail, $enqueuer): Incident {
+                    $created = $this->incidentRepo->create($newIncident, null, 'Aviso registrado mediante código QR');
+                    $enqueuer->enqueueIncidentOpened(
+                        $created,
+                        $machine,
+                        $location,
+                        NotificationOutboxEnqueuerService::ORIGIN_CITIZEN_QR,
+                        $reporterEmail
+                    );
+
+                    return $created;
+                });
 
             return [
                 // `incident_id` / `incident_code` (contrato §4.1.1) permiten anclar un
@@ -206,6 +245,7 @@ class QrReportService
                     $location,
                     $description,
                     $reporterName,
+                    $reporterEmail,
                     $retainedMoney,
                     $photoPath,
                     true
@@ -226,6 +266,7 @@ class QrReportService
         Location $location,
         string $description,
         ?string $reporterName,
+        ?string $reporterEmail,
         ?float $retainedMoney,
         ?string $photoPath,
         bool $isRaceCondition = false
@@ -254,7 +295,17 @@ class QrReportService
             ticketCode: $incident->getTicketCode()
         );
 
-        $this->incidentRepo->addComment($comment);
+        $enqueuer = $this->notificationEnqueuer;
+        if ($enqueuer === null) {
+            $this->incidentRepo->addComment($comment);
+        } else {
+            // RF-05.9: observación y acuse comparten transacción; el acuse va
+            // sólo al buzón del segundo informador, nunca al reportador original.
+            $this->transactions()->runInTransaction(function () use ($comment, $enqueuer, $incident, $reporterEmail, $description): void {
+                $this->incidentRepo->addComment($comment);
+                $enqueuer->enqueueCitizenObservationAck($incident, $reporterEmail, $description);
+            });
+        }
 
         return [
             // Un segundo consumidor sobre el mismo ticket genera su propio

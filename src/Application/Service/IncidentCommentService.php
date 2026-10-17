@@ -11,7 +11,9 @@ use VendGuard\Core\Domain\Exception\InvalidCommentLengthException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Storage\FileStorageCompensator;
 use VendGuard\Infrastructure\Storage\LocalFileUploader;
 
@@ -79,16 +81,30 @@ class IncidentCommentService
     /** Transaccionalidad compensatoria del fichero (EARS-05.3); se resuelve bajo demanda. */
     private ?FileStorageCompensator $fileCompensator;
 
+    /** Encolado del Centro de Notificaciones; `null` en contextos sin outbox. */
+    private ?NotificationOutboxEnqueuerService $notificationEnqueuer;
+
+    private ?TransactionManagerInterface $transactionManager;
+
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?AuditLogger $auditLogger = null,
         ?LocalFileUploader $fileUploader = null,
-        ?FileStorageCompensator $fileCompensator = null
+        ?FileStorageCompensator $fileCompensator = null,
+        ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
+        ?TransactionManagerInterface $transactionManager = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new \VendGuard\Infrastructure\Repository\PdoIncidentRepository();
         $this->auditLogger = $auditLogger ?? new AuditLogger();
         $this->fileUploader = $fileUploader ?? new LocalFileUploader();
         $this->fileCompensator = $fileCompensator;
+        $this->notificationEnqueuer = $notificationEnqueuer;
+        $this->transactionManager = $transactionManager;
+    }
+
+    private function transactions(): TransactionManagerInterface
+    {
+        return $this->transactionManager ??= new PdoTransactionManager();
     }
 
     /**
@@ -287,24 +303,40 @@ class IncidentCommentService
         //    llega a confirmarse —tiempo de espera agotado o enlace caído—, la fotografía
         //    recién escrita se retira en lugar de quedarse huérfana, y la excepción sigue
         //    su camino con su causa verdadera.
+        $persist = fn (): IncidentComment => $this->incidentRepo->addComment(new IncidentComment(
+            id: null,
+            incidentId: $incidentId,
+            authorType: $authorType,
+            userId: $authorUserId > 0 ? $authorUserId : null,
+            authorName: $authorName,
+            commentText: $trimmedText,
+            photoPath: $photoPath,
+            isInternal: $effectiveInternal,
+            // La marca del mensaje viaja **anclada**, como todas las del módulo: la columna lleva zona
+            // horaria y la fila se fecha con el reloj del motor (`CURRENT_TIMESTAMP`), de modo que la
+            // marca que el dominio arrastra en memoria tiene que denotar el mismo instante y no una
+            // pared que dependa de la zona del proceso (Contrato del Reloj Operativo, §1).
+            createdAt: date('Y-m-d\TH:i:sP'),
+            ticketCode: (string)($incidentRow['ticket_code'] ?? '')
+        ));
+
+        $enqueuer = $this->notificationEnqueuer;
         $comment = $this->compensator()->executeWithCompensatingFile(
             (string)$photoPath,
-            fn (): IncidentComment => $this->incidentRepo->addComment(new IncidentComment(
-                id: null,
-                incidentId: $incidentId,
-                authorType: $authorType,
-                userId: $authorUserId > 0 ? $authorUserId : null,
-                authorName: $authorName,
-                commentText: $trimmedText,
-                photoPath: $photoPath,
-                isInternal: $effectiveInternal,
-                // La marca del mensaje viaja **anclada**, como todas las del módulo: la columna lleva zona
-                // horaria y la fila se fecha con el reloj del motor (`CURRENT_TIMESTAMP`), de modo que la
-                // marca que el dominio arrastra en memoria tiene que denotar el mismo instante y no una
-                // pared que dependa de la zona del proceso (Contrato del Reloj Operativo, §1).
-                createdAt: date('Y-m-d\TH:i:sP'),
-                ticketCode: (string)($incidentRow['ticket_code'] ?? '')
-            ))
+            function () use ($persist, $enqueuer, $incidentId, $isSiteManager, $trimmedText): IncidentComment {
+                if ($enqueuer === null || !$isSiteManager) {
+                    return $persist();
+                }
+
+                // RF-05.4: comentario público de Sede y aviso al técnico comparten
+                // transacción; la agrupación de ráfagas la resuelve el repositorio.
+                return $this->transactions()->runInTransaction(function () use ($persist, $enqueuer, $incidentId, $trimmedText): IncidentComment {
+                    $comment = $persist();
+                    $enqueuer->enqueueSiteReply($incidentId, $trimmedText);
+
+                    return $comment;
+                });
+            }
         );
 
         // 8. Evento inmutable de auditoría (RF-06.3 / Art. III.3).

@@ -114,6 +114,8 @@ class CronController
      */
     private function sweeps(): SanitaryClockSweepService
     {
-        return $this->sweepService ??= new SanitaryClockSweepService();
+        return $this->sweepService ??= new SanitaryClockSweepService(
+            notificationEnqueuer: \VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory::createOrNull()
+        );
     }
 }

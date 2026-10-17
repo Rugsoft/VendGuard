@@ -133,6 +133,28 @@ class PdoNotificationOutboxRepository implements NotificationOutboxRepositoryInt
     /**
      * {@inheritDoc}
      */
+    public function hasTemplateForIncident(int $incidentId, string $template): bool
+    {
+        $sql = "
+            SELECT 1
+            FROM notification_outbox
+            WHERE incident_id = :incident_id
+              AND template = :template
+              AND deleted_at IS NULL
+            LIMIT 1
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':incident_id', $incidentId, PDO::PARAM_INT);
+        $stmt->bindValue(':template', strtoupper(trim($template)), PDO::PARAM_STR);
+        $stmt->execute();
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function save(NotificationOutboxItem $item): bool
     {
         if ($item->getId() === null) {

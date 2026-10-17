@@ -165,6 +165,9 @@ final class IncidentPauseService
     /** Unidad de trabajo transaccional; se resuelve en el primer uso si no se inyecta. */
     private ?TransactionManagerInterface $transactionManager;
 
+    /** Encolado del Centro de Notificaciones; `null` en contextos sin outbox. */
+    private ?NotificationOutboxEnqueuerService $notificationEnqueuer;
+
     /**
      * El orden de los parámetros conserva la firma ya publicada por T-PAUSE-06/07
      * (ajustes, auditoría) y añade al final el repositorio de incidencias que exige
@@ -179,7 +182,8 @@ final class IncidentPauseService
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?MachineRepositoryInterface $machineRepo = null,
         ?RefundRequestRepositoryInterface $refundRepo = null,
-        ?TransactionManagerInterface $transactionManager = null
+        ?TransactionManagerInterface $transactionManager = null,
+        ?NotificationOutboxEnqueuerService $notificationEnqueuer = null
     ) {
         $this->settingsRepo = $settingsRepo;
         $this->auditLogger = $auditLogger;
@@ -187,6 +191,7 @@ final class IncidentPauseService
         $this->machineRepo = $machineRepo;
         $this->refundRepo = $refundRepo;
         $this->transactionManager = $transactionManager;
+        $this->notificationEnqueuer = $notificationEnqueuer;
     }
 
     /** Apertura de la jornada comercial de la sede. */
@@ -427,6 +432,10 @@ final class IncidentPauseService
                 'reason' => 'Ruptura térmica prolongada: superadas las 4 horas naturales continuas sin frío confirmado (Art. II).',
             ]
         );
+
+        // RF-03.3: alerta crítica interna + aviso preventivo a la Sede. En el
+        // barrido viaja dentro de su transacción; aquí cubre el cierre técnico.
+        $this->notificationEnqueuer?->enqueueSanitaryQuarantine($incident);
 
         return true;
     }
@@ -756,6 +765,9 @@ final class IncidentPauseService
                 $reason,
                 $now
             );
+
+            // RF-05.3: solicitud de acceso/información EXCLUSIVAMENTE a la Sede.
+            $this->notificationEnqueuer?->enqueuePendingInfoRequest($pausedIncident);
 
             return $pausedIncident;
         });
@@ -1131,6 +1143,13 @@ final class IncidentPauseService
 
             // 3. El consumidor final no pierde su dinero (RF-04.5).
             $this->detachRefundsForInactivity($incidentId, $coordinatorUserId, $ticketCode);
+
+            // 4. RF-05.8: aviso de cancelación con la advertencia de máquina
+            //    bloqueada. La incidencia se relee para publicar su estado final.
+            $cancelled = $this->incidents()->findById($incidentId);
+            if ($cancelled !== null) {
+                $this->notificationEnqueuer?->enqueueCancellation($cancelled, true);
+            }
 
             return $pausedBusinessSeconds;
         });

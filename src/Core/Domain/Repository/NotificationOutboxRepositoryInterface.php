@@ -105,6 +105,16 @@ interface NotificationOutboxRepositoryInterface
     public function countByStatus(?DateTimeImmutable $now = null): array;
 
     /**
+     * True when the incident already has a non-deleted row of the given
+     * template, whatever its dispatch status.
+     *
+     * The enqueuer uses this fingerprint —never `reporter_email`— to decide
+     * whether an expediente originated in the citizen QR channel and therefore
+     * may receive the restricted public projection (RF-02.4, RF-05.9, Art. V.4).
+     */
+    public function hasTemplateForIncident(int $incidentId, string $template): bool;
+
+    /**
      * Cancels by obsolescence every pending row of an incident (RF-05.8,
      * RF-07.1). The cancellation notice of the incident itself can be preserved
      * so the closure email still leaves.

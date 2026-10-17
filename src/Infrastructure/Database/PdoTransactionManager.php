@@ -29,9 +29,6 @@ class PdoTransactionManager implements \VendGuard\Core\Domain\Repository\Transac
 {
     private ?PDO $pdo;
 
-    /** Si la conexión ya venía abierta en transacción, la confirmación es de su dueño. */
-    private bool $ownsTransaction = false;
-
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo;
@@ -47,9 +44,16 @@ class PdoTransactionManager implements \VendGuard\Core\Domain\Repository\Transac
         // Anidamiento tolerante: quien ya abrió la transacción es su dueño y el
         // único que confirma o deshace. Igual que hacen los repositorios del
         // proyecto con `inTransaction()`.
-        $this->ownsTransaction = !$pdo->inTransaction();
+        //
+        // La propiedad de ESTA unidad de trabajo vive en una variable local y no
+        // en un atributo del objeto: el servicio de encolado anida varias
+        // llamadas en la misma instancia y un atributo compartido hacía que la
+        // llamada interna sobrescribiera la propiedad del marco externo, de modo
+        // que un fallo posterior dejaba la transacción abierta sin deshacer
+        // (bug de anidamiento detectado por `NotificationOutboxEnqueueIntegrationTest`).
+        $ownsTransaction = !$pdo->inTransaction();
 
-        if ($this->ownsTransaction) {
+        if ($ownsTransaction) {
             $pdo->beginTransaction();
             PdoLockWaitBudget::applyToCurrentTransaction($pdo, ConnectionFactory::ambientLockWaitSeconds());
         }
@@ -57,13 +61,13 @@ class PdoTransactionManager implements \VendGuard\Core\Domain\Repository\Transac
         try {
             $result = $operation();
 
-            if ($this->ownsTransaction) {
+            if ($ownsTransaction) {
                 $pdo->commit();
             }
 
             return $result;
         } catch (Throwable $exception) {
-            if ($this->ownsTransaction && $pdo->inTransaction()) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
                 $pdo->rollBack();
             }
 

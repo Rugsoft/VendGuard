@@ -23,6 +23,7 @@ use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Repository\IncidentNotificationCycleRepositoryInterface;
+use VendGuard\Core\Domain\Repository\IncidentReopenNotificationInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentSiteResponseRepositoryInterface;
@@ -48,7 +49,7 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * El orden del triaje no es una diferencia de dialecto —tiene forma común—, pero tampoco se
  * escribe a mano dos veces: se deriva del rango de prioridad que declara el dominio.
  */
-class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, TechnicianRouteBoardRepositoryInterface, IncidentNotificationCycleRepositoryInterface
+class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, TechnicianRouteBoardRepositoryInterface, IncidentNotificationCycleRepositoryInterface, IncidentReopenNotificationInterface
 {
     /**
      * Marcadores canónicos de las notas de auditoría de la pausa (RF-01.4).
@@ -2144,6 +2145,20 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
      */
     public function reopen(int $incidentId, string $reasonText): Incident
     {
+        return $this->reopenWithLifecycleNotifications($incidentId, $reasonText);
+    }
+
+    /**
+     * Variante transaccional de la reapertura que ejecuta los ganchos de
+     * notificación ANTES del commit (ver `IncidentReopenNotificationInterface`).
+     */
+    public function reopenWithLifecycleNotifications(
+        int $incidentId,
+        string $reasonText,
+        ?callable $onReopened = null,
+        ?callable $onChronic = null
+    ): Incident
+    {
         $isOwnTransaction = !$this->pdo->inTransaction();
         if ($isOwnTransaction) {
             $this->pdo->beginTransaction();
@@ -2176,6 +2191,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $reopenCount = $this->countReopenEvents($incidentId);
             if ($reopenCount >= 2) {
                 $this->markAsChronic($incidentId);
+                if ($onChronic !== null) {
+                    // RF-05.7: la alerta de Avería Crónica se encola ANTES del commit
+                    // para que su fila comparta destino con la marca del expediente.
+                    $onChronic($incident);
+                }
                 if ($isOwnTransaction && $this->pdo->inTransaction()) {
                     $this->pdo->commit();
                 }
@@ -2219,13 +2239,18 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 "Reapertura solicitada por la sede ({$eventNumber}ª reincidencia). Motivo: " . trim($reasonText)
             );
 
-            if ($isOwnTransaction) {
-                $this->pdo->commit();
-            }
-
             $reopened = $this->findById($incidentId);
             if ($reopened === null) {
                 throw new DomainException("Error al recuperar la incidencia reabierta.");
+            }
+
+            if ($onReopened !== null) {
+                // RF-05.7 / RF-03.1: reapertura y alertas comparten transacción.
+                $onReopened($reopened);
+            }
+
+            if ($isOwnTransaction) {
+                $this->pdo->commit();
             }
 
             return $reopened;

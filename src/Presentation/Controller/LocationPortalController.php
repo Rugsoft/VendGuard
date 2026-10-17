@@ -9,6 +9,7 @@ use VendGuard\Application\DTO\RefundReceiptDTO;
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\IbanValidationService;
 use VendGuard\Application\Service\IncidentCommentService;
+use VendGuard\Application\Service\NotificationOutboxEnqueuerService;
 use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Core\Domain\Exception\ChronicIncidentException;
 use VendGuard\Core\Domain\Exception\ConversationSealedException;
@@ -25,14 +26,18 @@ use VendGuard\Core\Domain\Model\CompensationMethod;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\Machine;
+use VendGuard\Core\Domain\Repository\IncidentReopenNotificationInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
+use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
@@ -79,6 +84,8 @@ class LocationPortalController
     private IbanValidationService $ibanValidator;
     private ?IncidentCommentService $commentService;
     private ?AuditLogger $auditLogger;
+    private ?NotificationOutboxEnqueuerService $notificationEnqueuer;
+    private ?TransactionManagerInterface $transactionManager;
 
     /** Transaccionalidad compensatoria del fichero (EARS-05.3); se resuelve bajo demanda. */
     private ?FileStorageCompensator $fileCompensator;
@@ -92,7 +99,9 @@ class LocationPortalController
         ?IbanValidationService $ibanValidator = null,
         ?IncidentCommentService $commentService = null,
         ?AuditLogger $auditLogger = null,
-        ?FileStorageCompensator $fileCompensator = null
+        ?FileStorageCompensator $fileCompensator = null,
+        ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
+        ?TransactionManagerInterface $transactionManager = null
     ) {
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
@@ -108,6 +117,21 @@ class LocationPortalController
         // también se construye en contextos unitarios sin base de datos.
         $this->commentService = $commentService;
         $this->auditLogger = $auditLogger;
+        $this->notificationEnqueuer = $notificationEnqueuer;
+        $this->transactionManager = $transactionManager;
+    }
+
+    /**
+     * Servicio de encolado del Centro de Notificaciones, resuelto bajo demanda.
+     */
+    private function notifications(): ?NotificationOutboxEnqueuerService
+    {
+        return $this->notificationEnqueuer ??= NotificationOutboxEnqueuerFactory::createOrNull();
+    }
+
+    private function transactions(): TransactionManagerInterface
+    {
+        return $this->transactionManager ??= new PdoTransactionManager();
     }
 
     /**
@@ -134,7 +158,8 @@ class LocationPortalController
             $this->incidentRepo,
             null,
             $this->fileUploader,
-            $this->compensator()
+            $this->compensator(),
+            $this->notifications()
         );
     }
 
@@ -433,6 +458,22 @@ class LocationPortalController
         $reporterPhone = $request->getBodyParam('reporter_phone');
         $reporterPhone = $reporterPhone !== null && trim((string)$reporterPhone) !== '' ? trim((string)$reporterPhone) : null;
 
+        // RF-02.2: correo opcional del informador, validado ANTES de aceptar el
+        // envío. Un valor distinto del buzón oficial activa el doble destinatario
+        // de la Sede (RF-02.3); vacío no cambia nada.
+        $reporterEmail = null;
+        $reporterEmailRaw = $request->getBodyParam('reporter_email');
+        if ($reporterEmailRaw !== null && trim((string)$reporterEmailRaw) !== '') {
+            $reporterEmail = strtolower(trim((string)$reporterEmailRaw));
+            if (filter_var($reporterEmail, FILTER_VALIDATE_EMAIL) === false) {
+                return Response::error(
+                    'INVALID_REPORTER_EMAIL',
+                    'El correo electrónico del informador no tiene un formato válido.',
+                    422
+                );
+            }
+        }
+
         $retainedMoney = null;
         $retainedMoneyRaw = $request->getBodyParam('retained_money_amount');
         if ($retainedMoneyRaw !== null && trim((string)$retainedMoneyRaw) !== '') {
@@ -493,6 +534,7 @@ class LocationPortalController
                             'description' => $description,
                             'reporter_name' => $reporterName,
                             'reporter_phone' => $reporterPhone,
+                            'reporter_email' => $reporterEmail,
                             'retained_money_amount' => $retainedMoney,
                         ],
                     ]
@@ -511,7 +553,7 @@ class LocationPortalController
         try {
             $created = $this->compensator()->executeWithCompensatingFile(
                 (string)$uploadedPhotoPath,
-                function () use ($machine, $category, $location, $description, $reporterName, $reporterPhone, $retainedMoney, $photoPath): Incident {
+                function () use ($machine, $category, $location, $description, $reporterName, $reporterPhone, $reporterEmail, $retainedMoney, $photoPath): Incident {
                     $urgency = UrgencyCalculator::calculate($machine->getMachineType(), $category);
                     $ticketCode = TicketCode::generate()->value();
 
@@ -528,10 +570,30 @@ class LocationPortalController
                         reporterName: $reporterName,
                         reporterPhone: $reporterPhone,
                         retainedMoneyAmount: $retainedMoney,
-                        photoPath: $photoPath
+                        photoPath: $photoPath,
+                        reporterEmail: $reporterEmail
                     );
 
-                    return $this->incidentRepo->create($incident, null, 'Aviso registrado desde el portal de sede');
+                    $enqueuer = $this->notifications();
+                    if ($enqueuer === null) {
+                        return $this->incidentRepo->create($incident, null, 'Aviso registrado desde el portal de sede');
+                    }
+
+                    // RF-01.2: la fila de la cola nace en la MISMA transacción que el
+                    // expediente. Si el alta se revierte, no queda aviso que enviar; si
+                    // la cola falla, el alta no se confirma a medias.
+                    return $this->transactions()->runInTransaction(function () use ($incident, $enqueuer, $machine, $location, $reporterEmail): Incident {
+                        $created = $this->incidentRepo->create($incident, null, 'Aviso registrado desde el portal de sede');
+                        $enqueuer->enqueueIncidentOpened(
+                            $created,
+                            $machine,
+                            $location,
+                            NotificationOutboxEnqueuerService::ORIGIN_LOCATION_PORTAL,
+                            $reporterEmail
+                        );
+
+                        return $created;
+                    });
                 }
             );
         } catch (DuplicateIncidentException $e) {
@@ -1217,7 +1279,19 @@ class LocationPortalController
 
         // 5. Ejecutar la reapertura en el repositorio aplicando las reglas de negocio
         try {
-            $reopenedIncident = $this->incidentRepo->reopen((int)$incident->getId(), $reason);
+            $enqueuer = $this->notifications();
+            $reopenedIncident = ($enqueuer !== null && $this->incidentRepo instanceof IncidentReopenNotificationInterface)
+                ? $this->incidentRepo->reopenWithLifecycleNotifications(
+                    (int)$incident->getId(),
+                    $reason,
+                    static function (Incident $reopened) use ($enqueuer): void {
+                        $enqueuer->enqueueReopened($reopened);
+                    },
+                    static function (Incident $chronic) use ($enqueuer): void {
+                        $enqueuer->enqueueChronicBreakdown($chronic);
+                    }
+                )
+                : $this->incidentRepo->reopen((int)$incident->getId(), $reason);
         } catch (InvalidTransitionException $e) {
             return Response::error(
                 'INVALID_TRANSITION',

@@ -22,7 +22,9 @@ use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SparePartRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SparePartRequestRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Core\Service\ResolutionValidator;
 
 /**
@@ -46,13 +48,20 @@ class SparePartTraceabilityService
     private MachineRepositoryInterface $machineRepo;
     private ?AuditLogger $auditLogger;
 
+    /** Encolado del Centro de Notificaciones; `null` en contextos sin outbox. */
+    private ?NotificationOutboxEnqueuerService $notificationEnqueuer;
+
+    private ?TransactionManagerInterface $transactionManager;
+
     public function __construct(
         SparePartRequestRepositoryInterface $requestRepo,
         IncidentReplacedPartRepositoryInterface $replacedPartRepo,
         SparePartRepositoryInterface $sparePartRepo,
         IncidentRepositoryInterface $incidentRepo,
         MachineRepositoryInterface $machineRepo,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
+        ?TransactionManagerInterface $transactionManager = null
     ) {
         $this->requestRepo = $requestRepo;
         $this->replacedPartRepo = $replacedPartRepo;
@@ -60,6 +69,13 @@ class SparePartTraceabilityService
         $this->incidentRepo = $incidentRepo;
         $this->machineRepo = $machineRepo;
         $this->auditLogger = $auditLogger;
+        $this->notificationEnqueuer = $notificationEnqueuer;
+        $this->transactionManager = $transactionManager;
+    }
+
+    private function transactions(): TransactionManagerInterface
+    {
+        return $this->transactionManager ??= new PdoTransactionManager();
     }
 
     /**
@@ -440,8 +456,18 @@ class SparePartTraceabilityService
             $this->requestRepo->markCancelledByIncident($incidentId);
         }
 
-        // 5. Transicionar formalmente la incidencia a RESOLVED en el repositorio
-        $resolvedIncident = $this->incidentRepo->resolve($incidentId, $technicianId, $diagnosis, $action);
+        // 5. Transicionar formalmente la incidencia a RESOLVED en el repositorio.
+        //    RF-05.5: la confirmación de servicio restablecido nace en la MISMA
+        //    transacción que el cierre técnico (garantía de 48 h incluida).
+        $enqueuer = $this->notificationEnqueuer;
+        $resolvedIncident = $enqueuer === null
+            ? $this->incidentRepo->resolve($incidentId, $technicianId, $diagnosis, $action)
+            : $this->transactions()->runInTransaction(function () use ($incidentId, $technicianId, $diagnosis, $action, $enqueuer): Incident {
+                $resolved = $this->incidentRepo->resolve($incidentId, $technicianId, $diagnosis, $action);
+                $enqueuer->enqueueResolution($resolved);
+
+                return $resolved;
+            });
 
         // 6. Registro inmutable en auditoría
         if ($this->auditLogger !== null) {

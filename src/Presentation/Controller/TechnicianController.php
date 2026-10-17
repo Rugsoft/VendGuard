@@ -10,6 +10,7 @@ use VendGuard\Application\DTO\TechnicianRefundViewDTO;
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\IncidentCommentService;
 use VendGuard\Application\Service\IncidentPauseService;
+use VendGuard\Application\Service\NotificationOutboxEnqueuerService;
 use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Application\Service\SanitaryReportSafeguardService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
@@ -47,6 +48,7 @@ use VendGuard\Core\Domain\Repository\TechnicianRouteBoardRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Service\ResolutionValidator;
+use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentReplacedPartRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
@@ -115,7 +117,8 @@ class TechnicianController
         ?IncidentCommentService $commentService = null,
         ?IncidentPauseService $pauseService = null,
         ?FileStorageCompensator $fileCompensator = null,
-        ?SanitaryReportSafeguardService $sanitarySafeguard = null
+        ?SanitaryReportSafeguardService $sanitarySafeguard = null,
+        ?NotificationOutboxEnqueuerService $notificationEnqueuer = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->machineRepo  = $machineRepo ?? new PdoMachineRepository();
@@ -147,6 +150,14 @@ class TechnicianController
         // controlador pueda construirse en suites unitarias sin abrir conexiones.
         $this->pauseService = $pauseService;
         $this->sanitarySafeguard = $sanitarySafeguard;
+        $this->notificationEnqueuer = $notificationEnqueuer;
+    }
+
+    private ?NotificationOutboxEnqueuerService $notificationEnqueuer = null;
+
+    private function notifications(): ?NotificationOutboxEnqueuerService
+    {
+        return $this->notificationEnqueuer ??= NotificationOutboxEnqueuerFactory::createOrNull();
     }
 
     /**
@@ -166,7 +177,8 @@ class TechnicianController
             sparePartRepo: new PdoSparePartRepository(),
             incidentRepo: $this->incidentRepo,
             machineRepo: $this->machineRepo,
-            auditLogger: new AuditLogger(new PdoAuditLogRepository())
+            auditLogger: new AuditLogger(new PdoAuditLogRepository()),
+            notificationEnqueuer: $this->notifications()
         );
     }
 
@@ -184,7 +196,8 @@ class TechnicianController
             $this->incidentRepo,
             null,
             $this->fileUploader,
-            $this->compensator()
+            $this->compensator(),
+            $this->notifications()
         );
     }
 
@@ -206,7 +219,10 @@ class TechnicianController
      */
     private function pauses(): IncidentPauseService
     {
-        return $this->pauseService ??= new IncidentPauseService(incidentRepo: $this->incidentRepo);
+        return $this->pauseService ??= new IncidentPauseService(
+            incidentRepo: $this->incidentRepo,
+            notificationEnqueuer: $this->notifications()
+        );
     }
 
     /**

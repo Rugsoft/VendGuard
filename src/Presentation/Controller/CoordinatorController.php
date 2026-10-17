@@ -9,6 +9,7 @@ use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\CoordinatorIncidentDetailService;
 use VendGuard\Application\Service\IncidentCommentService;
 use VendGuard\Application\Service\IncidentPauseService;
+use VendGuard\Application\Service\NotificationOutboxEnqueuerService;
 use VendGuard\Core\Domain\Exception\ConversationSealedException;
 use VendGuard\Core\Domain\Exception\InactivityThresholdNotReachedException;
 use VendGuard\Core\Domain\Exception\InvalidCommentLengthException;
@@ -18,9 +19,12 @@ use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
+use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
@@ -77,6 +81,8 @@ class CoordinatorController
     private LocalFileUploader $fileUploader;
     private ?IncidentCommentService $commentService;
     private ?IncidentPauseService $pauseService;
+    private ?NotificationOutboxEnqueuerService $notificationEnqueuer;
+    private ?TransactionManagerInterface $transactionManager;
 
     /** Transaccionalidad compensatoria del fichero (EARS-05.3); se resuelve bajo demanda. */
     private ?FileStorageCompensator $fileCompensator;
@@ -91,7 +97,9 @@ class CoordinatorController
         ?LocalFileUploader $fileUploader = null,
         ?IncidentCommentService $commentService = null,
         ?IncidentPauseService $pauseService = null,
-        ?FileStorageCompensator $fileCompensator = null
+        ?FileStorageCompensator $fileCompensator = null,
+        ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
+        ?TransactionManagerInterface $transactionManager = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->userRepo = $userRepo ?? new PdoUserRepository();
@@ -113,6 +121,18 @@ class CoordinatorController
         // conexión a MariaDB al instanciarse y este controlador también se construye en
         // contextos unitarios sin base de datos.
         $this->pauseService = $pauseService;
+        $this->notificationEnqueuer = $notificationEnqueuer;
+        $this->transactionManager = $transactionManager;
+    }
+
+    private function notifications(): ?NotificationOutboxEnqueuerService
+    {
+        return $this->notificationEnqueuer ??= NotificationOutboxEnqueuerFactory::createOrNull();
+    }
+
+    private function transactions(): TransactionManagerInterface
+    {
+        return $this->transactionManager ??= new PdoTransactionManager();
     }
 
     /**
@@ -129,7 +149,8 @@ class CoordinatorController
             $this->incidentRepo,
             null,
             $this->fileUploader,
-            $this->compensator()
+            $this->compensator(),
+            $this->notifications()
         );
     }
 
@@ -155,7 +176,8 @@ class CoordinatorController
     {
         return $this->pauseService ??= new IncidentPauseService(
             incidentRepo: $this->incidentRepo,
-            machineRepo: $this->machineRepo
+            machineRepo: $this->machineRepo,
+            notificationEnqueuer: $this->notifications()
         );
     }
 
@@ -475,9 +497,12 @@ class CoordinatorController
         // 8. ID del coordinador autenticado (para auditoría)
         $coordinatorId = $request->getAttribute('user_id');
 
-        // 9. Realizar la asignación o reasignación transaccional en el repositorio
+        // 9. Realizar la asignación o reasignación transaccional en el repositorio.
+        //    RF-05.2 / RF-03.1: los avisos de entrada/salida y la posible reclasificación
+        //    crítica a frío se encolan en la MISMA transacción que el cambio de técnico.
         try {
-            $assigned = $this->incidentRepo->assign(
+            $enqueuer = $this->notifications();
+            $assign = fn (): Incident => $this->incidentRepo->assign(
                 incidentId: $incident,
                 technicianId: $technicianId,
                 coordinatorId: $coordinatorId !== null ? (int)$coordinatorId : null,
@@ -485,6 +510,15 @@ class CoordinatorController
                 urgencyReason: ($urgencyReason !== null && $urgencyReason !== '') ? $urgencyReason : null,
                 reassignmentReason: $isReassignment ? $reassignmentReason : null,
             );
+
+            $assigned = $enqueuer === null
+                ? $assign()
+                : $this->transactions()->runInTransaction(function () use ($assign, $enqueuer, $incident): Incident {
+                    $assigned = $assign();
+                    $enqueuer->enqueueAssignment($incident, $assigned);
+
+                    return $assigned;
+                });
         } catch (\VendGuard\Core\Domain\Exception\InvalidTransitionException $e) {
             return Response::error('INVALID_STATUS_FOR_ASSIGNMENT', $e->getMessage(), 422);
         } catch (\DomainException $e) {
@@ -597,13 +631,25 @@ class CoordinatorController
         // 6. ID del coordinador autenticado (para auditoría)
         $coordinatorId = $request->getAttribute('user_id');
 
-        // 7. Ejecutar cancelación lógica en el repositorio
+        // 7. Ejecutar cancelación lógica en el repositorio. RF-05.8: el aviso de
+        //    cancelación (con la advertencia de bloqueo si procede) se encola en la
+        //    misma transacción que la transición a CANCELLED.
         try {
-            $cancelled = $this->incidentRepo->cancel(
+            $enqueuer = $this->notifications();
+            $cancel = fn (): Incident => $this->incidentRepo->cancel(
                 incidentId: $incidentId,
                 cancellationReason: $reason,
                 coordinatorId: $coordinatorId !== null ? (int)$coordinatorId : null
             );
+
+            $cancelled = $enqueuer === null
+                ? $cancel()
+                : $this->transactions()->runInTransaction(function () use ($cancel, $enqueuer): Incident {
+                    $cancelled = $cancel();
+                    $enqueuer->enqueueCancellation($cancelled);
+
+                    return $cancelled;
+                });
         } catch (\VendGuard\Core\Domain\Exception\InvalidTransitionException $e) {
             return Response::error('INVALID_STATUS_FOR_CANCELLATION', $e->getMessage(), 422);
         } catch (\DomainException $e) {

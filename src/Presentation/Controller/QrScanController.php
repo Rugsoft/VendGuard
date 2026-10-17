@@ -119,7 +119,13 @@ class QrScanController
     ) {
         $this->settingsRepo = $settingsRepo;
         $this->qrScanService = $qrScanService ?? new QrScanService(null, null, null, $settingsRepo);
-        $this->qrReportService = $qrReportService ?? new QrReportService();
+        $this->qrReportService = $qrReportService
+            ?? new QrReportService(
+                null,
+                null,
+                null,
+                \VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory::createOrNull()
+            );
         $this->fileUploader = $fileUploader ?? new LocalFileUploader();
         $this->fileCompensator = $fileCompensator;
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
