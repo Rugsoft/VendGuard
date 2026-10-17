@@ -52,7 +52,9 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   PREVENTIVE_ORDER: 'Orden Preventiva',
   SANITARY_CERTIFICATE: 'Certificado Sanitario',
   REFUND_REQUEST: 'Expediente de Reintegro',
-  UNCLAIMED_CASH_FINDING: 'Efectivo No Reclamado'
+  UNCLAIMED_CASH_FINDING: 'Efectivo No Reclamado',
+  NOTIFICATION_OUTBOX: 'Notificación Saliente',
+  NOTIFICATION_CHANNEL_SETTING: 'Canal de Notificaciones'
 });
 
 /**

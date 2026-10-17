@@ -86,13 +86,14 @@ use VendGuard\Infrastructure\Repository\PdoUserRepository;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 20 tablas del contrato de correspondencia (§2.1). */
+/** Las 22 tablas del contrato de correspondencia (§2.1 y Módulo 14). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
     'spare_part_compatibilities', 'spare_part_requests', 'preventive_settings', 'preventive_orders',
     'preventive_order_items', 'sanitary_certificates', 'route_settings', 'sanitary_sweep_passes',
     'sanitary_sweep_contentions', 'audit_log',
+    'notification_outbox', 'notification_channel_settings',
 ];
 
 /** Las siete restricciones de longitud mínima del Art. V.1, con la tabla y la columna que vigilan. */
@@ -157,8 +158,8 @@ try {
     }
 
     $assert(
-        'El escenario se levanta con el esquema del repositorio y una fila en cada una de las 20 tablas',
-        count($rows) === count(CONTRACT_TABLES) && $schemaReport['migrations'] === ['001_initial_baseline.sql'],
+        sprintf('El escenario se levanta con el esquema del repositorio y una fila en cada una de las %d tablas', count(CONTRACT_TABLES)),
+        count($rows) === count(CONTRACT_TABLES) && in_array('001_initial_baseline.sql', $schemaReport['migrations'], true) && in_array('002_notification_center_outbox.sql', $schemaReport['migrations'], true),
         sprintf('%d filas · %d sentencias de DDL · migraciones: %s',
             count($rows),
             $schemaReport['statements'],

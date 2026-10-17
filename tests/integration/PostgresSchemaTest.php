@@ -60,13 +60,14 @@ use VendGuard\Infrastructure\Database\PostgresMigrationRunner;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 20 tablas del contrato de correspondencia (§2.1). */
+/** Las 22 tablas del contrato de correspondencia (§2.1 y Módulo 14). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
     'spare_part_compatibilities', 'spare_part_requests', 'preventive_settings', 'preventive_orders',
     'preventive_order_items', 'sanitary_certificates', 'route_settings', 'sanitary_sweep_passes',
     'sanitary_sweep_contentions', 'audit_log',
+    'notification_outbox', 'notification_channel_settings',
 ];
 
 $projectRoot = dirname(__DIR__, 2);
@@ -126,8 +127,8 @@ try {
     $convergence = (new PostgresMigrationRunner($pgPdo))->convergenceReport();
 
     $assert(
-        'El DDL base compila sentencia a sentencia y la migración del motor aplica',
-        $schemaReport['statements'] > 100 && $schemaReport['migrations'] === ['001_initial_baseline.sql'],
+        'El DDL base compila sentencia a sentencia y las migraciones del motor aplican',
+        $schemaReport['statements'] > 100 && in_array('001_initial_baseline.sql', $schemaReport['migrations'], true) && in_array('002_notification_center_outbox.sql', $schemaReport['migrations'], true),
         sprintf('%d sentencias · migraciones aplicadas: %s', $schemaReport['statements'], $schemaReport['migrations'] === [] ? 'ninguna' : implode(', ', $schemaReport['migrations']))
     );
 
@@ -143,7 +144,7 @@ try {
     sort($contractSorted, SORT_STRING);
 
     $assert(
-        'El motor nuevo tiene exactamente las 20 tablas del contrato',
+        sprintf('El motor nuevo tiene exactamente las %d tablas del contrato', count(CONTRACT_TABLES)),
         $tables === $contractSorted,
         sprintf('%d tablas · ausentes: %s · inesperadas: %s',
             count($tables),
@@ -169,7 +170,7 @@ try {
     }
 
     $assert(
-        'Se inserta una fila mínima en cada una de las 20 tablas respetando el orden de claves foráneas',
+        sprintf('Se inserta una fila mínima en cada una de las %d tablas respetando el orden de claves foráneas', count(CONTRACT_TABLES)),
         $insertionFailure === null && count($rows) === count(CONTRACT_TABLES),
         $insertionFailure ?? implode(' → ', $order)
     );

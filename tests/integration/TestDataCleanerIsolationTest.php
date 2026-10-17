@@ -195,7 +195,7 @@ $assert(
         && $position['incident_history'] < $position['incidents']
 );
 
-$assert('2.7 El plan cubre las 14 tablas transitorias del contrato', count($order) === 14, 'obtenidas: ' . count($order));
+$assert('2.7 El plan cubre las 15 tablas transitorias del contrato', count($order) === 15, 'obtenidas: ' . count($order));
 
 echo "\n--- 3. PRUEBA DE MORDIDA: el orden ingenuo debe fallar por la FK RESTRICT ---\n";
 

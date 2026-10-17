@@ -16,10 +16,18 @@
 
 ## Fase 1: Esquema de Base de Datos PostgreSQL (Supabase) y Modelos de Dominio
 
-- [ ] **T-NOTIF-01: Crear migración incremental `002_notification_center_outbox.sql` y converger `supabase_init.sql` y `supabase_seeds.sql`**
+- [x] **T-NOTIF-01: Crear migración incremental `002_notification_center_outbox.sql` y converger `supabase_init.sql` y `supabase_seeds.sql`**
   * **Requisitos:** RF-01.1, RF-02.1, RF-02.5, RF-02.6, RF-04.4, RF-04.5, RF-06.5.1, RF-07.2, RF-07.3, Constitución Art. III.1
   * **Dependencias:** Ninguna
   * **Hecho cuando:** Existen en `database/supabase_migrations/002_notification_center_outbox.sql` y en `database/supabase_init.sql`: (1) los 4 tipos `ENUM` (`notification_channel`, `notification_priority`, `notification_status` con los 6 estados canónicos, `notification_template` con las 19 plantillas) y la ampliación de `audit_entity_type` (`NOTIFICATION_OUTBOX`, `NOTIFICATION_CHANNEL_SETTING`); (2) las columnas `locations.contact_email` (con backfill institucional determinista para sedes preexistentes), `users.is_on_call` (con `chk_users_on_call_active_tech`) e `incidents` (`reporter_email`, `cycle_started_at`, `cold_alert_sent_at`, `sla_2h_alert_sent_at`, `sla_3h_alert_sent_at`); (3) las tablas `notification_outbox` y `notification_channel_settings` con sus índices (`idx_outbox_dispatch_queue`, `uq_notification_outbox_dedup_key`) y disparadores constitucionales `trg_no_delete_*` y `trg_touch_*`; y `PostgresMigrationRunner` aplica la migración sin errores.
+  * **Acta de Ejecución (2026-10-17):**
+    - Creada la migración incremental `database/supabase_migrations/002_notification_center_outbox.sql` implementando los 4 tipos `ENUM` (`notification_channel`, `notification_priority`, `notification_status`, `notification_template`), ampliación de `audit_entity_type` con `NOTIFICATION_OUTBOX` y `NOTIFICATION_CHANNEL_SETTING`, columnas nuevas en `locations`, `users` e `incidents`, y las 2 nuevas tablas del contrato: `notification_outbox` (tabla 21) y `notification_channel_settings` (tabla 22) con sus índices y disparadores constitucionales `BEFORE DELETE` (`prevent_hard_delete`).
+    - Convergido `database/supabase_init.sql` y sembrado de canal por defecto y correo de contacto en `database/supabase_seeds.sql`.
+    - Ampliado el dominio `AuditEvent::ENTITY_TYPES` y el catálogo visual `AuditActionLabels.js` con las nuevas entidades.
+    - Actualizado `TestDataCleaner` y sus pruebas de aislamiento para gestionar la tabla hija operacional `notification_outbox`.
+    - Verificado con `PostgresMigrationRunner`: 002 aplicada con éxito en ambos bancos (`vendguard_battery` y `vendguard_pg_test`), convergencia total reportada.
+    - Suites de certificación del motor (`PostgresSchemaTest`, `PostgresConstitutionalTest`, `SchemaConvergenceParityTest`) al 100% PASS (22 tablas del contrato y 29 tipos ENUM validados).
+    - Batería hermética global (`php tests/run_all.php`): **261 suites · 9.941 aserciones · 0 fallos (100% PASS)** con cifras documentales **COHERENTES**.
 
 - [ ] **T-NOTIF-02: Implementar Value Objects (`NotificationChannel`, `NotificationPriority`, `NotificationStatus`, `NotificationTemplate`) y Entidades (`NotificationOutboxItem`, `NotificationChannelSettings`)**
   * **Requisitos:** RF-01.1, RF-03, RF-04, RF-05, RF-06.1, RF-06.2, RF-06.3

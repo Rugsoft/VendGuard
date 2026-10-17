@@ -103,18 +103,18 @@
 -- el mapa territorial y el cálculo de rutas no tienen nada que ordenar.
 
 INSERT INTO locations (
-    site_code, site_code_key, name, address, latitude, longitude, contact_name, contact_phone
+    site_code, site_code_key, name, address, latitude, longitude, contact_name, contact_phone, contact_email
 ) VALUES
-    ('SEDE-BCN-01', 'sede-bcn-01', 'Hospital del Mar - Edificio Central', 'Passeig Marítim 25, Barcelona', 41.3853120, 2.1932450, 'Laura Sanitaria', '600111222'),
-    ('SEDE-BCN-02', 'sede-bcn-02', 'Torre Glòries - Planta 4 Oficinas', 'Avinguda Diagonal 211, Barcelona', 41.4036290, 2.1895120, 'Marc Recepción', '600333444'),
-    ('SEDE-BCN-03', 'sede-bcn-03', 'Hospital Universitari de Bellvitge', 'Carrer de la Feixa Llarga s/n, L''Hospitalet de Llobregat', 41.3458200, 2.1075400, 'Carles Coordinador', '600555666'),
-    ('SEDE-BCN-04', 'sede-bcn-04', 'World Trade Center Barcelona', 'Moll de Barcelona s/n, Barcelona', 41.3725000, 2.1819000, 'Núria Port', '600777888'),
-    ('SEDE-BCN-05', 'sede-bcn-05', 'Campus Nord UPC - Edifici Nexus', 'Carrer del Gran Capità 2, Barcelona', 41.3888000, 2.1123000, 'Albert Campus', '600999000'),
-    ('SEDE-BCN-06', 'sede-bcn-06', 'Parc Tecnològic Barcelona Activa', 'Carrer Marie Curie 8, Nou Barris, Barcelona', 41.4392000, 2.1758000, 'Clara Innovació', '611222333'),
-    ('SEDE-BCN-07', 'sede-bcn-07', 'Badalona Centre Mèdic Can Ruti', 'Carretera de Canyet s/n, Badalona', 41.4645000, 2.2421000, 'Sergi Logística', '611444555'),
-    ('SEDE-BCN-08', 'sede-bcn-08', 'Sant Cugat Trade Center', 'Avinguda de les Corts Catalanes 5, Sant Cugat del Vallès', 41.4712000, 2.0689000, 'Gemma Gestió', '611666777'),
-    ('SEDE-BCN-09', 'sede-bcn-09', 'Fira Gran Via - Pavelló 1', 'Avinguda Joan Carles I 64, L''Hospitalet de Llobregat', 41.3547000, 2.1284000, 'Pau Esdeveniments', '611888999'),
-    ('SEDE-BCN-10', 'sede-bcn-10', 'WTC Almeda Park Cornellà', 'Plaça de la Pau s/n, Cornellà de Llobregat', 41.3533000, 2.0862000, 'Mireia Serveis', '622111222')
+    ('SEDE-BCN-01', 'sede-bcn-01', 'Hospital del Mar - Edificio Central', 'Passeig Marítim 25, Barcelona', 41.3853120, 2.1932450, 'Laura Sanitaria', '600111222', 'contacto.sede-bcn-01@sede.vendguard.es'),
+    ('SEDE-BCN-02', 'sede-bcn-02', 'Torre Glòries - Planta 4 Oficinas', 'Avinguda Diagonal 211, Barcelona', 41.4036290, 2.1895120, 'Marc Recepción', '600333444', 'contacto.sede-bcn-02@sede.vendguard.es'),
+    ('SEDE-BCN-03', 'sede-bcn-03', 'Hospital Universitari de Bellvitge', 'Carrer de la Feixa Llarga s/n, L''Hospitalet de Llobregat', 41.3458200, 2.1075400, 'Carles Coordinador', '600555666', 'contacto.sede-bcn-03@sede.vendguard.es'),
+    ('SEDE-BCN-04', 'sede-bcn-04', 'World Trade Center Barcelona', 'Moll de Barcelona s/n, Barcelona', 41.3725000, 2.1819000, 'Núria Port', '600777888', 'contacto.sede-bcn-04@sede.vendguard.es'),
+    ('SEDE-BCN-05', 'sede-bcn-05', 'Campus Nord UPC - Edifici Nexus', 'Carrer del Gran Capità 2, Barcelona', 41.3888000, 2.1123000, 'Albert Campus', '600999000', 'contacto.sede-bcn-05@sede.vendguard.es'),
+    ('SEDE-BCN-06', 'sede-bcn-06', 'Parc Tecnològic Barcelona Activa', 'Carrer Marie Curie 8, Nou Barris, Barcelona', 41.4392000, 2.1758000, 'Clara Innovació', '611222333', 'contacto.sede-bcn-06@sede.vendguard.es'),
+    ('SEDE-BCN-07', 'sede-bcn-07', 'Badalona Centre Mèdic Can Ruti', 'Carretera de Canyet s/n, Badalona', 41.4645000, 2.2421000, 'Sergi Logística', '611444555', 'contacto.sede-bcn-07@sede.vendguard.es'),
+    ('SEDE-BCN-08', 'sede-bcn-08', 'Sant Cugat Trade Center', 'Avinguda de les Corts Catalanes 5, Sant Cugat del Vallès', 41.4712000, 2.0689000, 'Gemma Gestió', '611666777', 'contacto.sede-bcn-08@sede.vendguard.es'),
+    ('SEDE-BCN-09', 'sede-bcn-09', 'Fira Gran Via - Pavelló 1', 'Avinguda Joan Carles I 64, L''Hospitalet de Llobregat', 41.3547000, 2.1284000, 'Pau Esdeveniments', '611888999', 'contacto.sede-bcn-09@sede.vendguard.es'),
+    ('SEDE-BCN-10', 'sede-bcn-10', 'WTC Almeda Park Cornellà', 'Plaça de la Pau s/n, Cornellà de Llobregat', 41.3533000, 2.0862000, 'Mireia Serveis', '622111222', 'contacto.sede-bcn-10@sede.vendguard.es')
 ON CONFLICT (site_code_key) DO UPDATE SET
     site_code    = EXCLUDED.site_code,
     name         = EXCLUDED.name,
@@ -123,6 +123,7 @@ ON CONFLICT (site_code_key) DO UPDATE SET
     longitude    = EXCLUDED.longitude,
     contact_name = EXCLUDED.contact_name,
     contact_phone = EXCLUDED.contact_phone,
+    contact_email = EXCLUDED.contact_email,
     deleted_at   = NULL;
 
 
@@ -327,7 +328,21 @@ ON CONFLICT (spare_part_id, machine_model) DO NOTHING;
 
 
 -- =============================================================================
+-- SECCIÓN 8 · notification_channel_settings — Canal Corporativo de Emergencias
+-- =============================================================================
+-- Configuración por defecto del canal corporativo de emergencias (desactivado hasta configuración).
+INSERT INTO notification_channel_settings (webhook_name, webhook_url, is_webhook_enabled)
+SELECT v.webhook_name, v.webhook_url, v.is_webhook_enabled
+FROM (VALUES (
+    'Canal Central de Emergencias',
+    NULL::VARCHAR(500),
+    FALSE
+)) AS v(webhook_name, webhook_url, is_webhook_enabled)
+WHERE NOT EXISTS (SELECT 1 FROM notification_channel_settings);
+
+
+-- =============================================================================
 -- FIN · 10 sedes · 1 configuración de ruta · 13 máquinas · 6 usuarios internos ·
---       5 frecuencias normativas · 13 repuestos · 50 compatibilidades.
+--       5 frecuencias normativas · 13 repuestos · 50 compatibilidades · 1 canal emergencias.
 --       0 incidencias · 0 histórico · 0 auditoría (arranque en limpio estricto).
 -- =============================================================================

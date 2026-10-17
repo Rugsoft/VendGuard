@@ -84,6 +84,7 @@ final class TestDataCleaner
         'sanitary_certificates',
         'sanitary_sweep_contentions',
         'spare_part_compatibilities',
+        'notification_outbox',
     ];
 
     /** @var array<string, array<string, string>> tabla => (FK => tabla padre) caché por esquema */

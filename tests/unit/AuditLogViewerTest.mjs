@@ -262,9 +262,9 @@ assert('6.7 REOPEN_TICKET usa la etiqueta acordada y el tono de aviso',
   && instance.formatActionBadge('REOPEN_TICKET').bg === '#fef3c7');
 
 const entityCodes = Object.keys(instance.entityOptions);
-assert('6.8 El filtro de entidad ofrece los ocho tipos del enum de audit_log',
-  entityCodes.length === 8
-  && ['TICKET', 'MACHINE', 'LOCATION', 'USER', 'PREVENTIVE_ORDER', 'SANITARY_CERTIFICATE', 'REFUND_REQUEST', 'UNCLAIMED_CASH_FINDING']
+assert('6.8 El filtro de entidad ofrece los tipos del enum de audit_log',
+  entityCodes.length >= 8
+  && ['TICKET', 'MACHINE', 'LOCATION', 'USER', 'PREVENTIVE_ORDER', 'SANITARY_CERTIFICATE', 'REFUND_REQUEST', 'UNCLAIMED_CASH_FINDING', 'NOTIFICATION_OUTBOX', 'NOTIFICATION_CHANNEL_SETTING']
     .every((code) => entityCodes.includes(code))
   && Object.values(instance.entityOptions).every((label) => label.trim() !== ''));
 

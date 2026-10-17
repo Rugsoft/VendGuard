@@ -50,6 +50,12 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_SANITARY_CERTIFICATE = 'SANITARY_CERTIFICATE';
 
     /**
+     * Entidades del módulo de notificaciones y canal corporativo (Módulo 14).
+     */
+    public const ENTITY_NOTIFICATION_OUTBOX          = 'NOTIFICATION_OUTBOX';
+    public const ENTITY_NOTIFICATION_CHANNEL_SETTING = 'NOTIFICATION_CHANNEL_SETTING';
+
+    /**
      * Whitelist completa de tipos de entidad admitidos por el dominio.
      *
      * Debe coincidir exactamente con el enum `audit_log.entity_type` de la base
@@ -67,6 +73,8 @@ class AuditEvent implements JsonSerializable
         self::ENTITY_SANITARY_CERTIFICATE,
         self::ENTITY_REFUND_REQUEST,
         self::ENTITY_UNCLAIMED_CASH_FINDING,
+        self::ENTITY_NOTIFICATION_OUTBOX,
+        self::ENTITY_NOTIFICATION_CHANNEL_SETTING,
     ];
 
     /**

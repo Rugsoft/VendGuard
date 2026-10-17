@@ -43,13 +43,14 @@ use VendGuard\Infrastructure\Database\SqlScriptSplitter;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 20 tablas del contrato de correspondencia (§2.1). */
+/** Las 22 tablas del contrato de correspondencia (§2.1 y Módulo 14). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
     'spare_part_compatibilities', 'spare_part_requests', 'preventive_settings', 'preventive_orders',
     'preventive_order_items', 'sanitary_certificates', 'route_settings', 'sanitary_sweep_passes',
     'sanitary_sweep_contentions', 'audit_log',
+    'notification_outbox', 'notification_channel_settings',
 ];
 
 /** Adiciones declaradas del motor nuevo (§5). */
@@ -267,7 +268,7 @@ try {
     $applied = $runner->runAll();
     $assert(
         'El ejecutor aplica la migración posterior sobre la base ya creada',
-        $applied === ['001_initial_baseline.sql'],
+        $applied === ['001_initial_baseline.sql', '002_notification_center_outbox.sql'],
         'aplicadas: ' . $listSample($applied)
     );
 
@@ -279,12 +280,14 @@ try {
         'tablas: ' . count($convergedTables)
     );
 
-    $ledgerRows = $pgPdo->query('SELECT filename, checksum FROM ' . ADDITION_LEDGER)->fetchAll();
+    $ledgerRows = $pgPdo->query('SELECT filename, checksum FROM ' . ADDITION_LEDGER . ' ORDER BY filename')->fetchAll();
     $assert(
-        'El libro registra la migración con su huella de 64 caracteres',
-        count($ledgerRows) === 1
+        'El libro registra las migraciones con su huella de 64 caracteres',
+        count($ledgerRows) === 2
         && $ledgerRows[0]['filename'] === '001_initial_baseline.sql'
         && strlen((string)$ledgerRows[0]['checksum']) === 64
+        && $ledgerRows[1]['filename'] === '002_notification_center_outbox.sql'
+        && strlen((string)$ledgerRows[1]['checksum']) === 64
     );
 
     $assert('Reejecutar el ejecutor no aplica nada (idempotente)', $runner->runAll() === []);
@@ -353,7 +356,7 @@ try {
         'faltan: ' . $listSample($missingChecks)
     );
 
-    // A-4: 20 disparadores BEFORE DELETE en el motor único
+    // A-4: 22 disparadores BEFORE DELETE en el motor único
     $triggerStmt = $pgPdo->prepare(
         "SELECT event_object_table AS table_name FROM information_schema.triggers
           WHERE trigger_schema = :schema AND event_manipulation = 'DELETE' AND action_timing = 'BEFORE'"
@@ -361,8 +364,8 @@ try {
     $triggerStmt->execute([':schema' => $schema]);
     $pgTriggerTables = array_map(static fn (array $row): string => (string)$row['table_name'], $triggerStmt->fetchAll());
     $assert(
-        'A-4: las 20 tablas del dominio tienen su disparador BEFORE DELETE vinculado a prevent_hard_delete',
-        count(array_unique($pgTriggerTables)) === 20 && !in_array(ADDITION_LEDGER, $pgTriggerTables, true),
+        'A-4: las 22 tablas del dominio tienen su disparador BEFORE DELETE vinculado a prevent_hard_delete',
+        count(array_unique($pgTriggerTables)) === 22 && !in_array(ADDITION_LEDGER, $pgTriggerTables, true),
         'tablas con disparador: ' . count(array_unique($pgTriggerTables))
     );
 
