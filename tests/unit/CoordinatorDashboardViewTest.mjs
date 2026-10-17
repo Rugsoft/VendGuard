@@ -184,7 +184,9 @@ function createDashboardInstance(initialData = {}) {
     'prolongedInactivityIncidents',
     'pausedTokens',
     'inactivityReasonLength',
-    'isInactivityReasonValid'
+    'isInactivityReasonValid',
+    'permanentNotificationFailures',
+    'hasPermanentNotificationFailures'
   ]) {
     Object.defineProperty(instance, name, {
       get: () => CoordinatorDashboardView.computed[name].call(instance),
@@ -1189,6 +1191,94 @@ assert('16.19 The action cell wraps instead of squeezing its buttons (RNF-03)',
   dashboardTemplate.includes('<div class="vg-row-actions">') &&
   !dashboardTemplate.includes('<div style="display: inline-flex; gap: 8px;">'),
   'La celda de acciones volvió a ser un grupo sin envoltura: los botones se comprimen y la etiqueta se parte.');
+
+// ---------------------------------------------------------------------
+// TEST GROUP 17: Notification Center Alert & Outbox Badge (Módulo 14)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 17: Notification Center Alert & Outbox Badge (RF-06.2, RF-06.3) ---');
+
+// El resumen que alimenta la insignia se pide al montar y en cada latido de 60 s.
+const outboxCalls = [];
+api.notifications.getOutbox = async (filters = {}) => {
+  outboxCalls.push({ ...filters });
+  return {
+    summary: {
+      in_queue_count: 3,
+      pending_count: 2,
+      processing_count: 0,
+      pending_retry_count: 1,
+      sent_last_24h_count: 12,
+      failed_permanent_count: 4,
+      cancelled_obsolete_count: 0,
+      has_permanent_failures_alert: true,
+      active_on_call_technicians_count: 1
+    },
+    items: [],
+    pagination: { total: 7, limit: 1, offset: 0 }
+  };
+};
+
+const notificationView = createDashboardInstance();
+await CoordinatorDashboardView.methods.loadNotificationSummary.call(notificationView);
+assert('17.1 The badge summary is requested with a single row, not the whole page',
+  outboxCalls.length === 1 && outboxCalls[0].limit === 1 && outboxCalls[0].offset === 0);
+assert('17.2 The permanent failures counter comes from the server summary',
+  notificationView.permanentNotificationFailures === 4 && notificationView.hasPermanentNotificationFailures === true);
+
+// Un fallo de red no puede apagar la alerta escribiendo un cero falso.
+api.notifications.getOutbox = async () => {
+  throw new Error('Bandeja inaccesible');
+};
+await CoordinatorDashboardView.methods.loadNotificationSummary.call(notificationView);
+assert('17.3 A failed read keeps the last known alert instead of faking zero',
+  notificationView.permanentNotificationFailures === 4 && notificationView.hasPermanentNotificationFailures === true);
+
+// El modal publica su resumen tras cada acción: reintentar apaga la insignia sin sondeo.
+CoordinatorDashboardView.methods.handleNotificationOutboxUpdated.call(notificationView, {
+  in_queue_count: 2,
+  failed_permanent_count: 0,
+  has_permanent_failures_alert: false
+});
+assert('17.4 Retrying from the modal clears the badge immediately',
+  notificationView.permanentNotificationFailures === 0 && notificationView.hasPermanentNotificationFailures === false);
+
+const closedCenterView = createDashboardInstance();
+assert('17.5 The notification center starts closed', closedCenterView.showNotificationModal !== true);
+CoordinatorDashboardView.methods.openNotificationCenter.call(closedCenterView);
+assert('17.6 The «🔔 Notificaciones» button opens the center', closedCenterView.showNotificationModal === true);
+
+// El latido de 60 s refresca también el recuento de fallos definitivos.
+let pollCallback = null;
+const originalSetInterval = globalThis.setInterval;
+const originalClearInterval = globalThis.clearInterval;
+globalThis.setInterval = (fn) => { pollCallback = fn; return 4242; };
+globalThis.clearInterval = () => {};
+const pollingView = createDashboardInstance();
+let incidentTicks = 0;
+let summaryTicks = 0;
+pollingView.loadIncidents = async () => { incidentTicks++; };
+pollingView.loadNotificationSummary = async () => { summaryTicks++; };
+CoordinatorDashboardView.methods.startPolling.call(pollingView);
+if (typeof pollCallback === 'function') pollCallback();
+CoordinatorDashboardView.methods.stopPolling.call(pollingView);
+globalThis.setInterval = originalSetInterval;
+globalThis.clearInterval = originalClearInterval;
+assert('17.7 The 60-second heartbeat refreshes both triage and the outbox badge',
+  incidentTicks === 1 && summaryTicks === 1);
+
+assert('17.8 The tab bar exposes the button with its red badge, tooltip and test id',
+  dashboardTemplate.includes('data-testid="open-notification-center"') &&
+  dashboardTemplate.includes('🔔 Notificaciones') &&
+  dashboardTemplate.includes('data-testid="notification-failure-badge"') &&
+  dashboardTemplate.includes('v-if="hasPermanentNotificationFailures"'));
+assert('17.9 The dashboard mounts the center and forwards its outbox updates',
+  CoordinatorDashboardView.components.CoordinatorNotificationCenterModal !== undefined &&
+  dashboardTemplate.includes('<CoordinatorNotificationCenterModal') &&
+  dashboardTemplate.includes('v-model="showNotificationModal"') &&
+  dashboardTemplate.includes('@outbox-updated="handleNotificationOutboxUpdated"'));
+assert('17.10 The badge shows up only when there are permanent failures',
+  dashboardTemplate.includes('v-if="hasPermanentNotificationFailures"') &&
+  !dashboardTemplate.includes('v-if="permanentNotificationFailures"'));
 
 // Summary
 console.log('\n======================================================================');

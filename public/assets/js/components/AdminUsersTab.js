@@ -84,7 +84,11 @@ export const AdminUsersTab = {
       isSubmittingDeactivate: false,
 
       // Reactivación en curso
-      isReactivatingId: null
+      isReactivatingId: null,
+
+      // Guardia técnica en curso (RF-02.5): identifica la fila cuyo interruptor espera
+      // respuesta, para no dejar dos marcas de guardia cambiando a la vez.
+      onCallUpdatingId: null
     };
   },
   computed: {
@@ -182,7 +186,8 @@ export const AdminUsersTab = {
       const technicians = this.users.filter(u => u.role === 'TECHNICIAN').length;
       const coordinators = this.users.filter(u => u.role === 'COORDINATOR').length;
       const activeAssignedTroubles = this.users.reduce((acc, u) => acc + Number(u.active_assigned_incidents_count || 0), 0);
-      return { total, active, inactive, technicians, coordinators, activeAssignedTroubles };
+      const onCall = this.users.filter(u => u.is_active && u.role === 'TECHNICIAN' && u.is_on_call === true).length;
+      return { total, active, inactive, technicians, coordinators, activeAssignedTroubles, onCall };
     }
   },
   mounted() {
@@ -521,6 +526,51 @@ export const AdminUsersTab = {
     },
 
     /**
+     * Activa o retira la marca de «Técnico de guardia» (RF-02.5, Art. II).
+     *
+     * La guardia no es una etiqueta cosmética: es la lista de destinatarios de las
+     * alertas inmediatas de frío de los tickets sin asignar. Por eso el servidor
+     * revalida que el usuario sea un Técnico de Campo **activo** y que el valor sea
+     * booleano; este método no adelanta el estado, lo escribe con lo que responde el
+     * backend para que la fila nunca muestre una guardia que no existe.
+     *
+     * @param {Object} user Fila del directorio sobre la que se pulsa.
+     */
+    async toggleOnCall(user) {
+      if (!user || user.role !== 'TECHNICIAN' || !user.is_active) {
+        return;
+      }
+
+      const nextValue = user.is_on_call !== true;
+      this.onCallUpdatingId = user.id;
+      this.errorMessage = '';
+
+      try {
+        const response = api.admin && typeof api.admin.setUserOnCall === 'function'
+          ? await api.admin.setUserOnCall(user.id, nextValue)
+          : await api.patch(`/coordinator/users/${user.id}/on-call`, { is_on_call: nextValue });
+
+        const payload = response && typeof response === 'object' && response.data
+          ? response.data
+          : response;
+        const saved = payload && typeof payload.is_on_call === 'boolean' ? payload.is_on_call : nextValue;
+
+        const target = this.users.find(u => Number(u.id) === Number(user.id));
+        if (target) {
+          target.is_on_call = saved;
+        }
+
+        this.showSuccessNotification(saved
+          ? `"${user.name}" queda de guardia para las alertas críticas de frío.`
+          : `"${user.name}" ya no figura de guardia.`);
+      } catch (err) {
+        this.errorMessage = err.message || 'No se pudo actualizar el estado de guardia del técnico.';
+      } finally {
+        this.onCallUpdatingId = null;
+      }
+    },
+
+    /**
      * Muestra mensaje flotante temporal de confirmación.
      */
     showSuccessNotification(msg) {
@@ -624,6 +674,9 @@ export const AdminUsersTab = {
             <span class="text-info text-dark"><strong>Técnicos:</strong> {{ summaryMetrics.technicians }}</span>
             <span class="text-primary"><strong>Coordinadores:</strong> {{ summaryMetrics.coordinators }}</span>
             <span class="text-warning"><strong>Averías Asignadas en Curso:</strong> {{ summaryMetrics.activeAssignedTroubles }}</span>
+            <span :class="summaryMetrics.onCall > 0 ? 'text-success' : 'text-danger'">
+              <strong>🛡️ De Guardia:</strong> {{ summaryMetrics.onCall }}
+            </span>
           </div>
         </div>
       </div>
@@ -651,6 +704,7 @@ export const AdminUsersTab = {
                   <th scope="col" class="ps-3" style="min-width: 200px;">Nombre y Contacto</th>
                   <th scope="col" style="min-width: 150px;">Rol</th>
                   <th scope="col" style="min-width: 140px;">Carga de Averías</th>
+                  <th scope="col" style="width: 150px;">Guardia de Frío</th>
                   <th scope="col" style="width: 120px;">Estado</th>
                   <th scope="col" class="text-end pe-3" style="width: 250px;">Acciones</th>
                 </tr>
@@ -702,6 +756,32 @@ export const AdminUsersTab = {
                     <template v-else>
                       <span class="text-muted small">-</span>
                     </template>
+                  </td>
+
+                  <!-- Guardia de Frío (RF-02.5, Art. II): destinatarios de las alertas
+                       críticas de los tickets sin asignar. Sólo Técnicos de Campo en
+                       activo: el servidor rechaza cualquier otro destino. -->
+                  <td>
+                    <template v-if="u.role === 'TECHNICIAN' && u.is_active">
+                      <button
+                        type="button"
+                        class="vg-btn vg-btn-sm"
+                        :class="u.is_on_call ? 'vg-btn-success-soft' : 'vg-btn-secondary'"
+                        :aria-pressed="u.is_on_call ? 'true' : 'false'"
+                        :disabled="onCallUpdatingId === u.id"
+                        :title="u.is_on_call
+                          ? 'Retirar la marca de guardia: dejará de recibir las alertas de frío sin asignar'
+                          : 'Designar como técnico de guardia para las alertas críticas de frío'"
+                        data-testid="toggle-on-call"
+                        @click="toggleOnCall(u)"
+                      >
+                        <span v-if="onCallUpdatingId === u.id" class="spinner-border spinner-border-sm me-1" role="status"></span>
+                        <span v-else aria-hidden="true">🛡️</span>
+                        <span>En guardia</span>
+                      </button>
+                      <div v-if="u.is_on_call" class="small text-success mt-1">Recibe alertas de frío</div>
+                    </template>
+                    <span v-else class="text-muted small">-</span>
                   </td>
 
                   <!-- Estado Operativo -->

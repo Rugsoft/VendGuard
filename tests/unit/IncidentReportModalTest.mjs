@@ -136,6 +136,7 @@ function createModalInstance(machine, initialData = {}) {
     retainedMoney: '',
     reporterName: 'Conserje Test',
     reporterPhone: '600123456',
+    reporterEmail: '',
     photoFile: null,
     commentText: '',
     commentAuthor: 'Conserje Test',
@@ -170,6 +171,9 @@ function createModalInstance(machine, initialData = {}) {
   });
   Object.defineProperty(instance, 'hasPhysicalReception', {
     get: () => IncidentReportModal.computed.hasPhysicalReception.call(instance)
+  });
+  Object.defineProperty(instance, 'reporterEmailError', {
+    get: () => IncidentReportModal.computed.reporterEmailError.call(instance)
   });
 
   return instance;
@@ -326,6 +330,61 @@ assert('5.4 Submitting with refund forwards compensation_method', lastRefundCrea
 assert('5.5 Submitting with refund captures and saves lastRefundReceipt', modalWithRefund.lastRefundReceipt?.pickup_pin === '7391');
 assert('5.6 Modal remains open with confirmation screen when refund is created', modalWithRefund.isOpen === true && modalWithRefund.submittedSuccessData !== null);
 assert('5.7 Modal title reflects successful registration', modalWithRefund.modalTitle === 'Aviso y Solicitud Registrados');
+
+// ---------------------------------------------------------------------
+// TEST GROUP 6: Optional Informant Email (RF-02.2 / RF-02.3)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 6: Optional Informant Email (RF-02.2) ---');
+
+let emailPayloads = [];
+api.incidents.create = async (payload) => {
+  emailPayloads.push(payload);
+  return {
+    id: 90,
+    ticket_code: 'INC-2026-0090',
+    status: 'REGISTRADA',
+    urgency: 'CRITICAL',
+    machine_id: 1
+  };
+};
+
+const emailModal = createModalInstance(perishableMachine, {
+  category: 'TEMPERATURE_COLD',
+  description: 'No enfría la cuba de lácteos',
+  reporterName: 'Laura Sede',
+  reporterPhone: '600111222',
+  reporterEmail: '  Recepcion.Hospital@Cliente.ES  '
+});
+await IncidentReportModal.methods.handleSubmitReport.call(emailModal);
+assert('6.1 El correo opcional del informador viaja normalizado en minúsculas',
+  emailPayloads.length === 1 && emailPayloads[0].reporter_email === 'recepcion.hospital@cliente.es');
+
+const blankEmailModal = createModalInstance(perishableMachine, {
+  category: 'TEMPERATURE_COLD',
+  description: 'No enfría la cuba de lácteos',
+  reporterName: 'Laura Sede',
+  reporterPhone: '600111222',
+  reporterEmail: ''
+});
+await IncidentReportModal.methods.handleSubmitReport.call(blankEmailModal);
+assert('6.2 Un correo en blanco no añade la clave al alta (RF-02.4)',
+  emailPayloads.length === 2 && !Object.prototype.hasOwnProperty.call(emailPayloads[1], 'reporter_email'));
+
+const invalidEmailModal = createModalInstance(perishableMachine, {
+  category: 'TEMPERATURE_COLD',
+  description: 'No enfría la cuba de lácteos',
+  reporterName: 'Laura Sede',
+  reporterPhone: '600111222',
+  reporterEmail: 'recepcion.sede'
+});
+await IncidentReportModal.methods.handleSubmitReport.call(invalidEmailModal);
+assert('6.3 Un correo mal escrito no llega al servidor y se explica en pantalla',
+  emailPayloads.length === 2 && invalidEmailModal.errorMessage.includes('dirección de correo válida'));
+
+assert('6.4 El formulario de sede rotula el campo opcional y cita el buzón oficial de la sede',
+  IncidentReportModal.template.includes('Correo electrónico para notificaciones (opcional)') &&
+  IncidentReportModal.template.includes('data-testid="reporter-email-input"') &&
+  IncidentReportModal.template.includes('officialContactEmail'));
 
 // Summary
 console.log('\n======================================================================');

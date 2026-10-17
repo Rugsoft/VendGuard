@@ -366,6 +366,57 @@ console.log('\n--- BLOQUE 6: Diálogo de Baja Lógica y Bloqueos (EARS 3.5, 3.6,
 }
 
 // --------------------------------------------------------------------
+// BLOQUE 6B: Guardia Técnica de Frío (RF-02.5, Art. II)
+// --------------------------------------------------------------------
+console.log('\n--- BLOQUE 6B: Guardia Técnica de Frío (RF-02.5) ---');
+
+{
+  const comp = createComponentInstance({
+    users: JSON.parse(JSON.stringify(mockUsers))
+  });
+
+  let capturedOnCall = null;
+  api.admin.setUserOnCall = async (id, value) => {
+    capturedOnCall = { id, value };
+    return { success: true, data: { id, is_on_call: value } };
+  };
+
+  const technician = comp.users.find(u => u.name === 'Carlos Rodríguez');
+  assert('6B.1 El técnico arranca sin marca de guardia y el resumen lo refleja', technician.is_on_call !== true && comp.summaryMetrics.onCall === 0);
+
+  await comp.toggleOnCall(technician);
+  assert('6B.2 Activar la guardia invoca la API con un booleano real', capturedOnCall !== null && capturedOnCall.id === 2 && capturedOnCall.value === true);
+  assert('6B.3 La fila refleja la guardia confirmada por el servidor', technician.is_on_call === true);
+  assert('6B.4 El resumen de personal cuenta los técnicos de guardia', comp.summaryMetrics.onCall === 1);
+
+  await comp.toggleOnCall(technician);
+  assert('6B.5 Volver a pulsar retira la marca de guardia', capturedOnCall.value === false && technician.is_on_call === false);
+
+  // Un coordinador jamás es destinatario de las alertas de frío sin asignar.
+  capturedOnCall = null;
+  const coordinator = comp.users.find(u => u.role === 'COORDINATOR');
+  await comp.toggleOnCall(coordinator);
+  assert('6B.6 La guardia no se ofrece a coordinadores ni sale a la red', capturedOnCall === null);
+
+  // Un técnico dado de baja tampoco: el servidor lo retira al desactivarlo (RF-02.6).
+  capturedOnCall = null;
+  const inactiveTechnician = comp.users.find(u => !u.is_active);
+  await comp.toggleOnCall(inactiveTechnician);
+  assert('6B.7 Un técnico de baja no puede marcarse de guardia', capturedOnCall === null);
+
+  // Rechazo del servidor: se informa y la fila no se queda mintiendo.
+  api.admin.setUserOnCall = async () => { throw new Error('Solo técnicos activos'); };
+  await comp.toggleOnCall(technician);
+  assert('6B.8 Un rechazo del servidor se muestra y no altera la fila', comp.errorMessage.includes('Solo técnicos activos') && technician.is_on_call === false);
+
+  const template = AdminUsersTab.template;
+  assert('6B.9 La tabla de técnicos ofrece el selector de guardia con estado accesible',
+    template.includes('Guardia de Frío') && template.includes('aria-pressed') && template.includes('toggleOnCall(u)'));
+  assert('6B.10 El resumen de personal muestra el número de técnicos de guardia',
+    template.includes('De Guardia') && template.includes('summaryMetrics.onCall'));
+}
+
+// --------------------------------------------------------------------
 // BLOQUE 7: Reactivación y Template HTML
 // --------------------------------------------------------------------
 console.log('\n--- BLOQUE 7: Reactivación y Template HTML ---');

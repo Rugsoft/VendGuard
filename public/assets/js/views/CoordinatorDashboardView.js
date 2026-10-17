@@ -52,6 +52,7 @@ import { CoordinatorSparePartsAnalyticsTab } from '../components/CoordinatorSpar
 import { CoordinatorTerritorialMapTab } from '../components/CoordinatorTerritorialMapTab.js';
 import { CoordinatorRefundsTab } from '../components/CoordinatorRefundsTab.js';
 import { CoordinatorIncidentDetailModal } from '../components/CoordinatorIncidentDetailModal.js';
+import { CoordinatorNotificationCenterModal } from '../components/CoordinatorNotificationCenterModal.js';
 import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';// Status classification is delegated to the shared module utils/IncidentStatusPermissions.js
 // (frontend mirror of the PHP lifecycle rules): no literal status lists live in this view.
 
@@ -76,6 +77,7 @@ export const CoordinatorDashboardView = {
     CoordinatorTerritorialMapTab,
     CoordinatorRefundsTab,
     CoordinatorIncidentDetailModal,
+    CoordinatorNotificationCenterModal,
     IncidentCommentThreadModal
   },
   emits: ['assigned', 'cancelled', 'refresh'],
@@ -179,7 +181,17 @@ export const CoordinatorDashboardView = {
       selectedQrMachine: null,
       showQrBatchView: false,
       selectedBatchLocationId: 1,
-      selectedBatchLocationName: 'Hospital del Mar - Edificio Central'
+      selectedBatchLocationName: 'Hospital del Mar - Edificio Central',
+
+      // Centro de Notificaciones (Módulo 14, RF-06.3). El contador vive aquí y no
+      // dentro del modal porque la insignia tiene que verse con el modal cerrado:
+      // un fallo definitivo es una alerta de supervisión, no un detalle de pantalla.
+      showNotificationModal: false,
+      notificationSummary: {
+        in_queue_count: 0,
+        failed_permanent_count: 0,
+        has_permanent_failures_alert: false
+      }
     };
   },
   computed: {
@@ -316,6 +328,17 @@ export const CoordinatorDashboardView = {
     },
     sweepOpenContentionCount() {
       return Number(this.sweepVisibility?.escalation?.open_contentions || 0);
+    },
+
+    /**
+     * Fallos definitivos de la bandeja de salida (RF-06.2, RF-06.3). La cifra la
+     * decide el servidor en el resumen del listado; el panel sólo la pinta.
+     */
+    permanentNotificationFailures() {
+      return Number(this.notificationSummary?.failed_permanent_count || 0);
+    },
+    hasPermanentNotificationFailures() {
+      return this.permanentNotificationFailures > 0;
     }
   },
   mounted() {
@@ -325,6 +348,9 @@ export const CoordinatorDashboardView = {
       // El latido del barrido sanitario se pide al montar, no al abrir la sub-pestaña: el
       // distintivo de escalado tiene que verse ANTES de entrar a mirar (RF-07.3).
       this.loadSanitarySweepVisibility();
+      // La insignia de fallos definitivos también: un envío perdido se supervisa desde
+      // la barra de pestañas, sin abrir el centro de notificaciones (RF-06.2).
+      this.loadNotificationSummary();
       this.startPolling();
     }
   },
@@ -338,6 +364,9 @@ export const CoordinatorDashboardView = {
       this.pollingTimer = setInterval(() => {
         if (this.isAuthenticated) {
           this.loadIncidents(true);
+          // El recuento de fallos definitivos viaja en el mismo latido de 60 s: si la
+          // cola se atasca entre dos visitas al panel, la insignia se enciende sola.
+          this.loadNotificationSummary();
         }
       }, 60000);
     },
@@ -346,6 +375,53 @@ export const CoordinatorDashboardView = {
         clearInterval(this.pollingTimer);
         this.pollingTimer = null;
       }
+    },
+
+    /**
+     * Refresca el resumen que alimenta la insignia del Centro de Notificaciones
+     * (RF-06.2, RF-06.3).
+     *
+     * Se pide una sola fila: los contadores viajan en el sobre del listado y el modal
+     * vuelve a pedir la página completa al abrirse, así que el panel no duplica trabajo.
+     * Un fallo de red **no** escribe un cero: un cero falso apagaría la alerta de un
+     * fallo definitivo real, así que se conserva la última cifra conocida y el sondeo
+     * reintenta en el siguiente latido.
+     */
+    async loadNotificationSummary() {
+      try {
+        const data = await api.notifications.getOutbox({ limit: 1, offset: 0 });
+        this.applyNotificationSummary(data?.summary);
+      } catch (error) {
+        // Supervisión auxiliar: la bandeja de triaje ya informa de sus propios fallos.
+      }
+    },
+
+    /**
+     * Vuelca el resumen recibido (del listado o del propio modal) en la insignia.
+     * @param {Object|null} summary
+     */
+    applyNotificationSummary(summary) {
+      if (!summary || typeof summary !== 'object') {
+        return;
+      }
+      this.notificationSummary = {
+        in_queue_count: Number(summary.in_queue_count || 0),
+        failed_permanent_count: Number(summary.failed_permanent_count || 0),
+        has_permanent_failures_alert: summary.has_permanent_failures_alert === true
+      };
+    },
+
+    openNotificationCenter() {
+      this.showNotificationModal = true;
+    },
+
+    /**
+     * El modal publica su resumen tras cargar la bandeja y tras cada reintento o
+     * cancelación: reintentar un envío apaga la insignia sin esperar al sondeo.
+     * @param {Object|null} summary
+     */
+    handleNotificationOutboxUpdated(summary) {
+      this.applyNotificationSummary(summary);
     },
 
     /**
@@ -374,6 +450,7 @@ export const CoordinatorDashboardView = {
         await this.loadIncidents();
         this.loadTechnicians();
         this.loadSanitarySweepVisibility();
+        this.loadNotificationSummary();
         this.startPolling();
       } catch (err) {
         this.loginError = err.message || 'Credenciales incorrectas o usuario inactivo.';
@@ -1362,6 +1439,35 @@ export const CoordinatorDashboardView = {
           >
             📊 Métricas y Auditoría
           </button>
+
+          <!--
+            Centro de Notificaciones (Módulo 14, RF-06.2 / RF-06.3). Vive en la barra y
+            no dentro de una pestaña a propósito: un envío en «Fallo definitivo» es una
+            alerta de supervisión que tiene que verse desde cualquier pestaña, igual que
+            el aviso de SLA. La utilidad ms-auto lo empuja al extremo derecho del grupo.
+          -->
+          <button
+            type="button"
+            class="vg-btn vg-btn-secondary ms-auto"
+            data-testid="open-notification-center"
+            :title="hasPermanentNotificationFailures
+              ? permanentNotificationFailures + ' notificación(es) en fallo definitivo: revise la bandeja de salida'
+              : 'Bandeja de salida y canal corporativo de emergencias'"
+            @click="openNotificationCenter"
+          >
+            🔔 Notificaciones
+            <span
+              v-if="hasPermanentNotificationFailures"
+              class="vg-badge"
+              data-testid="notification-failure-badge"
+              :style="{
+                backgroundColor: 'var(--color-error-text)',
+                color: 'var(--color-surface-card)'
+              }"
+            >
+              {{ permanentNotificationFailures }}
+            </span>
+          </button>
         </div>
 
         <!-- CONTENIDO PESTAÑA 1: TRIAJE Y AVISOS -->
@@ -2320,6 +2426,14 @@ export const CoordinatorDashboardView = {
         v-model="showPreventiveSettingsModal"
         @settings-updated="loadIncidents(true)"
         @pause-updated="loadIncidents(true)"
+      />
+
+      <!-- =================================================================== -->
+      <!-- MODAL 4b: CENTRO DE NOTIFICACIONES (Módulo 14, RF-06.3 a RF-06.5)   -->
+      <!-- =================================================================== -->
+      <CoordinatorNotificationCenterModal
+        v-model="showNotificationModal"
+        @outbox-updated="handleNotificationOutboxUpdated"
       />
 
       <!-- =================================================================== -->

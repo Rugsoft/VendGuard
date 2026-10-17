@@ -165,6 +165,66 @@ async function runTests() {
   assert('2.6 merged es false en ticket nuevo', instance1.submittedTicket?.merged === false);
 
   // =====================================================================
+  // CASO 2B: Correo Opcional del Informador (RF-02.2, RF-05.9)
+  // =====================================================================
+  console.log('\n--- Caso 2B: Correo Opcional del Informador (RF-02.2) ---');
+
+  let qrEmailPayloads = [];
+  api.qr.report = async (payload) => {
+    qrEmailPayloads.push(payload);
+    return {
+      success: true,
+      data: { ticket_code: 'INC-2026-0100', status: 'REGISTERED', merged: false }
+    };
+  };
+
+  const instanceEmail = {
+    ...QrReportView.data(),
+    code: 'VEND-0101',
+    site: 'SEDE-BCN-01',
+    $emit: () => {}
+  };
+  Object.assign(instanceEmail, QrReportView.methods);
+  for (const [key, getter] of Object.entries(QrReportView.computed)) {
+    Object.defineProperty(instanceEmail, key, { get: getter });
+  }
+
+  instanceEmail.machine = cleanPerishableMachine;
+  instanceEmail.location = mockLocation;
+  instanceEmail.description = 'El display no responde y no acepta monedas.';
+  instanceEmail.reporterEmail = '  Ciudadano.QR@Correo.ES ';
+  await instanceEmail.submitReport();
+  assert('2B.1 El correo del ciudadano viaja normalizado con el aviso',
+    qrEmailPayloads.length === 1 && qrEmailPayloads[0].reporter_email === 'ciudadano.qr@correo.es');
+
+  instanceEmail.submitted = false;
+  instanceEmail.reporterEmail = 'ciudadano.qr';
+  const payloadsBeforeInvalid = qrEmailPayloads.length;
+  await instanceEmail.submitReport();
+  assert('2B.2 Un correo mal escrito bloquea el envío y se explica en pantalla',
+    qrEmailPayloads.length === payloadsBeforeInvalid && instanceEmail.submitError.includes('dirección de correo válida'));
+
+  instanceEmail.submitted = false;
+  instanceEmail.submitError = '';
+  instanceEmail.reporterEmail = '';
+  await instanceEmail.submitReport();
+  assert('2B.3 Sin correo el aviso se registra igual y la clave no viaja (RF-02.4)',
+    qrEmailPayloads.length === payloadsBeforeInvalid + 1 &&
+    !Object.prototype.hasOwnProperty.call(qrEmailPayloads[payloadsBeforeInvalid], 'reporter_email'));
+
+  instanceEmail.showCommentForm = true;
+  instanceEmail.commentText = 'También se queda sin luz la pantalla.';
+  instanceEmail.commentReporterEmail = 'Observador@Correo.ES';
+  await instanceEmail.submitAdditionalComment();
+  assert('2B.4 El segundo informador puede dejar su correo para el acuse (RF-05.9)',
+    qrEmailPayloads[payloadsBeforeInvalid + 1].reporter_email === 'observador@correo.es');
+
+  assert('2B.5 Los formularios rotulan el campo opcional y prometen no publicarlo',
+    QrReportView.template.includes('Correo electrónico para notificaciones') &&
+    QrReportView.template.includes('data-testid="reporter-email-input"') &&
+    QrReportView.template.includes('Tu correo no se publica.'));
+
+  // =====================================================================
   // CASO 3: Máquina con Avería Activa Preexistente (EARS 4.1, 4.2 / Art. V.4)
   // =====================================================================
   console.log('\n--- Caso 3: Máquina con Avería Activa y Blindaje de Privacidad ---');

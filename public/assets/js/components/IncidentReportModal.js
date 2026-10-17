@@ -36,6 +36,15 @@ export const IncidentReportModal = {
     machine: {
       type: Object,
       default: null
+    },
+    /**
+     * Buzón oficial de la sede en sesión, que siempre recibe copia (RF-02.3).
+     * Viaja como prop y no se lee del store: el formulario es el mismo para la Sede
+     * y para cualquier otra superficie, y quien lo monta sabe cuál es el buzón.
+     */
+    officialContactEmail: {
+      type: String,
+      default: ''
     }
   },
   emits: ['update:modelValue', 'created', 'commented', 'close'],
@@ -47,6 +56,10 @@ export const IncidentReportModal = {
       retainedMoney: '',
       reporterName: '',
       reporterPhone: '',
+      // Correo opcional del informador (RF-02.2). Si difiere del buzón oficial de la
+      // Sede, el servidor encola copia para ambos y la sede conserva su trazabilidad
+      // institucional (RF-02.3); en blanco no cambia nada.
+      reporterEmail: '',
       photoFile: null,
       refundClaim: { refund_requested: false },
       refundClaimValid: true,
@@ -112,6 +125,21 @@ export const IncidentReportModal = {
      */
     requiresAccessConfirmation() {
       return this.machine?.is_blocked_no_access === true;
+    },
+
+    /**
+     * Error de formato del correo opcional del informador (RF-02.2). Vacío no es un
+     * error: el campo es opcional. Pero un valor mal escrito no debe llegar al
+     * servidor, que lo rechazaría con 422 y obligaría a repetir el formulario.
+     */
+    reporterEmailError() {
+      const value = String(this.reporterEmail || '').trim();
+      if (value === '') {
+        return '';
+      }
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+        ? ''
+        : 'Introduce una dirección de correo válida o deja el campo en blanco.';
     }
   },
   watch: {
@@ -136,6 +164,7 @@ export const IncidentReportModal = {
       this.category = 'TEMPERATURE_COLD';
       this.description = '';
       this.retainedMoney = '';
+      this.reporterEmail = '';
       this.photoFile = null;
       this.refundClaim = { refund_requested: false };
       this.refundClaimValid = true;
@@ -180,6 +209,12 @@ export const IncidentReportModal = {
       if (!this.machine) return;
       if (this.refundRequested && !this.refundClaimValid) return;
 
+      // RF-02.2: el correo opcional, si se escribe, se valida antes de aceptar el envío.
+      if (this.reporterEmailError) {
+        this.errorMessage = this.reporterEmailError;
+        return;
+      }
+
       // RF-04.6: sin la casilla marcada no hay aviso posible sobre una máquina
       // bloqueada por falta de acceso; la confirmación viaja en el propio alta.
       if (this.requiresAccessConfirmation && !this.accessConfirmed) {
@@ -191,6 +226,10 @@ export const IncidentReportModal = {
       this.isSubmitting = true;
       store.setLoading(true);
 
+      // Correo opcional ya normalizado: minúsculas y sin espacios, o cadena vacía para
+      // que un campo en blanco no viaje como valor (RF-02.2, RF-02.4).
+      const reporterEmail = String(this.reporterEmail || '').trim().toLowerCase();
+
       try {
         let payload;
         // Use FormData if image is attached
@@ -201,6 +240,9 @@ export const IncidentReportModal = {
           payload.append('description', this.description.trim());
           payload.append('reporter_name', this.reporterName.trim());
           payload.append('reporter_phone', this.reporterPhone.trim());
+          if (reporterEmail !== '') {
+            payload.append('reporter_email', reporterEmail);
+          }
           if (this.retainedMoney !== '' && this.retainedMoney !== null) {
             payload.append('retained_money_amount', String(this.retainedMoney));
           }
@@ -221,6 +263,7 @@ export const IncidentReportModal = {
             description: this.description.trim(),
             reporter_name: this.reporterName.trim(),
             reporter_phone: this.reporterPhone.trim(),
+            ...(reporterEmail !== '' ? { reporter_email: reporterEmail } : {}),
             ...(this.refundRequested ? this.refundClaim : {}),
             ...(this.requiresAccessConfirmation ? { access_confirmed: true } : {})
           };
@@ -683,6 +726,46 @@ export const IncidentReportModal = {
           </div>
         </div>
 
+        <!-- 5.b Correo opcional del informador (RF-02.2, RF-02.3) -->
+        <div style="margin-bottom: 16px;">
+          <label for="reporter-email" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 4px;">
+            Correo electrónico para notificaciones (opcional)
+          </label>
+          <input
+            id="reporter-email"
+            v-model="reporterEmail"
+            type="email"
+            class="vg-input"
+            placeholder="Ej: conserjeria@hospital.es"
+            autocomplete="email"
+            maxlength="150"
+            :class="{ 'is-invalid': reporterEmailError }"
+            :disabled="isSubmitting"
+            data-testid="reporter-email-input"
+          />
+          <div
+            v-if="reporterEmailError"
+            :style="{
+              color: 'var(--color-error-text)',
+              fontSize: '12px',
+              marginTop: '4px'
+            }"
+            role="alert"
+            data-testid="reporter-email-error"
+          >
+            {{ reporterEmailError }}
+          </div>
+          <div v-else style="font-size: 12px; color: var(--color-ink-muted); margin-top: 4px;">
+            Recibirás copia de la confirmación, la resolución y la cancelación.
+            <span v-if="officialContactEmail">
+              La sede conserva siempre su copia oficial en {{ officialContactEmail }}.
+            </span>
+            <span v-else>
+              La sede conserva siempre su copia oficial.
+            </span>
+          </div>
+        </div>
+
         <!-- Error alert -->
         <div
           v-if="errorMessage"
@@ -705,7 +788,7 @@ export const IncidentReportModal = {
           <button
             type="submit"
             class="vg-btn vg-btn-primary"
-            :disabled="isSubmitting || !description.trim() || !reporterName.trim() || !reporterPhone.trim() || (requiresAccessConfirmation && !accessConfirmed)"
+            :disabled="isSubmitting || !description.trim() || !reporterName.trim() || !reporterPhone.trim() || Boolean(reporterEmailError) || (requiresAccessConfirmation && !accessConfirmed)"
           >
             <span v-if="!isSubmitting">Registrar aviso de avería</span>
             <span v-else>Enviando aviso...</span>

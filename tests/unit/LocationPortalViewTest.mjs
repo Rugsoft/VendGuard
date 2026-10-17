@@ -27,6 +27,7 @@ globalThis.localStorage = storageMock;
 import { api } from '../../public/assets/js/api.js';
 import { store, clearSession, setSiteSession } from '../../public/assets/js/store.js';
 import { MachineCard } from '../../public/assets/js/components/MachineCard.js';
+import { IncidentReportModal } from '../../public/assets/js/components/IncidentReportModal.js';
 import { LocationPortalView } from '../../public/assets/js/views/LocationPortalView.js';
 
 let assertions = 0;
@@ -296,6 +297,22 @@ assert('5.3 The refunds section renders the anonymized refunds component',
 const tabState = { activePortalTab: 'machines' };
 LocationPortalView.methods.setPortalTab.call(tabState, 'refunds');
 assert('5.4 setPortalTab("refunds") activates the refunds section', tabState.activePortalTab === 'refunds');
+
+// ---------------------------------------------------------------------
+// TEST GROUP 6: Optional Informant Mailbox on the Report Form (RF-02.2)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 6: Optional Informant Mailbox (RF-02.2, RF-02.3) ---');
+
+assert('6.1 The portal mounts the report form that carries the optional mailbox field',
+  Boolean(LocationPortalView.components.IncidentReportModal) &&
+  LocationPortalView.template.includes('<IncidentReportModal') &&
+  IncidentReportModal.template.includes('Correo electrónico para notificaciones (opcional)'));
+assert('6.2 The portal hands its own official mailbox to the form for the copy notice',
+  LocationPortalView.template.includes(':official-contact-email="(location && location.contact_email) || \'\'"'));
+assert('6.3 The report form keeps the mailbox optional and validates it before sending',
+  IncidentReportModal.props.officialContactEmail.type === String &&
+  IncidentReportModal.template.includes('data-testid="reporter-email-input"') &&
+  IncidentReportModal.template.includes('data-testid="reporter-email-error"'));
 
 // Summary
 console.log('\n======================================================================');

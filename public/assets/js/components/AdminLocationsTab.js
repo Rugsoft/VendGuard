@@ -39,6 +39,7 @@ export const AdminLocationsTab = {
         address: '',
         contact_name: '',
         contact_phone: '',
+        contact_email: '',
         latitude: '',
         longitude: ''
       },
@@ -54,6 +55,7 @@ export const AdminLocationsTab = {
         address: '',
         contact_name: '',
         contact_phone: '',
+        contact_email: '',
         latitude: '',
         longitude: ''
       },
@@ -178,6 +180,27 @@ export const AdminLocationsTab = {
       const clean = code.trim().toUpperCase();
       if (!/^[A-Z0-9_-]{3,32}$/.test(clean)) {
         return 'El código debe tener entre 3 y 32 caracteres (letras, números y guiones).';
+      }
+      return null;
+    },
+
+    /**
+     * Valida el correo oficial de la sede (RF-02.1).
+     *
+     * Es obligatorio y no una comodidad: es el destinatario de todos los avisos del
+     * centro (apertura, bloqueo de acceso, cuarentena sanitaria, resolución y
+     * cancelación). Una sede sin buzón válido se quedaría muda ante el servicio.
+     *
+     * @param {string} email
+     * @returns {string|null} Mensaje de error, o null si es válido.
+     */
+    validateEmail(email) {
+      const clean = String(email || '').trim();
+      if (clean === '') {
+        return 'El correo electrónico oficial de la sede es obligatorio.';
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
+        return 'Introduzca una dirección de correo electrónico válida.';
       }
       return null;
     },
@@ -311,6 +334,7 @@ export const AdminLocationsTab = {
         address: '',
         contact_name: '',
         contact_phone: '',
+        contact_email: '',
         latitude: '',
         longitude: ''
       };
@@ -347,6 +371,9 @@ export const AdminLocationsTab = {
       const phoneError = this.validatePhone(this.createForm.contact_phone);
       if (phoneError) this.createErrors.contact_phone = phoneError;
 
+      const emailError = this.validateEmail(this.createForm.contact_email);
+      if (emailError) this.createErrors.contact_email = emailError;
+
       const coordinateError = this.validateCoordinates(this.createForm.latitude, this.createForm.longitude);
       if (coordinateError) this.createErrors.coordinates = coordinateError;
 
@@ -362,6 +389,7 @@ export const AdminLocationsTab = {
           address: this.createForm.address.trim(),
           contact_name: this.createForm.contact_name ? this.createForm.contact_name.trim() : null,
           contact_phone: this.createForm.contact_phone ? this.createForm.contact_phone.trim().replace(/\s+/g, '') : null,
+          contact_email: this.createForm.contact_email.trim().toLowerCase(),
           latitude: Number(this.createForm.latitude),
           longitude: Number(this.createForm.longitude)
         };
@@ -400,6 +428,7 @@ export const AdminLocationsTab = {
         address: location.address,
         contact_name: location.contact_name || '',
         contact_phone: location.contact_phone || '',
+        contact_email: location.contact_email || '',
         latitude: location.latitude ?? '',
         longitude: location.longitude ?? ''
       };
@@ -433,6 +462,9 @@ export const AdminLocationsTab = {
       const phoneError = this.validatePhone(this.editForm.contact_phone);
       if (phoneError) this.editErrors.contact_phone = phoneError;
 
+      const emailError = this.validateEmail(this.editForm.contact_email);
+      if (emailError) this.editErrors.contact_email = emailError;
+
       const coordinateError = this.validateCoordinates(this.editForm.latitude, this.editForm.longitude);
       if (coordinateError) this.editErrors.coordinates = coordinateError;
 
@@ -447,6 +479,7 @@ export const AdminLocationsTab = {
           address: this.editForm.address.trim(),
           contact_name: this.editForm.contact_name ? this.editForm.contact_name.trim() : null,
           contact_phone: this.editForm.contact_phone ? this.editForm.contact_phone.trim().replace(/\s+/g, '') : null,
+          contact_email: this.editForm.contact_email.trim().toLowerCase(),
           latitude: Number(this.editForm.latitude),
           longitude: Number(this.editForm.longitude)
         };
@@ -952,6 +985,31 @@ export const AdminLocationsTab = {
                     />
                     <div v-if="createErrors.contact_phone" class="invalid-feedback small">{{ createErrors.contact_phone }}</div>
                   </div>
+
+                  <!-- Correo oficial de la Sede (RF-02.1): destinatario de todos los
+                       avisos del centro. Obligatorio: sin buzón válido la sede no se
+                       entera de una pausa de acceso ni de una cuarentena sanitaria. -->
+                  <div class="col-12 mb-3">
+                    <label class="form-label small fw-bold" for="create-contact-email">
+                      Correo oficial de la sede <span class="text-danger">*</span>
+                    </label>
+                    <input
+                      id="create-contact-email"
+                      type="email"
+                      class="form-control font-monospace"
+                      :class="{'is-invalid': createErrors.contact_email}"
+                      placeholder="Ej: recepcion.hospital@cliente.es"
+                      v-model="createForm.contact_email"
+                      maxlength="150"
+                      autocomplete="email"
+                      required
+                      data-testid="create-contact-email"
+                    />
+                    <div v-if="createErrors.contact_email" class="invalid-feedback small">{{ createErrors.contact_email }}</div>
+                    <div class="form-text small">
+                      Buzón institucional que recibe los avisos de apertura, pausa, cuarentena, resolución y cancelación de esta sede.
+                    </div>
+                  </div>
                 </div>
 
                 <div class="modal-footer px-0 pb-0 pt-3 border-top">
@@ -1075,6 +1133,31 @@ export const AdminLocationsTab = {
                       maxlength="15"
                     />
                     <div v-if="editErrors.contact_phone" class="invalid-feedback small">{{ editErrors.contact_phone }}</div>
+                  </div>
+
+                  <!-- Correo oficial de la Sede (RF-02.1). Corregirlo aquí repara de
+                       paso los envíos en «Fallo definitivo» que se reintenten después
+                       (RF-06.4): el reintento toma el buzón vigente. -->
+                  <div class="col-12 mb-3">
+                    <label class="form-label small fw-bold" for="edit-contact-email">
+                      Correo oficial de la sede <span class="text-danger">*</span>
+                    </label>
+                    <input
+                      id="edit-contact-email"
+                      type="email"
+                      class="form-control font-monospace"
+                      :class="{'is-invalid': editErrors.contact_email}"
+                      placeholder="Ej: recepcion.hospital@cliente.es"
+                      v-model="editForm.contact_email"
+                      maxlength="150"
+                      autocomplete="email"
+                      required
+                      data-testid="edit-contact-email"
+                    />
+                    <div v-if="editErrors.contact_email" class="invalid-feedback small">{{ editErrors.contact_email }}</div>
+                    <div class="form-text small">
+                      Si el buzón anterior fallaba, el reintento de los envíos pendientes usará esta dirección corregida.
+                    </div>
                   </div>
                 </div>
 

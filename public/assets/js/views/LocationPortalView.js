@@ -10,6 +10,9 @@
  * 5. Trigger report, comment or reopen workflows.
  * 6. Supervise sanitary certificates and hand over refund envelopes with the
  *    pickup PIN (RF-PREV-06, RF-PREV-07, RF-REF-06).
+ * 7. Offer the optional informant mailbox on the report form, always with the
+ *    site's official address as the copy that the centre never loses (RF-02.2,
+ *    RF-02.3).
  */
 
 import { api } from '../api.js';
@@ -622,10 +625,14 @@ export const LocationPortalView = {
           <LocationRefundsTab />
         </div>
 
-        <!-- Incident Report Modal -->
+        <!-- Incident Report Modal. El buzón oficial de la sede viaja como prop para
+             que el formulario pueda explicar quién recibe siempre copia (RF-02.3) y
+             para que el correo opcional del informador (RF-02.2) tenga contexto: si
+             escribe una dirección distinta, la Sede no pierde su trazabilidad. -->
         <IncidentReportModal
           v-model="showReportModal"
           :machine="selectedMachine"
+          :official-contact-email="(location && location.contact_email) || ''"
           @created="onIncidentCreated"
           @commented="onCommentAdded"
         />

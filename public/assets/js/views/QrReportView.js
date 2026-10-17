@@ -67,6 +67,11 @@ export const QrReportView = {
       refundClaimValid: true,
       reporterName: '',
       reporterPhone: '',
+      // Correo opcional del ciudadano (RF-02.2). Si lo facilita, recibe la
+      // confirmación y los avisos de resolución o cancelación; si lo deja en
+      // blanco, el aviso se registra igual y solo la Sede recibe su proyección
+      // (RF-02.4). Nunca se publica en la vista pública.
+      reporterEmail: '',
       photoFile: null,
       photoPreviewUrl: null,
 
@@ -75,6 +80,7 @@ export const QrReportView = {
       commentText: '',
       commentReporterName: '',
       commentReporterPhone: '',
+      commentReporterEmail: '',
       commentSubmitted: false,
 
       // Estados de envío y confirmación
@@ -121,12 +127,44 @@ export const QrReportView = {
     },
     refundRequested() {
       return this.refundClaim?.refund_requested === true;
+    },
+
+    /**
+     * Error de formato del correo opcional del reporte (RF-02.2). Dejarlo vacío no
+     * es un error; escribirlo mal sí, y el servidor rechaza el alta con 422.
+     */
+    reporterEmailError() {
+      return this.describeEmailError(this.reporterEmail);
+    },
+
+    /** Igual que el anterior, para el correo del segundo informador (RF-05.9). */
+    commentReporterEmailError() {
+      return this.describeEmailError(this.commentReporterEmail);
     }
   },
   mounted() {
     this.resolveMachine();
   },
   methods: {
+    /**
+     * Valida un correo opcional: vacío es válido, mal escrito no.
+     *
+     * Vive como método y no como regla duplicada en expresión porque el mensaje se
+     * pinta en dos formularios distintos y el criterio tiene que ser uno solo.
+     *
+     * @param {string} email
+     * @returns {string} Mensaje de error, o cadena vacía si es válido.
+     */
+    describeEmailError(email) {
+      const value = String(email || '').trim();
+      if (value === '') {
+        return '';
+      }
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+        ? ''
+        : 'Introduce una dirección de correo válida o déjala en blanco.';
+    },
+
     /**
      * Resuelve contextualmente el estado de la máquina tras escanear el QR (RF-03, RF-05)
      */
@@ -245,8 +283,17 @@ export const QrReportView = {
         return;
       }
 
+      if (this.reporterEmailError) {
+        this.submitError = this.reporterEmailError;
+        return;
+      }
+
       this.isSubmitting = true;
       this.submitError = '';
+
+      // Correo opcional normalizado una sola vez: vacío significa «sin aviso postal»
+      // y no debe viajar como cadena vacía (RF-02.2, RF-02.4).
+      const reporterEmail = String(this.reporterEmail || '').trim().toLowerCase();
 
       try {
         let payload;
@@ -258,6 +305,7 @@ export const QrReportView = {
           payload.append('description', this.description.trim());
           if (this.reporterName) payload.append('reporter_name', this.reporterName.trim());
           if (this.reporterPhone) payload.append('reporter_phone', this.reporterPhone.trim());
+          if (reporterEmail !== '') payload.append('reporter_email', reporterEmail);
           if (this.refundRequested) {
             for (const [key, value] of Object.entries(this.refundClaim)) {
               payload.append(key, value === null || value === undefined ? '' : String(value));
@@ -271,6 +319,7 @@ export const QrReportView = {
             description: this.description.trim(),
             reporter_name: this.reporterName.trim() || null,
             reporter_phone: this.reporterPhone.trim() || null,
+            ...(reporterEmail !== '' ? { reporter_email: reporterEmail } : {}),
             ...(this.refundRequested ? this.refundClaim : {})
           };
         }
@@ -302,6 +351,11 @@ export const QrReportView = {
         return;
       }
 
+      if (this.commentReporterEmailError) {
+        this.submitError = this.commentReporterEmailError;
+        return;
+      }
+
       this.isSubmitting = true;
       this.submitError = '';
 
@@ -311,7 +365,10 @@ export const QrReportView = {
           category: this.activeIncident?.category || 'OTHER',
           description: this.commentText.trim(),
           reporter_name: this.commentReporterName.trim() || null,
-          reporter_phone: this.commentReporterPhone.trim() || null
+          reporter_phone: this.commentReporterPhone.trim() || null,
+          ...(String(this.commentReporterEmail || '').trim() !== ''
+            ? { reporter_email: String(this.commentReporterEmail).trim().toLowerCase() }
+            : {})
         };
 
         const res = await api.qr.report(payload);
@@ -553,12 +610,34 @@ export const QrReportView = {
                     />
                   </div>
                 </div>
+                <div class="form-group">
+                  <input
+                    v-model="commentReporterEmail"
+                    type="email"
+                    class="form-control"
+                    placeholder="Correo electrónico para notificaciones (opcional)"
+                    autocomplete="email"
+                    maxlength="150"
+                    :class="{ 'is-invalid': commentReporterEmailError }"
+                    data-testid="comment-reporter-email-input"
+                  />
+                  <span
+                    v-if="commentReporterEmailError"
+                    class="form-hint text-error"
+                    role="alert"
+                    data-testid="comment-reporter-email-error"
+                  >{{ commentReporterEmailError }}</span>
+                </div>
 
                 <div v-if="submitError" class="alert-error">{{ submitError }}</div>
 
                 <div class="qr-form-actions">
                   <button type="button" class="vg-btn vg-btn-ghost" @click="showCommentForm = false">Cancelar</button>
-                  <button type="submit" class="vg-btn vg-btn-primary" :disabled="!commentText.trim() || isSubmitting">
+                  <button
+                    type="submit"
+                    class="vg-btn vg-btn-primary"
+                    :disabled="!commentText.trim() || isSubmitting || Boolean(commentReporterEmailError)"
+                  >
                     {{ isSubmitting ? 'Enviando...' : 'Añadir al ticket' }}
                   </button>
                 </div>
@@ -651,6 +730,35 @@ export const QrReportView = {
                 </div>
               </div>
 
+              <!-- Correo opcional del informador (RF-02.2). Es el único canal por el
+                   que el ciudadano recibe la confirmación y los avisos de resolución;
+                   dejarlo en blanco no altera el registro del aviso (RF-02.4). -->
+              <div class="form-group">
+                <label class="form-label" for="reporter-email">
+                  Correo electrónico para notificaciones <span class="text-muted">(opcional)</span>
+                </label>
+                <input
+                  id="reporter-email"
+                  v-model="reporterEmail"
+                  type="email"
+                  class="form-control"
+                  placeholder="tu.correo@ejemplo.com"
+                  autocomplete="email"
+                  maxlength="150"
+                  :class="{ 'is-invalid': reporterEmailError }"
+                  data-testid="reporter-email-input"
+                />
+                <span
+                  v-if="reporterEmailError"
+                  class="form-hint text-error"
+                  role="alert"
+                  data-testid="reporter-email-error"
+                >{{ reporterEmailError }}</span>
+                <span v-else class="form-hint">
+                  Te enviaremos la confirmación del aviso y el cierre del ticket. Tu correo no se publica.
+                </span>
+              </div>
+
               <!-- Adjuntar Fotografía -->
               <div class="form-group">
                 <label class="form-label">Adjuntar foto del fallo <span class="text-muted">(opcional, máx 5MB)</span></label>
@@ -675,7 +783,7 @@ export const QrReportView = {
               <button
                 type="submit"
                 class="vg-btn vg-btn-lg vg-btn-primary w-100"
-                :disabled="!isDescriptionValid || isSubmitting || (refundRequested && !refundClaimValid)"
+                :disabled="!isDescriptionValid || isSubmitting || Boolean(reporterEmailError) || (refundRequested && !refundClaimValid)"
                 data-testid="submit-report-btn"
               >
                 <span v-if="isSubmitting" class="qr-btn-spinner"></span>
