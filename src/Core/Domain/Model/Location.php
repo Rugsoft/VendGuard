@@ -26,6 +26,7 @@ class Location implements ArrayAccess, JsonSerializable
     private float $longitude;
     private ?string $contactName;
     private ?string $contactPhone;
+    private string $contactEmail;
     private bool $isActive;
     private ?string $createdAt;
     private ?string $updatedAt;
@@ -45,7 +46,8 @@ class Location implements ArrayAccess, JsonSerializable
         ?string $deletedAt = null,
         float $latitude = 41.3850640,
         float $longitude = 2.1734035,
-        bool $hasPhysicalReception = true
+        bool $hasPhysicalReception = true,
+        string $contactEmail = 'recepcion@sede.vendguard.es'
     ) {
         $this->id = $id;
         $this->siteCode = strtoupper(trim($siteCode));
@@ -58,6 +60,7 @@ class Location implements ArrayAccess, JsonSerializable
         }
         $this->contactName = $contactName !== null ? trim($contactName) : null;
         $this->contactPhone = $contactPhone !== null ? trim($contactPhone) : null;
+        $this->contactEmail = trim($contactEmail) !== '' ? trim($contactEmail) : 'recepcion@sede.vendguard.es';
         $this->isActive = $isActive;
         $this->createdAt = $createdAt;
         $this->updatedAt = $updatedAt;
@@ -86,7 +89,8 @@ class Location implements ArrayAccess, JsonSerializable
             isset($row['deleted_at']) && $row['deleted_at'] !== null ? (string)$row['deleted_at'] : null,
             isset($row['latitude']) ? (float)$row['latitude'] : 41.3850640,
             isset($row['longitude']) ? (float)$row['longitude'] : 2.1734035,
-            (bool)($row['has_physical_reception'] ?? true)
+            (bool)($row['has_physical_reception'] ?? true),
+            isset($row['contact_email']) && trim((string)$row['contact_email']) !== '' ? (string)$row['contact_email'] : 'recepcion@sede.vendguard.es'
         );
     }
 
@@ -141,6 +145,11 @@ class Location implements ArrayAccess, JsonSerializable
         return $this->contactPhone;
     }
 
+    public function getContactEmail(): string
+    {
+        return $this->contactEmail;
+    }
+
     public function hasPhysicalReception(): bool
     {
         return $this->hasPhysicalReception;
@@ -187,6 +196,7 @@ class Location implements ArrayAccess, JsonSerializable
             'longitude' => $this->longitude,
             'contact_name' => $this->contactName,
             'contact_phone' => $this->contactPhone,
+            'contact_email' => $this->contactEmail,
             'has_physical_reception' => $this->hasPhysicalReception,
             'is_active' => $this->isActive,
             'created_at' => $this->createdAt,

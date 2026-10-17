@@ -24,6 +24,7 @@ class User implements ArrayAccess, JsonSerializable
     private UserRole $role;
     private ?string $phone;
     private bool $isActive;
+    private bool $isOnCall;
     private ?string $createdAt;
     private ?string $updatedAt;
     private ?string $deletedAt;
@@ -38,7 +39,8 @@ class User implements ArrayAccess, JsonSerializable
         bool $isActive = true,
         ?string $createdAt = null,
         ?string $updatedAt = null,
-        ?string $deletedAt = null
+        ?string $deletedAt = null,
+        bool $isOnCall = false
     ) {
         $this->id = $id;
         $this->name = trim($name);
@@ -47,6 +49,7 @@ class User implements ArrayAccess, JsonSerializable
         $this->role = $role;
         $this->phone = $phone !== null ? trim($phone) : null;
         $this->isActive = $isActive;
+        $this->isOnCall = $isOnCall;
         $this->createdAt = $createdAt;
         $this->updatedAt = $updatedAt;
         $this->deletedAt = $deletedAt;
@@ -72,7 +75,8 @@ class User implements ArrayAccess, JsonSerializable
             (bool)($row['is_active'] ?? 1),
             isset($row['created_at']) ? (string)$row['created_at'] : null,
             isset($row['updated_at']) ? (string)$row['updated_at'] : null,
-            isset($row['deleted_at']) && $row['deleted_at'] !== null ? (string)$row['deleted_at'] : null
+            isset($row['deleted_at']) && $row['deleted_at'] !== null ? (string)$row['deleted_at'] : null,
+            (bool)($row['is_on_call'] ?? false)
         );
     }
 
@@ -104,6 +108,11 @@ class User implements ArrayAccess, JsonSerializable
     public function getPhone(): ?string
     {
         return $this->phone;
+    }
+
+    public function isOnCall(): bool
+    {
+        return $this->isOnCall;
     }
 
     public function isActive(): bool
@@ -168,6 +177,7 @@ class User implements ArrayAccess, JsonSerializable
             'role' => $this->role->value,
             'phone' => $this->phone,
             'is_active' => $this->isActive,
+            'is_on_call' => $this->isOnCall,
             'created_at' => $this->createdAt,
             'updated_at' => $this->updatedAt,
             'deleted_at' => $this->deletedAt,

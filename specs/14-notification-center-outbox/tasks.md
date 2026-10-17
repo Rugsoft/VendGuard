@@ -29,10 +29,16 @@
     - Suites de certificación del motor (`PostgresSchemaTest`, `PostgresConstitutionalTest`, `SchemaConvergenceParityTest`) al 100% PASS (22 tablas del contrato y 29 tipos ENUM validados).
     - Batería hermética global (`php tests/run_all.php`): **261 suites · 9.941 aserciones · 0 fallos (100% PASS)** con cifras documentales **COHERENTES**.
 
-- [ ] **T-NOTIF-02: Implementar Value Objects (`NotificationChannel`, `NotificationPriority`, `NotificationStatus`, `NotificationTemplate`) y Entidades (`NotificationOutboxItem`, `NotificationChannelSettings`)**
+- [x] **T-NOTIF-02: Implementar Value Objects (`NotificationChannel`, `NotificationPriority`, `NotificationStatus`, `NotificationTemplate`) y Entidades (`NotificationOutboxItem`, `NotificationChannelSettings`)**
   * **Requisitos:** RF-01.1, RF-03, RF-04, RF-05, RF-06.1, RF-06.2, RF-06.3
   * **Dependencias:** T-NOTIF-01
   * **Hecho cuando:** Existen en `src/Core/Domain/ValueObject/` los 4 enums nativos PHP 8.2+ con etiquetas en español y matriz de transiciones válidas en `NotificationStatus`, y en `src/Core/Domain/Model/` las entidades `NotificationOutboxItem.php` y `NotificationChannelSettings.php` (además de la extensión de `Location`, `User` e `Incident` con `contactEmail`, `isOnCall`, `reporterEmail` y marcas de ciclo sanitario), verificadas con `php tests/unit/NotificationStatusStateMachineTest.php` al 100% en verde.
+  * **Acta de Ejecución (2026-10-17):**
+    - Creados los 4 Value Objects en `src/Core/Domain/ValueObject/`: `NotificationChannel` (EMAIL, WEBHOOK), `NotificationPriority` (CRITICAL_SANITARY, STANDARD), `NotificationStatus` (los 6 estados canónicos, propiedades semánticas y matriz de transiciones exhaustiva) y `NotificationTemplate` (las 19 plantillas con etiquetas en español y prioridades por defecto).
+    - Creadas las entidades de dominio en `src/Core/Domain/Model/`: `NotificationOutboxItem.php` (ciclo de vida, estados, reintentos progresivos, rescate, agrupación de ráfagas) y `NotificationChannelSettings.php` (configuración del Webhook y registro de pruebas).
+    - Ampliadas las entidades maestras `Location` (`contactEmail`), `User` (`isOnCall`) e `Incident` (`reporterEmail`, `cycleStartedAt`, `coldAlertSentAt`, `sla2hAlertSentAt`, `sla3hAlertSentAt`).
+    - Creada suite unitaria `tests/unit/NotificationStatusStateMachineTest.php` certificando 59 aserciones al 100% PASS.
+    - Sincronizadas las cifras documentales con `DocMetricsGuard` y ejecutada la batería completa (`php tests/run_all.php`): **262 suites · 10.000 aserciones · 0 fallos (100% PASS)** con cifras documentales **COHERENTES**.
 
 - [ ] **T-NOTIF-03: Implementar políticas puras de dominio (`NotificationRetryPolicy`, `WebhookUrlSecurityValidator`, `NotificationPayloadSanitizer`, `NotificationObsolescencePolicy`) y sus tests unitarios**
   * **Requisitos:** RF-05.1, RF-05.3, RF-05.6, RF-06.1, RF-06.2, RF-06.5.1, RF-07.1, RNF-04, Constitución Art. V.4

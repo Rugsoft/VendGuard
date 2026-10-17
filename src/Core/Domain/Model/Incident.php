@@ -38,6 +38,7 @@ class Incident implements ArrayAccess, JsonSerializable
     private ?int $assignedTechnicianId;
     private ?string $reporterName;
     private ?string $reporterPhone;
+    private ?string $reporterEmail;
     private IncidentCategory $category;
     private string $description;
     private ?float $retainedMoneyAmount;
@@ -59,6 +60,12 @@ class Incident implements ArrayAccess, JsonSerializable
     private ?string $createdAt;
     private ?string $updatedAt;
     private ?string $deletedAt;
+
+    // Campos de ciclo sanitario y alertas de notificación (módulo 14)
+    private ?string $cycleStartedAt;
+    private ?string $coldAlertSentAt;
+    private ?string $sla2hAlertSentAt;
+    private ?string $sla3hAlertSentAt;
 
     // Campos del estado operativo "Pendiente de Información" con pausa de SLA (módulo 11)
     private ?IncidentPauseReasonCategory $pendingInfoReasonCategory;
@@ -116,7 +123,12 @@ class Incident implements ArrayAccess, JsonSerializable
         ?string $pendingInfoReasonText = null,
         ?string $pausedAt = null,
         int $totalPendingInfoSeconds = 0,
-        ?string $slaTargetAt = null
+        ?string $slaTargetAt = null,
+        ?string $reporterEmail = null,
+        ?string $cycleStartedAt = null,
+        ?string $coldAlertSentAt = null,
+        ?string $sla2hAlertSentAt = null,
+        ?string $sla3hAlertSentAt = null
     ) {
         $this->id = $id;
         $this->ticketCode = strtoupper(trim($ticketCode));
@@ -129,6 +141,7 @@ class Incident implements ArrayAccess, JsonSerializable
         $this->assignedTechnicianId = $assignedTechnicianId;
         $this->reporterName = $reporterName !== null ? trim($reporterName) : null;
         $this->reporterPhone = $reporterPhone !== null ? trim($reporterPhone) : null;
+        $this->reporterEmail = $reporterEmail !== null && trim($reporterEmail) !== '' ? trim($reporterEmail) : null;
         $this->retainedMoneyAmount = $retainedMoneyAmount;
         $this->photoPath = $photoPath;
         $this->assignedAt = $assignedAt;
@@ -146,6 +159,10 @@ class Incident implements ArrayAccess, JsonSerializable
         $this->createdAt = $createdAt;
         $this->updatedAt = $updatedAt;
         $this->deletedAt = $deletedAt;
+        $this->cycleStartedAt = $cycleStartedAt;
+        $this->coldAlertSentAt = $coldAlertSentAt;
+        $this->sla2hAlertSentAt = $sla2hAlertSentAt;
+        $this->sla3hAlertSentAt = $sla3hAlertSentAt;
         $this->machineCode = $machineCode;
         $this->machineModel = $machineModel;
         $this->machineType = $machineType;
@@ -225,7 +242,12 @@ class Incident implements ArrayAccess, JsonSerializable
             isset($row['pending_info_reason_text']) && $row['pending_info_reason_text'] !== null ? (string)$row['pending_info_reason_text'] : null,
             isset($row['paused_at']) && $row['paused_at'] !== null ? (string)$row['paused_at'] : null,
             isset($row['total_pending_info_seconds']) ? (int)$row['total_pending_info_seconds'] : 0,
-            isset($row['sla_target_at']) && $row['sla_target_at'] !== null ? (string)$row['sla_target_at'] : null
+            isset($row['sla_target_at']) && $row['sla_target_at'] !== null ? (string)$row['sla_target_at'] : null,
+            isset($row['reporter_email']) && $row['reporter_email'] !== null ? (string)$row['reporter_email'] : null,
+            isset($row['cycle_started_at']) && $row['cycle_started_at'] !== null ? (string)$row['cycle_started_at'] : null,
+            isset($row['cold_alert_sent_at']) && $row['cold_alert_sent_at'] !== null ? (string)$row['cold_alert_sent_at'] : null,
+            isset($row['sla_2h_alert_sent_at']) && $row['sla_2h_alert_sent_at'] !== null ? (string)$row['sla_2h_alert_sent_at'] : null,
+            isset($row['sla_3h_alert_sent_at']) && $row['sla_3h_alert_sent_at'] !== null ? (string)$row['sla_3h_alert_sent_at'] : null
         );
     }
 
@@ -272,6 +294,31 @@ class Incident implements ArrayAccess, JsonSerializable
     public function getReporterPhone(): ?string
     {
         return $this->reporterPhone;
+    }
+
+    public function getReporterEmail(): ?string
+    {
+        return $this->reporterEmail;
+    }
+
+    public function getCycleStartedAt(): ?string
+    {
+        return $this->cycleStartedAt;
+    }
+
+    public function getColdAlertSentAt(): ?string
+    {
+        return $this->coldAlertSentAt;
+    }
+
+    public function getSla2hAlertSentAt(): ?string
+    {
+        return $this->sla2hAlertSentAt;
+    }
+
+    public function getSla3hAlertSentAt(): ?string
+    {
+        return $this->sla3hAlertSentAt;
     }
 
     public function getCategory(): IncidentCategory
@@ -740,6 +787,7 @@ class Incident implements ArrayAccess, JsonSerializable
             'assigned_technician_id' => $this->assignedTechnicianId,
             'reporter_name' => $this->reporterName,
             'reporter_phone' => $this->reporterPhone,
+            'reporter_email' => $this->reporterEmail,
             'category' => $this->category->value,
             'category_label' => $this->category->label(),
             'description' => $this->description,
@@ -771,6 +819,10 @@ class Incident implements ArrayAccess, JsonSerializable
             'is_paused' => $this->isPaused(),
             'total_pending_info_seconds' => $this->totalPendingInfoSeconds,
             'sla_target_at' => $this->slaTargetAt,
+            'cycle_started_at' => $this->cycleStartedAt,
+            'cold_alert_sent_at' => $this->coldAlertSentAt,
+            'sla_2h_alert_sent_at' => $this->sla2hAlertSentAt,
+            'sla_3h_alert_sent_at' => $this->sla3hAlertSentAt,
             'created_at' => $this->createdAt,
             'updated_at' => $this->updatedAt,
             'deleted_at' => $this->deletedAt,
