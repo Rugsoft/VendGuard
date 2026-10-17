@@ -329,4 +329,81 @@ class AuditLogger
 
         return $this->auditRepo->log($event);
     }
+
+    /**
+     * Registra un evento sobre una notificación de la bandeja de salida (Módulo 14).
+     *
+     * Cubre la trazabilidad de RF-06.2 (paso a fallo definitivo) y RF-06.4
+     * (reintento y cancelación manual de Coordinación) sobre la entidad
+     * `NOTIFICATION_OUTBOX` que declara el Art. III.3.
+     *
+     * @param int $outboxItemId ID de la fila en `notification_outbox`.
+     * @param string $action Acción ejecutada (ej. 'NOTIFICATION_MANUAL_RETRY',
+     *   'NOTIFICATION_MANUAL_CANCEL', 'NOTIFICATION_PERMANENT_FAILURE').
+     * @param array{id: int|null, role: string, name: string} $actor Datos del causante.
+     * @param array<string, mixed>|null $previousState Estado anterior.
+     * @param array<string, mixed> $newState Estado resultante.
+     * @param array<string, mixed>|null $metadata Información adicional.
+     * @return AuditEvent Evento persistido con ID generado.
+     */
+    public function logNotificationOutboxEvent(
+        int $outboxItemId,
+        string $action,
+        array $actor,
+        ?array $previousState,
+        array $newState,
+        ?array $metadata = null
+    ): AuditEvent {
+        $event = new AuditEvent(
+            id: null,
+            entityType: AuditEvent::ENTITY_NOTIFICATION_OUTBOX,
+            entityId: $outboxItemId,
+            action: strtoupper(trim($action)),
+            userId: $actor['id'] ?? null,
+            userRole: $actor['role'] ?? 'SYSTEM',
+            userName: $actor['name'] ?? 'Sistema',
+            previousState: $previousState,
+            newState: $newState,
+            metadata: $metadata
+        );
+
+        return $this->auditRepo->log($event);
+    }
+
+    /**
+     * Registra un evento sobre la configuración del Canal Corporativo de
+     * Emergencias (Módulo 14 · RF-06.5).
+     *
+     * @param int $settingId ID de la fila en `notification_channel_settings`.
+     * @param string $action Acción ejecutada (ej. 'NOTIFICATION_WEBHOOK_UPDATED',
+     *   'NOTIFICATION_WEBHOOK_TESTED').
+     * @param array{id: int|null, role: string, name: string} $actor Datos del coordinador actuante.
+     * @param array<string, mixed>|null $previousState Estado anterior.
+     * @param array<string, mixed> $newState Estado resultante.
+     * @param array<string, mixed>|null $metadata Información adicional.
+     * @return AuditEvent Evento persistido con ID generado.
+     */
+    public function logNotificationChannelSettingEvent(
+        int $settingId,
+        string $action,
+        array $actor,
+        ?array $previousState,
+        array $newState,
+        ?array $metadata = null
+    ): AuditEvent {
+        $event = new AuditEvent(
+            id: null,
+            entityType: AuditEvent::ENTITY_NOTIFICATION_CHANNEL_SETTING,
+            entityId: $settingId,
+            action: strtoupper(trim($action)),
+            userId: $actor['id'] ?? null,
+            userRole: $actor['role'] ?? 'COORDINATOR',
+            userName: $actor['name'] ?? 'Coordinación',
+            previousState: $previousState,
+            newState: $newState,
+            metadata: $metadata
+        );
+
+        return $this->auditRepo->log($event);
+    }
 }

@@ -186,6 +186,26 @@ $assert(
     str_contains($auditLoggerSource, 'ENTITY_SANITARY_CERTIFICATE')
 );
 
+$assert(
+    '3.9 AuditLogger::logNotificationOutboxEvent está definido (Módulo 14)',
+    method_exists(AuditLogger::class, 'logNotificationOutboxEvent')
+);
+
+$assert(
+    '3.10 AuditLogger::logNotificationChannelSettingEvent está definido (Módulo 14)',
+    method_exists(AuditLogger::class, 'logNotificationChannelSettingEvent')
+);
+
+$assert(
+    '3.11 logNotificationOutboxEvent etiqueta el evento como NOTIFICATION_OUTBOX',
+    str_contains($auditLoggerSource, 'ENTITY_NOTIFICATION_OUTBOX')
+);
+
+$assert(
+    '3.12 logNotificationChannelSettingEvent etiqueta el evento como NOTIFICATION_CHANNEL_SETTING',
+    str_contains($auditLoggerSource, 'ENTITY_NOTIFICATION_CHANNEL_SETTING')
+);
+
 echo "\n--- 4. El enum de la base de datos admite los nuevos valores ---\n";
 
 try {
@@ -248,12 +268,11 @@ try {
         'Tipos que el dominio acepta y la BD no: ' . implode(', ', $missingInDatabase)
     );
 
+    // La fuente de verdad es el propio enum del motor: una lista escrita a mano
+    // quedaba obsoleta en cuanto una ampliación legítima (Módulo 14: notificaciones)
+    // empezaba a persistir sus tipos, y la guarda acusaba al dato en vez de al catálogo.
     $distinctTypes = $pdo->query("SELECT DISTINCT entity_type FROM audit_log")->fetchAll(\PDO::FETCH_COLUMN);
-    $unknownTypes = array_diff($distinctTypes, [
-        'TICKET', 'MACHINE', 'LOCATION', 'USER',
-        'PREVENTIVE_ORDER', 'SANITARY_CERTIFICATE',
-        'REFUND_REQUEST', 'UNCLAIMED_CASH_FINDING',
-    ]);
+    $unknownTypes = array_diff($distinctTypes, $dbEnumValues);
     $assert(
         '4.5 Los datos existentes solo usan tipos declarados en el enum',
         empty($unknownTypes),

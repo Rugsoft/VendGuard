@@ -386,6 +386,40 @@ class NotificationOutboxItem implements JsonSerializable
     }
 
     /**
+     * Adelanta un reintento manual sobre una notificación en PENDING_RETRY (RF-06.4).
+     *
+     * El contrato de supervisión admite el reintento manual tanto desde
+     * `FAILED_PERMANENT` como desde `PENDING_RETRY`. En el segundo caso el estado
+     * canónico NO cambia —la matriz de transiciones no contempla
+     * `PENDING_RETRY → PENDING` y esa restricción es deliberada—: se refresca el
+     * destinatario vigente, se reinicia el contador de intentos y se vence el
+     * `next_attempt_at` para que la próxima pasada del despachador lo tome de
+     * inmediato.
+     *
+     * @throws InvalidArgumentException Si la notificación no está en PENDING_RETRY.
+     */
+    public function rescheduleImmediateRetry(string $freshRecipient, DateTimeImmutable $retryAt): void
+    {
+        if ($this->status !== NotificationStatus::PENDING_RETRY) {
+            throw new InvalidArgumentException(sprintf(
+                'El reintento inmediato sólo aplica a notificaciones en PENDING_RETRY; estado actual: %s',
+                $this->status->value
+            ));
+        }
+
+        $cleanRecipient = trim($freshRecipient);
+        if ($cleanRecipient !== '') {
+            $this->recipient = $cleanRecipient;
+        }
+
+        $this->attempts = 0;
+        $this->nextAttemptAt = $retryAt;
+        $this->processingStartedAt = null;
+        $this->lastError = null;
+        $this->updatedAt = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+    }
+
+    /**
      * Actualiza el payload de una notificación PENDING ante una ráfaga de respuestas (RF-05.4).
      *
      * @param array<string, mixed> $freshPayload

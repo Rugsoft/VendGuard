@@ -16,6 +16,7 @@ use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\NotificationOutboxRepositoryInterface;
 use VendGuard\Core\Domain\Repository\NotificationSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OnCallTechnicianRepositoryInterface;
+use VendGuard\Core\Domain\Repository\SanitarySlaAlertEnqueuerInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
@@ -50,8 +51,9 @@ use VendGuard\Infrastructure\Notification\Template\NotificationMessageRenderer;
  * Los 19 eventos del catálogo se reparten en métodos públicos con nombre de
  * negocio (apertura, asignación, pausa, resolución, reapertura, crónica,
  * cancelación, acuse QR, cuarentena y escalado). Los dos umbrales de SLA (2h/3h)
- * pertenecen al despachador (`NotificationDispatcherService`, T-NOTIF-07) y no
- * se encolan desde aquí.
+ * viven aquí como métodos públicos del puerto `SanitarySlaAlertEnqueuerInterface`
+ * —el despachador decide CUÁNDO pedirlos (T-NOTIF-07), el servicio de encolado
+ * decide CÓMO construirlos—; ninguna otra ruta del ciclo de vida los dispara.
  *
  * Decisión de diseño sobre los destinatarios internos: la Alerta Inmediata de
  * Frío va a Coordinación y al canal corporativo siempre; al colectivo de guardia
@@ -62,7 +64,7 @@ use VendGuard\Infrastructure\Notification\Template\NotificationMessageRenderer;
  * Dogma Vanilla: PHP 8.2+ puro, PDO detrás de puertos, cero dependencias.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
  */
-final class NotificationOutboxEnqueuerService
+final class NotificationOutboxEnqueuerService implements SanitarySlaAlertEnqueuerInterface
 {
     /** Origen del expediente: formulario del Portal de Sede. */
     public const ORIGIN_LOCATION_PORTAL = 'LOCATION_PORTAL';
@@ -708,6 +710,113 @@ final class NotificationOutboxEnqueuerService
     }
 
     /**
+     * RF-04.1: Alerta de Inminencia de SLA de 2h sin técnico asignado.
+     *
+     * El sellado anti-spam de `sla_2h_alert_sent_at` lo realiza el vigilante
+     * (`NotificationDispatcherService`) en la misma transacción; este método sólo
+     * materializa los destinatarios y las claves de deduplicación por ciclo.
+     *
+     * @return int Filas efectivamente encoladas.
+     */
+    public function enqueueSla2hUnassignedAlert(Incident $incident): int
+    {
+        return $this->transactions->runInTransaction(function () use ($incident): int {
+            $machine = $this->machineFor($incident);
+            $location = $this->locationFor($incident);
+            if ($location === null) {
+                return 0;
+            }
+
+            $payload = $this->slaPayload($incident, $machine, $location);
+            $cycle = $this->cycleKey($incident);
+            $count = 0;
+
+            foreach ($this->coordinatorRecipients() as $coordinator) {
+                $count += $this->queueEmail(
+                    NotificationTemplate::SLA_IMMINENCE_2H_UNASSIGNED,
+                    $coordinator['email'],
+                    self::ROLE_COORDINATOR,
+                    $coordinator['id'],
+                    null,
+                    $incident,
+                    $payload,
+                    sprintf('inc:%d:cyc:%s:sla_2h:u%d', (int)$incident->getId(), $cycle, $coordinator['id'])
+                ) ? 1 : 0;
+            }
+
+            $count += $this->queueWebhook(
+                $incident,
+                NotificationTemplate::SLA_IMMINENCE_2H_UNASSIGNED,
+                $payload,
+                sprintf('inc:%d:cyc:%s:sla_2h:webhook', (int)$incident->getId(), $cycle)
+            ) ? 1 : 0;
+
+            return $count;
+        });
+    }
+
+    /**
+     * RF-04.2: Alerta Crítica de Inminencia de SLA de 3h sin inicio de
+     * intervención.
+     *
+     * Destinatarios: Coordinadores activos, el técnico asignado (si existe) y el
+     * canal corporativo de emergencias. El aviso al técnico es nominal y directo:
+     * es él quien debe arrancar la intervención en la máquina de frío.
+     *
+     * @return int Filas efectivamente encoladas.
+     */
+    public function enqueueSla3hUnstartedAlert(Incident $incident): int
+    {
+        return $this->transactions->runInTransaction(function () use ($incident): int {
+            $machine = $this->machineFor($incident);
+            $location = $this->locationFor($incident);
+            if ($location === null) {
+                return 0;
+            }
+
+            $payload = $this->slaPayload($incident, $machine, $location);
+            $cycle = $this->cycleKey($incident);
+            $count = 0;
+
+            foreach ($this->coordinatorRecipients() as $coordinator) {
+                $count += $this->queueEmail(
+                    NotificationTemplate::SLA_IMMINENCE_3H_UNSTARTED,
+                    $coordinator['email'],
+                    self::ROLE_COORDINATOR,
+                    $coordinator['id'],
+                    null,
+                    $incident,
+                    $payload,
+                    sprintf('inc:%d:cyc:%s:sla_3h:u%d', (int)$incident->getId(), $cycle, $coordinator['id'])
+                ) ? 1 : 0;
+            }
+
+            $assigned = $this->assignedTechnicianRecipient($incident);
+            if ($assigned !== null) {
+                $count += $this->queueEmail(
+                    NotificationTemplate::SLA_IMMINENCE_3H_UNSTARTED,
+                    $assigned['email'],
+                    self::ROLE_TECHNICIAN,
+                    $assigned['id'],
+                    null,
+                    $incident,
+                    $payload,
+                    sprintf('inc:%d:cyc:%s:sla_3h:u%d', (int)$incident->getId(), $cycle, $assigned['id'])
+                ) ? 1 : 0;
+            }
+
+            $count += $this->queueWebhook(
+                $incident,
+                NotificationTemplate::SLA_IMMINENCE_3H_UNSTARTED,
+                $payload,
+                sprintf('inc:%d:cyc:%s:sla_3h:webhook', (int)$incident->getId(), $cycle)
+            ) ? 1 : 0;
+
+            return $count;
+        });
+    }
+
+    /**
      * RF-03.4: escalado por contención persistente del barrido sanitario.
      *
      * Una única alerta por episodio de escalado: la clave de deduplicación usa
@@ -832,6 +941,55 @@ final class NotificationOutboxEnqueuerService
         $this->cycles->markColdAlertSent((int)$incident->getId());
 
         return $count;
+    }
+
+    /**
+     * Payload de los dos umbrales de inminencia de SLA (RF-04.1, RF-04.2).
+     *
+     * `elapsed_hours` se mide sobre el ciclo de atención vigente —la reapertura
+     * en garantía arranca uno nuevo (RF-04.5)— y en tiempo natural continuo
+     * 24/7: ni la pausa ni el cierre del inmueble detienen el reloj biológico
+     * (RF-04.3).
+     *
+     * @return array<string, mixed>
+     */
+    private function slaPayload(Incident $incident, ?Machine $machine, Location $location): array
+    {
+        $cycleStartedAt = $incident->getCycleStartedAt();
+        $elapsedHours = 0.0;
+        if (is_string($cycleStartedAt) && trim($cycleStartedAt) !== '') {
+            $startedTimestamp = strtotime($cycleStartedAt);
+            if ($startedTimestamp !== false) {
+                $elapsedHours = max(0.0, round((time() - $startedTimestamp) / 3600, 1));
+            }
+        }
+
+        return $this->basePayload($incident, $machine, $location, [
+            'event_at' => $this->now(),
+            'elapsed_hours' => $elapsedHours,
+            'on_call_technician_count' => $this->onCallTechnicians->countOnCallTechnicians(),
+        ]);
+    }
+
+    /**
+     * Técnico asignado vigente, si tiene correo válido (RF-04.2).
+     *
+     * @return array{id: int, email: string}|null
+     */
+    private function assignedTechnicianRecipient(Incident $incident): ?array
+    {
+        $assignedId = $incident->getAssignedTechnicianId();
+        if ($assignedId === null) {
+            return null;
+        }
+
+        $technician = $this->users->findById($assignedId, true);
+        $email = $this->validEmail($technician?->getEmail());
+        if ($technician === null || $email === null) {
+            return null;
+        }
+
+        return ['id' => $assignedId, 'email' => $email];
     }
 
     /**

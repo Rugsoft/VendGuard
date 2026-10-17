@@ -150,6 +150,55 @@ class PdoNotificationSettingsRepository implements NotificationSettingsRepositor
     }
 
     /**
+     * {@inheritDoc}
+     *
+     * Actualiza únicamente el resultado de la prueba interactiva. No reutiliza
+     * `save()` a propósito: `save()` cancela los envíos Webhook pendientes al
+     * desactivar el canal, y probar una conexión desde el panel no puede vaciar
+     * la cola como efecto colateral (RF-06.5.2, RF-07.1.f).
+     */
+    public function recordTestResult(NotificationChannelSettings $settings): NotificationChannelSettings
+    {
+        $current = $this->findCurrent();
+        $id = $settings->getId() ?? $current->getId();
+
+        if ($id === null) {
+            throw new RuntimeException('La configuración del canal de emergencias no tiene identificador.');
+        }
+
+        $stmt = $this->pdo->prepare("
+            UPDATE notification_channel_settings SET
+                last_tested_at = :last_tested_at,
+                last_test_status = :last_test_status,
+                last_test_error = :last_test_error,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND deleted_at IS NULL
+        ");
+
+        $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+        $stmt->bindValue(
+            ':last_tested_at',
+            $settings->getLastTestedAt()?->format('Y-m-d H:i:sP'),
+            $settings->getLastTestedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
+        );
+        $stmt->bindValue(
+            ':last_test_status',
+            $settings->getLastTestStatus(),
+            $settings->getLastTestStatus() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
+        );
+        $stmt->bindValue(
+            ':last_test_error',
+            $settings->getLastTestError(),
+            $settings->getLastTestError() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
+        );
+
+        $stmt->execute();
+
+        return $this->findCurrent();
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     private function currentRow(): ?array

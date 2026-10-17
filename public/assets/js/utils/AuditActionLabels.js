@@ -29,7 +29,8 @@ export const AUDIT_ACTION_GROUPS = Object.freeze({
   preventive: 'Mantenimiento Preventivo',
   sanitary: 'Sanidad Alimentaria',
   refund: 'Reintegros y Efectivo',
-  spare_parts: 'Repuestos'
+  spare_parts: 'Repuestos',
+  notification: 'Centro de Notificaciones'
 });
 
 /** Badge palette of the design system, keyed by semantic tone. */
@@ -121,6 +122,11 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'UNCLAIMED_CASH_RECORDED', label: 'Efectivo No Reclamado Registrado', tone: 'warning', group: 'refund' },
   { code: 'REFUND_DETACHED_BY_INACTIVITY', label: 'Reintegro Desvinculado por Inactividad', tone: 'warning', group: 'refund' },
   { code: 'EXPORT_SPARE_PARTS_CSV', label: 'Exportación CSV de Repuestos', tone: 'neutral', group: 'spare_parts' },
+  { code: 'NOTIFICATION_MANUAL_RETRY', label: 'Reintento Manual de Notificación', tone: 'warning', group: 'notification' },
+  { code: 'NOTIFICATION_MANUAL_CANCEL', label: 'Cancelación Manual de Notificación', tone: 'danger', group: 'notification' },
+  { code: 'NOTIFICATION_PERMANENT_FAILURE', label: 'Fallo Definitivo de Notificación', tone: 'danger', group: 'notification' },
+  { code: 'NOTIFICATION_WEBHOOK_UPDATED', label: 'Canal de Emergencias Actualizado', tone: 'info', group: 'notification' },
+  { code: 'NOTIFICATION_WEBHOOK_TESTED', label: 'Conexión del Canal de Emergencias Probada', tone: 'neutral', group: 'notification' },
 ]);
 
 const CATALOG_BY_CODE = Object.freeze(

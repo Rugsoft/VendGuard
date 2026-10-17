@@ -65,6 +65,8 @@ const AUDIT_WRITER_METHODS = [
     'logSanitaryCertificateEvent',
     'logRefundEvent',
     'logUnclaimedCashEvent',
+    'logNotificationOutboxEvent',
+    'logNotificationChannelSettingEvent',
 ];
 
 /**

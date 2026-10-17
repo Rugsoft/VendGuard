@@ -28,6 +28,7 @@ use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentSiteResponseRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SanitaryClockCandidateRepositoryInterface;
+use VendGuard\Core\Domain\Repository\SanitarySlaWatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianRouteBoardRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
@@ -49,7 +50,7 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * El orden del triaje no es una diferencia de dialecto —tiene forma común—, pero tampoco se
  * escribe a mano dos veces: se deriva del rango de prioridad que declara el dominio.
  */
-class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, TechnicianRouteBoardRepositoryInterface, IncidentNotificationCycleRepositoryInterface, IncidentReopenNotificationInterface
+class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, SanitarySlaWatchRepositoryInterface, TechnicianRouteBoardRepositoryInterface, IncidentNotificationCycleRepositoryInterface, IncidentReopenNotificationInterface
 {
     /**
      * Marcadores canónicos de las notas de auditoría de la pausa (RF-01.4).
@@ -1795,10 +1796,71 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
     }
 
     /**
+     * Expedientes activos bajo vigilancia sanitaria candidatos al reloj de inminencia de SLA
+     * (RF-04.1, RF-04.2, RF-04.3):
+     *
+     *   - La máquina es perecedera o mixta con módulo refrigerado (`PERISHABLE_FOOD`,
+     *     `COMBO`), que es la definición de vigilancia sanitaria del Art. II.
+     *   - El expediente está vivo (`REGISTERED`, `REOPENED`, `ASSIGNED`, `IN_PROGRESS`,
+     *     `PENDING_PARTS` o `PENDING_INFO`): se incluye de forma deliberada el ticket
+     *     pausado, porque el deterioro biológico no se detiene aunque el inmueble esté
+     *     cerrado (RF-04.3).
+     *   - Han transcurrido al menos 2 horas naturales continuas desde `cycle_started_at`,
+     *     umbral mínimo que habilita cualquiera de los dos avisos. Los umbrales finos de
+     *     2h/3h y la deduplicación por marca se juzgan en `NotificationDispatcherService`.
+     *
+     * Se traen en UNA sola consulta con el mismo `SELECT` enriquecido que el resto de
+     * lecturas del repositorio, de modo que el despachador no dispara una consulta por
+     * candidato.
+     *
+     * @return list<Incident>
+     */
+    public function findActiveSanitaryWatchIncidentsForSlaWatch(?DateTimeImmutable $now = null): array
+    {
+        $reference = $now ?? new DateTimeImmutable('now');
+        $cutoff = $reference->modify('-2 hours');
+
+        $sql = "
+            SELECT
+                i.*,
+                m.code AS machine_code,
+                m.model AS machine_model,
+                m.machine_type AS machine_type,
+                l.name AS location_name,
+                l.site_code AS location_site_code,
+                u.name AS technician_name
+            FROM incidents i
+            JOIN machines m ON i.machine_id = m.id
+            LEFT JOIN locations l ON i.location_id = l.id
+            LEFT JOIN users u ON i.assigned_technician_id = u.id
+            WHERE i.deleted_at IS NULL
+              AND i.status NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED')
+              AND m.machine_type IN ('PERISHABLE_FOOD', 'COMBO')
+              AND i.cycle_started_at <= :cutoff
+            ORDER BY i.cycle_started_at ASC, i.id ASC
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':cutoff', $cutoff->format('Y-m-d H:i:sP'), PDO::PARAM_STR);
+        $stmt->execute();
+
+        return array_map(
+            static fn(array $row): Incident => Incident::fromDatabaseRow($row),
+            $stmt->fetchAll(PDO::FETCH_ASSOC)
+        );
+    }
+
+    /**
      * Marca la alerta de inminencia de SLA (2h o 3h) como emitida en el ciclo vigente (RF-04.1, RF-04.2).
      *
      * La marca es por umbral: un expediente puede haber avisado de las 2h y aún
      * no de las 3h. `$hours` sólo admite 2 o 3.
+     *
+     * **Sellado condicional (RF-04.4).** El `UPDATE` exige que la columna del
+     * umbral siga a `NULL` y devuelve `false` cuando otro proceso (o una pasada
+     * anterior) ya la selló. El vigilante usa ese veredicto como cerrojo
+     * anti-spam: sólo encola la alerta quien gana el sellado, de modo que dos
+     * pasadas solapadas no emiten jamás el mismo aviso por duplicado (RNF-06).
      */
     public function markSlaAlertSent(int $incidentId, int $hours, ?DateTimeImmutable $sentAt = null): bool
     {
@@ -1813,6 +1875,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             SET {$column} = :sent_at,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = :id
+              AND {$column} IS NULL
               AND deleted_at IS NULL
         ";
 

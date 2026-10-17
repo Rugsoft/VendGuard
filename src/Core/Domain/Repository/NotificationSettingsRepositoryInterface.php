@@ -32,4 +32,15 @@ interface NotificationSettingsRepositoryInterface
      * just shut down.
      */
     public function save(NotificationChannelSettings $settings): NotificationChannelSettings;
+
+    /**
+     * Persists the outcome of a direct connectivity test of the emergency channel
+     * (RF-06.5.2) without side effects on the configuration state.
+     *
+     * This operation must NOT toggle `is_webhook_enabled` and must NOT cancel
+     * pending Webhook notifications: probing a disabled channel is a legitimate
+     * diagnostic action, and it cannot silently purge the queue. Only
+     * `last_tested_at`, `last_test_status` and `last_test_error` change.
+     */
+    public function recordTestResult(NotificationChannelSettings $settings): NotificationChannelSettings;
 }
