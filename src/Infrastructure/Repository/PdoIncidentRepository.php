@@ -22,6 +22,7 @@ use VendGuard\Core\Domain\Model\IncidentHistory;
 use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\MachineType;
+use VendGuard\Core\Domain\Repository\IncidentNotificationCycleRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentSiteResponseRepositoryInterface;
@@ -47,7 +48,7 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * El orden del triaje no es una diferencia de dialecto —tiene forma común—, pero tampoco se
  * escribe a mano dos veces: se deriva del rango de prioridad que declara el dominio.
  */
-class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, TechnicianRouteBoardRepositoryInterface
+class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, TechnicianRouteBoardRepositoryInterface, IncidentNotificationCycleRepositoryInterface
 {
     /**
      * Marcadores canónicos de las notas de auditoría de la pausa (RF-01.4).
@@ -143,6 +144,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             assigned_technician_id,
                             reporter_name,
                             reporter_phone,
+                            reporter_email,
+                            cycle_started_at,
                             category,
                             description,
                             retained_money_amount,
@@ -168,6 +171,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             :assigned_technician_id,
                             :reporter_name,
                             :reporter_phone,
+                            :reporter_email,
+                            :cycle_started_at,
                             :category,
                             :description,
                             :retained_money_amount,
@@ -221,6 +226,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $stmt->bindValue(':assigned_technician_id', $incident->getAssignedTechnicianId(), $incident->getAssignedTechnicianId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
                 $stmt->bindValue(':reporter_name', $incident->getReporterName(), $incident->getReporterName() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
                 $stmt->bindValue(':reporter_phone', $incident->getReporterPhone(), $incident->getReporterPhone() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':reporter_email', $incident->getReporterEmail(), $incident->getReporterEmail() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(
+                    ':cycle_started_at',
+                    $incident->getCycleStartedAt() ?? $incident->getCreatedAt() ?? date('Y-m-d H:i:sP'),
+                    PDO::PARAM_STR
+                );
                 $stmt->bindValue(':category', $incident->getCategory()->value, PDO::PARAM_STR);
                 $stmt->bindValue(':description', $incident->getDescription(), PDO::PARAM_STR);
                 $stmt->bindValue(':retained_money_amount', $incident->getRetainedMoneyAmount(), $incident->getRetainedMoneyAmount() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
@@ -312,6 +323,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     assigned_technician_id,
                     reporter_name,
                     reporter_phone,
+                    reporter_email,
+                    cycle_started_at,
                     category,
                     description,
                     retained_money_amount,
@@ -336,6 +349,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     :assigned_technician_id,
                     :reporter_name,
                     :reporter_phone,
+                    :reporter_email,
+                    :cycle_started_at,
                     :category,
                     :description,
                     :retained_money_amount,
@@ -363,6 +378,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $stmt->bindValue(':assigned_technician_id', $incident->getAssignedTechnicianId(), $incident->getAssignedTechnicianId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
             $stmt->bindValue(':reporter_name', $incident->getReporterName(), $incident->getReporterName() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
             $stmt->bindValue(':reporter_phone', $incident->getReporterPhone(), $incident->getReporterPhone() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            $stmt->bindValue(':reporter_email', $incident->getReporterEmail(), $incident->getReporterEmail() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            $stmt->bindValue(
+                ':cycle_started_at',
+                $incident->getCycleStartedAt() ?? $incident->getCreatedAt() ?? date('Y-m-d H:i:sP'),
+                PDO::PARAM_STR
+            );
             $stmt->bindValue(':category', $incident->getCategory()->value, PDO::PARAM_STR);
             $stmt->bindValue(':description', $incident->getDescription(), PDO::PARAM_STR);
             $stmt->bindValue(':retained_money_amount', $incident->getRetainedMoneyAmount(), $incident->getRetainedMoneyAmount() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
@@ -1753,6 +1774,55 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
     }
 
     /**
+     * Marca la Alerta Inmediata de Frío como emitida en el ciclo vigente (RF-03.1, RF-04.4).
+     */
+    public function markColdAlertSent(int $incidentId, ?DateTimeImmutable $sentAt = null): bool
+    {
+        $sql = "
+            UPDATE incidents
+            SET cold_alert_sent_at = :sent_at,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND deleted_at IS NULL
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':sent_at', ($sentAt ?? new DateTimeImmutable('now'))->format('Y-m-d H:i:sP'), PDO::PARAM_STR);
+        $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+
+        return $stmt->execute() && $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Marca la alerta de inminencia de SLA (2h o 3h) como emitida en el ciclo vigente (RF-04.1, RF-04.2).
+     *
+     * La marca es por umbral: un expediente puede haber avisado de las 2h y aún
+     * no de las 3h. `$hours` sólo admite 2 o 3.
+     */
+    public function markSlaAlertSent(int $incidentId, int $hours, ?DateTimeImmutable $sentAt = null): bool
+    {
+        $column = match ($hours) {
+            2 => 'sla_2h_alert_sent_at',
+            3 => 'sla_3h_alert_sent_at',
+            default => throw new InvalidArgumentException('El umbral de SLA sólo puede ser de 2 o 3 horas.'),
+        };
+
+        $sql = "
+            UPDATE incidents
+            SET {$column} = :sent_at,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND deleted_at IS NULL
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':sent_at', ($sentAt ?? new DateTimeImmutable('now'))->format('Y-m-d H:i:sP'), PDO::PARAM_STR);
+        $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+
+        return $stmt->execute() && $stmt->rowCount() > 0;
+    }
+
+    /**
      * Asigna un técnico de campo a la incidencia y transiciona al estado ASSIGNED.
      * Permite reclasificar la urgencia con motivo auditado (RF-05 / EARS 5.1, 5.2, 5.3).
      *
@@ -2125,7 +2195,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     assigned_at = NULL,
                     reopened_at = CURRENT_TIMESTAMP,
                     reopen_reason = :reopen_reason,
-                    resolved_at = NULL
+                    resolved_at = NULL,
+                    cycle_started_at = CURRENT_TIMESTAMP,
+                    cold_alert_sent_at = NULL,
+                    sla_2h_alert_sent_at = NULL,
+                    sla_3h_alert_sent_at = NULL
                 WHERE id = :id
                   AND deleted_at IS NULL
             ";

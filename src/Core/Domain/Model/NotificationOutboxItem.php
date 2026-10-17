@@ -111,6 +111,57 @@ class NotificationOutboxItem implements JsonSerializable
         $this->deletedAt = $deletedAt;
     }
 
+    /**
+     * Reconstruye la entidad a partir de una fila de la tabla `notification_outbox`.
+     *
+     * El payload llega como JSON textual desde PDO (PostgreSQL lo entrega así) y
+     * se decodifica al arreglo asociativo que el renderizador espera.
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function fromDatabaseRow(array $row): self
+    {
+        $payload = $row['payload_json'] ?? [];
+        if (is_string($payload)) {
+            $decoded = json_decode($payload, true);
+            $payload = is_array($decoded) ? $decoded : [];
+        }
+
+        $toDate = static function (mixed $value): ?DateTimeImmutable {
+            if ($value === null || $value === '') {
+                return null;
+            }
+
+            return new DateTimeImmutable((string)$value, new DateTimeZone('UTC'));
+        };
+
+        return new self(
+            isset($row['id']) ? (int)$row['id'] : null,
+            isset($row['incident_id']) && $row['incident_id'] !== null ? (int)$row['incident_id'] : null,
+            NotificationChannel::fromString((string)$row['channel']),
+            NotificationPriority::fromString((string)$row['priority']),
+            NotificationTemplate::fromString((string)$row['template']),
+            (string)$row['recipient'],
+            (string)$row['recipient_role'],
+            isset($row['recipient_user_id']) && $row['recipient_user_id'] !== null ? (int)$row['recipient_user_id'] : null,
+            isset($row['recipient_location_id']) && $row['recipient_location_id'] !== null ? (int)$row['recipient_location_id'] : null,
+            (string)$row['subject'],
+            is_array($payload) ? $payload : [],
+            isset($row['dedup_key']) && $row['dedup_key'] !== null ? (string)$row['dedup_key'] : null,
+            NotificationStatus::fromString((string)$row['status']),
+            isset($row['attempts']) ? (int)$row['attempts'] : 0,
+            isset($row['max_attempts']) ? (int)$row['max_attempts'] : 5,
+            $toDate($row['next_attempt_at'] ?? null),
+            $toDate($row['processing_started_at'] ?? null),
+            $toDate($row['processed_at'] ?? null),
+            isset($row['last_error']) && $row['last_error'] !== null ? (string)$row['last_error'] : null,
+            isset($row['obsolete_reason']) && $row['obsolete_reason'] !== null ? (string)$row['obsolete_reason'] : null,
+            $toDate($row['created_at'] ?? null),
+            $toDate($row['updated_at'] ?? null),
+            $toDate($row['deleted_at'] ?? null)
+        );
+    }
+
     public function getId(): ?int
     {
         return $this->id;

@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace VendGuard\Infrastructure\Repository;
 
+use InvalidArgumentException;
 use PDO;
 use RuntimeException;
 use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Repository\LocationBatchRepositoryInterface;
+use VendGuard\Core\Domain\Repository\LocationContactEmailRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
@@ -28,7 +30,7 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * técnico: resolver la sede de cada parada con una consulta por parada era un N+1 medido contra el
  * motor remoto (Módulo 12 · T-HYBRID-27).
  */
-class PdoLocationRepository implements LocationRepositoryInterface, LocationBatchRepositoryInterface
+class PdoLocationRepository implements LocationRepositoryInterface, LocationBatchRepositoryInterface, LocationContactEmailRepositoryInterface
 {
     private PDO $pdo;
 
@@ -68,6 +70,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 longitude,
                 contact_name, 
                 contact_phone, 
+                contact_email,
                 has_physical_reception,
                 is_active, 
                 created_at, 
@@ -117,6 +120,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 longitude,
                 contact_name, 
                 contact_phone, 
+                contact_email,
                 has_physical_reception,
                 is_active, 
                 created_at, 
@@ -190,6 +194,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 longitude,
                 contact_name, 
                 contact_phone, 
+                contact_email,
                 has_physical_reception,
                 is_active, 
                 created_at, 
@@ -232,6 +237,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 longitude,
                 contact_name, 
                 contact_phone, 
+                contact_email,
                 has_physical_reception,
                 is_active, 
                 created_at, 
@@ -268,6 +274,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 l.longitude,
                 l.contact_name, 
                 l.contact_phone, 
+                l.contact_email,
                 l.has_physical_reception,
                 l.access_code_issued_at,
                 (l.access_code_hash IS NOT NULL) AS has_access_code,
@@ -329,6 +336,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
             'longitude' => (float)$row['longitude'],
             'contact_name' => $row['contact_name'] !== null ? (string)$row['contact_name'] : null,
             'contact_phone' => $row['contact_phone'] !== null ? (string)$row['contact_phone'] : null,
+            'contact_email' => (string)($row['contact_email'] ?? 'recepcion@sede.vendguard.es'),
             'has_physical_reception' => (bool)$row['has_physical_reception'],
             'has_access_code' => (bool)$row['has_access_code'],
             'access_code_issued_at' => $row['access_code_issued_at'] !== null ? (string)$row['access_code_issued_at'] : null,
@@ -374,6 +382,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 longitude,
                 contact_name,
                 contact_phone,
+                contact_email,
                 has_physical_reception,
                 is_active,
                 created_at,
@@ -387,6 +396,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 :longitude,
                 :contact_name,
                 :contact_phone,
+                :contact_email,
                 :has_physical_reception,
                 :is_active,
                 CURRENT_TIMESTAMP,
@@ -416,6 +426,13 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
         $stmt->bindValue(':contact_name', $contactName, $contactName !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
         $contactPhone = isset($data['contact_phone']) && $data['contact_phone'] !== '' ? trim((string)$data['contact_phone']) : null;
         $stmt->bindValue(':contact_phone', $contactPhone, $contactPhone !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $contactEmail = isset($data['contact_email']) && trim((string)$data['contact_email']) !== ''
+            ? strtolower(trim((string)$data['contact_email']))
+            : 'recepcion@sede.vendguard.es';
+        if (filter_var($contactEmail, FILTER_VALIDATE_EMAIL) === false) {
+            throw new InvalidArgumentException('El correo de contacto de la sede no tiene un formato válido.');
+        }
+        $stmt->bindValue(':contact_email', $contactEmail, PDO::PARAM_STR);
         $stmt->bindValue(':has_physical_reception', array_key_exists('has_physical_reception', $data)
             ? (bool)$data['has_physical_reception']
             : true, PDO::PARAM_BOOL);
@@ -467,6 +484,14 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
         if (array_key_exists('contact_phone', $data)) {
             $fields[] = "contact_phone = :contact_phone";
             $params[':contact_phone'] = $data['contact_phone'] !== null && $data['contact_phone'] !== '' ? trim((string)$data['contact_phone']) : null;
+        }
+        if (array_key_exists('contact_email', $data)) {
+            $contactEmail = strtolower(trim((string)$data['contact_email']));
+            if (filter_var($contactEmail, FILTER_VALIDATE_EMAIL) === false) {
+                throw new InvalidArgumentException('El correo de contacto de la sede no tiene un formato válido.');
+            }
+            $fields[] = "contact_email = :contact_email";
+            $params[':contact_email'] = $contactEmail;
         }
 
         if (empty($fields)) {
@@ -523,6 +548,35 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':id' => $id]);
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Actualiza el correo oficial de la sede (RF-02.1).
+     *
+     * Es la dirección a la que el Centro de Notificaciones envía los avisos
+     * institucionales; un valor inválido se rechaza antes de tocar el motor.
+     */
+    public function updateContactEmail(int $id, string $contactEmail): bool
+    {
+        $normalized = strtolower(trim($contactEmail));
+        if (filter_var($normalized, FILTER_VALIDATE_EMAIL) === false) {
+            throw new InvalidArgumentException('El correo de contacto de la sede no tiene un formato válido.');
+        }
+
+        $sql = "
+            UPDATE locations
+            SET contact_email = :contact_email,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND deleted_at IS NULL
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':contact_email', $normalized, PDO::PARAM_STR);
+        $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+        $stmt->execute();
 
         return $stmt->rowCount() > 0;
     }

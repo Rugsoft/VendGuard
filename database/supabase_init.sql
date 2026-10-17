@@ -1400,7 +1400,7 @@ CREATE TABLE IF NOT EXISTS notification_channel_settings (
     deleted_at          TIMESTAMPTZ,
     CONSTRAINT pk_notification_channel_settings PRIMARY KEY (id),
     CONSTRAINT chk_webhook_url_https CHECK (
-        webhook_url IS NULL OR webhook_url ~* '^https://[a-z0-9.-]+\\.[a-z]{2,}(:[0-9]+)?(/.*)?$'
+        webhook_url IS NULL OR webhook_url ~* '^https://[a-z0-9.-]+\.[a-z]{2,}(:[0-9]+)?(/.*)?$'
     ),
     CONSTRAINT fk_notif_settings_updated_by FOREIGN KEY (updated_by)
         REFERENCES users (id) ON DELETE SET NULL ON UPDATE CASCADE

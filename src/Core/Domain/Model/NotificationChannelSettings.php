@@ -61,6 +61,36 @@ class NotificationChannelSettings implements JsonSerializable
         $this->deletedAt = $deletedAt;
     }
 
+    /**
+     * Reconstruye la configuración desde una fila de `notification_channel_settings`.
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function fromDatabaseRow(array $row): self
+    {
+        $toDate = static function (mixed $value): ?DateTimeImmutable {
+            if ($value === null || $value === '') {
+                return null;
+            }
+
+            return new DateTimeImmutable((string)$value, new DateTimeZone('UTC'));
+        };
+
+        return new self(
+            isset($row['id']) ? (int)$row['id'] : null,
+            (string)($row['webhook_name'] ?? 'Canal Central de Emergencias'),
+            isset($row['webhook_url']) && $row['webhook_url'] !== null ? (string)$row['webhook_url'] : null,
+            (bool)($row['is_webhook_enabled'] ?? false),
+            $toDate($row['last_tested_at'] ?? null),
+            isset($row['last_test_status']) && $row['last_test_status'] !== null ? (string)$row['last_test_status'] : null,
+            isset($row['last_test_error']) && $row['last_test_error'] !== null ? (string)$row['last_test_error'] : null,
+            isset($row['updated_by']) && $row['updated_by'] !== null ? (int)$row['updated_by'] : null,
+            $toDate($row['created_at'] ?? null),
+            $toDate($row['updated_at'] ?? null),
+            $toDate($row['deleted_at'] ?? null)
+        );
+    }
+
     public function getId(): ?int
     {
         return $this->id;

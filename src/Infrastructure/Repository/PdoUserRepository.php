@@ -6,8 +6,10 @@ namespace VendGuard\Infrastructure\Repository;
 
 use PDO;
 use RuntimeException;
+use Throwable;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
+use VendGuard\Core\Domain\Repository\OnCallTechnicianRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserLockoutRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -23,7 +25,7 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * —booleano literal (D-3), ventana temporal del periodo de garantía y clave canónica de
  * identidad (D-5)— se le piden al adaptador, que es el punto único de traducción (RF-01.5).
  */
-class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositoryInterface
+class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositoryInterface, OnCallTechnicianRepositoryInterface
 {
     private PDO $pdo;
 
@@ -71,6 +73,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
                 role, 
                 phone, 
                 is_active, 
+                is_on_call,
                 created_at, 
                 updated_at, 
                 deleted_at
@@ -123,6 +126,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
                 role, 
                 phone, 
                 is_active, 
+                is_on_call,
                 created_at, 
                 updated_at, 
                 deleted_at
@@ -171,6 +175,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
                 role, 
                 phone, 
                 is_active, 
+                is_on_call,
                 created_at, 
                 updated_at, 
                 deleted_at
@@ -345,19 +350,131 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
      */
     public function softDelete(int $id): bool
     {
+        $ownsTransaction = !$this->pdo->inTransaction();
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            // La marca de guardia se retira en el mismo acto (RF-02.6) y la
+            // restricción `chk_users_on_call_active_tech` la exige: un técnico
+            // inactivo no puede conservar `is_on_call = TRUE`.
+            $sql = "
+                UPDATE users
+                SET is_active = {$this->dialect->booleanLiteral(false)},
+                    is_on_call = {$this->dialect->booleanLiteral(false)},
+                    deleted_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+                  AND deleted_at IS NULL
+            ";
+
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute([':id' => $id]);
+            $deleted = $stmt->rowCount() > 0;
+
+            if ($deleted) {
+                // Los avisos que aún esperaban a este destinatario quedan sin
+                // validez (RF-07.1.f): se cancelan lógicamente, nunca se borran.
+                (new PdoNotificationOutboxRepository($this->pdo))->cancelPendingForRecipientUser(
+                    $id,
+                    'Destinatario interno desactivado en el directorio de personal.'
+                );
+            }
+
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            }
+
+            self::clearCache();
+
+            return $deleted;
+        } catch (Throwable $exception) {
+            if ($ownsTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * Activa o desactiva la condición de Técnico de Guardia (RF-02.5).
+     *
+     * El filtro de la sentencia impone la regla completa en el motor: sólo un
+     * TECHNICIAN activo y no dado de baja puede lucir la marca. Un `false`
+     * significa que la fila no cumple la regla (o no existe), no un fallo de
+     * escritura: los errores de PDO se propagan como excepción.
+     */
+    public function setOnCall(int $userId, bool $onCall): bool
+    {
         $sql = "
             UPDATE users
-            SET is_active = {$this->dialect->booleanLiteral(false)},
-                deleted_at = CURRENT_TIMESTAMP
+            SET is_on_call = :on_call,
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = :id
+              AND role = 'TECHNICIAN'
+              AND is_active = {$this->dialect->booleanLiteral(true)}
               AND deleted_at IS NULL
         ";
 
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([':id' => $id]);
+        $stmt->bindValue(':on_call', $onCall, PDO::PARAM_BOOL);
+        $stmt->bindValue(':id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
 
         self::clearCache();
+
         return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Técnicos activos con la marca de guardia (RF-03.1 y RF-03.2).
+     *
+     * @return array<User>
+     */
+    public function findOnCallTechnicians(): array
+    {
+        $sql = "
+            SELECT
+                id,
+                name,
+                email,
+                password_hash,
+                role,
+                phone,
+                is_active,
+                is_on_call,
+                created_at,
+                updated_at,
+                deleted_at
+            FROM users
+            WHERE role = 'TECHNICIAN'
+              AND is_active = {$this->dialect->booleanLiteral(true)}
+              AND is_on_call = {$this->dialect->booleanLiteral(true)}
+              AND deleted_at IS NULL
+            ORDER BY name ASC
+        ";
+
+        $rows = $this->pdo->query($sql)->fetchAll();
+
+        return array_map(static fn(array $row): User => User::fromDatabaseRow($row), $rows);
+    }
+
+    /**
+     * Número de técnicos activos de guardia (resumen del panel de Coordinación).
+     */
+    public function countOnCallTechnicians(): int
+    {
+        $sql = "
+            SELECT COUNT(*) AS total
+            FROM users
+            WHERE role = 'TECHNICIAN'
+              AND is_active = {$this->dialect->booleanLiteral(true)}
+              AND is_on_call = {$this->dialect->booleanLiteral(true)}
+              AND deleted_at IS NULL
+        ";
+
+        return (int)$this->pdo->query($sql)->fetchColumn();
     }
 
     /**
@@ -417,6 +534,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
                 u.role,
                 u.phone,
                 u.is_active,
+                u.is_on_call,
                 u.created_at,
                 u.updated_at,
                 u.deleted_at,
@@ -484,6 +602,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
                 'role_label'                      => $roleEnum !== null ? $roleEnum->label() : (string)$row['role'],
                 'phone'                           => $row['phone'] !== null ? (string)$row['phone'] : null,
                 'is_active'                       => (bool)$row['is_active'] && $row['deleted_at'] === null,
+                'is_on_call'                      => (bool)($row['is_on_call'] ?? false),
                 'active_assigned_incidents_count' => (int)$row['active_assigned_incidents_count'],
                 'warranty_incidents_count'        => (int)$row['warranty_incidents_count'],
                 'created_at'                      => (string)$row['created_at'],
