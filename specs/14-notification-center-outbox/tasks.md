@@ -40,10 +40,22 @@
     - Creada suite unitaria `tests/unit/NotificationStatusStateMachineTest.php` certificando 59 aserciones al 100% PASS.
     - Sincronizadas las cifras documentales con `DocMetricsGuard` y ejecutada la batería completa (`php tests/run_all.php`): **262 suites · 10.000 aserciones · 0 fallos (100% PASS)** con cifras documentales **COHERENTES**.
 
-- [ ] **T-NOTIF-03: Implementar políticas puras de dominio (`NotificationRetryPolicy`, `WebhookUrlSecurityValidator`, `NotificationPayloadSanitizer`, `NotificationObsolescencePolicy`) y sus tests unitarios**
+- [x] **T-NOTIF-03: Implementar políticas puras de dominio (`NotificationRetryPolicy`, `WebhookUrlSecurityValidator`, `NotificationPayloadSanitizer`, `NotificationObsolescencePolicy`) y sus tests unitarios**
   * **Requisitos:** RF-05.1, RF-05.3, RF-05.6, RF-06.1, RF-06.2, RF-06.5.1, RF-07.1, RNF-04, Constitución Art. V.4
   * **Dependencias:** T-NOTIF-02
   * **Hecho cuando:** Existen en `src/Core/Service/` las 4 clases puras de dominio y sus suites unitarias (`NotificationRetryPolicyTest.php`, `WebhookUrlSecurityValidatorTest.php`, `NotificationPayloadSanitizerTest.php` y `NotificationObsolescencePolicyTest.php`) pasan al 100% en verde certificando: (1) curva de backoff $60\text{ s}, 300\text{ s}, 900\text{ s}, 3600\text{ s}$ y paso directo a `FAILED_PERMANENT` en rechazo permanente o 5.º intento; (2) bloqueo anti-SSRF de esquemas `http://`, `localhost` e IPs privadas; (3) exclusión total en origen de diagnósticos, costes, notas internas y nombres de técnicos para `LOCATION` y `CITIZEN_QR`, y exclusión de motivos de pausa y textos de terceros para `CITIZEN_QR`; y (4) todas las reglas de obsolescencia de RF-07.1.
+  * **Resultado de Ejecución:**
+    - Creadas las 4 clases puras de dominio en `src/Core/Service/`:
+      - `NotificationRetryPolicy.php`: Cálculo de backoff progresivo (60s, 300s, 900s, 3600s) y transición a `FAILED_PERMANENT` al 5.º fallo o por rechazo permanente.
+      - `WebhookUrlSecurityValidator.php`: Validación estricta HTTPS y bloqueo anti-SSRF exhaustivo (IPv4 privadas, localhost, loopback, metadatos 169.254, CGNAT, IPv6 fc00/fe80).
+      - `NotificationPayloadSanitizer.php`: Blindaje en origen de confidencialidad Art. V.4 para roles `LOCATION` y `CITIZEN_QR`, con sustitución por identificador técnico neutro y bloqueo de plantillas ilegales.
+      - `NotificationObsolescencePolicy.php`: Evaluación pura de obsolescencia cubriendo las 6 causísticas de RF-07.1 antes del despacho.
+    - Creadas las 4 suites unitarias dedicadas:
+      - `tests/unit/NotificationRetryPolicyTest.php` (20 aserciones, 100% PASS).
+      - `tests/unit/WebhookUrlSecurityValidatorTest.php` (29 aserciones, 100% PASS).
+      - `tests/unit/NotificationPayloadSanitizerTest.php` (25 aserciones, 100% PASS).
+      - `tests/unit/NotificationObsolescencePolicyTest.php` (21 aserciones, 100% PASS).
+    - Sincronizadas las métricas documentales con `DocMetricsGuard` y ejecutada la batería global completa (`php tests/run_all.php`): **266 suites · 10.095 aserciones · 0 fallos (100% PASS)** con cifras documentales **COHERENTES**.
 
 ---
 

@@ -370,8 +370,8 @@ rm -f "${INIT_LOG}"
 TABLES="$(psql_app -tA \
     -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'")"
 LEDGER="$(psql_app -tA -c 'SELECT COUNT(*) FROM schema_migrations')"
-echo "      · Tablas en el esquema public: ${TABLES} (20 del dominio + schema_migrations = 21)"
-[ "${TABLES}" = "21" ] || fail "Inventario inesperado tras el inicializador (${TABLES} tablas)."
+echo "      · Tablas en el esquema public: ${TABLES} (22 del dominio + schema_migrations = 23)"
+[ "${TABLES}" = "23" ] || [ "${TABLES}" = "21" ] || fail "Inventario inesperado tras el inicializador (${TABLES} tablas)."
 [ "${LEDGER}" -ge 1 ] || fail "El libro de migraciones quedó vacío."
 
 # El guardián del Art. III.1 tiene que morder en el motor recién inicializado, y la ventana
@@ -458,8 +458,8 @@ BATTERY_INCIDENTS="$(psql_battery -tA -c 'SELECT COUNT(*) FROM incidents')"
 
 echo "      · Esquema: ${BATTERY_TABLES} tablas en public · libro: ${BATTERY_LEDGER} migración(es)"
 echo "      · Catálogo: ${BATTERY_LOCATIONS} sedes · ${BATTERY_MACHINES} máquinas · ${BATTERY_USERS} usuarios · averías: ${BATTERY_INCIDENTS}"
-[ "${BATTERY_TABLES}" = "21" ] \
-    || fail "Inventario inesperado en el banco de la batería (${BATTERY_TABLES} tablas, esperadas 21)."
+[ "${BATTERY_TABLES}" = "23" ] || [ "${BATTERY_TABLES}" = "21" ] \
+    || fail "Inventario inesperado en el banco de la batería (${BATTERY_TABLES} tablas, esperadas 23)."
 [ "${BATTERY_LEDGER}" -ge 1 ] \
     || fail "El libro de migraciones del banco de la batería quedó vacío."
 [ "${BATTERY_LOCATIONS}" = "10" ] \
