@@ -122,7 +122,7 @@ $assert('2.17 CANCELLED_OBSOLETE es terminal: ninguna transición permitida', No
 // =====================================================================
 echo "\n--- Grupo 3: Value Objects de Notificación ---\n";
 
-$assert('3.1 NotificationChannel tiene EMAIL y WEBHOOK', count(NotificationChannel::cases()) === 2);
+$assert('3.1 NotificationChannel tiene EMAIL, WEBHOOK y TELEGRAM', count(NotificationChannel::cases()) === 3);
 $assert('3.2 NotificationChannel::fromString normaliza insensible a mayúsculas', NotificationChannel::fromString('email') === NotificationChannel::EMAIL);
 
 $assert('3.3 NotificationPriority tiene CRITICAL_SANITARY y STANDARD', count(NotificationPriority::cases()) === 2);

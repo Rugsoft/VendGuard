@@ -25,6 +25,13 @@ class User implements ArrayAccess, JsonSerializable
     private ?string $phone;
     private bool $isActive;
     private bool $isOnCall;
+
+    /**
+     * Identidad Telegram del técnico (Módulo 15). Dato personal opcional: `null`
+     * significa que el técnico no recibe avisos por ese canal, no que el canal
+     * esté roto.
+     */
+    private ?string $telegramChatId;
     private ?string $createdAt;
     private ?string $updatedAt;
     private ?string $deletedAt;
@@ -40,7 +47,8 @@ class User implements ArrayAccess, JsonSerializable
         ?string $createdAt = null,
         ?string $updatedAt = null,
         ?string $deletedAt = null,
-        bool $isOnCall = false
+        bool $isOnCall = false,
+        ?string $telegramChatId = null
     ) {
         $this->id = $id;
         $this->name = trim($name);
@@ -53,6 +61,8 @@ class User implements ArrayAccess, JsonSerializable
         $this->createdAt = $createdAt;
         $this->updatedAt = $updatedAt;
         $this->deletedAt = $deletedAt;
+        $trimmedChatId = $telegramChatId !== null ? trim($telegramChatId) : null;
+        $this->telegramChatId = $trimmedChatId !== null && $trimmedChatId !== '' ? $trimmedChatId : null;
     }
 
     /**
@@ -76,7 +86,10 @@ class User implements ArrayAccess, JsonSerializable
             isset($row['created_at']) ? (string)$row['created_at'] : null,
             isset($row['updated_at']) ? (string)$row['updated_at'] : null,
             isset($row['deleted_at']) && $row['deleted_at'] !== null ? (string)$row['deleted_at'] : null,
-            (bool)($row['is_on_call'] ?? false)
+            (bool)($row['is_on_call'] ?? false),
+            isset($row['telegram_chat_id']) && $row['telegram_chat_id'] !== null
+                ? (string)$row['telegram_chat_id']
+                : null
         );
     }
 
@@ -113,6 +126,22 @@ class User implements ArrayAccess, JsonSerializable
     public function isOnCall(): bool
     {
         return $this->isOnCall;
+    }
+
+    /**
+     * Chat de Telegram vinculado, o `null` si el técnico no lo tiene declarado.
+     */
+    public function getTelegramChatId(): ?string
+    {
+        return $this->telegramChatId;
+    }
+
+    /**
+     * ¿El usuario puede recibir avisos por Telegram? (RF-TG-03, RF-TG-10).
+     */
+    public function hasTelegramLink(): bool
+    {
+        return $this->telegramChatId !== null;
     }
 
     public function isActive(): bool
@@ -178,6 +207,8 @@ class User implements ArrayAccess, JsonSerializable
             'phone' => $this->phone,
             'is_active' => $this->isActive,
             'is_on_call' => $this->isOnCall,
+            'telegram_chat_id' => $this->telegramChatId,
+            'telegram_linked' => $this->telegramChatId !== null,
             'created_at' => $this->createdAt,
             'updated_at' => $this->updatedAt,
             'deleted_at' => $this->deletedAt,

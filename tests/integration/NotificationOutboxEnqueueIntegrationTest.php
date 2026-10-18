@@ -39,7 +39,11 @@ use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Core\Domain\ValueObject\NotificationChannel;
 use VendGuard\Core\Domain\ValueObject\NotificationTemplate;
+use VendGuard\Core\Service\NotificationTrackingLinkResolver;
+use VendGuard\Infrastructure\Notification\Transport\NotificationTransportRegistry;
+use VendGuard\Infrastructure\Notification\Transport\TelegramTransport;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -59,6 +63,15 @@ echo "======================================================================\n\n
 $pdo = ConnectionFactory::getConnection();
 (new SeedRunner($pdo))->seedAll();
 TestDataCleaner::purge($pdo);
+
+// Módulo 15: el canal Telegram sólo produce filas si el entorno declara el token
+// del bot. El arnés lo retira para que la certificación no dependa de lo que el
+// operador tenga exportado en su terminal; el grupo 16 lo declara a propósito.
+$previousTelegramToken = getenv('VENDGUARD_TELEGRAM_BOT_TOKEN');
+$previousTelegramAlias = getenv('TG_BOT_TOKEN');
+$previousBaseUrl = getenv('APP_BASE_URL');
+putenv('VENDGUARD_TELEGRAM_BOT_TOKEN');
+putenv('TG_BOT_TOKEN');
 
 $outbox = new PdoNotificationOutboxRepository($pdo);
 $settings = new PdoNotificationSettingsRepository($pdo, $outbox);
@@ -797,8 +810,100 @@ $assert(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 16. Módulo 15 — Aviso personal al técnico por Telegram (RF-TG-02, RF-TG-03)
+// ─────────────────────────────────────────────────────────────────────────────
+$assert(
+    'RF-TG-01: el registro de transportes registra el canal TELEGRAM',
+    NotificationTransportRegistry::forRuntime()->has(NotificationChannel::TELEGRAM)
+);
+
+putenv('APP_BASE_URL=https://vendguard.test');
+putenv('VENDGUARD_TELEGRAM_BOT_TOKEN=123456:CERT-TOKEN');
+$users->update(2, ['telegram_chat_id' => '123456789']);
+
+$telegramFixture = $fixture('PRODUCT_JAM', 'HIGH');
+$telegramIncidentId = (int)$telegramFixture['incident']->getId();
+$telegramAssigned = $incidents->assign($telegramIncidentId, 2, $coordinatorId);
+$enqueuer->enqueueAssignment($telegramFixture['incident'], $telegramAssigned);
+
+$telegramRows = $fetchRows($telegramIncidentId, 'TECHNICIAN_ASSIGNED');
+$telegramChannelRows = array_values(array_filter(
+    $telegramRows,
+    static fn (array $row): bool => (string)$row['channel'] === NotificationChannel::TELEGRAM->value
+));
+
+$assert(
+    'RF-TG-02: la asignación se suma al correo con una fila de Telegram',
+    count($telegramRows) === 2 && count($telegramChannelRows) === 1,
+    'Filas: ' . json_encode(array_column($telegramRows, 'channel'))
+);
+$assert(
+    'RF-TG-02: el destinatario de la fila es el chat del técnico',
+    $telegramChannelRows !== []
+        && (string)$telegramChannelRows[0]['recipient'] === '123456789'
+        && (string)$telegramChannelRows[0]['recipient_role'] === 'TECHNICIAN'
+        && (int)$telegramChannelRows[0]['recipient_user_id'] === 2
+);
+$assert(
+    'RF-TG-02: el payload no lleva el chat de Telegram (dato personal)',
+    $telegramChannelRows !== []
+        && !array_key_exists('telegram_chat_id', $payloadOf($telegramChannelRows[0]))
+);
+$assert(
+    'RF-TG-04: el aviso resuelve el enlace a la parada del técnico',
+    $telegramChannelRows !== []
+        && NotificationTrackingLinkResolver::fromEnvironment()->resolve(
+            NotificationTemplate::TECHNICIAN_ASSIGNED,
+            $payloadOf($telegramChannelRows[0])
+        ) === 'https://vendguard.test/?tech=1&ticket=' . rawurlencode((string)$telegramFixture['incident']->getTicketCode())
+);
+
+putenv('VENDGUARD_TELEGRAM_BOT_TOKEN');
+$noTokenFixture = $fixture('PRODUCT_JAM', 'MEDIUM');
+$noTokenIncidentId = (int)$noTokenFixture['incident']->getId();
+$enqueuer->enqueueAssignment($noTokenFixture['incident'], $incidents->assign($noTokenIncidentId, 2, $coordinatorId));
+$assert(
+    'RF-TG-03: sin token de bot no se crea fila de Telegram (la asignación no se degrada)',
+    count($fetchRows($noTokenIncidentId, 'TECHNICIAN_ASSIGNED')) === 1
+);
+
+putenv('VENDGUARD_TELEGRAM_BOT_TOKEN=123456:CERT-TOKEN');
+$users->update(2, ['telegram_chat_id' => null]);
+
+// Sin vinculación se vuelve a encolar el mismo aviso: el correo se repite —como
+// ya hacía el sistema— y no aparece ninguna fila personal nueva.
+$telegramRowsBefore = count(array_filter(
+    $fetchRows($telegramIncidentId, 'TECHNICIAN_ASSIGNED'),
+    static fn (array $row): bool => (string)$row['channel'] === NotificationChannel::TELEGRAM->value
+));
+$enqueuer->enqueueAssignment($telegramFixture['incident'], $telegramAssigned);
+$telegramRowsAfter = count(array_filter(
+    $fetchRows($telegramIncidentId, 'TECHNICIAN_ASSIGNED'),
+    static fn (array $row): bool => (string)$row['channel'] === NotificationChannel::TELEGRAM->value
+));
+$assert(
+    'RF-TG-03: sin vinculación tampoco se inventa un aviso personal',
+    $telegramRowsBefore === 1 && $telegramRowsAfter === $telegramRowsBefore
+);
+
+// El aviso de desasignación nunca viaja por Telegram (RF-TG-06).
+$telegramUnassignedRows = array_values(array_filter(
+    $fetchRows((int)$assign['incident']->getId(), 'TECHNICIAN_UNASSIGNED'),
+    static fn (array $row): bool => (string)$row['channel'] === NotificationChannel::TELEGRAM->value
+));
+$assert(
+    'RF-TG-06: la desasignación no invita al saliente a abrir un expediente ajeno',
+    $telegramUnassignedRows === []
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Cierre y limpieza
 // ─────────────────────────────────────────────────────────────────────────────
+putenv('APP_BASE_URL' . ($previousBaseUrl !== false ? '=' . $previousBaseUrl : ''));
+putenv(TelegramTransport::ENV_BOT_TOKEN . ($previousTelegramToken !== false ? '=' . $previousTelegramToken : ''));
+if ($previousTelegramAlias !== false) {
+    putenv('TG_BOT_TOKEN=' . $previousTelegramAlias);
+}
 $users->setOnCall(2, false);
 TestDataCleaner::purge($pdo);
 

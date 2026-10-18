@@ -28,7 +28,9 @@ use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Domain\Model\NotificationOutboxItem;
 use VendGuard\Core\Service\NotificationPayloadSanitizer;
 use VendGuard\Core\Service\WebhookUrlSecurityValidator;
+use VendGuard\Infrastructure\Config\SecretProvider;
 use VendGuard\Infrastructure\Notification\Template\NotificationMessageRenderer;
+use VendGuard\Infrastructure\Notification\Transport\TelegramTransport;
 
 /**
  * NotificationOutboxEnqueuerService — Encolado transaccional de los eventos del
@@ -236,6 +238,21 @@ final class NotificationOutboxEnqueuerService implements SanitarySlaAlertEnqueue
                         self::ROLE_TECHNICIAN,
                         $incomingId,
                         null,
+                        $after,
+                        $payload
+                    ) ? 1 : 0;
+                }
+
+                // RF-TG-02 · Telegram se SUMA al correo: el técnico recibe el
+                // aviso en el bolsillo con el enlace a su parada, y conserva el
+                // correo de siempre. Sin vinculación o sin bot no se crea fila:
+                // la asignación no se degrada y la bandeja no acumula envíos
+                // imposibles (RF-TG-03).
+                if ($incoming !== null) {
+                    $count += $this->queueTelegram(
+                        NotificationTemplate::TECHNICIAN_ASSIGNED,
+                        $incoming->getTelegramChatId(),
+                        $incomingId,
                         $after,
                         $payload
                     ) ? 1 : 0;
@@ -997,6 +1014,48 @@ final class NotificationOutboxEnqueuerService implements SanitarySlaAlertEnqueue
      *
      * @param array<string, mixed> $payload
      */
+    /**
+     * Encola un aviso por el canal personal del técnico (Módulo 15, RF-TG-02).
+     *
+     * Devuelve `null` —sin crear fila— cuando falta cualquiera de las dos
+     * condiciones que hacen posible la entrega: un `chat_id` con formato válido en
+     * la vinculación del usuario y un token de bot declarado en el entorno. Es la
+     * traducción del requisito «sin vinculación, sin aviso y sin ruido»: la cola
+     * no debe contener envíos que no pueden salir, y la carencia se ve en el panel
+     * de administración, no como un fallo repetido en la bandeja.
+     *
+     * @param array<string, mixed> $payload Payload neutro ya del expediente.
+     */
+    private function queueTelegram(
+        NotificationTemplate $template,
+        ?string $chatId,
+        ?int $recipientUserId,
+        Incident $incident,
+        array $payload
+    ): ?NotificationOutboxItem {
+        $chatId = $chatId !== null ? trim($chatId) : null;
+        if ($chatId === null || $chatId === '' || !TelegramTransport::isValidChatId($chatId)) {
+            return null;
+        }
+
+        if (SecretProvider::telegramBotToken() === null) {
+            return null;
+        }
+
+        return $this->queue(
+            $template,
+            NotificationChannel::TELEGRAM,
+            $template->defaultPriority(),
+            $chatId,
+            self::ROLE_TECHNICIAN,
+            $recipientUserId,
+            null,
+            $incident,
+            $payload,
+            null
+        );
+    }
+
     private function queueEmail(
         NotificationTemplate $template,
         string $recipient,

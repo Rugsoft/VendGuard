@@ -23,6 +23,11 @@ use VendGuard\Core\Domain\ValueObject\NotificationChannel;
  * cae como fallo transitorio y queda visible en la bandeja de supervisión, que es
  * exactamente donde Coordinación debe descubrir que falta configurar el canal.
  *
+ * El canal `TELEGRAM` (Módulo 15) sigue la misma regla: se registra siempre, y
+ * sin token su `deliver()` devuelve fallo transitorio en lugar de convertir la
+ * pasada en una excepción de composición. Quien evita encolar lo imposible es el
+ * encolador, que consulta la presencia del token antes de crear la fila.
+ *
  * Dogma Vanilla: PHP 8.2+ puro, sin dependencias externas.
  * Dualismo Lingüístico: código e identificadores en inglés, documentación en castellano.
  */
@@ -44,7 +49,10 @@ final class NotificationTransportRegistry
      */
     public static function forRuntime(): self
     {
-        $transports = [new NativeHttpsWebhookTransport()];
+        $transports = [
+            new NativeHttpsWebhookTransport(),
+            TelegramTransport::fromEnvironment(),
+        ];
 
         try {
             $transports[] = NativeSmtpEmailTransport::fromEnvironment();

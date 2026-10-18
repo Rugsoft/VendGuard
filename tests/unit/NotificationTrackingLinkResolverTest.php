@@ -78,9 +78,13 @@ $assert(
 );
 $assert(
     '1.3 Los avisos internos no tienen nivel de acceso externo',
-    $resolver->audienceFor(NotificationTemplate::TECHNICIAN_ASSIGNED) === NotificationTrackingLinkResolver::AUDIENCE_INTERNAL
+    $resolver->audienceFor(NotificationTemplate::TECHNICIAN_UNASSIGNED) === NotificationTrackingLinkResolver::AUDIENCE_INTERNAL
     && $resolver->audienceFor(NotificationTemplate::COLD_CHAIN_IMMEDIATE_ALERT) === NotificationTrackingLinkResolver::AUDIENCE_INTERNAL
     && $resolver->audienceFor(NotificationTemplate::SLA_IMMINENCE_2H_UNASSIGNED) === NotificationTrackingLinkResolver::AUDIENCE_INTERNAL
+);
+$assert(
+    '1.4 La asignación al técnico se dirige a su ruta (Módulo 15)',
+    $resolver->audienceFor(NotificationTemplate::TECHNICIAN_ASSIGNED) === NotificationTrackingLinkResolver::AUDIENCE_TECHNICIAN
 );
 
 echo "\n--- 2. Ruta derivada y prioridad del payload ---\n";
@@ -108,7 +112,20 @@ $assert(
 );
 $assert(
     '2.5 El aviso interno no lleva ruta alguna aunque tenga los códigos',
-    $resolver->route(NotificationTemplate::TECHNICIAN_ASSIGNED, $siteyPayload) === null
+    $resolver->route(NotificationTemplate::TECHNICIAN_UNASSIGNED, $siteyPayload) === null
+);
+$assert(
+    '2.5.1 La asignación al técnico apunta a su ruta con el ticket citado',
+    $resolver->route(NotificationTemplate::TECHNICIAN_ASSIGNED, $siteyPayload)
+        === '/?tech=1&ticket=INC-2026-000123'
+);
+$assert(
+    '2.5.2 Sin ticket, el técnico aterriza en su ruta sin destino inventado',
+    $resolver->route(NotificationTemplate::TECHNICIAN_ASSIGNED, []) === '/?tech=1'
+);
+$assert(
+    '2.5.3 La desasignación no invita a abrir un expediente ajeno',
+    $resolver->route(NotificationTemplate::TECHNICIAN_UNASSIGNED, $siteyPayload) === null
 );
 $assert(
     '2.6 Una Sede sin ticket conocido conserva su enlace de portal',
@@ -172,8 +189,18 @@ $assert(
 );
 $assert(
     '5.4 Los avisos internos no se declaran: no llevan botón que resolver',
-    !$envlessResolver->usesRelativeTrackingLink(NotificationTemplate::TECHNICIAN_ASSIGNED, $siteyPayload)
+    !$envlessResolver->usesRelativeTrackingLink(NotificationTemplate::TECHNICIAN_UNASSIGNED, $siteyPayload)
     && !$envlessResolver->usesRelativeTrackingLink(NotificationTemplate::COLD_CHAIN_IMMEDIATE_ALERT, $siteyPayload)
+);
+$assert(
+    '5.4.1 El enlace del técnico también se declara cuando no hay host público',
+    $envlessResolver->usesRelativeTrackingLink(NotificationTemplate::TECHNICIAN_ASSIGNED, $siteyPayload)
+    && !$resolver->usesRelativeTrackingLink(NotificationTemplate::TECHNICIAN_ASSIGNED, $siteyPayload)
+);
+$assert(
+    '5.4.2 Con host público el botón del técnico sale absoluto',
+    $resolver->resolve(NotificationTemplate::TECHNICIAN_ASSIGNED, $siteyPayload)
+        === 'https://vendguard.onrender.com/?tech=1&ticket=INC-2026-000123'
 );
 $assert(
     '5.5 Un aviso sin códigos no se declara aunque falte el host',

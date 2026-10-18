@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Application\Service;
 
 use InvalidArgumentException;
+use PDOException;
 use RuntimeException;
 use VendGuard\Core\Domain\Exception\CannotDeactivateSelfException;
 use VendGuard\Core\Domain\Exception\CannotSetOnCallInactiveUserException;
@@ -17,6 +18,7 @@ use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\OnCallTechnicianRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
+use VendGuard\Infrastructure\Notification\Transport\TelegramTransport;
 
 /**
  * AdminUserService
@@ -114,6 +116,10 @@ class AdminUserService
             $this->validatePhone($phone);
         }
 
+        // Módulo 15: la vinculación con Telegram nace con el alta y sólo aplica a
+        // técnicos de campo (RF-TG-07). No es un dato obligatorio.
+        $telegramChatId = $this->validateTelegramChatId($data['telegram_chat_id'] ?? null, $role);
+
         // Detección de colisión de email (RF-03, EARS 3.2)
         $existing = $this->userRepo->findByEmail($email, onlyActive: false, allowDeleted: true);
         if ($existing !== null) {
@@ -136,13 +142,18 @@ class AdminUserService
             );
         }
 
-        $created = $this->userRepo->create([
-            'name'     => $name,
-            'email'    => $email,
-            'role'     => $role->value,
-            'phone'    => $phone,
-            'password' => $password,
-        ]);
+        try {
+            $created = $this->userRepo->create([
+                'name'              => $name,
+                'email'             => $email,
+                'role'              => $role->value,
+                'phone'             => $phone,
+                'password'          => $password,
+                'telegram_chat_id'  => $telegramChatId,
+            ]);
+        } catch (PDOException $exception) {
+            throw $this->translateWriteFailure($exception, 'El alta del usuario');
+        }
 
         // Auditoría inmutable sincrónica (RF-05, EARS 4.1) - NUNCA persistir passwords ni hashes
         $metadata = [];
@@ -160,6 +171,7 @@ class AdminUserService
                 'email' => $created->getEmail(),
                 'role'  => $created->getRole()->value,
                 'phone' => $created->getPhone(),
+                'telegram_chat_id' => self::maskChatId($created->getTelegramChatId()),
             ],
             !empty($metadata) ? $metadata : null
         );
@@ -206,11 +218,24 @@ class AdminUserService
             }
         }
 
+        if (array_key_exists('telegram_chat_id', $data)) {
+            $telegramChatId = $this->validateTelegramChatId($data['telegram_chat_id'], $existing->getRole());
+            if ($telegramChatId !== $existing->getTelegramChatId()) {
+                $updateData['telegram_chat_id'] = $telegramChatId;
+                $changedFields[] = 'telegram_chat_id';
+            }
+        }
+
         if (empty($updateData)) {
             return $existing;
         }
 
-        $this->userRepo->update($id, $updateData);
+        try {
+            $this->userRepo->update($id, $updateData);
+        } catch (PDOException $exception) {
+            throw $this->translateWriteFailure($exception, 'La actualización del usuario');
+        }
+
         $updated = $this->getUser($id, allowDeleted: false);
 
         // Auditoría diferencial sincrónica (RF-05, EARS 4.2)
@@ -226,10 +251,12 @@ class AdminUserService
             [
                 'name'  => $existing->getName(),
                 'phone' => $existing->getPhone(),
+                'telegram_chat_id' => self::maskChatId($existing->getTelegramChatId()),
             ],
             [
                 'name'  => $updated->getName(),
                 'phone' => $updated->getPhone(),
+                'telegram_chat_id' => self::maskChatId($updated->getTelegramChatId()),
             ],
             $metadata
         );
@@ -521,5 +548,81 @@ class AdminUserService
         if (!preg_match('/^[0-9+ -]{6,25}$/', $phone)) {
             throw new InvalidArgumentException("El teléfono '{$phone}' no tiene un formato válido. Debe contener entre 6 y 25 caracteres numéricos.");
         }
+    }
+
+    /**
+     * Valida la vinculación con Telegram del usuario (Módulo 15, RF-TG-07).
+     *
+     * Tres reglas, en este orden: un valor vacío significa «sin vincular» y es
+     * legal; sólo un técnico de campo puede tener chat, porque el canal entrega
+     * rutas de trabajo; y el formato es el de un identificador de Telegram. La
+     * unicidad no se comprueba aquí —necesitaría leer por un valor que aún no es
+     * columna obligatoria— sino en el índice único parcial, cuya violación se
+     * traduce a un mensaje de negocio en {@see translateWriteFailure()}.
+     */
+    private function validateTelegramChatId(mixed $rawValue, UserRole $role): ?string
+    {
+        if ($rawValue === null) {
+            return null;
+        }
+
+        $value = trim((string)$rawValue);
+        if ($value === '') {
+            return null;
+        }
+
+        if (!$role->isTechnician()) {
+            throw new InvalidArgumentException(
+                'Sólo un técnico de campo puede vincular un chat de Telegram: el canal entrega su ruta de trabajo.'
+            );
+        }
+
+        if (!TelegramTransport::isValidChatId($value)) {
+            throw new InvalidArgumentException(
+                'El chat de Telegram no tiene un formato válido. Debe ser un identificador numérico (por ejemplo 123456789 o -1001234567890).'
+            );
+        }
+
+        return $value;
+    }
+
+    /**
+     * Traduce una violación de unicidad del motor a un error de negocio.
+     *
+     * El chat de Telegram es único entre usuarios vivos: si dos técnicos
+     * compartieran chat, uno recibiría las averías del otro. La base lo impide con
+     * un índice único parcial; aquí se convierte en un mensaje que Coordinación
+     * puede entender y corregir.
+     */
+    private function translateWriteFailure(PDOException $exception, string $operation): InvalidArgumentException|PDOException
+    {
+        $isDuplicate = (string)$exception->getCode() === '23505';
+        $mentionsChat = str_contains($exception->getMessage(), 'uq_users_telegram_chat_id')
+            || str_contains($exception->getMessage(), 'telegram_chat_id');
+
+        if ($isDuplicate && $mentionsChat) {
+            return new InvalidArgumentException(
+                'Ese chat de Telegram ya está vinculado a otro usuario. Un chat pertenece a un solo técnico.'
+            );
+        }
+
+        return $exception;
+    }
+
+    /**
+     * Enmascara el chat en el rastro de auditoría: el identificador completo es un
+     * dato personal y no necesita viajar entero para que el cambio sea trazable.
+     */
+    private static function maskChatId(?string $chatId): ?string
+    {
+        if ($chatId === null || $chatId === '') {
+            return null;
+        }
+
+        if (strlen($chatId) <= 4) {
+            return '***';
+        }
+
+        return '***' . substr($chatId, -4);
     }
 }

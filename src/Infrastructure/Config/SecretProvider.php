@@ -37,6 +37,17 @@ final class SecretProvider
     public const ENV_CRON_SECRET = 'CRON_SECRET';
 
     /**
+     * Token del bot de Telegram (Módulo 15). A diferencia de las claves de firma,
+     * **no** es obligatorio: el canal personal del técnico es opcional, y su
+     * ausencia no puede impedir que el sistema arranque ni que la asignación se
+     * registre. `null` significa «canal no configurado».
+     */
+    public const ENV_TELEGRAM_BOT_TOKEN = 'VENDGUARD_TELEGRAM_BOT_TOKEN';
+
+    /** Alias admitido: el mismo nombre que usa el relé de Cloudflare. */
+    private const ENV_TELEGRAM_BOT_TOKEN_ALIAS = 'TG_BOT_TOKEN';
+
+    /**
      * Claves de desarrollo. No son secretos: su único propósito es que un entorno local
      * funcione sin configuración y que la clave histórica del repositorio quede invalidada.
      */
@@ -60,6 +71,25 @@ final class SecretProvider
     public static function cronSecret(): string
     {
         return self::resolve(self::ENV_CRON_SECRET, self::DEV_CRON_SECRET);
+    }
+
+    /**
+     * Token del bot de Telegram, o `null` si no está declarado.
+     *
+     * Se acepta `TG_BOT_TOKEN` como respaldo porque es el nombre con el que el
+     * relé de Cloudflare del Módulo 14 ya lo declara: un único valor sirve a los
+     * dos procesos en vez de mantener dos tokens en paralelo.
+     */
+    public static function telegramBotToken(): ?string
+    {
+        foreach ([self::ENV_TELEGRAM_BOT_TOKEN, self::ENV_TELEGRAM_BOT_TOKEN_ALIAS] as $name) {
+            $value = self::read($name);
+            if ($value !== null && $value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
     }
 
     /**

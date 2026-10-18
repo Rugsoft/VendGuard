@@ -85,7 +85,11 @@ $enqueuer = new NotificationOutboxEnqueuerService(
 
 $emailTransport = new InMemoryNotificationTransport(NotificationChannel::EMAIL);
 $webhookTransport = new InMemoryNotificationTransport(NotificationChannel::WEBHOOK);
-$transports = new NotificationTransportRegistry($emailTransport, $webhookTransport);
+// Módulo 15: el canal personal del técnico tiene su propio adaptador, de modo que
+// la suite pueda demostrar que el despachador NO entrega un chat por correo ni un
+// correo por Telegram (RF-TG-01).
+$telegramTransport = new InMemoryNotificationTransport(NotificationChannel::TELEGRAM);
+$transports = new NotificationTransportRegistry($emailTransport, $webhookTransport, $telegramTransport);
 
 /**
  * Composición del despachador sobre el grafo del banco.
@@ -711,6 +715,104 @@ $assert(
     'T-NOTIF-17: el botón del correo viaja absoluto con el host declarado',
     str_contains($hostHtml, 'https://sede.vendguard.test/?site=SEDE-BCN-01&amp;ticket=INC-2026-H7PU'),
     'Cuerpo: ' . mb_substr($hostHtml, 0, 200)
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. Módulo 15 — El canal personal del técnico despacha, reintenta y se rinde
+//    con las mismas reglas, sin abrir un socket y sin mezclar destinos.
+// ─────────────────────────────────────────────────────────────────────────────
+$telegramOkRecipient = '987654321';
+$telegramRetryRecipient = '555000111';
+$telegramBlockedRecipient = '555000222';
+
+$telegramOk = $enqueueSimple(
+    NotificationChannel::TELEGRAM,
+    NotificationPriority::STANDARD,
+    NotificationTemplate::TECHNICIAN_ASSIGNED,
+    $telegramOkRecipient,
+    'TECHNICIAN',
+    $threeHourId,
+    (int)($technician?->getId() ?? 0)
+);
+$telegramRetry = $enqueueSimple(
+    NotificationChannel::TELEGRAM,
+    NotificationPriority::STANDARD,
+    NotificationTemplate::TECHNICIAN_ASSIGNED,
+    $telegramRetryRecipient,
+    'TECHNICIAN'
+);
+$telegramBlocked = $enqueueSimple(
+    NotificationChannel::TELEGRAM,
+    NotificationPriority::STANDARD,
+    NotificationTemplate::TECHNICIAN_ASSIGNED,
+    $telegramBlockedRecipient,
+    'TECHNICIAN'
+);
+
+$telegramTransport->scriptOutcomes(
+    $telegramRetryRecipient,
+    TransportDeliveryResult::transientFailure('Telegram respondió con HTTP 429: Too Many Requests.', 429)
+);
+$telegramTransport->scriptOutcomes(
+    $telegramBlockedRecipient,
+    TransportDeliveryResult::permanentFailure('Telegram respondió con HTTP 403: bot was blocked by the user.', 403)
+);
+
+$emailDeliveriesBefore = $emailTransport->deliveryCount();
+$telegramAuditBefore = (int)$pdo->query(
+    "SELECT COUNT(*) FROM audit_log WHERE action = 'NOTIFICATION_PERMANENT_FAILURE'"
+)->fetchColumn();
+
+$telegramPass = $dispatcherWithHost->runPass(100);
+
+$telegramOkRow = $outboxRow((int)$telegramOk->getId());
+$telegramRetryRow = $outboxRow((int)$telegramRetry->getId());
+$telegramBlockedRow = $outboxRow((int)$telegramBlocked->getId());
+$telegramAuditAfter = (int)$pdo->query(
+    "SELECT COUNT(*) FROM audit_log WHERE action = 'NOTIFICATION_PERMANENT_FAILURE'"
+)->fetchColumn();
+$telegramDeliveries = $telegramTransport->deliveries();
+$telegramCta = null;
+foreach ($telegramDeliveries as $delivery) {
+    if ($delivery['recipient'] === $telegramOkRecipient) {
+        $telegramCta = $delivery['message']->ctaUrl ?? null;
+    }
+}
+
+$assert(
+    'RF-TG-01: una fila TELEGRAM se entrega por su canal con el chat del técnico como destinatario',
+    (string)$telegramOkRow['status'] === 'SENT'
+        && in_array($telegramOkRecipient, $telegramTransport->deliveredRecipients(), true),
+    'estado: ' . (string)$telegramOkRow['status']
+);
+$assert(
+    'RF-TG-04/RF-TG-05: el mensaje lleva el botón a la avería, absoluto y con el mismo destino que el correo',
+    $telegramCta === 'https://sede.vendguard.test/?tech=1&ticket=TICK-NOTIF07',
+    'cta: ' . var_export($telegramCta, true)
+);
+$assert(
+    'RF-TG-01: el canal Telegram no se cruza con el correo (ni un chat por SMTP ni un correo por Telegram)',
+    $emailTransport->deliveryCount() === $emailDeliveriesBefore
+        && !in_array($telegramOkRecipient, $emailTransport->deliveredRecipients(), true)
+);
+$assert(
+    'RF-TG-01: un 429 de Telegram es fallo transitorio y entra en la curva de reintentos',
+    (string)$telegramRetryRow['status'] === 'PENDING_RETRY'
+        && (int)$telegramRetryRow['attempts'] === 1
+        && str_contains((string)$telegramRetryRow['last_error'], '429'),
+    'estado: ' . (string)$telegramRetryRow['status'] . ' · error: ' . (string)$telegramRetryRow['last_error']
+);
+$assert(
+    'RF-TG-01: un 403 (bot bloqueado o chat inexistente) es fallo permanente, no un reintento infinito',
+    (string)$telegramBlockedRow['status'] === 'FAILED_PERMANENT'
+        && (int)$telegramBlockedRow['attempts'] === 1
+        && str_contains((string)$telegramBlockedRow['last_error'], '403'),
+    'estado: ' . (string)$telegramBlockedRow['status'] . ' · error: ' . (string)$telegramBlockedRow['last_error']
+);
+$assert(
+    'RF-TG-01/Art. III.3: el fallo definitivo de Telegram deja su rastro en audit_log',
+    $telegramAuditAfter > $telegramAuditBefore
+        && $telegramPass->failedPermanentCount >= 1
 );
 
 // Censo del catálogo: el vigilante es la única vía de las dos plantillas de

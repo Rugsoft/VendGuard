@@ -25,8 +25,12 @@ use VendGuard\Core\Domain\ValueObject\NotificationTemplate;
  *
  *   - **LOCATION (Portal de Sede):** `/?site={site_code}&ticket={ticket_code}`.
  *   - **CITIZEN_QR (vista pública acotada):** `/?qr={machine_code}`.
- *   - **INTERNAL:** sin enlace; Coordinación y los técnicos entran al sistema
- *     autenticados y el aviso no lleva botón.
+ *   - **TECHNICIAN (ruta del técnico, Módulo 15):** `/?tech=1&ticket={ticket_code}`.
+ *     El enlace **no** autentica: al abrirlo se pide la sesión del técnico y sólo
+ *     entonces se resuelve la parada. Un enlace reenviado no es una credencial.
+ *   - **INTERNAL:** sin enlace; Coordinación entra al sistema autenticada y su
+ *     aviso no lleva botón. La desasignación tampoco lo lleva: al técnico saliente
+ *     no se le invita a abrir un expediente que ya no es suyo.
  *
  * **Ruta persistida, URL entregada.** El payload de la cola guarda la ruta
  * —estable e independiente del despliegue— y el host público se aplica al
@@ -44,6 +48,7 @@ final class NotificationTrackingLinkResolver
 {
     public const AUDIENCE_LOCATION = 'LOCATION';
     public const AUDIENCE_CITIZEN_QR = 'CITIZEN_QR';
+    public const AUDIENCE_TECHNICIAN = 'TECHNICIAN';
     public const AUDIENCE_INTERNAL = 'INTERNAL';
 
     /**
@@ -85,6 +90,10 @@ final class NotificationTrackingLinkResolver
             NotificationTemplate::INCIDENT_RESOLVED_CITIZEN_QR,
             NotificationTemplate::INCIDENT_CANCELLED_CITIZEN_QR,
             NotificationTemplate::CITIZEN_QR_OBSERVATION_ACK => self::AUDIENCE_CITIZEN_QR,
+
+            // El técnico entrante recibe su aviso con enlace a la parada concreta.
+            // La desasignación se queda en INTERNAL a propósito (RF-TG-06).
+            NotificationTemplate::TECHNICIAN_ASSIGNED => self::AUDIENCE_TECHNICIAN,
 
             default => self::AUDIENCE_INTERNAL,
         };
@@ -161,6 +170,13 @@ final class NotificationTrackingLinkResolver
 
         if ($audience === self::AUDIENCE_LOCATION && $siteCode !== null) {
             return '/?site=' . rawurlencode($siteCode)
+                . ($ticketCode !== null ? '&ticket=' . rawurlencode($ticketCode) : '');
+        }
+
+        if ($audience === self::AUDIENCE_TECHNICIAN) {
+            // Sin ticket no se inventa un destino: la vista del técnico se abre en
+            // su ruta, que es lo único cierto que se puede prometer.
+            return '/?tech=1'
                 . ($ticketCode !== null ? '&ticket=' . rawurlencode($ticketCode) : '');
         }
 

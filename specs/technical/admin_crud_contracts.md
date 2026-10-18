@@ -498,6 +498,8 @@ Lista el personal del sistema, permitiendo filtrar por rol y estado operativo, e
 > **Semántica de `active_assigned_incidents_count`:** cuenta exclusivamente las averías en `ASSIGNED`, `IN_PROGRESS` o `PENDING_PARTS` del técnico. Una avería `RESOLVED` en su ventana de garantía de 48 h sigue siendo un expediente activo de la máquina (`is_active_ticket = 1`, cierre automático pendiente), pero el trabajo del técnico ya está hecho y no vuelve a intervenir: si el consumidor reabre por garantía, `reopen()` desasigna al técnico y la avería regresa a triaje como `REOPENED`. Contarla como carga falsificaría el directorio y bloquearía la baja de un técnico sin trabajo pendiente. El mismo criterio gobierna el bloqueo de baja (§3.3.6).
 >
 > **Semántica de `warranty_incidents_count` (informativo, solo lectura):** averías `RESOLVED` del técnico dentro de su ventana de garantía de 48 h (`resolved_at >= NOW() - INTERVAL 48 HOUR`). No forma parte del bloqueo de baja ni de ningún cálculo de carga: es un dato de contexto para el coordinador (trabajo reciente del técnico aún en período de garantía).
+>
+> **Vinculación de Telegram (Módulo 15, RF-TG-07 y RF-TG-10):** `telegram_chat_id` es el chat personal del técnico que recibe el aviso de asignación con el enlace a su avería, y `telegram_linked` es su indicador de solo lectura. Es un dato **personal y opcional**: sólo puede declararse en un usuario de rol `TECHNICIAN`, un chat pertenece a un solo usuario vivo y la auditoría lo registra enmascarado (`***1234`). Este contrato es el único que lo publica; no viaja en payloads de Sede ni de Ciudadano QR.
 
 * **Parámetros Query:**
   * `role` *(opcional, default: `all`)*: `TECHNICIAN`, `COORDINATOR`, `all`.
@@ -517,6 +519,9 @@ Lista el personal del sistema, permitiendo filtrar por rol y estado operativo, e
       "role_label": "Técnico de Ruta",
       "phone": "677998811",
       "is_active": true,
+      "is_on_call": true,
+      "telegram_chat_id": "987654321",
+      "telegram_linked": true,
       "active_assigned_incidents_count": 2,
       "warranty_incidents_count": 1,
       "created_at": "2026-09-01 08:00:00",
@@ -550,7 +555,8 @@ Da de alta a un nuevo técnico o coordinador con credenciales criptográficas se
   "email": "santiago.tec@vendguard.internal",
   "role": "TECHNICIAN",
   "phone": "655223344",
-  "password": "PasswordSegura2026!"
+  "password": "PasswordSegura2026!",
+  "telegram_chat_id": "987654321"
 }
 ```
 
@@ -566,10 +572,25 @@ Da de alta a un nuevo técnico o coordinador con credenciales criptográficas se
     "role": "TECHNICIAN",
     "phone": "655223344",
     "is_active": true,
+    "telegram_chat_id": "987654321",
+    "telegram_linked": true,
     "created_at": "2026-09-23 20:10:00"
   }
 }
 ```
+
+##### Errores de Vinculación de Telegram (`400 Bad Request`)
+```json
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Ese chat de Telegram ya está vinculado a otro usuario. Un chat pertenece a un solo técnico."
+  }
+}
+```
+
+Se rechaza con `400 VALIDATION_ERROR` cuando el formato no es un identificador numérico de Telegram (`^-?[0-9]{5,20}$`), cuando el destinatario no es un técnico de campo o cuando el chat ya pertenece a otro usuario vivo.
 
 ##### Respuesta de Conflicto (`409 Conflict` - Email existe inactivo)
 ```json
@@ -587,15 +608,18 @@ Da de alta a un nuevo técnico o coordinador con credenciales criptográficas se
 ---
 
 #### 3.3.3 `PATCH /api/coordinator/users/{id}`
-Actualiza datos de contacto del usuario (nombre y teléfono). El rol y el email son inmutables mediante este endpoint.
+Actualiza datos de contacto del usuario (nombre, teléfono y vinculación de Telegram). El rol y el email son inmutables mediante este endpoint.
 
 ##### Petición
 ```json
 {
   "name": "Santiago Gómez Morales",
-  "phone": "655998877"
+  "phone": "655998877",
+  "telegram_chat_id": "987654321"
 }
 ```
+
+Enviar `telegram_chat_id` vacío (`""`) **desvincula** al técnico: el campo pasa a `null`, deja de recibir avisos personales y su `telegram_linked` pasa a `false`. Omitir la clave deja la vinculación intacta.
 
 ##### Respuesta Exitosa (`200 OK`)
 ```json
@@ -608,7 +632,9 @@ Actualiza datos de contacto del usuario (nombre y teléfono). El rol y el email 
     "email": "santiago.tec@vendguard.internal",
     "role": "TECHNICIAN",
     "phone": "655998877",
-    "is_active": true
+    "is_active": true,
+    "telegram_chat_id": "987654321",
+    "telegram_linked": true
   }
 }
 ```

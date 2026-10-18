@@ -508,14 +508,20 @@ final class CoordinatorNotificationService
      * (`NotificationTrackingLinkResolver`), de modo que lo que Coordinación
      * revisa en la bandeja es exactamente lo que recibirá el destinatario: la
      * ruta guardada en `payload_json` prefijada con el host público vigente. Los
-     * avisos internos (Coordinación, técnicos) y los del canal Webhook, que no
-     * llevan botón, publican `null` en lugar de un enlace inventado.
+     * avisos internos (Coordinación) y los del canal Webhook, que no llevan botón,
+     * publican `null` en lugar de un enlace inventado.
+     *
+     * Desde el Módulo 15, un aviso de asignación al técnico **sí** lleva enlace, y
+     * viaja por dos canales: el correo y el mensaje personal de Telegram. La
+     * bandeja debe enseñar la misma URL en ambos, porque es la que se va a enviar.
+     * Por eso el filtro es «canales con botón», no «sólo correo».
      *
      * @param array<string, mixed> $row
      */
     private function trackingUrl(array $row, NotificationTemplate $template): ?string
     {
-        if ((string)($row['channel'] ?? '') !== NotificationChannel::EMAIL->value) {
+        $channel = (string)($row['channel'] ?? '');
+        if ($channel !== NotificationChannel::EMAIL->value && $channel !== NotificationChannel::TELEGRAM->value) {
             return null;
         }
 

@@ -48,6 +48,7 @@ export const AdminUsersTab = {
         email: '',
         role: 'TECHNICIAN',
         phone: '',
+        telegram_chat_id: '',
         password: ''
       },
       createErrors: {},
@@ -61,7 +62,8 @@ export const AdminUsersTab = {
         email: '',
         role: '',
         role_label: '',
-        phone: ''
+        phone: '',
+        telegram_chat_id: ''
       },
       editErrors: {},
       isSubmittingEdit: false,
@@ -187,7 +189,13 @@ export const AdminUsersTab = {
       const coordinators = this.users.filter(u => u.role === 'COORDINATOR').length;
       const activeAssignedTroubles = this.users.reduce((acc, u) => acc + Number(u.active_assigned_incidents_count || 0), 0);
       const onCall = this.users.filter(u => u.is_active && u.role === 'TECHNICIAN' && u.is_on_call === true).length;
-      return { total, active, inactive, technicians, coordinators, activeAssignedTroubles, onCall };
+      // Módulo 15 (RF-TG-10): la carencia de vinculación es un dato visible, no
+      // una sospecha. Sólo cuentan técnicos en activo: una cuenta de baja no
+      // necesita recibir avisos.
+      const techniciansWithoutTelegram = this.users.filter(
+        u => u.is_active && u.role === 'TECHNICIAN' && u.telegram_linked !== true
+      ).length;
+      return { total, active, inactive, technicians, coordinators, activeAssignedTroubles, onCall, techniciansWithoutTelegram };
     }
   },
   mounted() {
@@ -239,6 +247,22 @@ export const AdminUsersTab = {
     /**
      * Valida formato de teléfono español (9 dígitos).
      */
+    /**
+     * Valida el chat de Telegram declarado por Coordinación (Módulo 15, RF-TG-07).
+     *
+     * La regla espeja la del servicio de administración: vacío es legal —significa
+     * «sin vincular»— y cualquier valor debe ser un identificador numérico de
+     * Telegram (positivo para persona, negativo para grupo).
+     */
+    validateTelegramChatId(chatId) {
+      if (!chatId || !String(chatId).trim()) return null;
+      const value = String(chatId).trim();
+      if (!/^-?[0-9]{5,20}$/.test(value)) {
+        return 'El chat de Telegram debe ser numérico (por ejemplo 123456789 o -1001234567890).';
+      }
+      return null;
+    },
+
     validatePhone(phone) {
       if (!phone || !phone.trim()) return null;
       const clean = phone.trim().replace(/\s+/g, '');
@@ -283,6 +307,7 @@ export const AdminUsersTab = {
         email: '',
         role: 'TECHNICIAN',
         phone: '',
+        telegram_chat_id: '',
         password: ''
       };
       this.createErrors = {};
@@ -313,6 +338,9 @@ export const AdminUsersTab = {
       const phoneError = this.validatePhone(this.createForm.phone);
       if (phoneError) this.createErrors.phone = phoneError;
 
+      const telegramError = this.validateTelegramChatId(this.createForm.telegram_chat_id);
+      if (telegramError) this.createErrors.telegram_chat_id = telegramError;
+
       const passError = this.validatePassword(this.createForm.password);
       if (passError) this.createErrors.password = passError;
 
@@ -327,6 +355,9 @@ export const AdminUsersTab = {
           email: this.createForm.email.trim().toLowerCase(),
           role: this.createForm.role,
           phone: this.createForm.phone ? this.createForm.phone.trim().replace(/\s+/g, '') : null,
+          telegram_chat_id: this.createForm.role === 'TECHNICIAN' && this.createForm.telegram_chat_id
+            ? this.createForm.telegram_chat_id.trim()
+            : null,
           password: this.createForm.password
         };
 
@@ -355,7 +386,8 @@ export const AdminUsersTab = {
         email: user.email,
         role: user.role,
         role_label: user.role_label || this.getRoleLabel(user.role),
-        phone: user.phone || ''
+        phone: user.phone || '',
+        telegram_chat_id: user.telegram_chat_id || ''
       };
       this.editErrors = {};
       this.showEditModal = true;
@@ -382,6 +414,9 @@ export const AdminUsersTab = {
       const phoneError = this.validatePhone(this.editForm.phone);
       if (phoneError) this.editErrors.phone = phoneError;
 
+      const telegramError = this.validateTelegramChatId(this.editForm.telegram_chat_id);
+      if (telegramError) this.editErrors.telegram_chat_id = telegramError;
+
       if (Object.keys(this.editErrors).length > 0) {
         return;
       }
@@ -392,6 +427,15 @@ export const AdminUsersTab = {
           name: this.editForm.name.trim(),
           phone: this.editForm.phone ? this.editForm.phone.trim().replace(/\s+/g, '') : null
         };
+
+        // Sólo los técnicos pueden tener chat vinculado (misma regla que el
+        // servicio): enviar el campo vacío desvincula, y no enviarlo dejaría la
+        // vinculación anterior viva sin que nadie lo hubiera pedido.
+        if (this.editForm.role === 'TECHNICIAN') {
+          payload.telegram_chat_id = this.editForm.telegram_chat_id
+            ? this.editForm.telegram_chat_id.trim()
+            : null;
+        }
 
         await (api.admin ? api.admin.updateUser(this.editForm.id, payload) : api.patch(`/coordinator/users/${this.editForm.id}`, payload));
         this.showSuccessNotification(`Datos de "${this.editForm.name}" actualizados correctamente.`);
@@ -677,6 +721,9 @@ export const AdminUsersTab = {
             <span :class="summaryMetrics.onCall > 0 ? 'text-success' : 'text-danger'">
               <strong>🛡️ De Guardia:</strong> {{ summaryMetrics.onCall }}
             </span>
+            <span :class="summaryMetrics.techniciansWithoutTelegram > 0 ? 'text-warning' : 'text-success'">
+              <strong>📱 Telegram sin vincular:</strong> {{ summaryMetrics.techniciansWithoutTelegram }}
+            </span>
           </div>
         </div>
       </div>
@@ -705,6 +752,7 @@ export const AdminUsersTab = {
                   <th scope="col" style="min-width: 150px;">Rol</th>
                   <th scope="col" style="min-width: 140px;">Carga de Averías</th>
                   <th scope="col" style="width: 150px;">Guardia de Frío</th>
+                  <th scope="col" style="width: 130px;">Telegram</th>
                   <th scope="col" style="width: 120px;">Estado</th>
                   <th scope="col" class="text-end pe-3" style="width: 250px;">Acciones</th>
                 </tr>
@@ -780,6 +828,23 @@ export const AdminUsersTab = {
                         <span>En guardia</span>
                       </button>
                       <div v-if="u.is_on_call" class="small text-success mt-1">Recibe alertas de frío</div>
+                    </template>
+                    <span v-else class="text-muted small">-</span>
+                  </td>
+
+                  <!-- Telegram (Módulo 15, RF-TG-10): la carencia de vinculación
+                       se vede, para que la ausencia de avisos personales no sea
+                       una sospecha. Sólo aplica a técnicos. -->
+                  <td>
+                    <template v-if="u.role === 'TECHNICIAN'">
+                      <span
+                        v-if="u.telegram_linked"
+                        class="badge bg-primary-subtle text-primary border border-primary-subtle"
+                        :title="'Chat vinculado: ' + (u.telegram_chat_id || '')"
+                      >
+                        📱 Vinculado
+                      </span>
+                      <span v-else class="badge bg-light text-muted border">Sin vincular</span>
                     </template>
                     <span v-else class="text-muted small">-</span>
                   </td>
@@ -912,6 +977,22 @@ export const AdminUsersTab = {
                     <div v-if="createErrors.phone" class="invalid-feedback small">{{ createErrors.phone }}</div>
                   </div>
 
+                  <!-- Chat de Telegram (Módulo 15): opcional. Sin él el técnico
+                       recibe el correo de asignación pero no el aviso personal. -->
+                  <div v-if="createForm.role === 'TECHNICIAN'" class="col-md-6">
+                    <label class="form-label small fw-bold">Chat de Telegram (Avisos personales)</label>
+                    <input
+                      type="text"
+                      class="form-control font-monospace"
+                      :class="{'is-invalid': createErrors.telegram_chat_id}"
+                      v-model="createForm.telegram_chat_id"
+                      placeholder="Ej: 123456789 o -1001234567890"
+                      maxlength="32"
+                    />
+                    <div v-if="createErrors.telegram_chat_id" class="invalid-feedback small">{{ createErrors.telegram_chat_id }}</div>
+                    <div class="form-text small">Opcional. El técnico obtiene su identificador escribiendo a <code>@userinfobot</code> en Telegram.</div>
+                  </div>
+
                   <!-- Contraseña Inicial -->
                   <div class="col-12">
                     <label class="form-label small fw-bold">Contraseña Inicial <span class="text-danger">*</span></label>
@@ -992,6 +1073,21 @@ export const AdminUsersTab = {
                     maxlength="15"
                   />
                   <div v-if="editErrors.phone" class="invalid-feedback small">{{ editErrors.phone }}</div>
+                </div>
+
+                <!-- Chat de Telegram (Módulo 15, RF-TG-07): vaciarlo desvincula. -->
+                <div v-if="editForm.role === 'TECHNICIAN'" class="mb-3">
+                  <label class="form-label small fw-bold">Chat de Telegram (Avisos personales)</label>
+                  <input
+                    type="text"
+                    class="form-control font-monospace"
+                    :class="{'is-invalid': editErrors.telegram_chat_id}"
+                    v-model="editForm.telegram_chat_id"
+                    placeholder="Ej: 123456789 o -1001234567890"
+                    maxlength="32"
+                  />
+                  <div v-if="editErrors.telegram_chat_id" class="invalid-feedback small">{{ editErrors.telegram_chat_id }}</div>
+                  <div class="form-text small">Vacío = sin avisos por Telegram. Sólo un técnico puede tener un chat, y un chat pertenece a un solo técnico.</div>
                 </div>
 
                 <div class="modal-footer px-0 pb-0 pt-3 border-top">

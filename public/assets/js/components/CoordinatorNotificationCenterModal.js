@@ -54,7 +54,9 @@ const STATUS_OPTIONS = [
 const CHANNEL_OPTIONS = [
   { value: 'ALL', label: 'Todos los canales' },
   { value: 'EMAIL', label: 'Correo electrónico' },
-  { value: 'WEBHOOK', label: 'Webhook de emergencias' }
+  { value: 'WEBHOOK', label: 'Webhook de emergencias' },
+  // Módulo 15: canal personal del técnico (aviso de asignación).
+  { value: 'TELEGRAM', label: 'Telegram del técnico' }
 ];
 
 const PRIORITY_OPTIONS = [
@@ -425,6 +427,9 @@ export const CoordinatorNotificationCenterModal = {
       }
       if (channel === 'EMAIL') {
         return 'Correo';
+      }
+      if (channel === 'TELEGRAM') {
+        return 'Telegram';
       }
       return String(channel || '—');
     },

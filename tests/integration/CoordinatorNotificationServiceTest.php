@@ -270,9 +270,24 @@ $citizenLinkItem = $enqueue(
 $internalLinkItem = $enqueue(
     NotificationChannel::EMAIL,
     NotificationPriority::STANDARD,
-    NotificationTemplate::TECHNICIAN_ASSIGNED,
+    NotificationTemplate::TECHNICIAN_UNASSIGNED,
     'tecnico.enlace.tnotif07@example.org',
     'TECHNICIAN'
+);
+// Módulo 15: el aviso de asignación al técnico sí lleva botón, y apunta a su ruta.
+$technicianLinkItem = $enqueue(
+    NotificationChannel::TELEGRAM,
+    NotificationPriority::STANDARD,
+    NotificationTemplate::TECHNICIAN_ASSIGNED,
+    '123456789',
+    'TECHNICIAN',
+    null,
+    null,
+    null,
+    [
+        'ticket_code' => $ticketCode,
+        'machine_code' => $machineCodeForLink,
+    ]
 );
 
 $previousPublicBase = getenv(AppPublicUrl::ENV_NAME);
@@ -306,6 +321,12 @@ $assert(
 $assert(
     'El aviso interno no publica enlace: no lleva botón',
     $linkRows[(int)$internalLinkItem->getId()]['tracking_url'] === null
+);
+$assert(
+    'RF-TG-04: el aviso de asignación publica la ruta del técnico con su ticket',
+    $linkRows[(int)$technicianLinkItem->getId()]['tracking_url']
+        === 'https://vendguard.onrender.com/?tech=1&ticket=' . rawurlencode($ticketCode),
+    'recibido: ' . var_export($linkRows[(int)$technicianLinkItem->getId()]['tracking_url'] ?? null, true)
 );
 $assert(
     'El canal Webhook no publica enlace de seguimiento de correo',

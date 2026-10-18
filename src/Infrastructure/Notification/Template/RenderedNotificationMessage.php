@@ -15,6 +15,12 @@ use VendGuard\Core\Domain\ValueObject\NotificationTemplate;
  * consumen tal cual (SMTP compone las partes `text/plain` y `text/html`; el
  * Webhook serializa su contenido a JSON).
  *
+ * **Botón estructurado (Módulo 15).** `ctaLabel`/`ctaUrl` publican el destino del
+ * botón como dato, no sólo incrustado en el HTML: Telegram necesita el par
+ * (etiqueta, URL) para pintar su teclado en línea, y no puede extraerlo de un
+ * cuerpo de correo. SMTP y Webhook los ignoran, de modo que el contrato existente
+ * no cambia. Ambos son `null` cuando la plantilla no lleva enlace.
+ *
  * Dogma Vanilla: PHP 8.2+ puro, sin dependencias externas.
  * Dualismo Lingüístico: código e identificadores en inglés, documentación en castellano.
  */
@@ -28,6 +34,8 @@ final class RenderedNotificationMessage
         public readonly string $subject,
         public readonly string $textBody,
         public readonly string $htmlBody,
+        public readonly ?string $ctaLabel = null,
+        public readonly ?string $ctaUrl = null,
     ) {
         if (trim($this->subject) === '') {
             throw new InvalidArgumentException('El asunto de la notificación no puede estar vacío.');

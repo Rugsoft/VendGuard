@@ -45,6 +45,14 @@ import { PendingInfoPauseModal, PAUSE_REASON_CATEGORIES } from '../components/Pe
 
 export const TechnicianRouteView = {
   name: 'TechnicianRouteView',
+  props: {
+    /**
+     * Ticket citado por un enlace entrante (Módulo 15, RF-TG-08): el aviso de
+     * Telegram abre `/?tech=1&ticket=INC-…` y la vista resalta esa parada en
+     * cuanto la ruta está cargada. Opcional: entrar sin enlace es lo normal.
+     */
+    initialTicketCode: { type: String, default: '' }
+  },
   components: {
     IncidentBadge,
     ModalDialog,
@@ -81,6 +89,13 @@ export const TechnicianRouteView = {
 
       // Action loading states
       actionInProgressId: null,
+
+      // Enlace entrante del aviso de asignación (Módulo 15, RF-TG-08): se aplica
+      // una sola vez, cuando la ruta ya está cargada, y se marca como consumido
+      // para que un refresco no vuelva a desplazar la pantalla del técnico.
+      deepLinkHandled: false,
+      deepLinkNotice: '',
+      highlightedIncidentId: null,
 
       // Modal 1: Pause intervention for missing spare parts (RF-07 / EARS 7.2)
       showPauseModal: false,
@@ -263,7 +278,7 @@ export const TechnicianRouteView = {
   },
   mounted() {
     if (this.isAuthenticated) {
-      this.loadRoute();
+      this.loadRoute().then(() => this.applyDeepLink());
     }
   },
   methods: {
@@ -306,6 +321,51 @@ export const TechnicianRouteView = {
     },
 
     /**
+     * Aplica el enlace entrante de una asignación (Módulo 15, RF-TG-08).
+     *
+     * Reglas: se aplica una sola vez; compara el ticket sin distinguir
+     * mayúsculas; si la parada ya no está en la ruta avisa con un mensaje
+     * explícito en lugar de dejar al técnico mirando una lista vacía; y el
+     * desplazamiento y el resalte son opcionales para que la lógica se pueda
+     * certificar sin navegador.
+     */
+    applyDeepLink() {
+      if (this.deepLinkHandled) return;
+
+      const ticket = String(this.initialTicketCode || '').trim();
+      this.deepLinkHandled = true;
+      if (ticket === '') return;
+
+      const target = this.incidents.find(
+        inc => String(inc?.ticket_code || '').toUpperCase() === ticket.toUpperCase()
+      );
+
+      if (!target) {
+        this.deepLinkNotice = `El expediente ${ticket} ya no está en tu ruta. Puede haberse resuelto, cancelado o reasignado.`;
+        return;
+      }
+
+      this.deepLinkNotice = '';
+      this.highlightedIncidentId = target.id;
+
+      if (typeof document !== 'undefined' && typeof document.getElementById === 'function') {
+        this.$nextTick(() => {
+          const element = document.getElementById(`technician-stop-${target.id}`);
+          if (element && typeof element.scrollIntoView === 'function') {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        });
+      }
+
+      // El resalte es una pista, no un estado: se apaga solo para que la tarjeta
+      // vuelva a leerse como las demás.
+      const timer = setTimeout(() => {
+        this.highlightedIncidentId = null;
+      }, 2500);
+      if (timer && typeof timer.unref === 'function') timer.unref();
+    },
+
+    /**
      * Technician login handler (RF-04).
      */
     async handleInternalLogin() {
@@ -329,6 +389,9 @@ export const TechnicianRouteView = {
         this.loginEmail = '';
         this.loginPassword = '';
         await this.loadRoute();
+        // El enlace del mensaje ya estaba en la URL: se aplica después del
+        // acceso, que es el único momento en que la ruta es visible.
+        this.applyDeepLink();
       } catch (err) {
         this.loginError = err?.message || 'Credenciales incorrectas o usuario técnico inactivo.';
       } finally {
@@ -1177,6 +1240,19 @@ export const TechnicianRouteView = {
           <button type="button" @click="errorMessage = ''" style="background: none; border: none; font-size: 14px; color: #b91c1c; cursor: pointer;">×</button>
         </div>
 
+        <!-- Enlace entrante de una asignación (Módulo 15, RF-TG-08): si el
+             expediente citado ya no está en la ruta, se dice con claridad en
+             lugar de dejar al técnico mirando una lista que no lo contiene. -->
+        <div
+          v-if="deepLinkNotice"
+          style="background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); padding: 10px 14px; border-radius: var(--radius-interactive, 4px); font-size: 13px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;"
+          role="status"
+          data-testid="deep-link-notice"
+        >
+          <span>ℹ️ {{ deepLinkNotice }}</span>
+          <button type="button" @click="deepLinkNotice = ''" style="background: none; border: none; font-size: 14px; color: var(--color-warning-text); cursor: pointer;">×</button>
+        </div>
+
         <!-- Mobile Filter Tabs (Touch Friendly): wrap on the card so no chip ends cut -->
         <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
           <button
@@ -1251,6 +1327,7 @@ export const TechnicianRouteView = {
           <div
             v-for="incident in filteredIncidents"
             :key="incident.id"
+            :id="'technician-stop-' + incident.id"
             class="vg-route-card"
             :style="{
               backgroundColor: '#ffffff',
@@ -1258,7 +1335,10 @@ export const TechnicianRouteView = {
               borderLeft: cardBorderLeft(incident),
               borderRadius: 'var(--radius-card, 8px)',
               padding: '14px',
-              boxShadow: 'var(--shadow-card, 0 1px 3px rgba(0,0,0,0.04))'
+              boxShadow: highlightedIncidentId === incident.id
+                ? '0 0 0 2px var(--color-primary)'
+                : 'var(--shadow-card, 0 1px 3px rgba(0,0,0,0.04))',
+              transition: 'box-shadow 220ms ease-out'
             }"
           >
             <!-- Card Header: Ticket & Badges -->

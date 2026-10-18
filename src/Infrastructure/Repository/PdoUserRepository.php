@@ -74,6 +74,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
                 phone, 
                 is_active, 
                 is_on_call,
+                telegram_chat_id,
                 created_at, 
                 updated_at, 
                 deleted_at
@@ -127,6 +128,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
                 phone, 
                 is_active, 
                 is_on_call,
+                telegram_chat_id,
                 created_at, 
                 updated_at, 
                 deleted_at
@@ -176,6 +178,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
                 phone, 
                 is_active, 
                 is_on_call,
+                telegram_chat_id,
                 created_at, 
                 updated_at, 
                 deleted_at
@@ -231,6 +234,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
                 {$identityColumns}password_hash,
                 role,
                 phone,
+                telegram_chat_id,
                 is_active,
                 created_at,
                 updated_at,
@@ -241,6 +245,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
                 {$identityValues}:password_hash,
                 :role,
                 :phone,
+                :telegram_chat_id,
                 {$this->dialect->booleanLiteral(true)},
                 CURRENT_TIMESTAMP,
                 CURRENT_TIMESTAMP,
@@ -255,6 +260,9 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
             ':password_hash' => $passwordHash,
             ':role'          => strtoupper(trim((string)$data['role'])),
             ':phone'         => isset($data['phone']) && $data['phone'] !== '' ? trim((string)$data['phone']) : null,
+            ':telegram_chat_id' => isset($data['telegram_chat_id']) && $data['telegram_chat_id'] !== ''
+                ? trim((string)$data['telegram_chat_id'])
+                : null,
         ]);
 
         $newId = (int)$this->pdo->lastInsertId();
@@ -286,6 +294,12 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
         if (array_key_exists('phone', $data)) {
             $fields[] = "phone = :phone";
             $params[':phone'] = $data['phone'] !== null && $data['phone'] !== '' ? trim((string)$data['phone']) : null;
+        }
+        if (array_key_exists('telegram_chat_id', $data)) {
+            $fields[] = "telegram_chat_id = :telegram_chat_id";
+            $params[':telegram_chat_id'] = $data['telegram_chat_id'] !== null && $data['telegram_chat_id'] !== ''
+                ? trim((string)$data['telegram_chat_id'])
+                : null;
         }
 
         if (empty($fields)) {
@@ -535,6 +549,7 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
                 u.phone,
                 u.is_active,
                 u.is_on_call,
+                u.telegram_chat_id,
                 u.created_at,
                 u.updated_at,
                 u.deleted_at,
@@ -603,6 +618,8 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
                 'phone'                           => $row['phone'] !== null ? (string)$row['phone'] : null,
                 'is_active'                       => (bool)$row['is_active'] && $row['deleted_at'] === null,
                 'is_on_call'                      => (bool)($row['is_on_call'] ?? false),
+                'telegram_chat_id'                => $row['telegram_chat_id'] !== null ? (string)$row['telegram_chat_id'] : null,
+                'telegram_linked'                 => $row['telegram_chat_id'] !== null,
                 'active_assigned_incidents_count' => (int)$row['active_assigned_incidents_count'],
                 'warranty_incidents_count'        => (int)$row['warranty_incidents_count'],
                 'created_at'                      => (string)$row['created_at'],

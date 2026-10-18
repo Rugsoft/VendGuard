@@ -77,7 +77,16 @@ export const App = {
         return;
       }
 
-      // 3. Deep Link al Portal de Sede desde el correo de seguimiento
+      // 3. Deep Link al aviso de asignación del técnico (Módulo 15, RF-TG-08):
+      //    `/?tech=1&ticket=INC-…`. El enlace NO autentica: abre la vista del
+      //    técnico y, si no hay sesión, pide acceso; el ticket queda en la URL y se
+      //    aplica cuando la ruta se carga. Un enlace reenviado no es una credencial.
+      if (urlParams.has('tech')) {
+        this.currentView = 'technician';
+        this.deepLinkTicket = (urlParams.get('ticket') || '').trim();
+      }
+
+      // 4. Deep Link al Portal de Sede desde el correo de seguimiento
       //    (/?site=SEDE-BCN-01&ticket=INC-2026-...). El botón del aviso tiene que
       //    aterrizar en el portal de ESA sede, no en el formulario vacío: el
       //    código queda prellenado y, tras identificarse con la clave de centro,
@@ -91,7 +100,7 @@ export const App = {
       }
     }
 
-    // 4. Restauración de sesión si no es acceso público por QR o seguimiento
+    // 5. Restauración de sesión si no es acceso público por QR o seguimiento
     const restored = restoreSession();
     if (restored) {
       if (store.state.location) {
@@ -250,6 +259,7 @@ export const App = {
         />
         <TechnicianRouteView
           v-else-if="currentView === 'technician'"
+          :initial-ticket-code="deepLinkTicket"
         />
       </main>
 

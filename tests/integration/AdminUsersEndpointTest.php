@@ -337,6 +337,73 @@ $stmtAuditReactUsr->execute([':id' => $newUserId]);
 $auditReactUsr = $stmtAuditReactUsr->fetch(PDO::FETCH_ASSOC);
 $assert("8.4 Evento USER_REACTIVATED en audit_log", $auditReactUsr !== false);
 
+// =========================================================================
+// BLOQUE 9: Módulo 15 · Vinculación de Telegram del técnico (RF-TG-07)
+// =========================================================================
+echo "\n--- BLOQUE 9: Vinculación de Telegram del técnico (RF-TG-07) ---\n";
+
+$telegramChatId = '987654321';
+$telegramChatMask = '***' . substr($telegramChatId, -4);
+
+$reqLinkChat = new Request('PATCH', "/api/coordinator/users/{$newUserId}", [], [
+    'telegram_chat_id' => $telegramChatId
+], ['authorization' => "Bearer {$coordinatorToken}", 'content-type' => 'application/json']);
+$resLinkChat = $router->dispatch($reqLinkChat);
+$bodyLinkChat = $resLinkChat->getDecodedBody();
+
+$assert("9.1 Vincular un chat de Telegram a un técnico retorna HTTP 200 OK", $resLinkChat->getStatusCode() === 200);
+$assert("9.2 La ficha publica el chat vinculado y su indicador", ($bodyLinkChat['data']['telegram_chat_id'] ?? null) === $telegramChatId && ($bodyLinkChat['data']['telegram_linked'] ?? false) === true);
+
+$stmtChatPersisted = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE id = :id");
+$stmtChatPersisted->execute([':id' => $newUserId]);
+$assert("9.3 El chat queda persistido en la ficha del técnico", (string)$stmtChatPersisted->fetchColumn() === $telegramChatId);
+
+$reqListTech = new Request('GET', '/api/coordinator/users?role=TECHNICIAN', [], [], ['authorization' => "Bearer {$coordinatorToken}"]);
+$bodyListTechChat = $router->dispatch($reqListTech)->getDecodedBody();
+$linkedRow = null;
+foreach ($bodyListTechChat['data'] ?? [] as $rowUser) {
+    if ((int)($rowUser['id'] ?? 0) === $newUserId) {
+        $linkedRow = $rowUser;
+    }
+}
+$assert("9.4 El listado informa de la vinculación para que la carencia sea visible (RF-TG-10)", $linkedRow !== null && ($linkedRow['telegram_linked'] ?? false) === true);
+
+$stmtAuditChat = $pdo->prepare("SELECT * FROM audit_log WHERE entity_type = 'USER' AND action = 'USER_UPDATED' AND entity_id = :id ORDER BY id DESC LIMIT 1");
+$stmtAuditChat->execute([':id' => $newUserId]);
+$auditChatText = (string)json_encode($stmtAuditChat->fetch(PDO::FETCH_ASSOC));
+$assert("9.5 La auditoría registra el cambio de vinculación enmascarado", str_contains($auditChatText, $telegramChatMask));
+$assert("9.6 El chat completo no viaja en el rastro de auditoría (dato personal)", !str_contains($auditChatText, $telegramChatId));
+
+$reqBadChat = new Request('PATCH', "/api/coordinator/users/{$newUserId}", [], [
+    'telegram_chat_id' => 'jordi.ruta'
+], ['authorization' => "Bearer {$coordinatorToken}", 'content-type' => 'application/json']);
+$resBadChat = $router->dispatch($reqBadChat);
+$stmtChatAfterBad = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE id = :id");
+$stmtChatAfterBad->execute([':id' => $newUserId]);
+$assert("9.7 Un chat con formato inválido retorna HTTP 400 y no muta la ficha", $resBadChat->getStatusCode() === 400 && (string)$stmtChatAfterBad->fetchColumn() === $telegramChatId);
+
+$reqChatForCoordinator = new Request('PATCH', "/api/coordinator/users/{$coordId}", [], [
+    'telegram_chat_id' => '123456789'
+], ['authorization' => "Bearer {$coordinatorToken}", 'content-type' => 'application/json']);
+$resChatForCoordinator = $router->dispatch($reqChatForCoordinator);
+$assert("9.8 Un rol no técnico no puede vincular chat de Telegram", $resChatForCoordinator->getStatusCode() === 400);
+
+$reqDuplicateChat = new Request('PATCH', "/api/coordinator/users/{$techId}", [], [
+    'telegram_chat_id' => $telegramChatId
+], ['authorization' => "Bearer {$coordinatorToken}", 'content-type' => 'application/json']);
+$resDuplicateChat = $router->dispatch($reqDuplicateChat);
+$stmtChatOfSecond = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE id = :id");
+$stmtChatOfSecond->execute([':id' => $techId]);
+$assert("9.9 Un chat pertenece a un solo técnico: el duplicado se rechaza sin mutar al segundo", $resDuplicateChat->getStatusCode() === 400 && $stmtChatOfSecond->fetchColumn() === null);
+
+$reqUnlinkChat = new Request('PATCH', "/api/coordinator/users/{$newUserId}", [], [
+    'telegram_chat_id' => ''
+], ['authorization' => "Bearer {$coordinatorToken}", 'content-type' => 'application/json']);
+$resUnlinkChat = $router->dispatch($reqUnlinkChat);
+$stmtChatUnlinked = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE id = :id");
+$stmtChatUnlinked->execute([':id' => $newUserId]);
+$assert("9.10 Vaciar el campo desvincula al técnico sin tocar el resto de la ficha", $resUnlinkChat->getStatusCode() === 200 && $stmtChatUnlinked->fetchColumn() === null);
+
 // Limpieza de datos temporales de prueba
 TestDataCleaner::purgeIncidentByTicket($pdo, 'INC-TECH-BLOCKED');
 

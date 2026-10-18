@@ -41,10 +41,14 @@ De acuerdo con el contrato de motor único (`specs/technical/schema_corresponden
 ### 2.1. Nuevos Tipos Enumerados Nativos (`ENUM`) y Extensión de Auditoría
 
 ```sql
--- 1. Canal de salida de la notificación
+-- 1. Canal de salida de la notificación.
+--    TELEGRAM (Módulo 15) es el canal personal del técnico: el `recipient` de la
+--    fila es su `chat_id`, no una dirección ni una URL. Se añade al enum con la
+--    migración `004_telegram_technician_channel.sql`; convive con el WEBHOOK
+--    corporativo, que sigue siendo el canal del grupo de emergencias.
 DO $do$
 BEGIN
-    CREATE TYPE notification_channel AS ENUM ('EMAIL', 'WEBHOOK');
+    CREATE TYPE notification_channel AS ENUM ('EMAIL', 'WEBHOOK', 'TELEGRAM');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
 
@@ -253,7 +257,7 @@ Toda notificación se inserta **dentro de la misma transacción de base de datos
 | **6. Escalado de Contención del Barrido Sanitario** (3 pasadas consecutivas o > 5 en parque, RF-03.4) | `SANITARY_SWEEP_ESCALATED` | `CRITICAL_SANITARY` | `EMAIL` + `WEBHOOK` | Todos los `COORDINATOR` activos + Webhook (si activo) | `sweep:esc:{incident_or_pass_key}:{channel}:{dest_id}` |
 | **7. Confirmación de Apertura a Sede** (RF-05.1.1, RF-02.3) | `INCIDENT_OPENED_SITE` | `STANDARD` | `EMAIL` | `locations.contact_email` (+ `reporter_email` si el reporte vino del Portal de Sede y difiere del oficial) | `NULL` (única por acto de creación) |
 | **8. Confirmación de Apertura a Ciudadano QR** (RF-05.1.2) | `INCIDENT_OPENED_CITIZEN_QR` | `STANDARD` | `EMAIL` | `incidents.reporter_email` (solo si el reporte vino por QR y no está vacío) | `NULL` |
-| **9. Asignación / Reasignación a Técnico Entrante** (RF-05.2) | `TECHNICIAN_ASSIGNED` | `STANDARD` | `EMAIL` | `users.email` del técnico asignado | `NULL` |
+| **9. Asignación / Reasignación a Técnico Entrante** (RF-05.2; Módulo 15 RF-TG-02) | `TECHNICIAN_ASSIGNED` | `STANDARD` | `EMAIL` + `TELEGRAM` (sólo si el técnico tiene `telegram_chat_id` y el bot está configurado) | `users.email` del técnico asignado; la fila `TELEGRAM` lleva `users.telegram_chat_id` como `recipient` | `NULL` |
 | **10. Desasignación a Técnico Saliente** (en reasignación, RF-05.2) | `TECHNICIAN_UNASSIGNED` | `STANDARD` | `EMAIL` | `users.email` del técnico reemplazado | `NULL` |
 | **11. Solicitud de Acceso / Información a Sede** (pausa a `PENDING_INFO`, RF-05.3) | `PENDING_INFO_SITE_REQUEST` | `STANDARD` | `EMAIL` | Exclusivamente `locations.contact_email` (y `reporter_email` si el ticket lo abrió la Sede; **jamás** Ciudadano QR) | `NULL` |
 | **12. Respuesta de Sede en Pausa** (comentario público de Sede en `PENDING_INFO`, RF-05.4) | `PENDING_INFO_SITE_REPLY` | `STANDARD` | `EMAIL` | Técnico asignado (o Coordinadores si no hay técnico). **Agrupación de ráfagas:** si existe fila `PENDING` para el mismo `(incident_id, template, recipient_user_id)`, se hace `UPDATE` del `payload_json` en vez de `INSERT` | `NULL` (controlado por consulta de fila `PENDING` activa) |
@@ -281,13 +285,25 @@ El servicio de construcción de payloads (`NotificationPayloadSanitizer`) aplica
 
 ### 3.3. Enlaces Absolutos en la Entrega (Enmienda 2, 2026-10-18)
 
-`payload_json.tracking_url` persiste una **ruta del propio sistema** (`/?qr={machine_code}` o `/?site={site_code}&ticket={ticket_code}`), que es la forma estable e independiente del despliegue. En el momento de la entrega, `NotificationMessageRenderer` la convierte en **URL absoluta** con el host público canónico (`AppPublicUrl`: `APP_BASE_URL`, o `VENDGUARD_APP_URL` como respaldo; en el despacho por HTTP, el host efectivo de la petición si ninguna está declarada).
+`payload_json.tracking_url` persiste una **ruta del propio sistema** (`/?qr={machine_code}`, `/?site={site_code}&ticket={ticket_code}` o `/?tech=1&ticket={ticket_code}` para el técnico), que es la forma estable e independiente del despliegue. En el momento de la entrega, `NotificationMessageRenderer` la convierte en **URL absoluta** con el host público canónico (`AppPublicUrl`: `APP_BASE_URL`, o `VENDGUARD_APP_URL` como respaldo; en el despacho por HTTP, el host efectivo de la petición si ninguna está declarada).
 
 * **Motivo:** un cliente de correo resuelve las rutas relativas contra su propio dominio, de modo que el botón aterrizaba en la web del proveedor de correo en lugar del expediente. El enlace sólo es válido si viaja completo.
 * **Alcance del prefijado:** sólo rutas; un `tracking_url` que ya sea absoluto (`https://…`) no se reescribe, y cualquier esquema distinto de `http(s)`/`mailto:` se descarta.
 * **Degradación:** sin host declarado —worker CLI sin variable de entorno— la ruta se entrega tal cual. Definir `APP_BASE_URL` en el despliegue es la corrección operativa, y la pasada lo **declara** en lugar de silenciarlo (§3.4).
 * **Trazabilidad:** al aplicarse en el renderizado, los envíos ya encolados con ruta relativa quedan reparados en su siguiente intento o reintento manual desde la bandeja, sin reencolado ni migración de datos.
 * **Revisión previa (RF-06.3):** la bandeja de supervisión publica en cada fila de correo el campo `tracking_url` (§4.1) con esa **misma** URL final, resuelta por la misma autoridad (`NotificationTrackingLinkResolver`) y con la misma precedencia de host (`APP_BASE_URL` → host de la petición). Coordinación ve antes de reintentar exactamente el enlace que recibirá el destinatario; los avisos internos y los del canal Webhook no llevan botón y publican `null`.
+
+### 3.5. Canal Personal del Técnico (`TELEGRAM`, Módulo 15, 2026-10-18)
+
+El aviso de asignación **se suma** al correo: no lo sustituye. Una asignación a un técnico vinculado produce dos filas en `notification_outbox` —una `EMAIL` y otra `TELEGRAM`— dentro de la misma transacción de negocio, de modo que un fallo del canal personal no puede alterar el resultado del correo ni el de la asignación.
+
+* **Destinatario:** `users.telegram_chat_id` (identificador numérico; negativo en grupos). El chat es único entre usuarios vivos (`uq_users_telegram_chat_id`), porque dos técnicos con el mismo chat significaría que uno recibe las averías del otro.
+* **Sin vinculación, sin fila:** si el técnico no tiene chat válido o el proceso no declara `VENDGUARD_TELEGRAM_BOT_TOKEN` (alias `TG_BOT_TOKEN`), no se crea ninguna fila `TELEGRAM` y la asignación responde con éxito. La carencia se ve en el panel de usuarios, no como un fallo repetido en la bandeja.
+* **Entrega:** `POST https://api.telegram.org/bot{TOKEN}/sendMessage` con `{ chat_id, text, disable_web_page_preview: true, reply_markup?: { inline_keyboard: [[{ text, url }]] } }`. El host es una constante del código y del destinatario sólo se admite un identificador numérico: el canal no abre superficie SSRF. Timeout de 5 s (RNF-03); `2xx` éxito, `408`/`425`/`429`/`5xx` y red transitorios (curva 1/5/15/60), `400`/`401`/`403`/resto de `4xx` permanentes. El token se redacta en cualquier diagnóstico.
+* **Botón y cuerpo:** el botón lleva la **misma** URL que el correo (`{APP_BASE_URL}/?tech=1&ticket={ticket_code}`), resuelta por la misma autoridad; la URL se repite en el texto para los clientes que no pintan el teclado en línea.
+* **Aterrizaje:** `/?tech=1&ticket=…` abre la vista del técnico y resalta la parada citada una vez cargada su ruta; si el expediente ya no está, muestra un aviso explícito. El enlace **no** autentica (RF-TG-09): sin sesión de técnico se pide la identificación, y una sesión de coordinación o de sede no se secuestra.
+* **Sin botón en la desasignación:** `TECHNICIAN_UNASSIGNED` sigue siendo `EMAIL` y audiencia `INTERNAL`; al técnico saliente no se le invita a abrir un expediente que ya no es suyo (RF-TG-06).
+* **Privacidad:** el `chat_id` sólo se publica en el contrato de administración de usuarios (rol `COORDINATOR`) y la auditoría lo registra enmascarado (`***1234`). No viaja en payloads de Sede, Ciudadano QR ni en el JSON del Webhook corporativo.
 
 ### 3.4. Declaración de la Degradación del Enlace (T-NOTIF-17, 2026-10-18)
 
@@ -309,7 +325,7 @@ Consulta los contadores de estado y el historial de la bandeja de salida para el
 * **Autenticación:** `InternalAuthMiddleware(UserRole::COORDINATOR)`
 * **Parámetros Query (opcionales):**
   * `status`: `ALL` (default) | `PENDING` | `PROCESSING` | `PENDING_RETRY` | `SENT` | `FAILED_PERMANENT` | `CANCELLED_OBSOLETE`
-  * `channel`: `ALL` (default) | `EMAIL` | `WEBHOOK`
+  * `channel`: `ALL` (default) | `EMAIL` | `WEBHOOK` | `TELEGRAM`
   * `priority`: `ALL` (default) | `CRITICAL_SANITARY` | `STANDARD`
   * `ticket_code`: búsqueda parcial o exacta por código de ticket (ej. `TICK-2026`)
   * `limit`: entero (`1..200`, default `50`)

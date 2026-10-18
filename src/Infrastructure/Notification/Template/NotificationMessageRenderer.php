@@ -114,6 +114,7 @@ final class NotificationMessageRenderer
     private const CTA_LABELS = [
         NotificationTrackingLinkResolver::AUDIENCE_LOCATION => 'Abrir el Portal de Sede',
         NotificationTrackingLinkResolver::AUDIENCE_CITIZEN_QR => 'Consultar el estado del aviso',
+        NotificationTrackingLinkResolver::AUDIENCE_TECHNICIAN => 'Abrir la avería',
         NotificationTrackingLinkResolver::AUDIENCE_INTERNAL => 'Abrir el expediente',
     ];
 
@@ -134,11 +135,15 @@ final class NotificationMessageRenderer
         $draft = $this->compose($case, $payload);
         $subject = $this->buildSubject($draft);
 
+        // El botón viaja como dato además de como HTML: Telegram lo necesita para
+        // su teclado en línea y no puede leerlo del cuerpo del correo (RF-TG-04).
         return new RenderedNotificationMessage(
             template: $case,
             subject: $subject,
             textBody: $this->renderTextBody($draft),
             htmlBody: $this->renderHtmlBody($draft, $subject),
+            ctaLabel: $draft['cta_label'],
+            ctaUrl: $draft['tracking_url'],
         );
     }
 

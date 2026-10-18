@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/Database-PostgreSQL%2016%2B%20%7C%20Supabase-3ecf8e?style=flat-square&logo=postgresql&logoColor=white)](https://supabase.com/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-281%20Suites%20%7C%2010.933%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-284%20Suites%20%7C%2011.010%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -226,6 +226,7 @@ CMD ["sh", "-c", "php bin/init_cloud_db.php ; php -S 0.0.0.0:${PORT} -t public p
 | `DB_SSL` | Según proveedor | `1`/`true` fuerza TLS; se activa solo si el host contiene `tidbcloud`/`aivencloud`. |
 | `PORT` | La inyecta la plataforma | Puerto del servidor embebido. |
 | `APP_BASE_URL` | **Sí** si hay avisos externos por consola | Host público canónico de los enlaces que salen del sistema: las URLs impresas en las etiquetas QR y el botón de seguimiento de los correos. En las peticiones web, si falta, se resuelve por el host de la petición; un worker CLI sin ella entrega el botón como ruta relativa —que el cliente de correo resolvería contra su propio dominio— y la pasada lo **declara** en `relative_tracking_links_count`, con aviso por `stderr` (T-NOTIF-17). Se acepta también `VENDGUARD_APP_URL` como respaldo. |
+| `VENDGUARD_TELEGRAM_BOT_TOKEN` | Opcional (Módulo 15) | Token del bot que entrega al técnico el aviso de asignación con el enlace a su avería. Sin él **no se encola** ningún envío personal y la asignación sigue funcionando igual; el panel de usuarios marca qué técnicos están sin vincular. Se admite `TG_BOT_TOKEN` como respaldo (el mismo nombre que usa el relé corporativo). El `chat_id` de cada técnico se declara en **Administración → Usuarios**. |
 | `VENDGUARD_SMTP_HOST`, `VENDGUARD_SMTP_FROM_ADDRESS` | Para envío de emails | Servidor SMTP (ej. `smtp-relay.brevo.com`) y remitente verificado. Si no se declaran, se registra `UnconfiguredEmailTransport` y los correos quedan en fallo transitorio visible en la bandeja. |
 | `VENDGUARD_SMTP_PORT`, `VENDGUARD_SMTP_ENCRYPTION`, `VENDGUARD_SMTP_USERNAME`, `VENDGUARD_SMTP_PASSWORD`, `VENDGUARD_SMTP_FROM_NAME` | Opcionales (con SMTP) | Puerto (`587`/`2525` con `tls` o `465` con `ssl`), credenciales `AUTH LOGIN` y nombre visible del remitente. |
 | `VENDGUARD_DEV_SITE_KEYS` | **Nunca** en producción | Solo en local: siembra claves de centro deterministas `DEV-<site_code>`. En producción no se siembra ninguna: cada sede recibe su clave aleatoria al alta o al reemitirse desde coordinación. |
@@ -377,20 +378,20 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 281 suites · 10.933 aserciones
+batería global: 284 suites · 11.010 aserciones
 
 ```text
 ======================================================================
  RESUMEN DE EJECUCIÓN GLOBAL (T-39)
 ======================================================================
  Tiempo de ejecución total : 142.00 segundos  (variable en cada corrida)
- Suites de pruebas PHP Unit : 123 / 123 pasadas
- Suites de pruebas JS Unit  : 67 / 67 pasadas
- Suites de Integración PHP  : 90 / 90 pasadas
+ Suites de pruebas PHP Unit : 124 / 124 pasadas
+ Suites de pruebas JS Unit  : 68 / 68 pasadas
+ Suites de Integración PHP  : 91 / 91 pasadas
  Suites E2E Manuales (T-40): 1 / 1 pasadas
  ──────────────────────────────────────────────────────────────────
- Total Suites Ejecutadas    : 281
- Total Aserciones Evaluadas : 10.933
+ Total Suites Ejecutadas    : 284
+ Total Aserciones Evaluadas : 11.010
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
@@ -490,7 +491,7 @@ gestor-incidencias-vending/
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 281 suites (100% verde)
+    ├── run_all.php               # Ejecutor global de la batería de 284 suites (100% verde)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)
     ├── unit/                     # Pruebas unitarias de lógica pura, geometría y contratos

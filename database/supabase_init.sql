@@ -230,7 +230,9 @@ END $do$;
 
 DO $do$
 BEGIN
-    CREATE TYPE notification_channel AS ENUM ('EMAIL', 'WEBHOOK');
+    -- 'TELEGRAM' se incorpora en el Módulo 15 (aviso de asignación al técnico);
+    -- una base preexistente lo recibe por la migración 004.
+    CREATE TYPE notification_channel AS ENUM ('EMAIL', 'WEBHOOK', 'TELEGRAM');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
 
@@ -542,6 +544,9 @@ CREATE TABLE IF NOT EXISTS users (
     role               user_role NOT NULL,
     operator_code      VARCHAR(20),
     phone              VARCHAR(30),
+    -- Identidad Telegram del técnico (Módulo 15): chat de usuario o de grupo.
+    -- Una base preexistente la recibe por la migración 004.
+    telegram_chat_id   VARCHAR(32),
     is_active          BOOLEAN NOT NULL DEFAULT TRUE,
     is_on_call         BOOLEAN NOT NULL DEFAULT FALSE,
     login_attempts     SMALLINT NOT NULL DEFAULT 0,
@@ -559,10 +564,18 @@ CREATE TABLE IF NOT EXISTS users (
     CONSTRAINT uq_users_operator_code UNIQUE (operator_code),
     CONSTRAINT chk_users_on_call_active_tech CHECK (
         is_on_call = FALSE OR (role = 'TECHNICIAN' AND is_active = TRUE)
+    ),
+    CONSTRAINT chk_users_telegram_chat_id CHECK (
+        telegram_chat_id IS NULL OR telegram_chat_id ~ '^-?[0-9]{5,20}$'
     )
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_role ON users (role, is_active);
+
+-- Un chat pertenece a un solo usuario activo (Módulo 15, regla 1 de la spec).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_users_telegram_chat_id
+    ON users (telegram_chat_id)
+    WHERE telegram_chat_id IS NOT NULL AND deleted_at IS NULL;
 
 -- En bases preexistentes anteriores al Módulo 14, `CREATE TABLE IF NOT EXISTS users`
 -- no añade `is_on_call` (eso lo hace la migración `002_notification_center_outbox.sql`
