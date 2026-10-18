@@ -1,6 +1,6 @@
 # Plan Técnico · Aviso de asignación al técnico por Telegram (Módulo 15)
 
-**Estado:** **Aprobado e implementado (2026-10-18)** — ver [tasks.md](tasks.md)
+**Estado:** **Cerrado e implementado (2026-10-18)** — entrega real certificada; ver [tasks.md](tasks.md)
 **Spec funcional:** [spec.md](spec.md)
 **Contratos afectados:** `specs/technical/notification_center_outbox_contracts.md`, `specs/technical/api_contracts.md`
 **Precedencia:** [`constitution.md`](../../constitution.md) · [`AGENTS.md`](../../AGENTS.md)

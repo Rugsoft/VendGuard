@@ -1,9 +1,9 @@
 # Especificación Funcional · Aviso de asignación al técnico por Telegram
 
 **Módulo:** 15 (extensión del Centro de Notificaciones, Módulo 14)
-**Estado:** **Aprobada e implementada (2026-10-18).** Certificada con la batería completa y verificada en navegador;
-la única comprobación pendiente es la entrega real contra el API de Telegram, que exige un token de bot y un `chat_id`
-vivos (ver [tasks.md](tasks.md), T-TG-15).
+**Estado:** **Cerrada (2026-10-18).** Implementada, certificada con la batería completa, verificada en navegador y
+**entregada de verdad** contra el API de Telegram: la fila de la cola quedó en `SENT` con el botón absoluto a la avería
+(acta en [tasks.md](tasks.md), T-TG-15).
 **Fecha:** 2026-10-18
 **Rama:** `notifications`
 **Precedencia normativa:** [`constitution.md`](../../constitution.md) (Art. II, III y V) y [`AGENTS.md`](../../AGENTS.md)

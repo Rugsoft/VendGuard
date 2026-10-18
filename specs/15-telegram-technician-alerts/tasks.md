@@ -1,9 +1,8 @@
 # Tareas · Módulo 15 · Aviso de asignación al técnico por Telegram
 
-**Estado global:** **Implementado y certificado en local (2026-10-18).** Queda una sola casilla abierta —la entrega
-real contra el API de Telegram—, bloqueada por una dependencia externa: no hay token de bot ni `chat_id` real en el
-entorno de este repositorio. No es un fallo del código: la cadena completa está certificada con el transporte de
-memoria y la interfaz web se verificó en navegador.
+**Estado global:** **Cerrada y certificada (2026-10-18).** Las quince tareas están completas: la cadena entera
+—vinculación en administración, encolado, despacho y entrega real contra `api.telegram.org`— quedó verificada de punta
+a punta, con la fila de la cola en `SENT` y el botón absoluto. El acta de cierre está en T-TG-15.
 
 **Decisiones cerradas con el usuario (2026-10-18):**
 
@@ -61,8 +60,32 @@ memoria y la interfaz web se verificó en navegador.
   `specs/technical/admin_crud_contracts.md` §3.3; variable `VENDGUARD_TELEGRAM_BOT_TOKEN` en `README.md`.
 - [x] **T-TG-14 · Cifras canónicas.** Frase de la batería actualizada en los cinco documentos vivos; `DocMetricsGuard`
   las declara `COHERENTES`.
-- [ ] **T-TG-15 · Entrega real y acta de cierre.** **Bloqueada por credenciales**: falta `VENDGUARD_TELEGRAM_BOT_TOKEN`
-  en el entorno y un `chat_id` real al que entregar. El recorrido está certificado hasta el borde del API (transporte,
-  clasificación de respuestas, reintentos y botón) y la interfaz se verificó en navegador. Para cerrarla: declarar el
-  token, vincular el chat de un técnico desde Administración → Usuarios, asignarle una avería y ejecutar una pasada de
-  `bin/send_notifications.php`; la fila debe quedar en `SENT` con el botón `{APP_BASE_URL}/?tech=1&ticket=…`.
+- [x] **T-TG-15 · Entrega real y acta de cierre.** Ejecutada el 2026-10-18 contra el API de Telegram en vivo, con el
+  token declarado en el entorno del proceso (`VENDGUARD_TELEGRAM_BOT_TOKEN`) y `APP_BASE_URL` fijado:
+  * `getMe` → bot **@vendguard_alertas_bot**, `ok: true`.
+  * Vinculación del chat real por el endpoint de administración (`PATCH /api/coordinator/users/2` con
+    `telegram_chat_id`) → `HTTP 200`, `telegram_linked = true`; el rastro de auditoría lo guarda enmascarado y el chat
+    completo no viaja en el payload.
+  * Asignación de la avería `TG-CLOSE-855CA2` al técnico 2 por `PATCH …/assign` → `HTTP 200`: se encolan **dos** filas,
+    `EMAIL` y `TELEGRAM` (el aviso se suma al correo, decisión 1).
+  * Una pasada de `bin/send_notifications.php` → fila `#10061` del canal `TELEGRAM` en **`SENT`**, `attempts = 1`,
+    `last_error = NULL`, `processed_at` escrito; el correo hermano queda en `PENDING_RETRY` porque el entorno local no
+    declara SMTP (`UnconfiguredEmailTransport`), no por el canal nuevo.
+  * Botón entregado, renderizado con el cableado de producción (`NotificationTrackingLinkResolver` con
+    `AppPublicUrl::fromEnvironment()`): **«Abrir la avería» → `http://127.0.0.1:8000/?tech=1&ticket=TG-CLOSE-855CA2`**,
+    idéntico al esperado; `relative_tracking_links_count = 0`, sin degradación que declarar.
+  * El destino se publica como `***1993` en todas las trazas: el `chat_id` no viaja en `payload_json` ni en auditoría.
+  * La evidencia se capturó durante la pasada: el restablecimiento de semillas que la batería ejecuta al terminar
+    retira después el incidente y la fila, igual que cualquier dato operativo de prueba. El acta son los valores aquí
+    transcritos, no una fila que se pueda volver a consultar días más tarde.
+
+---
+
+## Nota de cierre · incidente de despliegue corregido (2026-10-18)
+
+El primer despliegue en Render abortó en el paso 3/6 con `SQLSTATE 42703: column "telegram_chat_id" does not exist`: el
+DDL base creaba el índice único antes de que la migración 004 añadiera la columna, y `CREATE TABLE IF NOT EXISTS users`
+no añade columnas a una tabla que ya existe. El índice queda ahora envuelto en la misma guarda `undefined_column` que ya
+protegía a `idx_users_on_call` (`database/supabase_init.sql`), y `SchemaConvergenceParityTest` exige las cuatro
+migraciones en el libro. Corregido en `fab919e`, tras reproducir el fallo y simular el arranque completo sobre un
+esquema legado.
