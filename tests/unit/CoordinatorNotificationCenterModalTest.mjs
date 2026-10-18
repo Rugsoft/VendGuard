@@ -712,6 +712,22 @@ await cancelModal.confirmCancel();
 assert('6.23 Sin envío señalado la cancelación no sale a la red',
   cancelCalls.length === 0);
 
+// Regresión: la confirmación vivía al final de la bandeja y quedaba fuera del
+// cuerpo visible del modal, de modo que pulsar «Cancelar envío» no mostraba nada.
+const revealOptions = [];
+const revealModal = createModal();
+revealModal.$nextTick = (callback) => { callback(); };
+revealModal.$refs = { cancelPanel: [{ scrollIntoView: (options) => revealOptions.push(options) }] };
+revealModal.askCancel(OUTBOX_ITEM);
+assert('6.23a askCancel acerca el panel de confirmación al borde visible (ref en colección)',
+  revealOptions.length === 1 && revealOptions[0].block === 'nearest');
+assert('6.23b La confirmación de cancelación vive dentro de la tabla, junto a la fila accionada',
+  COMPONENT_SOURCE.includes('data-testid="notification-cancel-row"')
+    && COMPONENT_SOURCE.includes('v-if="cancelTarget && cancelTarget.id === item.id"')
+    && /<td colspan="8"[^>]*>[\s\S]*?data-testid="notification-cancel-panel"/.test(COMPONENT_SOURCE));
+assert('6.23c Los avisos de éxito y error se mantienen visibles al desplazar la bandeja',
+  (COMPONENT_SOURCE.match(/position: sticky; top: 0/g) || []).length >= 2);
+
 const urlErrorCases = [
   ['', false, ''],
   ['', true, 'obligatoria'],

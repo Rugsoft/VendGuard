@@ -520,6 +520,30 @@ export const CoordinatorNotificationCenterModal = {
       this.cancelReason = '';
       this.errorMessage = '';
       this.successMessage = '';
+      this.revealCancelPanel();
+    },
+
+    /**
+     * Acerca el panel de confirmación al borde visible más próximo.
+     *
+     * La confirmación vive dentro de la fila accionada, pero una bandeja larga
+     * puede superar la altura del modal: sin este ajuste el operador ve cambiar
+     * la fila sin que lleguen a verse los botones de confirmar y descartar.
+     */
+    revealCancelPanel() {
+      if (typeof this.$nextTick !== 'function') {
+        return;
+      }
+
+      this.$nextTick(() => {
+        // El panel se declara dentro de un `v-for`, así que Vue entrega el ref
+        // como colección: sólo hay uno abierto a la vez.
+        const raw = this.$refs ? this.$refs.cancelPanel : null;
+        const panel = Array.isArray(raw) ? raw[raw.length - 1] : raw;
+        if (panel && typeof panel.scrollIntoView === 'function') {
+          panel.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        }
+      });
     },
 
     dismissCancel() {
@@ -697,7 +721,7 @@ export const CoordinatorNotificationCenterModal = {
           <!-- Avisos -->
           <div
             v-if="successMessage"
-            style="background-color: var(--color-success-bg); border: 1px solid var(--color-success); color: var(--color-success-text); padding: 10px 14px; border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: var(--font-size-body-sm); display: flex; justify-content: space-between; align-items: center; gap: 8px;"
+            style="position: sticky; top: 0; z-index: 6; background-color: var(--color-success-bg); border: 1px solid var(--color-success); color: var(--color-success-text); padding: 10px 14px; border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: var(--font-size-body-sm); display: flex; justify-content: space-between; align-items: center; gap: 8px;"
             data-testid="notification-success-banner"
           >
             <span>✅ {{ successMessage }}</span>
@@ -711,7 +735,7 @@ export const CoordinatorNotificationCenterModal = {
 
           <div
             v-if="errorMessage"
-            style="background-color: var(--color-error-bg); border: 1px solid var(--color-error); color: var(--color-error-text); padding: 10px 14px; border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: var(--font-size-body-sm); display: flex; justify-content: space-between; align-items: center; gap: 8px;"
+            style="position: sticky; top: 0; z-index: 6; background-color: var(--color-error-bg); border: 1px solid var(--color-error); color: var(--color-error-text); padding: 10px 14px; border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: var(--font-size-body-sm); display: flex; justify-content: space-between; align-items: center; gap: 8px;"
             data-testid="notification-error-banner"
           >
             <span>⚠️ {{ errorMessage }}</span>
@@ -887,9 +911,8 @@ export const CoordinatorNotificationCenterModal = {
                   </tr>
                 </thead>
                 <tbody>
+                  <template v-for="item in items" :key="item.id">
                   <tr
-                    v-for="item in items"
-                    :key="item.id"
                     style="border-bottom: 1px solid var(--color-hairline); vertical-align: top;"
                     data-testid="notification-row"
                   >
@@ -969,6 +992,52 @@ export const CoordinatorNotificationCenterModal = {
                       </div>
                     </td>
                   </tr>
+
+                  <!-- Confirmación pegada a la fila accionada: vive dentro del cuerpo
+                       de la tabla para aparecer donde el operador acaba de pulsar,
+                       sin depender de que descubra el final de la bandeja (RF-06.4). -->
+                  <tr v-if="cancelTarget && cancelTarget.id === item.id" data-testid="notification-cancel-row">
+                    <td colspan="8" style="padding: 0 10px 10px;">
+                      <div
+                        ref="cancelPanel"
+                        style="background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); border-radius: var(--radius-card); padding: var(--spacing-md); display: flex; flex-direction: column; gap: var(--spacing-sm);"
+                        data-testid="notification-cancel-panel"
+                      >
+                        <div style="font-family: var(--font-body); font-size: var(--font-size-body-sm); color: var(--color-slate);">
+                          Vas a cancelar el envío <strong>#{{ cancelTarget.id }}</strong> hacia
+                          <strong>{{ cancelTarget.recipient }}</strong>. La fila se conserva como
+                          «Cancelada por obsolescencia» y el motivo queda auditado (Art. III).
+                        </div>
+                        <label style="display: flex; flex-direction: column; gap: 4px; font-family: var(--font-body); font-size: var(--font-size-caption); font-weight: 600; color: var(--color-slate);">
+                          Motivo de la cancelación (opcional)
+                          <textarea
+                            v-model="cancelReason"
+                            rows="2"
+                            class="vg-textarea"
+                            placeholder="Ej. Contacto telefónico directo con la sede; el aviso ya no aplica."
+                            data-testid="input-notification-cancel-reason"
+                          ></textarea>
+                        </label>
+                        <div style="display: flex; justify-content: flex-end; gap: var(--spacing-sm);">
+                          <button
+                            type="button"
+                            class="vg-btn vg-btn-sm vg-btn-neutral"
+                            :disabled="isActionRunning"
+                            @click="dismissCancel"
+                            data-testid="btn-dismiss-cancel-notification"
+                          >Descartar</button>
+                          <button
+                            type="button"
+                            class="vg-btn vg-btn-sm vg-btn-danger"
+                            :disabled="isActionRunning"
+                            @click="confirmCancel"
+                            data-testid="btn-confirm-cancel-notification"
+                          >Confirmar cancelación</button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                  </template>
                 </tbody>
               </table>
 
@@ -1006,44 +1075,6 @@ export const CoordinatorNotificationCenterModal = {
               >Siguiente →</button>
             </div>
 
-            <!-- Confirmación de cancelación en línea -->
-            <div
-              v-if="cancelTarget"
-              style="background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); border-radius: var(--radius-card); padding: var(--spacing-md); display: flex; flex-direction: column; gap: var(--spacing-sm);"
-              data-testid="notification-cancel-panel"
-            >
-              <div style="font-family: var(--font-body); font-size: var(--font-size-body-sm); color: var(--color-slate);">
-                Vas a cancelar el envío <strong>#{{ cancelTarget.id }}</strong> hacia
-                <strong>{{ cancelTarget.recipient }}</strong>. La fila se conserva como
-                «Cancelada por obsolescencia» y el motivo queda auditado (Art. III).
-              </div>
-              <label style="display: flex; flex-direction: column; gap: 4px; font-family: var(--font-body); font-size: var(--font-size-caption); font-weight: 600; color: var(--color-slate);">
-                Motivo de la cancelación (opcional)
-                <textarea
-                  v-model="cancelReason"
-                  rows="2"
-                  class="vg-textarea"
-                  placeholder="Ej. Contacto telefónico directo con la sede; el aviso ya no aplica."
-                  data-testid="input-notification-cancel-reason"
-                ></textarea>
-              </label>
-              <div style="display: flex; justify-content: flex-end; gap: var(--spacing-sm);">
-                <button
-                  type="button"
-                  class="vg-btn vg-btn-sm vg-btn-neutral"
-                  :disabled="isActionRunning"
-                  @click="dismissCancel"
-                  data-testid="btn-dismiss-cancel-notification"
-                >Descartar</button>
-                <button
-                  type="button"
-                  class="vg-btn vg-btn-sm vg-btn-danger"
-                  :disabled="isActionRunning"
-                  @click="confirmCancel"
-                  data-testid="btn-confirm-cancel-notification"
-                >Confirmar cancelación</button>
-              </div>
-            </div>
           </div>
 
           <!-- ============================================================= -->
