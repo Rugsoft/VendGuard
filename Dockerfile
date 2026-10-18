@@ -29,7 +29,8 @@ EXPOSE 8080
 
 # En arranque:
 # 1. Exportar entorno a /etc/vendguard/cron.env para las tareas de crond
-# 2. Arrancar demonio crond en segundo plano
-# 3. Iniciar inicializador de BD en la nube (tablas, migraciones y semillas)
+# 2. Iniciar inicializador de BD en la nube (tablas, migraciones y semillas) ANTES de crond
+#    para que ninguna tarea periódica dispare contra un esquema aún no migrado
+# 3. Arrancar demonio crond en segundo plano
 # 4. Arrancar servidor web PHP
-CMD ["sh", "-c", "env > /etc/vendguard/cron.env && chmod 600 /etc/vendguard/cron.env && crond -b && php bin/init_cloud_db.php && php -S 0.0.0.0:${PORT} -t public public/index.php"]
+CMD ["sh", "-c", "env > /etc/vendguard/cron.env && chmod 600 /etc/vendguard/cron.env && php bin/init_cloud_db.php && crond -b && php -S 0.0.0.0:${PORT} -t public public/index.php"]

@@ -563,8 +563,17 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_role ON users (role, is_active);
-CREATE INDEX IF NOT EXISTS idx_users_on_call ON users (role, is_active, is_on_call)
-    WHERE is_on_call = TRUE;
+
+-- En bases preexistentes anteriores al Módulo 14, `CREATE TABLE IF NOT EXISTS users`
+-- no añade `is_on_call` (eso lo hace la migración `002_notification_center_outbox.sql`
+-- en el paso 4/6 de `bin/init_cloud_db.php`). Se tolera `undefined_column` aquí para
+-- no abortar el paso 3/6 antes de llegar al ejecutor de migraciones.
+DO $do$
+BEGIN
+    CREATE INDEX IF NOT EXISTS idx_users_on_call ON users (role, is_active, is_on_call)
+        WHERE is_on_call = TRUE;
+EXCEPTION WHEN duplicate_object OR undefined_column THEN NULL;
+END $do$;
 
 CREATE OR REPLACE TRIGGER trg_no_delete_users
     BEFORE DELETE ON users
