@@ -272,6 +272,7 @@ try {
             '001_initial_baseline.sql',
             '002_notification_center_outbox.sql',
             '003_notification_webhook_url_check_repair.sql',
+            '004_telegram_technician_channel.sql',
         ],
         'aplicadas: ' . $listSample($applied)
     );
@@ -287,13 +288,15 @@ try {
     $ledgerRows = $pgPdo->query('SELECT filename, checksum FROM ' . ADDITION_LEDGER . ' ORDER BY filename')->fetchAll();
     $assert(
         'El libro registra las migraciones con su huella de 64 caracteres',
-        count($ledgerRows) === 3
+        count($ledgerRows) === 4
         && $ledgerRows[0]['filename'] === '001_initial_baseline.sql'
         && strlen((string)$ledgerRows[0]['checksum']) === 64
         && $ledgerRows[1]['filename'] === '002_notification_center_outbox.sql'
         && strlen((string)$ledgerRows[1]['checksum']) === 64
         && $ledgerRows[2]['filename'] === '003_notification_webhook_url_check_repair.sql'
         && strlen((string)$ledgerRows[2]['checksum']) === 64
+        && $ledgerRows[3]['filename'] === '004_telegram_technician_channel.sql'
+        && strlen((string)$ledgerRows[3]['checksum']) === 64
     );
 
     $assert('Reejecutar el ejecutor no aplica nada (idempotente)', $runner->runAll() === []);

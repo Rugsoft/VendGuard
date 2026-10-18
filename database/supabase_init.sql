@@ -573,9 +573,18 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_role ON users (role, is_active);
 
 -- Un chat pertenece a un solo usuario activo (Módulo 15, regla 1 de la spec).
-CREATE UNIQUE INDEX IF NOT EXISTS uq_users_telegram_chat_id
-    ON users (telegram_chat_id)
-    WHERE telegram_chat_id IS NOT NULL AND deleted_at IS NULL;
+-- En bases preexistentes, `CREATE TABLE IF NOT EXISTS users` no añade
+-- `telegram_chat_id` (eso lo hace la migración `004_telegram_technician_channel.sql`
+-- en el paso 4/6 de `bin/init_cloud_db.php`). Se tolera `undefined_column` aquí
+-- para no abortar el paso 3/6 antes de llegar al ejecutor de migraciones: sin
+-- esta guarda el despliegue moría con SQLSTATE 42703 y reintentaba en vano.
+DO $do$
+BEGIN
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_users_telegram_chat_id
+        ON users (telegram_chat_id)
+        WHERE telegram_chat_id IS NOT NULL AND deleted_at IS NULL;
+EXCEPTION WHEN duplicate_object OR undefined_column THEN NULL;
+END $do$;
 
 -- En bases preexistentes anteriores al Módulo 14, `CREATE TABLE IF NOT EXISTS users`
 -- no añade `is_on_call` (eso lo hace la migración `002_notification_center_outbox.sql`
