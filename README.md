@@ -114,11 +114,23 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 * **Barrido de fondo y su superficie operativa:** la activación automática no espera a un intento de cierre (`php bin/sanitary_clock_sweep.php` o `POST /api/cron/sanitary-clock-sweep` cada 15 minutos, con cota de espera de bloqueo de 2 s y la contención publicada como aplazamiento, nunca como fallo); la pestaña *🩺 Barrido Sanitario* publica el latido, la tendencia de 24 h y el **escalado cuando el aplazamiento persiste** (RF-07).
 * **Segregación pública y transición prohibida (Art. V.4 y V.1):** el escaneo ciudadano muestra un estado neutro («En proceso de atención técnica») y **nunca** el motivo de la pausa, y queda prohibido cerrar directamente desde `PENDING_INFO` sin registrar la intervención física.
 
-### 11. Persistencia Cloud Administrada en PostgreSQL / Supabase (Módulo 12)
+### 11. Persistencia Cloud Administrada en PostgreSQL / Supabase (Módulos 12 y 13)
 * **Arquitectura Desacoplada con Motor Único (Coste 0 €/mes):** El backend puro PHP 8.2+ y el frontend reactivo Vanilla Vue 3 operan de forma homogénea contra PostgreSQL 16+ administrado en Supabase a través del agrupador transaccional Supavisor (puerto 6543) bajo TLS `verify-full`, y en local contra el motor PostgreSQL del arnés de pruebas sin dependencias externas.
 * **Blindaje Constitucional Nativo en PostgreSQL:** Disparadores `BEFORE DELETE` con emisión ruidosa de `SQLSTATE 45000` (`ART_III_1_VIOLATION`, Art. III.1); índice único parcial `uq_machine_active_ticket` que bloquea duplicados concurrentes e incidencias en garantía (Art. V.2 y V.6); restricciones `CHECK` de justificación mínima $\ge 20$ caracteres (Art. V.1); y claves canónicas de identidad (`email_key`, `site_code_key`) para unificación de colaciones (Art. V.4).
 * **Rendimiento Transaccional Certificado (RNF-01):** Optimización integral de round-trips mediante consultas CTE combinadas en inserción y actualización, reducción de consultas redundantes y lectura bloqueada en un solo salto (`FOR UPDATE OF i`), garantizando medianas inferiores al presupuesto estricto de 250 ms en todas las operaciones del sistema sobre enlaces de red transcontinentales.
 * **Resiliencia Operativa y Keep-Alive Diario:** Flujo de mantenimiento automatizado para prevenir la suspensión por inactividad tras 7 días en planes gratuitos y restauración desatendida mediante API de administración.
+
+### 12. Centro de Notificaciones Transaccionales y Alertas de Emergencia (Módulo 14)
+* **Bandeja de Salida Transaccional (*Transactional Outbox Pattern*):** Cola persistente y auditable en PostgreSQL (`notification_outbox`) con seis estados canónicos (`PENDING`, `PROCESSING`, `PENDING_RETRY`, `SENT`, `FAILED_PERMANENT`, `CANCELLED_OBSOLETE`), prioridades normativas (`CRITICAL_SANITARY`, `HIGH`, `STANDARD`) y política de obsolescencia automática (RF-01 a RF-03).
+* **Despachador y Política de Reintentos Progresiva:** Entrega desacoplada mediante worker CLI (`bin/send_notifications.php`) o endpoint HTTP protegido (`POST /api/cron/notifications-dispatch`), con reintentos exponenciales acotados a 5 intentos (1 min, 5 min, 15 min, 60 min), rescate automático de envíos atascados (> 5 min) y salvaguarda de SLA sanitario (alertas automáticas a las 2h sin asignar y 3h sin iniciar).
+* **Canal Corporativo de Emergencias (Webhook con Validación Anti-SSRF):** Notificaciones instantáneas a plataformas de mensajería (Slack, Discord, Telegram) para averías críticas perecederas (Art. II). Validación estricta de URLs públicas mediante `WebhookUrlSecurityValidator` (prohibición de IPs privadas, loopback, link-local y resolución DNS segura contra ataques SSRF y DNS Rebinding).
+* **Panel de Coordinación y Control Operativo:** Modal reactivo con filtros multidimensionales, KPIs de entrega en vivo, prueba interactiva de Webhook (timeout 5 s) y reintento/cancelación manual con confirmación contextual en línea (RF-06).
+
+### 13. Alertas de Asignación a Técnicos vía Telegram (Módulo 15)
+* **Aviso Personal de Asignación en Tiempo Real:** Notificación directa al smartphone del técnico de campo mediante Bot de Telegram (`POST https://api.telegram.org/bot{TOKEN}/sendMessage`) en cuanto se le asigna o reasigna una avería, sumándose al correo electrónico sin sustituirlo ni bloquear la asignación si no está configurado (RF-TG-01 a RF-TG-03).
+* **Enlace Canónico Unificado a la Avería (*Deep Linking*):** Resolución centralizada de URLs absolutas (`AppPublicUrl`) que incluye botón interactivo inline en el mensaje de Telegram dirigiendo al técnico directamente a la ficha de la avería en su vista móvil (`?tech=ID&ticket=CODIGO`).
+* **Vinculación Segura y Mínimo Privilegio (Art. V.4):** Campo `telegram_chat_id` gestionable exclusivamente para rol `TECHNICIAN` desde el panel de administración de usuarios, validado con regex numérico (`^-?[0-9]{5,20}$`), con unicidad estricta y enmascaramiento en auditoría (`***1234`).
+* **Relé de Webhook Opcional en Cloudflare Workers:** Infraestructura serverless gratuita de relé en edge (`deploy/cloudflare/telegram-webhook-relay.js`) para transformar webhooks salientes genéricos de emergencia en mensajes formateados de Telegram sin costes ni servidores dedicados.
 
 ---
 
@@ -363,6 +375,12 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `POST` | `/api/coordinator/notifications/settings/test-webhook` | `COORDINATOR` | Prueba interactiva de conexión con el Webhook corporativo (timeout estricto de 5 s). |
 | `PATCH` | `/api/coordinator/users/{id}/on-call` | `COORDINATOR` | Conmutación del estado de guardia 24/7 (`is_on_call`) de un técnico de ruta. |
 
+#### Alertas de Asignación a Técnicos vía Telegram (Módulo 15)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `PATCH` | `/api/coordinator/users/{id}` | `COORDINATOR` | Vinculación del chat personal de Telegram del técnico (`telegram_chat_id`), con validación de rol `TECHNICIAN`, regex numérico, unicidad y auditoría enmascarada (RF-TG-07/10). |
+| `GET` | `/api/technician/my-route?ticket={code}` | `TECHNICIAN` | Acceso directo por enlace profundo (*Deep Linking*) a la avería asignada desde el botón interactivo del mensaje de Telegram (RF-TG-05). |
+
 ---
 
 ## 🧪 Batería Completa de Pruebas Automatizadas (T-39 & Módulos 02, 03, 04, M1, M2 y M4)
@@ -412,6 +430,8 @@ Entre las suites de certificación destacan:
 * **`CoordinatorButtonVariantsGuardTest.mjs`** — los 149 botones del panel del coordinador visten la escalera `--control-*` y ningún botón declara geometría ni color en línea (sí una colocación o un color de estado); la guarda se prueba contra muestras sintéticas y cae también si alguna variante declarada queda muerta.
 * **`CoordinatorActionsWrapGuardTest.mjs`** — ningún grupo de acciones del panel depende de tener pocos controles: el grupo envuelve y la etiqueta nunca se parte dentro de su propio botón.
 * **`SanitarySweepVisibilityServiceTest` / `CoordinatorSanitarySweepEndpointTest` (T-PAUSE-41)** — la superficie del barrido sanitario: umbrales de escalado a las tres pasadas consecutivas, cierre del seguimiento **por identidad** y el ciclo completo contra el motor del arnés sobre dos conexiones PDO reales (aplazamiento → cuarentena → cierre → alerta apagada).
+* **`NotificationDispatcherAndSlaSweepTest` / `CoordinatorNotificationApiTest` (Módulo 14)** — certificación del ciclo completo de la bandeja de salida transaccional, rescate de envíos atascados en `PROCESSING`, escalado automático de SLA sanitario (2h/3h) y validación anti-SSRF de Webhooks.
+* **`TelegramTransportTest` / `AdminUserTelegramLinkTest` (Módulo 15)** — certificación del canal y transporte HTTP hacia la API de Telegram, vinculación de chats de técnicos, deep linking a averías y entrega real de alertas de asignación.
 
 > **Nota operativa:** las suites de integración incluyen pruebas de HTTP real contra `127.0.0.1:8000`. Si el puerto está ocupado por un servidor obsoleto, arránquelo antes con `php -S 127.0.0.1:8000 -t public public/index.php`.
 
@@ -466,6 +486,9 @@ gestor-incidencias-vending/
 │   ├── 10-incident-comments/     # Especificación del hilo de conversación del expediente
 │   ├── 11-pending-info-sla-pause/# Especificación de la pausa contractual de sede y del barrido sanitario
 │   ├── 12-hybrid-supabase-migration/# Especificación de persistencia cloud híbrida en PostgreSQL (Supabase)
+│   ├── 13-single-engine-supabase/# Especificación de consolidación definitiva en motor único PostgreSQL
+│   ├── 14-notification-center-outbox/# Especificación de la bandeja de salida transaccional y canal de emergencias
+│   ├── 15-telegram-technician-alerts/# Especificación de alertas directas a técnicos vía Bot de Telegram
 │   ├── functional/               # Especificaciones funcionales EARS transversales
 │   └── technical/                # Contratos de API, DDL y esquemas de base de datos
 ├── src/
