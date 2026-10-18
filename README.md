@@ -437,6 +437,10 @@ gestor-incidencias-vending/
 │   ├── supabase_migrations/      # Migraciones incrementales canónicas del motor único
 │   ├── supabase_seeds.sql        # Catálogo maestro de semillas del motor único
 │   └── DemoHistorySeeder.php     # Histórico de demostración portable: 17 averías (13 cerradas y 4 en garantía, dos reabiertas), traza y auditoría
+├── deploy/
+│   ├── cron/                     # Crontab interno del contenedor (barrido sanitario y despachador de notificaciones)
+│   ├── cloudflare/               # Relé gratuito de Cloudflare Worker para el Webhook de Telegram y Cron opcional
+│   └── local/                    # Aprovisionamiento del motor PostgreSQL local para desarrollo y certificación
 ├── docs/
 │   ├── design.md                 # Especificación de tokens visuales Docker
 │   ├── manual_0_analisis_problema.md # Análisis de negocio y reglas de vending
