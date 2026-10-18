@@ -20,10 +20,16 @@ declare(strict_types=1);
  * programador de sistema no pueden divergir en transportes ni en auditoría.
  *
  * **Contrato de salida.** La salida estándar contiene exclusivamente el resumen
- * JSON de la pasada (las nueve claves de `NotificationDispatchResultDto`), de
+ * JSON de la pasada (las diez claves de `NotificationDispatchResultDto`), de
  * forma que un programador pueda canalizarla a `jq` sin recortar banners. Los
  * errores también salen como JSON, con `success = false` y su código, para que
  * quien invoque el worker no tenga que distinguir formatos según el resultado.
+ *
+ * **Avisos de configuración por la salida de error.** Cuando la pasada entrega
+ * avisos externos con el enlace de seguimiento en relativo —proceso sin
+ * `APP_BASE_URL`—, el worker lo escribe en `stderr` con el remedio exacto
+ * (T-NOTIF-17). La salida estándar sigue siendo JSON puro: el aviso no rompe
+ * ninguna canalización, pero quien lanza el worker a mano lo ve en pantalla.
  *
  * **Códigos de salida:**
  *   0 = pasada completada. Los fallos de entrega individuales (rechazo
@@ -40,6 +46,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../src/autoload.php';
 
 use VendGuard\Application\Service\NotificationDispatcherService;
+use VendGuard\Core\Service\NotificationTrackingLinkResolver;
 use VendGuard\Infrastructure\Notification\NotificationDispatcherFactory;
 
 const EXIT_OK = 0;
@@ -131,6 +138,19 @@ try {
             'message' => $exception->getMessage(),
         ],
     ], EXIT_FATAL);
+}
+
+// T-NOTIF-17 · La degradación del enlace se declara. Un correo externo cuyo botón
+// viaja como ruta relativa llega con un enlace que el cliente de correo resuelve
+// contra su propio dominio, y hasta ahora eso se descubría al pulsarlo. El aviso
+// va a la salida de error: el resumen JSON de stdout queda intacto.
+if ($result->relativeTrackingLinksCount > 0) {
+    fwrite(STDERR, sprintf(
+        "[WARN] %d aviso(s) de esta pasada llevan el enlace de seguimiento como ruta relativa. %s%s",
+        $result->relativeTrackingLinksCount,
+        NotificationTrackingLinkResolver::MISSING_PUBLIC_HOST_REMEDY,
+        PHP_EOL
+    ));
 }
 
 $emit(['success' => true, 'data' => $result->toArray()], EXIT_OK);

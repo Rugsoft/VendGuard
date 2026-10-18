@@ -36,6 +36,15 @@ ventana de 15 minutos, así que dos pasadas nunca se solapan; y el `exit 1` fina
 hace que el fallo **no muera en silencio**: queda en el registro de la plataforma y el
 vigilante externo lo ve como ventana perdida y alerta.
 
+### El host público del botón de los correos (T-NOTIF-17)
+
+`/etc/vendguard/cron.env` se genera con `env > …`, de modo que la entrada de cada minuto hereda **todo** el entorno del
+contenedor, incluido `APP_BASE_URL`. Declararla en el panel del despliegue es lo que hace que el aviso a la Sede salga
+con el botón absoluto: sin ella, el aviso se entrega igual —la sede conoce su ticket— pero el botón viaja como ruta
+relativa y el cliente de correo lo resuelve contra su propio dominio. La pasada no lo calla: publica
+`relative_tracking_links_count` en el resumen y el worker escribe el remedio en su salida de error, que aquí queda
+redirigida al registro de la plataforma.
+
 ## La variante `pg_cron` + `pg_net` (admitida, no canónica)
 
 EARS-06.6 la admite como orquestador alternativo y aquí queda documentada con sus

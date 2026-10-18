@@ -40,9 +40,11 @@ use VendGuard\Core\Domain\ValueObject\NotificationStatus;
 use VendGuard\Core\Domain\ValueObject\NotificationTemplate;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
+use VendGuard\Core\Service\AppPublicUrl;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Database\SeedRunner;
+use VendGuard\Infrastructure\Notification\Template\NotificationMessageRenderer;
 use VendGuard\Infrastructure\Notification\Transport\InMemoryNotificationTransport;
 use VendGuard\Infrastructure\Notification\Transport\NotificationTransportRegistry;
 use VendGuard\Infrastructure\Notification\Transport\TransportDeliveryResult;
@@ -85,18 +87,44 @@ $emailTransport = new InMemoryNotificationTransport(NotificationChannel::EMAIL);
 $webhookTransport = new InMemoryNotificationTransport(NotificationChannel::WEBHOOK);
 $transports = new NotificationTransportRegistry($emailTransport, $webhookTransport);
 
-$dispatcher = new NotificationDispatcherService(
-    outbox: $outbox,
-    incidents: $incidents,
-    users: $users,
-    settings: $settings,
-    cycles: $incidents,
-    slaWatch: $incidents,
-    slaAlerts: $enqueuer,
-    transports: $transports,
-    transactions: $transactions,
-    audit: new AuditLogger()
-);
+/**
+ * Composición del despachador sobre el grafo del banco.
+ *
+ * El parámetro existe para la certificación de T-NOTIF-17: el mismo despachador,
+ * con un renderizador que declara un host público, sirve para demostrar que la
+ * degradación que se declara sin host desaparece cuando el despliegue declara el
+ * suyo. Se inyecta por renderizador —y no por resolutor suelto— porque el
+ * renderizador es la única autoridad del enlace: lo que sale en el correo y lo
+ * que la pasada declara no pueden venir de dos sitios distintos.
+ */
+$buildDispatcher = function (?NotificationMessageRenderer $renderer = null) use (
+    $outbox,
+    $incidents,
+    $users,
+    $settings,
+    $enqueuer,
+    $transports,
+    $transactions
+): NotificationDispatcherService {
+    return new NotificationDispatcherService(
+        outbox: $outbox,
+        incidents: $incidents,
+        users: $users,
+        settings: $settings,
+        cycles: $incidents,
+        slaWatch: $incidents,
+        slaAlerts: $enqueuer,
+        transports: $transports,
+        transactions: $transactions,
+        audit: new AuditLogger(),
+        renderer: $renderer
+    );
+};
+
+// La suite certifica la degradación sin host (T-NOTIF-17), así que el host del
+// despachador se declara **explícitamente** ausente: lo que tenga exportado la
+// terminal que lanza la batería no puede cambiar el veredicto de la suite.
+$dispatcher = $buildDispatcher(new NotificationMessageRenderer(new AppPublicUrl(null)));
 
 $failures = 0;
 $assertions = 0;
@@ -620,8 +648,69 @@ $assert(
     'La proyección plana publica las claves del contrato de despacho',
     array_keys($emptyPass->toArray()) === [
         'rescued_stuck_count', 'sla_2h_alerts_enqueued', 'sla_3h_alerts_enqueued', 'claimed_count',
-        'sent_count', 'retry_scheduled_count', 'failed_permanent_count', 'cancelled_obsolete_count', 'duration_ms',
+        'sent_count', 'retry_scheduled_count', 'failed_permanent_count', 'cancelled_obsolete_count',
+        'relative_tracking_links_count', 'duration_ms',
     ]
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8. T-NOTIF-17 — El enlace externo que no puede viajar absoluto se declara
+// ─────────────────────────────────────────────────────────────────────────────
+$enqueueLocationNotice = function (string $recipient) use ($outbox): NotificationOutboxItem {
+    $item = $outbox->enqueue(new NotificationOutboxItem(
+        id: null,
+        incidentId: null,
+        channel: NotificationChannel::EMAIL,
+        priority: NotificationPriority::STANDARD,
+        template: NotificationTemplate::INCIDENT_OPENED_SITE,
+        recipient: $recipient,
+        recipientRole: 'LOCATION',
+        recipientUserId: null,
+        recipientLocationId: null,
+        subject: 'Certificación T-NOTIF-17 · aviso de Sede con enlace',
+        payload: ['ticket_code' => 'INC-2026-H7PU', 'site_code' => 'SEDE-BCN-01']
+    ));
+
+    if ($item === null || $item->getId() === null) {
+        throw new RuntimeException('No se pudo encolar el aviso de Sede de certificación T-NOTIF-17.');
+    }
+
+    return $item;
+};
+
+$enqueueLocationNotice('enlace.relativo.tnotif17@example.org');
+$degradedPass = $dispatcher->runPass(10);
+
+$assert(
+    'T-NOTIF-17: sin host público la pasada declara el enlace relativo del aviso de Sede',
+    $degradedPass->relativeTrackingLinksCount === 1,
+    'relative_tracking_links_count: ' . $degradedPass->relativeTrackingLinksCount
+);
+$assert(
+    'T-NOTIF-17: la degradación se declara sin bloquear la entrega del aviso',
+    $degradedPass->sentCount >= 1
+        && in_array('enlace.relativo.tnotif17@example.org', $emailTransport->deliveredRecipients(), true),
+    'sent_count: ' . $degradedPass->sentCount
+);
+
+$enqueueLocationNotice('enlace.absoluto.tnotif17@example.org');
+$dispatcherWithHost = $buildDispatcher(
+    new NotificationMessageRenderer(new AppPublicUrl('https://sede.vendguard.test'))
+);
+$hostPass = $dispatcherWithHost->runPass(10);
+$hostDelivery = $emailTransport->lastDelivery();
+$hostHtml = (string)($hostDelivery['message']->htmlBody ?? '');
+
+$assert(
+    'T-NOTIF-17: con host público declarado no queda nada que declarar',
+    $hostPass->relativeTrackingLinksCount === 0
+        && in_array('enlace.absoluto.tnotif17@example.org', $emailTransport->deliveredRecipients(), true),
+    'relative_tracking_links_count: ' . $hostPass->relativeTrackingLinksCount
+);
+$assert(
+    'T-NOTIF-17: el botón del correo viaja absoluto con el host declarado',
+    str_contains($hostHtml, 'https://sede.vendguard.test/?site=SEDE-BCN-01&amp;ticket=INC-2026-H7PU'),
+    'Cuerpo: ' . mb_substr($hostHtml, 0, 200)
 );
 
 // Censo del catálogo: el vigilante es la única vía de las dos plantillas de

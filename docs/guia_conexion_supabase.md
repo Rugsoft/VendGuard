@@ -108,6 +108,10 @@ mkdir -p deploy/local/supabase
 cat > deploy/local/supabase/.env.local <<'EOF'
 export DATABASE_URL='postgres://postgres.<REF>:<CLAVE>@aws-<N>-<REGION>.pooler.supabase.com:6543/postgres'
 export DB_SSL_ROOT_CERT="$HOME/certs/supabase-prod-ca-2021.crt"
+# Host público del despliegue: lo usan el worker CLI y las etiquetas QR para
+# escribir enlaces absolutos. Sin él, el botón de los correos a la Sede sale como
+# ruta relativa y el cliente de correo lo resuelve contra su propio dominio.
+export APP_BASE_URL='https://<tu-app>.onrender.com'
 # Sólo si más adelante levantas la aplicación declarándose en producción:
 # export APP_ENV=production
 # export SECRET_KEY='...'
@@ -122,6 +126,12 @@ git check-ignore -v deploy/local/supabase/.env.local
 Único parámetro admitido además de `sslmode`/`sslrootcert`: ninguno. Cualquier otro (`pgbouncer`, `connection_limit`,
 `pgbouncer=true` que añaden los asistentes de ORM) se traslada **literalmente** al DSN y PostgreSQL lo rechaza con
 `invalid connection option`. Usa la URI limpia y pasa la CA por `DB_SSL_ROOT_CERT`.
+
+`APP_BASE_URL` no es de la base de datos, pero vive en el mismo contrato porque el proceso que la carga es el mismo: el
+worker del Centro de Notificaciones (`bin/send_notifications.php`) absolutiza con ella el botón de los correos, y las
+etiquetas QR la imprimen. Si falta, la pasada **no falla**: entrega el aviso con el botón en relativo y lo declara en
+`relative_tracking_links_count`, con un aviso por la salida de error. El remedio es declararla —aquí y en el panel de
+entorno del despliegue—, no reintentar el envío.
 
 ## 6. Pasos 5 a 7 — Yo: preflight, esquema y servidor local
 

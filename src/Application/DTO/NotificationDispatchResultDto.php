@@ -32,6 +32,15 @@ use JsonSerializable;
  *      constructor, de modo que un resumen incoherente no puede llegar jamás al
  *      planificador como si la pasada hubiera cuadrados.
  *
+ * `relative_tracking_links_count` (T-NOTIF-17) es un contador **de diagnóstico**,
+ * no de reparto: cuenta los avisos entregados o reprogramados cuyo botón de
+ * seguimiento viaja como ruta relativa porque el proceso no declara host público
+ * alguno (`APP_BASE_URL`). La entrega no se bloquea —la Sede conserva el ticket y
+ * el detalle en el texto—, pero un valor distinto de cero avisa de que los
+ * correos externos llevan un botón que el cliente de correo resolverá contra su
+ * propio dominio. Queda fuera de la identidad contable a propósito: no reparte el
+ * lote, sólo lo describe.
+ *
  * `duration_ms` permite vigilar la degradación del proceso batch (RNF-01).
  *
  * Dogma Vanilla: `final readonly`, tipado estricto PHP 8.2+, cero dependencias.
@@ -48,6 +57,8 @@ final readonly class NotificationDispatchResultDto implements JsonSerializable
      * @param int $retryScheduledCount Fallos transitorios reprogramados con backoff.
      * @param int $failedPermanentCount Fallos definitivos (5.º intento o rechazo irreversible).
      * @param int $cancelledObsoleteCount Envíos cancelados por obsolescencia antes de salir.
+     * @param int $relativeTrackingLinksCount Avisos procesados cuyo enlace de seguimiento
+     *                                        no pudo absolutizarse (sin `APP_BASE_URL`).
      * @param float $durationMs Duración medida de la pasada, en milisegundos.
      *
      * @throws InvalidArgumentException Si algún recuento es negativo o si la identidad
@@ -62,6 +73,7 @@ final readonly class NotificationDispatchResultDto implements JsonSerializable
         public int $retryScheduledCount,
         public int $failedPermanentCount,
         public int $cancelledObsoleteCount,
+        public int $relativeTrackingLinksCount,
         public float $durationMs,
     ) {
         foreach (get_object_vars($this) as $key => $value) {
@@ -109,6 +121,7 @@ final readonly class NotificationDispatchResultDto implements JsonSerializable
      *     retry_scheduled_count: int,
      *     failed_permanent_count: int,
      *     cancelled_obsolete_count: int,
+     *     relative_tracking_links_count: int,
      *     duration_ms: float
      * }
      */
@@ -123,6 +136,7 @@ final readonly class NotificationDispatchResultDto implements JsonSerializable
             'retry_scheduled_count' => $this->retryScheduledCount,
             'failed_permanent_count' => $this->failedPermanentCount,
             'cancelled_obsolete_count' => $this->cancelledObsoleteCount,
+            'relative_tracking_links_count' => $this->relativeTrackingLinksCount,
             'duration_ms' => $this->durationMs,
         ];
     }

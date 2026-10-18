@@ -954,6 +954,7 @@ $assert(
             'retry_scheduled_count',
             'failed_permanent_count',
             'cancelled_obsolete_count',
+            'relative_tracking_links_count',
             'duration_ms',
         ],
     'Claves devueltas: ' . implode(', ', array_keys($dispatchBody))

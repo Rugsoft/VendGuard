@@ -97,6 +97,20 @@ final class NotificationMessageRenderer
         $this->trackingLinks = new NotificationTrackingLinkResolver($publicUrl);
     }
 
+    /**
+     * Autoridad del destino del botón que este renderizador aplica.
+     *
+     * La publica para que quien decide **si el enlace puede viajar** —el
+     * despachador, que declara la degradación en el resumen de la pasada
+     * (T-NOTIF-17)— consulte exactamente la misma instancia que escribe el
+     * correo. Con un resolutor aparte, lo que sale en el mensaje y lo que se
+     * declara en el resumen podrían decir cosas distintas sobre el mismo envío.
+     */
+    public function trackingLinks(): NotificationTrackingLinkResolver
+    {
+        return $this->trackingLinks;
+    }
+
     private const CTA_LABELS = [
         NotificationTrackingLinkResolver::AUDIENCE_LOCATION => 'Abrir el Portal de Sede',
         NotificationTrackingLinkResolver::AUDIENCE_CITIZEN_QR => 'Consultar el estado del aviso',

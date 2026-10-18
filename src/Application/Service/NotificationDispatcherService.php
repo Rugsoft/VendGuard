@@ -63,7 +63,9 @@ use VendGuard\Infrastructure\Notification\Transport\NotificationTransportRegistr
  *   restantes se entregan con el timeout estricto de 5 s del transporte
  *   (RNF-03) y el resultado se traduce a `SENT`, `PENDING_RETRY` con la curva
  *   1m/5m/15m/60m o `FAILED_PERMANENT` con su fila de auditoría en `audit_log`
- *   (Art. III.3).
+ *   (Art. III.3). Los avisos externos cuyo botón no pudo absolutizarse se
+ *   cuentan en `relative_tracking_links_count` (T-NOTIF-17): la entrega no se
+ *   bloquea, pero la degradación del enlace se publica en lugar de silenciarse.
  *
  * **Idempotencia y honestidad contable.** El resumen devuelto
  * (`NotificationDispatchResultDto`) reparte el lote reclamado entre enviadas,
@@ -140,6 +142,7 @@ final class NotificationDispatcherService
         $retryScheduledCount = 0;
         $failedPermanentCount = 0;
         $cancelledObsoleteCount = 0;
+        $relativeTrackingLinksCount = 0;
 
         foreach ($claimed as $item) {
             $obsolescence = $this->evaluateObsolescence($item);
@@ -152,6 +155,16 @@ final class NotificationDispatcherService
                 $this->persist($item);
                 $cancelledObsoleteCount++;
                 continue;
+            }
+
+            // T-NOTIF-17 · Un enlace externo que no pudo absolutizarse se declara
+            // antes de salir: el aviso sigue viajando —la Sede conserva ticket,
+            // máquina y urgencia—, pero la pasada lo cuenta para que la
+            // degradación deje de ser invisible y la configuración se corrija. La
+            // autoridad es la del propio renderizador: lo que se declara aquí y lo
+            // que se escribe en el correo son exactamente la misma regla.
+            if ($this->renderer->trackingLinks()->usesRelativeTrackingLink($item->getTemplate(), $item->getPayload())) {
+                $relativeTrackingLinksCount++;
             }
 
             $result = $this->transports
@@ -199,6 +212,7 @@ final class NotificationDispatcherService
             retryScheduledCount: $retryScheduledCount,
             failedPermanentCount: $failedPermanentCount,
             cancelledObsoleteCount: $cancelledObsoleteCount,
+            relativeTrackingLinksCount: $relativeTrackingLinksCount,
             durationMs: round((microtime(true) - $startedAt) * 1000, 1),
         );
     }

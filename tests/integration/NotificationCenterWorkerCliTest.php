@@ -88,10 +88,15 @@ $assert('0.1 El worker CLI existe en bin/send_notifications.php', is_file($worke
 /**
  * Ejecuta el worker como proceso hijo real y devuelve salida y código de salida.
  *
+ * `$environment` es el entorno **completo** del hijo cuando se declara: así la
+ * certificación del enlace relativo (T-NOTIF-17) no depende de lo que tenga
+ * exportado la terminal que ejecuta la batería.
+ *
  * @param list<string> $arguments
+ * @param array<string, string>|null $environment
  * @return array{exit: int, stdout: string, stderr: string}
  */
-$runWorker = function (array $arguments) use ($workerPath): array {
+$runWorker = function (array $arguments, ?array $environment = null) use ($workerPath): array {
     $token = bin2hex(random_bytes(8));
     $stdoutPath = sys_get_temp_dir() . "/vendguard_notif_worker_{$token}.out";
     $stderrPath = sys_get_temp_dir() . "/vendguard_notif_worker_{$token}.err";
@@ -106,7 +111,8 @@ $runWorker = function (array $arguments) use ($workerPath): array {
         array_merge([PHP_BINARY, $workerPath], $arguments),
         $descriptors,
         $pipes,
-        dirname($workerPath, 1)
+        dirname($workerPath, 1),
+        $environment
     );
 
     if (!is_resource($process)) {
@@ -175,7 +181,7 @@ $assert(
     'Salida: ' . mb_substr(trim($defaultRun['stdout']), 0, 200)
 );
 $assert(
-    '1.3 El resumen publica exactamente las nueve claves del DTO',
+    '1.3 El resumen publica exactamente las diez claves del DTO',
     array_keys($defaultBody['data'] ?? []) === [
         'rescued_stuck_count',
         'sla_2h_alerts_enqueued',
@@ -185,6 +191,7 @@ $assert(
         'retry_scheduled_count',
         'failed_permanent_count',
         'cancelled_obsolete_count',
+        'relative_tracking_links_count',
         'duration_ms',
     ],
     'Claves: ' . implode(', ', array_keys($defaultBody['data'] ?? []))
@@ -269,6 +276,67 @@ $assert(
         && str_contains((string)($helpBody['usage'] ?? ''), '--batch-size')
         && ($helpBody['batch_size_range'] ?? []) === [1, 200],
     "Exit: {$helpRun['exit']}"
+);
+
+echo "\n--- 1bis. Degradación del enlace declarada por el worker (T-NOTIF-17) ---\n";
+
+// Aviso de Sede de verdad: lleva su código de ticket y su código de sede, que es
+// lo que compone el botón del correo. El worker se lanza con un entorno explícito
+// —sin ninguna de las dos variables de host— para que la prueba no dependa de lo
+// que tenga exportado la terminal que ejecuta la batería.
+$enqueueLocationItem = function (string $recipient) use ($outbox): NotificationOutboxItem {
+    $item = $outbox->enqueue(new NotificationOutboxItem(
+        id: null,
+        incidentId: null,
+        channel: NotificationChannel::EMAIL,
+        priority: NotificationPriority::STANDARD,
+        template: NotificationTemplate::INCIDENT_OPENED_SITE,
+        recipient: $recipient,
+        recipientRole: 'LOCATION',
+        recipientUserId: null,
+        recipientLocationId: null,
+        subject: 'Certificación T-NOTIF-17 · ' . $recipient,
+        payload: ['ticket_code' => 'INC-2026-H7PU', 'site_code' => 'SEDE-BCN-01']
+    ));
+
+    if ($item === null || $item->getId() === null) {
+        throw new RuntimeException('No se pudo encolar el aviso de Sede de certificación.');
+    }
+
+    return $item;
+};
+
+$envWithoutHost = getenv();
+unset($envWithoutHost['APP_BASE_URL'], $envWithoutHost['VENDGUARD_APP_URL']);
+
+$enqueueLocationItem('enlace.relativo.tnotif17@sede.vendguard.es');
+$noHostRun = $runWorker(['--batch-size=5'], $envWithoutHost);
+$noHostBody = $decodeWorker($noHostRun['stdout']);
+$assert(
+    '1.14 Sin host público la pasada declara el enlace relativo del aviso de Sede',
+    ($noHostBody['data']['relative_tracking_links_count'] ?? -1) === 1,
+    'relative_tracking_links_count: ' . (string)($noHostBody['data']['relative_tracking_links_count'] ?? 'ausente')
+);
+$assert(
+    '1.15 El diagnóstico sale por stderr con la variable a declarar, y stdout sigue siendo JSON puro',
+    $noHostRun['exit'] === 0
+        && ($noHostBody['success'] ?? false) === true
+        && str_contains($noHostRun['stderr'], 'APP_BASE_URL'),
+    'stderr: ' . trim($noHostRun['stderr'])
+);
+
+$enqueueLocationItem('enlace.absoluto.tnotif17@sede.vendguard.es');
+$withHostRun = $runWorker(
+    ['--batch-size=5'],
+    array_merge($envWithoutHost, ['APP_BASE_URL' => 'https://sede.vendguard.test'])
+);
+$withHostBody = $decodeWorker($withHostRun['stdout']);
+$assert(
+    '1.16 Con APP_BASE_URL declarada el enlace viaja absoluto y deja de declararse',
+    ($withHostBody['data']['relative_tracking_links_count'] ?? -1) === 0
+        && !str_contains($withHostRun['stderr'], 'APP_BASE_URL'),
+    'relative_tracking_links_count: ' . (string)($withHostBody['data']['relative_tracking_links_count'] ?? 'ausente')
+        . ' · stderr: ' . trim($withHostRun['stderr'])
 );
 
 echo "\n--- 2. Registro de las nueve rutas nuevas (T-NOTIF-09.2) ---\n";

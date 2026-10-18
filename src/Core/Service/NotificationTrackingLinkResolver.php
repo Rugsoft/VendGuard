@@ -33,6 +33,10 @@ use VendGuard\Core\Domain\ValueObject\NotificationTemplate;
  * resolver (`AppPublicUrl`). Así los envíos que ya están encolados en relativo
  * quedan reparados en su siguiente intento, sin migración de datos.
  *
+ * **Degradación declarada.** Sin host, la ruta viaja relativa; ese caso lo
+ * delata `usesRelativeTrackingLink()`, de modo que el resumen de la pasada y el
+ * worker CLI lo publican en lugar de darlo por bueno (T-NOTIF-17).
+ *
  * Dogma Vanilla: PHP 8.2+ puro, sin dependencias externas, sin I/O.
  * Dualismo Lingüístico: código e identificadores en inglés, documentación en castellano.
  */
@@ -41,6 +45,14 @@ final class NotificationTrackingLinkResolver
     public const AUDIENCE_LOCATION = 'LOCATION';
     public const AUDIENCE_CITIZEN_QR = 'CITIZEN_QR';
     public const AUDIENCE_INTERNAL = 'INTERNAL';
+
+    /**
+     * Remedio canónico de un enlace relativo: es una variable de entorno, no un
+     * cambio de código. Lo publican los consumidores que lo detectan —el resumen
+     * de la pasada y el worker CLI— para que el diagnóstico diga exactamente qué
+     * declarar en lugar de dejar al operador buscándolo (T-NOTIF-17).
+     */
+    public const MISSING_PUBLIC_HOST_REMEDY = 'Declare APP_BASE_URL (o VENDGUARD_APP_URL) con el origen público del despliegue para que el botón del correo viaje absoluto.';
 
     private readonly AppPublicUrl $publicUrl;
 
@@ -87,6 +99,39 @@ final class NotificationTrackingLinkResolver
     public function resolve(NotificationTemplate $template, array $payload): ?string
     {
         return $this->publicUrl->absolute($this->route($template, $payload));
+    }
+
+    /**
+     * ¿El enlace de esta notificación viaja como ruta relativa?
+     *
+     * Convierte una degradación silenciosa en un dato del resumen de la pasada
+     * (T-NOTIF-17): un correo externo cuyo botón no pudo absolutizarse lleva una
+     * ruta que el cliente de correo resolverá contra su propio dominio, de modo
+     * que el destinatario recibe un botón inservible y nadie se entera. El envío
+     * no se bloquea —la Sede sigue conociendo su ticket y su detalle por el
+     * texto—, pero la pasada lo cuenta para que quien opera el planificador
+     * pueda corregir la configuración antes de que se repita.
+     *
+     * @param array<string, mixed> $payload
+     */
+    public function usesRelativeTrackingLink(NotificationTemplate $template, array $payload): bool
+    {
+        if ($this->audienceFor($template) === self::AUDIENCE_INTERNAL) {
+            return false;
+        }
+
+        $route = $this->route($template, $payload);
+        if ($route === null) {
+            return false;
+        }
+
+        $resolved = $this->publicUrl->absolute($route);
+        if ($resolved === null) {
+            return false;
+        }
+
+        // Relativa es la que no declara esquema: `/?site=…`, `?qr=…`, `/ruta`.
+        return preg_match('#^[A-Za-z][A-Za-z0-9+.\-]*:#', $resolved) !== 1;
     }
 
     /**

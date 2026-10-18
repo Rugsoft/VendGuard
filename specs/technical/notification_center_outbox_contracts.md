@@ -285,9 +285,19 @@ El servicio de construcción de payloads (`NotificationPayloadSanitizer`) aplica
 
 * **Motivo:** un cliente de correo resuelve las rutas relativas contra su propio dominio, de modo que el botón aterrizaba en la web del proveedor de correo en lugar del expediente. El enlace sólo es válido si viaja completo.
 * **Alcance del prefijado:** sólo rutas; un `tracking_url` que ya sea absoluto (`https://…`) no se reescribe, y cualquier esquema distinto de `http(s)`/`mailto:` se descarta.
-* **Degradación:** sin host declarado —worker CLI sin variable de entorno— la ruta se entrega tal cual. Definir `APP_BASE_URL` en el despliegue es la corrección operativa.
+* **Degradación:** sin host declarado —worker CLI sin variable de entorno— la ruta se entrega tal cual. Definir `APP_BASE_URL` en el despliegue es la corrección operativa, y la pasada lo **declara** en lugar de silenciarlo (§3.4).
 * **Trazabilidad:** al aplicarse en el renderizado, los envíos ya encolados con ruta relativa quedan reparados en su siguiente intento o reintento manual desde la bandeja, sin reencolado ni migración de datos.
 * **Revisión previa (RF-06.3):** la bandeja de supervisión publica en cada fila de correo el campo `tracking_url` (§4.1) con esa **misma** URL final, resuelta por la misma autoridad (`NotificationTrackingLinkResolver`) y con la misma precedencia de host (`APP_BASE_URL` → host de la petición). Coordinación ve antes de reintentar exactamente el enlace que recibirá el destinatario; los avisos internos y los del canal Webhook no llevan botón y publican `null`.
+
+### 3.4. Declaración de la Degradación del Enlace (T-NOTIF-17, 2026-10-18)
+
+Un enlace de seguimiento que viaja relativo es un envío que **parece** correcto y no lo es: el destinatario recibe el aviso, pulsa el botón y aterriza en el dominio del proveedor de correo. La degradación deja de ser silenciosa: se declara en los dos consumidores del despacho.
+
+* **Resumen de la pasada (`POST /api/cron/notifications-dispatch` y `bin/send_notifications.php`):** la clave `relative_tracking_links_count` cuenta los avisos procesados —entregados o reprogramados— cuyo botón no pudo absolutizarse. Es un contador **de diagnóstico**, no de reparto: queda fuera de la identidad contable `claimed = sent + retry + permanent + obsolete`, que no altera.
+* **Worker CLI:** cuando el contador no es cero, el worker escribe en la salida de error un aviso con el remedio exacto (`Declare APP_BASE_URL (o VENDGUARD_APP_URL) …`). La salida estándar sigue siendo el JSON puro del resumen, de modo que ninguna canalización se rompe.
+* **Motivo de no bloquear la entrega:** el correo degradado sigue informando a la Sede de su ticket, su máquina y su urgencia, y el aviso es la única vía por la que la sede conoce la avería. Se declara el defecto en lugar de suprimir la información.
+* **Autoridad única:** la comprobación la resuelve el mismo `NotificationTrackingLinkResolver` que escribe el botón —expuesto por `NotificationMessageRenderer::trackingLinks()`—, de manera que lo que viaja en el correo y lo que la pasada declara no puedan decir cosas distintas del mismo envío. Un aviso interno (sin botón) o un aviso sin códigos de expediente no se declaran: no hay enlace que resolver.
+* **Trazabilidad operativa:** definir el host en el despliegue deja la próxima pasada en cero; los envíos ya encolados quedan reparados en su siguiente intento, sin reencolado ni migración.
 
 ---
 
@@ -576,6 +586,7 @@ Activa o desactiva la condición de *"Técnico de guardia"* (`is_on_call`) sobre
     "retry_scheduled_count": 1,
     "failed_permanent_count": 0,
     "cancelled_obsolete_count": 0,
+    "relative_tracking_links_count": 0,
     "duration_ms": 84.5
   }
 }

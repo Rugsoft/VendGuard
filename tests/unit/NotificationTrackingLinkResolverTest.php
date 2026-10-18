@@ -13,6 +13,8 @@ declare(strict_types=1);
  *   3. URL absoluta con el host público; degradación honesta sin host.
  *   4. Ni la Sede ve el enlace del Ciudadano ni al revés, y los avisos internos
  *      no llevan botón.
+ *   5. Detección de la degradación sin host público (T-NOTIF-17): el enlace que
+ *      viaja relativo se declara, y el aviso interno o sin códigos no se declara.
  *
  * Dogma Vanilla: PHP 8.2+ puro, sin red, sin base de datos y sin reloj.
  */
@@ -151,6 +153,43 @@ $assert(
 $assert(
     '4.3 El enlace del Ciudadano acota la máquina, sin datos de la sede',
     !str_contains((string)$resolver->resolve(NotificationTemplate::INCIDENT_OPENED_CITIZEN_QR, $citizenPayload), 'SEDE-')
+);
+
+echo "\n--- 5. Detección de la degradación sin host público (T-NOTIF-17) ---\n";
+
+$assert(
+    '5.1 Sin host público, el aviso de Sede se declara con enlace relativo',
+    $envlessResolver->usesRelativeTrackingLink(NotificationTemplate::INCIDENT_OPENED_SITE, $siteyPayload)
+);
+$assert(
+    '5.2 Con host público, el mismo aviso deja de declararse degradado',
+    !$resolver->usesRelativeTrackingLink(NotificationTemplate::INCIDENT_OPENED_SITE, $siteyPayload)
+);
+$assert(
+    '5.3 El aviso del Ciudadano QR se declara igual: su botón también es externo',
+    $envlessResolver->usesRelativeTrackingLink(NotificationTemplate::INCIDENT_OPENED_CITIZEN_QR, $citizenPayload)
+    && !$resolver->usesRelativeTrackingLink(NotificationTemplate::INCIDENT_OPENED_CITIZEN_QR, $citizenPayload)
+);
+$assert(
+    '5.4 Los avisos internos no se declaran: no llevan botón que resolver',
+    !$envlessResolver->usesRelativeTrackingLink(NotificationTemplate::TECHNICIAN_ASSIGNED, $siteyPayload)
+    && !$envlessResolver->usesRelativeTrackingLink(NotificationTemplate::COLD_CHAIN_IMMEDIATE_ALERT, $siteyPayload)
+);
+$assert(
+    '5.5 Un aviso sin códigos no se declara aunque falte el host',
+    !$envlessResolver->usesRelativeTrackingLink(NotificationTemplate::INCIDENT_OPENED_SITE, ['ticket_code' => 'INC-1'])
+);
+$assert(
+    '5.6 Un payload ya absoluto no se declara degradado',
+    !$envlessResolver->usesRelativeTrackingLink(
+        NotificationTemplate::INCIDENT_OPENED_SITE,
+        array_merge($siteyPayload, ['tracking_url' => 'https://otro.example/?site=X&ticket=Y'])
+    )
+);
+$assert(
+    '5.7 El remedio publicado nombra las dos variables que el código lee',
+    str_contains(NotificationTrackingLinkResolver::MISSING_PUBLIC_HOST_REMEDY, 'APP_BASE_URL')
+    && str_contains(NotificationTrackingLinkResolver::MISSING_PUBLIC_HOST_REMEDY, 'VENDGUARD_APP_URL')
 );
 
 echo "\n======================================================================\n";
