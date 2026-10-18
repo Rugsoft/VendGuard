@@ -178,18 +178,30 @@ Abre en tu navegador:
 
 ### 4. Programar los Procesos de Fondo (Cron)
 
-Los dos procesos batch del sistema se disparan desde fuera de la aplicación: VendGuard **no** lleva planificador propio, de modo que su activación real depende de la tarea programada que se configure aquí. La credencial es la cabecera `X-Cron-Secret` (variable de entorno `CRON_SECRET`; en desarrollo vale la clave local `vendguard-dev-cron-key-local-only`) y las dos rutas son fail-closed: sin la marca del middleware responden `401` aunque la ruta se registre mal.
+Los tres procesos batch del sistema pueden ejecutarse tanto desde el `crond` interno del contenedor ([`deploy/cron/vendguard-sanitary-sweep`](deploy/cron/vendguard-sanitary-sweep)) como desde un planificador externo por CLI o HTTP. La credencial HTTP es la cabecera `X-Cron-Secret` (variable de entorno `CRON_SECRET`; en desarrollo vale la clave local `vendguard-dev-cron-key-local-only`) y las tres rutas son fail-closed: sin la marca de `CronAuthMiddleware` responden `401`.
 
-| Proceso | Cadencia ratificada | Comando |
+| Proceso | Cadencia recomendada | Comando CLI / Endpoint HTTP |
 | :--- | :--- | :--- |
+| **Despachador del Centro de Notificaciones** (Módulo 14, RF-01.3/RF-04/RF-06): rescata envíos atrapados en `PROCESSING` (> 5 min), vigila los umbrales de inminencia de SLA sanitario (2 h sin asignar / 3 h sin iniciar) y entrega la cola `notification_outbox` con prioridad `CRITICAL_SANITARY` y backoff progresivo (1m, 5m, 15m, 60m). | **Cada 1–2 minutos** | `php bin/send_notifications.php [--batch-size=N]` *(o `POST /api/cron/notifications-dispatch`)* |
 | **Barrido del Reloj Sanitario Biológico** (RF-03.5.1, Art. II): activa la cuarentena de las máquinas bajo vigilancia con más de 4 h naturales sin frío confirmado **sin** esperar a un intento de cierre; una fila sostenida por otro consumidor se aplaza en 2 s en lugar de bloquear la pasada. | **Cada 15 minutos** — acota la latencia de detección en «4 h naturales + hasta 15 min» (+ una cadencia si otro consumidor sostiene la fila). | `php bin/sanitary_clock_sweep.php` *(o `POST /api/cron/sanitary-clock-sweep`)* |
-| **Cierre definitivo de garantía** (RF-10): archiva a `CERRADA` los expedientes resueltos que superan las 48 h sin reclamación. | Una vez al día | `POST /api/cron/auto-close` |
+| **Cierre definitivo de garantía** (RF-10): archiva a `CERRADA` los expedientes resueltos que superan las 48 h sin reclamación. | **Una vez al día** (ej. 03:00 UTC) | `POST /api/cron/auto-close` |
 
 ```bash
-# crontab -e  (Linux / macOS)
+# crontab -e  (Linux / macOS — o instalado de serie en /etc/crontabs/root dentro del contenedor)
+* * * * *    cd /ruta/a/gestor-incidencias-vending && php bin/send_notifications.php >> /var/log/vendguard-notifications.log 2>&1
 */15 * * * * cd /ruta/a/gestor-incidencias-vending && CRON_SECRET=... php bin/sanitary_clock_sweep.php >> /var/log/vendguard-sweep.log 2>&1
-0 3 * * *     curl -s -X POST -H "X-Cron-Secret: $CRON_SECRET" https://tu-dominio/api/cron/auto-close
+0 3 * * *    curl -s -X POST -H "X-Cron-Secret: $CRON_SECRET" https://tu-dominio/api/cron/auto-close
 ```
+
+#### Programación externa gratuita sin depender de GitHub Actions (`cron-job.org` o Cloudflare Workers)
+Si la cuenta de GitHub tiene bloqueada la ejecución de Actions o el contenedor se despliega en un plan gratuito que se suspende por inactividad (ej. Render Free), puedes desactivar los workflows `.yml` en la pestaña *Actions* de GitHub y programar las tres llamadas HTTP en un servicio gratuito como **[cron-job.org](https://cron-job.org)** o un **Cron Trigger de Cloudflare Workers**:
+
+1. **Despachador de notificaciones (Emails + Webhook Telegram + Alertas SLA 2h/3h):**
+   * `POST https://tu-dominio/api/cron/notifications-dispatch` · Cabecera `X-Cron-Secret: <CRON_SECRET>` · Cadencia: **cada 1–2 minutos**.
+2. **Barrido sanitario + Keep-Alive de Supabase:**
+   * `POST https://tu-dominio/api/cron/sanitary-clock-sweep` · Cabecera `X-Cron-Secret: <CRON_SECRET>` · Cadencia: **cada 15 minutos** *(al ejecutar consultas reales contra PostgreSQL cada 15 min, evita además la pausa por inactividad de 7 días de Supabase sin necesitar el workflow de GitHub)*.
+3. **Auto-cierre de garantía 48 h:**
+   * `POST https://tu-dominio/api/cron/auto-close` · Cabecera `X-Cron-Secret: <CRON_SECRET>` · Cadencia: **diaria (`0 3 * * *`)**.
 
 El equivalente de línea de comandos del barrido devuelve código de salida **distinto de cero** si alguna máquina no pudo evaluarse, de modo que un planificador o un supervisor de tareas puede alertar sobre él; el mismo barrido sigue disponible por HTTP para entornos sin acceso a la consola del servidor. La cadencia se **comprueba** desde el panel de coordinación: la pestaña *🩺 Barrido Sanitario* publica el latido (última pasada y minutos transcurridos), la tendencia de 24 h y los expedientes aplazados por contención de fila, con la alerta de escalado cuando un aplazamiento persiste tres pasadas consecutivas (RF-07).
 
@@ -207,13 +219,15 @@ CMD ["sh", "-c", "php bin/init_cloud_db.php ; php -S 0.0.0.0:${PORT} -t public p
 | Variable | Obligatoria en producción | Efecto |
 | :--- | :--- | :--- |
 | `SECRET_KEY` | **Sí** con `APP_ENV=production` | Firma HMAC de los tokens de sesión. Sin ella y sin entorno declarado se usa una clave **exclusiva de desarrollo**. |
-| `CRON_SECRET` | **Sí** con `APP_ENV=production` | Credencial `X-Cron-Secret` de los dos procesos batch. |
+| `CRON_SECRET` | **Sí** con `APP_ENV=production` | Credencial `X-Cron-Secret` de los tres procesos batch (`auto-close`, `sanitary-clock-sweep` y `notifications-dispatch`). |
 | `APP_ENV` ó `VENDGUARD_ENV` | Recomendada | `production`/`prod` activan el **fallo en cerrado**: sin claves el sistema no arranca y `root` sin contraseña se rechaza (hallazgos S-1 y S-5). |
 | `DATABASE_URL` / `SUPABASE_DB_URL` | Alternativa | Cadena única de PostgreSQL (`postgres://usuario:clave@host:puerto/base?sslmode=verify-full`). Tiene prioridad sobre `DB_*`. |
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Sí (o la cadena única) | Credenciales sueltas; se aceptan también `DB_DATABASE`, `DB_USERNAME` y `DB_PASS`. |
 | `DB_SSL` | Según proveedor | `1`/`true` fuerza TLS; se activa solo si el host contiene `tidbcloud`/`aivencloud`. |
 | `PORT` | La inyecta la plataforma | Puerto del servidor embebido. |
 | `APP_BASE_URL` | Opcional | Host público canónico para las URLs impresas en las etiquetas QR (si falta, se resuelve por la petición). |
+| `VENDGUARD_SMTP_HOST`, `VENDGUARD_SMTP_FROM_ADDRESS` | Para envío de emails | Servidor SMTP (ej. `smtp-relay.brevo.com`) y remitente verificado. Si no se declaran, se registra `UnconfiguredEmailTransport` y los correos quedan en fallo transitorio visible en la bandeja. |
+| `VENDGUARD_SMTP_PORT`, `VENDGUARD_SMTP_ENCRYPTION`, `VENDGUARD_SMTP_USERNAME`, `VENDGUARD_SMTP_PASSWORD`, `VENDGUARD_SMTP_FROM_NAME` | Opcionales (con SMTP) | Puerto (`587`/`2525` con `tls` o `465` con `ssl`), credenciales `AUTH LOGIN` y nombre visible del remitente. |
 | `VENDGUARD_DEV_SITE_KEYS` | **Nunca** en producción | Solo en local: siembra claves de centro deterministas `DEV-<site_code>`. En producción no se siembra ninguna: cada sede recibe su clave aleatoria al alta o al reemitirse desde coordinación. |
 
 **Cron en la plataforma:** un *Cron Job* con la misma imagen ejecutando `php bin/sanitary_clock_sweep.php` cada 15 minutos (o una llamada externa a `POST /api/cron/sanitary-clock-sweep` con la cabecera `X-Cron-Secret`) y `POST /api/cron/auto-close` una vez al día. Sin el barrido programado, la pestaña *🩺 Barrido Sanitario* lo delata con el latido envejecido: la superficie distingue «no hay nada que hacer» de «el barrido no está corriendo».
@@ -258,6 +272,7 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `POST`| `/api/technician/incidents/{id}/resolve`| `TECHNICIAN` | Resolución técnica documentada ($\ge 20$ chars diagnóstico y acción). |
 | `POST`| `/api/cron/auto-close` | Clave Cron | Cierre definitivo automático tras 48h de garantía. |
 | `POST`| `/api/cron/sanitary-clock-sweep` | Clave Cron | Barrido de fondo del Reloj Sanitario Biológico: activa la cuarentena sin intento de cierre (latencia ≤ 15 min). |
+| `POST`| `/api/cron/notifications-dispatch` | Clave Cron | Pasada del despachador de notificaciones: rescate de envíos en tránsito, vigilancia de SLA (2h/3h) y entrega con prioridad `CRITICAL_SANITARY`. |
 | `GET` | `/api/qr/scan/{code}` | Público | Consulta ciudadana de estado de máquina por código QR. |
 | `POST`| `/api/qr/report` | Público | Envío directo de incidencia ciudadana desde lectura QR. |
 
@@ -336,6 +351,17 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `POST` | `/api/coordinator/incidents/{id}/resume-pending-info` | `COORDINATOR` | Reanudación manual: devuelve el expediente a `ASSIGNED` o a `REGISTERED` según haya responsable o no. |
 | `POST` | `/api/coordinator/incidents/{id}/cancel-inactivity` | `COORDINATOR` | Cancelación justificada tras **72 horas hábiles** de silencio, desvinculando los reintegros pendientes (Art. V.1 y V.2). |
 
+#### Centro de Notificaciones Transaccionales y Alertas de Emergencia (Módulo 14)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/coordinator/notifications/outbox` | `COORDINATOR` | Bandeja de salida paginada con KPIs de estados, alerta de fallos permanentes y filtros combinados. |
+| `POST` | `/api/coordinator/notifications/outbox/{id}/retry` | `COORDINATOR` | Reintento manual individual refrescando el destinatario vigente de la sede o del webhook. |
+| `POST` | `/api/coordinator/notifications/outbox/retry-all-failed` | `COORDINATOR` | Reintento masivo de todos los envíos en estado `FAILED_PERMANENT`. |
+| `POST` | `/api/coordinator/notifications/outbox/{id}/cancel` | `COORDINATOR` | Cancelación manual auditada a `CANCELLED_OBSOLETE`. |
+| `GET/PUT` | `/api/coordinator/notifications/settings` | `COORDINATOR` | Consulta y actualización del Canal Corporativo de Emergencias (URL `https://` validada anti-SSRF) y técnicos de guardia. |
+| `POST` | `/api/coordinator/notifications/settings/test-webhook` | `COORDINATOR` | Prueba interactiva de conexión con el Webhook corporativo (timeout estricto de 5 s). |
+| `PATCH` | `/api/coordinator/users/{id}/on-call` | `COORDINATOR` | Conmutación del estado de guardia 24/7 (`is_on_call`) de un técnico de ruta. |
+
 ---
 
 ## 🧪 Batería Completa de Pruebas Automatizadas (T-39 & Módulos 02, 03, 04, M1, M2 y M4)
@@ -404,7 +430,8 @@ gestor-incidencias-vending/
 │   ├── migrate.php               # Migrador incremental del motor único (PostgresMigrationRunner)
 │   ├── seed_demo_history.php     # Histórico de demostración (17 averías INC-DEMO-*, traza y auditoría)
 │   ├── create_bizum_case.php     # Script CLI de caso demo de reintegro por Bizum
-│   └── sanitary_clock_sweep.php  # Barrido CLI del Reloj Sanitario Biológico (mismo reloj que el endpoint cron)
+│   ├── sanitary_clock_sweep.php  # Barrido CLI del Reloj Sanitario Biológico (mismo reloj que el endpoint cron)
+│   └── send_notifications.php    # Worker CLI del despachador de notificaciones (mismo grafo que el endpoint cron)
 ├── database/
 │   ├── supabase_init.sql         # DDL canónico de PostgreSQL (20 tablas, 24 enumerados, disparadores)
 │   ├── supabase_migrations/      # Migraciones incrementales canónicas del motor único

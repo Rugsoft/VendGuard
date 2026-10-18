@@ -10,8 +10,8 @@ proveedor), porque el programador interno corre dentro de la base que se suspend
 
 | Pieza | Artefacto versionado | Qué cubre |
 | :--- | :--- | :--- |
-| Reloj canónico | [`vendguard-sanitary-sweep`](vendguard-sanitary-sweep) → `/etc/crontabs/root` | La cadencia de 15 minutos mientras el contenedor está en pie. Sin red y sin credenciales expuestas. |
-| Despertador y vigilante | [`.github/workflows/sanitary-clock.yml`](../../.github/workflows/sanitary-clock.yml) | Despierta el contenedor si está suspendido, detecta la ventana perdida, invoca el mismo servicio canónico por el endpoint autenticado y **alerta**. |
+| Reloj canónico | [`vendguard-sanitary-sweep`](vendguard-sanitary-sweep) → `/etc/crontabs/root` | La cadencia de 15 minutos del barrido sanitario (`bin/sanitary_clock_sweep.php`) y la cadencia de 1 minuto del despachador de notificaciones (`bin/send_notifications.php`) mientras el contenedor está en pie. Sin red y sin credenciales expuestas. |
+| Despertador y vigilante | [`.github/workflows/sanitary-clock.yml`](../../.github/workflows/sanitary-clock.yml) *(o planificador externo HTTP como `cron-job.org` / Cloudflare Workers)* | Despierta el contenedor si está suspendido, detecta la ventana perdida, invoca los servicios canónicos por sus endpoints autenticados y **alerta**. |
 
 ## Instalación en la imagen (tarea T-HYBRID-12)
 
