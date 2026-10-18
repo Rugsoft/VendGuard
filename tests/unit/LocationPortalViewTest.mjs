@@ -314,6 +314,52 @@ assert('6.3 The report form keeps the mailbox optional and validates it before s
   IncidentReportModal.template.includes('data-testid="reporter-email-input"') &&
   IncidentReportModal.template.includes('data-testid="reporter-email-error"'));
 
+// ---------------------------------------------------------------------
+// TEST GROUP 7: Deep link from the tracking email (?site=...&ticket=...)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 7: Deep Link del Correo de Seguimiento (Portal de Sede) ---');
+
+assert('7.1 The portal declares the initial site code prop',
+  LocationPortalView.props.initialSiteCode.type === String &&
+  LocationPortalView.props.initialSiteCode.default === '');
+assert('7.2 The portal declares the initial ticket code prop',
+  LocationPortalView.props.initialTicketCode.type === String &&
+  LocationPortalView.props.initialTicketCode.default === '');
+
+const prefillState = { initialSiteCode: 'sede-bcn-02', siteCodeInput: '' };
+LocationPortalView.created.call(prefillState);
+assert('7.3 created() pre-fills the site code in upper case', prefillState.siteCodeInput === 'SEDE-BCN-02');
+
+const noDeepLinkState = { initialSiteCode: '', siteCodeInput: '' };
+LocationPortalView.created.call(noDeepLinkState);
+assert('7.4 Without a deep link the field stays empty', noDeepLinkState.siteCodeInput === '');
+
+let openedTickets = [];
+const deepLinkState = {
+  machines: mockMachines,
+  initialTicketCode: 'INC-2026-0042',
+  deepLinkHandled: false,
+  onOpenComments: (machine) => { openedTickets.push(machine.id); }
+};
+LocationPortalView.methods.openDeepLinkedIncident.call(deepLinkState);
+assert('7.5 The cited ticket opens its conversation thread once authenticated',
+  openedTickets.length === 1 && openedTickets[0] === 2 && deepLinkState.deepLinkHandled === true);
+
+LocationPortalView.methods.openDeepLinkedIncident.call(deepLinkState);
+assert('7.6 Closing the thread does not reopen it on the next list refresh', openedTickets.length === 1);
+
+const unknownTicketState = {
+  machines: mockMachines,
+  initialTicketCode: 'INC-1999-000001',
+  deepLinkHandled: false,
+  onOpenComments: () => { openedTickets.push('unexpected'); }
+};
+LocationPortalView.methods.openDeepLinkedIncident.call(unknownTicketState);
+assert('7.7 An unknown ticket opens nothing and keeps the flag untouched',
+  unknownTicketState.deepLinkHandled === false && openedTickets.length === 1);
+assert('7.8 The machine list triggers the deep link resolution after loading',
+  LocationPortalView.methods.loadMachines.toString().includes('openDeepLinkedIncident'));
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);

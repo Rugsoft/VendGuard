@@ -37,7 +37,8 @@ export const App = {
       siteCode: 'SEDE-BCN-01',
       showCredentialsGuide: true,
       qrMachineCode: '',
-      qrSiteCode: ''
+      qrSiteCode: '',
+      deepLinkTicket: ''
     };
   },
   computed: {
@@ -55,6 +56,9 @@ export const App = {
     }
   },
   created() {
+    /** ¿La URL apunta al Portal de Sede desde el correo de seguimiento? */
+    let siteDeepLink = false;
+
     // 1. Seguimiento público por token (?track=...), antes de restaurar cualquier sesión.
     if (typeof window !== 'undefined' && window.location) {
       const urlParams = new URLSearchParams(window.location.search);
@@ -72,18 +76,40 @@ export const App = {
         this.qrSiteCode = (urlParams.get('site') || urlParams.get('site_code') || '').trim();
         return;
       }
+
+      // 3. Deep Link al Portal de Sede desde el correo de seguimiento
+      //    (/?site=SEDE-BCN-01&ticket=INC-2026-...). El botón del aviso tiene que
+      //    aterrizar en el portal de ESA sede, no en el formulario vacío: el
+      //    código queda prellenado y, tras identificarse con la clave de centro,
+      //    el expediente citado abre su hilo de conversación.
+      const siteParam = (urlParams.get('site') || urlParams.get('site_code') || '').trim();
+      if (siteParam !== '') {
+        this.currentView = 'portal';
+        this.siteCode = siteParam;
+        this.deepLinkTicket = (urlParams.get('ticket') || '').trim();
+        siteDeepLink = true;
+      }
     }
 
-    // 3. Restauración de sesión si no es acceso público por QR o seguimiento
+    // 4. Restauración de sesión si no es acceso público por QR o seguimiento
     const restored = restoreSession();
     if (restored) {
-      if (store.state.user?.role === 'COORDINATOR') {
+      if (store.state.location) {
+        // Sesión de sede ya abierta: se reutiliza si es la sede del enlace.
+        if (!siteDeepLink || store.state.location.site_code === this.siteCode) {
+          this.currentView = 'portal';
+          this.siteCode = store.state.location.site_code;
+        } else {
+          // El enlace cita otra sede: manda el enlace, no la sesión anterior.
+          store.clearSession();
+        }
+      } else if (siteDeepLink) {
+        // El correo pedía el Portal de Sede: la sesión interna no lo secuestra.
+        this.currentView = 'portal';
+      } else if (store.state.user?.role === 'COORDINATOR') {
         this.currentView = 'coordinator';
       } else if (store.state.user?.role === 'TECHNICIAN') {
         this.currentView = 'technician';
-      } else if (store.state.location) {
-        this.currentView = 'portal';
-        this.siteCode = store.state.location.site_code;
       }
     }
   },
@@ -216,6 +242,7 @@ export const App = {
         <LocationPortalView
           v-else-if="currentView === 'portal'"
           :initial-site-code="siteCode"
+          :initial-ticket-code="deepLinkTicket"
           @authenticated="siteCode = $event"
         />
         <CoordinatorDashboardView

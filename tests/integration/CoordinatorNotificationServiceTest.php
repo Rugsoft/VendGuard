@@ -37,6 +37,8 @@ use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SeedRunner;
+use VendGuard\Core\Service\AppPublicUrl;
+use VendGuard\Core\Service\NotificationTrackingLinkResolver;
 use VendGuard\Infrastructure\Notification\Transport\InMemoryNotificationTransport;
 use VendGuard\Infrastructure\Notification\Transport\NativeHttpsWebhookTransport;
 use VendGuard\Infrastructure\Notification\Transport\NotificationTransportInterface;
@@ -128,7 +130,8 @@ $enqueue = function (
     string $role,
     ?int $incidentId = null,
     ?int $recipientUserId = null,
-    ?int $recipientLocationId = null
+    ?int $recipientLocationId = null,
+    array $payload = ['ticket_code' => 'TICK-NOTIF07']
 ) use ($outbox): NotificationOutboxItem {
     $item = $outbox->enqueue(new NotificationOutboxItem(
         id: null,
@@ -141,7 +144,7 @@ $enqueue = function (
         recipientUserId: $recipientUserId,
         recipientLocationId: $recipientLocationId,
         subject: 'Certificación T-NOTIF-07 · ' . $template->value,
-        payload: ['ticket_code' => 'TICK-NOTIF07']
+        payload: $payload
     ));
 
     if ($item === null || $item->getId() === null) {
@@ -226,6 +229,117 @@ $assert('El filtro por estado reduce la tabla al fallo definitivo', $byStatus['p
 $assert('El filtro por canal aísla el canal corporativo', $byChannel['pagination']['total'] === 1 && $byChannel['items'][0]['channel'] === 'WEBHOOK');
 $assert('El filtro por prioridad aísla la emergencia sanitaria (Art. II)', $byPriority['pagination']['total'] === 1 && $byPriority['items'][0]['priority'] === 'CRITICAL_SANITARY');
 $assert('El filtro por código de ticket encuentra el expediente por búsqueda parcial', $byTicket['pagination']['total'] === 1 && $byTicket['items'][0]['ticket_code'] === $ticketCode);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1.b RF-06.3 — La bandeja publica la URL final del botón, para revisarla antes
+//     de reintentar. Sale de la misma autoridad que la del envío.
+// ─────────────────────────────────────────────────────────────────────────────
+$siteCodeForLink = (string)($locations->findById($machine->getLocationId())?->getSiteCode() ?? 'SEDE-LINK');
+$machineCodeForLink = (string)$machine->getCode();
+
+$siteLinkItem = $enqueue(
+    NotificationChannel::EMAIL,
+    NotificationPriority::STANDARD,
+    NotificationTemplate::INCIDENT_OPENED_SITE,
+    'enlace.sede.tnotif07@example.org',
+    'LOCATION',
+    null,
+    null,
+    null,
+    [
+        'ticket_code' => $ticketCode,
+        'site_code' => $siteCodeForLink,
+        'tracking_url' => '/?site=' . rawurlencode($siteCodeForLink) . '&ticket=' . rawurlencode($ticketCode),
+    ]
+);
+$citizenLinkItem = $enqueue(
+    NotificationChannel::EMAIL,
+    NotificationPriority::STANDARD,
+    NotificationTemplate::INCIDENT_OPENED_CITIZEN_QR,
+    'enlace.ciudadano.tnotif07@example.org',
+    'CITIZEN_QR',
+    null,
+    null,
+    null,
+    [
+        'ticket_code' => $ticketCode,
+        'machine_code' => $machineCodeForLink,
+        'tracking_url' => '/?qr=' . rawurlencode($machineCodeForLink),
+    ]
+);
+$internalLinkItem = $enqueue(
+    NotificationChannel::EMAIL,
+    NotificationPriority::STANDARD,
+    NotificationTemplate::TECHNICIAN_ASSIGNED,
+    'tecnico.enlace.tnotif07@example.org',
+    'TECHNICIAN'
+);
+
+$previousPublicBase = getenv(AppPublicUrl::ENV_NAME);
+putenv(AppPublicUrl::ENV_NAME);
+
+$linkService = new CoordinatorNotificationService(
+    outbox: $outbox,
+    locations: $locations,
+    settings: $settings,
+    onCallTechnicians: $users,
+    transports: $transports,
+    audit: new AuditLogger(),
+    trackingLinks: new NotificationTrackingLinkResolver(new AppPublicUrl('https://vendguard.onrender.com'))
+);
+$linkRows = [];
+foreach ($linkService->listOutbox([], 50, 0)['items'] as $row) {
+    $linkRows[(int)$row['id']] = $row;
+}
+
+$expectedSiteUrl = 'https://vendguard.onrender.com/?site=' . rawurlencode($siteCodeForLink) . '&ticket=' . rawurlencode($ticketCode);
+$assert(
+    'RF-06.3: la fila de Sede publica la URL final absoluta que llevará el correo',
+    $linkRows[(int)$siteLinkItem->getId()]['tracking_url'] === $expectedSiteUrl,
+    'recibido: ' . var_export($linkRows[(int)$siteLinkItem->getId()]['tracking_url'] ?? null, true)
+);
+$assert(
+    'La fila del Ciudadano QR publica su enlace público acotado, también absoluto',
+    $linkRows[(int)$citizenLinkItem->getId()]['tracking_url']
+        === 'https://vendguard.onrender.com/?qr=' . rawurlencode($machineCodeForLink)
+);
+$assert(
+    'El aviso interno no publica enlace: no lleva botón',
+    $linkRows[(int)$internalLinkItem->getId()]['tracking_url'] === null
+);
+$assert(
+    'El canal Webhook no publica enlace de seguimiento de correo',
+    $linkRows[(int)$webhookItem->getId()]['tracking_url'] === null
+);
+$assert(
+    'Sin códigos en el payload no se inventa una URL',
+    $linkRows[(int)$failedItem->getId()]['tracking_url'] === null
+);
+
+$noHostService = new CoordinatorNotificationService(
+    outbox: $outbox,
+    locations: $locations,
+    settings: $settings,
+    onCallTechnicians: $users,
+    transports: $transports,
+    audit: new AuditLogger(),
+    trackingLinks: new NotificationTrackingLinkResolver(new AppPublicUrl(null))
+);
+$noHostRows = [];
+foreach ($noHostService->listOutbox([], 50, 0)['items'] as $row) {
+    $noHostRows[(int)$row['id']] = $row;
+}
+$assert(
+    'Sin host público declarado la bandeja enseña la ruta tal cual (degradación honesta)',
+    $noHostRows[(int)$siteLinkItem->getId()]['tracking_url']
+        === '/?site=' . rawurlencode($siteCodeForLink) . '&ticket=' . rawurlencode($ticketCode)
+);
+
+if ($previousPublicBase === false) {
+    putenv(AppPublicUrl::ENV_NAME);
+} else {
+    putenv(AppPublicUrl::ENV_NAME . '=' . $previousPublicBase);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. RF-06.4 — Reintento individual refrescando el correo vigente de la Sede

@@ -118,6 +118,7 @@ const OUTBOX_ITEM = {
   processed_at: '2026-10-16T19:40:00+02:00',
   last_error: 'SMTP 550 5.1.1 <malformed@invalid>: Recipient address rejected',
   obsolete_reason: null,
+  tracking_url: 'https://vendguard.onrender.com/?site=SEDE-BCN-01&ticket=TICK-2026-00142',
   can_retry: true,
   can_cancel: true
 };
@@ -136,6 +137,7 @@ const PENDING_ITEM = {
   max_attempts: 5,
   last_error: null,
   obsolete_reason: null,
+  tracking_url: null,
   can_retry: false,
   can_cancel: true
 };
@@ -369,6 +371,18 @@ assert('3.12 Expone estados de carga y de bandeja vacía',
 assert('3.13 Los avisos de éxito y de error tienen su propia franja',
   template.includes('data-testid="notification-success-banner"')
     && template.includes('data-testid="notification-error-banner"'));
+assert('3.14 La tabla publica la URL final del botón de seguimiento de cada correo',
+  template.includes('Enlace de seguimiento')
+    && template.includes('data-testid="outbox-tracking-url"')
+    && template.includes(':href="item.tracking_url"')
+    && template.includes(':title="item.tracking_url"')
+    && template.includes('rel="noopener noreferrer"')
+    && template.includes('target="_blank"'));
+assert('3.15 Sin enlace (internos y Webhook) la celda muestra un guión, no una URL inventada',
+  template.includes('v-if="item.tracking_url"')
+    && template.includes('<span v-else style="color: var(--color-ink-muted);">—</span>')
+    && OUTBOX_ITEM.tracking_url === 'https://vendguard.onrender.com/?site=SEDE-BCN-01&ticket=TICK-2026-00142'
+    && PENDING_ITEM.tracking_url === null);
 
 // ---------------------------------------------------------------------
 // GRUPO 4: Pestaña Canal Corporativo de Emergencias y sistema de diseño

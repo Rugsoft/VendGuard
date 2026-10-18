@@ -279,6 +279,16 @@ El servicio de construcción de payloads (`NotificationPayloadSanitizer`) aplica
    * El enlace de seguimiento apunta al Portal de Sede: `/?site={site_code}&ticket={ticket_code}`.
    * En `PENDING_INFO_SITE_REQUEST` sí se incluyen `reason_category_label` y `reason_text` ($\ge 20$ caracteres) para que el responsable del edificio pueda desbloquear el acceso (Módulo 11 RF-05.1).
 
+### 3.3. Enlaces Absolutos en la Entrega (Enmienda 2, 2026-10-18)
+
+`payload_json.tracking_url` persiste una **ruta del propio sistema** (`/?qr={machine_code}` o `/?site={site_code}&ticket={ticket_code}`), que es la forma estable e independiente del despliegue. En el momento de la entrega, `NotificationMessageRenderer` la convierte en **URL absoluta** con el host público canónico (`AppPublicUrl`: `APP_BASE_URL`, o `VENDGUARD_APP_URL` como respaldo; en el despacho por HTTP, el host efectivo de la petición si ninguna está declarada).
+
+* **Motivo:** un cliente de correo resuelve las rutas relativas contra su propio dominio, de modo que el botón aterrizaba en la web del proveedor de correo en lugar del expediente. El enlace sólo es válido si viaja completo.
+* **Alcance del prefijado:** sólo rutas; un `tracking_url` que ya sea absoluto (`https://…`) no se reescribe, y cualquier esquema distinto de `http(s)`/`mailto:` se descarta.
+* **Degradación:** sin host declarado —worker CLI sin variable de entorno— la ruta se entrega tal cual. Definir `APP_BASE_URL` en el despliegue es la corrección operativa.
+* **Trazabilidad:** al aplicarse en el renderizado, los envíos ya encolados con ruta relativa quedan reparados en su siguiente intento o reintento manual desde la bandeja, sin reencolado ni migración de datos.
+* **Revisión previa (RF-06.3):** la bandeja de supervisión publica en cada fila de correo el campo `tracking_url` (§4.1) con esa **misma** URL final, resuelta por la misma autoridad (`NotificationTrackingLinkResolver`) y con la misma precedencia de host (`APP_BASE_URL` → host de la petición). Coordinación ve antes de reintentar exactamente el enlace que recibirá el destinatario; los avisos internos y los del canal Webhook no llevan botón y publican `null`.
+
 ---
 
 ## 4. Contratos Detallados de Endpoints REST
@@ -333,6 +343,7 @@ Consulta los contadores de estado y el historial de la bandeja de salida para el
         "processed_at": "2026-10-16T19:40:00+02:00",
         "last_error": "SMTP 550 5.1.1 <malformed@invalid>: Recipient address rejected",
         "obsolete_reason": null,
+        "tracking_url": "https://vendguard.onrender.com/?site=SEDE-BCN-01&ticket=TICK-2026-00142",
         "can_retry": true,
         "can_cancel": true,
         "created_at": "2026-10-16T18:10:00+02:00",

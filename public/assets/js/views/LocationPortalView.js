@@ -41,9 +41,22 @@ export const LocationPortalView = {
     LocationRefundsTab
   },
   emits: ['report-incident', 'open-comments', 'reopen-incident'],
+  props: {
+    /** Código de sede con el que aterriza el enlace de seguimiento del correo. */
+    initialSiteCode: {
+      type: String,
+      default: ''
+    },
+    /** Expediente citado en el correo; abre su hilo tras identificarse. */
+    initialTicketCode: {
+      type: String,
+      default: ''
+    }
+  },
   data() {
     return {
       siteCodeInput: '',
+      deepLinkHandled: false,
       accessCodeInput: '',
       loginError: '',
       isLoggingIn: false,
@@ -137,6 +150,15 @@ export const LocationPortalView = {
       return this.activeCommentIncident?.ticket_code ?? null;
     }
   },
+  created() {
+    // El enlace del correo de seguimiento llega con la sede en la URL: el
+    // formulario se abre con el código puesto y sólo falta la clave de centro
+    // entregada en mano (RF-01). Sin deep link el campo queda vacío, como antes.
+    const site = String(this.initialSiteCode || '').trim();
+    if (site !== '') {
+      this.siteCodeInput = site.toUpperCase();
+    }
+  },
   mounted() {
     if (this.isAuthenticated && this.location?.site_code) {
       this.loadMachines();
@@ -192,12 +214,38 @@ export const LocationPortalView = {
       try {
         const data = await api.locations.getMachines(this.location.site_code);
         this.machines = Array.isArray(data) ? data : [];
+        this.openDeepLinkedIncident();
       } catch (err) {
         this.machinesError = err.message || 'Error al cargar las máquinas de la sede.';
       } finally {
         this.isLoadingMachines = false;
         store.setLoading(false);
       }
+    },
+
+    /**
+     * Abre el hilo del expediente citado en el correo de seguimiento.
+     *
+     * El botón «Abrir el Portal de Sede» lleva `?site=…&ticket=…`; una vez
+     * identificado el centro, la tarjeta de esa máquina es la que el usuario
+     * venía a leer. Se hace una sola vez por montaje: cerrar el hilo no debe
+     * reabrirlo en la siguiente recarga de la lista.
+     */
+    openDeepLinkedIncident() {
+      const ticket = String(this.initialTicketCode || '').trim();
+      if (ticket === '' || this.deepLinkHandled) {
+        return;
+      }
+
+      const machine = this.machines.find(
+        m => m && m.active_incident && m.active_incident.ticket_code === ticket
+      );
+      if (!machine) {
+        return;
+      }
+
+      this.deepLinkHandled = true;
+      this.onOpenComments(machine);
     },
 
     setFilter(filter) {

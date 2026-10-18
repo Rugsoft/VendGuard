@@ -187,7 +187,8 @@ $enqueue = function (
     string $recipient,
     NotificationStatus $status,
     ?int $recipientLocationId = null,
-    ?string $subject = null
+    ?string $subject = null,
+    array $payload = ['ticket_code' => 'TICK-NOTIF08']
 ) use ($outbox): NotificationOutboxItem {
     $item = $outbox->enqueue(new NotificationOutboxItem(
         id: null,
@@ -200,7 +201,7 @@ $enqueue = function (
         recipientUserId: null,
         recipientLocationId: $recipientLocationId,
         subject: $subject ?? ('Certificación T-NOTIF-08 · ' . $recipient),
-        payload: ['ticket_code' => 'TICK-NOTIF08']
+        payload: $payload
     ));
 
     if ($item === null || $item->getId() === null) {
@@ -312,6 +313,49 @@ $assert(
 $assert(
     '1.9 Un código de ticket inexistente no devuelve filas',
     ($json($call('GET', '/api/coordinator/notifications/outbox', token: $coordinatorToken, query: ['ticket_code' => 'TICK-NO-EXISTE-08']))['data']['pagination']['total'] ?? -1) === 0
+);
+
+// 1.10 RF-06.3: la bandeja publica la URL final y absoluta del botón de cada
+//      correo, para revisarla antes de reintentar. El host lo resuelve el propio
+//      endpoint (APP_BASE_URL o el host de la petición), así que se certifica que
+//      la URL es absoluta y que conserva la ruta de seguimiento del nivel de
+//      acceso, sin fijar un dominio concreto.
+$linkItem = $enqueue(
+    NotificationChannel::EMAIL,
+    NotificationPriority::STANDARD,
+    'enlace.host.tnotif08@example.org',
+    NotificationStatus::PENDING,
+    (int)$location1->getId(),
+    null,
+    [
+        'ticket_code' => 'TICK-NOTIF08',
+        'site_code' => (string)$location1->getSiteCode(),
+        'tracking_url' => '/?site=' . rawurlencode((string)$location1->getSiteCode()) . '&ticket=TICK-NOTIF08',
+    ]
+);
+// La fila no cuelga de un expediente (`incident_id` nulo), así que se localiza en
+// la bandeja recién creada y no por el filtro de ticket, que resuelve contra el
+// expediente unido. La petición declara Host a propósito: cuando `APP_BASE_URL`
+// no está definida, el endpoint compone el host público con el de la petición.
+$linkBody = $json($call(
+    'GET',
+    '/api/coordinator/notifications/outbox',
+    token: $coordinatorToken,
+    query: ['status' => 'PENDING'],
+    headers: ['Host' => 'vendguard.test']
+));
+$linkRow = null;
+foreach ($linkBody['data']['items'] ?? [] as $row) {
+    if ((int)($row['id'] ?? 0) === (int)$linkItem->getId()) {
+        $linkRow = $row;
+    }
+}
+$publishedLink = (string)($linkRow['tracking_url'] ?? '');
+$assert(
+    '1.10 La bandeja publica el enlace de seguimiento como URL absoluta con su ruta de Sede',
+    $linkRow !== null
+        && $publishedLink === 'http://vendguard.test/?site=' . rawurlencode((string)$location1->getSiteCode()) . '&ticket=TICK-NOTIF08',
+    'recibido: ' . $publishedLink
 );
 
 $badLimit = $call('GET', '/api/coordinator/notifications/outbox', token: $coordinatorToken, query: ['limit' => 'muchas']);

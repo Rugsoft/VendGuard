@@ -8,7 +8,9 @@ use VendGuard\Application\Service\NotificationDispatcherService;
 use VendGuard\Application\Service\SanitaryClockSweepService;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Service\AppPublicUrl;
 use VendGuard\Infrastructure\Notification\NotificationDispatcherFactory;
+use VendGuard\Infrastructure\Notification\Template\NotificationMessageRenderer;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -155,9 +157,27 @@ class CronController
             $batchSize = (int)$candidate;
         }
 
-        $this->notificationDispatcher ??= NotificationDispatcherFactory::create();
+        $this->notificationDispatcher ??= NotificationDispatcherFactory::create(
+            $this->notificationRenderer($request)
+        );
 
         return Response::json($this->notificationDispatcher->runPass($batchSize)->toArray(), 200);
+    }
+
+    /**
+     * Renderizador de correos con el host público canónico de los enlaces.
+     *
+     * Precedencia del contrato de enlaces: `APP_BASE_URL` (la vía del
+     * despliegue) y, si no está declarada, el host efectivo de esta petición
+     * —el planificador llama al endpoint por su URL pública—. El correo no
+     * puede llevar rutas relativas: el cliente de correo las resolvería contra
+     * el dominio del proveedor y el botón aterrizaría en una web ajena.
+     */
+    private function notificationRenderer(Request $request): NotificationMessageRenderer
+    {
+        return new NotificationMessageRenderer(
+            AppPublicUrl::fromHttpOrigin($request->getScheme(), (string)$request->getHeader('Host'))
+        );
     }
 
     /**

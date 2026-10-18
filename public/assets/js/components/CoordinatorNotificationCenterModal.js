@@ -874,6 +874,7 @@ export const CoordinatorNotificationCenterModal = {
                     <th style="padding: 8px 10px; font-weight: 600;">Ticket</th>
                     <th style="padding: 8px 10px; font-weight: 600;">Destinatario</th>
                     <th style="padding: 8px 10px; font-weight: 600;">Aviso</th>
+                    <th style="padding: 8px 10px; font-weight: 600;">Enlace de seguimiento</th>
                     <th style="padding: 8px 10px; font-weight: 600;">Estado</th>
                     <th style="padding: 8px 10px; font-weight: 600; text-align: center;">Intentos</th>
                     <th style="padding: 8px 10px; font-weight: 600;">Último error</th>
@@ -904,6 +905,18 @@ export const CoordinatorNotificationCenterModal = {
                           color: priorityMetaOf(item.priority).color
                         }"
                       >{{ priorityMetaOf(item.priority).label }}</span>
+                    </td>
+                    <td style="padding: 8px 10px; max-width: 260px;">
+                      <a
+                        v-if="item.tracking_url"
+                        :href="item.tracking_url"
+                        :title="item.tracking_url"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style="color: var(--color-primary); word-break: break-all;"
+                        data-testid="outbox-tracking-url"
+                      >{{ item.tracking_url }}</a>
+                      <span v-else style="color: var(--color-ink-muted);">—</span>
                     </td>
                     <td style="padding: 8px 10px;">
                       <span

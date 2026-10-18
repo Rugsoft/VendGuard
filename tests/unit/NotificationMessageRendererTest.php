@@ -21,6 +21,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../bootstrap.php';
 
 use VendGuard\Core\Domain\ValueObject\NotificationTemplate;
+use VendGuard\Core\Service\AppPublicUrl;
 use VendGuard\Infrastructure\Notification\Template\NotificationMessageRenderer;
 use VendGuard\Infrastructure\Notification\Template\RenderedNotificationMessage;
 
@@ -335,6 +336,54 @@ $explicitTracking = $renderer->render(
 $assert(
     'El tracking_url explícito del payload tiene prioridad',
     str_contains($explicitTracking->textBody, 'https://vendguard.example.com/?site=X&ticket=Y')
+);
+
+// ---------------------------------------------------------------------
+// 4.1 Host público canónico: el correo nunca lleva rutas relativas
+// ---------------------------------------------------------------------
+echo "--- 4.1 Host público canónico de los enlaces del correo ---\n";
+
+// Un cliente de correo resuelve `/?qr=…` contra su propio dominio: el botón
+// aterrizaba en la web del proveedor. Con el host declarado el enlace viaja
+// absoluto y el destinatario llega al expediente.
+$publicRenderer = new NotificationMessageRenderer(new AppPublicUrl('https://vendguard.onrender.com'));
+
+$absoluteSite = $publicRenderer->render(NotificationTemplate::INCIDENT_OPENED_SITE, $payload);
+$assert(
+    'El botón de la Sede apunta al host público declarado',
+    str_contains($absoluteSite->textBody, 'Abrir el Portal de Sede:')
+    && str_contains($absoluteSite->textBody, 'https://vendguard.onrender.com/?site=SEDE-CENTRAL&ticket=INC-2026-000123')
+);
+$assert(
+    'El href del HTML es absoluto y escapa los separadores de la consulta',
+    str_contains(
+        $absoluteSite->htmlBody,
+        'href="https://vendguard.onrender.com/?site=SEDE-CENTRAL&amp;ticket=INC-2026-000123"'
+    )
+);
+
+$absoluteCitizen = $publicRenderer->render(NotificationTemplate::INCIDENT_OPENED_CITIZEN_QR, $payload);
+$assert(
+    'El botón del Ciudadano QR también sale absoluto',
+    str_contains($absoluteCitizen->textBody, 'https://vendguard.onrender.com/?qr=M-0041')
+);
+
+$queuedRelative = $publicRenderer->render(
+    NotificationTemplate::INCIDENT_OPENED_SITE,
+    array_merge($payload, ['tracking_url' => '/?site=SEDE-CENTRAL&ticket=INC-2026-000123'])
+);
+$assert(
+    'La ruta relativa ya persistida en la cola se absolutiza al renderizar',
+    str_contains($queuedRelative->textBody, 'https://vendguard.onrender.com/?site=SEDE-CENTRAL&ticket=INC-2026-000123')
+);
+
+$explicitAbsolute = $publicRenderer->render(
+    NotificationTemplate::INCIDENT_OPENED_SITE,
+    array_merge($payload, ['tracking_url' => 'https://vendguard.example.com/?site=X&ticket=Y'])
+);
+$assert(
+    'Un enlace absoluto del payload no se reescribe con el host declarado',
+    str_contains($explicitAbsolute->textBody, 'https://vendguard.example.com/?site=X&ticket=Y')
 );
 
 $withoutCodes = $renderer->render(

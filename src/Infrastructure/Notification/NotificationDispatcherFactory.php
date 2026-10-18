@@ -7,7 +7,9 @@ namespace VendGuard\Infrastructure\Notification;
 use Throwable;
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\NotificationDispatcherService;
+use VendGuard\Core\Service\AppPublicUrl;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
+use VendGuard\Infrastructure\Notification\Template\NotificationMessageRenderer;
 use VendGuard\Infrastructure\Notification\Transport\NotificationTransportRegistry;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoNotificationOutboxRepository;
@@ -23,6 +25,12 @@ use VendGuard\Infrastructure\Repository\PdoUserRepository;
  * que la pasada del planificador y la de consola no puedan divergir en
  * transportes, relojes ni auditoría.
  *
+ * El renderizador se compone con el host público canónico (`APP_BASE_URL`), de
+ * modo que el botón de seguimiento del correo sale absoluto y no como una ruta
+ * relativa que el cliente de correo resolvería contra su propio dominio. El
+ * llamante puede inyectar un renderizador ya resuelto —el endpoint cron añade
+ * el host de la petición como respaldo cuando la variable no está declarada—.
+ *
  * `PdoIncidentRepository` satisface a la vez los tres puertos que el despachador
  * necesita del expediente: lectura del estado vigente para la evaluación de
  * obsolescencia, sellado anti-spam de los umbrales de SLA y prefiltro de
@@ -34,7 +42,7 @@ use VendGuard\Infrastructure\Repository\PdoUserRepository;
  */
 final class NotificationDispatcherFactory
 {
-    public static function create(): NotificationDispatcherService
+    public static function create(?NotificationMessageRenderer $renderer = null): NotificationDispatcherService
     {
         $outbox = new PdoNotificationOutboxRepository();
         $incidents = new PdoIncidentRepository();
@@ -52,6 +60,7 @@ final class NotificationDispatcherFactory
             transports: NotificationTransportRegistry::forRuntime(),
             transactions: new PdoTransactionManager(),
             audit: new AuditLogger(),
+            renderer: $renderer ?? new NotificationMessageRenderer(AppPublicUrl::fromEnvironment()),
         );
     }
 

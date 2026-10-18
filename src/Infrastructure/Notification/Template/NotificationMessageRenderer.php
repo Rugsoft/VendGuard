@@ -8,6 +8,8 @@ use DateTimeImmutable;
 use DateTimeZone;
 use InvalidArgumentException;
 use VendGuard\Core\Domain\ValueObject\NotificationTemplate;
+use VendGuard\Core\Service\AppPublicUrl;
+use VendGuard\Core\Service\NotificationTrackingLinkResolver;
 
 /**
  * NotificationMessageRenderer — Redacción de asuntos y cuerpos en castellano para las 19 plantillas (T-NOTIF-05).
@@ -33,9 +35,19 @@ use VendGuard\Core\Domain\ValueObject\NotificationTemplate;
  *    terceros. Los avisos al Ciudadano QR sólo exponen ticket, máquina,
  *    categoría declarada y fecha de apertura, y enlazan a `/?qr={machine_code}`.
  * 4. **Enlaces por nivel de acceso:** la Sede recibe `/?site={site_code}&ticket={ticket_code}`;
- *    el Ciudadano QR, `/?qr={machine_code}`. El enlace llega ya resuelto en
+ *    el Ciudadano QR, `/?qr={machine_code}`. El enlace llega como ruta en
  *    `payload_json.tracking_url` (lo fija `NotificationPayloadSanitizer`); si
- *    faltara, el renderizador lo deriva de los códigos del expediente.
+ *    faltara, el renderizador lo deriva de los códigos del expediente. La regla
+ *    «a dónde lleva el botón» vive en `NotificationTrackingLinkResolver`, que
+ *    comparte con el panel de supervisión: lo que Coordinación revisa en la
+ *    bandeja es exactamente lo que se envía.
+ * 5. **Enlaces absolutos en el correo.** La ruta se prefija con el host público
+ *    canónico (`AppPublicUrl`, `APP_BASE_URL`) antes de llegar al asunto o al
+ *    cuerpo. Un cliente de correo resuelve las rutas relativas contra su propio
+ *    dominio —el botón aterrizaba en la web del proveedor de correo— así que el
+ *    enlace sólo es válido si viaja completo. La ruta persistida en la cola no
+ *    cambia: el host se aplica en el momento de renderizar, lo que repara
+ *    también los envíos ya encolados que se reintenten.
  *
  * ## Contrato de `$payload` que construirá T-NOTIF-06
  *
@@ -72,14 +84,23 @@ final class NotificationMessageRenderer
     /** Garantía de reapertura tras la resolución (RF-05.5). */
     public const WARRANTY_HOURS = 48;
 
-    private const AUDIENCE_LOCATION = 'LOCATION';
-    private const AUDIENCE_CITIZEN_QR = 'CITIZEN_QR';
-    private const AUDIENCE_INTERNAL = 'INTERNAL';
+    /** Autoridad única del destino del botón (ver `NotificationTrackingLinkResolver`). */
+    private readonly NotificationTrackingLinkResolver $trackingLinks;
+
+    /**
+     * @param AppPublicUrl|null $publicUrl Host canónico para absolutizar los
+     *   enlaces de seguimiento. Sin él los enlaces conservan su ruta relativa,
+     *   comportamiento heredado que usan las suites del renderizador puro.
+     */
+    public function __construct(?AppPublicUrl $publicUrl = null)
+    {
+        $this->trackingLinks = new NotificationTrackingLinkResolver($publicUrl);
+    }
 
     private const CTA_LABELS = [
-        self::AUDIENCE_LOCATION => 'Abrir el Portal de Sede',
-        self::AUDIENCE_CITIZEN_QR => 'Consultar el estado del aviso',
-        self::AUDIENCE_INTERNAL => 'Abrir el expediente',
+        NotificationTrackingLinkResolver::AUDIENCE_LOCATION => 'Abrir el Portal de Sede',
+        NotificationTrackingLinkResolver::AUDIENCE_CITIZEN_QR => 'Consultar el estado del aviso',
+        NotificationTrackingLinkResolver::AUDIENCE_INTERNAL => 'Abrir el expediente',
     ];
 
     /**
@@ -445,8 +466,10 @@ final class NotificationMessageRenderer
             ),
         };
 
-        $audience = $this->audienceFor($template);
-        $trackingUrl = $draft['tracking_url'] ?? $this->resolveTrackingUrl($payload, $audience);
+        $audience = $this->trackingLinks->audienceFor($template);
+        $trackingUrl = $draft['tracking_url'] !== null
+            ? $this->trackingLinks->resolve($template, ['tracking_url' => $draft['tracking_url']])
+            : $this->trackingLinks->resolve($template, $payload);
 
         return [
             ...$draft,
@@ -662,50 +685,6 @@ final class NotificationMessageRenderer
             $noteBlock,
             $ctaBlock
         );
-    }
-
-    private function audienceFor(NotificationTemplate $template): string
-    {
-        return match ($template) {
-            NotificationTemplate::SITE_SANITARY_QUARANTINE_NOTICE,
-            NotificationTemplate::INCIDENT_OPENED_SITE,
-            NotificationTemplate::PENDING_INFO_SITE_REQUEST,
-            NotificationTemplate::INCIDENT_RESOLVED_SITE,
-            NotificationTemplate::INCIDENT_CANCELLED_SITE => self::AUDIENCE_LOCATION,
-
-            NotificationTemplate::INCIDENT_OPENED_CITIZEN_QR,
-            NotificationTemplate::INCIDENT_RESOLVED_CITIZEN_QR,
-            NotificationTemplate::INCIDENT_CANCELLED_CITIZEN_QR,
-            NotificationTemplate::CITIZEN_QR_OBSERVATION_ACK => self::AUDIENCE_CITIZEN_QR,
-
-            default => self::AUDIENCE_INTERNAL,
-        };
-    }
-
-    /**
-     * @param array<string, mixed> $payload
-     */
-    private function resolveTrackingUrl(array $payload, string $audience): ?string
-    {
-        $explicit = $this->text($payload, 'tracking_url');
-        if ($explicit !== null) {
-            return $explicit;
-        }
-
-        $machineCode = $this->text($payload, 'machine_code');
-        $siteCode = $this->text($payload, 'site_code');
-        $ticketCode = $this->text($payload, 'ticket_code');
-
-        if ($audience === self::AUDIENCE_CITIZEN_QR && $machineCode !== null) {
-            return '/?qr=' . rawurlencode($machineCode);
-        }
-
-        if ($audience === self::AUDIENCE_LOCATION && $siteCode !== null) {
-            return '/?site=' . rawurlencode($siteCode)
-                . ($ticketCode !== null ? '&ticket=' . rawurlencode($ticketCode) : '');
-        }
-
-        return null;
     }
 
     /**

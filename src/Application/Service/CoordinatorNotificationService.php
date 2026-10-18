@@ -21,6 +21,7 @@ use VendGuard\Core\Domain\ValueObject\NotificationChannel;
 use VendGuard\Core\Domain\ValueObject\NotificationPriority;
 use VendGuard\Core\Domain\ValueObject\NotificationStatus;
 use VendGuard\Core\Domain\ValueObject\NotificationTemplate;
+use VendGuard\Core\Service\NotificationTrackingLinkResolver;
 use VendGuard\Core\Service\WebhookUrlSecurityValidator;
 use VendGuard\Infrastructure\Notification\Template\RenderedNotificationMessage;
 use VendGuard\Infrastructure\Notification\Transport\NotificationTransportRegistry;
@@ -38,6 +39,9 @@ use VendGuard\Infrastructure\Notification\Transport\NotificationTransportRegistr
  *      canónicos, la insignia de fallos definitivos y la tabla paginada con los
  *      filtros de estado, canal, prioridad y código de ticket. Los importes de
  *      fecha salen en ISO 8601 con zona para que el panel no adivine formatos.
+ *      Cada fila de correo publica además su `tracking_url` **final y absoluta**
+ *      —la misma que escribirá el despachador— para que Coordinación revise a
+ *      dónde llevará el botón antes de reintentar el envío.
  *   2. **Reintento manual, individual y masivo (RF-06.4).** Antes de reencolar,
  *      **refresca el destinatario vigente**: si la notificación pertenecía a una
  *      Sede toma su `contact_email` actual y si era del canal corporativo toma el
@@ -71,6 +75,7 @@ final class CoordinatorNotificationService
     public const DEFAULT_CANCELLATION_REASON = 'Cancelada manualmente por Coordinación.';
 
     private readonly AuditLogger $audit;
+    private readonly NotificationTrackingLinkResolver $trackingLinks;
 
     public function __construct(
         private readonly NotificationOutboxRepositoryInterface $outbox,
@@ -79,8 +84,10 @@ final class CoordinatorNotificationService
         private readonly OnCallTechnicianRepositoryInterface $onCallTechnicians,
         private readonly NotificationTransportRegistry $transports,
         ?AuditLogger $audit = null,
+        ?NotificationTrackingLinkResolver $trackingLinks = null,
     ) {
         $this->audit = $audit ?? new AuditLogger();
+        $this->trackingLinks = $trackingLinks ?? NotificationTrackingLinkResolver::fromEnvironment();
     }
 
     /**
@@ -486,11 +493,53 @@ final class CoordinatorNotificationService
             'processed_at' => $this->isoDate($row['processed_at'] ?? null),
             'last_error' => isset($row['last_error']) && $row['last_error'] !== null ? (string)$row['last_error'] : null,
             'obsolete_reason' => isset($row['obsolete_reason']) && $row['obsolete_reason'] !== null ? (string)$row['obsolete_reason'] : null,
+            'tracking_url' => $this->trackingUrl($row, $template),
             'can_retry' => in_array($status, [NotificationStatus::FAILED_PERMANENT, NotificationStatus::PENDING_RETRY], true),
             'can_cancel' => $status->canBeCancelled(),
             'created_at' => $this->isoDate($row['created_at'] ?? null),
             'updated_at' => $this->isoDate($row['updated_at'] ?? null),
         ];
+    }
+
+    /**
+     * URL final del botón de seguimiento del correo (RF-06.3).
+     *
+     * Sale de la misma autoridad que la del envío
+     * (`NotificationTrackingLinkResolver`), de modo que lo que Coordinación
+     * revisa en la bandeja es exactamente lo que recibirá el destinatario: la
+     * ruta guardada en `payload_json` prefijada con el host público vigente. Los
+     * avisos internos (Coordinación, técnicos) y los del canal Webhook, que no
+     * llevan botón, publican `null` en lugar de un enlace inventado.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function trackingUrl(array $row, NotificationTemplate $template): ?string
+    {
+        if ((string)($row['channel'] ?? '') !== NotificationChannel::EMAIL->value) {
+            return null;
+        }
+
+        return $this->trackingLinks->resolve($template, $this->decodePayload($row['payload_json'] ?? null));
+    }
+
+    /**
+     * Payload de la fila decodificado; `[]` si no es un objeto JSON legible.
+     *
+     * @return array<string, mixed>
+     */
+    private function decodePayload(mixed $raw): array
+    {
+        if (is_array($raw)) {
+            return $raw;
+        }
+
+        if (!is_string($raw) || trim($raw) === '') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+
+        return is_array($decoded) ? $decoded : [];
     }
 
     /**

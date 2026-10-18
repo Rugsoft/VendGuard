@@ -12,6 +12,8 @@ use VendGuard\Core\Domain\Exception\InvalidNotificationOutboxStatusException;
 use VendGuard\Core\Domain\Exception\NotificationOutboxItemNotFoundException;
 use VendGuard\Core\Domain\Exception\WebhookConfigurationException;
 use VendGuard\Core\Domain\Model\User;
+use VendGuard\Core\Service\AppPublicUrl;
+use VendGuard\Core\Service\NotificationTrackingLinkResolver;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoNotificationOutboxRepository;
@@ -86,7 +88,7 @@ class CoordinatorNotificationController
                 'ticket_code' => $request->getQuery('ticket_code'),
             ];
 
-            return Response::json($this->notifications()->listOutbox($filters, $limit, $offset), 200);
+            return Response::json($this->notifications($request)->listOutbox($filters, $limit, $offset), 200);
         });
     }
 
@@ -228,7 +230,7 @@ class CoordinatorNotificationController
      * Grafo del servicio de supervisión, resuelto en el primer uso para que el
      * controlador no abra el motor al construirse.
      */
-    private function notifications(): CoordinatorNotificationService
+    private function notifications(?Request $request = null): CoordinatorNotificationService
     {
         if ($this->service !== null) {
             return $this->service;
@@ -243,6 +245,24 @@ class CoordinatorNotificationController
             onCallTechnicians: new PdoUserRepository(),
             transports: NotificationTransportRegistry::forRuntime(),
             audit: new AuditLogger(new PdoAuditLogRepository()),
+            trackingLinks: $this->trackingLinks($request),
+        );
+    }
+
+    /**
+     * Resolutor de los enlaces que se enseñan en la bandeja: `APP_BASE_URL` y,
+     * si no está declarada, el host efectivo de la petición del propio panel. La
+     * URL que revisa Coordinación coincide así con la que escribirá el
+     * despachador al entregar el correo.
+     */
+    private function trackingLinks(?Request $request): NotificationTrackingLinkResolver
+    {
+        if ($request === null) {
+            return NotificationTrackingLinkResolver::fromEnvironment();
+        }
+
+        return new NotificationTrackingLinkResolver(
+            AppPublicUrl::fromHttpOrigin($request->getScheme(), (string)$request->getHeader('Host'))
         );
     }
 

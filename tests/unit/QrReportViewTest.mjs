@@ -396,6 +396,62 @@ async function runTests() {
     App.template.includes(':code="qrMachineCode"') &&
     App.template.includes(':site="qrSiteCode"'));
 
+  // 6.5 Deep link al Portal de Sede desde el correo de seguimiento
+  //     (?site=SEDE-BCN-01&ticket=INC-2026-...) — antes se ignoraba y el
+  //     responsable aterrizaba en un formulario de acceso sin su sede.
+  globalThis.window.location.search = '?site=SEDE-BCN-01&ticket=INC-2026-000123';
+  const appInstanceSite = {
+    ...App.data()
+  };
+  App.created.call(appInstanceSite);
+
+  assert('6.11 ?site=…&ticket=… enruta al Portal de Sede con sede y expediente',
+    appInstanceSite.currentView === 'portal' &&
+    appInstanceSite.siteCode === 'SEDE-BCN-01' &&
+    appInstanceSite.deepLinkTicket === 'INC-2026-000123');
+  assert('6.12 El deep link no se confunde con la vista QR', appInstanceSite.qrMachineCode === '');
+  assert('6.13 App entrega al portal el código de sede y el ticket del correo',
+    App.template.includes(':initial-site-code="siteCode"') &&
+    App.template.includes(':initial-ticket-code="deepLinkTicket"'));
+
+  // 6.6 Precedencia del deep link frente a una sesión abierta en el navegador:
+  //     el correo de la Sede no puede acabar en el panel de otro perfil ni en
+  //     la sesión de otra sede.
+  storageMock.setItem('vendguard_session', JSON.stringify({
+    authType: 'internal',
+    token: 'token-demo-coordinacion',
+    user: { id: 1, name: 'Coordinación', email: 'coordinacion@vendguard.internal', role: 'COORDINATOR' }
+  }));
+  globalThis.window.location.search = '?site=SEDE-BCN-01&ticket=INC-2026-000123';
+  const appInstanceInternal = { ...App.data() };
+  App.created.call(appInstanceInternal);
+  assert('6.14 Con sesión de coordinador, el enlace de la Sede abre el Portal de Sede',
+    appInstanceInternal.currentView === 'portal' && appInstanceInternal.siteCode === 'SEDE-BCN-01');
+
+  storageMock.setItem('vendguard_session', JSON.stringify({
+    authType: 'site',
+    token: 'token-demo-sede-02',
+    location: { id: 2, site_code: 'SEDE-BCN-02', name: 'Sede Dos', address: 'Calle Dos 2', contact_name: 'Recepción' }
+  }));
+  const appInstanceOtherSite = { ...App.data() };
+  App.created.call(appInstanceOtherSite);
+  assert('6.15 Una sesión de otra sede no secuestra el enlace: queda la sede del correo',
+    appInstanceOtherSite.currentView === 'portal' &&
+    appInstanceOtherSite.siteCode === 'SEDE-BCN-01' &&
+    storageMock.getItem('vendguard_session') === null);
+
+  globalThis.window.location.search = '';
+  storageMock.setItem('vendguard_session', JSON.stringify({
+    authType: 'internal',
+    token: 'token-demo-coordinacion',
+    user: { id: 1, name: 'Coordinación', email: 'coordinacion@vendguard.internal', role: 'COORDINATOR' }
+  }));
+  const appInstanceRestored = { ...App.data() };
+  App.created.call(appInstanceRestored);
+  assert('6.16 Sin deep link la restauración de sesión sigue eligiendo el panel del rol',
+    appInstanceRestored.currentView === 'coordinator');
+  storageMock.removeItem('vendguard_session');
+
   // =====================================================================
   // Resumen Final
   // =====================================================================
