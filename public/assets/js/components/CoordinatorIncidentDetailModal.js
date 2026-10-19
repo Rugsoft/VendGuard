@@ -47,6 +47,10 @@
 import { api } from '../api.js';
 import { IncidentBadge } from './IncidentBadge.js';
 import { AMBER_TECHNICAL_TOKENS } from '../utils/IncidentStatusPermissions.js';
+import {
+  opportunisticModeLabel,
+  opportunisticOriginLabel
+} from '../utils/OpportunisticContext.js';
 
 export const CoordinatorIncidentDetailModal = {
   name: 'CoordinatorIncidentDetailModal',
@@ -141,6 +145,26 @@ export const CoordinatorIncidentDetailModal = {
     /** Bloque de cabecera del ticket (RF-02). */
     incident() {
       return this.detail?.incident || null;
+    },
+
+    /**
+     * Etiqueta de la modalidad oportunista del expediente (Módulo 16, RF-06.4), o vacío
+     * cuando nació por el canal ordinario. Coordinación distingue «Nueva» de «Asumida».
+     */
+    opportunisticLabel() {
+      return opportunisticModeLabel(this.incident);
+    },
+
+    /** Submotivo del alta in situ (RF-04.1.2), p. ej. aviso verbal en sede. */
+    opportunisticOrigin() {
+      return opportunisticOriginLabel(this.incident);
+    },
+
+    /** Informante verbal de la sede, cuando el técnico lo anotó (RF-04.1.2). */
+    opportunisticInformant() {
+      const name = this.incident?.opportunistic_informant_name;
+
+      return typeof name === 'string' && name.trim() !== '' ? name.trim() : '';
     },
 
     /** Sede cliente donde vive la máquina (RF-02). */
@@ -1092,6 +1116,14 @@ export const CoordinatorIncidentDetailModal = {
                   :custom-label="incident.urgency_label"
                   data-testid="incident-detail-urgency-badge"
                 />
+                <!-- Trazabilidad oportunista (Módulo 16, RF-06.4): la ficha de
+                     Coordinación distingue el alta in situ de la asunción. -->
+                <IncidentBadge
+                  v-if="opportunisticLabel"
+                  :value="incident.opportunistic_mode"
+                  type="opportunistic"
+                  data-testid="incident-detail-opportunistic-badge"
+                />
                 <span
                   v-if="hasReopening"
                   class="badge badge-reopened"
@@ -1257,6 +1289,26 @@ export const CoordinatorIncidentDetailModal = {
                 <p style="margin: 0 0 12px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-secondary, #434c5f);">
                   <strong>Canal de reporte:</strong> {{ reportChannelLabel }}
                 </p>
+
+                <!-- Origen oportunista (Módulo 16, RF-06.4): submotivo e informante verbal.
+                     La nota de traspaso entre técnicos nunca llega aquí (Art. V.4). -->
+                <div
+                  v-if="opportunisticLabel"
+                  class="vg-alert vg-alert-info"
+                  data-testid="incident-detail-opportunistic-origin"
+                  style="margin: 0 0 12px; display: flex; flex-direction: column; gap: 2px;"
+                >
+                  <span style="font-size: 13px; font-weight: 600;">{{ opportunisticLabel }}</span>
+                  <span v-if="opportunisticOrigin" style="font-size: 12px;">
+                    Motivo: {{ opportunisticOrigin }}
+                  </span>
+                  <span v-if="opportunisticInformant" style="font-size: 12px;">
+                    Informante en sede: {{ opportunisticInformant }}
+                  </span>
+                  <span v-if="incident.chronic_predecessor_incident_id" style="font-size: 12px;">
+                    Sucesor del expediente crónico #{{ incident.chronic_predecessor_incident_id }}
+                  </span>
+                </div>
 
                 <div
                   v-if="incident.photo_url && !photoFailed"

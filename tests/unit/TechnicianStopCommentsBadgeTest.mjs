@@ -283,8 +283,11 @@ assert('4.7 El total exacto del servidor prevalece sobre un incremento optimista
     && exactInstance.incidents[0].comments_count === 12,
   `Contador obtenido: ${exactInstance.incidents[0].comments_count}`);
 
+// Módulo 16: la carga oficial viaja con `includeOpportunisticContext`, así que la
+// llamada lleva opciones; lo que se certifica aquí es que sigue siendo el endpoint
+// oficial del técnico y no un endpoint inventado para refrescar el contador.
 assert('4.8 La vista sigue cargando la ruta por el endpoint oficial del técnico',
-  viewSource.includes('api.technician.getMyRoute()'),
+  /api\.technician\.getMyRoute\(/.test(viewSource),
   'El refresco del contador no debe inventar endpoints ni sustituir la carga oficial.');
 
 // RESUMEN DE EJECUCIÓN

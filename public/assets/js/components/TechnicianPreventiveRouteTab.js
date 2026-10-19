@@ -16,6 +16,7 @@
  */
 
 import { api } from '../api.js';
+import { graceRemainingMinutes, graceWindowLocations } from '../utils/OpportunisticContext.js';
 
 export const TechnicianPreventiveRouteTab = {
   name: 'TechnicianPreventiveRouteTab',
@@ -23,9 +24,18 @@ export const TechnicianPreventiveRouteTab = {
     currentLocationId: {
       type: [Number, String],
       default: null
+    },
+    /**
+     * Sedes habilitadas para intervenir in situ (Módulo 16, RF-01.2). La pestaña
+     * preventiva no las pide por su cuenta: las recibe de la vista de ruta, que es
+     * la dueña del contexto oportunista de la jornada.
+     */
+    enabledLocations: {
+      type: Array,
+      default: () => []
     }
   },
-  emits: ['open-checklist', 'order-claimed', 'inspection-started', 'refresh'],
+  emits: ['open-checklist', 'order-claimed', 'inspection-started', 'refresh', 'open-opportunistic'],
   data() {
     return {
       orders: [],
@@ -54,6 +64,14 @@ export const TechnicianPreventiveRouteTab = {
       return this.orders.filter(o => 
         o.status === 'PENDING_ASSIGNMENT'
       );
+    },
+
+    /**
+     * Sedes que solo siguen habilitadas por la ventana de gracia de 30 minutos
+     * (RF-01.2): son las que ganan la tarjeta temporal «Sede recién visitada».
+     */
+    recentLocations() {
+      return graceWindowLocations(this.enabledLocations);
     },
 
     /**
@@ -168,6 +186,40 @@ export const TechnicianPreventiveRouteTab = {
      */
     openChecklist(order) {
       this.$emit('open-checklist', order);
+    },
+
+    /**
+     * Abre el catálogo oportunista de la sede de la inspección en curso (Módulo 16,
+     * RF-01.2, RNF-02): la vista de ruta monta el modal con su contexto de sedes.
+     *
+     * @param {{location?: Object}|null} order Orden preventiva activa.
+     */
+    openOpportunisticForOrder(order = null) {
+      const locationId = Number(order?.location?.id ?? order?.location_id ?? 0);
+
+      if (!(locationId > 0)) {
+        return;
+      }
+
+      this.$emit('open-opportunistic', {
+        location_id: locationId,
+        location_name: order?.location?.name ?? ''
+      });
+    },
+
+    /**
+     * Texto de la tarjeta temporal «Sede recién visitada» (RF-01.2).
+     *
+     * @param {Object} location Sede habilitada por ventana de gracia.
+     * @returns {string}
+     */
+    graceWindowLabel(location) {
+      const minutes = graceRemainingMinutes(location);
+      if (minutes <= 0) {
+        return 'Sede recién visitada · ventana de gracia agotada';
+      }
+
+      return `Sede recién visitada · disponible ${minutes} min más`;
     },
 
     /**
@@ -316,6 +368,32 @@ export const TechnicianPreventiveRouteTab = {
         </div>
       </div>
 
+      <!-- 3-bis. Tarjeta temporal de sede recién visitada (Módulo 16, RF-01.2):
+           la inspección preventiva también habilita la avería oportunista. -->
+      <div
+        v-for="recent in recentLocations"
+        :key="'recent-preventive-location-' + recent.location_id"
+        class="vg-card vg-recent-location-card"
+        data-testid="preventive-recent-location-card"
+        style="border-left: 4px solid var(--color-primary); background: var(--color-surface-card); border-radius: var(--radius-card); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px;"
+      >
+        <strong style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 14px; color: var(--color-ink);">
+          🏢 Sede recién visitada (30 min) · {{ recent.location_name }}
+        </strong>
+        <span style="font-size: 12px; color: var(--color-ink-muted);">
+          {{ graceWindowLabel(recent) }} por si surge otra avería in situ.
+        </span>
+        <button
+          type="button"
+          class="vg-btn vg-btn-primary"
+          style="width: 100%; min-height: 44px; font-size: 14px; font-weight: 600; border-radius: 4px;"
+          data-testid="btn-preventive-recent-location-catalog"
+          @click="openOpportunisticForOrder({ location: { id: recent.location_id, name: recent.location_name } })"
+        >
+          ➕ Otra máquina en esta sede
+        </button>
+      </div>
+
       <!-- 4. LISTADO PRINCIPAL: MIS INSPECCIONES ASIGNADAS -->
       <div style="display: flex; flex-direction: column; gap: 10px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -415,6 +493,17 @@ export const TechnicianPreventiveRouteTab = {
                 📝 Completar Checklist Sanitario
               </button>
             </div>
+
+            <!-- Entrada oportunista desde la inspección en curso (Módulo 16, RF-01.2) -->
+            <button
+              type="button"
+              class="vg-btn vg-btn-secondary"
+              style="width: 100%; min-height: 44px; font-size: 13px; font-weight: 600; border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 6px;"
+              data-testid="btn-preventive-opportunistic"
+              @click="openOpportunisticForOrder(order)"
+            >
+              ➕ Otra máquina en esta sede
+            </button>
           </div>
         </div>
       </div>

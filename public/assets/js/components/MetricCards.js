@@ -39,6 +39,24 @@ export const MetricCards = {
     generalAlert() {
       return this.slaAlerts?.general || {};
     },
+
+    /**
+     * Intervenciones oportunistas in situ (Módulo 16, RF-06.4): desplazamientos
+     * adicionales evitados, con el desglose entre altas nuevas y asunciones.
+     */
+    opportunistic() {
+      const block = this.summary?.opportunistic_interventions || {};
+      const newCount = Number(block.new_count || 0);
+      const assumedCount = Number(block.assumed_count || 0);
+      const total = Number(block.total_avoided_dispatches ?? (newCount + assumedCount));
+
+      return {
+        total: Number.isFinite(total) ? total : newCount + assumedCount,
+        newCount,
+        assumedCount,
+        byOrigin: block.by_origin_reason || {}
+      };
+    },
     trend() {
       const p = this.kpis.mttr_trend_percentage;
       if (p === null || p === undefined) {
@@ -228,7 +246,30 @@ export const MetricCards = {
           </div>
         </div>
 
-        <!-- 5. SLA Parque General -->
+        <!-- 5. Intervenciones oportunistas in situ (Módulo 16, RF-06.4) -->
+        <div
+          class="vg-card vg-kpi-card"
+          data-testid="kpi-opportunistic-interventions"
+          style="background: var(--color-surface-card); border-radius: var(--radius-card); border: 1px solid var(--color-hairline); padding: 20px; display: flex; flex-direction: column; justify-content: space-between; box-shadow: var(--shadow-card);"
+        >
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 13px; font-weight: 600; color: var(--color-ink-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Desplazamientos Evitados</span>
+              <span style="font-size: 18px;" title="Intervenciones oportunistas in situ">🏢</span>
+            </div>
+            <div style="font-family: var(--font-display); font-size: 28px; font-weight: 700; color: var(--color-ink); line-height: 1.1;">
+              {{ opportunistic.total }}
+            </div>
+            <div style="font-size: 12px; color: var(--color-ink-muted); margin-top: 4px;">
+              {{ opportunistic.newCount }} nuevas · {{ opportunistic.assumedCount }} asumidas
+            </div>
+          </div>
+          <div style="margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--color-hairline-soft); font-size: 11px; color: var(--color-ink-muted);">
+            Intervenciones oportunistas in situ (RF-06.4)
+          </div>
+        </div>
+
+        <!-- 6. SLA Parque General -->
         <div class="vg-card vg-kpi-card" style="background: #ffffff; border-radius: 8px; border: 1px solid #c8cfda; padding: 20px; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
           <div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">

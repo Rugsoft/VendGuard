@@ -42,6 +42,14 @@ import { TechnicianRouteMapModal } from '../components/TechnicianRouteMapModal.j
 import { TechnicianMachineHistoryModal } from '../components/TechnicianMachineHistoryModal.js';
 import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';
 import { PendingInfoPauseModal, PAUSE_REASON_CATEGORIES } from '../components/PendingInfoPauseModal.js';
+import { TechnicianOpportunisticModal } from '../components/TechnicianOpportunisticModal.js';
+import {
+  graceRemainingMinutes,
+  graceWindowLocations,
+  groupColocatedStops,
+  normalizeRouteEnvelope,
+  summarizePendingCriticalStops
+} from '../utils/OpportunisticContext.js';
 
 export const TechnicianRouteView = {
   name: 'TechnicianRouteView',
@@ -67,7 +75,8 @@ export const TechnicianRouteView = {
     TechnicianRouteMapModal,
     TechnicianMachineHistoryModal,
     IncidentCommentThreadModal,
-    PendingInfoPauseModal
+    PendingInfoPauseModal,
+    TechnicianOpportunisticModal
   },
   data() {
     return {
@@ -138,7 +147,15 @@ export const TechnicianRouteView = {
       showPendingInfoPauseModal: false,
       pendingInfoIncident: null,
       isResumingPendingInfo: false,
-      pendingInfoResumeError: ''
+      pendingInfoResumeError: '',
+
+      // Módulo 16: sedes habilitadas, aviso sanitario y modal de intervención in situ.
+      // El contexto viaja en la misma petición de ruta (`include_opportunistic_context=1`)
+      // para no duplicar viajes al motor desde el móvil del técnico (RNF-02).
+      enabledLocations: [],
+      pendingCriticalStops: [],
+      showOpportunisticModal: false,
+      opportunisticLocation: null
     };
   },
   computed: {
@@ -193,11 +210,38 @@ export const TechnicianRouteView = {
     },
 
     /**
+     * Sedes que solo siguen habilitadas por la ventana de gracia de 30 minutos
+     * (RF-01.2): son las que ganan la tarjeta temporal «Sede recién visitada».
+     */
+    recentLocations() {
+      return graceWindowLocations(this.enabledLocations);
+    },
+
+    /**
+     * Resumen del aviso sanitario de otra sede (RF-03.1): cuántas paradas críticas o
+     * de cadena de frío esperan y cuál es el SLA más próximo.
+     */
+    pendingCriticalSummary() {
+      return summarizePendingCriticalStops(this.pendingCriticalStops);
+    },
+
+    /**
+     * Sede sobre la que se abre el catálogo oportunista. Con la tarjeta temporal se
+     * usa su sede; desde una parada activa, la del expediente.
+     */
+    canOpenOpportunistic() {
+      return this.enabledLocations.length > 0;
+    },
+
+    /**
      * Filtered and sorted route list.
      * Orders CRITICAL first, then by operational status (IN_PROGRESS first).
      */
     filteredIncidents() {
-      let list = [...this.incidents];
+      // RF-02.1: las intervenciones en curso de una misma sede se leen como una sola
+      // parada física ordenada por criticidad. La agrupación no descarta filas: cada
+      // máquina conserva sus botones individuales de pausa y resolución.
+      let list = groupColocatedStops([...this.incidents]);
 
       if (this.filterStatus !== 'ALL') {
         const filterNorm = normalizeIncidentStatus(this.filterStatus);
@@ -211,13 +255,30 @@ export const TechnicianRouteView = {
         [INCIDENT_STATUSES.PENDING_INFO]: 4
       };
 
+      // Las paradas ya llegan agrupadas por sede y ordenadas internamente por
+      // criticidad (groupColocatedStops). El orden global conserva esa secuencia de
+      // grupo y aplica después la prioridad de estado y urgencia entre grupos, de
+      // modo que los hermanos de una misma sede no se separan.
+      const groupRank = new Map();
+      list.forEach((incident) => {
+        const locationId = Number(incident?.location?.id ?? incident?.location_id ?? 0);
+        if (!groupRank.has(locationId)) {
+          groupRank.set(locationId, groupRank.size);
+        }
+      });
+
       return list.sort((a, b) => {
-        // La parada pausada se desprioriza por delante de la urgencia (RF-05.5): el
-        // técnico no puede intervenir en ella hasta que la sede responda, así que no
-        // debe tapar el siguiente trabajo operativo ni aunque su criticidad sea máxima.
         const pausedA = isPendingInfoStatus(a.status) ? 1 : 0;
         const pausedB = isPendingInfoStatus(b.status) ? 1 : 0;
         if (pausedA !== pausedB) return pausedA - pausedB;
+
+        const locationA = Number(a?.location?.id ?? a?.location_id ?? 0);
+        const locationB = Number(b?.location?.id ?? b?.location_id ?? 0);
+        if (locationA !== locationB) {
+          const rankA = groupRank.get(locationA) ?? 99;
+          const rankB = groupRank.get(locationB) ?? 99;
+          if (rankA !== rankB) return rankA - rankB;
+        }
 
         const uA = URGENCY_RANKS[normalizeUrgency(a.urgency)] || 99;
         const uB = URGENCY_RANKS[normalizeUrgency(b.urgency)] || 99;
@@ -304,20 +365,66 @@ export const TechnicianRouteView = {
       this.isLoading = true;
       this.errorMessage = '';
       try {
-        const response = await api.technician.getMyRoute();
-        // Handler supports both raw array and envelope { success, data: [] }
-        if (Array.isArray(response)) {
-          this.incidents = response;
-        } else if (response && Array.isArray(response.data)) {
-          this.incidents = response.data;
-        } else {
-          this.incidents = [];
-        }
+        // Módulo 16: el contexto oportunista viaja en la misma petición (RF-01.2). El
+        // normalizador acepta el array histórico y el envoltorio, de modo que esta
+        // vista sigue funcionando contra un backend sin la extensión.
+        const response = await api.technician.getMyRoute({ includeOpportunisticContext: true });
+        const envelope = normalizeRouteEnvelope(response);
+        this.incidents = envelope.stops;
+        this.enabledLocations = envelope.enabledLocations;
+        this.pendingCriticalStops = envelope.pendingCriticalStops;
       } catch (err) {
         this.errorMessage = err?.message || 'No se pudo sincronizar la ruta de averías. Comprueba tu conexión.';
       } finally {
         this.isLoading = false;
       }
+    },
+
+    /**
+     * Abre el catálogo oportunista de una sede (toque 1 del flujo, RNF-02).
+     *
+     * @param {{location_id?: number, location?: Object}|null} source Sede habilitada o parada de la ruta.
+     */
+    openOpportunisticModal(source = null) {
+      const locationId = Number(
+        source?.location_id ?? source?.location?.id ?? this.enabledLocations[0]?.location_id ?? 0
+      );
+
+      if (!(locationId > 0)) {
+        return;
+      }
+
+      this.opportunisticLocation = this.enabledLocations.find(
+        (location) => Number(location.location_id) === locationId
+      ) || {
+        location_id: locationId,
+        location_name: source?.location?.name ?? source?.location_name ?? 'la sede actual'
+      };
+      this.showOpportunisticModal = true;
+    },
+
+    /**
+     * Cierra el modal y refresca la ruta: el alta o la asunción cambian la hoja y la
+     * ventana de gracia de la sede (RF-01.2).
+     */
+    async handleOpportunisticClosed() {
+      this.showOpportunisticModal = false;
+      await this.loadRoute();
+    },
+
+    /**
+     * Texto de la tarjeta temporal «Sede recién visitada» (RF-01.2).
+     *
+     * @param {Object} location Sede habilitada por ventana de gracia.
+     * @returns {string}
+     */
+    graceWindowLabel(location) {
+      const minutes = graceRemainingMinutes(location);
+      if (minutes <= 0) {
+        return 'Sede recién visitada · ventana de gracia agotada';
+      }
+
+      return `Sede recién visitada · disponible ${minutes} min más`;
     },
 
     /**
@@ -1189,9 +1296,11 @@ export const TechnicianRouteView = {
         <!-- SECCIÓN 3: MANTENIMIENTO PREVENTIVO Y VISITA OPORTUNISTA (RF-PREV-02, EARS 2.3) -->
         <div v-else-if="activeSection === 'preventive'">
           <TechnicianPreventiveRouteTab
+            :enabled-locations="enabledLocations"
             @open-checklist="handleOpenPreventiveChecklist($event)"
             @order-claimed="loadRoute"
             @inspection-started="loadRoute"
+            @open-opportunistic="openOpportunisticModal($event)"
           />
         </div>
 
@@ -1251,6 +1360,51 @@ export const TechnicianRouteView = {
         >
           <span>ℹ️ {{ deepLinkNotice }}</span>
           <button type="button" @click="deepLinkNotice = ''" style="background: none; border: none; font-size: 14px; color: var(--color-warning-text); cursor: pointer;">×</button>
+        </div>
+
+        <!-- Aviso sanitario de otra sede (Módulo 16, RF-03.1, Art. II): la decisión de
+             quedarse aquí se confirma en el modal; la ruta solo avisa de que existe la
+             emergencia para que el técnico no la descubra al abrir el catálogo. -->
+        <div
+          v-if="pendingCriticalSummary.count > 0"
+          class="vg-alert vg-alert-warning"
+          data-testid="tech-cold-chain-route-warning"
+          role="status"
+          style="margin-bottom: 12px; display: flex; flex-direction: column; gap: 4px;"
+        >
+          <strong style="font-size: 13px;">⚠️ Prioridad sanitaria en otra sede (Art. II)</strong>
+          <span style="font-size: 12px;">
+            Tienes {{ pendingCriticalSummary.count }} parada(s) crítica(s) esperando
+            <span v-if="pendingCriticalSummary.perishable_count > 0">
+              ({{ pendingCriticalSummary.perishable_count }} de comida perecedera)
+            </span>.
+          </span>
+        </div>
+
+        <!-- Tarjeta temporal de sede recién visitada (Módulo 16, RF-01.2): puerta de
+             entrada a la intervención oportunista en ≤ 3 toques. -->
+        <div
+          v-for="recent in recentLocations"
+          :key="'recent-location-' + recent.location_id"
+          class="vg-card vg-recent-location-card"
+          data-testid="tech-recent-location-card"
+          style="margin-bottom: 12px; border-left: 4px solid var(--color-primary); display: flex; flex-direction: column; gap: 6px;"
+        >
+          <strong style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 14px; color: var(--color-ink);">
+            🏢 Sede recién visitada (30 min) · {{ recent.location_name }}
+          </strong>
+          <span style="font-size: 12px; color: var(--color-ink-muted);">
+            {{ graceWindowLabel(recent) }} por si surge otra avería in situ.
+          </span>
+          <button
+            type="button"
+            class="vg-btn vg-btn-primary"
+            style="width: 100%; height: 44px; font-size: 14px; font-weight: 600;"
+            data-testid="btn-open-recent-location-catalog"
+            @click="openOpportunisticModal(recent)"
+          >
+            ➕ Otra máquina en esta sede
+          </button>
         </div>
 
         <!-- Mobile Filter Tabs (Touch Friendly): wrap on the card so no chip ends cut -->
@@ -1346,9 +1500,16 @@ export const TechnicianRouteView = {
               <span style="font-family: monospace; font-size: 13px; font-weight: 700; color: var(--color-slate, #2c333f);">
                 #{{ incident.ticket_code }}
               </span>
-              <div style="display: flex; gap: 6px; align-items: center;">
+              <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 <IncidentBadge type="urgency" :value="incident.urgency" />
                 <IncidentBadge type="status" :value="incident.status" />
+                <!-- Trazabilidad oportunista (Módulo 16, RF-06.4). -->
+                <IncidentBadge
+                  v-if="opportunisticModeLabel(incident)"
+                  :value="incident.opportunistic_mode"
+                  type="opportunistic"
+                  size="sm"
+                />
               </div>
             </div>
 
@@ -1386,6 +1547,18 @@ export const TechnicianRouteView = {
                 >
                   🧭 Navegar con GPS
                 </button>
+              </div>
+
+              <!-- Agrupación de la misma sede (RB-02.1 / RF-02.1): en la primera tarjeta
+                   del grupo se anuncia cuántas máquinas del edificio esperan, para que el
+                   técnico no las busque como paradas independientes. -->
+              <div
+                v-if="incident.colocation_count > 1 && incident.colocation_primary"
+                class="vg-alert vg-alert-info"
+                data-testid="tech-colocated-stops"
+                style="margin-top: 6px; font-size: 12px;"
+              >
+                🏢 {{ incident.colocation_count }} intervenciones en curso en esta sede, ordenadas por urgencia y SLA.
               </div>
 
               <!-- Read-only incident history of this machine (RF-07 / EARS H.1, H.6) -->
@@ -1583,6 +1756,24 @@ export const TechnicianRouteView = {
                 <span v-else>Reanudando...</span>
               </button>
 
+              <!-- Action Option 3-bis: Otra máquina en esta sede (Módulo 16, RF-01.2, RNF-02).
+                   Solo en paradas activas (asignadas o en curso) y cuando la sede sigue
+                   habilitada para el técnico. -->
+              <div
+                v-if="(isAssigned(incident) || isInProgress(incident)) && canOpenOpportunistic"
+                style="margin-top: 8px;"
+              >
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-secondary"
+                  style="width: 100%; height: 44px; font-size: 14px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"
+                  data-testid="btn-opportunistic-other-machine"
+                  @click="openOpportunisticModal(incident)"
+                >
+                  ➕ Otra máquina en esta sede
+                </button>
+              </div>
+
               <!-- Action Option 4: Pausa por falta de acceso imputable a la sede (Módulo 11, RF-01.1) -->
               <div v-if="canPausePendingInfo(incident)" style="margin-top: 8px;">
                 <button
@@ -1625,6 +1816,18 @@ export const TechnicianRouteView = {
         role="TECHNICIAN"
         @close="closeCommentsModal"
         @comment-added="onCommentAdded"
+      />
+
+      <!-- =================================================================== -->
+      <!-- MODAL: INTERVENCIÓN OPORTUNISTA IN SITU (Módulo 16, T-OPP-11)          -->
+      <!-- =================================================================== -->
+      <TechnicianOpportunisticModal
+        v-model="showOpportunisticModal"
+        :location-id="opportunisticLocation?.location_id ?? null"
+        :location-name="opportunisticLocation?.location_name ?? ''"
+        @created="handleOpportunisticClosed"
+        @assumed="handleOpportunisticClosed"
+        @close="showOpportunisticModal = false"
       />
 
       <!-- =================================================================== -->

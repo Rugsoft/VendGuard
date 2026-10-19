@@ -53,7 +53,8 @@ import { CoordinatorTerritorialMapTab } from '../components/CoordinatorTerritori
 import { CoordinatorRefundsTab } from '../components/CoordinatorRefundsTab.js';
 import { CoordinatorIncidentDetailModal } from '../components/CoordinatorIncidentDetailModal.js';
 import { CoordinatorNotificationCenterModal } from '../components/CoordinatorNotificationCenterModal.js';
-import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';// Status classification is delegated to the shared module utils/IncidentStatusPermissions.js
+import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';
+import { opportunisticModeLabel as resolveOpportunisticModeLabel } from '../utils/OpportunisticContext.js';// Status classification is delegated to the shared module utils/IncidentStatusPermissions.js
 // (frontend mirror of the PHP lifecycle rules): no literal status lists live in this view.
 
 export const CoordinatorDashboardView = {
@@ -358,6 +359,17 @@ export const CoordinatorDashboardView = {
     this.stopPolling();
   },
   methods: {
+    /**
+     * Etiqueta de la modalidad oportunista de una fila (Módulo 16, RF-06.4), o vacío
+     * cuando el expediente nació por el canal ordinario.
+     *
+     * @param {Object} incident Fila de la bandeja de triaje.
+     * @returns {string}
+     */
+    opportunisticModeLabel(incident) {
+      return resolveOpportunisticModeLabel(incident) || '';
+    },
+
     startPolling() {
       this.stopPolling();
       // 60s periodic polling for 24/7 SLA updates (RF-11 / plan.md)
@@ -1776,9 +1788,17 @@ export const CoordinatorDashboardView = {
                     <IncidentBadge :value="inc.urgency" type="urgency" size="sm" />
                   </td>
 
-                  <!-- 5. Estado -->
+                  <!-- 5. Estado · con la trazabilidad oportunista del Módulo 16 (RF-06.4) -->
                   <td style="padding: 14px 16px; vertical-align: top;">
-                    <IncidentBadge :value="inc.status" type="status" size="sm" />
+                    <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
+                      <IncidentBadge :value="inc.status" type="status" size="sm" />
+                      <IncidentBadge
+                        v-if="opportunisticModeLabel(inc)"
+                        :value="inc.opportunistic_mode"
+                        type="opportunistic"
+                        size="sm"
+                      />
+                    </div>
                   </td>
 
                   <!-- 6. Técnico -->

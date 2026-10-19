@@ -17,6 +17,11 @@
 import { IncidentBadge } from './IncidentBadge.js';
 import { MACHINE_TYPE_LABELS, MACHINE_TYPE_ICONS, isPerishableMachineType, isResolvedStatus, isPendingInfoStatus, isSanitaryQuarantine, SANITARY_THERMAL_RISK_LABEL, AMBER_TECHNICAL_TOKENS } from '../utils/IncidentStatusPermissions.js';
 import { PAUSE_REASON_CATEGORIES } from './PendingInfoPauseModal.js';
+import {
+  officialTechnicianAlias,
+  opportunisticModeLabel,
+  opportunisticOriginLabel
+} from '../utils/OpportunisticContext.js';
 
 // Machine-type labels, icons and the sanitary perishable rule live in the shared
 // module utils/IncidentStatusPermissions.js (mirrors MachineType.php); unknown
@@ -138,6 +143,38 @@ export const MachineCard = {
      */
     isBlockedNoAccess() {
       return this.machine?.is_blocked_no_access === true;
+    },
+
+    /**
+     * Atención oportunista in situ del expediente activo (Módulo 16, RF-06.4).
+     *
+     * La sede ve que su avería ya está siendo atendida por el servicio técnico en el
+     * propio edificio, y el motivo por el que nació el aviso. Nunca ve el nombre del
+     * técnico: la tarjeta lo rotula con el alias institucional del Art. V.4.
+     */
+    opportunisticLabel() {
+      return opportunisticModeLabel(this.activeIncident) || '';
+    },
+
+    /** Submotivo del alta in situ (RF-04.1.2). */
+    opportunisticOrigin() {
+      return opportunisticOriginLabel(this.activeIncident);
+    },
+
+    /** Informante verbal de la sede, cuando consta (RF-04.1.2). */
+    opportunisticInformant() {
+      const name = this.activeIncident?.opportunistic_informant_name;
+
+      return typeof name === 'string' && name.trim() !== '' ? name.trim() : '';
+    },
+
+    /**
+     * Alias público del técnico (Art. V.4): `Servicio Técnico Oficial · Operador #[Código]`.
+     * El servidor ya lo impone en la sanitización; la tarjeta lo reafirma con el mismo
+     * helper para que ningún camino de render pueda dejar caer el nombre real.
+     */
+    officialTechnicianLabel() {
+      return officialTechnicianAlias(this.activeIncident, this.machine?.active_incident?.assigned_technician_id);
     }
   },
   methods: {
@@ -346,6 +383,19 @@ export const MachineCard = {
           <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: #7f1d1d; margin: 0; line-height: 1.3;">
             Avería en curso. No es posible abrir un nuevo ticket para esta máquina.
           </p>
+
+          <!-- Atención oportunista in situ (Módulo 16, RF-06.4 y Art. V.4). -->
+          <div
+            v-if="opportunisticLabel"
+            class="vg-alert vg-alert-info"
+            data-testid="machine-card-opportunistic-notice"
+            style="margin-top: 8px; display: flex; flex-direction: column; gap: 2px;"
+          >
+            <span style="font-size: 12px; font-weight: 600;">🏢 {{ opportunisticLabel }}</span>
+            <span style="font-size: 11px;">{{ officialTechnicianLabel }}</span>
+            <span v-if="opportunisticOrigin" style="font-size: 11px;">Motivo: {{ opportunisticOrigin }}</span>
+            <span v-if="opportunisticInformant" style="font-size: 11px;">Informante en sede: {{ opportunisticInformant }}</span>
+          </div>
         </div>
 
         <!-- Case 2: Machine repaired recently within 48h warranty -->

@@ -74,7 +74,10 @@ class PdoMachineRepository implements MachineRepositoryInterface, MachineBatchRe
                 i.created_at AS inc_created_at,
                 i.resolved_at AS inc_resolved_at,
                 i.pending_info_reason_category AS inc_pending_info_reason_category,
-                i.pending_info_reason_text AS inc_pending_info_reason_text
+                i.pending_info_reason_text AS inc_pending_info_reason_text,
+                i.opportunistic_mode AS inc_opportunistic_mode,
+                i.opportunistic_origin_reason AS inc_opportunistic_origin_reason,
+                i.opportunistic_informant_name AS inc_opportunistic_informant_name
             FROM machines m
             LEFT JOIN incidents i ON i.machine_id = m.id
                 AND i.deleted_at IS NULL
@@ -130,7 +133,10 @@ class PdoMachineRepository implements MachineRepositoryInterface, MachineBatchRe
                 i.created_at AS inc_created_at,
                 i.resolved_at AS inc_resolved_at,
                 i.pending_info_reason_category AS inc_pending_info_reason_category,
-                i.pending_info_reason_text AS inc_pending_info_reason_text
+                i.pending_info_reason_text AS inc_pending_info_reason_text,
+                i.opportunistic_mode AS inc_opportunistic_mode,
+                i.opportunistic_origin_reason AS inc_opportunistic_origin_reason,
+                i.opportunistic_informant_name AS inc_opportunistic_informant_name
             FROM machines m
             LEFT JOIN incidents i ON i.machine_id = m.id
                 AND i.deleted_at IS NULL
@@ -190,7 +196,10 @@ class PdoMachineRepository implements MachineRepositoryInterface, MachineBatchRe
                 i.created_at AS inc_created_at,
                 i.resolved_at AS inc_resolved_at,
                 i.pending_info_reason_category AS inc_pending_info_reason_category,
-                i.pending_info_reason_text AS inc_pending_info_reason_text
+                i.pending_info_reason_text AS inc_pending_info_reason_text,
+                i.opportunistic_mode AS inc_opportunistic_mode,
+                i.opportunistic_origin_reason AS inc_opportunistic_origin_reason,
+                i.opportunistic_informant_name AS inc_opportunistic_informant_name
             FROM machines m
             LEFT JOIN incidents i ON i.machine_id = m.id
                 AND i.deleted_at IS NULL
@@ -276,7 +285,10 @@ class PdoMachineRepository implements MachineRepositoryInterface, MachineBatchRe
                 i.created_at AS inc_created_at,
                 i.resolved_at AS inc_resolved_at,
                 i.pending_info_reason_category AS inc_pending_info_reason_category,
-                i.pending_info_reason_text AS inc_pending_info_reason_text
+                i.pending_info_reason_text AS inc_pending_info_reason_text,
+                i.opportunistic_mode AS inc_opportunistic_mode,
+                i.opportunistic_origin_reason AS inc_opportunistic_origin_reason,
+                i.opportunistic_informant_name AS inc_opportunistic_informant_name
             FROM machines m
             LEFT JOIN incidents i ON i.machine_id = m.id
                 AND i.deleted_at IS NULL
@@ -853,6 +865,12 @@ class PdoMachineRepository implements MachineRepositoryInterface, MachineBatchRe
             'pending_info_reason_category'       => $categoryValue,
             'pending_info_reason_category_label' => $category?->label(),
             'pending_info_reason_text'           => !empty($row['inc_pending_info_reason_text']) ? (string)$row['inc_pending_info_reason_text'] : null,
+            // Trazabilidad oportunista del expediente activo (Módulo 16, RF-06.4): el
+            // portal de sede rotula el origen y, si lo hubo, al informante verbal, sin
+            // revelar jamás el nombre del técnico (Art. V.4).
+            'opportunistic_mode'                 => !empty($row['inc_opportunistic_mode']) ? (string)$row['inc_opportunistic_mode'] : null,
+            'opportunistic_origin_reason'        => !empty($row['inc_opportunistic_origin_reason']) ? (string)$row['inc_opportunistic_origin_reason'] : null,
+            'opportunistic_informant_name'       => !empty($row['inc_opportunistic_informant_name']) ? (string)$row['inc_opportunistic_informant_name'] : null,
         ];
     }
 }
