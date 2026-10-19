@@ -13,6 +13,8 @@ use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Core\Domain\ValueObject\OpportunisticMode;
+use VendGuard\Core\Domain\ValueObject\OpportunisticOriginReason;
 use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 
@@ -74,6 +76,12 @@ class Incident implements ArrayAccess, JsonSerializable
     private int $totalPendingInfoSeconds;
     private ?string $slaTargetAt;
 
+    // Campos de la avería oportunista in situ (módulo 16)
+    private ?OpportunisticMode $opportunisticMode;
+    private ?OpportunisticOriginReason $opportunisticOriginReason;
+    private ?string $opportunisticInformantName;
+    private ?int $chronicPredecessorIncidentId;
+
     // Campos enriquecidos opcionales (vía JOIN)
     private ?string $machineCode;
     private ?string $machineModel;
@@ -128,7 +136,11 @@ class Incident implements ArrayAccess, JsonSerializable
         ?string $cycleStartedAt = null,
         ?string $coldAlertSentAt = null,
         ?string $sla2hAlertSentAt = null,
-        ?string $sla3hAlertSentAt = null
+        ?string $sla3hAlertSentAt = null,
+        ?OpportunisticMode $opportunisticMode = null,
+        ?OpportunisticOriginReason $opportunisticOriginReason = null,
+        ?string $opportunisticInformantName = null,
+        ?int $chronicPredecessorIncidentId = null
     ) {
         $this->id = $id;
         $this->ticketCode = strtoupper(trim($ticketCode));
@@ -186,6 +198,38 @@ class Incident implements ArrayAccess, JsonSerializable
 
         $this->totalPendingInfoSeconds = $totalPendingInfoSeconds;
         $this->slaTargetAt = $slaTargetAt;
+
+        // Coherencia oportunista (RF-04.1): la modalidad y su submotivo se
+        // acompañan siempre, y cada modalidad admite sólo sus motivos. La base
+        // de datos impone la misma regla; aquí se falla antes de persistir, para
+        // que el error llegue como validación de dominio y no como SQLSTATE.
+        if (($opportunisticMode === null) !== ($opportunisticOriginReason === null)) {
+            throw new InvalidArgumentException(
+                'La modalidad oportunista y su submotivo de origen deben declararse juntos o no declararse.'
+            );
+        }
+
+        if ($opportunisticMode !== null && $opportunisticOriginReason !== null
+            && !$opportunisticOriginReason->isAllowedFor($opportunisticMode)) {
+            throw new InvalidArgumentException(sprintf(
+                'El submotivo «%s» no es coherente con la modalidad «%s».',
+                $opportunisticOriginReason->value,
+                $opportunisticMode->value
+            ));
+        }
+
+        $informant = $opportunisticInformantName !== null ? trim($opportunisticInformantName) : null;
+        if ($informant === '') {
+            $informant = null;
+        }
+        if ($informant !== null && mb_strlen($informant) > 100) {
+            throw new InvalidArgumentException('El nombre del informante en sede no puede superar los 100 caracteres.');
+        }
+
+        $this->opportunisticMode = $opportunisticMode;
+        $this->opportunisticOriginReason = $opportunisticOriginReason;
+        $this->opportunisticInformantName = $informant;
+        $this->chronicPredecessorIncidentId = $chronicPredecessorIncidentId;
     }
 
     /**
@@ -247,7 +291,19 @@ class Incident implements ArrayAccess, JsonSerializable
             isset($row['cycle_started_at']) && $row['cycle_started_at'] !== null ? (string)$row['cycle_started_at'] : null,
             isset($row['cold_alert_sent_at']) && $row['cold_alert_sent_at'] !== null ? (string)$row['cold_alert_sent_at'] : null,
             isset($row['sla_2h_alert_sent_at']) && $row['sla_2h_alert_sent_at'] !== null ? (string)$row['sla_2h_alert_sent_at'] : null,
-            isset($row['sla_3h_alert_sent_at']) && $row['sla_3h_alert_sent_at'] !== null ? (string)$row['sla_3h_alert_sent_at'] : null
+            isset($row['sla_3h_alert_sent_at']) && $row['sla_3h_alert_sent_at'] !== null ? (string)$row['sla_3h_alert_sent_at'] : null,
+            isset($row['opportunistic_mode']) && $row['opportunistic_mode'] !== null && $row['opportunistic_mode'] !== ''
+                ? OpportunisticMode::fromString((string)$row['opportunistic_mode'])
+                : null,
+            isset($row['opportunistic_origin_reason']) && $row['opportunistic_origin_reason'] !== null && $row['opportunistic_origin_reason'] !== ''
+                ? OpportunisticOriginReason::fromString((string)$row['opportunistic_origin_reason'])
+                : null,
+            isset($row['opportunistic_informant_name']) && $row['opportunistic_informant_name'] !== null
+                ? (string)$row['opportunistic_informant_name']
+                : null,
+            isset($row['chronic_predecessor_incident_id']) && $row['chronic_predecessor_incident_id'] !== null
+                ? (int)$row['chronic_predecessor_incident_id']
+                : null
         );
     }
 
@@ -549,6 +605,42 @@ class Incident implements ArrayAccess, JsonSerializable
     }
 
     /**
+     * Modalidad oportunista del expediente (Módulo 16). `null` en los tickets
+     * abiertos por los canales ordinarios, que son la inmensa mayoría.
+     */
+    public function getOpportunisticMode(): ?OpportunisticMode
+    {
+        return $this->opportunisticMode;
+    }
+
+    public function getOpportunisticOriginReason(): ?OpportunisticOriginReason
+    {
+        return $this->opportunisticOriginReason;
+    }
+
+    /**
+     * Nombre o cargo de quien avisó en el pasillo. Dato opcional, visible para la
+     * Sede y Coordinación y **nunca** en la vista pública del Ciudadano QR (Art. V.4).
+     */
+    public function getOpportunisticInformantName(): ?string
+    {
+        return $this->opportunisticInformantName;
+    }
+
+    /**
+     * Expediente crónico que este sucesor reemplaza (3.ª reincidencia in situ).
+     */
+    public function getChronicPredecessorIncidentId(): ?int
+    {
+        return $this->chronicPredecessorIncidentId;
+    }
+
+    public function isOpportunistic(): bool
+    {
+        return $this->opportunisticMode !== null;
+    }
+
+    /**
      * Duración viva del intervalo de pausa abierto respecto a un instante de referencia.
      *
      * Alimenta dos lecturas del módulo: el reloj contractual visualmente congelado
@@ -823,6 +915,13 @@ class Incident implements ArrayAccess, JsonSerializable
             'cold_alert_sent_at' => $this->coldAlertSentAt,
             'sla_2h_alert_sent_at' => $this->sla2hAlertSentAt,
             'sla_3h_alert_sent_at' => $this->sla3hAlertSentAt,
+            'opportunistic_mode' => $this->opportunisticMode?->value,
+            'opportunistic_mode_label' => $this->opportunisticMode?->label(),
+            'opportunistic_origin_reason' => $this->opportunisticOriginReason?->value,
+            'opportunistic_origin_label' => $this->opportunisticOriginReason?->label(),
+            'opportunistic_informant_name' => $this->opportunisticInformantName,
+            'chronic_predecessor_incident_id' => $this->chronicPredecessorIncidentId,
+            'is_opportunistic' => $this->isOpportunistic(),
             'created_at' => $this->createdAt,
             'updated_at' => $this->updatedAt,
             'deleted_at' => $this->deletedAt,

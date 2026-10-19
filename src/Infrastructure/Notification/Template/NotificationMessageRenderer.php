@@ -12,12 +12,12 @@ use VendGuard\Core\Service\AppPublicUrl;
 use VendGuard\Core\Service\NotificationTrackingLinkResolver;
 
 /**
- * NotificationMessageRenderer — Redacción de asuntos y cuerpos en castellano para las 19 plantillas (T-NOTIF-05).
+ * NotificationMessageRenderer — Redacción de asuntos y cuerpos en castellano para las 21 plantillas (T-NOTIF-05).
  *
  * Cumple con RF-01.5, RF-03.2, RF-05.1 a RF-05.9, RF-06.5.2 y la Constitución
  * Art. V.4:
  *
- * 1. **Las 19 plantillas del catálogo** (`NotificationTemplate`) generan un
+ * 1. **Las 21 plantillas del catálogo** (`NotificationTemplate`) generan un
  *    asunto (≤ 255 caracteres, límite de `notification_outbox.subject`), un
  *    cuerpo en texto plano y un cuerpo HTML responsivo. Ambos cuerpos se
  *    construyen desde el MISMO borrador estructurado, de modo que no pueden
@@ -148,7 +148,7 @@ final class NotificationMessageRenderer
     }
 
     /**
-     * Compone el borrador estructurado de cada una de las 19 plantillas.
+     * Compone el borrador estructurado de cada una de las 21 plantillas.
      *
      * @param array<string, mixed> $payload
      * @return array{
@@ -482,6 +482,46 @@ final class NotificationMessageRenderer
                     $this->row('Su observación', $this->text($payload, 'observation_text')),
                 ]),
                 note: 'Su aportación se ha añadido al expediente sin modificar los datos del informador original.',
+            ),
+
+            // ── Módulo 16 · Avería oportunista in situ ──────────────────────
+            NotificationTemplate::OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT => $this->draft(
+                subject: '⚠️ Parada crítica pospuesta por una intervención oportunista' . $ticketSuffix,
+                eyebrow: 'ALERTA SANITARIA · CADENA DE FRÍO',
+                title: 'El técnico ha pospuesto una parada crítica en otra sede',
+                intro: 'Un técnico ha confirmado una intervención oportunista mientras tenía pendiente una parada crítica '
+                    . 'o con riesgo de cadena de frío en otra sede. La decisión ha quedado registrada con su confirmación expresa (Art. II).',
+                details: $this->mergeRows(
+                    $this->dossierRows($payload, true),
+                    [
+                        $this->row('Paradas postergadas', $this->countText($payload, 'postponed_stops_count')),
+                        $this->row('Sede postergada', $this->text($payload, 'postponed_stop_location')),
+                        $this->row('Expediente postergado', $this->text($payload, 'postponed_stop_ticket')),
+                        $this->row('Técnico actuante', $this->technicianLabel($payload)),
+                        $this->row('Origen del hallazgo', $this->text($payload, 'opportunistic_origin_label')),
+                    ]
+                ),
+                warning: 'La parada crítica sigue pendiente en otra sede: verifique su cobertura inmediata (Art. II).',
+                warningTone: 'danger',
+                warningInSubject: true,
+                note: 'La alerta se ha encolado con prioridad sanitaria por delante de cualquier aviso ordinario.',
+            ),
+
+            NotificationTemplate::INCIDENT_REOPENED_IN_SITU_SITE => $this->draft(
+                subject: '🔁 Hemos reabierto su avería durante la visita' . $ticketSuffix,
+                eyebrow: 'CICLO DEL EXPEDIENTE',
+                title: 'Avería reabierta durante la visita técnica',
+                intro: 'El servicio técnico ha reabierto la avería durante su presencia en el centro y ya está trabajando en ella. '
+                    . 'Puede seguir su evolución en el Portal de Sede.',
+                details: $this->mergeRows(
+                    $this->dossierRows($payload, true),
+                    [
+                        $this->row('Reabierta', $this->dateText($payload, 'reopened_at') ?? $this->dateText($payload, 'event_at')),
+                        $this->row('Motivo de la reapertura', $this->text($payload, 'reopen_reason')),
+                        $this->row('Servicio técnico', $this->technicianLabel($payload)),
+                    ]
+                ),
+                note: 'La garantía de reapertura de 48 horas vuelve a contar desde esta intervención.',
             ),
         };
 

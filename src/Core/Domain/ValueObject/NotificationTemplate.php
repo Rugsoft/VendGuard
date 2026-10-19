@@ -9,7 +9,7 @@ use InvalidArgumentException;
 /**
  * NotificationTemplate
  *
- * Catálogo cerrado de las 19 plantillas de notificación tipificadas (Módulo 14).
+ * Catálogo cerrado de las 21 plantillas de notificación tipificadas (Módulos 14 y 16).
  * Coincide exactamente con el enum `notification_template` de PostgreSQL.
  */
 enum NotificationTemplate: string
@@ -39,6 +39,10 @@ enum NotificationTemplate: string
     case INCIDENT_CANCELLED_CITIZEN_QR      = 'INCIDENT_CANCELLED_CITIZEN_QR';
     case CITIZEN_QR_OBSERVATION_ACK         = 'CITIZEN_QR_OBSERVATION_ACK';
 
+    // 4. Avería oportunista in situ (Módulo 16)
+    case OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT = 'OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT';
+    case INCIDENT_REOPENED_IN_SITU_SITE           = 'INCIDENT_REOPENED_IN_SITU_SITE';
+
     /**
      * Etiqueta descriptiva en castellano.
      */
@@ -64,6 +68,8 @@ enum NotificationTemplate: string
             self::INCIDENT_CANCELLED_SITE => 'Aviso de Cancelación de Expediente (Sede)',
             self::INCIDENT_CANCELLED_CITIZEN_QR => 'Aviso de Cierre de Expediente (Ciudadano QR)',
             self::CITIZEN_QR_OBSERVATION_ACK => 'Acuse de Observación Adicional Registrada (QR)',
+            self::OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT => 'Alerta a Coordinación por Posponer una Parada Crítica de Frío',
+            self::INCIDENT_REOPENED_IN_SITU_SITE => 'Aviso a Sede de Reapertura In Situ',
         };
     }
 
@@ -79,7 +85,8 @@ enum NotificationTemplate: string
             self::SANITARY_SWEEP_ESCALATED,
             self::SLA_IMMINENCE_2H_UNASSIGNED,
             self::SLA_IMMINENCE_3H_UNSTARTED,
-            self::CHRONIC_BREAKDOWN_ALERT => NotificationPriority::CRITICAL_SANITARY,
+            self::CHRONIC_BREAKDOWN_ALERT,
+            self::OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT => NotificationPriority::CRITICAL_SANITARY,
             default => NotificationPriority::STANDARD,
         };
     }

@@ -39,7 +39,7 @@
 
 ## Fase 2: Modelos de Dominio, Value Objects, Excepciones y Políticas Puras
 
-- [ ] **T-OPP-03 · Implementar Value Objects (`OpportunisticMode`, `OpportunisticOriginReason`, `OpportunisticActionType`), Excepciones de Dominio y ampliación de `Incident` y `NotificationTemplate`**
+- [x] **T-OPP-03 · Implementar Value Objects (`OpportunisticMode`, `OpportunisticOriginReason`, `OpportunisticActionType`), Excepciones de Dominio y ampliación de `Incident` y `NotificationTemplate`**
   * **Tiempo estimado:** 25 min
   * **Dependencias:** `T-OPP-01`
   * **Ficheros a crear o modificar:**

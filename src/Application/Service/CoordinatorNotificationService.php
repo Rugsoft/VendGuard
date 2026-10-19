@@ -374,7 +374,7 @@ final class CoordinatorNotificationService
      * El mensaje viaja identificado como `[PRUEBA DE CONEXIÓN · VENDGUARD]` para
      * que quien lo reciba en el grupo corporativo sepa que es una verificación.
      *
-     * Nota de diseño: el catálogo cerrado de 19 plantillas no incluye una
+     * Nota de diseño: el catálogo cerrado de 21 plantillas no incluye una
      * plantilla de prueba, así que el sobre de la prueba reutiliza
      * `SANITARY_QUARANTINE_TRIGGERED` —la alerta crítica canónica del Art. II— y
      * el asunto y los cuerpos declaran explícitamente que es una prueba de

@@ -6,7 +6,7 @@ declare(strict_types=1);
  * NotificationMessageRendererTest
  *
  * Suite unitaria del renderizador del Centro de Notificaciones (T-NOTIF-05):
- *   1. Las 19 plantillas del catálogo generan asunto (≤ 255), texto y HTML.
+ *   1. Las 21 plantillas del catálogo generan asunto (≤ 255), texto y HTML.
  *   2. El aviso destacado de RF-03.2 aparece en asunto y encabezado cuando no
  *      hay técnico de guardia ni técnico asignado, y sólo entonces.
  *   3. Blindaje Art. V.4: la Sede nunca recibe diagnósticos, acciones, costes,
@@ -128,11 +128,11 @@ $secretMarkers = [
 ];
 
 // ---------------------------------------------------------------------
-// 1. Cobertura de las 19 plantillas
+// 1. Cobertura de las 21 plantillas
 // ---------------------------------------------------------------------
-echo "--- 1. Las 19 plantillas del catálogo ---\n";
+echo "--- 1. Las 21 plantillas del catálogo ---\n";
 
-$assert('El catálogo cerrado declara 19 plantillas', count(NotificationTemplate::cases()) === 19);
+$assert('El catálogo cerrado declara 21 plantillas', count(NotificationTemplate::cases()) === 21);
 
 $subjects = [];
 $allRendered = [];
@@ -160,7 +160,7 @@ foreach (NotificationTemplate::cases() as $template) {
     );
 }
 
-$assert('Los 19 asuntos son distintos entre sí', count(array_unique($subjects)) === 19);
+$assert('Los 21 asuntos son distintos entre sí', count(array_unique($subjects)) === 21);
 $assert('El renderizador acepta el nombre de plantilla como cadena', $renderer->render('INCIDENT_OPENED_SITE', $payload)->template === NotificationTemplate::INCIDENT_OPENED_SITE);
 
 $assertThrows('Rechaza una plantilla fuera del catálogo', static fn () => $renderer->render('NOT_A_TEMPLATE', $payload));

@@ -84,7 +84,8 @@ final class NotificationTrackingLinkResolver
             NotificationTemplate::INCIDENT_OPENED_SITE,
             NotificationTemplate::PENDING_INFO_SITE_REQUEST,
             NotificationTemplate::INCIDENT_RESOLVED_SITE,
-            NotificationTemplate::INCIDENT_CANCELLED_SITE => self::AUDIENCE_LOCATION,
+            NotificationTemplate::INCIDENT_CANCELLED_SITE,
+            NotificationTemplate::INCIDENT_REOPENED_IN_SITU_SITE => self::AUDIENCE_LOCATION,
 
             NotificationTemplate::INCIDENT_OPENED_CITIZEN_QR,
             NotificationTemplate::INCIDENT_RESOLVED_CITIZEN_QR,

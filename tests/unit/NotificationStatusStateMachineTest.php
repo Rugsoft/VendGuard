@@ -129,7 +129,7 @@ $assert('3.3 NotificationPriority tiene CRITICAL_SANITARY y STANDARD', count(Not
 $assert('3.4 NotificationPriority::CRITICAL_SANITARY isCritical() es true', NotificationPriority::CRITICAL_SANITARY->isCritical());
 $assert('3.5 NotificationPriority::STANDARD isCritical() es false', !NotificationPriority::STANDARD->isCritical());
 
-$assert('3.6 NotificationTemplate declara las 19 plantillas cerradas', count(NotificationTemplate::cases()) === 19);
+$assert('3.6 NotificationTemplate declara las 21 plantillas cerradas', count(NotificationTemplate::cases()) === 21);
 $assert('3.7 COLD_CHAIN_IMMEDIATE_ALERT asigna prioridad crítica sanitaria por defecto', NotificationTemplate::COLD_CHAIN_IMMEDIATE_ALERT->defaultPriority() === NotificationPriority::CRITICAL_SANITARY);
 $assert('3.8 INCIDENT_OPENED_SITE asigna prioridad estándar por defecto', NotificationTemplate::INCIDENT_OPENED_SITE->defaultPriority() === NotificationPriority::STANDARD);
 
