@@ -2,7 +2,7 @@
 
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
 **Módulo:** 16 · Avería Oportunista In Situ  
-**Estado:** Especificación Formal Consolidada y Auditada tras QA (Fase 2 SDD - Gate)  
+**Estado:** Cerrada · Módulo 16 implementado y certificado (Octubre 2026)  
 **Fecha:** Octubre 2026  
 **Alineación Constitucional:** Artículos I al VII de la Constitución de VendGuard (Especialmente Art. II, Art. III, Art. V.1, Art. V.2, Art. V.3, Art. V.4, Art. V.5 y Art. V.6)
 

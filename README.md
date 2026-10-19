@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/Database-PostgreSQL%2016%2B%20%7C%20Supabase-3ecf8e?style=flat-square&logo=postgresql&logoColor=white)](https://supabase.com/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-292%20Suites%20%7C%2011.435%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-293%20Suites%20%7C%2011.507%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -396,7 +396,7 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 292 suites · 11.435 aserciones
+batería global: 293 suites · 11.507 aserciones
 
 ```text
 ======================================================================
@@ -404,12 +404,12 @@ batería global: 292 suites · 11.435 aserciones
 ======================================================================
  Tiempo de ejecución total : 142.00 segundos  (variable en cada corrida)
  Suites de pruebas PHP Unit : 127 / 127 pasadas
- Suites de pruebas JS Unit  : 69 / 69 pasadas
+ Suites de pruebas JS Unit  : 70 / 70 pasadas
  Suites de Integración PHP  : 95 / 95 pasadas
  Suites E2E Manuales (T-40): 1 / 1 pasadas
  ──────────────────────────────────────────────────────────────────
- Total Suites Ejecutadas    : 292
- Total Aserciones Evaluadas : 11.435
+ Total Suites Ejecutadas    : 293
+ Total Aserciones Evaluadas : 11.507
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
@@ -432,6 +432,8 @@ Entre las suites de certificación destacan:
 * **`SanitarySweepVisibilityServiceTest` / `CoordinatorSanitarySweepEndpointTest` (T-PAUSE-41)** — la superficie del barrido sanitario: umbrales de escalado a las tres pasadas consecutivas, cierre del seguimiento **por identidad** y el ciclo completo contra el motor del arnés sobre dos conexiones PDO reales (aplazamiento → cuarentena → cierre → alerta apagada).
 * **`NotificationDispatcherAndSlaSweepTest` / `CoordinatorNotificationApiTest` (Módulo 14)** — certificación del ciclo completo de la bandeja de salida transaccional, rescate de envíos atascados en `PROCESSING`, escalado automático de SLA sanitario (2h/3h) y validación anti-SSRF de Webhooks.
 * **`TelegramTransportTest` / `AdminUserTelegramLinkTest` (Módulo 15)** — certificación del canal y transporte HTTP hacia la API de Telegram, vinculación de chats de técnicos, deep linking a averías y entrega real de alertas de asignación.
+* **`OpportunisticIncidentApiIntegrationTest` / `OpportunisticAtomicWritesTest` (Módulo 16)** — catálogo de máquinas de la sede, alta y asunción in situ, reapertura en garantía, sustitución atómica del ticket crónico y bloqueo de convivencia entre sedes bajo `FOR UPDATE`.
+* **`OpportunisticFrontendIntegrationTest.mjs` (Módulo 16)** — tarjeta temporal de 30 minutos, entrada oportunista desde la parada activa y desde la inspección preventiva, agrupación en Parada #1, KPI de desplazamientos evitados y alias constitucional del técnico en el portal de sede.
 
 > **Nota operativa:** las suites de integración incluyen pruebas de HTTP real contra `127.0.0.1:8000`. Si el puerto está ocupado por un servidor obsoleto, arránquelo antes con `php -S 127.0.0.1:8000 -t public public/index.php`.
 
@@ -514,7 +516,7 @@ gestor-incidencias-vending/
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 292 suites (100% verde)
+    ├── run_all.php               # Ejecutor global de la batería de 293 suites (100% verde)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)
     ├── unit/                     # Pruebas unitarias de lógica pura, geometría y contratos

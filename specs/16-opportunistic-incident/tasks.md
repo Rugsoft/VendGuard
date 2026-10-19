@@ -174,7 +174,7 @@
 
 ## Fase 7: Certificación Integral, Regresión Global y Cierre SDD
 
-- [ ] **T-OPP-12 · Ejecutar batería global de regresión (`php tests/run_all.php`), sincronizar métricas documentales (`DocMetricsGuard`) y cerrar actas del Módulo 16**
+- [x] **T-OPP-12 · Ejecutar batería global de regresión (`php tests/run_all.php`), sincronizar métricas documentales (`DocMetricsGuard`) y cerrar actas del Módulo 16**
   * **Tiempo estimado:** 20 min
   * **Dependencias:** `T-OPP-01` a `T-OPP-11`
   * **Ficheros a crear o modificar:**
@@ -186,3 +186,6 @@
     * `specs/16-opportunistic-incident/tasks.md` *(marcar acta final)*
   * **Requisitos que cubre:** Todos los requisitos `RF-01` a `RF-06`, `RNF-01` a `RNF-04`, Resoluciones QA 1 a 5 y Artículos I a VII de `constitution.md`
   * **Hecho cuando:** `php tests/run_all.php` finaliza con **0 fallos (100% PASS)** en todas las suites PHP y ESM (incluyendo `DocMetricsGuardTest`, `PostgresSchemaTest`, `PostgresConstitutionalTest` y `SchemaConvergenceParityTest`), y la documentación viva refleja las cifras actualizadas del proyecto.
+  * **Verificación ejecutada (2026-10-19):** `php tests/run_all.php` → **293 suites · 11.507 aserciones · 0 fallos · exit 0**, con la guarda de cifras documentadas coherente y la base restablecida a semillas. Reparto: 127 suites PHP Unit, 70 suites JS Unit, 95 de integración y 1 guion E2E. Las seis suites de motor nuevo (`DemoHistorySeederPostgresTest`, `OpportunisticSchemaCorrespondenceTest`, `PoolerLatencyMeasurementTest`, `PostgresConstitutionalTest`, `PostgresSchemaTest` y `SchemaConvergenceParityTest`) se declaran en la categoría `new_engine` y se ejecutan por su canal propio, no en la batería hermética.
+  * **Cifras sincronizadas:** insignia y resumen del `README.md`, árbol de directorios, frases canónicas de `docs/handoff_rama_incident-comments.md`, `docs/manual_e2e_verification.md`, `docs/verificacion_criterios_finalizacion_mvp.md` y `docs/verificacion_criterios_finalizacion_preventivo.md`, y catálogo no versionado `docs/features_pendientes.md`. Estados de `spec.md` y su espejo funcional actualizados a **Cerrada**.
+  * **Estabilización necesaria para el verde (declarada):** `HealthCheckServiceTest` medía la latencia real del motor y exigía que quedara por debajo del presupuesto de 1,0 s. Bajo la carga de la batería esa medición puede superar el umbral, y la suite se ponía en rojo por el entorno, no por el servicio. La aserción 2.3 ahora certifica la **coherencia entre la latencia medida y el estado publicado**: por debajo del presupuesto → `HEALTHY` sin motivo; por encima → `DEGRADED` con `SLOW_RESPONSE`. La regla EARS-07.1 queda intacta y los dos desenlaces quedan cubiertos; las aserciones siguen siendo 31.

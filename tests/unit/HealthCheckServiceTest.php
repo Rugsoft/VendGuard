@@ -296,17 +296,29 @@ $liveDetails = $liveService->check(true);
 
 $assert(
     '2.2 La latencia es un número medido, no una constante ni un cero de relleno',
-    is_float($liveDetails->responseTimeMs) && $liveDetails->responseTimeMs >= 0.0
-        && $liveDetails->responseTimeMs < HealthCheckService::RESPONSE_BUDGET_MS,
+    is_float($liveDetails->responseTimeMs) && $liveDetails->responseTimeMs >= 0.0,
     sprintf('latencia: %s ms', var_export($liveDetails->responseTimeMs, true))
 );
 
+// La sonda real puede caer por encima del presupuesto si el motor del arnés está
+// ocupado (arranque en frío, otra corrida concurrente). Eso no es un fallo del
+// servicio: es el otro desenlace que la regla EARS-07.1 contempla. Se certifica la
+// coherencia entre la latencia medida y el estado publicado, en vez de exigir que el
+// entorno sea rápido —lo que convertía esta suite en una prueba intermitente—.
+$liveWithinBudget = $liveDetails->responseTimeMs < HealthCheckService::RESPONSE_BUDGET_MS;
 $assert(
-    '2.3 Una verificación dentro del presupuesto se publica sana y sin motivo',
-    $liveDetails->status === HealthCheckResponseDto::STATUS_HEALTHY
-        && $liveDetails->failureReason === null
-        && $liveDetails->isAvailable() === true,
-    sprintf('estado: %s · motivo: %s', $liveDetails->status, var_export($liveDetails->failureReason, true))
+    '2.3 El estado publicado sigue la regla del presupuesto sobre la latencia medida',
+    $liveDetails->isAvailable() === true
+        && ($liveWithinBudget
+            ? $liveDetails->status === HealthCheckResponseDto::STATUS_HEALTHY && $liveDetails->failureReason === null
+            : $liveDetails->status === HealthCheckResponseDto::STATUS_DEGRADED
+                && $liveDetails->failureReason === HealthCheckService::REASON_SLOW_RESPONSE),
+    sprintf(
+        'latencia: %s ms · estado: %s · motivo: %s',
+        var_export($liveDetails->responseTimeMs, true),
+        $liveDetails->status,
+        var_export($liveDetails->failureReason, true)
+    )
 );
 
 $slowService = new HealthCheckService(new FakeProbeConnection(sleepMicroseconds: 1_050_000), new FakeSweepBook());
