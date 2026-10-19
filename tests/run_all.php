@@ -264,6 +264,12 @@ foreach ($unitPhpFiles as $filePath) {
         $stats['unit_php']['failed']++;
         $failedFiles[] = "unit/{$fileName}";
         echo "  {$colorRed}[FAIL] {$fileName}{$colorReset}\n";
+        // Sin esta salida, una suite unitaria en rojo solo decía su nombre: la aserción
+        // que falló, la traza o el errno del motor se perdían, y el diagnóstico de un
+        // rojo esporádico exigía volver a lanzarla a mano fuera de la batería. La fase
+        // de integración ya imprimía su salida; la unitaria no, y esa asimetría ocultó
+        // la causa de un fallo real. Se conserva el mismo formato y el mismo recorte.
+        echo "         " . str_replace("\n", "\n         ", trim($output)) . "\n";
     }
 }
 
