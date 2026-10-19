@@ -81,7 +81,7 @@
   * **Requisitos que cubre:** `RF-01.1` a `RF-01.5`, `RF-02.1`, `RF-02.2`, `RF-03.1`, `RF-05.1` a `RF-05.5`, `RNF-01`
   * **Hecho cuando:** `PdoIncidentRepository` implementa `OpportunisticIncidentRepositoryInterface` proporcionando: (1) consulta de sedes habilitadas para el técnico (`ACTIVE_STOP` y `GRACE_WINDOW_30M` a partir de `incident_history` y `preventive_orders`); (2) catálogo de máquinas operativas de la sede con su ticket activo o en garantía (< 48h) y su `reopen_count`; (3) consulta de conflictos `IN_PROGRESS` / `IN_INSPECTION` en otras sedes y paradas `CRITICAL` / vigilancia sanitaria pendientes en otras sedes; y (4) agrupación y ordenación por urgencia/SLA de múltiples intervenciones `IN_PROGRESS` de la misma sede en `findRouteBoard()`.
 
-- [ ] **T-OPP-06 · Implementar escrituras atómicas en `PdoIncidentRepository` (Flujo A, Flujo B con `FOR UPDATE`, cierre crónico + sucesor en 3.ª reincidencia, desbloqueo 72h al resolver y métricas en `PdoMetricsRepository`)**
+- [x] **T-OPP-06 · Implementar escrituras atómicas en `PdoIncidentRepository` (Flujo A, Flujo B con `FOR UPDATE`, cierre crónico + sucesor en 3.ª reincidencia, desbloqueo 72h al resolver y métricas en `PdoMetricsRepository`)**
   * **Tiempo estimado:** 30 min
   * **Dependencias:** `T-OPP-05`
   * **Ficheros a crear o modificar:**

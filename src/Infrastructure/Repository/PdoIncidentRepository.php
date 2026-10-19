@@ -193,7 +193,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             reopened_at,
                             closed_at,
                             cancellation_reason,
-                            cancelled_at
+                            cancelled_at,
+                            opportunistic_mode,
+                            opportunistic_origin_reason,
+                            opportunistic_informant_name,
+                            chronic_predecessor_incident_id
                         )
                         SELECT
                             :ticket_code,
@@ -220,7 +224,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             :reopened_at,
                             :closed_at,
                             :cancellation_reason,
-                            :cancelled_at
+                            :cancelled_at,
+                            :opportunistic_mode,
+                            :opportunistic_origin_reason,
+                            :opportunistic_informant_name,
+                            :chronic_predecessor_incident_id
                         WHERE NOT EXISTS (SELECT 1 FROM existing_check)
                         RETURNING id, status
                     ),
@@ -280,6 +288,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $stmt->bindValue(':closed_at', $incident->getClosedAt(), $incident->getClosedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
                 $stmt->bindValue(':cancellation_reason', $incident->getCancellationReason(), $incident->getCancellationReason() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
                 $stmt->bindValue(':cancelled_at', $incident->getCancelledAt(), $incident->getCancelledAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                // Metadatos oportunistas del alta `NEW` (Módulo 16): la modalidad y su
+                // submotivo viajan juntos y la coherencia ya la validó el agregado.
+                $stmt->bindValue(':opportunistic_mode', $incident->getOpportunisticMode()?->value, $incident->getOpportunisticMode() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':opportunistic_origin_reason', $incident->getOpportunisticOriginReason()?->value, $incident->getOpportunisticOriginReason() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':opportunistic_informant_name', $incident->getOpportunisticInformantName(), $incident->getOpportunisticInformantName() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':chronic_predecessor_incident_id', $incident->getChronicPredecessorIncidentId(), $incident->getChronicPredecessorIncidentId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
                 $stmt->bindValue(':user_id', $userId, $userId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
                 $note = $initialNote ?? 'Aviso creado por el responsable de sede';
                 $stmt->bindValue(':action_note', $note, PDO::PARAM_STR);
@@ -372,7 +386,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     reopened_at,
                     closed_at,
                     cancellation_reason,
-                    cancelled_at
+                    cancelled_at,
+                    opportunistic_mode,
+                    opportunistic_origin_reason,
+                    opportunistic_informant_name,
+                    chronic_predecessor_incident_id
                 ) VALUES (
                     :ticket_code,
                     :machine_id,
@@ -398,7 +416,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     :reopened_at,
                     :closed_at,
                     :cancellation_reason,
-                    :cancelled_at
+                    :cancelled_at,
+                    :opportunistic_mode,
+                    :opportunistic_origin_reason,
+                    :opportunistic_informant_name,
+                    :chronic_predecessor_incident_id
                 )
             ";
 
@@ -432,6 +454,11 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $stmt->bindValue(':closed_at', $incident->getClosedAt(), $incident->getClosedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
             $stmt->bindValue(':cancellation_reason', $incident->getCancellationReason(), $incident->getCancellationReason() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
             $stmt->bindValue(':cancelled_at', $incident->getCancelledAt(), $incident->getCancelledAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            // Metadatos oportunistas del alta `NEW` (Módulo 16).
+            $stmt->bindValue(':opportunistic_mode', $incident->getOpportunisticMode()?->value, $incident->getOpportunisticMode() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            $stmt->bindValue(':opportunistic_origin_reason', $incident->getOpportunisticOriginReason()?->value, $incident->getOpportunisticOriginReason() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            $stmt->bindValue(':opportunistic_informant_name', $incident->getOpportunisticInformantName(), $incident->getOpportunisticInformantName() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            $stmt->bindValue(':chronic_predecessor_incident_id', $incident->getChronicPredecessorIncidentId(), $incident->getChronicPredecessorIncidentId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
 
             $stmt->execute();
             $newId = (int)$this->pdo->lastInsertId();
@@ -1527,6 +1554,541 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         }
 
         return $pending;
+    }
+
+    /**
+     * Flujo A · Alta Oportunista In Situ (`RF-04`).
+     *
+     * El expediente llega ya construido por el caso de uso —en curso, asignado y con
+     * modalidad y submotivo—, así que esta primitiva solo comprueba que el agregado
+     * cumpla la forma que el alta promete y delega en `create()`, que ya resuelve en
+     * una sola transacción la inserción, el primer evento de historial y la carrera
+     * contra el índice único `uq_machine_active_ticket`.
+     *
+     * La comprobación no es decorativa: si la modalidad viajara nula, el alta
+     * quedaría indistinguible de un aviso ordinario y el KPI de desplazamientos
+     * evitados dejaría de contarla; si naciera en otro estado, la tarjeta de ruta no
+     * la presentaría como intervención en curso.
+     */
+    public function createOpportunisticIncident(
+        Incident $incident,
+        ?int $userId = null,
+        ?string $initialNote = null
+    ): Incident {
+        if (!$incident->isOpportunistic()) {
+            throw new InvalidArgumentException(
+                'El alta oportunista exige declarar la modalidad y su submotivo de origen.'
+            );
+        }
+
+        if ($incident->getStatus() !== IncidentStatus::IN_PROGRESS) {
+            throw new InvalidArgumentException(sprintf(
+                'El alta oportunista nace directamente en curso; se recibió el estado %s.',
+                $incident->getStatus()->value
+            ));
+        }
+
+        return $this->create($incident, $userId, $initialNote);
+    }
+
+    /**
+     * Asunción directa de un expediente sin técnico (`RF-05.2`, caso 1).
+     */
+    public function claimOpportunisticIncident(
+        int $incidentId,
+        int $technicianId,
+        ?DateTimeImmutable $now = null
+    ): Incident {
+        $isOwnTransaction = !$this->pdo->inTransaction();
+        $instant = $now ?? new DateTimeImmutable('now');
+        $stamp = $instant->format('Y-m-d H:i:sP');
+
+        if ($isOwnTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $incident = $this->findByIdForUpdate($incidentId);
+            if ($incident === null) {
+                throw new DomainException("No se encontró ninguna incidencia con ID {$incidentId}.");
+            }
+
+            if (!in_array($incident->getStatus(), [IncidentStatus::REGISTERED, IncidentStatus::REOPENED], true)) {
+                throw new InvalidTransitionException(
+                    sprintf(
+                        'Solo se asume directamente un expediente registrado o reabierto; el %s se encuentra en estado %s.',
+                        $incident->getTicketCode(),
+                        $incident->getStatus()->value
+                    ),
+                    $incident->getStatus(),
+                    IncidentStatus::IN_PROGRESS
+                );
+            }
+
+            $sql = "
+                UPDATE incidents
+                SET status = 'IN_PROGRESS',
+                    assigned_technician_id = :technician_id,
+                    assigned_at = COALESCE(assigned_at, :instant),
+                    started_at = COALESCE(started_at, :instant),
+                    cycle_started_at = COALESCE(cycle_started_at, :instant),
+                    opportunistic_mode = 'ASSUMED',
+                    opportunistic_origin_reason = 'EXISTING_TICKET_CLAIM',
+                    updated_at = :instant
+                WHERE id = :id
+                  AND status IN ('REGISTERED', 'REOPENED')
+                  AND deleted_at IS NULL
+            ";
+
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+            $stmt->bindValue(':instant', $stamp, PDO::PARAM_STR);
+            $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+            $stmt->execute();
+
+            $this->insertHistory(
+                $incidentId,
+                $technicianId,
+                $incident->getStatus()->value,
+                IncidentStatus::IN_PROGRESS->value,
+                'Asunción Oportunista In Situ (Oportunista In Situ · Asumida). Intervención iniciada en el acto.'
+            );
+
+            $claimed = $this->findById($incidentId);
+            if ($claimed === null) {
+                throw new DomainException('Error al recuperar la incidencia asumida.');
+            }
+
+            if ($isOwnTransaction) {
+                $this->pdo->commit();
+            }
+
+            return $claimed;
+        } catch (Throwable $e) {
+            if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Traspaso in situ de un expediente a nombre de otro técnico (`RF-05.3`).
+     *
+     * El cierre del intervalo de pausa usa `Incident::currentPauseDurationSeconds()` y no
+     * aritmética SQL: la duración de pared es una regla del agregado y el motor no debe
+     * tener una segunda forma de calcularla. El vencimiento comercial de SLA no se mueve
+     * aquí —depende del calendario de la sede—; el caso de uso lo compone con
+     * `IncidentPauseService` dentro de la misma transacción.
+     *
+     * @return array{incident: Incident, previous_technician_id: int, previous_technician_name: string|null}
+     */
+    public function takeOverOpportunisticIncident(
+        int $incidentId,
+        int $technicianId,
+        ?string $takeoverInternalNote = null,
+        ?DateTimeImmutable $now = null
+    ): array {
+        $isOwnTransaction = !$this->pdo->inTransaction();
+        $instant = $now ?? new DateTimeImmutable('now');
+        $stamp = $instant->format('Y-m-d H:i:sP');
+
+        if ($isOwnTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $incident = $this->findByIdForUpdate($incidentId);
+            if ($incident === null) {
+                throw new DomainException("No se encontró ninguna incidencia con ID {$incidentId}.");
+            }
+
+            $previousTechnicianId = $incident->getAssignedTechnicianId();
+            if ($previousTechnicianId === null || $previousTechnicianId === $technicianId) {
+                throw new InvalidTransitionException(
+                    sprintf(
+                        'El expediente %s no está a nombre de otro técnico: no hay traspaso que confirmar.',
+                        $incident->getTicketCode()
+                    ),
+                    $incident->getStatus(),
+                    IncidentStatus::IN_PROGRESS
+                );
+            }
+
+            $takeoverStates = [
+                IncidentStatus::ASSIGNED,
+                IncidentStatus::PENDING_PARTS,
+                IncidentStatus::PENDING_INFO,
+            ];
+            if (!in_array($incident->getStatus(), $takeoverStates, true)) {
+                throw new InvalidTransitionException(
+                    sprintf(
+                        'No se puede traspasar el expediente %s desde el estado %s.',
+                        $incident->getTicketCode(),
+                        $incident->getStatus()->value
+                    ),
+                    $incident->getStatus(),
+                    IncidentStatus::IN_PROGRESS
+                );
+            }
+
+            // Segundos de pared del intervalo de pausa que el traspaso cierra. El dominio
+            // es la única autoridad de la duración; sin pausa viva devuelve 0.
+            $closedPauseSeconds = $incident->currentPauseDurationSeconds($instant);
+
+            $sql = "
+                UPDATE incidents
+                SET status = 'IN_PROGRESS',
+                    assigned_technician_id = :technician_id,
+                    assigned_at = :instant,
+                    started_at = COALESCE(started_at, :instant),
+                    cycle_started_at = COALESCE(cycle_started_at, :instant),
+                    total_pending_info_seconds = total_pending_info_seconds + :closed_pause_seconds,
+                    paused_at = NULL,
+                    opportunistic_mode = 'ASSUMED',
+                    opportunistic_origin_reason = 'EXISTING_TICKET_CLAIM',
+                    updated_at = :instant
+                WHERE id = :id
+                  AND assigned_technician_id IS NOT NULL
+                  AND assigned_technician_id <> :technician_id
+                  AND status IN ('ASSIGNED', 'PENDING_PARTS', 'PENDING_INFO')
+                  AND deleted_at IS NULL
+            ";
+
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+            $stmt->bindValue(':instant', $stamp, PDO::PARAM_STR);
+            $stmt->bindValue(':closed_pause_seconds', $closedPauseSeconds, PDO::PARAM_INT);
+            $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+            $stmt->execute();
+
+            if ($stmt->rowCount() === 0) {
+                throw new DomainException(sprintf(
+                    'El expediente %s cambió de titular o de estado durante el traspaso.',
+                    $incident->getTicketCode()
+                ));
+            }
+
+            $this->insertHistory(
+                $incidentId,
+                $technicianId,
+                $incident->getStatus()->value,
+                IncidentStatus::IN_PROGRESS->value,
+                sprintf(
+                    'Asunción Oportunista In Situ por presencia física en sede (traspaso desde el técnico #%d).',
+                    $previousTechnicianId
+                )
+            );
+
+            $taken = $this->findById($incidentId);
+            if ($taken === null) {
+                throw new DomainException('Error al recuperar la incidencia traspasada.');
+            }
+
+            // La nota de traspaso es interna por mandato del Art. V.4: la Sede y el
+            // Ciudadano QR no pueden leerla jamás (Resolución QA 5). Se firma con el
+            // nombre del técnico que la escribe —el expediente ya está rehidratado tras
+            // el cambio de titular— y nunca con el del compañero reemplazado.
+            $note = $takeoverInternalNote !== null ? trim($takeoverInternalNote) : '';
+            if ($note !== '') {
+                $this->addComment(new IncidentComment(
+                    id: null,
+                    incidentId: $incidentId,
+                    authorType: 'TECHNICIAN',
+                    userId: $technicianId,
+                    authorName: $taken->getTechnicianName() ?? 'Técnico de campo',
+                    commentText: '[Traspaso Oportunista In Situ] ' . $note,
+                    photoPath: null,
+                    isInternal: true
+                ));
+            }
+
+            if ($isOwnTransaction) {
+                $this->pdo->commit();
+            }
+
+            return [
+                'incident' => $taken,
+                'previous_technician_id' => $previousTechnicianId,
+                'previous_technician_name' => $incident->getTechnicianName(),
+            ];
+        } catch (Throwable $e) {
+            if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Reapertura in situ en garantía, 1.ª o 2.ª reincidencia (`RF-05.4.1`).
+     */
+    public function reopenOpportunisticIncident(
+        int $incidentId,
+        int $technicianId,
+        string $reopenReason,
+        ?DateTimeImmutable $now = null
+    ): Incident {
+        $isOwnTransaction = !$this->pdo->inTransaction();
+        $instant = $now ?? new DateTimeImmutable('now');
+        $stamp = $instant->format('Y-m-d H:i:sP');
+        $reason = trim($reopenReason);
+
+        if ($isOwnTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $incident = $this->findByIdForUpdate($incidentId);
+            if ($incident === null) {
+                throw new DomainException("No se encontró ninguna incidencia con ID {$incidentId}.");
+            }
+
+            $this->assertReopenable($incident, $instant);
+
+            $reopenCount = $this->countReopenEvents($incidentId);
+            if ($reopenCount >= 2) {
+                throw new InvalidTransitionException(
+                    sprintf(
+                        'El expediente %s acumula ya %d reaperturas: la tercera reincidencia se sustituye como Avería Crónica.',
+                        $incident->getTicketCode(),
+                        $reopenCount
+                    ),
+                    $incident->getStatus(),
+                    IncidentStatus::IN_PROGRESS
+                );
+            }
+
+            $sql = "
+                UPDATE incidents
+                SET status = 'IN_PROGRESS',
+                    assigned_technician_id = :technician_id,
+                    assigned_at = :instant,
+                    started_at = :instant,
+                    reopened_at = :instant,
+                    reopen_reason = :reopen_reason,
+                    resolved_at = NULL,
+                    cycle_started_at = :instant,
+                    cold_alert_sent_at = NULL,
+                    sla_2h_alert_sent_at = NULL,
+                    sla_3h_alert_sent_at = NULL,
+                    opportunistic_mode = 'ASSUMED',
+                    opportunistic_origin_reason = 'WARRANTY_REOPEN_IN_SITU',
+                    updated_at = :instant
+                WHERE id = :id
+                  AND status = 'RESOLVED'
+                  AND deleted_at IS NULL
+            ";
+
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+            $stmt->bindValue(':instant', $stamp, PDO::PARAM_STR);
+            $stmt->bindValue(':reopen_reason', $reason, PDO::PARAM_STR);
+            $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+            $stmt->execute();
+
+            $eventNumber = $reopenCount + 1;
+            $this->insertHistory(
+                $incidentId,
+                $technicianId,
+                IncidentStatus::RESOLVED->value,
+                IncidentStatus::REOPENED->value,
+                sprintf(
+                    'Reapertura Oportunista In Situ (%d.ª reincidencia): %s',
+                    $eventNumber,
+                    $reason
+                )
+            );
+            $this->insertHistory(
+                $incidentId,
+                $technicianId,
+                IncidentStatus::REOPENED->value,
+                IncidentStatus::IN_PROGRESS->value,
+                'Asunción inmediata tras Reapertura Oportunista In Situ.'
+            );
+
+            $reopened = $this->findById($incidentId);
+            if ($reopened === null) {
+                throw new DomainException('Error al recuperar la incidencia reabierta in situ.');
+            }
+
+            if ($isOwnTransaction) {
+                $this->pdo->commit();
+            }
+
+            return $reopened;
+        } catch (Throwable $e) {
+            if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Sustitución atómica por Avería Crónica en la 3.ª reincidencia (`RF-05.4.2`).
+     *
+     * El orden no es negociable: primero se cierra el predecesor para liberar el índice
+     * único parcial `uq_machine_active_ticket`, y solo después se inserta el sucesor. Al
+     * compartir transacción, un fallo en la inserción devuelve el predecesor a `RESOLVED`
+     * y la máquina conserva su expediente vivo: nunca queda un hueco entre ambos.
+     */
+    public function replaceChronicOpportunisticIncident(
+        int $predecessorIncidentId,
+        Incident $successor,
+        int $technicianId,
+        ?DateTimeImmutable $now = null
+    ): Incident {
+        $isOwnTransaction = !$this->pdo->inTransaction();
+        $instant = $now ?? new DateTimeImmutable('now');
+        $stamp = $instant->format('Y-m-d H:i:sP');
+
+        if (!$successor->isOpportunistic() || $successor->getStatus() !== IncidentStatus::IN_PROGRESS) {
+            throw new InvalidArgumentException(
+                'El sucesor de una Avería Crónica debe ser un expediente oportunista ya en curso.'
+            );
+        }
+
+        if ($successor->getChronicPredecessorIncidentId() !== $predecessorIncidentId) {
+            throw new InvalidArgumentException(
+                'El sucesor debe declarar como predecesor el expediente crónico que reemplaza.'
+            );
+        }
+
+        if ($isOwnTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $predecessor = $this->findByIdForUpdate($predecessorIncidentId);
+            if ($predecessor === null) {
+                throw new DomainException(
+                    "No se encontró ninguna incidencia con ID {$predecessorIncidentId}."
+                );
+            }
+
+            $this->assertReopenable($predecessor, $instant);
+
+            $reopenCount = $this->countReopenEvents($predecessorIncidentId);
+            if ($reopenCount < 2) {
+                throw new InvalidTransitionException(
+                    sprintf(
+                        'El expediente %s solo acumula %d reaperturas: todavía se reabre in situ en lugar de sustituirse.',
+                        $predecessor->getTicketCode(),
+                        $reopenCount
+                    ),
+                    $predecessor->getStatus(),
+                    IncidentStatus::CLOSED
+                );
+            }
+
+            if ($successor->getMachineId() !== $predecessor->getMachineId()
+                || $successor->getLocationId() !== $predecessor->getLocationId()
+            ) {
+                throw new InvalidArgumentException(
+                    'El sucesor crónico debe nacer sobre la misma máquina y la misma sede que el predecesor.'
+                );
+            }
+
+            // La marca se compone en PHP y no con `CONCAT` ni `||`: la misma frase sirve
+            // a los dos motores sin abrir una familia de dialecto por una concatenación.
+            $previousReason = $predecessor->getReopenReason() !== null ? trim($predecessor->getReopenReason()) : '';
+            $markedReason = $previousReason === ''
+                ? '[AVERÍA CRÓNICA]'
+                : $previousReason . ' [AVERÍA CRÓNICA]';
+
+            $sql = "
+                UPDATE incidents
+                SET status = 'CLOSED',
+                    closed_at = :instant,
+                    reopen_reason = :reopen_reason,
+                    updated_at = :instant
+                WHERE id = :id
+                  AND status = 'RESOLVED'
+                  AND deleted_at IS NULL
+            ";
+
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->bindValue(':instant', $stamp, PDO::PARAM_STR);
+            $stmt->bindValue(':reopen_reason', $markedReason, PDO::PARAM_STR);
+            $stmt->bindValue(':id', $predecessorIncidentId, PDO::PARAM_INT);
+            $stmt->execute();
+
+            $this->insertHistory(
+                $predecessorIncidentId,
+                $technicianId,
+                IncidentStatus::RESOLVED->value,
+                IncidentStatus::CLOSED->value,
+                sprintf(
+                    'Avería Crónica (%d.ª reincidencia in situ): cierre del expediente con marca [AVERÍA CRÓNICA] y apertura del sucesor %s.',
+                    $reopenCount + 1,
+                    $successor->getTicketCode()
+                )
+            );
+
+            // `create()` se une a esta transacción y vuelve a insertar el historial de
+            // apertura del sucesor, de modo que el reemplazo entero queda en un solo acto.
+            $created = $this->create(
+                $successor,
+                $technicianId,
+                sprintf(
+                    'Alta Oportunista In Situ (Oportunista In Situ · Nueva · Reapertura en garantía in situ). Sucesor de la Avería Crónica %s.',
+                    $predecessor->getTicketCode()
+                )
+            );
+
+            if ($isOwnTransaction) {
+                $this->pdo->commit();
+            }
+
+            return $created;
+        } catch (Throwable $e) {
+            if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Puerta común de las dos salidas de una incidencia resuelta: garantía viva y estado.
+     *
+     * La ventana se mide contra el instante de la operación y no contra `time()`, para que
+     * una prueba pueda declarar el momento exacto sin depender del reloj de la máquina.
+     *
+     * @throws InvalidTransitionException Si el expediente no está resuelto.
+     * @throws WarrantyExpiredException Si ha superado la garantía de 48 horas.
+     */
+    private function assertReopenable(Incident $incident, DateTimeImmutable $instant): void
+    {
+        if ($incident->getStatus() !== IncidentStatus::RESOLVED) {
+            throw new InvalidTransitionException(
+                sprintf(
+                    'Solo se reabre in situ un expediente resuelto; el %s está en estado %s.',
+                    $incident->getTicketCode(),
+                    $incident->getStatus()->value
+                ),
+                $incident->getStatus(),
+                IncidentStatus::IN_PROGRESS
+            );
+        }
+
+        $resolvedAt = $incident->getResolvedAt();
+        if ($resolvedAt === null) {
+            throw new InvalidTransitionException(
+                sprintf('El expediente %s no conserva la marca de resolución.', $incident->getTicketCode()),
+                $incident->getStatus(),
+                IncidentStatus::IN_PROGRESS
+            );
+        }
+
+        $elapsedSeconds = $instant->getTimestamp() - (new DateTimeImmutable($resolvedAt))->getTimestamp();
+        if ($elapsedSeconds < 0 || $elapsedSeconds > 48 * 3600) {
+            throw new WarrantyExpiredException(
+                'REOPEN_WINDOW_EXPIRED',
+                'Han transcurrido más de 48 horas desde la resolución de la incidencia. La ventana de garantía ha expirado; debe registrar un nuevo ticket de avería.'
+            );
+        }
     }
 
     /**

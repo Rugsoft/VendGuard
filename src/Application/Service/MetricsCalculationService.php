@@ -90,6 +90,10 @@ class MetricsCalculationService
             $this->metricsRepo->getAveragePendingInfoSeconds($filter, MachineType::PERISHABLE_FOOD)
         );
 
+        // 8. Desplazamientos evitados por intervención oportunista in situ (Módulo 16 · RF-06.4).
+        //    El repositorio entrega el bloque ya agregado, con las cuatro claves de origen.
+        $opportunisticInterventions = $this->metricsRepo->getOpportunisticInterventions($filter);
+
         return new KpiSummary(
             filter: $filter,
             mttrGlobal: $mttrGlobal,
@@ -100,7 +104,8 @@ class MetricsCalculationService
             resolutionRatePercentage: $resolutionRate,
             activeBacklog: $activeBacklog,
             criticalSlaBreaches: $criticalBreaches,
-            mttrPerishable: $mttrPerishable
+            mttrPerishable: $mttrPerishable,
+            opportunisticInterventions: $opportunisticInterventions
         );
     }
 

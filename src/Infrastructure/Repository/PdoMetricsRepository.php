@@ -11,6 +11,8 @@ use VendGuard\Core\Domain\Model\KpiSummary;
 use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\MetricFilter;
 use VendGuard\Core\Domain\Repository\MetricsRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\OpportunisticMode;
+use VendGuard\Core\Domain\ValueObject\OpportunisticOriginReason;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
@@ -528,6 +530,82 @@ class PdoMetricsRepository implements MetricsRepositoryInterface
         } catch (PDOException $e) {
             throw new RuntimeException("Error en desglose por categoría: " . $e->getMessage(), (int)$e->getCode(), $e);
         }
+    }
+
+    /**
+     * Intervenciones oportunistas in situ del periodo, por modalidad y origen (Módulo 16 · RF-06.4).
+     *
+     * Una sola agregación resuelve el bloque entero: contar las modalidades y los motivos por
+     * separado habría supuesto dos viajes y dos ventanas de tiempo distintas sobre la misma
+     * tabla. Los ceros de las combinaciones ausentes los pone este método a partir del catálogo
+     * de los enums, no de lo que devuelva el motor: la interfaz pinta siempre los cuatro motivos
+     * y las dos modalidades, y una cifra ausente nunca debe convertirse en una fila fantasma.
+     */
+    public function getOpportunisticInterventions(MetricFilter $filter): array
+    {
+        $sql = "SELECT i.opportunistic_mode AS mode,
+                       i.opportunistic_origin_reason AS origin_reason,
+                       COUNT(*) AS total
+                FROM incidents i
+                WHERE i.opportunistic_mode IS NOT NULL
+                  AND i.deleted_at IS NULL
+                  AND i.created_at >= :from_date
+                  AND i.created_at <= :to_date";
+
+        $params = [
+            ':from_date' => $filter->getFrom()->format('Y-m-d H:i:s'),
+            ':to_date'   => $filter->getTo()->format('Y-m-d H:i:s'),
+        ];
+
+        if ($filter->getLocationId() !== null) {
+            $sql .= " AND i.location_id = :location_id";
+            $params[':location_id'] = $filter->getLocationId();
+        }
+
+        if ($filter->getTechnicianId() !== null) {
+            $sql .= " AND i.assigned_technician_id = :technician_id";
+            $params[':technician_id'] = $filter->getTechnicianId();
+        }
+
+        $sql .= " GROUP BY i.opportunistic_mode, i.opportunistic_origin_reason";
+
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            throw new RuntimeException("Error al contar intervenciones oportunistas: " . $e->getMessage(), (int)$e->getCode(), $e);
+        }
+
+        $newCount = 0;
+        $assumedCount = 0;
+        $byOrigin = [];
+        foreach (OpportunisticOriginReason::cases() as $reason) {
+            $byOrigin[$reason->value] = 0;
+        }
+
+        foreach ($rows as $row) {
+            $total = (int)$row['total'];
+            $mode = (string)$row['mode'];
+            $origin = (string)$row['origin_reason'];
+
+            if ($mode === OpportunisticMode::NEW->value) {
+                $newCount += $total;
+            } elseif ($mode === OpportunisticMode::ASSUMED->value) {
+                $assumedCount += $total;
+            }
+
+            if (array_key_exists($origin, $byOrigin)) {
+                $byOrigin[$origin] += $total;
+            }
+        }
+
+        return [
+            'total_avoided_dispatches' => $newCount + $assumedCount,
+            'new_count' => $newCount,
+            'assumed_count' => $assumedCount,
+            'by_origin_reason' => $byOrigin,
+        ];
     }
 
     /**

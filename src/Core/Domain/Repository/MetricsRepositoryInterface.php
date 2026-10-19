@@ -174,4 +174,32 @@ interface MetricsRepositoryInterface
      * }
      */
     public function getTechnicianMetrics(int $technicianId, MetricFilter $filter): array;
+
+    /**
+     * Intervenciones oportunistas in situ del periodo, contadas por modalidad y origen
+     * (Módulo 16 · `RF-06.4`).
+     *
+     * Cada fila es un desplazamiento evitado: el técnico ya estaba en la sede y resolvió
+     * la avería sin que Coordinación tuviera que programar una visita. El conteo se hace
+     * por `created_at`, igual que el resto de altas del resumen, y respeta los filtros de
+     * sede y técnico del periodo.
+     *
+     * Los expedientes cerrados como `[AVERÍA CRÓNICA]` siguen contando: la intervención
+     * oportunista existió y evitó el desplazamiento, aunque su sucesor haya heredado la
+     * máquina. Los borrados lógicamente quedan fuera, que es la misma condición del índice
+     * parcial `idx_incidents_opportunistic_mode`.
+     *
+     * Devuelve siempre las cuatro claves de `by_origin_reason`, con cero cuando el motivo
+     * no se usó: la interfaz dibuja la leyenda completa y no debe distinguir «sin datos» de
+     * «clave ausente».
+     *
+     * @param MetricFilter $filter Periodo y filtros de sede/técnico.
+     * @return array{
+     *   total_avoided_dispatches: int,
+     *   new_count: int,
+     *   assumed_count: int,
+     *   by_origin_reason: array<string, int>
+     * }
+     */
+    public function getOpportunisticInterventions(MetricFilter $filter): array;
 }

@@ -184,6 +184,21 @@ final class TestDataCleaner
      */
     public static function purgeIncident(PDO $pdo, int $incidentId): array
     {
+        // La cadena de averías crónicas es una referencia AUTORREFERENTE de
+        // `incidents`: el sucesor apunta a su predecesor mediante
+        // `chronic_predecessor_incident_id` (Módulo 16). Borrar primero el
+        // predecesor viola `fk_incidents_chronic_predecessor`, así que cada
+        // sucesor se purga antes, recursivamente, y la cadena entera desaparece
+        // en el orden que impone la clave. La guarda `id <> :id` corta una
+        // autorreferencia accidental sin entrar en recursión infinita.
+        $successorsStmt = $pdo->prepare(
+            'SELECT id FROM incidents WHERE chronic_predecessor_incident_id = :id AND id <> :id'
+        );
+        $successorsStmt->execute([':id' => $incidentId]);
+        foreach ($successorsStmt->fetchAll(PDO::FETCH_COLUMN) as $successorId) {
+            self::purgeIncident($pdo, (int)$successorId);
+        }
+
         $graph = self::loadFkGraph($pdo);
 
         // Tablas hijas que referencian `incidents` a través de la columna

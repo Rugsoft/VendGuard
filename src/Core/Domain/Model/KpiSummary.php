@@ -21,6 +21,26 @@ class KpiSummary implements JsonSerializable
     public const SLA_PERISHABLE_HOURS = 4.0;
     public const SLA_GENERAL_HOURS    = 24.0;
 
+    /**
+     * Bloque vacío del indicador oportunista (Módulo 16 · `RF-06.4`).
+     *
+     * Las cuatro claves de origen existen siempre, con cero, para que la interfaz
+     * dibuje la leyenda completa sin distinguir «no hubo» de «no vino la clave».
+     * Se declara aquí y no en el servicio para que el resumen pueda construirse sin
+     * repositorio (pruebas, reportes históricos) sin inventar la forma del bloque.
+     */
+    private const EMPTY_OPPORTUNISTIC_INTERVENTIONS = [
+        'total_avoided_dispatches' => 0,
+        'new_count' => 0,
+        'assumed_count' => 0,
+        'by_origin_reason' => [
+            'SITE_VERBAL_NOTICE' => 0,
+            'TECHNICIAN_DETECTION' => 0,
+            'EXISTING_TICKET_CLAIM' => 0,
+            'WARRANTY_REOPEN_IN_SITU' => 0,
+        ],
+    ];
+
     private MetricFilter $filter;
     private MttrMetric $mttrGlobal;
     private ?MttrMetric $mttrPreviousPeriod;
@@ -32,6 +52,9 @@ class KpiSummary implements JsonSerializable
     private int $criticalSlaBreaches;
     private ?MttrMetric $mttrPerishable;
 
+    /** @var array<string, mixed> Bloque `opportunistic_interventions` ya agregado por el repositorio. */
+    private array $opportunisticInterventions;
+
     public function __construct(
         MetricFilter $filter,
         MttrMetric $mttrGlobal,
@@ -42,7 +65,8 @@ class KpiSummary implements JsonSerializable
         float $resolutionRatePercentage,
         int $activeBacklog,
         int $criticalSlaBreaches,
-        ?MttrMetric $mttrPerishable = null
+        ?MttrMetric $mttrPerishable = null,
+        array $opportunisticInterventions = self::EMPTY_OPPORTUNISTIC_INTERVENTIONS
     ) {
         $this->filter = $filter;
         $this->mttrGlobal = $mttrGlobal;
@@ -54,6 +78,7 @@ class KpiSummary implements JsonSerializable
         $this->activeBacklog = $activeBacklog;
         $this->criticalSlaBreaches = $criticalSlaBreaches;
         $this->mttrPerishable = $mttrPerishable ?? MttrMetric::noData();
+        $this->opportunisticInterventions = $opportunisticInterventions;
     }
 
     public function getFilter(): MetricFilter
@@ -107,6 +132,16 @@ class KpiSummary implements JsonSerializable
     }
 
     /**
+     * Bloque de desplazamientos evitados por intervención oportunista in situ (Módulo 16).
+     *
+     * @return array<string, mixed>
+     */
+    public function getOpportunisticInterventions(): array
+    {
+        return $this->opportunisticInterventions;
+    }
+
+    /**
      * Evalúa el cumplimiento de los acuerdos de nivel de servicio (SLA).
      * 
      * @return array<string, array<string, mixed>>
@@ -154,6 +189,7 @@ class KpiSummary implements JsonSerializable
                 'critical_sla_breaches' => $this->criticalSlaBreaches,
             ],
             'sla_alerts' => $this->getSlaAlerts(),
+            'opportunistic_interventions' => $this->opportunisticInterventions,
         ];
     }
 

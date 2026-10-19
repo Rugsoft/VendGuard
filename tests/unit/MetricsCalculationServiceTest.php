@@ -75,6 +75,19 @@ class TestMetricsRepository implements MetricsRepositoryInterface
     public int $criticalBreaches = 0;
     public ?int $techFirstResponseMinutes = 45;
 
+    /** Bloque oportunista del Módulo 16, con la forma exacta del contrato de métricas. */
+    public array $opportunisticInterventions = [
+        'total_avoided_dispatches' => 14,
+        'new_count' => 9,
+        'assumed_count' => 5,
+        'by_origin_reason' => [
+            'SITE_VERBAL_NOTICE' => 6,
+            'TECHNICIAN_DETECTION' => 3,
+            'EXISTING_TICKET_CLAIM' => 4,
+            'WARRANTY_REOPEN_IN_SITU' => 1,
+        ],
+    ];
+
     public function getGrossMttrSeconds(MetricFilter $filter, ?MachineType $machineType = null): ?int
     {
         if ($machineType === MachineType::PERISHABLE_FOOD) {
@@ -206,6 +219,11 @@ class TestMetricsRepository implements MetricsRepositoryInterface
             'avg_first_response_formatted' => $respFormatted,
         ];
     }
+
+    public function getOpportunisticInterventions(MetricFilter $filter): array
+    {
+        return $this->opportunisticInterventions;
+    }
 }
 
 try {
@@ -226,6 +244,14 @@ try {
     assertCondition($summary->getTotalTicketsResolved() === 42, "1.5 Conteo de tickets resueltos (42)");
     assertCondition($summary->getResolutionRatePercentage() === 87.5, "1.6 Tasa de resolución calculada exactamente (87.5%)");
     assertCondition($summary->getActiveBacklog() === 6, "1.7 Backlog activo reportado (6)");
+    assertCondition(
+        $summary->getOpportunisticInterventions()['total_avoided_dispatches'] === 14,
+        "1.8 El resumen publica los desplazamientos evitados por intervención oportunista (14)"
+    );
+    assertCondition(
+        ($summary->toArray()['opportunistic_interventions']['by_origin_reason']['SITE_VERBAL_NOTICE'] ?? null) === 6,
+        "1.9 El desglose por motivo viaja en el JSON del resumen (6 avisos verbales)"
+    );
 
     // -------------------------------------------------------------
     // 2. Cálculo Determinista de Tendencia (EARS 3.1.1)
