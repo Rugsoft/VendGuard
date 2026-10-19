@@ -748,9 +748,18 @@ CREATE INDEX IF NOT EXISTS idx_incidents_technician ON incidents (assigned_techn
 
 -- Índice parcial de las intervenciones oportunistas vigentes (RF-06.4): el
 -- indicador de desplazamientos evitados sólo cuenta lo no borrado lógicamente.
-CREATE INDEX IF NOT EXISTS idx_incidents_opportunistic_mode
-    ON incidents (opportunistic_mode, created_at)
-    WHERE opportunistic_mode IS NOT NULL AND deleted_at IS NULL;
+-- En bases preexistentes anteriores al Módulo 16, `CREATE TABLE IF NOT EXISTS
+-- incidents` no añade `opportunistic_mode` (eso lo hace la migración
+-- `005_opportunistic_incident.sql` en el paso 4/6 de `bin/init_cloud_db.php`). Se
+-- tolera `undefined_column` para no abortar el paso 3/6 antes de llegar al ejecutor:
+-- sin esta guarda el arranque moría con SQLSTATE 42703 y reintentaba en vano.
+DO $do$
+BEGIN
+    CREATE INDEX IF NOT EXISTS idx_incidents_opportunistic_mode
+        ON incidents (opportunistic_mode, created_at)
+        WHERE opportunistic_mode IS NOT NULL AND deleted_at IS NULL;
+EXCEPTION WHEN duplicate_object OR undefined_column THEN NULL;
+END $do$;
 
 CREATE OR REPLACE TRIGGER trg_no_delete_incidents
     BEFORE DELETE ON incidents

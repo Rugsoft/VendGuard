@@ -53,6 +53,13 @@ declare(strict_types=1);
  *    **raises** naming the missing tables instead of declaring convergence over
  *    a schema that does not exist; and the comparators signal a column, a type or
  *    an enum label that goes missing.
+ * 5. The boot is idempotent over an **older** schema, which is the shape every
+ *    redeploy actually finds: the base DDL runs again over an `incidents` table
+ *    that already exists, so `CREATE TABLE IF NOT EXISTS` adds none of the
+ *    columns an incremental migration introduced. A base statement that reads
+ *    such a column -- the opportunistic index did -- aborted the boot with
+ *    SQLSTATE 42703 before the runner was reached. The probe reproduces that
+ *    table, reapplies the base DDL and certifies that migrations complete it.
  *
  * ## Why a scratch schema and not a scratch database
  * The deployment target is a database whose owner is the application role, and
@@ -84,6 +91,7 @@ $baseDir = dirname(__DIR__, 2);
 $probeSchema = 'vendguard_deploy_probe';
 $baseOnlySchema = 'vendguard_deploy_probe_base';
 $emptySchema = 'vendguard_deploy_probe_empty';
+$legacySchema = 'vendguard_deploy_probe_legacy';
 
 // El esquema probado: el que la batería usa de verdad. Es el rasero, no el sujeto.
 $yardstickSchema = 'public';
@@ -643,6 +651,7 @@ $yardstickPdo = null;
 $probePdo = null;
 $baseOnlyPdo = null;
 $emptyPdo = null;
+$legacyPdo = null;
 
 try {
     // El rasero: el esquema contra el que corre toda la batería. No se toca.
@@ -664,7 +673,7 @@ try {
         'tablas: ' . count($yardstickTables) . ' (rasero; incluye el libro del ejecutor) · columnas: ' . $yardstickColumns
     );
 
-    foreach ([$probeSchema, $baseOnlySchema, $emptySchema] as $scratchSchema) {
+    foreach ([$probeSchema, $baseOnlySchema, $emptySchema, $legacySchema] as $scratchSchema) {
         $definitionsPdo->exec("DROP SCHEMA IF EXISTS {$scratchSchema} CASCADE");
         $definitionsPdo->exec("CREATE SCHEMA {$scratchSchema}");
     }
@@ -894,6 +903,80 @@ try {
         'El comparador de estados senala los que faltan en un enumerado incompleto',
         'detectados: ' . implode(', ', $syntheticMissing)
     );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Caso 5: el despliegue sobre una base anterior al Módulo 16
+    // ─────────────────────────────────────────────────────────────────────────
+    echo "\n--- Caso 5: el DDL base se reaplica sobre un esquema preexistente ---\n";
+
+    // El DDL base se ejecuta en cada arranque, no solo en el primero. Una base
+    // creada antes del Módulo 16 ya tiene `incidents`, así que `CREATE TABLE IF NOT
+    // EXISTS` no añade las columnas oportunistas: las añade la migración 005. Si el
+    // DDL base declara un índice sobre esa columna sin guarda, el paso 3/6 aborta con
+    // SQLSTATE 42703 y el ejecutor nunca llega al paso 4/6. Este caso reproduce esa
+    // base y certifica que la ruta converge igual.
+    $legacyPdo = ConnectionFactory::getConnection([], true);
+    $legacyPdo->exec("SET search_path TO {$legacySchema}, public");
+    $applySqlFile($legacyPdo, $deployDdlFile);
+
+    // Se retiran las cuatro columnas de la migración 005 (y, en cascada, su
+    // restricción, su clave foránea y su índice) para dejar el parque anterior.
+    $legacyPdo->exec(
+        'ALTER TABLE incidents '
+        . 'DROP COLUMN IF EXISTS opportunistic_mode, '
+        . 'DROP COLUMN IF EXISTS opportunistic_origin_reason, '
+        . 'DROP COLUMN IF EXISTS opportunistic_informant_name, '
+        . 'DROP COLUMN IF EXISTS chronic_predecessor_incident_id CASCADE'
+    );
+
+    $columnExists = static function (PDO $pdo, string $schema, string $table, string $column): bool {
+        $stmt = $pdo->prepare(
+            'SELECT COUNT(*) FROM information_schema.columns '
+            . 'WHERE table_schema = :schema AND table_name = :table AND column_name = :column'
+        );
+        $stmt->execute([':schema' => $schema, ':table' => $table, ':column' => $column]);
+
+        return (int)$stmt->fetchColumn() > 0;
+    };
+
+    $assert(
+        !$columnExists($legacyPdo, $legacySchema, 'incidents', 'opportunistic_mode'),
+        'La sonda reproduce una base anterior al Módulo 16, sin la columna oportunista'
+    );
+
+    $legacyReapplyFailure = '';
+    try {
+        $applySqlFile($legacyPdo, $deployDdlFile);
+    } catch (Throwable $exception) {
+        $legacyReapplyFailure = $exception->getMessage();
+    }
+    $assert(
+        $legacyReapplyFailure === '',
+        'El DDL base se reaplica sobre una base preexistente sin abortar por una columna que aún no existe (EARS-02.5)',
+        $legacyReapplyFailure
+    );
+
+    $legacyRunner = new PostgresMigrationRunner($legacyPdo);
+    $legacyApplied = $legacyRunner->runAll();
+    $legacyConvergenceFailure = '';
+    try {
+        $legacyRunner->assertConverged();
+    } catch (Throwable $exception) {
+        $legacyConvergenceFailure = $exception->getMessage();
+    }
+
+    $legacyIndexDefinition = (string)$legacyPdo->query(
+        "SELECT indexdef FROM pg_indexes WHERE schemaname = '{$legacySchema}' AND indexname = 'idx_incidents_opportunistic_mode'"
+    )->fetchColumn();
+    $assert(
+        $legacyConvergenceFailure === ''
+        && in_array('005_opportunistic_incident.sql', array_map('basename', $legacyApplied), true)
+        && $columnExists($legacyPdo, $legacySchema, 'incidents', 'opportunistic_mode')
+        && str_contains($legacyIndexDefinition, 'opportunistic_mode')
+        && str_contains($legacyIndexDefinition, 'deleted_at IS NULL'),
+        'La capa incremental completa la base anterior: columna e índice parcial presentes y convergencia declarada',
+        'convergencia: ' . $legacyConvergenceFailure . ' · índice: ' . $legacyIndexDefinition
+    );
 } finally {
     // Las conexiones a las sondas se sueltan antes de borrarlas. El borrado va por una
     // conexion propia para no depender de la que quedó apuntando al esquema de sonda.
@@ -901,9 +984,10 @@ try {
     $probePdo = null;
     $baseOnlyPdo = null;
     $emptyPdo = null;
+    $legacyPdo = null;
 
     if ($definitionsPdo instanceof PDO) {
-        foreach ([$probeSchema, $baseOnlySchema, $emptySchema] as $scratchSchema) {
+        foreach ([$probeSchema, $baseOnlySchema, $emptySchema, $legacySchema] as $scratchSchema) {
             $definitionsPdo->exec("DROP SCHEMA IF EXISTS {$scratchSchema} CASCADE");
         }
     }
