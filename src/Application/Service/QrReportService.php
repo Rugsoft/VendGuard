@@ -17,7 +17,6 @@ use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
-use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
@@ -45,19 +44,31 @@ class QrReportService
     private IncidentRepositoryInterface $incidentRepo;
     private ?NotificationOutboxEnqueuerService $notificationEnqueuer;
     private ?TransactionManagerInterface $transactionManager;
+    private ?IncidentTicketAllocator $ticketAllocator;
 
     public function __construct(
         ?MachineRepositoryInterface $machineRepo = null,
         ?LocationRepositoryInterface $locationRepo = null,
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
-        ?TransactionManagerInterface $transactionManager = null
+        ?TransactionManagerInterface $transactionManager = null,
+        ?IncidentTicketAllocator $ticketAllocator = null
     ) {
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->notificationEnqueuer = $notificationEnqueuer;
         $this->transactionManager = $transactionManager;
+        $this->ticketAllocator = $ticketAllocator;
+    }
+
+    /**
+     * Política de asignación del código de ticket (EARS 2.4), resuelta bajo demanda
+     * para no abrir dependencias en contextos sin persistencia.
+     */
+    private function tickets(): IncidentTicketAllocator
+    {
+        return $this->ticketAllocator ??= new IncidentTicketAllocator();
     }
 
     private function transactions(): TransactionManagerInterface
@@ -174,33 +185,35 @@ class QrReportService
         // 7. Cálculo automático de urgencia (Constitución Art. II, RF-03 / EARS 3.2-3.7)
         $urgency = UrgencyCalculator::calculate($machine->getMachineType(), $category);
 
-        // 8. Generar código de ticket único (INC-YYYY-XXXX)
-        $ticketCode = TicketCode::generate()->value();
-
-        // 9. Construir la nueva entidad Incident
-        $newIncident = new Incident(
-            id: null,
-            ticketCode: $ticketCode,
-            machineId: $machine->getId(),
-            locationId: $location->getId(),
-            category: $category,
-            description: $description,
-            urgency: $urgency,
-            status: IncidentStatus::REGISTERED,
-            assignedTechnicianId: null,
-            reporterName: $reporterName,
-            reporterPhone: $reporterPhone,
-            retainedMoneyAmount: $retainedMoney,
-            photoPath: $photoPath,
-            reporterEmail: $reporterEmail
-        );
-
-        // 10. Persistencia atómica con captura de condición de carrera
+        // 8-10. Alta atómica con un código de ticket único. El asignador reconstruye el
+        //       expediente y repite la unidad de trabajo completa si el índice único del
+        //       ticket rechaza el código (EARS 2.4): el aviso nace una sola vez, con una
+        //       única notificación, y nunca responde un 500 por una colisión de azar.
         try {
             $enqueuer = $this->notificationEnqueuer;
-            $created = $enqueuer === null
-                ? $this->incidentRepo->create($newIncident, null, 'Aviso registrado mediante código QR')
-                : $this->transactions()->runInTransaction(function () use ($newIncident, $machine, $location, $reporterEmail, $enqueuer): Incident {
+            $created = $this->tickets()->persistWithUniqueTicket(function (string $ticketCode) use ($machine, $location, $category, $description, $urgency, $reporterName, $reporterPhone, $retainedMoney, $photoPath, $reporterEmail, $enqueuer): Incident {
+                $newIncident = new Incident(
+                    id: null,
+                    ticketCode: $ticketCode,
+                    machineId: $machine->getId(),
+                    locationId: $location->getId(),
+                    category: $category,
+                    description: $description,
+                    urgency: $urgency,
+                    status: IncidentStatus::REGISTERED,
+                    assignedTechnicianId: null,
+                    reporterName: $reporterName,
+                    reporterPhone: $reporterPhone,
+                    retainedMoneyAmount: $retainedMoney,
+                    photoPath: $photoPath,
+                    reporterEmail: $reporterEmail
+                );
+
+                if ($enqueuer === null) {
+                    return $this->incidentRepo->create($newIncident, null, 'Aviso registrado mediante código QR');
+                }
+
+                return $this->transactions()->runInTransaction(function () use ($newIncident, $machine, $location, $reporterEmail, $enqueuer): Incident {
                     $created = $this->incidentRepo->create($newIncident, null, 'Aviso registrado mediante código QR');
                     $enqueuer->enqueueIncidentOpened(
                         $created,
@@ -212,6 +225,7 @@ class QrReportService
 
                     return $created;
                 });
+            });
 
             return [
                 // `incident_id` / `incident_code` (contrato §4.1.1) permiten anclar un

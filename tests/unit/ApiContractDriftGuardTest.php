@@ -198,9 +198,14 @@ function emittedErrorCodes(string $source): array
             continue;
         }
 
-        // $errorCode = 'CODE'  ·  errorCode: 'CODE'
+        // $errorCode = 'CODE'  ·  errorCode: 'CODE'  ·  const ERROR_CODE = 'CODE'
+        //
+        // La tercera forma es la de las excepciones de dominio cuyo código de API
+        // es una constante de la propia clase (`TicketCodeCollisionException::
+        // ERROR_CODE`): el `Router` lo publica con `getErrorCode()`, de modo que el
+        // literal vive una sola vez y el guardia debe reconocerlo como emisor.
         $isErrorCodeName = ($token[0] === T_VARIABLE && $token[1] === '$errorCode')
-            || ($token[0] === T_STRING && $token[1] === 'errorCode');
+            || ($token[0] === T_STRING && in_array($token[1], ['errorCode', 'ERROR_CODE'], true));
         if ($isErrorCodeName) {
             $separator = $nextSignificant($i + 1);
             if ($separator !== -1 && ($tokens[$separator] === '=' || $tokens[$separator] === ':')) {
@@ -512,6 +517,19 @@ $assert(
         && !in_array('CONVERSATION_SEALED', $fixturePhantoms, true)
 );
 
+$constEmitterFixture = <<<'PHP'
+<?php
+final class ConstEmitterFixture
+{
+    public const ERROR_CODE = 'CONST_DECLARED_CODE';
+}
+PHP;
+$assert(
+    '3.3 La guarda reconoce el código publicado como constante de la excepción',
+    in_array('CONST_DECLARED_CODE', emittedErrorCodes($constEmitterFixture), true)
+        && in_array('TICKET_CODE_COLLISION', $emittedCodes, true)
+);
+
 $legacyFieldFixture = <<<'MD'
 ### 4.5 `POST /api/coordinator/incidents/{id}/comments`
 ```json
@@ -521,7 +539,7 @@ MD;
 $fixtureItemKeys = documentedKeys(documentedJsonExamples($legacyFieldFixture), 'data.comments.*');
 $fixturePhantomFields = array_values(array_diff($fixtureItemKeys, $realItemKeys));
 $assert(
-    '3.3 La guarda detecta los campos fantasma del apartado 4.5 histórico',
+    '3.4 La guarda detecta los campos fantasma del apartado 4.5 histórico',
     in_array('user_id', $fixturePhantomFields, true)
         && in_array('photo_path', $fixturePhantomFields, true)
         && in_array('ticket_code', $fixturePhantomFields, true)

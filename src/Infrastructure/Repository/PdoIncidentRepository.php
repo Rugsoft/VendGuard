@@ -15,6 +15,7 @@ use Throwable;
 use VendGuard\Core\Domain\Exception\ChronicIncidentException;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
+use VendGuard\Core\Domain\Exception\TicketCodeCollisionException;
 use VendGuard\Core\Domain\Exception\WarrantyExpiredException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
@@ -36,6 +37,7 @@ use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\OpportunisticLocationEligibilityPolicy;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Database\UniqueViolationDetector;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
@@ -150,6 +152,20 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
         if ($isOwnTransaction) {
             $this->pdo->beginTransaction();
+        }
+
+        // Punto de retorno cuando la inserción vive dentro de una transacción ajena.
+        //
+        // El motor único deja la transacción **abortada** tras cualquier error hasta que se
+        // deshace. Sin este `SAVEPOINT`, la traducción del duplicado —que necesita leer el
+        // ticket activo para devolverlo en el 409— consultaba dentro de esa transacción
+        // abortada y moría con `25P02 current transaction is aborted`: el 409 de negocio se
+        // convertía en un 500. Lo descubrió la carrera G8 (portal de sede con notificaciones
+        // activas: el alta se envuelve en su unidad de trabajo y el duplicado se traduce dentro
+        // de ella). PostgreSQL y MariaDB comparten la forma, así que el punto no es de dialecto.
+        $savepoint = $isOwnTransaction ? null : 'vg_incident_insert_' . bin2hex(random_bytes(4));
+        if ($savepoint !== null) {
+            $this->pdo->exec('SAVEPOINT ' . $savepoint);
         }
 
         try {
@@ -485,6 +501,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $note
             );
 
+            if ($savepoint !== null) {
+                $this->pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+            }
+
             if ($isOwnTransaction) {
                 $this->pdo->commit();
             }
@@ -492,35 +512,45 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             // Evitar round-trip redundante de relectura completa tras inserción (T-HYBRID-27)
             return $incident->withId($newId);
         } catch (PDOException $e) {
-            if ($isOwnTransaction && $this->pdo->inTransaction()) {
+            if ($savepoint !== null) {
+                // Deshacer sólo lo intentado por esta alta y devolver la transacción del
+                // llamador a un estado utilizable: es lo que permite leer el ticket activo
+                // para el 409 y, en el alta por ticket, reintentar con un código nuevo.
+                try {
+                    $this->pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
+                } catch (Throwable $savepointFailure) {
+                    error_log('[vendguard] No se pudo volver al punto de retorno del alta: ' . $savepointFailure);
+                }
+            } elseif ($isOwnTransaction && $this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
             }
 
+            // Colisión del código de ticket (`uq_incidents_ticket_code`). No es un
+            // duplicado de máquina: el código se genera al azar y dos altas simultáneas
+            // pueden caer en el mismo. La excepción propia permite que la capa de
+            // aplicación reintente la unidad de trabajo con un código nuevo (EARS 2.4);
+            // sin esta traducción la carrera escapaba como `PDOException` y el aviso
+            // moría en un 500 que ningún reintento podía recuperar.
+            if (UniqueViolationDetector::matches($e, 'uq_incidents_ticket_code', 'incidents_ticket_code')) {
+                throw new TicketCodeCollisionException($incident->getTicketCode());
+            }
+
             // Detección de duplicado por el índice único condicional `uq_machine_active_ticket`.
-            //
-            // La rama no puede mirar sólo el errno de MySQL: el motor único es PostgreSQL, que
-            // declara la violación de unicidad con SQLSTATE `23505` y sin errno de controlador.
-            // Sin esta segunda familia, una carrera REAL (dos altas que comprueban a la vez y
-            // colisionan en el índice) escapaba como `PDOException` y el técnico recibía un 500
-            // en lugar del 409 que le ofrece asumir el ticket existente.
-            $sqlState = (string)($e->errorInfo[0] ?? $e->getCode());
-            $driverErrorCode = $e->errorInfo[1] ?? null;
-            $isUniqueViolation = $sqlState === '23000'
-                || $sqlState === '23505'
-                || $driverErrorCode === 1062;
-            if ($isUniqueViolation) {
-                if (str_contains($e->getMessage(), 'uq_machine_active_ticket')) {
-                    $active = $this->findActiveByMachineId($incident->getMachineId());
-                    $ticket = $active ? $active->getTicketCode() : 'ACTIVO';
-                    $st = $active ? $active->getStatus()->value : 'REGISTERED';
-                    throw new DuplicateIncidentException(
-                        'MACHINE_HAS_ACTIVE_INCIDENT',
-                        "Esta máquina ya cuenta con un aviso activo (Ticket #{$ticket}) en estado {$st}.",
-                        $ticket,
-                        $st,
-                        409
-                    );
-                }
+            // La pregunta al motor la responde el detector único (SQLSTATE `23505` de PostgreSQL,
+            // `23000` y errno `1062` del motor retirado), para que una carrera REAL —dos altas que
+            // comprueban a la vez y colisionan en el índice— devuelva el 409 que ofrece asumir el
+            // ticket existente en lugar de escapar como `PDOException` y morir en un 500.
+            if (UniqueViolationDetector::matches($e, 'uq_machine_active_ticket')) {
+                $active = $this->findActiveByMachineId($incident->getMachineId());
+                $ticket = $active ? $active->getTicketCode() : 'ACTIVO';
+                $st = $active ? $active->getStatus()->value : 'REGISTERED';
+                throw new DuplicateIncidentException(
+                    'MACHINE_HAS_ACTIVE_INCIDENT',
+                    "Esta máquina ya cuenta con un aviso activo (Ticket #{$ticket}) en estado {$st}.",
+                    $ticket,
+                    $st,
+                    409
+                );
             }
 
             throw $e;

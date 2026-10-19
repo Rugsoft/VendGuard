@@ -13,6 +13,7 @@ use VendGuard\Core\Domain\Exception\InactivityThresholdNotReachedException;
 use VendGuard\Core\Domain\Exception\InvalidResolutionException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
+use VendGuard\Core\Domain\Exception\TicketCodeCollisionException;
 use VendGuard\Core\Domain\Exception\WarrantyExpiredException;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -208,6 +209,15 @@ class Router
                     'ticket_code' => $e->getTicketCode(),
                     'ticket_status' => $e->getTicketStatus(),
                 ]
+            );
+        } catch (TicketCodeCollisionException $e) {
+            // EARS 2.4: agotado el reintento acotado, la colisión del código de ticket
+            // es un 409 explícito, no un 500. El cliente sabe que puede reenviar el aviso.
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                $e->getDetails()
             );
         } catch (InvalidUploadException $e) {
             return Response::error(

@@ -16,7 +16,6 @@ use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SanitaryCertificateRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
-use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\ResolutionValidator;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
@@ -40,6 +39,7 @@ class PreventiveCoexistenceBridgeService
     private MachineRepositoryInterface $machineRepo;
     private ?SanitaryCertificateRepositoryInterface $certificateRepo;
     private AuditLogger $auditLogger;
+    private ?IncidentTicketAllocator $ticketAllocator;
 
     public function __construct(
         IncidentRepositoryInterface $incidentRepo,
@@ -47,7 +47,8 @@ class PreventiveCoexistenceBridgeService
         PreventiveSettingsRepositoryInterface $settingsRepo,
         ?MachineRepositoryInterface $machineRepo = null,
         ?SanitaryCertificateRepositoryInterface $certificateRepo = null,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?IncidentTicketAllocator $ticketAllocator = null
     ) {
         $this->incidentRepo = $incidentRepo;
         $this->orderRepo = $orderRepo;
@@ -55,6 +56,15 @@ class PreventiveCoexistenceBridgeService
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->certificateRepo = $certificateRepo;
         $this->auditLogger = $auditLogger ?? new AuditLogger();
+        $this->ticketAllocator = $ticketAllocator;
+    }
+
+    /**
+     * Política de asignación del código de ticket (EARS 2.4), resuelta bajo demanda.
+     */
+    private function tickets(): IncidentTicketAllocator
+    {
+        return $this->ticketAllocator ??= new IncidentTicketAllocator();
     }
 
     /**
@@ -118,8 +128,6 @@ class PreventiveCoexistenceBridgeService
             // =========================================================================
             // CASO A: Sin ticket previo -> Crear incidencia correctiva vinculada (Art. V.1)
             // =========================================================================
-            $ticketCode = TicketCode::generate()->value();
-
             $description = "Avería detectada durante la inspección preventiva {$order->getOrderCode()}.";
             if ($temperature !== null) {
                 $description .= " Temperatura de sonda registrada: {$temperature} °C.";
@@ -138,26 +146,33 @@ class PreventiveCoexistenceBridgeService
                 $description .= " Observaciones técnicas: " . trim($notes) . ".";
             }
 
-            $newIncident = new Incident(
-                id: null,
-                ticketCode: $ticketCode,
-                machineId: $machineId,
-                locationId: $locationId,
-                category: $category,
-                description: $description,
-                urgency: $urgency,
-                status: IncidentStatus::IN_PROGRESS,
-                assignedTechnicianId: $technicianId,
-                reporterName: 'Sistema Preventivo (VendGuard)',
-                reporterPhone: '000000000',
-                assignedAt: date('Y-m-d H:i:s'),
-                startedAt: date('Y-m-d H:i:s')
-            );
+            // EARS 2.4: el alta se repite con un código nuevo si el índice único del
+            // ticket lo rechaza, de modo que una colisión de azar no pierde el correctivo
+            // que la inspección acaba de detectar ni responde un 500 al técnico.
+            $createdIncident = $this->tickets()->persistWithUniqueTicket(
+                function (string $ticketCode) use ($machineId, $locationId, $category, $description, $urgency, $technicianId, $order): Incident {
+                    $newIncident = new Incident(
+                        id: null,
+                        ticketCode: $ticketCode,
+                        machineId: $machineId,
+                        locationId: $locationId,
+                        category: $category,
+                        description: $description,
+                        urgency: $urgency,
+                        status: IncidentStatus::IN_PROGRESS,
+                        assignedTechnicianId: $technicianId,
+                        reporterName: 'Sistema Preventivo (VendGuard)',
+                        reporterPhone: '000000000',
+                        assignedAt: date('Y-m-d H:i:s'),
+                        startedAt: date('Y-m-d H:i:s')
+                    );
 
-            $createdIncident = $this->incidentRepo->create(
-                $newIncident,
-                $technicianId,
-                "Apertura automática de correctivo desde orden preventiva {$order->getOrderCode()}"
+                    return $this->incidentRepo->create(
+                        $newIncident,
+                        $technicianId,
+                        "Apertura automática de correctivo desde orden preventiva {$order->getOrderCode()}"
+                    );
+                }
             );
 
             $incidentId = (int)$createdIncident->getId();

@@ -9,6 +9,7 @@ use VendGuard\Application\DTO\RefundReceiptDTO;
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\IbanValidationService;
 use VendGuard\Application\Service\IncidentCommentService;
+use VendGuard\Application\Service\IncidentTicketAllocator;
 use VendGuard\Application\Service\NotificationOutboxEnqueuerService;
 use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Core\Domain\Exception\ChronicIncidentException;
@@ -35,7 +36,6 @@ use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Service\UrgencyCalculator;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
-use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
@@ -86,6 +86,7 @@ class LocationPortalController
     private ?AuditLogger $auditLogger;
     private ?NotificationOutboxEnqueuerService $notificationEnqueuer;
     private ?TransactionManagerInterface $transactionManager;
+    private ?IncidentTicketAllocator $ticketAllocator;
 
     /** Transaccionalidad compensatoria del fichero (EARS-05.3); se resuelve bajo demanda. */
     private ?FileStorageCompensator $fileCompensator;
@@ -101,8 +102,10 @@ class LocationPortalController
         ?AuditLogger $auditLogger = null,
         ?FileStorageCompensator $fileCompensator = null,
         ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
-        ?TransactionManagerInterface $transactionManager = null
+        ?TransactionManagerInterface $transactionManager = null,
+        ?IncidentTicketAllocator $ticketAllocator = null
     ) {
+        $this->ticketAllocator = $ticketAllocator;
         $this->machineRepo = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
@@ -132,6 +135,14 @@ class LocationPortalController
     private function transactions(): TransactionManagerInterface
     {
         return $this->transactionManager ??= new PdoTransactionManager();
+    }
+
+    /**
+     * Política de asignación del código de ticket (EARS 2.4), resuelta bajo demanda.
+     */
+    private function tickets(): IncidentTicketAllocator
+    {
+        return $this->ticketAllocator ??= new IncidentTicketAllocator();
     }
 
     /**
@@ -555,44 +566,49 @@ class LocationPortalController
                 (string)$uploadedPhotoPath,
                 function () use ($machine, $category, $location, $description, $reporterName, $reporterPhone, $reporterEmail, $retainedMoney, $photoPath): Incident {
                     $urgency = UrgencyCalculator::calculate($machine->getMachineType(), $category);
-                    $ticketCode = TicketCode::generate()->value();
 
-                    $incident = new Incident(
-                        id: null,
-                        ticketCode: $ticketCode,
-                        machineId: $machine->getId(),
-                        locationId: $location->getId(),
-                        category: $category,
-                        description: $description,
-                        urgency: $urgency,
-                        status: IncidentStatus::REGISTERED,
-                        assignedTechnicianId: null,
-                        reporterName: $reporterName,
-                        reporterPhone: $reporterPhone,
-                        retainedMoneyAmount: $retainedMoney,
-                        photoPath: $photoPath,
-                        reporterEmail: $reporterEmail
-                    );
-
-                    $enqueuer = $this->notifications();
-                    if ($enqueuer === null) {
-                        return $this->incidentRepo->create($incident, null, 'Aviso registrado desde el portal de sede');
-                    }
-
-                    // RF-01.2: la fila de la cola nace en la MISMA transacción que el
-                    // expediente. Si el alta se revierte, no queda aviso que enviar; si
-                    // la cola falla, el alta no se confirma a medias.
-                    return $this->transactions()->runInTransaction(function () use ($incident, $enqueuer, $machine, $location, $reporterEmail): Incident {
-                        $created = $this->incidentRepo->create($incident, null, 'Aviso registrado desde el portal de sede');
-                        $enqueuer->enqueueIncidentOpened(
-                            $created,
-                            $machine,
-                            $location,
-                            NotificationOutboxEnqueuerService::ORIGIN_LOCATION_PORTAL,
-                            $reporterEmail
+                    // EARS 2.4: si el índice único del ticket rechaza el código, se
+                    // reintenta la unidad de trabajo completa con un código nuevo. El
+                    // aviso se confirma una sola vez y la notificación se encola sólo
+                    // tras el alta, así que el reintento no la duplica.
+                    return $this->tickets()->persistWithUniqueTicket(function (string $ticketCode) use ($machine, $category, $location, $description, $reporterName, $reporterPhone, $reporterEmail, $retainedMoney, $photoPath, $urgency): Incident {
+                        $incident = new Incident(
+                            id: null,
+                            ticketCode: $ticketCode,
+                            machineId: $machine->getId(),
+                            locationId: $location->getId(),
+                            category: $category,
+                            description: $description,
+                            urgency: $urgency,
+                            status: IncidentStatus::REGISTERED,
+                            assignedTechnicianId: null,
+                            reporterName: $reporterName,
+                            reporterPhone: $reporterPhone,
+                            retainedMoneyAmount: $retainedMoney,
+                            photoPath: $photoPath,
+                            reporterEmail: $reporterEmail
                         );
 
-                        return $created;
+                        $enqueuer = $this->notifications();
+                        if ($enqueuer === null) {
+                            return $this->incidentRepo->create($incident, null, 'Aviso registrado desde el portal de sede');
+                        }
+
+                        // RF-01.2: la fila de la cola nace en la MISMA transacción que el
+                        // expediente. Si el alta se revierte, no queda aviso que enviar; si
+                        // la cola falla, el alta no se confirma a medias.
+                        return $this->transactions()->runInTransaction(function () use ($incident, $enqueuer, $machine, $location, $reporterEmail): Incident {
+                            $created = $this->incidentRepo->create($incident, null, 'Aviso registrado desde el portal de sede');
+                            $enqueuer->enqueueIncidentOpened(
+                                $created,
+                                $machine,
+                                $location,
+                                NotificationOutboxEnqueuerService::ORIGIN_LOCATION_PORTAL,
+                                $reporterEmail
+                            );
+
+                            return $created;
+                        });
                     });
                 }
             );
