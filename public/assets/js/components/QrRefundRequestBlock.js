@@ -137,7 +137,11 @@ export const QrRefundRequestBlock = {
   },
   template: `
     <section class="qr-refund-request" data-testid="qr-refund-request">
-      <label class="qr-refund-toggle-row" for="refund-request-toggle">
+      <label
+        class="qr-refund-toggle-row"
+        for="refund-request-toggle"
+        style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; margin-bottom: 8px;"
+      >
         <input
           id="refund-request-toggle"
           class="qr-refund-toggle"
@@ -146,8 +150,9 @@ export const QrRefundRequestBlock = {
           :disabled="disabled"
           @change="toggleClaim"
           data-testid="refund-request-toggle"
+          style="margin: 0; width: 16px; height: 16px; flex-shrink: 0; cursor: pointer; accent-color: var(--color-primary);"
         />
-        <span class="form-label">¿La máquina te ha tragado dinero o cobrado sin entregar producto?</span>
+        <span style="font-size: 13px; font-weight: 600; color: var(--color-slate); line-height: 1.4;">¿La máquina te ha tragado dinero o cobrado sin entregar producto?</span>
       </label>
 
       <div v-if="isExpanded" class="qr-refund-fields" data-testid="refund-request-fields">
