@@ -118,16 +118,34 @@ const mockOrdersRoute = [
   }
 ];
 
-const mockLocations = [
-  { id: 1, site_code: 'SEDE-BCN-01', name: 'Hospital del Mar' },
-  { id: 2, site_code: 'SEDE-BCN-02', name: 'Campus Nord UPC' }
+// Las sedes del selector in situ llegan ya habilitadas por la ruta del técnico
+// (`get_my_route` con contexto oportunista), no de la API de coordinación: esa
+// está cerrada a COORDINATOR y devolvía 403 al técnico.
+const mockEnabledLocations = [
+  {
+    location_id: 1,
+    location_name: 'Hospital del Mar',
+    location_address: 'Passeig Marítim 25',
+    enablement_type: 'ACTIVE_STOP'
+  },
+  {
+    location_id: 2,
+    location_name: 'Campus Nord UPC',
+    location_address: 'Carrer Jordi Girona 1',
+    enablement_type: 'GRACE_WINDOW_30M',
+    grace_remaining_seconds: 600
+  }
 ];
 
 let apiRouteCalledWithLocation = null;
 let apiClaimCalledId = null;
 let apiStartInspectionCalledId = null;
+let coordinatorLocationsCalled = false;
 
-api.coordinator.getLocations = async () => mockLocations;
+api.coordinator.getLocations = async () => {
+  coordinatorLocationsCalled = true;
+  return [];
+};
 api.technician.getPreventiveRoute = async (locId) => {
   apiRouteCalledWithLocation = locId;
   return { success: true, data: mockOrdersRoute };
@@ -144,6 +162,10 @@ api.technician.startPreventiveInspection = async (orderId) => {
 const tab = {
   ...TechnicianPreventiveRouteTab.data(),
   ...TechnicianPreventiveRouteTab.methods,
+  enabledLocations: mockEnabledLocations,
+  get locations() {
+    return TechnicianPreventiveRouteTab.computed.locations.call(this);
+  },
   get assignedOrders() {
     return TechnicianPreventiveRouteTab.computed.assignedOrders.call(this);
   },
@@ -165,7 +187,13 @@ const tab = {
 console.log('--- BLOQUE 1: Carga y agrupación reactiva ---');
 
 await tab.loadInitialData();
-assert('1.1 loadInitialData carga catálogo de sedes', tab.locations.length === 2);
+assert('1.1 loadInitialData publica las sedes habilitadas para el selector in situ',
+  tab.locations.length === 2
+  && tab.locations[0].id === 1
+  && tab.locations[0].name === 'Hospital del Mar');
+assert('1.1a El selector in situ no pide sedes a la API de coordinación (403 para TECHNICIAN)',
+  coordinatorLocationsCalled === false
+  && typeof TechnicianPreventiveRouteTab.methods.loadLocations === 'undefined');
 assert('1.2 getPreventiveRoute invocado', apiRouteCalledWithLocation !== undefined);
 assert('1.3 Órdenes cargadas en array (3 órdenes)', tab.orders.length === 3);
 

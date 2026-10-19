@@ -39,7 +39,6 @@ export const TechnicianPreventiveRouteTab = {
   data() {
     return {
       orders: [],
-      locations: [],
       selectedLocationId: this.currentLocationId ? Number(this.currentLocationId) : null,
       isLoading: false,
       actionLoadingId: null,
@@ -48,6 +47,26 @@ export const TechnicianPreventiveRouteTab = {
     };
   },
   computed: {
+    /**
+     * Sedes seleccionables para el trabajo in situ (EARS 2.3).
+     *
+     * El selector no pide sedes por su cuenta: la pestaña se monta en la sesión
+     * de un técnico y `/api/coordinator/locations` está cerrado a COORDINATOR,
+     * así que pedirlo devolvía 403 y dejaba el desplegable vacío. La lista que
+     * importa es la que la ruta ya habilitó para este técnico —paradas activas
+     * más la ventana de gracia de 30 minutos (RF-01.2)—, que llega como prop
+     * desde `TechnicianRouteView`.
+     */
+    locations() {
+      return (this.enabledLocations || [])
+        .map((location) => ({
+          id: Number(location?.location_id),
+          name: String(location?.location_name ?? ''),
+          address: String(location?.location_address ?? '')
+        }))
+        .filter((location) => location.id > 0 && location.name !== '');
+    },
+
     /**
      * Órdenes asignadas directamente al técnico autenticado
      */
@@ -100,22 +119,7 @@ export const TechnicianPreventiveRouteTab = {
   },
   methods: {
     async loadInitialData() {
-      await Promise.all([
-        this.loadLocations(),
-        this.loadRoute()
-      ]);
-    },
-
-    /**
-     * Carga las sedes activas para el selector de ubicación in situ
-     */
-    async loadLocations() {
-      try {
-        const res = await api.coordinator.getLocations();
-        this.locations = res?.data || res || [];
-      } catch (err) {
-        console.warn('No se pudieron cargar las sedes para el selector in situ:', err);
-      }
+      await this.loadRoute();
     },
 
     /**
@@ -264,7 +268,7 @@ export const TechnicianPreventiveRouteTab = {
         >
           <option :value="null">Todas las sedes (Ruta asignada general)</option>
           <option v-for="loc in locations" :key="loc.id" :value="loc.id">
-            🏢 {{ loc.site_code }} - {{ loc.name }}
+            🏢 {{ loc.name }}{{ loc.address ? ' — ' + loc.address : '' }}
           </option>
         </select>
         <small style="font-size: 11px; color: #64748b;">

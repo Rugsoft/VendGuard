@@ -364,9 +364,15 @@ assert('5.5 El submotivo verbal se rotula en sede',
 assert('5.6 La asunción de ticket se rotula como tal',
   opportunisticOriginLabel({ opportunistic_origin_reason: 'EXISTING_TICKET_CLAIM' }) === 'Asunción de ticket abierto in situ');
 
-assert('5.7 La bandeja de coordinación pinta la insignia oportunista por fila',
+// La tarjeta del técnico llama al helper desde la plantilla, y la plantilla de
+// Vue resuelve contra la instancia: sin el método-puente la vista se queda en
+// blanco en cuanto hay una avería (importar el helper NO basta).
+assert('5.7 La bandeja de coordinación y la tarjeta del técnico pintan la insignia oportunista',
   CoordinatorDashboardView.template.includes('opportunisticModeLabel(inc)')
-  && CoordinatorDashboardView.template.includes('type="opportunistic"'));
+  && CoordinatorDashboardView.template.includes('type="opportunistic"')
+  && TechnicianRouteView.template.includes('opportunisticModeLabel(incident)')
+  && TechnicianRouteView.template.includes('type="opportunistic"')
+  && TechnicianRouteView.methods.opportunisticModeLabel.call({}, { opportunistic_mode: 'NEW' }) === 'Oportunista In Situ · Nueva');
 const dashboardInstance = { $emit: () => {} };
 assert('5.8 El método de la bandeja delega en el helper compartido',
   CoordinatorDashboardView.methods.opportunisticModeLabel.call(

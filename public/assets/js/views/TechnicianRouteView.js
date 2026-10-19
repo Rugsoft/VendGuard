@@ -48,6 +48,7 @@ import {
   graceWindowLocations,
   groupColocatedStops,
   normalizeRouteEnvelope,
+  opportunisticModeLabel as resolveOpportunisticModeLabel,
   summarizePendingCriticalStops
 } from '../utils/OpportunisticContext.js';
 
@@ -533,6 +534,21 @@ export const TechnicianRouteView = {
       if (urg === URGENCY_LEVELS.CRITICAL) return '4px solid #dc2626';
       if (urg === URGENCY_LEVELS.HIGH) return '4px solid #f97316';
       return '4px solid #c8cfda';
+    },
+
+    /**
+     * Etiqueta de trazabilidad oportunista de la tarjeta (Módulo 16, RF-06.4).
+     *
+     * El puente es obligatorio: la plantilla compilada resuelve las llamadas
+     * contra la instancia (`_ctx`), no contra el ámbito del módulo. Importar el
+     * helper sin exponerlo aquí dejaba la vista en blanco con «is not a
+     * function» en cuanto había una avería que pintar.
+     *
+     * @param {Object} incident
+     * @returns {string|null}
+     */
+    opportunisticModeLabel(incident) {
+      return resolveOpportunisticModeLabel(incident);
     },
 
     /**

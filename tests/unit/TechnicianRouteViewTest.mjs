@@ -1134,6 +1134,122 @@ assert('14.6 Un rechazo ajeno a la cuarentena no abre el bloque sanitario (contr
     && unrelatedView.resolveError === 'La intervención no está en curso.');
 
 // ---------------------------------------------------------------------
+// TEST GROUP 15: Humo E2E de Renderizado Reactivo con Avería Activa
+// ---------------------------------------------------------------------
+console.log('\\n--- Group 15: Smoke test de renderizado con avería activa en ruta ---');
+
+// Mock del entorno DOM mínimo requerido por el compilador de Vue para decodificar entidades HTML
+globalThis.document = globalThis.document || {};
+globalThis.document.createElement = () => {
+  let _foo = '';
+  return {
+    setAttribute: () => {},
+    getAttribute: (attr) => attr === 'foo' ? _foo : '',
+    set innerHTML(val) {
+      const m = val.match(/foo="([^"]*)"/);
+      if (m) _foo = m[1].replace(/&quot;/g, '"');
+    },
+    get textContent() { return ''; },
+    children: [{ getAttribute: (attr) => attr === 'foo' ? _foo : '' }]
+  };
+};
+
+const { compile } = await import('../../public/assets/js/vendor/vue.esm-browser.prod.js');
+
+const smokeIncident = {
+  id: 999,
+  ticket_code: 'INC-2026-SMOKE',
+  urgency: 'HIGH',
+  status: 'ASSIGNED',
+  category: 'OTHER',
+  description: 'Avería activa para comprobación de renderizado completo sin fallos de consola',
+  opportunistic_mode: 'NEW',
+  machine: { id: 1, code: 'VEND-0102', model: 'Vendo ColdDrink', floor_wing: 'Planta Baja' },
+  location: { id: 1, name: 'Sede Central', address: 'Calle Principal 10', contact_phone: '600111222' }
+};
+
+const renderFn = compile(TechnicianRouteView.template);
+
+const baseSmokeData = {
+  ...TechnicianRouteView.data(),
+  ...TechnicianRouteView.methods,
+  incidents: [smokeIncident],
+  isLoading: false,
+  errorMessage: '',
+  filterStatus: 'ALL',
+  activeSection: 'route',
+  isAuthenticated: true,
+  currentUser: { id: 2, name: 'Jordi Técnico', role: 'TECHNICIAN' }
+};
+
+const smokeProxy = new Proxy(baseSmokeData, {
+  has(target, prop) {
+    return (prop in target) || (TechnicianRouteView.computed && prop in TechnicianRouteView.computed);
+  },
+  get(target, prop) {
+    if (prop in target) return target[prop];
+    if (TechnicianRouteView.computed && prop in TechnicianRouteView.computed) {
+      return TechnicianRouteView.computed[prop].call(smokeProxy);
+    }
+    return undefined;
+  }
+});
+
+let renderError = null;
+let renderedVNode = null;
+try {
+  renderedVNode = renderFn.call(smokeProxy, smokeProxy, []);
+} catch (err) {
+  renderError = err;
+}
+
+assert(
+  '15.1 La plantilla compila y renderiza con éxito la tarjeta de avería activa sin TypeError/ReferenceError',
+  renderError === null && typeof renderedVNode === 'object',
+  renderError ? renderError.message : ''
+);
+
+assert(
+  '15.2 El método delegado opportunisticModeLabel está definido en la instancia y retorna la etiqueta canónica',
+  typeof smokeProxy.opportunisticModeLabel === 'function'
+    && smokeProxy.opportunisticModeLabel(smokeIncident) === 'Oportunista In Situ · Nueva'
+);
+
+// Control negativo: certificar que si falta opportunisticModeLabel en methods, el render falla como antes
+const buggyMethods = { ...TechnicianRouteView.methods };
+delete buggyMethods.opportunisticModeLabel;
+const brokenSmokeData = {
+  ...baseSmokeData,
+  ...buggyMethods
+};
+delete brokenSmokeData.opportunisticModeLabel;
+
+const brokenProxy = new Proxy(brokenSmokeData, {
+  has(target, prop) {
+    return (prop in target) || (TechnicianRouteView.computed && prop in TechnicianRouteView.computed);
+  },
+  get(target, prop) {
+    if (prop in target) return target[prop];
+    if (TechnicianRouteView.computed && prop in TechnicianRouteView.computed) {
+      return TechnicianRouteView.computed[prop].call(brokenProxy);
+    }
+    return undefined;
+  }
+});
+
+let brokenError = null;
+try {
+  renderFn.call(brokenProxy, brokenProxy, []);
+} catch (err) {
+  brokenError = err;
+}
+
+assert(
+  '15.3 Control de mordida: si falta opportunisticModeLabel el render falla con ReferenceError / TypeError',
+  brokenError !== null && (brokenError.message.includes('opportunisticModeLabel') || brokenError.name === 'ReferenceError')
+);
+
+// ---------------------------------------------------------------------
 // SUMMARY
 // ---------------------------------------------------------------------
 console.log('\n======================================================================');

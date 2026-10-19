@@ -339,6 +339,153 @@ assert(
 );
 
 // ---------------------------------------------------------------------
+console.log('\n--- 4. Toda función que la plantilla llama existe en el componente ---\n');
+
+// La sintaxis válida no basta: `{{ opportunisticModeLabel(incident) }}` es
+// JavaScript perfecto y aun así tumbaba la vista del técnico con
+// «opportunisticModeLabel is not a function». Y la trampa tiene dos capas: un
+// `import` NO expone el helper a la plantilla, porque el compilador resuelve
+// cada llamada contra la instancia (`_ctx.foo`). Hace falta un método (o un
+// computed/prop/data) que lo publique. Esta sección cruza las llamadas de cada
+// plantilla con la superficie REAL del componente —methods, computed, props,
+// data, components e inject— y exige que todas resuelvan ahí.
+
+/**
+ * Globales de JavaScript que una plantilla puede invocar sin declararlos.
+ */
+
+/**
+ * Globales de JavaScript que una plantilla puede invocar sin declararlos.
+ */
+const JS_GLOBALS = new Set([
+  'Math', 'Number', 'String', 'Boolean', 'Date', 'JSON', 'Object', 'Array',
+  'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'encodeURIComponent',
+  'decodeURIComponent', 'setTimeout', 'clearTimeout', 'setInterval',
+  'clearInterval', 'console', 'Intl', 'RegExp', 'Promise', 'Error', 'Map',
+  'Set', 'Symbol', 'BigInt', 'structuredClone'
+]);
+
+const JS_KEYWORDS = new Set(['if', 'for', 'while', 'return', 'function', 'new', 'typeof', 'await', 'catch', 'switch']);
+
+/**
+ * Identificadores invocados como función dentro del código de la plantilla
+ * (`foo(`, pero no `obj.foo(`), sin literales de cadena ni comentarios HTML.
+ *
+ * @param {string} template
+ * @returns {Set<string>}
+ */
+function calledIdentifiers(template) {
+  const withoutComments = template.replace(/<!--[\s\S]*?-->/g, '');
+  const called = new Set();
+
+  for (const expression of extractExpressions(withoutComments)) {
+    // Los literales se vacían primero: `'var(--x)'` es CSS y `'rgba(…)'` es un
+    // color, no llamadas. Sin este paso cada estilo inline sería un falso positivo.
+    // Un `:style` puede llevar comentarios `//` de JavaScript dentro del valor
+    // (`borderLeft` explica por qué existe): también se apartan, porque su prosa
+    // produce falsos positivos como `edge (plan §4.4)`.
+    const code = expression
+      .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+      .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+      .replace(/`(?:[^`\\]|\\.)*`/g, '``')
+      .replace(/\/\/.*$/gm, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+
+    const call = /(^|[^.\w$])([A-Za-z_$][\w$]*)\s*\(/g;
+    let match;
+    while ((match = call.exec(code)) !== null) {
+      const identifier = match[2];
+      if (JS_KEYWORDS.has(identifier) || identifier.startsWith('$')) continue;
+      called.add(identifier);
+    }
+  }
+
+  return called;
+}
+
+/**
+ * Devuelve las llamadas de la plantilla que el componente no puede resolver.
+ *
+ * Solo cuenta la superficie de la instancia: los `import` del módulo no llegan
+ * al render y por eso no se aceptan aquí.
+ *
+ * @param {Object} component
+ * @returns {string[]}
+ */
+function unresolvedCalls(component) {
+  let dataKeys = [];
+  try {
+    dataKeys = Object.keys(typeof component.data === 'function' ? component.data() : {});
+  } catch (error) {
+    dataKeys = [];
+  }
+
+  const surface = new Set([
+    ...Object.keys(component.methods || {}),
+    ...Object.keys(component.computed || {}),
+    ...Object.keys(component.props || {}),
+    ...Object.keys(component.components || {}),
+    ...Object.keys(component.inject || {}),
+    ...dataKeys
+  ]);
+  return [...calledIdentifiers(component.template)]
+    .filter((identifier) => !surface.has(identifier) && !JS_GLOBALS.has(identifier));
+}
+
+// Control de no-vacuidad: la forma exacta del defecto tiene que ser detectada,
+// la forma correcta (el helper publicado en methods) no puede marcarse, y un
+// helper que solo está importado tiene que seguir marcándose: el import no
+// llega a la plantilla y es justo el espejismo que dejó la vista en blanco.
+assert(
+  '4.1 Se detecta un helper usado en la plantilla y no definido en el componente',
+  unresolvedCalls({ template: '<div>{{ opportunisticModeLabel(incident) }}</div>' }).includes('opportunisticModeLabel')
+);
+assert(
+  '4.2 Un helper declarado en methods no se marca',
+  unresolvedCalls({ methods: { opportunisticModeLabel() {} }, template: '<div>{{ opportunisticModeLabel(incident) }}</div>' }).length === 0
+);
+assert(
+  '4.3 Un helper solo importado sigue marcándose: el import no llega al render',
+  unresolvedCalls({ importsOnly: true, template: '<div>{{ opportunisticModeLabel(incident) }}</div>' }).includes('opportunisticModeLabel')
+);
+
+const danglingCalls = [];
+let totalCalled = 0;
+const countedComponents = new Set();
+
+for (const relative of modules) {
+  let exported;
+  try {
+    exported = await import(pathToFileURL(path.join(JS_ROOT, relative)).href);
+  } catch (error) {
+    continue; // 2.2 ya informa del módulo que no importa
+  }
+
+  for (const [name, value] of Object.entries(exported)) {
+    if (!value || typeof value !== 'object' || typeof value.template !== 'string') continue;
+    if (countedComponents.has(value)) continue;
+    countedComponents.add(value);
+
+    const called = calledIdentifiers(value.template);
+    totalCalled += called.size;
+    for (const identifier of unresolvedCalls(value)) {
+      danglingCalls.push(`${relative} [${name}] :: ${identifier}()`);
+    }
+  }
+}
+
+assert(
+  '4.4 Se han cruzado las llamadas de un volumen real de plantillas',
+  countedComponents.size >= 40 && totalCalled >= 50,
+  `componentes: ${countedComponents.size} | llamadas distintas: ${totalCalled}`
+);
+assert(
+  '4.5 Ninguna plantilla llama a una función que el componente no expone',
+  danglingCalls.length === 0,
+  danglingCalls.slice(0, 5).join(' | ')
+);
+
+// ---------------------------------------------------------------------
 console.log('\n======================================================================');
 console.log(` Plantillas: ${withTemplate.length} | Expresiones: ${totalExpressions} | Aserciones: ${assertions} | Fallos: ${failures}`);
 if (failures === 0) {
