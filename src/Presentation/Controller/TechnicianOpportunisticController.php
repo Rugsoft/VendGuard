@@ -22,6 +22,7 @@ use VendGuard\Core\Domain\Exception\LocationNotEnabledForOpportunisticException;
 use VendGuard\Core\Domain\Exception\LocationNotFoundException;
 use VendGuard\Core\Domain\Exception\MachineInactiveException;
 use VendGuard\Core\Domain\Exception\MachineNotFoundException;
+use VendGuard\Core\Domain\Exception\TicketCodeCollisionException;
 use VendGuard\Core\Domain\Exception\TakeoverConfirmationRequiredException;
 use VendGuard\Core\Domain\Exception\WarrantyExpiredException;
 use VendGuard\Core\Domain\Model\User;
@@ -460,6 +461,18 @@ final class TechnicianOpportunisticController
                     'ticket_code' => $exception->getTicketCode(),
                     'ticket_status' => $exception->getTicketStatus(),
                 ])
+            );
+        }
+
+        // EARS 2.4 · agotados los reintentos, el choque de identidad del expediente
+        // es un 409 explícito: el técnico puede reenviar el parte. Sin esta rama la
+        // colisión caía en el 500 genérico del final, que ningún reintento recupera.
+        if ($exception instanceof TicketCodeCollisionException) {
+            return Response::error(
+                $exception->getErrorCode(),
+                $exception->getMessage(),
+                $exception->getHttpStatusCode(),
+                $exception->getDetails()
             );
         }
 

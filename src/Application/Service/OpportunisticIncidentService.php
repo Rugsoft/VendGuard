@@ -30,7 +30,6 @@ use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\OpportunisticMode;
 use VendGuard\Core\Domain\ValueObject\OpportunisticOriginReason;
-use VendGuard\Core\Domain\ValueObject\TicketCode;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Service\OpportunisticCoexistencePolicy;
 use VendGuard\Core\Service\OpportunisticColdChainGuardPolicy;
@@ -115,6 +114,7 @@ final class OpportunisticIncidentService
     private OpportunisticLocationEligibilityPolicy $eligibility;
     private OpportunisticCoexistencePolicy $coexistence;
     private OpportunisticColdChainGuardPolicy $coldChain;
+    private IncidentTicketAllocator $tickets;
 
     public function __construct(
         OpportunisticIncidentRepositoryInterface $opportunistic,
@@ -127,7 +127,8 @@ final class OpportunisticIncidentService
         ?IncidentPauseService $pauses = null,
         ?OpportunisticLocationEligibilityPolicy $eligibility = null,
         ?OpportunisticCoexistencePolicy $coexistence = null,
-        ?OpportunisticColdChainGuardPolicy $coldChain = null
+        ?OpportunisticColdChainGuardPolicy $coldChain = null,
+        ?IncidentTicketAllocator $tickets = null
     ) {
         $this->opportunistic = $opportunistic;
         $this->machines = $machines;
@@ -140,6 +141,7 @@ final class OpportunisticIncidentService
         $this->eligibility = $eligibility ?? new OpportunisticLocationEligibilityPolicy();
         $this->coexistence = $coexistence ?? new OpportunisticCoexistencePolicy();
         $this->coldChain = $coldChain ?? new OpportunisticColdChainGuardPolicy();
+        $this->tickets = $tickets ?? new IncidentTicketAllocator();
     }
 
     /**
@@ -245,7 +247,33 @@ final class OpportunisticIncidentService
         $dto = CreateOpportunisticIncidentDto::fromPayload($payload);
         $now ??= new DateTimeImmutable('now');
 
-        return $this->transactions->runInTransaction(function () use ($technician, $dto, $now): array {
+        // EARS 2.4 · la colisión del código de ticket la absorbe la política de alta.
+        //
+        // El código se genera al azar y el índice único es quien garantiza que no se
+        // repita; cuando dos altas simultáneas caen en el mismo, la señal es «prueba
+        // otro código», no un 500 en la ruta del técnico. El reintento reabre la
+        // **unidad de trabajo completa** —lectura de la máquina, habilitación,
+        // coexistencia, escritura, historial, auditoría y encolado—, de modo que el
+        // intento perdedor no deja rastro: el motor lo deshace entero y solo el
+        // ganador escribe sus efectos. Reintentar la escritura suelta dentro del
+        // repositorio no serviría: en PostgreSQL la transacción queda abortada.
+        return $this->tickets->persistWithUniqueTicket(
+            fn (string $ticketCode): array => $this->createWithTicket($technician, $dto, $now, $ticketCode)
+        );
+    }
+
+    /**
+     * Un intento completo del alta oportunista con el código candidato ya elegido.
+     *
+     * @return array<string, mixed>
+     */
+    private function createWithTicket(
+        User $technician,
+        CreateOpportunisticIncidentDto $dto,
+        DateTimeImmutable $now,
+        string $ticketCode
+    ): array {
+        return $this->transactions->runInTransaction(function () use ($technician, $dto, $now, $ticketCode): array {
             $machine = $this->machines->findById($dto->machineId, false);
             if ($machine === null || $machine->isSoftDeleted()) {
                 throw new MachineNotFoundException(
@@ -274,7 +302,7 @@ final class OpportunisticIncidentService
 
             $incident = new Incident(
                 id: null,
-                ticketCode: TicketCode::generate()->value(),
+                ticketCode: $ticketCode,
                 machineId: $machine->getId(),
                 locationId: $locationId,
                 category: $dto->category,
@@ -424,7 +452,28 @@ final class OpportunisticIncidentService
         $dto = AssumeOpportunisticIncidentDto::fromPayload($payload);
         $now ??= new DateTimeImmutable('now');
 
-        return $this->transactions->runInTransaction(function () use ($technician, $incidentId, $dto, $now): array {
+        // EARS 2.4 · el único camino de la asunción que crea un expediente es la
+        // sustitución por Avería Crónica: para el resto, el código candidato se
+        // genera y se descarta, y el reintento nunca llega a usarse. La política
+        // cubre los dos casos con la misma cota sin abrir una rama por estado.
+        return $this->tickets->persistWithUniqueTicket(
+            fn (string $ticketCode): array => $this->assumeWithTicket($technician, $incidentId, $dto, $now, $ticketCode)
+        );
+    }
+
+    /**
+     * Un intento completo de la asunción con el código candidato ya elegido.
+     *
+     * @return array<string, mixed>
+     */
+    private function assumeWithTicket(
+        User $technician,
+        int $incidentId,
+        AssumeOpportunisticIncidentDto $dto,
+        DateTimeImmutable $now,
+        string $ticketCode
+    ): array {
+        return $this->transactions->runInTransaction(function () use ($technician, $incidentId, $dto, $now, $ticketCode): array {
             $incident = $this->incidents->findById($incidentId);
             if ($incident === null) {
                 throw new IncidentNotFoundException($incidentId);
@@ -485,7 +534,7 @@ final class OpportunisticIncidentService
                 if ($reopenCount >= self::CHRONIC_REOPEN_THRESHOLD) {
                     $chronicReplacementCreated = true;
                     $predecessorTicketCode = $incident->getTicketCode();
-                    $result = $this->replaceChronicBreakdown($technician, $incident, $machine, $dto, $now);
+                    $result = $this->replaceChronicBreakdown($technician, $incident, $machine, $dto, $now, $ticketCode);
                 } else {
                     $result = $this->reopenInWarranty($technician, $incident, $incidentId, $dto, $now);
                 }
@@ -774,7 +823,8 @@ final class OpportunisticIncidentService
         Incident $incident,
         Machine $machine,
         AssumeOpportunisticIncidentDto $dto,
-        DateTimeImmutable $now
+        DateTimeImmutable $now,
+        string $ticketCode
     ): array {
         $this->assertWarrantyAlive($incident, $now);
 
@@ -788,9 +838,12 @@ final class OpportunisticIncidentService
         $urgency = UrgencyCalculator::calculate($machine->getMachineType(), $incident->getCategory());
         $stamp = $now->format('Y-m-d\TH:i:sP');
 
+        // El código llega de la política de alta: si el índice único rechaza el
+        // candidato, el llamador deshace el cierre del predecesor y reintenta la
+        // sustitución entera con otro código, sin dejar un hueco entre ambos.
         $successor = new Incident(
             id: null,
-            ticketCode: TicketCode::generate()->value(),
+            ticketCode: $ticketCode,
             machineId: $incident->getMachineId(),
             locationId: $incident->getLocationId(),
             category: $incident->getCategory(),
