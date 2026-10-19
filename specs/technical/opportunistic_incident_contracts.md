@@ -445,6 +445,7 @@ Crea una nueva incidencia con `opportunistic_mode = 'NEW'`, asignada al técnico
   * `409 ACTIVE_INTERVENTION_AT_DIFFERENT_LOCATION`: El técnico dejó una intervención `IN_PROGRESS` (o preventivo `IN_INSPECTION`) abierta en otra sede distinta (`RF-02.2`). Incluye `details.active_conflict`.
   * `409 ACTIVE_INCIDENT_ALREADY_EXISTS_ASSUME_INSTEAD`: La máquina ya tiene un expediente activo o en garantía de 48h (`uq_machine_active_ticket`, Art. V.2 y `RF-05.1`). Devuelve en `details.existing_incident` el objeto completo del ticket existente y `opportunistic_action` para que el cliente ofrezca asumirlo inmediatamente sin recargar.
   * `409 COLD_CHAIN_ROUTE_WARNING_CONFIRMATION_REQUIRED`: El técnico tiene una parada crítica/sanitaria esperando en otra sede y no envió `confirm_cold_chain_override = true` (`RF-03.1`).
+  * `409 TICKET_CODE_COLLISION`: **EARS 2.4/2.6.** Los tres intentos de reservar un código de ticket chocaron con el índice único `uq_incidents_ticket_code`. El alta se reintenta entera con un código nuevo; solo si los tres colisionan se responde este conflicto (con `details.attempts`) y nunca un `500`. No se confunde con `409 ACTIVE_INCIDENT_ALREADY_EXISTS_ASSUME_INSTEAD`, que es el duplicado de máquina y no se reintenta.
   * `422 MACHINE_INACTIVE`: La máquina está dada de baja definitiva (`RF-01.5`).
   * `422 INVALID_CATEGORY` / `INVALID_ORIGIN_REASON` / `DESCRIPTION_TOO_SHORT` (< 10 caracteres).
   * `422 CASH_REFUND_PRIVACY_VIOLATION`: Intento de enviar datos bancarios o de reembolso desde el parte del técnico (`RF-04.3`, Art. V.4).
@@ -516,6 +517,7 @@ Asume un expediente activo preexistente o reabre in situ un expediente en garant
   * `409 ACTIVE_INTERVENTION_AT_DIFFERENT_LOCATION`: El técnico mantiene una intervención `IN_PROGRESS` en otra sede distinta (`RF-02.2`).
   * `409 TAKEOVER_CONFIRMATION_REQUIRED`: El expediente pertenece a otro técnico (`ASSIGNED` / `PENDING_PARTS` / `PENDING_INFO`) y no se envió `confirm_takeover_from_other_tech = true` (`RF-05.3`).
   * `409 COLD_CHAIN_ROUTE_WARNING_CONFIRMATION_REQUIRED`: Hay una parada crítica/sanitaria en otra sede y falta `confirm_cold_chain_override = true` (`RF-03.1`).
+  * `409 TICKET_CODE_COLLISION`: **EARS 2.4/2.6.** Solo puede producirse en la sustitución por Avería Crónica. La unidad de trabajo se reintenta completa con otro código (el predecesor se cierra y el sucesor nace en el mismo acto); agotados los tres intentos, el predecesor conserva su `RESOLVED` y la marca `[AVERÍA CRÓNICA]` no se escribe.
   * `422 REOPEN_REASON_TOO_SHORT`: El expediente está en `RESOLVED` (< 48h) y `reopen_reason` tiene menos de 10 caracteres (`RF-05.4`).
   * `422 REOPEN_WINDOW_EXPIRED`: El expediente está en `RESOLVED` pero ya superó las 48h de garantía (`Art. V.6`).
   * `422 INVALID_STATUS_FOR_ASSUME`: El expediente está en `CLOSED` o `CANCELLED`.

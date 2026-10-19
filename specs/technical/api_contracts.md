@@ -218,6 +218,17 @@ Registra un nuevo aviso de avería con cálculo automático de urgencia y contro
     }
     ```
   * `422 Unprocessable` (`FILE_TOO_LARGE` / `INVALID_FILE_TYPE`): Archivo > 5 MB o formato no seguro.
+  * `409 Conflict` (`TICKET_CODE_COLLISION`): **EARS 2.4.** Los tres intentos de asignación de código de ticket chocaron con el índice único `uq_incidents_ticket_code`. Es la única respuesta posible cuando el reintento acotado se agota; el alta nunca responde `500` por esta causa. La misma regla cubre el portal de sede, el puente de no conformidad preventiva y las dos superficies oportunistas del Módulo 16 (alta in situ y sustitución por Avería Crónica, §4.3 y §4.4 de [sus contratos](opportunistic_incident_contracts.md)), que responden con su propio envolvente de error.
+    ```json
+    {
+      "success": false,
+      "error": {
+        "code": "TICKET_CODE_COLLISION",
+        "message": "No se pudo reservar un código de ticket único tras varios intentos. Vuelva a enviar el aviso.",
+        "details": { "attempts": 3 }
+      }
+    }
+    ```
 
 ---
 
