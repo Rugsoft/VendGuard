@@ -141,7 +141,7 @@
 
 ## Fase 6: Interfaz Frontend Reactiva Vanilla y Pruebas ESM
 
-- [ ] **T-OPP-10 · Ampliar `api.js` e implementar `TechnicianOpportunisticModal.js` (flujo móvil en $\le 3$ toques, banner sanitario Art. II, recordatorio QR monedas y Flujos A/B)**
+- [x] **T-OPP-10 · Ampliar `api.js` e implementar `TechnicianOpportunisticModal.js` (flujo móvil en $\le 3$ toques, banner sanitario Art. II, recordatorio QR monedas y Flujos A/B)**
   * **Tiempo estimado:** 30 min
   * **Dependencias:** `T-OPP-09`
   * **Ficheros a crear o modificar:**

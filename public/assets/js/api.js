@@ -1387,10 +1387,61 @@ export class ApiClient {
   technician = {
     /**
      * Retrieves the technician's assigned route (RF-07).
-     * @returns {Promise<Array<Object>>}
+     *
+     * Con `includeOpportunisticContext` la respuesta pasa del array indexado de
+     * paradas al envoltorio del Módulo 16 (`{ stops, enabled_locations,
+     * pending_critical_stops_other_locations }`), que es la forma que la vista de
+     * ruta necesita para pintar la tarjeta de sede recién visitada sin romper los
+     * contratos anteriores (plan §5, decisión 3).
+     *
+     * @param {{includeOpportunisticContext?: boolean, formOpenedWithinGrace?: boolean}} [options={}]
+     * @returns {Promise<Array<Object>|Object>}
      */
-    getMyRoute: () => {
-      return this.get('/technician/my-route');
+    getMyRoute: (options = {}) => {
+      const query = new URLSearchParams();
+      if (options.includeOpportunisticContext === true) {
+        query.set('include_opportunistic_context', '1');
+      }
+      if (options.formOpenedWithinGrace === true) {
+        query.set('form_opened_within_grace', '1');
+      }
+      const q = query.toString();
+
+      return this.get(`/technician/my-route${q ? `?${q}` : ''}`);
+    },
+
+    /**
+     * Retrieves the operational machine catalog of a location enabled for the
+     * authenticated technician (Módulo 16, RF-01.4). Each machine carries its
+     * `opportunistic_action`: CREATE_NEW, ASSUME_DIRECT, ASSUME_WITH_CONFIRMATION,
+     * REOPEN_IN_SITU, CURRENT_TECHNICIAN_IN_PROGRESS or BLOCKED_OTHER_TECH_IN_PROGRESS.
+     * @param {number|string} locationId
+     * @returns {Promise<Object>} LocationOpportunisticCatalogDto
+     */
+    getOpportunisticMachines: (locationId) => {
+      return this.get(`/technician/locations/${encodeURIComponent(locationId)}/opportunistic-machines`);
+    },
+
+    /**
+     * Registers a brand-new in-situ ticket and starts the intervention in one act
+     * (Módulo 16, Flujo A, RF-04). Accepts a plain JSON payload or a `FormData`
+     * instance when a photo is attached (Art. V.5).
+     * @param {Object|FormData} payload
+     * @returns {Promise<Object>} Created opportunistic incident
+     */
+    createOpportunisticIncident: (payload) => {
+      return this.post('/technician/opportunistic/incidents', payload);
+    },
+
+    /**
+     * Assumes, resumes or reopens in situ an existing ticket under the technician's
+     * ownership (Módulo 16, Flujo B, RF-05).
+     * @param {number|string} incidentId
+     * @param {Object} [payload={}]
+     * @returns {Promise<Object>} Updated or successor incident
+     */
+    assumeOpportunisticIncident: (incidentId, payload = {}) => {
+      return this.post(`/technician/opportunistic/incidents/${encodeURIComponent(incidentId)}/assume`, payload);
     },
 
     /**

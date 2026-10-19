@@ -22,6 +22,32 @@ import {
   resolveBadgeConfig
 } from '../utils/IncidentStatusPermissions.js';
 
+/**
+ * Insignias de trazabilidad del Módulo 16 (RF-06.4).
+ *
+ * La etiqueta canónica del expediente viaja ya resuelta desde el backend
+ * (`opportunistic_mode_label`), pero la interfaz también necesita pintar el chip a
+ * partir del valor crudo (`NEW` / `ASSUMED`) cuando la fila solo trae el enum. Los
+ * colores entran por token —nunca por literal hexadecimal— para no engordar el
+ * trinquete de deuda de diseño (`DesignTokenDebtRatchetTest`).
+ */
+const OPPORTUNISTIC_BADGES = Object.freeze({
+  NEW: Object.freeze({
+    label: 'Oportunista In Situ · Nueva',
+    bg: 'var(--color-info-bg)',
+    color: 'var(--color-info-text)',
+    border: 'var(--color-info-border)',
+    cssClass: 'vg-badge-opportunistic-new'
+  }),
+  ASSUMED: Object.freeze({
+    label: 'Oportunista In Situ · Asumida',
+    bg: 'var(--color-warning-bg)',
+    color: 'var(--color-warning-text)',
+    border: 'var(--color-warning-border)',
+    cssClass: 'vg-badge-opportunistic-assumed'
+  })
+});
+
 export const IncidentBadge = {
   name: 'IncidentBadge',
   props: {
@@ -33,7 +59,7 @@ export const IncidentBadge = {
       required: true
     },
     /**
-     * Type mode: 'auto' | 'urgency' | 'status'
+     * Type mode: 'auto' | 'urgency' | 'status' | 'opportunistic'
      */
     type: {
       type: String,
@@ -59,6 +85,15 @@ export const IncidentBadge = {
       return normalizeBadgeKey(this.value);
     },
     resolvedConfig() {
+      // Módulo 16 (RF-06.4): el chip de modalidad oportunista se resuelve antes que el
+      // contrato compartido de estados/urgencias, que no conoce estos dos valores.
+      if (this.type === 'opportunistic') {
+        const opportunisticKey = String(this.value ?? '').trim().toUpperCase();
+        if (OPPORTUNISTIC_BADGES[opportunisticKey]) {
+          return OPPORTUNISTIC_BADGES[opportunisticKey];
+        }
+      }
+
       const shared = resolveBadgeConfig(this.value, this.type);
       if (shared) {
         return shared;
