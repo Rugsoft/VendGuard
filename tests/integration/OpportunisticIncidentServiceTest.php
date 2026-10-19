@@ -712,6 +712,118 @@ $assert(
 );
 
 // ---------------------------------------------------------------------
+// CASO 11 · Reanudación de una parada PROPIA (RF-05.2, caso 2)
+// ---------------------------------------------------------------------
+echo "\n--- Caso 11: el técnico reanuda su propia parada sin convertirla en oportunista ---\n";
+
+// El caso 10 deja una intervención del técnico EN CURSO en otra sede a propósito:
+// aquí se releva para no heredar su conflicto de coexistencia (RF-02.2).
+TestDataCleaner::purgeIncidentsByMachine($pdo, (int)$machines['VEND-0502']->getId());
+TestDataCleaner::purgeIncidentsByMachine($pdo, (int)$machines['VEND-0501']->getId());
+TestDataCleaner::purgeIncidentsByMachine($pdo, (int)$machines['VEND-0302']->getId());
+
+$ownAssigned = $incidentRepo->create(
+    $fixtureIncident([
+        'ticketCode' => 'INC-2026-S08G1',
+        'machineId' => $machines['VEND-0302']->getId(),
+        'locationId' => $locationThree,
+        'status' => IncidentStatus::ASSIGNED,
+        'assignedTechnicianId' => $jordi->getId(),
+    ]),
+    $jordi->getId(),
+    'Parada ordinaria propia que el técnico retoma in situ'
+);
+$ownAssignedId = (int)$ownAssigned->getId();
+
+$resumedOwn = $service->assumeOpportunisticIncident($jordi, $ownAssignedId, []);
+$rawResumedOwn = $rawRow($ownAssignedId);
+
+$assert(
+    '11.1 La parada propia asignada pasa a IN_PROGRESS sin pedir confirmación',
+    $resumedOwn['status'] === 'IN_PROGRESS'
+        && $resumedOwn['assigned_technician_id'] === $jordi->getId()
+);
+$assert(
+    '11.2 No se inventa modalidad oportunista sobre una parada ordinaria',
+    $resumedOwn['opportunistic_mode'] === null
+        && ($rawResumedOwn['opportunistic_mode'] ?? null) === null
+        && $resumedOwn['previous_technician_id'] === null
+);
+$assert(
+    '11.3 El arranque real queda persistido en el expediente',
+    ($rawResumedOwn['status'] ?? null) === 'IN_PROGRESS'
+        && ($rawResumedOwn['started_at'] ?? null) !== null
+);
+$assert(
+    '11.4 El historial documenta la reanudación desde el estado real',
+    (static function () use ($incidentRepo, $ownAssignedId): bool {
+        $history = $incidentRepo->getHistory($ownAssignedId);
+        $last = end($history);
+
+        return $last !== false
+            && $last->getFromStatus() === 'ASSIGNED'
+            && $last->getToStatus() === 'IN_PROGRESS';
+    })()
+);
+$assert(
+    '11.5 No se envía correo redundante a la Sede al reanudar lo propio (RF-06.3.1)',
+    $outboxRows($ownAssignedId, NotificationTemplate::INCIDENT_OPENED_SITE->value) === []
+);
+
+// La variante pausada es la que cierra el intervalo vivo y desplaza el SLA:
+// reanudarla por el camino oportunista no puede saltarse el servicio de pausas.
+TestDataCleaner::purgeIncidentsByMachine($pdo, (int)$machines['VEND-0302']->getId());
+$ownPaused = $incidentRepo->create(
+    $fixtureIncident([
+        'ticketCode' => 'INC-2026-S08G2',
+        'machineId' => $machines['VEND-0302']->getId(),
+        'locationId' => $locationThree,
+        'status' => IncidentStatus::PENDING_INFO,
+        'assignedTechnicianId' => $jordi->getId(),
+        'slaTargetAt' => $stamp(28800),
+    ]),
+    $jordi->getId(),
+    'Parada propia pausada esperando información de la sede'
+);
+$ownPausedId = (int)$ownPaused->getId();
+// `create()` no publica el intervalo vivo de pausa: se abre aquí con la misma
+// marca que usaría una pausa real, para que el servicio de pausas tenga qué cerrar.
+$pdo->prepare('UPDATE incidents SET paused_at = :paused_at WHERE id = :id')->execute([
+    ':paused_at' => $stamp(-3600),
+    ':id' => $ownPausedId,
+]);
+
+$resumedPaused = $service->assumeOpportunisticIncident($jordi, $ownPausedId, []);
+$rawResumedPaused = $rawRow($ownPausedId);
+$resumedPausedModel = $incidentRepo->findById($ownPausedId);
+
+$assert(
+    '11.6 La parada propia en PENDING_INFO vuelve a IN_PROGRESS',
+    $resumedPaused['status'] === 'IN_PROGRESS'
+        && ($rawResumedPaused['status'] ?? null) === 'IN_PROGRESS'
+);
+$assert(
+    '11.7 El intervalo de pausa se cierra y se acumula para el MTTR',
+    $resumedPausedModel !== null
+        && $resumedPausedModel->getPausedAt() === null
+        && $resumedPausedModel->getTotalPendingInfoSeconds() >= 3600
+        && $resumedPausedModel->getTotalPendingInfoSeconds() < 3720,
+    'acumulado=' . ($resumedPausedModel?->getTotalPendingInfoSeconds() ?? -1)
+);
+$assert(
+    '11.8 El vencimiento contractual se desplaza en horario comercial (RF-03.3)',
+    $resumedPausedModel !== null
+        && $resumedPausedModel->getSlaTargetAt() !== null
+        && strtotime((string)$resumedPausedModel->getSlaTargetAt()) > strtotime($stamp(28800))
+);
+$assert(
+    '11.9 La reanudación pausada tampoco se etiqueta como oportunista',
+    $resumedPaused['opportunistic_mode'] === null
+        && $resumedPaused['previous_technician_id'] === null
+        && $outboxRows($ownPausedId, NotificationTemplate::INCIDENT_OPENED_SITE->value) === []
+);
+
+// ---------------------------------------------------------------------
 // LIMPIEZA
 // ---------------------------------------------------------------------
 $purge($pdo, $machines);

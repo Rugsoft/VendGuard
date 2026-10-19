@@ -496,8 +496,19 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $this->pdo->rollBack();
             }
 
-            // Detección de duplicado por índice único condicional uq_machine_active_ticket (código 1062)
-            if ($e->getCode() === '23000' || (isset($e->errorInfo[1]) && $e->errorInfo[1] === 1062)) {
+            // Detección de duplicado por el índice único condicional `uq_machine_active_ticket`.
+            //
+            // La rama no puede mirar sólo el errno de MySQL: el motor único es PostgreSQL, que
+            // declara la violación de unicidad con SQLSTATE `23505` y sin errno de controlador.
+            // Sin esta segunda familia, una carrera REAL (dos altas que comprueban a la vez y
+            // colisionan en el índice) escapaba como `PDOException` y el técnico recibía un 500
+            // en lugar del 409 que le ofrece asumir el ticket existente.
+            $sqlState = (string)($e->errorInfo[0] ?? $e->getCode());
+            $driverErrorCode = $e->errorInfo[1] ?? null;
+            $isUniqueViolation = $sqlState === '23000'
+                || $sqlState === '23505'
+                || $driverErrorCode === 1062;
+            if ($isUniqueViolation) {
                 if (str_contains($e->getMessage(), 'uq_machine_active_ticket')) {
                     $active = $this->findActiveByMachineId($incident->getMachineId());
                     $ticket = $active ? $active->getTicketCode() : 'ACTIVO';

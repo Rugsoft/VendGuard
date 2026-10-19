@@ -402,6 +402,53 @@ $assert(
         && ($body['error']['details']['opportunistic_action'] ?? null) === 'CURRENT_TECHNICIAN_IN_PROGRESS'
 );
 
+// G4 · La foto VÁLIDA debe recorrer el camino completo: adjunto multipart real,
+// escritura en `public/uploads/` y `photo_path` persistido en el expediente. La
+// suite ya certifica el rechazo de un adjunto falso (3.2); este caso cierra la
+// mitad positiva de la costura, que es la que usa el técnico en ruta.
+$resetScenario(['VEND-0302']);
+$validJpgBytes = hex2bin(
+    'ffd8ffe000104a46494600010101004800480000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffc0000b080001000101011100ffda0008010100003f00d2cf20ffd9'
+);
+$validPhoto = tempnam(sys_get_temp_dir(), 'vg_t09_photo_') . '.jpg';
+file_put_contents($validPhoto, $validJpgBytes);
+[$status, $body] = $dispatch(
+    'POST',
+    '/api/technician/opportunistic/incidents',
+    $techToken,
+    $baseCreate,
+    [],
+    ['photo' => [
+        'name' => 'evidencia_oportunista.jpg',
+        'type' => 'image/jpeg',
+        'tmp_name' => $validPhoto,
+        'error' => UPLOAD_ERR_OK,
+        'size' => strlen($validJpgBytes),
+    ]]
+);
+@unlink($validPhoto);
+$photoIncident = $body['data'] ?? [];
+$photoIncidentId = (int)($photoIncident['id'] ?? 0);
+$photoRow = $photoIncidentId > 0
+    ? $pdo->query('SELECT photo_path FROM incidents WHERE id = ' . $photoIncidentId)->fetch(PDO::FETCH_ASSOC)
+    : false;
+$photoPath = is_array($photoRow) ? (string)($photoRow['photo_path'] ?? '') : '';
+$photoFullPath = __DIR__ . '/../../public' . $photoPath;
+$assert(
+    '3.11 Una foto JPEG válida abre el expediente en curso y persiste su ruta',
+    $status === 201
+        && ($photoIncident['status'] ?? null) === 'IN_PROGRESS'
+        && (bool)preg_match('#^/uploads/[a-f0-9]{32}\.jpg$#', $photoPath),
+    'HTTP ' . $status . ' · photo_path=' . $photoPath
+);
+$assert(
+    '3.12 El archivo de la evidencia existe físicamente y no queda huérfano',
+    $photoPath !== '' && is_file($photoFullPath) && filesize($photoFullPath) === strlen($validJpgBytes)
+);
+if ($photoPath !== '' && is_file($photoFullPath)) {
+    @unlink($photoFullPath);
+}
+
 // =========================================================================
 // CASO 4 · POST /opportunistic/incidents/{id}/assume — Flujo B (RF-05)
 // =========================================================================
