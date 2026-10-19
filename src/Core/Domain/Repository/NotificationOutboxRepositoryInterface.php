@@ -137,6 +137,25 @@ interface NotificationOutboxRepositoryInterface
     public function cancelPendingForRecipientUser(int $userId, string $reason): int;
 
     /**
+     * Cancels by obsolescence the pending rows of one incident addressed to one
+     * internal user, optionally restricted to a closed list of templates.
+     *
+     * Es la primitiva que exige el traspaso oportunista in situ (RF-06.3.3):
+     * al asumir el expediente de otro compañero, su aviso de «Nueva asignación»
+     * —correo y Telegram— queda invalidado, pero los avisos pendientes de OTROS
+     * expedientes del mismo técnico deben seguir vivos.
+     *
+     * @param list<string> $templates Plantillas a cancelar; vacío = todas.
+     * @return int Number of cancelled rows.
+     */
+    public function cancelPendingForIncidentRecipient(
+        int $incidentId,
+        int $recipientUserId,
+        string $reason,
+        array $templates = []
+    ): int;
+
+    /**
      * Cancels by obsolescence every pending Webhook row after the corporate
      * channel is disabled (RF-07.1.f).
      *

@@ -94,13 +94,16 @@
 
 ## Fase 4: Integración con el Centro de Notificaciones y Privacidad (Módulos 14 y 15)
 
-- [ ] **T-OPP-07 · Ampliar `NotificationMessageRenderer`, `NotificationPayloadSanitizer` y `NotificationOutboxEnqueuerService` con las reglas oportunistas, obsolescencia y respeto a `RF-TG-06`**
+- [x] **T-OPP-07 · Ampliar `NotificationMessageRenderer`, `NotificationPayloadSanitizer` y `NotificationOutboxEnqueuerService` con las reglas oportunistas, obsolescencia y respeto a `RF-TG-06`**
   * **Tiempo estimado:** 25 min
   * **Dependencias:** `T-OPP-03`, `T-OPP-06`
   * **Ficheros a crear o modificar:**
     * `src/Infrastructure/Notification/Template/NotificationMessageRenderer.php` *(modificar)*
     * `src/Core/Service/NotificationPayloadSanitizer.php` *(modificar)*
     * `src/Application/Service/NotificationOutboxEnqueuerService.php` *(modificar)*
+    * `src/Core/Service/NotificationObsolescencePolicy.php` *(modificar)*
+    * `src/Core/Domain/Repository/NotificationOutboxRepositoryInterface.php` *(modificar)*
+    * `src/Infrastructure/Repository/PdoNotificationOutboxRepository.php` *(modificar)*
     * `tests/integration/OpportunisticNotificationAndPrivacyTest.php` *(crear)*
   * **Requisitos que cubre:** `RF-03.2.2`, `RF-04.1.2`, `RF-05.3.3`, `RF-06.3.1` a `RF-06.3.4`, `RNF-03`, Resoluciones QA 1, QA 2 y QA 5, `constitution.md` Art. II y Art. V.4, Módulo 15 `RF-TG-06`
   * **Hecho cuando:** `php tests/integration/OpportunisticNotificationAndPrivacyTest.php` pasa al 100% en verde certificando: (1) renderizado y encolado de `OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT` (`CRITICAL_SANITARY`) a Coordinadores y Webhook cuando el técnico pospone una parada crítica/frío en otra sede; (2) renderizado y encolado de `INCIDENT_REOPENED_IN_SITU_SITE` a la Sede en reapertura in situ; (3) cero correo redundante a la Sede cuando solo se asume un ticket ya abierto; (4) en traspaso entre técnicos, cancelación por obsolescencia (`CANCELLED_OBSOLETE`) de `TECHNICIAN_ASSIGNED` (`EMAIL` y `TELEGRAM`) pendientes del técnico reemplazado y encolado de `TECHNICIAN_UNASSIGNED` **exclusivamente por `EMAIL` (sin `TELEGRAM`)**; y (5) anonimización del técnico como `"Servicio Técnico Oficial · Operador #[Código]"`, ocultación de notas internas de traspaso a la Sede y ocultación de `opportunistic_informant_name` al Ciudadano QR.

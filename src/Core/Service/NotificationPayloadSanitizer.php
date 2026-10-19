@@ -27,6 +27,14 @@ use InvalidArgumentException;
  *    - El enlace de seguimiento apunta al Portal de Sede: `/?site={site_code}&ticket={ticket_code}`.
  *    - En `PENDING_INFO_SITE_REQUEST` sí se incluyen `reason_category_label` y `reason_text` (>= 20 caracteres)
  *      para que el responsable del edificio pueda desbloquear el acceso (Módulo 11 RF-05.1).
+ *    - Sí se publica el nombre del informante verbal en sede (`opportunistic_informant_name`)
+ *      y la modalidad oportunista, pero JAMÁS la nota interna de traspaso entre técnicos
+ *      (RF-05.3.3, Resolución QA 5, Módulo 16).
+ *
+ * 4. Para destinatarios con recipient_role = 'CITIZEN_QR' (Módulo 16):
+ *    - El nombre del informante en sede y el motivo de origen del hallazgo no forman
+ *      parte de la proyección pública neutra: se eliminan aunque la plantilla no los lea
+ *      (RF-06.3.1, Art. V.4).
  *
  * Dogma Vanilla: PHP 8.2+ puro, sin dependencias externas.
  * Dualismo Lingüístico: código e identificadores en inglés, documentación en castellano.
@@ -62,6 +70,13 @@ final class NotificationPayloadSanitizer
         // Operador #02»), así que para un rol externo se descarta y se sustituye
         // por la etiqueta neutra `technical_service_label` (Art. V.4).
         'technician_label',
+        // Notas estrictamente internas del traspaso oportunista entre técnicos
+        // (RF-05.3.3, Resolución QA 5): la Sede y el Ciudadano QR no pueden
+        // recibir ni el texto ni su clave, aunque un productor futuro la copiara.
+        'takeover_internal_note',
+        'takeover_note',
+        'handover_note',
+        'internal_note',
     ];
 
     /** Claves prohibidas adicionalmente para CITIZEN_QR (proyección pública mínima neutra). */
@@ -76,6 +91,12 @@ final class NotificationPayloadSanitizer
         'site_code',
         'site_name',
         'location_name',
+        // El informante verbal de la sede y el origen del hallazgo son datos de
+        // contexto operativo, no de la proyección pública neutra (RF-06.3.1).
+        'opportunistic_informant_name',
+        'informant_name',
+        'opportunistic_origin_reason',
+        'opportunistic_origin_label',
     ];
 
     /**

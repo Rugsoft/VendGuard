@@ -491,6 +491,46 @@ class PdoNotificationOutboxRepository implements NotificationOutboxRepositoryInt
     /**
      * {@inheritDoc}
      */
+    public function cancelPendingForIncidentRecipient(
+        int $incidentId,
+        int $recipientUserId,
+        string $reason,
+        array $templates = []
+    ): int {
+        $params = [
+            ':incident_id' => [$incidentId, PDO::PARAM_INT],
+            ':recipient_user_id' => [$recipientUserId, PDO::PARAM_INT],
+            ':reason' => [$reason, PDO::PARAM_STR],
+            ':cancelled_at' => [$this->formatDate($this->now()), PDO::PARAM_STR],
+        ];
+
+        $restriction = '';
+        foreach (array_values($templates) as $index => $template) {
+            NotificationTemplate::fromString($template); // valida el catálogo cerrado
+            $restriction .= sprintf(' AND template = :template_%d', $index);
+            $params[':template_' . $index] = [$template, PDO::PARAM_STR];
+        }
+
+        $sql = "
+            UPDATE notification_outbox
+            SET status = 'CANCELLED_OBSOLETE',
+                obsolete_reason = :reason,
+                processed_at = :cancelled_at,
+                processing_started_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE incident_id = :incident_id
+              AND recipient_user_id = :recipient_user_id
+              AND status IN ('PENDING', 'PENDING_RETRY')
+              AND deleted_at IS NULL
+              {$restriction}
+        ";
+
+        return $this->executeCancellation($sql, $params);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function cancelPendingWebhookItems(string $reason): int
     {
         $sql = "

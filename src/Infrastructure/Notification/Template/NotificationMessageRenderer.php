@@ -276,14 +276,24 @@ final class NotificationMessageRenderer
             ),
 
             NotificationTemplate::INCIDENT_OPENED_SITE => $this->draft(
-                subject: '✅ Hemos registrado su avería' . $ticketSuffix,
+                subject: $this->isOpportunisticOpening($payload)
+                    ? '✅ Avería registrada y en atención in situ' . $ticketSuffix
+                    : '✅ Hemos registrado su avería' . $ticketSuffix,
                 eyebrow: 'CICLO DEL EXPEDIENTE',
-                title: 'Avería registrada correctamente',
-                intro: 'Hemos registrado correctamente la avería comunicada desde su centro. '
-                    . 'Puede seguir su evolución en el Portal de Sede.',
+                title: $this->isOpportunisticOpening($payload)
+                    ? 'Avería registrada y ya en atención in situ'
+                    : 'Avería registrada correctamente',
+                intro: $this->isOpportunisticOpening($payload)
+                    ? 'Hemos registrado la avería detectada durante la visita al centro y el servicio técnico '
+                        . 'ya está interviniendo la máquina in situ. Puede seguir su evolución en el Portal de Sede.'
+                    : 'Hemos registrado correctamente la avería comunicada desde su centro. '
+                        . 'Puede seguir su evolución en el Portal de Sede.',
                 details: $this->mergeRows(
                     $this->dossierRows($payload, true),
                     [
+                        $this->row('Modalidad', $this->text($payload, 'opportunistic_mode_label')),
+                        $this->row('Informante en sede', $this->text($payload, 'opportunistic_informant_name')),
+                        $this->row('Servicio técnico', $this->technicianLabel($payload)),
                         $this->row('Dirección', $this->text($payload, 'address')),
                         $this->row('Fecha de apertura', $this->dateText($payload, 'opened_at') ?? $this->dateText($payload, 'event_at')),
                         $this->row('Descripción reportada', $this->text($payload, 'description')),
@@ -807,6 +817,22 @@ final class NotificationMessageRenderer
     private function machineLabel(array $payload): ?string
     {
         return $this->text($payload, 'machine_label') ?? $this->text($payload, 'machine_code');
+    }
+
+    /**
+     * ¿La confirmación de apertura corresponde a un Alta Oportunista In Situ?
+     *
+     * El productor añade `opportunistic_mode` al payload neutro; con la modalidad
+     * `NEW` (o su etiqueta) el correo a la Sede debe decir que la máquina ya está
+     * siendo atendida en el acto (RF-06.3.1). La modalidad `ASSUMED` no genera
+     * correo de apertura: asumir un expediente ya abierto nunca avisa a la Sede.
+     *
+     * @param array<string, mixed> $payload
+     */
+    private function isOpportunisticOpening(array $payload): bool
+    {
+        return $this->text($payload, 'opportunistic_mode') === 'NEW'
+            || $this->text($payload, 'opportunistic_mode_label') === 'Oportunista In Situ · Nueva';
     }
 
     /**

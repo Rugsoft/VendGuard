@@ -26,6 +26,7 @@ use VendGuard\Core\Domain\ValueObject\NotificationPriority;
 use VendGuard\Core\Domain\ValueObject\NotificationTemplate;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 use VendGuard\Core\Domain\Model\NotificationOutboxItem;
+use VendGuard\Core\Service\NotificationObsolescencePolicy;
 use VendGuard\Core\Service\NotificationPayloadSanitizer;
 use VendGuard\Core\Service\WebhookUrlSecurityValidator;
 use VendGuard\Infrastructure\Config\SecretProvider;
@@ -50,10 +51,17 @@ use VendGuard\Infrastructure\Notification\Transport\TelegramTransport;
  *    cuarentena y el escalado de contención llevan `dedup_key`; las respuestas de
  *    Sede en `PENDING_INFO` delegan la agrupación de ráfagas en el repositorio.
  *
- * Los 19 eventos del catálogo se reparten en métodos públicos con nombre de
+ * Los eventos del catálogo se reparten en métodos públicos con nombre de
  * negocio (apertura, asignación, pausa, resolución, reapertura, crónica,
- * cancelación, acuse QR, cuarentena y escalado). Los dos umbrales de SLA (2h/3h)
- * viven aquí como métodos públicos del puerto `SanitarySlaAlertEnqueuerInterface`
+ * cancelación, acuse QR, cuarentena y escalado). El Módulo 16 añade dos métodos
+ * que respetan la matriz de encolado de la avería oportunista (RF-06.3):
+ * `enqueueInSituAssumption()` aplica la regla «cero correo redundante a la Sede»
+ * al asumir un ticket ya abierto, cancela por obsolescencia el aviso de
+ * asignación del técnico reemplazado —solo por correo la desasignación, RF-TG-06—
+ * y avisa a Sede y Coordinación cuando hay reapertura in situ en garantía;
+ * `enqueueOpportunisticColdRoutePostponed()` escala a Coordinación la parada
+ * crítica/frío postergada en otra sede (Resolución QA 1). Los dos umbrales de SLA
+ * (2h/3h) viven aquí como métodos públicos del puerto `SanitarySlaAlertEnqueuerInterface`
  * —el despachador decide CUÁNDO pedirlos (T-NOTIF-07), el servicio de encolado
  * decide CÓMO construirlos—; ninguna otra ruta del ciclo de vida los dispara.
  *
@@ -892,6 +900,246 @@ final class NotificationOutboxEnqueuerService implements SanitarySlaAlertEnqueue
     }
 
     /**
+     * RF-06.3 / Resoluciones QA 1 y QA 2: efectos de la Asunción Oportunista In Situ.
+     *
+     * La matriz de encolado distingue tres desenlaces que el técnico no debe
+     * pagar con correos de más:
+     *
+     * 1. **Asunción simple** de un ticket registrado o de un compañero: cero
+     *    correo a la Sede. El expediente ya estaba abierto y su informador no
+     *    necesita saber que cambió de manos (RF-06.3.1).
+     * 2. **Traspaso desde otro técnico** (`$previousTechnicianId`): se cancela por
+     *    obsolescencia su aviso de «Nueva asignación» pendiente —correo y
+     *    Telegram— y se le envía la desasignación SOLO por correo, sin botón
+     *    (RF-06.3.3 y Módulo 15 `RF-TG-06`).
+     * 3. **Reapertura in situ en garantía** (`$before` resuelto): la Sede recibe
+     *    `INCIDENT_REOPENED_IN_SITU_SITE` y Coordinación
+     *    `INCIDENT_REOPENED_COORDINATOR`, ambos por correo (RF-06.3.2).
+     *
+     * Debe invocarse dentro de la transacción de negocio: el traspaso y su
+     * aviso de desasignación viajan en el mismo commit que el cambio de titular.
+     *
+     * @return int Filas efectivamente encoladas.
+     */
+    public function enqueueInSituAssumption(
+        Incident $before,
+        Incident $after,
+        ?int $previousTechnicianId = null,
+        ?Machine $machine = null,
+        ?Location $location = null
+    ): int {
+        return $this->transactions->runInTransaction(function () use (
+            $before,
+            $after,
+            $previousTechnicianId,
+            $machine,
+            $location
+        ): int {
+            $machine ??= $this->machineFor($after);
+            $location ??= $this->locationFor($after);
+            if ($location === null) {
+                return 0;
+            }
+
+            $count = 0;
+            $incomingId = $after->getAssignedTechnicianId();
+
+            if ($previousTechnicianId !== null && $previousTechnicianId !== $incomingId) {
+                $count += $this->notifySupersededTechnician($after, $previousTechnicianId, $machine, $location);
+            }
+
+            // Solo la reapertura en garantía legitima un correo nuevo a la Sede
+            // (RF-06.3.1). La asunción de un ticket ya abierto no deja rastro en
+            // la bandeja: el informador ya conocía el expediente.
+            if ($before->getStatus() === IncidentStatus::RESOLVED) {
+                $count += $this->queueInSituReopenNotices($after, $machine, $location);
+            }
+
+            return $count;
+        });
+    }
+
+    /**
+     * RF-03.2.2 / Resolución QA 1: el técnico pospone una parada crítica o de
+     * riesgo sanitario en OTRA sede para atender una avería oportunista.
+     *
+     * La alerta va a los coordinadores activos con prioridad `CRITICAL_SANITARY`
+     * (la hereda de la plantilla) y al canal corporativo de emergencias solo si
+     * alguna parada postergada tiene vigilancia sanitaria/térmica: el webhook no
+     * debe recibir ruido por una parada crítica comercial.
+     *
+     * @param list<array{ticket_code: string, location_name: string, is_sanitary: bool}> $postponedStops
+     * @return int Filas efectivamente encoladas.
+     */
+    public function enqueueOpportunisticColdRoutePostponed(
+        Incident $incident,
+        array $postponedStops,
+        ?Machine $machine = null,
+        ?Location $location = null
+    ): int {
+        if ($postponedStops === []) {
+            return 0;
+        }
+
+        return $this->transactions->runInTransaction(function () use (
+            $incident,
+            $postponedStops,
+            $machine,
+            $location
+        ): int {
+            $machine ??= $this->machineFor($incident);
+            $location ??= $this->locationFor($incident);
+            if ($location === null) {
+                return 0;
+            }
+
+            $first = $postponedStops[0];
+            $sanitary = false;
+            foreach ($postponedStops as $stop) {
+                if (($stop['is_sanitary'] ?? false) === true) {
+                    $sanitary = true;
+                    break;
+                }
+            }
+
+            $payload = $this->basePayload($incident, $machine, $location, [
+                'event_at' => $this->now(),
+                'postponed_stops_count' => count($postponedStops),
+                'postponed_stop_location' => trim((string)($first['location_name'] ?? '')),
+                'postponed_stop_ticket' => trim((string)($first['ticket_code'] ?? '')),
+            ]);
+
+            $cycle = $this->cycleKey($incident);
+            $count = 0;
+
+            foreach ($this->coordinatorRecipients() as $coordinator) {
+                $count += $this->queueEmail(
+                    NotificationTemplate::OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT,
+                    $coordinator['email'],
+                    self::ROLE_COORDINATOR,
+                    $coordinator['id'],
+                    null,
+                    $incident,
+                    $payload,
+                    sprintf('inc:%d:cyc:%s:postponed:u%d', (int)$incident->getId(), $cycle, $coordinator['id'])
+                ) ? 1 : 0;
+            }
+
+            if ($sanitary) {
+                $count += $this->queueWebhook(
+                    $incident,
+                    NotificationTemplate::OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT,
+                    $payload,
+                    sprintf('inc:%d:cyc:%s:postponed:webhook', (int)$incident->getId(), $cycle)
+                ) ? 1 : 0;
+            }
+
+            return $count;
+        });
+    }
+
+    /**
+     * RF-06.3.3: invalida el aviso de asignación del técnico reemplazado y le
+     * envía la desasignación exclusivamente por correo.
+     *
+     * La cancelación se restringe a `TECHNICIAN_ASSIGNED` de ESTE expediente y
+     * ESTE destinatario: los avisos pendientes de otros tickets del mismo técnico
+     * siguen siendo válidos y la bandeja no debe vaciarse en bloque.
+     *
+     * @return int Filas encoladas (0 o 1).
+     */
+    private function notifySupersededTechnician(
+        Incident $incident,
+        int $previousTechnicianId,
+        ?Machine $machine,
+        Location $location
+    ): int {
+        $this->outbox->cancelPendingForIncidentRecipient(
+            (int)$incident->getId(),
+            $previousTechnicianId,
+            NotificationObsolescencePolicy::REASON_ASSIGNMENT_SUPERSEDED_IN_SITU,
+            [NotificationTemplate::TECHNICIAN_ASSIGNED->value]
+        );
+
+        $technician = $this->users->findById($previousTechnicianId, false);
+        $email = $this->validEmail($technician?->getEmail());
+        if ($technician === null || $email === null) {
+            return 0;
+        }
+
+        $payload = $this->basePayload($incident, $machine, $location, [
+            'event_at' => $this->now(),
+        ]);
+
+        // El canal es EMAIL por mandato de RF-TG-06: la desasignación no viaja
+        // por Telegram ni lleva botón a un expediente que ya no es del saliente.
+        return $this->queueEmail(
+            NotificationTemplate::TECHNICIAN_UNASSIGNED,
+            $email,
+            self::ROLE_TECHNICIAN,
+            $previousTechnicianId,
+            null,
+            $incident,
+            $payload,
+            sprintf('inc:%d:takeover:%d:unassigned', (int)$incident->getId(), $previousTechnicianId)
+        ) ? 1 : 0;
+    }
+
+    /**
+     * RF-06.3.2 / RF-06.3.4: reapertura in situ en garantía.
+     *
+     * La Sede y Coordinación saben que el expediente vuelve a estar vivo y ya se
+     * está atendiendo; la alerta de frío del nuevo ciclo se emite con la misma
+     * puerta anti-spam que el resto del catálogo.
+     *
+     * @return int Filas efectivamente encoladas.
+     */
+    private function queueInSituReopenNotices(
+        Incident $incident,
+        ?Machine $machine,
+        Location $location
+    ): int {
+        $payload = $this->basePayload($incident, $machine, $location, [
+            'event_at' => $this->now(),
+            'reopened_at' => $incident->getReopenedAt() ?? $this->now(),
+            'reopen_reason' => $incident->getReopenReason(),
+        ]);
+        $cycle = $this->cycleKey($incident);
+        $count = 0;
+
+        $siteEmail = $this->validEmail($location->getContactEmail());
+        if ($siteEmail !== null) {
+            $count += $this->queueEmail(
+                NotificationTemplate::INCIDENT_REOPENED_IN_SITU_SITE,
+                $siteEmail,
+                self::ROLE_LOCATION,
+                null,
+                (int)$location->getId(),
+                $incident,
+                $payload,
+                sprintf('inc:%d:cyc:%s:insitu-reopen:site:%s', (int)$incident->getId(), $cycle, $siteEmail)
+            ) ? 1 : 0;
+        }
+
+        foreach ($this->coordinatorRecipients() as $coordinator) {
+            $count += $this->queueEmail(
+                NotificationTemplate::INCIDENT_REOPENED_COORDINATOR,
+                $coordinator['email'],
+                self::ROLE_COORDINATOR,
+                $coordinator['id'],
+                null,
+                $incident,
+                $payload,
+                sprintf('inc:%d:cyc:%s:insitu-reopen:u%d', (int)$incident->getId(), $cycle, $coordinator['id'])
+            ) ? 1 : 0;
+        }
+
+        $count += $this->enqueueColdChainAlertInternal($incident, $machine, $location);
+
+        return $count;
+    }
+
+    /**
      * Núcleo de RF-03.1, compartido por apertura, reapertura, asignación y la
      * API pública de la alerta. Debe invocarse ya dentro de una transacción.
      */
@@ -1170,7 +1418,9 @@ final class NotificationOutboxEnqueuerService implements SanitarySlaAlertEnqueue
      * Sólo viajan claves que el renderizador puede leer y que el sanitizador
      * conoce. Los diagnósticos, acciones, costes y notas internas NO se copian
      * aquí: no existen en el payload de origen y, por tanto, no pueden acabar
-     * en la cola (Art. V.4).
+     * en la cola (Art. V.4). Las claves oportunistas son neutras (`modo`,
+     * `submotivo`, `informante`); la nota de traspaso se queda en
+     * `incident_comments` con `is_internal = TRUE` y jamás entra en este método.
      *
      * @param array<string, mixed> $extra
      * @return array<string, mixed>
@@ -1216,6 +1466,15 @@ final class NotificationOutboxEnqueuerService implements SanitarySlaAlertEnqueue
             'technician_id' => $incident->getAssignedTechnicianId(),
             'operator_code' => $incident->getTechnicianOperatorCode(),
             'technician_label' => $technicianLabel,
+            // Contexto oportunista (Módulo 16): la Sede ve la modalidad y el
+            // informante verbal; el Ciudadano QR los pierde en el sanitizador y
+            // la nota de traspaso nunca viaja aquí (Art. V.4, Resolución QA 5).
+            'is_opportunistic' => $incident->isOpportunistic() ? true : null,
+            'opportunistic_mode' => $incident->getOpportunisticMode()?->value,
+            'opportunistic_mode_label' => $incident->getOpportunisticMode()?->label(),
+            'opportunistic_origin_reason' => $incident->getOpportunisticOriginReason()?->value,
+            'opportunistic_origin_label' => $incident->getOpportunisticOriginReason()?->label(),
+            'opportunistic_informant_name' => $incident->getOpportunisticInformantName(),
         ], $extra), static fn (mixed $value): bool => $value !== null && $value !== '');
     }
 

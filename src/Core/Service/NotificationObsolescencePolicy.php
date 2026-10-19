@@ -44,6 +44,13 @@ final class NotificationObsolescencePolicy
     /** Motivo cuando el técnico asignado fue reemplazado antes del despacho. */
     public const REASON_TECHNICIAN_SUPERSEDED = 'Technician was unassigned or superseded before dispatch';
 
+    /**
+     * Motivo cuando otro técnico presente en la sede asume el expediente in situ
+     * (RF-06.3.3): el aviso de «Nueva asignación» pendiente del compañero
+     * reemplazado queda invalidado antes de que salga.
+     */
+    public const REASON_ASSIGNMENT_SUPERSEDED_IN_SITU = 'Assignment superseded by an in-situ opportunistic takeover';
+
     /** Motivo cuando la pausa por información ya fue reanudada. */
     public const REASON_PAUSE_ALREADY_RESUMED = 'Incident is no longer paused in pending info status';
 
