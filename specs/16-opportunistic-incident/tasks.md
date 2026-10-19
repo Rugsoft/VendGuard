@@ -56,7 +56,7 @@
   * **Requisitos que cubre:** `RF-01.1`, `RF-02.2`, `RF-03.1`, `RF-04.1`, `RF-04.2`, `RF-05.2`, `RF-05.3`, `RF-05.4`, `RF-06.4`, Resoluciones QA 1, QA 2 y QA 4
   * **Hecho cuando:** Existen los 3 nuevos Value Objects con sus etiquetas canónicas en español (*"Oportunista In Situ · Nueva"*, *"Oportunista In Situ · Asumida"*, etc.), las 4 excepciones tipadas con sus códigos y estados HTTP (`403`, `409`), la entidad `Incident` hidrata y serializa los 4 nuevos atributos en `fromDatabaseRow()` / `toArray()`, y `php tests/unit/OpportunisticStateTransitionsTest.php` pasa al 100% en verde.
 
-- [ ] **T-OPP-04 · Implementar políticas puras de dominio (`OpportunisticLocationEligibilityPolicy`, `OpportunisticCoexistencePolicy`, `OpportunisticColdChainGuardPolicy`) y sus suites unitarias**
+- [x] **T-OPP-04 · Implementar políticas puras de dominio (`OpportunisticLocationEligibilityPolicy`, `OpportunisticCoexistencePolicy`, `OpportunisticColdChainGuardPolicy`) y sus suites unitarias**
   * **Tiempo estimado:** 30 min
   * **Dependencias:** `T-OPP-03`
   * **Ficheros a crear o modificar:**
