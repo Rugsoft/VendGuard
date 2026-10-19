@@ -124,7 +124,7 @@
   * **Requisitos que cubre:** `RF-01` a `RF-06`, `RNF-01`, `RNF-03`, `RNF-04`, `constitution.md` Art. II, Art. III y Art. V
   * **Hecho cuando:** `OpportunisticIncidentService` coordina de forma transaccional la consulta del catálogo de máquinas de la sede (`getLocationOpportunisticCatalog`), el Alta Oportunista (`createOpportunisticIncident`, rechazando cualquier campo `iban`/`bizum_phone`/`refund_requested` con `422 CASH_REFUND_PRIVACY_VIOLATION` y devolviendo el ticket existente con `409 ACTIVE_INCIDENT_ALREADY_EXISTS_ASSUME_INSTEAD` si hubo alta concurrente) y la Asunción/Reapertura Oportunista (`assumeOpportunisticIncident`), registrando todas las acciones en `AuditLogger`.
 
-- [ ] **T-OPP-09 · Implementar `TechnicianOpportunisticController`, extender `TechnicianController`, `CoordinatorController` y `LocationPortalController`, registrar rutas en `AppRouter` y crear `OpportunisticIncidentApiIntegrationTest.php`**
+- [x] **T-OPP-09 · Implementar `TechnicianOpportunisticController`, extender `TechnicianController`, `CoordinatorController` y `LocationPortalController`, registrar rutas en `AppRouter` y crear `OpportunisticIncidentApiIntegrationTest.php`**
   * **Tiempo estimado:** 30 min
   * **Dependencias:** `T-OPP-08`
   * **Ficheros a crear o modificar:**

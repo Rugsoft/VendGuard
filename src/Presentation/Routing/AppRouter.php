@@ -9,6 +9,7 @@ use VendGuard\Presentation\Controller\CoordinatorRouteMapController;
 use VendGuard\Presentation\Controller\HealthController;
 use VendGuard\Presentation\Controller\LocationRefundController;
 use VendGuard\Presentation\Controller\PublicRefundController;
+use VendGuard\Presentation\Controller\TechnicianOpportunisticController;
 use VendGuard\Presentation\Controller\TechnicianRefundController;
 use VendGuard\Presentation\Controller\TechnicianRouteMapController;
 use VendGuard\Presentation\Http\Request;
@@ -224,6 +225,13 @@ class AppRouter
         );
         $router->get('/api/technician/route/map', [TechnicianRouteMapController::class, 'getRouteMap'], [$technicianAuth]);
         $router->get('/api/technician/my-route', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getMyRoute'], [$technicianAuth]);
+        // Avería Oportunista In Situ (Módulo 16: T-OPP-09, RF-01 a RF-05).
+        // El catálogo exige que la sede esté habilitada para este técnico; el alta y
+        // la asunción revalidan esa habilitación en el servicio, bajo su propia
+        // transacción, para que el catálogo pintado nunca sea la última palabra.
+        $router->get('/api/technician/locations/{location_id}/opportunistic-machines', [TechnicianOpportunisticController::class, 'getLocationCatalog'], [$technicianAuth]);
+        $router->post('/api/technician/opportunistic/incidents', [TechnicianOpportunisticController::class, 'createIncident'], [$technicianAuth]);
+        $router->post('/api/technician/opportunistic/incidents/{id}/assume', [TechnicianOpportunisticController::class, 'assumeIncident'], [$technicianAuth]);
         // Historial de averías de una máquina de la ruta (solo lectura, Art. V.4).
         $router->get('/api/technician/machines/{id}/history', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getMachineHistory'], [$technicianAuth]);
         $router->get('/api/technician/my-metrics', [\VendGuard\Presentation\Controller\TechnicianMetricsController::class, 'getMyMetrics'], [$technicianAuth]);

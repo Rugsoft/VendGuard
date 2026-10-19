@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VendGuard\Presentation\Controller;
 
+use DateTimeImmutable;
 use VendGuard\Application\DTO\IncidentPauseRequestDto;
 use VendGuard\Application\DTO\TechnicianRefundInspectionDTO;
 use VendGuard\Application\DTO\TechnicianRefundViewDTO;
@@ -44,6 +45,7 @@ use VendGuard\Core\Domain\Repository\LocationBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Core\Domain\Repository\OpportunisticIncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianRouteBoardRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
@@ -118,7 +120,8 @@ class TechnicianController
         ?IncidentPauseService $pauseService = null,
         ?FileStorageCompensator $fileCompensator = null,
         ?SanitaryReportSafeguardService $sanitarySafeguard = null,
-        ?NotificationOutboxEnqueuerService $notificationEnqueuer = null
+        ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
+        ?AuditLogger $auditLogger = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->machineRepo  = $machineRepo ?? new PdoMachineRepository();
@@ -151,13 +154,27 @@ class TechnicianController
         $this->pauseService = $pauseService;
         $this->sanitarySafeguard = $sanitarySafeguard;
         $this->notificationEnqueuer = $notificationEnqueuer;
+        $this->auditLogger = $auditLogger;
     }
 
     private ?NotificationOutboxEnqueuerService $notificationEnqueuer = null;
 
+    /**
+     * Registro inmutable del desbloqueo de máquina al resolver in situ
+     * (RF-06.1.1). Se resuelve bajo demanda, como el resto de colaboradores
+     * opcionales, para que el controlador se construya en suites unitarias sin
+     * base de datos.
+     */
+    private ?AuditLogger $auditLogger = null;
+
     private function notifications(): ?NotificationOutboxEnqueuerService
     {
         return $this->notificationEnqueuer ??= NotificationOutboxEnqueuerFactory::createOrNull();
+    }
+
+    private function audit(): AuditLogger
+    {
+        return $this->auditLogger ??= new AuditLogger(new PdoAuditLogRepository());
     }
 
     /**
@@ -267,7 +284,43 @@ class TechnicianController
             ? $this->routeFromBoard($techId, $routeStatuses)
             : $this->routeFromReads($techId, $routeStatuses);
 
-        return Response::json($routeData, 200);
+        // Contexto oportunista opcional (Módulo 16, RF-01.2 y RF-03.1). La raíz sigue
+        // siendo el array de paradas cuando el cliente no lo pide: los contratos de los
+        // Módulos 03, 07, 11 y 15 no pueden cambiar de forma por una extensión.
+        if (!$this->isTruthyQueryFlag($request->getQuery('include_opportunistic_context'))) {
+            return Response::json($routeData, 200);
+        }
+
+        if (!$this->incidentRepo instanceof OpportunisticIncidentRepositoryInterface) {
+            // Dobles de prueba sin la capacidad: se publica el contexto vacío, no un
+            // error, porque la ruta ordinaria sigue siendo válida.
+            return Response::json([
+                'stops' => $routeData,
+                'enabled_locations' => [],
+                'pending_critical_stops_other_locations' => [],
+            ], 200);
+        }
+
+        $now = new DateTimeImmutable('now');
+        $enabledLocations = $this->incidentRepo->findOpportunisticEnabledLocations(
+            $techId,
+            $now,
+            $this->isTruthyQueryFlag($request->getQuery('form_opened_within_grace'))
+        );
+
+        // Sin sede destino: el contexto de ruta no opera sobre una sede concreta, así
+        // que se publican todas las paradas críticas o sanitarias que esperan al
+        // técnico. El centinela 0 no colisiona con ninguna sede persistida.
+        $pendingStops = $this->incidentRepo->findPendingCriticalStopsInOtherLocations($techId, 0);
+
+        return Response::json([
+            'stops' => $routeData,
+            'enabled_locations' => $enabledLocations,
+            'pending_critical_stops_other_locations' => array_map(
+                $this->pendingCriticalStopPayload(...),
+                $pendingStops
+            ),
+        ], 200);
     }
 
     /**
@@ -415,6 +468,14 @@ class TechnicianController
             'ticket_code' => $incident->getTicketCode(),
             'urgency'     => $incident->getUrgency()->value,
             'status'      => $incident->getStatus()->value,
+            // Trazabilidad oportunista (Módulo 16, RF-06.4): la insignia de la parada
+            // distingue si la avería nació in situ o se asumió, y con qué motivo.
+            'opportunistic_mode'               => $incident->getOpportunisticMode()?->value,
+            'opportunistic_mode_label'         => $incident->getOpportunisticMode()?->label(),
+            'opportunistic_origin_reason'      => $incident->getOpportunisticOriginReason()?->value,
+            'opportunistic_origin_label'       => $incident->getOpportunisticOriginReason()?->label(),
+            'opportunistic_informant_name'     => $incident->getOpportunisticInformantName(),
+            'chronic_predecessor_incident_id'  => $incident->getChronicPredecessorIncidentId(),
             'machine'     => [
                 'id'         => $machine?->getId(),
                 'code'       => $machine?->getCode() ?? $incident->getMachineCode(),
@@ -1154,6 +1215,11 @@ class TechnicianController
         try {
             $result = $this->traceability()->resolveIncidentWithParts($incidentId, $techId, $body, $actor);
 
+            // RF-06.1.1 / RF-06.1.2: la reparación in situ devuelve la máquina al parque
+            // si estaba fuera de servicio por falta de acceso. La puerta sanitaria manda:
+            // una cuarentena vigente NO se levanta por cerrar la avería (Art. II).
+            $result += $this->releaseNoAccessBlockAfterResolution($incident, $request, $sanitaryRequired);
+
             return Response::json(
                 $result + $this->buildRefundSummary($incidentId, $refundOutcome, $unclaimedFindingId),
                 200,
@@ -1430,6 +1496,129 @@ class TechnicianController
      * @param Request $request
      * @return array{id: int|null, role: string, name: string}
      */
+    /**
+     * Levanta el bloqueo por falta de acceso tras una resolución in situ
+     * (RF-06.1.1) y firma el hecho en `audit_log` (Art. III).
+     *
+     * La puerta sanitaria manda sobre la operativa: si la máquina entró en
+     * cuarentena o el reloj biológico venció, el cierre exige el protocolo del
+     * Art. II y la máquina NO vuelve al parque por el simple hecho de repararla
+     * (RF-06.1.2). El bloqueo es de acceso, no de avería, y la sede lo confirmó
+     * para permitir la entrada; reparar el equipo no demuestra que el riesgo
+     * higiénico haya desaparecido.
+     *
+     * Un fallo al levantar el bloqueo no revierte la resolución ya persistida: se
+     * devuelve la marca honesta y el aviso queda en el log del servidor, porque
+     * fingir que la máquina volvió a servicio sería peor que informar del resto.
+     *
+     * @param Incident $incident Expediente recién resuelto.
+     * @param Request $request Petición autenticada (actor del hecho).
+     * @param bool $sanitaryGateActive Si el cierre exigió el protocolo sanitario.
+     * @return array<string, mixed> Marcas de desbloqueo para la respuesta.
+     */
+    private function releaseNoAccessBlockAfterResolution(
+        Incident $incident,
+        Request $request,
+        bool $sanitaryGateActive
+    ): array {
+        if ($sanitaryGateActive) {
+            return [
+                'machine_access_unblocked' => false,
+                'machine_access_block_reason' => 'SANITARY_QUARANTINE_OR_BIOLOGICAL_CLOCK',
+            ];
+        }
+
+        $machine = $this->machineRepo->findById($incident->getMachineId(), false);
+        if ($machine === null || !$machine->isBlockedNoAccess()) {
+            return ['machine_access_unblocked' => false];
+        }
+
+        try {
+            $lifted = $this->machineRepo->clearNoAccessBlock(
+                (int)$machine->getId(),
+                (string)$incident->getTicketCode()
+            );
+        } catch (\Throwable $exception) {
+            error_log(sprintf(
+                '[vendguard] No se pudo levantar el bloqueo de acceso de la máquina %d al resolver el expediente %s: %s',
+                (int)$machine->getId(),
+                (string)$incident->getTicketCode(),
+                $exception->getMessage()
+            ));
+
+            return [
+                'machine_access_unblocked' => false,
+                'machine_access_unblock_warning' => 'La avería quedó resuelta, pero la máquina no pudo devolverse automáticamente al parque activo.',
+            ];
+        }
+
+        if (!$lifted) {
+            return ['machine_access_unblocked' => false];
+        }
+
+        $this->audit()->logMachineEvent(
+            machineId: (int)$machine->getId(),
+            action: 'MACHINE_UNBLOCKED_BY_ONSITE_RESOLUTION',
+            user: $this->extractActor($request),
+            previousState: [
+                'operational_status' => Machine::OPERATIONAL_STATUS_BLOCKED_NO_ACCESS,
+                'is_active' => false,
+                'is_blocked_no_access' => true,
+            ],
+            newState: [
+                'is_active' => true,
+                'is_blocked_no_access' => false,
+            ],
+            metadata: [
+                'ticket_code' => $incident->getTicketCode(),
+                'incident_id' => $incident->getId(),
+                'location_id' => $incident->getLocationId(),
+                'reason' => 'Cierre de la avería por intervención in situ (RF-06.1.1, Art. V.2).',
+            ]
+        );
+
+        return ['machine_access_unblocked' => true];
+    }
+
+    /**
+     * Proyección contractual de una parada crítica/sanitaria pendiente (§4.1),
+     * sin claves internas del repositorio.
+     *
+     * @param array<string, mixed> $stop Fila de `findPendingCriticalStopsInOtherLocations()`.
+     * @return array<string, mixed>
+     */
+    private function pendingCriticalStopPayload(array $stop): array
+    {
+        return [
+            'incident_id' => (int)($stop['incident_id'] ?? $stop['id'] ?? 0),
+            'ticket_code' => (string)($stop['ticket_code'] ?? ''),
+            'urgency' => (string)($stop['urgency'] ?? ''),
+            'category' => (string)($stop['category'] ?? ''),
+            'machine_code' => isset($stop['machine_code']) ? (string)$stop['machine_code'] : null,
+            'machine_type' => (string)($stop['machine_type'] ?? ''),
+            'location_id' => (int)($stop['location_id'] ?? 0),
+            'location_name' => isset($stop['location_name']) ? (string)$stop['location_name'] : null,
+            'sla_target_at' => isset($stop['sla_target_at']) ? (string)$stop['sla_target_at'] : null,
+        ];
+    }
+
+    /**
+     * Interpreta banderas de query string con el criterio tolerante de la API.
+     */
+    private function isTruthyQueryFlag(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value)) {
+            return $value === 1;
+        }
+
+        return is_string($value)
+            && in_array(strtolower(trim($value)), ['1', 'true', 'yes', 'si', 'sí'], true);
+    }
+
     private function extractActor(Request $request): array
     {
         $user = $request->getAttribute('authenticated_user');

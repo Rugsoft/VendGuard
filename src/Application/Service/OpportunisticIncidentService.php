@@ -11,6 +11,7 @@ use VendGuard\Application\DTO\CreateOpportunisticIncidentDto;
 use VendGuard\Application\DTO\OpportunisticMachineCatalogDto;
 use VendGuard\Core\Domain\Exception\CashRefundPrivacyViolationException;
 use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
+use VendGuard\Core\Domain\Exception\IncidentAlreadyInProgressByOtherTechnicianException;
 use VendGuard\Core\Domain\Exception\IncidentNotFoundException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Exception\LocationNotFoundException;
@@ -469,6 +470,16 @@ final class OpportunisticIncidentService
                     $previousTechnicianId = $incident->getAssignedTechnicianId();
                     $result = $this->takeOverFromColleague($technician, $incident, $incidentId, $dto);
                 }
+            } elseif ($status === IncidentStatus::IN_PROGRESS
+                && $incident->getAssignedTechnicianId() !== $technician->getId()
+            ) {
+                // Caso 5 (RF-05.5, Art. V.3): bloqueo absoluto. El compañero está
+                // físicamente delante de la máquina; no existe confirmación que
+                // legitime un arrebato silencioso.
+                throw new IncidentAlreadyInProgressByOtherTechnicianException(
+                    $incident->getAssignedTechnicianId(),
+                    $incident->getTechnicianName()
+                );
             } elseif ($status === IncidentStatus::RESOLVED) {
                 $reopenCount = $this->incidents->countReopenEvents($incidentId);
                 if ($reopenCount >= self::CHRONIC_REOPEN_THRESHOLD) {

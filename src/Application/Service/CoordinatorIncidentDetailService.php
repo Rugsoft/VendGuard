@@ -14,6 +14,8 @@ use VendGuard\Core\Domain\Model\RefundStatus;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Core\Domain\ValueObject\OpportunisticMode;
+use VendGuard\Core\Domain\ValueObject\OpportunisticOriginReason;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
 
 /**
@@ -349,6 +351,10 @@ final class CoordinatorIncidentDetailService
     {
         $status = IncidentStatus::tryFrom((string)($incident['status'] ?? ''));
         $urgency = UrgencyLevel::tryFrom((string)($incident['urgency'] ?? ''));
+        $opportunisticMode = OpportunisticMode::tryFrom((string)($incident['opportunistic_mode'] ?? ''));
+        $opportunisticOrigin = OpportunisticOriginReason::tryFrom(
+            (string)($incident['opportunistic_origin_reason'] ?? '')
+        );
 
         return [
             'id' => (int)($incident['id'] ?? 0),
@@ -363,6 +369,18 @@ final class CoordinatorIncidentDetailService
             'description' => (string)($incident['description'] ?? ''),
             'report_channel' => $this->detectReportChannel($history),
             'photo_url' => $incident['photo_path'] ?? null,
+            // Trazabilidad oportunista (Módulo 16, RF-06.4): Coordinación distingue
+            // «Oportunista In Situ · Nueva» de «Asumida», conoce el submotivo, al
+            // informante verbal de la sede y el expediente crónico predecesor.
+            'opportunistic_mode' => $opportunisticMode?->value,
+            'opportunistic_mode_label' => $opportunisticMode?->label(),
+            'opportunistic_origin_reason' => $opportunisticOrigin?->value,
+            'opportunistic_origin_label' => $opportunisticOrigin?->label(),
+            'opportunistic_informant_name' => $incident['opportunistic_informant_name'] ?? null,
+            'chronic_predecessor_incident_id' => isset($incident['chronic_predecessor_incident_id'])
+                && $incident['chronic_predecessor_incident_id'] !== null
+                    ? (int)$incident['chronic_predecessor_incident_id']
+                    : null,
             'created_at' => (string)($incident['created_at'] ?? ''),
             'updated_at' => (string)($incident['updated_at'] ?? ''),
         ];

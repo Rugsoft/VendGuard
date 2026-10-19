@@ -39,9 +39,11 @@ declare(strict_types=1);
  * Script sin autoloader, como el resto de `bin/`: cada dependencia de la cadena se
  * declara a mano (`ConnectionFactory` → `SecretProvider` por S-5; `SeedRunner` no
  * interviene aquí, pero el adaptador de dialecto sí: T-HYBRID-25, y el repositorio
- * de métricas de la comprobación final arrastra su propio contrato de dominio). La
- * guarda `CloudDeploySchemaParityTest` Caso 1c-bis certifica en proceso limpio que
- * esta lista está completa.
+ * de métricas de la comprobación final arrastra su propio contrato de dominio, que
+ * incluye los dos vocabularios del módulo 16: `OpportunisticMode` y
+ * `OpportunisticOriginReason`, este último tipado contra el primero). La guarda
+ * `CloudDeploySchemaParityTest` Caso 1c-bis certifica en proceso limpio que esta
+ * lista está completa.
  */
 
 require_once __DIR__ . '/../src/Infrastructure/Config/SecretProvider.php';
@@ -52,6 +54,8 @@ require_once __DIR__ . '/../src/Core/Domain/Model/MetricFilter.php';
 require_once __DIR__ . '/../src/Core/Domain/Model/MachineType.php';
 require_once __DIR__ . '/../src/Core/Domain/Model/KpiSummary.php';
 require_once __DIR__ . '/../src/Core/Domain/Repository/MetricsRepositoryInterface.php';
+require_once __DIR__ . '/../src/Core/Domain/ValueObject/OpportunisticMode.php';
+require_once __DIR__ . '/../src/Core/Domain/ValueObject/OpportunisticOriginReason.php';
 require_once __DIR__ . '/../src/Infrastructure/Repository/PdoMetricsRepository.php';
 require_once __DIR__ . '/../database/DemoHistorySeeder.php';
 

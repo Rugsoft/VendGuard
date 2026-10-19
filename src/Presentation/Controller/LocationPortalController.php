@@ -1430,6 +1430,18 @@ class LocationPortalController
             unset($data[$key]);
         }
 
+        // Art. V.4 / RF-04.1.2: en una atención oportunista la Sede ve el motivo y al
+        // informante verbal, pero nunca el nombre del técnico. El alias oficial toma el
+        // relevo del nombre en la única superficie externa que pinta el expediente.
+        if (($data['opportunistic_mode'] ?? null) !== null && $data['opportunistic_mode'] !== '') {
+            $technicianId = isset($data['assigned_technician_id']) && is_numeric($data['assigned_technician_id'])
+                ? (int)$data['assigned_technician_id']
+                : null;
+            $data['technician_name'] = $technicianId !== null
+                ? 'Servicio Técnico Oficial · Operador #' . sprintf('%02d', $technicianId)
+                : 'Servicio Técnico Oficial';
+        }
+
         foreach ($data as $key => $value) {
             if (is_string($key)) {
                 if (preg_match('/(spare_part|replaced_part|part_code|unit_cost|total_cost|cost_snapshot|reference_cost|old_part_dest)/i', $key)) {
