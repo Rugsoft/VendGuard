@@ -29,7 +29,7 @@
 
 ## 2. Contrato de Esquema de Base de Datos (PostgreSQL / Supabase)
 
-De acuerdo con el contrato de correspondencia de esquema (`specs/technical/schema_correspondence_contract.md`), las adiciones se declaran de forma idempotente tanto en la migración incremental `database/supabase_migrations/005_opportunistic_incident.sql` como en el DDL canónico `database/supabase_init.sql`.
+De acuerdo con el contrato de correspondencia de esquema (`specs/technical/schema_correspondence_contract.md`), las adiciones se declaran de forma idempotente tanto en la migración incremental `database/supabase_migrations/005_opportunistic_incident.sql` como en el DDL canónico `database/supabase_init.sql`; la coherencia modalidad ↔ submotivo se refuerza además con la reparación `006_opportunistic_coherence_repair.sql`.
 
 ### 2.1. Nuevos Tipos Enumerados Nativos (`ENUM`) y Extensión de Plantillas Outbox
 
@@ -71,18 +71,29 @@ ALTER TABLE incidents
     ADD COLUMN IF NOT EXISTS chronic_predecessor_incident_id BIGINT;
 
 -- Restricción de integridad: coherencia entre modalidad oportunista y submotivo de origen
+--
+-- Los dos `IS NOT NULL` no son decorativos: sin ellos, `opportunistic_mode = 'NEW'`
+-- sobre una modalidad nula evalúa a desconocido y el `CHECK` admitiría «submotivo
+-- sin modalidad» y «modalidad sin submotivo». RF-04.1 exige el motivo de origen y
+-- la 006 repara la definición declarada originalmente por la 005.
 DO $do$
 BEGIN
     ALTER TABLE incidents
         ADD CONSTRAINT chk_incidents_opportunistic_coherence CHECK (
             (opportunistic_mode IS NULL AND opportunistic_origin_reason IS NULL)
             OR (
-                opportunistic_mode = 'NEW'
-                AND opportunistic_origin_reason IN ('SITE_VERBAL_NOTICE', 'TECHNICIAN_DETECTION', 'WARRANTY_REOPEN_IN_SITU')
-            )
-            OR (
-                opportunistic_mode = 'ASSUMED'
-                AND opportunistic_origin_reason IN ('EXISTING_TICKET_CLAIM', 'WARRANTY_REOPEN_IN_SITU')
+                opportunistic_mode IS NOT NULL
+                AND opportunistic_origin_reason IS NOT NULL
+                AND (
+                    (
+                        opportunistic_mode = 'NEW'
+                        AND opportunistic_origin_reason IN ('SITE_VERBAL_NOTICE', 'TECHNICIAN_DETECTION', 'WARRANTY_REOPEN_IN_SITU')
+                    )
+                    OR (
+                        opportunistic_mode = 'ASSUMED'
+                        AND opportunistic_origin_reason IN ('EXISTING_TICKET_CLAIM', 'WARRANTY_REOPEN_IN_SITU')
+                    )
+                )
             )
         );
 EXCEPTION WHEN duplicate_object THEN NULL;

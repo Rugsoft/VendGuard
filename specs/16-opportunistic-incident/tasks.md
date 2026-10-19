@@ -27,7 +27,7 @@
   * **Requisitos que cubre:** `RF-04.1.2`, `RF-04.2`, `RF-05.2`, `RF-05.4.2`, `RF-06.3.1`, `RF-06.4`, Resoluciones QA 1, QA 2 y QA 4, `constitution.md` Art. III.1 y Art. V.2
   * **Hecho cuando:** Existen en `database/supabase_migrations/005_opportunistic_incident.sql` y en `database/supabase_init.sql`: (1) los tipos nativos `opportunistic_mode` (`'NEW'`, `'ASSUMED'`) y `opportunistic_origin_reason` (`'SITE_VERBAL_NOTICE'`, `'TECHNICIAN_DETECTION'`, `'EXISTING_TICKET_CLAIM'`, `'WARRANTY_REOPEN_IN_SITU'`); (2) la ampliación de `notification_template` con `'OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT'` e `'INCIDENT_REOPENED_IN_SITU_SITE'`; (3) las 4 columnas en `incidents` (`opportunistic_mode`, `opportunistic_origin_reason`, `opportunistic_informant_name`, `chronic_predecessor_incident_id`) con la restricción `chk_incidents_opportunistic_coherence`, la clave foránea `fk_incidents_chronic_predecessor` y el índice parcial `idx_incidents_opportunistic_mode`; y `PostgresMigrationRunner` aplica la migración `005` sin errores dejando en verde `php tests/integration/PostgresSchemaTest.php` y `php tests/integration/SchemaConvergenceParityTest.php`.
 
-- [ ] **T-OPP-02 · Implementar suite de integración de esquema `OpportunisticSchemaCorrespondenceTest.php`**
+- [x] **T-OPP-02 · Implementar suite de integración de esquema `OpportunisticSchemaCorrespondenceTest.php`**
   * **Tiempo estimado:** 20 min
   * **Dependencias:** `T-OPP-01`
   * **Ficheros a crear o modificar:**

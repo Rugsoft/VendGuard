@@ -713,15 +713,24 @@ CREATE TABLE IF NOT EXISTS incidents (
         REFERENCES machines (id) ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT fk_incidents_technician FOREIGN KEY (assigned_technician_id)
         REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    -- Sin modalidad no hay submotivo, y con modalidad el submotivo es obligatorio: los
+    -- dos `IS NOT NULL` convierten en falso el desconocido que produce comparar con NULL
+    -- (una base migrada recibe esta misma definición por la reparación 006).
     CONSTRAINT chk_incidents_opportunistic_coherence CHECK (
         (opportunistic_mode IS NULL AND opportunistic_origin_reason IS NULL)
         OR (
-            opportunistic_mode = 'NEW'
-            AND opportunistic_origin_reason IN ('SITE_VERBAL_NOTICE', 'TECHNICIAN_DETECTION', 'WARRANTY_REOPEN_IN_SITU')
-        )
-        OR (
-            opportunistic_mode = 'ASSUMED'
-            AND opportunistic_origin_reason IN ('EXISTING_TICKET_CLAIM', 'WARRANTY_REOPEN_IN_SITU')
+            opportunistic_mode IS NOT NULL
+            AND opportunistic_origin_reason IS NOT NULL
+            AND (
+                (
+                    opportunistic_mode = 'NEW'
+                    AND opportunistic_origin_reason IN ('SITE_VERBAL_NOTICE', 'TECHNICIAN_DETECTION', 'WARRANTY_REOPEN_IN_SITU')
+                )
+                OR (
+                    opportunistic_mode = 'ASSUMED'
+                    AND opportunistic_origin_reason IN ('EXISTING_TICKET_CLAIM', 'WARRANTY_REOPEN_IN_SITU')
+                )
+            )
         )
     ),
     CONSTRAINT fk_incidents_chronic_predecessor FOREIGN KEY (chronic_predecessor_incident_id)
