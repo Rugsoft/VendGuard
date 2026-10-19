@@ -182,6 +182,25 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
 
+-- ---- Tipos de la avería oportunista in situ (Módulo 16) ---------------------
+-- Una base preexistente los recibe por la migración 005; aquí se declaran para
+-- que una base creada en limpio tenga exactamente la misma forma.
+
+DO $do$
+BEGIN
+    CREATE TYPE opportunistic_mode AS ENUM ('NEW', 'ASSUMED');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+DO $do$
+BEGIN
+    CREATE TYPE opportunistic_origin_reason AS ENUM (
+        'SITE_VERBAL_NOTICE', 'TECHNICIAN_DETECTION',
+        'EXISTING_TICKET_CLAIM', 'WARRANTY_REOPEN_IN_SITU'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
 DO $do$
 BEGIN
     CREATE TYPE sanitary_status AS ENUM ('OK', 'ATTENTION_REQUIRED', 'EXPIRED', 'QUARANTINE', 'SEASONAL_PAUSE');
@@ -276,7 +295,11 @@ BEGIN
         'CHRONIC_BREAKDOWN_ALERT',
         'INCIDENT_CANCELLED_SITE',
         'INCIDENT_CANCELLED_CITIZEN_QR',
-        'CITIZEN_QR_OBSERVATION_ACK'
+        'CITIZEN_QR_OBSERVATION_ACK',
+        -- Módulo 16: alerta sanitaria al posponer una parada crítica en otra sede
+        -- y aviso a la sede de la reapertura practicada in situ.
+        'OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT',
+        'INCIDENT_REOPENED_IN_SITU_SITE'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -661,6 +684,12 @@ CREATE TABLE IF NOT EXISTS incidents (
     pending_info_reason_text    TEXT,
     total_pending_info_seconds  BIGINT NOT NULL DEFAULT 0,
     sla_target_at               TIMESTAMPTZ,
+    -- Módulo 16 · metadatos de la avería oportunista in situ. Opcionales a
+    -- propósito: ningún expediente anterior al módulo inventa una modalidad.
+    opportunistic_mode              opportunistic_mode,
+    opportunistic_origin_reason     opportunistic_origin_reason,
+    opportunistic_informant_name    VARCHAR(100),
+    chronic_predecessor_incident_id BIGINT,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_at                  TIMESTAMPTZ,
@@ -683,7 +712,20 @@ CREATE TABLE IF NOT EXISTS incidents (
     CONSTRAINT fk_incidents_machine FOREIGN KEY (machine_id)
         REFERENCES machines (id) ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT fk_incidents_technician FOREIGN KEY (assigned_technician_id)
-        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_incidents_opportunistic_coherence CHECK (
+        (opportunistic_mode IS NULL AND opportunistic_origin_reason IS NULL)
+        OR (
+            opportunistic_mode = 'NEW'
+            AND opportunistic_origin_reason IN ('SITE_VERBAL_NOTICE', 'TECHNICIAN_DETECTION', 'WARRANTY_REOPEN_IN_SITU')
+        )
+        OR (
+            opportunistic_mode = 'ASSUMED'
+            AND opportunistic_origin_reason IN ('EXISTING_TICKET_CLAIM', 'WARRANTY_REOPEN_IN_SITU')
+        )
+    ),
+    CONSTRAINT fk_incidents_chronic_predecessor FOREIGN KEY (chronic_predecessor_incident_id)
+        REFERENCES incidents (id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_machine_active_ticket
@@ -694,6 +736,12 @@ CREATE INDEX IF NOT EXISTS idx_incidents_created_at ON incidents (created_at);
 CREATE INDEX IF NOT EXISTS idx_incidents_location ON incidents (location_id);
 CREATE INDEX IF NOT EXISTS idx_incidents_status_urgency ON incidents (status, urgency);
 CREATE INDEX IF NOT EXISTS idx_incidents_technician ON incidents (assigned_technician_id);
+
+-- Índice parcial de las intervenciones oportunistas vigentes (RF-06.4): el
+-- indicador de desplazamientos evitados sólo cuenta lo no borrado lógicamente.
+CREATE INDEX IF NOT EXISTS idx_incidents_opportunistic_mode
+    ON incidents (opportunistic_mode, created_at)
+    WHERE opportunistic_mode IS NOT NULL AND deleted_at IS NULL;
 
 CREATE OR REPLACE TRIGGER trg_no_delete_incidents
     BEFORE DELETE ON incidents

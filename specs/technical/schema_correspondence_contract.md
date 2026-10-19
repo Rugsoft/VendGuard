@@ -26,7 +26,7 @@ Todas las tablas cuentan con clave primaria `id BIGINT GENERATED ALWAYS AS IDENT
 1. `locations` (17 columnas)
 2. `machines` (19 columnas)
 3. `users` (13 columnas)
-4. `incidents` (35 columnas)
+4. `incidents` (43 columnas)
 5. `incident_history` (7 columnas)
 6. `incident_comments` (9 columnas)
 7. `incident_replaced_parts` (17 columnas)
@@ -59,4 +59,8 @@ Adicionalmente, `schema_migrations` gestiona el registro de huellas SHA-256 de l
   - `users.email_key` con índice único `uq_users_email_key` para unicidad estricta insensible a acentos y mayúsculas.
   - `locations.site_code_key` con índice único `uq_locations_site_code_key`.
 - **Restricciones CHECK de longitud mínima (Art. V.1):** 7 restricciones de longitud en sentencias que validan un mínimo de 20 caracteres significativos sin espacios en blanco superfluos.
-- **Tipado estricto:** 24 enumerados nativos `ENUM` que encapsulan los estados y categorías del dominio.
+- **Tipado estricto:** 30 enumerados nativos `ENUM` que encapsulan los estados y categorías del dominio.
+- **Coherencia de la avería oportunista in situ (Módulo 16):** `chk_incidents_opportunistic_coherence` exige que `opportunistic_origin_reason` acompañe siempre a `opportunistic_mode` y limita los motivos admitidos por cada modalidad (`NEW`: aviso verbal en sede, detección propia o reapertura en garantía; `ASSUMED`: asunción de ticket abierto o reapertura en garantía). Sin modalidad no hay submotivo.
+- **Cadena de reincidencias (Art. III.1):** `fk_incidents_chronic_predecessor` enlaza el expediente sucesor con el crónico que cierra, con `ON DELETE RESTRICT` para no romper la traza histórica y `ON UPDATE CASCADE`.
+- **Índice parcial oportunista:** `idx_incidents_opportunistic_mode` sobre `(opportunistic_mode, created_at)` y sólo las filas con modalidad no borradas lógicamente, que es el universo del indicador de desplazamientos evitados (RF-06.4).
+- **Plantillas del Módulo 16:** `OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT` e `INCIDENT_REOPENED_IN_SITU_SITE` amplían el catálogo cerrado de `notification_template`, que pasa a 21 valores.

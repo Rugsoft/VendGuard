@@ -28,6 +28,10 @@
 --     El arnés sí las siembra, y solo fuera de producción, desde `SeedRunner`.
 --   · Ninguna imagen ni binario: el motor guarda exclusivamente datos tabulares
 --     (EARS-05.1).
+--   · Ninguna marca oportunista (`opportunistic_mode`, `opportunistic_origin_reason`,
+--     `opportunistic_informant_name`, `chronic_predecessor_incident_id`): la avería
+--     oportunista in situ (Módulo 16) nace de una visita real, nunca de una semilla,
+--     de modo que el arranque en limpio deja esas cuatro columnas a NULL.
 --
 -- UNA SOLA REGLA DE UPSERT, DOS RENDERIZADOS
 --   `ON CONFLICT ... DO UPDATE` no tiene forma común con el motor local, que
