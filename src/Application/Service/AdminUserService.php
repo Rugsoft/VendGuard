@@ -7,6 +7,7 @@ namespace VendGuard\Application\Service;
 use InvalidArgumentException;
 use PDOException;
 use RuntimeException;
+use Throwable;
 use VendGuard\Core\Domain\Exception\CannotDeactivateSelfException;
 use VendGuard\Core\Domain\Exception\CannotSetOnCallInactiveUserException;
 use VendGuard\Core\Domain\Exception\InactiveRecordCollisionException;
@@ -18,6 +19,7 @@ use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\OnCallTechnicianRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
+use VendGuard\Infrastructure\Database\UniqueViolationDetector;
 use VendGuard\Infrastructure\Notification\Transport\TelegramTransport;
 
 /**
@@ -152,7 +154,7 @@ class AdminUserService
                 'telegram_chat_id'  => $telegramChatId,
             ]);
         } catch (PDOException $exception) {
-            throw $this->translateWriteFailure($exception, 'El alta del usuario');
+            throw $this->translateWriteFailure($exception, 'El alta del usuario', $email);
         }
 
         // Auditoría inmutable sincrónica (RF-05, EARS 4.1) - NUNCA persistir passwords ni hashes
@@ -589,18 +591,48 @@ class AdminUserService
     /**
      * Traduce una violación de unicidad del motor a un error de negocio.
      *
-     * El chat de Telegram es único entre usuarios vivos: si dos técnicos
-     * compartieran chat, uno recibiría las averías del otro. La base lo impide con
-     * un índice único parcial; aquí se convierte en un mensaje que Coordinación
-     * puede entender y corregir.
+     * La comprobación previa de correo y la validación del chat viven en la capa de
+     * aplicación, pero entre la comprobación y la escritura cabe otra petición: si dos
+     * altas simultáneas pasan la misma validación, la segunda choca contra los índices
+     * `uq_users_email` / `uq_users_email_key` o `uq_users_telegram_chat_id`. Sin esta
+     * traducción, esa carrera real escapaba como `PDOException` y Coordinación recibía
+     * un 500 en lugar del 409 con el registro en conflicto.
+     *
+     * La detección es única y compartida (`UniqueViolationDetector`): reconoce el
+     * SQLSTATE `23505` del motor único y la familia heredada, y sólo traduce cuando el
+     * mensaje nombra la restricción esperada.
+     *
+     * @param PDOException $exception Fallo de escritura del motor.
+     * @param string $operation Operación legible para diagnósticos.
+     * @param string|null $email Correo del alta, para el mensaje de negocio.
      */
-    private function translateWriteFailure(PDOException $exception, string $operation): InvalidArgumentException|PDOException
-    {
-        $isDuplicate = (string)$exception->getCode() === '23505';
-        $mentionsChat = str_contains($exception->getMessage(), 'uq_users_telegram_chat_id')
-            || str_contains($exception->getMessage(), 'telegram_chat_id');
+    private function translateWriteFailure(
+        PDOException $exception,
+        string $operation,
+        ?string $email = null
+    ): Throwable {
+        if (UniqueViolationDetector::matches(
+            $exception,
+            'uq_users_email',
+            'uq_users_email_key',
+            'users_email'
+        )) {
+            $target = $email !== null && $email !== '' ? "'{$email}'" : 'indicado';
 
-        if ($isDuplicate && $mentionsChat) {
+            return new InactiveRecordCollisionException(
+                'USER_ALREADY_EXISTS_ACTIVE',
+                "El correo electrónico {$target} ya se encuentra registrado y activo.",
+                null,
+                'USER',
+                false
+            );
+        }
+
+        if (UniqueViolationDetector::matches(
+            $exception,
+            'uq_users_telegram_chat_id',
+            'telegram_chat_id'
+        )) {
             return new InvalidArgumentException(
                 'Ese chat de Telegram ya está vinculado a otro usuario. Un chat pertenece a un solo técnico.'
             );

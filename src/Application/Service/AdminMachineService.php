@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Application\Service;
 
 use InvalidArgumentException;
+use PDOException;
 use VendGuard\Core\Domain\Exception\InactiveRecordCollisionException;
 use VendGuard\Core\Domain\Exception\MachineNotFoundException;
 use VendGuard\Core\Domain\Exception\MachineTransferBlockedException;
@@ -13,6 +14,7 @@ use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Infrastructure\Database\UniqueViolationDetector;
 
 /**
  * AdminMachineService
@@ -124,14 +126,31 @@ class AdminMachineService
             );
         }
 
-        $created = $this->machineRepo->create([
-            'location_id'  => $locationId,
-            'code'         => $code,
-            'model'        => $model,
-            'machine_type' => $machineType->value,
-            'floor_wing'   => $floorWing,
-            'notes'        => $notes,
-        ]);
+        try {
+            $created = $this->machineRepo->create([
+                'location_id'  => $locationId,
+                'code'         => $code,
+                'model'        => $model,
+                'machine_type' => $machineType->value,
+                'floor_wing'   => $floorWing,
+                'notes'        => $notes,
+            ]);
+        } catch (PDOException $exception) {
+            // Carrera real de altas simultáneas: la comprobación previa no ve la fila
+            // sin confirmar del vecino y es el índice único quien la delata. Responde
+            // el mismo 409 de negocio, jamás un 500.
+            if (UniqueViolationDetector::matches($exception, 'uq_machines_code', 'machines_code')) {
+                throw new InactiveRecordCollisionException(
+                    'MACHINE_ALREADY_EXISTS_ACTIVE',
+                    "El código de máquina '{$code}' ya se encuentra registrado y activo.",
+                    null,
+                    'MACHINE',
+                    false
+                );
+            }
+
+            throw $exception;
+        }
 
         // Auditoría inmutable sincrónica (RF-05, EARS 4.1)
         $metadata = [];

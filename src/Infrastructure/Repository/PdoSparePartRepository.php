@@ -7,10 +7,12 @@ namespace VendGuard\Infrastructure\Repository;
 use PDO;
 use PDOException;
 use RuntimeException;
+use VendGuard\Core\Domain\Exception\SparePartCodeExistsException;
 use VendGuard\Core\Domain\Model\SparePart;
 use VendGuard\Core\Domain\Model\SparePartCategory;
 use VendGuard\Core\Domain\Repository\SparePartRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Database\UniqueViolationDetector;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
 /**
@@ -139,6 +141,19 @@ class PdoSparePartRepository implements SparePartRepositoryInterface
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
             }
+
+            // Carrera de altas simultáneas sobre el catálogo maestro: la comprobación
+            // previa del servicio no ve la fila sin confirmar del vecino y la colisión
+            // aparece aquí. El detector único reconoce el SQLSTATE `23505` del motor
+            // único y devuelve el 409 de negocio; el resto de fallos sigue siendo un
+            // fallo de infraestructura en voz alta.
+            if (UniqueViolationDetector::matches($e, 'uq_spare_parts_part_code', 'spare_parts_part_code')) {
+                throw new SparePartCodeExistsException(
+                    $sparePart->getPartCode(),
+                    "Ya existe un repuesto registrado con el código '{$sparePart->getPartCode()}'."
+                );
+            }
+
             throw new RuntimeException("Error al crear repuesto: " . $e->getMessage(), (int)$e->getCode(), $e);
         }
     }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Application\Service;
 
 use InvalidArgumentException;
+use PDOException;
 use VendGuard\Core\Domain\Exception\ActiveMachinesBlockedException;
 use VendGuard\Core\Domain\Exception\InactiveRecordCollisionException;
 use VendGuard\Core\Domain\Exception\LocationNotFoundException;
@@ -12,6 +13,7 @@ use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SiteAccessCodeRepositoryInterface;
 use VendGuard\Core\Domain\Service\SiteAccessCodeGenerator;
+use VendGuard\Infrastructure\Database\UniqueViolationDetector;
 use VendGuard\Infrastructure\Repository\PdoSiteAccessCodeRepository;
 
 /**
@@ -150,7 +152,29 @@ class AdminLocationService
             $locationData['longitude'] = (float)$data['longitude'];
         }
 
-        $created = $this->locationRepo->create($locationData);
+        try {
+            $created = $this->locationRepo->create($locationData);
+        } catch (PDOException $exception) {
+            // La comprobación previa no cubre a la petición simultánea que pasó la misma
+            // validación: si el código colisiona en el índice único, la carrera debe
+            // responder el mismo 409 de negocio y nunca un 500 de infraestructura.
+            if (UniqueViolationDetector::matches(
+                $exception,
+                'uq_locations_site_code',
+                'uq_locations_site_code_key',
+                'locations_site_code'
+            )) {
+                throw new InactiveRecordCollisionException(
+                    'LOCATION_ALREADY_EXISTS_ACTIVE',
+                    "El código de sede '{$siteCode}' ya se encuentra registrado y activo.",
+                    null,
+                    'LOCATION',
+                    false
+                );
+            }
+
+            throw $exception;
+        }
 
         // Auditoría inmutable sincrónica (RF-05, EARS 4.1)
         $metadata = [];
