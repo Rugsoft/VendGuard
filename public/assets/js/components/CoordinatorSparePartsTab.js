@@ -698,12 +698,11 @@ export const CoordinatorSparePartsTab = {
             </h3>
             <button
               type="button"
-              class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-muted"
+              class="vg-btn vg-btn-icon vg-btn-ghost vg-btn-ghost-muted vg-btn-close"
               @click="closeModal"
               data-testid="modal-btn-close-header"
-            >
-              &times;
-            </button>
+              aria-label="Cerrar"
+            ></button>
           </div>
 
           <!-- Cuerpo del Modal (Scrollable) -->

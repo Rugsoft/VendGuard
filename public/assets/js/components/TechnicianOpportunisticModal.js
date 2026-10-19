@@ -813,7 +813,7 @@ export const TechnicianOpportunisticModal = {
           <p style="margin: 0; font-size: 12px; font-weight: 600; color: var(--color-ink-muted);">
             1 · Elige la máquina
           </p>
-          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px;">
             <button
               v-for="machine in machines"
               :key="machine.id"
@@ -821,7 +821,7 @@ export const TechnicianOpportunisticModal = {
               class="vg-btn vg-btn-secondary"
               :class="{ 'vg-btn-primary': Number(selectedMachineId) === Number(machine.id) }"
               :disabled="!isMachineSelectable(machine)"
-              style="text-align: left; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 12px;"
+              style="height: auto; min-height: 105px; text-align: left; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 6px; padding: 12px 14px; white-space: normal;"
               :data-testid="'opportunistic-machine-' + machine.id"
               @click="selectMachine(machine)"
             >

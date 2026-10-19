@@ -258,12 +258,11 @@ export const TechnicianSparePartsPauseModal = {
 
           <button
             type="button"
+            class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close"
             @click="close"
-            style="min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; background: none; border: none; font-size: 24px; color: #6c7e9d; cursor: pointer;"
+            aria-label="Cerrar"
             data-testid="btn-close-pause-modal"
-          >
-            &times;
-          </button>
+          ></button>
         </div>
 
         <!-- Mensaje de error general -->

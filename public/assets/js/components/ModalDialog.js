@@ -153,15 +153,10 @@ export const ModalDialog = {
             <button
               v-if="showCloseButton"
               type="button"
-              class="vg-btn-close"
+              class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close"
               aria-label="Cerrar ventana modal"
               @click="close"
-              style="background: transparent; border: none; font-size: 20px; line-height: 1; cursor: pointer; color: var(--color-ink-muted, #6c7e9d); border-radius: 4px; padding: 4px 8px; margin: -4px -8px 0 0; transition: color 0.15s ease;"
-              onmouseover="this.style.color='#000000'"
-              onmouseout="this.style.color='#6c7e9d'"
-            >
-              &times;
-            </button>
+            ></button>
           </div>
 
           <!-- Body / Content -->
