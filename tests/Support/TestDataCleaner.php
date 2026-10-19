@@ -632,6 +632,12 @@ final class TestDataCleaner
         while ($queue !== []) {
             $parent = array_shift($queue);
             foreach ($graph[$parent]['children'] ?? [] as $child => $column) {
+                // La autorreferencia del Módulo 16 (`incidents.chronic_predecessor_incident_id`)
+                // no es una vía hacia otra tabla: resolverla como enlace haría que el plan pidiera
+                // el subárbol de la propia tabla que está resolviendo. La raíz ya la acota.
+                if ($child === $parent) {
+                    continue;
+                }
                 if (in_array($child, self::PROTECTED_TABLES, true)
                     && !in_array($child, $purgeableMasters, true)) {
                     continue;
@@ -834,6 +840,14 @@ final class TestDataCleaner
         }
         foreach ($tables as $t) {
             foreach ($graph[$t]['parents'] ?? [] as $parent) {
+                // Una clave foránea autorreferente (`incidents.chronic_predecessor_incident_id`,
+                // Módulo 16) no impone un orden entre tablas: las dos filas viven en la misma
+                // tabla y su `DELETE` conjunto resuelve la referencia. Contarla como arista
+                // convierte el grafo en un ciclo imposible y bloquea toda purga del arnés.
+                if ($parent === $t) {
+                    continue;
+                }
+
                 if (isset($inSet[$parent]) && !in_array($parent, $parents[$t], true)) {
                     // t es hija de parent: parent necesita que t se borre antes.
                     $childCount[$parent]++;

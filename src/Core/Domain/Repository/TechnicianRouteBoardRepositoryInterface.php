@@ -54,8 +54,10 @@ interface TechnicianRouteBoardRepositoryInterface
     /**
      * Tablero de paradas asignadas a un técnico, en una sola ida y vuelta.
      *
-     * El orden es el de la ruta (criticidad y antigüedad), igual que el de
-     * `findAssignedToTechnician()`, y sólo aparecen los expedientes no borrados cuyo estado está
+     * El orden es el de la ruta, idéntico al de `findAssignedToTechnician()`: las intervenciones
+     * `IN_PROGRESS` abren la bandeja agrupadas por sede —la Parada #1 del Módulo 16, ordenadas
+     * dentro del bloque por urgencia, SLA e inicio— y el resto sigue el triaje de criticidad y
+     * antigüedad (RF-02.1). Sólo aparecen los expedientes no borrados cuyo estado está
      * entre los pedidos. Una parada cuya máquina o sede no exista se entrega igualmente con el
      * lado ausente en `null`: la tarjeta publica entonces los datos denormalizados del expediente,
      * que es la degradación ya declarada de la ruta.

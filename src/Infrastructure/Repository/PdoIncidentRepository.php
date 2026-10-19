@@ -26,6 +26,7 @@ use VendGuard\Core\Domain\Repository\IncidentNotificationCycleRepositoryInterfac
 use VendGuard\Core\Domain\Repository\IncidentReopenNotificationInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
+use VendGuard\Core\Domain\Repository\OpportunisticIncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentSiteResponseRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SanitaryClockCandidateRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SanitarySlaWatchRepositoryInterface;
@@ -33,6 +34,7 @@ use VendGuard\Core\Domain\Repository\TechnicianRouteBoardRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
+use VendGuard\Core\Service\OpportunisticLocationEligibilityPolicy;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
@@ -50,7 +52,7 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * El orden del triaje no es una diferencia de dialecto —tiene forma común—, pero tampoco se
  * escribe a mano dos veces: se deriva del rango de prioridad que declara el dominio.
  */
-class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, SanitarySlaWatchRepositoryInterface, TechnicianRouteBoardRepositoryInterface, IncidentNotificationCycleRepositoryInterface, IncidentReopenNotificationInterface
+class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, SanitarySlaWatchRepositoryInterface, TechnicianRouteBoardRepositoryInterface, IncidentNotificationCycleRepositoryInterface, IncidentReopenNotificationInterface, OpportunisticIncidentRepositoryInterface
 {
     /**
      * Marcadores canónicos de las notas de auditoría de la pausa (RF-01.4).
@@ -72,10 +74,14 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
     private SqlDialectAdapter $dialect;
 
+    /** Regla pura que fija la ventana de gracia visible (1800 s) y su tolerancia (2100 s). */
+    private OpportunisticLocationEligibilityPolicy $opportunisticEligibilityPolicy;
+
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
         $this->dialect = SqlDialectAdapter::forConnection($this->pdo);
+        $this->opportunisticEligibilityPolicy = new OpportunisticLocationEligibilityPolicy();
     }
 
     /**
@@ -103,6 +109,29 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         }
 
         return 'CASE i.urgency ' . implode(' ', $cases) . ' ELSE 0 END';
+    }
+
+    /**
+     * Orden de la hoja de ruta con la Parada #1 agrupada (Módulo 16 · RF-02.1).
+     *
+     * Las intervenciones `IN_PROGRESS` suben al frente y se agrupan por sede —un bloque
+     * contiguo por edificio, que es la Parada #1—, y dentro del bloque mandan la urgencia,
+     * el SLA restante y el inicio real. El resto de estados conserva el triaje de siempre
+     * (criticidad y antigüedad).
+     *
+     * Se usa en `findAssignedToTechnician()` y en `findRouteBoard()` a propósito: los dos
+     * caminos publican la misma bandeja y el caso 9.2 de `TechnicianRouteEndpointTest`
+     * certifica que el tablero y el listado ordinario proyectan el MISMO orden. Una regla,
+     * una expresión, dos lecturas.
+     */
+    private function routeOrderExpression(): string
+    {
+        return "CASE WHEN i.status = 'IN_PROGRESS' THEN 0 ELSE 1 END ASC, "
+            . "CASE WHEN i.status = 'IN_PROGRESS' THEN i.location_id ELSE NULL END ASC, "
+            . $this->triageOrderExpression() . ' ASC, '
+            . 'CASE WHEN i.sla_target_at IS NULL THEN 1 ELSE 0 END ASC, i.sla_target_at ASC, '
+            . 'CASE WHEN i.started_at IS NULL THEN 1 ELSE 0 END ASC, i.started_at ASC, '
+            . 'i.created_at ASC, i.id ASC';
     }
 
     /**
@@ -903,7 +932,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         }
 
         // Ordenar con máxima prioridad a CRITICAL, luego HIGH, MEDIUM, LOW, y por fecha de creación
-        $sql .= " ORDER BY {$this->triageOrderExpression()}, i.created_at ASC";
+        $sql .= " ORDER BY {$this->routeOrderExpression()}";
 
         $stmt = $this->pdo->prepare($sql);
         foreach ($params as $param => $val) {
@@ -953,8 +982,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $sql .= " AND i.status IN (" . implode(', ', $placeholders) . ")";
         }
 
-        // Ruta ordenada por criticidad y antigüedad
-        $sql .= " ORDER BY {$this->triageOrderExpression()}, i.created_at ASC";
+        // Ruta ordenada con la Parada #1 agrupada (RF-02.1) y, en el resto, por criticidad y antigüedad.
+        $sql .= " ORDER BY {$this->routeOrderExpression()}";
 
         $stmt = $this->pdo->prepare($sql);
         foreach ($params as $key => $val) {
@@ -964,6 +993,561 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
 
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         return array_map(fn(array $row) => Incident::fromDatabaseRow($row), $rows);
+    }
+
+    // ========================================================================
+    // Módulo 16 · Avería Oportunista In Situ · lecturas del puerto propio
+    // ========================================================================
+
+    /**
+     * Sedes habilitadas por parada vigente o ventana de gracia (RF-01.1 a RF-01.3).
+     *
+     * La consulta resuelve las tres fuentes de la habilitación en una sola ida:
+     * paradas correctivas vigentes (`ASSIGNED` / `IN_PROGRESS`), órdenes preventivas
+     * activas (`SCHEDULED` / `IN_INSPECTION`) y la última salida del técnico de cada
+     * sede, que puede venir de una transición de `incident_history` (`RESOLVED`,
+     * `PENDING_PARTS`, `PENDING_INFO`) o de una orden preventiva `COMPLETED`.
+     *
+     * El corte de la ventana se calcula en PHP y viaja como instante con desfase
+     * explícito: 30 minutos para pintar la ruta y 35 cuando el formulario ya estaba
+     * abierto. La ventana visible no se desplaza —el minuto 30 sigue siendo la
+     * caducidad que anuncia la tarjeta—; solo se tolera el envío.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function findOpportunisticEnabledLocations(
+        int $technicianId,
+        DateTimeImmutable $now,
+        bool $formOpenedWithinGrace = false
+    ): array {
+        $windowSeconds = $formOpenedWithinGrace
+            ? OpportunisticLocationEligibilityPolicy::FORM_TOLERANCE_SECONDS
+            : OpportunisticLocationEligibilityPolicy::GRACE_WINDOW_SECONDS;
+        $windowStart = $now->modify(sprintf('-%d seconds', $windowSeconds))->format('Y-m-d H:i:sP');
+
+        $sql = "
+            WITH active_corrective AS (
+                SELECT i.location_id, COUNT(*) AS active_stops
+                FROM incidents i
+                WHERE i.assigned_technician_id = :tech_corrective
+                  AND i.status IN ('ASSIGNED', 'IN_PROGRESS')
+                  AND i.deleted_at IS NULL
+                GROUP BY i.location_id
+            ),
+            active_preventive AS (
+                SELECT po.location_id, COUNT(*) AS active_stops
+                FROM preventive_orders po
+                WHERE po.assigned_technician_id = :tech_preventive
+                  AND po.status IN ('SCHEDULED', 'IN_INSPECTION')
+                  AND po.deleted_at IS NULL
+                GROUP BY po.location_id
+            ),
+            recent_incident_exit AS (
+                SELECT i.location_id, i.ticket_code AS reference, h.created_at AS exited_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY i.location_id
+                           ORDER BY h.created_at DESC, h.id DESC
+                       ) AS rn
+                FROM incident_history h
+                JOIN incidents i ON i.id = h.incident_id
+                WHERE h.user_id = :tech_exit
+                  AND h.to_status IN ('RESOLVED', 'PENDING_PARTS', 'PENDING_INFO')
+                  AND i.deleted_at IS NULL
+                  AND h.created_at >= :window_start
+            ),
+            recent_preventive_exit AS (
+                SELECT po.location_id, po.order_code AS reference, po.completed_at AS exited_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY po.location_id
+                           ORDER BY po.completed_at DESC, po.id DESC
+                       ) AS rn
+                FROM preventive_orders po
+                WHERE po.assigned_technician_id = :tech_completed
+                  AND po.status = 'COMPLETED'
+                  AND po.completed_at IS NOT NULL
+                  AND po.completed_at >= :window_start
+                  AND po.deleted_at IS NULL
+            ),
+            combined_exit AS (
+                SELECT location_id, reference, exited_at
+                FROM recent_incident_exit WHERE rn = 1
+                UNION ALL
+                SELECT location_id, reference, exited_at
+                FROM recent_preventive_exit WHERE rn = 1
+            ),
+            ranked_exit AS (
+                SELECT location_id, reference, exited_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY location_id
+                           ORDER BY exited_at DESC, reference DESC
+                       ) AS rn
+                FROM combined_exit
+            )
+            SELECT
+                l.id AS location_id,
+                l.name AS location_name,
+                l.address AS location_address,
+                CASE
+                    WHEN ac.location_id IS NOT NULL OR ap.location_id IS NOT NULL THEN 'ACTIVE_STOP'
+                    ELSE 'GRACE_WINDOW_30M'
+                END AS enablement_type,
+                (COALESCE(ac.active_stops, 0) + COALESCE(ap.active_stops, 0)) AS active_stop_count,
+                re.reference AS last_intervention_reference,
+                re.exited_at AS last_intervention_transition_at
+            FROM locations l
+            LEFT JOIN active_corrective ac ON ac.location_id = l.id
+            LEFT JOIN active_preventive ap ON ap.location_id = l.id
+            LEFT JOIN ranked_exit re ON re.location_id = l.id AND re.rn = 1
+            WHERE (ac.location_id IS NOT NULL OR ap.location_id IS NOT NULL OR re.location_id IS NOT NULL)
+              AND l.deleted_at IS NULL
+              AND l.is_active = {$this->dialect->booleanLiteral(true)}
+            ORDER BY
+                CASE WHEN ac.location_id IS NOT NULL OR ap.location_id IS NOT NULL THEN 0 ELSE 1 END ASC,
+                l.name ASC,
+                l.id ASC
+        ";
+
+        $rows = $this->fetchAllRows($sql, [
+            ':tech_corrective' => $technicianId,
+            ':tech_preventive' => $technicianId,
+            ':tech_exit' => $technicianId,
+            ':tech_completed' => $technicianId,
+            ':window_start' => $windowStart,
+        ]);
+
+        $enabled = [];
+        foreach ($rows as $row) {
+            $enablementType = (string)$row['enablement_type'];
+            $isActiveStop = $enablementType === 'ACTIVE_STOP';
+            $lastExitAt = $this->isoInstant($row['last_intervention_transition_at'] ?? null);
+            $graceExpiresAt = null;
+            $graceRemainingSeconds = null;
+
+            if (!$isActiveStop && $lastExitAt !== null) {
+                $exitInstant = new DateTimeImmutable($lastExitAt);
+                $graceExpiresAt = $exitInstant
+                    ->modify('+' . OpportunisticLocationEligibilityPolicy::GRACE_WINDOW_SECONDS . ' seconds')
+                    ->format(DATE_ATOM);
+                $graceRemainingSeconds = $this->opportunisticEligibilityPolicy
+                    ->graceRemainingSeconds($exitInstant, $now);
+            }
+
+            $enabled[] = [
+                'location_id' => (int)$row['location_id'],
+                'location_name' => (string)$row['location_name'],
+                'location_address' => (string)$row['location_address'],
+                'enablement_type' => $enablementType,
+                'active_stop_count' => (int)$row['active_stop_count'],
+                'grace_expires_at' => $graceExpiresAt,
+                'grace_remaining_seconds' => $graceRemainingSeconds,
+                'last_intervention_reference' => $row['last_intervention_reference'] !== null
+                    ? (string)$row['last_intervention_reference']
+                    : null,
+                'last_intervention_transition_at' => $lastExitAt,
+            ];
+        }
+
+        return $enabled;
+    }
+
+    /**
+     * Hechos de visita de una sede para revalidar la habilitación con la política pura.
+     *
+     * Devuelve solo las paradas que todavía habilitan (no las pausadas, que solo
+     * abren la ventana en el instante de la pausa) y la última salida registrada.
+     *
+     * @return array{
+     *     corrective_stops: list<array{id: int, status: string, location_id: int, ticket_code: string}>,
+     *     preventive_orders: list<array{id: int, status: string, location_id: int, order_code: string}>,
+     *     last_stop_exit_at: ?string,
+     *     last_intervention_reference: ?string
+     * }
+     */
+    public function findLocationVisitFacts(int $technicianId, int $locationId): array
+    {
+        $correctiveRows = $this->fetchAllRows(
+            "
+            SELECT i.id, i.status, i.location_id, i.ticket_code
+            FROM incidents i
+            WHERE i.assigned_technician_id = :technician_id
+              AND i.location_id = :location_id
+              AND i.status IN ('ASSIGNED', 'IN_PROGRESS')
+              AND i.deleted_at IS NULL
+            ORDER BY i.id ASC
+            ",
+            [':technician_id' => $technicianId, ':location_id' => $locationId]
+        );
+
+        $preventiveRows = $this->fetchAllRows(
+            "
+            SELECT po.id, po.status, po.location_id, po.order_code
+            FROM preventive_orders po
+            WHERE po.assigned_technician_id = :technician_id
+              AND po.location_id = :location_id
+              AND po.status IN ('SCHEDULED', 'IN_INSPECTION')
+              AND po.deleted_at IS NULL
+            ORDER BY po.id ASC
+            ",
+            [':technician_id' => $technicianId, ':location_id' => $locationId]
+        );
+
+        $lastExit = $this->fetchSingleRow(
+            "
+            SELECT exits.reference, exits.exited_at
+            FROM (
+                SELECT i.ticket_code AS reference, h.created_at AS exited_at
+                FROM incident_history h
+                JOIN incidents i ON i.id = h.incident_id
+                WHERE h.user_id = :exit_technician_id
+                  AND i.location_id = :exit_location_id
+                  AND h.to_status IN ('RESOLVED', 'PENDING_PARTS', 'PENDING_INFO')
+                  AND i.deleted_at IS NULL
+                UNION ALL
+                SELECT po.order_code AS reference, po.completed_at AS exited_at
+                FROM preventive_orders po
+                WHERE po.assigned_technician_id = :completed_technician_id
+                  AND po.location_id = :completed_location_id
+                  AND po.status = 'COMPLETED'
+                  AND po.completed_at IS NOT NULL
+                  AND po.deleted_at IS NULL
+            ) exits
+            ORDER BY exits.exited_at DESC, exits.reference DESC
+            LIMIT 1
+            ",
+            [
+                ':exit_technician_id' => $technicianId,
+                ':exit_location_id' => $locationId,
+                ':completed_technician_id' => $technicianId,
+                ':completed_location_id' => $locationId,
+            ]
+        );
+
+        $correctiveStops = array_map(static fn (array $row): array => [
+            'id' => (int)$row['id'],
+            'status' => (string)$row['status'],
+            'location_id' => (int)$row['location_id'],
+            'ticket_code' => (string)$row['ticket_code'],
+        ], $correctiveRows);
+
+        $preventiveOrders = array_map(static fn (array $row): array => [
+            'id' => (int)$row['id'],
+            'status' => (string)$row['status'],
+            'location_id' => (int)$row['location_id'],
+            'order_code' => (string)$row['order_code'],
+        ], $preventiveRows);
+
+        return [
+            'corrective_stops' => $correctiveStops,
+            'preventive_orders' => $preventiveOrders,
+            'last_stop_exit_at' => $this->isoInstant($lastExit['exited_at'] ?? null),
+            'last_intervention_reference' => isset($lastExit['reference'])
+                ? (string)$lastExit['reference']
+                : null,
+        ];
+    }
+
+    /**
+     * Catálogo de máquinas operativas de la sede con su expediente activo o en garantía.
+     *
+     * Dos lecturas resueltas por lote —máquinas e incidentes—, nunca una por máquina. El
+     * expediente elegido es el activo si existe y, si no, el `RESOLVED` dentro de las 48 h
+     * de garantía; el recuento de reaperturas viaja en la misma consulta como subconsulta
+     * agregada para no pagar una lectura por expediente (RNF-01).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function findLocationMachineCatalog(int $locationId, DateTimeImmutable $now): array
+    {
+        $machineRows = $this->fetchAllRows(
+            "
+            SELECT id, code, model, machine_type, floor_wing,
+                   is_active, is_blocked_no_access, sanitary_status
+            FROM machines
+            WHERE location_id = :location_id
+              AND deleted_at IS NULL
+              AND (is_active = {$this->dialect->booleanLiteral(true)}
+                   OR is_blocked_no_access = {$this->dialect->booleanLiteral(true)})
+            ORDER BY floor_wing ASC, code ASC, id ASC
+            ",
+            [':location_id' => $locationId]
+        );
+
+        if ($machineRows === []) {
+            return [];
+        }
+
+        $machineIds = array_map(static fn (array $row): int => (int)$row['id'], $machineRows);
+        $placeholders = [];
+        $params = [
+            ':warranty_cutoff' => $now->modify('-48 hours')->format('Y-m-d H:i:sP'),
+        ];
+        foreach ($machineIds as $index => $machineId) {
+            $key = ':machine_' . $index;
+            $placeholders[] = $key;
+            $params[$key] = $machineId;
+        }
+
+        // `activeTicketCondition()` incluye `RESOLVED` (es la forma del índice único, Art. V.2 y
+        // V.6), pero el catálogo necesita distinguir el expediente vivo del resuelto: si no, una
+        // resolución de hace 49 h se publicaría como si siguiera abierta. La condición explícita
+        // enumera los estados no terminales y la garantía se añade aparte con su corte de 48 h.
+        $openIncidentCondition = "i.status IN ('REGISTERED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS', 'PENDING_INFO', 'REOPENED')";
+        $warrantyCutoffTimestamp = $now->getTimestamp() - (48 * 3600);
+
+        $incidentRows = $this->fetchAllRows(
+            "
+            SELECT i.id, i.machine_id, i.ticket_code, i.status, i.urgency, i.category,
+                   i.description, i.assigned_technician_id, u.name AS assigned_technician_name,
+                   i.resolved_at, i.started_at, i.sla_target_at,
+                   i.opportunistic_mode, i.opportunistic_origin_reason,
+                   (SELECT COUNT(*) FROM incident_history h
+                    WHERE h.incident_id = i.id
+                      AND h.to_status IN ('REOPENED')) AS reopen_count
+            FROM incidents i
+            LEFT JOIN users u ON u.id = i.assigned_technician_id
+            WHERE i.machine_id IN (" . implode(', ', $placeholders) . ")
+              AND i.deleted_at IS NULL
+              AND (
+                  ({$openIncidentCondition})
+                  OR (i.status = 'RESOLVED' AND i.resolved_at IS NOT NULL AND i.resolved_at >= :warranty_cutoff)
+              )
+            ORDER BY
+                CASE WHEN ({$openIncidentCondition}) THEN 0 ELSE 1 END ASC,
+                i.resolved_at DESC,
+                i.id DESC
+            ",
+            $params
+        );
+
+        $incidentByMachine = [];
+        foreach ($incidentRows as $row) {
+            $machineId = (int)$row['machine_id'];
+            if (array_key_exists($machineId, $incidentByMachine)) {
+                continue;
+            }
+
+            $status = (string)$row['status'];
+            $resolvedAt = $this->isoInstant($row['resolved_at'] ?? null);
+            $isInWarranty = $status === 'RESOLVED'
+                && $resolvedAt !== null
+                && strtotime($resolvedAt) !== false
+                && strtotime($resolvedAt) >= $warrantyCutoffTimestamp;
+            $reopenCount = (int)$row['reopen_count'];
+
+            $incidentByMachine[$machineId] = [
+                'id' => (int)$row['id'],
+                'ticket_code' => (string)$row['ticket_code'],
+                'status' => $status,
+                'urgency' => (string)$row['urgency'],
+                'category' => (string)$row['category'],
+                'description' => (string)$row['description'],
+                'assigned_technician_id' => $row['assigned_technician_id'] !== null
+                    ? (int)$row['assigned_technician_id']
+                    : null,
+                'assigned_technician_name' => $row['assigned_technician_name'] !== null
+                    ? (string)$row['assigned_technician_name']
+                    : null,
+                'resolved_at' => $resolvedAt,
+                'started_at' => $this->isoInstant($row['started_at'] ?? null),
+                'sla_target_at' => $this->isoInstant($row['sla_target_at'] ?? null),
+                'is_in_warranty' => $isInWarranty,
+                'reopen_count' => $reopenCount,
+                'will_trigger_chronic_replacement' => $isInWarranty && $reopenCount >= 2,
+                'opportunistic_mode' => $row['opportunistic_mode'] !== null
+                    ? (string)$row['opportunistic_mode']
+                    : null,
+                'opportunistic_origin_reason' => $row['opportunistic_origin_reason'] !== null
+                    ? (string)$row['opportunistic_origin_reason']
+                    : null,
+            ];
+        }
+
+        $catalog = [];
+        foreach ($machineRows as $row) {
+            $machineId = (int)$row['id'];
+            $catalog[] = [
+                'id' => $machineId,
+                'code' => (string)$row['code'],
+                'model' => (string)$row['model'],
+                'machine_type' => (string)$row['machine_type'],
+                'floor_wing' => (string)$row['floor_wing'],
+                'is_active' => (bool)$row['is_active'],
+                'is_blocked_no_access' => (bool)$row['is_blocked_no_access'],
+                'sanitary_status' => (string)$row['sanitary_status'],
+                'active_incident' => $incidentByMachine[$machineId] ?? null,
+            ];
+        }
+
+        return $catalog;
+    }
+
+    /**
+     * Intervenciones abiertas del técnico en otra sede (RF-02.2).
+     *
+     * Incidencias `IN_PROGRESS` y órdenes preventivas `IN_INSPECTION`. La sede destino
+     * se excluye: varias máquinas en el mismo edificio son la razón de ser del flujo.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function findActiveInterventionsInOtherLocations(int $technicianId, int $targetLocationId): array
+    {
+        $incidentRows = $this->fetchAllRows(
+            "
+            SELECT i.id, i.ticket_code, i.status, i.urgency, i.started_at,
+                   i.location_id, l.name AS location_name,
+                   i.machine_id, m.code AS machine_code, m.floor_wing
+            FROM incidents i
+            LEFT JOIN locations l ON l.id = i.location_id
+            LEFT JOIN machines m ON m.id = i.machine_id
+            WHERE i.assigned_technician_id = :technician_id
+              AND i.status = 'IN_PROGRESS'
+              AND i.location_id <> :target_location_id
+              AND i.deleted_at IS NULL
+            ",
+            [':technician_id' => $technicianId, ':target_location_id' => $targetLocationId]
+        );
+
+        $preventiveRows = $this->fetchAllRows(
+            "
+            SELECT po.id, po.order_code, po.status, po.started_at,
+                   po.location_id, l.name AS location_name,
+                   po.machine_id, m.code AS machine_code, m.floor_wing
+            FROM preventive_orders po
+            LEFT JOIN locations l ON l.id = po.location_id
+            LEFT JOIN machines m ON m.id = po.machine_id
+            WHERE po.assigned_technician_id = :technician_id
+              AND po.status = 'IN_INSPECTION'
+              AND po.location_id <> :target_location_id
+              AND po.deleted_at IS NULL
+            ",
+            [':technician_id' => $technicianId, ':target_location_id' => $targetLocationId]
+        );
+
+        $conflicts = [];
+        foreach ($incidentRows as $row) {
+            $conflicts[] = [
+                'id' => (int)$row['id'],
+                'record_type' => 'INCIDENT',
+                'ticket_code' => (string)$row['ticket_code'],
+                'status' => (string)$row['status'],
+                'urgency' => $row['urgency'] !== null ? (string)$row['urgency'] : null,
+                'started_at' => $this->isoInstant($row['started_at'] ?? null),
+                'location_id' => (int)$row['location_id'],
+                'location_name' => $row['location_name'] !== null ? (string)$row['location_name'] : null,
+                'machine_id' => (int)$row['machine_id'],
+                'machine_code' => $row['machine_code'] !== null ? (string)$row['machine_code'] : null,
+                'floor_wing' => $row['floor_wing'] !== null ? (string)$row['floor_wing'] : null,
+            ];
+        }
+
+        foreach ($preventiveRows as $row) {
+            $conflicts[] = [
+                'id' => (int)$row['id'],
+                'record_type' => 'PREVENTIVE_ORDER',
+                'ticket_code' => (string)$row['order_code'],
+                'order_code' => (string)$row['order_code'],
+                'status' => (string)$row['status'],
+                'urgency' => null,
+                'started_at' => $this->isoInstant($row['started_at'] ?? null),
+                'location_id' => (int)$row['location_id'],
+                'location_name' => $row['location_name'] !== null ? (string)$row['location_name'] : null,
+                'machine_id' => (int)$row['machine_id'],
+                'machine_code' => $row['machine_code'] !== null ? (string)$row['machine_code'] : null,
+                'floor_wing' => $row['floor_wing'] !== null ? (string)$row['floor_wing'] : null,
+            ];
+        }
+
+        usort($conflicts, static function (array $a, array $b): int {
+            $left = $a['started_at'] === null ? PHP_INT_MAX : (int)strtotime($a['started_at']);
+            $right = $b['started_at'] === null ? PHP_INT_MAX : (int)strtotime($b['started_at']);
+
+            return [$left, $a['id']] <=> [$right, $b['id']];
+        });
+
+        return $conflicts;
+    }
+
+    /**
+     * Paradas críticas o sanitarias pendientes en otra sede (RF-03.1, Art. II).
+     *
+     * Solo las que siguen esperando (`ASSIGNED` / `PENDING_INFO`) y cumplen el criterio
+     * de la salvaguarda: urgencia `CRITICAL`, máquina de perecederos o combo con fallo
+     * térmico o corte eléctrico, o máquina en cuarentena sanitaria. La consulta no decide
+     * si hay que confirmar: entrega los hechos a la política pura.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function findPendingCriticalStopsInOtherLocations(int $technicianId, int $targetLocationId): array
+    {
+        $rows = $this->fetchAllRows(
+            "
+            SELECT i.id, i.ticket_code, i.status, i.urgency, i.category,
+                   i.machine_id, m.code AS machine_code, m.machine_type, m.sanitary_status,
+                   i.location_id, l.name AS location_name, i.sla_target_at
+            FROM incidents i
+            JOIN machines m ON m.id = i.machine_id
+            LEFT JOIN locations l ON l.id = i.location_id
+            WHERE i.assigned_technician_id = :technician_id
+              AND i.status IN ('ASSIGNED', 'PENDING_INFO')
+              AND i.location_id <> :target_location_id
+              AND i.deleted_at IS NULL
+              AND (
+                  i.urgency = 'CRITICAL'
+                  OR m.sanitary_status = 'QUARANTINE'
+                  OR (
+                      m.machine_type IN ('PERISHABLE_FOOD', 'COMBO')
+                      AND i.category IN ('TEMPERATURE_COLD', 'ELECTRICAL_OFF')
+                  )
+              )
+            ORDER BY {$this->triageOrderExpression()} ASC,
+                     CASE WHEN i.sla_target_at IS NULL THEN 1 ELSE 0 END ASC,
+                     i.sla_target_at ASC,
+                     i.id ASC
+            ",
+            [':technician_id' => $technicianId, ':target_location_id' => $targetLocationId]
+        );
+
+        $pending = [];
+        foreach ($rows as $row) {
+            $pending[] = [
+                'id' => (int)$row['id'],
+                'incident_id' => (int)$row['id'],
+                'ticket_code' => (string)$row['ticket_code'],
+                'status' => (string)$row['status'],
+                'urgency' => (string)$row['urgency'],
+                'category' => (string)$row['category'],
+                'machine_id' => (int)$row['machine_id'],
+                'machine_code' => $row['machine_code'] !== null ? (string)$row['machine_code'] : null,
+                'machine_type' => (string)$row['machine_type'],
+                'sanitary_status' => (string)$row['sanitary_status'],
+                'location_id' => (int)$row['location_id'],
+                'location_name' => $row['location_name'] !== null ? (string)$row['location_name'] : null,
+                'sla_target_at' => $this->isoInstant($row['sla_target_at'] ?? null),
+            ];
+        }
+
+        return $pending;
+    }
+
+    /**
+     * Formatea un instante leído del motor como ISO 8601 con desfase explícito.
+     *
+     * `timestamptz` viaja con su desfase (`2026-10-15 20:40:00+00`); el contrato de la API
+     * publica ISO 8601, de modo que la conversión se hace una sola vez aquí y no en cada
+     * consumidor. Un valor vacío o no interpretable se degrada a `null` en lugar de inventar
+     * un instante.
+     */
+    private function isoInstant(?string $value): ?string
+    {
+        if ($value === null || trim($value) === '') {
+            return null;
+        }
+
+        try {
+            return (new DateTimeImmutable($value))->format(DATE_ATOM);
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**
@@ -1057,7 +1641,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $sql .= " AND i.status IN (" . implode(', ', $placeholders) . ")";
         }
 
-        $sql .= " ORDER BY {$this->triageOrderExpression()}, i.created_at ASC";
+        $sql .= " ORDER BY {$this->routeOrderExpression()}";
 
         $stmt = $this->pdo->prepare($sql);
         foreach ($params as $key => $val) {

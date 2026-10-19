@@ -72,7 +72,7 @@
 
 ## Fase 3: Capa de Infraestructura y Repositorio PDO
 
-- [ ] **T-OPP-05 · Implementar `OpportunisticIncidentRepositoryInterface` en `PdoIncidentRepository` (consultas de habilitación 30m/+5m, catálogo de máquinas de la sede y ordenación en Parada #1)**
+- [x] **T-OPP-05 · Implementar `OpportunisticIncidentRepositoryInterface` en `PdoIncidentRepository` (consultas de habilitación 30m/+5m, catálogo de máquinas de la sede y ordenación en Parada #1)**
   * **Tiempo estimado:** 30 min
   * **Dependencias:** `T-OPP-02`, `T-OPP-04`
   * **Ficheros a crear o modificar:**
