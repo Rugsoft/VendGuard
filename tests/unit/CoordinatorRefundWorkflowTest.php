@@ -882,6 +882,29 @@ $detail = static fn (Response|CoordFaultedResponse $response): string => $respon
  * @param array<string, mixed> $body
  * @return array<string, mixed>|null
  */
+/**
+ * ¿Algún valor escalar del cuerpo decodificado coincide exactamente con `$needle`?
+ *
+ * La aserción de privacidad del PIN se hacía con `str_contains()` sobre el JSON crudo, y un
+ * PIN de cuatro cifras puede aparecer **dentro** de un IBAN, un teléfono o una marca de
+ * tiempo sin que eso publique nada: medido, el fixture colisionaba en ~1 de cada 500
+ * corridas (1 PIN en 500 coincidía con cuatro dígitos seguidos de otro dato). La pregunta
+ * correcta es si el PIN viaja como valor, no si sus cifras se parecen a las de otro campo.
+ */
+$containsScalar = static function (mixed $value, string $needle) use (&$containsScalar): bool {
+    if (is_array($value)) {
+        foreach ($value as $item) {
+            if ($containsScalar($item, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    return is_scalar($value) && (string)$value === $needle;
+};
+
 $itemById = static function (array $body, int $id): ?array {
     foreach ($body['data']['items'] ?? [] as $row) {
         if ((int)($row['id'] ?? 0) === $id) {
@@ -1020,7 +1043,14 @@ $assert(
     strlen($deskCase->getTrackingToken()) === 64,
     'token: ' . var_export($deskCase->getTrackingToken(), true)
 );
-$assert('1.26 Y el PIN real tampoco aparece como valor suelto', !str_contains($inboxJson, (string)$deskCase->getPickupPin()));
+$assert(
+    '1.26 Y el PIN real tampoco aparece como valor suelto',
+    // La segunda mitad es el control de no-vacuidad del detector: si el helper no reconociera
+    // un PIN publicado, la primera mitad pasaría siempre y la privacidad quedaría sin medir.
+    !$containsScalar($inboxBody, (string)$deskCase->getPickupPin())
+        && $containsScalar(['pickup_pin' => $deskCase->getPickupPin()], (string)$deskCase->getPickupPin()),
+    'pin: ' . var_export($deskCase->getPickupPin(), true)
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. Filtros y paginación de la bandeja

@@ -732,6 +732,28 @@ $statusDetail = static fn (Response|FaultedResponse $response, string $prefix = 
     ? 'fallo inesperado -> ' . $response->fault
     : $prefix . $response->getStatusCode();
 
+/**
+ * ¿Algún valor escalar del árbol coincide exactamente con `$needle`?
+ *
+ * La privacidad del PIN se medía con `str_contains()` sobre el JSON serializado, y un PIN de
+ * cuatro cifras puede aparecer **dentro** de un identificador, un importe o una marca de
+ * tiempo sin que eso publique nada. La pregunta correcta es si el PIN viaja como valor; el
+ * mismo defecto hacía fallar esporádicamente a `CoordinatorRefundWorkflowTest`.
+ */
+$containsScalar = static function (mixed $value, string $needle) use (&$containsScalar): bool {
+    if (is_array($value)) {
+        foreach ($value as $item) {
+            if ($containsScalar($item, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    return is_scalar($value) && (string)$value === $needle;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 0. Dogma Vanilla
 // ─────────────────────────────────────────────────────────────────────────────
@@ -833,9 +855,14 @@ $assert(
     '3.7 Control de no-vacuidad: existe el evento REFUND_DELIVERED_IN_HAND',
     count(array_filter($auditRepo->events, static fn (AuditEvent $e): bool => $e->getAction() === 'REFUND_DELIVERED_IN_HAND')) === 1
 );
+$auditPayload = array_map(static fn (AuditEvent $e): array => $e->toArray(), $auditRepo->events);
 $assert(
     '3.8 La auditoría NO arrastra el PIN de recogida',
-    !str_contains((string)json_encode(array_map(static fn (AuditEvent $e): array => $e->toArray(), $auditRepo->events), JSON_THROW_ON_ERROR), (string)$atDesk->getPickupPin())
+    // El segundo término es el control de no-vacuidad del detector: si no reconociera un PIN
+    // publicado, la primera mitad pasaría siempre y la privacidad quedaría sin medir.
+    !$containsScalar($auditPayload, (string)$atDesk->getPickupPin())
+        && $containsScalar(['pickup_pin' => $atDesk->getPickupPin()], (string)$atDesk->getPickupPin()),
+    'pin: ' . var_export($atDesk->getPickupPin(), true)
 );
 
 // Un sobre ya entregado no se vuelve a entregar: la arista REFUNDED_IN_HAND ->
