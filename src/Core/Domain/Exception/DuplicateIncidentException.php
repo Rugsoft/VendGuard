@@ -23,18 +23,28 @@ class DuplicateIncidentException extends DomainException
     private ?string $ticketStatus;
     private int $httpStatusCode;
 
+    /** @var array<string, mixed> */
+    private array $details;
+
+    /**
+     * @param array<string, mixed> $details Contexto adicional del choque. La Avería Oportunista
+     *        In Situ (Módulo 16) lo usa para devolver el expediente existente y la acción exacta
+     *        con la que asumirlo, sin una segunda consulta del cliente.
+     */
     public function __construct(
         string $errorCode,
         string $message,
         ?string $ticketCode = null,
         ?string $ticketStatus = null,
-        int $httpStatusCode = self::HTTP_STATUS
+        int $httpStatusCode = self::HTTP_STATUS,
+        array $details = []
     ) {
         parent::__construct($message, $httpStatusCode);
         $this->errorCode = $errorCode;
         $this->ticketCode = $ticketCode;
         $this->ticketStatus = $ticketStatus;
         $this->httpStatusCode = $httpStatusCode;
+        $this->details = $details;
     }
 
     public function getErrorCode(): string
@@ -55,5 +65,13 @@ class DuplicateIncidentException extends DomainException
     public function getHttpStatusCode(): int
     {
         return $this->httpStatusCode;
+    }
+
+    /**
+     * @return array<string, mixed> Contexto adicional del choque (vacío si no se aportó).
+     */
+    public function getDetails(): array
+    {
+        return $this->details;
     }
 }

@@ -22,6 +22,25 @@ use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
  */
 class AuditLogger
 {
+    /**
+     * Vocabulario inmutable de la Avería Oportunista In Situ (Módulo 16).
+     *
+     * Las seis acciones se firman a través de `logOpportunisticEvent()`, que
+     * rechaza cualquier código fuera de esta lista: es la garantía de que el
+     * visor de auditoría de Coordinación no recibe un hecho que no sepa rotular
+     * y de que el catálogo del backend no crece por accidente.
+     *
+     * @var list<string>
+     */
+    public const OPPORTUNISTIC_ACTIONS = [
+        'INCIDENT_CREATED_OPPORTUNISTIC',
+        'INCIDENT_ASSUMED_OPPORTUNISTIC',
+        'INCIDENT_TAKEOVER_OPPORTUNISTIC',
+        'INCIDENT_REOPENED_IN_SITU',
+        'INCIDENT_CHRONIC_REPLACED',
+        'COLD_CHAIN_ROUTE_POSTPONED_CONFIRMED',
+    ];
+
     private AuditLogRepositoryInterface $auditRepo;
 
     public function __construct(?AuditLogRepositoryInterface $auditRepo = null)
@@ -76,6 +95,47 @@ class AuditLogger
         );
 
         return $this->auditRepo->log($event);
+    }
+
+    /**
+     * Registra un hecho de la Avería Oportunista In Situ (Módulo 16, Art. III).
+     *
+     * El módulo tiene seis hechos con nombre propio —alta, asunción, traspaso,
+     * reapertura en garantía, sustitución por Avería Crónica y confirmación de
+     * postergación de una parada crítica/frío— y todos se firman por esta puerta.
+     * Centralizarlos aquí hace dos cosas que el servicio no puede garantizar
+     * solo: primero, que el código de acción pertenece al catálogo cerrado del
+     * módulo; segundo, que el evento hereda la validación del Art. V.1 cuando la
+     * transición entra en `CLOSED` (la sustitución crónica cierra el predecesor).
+     *
+     * @param int $ticketId Expediente afectado.
+     * @param string $action Acción del catálogo `OPPORTUNISTIC_ACTIONS`.
+     * @param array{id: int|null, role: string, name: string} $user Técnico que firma el hecho.
+     * @param array<string, mixed>|null $previousState Estado anterior.
+     * @param array<string, mixed> $newState Estado resultante.
+     * @param array<string, mixed>|null $metadata Contexto (máquina, sede, modalidad, confirmaciones).
+     * @return AuditEvent Evento persistido con ID generado.
+     *
+     * @throws InvalidArgumentException Si la acción no pertenece al catálogo del módulo.
+     */
+    public function logOpportunisticEvent(
+        int $ticketId,
+        string $action,
+        array $user,
+        ?array $previousState,
+        array $newState,
+        ?array $metadata = null
+    ): AuditEvent {
+        $actionUpper = strtoupper(trim($action));
+
+        if (!in_array($actionUpper, self::OPPORTUNISTIC_ACTIONS, true)) {
+            throw new InvalidArgumentException(sprintf(
+                'La acción «%s» no pertenece al catálogo de auditoría de la avería oportunista in situ.',
+                $action
+            ));
+        }
+
+        return $this->logTicketEvent($ticketId, $actionUpper, $user, $previousState, $newState, $metadata);
     }
 
     /**

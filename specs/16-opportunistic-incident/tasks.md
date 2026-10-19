@@ -112,7 +112,7 @@
 
 ## Fase 5: Servicio de Aplicación, Controladores REST y Enrutamiento
 
-- [ ] **T-OPP-08 · Implementar DTOs y `OpportunisticIncidentService` (orquestador de catálogo, Flujo A, Flujo B, bloqueo de datos bancarios Art. V.4 y auditoría)**
+- [x] **T-OPP-08 · Implementar DTOs y `OpportunisticIncidentService` (orquestador de catálogo, Flujo A, Flujo B, bloqueo de datos bancarios Art. V.4 y auditoría)**
   * **Tiempo estimado:** 30 min
   * **Dependencias:** `T-OPP-04`, `T-OPP-06`, `T-OPP-07`
   * **Ficheros a crear o modificar:**

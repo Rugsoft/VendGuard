@@ -53,6 +53,12 @@ $assert = function (string $label, bool $condition, string $detail = '') use (&$
  */
 const KNOWN_DYNAMIC_ACTION_SITES = [
     'src/Presentation/Controller/CoordinatorController.php::logTicketEvent',
+    // Módulo 16: `logOpportunisticEvent()` valida la acción contra su catálogo
+    // cerrado y delega en `logTicketEvent()` con el código ya normalizado. La
+    // delegación es dinámica por diseño; las seis acciones reales se enumeran
+    // como literales en cada llamada de `OpportunisticIncidentService` y este
+    // guard las extrae de allí.
+    'src/Application/Service/AuditLogger.php::logTicketEvent',
 ];
 
 /** AuditLogger writers whose second argument (or `action:` named argument) is the action. */
@@ -67,6 +73,8 @@ const AUDIT_WRITER_METHODS = [
     'logUnclaimedCashEvent',
     'logNotificationOutboxEvent',
     'logNotificationChannelSettingEvent',
+    // Módulo 16: firma de los seis hechos de la avería oportunista in situ.
+    'logOpportunisticEvent',
 ];
 
 /**

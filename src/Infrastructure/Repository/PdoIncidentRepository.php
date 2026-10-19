@@ -194,6 +194,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             closed_at,
                             cancellation_reason,
                             cancelled_at,
+                            sla_target_at,
                             opportunistic_mode,
                             opportunistic_origin_reason,
                             opportunistic_informant_name,
@@ -225,6 +226,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             :closed_at,
                             :cancellation_reason,
                             :cancelled_at,
+                            :sla_target_at,
                             :opportunistic_mode,
                             :opportunistic_origin_reason,
                             :opportunistic_informant_name,
@@ -275,6 +277,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $stmt->bindValue(':description', $incident->getDescription(), PDO::PARAM_STR);
                 $stmt->bindValue(':retained_money_amount', $incident->getRetainedMoneyAmount(), $incident->getRetainedMoneyAmount() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
                 $stmt->bindValue(':photo_path', $incident->getPhotoPath(), $incident->getPhotoPath() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                // Vencimiento contractual (Módulo 16, RF-04.2): el alta oportunista lo calcula
+                // en el dominio y viaja con el expediente; los demás canales siguen insertando
+                // `NULL` sin cambiar su comportamiento.
+                $stmt->bindValue(':sla_target_at', $incident->getSlaTargetAt(), $incident->getSlaTargetAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
                 $stmt->bindValue(':urgency', $incident->getUrgency()->value, PDO::PARAM_STR);
                 $stmt->bindValue(':status', $incident->getStatus()->value, PDO::PARAM_STR);
                 $stmt->bindValue(':assigned_at', $incident->getAssignedAt(), $incident->getAssignedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
@@ -387,6 +393,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     closed_at,
                     cancellation_reason,
                     cancelled_at,
+                    sla_target_at,
                     opportunistic_mode,
                     opportunistic_origin_reason,
                     opportunistic_informant_name,
@@ -417,6 +424,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     :closed_at,
                     :cancellation_reason,
                     :cancelled_at,
+                    :sla_target_at,
                     :opportunistic_mode,
                     :opportunistic_origin_reason,
                     :opportunistic_informant_name,
@@ -441,6 +449,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $stmt->bindValue(':description', $incident->getDescription(), PDO::PARAM_STR);
             $stmt->bindValue(':retained_money_amount', $incident->getRetainedMoneyAmount(), $incident->getRetainedMoneyAmount() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
             $stmt->bindValue(':photo_path', $incident->getPhotoPath(), $incident->getPhotoPath() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            // Vencimiento contractual (Módulo 16, RF-04.2): el alta oportunista lo calcula
+            // en el dominio y viaja con el expediente; los demás canales siguen insertando
+            // `NULL` sin cambiar su comportamiento.
+            $stmt->bindValue(':sla_target_at', $incident->getSlaTargetAt(), $incident->getSlaTargetAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
             $stmt->bindValue(':urgency', $incident->getUrgency()->value, PDO::PARAM_STR);
             $stmt->bindValue(':status', $incident->getStatus()->value, PDO::PARAM_STR);
             $stmt->bindValue(':assigned_at', $incident->getAssignedAt(), $incident->getAssignedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
