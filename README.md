@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/Database-PostgreSQL%2016%2B%20%7C%20Supabase-3ecf8e?style=flat-square&logo=postgresql&logoColor=white)](https://supabase.com/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-305%20Suites%20%7C%2011.827%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-307%20Suites%20%7C%2011.919%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -141,6 +141,14 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 * **Ventana de Gracia de 30 Minutos y Experiencia en $\le 3$ Toques (RNF-02):** La operativa in situ está habilitada mientras el técnico tenga una parada activa en la sede, o durante una ventana de cortesía de **30 minutos** (+5 min con formulario abierto) tras resolver o pausar la última intervención. La vista móvil renderiza la tarjeta temporal **"🏢 Sede recién visitada (30 min)"** y un catálogo filtrado de máquinas para completar la intervención en menos de tres toques.
 * **Coexistencia en Parada #1 y Blindaje de Privacidad (Art. V.4):** Las intervenciones simultáneas `IN_PROGRESS` de la misma sede conviven agrupadas en la Parada #1 de la ruta ordenadas por criticidad y SLA (prohibiendo iniciar en sedes distintas con error `409`). Se prohíbe terminantemente recabar datos bancarios (IBAN/Bizum) en la ficha técnica derivando al usuario al código QR público (`422 CASH_REFUND_PRIVACY_VIOLATION`), y se enmascara la identidad técnica en el portal de sede bajo el código oficial de operador.
 * **Retorno de Inversión y Métricas de Eficiencia:** Cuadro de mando para Coordinación con registro de desplazamientos evitados (`opportunistic_interventions`), reduciendo la huella de carbono y el coste logístico de segundas visitas.
+
+### 15. Zonificación Operativa y Asignación Asistida (Módulo 17)
+* **Demarcaciones por Código Postal con Herencia Automática:** Zonas operativas con nombre, código y color corporativo `#RRGGBB`, delimitadas por códigos postales de cinco dígitos. Una sede hereda la zona de su CP sin intervención manual; la excepción manual (`is_manual_override`) se conmuta de forma atómica y auditada, y el panel de sedes señala con la insignia «Sin Zona Asignada» los centros huérfanos.
+* **Cuadrante de Cobertura con Titular Único:** Cada técnico puede tener una zona principal y varias suplencias; el índice parcial `uq_technician_primary_zone` impide dos titularidades vivas simultáneas y la degradación de la anterior deja rastro en auditoría (`TECHNICIAN_ZONE_PRIMARY_DEMOTED`).
+* **Motor de Sugerencia Explicada (RF-04 / RF-05):** `TechnicianAssignmentSuggester` pondera afinidad territorial, presencia in situ, paradas en la misma zona, carga viva, pausas por falta de acceso y guardia sanitaria 24/7 para devolver un ranking con desglose de puntos. En zonas desatendidas ordena por distancia Haversine (parada actual, última resuelta o Base Central) y desempata por mayor tiempo desde la última asignación formal.
+* **Despacho en Dos Toques y Salvaguarda de Frío (Art. II / Art. V.1):** El panel de triaje destaca al primer puesto y permite asignarlo con `[⚡ Asignar Sugerido]`. Si se descarta al técnico de guardia ante una avería de frío, exige `override_justification` de al menos 20 caracteres reales, auditada como `INCIDENT_ASSIGNMENT_SUGGESTION_OVERRIDDEN` sin alterar el `reassignment_reason` del flujo de reasignación.
+* **Mapa Territorial por Zona y Privacidad de Sede:** El mapa de coordinación filtra y tiñe los centros con el color de su demarcación resolviéndolo en cliente (el contrato cartográfico no admite parámetros nuevos). El portal de sede jamás recibe el nombre, código ni color de la zona del cliente (Art. V.4).
+* **Transferencia Atómica de Códigos Postales:** Mover un CP entre zonas actualiza la demarcación, bloquea con `FOR UPDATE` las sedes heredadas, reasigna su `zone_id` e inscribe el evento matriz más un evento individual por sede en la misma transacción, con rollback completo ante cualquier fallo.
 
 ---
 
@@ -400,6 +408,18 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `GET` | `/api/technician/my-route?include_opportunistic_context=1` | `TECHNICIAN` | Hoja de ruta extendida con sedes habilitadas (paradas activas o ventana de gracia de 30 min) y aviso de paradas críticas pendientes en otras sedes. |
 | `GET` | `/api/coordinator/metrics` | `COORDINATOR` | KPIs globales incluyendo desplazamientos logísticos evitados por intervenciones oportunistas (`opportunistic_interventions`). |
 
+#### Zonificación Operativa y Asignación Asistida (Módulo 17)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/coordinator/zones` | `COORDINATOR` | Catálogo territorial con conteo agregado de sedes, técnicos y códigos postales por zona en un solo round-trip. |
+| `POST` | `/api/coordinator/zones` | `COORDINATOR` | Alta de demarcación con validación de nombre, código y color `#RRGGBB`; detecta CPs en conflicto antes de persistir. |
+| `GET/PUT` | `/api/coordinator/zones/{id}` | `COORDINATOR` | Detalle y edición de la zona, incluyendo su cuadrante de titulares y suplentes. |
+| `POST` | `/api/coordinator/zones/{id}/postal-codes` | `COORDINATOR` | Traslado atómico de códigos postales entre zonas con reasignación de sedes heredadas y auditoría dual matriz-sede. |
+| `POST` | `/api/coordinator/zones/{id}/technicians` | `COORDINATOR` | Vinculación de técnico como titular o suplente, con degradación auditada de la titularidad previa. |
+| `DELETE` | `/api/coordinator/zones/{id}/technicians/{tech_id}` | `COORDINATOR` | Baja lógica del cuadrante (`removed_at`), preservando el histórico de cobertura. |
+| `POST` | `/api/coordinator/locations/{id}/override-zone` | `COORDINATOR` | Excepción manual de sede o restablecimiento de la herencia por código postal. |
+| `GET` | `/api/coordinator/incidents/{id}/suggested-technicians` | `COORDINATOR` | Ranking territorial explicado con desglose de puntuación, insignias y salvaguarda sanitaria de guardia. |
+
 ---
 
 ## 🧪 Batería Completa de Pruebas Automatizadas (T-39 & Módulos 02, 03, 04, M1, M2 y M4)
@@ -415,20 +435,20 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 305 suites · 11.827 aserciones
+batería global: 307 suites · 11.919 aserciones
 
 ```text
 ======================================================================
  RESUMEN DE EJECUCIÓN GLOBAL (T-39)
 ======================================================================
- Tiempo de ejecución total : 142.00 segundos  (variable en cada corrida)
+ Tiempo de ejecución total : 300.00 segundos  (variable en cada corrida)
  Suites de pruebas PHP Unit : 133 / 133 pasadas
- Suites de pruebas JS Unit  : 70 / 70 pasadas
+ Suites de pruebas JS Unit  : 72 / 72 pasadas
  Suites de Integración PHP  : 101 / 101 pasadas
  Suites E2E Manuales (T-40): 1 / 1 pasadas
  ──────────────────────────────────────────────────────────────────
- Total Suites Ejecutadas    : 305
- Total Aserciones Evaluadas : 11.827
+ Total Suites Ejecutadas    : 307
+ Total Aserciones Evaluadas : 11.919
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
@@ -452,6 +472,9 @@ Entre las suites de certificación destacan:
 * **`NotificationDispatcherAndSlaSweepTest` / `CoordinatorNotificationApiTest` (Módulo 14)** — certificación del ciclo completo de la bandeja de salida transaccional, rescate de envíos atascados en `PROCESSING`, escalado automático de SLA sanitario (2h/3h) y validación anti-SSRF de Webhooks.
 * **`TelegramTransportTest` / `AdminUserTelegramLinkTest` (Módulo 15)** — certificación del canal y transporte HTTP hacia la API de Telegram, vinculación de chats de técnicos, deep linking a averías y entrega real de alertas de asignación.
 * **`OpportunisticIncidentApiIntegrationTest` / `OpportunisticAtomicWritesTest` (Módulo 16)** — catálogo de máquinas de la sede, alta y asunción in situ, reapertura en garantía, sustitución atómica del ticket crónico y bloqueo de convivencia entre sedes bajo `FOR UPDATE`.
+* **`PostgresZoneSchemaTest` / `OperationalZoneRepositoryTest` (Módulo 17)** — unicidad global del CP vivo por índice parcial, titularidad única por técnico, baja lógica de zonas y cuadrantes, y traslado transaccional de CPs con auditoría matriz-sede.
+* **`SuggestedTechniciansApiTest` / `ColdChainOverrideJustificationTest` (Módulo 17)** — ranking determinista con mediana inferior a 100 ms, salvaguarda del Art. V.1 con umbral de 20 caracteres reales y registro del descarte en `audit_log`.
+* **`OperationalZoneManagementTabTest.mjs` / `CoordinatorDashboardAssignPanelTest.mjs` (Módulo 17)** — consola territorial de administración, despacho del sugerido en dos toques, justificación sanitaria dinámica y filtro de zona del mapa de coordinación.
 * **`OpportunisticFrontendIntegrationTest.mjs` (Módulo 16)** — tarjeta temporal de 30 minutos, entrada oportunista desde la parada activa y desde la inspección preventiva, agrupación en Parada #1, KPI de desplazamientos evitados y alias constitucional del técnico en el portal de sede.
 
 > **Nota operativa:** las suites de integración incluyen pruebas de HTTP real contra `127.0.0.1:8000`. Si el puerto está ocupado por un servidor obsoleto, arránquelo antes con `php -S 127.0.0.1:8000 -t public public/index.php`.
@@ -511,6 +534,7 @@ gestor-incidencias-vending/
 │   ├── 14-notification-center-outbox/# Especificación de la bandeja de salida transaccional y canal de emergencias
 │   ├── 15-telegram-technician-alerts/# Especificación de alertas directas a técnicos vía Bot de Telegram
 │   ├── 16-opportunistic-incident/# Especificación de atención y asunción oportunista de averías en ruta
+│   ├── 17-operational-zones/     # Especificación de zonificación operativa y asignación asistida por territorio
 │   ├── functional/               # Especificaciones funcionales EARS transversales
 │   └── technical/                # Contratos de API, DDL y esquemas de base de datos
 ├── src/
@@ -536,7 +560,7 @@ gestor-incidencias-vending/
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 305 suites (100% verde)
+    ├── run_all.php               # Ejecutor global de la batería de 307 suites (100% verde)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)
     ├── unit/                     # Pruebas unitarias de lógica pura, geometría y contratos

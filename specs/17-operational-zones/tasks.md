@@ -193,7 +193,7 @@
 
 ## Fase 7: Certificación Integral, Regresión Global y Cierre Documental
 
-- [ ] **T-ZONE-13 · Ejecutar batería global de regresión (`php tests/run_all.php`), sincronizar métricas documentales (`DocMetricsGuard`) y cerrar actas del Módulo 17**
+- [x] **T-ZONE-13 · Ejecutar batería global de regresión (`php tests/run_all.php`), sincronizar métricas documentales (`DocMetricsGuard`) y cerrar actas del Módulo 17**
   * **Tiempo estimado:** 20 min
   * **Dependencias:** `T-ZONE-01` a `T-ZONE-12`
   * **Ficheros a crear o modificar:**
@@ -205,3 +205,4 @@
     * `specs/17-operational-zones/tasks.md` *(marcar acta final)*
   * **Requisitos que cubre:** Todos los requisitos `RF-01` a `RF-07`, `RNF-01` a `RNF-04`, Resoluciones QA 1 a 12 y Artículos I al VII de `constitution.md`
   * **Hecho cuando:** `php tests/run_all.php` finaliza con **0 fallos (100% PASS)** en todas las suites PHP y ESM (incluyendo `PostgresZoneSchemaTest`, `CoordinatorZoneApiTest`, `SuggestedTechniciansApiTest`, `ColdChainOverrideJustificationTest`, `AuditActionCatalogTest`, `AuditEntityTypesTest` y `DocMetricsGuard`), `ApiContractDriftGuardTest` sigue en verde con la sección del módulo en `api_contracts.md`, las tres listas `CONTRACT_TABLES` declaran 25 tablas, la base de datos queda restablecida a semillas y la documentación viva refleja las cifras exactas del proyecto.
+  * **Verificación ejecutada (2026-10-20):** `php tests/run_all.php` → **307 suites · 11.919 aserciones · 0 fallos · exit 0** (133 unitarias PHP, 72 unitarias ESM, 101 de integración y 1 guion E2E) en 300,36 s, con la base del arnés restablecida a semillas y las **cifras documentadas COHERENTES**. Las catorce suites del canal `new_engine` se ejecutaron una a una por su canal contra PostgreSQL: trece en verde (entre ellas `PostgresZoneSchemaTest`, `OperationalZoneRepositoryTest`, `OperationalZoneServiceTest`, `ZonePostalCodeTransferTest`, `CoordinatorZoneApiTest`, `SuggestedTechniciansApiTest`, `ColdChainOverrideJustificationTest`, `SiteZonePrivacyTest`, `PostgresSchemaTest` y `SchemaConvergenceParityTest`), y `PoolerLatencyMeasurementTest` sale con código 2 sin ejecutar por falta de `DB_SSL_ROOT_CERT` —la identidad TLS del motor remoto no se puede verificar en local—, condición de entorno preexistente que no altera la corrida hermética. La frase canónica `batería global: 307 suites · 11.919 aserciones` se sincronizó en el README (insignia, línea canónica, resumen de ejecución y árbol de directorios) y en los cuatro informes vivos; `CHANGELOG.md` registra el cierre del módulo, `docs/features_pendientes.md` retira la zonificación del backlog y ambas especificaciones (canónica y espejo) declaran la implementación certificada.

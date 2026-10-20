@@ -4,6 +4,54 @@ Registro de los hitos de producto y de los módulos cerrados bajo el ciclo SDD.
 El proyecto no publica versiones semánticas independientes: cada entrada corresponde
 a un módulo funcional certificado por la batería global.
 
+## [Módulo 17] · Zonificación Operativa y Asignación Asistida — 2026-10-20
+
+**Estado:** Cerrado · especificación funcional, contratos técnicos y batería de pruebas en verde.
+
+### Añadido
+
+- Zonas operativas delimitadas por códigos postales, con nombre, código único y color
+  corporativo `#RRGGBB`, y liberación lógica del CP (`released_at`) para que reasignar
+  un código nunca exija borrarlo (Art. III).
+- Herencia automática de zona en la sede por su CP, con excepción manual atómica
+  (`is_manual_override`) y auditoría del cambio; el panel de sedes señala los centros
+  sin demarcación.
+- Cuadrante de cobertura con zona principal y suplencias, protegido por el índice
+  parcial `uq_technician_primary_zone`: un técnico no puede tener dos titularidades
+  vivas y la degradación de la anterior queda registrada.
+- Motor `TechnicianAssignmentSuggester` con `TechnicianWorkloadScorer`: afinidad
+  territorial, presencia in situ, paradas en la misma zona, carga viva, pausas por
+  falta de acceso y guardia sanitaria 24/7, con desempate determinista y fallback
+  Haversine medido desde la parada actual, la última resuelta o la Base Central.
+- Endpoint `GET /api/coordinator/incidents/{id}/suggested-technicians` con el ranking
+  desglosado, y consola de administración territorial como cuarta subpestaña de
+  Administración (zonas, CPs, cuadrante y traslados en bloque).
+- Panel de asignación con despacho del técnico recomendado en dos toques
+  (`[⚡ Asignar Sugerido]`), banner de emergencia sanitaria y campo obligatorio
+  `override_justification` de 20 caracteres reales al descartar la recomendación de
+  frío, auditado como `INCIDENT_ASSIGNMENT_SUGGESTION_OVERRIDDEN` sin tocar el
+  `reassignment_reason` del flujo de reasignación (Art. II y Art. V.1).
+- Filtro por zona operativa en el mapa territorial de coordinación, con los centros
+  teñidos por el color de su demarcación y resuelto en cliente para no alterar el
+  contrato cartográfico.
+- Transferencia transaccional de códigos postales entre zonas: bloqueo `FOR UPDATE`
+  de las sedes heredadas, reasignación en bloque y auditoría dual matriz-sede.
+
+### Seguridad
+
+- El portal de la sede no recibe el nombre, código ni color de su zona operativa, ni
+  la afinidad de los técnicos (Art. V.4).
+
+### Verificado
+
+- Batería global: 307 suites y 11.919 aserciones al 100 % en verde, con la guarda de
+  coherencia documental activa y la base del arnés restaurada a semillas.
+- Canal `new_engine` contra PostgreSQL: esquema territorial, repositorio, servicio de
+  aplicación, traslado de CPs, API de zonas, sugerencias, salvaguarda de frío y
+  privacidad de sede, todos en verde.
+- Superficies Vue: consola territorial (43 aserciones), panel de asignación (32),
+  mapa territorial con filtro por zona (101) y las 72 suites ESM sin fallos.
+
 ## [Módulo 16] · Avería Oportunista In Situ — 2026-10-19
 
 **Estado:** Cerrado · especificación funcional, contratos técnicos y batería de pruebas en verde.
