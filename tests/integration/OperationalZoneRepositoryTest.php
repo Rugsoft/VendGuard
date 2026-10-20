@@ -428,6 +428,86 @@ try {
     );
 
     // ─────────────────────────────────────────────────────────────────────
+    // 2 bis. Lectura legible del cuadrante y consulta inversa (RF-02.3, QA 15)
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 2 bis. Cuadrante legible y consulta inversa por técnico ---\n";
+
+    $projection = $zoneRepo->findTechnicianAssignments($northId);
+    $primaryRow = null;
+    foreach ($projection as $row) {
+        if ($row['technician_id'] === $technicianPrimary) {
+            $primaryRow = $row;
+        }
+    }
+
+    $assert(
+        'La fila del cuadrante publica el código de operador y no el correo (QA 15)',
+        $primaryRow !== null
+            && ($primaryRow['operator_code'] ?? null) === 'Z05-TITULAR'
+            && !array_key_exists('email', $primaryRow),
+        json_encode($primaryRow)
+    );
+
+    $quadrantZone = $zoneRepo->create([
+        'code' => 'zona-cuad-s05',
+        'name' => 'Zona de Cuadrante Legible',
+        'color_hex' => '#7C3AED',
+    ]);
+    $quadrantZoneId = (int)$quadrantZone->getId();
+
+    // Titular en la zona nueva y suplente en la Norte: su lectura inversa debe poner
+    // la titularidad delante de la suplencia (RF-02.4).
+    $zoneRepo->assignTechnician($technicianOnCall, $quadrantZoneId, true);
+    $technicianWithoutZone = $createTechnician($pgPdo, 'sinzona');
+
+    // Un usuario de baja puede conservar una vinculación viva y el repositorio se niega
+    // a crearla, así que el escenario se siembra por SQL: lo que se certifica aquí es la
+    // lectura, no la regla de alta (RF-02.4, QA 15).
+    $pgPdo->exec(
+        'INSERT INTO technician_zone_assignments (technician_id, zone_id, is_primary)
+         VALUES (' . $technicianInactive . ', ' . $quadrantZoneId . ', FALSE)'
+    );
+
+    $countingPdo->statements = 0;
+    $quadrants = $countingZoneRepo->findQuadrantsByTechnician();
+    $byTechnician = [];
+    foreach ($quadrants as $quadrant) {
+        $byTechnician[$quadrant['technician_id']] = $quadrant;
+    }
+
+    $assert(
+        'La consulta inversa se resuelve en una sola sentencia, sin N+1 (RNF-01)',
+        $countingPdo->statements === 1,
+        'sentencias=' . $countingPdo->statements
+    );
+    $assert(
+        'La titularidad va antes que la suplencia en la lectura por técnico (RF-02.4)',
+        isset($byTechnician[$technicianOnCall])
+            && count($byTechnician[$technicianOnCall]['zones']) === 2
+            && $byTechnician[$technicianOnCall]['zones'][0]['zone_id'] === $quadrantZoneId
+            && $byTechnician[$technicianOnCall]['zones'][0]['is_primary'] === true
+            && $byTechnician[$technicianOnCall]['zones'][1]['zone_id'] === $northId
+            && $byTechnician[$technicianOnCall]['zones'][1]['is_primary'] === false
+    );
+    $assert(
+        'Un técnico activo sin zona aparece con la lista vacía, no desaparece',
+        isset($byTechnician[$technicianWithoutZone])
+            && $byTechnician[$technicianWithoutZone]['zones'] === []
+            && $byTechnician[$technicianWithoutZone]['is_active'] === true
+    );
+    $assert(
+        'La vinculación viva de un técnico de baja se sigue publicando con su zona',
+        isset($byTechnician[$technicianInactive])
+            && $byTechnician[$technicianInactive]['is_active'] === false
+            && $byTechnician[$technicianInactive]['zones'][0]['zone_id'] === $quadrantZoneId
+    );
+    $assert(
+        'Cada zona de la lectura inversa trae código y color para pintarla',
+        ($byTechnician[$technicianOnCall]['zones'][0]['code'] ?? null) === 'ZONA-CUAD-S05'
+            && ($byTechnician[$technicianOnCall]['zones'][0]['color_hex'] ?? null) === '#7c3aed'
+    );
+
+    // ─────────────────────────────────────────────────────────────────────
     // 3. Herencia y anulación manual de la sede (RF-03.1, RF-03.2, RF-03.3)
     // ─────────────────────────────────────────────────────────────────────
     echo "\n--- 3. Herencia por CP y anulación manual ---\n";
@@ -619,11 +699,19 @@ try {
     // ─────────────────────────────────────────────────────────────────────
     echo "\n--- 6. Ciclo de vida de la zona ---\n";
 
+    // El escenario crece con cada fase, así que la aserción comprueba que la zona
+    // reactivada **entra** en el filtro de activas en lugar de fijar un total que
+    // cualquier ampliación posterior del arnés rompería sin que nada estuviera mal.
+    $reactivated = $zoneRepo->setActive($closedId, true);
+    $activeCodes = array_map(
+        static fn (array $row): string => $row['zone']->getCode(),
+        $zoneRepo->findAllWithCounts(false)
+    );
     $assert(
         'setActive reactiva la zona y el listado filtrado la recupera',
-        $zoneRepo->setActive($closedId, true) === true
+        $reactivated === true
             && $zoneRepo->findById($closedId)?->isActive() === true
-            && count($zoneRepo->findAllWithCounts(false)) === 4
+            && in_array('ZONA-CERRADA-CERT', $activeCodes, true)
     );
 
     $assert(

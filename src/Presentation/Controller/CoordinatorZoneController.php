@@ -36,6 +36,8 @@ use VendGuard\Presentation\Http\Response;
  * | POST   | `/api/coordinator/zones/{id}/postal-codes`                 | `assignPostalCodes`  |
  * | POST   | `/api/coordinator/zones/{id}/technicians`                  | `assignTechnician`   |
  * | DELETE | `/api/coordinator/zones/{id}/technicians/{tech_id}`         | `removeTechnician`   |
+ * | GET    | `/api/coordinator/zones/{id}/technicians`                  | `listZoneTechnicians` |
+ * | GET    | `/api/coordinator/technicians/quadrants`                   | `listTechnicianQuadrants` |
  * | POST   | `/api/coordinator/locations/{id}/override-zone`            | `overrideLocationZone` |
  *
  * **El controlador no decide reglas de negocio.** Las tres confirmaciones
@@ -110,6 +112,39 @@ final class CoordinatorZoneController
             $zone = $this->zoneService->getZone($this->extractIdFromRoute($request));
 
             return Response::json($zone->toArray(), 200);
+        });
+    }
+
+    /**
+     * GET /api/coordinator/zones/{id}/technicians
+     *
+     * Cuadrante vivo con la identidad de cada técnico (RF-02.3, QA 15). Se sirve
+     * aparte del listado a propósito: el catálogo publica contadores y no paga una
+     * consulta por zona (RNF-01).
+     */
+    public function listZoneTechnicians(Request $request): Response
+    {
+        return $this->handleExecution(function () use ($request): Response {
+            return Response::json(
+                $this->zoneService->listZoneQuadrant($this->extractIdFromRoute($request)),
+                200
+            );
+        });
+    }
+
+    /**
+     * GET /api/coordinator/technicians/quadrants
+     *
+     * Consulta inversa del cuadrante: cada técnico con sus zonas vivas y el papel que
+     * juega en cada una (RF-02.3, QA 15).
+     */
+    public function listTechnicianQuadrants(Request $request): Response
+    {
+        return $this->handleExecution(function (): Response {
+            return Response::json(
+                ['technicians' => $this->zoneService->listTechnicianQuadrants()],
+                200
+            );
         });
     }
 

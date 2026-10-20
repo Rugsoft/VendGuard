@@ -17,11 +17,13 @@
 | **Administración Territorial de Zonas** | | | |
 | `GET` | `/api/coordinator/zones` | `InternalAuthMiddleware(COORDINATOR)` | Devuelve el listado completo de zonas operativas (activas e inactivas) con contadores agregados de sedes vinculadas, técnicos titulares/suplentes y códigos postales (`RF-01.1`). |
 | `POST` | `/api/coordinator/zones` | `InternalAuthMiddleware(COORDINATOR)` | Crea una nueva zona operativa con código único alfanumérico, nombre, color hexadecimal y descripción opcional (`RF-01.1`, `DoD-01`). |
-| `GET` | `/api/coordinator/zones/{id}` | `InternalAuthMiddleware(COORDINATOR)` | Ficha de detalle de una zona operativa, incluyendo sus códigos postales asociados, sedes vinculadas y cuadrante técnico asignado (`RF-01.1`). |
+| `GET` | `/api/coordinator/zones/{id}` | `InternalAuthMiddleware(COORDINATOR)` | Ficha de detalle de una zona operativa con sus códigos postales vivos y sus contadores agregados (`RF-01.1`). El cuadrante con **identidades** no viaja aquí: se sirve bajo demanda en `GET /api/coordinator/zones/{id}/technicians` (QA 15). |
 | `PUT` | `/api/coordinator/zones/{id}` | `InternalAuthMiddleware(COORDINATOR)` | Actualiza metadatos de la zona (nombre, color corporativo, descripción o conmutación de estado activo/inactivo). Desactivar exige `confirm_release = true` cuando la zona conserva códigos postales o cuadrante, y libera ambos en la misma transacción (QA 7). |
 | `POST` | `/api/coordinator/zones/{id}/postal-codes` | `InternalAuthMiddleware(COORDINATOR)` | **Gestión de Códigos Postales (`RF-01.2`, `RF-03.3` / QA 4 / QA 7):** Asignación o sustitución en bloque de códigos postales. Detecta colisiones previas, **mueve** la fila del CP (`UPDATE zone_id`, nunca duplica por la `PRIMARY KEY`) y traslada las sedes heredadas generando eventos de auditoría dual matriz-sede (Art. III / QA 6). |
 | `POST` | `/api/coordinator/zones/{id}/technicians` | `InternalAuthMiddleware(COORDINATOR)` | **Cuadrante Técnico (`RF-02.1`, `RF-02.2`):** Vincula técnicos a la zona definiendo su condición de Titular Principal (`is_primary = TRUE`, máx. 1 zona activa por técnico) o Suplente (`is_primary = FALSE`). |
 | `DELETE` | `/api/coordinator/zones/{id}/technicians/{technician_id}` | `InternalAuthMiddleware(COORDINATOR)` | Da de baja **lógica** (`removed_at`) al técnico del cuadrante, preservando el histórico (Art. III.1 / QA 10). Es idempotente: si la vinculación ya estaba extinguida responde `200` sin escribir. |
+| `GET` | `/api/coordinator/zones/{id}/technicians` | `InternalAuthMiddleware(COORDINATOR)` | **Lectura del Cuadrante (`RF-02.3` / QA 15):** Devuelve las vinculaciones vivas de la zona con nombre, código de operador, titularidad, guardia, estado y fecha de alta. Incluye a los técnicos de baja con vinculación viva para que puedan retirarse. |
+| `GET` | `/api/coordinator/technicians/quadrants` | `InternalAuthMiddleware(COORDINATOR)` | **Consulta Inversa (`RF-02.3` / QA 15):** Agrupa por técnico todas sus zonas vivas con su rol en cada una, incluyendo a los técnicos activos sin zona. Una sola sentencia con `LEFT JOIN`. |
 | **Asignación Territorial en Sedes** | | | |
 | `POST` | `/api/coordinator/locations/{id}/override-zone` | `InternalAuthMiddleware(COORDINATOR)` | **Asignación Forzada Manual (`RF-03.2`):** Asigna manualmente una sede a una zona específica (`is_manual_override = TRUE`) o restablece la herencia automática por código postal (`is_manual_override = FALSE`). |
 | **Motor de Recomendación y Triaje Asistido** | | | |
@@ -502,6 +504,109 @@ Extensión del endpoint de asignación existente para incorporar la justificaci�
 
 ---
 
+### 3.8. `GET /api/coordinator/zones/{id}/technicians` *(Lectura del Cuadrante — RF-02.3 / QA 15)*
+
+Devuelve las vinculaciones **vivas** (`removed_at IS NULL`) del cuadrante de una zona, con la identidad que el panel necesita para **nombrar** a sus técnicos en lugar de contarlos. No altera el resto del recurso: el alta y la baja siguen siendo `POST` y `DELETE` sobre la misma ruta.
+
+* **Autorización:** `InternalAuthMiddleware(COORDINATOR)`; el portal de sede y la sesión del técnico no reciben esta superficie (Art. V.4).
+* **Sin parámetros de consulta:** la zona se identifica en la ruta y el orden es fijo (titular primero, después por nombre).
+* **Respuesta Exitosa (`200 OK`):**
+```json
+{
+  "success": true,
+  "data": {
+    "zone_id": 12,
+    "technicians": [
+      {
+        "assignment_id": 41,
+        "technician_id": 7,
+        "name": "Marta Guardia",
+        "operator_code": "OP-07",
+        "is_primary": true,
+        "is_on_call": true,
+        "is_active": true,
+        "assigned_at": "2026-10-20T09:12:44+00:00"
+      },
+      {
+        "assignment_id": 44,
+        "technician_id": 9,
+        "name": "Jordi Ruta",
+        "operator_code": "OP-05",
+        "is_primary": false,
+        "is_on_call": false,
+        "is_active": false,
+        "assigned_at": "2026-10-18T16:02:10+00:00"
+      }
+    ]
+  }
+}
+```
+* **Semántica de los campos:**
+  * `is_primary = true` es el Titular Principal; `false` es Suplente (RF-02.1).
+  * `is_active = false` significa usuario desactivado o de baja laboral con la vinculación aún viva: el panel lo pinta con la insignia «Baja» y permite retirarlo (QA 10).
+  * `operator_code` es el identificador operativo del técnico; puede ser `null` en usuarios creados antes de que el campo existiera, y el panel cae al `ID #n` igual que el selector anterior.
+  * `email` **no** se publica: el panel no lo usa y no se amplía la superficie de datos personales sin necesidad (QA 15).
+* **Zona desactivada (`200 OK`):** responde con `technicians: []` cuando la desactivación ya liberó el cuadrante (QA 7); no es un error, es el estado real de la zona.
+* **Error (`404 ZONE_NOT_FOUND`):** la zona no existe.
+* **Orden garantizado:** `is_primary DESC, name ASC`, calculado en el motor; el cliente no reordena.
+* **Una sola consulta:** la lectura reutiliza `findTechnicianAssignments()`; no hay consulta por técnico (RNF-01).
+
+### 3.9. `GET /api/coordinator/technicians/quadrants` *(Consulta Inversa — RF-02.3 / QA 15)*
+
+Responde «¿qué cubre este técnico?» sin recorrer las zonas una a una: agrupa por técnico todas sus vinculaciones vivas con la zona a la que pertenecen.
+
+* **Autorización:** `InternalAuthMiddleware(COORDINATOR)`.
+* **Universo de filas:** todos los técnicos que (a) están activos, aunque no tengan ninguna zona, o (b) tienen al menos una vinculación viva aunque su usuario esté desactivado o de baja. Un técnico inactivo **sin** vinculación viva no aparece.
+* **Respuesta Exitosa (`200 OK`):**
+```json
+{
+  "success": true,
+  "data": {
+    "technicians": [
+      {
+        "technician_id": 7,
+        "name": "Marta Guardia",
+        "operator_code": "OP-07",
+        "is_active": true,
+        "is_on_call": false,
+        "zones": [
+          {
+            "zone_id": 3,
+            "code": "ZONA-BCN-NORTE",
+            "name": "Barcelona Norte",
+            "color_hex": "#2560ff",
+            "is_primary": true,
+            "assigned_at": "2026-10-20T09:12:44+00:00"
+          },
+          {
+            "zone_id": 12,
+            "code": "ZONA-BCN-SUR",
+            "name": "Barcelona Sur",
+            "color_hex": "#f97316",
+            "is_primary": false,
+            "assigned_at": "2026-10-18T16:02:10+00:00"
+          }
+        ]
+      },
+      {
+        "technician_id": 11,
+        "name": "Elena Ruta",
+        "operator_code": "OP-04",
+        "is_active": true,
+        "is_on_call": true,
+        "zones": []
+      }
+    ]
+  }
+}
+```
+* **Reglas de agregación:** `zones: []` significa «sin zona asignada» y el panel lo señala expresamente; dentro de `zones`, la titular va primero (`is_primary DESC`) y después las suplentes por nombre de zona. Un técnico nunca acumula dos titulares por el índice `uq_technician_primary_zone` (RF-02.1).
+* **Una sola sentencia:** `users LEFT JOIN technician_zone_assignments ... WHERE role = 'TECHNICIAN' AND ((deleted_at IS NULL AND is_active = TRUE) OR a.id IS NOT NULL)`, agrupada en PHP. El predicado va **entre paréntesis** porque `AND` precede a `OR`: sin ellos, cualquier técnico activo arrastraría vinculaciones que no le corresponden.
+* **Orden garantizado:** `name ASC`, y dentro de cada técnico sus zonas según la regla anterior.
+* **Enrutado:** ruta estática registrada **antes** de cualquier `/api/coordinator/technicians/{id}` futura, porque el `Router` resuelve por orden de registro y un `{id}` la interpretaría como identificador.
+
+---
+
 ## 4. Contrato Algorítmico del Motor de Ponderación (`TechnicianWorkloadScorer`)
 
 El índice numérico final de idoneidad ($Score_{total}$) para cada técnico se rige por la siguiente especificación determinista:
@@ -622,6 +727,8 @@ Simultáneamente, para cada sede en `affected_location_ids` se inserta:
 | **RF-01.3** | Confirmación en traslados y desactivación | `POST /api/coordinator/zones/{id}/postal-codes`, `PUT /api/coordinator/zones/{id}` |
 | **RF-02.1** | Máx. 1 titular principal por técnico | Índice parcial `uq_technician_primary_zone WHERE is_primary = TRUE` |
 | **RF-02.2** | Exclusión de técnicos inactivos | `TechnicianWorkloadScorer` filtra `users.is_active = TRUE` |
+| **RF-02.3** | Cuadrante legible por zona y consulta inversa por técnico | `GET /api/coordinator/zones/{id}/technicians`, `GET /api/coordinator/technicians/quadrants` |
+| **RF-02.4** | Orden titular→suplente, inclusión de vinculaciones de baja y estado vacío | `PdoOperationalZoneRepository::findTechnicianAssignments()` (`ORDER BY is_primary DESC, name ASC`) y `findQuadrantsByTechnician()` |
 | **RF-03.1** | Herencia de zona por CP | `locations.postal_code` (QA 7) resuelto contra `operational_zone_postal_codes` en el alta y la edición de sede |
 | **RF-03.2** | Asignación forzada manual | Columna `locations.is_manual_override`, endpoint `/override-zone` |
 | **RF-03.3** | Preservación de rutas en traslados | El traslado actualiza `locations.zone_id` pero **no** modifica `incidents.assigned_technician_id` |

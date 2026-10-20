@@ -6,6 +6,8 @@ namespace VendGuard\Application\Service;
 
 use VendGuard\Application\DTO\OperationalZoneDto;
 use VendGuard\Application\DTO\PostalCodeTransferResultDto;
+use VendGuard\Application\DTO\TechnicianQuadrantDto;
+use VendGuard\Application\DTO\ZoneTechnicianAssignmentDto;
 use VendGuard\Core\Domain\Exception\LocationNotFoundException;
 use VendGuard\Core\Domain\Exception\PostalCodeConflictException;
 use VendGuard\Core\Domain\Exception\PrimaryTechnicianConflictException;
@@ -104,6 +106,49 @@ class OperationalZoneService
     public function getZone(int $zoneId): OperationalZoneDto
     {
         return $this->toDto($this->requireZone($zoneId));
+    }
+
+    /**
+     * Cuadrante vivo de una zona, con la identidad de cada vinculación (RF-02.3, QA 15).
+     *
+     * Se lee **bajo demanda**: el listado del catálogo sigue publicando contadores y no
+     * paga una consulta por zona (RNF-01). Una zona desactivada responde con su cuadrante
+     * real —normalmente vacío, porque la desactivación lo extingue— y una inexistente con
+     * `ZONE_NOT_FOUND`.
+     *
+     * @param int $zoneId Identificador de la zona.
+     * @return array{zone_id: int, technicians: list<array<string, mixed>>}
+     *
+     * @throws ZoneNotFoundException Si la zona no existe.
+     */
+    public function listZoneQuadrant(int $zoneId): array
+    {
+        $this->requireZone($zoneId);
+
+        return [
+            'zone_id' => $zoneId,
+            'technicians' => array_map(
+                static fn (array $row): array => ZoneTechnicianAssignmentDto::fromRow($row)->toArray(),
+                $this->zoneRepo->findTechnicianAssignments($zoneId)
+            ),
+        ];
+    }
+
+    /**
+     * Lectura inversa del cuadrante: técnico → zonas vivas (RF-02.3, QA 15).
+     *
+     * No decide nada: el repositorio agrupa en una sola sentencia y el servicio solo
+     * proyecta el contrato. Los técnicos activos sin zona viajan con `zones: []` para que
+     * el panel pueda señalarlos como trabajo pendiente.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listTechnicianQuadrants(): array
+    {
+        return array_map(
+            static fn (array $row): array => TechnicianQuadrantDto::fromRow($row)->toArray(),
+            $this->zoneRepo->findQuadrantsByTechnician()
+        );
     }
 
     /**

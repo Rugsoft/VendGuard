@@ -1455,6 +1455,23 @@ export class ApiClient {
       return this.delete(`/coordinator/zones/${encodeURIComponent(zoneId)}/technicians/${encodeURIComponent(technicianId)}`);
     },
     /**
+     * Cuadrante vivo de una zona con la identidad de cada técnico (RF-02.3 / QA 15).
+     * Se pide al abrir el modal: el catálogo solo publica contadores para no pagar una
+     * consulta por zona (RNF-01).
+     * @returns {Promise<{zone_id: number, technicians: Array<Object>}>}
+     */
+    getZoneTechnicians: (zoneId) => {
+      return this.get(`/coordinator/zones/${encodeURIComponent(zoneId)}/technicians`);
+    },
+    /**
+     * Consulta inversa del cuadrante (RF-02.3 / QA 15): cada técnico con sus zonas vivas.
+     * Un técnico activo sin zona viaja con `zones: []`, que es trabajo pendiente, no un error.
+     * @returns {Promise<{technicians: Array<Object>}>}
+     */
+    getTechnicianQuadrants: () => {
+      return this.get('/coordinator/technicians/quadrants');
+    },
+    /**
      * Fuerza la zona de una sede (`manualOverride = true`) o restablece la herencia por
      * código postal (`false`) (RF-03.2).
      */

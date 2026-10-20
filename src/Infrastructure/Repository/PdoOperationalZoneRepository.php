@@ -677,6 +677,8 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
      */
     public function findTechnicianAssignments(int $zoneId): array
     {
+        // El `email` no se proyecta: el panel no lo usa y la lectura del cuadrante
+        // no amplía la superficie de datos personales sin necesidad (QA 15).
         $sql = "
             SELECT
                 a.id,
@@ -684,7 +686,7 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
                 a.is_primary,
                 a.assigned_at,
                 u.name,
-                u.email,
+                u.operator_code,
                 u.is_on_call,
                 u.is_active
             FROM technician_zone_assignments a
@@ -702,12 +704,80 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
             'assignment_id' => (int)$row['id'],
             'technician_id' => (int)$row['technician_id'],
             'name' => (string)$row['name'],
-            'email' => (string)$row['email'],
+            'operator_code' => $row['operator_code'] !== null ? (string)$row['operator_code'] : null,
             'is_primary' => self::toBoolean($row['is_primary']),
             'is_on_call' => self::toBoolean($row['is_on_call']),
             'is_active' => self::toBoolean($row['is_active']),
             'assigned_at' => $row['assigned_at'] !== null ? (string)$row['assigned_at'] : null,
         ], $stmt->fetchAll());
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function findQuadrantsByTechnician(): array
+    {
+        // Una sola sentencia para toda la consola: el `LEFT JOIN` desde `users` es lo
+        // que permite incluir a los técnicos activos **sin** zona, que son justo los
+        // que el coordinador necesita ver para asignarlos. El predicado va entre
+        // paréntesis porque `AND` precede a `OR`: sin ellos, cualquier técnico activo
+        // arrastraría vinculaciones ajenas.
+        $sql = "
+            SELECT
+                u.id AS technician_id,
+                u.name,
+                u.operator_code,
+                u.is_active,
+                u.is_on_call,
+                a.zone_id,
+                z.code AS zone_code,
+                z.name AS zone_name,
+                z.color_hex,
+                a.is_primary,
+                a.assigned_at
+            FROM users u
+            LEFT JOIN technician_zone_assignments a
+                   ON a.technician_id = u.id
+                  AND a.removed_at IS NULL
+            LEFT JOIN operational_zones z ON z.id = a.zone_id
+            WHERE u.role = 'TECHNICIAN'
+              AND (
+                    (u.deleted_at IS NULL AND u.is_active = " . $this->dialect->booleanLiteral(true) . ")
+                    OR a.id IS NOT NULL
+                  )
+            ORDER BY u.name ASC, a.is_primary DESC, z.name ASC
+        ";
+
+        $stmt = $this->pdo->query($sql);
+
+        $quadrants = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $technicianId = (int)$row['technician_id'];
+
+            if (!isset($quadrants[$technicianId])) {
+                $quadrants[$technicianId] = [
+                    'technician_id' => $technicianId,
+                    'name' => (string)$row['name'],
+                    'operator_code' => $row['operator_code'] !== null ? (string)$row['operator_code'] : null,
+                    'is_active' => self::toBoolean($row['is_active']),
+                    'is_on_call' => self::toBoolean($row['is_on_call']),
+                    'zones' => [],
+                ];
+            }
+
+            if ($row['zone_id'] !== null) {
+                $quadrants[$technicianId]['zones'][] = [
+                    'zone_id' => (int)$row['zone_id'],
+                    'code' => (string)$row['zone_code'],
+                    'name' => (string)$row['zone_name'],
+                    'color_hex' => (string)$row['color_hex'],
+                    'is_primary' => self::toBoolean($row['is_primary']),
+                    'assigned_at' => $row['assigned_at'] !== null ? (string)$row['assigned_at'] : null,
+                ];
+            }
+        }
+
+        return array_values($quadrants);
     }
 
     /**

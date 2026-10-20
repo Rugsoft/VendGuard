@@ -15,8 +15,12 @@
  *   3. Gestión de códigos postales en bloque. Un CP que ya pertenece a otra zona no
  *      se mueve en silencio: el servidor responde 409 y el coordinador decide viendo
  *      **cuántas sedes cambian de demarcación** antes de confirmar (QA 4 / QA 6).
- *   4. Cuadrante técnico: alta como titular o suplente y baja lógica. Un segundo
- *      titular vivo exige confirmación explícita porque degrada al anterior (QA 9).
+ *   4. Cuadrante técnico: alta como titular o suplente y baja lógica, con la lista de
+ *      quién cubre la zona —nombre, código de operador, rol, guardia y alta— servida
+ *      bajo demanda y retirable fila a fila (RF-02.3, QA 15). Un segundo titular vivo
+ *      exige confirmación explícita porque degrada al anterior (QA 9).
+ *   5. Lectura inversa por técnico: sus zonas vivas con el color de la demarcación y
+ *      señalización expresa de quien no cubre ninguna (RF-02.3).
  *   5. Desactivación con liberación territorial: la confirmación cifra lo que se
  *      libera (CP, sedes y técnicos) antes de ejecutarla (QA 7 / QA 13).
  *
@@ -29,6 +33,9 @@
  *     conserva su histórico; reactivarla no devuelve territorio, y el modal lo avisa.
  *   - **Estados vacíos que orientan.** Una zona sin códigos postales o sin cuadrante
  *     invita a completarla en lugar de mostrar una fila hueca.
+ *   - **Se retira a quien se ve.** La baja del cuadrante sale de la fila del técnico,
+ *     no de un selector con todo el directorio: el coordinador retira a quien está
+ *     cubriendo la zona, sin margen para equivocarse de persona (QA 15).
  *
  * Dogma Vanilla: Vue 3 Options API en módulos ESM nativos, sin dependencias npm.
  * Dualismo Lingüístico: código en inglés, textos de interfaz en castellano.
@@ -149,11 +156,17 @@ export const OperationalZoneManagementTab = {
       quadrantErrors: {},
       primaryConflict: null,
       isSubmittingQuadrant: false,
-      // Los dos selectores del modal (vincular / retirar) no comparten estado: elegir a
-      // quién dar de baja no debe cambiar a quién se está vinculando.
-      removeTechnicianId: '',
+      // Filas vivas del cuadrante que devuelve `GET /zones/{id}/technicians` (RF-02.3,
+      // QA 15). Se piden al abrir el modal: el catálogo solo trae contadores.
+      quadrantTechnicians: [],
+      isLoadingQuadrant: false,
       isRemovingTechnicianId: null,
-      quadrantNotice: ''
+      quadrantNotice: '',
+
+      // Lectura inversa: «qué cubre este técnico» (RF-02.3).
+      catalogView: 'zones', // 'zones' | 'technicians'
+      technicianQuadrants: [],
+      isLoadingTechnicianQuadrants: false
     };
   },
   computed: {
@@ -239,14 +252,26 @@ export const OperationalZoneManagementTab = {
     },
 
     /**
-     * Técnicos activos del directorio interno (RF-02.1).
+     * Técnicos activos del directorio interno, para **vincular** (RF-02.1).
      *
-     * El catálogo de zonas solo publica contadores del cuadrante, no sus miembros; por eso
-     * el modal ofrece el directorio completo y deja que el servidor sea quien rechace una
-     * vinculación duplicada. La baja lógica del cuadrante no expulsa a nadie del directorio.
+     * El directorio sigue siendo la fuente del alta porque el servidor es quien rechaza
+     * una vinculación duplicada o una segunda titularidad. La baja ya no se hace desde
+     * aquí: se retira a quien está en la lista del cuadrante, no a ciegas (QA 15).
      */
     availableTechnicians() {
       return this.technicianDirectory.filter((technician) => technician.id > 0);
+    },
+
+    /**
+     * Contadores del cuadrante derivados de la lista cargada.
+     *
+     * Se calculan sobre las filas y no sobre el contador del catálogo para que, tras una
+     * alta o una baja, lo que el coordinador ve y lo que cuenta no puedan divergir.
+     */
+    quadrantCounts() {
+      const primary = this.quadrantTechnicians.filter((assignment) => assignment.is_primary).length;
+
+      return { primary, backup: this.quadrantTechnicians.length - primary };
     },
   },
   mounted() {
@@ -657,13 +682,40 @@ export const OperationalZoneManagementTab = {
       this.quadrantErrors = {};
       this.primaryConflict = null;
       this.quadrantNotice = '';
+      this.quadrantTechnicians = [];
       this.showTechniciansModal = true;
 
+      // Dos lecturas independientes: el directorio para **vincular** y el cuadrante vivo
+      // para **nombrar** a quien ya cubre la zona (RF-02.3, QA 15).
+      await Promise.all([this.loadTechnicianDirectory(), this.loadZoneQuadrant(zone.id)]);
+    },
+
+    /** Directorio de técnicos activos que alimenta el selector de alta. */
+    async loadTechnicianDirectory() {
       try {
         const technicians = await api.admin.getUsers({ role: 'TECHNICIAN', status: 'active' });
         this.technicianDirectory = Array.isArray(technicians) ? technicians : [];
       } catch (error) {
         this.quadrantErrors.general = error?.message || 'No se pudo cargar el directorio de técnicos.';
+      }
+    },
+
+    /**
+     * Cuadrante vivo de la zona abierta (RF-02.3, QA 15).
+     *
+     * Se pide cada vez que el modal se abre y después de cada mutación: el catálogo solo
+     * publica contadores, así que confiar en la fila cargada dejaría la lista congelada.
+     */
+    async loadZoneQuadrant(zoneId) {
+      this.isLoadingQuadrant = true;
+
+      try {
+        const data = (await api.coordinator.getZoneTechnicians(zoneId)) || {};
+        this.quadrantTechnicians = Array.isArray(data.technicians) ? data.technicians : [];
+      } catch (error) {
+        this.quadrantErrors.general = error?.message || 'No se pudo cargar el cuadrante de la zona.';
+      } finally {
+        this.isLoadingQuadrant = false;
       }
     },
 
@@ -674,7 +726,53 @@ export const OperationalZoneManagementTab = {
       this.primaryConflict = null;
       this.quadrantErrors = {};
       this.quadrantNotice = '';
-      this.removeTechnicianId = '';
+      this.quadrantTechnicians = [];
+    },
+
+    /**
+     * Cambia entre la vista por zona y la lectura inversa por técnico (RF-02.3).
+     *
+     * La lectura inversa es perezosa: no se paga hasta que el coordinador la pide, para
+     * que abrir la pestaña territorial siga costando una sola lectura.
+     */
+    async selectCatalogView(view) {
+      this.catalogView = view === 'technicians' ? 'technicians' : 'zones';
+
+      if (this.catalogView === 'technicians') {
+        await this.loadTechnicianQuadrants();
+      }
+    },
+
+    /** Cobertura por técnico: sus zonas vivas y las que no cubre (QA 15). */
+    async loadTechnicianQuadrants() {
+      this.isLoadingTechnicianQuadrants = true;
+
+      try {
+        const data = (await api.coordinator.getTechnicianQuadrants()) || {};
+        this.technicianQuadrants = Array.isArray(data.technicians) ? data.technicians : [];
+      } catch (error) {
+        this.errorMessage = error?.message || 'No se pudo cargar la cobertura por técnico.';
+      } finally {
+        this.isLoadingTechnicianQuadrants = false;
+      }
+    },
+
+    /** Fecha de alta legible; una marca ilegible no inventa una fecha. */
+    formatAssignmentDate(value) {
+      if (!value) {
+        return '—';
+      }
+
+      // El motor entrega `2026-10-20 09:12:44+00`: `Date` no interpreta un desfase de
+      // dos dígitos sin minutos, así que se normaliza antes de parsear.
+      const parsed = new Date(
+        String(value).trim().replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00')
+      );
+      if (Number.isNaN(parsed.getTime())) {
+        return '—';
+      }
+
+      return parsed.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
     },
 
     async submitQuadrantAssignment(confirmPrimaryOverride = false) {
@@ -701,11 +799,13 @@ export const OperationalZoneManagementTab = {
         );
 
         const role = this.quadrantForm.is_primary ? 'titular' : 'suplente';
+        const zoneId = this.quadrantZone.id;
+
         this.showSuccessNotification(`Técnico vinculado como ${role} de «${this.quadrantZone.name}».`);
         this.primaryConflict = null;
         this.quadrantForm = { technician_id: '', is_primary: false };
-        this.removeTechnicianId = '';
         await this.loadZones();
+        await this.loadZoneQuadrant(zoneId);
       } catch (error) {
         if (error?.code === 'TECHNICIAN_ALREADY_PRIMARY_IN_OTHER_ZONE') {
           this.primaryConflict = {
@@ -750,12 +850,12 @@ export const OperationalZoneManagementTab = {
       this.quadrantNotice = '';
 
       try {
-        await api.coordinator.removeZoneTechnician(this.quadrantZone.id, technicianId);
+        const zoneId = this.quadrantZone.id;
+
+        await api.coordinator.removeZoneTechnician(zoneId, technicianId);
         this.quadrantNotice = 'Técnico retirado del cuadrante. Su histórico de asignaciones se conserva.';
-        if (Number(this.removeTechnicianId) === technicianId) {
-          this.removeTechnicianId = '';
-        }
         await this.loadZones();
+        await this.loadZoneQuadrant(zoneId);
       } catch (error) {
         this.quadrantErrors.general = error?.code === 'ASSIGNMENT_NOT_FOUND'
           ? 'Ese técnico no tiene una vinculación viva con esta zona.'
@@ -832,18 +932,42 @@ export const OperationalZoneManagementTab = {
           <option value="active">Solo activas</option>
           <option value="inactive">Solo inactivas</option>
         </select>
+        <!-- Dos lecturas del mismo territorio: la demarcación y la persona (RF-02.3). -->
+        <div
+          class="d-inline-flex"
+          role="group"
+          aria-label="Vista de la consola territorial"
+          style="border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); overflow: hidden;"
+        >
+          <button
+            type="button"
+            class="vg-btn vg-btn-sm"
+            :class="catalogView === 'zones' ? 'vg-btn-primary' : 'vg-btn-ghost'"
+            :aria-pressed="catalogView === 'zones' ? 'true' : 'false'"
+            @click="selectCatalogView('zones')"
+            data-testid="zone-view-zones"
+          >Por zona</button>
+          <button
+            type="button"
+            class="vg-btn vg-btn-sm"
+            :class="catalogView === 'technicians' ? 'vg-btn-primary' : 'vg-btn-ghost'"
+            :aria-pressed="catalogView === 'technicians' ? 'true' : 'false'"
+            @click="selectCatalogView('technicians')"
+            data-testid="zone-view-technicians"
+          >Por técnico</button>
+        </div>
         <span class="ms-auto" style="font-size: 12px; color: var(--color-ink-muted);">
           {{ filteredZones.length }} de {{ zones.length }} zonas visibles
         </span>
       </div>
 
       <!-- Cargando / vacío / tarjetas -->
-      <div v-if="isLoading" class="text-center py-5" style="color: var(--color-ink-muted);" data-testid="zone-loading">
+      <div v-if="catalogView === 'zones' && isLoading" class="text-center py-5" style="color: var(--color-ink-muted);" data-testid="zone-loading">
         <div class="spinner-border spinner-border-sm me-2" role="status"></div>
         <span>Cargando demarcaciones…</span>
       </div>
 
-      <div v-else-if="zones.length === 0" class="vg-card p-4 text-center" data-testid="zone-empty">
+      <div v-else-if="catalogView === 'zones' && zones.length === 0" class="vg-card p-4 text-center" data-testid="zone-empty">
         <div class="mb-2" style="font-size: 28px;">🗺️</div>
         <h4 class="mb-1" style="font-size: 18px; font-weight: 500;">Aún no hay zonas operativas</h4>
         <p class="mb-3" style="font-size: 13px; color: var(--color-ink-muted);">
@@ -852,12 +976,12 @@ export const OperationalZoneManagementTab = {
         <button type="button" class="vg-btn vg-btn-primary" @click="openCreateModal">Crear la primera zona</button>
       </div>
 
-      <div v-else-if="filteredZones.length === 0" class="vg-card p-4 text-center" data-testid="zone-no-results">
+      <div v-else-if="catalogView === 'zones' && filteredZones.length === 0" class="vg-card p-4 text-center" data-testid="zone-no-results">
         <p class="mb-1 fw-semibold">Ninguna zona coincide con el filtro.</p>
         <p class="mb-0" style="font-size: 13px; color: var(--color-ink-muted);">Pruebe otro estado o borre la búsqueda.</p>
       </div>
 
-      <div v-else class="row g-3" data-testid="zone-grid">
+      <div v-else-if="catalogView === 'zones'" class="row g-3" data-testid="zone-grid">
         <div v-for="zone in filteredZones" :key="zone.id" class="col-12 col-xl-6" data-testid="zone-card">
           <!-- El carril de color es la identidad cromática de la zona: el mismo que usa el mapa. -->
           <article
@@ -944,6 +1068,61 @@ export const OperationalZoneManagementTab = {
                 @click="reactivateZone(zone)"
                 data-testid="zone-reactivate"
               >▶️ Reactivar</button>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <!-- Lectura inversa: qué cubre cada técnico (RF-02.3, QA 15). -->
+      <div v-if="catalogView === 'technicians'" data-testid="technician-quadrants">
+        <div v-if="isLoadingTechnicianQuadrants" class="text-center py-5" style="color: var(--color-ink-muted);" data-testid="technician-quadrants-loading">
+          <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+          <span>Cargando la cobertura por técnico…</span>
+        </div>
+
+        <div v-else-if="technicianQuadrants.length === 0" class="vg-card p-4 text-center" data-testid="technician-quadrants-empty">
+          <div class="mb-2" style="font-size: 28px;">🧑‍🔧</div>
+          <p class="mb-1 fw-semibold">No hay técnicos en el directorio.</p>
+          <p class="mb-0" style="font-size: 13px; color: var(--color-ink-muted);">
+            Cree técnicos en Administración → Usuarios para poder asignarles demarcaciones.
+          </p>
+        </div>
+
+        <div v-else class="d-flex flex-column gap-2">
+          <article
+            v-for="technician in technicianQuadrants"
+            :key="technician.technician_id"
+            class="vg-card p-3"
+            data-testid="technician-quadrant-row"
+          >
+            <div class="d-flex flex-wrap align-items-center gap-2">
+              <strong style="font-size: 15px;">{{ technician.name }}</strong>
+              <span class="font-monospace" style="font-size: 12px; color: var(--color-ink-secondary);">
+                {{ technician.operator_code || ('ID #' + technician.technician_id) }}
+              </span>
+              <span v-if="technician.is_on_call" class="vg-chip vg-chip-warning">En guardia</span>
+              <span v-if="!technician.is_active" class="vg-chip vg-chip-danger" data-testid="technician-inactive">Baja</span>
+              <span
+                v-if="technician.zones.length === 0"
+                class="vg-chip ms-auto"
+                data-testid="technician-without-zone"
+              >Sin zona asignada</span>
+            </div>
+
+            <div v-if="technician.zones.length > 0" class="d-flex flex-wrap gap-2 mt-2" data-testid="technician-zone-chips">
+              <span
+                v-for="zone in technician.zones"
+                :key="zone.zone_id"
+                class="vg-chip"
+                :style="{ borderColor: zone.color_hex, color: zone.color_hex }"
+                :data-testid="zone.is_primary ? 'technician-zone-primary' : 'technician-zone-backup'"
+              >
+                <span
+                  aria-hidden="true"
+                  :style="{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: zone.color_hex, marginRight: '6px' }"
+                ></span>
+                {{ zone.name }} · {{ zone.is_primary ? 'Titular' : 'Suplente' }}
+              </span>
             </div>
           </article>
         </div>
@@ -1182,12 +1361,52 @@ export const OperationalZoneManagementTab = {
       >
         <div v-if="quadrantZone" data-testid="zone-quadrant-modal">
           <div class="d-flex flex-wrap gap-2 mb-3" data-testid="zone-quadrant-counts">
-            <span class="vg-chip">Titulares: {{ quadrantZone.primary_technicians_count }}</span>
-            <span class="vg-chip">Suplentes: {{ quadrantZone.backup_technicians_count }}</span>
+            <span class="vg-chip">Titulares: {{ quadrantCounts.primary }}</span>
+            <span class="vg-chip">Suplentes: {{ quadrantCounts.backup }}</span>
           </div>
 
           <div v-if="quadrantNotice" class="vg-alert vg-alert-info" data-testid="zone-quadrant-notice">{{ quadrantNotice }}</div>
           <div v-if="quadrantErrors.general" class="vg-alert vg-alert-error">{{ quadrantErrors.general }}</div>
+
+          <!-- Quién cubre la zona, con nombre y rol (RF-02.3 / QA 15). -->
+          <div v-if="isLoadingQuadrant" class="text-center py-3" style="color: var(--color-ink-muted);" data-testid="zone-quadrant-loading">
+            <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+            <span style="font-size: 13px;">Cargando el cuadrante…</span>
+          </div>
+
+          <div v-else-if="quadrantTechnicians.length === 0" class="vg-alert vg-alert-info" data-testid="zone-quadrant-empty">
+            Esta zona no tiene cuadrante todavía: vincule a un técnico para que el triaje lo recomiende.
+          </div>
+
+          <ul v-else class="list-unstyled mb-3" data-testid="zone-quadrant-list">
+            <li
+              v-for="assignment in quadrantTechnicians"
+              :key="assignment.assignment_id"
+              class="d-flex flex-wrap align-items-center gap-2 py-2"
+              style="border-bottom: 1px solid var(--color-hairline);"
+              data-testid="zone-quadrant-row"
+            >
+              <span v-if="assignment.is_primary" class="vg-chip vg-chip-success" data-testid="zone-quadrant-primary">Titular</span>
+              <span v-else class="vg-chip" data-testid="zone-quadrant-backup">Suplente</span>
+              <strong style="font-size: 14px;">{{ assignment.name }}</strong>
+              <span class="font-monospace" style="font-size: 12px; color: var(--color-ink-secondary);">
+                {{ assignment.operator_code || ('ID #' + assignment.technician_id) }}
+              </span>
+              <span v-if="assignment.is_on_call" class="vg-chip vg-chip-warning">En guardia</span>
+              <span v-if="!assignment.is_active" class="vg-chip vg-chip-danger" data-testid="zone-quadrant-inactive">Baja</span>
+              <span style="font-size: 12px; color: var(--color-ink-muted);">Alta: {{ formatAssignmentDate(assignment.assigned_at) }}</span>
+              <button
+                type="button"
+                class="vg-btn vg-btn-sm vg-btn-danger-soft ms-auto"
+                :disabled="isRemovingTechnicianId !== null"
+                @click="removeTechnicianFromQuadrant(assignment.technician_id)"
+                data-testid="zone-quadrant-remove"
+              >
+                <span v-if="isRemovingTechnicianId === assignment.technician_id" class="spinner-border spinner-border-sm me-1" role="status"></span>
+                <span>Retirar</span>
+              </button>
+            </li>
+          </ul>
 
           <form id="zone-quadrant-form" @submit.prevent="submitQuadrantAssignment(false)">
             <div class="mb-3">
@@ -1225,30 +1444,9 @@ export const OperationalZoneManagementTab = {
 
           </form>
 
-          <div class="mt-4 pt-3" style="border-top: 1px solid var(--color-hairline);">
-            <p class="mb-1 fw-semibold" style="font-size: 13px;">Retirar un técnico del cuadrante</p>
-            <p class="mb-2" style="font-size: 12px; color: var(--color-ink-muted);">
-              La baja es lógica: la vinculación se extingue con su fecha y el histórico de asignaciones se conserva.
-            </p>
-            <div class="d-flex flex-wrap gap-2 align-items-center">
-              <select class="vg-select" style="max-width: 320px;" v-model="removeTechnicianId" data-testid="zone-quadrant-remove-select">
-                <option value="">Seleccione un técnico…</option>
-                <option v-for="technician in availableTechnicians" :key="technician.id" :value="technician.id">
-                  {{ technician.name }} · {{ technician.operator_code || ('ID #' + technician.id) }}
-                </option>
-              </select>
-              <button
-                type="button"
-                class="vg-btn vg-btn-sm vg-btn-danger-soft"
-                :disabled="!removeTechnicianId || isRemovingTechnicianId !== null"
-                @click="removeTechnicianFromQuadrant(Number(removeTechnicianId))"
-                data-testid="zone-quadrant-remove"
-              >
-                <span v-if="isRemovingTechnicianId !== null" class="spinner-border spinner-border-sm me-1" role="status"></span>
-                <span>Retirar</span>
-              </button>
-            </div>
-          </div>
+          <p class="mt-3 mb-0" style="font-size: 12px; color: var(--color-ink-muted);">
+            La baja de una fila es lógica: la vinculación se extingue con su fecha y el histórico de asignaciones se conserva.
+          </p>
         </div>
 
         <template #footer>

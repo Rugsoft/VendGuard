@@ -214,12 +214,17 @@ interface OperationalZoneRepositoryInterface
      * es el motor de sugerencias quien los excluye de las recomendaciones
      * (RF-02.2). Ocultarlos aquí haría que el coordinador no pudiera darles de baja.
      *
+     * El `operator_code` es la identidad que el coordinador reconoce en planta y
+     * puede ser `null` en usuarios anteriores al campo (QA 15). El `email` **no**
+     * forma parte de la proyección: el panel no lo usa y la lectura del cuadrante
+     * no amplía la superficie de datos personales sin necesidad (Art. V.4).
+     *
      * @param int $zoneId Identificador de la zona.
      * @return list<array{
      *     assignment_id: int,
      *     technician_id: int,
      *     name: string,
-     *     email: string,
+     *     operator_code: string|null,
      *     is_primary: bool,
      *     is_on_call: bool,
      *     is_active: bool,
@@ -227,6 +232,38 @@ interface OperationalZoneRepositoryInterface
      * }>
      */
     public function findTechnicianAssignments(int $zoneId): array;
+
+    /**
+     * Lectura inversa del cuadrante: cada técnico con sus zonas vivas (RF-02.3, QA 15).
+     *
+     * El universo de filas es deliberado: entran los técnicos **activos aunque no
+     * tengan zona** —son el trabajo pendiente de configuración y desaparecerlos
+     * dejaría el hueco invisible— y los técnicos desactivados o de baja que aún
+     * conserven una vinculación viva, porque su baja del cuadrante sigue pendiente.
+     * Un técnico inactivo sin vinculación viva no se publica.
+     *
+     * Una sola sentencia con `LEFT JOIN`: el panel no puede pagar una consulta por
+     * técnico (RNF-01). El orden viaja resuelto —técnicos por nombre, y dentro de cada
+     * uno la titularidad antes de las suplencias por nombre de zona— porque el cliente
+     * no reordena.
+     *
+     * @return list<array{
+     *     technician_id: int,
+     *     name: string,
+     *     operator_code: string|null,
+     *     is_active: bool,
+     *     is_on_call: bool,
+     *     zones: list<array{
+     *         zone_id: int,
+     *         code: string,
+     *         name: string,
+     *         color_hex: string,
+     *         is_primary: bool,
+     *         assigned_at: string|null
+     *     }>
+     * }>
+     */
+    public function findQuadrantsByTechnician(): array;
 
     /**
      * Da de alta una zona operativa.

@@ -128,6 +128,61 @@ let nextAssignResult = {
 let nextPostalError = null;
 let nextTechnicianError = null;
 
+// Cuadrante vivo que devuelve la lectura por zona (RF-02.3 / QA 15).
+const makeZoneTechnicians = () => ([
+  {
+    assignment_id: 11,
+    technician_id: 7,
+    name: 'Marta Guardia',
+    operator_code: 'OP-07',
+    is_primary: true,
+    is_on_call: true,
+    is_active: true,
+    assigned_at: '2026-10-20 09:12:44+00'
+  },
+  {
+    assignment_id: 12,
+    technician_id: 9,
+    name: 'Jordi Baja',
+    operator_code: null,
+    is_primary: false,
+    is_on_call: false,
+    is_active: false,
+    assigned_at: null
+  }
+]);
+
+let nextZoneTechnicians = makeZoneTechnicians();
+
+// Lectura inversa: un técnico con zona y otro activo sin ninguna.
+let nextTechnicianQuadrants = [
+  {
+    technician_id: 7,
+    name: 'Marta Guardia',
+    operator_code: 'OP-07',
+    is_active: true,
+    is_on_call: false,
+    zones: [
+      {
+        zone_id: 1,
+        code: 'BCN-NORTE',
+        name: 'Barcelona Norte',
+        color_hex: '#2560ff',
+        is_primary: true,
+        assigned_at: '2026-10-20 09:12:44+00'
+      }
+    ]
+  },
+  {
+    technician_id: 5,
+    name: 'Jordi Ruta',
+    operator_code: 'OP-05',
+    is_active: true,
+    is_on_call: true,
+    zones: []
+  }
+];
+
 api.coordinator = api.coordinator || {};
 api.coordinator.getZones = async () => ({
   zones: JSON.parse(JSON.stringify(nextZonesPayload.zones)),
@@ -162,6 +217,14 @@ api.coordinator.assignZoneTechnician = async (zoneId, technicianId, isPrimary, c
 api.coordinator.removeZoneTechnician = async (zoneId, technicianId) => {
   apiCalls.push({ method: 'removeZoneTechnician', zoneId, technicianId });
   return { zone_id: zoneId, technician_id: technicianId, removed: true };
+};
+api.coordinator.getZoneTechnicians = async (zoneId) => {
+  apiCalls.push({ method: 'getZoneTechnicians', zoneId });
+  return { zone_id: zoneId, technicians: JSON.parse(JSON.stringify(nextZoneTechnicians)) };
+};
+api.coordinator.getTechnicianQuadrants = async () => {
+  apiCalls.push({ method: 'getTechnicianQuadrants' });
+  return { technicians: JSON.parse(JSON.stringify(nextTechnicianQuadrants)) };
 };
 api.admin = api.admin || {};
 api.admin.getUsers = async () => ([
@@ -224,6 +287,22 @@ assert('1.11 Cada diálogo separa cuerpo y pie, y el pie envía el formulario de
     && template.includes('form="zone-create-form"')
     && template.includes('form="zone-edit-form"')
     && template.includes('form="zone-quadrant-form"'));
+
+// 2026-10-20: el cuadrante se contaba pero no se nombraba —y se retiraba desde un
+// selector con todo el directorio—. La guarda fija la lectura legible (RF-02.3 / QA 15).
+assert('1.12 El cuadrante se nombra con rol, código de operador y baja, sin selector ciego',
+  template.includes('data-testid="zone-quadrant-list"')
+    && template.includes('data-testid="zone-quadrant-row"')
+    && template.includes('data-testid="zone-quadrant-inactive"')
+    && template.includes('assignment.operator_code')
+    && !template.includes('zone-quadrant-remove-select')
+    && !template.includes('v-model="removeTechnicianId"'));
+assert('1.13 La consola ofrece la lectura inversa por técnico con sus zonas coloreadas',
+  template.includes('data-testid="zone-view-technicians"')
+    && template.includes('data-testid="technician-quadrants"')
+    && template.includes('data-testid="technician-without-zone"')
+    && template.includes('technician-zone-primary')
+    && template.includes('zone.color_hex'));
 
 // =========================================================================
 // BLOQUE 2: Normalización del lote de códigos postales
@@ -455,12 +534,29 @@ assert('6.4 La confirmación reenvía la titularidad con confirm_primary_overrid
     && quadrantTab.quadrantForm.technician_id === '');
 
 resetCalls();
-quadrantTab.removeTechnicianId = 5;
+nextZoneTechnicians = makeZoneTechnicians().slice(0, 1);
 await quadrantTab.removeTechnicianFromQuadrant(5);
-assert('6.5 La baja del cuadrante llama al DELETE lógico y conserva el histórico',
+assert('6.5 La baja del cuadrante llama al DELETE lógico y recarga la lista visible',
   apiCalls.some(call => call.method === 'removeZoneTechnician' && call.technicianId === 5)
-    && quadrantTab.removeTechnicianId === ''
+    && apiCalls.filter(call => call.method === 'getZoneTechnicians').length === 1
+    && quadrantTab.quadrantTechnicians.length === 1
     && quadrantTab.quadrantNotice.includes('histórico'));
+
+resetCalls();
+nextZoneTechnicians = makeZoneTechnicians();
+const readableTab = createTabInstance();
+readableTab.zones = makeZones();
+await readableTab.openTechniciansModal(readableTab.zones[0]);
+assert('6.6 Abrir el cuadrante trae sus filas y deriva de ellas los contadores',
+  apiCalls.some(call => call.method === 'getZoneTechnicians' && call.zoneId === 1)
+    && readableTab.quadrantTechnicians.length === 2
+    && readableTab.quadrantCounts.primary === 1
+    && readableTab.quadrantCounts.backup === 1
+    && readableTab.quadrantTechnicians[1].is_active === false);
+assert('6.7 La fecha de alta se pinta legible y una marca ilegible no inventa fecha',
+  readableTab.formatAssignmentDate('2026-10-20 09:12:44+00') === '20/10/2026'
+    && readableTab.formatAssignmentDate(null) === '—'
+    && readableTab.formatAssignmentDate('no-es-fecha') === '—');
 
 // =========================================================================
 // BLOQUE 7: Desactivación con liberación territorial (QA 7 / QA 13)
@@ -515,6 +611,21 @@ refreshTab.quadrantZone = refreshTab.zones[0];
 await refreshTab.loadZones();
 assert('8.2 El modal de cuadrante apunta a la fila recargada (sin contadores congelados)',
   refreshTab.quadrantZone === refreshTab.zones[0]);
+
+resetCalls();
+const inverseTab = createTabInstance();
+await inverseTab.selectCatalogView('technicians');
+assert('8.3 La vista por técnico se carga bajo demanda y señala a quien no tiene zona',
+  inverseTab.catalogView === 'technicians'
+    && inverseTab.technicianQuadrants.length === 2
+    && inverseTab.technicianQuadrants[0].zones.length === 1
+    && inverseTab.technicianQuadrants[1].zones.length === 0
+    && apiCalls.filter(call => call.method === 'getTechnicianQuadrants').length === 1);
+
+await inverseTab.selectCatalogView('zones');
+assert('8.4 Volver a la vista por zona no repite la lectura inversa',
+  inverseTab.catalogView === 'zones'
+    && apiCalls.filter(call => call.method === 'getTechnicianQuadrants').length === 1);
 
 // =========================================================================
 // RESUMEN FINAL

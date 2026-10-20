@@ -158,6 +158,11 @@ class AppRouter
         $router->post('/api/coordinator/zones/{id}/postal-codes', [CoordinatorZoneController::class, 'assignPostalCodes'], [$coordinatorAuth]);
         $router->post('/api/coordinator/zones/{id}/technicians', [CoordinatorZoneController::class, 'assignTechnician'], [$coordinatorAuth]);
         $router->delete('/api/coordinator/zones/{id}/technicians/{tech_id}', [CoordinatorZoneController::class, 'removeTechnician'], [$coordinatorAuth]);
+        // Lectura del cuadrante (RF-02.3, QA 15). `technicians/quadrants` se registra antes
+        // de cualquier ruta `{id}` de técnico porque el `Router` resuelve por orden de
+        // registro y un segmento dinámico la interpretaría como identificador.
+        $router->get('/api/coordinator/technicians/quadrants', [CoordinatorZoneController::class, 'listTechnicianQuadrants'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/zones/{id}/technicians', [CoordinatorZoneController::class, 'listZoneTechnicians'], [$coordinatorAuth]);
         $router->post('/api/coordinator/locations/{id}/override-zone', [CoordinatorZoneController::class, 'overrideLocationZone'], [$coordinatorAuth]);
 
         // Máquinas (Machines)

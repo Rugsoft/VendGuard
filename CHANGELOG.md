@@ -37,6 +37,23 @@ a un módulo funcional certificado por la batería global.
 - Transferencia transaccional de códigos postales entre zonas: bloqueo `FOR UPDATE`
   de las sedes heredadas, reasignación en bloque y auditoría dual matriz-sede.
 
+### Añadido (2026-10-20, cuadrante legible)
+
+- El cuadrante de una zona se lee **con identidad**: nombre, código de operador,
+  condición de titular o suplente, guardia 24/7, fecha de alta y estado, servido bajo
+  demanda en `GET /api/coordinator/zones/{id}/technicians`. El listado del catálogo
+  sigue publicando solo contadores para no pagar una consulta por zona (RNF-01), y la
+  proyección deja de incluir el correo del técnico (QA 15).
+- La baja del cuadrante se ejecuta desde la fila del técnico que el coordinador está
+  viendo; desaparece el selector con todo el directorio. Una vinculación viva de un
+  usuario desactivado se muestra con la insignia «Baja» y sigue siendo retirable
+  (QA 10).
+- Nueva lectura inversa «Por técnico» en la consola territorial
+  (`GET /api/coordinator/technicians/quadrants`): zonas vivas por profesional con su
+  rol en cada una, coloreadas con el color de la demarcación, y señalización expresa de
+  quien no cubre ninguna. Se resuelve en una sola sentencia con `LEFT JOIN` y solo se
+  carga cuando el coordinador la pide.
+
 ### Corregido (2026-10-20, auditoría de cierre)
 
 - El panel de sedes incorpora la columna de zona operativa con el color de la
@@ -85,12 +102,12 @@ a un módulo funcional certificado por la batería global.
 
 ### Verificado
 
-- Batería global: 307 suites y 11.946 aserciones al 100 % en verde, con la guarda de
+- Batería global: 307 suites y 11.952 aserciones al 100 % en verde, con la guarda de
   coherencia documental activa y la base del arnés restaurada a semillas.
 - Canal `new_engine` contra PostgreSQL: esquema territorial, repositorio, servicio de
   aplicación, traslado de CPs, API de zonas, sugerencias, salvaguarda de frío y
   privacidad de sede, todos en verde.
-- Superficies Vue: consola territorial (45 aserciones), panel de asignación (32),
+- Superficies Vue: consola territorial (51 aserciones), panel de asignación (32),
   mapa territorial con filtro por zona (101) y las 72 suites ESM sin fallos.
 
 ## [Módulo 16] · Avería Oportunista In Situ — 2026-10-19

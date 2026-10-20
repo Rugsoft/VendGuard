@@ -126,6 +126,7 @@ try {
     $technicianOne = $createUser('uno', 'TECHNICIAN');
     $technicianTwo = $createUser('dos', 'TECHNICIAN');
     $technicianInactive = $createUser('baja', 'TECHNICIAN', false);
+    $technicianWithoutZone = $createUser('sinzona', 'TECHNICIAN');
 
     $userRepo = new PdoUserRepository($pdo);
     $locationRepo = new PdoLocationRepository($pdo);
@@ -471,6 +472,82 @@ try {
         '4.7 Repetir la baja sin vinculación viva responde 404 ASSIGNMENT_NOT_FOUND',
         $removedAgain->getStatusCode() === 404
             && ($json($removedAgain)['error']['code'] ?? '') === 'ASSIGNMENT_NOT_FOUND'
+    );
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 4 bis. Cuadrante legible y consulta inversa (RF-02.3 / RF-02.4 / QA 15)
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 4 bis. Cuadrante legible y consulta inversa ---\n";
+
+    // Un usuario de baja puede conservar una vinculación viva: el alta la rechaza, así
+    // que la fila se siembra directamente para certificar la lectura (QA 10, QA 15).
+    $pdo->exec(
+        'INSERT INTO technician_zone_assignments (technician_id, zone_id, is_primary)
+         VALUES (' . $technicianInactive . ', ' . $northId . ', FALSE)'
+    );
+
+    $quadrant = $call('GET', '/api/coordinator/zones/' . $northId . '/technicians', [], $coordinatorToken);
+    $quadrantBody = $json($quadrant);
+    $quadrantRows = $quadrantBody['data']['technicians'] ?? [];
+    $inactiveRow = null;
+    foreach ($quadrantRows as $row) {
+        if (($row['technician_id'] ?? null) === $technicianInactive) {
+            $inactiveRow = $row;
+        }
+    }
+    $assert(
+        '4.8 La lectura del cuadrante publica titulares primero, con su código de operador y sin correo',
+        $quadrant->getStatusCode() === 200
+            && ($quadrantBody['data']['zone_id'] ?? null) === $northId
+            && count($quadrantRows) === 3
+            && ($quadrantRows[0]['is_primary'] ?? null) === true
+            && ($quadrantRows[0]['technician_id'] ?? null) === $technicianTwo
+            && ($quadrantRows[0]['operator_code'] ?? null) === 'Z09-DOS'
+            && !array_key_exists('email', $quadrantRows[0]),
+        json_encode($quadrantBody)
+    );
+    $assert(
+        '4.9 La vinculación viva de un técnico de baja aparece marcada como inactiva',
+        $inactiveRow !== null
+            && $inactiveRow['is_active'] === false
+            && $inactiveRow['is_primary'] === false
+    );
+
+    $quadrants = $call('GET', '/api/coordinator/technicians/quadrants', [], $coordinatorToken);
+    $quadrantsBody = $json($quadrants);
+    $quadrantByTechnician = [];
+    foreach ($quadrantsBody['data']['technicians'] ?? [] as $technicianRow) {
+        $quadrantByTechnician[$technicianRow['technician_id']] = $technicianRow;
+    }
+    $assert(
+        '4.10 La consulta inversa agrupa por técnico y no la intercepta la ruta {id}',
+        $quadrants->getStatusCode() === 200
+            && isset($quadrantByTechnician[$technicianOne])
+            && count($quadrantByTechnician[$technicianOne]['zones']) === 1
+            && ($quadrantByTechnician[$technicianOne]['zones'][0]['zone_id'] ?? null) === $northId
+    );
+    $assert(
+        '4.11 El técnico activo sin zona aparece con la lista vacía y el de baja con la suya',
+        isset($quadrantByTechnician[$technicianWithoutZone])
+            && $quadrantByTechnician[$technicianWithoutZone]['zones'] === []
+            && isset($quadrantByTechnician[$technicianInactive])
+            && $quadrantByTechnician[$technicianInactive]['is_active'] === false
+    );
+
+    $missingQuadrant = $call('GET', '/api/coordinator/zones/999999/technicians', [], $coordinatorToken);
+    $assert(
+        '4.12 El cuadrante de una zona inexistente responde 404 ZONE_NOT_FOUND',
+        $missingQuadrant->getStatusCode() === 404
+            && ($json($missingQuadrant)['error']['code'] ?? '') === 'ZONE_NOT_FOUND'
+    );
+
+    $anonymousQuadrant = $call('GET', '/api/coordinator/zones/' . $northId . '/technicians');
+    $anonymousQuadrants = $call('GET', '/api/coordinator/technicians/quadrants');
+    $assert(
+        '4.13 Las dos lecturas nuevas exigen token de Coordinación (Art. V.4)',
+        $anonymousQuadrant->getStatusCode() === 401
+            && $anonymousQuadrants->getStatusCode() === 401
+            && $call('GET', '/api/coordinator/technicians/quadrants', [], $technicianToken)->getStatusCode() === 403
     );
 
     // ─────────────────────────────────────────────────────────────────────
