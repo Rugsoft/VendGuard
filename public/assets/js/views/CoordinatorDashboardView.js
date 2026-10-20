@@ -43,6 +43,7 @@ import { CoordinatorMetricsView } from './CoordinatorMetricsView.js';
 import { AdminLocationsTab } from '../components/AdminLocationsTab.js';
 import { AdminMachinesTab } from '../components/AdminMachinesTab.js';
 import { AdminUsersTab } from '../components/AdminUsersTab.js';
+import { OperationalZoneManagementTab } from '../components/OperationalZoneManagementTab.js';
 import { CoordinatorPreventiveDashboard } from '../components/CoordinatorPreventiveDashboard.js';
 import { CoordinatorPreventiveOrdersTab } from '../components/CoordinatorPreventiveOrdersTab.js';
 import { CoordinatorPreventiveSettingsModal } from '../components/CoordinatorPreventiveSettingsModal.js';
@@ -69,6 +70,7 @@ export const CoordinatorDashboardView = {
     AdminLocationsTab,
     AdminMachinesTab,
     AdminUsersTab,
+    OperationalZoneManagementTab,
     CoordinatorPreventiveDashboard,
     CoordinatorPreventiveOrdersTab,
     CoordinatorPreventiveSettingsModal,
@@ -86,7 +88,7 @@ export const CoordinatorDashboardView = {
     return {
       // Navigation Tabs (RF-FLEET-01, RF-03, RF-05, RF-PREV-02, RF-REP-01, RF-REP-09)
       activeTab: 'incidents', // 'incidents' | 'fleet' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'refunds' | 'admin' | 'metrics'
-      activeAdminSubTab: 'locations', // 'locations' | 'machines' | 'users'
+      activeAdminSubTab: 'locations', // 'locations' | 'zones' | 'machines' | 'users'
       activePreventiveSubTab: 'dashboard', // 'dashboard' | 'orders' | 'sweep'
       showPreventiveSettingsModal: false,
 
@@ -2016,6 +2018,15 @@ export const CoordinatorDashboardView = {
                 <button
                   type="button"
                   class="vg-btn"
+                  :class="activeAdminSubTab === 'zones' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+                  @click="activeAdminSubTab = 'zones'"
+                  data-testid="subtab-zones"
+                >
+                  🗺️ Zonas Operativas
+                </button>
+                <button
+                  type="button"
+                  class="vg-btn"
                   :class="activeAdminSubTab === 'machines' ? 'vg-btn-primary' : 'vg-btn-secondary'"
                   @click="activeAdminSubTab = 'machines'"
                   data-testid="subtab-machines"
@@ -2042,10 +2053,13 @@ export const CoordinatorDashboardView = {
         <!-- Subpestaña 1: Sedes Clientes (RF-01) -->
         <AdminLocationsTab v-if="activeAdminSubTab === 'locations'" />
 
-        <!-- Subpestaña 2: Catálogo de Máquinas (RF-02) -->
+        <!-- Subpestaña 2: Zonificación Operativa y Cuadrantes (Módulo 17, RF-01 a RF-03) -->
+        <OperationalZoneManagementTab v-else-if="activeAdminSubTab === 'zones'" />
+
+        <!-- Subpestaña 3: Catálogo de Máquinas (RF-02) -->
         <AdminMachinesTab v-else-if="activeAdminSubTab === 'machines'" />
 
-        <!-- Subpestaña 3: Directorio de Personal (RF-03) -->
+        <!-- Subpestaña 4: Directorio de Personal (RF-03) -->
         <AdminUsersTab v-else-if="activeAdminSubTab === 'users'" />
       </div>
 

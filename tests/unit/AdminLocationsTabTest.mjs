@@ -8,6 +8,7 @@
  * 2. Aplica filtro de búsqueda en tiempo real (código, nombre, dirección y contacto).
  * 3. Valida en cliente el código de sede (3-32 chars, uppercase) y teléfono español (9 dígitos).
  * 4. Gestiona coordenadas geográficas con validación en cliente y envía ambas al guardar alta y edición mediante PUT.
+ * 4.1 Exige el código postal de cinco dígitos en el alta y la edición de sede (Módulo 17, RF-03.1, QA 7).
  * 5. Geocodifica la dirección mediante el servicio abierto estándar y exige confirmación de la previsualización (RF-MAP-01).
  * 6. Gestiona el modal de alta invocando a la API y reseteando errores.
  * 7. Gestiona el modal de edición preservando el código inmutable en modo solo lectura.
@@ -64,6 +65,7 @@ const mockLocations = [
     site_code: 'SEDE-BCN-01',
     name: 'Hospital del Mar - Edificio Central',
     address: 'Passeig Marítim 25, Barcelona',
+    postal_code: '08003',
     contact_name: 'Laura Sanitaria',
     contact_phone: '600111222',
     contact_email: 'recepcion.hospitalmar@cliente.es',
@@ -78,6 +80,7 @@ const mockLocations = [
     site_code: 'SEDE-BCN-02',
     name: 'Torre Glòries - Planta 4 Oficinas',
     address: 'Avinguda Diagonal 211, Barcelona',
+    postal_code: '08018',
     contact_name: 'Marc Recepción',
     contact_phone: '600333444',
     contact_email: 'recepcion.glorias@cliente.es',
@@ -90,6 +93,7 @@ const mockLocations = [
     site_code: 'SEDE-OLD-01',
     name: 'Antigua Central Retirada',
     address: 'Calle Pasada 99',
+    postal_code: '08001',
     contact_name: 'Antiguo Contacto',
     contact_phone: '677000111',
     contact_email: 'recepcion.antigua@cliente.es',
@@ -143,6 +147,12 @@ assert('1.12 validateEmail rechaza el correo oficial vacío', tab.validateEmail(
 assert('1.12.1 validateEmail rechaza un correo sin dominio o sin arroba', tab.validateEmail('recepcion.sede') !== null && tab.validateEmail('recepcion@') !== null);
 assert('1.12.2 validateEmail acepta el buzón institucional de la sede', tab.validateEmail('recepcion.hospital@cliente.es') === null);
 
+// Código postal de la sede (Módulo 17, RF-03.1, QA 7): obligatorio y de cinco dígitos.
+assert('1.12.3 validatePostalCode rechaza el código postal vacío', tab.validatePostalCode('') !== null);
+assert('1.12.4 validatePostalCode rechaza cuatro dígitos y letras',
+  tab.validatePostalCode('0800') !== null && tab.validatePostalCode('0800A') !== null);
+assert('1.12.5 validatePostalCode acepta cinco dígitos', tab.validatePostalCode('08005') === null);
+
 assert('1.13 validateCoordinates exige ambos valores', tab.validateCoordinates('', 2.17) !== null);
 assert('1.14 validateCoordinates rechaza ubicaciones fuera de territorio', tab.validateCoordinates(20, 2.17) !== null);
 assert('1.15 validateCoordinates acepta una ubicación dentro de territorio', tab.validateCoordinates(41.385312, 2.193245) === null);
@@ -191,6 +201,7 @@ assert('3.2 createForm inicializado en blanco', tab.createForm.site_code === '' 
 await tab.submitCreate();
 assert('3.3 submitCreate bloquea envío si faltan campos obligatorios', tab.createErrors.site_code !== undefined && tab.createErrors.name !== undefined);
 assert('3.3.1 submitCreate bloquea el alta si la sede no tiene correo oficial (RF-02.1)', tab.createErrors.contact_email !== undefined);
+assert('3.3.3 submitCreate bloquea el alta sin código postal (RF-03.1, QA 7)', tab.createErrors.postal_code !== undefined);
 
 // Envío válido mockeado
 let apiCreateCalled = false;
@@ -204,6 +215,7 @@ api.admin.createLocation = async (payload) => {
 tab.createForm.site_code = 'SEDE-VAL-01';
 tab.createForm.name = 'Hospital La Fe';
 tab.createForm.address = 'Avinguda de Fernando Abril Martorell 106, Valencia';
+tab.createForm.postal_code = '46020';
 tab.createForm.contact_name = 'Vicente Sanitario';
 tab.createForm.contact_phone = '600778899';
 tab.createForm.latitude = '39.4812';
@@ -220,6 +232,7 @@ assert('3.4 submitCreate invoca a api.admin.createLocation', apiCreateCalled ===
 assert('3.5.2 Alta envía el correo oficial de la sede normalizado en minúsculas', createdPayload.contact_email === 'recepcion.lafe@cliente.es');
 assert('3.5 Payload enviado en mayúsculas y limpio', createdPayload.site_code === 'SEDE-VAL-01' && createdPayload.name === 'Hospital La Fe');
 assert('3.5.1 Alta envía ambas coordenadas numéricas', createdPayload.latitude === 39.4812 && createdPayload.longitude === -0.3401);
+assert('3.5.3 Alta envía el código postal que resuelve la zona heredada', createdPayload.postal_code === '46020');
 assert('3.6 Modal de alta se cierra tras éxito', tab.showCreateModal === false);
 
 // =========================================================================
@@ -312,6 +325,7 @@ tab.openEditModal(locToEdit);
 assert('4.1 openEditModal abre el modal de edición', tab.showEditModal === true);
 assert('4.2 editForm contiene los datos de la sede seleccionada', tab.editForm.site_code === 'SEDE-BCN-01' && tab.editForm.name === locToEdit.name);
 assert('4.2.1 editForm conserva latitud y longitud de la sede', tab.editForm.latitude === locToEdit.latitude && tab.editForm.longitude === locToEdit.longitude);
+assert('4.2.3 editForm precarga el código postal vigente de la sede', tab.editForm.postal_code === '08003');
 
 let apiUpdateCalled = false;
 let updatedPayload = null;
@@ -332,6 +346,7 @@ tab.editForm.contact_phone = '699112233';
 tab.editForm.contact_email = 'Recepcion.Nueva@Cliente.ES';
 tab.editForm.latitude = '41.4';
 tab.editForm.longitude = '2.2';
+tab.editForm.postal_code = '08007';
 await tab.submitEdit();
 
 assert('4.3 submitEdit invoca a api.admin.updateLocation', apiUpdateCalled === true);
@@ -340,6 +355,7 @@ assert('4.3.2 PUT actualiza la ruta de la sede correspondiente', updateEndpoint 
 assert('4.4 Datos descriptivos actualizados enviados a la API', updatedPayload.name === 'Hospital del Mar - Sede Renovada' && updatedPayload.contact_phone === '699112233');
 assert('4.4.2 La edición envía el correo oficial corregido y normalizado', updatedPayload.contact_email === 'recepcion.nueva@cliente.es');
 assert('4.4.1 Edición envía ambas coordenadas numéricas', updatedPayload.latitude === 41.4 && updatedPayload.longitude === 2.2);
+assert('4.4.3 La edición envía el código postal corregido', updatedPayload.postal_code === '08007');
 assert('4.5 Modal de edición se cierra tras éxito', tab.showEditModal === false);
 
 // =========================================================================
@@ -418,6 +434,14 @@ assert('6.8.1 Los formularios de alta y edición piden el correo oficial obligat
     && tmpl.includes('editErrors.contact_email')
     && tmpl.includes('data-testid="create-contact-email"')
     && tmpl.includes('data-testid="edit-contact-email"'));
+assert('6.8.2 Los formularios de alta y edición piden el código postal obligatorio (QA 7)',
+  (tmpl.match(/Código Postal <span class="text-danger">\*<\/span>/g) || []).length === 2
+    && tmpl.includes('v-model="createForm.postal_code"')
+    && tmpl.includes('v-model="editForm.postal_code"')
+    && tmpl.includes('createErrors.postal_code')
+    && tmpl.includes('editErrors.postal_code')
+    && tmpl.includes('data-testid="create-postal-code"')
+    && tmpl.includes('data-testid="edit-postal-code"'));
 assert('6.9 Template contiene la previsualización de confirmación de coordenadas',
   tmpl.includes('createSuggestion') && tmpl.includes('editSuggestion')
     && tmpl.includes('applyGeocodeSuggestion(\'create\')') && tmpl.includes('applyGeocodeSuggestion(\'edit\')')

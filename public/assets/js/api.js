@@ -1046,7 +1046,7 @@ export class ApiClient {
      * @param {string|null} [urgencyReason=null]
      * @returns {Promise<Object>}
      */
-    assignTechnician: (incidentId, technicianId, urgency = null, urgencyReason = null, reassignmentReason = null) => {
+    assignTechnician: (incidentId, technicianId, urgency = null, urgencyReason = null, reassignmentReason = null, overrideJustification = null) => {
       const body = {
         technician_id: Number(technicianId)
       };
@@ -1062,6 +1062,11 @@ export class ApiClient {
         // Canonical key of the endpoint plus the compact alias of the technical plan (§2.2).
         body.reassignment_reason = reassignmentReason;
         body.reason = reassignmentReason;
+      }
+      if (overrideJustification) {
+        // Art. V.1: la justificación del descarte sanitario convive con el motivo de
+        // reasignación; una razona la cadena de frío y el otro el cambio de titular.
+        body.override_justification = String(overrideJustification);
       }
       return this.patch(`/coordinator/incidents/${incidentId}/assign`, body);
     },
@@ -1378,6 +1383,73 @@ export class ApiClient {
       }
 
       return this.post(`/coordinator/refunds/${encodeURIComponent(refundId)}/regularize`, body);
+    },
+
+    // Zonificación operativa (Módulo 17: RF-01, RF-02, RF-03). El catálogo devuelve las
+    // zonas con sus contadores y la lista de códigos postales vigentes; el traslado de CP
+    // puede responder 409 y el coordinador confirma con `confirm_transfers`.
+    /**
+     * Catálogo completo de zonas (activas e inactivas) con sus contadores y la lista de
+     * códigos postales vigentes; incluye el trabajo pendiente de configuración
+     * (`unassigned_locations_count`).
+     * @param {{include_inactive?: boolean|string}} [params={}]
+     * @returns {Promise<{zones: Array<Object>, unassigned_locations_count: number}>}
+     */
+    getZones: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/zones${q ? `?${q}` : ''}`);
+    },
+    createZone: (payload) => {
+      return this.post('/coordinator/zones', payload);
+    },
+    getZone: (zoneId) => {
+      return this.get(`/coordinator/zones/${encodeURIComponent(zoneId)}`);
+    },
+    updateZone: (zoneId, payload) => {
+      return this.put(`/coordinator/zones/${encodeURIComponent(zoneId)}`, payload);
+    },
+    /**
+     * Asigna o sustituye en bloque los códigos postales de una zona (RF-01.2, QA 4).
+     * Sin `confirmTransfers` un traslado responde 409 con `error.conflicts`.
+     */
+    assignZonePostalCodes: (zoneId, postalCodes, confirmTransfers = false) => {
+      const body = { postal_codes: postalCodes };
+      if (confirmTransfers) {
+        body.confirm_transfers = true;
+      }
+      return this.post(`/coordinator/zones/${encodeURIComponent(zoneId)}/postal-codes`, body);
+    },
+    /**
+     * Vincula a un técnico al cuadrante de la zona como titular (`isPrimary`) o suplente
+     * (RF-02.1). Un segundo titular vivo exige `confirmPrimaryOverride` (QA 9).
+     */
+    assignZoneTechnician: (zoneId, technicianId, isPrimary = false, confirmPrimaryOverride = false) => {
+      const body = {
+        technician_id: Number(technicianId),
+        is_primary: Boolean(isPrimary)
+      };
+      if (confirmPrimaryOverride) {
+        body.confirm_primary_override = true;
+      }
+      return this.post(`/coordinator/zones/${encodeURIComponent(zoneId)}/technicians`, body);
+    },
+    /**
+     * Baja lógica del cuadrante (RF-02.2 / QA 10): la vinculación se extingue con
+     * `removed_at` y el histórico se conserva.
+     */
+    removeZoneTechnician: (zoneId, technicianId) => {
+      return this.delete(`/coordinator/zones/${encodeURIComponent(zoneId)}/technicians/${encodeURIComponent(technicianId)}`);
+    },
+    /**
+     * Fuerza la zona de una sede (`manualOverride = true`) o restablece la herencia por
+     * código postal (`false`) (RF-03.2).
+     */
+    overrideLocationZone: (locationId, zoneId, manualOverride = true) => {
+      const body = { is_manual_override: Boolean(manualOverride) };
+      if (zoneId !== null && zoneId !== undefined && zoneId !== '') {
+        body.zone_id = Number(zoneId);
+      }
+      return this.post(`/coordinator/locations/${encodeURIComponent(locationId)}/override-zone`, body);
     }
   };
 

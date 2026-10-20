@@ -42,12 +42,16 @@ const EXCLUDED_DIR = 'vendor';
 const HEX_PATTERN = /#[0-9a-fA-F]{3,8}\b/g;
 
 /**
- * Techo congelado el 2026-10-12 con el contador medido en esa fecha y registrado en el acta
- * de triaje (`specs/technical/auditoria_arquitectura_triage.md` §6): 2.271 literales tras
- * retirar la paleta heredada `.btn`.
+ * Techo congelado el 2026-10-20 con el contador medido en esa fecha: **2.269** literales.
+ *
+ * La pestaña de administración territorial (Módulo 17, T-ZONE-11) entró sin deuda
+ * cromática: declara dos literales —el azul de voltaje con el que arranca el alta y el
+ * blanco del marcador sobre el color de la zona— y todo lo demás entra por token
+ * (`var(--color-…)`) o por dato (el `color_hex` que elige el coordinador). La cifra baja
+ * desde 2.271, así que el techo baja con ella.
  * Bajarlo es la direccion esperada; subirlo exige una decision explicita en el commit.
  */
-const CEILING = 2271;
+const CEILING = 2269;
 
 let assertions = 0;
 let failures = 0;

@@ -37,6 +37,7 @@ export const AdminLocationsTab = {
         site_code: '',
         name: '',
         address: '',
+        postal_code: '',
         contact_name: '',
         contact_phone: '',
         contact_email: '',
@@ -53,6 +54,7 @@ export const AdminLocationsTab = {
         site_code: '',
         name: '',
         address: '',
+        postal_code: '',
         contact_name: '',
         contact_phone: '',
         contact_email: '',
@@ -217,6 +219,24 @@ export const AdminLocationsTab = {
       return null;
     },
 
+    /**
+     * Valida el código postal de la sede (Resolución QA 7, Módulo 17).
+     *
+     * Es obligatorio y de cinco dígitos exactos: es la llave con la que la sede hereda
+     * su zona operativa. Sin él, la sede queda fuera de todo cuadrante y el triaje no
+     * puede recomendar a nadie por afinidad territorial.
+     */
+    validatePostalCode(postalCode) {
+      const clean = String(postalCode ?? '').trim();
+      if (clean === '') {
+        return 'El código postal de la sede es obligatorio.';
+      }
+      if (!/^\d{5}$/.test(clean)) {
+        return 'El código postal debe tener exactamente cinco dígitos.';
+      }
+      return null;
+    },
+
     validateCoordinates(latitude, longitude) {
       if (latitude === '' || longitude === '' || !Number.isFinite(Number(latitude)) || !Number.isFinite(Number(longitude))) {
         return 'La latitud y la longitud son obligatorias y deben ser numéricas.';
@@ -332,6 +352,7 @@ export const AdminLocationsTab = {
         site_code: '',
         name: '',
         address: '',
+        postal_code: '',
         contact_name: '',
         contact_phone: '',
         contact_email: '',
@@ -368,6 +389,9 @@ export const AdminLocationsTab = {
         this.createErrors.address = 'La dirección de la sede es obligatoria.';
       }
 
+      const postalCodeError = this.validatePostalCode(this.createForm.postal_code);
+      if (postalCodeError) this.createErrors.postal_code = postalCodeError;
+
       const phoneError = this.validatePhone(this.createForm.contact_phone);
       if (phoneError) this.createErrors.contact_phone = phoneError;
 
@@ -387,6 +411,7 @@ export const AdminLocationsTab = {
           site_code: this.createForm.site_code.trim().toUpperCase(),
           name: this.createForm.name.trim(),
           address: this.createForm.address.trim(),
+          postal_code: this.createForm.postal_code.trim(),
           contact_name: this.createForm.contact_name ? this.createForm.contact_name.trim() : null,
           contact_phone: this.createForm.contact_phone ? this.createForm.contact_phone.trim().replace(/\s+/g, '') : null,
           contact_email: this.createForm.contact_email.trim().toLowerCase(),
@@ -426,6 +451,7 @@ export const AdminLocationsTab = {
         site_code: location.site_code,
         name: location.name,
         address: location.address,
+        postal_code: location.postal_code || '',
         contact_name: location.contact_name || '',
         contact_phone: location.contact_phone || '',
         contact_email: location.contact_email || '',
@@ -459,6 +485,9 @@ export const AdminLocationsTab = {
         this.editErrors.address = 'La dirección de la sede es obligatoria.';
       }
 
+      const postalCodeError = this.validatePostalCode(this.editForm.postal_code);
+      if (postalCodeError) this.editErrors.postal_code = postalCodeError;
+
       const phoneError = this.validatePhone(this.editForm.contact_phone);
       if (phoneError) this.editErrors.contact_phone = phoneError;
 
@@ -477,6 +506,7 @@ export const AdminLocationsTab = {
         const payload = {
           name: this.editForm.name.trim(),
           address: this.editForm.address.trim(),
+          postal_code: this.editForm.postal_code.trim(),
           contact_name: this.editForm.contact_name ? this.editForm.contact_name.trim() : null,
           contact_phone: this.editForm.contact_phone ? this.editForm.contact_phone.trim().replace(/\s+/g, '') : null,
           contact_email: this.editForm.contact_email.trim().toLowerCase(),
@@ -784,6 +814,9 @@ export const AdminLocationsTab = {
                   <div class="small text-muted text-truncate" style="max-width: 280px;" :title="loc.address">
                     📍 {{ loc.address }}
                   </div>
+                  <div v-if="loc.postal_code" class="small text-muted font-monospace" data-testid="location-postal-code">
+                    📮 CP {{ loc.postal_code }}
+                  </div>
                 </td>
 
                 <!-- Contacto -->
@@ -929,6 +962,29 @@ export const AdminLocationsTab = {
                     required
                   />
                   <div v-if="createErrors.address" class="invalid-feedback small">{{ createErrors.address }}</div>
+                </div>
+
+                <!-- Código postal (QA 7): llave de la herencia territorial de la sede.
+                     Sin CP la sede queda fuera de todo cuadrante y el triaje no puede
+                     recomendarla por afinidad (Módulo 17, RF-03.1). -->
+                <div class="mb-3">
+                  <label class="form-label small fw-bold" for="create-postal-code">
+                    Código Postal <span class="text-danger">*</span>
+                  </label>
+                  <input
+                    id="create-postal-code"
+                    type="text"
+                    inputmode="numeric"
+                    maxlength="5"
+                    class="form-control font-monospace"
+                    :class="{'is-invalid': createErrors.postal_code}"
+                    placeholder="Ej: 08005"
+                    v-model="createForm.postal_code"
+                    data-testid="create-postal-code"
+                    required
+                  />
+                  <div v-if="createErrors.postal_code" class="invalid-feedback small">{{ createErrors.postal_code }}</div>
+                  <small class="text-muted form-text">Cinco dígitos. Resuelve la zona operativa heredada de la sede.</small>
                 </div>
 
                 <!-- Geocodificación asistida de la dirección (RF-MAP-01) -->
@@ -1080,6 +1136,27 @@ export const AdminLocationsTab = {
                     required
                   />
                   <div v-if="editErrors.address" class="invalid-feedback small">{{ editErrors.address }}</div>
+                </div>
+
+                <!-- Código postal (QA 7): cambiarlo recoloca la sede en la zona que
+                     resuelva el nuevo CP, salvo que su asignación sea manual. -->
+                <div class="mb-3">
+                  <label class="form-label small fw-bold" for="edit-postal-code">
+                    Código Postal <span class="text-danger">*</span>
+                  </label>
+                  <input
+                    id="edit-postal-code"
+                    type="text"
+                    inputmode="numeric"
+                    maxlength="5"
+                    class="form-control font-monospace"
+                    :class="{'is-invalid': editErrors.postal_code}"
+                    v-model="editForm.postal_code"
+                    data-testid="edit-postal-code"
+                    required
+                  />
+                  <div v-if="editErrors.postal_code" class="invalid-feedback small">{{ editErrors.postal_code }}</div>
+                  <small class="text-muted form-text">Si la sede tiene una zona forzada a mano, el CP no la recoloca.</small>
                 </div>
 
                 <!-- Geocodificación asistida de la dirección (RF-MAP-01) -->

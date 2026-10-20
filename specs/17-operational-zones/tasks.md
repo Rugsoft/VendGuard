@@ -164,7 +164,7 @@
 
 ## Fase 6: Interfaz Frontend Vanilla ES Modules y Pruebas ESM
 
-- [ ] **T-ZONE-11 · Implementar cliente `api.js` y componente de administración territorial `OperationalZoneManagementTab.js`**
+- [x] **T-ZONE-11 · Implementar cliente `api.js` y componente de administración territorial `OperationalZoneManagementTab.js`**
   * **Tiempo estimado:** 30 min
   * **Dependencias:** `T-ZONE-09`
   * **Ficheros a crear o modificar:**
@@ -175,6 +175,7 @@
     * `public/assets/js/views/CoordinatorDashboardView.js` *(modificar)*
   * **Requisitos que cubre:** `RF-01.1`, `RF-01.3`, `RF-02.1`, `RF-03.2`, `DoD-01`, `DoD-02`, `DoD-04`, `docs/design.md`
   * **Hecho cuando:** `OperationalZoneManagementTab.js` se monta en la vista de Coordinación permitiendo listar zonas en tarjetas con sus tokens de color Docker (`#2560ff`, etc.), añadir/editar zonas, gestionar badges de códigos postales, asignar técnicos titulares/suplentes y presentar el modal de confirmación en bloque ante traslados de códigos postales que afectan a sedes; `AdminLocationsTab.js` exige el CP en el alta y la edición de sede; y `AuditActionLabels.js` cataloga todas las acciones y entidades nuevas sin dejar ninguna sin etiqueta ni filtro.
+  * **Verificación ejecutada (2026-10-20):** `OperationalZoneManagementTab` se registra como cuarta subpestaña de Administración (`subtab-zones`) y `dashboard` + `zone tab` compilan sin errores con el compilador de plantillas de Vue 3; `node tests/unit/AdminLocationsTabTest.mjs` → **86/86** (incluye CP obligatorio en alta, edición y plantilla); `node tests/unit/AdminTabsTest.mjs` → **25/25**; `node tests/unit/DesignTokenDebtRatchetTest.mjs` → **3/3** con el techo rebajado a **2.269** literales y el acta §6 sincronizada; `php tests/unit/AuditActionCatalogTest.php` → **26/26**, con la guarda ampliada para enumerar las escrituras directas `new AuditEvent(...)` del repositorio territorial; y las **70 suites ESM** de `tests/unit/*.mjs` pasan con 0 fallos.
 
 - [ ] **T-ZONE-12 · Ampliar el panel de asignación existente, filtro territorial en Módulo M4 y suite `OperationalZoneManagementTabTest.mjs`**
   * **Tiempo estimado:** 25 min

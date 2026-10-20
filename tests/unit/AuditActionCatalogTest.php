@@ -78,7 +78,102 @@ const AUDIT_WRITER_METHODS = [
 ];
 
 /**
+ * Divide la lista de argumentos de una llamada cuyo paréntesis de apertura ocupa
+ * `$openIndex`, respetando el anidamiento de paréntesis, corchetes y llaves.
+ *
+ * @param list<mixed> $tokens Flujo de `token_get_all()`.
+ * @param int $openIndex Índice del token `(` que abre la llamada.
+ * @return list<list<mixed>> Argumentos en crudo, en orden posicional.
+ */
+function splitCallArguments(array $tokens, int $openIndex): array
+{
+    $count = count($tokens);
+    $depth = 1;
+    $arguments = [];
+    $current = [];
+
+    for ($k = $openIndex + 1; $k < $count; $k++) {
+        $inner = $tokens[$k];
+        $text = is_array($inner) ? $inner[1] : $inner;
+        if (in_array($text, ['(', '[', '{'], true)) {
+            $depth++;
+        } elseif (in_array($text, [')', ']', '}'], true)) {
+            $depth--;
+            if ($depth === 0) {
+                $arguments[] = $current;
+                break;
+            }
+        } elseif ($text === ',' && $depth === 1) {
+            $arguments[] = $current;
+            $current = [];
+            continue;
+        }
+        $current[] = $inner;
+    }
+
+    return $arguments;
+}
+
+/**
+ * Localiza el argumento de la acción: el nombrado `action:` manda; si no existe,
+ * se toma la posición indicada.
+ *
+ * @param list<list<mixed>> $arguments Argumentos devueltos por `splitCallArguments()`.
+ * @param int $position Posición de la acción en la firma posicional.
+ * @return list<mixed>|null Tokens del argumento, ya sin el nombre, o `null`.
+ */
+function resolveActionArgument(array $arguments, int $position): ?array
+{
+    foreach ($arguments as $argument) {
+        $clean = array_values(array_filter($argument, static fn($tk): bool => !(is_array($tk)
+            && in_array($tk[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true))));
+        if (isset($clean[0], $clean[1]) && is_array($clean[0]) && $clean[0][0] === T_STRING
+            && $clean[0][1] === 'action' && $clean[1] === ':') {
+            return array_slice($argument, array_search(':', $argument, true) + 1);
+        }
+    }
+
+    return $arguments[$position] ?? null;
+}
+
+/**
+ * Reduce la expresión de la acción a su forma analizable por la guarda.
+ *
+ * @param list<mixed> $expression Tokens del argumento de acción.
+ * @return array{plain: ?string, literals: list<string>, flat: string}
+ *         plain:    el literal único si la expresión es un literal plano
+ *         literals: todos los literales contenidos (ramas de un ternario, etc.)
+ *         flat:     texto de la expresión, para el informe de sitios dinámicos
+ */
+function analyseActionExpression(array $expression): array
+{
+    $clean = array_values(array_filter($expression, static fn($tk): bool => !(is_array($tk)
+        && in_array($tk[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true))));
+
+    $literals = [];
+    $flat = '';
+    foreach ($clean as $tk) {
+        if (is_array($tk) && $tk[0] === T_CONSTANT_ENCAPSED_STRING) {
+            $literals[] = trim($tk[1], "'\"");
+        }
+        $flat .= is_array($tk) ? $tk[1] : $tk;
+    }
+
+    return [
+        'plain' => count($clean) === 1 && count($literals) === 1 ? $literals[0] : null,
+        'literals' => $literals,
+        'flat' => $flat,
+    ];
+}
+
+/**
  * Extracts every audit action a PHP source can persist.
+ *
+ * Los hechos territoriales del Módulo 17 no pasan por `AuditLogger`: el repositorio
+ * construye el `AuditEvent` y lo entrega al repositorio de auditoría dentro de su
+ * propia transacción. Por eso la extracción cubre también `new AuditEvent(...)`
+ * (cuarto argumento posicional o `action:` nombrado); si solo mirase los métodos de
+ * `AuditLogger`, esas nuevas acciones se leerían como filtros fantasma del visor.
  *
  * @return array{literals: array<string, string>, dynamic: array<string, string>}
  *         literals: action => first call site that writes it
@@ -93,6 +188,20 @@ function extractAuditActions(string $source, string $relativePath): array
 
     $isSkippable = static fn($token): bool => is_array($token)
         && in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true);
+
+    $register = static function (array $expression, string $site) use (&$literals, &$dynamic): void {
+        $analysis = analyseActionExpression($expression);
+
+        if ($analysis['plain'] !== null) {
+            $literals[$analysis['plain']] = $literals[$analysis['plain']] ?? $site;
+            return;
+        }
+
+        foreach ($analysis['literals'] as $literal) {
+            $literals[$literal] = $literals[$literal] ?? $site . ' (expression)';
+        }
+        $dynamic[$site] = $analysis['flat'];
+    };
 
     for ($i = 0; $i < $count; $i++) {
         $token = $tokens[$i];
@@ -117,74 +226,57 @@ function extractAuditActions(string $source, string $relativePath): array
             continue;
         }
 
-        $method = $token[1];
-        $site = $relativePath . '::' . $method;
-
-        // Split the argument list at top level, honouring nesting.
-        $depth = 1;
-        $arguments = [];
-        $current = [];
-        for ($k = $cursor + 1; $k < $count; $k++) {
-            $inner = $tokens[$k];
-            $text = is_array($inner) ? $inner[1] : $inner;
-            if (in_array($text, ['(', '[', '{'], true)) {
-                $depth++;
-            } elseif (in_array($text, [')', ']', '}'], true)) {
-                $depth--;
-                if ($depth === 0) {
-                    $arguments[] = $current;
-                    break;
-                }
-            } elseif ($text === ',' && $depth === 1) {
-                $arguments[] = $current;
-                $current = [];
-                continue;
-            }
-            $current[] = $inner;
-        }
-
-        // Locate the action argument: named `action:` wins, otherwise positional #2.
-        $actionArgument = null;
-        $named = null;
-        foreach ($arguments as $index => $argument) {
-            $clean = array_values(array_filter($argument, static fn($tk): bool => !$isSkippable($tk)));
-            if (isset($clean[0], $clean[1]) && is_array($clean[0]) && $clean[0][0] === T_STRING
-                && $clean[0][1] === 'action' && $clean[1] === ':') {
-                $named = array_slice($argument, array_search(':', $argument, true) + 1);
-                break;
-            }
-            if ($index === 1) {
-                $actionArgument = $argument;
-            }
-        }
-        $expression = $named ?? $actionArgument;
+        $site = $relativePath . '::' . $token[1];
+        $expression = resolveActionArgument(splitCallArguments($tokens, $cursor), 1);
         if ($expression === null) {
             $dynamic[$site] = '(no action argument found)';
             continue;
         }
 
-        $clean = array_values(array_filter($expression, static fn($tk): bool => !$isSkippable($tk)));
-        $stringLiterals = [];
-        foreach ($clean as $tk) {
-            if (is_array($tk) && $tk[0] === T_CONSTANT_ENCAPSED_STRING) {
-                $stringLiterals[] = trim($tk[1], "'\"");
-            }
-        }
+        $register($expression, $site);
+    }
 
-        $isPlainLiteral = count($clean) === 1 && count($stringLiterals) === 1;
-        if ($isPlainLiteral) {
-            $literals[$stringLiterals[0]] = $literals[$stringLiterals[0]] ?? $site;
+    // Escrituras directas: el evento se construye y se entrega sin `AuditLogger`.
+    for ($i = 0; $i < $count; $i++) {
+        $token = $tokens[$i];
+        if (!is_array($token) || $token[0] !== T_NEW) {
             continue;
         }
 
-        foreach ($stringLiterals as $literal) {
-            $literals[$literal] = $literals[$literal] ?? $site . ' (expression)';
+        $cursor = $i + 1;
+        while ($cursor < $count && $isSkippable($tokens[$cursor])) {
+            $cursor++;
         }
-        $flat = '';
-        foreach ($clean as $tk) {
-            $flat .= is_array($tk) ? $tk[1] : $tk;
+        if ($cursor >= $count || !is_array($tokens[$cursor]) || $tokens[$cursor][0] !== T_STRING
+            || $tokens[$cursor][1] !== 'AuditEvent') {
+            continue;
         }
-        $dynamic[$site] = $flat;
+
+        $open = $cursor + 1;
+        while ($open < $count && $isSkippable($tokens[$open])) {
+            $open++;
+        }
+        if ($open >= $count || $tokens[$open] !== '(') {
+            continue;
+        }
+
+        $site = $relativePath . '::new AuditEvent';
+        // Firma posicional: id, entityType, entityId, action.
+        $expression = resolveActionArgument(splitCallArguments($tokens, $open), 3);
+        if ($expression === null) {
+            continue;
+        }
+
+        // Solo interesa la escritura con acción literal. Una acción calculada aquí es
+        // hidratación (`$row['action']` en `PdoAuditLogRepository`) o la delegación de
+        // `AuditLogger::log()`, que escribe lo que ya enumeró otra llamada; tratarlas
+        // como sitios dinámicos obligaría a declarar lecturas como si fueran escrituras.
+        $analysis = analyseActionExpression($expression);
+        if ($analysis['plain'] === null) {
+            continue;
+        }
+
+        $literals[$analysis['plain']] = $literals[$analysis['plain']] ?? $site;
     }
 
     // Raw inserts into audit_log (demo/metric seeders).
