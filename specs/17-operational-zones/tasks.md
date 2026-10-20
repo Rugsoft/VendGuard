@@ -115,15 +115,16 @@
   * **Hecho cuando:** `OperationalZoneService` gestiona el ciclo de vida de zonas (alta, edición, desactivación), detecta si hay códigos postales en conflicto para requerir confirmación previa (`PostalCodeConflictException`), coordina el traslado atómico cuando `confirm_transfers = true`, valida que un técnico no tenga dos titularidades vivas (`PrimaryTechnicianConflictException`), degrada la titularidad anterior con `TECHNICIAN_ZONE_PRIMARY_DEMOTED` al confirmar `confirm_primary_override`, exige `confirm_release = true` para desactivar una zona con CPs o cuadrante y, en esa misma transacción, deja las sedes en `zone_id = NULL`, libera los CPs marcándolos con `released_at` (QA 13) y marca `removed_at` en las vinculaciones (QA 7 / QA 9 / QA 10), y gestiona las excepciones manuales de sede.
   * **Verificación:** `source deploy/local/postgres/.env.local && php tests/integration/OperationalZoneServiceTest.php` → **40/40**, exit 0.
 
-- [ ] **T-ZONE-08 · Implementar caso de uso `TechnicianAssignmentSuggester` con desempates deterministas y fallback Haversine sin GPS**
+- [x] **T-ZONE-08 · Implementar caso de uso `TechnicianAssignmentSuggester` con desempates deterministas y fallback Haversine sin GPS**
   * **Tiempo estimado:** 30 min
   * **Dependencias:** `T-ZONE-04`, `T-ZONE-05`
   * **Ficheros a crear o modificar:**
-    * `src/Application/DTO/SuggestedTechnicianDto.php` *(crear)*
+    * `src/Application/DTO/SuggestedTechnicianDto.php` *(crear: forma exacta del contrato §3.6, con identidad contable recomendación ↔ primer puesto)*
     * `src/Application/Service/TechnicianAssignmentSuggester.php` *(crear)*
     * `tests/unit/TechnicianAssignmentSuggesterTest.php` *(crear)*
   * **Requisitos que cubre:** `RF-04.1`, `RF-04.2`, `RF-05.1`, `RF-06.1`, `RF-06.2`, `RNF-01`, Resoluciones QA 1, QA 2, QA 3 y QA 5, `constitution.md` Art. II y Art. V.4
   * **Hecho cuando:** `TechnicianAssignmentSuggester::getSuggestionsForIncident()`: (1) pondera a los técnicos con `TechnicianWorkloadScorer`; (2) ante averías críticas/frío con paradas previas del titular, antepone obligatoriamente al técnico de guardia 24/7; (3) en zonas desatendidas aplica ordenación secundaria por distancia Haversine (`GeoDistanceService`) respecto a la parada actual, última resuelta o Base Central; (4) desempata deterministamente por mayor tiempo desde la última asignación formal (`assigned_at ASC`); y `php tests/unit/TechnicianAssignmentSuggesterTest.php` pasa al 100% en verde certificando todos los caminos lógicos.
+  * **Verificación:** `php tests/unit/TechnicianAssignmentSuggesterTest.php` → **28/28**, exit 0. La batería global queda en 305 suites · 11.827 aserciones (frase canónica sincronizada en README y en los cuatro informes vivos).
 
 ---
 
