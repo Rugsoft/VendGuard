@@ -202,13 +202,13 @@ export const AssignSuggestionPanel = {
           @click="chooseCandidate(candidate)"
         >
           <span>
-            <span class="fw-semibold" style="font-size: 13px; color: var(--color-ink-slate);">{{ candidate.name }}</span>
-            <span class="small" style="color: var(--color-ink-muted);"> · {{ candidate.zone_affinity_label }}</span>
+            <span class="fw-semibold" style="font-size: 13px;">{{ candidate.name }}</span>
+            <span class="small" style="opacity: 0.8;"> · {{ candidate.zone_affinity_label }}</span>
             <span class="d-flex flex-wrap gap-1 mt-1">
               <span v-for="badge in candidate.badges" :key="badge" class="vg-chip" style="font-size: 10px;">{{ suggestionBadgeLabel(badge) }}</span>
             </span>
           </span>
-          <span class="font-monospace" style="font-size: 12px; color: var(--color-ink-secondary);">{{ candidate.total_score }} pts</span>
+          <span class="font-monospace" style="font-size: 12px; opacity: 0.9;">{{ candidate.total_score }} pts</span>
         </button>
       </div>
     </div>
