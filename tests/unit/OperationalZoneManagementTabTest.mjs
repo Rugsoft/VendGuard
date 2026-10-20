@@ -211,6 +211,20 @@ assert('1.9 La desactivación presenta el resumen de liberación en un modal',
     && template.includes('data-testid="zone-release-summary"')
     && template.includes('data-testid="zone-release-confirm"'));
 
+// 2026-10-20: los cinco diálogos se pintaban con la cáscara `vg-modal` a pelo —sin cuerpo
+// acolchado ni pie separado— y el contenido tocaba el borde de la tarjeta. La guarda impide
+// volver a reimplementar la anatomía: un diálogo entra por el componente compartido o no entra.
+assert('1.10 Los cinco diálogos se declaran sobre el componente compartido ModalDialog',
+  Boolean(OperationalZoneManagementTab.components && OperationalZoneManagementTab.components.ModalDialog)
+    && (template.match(/<ModalDialog[\s>]/g) || []).length === 5
+    && (template.match(/<\/ModalDialog>/g) || []).length === 5
+    && !template.includes('vg-modal-backdrop'));
+assert('1.11 Cada diálogo separa cuerpo y pie, y el pie envía el formulario del cuerpo',
+  (template.match(/<template #footer>/g) || []).length === 5
+    && template.includes('form="zone-create-form"')
+    && template.includes('form="zone-edit-form"')
+    && template.includes('form="zone-quadrant-form"'));
+
 // =========================================================================
 // BLOQUE 2: Normalización del lote de códigos postales
 // =========================================================================

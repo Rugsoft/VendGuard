@@ -35,6 +35,7 @@
  */
 
 import { api } from '../api.js';
+import { ModalDialog } from './ModalDialog.js';
 
 /** Patrón del código postal español y de la zona: cinco dígitos exactos (QA 7). */
 const POSTAL_CODE_PATTERN = /^\d{5}$/;
@@ -88,6 +89,7 @@ export function invalidPostalCodes(raw) {
 
 export const OperationalZoneManagementTab = {
   name: 'OperationalZoneManagementTab',
+  components: { ModalDialog },
   data() {
     return {
       zones: [],
@@ -948,16 +950,11 @@ export const OperationalZoneManagementTab = {
       </div>
 
       <!-- MODAL: alta de zona -->
-      <div v-if="showCreateModal" class="vg-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="zone-create-title" data-testid="zone-create-modal">
-        <div class="vg-modal" style="max-width: 560px;">
-          <div class="d-flex justify-content-between align-items-center mb-3">
-            <h4 id="zone-create-title" class="mb-0" style="font-size: 20px; font-weight: 500;">Nueva zona operativa</h4>
-            <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" @click="closeCreateModal" aria-label="Cerrar"></button>
-          </div>
-
+      <ModalDialog v-model="showCreateModal" title="Nueva zona operativa" size="md" @close="closeCreateModal">
+        <div data-testid="zone-create-modal">
           <div v-if="createErrors.general" class="vg-alert vg-alert-error">{{ createErrors.general }}</div>
 
-          <form @submit.prevent="submitCreate">
+          <form id="zone-create-form" @submit.prevent="submitCreate">
             <div class="mb-3">
               <label class="form-label fw-bold" style="font-size: 13px;" for="zone-create-code">
                 Código de zona <span class="text-danger">*</span>
@@ -1012,29 +1009,25 @@ export const OperationalZoneManagementTab = {
                 data-testid="zone-create-description"
               ></textarea>
             </div>
-
-            <div class="d-flex justify-content-end gap-2">
-              <button type="button" class="vg-btn vg-btn-secondary" @click="closeCreateModal">Cancelar</button>
-              <button type="submit" class="vg-btn vg-btn-primary" :disabled="isSubmittingCreate" data-testid="zone-create-submit">
-                <span v-if="isSubmittingCreate" class="spinner-border spinner-border-sm me-1" role="status"></span>
-                <span>Crear zona</span>
-              </button>
-            </div>
           </form>
         </div>
-      </div>
+
+        <!-- El atributo form del pie mantiene el Enter del teclado enviando el formulario del cuerpo. -->
+        <template #footer>
+          <button type="button" class="vg-btn vg-btn-secondary" @click="closeCreateModal">Cancelar</button>
+          <button type="submit" form="zone-create-form" class="vg-btn vg-btn-primary" :disabled="isSubmittingCreate" data-testid="zone-create-submit">
+            <span v-if="isSubmittingCreate" class="spinner-border spinner-border-sm me-1" role="status"></span>
+            <span>Crear zona</span>
+          </button>
+        </template>
+      </ModalDialog>
 
       <!-- MODAL: edición de zona -->
-      <div v-if="showEditModal" class="vg-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="zone-edit-title" data-testid="zone-edit-modal">
-        <div class="vg-modal" style="max-width: 560px;">
-          <div class="d-flex justify-content-between align-items-center mb-3">
-            <h4 id="zone-edit-title" class="mb-0" style="font-size: 20px; font-weight: 500;">Editar {{ editForm.code }}</h4>
-            <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" @click="closeEditModal" aria-label="Cerrar"></button>
-          </div>
-
+      <ModalDialog v-model="showEditModal" :title="'Editar ' + editForm.code" size="md" @close="closeEditModal">
+        <div data-testid="zone-edit-modal">
           <div v-if="editErrors.general" class="vg-alert vg-alert-error">{{ editErrors.general }}</div>
 
-          <form @submit.prevent="submitEdit">
+          <form id="zone-edit-form" @submit.prevent="submitEdit">
             <div class="mb-3">
               <label class="form-label fw-bold" style="font-size: 13px;">Código de zona</label>
               <input type="text" class="vg-input font-monospace" :value="editForm.code" readonly />
@@ -1071,25 +1064,26 @@ export const OperationalZoneManagementTab = {
               </div>
             </div>
 
-            <div class="d-flex justify-content-end gap-2">
-              <button type="button" class="vg-btn vg-btn-secondary" @click="closeEditModal">Cancelar</button>
-              <button type="submit" class="vg-btn vg-btn-primary" :disabled="isSubmittingEdit" data-testid="zone-edit-submit">
-                <span v-if="isSubmittingEdit" class="spinner-border spinner-border-sm me-1" role="status"></span>
-                <span>Guardar cambios</span>
-              </button>
-            </div>
           </form>
         </div>
-      </div>
+
+        <template #footer>
+          <button type="button" class="vg-btn vg-btn-secondary" @click="closeEditModal">Cancelar</button>
+          <button type="submit" form="zone-edit-form" class="vg-btn vg-btn-primary" :disabled="isSubmittingEdit" data-testid="zone-edit-submit">
+            <span v-if="isSubmittingEdit" class="spinner-border spinner-border-sm me-1" role="status"></span>
+            <span>Guardar cambios</span>
+          </button>
+        </template>
+      </ModalDialog>
 
       <!-- MODAL: confirmación de desactivación con liberación -->
-      <div v-if="showReleaseModal && zoneToRelease" class="vg-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="zone-release-title" data-testid="zone-release-modal">
-        <div class="vg-modal" style="max-width: 520px;">
-          <div class="d-flex justify-content-between align-items-center mb-3">
-            <h4 id="zone-release-title" class="mb-0" style="font-size: 20px; font-weight: 500;">Liberar el territorio de {{ zoneToRelease.code }}</h4>
-            <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" @click="closeReleaseModal" aria-label="Cerrar"></button>
-          </div>
-
+      <ModalDialog
+        v-model="showReleaseModal"
+        :title="zoneToRelease ? ('Liberar el territorio de ' + zoneToRelease.code) : 'Liberar territorio'"
+        size="sm"
+        @close="closeReleaseModal"
+      >
+        <div v-if="zoneToRelease" data-testid="zone-release-modal">
           <div class="vg-alert vg-alert-warning" data-testid="zone-release-summary">
             <p class="mb-1 fw-semibold">Esta operación libera, en una sola transacción:</p>
             <p class="mb-0">{{ releaseSummary }}</p>
@@ -1100,25 +1094,25 @@ export const OperationalZoneManagementTab = {
             y las vinculaciones técnicas se darán de baja conservando su histórico. Reactivar la zona después no
             recupera este territorio.
           </p>
-
-          <div class="d-flex justify-content-end gap-2">
-            <button type="button" class="vg-btn vg-btn-secondary" @click="closeReleaseModal">Cancelar</button>
-            <button type="button" class="vg-btn vg-btn-danger" :disabled="isSubmittingRelease" @click="confirmRelease" data-testid="zone-release-confirm">
-              <span v-if="isSubmittingRelease" class="spinner-border spinner-border-sm me-1" role="status"></span>
-              <span>Desactivar y liberar</span>
-            </button>
-          </div>
         </div>
-      </div>
+
+        <template #footer>
+          <button type="button" class="vg-btn vg-btn-secondary" @click="closeReleaseModal">Cancelar</button>
+          <button type="button" class="vg-btn vg-btn-danger" :disabled="isSubmittingRelease" @click="confirmRelease" data-testid="zone-release-confirm">
+            <span v-if="isSubmittingRelease" class="spinner-border spinner-border-sm me-1" role="status"></span>
+            <span>Desactivar y liberar</span>
+          </button>
+        </template>
+      </ModalDialog>
 
       <!-- MODAL: códigos postales -->
-      <div v-if="showPostalCodesModal && postalZone" class="vg-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="zone-postal-title" data-testid="zone-postal-modal">
-        <div class="vg-modal" style="max-width: 620px;">
-          <div class="d-flex justify-content-between align-items-center mb-3">
-            <h4 id="zone-postal-title" class="mb-0" style="font-size: 20px; font-weight: 500;">Códigos postales de {{ postalZone.code }}</h4>
-            <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" @click="closePostalCodesModal" aria-label="Cerrar"></button>
-          </div>
-
+      <ModalDialog
+        v-model="showPostalCodesModal"
+        :title="postalZone ? ('Códigos postales de ' + postalZone.code) : 'Códigos postales'"
+        size="lg"
+        @close="closePostalCodesModal"
+      >
+        <div v-if="postalZone" data-testid="zone-postal-modal">
           <p style="font-size: 13px; color: var(--color-ink-secondary);">
             Las sedes heredan la zona por su código postal. Un código que ya pertenece a otra demarcación exige
             confirmación: el traslado mueve también sus sedes.
@@ -1162,30 +1156,31 @@ export const OperationalZoneManagementTab = {
             </div>
           </div>
 
-          <div class="d-flex justify-content-end gap-2 mt-3">
-            <button type="button" class="vg-btn vg-btn-secondary" @click="closePostalCodesModal">Cerrar</button>
-            <button
-              type="button"
-              class="vg-btn vg-btn-primary"
-              :disabled="isSubmittingPostalCodes || postalInputHasInvalidCodes"
-              @click="submitPostalCodes(false)"
-              data-testid="zone-postal-submit"
-            >
-              <span v-if="isSubmittingPostalCodes" class="spinner-border spinner-border-sm me-1" role="status"></span>
-              <span>Guardar códigos</span>
-            </button>
-          </div>
         </div>
-      </div>
+
+        <template #footer>
+          <button type="button" class="vg-btn vg-btn-secondary" @click="closePostalCodesModal">Cerrar</button>
+          <button
+            type="button"
+            class="vg-btn vg-btn-primary"
+            :disabled="isSubmittingPostalCodes || postalInputHasInvalidCodes"
+            @click="submitPostalCodes(false)"
+            data-testid="zone-postal-submit"
+          >
+            <span v-if="isSubmittingPostalCodes" class="spinner-border spinner-border-sm me-1" role="status"></span>
+            <span>Guardar códigos</span>
+          </button>
+        </template>
+      </ModalDialog>
 
       <!-- MODAL: cuadrante técnico -->
-      <div v-if="showTechniciansModal && quadrantZone" class="vg-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="zone-quadrant-title" data-testid="zone-quadrant-modal">
-        <div class="vg-modal" style="max-width: 620px;">
-          <div class="d-flex justify-content-between align-items-center mb-3">
-            <h4 id="zone-quadrant-title" class="mb-0" style="font-size: 20px; font-weight: 500;">Cuadrante de {{ quadrantZone.code }}</h4>
-            <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" @click="closeTechniciansModal" aria-label="Cerrar"></button>
-          </div>
-
+      <ModalDialog
+        v-model="showTechniciansModal"
+        :title="quadrantZone ? ('Cuadrante de ' + quadrantZone.code) : 'Cuadrante técnico'"
+        size="lg"
+        @close="closeTechniciansModal"
+      >
+        <div v-if="quadrantZone" data-testid="zone-quadrant-modal">
           <div class="d-flex flex-wrap gap-2 mb-3" data-testid="zone-quadrant-counts">
             <span class="vg-chip">Titulares: {{ quadrantZone.primary_technicians_count }}</span>
             <span class="vg-chip">Suplentes: {{ quadrantZone.backup_technicians_count }}</span>
@@ -1194,7 +1189,7 @@ export const OperationalZoneManagementTab = {
           <div v-if="quadrantNotice" class="vg-alert vg-alert-info" data-testid="zone-quadrant-notice">{{ quadrantNotice }}</div>
           <div v-if="quadrantErrors.general" class="vg-alert vg-alert-error">{{ quadrantErrors.general }}</div>
 
-          <form @submit.prevent="submitQuadrantAssignment(false)">
+          <form id="zone-quadrant-form" @submit.prevent="submitQuadrantAssignment(false)">
             <div class="mb-3">
               <label class="form-label fw-bold" style="font-size: 13px;" for="zone-quadrant-technician">Técnico</label>
               <select id="zone-quadrant-technician" class="vg-select" v-model="quadrantForm.technician_id" data-testid="zone-quadrant-technician">
@@ -1228,13 +1223,6 @@ export const OperationalZoneManagementTab = {
               </div>
             </div>
 
-            <div class="d-flex justify-content-end gap-2">
-              <button type="button" class="vg-btn vg-btn-secondary" @click="closeTechniciansModal">Cerrar</button>
-              <button type="submit" class="vg-btn vg-btn-primary" :disabled="isSubmittingQuadrant" data-testid="zone-quadrant-submit">
-                <span v-if="isSubmittingQuadrant" class="spinner-border spinner-border-sm me-1" role="status"></span>
-                <span>Vincular al cuadrante</span>
-              </button>
-            </div>
           </form>
 
           <div class="mt-4 pt-3" style="border-top: 1px solid var(--color-hairline);">
@@ -1262,7 +1250,15 @@ export const OperationalZoneManagementTab = {
             </div>
           </div>
         </div>
-      </div>
+
+        <template #footer>
+          <button type="button" class="vg-btn vg-btn-secondary" @click="closeTechniciansModal">Cerrar</button>
+          <button type="submit" form="zone-quadrant-form" class="vg-btn vg-btn-primary" :disabled="isSubmittingQuadrant" data-testid="zone-quadrant-submit">
+            <span v-if="isSubmittingQuadrant" class="spinner-border spinner-border-sm me-1" role="status"></span>
+            <span>Vincular al cuadrante</span>
+          </button>
+        </template>
+      </ModalDialog>
     </div>
   `
 };

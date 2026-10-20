@@ -64,6 +64,20 @@ a un módulo funcional certificado por la batería global.
   módulo, reaplica el DDL base y certifica columnas, índice y clave foránea antes de
   la capa incremental, además de la convergencia final.
 
+### Corregido (2026-10-20, modales territoriales)
+
+- Los cinco diálogos de la consola territorial (alta, edición, liberación, códigos
+  postales y cuadrante) se pintaban sobre la cáscara `vg-modal` a pelo: esa clase no
+  declara relleno ni anatomía, así que el título y los controles tocaban el borde de la
+  tarjeta y las acciones quedaban dentro del área que se desplaza. Ahora los cinco
+  entran por el componente compartido `ModalDialog` —cabecera con hairline, cuerpo de
+  20 px y pie separado—, igual que el resto de diálogos del panel, y ganan cierre con
+  `Escape`, clic en el fondo, foco en el diálogo y bloqueo del desplazamiento de fondo.
+- Los botones de envío viven en el pie pero siguen enviando el formulario del cuerpo
+  (atributo `form`), de modo que el Enter del teclado no pierde su comportamiento.
+- `OperationalZoneManagementTabTest` gana dos aserciones (1.10 y 1.11) que impiden
+  reintroducir un diálogo fuera del componente compartido o sin pie de acciones.
+
 ### Seguridad
 
 - El portal de la sede no recibe el nombre, código ni color de su zona operativa, ni
@@ -71,12 +85,12 @@ a un módulo funcional certificado por la batería global.
 
 ### Verificado
 
-- Batería global: 307 suites y 11.944 aserciones al 100 % en verde, con la guarda de
+- Batería global: 307 suites y 11.946 aserciones al 100 % en verde, con la guarda de
   coherencia documental activa y la base del arnés restaurada a semillas.
 - Canal `new_engine` contra PostgreSQL: esquema territorial, repositorio, servicio de
   aplicación, traslado de CPs, API de zonas, sugerencias, salvaguarda de frío y
   privacidad de sede, todos en verde.
-- Superficies Vue: consola territorial (43 aserciones), panel de asignación (32),
+- Superficies Vue: consola territorial (45 aserciones), panel de asignación (32),
   mapa territorial con filtro por zona (101) y las 72 suites ESM sin fallos.
 
 ## [Módulo 16] · Avería Oportunista In Situ — 2026-10-19
