@@ -157,7 +157,9 @@ try {
 
     $assert(
         'El DDL base y la migración 007 aplican sin errores y el esquema converge',
-        in_array('007_operational_zones.sql', $schemaReport['migrations'], true) && $convergence['converged'] === true,
+        in_array('007_operational_zones.sql', $schemaReport['migrations'], true)
+            && in_array('008_zone_postal_code_release.sql', $schemaReport['migrations'], true)
+            && $convergence['converged'] === true,
         sprintf('%d sentencias · migraciones: %s', $schemaReport['statements'], implode(', ', $schemaReport['migrations']))
     );
 
@@ -436,6 +438,35 @@ try {
             && $locationRepo->findInheritedZoneByPostalCode('99999') === null
     );
 
+    // ── Liberación lógica de CP (QA 13): sin DELETE y sin disparador tocado ──
+    $releasingZone = $zoneRepo->create([
+        'code' => 'ZONA-LIBERACION-CERT',
+        'name' => 'Zona de Liberación de Certificación',
+    ]);
+    $releasingZoneId = (int)$releasingZone->getId();
+    $linkPostalCode($pgPdo, '08050', $releasingZoneId);
+
+    $assert(
+        'releasePostalCodes marca el CP como liberado y lo retira de la ficha viva',
+        $zoneRepo->releasePostalCodes($releasingZoneId) === 1
+            && $zoneRepo->findPostalCodes($releasingZoneId) === []
+            && $zoneRepo->releasePostalCodes($releasingZoneId) === 0
+    );
+
+    $historical = $pgPdo->query(
+        "SELECT COUNT(*) FROM operational_zone_postal_codes WHERE postal_code = '08050' AND released_at IS NOT NULL"
+    )->fetchColumn();
+    $assert(
+        'La fila histórica del CP liberado se conserva (Art. III.1)',
+        (int)$historical === 1
+    );
+
+    $linkPostalCode($pgPdo, '08050', $northId);
+    $assert(
+        'El CP liberado se reasigna a otra zona y la herencia ya apunta a la nueva',
+        $locationRepo->findInheritedZoneByPostalCode('08050') === $northId
+    );
+
     $assert(
         'setPostalCode persiste el CP y recoloca la sede heredada',
         $locationRepo->setPostalCode($northOneId, '08003') === $southId
@@ -590,7 +621,7 @@ try {
         'setActive reactiva la zona y el listado filtrado la recupera',
         $zoneRepo->setActive($closedId, true) === true
             && $zoneRepo->findById($closedId)?->isActive() === true
-            && count($zoneRepo->findAllWithCounts(false)) === 3
+            && count($zoneRepo->findAllWithCounts(false)) === 4
     );
 
     $assert(

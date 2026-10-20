@@ -66,12 +66,49 @@ interface OperationalZoneRepositoryInterface
     public function findAllWithCounts(bool $includeInactive = true): array;
 
     /**
-     * Códigos postales de una zona, ordenados.
+     * Códigos postales **vivos** de una zona, ordenados.
+     *
+     * Un CP liberado (`released_at`) pertenece al historial y no aparece aquí.
      *
      * @param int $zoneId Identificador de la zona.
      * @return list<string>
      */
     public function findPostalCodes(int $zoneId): array;
+
+    /**
+     * Libera los códigos postales vivos de una zona dejándolos disponibles para
+     * otras demarcaciones (RF-01.2, Resolución QA 13).
+     *
+     * La liberación es **lógica**: la fila se conserva con `released_at` porque el
+     * borrado físico está prohibido por el Art. III.1. Reactivar la zona no los
+     * recupera; volver a asignarlos es una operación explícita.
+     *
+     * @param int $zoneId Identificador de la zona.
+     * @return int Número de códigos postales liberados.
+     */
+    public function releasePostalCodes(int $zoneId): int;
+
+    /**
+     * Traslada códigos postales vivos a otra zona en una única transacción,
+     * moviendo sus filas y arrastrando las sedes que los heredaban (RF-01.3,
+     * Resolución QA 6).
+     *
+     * Nunca duplica una fila de CP: la actualiza. Las sedes con
+     * `is_manual_override = TRUE` conservan su zona. Emite el evento matriz
+     * `ZONE_POSTAL_CODE_TRANSFERRED` sobre `OPERATIONAL_ZONE` y un
+     * `LOCATION_ZONE_REASSIGNED` por cada sede afectada, todo dentro de la misma
+     * transacción; cualquier fallo deshace el traslado completo.
+     *
+     * @param int $newZoneId Zona activa de destino.
+     * @param list<string> $postalCodes Códigos postales a mover.
+     * @param int $userId Coordinador que ejecuta el traslado.
+     * @return int Número de sedes cuya zona se recalculó.
+     *
+     * @throws ZoneValidationException Si la zona no es válida o algún CP no tiene
+     *   asignación viva.
+     * @throws \InvalidArgumentException Si la lista está vacía o el usuario no existe.
+     */
+    public function transferPostalCodes(int $newZoneId, array $postalCodes, int $userId): int;
 
     /**
      * Cuadrante vivo de una zona, con los datos del técnico que pinta el panel.

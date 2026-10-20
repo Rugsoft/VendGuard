@@ -686,6 +686,7 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
             FROM operational_zone_postal_codes p
             INNER JOIN operational_zones z ON z.id = p.zone_id
             WHERE p.postal_code = :postal_code
+              AND p.released_at IS NULL
               AND z.is_active = {$this->dialect->booleanLiteral(true)}
             LIMIT 1
         ";

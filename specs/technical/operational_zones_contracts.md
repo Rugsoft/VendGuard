@@ -60,15 +60,28 @@ CREATE TABLE IF NOT EXISTS operational_zones (
 );
 
 -- ============================================================================
--- 2. TABLA: operational_zone_postal_codes (Mapeo Unívoco de Códigos Postales)
--- Regla de Unicidad Territorial: 1 código postal = 1 sola zona activa (RF-01.2)
+-- 2. TABLA: operational_zone_postal_codes (Mapeo de Códigos Postales)
+-- Regla de Unicidad Territorial: 1 CP vivo = 1 sola zona (RF-01.2)
+-- Resolución QA 13: la liberación es lógica (released_at). La clave primaria
+-- pasa a un identificador sustituto y la unicidad territorial se declara en un
+-- índice único **parcial** sobre las filas vivas: así un CP liberado queda
+-- disponible para otra zona sin borrar su historia y sin tocar el disparador
+-- anti-borrado (Art. III.1).
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS operational_zone_postal_codes (
-    postal_code VARCHAR(5) PRIMARY KEY,
+    id          BIGINT GENERATED ALWAYS AS IDENTITY,
+    postal_code VARCHAR(5) NOT NULL,
     zone_id     BIGINT NOT NULL REFERENCES operational_zones(id) ON DELETE RESTRICT,
+    released_at TIMESTAMPTZ,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_operational_zone_postal_codes PRIMARY KEY (id),
     CONSTRAINT chk_postal_code_format CHECK (postal_code ~ '^[0-9]{5}$')
 );
+
+-- Un CP pertenece a una única zona **viva**; las filas liberadas se conservan.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_zone_postal_codes_live
+    ON operational_zone_postal_codes (postal_code)
+    WHERE released_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_zone_postal_codes_zone_id 
     ON operational_zone_postal_codes (zone_id);

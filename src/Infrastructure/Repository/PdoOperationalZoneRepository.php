@@ -4,13 +4,19 @@ declare(strict_types=1);
 
 namespace VendGuard\Infrastructure\Repository;
 
+use InvalidArgumentException;
 use PDO;
 use PDOException;
+use PDOStatement;
 use RuntimeException;
+use Throwable;
 use VendGuard\Core\Domain\Exception\PrimaryTechnicianConflictException;
 use VendGuard\Core\Domain\Exception\ZoneValidationException;
+use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\OperationalZone;
+use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OperationalZoneRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\PostalCode;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\UniqueViolationDetector;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
@@ -54,10 +60,20 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
 
     private SqlDialectAdapter $dialect;
 
-    public function __construct(?PDO $pdo = null)
+    /**
+     * Registro de auditoría usado por el traslado de CP.
+     *
+     * Debe compartir la conexión del repositorio: los eventos matriz e hijos se
+     * escriben dentro de la misma transacción que el movimiento y se deshacen con
+     * él (Resolución QA 6).
+     */
+    private AuditLogRepositoryInterface $auditRepo;
+
+    public function __construct(?PDO $pdo = null, ?AuditLogRepositoryInterface $auditRepo = null)
     {
         $this->pdo = $pdo ?? ConnectionFactory::getConnection();
         $this->dialect = SqlDialectAdapter::forConnection($this->pdo);
+        $this->auditRepo = $auditRepo ?? new PdoAuditLogRepository($this->pdo);
     }
 
     /**
@@ -142,6 +158,7 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
                     SELECT COUNT(*)
                     FROM operational_zone_postal_codes p
                     WHERE p.zone_id = z.id
+                      AND p.released_at IS NULL
                 ) AS postal_codes_count
             FROM operational_zones z
         ";
@@ -173,8 +190,14 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
      */
     public function findPostalCodes(int $zoneId): array
     {
+        // Solo las asignaciones vivas: un CP liberado pertenece al historial de la
+        // zona y mostrarlo en su ficha sugeriría que todavía lo gobierna (QA 13).
         $stmt = $this->pdo->prepare(
-            'SELECT postal_code FROM operational_zone_postal_codes WHERE zone_id = :zone_id ORDER BY postal_code ASC'
+            'SELECT postal_code
+             FROM operational_zone_postal_codes
+             WHERE zone_id = :zone_id
+               AND released_at IS NULL
+             ORDER BY postal_code ASC'
         );
         $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
         $stmt->execute();
@@ -183,6 +206,180 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
             static fn (array $row): string => (string)$row['postal_code'],
             $stmt->fetchAll()
         );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function releasePostalCodes(int $zoneId): int
+    {
+        // `released_at` es la baja lógica del CP: la fila sigue ahí, el CP deja de
+        // estar gobernado por esta zona y el índice parcial libera la clave para
+        // otra demarcación (QA 13). No hay DELETE que el disparador pueda rechazar.
+        $stmt = $this->pdo->prepare(
+            'UPDATE operational_zone_postal_codes
+             SET released_at = CURRENT_TIMESTAMP
+             WHERE zone_id = :zone_id
+               AND released_at IS NULL'
+        );
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->rowCount();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function transferPostalCodes(int $newZoneId, array $postalCodes, int $userId): int
+    {
+        $target = $this->findById($newZoneId, true);
+        if ($target === null || !$target->isActive()) {
+            throw ZoneValidationException::unprocessable(
+                'No se pueden trasladar códigos postales a una zona inexistente o desactivada.',
+                ['zone_id' => 'La zona de destino no está activa.']
+            );
+        }
+
+        $codes = self::normalizePostalCodes($postalCodes);
+        if ($codes === []) {
+            throw new InvalidArgumentException('El traslado requiere al menos un código postal.');
+        }
+
+        $actor = $this->resolveActor($userId);
+        [$postalIn, $postalParams] = self::inClause('cp', $codes);
+
+        $this->pdo->beginTransaction();
+
+        try {
+            // (0) Verificar y bloquear las asignaciones vivas: un CP inexistente o
+            // ya liberado no se puede mover, y dos traslados simultáneos del mismo
+            // CP no deben pisarse.
+            $stmt = $this->pdo->prepare(
+                "SELECT postal_code, zone_id
+                 FROM operational_zone_postal_codes
+                 WHERE postal_code IN ({$postalIn})
+                   AND released_at IS NULL
+                 FOR UPDATE"
+            );
+            self::bindAll($stmt, $postalParams);
+            $stmt->execute();
+            $sources = $stmt->fetchAll();
+
+            if (count($sources) !== count($codes)) {
+                $found = array_map(static fn (array $row): string => (string)$row['postal_code'], $sources);
+                $missing = array_values(array_diff($codes, $found));
+                throw ZoneValidationException::unprocessable(
+                    'Uno o más códigos postales no tienen una asignación viva y no se pueden trasladar: '
+                        . implode(', ', $missing) . '.',
+                    ['postal_codes' => 'Sin asignación viva: ' . implode(', ', $missing) . '.'],
+                );
+            }
+
+            // (1) Bloquear las sedes que heredan esos CPs. Las forzadas a mano no
+            // entran: su zona es una decisión operativa y el traslado no la toca
+            // (RF-03.3).
+            $stmt = $this->pdo->prepare(
+                "SELECT id, zone_id, postal_code
+                 FROM locations
+                 WHERE postal_code IN ({$postalIn})
+                   AND is_manual_override = " . $this->dialect->booleanLiteral(false) . '
+                   AND deleted_at IS NULL
+                 FOR UPDATE'
+            );
+            self::bindAll($stmt, $postalParams);
+            $stmt->execute();
+            $locations = $stmt->fetchAll();
+
+            // (2) Mover las filas del CP: UPDATE, nunca INSERT duplicado.
+            $stmt = $this->pdo->prepare(
+                "UPDATE operational_zone_postal_codes
+                 SET zone_id = :new_zone_id
+                 WHERE postal_code IN ({$postalIn})
+                   AND released_at IS NULL"
+            );
+            self::bindAll($stmt, $postalParams);
+            $stmt->bindValue(':new_zone_id', $newZoneId, PDO::PARAM_INT);
+            $stmt->execute();
+
+            // (3) Arrastrar en bloque las sedes heredadas.
+            $reassigned = [];
+            foreach ($locations as $location) {
+                $previousZoneId = $location['zone_id'] !== null ? (int)$location['zone_id'] : null;
+                if ($previousZoneId !== $newZoneId) {
+                    $reassigned[] = [
+                        'id' => (int)$location['id'],
+                        'zone_id' => $previousZoneId,
+                        'postal_code' => (string)$location['postal_code'],
+                    ];
+                }
+            }
+
+            if ($reassigned !== []) {
+                [$locationIn, $locationParams] = self::inClause('loc', array_column($reassigned, 'id'));
+                $stmt = $this->pdo->prepare(
+                    "UPDATE locations
+                     SET zone_id = :new_zone_id
+                     WHERE id IN ({$locationIn})
+                       AND deleted_at IS NULL"
+                );
+                self::bindAll($stmt, $locationParams);
+                $stmt->bindValue(':new_zone_id', $newZoneId, PDO::PARAM_INT);
+                $stmt->execute();
+            }
+
+            // (4) Evento matriz del traslado (Resolución QA 6).
+            $sourceZoneIds = array_values(array_unique(array_map(
+                static fn (array $row): int => (int)$row['zone_id'],
+                $sources
+            )));
+
+            $this->auditRepo->log(new AuditEvent(
+                null,
+                AuditEvent::ENTITY_OPERATIONAL_ZONE,
+                $newZoneId,
+                'ZONE_POSTAL_CODE_TRANSFERRED',
+                $userId,
+                $actor['role'],
+                $actor['name'],
+                ['postal_codes' => $codes, 'zone_ids' => $sourceZoneIds],
+                [
+                    'zone_id' => $newZoneId,
+                    'postal_codes' => $codes,
+                    'affected_locations_count' => count($reassigned),
+                ],
+                ['source_zone_ids' => $sourceZoneIds]
+            ));
+
+            // (5) Un evento por sede reasignada, en la misma transacción.
+            foreach ($reassigned as $location) {
+                $this->auditRepo->log(new AuditEvent(
+                    null,
+                    AuditEvent::ENTITY_LOCATION,
+                    $location['id'],
+                    'LOCATION_ZONE_REASSIGNED',
+                    $userId,
+                    $actor['role'],
+                    $actor['name'],
+                    ['zone_id' => $location['zone_id']],
+                    ['zone_id' => $newZoneId, 'postal_code' => $location['postal_code']],
+                    [
+                        'postal_code' => $location['postal_code'],
+                        'origin' => 'ZONE_POSTAL_CODE_TRANSFERRED',
+                    ]
+                ));
+            }
+
+            $this->pdo->commit();
+
+            return count($reassigned);
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $exception;
+        }
     }
 
     /**
@@ -510,6 +707,97 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
         return [
             'id' => (int)$row['id'],
             'is_primary' => self::toBoolean($row['is_primary']),
+        ];
+    }
+
+    /**
+     * Normaliza, deduplica y ordena una lista de códigos postales.
+     *
+     * El Value Object es la única validación: un CP mal formado detiene el
+     * traslado antes de abrir la transacción, no a mitad de ella.
+     *
+     * @param array<int, mixed> $postalCodes
+     * @return list<string>
+     *
+     * @throws ZoneValidationException Si algún CP no tiene cinco dígitos.
+     */
+    private static function normalizePostalCodes(array $postalCodes): array
+    {
+        $normalized = [];
+        foreach ($postalCodes as $raw) {
+            $value = (new PostalCode(is_int($raw) ? $raw : (string)$raw))->value();
+            $normalized[$value] = $value;
+        }
+
+        $codes = array_values($normalized);
+        sort($codes, SORT_STRING);
+
+        return $codes;
+    }
+
+    /**
+     * Construye una lista de marcadores nombrados y sus valores enlazables.
+     *
+     * Los marcadores nacen de un prefijo controlado por este repositorio y un
+     * índice entero, nunca de la entrada: la lista viaja siempre por parámetros.
+     *
+     * @param list<string> $values
+     * @return array{0: string, 1: array<string, string>}
+     */
+    private static function inClause(string $prefix, array $values): array
+    {
+        $placeholders = [];
+        $params = [];
+
+        foreach (array_values($values) as $index => $value) {
+            $key = ':' . $prefix . '_' . $index;
+            $placeholders[] = $key;
+            $params[$key] = (string)$value;
+        }
+
+        return [implode(', ', $placeholders), $params];
+    }
+
+    /**
+     * Enlaza un lote de parámetros respetando el tipo de cada valor.
+     *
+     * @param array<string, mixed> $params
+     */
+    private static function bindAll(PDOStatement $statement, array $params): void
+    {
+        foreach ($params as $key => $value) {
+            if (is_int($value)) {
+                $statement->bindValue($key, $value, PDO::PARAM_INT);
+                continue;
+            }
+
+            $statement->bindValue($key, (string)$value, PDO::PARAM_STR);
+        }
+    }
+
+    /**
+     * Rol y nombre del coordinador que firma el traslado en `audit_log`.
+     *
+     * @return array{role: string, name: string}
+     *
+     * @throws InvalidArgumentException Si el usuario no existe.
+     */
+    private function resolveActor(int $userId): array
+    {
+        $stmt = $this->pdo->prepare('SELECT role, name FROM users WHERE id = :user_id LIMIT 1');
+        $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch();
+
+        if ($row === false) {
+            throw new InvalidArgumentException(
+                "No existe el usuario {$userId} que pretende ejecutar el traslado de códigos postales."
+            );
+        }
+
+        return [
+            'role' => mb_strtoupper((string)$row['role']),
+            'name' => (string)$row['name'],
         ];
     }
 

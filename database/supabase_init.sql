@@ -1585,20 +1585,30 @@ CREATE OR REPLACE TRIGGER trg_touch_operational_zones
 
 
 -- -----------------------------------------------------------------------------
--- Tabla 24 · operational_zone_postal_codes — mapeo unívoco de CPs (RF-01.2)
+-- Tabla 24 · operational_zone_postal_codes — mapeo de CPs (RF-01.2, QA 13)
 -- -----------------------------------------------------------------------------
--- La unicidad territorial es global y vive en la clave primaria: si el CP fuera
--- único por zona, el mismo barrio podría pertenecer a dos demarcaciones y el
--- recomendador tendría dos titulares para una sola sede (Resolución QA 7).
+-- La unicidad territorial es global **entre filas vivas**: si el CP fuera único
+-- por zona, el mismo barrio podría pertenecer a dos demarcaciones y el
+-- recomendador tendría dos titulares para una sola sede. Desactivar una zona
+-- libera sus CPs con `released_at` (UPDATE), porque el borrado físico está
+-- prohibido por el Art. III.1 y el disparador constitucional lo rechaza; por eso
+-- la clave primaria es un identificador sustituto y la unicidad viaja en un
+-- índice único **parcial** sobre las filas sin liberar.
 CREATE TABLE IF NOT EXISTS operational_zone_postal_codes (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY,
     postal_code VARCHAR(5) NOT NULL,
     zone_id     BIGINT NOT NULL,
+    released_at TIMESTAMPTZ,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT pk_operational_zone_postal_codes PRIMARY KEY (postal_code),
+    CONSTRAINT pk_operational_zone_postal_codes PRIMARY KEY (id),
     CONSTRAINT chk_postal_code_format CHECK (postal_code ~ '^[0-9]{5}$'),
     CONSTRAINT fk_postal_codes_zone FOREIGN KEY (zone_id)
         REFERENCES operational_zones (id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_zone_postal_codes_live
+    ON operational_zone_postal_codes (postal_code)
+    WHERE released_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_zone_postal_codes_zone_id
     ON operational_zone_postal_codes (zone_id);

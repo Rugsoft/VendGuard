@@ -400,7 +400,7 @@ FROM tmp_affected_locations;
 COMMIT;
 ```
 
-> **Nota (QA 7 / QA 10):** el paso 2 **mueve** la fila del CP (`UPDATE ... SET zone_id`), nunca la duplica, porque `postal_code` es clave primaria global. La desactivación de una zona reutiliza el patrón dentro de su propia transacción: `UPDATE locations SET zone_id = NULL`, liberación de los CPs de la zona (`DELETE FROM operational_zone_postal_codes WHERE zone_id = :id`, filas de CP, nunca la zona) y baja lógica del cuadrante (`UPDATE technician_zone_assignments SET removed_at = CURRENT_TIMESTAMP`), jamás un `DELETE` físico (Art. III.1).
+> **Nota (QA 7 / QA 10 / QA 13):** el paso 2 **mueve** la fila del CP (`UPDATE ... SET zone_id`), nunca la duplica; la unicidad territorial vive en el índice único parcial `uq_zone_postal_codes_live (postal_code) WHERE released_at IS NULL`. La desactivación de una zona reutiliza el patrón dentro de su propia transacción: `UPDATE locations SET zone_id = NULL`, liberación **lógica** de los CPs de la zona (`UPDATE operational_zone_postal_codes SET released_at = CURRENT_TIMESTAMP WHERE zone_id = :id AND released_at IS NULL`) y baja lógica del cuadrante (`UPDATE technician_zone_assignments SET removed_at = CURRENT_TIMESTAMP`), jamás un `DELETE` físico (Art. III.1): el disparador anti-borrado se mantiene intacto y la fila del CP conserva su historia.
 
 ---
 

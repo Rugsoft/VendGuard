@@ -377,9 +377,10 @@ WHERE NOT EXISTS (
 -- SECCIÓN 10 · operational_zone_postal_codes — el CP como llave territorial
 -- =============================================================================
 -- Los diez códigos postales de las sedes sembradas, cada uno en una sola zona:
--- la clave primaria del catálogo prohíbe que el mismo CP viva en dos
--- demarcaciones (RF-01.2, Resolución QA 7). El CP se resuelve por el código de
--- la zona para no depender del identificador que asigna la secuencia.
+-- el índice único parcial `uq_zone_postal_codes_live` prohíbe que el mismo CP
+-- viva en dos demarcaciones (RF-01.2, QA 7). El CP se resuelve por el código de
+-- la zona para no depender del identificador que asigna la secuencia. Solo se
+-- considera ocupado si su asignación está **viva** (QA 13).
 
 INSERT INTO operational_zone_postal_codes (postal_code, zone_id)
 SELECT v.postal_code, z.id
@@ -397,7 +398,9 @@ FROM (VALUES
 ) AS v(postal_code, zone_code)
 JOIN operational_zones z ON z.code = v.zone_code
 WHERE NOT EXISTS (
-    SELECT 1 FROM operational_zone_postal_codes p WHERE p.postal_code = v.postal_code
+    SELECT 1 FROM operational_zone_postal_codes p
+     WHERE p.postal_code = v.postal_code
+       AND p.released_at IS NULL
 );
 
 
@@ -443,6 +446,7 @@ UPDATE locations l
    SET zone_id = p.zone_id
   FROM operational_zone_postal_codes p
  WHERE p.postal_code = l.postal_code
+   AND p.released_at IS NULL
    AND l.is_manual_override = FALSE
    AND l.zone_id IS DISTINCT FROM p.zone_id;
 
@@ -452,7 +456,9 @@ UPDATE locations l
    AND l.postal_code IS NOT NULL
    AND l.zone_id IS NOT NULL
    AND NOT EXISTS (
-       SELECT 1 FROM operational_zone_postal_codes p WHERE p.postal_code = l.postal_code
+       SELECT 1 FROM operational_zone_postal_codes p
+        WHERE p.postal_code = l.postal_code
+          AND p.released_at IS NULL
    );
 
 

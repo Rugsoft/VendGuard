@@ -11,10 +11,11 @@ declare(strict_types=1);
  * las garantías que la base de datos debe imponer por sí sola, porque son las que ningún camino
  * de código puede saltarse:
  *
- *   1. **Un código postal, una zona (RF-01.2 / QA 7).** La clave primaria de
- *      `operational_zone_postal_codes` está en el propio CP, así que insertar el mismo CP en dos
- *      zonas se rechaza con `SQLSTATE '23505'`: la unicidad es global y no depende de que el
- *      servicio la recuerde.
+ *   1. **Un código postal vivo, una zona (RF-01.2 / QA 7 / QA 13).** El índice único parcial
+ *      `uq_zone_postal_codes_live` rechaza con `SQLSTATE '23505'` el mismo CP en dos zonas vivas:
+ *      la unicidad es global y no depende de que el servicio la recuerde. La liberación es
+ *      lógica (`released_at`, UPDATE), de modo que un CP liberado **sí** puede reasignarse a otra
+ *      zona y la fila histórica se conserva; el `DELETE` sigue rechazándose con `45000`.
  *   2. **Titularidad única viva (RF-02.1).** El índice parcial `uq_technician_primary_zone`
  *      (`WHERE is_primary = TRUE AND removed_at IS NULL`) rechaza el segundo titularato del mismo
  *      técnico. Es un índice y no una consulta de aplicación: dos peticiones concurrentes no
@@ -155,7 +156,9 @@ try {
 
     $assert(
         'El DDL base y la migración 007 aplican sin errores y el esquema converge',
-        in_array('007_operational_zones.sql', $schemaReport['migrations'], true) && $convergence['converged'] === true,
+        in_array('007_operational_zones.sql', $schemaReport['migrations'], true)
+            && in_array('008_zone_postal_code_release.sql', $schemaReport['migrations'], true)
+            && $convergence['converged'] === true,
         sprintf('%d sentencias · migraciones: %s', $schemaReport['statements'], implode(', ', $schemaReport['migrations']))
     );
 
@@ -191,10 +194,10 @@ try {
     });
 
     $assert(
-        'El mismo CP no puede pertenecer a dos zonas: la clave primaria lo rechaza con 23505',
+        'El mismo CP vivo no puede pertenecer a dos zonas: el índice parcial lo rechaza con 23505',
         $duplicatePostalCode !== null
             && $duplicatePostalCode['state'] === '23505'
-            && str_contains($duplicatePostalCode['message'], 'pk_operational_zone_postal_codes'),
+            && str_contains($duplicatePostalCode['message'], 'uq_zone_postal_codes_live'),
         $duplicatePostalCode === null ? 'el CP duplicado se admitió' : 'estado=' . $duplicatePostalCode['state']
     );
 
@@ -202,6 +205,41 @@ try {
     $assert(
         'Control positivo: un CP distinto en otra zona se admite',
         (int)$pgPdo->query('SELECT COUNT(*) FROM operational_zone_postal_codes')->fetchColumn() === 2
+    );
+
+    // ── Liberación lógica (QA 13): el CP se marca, no se borra ──
+    $linkPostalCode($pgPdo, '08007', $zoneA);
+    $pgPdo->exec("UPDATE operational_zone_postal_codes SET released_at = CURRENT_TIMESTAMP WHERE postal_code = '08007'");
+
+    $releasedRow = $pgPdo->query(
+        "SELECT zone_id, released_at FROM operational_zone_postal_codes WHERE postal_code = '08007'"
+    )->fetch();
+    $assert(
+        'Liberar un CP es un UPDATE: la fila histórica se conserva marcada con released_at',
+        $releasedRow !== false && $releasedRow['released_at'] !== null && (int)$releasedRow['zone_id'] === $zoneA,
+        $releasedRow === false ? 'la fila desapareció' : 'released_at=' . json_encode($releasedRow['released_at'])
+    );
+
+    $linkPostalCode($pgPdo, '08007', $zoneB);
+    $liveRows = (int)$pgPdo->query(
+        "SELECT COUNT(*) FROM operational_zone_postal_codes WHERE postal_code = '08007' AND released_at IS NULL"
+    )->fetchColumn();
+    $historicalRows = (int)$pgPdo->query(
+        "SELECT COUNT(*) FROM operational_zone_postal_codes WHERE postal_code = '08007'"
+    )->fetchColumn();
+    $assert(
+        'Un CP liberado puede asignarse a otra zona y convive con su fila histórica',
+        $liveRows === 1 && $historicalRows === 2,
+        "vivas={$liveRows} · históricas={$historicalRows}"
+    );
+
+    $deletePostalCode = PostgresFixtureBuilder::expectRejection(static function () use ($pgPdo): void {
+        $pgPdo->exec("DELETE FROM operational_zone_postal_codes WHERE postal_code = '08007'");
+    });
+    $assert(
+        'El disparador anti-borrado sigue intacto: liberar no abre la puerta al DELETE',
+        $deletePostalCode !== null && $deletePostalCode['state'] === '45000',
+        $deletePostalCode === null ? 'el DELETE se admitió' : 'estado=' . $deletePostalCode['state']
     );
 
     // ─────────────────────────────────────────────────────────────────────
