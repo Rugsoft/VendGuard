@@ -72,7 +72,7 @@
 
 ## Fase 3: Capa de Infraestructura y Repositorio PDO
 
-- [ ] **T-ZONE-05 · Crear `OperationalZoneRepositoryInterface`, `PdoOperationalZoneRepository` y extender `PdoLocationRepository`**
+- [x] **T-ZONE-05 · Crear `OperationalZoneRepositoryInterface`, `PdoOperationalZoneRepository` y extender `PdoLocationRepository`**
   * **Tiempo estimado:** 30 min
   * **Dependencias:** `T-ZONE-03`
   * **Ficheros a crear o modificar:**
@@ -80,6 +80,7 @@
     * `src/Infrastructure/Repository/PdoOperationalZoneRepository.php` *(crear)*
     * `src/Infrastructure/Repository/PdoLocationRepository.php` *(modificar: `zone_id`, `is_manual_override` y `postal_code`)*
     * `src/Application/Service/AdminLocationService.php` *(modificar: CP obligatorio en alta/edición)*
+    * `tests/integration/OperationalZoneRepositoryTest.php` *(crear: certificación contra PostgreSQL)*
   * **Requisitos que cubre:** `RF-01.1`, `RF-02.1`, `RF-02.2`, `RF-03.1`, `RF-03.2`, `RNF-01`, `constitution.md` Art. IV
   * **Hecho cuando:** `PdoOperationalZoneRepository` implementa las consultas de listado con conteos agregados de sedes, técnicos y códigos postales en un solo round-trip mediante CTE/subqueries; permite vincular técnicos como titular o suplente; `PdoLocationRepository::setManualOverride()` conmuta `is_manual_override` y `zone_id` de forma atómica; `PdoLocationRepository::setPostalCode()` persiste el CP validado y recalcula la zona heredada cuando `is_manual_override = FALSE`; `AdminLocationService` exige el CP en el alta y la edición (QA 7); y `PdoLocationRepository::findInheritedZoneByPostalCode()` resuelve la zona correspondiente en $< 5\text{ ms}$.
 

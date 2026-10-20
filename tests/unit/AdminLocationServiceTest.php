@@ -137,7 +137,8 @@ class InMemoryLocationRepository implements LocationRepositoryInterface
             '2026-09-23 20:00:00',
             null,
             (float)($data['latitude'] ?? 41.3850640),
-            (float)($data['longitude'] ?? 2.1734035)
+            (float)($data['longitude'] ?? 2.1734035),
+            postalCode: $data['postal_code'] ?? null
         );
         $this->locations[$id] = $loc;
         return $loc;
@@ -160,7 +161,10 @@ class InMemoryLocationRepository implements LocationRepositoryInterface
             '2026-09-23 20:05:00',
             $loc->getDeletedAt(),
             (float)($data['latitude'] ?? $loc->getLatitude()),
-            (float)($data['longitude'] ?? $loc->getLongitude())
+            (float)($data['longitude'] ?? $loc->getLongitude()),
+            postalCode: $data['postal_code'] ?? $loc->getPostalCode(),
+            zoneId: $loc->getZoneId(),
+            isManualOverride: $loc->isManualOverride()
         );
         return true;
     }
@@ -180,7 +184,10 @@ class InMemoryLocationRepository implements LocationRepositoryInterface
             false,
             $loc->getCreatedAt(),
             '2026-09-23 20:10:00',
-            '2026-09-23 20:10:00'
+            '2026-09-23 20:10:00',
+            postalCode: $loc->getPostalCode(),
+            zoneId: $loc->getZoneId(),
+            isManualOverride: $loc->isManualOverride()
         );
         return true;
     }
@@ -200,7 +207,10 @@ class InMemoryLocationRepository implements LocationRepositoryInterface
             true,
             $loc->getCreatedAt(),
             '2026-09-23 20:15:00',
-            null
+            null,
+            postalCode: $loc->getPostalCode(),
+            zoneId: $loc->getZoneId(),
+            isManualOverride: $loc->isManualOverride()
         );
         return true;
     }
@@ -336,6 +346,7 @@ $createdResult = $service->createLocation([
     'address'       => 'Camino de Vera s/n, 46022 Valencia',
     'contact_name'  => 'Laura Navarro',
     'contact_phone' => '633445566',
+    'postal_code'   => '46022',
     'latitude'      => 39.4812,
     'longitude'     => -0.3401,
 ], $coordinatorActor, '192.168.1.50');
@@ -407,6 +418,7 @@ try {
         'site_code' => 'SEDE-VAL-01', // Ya creada y activa
         'name'      => 'Otra Sede Valencia',
         'address'   => 'Calle Secundaria 45',
+        'postal_code' => '46022',
     ], $coordinatorActor);
 } catch (InactiveRecordCollisionException $e) {
     $threwActive = true;
@@ -424,6 +436,7 @@ try {
         'site_code' => 'SEDE-VAL-01', // Ahora inactiva
         'name'      => 'Intento en Sede Inactiva',
         'address'   => 'Calle Inactiva 12',
+        'postal_code' => '46022',
     ], $coordinatorActor);
 } catch (InactiveRecordCollisionException $e) {
     $threwInactive = true;
@@ -444,6 +457,7 @@ echo "\n--- Caso 4: Actualización de sede (updateLocation) ---\n";
 $updated = $service->updateLocation($created->getId(), [
     'name'          => 'Politécnico de Valencia - Campus Central',
     'contact_phone' => '633999888',
+    'postal_code'   => '46022',
     'latitude'      => 39.4820,
     'longitude'     => -0.3410,
 ], $coordinatorActor);

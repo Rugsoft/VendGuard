@@ -1,0 +1,527 @@
+<?php
+
+declare(strict_types=1);
+
+namespace VendGuard\Infrastructure\Repository;
+
+use PDO;
+use PDOException;
+use RuntimeException;
+use VendGuard\Core\Domain\Exception\PrimaryTechnicianConflictException;
+use VendGuard\Core\Domain\Exception\ZoneValidationException;
+use VendGuard\Core\Domain\Model\OperationalZone;
+use VendGuard\Core\Domain\Repository\OperationalZoneRepositoryInterface;
+use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Database\UniqueViolationDetector;
+use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
+
+/**
+ * PdoOperationalZoneRepository
+ *
+ * Implementación nativa con PDO del catálogo territorial del Módulo 17:
+ * zonas operativas, sus códigos postales y su cuadrante técnico.
+ *
+ * Decisiones que el código hace explícitas:
+ *
+ *  - **El listado es una sola sentencia.** Los cuatro contadores (sedes,
+ *    titulares, suplentes y códigos postales) viajan como subconsultas
+ *    correlacionadas, de modo que el panel del coordinador no paga una consulta
+ *    por zona por muy grande que sea el parque (RNF-01). Los códigos postales se
+ *    leen aparte, con `findPostalCodes()`, porque agregar un array dentro de la
+ *    misma sentencia exigiría una función de agregación distinta en cada motor y
+ *    esta lectura fija **no** es un N+1: son dos consultas para cualquier número
+ *    de zonas.
+ *  - **La titularidad única se comprueba antes de escribir.** El índice parcial
+ *    `uq_technician_primary_zone` la impone igualmente, pero el coordinador
+ *    necesita saber *qué zona perdería* antes de confirmar, y eso el motor no lo
+ *    cuenta al lanzar un `23505` (RF-02.2, QA 9).
+ *  - **No hay `DELETE`.** La zona se desactiva, la vinculación se extingue con
+ *    `removed_at`, y el histórico se conserva (Art. III.1, QA 10).
+ *
+ * Los identificadores se escriben desnudos y los booleanos cruzan enlazados con
+ * `PDO::PARAM_BOOL`, que es la forma que los dos drivers del proyecto traducen al
+ * tipo de cada motor (D-3, T-HYBRID-25).
+ *
+ * Dogma Vanilla: PHP 8.2+ puro, PDO nativo, sin dependencias externas.
+ * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
+ */
+final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInterface
+{
+    /** Columnas del catálogo que proyecta la entidad. */
+    private const ZONE_COLUMNS = 'id, code, name, color_hex, description, is_active, created_at, updated_at';
+
+    private PDO $pdo;
+
+    private SqlDialectAdapter $dialect;
+
+    public function __construct(?PDO $pdo = null)
+    {
+        $this->pdo = $pdo ?? ConnectionFactory::getConnection();
+        $this->dialect = SqlDialectAdapter::forConnection($this->pdo);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function findById(int $zoneId, bool $includeInactive = false): ?OperationalZone
+    {
+        $sql = 'SELECT ' . self::ZONE_COLUMNS . ' FROM operational_zones WHERE id = :zone_id';
+
+        if (!$includeInactive) {
+            $sql .= ' AND is_active = ' . $this->dialect->booleanLiteral(true);
+        }
+
+        $sql .= ' LIMIT 1';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch();
+
+        return $row === false ? null : OperationalZone::fromDatabaseRow($row);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function findByCode(string $code): ?OperationalZone
+    {
+        $normalizedCode = mb_strtoupper(trim($code));
+        if ($normalizedCode === '') {
+            return null;
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT ' . self::ZONE_COLUMNS . ' FROM operational_zones WHERE code = :code LIMIT 1'
+        );
+        $stmt->bindValue(':code', $normalizedCode, PDO::PARAM_STR);
+        $stmt->execute();
+        $row = $stmt->fetch();
+
+        return $row === false ? null : OperationalZone::fromDatabaseRow($row);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function findAllWithCounts(bool $includeInactive = true): array
+    {
+        $booleanTrue = $this->dialect->booleanLiteral(true);
+        $booleanFalse = $this->dialect->booleanLiteral(false);
+
+        $sql = "
+            SELECT
+                z.id,
+                z.code,
+                z.name,
+                z.color_hex,
+                z.description,
+                z.is_active,
+                z.created_at,
+                z.updated_at,
+                (
+                    SELECT COUNT(*)
+                    FROM locations l
+                    WHERE l.zone_id = z.id
+                ) AS locations_count,
+                (
+                    SELECT COUNT(*)
+                    FROM technician_zone_assignments t
+                    WHERE t.zone_id = z.id
+                      AND t.is_primary = {$booleanTrue}
+                      AND t.removed_at IS NULL
+                ) AS primary_technicians_count,
+                (
+                    SELECT COUNT(*)
+                    FROM technician_zone_assignments t
+                    WHERE t.zone_id = z.id
+                      AND t.is_primary = {$booleanFalse}
+                      AND t.removed_at IS NULL
+                ) AS backup_technicians_count,
+                (
+                    SELECT COUNT(*)
+                    FROM operational_zone_postal_codes p
+                    WHERE p.zone_id = z.id
+                ) AS postal_codes_count
+            FROM operational_zones z
+        ";
+
+        if (!$includeInactive) {
+            $sql .= " WHERE z.is_active = {$booleanTrue}";
+        }
+
+        $sql .= ' ORDER BY z.code ASC';
+
+        $stmt = $this->pdo->query($sql);
+
+        $zones = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $zones[] = [
+                'zone' => OperationalZone::fromDatabaseRow($row),
+                'locations_count' => (int)$row['locations_count'],
+                'primary_technicians_count' => (int)$row['primary_technicians_count'],
+                'backup_technicians_count' => (int)$row['backup_technicians_count'],
+                'postal_codes_count' => (int)$row['postal_codes_count'],
+            ];
+        }
+
+        return $zones;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function findPostalCodes(int $zoneId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT postal_code FROM operational_zone_postal_codes WHERE zone_id = :zone_id ORDER BY postal_code ASC'
+        );
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return array_map(
+            static fn (array $row): string => (string)$row['postal_code'],
+            $stmt->fetchAll()
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function findTechnicianAssignments(int $zoneId): array
+    {
+        $sql = "
+            SELECT
+                a.id,
+                a.technician_id,
+                a.is_primary,
+                a.assigned_at,
+                u.name,
+                u.email,
+                u.is_on_call,
+                u.is_active
+            FROM technician_zone_assignments a
+            INNER JOIN users u ON u.id = a.technician_id
+            WHERE a.zone_id = :zone_id
+              AND a.removed_at IS NULL
+            ORDER BY a.is_primary DESC, u.name ASC
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return array_map(static fn (array $row): array => [
+            'assignment_id' => (int)$row['id'],
+            'technician_id' => (int)$row['technician_id'],
+            'name' => (string)$row['name'],
+            'email' => (string)$row['email'],
+            'is_primary' => self::toBoolean($row['is_primary']),
+            'is_on_call' => self::toBoolean($row['is_on_call']),
+            'is_active' => self::toBoolean($row['is_active']),
+            'assigned_at' => $row['assigned_at'] !== null ? (string)$row['assigned_at'] : null,
+        ], $stmt->fetchAll());
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function create(array $data): OperationalZone
+    {
+        // La entidad es la única puerta de entrada al catálogo: valida código,
+        // nombre y color con las mismas reglas que usa el resto del dominio.
+        $zone = new OperationalZone(
+            null,
+            (string)($data['code'] ?? ''),
+            (string)($data['name'] ?? ''),
+            (string)($data['color_hex'] ?? OperationalZone::DEFAULT_COLOR_HEX),
+            isset($data['description']) ? (string)$data['description'] : null,
+            (bool)($data['is_active'] ?? true)
+        );
+
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO operational_zones (code, name, color_hex, description, is_active)
+             VALUES (:code, :name, :color_hex, :description, :is_active)'
+        );
+        $stmt->bindValue(':code', $zone->getCode(), PDO::PARAM_STR);
+        $stmt->bindValue(':name', $zone->getName(), PDO::PARAM_STR);
+        $stmt->bindValue(':color_hex', $zone->getColorHex(), PDO::PARAM_STR);
+        if ($zone->getDescription() === null) {
+            $stmt->bindValue(':description', null, PDO::PARAM_NULL);
+        } else {
+            $stmt->bindValue(':description', $zone->getDescription(), PDO::PARAM_STR);
+        }
+        $stmt->bindValue(':is_active', $zone->isActive(), PDO::PARAM_BOOL);
+        $stmt->execute();
+
+        $newId = (int)$this->pdo->lastInsertId();
+
+        // `lastInsertId()` puede no estar disponible en algunos agrupadores; el
+        // código es único, así que sirve de identidad de respaldo sin inventar nada.
+        $created = $newId > 0 ? $this->findById($newId, true) : $this->findByCode($zone->getCode());
+        if ($created === null) {
+            throw new RuntimeException(
+                "Error al recuperar la zona operativa recién creada con código '{$zone->getCode()}'."
+            );
+        }
+
+        return $created;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function update(int $zoneId, array $data): bool
+    {
+        $current = $this->findById($zoneId, true);
+        if ($current === null) {
+            return false;
+        }
+
+        // Se construye la entidad candidata para que las invariantes (longitud del
+        // nombre, formato del color, estado booleano) se apliquen en un único sitio.
+        $candidate = new OperationalZone(
+            $current->getId(),
+            $current->getCode(),
+            array_key_exists('name', $data) ? (string)$data['name'] : $current->getName(),
+            array_key_exists('color_hex', $data) ? (string)$data['color_hex'] : $current->getColorHex(),
+            array_key_exists('description', $data)
+                ? ($data['description'] !== null ? (string)$data['description'] : null)
+                : $current->getDescription(),
+            array_key_exists('is_active', $data) ? (bool)$data['is_active'] : $current->isActive()
+        );
+
+        $stmt = $this->pdo->prepare(
+            'UPDATE operational_zones
+             SET name = :name,
+                 color_hex = :color_hex,
+                 description = :description,
+                 is_active = :is_active
+             WHERE id = :zone_id'
+        );
+        $stmt->bindValue(':name', $candidate->getName(), PDO::PARAM_STR);
+        $stmt->bindValue(':color_hex', $candidate->getColorHex(), PDO::PARAM_STR);
+        if ($candidate->getDescription() === null) {
+            $stmt->bindValue(':description', null, PDO::PARAM_NULL);
+        } else {
+            $stmt->bindValue(':description', $candidate->getDescription(), PDO::PARAM_STR);
+        }
+        $stmt->bindValue(':is_active', $candidate->isActive(), PDO::PARAM_BOOL);
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return true;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function setActive(int $zoneId, bool $isActive): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE operational_zones SET is_active = :is_active WHERE id = :zone_id'
+        );
+        $stmt->bindValue(':is_active', $isActive, PDO::PARAM_BOOL);
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function assignTechnician(int $technicianId, int $zoneId, bool $isPrimary): int
+    {
+        $zone = $this->findById($zoneId, true);
+        if ($zone === null) {
+            throw ZoneValidationException::forField(
+                'zone_id',
+                sprintf('No existe la zona operativa %d.', $zoneId)
+            );
+        }
+        if (!$zone->isActive()) {
+            throw ZoneValidationException::unprocessable(
+                'No se puede vincular a un técnico con una zona desactivada.',
+                ['zone_id' => 'La zona está inactiva.']
+            );
+        }
+
+        if (!$this->isActiveTechnician($technicianId)) {
+            throw ZoneValidationException::unprocessable(
+                'Solo un usuario activo con rol Técnico puede formar parte del cuadrante.',
+                ['technician_id' => 'El usuario no es un técnico activo.']
+            );
+        }
+
+        if ($isPrimary) {
+            $this->assertNoOtherPrimaryZone($technicianId, $zoneId);
+        }
+
+        $live = $this->findLiveAssignment($technicianId, $zoneId);
+        if ($live !== null) {
+            if ($live['is_primary'] !== $isPrimary) {
+                $stmt = $this->pdo->prepare(
+                    'UPDATE technician_zone_assignments SET is_primary = :is_primary WHERE id = :assignment_id'
+                );
+                $stmt->bindValue(':is_primary', $isPrimary, PDO::PARAM_BOOL);
+                $stmt->bindValue(':assignment_id', $live['id'], PDO::PARAM_INT);
+                $stmt->execute();
+            }
+
+            return $live['id'];
+        }
+
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO technician_zone_assignments (technician_id, zone_id, is_primary)
+             VALUES (:technician_id, :zone_id, :is_primary)'
+        );
+        $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->bindValue(':is_primary', $isPrimary, PDO::PARAM_BOOL);
+
+        try {
+            $stmt->execute();
+        } catch (PDOException $exception) {
+            // Dos peticiones simultáneas pueden pasar la comprobación previa: el
+            // índice parcial las separa, y la que pierde merece el mismo 409 de
+            // negocio que si hubiera llegado sola, no un 500 de infraestructura.
+            if (UniqueViolationDetector::matches($exception, 'uq_technician_primary_zone')) {
+                $this->assertNoOtherPrimaryZone($technicianId, $zoneId);
+                throw new PrimaryTechnicianConflictException($technicianId);
+            }
+
+            throw $exception;
+        }
+
+        $assignmentId = (int)$this->pdo->lastInsertId();
+        if ($assignmentId > 0) {
+            return $assignmentId;
+        }
+
+        $created = $this->findLiveAssignment($technicianId, $zoneId);
+        if ($created === null) {
+            throw new RuntimeException(
+                "Error al recuperar la vinculación recién creada del técnico {$technicianId} con la zona {$zoneId}."
+            );
+        }
+
+        return $created['id'];
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function removeTechnician(int $technicianId, int $zoneId): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE technician_zone_assignments
+             SET removed_at = CURRENT_TIMESTAMP
+             WHERE technician_id = :technician_id
+               AND zone_id = :zone_id
+               AND removed_at IS NULL'
+        );
+        $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * ¿El usuario existe, es técnico y está activo? (RF-02.2)
+     */
+    private function isActiveTechnician(int $technicianId): bool
+    {
+        $sql = "
+            SELECT 1
+            FROM users
+            WHERE id = :technician_id
+              AND role = 'TECHNICIAN'
+              AND is_active = " . $this->dialect->booleanLiteral(true) . '
+              AND deleted_at IS NULL
+            LIMIT 1
+        ';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Rechaza la segunda titularidad viva con el detalle de la zona que se perdería.
+     *
+     * @throws PrimaryTechnicianConflictException
+     */
+    private function assertNoOtherPrimaryZone(int $technicianId, int $zoneId): void
+    {
+        $sql = "
+            SELECT a.zone_id, z.name
+            FROM technician_zone_assignments a
+            INNER JOIN operational_zones z ON z.id = a.zone_id
+            WHERE a.technician_id = :technician_id
+              AND a.is_primary = " . $this->dialect->booleanLiteral(true) . '
+              AND a.removed_at IS NULL
+              AND a.zone_id <> :zone_id
+            LIMIT 1
+        ';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->execute();
+        $conflict = $stmt->fetch();
+
+        if ($conflict !== false) {
+            throw new PrimaryTechnicianConflictException(
+                $technicianId,
+                (int)$conflict['zone_id'],
+                (string)$conflict['name']
+            );
+        }
+    }
+
+    /**
+     * Vinculación viva del técnico con la zona, si existe.
+     *
+     * @return array{id: int, is_primary: bool}|null
+     */
+    private function findLiveAssignment(int $technicianId, int $zoneId): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT id, is_primary
+             FROM technician_zone_assignments
+             WHERE technician_id = :technician_id
+               AND zone_id = :zone_id
+               AND removed_at IS NULL
+             LIMIT 1'
+        );
+        $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch();
+
+        if ($row === false) {
+            return null;
+        }
+
+        return [
+            'id' => (int)$row['id'],
+            'is_primary' => self::toBoolean($row['is_primary']),
+        ];
+    }
+
+    /**
+     * Booleano del motor, sin suponer la forma que devuelve el driver.
+     */
+    private static function toBoolean(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return in_array(strtolower(trim((string)$value)), ['1', 't', 'true', 'y', 'yes', 'on'], true);
+    }
+}

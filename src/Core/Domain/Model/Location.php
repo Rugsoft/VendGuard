@@ -33,6 +33,15 @@ class Location implements ArrayAccess, JsonSerializable
     private ?string $deletedAt;
     private bool $hasPhysicalReception;
 
+    /** Código postal de la sede: llave de la herencia territorial (Módulo 17, RF-03.1). */
+    private ?string $postalCode;
+
+    /** Zona operativa efectiva: heredada por CP o forzada por el coordinador (RF-03.2). */
+    private ?int $zoneId;
+
+    /** True cuando la zona fue fijada a mano y no debe recalcularse con el CP. */
+    private bool $isManualOverride;
+
     public function __construct(
         int $id,
         string $siteCode,
@@ -47,7 +56,10 @@ class Location implements ArrayAccess, JsonSerializable
         float $latitude = 41.3850640,
         float $longitude = 2.1734035,
         bool $hasPhysicalReception = true,
-        string $contactEmail = 'recepcion@sede.vendguard.es'
+        string $contactEmail = 'recepcion@sede.vendguard.es',
+        ?string $postalCode = null,
+        ?int $zoneId = null,
+        bool $isManualOverride = false
     ) {
         $this->id = $id;
         $this->siteCode = strtoupper(trim($siteCode));
@@ -66,6 +78,13 @@ class Location implements ArrayAccess, JsonSerializable
         $this->updatedAt = $updatedAt;
         $this->deletedAt = $deletedAt;
         $this->hasPhysicalReception = $hasPhysicalReception;
+
+        // El CP vacío es ausencia de dato, no una cadena vacía: las sedes
+        // históricas no tienen CP y la migración nunca lo inventa (QA 7).
+        $normalizedPostalCode = $postalCode !== null ? trim($postalCode) : null;
+        $this->postalCode = $normalizedPostalCode === '' ? null : $normalizedPostalCode;
+        $this->zoneId = $zoneId !== null && $zoneId > 0 ? $zoneId : null;
+        $this->isManualOverride = $isManualOverride;
     }
 
     /**
@@ -90,7 +109,10 @@ class Location implements ArrayAccess, JsonSerializable
             isset($row['latitude']) ? (float)$row['latitude'] : 41.3850640,
             isset($row['longitude']) ? (float)$row['longitude'] : 2.1734035,
             (bool)($row['has_physical_reception'] ?? true),
-            isset($row['contact_email']) && trim((string)$row['contact_email']) !== '' ? (string)$row['contact_email'] : 'recepcion@sede.vendguard.es'
+            isset($row['contact_email']) && trim((string)$row['contact_email']) !== '' ? (string)$row['contact_email'] : 'recepcion@sede.vendguard.es',
+            isset($row['postal_code']) && $row['postal_code'] !== null ? (string)$row['postal_code'] : null,
+            isset($row['zone_id']) && $row['zone_id'] !== null ? (int)$row['zone_id'] : null,
+            self::toBoolean($row['is_manual_override'] ?? false)
         );
     }
 
@@ -155,6 +177,30 @@ class Location implements ArrayAccess, JsonSerializable
         return $this->hasPhysicalReception;
     }
 
+    /**
+     * Código postal de la sede, o null si es una sede histórica sin demarcación.
+     */
+    public function getPostalCode(): ?string
+    {
+        return $this->postalCode;
+    }
+
+    /**
+     * Zona operativa efectiva de la sede, o null si está en «Sin Zona Asignada».
+     */
+    public function getZoneId(): ?int
+    {
+        return $this->zoneId;
+    }
+
+    /**
+     * ¿La zona fue fijada manualmente? Si es true, cambiar el CP no la recoloca (RF-03.3).
+     */
+    public function isManualOverride(): bool
+    {
+        return $this->isManualOverride;
+    }
+
     public function isActive(): bool
     {
         return $this->isActive && $this->deletedAt === null;
@@ -198,6 +244,9 @@ class Location implements ArrayAccess, JsonSerializable
             'contact_phone' => $this->contactPhone,
             'contact_email' => $this->contactEmail,
             'has_physical_reception' => $this->hasPhysicalReception,
+            'postal_code' => $this->postalCode,
+            'zone_id' => $this->zoneId,
+            'is_manual_override' => $this->isManualOverride,
             'is_active' => $this->isActive,
             'created_at' => $this->createdAt,
             'updated_at' => $this->updatedAt,
@@ -233,5 +282,17 @@ class Location implements ArrayAccess, JsonSerializable
     public function offsetUnset(mixed $offset): void
     {
         // Entidad inmutable vía array access
+    }
+
+    /**
+     * Booleano del motor, sin suponer la forma que devuelve el driver (`t`/`f`, `1`/`0`).
+     */
+    private static function toBoolean(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return in_array(strtolower(trim((string)$value)), ['1', 't', 'true', 'y', 'yes', 'on'], true);
     }
 }

@@ -376,6 +376,8 @@ $locationPayload = static fn(array $overrides = []): array => array_merge([
     'site_code' => 'SEDE-MAP17-' . strtoupper(bin2hex(random_bytes(2))),
     'name'      => 'Sede de aceptación territorial T-MAP-17',
     'address'   => 'Avinguda del Paral·lel 17, Barcelona',
+    // El CP es obligatorio en el alta y la edición de sede (Módulo 17, QA 7).
+    'postal_code' => '08001',
 ], $overrides);
 
 $requestOptions = ['Authorization' => "Bearer {$coordinatorToken}", 'Content-Type' => 'application/json'];
@@ -410,6 +412,7 @@ $assert('5.8 Edición fuera de territorio => 422 COORDINATES_OUT_OF_BOUNDS', $re
 
 $res = $router->dispatch(new Request('PUT', "/api/coordinator/locations/{$createdLocationId}", [], [
     'name'      => 'Sede de aceptación territorial (renombrada)',
+    'postal_code' => '08001',
     'latitude'  => 41.403629,
     'longitude' => 2.189512,
 ], $requestOptions));

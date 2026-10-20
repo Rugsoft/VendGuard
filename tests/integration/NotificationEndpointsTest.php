@@ -371,6 +371,8 @@ echo "\n--- 2. Reintento manual con destinatario refrescado (RF-06.4) ---\n";
 $locationPatch = $call('PATCH', '/api/coordinator/locations/' . $location1->getId(), [
     'latitude' => $location1->getLatitude(),
     'longitude' => $location1->getLongitude(),
+    // La edición de sede exige CP (Módulo 17, QA 7); se conserva el de la semilla.
+    'postal_code' => $location1->getPostalCode() ?? '08001',
     'contact_email' => 'Nuevo.Contacto@Sede-BCN-01.ES',
 ], $coordinatorToken);
 $assert(
@@ -798,6 +800,7 @@ echo "\n--- 7. contact_email obligatorio y editable en la ficha de Sede (RF-02.1
 $invalidContactEmail = $call('PATCH', '/api/coordinator/locations/' . $location2->getId(), [
     'latitude' => $location2->getLatitude(),
     'longitude' => $location2->getLongitude(),
+    'postal_code' => $location2->getPostalCode() ?? '08002',
     'contact_email' => 'esto-no-es-un-correo',
 ], $coordinatorToken);
 $assert(
@@ -810,6 +813,7 @@ $assert(
 $emptyContactEmail = $call('PATCH', '/api/coordinator/locations/' . $location2->getId(), [
     'latitude' => $location2->getLatitude(),
     'longitude' => $location2->getLongitude(),
+    'postal_code' => $location2->getPostalCode() ?? '08002',
     'contact_email' => '',
 ], $coordinatorToken);
 $assert(
@@ -823,6 +827,7 @@ $createdLocation = $call('POST', '/api/coordinator/locations', [
     'site_code' => 'SEDE-NOTIF-08',
     'name' => 'Sede de Certificación Notificaciones',
     'address' => 'Calle de la Certificación 8, 08001 Barcelona',
+    'postal_code' => '08001',
     'latitude' => 41.3874,
     'longitude' => 2.1686,
     'contact_email' => 'Recepcion.Certificacion@Sede-Vendguard.ES',
@@ -839,6 +844,7 @@ $invalidCreatedEmail = $call('POST', '/api/coordinator/locations', [
     'site_code' => 'SEDE-NOTIF-08-B',
     'name' => 'Sede con buzón inválido',
     'address' => 'Calle de la Certificación 9, 08001 Barcelona',
+    'postal_code' => '08001',
     'latitude' => 41.3875,
     'longitude' => 2.1687,
     'contact_email' => 'sin-arroba',

@@ -124,6 +124,7 @@ $createLocationRequest = static function (string $siteCode, array $coordinates) 
         'site_code' => $siteCode,
         'name' => 'Ubicación geográfica de aceptación',
         'address' => 'Avenida de prueba 10, Barcelona',
+        'postal_code' => '08001',
     ], $coordinates), [
         'authorization' => "Bearer {$coordinatorToken}",
         'content-type' => 'application/json',
@@ -195,6 +196,7 @@ $reqDuplicate = new Request('POST', '/api/coordinator/locations', [], [
     'address' => 'Calle Copia 1',
     'contact_name' => 'Contacto',
     'contact_phone' => '600112233',
+    'postal_code' => '08001',
     'latitude' => 41.385312,
     'longitude' => 2.193245
 ], ['authorization' => "Bearer {$coordinatorToken}", 'content-type' => 'application/json']);
@@ -211,6 +213,7 @@ $reqCreate = new Request('POST', '/api/coordinator/locations', [], [
     'address' => 'Avenida de la Innovación 45, Planta 0',
     'contact_name' => 'Elena Gestora',
     'contact_phone' => '677889900',
+    'postal_code' => '08001',
     'latitude' => 41.385312,
     'longitude' => 2.193245
 ], ['authorization' => "Bearer {$coordinatorToken}", 'content-type' => 'application/json']);
@@ -328,7 +331,8 @@ $reqUpdate = new Request('PUT', "/api/coordinator/locations/{$newLocationId}", [
     'name' => 'Parque Tecnológico Norte (Renombrado)',
     'address' => 'Avenida de la Innovación 45, Planta 1',
     'contact_name' => 'Elena Gestora Principal',
-    'contact_phone' => '688990011'
+    'contact_phone' => '688990011',
+    'postal_code' => '08001'
 ], ['authorization' => "Bearer {$coordinatorToken}", 'content-type' => 'application/json']);
 $resUpdate = $router->dispatch($reqUpdate);
 $bodyUpdate = $resUpdate->getDecodedBody();

@@ -23,6 +23,7 @@ use VendGuard\Core\Domain\Exception\MinimumActiveStaffException;
 use VendGuard\Core\Domain\Exception\OnCallOnlyForTechniciansException;
 use VendGuard\Core\Domain\Exception\PendingIncidentsBlockedException;
 use VendGuard\Core\Domain\Exception\UserNotFoundException;
+use VendGuard\Core\Domain\Exception\ZoneValidationException;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
@@ -615,6 +616,10 @@ class CoordinatorAdminController
             return $this->errorResponse(404, $e->getErrorCode(), $e->getMessage(), [
                 'user_id' => $e->getUserId(),
             ]);
+        } catch (ZoneValidationException $e) {
+            // El CP de la sede y los atributos de zona viajan con el detalle del
+            // contrato (400/422), no como un 500 de validación de dominio.
+            return $this->errorResponse($e->getHttpStatusCode(), $e->getErrorCode(), $e->getMessage(), $e->getDetails());
         } catch (InvalidArgumentException $e) {
             if (str_contains($e->getMessage(), 'La sede original de la máquina está dada de baja')) {
                 return $this->errorResponse(422, 'MACHINE_REACTIVATION_REQUIRES_NEW_LOCATION', $e->getMessage());

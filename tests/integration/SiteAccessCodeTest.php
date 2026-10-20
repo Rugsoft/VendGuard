@@ -254,6 +254,8 @@ try {
         'site_code' => 'SEDE-TEST-NEW',
         'name' => 'Sede de prueba S-4',
         'address' => 'Carrer de Prova 3, Barcelona',
+        // El CP es obligatorio en el alta de sede (Módulo 17, QA 7).
+        'postal_code' => '08001',
         'latitude' => 41.3850640,
         'longitude' => 2.1734035,
     ], ['Authorization' => "Bearer {$coordinatorToken}"]));

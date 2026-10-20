@@ -455,6 +455,8 @@ $correctedEmail = 'recepcion.corregida@sede-bcn-01.es';
 $locationPatch = $call('PATCH', '/api/coordinator/locations/' . $location->getId(), [
     'latitude' => $location->getLatitude(),
     'longitude' => $location->getLongitude(),
+    // La edición de sede exige CP (Módulo 17, QA 7); se conserva el de la semilla.
+    'postal_code' => $location->getPostalCode() ?? '08001',
     'contact_email' => 'Recepcion.Corregida@Sede-BCN-01.ES',
 ], $coordinatorToken);
 $assert(

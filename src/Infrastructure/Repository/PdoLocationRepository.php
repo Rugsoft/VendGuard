@@ -11,6 +11,7 @@ use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Repository\LocationBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationContactEmailRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\PostalCode;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
 
@@ -72,6 +73,9 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 contact_phone, 
                 contact_email,
                 has_physical_reception,
+                postal_code,
+                zone_id,
+                is_manual_override,
                 is_active, 
                 created_at, 
                 updated_at, 
@@ -122,6 +126,9 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 contact_phone, 
                 contact_email,
                 has_physical_reception,
+                postal_code,
+                zone_id,
+                is_manual_override,
                 is_active, 
                 created_at, 
                 updated_at, 
@@ -196,6 +203,9 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 contact_phone, 
                 contact_email,
                 has_physical_reception,
+                postal_code,
+                zone_id,
+                is_manual_override,
                 is_active, 
                 created_at, 
                 updated_at, 
@@ -239,6 +249,9 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 contact_phone, 
                 contact_email,
                 has_physical_reception,
+                postal_code,
+                zone_id,
+                is_manual_override,
                 is_active, 
                 created_at, 
                 updated_at, 
@@ -276,6 +289,9 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 l.contact_phone, 
                 l.contact_email,
                 l.has_physical_reception,
+                l.postal_code,
+                l.zone_id,
+                l.is_manual_override,
                 l.access_code_issued_at,
                 (l.access_code_hash IS NOT NULL) AS has_access_code,
                 l.is_active, 
@@ -338,6 +354,11 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
             'contact_phone' => $row['contact_phone'] !== null ? (string)$row['contact_phone'] : null,
             'contact_email' => (string)($row['contact_email'] ?? 'recepcion@sede.vendguard.es'),
             'has_physical_reception' => (bool)$row['has_physical_reception'],
+            // Herencia territorial (Módulo 17, RF-03): el panel de sedes pinta la
+            // insignia «Sin Zona Asignada» y prellena el CP en la edición.
+            'postal_code' => $row['postal_code'] !== null ? (string)$row['postal_code'] : null,
+            'zone_id' => $row['zone_id'] !== null ? (int)$row['zone_id'] : null,
+            'is_manual_override' => (bool)$row['is_manual_override'],
             'has_access_code' => (bool)$row['has_access_code'],
             'access_code_issued_at' => $row['access_code_issued_at'] !== null ? (string)$row['access_code_issued_at'] : null,
             'is_active' => (bool)$row['is_active'],
@@ -359,6 +380,17 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
     public function create(array $data): Location
     {
         $siteCode = strtoupper(trim((string)$data['site_code']));
+
+        // Herencia territorial (RF-03.1, QA 7): el CP, si llega, se valida con el
+        // único Value Object del módulo y la zona se resuelve contra el catálogo
+        // activo. La obligatoriedad del CP la exige la capa de aplicación; aquí se
+        // acepta su ausencia para no romper a los llamadores históricos que aún
+        // construyen sedes sin demarcación.
+        $postalCode = null;
+        if (array_key_exists('postal_code', $data) && trim((string)($data['postal_code'] ?? '')) !== '') {
+            $postalCode = (new PostalCode((string)$data['postal_code']))->value();
+        }
+        $zoneId = $postalCode !== null ? $this->findInheritedZoneByPostalCode($postalCode) : null;
 
         // La clave canónica acompaña al código desde el alta (A-2, EARS-08.5): donde el motor la
         // exige como columna `NOT NULL` con índice único, una fila sin clave no sería un duplicado
@@ -383,6 +415,8 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 contact_name,
                 contact_phone,
                 contact_email,
+                postal_code,
+                zone_id,
                 has_physical_reception,
                 is_active,
                 created_at,
@@ -397,6 +431,8 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
                 :contact_name,
                 :contact_phone,
                 :contact_email,
+                :postal_code,
+                :zone_id,
                 :has_physical_reception,
                 :is_active,
                 CURRENT_TIMESTAMP,
@@ -433,6 +469,16 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
             throw new InvalidArgumentException('El correo de contacto de la sede no tiene un formato válido.');
         }
         $stmt->bindValue(':contact_email', $contactEmail, PDO::PARAM_STR);
+        if ($postalCode === null) {
+            $stmt->bindValue(':postal_code', null, PDO::PARAM_NULL);
+        } else {
+            $stmt->bindValue(':postal_code', $postalCode, PDO::PARAM_STR);
+        }
+        if ($zoneId === null) {
+            $stmt->bindValue(':zone_id', null, PDO::PARAM_NULL);
+        } else {
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        }
         $stmt->bindValue(':has_physical_reception', array_key_exists('has_physical_reception', $data)
             ? (bool)$data['has_physical_reception']
             : true, PDO::PARAM_BOOL);
@@ -492,6 +538,20 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
             }
             $fields[] = "contact_email = :contact_email";
             $params[':contact_email'] = $contactEmail;
+        }
+
+        if (array_key_exists('postal_code', $data)) {
+            $postalCode = (new PostalCode((string)$data['postal_code']))->value();
+            $fields[] = 'postal_code = :postal_code';
+            $params[':postal_code'] = $postalCode;
+
+            // La anulación manual manda (RF-03.3): una sede forzada a otra zona
+            // conserva su asignación al corregir el CP, y una sede heredada se
+            // recoloca contra el catálogo activo. El CASE se resuelve dentro del
+            // mismo UPDATE, así que no hay un instante con el CP nuevo y la zona
+            // vieja visible para otra petición.
+            $fields[] = 'zone_id = CASE WHEN is_manual_override THEN zone_id ELSE :inherited_zone END';
+            $params[':inherited_zone'] = $this->findInheritedZoneByPostalCode($postalCode);
         }
 
         if (empty($fields)) {
@@ -601,6 +661,167 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
         ]);
 
         return $stmt->rowCount() >= 0;
+    }
+
+    /**
+     * Resuelve, en una lectura indexada, la zona activa que gobierna un código postal.
+     *
+     * Es la herencia territorial de RF-03.1: la clave primaria de
+     * `operational_zone_postal_codes` está en el propio CP, de modo que la consulta
+     * es una búsqueda por clave y no un recorrido del catálogo. Devuelve `null`
+     * cuando el CP no pertenece a ninguna zona activa, que es el estado «Sin Zona
+     * Asignada» y no un error.
+     *
+     * @param string $postalCode Código postal canónico de cinco dígitos.
+     * @return int|null Identificador de la zona heredada, o null si no hay ninguna.
+     *
+     * @throws \VendGuard\Core\Domain\Exception\ZoneValidationException Si el CP no tiene cinco dígitos.
+     */
+    public function findInheritedZoneByPostalCode(string $postalCode): ?int
+    {
+        $normalized = (new PostalCode($postalCode))->value();
+
+        $sql = "
+            SELECT p.zone_id
+            FROM operational_zone_postal_codes p
+            INNER JOIN operational_zones z ON z.id = p.zone_id
+            WHERE p.postal_code = :postal_code
+              AND z.is_active = {$this->dialect->booleanLiteral(true)}
+            LIMIT 1
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':postal_code', $normalized, PDO::PARAM_STR);
+        $stmt->execute();
+        $zoneId = $stmt->fetchColumn();
+
+        return $zoneId === false ? null : (int)$zoneId;
+    }
+
+    /**
+     * Fija la anulación manual de la sede: zona forzada y `is_manual_override = TRUE`
+     * en una sola sentencia (RF-03.2).
+     *
+     * Con `$zoneId = null` la sede queda forzada a «Sin Zona Asignada»: es una
+     * decisión operativa del coordinador, no una herencia pendiente, y por eso la
+     * bandera se mantiene encendida.
+     *
+     * @param int $locationId Identificador de la sede.
+     * @param int|null $zoneId Zona forzada, o null para dejarla sin zona.
+     * @return bool True si la sede existía.
+     */
+    public function setManualOverride(int $locationId, ?int $zoneId): bool
+    {
+        $sql = "
+            UPDATE locations
+            SET zone_id = :zone_id,
+                is_manual_override = {$this->dialect->booleanLiteral(true)},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :location_id
+              AND deleted_at IS NULL
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':location_id', $locationId, PDO::PARAM_INT);
+        if ($zoneId === null) {
+            $stmt->bindValue(':zone_id', null, PDO::PARAM_NULL);
+        } else {
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Restablece la herencia automática: apaga la anulación manual y recalcula la
+     * zona desde el CP almacenado (RF-03.2).
+     *
+     * @param int $locationId Identificador de la sede.
+     * @return int|null Zona heredada resultante, o null si el CP no pertenece a ninguna activa.
+     */
+    public function clearManualOverride(int $locationId): ?int
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT postal_code FROM locations WHERE id = :location_id AND deleted_at IS NULL LIMIT 1'
+        );
+        $stmt->bindValue(':location_id', $locationId, PDO::PARAM_INT);
+        $stmt->execute();
+        $postalCode = $stmt->fetchColumn();
+
+        if ($postalCode === false) {
+            return null;
+        }
+
+        $inheritedZone = $postalCode !== null && trim((string)$postalCode) !== ''
+            ? $this->findInheritedZoneByPostalCode((string)$postalCode)
+            : null;
+
+        $update = $this->pdo->prepare(
+            "UPDATE locations
+             SET zone_id = :zone_id,
+                 is_manual_override = {$this->dialect->booleanLiteral(false)},
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = :location_id
+               AND deleted_at IS NULL"
+        );
+        if ($inheritedZone === null) {
+            $update->bindValue(':zone_id', null, PDO::PARAM_NULL);
+        } else {
+            $update->bindValue(':zone_id', $inheritedZone, PDO::PARAM_INT);
+        }
+        $update->bindValue(':location_id', $locationId, PDO::PARAM_INT);
+        $update->execute();
+
+        return $inheritedZone;
+    }
+
+    /**
+     * Persiste el CP validado de la sede y recalcula su zona heredada si no está
+     * forzada (RF-03.1, RF-03.3, QA 7).
+     *
+     * El CP y la zona se escriben en la misma sentencia: un CP nuevo con la zona
+     * vieja sería una sede apuntando a la demarcación equivocada durante el tiempo
+     * que tardara la segunda escritura.
+     *
+     * @param int $locationId Identificador de la sede.
+     * @param string $postalCode Código postal de cinco dígitos.
+     * @return int|null Zona efectiva después de la escritura (la forzada se conserva).
+     *
+     * @throws \VendGuard\Core\Domain\Exception\ZoneValidationException Si el CP no es válido.
+     */
+    public function setPostalCode(int $locationId, string $postalCode): ?int
+    {
+        $normalized = (new PostalCode($postalCode))->value();
+        $inheritedZone = $this->findInheritedZoneByPostalCode($normalized);
+
+        $sql = "
+            UPDATE locations
+            SET postal_code = :postal_code,
+                zone_id = CASE WHEN is_manual_override THEN zone_id ELSE :inherited_zone END,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :location_id
+              AND deleted_at IS NULL
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':postal_code', $normalized, PDO::PARAM_STR);
+        $stmt->bindValue(':location_id', $locationId, PDO::PARAM_INT);
+        if ($inheritedZone === null) {
+            $stmt->bindValue(':inherited_zone', null, PDO::PARAM_NULL);
+        } else {
+            $stmt->bindValue(':inherited_zone', $inheritedZone, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        $effective = $this->pdo->prepare(
+            'SELECT zone_id FROM locations WHERE id = :location_id AND deleted_at IS NULL LIMIT 1'
+        );
+        $effective->bindValue(':location_id', $locationId, PDO::PARAM_INT);
+        $effective->execute();
+        $zoneId = $effective->fetchColumn();
+
+        return $zoneId === false || $zoneId === null ? null : (int)$zoneId;
     }
 
     /**

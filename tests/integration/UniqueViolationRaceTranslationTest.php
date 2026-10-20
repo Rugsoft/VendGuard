@@ -245,6 +245,7 @@ $locationPayload = [
     'site_code' => $raceSiteCode,
     'name' => 'Sede de Carrera',
     'address' => 'Calle de la Carrera 1',
+    'postal_code' => '08001',
 ];
 
 $locationRace = $race(
