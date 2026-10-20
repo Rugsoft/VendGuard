@@ -132,6 +132,16 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 * **Vinculación Segura y Mínimo Privilegio (Art. V.4):** Campo `telegram_chat_id` gestionable exclusivamente para rol `TECHNICIAN` desde el panel de administración de usuarios, validado con regex numérico (`^-?[0-9]{5,20}$`), con unicidad estricta y enmascaramiento en auditoría (`***1234`).
 * **Relé de Webhook Opcional en Cloudflare Workers:** Infraestructura serverless gratuita de relé en edge (`deploy/cloudflare/telegram-webhook-relay.js`) para transformar webhooks salientes genéricos de emergencia en mensajes formateados de Telegram sin costes ni servidores dedicados.
 
+### 14. Avería Oportunista In Situ y Reingreso en Ruta (Módulo 16)
+* **Atención In Situ de Averías No Programadas (Flujos A y B):** Permite al técnico en ruta gestionar avisos sobre la marcha cuando visita una sede:
+  * **Flujo A (`NEW` — "Oportunista In Situ · Nueva"):** Alta de avería detectada in situ o comunicada verbalmente por el personal del centro (`opportunistic_origin_reason`: `TECHNICIAN_DETECTION` o `SITE_VERBAL_NOTICE`), naciendo directamente en estado `IN_PROGRESS` asignada al técnico que la reporta, con descripción técnica obligatoria ($\ge 10$ caracteres) y subida opcional de foto de evidencia ($\le 5\text{ MB}$, validada por magic bytes, Art. V.5).
+  * **Flujo B (`ASSUMED` — "Oportunista In Situ · Asumida"):** Asunción directa de expedientes ya registrados pendientes en la sede (`REGISTERED`, `REOPENED`, `ASSIGNED`, `PENDING_PARTS`, `PENDING_INFO`), traspaso formal con nota interna de taller confidencial (`is_internal = TRUE`, Art. V.4), o reapertura in situ en garantía (< 48h) ante reclamaciones presenciales del centro.
+* **Sustitución Atómica de 3.ª Reincidencia ("Avería Crónica", RF-05.4.2):** Al reabrir por tercera vez consecutiva una avería en garantía, el sistema cierra atómicamente el expediente anterior a `CLOSED` con la nota formal `[AVERÍA CRÓNICA]` (liberando el índice único parcial `uq_machine_active_ticket`), emite la alerta `CHRONIC_BREAKDOWN_ALERT` a Coordinación y genera un expediente sucesor limpio en `IN_PROGRESS` en la misma transacción (`T-OPP-13` con reintento ante colisión de código).
+* **Salvaguarda Sanitaria de Cadena de Frío en Ruta (Art. II):** Si el técnico tiene en cola paradas pendientes críticas o de alimentos perecederos en otras sedes, el sistema exige confirmación expresa de anulación voluntaria (`confirm_cold_chain_override = true`) y encola de inmediato una alerta de emergencia sanitaria prioritaria (`OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT`) hacia el cuadro de mando de Coordinación y canal Webhook corporativo.
+* **Ventana de Gracia de 30 Minutos y Experiencia en $\le 3$ Toques (RNF-02):** La operativa in situ está habilitada mientras el técnico tenga una parada activa en la sede, o durante una ventana de cortesía de **30 minutos** (+5 min con formulario abierto) tras resolver o pausar la última intervención. La vista móvil renderiza la tarjeta temporal **"🏢 Sede recién visitada (30 min)"** y un catálogo filtrado de máquinas para completar la intervención en menos de tres toques.
+* **Coexistencia en Parada #1 y Blindaje de Privacidad (Art. V.4):** Las intervenciones simultáneas `IN_PROGRESS` de la misma sede conviven agrupadas en la Parada #1 de la ruta ordenadas por criticidad y SLA (prohibiendo iniciar en sedes distintas con error `409`). Se prohíbe terminantemente recabar datos bancarios (IBAN/Bizum) en la ficha técnica derivando al usuario al código QR público (`422 CASH_REFUND_PRIVACY_VIOLATION`), y se enmascara la identidad técnica en el portal de sede bajo el código oficial de operador.
+* **Retorno de Inversión y Métricas de Eficiencia:** Cuadro de mando para Coordinación con registro de desplazamientos evitados (`opportunistic_interventions`), reduciendo la huella de carbono y el coste logístico de segundas visitas.
+
 ---
 
 ## 👥 Actores del Sistema y Credenciales de Demostración
@@ -381,6 +391,15 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `PATCH` | `/api/coordinator/users/{id}` | `COORDINATOR` | Vinculación del chat personal de Telegram del técnico (`telegram_chat_id`), con validación de rol `TECHNICIAN`, regex numérico, unicidad y auditoría enmascarada (RF-TG-07/10). |
 | `GET` | `/api/technician/my-route?ticket={code}` | `TECHNICIAN` | Acceso directo por enlace profundo (*Deep Linking*) a la avería asignada desde el botón interactivo del mensaje de Telegram (RF-TG-05). |
 
+#### Avería Oportunista In Situ y Reingreso en Ruta (Módulo 16)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/technician/locations/{location_id}/opportunistic-machines` | `TECHNICIAN` | Catálogo de máquinas de la sede con estado operativo, prediagnóstico (`CREATE_NEW`, `ASSUME_DIRECT`, `ASSUME_WITH_CONFIRMATION`, `REOPEN_IN_SITU`, `ALREADY_MINE`, `BLOCKED_IN_PROGRESS_BY_OTHER`) y alerta sanitaria Art. II ante paradas críticas en otras sedes. |
+| `POST` | `/api/technician/opportunistic/incidents` | `TECHNICIAN` | Alta de avería oportunista in situ (Flujo A: `NEW`), naciendo en `IN_PROGRESS`, con validación de imagen ($\le 5\text{ MB}$, Art. V.5), bloqueo de captura bancaria (Art. V.4) y salvaguarda de frío (Art. II). |
+| `POST` | `/api/technician/opportunistic/incidents/{id}/assume` | `TECHNICIAN` | Asunción de ticket existente (Flujo B: `ASSUMED`), traspaso con nota interna confidencial (`is_internal = TRUE`), reapertura en garantía in situ y sustitución atómica de 3.ª reincidencia crónica. |
+| `GET` | `/api/technician/my-route?include_opportunistic_context=1` | `TECHNICIAN` | Hoja de ruta extendida con sedes habilitadas (paradas activas o ventana de gracia de 30 min) y aviso de paradas críticas pendientes en otras sedes. |
+| `GET` | `/api/coordinator/metrics` | `COORDINATOR` | KPIs globales incluyendo desplazamientos logísticos evitados por intervenciones oportunistas (`opportunistic_interventions`). |
+
 ---
 
 ## 🧪 Batería Completa de Pruebas Automatizadas (T-39 & Módulos 02, 03, 04, M1, M2 y M4)
@@ -491,6 +510,7 @@ gestor-incidencias-vending/
 │   ├── 13-single-engine-supabase/# Especificación de consolidación definitiva en motor único PostgreSQL
 │   ├── 14-notification-center-outbox/# Especificación de la bandeja de salida transaccional y canal de emergencias
 │   ├── 15-telegram-technician-alerts/# Especificación de alertas directas a técnicos vía Bot de Telegram
+│   ├── 16-opportunistic-incident/# Especificación de atención y asunción oportunista de averías en ruta
 │   ├── functional/               # Especificaciones funcionales EARS transversales
 │   └── technical/                # Contratos de API, DDL y esquemas de base de datos
 ├── src/
