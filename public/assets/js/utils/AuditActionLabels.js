@@ -55,7 +55,12 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   REFUND_REQUEST: 'Expediente de Reintegro',
   UNCLAIMED_CASH_FINDING: 'Efectivo No Reclamado',
   NOTIFICATION_OUTBOX: 'Notificación Saliente',
-  NOTIFICATION_CHANNEL_SETTING: 'Canal de Notificaciones'
+  NOTIFICATION_CHANNEL_SETTING: 'Canal de Notificaciones',
+  // Entidades del Módulo 17 (Resolución QA 11): el catálogo no puede quedarse
+  // corto respecto al enumerado `audit_entity_type` o el filtro del visor
+  // perdería filas reales del historial territorial.
+  OPERATIONAL_ZONE: 'Zona Operativa',
+  TECHNICIAN_ZONE: 'Cuadrante Técnico'
 });
 
 /**

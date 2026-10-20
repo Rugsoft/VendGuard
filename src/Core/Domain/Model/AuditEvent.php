@@ -56,6 +56,16 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_NOTIFICATION_CHANNEL_SETTING = 'NOTIFICATION_CHANNEL_SETTING';
 
     /**
+     * Entidades del módulo de zonificación operativa (Módulo 17).
+     *
+     * La zona y su cuadrante técnico tienen espacio de identificadores propio, así
+     * que auditarlos como `LOCATION` o `USER` apuntaría a una sede o a un técnico
+     * ajenos y rompería la trazabilidad territorial (RNF-03, Art. III.3).
+     */
+    public const ENTITY_OPERATIONAL_ZONE = 'OPERATIONAL_ZONE';
+    public const ENTITY_TECHNICIAN_ZONE  = 'TECHNICIAN_ZONE';
+
+    /**
      * Whitelist completa de tipos de entidad admitidos por el dominio.
      *
      * Debe coincidir exactamente con el enum `audit_log.entity_type` de la base
@@ -75,6 +85,8 @@ class AuditEvent implements JsonSerializable
         self::ENTITY_UNCLAIMED_CASH_FINDING,
         self::ENTITY_NOTIFICATION_OUTBOX,
         self::ENTITY_NOTIFICATION_CHANNEL_SETTING,
+        self::ENTITY_OPERATIONAL_ZONE,
+        self::ENTITY_TECHNICIAN_ZONE,
     ];
 
     /**

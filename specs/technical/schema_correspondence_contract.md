@@ -19,11 +19,11 @@ Queda completamente retirado el camino dual de persistencia (MariaDB/MySQL).
 
 ---
 
-## 2. Inventario de las 20 Tablas del Dominio
+## 2. Inventario de las 25 Tablas del Dominio
 
-Todas las tablas cuentan con clave primaria `id BIGINT GENERATED ALWAYS AS IDENTITY` y disparador constitucional `trg_no_delete_*` vinculado a `prevent_hard_delete()` (Art. III.1).
+Todas las tablas cuentan con clave primaria y disparador constitucional `trg_no_delete_*` vinculado a `prevent_hard_delete()` (Art. III.1). La clave primaria es `id BIGINT GENERATED ALWAYS AS IDENTITY` salvo en `operational_zone_postal_codes`, donde la identidad de la fila es el propio código postal: es la forma de garantizar que un CP pertenezca a una sola zona en todo su ciclo de vida (RF-01.2, Resolución QA 7).
 
-1. `locations` (17 columnas)
+1. `locations` (20 columnas)
 2. `machines` (19 columnas)
 3. `users` (13 columnas)
 4. `incidents` (43 columnas)
@@ -43,6 +43,9 @@ Todas las tablas cuentan con clave primaria `id BIGINT GENERATED ALWAYS AS IDENT
 18. `sanitary_sweep_passes` (9 columnas)
 19. `sanitary_sweep_contentions` (9 columnas)
 20. `audit_log` (11 columnas)
+21. `operational_zones` (8 columnas)
+22. `operational_zone_postal_codes` (3 columnas)
+23. `technician_zone_assignments` (6 columnas)
 
 Adicionalmente, `schema_migrations` gestiona el registro de huellas SHA-256 de las migraciones incrementales.
 
@@ -65,3 +68,8 @@ Adicionalmente, `schema_migrations` gestiona el registro de huellas SHA-256 de l
 - **Índice parcial oportunista:** `idx_incidents_opportunistic_mode` sobre `(opportunistic_mode, created_at)` y sólo las filas con modalidad no borradas lógicamente, que es el universo del indicador de desplazamientos evitados (RF-06.4).
 - **Arranque idempotente sobre bases anteriores:** el DDL base se ejecuta en cada arranque, no sólo en el primero. Un índice declarado en él sobre una columna que introduce una migración (como `opportunistic_mode`, añadida por `005_opportunistic_incident.sql`) se crea dentro de un bloque `DO` que tolera `duplicate_object` y `undefined_column`: la base preexistente continúa hasta el ejecutor de migraciones y es éste quien añade la columna y el índice. Sin esa guarda el arranque abortaba con SQLSTATE 42703 antes de migrar (EARS-02.5).
 - **Plantillas del Módulo 16:** `OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT` e `INCIDENT_REOPENED_IN_SITU_SITE` amplían el catálogo cerrado de `notification_template`, que pasa a 21 valores.
+- **Unicidad territorial del código postal (Módulo 17, RF-01.2):** `operational_zone_postal_codes.postal_code` es la clave primaria y su formato se blinda con `chk_postal_code_format CHECK (postal_code ~ '^[0-9]{5}$')`. Un CP pertenece a una única zona, activa o inactiva, durante todo su ciclo de vida; la desactivación de la zona libera sus filas en la misma transacción (Resolución QA 7).
+- **Titularidad única por técnico (Módulo 17, RF-02.1):** el índice único parcial `uq_technician_primary_zone` sobre `(technician_id) WHERE is_primary = TRUE AND removed_at IS NULL` impide que un técnico sea titular principal de dos zonas vivas a la vez; `uq_technician_zone_live` sobre `(technician_id, zone_id) WHERE removed_at IS NULL` permite reingresos sin borrar el histórico (Resolución QA 10).
+- **Herencia territorial de la sede (Módulo 17, RF-03):** `locations` declara `zone_id` (FK `fk_locations_zone`, `ON DELETE SET NULL`), `is_manual_override` y `postal_code VARCHAR(5)` con `chk_locations_postal_code_format CHECK (postal_code IS NULL OR postal_code ~ '^[0-9]{5}$')`. El CP admite `NULL` para no inventar datos en sedes históricas; el alta y la edición lo exigen en la aplicación. Índices `idx_locations_zone_id` e `idx_locations_postal_code`.
+- **Formato de la zona (Módulo 17, RF-01.1):** `chk_operational_zones_code_len`, `chk_operational_zones_name_len` y `chk_operational_zones_color_format CHECK (color_hex ~* '^#[0-9A-Fa-f]{6}$')`, además de las claves únicas de código y nombre.
+- **Auditoría territorial (Módulo 17, RNF-03 / QA 11):** el enumerado `audit_entity_type` añade `OPERATIONAL_ZONE` y `TECHNICIAN_ZONE` mediante la migración `007_operational_zones.sql` con `ALTER TYPE ... ADD VALUE IF NOT EXISTS`, y el traslado masivo de códigos postales emite un evento matriz `ZONE_POSTAL_CODE_TRANSFERRED` más un evento `LOCATION_ZONE_REASSIGNED` por sede afectada en la misma transacción (QA 6).

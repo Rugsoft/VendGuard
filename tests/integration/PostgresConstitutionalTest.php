@@ -13,7 +13,7 @@ declare(strict_types=1);
  * QUÉ SE CERTIFICA, Y POR QUÉ ASÍ
  *
  *   1. **Art. III.1 — el borrado físico se rechaza con la boca abierta.** `DELETE FROM` sobre
- *      cada una de las 20 tablas lanza `SQLSTATE '45000'` con la marca `ART_III_1_VIOLATION`.
+ *      cada una de las 25 tablas lanza `SQLSTATE '45000'` con la marca `ART_III_1_VIOLATION`.
  *      Cada tabla se prueba **con una fila dentro**: un disparador `FOR EACH ROW` no ve una tabla
  *      vacía, de modo que certificar el rechazo sin filas no certificaría nada. La fixture se
  *      construye con el arnés del motor nuevo (`PostgresFixtureBuilder`), que respeta el grafo de
@@ -94,6 +94,7 @@ const CONTRACT_TABLES = [
     'preventive_order_items', 'sanitary_certificates', 'route_settings', 'sanitary_sweep_passes',
     'sanitary_sweep_contentions', 'audit_log',
     'notification_outbox', 'notification_channel_settings',
+    'operational_zones', 'operational_zone_postal_codes', 'technician_zone_assignments',
 ];
 
 /** Las siete restricciones de longitud mínima del Art. V.1, con la tabla y la columna que vigilan. */

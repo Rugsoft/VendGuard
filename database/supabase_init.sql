@@ -1,5 +1,5 @@
 -- =============================================================================
--- VendGuard · DDL canónico del motor nuevo · COMPLETO (20 tablas)
+-- VendGuard · DDL canónico del motor nuevo · COMPLETO (25 tablas)
 -- PostgreSQL 15+ (certificado contra PostgreSQL 16.15 en deploy/local/postgres/)
 -- Fichero: database/supabase_init.sql
 -- Módulo: 12-hybrid-supabase-migration · T-HYBRID-01 (tablas 1-10) y T-HYBRID-02 (tablas 11-20)
@@ -8,14 +8,16 @@
 -- QUÉ ES ESTE FICHERO
 --   La creación del esquema relacional del motor nuevo: extensiones, los tipos
 --   `ENUM` del dominio con su tabla de correspondencia, las funciones canónicas
---   de blindaje y **las 20 tablas** con sus claves, restricciones, índices y
+--   de blindaje y **las 25 tablas** con sus claves, restricciones, índices y
 --   disparadores. La Parte 1 (§4) cubre `locations`, `machines`, `users`,
 --   `incidents`, `incident_history`, `incident_comments`, `audit_log`,
 --   `route_settings`, `preventive_settings` y `preventive_orders`; la Parte 2
 --   (§5) cubre `preventive_order_items`, `sanitary_certificates`, `spare_parts`,
 --   `spare_part_compatibilities`, `spare_part_requests`, `incident_replaced_parts`,
 --   `refund_requests`, `unclaimed_cash_findings`, `sanitary_sweep_passes` y
---   `sanitary_sweep_contentions`.
+--   `sanitary_sweep_contentions`. La Parte 3 (§6) declara las tres tablas
+--   territoriales del módulo 17: `operational_zones`,
+--   `operational_zone_postal_codes` y `technician_zone_assignments`.
 --
 -- CONTRATO QUE LO RIGE (no al revés)
 --   specs/technical/schema_correspondence_contract.md. Este DDL se escribe
@@ -129,7 +131,9 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- | 22| incident_category                 | ('TEMPERATURE_COLD','PAYMENT_SYSTEM','PRODUCT_JAM',           | incidents.category                                                               | Parte 1       |
 -- |   |                                   |  'ELECTRICAL_OFF','OTHER')                                    |                                                                                  |               |
 -- | 23| audit_entity_type                 | ('TICKET','MACHINE','LOCATION','USER','PREVENTIVE_ORDER',     | audit_log.entity_type                                                            | Parte 1       |
--- |   |                                   |  'SANITARY_CERTIFICATE','REFUND_REQUEST','UNCLAIMED_CASH_FINDING')|                                                                            |               |
+-- |   |                                   |  'SANITARY_CERTIFICATE','REFUND_REQUEST','UNCLAIMED_CASH_FINDING',|                                                                                  |               |
+-- |   |                                   |  'NOTIFICATION_OUTBOX','NOTIFICATION_CHANNEL_SETTING',       |                                                                                  |               |
+-- |   |                                   |  'OPERATIONAL_ZONE','TECHNICIAN_ZONE')                       |                                                                                  |               |
 -- | 24| certificate_status                | ('VALID','SUSPENDED','REVOKED')                              | sanitary_certificates.status                                                     | Parte 2       |
 --
 -- Reparto del trabajo: 12 conjuntos (13 columnas) se declaran en la Parte 1 y los
@@ -218,7 +222,11 @@ BEGIN
     CREATE TYPE audit_entity_type AS ENUM (
         'TICKET', 'MACHINE', 'LOCATION', 'USER', 'PREVENTIVE_ORDER',
         'SANITARY_CERTIFICATE', 'REFUND_REQUEST', 'UNCLAIMED_CASH_FINDING',
-        'NOTIFICATION_OUTBOX', 'NOTIFICATION_CHANNEL_SETTING'
+        'NOTIFICATION_OUTBOX', 'NOTIFICATION_CHANNEL_SETTING',
+        -- Entidades territoriales del Módulo 17 (Resolución QA 11): la zona
+        -- operativa y su cuadrante técnico se auditan con tipo propio para que
+        -- el rastro no se confunda con la sede ni con el usuario.
+        'OPERATIONAL_ZONE', 'TECHNICIAN_ZONE'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -493,17 +501,38 @@ CREATE TABLE IF NOT EXISTS locations (
     access_code_issued_at   TIMESTAMPTZ,
     login_attempts          SMALLINT NOT NULL DEFAULT 0,
     login_locked_until      TIMESTAMPTZ,
+    -- Vinculación territorial (Módulo 17): la zona que atiende la sede, el CP
+    -- que la resuelve por herencia y la marca de excepción manual del coordinador.
+    -- Las tres llegan a una base preexistente por la migración `007`.
+    zone_id                 BIGINT,
+    is_manual_override      BOOLEAN NOT NULL DEFAULT FALSE,
+    postal_code             VARCHAR(5),
     is_active               BOOLEAN NOT NULL DEFAULT TRUE,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_at              TIMESTAMPTZ,
     CONSTRAINT pk_locations PRIMARY KEY (id),
     CONSTRAINT uq_locations_site_code UNIQUE (site_code),
-    CONSTRAINT uq_locations_site_code_key UNIQUE (site_code_key)
+    CONSTRAINT uq_locations_site_code_key UNIQUE (site_code_key),
+    -- El CP admite NULL para no inventar datos en las sedes históricas; el alta
+    -- y la edición lo exigen en la aplicación (Resolución QA 7).
+    CONSTRAINT chk_locations_postal_code_format CHECK (
+        postal_code IS NULL OR postal_code ~ '^[0-9]{5}$'
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_locations_active ON locations (is_active, deleted_at);
 CREATE INDEX IF NOT EXISTS idx_locations_lat_lng ON locations (latitude, longitude, is_active);
+
+-- Los índices territoriales se declaran en un bloque que tolera `undefined_column`:
+-- en una base preexistente la columna llega con la migración `007`, que corre
+-- después de este DDL base (misma lección que `idx_users_on_call`, EARS-02.5).
+DO $do$
+BEGIN
+    CREATE INDEX IF NOT EXISTS idx_locations_postal_code ON locations (postal_code);
+    CREATE INDEX IF NOT EXISTS idx_locations_zone_id ON locations (zone_id);
+EXCEPTION WHEN duplicate_object OR undefined_column THEN NULL;
+END $do$;
 
 CREATE OR REPLACE TRIGGER trg_no_delete_locations
     BEFORE DELETE ON locations
@@ -1513,21 +1542,146 @@ CREATE OR REPLACE TRIGGER trg_touch_notification_channel_settings
 
 
 -- =============================================================================
+-- SECCIÓN 6 · Tablas 23 a 25 · Zonificación operativa (Módulo 17)
+-- =============================================================================
+-- Las tablas territoriales se declaran al final por una razón de dependencia y no
+-- de importancia: `locations` (Tabla 1) referencia `operational_zones`, de modo que
+-- la clave foránea de la sede se añade aquí, cuando el catálogo ya existe. Las
+-- Tablas 21 y 22 son las de notificaciones y viven en la Sección 5.
+--
+-- La declaración es idéntica a `database/supabase_migrations/007_operational_zones.sql`,
+-- que es la vía por la que una base ya creada recibe este mismo esquema.
+
+-- -----------------------------------------------------------------------------
+-- Tabla 23 · operational_zones — catálogo maestro de zonas operativas (RF-01.1)
+-- -----------------------------------------------------------------------------
+-- `color_hex` se valida contra `#RRGGBB`: es el token con el que el mapa
+-- territorial pinta la zona, y un color inválido dejaría la demarcación sin
+-- representación cartográfica.
+CREATE TABLE IF NOT EXISTS operational_zones (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY,
+    code        VARCHAR(50) NOT NULL,
+    name        VARCHAR(100) NOT NULL,
+    color_hex   VARCHAR(7) NOT NULL DEFAULT '#2560ff',
+    description TEXT,
+    is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_operational_zones PRIMARY KEY (id),
+    CONSTRAINT uq_operational_zones_code UNIQUE (code),
+    CONSTRAINT uq_operational_zones_name UNIQUE (name),
+    CONSTRAINT chk_operational_zones_code_len CHECK (length(btrim(code)) >= 3),
+    CONSTRAINT chk_operational_zones_name_len CHECK (length(btrim(name)) >= 3),
+    CONSTRAINT chk_operational_zones_color_format CHECK (color_hex ~* '^#[0-9A-Fa-f]{6}$')
+);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_operational_zones
+    BEFORE DELETE ON operational_zones
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_touch_operational_zones
+    BEFORE UPDATE ON operational_zones
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 24 · operational_zone_postal_codes — mapeo unívoco de CPs (RF-01.2)
+-- -----------------------------------------------------------------------------
+-- La unicidad territorial es global y vive en la clave primaria: si el CP fuera
+-- único por zona, el mismo barrio podría pertenecer a dos demarcaciones y el
+-- recomendador tendría dos titulares para una sola sede (Resolución QA 7).
+CREATE TABLE IF NOT EXISTS operational_zone_postal_codes (
+    postal_code VARCHAR(5) NOT NULL,
+    zone_id     BIGINT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_operational_zone_postal_codes PRIMARY KEY (postal_code),
+    CONSTRAINT chk_postal_code_format CHECK (postal_code ~ '^[0-9]{5}$'),
+    CONSTRAINT fk_postal_codes_zone FOREIGN KEY (zone_id)
+        REFERENCES operational_zones (id) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_zone_postal_codes_zone_id
+    ON operational_zone_postal_codes (zone_id);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_operational_zone_postal_codes
+    BEFORE DELETE ON operational_zone_postal_codes
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+
+-- -----------------------------------------------------------------------------
+-- Herencia territorial de la sede (RF-03.1, RF-03.2, Resolución QA 7)
+-- -----------------------------------------------------------------------------
+-- Las columnas se declaran en la Tabla 1; la clave foránea se materializa aquí
+-- porque exige que `operational_zones` exista. `ON DELETE SET NULL` deja la sede
+-- en «Sin Zona Asignada» conservando su historial si la zona desapareciera.
+DO $do$
+BEGIN
+    ALTER TABLE locations
+        ADD CONSTRAINT fk_locations_zone FOREIGN KEY (zone_id)
+        REFERENCES operational_zones (id) ON DELETE SET NULL ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 25 · technician_zone_assignments — cuadrante técnico (RF-02.1)
+-- -----------------------------------------------------------------------------
+-- La baja es lógica (`removed_at`): el histórico del cuadrante no se borra
+-- (Art. III.1) y el reingreso del técnico estrena una vinculación nueva y
+-- auditada (Resolución QA 10).
+CREATE TABLE IF NOT EXISTS technician_zone_assignments (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY,
+    technician_id BIGINT NOT NULL,
+    zone_id       BIGINT NOT NULL,
+    is_primary    BOOLEAN NOT NULL DEFAULT FALSE,
+    assigned_at   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    removed_at    TIMESTAMPTZ,
+    CONSTRAINT pk_technician_zone_assignments PRIMARY KEY (id),
+    CONSTRAINT fk_technician_zone_technician FOREIGN KEY (technician_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_technician_zone_zone FOREIGN KEY (zone_id)
+        REFERENCES operational_zones (id) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- Unicidad solo sobre vinculaciones vivas: permite reingresos con histórico.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_technician_zone_live
+    ON technician_zone_assignments (technician_id, zone_id)
+    WHERE removed_at IS NULL;
+
+-- Un técnico solo puede ser Titular Principal de una zona viva a la vez (RF-02.1).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_technician_primary_zone
+    ON technician_zone_assignments (technician_id)
+    WHERE is_primary = TRUE AND removed_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_tech_zone_assignments_zone_id
+    ON technician_zone_assignments (zone_id);
+
+CREATE INDEX IF NOT EXISTS idx_tech_zone_assignments_tech_id
+    ON technician_zone_assignments (technician_id);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_technician_zone_assignments
+    BEFORE DELETE ON technician_zone_assignments
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+
+-- =============================================================================
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 20 tablas (las 20 del contrato de correspondencia) · 24 tipos del dominio en sus
+-- 25 tablas (las 25 del contrato de correspondencia) · 24 tipos del dominio en sus
 -- 25 columnas `ENUM` · 2 funciones canónicas de blindaje
--- 31 disparadores: 20 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1) y 11
+-- 37 disparadores: 25 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1) y 12
 -- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2)
--- 33 restricciones nombradas: 20 claves primarias y 13 únicas. El motor local declara
--- 32 (20 + 12): la duodécima suya es la compuesta de D-6, que aquí no es una
--- restricción sino el índice único parcial, y en cambio las dos claves canónicas
--- (A-1 y A-2) suman dos únicas que allí no existen
--- 7 restricciones `CHECK` de longitud mínima (A-3: 4 en `incidents`, 2 en
--- `refund_requests`, 1 en `spare_part_requests`) · 35 claves foráneas con las reglas
--- declaradas en el contrato §2.4
--- 56 índices secundarios —uno por índice no único del esquema local y con las mismas
--- columnas (D-9)— más el índice único parcial `uq_machine_active_ticket` (D-6)
+-- 38 restricciones nombradas: 23 claves primarias (la del mapeo de códigos postales
+-- es el propio CP, no un identificador sintético) y 15 únicas
+-- 12 restricciones `CHECK`: las 7 de longitud mínima del Art. V.1 (A-3: 4 en
+-- `incidents`, 2 en `refund_requests`, 1 en `spare_part_requests`) más las 5 del
+-- Módulo 17 (longitud de código y nombre de la zona, formato `#RRGGBB` de su color,
+-- formato del CP del catálogo y formato del CP de la sede) · 39 claves foráneas con
+-- las reglas declaradas en el contrato §2.4
+-- 61 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- columnas (D-9), más los cinco del Módulo 17— y tres índices únicos parciales:
+-- `uq_machine_active_ticket` (D-6), `uq_technician_zone_live` y
+-- `uq_technician_primary_zone` (Resolución QA 10)
 -- 2 columnas canónicas (`site_code_key`, `email_key`) con índice único propio (A-1/A-2)
 -- 1 columna derivada (`incident_replaced_parts.total_cost_snapshot`, D-7)
 -- 3 columnas `JSONB` en `audit_log` (D-4)

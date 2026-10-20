@@ -16,7 +16,7 @@
 
 ## Fase 1: Esquema de Base de Datos PostgreSQL / Supabase
 
-- [ ] **T-ZONE-01 · Crear migración incremental `007_operational_zones.sql` y converger `supabase_init.sql` y `supabase_seeds.sql`**
+- [x] **T-ZONE-01 · Crear migración incremental `007_operational_zones.sql` y converger `supabase_init.sql` y `supabase_seeds.sql`**
   * **Tiempo estimado:** 25 min
   * **Dependencias:** Ninguna
   * **Ficheros a crear o modificar:**

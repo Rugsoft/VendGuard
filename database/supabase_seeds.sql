@@ -7,12 +7,13 @@
 --
 -- QUÉ ES ESTE FICHERO
 --   El catálogo maestro con el que arranca en limpio una base de datos vacía del
---   motor nuevo (EARS-02.1): las 10 sedes, la configuración de la ruta base, las
---   13 máquinas del parque, el personal interno con su contraseña hasheada, las
---   frecuencias normativas del preventivo y el catálogo maestro de repuestos con
---   sus compatibilidades por modelo. Solo datos: no crea ni modifica esquema, que
---   es responsabilidad de `database/supabase_init.sql` y de
---   `database/supabase_migrations/`.
+--   motor nuevo (EARS-02.1): las 10 sedes con su código postal, las 3 zonas
+--   operativas del Módulo 17 con sus códigos postales y el cuadrante técnico demo,
+--   la configuración de la ruta base, las 13 máquinas del parque, el personal
+--   interno con su contraseña hasheada, las frecuencias normativas del preventivo
+--   y el catálogo maestro de repuestos con sus compatibilidades por modelo. Solo
+--   datos: no crea ni modifica esquema, que es responsabilidad de
+--   `database/supabase_init.sql` y de `database/supabase_migrations/`.
 --
 -- LO QUE ESTE FICHERO NO CONTIENE (deliberadamente)
 --   · Ninguna incidencia, ni histórica ni activa, ni comentarios, ni marcas de
@@ -52,6 +53,9 @@
 --   | preventive_settings        | `machine_type`                      | `default_frequency_days`, `max_allowed_days`, `advance_warning_days`                          |
 --   | spare_parts                | `part_code`                         | `name`, `category`, `manufacturer`, `reference_cost`, `is_active`                            |
 --   | spare_part_compatibilities | `(spare_part_id, machine_model)`    | ninguno: el par se asegura con `DO NOTHING` (así lo declara el motor local)                   |
+--   | operational_zones          | `code` (única)                      | ninguno: se inserta solo si no existe (Módulo 17)                                            |
+--   | operational_zone_postal_codes | `postal_code` (clave primaria)    | ninguno: se inserta solo si no existe; el CP es único en todo el catálogo (QA 7)             |
+--   | technician_zone_assignments | `(technician_id, zone_id)` vivo     | ninguno: se inserta solo si no existe (la baja es lógica, QA 10)                              |
 --
 --   Dos consecuencias buscadas de esa regla:
 --     1. Reejecutarlo no duplica nada y deja el catálogo igual: el arranque del
@@ -106,19 +110,22 @@
 -- `latitude`/`longitude` son las coordenadas reales de cada sede, sin las cuales
 -- el mapa territorial y el cálculo de rutas no tienen nada que ordenar.
 
+-- El código postal (Resolución QA 7) es obligatorio en el alta de una sede y
+-- resuelve por herencia su zona operativa: cada una de las diez sedes sembradas
+-- lleva el CP real de su dirección, y la Sección 12 lo traduce a zona.
 INSERT INTO locations (
-    site_code, site_code_key, name, address, latitude, longitude, contact_name, contact_phone, contact_email
+    site_code, site_code_key, name, address, latitude, longitude, contact_name, contact_phone, contact_email, postal_code
 ) VALUES
-    ('SEDE-BCN-01', 'sede-bcn-01', 'Hospital del Mar - Edificio Central', 'Passeig Marítim 25, Barcelona', 41.3853120, 2.1932450, 'Laura Sanitaria', '600111222', 'contacto.sede-bcn-01@sede.vendguard.es'),
-    ('SEDE-BCN-02', 'sede-bcn-02', 'Torre Glòries - Planta 4 Oficinas', 'Avinguda Diagonal 211, Barcelona', 41.4036290, 2.1895120, 'Marc Recepción', '600333444', 'contacto.sede-bcn-02@sede.vendguard.es'),
-    ('SEDE-BCN-03', 'sede-bcn-03', 'Hospital Universitari de Bellvitge', 'Carrer de la Feixa Llarga s/n, L''Hospitalet de Llobregat', 41.3458200, 2.1075400, 'Carles Coordinador', '600555666', 'contacto.sede-bcn-03@sede.vendguard.es'),
-    ('SEDE-BCN-04', 'sede-bcn-04', 'World Trade Center Barcelona', 'Moll de Barcelona s/n, Barcelona', 41.3725000, 2.1819000, 'Núria Port', '600777888', 'contacto.sede-bcn-04@sede.vendguard.es'),
-    ('SEDE-BCN-05', 'sede-bcn-05', 'Campus Nord UPC - Edifici Nexus', 'Carrer del Gran Capità 2, Barcelona', 41.3888000, 2.1123000, 'Albert Campus', '600999000', 'contacto.sede-bcn-05@sede.vendguard.es'),
-    ('SEDE-BCN-06', 'sede-bcn-06', 'Parc Tecnològic Barcelona Activa', 'Carrer Marie Curie 8, Nou Barris, Barcelona', 41.4392000, 2.1758000, 'Clara Innovació', '611222333', 'contacto.sede-bcn-06@sede.vendguard.es'),
-    ('SEDE-BCN-07', 'sede-bcn-07', 'Badalona Centre Mèdic Can Ruti', 'Carretera de Canyet s/n, Badalona', 41.4645000, 2.2421000, 'Sergi Logística', '611444555', 'contacto.sede-bcn-07@sede.vendguard.es'),
-    ('SEDE-BCN-08', 'sede-bcn-08', 'Sant Cugat Trade Center', 'Avinguda de les Corts Catalanes 5, Sant Cugat del Vallès', 41.4712000, 2.0689000, 'Gemma Gestió', '611666777', 'contacto.sede-bcn-08@sede.vendguard.es'),
-    ('SEDE-BCN-09', 'sede-bcn-09', 'Fira Gran Via - Pavelló 1', 'Avinguda Joan Carles I 64, L''Hospitalet de Llobregat', 41.3547000, 2.1284000, 'Pau Esdeveniments', '611888999', 'contacto.sede-bcn-09@sede.vendguard.es'),
-    ('SEDE-BCN-10', 'sede-bcn-10', 'WTC Almeda Park Cornellà', 'Plaça de la Pau s/n, Cornellà de Llobregat', 41.3533000, 2.0862000, 'Mireia Serveis', '622111222', 'contacto.sede-bcn-10@sede.vendguard.es')
+    ('SEDE-BCN-01', 'sede-bcn-01', 'Hospital del Mar - Edificio Central', 'Passeig Marítim 25, Barcelona', 41.3853120, 2.1932450, 'Laura Sanitaria', '600111222', 'contacto.sede-bcn-01@sede.vendguard.es', '08003'),
+    ('SEDE-BCN-02', 'sede-bcn-02', 'Torre Glòries - Planta 4 Oficinas', 'Avinguda Diagonal 211, Barcelona', 41.4036290, 2.1895120, 'Marc Recepción', '600333444', 'contacto.sede-bcn-02@sede.vendguard.es', '08018'),
+    ('SEDE-BCN-03', 'sede-bcn-03', 'Hospital Universitari de Bellvitge', 'Carrer de la Feixa Llarga s/n, L''Hospitalet de Llobregat', 41.3458200, 2.1075400, 'Carles Coordinador', '600555666', 'contacto.sede-bcn-03@sede.vendguard.es', '08907'),
+    ('SEDE-BCN-04', 'sede-bcn-04', 'World Trade Center Barcelona', 'Moll de Barcelona s/n, Barcelona', 41.3725000, 2.1819000, 'Núria Port', '600777888', 'contacto.sede-bcn-04@sede.vendguard.es', '08039'),
+    ('SEDE-BCN-05', 'sede-bcn-05', 'Campus Nord UPC - Edifici Nexus', 'Carrer del Gran Capità 2, Barcelona', 41.3888000, 2.1123000, 'Albert Campus', '600999000', 'contacto.sede-bcn-05@sede.vendguard.es', '08034'),
+    ('SEDE-BCN-06', 'sede-bcn-06', 'Parc Tecnològic Barcelona Activa', 'Carrer Marie Curie 8, Nou Barris, Barcelona', 41.4392000, 2.1758000, 'Clara Innovació', '611222333', 'contacto.sede-bcn-06@sede.vendguard.es', '08042'),
+    ('SEDE-BCN-07', 'sede-bcn-07', 'Badalona Centre Mèdic Can Ruti', 'Carretera de Canyet s/n, Badalona', 41.4645000, 2.2421000, 'Sergi Logística', '611444555', 'contacto.sede-bcn-07@sede.vendguard.es', '08916'),
+    ('SEDE-BCN-08', 'sede-bcn-08', 'Sant Cugat Trade Center', 'Avinguda de les Corts Catalanes 5, Sant Cugat del Vallès', 41.4712000, 2.0689000, 'Gemma Gestió', '611666777', 'contacto.sede-bcn-08@sede.vendguard.es', '08195'),
+    ('SEDE-BCN-09', 'sede-bcn-09', 'Fira Gran Via - Pavelló 1', 'Avinguda Joan Carles I 64, L''Hospitalet de Llobregat', 41.3547000, 2.1284000, 'Pau Esdeveniments', '611888999', 'contacto.sede-bcn-09@sede.vendguard.es', '08908'),
+    ('SEDE-BCN-10', 'sede-bcn-10', 'WTC Almeda Park Cornellà', 'Plaça de la Pau s/n, Cornellà de Llobregat', 41.3533000, 2.0862000, 'Mireia Serveis', '622111222', 'contacto.sede-bcn-10@sede.vendguard.es', '08940')
 ON CONFLICT (site_code_key) DO UPDATE SET
     site_code    = EXCLUDED.site_code,
     name         = EXCLUDED.name,
@@ -128,6 +135,7 @@ ON CONFLICT (site_code_key) DO UPDATE SET
     contact_name = EXCLUDED.contact_name,
     contact_phone = EXCLUDED.contact_phone,
     contact_email = EXCLUDED.contact_email,
+    postal_code  = EXCLUDED.postal_code,
     deleted_at   = NULL;
 
 
@@ -346,7 +354,111 @@ WHERE NOT EXISTS (SELECT 1 FROM notification_channel_settings);
 
 
 -- =============================================================================
--- FIN · 10 sedes · 1 configuración de ruta · 13 máquinas · 6 usuarios internos ·
+-- SECCIÓN 9 · operational_zones — las tres zonas operativas de Barcelona
+-- =============================================================================
+-- El parque sembrado se reparte en tres demarcaciones con un color corporativo
+-- distinto, que es el token con el que el mapa territorial pinta cada sede. Se
+-- insertan solo si no existen (no añaden una cláusula de upsert nueva, ver la
+-- cabecera): reejecutar el arranque no duplica el catálogo.
+
+INSERT INTO operational_zones (code, name, color_hex, description)
+SELECT v.code, v.name, v.color_hex, v.description
+FROM (VALUES
+    ('ZONA-BCN-NORTE',  'Barcelona Litoral y Norte', '#2560ff', 'Sant Martí, Poblenou, Nou Barris y Badalona'),
+    ('ZONA-BCN-CENTRO', 'Barcelona Centro y Litoral', '#10b981', 'Ciutat Vella, Eixample y Campus Nord (Les Corts)'),
+    ('ZONA-BCN-SUR',    'Barcelona Sur y Vallès',     '#f59e0b', 'Bellvitge, Fira Gran Via, Cornellà y Sant Cugat')
+) AS v(code, name, color_hex, description)
+WHERE NOT EXISTS (
+    SELECT 1 FROM operational_zones z WHERE z.code = v.code
+);
+
+
+-- =============================================================================
+-- SECCIÓN 10 · operational_zone_postal_codes — el CP como llave territorial
+-- =============================================================================
+-- Los diez códigos postales de las sedes sembradas, cada uno en una sola zona:
+-- la clave primaria del catálogo prohíbe que el mismo CP viva en dos
+-- demarcaciones (RF-01.2, Resolución QA 7). El CP se resuelve por el código de
+-- la zona para no depender del identificador que asigna la secuencia.
+
+INSERT INTO operational_zone_postal_codes (postal_code, zone_id)
+SELECT v.postal_code, z.id
+FROM (VALUES
+    ('08018', 'ZONA-BCN-NORTE'),
+    ('08042', 'ZONA-BCN-NORTE'),
+    ('08916', 'ZONA-BCN-NORTE'),
+    ('08003', 'ZONA-BCN-CENTRO'),
+    ('08039', 'ZONA-BCN-CENTRO'),
+    ('08034', 'ZONA-BCN-CENTRO'),
+    ('08907', 'ZONA-BCN-SUR'),
+    ('08908', 'ZONA-BCN-SUR'),
+    ('08940', 'ZONA-BCN-SUR'),
+    ('08195', 'ZONA-BCN-SUR')
+) AS v(postal_code, zone_code)
+JOIN operational_zones z ON z.code = v.zone_code
+WHERE NOT EXISTS (
+    SELECT 1 FROM operational_zone_postal_codes p WHERE p.postal_code = v.postal_code
+);
+
+
+-- =============================================================================
+-- SECCIÓN 11 · technician_zone_assignments — el cuadrante demo
+-- =============================================================================
+-- Un titular por zona (`is_primary = TRUE`), que es el máximo que admite el
+-- índice parcial `uq_technician_primary_zone`, y dos técnicos de respaldo con
+-- suplencias repartidas. La vinculación se resuelve por la clave canónica del
+-- usuario (`email_key`) y por el código de la zona, nunca por identificadores
+-- que la secuencia asigna distinto en cada base.
+
+INSERT INTO technician_zone_assignments (technician_id, zone_id, is_primary)
+SELECT u.id, z.id, v.is_primary
+FROM (VALUES
+    ('elena.ruta@vendguard.internal',  'ZONA-BCN-NORTE',  TRUE),
+    ('marta.ruta@vendguard.internal',  'ZONA-BCN-CENTRO', TRUE),
+    ('carlos.ruta@vendguard.internal', 'ZONA-BCN-SUR',    TRUE),
+    ('jordi.ruta@vendguard.internal',  'ZONA-BCN-NORTE',  FALSE),
+    ('jordi.ruta@vendguard.internal',  'ZONA-BCN-CENTRO', FALSE),
+    ('marc.ruta@vendguard.internal',   'ZONA-BCN-SUR',    FALSE),
+    ('marc.ruta@vendguard.internal',   'ZONA-BCN-NORTE',  FALSE)
+) AS v(email, zone_code, is_primary)
+JOIN users u ON u.email_key = v.email
+JOIN operational_zones z ON z.code = v.zone_code
+WHERE NOT EXISTS (
+    SELECT 1 FROM technician_zone_assignments a
+     WHERE a.technician_id = u.id
+       AND a.zone_id = z.id
+       AND a.removed_at IS NULL
+);
+
+
+-- =============================================================================
+-- SECCIÓN 12 · Herencia territorial de las sedes (RF-03.1, Resolución QA 7)
+-- =============================================================================
+-- La zona de una sede se deriva de su código postal salvo que el coordinador la
+-- haya forzado manualmente. Estas dos sentencias reafirman la herencia y dejan
+-- en «Sin Zona Asignada» (`zone_id = NULL`) la sede cuyo CP no pertenece a
+-- ningún catálogo: nunca se inventa una zona.
+
+UPDATE locations l
+   SET zone_id = p.zone_id
+  FROM operational_zone_postal_codes p
+ WHERE p.postal_code = l.postal_code
+   AND l.is_manual_override = FALSE
+   AND l.zone_id IS DISTINCT FROM p.zone_id;
+
+UPDATE locations l
+   SET zone_id = NULL
+ WHERE l.is_manual_override = FALSE
+   AND l.postal_code IS NOT NULL
+   AND l.zone_id IS NOT NULL
+   AND NOT EXISTS (
+       SELECT 1 FROM operational_zone_postal_codes p WHERE p.postal_code = l.postal_code
+   );
+
+
+-- =============================================================================
+-- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
+--       de cuadrante · 1 configuración de ruta · 13 máquinas · 6 usuarios internos ·
 --       5 frecuencias normativas · 13 repuestos · 50 compatibilidades · 1 canal emergencias.
 --       0 incidencias · 0 histórico · 0 auditoría (arranque en limpio estricto).
 -- =============================================================================

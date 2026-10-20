@@ -536,6 +536,13 @@ final class PostgresFixtureBuilder
             in_array($udt, ['int2', 'int4', 'int8'], true) => $variant === 'update' ? 9 : 7,
             $udt === 'numeric', $udt === 'float4', $udt === 'float8' => $variant === 'update' ? '9.5000000' : '1.5000000',
             $udt === 'text' => $literal,
+            // El código postal es la llave territorial del Módulo 17 y su formato
+            // está restringido por `CHECK` a cinco dígitos: sintetizar texto libre
+            // convertiría el alta en un rechazo legítimo del motor y el CRUD no se
+            // certificaría. Alta y actualización usan valores distintos para que la
+            // modificación se pueda comprobar.
+            $column === 'postal_code' && in_array($udt, ['varchar', 'bpchar'], true)
+                => $variant === 'update' ? '08999' : '08001',
             in_array($udt, ['varchar', 'bpchar'], true) => substr($literal, 0, $meta['max_length'] ?? 255),
             in_array($udt, ['timestamptz', 'timestamp'], true) => $variant === 'update' ? '2027-01-01 08:30:00+00' : self::FILLER_TIMESTAMP,
             $udt === 'date' => $variant === 'update' ? '2027-01-01' : '2026-10-14',
