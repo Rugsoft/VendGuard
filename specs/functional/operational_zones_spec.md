@@ -4,7 +4,7 @@
 **Módulo:** 17 · Zonificación Operativa y Asignación Asistida  
 **Documento Espejo Funcional:** `specs/functional/operational_zones_spec.md`  
 **Referencia Canónica:** [`specs/17-operational-zones/spec.md`](../17-operational-zones/spec.md)  
-**Estado:** Cerrada y aprobada tras auditoría QA  
+**Estado:** Cerrada y aprobada · Enmienda de implementabilidad 2026-10-20 (Resoluciones QA 7 a 12)  
 **Fecha:** Octubre 2026  
 **Alineación Constitucional:** Artículos I al VII de la Constitución de VendGuard (Especialmente Art. II, Art. III, Art. V.1, Art. V.3 y Art. V.4)
 
@@ -34,7 +34,7 @@ Implantar un sistema de **Zonificación Territorial Operativa** y un motor de **
 
 | Perfil / Actor | Rol en la Zonificación y Asignación Asistida | Permisos y Restricciones |
 | :--- | :--- | :--- |
-| **📊 Coordinador de Operaciones** | Actor principal de configuración y triaje. Crea y gestiona zonas operativas, vincula códigos postales, define cuadrantes técnicos (titular/suplentes), asigna o desvincula sedes manualmente, y recibe sugerencias inteligentes en el modal de asignación. | Control total de configuración y visualización. Puede anular libremente la sugerencia del sistema; si anula una sugerencia sanitaria de frío del Art. II debe registrar justificación obligatoria ($\ge 20$ caracteres). |
+| **📊 Coordinador de Operaciones** | Actor principal de configuración y triaje. Crea y gestiona zonas operativas, vincula códigos postales, define cuadrantes técnicos (titular/suplentes), asigna o desvincula sedes manualmente, y recibe sugerencias inteligentes en el panel de asignación. | Control total de configuración y visualización. Puede anular libremente la sugerencia del sistema; si anula una sugerencia sanitaria de frío del Art. II debe registrar justificación obligatoria ($\ge 20$ caracteres). |
 | **📱 Técnico de Campo / Ruta** | Beneficiario operativo. Es asignado a una zona titular y posibles zonas suplentes. Recibe averías optimizadas según su demarcación territorial habitual. | Visualiza en su perfil o cabecera de ruta sus zonas asignadas (titular y suplentes) a título meramente informativo. No puede alterar los cuadrantes ni redefinir zonas. |
 | **🏢 Responsable de Sede** | Cliente / sede receptora del servicio de vending. | **Acceso estrictamente bloqueado (Art. V.4):** No tiene visibilidad alguna sobre nombres de zonas, límites territoriales, cuadrantes de técnicos ni criterios de asignación interna. El técnico sigue figurando bajo el código oficial de operador anónimo. |
 
@@ -80,24 +80,25 @@ Implantar un sistema de **Zonificación Territorial Operativa** y un motor de **
   * Estado operativo (`Activa` / `Inactiva`).
 * **RF-01.2: Validación y Unicidad de Códigos Postales:**
   * **Formato Estricto:** Los códigos postales deben estar formados exactamente por **5 dígitos numéricos** (`^\d{5}$`), normalizados con ceros a la izquierda (ej. `08001`).
-  * **Regla de Unicidad Territorial:** Un código postal solo puede pertenecer a **una única zona activa simultáneamente**.
+  * **Regla de Unicidad Territorial:** Un código postal solo puede pertenecer a **una única zona operativa**, activa o inactiva, durante todo su ciclo de vida (`PRIMARY KEY (postal_code)`). La desactivación de una zona libera sus códigos postales en la misma transacción (Resolución QA 7), de modo que quedan disponibles para otra zona; volver a activar la zona **no** los recupera automáticamente.
 * **RF-01.3: Criterios de Aceptación EARS:**
   * **[Ubiquitous]** El sistema debe impedir la creación de dos zonas con el mismo código identificativo o el mismo nombre.
-  * **[Event-driven]** Cuando el coordinador intente asignar a una zona un lote de códigos postales que ya pertenecen a otras zonas activas, el sistema debe presentar un modal previo detallando los códigos a mover y las sedes afectadas, aplicando el traslado de forma atómica en una única transacción tras la confirmación expresa.
-  * **[Event-driven]** Cuando el coordinador desactive una zona que contiene sedes activas, el sistema debe solicitar confirmación advirtiendo de que todas sus sedes (tanto heredadas como forzadas) pasarán al estado *"Sin Zona Asignada"* (`zone_id = NULL`), conservando su historial para una futura reactivación o reubicación.
+  * **[Event-driven]** Cuando el coordinador intente asignar a una zona un lote de códigos postales que ya pertenecen a otra zona, el sistema debe presentar un modal previo detallando los códigos a mover y las sedes afectadas, aplicando el traslado de forma atómica en una única transacción tras la confirmación expresa.
+  * **[Event-driven]** Cuando el coordinador desactive una zona que contiene sedes activas, el sistema debe solicitar confirmación advirtiendo de que todas sus sedes (tanto heredadas como forzadas) pasarán al estado *"Sin Zona Asignada"* (`zone_id = NULL`), conservando su historial. En la misma transacción, el sistema debe liberar sus códigos postales y dar de baja lógica (`removed_at`) las vinculaciones de su cuadrante técnico, exigiéndose `confirm_release = true` cuando existan códigos postales o técnicos vinculados (Resolución QA 7).
 
 ### RF-02: Cuadrante de Cobertura Técnica (Titularidad y Suplencias)
 * **RF-02.1: Reglas de Cobertura:**
-  * Un técnico solo puede ser **Titular Principal** (`is_primary = true`) de **máximo una zona operativa activa**.
+  * Un técnico solo puede ser **Titular Principal** (`is_primary = true`) de **máximo una zona operativa**, materializado con el índice único parcial `uq_technician_primary_zone` sobre las vinculaciones vivas (`is_primary = TRUE AND removed_at IS NULL`). Desactivar una zona extingue esa titularidad.
   * Un técnico puede ser configurado como **Suplente / Respaldo** (`is_primary = false`) en una o más zonas operativas adicionales.
   * Una zona operativa puede contar con uno o varios técnicos titulares y uno o varios suplentes.
 * **RF-02.2: Criterios de Aceptación EARS:**
   * **[Ubiquitous]** El sistema debe permitir únicamente la vinculación de usuarios con rol `TECHNICIAN` activo a los cuadrantes de zona.
   * **[Unwanted behavior]** Si el coordinador intenta marcar a un técnico como titular de una segunda zona cuando ya es titular de otra, el sistema debe advertir que perderá la titularidad de su zona previa y solicitar confirmación.
   * **[State-driven]** Mientras un técnico esté desactivado o de baja laboral, el sistema debe excluirlo de las sugerencias activas de la zona sin eliminar su vinculación histórica.
+  * **[Ubiquitous]** La baja de un técnico del cuadrante debe ser **lógica** (`removed_at`), nunca un borrado físico (Art. III.1). Una vinculación extinguida no se reactiva: si el técnico regresa, se registra una vinculación nueva y auditada (Resolución QA 10).
 
 ### RF-03: Herencia Territorial en Sedes y Anulación Manual
-* **RF-03.1: Herencia por Código Postal:** Al registrar o actualizar una sede, si su código postal coincide con alguno de los códigos postales de una zona activa, la sede heredará automáticamente dicha zona (`zone_id = zona.id`, `is_manual_override = false`).
+* **RF-03.1: Herencia por Código Postal:** Al registrar o actualizar una sede, si su código postal coincide con alguno de los códigos postales de una zona activa, la sede heredará automáticamente dicha zona (`zone_id = zona.id`, `is_manual_override = false`). El código postal es un atributo **obligatorio** de la sede en el alta y la edición, persistido en `locations.postal_code` con formato de cinco dígitos (Resolución QA 7); las sedes históricas que aún no lo tengan permanecen como *Sin Zona Asignada* hasta que se editen, porque la migración nunca inventa un código postal.
 * **RF-03.2: Asignación Forzada Manual (Excepción Operativa):** El coordinador debe poder anular la herencia y asignar manualmente una sede a cualquier zona operativa distinta, o desvincularla para dejarla en *"Sin Zona Asignada"*. En ese caso se fija `is_manual_override = true`.
 * **RF-03.3: Edición de Sedes y Traslado de Códigos Postales:**
   * Al editar el código postal de una sede, si esta **no** tenía asignación forzada manual (`is_manual_override = false`), el sistema recalcula automáticamente su zona heredada según el nuevo código postal. Si tenía asignación forzada manual (`is_manual_override = true`), la zona seleccionada se mantiene inalterada.
@@ -109,14 +110,14 @@ Implantar un sistema de **Zonificación Territorial Operativa** y un motor de **
   * **[Ubiquitous]** Las sedes cuyo código postal no coincida con ninguna zona activa deben mostrarse en el panel de sedes con la insignia visual *"Sin Zona Asignada"*.
 
 ### RF-04: Motor de Sugerencia Inteligente de Asignación en Triaje
-* **RF-04.1: Algoritmo de Ponderación Determinista:** Al desplegar el modal de asignación o reasignación de una avería, el sistema debe evaluar a los técnicos disponibles y calcular un índice numérico de idoneidad basado en:
+* **RF-04.1: Algoritmo de Ponderación Determinista:** Al desplegar el panel de asignación o reasignación de una avería, el sistema debe evaluar a los técnicos disponibles y calcular un índice numérico de idoneidad basado en:
   1. **Afinidad Territorial:**
      * Técnico titular de la zona de la sede: **+50 puntos**.
      * Técnico suplente de la zona de la sede: **+25 puntos**.
      * Técnico de otra zona: **+0 puntos**.
   2. **Presencia In Situ y Paradas Activas:**
-     * Si el técnico ya tiene una intervención `IN_PROGRESS` o pendiente en la **misma sede**: **+40 puntos** (atención inmediata sin desplazamiento).
-     * Si el técnico tiene intervenciones programadas en **otras sedes de la misma zona**: **+20 puntos**.
+     * Si el técnico ya tiene una parada viva (`ASSIGNED` o `IN_PROGRESS`) en la **misma sede**: **+40 puntos** (atención inmediata sin desplazamiento).
+     * Si el técnico tiene paradas vivas hoy en **otras sedes de la misma zona**: **+20 puntos**. Ambas bonificaciones son **excluyentes**: una parada en la misma sede no suma además el `+20` de zona (Resolución QA 12).
   3. **Penalización por Intervención en Curso en Otra Sede (Art. V.3 y Módulo 16):**
      * Si el técnico se encuentra actualmente con una parada `IN_PROGRESS` abierta en una **sede diferente**: **$-15$ puntos** de penalización y advertencia visible (*"⚠️ En curso en otra sede: requerirá pausar o finalizar antes de iniciar"*).
   4. **Carga Operativa Viva (Definición Objetiva):**
@@ -124,17 +125,17 @@ Implantar un sistema de **Zonificación Territorial Operativa** y un motor de **
      * Por cada ticket en pausa por falta de acceso (`PENDING_INFO`, Módulo 11): penalización atenuada de **$-2$ puntos** (reloj de SLA pausado sin dedicación física inmediata).
      * Se computan todas las paradas vivas en la hoja de ruta del técnico en el momento del triaje, con independencia de la fecha en que se abriera el expediente.
   5. **Disponibilidad Inmediata:** Exclusión de técnicos inactivos o dados de baja.
-* **RF-04.2: Regla de Desempate y Múltiples Titulares:** Si dos técnicos obtienen la misma puntuación final, el orden de sugerencia se resuelve de forma determinista por **mayor tiempo transcurrido desde la última asignación formal** (`assigned_at` en el histórico), situando en primer lugar al técnico que lleve más tiempo sin recibir trabajo para equilibrar la fatiga del equipo.
+* **RF-04.2: Regla de Desempate y Múltiples Titulares:** Si dos técnicos obtienen la misma puntuación final, el orden de sugerencia se resuelve de forma determinista por **mayor tiempo transcurrido desde su última asignación formal**, tomando `MAX(incidents.assigned_at)` de los expedientes que el técnico tiene asignados hoy; un técnico **sin ninguna asignación registrada** se trata como asignado en `epoch` (prioridad máxima de reparto) para equilibrar la fatiga del equipo. Si persiste el empate, ordena `users.id ASC`, garantizando reproducibilidad total.
 * **RF-04.3: Criterios de Aceptación EARS:**
-  * **[Event-driven]** Cuando el coordinador abra el modal de asignación de una avería, el sistema debe destacar al técnico con mayor puntuación bajo la etiqueta *"⭐ Sugerido por Zona"* con desglose explicativo de su puntuación.
+  * **[Event-driven]** Cuando el coordinador abra el panel de asignación de una avería, el sistema debe destacar al técnico con mayor puntuación bajo la etiqueta *"⭐ Sugerido por Zona"* con desglose explicativo de su puntuación.
   * **[Event-driven]** Cuando el coordinador pulse el botón directo *"Asignar sugerido"*, el sistema debe ejecutar la asignación técnica en una única interacción.
-  * **[Optional]** Si el coordinador decide no aceptar al técnico sugerido, el sistema debe permitir seleccionar a cualquier otro técnico del desplegable sin bloqueo alguno.
+  * **[Optional]** Si el coordinador decide no aceptar al técnico sugerido, el sistema debe permitir seleccionar a cualquier otro técnico del desplegable sin bloqueo alguno, **con la única excepción** de la salvaguarda sanitaria de RF-05.2, que exige justificación cuando se descarta una recomendación de frío.
 
 ### RF-05: Salvaguarda Sanitaria en Averías Críticas de Frío (Art. II y Art. V.1)
 * **RF-05.1: Protección de Emergencia Sanitaria (< 4h):** Si la avería recae sobre una máquina con alimentos perecederos (`PERISHABLE_FOOD` o `COMBO`) o cuenta con prioridad `CRITICAL`:
-  * El motor de sugerencia debe comprobar si el técnico titular de la zona tiene **cualquier parada previa activa** (correctiva o preventiva).
-  * Si el titular tiene paradas previas activas, el motor antepone de inmediato al técnico con guardia 24/7 activa (`is_on_call = true`) o con menor cola inmediata de trabajo, destacándolo con la insignia *"🚨 Prioridad Sanitaria Art. II · Guardia 24/7"*.
-* **RF-05.2: Justificación Obligatoria de Anulación Sanitaria (Art. V.1):** Si el coordinador decide no asignar al técnico de guardia sugerido y selecciona a un técnico que tenga paradas previas o que no esté de guardia, el sistema debe **exigir obligatoriamente una justificación de al menos 20 caracteres** antes de confirmar el despacho, auditando el motivo por el cual se pospone o asume el riesgo sanitario.
+  * El motor de sugerencia debe evaluar el **cuadrante titular completo** de la zona: el escalado se dispara cuando **ningún titular activo de la zona está libre** de paradas previas activas (correctiva o preventiva). Si al menos un titular está libre, no hay escalado y puntúa el scoring ordinario.
+  * Cuando el escalado se dispara, el motor antepone al técnico de guardia (`users.is_on_call = true`, Módulo 14), destacándolo con la insignia *"🚨 Prioridad Sanitaria Art. II · Guardia 24/7"*. Si hay varios técnicos de guardia, gana el de mayor puntuación; si **no hay ninguno**, se antepone el técnico activo con menor carga viva y, a igual carga, el más próximo (Resolución QA 9).
+* **RF-05.2: Justificación Obligatoria de Anulación Sanitaria (Art. V.1):** Si la avería es perecedera o `CRITICAL` y la recomendación sanitaria está activa, el coordinador debe aportar `override_justification` de **al menos 20 caracteres** siempre que asigne a un técnico distinto del recomendado; el campo viaja en el `PATCH /api/coordinator/incidents/{id}/assign` y se audita junto al despacho. Cuando la recomendación no es sanitaria, no se exige justificación adicional. El campo convive con `reassignment_reason`: uno razona el descarte sanitario y el otro el cambio de titular, y ambos pueden coexistir en una misma reasignación (Resolución QA 8).
 * **RF-05.3: Criterios de Aceptación EARS:**
   * **[State-driven]** Mientras una avería sea crítica o perecedera, el sistema debe anteponer al técnico de guardia 24/7 frente a titulares de zona con paradas previas activas.
   * **[Unwanted behavior]** Si el coordinador intenta confirmar la asignación a un técnico no sugerido en una avería sanitaria sin aportar un texto de justificación de $\ge 20$ caracteres, el sistema debe bloquear la acción mostrando el error de validación constitucional.
@@ -148,7 +149,7 @@ Implantar un sistema de **Zonificación Territorial Operativa** y un motor de **
     1. La sede donde el técnico tenga su parada `IN_PROGRESS` actual.
     2. Si no tiene parada en curso, la sede de su última parada completada hoy.
     3. Si aún no ha iniciado ruta, las coordenadas de la Base Central.
-  * **Sedes sin Coordenadas (`lat`/`lng` nulos):** Si la sede averiada o la del técnico carecen de coordenadas válidas, se aplica una distancia neutra penalizada (999 km), desempatando directamente por menor carga de trabajo activa.
+  * **Coordenadas inválidas:** `locations.latitude`/`longitude` y `route_settings.base_latitude`/`base_longitude` son `NOT NULL` con valores por defecto, así que el escenario degradado no es «columna nula» sino coordenada inválida (no finita, `0,0` o fuera del área operativa que valida `GeoDistanceService`): se aplica una distancia neutra penalizada de **999 km**, desempatando directamente por menor carga de trabajo activa (Resolución QA 5).
 * **RF-06.3: Criterios de Aceptación EARS:**
   * **[State-driven]** Mientras una zona esté desatendida, el sistema debe presentar a los técnicos del parque ordenados por proximidad Haversine y menor carga.
   * **[Unwanted behavior]** El sistema jamás debe bloquear la asignación de un ticket porque la zona esté desatendida; el coordinador siempre podrá despachar la incidencia.
@@ -164,20 +165,20 @@ Implantar un sistema de **Zonificación Territorial Operativa** y un motor de **
 
 ## 5. Requisitos No Funcionales (RNF-x)
 
-* **RNF-01 · Rendimiento del Recomendador:** El cálculo del índice de idoneidad y la ordenación de técnicos sugeridos para una incidencia debe completarse en menos de **100 milisegundos**, garantizando apertura instantánea del modal de asignación.
+* **RNF-01 · Rendimiento del Recomendador:** El cálculo del índice de idoneidad y la ordenación de técnicos sugeridos para una incidencia debe completarse en menos de **100 milisegundos**, garantizando apertura instantánea del panel de asignación. La medición se certifica sobre el endpoint real con una flota sembrada de 6 técnicos activos y 20 repeticiones, exigiendo **mediana < 100 ms**; el cálculo puro se certifica por determinismo y no por reloj de pared.
 * **RNF-02 · Agilidad de Triaje ($\le 2$ interacciones):** La asignación del técnico recomendado debe poder completarse en un máximo de **dos interacciones** (abrir modal $\to$ confirmar asignación con botón predeterminado).
 * **RNF-03 · Trazabilidad y Auditoría Atómica (Art. III):**
   * Cada cambio en la configuración de zonas, códigos postales o cuadrantes de técnicos debe registrar un evento inmutable en el registro de auditoría (`audit_log`).
-  * En traslados masivos de códigos postales, se registra un evento matriz **`OPERATIONAL_ZONE_POSTAL_CODE_TRANSFERRED`** con el balance global y eventos individuales **`LOCATION_ZONE_REASSIGNED`** por cada sede afectada dentro de la misma transacción.
-* **RNF-04 · Consistencia Territorial Idempotente:** La reubicación de códigos postales entre zonas debe ejecutarse de forma transaccional, garantizando que jamás existan códigos postales huérfanos o duplicados entre zonas activas.
+  * En traslados masivos de códigos postales, se registra un evento matriz **`ZONE_POSTAL_CODE_TRANSFERRED`** (entidad `OPERATIONAL_ZONE`) con el balance global y eventos individuales **`LOCATION_ZONE_REASSIGNED`** por cada sede afectada dentro de la misma transacción.
+* **RNF-04 · Consistencia Territorial Idempotente:** La reubicación de códigos postales entre zonas debe ejecutarse de forma transaccional, garantizando que jamás existan códigos postales huérfanos o duplicados en todo el catálogo.
 
 ---
 
 ## 6. Casos Límite y Reglas de Excepción
 
 1. **Sede con Código Postal Inexistente:** Si una sede se registra con un código postal que no existe en el catálogo de zonas, la sede queda registrada con `zone_id = NULL` y clasificada como *"Sin Zona Asignada"*.
-2. **Empate Técnico en la Puntuación:** Se desempata estrictamente por mayor tiempo transcurrido desde la última asignación formal (`assigned_at`).
-3. **Desactivación de una Zona con Averías Abiertas:** Las averías activas de sus sedes permanecen asignadas a sus técnicos actuales. Las sedes pasan a `zone_id = NULL` conservando su historial.
+2. **Empate Técnico en la Puntuación:** Se desempata estrictamente por mayor tiempo transcurrido desde la última asignación formal (`MAX(incidents.assigned_at)`; sin asignaciones previas, `epoch`) y, si persiste, por `users.id ASC`.
+3. **Desactivación de una Zona con Averías Abiertas:** Las averías activas de sus sedes permanecen asignadas a sus técnicos actuales. Las sedes pasan a `zone_id = NULL` conservando su historial, se liberan los códigos postales de la zona y se dan de baja lógica las vinculaciones de su cuadrante, todo en la misma transacción auditada.
 4. **Técnico Reasignado de Zona con Averías Pendientes:** Si un técnico deja de ser titular de una zona, conserva sus averías ya asignadas en curso para no perturbar su jornada actual.
 5. **Averías Concurrentes en la Misma Sede (Sinergia Módulo 16):** Si un técnico ya tiene una parada en la sede, la bonificación de presencia in situ (+40 pts) lo situará en primera posición. Si está `IN_PROGRESS` en otra sede, la penalización ($-15$ pts) advertirá de la incompatibilidad territorial.
 
@@ -195,14 +196,16 @@ Implantar un sistema de **Zonificación Territorial Operativa** y un motor de **
 ## 8. Criterios de Finalización (Definition of Done - DoD)
 
 * **DoD-01:** La configuración de zonas permite crear, editar, listar y desactivar zonas con nombre, código y color.
-* **DoD-02:** Los códigos postales (formato `^\d{5}$`) respetan la unicidad estricta entre zonas activas y se reasignan limpiamente con confirmación en bloque del coordinador.
+* **DoD-02:** Los códigos postales (formato `^\d{5}$`) son únicos en todo el catálogo y se trasladan entre zonas con confirmación en bloque del coordinador, sin duplicarse ni dejar huérfanas las sedes heredadas.
 * **DoD-03:** Las sedes heredan automáticamente la zona por su código postal y admiten anulación/asignación forzada manual (`is_manual_override = true`).
 * **DoD-04:** El cuadrante técnico permite fijar 1 zona titular y múltiples suplencias por técnico, excluyendo a técnicos inactivos.
-* **DoD-05:** El modal de asignación de incidencias presenta al técnico sugerido con desglose de puntuación (+50/+25 zona, +40/+20 in situ, -5/-2 carga, -15 otra sede) y asignación en 1 clic.
-* **DoD-06:** Ante emergencias críticas de frío (Art. II), el sistema antepone al técnico de guardia 24/7 si el titular de zona presenta paradas previas activas, y exige justificación $\ge 20$ caracteres si el coordinador descarta la sugerencia sanitaria (Art. V.1).
+* **DoD-05:** El panel de asignación de incidencias presenta al técnico sugerido con desglose de puntuación (+50/+25 zona, +40/+20 in situ, -5/-2 carga, -15 otra sede) y asignación en 1 clic.
+* **DoD-06:** Ante emergencias críticas de frío (Art. II), el sistema antepone al técnico de guardia 24/7 cuando ningún titular activo de la zona está libre de paradas previas, y exige `override_justification` $\ge 20$ caracteres si el coordinador descarta la recomendación sanitaria (Art. V.1).
 * **DoD-07:** Si una zona no tiene técnicos disponibles, se muestra la advertencia y se lista a los demás técnicos por proximidad Haversine / menor carga sin bloquear el despacho.
 * **DoD-08:** El portal de sede y las vistas públicas no contienen referencias a zonas ni cuadrantes (Art. V.4).
 * **DoD-09:** Todas las acciones territoriales quedan registradas inmutablemente en `audit_log` con evento dual matriz-sede en traslados masivos (Art. III).
+* **DoD-10:** Toda sede guarda un código postal válido (`locations.postal_code`) exigido en el alta y la edición, y la herencia de zona se recalcula al cambiarlo salvo anulación manual.
+* **DoD-11:** Desactivar una zona libera códigos postales y cuadrante de forma atómica y auditada, y la baja de un técnico del cuadrante es lógica (`removed_at`), preservando el histórico (Art. III.1).
 
 ---
 
@@ -212,5 +215,11 @@ Implantar un sistema de **Zonificación Territorial Operativa** y un motor de **
 * **Resolución QA 2 (Art. V.3 y Módulo 16 - Coexistencia entre Sedes):** Si un técnico tiene una parada `IN_PROGRESS` en otra sede distinta, se le penaliza con $-15$ puntos y advertencia visible. Si es en la misma sede, se le bonifica con $+40$ puntos.
 * **Resolución QA 3 (Cálculo de Carga y "Hoy"):** Se define la carga como toda parada viva en la hoja de ruta en el momento del triaje. Averías y preventivos penalizan $-5$ puntos; pausas `PENDING_INFO` penalizan atenuadamente $-2$ puntos.
 * **Resolución QA 4 (Código Postal y Ciclo de Vida):** Formato numérico estricto de 5 dígitos (`^\d{5}$`). La edición de sede recalcula zona si `is_manual_override = false`. La desactivación de zona pasa sedes a `NULL` (*"Sin Zona Asignada"*). Los traslados de códigos postales se confirman en bloque de forma atómica.
-* **Resolución QA 5 (Proximidad Haversine y Desempates):** Proximidad esférica Haversine respecto a parada `IN_PROGRESS`, última parada completada o Base Central. Sedes sin coordenadas computan 999 km de penalización. Desempates resueltos deterministamente por mayor tiempo desde la última asignación (`assigned_at`).
-* **Resolución QA 6 (Art. III - Trazabilidad Dual en Cambios Masivos):** En reubicaciones masivas se emite un evento matriz `OPERATIONAL_ZONE_POSTAL_CODE_TRANSFERRED` y eventos individuales `LOCATION_ZONE_REASSIGNED` por sede afectada en la misma transacción.
+* **Resolución QA 5 (Proximidad Haversine y Desempates):** Proximidad esférica Haversine respecto a parada `IN_PROGRESS`, última parada completada o Base Central (`route_settings.base_latitude`/`base_longitude`). Coordenadas inválidas computan 999 km de penalización. Desempates resueltos deterministamente por mayor tiempo desde la última asignación (`MAX(incidents.assigned_at)`, `epoch` si nunca asignado) y, en último término, por `users.id ASC`.
+* **Resolución QA 6 (Art. III - Trazabilidad Dual en Cambios Masivos):** En reubicaciones masivas se emite un evento matriz `ZONE_POSTAL_CODE_TRANSFERRED` (entidad `OPERATIONAL_ZONE`) y eventos individuales `LOCATION_ZONE_REASSIGNED` por sede afectada en la misma transacción.
+* **Resolución QA 7 (Código Postal de Sede y Ciclo de Vida de la Zona — aprobada 2026-10-20):** El código postal vive en `locations.postal_code` (`VARCHAR(5)`, `CHECK (postal_code IS NULL OR postal_code ~ '^[0-9]{5}$')`), es obligatorio en el alta y la edición de sede y la migración no inventa datos: las sedes históricas sin CP quedan como *Sin Zona Asignada*. La unicidad del CP es **global** (`PRIMARY KEY (postal_code)`) y desactivar una zona libera sus CPs y da de baja lógica su cuadrante en la misma transacción, con confirmación `confirm_release = true`. Reactivar la zona no restaura CPs ni cuadrantes.
+* **Resolución QA 8 (Justificación Sanitaria y Endpoint de Despacho — aprobada 2026-10-20):** El despacho se mantiene en `PATCH /api/coordinator/incidents/{id}/assign`; la justificación viaja en `override_justification` ($\ge 20$ caracteres) y solo se exige cuando la recomendación sanitaria está activa y el técnico elegido no es el recomendado. Convive con `reassignment_reason` sin sustituirlo.
+* **Resolución QA 9 (Cuadrante Titular Múltiple y Ausencia de Guardia — aprobada 2026-10-20):** El escalado del Art. II se evalúa sobre el cuadrante titular completo: solo se dispara si ningún titular activo está libre de paradas previas. Sin técnico de guardia, la recomendación recae en el técnico activo con menor carga viva y, a igual carga, el más próximo.
+* **Resolución QA 10 (Baja Lógica del Cuadrante — aprobada 2026-10-20):** `technician_zone_assignments` incorpora `removed_at`; la baja es lógica (Art. III.1), la unicidad se declara parcial (`uq_technician_zone_live ... WHERE removed_at IS NULL` y `uq_technician_primary_zone ... WHERE is_primary = TRUE AND removed_at IS NULL`) y el reingreso crea una vinculación nueva y auditada.
+* **Resolución QA 11 (Extensión del ENUM de Auditoría — aprobada 2026-10-20):** La migración `007` añade `OPERATIONAL_ZONE` y `TECHNICIAN_ZONE` a `audit_entity_type` con `ALTER TYPE ... ADD VALUE IF NOT EXISTS`, actualiza la declaración de `database/supabase_init.sql`, `AuditEvent::ENTITY_TYPES`, `AuditActionLabels.js` y las tres listas `CONTRACT_TABLES` (25 tablas). Como el runner envuelve cada migración en transacción, la `007` solo ejecuta DDL: ningún valor nuevo se usa hasta el commit.
+* **Resolución QA 12 (Exclusividad de Bonificaciones y Medición de RNF-01 — aprobada 2026-10-20):** `+40` (misma sede) y `+20` (otras sedes de la zona) son excluyentes. RNF-01 se certifica con mediana < 100 ms sobre 20 repeticiones del endpoint real con 6 técnicos sembrados.

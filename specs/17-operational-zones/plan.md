@@ -3,7 +3,7 @@
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
 **Módulo:** `17-operational-zones`  
 **Documento:** `specs/17-operational-zones/plan.md`  
-**Referencia Funcional:** [`specs/17-operational-zones/spec.md`](spec.md) y [`specs/functional/operational_zones_spec.md`](../functional/operational_zones_spec.md) (`RF-01` a `RF-07`, `RNF-01` a `RNF-04`, Resoluciones QA 1 a 6)  
+**Referencia Funcional:** [`specs/17-operational-zones/spec.md`](spec.md) y [`specs/functional/operational_zones_spec.md`](../functional/operational_zones_spec.md) (`RF-01` a `RF-07`, `RNF-01` a `RNF-04`, Resoluciones QA 1 a 12)  
 **Contratos Técnicos:** [`specs/technical/operational_zones_contracts.md`](../technical/operational_zones_contracts.md)  
 **Normativa Suprema:** [`constitution.md`](../../constitution.md) (Artículos I al VII)  
 **Directrices Operativas:** [`AGENTS.md`](../../AGENTS.md) (SDD, Dogma Vanilla, Dualismo Lingüístico)  
@@ -62,7 +62,7 @@ gestor-incidencias-vending/
 │   ├── Infrastructure/
 │   │   └── Repository/
 │   │       ├── PdoOperationalZoneRepository.php    # Implementación PDO de OperationalZoneRepositoryInterface
-│   │       └── PdoLocationRepository.php           # Ampliado para gestionar zone_id e is_manual_override en sedes
+│        │       └── PdoLocationRepository.php           # Ampliado: zone_id, is_manual_override y postal_code de sede
 │   └── Presentation/
 │       ├── Controller/
 │       │   ├── CoordinatorZoneController.php       # Endpoints /api/coordinator/zones y submódulos (CPs, técnicos)
@@ -76,10 +76,12 @@ gestor-incidencias-vending/
 │           ├── api.js                              # Métodos de cliente HTTP para zonas, cuadrantes y sugerencias
 │           ├── components/
 │           │   ├── OperationalZoneManagementTab.js # Pestaña de administración territorial de zonas y códigos postales
-│           │   ├── AssignTechnicianModal.js        # Modal interactivo de asignación asistida en 1 clic con badges y justificación
-│           │   └── TerritorialMapTab.js            # Filtro reactivo por zona operativa en el mapa territorial (Módulo M4)
+│           │   ├── AdminLocationsTab.js             # Campo obligatorio de código postal de sede (QA 7)
+│           │   └── CoordinatorTerritorialMapTab.js  # Filtro reactivo por zona operativa en el mapa territorial (Módulo M4)
+│           ├── utils/
+│           │   └── AuditActionLabels.js             # Catálogo de acciones y entidades nuevas (QA 11)
 │           └── views/
-│               └── CoordinatorDashboardView.js     # Integración de la pestaña territorial y el modal asistido
+│               └── CoordinatorDashboardView.js     # Pestaña territorial y panel de asignación existente ampliado
 └── tests/
     ├── unit/
     │   ├── TechnicianWorkloadScorerTest.php        # Test unitario puro del algoritmo de puntuación
@@ -240,7 +242,7 @@ gestor-incidencias-vending/
   }
   ```
 
-#### `POST /api/coordinator/incidents/{id}/assign` *(Extensión Art. V.1)*
+#### `PATCH /api/coordinator/incidents/{id}/assign` *(Extensión Art. V.1 / QA 8)*
 * **Payload Entrada:**
   ```json
   {
@@ -248,7 +250,7 @@ gestor-incidencias-vending/
     "override_justification": "Técnico Jordi finaliza en 10 min en Torre Glòries y se desplaza de inmediato al Hospital del Mar (distancia 5 min)."
   }
   ```
-* **Validación Constitucional:** Si `is_cold_chain_risk = true` y se descarta al técnico de guardia sugerido sin justificación de al menos 20 caracteres, responde `422 COLD_CHAIN_OVERRIDE_JUSTIFICATION_REQUIRED`.
+* **Validación Constitucional:** Si `is_cold_chain_risk = true` y se descarta al técnico de guardia sugerido sin `override_justification` de al menos 20 caracteres, responde `422 COLD_CHAIN_OVERRIDE_JUSTIFICATION_REQUIRED`. El campo convive con `reassignment_reason`, que ya envía el cliente actual.
 
 ---
 
@@ -304,7 +306,8 @@ def compute_technician_score(technician, incident, location, active_stops):
     breakdown['onsite_presence'] = s_in_situ
 
     # 3. Paradas en la misma zona (RF-04.1.2)
-    has_stop_in_zone = any(s.zone_id == location.zone_id and s.location_id != location.id for s in active_stops[technician.id])
+    # Excluyente con la presencia in situ (QA 12): la misma sede nunca suma ambos bonos.
+    has_stop_in_zone = s_in_situ == 0 and any(s.zone_id == location.zone_id and s.location_id != location.id for s in active_stops[technician.id])
     s_zone = 20 if has_stop_in_zone else 0
     score += s_zone
     breakdown['same_zone_stops'] = s_zone
@@ -322,10 +325,12 @@ def compute_technician_score(technician, incident, location, active_stops):
     score += s_carga
     breakdown['active_workload_penalty'] = s_carga
 
-    # 6. Salvaguarda Sanitaria de Frío (RF-05.1 / QA 1 / Art. II)
+    # 6. Salvaguarda Sanitaria de Frío (RF-05.1 / QA 1 / QA 9 / Art. II)
+    # El escalado se decide sobre el cuadrante titular completo: solo se activa
+    # cuando ningún titular activo de la zona está libre de paradas previas.
     s_frio = 0
     if incident.is_perishable or incident.priority == 'CRITICAL':
-        if technician.is_on_call and (standard_active_stops > 0 or has_in_progress_other_site):
+        if zone_quadrant_all_busy and technician.is_on_call:
             s_frio = 100
     score += s_frio
     breakdown['cold_chain_on_call_bonus'] = s_frio
@@ -351,6 +356,8 @@ def rank_technicians(technicians, incident, location):
     def sort_key(item):
         t = item['tech']
         dist = calculate_haversine_reference_distance(t, location) # 999.0 si nulo
+        # MAX(incidents.assigned_at) de los expedientes asignados hoy;
+        # sin asignaciones previas, epoch (prioridad máxima de reparto).
         last_assign = t.last_assigned_at or '1970-01-01T00:00:00Z'
         return (-item['score'], dist, last_assign, t.id)
         
@@ -393,6 +400,8 @@ FROM tmp_affected_locations;
 COMMIT;
 ```
 
+> **Nota (QA 7 / QA 10):** el paso 2 **mueve** la fila del CP (`UPDATE ... SET zone_id`), nunca la duplica, porque `postal_code` es clave primaria global. La desactivación de una zona reutiliza el patrón dentro de su propia transacción: `UPDATE locations SET zone_id = NULL`, liberación de los CPs de la zona (`DELETE FROM operational_zone_postal_codes WHERE zone_id = :id`, filas de CP, nunca la zona) y baja lógica del cuadrante (`UPDATE technician_zone_assignments SET removed_at = CURRENT_TIMESTAMP`), jamás un `DELETE` físico (Art. III.1).
+
 ---
 
 ## 4. Arquitectura de Eventos y Componentes Frontend Vanilla
@@ -402,19 +411,19 @@ Siguiendo las directrices de `docs/design.md` (tokens Docker, color principal `#
 ```mermaid
 graph TD
     View["CoordinatorDashboardView.js"] --> TabMgr["OperationalZoneManagementTab.js<br>(Nueva Pestaña Administración)"]
-    View --> AssignModal["AssignTechnicianModal.js<br>(Modal de Triaje Asistido)"]
-    View --> MapTab["TerritorialMapTab.js<br>(Filtro por Zona M4)"]
+    View --> AssignPanel["Panel de asignación existente<br>(badges, sugerido y justificación)"]
+    View --> MapTab["CoordinatorTerritorialMapTab.js<br>(Filtro por Zona M4)"]
     
-    AssignModal --> API_Sugg["api.coordinator.getSuggestedTechnicians()"]
-    AssignModal --> API_Assign["api.coordinator.assignIncident()"]
+    AssignPanel --> API_Sugg["api.coordinator.getSuggestedTechnicians()"]
+    AssignPanel --> API_Assign["api.coordinator.assignTechnician()"]
     
     TabMgr --> API_Zones["api.coordinator.getZones()"]
     TabMgr --> API_CPs["api.coordinator.updatePostalCodes()"]
     TabMgr --> API_Techs["api.coordinator.setZoneTechnicians()"]
 ```
 
-### 4.1. Componente: `AssignTechnicianModal.js`
-* Se abre al pulsar *"Asignar"* en la bandeja de triaje.
+### 4.1. Panel de asignación asistida en `CoordinatorDashboardView`
+* Amplía el panel de asignación que ya existe en la bandeja de triaje; no se crea un modal paralelo, porque la asignación inline actual ya envía `reassignment_reason`.
 * Realiza `GET /api/coordinator/incidents/{id}/suggested-technicians`.
 * Si la avería es crítica o perecedera y se sugiere al técnico de guardia, muestra un banner sanitario rojo/ámbar:
   `🚨 Prioridad Sanitaria Art. II: Atención requerida en < 4 horas. Se sugiere técnico de guardia.`
@@ -434,11 +443,13 @@ graph TD
 
 | Decisión Técnica Adoptada | Justificación y Ventaja | Alternativas Descartadas y Motivo |
 | :--- | :--- | :--- |
-| **1. Clave Primaria Natural en `operational_zone_postal_codes.postal_code`** | Impone la **Unicidad Territorial Estricta** (RF-01.2) a nivel de motor PostgreSQL. Un CP jamás puede duplicarse entre dos zonas por diseño físico de la base de datos. | *Clave subrogada `id` con índice UNIQUE:* innecesaria y propensa a inconsistencias si se usa `ON CONFLICT` descuidado. |
-| **2. Índice Único Parcial para Titularidad Técnica (`WHERE is_primary = TRUE`)** | Permite que un técnico tenga múltiples suplencias (`is_primary = FALSE`), pero garantiza que solo tenga **máximo una titularidad principal** sin requerir bloqueos de aplicación complejos. | *Disparadores PL/pgSQL:* sobrecarga de mantenimiento; el índice parcial resuelve la restricción en Cero Bloatware. |
+| **1. Clave Primaria Natural en `operational_zone_postal_codes.postal_code`** | Impone la **unicidad global** del CP (RF-01.2 / QA 7) a nivel de motor. La desactivación de una zona libera sus filas de CP para que puedan reasignarse. | *Clave subrogada `id` con índice UNIQUE:* innecesaria y propensa a inconsistencias si se usa `ON CONFLICT` descuidado. |
+| **2. Índice Único Parcial para Titularidad Técnica (`WHERE is_primary = TRUE AND removed_at IS NULL`)** | Permite múltiples suplencias y reingresos con histórico, garantizando **máximo una titularidad principal viva** sin bloqueos de aplicación. | *Disparadores PL/pgSQL:* sobrecarga de mantenimiento; el índice parcial resuelve la restricción en Cero Bloatware. |
 | **3. Proximidad Haversine sin Rastreo GPS en Vivo (Art. V.4)** | Respeta estrictamente la Constitución: no se rastrea la ubicación continua del trabajador. Se calcula la distancia euclidiana esférica respecto a su última parada física confirmada. | *Google Maps Distance Matrix / GPS en segundo plano:* viola el Art. V.4, añade costes de API externa y rompe el Dogma Vanilla. |
 | **4. Justificación Obligatoria $\ge 20$ chars en Descarte Sanitario (Art. V.1)** | Protege la cadena de frío del Art. II. Si el coordinador decide no enviar al técnico de guardia, asume la responsabilidad dejando constancia auditable. | *Permitir descarte silencioso:* pondría en grave riesgo las máquinas perecederas y relajaría el blindaje constitucional. |
 | **5. Auditoría Dual Atómica en Traslados Masivos (Art. III / QA 6)** | Permite consultar tanto la traza de la operación global de la zona como el historial cronológico individual en la ficha de cada sede. | *Auditar solo la zona:* dejaría a las sedes sin trazabilidad de cuándo ni por qué cambiaron de demarcación. |
+| **6. Código Postal en la Propia Sede (`locations.postal_code`)** | La herencia territorial exige el CP en el maestro de sedes; se admite anulable en el motor para no inventar datos históricos y se exige en el alta/edición (QA 7). | *Tabla puente sede↔CP:* duplicaría la verdad y complicaría la edición de la sede. |
+| **7. Extensión del ENUM `audit_entity_type`** | `OPERATIONAL_ZONE` y `TECHNICIAN_ZONE` describen el hecho real mejor que reutilizar `LOCATION`/`USER`, y el ENUM nativo sigue siendo la garantía constitucional (QA 11). | *Reutilizar entidades existentes:* habría que deducir el sujeto desde la acción y el visor perdería el filtro por entidad. |
 
 ---
 
@@ -451,23 +462,26 @@ graph TD
 * **`PostalCodeValidationTest.php`:**
   * Valida que el Value Object `PostalCode` acepte únicamente `^\d{5}$` y rechace letras, longitudes distintas o espacios.
 * **`TechnicianAssignmentSuggesterTest.php`:**
-  * Valida la ordenación final, el comportamiento ante zonas desatendidas y los desempates deterministas por `assigned_at ASC`.
+  * Valida la ordenación final, el comportamiento ante zonas desatendidas y los desempates deterministas por `MAX(incidents.assigned_at)` y `users.id ASC`.
 
 ### 6.2. Pruebas de Integración HTTP y Base de Datos (PostgreSQL)
 * **`PostgresZoneSchemaTest.php`:**
-  * Aplica la migración `007_operational_zones.sql` y certifica la restricción de clave primaria en `postal_code` y el índice único parcial `uq_technician_primary_zone`.
+  * Aplica la migración `007_operational_zones.sql` y certifica la clave primaria global en `postal_code`, el `CHECK` de formato, `locations.postal_code`, la extensión del ENUM de auditoría y los índices únicos parciales `uq_technician_zone_live` y `uq_technician_primary_zone` (`removed_at IS NULL`).
+  * Actualiza las tres listas `CONTRACT_TABLES` (`PostgresSchemaTest`, `SchemaConvergenceParityTest`, `PostgresConstitutionalTest`) de 22 a **25 tablas**.
 * **`CoordinatorZoneApiTest.php`:**
   * CRUD completo de zonas, validación de nombres/códigos duplicados (`409`), y flujo de confirmación de traslado de códigos postales con sedes afectadas.
 * **`SuggestedTechniciansApiTest.php`:**
-  * Verifica el contrato JSON del endpoint `/suggested-technicians`, verificando que el tiempo de respuesta sea $< 100\text{ ms}$ (RNF-01).
+  * Verifica el contrato JSON del endpoint `/suggested-technicians` y certifica RNF-01 con la **mediana de 20 repeticiones** sobre 6 técnicos sembrados, no con una sola medición.
 * **`ColdChainOverrideJustificationTest.php`:**
   * Intenta asignar un técnico no sugerido en una avería perecedera con texto de 10 caracteres $\to$ rechazo `422`. Repite con texto de 22 caracteres $\to$ éxito `200` y persistencia en `audit_log`.
 
 ### 6.3. Pruebas Unitarias de Frontend (Node.js ESM)
 * **`OperationalZoneManagementTabTest.mjs`:**
   * Renderizado reactivo de la pestaña de zonas, selector de color hexadecimal y visualización de badges de códigos postales.
-* **`AssignTechnicianModalTest.mjs`:**
-  * Interacción en $\le 2$ toques para asignar al técnico sugerido y despliegue condicional del textarea de justificación sanitaria.
+* **`CoordinatorAssignPanelTest.mjs`:**
+  * Interacción en $\le 2$ toques sobre el panel de asignación existente y despliegue condicional del campo `override_justification`.
+* **`AuditActionCatalogTest.php` / `AuditEntityTypesTest.php`:**
+  * Certifican que las 11 acciones y las 2 entidades nuevas están catalogadas en `AuditActionLabels.js`, en `AuditEvent::ENTITY_TYPES` y en el ENUM del motor (QA 11).
 
 ---
 
@@ -478,18 +492,18 @@ graph TD
 | **RF-01.1 / RF-01.2 / DoD-01 / DoD-02** | `CoordinatorZoneController`, `PdoOperationalZoneRepository` | Tabla `operational_zones`, `operational_zone_postal_codes` |
 | **RF-01.3 / QA 4** | `OperationalZoneService::updatePostalCodes()` | Modal de confirmación en bloque de CPs en conflicto |
 | **RF-02.1 / RF-02.2 / DoD-04** | `technician_zone_assignments`, Value Object `ZoneAffinityType` | Índice parcial `uq_technician_primary_zone` |
-| **RF-03.1 / RF-03.2 / DoD-03** | `PdoLocationRepository::setManualOverride()` | Columna `locations.is_manual_override` |
+| **RF-03.1 / RF-03.2 / DoD-03** | `PdoLocationRepository::setManualOverride()` y `setPostalCode()` | Columnas `locations.postal_code` e `is_manual_override` |
 | **RF-03.3 / QA 4** | Migración atómica en `OperationalZoneService` | Preservación de `incidents.assigned_technician_id` |
-| **RF-04.1 / DoD-05** | `TechnicianWorkloadScorer` (+50/+25, +40/+20, -15, -5/-2) | Desglose visual en `AssignTechnicianModal.js` |
+| **RF-04.1 / DoD-05** | `TechnicianWorkloadScorer` (+50/+25, +40/+20 excluyentes, -15, -5/-2) | Desglose visual en el panel de asignación de `CoordinatorDashboardView` |
 | **RF-04.2 / QA 5** | Ordenación multinivel por `assigned_at ASC` | Criterio determinista de desempate en sugerencias |
 | **RF-05.1 / DoD-06 / QA 1** | Escalado $+100$ pts a `is_on_call` ante SLA < 4h | Badge destacado *"🚨 Prioridad Sanitaria Art. II"* |
-| **RF-05.2 / QA 1 / Art. V.1** | Validación en `CoordinatorController::assignIncident()` | Campo obligatorio de justificación $\ge 20$ chars |
+| **RF-05.2 / QA 1 / QA 8 / Art. V.1** | Validación de `override_justification` en `CoordinatorController::assignTechnician()` (`PATCH`) | Campo obligatorio de justificación $\ge 20$ chars en el panel de asignación |
 | **RF-06.1 / RF-06.2 / DoD-07 / QA 5** | Fallback Haversine en `GeoDistanceService` | Alerta *"⚠️ Sin técnicos disponibles en esta zona"* |
 | **RF-07.1 / DoD-08 / Art. V.4** | Filtrado estricto en `LocationPortalController` | Anonimización `"Servicio Técnico Oficial · OP-XXX"` |
 | **RNF-01** | Consultas CTE indexadas en `zone_id` y `postal_code` | Apertura de modal en $< 100\text{ ms}$ |
 | **RNF-02** | Endpoint directo de asignación | Flujo de triaje en $\le 2$ clics |
 | **RNF-03 / QA 6 / Art. III** | Transacción PDO con eventos matriz e hijos | Tabla inmutable `audit_log` (`ZONE_*`, `LOCATION_*`) |
-| **RNF-04** | Transacciones atómicas con bloqueo de fila | Migración idempotente de códigos postales |
+| **RNF-04** | Transacciones atómicas con bloqueo de fila | Migración idempotente de códigos postales y liberación al desactivar (QA 7) |
 
 ---
 
