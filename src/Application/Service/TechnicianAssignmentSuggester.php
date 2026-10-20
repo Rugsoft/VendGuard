@@ -36,9 +36,12 @@ use VendGuard\Core\Service\TechnicianWorkloadScorer;
  *      ningún técnico de guardia, manda la menor carga viva y, a igual carga, la
  *      mayor proximidad Haversine. Es la alternativa que fija la resolución, aunque
  *      un titular puntúe más por afinidad territorial.
- *   3. **Zona desatendida (RF-06.1, QA 5).** Sin titulares ni suplentes activos no
- *      hay afinidad que premie: el ranking se ordena por proximidad Haversine y, a
- *      igual distancia, por puntuación (menor carga).
+ *   3. **Zona desatendida (RF-06.1, QA 5 y QA 14).** Sin titulares ni suplentes
+ *      activos —o con todo el cuadrante en el cupo de {@see self::MAX_LIVE_STOPS_PER_TECHNICIAN}
+ *      paradas vivas— no hay afinidad que premie: el ranking se ordena por
+ *      proximidad Haversine y, a igual distancia, por puntuación (menor carga). El
+ *      técnico en el cupo sigue listado y asignable: el cupo cambia el orden y la
+ *      advertencia, nunca bloquea (RF-06.3).
  *   4. **Caso ordinario (RF-04.2).** Puntuación descendente y, en caso de empate,
  *      mayor tiempo transcurrido desde la última asignación formal
  *      (`assigned_at` ascendente; sin asignaciones, `epoch`). El identificador
@@ -100,6 +103,17 @@ final class TechnicianAssignmentSuggester
     /** Insignia de incompatibilidad territorial visible (RF-04.1.3). */
     public const BADGE_IN_PROGRESS_ELSEWHERE = 'EN_CURSO_OTRA_SEDE';
 
+    /**
+     * Cupo de paradas vivas por técnico para considerar desatendida la zona
+     * (RF-06.1, Resolución QA 14).
+     *
+     * Es una constante de dominio y no configuración persistida: el cálculo tiene
+     * que ser determinista y no depender de una tabla de ajustes que el MVP no
+     * tiene. Una parada viva es una avería activa, una pausa por falta de acceso o
+     * un preventivo de hoy —la misma carga con la que puntúa el scorer (QA 3)—.
+     */
+    public const MAX_LIVE_STOPS_PER_TECHNICIAN = 10;
+
     private GeoDistanceService $geoDistanceService;
 
     public function __construct(?GeoDistanceService $geoDistanceService = null)
@@ -141,18 +155,27 @@ final class TechnicianAssignmentSuggester
             $candidates[] = self::normalizeTechnician($technician, $location);
         }
 
-        $zoneId = $location['zone_id'];
         $primaries = array_values(array_filter(
             $candidates,
             static fn (array $candidate): bool => $candidate['affinity'] === ZoneAffinityType::PRIMARY
         ));
 
         $coldChainEscalation = $isColdChainRisk && self::noPrimaryFree($primaries);
-        $unattendedZone = $candidates === []
-            || array_filter(
-                $candidates,
-                static fn (array $candidate): bool => $candidate['affinity'] !== ZoneAffinityType::NONE
-            ) === [];
+
+        // RF-06.1 / QA 14: la zona se queda sin nadie a quien enviar cuando no hay
+        // cuadrante vivo o cuando todo él ha agotado su cupo. El profesional en el
+        // cupo no se excluye del ranking: sigue asignable, solo deja de contar como
+        // cobertura de la zona.
+        $zoneTechnicians = array_values(array_filter(
+            $candidates,
+            static fn (array $candidate): bool => $candidate['affinity'] !== ZoneAffinityType::NONE
+        ));
+        $freeZoneTechnicians = array_filter(
+            $zoneTechnicians,
+            static fn (array $candidate): bool => self::liveStops($candidate) < self::MAX_LIVE_STOPS_PER_TECHNICIAN
+        );
+        $unattendedZone = $freeZoneTechnicians === [];
+        $zoneAtCapacity = $unattendedZone && $zoneTechnicians !== [];
 
         $hasOnCall = array_filter($candidates, static fn (array $candidate): bool => $candidate['is_on_call']) !== [];
 
@@ -203,7 +226,7 @@ final class TechnicianAssignmentSuggester
                 'top_technician_id' => $top['technician_id'] ?? null,
                 'is_cold_chain_escalation' => $coldChainEscalation,
                 'unattended_zone' => $unattendedZone,
-                'explanation' => $this->explain($coldChainEscalation, $hasOnCall, $unattendedZone, $top, $zoneId),
+                'explanation' => $this->explain($coldChainEscalation, $hasOnCall, $unattendedZone, $top, $zoneAtCapacity),
             ],
             $ranked
         );
@@ -329,7 +352,7 @@ final class TechnicianAssignmentSuggester
         bool $hasOnCall,
         bool $unattendedZone,
         ?array $top,
-        ?int $zoneId
+        bool $zoneAtCapacity
     ): string {
         if ($top === null) {
             return '⚠️ No hay técnicos activos disponibles en el parque: el despacho requiere incorporar o reactivar un técnico.';
@@ -353,8 +376,11 @@ final class TechnicianAssignmentSuggester
 
         if ($unattendedZone) {
             return sprintf(
-                '⚠️ Sin técnicos disponibles en esta zona: %s encabeza la lista por proximidad Haversine y menor carga. '
+                '⚠️ Sin técnicos disponibles en esta zona%s: %s encabeza la lista por proximidad Haversine y menor carga. '
                     . 'La asignación no queda bloqueada.',
+                $zoneAtCapacity
+                    ? sprintf(' (cuadrante completo en el cupo de %d paradas vivas)', self::MAX_LIVE_STOPS_PER_TECHNICIAN)
+                    : '',
                 $top['name']
             );
         }
@@ -382,16 +408,25 @@ final class TechnicianAssignmentSuggester
         }
 
         foreach ($primaries as $primary) {
-            $liveStops = $primary['active_incidents']
-                + $primary['pending_info_incidents']
-                + $primary['preventive_orders_today'];
-
-            if ($liveStops === 0) {
+            if (self::liveStops($primary) === 0) {
                 return false;
             }
         }
 
         return true;
+    }
+
+    /**
+     * Paradas vivas de un candidato: averías activas, pausas por falta de acceso y
+     * preventivos de hoy (QA 3, QA 14).
+     *
+     * @param array<string, mixed> $candidate
+     */
+    private static function liveStops(array $candidate): int
+    {
+        return $candidate['active_incidents']
+            + $candidate['pending_info_incidents']
+            + $candidate['preventive_orders_today'];
     }
 
     /**

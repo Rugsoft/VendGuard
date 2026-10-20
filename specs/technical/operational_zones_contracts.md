@@ -461,6 +461,8 @@ Punto central del recomendador. Evalúa a todos los técnicos disponibles frente
 }
 ```
 
+**Semántica de `unattended_zone` (RF-06.1 / QA 14):** la bandera se enciende cuando no queda ningún titular ni suplente **activo** en la zona, o cuando todos ellos alcanzan el **cupo de 10 paradas vivas** —averías activas + pausas `PENDING_INFO` + preventivos de hoy—. El técnico en el cupo no desaparece del ranking ni bloquea el despacho: sigue listado y asignable, pero la recomendación pasa a ordenarse por proximidad Haversine y menor carga, y el panel muestra el aviso de zona desatendida.
+
 ---
 
 ### 3.7. `PATCH /api/coordinator/incidents/{id}/assign` *(Extensión Art. V.1 / QA 8)*
@@ -627,7 +629,7 @@ Simultáneamente, para cada sede en `affected_location_ids` se inserta:
 | **RF-04.2** | Desempate por última asignación | Ordenación determinista por `assigned_at ASC` (mayor tiempo sin asignar) |
 | **RF-05.1** | Salvaguarda sanitaria de frío (Art. II) | Escalamiento $+100$ pts al técnico de guardia ante riesgo de 4h |
 | **RF-05.2** | Justificación obligatoria $\ge 20$ chars en `override_justification` (Art. V.1) | Validación en `PATCH /api/coordinator/incidents/{id}/assign` (QA 8) |
-| **RF-06.1** | Manejo de zonas desatendidas | Detección de `unattended_zone = true` y fallback por proximidad Haversine |
+| **RF-06.1** | Manejo de zonas desatendidas | Detección de `unattended_zone = true` (sin cuadrante activo **o** con todos sus técnicos en el cupo de 10 paradas vivas, QA 14) y fallback por proximidad Haversine |
 | **RF-06.2** | Proximidad Haversine sin GPS | `GeoDistanceService` midiendo respecto a parada actual o Base Central |
 | **RF-07.1** | Aislamiento y privacidad (Art. V.4) | `LocationPortalController` sanitiza todo dato de zonificación |
 | **RNF-01** | Rendimiento $< 100\text{ ms}$ (mediana de 20 repeticiones, 6 técnicos sembrados) | Consultas combinadas CTE con índices en `zone_id`, `technician_id` y `postal_code` |

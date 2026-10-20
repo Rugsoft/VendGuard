@@ -37,6 +37,21 @@ a un módulo funcional certificado por la batería global.
 - Transferencia transaccional de códigos postales entre zonas: bloqueo `FOR UPDATE`
   de las sedes heredadas, reasignación en bloque y auditoría dual matriz-sede.
 
+### Corregido (2026-10-20, auditoría de cierre)
+
+- El panel de sedes incorpora la columna de zona operativa con el color de la
+  demarcación y la insignia «Sin Zona Asignada» para los centros cuyo código postal
+  no resuelve ninguna zona activa (RF-03.4).
+- La edición de sede permite forzar una zona, dejarla sin zona o restablecer la
+  herencia por código postal; la excepción viaja al servidor después del guardado y
+  solo cuando el coordinador la cambia (RF-03.2, RF-03.3).
+- El «cupo máximo de paradas» de RF-06.1 deja de ser una cláusula sin magnitud: se
+  fija en diez paradas vivas por técnico (Resolución QA 14) y una zona con todo el
+  cuadrante en el cupo se declara desatendida sin excluir a sus técnicos del ranking.
+- La preservación de averías que exige RF-03.3 y los casos límite 3 y 4 queda
+  certificada con aserciones sobre el traslado de CP, la desactivación de la zona y
+  la baja del técnico del cuadrante.
+
 ### Seguridad
 
 - El portal de la sede no recibe el nombre, código ni color de su zona operativa, ni

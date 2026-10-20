@@ -2,7 +2,7 @@
 
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
 **Módulo:** 17 · Zonificación Operativa y Asignación Asistida  
-**Estado:** Cerrada y aprobada · Enmienda de implementabilidad 2026-10-20 (Resoluciones QA 7 a 12) · Implementación certificada 2026-10-20 (T-ZONE-01 a T-ZONE-13)  
+**Estado:** Cerrada y aprobada · Enmienda de implementabilidad 2026-10-20 (Resoluciones QA 7 a 12) · Implementación certificada 2026-10-20 (T-ZONE-01 a T-ZONE-13) · Enmienda de auditoría 2026-10-20 (Resolución QA 14, T-ZONE-14)  
 **Fecha:** Octubre 2026  
 **Alineación Constitucional:** Artículos I al VII de la Constitución de VendGuard (Especialmente Art. II, Art. III, Art. V.1, Art. V.3 y Art. V.4)
 
@@ -139,7 +139,7 @@ Implantar un sistema de **Zonificación Territorial Operativa** y un motor de **
   * **[Unwanted behavior]** Si el coordinador intenta confirmar la asignación a un técnico no sugerido en una avería sanitaria sin aportar un texto de justificación de $\ge 20$ caracteres, el sistema debe bloquear la acción mostrando el error de validación constitucional.
 
 ### RF-06: Gestión de Zonas Desatendidas o Sin Técnicos Disponibles
-* **RF-06.1: Detección y Proximidad Espacial:** Si la zona de la sede no cuenta con técnicos asignados o si todos sus integrantes están dados de baja o han alcanzado su cupo máximo de paradas:
+* **RF-06.1: Detección y Proximidad Espacial:** Si la zona de la sede no cuenta con técnicos asignados o si todos sus integrantes están dados de baja o han alcanzado su **cupo máximo de 10 paradas vivas** cada uno (Resolución QA 14):
   * El sistema muestra la advertencia *"⚠️ Sin técnicos disponibles en esta zona"*.
   * El sistema lista a los demás técnicos activos ordenados por: (1.º) proximidad espacial respecto a su parada más reciente, y (2.º) menor carga de trabajo.
 * **RF-06.2: Cálculo de Proximidad sin GPS (Dogma Vanilla):**
@@ -222,3 +222,4 @@ Implantar un sistema de **Zonificación Territorial Operativa** y un motor de **
 * **Resolución QA 11 (Extensión del ENUM de Auditoría — aprobada 2026-10-20):** La migración `007` añade `OPERATIONAL_ZONE` y `TECHNICIAN_ZONE` a `audit_entity_type` con `ALTER TYPE ... ADD VALUE IF NOT EXISTS`, actualiza la declaración de `database/supabase_init.sql`, `AuditEvent::ENTITY_TYPES`, `AuditActionLabels.js` y las tres listas `CONTRACT_TABLES` (25 tablas). Como el runner envuelve cada migración en transacción, la `007` solo ejecuta DDL: ningún valor nuevo se usa hasta el commit.
 * **Resolución QA 12 (Exclusividad de Bonificaciones y Medición de RNF-01 — aprobada 2026-10-20):** `+40` (misma sede) y `+20` (otras sedes de la zona) son excluyentes. RNF-01 se certifica con mediana < 100 ms con 20 repeticiones del endpoint real con 6 técnicos sembrados.
 * **Resolución QA 13 (Liberación Lógica de Códigos Postales — aprobada 2026-10-20):** La liberación de CP que exige QA 7 no puede ser un `DELETE` sobre `operational_zone_postal_codes`: el Art. III.1 prohíbe el borrado físico y el disparador constitucional lo rechaza con `SQLSTATE '45000'`. Por tanto, la fila se conserva y se marca con `released_at`; la tabla obtiene una clave primaria sustituta (`id`) y la unicidad territorial pasa a un índice único parcial `uq_zone_postal_codes_live (postal_code) WHERE released_at IS NULL`. Un CP liberado queda disponible para otra zona (convive con su fila histórica), reactivar la zona de origen no lo recupera y el historial completo sigue siendo auditable. La migración `008` evoluciona las bases existentes y `supabase_init.sql` declara la forma final.
+* **Resolución QA 14 (Cupo de Paradas Vivas de la Zona Desatendida — aprobada 2026-10-20):** El «cupo máximo de paradas» de RF-06.1 se fija en **10 paradas vivas por técnico** (`TechnicianAssignmentSuggester::MAX_LIVE_STOPS_PER_TECHNICIAN`), entendiendo por parada viva toda avería activa (`ASSIGNED`, `IN_PROGRESS`, `PENDING_PARTS`), toda pausa por falta de acceso (`PENDING_INFO`) y toda orden preventiva de hoy, que es la misma carga con la que puntúa el scorer (QA 3). Una zona está desatendida cuando **ningún** titular ni suplente activo se sitúa por debajo del cupo; el profesional al cupo **sigue apareciendo en el ranking y sigue siendo asignable** (RF-06.3), pero no evita la advertencia ni la ordenación por proximidad y menor carga. El umbral es una constante de dominio, no configuración persistida: así el cálculo es determinista y no depende de una tabla de ajustes que el MVP no tiene.

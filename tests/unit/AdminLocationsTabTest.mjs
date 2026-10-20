@@ -71,7 +71,9 @@ const mockLocations = [
     contact_email: 'recepcion.hospitalmar@cliente.es',
     is_active: true,
     active_machines_count: 2,
-    total_machines_count: 2
+    total_machines_count: 2,
+    zone_id: 1,
+    is_manual_override: false
   },
   {
     id: 2,
@@ -86,7 +88,9 @@ const mockLocations = [
     contact_email: 'recepcion.glorias@cliente.es',
     is_active: true,
     active_machines_count: 0,
-    total_machines_count: 1
+    total_machines_count: 1,
+    zone_id: null,
+    is_manual_override: false
   },
   {
     id: 3,
@@ -99,7 +103,9 @@ const mockLocations = [
     contact_email: 'recepcion.antigua@cliente.es',
     is_active: false,
     active_machines_count: 0,
-    total_machines_count: 0
+    total_machines_count: 0,
+    zone_id: 2,
+    is_manual_override: true
   }
 ];
 
@@ -447,6 +453,134 @@ assert('6.9 Template contiene la previsualización de confirmación de coordenad
     && tmpl.includes('applyGeocodeSuggestion(\'create\')') && tmpl.includes('applyGeocodeSuggestion(\'edit\')')
     && tmpl.includes('dismissGeocodeSuggestion')
     && tmpl.includes('Usar coordenadas') && tmpl.includes('Descartar'));
+
+// =========================================================================
+// BLOQUE 7: Zona operativa visible y excepción manual (Módulo 17, T-ZONE-14)
+// =========================================================================
+console.log('\n--- BLOQUE 7: Zona operativa visible y excepción manual ---');
+
+// Catálogo territorial: dos zonas vivas y una retirada que no debe ofrecerse.
+api.coordinator.getZones = async () => ({
+  success: true,
+  data: {
+    unassigned_locations_count: 1,
+    zones: [
+      { id: 1, code: 'ZONA-BCN-NORTE', name: 'Barcelona Litoral y Norte', color_hex: '#2560ff', is_active: true },
+      { id: 2, code: 'ZONA-BCN-SUR', name: 'Barcelona Sur y Poniente', color_hex: '#10b981', is_active: true },
+      { id: 3, code: 'ZONA-RETIRADA', name: 'Zona Retirada', color_hex: '#dc2626', is_active: false },
+    ]
+  }
+});
+
+await tab.loadZones();
+assert('7.1 loadZones puebla el catálogo y descarta las zonas inactivas',
+  tab.zones.length === 2 && tab.zones.every(zone => zone.is_active !== false) && tab.zonesError === '');
+
+assert('7.2 locationZone resuelve la demarcación por identificador', tab.locationZone(tab.locations[0])?.id === 1);
+assert('7.3 locationZone devuelve null cuando la sede no tiene zona', tab.locationZone(tab.locations[1]) === null);
+assert('7.4 La etiqueta territorial nombra la zona o declara su ausencia',
+  tab.locationZoneLabel(tab.locations[0]) === 'Barcelona Litoral y Norte'
+    && tab.locationZoneLabel(tab.locations[1]) === 'Sin Zona Asignada');
+assert('7.5 El color corporativo sale del catálogo y no de un literal',
+  tab.locationZoneColor(tab.locations[0]) === '#2560ff' && tab.locationZoneColor(tab.locations[1]) === null);
+
+// Plantilla: la tabla publica la demarcación y la insignia de ausencia (RF-03.4).
+assert('7.6 La tabla declara la columna de zona y sus dos insignias',
+  tmpl.includes('Zona operativa')
+    && tmpl.includes('data-testid="location-zone-badge"')
+    && tmpl.includes('data-testid="location-zone-unassigned"')
+    && tmpl.includes('Sin Zona Asignada')
+    && tmpl.includes('data-testid="location-zone-forced"')
+    && tmpl.includes('colspan="7"'));
+
+// Plantilla: el modal permite forzar la zona o restablecer la herencia (RF-03.2).
+assert('7.7 La edición ofrece heredar, forzar una zona o dejarla sin zona',
+  tmpl.includes('data-testid="edit-zone-selection"')
+    && tmpl.includes('Heredar del código postal (automática)')
+    && tmpl.includes('Sin zona (forzada)')
+    && tmpl.includes('v-for="zone in zones"'));
+
+assert('7.8 openEditModal precarga la herencia automática en una sede sin excepción',
+  (tab.openEditModal(tab.locations[0]), tab.editForm.zone_selection === ''
+    && tab.editOriginalZone.is_manual_override === false && tab.editOriginalZone.zone_id === 1));
+
+assert('7.9 openEditModal precarga la zona forzada de una sede con excepción',
+  (tab.openEditModal(tab.locations[2]), tab.editForm.zone_selection === '2'
+    && tab.editOriginalZone.is_manual_override === true));
+
+// Despacho de la excepción manual: solo viaja cuando el coordinador la cambia.
+let zoneOverrideCalls = [];
+let zoneOverrideFailure = null;
+api.coordinator.overrideLocationZone = async (locationId, zoneId, manualOverride) => {
+  zoneOverrideCalls.push({ locationId, zoneId, manualOverride });
+  if (zoneOverrideFailure) {
+    throw new Error(zoneOverrideFailure);
+  }
+  return { success: true, data: { location_id: locationId, zone_id: zoneId, is_manual_override: manualOverride } };
+};
+api.put = async (endpoint, payload) => ({ success: true, data: { id: tab.editForm.id, ...payload } });
+
+const fillEditForm = () => {
+  tab.editForm.name = 'Hospital del Mar';
+  tab.editForm.address = 'Passeig Marítim 25, Barcelona';
+  tab.editForm.postal_code = '08003';
+  tab.editForm.contact_name = 'Laura Sanitaria';
+  tab.editForm.contact_phone = '600111222';
+  tab.editForm.contact_email = 'recepcion.hospitalmar@cliente.es';
+  tab.editForm.latitude = '41.385';
+  tab.editForm.longitude = '2.193';
+};
+
+zoneOverrideCalls = [];
+tab.openEditModal(tab.locations[0]);
+fillEditForm();
+await tab.submitEdit();
+assert('7.10 Guardar sin tocar la zona no dispara ninguna excepción manual',
+  zoneOverrideCalls.length === 0 && tab.showEditModal === false);
+
+zoneOverrideCalls = [];
+tab.openEditModal(tab.locations[0]);
+fillEditForm();
+tab.editForm.zone_selection = '2';
+await tab.submitEdit();
+assert('7.11 Forzar una zona envía la excepción con su identificador',
+  zoneOverrideCalls.length === 1
+    && zoneOverrideCalls[0].locationId === 1
+    && zoneOverrideCalls[0].zoneId === 2
+    && zoneOverrideCalls[0].manualOverride === true);
+
+zoneOverrideCalls = [];
+tab.openEditModal(tab.locations[1]);
+fillEditForm();
+tab.editForm.zone_selection = 'none';
+await tab.submitEdit();
+assert('7.12 «Sin zona (forzada)» fuerza la excepción sin demarcación',
+  zoneOverrideCalls.length === 1
+    && zoneOverrideCalls[0].zoneId === null
+    && zoneOverrideCalls[0].manualOverride === true);
+
+zoneOverrideCalls = [];
+tab.openEditModal(tab.locations[2]);
+fillEditForm();
+tab.editForm.zone_selection = '';
+await tab.submitEdit();
+assert('7.13 «Heredar» restablece la herencia por código postal',
+  zoneOverrideCalls.length === 1
+    && zoneOverrideCalls[0].zoneId === null
+    && zoneOverrideCalls[0].manualOverride === false);
+
+zoneOverrideFailure = 'el catálogo territorial no responde';
+zoneOverrideCalls = [];
+tab.openEditModal(tab.locations[0]);
+fillEditForm();
+tab.editForm.zone_selection = '2';
+await tab.submitEdit();
+assert('7.14 Un fallo del override deja el modal abierto y declara lo que sí se guardó',
+  tab.showEditModal === true
+    && typeof tab.editErrors.general === 'string'
+    && tab.editErrors.general.includes('se guardaron')
+    && tab.editErrors.general.includes('no se pudo aplicar'));
+zoneOverrideFailure = null;
 
 // =========================================================================
 // RESUMEN FINAL

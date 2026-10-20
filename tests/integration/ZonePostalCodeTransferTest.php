@@ -146,6 +146,51 @@ $linkPostalCode = static function (PDO $pdo, string $postalCode, int $zoneId): v
     $stmt->execute([':postal_code' => $postalCode, ':zone_id' => $zoneId]);
 };
 
+/**
+ * Siembra una avería asignada en una sede, para certificar que el traslado del CP
+ * no reasigna la ruta en curso (RF-03.3).
+ *
+ * @return int identificador del expediente
+ */
+$seedIncident = static function (PDO $pdo, int $locationId, int $technicianId, string $ticket): int {
+    $machine = $pdo->prepare(
+        'INSERT INTO machines (location_id, code, model, machine_type, floor_wing)
+         VALUES (:location_id, :code, :model, :type, :wing) RETURNING id'
+    );
+    $machine->execute([
+        ':location_id' => $locationId,
+        ':code' => 'MAQ-' . $ticket,
+        ':model' => 'Modelo de certificación del traslado',
+        ':type' => 'COLD_DRINKS',
+        ':wing' => 'Vestíbulo',
+    ]);
+    $machineId = (int)$machine->fetchColumn();
+
+    $incident = $pdo->prepare(
+        'INSERT INTO incidents (
+            ticket_code, machine_id, machine_type_snapshot, location_id, assigned_technician_id,
+            category, description, urgency, status, assigned_at
+         ) VALUES (
+            :ticket, :machine_id, :machine_type, :location_id, :technician_id,
+            :category, :description, :urgency, :status, :assigned_at
+         ) RETURNING id'
+    );
+    $incident->execute([
+        ':ticket' => $ticket,
+        ':machine_id' => $machineId,
+        ':machine_type' => 'COLD_DRINKS',
+        ':location_id' => $locationId,
+        ':technician_id' => $technicianId,
+        ':category' => 'PRODUCT_JAM',
+        ':description' => 'Avería sembrada para certificar que el traslado no mueve rutas.',
+        ':urgency' => 'HIGH',
+        ':status' => 'ASSIGNED',
+        ':assigned_at' => '2026-10-20T08:30:00+02:00',
+    ]);
+
+    return (int)$incident->fetchColumn();
+};
+
 /** Cuenta filas de auditoría por acción. */
 $auditCount = static function (PDO $pdo, string $action): int {
     $stmt = $pdo->prepare('SELECT COUNT(*) FROM audit_log WHERE action = :action');
@@ -189,6 +234,7 @@ try {
     $linkPostalCode($pgPdo, '08003', $southId);
 
     $coordinator = $createUser($pgPdo, 'coordinacion', 'COORDINATOR');
+    $technician = $createUser($pgPdo, 'tecnico', 'TECHNICIAN');
 
     $inheritedOne = $locationRepo->create([
         'site_code' => 'SEDE-06-HEREDADA-1',
@@ -216,6 +262,13 @@ try {
     ]);
 
     $locationRepo->setManualOverride((int)$forcedLocation->getId(), $forcedId);
+
+    $movingIncident = $seedIncident(
+        $pgPdo,
+        (int)$inheritedOne->getId(),
+        $technician,
+        'INC-Z06-TRASLADO-01'
+    );
 
     $assert(
         'El escenario siembra dos sedes heredadas, una forzada y una del sur',
@@ -323,6 +376,22 @@ try {
         'La sede forzada no genera evento de reasignación',
         $auditCount($pgPdo, 'LOCATION_ZONE_REASSIGNED') === 2
             && !in_array((int)$forcedLocation->getId(), $reassignedIds, true)
+    );
+
+    // RF-03.3: el traslado recoloca el territorio, no la ruta. Una avería asignada
+    // en una sede heredada conserva técnico, estado y sede tras el movimiento.
+    $incidentAfterTransfer = $pgPdo->prepare(
+        'SELECT assigned_technician_id, status, location_id FROM incidents WHERE id = :id'
+    );
+    $incidentAfterTransfer->execute([':id' => $movingIncident]);
+    $incidentRow = $incidentAfterTransfer->fetch();
+    $assert(
+        'El traslado del CP no reasigna la avería en curso de la sede heredada (RF-03.3)',
+        $incidentRow !== false
+            && (int)$incidentRow['assigned_technician_id'] === $technician
+            && $incidentRow['status'] === 'ASSIGNED'
+            && (int)$incidentRow['location_id'] === (int)$inheritedOne->getId(),
+        json_encode($incidentRow)
     );
 
     // ─────────────────────────────────────────────────────────────────────

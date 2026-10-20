@@ -153,6 +153,64 @@ $zoneOfLocation = static function (PDO $pdo, int $locationId): ?int {
     return $value === false || $value === null ? null : (int)$value;
 };
 
+/**
+ * Siembra una máquina y una avería asignada en la sede indicada.
+ *
+ * Sirve para certificar que ninguna operación territorial —traslado, desactivación
+ * o baja de cuadrante— toca el expediente: la avería conserva técnico, estado y
+ * sede (RF-03.3, casos límite 3 y 4).
+ *
+ * @return array{incident_id: int, machine_id: int}
+ */
+$seedIncident = static function (PDO $pdo, int $locationId, int $technicianId, string $ticket): array {
+    $machine = $pdo->prepare(
+        'INSERT INTO machines (location_id, code, model, machine_type, floor_wing)
+         VALUES (:location_id, :code, :model, :type, :wing) RETURNING id'
+    );
+    $machine->execute([
+        ':location_id' => $locationId,
+        ':code' => 'MAQ-' . $ticket,
+        ':model' => 'Modelo de certificación territorial',
+        ':type' => 'COLD_DRINKS',
+        ':wing' => 'Vestíbulo',
+    ]);
+    $machineId = (int)$machine->fetchColumn();
+
+    $incident = $pdo->prepare(
+        'INSERT INTO incidents (
+            ticket_code, machine_id, machine_type_snapshot, location_id, assigned_technician_id,
+            category, description, urgency, status, assigned_at
+         ) VALUES (
+            :ticket, :machine_id, :machine_type, :location_id, :technician_id,
+            :category, :description, :urgency, :status, :assigned_at
+         ) RETURNING id'
+    );
+    $incident->execute([
+        ':ticket' => $ticket,
+        ':machine_id' => $machineId,
+        ':machine_type' => 'COLD_DRINKS',
+        ':location_id' => $locationId,
+        ':technician_id' => $technicianId,
+        ':category' => 'PRODUCT_JAM',
+        ':description' => 'Avería sembrada para certificar la preservación de la ruta.',
+        ':urgency' => 'HIGH',
+        ':status' => 'ASSIGNED',
+        ':assigned_at' => '2026-10-20T09:00:00+02:00',
+    ]);
+
+    return ['incident_id' => (int)$incident->fetchColumn(), 'machine_id' => $machineId];
+};
+
+/** Estado vivo de una avería, para comparar antes y después de la operación territorial. */
+$incidentSnapshot = static function (PDO $pdo, int $incidentId): array {
+    $stmt = $pdo->prepare(
+        'SELECT assigned_technician_id, status, location_id, machine_id FROM incidents WHERE id = :id'
+    );
+    $stmt->execute([':id' => $incidentId]);
+
+    return $stmt->fetch() ?: [];
+};
+
 try {
     // ─────────────────────────────────────────────────────────────────────
     // Escenario: DDL base + migraciones en un esquema aislado
@@ -472,10 +530,29 @@ try {
         json_encode($demotedRow)
     );
 
+    // Caso límite 4: la baja del cuadrante no reasigna la ruta en curso del técnico.
+    $routeIncident = $seedIncident(
+        $pgPdo,
+        (int)$inheritedLocation->getId(),
+        $technicianOne,
+        'INC-Z07-RUTA-01'
+    );
+    $routeBefore = $incidentSnapshot($pgPdo, $routeIncident['incident_id']);
+
     $removed = $service->removeTechnician($technicianOne, $south->id, $coordinatorId);
     $assert(
         'La baja del cuadrante es lógica y queda auditada',
         $removed === true && $auditCount($pgPdo, 'TECHNICIAN_ZONE_REMOVED') === 1
+    );
+
+    $routeAfter = $incidentSnapshot($pgPdo, $routeIncident['incident_id']);
+    $assert(
+        'Quitar al técnico del cuadrante conserva sus averías asignadas (caso límite 4)',
+        $routeBefore !== []
+            && $routeAfter === $routeBefore
+            && (int)$routeAfter['assigned_technician_id'] === $technicianOne
+            && $routeAfter['status'] === 'ASSIGNED',
+        json_encode([$routeBefore, $routeAfter])
     );
 
     $reentry = $service->assignTechnician($technicianOne, $south->id, false, $coordinatorId);
@@ -533,6 +610,15 @@ try {
         $updateGuard !== null && $updateGuard->getHttpStatusCode() === 422
     );
 
+    // Caso límite 3: desactivar la zona no toca las averías abiertas de sus sedes.
+    $openIncident = $seedIncident(
+        $pgPdo,
+        (int)$northLocation->getId(),
+        $technicianTwo,
+        'INC-Z07-ABIERTA-01'
+    );
+    $openBefore = $incidentSnapshot($pgPdo, $openIncident['incident_id']);
+
     $deactivated = $service->deactivateZone($north->id, $coordinatorId, true);
 
     $releasedAt = $pgPdo->query(
@@ -574,6 +660,16 @@ try {
             && (int)$deactivatedEvent['entity_id'] === $north->id
             && str_contains((string)$deactivatedEvent['metadata'], 'released_postal_codes')
             && str_contains((string)$deactivatedEvent['metadata'], 'unassigned_locations_count')
+    );
+
+    $openAfter = $incidentSnapshot($pgPdo, $openIncident['incident_id']);
+    $assert(
+        'Desactivar la zona conserva las averías abiertas con su técnico y su estado (caso límite 3)',
+        $openBefore !== []
+            && $openAfter === $openBefore
+            && (int)$openAfter['assigned_technician_id'] === $technicianTwo
+            && $openAfter['status'] === 'ASSIGNED',
+        json_encode([$openBefore, $openAfter])
     );
 
     $idempotent = $service->deactivateZone($north->id, $coordinatorId);

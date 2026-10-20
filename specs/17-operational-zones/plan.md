@@ -351,6 +351,8 @@ def rank_technicians(technicians, incident, location):
     # Paso 2: Ordenación multinivel (QA 5)
     # Criterio 1: Puntuación total (DESC)
     # Criterio 2: En caso de zona desatendida, proximidad Haversine (ASC)
+    #   (zona desatendida = sin titulares ni suplentes activos, o todos en el cupo de
+    #    10 paradas vivas; Resolución QA 14)
     # Criterio 3: Desempate por mayor tiempo desde última asignación formal (assigned_at ASC)
     # Criterio 4: Estabilidad determinista por ID de técnico (ASC)
     def sort_key(item):

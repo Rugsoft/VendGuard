@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/Database-PostgreSQL%2016%2B%20%7C%20Supabase-3ecf8e?style=flat-square&logo=postgresql&logoColor=white)](https://supabase.com/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-307%20Suites%20%7C%2011.919%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-307%20Suites%20%7C%2011.940%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -145,7 +145,7 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 ### 15. Zonificación Operativa y Asignación Asistida (Módulo 17)
 * **Demarcaciones por Código Postal con Herencia Automática:** Zonas operativas con nombre, código y color corporativo `#RRGGBB`, delimitadas por códigos postales de cinco dígitos. Una sede hereda la zona de su CP sin intervención manual; la excepción manual (`is_manual_override`) se conmuta de forma atómica y auditada, y el panel de sedes señala con la insignia «Sin Zona Asignada» los centros huérfanos.
 * **Cuadrante de Cobertura con Titular Único:** Cada técnico puede tener una zona principal y varias suplencias; el índice parcial `uq_technician_primary_zone` impide dos titularidades vivas simultáneas y la degradación de la anterior deja rastro en auditoría (`TECHNICIAN_ZONE_PRIMARY_DEMOTED`).
-* **Motor de Sugerencia Explicada (RF-04 / RF-05):** `TechnicianAssignmentSuggester` pondera afinidad territorial, presencia in situ, paradas en la misma zona, carga viva, pausas por falta de acceso y guardia sanitaria 24/7 para devolver un ranking con desglose de puntos. En zonas desatendidas ordena por distancia Haversine (parada actual, última resuelta o Base Central) y desempata por mayor tiempo desde la última asignación formal.
+* **Motor de Sugerencia Explicada (RF-04 / RF-05):** `TechnicianAssignmentSuggester` pondera afinidad territorial, presencia in situ, paradas en la misma zona, carga viva, pausas por falta de acceso y guardia sanitaria 24/7 para devolver un ranking con desglose de puntos. En zonas desatendidas —sin cuadrante activo o con todo él en el cupo de diez paradas vivas— ordena por distancia Haversine (parada actual, última resuelta o Base Central) y desempata por mayor tiempo desde la última asignación formal, sin excluir a los técnicos del cupo del ranking.
 * **Despacho en Dos Toques y Salvaguarda de Frío (Art. II / Art. V.1):** El panel de triaje destaca al primer puesto y permite asignarlo con `[⚡ Asignar Sugerido]`. Si se descarta al técnico de guardia ante una avería de frío, exige `override_justification` de al menos 20 caracteres reales, auditada como `INCIDENT_ASSIGNMENT_SUGGESTION_OVERRIDDEN` sin alterar el `reassignment_reason` del flujo de reasignación.
 * **Mapa Territorial por Zona y Privacidad de Sede:** El mapa de coordinación filtra y tiñe los centros con el color de su demarcación resolviéndolo en cliente (el contrato cartográfico no admite parámetros nuevos). El portal de sede jamás recibe el nombre, código ni color de la zona del cliente (Art. V.4).
 * **Transferencia Atómica de Códigos Postales:** Mover un CP entre zonas actualiza la demarcación, bloquea con `FOR UPDATE` las sedes heredadas, reasigna su `zone_id` e inscribe el evento matriz más un evento individual por sede en la misma transacción, con rollback completo ante cualquier fallo.
@@ -435,20 +435,20 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 307 suites · 11.919 aserciones
+batería global: 307 suites · 11.940 aserciones
 
 ```text
 ======================================================================
  RESUMEN DE EJECUCIÓN GLOBAL (T-39)
 ======================================================================
- Tiempo de ejecución total : 300.00 segundos  (variable en cada corrida)
+ Tiempo de ejecución total : 299.00 segundos  (variable en cada corrida)
  Suites de pruebas PHP Unit : 133 / 133 pasadas
  Suites de pruebas JS Unit  : 72 / 72 pasadas
  Suites de Integración PHP  : 101 / 101 pasadas
  Suites E2E Manuales (T-40): 1 / 1 pasadas
  ──────────────────────────────────────────────────────────────────
  Total Suites Ejecutadas    : 307
- Total Aserciones Evaluadas : 11.919
+ Total Aserciones Evaluadas : 11.940
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)

@@ -28,6 +28,10 @@ declare(strict_types=1);
  *   6. **Proximidad sin GPS (QA 5).** La referencia es la parada en curso, después
  *      la última completada y después la Base Central; una coordenada inválida
  *      computa 999 km.
+ *   7. **Cupo de paradas vivas (RF-06.1, QA 14).** Con todo el cuadrante en diez
+ *      paradas vivas la zona queda desatendida aunque haya técnicos; un suplente
+ *      libre la mantiene atendida y el profesional en el cupo sigue siendo
+ *      asignable (RF-06.3).
  *   7. **Exclusiones y validación.** Los técnicos inactivos no entran, y una foto
  *      imposible (afinidad desconocida, contador negativo, fecha ilegible) falla en
  *      voz alta en lugar de producir un ranking plausible.
@@ -426,6 +430,84 @@ $assert(
         static fn (array $row): array => [$row['total_score'], array_sum($row['score_breakdown'])],
         $firstRun->rankedTechnicians
     ))
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. Cupo de paradas vivas de la zona desatendida (RF-06.1, QA 14)
+// ─────────────────────────────────────────────────────────────────────────────
+echo "\n--- 7. Cupo de paradas vivas (QA 14) ---\n";
+
+$assert(
+    '7.0 El cupo es una constante de dominio de diez paradas vivas',
+    TechnicianAssignmentSuggester::MAX_LIVE_STOPS_PER_TECHNICIAN === 10
+);
+
+$atCap = $suggester->getSuggestionsForIncident($incident(), [
+    $technician(1, ['affinity' => 'PRIMARY', 'active_incidents' => 10, 'in_progress_location' => $farPoint]),
+    $technician(2, ['in_progress_location' => $nearPoint]),
+], $base);
+$assert(
+    '7.1 Un titular en el cupo deja la zona desatendida y ordena por proximidad',
+    $atCap->recommendation['unattended_zone'] === true
+        && $order($atCap->rankedTechnicians) === [2, 1]
+        && str_contains((string)$atCap->recommendation['explanation'], 'cupo de 10 paradas vivas'),
+    json_encode($order($atCap->rankedTechnicians))
+);
+
+$belowCap = $suggester->getSuggestionsForIncident($incident(), [
+    $technician(1, ['affinity' => 'PRIMARY', 'active_incidents' => 9, 'in_progress_location' => $farPoint]),
+    $technician(2, ['in_progress_location' => $nearPoint]),
+], $base);
+$assert(
+    '7.2 Con nueve paradas vivas la zona sigue atendida y recomienda al titular',
+    $belowCap->recommendation['unattended_zone'] === false
+        && $order($belowCap->rankedTechnicians) === [1, 2]
+        && str_contains((string)$belowCap->recommendation['explanation'], 'Sugerido por Zona'),
+    json_encode([$belowCap->recommendation['unattended_zone'], $order($belowCap->rankedTechnicians)])
+);
+
+$mixedCap = $suggester->getSuggestionsForIncident($incident(), [
+    $technician(1, [
+        'affinity' => 'PRIMARY',
+        'active_incidents' => 8,
+        'pending_info_incidents' => 1,
+        'preventive_orders_today' => 1,
+    ]),
+    $technician(2, ['in_progress_location' => $nearPoint]),
+], $base);
+$assert(
+    '7.3 Pausas y preventivos computan para el cupo: 8 + 1 + 1 lo agotan',
+    $mixedCap->recommendation['unattended_zone'] === true,
+    json_encode($mixedCap->recommendation)
+);
+
+$backupFree = $suggester->getSuggestionsForIncident($incident(), [
+    $technician(1, ['affinity' => 'PRIMARY', 'active_incidents' => 10]),
+    $technician(2, ['affinity' => 'BACKUP']),
+], $base);
+$assert(
+    '7.4 Un suplente libre mantiene la zona atendida aunque el titular esté en el cupo',
+    $backupFree->recommendation['unattended_zone'] === false
+        && $order($backupFree->rankedTechnicians) === [2, 1]
+        && !str_contains((string)$backupFree->recommendation['explanation'], 'Sin técnicos disponibles'),
+    json_encode($order($backupFree->rankedTechnicians))
+);
+
+$assert(
+    '7.5 El técnico en el cupo sigue en el ranking y sigue siendo asignable (RF-06.3)',
+    count($atCap->rankedTechnicians) === 2
+        && in_array(1, $order($atCap->rankedTechnicians), true)
+        && $atCap->rankedTechnicians[0]['technician_id'] === 2
+);
+
+$emptyZone = $suggester->getSuggestionsForIncident($incident(), [
+    $technician(1, ['in_progress_location' => $nearPoint]),
+], $base);
+$assert(
+    '7.6 Una zona sin cuadrante avisa sin atribuirlo al cupo',
+    $emptyZone->recommendation['unattended_zone'] === true
+        && str_contains((string)$emptyZone->recommendation['explanation'], 'Sin técnicos disponibles')
+        && !str_contains((string)$emptyZone->recommendation['explanation'], 'cupo de')
 );
 
 echo "\n======================================================================\n";

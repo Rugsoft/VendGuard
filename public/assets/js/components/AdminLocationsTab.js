@@ -14,6 +14,12 @@
  *    de confirmación de coordenadas antes de guardar (RF-MAP-01).
  * 8. Clave de centro (S-4): el alta y la reemisión la muestran una sola vez para su entrega
  *    en mano, y la tabla marca las sedes «pendiente de entrega» (sin clave emitida).
+ * 9. Herencia territorial visible (Módulo 17, RF-03.4): la tabla pinta la zona operativa de
+ *    cada sede con su color corporativo y marca con la insignia «Sin Zona Asignada» los
+ *    centros cuyo código postal no resuelve ninguna zona activa.
+ * 10. Excepción manual de zona (RF-03.2 / RF-03.3): la edición permite forzar la zona de la
+ *    sede o restablecer la herencia por código postal, y el cambio se aplica tras guardar
+ *    los datos descriptivos.
  * 
  * Dogma Vanilla: Vue 3 Options API en módulos ESM nativos sin dependencias npm externas.
  */
@@ -30,6 +36,10 @@ export const AdminLocationsTab = {
       successMessage: '',
       filterStatus: 'all', // 'all' | 'active' | 'inactive'
       searchQuery: '',
+
+      // Catálogo territorial (Módulo 17): id → nombre y color de cada zona activa.
+      zones: [],
+      zonesError: '',
 
       // Modal Alta
       showCreateModal: false,
@@ -59,8 +69,13 @@ export const AdminLocationsTab = {
         contact_phone: '',
         contact_email: '',
         latitude: '',
-        longitude: ''
+        longitude: '',
+        // '' = heredar del CP, 'none' = sin zona forzada, '<id>' = forzada a esa zona
+        zone_selection: ''
       },
+      // Situación territorial al abrir la edición, para no repetir una excepción
+      // que el coordinador no ha cambiado.
+      editOriginalZone: { zone_id: null, is_manual_override: false },
       editErrors: {},
       isSubmittingEdit: false,
 
@@ -145,11 +160,59 @@ export const AdminLocationsTab = {
   },
   mounted() {
     this.loadLocations();
+    this.loadZones();
   },
   methods: {
     /**
      * Carga el listado de sedes desde el backend administrativo (RF-01).
      */
+    /**
+     * Carga el catálogo territorial para poder pintar la zona de cada sede y ofrecer
+     * la excepción manual (Módulo 17, RF-03.4 y RF-03.2).
+     *
+     * Un fallo del catálogo no puede tumbar el panel de sedes: se declara y la tabla
+     * sigue mostrando las sedes, con la insignia de «Sin Zona Asignada» como verdad
+     * visible de lo que no se pudo resolver.
+     */
+    async loadZones() {
+      try {
+        const res = await (api.coordinator && api.coordinator.getZones
+          ? api.coordinator.getZones()
+          : api.get('/coordinator/zones'));
+        const payload = res && res.data !== undefined ? res.data : res;
+        const zones = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.zones) ? payload.zones : []);
+
+        this.zones = zones.filter(zone => zone && zone.is_active !== false);
+        this.zonesError = '';
+      } catch (err) {
+        this.zones = [];
+        this.zonesError = err.message || 'No se pudo cargar el catálogo territorial de zonas.';
+      }
+    },
+
+    /** Zona operativa viva de una sede, o `null` cuando no tiene demarcación. */
+    locationZone(location) {
+      if (!location || location.zone_id === null || location.zone_id === undefined || location.zone_id === '') {
+        return null;
+      }
+
+      return this.zones.find(zone => Number(zone.id) === Number(location.zone_id)) || null;
+    },
+
+    /** Etiqueta de la insignia territorial de la sede (RF-03.4). */
+    locationZoneLabel(location) {
+      const zone = this.locationZone(location);
+
+      return zone ? zone.name : 'Sin Zona Asignada';
+    },
+
+    /** Color corporativo de la demarcación, si el catálogo lo declara. */
+    locationZoneColor(location) {
+      const zone = this.locationZone(location);
+
+      return zone && zone.color_hex ? zone.color_hex : null;
+    },
+
     async loadLocations() {
       this.isLoading = true;
       this.errorMessage = '';
@@ -456,7 +519,16 @@ export const AdminLocationsTab = {
         contact_phone: location.contact_phone || '',
         contact_email: location.contact_email || '',
         latitude: location.latitude ?? '',
-        longitude: location.longitude ?? ''
+        longitude: location.longitude ?? '',
+        // La excepción manual se muestra como una selección explícita; la herencia
+        // por CP es el estado por defecto (RF-03.2 / RF-03.3).
+        zone_selection: location.is_manual_override
+          ? (location.zone_id !== null && location.zone_id !== undefined ? String(location.zone_id) : 'none')
+          : ''
+      };
+      this.editOriginalZone = {
+        zone_id: location.zone_id === null || location.zone_id === undefined ? null : Number(location.zone_id),
+        is_manual_override: Boolean(location.is_manual_override)
       };
       this.editErrors = {};
       this.editSuggestion = null;
@@ -470,6 +542,25 @@ export const AdminLocationsTab = {
     closeEditModal() {
       this.showEditModal = false;
       this.editErrors = {};
+    },
+
+    /**
+     * Traduce la selección territorial del formulario en la llamada de excepción manual
+     * (RF-03.2). Devuelve también si hubo cambio real, para no auditar una excepción
+     * que el coordinador no ha tocado.
+     *
+     * @returns {{changed: boolean, manualOverride: boolean, zoneId: number|null}}
+     */
+    resolveZoneIntent() {
+      const selection = String(this.editForm.zone_selection || '');
+      const manualOverride = selection !== '';
+      const zoneId = selection === '' || selection === 'none' ? null : Number(selection);
+      const original = this.editOriginalZone || { zone_id: null, is_manual_override: false };
+
+      const changed = manualOverride !== Boolean(original.is_manual_override)
+        || (manualOverride && Number(zoneId) !== Number(original.zone_id));
+
+      return { changed, manualOverride, zoneId };
     },
 
     /**
@@ -515,6 +606,26 @@ export const AdminLocationsTab = {
         };
 
         await (api.admin ? api.admin.updateLocation(this.editForm.id, payload) : api.put(`/coordinator/locations/${this.editForm.id}`, payload));
+
+        // Excepción manual de zona (RF-03.2 / RF-03.3): se aplica **después** del
+        // guardado porque el PUT puede recolocar la herencia al cambiar el CP; el
+        // override es lo último que decide, y solo viaja si el coordinador lo cambió.
+        const zoneIntent = this.resolveZoneIntent();
+        if (zoneIntent.changed) {
+          try {
+            await api.coordinator.overrideLocationZone(
+              this.editForm.id,
+              zoneIntent.zoneId,
+              zoneIntent.manualOverride
+            );
+          } catch (zoneError) {
+            this.editErrors.general = `Los datos de la sede se guardaron, pero la zona no se pudo aplicar: ${zoneError.message || 'error desconocido'}. Revisa el catálogo territorial y vuelve a intentarlo.`;
+            await this.loadLocations();
+
+            return;
+          }
+        }
+
         this.showSuccessNotification(`Sede "${this.editForm.site_code}" actualizada correctamente.`);
         this.closeEditModal();
         await this.loadLocations();
@@ -773,6 +884,7 @@ export const AdminLocationsTab = {
                 <th scope="col" style="min-width: 130px;">Código</th>
                 <th scope="col" style="min-width: 220px;">Nombre y Dirección</th>
                 <th scope="col" style="min-width: 180px;">Contacto</th>
+                <th scope="col" style="min-width: 170px;">Zona operativa</th>
                 <th scope="col" class="text-center" style="min-width: 110px;">Máquinas</th>
                 <th scope="col" class="text-center" style="min-width: 100px;">Estado</th>
                 <th scope="col" class="text-end" style="min-width: 180px;">Acciones</th>
@@ -781,7 +893,7 @@ export const AdminLocationsTab = {
             <tbody>
               <!-- Spinner de carga -->
               <tr v-if="isLoading">
-                <td colspan="6" class="text-center py-4 text-muted">
+                <td colspan="7" class="text-center py-4 text-muted">
                   <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
                   <span>Cargando sedes...</span>
                 </td>
@@ -789,7 +901,7 @@ export const AdminLocationsTab = {
 
               <!-- Sin resultados -->
               <tr v-else-if="filteredLocations.length === 0">
-                <td colspan="6" class="text-center py-5 text-muted">
+                <td colspan="7" class="text-center py-5 text-muted">
                   <div class="mb-2 fs-3">🏢</div>
                   <p class="mb-0 fw-semibold">No se encontraron sedes coincidentes.</p>
                   <small>Modifique los filtros o registre una nueva sede.</small>
@@ -828,6 +940,30 @@ export const AdminLocationsTab = {
                     📞 {{ loc.contact_phone }}
                   </div>
                   <span v-if="!loc.contact_name && !loc.contact_phone" class="text-muted small fst-italic">Sin datos</span>
+                </td>
+
+                <!-- Zona operativa heredada o forzada (Módulo 17, RF-03.4) -->
+                <td data-testid="location-zone-cell">
+                  <span
+                    v-if="locationZone(loc)"
+                    class="d-inline-flex align-items-center gap-1 small fw-semibold"
+                    data-testid="location-zone-badge"
+                    :title="'Zona operativa: ' + locationZone(loc).name"
+                  >
+                    <i class="route-dot" :style="{ background: locationZoneColor(loc) }"></i>
+                    {{ locationZoneLabel(loc) }}
+                  </span>
+                  <span
+                    v-else
+                    class="badge bg-warning text-dark"
+                    data-testid="location-zone-unassigned"
+                    title="El código postal de la sede no resuelve ninguna zona activa"
+                  >
+                    Sin Zona Asignada
+                  </span>
+                  <div v-if="loc.is_manual_override" class="small text-muted mt-1" data-testid="location-zone-forced">
+                    ⚙️ Forzada
+                  </div>
                 </td>
 
                 <!-- Conteo de Máquinas -->
@@ -1157,6 +1293,25 @@ export const AdminLocationsTab = {
                   />
                   <div v-if="editErrors.postal_code" class="invalid-feedback small">{{ editErrors.postal_code }}</div>
                   <small class="text-muted form-text">Si la sede tiene una zona forzada a mano, el CP no la recoloca.</small>
+                </div>
+
+                <!-- Zona operativa: herencia o excepción manual (Módulo 17, RF-03.2) -->
+                <div class="mb-3">
+                  <label class="form-label small fw-bold" for="edit-zone-selection">Zona Operativa</label>
+                  <select
+                    id="edit-zone-selection"
+                    class="form-select"
+                    v-model="editForm.zone_selection"
+                    data-testid="edit-zone-selection"
+                  >
+                    <option value="">Heredar del código postal (automática)</option>
+                    <option value="none">Sin zona (forzada)</option>
+                    <option v-for="zone in zones" :key="zone.id" :value="String(zone.id)">
+                      {{ zone.name }} ({{ zone.code }})
+                    </option>
+                  </select>
+                  <small class="text-muted form-text">Forzar una zona anula la herencia por CP; «Heredar» la restablece.</small>
+                  <div v-if="zonesError" class="text-danger small mt-1" data-testid="edit-zone-error">{{ zonesError }}</div>
                 </div>
 
                 <!-- Geocodificación asistida de la dirección (RF-MAP-01) -->
