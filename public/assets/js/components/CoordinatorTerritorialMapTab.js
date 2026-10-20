@@ -112,25 +112,59 @@ export const CoordinatorTerritorialMapTab = {
       filters: {
         technician_id: '',
         is_critical_only: false,
-        unassigned_only: false
-      }
+        unassigned_only: false,
+        // Módulo 17 (M4): el filtro territorial es local. El contrato del mapa declara
+        // «sin cambios de parámetros» (route_map_contracts §4.2.1), así que el catálogo de
+        // zonas y la zona de cada sede se resuelven en cliente y el endpoint no se toca.
+        zone_id: ''
+      },
+      // Catálogo territorial (id → { id, name, color_hex }) y zona viva de cada sede.
+      zoneDirectory: {},
+      siteZoneIds: {}
     };
   },
   computed: {
     /**
-     * Sites already filtered server-side according to the reactive filters (RF-MAP-09).
+     * Sedes visibles: el servidor ya aplicó técnico y severidad; la zona se filtra aquí
+     * sobre la foto recibida para no añadir parámetros al contrato del mapa.
      */
     visibleSites() {
-      return this.sites;
+      const zoneFilter = this.filters.zone_id;
+      if (zoneFilter === '') {
+        return this.sites;
+      }
+      if (zoneFilter === 'none') {
+        return this.sites.filter(site => this.siteZone(site) === null);
+      }
+      return this.sites.filter(site => Number(this.siteZone(site)?.id) === Number(zoneFilter));
     },
     criticalSiteCount() {
-      return this.sites.filter(site => site.has_perishable_risk).length;
+      return this.visibleSites.filter(site => site.has_perishable_risk).length;
     },
     multiTechnicianSiteCount() {
-      return this.sites.filter(site => site.is_multi_technician).length;
+      return this.visibleSites.filter(site => site.is_multi_technician).length;
     },
     totalActiveTasks() {
-      return this.sites.reduce((sum, site) => sum + Number(site.total_incidents || 0) + Number(site.total_preventives || 0), 0);
+      return this.visibleSites.reduce((sum, site) => sum + Number(site.total_incidents || 0) + Number(site.total_preventives || 0), 0);
+    },
+    /** Zonas del selector, con las sedes activas que las pueblan en la foto actual. */
+    zoneFilterOptions() {
+      return Object.values(this.zoneDirectory)
+        .map(zone => ({
+          ...zone,
+          sitesCount: this.sites.filter(site => Number(this.siteZone(site)?.id) === Number(zone.id)).length
+        }))
+        .sort((left, right) => String(left.name).localeCompare(String(right.name), 'es'));
+    },
+    /** Zona seleccionada en el filtro, para pintar su muestra cromática junto al selector. */
+    selectedZone() {
+      return this.filters.zone_id === '' || this.filters.zone_id === 'none'
+        ? null
+        : (this.zoneDirectory[Number(this.filters.zone_id)] || null);
+    },
+    /** ¿El filtro activo ha dejado la foto sin sedes? */
+    isZoneFilterEmpty() {
+      return this.sites.length > 0 && this.visibleSites.length === 0;
     },
     /**
      * Standard public map tiles covering the effective (zoomed/panned) viewport (RF-MAP-09).
@@ -191,6 +225,9 @@ export const CoordinatorTerritorialMapTab = {
     }
   },
   mounted() {
+    // Las dos lecturas son independientes del motor de sugerencias: si el catálogo
+    // territorial falla, el mapa conserva sus marcadores con el color semántico habitual.
+    this.loadZoneContext();
     this.loadTerritorialData();
   },
   methods: {
@@ -258,6 +295,7 @@ export const CoordinatorTerritorialMapTab = {
         const response = await api.map.getActiveIncidents(params);
         const payload = response && response.data ? response.data : response;
         this.sites = Array.isArray(payload && payload.locations) ? payload.locations : [];
+        this.applyZoneContext();
         const hadWindow = !!this.mapWindow;
         this.mapWindow = this.computeTerritorialWindow();
         if (silent) {
@@ -300,6 +338,90 @@ export const CoordinatorTerritorialMapTab = {
       if (event && event.target && event.target.style) {
         event.target.style.display = 'none';
       }
+    },
+
+    // ---------------------------------------------------------------------
+    // Contexto territorial del Mapa M4 (Módulo 17, RF-01 / RF-03 / RF-06.1)
+    // ---------------------------------------------------------------------
+
+    /**
+     * Carga el catálogo de zonas y la zona viva de cada sede, en dos lecturas independientes
+     * del endpoint del mapa. Se resuelve en cliente porque el contrato cartográfico prohíbe
+     * añadir parámetros o campos (§4.2.1) y el filtro es solo de presentación.
+     */
+    async loadZoneContext() {
+      try {
+        const [zonesPayload, locationsPayload] = await Promise.all([
+          api.coordinator.getZones(),
+          api.admin.getLocations()
+        ]);
+
+        const zones = Array.isArray(zonesPayload?.zones)
+          ? zonesPayload.zones
+          : (Array.isArray(zonesPayload) ? zonesPayload : []);
+        const locations = Array.isArray(locationsPayload)
+          ? locationsPayload
+          : (Array.isArray(locationsPayload?.locations) ? locationsPayload.locations : []);
+
+        const directory = {};
+        zones.forEach(zone => {
+          if (zone && zone.id !== undefined && zone.id !== null) {
+            directory[Number(zone.id)] = {
+              id: Number(zone.id),
+              name: String(zone.name || ''),
+              color_hex: String(zone.color_hex || '')
+            };
+          }
+        });
+
+        const zoneIds = {};
+        locations.forEach(location => {
+          if (location && location.id !== undefined && location.zone_id !== undefined && location.zone_id !== null) {
+            zoneIds[Number(location.id)] = Number(location.zone_id);
+          }
+        });
+
+        this.zoneDirectory = directory;
+        this.siteZoneIds = zoneIds;
+        this.applyZoneContext();
+      } catch (error) {
+        // Sin catálogo territorial el mapa sigue siendo útil: el filtro por zona queda
+        // vacío y cada marcador conserva su color semántico de criticidad.
+        this.zoneDirectory = {};
+        this.siteZoneIds = {};
+        this.applyZoneContext();
+      }
+    },
+
+    /** Proyecta la zona viva de cada sede sobre la foto ya cargada del mapa. */
+    applyZoneContext() {
+      this.sites.forEach(site => {
+        const zoneId = this.siteZoneIds[Number(site.location_id)];
+        site.zone_id = zoneId === undefined ? null : zoneId;
+      });
+    },
+
+    /** Zona de la sede, o `null` si no hereda ninguna demarcación (RF-03.4). */
+    siteZone(site) {
+      const zoneId = site?.zone_id ?? this.siteZoneIds[Number(site?.location_id)];
+      if (zoneId === undefined || zoneId === null) {
+        return null;
+      }
+      return this.zoneDirectory[Number(zoneId)] || { id: Number(zoneId), name: '', color_hex: '' };
+    },
+
+    /** Nombre visible de la demarcación de la sede. */
+    siteZoneName(site) {
+      const zone = this.siteZone(site);
+      if (!zone) {
+        return 'Sin zona asignada';
+      }
+      return zone.name || `Zona #${zone.id}`;
+    },
+
+    /** Color corporativo de la zona; la hairline para las sedes sin demarcación. */
+    siteZoneColor(site) {
+      return this.siteZone(site)?.color_hex || 'var(--color-hairline)';
     },
     // ---------------------------------------------------------------------
     // ---------------------------------------------------------------------
@@ -449,6 +571,24 @@ export const CoordinatorTerritorialMapTab = {
         <option value="">Todos los técnicos</option>
         <option v-for="tech in technicians" :key="tech.id" :value="tech.id">{{ tech.name }}</option>
       </select>
+      <!-- Filtro por zona operativa (Módulo 17, RF-01 / RF-06.1): colorea y acota los centros -->
+      <label class="small fw-bold ms-2" for="territorial-zone-filter">Zona operativa</label>
+      <select id="territorial-zone-filter" v-model="filters.zone_id" class="form-select form-select-sm" data-testid="filter-territorial-zone">
+        <option value="">Todas las zonas</option>
+        <option v-for="zone in zoneFilterOptions" :key="zone.id" :value="zone.id">
+          {{ zone.name }} ({{ zone.sitesCount }})
+        </option>
+        <option value="none">Sin zona asignada</option>
+      </select>
+      <span
+        v-if="selectedZone"
+        class="d-inline-flex align-items-center gap-1 small"
+        style="color: var(--color-ink-muted);"
+        data-testid="territorial-zone-swatch"
+      >
+        <i class="route-dot" :style="{ background: selectedZone.color_hex }"></i>
+        {{ selectedZone.name }}
+      </span>
       <div class="form-check form-check-inline ms-2">
         <input class="form-check-input" type="checkbox" id="territorial-critical-only" v-model="filters.is_critical_only" data-testid="filter-territorial-critical" />
         <label class="form-check-label small" for="territorial-critical-only">Solo cadena de frío (críticas)</label>
@@ -470,9 +610,14 @@ export const CoordinatorTerritorialMapTab = {
         <p class="text-muted small mb-0">El mapa se poblará automáticamente cuando se registren intervenciones.</p>
       </div>
 
+      <div v-else-if="isZoneFilterEmpty" class="territorial-empty text-center py-5" data-testid="territorial-zone-empty">
+        <p class="fw-bold mb-1">Ninguna sede con actividad en la zona seleccionada.</p>
+        <p class="text-muted small mb-0">Cambie el filtro territorial para volver a ver todo el parque.</p>
+      </div>
+
       <template v-else>
         <div class="territorial-map-summary small text-muted mb-2" data-testid="territorial-summary">
-          {{ sites.length }} sede(s) con actividad · {{ totalActiveTasks }} tarea(s) activa(s) · {{ criticalSiteCount }} crítica(s) · {{ multiTechnicianSiteCount }} con multi-técnico
+          {{ visibleSites.length }} sede(s) con actividad · {{ totalActiveTasks }} tarea(s) activa(s) · {{ criticalSiteCount }} crítica(s) · {{ multiTechnicianSiteCount }} con multi-técnico
         </div>
 
         <!-- Panoramic standard public map tiles (OpenStreetMap) with the interactive SVG
@@ -505,7 +650,7 @@ export const CoordinatorTerritorialMapTab = {
             </div>
             <svg class="territorial-map-overlay" viewBox="0 0 100 62" preserveAspectRatio="none" role="img" aria-label="Mapa territorial de sedes con averías activas">
             <g
-              v-for="site in sites"
+              v-for="site in visibleSites"
               :key="site.location_id"
               class="territorial-marker"
               :class="{ 'is-unassigned': isUnassignedSite(site), 'is-multi-technician': site.is_multi_technician }"
@@ -517,6 +662,15 @@ export const CoordinatorTerritorialMapTab = {
               @keydown.enter.prevent="handleSiteClick(site)"
             >
               <circle :r="markerHitRadius" fill="transparent" class="territorial-marker-hit" />
+              <!-- Aro de demarcación: el relleno sigue hablando de criticidad y el aro, de zona. -->
+              <circle
+                v-if="siteZone(site)"
+                :r="markerRadius * 1.7"
+                fill="none"
+                :stroke="siteZoneColor(site)"
+                stroke-width="2.2"
+                class="territorial-marker-zone-ring"
+              />
               <circle :r="markerRadius" :fill="siteColor(site)" class="territorial-marker-circle" />
               <circle v-if="isUnassignedSite(site)" :r="markerRadius * 1.5" class="territorial-marker-unassigned-ring" />
               <text :y="-(markerRadius + 1.9)" text-anchor="middle" class="territorial-marker-badge">{{ sitePendingCount(site) }}</text>
@@ -535,21 +689,29 @@ export const CoordinatorTerritorialMapTab = {
             <span><i class="route-dot" style="background:#2560ff"></i> Ordinaria</span>
             <span><i class="route-dot" style="background:#38bd7d"></i> Preventiva</span>
             <span><i class="route-dot" style="background:#f8b60f"></i> Sin asignar</span>
+            <span v-if="selectedZone" data-testid="territorial-zone-legend">
+              <i class="route-dot" :style="{ background: selectedZone.color_hex }"></i> {{ selectedZone.name }}
+            </span>
           </div>
         </div>
 
         <!-- Site detail cards with technician and multi-technician badges -->
         <div class="territorial-site-list">
           <div
-            v-for="site in sites"
+            v-for="site in visibleSites"
             :key="'card-' + site.location_id"
             class="territorial-site-card"
             :class="{ 'is-unassigned': isUnassignedSite(site) }"
+            :style="{ borderLeft: '3px solid ' + siteZoneColor(site) }"
+            :data-zone-id="siteZone(site)?.id ?? 'none'"
           >
             <span class="territorial-site-badge" :style="{ background: siteColor(site) }">{{ sitePendingCount(site) }}</span>
             <span class="territorial-site-main">
               <strong>{{ site.name }}</strong>
               <small class="text-muted d-block">{{ site.address }}</small>
+              <small class="d-block" style="color: var(--color-ink-muted);" data-testid="territorial-site-zone">
+                🗺️ {{ siteZoneName(site) }}
+              </small>
               <small class="d-block" :class="{ 'text-danger fw-bold': site.is_multi_technician }">
                 <template v-if="site.is_multi_technician">👥 {{ technicianNames(site) }}</template>
                 <template v-else-if="site.assigned_technicians && site.assigned_technicians.length > 0">{{ technicianNames(site) }}</template>

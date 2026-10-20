@@ -128,6 +128,18 @@ export const CoordinatorDashboardView = {
       isAssigning: false,
       assignError: '',
 
+      // Asignación asistida por zona (Módulo 17, RF-04 / RF-05): el ranking llega del
+      // endpoint de sugerencias y es la única fuente del destacado y de la salvaguarda
+      // sanitaria. `assignTechnicianChosenByUser` impide que una respuesta tardía pise
+      // la elección manual del coordinador.
+      assignmentSuggestions: null,
+      isLoadingSuggestions: false,
+      suggestionsError: '',
+      assignTechnicianChosenByUser: false,
+      // Art. V.1: justificación del descarte sanitario, independiente del motivo de
+      // reasignación que ya viaja desde la ficha integral (RF-07.3).
+      assignOverrideJustification: '',
+
       // Bulk assignment modal state (reached from the territorial map, RF-MAP-09):
       // one technician + optional urgency reclassification applied to every active
       // incident of the chosen site (unassigned ones plus assigned ones on sites
@@ -342,6 +354,70 @@ export const CoordinatorDashboardView = {
     },
     hasPermanentNotificationFailures() {
       return this.permanentNotificationFailures > 0;
+    },
+
+    // --- Asignación asistida (Módulo 17, RF-04 / RF-05 / RF-06) ---
+
+    /** Ranking explicado devuelto por el endpoint; vacío si aún no llegó o falló. */
+    rankedTechnicians() {
+      const ranked = this.assignmentSuggestions?.ranked_technicians;
+      return Array.isArray(ranked) ? ranked : [];
+    },
+
+    /**
+     * Primer puesto del ranking: el técnico destacado con la insignia «Sugerido por Zona».
+     * Se toma de la lista ordenada y no de `recommendation.top_technician_id` para que la
+     * identidad contable recomendación ↔ primer puesto se cumpla por construcción.
+     */
+    suggestedTechnician() {
+      return this.rankedTechnicians[0] || null;
+    },
+
+    suggestedTechnicianId() {
+      return this.suggestedTechnician ? Number(this.suggestedTechnician.technician_id) : null;
+    },
+
+    /** Escalado sanitario activo: la avería es de frío y la guardia 24/7 va delante (Art. II). */
+    isColdChainSuggestion() {
+      const recommendation = this.assignmentSuggestions?.recommendation;
+      return Boolean(this.assignmentSuggestions?.incident?.is_cold_chain_risk)
+        && Boolean(recommendation?.is_cold_chain_escalation);
+    },
+
+    /** Banner de emergencia sanitaria del plan §4.1. */
+    hasSanitarySuggestionBanner() {
+      return this.isColdChainSuggestion;
+    },
+
+    /** La zona de la sede no tiene cuadrante propio: se ordena por proximidad y carga (RF-06.1). */
+    isUnattendedZone() {
+      return Boolean(this.assignmentSuggestions?.recommendation?.unattended_zone);
+    },
+
+    /** ¿El técnico elegido es el recomendado? */
+    assignIsSuggestedTechnician() {
+      return this.assignTechnicianId !== null
+        && this.assignTechnicianId !== ''
+        && Number(this.assignTechnicianId) === this.suggestedTechnicianId;
+    },
+
+    /**
+     * Art. V.1: descartar la recomendación sanitaria exige justificación de 20 caracteres
+     * reales. Fuera del escalado de frío no se pide nada adicional (RF-05.2).
+     */
+    assignRequiresOverrideJustification() {
+      return this.isColdChainSuggestion
+        && this.suggestedTechnicianId !== null
+        && !this.assignIsSuggestedTechnician;
+    },
+
+    /** Caracteres reales (puntos de código Unicode), no unidades UTF-16. */
+    assignOverrideJustificationLength() {
+      return Array.from(String(this.assignOverrideJustification || '').trim()).length;
+    },
+
+    assignOverrideJustificationValid() {
+      return !this.assignRequiresOverrideJustification || this.assignOverrideJustificationLength >= 20;
     }
   },
   mounted() {
@@ -813,13 +889,141 @@ export const CoordinatorDashboardView = {
       this.assignUrgencyOverride = '';
       this.assignUrgencyReason = '';
       this.assignError = '';
+      this.assignTechnicianChosenByUser = false;
+      this.assignOverrideJustification = '';
+      this.assignmentSuggestions = null;
+      this.suggestionsError = '';
       this.ensureTechniciansLoaded();
       this.showAssignModal = true;
+      // El ranking llega del servidor en paralelo: la apertura del panel no espera a la
+      // sugerencia y, si falla, el coordinador conserva el despacho manual (RF-06.3).
+      this.loadAssignmentSuggestions(incident.id);
     },
 
     closeAssignModal() {
       this.showAssignModal = false;
       this.selectedIncident = null;
+      this.assignmentSuggestions = null;
+      this.isLoadingSuggestions = false;
+      this.suggestionsError = '';
+      this.assignOverrideJustification = '';
+      this.assignTechnicianChosenByUser = false;
+    },
+
+    /**
+     * Carga el ranking explicado de la incidencia abierta (RF-04.1).
+     *
+     * No bloquea la asignación: un fallo se declara en el panel y el desplegable manual
+     * sigue operativo. El técnico sugerido se preselecciona solo si el coordinador no
+     * había elegido a nadie y la avería aún no tenía responsable.
+     */
+    async loadAssignmentSuggestions(incidentId) {
+      if (incidentId === null || incidentId === undefined || incidentId === '') {
+        return;
+      }
+
+      this.isLoadingSuggestions = true;
+      this.suggestionsError = '';
+
+      try {
+        const suggestions = await api.coordinator.getSuggestedTechnicians(incidentId);
+
+        // La respuesta puede llegar después de cerrar o cambiar de expediente: no se
+        // pinta un ranking de otra avería.
+        if (!this.showAssignModal || Number(this.selectedIncident?.id) !== Number(incidentId)) {
+          return;
+        }
+
+        this.assignmentSuggestions = suggestions || null;
+
+        if (!this.assignTechnicianChosenByUser
+          && !this.selectedIncident?.assigned_technician_id
+          && this.suggestedTechnicianId !== null) {
+          this.assignTechnicianId = this.suggestedTechnicianId;
+        }
+      } catch (err) {
+        if (Number(this.selectedIncident?.id) === Number(incidentId)) {
+          this.suggestionsError = err?.message
+            || 'No se pudo cargar la sugerencia territorial. Puede asignar manualmente.';
+        }
+      } finally {
+        this.isLoadingSuggestions = false;
+      }
+    },
+
+    /** Marca la elección manual para que una respuesta tardía no la pise. */
+    onAssignTechnicianChange() {
+      this.assignTechnicianChosenByUser = true;
+    },
+
+    /** Rótulo en castellano de las insignias del motor (contrato §3.6). */
+    suggestionBadgeLabel(badge) {
+      const labels = {
+        RECOMENDADO: '⭐ Sugerido por Zona',
+        GUARDIA_24_7: '🚨 Guardia 24/7',
+        TITULAR_ZONA: 'Titular de zona',
+        SUPLENTE_ZONA: 'Suplente de zona',
+        EN_CURSO_OTRA_SEDE: '⚠️ En curso en otra sede'
+      };
+      return labels[badge] || String(badge);
+    },
+
+    /** Desglose legible de la puntuación del sugerido (RF-04.3). */
+    suggestionBreakdown(suggestion) {
+      const breakdown = suggestion?.score_breakdown || {};
+      const parts = [];
+      if (Number(breakdown.territorial_affinity || 0) !== 0) {
+        parts.push(`Afinidad ${Number(breakdown.territorial_affinity) > 0 ? '+' : ''}${breakdown.territorial_affinity}`);
+      }
+      if (Number(breakdown.onsite_presence || 0) !== 0) {
+        parts.push(`In situ +${breakdown.onsite_presence}`);
+      }
+      if (Number(breakdown.same_zone_stops || 0) !== 0) {
+        parts.push(`Paradas de zona +${breakdown.same_zone_stops}`);
+      }
+      if (Number(breakdown.active_workload_penalty || 0) !== 0) {
+        parts.push(`Carga ${breakdown.active_workload_penalty}`);
+      }
+      if (Number(breakdown.inter_location_penalty || 0) !== 0) {
+        parts.push(`Otra sede ${breakdown.inter_location_penalty}`);
+      }
+      if (Number(breakdown.cold_chain_on_call_bonus || 0) !== 0) {
+        parts.push(`Guardia +${breakdown.cold_chain_on_call_bonus}`);
+      }
+      return parts.join(' · ');
+    },
+
+    /** Distancia de referencia del técnico, ya calculada por el servidor (RF-06.2). */
+    suggestionDistance(suggestion) {
+      const raw = suggestion?.current_status?.distance_km;
+      if (raw === null || raw === undefined || raw === '') {
+        return '—';
+      }
+      const distance = Number(raw);
+      return Number.isFinite(distance) ? `${distance.toFixed(1)} km` : '—';
+    },
+
+    /** Selecciona un puesto del ranking sin confirmar el despacho. */
+    applySuggestedTechnician(suggestion) {
+      if (!suggestion) {
+        return;
+      }
+      this.assignTechnicianId = suggestion.technician_id;
+      this.assignTechnicianChosenByUser = true;
+    },
+
+    /**
+     * Despacho en un clic del técnico recomendado (RNF-02): abre el modal y confirma.
+     * No exige justificación porque no está descartando la recomendación sanitaria.
+     */
+    async assignSuggestedTechnician() {
+      if (!this.selectedIncident || this.suggestedTechnicianId === null) {
+        return;
+      }
+
+      this.assignTechnicianId = this.suggestedTechnicianId;
+      this.assignTechnicianChosenByUser = false;
+      await this.performAssignment(this.suggestedTechnicianId);
     },
 
     openCancelModal(incident) {
@@ -1137,10 +1341,22 @@ export const CoordinatorDashboardView = {
      */
     async submitAssignment() {
       if (!this.selectedIncident) return;
+      await this.performAssignment(this.assignTechnicianId);
+    },
+
+    /**
+     * Confirmación única del panel, tanto del sugerido como del técnico elegido a mano.
+     *
+     * `override_justification` viaja como sexto argumento y solo cuando la salvaguarda
+     * sanitaria lo exige; el `reassignment_reason` del flujo de reasignación no se toca
+     * (RF-05.2, Resolución QA 8).
+     */
+    async performAssignment(technicianId) {
+      if (!this.selectedIncident) return;
 
       // Guard: no assignment is sent without a chosen active technician (EARS 5.5,
       // API contract requires technician_id of an active route technician).
-      if (!this.assignTechnicianId) {
+      if (!technicianId) {
         this.assignError = 'Selecciona un técnico de ruta activo antes de confirmar la asignación.';
         return;
       }
@@ -1151,16 +1367,29 @@ export const CoordinatorDashboardView = {
         return;
       }
 
+      // Art. V.1: descartar la recomendación de frío exige 20 caracteres reales. El
+      // bloqueo es de cliente para no gastar una petición que el servidor rechazará.
+      if (!this.assignOverrideJustificationValid) {
+        this.assignError = 'La justificación del descarte sanitario debe contener al menos 20 caracteres reales (Art. V.1).';
+        return;
+      }
+
       this.assignError = '';
       this.isAssigning = true;
       store.setLoading(true);
 
       try {
+        const overrideJustification = this.assignRequiresOverrideJustification
+          ? String(this.assignOverrideJustification).trim()
+          : null;
+
         const result = await api.coordinator.assignTechnician(
           this.selectedIncident.id,
-          this.assignTechnicianId,
+          technicianId,
           this.assignUrgencyOverride || null,
-          this.assignUrgencyReason.trim() || null
+          this.assignUrgencyReason.trim() || null,
+          null,
+          overrideJustification
         );
 
         store.addAlert(
@@ -1173,7 +1402,11 @@ export const CoordinatorDashboardView = {
         this.closeAssignModal();
         await this.loadIncidents();
       } catch (err) {
-        this.assignError = err.message || 'Error al asignar la incidencia.';
+        // La salvaguarda constitucional también vive en el servidor: su rechazo se pinta
+        // junto al campo que lo provoca en lugar de como un error genérico (Art. V.1).
+        this.assignError = err.code === 'COLD_CHAIN_OVERRIDE_JUSTIFICATION_REQUIRED'
+          ? (err.message || 'El descarte de la recomendación sanitaria exige una justificación de al menos 20 caracteres.')
+          : (err.message || 'Error al asignar la incidencia.');
         // Stale-row defense (EARS 5.6): the backend rejected the operation because the
         // real state no longer allows it. Re-sync the affected row with the server truth
         // while the panel stays open showing the rejection reason.
@@ -2105,6 +2338,92 @@ export const CoordinatorDashboardView = {
         @close="closeAssignModal"
       >
         <form v-if="selectedIncident" @submit.prevent="submitAssignment">
+          <!-- Asignación asistida por zona (Módulo 17, RF-04 / RF-05 / RF-06) -->
+          <div v-if="isLoadingSuggestions" class="d-flex align-items-center gap-2 mb-3" style="font-size: 12px; color: var(--color-ink-muted);" data-testid="assign-suggestions-loading">
+            <span class="spinner-border spinner-border-sm" role="status"></span>
+            <span>Calculando la sugerencia territorial…</span>
+          </div>
+
+          <div v-if="suggestionsError" class="mb-3" role="status" data-testid="assign-suggestions-error" style="background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); padding: 10px; border-radius: var(--radius-interactive); font-size: 13px;">
+            ⚠️ {{ suggestionsError }}
+          </div>
+
+          <!-- Banner de emergencia sanitaria (Art. II, RF-05.1) -->
+          <div v-if="hasSanitarySuggestionBanner" class="mb-3" role="alert" data-testid="assign-sanitary-banner" style="background-color: var(--color-error-bg); border: 1px solid var(--color-error-border); border-left: 3px solid var(--color-error); color: var(--color-error-text); padding: 12px 14px; border-radius: var(--radius-interactive); font-size: 13px;">
+            <div class="fw-bold">🚨 Prioridad Sanitaria Art. II: Atención requerida en &lt; 4 horas.</div>
+            <div>Se sugiere técnico de guardia.</div>
+            <div v-if="assignmentSuggestions?.recommendation?.explanation" class="mt-1" style="font-size: 12px;">
+              {{ assignmentSuggestions.recommendation.explanation }}
+            </div>
+          </div>
+
+          <div v-if="isUnattendedZone" class="mb-3" data-testid="assign-unattended-warning" style="background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); padding: 10px; border-radius: var(--radius-interactive); font-size: 13px;">
+            ⚠️ Sin técnicos disponibles en esta zona. Se ordena por proximidad y menor carga.
+          </div>
+
+          <!-- Técnico recomendado: un toque para despachar (RNF-02) -->
+          <div v-if="suggestedTechnician" class="mb-3" data-testid="assign-suggested-card" style="background-color: var(--color-primary-subtle); border: 1px solid var(--color-primary); border-radius: var(--radius-card); padding: 12px 14px;">
+            <div class="d-flex justify-content-between align-items-start gap-2">
+              <div>
+                <div class="fw-bold" style="font-size: 12px; letter-spacing: 0.03em; color: var(--color-primary-dark);">
+                  ⭐ Sugerido por Zona · {{ suggestionDistance(suggestedTechnician) }}
+                </div>
+                <div style="font-size: 15px; font-weight: 600; color: var(--color-ink-slate);">
+                  {{ suggestedTechnician.name }}
+                  <span class="font-monospace" style="font-size: 12px; color: var(--color-ink-muted);">{{ suggestedTechnician.operator_code }}</span>
+                </div>
+                <div style="font-size: 12px; color: var(--color-ink-muted);">
+                  {{ suggestedTechnician.zone_affinity_label }} · Puntuación {{ suggestedTechnician.total_score }}
+                </div>
+                <div v-if="suggestionBreakdown(suggestedTechnician)" class="font-monospace mt-1" style="font-size: 11px; color: var(--color-ink-secondary);" data-testid="assign-suggested-breakdown">
+                  {{ suggestionBreakdown(suggestedTechnician) }}
+                </div>
+                <div class="d-flex flex-wrap gap-1 mt-2" data-testid="assign-suggested-badges">
+                  <span v-for="badge in suggestedTechnician.badges" :key="badge" class="vg-chip" style="font-size: 11px;">
+                    {{ suggestionBadgeLabel(badge) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div v-if="suggestedTechnician.current_status?.has_in_progress_stop" class="mt-2" style="font-size: 12px; color: var(--color-warning-text);">
+              ⚠️ En curso en {{ suggestedTechnician.current_status.in_progress_location_name }}: requerirá pausar o finalizar antes de iniciar.
+            </div>
+            <button
+              type="button"
+              class="vg-btn vg-btn-primary w-100 mt-2"
+              :disabled="isAssigning"
+              @click="assignSuggestedTechnician"
+              data-testid="assign-suggested"
+            >
+              <span v-if="!isAssigning">⚡ Asignar Sugerido</span>
+              <span v-else>Asignando…</span>
+            </button>
+          </div>
+
+          <!-- Ranking explicado: el coordinador puede elegir a otro sin bloqueo (RF-04.3) -->
+          <div v-if="rankedTechnicians.length > 1" class="mb-3" data-testid="assign-ranking">
+            <div class="text-uppercase fw-bold mb-1" style="font-size: 11px; letter-spacing: 0.05em; color: var(--color-ink-muted);">Ranking territorial</div>
+            <button
+              v-for="candidate in rankedTechnicians"
+              :key="candidate.technician_id"
+              type="button"
+              class="vg-btn vg-btn-sm w-100 d-flex justify-content-between align-items-center gap-2 mb-1 text-start"
+              :class="Number(assignTechnicianId) === Number(candidate.technician_id) ? 'vg-btn-primary' : 'vg-btn-secondary'"
+              :disabled="isAssigning"
+              :data-testid="'assign-candidate-' + candidate.technician_id"
+              @click="applySuggestedTechnician(candidate)"
+            >
+              <span>
+                <span class="fw-semibold" style="font-size: 13px; color: var(--color-ink-slate);">{{ candidate.name }}</span>
+                <span class="small" style="color: var(--color-ink-muted);"> · {{ candidate.zone_affinity_label }}</span>
+                <span class="d-flex flex-wrap gap-1 mt-1">
+                  <span v-for="badge in candidate.badges" :key="badge" class="vg-chip" style="font-size: 10px;">{{ suggestionBadgeLabel(badge) }}</span>
+                </span>
+              </span>
+              <span class="font-monospace" style="font-size: 12px; color: var(--color-ink-secondary);">{{ candidate.total_score }} pts</span>
+            </button>
+          </div>
+
           <!-- Technician Selector -->
           <div style="margin-bottom: 16px;">
             <label for="assign-tech-select" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
@@ -2116,6 +2435,8 @@ export const CoordinatorDashboardView = {
               class="vg-select"
               required
               :disabled="isAssigning"
+              data-testid="assign-technician-select"
+              @change="onAssignTechnicianChange"
             >
               <option v-if="isLoadingTechnicians" value="" disabled>Cargando técnicos activos...</option>
               <option v-else-if="technicians.length === 0" value="" disabled>
@@ -2162,6 +2483,44 @@ export const CoordinatorDashboardView = {
             </div>
           </div>
 
+          <!-- Justificación del descarte sanitario (Art. V.1, RF-05.2): aparece solo
+               cuando el coordinador elige a alguien distinto del recomendado. -->
+          <div
+            v-if="assignRequiresOverrideJustification"
+            data-testid="assign-override-block"
+            style="background-color: var(--color-error-bg); border: 1px solid var(--color-error-border); border-radius: var(--radius-interactive); padding: 12px 14px; margin-bottom: 16px;"
+          >
+            <label for="assign-override-justification" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-error-text); margin-bottom: 6px;">
+              Justificación obligatoria de descarte sanitario (mínimo 20 caracteres) <span style="color: var(--color-error);">*</span>
+            </label>
+            <textarea
+              id="assign-override-justification"
+              v-model="assignOverrideJustification"
+              class="vg-textarea"
+              :class="{'is-invalid': !assignOverrideJustificationValid}"
+              rows="3"
+              maxlength="500"
+              placeholder="Explique por qué se descarta al técnico sugerido para esta avería de frío…"
+              :disabled="isAssigning"
+              data-testid="assign-override-justification"
+            ></textarea>
+            <div class="d-flex justify-content-between align-items-start mt-1">
+              <small style="font-size: 11px; color: var(--color-error-text);">
+                El descarte queda auditado (Art. III.3).
+              </small>
+              <small class="font-monospace" style="font-size: 11px; color: var(--color-error-text);" data-testid="assign-override-counter">
+                {{ assignOverrideJustificationLength }}/20
+              </small>
+            </div>
+            <small
+              v-if="assignOverrideJustificationLength > 0 && !assignOverrideJustificationValid"
+              style="font-size: 11px; color: var(--color-error-text);"
+              data-testid="assign-override-missing"
+            >
+              Faltan {{ 20 - assignOverrideJustificationLength }} caracteres para poder confirmar.
+            </small>
+          </div>
+
           <!-- Error Alert -->
           <div
             v-if="assignError"
@@ -2176,7 +2535,12 @@ export const CoordinatorDashboardView = {
             <button type="button" class="vg-btn vg-btn-secondary" @click="closeAssignModal" :disabled="isAssigning">
               Cancelar
             </button>
-            <button type="submit" class="vg-btn vg-btn-primary" :disabled="isAssigning || !assignTechnicianId">
+            <button
+              type="submit"
+              class="vg-btn vg-btn-primary"
+              :disabled="isAssigning || !assignTechnicianId || !assignOverrideJustificationValid"
+              data-testid="assign-submit"
+            >
               <span v-if="!isAssigning">Confirmar Asignación</span>
               <span v-else>Guardando...</span>
             </button>

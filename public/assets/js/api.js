@@ -1039,6 +1039,20 @@ export class ApiClient {
     },
 
     /**
+     * Ranking explicado de técnicos idóneos para una avería (Módulo 17, RF-04.1, contrato §3.6).
+     *
+     * Devuelve `{ incident, recommendation, ranked_technicians }`: la recomendación declara
+     * el escalado sanitario y la zona desatendida, y cada puesto trae su desglose, sus
+     * insignias y la distancia de referencia. El panel de triaje lo usa para destacar al
+     * sugerido y para saber cuándo el descarte exige justificación (Art. V.1).
+     * @param {number|string} incidentId
+     * @returns {Promise<Object>}
+     */
+    getSuggestedTechnicians: (incidentId) => {
+      return this.get(`/coordinator/incidents/${encodeURIComponent(incidentId)}/suggested-technicians`);
+    },
+
+    /**
      * Assigns incident to a technician, with optional urgency reclassification (RF-05).
      * @param {number|string} incidentId
      * @param {number|string} technicianId

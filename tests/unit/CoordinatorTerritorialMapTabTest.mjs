@@ -658,6 +658,87 @@ assert('8.7 El dashboard refresca el mapa vía ref tras asignar en lote (y solo 
     && viewSource.includes('if (assigned.length > 0) {') && viewSource.includes('mapTab.loadTerritorialData(true)'));
 
 // =========================================================================
+// BLOQUE 9: Filtro por zona operativa y color de demarcación (Módulo 17, M4)
+// =========================================================================
+console.log('\n--- BLOQUE 9: Filtro por zona operativa ---');
+
+// El contrato cartográfico prohíbe añadir parámetros al endpoint (§4.2.1): la zona se
+// resuelve en cliente con el catálogo territorial y la ficha de cada sede.
+api.coordinator = api.coordinator || {};
+api.admin = api.admin || {};
+const previousGetZones = api.coordinator.getZones;
+const previousGetLocations = api.admin.getLocations;
+
+api.coordinator.getZones = async () => ({
+  zones: [
+    { id: 1, code: 'BCN-NORTE', name: 'Barcelona Norte', color_hex: '#2560ff', is_active: true },
+    { id: 2, code: 'BCN-SUR', name: 'Barcelona Sur', color_hex: '#38bd7d', is_active: true }
+  ],
+  unassigned_locations_count: 1
+});
+api.admin.getLocations = async () => ([
+  { id: 1, site_code: 'SEDE-BCN-01', zone_id: 1 },
+  { id: 2, site_code: 'SEDE-BCN-02', zone_id: 2 },
+  { id: 3, site_code: 'SEDE-BCN-03', zone_id: null }
+]);
+
+const zoneTab = createTabInstance();
+await zoneTab.loadTerritorialData();
+await zoneTab.loadZoneContext();
+
+assert('9.1 La zona viva de cada sede se resuelve desde el catálogo territorial',
+  zoneTab.siteZoneName(zoneTab.sites[0]) === 'Barcelona Norte'
+    && zoneTab.siteZoneName(zoneTab.sites[1]) === 'Barcelona Sur'
+    && zoneTab.siteZone(zoneTab.sites[2]) === null);
+assert('9.2 El color de marcador es el corporativo de la zona, no un literal nuevo',
+  zoneTab.siteZoneColor(zoneTab.sites[0]) === '#2560ff'
+    && zoneTab.siteZoneColor(zoneTab.sites[1]) === '#38bd7d'
+    && zoneTab.siteZoneColor(zoneTab.sites[2]) === 'var(--color-hairline)');
+
+zoneTab.filters.zone_id = '1';
+assert('9.3 El filtro por zona acota las sedes sin pedir otra foto al servidor',
+  zoneTab.visibleSites.length === 1
+    && zoneTab.visibleSites[0].location_id === 1
+    && zoneTab.totalActiveTasks === 2);
+
+zoneTab.filters.zone_id = 'none';
+assert('9.4 «Sin zona asignada» aísla las sedes sin demarcación',
+  zoneTab.visibleSites.length === 1 && zoneTab.visibleSites[0].location_id === 3);
+
+zoneTab.filters.zone_id = '99';
+assert('9.5 Una zona sin sedes activas declara el vacío del filtro sin borrar el mapa',
+  zoneTab.visibleSites.length === 0 && zoneTab.isZoneFilterEmpty === true);
+
+zoneTab.filters.zone_id = '';
+assert('9.6 Quitar el filtro devuelve todas las sedes y recuenta el resumen',
+  zoneTab.visibleSites.length === 3 && zoneTab.totalActiveTasks === 5);
+assert('9.7 El selector de zona publica el nombre y el número de sedes de cada demarcación',
+  zoneTab.zoneFilterOptions.length === 2
+    && zoneTab.zoneFilterOptions.find(zone => zone.id === 1)?.sitesCount === 1
+    && zoneTab.zoneFilterOptions.find(zone => zone.id === 2)?.sitesCount === 1);
+
+const zoneTemplate = CoordinatorTerritorialMapTab.template;
+assert('9.8 Plantilla: selector de zona, aro de demarcación y etiqueta en la tarjeta',
+  zoneTemplate.includes('data-testid="filter-territorial-zone"')
+    && zoneTemplate.includes('v-model="filters.zone_id"')
+    && zoneTemplate.includes('territorial-marker-zone-ring')
+    && zoneTemplate.includes('data-testid="territorial-site-zone"')
+    && zoneTemplate.includes('siteZoneColor(site)'));
+
+// Un catálogo caído no puede tumbar el mapa: los marcadores conservan su color semántico.
+api.coordinator.getZones = async () => { throw new Error('catálogo caído'); };
+const resilientZoneTab = createTabInstance();
+await resilientZoneTab.loadTerritorialData();
+await resilientZoneTab.loadZoneContext();
+assert('9.9 Sin catálogo territorial el mapa sigue operativo y sin filtro de zona',
+  resilientZoneTab.sites.length === 3
+    && resilientZoneTab.visibleSites.length === 3
+    && resilientZoneTab.zoneFilterOptions.length === 0);
+
+api.coordinator.getZones = previousGetZones;
+api.admin.getLocations = previousGetLocations;
+
+// =========================================================================
 // RESUMEN FINAL
 // =========================================================================
 console.log('\n======================================================================');

@@ -142,6 +142,12 @@ function createDashboardInstance(initialData = {}) {
     assignUrgencyReason: '',
     isAssigning: false,
     assignError: '',
+    // Módulo 17: estado del recomendador y de la justificación de descarte sanitario.
+    assignmentSuggestions: null,
+    isLoadingSuggestions: false,
+    suggestionsError: '',
+    assignTechnicianChosenByUser: false,
+    assignOverrideJustification: '',
     showBulkAssignModal: false,
     bulkAssignSite: null,
     bulkAssignIncidents: [],
@@ -186,7 +192,19 @@ function createDashboardInstance(initialData = {}) {
     'inactivityReasonLength',
     'isInactivityReasonValid',
     'permanentNotificationFailures',
-    'hasPermanentNotificationFailures'
+    'hasPermanentNotificationFailures',
+    // Asignación asistida por zona (Módulo 17, T-ZONE-12): los métodos leen estos
+    // getters, así que el arnés los expone igual que lo haría Vue.
+    'rankedTechnicians',
+    'suggestedTechnician',
+    'suggestedTechnicianId',
+    'isColdChainSuggestion',
+    'hasSanitarySuggestionBanner',
+    'isUnattendedZone',
+    'assignIsSuggestedTechnician',
+    'assignRequiresOverrideJustification',
+    'assignOverrideJustificationLength',
+    'assignOverrideJustificationValid'
   ]) {
     Object.defineProperty(instance, name, {
       get: () => CoordinatorDashboardView.computed[name].call(instance),
