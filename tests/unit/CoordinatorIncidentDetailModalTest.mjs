@@ -1562,6 +1562,113 @@ assert('19.16 The dirty-form guard also protects the inactivity draft (RF-08.1)'
   CoordinatorIncidentDetailModal.methods.resetDrafts.call(draftGuardInstance) === undefined &&
   draftGuardInstance.inactivityReason === '' && draftGuardInstance.isInactivityPanelOpen === false);
 
+// ---------------------------------------------------------------------
+// GROUP 20: Inline assisted assignment suggestions (RF-04.1, RF-04.3, RF-MAP-09)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 20: Inline assisted suggestions inside the detail modal ---');
+
+let detailSuggestionCalls = [];
+let nextDetailSuggestions = null;
+let nextDetailSuggestionError = null;
+let detailAssignCalls = [];
+api.coordinator.getSuggestedTechnicians = async (incidentId) => {
+  detailSuggestionCalls.push(incidentId);
+  if (nextDetailSuggestionError) {
+    const error = nextDetailSuggestionError;
+    nextDetailSuggestionError = null;
+    throw error;
+  }
+  return nextDetailSuggestions;
+};
+api.coordinator.assignTechnician = async (...args) => { detailAssignCalls.push(args); return { id: args[0] }; };
+api.coordinator.getIncidentDetail = async () => ({ ...assignFixture });
+api.coordinator.getUsers = async () => [
+  { id: 7, name: 'Marta Guardia', email: 'marta.ruta@vendguard.internal' },
+  { id: 5, name: 'Jordi Ruta', email: 'jordi.ruta@vendguard.internal' }
+];
+const detailSuggestionsFixture = () => ({
+  incident: { id: 3661, ticket_code: 'INC-2026-0036', priority: 'HIGH', is_cold_chain_risk: true },
+  recommendation: { top_technician_id: 7, is_cold_chain_escalation: true, unattended_zone: false, explanation: 'Escalado de frío.' },
+  ranked_technicians: [
+    {
+      technician_id: 7,
+      name: 'Marta Guardia',
+      operator_code: 'OP-07',
+      zone_affinity_label: 'Titular de zona',
+      total_score: 140,
+      badges: ['RECOMENDADO', 'GUARDIA_24_7'],
+      score_breakdown: { cold_chain_on_call_bonus: 100 },
+      current_status: { distance_km: 1.4 }
+    },
+    {
+      technician_id: 5,
+      name: 'Jordi Ruta',
+      operator_code: 'OP-05',
+      zone_affinity_label: 'Titular de zona',
+      total_score: 50,
+      badges: [],
+      score_breakdown: {},
+      current_status: { distance_km: 2.4 }
+    }
+  ]
+});
+
+const suggestPanel = createInstance({ detail: assignFixture, incidentId: 3661 });
+nextDetailSuggestions = detailSuggestionsFixture();
+CoordinatorIncidentDetailModal.methods.openAssignPanel.call(suggestPanel);
+await new Promise((resolve) => setTimeout(resolve, 0));
+suggestPanel.fetchDetail = async () => {};
+assert('20.1 Opening the initial-assign panel loads the territorial ranking',
+  detailSuggestionCalls.length === 1 && detailSuggestionCalls[0] === 3661 &&
+  suggestPanel.assignmentSuggestions !== null && suggestPanel.suggestionsError === '');
+assert('20.2 The suggested technician takes over the selection until the user chooses another one',
+  suggestPanel.selectedTechnicianId === 7 && computed(suggestPanel, 'detailSuggestedTechnicianId') === 7);
+
+// Reassignment is a change of owner: the engine is a dispatch aid for unassigned
+// tickets, so it is never consulted on that path (RF-04.1).
+detailSuggestionCalls = [];
+const reassignSuggestPanel = createInstance({ detail: reassignFixture, incidentId: 142, techniciansLoaded: true });
+CoordinatorIncidentDetailModal.methods.openAssignPanel.call(reassignSuggestPanel);
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert('20.3 The engine is not consulted when reassigning an owned ticket',
+  detailSuggestionCalls.length === 0 && reassignSuggestPanel.assignmentSuggestions === null);
+
+// Fallback: a failing recommender is declared and never blocks the manual dispatch (RF-06.3).
+const fallbackPanel = createInstance({ detail: assignFixture, incidentId: 3661 });
+nextDetailSuggestionError = new Error('El recomendador no responde.');
+detailSuggestionCalls = [];
+CoordinatorIncidentDetailModal.methods.openAssignPanel.call(fallbackPanel);
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert('20.4 A failed suggestion is declared and the manual selection stays usable',
+  fallbackPanel.suggestionsError.includes('no responde') &&
+  fallbackPanel.assignmentSuggestions === null);
+
+// Sanitary override guard inside the inline panel (Art. V.1, RF-05.2)
+const inlineOverridePanel = createInstance({ detail: assignFixture, incidentId: 3661 });
+nextDetailSuggestions = detailSuggestionsFixture();
+CoordinatorIncidentDetailModal.methods.openAssignPanel.call(inlineOverridePanel);
+await new Promise((resolve) => setTimeout(resolve, 0));
+inlineOverridePanel.applyDetailSuggestedTechnician(inlineOverridePanel.assignmentSuggestions?.ranked_technicians?.[1]);
+assert('20.5 Discarding the cold-chain suggestion demands the override justification',
+  computed(inlineOverridePanel, 'detailRequiresOverrideJustification') === true &&
+  computed(inlineOverridePanel, 'detailOverrideJustificationValid') === false);
+
+await CoordinatorIncidentDetailModal.methods.confirmAssign.call(inlineOverridePanel);
+assert('20.6 Without the justification the API is never called',
+  detailAssignCalls.length === 0 && inlineOverridePanel.assignErrorMessage.includes('20 caracteres'));
+
+inlineOverridePanel.assignOverrideJustification = 'Sustitución justificada: el sustituto está más cerca de la sede';
+await CoordinatorIncidentDetailModal.methods.confirmAssign.call(inlineOverridePanel);
+assert('20.7 A justified dispatch travels with override_justification as the sixth argument',
+  detailAssignCalls.length === 1 &&
+  detailAssignCalls[0][0] === 3661 && detailAssignCalls[0][1] === 5 && detailAssignCalls[0][5] !== null &&
+  inlineOverridePanel.isAssignPanelOpen === false);
+
+assert('20.8 The inline panel renders the shared suggestion engine and its override block',
+  CoordinatorIncidentDetailModal.template.includes('<AssignSuggestionPanel') &&
+  CoordinatorIncidentDetailModal.template.includes('@select="applyDetailSuggestedTechnician"') &&
+  CoordinatorIncidentDetailModal.template.includes('data-testid="detail-assign-override-justification"'));
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);

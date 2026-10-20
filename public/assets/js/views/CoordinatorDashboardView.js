@@ -55,6 +55,12 @@ import { CoordinatorRefundsTab } from '../components/CoordinatorRefundsTab.js';
 import { CoordinatorIncidentDetailModal } from '../components/CoordinatorIncidentDetailModal.js';
 import { CoordinatorNotificationCenterModal } from '../components/CoordinatorNotificationCenterModal.js';
 import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';
+import { AssignSuggestionPanel } from '../components/AssignSuggestionPanel.js';
+import {
+  suggestionBadgeLabel,
+  suggestionBreakdown,
+  suggestionDistance
+} from '../utils/SuggestionFormat.js';
 import { opportunisticModeLabel as resolveOpportunisticModeLabel } from '../utils/OpportunisticContext.js';// Status classification is delegated to the shared module utils/IncidentStatusPermissions.js
 // (frontend mirror of the PHP lifecycle rules): no literal status lists live in this view.
 
@@ -81,7 +87,8 @@ export const CoordinatorDashboardView = {
     CoordinatorRefundsTab,
     CoordinatorIncidentDetailModal,
     CoordinatorNotificationCenterModal,
-    IncidentCommentThreadModal
+    IncidentCommentThreadModal,
+    AssignSuggestionPanel
   },
   emits: ['assigned', 'cancelled', 'refresh'],
   data() {
@@ -154,6 +161,17 @@ export const CoordinatorDashboardView = {
       // Justification for the incidents of the batch that already have an active owner:
       // the backend only accepts a reassignment with >= 10 real characters (RF-07.3).
       bulkAssignReassignmentReason: '',
+      // Asignación asistida aplicada al lote (RF-MAP-09, RF-04.1): la sugerencia se
+      // calcula sobre la incidencia más prioritaria del lote y preselecciona el
+      // técnico común; el coordinador puede elegir otro sin bloqueo (RF-04.3).
+      bulkAssignSuggestions: null,
+      bulkAssignSuggestionIncidentId: null,
+      isLoadingBulkSuggestions: false,
+      bulkSuggestionsError: '',
+      bulkAssignTechnicianChosenByUser: false,
+      // Art. V.1: justificación del descarte sanitario dentro del lote, independiente
+      // del motivo de reasignación (RF-05.2).
+      bulkAssignOverrideJustification: '',
       bulkAssignError: '',
       isBulkAssigning: false,
 
@@ -418,6 +436,55 @@ export const CoordinatorDashboardView = {
 
     assignOverrideJustificationValid() {
       return !this.assignRequiresOverrideJustification || this.assignOverrideJustificationLength >= 20;
+    },
+
+    // --- Salvaguarda sanitaria aplicada al lote del mapa (RF-05.2 / Art. V.1) ---
+
+    /** Primer puesto del ranking del lote. */
+    bulkSuggestedTechnicianId() {
+      const first = this.bulkAssignSuggestions?.ranked_technicians?.[0];
+      return first ? Number(first.technician_id) : null;
+    },
+
+    /** Escalado sanitario activo en el expediente de referencia del lote (Art. II). */
+    bulkIsColdChainSuggestion() {
+      return Boolean(this.bulkAssignSuggestions?.incident?.is_cold_chain_risk)
+        && Boolean(this.bulkAssignSuggestions?.recommendation?.is_cold_chain_escalation);
+    },
+
+    /**
+     * Descartar la recomendación sanitaria del lote exige la misma justificación de
+     * 20 caracteres reales que el despacho unitario (Art. V.1, RF-05.2).
+     */
+    bulkRequiresOverrideJustification() {
+      return this.bulkIsColdChainSuggestion
+        && this.bulkSuggestedTechnicianId !== null
+        && this.bulkAssignTechnicianId !== null
+        && this.bulkAssignTechnicianId !== ''
+        && Number(this.bulkAssignTechnicianId) !== this.bulkSuggestedTechnicianId;
+    },
+
+    /** Caracteres reales (puntos de código Unicode) de la justificación del lote. */
+    bulkAssignOverrideJustificationLength() {
+      return Array.from(String(this.bulkAssignOverrideJustification || '').trim()).length;
+    },
+
+    bulkAssignOverrideJustificationValid() {
+      return !this.bulkRequiresOverrideJustification || this.bulkAssignOverrideJustificationLength >= 20;
+    },
+
+    /** Checklist del expediente de referencia del lote (coincide con el panel). */
+    bulkSuggestionIncident() {
+      return this.bulkAssignIncidents.find(inc => Number(inc.id) === Number(this.bulkAssignSuggestionIncidentId)) || null;
+    },
+
+    /** Nota de ámbito del panel asistido del lote (RF-MAP-09). */
+    bulkAssignSuggestionCaption() {
+      const incident = this.bulkSuggestionIncident;
+      if (!incident || !(this.bulkAssignSuggestions || this.isLoadingBulkSuggestions)) {
+        return '';
+      }
+      return `Sugerencia calculada sobre #${incident.ticket_code}, la incidencia más prioritaria del lote.`;
     }
   },
   mounted() {
@@ -620,6 +687,16 @@ export const CoordinatorDashboardView = {
         // the whole building under a single active owner in one click (T-MAP-15).
         return matchesSite && !isTerminalStatus(inc.status);
       });
+
+      // Un solo expediente pendiente: el lote nada aporta sobre el panel asistido
+      // completo (sugerido + ranking + reclasificación auditada por ticket), así que
+      // se abre directamente (RF-04.1 / RF-MAP-09).
+      if (pending.length === 1) {
+        this.closeBulkAssignModal();
+        this.openAssignModal(pending[0]);
+        return;
+      }
+
       this.bulkAssignSite = {
         locationId,
         siteCode,
@@ -630,8 +707,16 @@ export const CoordinatorDashboardView = {
       this.bulkAssignUrgencyOverride = '';
       this.bulkAssignUrgencyReason = '';
       this.bulkAssignReassignmentReason = '';
+      this.bulkAssignSuggestions = null;
+      this.bulkAssignSuggestionIncidentId = pending[0]?.id ?? null;
+      this.bulkSuggestionsError = '';
+      this.bulkAssignTechnicianChosenByUser = false;
+      this.bulkAssignOverrideJustification = '';
       this.bulkAssignError = '';
       this.showBulkAssignModal = true;
+      // La sugerencia territorial llega en paralelo y preselecciona al sugerido del
+      // primer expediente del lote; si falla, el despacho manual sigue operativo (RF-06.3).
+      this.loadBulkAssignSuggestions();
     },
 
     closeBulkAssignModal() {
@@ -639,6 +724,75 @@ export const CoordinatorDashboardView = {
       this.bulkAssignSite = null;
       this.bulkAssignIncidents = [];
       this.bulkAssignReassignmentReason = '';
+      this.bulkAssignSuggestions = null;
+      this.bulkAssignSuggestionIncidentId = null;
+      this.isLoadingBulkSuggestions = false;
+      this.bulkSuggestionsError = '';
+    },
+
+    /**
+     * Carga el ranking explicado del lote del mapa (RF-04.1, RF-MAP-09).
+     *
+     * El motor puntúa por expediente, así que en un lote multi-aviso la sugerencia se
+     * calcula sobre la incidencia más prioritaria (la primera de la bandeja del
+     * servidor). Un fallo se declara en el panel y nunca bloquea el despacho manual.
+     */
+    async loadBulkAssignSuggestions() {
+      const incidentId = this.bulkAssignSuggestionIncidentId;
+      if (incidentId === null || incidentId === undefined || incidentId === '') {
+        return;
+      }
+
+      this.isLoadingBulkSuggestions = true;
+      this.bulkSuggestionsError = '';
+
+      try {
+        const suggestions = await api.coordinator.getSuggestedTechnicians(incidentId);
+
+        // La respuesta puede llegar después de cerrar o cambiar de sede: no se pinta
+        // un ranking de otro lote.
+        if (!this.showBulkAssignModal || Number(this.bulkAssignSuggestionIncidentId) !== Number(incidentId)) {
+          return;
+        }
+
+        this.bulkAssignSuggestions = suggestions || null;
+        this.applyBulkSuggestionPreselection();
+      } catch (err) {
+        if (Number(this.bulkAssignSuggestionIncidentId) === Number(incidentId)) {
+          this.bulkSuggestionsError = err?.message
+            || 'No se pudo cargar la sugerencia territorial. Puede asignar manualmente.';
+        }
+      } finally {
+        this.isLoadingBulkSuggestions = false;
+      }
+    },
+
+    /**
+     * Preselecciona al técnico sugerido del lote salvo que el coordinador ya hubiera
+     * elegido otro manualmente (espejo de `loadAssignmentSuggestions`, RF-04.2).
+     */
+    applyBulkSuggestionPreselection() {
+      if (this.bulkAssignTechnicianChosenByUser) {
+        return;
+      }
+      const suggestedId = Number(this.bulkAssignSuggestions?.ranked_technicians?.[0]?.technician_id) || null;
+      if (suggestedId !== null) {
+        this.bulkAssignTechnicianId = suggestedId;
+      }
+    },
+
+    /** Marca la elección manual del lote para que la sugerencia tardía no la pise. */
+    onBulkAssignTechnicianChange() {
+      this.bulkAssignTechnicianChosenByUser = true;
+    },
+
+    /** Aplica un puesto del ranking del lote al técnico común (RF-04.3). */
+    applyBulkSuggestedTechnician(candidate) {
+      if (!candidate) {
+        return;
+      }
+      this.bulkAssignTechnicianId = candidate.technician_id;
+      this.bulkAssignTechnicianChosenByUser = true;
     },
 
     /**
@@ -762,6 +916,13 @@ export const CoordinatorDashboardView = {
         }
       }
 
+      // Art. V.1 / RF-05.2: descartar la recomendación sanitaria del expediente de
+      // referencia del lote exige la misma justificación de 20 caracteres reales.
+      if (this.bulkRequiresOverrideJustification && !this.bulkAssignOverrideJustificationValid) {
+        this.bulkAssignError = 'Justificación obligatoria de descarte sanitario: al menos 20 caracteres reales (Art. V.1, RF-05.2).';
+        return;
+      }
+
       this.bulkAssignError = '';
       this.isBulkAssigning = true;
       store.setLoading(true);
@@ -777,7 +938,8 @@ export const CoordinatorDashboardView = {
               this.bulkAssignTechnicianId,
               this.bulkAssignUrgencyOverride || null,
               this.bulkAssignUrgencyReason.trim() || null,
-              isReassignment ? reassignmentReason : null
+              isReassignment ? reassignmentReason : null,
+              this.bulkRequiresOverrideJustification ? this.bulkAssignOverrideJustification.trim() : null
             );
             assigned.push(incident.ticket_code);
           } catch (err) {
@@ -958,49 +1120,17 @@ export const CoordinatorDashboardView = {
 
     /** Rótulo en castellano de las insignias del motor (contrato §3.6). */
     suggestionBadgeLabel(badge) {
-      const labels = {
-        RECOMENDADO: '⭐ Sugerido por Zona',
-        GUARDIA_24_7: '🚨 Guardia 24/7',
-        TITULAR_ZONA: 'Titular de zona',
-        SUPLENTE_ZONA: 'Suplente de zona',
-        EN_CURSO_OTRA_SEDE: '⚠️ En curso en otra sede'
-      };
-      return labels[badge] || String(badge);
+      return suggestionBadgeLabel(badge);
     },
 
     /** Desglose legible de la puntuación del sugerido (RF-04.3). */
     suggestionBreakdown(suggestion) {
-      const breakdown = suggestion?.score_breakdown || {};
-      const parts = [];
-      if (Number(breakdown.territorial_affinity || 0) !== 0) {
-        parts.push(`Afinidad ${Number(breakdown.territorial_affinity) > 0 ? '+' : ''}${breakdown.territorial_affinity}`);
-      }
-      if (Number(breakdown.onsite_presence || 0) !== 0) {
-        parts.push(`In situ +${breakdown.onsite_presence}`);
-      }
-      if (Number(breakdown.same_zone_stops || 0) !== 0) {
-        parts.push(`Paradas de zona +${breakdown.same_zone_stops}`);
-      }
-      if (Number(breakdown.active_workload_penalty || 0) !== 0) {
-        parts.push(`Carga ${breakdown.active_workload_penalty}`);
-      }
-      if (Number(breakdown.inter_location_penalty || 0) !== 0) {
-        parts.push(`Otra sede ${breakdown.inter_location_penalty}`);
-      }
-      if (Number(breakdown.cold_chain_on_call_bonus || 0) !== 0) {
-        parts.push(`Guardia +${breakdown.cold_chain_on_call_bonus}`);
-      }
-      return parts.join(' · ');
+      return suggestionBreakdown(suggestion);
     },
 
     /** Distancia de referencia del técnico, ya calculada por el servidor (RF-06.2). */
     suggestionDistance(suggestion) {
-      const raw = suggestion?.current_status?.distance_km;
-      if (raw === null || raw === undefined || raw === '') {
-        return '—';
-      }
-      const distance = Number(raw);
-      return Number.isFinite(distance) ? `${distance.toFixed(1)} km` : '—';
+      return suggestionDistance(suggestion);
     },
 
     /** Selecciona un puesto del ranking sin confirmar el despacho. */
@@ -1401,6 +1531,9 @@ export const CoordinatorDashboardView = {
         this.$emit('assigned', result);
         this.closeAssignModal();
         await this.loadIncidents();
+        // El modal asistido también se abre desde el mapa territorial (lote de una
+        // sola incidencia): repinta los marcadores sin click manual extra (RF-MAP-09).
+        this.refreshTerritorialMap();
       } catch (err) {
         // La salvaguarda constitucional también vive en el servidor: su rechazo se pinta
         // junto al campo que lo provoca en lugar de como un error genérico (Art. V.1).
@@ -2338,91 +2471,18 @@ export const CoordinatorDashboardView = {
         @close="closeAssignModal"
       >
         <form v-if="selectedIncident" @submit.prevent="submitAssignment">
-          <!-- Asignación asistida por zona (Módulo 17, RF-04 / RF-05 / RF-06) -->
-          <div v-if="isLoadingSuggestions" class="d-flex align-items-center gap-2 mb-3" style="font-size: 12px; color: var(--color-ink-muted);" data-testid="assign-suggestions-loading">
-            <span class="spinner-border spinner-border-sm" role="status"></span>
-            <span>Calculando la sugerencia territorial…</span>
-          </div>
-
-          <div v-if="suggestionsError" class="mb-3" role="status" data-testid="assign-suggestions-error" style="background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); padding: 10px; border-radius: var(--radius-interactive); font-size: 13px;">
-            ⚠️ {{ suggestionsError }}
-          </div>
-
-          <!-- Banner de emergencia sanitaria (Art. II, RF-05.1) -->
-          <div v-if="hasSanitarySuggestionBanner" class="mb-3" role="alert" data-testid="assign-sanitary-banner" style="background-color: var(--color-error-bg); border: 1px solid var(--color-error-border); border-left: 3px solid var(--color-error); color: var(--color-error-text); padding: 12px 14px; border-radius: var(--radius-interactive); font-size: 13px;">
-            <div class="fw-bold">🚨 Prioridad Sanitaria Art. II: Atención requerida en &lt; 4 horas.</div>
-            <div>Se sugiere técnico de guardia.</div>
-            <div v-if="assignmentSuggestions?.recommendation?.explanation" class="mt-1" style="font-size: 12px;">
-              {{ assignmentSuggestions.recommendation.explanation }}
-            </div>
-          </div>
-
-          <div v-if="isUnattendedZone" class="mb-3" data-testid="assign-unattended-warning" style="background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); padding: 10px; border-radius: var(--radius-interactive); font-size: 13px;">
-            ⚠️ Sin técnicos disponibles en esta zona. Se ordena por proximidad y menor carga.
-          </div>
-
-          <!-- Técnico recomendado: un toque para despachar (RNF-02) -->
-          <div v-if="suggestedTechnician" class="mb-3" data-testid="assign-suggested-card" style="background-color: var(--color-primary-subtle); border: 1px solid var(--color-primary); border-radius: var(--radius-card); padding: 12px 14px;">
-            <div class="d-flex justify-content-between align-items-start gap-2">
-              <div>
-                <div class="fw-bold" style="font-size: 12px; letter-spacing: 0.03em; color: var(--color-primary-dark);">
-                  ⭐ Sugerido por Zona · {{ suggestionDistance(suggestedTechnician) }}
-                </div>
-                <div style="font-size: 15px; font-weight: 600; color: var(--color-ink-slate);">
-                  {{ suggestedTechnician.name }}
-                  <span class="font-monospace" style="font-size: 12px; color: var(--color-ink-muted);">{{ suggestedTechnician.operator_code }}</span>
-                </div>
-                <div style="font-size: 12px; color: var(--color-ink-muted);">
-                  {{ suggestedTechnician.zone_affinity_label }} · Puntuación {{ suggestedTechnician.total_score }}
-                </div>
-                <div v-if="suggestionBreakdown(suggestedTechnician)" class="font-monospace mt-1" style="font-size: 11px; color: var(--color-ink-secondary);" data-testid="assign-suggested-breakdown">
-                  {{ suggestionBreakdown(suggestedTechnician) }}
-                </div>
-                <div class="d-flex flex-wrap gap-1 mt-2" data-testid="assign-suggested-badges">
-                  <span v-for="badge in suggestedTechnician.badges" :key="badge" class="vg-chip" style="font-size: 11px;">
-                    {{ suggestionBadgeLabel(badge) }}
-                  </span>
-                </div>
-              </div>
-            </div>
-            <div v-if="suggestedTechnician.current_status?.has_in_progress_stop" class="mt-2" style="font-size: 12px; color: var(--color-warning-text);">
-              ⚠️ En curso en {{ suggestedTechnician.current_status.in_progress_location_name }}: requerirá pausar o finalizar antes de iniciar.
-            </div>
-            <button
-              type="button"
-              class="vg-btn vg-btn-primary w-100 mt-2"
-              :disabled="isAssigning"
-              @click="assignSuggestedTechnician"
-              data-testid="assign-suggested"
-            >
-              <span v-if="!isAssigning">⚡ Asignar Sugerido</span>
-              <span v-else>Asignando…</span>
-            </button>
-          </div>
-
-          <!-- Ranking explicado: el coordinador puede elegir a otro sin bloqueo (RF-04.3) -->
-          <div v-if="rankedTechnicians.length > 1" class="mb-3" data-testid="assign-ranking">
-            <div class="text-uppercase fw-bold mb-1" style="font-size: 11px; letter-spacing: 0.05em; color: var(--color-ink-muted);">Ranking territorial</div>
-            <button
-              v-for="candidate in rankedTechnicians"
-              :key="candidate.technician_id"
-              type="button"
-              class="vg-btn vg-btn-sm w-100 d-flex justify-content-between align-items-center gap-2 mb-1 text-start"
-              :class="Number(assignTechnicianId) === Number(candidate.technician_id) ? 'vg-btn-primary' : 'vg-btn-secondary'"
-              :disabled="isAssigning"
-              :data-testid="'assign-candidate-' + candidate.technician_id"
-              @click="applySuggestedTechnician(candidate)"
-            >
-              <span>
-                <span class="fw-semibold" style="font-size: 13px; color: var(--color-ink-slate);">{{ candidate.name }}</span>
-                <span class="small" style="color: var(--color-ink-muted);"> · {{ candidate.zone_affinity_label }}</span>
-                <span class="d-flex flex-wrap gap-1 mt-1">
-                  <span v-for="badge in candidate.badges" :key="badge" class="vg-chip" style="font-size: 10px;">{{ suggestionBadgeLabel(badge) }}</span>
-                </span>
-              </span>
-              <span class="font-monospace" style="font-size: 12px; color: var(--color-ink-secondary);">{{ candidate.total_score }} pts</span>
-            </button>
-          </div>
+          <!-- Asignación asistida por zona (Módulo 17, RF-04 / RF-05 / RF-06):
+               el bloque sugerido + ranking territorial es un componente compartido
+               con la ficha de detalle y el lote del mapa territorial. -->
+          <AssignSuggestionPanel
+            :suggestions="assignmentSuggestions"
+            :is-loading="isLoadingSuggestions"
+            :error="suggestionsError"
+            :selected-technician-id="assignTechnicianId"
+            :busy="isAssigning"
+            @select="applySuggestedTechnician"
+            @dispatch="assignSuggestedTechnician"
+          />
 
           <!-- Technician Selector -->
           <div style="margin-bottom: 16px;">
@@ -2579,6 +2639,18 @@ export const CoordinatorDashboardView = {
             </ul>
           </div>
 
+          <!-- Asignación asistida aplicada al lote (RF-04.1 / RF-MAP-09):
+               sugerencia calculada sobre la incidencia más prioritaria del lote. -->
+          <AssignSuggestionPanel
+            :suggestions="bulkAssignSuggestions"
+            :is-loading="isLoadingBulkSuggestions"
+            :error="bulkSuggestionsError"
+            :selected-technician-id="bulkAssignTechnicianId"
+            :busy="isBulkAssigning"
+            :caption="bulkAssignSuggestionCaption"
+            @select="applyBulkSuggestedTechnician"
+          />
+
           <!-- Technician Selector -->
           <div style="margin-bottom: 16px;">
             <label for="bulk-assign-tech-select" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
@@ -2591,6 +2663,7 @@ export const CoordinatorDashboardView = {
               required
               :disabled="isBulkAssigning"
               data-testid="bulk-assign-tech-select"
+              @change="onBulkAssignTechnicianChange"
             >
               <option v-if="isLoadingTechnicians" value="" disabled>Cargando técnicos activos...</option>
               <option v-else-if="technicians.length === 0" value="" disabled>
@@ -2623,6 +2696,27 @@ export const CoordinatorDashboardView = {
             <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 4px;">
               El cambio de responsable exige al menos 10 caracteres reales y queda registrado en el historial inmutable de cada incidencia (RF-07.3).
             </div>
+          </div>
+
+          <!-- Justificación del descarte sanitario aplicado al lote (Art. V.1, RF-05.2) -->
+          <div
+            v-if="bulkRequiresOverrideJustification"
+            data-testid="bulk-assign-override-block"
+            style="background-color: var(--color-error-bg); border: 1px solid var(--color-error-border); border-radius: var(--radius-interactive); padding: 12px 14px; margin-bottom: 16px;"
+          >
+            <label for="bulk-assign-override-justification" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-error-text); margin-bottom: 6px;">
+              Justificación obligatoria de descarte sanitario (mínimo 20 caracteres) <span style="color: var(--color-error);">*</span>
+            </label>
+            <textarea
+              id="bulk-assign-override-justification"
+              v-model="bulkAssignOverrideJustification"
+              class="vg-textarea"
+              rows="2"
+              placeholder="Ej: El titular de zona está próximo y ya conocía esta sede..."
+              required
+              :disabled="isBulkAssigning"
+              data-testid="bulk-assign-override-justification"
+            ></textarea>
           </div>
 
           <!-- Urgency Reclassification (Optional / Audit trail required) -->

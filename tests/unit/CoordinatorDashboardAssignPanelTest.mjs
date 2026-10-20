@@ -40,6 +40,8 @@ globalThis.window = {
 
 import { api } from '../../public/assets/js/api.js';
 import { CoordinatorDashboardView } from '../../public/assets/js/views/CoordinatorDashboardView.js';
+import { CoordinatorIncidentDetailModal } from '../../public/assets/js/components/CoordinatorIncidentDetailModal.js';
+import { AssignSuggestionPanel } from '../../public/assets/js/components/AssignSuggestionPanel.js';
 
 let assertions = 0;
 let failures = 0;
@@ -209,13 +211,13 @@ assert('1.1 El panel arranca sin sugerencia ni justificación', fresh.assignment
 
 const template = CoordinatorDashboardView.template;
 assert('1.2 La plantilla ofrece el botón directo del sugerido',
-  template.includes('data-testid="assign-suggested"')
-    && template.includes('⚡ Asignar Sugerido')
-    && template.includes('assignSuggestedTechnician'));
-assert('1.3 La plantilla publica el banner de emergencia sanitaria', template.includes('data-testid="assign-sanitary-banner"')
-  && template.includes('Prioridad Sanitaria Art. II')
-  && template.includes('< 4 horas') === false
-  && template.includes('&lt; 4 horas'));
+  AssignSuggestionPanel.template.includes('data-testid="assign-suggested"')
+    && AssignSuggestionPanel.template.includes('⚡ Asignar Sugerido')
+    && template.includes('@dispatch="assignSuggestedTechnician"'));
+assert('1.3 La plantilla publica el banner de emergencia sanitaria', AssignSuggestionPanel.template.includes('data-testid="assign-sanitary-banner"')
+  && AssignSuggestionPanel.template.includes('Prioridad Sanitaria Art. II')
+  && AssignSuggestionPanel.template.includes('< 4 horas') === false
+  && AssignSuggestionPanel.template.includes('&lt; 4 horas'));
 assert('1.4 La plantilla pide la justificación ligada al motivo del descarte',
   template.includes('data-testid="assign-override-justification"')
     && template.includes('v-model="assignOverrideJustification"')
@@ -224,9 +226,15 @@ assert('1.4 La plantilla pide la justificación ligada al motivo del descarte',
 assert('1.5 La plantilla conserva el motivo de urgencia y el bloque de error existentes',
   template.includes('assignUrgencyReason') && template.includes('assignError'));
 assert('1.6 La plantilla pinta el ranking con sus insignias y el aviso de zona desatendida',
-  template.includes('data-testid="assign-ranking"')
-    && template.includes('suggestionBadgeLabel(badge)')
-    && template.includes('data-testid="assign-unattended-warning"'));
+  AssignSuggestionPanel.template.includes('data-testid="assign-ranking"')
+    && AssignSuggestionPanel.template.includes('suggestionBadgeLabel(badge)')
+    && AssignSuggestionPanel.template.includes('data-testid="assign-unattended-warning"'));
+assert('1.7 Las filas del ranking llevan altura automática: el bloque de insignias de dos líneas no desborda sobre la fila siguiente',
+  AssignSuggestionPanel.template.includes('height: auto; min-height: var(--control-height-sm)'));
+assert('1.8 El panel asistido es un componente compartido con detalle y lote del mapa',
+  template.includes('<AssignSuggestionPanel')
+    && CoordinatorIncidentDetailModal.template.includes('<AssignSuggestionPanel')
+    && template.includes('bulkAssignSuggestions'));;
 
 // =========================================================================
 // BLOQUE 2: Apertura del modal y carga del ranking (RF-04.1)

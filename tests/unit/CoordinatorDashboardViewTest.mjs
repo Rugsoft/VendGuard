@@ -155,6 +155,13 @@ function createDashboardInstance(initialData = {}) {
     bulkAssignUrgencyOverride: '',
     bulkAssignUrgencyReason: '',
     bulkAssignReassignmentReason: '',
+    // Módulo 17 / RF-MAP-09: estado de la sugerencia territorial aplicada al lote.
+    bulkAssignSuggestions: null,
+    bulkAssignSuggestionIncidentId: null,
+    isLoadingBulkSuggestions: false,
+    bulkSuggestionsError: '',
+    bulkAssignTechnicianChosenByUser: false,
+    bulkAssignOverrideJustification: '',
     bulkAssignError: '',
     isBulkAssigning: false,
     showCancelModal: false,
@@ -204,7 +211,15 @@ function createDashboardInstance(initialData = {}) {
     'assignIsSuggestedTechnician',
     'assignRequiresOverrideJustification',
     'assignOverrideJustificationLength',
-    'assignOverrideJustificationValid'
+    'assignOverrideJustificationValid',
+    // Lote del mapa territorial (RF-MAP-09): sugerencia aplicada y salvaguarda sanitaria.
+    'bulkSuggestedTechnicianId',
+    'bulkIsColdChainSuggestion',
+    'bulkRequiresOverrideJustification',
+    'bulkAssignOverrideJustificationLength',
+    'bulkAssignOverrideJustificationValid',
+    'bulkSuggestionIncident',
+    'bulkAssignSuggestionCaption'
   ]) {
     Object.defineProperty(instance, name, {
       get: () => CoordinatorDashboardView.computed[name].call(instance),
@@ -427,6 +442,66 @@ assert('6.10 A map-card assignment opens the bulk modal over that site pending i
     && mapSearchView.bulkAssignIncidents.every(i => (i.location_site_code || i.site_code) === 'SEDE-BCN-01'));
 
 // ---------------------------------------------------------------------
+// Assisted suggestions inside the map flow (RF-04.1 / RF-MAP-09)
+// ---------------------------------------------------------------------
+let bulkSuggestionCalls = [];
+let nextBulkSuggestions = null;
+api.coordinator.getSuggestedTechnicians = async (incidentId) => {
+  bulkSuggestionCalls.push(incidentId);
+  if (nextBulkSuggestions === 'error') {
+    nextBulkSuggestions = null;
+    throw new Error('El recomendador no responde.');
+  }
+  return nextBulkSuggestions;
+};
+
+const bulkSuggestionsFixture = () => ({
+  incident: { id: 1, ticket_code: 'INC-2026-0001', priority: 'CRITICAL', is_cold_chain_risk: true },
+  recommendation: { top_technician_id: 2, is_cold_chain_escalation: true, unattended_zone: false, explanation: '' },
+  ranked_technicians: [
+    { technician_id: 2, name: 'Tecnico Dos', zone_affinity_label: 'Titular de zona', total_score: 80, badges: ['RECOMENDADO'], score_breakdown: {}, current_status: { distance_km: 1.0 } },
+    { technician_id: 1, name: 'Tecnico Uno', zone_affinity_label: 'Titular de zona', total_score: 40, badges: [], score_breakdown: {}, current_status: { distance_km: 2.0 } }
+  ]
+});
+
+nextBulkSuggestions = bulkSuggestionsFixture();
+bulkSuggestionCalls = [];
+const assistedBulkView = createDashboardInstance();
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(assistedBulkView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert('6.11 The map batch loads the territorial ranking of its most prioritary incident and preselects the suggested technician',
+  bulkSuggestionCalls.length === 1 && bulkSuggestionCalls[0] === mockIncidents[0].id &&
+  assistedBulkView.bulkAssignSuggestions !== null && assistedBulkView.bulkAssignTechnicianId === 2 &&
+  assistedBulkView.bulkAssignSuggestionCaption.includes('más prioritaria'));
+
+// A failing recommender is declared without breaking the bulk dispatch (RF-06.3).
+nextBulkSuggestions = 'error';
+bulkSuggestionCalls = [];
+const failedBulkView = createDashboardInstance();
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(failedBulkView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert('6.12 A failing recommender is declared and the manual selection stays usable',
+  failedBulkView.bulkSuggestionsError.includes('no responde') &&
+  failedBulkView.bulkAssignSuggestions === null && failedBulkView.bulkAssignTechnicianId === 2);
+
+// A single pending incident bypasses the batch: the full assisted modal opens (RF-04.1).
+const singleSiteView = createDashboardInstance();
+singleSiteView.incidents = [{
+  id: 91,
+  ticket_code: 'INC-2026-0091',
+  machine_code: 'VEND-0909',
+  location_id: 9,
+  location_site_code: 'SEDE-GIR-01',
+  location_name: 'Clínica Girona',
+  status: 'REGISTRADA',
+  assigned_technician_id: null
+}];
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(singleSiteView, { locationId: 9, siteCode: 'SEDE-GIR-01' });
+assert('6.13 A site with one pending incident opens the assisted modal instead of the batch one',
+  singleSiteView.showAssignModal === true && singleSiteView.showBulkAssignModal === false &&
+  singleSiteView.selectedIncident?.id === 91);
+
+// ---------------------------------------------------------------------
 // TEST GROUP 7: Bulk Site Assignment Modal (RF-MAP-09)
 // ---------------------------------------------------------------------
 console.log('\n--- Group 7: Bulk Site Assignment Modal (RF-MAP-09) ---');
@@ -482,6 +557,34 @@ assert('7.6 A per-incident failure keeps the modal open with the failed tickets 
 assert('7.7 Submit stays disabled without pending incidents or technician (template contract)',
   CoordinatorDashboardView.template.includes('isBulkAssigning || !bulkAssignTechnicianId || bulkAssignIncidents.length === 0')
     && CoordinatorDashboardView.template.includes('data-testid="bulk-assign-form"'));
+
+// Art. V.1 / RF-05.2: descartar la recomendación sanitaria del lote exige la misma
+// justificación de 20 caracteres reales que el despacho unitario.
+nextBulkSuggestions = bulkSuggestionsFixture();
+bulkSuggestionCalls = [];
+const overriddenBulkView = createDashboardInstance();
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(overriddenBulkView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+await new Promise((resolve) => setTimeout(resolve, 0));
+overriddenBulkView.bulkAssignReassignmentReason = 'Consolidación justificada de la sede completa';
+overriddenBulkView.bulkAssignTechnicianId = 1;
+await CoordinatorDashboardView.methods.submitBulkAssignment.call(overriddenBulkView);
+assert('7.8 Bulk sanitation override without justification is blocked (Art. V.1, RF-05.2)',
+  overriddenBulkView.bulkAssignError.includes('20 caracteres') && overriddenBulkView.isBulkAssigning === false);
+
+overriddenBulkView.bulkAssignOverrideJustification = 'Descarte justificado: el sustituto está próximo a la sede';
+api.coordinator.assignTechnician = async (id, techId, urgency, urgencyReason, reason, override) => {
+  bulkSuggestionCalls.push({ id, techId, override });
+  return { id, technician_id: techId };
+};
+await CoordinatorDashboardView.methods.submitBulkAssignment.call(overriddenBulkView);
+assert('7.9 A justified bulk dispatch travels with override_justification to every incident',
+  bulkSuggestionCalls.filter(c => typeof c === 'object').length === 2 &&
+  bulkSuggestionCalls.every(c => typeof c !== 'object' || c.techId === 1) &&
+  overriddenBulkView.showBulkAssignModal === false);
+// Restore a neutral recommender for the following groups: these harnesses set the
+// chosen technician programmatically and would race the async preselection.
+nextBulkSuggestions = null;
+bulkSuggestionCalls = [];
 
 // Template passes the coordinator context to the map tab
 assert('6.9 Map tab receives the coordinator user context',

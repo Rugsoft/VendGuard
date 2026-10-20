@@ -46,6 +46,7 @@
 
 import { api } from '../api.js';
 import { IncidentBadge } from './IncidentBadge.js';
+import { AssignSuggestionPanel } from './AssignSuggestionPanel.js';
 import { AMBER_TECHNICAL_TOKENS } from '../utils/IncidentStatusPermissions.js';
 import {
   opportunisticModeLabel,
@@ -55,7 +56,8 @@ import {
 export const CoordinatorIncidentDetailModal = {
   name: 'CoordinatorIncidentDetailModal',
   components: {
-    IncidentBadge
+    IncidentBadge,
+    AssignSuggestionPanel
   },
   props: {
     /**
@@ -108,6 +110,13 @@ export const CoordinatorIncidentDetailModal = {
       selectedTechnicianId: null,
       isSubmittingAssign: false,
       assignErrorMessage: '',
+      /** Asignación asistida en línea (RF-04.1): sugerido + ranking del expediente abierto. */
+      assignmentSuggestions: null,
+      isLoadingSuggestions: false,
+      suggestionsError: '',
+      detailTechnicianChosenByUser: false,
+      /** Art. V.1: justificación del descarte sanitario dentro del panel en línea (RF-05.2). */
+      assignOverrideJustification: '',
       /** Borrador del motivo de reasignación, obligatorio con ≥ 10 caracteres reales (RF-07.3). */
       reassignReason: '',
       /** Borrador del motivo de descarte y su envío lógico (Art. III.2, RF-07.4). */
@@ -369,6 +378,38 @@ export const CoordinatorIncidentDetailModal = {
     /** Contador de caracteres reales (puntos de código Unicode) del motivo de reasignación. */
     reassignReasonLength() {
       return Array.from(String(this.reassignReason || '').trim()).length;
+    },
+
+    /** Primer puesto del ranking del expediente abierto (RF-04.3). */
+    detailSuggestedTechnicianId() {
+      const first = this.assignmentSuggestions?.ranked_technicians?.[0];
+      return first ? Number(first.technician_id) : null;
+    },
+
+    /** Escalado sanitario activo en este expediente (Art. II, RF-05.1). */
+    detailIsColdChainSuggestion() {
+      return Boolean(this.assignmentSuggestions?.incident?.is_cold_chain_risk)
+        && Boolean(this.assignmentSuggestions?.recommendation?.is_cold_chain_escalation);
+    },
+
+    /**
+     * Descartar la recomendación sanitaria exige 20 caracteres reales; la reasignación
+     * no pinta sugerencia alguna, así que el bloque sólo aplica al despacho inicial.
+     */
+    detailRequiresOverrideJustification() {
+      return this.detailIsColdChainSuggestion
+        && !this.isReassign
+        && this.detailSuggestedTechnicianId !== null
+        && Number(this.selectedTechnicianId) !== this.detailSuggestedTechnicianId;
+    },
+
+    /** Caracteres reales (puntos de código Unicode) de la justificación del descarte. */
+    detailOverrideJustificationLength() {
+      return Array.from(String(this.assignOverrideJustification || '').trim()).length;
+    },
+
+    detailOverrideJustificationValid() {
+      return !this.detailRequiresOverrideJustification || this.detailOverrideJustificationLength >= 20;
     },
 
     /** La reasignación exige un motivo justificado de al menos 10 caracteres reales (RF-07.3). */
@@ -820,6 +861,10 @@ export const CoordinatorIncidentDetailModal = {
       this.isAssignPanelOpen = true;
       this.assignErrorMessage = '';
       this.reassignReason = '';
+      this.assignOverrideJustification = '';
+      this.assignmentSuggestions = null;
+      this.suggestionsError = '';
+      this.detailTechnicianChosenByUser = false;
       // El responsable vigente nunca es destino válido de la reasignación (Art. V.3).
       if (this.isReassign && this.selectedTechnicianId === this.technician?.technician_id) {
         this.selectedTechnicianId = null;
@@ -827,12 +872,74 @@ export const CoordinatorIncidentDetailModal = {
       if (!this.techniciansLoaded) {
         this.loadTechnicians();
       }
+      // Asignación asistida en línea (RF-04.1): la sugerencia llega en paralelo; el
+      // motor no aplica al cambio de titular, así que sólo se pide en despacho inicial.
+      if (!this.isReassign) {
+        this.loadAssignSuggestions();
+      }
     },
 
     closeAssignPanel() {
       this.isAssignPanelOpen = false;
       this.assignErrorMessage = '';
       this.reassignReason = '';
+      this.assignmentSuggestions = null;
+      this.isLoadingSuggestions = false;
+      this.suggestionsError = '';
+      this.assignOverrideJustification = '';
+      this.detailTechnicianChosenByUser = false;
+    },
+
+    /**
+     * Carga el ranking explicado del expediente mostrado en la ficha (RF-04.1).
+     *
+     * No bloquea el despacho manual: un fallo se declara en el panel y el desplegable
+     * sigue operativo (RF-06.3). El sugerido se preselecciona sólo si el coordinador
+     * no había elegido a nadie.
+     */
+    async loadAssignSuggestions() {
+      const incidentId = this.actionableIncidentId;
+      if (incidentId === null || incidentId === undefined || incidentId === '') {
+        return;
+      }
+
+      this.isLoadingSuggestions = true;
+      this.suggestionsError = '';
+
+      try {
+        const suggestions = await api.coordinator.getSuggestedTechnicians(incidentId);
+
+        // La respuesta puede llegar después de cerrar el panel o cambiar de expediente.
+        if (!this.isAssignPanelOpen || Number(this.actionableIncidentId) !== Number(incidentId)) {
+          return;
+        }
+
+        this.assignmentSuggestions = suggestions || null;
+        if (!this.detailTechnicianChosenByUser && this.detailSuggestedTechnicianId !== null) {
+          this.selectedTechnicianId = this.detailSuggestedTechnicianId;
+        }
+      } catch (err) {
+        if (Number(this.actionableIncidentId) === Number(incidentId)) {
+          this.suggestionsError = err?.message
+            || 'No se pudo cargar la sugerencia territorial. Puede asignar manualmente.';
+        }
+      } finally {
+        this.isLoadingSuggestions = false;
+      }
+    },
+
+    /** Marca la elección manual para que una sugerencia tardía no la pise. */
+    markDetailTechnicianChosen() {
+      this.detailTechnicianChosenByUser = true;
+    },
+
+    /** Aplica un puesto del ranking del panel en línea (RF-04.3). */
+    applyDetailSuggestedTechnician(candidate) {
+      if (!candidate) {
+        return;
+      }
+      this.selectedTechnicianId = Number(candidate.technician_id);
+      this.detailTechnicianChosenByUser = true;
     },
 
     /**
@@ -972,6 +1079,12 @@ export const CoordinatorIncidentDetailModal = {
         this.assignErrorMessage = 'El motivo de la reasignación debe contener al menos 10 caracteres.';
         return;
       }
+      // Art. V.1: descartar la recomendación de frío exige 20 caracteres reales; el
+      // bloqueo es de cliente para no gastar una petición que el servidor rechazará.
+      if (!this.detailOverrideJustificationValid) {
+        this.assignErrorMessage = 'La justificación del descarte sanitario debe contener al menos 20 caracteres reales (Art. V.1).';
+        return;
+      }
       const incidentId = this.actionableIncidentId;
       if (incidentId === null || incidentId === undefined || incidentId === '') {
         return;
@@ -990,11 +1103,15 @@ export const CoordinatorIncidentDetailModal = {
           this.selectedTechnicianId,
           null,
           null,
-          isReassignment ? String(this.reassignReason).trim() : null
+          isReassignment ? String(this.reassignReason).trim() : null,
+          this.detailRequiresOverrideJustification ? String(this.assignOverrideJustification).trim() : null
         );
         this.isAssignPanelOpen = false;
         this.selectedTechnicianId = null;
         this.reassignReason = '';
+        this.assignOverrideJustification = '';
+        this.assignmentSuggestions = null;
+        this.detailTechnicianChosenByUser = false;
         await this.fetchDetail();
         // El padre refresca la fila del aviso con el mismo evento para asignar y reasignar.
         this.notifyIncidentUpdated({ reason: 'assign' });
@@ -1806,6 +1923,15 @@ export const CoordinatorIncidentDetailModal = {
                 <h4 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 14px; font-weight: 500; color: var(--color-ink, #000000); margin: 0 0 10px;">
                   {{ isReassign ? '🔁 Reasignar Técnico' : '👷 Asignar Técnico' }}
                 </h4>
+                <AssignSuggestionPanel
+                  v-if="!isReassign"
+                  :suggestions="assignmentSuggestions"
+                  :is-loading="isLoadingSuggestions"
+                  :error="suggestionsError"
+                  :selected-technician-id="selectedTechnicianId"
+                  :busy="isSubmittingAssign"
+                  @select="applyDetailSuggestedTechnician"
+                />
                 <label for="assign-technician-select" style="display: block; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-ink-secondary, #434c5f); margin-bottom: 4px;">
                   {{ isReassign ? 'Nuevo técnico responsable' : 'Técnico de ruta activo' }}
                 </label>
@@ -1816,6 +1942,7 @@ export const CoordinatorIncidentDetailModal = {
                   data-testid="assign-technician-select"
                   :disabled="isSubmittingAssign || isLoadingTechnicians"
                   style="width: 100%; max-width: 420px; box-sizing: border-box; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f); background-color: var(--color-canvas, #f9fafb); border: 1px solid var(--color-hairline-soft, #a9b4c6); border-radius: var(--radius-interactive, 4px); padding: 8px 12px;"
+                  @change="markDetailTechnicianChosen"
                 >
                   <option :value="null">Selecciona un técnico…</option>
                   <option v-for="technician in reassignableTechnicians" :key="technician.id" :value="technician.id">
@@ -1851,6 +1978,22 @@ export const CoordinatorIncidentDetailModal = {
                   >
                     {{ reassignReasonLength }} / 10 caracteres
                   </span>
+                </div>
+                <div v-if="detailRequiresOverrideJustification" data-testid="detail-assign-override-block" style="background-color: var(--color-error-bg); border: 1px solid var(--color-error-border); border-radius: var(--radius-interactive, 4px); padding: 12px 14px; margin-top: 12px;">
+                  <label for="detail-assign-override-justification" style="display: block; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-error-text); margin-bottom: 4px;">
+                    Justificación obligatoria de descarte sanitario (mínimo 20 caracteres) <span style="color: var(--color-error);">*</span>
+                  </label>
+                  <textarea
+                    id="detail-assign-override-justification"
+                    v-model="assignOverrideJustification"
+                    class="vg-textarea"
+                    data-testid="detail-assign-override-justification"
+                    rows="2"
+                    placeholder="Ej: El titular de zona está próximo y ya conocía esta máquina..."
+                    required
+                    :disabled="isSubmittingAssign"
+                    style="width: 100%; box-sizing: border-box; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate); background-color: var(--color-canvas); border: 1px solid var(--color-hairline-soft); border-radius: var(--radius-interactive, 4px); padding: 8px 12px; resize: vertical;"
+                  ></textarea>
                 </div>
                 <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
                   <button
