@@ -66,6 +66,23 @@ interface OperationalZoneRepositoryInterface
     public function findAllWithCounts(bool $includeInactive = true): array;
 
     /**
+     * Una zona con sus contadores agregados, leída igual que el listado (RNF-01).
+     *
+     * Existe para que el alta, la edición y la desactivación devuelvan la ficha
+     * completa sin recorrer el catálogo entero ni inventar contadores a cero.
+     *
+     * @param int $zoneId Identificador de la zona.
+     * @return array{
+     *     zone: OperationalZone,
+     *     locations_count: int,
+     *     primary_technicians_count: int,
+     *     backup_technicians_count: int,
+     *     postal_codes_count: int
+     * }|null Null si la zona no existe.
+     */
+    public function findWithCounts(int $zoneId): ?array;
+
+    /**
      * Códigos postales **vivos** de una zona, ordenados.
      *
      * Un CP liberado (`released_at`) pertenece al historial y no aparece aquí.
@@ -74,6 +91,74 @@ interface OperationalZoneRepositoryInterface
      * @return list<string>
      */
     public function findPostalCodes(int $zoneId): array;
+
+    /**
+     * Conflictos de un lote de códigos postales con las demás zonas (RF-01.3).
+     *
+     * Un CP que ya vive en la zona destino no es un conflicto: volver a enviarlo
+     * es idempotente. Solo se informa de los que pertenecen a **otra** zona viva,
+     * junto con la zona que los gobierna y cuántas sedes heredadas arrastraría el
+     * traslado, que es exactamente lo que el modal de confirmación necesita.
+     *
+     * @param list<string> $postalCodes Códigos postales normalizados.
+     * @param int $targetZoneId Zona de destino del lote.
+     * @return list<array{
+     *     postal_code: string,
+     *     current_zone_id: int,
+     *     current_zone_name: string,
+     *     affected_locations_count: int
+     * }>
+     */
+    public function findPostalCodeConflicts(array $postalCodes, int $targetZoneId): array;
+
+    /**
+     * Da de alta los códigos postales **libres** de un lote en la zona indicada.
+     *
+     * Solo admite CP sin asignación viva: los que pertenecen a otra zona se mueven
+     * con `transferPostalCodes()`, y este método lo rechaza para que no existan dos
+     * caminos de escritura sobre la misma clave territorial (RNF-04).
+     *
+     * La fila nueva se inserta aunque exista una fila histórica liberada del mismo
+     * CP: el histórico se conserva y el CP vuelve a estar gobernado (QA 13).
+     *
+     * @param int $zoneId Zona activa de destino.
+     * @param list<string> $postalCodes Códigos postales libres.
+     * @param int $userId Coordinador que firma la operación.
+     * @return list<string> Códigos postales efectivamente asignados, ordenados.
+     *
+     * @throws ZoneValidationException Si la zona no está activa o algún CP ya tiene
+     *   asignación viva.
+     */
+    public function assignPostalCodes(int $zoneId, array $postalCodes, int $userId): array;
+
+    /**
+     * Fotografía de lo que la desactivación de una zona arrastraría (RF-01.3).
+     *
+     * Se consulta **antes** de desactivar para poder exigir `confirm_release` con
+     * cifras en la mano: el coordinador debe saber cuántos CP se liberan, cuántas
+     * sedes quedan «Sin Zona Asignada» y cuántos técnicos salen del cuadrante.
+     *
+     * @param int $zoneId Identificador de la zona.
+     * @return array{postal_codes: int, technicians: int, locations: int}
+     */
+    public function inspectReleaseImpact(int $zoneId): array;
+
+    /**
+     * Desactiva la zona y libera su territorio en **una sola** transacción
+     * (RF-01.3, QA 7, QA 10, QA 13).
+     *
+     * Pasos, todos o ninguno: las sedes (heredadas y forzadas) quedan con
+     * `zone_id = NULL`, los CP vivos se liberan con `released_at`, el cuadrante se
+     * extingue con `removed_at`, la zona pasa a inactiva y se registra
+     * `ZONE_DEACTIVATED` con el balance. Nunca se borra una fila (Art. III.1).
+     *
+     * @param int $zoneId Identificador de la zona.
+     * @param int $userId Coordinador que firma la desactivación.
+     * @return array{released_postal_codes: int, unassigned_locations: int, removed_technicians: int}
+     *
+     * @throws ZoneValidationException Si la zona no existe.
+     */
+    public function deactivateZone(int $zoneId, int $userId): array;
 
     /**
      * Libera los códigos postales vivos de una zona dejándolos disponibles para
@@ -139,22 +224,25 @@ interface OperationalZoneRepositoryInterface
      * la unicidad de código y nombre la impone el esquema.
      *
      * @param array<string, mixed> $data Claves: `code`, `name`, `color_hex`, `description`, `is_active`.
+     * @param int|null $userId Coordinador que firma el alta; con `null` no se audita
+     *   (solo lo usan las suites de persistencia que no ejercen el caso de uso).
      * @return OperationalZone Zona persistida con su identificador.
      *
      * @throws ZoneValidationException Si algún atributo no cumple el contrato.
      */
-    public function create(array $data): OperationalZone;
+    public function create(array $data, ?int $userId = null): OperationalZone;
 
     /**
      * Actualiza los metadatos editables de una zona. El código es inmutable.
      *
      * @param int $zoneId Identificador de la zona.
      * @param array<string, mixed> $data Claves admitidas: `name`, `color_hex`, `description`, `is_active`.
+     * @param int|null $userId Coordinador que firma la edición; con `null` no se audita.
      * @return bool True si la zona existía y se actualizó.
      *
      * @throws ZoneValidationException Si algún atributo no cumple el contrato.
      */
-    public function update(int $zoneId, array $data): bool;
+    public function update(int $zoneId, array $data, ?int $userId = null): bool;
 
     /**
      * Conmuta el estado operativo de la zona (baja lógica, Art. III.1).
@@ -173,15 +261,29 @@ interface OperationalZoneRepositoryInterface
      * titular vivo de una zona, así que el intento de una segunda titularidad se
      * rechaza con el detalle de la zona que perdería (RF-02.2).
      *
+     * Con `$demotePreviousPrimary = true` y `$isPrimary = true`, la titularidad
+     * viva que el técnico tuviera en otra zona se degrada a suplencia dentro de la
+     * misma transacción y se audita con `TECHNICIAN_ZONE_PRIMARY_DEMOTED`, que es la
+     * confirmación expresa `confirm_primary_override` del contrato (QA 9).
+     *
      * @param int $technicianId Usuario con rol `TECHNICIAN` activo.
      * @param int $zoneId Zona activa de destino.
      * @param bool $isPrimary True para titular principal, false para suplente.
+     * @param int|null $userId Coordinador que firma la vinculación; con `null` no se audita.
+     * @param bool $demotePreviousPrimary Degrada la titularidad previa en lugar de rechazarla.
      * @return int Identificador de la vinculación viva.
      *
-     * @throws PrimaryTechnicianConflictException Si el técnico ya es titular de otra zona.
+     * @throws PrimaryTechnicianConflictException Si el técnico ya es titular de otra zona
+     *   y no se pidió la degradación.
      * @throws ZoneValidationException Si la zona no existe, está inactiva o el usuario no es un técnico activo.
      */
-    public function assignTechnician(int $technicianId, int $zoneId, bool $isPrimary): int;
+    public function assignTechnician(
+        int $technicianId,
+        int $zoneId,
+        bool $isPrimary,
+        ?int $userId = null,
+        bool $demotePreviousPrimary = false
+    ): int;
 
     /**
      * Extingue lógicamente la vinculación de un técnico con una zona (QA 10).
@@ -191,7 +293,8 @@ interface OperationalZoneRepositoryInterface
      *
      * @param int $technicianId Identificador del técnico.
      * @param int $zoneId Identificador de la zona.
+     * @param int|null $userId Coordinador que firma la baja; con `null` no se audita.
      * @return bool True si había una vinculación viva y se extinguió.
      */
-    public function removeTechnician(int $technicianId, int $zoneId): bool;
+    public function removeTechnician(int $technicianId, int $zoneId, ?int $userId = null): bool;
 }

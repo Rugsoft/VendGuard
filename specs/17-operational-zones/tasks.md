@@ -99,15 +99,21 @@
 
 ## Fase 4: Servicios de Aplicación y Casos de Uso
 
-- [ ] **T-ZONE-07 · Implementar servicio de aplicación `OperationalZoneService` y DTOs**
+- [x] **T-ZONE-07 · Implementar servicio de aplicación `OperationalZoneService` y DTOs**
   * **Tiempo estimado:** 25 min
   * **Dependencias:** `T-ZONE-05`, `T-ZONE-06`
   * **Ficheros a crear o modificar:**
     * `src/Application/DTO/OperationalZoneDto.php` *(crear)*
     * `src/Application/DTO/PostalCodeTransferResultDto.php` *(crear)*
     * `src/Application/Service/OperationalZoneService.php` *(crear)*
+    * `src/Core/Domain/Repository/LocationZoneRepositoryInterface.php` *(crear: puerto segregado de la capacidad territorial de la sede, sin ampliar `LocationRepositoryInterface` ni romper sus veinte dobles de prueba)*
+    * `src/Core/Domain/Repository/OperationalZoneRepositoryInterface.php` *(modificar: `findWithCounts`, `findPostalCodeConflicts`, `assignPostalCodes`, `inspectReleaseImpact`, `deactivateZone`; `userId` opcional en alta, edición, vinculación y baja del cuadrante, con degradación de la titularidad previa)*
+    * `src/Infrastructure/Repository/PdoOperationalZoneRepository.php` *(modificar: implementación transaccional y auditoría `ZONE_CREATED`, `ZONE_UPDATED`, `ZONE_DEACTIVATED`, `TECHNICIAN_ZONE_ASSIGNED`, `TECHNICIAN_ZONE_REMOVED`, `TECHNICIAN_ZONE_PRIMARY_DEMOTED`)*
+    * `src/Infrastructure/Repository/PdoLocationRepository.php` *(modificar: `LOCATION_ZONE_MANUAL_OVERRIDE` al forzar o restablecer la herencia)*
+    * `tests/integration/OperationalZoneServiceTest.php` *(crear: certificación del caso de uso contra PostgreSQL)*
   * **Requisitos que cubre:** `RF-01.1`, `RF-01.3`, `RF-02.1`, `RF-02.2`, `RF-03.2`, Resoluciones QA 4 y QA 6
   * **Hecho cuando:** `OperationalZoneService` gestiona el ciclo de vida de zonas (alta, edición, desactivación), detecta si hay códigos postales en conflicto para requerir confirmación previa (`PostalCodeConflictException`), coordina el traslado atómico cuando `confirm_transfers = true`, valida que un técnico no tenga dos titularidades vivas (`PrimaryTechnicianConflictException`), degrada la titularidad anterior con `TECHNICIAN_ZONE_PRIMARY_DEMOTED` al confirmar `confirm_primary_override`, exige `confirm_release = true` para desactivar una zona con CPs o cuadrante y, en esa misma transacción, deja las sedes en `zone_id = NULL`, libera los CPs marcándolos con `released_at` (QA 13) y marca `removed_at` en las vinculaciones (QA 7 / QA 9 / QA 10), y gestiona las excepciones manuales de sede.
+  * **Verificación:** `source deploy/local/postgres/.env.local && php tests/integration/OperationalZoneServiceTest.php` → **40/40**, exit 0.
 
 - [ ] **T-ZONE-08 · Implementar caso de uso `TechnicianAssignmentSuggester` con desempates deterministas y fallback Haversine sin GPS**
   * **Tiempo estimado:** 30 min

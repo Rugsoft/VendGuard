@@ -7,10 +7,13 @@ namespace VendGuard\Infrastructure\Repository;
 use InvalidArgumentException;
 use PDO;
 use RuntimeException;
+use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\Location;
+use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationContactEmailRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
+use VendGuard\Core\Domain\Repository\LocationZoneRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\PostalCode;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
@@ -31,11 +34,19 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * técnico: resolver la sede de cada parada con una consulta por parada era un N+1 medido contra el
  * motor remoto (Módulo 12 · T-HYBRID-27).
  */
-class PdoLocationRepository implements LocationRepositoryInterface, LocationBatchRepositoryInterface, LocationContactEmailRepositoryInterface
+class PdoLocationRepository implements LocationRepositoryInterface, LocationBatchRepositoryInterface, LocationContactEmailRepositoryInterface, LocationZoneRepositoryInterface
 {
     private PDO $pdo;
 
     private SqlDialectAdapter $dialect;
+
+    /**
+     * Registro de auditoría de las conmutaciones territoriales.
+     *
+     * Se resuelve de forma perezosa sobre la misma conexión: una suite que solo
+     * lea sedes no abre un segundo canal ni toca `audit_log`.
+     */
+    private ?AuditLogRepositoryInterface $auditRepo = null;
 
     public function __construct(?PDO $pdo = null)
     {
@@ -711,8 +722,10 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
      * @param int|null $zoneId Zona forzada, o null para dejarla sin zona.
      * @return bool True si la sede existía.
      */
-    public function setManualOverride(int $locationId, ?int $zoneId): bool
+    public function setManualOverride(int $locationId, ?int $zoneId, ?int $userId = null): bool
     {
+        $previous = $this->loadZoneSnapshot($locationId);
+
         $sql = "
             UPDATE locations
             SET zone_id = :zone_id,
@@ -730,8 +743,13 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
             $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
         }
         $stmt->execute();
+        $updated = $stmt->rowCount() > 0;
 
-        return $stmt->rowCount() > 0;
+        if ($updated && $userId !== null && $previous !== null) {
+            $this->logZoneOverride($locationId, $userId, $previous, $zoneId, 'MANUAL_OVERRIDE');
+        }
+
+        return $updated;
     }
 
     /**
@@ -741,8 +759,10 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
      * @param int $locationId Identificador de la sede.
      * @return int|null Zona heredada resultante, o null si el CP no pertenece a ninguna activa.
      */
-    public function clearManualOverride(int $locationId): ?int
+    public function clearManualOverride(int $locationId, ?int $userId = null): ?int
     {
+        $previous = $this->loadZoneSnapshot($locationId);
+
         $stmt = $this->pdo->prepare(
             'SELECT postal_code FROM locations WHERE id = :location_id AND deleted_at IS NULL LIMIT 1'
         );
@@ -774,7 +794,92 @@ class PdoLocationRepository implements LocationRepositoryInterface, LocationBatc
         $update->bindValue(':location_id', $locationId, PDO::PARAM_INT);
         $update->execute();
 
+        if ($userId !== null && $previous !== null) {
+            $this->logZoneOverride($locationId, $userId, $previous, $inheritedZone, 'INHERITED_BY_POSTAL_CODE');
+        }
+
         return $inheritedZone;
+    }
+
+    /**
+     * Estado territorial previo de la sede, para el rastro de auditoría.
+     *
+     * @return array{zone_id: int|null, is_manual_override: bool}|null
+     */
+    private function loadZoneSnapshot(int $locationId): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT zone_id, is_manual_override FROM locations WHERE id = :location_id AND deleted_at IS NULL LIMIT 1'
+        );
+        $stmt->bindValue(':location_id', $locationId, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch();
+
+        if ($row === false) {
+            return null;
+        }
+
+        return [
+            'zone_id' => $row['zone_id'] !== null ? (int)$row['zone_id'] : null,
+            'is_manual_override' => $row['is_manual_override'] === true
+                || in_array(strtolower((string)$row['is_manual_override']), ['1', 't', 'true'], true),
+        ];
+    }
+
+    /**
+     * Firma la excepción territorial de la sede en `audit_log` (RNF-03).
+     *
+     * El fallo de auditoría propagado aborta la operación del servicio: un cambio
+     * de demarcación sin rastro es exactamente lo que el Art. III prohíbe.
+     */
+    private function logZoneOverride(
+        int $locationId,
+        int $userId,
+        array $previous,
+        ?int $newZoneId,
+        string $resolutionMode
+    ): void {
+        $actor = $this->resolveActor($userId);
+        $auditRepo = $this->auditRepo ??= new PdoAuditLogRepository($this->pdo);
+
+        $auditRepo->log(new AuditEvent(
+            null,
+            AuditEvent::ENTITY_LOCATION,
+            $locationId,
+            'LOCATION_ZONE_MANUAL_OVERRIDE',
+            $userId,
+            $actor['role'],
+            $actor['name'],
+            $previous,
+            ['zone_id' => $newZoneId, 'is_manual_override' => $resolutionMode === 'MANUAL_OVERRIDE'],
+            ['resolution_mode' => $resolutionMode]
+        ));
+    }
+
+    /**
+     * Rol y nombre del coordinador que firma la excepción territorial.
+     *
+     * @return array{role: string, name: string}
+     *
+     * @throws InvalidArgumentException Si el usuario no existe.
+     */
+    private function resolveActor(int $userId): array
+    {
+        $stmt = $this->pdo->prepare('SELECT role, name FROM users WHERE id = :user_id LIMIT 1');
+        $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch();
+
+        if ($row === false) {
+            throw new InvalidArgumentException(
+                "No existe el usuario {$userId} que pretende cambiar la zona de la sede."
+            );
+        }
+
+        return [
+            'role' => mb_strtoupper((string)$row['role']),
+            'name' => (string)$row['name'],
+        ];
     }
 
     /**

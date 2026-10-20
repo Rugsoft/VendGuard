@@ -11,6 +11,7 @@ use PDOStatement;
 use RuntimeException;
 use Throwable;
 use VendGuard\Core\Domain\Exception\PrimaryTechnicianConflictException;
+use VendGuard\Core\Domain\Exception\ZoneNotFoundException;
 use VendGuard\Core\Domain\Exception\ZoneValidationException;
 use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\OperationalZone;
@@ -122,6 +123,32 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
      */
     public function findAllWithCounts(bool $includeInactive = true): array
     {
+        return $this->fetchWithCounts(null, $includeInactive);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function findWithCounts(int $zoneId): ?array
+    {
+        $rows = $this->fetchWithCounts($zoneId, true);
+
+        return $rows[0] ?? null;
+    }
+
+    /**
+     * Sentencia única de catálogo con contadores, opcionalmente acotada a una zona.
+     *
+     * @return list<array{
+     *     zone: OperationalZone,
+     *     locations_count: int,
+     *     primary_technicians_count: int,
+     *     backup_technicians_count: int,
+     *     postal_codes_count: int
+     * }>
+     */
+    private function fetchWithCounts(?int $zoneId, bool $includeInactive): array
+    {
         $booleanTrue = $this->dialect->booleanLiteral(true);
         $booleanFalse = $this->dialect->booleanLiteral(false);
 
@@ -163,13 +190,25 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
             FROM operational_zones z
         ";
 
+        $conditions = [];
+        if ($zoneId !== null) {
+            $conditions[] = 'z.id = :zone_id';
+        }
         if (!$includeInactive) {
-            $sql .= " WHERE z.is_active = {$booleanTrue}";
+            $conditions[] = "z.is_active = {$booleanTrue}";
+        }
+
+        if ($conditions !== []) {
+            $sql .= ' WHERE ' . implode(' AND ', $conditions);
         }
 
         $sql .= ' ORDER BY z.code ASC';
 
-        $stmt = $this->pdo->query($sql);
+        $stmt = $this->pdo->prepare($sql);
+        if ($zoneId !== null) {
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        }
+        $stmt->execute();
 
         $zones = [];
         foreach ($stmt->fetchAll() as $row) {
@@ -206,6 +245,245 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
             static fn (array $row): string => (string)$row['postal_code'],
             $stmt->fetchAll()
         );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function findPostalCodeConflicts(array $postalCodes, int $targetZoneId): array
+    {
+        $codes = self::normalizePostalCodes($postalCodes);
+        if ($codes === []) {
+            return [];
+        }
+
+        [$postalIn, $postalParams] = self::inClause('cp', $codes);
+
+        // Las sedes afectadas se cuentan con la misma regla que aplicará el
+        // traslado: solo las que heredan (`is_manual_override = FALSE`) cambian de
+        // zona, así que prometer otro número en el modal sería mentir (RF-03.3).
+        $sql = "
+            SELECT
+                p.postal_code,
+                p.zone_id,
+                z.name,
+                (
+                    SELECT COUNT(*)
+                    FROM locations l
+                    WHERE l.postal_code = p.postal_code
+                      AND l.is_manual_override = " . $this->dialect->booleanLiteral(false) . '
+                      AND l.deleted_at IS NULL
+                ) AS affected_locations_count
+            FROM operational_zone_postal_codes p
+            INNER JOIN operational_zones z ON z.id = p.zone_id
+            WHERE p.postal_code IN (' . $postalIn . ')
+              AND p.released_at IS NULL
+              AND p.zone_id <> :target_zone_id
+            ORDER BY p.postal_code ASC
+        ';
+
+        $stmt = $this->pdo->prepare($sql);
+        self::bindAll($stmt, $postalParams);
+        $stmt->bindValue(':target_zone_id', $targetZoneId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return array_map(static fn (array $row): array => [
+            'postal_code' => (string)$row['postal_code'],
+            'current_zone_id' => (int)$row['zone_id'],
+            'current_zone_name' => (string)$row['name'],
+            'affected_locations_count' => (int)$row['affected_locations_count'],
+        ], $stmt->fetchAll());
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function assignPostalCodes(int $zoneId, array $postalCodes, int $userId): array
+    {
+        $this->assertActiveZone($zoneId, 'asignar códigos postales');
+
+        $codes = self::normalizePostalCodes($postalCodes);
+        if ($codes === []) {
+            return [];
+        }
+
+        $actor = $this->resolveActor($userId);
+        [$postalIn, $postalParams] = self::inClause('cp', $codes);
+
+        $this->pdo->beginTransaction();
+
+        try {
+            // Un CP con asignación viva no se da de alta: se traslada. Bloquear la
+            // fila convierte una carrera entre alta y traslado en un rechazo claro
+            // en vez de un 23505 sobre el índice parcial (RNF-04).
+            $stmt = $this->pdo->prepare(
+                "SELECT postal_code
+                 FROM operational_zone_postal_codes
+                 WHERE postal_code IN ({$postalIn})
+                   AND released_at IS NULL
+                 FOR UPDATE"
+            );
+            self::bindAll($stmt, $postalParams);
+            $stmt->execute();
+            $taken = array_map(static fn (array $row): string => (string)$row['postal_code'], $stmt->fetchAll());
+
+            if ($taken !== []) {
+                throw ZoneValidationException::unprocessable(
+                    'Los códigos postales con zona asignada deben trasladarse, no darse de alta: '
+                        . implode(', ', $taken) . '.',
+                    ['postal_codes' => 'Ya tienen zona: ' . implode(', ', $taken) . '.'],
+                );
+            }
+
+            // La fila histórica liberada del mismo CP se queda como está: el CP
+            // recupera una asignación viva nueva y el historial sigue siendo
+            // auditable (QA 13).
+            $insert = $this->pdo->prepare(
+                'INSERT INTO operational_zone_postal_codes (postal_code, zone_id)
+                 VALUES (:postal_code, :zone_id)'
+            );
+            foreach ($codes as $code) {
+                $insert->bindValue(':postal_code', $code, PDO::PARAM_STR);
+                $insert->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+                $insert->execute();
+            }
+
+            $this->auditRepo->log(new AuditEvent(
+                null,
+                AuditEvent::ENTITY_OPERATIONAL_ZONE,
+                $zoneId,
+                'ZONE_UPDATED',
+                $userId,
+                $actor['role'],
+                $actor['name'],
+                null,
+                ['postal_codes_added' => $codes],
+                ['operation' => 'POSTAL_CODES_ASSIGNED']
+            ));
+
+            $this->pdo->commit();
+
+            return $codes;
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function inspectReleaseImpact(int $zoneId): array
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT
+                (SELECT COUNT(*) FROM operational_zone_postal_codes
+                  WHERE zone_id = :zone_id AND released_at IS NULL) AS postal_codes,
+                (SELECT COUNT(*) FROM technician_zone_assignments
+                  WHERE zone_id = :zone_id AND removed_at IS NULL) AS technicians,
+                (SELECT COUNT(*) FROM locations
+                  WHERE zone_id = :zone_id AND deleted_at IS NULL) AS locations"
+        );
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch();
+
+        // La cuenta de sedes incluye también las forzadas a mano: todas acaban en
+        // «Sin Zona Asignada» al desactivar (RF-01.3).
+        return [
+            'postal_codes' => (int)($row['postal_codes'] ?? 0),
+            'technicians' => (int)($row['technicians'] ?? 0),
+            'locations' => (int)($row['locations'] ?? 0),
+        ];
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function deactivateZone(int $zoneId, int $userId): array
+    {
+        $actor = $this->resolveActor($userId);
+
+        $this->pdo->beginTransaction();
+
+        try {
+            $stmt = $this->pdo->prepare(
+                'SELECT id, code, name, is_active FROM operational_zones WHERE id = :zone_id FOR UPDATE'
+            );
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+            $stmt->execute();
+            $zone = $stmt->fetch();
+
+            if ($zone === false) {
+                throw new ZoneNotFoundException($zoneId);
+            }
+
+            // Las sedes se sueltan primero: `locations.zone_id` referencia la zona
+            // con `ON DELETE SET NULL`, y aquí no se borra nada, solo se dejan «Sin
+            // Zona Asignada» conservando su historial (RF-01.3, Art. III.1).
+            $stmt = $this->pdo->prepare(
+                'UPDATE locations
+                 SET zone_id = NULL
+                 WHERE zone_id = :zone_id
+                   AND deleted_at IS NULL'
+            );
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+            $stmt->execute();
+            $unassignedLocations = $stmt->rowCount();
+
+            $released = $this->releasePostalCodes($zoneId);
+
+            $stmt = $this->pdo->prepare(
+                'UPDATE technician_zone_assignments
+                 SET removed_at = CURRENT_TIMESTAMP
+                 WHERE zone_id = :zone_id
+                   AND removed_at IS NULL'
+            );
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+            $stmt->execute();
+            $removedTechnicians = $stmt->rowCount();
+
+            $stmt = $this->pdo->prepare(
+                'UPDATE operational_zones SET is_active = :is_active WHERE id = :zone_id'
+            );
+            $stmt->bindValue(':is_active', false, PDO::PARAM_BOOL);
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+            $stmt->execute();
+
+            $this->auditRepo->log(new AuditEvent(
+                null,
+                AuditEvent::ENTITY_OPERATIONAL_ZONE,
+                $zoneId,
+                'ZONE_DEACTIVATED',
+                $userId,
+                $actor['role'],
+                $actor['name'],
+                ['is_active' => self::toBoolean($zone['is_active']), 'code' => (string)$zone['code']],
+                ['is_active' => false],
+                [
+                    'released_postal_codes' => $released,
+                    'unassigned_locations_count' => $unassignedLocations,
+                    'removed_technicians_count' => $removedTechnicians,
+                ]
+            ));
+
+            $this->pdo->commit();
+
+            return [
+                'released_postal_codes' => $released,
+                'unassigned_locations' => $unassignedLocations,
+                'removed_technicians' => $removedTechnicians,
+            ];
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $exception;
+        }
     }
 
     /**
@@ -423,7 +701,7 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
     /**
      * {@inheritDoc}
      */
-    public function create(array $data): OperationalZone
+    public function create(array $data, ?int $userId = null): OperationalZone
     {
         // La entidad es la única puerta de entrada al catálogo: valida código,
         // nombre y color con las mismas reglas que usa el resto del dominio.
@@ -436,39 +714,68 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
             (bool)($data['is_active'] ?? true)
         );
 
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO operational_zones (code, name, color_hex, description, is_active)
-             VALUES (:code, :name, :color_hex, :description, :is_active)'
-        );
-        $stmt->bindValue(':code', $zone->getCode(), PDO::PARAM_STR);
-        $stmt->bindValue(':name', $zone->getName(), PDO::PARAM_STR);
-        $stmt->bindValue(':color_hex', $zone->getColorHex(), PDO::PARAM_STR);
-        if ($zone->getDescription() === null) {
-            $stmt->bindValue(':description', null, PDO::PARAM_NULL);
-        } else {
-            $stmt->bindValue(':description', $zone->getDescription(), PDO::PARAM_STR);
-        }
-        $stmt->bindValue(':is_active', $zone->isActive(), PDO::PARAM_BOOL);
-        $stmt->execute();
+        // El alta y su evento se confirman juntos: una zona sin rastro en
+        // `audit_log` sería una configuración territorial invisible (RNF-03).
+        $actor = $userId !== null ? $this->resolveActor($userId) : null;
+        $this->pdo->beginTransaction();
 
-        $newId = (int)$this->pdo->lastInsertId();
-
-        // `lastInsertId()` puede no estar disponible en algunos agrupadores; el
-        // código es único, así que sirve de identidad de respaldo sin inventar nada.
-        $created = $newId > 0 ? $this->findById($newId, true) : $this->findByCode($zone->getCode());
-        if ($created === null) {
-            throw new RuntimeException(
-                "Error al recuperar la zona operativa recién creada con código '{$zone->getCode()}'."
+        try {
+            $stmt = $this->pdo->prepare(
+                'INSERT INTO operational_zones (code, name, color_hex, description, is_active)
+                 VALUES (:code, :name, :color_hex, :description, :is_active)'
             );
-        }
+            $stmt->bindValue(':code', $zone->getCode(), PDO::PARAM_STR);
+            $stmt->bindValue(':name', $zone->getName(), PDO::PARAM_STR);
+            $stmt->bindValue(':color_hex', $zone->getColorHex(), PDO::PARAM_STR);
+            if ($zone->getDescription() === null) {
+                $stmt->bindValue(':description', null, PDO::PARAM_NULL);
+            } else {
+                $stmt->bindValue(':description', $zone->getDescription(), PDO::PARAM_STR);
+            }
+            $stmt->bindValue(':is_active', $zone->isActive(), PDO::PARAM_BOOL);
+            $stmt->execute();
 
-        return $created;
+            $newId = (int)$this->pdo->lastInsertId();
+
+            // `lastInsertId()` puede no estar disponible en algunos agrupadores; el
+            // código es único, así que sirve de identidad de respaldo sin inventar nada.
+            $created = $newId > 0 ? $this->findById($newId, true) : $this->findByCode($zone->getCode());
+            if ($created === null) {
+                throw new RuntimeException(
+                    "Error al recuperar la zona operativa recién creada con código '{$zone->getCode()}'."
+                );
+            }
+
+            if ($userId !== null && $actor !== null) {
+                $this->auditRepo->log(new AuditEvent(
+                    null,
+                    AuditEvent::ENTITY_OPERATIONAL_ZONE,
+                    (int)$created->getId(),
+                    'ZONE_CREATED',
+                    $userId,
+                    $actor['role'],
+                    $actor['name'],
+                    null,
+                    $created->toArray()
+                ));
+            }
+
+            $this->pdo->commit();
+
+            return $created;
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $exception;
+        }
     }
 
     /**
      * {@inheritDoc}
      */
-    public function update(int $zoneId, array $data): bool
+    public function update(int $zoneId, array $data, ?int $userId = null): bool
     {
         $current = $this->findById($zoneId, true);
         if ($current === null) {
@@ -503,11 +810,38 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
         } else {
             $stmt->bindValue(':description', $candidate->getDescription(), PDO::PARAM_STR);
         }
-        $stmt->bindValue(':is_active', $candidate->isActive(), PDO::PARAM_BOOL);
-        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
-        $stmt->execute();
+        $actor = $userId !== null ? $this->resolveActor($userId) : null;
+        $this->pdo->beginTransaction();
 
-        return true;
+        try {
+            $stmt->bindValue(':is_active', $candidate->isActive(), PDO::PARAM_BOOL);
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+            $stmt->execute();
+
+            if ($userId !== null && $actor !== null) {
+                $this->auditRepo->log(new AuditEvent(
+                    null,
+                    AuditEvent::ENTITY_OPERATIONAL_ZONE,
+                    $zoneId,
+                    'ZONE_UPDATED',
+                    $userId,
+                    $actor['role'],
+                    $actor['name'],
+                    $current->toArray(),
+                    $candidate->toArray()
+                ));
+            }
+
+            $this->pdo->commit();
+
+            return true;
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $exception;
+        }
     }
 
     /**
@@ -528,8 +862,13 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
     /**
      * {@inheritDoc}
      */
-    public function assignTechnician(int $technicianId, int $zoneId, bool $isPrimary): int
-    {
+    public function assignTechnician(
+        int $technicianId,
+        int $zoneId,
+        bool $isPrimary,
+        ?int $userId = null,
+        bool $demotePreviousPrimary = false
+    ): int {
         $zone = $this->findById($zoneId, true);
         if ($zone === null) {
             throw ZoneValidationException::forField(
@@ -551,35 +890,112 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
             );
         }
 
+        // La degradación de la titularidad previa solo se admite con la confirmación
+        // expresa que pide RF-02.2; sin ella, el conflicto viaja al coordinador.
+        $demotion = null;
         if ($isPrimary) {
-            $this->assertNoOtherPrimaryZone($technicianId, $zoneId);
-        }
+            $demotion = $demotePreviousPrimary
+                ? $this->findOtherPrimaryZone($technicianId, $zoneId)
+                : null;
 
-        $live = $this->findLiveAssignment($technicianId, $zoneId);
-        if ($live !== null) {
-            if ($live['is_primary'] !== $isPrimary) {
-                $stmt = $this->pdo->prepare(
-                    'UPDATE technician_zone_assignments SET is_primary = :is_primary WHERE id = :assignment_id'
-                );
-                $stmt->bindValue(':is_primary', $isPrimary, PDO::PARAM_BOOL);
-                $stmt->bindValue(':assignment_id', $live['id'], PDO::PARAM_INT);
-                $stmt->execute();
+            if (!$demotePreviousPrimary) {
+                $this->assertNoOtherPrimaryZone($technicianId, $zoneId);
             }
-
-            return $live['id'];
         }
 
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO technician_zone_assignments (technician_id, zone_id, is_primary)
-             VALUES (:technician_id, :zone_id, :is_primary)'
-        );
-        $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
-        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
-        $stmt->bindValue(':is_primary', $isPrimary, PDO::PARAM_BOOL);
+        $actor = $userId !== null ? $this->resolveActor($userId) : null;
+        $this->pdo->beginTransaction();
 
         try {
+            if ($demotion !== null) {
+                $stmt = $this->pdo->prepare(
+                    'UPDATE technician_zone_assignments
+                     SET is_primary = :is_primary
+                     WHERE id = :assignment_id'
+                );
+                $stmt->bindValue(':is_primary', false, PDO::PARAM_BOOL);
+                $stmt->bindValue(':assignment_id', $demotion['assignment_id'], PDO::PARAM_INT);
+                $stmt->execute();
+
+                if ($userId !== null && $actor !== null) {
+                    $this->auditRepo->log(new AuditEvent(
+                        null,
+                        AuditEvent::ENTITY_TECHNICIAN_ZONE,
+                        $demotion['assignment_id'],
+                        'TECHNICIAN_ZONE_PRIMARY_DEMOTED',
+                        $userId,
+                        $actor['role'],
+                        $actor['name'],
+                        ['zone_id' => $demotion['zone_id'], 'is_primary' => true],
+                        ['zone_id' => $demotion['zone_id'], 'is_primary' => false],
+                        [
+                            'technician_id' => $technicianId,
+                            'demoted_zone_id' => $demotion['zone_id'],
+                            'demoted_zone_name' => $demotion['zone_name'],
+                            'new_primary_zone_id' => $zoneId,
+                        ]
+                    ));
+                }
+            }
+
+            $live = $this->findLiveAssignment($technicianId, $zoneId);
+            if ($live !== null) {
+                if ($live['is_primary'] !== $isPrimary) {
+                    $stmt = $this->pdo->prepare(
+                        'UPDATE technician_zone_assignments SET is_primary = :is_primary WHERE id = :assignment_id'
+                    );
+                    $stmt->bindValue(':is_primary', $isPrimary, PDO::PARAM_BOOL);
+                    $stmt->bindValue(':assignment_id', $live['id'], PDO::PARAM_INT);
+                    $stmt->execute();
+                }
+
+                $this->pdo->commit();
+
+                return $live['id'];
+            }
+
+            $stmt = $this->pdo->prepare(
+                'INSERT INTO technician_zone_assignments (technician_id, zone_id, is_primary)
+                 VALUES (:technician_id, :zone_id, :is_primary)'
+            );
+            $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+            $stmt->bindValue(':is_primary', $isPrimary, PDO::PARAM_BOOL);
             $stmt->execute();
+
+            $assignmentId = (int)$this->pdo->lastInsertId();
+            if ($assignmentId <= 0) {
+                $created = $this->findLiveAssignment($technicianId, $zoneId);
+                if ($created === null) {
+                    throw new RuntimeException(
+                        "Error al recuperar la vinculación recién creada del técnico {$technicianId} con la zona {$zoneId}."
+                    );
+                }
+                $assignmentId = $created['id'];
+            }
+
+            if ($userId !== null && $actor !== null) {
+                $this->auditRepo->log(new AuditEvent(
+                    null,
+                    AuditEvent::ENTITY_TECHNICIAN_ZONE,
+                    $assignmentId,
+                    'TECHNICIAN_ZONE_ASSIGNED',
+                    $userId,
+                    $actor['role'],
+                    $actor['name'],
+                    null,
+                    ['technician_id' => $technicianId, 'zone_id' => $zoneId, 'is_primary' => $isPrimary]
+                ));
+            }
+
+            $this->pdo->commit();
+
+            return $assignmentId;
         } catch (PDOException $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
             // Dos peticiones simultáneas pueden pasar la comprobación previa: el
             // índice parcial las separa, y la que pierde merece el mismo 409 de
             // negocio que si hubiera llegado sola, no un 500 de infraestructura.
@@ -589,40 +1005,63 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
             }
 
             throw $exception;
-        }
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
 
-        $assignmentId = (int)$this->pdo->lastInsertId();
-        if ($assignmentId > 0) {
-            return $assignmentId;
+            throw $exception;
         }
-
-        $created = $this->findLiveAssignment($technicianId, $zoneId);
-        if ($created === null) {
-            throw new RuntimeException(
-                "Error al recuperar la vinculación recién creada del técnico {$technicianId} con la zona {$zoneId}."
-            );
-        }
-
-        return $created['id'];
     }
 
     /**
      * {@inheritDoc}
      */
-    public function removeTechnician(int $technicianId, int $zoneId): bool
+    public function removeTechnician(int $technicianId, int $zoneId, ?int $userId = null): bool
     {
-        $stmt = $this->pdo->prepare(
-            'UPDATE technician_zone_assignments
-             SET removed_at = CURRENT_TIMESTAMP
-             WHERE technician_id = :technician_id
-               AND zone_id = :zone_id
-               AND removed_at IS NULL'
-        );
-        $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
-        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
-        $stmt->execute();
+        $actor = $userId !== null ? $this->resolveActor($userId) : null;
+        $this->pdo->beginTransaction();
 
-        return $stmt->rowCount() > 0;
+        try {
+            $live = $this->findLiveAssignment($technicianId, $zoneId);
+
+            $stmt = $this->pdo->prepare(
+                'UPDATE technician_zone_assignments
+                 SET removed_at = CURRENT_TIMESTAMP
+                 WHERE technician_id = :technician_id
+                   AND zone_id = :zone_id
+                   AND removed_at IS NULL'
+            );
+            $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+            $stmt->execute();
+            $removed = $stmt->rowCount() > 0;
+
+            if ($removed && $userId !== null && $actor !== null && $live !== null) {
+                $this->auditRepo->log(new AuditEvent(
+                    null,
+                    AuditEvent::ENTITY_TECHNICIAN_ZONE,
+                    $live['id'],
+                    'TECHNICIAN_ZONE_REMOVED',
+                    $userId,
+                    $actor['role'],
+                    $actor['name'],
+                    ['zone_id' => $zoneId, 'is_primary' => $live['is_primary'], 'removed_at' => null],
+                    ['removed_at' => 'CURRENT_TIMESTAMP'],
+                    ['technician_id' => $technicianId]
+                ));
+            }
+
+            $this->pdo->commit();
+
+            return $removed;
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $exception;
+        }
     }
 
     /**
@@ -676,6 +1115,66 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
                 $technicianId,
                 (int)$conflict['zone_id'],
                 (string)$conflict['name']
+            );
+        }
+    }
+
+    /**
+     * Titularidad viva del técnico en **otra** zona, con su nombre para el rastro.
+     *
+     * Es la lectura que necesita la confirmación `confirm_primary_override`: la
+     * degradación automática solo puede aplicarse si el coordinador sabe qué zona
+     * pierde el técnico (RF-02.2, QA 9).
+     *
+     * @return array{assignment_id: int, zone_id: int, zone_name: string}|null
+     */
+    private function findOtherPrimaryZone(int $technicianId, int $zoneId): ?array
+    {
+        $sql = "
+            SELECT a.id, a.zone_id, z.name
+            FROM technician_zone_assignments a
+            INNER JOIN operational_zones z ON z.id = a.zone_id
+            WHERE a.technician_id = :technician_id
+              AND a.is_primary = " . $this->dialect->booleanLiteral(true) . '
+              AND a.removed_at IS NULL
+              AND a.zone_id <> :zone_id
+            LIMIT 1
+        ';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+        $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch();
+
+        if ($row === false) {
+            return null;
+        }
+
+        return [
+            'assignment_id' => (int)$row['id'],
+            'zone_id' => (int)$row['zone_id'],
+            'zone_name' => (string)$row['name'],
+        ];
+    }
+
+    /**
+     * Comprueba que la zona existe y está activa antes de escribir en su territorio.
+     *
+     * @throws ZoneNotFoundException Si la zona no existe.
+     * @throws ZoneValidationException Si está desactivada.
+     */
+    private function assertActiveZone(int $zoneId, string $operation): void
+    {
+        $zone = $this->findById($zoneId, true);
+        if ($zone === null) {
+            throw new ZoneNotFoundException($zoneId);
+        }
+
+        if (!$zone->isActive()) {
+            throw ZoneValidationException::unprocessable(
+                sprintf('No se pueden %s en una zona desactivada.', $operation),
+                ['zone_id' => 'La zona está inactiva.']
             );
         }
     }
