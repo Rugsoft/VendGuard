@@ -43,7 +43,7 @@
 
 ## Fase 2: Modelos de Dominio, Value Objects, Excepciones y Políticas Puras
 
-- [ ] **T-ZONE-03 · Implementar entidad `OperationalZone`, Value Objects (`ZoneAffinityType`, `PostalCode`), Excepciones de Dominio y test unitario**
+- [x] **T-ZONE-03 · Implementar entidad `OperationalZone`, Value Objects (`ZoneAffinityType`, `PostalCode`), Excepciones de Dominio y test unitario**
   * **Tiempo estimado:** 20 min
   * **Dependencias:** `T-ZONE-01`
   * **Ficheros a crear o modificar:**
