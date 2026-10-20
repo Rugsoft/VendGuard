@@ -59,7 +59,7 @@
   * **Requisitos que cubre:** `RF-01.1`, `RF-01.2`, `RF-02.1`, `RF-05.2`, Resoluciones QA 1 y QA 4
   * **Hecho cuando:** `PostalCode` normaliza con ceros a la izquierda y rechaza cadenas no conformes con `^\d{5}$` (mismo Value Object que valida el CP de sede en el alta y la edición), `ZoneAffinityType` define `PRIMARY`, `BACKUP`, `NONE` con sus etiquetas en español, las 5 excepciones tipadas exponen sus códigos y estados HTTP (`400`, `404`, `409`, `422`), la entidad inmutable `OperationalZone` serializa e hidrata sus datos vía `fromDatabaseRow()` y `toArray()`, y `php tests/unit/PostalCodeValidationTest.php` pasa al 100% en verde con 0 fallos.
 
-- [ ] **T-ZONE-04 · Implementar política pura de dominio `TechnicianWorkloadScorer` y su suite unitaria**
+- [x] **T-ZONE-04 · Implementar política pura de dominio `TechnicianWorkloadScorer` y su suite unitaria**
   * **Tiempo estimado:** 25 min
   * **Dependencias:** `T-ZONE-03`
   * **Ficheros a crear o modificar:**
