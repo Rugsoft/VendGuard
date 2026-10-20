@@ -6,6 +6,7 @@ namespace VendGuard\Presentation\Routing;
 
 use VendGuard\Presentation\Controller\CoordinatorRefundController;
 use VendGuard\Presentation\Controller\CoordinatorRouteMapController;
+use VendGuard\Presentation\Controller\CoordinatorZoneController;
 use VendGuard\Presentation\Controller\HealthController;
 use VendGuard\Presentation\Controller\LocationRefundController;
 use VendGuard\Presentation\Controller\PublicRefundController;
@@ -142,6 +143,18 @@ class AppRouter
         $router->patch('/api/coordinator/locations/{id}/deactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'deactivateLocation'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/locations/{id}/reactivate', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'reactivateLocation'], [$coordinatorAuth]);
         $router->post('/api/coordinator/locations/{id}/access-code', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'reissueLocationAccessCode'], [$coordinatorAuth]);
+
+        // Zonificación operativa (Módulo 17, T-ZONE-09): catálogo territorial, CP y
+        // cuadrante. Todas las rutas exigen Coordinación y las zonas nunca se exponen
+        // al portal de sede (Art. V.4, RF-07.1).
+        $router->get('/api/coordinator/zones', [CoordinatorZoneController::class, 'listZones'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/zones', [CoordinatorZoneController::class, 'createZone'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/zones/{id}', [CoordinatorZoneController::class, 'getZone'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/zones/{id}', [CoordinatorZoneController::class, 'updateZone'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/zones/{id}/postal-codes', [CoordinatorZoneController::class, 'assignPostalCodes'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/zones/{id}/technicians', [CoordinatorZoneController::class, 'assignTechnician'], [$coordinatorAuth]);
+        $router->delete('/api/coordinator/zones/{id}/technicians/{tech_id}', [CoordinatorZoneController::class, 'removeTechnician'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/locations/{id}/override-zone', [CoordinatorZoneController::class, 'overrideLocationZone'], [$coordinatorAuth]);
 
         // Máquinas (Machines)
         $router->get('/api/coordinator/machines', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'listMachines'], [$coordinatorAuth]);

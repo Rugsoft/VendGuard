@@ -130,7 +130,7 @@
 
 ## Fase 5: Controladores REST, Router y Suites de Integración HTTP
 
-- [ ] **T-ZONE-09 · Implementar controlador `CoordinatorZoneController`, registrar rutas en `AppRouter` y crear suite `CoordinatorZoneApiTest.php`**
+- [x] **T-ZONE-09 · Implementar controlador `CoordinatorZoneController`, registrar rutas en `AppRouter` y crear suite `CoordinatorZoneApiTest.php`**
   * **Tiempo estimado:** 25 min
   * **Dependencias:** `T-ZONE-07`
   * **Ficheros a crear o modificar:**
@@ -139,6 +139,7 @@
     * `tests/integration/CoordinatorZoneApiTest.php` *(crear)*
   * **Requisitos que cubre:** `RF-01.1`, `RF-01.2`, `RF-01.3`, `RF-02.1`, `RF-03.2`, `RNF-04`
   * **Hecho cuando:** Están registradas y protegidas con `InternalAuthMiddleware(COORDINATOR)` las rutas `GET /api/coordinator/zones`, `POST /api/coordinator/zones`, `GET /api/coordinator/zones/{id}`, `PUT /api/coordinator/zones/{id}`, `POST /api/coordinator/zones/{id}/postal-codes`, `POST /api/coordinator/zones/{id}/technicians`, `DELETE /api/coordinator/zones/{id}/technicians/{tech_id}` y `POST /api/coordinator/locations/{id}/override-zone`; y `php tests/integration/CoordinatorZoneApiTest.php` pasa al 100% en verde verificando todos los códigos HTTP (`200`, `201`, `400`, `404`, `409`).
+  * **Verificación:** `source deploy/local/postgres/.env.local && php tests/integration/CoordinatorZoneApiTest.php` → **37/37**, exit 0 (incluye `401`, `403`, `201`, `409` de código/nombre duplicado y `422` de liberación). La batería global sigue en 305 suites · 11.827 aserciones (la suite declara categoría `new_engine` y no altera las cifras herméticas).
 
 - [ ] **T-ZONE-10 · Implementar endpoint de sugerencias, validación constitucional $\ge 20$ chars en `/assign` y suites de integración**
   * **Tiempo estimado:** 30 min

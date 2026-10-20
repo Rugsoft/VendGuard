@@ -87,6 +87,16 @@ class OperationalZoneService
     }
 
     /**
+     * Sedes activas sin demarcación, que el panel muestra como trabajo pendiente.
+     *
+     * @return int Número de sedes en «Sin Zona Asignada».
+     */
+    public function countUnassignedLocations(): int
+    {
+        return $this->zoneRepo->countUnassignedLocations();
+    }
+
+    /**
      * Ficha completa de una zona, activa o desactivada (RF-01.1).
      *
      * @throws ZoneNotFoundException Si la zona no existe.

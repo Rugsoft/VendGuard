@@ -201,15 +201,17 @@ try {
             && $zoneClosed->isActive() === false
     );
 
+    // La unicidad la impone el esquema, pero el repositorio la traduce a la regla de
+    // negocio del contrato (§3.2): el coordinador recibe un 409, no un 23505 del motor.
     $duplicateCode = null;
     try {
         $zoneRepo->create(['code' => 'ZONA-NORTE-CERT', 'name' => 'Otra Zona Norte']);
-    } catch (PDOException $exception) {
-        $duplicateCode = $exception->getCode();
+    } catch (ZoneValidationException $exception) {
+        $duplicateCode = $exception->getErrorCode();
     }
     $assert(
-        'El código único de zona lo impone el esquema (23505)',
-        $duplicateCode === '23505',
+        'El código único de zona se rechaza como ZONE_CODE_ALREADY_EXISTS (409)',
+        $duplicateCode === 'ZONE_CODE_ALREADY_EXISTS',
         (string)$duplicateCode
     );
 

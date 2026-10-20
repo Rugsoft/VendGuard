@@ -137,6 +137,18 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
     }
 
     /**
+     * {@inheritDoc}
+     */
+    public function countUnassignedLocations(): int
+    {
+        $stmt = $this->pdo->query(
+            'SELECT COUNT(*) FROM locations WHERE zone_id IS NULL AND deleted_at IS NULL'
+        );
+
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
      * Sentencia única de catálogo con contadores, opcionalmente acotada a una zona.
      *
      * @return list<array{
@@ -763,6 +775,32 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
             $this->pdo->commit();
 
             return $created;
+        } catch (PDOException $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            // El código y el nombre son únicos en todo el catálogo: la colisión es
+            // una regla de negocio (409 del contrato §3.2), no un 500 del motor.
+            if (UniqueViolationDetector::matches($exception, 'uq_operational_zones_code')) {
+                throw new ZoneValidationException(
+                    sprintf('Ya existe una zona operativa con el código «%s».', $zone->getCode()),
+                    'ZONE_CODE_ALREADY_EXISTS',
+                    409,
+                    ['code' => 'El código identificativo ya está en uso.']
+                );
+            }
+
+            if (UniqueViolationDetector::matches($exception, 'uq_operational_zones_name')) {
+                throw new ZoneValidationException(
+                    sprintf('Ya existe una zona operativa con el nombre «%s».', $zone->getName()),
+                    'ZONE_NAME_ALREADY_EXISTS',
+                    409,
+                    ['name' => 'El nombre ya está en uso.']
+                );
+            }
+
+            throw $exception;
         } catch (Throwable $exception) {
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
@@ -835,6 +873,21 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
             $this->pdo->commit();
 
             return true;
+        } catch (PDOException $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            if (UniqueViolationDetector::matches($exception, 'uq_operational_zones_name')) {
+                throw new ZoneValidationException(
+                    sprintf('Ya existe una zona operativa con el nombre «%s».', $candidate->getName()),
+                    'ZONE_NAME_ALREADY_EXISTS',
+                    409,
+                    ['name' => 'El nombre ya está en uso.']
+                );
+            }
+
+            throw $exception;
         } catch (Throwable $exception) {
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();

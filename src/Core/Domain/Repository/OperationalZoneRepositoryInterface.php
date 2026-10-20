@@ -83,6 +83,17 @@ interface OperationalZoneRepositoryInterface
     public function findWithCounts(int $zoneId): ?array;
 
     /**
+     * Sedes activas que no pertenecen a ninguna zona (RF-03.4, «Sin Zona Asignada»).
+     *
+     * El panel territorial lo muestra junto al catálogo: es el trabajo pendiente de
+     * configuración, no un error. Las sedes históricas sin CP entran aquí hasta que
+     * se editan (QA 7).
+     *
+     * @return int Número de sedes con `zone_id IS NULL` y no dadas de baja.
+     */
+    public function countUnassignedLocations(): int;
+
+    /**
      * Códigos postales **vivos** de una zona, ordenados.
      *
      * Un CP liberado (`released_at`) pertenece al historial y no aparece aquí.
