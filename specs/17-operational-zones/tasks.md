@@ -28,7 +28,7 @@
   * **Requisitos que cubre:** `RF-01.1`, `RF-01.2`, `RF-02.1`, `RF-03.1`, `RF-03.2`, Resoluciones QA 4 y QA 6, `constitution.md` Art. III.1, Art. IV y Art. V.7
   * **Hecho cuando:** Existen en `007_operational_zones.sql` y en `database/supabase_init.sql`: (1) tabla `operational_zones` con restricciones `CHECK` de nombre, código y color `#RRGGBB`; (2) tabla `operational_zone_postal_codes` con clave primaria en `postal_code` (`VARCHAR(5)`, `CHECK (postal_code ~ '^[0-9]{5}$')`) garantizando la unicidad **global** del CP (QA 7); (3) columnas `zone_id`, `is_manual_override` y `postal_code` en `locations`, con `CHECK` de formato del CP e índices `idx_locations_zone_id` e `idx_locations_postal_code`; (4) tabla `technician_zone_assignments` con `removed_at`, índice parcial `uq_technician_zone_live` (`WHERE removed_at IS NULL`) y `uq_technician_primary_zone` (`WHERE is_primary = TRUE AND removed_at IS NULL`); (5) valores `OPERATIONAL_ZONE` y `TECHNICIAN_ZONE` añadidos a `audit_entity_type` con `ALTER TYPE ... ADD VALUE IF NOT EXISTS` y replicados en la declaración de `supabase_init.sql` (QA 11); (6) semillas de zonas BCN Norte/Sur/Centro con sus CPs, cuadrantes demo y CP asignado a cada sede sembrada; y `PostgresMigrationRunner` aplica la migración `007` sin errores dejando en verde `php tests/integration/PostgresSchemaTest.php` y `php tests/integration/SchemaConvergenceParityTest.php` con las listas `CONTRACT_TABLES` actualizadas a **25 tablas**.
 
-- [ ] **T-ZONE-02 · Implementar suite de integración de esquema `PostgresZoneSchemaTest.php`**
+- [x] **T-ZONE-02 · Implementar suite de integración de esquema `PostgresZoneSchemaTest.php`**
   * **Tiempo estimado:** 20 min
   * **Dependencias:** `T-ZONE-01`
   * **Ficheros a crear o modificar:**
