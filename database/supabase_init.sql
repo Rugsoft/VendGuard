@@ -521,12 +521,24 @@ CREATE TABLE IF NOT EXISTS locations (
     )
 );
 
+-- Vinculación territorial idempotente (Módulo 17). `CREATE TABLE IF NOT EXISTS` no
+-- añade columnas a una tabla que ya existía: una base creada antes del módulo conserva
+-- su `locations` antigua sin `zone_id`, `is_manual_override` ni `postal_code`, y los
+-- índices y la clave foránea de más abajo morían con `SQLSTATE 42703` en el paso 3/6 del
+-- arranque, antes de que la migración `007` pudiera llegar a ejecutarse. Con esta
+-- declaración la base antigua converge en el mismo paso y la capa incremental no tiene
+-- nada que corregir (misma lección que `idx_users_on_call`, EARS-02.5).
+ALTER TABLE locations
+    ADD COLUMN IF NOT EXISTS zone_id BIGINT,
+    ADD COLUMN IF NOT EXISTS is_manual_override BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS postal_code VARCHAR(5);
+
 CREATE INDEX IF NOT EXISTS idx_locations_active ON locations (is_active, deleted_at);
 CREATE INDEX IF NOT EXISTS idx_locations_lat_lng ON locations (latitude, longitude, is_active);
 
 -- Los índices territoriales se declaran en un bloque que tolera `undefined_column`:
--- en una base preexistente la columna llega con la migración `007`, que corre
--- después de este DDL base (misma lección que `idx_users_on_call`, EARS-02.5).
+-- la columna la garantiza la declaración idempotente de arriba, pero una base ajena con
+-- restricciones propias puede rechazarla sin abortar el arranque (EARS-02.5).
 DO $do$
 BEGIN
     CREATE INDEX IF NOT EXISTS idx_locations_postal_code ON locations (postal_code);
@@ -1624,6 +1636,10 @@ CREATE OR REPLACE TRIGGER trg_no_delete_operational_zone_postal_codes
 -- Las columnas se declaran en la Tabla 1; la clave foránea se materializa aquí
 -- porque exige que `operational_zones` exista. `ON DELETE SET NULL` deja la sede
 -- en «Sin Zona Asignada» conservando su historial si la zona desapareciera.
+--
+-- Las columnas las garantiza la declaración idempotente que acompaña a la creación de
+-- `locations` (una base anterior al módulo 17 llega aquí sin ellas y también sin haber
+-- podido declarar su clave foránea en línea).
 DO $do$
 BEGIN
     ALTER TABLE locations

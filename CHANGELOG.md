@@ -52,6 +52,18 @@ a un módulo funcional certificado por la batería global.
   certificada con aserciones sobre el traslado de CP, la desactivación de la zona y
   la baja del técnico del cuadrante.
 
+### Corregido (2026-10-20, despliegue en Render)
+
+- El arranque del contenedor vuelve a levantar sobre una base que ya servía antes de
+  este módulo: `locations` existía sin `zone_id`, `CREATE TABLE IF NOT EXISTS` no
+  añade columnas y el bloque de la clave foránea territorial abortaba el paso 3/6 con
+  `SQLSTATE 42703` en los tres reintentos. El DDL base declara ahora las tres columnas
+  territoriales de forma idempotente junto a la tabla, así que los índices y la clave
+  foránea se materializan en el mismo paso y la migración `007` solo confirma.
+- `CloudDeploySchemaParityTest` gana el caso 6: reproduce un `locations` anterior al
+  módulo, reaplica el DDL base y certifica columnas, índice y clave foránea antes de
+  la capa incremental, además de la convergencia final.
+
 ### Seguridad
 
 - El portal de la sede no recibe el nombre, código ni color de su zona operativa, ni
@@ -59,7 +71,7 @@ a un módulo funcional certificado por la batería global.
 
 ### Verificado
 
-- Batería global: 307 suites y 11.919 aserciones al 100 % en verde, con la guarda de
+- Batería global: 307 suites y 11.944 aserciones al 100 % en verde, con la guarda de
   coherencia documental activa y la base del arnés restaurada a semillas.
 - Canal `new_engine` contra PostgreSQL: esquema territorial, repositorio, servicio de
   aplicación, traslado de CPs, API de zonas, sugerencias, salvaguarda de frío y

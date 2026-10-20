@@ -60,6 +60,11 @@ declare(strict_types=1);
  *    such a column -- the opportunistic index did -- aborted the boot with
  *    SQLSTATE 42703 before the runner was reached. The probe reproduces that
  *    table, reapplies the base DDL and certifies that migrations complete it.
+ * 6. The same holds for **Módulo 17** (2026-10-20): a base that served before the
+ *    operational zoning shipped has `locations` without `zone_id`, and the base DDL
+ *    aborted the boot with SQLSTATE 42703 on the foreign key that references it. The
+ *    probe reproduces that table, reapplies the base DDL and certifies that the
+ *    columns, their indexes and the key exist **before** the incremental layer runs.
  *
  * ## Why a scratch schema and not a scratch database
  * The deployment target is a database whose owner is the application role, and
@@ -92,6 +97,7 @@ $probeSchema = 'vendguard_deploy_probe';
 $baseOnlySchema = 'vendguard_deploy_probe_base';
 $emptySchema = 'vendguard_deploy_probe_empty';
 $legacySchema = 'vendguard_deploy_probe_legacy';
+$zonesLegacySchema = 'vendguard_deploy_probe_zones_legacy';
 
 // El esquema probado: el que la batería usa de verdad. Es el rasero, no el sujeto.
 $yardstickSchema = 'public';
@@ -652,6 +658,7 @@ $probePdo = null;
 $baseOnlyPdo = null;
 $emptyPdo = null;
 $legacyPdo = null;
+$zonesLegacyPdo = null;
 
 try {
     // El rasero: el esquema contra el que corre toda la batería. No se toca.
@@ -673,7 +680,7 @@ try {
         'tablas: ' . count($yardstickTables) . ' (rasero; incluye el libro del ejecutor) · columnas: ' . $yardstickColumns
     );
 
-    foreach ([$probeSchema, $baseOnlySchema, $emptySchema, $legacySchema] as $scratchSchema) {
+    foreach ([$probeSchema, $baseOnlySchema, $emptySchema, $legacySchema, $zonesLegacySchema] as $scratchSchema) {
         $definitionsPdo->exec("DROP SCHEMA IF EXISTS {$scratchSchema} CASCADE");
         $definitionsPdo->exec("CREATE SCHEMA {$scratchSchema}");
     }
@@ -977,6 +984,83 @@ try {
         'La capa incremental completa la base anterior: columna e índice parcial presentes y convergencia declarada',
         'convergencia: ' . $legacyConvergenceFailure . ' · índice: ' . $legacyIndexDefinition
     );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Caso 6: el despliegue sobre una base anterior al Módulo 17
+    // ─────────────────────────────────────────────────────────────────────────
+    echo "\n--- Caso 6: el DDL base converge sobre una base anterior al Módulo 17 ---\n";
+
+    // 2026-10-20: el despliegue no levantó con «column "zone_id" referenced in foreign
+    // key constraint does not exist» (SQLSTATE 42703) en los tres intentos. Una base que
+    // ya servía antes del Módulo 17 tiene `locations` sin las columnas territoriales, y
+    // `CREATE TABLE IF NOT EXISTS` no las añade: el bloque de la clave foránea abortaba el
+    // paso 3/6 del arranque antes de que la migración `007` pudiera ejecutarse siquiera.
+    // Este caso reproduce esa tabla, reaplica el DDL base y exige que converja sin ayuda.
+    $zonesLegacyPdo = ConnectionFactory::getConnection([], true);
+    $zonesLegacyPdo->exec("SET search_path TO {$zonesLegacySchema}, public");
+    $applySqlFile($zonesLegacyPdo, $deployDdlFile);
+
+    // Se retiran las tres columnas del módulo (y, en cascada, su índice, su restricción
+    // de formato y su clave foránea) para dejar el `locations` anterior al módulo 17.
+    $zonesLegacyPdo->exec(
+        'ALTER TABLE locations '
+        . 'DROP COLUMN IF EXISTS zone_id, '
+        . 'DROP COLUMN IF EXISTS is_manual_override, '
+        . 'DROP COLUMN IF EXISTS postal_code CASCADE'
+    );
+
+    $assert(
+        !$columnExists($zonesLegacyPdo, $zonesLegacySchema, 'locations', 'zone_id'),
+        'La sonda reproduce una base anterior al Módulo 17, sin la columna territorial'
+    );
+
+    $zonesLegacyReapplyFailure = '';
+    try {
+        $applySqlFile($zonesLegacyPdo, $deployDdlFile);
+    } catch (Throwable $exception) {
+        $zonesLegacyReapplyFailure = $exception->getMessage();
+    }
+    $assert(
+        $zonesLegacyReapplyFailure === '',
+        'El DDL base converge sobre una base anterior al Módulo 17 sin abortar por la columna ausente (EARS-02.5)',
+        $zonesLegacyReapplyFailure
+    );
+
+    $zonesLegacyIndexDefinition = (string)$zonesLegacyPdo->query(
+        "SELECT indexdef FROM pg_indexes WHERE schemaname = '{$zonesLegacySchema}' AND indexname = 'idx_locations_zone_id'"
+    )->fetchColumn();
+    $zonesLegacyForeignKey = (int)$zonesLegacyPdo->query(
+        "SELECT COUNT(*) FROM pg_constraint c
+           JOIN pg_class t ON t.oid = c.conrelid
+           JOIN pg_namespace n ON n.oid = t.relnamespace
+          WHERE n.nspname = '{$zonesLegacySchema}' AND t.relname = 'locations'
+            AND c.conname = 'fk_locations_zone'"
+    )->fetchColumn();
+
+    $assert(
+        $columnExists($zonesLegacyPdo, $zonesLegacySchema, 'locations', 'zone_id')
+        && $columnExists($zonesLegacyPdo, $zonesLegacySchema, 'locations', 'is_manual_override')
+        && $columnExists($zonesLegacyPdo, $zonesLegacySchema, 'locations', 'postal_code')
+        && str_contains($zonesLegacyIndexDefinition, 'zone_id')
+        && $zonesLegacyForeignKey === 1,
+        'El DDL base por sí solo repone las columnas territoriales, su índice y la clave foránea',
+        'índice: ' . $zonesLegacyIndexDefinition . ' · claves foráneas: ' . $zonesLegacyForeignKey
+    );
+
+    $zonesLegacyRunner = new PostgresMigrationRunner($zonesLegacyPdo);
+    $zonesLegacyApplied = $zonesLegacyRunner->runAll();
+    $zonesLegacyConvergenceFailure = '';
+    try {
+        $zonesLegacyRunner->assertConverged();
+    } catch (Throwable $exception) {
+        $zonesLegacyConvergenceFailure = $exception->getMessage();
+    }
+    $assert(
+        $zonesLegacyConvergenceFailure === ''
+        && in_array('007_operational_zones.sql', array_map('basename', $zonesLegacyApplied), true),
+        'La capa incremental completa la base anterior y el arranque declara la convergencia (EARS-02.4)',
+        'convergencia: ' . $zonesLegacyConvergenceFailure
+    );
 } finally {
     // Las conexiones a las sondas se sueltan antes de borrarlas. El borrado va por una
     // conexion propia para no depender de la que quedó apuntando al esquema de sonda.
@@ -985,9 +1069,10 @@ try {
     $baseOnlyPdo = null;
     $emptyPdo = null;
     $legacyPdo = null;
+    $zonesLegacyPdo = null;
 
     if ($definitionsPdo instanceof PDO) {
-        foreach ([$probeSchema, $baseOnlySchema, $emptySchema, $legacySchema] as $scratchSchema) {
+        foreach ([$probeSchema, $baseOnlySchema, $emptySchema, $legacySchema, $zonesLegacySchema] as $scratchSchema) {
             $definitionsPdo->exec("DROP SCHEMA IF EXISTS {$scratchSchema} CASCADE");
         }
     }
