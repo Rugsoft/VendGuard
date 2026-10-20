@@ -141,17 +141,24 @@
   * **Hecho cuando:** Están registradas y protegidas con `InternalAuthMiddleware(COORDINATOR)` las rutas `GET /api/coordinator/zones`, `POST /api/coordinator/zones`, `GET /api/coordinator/zones/{id}`, `PUT /api/coordinator/zones/{id}`, `POST /api/coordinator/zones/{id}/postal-codes`, `POST /api/coordinator/zones/{id}/technicians`, `DELETE /api/coordinator/zones/{id}/technicians/{tech_id}` y `POST /api/coordinator/locations/{id}/override-zone`; y `php tests/integration/CoordinatorZoneApiTest.php` pasa al 100% en verde verificando todos los códigos HTTP (`200`, `201`, `400`, `404`, `409`).
   * **Verificación:** `source deploy/local/postgres/.env.local && php tests/integration/CoordinatorZoneApiTest.php` → **37/37**, exit 0 (incluye `401`, `403`, `201`, `409` de código/nombre duplicado y `422` de liberación). La batería global sigue en 305 suites · 11.827 aserciones (la suite declara categoría `new_engine` y no altera las cifras herméticas).
 
-- [ ] **T-ZONE-10 · Implementar endpoint de sugerencias, validación constitucional $\ge 20$ chars en `/assign` y suites de integración**
+- [x] **T-ZONE-10 · Implementar endpoint de sugerencias, validación constitucional $\ge 20$ chars en `/assign` y suites de integración**
   * **Tiempo estimado:** 30 min
   * **Dependencias:** `T-ZONE-08`, `T-ZONE-09`
   * **Ficheros a crear o modificar:**
-    * `src/Presentation/Controller/CoordinatorController.php` *(modificar: `assignTechnician` en `PATCH` con `override_justification`)*
-    * `src/Presentation/Controller/LocationPortalController.php` *(modificar)*
-    * `specs/technical/api_contracts.md` *(modificar: endpoints y códigos de error del módulo)*
+    * `src/Presentation/Controller/CoordinatorController.php` *(modificar: `getSuggestedTechnicians`, `assignTechnician` en `PATCH` con `override_justification`)*
+    * `src/Presentation/Routing/AppRouter.php` *(modificar: ruta `GET /api/coordinator/incidents/{id}/suggested-technicians` con `InternalAuthMiddleware(COORDINATOR)`)*
+    * `src/Presentation/Controller/LocationPortalController.php` *(modificar: ocultación de zona, excepción manual y afinidad en `sanitizeIncidentForSite`)*
+    * `src/Core/Domain/Repository/TechnicianSuggestionRepositoryInterface.php` *(crear: puerto de lectura de la foto operativa; no amplía los puertos de usuario ni de incidencia, cuyos dobles de prueba se mantienen intactos)*
+    * `src/Infrastructure/Repository/PdoTechnicianSuggestionRepository.php` *(crear: cinco consultas fijas, independientes del número de técnicos)*
+    * `src/Application/Service/SuggestedTechniciansService.php` *(crear: composición de foto + motor; única fuente del ranking para el panel y para la salvaguarda)*
+    * `src/Core/Service/ColdChainOverridePolicy.php` *(crear: regla pura del Art. V.1 y umbral de 20 caracteres reales)*
+    * `specs/technical/api_contracts.md` *(modificar: apartado 4.2.1, campo `override_justification` y códigos de error del módulo)*
     * `tests/integration/SuggestedTechniciansApiTest.php` *(crear)*
     * `tests/integration/ColdChainOverrideJustificationTest.php` *(crear)*
+    * `tests/integration/SiteZonePrivacyTest.php` *(crear: certifica el Art. V.4 en la superficie de sede)*
   * **Requisitos que cubre:** `RF-04.1`, `RF-05.1`, `RF-05.2`, `RF-07.1`, `RNF-01`, Resolución QA 1, `constitution.md` Art. II, Art. V.1 y Art. V.4
   * **Hecho cuando:** (1) `GET /api/coordinator/incidents/{id}/suggested-technicians` devuelve el ranking desglosado con mediana $< 100\text{ ms}$ sobre 20 repeticiones; (2) `PATCH /api/coordinator/incidents/{id}/assign` rechaza con `422 COLD_CHAIN_OVERRIDE_JUSTIFICATION_REQUIRED` si se descarta al técnico de guardia sugerido ante riesgo de frío con `override_justification` de menos de 20 caracteres, y acepta con $\ge 20$ caracteres registrando `INCIDENT_ASSIGNMENT_SUGGESTION_OVERRIDDEN` en `audit_log`, sin romper el `reassignment_reason` que ya envía el cliente; (3) `LocationPortalController` sanitiza y oculta cualquier campo de zona ante la sede (Art. V.4); y `php tests/integration/SuggestedTechniciansApiTest.php` y `php tests/integration/ColdChainOverrideJustificationTest.php` pasan al 100% en verde.
+  * **Verificación ejecutada (2026-10-20):** `php tests/integration/SuggestedTechniciansApiTest.php` → **23/23**, exit 0, con la mediana de 20 repeticiones reales **11,24 ms** (mín. 9,06 · máx. 14,45) y orden idéntico en las veinte; `php tests/integration/ColdChainOverrideJustificationTest.php` → **15/15**, exit 0; `php tests/integration/SiteZonePrivacyTest.php` → **8/8**, exit 0. Las tres suites declaran categoría `new_engine` y no alteran las cifras herméticas de la batería.
 
 ---
 

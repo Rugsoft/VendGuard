@@ -453,6 +453,7 @@ Asocia un técnico de campo único a la incidencia y, desde el modal de detalle 
   * `technician_id` (int, obligatorio): ID de un técnico de ruta activo con rol `TECHNICIAN`.
   * `urgency_override` / `urgency_override_reason` (string, opcionales): reclasificación de urgencia con motivo obligatorio cuando se envía la nueva clasificación.
   * `reassignment_reason` (string, obligatorio en la reasignación): motivo justificado de **10 caracteres reales** mínimo tras recortar espacios. Se admite también el alias `reason`.
+  * `override_justification` (string, obligatorio **solo** al descartar la recomendación sanitaria): justificación de **20 caracteres reales** mínimo tras recortar espacios (Art. II y V.1, RF-05.2, Resolución QA 8). Se exige cuando la avería presenta riesgo de cadena de frío, el escalado sanitario está activo y el técnico asignado es distinto del primer puesto del ranking —el técnico de guardia sugerido—. Convive con `reassignment_reason` sin sustituirlo: uno razona el descarte sanitario y el otro el cambio de titular.
 * **Estados admitidos:** asignación inicial desde `REGISTERED` y `REOPENED`; reasignación desde `ASSIGNED`, `IN_PROGRESS` y `PENDING_PARTS`. La reasignación conserva el estado operativo y el hito `assigned_at` original (el instante del cambio queda fechado en el historial inmutable) y mantiene un único técnico responsable activo por incidencia.
 * **Respuesta Exitosa (`200 OK`):**
 ```json
@@ -478,9 +479,82 @@ Asocia un técnico de campo único a la incidencia y, desde el modal de detalle 
   * `422 Unprocessable` (`MISSING_REASSIGNMENT_REASON`): reasignación sin `reassignment_reason`.
   * `422 Unprocessable` (`REASSIGNMENT_REASON_TOO_SHORT`): el motivo de la reasignación no alcanza los 10 caracteres reales.
   * `422 Unprocessable` (`TECHNICIAN_ALREADY_ASSIGNED`): el destino es el responsable actual del aviso.
+  * `422 Unprocessable` (`COLD_CHAIN_OVERRIDE_JUSTIFICATION_REQUIRED`): la avería presenta riesgo de frío, el escalado sanitario está activo y el técnico elegido no es el sugerido, sin `override_justification` de al menos 20 caracteres reales (Art. II y Art. V.1, Resolución QA 8). La comprobación es Fail-Fast: ocurre antes de abrir la transacción, de modo que el rechazo no escribe ni el cambio de responsable ni el rastro de salvaguarda.
   * `500 Server Error` (`ASSIGNMENT_FAILED`): fallo inesperado durante la asignación transaccional.
 * **Trazabilidad:** la acción deja un registro inmutable en `incident_history` con el actor, los estados de origen y destino y el motivo. La nota de reasignación reserva su texto final tras el marcador `Motivo: `, del que el servicio de detalle lee `technician.reassignment_reason` (apartado 4.4).
-* **Auditoría (RNF-04, Art. III.3):** la asignación inicial emite `INCIDENT_ASSIGNED` y la reasignación `INCIDENT_REASSIGNED` en `audit_log` con `entity_type = TICKET`, el coordinador autenticado como causante y el detalle en `new_state` (`status`, `assigned_technician_id` y, en la reasignación, `reassignment_reason`); `metadata` registra `previous_technician_id` y `new_technician_id` en la reasignación.
+* **Auditoría (RNF-04, Art. III.3):** la asignación inicial emite `INCIDENT_ASSIGNED` y la reasignación `INCIDENT_REASSIGNED` en `audit_log` con `entity_type = TICKET`, el coordinador autenticado como causante y el detalle en `new_state` (`status`, `assigned_technician_id` y, en la reasignación, `reassignment_reason`); `metadata` registra `previous_technician_id` y `new_technician_id` en la reasignación. Cuando la asignación descarta la recomendación sanitaria, se añade un segundo evento **`INCIDENT_ASSIGNMENT_SUGGESTION_OVERRIDDEN`** (T-ZONE-10, contrato del módulo §5.1) con el técnico sugerido en `previous_state.suggested_technician_id`, el enviado en `new_state.assigned_technician_id` y la `override_justification` íntegra; es un hecho distinto del cambio de responsable a propósito, para que el visor de auditoría pueda filtrar la salvaguarda del Art. V.1.
+* **Privacidad (Art. V.4):** la respuesta es exclusiva de Coordinación; el portal de sede nunca recibe zonas, cuadrantes ni marcas de excepción manual.
+
+---
+
+### 4.2.1 `GET /api/coordinator/incidents/{id}/suggested-technicians` (Recomendador de Idoneidad)
+Publica el ranking explicado del despacho asistido (RF-04.1, RF-05.1, RNF-01) tal y como lo calcula `TechnicianAssignmentSuggester`: la avería con su sede y su zona, la recomendación con su explicación y el desglose exacto de la puntuación de cada candidato. El panel de triaje no recalcula nada y el orden publicado es el mismo que evalúa la puerta constitucional de `/assign`.
+
+* **Autenticación:** Token interno con rol `COORDINATOR` (`401 Unauthorized` sin token o con token inválido; `403 Forbidden` con otro rol).
+* **Identificador:** admite el ID primario (entero positivo) o el código de ticket (`INC-2026-0001`, con `#` opcional), igual que la ficha integral (apartado 4.4).
+* **Respuesta Exitosa (`200 OK`):**
+```json
+{
+  "success": true,
+  "data": {
+    "incident": {
+      "id": 1042,
+      "ticket_code": "INC-20261020-0012",
+      "priority": "CRITICAL",
+      "is_cold_chain_risk": true,
+      "location": {
+        "id": 4,
+        "site_code": "SEDE-BCN-01",
+        "name": "Hospital del Mar",
+        "postal_code": "08005",
+        "zone_id": 1,
+        "zone_name": "Barcelona Litoral y Norte",
+        "latitude": 41.385,
+        "longitude": 2.196
+      }
+    },
+    "recommendation": {
+      "top_technician_id": 7,
+      "is_cold_chain_escalation": true,
+      "unattended_zone": false,
+      "explanation": "🚨 Prioridad Sanitaria Art. II: ningún titular activo de la zona está libre de paradas previas; se antepone al técnico de guardia 24/7 Marta Guardia para asegurar el SLA < 4 h."
+    },
+    "ranked_technicians": [
+      {
+        "technician_id": 7,
+        "name": "Marta Guardia",
+        "operator_code": "OP-774",
+        "is_on_call": true,
+        "affinity_type": "NONE",
+        "zone_affinity_label": "Sin zona asignada",
+        "total_score": 80,
+        "score_breakdown": {
+          "territorial_affinity": 0,
+          "onsite_presence": 0,
+          "same_zone_stops": 0,
+          "active_workload_penalty": -5,
+          "inter_location_penalty": -15,
+          "cold_chain_on_call_bonus": 100
+        },
+        "active_workload": { "active_tickets_count": 1, "pending_info_count": 0, "preventive_orders_count": 0 },
+        "current_status": { "has_in_progress_stop": true, "in_progress_location_name": "Sede Sur", "distance_km": 2.78 },
+        "is_top_suggestion": true,
+        "badges": ["RECOMENDADO", "GUARDIA_24_7", "EN_CURSO_OTRA_SEDE"]
+      }
+    ]
+  }
+}
+```
+* **Reglas de contenido:**
+  * `ranked_technicians` sólo incluye usuarios con rol `TECHNICIAN`, activos y no borrados (RF-04.1.5, RF-02.2); un técnico de baja no se puede enviar.
+  * `recommendation.top_technician_id` coincide siempre con `ranked_technicians[0].technician_id` (identidad contable).
+  * El orden de decisión es el del contrato del módulo §4: escalado sanitario del Art. II → zona desatendida (Haversine) → puntuación → mayor tiempo sin asignación formal → menor ID. `distance_km` se mide desde la parada en curso, la última resuelta del día o la Base Central (QA 5); una coordenada inválida computa `999.0` km.
+  * `score_breakdown` publica exactamente las seis claves del contrato; `total_score` es su suma, sin segunda fórmula.
+  * `is_cold_chain_risk` se deriva de `priority = CRITICAL` o de máquina `PERISHABLE_FOOD`/`COMBO`.
+* **Errores:** `400 INVALID_INCIDENT_IDENTIFIER` si el identificador no es válido; `401 UNAUTHORIZED` / `403 FORBIDDEN`; `404 INCIDENT_NOT_FOUND` si el expediente no existe o está borrado lógicamente.
+* **Privacidad (Art. V.4):** el bloque de sede publica `zone_id` y `zone_name` **sólo** a Coordinación; el portal de sede no consume este endpoint.
+* **Rendimiento (RNF-01):** la foto se compone en cinco consultas fijas, independientes del número de técnicos, y el ranking es determinista: veinte repeticiones sobre el mismo estado devuelven el mismo orden con mediana por debajo de 100 ms (medida en `SuggestedTechniciansApiTest`).
+
 
 ---
 

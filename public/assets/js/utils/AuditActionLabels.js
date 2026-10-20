@@ -70,6 +70,7 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
 export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'INCIDENT_ASSIGNED', label: 'Asignación de Técnico', tone: 'purple', group: 'ticket' },
   { code: 'INCIDENT_REASSIGNED', label: 'Reasignación de Técnico', tone: 'purple', group: 'ticket' },
+  { code: 'INCIDENT_ASSIGNMENT_SUGGESTION_OVERRIDDEN', label: 'Descarte de Sugerencia Sanitaria', tone: 'danger', group: 'ticket' },
   { code: 'INCIDENT_CANCELLED', label: 'Cancelación de Avería', tone: 'danger', group: 'ticket' },
   { code: 'INCIDENT_COMMENT_ADDED', label: 'Comentario en el Hilo', tone: 'info', group: 'ticket' },
   { code: 'REOPEN_TICKET', label: 'Reapertura de Ticket', tone: 'warning', group: 'ticket' },

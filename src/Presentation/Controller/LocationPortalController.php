@@ -1440,6 +1440,20 @@ class LocationPortalController
             'technician_phone',
             'internal_notes',
             'notes_taller',
+            // Art. V.4 / Módulo 17: la sede no ve la demarcación territorial ni su
+            // cuadrante. La zona es un dato interno de planificación (RF-07.1) y la
+            // excepción manual revela una decisión de coordinación sobre su centro.
+            'zone_id',
+            'zone_name',
+            'zone_code',
+            'zone_color_hex',
+            'zone_description',
+            'zone_is_active',
+            'operational_zone_id',
+            'zone_affinity_type',
+            'zone_affinity_label',
+            'technician_zone',
+            'is_manual_override',
         ];
 
         foreach ($forbiddenExactKeys as $key) {
@@ -1461,6 +1475,14 @@ class LocationPortalController
         foreach ($data as $key => $value) {
             if (is_string($key)) {
                 if (preg_match('/(spare_part|replaced_part|part_code|unit_cost|total_cost|cost_snapshot|reference_cost|old_part_dest)/i', $key)) {
+                    unset($data[$key]);
+                    continue;
+                }
+
+                // Cualquier clave territorial, también las anidadas (`location.zone_id`,
+                // `zone_affinity.*`): el filtro por nombre evita que un bloque nuevo del
+                // contrato abra una fuga por olvido de la lista exacta.
+                if (preg_match('/(^|_)(zone|zona)($|_)|operational_zone|zone_affinity|is_manual_override/i', $key)) {
                     unset($data[$key]);
                     continue;
                 }

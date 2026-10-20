@@ -10,6 +10,7 @@ use VendGuard\Application\Service\CoordinatorIncidentDetailService;
 use VendGuard\Application\Service\IncidentCommentService;
 use VendGuard\Application\Service\IncidentPauseService;
 use VendGuard\Application\Service\NotificationOutboxEnqueuerService;
+use VendGuard\Application\Service\SuggestedTechniciansService;
 use VendGuard\Core\Domain\Exception\ConversationSealedException;
 use VendGuard\Core\Domain\Exception\InactivityThresholdNotReachedException;
 use VendGuard\Core\Domain\Exception\InvalidCommentLengthException;
@@ -23,6 +24,7 @@ use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
+use VendGuard\Core\Service\ColdChainOverridePolicy;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
@@ -87,6 +89,12 @@ class CoordinatorController
     /** Transaccionalidad compensatoria del fichero (EARS-05.3); se resuelve bajo demanda. */
     private ?FileStorageCompensator $fileCompensator;
 
+    /** Recomendador de asignación (Módulo 17); se resuelve bajo demanda para no abrir conexión al construir. */
+    private ?SuggestedTechniciansService $suggestionService;
+
+    /** Política del Art. V.1: cuándo el descarte sanitario exige justificación. */
+    private ?ColdChainOverridePolicy $coldChainPolicy;
+
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?UserRepositoryInterface $userRepo = null,
@@ -99,7 +107,9 @@ class CoordinatorController
         ?IncidentPauseService $pauseService = null,
         ?FileStorageCompensator $fileCompensator = null,
         ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
-        ?TransactionManagerInterface $transactionManager = null
+        ?TransactionManagerInterface $transactionManager = null,
+        ?SuggestedTechniciansService $suggestionService = null,
+        ?ColdChainOverridePolicy $coldChainPolicy = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->userRepo = $userRepo ?? new PdoUserRepository();
@@ -123,6 +133,25 @@ class CoordinatorController
         $this->pauseService = $pauseService;
         $this->notificationEnqueuer = $notificationEnqueuer;
         $this->transactionManager = $transactionManager;
+        $this->suggestionService = $suggestionService;
+        $this->coldChainPolicy = $coldChainPolicy;
+    }
+
+    /**
+     * Recomendador de asignación, resuelto bajo demanda (abre conexión al instanciarse).
+     *
+     * El mismo objeto sirve al panel de triaje y a la puerta constitucional de la
+     * asignación: si cada uno compusiera su propio ranking, panel y salvaguarda podrían
+     * discrepar sobre quién es el técnico de guardia sugerido.
+     */
+    private function suggestions(): SuggestedTechniciansService
+    {
+        return $this->suggestionService ??= new SuggestedTechniciansService();
+    }
+
+    private function coldChainPolicy(): ColdChainOverridePolicy
+    {
+        return $this->coldChainPolicy ??= new ColdChainOverridePolicy();
     }
 
     private function notifications(): ?NotificationOutboxEnqueuerService
@@ -407,7 +436,10 @@ class CoordinatorController
      * TECHNICIAN; 422 `INVALID_STATUS_FOR_ASSIGNMENT` si el estado no admite la acción;
      * 422 `MISSING_REASSIGNMENT_REASON` o `REASSIGNMENT_REASON_TOO_SHORT` cuando la
      * reasignación carece de motivo válido; 422 `TECHNICIAN_ALREADY_ASSIGNED` si el
-     * destino es el responsable actual; 500 `ASSIGNMENT_FAILED` ante un fallo inesperado.
+     * destino es el responsable actual; 422 `COLD_CHAIN_OVERRIDE_JUSTIFICATION_REQUIRED`
+     * si una avería de frío descarta al técnico de guardia sugerido sin justificación de
+     * 20 caracteres reales (Art. II y Art. V.1); 500 `ASSIGNMENT_FAILED` ante un fallo
+     * inesperado.
      */
     public function assignTechnician(Request $request): Response
     {
@@ -494,6 +526,31 @@ class CoordinatorController
             }
         }
 
+        // 7.bis Puerta constitucional de la cadena de frío (Art. II y Art. V.1, RF-05.2,
+        //        Resolución QA 8). Se compone el ranking sólo cuando la avería puede ser
+        //        sanitaria: un despacho ordinario no paga la lectura agregada y el camino
+        //        de asignación sigue funcionando sin recomendador.
+        $overrideJustification = null;
+        $overriddenSuggestionId = null;
+        if ($this->isPotentialColdChainRisk($incident)) {
+            $suggestions = $this->suggestions()->getSuggestions($incidentId);
+            if ($suggestions !== null) {
+                $suggestionPayload = $suggestions->toArray();
+                if ($this->coldChainPolicy()->requiresOverride($suggestionPayload, $technicianId)) {
+                    $rawJustification = $body['override_justification'] ?? null;
+                    if (!$this->coldChainPolicy()->isValidJustification($rawJustification)) {
+                        return Response::error(
+                            'COLD_CHAIN_OVERRIDE_JUSTIFICATION_REQUIRED',
+                            'La avería presenta riesgo crítico de frío (Art. II). Si descarta al técnico de guardia sugerido, debe aportar una justificación obligatoria de al menos 20 caracteres.',
+                            422
+                        );
+                    }
+                    $overrideJustification = $this->coldChainPolicy()->normalize($rawJustification);
+                    $overriddenSuggestionId = $suggestionPayload['recommendation']['top_technician_id'] ?? null;
+                }
+            }
+        }
+
         // 8. ID del coordinador autenticado (para auditoría)
         $coordinatorId = $request->getAttribute('user_id');
 
@@ -555,6 +612,32 @@ class CoordinatorController
                 : null
         );
 
+        // 10.bis El descarte de la recomendación sanitaria deja su propio rastro inmutable
+        //        (Art. III.3, contrato §5.1): quién se sugería, a quién se envió y la
+        //        justificación del coordinador. Es un evento distinto del cambio de
+        //        responsable a propósito: `INCIDENT_ASSIGNED`/`INCIDENT_REASSIGNED` ya
+        //        existe y el visor debe poder filtrar la salvaguarda del Art. V.1.
+        if ($overrideJustification !== null) {
+            $this->auditLogger->logTicketEvent(
+                ticketId: $incidentId,
+                action: 'INCIDENT_ASSIGNMENT_SUGGESTION_OVERRIDDEN',
+                user: $actor,
+                previousState: [
+                    'suggested_technician_id' => $overriddenSuggestionId,
+                    'is_cold_chain_escalation' => true,
+                ],
+                newState: [
+                    'status' => $assigned->getStatus()->value,
+                    'assigned_technician_id' => $assigned->getAssignedTechnicianId(),
+                    'override_justification' => $overrideJustification,
+                ],
+                metadata: [
+                    'suggested_technician_id' => $overriddenSuggestionId,
+                    'new_technician_id' => $technicianId,
+                ]
+            );
+        }
+
         // 11. Respuesta exitosa con datos esenciales de la incidencia asignada (contrato 4.2)
         return Response::json([
             'id'                     => $assigned->getId(),
@@ -562,6 +645,59 @@ class CoordinatorController
             'assigned_technician_id' => $assigned->getAssignedTechnicianId(),
             'assigned_at'            => $assigned->getAssignedAt(),
         ], 200);
+    }
+
+    /**
+     * GET /api/coordinator/incidents/{id}/suggested-technicians
+     *
+     * Ranking explicado de técnicos para el despacho asistido (contrato §3.6, RF-04.1,
+     * RF-05.1, RNF-01). Publica la avería con su zona, la recomendación con su
+     * explicación y el desglose exacto de la puntuación de cada candidato, de modo que
+     * el panel de triaje no recalcule nada y el orden que ve el coordinador sea el que
+     * la puerta constitucional de la asignación evalúa.
+     *
+     * El identificador admite el ID primario o el código de ticket, igual que la ficha
+     * integral: el panel puede pedir la sugerencia con el mismo dato que ya tiene.
+     *
+     * Respuestas: 200 OK con los tres bloques del contrato; 400 si el identificador no
+     * es válido; 401/403 si la petición no procede de un coordinador autenticado (defensa
+     * en profundidad además del middleware); 404 si el expediente no existe.
+     */
+    public function getSuggestedTechnicians(Request $request): Response
+    {
+        $authFailure = $this->authorizeCoordinator($request);
+        if ($authFailure !== null) {
+            return $authFailure;
+        }
+
+        $rawIdentifier = trim((string)($request->getRouteParam('id') ?? ''));
+        $identifier = $this->resolveIncidentIdentifier($rawIdentifier);
+        if ($identifier === null) {
+            return Response::error(
+                'INVALID_INCIDENT_IDENTIFIER',
+                'El identificador de la incidencia no es válido. Se admite un ID numérico positivo o un código de ticket (ej: INC-2026-0001).',
+                400
+            );
+        }
+
+        // El recomendador trabaja con el ID primario: un código de ticket se resuelve
+        // aquí y no en el repositorio de lectura, que no necesita conocer dos claves.
+        $incidentId = is_int($identifier) ? $identifier : null;
+        if ($incidentId === null) {
+            $incident = $this->incidentRepo->findByTicketCode($identifier);
+            $incidentId = $incident?->getId();
+        }
+
+        $suggestions = $incidentId !== null ? $this->suggestions()->getSuggestions($incidentId) : null;
+        if ($suggestions === null) {
+            return Response::error(
+                'INCIDENT_NOT_FOUND',
+                "No se encontró ninguna incidencia con identificador '{$rawIdentifier}'.",
+                404
+            );
+        }
+
+        return Response::json($suggestions->toArray(), 200);
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -1248,6 +1384,21 @@ class CoordinatorController
      * es defensa en profundidad para que el controlador no dependa jamás de cómo fue
      * montado y nunca lea un expediente para un actor no autorizado (Art. V.4).
      */
+    /**
+     * ¿La avería puede activar la vigilancia de cadena de frío del Art. II?
+     *
+     * Guarda **barata** (sin consultas): el ranking agregado sólo se compone cuando la
+     * respuesta puede ser «sí». La derivación es la misma que usan el recomendador y la
+     * política del Art. V.1, no una segunda regla escrita aquí.
+     */
+    private function isPotentialColdChainRisk(Incident $incident): bool
+    {
+        return ColdChainOverridePolicy::deriveColdChainRisk(
+            $incident->getUrgency()->value,
+            $incident->getMachineType()
+        );
+    }
+
     private function authorizeCoordinator(Request $request): ?Response
     {
         $userId = $request->getAttribute('user_id');

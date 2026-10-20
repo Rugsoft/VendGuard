@@ -116,6 +116,10 @@ class AppRouter
         $router->get('/api/coordinator/route/settings', [CoordinatorRouteMapController::class, 'getRouteSettings'], [$coordinatorAuth]);
         $router->put('/api/coordinator/route/settings', [CoordinatorRouteMapController::class, 'updateRouteSettings'], [$coordinatorAuth]);
         $router->get('/api/coordinator/incidents', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getIncidents'], [$coordinatorAuth]);
+        // Recomendador de idoneidad (Módulo 17, T-ZONE-10): ranking explicado del
+        // despacho asistido. Comparte puerta con la asignación, porque el panel y la
+        // salvaguarda del Art. V.1 deben evaluar el mismo ranking.
+        $router->get('/api/coordinator/incidents/{id}/suggested-technicians', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getSuggestedTechnicians'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/incidents/{id}/assign', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'assignTechnician'], [$coordinatorAuth]);
         $router->patch('/api/coordinator/incidents/{id}/cancel', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'cancelIncident'], [$coordinatorAuth]);
         // Pausa por bloqueo de sede, reanudación manual y cancelación por inactividad
