@@ -101,3 +101,16 @@ T-VAN-02 ─┼─> T-VAN-04 ─> T-VAN-05 ─> T-VAN-06 ─┬─> T-VAN-07
 T-VAN-03 ─┘                                     ├─> T-VAN-08 ─┐
                                                 └─> T-VAN-09 ─┴─> T-VAN-10 ─> T-VAN-11
 ```
+
+---
+
+## Bitácora de ejecución
+
+### WU-1 · T-VAN-01 (esquema) — cerrado
+* **Commit:** `feat(van-stock): add the technician van stock schema with its guards`
+* **Rojo observado:** `PostgresVanStockSchemaTest` 3 fallos — relación `technician_van_stocks` inexistente (`42P01`).
+* **Verde:** suite nueva 18/18 · `SchemaConvergenceParityTest` 18/18 · `PostgresSchemaTest` 83/83 · `PostgresConstitutionalTest` 63/63 · `TestDataCleanerIsolationTest` 50/50 · batería completa 307 suites / 11 985 aserciones / 0 fallos, cifras documentadas coherentes.
+* **Canal `new_engine`:** el DDL base y la migración `009` se aplican en un esquema aislado y convergen; la base de la batería se reprovisionó con DDL base + `009` + semillas (`VAN_STOCK_ROWS=5`).
+* **Desvío corregido dentro de la rebanada:** el enumerado `audit_entity_type` ganó `TECHNICIAN_VAN_STOCK`, así que `AuditEvent::ENTITY_TYPES` y la etiqueta del visor (`AuditActionLabels.js`) debían incorporarlo en el mismo commit: `AuditEntityTypesTest` y `AuditActionCatalogTest` exigen que el catálogo del dominio y el del visor no divergan del enumerado de la base.
+* **Recuento de esquema:** 26 tablas · 39 disparadores · 40 restricciones nombradas · 14 `CHECK` · 41 claves foráneas · 63 índices secundarios.
+* **Riesgo:** `none` — todo es aditivo: tabla nueva, valor de enumerado nuevo y semillas nuevas; ninguna fila ni columna existente cambia de forma o de significado.

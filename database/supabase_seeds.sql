@@ -56,6 +56,7 @@
 --   | operational_zones          | `code` (única)                      | ninguno: se inserta solo si no existe (Módulo 17)                                            |
 --   | operational_zone_postal_codes | `postal_code` (clave primaria)    | ninguno: se inserta solo si no existe; el CP es único en todo el catálogo (QA 7)             |
 --   | technician_zone_assignments | `(technician_id, zone_id)` vivo     | ninguno: se inserta solo si no existe (la baja es lógica, QA 10)                              |
+--   | technician_van_stocks      | `(technician_id, spare_part_id)`    | ninguno: se inserta solo si no existe (Módulo 18)                                            |
 --
 --   Dos consecuencias buscadas de esa regla:
 --     1. Reejecutarlo no duplica nada y deja el catálogo igual: el arranque del
@@ -463,8 +464,37 @@ UPDATE locations l
 
 
 -- =============================================================================
+-- SECCIÓN 13 · technician_van_stocks — el saldo demo de las furgonetas (Módulo 18)
+-- =============================================================================
+-- Cinco saldos repartidos entre tres técnicos, resueltos por la clave canónica del
+-- usuario (`email_key`) y por el código del repuesto. Se incluyen a propósito un
+-- saldo justo en el umbral (JUNT-TOR-01: 1 ≤ 2) y un descuadre negativo
+-- (TELEC-NAYAX-01: -1): la alerta y la cantidad negativa tienen que ser
+-- demostrables en el entorno sembrado, no solo dentro de una prueba. Ninguna fila
+-- lleva coste: el coste del repuesto se congela en la avería (RD-05).
+
+INSERT INTO technician_van_stocks (technician_id, spare_part_id, quantity_available, min_threshold)
+SELECT u.id, sp.id, v.quantity_available, v.min_threshold
+FROM (VALUES
+    ('jordi.ruta@vendguard.internal',  'VALV-ULKA-01',     4, 2),
+    ('jordi.ruta@vendguard.internal',  'JUNT-TOR-01',      1, 2),
+    ('marta.ruta@vendguard.internal',  'BOMB-VIB-02',      3, 1),
+    ('marta.ruta@vendguard.internal',  'TELEC-NAYAX-01',  -1, 0),
+    ('carlos.ruta@vendguard.internal', 'SOND-NTC-01',      2, 2)
+) AS v(email, part_code, quantity_available, min_threshold)
+JOIN users u ON u.email_key = v.email
+JOIN spare_parts sp ON sp.part_code = v.part_code
+WHERE NOT EXISTS (
+    SELECT 1 FROM technician_van_stocks vs
+     WHERE vs.technician_id = u.id
+       AND vs.spare_part_id = sp.id
+);
+
+
+-- =============================================================================
 -- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
---       de cuadrante · 1 configuración de ruta · 13 máquinas · 6 usuarios internos ·
---       5 frecuencias normativas · 13 repuestos · 50 compatibilidades · 1 canal emergencias.
+--       de cuadrante · 5 saldos de stock de furgoneta · 1 configuración de ruta ·
+--       13 máquinas · 6 usuarios internos · 5 frecuencias normativas · 13 repuestos ·
+--       50 compatibilidades · 1 canal emergencias.
 --       0 incidencias · 0 histórico · 0 auditoría (arranque en limpio estricto).
 -- =============================================================================

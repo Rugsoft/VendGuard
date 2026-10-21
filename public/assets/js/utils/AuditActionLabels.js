@@ -61,7 +61,10 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   // corto respecto al enumerado `audit_entity_type` o el filtro del visor
   // perdería filas reales del historial territorial.
   OPERATIONAL_ZONE: 'Zona Operativa',
-  TECHNICIAN_ZONE: 'Cuadrante Técnico'
+  TECHNICIAN_ZONE: 'Cuadrante Técnico',
+  // Entidad del Módulo 18: el saldo de la furgoneta se audita con tipo propio, y
+  // el visor necesita su etiqueta o el filtro perdería esas filas del historial.
+  TECHNICIAN_VAN_STOCK: 'Stock de Furgoneta'
 });
 
 /**

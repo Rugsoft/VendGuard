@@ -86,10 +86,10 @@ CREATE TABLE IF NOT EXISTS technician_van_stocks (
         REFERENCES spare_parts (id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_van_stock_technician
+CREATE INDEX IF NOT EXISTS idx_technician_van_stocks_technician_id
     ON technician_van_stocks (technician_id);
 
-CREATE INDEX IF NOT EXISTS idx_van_stock_spare_part
+CREATE INDEX IF NOT EXISTS idx_technician_van_stocks_spare_part_id
     ON technician_van_stocks (spare_part_id);
 
 CREATE OR REPLACE TRIGGER trg_no_delete_technician_van_stocks
