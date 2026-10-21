@@ -239,6 +239,10 @@ class AppRouter
         $router->get('/api/coordinator/spare-parts/{id}', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'getPart'], [$coordinatorAuth]);
         $router->delete('/api/coordinator/spare-parts/{id}', [\VendGuard\Presentation\Controller\CoordinatorSparePartsController::class, 'deletePart'], [$coordinatorAuth]);
 
+        // Stock de repuestos de las furgonetas (Módulo 18, RF-03 / RF-04.2)
+        $router->get('/api/coordinator/van-stocks', [\VendGuard\Presentation\Controller\CoordinatorVanStockController::class, 'getInventory'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/van-stocks', [\VendGuard\Presentation\Controller\CoordinatorVanStockController::class, 'upsertStock'], [$coordinatorAuth]);
+
         // -----------------------------------------------------------------
         // 5. Módulo de Técnico de Campo / "Mi Ruta" (T-28, T-29)
         // -----------------------------------------------------------------
@@ -286,6 +290,9 @@ class AppRouter
 
         // Gestión de Repuestos y Trazabilidad en Movilidad (Módulo 06: Técnico - T-SPARE-11, T-SPARE-13)
         $router->get('/api/technician/spare-parts/catalog', [\VendGuard\Presentation\Controller\TechnicianSparePartsController::class, 'getCatalog'], [$technicianAuth]);
+
+        // Inventario de la furgoneta del propio técnico (Módulo 18, RF-04.1 / RF-04.3)
+        $router->get('/api/technician/van-stock', [\VendGuard\Presentation\Controller\TechnicianVanStockController::class, 'getInventory'], [$technicianAuth]);
 
         // -----------------------------------------------------------------
         // 6. Módulo de Automatización y Tareas Cron (T-30)

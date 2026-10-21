@@ -57,6 +57,14 @@ final class ThrowingVanStockRepository implements \VendGuard\Core\Domain\Reposit
     /**
      * {@inheritDoc}
      */
+    public function listInventory(?int $technicianId = null): array
+    {
+        return [];
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function listBelowThreshold(?int $technicianId = null): array
     {
         return [];

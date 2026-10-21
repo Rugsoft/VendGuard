@@ -70,6 +70,14 @@ final class RecordingVanStockRepository implements \VendGuard\Core\Domain\Reposi
     /**
      * {@inheritDoc}
      */
+    public function listInventory(?int $technicianId = null): array
+    {
+        return [];
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function listBelowThreshold(?int $technicianId = null): array
     {
         return [];

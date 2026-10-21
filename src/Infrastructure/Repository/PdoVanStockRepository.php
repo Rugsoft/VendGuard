@@ -190,6 +190,31 @@ final class PdoVanStockRepository implements VanStockRepositoryInterface
     /**
      * {@inheritDoc}
      */
+    public function listInventory(?int $technicianId = null): array
+    {
+        $sql = 'SELECT ' . self::ENTRY_COLUMNS . '
+                  ' . self::ENTRY_JOINS;
+        $params = [];
+
+        if ($technicianId !== null) {
+            $sql .= ' WHERE vs.technician_id = :technician_id';
+            $params[':technician_id'] = $technicianId;
+        }
+
+        $sql .= ' ORDER BY u.name ASC, sp.name ASC, sp.part_code ASC';
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($params as $placeholder => $value) {
+            $stmt->bindValue($placeholder, $value, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        return $this->hydrateEntries($stmt->fetchAll());
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function listBelowThreshold(?int $technicianId = null): array
     {
         $sql = 'SELECT ' . self::ENTRY_COLUMNS . '

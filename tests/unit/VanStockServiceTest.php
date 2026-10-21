@@ -73,6 +73,12 @@ final class InMemoryVanStockRepository implements VanStockRepositoryInterface
     /** @var list<int> */
     public array $technicianListings = [];
 
+    /** @var list<VanStockEntryDto> */
+    public array $inventoryEntries = [];
+
+    /** @var list<int|null> */
+    public array $inventoryFilters = [];
+
     private int $nextId = 100;
 
     private static function key(int $technicianId, int $sparePartId): string
@@ -122,6 +128,13 @@ final class InMemoryVanStockRepository implements VanStockRepositoryInterface
         $this->technicianListings[] = $technicianId;
 
         return $this->technicianEntries;
+    }
+
+    public function listInventory(?int $technicianId = null): array
+    {
+        $this->inventoryFilters[] = $technicianId;
+
+        return $this->inventoryEntries;
     }
 
     public function listBelowThreshold(?int $technicianId = null): array
@@ -280,6 +293,16 @@ $assert('La vista del técnico devuelve las filas del puerto sin recomponerlas',
 
 $assert('El listado de alerta sin filtro delega un filtro nulo', $service->listBelowThreshold() === [$entry] && $repository->belowThresholdFilters === [null]);
 $assert('El listado de alerta con filtro delega el técnico indicado', $service->listBelowThreshold(7) === [$entry] && $repository->belowThresholdFilters === [null, 7]);
+
+$repository->inventoryEntries = [$entry];
+$assert(
+    'El inventario del parque delega un filtro nulo (contrato §4.2)',
+    $service->listInventory() === [$entry] && $repository->inventoryFilters === [null]
+);
+$assert(
+    'El inventario por técnico delega el identificador recibido',
+    $service->listInventory(7) === [$entry] && $repository->inventoryFilters === [null, 7]
+);
 
 echo "\n--- 6. Proyecciones de respuesta (contratos §4.1, §4.2) ---\n";
 

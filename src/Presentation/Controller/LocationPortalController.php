@@ -1465,6 +1465,17 @@ class LocationPortalController
             'zone_affinity_label',
             'technician_zone',
             'is_manual_override',
+            // Art. V.4 / Módulo 18: el stock de la furgoneta es un dato interno de
+            // operación. La sede no lo ve en ninguna proyección —ni la cantidad, ni el
+            // umbral, ni las marcas que delatan un descuadre— aunque una ampliación
+            // futura del expediente lo adjuntara por error.
+            'van_stock',
+            'van_stocks',
+            'technician_van_stocks',
+            'quantity_available',
+            'min_threshold',
+            'is_below_threshold',
+            'is_negative',
         ];
 
         foreach ($forbiddenExactKeys as $key) {
@@ -1485,7 +1496,7 @@ class LocationPortalController
 
         foreach ($data as $key => $value) {
             if (is_string($key)) {
-                if (preg_match('/(spare_part|replaced_part|part_code|unit_cost|total_cost|cost_snapshot|reference_cost|old_part_dest)/i', $key)) {
+                if (preg_match('/(spare_part|replaced_part|part_code|unit_cost|total_cost|cost_snapshot|reference_cost|old_part_dest|van_stock|quantity_available|min_threshold|is_below_threshold)/i', $key)) {
                     unset($data[$key]);
                     continue;
                 }

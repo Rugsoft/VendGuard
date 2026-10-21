@@ -149,12 +149,22 @@ final class VanStockService
     }
 
     /**
-     * Inventario completo de la furgoneta del propio técnico (RF-04.1).
+     * Inventario completo de una furgoneta (RF-04.1).
      *
      * @return list<VanStockEntryDto>
      */
     public function listByTechnician(int $technicianId): array
     {
         return $this->stockRepository->listByTechnician($technicianId);
+    }
+
+    /**
+     * Inventario del parque, o de una furgoneta concreta (contrato §4.2).
+     *
+     * @return list<VanStockEntryDto>
+     */
+    public function listInventory(?int $technicianId = null): array
+    {
+        return $this->stockRepository->listInventory($technicianId);
     }
 }

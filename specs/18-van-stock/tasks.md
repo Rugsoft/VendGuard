@@ -61,8 +61,9 @@
 ### T-VAN-06 · API de stock (técnico y coordinación)
 * **Refs:** RF-03.2, RF-04.1, RF-04.2, RF-04.3 · Contratos §4 y §5
 * **Ruta:** inline
-* **Prueba en rojo:** `tests/unit/TechnicianVanStockControllerTest.php`, `tests/unit/CoordinatorVanStockControllerTest.php`, `tests/integration/VanStockApiTest.php`.
-* **Alcance:** `TechnicianVanStockController`, `CoordinatorVanStockController`, rutas en `AppRouter.php` tras el middleware de rol.
+* **Prueba en rojo:** `tests/integration/VanStockApiTest.php`.
+  * **Desvío respecto al plan, decidido al implementar:** las dos suites unitarias de controlador previstas no se escriben. Un controlador que solo lee, delega y traduce excepciones se certifica mejor a través del router real que contra un doble del servicio: la suite de integración fija el mismo JSON y los mismos códigos que habría fijado el doble, y además ejerce el middleware de rol y el motor. Una suite unitaria paralela habría duplicado la misma forma de respuesta sobre un colaborador simulado. La validación de query y de cuerpo —lo único que el controlador decide por su cuenta— queda cubierta en los apartados 4.3, 4.4 y 6.1 a 6.7 de la suite de integración.
+* **Alcance:** `TechnicianVanStockController`, `CoordinatorVanStockController`, rutas en `AppRouter.php` tras el middleware de rol, y `listInventory(?int)` en el puerto, el repositorio PDO y el servicio para el modo «inventario» de la Coordinación (contrato §4.2, que declara opcionales los dos parámetros de consulta y por tanto admite la lectura del parque completo).
 
 ### T-VAN-07 · Privacidad constitucional (Art. V.4)
 * **Refs:** RF-06.1, RF-06.2, RF-06.3
@@ -144,3 +145,13 @@ T-VAN-03 ─┘                                     ├─> T-VAN-08 ─┐
 * **Límite declarado trasladado a T-VAN-11:** el saldo no puede bajar de `-999`, así que un descuadre acumulado que rebasara ese suelo abortaría el cierre. Queda escrito como límite conocido del módulo en la tarea de cierre, con su razón.
 * **Evaluación nativa de riesgo:** rango `061e7b9..16a180a` → `risk: medium`, `review_due: false` (`under_budget`). La porción revisable sigue abierta con frontera en `061e7b9`; la revisión nativa llegará cuando el acumulado alcance el presupuesto.
 * **Verde:** `SparePartTraceabilityServiceTest` 48/48 · batería completa 309 suites / 12 047 aserciones / 0 fallos con las cifras documentadas coherentes.
+
+### WU-4 · T-VAN-06 y T-VAN-07 (API de stock y frontera de privacidad) — cerrado
+* **Commit:** `feat(van-stock): expose the van stock API and seal the site privacy boundary`
+* **Rojo observado (API):** con las tres rutas retiradas del router, `VanStockApiTest` cae en **22 de sus 30 aserciones**; las 8 que siguen verdes son las de la superficie del técnico, cuya ruta seguía registrada. Es el rojo correcto: la suite distingue las dos superficies en vez de caer en bloque por un error de arranque.
+* **Rojo observado (privacidad):** con las claves de stock fuera de la lista vedada del saneador, el apartado 1.1 falla y nombra la fuga: `is_negative`. Las demás claves del módulo (`quantity_available`, `min_threshold`, `is_below_threshold`, `van_stock`) ya caían por el filtro por nombre; la marca de descuadre no lleva prefijo que la delate, así que la lista exacta no es redundante: es la que cierra esa fuga.
+* **Verde:** `VanStockApiTest` 30/30 · `VanStockPrivacyTest` 9/9 · `VanStockServiceTest` 29/29 · batería completa 310 suites / 12 058 aserciones / 0 fallos, con README y las cuatro actas sincronizadas a esas cifras.
+* **Auditoría del delta certificada contra motor real:** el apartado 5 de la suite de integración comprueba en `audit_log` la entidad `TECHNICIAN_VAN_STOCK`, la acción `VAN_STOCK_ADJUSTED`, el actor de coordinación, `previous_state = {"quantity_available": 4}` y `metadata = {"delta": -3}`. La certificación que WU-2 dejó pendiente queda cerrada, y la sonda manual de aquella rebanada deja de ser la única evidencia.
+* **Desvío declarado:** las dos suites unitarias de controlador del plan se sustituyen por la suite de integración, con la razón escrita en la propia T-VAN-06.
+* **Adición de alcance:** `listInventory(?int)` en el puerto, el repositorio PDO y el servicio. El contrato §4.2 declara opcionales los dos parámetros de consulta, de modo que la lectura sin filtros —el parque completo en modo inventario— necesita una consulta que el puerto no tenía. Se descartó reutilizar la alerta para ese modo: habría respondido `below_threshold: false` sobre una lista que sí está bajo umbral, y el panel habría mostrado como inventario lo que es una alerta.
+* **Riesgo:** `item 2` — abre tres endpoints nuevos y añade un método de lectura al puerto que comparten el repositorio y sus dobles. Las dos superficies quedan detrás del middleware de rol, la Sede no gana ninguna ruta y la lista vedada del saneador se amplía, no se relaja.

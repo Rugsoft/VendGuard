@@ -64,6 +64,18 @@ interface VanStockRepositoryInterface
     public function listByTechnician(int $technicianId): array;
 
     /**
+     * Inventario completo del parque, opcionalmente limitado a un técnico (contrato §4.2).
+     *
+     * Es la lectura que sostiene el modo «inventario» del panel de coordinación, distinto de la
+     * alerta: la alerta solo devuelve parejas bajo umbral y viene ordenada por severidad; aquí el
+     * orden es estable por técnico y pieza para que la tabla no cambie de forma entre consultas.
+     *
+     * @param int|null $technicianId Limita el inventario a un técnico; `null` recorre todo el parque.
+     * @return list<VanStockEntryDto>
+     */
+    public function listInventory(?int $technicianId = null): array;
+
+    /**
      * Parejas bajo umbral, ya ordenadas por severidad: primero los descuadres negativos y después
      * por cantidad disponible ascendente (RF-03.2, contratos §6.3).
      *
