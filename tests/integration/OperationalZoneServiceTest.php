@@ -471,6 +471,55 @@ try {
             && $auditCount($pgPdo, 'LOCATION_ZONE_REASSIGNED', $inheritedLocation->getId()) === 1
     );
 
+    // Sustitución del territorio: la lista enviada es la colección final
+    // (RF-01.4, hallazgo H-1). Reenviar lo que ya está no puede fallar y lo que
+    // falta se libera sin borrar la fila.
+    $idempotentBatch = $service->assignPostalCodes($south->id, ['08003', '08001'], $coordinatorId);
+    $assert(
+        'Reenviar la colección actual es un no-op y no libera nada',
+        $idempotentBatch->assignedPostalCodes === ['08001', '08003']
+            && $idempotentBatch->transferredPostalCodes === []
+            && $idempotentBatch->releasedPostalCodes === []
+            && $idempotentBatch->affectedLocationsCount === 0
+            && $service->getZone($south->id)->postalCodes === ['08001', '08003'],
+        json_encode($idempotentBatch->toArray())
+    );
+
+    $substitution = $service->assignPostalCodes($south->id, ['08003', '08004'], $coordinatorId);
+    $assert(
+        'Lo ausente se libera y lo nuevo se da de alta en la misma edición',
+        $substitution->assignedPostalCodes === ['08003', '08004']
+            && $substitution->releasedPostalCodes === ['08001']
+            && $substitution->transferredPostalCodes === []
+            && $substitution->affectedLocationsCount === 1
+            && $service->getZone($south->id)->postalCodes === ['08003', '08004'],
+        json_encode($substitution->toArray())
+    );
+    $assert(
+        'La sede heredada de un CP liberado recalculó su zona y la forzada conservó la suya',
+        $zoneOfLocation($pgPdo, $inheritedLocation->getId()) === null
+            && $zoneOfLocation($pgPdo, $forcedLocation->getId()) === $east->id
+    );
+    $releasedEvent = $lastAudit($pgPdo, 'ZONE_UPDATED');
+    $assert(
+        'La liberación firma ZONE_UPDATED con los códigos liberados',
+        $releasedEvent !== null
+            && (int)$releasedEvent['entity_id'] === $south->id
+            && str_contains((string)$releasedEvent['metadata'], 'POSTAL_CODES_RELEASED')
+            && str_contains((string)$releasedEvent['new_state'], '08001')
+    );
+
+    // Restitución del escenario: 08001 vuelve a la zona y su sede heredada
+    // recalcula la demarcación desde el catálogo.
+    $restored = $service->assignPostalCodes($south->id, ['08001', '08003'], $coordinatorId);
+    $service->overrideLocationZone($inheritedLocation->getId(), null, $coordinatorId, false);
+    $assert(
+        'Un CP liberado vuelve a la zona como alta libre y la sede recupera la herencia',
+        $restored->releasedPostalCodes === ['08004']
+            && $service->getZone($south->id)->postalCodes === ['08001', '08003']
+            && $zoneOfLocation($pgPdo, $inheritedLocation->getId()) === $south->id
+    );
+
     $inactiveZone = null;
     try {
         $service->assignPostalCodes(999999, ['08010'], $coordinatorId);
@@ -678,11 +727,12 @@ try {
         $idempotent->isActive === false && $auditCount($pgPdo, 'ZONE_DEACTIVATED', $north->id) === 1
     );
 
-    $reassignedAfterRelease = $service->assignPostalCodes($south->id, ['08002'], $coordinatorId);
+    $reassignedAfterRelease = $service->assignPostalCodes($south->id, ['08001', '08002', '08003'], $coordinatorId);
     $assert(
         'Un CP liberado puede asignarse a otra zona sin confirmación de traslado',
-        $reassignedAfterRelease->assignedPostalCodes === ['08002']
+        $reassignedAfterRelease->assignedPostalCodes === ['08001', '08002', '08003']
             && $reassignedAfterRelease->transferredPostalCodes === []
+            && $reassignedAfterRelease->releasedPostalCodes === []
             && $service->getZone($south->id)->postalCodes === ['08001', '08002', '08003']
     );
 

@@ -206,6 +206,7 @@ function createDashboardInstance(initialData = {}) {
     'suggestedTechnician',
     'suggestedTechnicianId',
     'isColdChainSuggestion',
+    'suggestedTechnicianIsOnCall',
     'hasSanitarySuggestionBanner',
     'isUnattendedZone',
     'assignIsSuggestedTechnician',
@@ -215,11 +216,13 @@ function createDashboardInstance(initialData = {}) {
     // Lote del mapa territorial (RF-MAP-09): sugerencia aplicada y salvaguarda sanitaria.
     'bulkSuggestedTechnicianId',
     'bulkIsColdChainSuggestion',
+    'bulkSuggestedTechnicianIsOnCall',
     'bulkRequiresOverrideJustification',
     'bulkAssignOverrideJustificationLength',
     'bulkAssignOverrideJustificationValid',
     'bulkSuggestionIncident',
-    'bulkAssignSuggestionCaption'
+    'bulkAssignSuggestionCaption',
+    'bulkSuggestionReferenceIncident'
   ]) {
     Object.defineProperty(instance, name, {
       get: () => CoordinatorDashboardView.computed[name].call(instance),
@@ -459,8 +462,8 @@ const bulkSuggestionsFixture = () => ({
   incident: { id: 1, ticket_code: 'INC-2026-0001', priority: 'CRITICAL', is_cold_chain_risk: true },
   recommendation: { top_technician_id: 2, is_cold_chain_escalation: true, unattended_zone: false, explanation: '' },
   ranked_technicians: [
-    { technician_id: 2, name: 'Tecnico Dos', zone_affinity_label: 'Titular de zona', total_score: 80, badges: ['RECOMENDADO'], score_breakdown: {}, current_status: { distance_km: 1.0 } },
-    { technician_id: 1, name: 'Tecnico Uno', zone_affinity_label: 'Titular de zona', total_score: 40, badges: [], score_breakdown: {}, current_status: { distance_km: 2.0 } }
+    { technician_id: 2, name: 'Tecnico Dos', is_on_call: true, zone_affinity_label: 'Titular de zona', total_score: 80, badges: ['RECOMENDADO', 'GUARDIA_24_7'], score_breakdown: {}, current_status: { distance_km: 1.0 } },
+    { technician_id: 1, name: 'Tecnico Uno', is_on_call: false, zone_affinity_label: 'Titular de zona', total_score: 40, badges: [], score_breakdown: {}, current_status: { distance_km: 2.0 } }
   ]
 });
 
@@ -581,6 +584,46 @@ assert('7.9 A justified bulk dispatch travels with override_justification to eve
   bulkSuggestionCalls.filter(c => typeof c === 'object').length === 2 &&
   bulkSuggestionCalls.every(c => typeof c !== 'object' || c.techId === 1) &&
   overriddenBulkView.showBulkAssignModal === false);
+
+// H-5: el cliente espeja la condición del servidor. Si el ranking lo encabeza un
+// titular libre, descartarlo no exige justificación aunque la avería sea de frío.
+const freeTopFixture = bulkSuggestionsFixture();
+freeTopFixture.ranked_technicians[0] = { ...freeTopFixture.ranked_technicians[0], is_on_call: false, badges: ['RECOMENDADO'] };
+nextBulkSuggestions = freeTopFixture;
+const freeTopBulkView = createDashboardInstance();
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(freeTopBulkView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+await new Promise((resolve) => setTimeout(resolve, 0));
+freeTopBulkView.bulkAssignTechnicianId = 1;
+assert('7.10 Un primer puesto sin guardia no exige justificación de descarte (H-5)',
+  freeTopBulkView.bulkIsColdChainSuggestion === true &&
+  freeTopBulkView.bulkSuggestedTechnicianIsOnCall === false &&
+  freeTopBulkView.bulkRequiresOverrideJustification === false);
+
+const freeTopAssignView = createDashboardInstance();
+freeTopAssignView.selectedIncident = { id: 1, ticket_code: 'INC-2026-0001' };
+freeTopAssignView.assignmentSuggestions = freeTopFixture;
+freeTopAssignView.assignTechnicianId = 1;
+assert('7.11 El mismo espejo se aplica al panel de despacho unitario (H-5)',
+  freeTopAssignView.isColdChainSuggestion === true &&
+  freeTopAssignView.suggestedTechnicianIsOnCall === false &&
+  freeTopAssignView.assignRequiresOverrideJustification === false);
+
+// H-8: la sugerencia del lote se calcula sobre el expediente de mayor urgencia y
+// el panel declara a cuántos avisos alcanza el técnico elegido.
+const priorityBatchView = createDashboardInstance();
+priorityBatchView.incidents = [
+  { ...mockIncidents[1], urgency: 'MEDIUM', status: 'REGISTRADA', assigned_technician_id: null },
+  { ...mockIncidents[0], urgency: 'CRITICAL', status: 'REGISTRADA', assigned_technician_id: null }
+];
+CoordinatorDashboardView.methods.handleTerritorialAssign.call(priorityBatchView, { locationId: 1, siteCode: 'SEDE-BCN-01' });
+assert('7.12 El lote sugiere sobre la incidencia crítica aunque no encabece la bandeja (H-8)',
+  Number(priorityBatchView.bulkAssignSuggestionIncidentId) === Number(mockIncidents[0].id)
+    && priorityBatchView.bulkAssignIncidents.length === 2);
+priorityBatchView.bulkAssignSuggestions = bulkSuggestionsFixture();
+assert('7.13 El rótulo declara la referencia y el alcance del despacho (H-8)',
+  priorityBatchView.bulkAssignSuggestionCaption.includes('#INC-2026-0001')
+    && priorityBatchView.bulkAssignSuggestionCaption.includes('2 avisos de la sede'));
+nextBulkSuggestions = bulkSuggestionsFixture();
 // Restore a neutral recommender for the following groups: these harnesses set the
 // chosen technician programmatically and would race the async preselection.
 nextBulkSuggestions = null;

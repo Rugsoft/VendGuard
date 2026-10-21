@@ -85,6 +85,10 @@ Implantar un sistema de **Zonificación Territorial Operativa** y un motor de **
   * **[Ubiquitous]** El sistema debe impedir la creación de dos zonas con el mismo código identificativo o el mismo nombre.
   * **[Event-driven]** Cuando el coordinador intente asignar a una zona un lote de códigos postales que ya pertenecen a otra zona, el sistema debe presentar un modal previo detallando los códigos a mover y las sedes afectadas, aplicando el traslado de forma atómica en una única transacción tras la confirmación expresa.
   * **[Event-driven]** Cuando el coordinador desactive una zona que contiene sedes activas, el sistema debe solicitar confirmación advirtiendo de que todas sus sedes (tanto heredadas como forzadas) pasarán al estado *"Sin Zona Asignada"* (`zone_id = NULL`), conservando su historial. En la misma transacción, el sistema debe liberar sus códigos postales y dar de baja lógica (`removed_at`) las vinculaciones de su cuadrante técnico, exigiéndose `confirm_release = true` cuando existan códigos postales o técnicos vinculados (Resolución QA 7).
+* **RF-01.4: Edición Sustitutiva del Territorio (enmienda 2026-10-21, hallazgo H-1):**
+  * La colección que envía la consola al guardar los códigos postales de una zona es la **colección final**: los códigos que la zona ya tenía son un *no-op* (reenviar la lista completa nunca falla), los códigos ausentes se **liberan** lógicamente (`released_at`) y los nuevos se dan de alta.
+  * Las sedes heredadas de un código liberado recalculan su zona; las que tienen anulación manual (`is_manual_override = true`) no se tocan.
+  * Cada fase (liberación, traslado y alta) es atómica y auditada; la liberación se aplica al final, de modo que un fallo previo deja intacto el territorio. La respuesta publica `released_postal_codes`.
 
 ### RF-02: Cuadrante de Cobertura Técnica (Titularidad y Suplencias)
 * **RF-02.1: Reglas de Cobertura:**

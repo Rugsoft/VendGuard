@@ -86,6 +86,22 @@ register_shutdown_function(static function () use ($homeSeedMachine): void {
 // suite planta residuo a propósito, así que se drena también tras un error fatal.
 TestDataCleaner::registerShutdownRestitution();
 
+// Sonda territorial (Módulo 17, hallazgo H-2): una zona con CP y cuadrante que una suite
+// podría dejar atrás. `operational_zones` es padre de `locations`, no hija de `incidents`,
+// así que sin declararla como raíz la purga no la veía y el catálogo se acumulaba entre
+// corridas. Se planta antes de purgar y se mide después.
+$pdo->exec("INSERT INTO operational_zones (code, name, color_hex) VALUES ('ZONA-RESIDUE-PROBE', 'Zona Residuo Sonda', '#0ea5e9')");
+$probeZoneId = (int)$pdo->query("SELECT id FROM operational_zones WHERE code = 'ZONA-RESIDUE-PROBE'")->fetchColumn();
+$probeTechnicianId = (int)$pdo->query("SELECT id FROM users WHERE email_key = 'jordi.ruta@vendguard.internal'")->fetchColumn();
+$pdo->prepare('INSERT INTO operational_zone_postal_codes (postal_code, zone_id) VALUES (:postal_code, :zone_id)')
+    ->execute([':postal_code' => '00991', ':zone_id' => $probeZoneId]);
+// El booleano se escribe con el literal del adaptador: PDO convierte `false` en la
+// cadena vacía al ejecutar y PostgreSQL rechaza `''` para una columna BOOLEAN.
+$pdo->prepare(
+    'INSERT INTO technician_zone_assignments (technician_id, zone_id, is_primary) VALUES (:technician_id, :zone_id, '
+        . $dialect->booleanLiteral(false) . ')'
+)->execute([':technician_id' => $probeTechnicianId, ':zone_id' => $probeZoneId]);
+
 // Estado de partida normalizado: sin incidencias huérfanas y con las semillas puestas.
 // NO se vacían las maestras: precisamente lo que se mide aquí es si el arnés dejó residuo
 // en ellas, y `purge()` no las toca por diseño.
@@ -107,6 +123,23 @@ $assert = function (string $caseTitle, bool $condition, string $message = '') us
     }
     $failures++;
 };
+
+$assert(
+    '0.1 La purga drena el catálogo territorial que plantó una suite (H-2)',
+    (int)$pdo->query("SELECT COUNT(*) FROM operational_zones WHERE code = 'ZONA-RESIDUE-PROBE'")->fetchColumn() === 0
+        && (int)$pdo->query("SELECT COUNT(*) FROM operational_zone_postal_codes WHERE postal_code = '00991'")->fetchColumn() === 0
+        && (int)$pdo->query('SELECT COUNT(*) FROM technician_zone_assignments WHERE zone_id = ' . $probeZoneId)->fetchColumn() === 0,
+    'la zona de sonda sobrevivió a la purga'
+);
+$assert(
+    '0.2 El sembrador restituye el catálogo territorial canónico',
+    (int)$pdo->query('SELECT COUNT(*) FROM operational_zones')->fetchColumn() === 3
+        && (int)$pdo->query('SELECT COUNT(*) FROM operational_zone_postal_codes WHERE released_at IS NULL')->fetchColumn() === 10
+        && (int)$pdo->query('SELECT COUNT(*) FROM technician_zone_assignments WHERE removed_at IS NULL')->fetchColumn() === 7,
+    'zonas=' . (int)$pdo->query('SELECT COUNT(*) FROM operational_zones')->fetchColumn()
+        . ' cp=' . (int)$pdo->query('SELECT COUNT(*) FROM operational_zone_postal_codes WHERE released_at IS NULL')->fetchColumn()
+        . ' cuadrante=' . (int)$pdo->query('SELECT COUNT(*) FROM technician_zone_assignments WHERE removed_at IS NULL')->fetchColumn()
+);
 
 /** Columna de texto del banco, tal cual, para comparar contra el catálogo. */
 $column = static function (string $sql) use ($pdo): array {

@@ -402,6 +402,24 @@ export const CoordinatorDashboardView = {
         && Boolean(recommendation?.is_cold_chain_escalation);
     },
 
+    /**
+     * ¿El primer puesto es un técnico de guardia?
+     *
+     * La salvaguarda del servidor (`ColdChainOverridePolicy`) solo exige justificar
+     * el descarte cuando el **sugerido** está de guardia; si encabeza el ranking un
+     * titular libre, descartarlo no compromete la cadena de frío. El cliente espeja
+     * esa condición para no pedir un texto que el servidor no reclamaría (H-5).
+     */
+    suggestedTechnicianIsOnCall() {
+      return this.suggestedTechnician?.is_on_call === true;
+    },
+
+    /** La misma condición sobre el primer puesto del lote del mapa. */
+    bulkSuggestedTechnicianIsOnCall() {
+      const first = this.bulkAssignSuggestions?.ranked_technicians?.[0];
+      return first?.is_on_call === true;
+    },
+
     /** Banner de emergencia sanitaria del plan §4.1. */
     hasSanitarySuggestionBanner() {
       return this.isColdChainSuggestion;
@@ -426,6 +444,7 @@ export const CoordinatorDashboardView = {
     assignRequiresOverrideJustification() {
       return this.isColdChainSuggestion
         && this.suggestedTechnicianId !== null
+        && this.suggestedTechnicianIsOnCall
         && !this.assignIsSuggestedTechnician;
     },
 
@@ -459,6 +478,7 @@ export const CoordinatorDashboardView = {
     bulkRequiresOverrideJustification() {
       return this.bulkIsColdChainSuggestion
         && this.bulkSuggestedTechnicianId !== null
+        && this.bulkSuggestedTechnicianIsOnCall
         && this.bulkAssignTechnicianId !== null
         && this.bulkAssignTechnicianId !== ''
         && Number(this.bulkAssignTechnicianId) !== this.bulkSuggestedTechnicianId;
@@ -473,18 +493,47 @@ export const CoordinatorDashboardView = {
       return !this.bulkRequiresOverrideJustification || this.bulkAssignOverrideJustificationLength >= 20;
     },
 
+    /**
+     * Expediente que gobierna la sugerencia del lote (hallazgo H-8).
+     *
+     * El motor puntúa por expediente, así que un lote multi-aviso necesita una
+     * referencia única. Se elige por rango de urgencia real (crítica primero) y, a
+     * igualdad, por antigüedad: la misma regla de triaje del servidor, en lugar de
+     * confiar en que la bandeja llegue ordenada.
+     */
+    bulkSuggestionReferenceIncident() {
+      const rank = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
+      return [...this.bulkAssignIncidents].sort((left, right) => {
+        const byUrgency = (rank[right.urgency] || 0) - (rank[left.urgency] || 0);
+        if (byUrgency !== 0) {
+          return byUrgency;
+        }
+        return (Number(left.id) || 0) - (Number(right.id) || 0);
+      })[0] || null;
+    },
+
     /** Checklist del expediente de referencia del lote (coincide con el panel). */
     bulkSuggestionIncident() {
       return this.bulkAssignIncidents.find(inc => Number(inc.id) === Number(this.bulkAssignSuggestionIncidentId)) || null;
     },
 
-    /** Nota de ámbito del panel asistido del lote (RF-MAP-09). */
+    /**
+     * Nota de ámbito del panel asistido del lote (RF-MAP-09 / hallazgo H-8).
+     *
+     * Dice sobre qué expediente se calculó el ranking **y** a cuántos avisos se
+     * aplicará el técnico elegido: el coordinador no debe deducir si la sugerencia
+     * cubre un ticket o la sede entera.
+     */
     bulkAssignSuggestionCaption() {
       const incident = this.bulkSuggestionIncident;
       if (!incident || !(this.bulkAssignSuggestions || this.isLoadingBulkSuggestions)) {
         return '';
       }
-      return `Sugerencia calculada sobre #${incident.ticket_code}, la incidencia más prioritaria del lote.`;
+      const total = this.bulkAssignIncidents.length;
+      const scope = total > 1
+        ? ` El técnico elegido se aplicará a los ${total} avisos de la sede.`
+        : '';
+      return `Sugerencia calculada sobre #${incident.ticket_code}, la incidencia más prioritaria del lote.${scope}`;
     }
   },
   mounted() {
@@ -708,7 +757,9 @@ export const CoordinatorDashboardView = {
       this.bulkAssignUrgencyReason = '';
       this.bulkAssignReassignmentReason = '';
       this.bulkAssignSuggestions = null;
-      this.bulkAssignSuggestionIncidentId = pending[0]?.id ?? null;
+      // El lote se ordena por urgencia para que la sugerencia se calcule sobre el
+      // expediente que de verdad manda (H-8), no sobre la primera fila de la bandeja.
+      this.bulkAssignSuggestionIncidentId = this.bulkSuggestionReferenceIncident?.id ?? null;
       this.bulkSuggestionsError = '';
       this.bulkAssignTechnicianChosenByUser = false;
       this.bulkAssignOverrideJustification = '';

@@ -195,7 +195,13 @@ $assert(
         && $position['incident_history'] < $position['incidents']
 );
 
-$assert('2.7 El plan cubre las 15 tablas transitorias del contrato', count($order) === 15, 'obtenidas: ' . count($order));
+// 15 tablas de la bandeja + las 3 del catálogo territorial (Módulo 17, hallazgo H-2):
+// `operational_zones` es raíz propia y sus dos hijas caen por el grafo de claves foráneas.
+$assert(
+    '2.7 El plan cubre las 18 tablas transitorias del contrato (15 de la bandeja + 3 territoriales)',
+    count($order) === 18,
+    'obtenidas: ' . count($order)
+);
 
 echo "\n--- 3. PRUEBA DE MORDIDA: el orden ingenuo debe fallar por la FK RESTRICT ---\n";
 

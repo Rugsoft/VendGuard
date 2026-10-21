@@ -299,10 +299,23 @@ La ruta equivalente con el motor TLS en contenedor (`provision-tls-engine.sh` y
 `.env.docker-tls`) sirve el **mismo** contrato: la sonda no cambia y las suites tampoco, porque
 leen `PG_TEST_DSN` y no la forma en que el motor se aprovisionó.
 
-Sin `PG_TEST_DSN` —o con el motor inalcanzable— las tres se declaran **no ejecutables** con
-código de salida `2` en lugar de omitirse en silencio. El **informe** agregado del canal (la
-certificación de cierre del módulo) es T-HYBRID-22; lo que T-HYBRID-21 cierra es la ejecución
-con su evidencia.
+Con el contrato cargado, el canal completo se ejecuta con un solo comando (hallazgo H-4):
+
+```bash
+php tests/run_new_engine.php            # las 14 suites de la categoría
+php tests/run_new_engine.php Zone       # sólo las que casan con el filtro
+```
+
+El comando exige `PG_TEST_DSN` y un motor alcanzable: sin uno de los dos sale con código `2`
+y lo dice. Cada suite sigue siendo invocable por separado para depurar, pero la certificación
+del canal se lee en el resumen agregado. `PoolerLatencyMeasurementTest` sale con código `2`
+cuando falta el contrato remoto (`DB_SSL_ROOT_CERT`): el runner la lista como **no ejecutable**
+con su motivo, sin contarla como fallo y sin omitirla en silencio.
+
+Sin `PG_TEST_DSN` —o con el motor inalcanzable— las suites de la categoría se declaran **no
+ejecutables** con código de salida `2` en lugar de omitirse en silencio. El **informe** agregado
+del canal (la certificación de cierre del módulo) es T-HYBRID-22; lo que T-HYBRID-21 cierra es
+la ejecución con su evidencia.
 
 ## Credenciales
 

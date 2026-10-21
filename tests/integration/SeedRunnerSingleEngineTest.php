@@ -405,6 +405,81 @@ $assert(
         . ' · sesión reabierta: ' . (is_array($reopened) ? 'sí' : 'no')
 );
 
+// ── 5. Catálogo territorial (Módulo 17, hallazgo H-2) ──────────────────────
+// Hasta la corrección, `seedAll()` no sembraba zonas: cada corrida dejaba el catálogo
+// vacío, las diez sedes «Sin Zona Asignada» y el recomendador sin afinidad. El
+// sembrador es ahora el único escritor canónico también del territorio.
+$territory = $runner->seedAll();
+$assert(
+    '5.1 El sembrador declara las tres zonas, sus diez CP y el cuadrante demo',
+    ($territory['operational_zones'] ?? 0) === 3
+        && ($territory['zone_postal_codes'] ?? 0) === 10
+        && ($territory['technician_zone_assignments'] ?? 0) === 7,
+    'resumen: ' . json_encode($territory, JSON_UNESCAPED_UNICODE)
+);
+
+$assert(
+    '5.2 Las tres zonas quedan activas y con su color corporativo',
+    (int)$scalar("SELECT COUNT(*) FROM operational_zones WHERE is_active = TRUE") === 3
+        && (int)$scalar("SELECT COUNT(*) FROM operational_zones WHERE code = 'ZONA-BCN-NORTE' AND color_hex = '#2560ff'") === 1
+        && (int)$scalar("SELECT COUNT(*) FROM operational_zones WHERE code = 'ZONA-BCN-CENTRO' AND color_hex = '#10b981'") === 1
+        && (int)$scalar("SELECT COUNT(*) FROM operational_zones WHERE code = 'ZONA-BCN-SUR' AND color_hex = '#f59e0b'") === 1,
+    'colores o estado de las zonas sembradas fuera de catálogo'
+);
+
+$assert(
+    '5.3 Los diez códigos postales viven en una sola zona y ninguno se duplica',
+    (int)$scalar('SELECT COUNT(*) FROM operational_zone_postal_codes WHERE released_at IS NULL') === 10
+        && (int)$scalar('SELECT COUNT(DISTINCT postal_code) FROM operational_zone_postal_codes WHERE released_at IS NULL') === 10,
+    'CP vivos: ' . (int)$scalar('SELECT COUNT(*) FROM operational_zone_postal_codes WHERE released_at IS NULL')
+);
+
+$expectedInheritance = [
+    'SEDE-BCN-01' => 'ZONA-BCN-CENTRO',
+    'SEDE-BCN-02' => 'ZONA-BCN-NORTE',
+    'SEDE-BCN-03' => 'ZONA-BCN-SUR',
+    'SEDE-BCN-04' => 'ZONA-BCN-CENTRO',
+    'SEDE-BCN-05' => 'ZONA-BCN-CENTRO',
+    'SEDE-BCN-06' => 'ZONA-BCN-NORTE',
+    'SEDE-BCN-07' => 'ZONA-BCN-NORTE',
+    'SEDE-BCN-08' => 'ZONA-BCN-SUR',
+    'SEDE-BCN-09' => 'ZONA-BCN-SUR',
+    'SEDE-BCN-10' => 'ZONA-BCN-SUR',
+];
+$inheritanceHoles = [];
+foreach ($expectedInheritance as $siteCode => $zoneCode) {
+    $inherited = $scalar(
+        'SELECT z.code FROM locations l LEFT JOIN operational_zones z ON z.id = l.zone_id WHERE l.site_code = :site',
+        [':site' => $siteCode]
+    );
+    if ((string)$inherited !== $zoneCode) {
+        $inheritanceHoles[] = $siteCode . '→' . (string)$inherited;
+    }
+}
+$assert(
+    '5.4 Cada sede sembrada hereda la zona de su código postal',
+    $inheritanceHoles === [],
+    'desvíos: ' . implode(', ', $inheritanceHoles)
+);
+
+$second = $runner->seedAll();
+$assert(
+    '5.5 Volver a sembrar no duplica el territorio',
+    ($second['operational_zones'] ?? 0) === 3
+        && (int)$scalar('SELECT COUNT(*) FROM operational_zones') === 3
+        && (int)$scalar('SELECT COUNT(*) FROM operational_zone_postal_codes WHERE released_at IS NULL') === 10
+        && (int)$scalar('SELECT COUNT(*) FROM technician_zone_assignments WHERE removed_at IS NULL') === 7,
+    'zonas=' . (int)$scalar('SELECT COUNT(*) FROM operational_zones')
+        . ' cp=' . (int)$scalar('SELECT COUNT(*) FROM operational_zone_postal_codes WHERE released_at IS NULL')
+        . ' cuadrante=' . (int)$scalar('SELECT COUNT(*) FROM technician_zone_assignments WHERE removed_at IS NULL')
+);
+
+$assert(
+    '5.6 Cada zona sembrada tiene exactamente un titular vivo',
+    (int)$scalar("SELECT COUNT(*) FROM (SELECT zone_id FROM technician_zone_assignments WHERE is_primary = TRUE AND removed_at IS NULL GROUP BY zone_id HAVING COUNT(*) = 1) t") === 3,
+    'titulares por zona fuera de la regla'
+);
+
 echo "\n======================================================================\n";
 echo " Total Aserciones: {$assertions} | Exitosas: " . ($assertions - $failures) . " | Fallidas: {$failures}\n";
 echo $failures === 0

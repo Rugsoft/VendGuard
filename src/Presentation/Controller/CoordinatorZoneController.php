@@ -195,9 +195,15 @@ final class CoordinatorZoneController
                 $this->readBoolean($body, 'confirm_transfers', false)
             );
 
-            $message = $result->transferredPostalCodes === []
-                ? 'Códigos postales asignados a la zona.'
-                : 'Códigos postales trasladados y sedes heredadas recolocadas en una única transacción.';
+            $message = match (true) {
+                $result->releasedPostalCodes !== [] && $result->transferredPostalCodes !== [] =>
+                    'Territorio sustituido: códigos liberados, códigos trasladados y sedes heredadas recolocadas.',
+                $result->releasedPostalCodes !== [] =>
+                    'Territorio sustituido: los códigos ausentes de la lista se han liberado.',
+                $result->transferredPostalCodes !== [] =>
+                    'Códigos postales trasladados y sedes heredadas recolocadas en una única transacción.',
+                default => 'Códigos postales asignados a la zona.',
+            };
 
             return Response::json($result->toArray(), 200, $message);
         });

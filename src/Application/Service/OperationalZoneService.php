@@ -248,11 +248,14 @@ class OperationalZoneService
     }
 
     /**
-     * Asigna un lote de códigos postales a una zona (RF-01.2, RF-01.3).
+     * Gobierno sustitutivo del territorio de una zona (RF-01.2 a RF-01.4).
      *
-     * Los CP libres se dan de alta; los que ya pertenecen a otra zona se trasladan
-     * solo con confirmación expresa y arrastran sus sedes heredadas en la misma
-     * transacción (QA 6).
+     * El lote recibido es la **colección final**: los CP que ya eran de la zona son
+     * un no-op (reenviar la lista completa nunca falla), los que pertenecen a otra
+     * zona se trasladan solo con confirmación expresa (QA 6) y los que la zona
+     * gobernaba y ya no declara se liberan lógicamente al final (hallazgo H-1). La
+     * liberación va última y en su propia transacción: si un traslado o un alta
+     * falla, el territorio previo queda intacto.
      *
      * @param int $zoneId Zona activa de destino.
      * @param array<int, mixed> $postalCodes Lote de códigos postales.
@@ -280,6 +283,7 @@ class OperationalZoneService
             );
         }
 
+        $currentCodes = $this->zoneRepo->findPostalCodes($zoneId);
         $conflicts = $this->zoneRepo->findPostalCodeConflicts($codes, $zoneId);
 
         if ($conflicts !== [] && !$confirmTransfers) {
@@ -287,7 +291,9 @@ class OperationalZoneService
         }
 
         $transferredCodes = array_column($conflicts, 'postal_code');
-        $freeCodes = array_values(array_diff($codes, $transferredCodes));
+        // Los códigos ya gobernados por la zona y los que se trasladan no son
+        // altas: darlos de alta chocaría con el índice único parcial (H-1).
+        $freeCodes = array_values(array_diff($codes, $currentCodes, $transferredCodes));
 
         $affectedLocations = 0;
         if ($transferredCodes !== []) {
@@ -298,13 +304,22 @@ class OperationalZoneService
             $this->zoneRepo->assignPostalCodes($zoneId, $freeCodes, $userId);
         }
 
+        $release = $this->zoneRepo->releasePostalCodesNotIn($zoneId, $codes, $userId);
+        $affectedLocations += $release['recalculated_locations'];
+
         $transferred = array_map(static fn (array $conflict): array => [
             'postal_code' => $conflict['postal_code'],
             'previous_zone_id' => $conflict['current_zone_id'],
             'previous_zone_name' => $conflict['current_zone_name'],
         ], $conflicts);
 
-        return new PostalCodeTransferResultDto($zoneId, $codes, $transferred, $affectedLocations);
+        return new PostalCodeTransferResultDto(
+            $zoneId,
+            $codes,
+            $transferred,
+            $affectedLocations,
+            $release['released_postal_codes']
+        );
     }
 
     /**

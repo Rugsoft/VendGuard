@@ -252,6 +252,26 @@ Crea una nueva zona operativa.
 
 Asigna o sustituye la colección de códigos postales asociados a una zona operativa.
 
+* **Semántica de sustitución (enmienda 2026-10-21, hallazgo H-1).** El cuerpo es la
+  **colección final** del territorio de la zona, no un incremento:
+  * Un código que ya pertenece **a la propia zona** es un *no-op*: reenviar la lista
+    completa (lo que hace la consola al editar) nunca puede fallar.
+  * Un código que pertenece a **otra zona activa** sigue exigiendo
+    `confirm_transfers = true` y responde `409 POSTAL_CODES_REQUIRE_CONFIRMATION`
+    mientras no se confirme.
+  * Un código propio de la zona que **no aparece** en el cuerpo se **libera**
+    lógicamente (`released_at`), igual que en la desactivación: el histórico se
+    conserva y la fila no se borra (Art. III.1, Resolución QA 13). Al liberar, la
+    zona se recalcula para las sedes heredadas del código (`is_manual_override =
+    false`); las sedes con anulación manual no se tocan.
+  * Un código libre se da de alta.
+  * Cada fase (liberación, traslado y alta) se ejecuta en su propia transacción y la
+    liberación va al final: un fallo previo deja intacto el territorio anterior. Todas
+    las fases se auditan y el resultado publica `released_postal_codes` además de los
+    campos existentes.
+  * `affected_locations_count` cuenta **todas** las sedes heredadas cuya zona se
+    recalculó en la operación, ya sea por un traslado o por una liberación.
+
 * **Headers:** `Content-Type: application/json`, `Authorization: Bearer <token_coordinator>`
 * **Payload de Entrada:**
 ```json
@@ -274,6 +294,7 @@ Asigna o sustituye la colección de códigos postales asociados a una zona opera
         "previous_zone_name": "Barcelona Centro"
       }
     ],
+    "released_postal_codes": ["08044"],
     "affected_locations_count": 8
   }
 }

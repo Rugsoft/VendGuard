@@ -123,11 +123,13 @@ echo "=== 3/4 · Contrato de entorno (no versionado) ==="
         "# Generado por deploy/local/postgres/provision.sh — NO versionado." \
         "# Motor local de la categoría de certificación del motor nuevo (spec §9, duda 1)." \
         "# Uso: source deploy/local/postgres/.env.local" \
+        "# Canal completo: php tests/run_new_engine.php" \
         "export PG_TEST_DSN='pgsql:host=${PG_TEST_HOST};port=${PG_TEST_PORT};dbname=${APP_DATABASE};user=${APP_ROLE};password=${APP_PASSWORD}'" \
         > "$ENV_FILE"
 )
 chmod 600 "$ENV_FILE" 2>/dev/null || true
 echo "      Escrito ${ENV_FILE} (modo 600, ignorado por git)"
+echo "      Canal de la categoría: php tests/run_new_engine.php"
 
 # --- 4. Sonda de disponibilidad ----------------------------------------------
 echo "=== 4/4 · Sonda del motor nuevo ==="

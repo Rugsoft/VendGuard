@@ -370,11 +370,55 @@ try {
         json_encode($transferBody)
     );
 
+    $idempotentBatch = $call('POST', '/api/coordinator/zones/' . $southId . '/postal-codes', [
+        'postal_codes' => ['08003', '08001'],
+    ], $coordinatorToken);
+    $idempotentBody = $json($idempotentBatch);
+    $assert(
+        '3.7 Reenviar la colección actual responde 200 sin trasladar ni liberar nada',
+        $idempotentBatch->getStatusCode() === 200
+            && ($idempotentBody['data']['assigned_postal_codes'] ?? null) === ['08001', '08003']
+            && ($idempotentBody['data']['transferred_postal_codes'] ?? null) === []
+            && ($idempotentBody['data']['released_postal_codes'] ?? null) === []
+            && ($idempotentBody['data']['affected_locations_count'] ?? null) === 0,
+        json_encode($idempotentBody)
+    );
+
+    $substitution = $call('POST', '/api/coordinator/zones/' . $southId . '/postal-codes', [
+        'postal_codes' => ['08001', '08004'],
+    ], $coordinatorToken);
+    $substitutionBody = $json($substitution);
+    $releasedRow = $pdo->prepare(
+        'SELECT released_at FROM operational_zone_postal_codes
+         WHERE postal_code = :postal_code AND zone_id = :zone_id
+         ORDER BY id DESC LIMIT 1'
+    );
+    $releasedRow->execute([':postal_code' => '08003', ':zone_id' => $southId]);
+    $assert(
+        '3.8 Editar el territorio libera lo ausente sin borrar la fila (RF-01.4)',
+        $substitution->getStatusCode() === 200
+            && ($substitutionBody['data']['assigned_postal_codes'] ?? null) === ['08001', '08004']
+            && ($substitutionBody['data']['released_postal_codes'] ?? null) === ['08003']
+            && $releasedRow->fetchColumn() !== null
+            && $locationRepo->findById($inheritedLocation->getId())?->getZoneId() === $southId,
+        json_encode($substitutionBody)
+    );
+
+    $restoredBatch = $call('POST', '/api/coordinator/zones/' . $southId . '/postal-codes', [
+        'postal_codes' => ['08001', '08003'],
+    ], $coordinatorToken);
+    $assert(
+        '3.9 El CP liberado vuelve a la zona como alta libre',
+        $restoredBatch->getStatusCode() === 200
+            && ($json($restoredBatch)['data']['released_postal_codes'] ?? null) === ['08004']
+            && ($json($restoredBatch)['data']['assigned_postal_codes'] ?? null) === ['08001', '08003']
+    );
+
     $missingZoneCp = $call('POST', '/api/coordinator/zones/999999/postal-codes', [
         'postal_codes' => ['08010'],
     ], $coordinatorToken);
     $assert(
-        '3.7 Asignar CP a una zona inexistente responde 404 ZONE_NOT_FOUND',
+        '3.10 Asignar CP a una zona inexistente responde 404 ZONE_NOT_FOUND',
         $missingZoneCp->getStatusCode() === 404
             && ($json($missingZoneCp)['error']['code'] ?? '') === 'ZONE_NOT_FOUND'
     );
@@ -658,7 +702,7 @@ try {
     );
 
     $reassigned = $call('POST', '/api/coordinator/zones/' . $southId . '/postal-codes', [
-        'postal_codes' => ['08002'],
+        'postal_codes' => ['08001', '08002', '08003'],
     ], $coordinatorToken);
     $assert(
         '6.4 El CP liberado se reasigna a otra zona sin confirmación de traslado',

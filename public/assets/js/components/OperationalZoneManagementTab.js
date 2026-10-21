@@ -246,6 +246,19 @@ export const OperationalZoneManagementTab = {
       return this.postalCodesToSubmit.filter((code) => !current.has(code));
     },
 
+    /**
+     * Códigos que la zona gobierna hoy y que la lista ya no declara.
+     *
+     * Guardar es una sustitución, no un incremento: lo ausente se libera de forma
+     * lógica (hallazgo H-1), así que el coordinador debe verlo antes de confirmar.
+     */
+    postalCodesToRelease() {
+      const declared = new Set(this.postalCodesToSubmit);
+      return (this.postalZone?.postal_codes || [])
+        .map(String)
+        .filter((code) => !declared.has(code));
+    },
+
     /** ¿Hay algún código con formato inválido en el área de texto? */
     postalInputHasInvalidCodes() {
       return invalidPostalCodes(this.postalCodesInput).length > 0;
@@ -638,12 +651,24 @@ export const OperationalZoneManagementTab = {
       try {
         const result = await api.coordinator.assignZonePostalCodes(this.postalZone.id, codes, confirmTransfers);
         const transferred = Number(result?.transferred_postal_codes?.length || 0);
+        const released = Number(result?.released_postal_codes?.length || 0);
         const affected = Number(result?.affected_locations_count || 0);
 
+        const parts = [];
+        if (released > 0) {
+          parts.push(`${released} código(s) liberado(s)`);
+        }
+        if (transferred > 0) {
+          parts.push(`${transferred} código(s) trasladado(s)`);
+        }
+        if (affected > 0) {
+          parts.push(`${affected} sede(s) recolocada(s)`);
+        }
+
         this.showSuccessNotification(
-          transferred === 0
+          parts.length === 0
             ? 'Códigos postales asignados a la zona.'
-            : `${transferred} código(s) trasladado(s) y ${affected} sede(s) recolocada(s) en una sola transacción.`
+            : `Territorio actualizado: ${parts.join(', ')}.`
         );
         this.postalConflicts = [];
         this.closePostalCodesModal();
@@ -1293,7 +1318,8 @@ export const OperationalZoneManagementTab = {
       >
         <div v-if="postalZone" data-testid="zone-postal-modal">
           <p style="font-size: 13px; color: var(--color-ink-secondary);">
-            Las sedes heredan la zona por su código postal. Un código que ya pertenece a otra demarcación exige
+            Las sedes heredan la zona por su código postal. La lista que guarde es la <strong>colección final</strong>:
+            los códigos que ya no aparezcan se liberan. Un código que ya pertenece a otra demarcación exige
             confirmación: el traslado mueve también sus sedes.
           </p>
 
@@ -1312,7 +1338,20 @@ export const OperationalZoneManagementTab = {
           <div class="d-flex flex-wrap gap-2 mt-2 mb-3">
             <span class="vg-chip">{{ postalCodesToSubmit.length }} declarados</span>
             <span class="vg-chip vg-chip-success">{{ newPostalCodes.length }} nuevos</span>
+            <span class="vg-chip vg-chip-warning" v-if="postalCodesToRelease.length > 0" data-testid="zone-postal-release-chip">
+              {{ postalCodesToRelease.length }} a liberar
+            </span>
             <span class="vg-chip vg-chip-danger" v-if="postalInputHasInvalidCodes">Hay códigos con formato inválido</span>
+          </div>
+
+          <div v-if="postalCodesToRelease.length > 0" class="vg-alert vg-alert-warning" data-testid="zone-postal-releases">
+            <p class="mb-2 fw-semibold">Al guardar, estos códigos dejarán de pertenecer a la zona:</p>
+            <div class="d-flex flex-wrap gap-2 mb-2">
+              <span v-for="code in postalCodesToRelease" :key="code" class="vg-chip vg-chip-danger font-monospace">{{ code }}</span>
+            </div>
+            <p class="mb-0" style="font-size: 12px;">
+              Sus sedes heredadas recalculan su zona; las anuladas a mano conservan la suya.
+            </p>
           </div>
 
           <div v-if="postalErrors.codes" class="vg-alert vg-alert-error" data-testid="zone-postal-error">{{ postalErrors.codes }}</div>

@@ -52,6 +52,14 @@ final class TestDataCleaner
         // raíz propia. Dejar sus filas entre suites haría que la ventana de
         // tendencia de una prueba contase pasadas de otra.
         'sanitary_sweep_passes',
+        // Catálogo territorial (Módulo 17, hallazgo H-2): `operational_zones` es
+        // **padre** de `locations`, no hija de `incidents`, así que el grafo de la
+        // purga no lo alcanzaba y cada corrida dejaba las zonas y los CP de una
+        // suite en la base. Entra como raíz propia: sus hijas —códigos postales y
+        // cuadrante— caen por el grafo y la sede queda en «Sin Zona Asignada» por
+        // el `ON DELETE SET NULL` de la clave foránea. El sembrador restituye
+        // después el catálogo canónico.
+        'operational_zones',
     ];
 
     /**
@@ -85,6 +93,8 @@ final class TestDataCleaner
         'sanitary_sweep_contentions',
         'spare_part_compatibilities',
         'notification_outbox',
+        'operational_zone_postal_codes',
+        'technician_zone_assignments',
     ];
 
     /** @var array<string, array<string, string>> tabla => (FK => tabla padre) caché por esquema */

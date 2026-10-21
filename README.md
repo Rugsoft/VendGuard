@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/Database-PostgreSQL%2016%2B%20%7C%20Supabase-3ecf8e?style=flat-square&logo=postgresql&logoColor=white)](https://supabase.com/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-307%20Suites%20%7C%2011.952%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-307%20Suites%20%7C%2011.985%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -438,7 +438,7 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 307 suites · 11.952 aserciones
+batería global: 307 suites · 11.985 aserciones
 
 ```text
 ======================================================================
@@ -451,7 +451,7 @@ batería global: 307 suites · 11.952 aserciones
  Suites E2E Manuales (T-40): 1 / 1 pasadas
  ──────────────────────────────────────────────────────────────────
  Total Suites Ejecutadas    : 307
- Total Aserciones Evaluadas : 11.952
+ Total Aserciones Evaluadas : 11.985
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
@@ -481,6 +481,18 @@ Entre las suites de certificación destacan:
 * **`OpportunisticFrontendIntegrationTest.mjs` (Módulo 16)** — tarjeta temporal de 30 minutos, entrada oportunista desde la parada activa y desde la inspección preventiva, agrupación en Parada #1, KPI de desplazamientos evitados y alias constitucional del técnico en el portal de sede.
 
 > **Nota operativa:** las suites de integración incluyen pruebas de HTTP real contra `127.0.0.1:8000`. Si el puerto está ocupado por un servidor obsoleto, arránquelo antes con `php -S 127.0.0.1:8000 -t public public/index.php`.
+
+### Canal propio del motor nuevo (`new_engine`)
+
+Las suites que declaran `VENDGUARD_TEST_CATEGORY = 'new_engine'` exigen un PostgreSQL real y trabajan sobre esquemas aislados, así que **no forman parte de la batería hermética**: `run_all.php` las enumera y las deriva a un canal con comando propio (hallazgo H-4).
+
+```bash
+source deploy/local/postgres/.env.local     # motor local; .env.docker-tls para el TLS
+php tests/run_new_engine.php                # las 14 suites del canal
+php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
+```
+
+El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o con el motor inalcanzable, sale con código `2` y un mensaje explícito en lugar de omitir suites en silencio. Cada suite corre en su propio proceso y el resumen publica verdes, aserciones y fallos. Una suite que declara `exit 2` —la medición de latencia contra el motor remoto, que exige `DB_SSL_ROOT_CERT` y otra infraestructura— se lista como **no ejecutable**, con su motivo, y no se cuenta como fallo ni desaparece del informe.
 
 ---
 
@@ -564,6 +576,7 @@ gestor-incidencias-vending/
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
     ├── run_all.php               # Ejecutor global de la batería de 307 suites (100% verde)
+    ├── run_new_engine.php        # Canal propio de la categoría new_engine (PG_TEST_DSN)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)
     ├── unit/                     # Pruebas unitarias de lógica pura, geometría y contratos

@@ -333,11 +333,13 @@ TLS_DSN="pgsql:host=${TLS_HOST_CLIENT};port=${HOST_PORT};dbname=${APP_DATABASE};
         "# inicializador se invoca con la variable delante, en su propio proceso:" \
         "#   DATABASE_URL=\"\${PG_TEST_DSN}\" php bin/init_cloud_db.php" \
         "# Uso: source deploy/local/postgres/.env.docker-tls" \
+        "# Canal completo: php tests/run_new_engine.php" \
         "export PG_TEST_DSN='${TLS_DSN}'" \
         > "${ENV_FILE}"
 )
 chmod 600 "${ENV_FILE}" 2>/dev/null || true
 ok "Escrito ${ENV_FILE} (modo 600, ignorado por git)"
+echo "      Canal de la categoría: php tests/run_new_engine.php"
 
 export PG_TEST_DSN="${TLS_DSN}"
 

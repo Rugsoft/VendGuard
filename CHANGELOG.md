@@ -4,6 +4,38 @@ Registro de los hitos de producto y de los módulos cerrados bajo el ciclo SDD.
 El proyecto no publica versiones semánticas independientes: cada entrada corresponde
 a un módulo funcional certificado por la batería global.
 
+## [Módulo 17] · Corrección de los ocho hallazgos de la verificación funcional — 2026-10-21
+
+**Estado:** Cerrado · H-1 a H-8 corregidos y certificados por la batería global.
+
+### Corregido
+
+- **H-1 · Edición sustitutiva del territorio:** guardar los códigos postales de una zona
+  envía la colección final; los que ya eran suyos son un no-op (reenviar la lista completa
+  nunca falla) y los ausentes se liberan con `released_at`, sin `DELETE` (Art. III.1). Las
+  sedes heredadas de un código liberado recalculan su zona, las forzadas a mano no se tocan,
+  y el resultado publica `released_postal_codes` junto al balance de traslados.
+- **H-2 · Semilla territorial:** `SeedRunner::seedAll()` siembra las tres zonas de Barcelona,
+  sus diez códigos postales, el cuadrante demo y la herencia de cada sede; el resumen publica
+  el territorio canónico en vigor y `TestDataCleaner` drena `operational_zones` como raíz para
+  que ninguna corrida deje el catálogo vacío ni acumule zonas entre suites.
+- **H-3 · Cifras documentales:** batería global **307 suites · 11.985 aserciones · 0 fallos**,
+  con la frase canónica, la insignia y los cuatro informes vivos sincronizados.
+- **H-4 · Canal `new_engine`:** `tests/run_new_engine.php` ejecuta la categoría con un comando
+  propio, exige `PG_TEST_DSN` y un motor alcanzable (código `2` si falta cualquiera de los
+  dos), descubre las suites por su marca y lista aparte las que declaran otro contrato de
+  entorno en lugar de omitirlas. Documentado en el README y en `deploy/local/postgres/`.
+- **H-5 · Salvaguarda de frío en la UI:** el cliente exige la justificación de descarte con
+  la misma condición que `ColdChainOverridePolicy` —primer puesto en guardia—, tanto en el
+  despacho unitario como en el lote del mapa; ya no pide un texto que el servidor no reclamaría.
+- **H-6/H-7 · Alta de avería desde la sede:** `POST /api/incidents` certifica JSON puro
+  (`application/json`) además de multipart, y el `201` publica el contexto del equipo
+  (`machine_code`, `machine_model`, `machine_type`) y de la sede (`location_site_code`,
+  `location_name`) que el contrato §3.2 prometía.
+- **H-8 · Alcance de la sugerencia del lote:** la referencia del ranking se elige por urgencia
+  real (crítica primero) y el panel rotula sobre qué ticket se calculó y a cuántos avisos de
+  la sede se aplicará el técnico elegido.
+
 ## [Módulo 17] · Zonificación Operativa y Asignación Asistida — 2026-10-20
 
 **Estado:** Cerrado · especificación funcional, contratos técnicos y batería de pruebas en verde.
@@ -120,7 +152,7 @@ a un módulo funcional certificado por la batería global.
 
 ### Verificado
 
-- Batería global: 307 suites y 11.952 aserciones al 100 % en verde, con la guarda de
+- Batería global: 307 suites y 11.985 aserciones al 100 % en verde, con la guarda de
   coherencia documental activa y la base del arnés restaurada a semillas.
 - Canal `new_engine` contra PostgreSQL: esquema territorial, repositorio, servicio de
   aplicación, traslado de CPs, API de zonas, sugerencias, salvaguarda de frío y

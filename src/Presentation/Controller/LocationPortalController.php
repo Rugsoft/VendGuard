@@ -674,6 +674,17 @@ class LocationPortalController
 
         // 11. Apertura de expediente de reintegro formal si se solicitó (HU-02)
         $payload = $this->sanitizeIncidentForSite($created->toArray());
+
+        // 11.b Contexto del equipo en el 201 (hallazgo H-7): el contrato §3.2
+        // promete `machine_code`, y la sede necesita saber sobre qué máquina quedó
+        // el aviso sin una segunda lectura del catálogo. Se publica el código, el
+        // modelo y el tipo con los que el portal rotula la tarjeta, más la sede
+        // (código y nombre) que ya conoce: datos públicos, nada interno (Art. V.4).
+        $payload['machine_code'] = $machine->getCode();
+        $payload['machine_model'] = $machine->getModel();
+        $payload['machine_type'] = $machine->getMachineType()->value;
+        $payload['location_site_code'] = $location->getSiteCode();
+        $payload['location_name'] = $location->getName();
         if ($refundClaim !== null) {
             $receipt = $this->openRefundCase($refundClaim, (int)$created->getId(), $machine, $location);
             if ($receipt instanceof Response) {

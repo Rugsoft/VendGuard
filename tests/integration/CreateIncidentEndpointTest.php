@@ -140,6 +140,19 @@ $assert("1.5 Estado inicial es REGISTERED", ($data1['status'] ?? '') === 'REGIST
 $assert("1.6 Código de ticket generado con prefijo INC-", str_starts_with((string)($data1['ticket_code'] ?? ''), 'INC-'));
 $assert("1.7 Sede asignada correctamente", (int)($data1['location_id'] ?? 0) === $location1->getId());
 $assert("1.8 Dinero retenido registrado correctamente (4.5)", (float)($data1['retained_money_amount'] ?? 0) === 4.5);
+$assert(
+    "1.10 El 201 publica el contexto de la máquina y de la sede (H-7)",
+    ($data1['machine_code'] ?? '') === $perishableMachine->getCode()
+        && ($data1['machine_model'] ?? '') === $perishableMachine->getModel()
+        && ($data1['machine_type'] ?? '') === $perishableMachine->getMachineType()->value
+        && ($data1['location_site_code'] ?? '') === $location1->getSiteCode()
+        && ($data1['location_name'] ?? '') === $location1->getName(),
+    json_encode([
+        'machine_code' => $data1['machine_code'] ?? null,
+        'machine_type' => $data1['machine_type'] ?? null,
+        'location_site_code' => $data1['location_site_code'] ?? null,
+    ])
+);
 
 // Verificar persistencia en base de datos
 $createdIncidentId = (int)($data1['id'] ?? 0);
@@ -432,6 +445,45 @@ if ($serverAvailable) {
     $assert("7.4 Intento duplicado por HTTP real responde HTTP 409 Conflict", $dupStatus === 409, "Status obtenido: {$dupStatus}");
     $dupDecoded = json_decode((string)$dupRes, true);
     $assert("7.5 HTTP real 409 error code es MACHINE_HAS_ACTIVE_INCIDENT", ($dupDecoded['error']['code'] ?? '') === 'MACHINE_HAS_ACTIVE_INCIDENT');
+
+    // 7.6–7.7 Con el ciclo multipart cerrado, la misma alta viaja como JSON puro:
+    // el portal envía `application/json` cuando no hay fotografía y el contrato §3.2
+    // debe aceptarlo con el contexto del equipo en la respuesta (hallazgos H-6/H-7).
+    TestDataCleaner::purgeIncidentsByMachine($pdo, $loc2Machine->getId());
+
+    $jsonBody = json_encode([
+        'machine_id' => $loc2Machine->getId(),
+        'category' => 'PAYMENT_SYSTEM',
+        'description' => 'Test HTTP Real: alta sin fotografía enviada como JSON.',
+        'reporter_name' => 'Agente Remoto',
+        'reporter_phone' => '677889900',
+    ]);
+    $chJson = curl_init('http://127.0.0.1:8000/api/incidents');
+    curl_setopt($chJson, CURLOPT_POST, true);
+    curl_setopt($chJson, CURLOPT_POSTFIELDS, $jsonBody);
+    curl_setopt($chJson, CURLOPT_HTTPHEADER, [
+        "Authorization: Bearer {$tokenLoc2}",
+        'Content-Type: application/json',
+    ]);
+    curl_setopt($chJson, CURLOPT_RETURNTRANSFER, true);
+    $jsonResponse = curl_exec($chJson);
+    $jsonStatus = curl_getinfo($chJson, CURLINFO_HTTP_CODE);
+    curl_close($chJson);
+    $jsonDecoded = json_decode((string)$jsonResponse, true);
+    $assert(
+        "7.6 Llamada HTTP real con application/json responde HTTP 201 Created",
+        $jsonStatus === 201,
+        "Status obtenido: {$jsonStatus}, Body: {$jsonResponse}"
+    );
+    $assert(
+        "7.7 El 201 JSON devuelve el contexto de la máquina (H-7)",
+        ($jsonDecoded['data']['machine_code'] ?? '') === $loc2Machine->getCode()
+            && ($jsonDecoded['data']['machine_type'] ?? '') === $loc2Machine->getMachineType()->value
+            && ($jsonDecoded['data']['location_site_code'] ?? '') === $location2->getSiteCode(),
+        json_encode($jsonDecoded['data'] ?? [])
+    );
+
+    TestDataCleaner::purgeIncidentsByMachine($pdo, $loc2Machine->getId());
 } else {
     echo "  [SKIP] Servidor local no disponible en 127.0.0.1:8000 para Caso 7.\n";
 }

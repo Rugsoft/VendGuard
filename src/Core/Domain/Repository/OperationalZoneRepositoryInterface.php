@@ -185,6 +185,25 @@ interface OperationalZoneRepositoryInterface
     public function releasePostalCodes(int $zoneId): int;
 
     /**
+     * Libera los códigos vivos de la zona que **no** están en la colección final y
+     * recalcula las sedes heredadas que se quedan sin demarcación (RF-01.4).
+     *
+     * Es la pieza que hace sustitutiva la edición del territorio: el formulario
+     * envía la lista completa y lo ausente se libera lógicamente, nunca se borra
+     * (Art. III.1). Las sedes con `is_manual_override = TRUE` conservan su zona.
+     * Todo ocurre en una transacción propia; el evento `ZONE_UPDATED` deja la
+     * traza con los códigos liberados.
+     *
+     * @param int $zoneId Zona activa cuyo territorio se está editando.
+     * @param list<string> $keepPostalCodes Colección final enviada por la consola.
+     * @param int $userId Coordinador que firma la operación.
+     * @return array{released_postal_codes: list<string>, recalculated_locations: int}
+     *
+     * @throws ZoneValidationException Si la zona no está activa.
+     */
+    public function releasePostalCodesNotIn(int $zoneId, array $keepPostalCodes, int $userId): array;
+
+    /**
      * Traslada códigos postales vivos a otra zona en una única transacción,
      * moviendo sus filas y arrastrando las sedes que los heredaban (RF-01.3,
      * Resolución QA 6).

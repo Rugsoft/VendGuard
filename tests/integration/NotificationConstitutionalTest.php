@@ -281,9 +281,13 @@ $deleteAttempt = function (string $sql, array $params = []) use ($pdo): array {
 };
 
 $guardedTriggers = (int)$pdo->query(
-    "SELECT COUNT(*) FROM pg_trigger
-     WHERE NOT tgisinternal
-       AND tgname IN ('trg_no_delete_notification_outbox', 'trg_no_delete_notification_channel_settings')"
+    "SELECT COUNT(*)
+       FROM pg_trigger t
+       INNER JOIN pg_class c ON c.oid = t.tgrelid
+       INNER JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE NOT t.tgisinternal
+        AND n.nspname = current_schema()
+        AND t.tgname IN ('trg_no_delete_notification_outbox', 'trg_no_delete_notification_channel_settings')"
 )->fetchColumn();
 $assert('1.1 El motor declara el disparador de no borrado en las dos tablas', $guardedTriggers === 2);
 

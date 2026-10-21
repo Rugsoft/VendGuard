@@ -117,11 +117,11 @@ class SeedRunner
 
         $columns = [
             'site_code', 'name', 'address', 'latitude', 'longitude',
-            'contact_name', 'contact_phone', 'is_active',
+            'contact_name', 'contact_phone', 'postal_code', 'is_active',
         ];
         $placeholders = [
             ':site_code', ':name', ':address', ':latitude', ':longitude',
-            ':contact_name', ':contact_phone', $this->dialect->booleanLiteral(true),
+            ':contact_name', ':contact_phone', ':postal_code', $this->dialect->booleanLiteral(true),
         ];
 
         if ($writesCanonicalKey) {
@@ -143,6 +143,9 @@ class SeedRunner
             'longitude' => SqlDialectAdapter::PROPOSED_VALUE,
             'contact_name' => SqlDialectAdapter::PROPOSED_VALUE,
             'contact_phone' => SqlDialectAdapter::PROPOSED_VALUE,
+            // El CP es la llave de la herencia territorial (Resolución QA 7): el
+            // sembrador lo escribe, no lo deja al azar de una migración.
+            'postal_code' => SqlDialectAdapter::PROPOSED_VALUE,
             'deleted_at' => 'NULL',
         ];
 
@@ -176,6 +179,7 @@ class SeedRunner
                 ':longitude' => $loc['longitude'],
                 ':contact_name' => $loc['contact_name'],
                 ':contact_phone' => $loc['contact_phone'],
+                ':postal_code' => $loc['postal_code'],
             ];
             if ($writesCanonicalKey) {
                 $params[':site_code_key'] = $this->dialect->identityKey($loc['site_code']);
@@ -191,6 +195,205 @@ class SeedRunner
             }
 
             $stmt->execute($params);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    /**
+     * Catálogo territorial del arranque: las tres demarcaciones de Barcelona.
+     *
+     * El sembrador es el **único** escritor canónico del arnés y del entorno local
+     * (hallazgo H-2 de la verificación funcional del 2026-10-21): hasta esta fase
+     * `seedAll()` no sembraba `operational_zones`, así que cada corrida de la batería
+     * dejaba el catálogo vacío, las diez sedes «Sin Zona Asignada» y el recomendador
+     * sin afinidad. Los valores son los mismos que declara `supabase_seeds.sql`
+     * (secciones 9 a 12) y `CloudDeploySchemaParityTest` vigila esa paridad.
+     *
+     * @return int Número de zonas procesadas.
+     */
+    public function seedOperationalZones(): int
+    {
+        $sql = sprintf(
+            'INSERT INTO operational_zones (code, name, color_hex, description, is_active) VALUES (%s) %s',
+            ':code, :name, :color_hex, :description, ' . $this->dialect->booleanLiteral(true),
+            $this->dialect->upsertAssignments(['code'], [
+                'name' => SqlDialectAdapter::PROPOSED_VALUE,
+                'color_hex' => SqlDialectAdapter::PROPOSED_VALUE,
+                'description' => SqlDialectAdapter::PROPOSED_VALUE,
+                'is_active' => $this->dialect->booleanLiteral(true),
+            ])
+        );
+        $stmt = $this->pdo->prepare($sql);
+
+        $count = 0;
+        foreach (self::canonicalOperationalZoneRows() as $zone) {
+            $stmt->execute([
+                ':code' => $zone['code'],
+                ':name' => $zone['name'],
+                ':color_hex' => $zone['color_hex'],
+                ':description' => $zone['description'],
+            ]);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    /**
+     * Códigos postales de las zonas sembradas, con alta sólo si el CP está libre.
+     *
+     * No reasigna un CP que ya vive en otra zona: la semilla declara el estado
+     * canónico y un traslado hecho por el coordinador no se deshace al resembrar.
+     *
+     * @return int Códigos canónicos efectivamente vivos en su zona tras sembrar.
+     */
+    public function seedZonePostalCodes(): int
+    {
+        $sql = "
+            INSERT INTO operational_zone_postal_codes (postal_code, zone_id)
+            SELECT :postal_code, z.id
+              FROM operational_zones z
+             WHERE z.code = :zone_code
+               AND NOT EXISTS (
+                   SELECT 1 FROM operational_zone_postal_codes p
+                    WHERE p.postal_code = :postal_code_live
+                      AND p.released_at IS NULL
+               )
+        ";
+        $stmt = $this->pdo->prepare($sql);
+
+        foreach (self::canonicalZonePostalCodeRows() as $row) {
+            $stmt->execute([
+                ':postal_code' => $row['postal_code'],
+                ':zone_code' => $row['zone_code'],
+                ':postal_code_live' => $row['postal_code'],
+            ]);
+        }
+
+        // El resumen publica el territorio **canónico en vigor**, no las altas de
+        // esta pasada: reejecutar la siembra es idempotente y debe informar lo
+        // mismo, y un CP movido por el coordinador se delata aquí (hallazgo H-2).
+        $verify = $this->pdo->prepare(
+            'SELECT COUNT(*)
+               FROM operational_zone_postal_codes p
+               INNER JOIN operational_zones z ON z.id = p.zone_id
+              WHERE p.postal_code = :postal_code
+                AND p.released_at IS NULL
+                AND z.code = :zone_code'
+        );
+
+        $count = 0;
+        foreach (self::canonicalZonePostalCodeRows() as $row) {
+            $verify->execute([
+                ':postal_code' => $row['postal_code'],
+                ':zone_code' => $row['zone_code'],
+            ]);
+            $count += (int)$verify->fetchColumn();
+        }
+
+        return $count;
+    }
+
+    /**
+     * Cuadrante demo: un titular por zona y las suplencias repartidas.
+     *
+     * Se resuelve por la clave canónica del usuario (`email_key`) y el código de la
+     * zona, nunca por identificadores que la secuencia asigna distinto en cada base.
+     *
+     * @return int Vinculaciones canónicas efectivamente vivas tras sembrar.
+     */
+    public function seedTechnicianZoneAssignments(): int
+    {
+        $identityColumn = $this->dialect->requiresCanonicalIdentityColumns() ? 'email_key' : 'email';
+        $sqlTemplate = 'INSERT INTO technician_zone_assignments (technician_id, zone_id, is_primary)
+             SELECT u.id, z.id, %s
+               FROM users u, operational_zones z
+              WHERE u.%s = :email
+                AND z.code = :zone_code
+                AND NOT EXISTS (
+                    SELECT 1 FROM technician_zone_assignments a
+                     WHERE a.technician_id = u.id
+                       AND a.zone_id = z.id
+                       AND a.removed_at IS NULL
+                )';
+
+        foreach (self::canonicalTechnicianZoneRows() as $row) {
+            $statement = $this->pdo->prepare(sprintf(
+                $sqlTemplate,
+                $this->dialect->booleanLiteral((bool)$row['is_primary']),
+                $identityColumn
+            ));
+            $statement->execute([
+                ':email' => $row['email'],
+                ':zone_code' => $row['zone_code'],
+            ]);
+        }
+
+        // Igual que el territorio: se informa del cuadrante canónico vivo, de modo
+        // que resembrar no altera las cifras y una baja del coordinador se ve.
+        $verify = $this->pdo->prepare(sprintf(
+            'SELECT COUNT(*)
+               FROM technician_zone_assignments a
+               INNER JOIN users u ON u.id = a.technician_id
+               INNER JOIN operational_zones z ON z.id = a.zone_id
+              WHERE u.%s = :email
+                AND z.code = :zone_code
+                AND a.removed_at IS NULL',
+            $identityColumn
+        ));
+
+        $count = 0;
+        foreach (self::canonicalTechnicianZoneRows() as $row) {
+            $verify->execute([
+                ':email' => $row['email'],
+                ':zone_code' => $row['zone_code'],
+            ]);
+            $count += (int)$verify->fetchColumn();
+        }
+
+        return $count;
+    }
+
+    /**
+     * Reafirma la herencia territorial de las sedes desde su código postal.
+     *
+     * Es la misma regla que publica `supabase_seeds.sql` (sección 12): la sede hereda
+     * la zona viva de su CP, y se queda en «Sin Zona Asignada» cuando el CP no está
+     * en el catálogo. Las sedes con anulación manual no se tocan (RF-03.2).
+     *
+     * @return int Número de sedes recolocadas.
+     */
+    public function seedTerritorialInheritance(): int
+    {
+        $zoneByPostalCode = [];
+        $stmt = $this->pdo->query(
+            'SELECT postal_code, zone_id FROM operational_zone_postal_codes WHERE released_at IS NULL'
+        );
+        foreach ($stmt->fetchAll() as $row) {
+            $zoneByPostalCode[(string)$row['postal_code']] = (int)$row['zone_id'];
+        }
+
+        $update = $this->pdo->prepare('UPDATE locations SET zone_id = :zone_id WHERE id = :id');
+
+        $count = 0;
+        foreach ($this->pdo->query('SELECT id, postal_code, zone_id, is_manual_override FROM locations')->fetchAll() as $location) {
+            if ((bool)$location['is_manual_override']) {
+                continue;
+            }
+
+            $postalCode = $location['postal_code'] !== null ? (string)$location['postal_code'] : null;
+            $expected = $postalCode !== null && isset($zoneByPostalCode[$postalCode]) ? $zoneByPostalCode[$postalCode] : null;
+            $current = $location['zone_id'] !== null ? (int)$location['zone_id'] : null;
+
+            if ($expected === $current) {
+                continue;
+            }
+
+            $update->bindValue(':zone_id', $expected, $expected === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+            $update->bindValue(':id', (int)$location['id'], PDO::PARAM_INT);
+            $update->execute();
             $count++;
         }
 
@@ -1135,6 +1338,13 @@ class SeedRunner
             $this->seedRouteSettings();
             $machCount = $this->seedMachines();
             $userCount = $this->seedUsers($defaultPassword);
+            // El catálogo territorial entra en el mismo sembrador que el resto del
+            // parque (hallazgo H-2): zonas, códigos postales, cuadrante y la herencia
+            // de cada sede. Sin esto, la batería dejaba el territorio vacío.
+            $zoneCount = $this->seedOperationalZones();
+            $zonePostalCodeCount = $this->seedZonePostalCodes();
+            $zoneTechnicianCount = $this->seedTechnicianZoneAssignments();
+            $this->seedTerritorialInheritance();
             $prevCount = $this->seedPreventiveSettings();
             $this->seedPreventiveOrdersAndCertificates();
             $checklistOrders = $this->seedPreventiveChecklistItems();
@@ -1147,6 +1357,9 @@ class SeedRunner
                 'locations' => $locCount,
                 'machines' => $machCount,
                 'users' => $userCount,
+                'operational_zones' => $zoneCount,
+                'zone_postal_codes' => $zonePostalCodeCount,
+                'technician_zone_assignments' => $zoneTechnicianCount,
                 'preventive_settings' => $prevCount,
                 'preventive_checklists' => $checklistOrders,
                 'preventive_audit_events' => $auditEvents,
@@ -1171,6 +1384,74 @@ class SeedRunner
      *
      * @return list<array<string, mixed>>
      */
+    /**
+     * Las tres demarcaciones operativas del parque sembrado.
+     *
+     * @return list<array{code: string, name: string, color_hex: string, description: string}>
+     */
+    private static function canonicalOperationalZoneRows(): array
+    {
+        return [
+            [
+                'code' => 'ZONA-BCN-NORTE',
+                'name' => 'Barcelona Litoral y Norte',
+                'color_hex' => '#2560ff',
+                'description' => 'Sant Martí, Poblenou, Nou Barris y Badalona',
+            ],
+            [
+                'code' => 'ZONA-BCN-CENTRO',
+                'name' => 'Barcelona Centro y Litoral',
+                'color_hex' => '#10b981',
+                'description' => 'Ciutat Vella, Eixample y Campus Nord (Les Corts)',
+            ],
+            [
+                'code' => 'ZONA-BCN-SUR',
+                'name' => 'Barcelona Sur y Vallès',
+                'color_hex' => '#f59e0b',
+                'description' => 'Bellvitge, Fira Gran Via, Cornellà y Sant Cugat',
+            ],
+        ];
+    }
+
+    /**
+     * Los diez códigos postales de las sedes sembradas, cada uno en una sola zona.
+     *
+     * @return list<array{postal_code: string, zone_code: string}>
+     */
+    private static function canonicalZonePostalCodeRows(): array
+    {
+        return [
+            ['postal_code' => '08018', 'zone_code' => 'ZONA-BCN-NORTE'],
+            ['postal_code' => '08042', 'zone_code' => 'ZONA-BCN-NORTE'],
+            ['postal_code' => '08916', 'zone_code' => 'ZONA-BCN-NORTE'],
+            ['postal_code' => '08003', 'zone_code' => 'ZONA-BCN-CENTRO'],
+            ['postal_code' => '08039', 'zone_code' => 'ZONA-BCN-CENTRO'],
+            ['postal_code' => '08034', 'zone_code' => 'ZONA-BCN-CENTRO'],
+            ['postal_code' => '08907', 'zone_code' => 'ZONA-BCN-SUR'],
+            ['postal_code' => '08908', 'zone_code' => 'ZONA-BCN-SUR'],
+            ['postal_code' => '08940', 'zone_code' => 'ZONA-BCN-SUR'],
+            ['postal_code' => '08195', 'zone_code' => 'ZONA-BCN-SUR'],
+        ];
+    }
+
+    /**
+     * Cuadrante demo: un titular por zona y las suplencias repartidas.
+     *
+     * @return list<array{email: string, zone_code: string, is_primary: bool}>
+     */
+    private static function canonicalTechnicianZoneRows(): array
+    {
+        return [
+            ['email' => 'elena.ruta@vendguard.internal', 'zone_code' => 'ZONA-BCN-NORTE', 'is_primary' => true],
+            ['email' => 'marta.ruta@vendguard.internal', 'zone_code' => 'ZONA-BCN-CENTRO', 'is_primary' => true],
+            ['email' => 'carlos.ruta@vendguard.internal', 'zone_code' => 'ZONA-BCN-SUR', 'is_primary' => true],
+            ['email' => 'jordi.ruta@vendguard.internal', 'zone_code' => 'ZONA-BCN-NORTE', 'is_primary' => false],
+            ['email' => 'jordi.ruta@vendguard.internal', 'zone_code' => 'ZONA-BCN-CENTRO', 'is_primary' => false],
+            ['email' => 'marc.ruta@vendguard.internal', 'zone_code' => 'ZONA-BCN-SUR', 'is_primary' => false],
+            ['email' => 'marc.ruta@vendguard.internal', 'zone_code' => 'ZONA-BCN-NORTE', 'is_primary' => false],
+        ];
+    }
+
     private static function canonicalLocationRows(): array
     {
         return [
@@ -1182,6 +1463,7 @@ class SeedRunner
                 'longitude' => 2.1932450,
                 'contact_name' => 'Laura Sanitaria',
                 'contact_phone' => '600111222',
+                'postal_code' => '08003',
             ],
             [
                 'site_code' => 'SEDE-BCN-02',
@@ -1191,6 +1473,7 @@ class SeedRunner
                 'longitude' => 2.1895120,
                 'contact_name' => 'Marc Recepción',
                 'contact_phone' => '600333444',
+                'postal_code' => '08018',
             ],
             [
                 'site_code' => 'SEDE-BCN-03',
@@ -1200,6 +1483,7 @@ class SeedRunner
                 'longitude' => 2.1075400,
                 'contact_name' => 'Carles Coordinador',
                 'contact_phone' => '600555666',
+                'postal_code' => '08907',
             ],
             [
                 'site_code' => 'SEDE-BCN-04',
@@ -1209,6 +1493,7 @@ class SeedRunner
                 'longitude' => 2.1819000,
                 'contact_name' => 'Núria Port',
                 'contact_phone' => '600777888',
+                'postal_code' => '08039',
             ],
             [
                 'site_code' => 'SEDE-BCN-05',
@@ -1218,6 +1503,7 @@ class SeedRunner
                 'longitude' => 2.1123000,
                 'contact_name' => 'Albert Campus',
                 'contact_phone' => '600999000',
+                'postal_code' => '08034',
             ],
             [
                 'site_code' => 'SEDE-BCN-06',
@@ -1227,6 +1513,7 @@ class SeedRunner
                 'longitude' => 2.1758000,
                 'contact_name' => 'Clara Innovació',
                 'contact_phone' => '611222333',
+                'postal_code' => '08042',
             ],
             [
                 'site_code' => 'SEDE-BCN-07',
@@ -1236,6 +1523,7 @@ class SeedRunner
                 'longitude' => 2.2421000,
                 'contact_name' => 'Sergi Logística',
                 'contact_phone' => '611444555',
+                'postal_code' => '08916',
             ],
             [
                 'site_code' => 'SEDE-BCN-08',
@@ -1245,6 +1533,7 @@ class SeedRunner
                 'longitude' => 2.0689000,
                 'contact_name' => 'Gemma Gestió',
                 'contact_phone' => '611666777',
+                'postal_code' => '08195',
             ],
             [
                 'site_code' => 'SEDE-BCN-09',
@@ -1254,6 +1543,7 @@ class SeedRunner
                 'longitude' => 2.1284000,
                 'contact_name' => 'Pau Esdeveniments',
                 'contact_phone' => '611888999',
+                'postal_code' => '08908',
             ],
             [
                 'site_code' => 'SEDE-BCN-10',
@@ -1263,6 +1553,7 @@ class SeedRunner
                 'longitude' => 2.0862000,
                 'contact_name' => 'Mireia Serveis',
                 'contact_phone' => '622111222',
+                'postal_code' => '08940',
             ],
         ];
     }

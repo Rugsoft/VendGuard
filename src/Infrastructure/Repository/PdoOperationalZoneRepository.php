@@ -521,6 +521,110 @@ final class PdoOperationalZoneRepository implements OperationalZoneRepositoryInt
     /**
      * {@inheritDoc}
      */
+    public function releasePostalCodesNotIn(int $zoneId, array $keepPostalCodes, int $userId): array
+    {
+        $this->assertActiveZone($zoneId, 'liberar códigos postales');
+
+        $keep = self::normalizePostalCodes($keepPostalCodes);
+        $actor = $this->resolveActor($userId);
+
+        $this->pdo->beginTransaction();
+
+        try {
+            // La foto se toma con la fila bloqueada: una edición concurrente del
+            // mismo territorio no puede liberar lo que la otra acaba de añadir.
+            $stmt = $this->pdo->prepare(
+                'SELECT postal_code
+                 FROM operational_zone_postal_codes
+                 WHERE zone_id = :zone_id
+                   AND released_at IS NULL
+                 FOR UPDATE'
+            );
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+            $stmt->execute();
+            $current = array_map(
+                static fn (array $row): string => (string)$row['postal_code'],
+                $stmt->fetchAll()
+            );
+
+            // Lo que el formulario ya no declara deja de estar gobernado por la
+            // zona. Los códigos del lote son un no-op, no un alta duplicada.
+            $toRelease = array_values(array_diff($current, $keep));
+
+            if ($toRelease === []) {
+                $this->pdo->commit();
+
+                return ['released_postal_codes' => [], 'recalculated_locations' => 0];
+            }
+
+            [$postalIn, $postalParams] = self::inClause('cp', $toRelease);
+
+            $stmt = $this->pdo->prepare(
+                "UPDATE operational_zone_postal_codes
+                 SET released_at = CURRENT_TIMESTAMP
+                 WHERE zone_id = :zone_id
+                   AND released_at IS NULL
+                   AND postal_code IN ({$postalIn})"
+            );
+            self::bindAll($stmt, $postalParams);
+            $stmt->bindValue(':zone_id', $zoneId, PDO::PARAM_INT);
+            $stmt->execute();
+
+            // Las sedes heredadas de un CP liberado recalculan su zona desde el
+            // catálogo vivo. Si el CP quedó sin demarcación, la subconsulta
+            // devuelve NULL y la sede pasa a «Sin Zona Asignada»; las forzadas a
+            // mano no se tocan (RF-03.2, RF-03.3).
+            $stmt = $this->pdo->prepare(
+                "UPDATE locations
+                 SET zone_id = (
+                     SELECT p.zone_id
+                     FROM operational_zone_postal_codes p
+                     WHERE p.postal_code = locations.postal_code
+                       AND p.released_at IS NULL
+                     LIMIT 1
+                 )
+                 WHERE postal_code IN ({$postalIn})
+                   AND is_manual_override = " . $this->dialect->booleanLiteral(false) . '
+                   AND deleted_at IS NULL'
+            );
+            self::bindAll($stmt, $postalParams);
+            $stmt->execute();
+            $recalculatedLocations = $stmt->rowCount();
+
+            $this->auditRepo->log(new AuditEvent(
+                null,
+                AuditEvent::ENTITY_OPERATIONAL_ZONE,
+                $zoneId,
+                'ZONE_UPDATED',
+                $userId,
+                $actor['role'],
+                $actor['name'],
+                null,
+                [
+                    'released_postal_codes' => $toRelease,
+                    'recalculated_locations_count' => $recalculatedLocations,
+                ],
+                ['operation' => 'POSTAL_CODES_RELEASED']
+            ));
+
+            $this->pdo->commit();
+
+            return [
+                'released_postal_codes' => $toRelease,
+                'recalculated_locations' => $recalculatedLocations,
+            ];
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function transferPostalCodes(int $newZoneId, array $postalCodes, int $userId): int
     {
         $target = $this->findById($newZoneId, true);

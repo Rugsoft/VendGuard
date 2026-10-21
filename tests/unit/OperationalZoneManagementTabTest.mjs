@@ -489,6 +489,35 @@ assert('5.5 La confirmación reenvía el lote completo con confirm_transfers = t
     && postalTab.postalConflicts.length === 0
     && postalTab.showPostalCodesModal === false);
 
+// Sustitución territorial (RF-01.4, hallazgo H-1): lo que desaparece de la lista
+// se anuncia como liberación antes de guardar, y el resultado lo confirma.
+const substitutionTab = createTabInstance();
+substitutionTab.zones = makeZones();
+substitutionTab.openPostalCodesModal(substitutionTab.zones[0]);
+substitutionTab.postalCodesInput = '08005';
+assert('5.6 La consola anticipa los códigos que se liberarán al guardar',
+  JSON.stringify(substitutionTab.postalCodesToRelease) === JSON.stringify(['08006']));
+
+substitutionTab.postalCodesInput = '08005, 08006, 08007';
+nextAssignResult = {
+  zone_id: 1,
+  assigned_postal_codes: ['08005', '08006', '08007'],
+  transferred_postal_codes: [],
+  released_postal_codes: ['08009'],
+  affected_locations_count: 2
+};
+await substitutionTab.submitPostalCodes(false);
+assert('5.7 El aviso de éxito distingue liberaciones y sedes recolocadas',
+  substitutionTab.successMessage.includes('1 código(s) liberado(s)')
+    && substitutionTab.successMessage.includes('2 sede(s) recolocada(s)'));
+nextAssignResult = {
+  zone_id: 1,
+  assigned_postal_codes: ['08005', '08006'],
+  transferred_postal_codes: [],
+  released_postal_codes: [],
+  affected_locations_count: 0
+};
+
 // =========================================================================
 // BLOQUE 6: Cuadrante técnico (QA 9 / QA 10)
 // =========================================================================

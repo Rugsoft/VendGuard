@@ -180,8 +180,8 @@ Obtiene el parque de máquinas instaladas en la sede para el formulario de repor
 ### 3.2 `POST /api/incidents` (Crear Nueva Incidencia)
 Registra un nuevo aviso de avería con cálculo automático de urgencia y control de duplicados (RF-02, RF-03).
 
-* **Formato:** `multipart/form-data` (permite adjuntar imagen opcional)
-* **Parámetros / Campos de Formulario:**
+* **Formato:** `application/json` (sin fotografía) o `multipart/form-data` (con fotografía opcional). El portal de sede envía JSON puro cuando no hay imagen; ambas formas comparten los mismos campos y el mismo contrato de respuesta (hallazgo H-6).
+* **Parámetros / Campos:**
   * `machine_id` *(int, requerido)*: ID de la máquina averiada.
   * `reporter_name` *(string, opcional)*: Nombre del informador.
   * `reporter_phone` *(string, opcional)*: Teléfono de contacto.
@@ -196,7 +196,13 @@ Registra un nuevo aviso de avería con cálculo automático de urgencia y contro
   "data": {
     "id": 14,
     "ticket_code": "INC-2026-0014",
+    "machine_id": 3,
     "machine_code": "VEND-0101",
+    "machine_model": "Sanden Vendo G-Drink",
+    "machine_type": "PERISHABLE_FOOD",
+    "location_id": 1,
+    "location_site_code": "SEDE-BCN-01",
+    "location_name": "Hospital del Mar - Edificio Central",
     "category": "TEMPERATURE_COLD",
     "urgency": "CRITICAL",
     "status": "REGISTERED",
