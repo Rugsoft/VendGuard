@@ -168,7 +168,13 @@ namespace VendGuard\Application\Service;
 final class VanStockService
 {
     /** RF-01.1 / RF-05.1: alta o ajuste absoluto con auditoría del delta. */
-    public function setStock(int $technicianId, int $sparePartId, int $quantity, int $minThreshold, ?array $actor): VanStockItem;
+    public function setStock(
+        int $technicianId,
+        int $sparePartId,
+        int $quantityAvailable,
+        int $minThreshold,
+        ?int $actorUserId = null
+    ): VanStockAdjustmentResultDto;
 
     /** RF-02.1: único punto de descuento, atómico y llamado por ambos caminos de declaración. */
     public function consume(int $technicianId, int $sparePartId, int $quantity): void;
@@ -180,6 +186,10 @@ final class VanStockService
     public function listByTechnician(int $technicianId): array;
 }
 ```
+
+El ajuste devuelve `VanStockAdjustmentResultDto` —saldo, cantidad previa y delta— y no la entidad desnuda: el panel necesita saber **cuánto había antes** para confirmar que el ajuste hizo lo que el coordinador esperaba, y un alta no tiene cantidad previa (`null`, no `0`: «no existía fila» y «había cero unidades» son hechos distintos). El actor viaja como identificador de usuario, no como tupla de rol y nombre: el repositorio lo resuelve contra `users` dentro de la misma transacción que escribe el saldo (RF-05.1).
+
+Los dos listados devuelven `VanStockEntryDto`, que trae la fila ya unida a su técnico y a su pieza y expone dos proyecciones: `toTechnicianArray()` (contrato §4.1) y `toCoordinatorArray()` (contrato §4.2). Las marcas `is_below_threshold` e `is_negative` se calculan en el DTO con la misma definición que la entidad, de modo que la insignia del panel y la del técnico no puedan divergir.
 
 ### 3.3. Inyección y compatibilidad de pruebas
 `SparePartTraceabilityService` recibe `VanStockService` por constructor junto a sus repositorios actuales. **Consecuencia declarada:** los stubs de repositorio de los tests unitarios que implementan las interfaces de dominio afectadas deben actualizarse en el mismo cambio (guarda §5 del plan).

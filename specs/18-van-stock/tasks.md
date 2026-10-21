@@ -36,7 +36,7 @@
 * **Refs:** RF-01.2, RF-03.1, RF-03.3
 * **Ruta:** inline
 * **Prueba en rojo:** `tests/unit/VanStockItemTest.php` (rangos, umbral, negatividad).
-* **Alcance:** `src/Core/Domain/Model/VanStockItem.php`.
+* **Alcance:** `src/Core/Domain/Model/VanStockItem.php`, `src/Core/Domain/Exception/VanStockValidationException.php` (catálogo de errores de los contratos §5).
 
 ### T-VAN-03 · Puerto y repositorio PDO
 * **Refs:** RF-01.1, RF-02.3, RF-03.2 · Contratos §6
@@ -48,7 +48,8 @@
 * **Refs:** RF-01.1, RF-03, RF-04, RF-05.1
 * **Ruta:** inline
 * **Prueba en rojo:** `tests/unit/VanStockServiceTest.php` (ajuste absoluto con auditoría del delta; alerta ordenada con negativos primero; listado por técnico).
-* **Alcance:** `src/Application/Service/VanStockService.php`, `src/Application/DTO/VanStockAdjustmentDto.php`.
+* **Alcance:** `src/Application/Service/VanStockService.php`, `src/Application/DTO/VanStockAdjustmentResultDto.php` (saldo, cantidad previa y delta), `src/Application/DTO/VanStockEntryDto.php` (proyecciones de técnico y de coordinador).
+* **Nota de diseño:** el servicio valida y delega; la transacción y el evento de auditoría viven en `PdoVanStockRepository::adjust()`, que es donde comparten unidad de escritura con el saldo. La auditoría del delta se certifica contra el motor real en `VanStockApiTest` (WU-4).
 
 ### T-VAN-05 · Descuento automático en los dos caminos de declaración
 * **Refs:** RF-02.1, RF-02.2, RF-02.3, RF-02.4 (RD-01 a RD-04)
@@ -114,3 +115,12 @@ T-VAN-03 ─┘                                     ├─> T-VAN-08 ─┐
 * **Desvío corregido dentro de la rebanada:** el enumerado `audit_entity_type` ganó `TECHNICIAN_VAN_STOCK`, así que `AuditEvent::ENTITY_TYPES` y la etiqueta del visor (`AuditActionLabels.js`) debían incorporarlo en el mismo commit: `AuditEntityTypesTest` y `AuditActionCatalogTest` exigen que el catálogo del dominio y el del visor no divergan del enumerado de la base.
 * **Recuento de esquema:** 26 tablas · 39 disparadores · 40 restricciones nombradas · 14 `CHECK` · 41 claves foráneas · 63 índices secundarios.
 * **Riesgo:** `none` — todo es aditivo: tabla nueva, valor de enumerado nuevo y semillas nuevas; ninguna fila ni columna existente cambia de forma o de significado.
+
+### WU-2 · T-VAN-02, T-VAN-03 y T-VAN-04 (dominio y aplicación) — cerrado
+* **Commit:** `feat(van-stock): add the van stock domain, its port and its application service`
+* **Rojo observado:** `VanStockItemTest` y `VanStockServiceTest` mueren con «Class/Interface not found» antes de escribir las clases.
+* **Verde:** `VanStockItemTest` 17/17 · `VanStockServiceTest` 27/27 · `SqlDialectPortabilityTest` 97/97 · `AuditActionCatalogTest` 26/26 · batería completa 309 suites / 12 029 aserciones / 0 fallos con las cifras documentadas coherentes.
+* **Sonda contra el motor real** (script fuera del repositorio, dentro de una transacción revertida, sin dejar rastro en la base de la batería): `findTechnician` (rol y código de operador), `sparePartExists` (pieza existente e inexistente), `findByPair` sin fila, alta con `RETURNING` e identificador, ajuste con cantidad previa y delta `-3`, evento `VAN_STOCK_ADJUSTED` con `previous_state` y `metadata.delta`, consumo sobre fila existente (`1 - 2 = -1`) y consumo sin fila previa (creada en `-3`), inventario del técnico (4 filas), alerta (5 filas, el descuadre primero) y filtro por técnico. La sonda corrió además dentro de una transacción externa: el guardián de `adjust()` no anida transacción.
+* **Decisiones tomadas al implementar:** el actor viaja como `?int $actorUserId` (el repositorio resuelve rol y nombre) y el ajuste devuelve `VanStockAdjustmentResultDto` con la cantidad previa y el delta; ambas cosas quedaron reflejadas en los contratos §3.2. El puerto asume las dos lecturas de destino (`findTechnician`, `sparePartExists`) en vez de depender de los puertos completos de usuarios y repuestos, que suman más de veinte métodos para dos comprobaciones de existencia.
+* **Pendiente de certificar:** la auditoría del delta contra motor real queda para `VanStockApiTest` (WU-4), que es la suite que levanta el esquema completo y ejerce el camino HTTP. La sonda manual de esta rebanada es evidencia, no cobertura.
+* **Riesgo:** `none` — todo es código nuevo más una entrada aditiva en el catálogo del visor (`VAN_STOCK_ADJUSTED`); ningún camino existente cambia de comportamiento.
