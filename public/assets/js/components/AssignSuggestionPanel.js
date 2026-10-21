@@ -146,7 +146,7 @@ export const AssignSuggestionPanel = {
       </div>
 
       <!-- Técnico recomendado: un toque para despachar (RNF-02) -->
-      <div v-if="suggestedTechnician" class="mb-3" data-testid="assign-suggested-card" style="background-color: var(--color-primary-subtle); border: 1px solid var(--color-primary); border-radius: var(--radius-card); padding: 12px 14px;">
+      <div v-if="suggestedTechnician" class="vg-suggestion-block" data-testid="assign-suggested-card" style="background-color: var(--color-primary-subtle); border: 1px solid var(--color-primary); border-radius: var(--radius-card); padding: 12px 14px;">
         <div class="d-flex justify-content-between align-items-start gap-2">
           <div>
             <div class="fw-bold" style="font-size: 12px; letter-spacing: 0.03em; color: var(--color-primary-dark);">
@@ -162,8 +162,8 @@ export const AssignSuggestionPanel = {
             <div v-if="suggestionBreakdown(suggestedTechnician)" class="font-monospace mt-1" style="font-size: 11px; color: var(--color-ink-secondary);" data-testid="assign-suggested-breakdown">
               {{ suggestionBreakdown(suggestedTechnician) }}
             </div>
-            <div class="d-flex flex-wrap gap-1 mt-2" data-testid="assign-suggested-badges">
-              <span v-for="badge in suggestedBadges" :key="badge" class="vg-chip" style="font-size: 11px;">
+            <div class="vg-suggestion-badges" data-testid="assign-suggested-badges">
+              <span v-for="badge in suggestedBadges" :key="badge" class="vg-chip">
                 {{ suggestionBadgeLabel(badge) }}
               </span>
             </div>
@@ -185,30 +185,31 @@ export const AssignSuggestionPanel = {
       </div>
 
       <!-- Ranking explicado: el coordinador puede elegir a otro sin bloqueo (RF-04.3).
-           Las filas llevan altura automática: el contenido de dos líneas (nombre +
-           insignias) no cabe en la altura fija del vg-btn y desbordaría sobre la
-           fila siguiente (regresión visual reportada en triaje, 2026-10-20). -->
-      <div v-if="rankedTechnicians.length > 1" class="mb-3" data-testid="assign-ranking">
-        <div class="text-uppercase fw-bold mb-1" style="font-size: 11px; letter-spacing: 0.05em; color: var(--color-ink-muted);">Ranking territorial</div>
+           La fila se viste con vg-ranking-row (rejilla de dos pistas declarada en
+           design-tokens.css) en lugar de amontonar nombre, afinidad, insignias y
+           puntuación dentro de un vg-btn-sm: la puntuación queda anclada arriba a la
+           derecha y las insignias en su propio renglón, con aire entre ellas
+           (regresión visual reportada en triaje, 2026-10-21). -->
+      <div v-if="rankedTechnicians.length > 1" class="vg-suggestion-block" data-testid="assign-ranking">
+        <div class="vg-ranking-heading">Ranking territorial</div>
         <button
           v-for="candidate in rankedTechnicians"
           :key="candidate.technician_id"
           type="button"
-          class="vg-btn vg-btn-sm w-100 d-flex justify-content-between align-items-center gap-2 mb-1 text-start"
+          class="vg-btn vg-btn-sm vg-ranking-row"
           :class="Number(selectedTechnicianId) === Number(candidate.technician_id) ? 'vg-btn-primary' : 'vg-btn-secondary'"
           :disabled="busy"
           :data-testid="'assign-candidate-' + candidate.technician_id"
-          style="height: auto; min-height: var(--control-height-sm);"
           @click="chooseCandidate(candidate)"
         >
-          <span>
-            <span class="fw-semibold" style="font-size: 13px;">{{ candidate.name }}</span>
-            <span class="small" style="opacity: 0.8;"> · {{ candidate.zone_affinity_label }}</span>
-            <span class="d-flex flex-wrap gap-1 mt-1">
-              <span v-for="badge in candidate.badges" :key="badge" class="vg-chip" style="font-size: 10px;">{{ suggestionBadgeLabel(badge) }}</span>
-            </span>
+          <span class="vg-ranking-identity">
+            <span class="vg-ranking-name">{{ candidate.name }}</span>
+            <span class="vg-ranking-affinity">· {{ candidate.zone_affinity_label }}</span>
           </span>
-          <span class="font-monospace" style="font-size: 12px; opacity: 0.9;">{{ candidate.total_score }} pts</span>
+          <span class="vg-ranking-score font-monospace">{{ candidate.total_score }} pts</span>
+          <span v-if="candidate.badges && candidate.badges.length" class="vg-ranking-badges">
+            <span v-for="badge in candidate.badges" :key="badge" class="vg-chip">{{ suggestionBadgeLabel(badge) }}</span>
+          </span>
         </button>
       </div>
     </div>

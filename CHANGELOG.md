@@ -95,6 +95,24 @@ a un módulo funcional certificado por la batería global.
 - `OperationalZoneManagementTabTest` gana dos aserciones (1.10 y 1.11) que impiden
   reintroducir un diálogo fuera del componente compartido o sin pie de acciones.
 
+### Corregido (2026-10-21, ranking territorial legible)
+
+- El ranking de asignación amontonaba cinco datos en dos renglones: nombre y afinidad
+  compartían línea, las insignias caían cuatro píxeles debajo y la puntuación —centrada
+  a media altura por el `align-items-center` de la fila— se montaba sobre ellas. La fila
+  pasa a una rejilla de dos pistas (`vg-ranking-row`): identidad arriba a la izquierda,
+  puntuación anclada arriba a la derecha e insignias en su propio renglón, con 6 px entre
+  fichas, 8 px bajo el nombre y 6 px entre filas.
+- Las insignias dejan de ser `<span class="vg-chip">` en línea, sin borde ni envoltura:
+  el bloque compartido `vg-ranking-badges` / `vg-suggestion-badges` las envuelve con
+  separación y les da su filo hairline, un peldaño por debajo del chip suelto.
+- La ficha del técnico recomendado recibe el mismo tratamiento, porque sufría el mismo
+  amontonamiento en el mismo modal, y los bloques del panel se separan con la escala del
+  sistema (`vg-suggestion-block`) en lugar de la utilidad de empaquetado `mb-3`.
+- `CoordinatorDashboardAssignPanelTest` reescribe la aserción 1.7 y añade la 1.8: la
+  geometría de la fila vive en la hoja de tokens (clase, no `style` en línea) y las pistas
+  declaran su holgura, para que la próxima plantilla no vuelva al amontonamiento.
+
 ### Seguridad
 
 - El portal de la sede no recibe el nombre, código ni color de su zona operativa, ni

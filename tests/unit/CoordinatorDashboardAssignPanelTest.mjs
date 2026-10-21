@@ -38,6 +38,8 @@ globalThis.window = {
   dispatchEvent: () => true
 };
 
+import { readFileSync } from 'node:fs';
+
 import { api } from '../../public/assets/js/api.js';
 import { CoordinatorDashboardView } from '../../public/assets/js/views/CoordinatorDashboardView.js';
 import { CoordinatorIncidentDetailModal } from '../../public/assets/js/components/CoordinatorIncidentDetailModal.js';
@@ -229,9 +231,30 @@ assert('1.6 La plantilla pinta el ranking con sus insignias y el aviso de zona d
   AssignSuggestionPanel.template.includes('data-testid="assign-ranking"')
     && AssignSuggestionPanel.template.includes('suggestionBadgeLabel(badge)')
     && AssignSuggestionPanel.template.includes('data-testid="assign-unattended-warning"'));
-assert('1.7 Las filas del ranking llevan altura automática: el bloque de insignias de dos líneas no desborda sobre la fila siguiente',
-  AssignSuggestionPanel.template.includes('height: auto; min-height: var(--control-height-sm)'));
-assert('1.8 El panel asistido es un componente compartido con detalle y lote del mapa',
+// Vestido de la fila del ranking: la geometría vive en la hoja de tokens, no en la plantilla.
+const designTokensCss = readFileSync(new URL('../../public/assets/css/design-tokens.css', import.meta.url), 'utf8');
+const rankingRowRule = designTokensCss.match(/\.vg-ranking-row\s*\{([^}]*)\}/s)?.[1] || '';
+const suggestionBadgesRule = designTokensCss.match(/\.vg-ranking-badges,\s*\n?\.vg-suggestion-badges\s*\{([^}]*)\}/s)?.[1] || '';
+const suggestionChipRule = designTokensCss.match(/\.vg-ranking-badges \.vg-chip,\s*\n?\.vg-suggestion-badges \.vg-chip\s*\{([^}]*)\}/s)?.[1] || '';
+
+assert('1.7 Las filas del ranking se visten con la clase del sistema y su altura es automática: el bloque de insignias de dos líneas no desborda',
+  AssignSuggestionPanel.template.includes('vg-ranking-row')
+    && !/style="height:/.test(AssignSuggestionPanel.template)
+    && /height:\s*auto/.test(rankingRowRule)
+    && /min-height:\s*var\(--control-height-sm\)/.test(rankingRowRule));
+assert('1.8 La fila del ranking respira: identidad, puntuación e insignias ocupan pistas separadas con holgura propia',
+  /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/.test(rankingRowRule)
+    && /row-gap:\s*var\(--spacing-/.test(rankingRowRule)
+    && /column-gap:\s*var\(--spacing-/.test(rankingRowRule)
+    && /flex-wrap:\s*wrap/.test(suggestionBadgesRule)
+    && /gap:\s*var\(--spacing-xs\)/.test(suggestionBadgesRule)
+    && /padding:\s*var\(--control-gap-sm\)/.test(suggestionChipRule)
+    && /font-size:\s*var\(--font-size-caption\)/.test(suggestionChipRule)
+    && AssignSuggestionPanel.template.includes('class="vg-ranking-identity"')
+    && AssignSuggestionPanel.template.includes('class="vg-ranking-score font-monospace"')
+    && AssignSuggestionPanel.template.includes('class="vg-ranking-badges"')
+    && AssignSuggestionPanel.template.includes('class="vg-suggestion-badges"'));
+assert('1.9 El panel asistido es un componente compartido con detalle y lote del mapa',
   template.includes('<AssignSuggestionPanel')
     && CoordinatorIncidentDetailModal.template.includes('<AssignSuggestionPanel')
     && template.includes('bulkAssignSuggestions'));;

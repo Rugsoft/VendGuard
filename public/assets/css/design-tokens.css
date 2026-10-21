@@ -509,6 +509,115 @@ h4 { font-size: var(--font-size-heading-md); }
   color: var(--color-error-text);
 }
 
+/* Fila del ranking territorial de la asignación asistida (Módulo 17, RF-04.3).
+
+   Origen (reporte del Product Owner, 2026-10-21): la fila era un `vg-btn-sm` con todo el
+   contenido dentro. El nombre y la afinidad compartían renglón, las insignias caían cuatro
+   píxeles debajo y la puntuación —centrada a media altura por el `align-items-center` de la
+   fila— aterrizaba justo encima de las insignias. Cinco datos en dos renglones sin un solo
+   píxel de aire entre ellos.
+
+   La fila deja de ser una línea de botón con contenido amontonado y pasa a ser una rejilla
+   de dos pistas: la identidad (nombre + afinidad) arriba a la izquierda y la puntuación
+   anclada arriba a la derecha, con las insignias en su propio renglón debajo de la identidad
+   y sin invadir la columna de la puntuación. El aire sale de la escala de espaciado, no de
+   literales en la plantilla. */
+.vg-ranking-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  width: 100%;
+  height: auto;
+  min-height: var(--control-height-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  column-gap: var(--spacing-md);
+  row-gap: var(--spacing-sm);
+  text-align: left;
+  white-space: normal;
+}
+
+.vg-ranking-row + .vg-ranking-row {
+  margin-top: var(--spacing-xs);
+}
+
+.vg-ranking-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--spacing-xs);
+  min-width: 0;
+}
+
+.vg-ranking-name {
+  font-size: var(--font-size-body-sm);
+  font-weight: 600;
+  line-height: var(--font-line-height-body-sm);
+}
+
+.vg-ranking-affinity {
+  font-size: var(--font-size-caption);
+  color: inherit;
+  opacity: 0.75;
+}
+
+/* Cifras alineadas por dígito: la columna de puntos del ranking se lee de un vistazo. */
+.vg-ranking-score {
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Las insignias son fichas de lectura, no mandos: van un peldaño por debajo del chip suelto
+   para que la fila no doble de alto, envuelven si no caben y conservan separación entre sí.
+   El mismo bloque sirve al técnico recomendado y a cada puesto del ranking. */
+.vg-ranking-badges,
+.vg-suggestion-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-sm);
+}
+
+.vg-ranking-badges {
+  grid-column: 1;
+  margin-top: 0;
+}
+
+.vg-ranking-badges .vg-chip,
+.vg-suggestion-badges .vg-chip {
+  /* El chip suelto toma el borde de la variante de botón que lo acompaña; aquí se le da
+     su propio filo —sin shorthand, para no pisar el color de los tintes semánticos— para
+     que la insignia siga leyéndose como ficha sobre una fila blanca. */
+  border-width: 1px;
+  border-style: solid;
+  padding: var(--control-gap-sm) var(--spacing-sm);
+  font-size: var(--font-size-caption);
+  font-weight: 500;
+  line-height: var(--font-line-height-caption);
+}
+
+/* Separación vertical de los bloques del panel de sugerencias (recomendado, ranking).
+
+   La ficha del recomendado y el ranking se separaban con la utilidad `mb-3` (16 px), la
+   misma que usa el resto del panel para empaquetar controles. Aquí el aire es mayor a
+   propósito: el ranking es una lista que se lee de arriba abajo y empieza en una tarjeta
+   distinta, así que cada bloque se declara con la escala del sistema en lugar de heredar
+   el espaciado de formulario. */
+.vg-suggestion-block {
+  margin-bottom: var(--spacing-base);
+}
+
+.vg-ranking-heading {
+  margin-bottom: var(--spacing-sm);
+  font-size: var(--font-size-caption);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+
 /* Grupo de botones que envuelve sus controles.
 
    Origen (reporte del Product Owner, 2026-10-11): en una avería en pausa de sede la
