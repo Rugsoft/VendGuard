@@ -13,6 +13,7 @@ use VendGuard\Application\Service\PreventiveChecklistEvaluationService;
 use VendGuard\Application\Service\PreventiveCoexistenceBridgeService;
 use VendGuard\Application\Service\SanitaryCertificateService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
+use VendGuard\Application\Service\VanStockService;
 use VendGuard\Core\Domain\Exception\CannotIssueNonConformCertificateException;
 use VendGuard\Core\Domain\Exception\ChecklistIncompleteException;
 use VendGuard\Core\Domain\Exception\InvalidPartQuantityException;
@@ -33,6 +34,7 @@ use VendGuard\Infrastructure\Repository\PdoIncidentReplacedPartRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoVanStockRepository;
 use VendGuard\Infrastructure\Repository\PdoPreventiveItemRepository;
 use VendGuard\Infrastructure\Repository\PdoPreventiveOrderRepository;
 use VendGuard\Infrastructure\Repository\PdoPreventiveSettingsRepository;
@@ -133,6 +135,7 @@ class TechnicianPreventiveController
             sparePartRepo: new PdoSparePartRepository(),
             incidentRepo: $incidentRepo,
             machineRepo: $this->machineRepo,
+            vanStockService: new VanStockService(new PdoVanStockRepository()),
             auditLogger: $this->auditLogger
         );
     }

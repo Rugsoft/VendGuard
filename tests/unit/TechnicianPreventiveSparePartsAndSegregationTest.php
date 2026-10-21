@@ -18,12 +18,14 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/../../src/autoload.php';
+require_once __DIR__ . '/../Support/RecordingVanStockRepository.php';
 
 use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\PreventiveChecklistEvaluationService;
 use VendGuard\Application\Service\PreventiveCoexistenceBridgeService;
 use VendGuard\Application\Service\SanitaryCertificateService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
+use VendGuard\Application\Service\VanStockService;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentReplacedPart;
 use VendGuard\Core\Domain\Model\Location;
@@ -752,6 +754,7 @@ function createPrevTestEnvironment(): array
         sparePartRepo: $sparePartRepo,
         incidentRepo: $incidentRepo,
         machineRepo: $machineRepo,
+        vanStockService: new VanStockService(new RecordingVanStockRepository()),
         auditLogger: $auditLogger
     );
 

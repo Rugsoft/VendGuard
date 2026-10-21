@@ -17,8 +17,10 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/../../src/autoload.php';
+require_once __DIR__ . '/../Support/RecordingVanStockRepository.php';
 
 use VendGuard\Application\Service\SparePartTraceabilityService;
+use VendGuard\Application\Service\VanStockService;
 use VendGuard\Core\Domain\Exception\IncompatibleSparePartException;
 use VendGuard\Core\Domain\Exception\InvalidOutOfCatalogJustificationException;
 use VendGuard\Core\Domain\Exception\InvalidPartQuantityException;
@@ -537,6 +539,7 @@ function createTestEnvironment(): array {
     $sparePartRepo = new MockSparePartRepository();
     $incidentRepo = new MockIncidentRepository();
     $machineRepo = new MockMachineRepository();
+    $vanStockRepo = new RecordingVanStockRepository();
 
     // 1. Repuestos de prueba
     $part1 = new SparePart(
@@ -596,7 +599,8 @@ function createTestEnvironment(): array {
         replacedPartRepo: $replacedPartRepo,
         sparePartRepo: $sparePartRepo,
         incidentRepo: $incidentRepo,
-        machineRepo: $machineRepo
+        machineRepo: $machineRepo,
+        vanStockService: new VanStockService($vanStockRepo)
     );
 
     return [
@@ -606,6 +610,7 @@ function createTestEnvironment(): array {
         'sparePartRepo'    => $sparePartRepo,
         'incidentRepo'     => $incidentRepo,
         'machineRepo'      => $machineRepo,
+        'vanStockRepo'     => $vanStockRepo,
     ];
 }
 
@@ -1011,6 +1016,105 @@ $assert(
 $assert(
     "getRequestsByIncident recupera solicitudes de la incidencia",
     is_array($service->getRequestsByIncident(101))
+);
+
+// =============================================================================
+// 6. Descuento del stock de la furgoneta (Módulo 18, RF-02.1 a RF-02.4 / RD-01 a RD-04)
+// =============================================================================
+echo "\n--- 6. Descuento del stock de la furgoneta (Módulo 18) ---\n";
+
+// 6.1 Correctivo con pieza de catálogo: descuenta exactamente lo declarado
+$env = createTestEnvironment();
+$catResolve = $env['service']->resolveIncidentWithParts(101, 42, [
+    'resolution_diagnosis' => 'Rotura de membrana interna en electroválvula de entrada',
+    'resolution_action' => 'Sustitución de electroválvula y prueba de estanqueidad',
+    'replaced_parts_declared' => true,
+    'replaced_parts' => [
+        ['spare_part_id' => 1, 'is_out_of_catalog' => false, 'quantity' => 2, 'old_part_destination' => 'TALLER'],
+    ],
+]);
+$assert(
+    "El correctivo descuenta la cantidad declarada de la pieza de catálogo",
+    $env['vanStockRepo']->consumptions === [
+        ['technician_id' => 42, 'spare_part_id' => 1, 'quantity' => 2],
+    ],
+    json_encode($env['vanStockRepo']->consumptions)
+);
+$assert(
+    "La declaración no consulta la disponibilidad: el inventario no puede impedir el cierre (RD-04)",
+    $env['vanStockRepo']->findByPairCalls === 0 && $catResolve['status'] === IncidentStatus::RESOLVED->value
+);
+
+// 6.2 Correctivo con pieza fuera de catálogo: no descuenta y no bloquea (RD-01)
+$env = createTestEnvironment();
+$outResolve = $env['service']->resolveIncidentWithParts(101, 42, [
+    'resolution_diagnosis' => 'Obstrucción del circuito de agua por manguera degradada',
+    'resolution_action' => 'Sustitución de manguera de silicona y purga del circuito',
+    'replaced_parts_declared' => true,
+    'replaced_parts' => [
+        ['is_out_of_catalog' => true, 'custom_part_name' => 'Manguera silicona 8mm', 'quantity' => 1, 'old_part_destination' => 'DESGUACE'],
+    ],
+]);
+$assert(
+    "Una pieza fuera de catálogo no descuenta stock (RD-01)",
+    $env['vanStockRepo']->consumptions === [] && $outResolve['replaced_parts_count'] === 1
+);
+
+// 6.3 Preventivo: el mismo punto único de descuento
+$env = createTestEnvironment();
+$env['service']->recordPreventiveReplacedParts(
+    preventiveOrderId: 501,
+    technicianId: 42,
+    machineId: 10,
+    locationId: 5,
+    replacedParts: [
+        ['spare_part_id' => 1, 'quantity' => 1, 'old_part_destination' => 'DESGUACE'],
+    ]
+);
+$assert(
+    "El preventivo descuenta por el mismo método que el correctivo (RF-02.3)",
+    $env['vanStockRepo']->consumptions === [
+        ['technician_id' => 42, 'spare_part_id' => 1, 'quantity' => 1],
+    ],
+    json_encode($env['vanStockRepo']->consumptions)
+);
+
+// 6.4 Preventivo fuera de catálogo: tampoco descuenta
+$env = createTestEnvironment();
+$env['service']->recordPreventiveReplacedParts(
+    preventiveOrderId: 502,
+    technicianId: 42,
+    machineId: 10,
+    locationId: 5,
+    replacedParts: [
+        ['is_out_of_catalog' => true, 'custom_part_name' => 'Junta de goma del grupo', 'quantity' => 2, 'old_part_destination' => 'TALLER'],
+    ]
+);
+$assert("El preventivo fuera de catálogo tampoco descuenta", $env['vanStockRepo']->consumptions === []);
+
+// 6.5 Dos declaraciones acumulan: aditivo, sin reversión ni deduplicación (RD-03)
+$env = createTestEnvironment();
+$preventiveOne = [['spare_part_id' => 1, 'quantity' => 1, 'old_part_destination' => 'DESGUACE']];
+$env['service']->recordPreventiveReplacedParts(501, 42, 10, 5, $preventiveOne);
+$env['service']->recordPreventiveReplacedParts(501, 42, 10, 5, $preventiveOne);
+$assert(
+    "Dos declaraciones descuentan dos veces: el descuento es aditivo (RD-03)",
+    count($env['vanStockRepo']->consumptions) === 2
+);
+
+// 6.6 Cantidad fuera de rango: se rechaza antes de tocar el stock
+$env = createTestEnvironment();
+$quantityRejected = false;
+try {
+    $env['service']->recordPreventiveReplacedParts(503, 42, 10, 5, [
+        ['spare_part_id' => 1, 'quantity' => 51, 'old_part_destination' => 'DESGUACE'],
+    ]);
+} catch (InvalidPartQuantityException) {
+    $quantityRejected = true;
+}
+$assert(
+    "Una cantidad fuera de rango se rechaza sin descontar nada (sin efectos parciales)",
+    $quantityRejected && $env['vanStockRepo']->consumptions === []
 );
 
 // =============================================================================

@@ -54,8 +54,8 @@
 ### T-VAN-05 · Descuento automático en los dos caminos de declaración
 * **Refs:** RF-02.1, RF-02.2, RF-02.3, RF-02.4 (RD-01 a RD-04)
 * **Ruta:** inline · **Riesgo:** `item 3` (código compartido por toda resolución) → commit propio
-* **Prueba en rojo:** `tests/unit/SparePartTraceabilityVanStockTest.php`: descuento por cantidad declarada en correctivo; idéntico en preventivo; fuera de catálogo no descuenta ni altera el flujo; negativo permitido; aditivo en reapertura; **la resolución no falla por causa del inventario**.
-* **Alcance:** `src/Application/Service/SparePartTraceabilityService.php` (invocación del método único en ambos bucles) + actualización de los stubs de repositorio que la interfaz o el constructor afecten.
+* **Prueba en rojo:** sección 6 de `tests/unit/SparePartTraceabilityServiceTest.php` (reutiliza el escenario completo ya montado en vez de duplicarlo en una suite nueva): descuento por cantidad declarada en correctivo; idéntico en preventivo; fuera de catálogo no descuenta ni altera el flujo; cantidad fuera de rango rechazada sin efectos parciales; aditivo en dos declaraciones; **la declaración no consulta la disponibilidad, así que el inventario no puede impedir el cierre**.
+* **Alcance:** `src/Application/Service/SparePartTraceabilityService.php` (inyección obligatoria del servicio de stock y una sola invocación del descuento en ambos bucles) + cableado en `CoordinatorSparePartsController`, `TechnicianController` y `TechnicianPreventiveController` + doble compartido `tests/Support/RecordingVanStockRepository.php`.
 * **Invariante:** un solo método de descuento; prohibido duplicar el decremento en el camino preventivo.
 
 ### T-VAN-06 · API de stock (técnico y coordinación)
@@ -124,3 +124,12 @@ T-VAN-03 ─┘                                     ├─> T-VAN-08 ─┐
 * **Decisiones tomadas al implementar:** el actor viaja como `?int $actorUserId` (el repositorio resuelve rol y nombre) y el ajuste devuelve `VanStockAdjustmentResultDto` con la cantidad previa y el delta; ambas cosas quedaron reflejadas en los contratos §3.2. El puerto asume las dos lecturas de destino (`findTechnician`, `sparePartExists`) en vez de depender de los puertos completos de usuarios y repuestos, que suman más de veinte métodos para dos comprobaciones de existencia.
 * **Pendiente de certificar:** la auditoría del delta contra motor real queda para `VanStockApiTest` (WU-4), que es la suite que levanta el esquema completo y ejerce el camino HTTP. La sonda manual de esta rebanada es evidencia, no cobertura.
 * **Riesgo:** `none` — todo es código nuevo más una entrada aditiva en el catálogo del visor (`VAN_STOCK_ADJUSTED`); ningún camino existente cambia de comportamiento.
+
+### WU-3 · T-VAN-05 (descuento en el flujo de declaración) — cerrado
+* **Commit:** `feat(van-stock): deduct the van stock from every declared catalogue part`
+* **Rojo observado:** con el descuento desactivado fallan 3 de las 7 aserciones nuevas —correctivo, preventivo y aditividad—; las de fuera de catálogo siguen verdes en ambos estados, que es justo lo que deben certificar.
+* **Verde:** `SparePartTraceabilityServiceTest` 37/37 · `CoordinatorSparePartsControllerTest` 20/20 · `TechnicianSparePartsControllerTest` 19/19 · `TechnicianPreventiveSparePartsAndSegregationTest` 10/10 · batería completa 309 suites / 12 036 aserciones / 0 fallos con las cifras documentadas coherentes.
+* **Inyección obligatoria:** `SparePartTraceabilityService` recibe `VanStockService` como parámetro **requerido**, sin valor por defecto. Un colaborador opcional habría convertido un cableado olvidado en un descuento que no ocurre y nadie ve; el compilador lo impide. El coste es el doble compartido `tests/Support/RecordingVanStockRepository.php`, que las cuatro suites del flujo usan.
+* **Un solo punto de descuento:** la invocación vive justo después de `insertReplacedPart()` en los dos bucles y está guardada por `!$inserted->isOutOfCatalog()`. El preventivo no duplica la regla: llama al mismo método del mismo servicio (RF-02.3).
+* **Sin consulta de disponibilidad:** la suite cuenta las llamadas a `findByPair()` del doble y exige cero. El flujo nunca pregunta cuánto hay, así que no existe un camino por el que el inventario frene una resolución (RD-04, Art. V.1).
+* **Riesgo:** `item 3` — modifica la ruta compartida por toda resolución de avería y por toda sustitución preventiva. Cobertura propia observada en rojo y verde; se solicita verificación independiente de esta rebanada antes de cerrar el módulo.

@@ -12,6 +12,7 @@ use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\SparePartAnalyticsService;
 use VendGuard\Application\Service\SparePartCatalogService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
+use VendGuard\Application\Service\VanStockService;
 use VendGuard\Core\Domain\Exception\SparePartCodeExistsException;
 use VendGuard\Core\Domain\Exception\SparePartNotFoundException;
 use VendGuard\Core\Domain\Model\SparePart;
@@ -27,6 +28,7 @@ use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRequestRepository;
+use VendGuard\Infrastructure\Repository\PdoVanStockRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
 
@@ -87,6 +89,7 @@ class CoordinatorSparePartsController
             sparePartRepo: $sparePartRepoActual,
             incidentRepo: $incidentRepoActual,
             machineRepo: $machineRepoActual,
+            vanStockService: new VanStockService(new PdoVanStockRepository()),
             auditLogger: $this->auditLogger
         );
     }

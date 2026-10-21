@@ -38,6 +38,10 @@ use VendGuard\Core\Service\ResolutionValidator;
  * 2. Resolución de intervenciones exigiendo declaración explícita de piezas sustituidas (Sí/No).
  * 3. Congelación inmutable del coste unitario mediante snapshot histórico protegido contra fluctuaciones futuras (Art. III).
  * 4. Actualización del ciclo de vida de solicitudes estructuradas (PENDING -> ATTENDED / CANCELLED).
+ * 5. Descuento del stock de la furgoneta por cada pieza de catálogo declarada (Módulo 18, RF-02.1):
+ *    un solo punto de descuento para correctivo y preventivo, sin consultar la disponibilidad —el
+ *    inventario no puede impedir un cierre (RD-04)— y sin descontar las piezas fuera de catálogo,
+ *    que no tienen pareja en el catálogo maestro (RD-01).
  */
 class SparePartTraceabilityService
 {
@@ -53,12 +57,16 @@ class SparePartTraceabilityService
 
     private ?TransactionManagerInterface $transactionManager;
 
+    /** Descuento del stock de la furgoneta del técnico (Módulo 18). */
+    private VanStockService $vanStockService;
+
     public function __construct(
         SparePartRequestRepositoryInterface $requestRepo,
         IncidentReplacedPartRepositoryInterface $replacedPartRepo,
         SparePartRepositoryInterface $sparePartRepo,
         IncidentRepositoryInterface $incidentRepo,
         MachineRepositoryInterface $machineRepo,
+        VanStockService $vanStockService,
         ?AuditLogger $auditLogger = null,
         ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
         ?TransactionManagerInterface $transactionManager = null
@@ -68,6 +76,7 @@ class SparePartTraceabilityService
         $this->sparePartRepo = $sparePartRepo;
         $this->incidentRepo = $incidentRepo;
         $this->machineRepo = $machineRepo;
+        $this->vanStockService = $vanStockService;
         $this->auditLogger = $auditLogger;
         $this->notificationEnqueuer = $notificationEnqueuer;
         $this->transactionManager = $transactionManager;
@@ -447,6 +456,18 @@ class SparePartTraceabilityService
 
                 $inserted = $this->replacedPartRepo->insertReplacedPart($partEntity);
                 $insertedParts[] = $inserted;
+
+                // Descuento del stock de la furgoneta (Módulo 18, RF-02.1): una sola sentencia por
+                // línea declarada, pegada a su escritura. Solo las piezas de catálogo tienen pareja
+                // técnico/pieza que descontar (RD-01), y el consumo no consulta disponibilidad, así
+                // que no puede impedir el cierre de la avería (RD-04).
+                if (!$inserted->isOutOfCatalog()) {
+                    $this->vanStockService->consume(
+                        $technicianId,
+                        (int)$inserted->getSparePartId(),
+                        $inserted->getQuantity()
+                    );
+                }
             }
 
             // Marcar solicitudes previas de repuestos de esta incidencia como atendidas (RF-REP-06)
@@ -631,6 +652,16 @@ class SparePartTraceabilityService
 
             $inserted = $this->replacedPartRepo->insertReplacedPart($partEntity);
             $insertedParts[] = $inserted;
+
+            // Mismo punto único de descuento que el correctivo (Módulo 18, RF-02.3): el preventivo no
+            // duplica la regla, la reutiliza. Fuera de catálogo no descuenta (RD-01).
+            if (!$inserted->isOutOfCatalog()) {
+                $this->vanStockService->consume(
+                    $technicianId,
+                    (int)$inserted->getSparePartId(),
+                    $inserted->getQuantity()
+                );
+            }
         }
 
         if ($this->auditLogger !== null) {
