@@ -95,6 +95,7 @@ final class TestDataCleaner
         'notification_outbox',
         'operational_zone_postal_codes',
         'technician_zone_assignments',
+        'technician_van_stocks',
     ];
 
     /** @var array<string, array<string, string>> tabla => (FK => tabla padre) caché por esquema */

@@ -1324,6 +1324,80 @@ class SeedRunner
     }
 
     /**
+     * Saldo demo de las furgonetas del parque sembrado.
+     *
+     * Se resuelve por las claves canónicas del técnico (`email_key`) y del repuesto
+     * (`part_code`), nunca por identificadores que la secuencia asigna distinto en cada
+     * base. La siembra incluye a propósito un saldo justo en el umbral y otro negativo:
+     * la alerta y el descuadre del Módulo 18 tienen que ser demostrables en el entorno
+     * sembrado, no solo dentro de una prueba.
+     *
+     * @return int Saldos canónicos vivos tras sembrar.
+     */
+    public function seedVanStocks(): int
+    {
+        $identityColumn = $this->dialect->requiresCanonicalIdentityColumns() ? 'email_key' : 'email';
+        $insert = $this->pdo->prepare(sprintf(
+            'INSERT INTO technician_van_stocks (technician_id, spare_part_id, quantity_available, min_threshold)
+             SELECT u.id, sp.id, :quantity_available, :min_threshold
+               FROM users u, spare_parts sp
+              WHERE u.%s = :email
+                AND sp.part_code = :part_code
+                AND NOT EXISTS (
+                    SELECT 1 FROM technician_van_stocks vs
+                     WHERE vs.technician_id = u.id
+                       AND vs.spare_part_id = sp.id
+                )',
+            $identityColumn
+        ));
+
+        foreach (self::canonicalVanStockRows() as $row) {
+            $insert->execute([
+                ':quantity_available' => $row['quantity_available'],
+                ':min_threshold' => $row['min_threshold'],
+                ':email' => $row['email'],
+                ':part_code' => $row['part_code'],
+            ]);
+        }
+
+        // Se informa del saldo canónico vivo, no de las filas insertadas: igual que el
+        // cuadrante territorial, resembrar no altera las cifras del resumen.
+        $verify = $this->pdo->prepare(sprintf(
+            'SELECT COUNT(*)
+               FROM technician_van_stocks vs
+               INNER JOIN users u ON u.id = vs.technician_id
+               INNER JOIN spare_parts sp ON sp.id = vs.spare_part_id
+              WHERE u.%s = :email
+                AND sp.part_code = :part_code',
+            $identityColumn
+        ));
+
+        $count = 0;
+        foreach (self::canonicalVanStockRows() as $row) {
+            $verify->execute([':email' => $row['email'], ':part_code' => $row['part_code']]);
+            $count += (int)$verify->fetchColumn();
+        }
+
+        return $count;
+    }
+
+    /**
+     * Los cinco saldos de furgoneta del parque sembrado.
+     *
+     * @return list<array{email: string, part_code: string, quantity_available: int, min_threshold: int}>
+     */
+    private static function canonicalVanStockRows(): array
+    {
+        return [
+            ['email' => 'jordi.ruta@vendguard.internal', 'part_code' => 'VALV-ULKA-01', 'quantity_available' => 4, 'min_threshold' => 2],
+            ['email' => 'jordi.ruta@vendguard.internal', 'part_code' => 'JUNT-TOR-01', 'quantity_available' => 1, 'min_threshold' => 2],
+            ['email' => 'marta.ruta@vendguard.internal', 'part_code' => 'BOMB-VIB-02', 'quantity_available' => 3, 'min_threshold' => 1],
+            ['email' => 'marta.ruta@vendguard.internal', 'part_code' => 'TELEC-NAYAX-01', 'quantity_available' => -1, 'min_threshold' => 0],
+            ['email' => 'carlos.ruta@vendguard.internal', 'part_code' => 'SOND-NTC-01', 'quantity_available' => 2, 'min_threshold' => 2],
+        ];
+    }
+
+    /**
      * Ejecuta todas las semillas dentro de una transacción.
      *
      * @param string $defaultPassword
@@ -1350,6 +1424,9 @@ class SeedRunner
             $checklistOrders = $this->seedPreventiveChecklistItems();
             $auditEvents = $this->seedPreventiveAuditTrail();
             $partsRes = $this->seedSpareParts();
+            // El saldo de furgoneta se siembra después del catálogo maestro: lo resuelve
+            // por `part_code` y por la clave canónica del técnico (Módulo 18).
+            $vanStockCount = $this->seedVanStocks();
 
             $this->pdo->commit();
 
@@ -1365,6 +1442,7 @@ class SeedRunner
                 'preventive_audit_events' => $auditEvents,
                 'spare_parts' => $partsRes['parts'],
                 'spare_part_compatibilities' => $partsRes['compatibilities'],
+                'technician_van_stocks' => $vanStockCount,
             ];
         } catch (PDOException $e) {
             if ($this->pdo->inTransaction()) {

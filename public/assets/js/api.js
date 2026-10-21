@@ -1309,6 +1309,15 @@ export class ApiClient {
       return this.get('/coordinator/spare-parts/requests/pending-review');
     },
 
+    // Stock de repuestos de las furgonetas (Módulo 18 - RF-03, RF-04.2)
+    getVanStocks: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/van-stocks${q ? `?${q}` : ''}`);
+    },
+    setVanStock: (payload) => {
+      return this.put('/coordinator/van-stocks', payload);
+    },
+
     // Gestión de Reintegros e Importe Retenido (Módulo 08 - RF-REF-03, RF-REF-07, RF-REF-08)
     /**
      * Retrieves the global refund inbox with full financial detail and filters.
@@ -1708,6 +1717,11 @@ export class ApiClient {
       if (incidentId) params.incident_id = incidentId;
       const q = new URLSearchParams(params).toString();
       return this.get(`/technician/spare-parts/catalog?${q}`);
+    },
+
+    // Stock de la furgoneta del propio técnico (Módulo 18: RF-04.1)
+    getVanStock: () => {
+      return this.get('/technician/van-stock');
     }
   };
 

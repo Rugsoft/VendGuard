@@ -19,7 +19,7 @@ Queda completamente retirado el camino dual de persistencia (MariaDB/MySQL).
 
 ---
 
-## 2. Inventario de las 25 Tablas del Dominio
+## 2. Inventario de las 26 Tablas del Dominio
 
 Todas las tablas cuentan con clave primaria y disparador constitucional `trg_no_delete_*` vinculado a `prevent_hard_delete()` (Art. III.1). La clave primaria es `id BIGINT GENERATED ALWAYS AS IDENTITY` salvo en `operational_zone_postal_codes`, donde la identidad de la fila es el propio código postal: es la forma de garantizar que un CP pertenezca a una sola zona en todo su ciclo de vida (RF-01.2, Resolución QA 7).
 
@@ -43,9 +43,12 @@ Todas las tablas cuentan con clave primaria y disparador constitucional `trg_no_
 18. `sanitary_sweep_passes` (9 columnas)
 19. `sanitary_sweep_contentions` (9 columnas)
 20. `audit_log` (11 columnas)
-21. `operational_zones` (8 columnas)
-22. `operational_zone_postal_codes` (3 columnas)
-23. `technician_zone_assignments` (6 columnas)
+21. `notification_outbox` (23 columnas)
+22. `notification_channel_settings` (11 columnas)
+23. `operational_zones` (8 columnas)
+24. `operational_zone_postal_codes` (3 columnas)
+25. `technician_zone_assignments` (6 columnas)
+26. `technician_van_stocks` (7 columnas)
 
 Adicionalmente, `schema_migrations` gestiona el registro de huellas SHA-256 de las migraciones incrementales.
 
@@ -73,3 +76,4 @@ Adicionalmente, `schema_migrations` gestiona el registro de huellas SHA-256 de l
 - **Herencia territorial de la sede (Módulo 17, RF-03):** `locations` declara `zone_id` (FK `fk_locations_zone`, `ON DELETE SET NULL`), `is_manual_override` y `postal_code VARCHAR(5)` con `chk_locations_postal_code_format CHECK (postal_code IS NULL OR postal_code ~ '^[0-9]{5}$')`. El CP admite `NULL` para no inventar datos en sedes históricas; el alta y la edición lo exigen en la aplicación. Índices `idx_locations_zone_id` e `idx_locations_postal_code`.
 - **Formato de la zona (Módulo 17, RF-01.1):** `chk_operational_zones_code_len`, `chk_operational_zones_name_len` y `chk_operational_zones_color_format CHECK (color_hex ~* '^#[0-9A-Fa-f]{6}$')`, además de las claves únicas de código y nombre.
 - **Auditoría territorial (Módulo 17, RNF-03 / QA 11):** el enumerado `audit_entity_type` añade `OPERATIONAL_ZONE` y `TECHNICIAN_ZONE` mediante la migración `007_operational_zones.sql` con `ALTER TYPE ... ADD VALUE IF NOT EXISTS`, y el traslado masivo de códigos postales emite un evento matriz `ZONE_POSTAL_CODE_TRANSFERRED` más un evento `LOCATION_ZONE_REASSIGNED` por sede afectada en la misma transacción (QA 6).
+- **Saldo declarado de la furgoneta (Módulo 18, RF-01 a RF-05):** `technician_van_stocks` declara `technician_id` y `spare_part_id` (FK `fk_van_stock_technician` y `fk_van_stock_spare_part`, ambas con `ON DELETE RESTRICT` y `ON UPDATE CASCADE`), con la unicidad `uq_van_stock_technician_part (technician_id, spare_part_id)`: el saldo es un valor vigente, no un libro de movimientos. Las cotas `chk_van_stock_quantity_range CHECK (quantity_available BETWEEN -999 AND 9999)` y `chk_van_stock_threshold_range CHECK (min_threshold BETWEEN 0 AND 9999)` acotan la erratura de captura **sin prohibir el negativo**: una cantidad negativa es un descuadre declarado y no puede bloquear el cierre de la avería (RD-04). No hay columna de coste ni de valoración (RD-05): el coste del repuesto se congela inmutablemente en `incident_replaced_parts.unit_cost_snapshot`. El enumerado `audit_entity_type` añade `TECHNICIAN_VAN_STOCK` mediante `009_technician_van_stocks.sql`.

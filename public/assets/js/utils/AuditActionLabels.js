@@ -61,7 +61,10 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   // corto respecto al enumerado `audit_entity_type` o el filtro del visor
   // perdería filas reales del historial territorial.
   OPERATIONAL_ZONE: 'Zona Operativa',
-  TECHNICIAN_ZONE: 'Cuadrante Técnico'
+  TECHNICIAN_ZONE: 'Cuadrante Técnico',
+  // Entidad del Módulo 18: el saldo de la furgoneta se audita con tipo propio, y
+  // el visor necesita su etiqueta o el filtro perdería esas filas del historial.
+  TECHNICIAN_VAN_STOCK: 'Stock de Furgoneta'
 });
 
 /**
@@ -146,6 +149,7 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'UNCLAIMED_CASH_RECORDED', label: 'Efectivo No Reclamado Registrado', tone: 'warning', group: 'refund' },
   { code: 'REFUND_DETACHED_BY_INACTIVITY', label: 'Reintegro Desvinculado por Inactividad', tone: 'warning', group: 'refund' },
   { code: 'EXPORT_SPARE_PARTS_CSV', label: 'Exportación CSV de Repuestos', tone: 'neutral', group: 'spare_parts' },
+  { code: 'VAN_STOCK_ADJUSTED', label: 'Ajuste de Stock de Furgoneta', tone: 'primary', group: 'spare_parts' },
   { code: 'NOTIFICATION_MANUAL_RETRY', label: 'Reintento Manual de Notificación', tone: 'warning', group: 'notification' },
   { code: 'NOTIFICATION_MANUAL_CANCEL', label: 'Cancelación Manual de Notificación', tone: 'danger', group: 'notification' },
   { code: 'NOTIFICATION_PERMANENT_FAILURE', label: 'Fallo Definitivo de Notificación', tone: 'danger', group: 'notification' },

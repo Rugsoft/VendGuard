@@ -15,6 +15,7 @@ use VendGuard\Application\Service\NotificationOutboxEnqueuerService;
 use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Application\Service\SanitaryReportSafeguardService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
+use VendGuard\Application\Service\VanStockService;
 use VendGuard\Application\Service\TechnicianRefundService;
 use VendGuard\Core\Domain\Exception\ConversationSealedException;
 use VendGuard\Core\Domain\Exception\IncompatibleSparePartException;
@@ -56,6 +57,7 @@ use VendGuard\Infrastructure\Repository\PdoIncidentReplacedPartRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoVanStockRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRequestRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
@@ -194,6 +196,7 @@ class TechnicianController
             sparePartRepo: new PdoSparePartRepository(),
             incidentRepo: $this->incidentRepo,
             machineRepo: $this->machineRepo,
+            vanStockService: new VanStockService(new PdoVanStockRepository()),
             auditLogger: new AuditLogger(new PdoAuditLogRepository()),
             notificationEnqueuer: $this->notifications()
         );

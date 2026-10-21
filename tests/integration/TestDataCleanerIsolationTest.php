@@ -195,11 +195,12 @@ $assert(
         && $position['incident_history'] < $position['incidents']
 );
 
-// 15 tablas de la bandeja + las 3 del catálogo territorial (Módulo 17, hallazgo H-2):
-// `operational_zones` es raíz propia y sus dos hijas caen por el grafo de claves foráneas.
+// 15 tablas de la bandeja + las 3 del catálogo territorial (Módulo 17, hallazgo H-2) + el saldo
+// de furgoneta del Módulo 18: `operational_zones` es raíz propia y sus dos hijas caen por el
+// grafo de claves foráneas, y `technician_van_stocks` es hija de `spare_parts`, que ya es raíz.
 $assert(
-    '2.7 El plan cubre las 18 tablas transitorias del contrato (15 de la bandeja + 3 territoriales)',
-    count($order) === 18,
+    '2.7 El plan cubre las 19 tablas transitorias del contrato (15 de la bandeja + 3 territoriales + 1 de stock)',
+    count($order) === 19,
     'obtenidas: ' . count($order)
 );
 

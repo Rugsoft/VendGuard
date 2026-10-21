@@ -66,6 +66,15 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_TECHNICIAN_ZONE  = 'TECHNICIAN_ZONE';
 
     /**
+     * Saldo de repuestos de la furgoneta (Módulo 18, RF-05.1).
+     *
+     * El ajuste del stock referencia la pareja técnico/pieza, no una fila de
+     * `spare_parts` ni de `users`: auditarlo como `MACHINE` o `USER` apuntaría a
+     * otro objeto y rompería la trazabilidad (Art. III.3).
+     */
+    public const ENTITY_TECHNICIAN_VAN_STOCK = 'TECHNICIAN_VAN_STOCK';
+
+    /**
      * Whitelist completa de tipos de entidad admitidos por el dominio.
      *
      * Debe coincidir exactamente con el enum `audit_log.entity_type` de la base
@@ -87,6 +96,7 @@ class AuditEvent implements JsonSerializable
         self::ENTITY_NOTIFICATION_CHANNEL_SETTING,
         self::ENTITY_OPERATIONAL_ZONE,
         self::ENTITY_TECHNICIAN_ZONE,
+        self::ENTITY_TECHNICIAN_VAN_STOCK,
     ];
 
     /**

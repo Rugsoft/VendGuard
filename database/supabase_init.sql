@@ -133,7 +133,8 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- | 23| audit_entity_type                 | ('TICKET','MACHINE','LOCATION','USER','PREVENTIVE_ORDER',     | audit_log.entity_type                                                            | Parte 1       |
 -- |   |                                   |  'SANITARY_CERTIFICATE','REFUND_REQUEST','UNCLAIMED_CASH_FINDING',|                                                                                  |               |
 -- |   |                                   |  'NOTIFICATION_OUTBOX','NOTIFICATION_CHANNEL_SETTING',       |                                                                                  |               |
--- |   |                                   |  'OPERATIONAL_ZONE','TECHNICIAN_ZONE')                       |                                                                                  |               |
+-- |   |                                   |  'OPERATIONAL_ZONE','TECHNICIAN_ZONE',                       |                                                                                  |               |
+-- |   |                                   |  'TECHNICIAN_VAN_STOCK')                                     |                                                                                  |               |
 -- | 24| certificate_status                | ('VALID','SUSPENDED','REVOKED')                              | sanitary_certificates.status                                                     | Parte 2       |
 --
 -- Reparto del trabajo: 12 conjuntos (13 columnas) se declaran en la Parte 1 y los
@@ -226,7 +227,10 @@ BEGIN
         -- Entidades territoriales del Módulo 17 (Resolución QA 11): la zona
         -- operativa y su cuadrante técnico se auditan con tipo propio para que
         -- el rastro no se confunda con la sede ni con el usuario.
-        'OPERATIONAL_ZONE', 'TECHNICIAN_ZONE'
+        'OPERATIONAL_ZONE', 'TECHNICIAN_ZONE',
+        -- Saldo de furgoneta del Módulo 18 (RF-05.1): el ajuste de stock se
+        -- audita con tipo propio, no como edición del repuesto ni del técnico.
+        'TECHNICIAN_VAN_STOCK'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -1691,21 +1695,72 @@ CREATE OR REPLACE TRIGGER trg_no_delete_technician_zone_assignments
 
 
 -- =============================================================================
+-- SECCIÓN 7 · Tabla 26 · Stock de repuestos de la furgoneta (Módulo 18)
+-- =============================================================================
+-- El saldo vive al final, igual que el catálogo territorial: depende de `users`
+-- (Tabla 3) y de `spare_parts` (Tabla 10), que ya existen. La declaración es
+-- idéntica a `database/supabase_migrations/009_technician_van_stocks.sql`, que
+-- es la vía por la que una base ya creada recibe este mismo esquema.
+--
+-- No hay columna de coste a propósito: el coste del repuesto se congela inmutable
+-- en `incident_replaced_parts.unit_cost_snapshot` (M2, RD-05). Y la cantidad
+-- admite negativos a propósito: un descuadre declarado es información operativa,
+-- no un error que deba truncarse ni bloquear el cierre de la avería (RD-04).
+
+-- -----------------------------------------------------------------------------
+-- Tabla 26 · technician_van_stocks — saldo declarado de la furgoneta (RF-01)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS technician_van_stocks (
+    id                 BIGINT GENERATED ALWAYS AS IDENTITY,
+    technician_id      BIGINT NOT NULL,
+    spare_part_id      BIGINT NOT NULL,
+    quantity_available INTEGER NOT NULL DEFAULT 0,
+    min_threshold      INTEGER NOT NULL DEFAULT 0,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_technician_van_stocks PRIMARY KEY (id),
+    CONSTRAINT uq_van_stock_technician_part UNIQUE (technician_id, spare_part_id),
+    CONSTRAINT chk_van_stock_quantity_range CHECK (quantity_available BETWEEN -999 AND 9999),
+    CONSTRAINT chk_van_stock_threshold_range CHECK (min_threshold BETWEEN 0 AND 9999),
+    CONSTRAINT fk_van_stock_technician FOREIGN KEY (technician_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_van_stock_spare_part FOREIGN KEY (spare_part_id)
+        REFERENCES spare_parts (id) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_technician_van_stocks_technician_id
+    ON technician_van_stocks (technician_id);
+
+CREATE INDEX IF NOT EXISTS idx_technician_van_stocks_spare_part_id
+    ON technician_van_stocks (spare_part_id);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_technician_van_stocks
+    BEFORE DELETE ON technician_van_stocks
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_touch_technician_van_stocks
+    BEFORE UPDATE ON technician_van_stocks
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+
+-- =============================================================================
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 25 tablas (las 25 del contrato de correspondencia) · 24 tipos del dominio en sus
+-- 26 tablas (las 26 del contrato de correspondencia) · 24 tipos del dominio en sus
 -- 25 columnas `ENUM` · 2 funciones canónicas de blindaje
--- 37 disparadores: 25 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1) y 12
+-- 39 disparadores: 26 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1) y 13
 -- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2)
--- 38 restricciones nombradas: 23 claves primarias (la del mapeo de códigos postales
--- es el propio CP, no un identificador sintético) y 15 únicas
--- 12 restricciones `CHECK`: las 7 de longitud mínima del Art. V.1 (A-3: 4 en
+-- 40 restricciones nombradas: 24 claves primarias (la del mapeo de códigos postales
+-- es el propio CP, no un identificador sintético) y 16 únicas
+-- 14 restricciones `CHECK`: las 7 de longitud mínima del Art. V.1 (A-3: 4 en
 -- `incidents`, 2 en `refund_requests`, 1 en `spare_part_requests`) más las 5 del
 -- Módulo 17 (longitud de código y nombre de la zona, formato `#RRGGBB` de su color,
--- formato del CP del catálogo y formato del CP de la sede) · 39 claves foráneas con
+-- formato del CP del catálogo y formato del CP de la sede) más las 2 del Módulo 18
+-- (cotas de cantidad disponible y de umbral mínimo) · 41 claves foráneas con
 -- las reglas declaradas en el contrato §2.4
--- 61 índices secundarios —uno por índice no único del esquema local y con las mismas
--- columnas (D-9), más los cinco del Módulo 17— y tres índices únicos parciales:
+-- 63 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- columnas (D-9), más los cinco del Módulo 17 y los dos del Módulo 18— y tres
+-- índices únicos parciales:
 -- `uq_machine_active_ticket` (D-6), `uq_technician_zone_live` y
 -- `uq_technician_primary_zone` (Resolución QA 10)
 -- 2 columnas canónicas (`site_code_key`, `email_key`) con índice único propio (A-1/A-2)

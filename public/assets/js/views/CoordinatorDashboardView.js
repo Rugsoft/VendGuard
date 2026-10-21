@@ -50,6 +50,7 @@ import { CoordinatorPreventiveSettingsModal } from '../components/CoordinatorPre
 import { CoordinatorSanitarySweepPanel } from '../components/CoordinatorSanitarySweepPanel.js';
 import { CoordinatorSparePartsTab } from '../components/CoordinatorSparePartsTab.js';
 import { CoordinatorSparePartsAnalyticsTab } from '../components/CoordinatorSparePartsAnalyticsTab.js';
+import { CoordinatorVanStockTab } from '../components/CoordinatorVanStockTab.js';
 import { CoordinatorTerritorialMapTab } from '../components/CoordinatorTerritorialMapTab.js';
 import { CoordinatorRefundsTab } from '../components/CoordinatorRefundsTab.js';
 import { CoordinatorIncidentDetailModal } from '../components/CoordinatorIncidentDetailModal.js';
@@ -83,6 +84,7 @@ export const CoordinatorDashboardView = {
     CoordinatorSanitarySweepPanel,
     CoordinatorSparePartsTab,
     CoordinatorSparePartsAnalyticsTab,
+    CoordinatorVanStockTab,
     CoordinatorTerritorialMapTab,
     CoordinatorRefundsTab,
     CoordinatorIncidentDetailModal,
@@ -94,7 +96,7 @@ export const CoordinatorDashboardView = {
   data() {
     return {
       // Navigation Tabs (RF-FLEET-01, RF-03, RF-05, RF-PREV-02, RF-REP-01, RF-REP-09)
-      activeTab: 'incidents', // 'incidents' | 'fleet' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'refunds' | 'admin' | 'metrics'
+      activeTab: 'incidents', // 'incidents' | 'fleet' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'stock-furgonetas' | 'refunds' | 'admin' | 'metrics'
       activeAdminSubTab: 'locations', // 'locations' | 'zones' | 'machines' | 'users'
       activePreventiveSubTab: 'dashboard', // 'dashboard' | 'orders' | 'sweep'
       showPreventiveSettingsModal: false,
@@ -1844,6 +1846,16 @@ export const CoordinatorDashboardView = {
           <button
             type="button"
             class="vg-btn"
+            :class="activeTab === 'stock-furgonetas' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            @click="activeTab = 'stock-furgonetas'"
+            data-testid="tab-stock-furgonetas"
+          >
+            🧰 Stock Furgonetas
+          </button>
+
+          <button
+            type="button"
+            class="vg-btn"
             :class="activeTab === 'refunds' ? 'vg-btn-primary' : 'vg-btn-secondary'"
             @click="activeTab = 'refunds'"
             data-testid="tab-refunds"
@@ -2490,6 +2502,11 @@ export const CoordinatorDashboardView = {
       <CoordinatorSparePartsAnalyticsTab
         v-else-if="activeTab === 'analitica-repuestos'"
         @open-catalog="activeTab = 'repuestos'"
+      />
+
+      <!-- CONTENIDO PESTAÑA: STOCK DE LAS FURGONETAS (Módulo 18, RF-03, RF-04.2) -->
+      <CoordinatorVanStockTab
+        v-else-if="activeTab === 'stock-furgonetas'"
       />
 
       <!-- CONTENIDO PESTAÑA: REINTEGROS Y LIQUIDACIÓN DIGITAL (RF-REF-03, RF-REF-07, RF-REF-08 / T-REF-18) -->
