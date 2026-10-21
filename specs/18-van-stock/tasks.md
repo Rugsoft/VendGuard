@@ -76,12 +76,15 @@
 * **Ruta:** inline o escritor delegado (superficie disjunta de T-VAN-09; `api.js` lo edita el padre)
 * **Prueba en rojo:** `tests/unit/TechnicianVanStockPanelTest.mjs`.
 * **Alcance:** `public/assets/js/components/TechnicianVanStockPanel.js` + montaje en `public/assets/js/views/TechnicianRouteView.js`.
+  * **Decisión de montaje:** el panel entra en un bloque `<details>` nativo al principio de la sección *Averías*, no como cuarta pestaña. La barra de navegación móvil tiene tres botones a ancho completo; un cuarto comprimiría las etiquetas que ya existen («Mis Métricas») hasta partir el texto en pantallas de 360 px. El bloque plegable deja el stock a un toque y no toca una navegación ya certificada.
 
 ### T-VAN-09 · Pestaña de stock en coordinación (frontend)
 * **Refs:** RF-03.2, RF-04.2
 * **Ruta:** inline o escritor delegado (superficie disjunta de T-VAN-08; `api.js` lo edita el padre)
 * **Prueba en rojo:** `tests/unit/CoordinatorVanStockTabTest.mjs`.
 * **Alcance:** `public/assets/js/components/CoordinatorVanStockTab.js` + montaje de la pestaña en la vista de coordinación que aloja repuestos.
+  * **El ajuste entra en esta tarea:** RF-04.2 exige que el panel permita «cargar y ajustar cantidades y umbrales». La línea de referencias de la tarea citaba solo las dos lecturas, pero la especificación manda: sin formulario de ajuste el módulo solo sería operable por API. Entra como panel en línea sobre la propia pestaña, con el saldo actual precargado al abrirse desde una fila.
+  * **Objetivo táctil:** este componente cae dentro del barrido de `CoordinatorButtonVariantsGuardTest`, que prohíbe la geometría en línea en los botones del panel. Los botones usan la escalera del sistema (36 px) y el objetivo de 44 px se reserva para la vista móvil del técnico, que está fuera de ese barrido.
 
 ### T-VAN-10 · Guardas de alcance y cifras documentadas
 * **Refs:** spec §8.2 · RNF-04
@@ -155,3 +158,15 @@ T-VAN-03 ─┘                                     ├─> T-VAN-08 ─┐
 * **Desvío declarado:** las dos suites unitarias de controlador del plan se sustituyen por la suite de integración, con la razón escrita en la propia T-VAN-06.
 * **Adición de alcance:** `listInventory(?int)` en el puerto, el repositorio PDO y el servicio. El contrato §4.2 declara opcionales los dos parámetros de consulta, de modo que la lectura sin filtros —el parque completo en modo inventario— necesita una consulta que el puerto no tenía. Se descartó reutilizar la alerta para ese modo: habría respondido `below_threshold: false` sobre una lista que sí está bajo umbral, y el panel habría mostrado como inventario lo que es una alerta.
 * **Riesgo:** `item 2` — abre tres endpoints nuevos y añade un método de lectura al puerto que comparten el repositorio y sus dobles. Las dos superficies quedan detrás del middleware de rol, la Sede no gana ninguna ruta y la lista vedada del saneador se amplía, no se relaja.
+
+### WU-5 · T-VAN-08 y T-VAN-09 (superficies de cliente) — cerrado
+* **Commit:** `feat(van-stock): add the technician stock panel and the coordinator stock tab`
+* **Rojo observado:** con el contador de alertas contando todas las filas en vez de solo las que el servidor marca, `TechnicianVanStockPanelTest` cae en 2 aserciones (2.4 y 2.6); con la severidad mirando primero el bajo umbral en vez del descuadre, `CoordinatorVanStockTabTest` cae en la 3.1. Ambas reversiones se retiraron antes del commit.
+* **Verde:** `TechnicianVanStockPanelTest` 20/20 · `CoordinatorVanStockTabTest` 30/30 · `DesignTokenDebtRatchetTest` 3/3 con el contador intacto —los dos componentes nuevos entran sin un solo literal hexadecimal— · `CoordinatorButtonVariantsGuardTest` en verde · `CoordinatorActionsWrapGuardTest` 7/7 · batería completa 312 suites / 12 108 aserciones / 0 fallos.
+* **Dos guardas del panel obligaron a corregir el diseño:** `CoordinatorButtonVariantsGuardTest` prohíbe la geometría en línea en los botones del panel y `CoordinatorActionsWrapGuardTest` exige que todo grupo de botones de fila o barra envuelva sus controles. El primer intento declaraba `min-height: 44px` en cuatro botones y dejaba dos grupos sin `flex-wrap`; los dos defectos se corrigieron en el código, no en las guardas: los botones visten la escalera del sistema y los grupos envuelven.
+* **Adición de alcance justificada:** el formulario de ajuste entra en T-VAN-09 porque RF-04.2 exige que el panel permita «cargar y ajustar cantidades y umbrales». La línea de referencias de la tarea citaba solo las lecturas, pero la especificación manda: sin formulario la pestaña habría sido informativa y el módulo solo operable por API. El ajuste abre con el saldo actual precargado y envía el valor absoluto, no un delta.
+* **Decisión de montaje del técnico:** bloque `<details>` al principio de la sección *Averías*, no una cuarta pestaña. La barra de navegación móvil ya tiene tres botones a ancho completo y un cuarto habría partido las etiquetas existentes por debajo de 400 px.
+* **Catálogo de técnicos del formulario:** sale de `/api/coordinator/users` con rol técnico activo, no de las filas ya cargadas. Derivarlo del inventario habría dejado fuera al técnico sin ninguna pareja declarada, que es justo al primero que hay que cargarle la furgoneta.
+* **`api.js` editado por el padre**, como preveía el plan: `coordinator.getVanStocks`, `coordinator.setVanStock` y `technician.getVanStock`.
+* **Fallo intermitente ajeno observado:** en una de las pasadas de la batería cayó `HealthCheckServiceTest` (1 suite, y con ella 1 aserción); aislada vuelve a 31/31 y la pasada siguiente cerró 312 suites / 12 108 aserciones sin fallos. Es una intermitencia previa del diagnóstico de salud contra la base de la batería, no de este módulo; queda anotada para que nadie la atribuya al Módulo 18 ni a sus cifras.
+* **Riesgo:** `item 1` — dos superficies nuevas de cliente, sin migración ni cambio del contrato HTTP. La de coordinación queda detrás del mismo middleware que el resto del panel y la del técnico no muta nada: no tiene ni un `<input>`.

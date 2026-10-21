@@ -43,6 +43,7 @@ import { TechnicianMachineHistoryModal } from '../components/TechnicianMachineHi
 import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';
 import { PendingInfoPauseModal, PAUSE_REASON_CATEGORIES } from '../components/PendingInfoPauseModal.js';
 import { TechnicianOpportunisticModal } from '../components/TechnicianOpportunisticModal.js';
+import { TechnicianVanStockPanel } from '../components/TechnicianVanStockPanel.js';
 import {
   graceRemainingMinutes,
   graceWindowLocations,
@@ -77,7 +78,8 @@ export const TechnicianRouteView = {
     TechnicianMachineHistoryModal,
     IncidentCommentThreadModal,
     PendingInfoPauseModal,
-    TechnicianOpportunisticModal
+    TechnicianOpportunisticModal,
+    TechnicianVanStockPanel
   },
   data() {
     return {
@@ -1322,6 +1324,21 @@ export const TechnicianRouteView = {
 
         <!-- SECCIÓN 1: RUTA OPERATIVA DE TRABAJO (RF-07, RF-08) -->
         <div v-else>
+          <!-- Stock de la furgoneta (Módulo 18, RF-04.1). Va en un bloque plegable nativo: el
+               técnico lo abre cuando lo necesita sin que la lista de averías —lo urgente— quede
+               empujada fuera de la primera pantalla del móvil. -->
+          <details
+            data-testid="tech-van-stock-section"
+            style="margin-bottom: 12px; padding: 12px 16px; background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card);"
+          >
+            <summary style="cursor: pointer; font-family: var(--font-body); font-size: var(--font-size-body-md); font-weight: 700; color: var(--color-ink);">
+              🧰 Stock de mi furgoneta
+            </summary>
+            <div style="margin-top: 12px;">
+              <TechnicianVanStockPanel />
+            </div>
+          </details>
+
           <!-- Prominent "Ver Mapa de Ruta" button plus full-day Google Maps link (RF-MAP-08) -->
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;">
             <button
