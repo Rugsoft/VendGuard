@@ -88,6 +88,30 @@ class SparePartTraceabilityService
     }
 
     /**
+     * Descuenta del stock de la furgoneta la pieza recién declarada (Módulo 18, RF-02.1).
+     *
+     * Es el **único** punto de descuento del sistema: correctivo y preventivo llaman aquí, así que la
+     * regla no puede divergir entre caminos (RF-02.3). Solo descuentan las piezas de catálogo: una
+     * pieza fuera de catálogo no tiene pareja técnico/pieza en el stock (RD-01).
+     *
+     * No se consulta la disponibilidad antes de descontar —una sentencia atómica basta— porque el
+     * inventario nunca puede frenar el cierre de una avería: si la furgoneta no tenía saldo, la fila
+     * queda en negativo y eso es un descuadre declarado, no un error (RD-04).
+     */
+    private function deductVanStock(IncidentReplacedPart $part): void
+    {
+        if ($part->isOutOfCatalog()) {
+            return;
+        }
+
+        $this->vanStockService->consume(
+            $part->getTechnicianId(),
+            (int)$part->getSparePartId(),
+            $part->getQuantity()
+        );
+    }
+
+    /**
      * Pausa temporalmente una incidencia en curso por falta de repuestos (RF-REP-03 / RF-REP-04).
      * Transiciona la avería a PENDING_PARTS y genera solicitudes estructuradas en spare_part_requests.
      *
@@ -457,17 +481,8 @@ class SparePartTraceabilityService
                 $inserted = $this->replacedPartRepo->insertReplacedPart($partEntity);
                 $insertedParts[] = $inserted;
 
-                // Descuento del stock de la furgoneta (Módulo 18, RF-02.1): una sola sentencia por
-                // línea declarada, pegada a su escritura. Solo las piezas de catálogo tienen pareja
-                // técnico/pieza que descontar (RD-01), y el consumo no consulta disponibilidad, así
-                // que no puede impedir el cierre de la avería (RD-04).
-                if (!$inserted->isOutOfCatalog()) {
-                    $this->vanStockService->consume(
-                        $technicianId,
-                        (int)$inserted->getSparePartId(),
-                        $inserted->getQuantity()
-                    );
-                }
+                // Módulo 18: la línea declarada descuenta el stock justo después de escribirse.
+                $this->deductVanStock($inserted);
             }
 
             // Marcar solicitudes previas de repuestos de esta incidencia como atendidas (RF-REP-06)
@@ -653,15 +668,8 @@ class SparePartTraceabilityService
             $inserted = $this->replacedPartRepo->insertReplacedPart($partEntity);
             $insertedParts[] = $inserted;
 
-            // Mismo punto único de descuento que el correctivo (Módulo 18, RF-02.3): el preventivo no
-            // duplica la regla, la reutiliza. Fuera de catálogo no descuenta (RD-01).
-            if (!$inserted->isOutOfCatalog()) {
-                $this->vanStockService->consume(
-                    $technicianId,
-                    (int)$inserted->getSparePartId(),
-                    $inserted->getQuantity()
-                );
-            }
+            // Mismo punto único de descuento que el correctivo (Módulo 18, RF-02.3).
+            $this->deductVanStock($inserted);
         }
 
         if ($this->auditLogger !== null) {

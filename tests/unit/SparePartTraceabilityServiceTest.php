@@ -18,6 +18,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/autoload.php';
 require_once __DIR__ . '/../Support/RecordingVanStockRepository.php';
+require_once __DIR__ . '/../Support/ThrowingVanStockRepository.php';
 
 use VendGuard\Application\Service\SparePartTraceabilityService;
 use VendGuard\Application\Service\VanStockService;
@@ -1042,7 +1043,9 @@ $assert(
 );
 $assert(
     "La declaración no consulta la disponibilidad: el inventario no puede impedir el cierre (RD-04)",
-    $env['vanStockRepo']->findByPairCalls === 0 && $catResolve['status'] === IncidentStatus::RESOLVED->value
+    $env['vanStockRepo']->findByPairCalls === 0
+        && $env['vanStockRepo']->consumptions !== []
+        && $catResolve['status'] === IncidentStatus::RESOLVED->value
 );
 
 // 6.2 Correctivo con pieza fuera de catálogo: no descuenta y no bloquea (RD-01)
@@ -1115,6 +1118,219 @@ try {
 $assert(
     "Una cantidad fuera de rango se rechaza sin descontar nada (sin efectos parciales)",
     $quantityRejected && $env['vanStockRepo']->consumptions === []
+);
+
+// =============================================================================
+// 7. Sondas de la verificación independiente de WU-3 (T-VAN-05)
+// =============================================================================
+// Escritas por el verificador independiente sobre el commit `16a180a` y adoptadas aquí como
+// regresión: prueban las mismas reglas desde un ángulo que el autor no eligió (dos líneas de la
+// misma pieza, cantidades límite, declaración parcial y declaración mixta) y dejan escrito qué
+// ocurre cuando el descuento falla por motor.
+echo "\n--- 7. Sondas de la verificación independiente (WU-3) ---\n";
+
+// 7.1 [invariante b/d] Dos líneas de la MISMA pieza: descuenta una vez por línea, en orden.
+$env = createTestEnvironment();
+$multi = $env['service']->resolveIncidentWithParts(101, 42, [
+    'resolution_diagnosis' => 'Rotura doble de membrana en electroválvulas de entrada',
+    'resolution_action' => 'Sustitución doble de electroválvula y prueba de estanqueidad',
+    'replaced_parts_declared' => true,
+    'replaced_parts' => [
+        ['spare_part_id' => 1, 'is_out_of_catalog' => false, 'quantity' => 3, 'old_part_destination' => 'TALLER'],
+        ['spare_part_id' => 1, 'is_out_of_catalog' => false, 'quantity' => 4, 'old_part_destination' => 'DESGUACE'],
+    ],
+]);
+$assert(
+    'S1 dos líneas de la misma pieza descuentan 3 y 4 en orden',
+    $env['vanStockRepo']->consumptions === [
+        ['technician_id' => 42, 'spare_part_id' => 1, 'quantity' => 3],
+        ['technician_id' => 42, 'spare_part_id' => 1, 'quantity' => 4],
+    ],
+    json_encode($env['vanStockRepo']->consumptions)
+);
+$multiLines = $env['replacedPartRepo']->findByIncidentId(101);
+$assert(
+    'S2 las líneas conservan cantidad, snapshot 28.50 y coste total propio',
+    count($multiLines) === 2
+        && $multiLines[0]->getQuantity() === 3 && $multiLines[0]->getUnitCostSnapshot() === 28.50 && $multiLines[0]->getTotalCostSnapshot() === 85.50
+        && $multiLines[1]->getQuantity() === 4 && $multiLines[1]->getUnitCostSnapshot() === 28.50 && $multiLines[1]->getTotalCostSnapshot() === 114.00,
+    json_encode(array_map(static fn($p) => [$p->getQuantity(), $p->getUnitCostSnapshot(), $p->getTotalCostSnapshot()], $multiLines))
+);
+$assert(
+    'S3 la resolución consulta cero veces la disponibilidad y cierra en RESOLVED',
+    $env['vanStockRepo']->findByPairCalls === 0 && $multi['status'] === IncidentStatus::RESOLVED->value
+);
+
+// 7.2 [límite declarable] Cantidad 50 (máximo): se descuenta exactamente 50.
+$env = createTestEnvironment();
+$env['service']->resolveIncidentWithParts(101, 42, [
+    'resolution_diagnosis' => 'Degradación generalizada del circuito hidráulico',
+    'resolution_action' => 'Sustitución masiva de electroválvulas y prueba de estanqueidad',
+    'replaced_parts_declared' => true,
+    'replaced_parts' => [
+        ['spare_part_id' => 1, 'is_out_of_catalog' => false, 'quantity' => 50, 'old_part_destination' => 'TALLER'],
+    ],
+]);
+$assert(
+    'S4 cantidad 50 se acepta y descuenta 50',
+    $env['vanStockRepo']->consumptions === [['technician_id' => 42, 'spare_part_id' => 1, 'quantity' => 50]],
+    json_encode($env['vanStockRepo']->consumptions)
+);
+
+// 7.3 [límite declarable / RD-04] Cantidad 51: rechazada sin ninguna escritura.
+$env = createTestEnvironment();
+$rejectedOverMax = false;
+try {
+    $env['service']->resolveIncidentWithParts(101, 42, [
+        'resolution_diagnosis' => 'Cantidad fuera de rango declarada en correctivo',
+        'resolution_action' => 'Sustitución con cantidad inválida y prueba de estanqueidad',
+        'replaced_parts_declared' => true,
+        'replaced_parts' => [
+            ['spare_part_id' => 1, 'is_out_of_catalog' => false, 'quantity' => 51, 'old_part_destination' => 'TALLER'],
+        ],
+    ]);
+} catch (InvalidPartQuantityException) {
+    $rejectedOverMax = true;
+}
+$assert(
+    'S5 cantidad 51 rechazada sin tocar stock ni línea de pieza',
+    $rejectedOverMax && $env['vanStockRepo']->consumptions === [] && $env['replacedPartRepo']->parts === []
+);
+
+// 7.4 [límite declarado] Dos líneas con la segunda inválida: la primera ya se escribió.
+// No es un defecto: las líneas se escriben y descuentan en el mismo acto, sin transacción que las
+// agrupe (RD-02 mantiene esa forma). Queda fijado aquí para que cualquier cambio sea deliberado.
+$env = createTestEnvironment();
+$partialWrite = false;
+try {
+    $env['service']->resolveIncidentWithParts(101, 42, [
+        'resolution_diagnosis' => 'Segunda línea con cantidad fuera de rango',
+        'resolution_action' => 'Sustitución mixta con cantidad inválida y prueba de estanqueidad',
+        'replaced_parts_declared' => true,
+        'replaced_parts' => [
+            ['spare_part_id' => 1, 'is_out_of_catalog' => false, 'quantity' => 1, 'old_part_destination' => 'TALLER'],
+            ['spare_part_id' => 1, 'is_out_of_catalog' => false, 'quantity' => 51, 'old_part_destination' => 'TALLER'],
+        ],
+    ]);
+} catch (InvalidPartQuantityException) {
+    $partialWrite = true;
+}
+$assert(
+    'S6 línea válida previa se escribe y se descuenta antes del rechazo de la inválida',
+    $partialWrite && count($env['replacedPartRepo']->parts) === 1 && count($env['vanStockRepo']->consumptions) === 1,
+    'escrituras=' . count($env['replacedPartRepo']->parts) . ' consumos=' . json_encode($env['vanStockRepo']->consumptions)
+);
+
+// 7.5 [RD-01/c] Fuera de catálogo: sin consumo, línea persistida con coste 0.
+$env = createTestEnvironment();
+$outOfCatalogResolve = $env['service']->resolveIncidentWithParts(101, 42, [
+    'resolution_diagnosis' => 'Manguera degradada sin equivalente en catálogo',
+    'resolution_action' => 'Sustitución de pieza no catalogada y prueba de estanqueidad',
+    'replaced_parts_declared' => true,
+    'replaced_parts' => [
+        ['is_out_of_catalog' => true, 'custom_part_name' => 'Manguera silicona 8mm', 'quantity' => 2, 'old_part_destination' => 'DESGUACE'],
+    ],
+]);
+$outLines = $env['replacedPartRepo']->findByIncidentId(101);
+$assert(
+    'S7 fuera de catálogo no descuenta, persiste con snapshot 0.00 y spare_part_id nulo',
+    $env['vanStockRepo']->consumptions === []
+        && count($outLines) === 1
+        && $outLines[0]->isOutOfCatalog() === true
+        && $outLines[0]->getSparePartId() === null
+        && $outLines[0]->getUnitCostSnapshot() === 0.00
+        && $outLines[0]->getTotalCostSnapshot() === 0.00
+        && $outOfCatalogResolve['replaced_parts_count'] === 1,
+    json_encode($env['vanStockRepo']->consumptions)
+);
+
+// 7.6 [interacción] Declaración mixta: una catalogada + una fuera de catálogo -> un solo consumo.
+$env = createTestEnvironment();
+$env['service']->resolveIncidentWithParts(101, 42, [
+    'resolution_diagnosis' => 'Fuga con abrazadera no catalogada',
+    'resolution_action' => 'Sustitución mixta y prueba de estanqueidad del circuito',
+    'replaced_parts_declared' => true,
+    'replaced_parts' => [
+        ['spare_part_id' => 1, 'is_out_of_catalog' => false, 'quantity' => 2, 'old_part_destination' => 'TALLER'],
+        ['is_out_of_catalog' => true, 'custom_part_name' => 'Abrazadera metálica 12mm', 'quantity' => 5, 'old_part_destination' => 'DESGUACE'],
+    ],
+]);
+$assert(
+    'S8 declaración mixta: solo la catalogada descuenta (una vez)',
+    $env['vanStockRepo']->consumptions === [['technician_id' => 42, 'spare_part_id' => 1, 'quantity' => 2]],
+    json_encode($env['vanStockRepo']->consumptions)
+);
+
+// 7.7 [RD-03 / RF-02.3] Aditividad entre caminos: correctivo y después preventivo.
+$env = createTestEnvironment();
+$env['service']->resolveIncidentWithParts(101, 42, [
+    'resolution_diagnosis' => 'Correctivo previo al preventivo del mismo técnico',
+    'resolution_action' => 'Sustitución en correctivo y prueba de estanqueidad del circuito',
+    'replaced_parts_declared' => true,
+    'replaced_parts' => [
+        ['spare_part_id' => 1, 'is_out_of_catalog' => false, 'quantity' => 2, 'old_part_destination' => 'TALLER'],
+    ],
+]);
+$env['service']->recordPreventiveReplacedParts(700, 42, 10, 5, [
+    ['spare_part_id' => 1, 'quantity' => 1, 'old_part_destination' => 'DESGUACE'],
+]);
+$assert(
+    'S9 correctivo y preventivo acumulan sin reversión (aditivo, mismo puerto)',
+    $env['vanStockRepo']->consumptions === [
+        ['technician_id' => 42, 'spare_part_id' => 1, 'quantity' => 2],
+        ['technician_id' => 42, 'spare_part_id' => 1, 'quantity' => 1],
+    ] && $env['vanStockRepo']->findByPairCalls === 0,
+    json_encode($env['vanStockRepo']->consumptions)
+);
+
+// 7.8 [invariante f] El constructor exige VanStockService: sin él, el fallo es inmediato y ruidoso.
+$missingDependencyThrows = false;
+try {
+    $brokenEnv = createTestEnvironment();
+    new SparePartTraceabilityService(
+        requestRepo: $brokenEnv['requestRepo'],
+        replacedPartRepo: $brokenEnv['replacedPartRepo'],
+        sparePartRepo: $brokenEnv['sparePartRepo'],
+        incidentRepo: $brokenEnv['incidentRepo'],
+        machineRepo: $brokenEnv['machineRepo']
+    );
+} catch (Error) {
+    $missingDependencyThrows = true;
+}
+$assert('S10 el constructor exige VanStockService (sin valor por defecto)', $missingDependencyThrows);
+
+// 7.9 [fallo de motor] Si el descuento no puede ejecutarse, la excepción se propaga.
+$env = createTestEnvironment();
+$throwingService = new SparePartTraceabilityService(
+    requestRepo: $env['requestRepo'],
+    replacedPartRepo: $env['replacedPartRepo'],
+    sparePartRepo: $env['sparePartRepo'],
+    incidentRepo: $env['incidentRepo'],
+    machineRepo: $env['machineRepo'],
+    vanStockService: new VanStockService(new ThrowingVanStockRepository())
+);
+$deductionFailed = false;
+try {
+    $throwingService->resolveIncidentWithParts(101, 42, [
+        'resolution_diagnosis' => 'Fallo simulado del motor durante el descuento',
+        'resolution_action' => 'Sustitución con fallo simulado y prueba de estanqueidad',
+        'replaced_parts_declared' => true,
+        'replaced_parts' => [
+            ['spare_part_id' => 1, 'is_out_of_catalog' => false, 'quantity' => 2, 'old_part_destination' => 'TALLER'],
+        ],
+    ]);
+} catch (RuntimeException) {
+    $deductionFailed = true;
+}
+$linesAfterFailure = $env['replacedPartRepo']->findByIncidentId(101);
+$incidentAfterFailure = $env['incidentRepo']->findById(101);
+$assert(
+    'S11 un fallo del descuento propaga la excepción: la línea queda escrita SIN descuento',
+    $deductionFailed === true
+        && count($linesAfterFailure) === 1
+        && $incidentAfterFailure !== null
+        && $incidentAfterFailure->getStatus() !== IncidentStatus::RESOLVED,
+    'lineas=' . count($linesAfterFailure) . ' estado=' . ($incidentAfterFailure?->getStatus()->value ?? 'null')
 );
 
 // =============================================================================

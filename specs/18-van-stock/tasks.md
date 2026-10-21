@@ -91,6 +91,7 @@
 * **Refs:** spec §9
 * **Ruta:** inline
 * **Alcance:** espejo `specs/functional/van_stock_spec.md`; estado real de la feature #5 en `docs/features_pendientes.md` (documento no versionado, `.gitignore:21`); ejecución de la batería completa y reporte honesto de toda prueba no ejecutada con su causa.
+* **Límite declarado (advisoria de la verificación de WU-3):** el saldo de una pareja técnico/pieza no puede bajar de `-999` (`chk_van_stock_quantity_range`). Un descuadre acumulado que rebasara ese suelo abortaría el cierre de la avería, que es justo lo que RD-04 quiere impedir; el rango admite 999 sustituciones sin reponer, así que el caso es alcanzable en teoría y debe quedar escrito como límite conocido del módulo, no descubierto en producción.
 
 ---
 
@@ -133,3 +134,13 @@ T-VAN-03 ─┘                                     ├─> T-VAN-08 ─┐
 * **Un solo punto de descuento:** la invocación vive justo después de `insertReplacedPart()` en los dos bucles y está guardada por `!$inserted->isOutOfCatalog()`. El preventivo no duplica la regla: llama al mismo método del mismo servicio (RF-02.3).
 * **Sin consulta de disponibilidad:** la suite cuenta las llamadas a `findByPair()` del doble y exige cero. El flujo nunca pregunta cuánto hay, así que no existe un camino por el que el inventario frene una resolución (RD-04, Art. V.1).
 * **Riesgo:** `item 3` — modifica la ruta compartida por toda resolución de avería y por toda sustitución preventiva. Cobertura propia observada en rojo y verde; se solicita verificación independiente de esta rebanada antes de cerrar el módulo.
+
+### WU-3 · Cierre tras la verificación independiente — cerrado
+* **Verificación independiente:** agente verificador sobre el rango `deda778..16a180a`, en su propia copia de trabajo dentro del directorio temporal. **Sin bloqueos.** RD-01, RD-02, RD-03, RD-04 y RF-02.3 verificados con evidencia `path:line`, e invariantes (a)-(f) cumplidos.
+* **Sondas adoptadas como regresión:** sección 7 de `tests/unit/SparePartTraceabilityServiceTest.php` (S1 a S11) más el doble `tests/Support/ThrowingVanStockRepository.php` que S11 necesita. Son once aserciones escritas desde un ángulo que el autor no eligió: dos líneas de la misma pieza, cantidades límite 50 y 51, declaración parcial y declaración mixta.
+* **Rojo observado con el descuento desactivado:** 10 fallos de 48 aserciones. Las de ausencia —fuera de catálogo, cantidad rechazada— siguen verdes en ambos estados, que es exactamente lo que deben certificar.
+* **Advisoria de duplicación resuelta:** el par `!isOutOfCatalog()` + `consume()` estaba escrito dos veces, una por bucle. Ahora es `deductVanStock(IncidentReplacedPart $part): void`, el punto único con nombre que exige RF-02.3; el técnico se toma de la propia línea persistida, no del parámetro del flujo, de modo que el descuento cae siempre sobre el técnico que la línea registra.
+* **Advisoria de aserción vacua resuelta:** la aserción «no consulta la disponibilidad» del apartado 6.1 pasaba también en el estado rojo, porque solo miraba que no se leyera el saldo. Ahora exige además un consumo registrado; se comprobó que falla con el descuento desactivado.
+* **Límite declarado trasladado a T-VAN-11:** el saldo no puede bajar de `-999`, así que un descuadre acumulado que rebasara ese suelo abortaría el cierre. Queda escrito como límite conocido del módulo en la tarea de cierre, con su razón.
+* **Evaluación nativa de riesgo:** rango `061e7b9..16a180a` → `risk: medium`, `review_due: false` (`under_budget`). La porción revisable sigue abierta con frontera en `061e7b9`; la revisión nativa llegará cuando el acumulado alcance el presupuesto.
+* **Verde:** `SparePartTraceabilityServiceTest` 48/48 · batería completa 309 suites / 12 047 aserciones / 0 fallos con las cifras documentadas coherentes.
