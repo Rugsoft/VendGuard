@@ -190,10 +190,10 @@ php bin/migrate.php
 php bin/seed_demo_history.php
 ```
 
-#### Entorno Cloud / Producción (Render, TiDB Cloud, Aiven):
-El script [`bin/init_cloud_db.php`](bin/init_cloud_db.php) ejecuta automáticamente el esquema DDL, **aplica todas las migraciones incrementales** (hoy 003-018, de ahí que una base de datos ya desplegada converja en cada arranque) y siembra sedes, máquinas, técnicos, averías históricas y eventos de auditoría de forma tolerante e idempotente:
+#### Entorno Cloud / Producción (Render + Supabase PostgreSQL):
+El script [`bin/init_cloud_db.php`](bin/init_cloud_db.php) es el único punto de convergencia del esquema y no es tolerante a medias: aplica el DDL base (`database/supabase_init.sql`), **todas las migraciones incrementales** de `database/supabase_migrations/` (hoy 001–009, de ahí que una base ya desplegada converja en cada arranque), el catálogo maestro (`database/supabase_seeds.sql`) y el histórico de demostración. Todo está declarado con `IF NOT EXISTS` y semillas «insertar si no existe», así que reejecutarlo no duplica nada. Si cualquier paso falla, el script reintenta con espera progresiva y, agotados los intentos, **sale con código distinto de cero**: con el `&&` del arranque, el contenedor no levanta y no se sirve tráfico contra un esquema sin verificar (EARS-02.5).
 ```powershell
-DB_HOST=gateway... DB_USER=xxx DB_PASSWORD=yyy DB_NAME=vendguard DB_PORT=4000 DB_SSL=1 php bin/init_cloud_db.php
+DATABASE_URL="postgres://usuario:clave@aws-0-<region>.pooler.supabase.com:6543/postgres?sslmode=verify-full" php bin/init_cloud_db.php
 ```
 
 El histórico de demostración (las 17 averías `INC-DEMO-…` con su traza de estados y su auditoría) entra en **cada arranque y por defecto** (EARS-02.6): un redespliegue lo devuelve a su sitio sin configurar nada, y la pasada que reafirma un expediente desplaza su traza con las fechas del expediente —con `UPDATE`, nunca borrando, y sólo sobre la traza que sigue siendo la del fixture—. `VENDGUARD_DEMO_HISTORY=0` deja el arranque en limpio estricto, y una avería en garantía cuya máquina esté ocupada por otro aviso vivo se omite y se declara en lugar de tumbar el servicio.
@@ -237,13 +237,14 @@ Si la cuenta de GitHub tiene bloqueada la ejecución de Actions o el contenedor 
 El equivalente de línea de comandos del barrido devuelve código de salida **distinto de cero** si alguna máquina no pudo evaluarse, de modo que un planificador o un supervisor de tareas puede alertar sobre él; el mismo barrido sigue disponible por HTTP para entornos sin acceso a la consola del servidor. La cadencia se **comprueba** desde el panel de coordinación: la pestaña *🩺 Barrido Sanitario* publica el latido (última pasada y minutos transcurridos), la tendencia de 24 h y los expedientes aplazados por contención de fila, con la alerta de escalado cuando un aplazamiento persiste tres pasadas consecutivas (RF-07).
 
 ### 5. Despliegue en Contenedor (Render) y Variables de Entorno
-El contenedor declara dos pasos y ninguno es opcional:
+El arranque del contenedor es una cadena fail-closed: ningún paso se salta y, si uno falla, el servicio no queda sirviendo.
 ```dockerfile
-CMD ["sh", "-c", "php bin/init_cloud_db.php ; php -S 0.0.0.0:${PORT} -t public public/index.php"]
+CMD ["sh", "-c", "env > /etc/vendguard/cron.env && chmod 600 /etc/vendguard/cron.env && php bin/init_cloud_db.php && crond -b && php -S 0.0.0.0:${PORT} -t public public/index.php"]
 ```
-* **Paso 1 — convergencia de la base de datos:** `init_cloud_db.php` ejecuta `cloud_init.sql` (creación de tablas con `CREATE TABLE IF NOT EXISTS`) **y todas las migraciones de `database/migrations/` en orden**, sentencia a sentencia y sin abortar el resto si un motor cloud no soporta triggers. Es lo que hace que una base **ya existente** reciba las columnas y tablas nuevas de cada despliegue; si este paso falla, el servidor arranca igual (el `;` no corta la cadena) pero el esquema se queda atrás.
-* **Paso 2 — servidor web:** `php -S` sirviendo `public/index.php`, que despacha tanto la API como los assets estáticos con su MIME y `Cache-Control: no-cache` para JS/CSS (un despliegue no se queda a medias por caché del navegador). El puerto lo inyecta la plataforma (`PORT`, por defecto 8080).
-* **Imagen y extensiones:** `php:8.2-cli-alpine` trae `mbstring` compilada de serie y el [Dockerfile](Dockerfile) instala `pdo_pgsql`; no hace falta ninguna otra extensión (Dogma Vanilla: cero `composer`, cero `npm` en runtime).
+* **Paso 1 — entorno para cron:** las variables del contenedor se vuelcan en `/etc/vendguard/cron.env` con permisos `600`, de modo que las tareas de `crond` dispongan de `CRON_SECRET` y de las credenciales del motor sin heredar el entorno del servidor web.
+* **Paso 2 — convergencia de la base de datos:** `init_cloud_db.php` aplica el DDL base (`database/supabase_init.sql`), **todas las migraciones de `database/supabase_migrations/` en orden** —el libro `schema_migrations` registra la huella de cada fichero y el arranque exige que el motor haya convergido—, el catálogo maestro y el histórico de demostración. Es lo que hace que una base **ya existente** reciba las tablas y columnas nuevas de cada despliegue; si este paso falla, la cadena se corta y el contenedor no arranca.
+* **Paso 3 — `crond` y servidor web:** el demonio interno ejecuta el [reloj de barrido sanitario](deploy/cron/vendguard-sanitary-sweep) (§4) y después arranca `php -S` sirviendo `public/index.php`, que despacha tanto la API como los assets estáticos con su MIME y `Cache-Control: no-cache` para JS/CSS (un despliegue no se queda a medias por caché del navegador). El puerto lo inyecta la plataforma (`PORT`, por defecto 8080).
+* **Imagen y extensiones:** `php:8.2-cli-alpine` incluye `mbstring` y las CA del sistema (comprobado con `php -m`); el [Dockerfile](Dockerfile) añade `pdo_pgsql`. No hace falta ninguna otra extensión ni hay `composer`/`npm` en runtime (Dogma Vanilla).
 
 **Variables de entorno** (única fuente de verdad: [`SecretProvider`](src/Infrastructure/Config/SecretProvider.php) y [`ConnectionFactory`](src/Infrastructure/Database/ConnectionFactory.php)):
 
@@ -254,7 +255,7 @@ CMD ["sh", "-c", "php bin/init_cloud_db.php ; php -S 0.0.0.0:${PORT} -t public p
 | `APP_ENV` ó `VENDGUARD_ENV` | Recomendada | `production`/`prod` activan el **fallo en cerrado**: sin claves el sistema no arranca y `root` sin contraseña se rechaza (hallazgos S-1 y S-5). |
 | `DATABASE_URL` / `SUPABASE_DB_URL` | Alternativa | Cadena única de PostgreSQL (`postgres://usuario:clave@host:puerto/base?sslmode=verify-full`). Tiene prioridad sobre `DB_*`. |
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Sí (o la cadena única) | Credenciales sueltas; se aceptan también `DB_DATABASE`, `DB_USERNAME` y `DB_PASS`. |
-| `DB_SSL` | Según proveedor | `1`/`true` fuerza TLS; se activa solo si el host contiene `tidbcloud`/`aivencloud`. |
+| `sslmode` y `sslrootcert` / `DB_SSL_ROOT_CERT` | No: hay valores por defecto seguros | TLS con verificación de identidad es **obligatorio** (RNF-05): solo se admite `sslmode=verify-full`, y `require`, `prefer`, `allow`, `disable` o `ssl: false` **abortan el arranque**. Sin CA declarada se usa la de Supabase incluida en `src/Infrastructure/Database/prod-ca-2021.crt` y, si no aparece, el almacén de certificados de la imagen; si tampoco hay ninguna, el arranque falla (el criterio no se degrada). |
 | `PORT` | La inyecta la plataforma | Puerto del servidor embebido. |
 | `APP_BASE_URL` | **Sí** si hay avisos externos por consola | Host público canónico de los enlaces que salen del sistema: las URLs impresas en las etiquetas QR y el botón de seguimiento de los correos. En las peticiones web, si falta, se resuelve por el host de la petición; un worker CLI sin ella entrega el botón como ruta relativa —que el cliente de correo resolvería contra su propio dominio— y la pasada lo **declara** en `relative_tracking_links_count`, con aviso por `stderr` (T-NOTIF-17). Se acepta también `VENDGUARD_APP_URL` como respaldo. |
 | `VENDGUARD_TELEGRAM_BOT_TOKEN` | Opcional (Módulo 15) | Token del bot que entrega al técnico el aviso de asignación con el enlace a su avería. Sin él **no se encola** ningún envío personal y la asignación sigue funcionando igual; el panel de usuarios marca qué técnicos están sin vincular. Se admite `TG_BOT_TOKEN` como respaldo (el mismo nombre que usa el relé corporativo). El `chat_id` de cada técnico se declara en **Administración → Usuarios**. |
@@ -264,7 +265,7 @@ CMD ["sh", "-c", "php bin/init_cloud_db.php ; php -S 0.0.0.0:${PORT} -t public p
 
 **Cron en la plataforma:** un *Cron Job* con la misma imagen ejecutando `php bin/sanitary_clock_sweep.php` cada 15 minutos (o una llamada externa a `POST /api/cron/sanitary-clock-sweep` con la cabecera `X-Cron-Secret`) y `POST /api/cron/auto-close` una vez al día. Sin el barrido programado, la pestaña *🩺 Barrido Sanitario* lo delata con el latido envejecido: la superficie distingue «no hay nada que hacer» de «el barrido no está corriendo».
 
-> **Credenciales de demostración en el despliegue.** El paso 1 siembra el personal interno con la contraseña de demostración, de modo que `coordinacion@vendguard.internal` / `Password123!` funciona nada más desplegar. Las claves de centro, en cambio, **no** se siembran en producción (arriba).
+> **Credenciales de demostración en el despliegue.** El paso 2 siembra el personal interno con la contraseña de demostración, de modo que `coordinacion@vendguard.internal` / `Password123!` funciona nada más desplegar. Las claves de centro, en cambio, **no** se siembran en producción (arriba).
 
 ---
 
