@@ -4,7 +4,7 @@
 **Módulo:** 18 · Stock de Repuestos en Furgoneta  
 **Documento Espejo Funcional:** `specs/functional/van_stock_spec.md`  
 **Referencia Canónica:** [`specs/18-van-stock/spec.md`](../18-van-stock/spec.md)  
-**Estado:** Espejo de la spec aprobada por el Product Owner el 2026-10-21 · Implementación en curso (ciclo SDD, fases 3 y 4)  
+**Estado:** Espejo de la spec aprobada por el Product Owner el 2026-10-21 · Implementada y verificada (ciclo SDD cerrado: fases 3, 4 y 5)  
 **Fecha:** Octubre 2026  
 **Alineación Constitucional:** Artículos I al VII de la Constitución de VendGuard (Especialmente Art. III.1, Art. IV, Art. V.1, Art. V.4 y Art. VI.1)
 
@@ -204,19 +204,19 @@ Queda **fuera** de este módulo, y no debe implementarse ni diseñarse aquí:
 
 ## 9. Criterios de Aceptación / Definition of Done
 
-- [ ] El inventario de stock existe por pareja única `(técnico, pieza)` con cantidad y umbral, y no admite borrado físico.
-- [ ] El coordinador puede cargar y ajustar el stock de cualquier técnico, con auditoría del delta.
-- [ ] El descuento se aplica por un **único método compartido** desde los dos caminos de declaración (correctivo y preventivo), por la cantidad declarada.
-- [ ] La pieza fuera de catálogo no descuenta y no altera el flujo de declaración.
-- [ ] El stock puede quedar negativo y se muestra marcado como descuadre.
-- [ ] La alerta de stock bajo se publica en Coordinación con orden por severidad y estado vacío explicativo.
-- [ ] El técnico consulta su propio stock en solo lectura, sin poder parametrizar a otro técnico ni mutar nada.
-- [ ] Ninguna superficie de sede ni de escaneo público expone stock, cantidades ni umbrales (suite constitucional propia).
-- [ ] La resolución de avería y el completado de preventivo **no** pueden fallar por causa del inventario.
-- [ ] Cero dependencias nuevas; frontend en Vue 3 estándar y backend en PHP puro tipado.
-- [ ] La batería global (`php tests/run_all.php`) queda en verde y las cifras documentadas se sincronizan.
-- [ ] Las guardas de §8.2 quedan en verde, incluida la enmienda de la auditoría del Art. VI.
-- [ ] El albarán de reposición automática **no** se ha implementado (§2.2).
+- [x] El inventario de stock existe por pareja única `(técnico, pieza)` con cantidad y umbral, y no admite borrado físico.
+- [x] El coordinador puede cargar y ajustar el stock de cualquier técnico, con auditoría del delta.
+- [x] El descuento se aplica por un **único método compartido** desde los dos caminos de declaración (correctivo y preventivo), por la cantidad declarada.
+- [x] La pieza fuera de catálogo no descuenta y no altera el flujo de declaración.
+- [x] El stock puede quedar negativo y se muestra marcado como descuadre.
+- [x] La alerta de stock bajo se publica en Coordinación con orden por severidad y estado vacío explicativo.
+- [x] El técnico consulta su propio stock en solo lectura, sin poder parametrizar a otro técnico ni mutar nada.
+- [x] Ninguna superficie de sede ni de escaneo público expone stock, cantidades ni umbrales (suite constitucional propia).
+- [x] La resolución de avería y el completado de preventivo **no** pueden fallar por causa del inventario.
+- [x] Cero dependencias nuevas; frontend en Vue 3 estándar y backend en PHP puro tipado.
+- [x] La batería global (`php tests/run_all.php`) queda en verde y las cifras documentadas se sincronizan.
+- [x] Las guardas de §8.2 quedan en verde, incluida la enmienda de la auditoría del Art. VI.
+- [x] El albarán de reposición automática **no** se ha implementado (§2.2).
 
 ---
 
@@ -224,5 +224,12 @@ Queda **fuera** de este módulo, y no debe implementarse ni diseñarse aquí:
 
 * **Origen de la petición:** feature #5 del catálogo de pendientes, `docs/features_pendientes.md` §5 (*"🚐 Inventario de Repuestos en Furgoneta (Van Stock)"*), bloque 2, complejidad estimada Media-Alta (3 días). El documento **no está versionado** en el repositorio, por lo que esta spec es la referencia normativa del módulo.
 * **Base normativa previa:** [`specs/functional/spare_parts_spec.md`](../functional/spare_parts_spec.md) (RF-REP-01 a RF-REP-10) y [`specs/technical/spare_parts_contracts.md`](../technical/spare_parts_contracts.md), de las que este módulo hereda el catálogo maestro, el patrón de snapshot inmutable de coste y la exclusión de albaranes.
-* **Pendiente de redacción tras la aprobación de esta spec (Fase 1 → Fase 3):** `specs/18-van-stock/plan.md` (diseño técnico y matriz de trazabilidad), `specs/18-van-stock/tasks.md` (tareas T-VAN-xx) y `specs/technical/van_stock_contracts.md` (contratos HTTP y DDL definitivo).
-* **Documento espejo:** por convención del repositorio, `specs/functional/van_stock_spec.md` se generará como copia espejo de este documento canónico una vez aprobado.
+* **Artefactos de las fases 3 y 4 (redactados y cerrados):** `specs/18-van-stock/plan.md` (diseño técnico y matriz de trazabilidad), `specs/18-van-stock/tasks.md` (tareas T-VAN-01 a T-VAN-11 con su bitácora de ejecución) y `specs/technical/van_stock_contracts.md` (contratos HTTP y DDL definitivo).
+* **Documento espejo:** `specs/functional/van_stock_spec.md` mantiene la copia espejo de este documento canónico; su cabecera declara la referencia inversa.
+---
+
+## 11. Límites Conocidos y Verificación Final
+
+* **Suelo de saldo `-999` (`chk_van_stock_quantity_range`):** el saldo de una pareja `(técnico, pieza)` no puede bajar de `-999`. Un descuadre acumulado que rebasara ese suelo abortaría la escritura y, con ella, el cierre de la avería, que es justo lo que RD-04 quiere impedir. El rango admite 999 sustituciones sin reponer, así que el caso es alcanzable solo en teoría; queda escrito como límite conocido del módulo, no como defecto a descubrir en producción. Si alguna vez se aproxima, la salida es reponer stock —lo que devuelve el saldo a positivo—, no ampliar el rango.
+* **Albarán de reposición automática:** no implementado, por alcance autorizado (§2.2). La alerta de bajo umbral es la señal operativa; la propuesta de albarán, los pedidos, el picking y la valoración monetaria siguen siendo trabajo futuro.
+* **Verificación final:** `php tests/run_all.php` → **312 suites · 12.108 aserciones · 0 fallos**, cifras documentadas coherentes y base restaurada a semillas. Las suites propias del módulo son `PostgresVanStockSchemaTest` (18/18, canal `new_engine`), `VanStockItemTest` (17/17), `VanStockServiceTest` (29/29), `SparePartTraceabilityServiceTest` (48/48 con los apartados del descuento), `VanStockApiTest` (30/30, canal `new_engine`), `VanStockPrivacyTest` (9/9), `TechnicianVanStockPanelTest` (20/20) y `CoordinatorVanStockTabTest` (30/30). No quedó ninguna prueba del módulo sin ejecutar: las dos del canal `new_engine` se corrieron por su canal propio contra el motor local (`deploy/local/postgres/.env.local`).

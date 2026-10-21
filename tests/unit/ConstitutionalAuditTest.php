@@ -236,7 +236,12 @@ $assert(
 // ─────────────────────────────────────────────────────────────────────────
 echo "\n{$colorBold}--- 7. Artículo VI: Delimitación Sagrada del Alcance (Anti-Feature Creep) ---{$colorReset}\n";
 
-$prohibitedTerms = ['telemetry', 'mdb_protocol', 'dex_protocol', 'van_inventory', 'payment_gateway', 'stripe', 'paypal'];
+// `van_inventory` se retira de esta lista el 21/10/2026: el Product Owner cerró la Fase 1 y
+// autorizó el Módulo 18 con alcance mínimo —stock por técnico, descuento automático y alerta de
+// bajo umbral—. Lo que sigue vedado es el resto de la Fase 2: telemetría MDB/DEX, albarán
+// automático, pedidos, picking y valoración monetaria. El Artículo VI no distingue por nombre de
+// tabla, así que la guarda sigue mirando los términos que aún no tienen autorización.
+$prohibitedTerms = ['telemetry', 'mdb_protocol', 'dex_protocol', 'payment_gateway', 'stripe', 'paypal'];
 $creepDetected = [];
 
 foreach ($prodPhpFiles as $filePath) {
@@ -249,7 +254,7 @@ foreach ($prodPhpFiles as $filePath) {
 }
 
 $assert(
-    "7.1 Cero código de telemetría IoT MDB/DEX o inventario de furgonetas (Foco estricto en MVP)",
+    "7.1 Cero código de telemetría IoT MDB/DEX ni pasarelas de pago (Foco estricto en MVP)",
     empty($creepDetected),
     "Términos no autorizados detectados: " . implode(', ', $creepDetected)
 );

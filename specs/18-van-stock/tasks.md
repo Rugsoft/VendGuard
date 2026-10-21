@@ -170,3 +170,13 @@ T-VAN-03 ─┘                                     ├─> T-VAN-08 ─┐
 * **`api.js` editado por el padre**, como preveía el plan: `coordinator.getVanStocks`, `coordinator.setVanStock` y `technician.getVanStock`.
 * **Fallo intermitente ajeno observado:** en una de las pasadas de la batería cayó `HealthCheckServiceTest` (1 suite, y con ella 1 aserción); aislada vuelve a 31/31 y la pasada siguiente cerró 312 suites / 12 108 aserciones sin fallos. Es una intermitencia previa del diagnóstico de salud contra la base de la batería, no de este módulo; queda anotada para que nadie la atribuya al Módulo 18 ni a sus cifras.
 * **Riesgo:** `item 1` — dos superficies nuevas de cliente, sin migración ni cambio del contrato HTTP. La de coordinación queda detrás del mismo middleware que el resto del panel y la del técnico no muta nada: no tiene ni un `<input>`.
+
+### WU-6 · T-VAN-10 y T-VAN-11 (guardas de alcance y cierre) — cerrado
+* **Commit:** `docs(van-stock): close the module and retire the authorised scope guard`
+* **Enmienda del Art. VI:** `van_inventory` sale de la lista de términos vedados de `ConstitutionalAuditTest` §7.1, con la autorización del Product Owner citada en el propio test (21/10/2026, alcance mínimo). La guarda sigue mirando lo que continúa sin autorización: telemetría MDB/DEX y pasarelas de pago. Auditoría constitucional 44/44.
+* **Trinquete de tokens:** contador 2268 con el techo en 2269 — no sube; los ficheros de cliente del módulo (dos componentes, las dos vistas tocadas y `api.js`) no añaden ni un literal hexadecimal.
+* **Cifras documentadas:** README y las cuatro actas sincronizadas a 312 suites / 12 108 aserciones; `DocMetricsGuard` cierra en COHERENTES.
+* **Cierre documental:** la spec canónica y su espejo funcional pasan a «implementada y verificada», los trece criterios de aceptación de §9 se marcan cumplidos, §10 refleja los artefactos realmente redactados y un §11 nuevo declara los dos límites conocidos: el suelo `-999` y el albarán automático no implementado.
+* **Feature #5 de `docs/features_pendientes.md`:** estado real con el alcance mínimo y, explícito, lo que quedó fuera. El documento está ignorado por git (`.gitignore:21`), así que el cambio no entra en el commit; queda en el árbol de trabajo como registro local.
+* **Pruebas no ejecutadas:** ninguna del módulo. Las dos suites del canal `new_engine` se corrieron aparte contra el motor local (`PostgresVanStockSchemaTest` 18/18 y `VanStockApiTest` 30/30); el resto entra en la batería global.
+* **Riesgo:** `item 1` — solo toca pruebas y documentación; no altera código de producción.
