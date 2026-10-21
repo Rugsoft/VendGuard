@@ -32,6 +32,7 @@ globalThis.window = {
 
 import { api } from '../../public/assets/js/api.js';
 import { AdminMachinesTab, MACHINE_TYPES } from '../../public/assets/js/components/AdminMachinesTab.js';
+import { QrLabelModal } from '../../public/assets/js/components/QrLabelModal.js';
 
 let assertions = 0;
 let failures = 0;
@@ -460,7 +461,17 @@ console.log('\n--- BLOQUE 8: Template HTML y Elementos Constitucionales ---');
   assert('8.6 Template contiene modal de traslado con advertencia de bloqueo operativo', template.includes('Traslado Físico de Máquina') && template.includes('Traslado Bloqueado'));
   assert('8.7 Template contiene diálogo de confirmación de baja lógica', template.includes('Confirmar Baja Lógica de Máquina') && template.includes('canConfirmDeactivate'));
   assert('8.8 Template contiene diálogo de reactivación asistida con aviso de sede inactiva', template.includes('Reactivación Asistida') && template.includes('Sede Original Inactiva'));
-  assert('8.9 Template contiene modal visor de código QR', template.includes('/api/qr/view/') && template.includes('/api/qr/download/'));
+  assert(
+    '8.9 Template reutiliza el modal canónico de etiqueta QR (QrLabelModal) sobre el endpoint autenticado de coordinación',
+    template.includes('<QrLabelModal') &&
+      template.includes(':machine-id="qrMachine?.id"') &&
+      template.includes('@close="closeQrModal"') &&
+      AdminMachinesTab.components?.QrLabelModal !== undefined &&
+      typeof QrLabelModal.methods.fetchLabelData === 'function' &&
+      !template.includes('/api/qr/view/') &&
+      !template.includes('/api/qr/download/'),
+    'El visor debe pedir la etiqueta con el token de sesión y no puede referenciar rutas de imagen no registradas'
+  );
 }
 
 // --------------------------------------------------------------------

@@ -12,11 +12,14 @@
  * 6. Diálogo de Baja Lógica (Soft Delete) con bloqueo estricto si cuenta con averías en curso o en periodo de garantía de 48h (EARS 2.10, 2.11).
  * 7. Diálogo de Reactivación Asistida con selector forzoso de nueva sede activa si la sede original fue dada de baja previa (EARS 2.13).
  * 8. Acceso integrado a códigos QR para previsualización e impresión de etiquetas identificativas (EARS 2.14).
+ *    Reutiliza el modal canónico de etiqueta (QrLabelModal) sobre el endpoint autenticado
+ *    `GET /api/coordinator/machines/{id}/qr-label`, en lugar de inventar rutas de imagen.
  * 
  * Dogma Vanilla: Vue 3 Options API en módulos ESM nativos sin dependencias npm externas.
  */
 
 import { api } from '../api.js';
+import { QrLabelModal } from './QrLabelModal.js';
 
 export const MACHINE_TYPES = [
   { value: 'HOT_DRINKS', label: 'Bebidas calientes (Café e infusiones)', isPerishable: false, badgeClass: 'bg-info text-dark' },
@@ -28,6 +31,9 @@ export const MACHINE_TYPES = [
 
 export const AdminMachinesTab = {
   name: 'AdminMachinesTab',
+  components: {
+    QrLabelModal
+  },
   data() {
     return {
       machines: [],
@@ -1364,40 +1370,16 @@ export const AdminMachinesTab = {
         </div>
       </div>
 
-      <!-- MODAL VISOR QR (EARS 2.14) -->
-      <div v-if="showQrModal && qrMachine" class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5); z-index: 1050;" role="dialog" aria-modal="true">
-        <div class="modal-dialog modal-dialog-centered">
-          <div class="modal-content border-0 shadow text-center">
-            <div class="modal-header bg-light">
-              <h5 class="modal-title fw-bold text-dark">📱 Código QR: {{ qrMachine.code }}</h5>
-              <button type="button" class="vg-btn vg-btn-ghost vg-btn-icon vg-btn-close" @click="closeQrModal" aria-label="Cerrar"></button>
-            </div>
-            <div class="modal-body py-4">
-              <div class="mb-3">
-                <img 
-                  :src="'/api/qr/view/' + qrMachine.code" 
-                  :alt="'QR ' + qrMachine.code" 
-                  style="width: 220px; height: 220px; border: 1px solid #dee2e6; border-radius: 8px; padding: 10px;"
-                />
-              </div>
-              <h6 class="fw-bold mb-1">{{ qrMachine.location_name }}</h6>
-              <p class="text-muted small mb-3">{{ qrMachine.floor_wing }} ({{ qrMachine.model }})</p>
-
-              <div class="d-flex justify-content-center gap-2">
-                <a :href="'/api/qr/download/' + qrMachine.code" download class="vg-btn vg-btn-sm vg-btn-primary-outline">
-                  ⬇️ Descargar SVG
-                </a>
-                <a :href="'/api/qr/view/' + qrMachine.code" target="_blank" class="vg-btn vg-btn-sm vg-btn-secondary">
-                  🖨️ Imprimir
-                </a>
-              </div>
-            </div>
-            <div class="modal-footer border-top justify-content-center">
-              <button type="button" class="vg-btn vg-btn-secondary" @click="closeQrModal">Cerrar</button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- MODAL VISOR QR COMPARTIDO (EARS 2.14 / RF-01, RF-02). La etiqueta se
+           pide al endpoint autenticado de coordinación con el token de sesión;
+           una <img src> directa no puede enviar la cabecera Authorization y
+           devolvía la imagen rota. -->
+      <QrLabelModal
+        v-model="showQrModal"
+        :machine="qrMachine"
+        :machine-id="qrMachine?.id"
+        @close="closeQrModal"
+      />
     </div>
   `
 };
