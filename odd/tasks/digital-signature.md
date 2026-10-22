@@ -56,8 +56,8 @@ S22 — **Fuera de alcance (Q7, §2.2).** Preventivas sin firma ni albarán; sin
 | **WU-0 / T-SIGN-00** | S1–S22 (puerta SDD) | inline | `docs(digital-signature): add module 19 specification and ODD tracking` | ✅ hecho (`7daed7d`) |
 | **T-SIGN-01** | S5, S6, S8 | inline | `feat(digital-signature): model the service sheet and its frozen document` | ✅ hecho |
 | **T-SIGN-02** | S2, S3, S4, S8, S17 | inline | (mismo commit que T-SIGN-01) | ✅ hecho |
-| **T-SIGN-03** | S8, S9, S11, S14 | inline | `feat(digital-signature): persist parts, stock and the sheet in one transaction` | ✅ hecho (WU-2) |
-| **T-SIGN-04** | S5, S16 | inline | (mismo commit que T-SIGN-03) | ✅ hecho (WU-2) |
+| **T-SIGN-03** | S8, S9, S11, S14 | inline | `feat(digital-signature): persist parts, stock and the sheet in one transaction` | ✅ hecho (`461992d`) |
+| **T-SIGN-04** | S5, S16 | inline | (mismo commit que T-SIGN-03) | ✅ hecho (`461992d`) |
 | **T-SIGN-05** | S7, S9, S10, S11, S13, S14, S15 | inline | `feat(digital-signature): expose current and historical service sheets` | pendiente |
 | **T-SIGN-06** | S1, S2, S3, S4, S19 | inline¹ | `feat(digital-signature): capture the signature and print the service sheet` | pendiente |
 | **T-SIGN-07** | S9, S12, S14 | inline¹ | (mismo commit que T-SIGN-06) | pendiente |
@@ -118,3 +118,18 @@ Desvíos declarados de esta unidad:
 * (b) Cambio de comportamiento aceptado y documentado: antes, un cierre con una línea válida seguida de una inválida dejaba escrita la primera; ahora no escribe ninguna. Es exactamente S5 y el test S6 se reescribió para fijarlo.
 * (c) Se añadió el disparador `BEFORE UPDATE` porque el contrato aprobado lo exige literalmente («el trigger lo impide en base», invariante 2) y porque la inmutabilidad es el valor del módulo; la migración 010 aún no estaba desplegada.
 * (d) Los hallazgos informativos R3-4, R1-SHEET-UPDATE-NOT-ENFORCED, R3-3, R3-2, R3-1, R1-SHEET-DECODE-BEFORE-SIZE y R3-5 quedan cerrados en esta unidad; R1-SHEET-READ-SCOPE se cierra con la autorización de endpoints en WU-3.
+
+**L8 (2026-10-22) — Revisión nativa de WU-2.** `assess --base-ref 8e3754e --committed-only` dictaminó `high_risk`. Consentimiento del PO sobre el candidato (25 ficheros / 1.505 líneas) en `gentle-ai.review-integration.consent/v3`: **granted**. Lineage `review-1d7431e21bb5c3d2`, revisión `sha256:99e19082…`, lentes `review-risk`, `review-resilience`, `review-reliability` (documentos inmutables con guarda de motor, cierre transaccional bajo fallo y lógica fijada por pruebas nuevas).
+
+Resultado: **approved**, 0 hallazgos bloqueantes, 9 informativos. Autoridad quemada (`review-acknowledged/v1`, `consumed_revision sha256:bbd34a1c…`, `authority: burned`). Commit del candidato: `461992d`.
+
+Hallazgos informativos y destino acordado (trabajo posterior, no reabren este candidato):
+
+| ID | Hallazgo | Destino |
+| :--- | :--- | :--- |
+| `R1-MIGRATION-CHECK-UPGRADE`, `R3-MIGRATION-DRIFT`, `R4-MIGRATION-IN-PLACE` | Los `CHECK` endurecidos y el disparador `BEFORE UPDATE` se editaron **dentro** de la migración 010 (`CREATE TABLE IF NOT EXISTS`): una base que ya hubiera aplicado la versión anterior conserva la tabla laxa. Hoy no hay ninguna base así (010 nunca se desplegó), pero la deriva no la detectan las suites, que reconstruyen desde `supabase_init.sql`. | WU-5 (cierre documental): nota de despliegue que exige 010 sin aplicar, o migración `011` con `ALTER TABLE … ADD CONSTRAINT` + `CREATE TRIGGER` si el entorno ya la aplicó. |
+| `R3-PERSISTENCE-EXC`, `R4-SHEET-ERROR-TYPE` | `ServiceSheetPersistenceException` solo se lanza cuando `INSERT … RETURNING` no devuelve fila; un fallo real del motor (CHECK, FK, conexión) viaja como `PDOException` sin código técnico, y ninguna prueba referencia la excepción. | WU-3: envolver el fallo del motor al escribir la hoja y probar el camino de error con un CHECK forzado. |
+| `R4-READ-SILENT-FALLBACK` | Un `sheet_id` inexistente o de otra avería no se distingue de «sin hoja»: el modelo devuelve `sheet: null` y la proyección viva. | WU-3: la ruta responde `404 SERVICE_SHEET_NOT_FOUND` (S14) y distingue el caso por el `sheet_id` pedido. |
+| `R3-ATOMICITY-GATE` | `ServiceSheetAtomicityTest` es `new_engine`: `run_all.php` sigue en 313 suites y esas conductas pueden regresar sin motor. | Aceptado como límite declarado del arnés; la alternativa (duplicar la suite contra dobles) certificaría menos. Se anota en el cierre de WU-5. |
+| `R3-PREDECODE-ASSERT` | La aserción de la pre-cota base64 no distingue el guardián de su ausencia (el mismo cuerpo lo rechazan también las cotas posteriores). | WU-5: o se fija con un espía del decodificador, o se declara la pre-cota como optimización no observable. |
+| `R1-TEST-SQL-CONCAT` | La suite de integración concatena en SQL valores constantes definidos en la propia prueba. | Aceptado: no hay valor atacante; se anota para no copiarlo a código de producción. |
