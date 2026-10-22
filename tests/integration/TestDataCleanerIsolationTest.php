@@ -196,11 +196,13 @@ $assert(
 );
 
 // 15 tablas de la bandeja + las 3 del catálogo territorial (Módulo 17, hallazgo H-2) + el saldo
-// de furgoneta del Módulo 18: `operational_zones` es raíz propia y sus dos hijas caen por el
-// grafo de claves foráneas, y `technician_van_stocks` es hija de `spare_parts`, que ya es raíz.
+// de furgoneta del Módulo 18 + la hoja de servicio firmada del Módulo 19: `operational_zones` es
+// raíz propia y sus dos hijas caen por el grafo de claves foráneas, `technician_van_stocks` es
+// hija de `spare_parts`, que ya es raíz, e `incident_service_sheets` cuelga de `incidents` con
+// RESTRICT y se drena por la ventana de purga del Art. III.1.
 $assert(
-    '2.7 El plan cubre las 19 tablas transitorias del contrato (15 de la bandeja + 3 territoriales + 1 de stock)',
-    count($order) === 19,
+    '2.7 El plan cubre las 20 tablas transitorias del contrato (15 de la bandeja + 3 territoriales + 1 de stock + 1 de hojas de servicio)',
+    count($order) === 20,
     'obtenidas: ' . count($order)
 );
 

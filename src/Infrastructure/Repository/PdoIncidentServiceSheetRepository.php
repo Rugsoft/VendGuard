@@ -31,7 +31,9 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  *  - **Una consulta para la hoja y la proyección viva.** `findDocumentByIncidentId()` sirve
  *    el albarán pedido o el vigente, y compone la proyección viva cuando todavía no hay
  *    ninguna hoja (contratos §6.2). El `JOIN` de la hoja filtra por `incident_id`, así que
- *    un `sheet_id` de otra avería no puede servirse (RD-17).
+ *    un `sheet_id` de otra avería no puede servirse (RD-17). Sin `sheet_id`, la hoja
+ *    servida es la **anclada a la resolución vigente** (`resolution_at = resolved_at`):
+ *    tras reabrir y volver a cerrar sin firma, la firma anterior no se reutiliza (S7).
  */
 final class PdoIncidentServiceSheetRepository implements IncidentServiceSheetRepositoryInterface
 {
@@ -138,7 +140,13 @@ final class PdoIncidentServiceSheetRepository implements IncidentServiceSheetRep
               SELECT sh.*
                 FROM incident_service_sheets sh
                WHERE sh.incident_id = i.id
-                 AND (:sheet_id::bigint IS NULL OR sh.id = :sheet_id::bigint)
+                 AND (
+                       (:sheet_id::bigint IS NOT NULL AND sh.id = :sheet_id::bigint)
+                    OR (:sheet_id::bigint IS NULL AND (
+                           sh.resolution_at = i.resolved_at
+                        OR i.status::text NOT IN ('RESOLVED', 'CLOSED')
+                       ))
+                 )
                ORDER BY sh.recorded_at DESC, sh.id DESC
                LIMIT 1
           ) s ON TRUE
@@ -165,6 +173,23 @@ final class PdoIncidentServiceSheetRepository implements IncidentServiceSheetRep
         SQL;
 
     /**
+     * Autorización de lectura del técnico (contratos §6.4, RD-17).
+     */
+    private const READ_AUTHORIZATION_SQL = <<<'SQL'
+        SELECT 1
+          FROM incidents i
+         WHERE i.id = :incident_id
+           AND (
+                i.assigned_technician_id = :technician_id
+                OR EXISTS (
+                    SELECT 1 FROM incident_service_sheets sh
+                     WHERE sh.incident_id = i.id
+                       AND sh.technician_id = :technician_id
+                )
+           )
+        SQL;
+
+    /**
      * {@inheritdoc}
      */
     public function insert(IncidentServiceSheet $sheet): IncidentServiceSheet
@@ -183,7 +208,14 @@ final class PdoIncidentServiceSheetRepository implements IncidentServiceSheetRep
             $stmt->bindValue(':signature_png', $sheet->getSignaturePng(), PDO::PARAM_LOB);
         }
 
-        $stmt->execute();
+        try {
+            $stmt->execute();
+        } catch (\PDOException $exception) {
+            // El motor rechaza la fila (CHECK de rama, firma de PNG, FK, conexión). El
+            // cierre entero revierte y el técnico recibe un 500 reintentable en vez de
+            // un error de persistencia sin código técnico (§5, R3-PERSISTENCE-EXC).
+            throw new ServiceSheetPersistenceException(previous: $exception);
+        }
 
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false || !isset($row['id'], $row['recorded_at'])) {
@@ -273,6 +305,19 @@ final class PdoIncidentServiceSheetRepository implements IncidentServiceSheetRep
         }
 
         return $history;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function isReadableByTechnician(int $incidentId, int $technicianId): bool
+    {
+        $stmt = $this->pdo->prepare(self::READ_AUTHORIZATION_SQL);
+        $stmt->bindValue(':incident_id', $incidentId, PDO::PARAM_INT);
+        $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetchColumn() !== false;
     }
 
     private function bindNullableText(PDOStatement $stmt, string $placeholder, ?string $value): void

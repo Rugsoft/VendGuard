@@ -404,12 +404,13 @@ Parámetro opcional `?sheet_id=` (entero positivo) para pedir una hoja concreta 
 
 * `document` es el `signed_document` de la hoja seleccionada cuando existe hoja; si no existe ninguna, se compone con los datos vivos de la incidencia (RF-04.4).
 * `sheet` es `null` cuando la avería no tiene ninguna hoja; entonces `document` es la proyección viva y el cliente imprime «Sin firma del responsable».
+* Sin `sheet_id`, la hoja servida es la **anclada a la resolución vigente** (`resolution_at = resolved_at`). Una avería reabierta sirve su última hoja como histórica (`current: false`) y, tras un nuevo cierre sin hoja, `sheet` vuelve a ser `null`: la firma anterior no se reutiliza nunca (S7, RD-11).
 * `parts[].name` sale del snapshot (piezas de catálogo y fuera de catálogo ya congeladas) o, en la proyección viva, de `COALESCE(spare_parts.name, incident_replaced_parts.custom_part_name)`. **Nunca** `part_code` ni coste.
 * Sin piezas, `parts` es `[]` y el cliente imprime «Sin sustitución de componentes» (RF-04.1).
 * `current` es `true` cuando el documento corresponde a la resolución vigente: si hay hoja, la seleccionada debe ser la última y su `resolution_at` debe coincidir con `incidents.resolved_at` estando la incidencia en `RESOLVED` o `CLOSED`; si no hay hoja, basta con que la incidencia esté resuelta o cerrada (RD-11).
 * `history` incluye **todas** las hojas de la incidencia, de la más reciente a la más antigua.
 * `png_base64` es el trazo decodificado a base64 **sin** prefijo `data:`. El cliente lo compone siempre como `data:image/png;base64,` y nunca asigna el valor a un `src` sin ese prefijo.
-* **Errores:** `404 INCIDENT_NOT_FOUND`; `403 SERVICE_SHEET_FORBIDDEN` (técnico ni asignado ni firmante); `422 INCIDENT_NOT_RESOLVED` cuando no hay hoja y la avería nunca se resolvió; `404 SERVICE_SHEET_NOT_FOUND` cuando `sheet_id` no pertenece a esa avería.
+* **Errores:** `400 INVALID_SHEET_ID` (el parámetro no es un entero positivo); `404 INCIDENT_NOT_FOUND`; `403 SERVICE_SHEET_FORBIDDEN` (técnico ni asignado ni firmante); `422 INCIDENT_NOT_RESOLVED` cuando no hay hoja y la avería nunca se resolvió; `404 SERVICE_SHEET_NOT_FOUND` cuando `sheet_id` no pertenece a esa avería.
 
 ---
 
@@ -418,6 +419,7 @@ Parámetro opcional `?sheet_id=` (entero positivo) para pedir una hoja concreta 
 | Código | HTTP | Significado operativo |
 | :--- | :--- | :--- |
 | `INVALID_SERVICE_SHEET` | 422 | El bloque de firma no cumple el contrato; el técnico debe corregirlo o declarar la ausencia. |
+| `INVALID_SHEET_ID` | 400 | El `?sheet_id=` de la lectura no es un entero positivo; no se ignora en silencio. |
 | `SERVICE_SHEET_PERSISTENCE_FAILED` | 500 | No se pudo guardar la hoja; el cierre (y sus piezas y su stock) se revirtió y el técnico puede reintentar. |
 | `INCIDENT_NOT_RESOLVED` | 422 | No hay documento que emitir: la avería no se ha cerrado nunca. |
 | `SERVICE_SHEET_FORBIDDEN` | 403 | La avería no está asignada a este técnico y él no firmó ninguna de sus hojas. |

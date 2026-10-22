@@ -27,4 +27,9 @@ final class NullServiceSheetRepository implements \VendGuard\Core\Domain\Reposit
     {
         return [];
     }
+
+    public function isReadableByTechnician(int $incidentId, int $technicianId): bool
+    {
+        return false;
+    }
 }

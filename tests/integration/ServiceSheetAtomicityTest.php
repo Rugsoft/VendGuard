@@ -41,6 +41,7 @@ require_once __DIR__ . '/../../src/Infrastructure/Database/PostgresMigrationRunn
 
 use VendGuard\Application\Service\SparePartTraceabilityService;
 use VendGuard\Application\Service\VanStockService;
+use VendGuard\Core\Domain\Exception\ServiceSheetPersistenceException;
 use VendGuard\Core\Domain\Model\IncidentServiceSheet;
 use VendGuard\Core\Domain\Repository\IncidentServiceSheetRepositoryInterface;
 use VendGuard\Core\Service\ServiceSheetValidator;
@@ -109,6 +110,11 @@ final class FailingServiceSheetRepository implements IncidentServiceSheetReposit
     public function listByIncidentId(int $incidentId): array
     {
         return $this->inner->listByIncidentId($incidentId);
+    }
+
+    public function isReadableByTechnician(int $incidentId, int $technicianId): bool
+    {
+        return $this->inner->isReadableByTechnician($incidentId, $technicianId);
     }
 }
 
@@ -370,6 +376,38 @@ try {
     $assert('El trazo supera los 8 KB y vuelve íntegro', is_string($traceBytes) && strlen($traceBytes) > 8192, 'bytes=' . (is_string($traceBytes) ? strlen($traceBytes) : -1));
     $assert('Los bytes del PNG son los mismos que se enviaron', $traceBytes === ServiceSheetValidator::normalize(['signer_name' => 'María López Ferrer', 'signer_document' => '12345678Z', 'signature_png_base64' => $closePayload['service_sheet']['signature_png_base64']])['signature_png'], 'png distinto');
     $assert('El documento congelado no viaja en el trazo', !array_key_exists('signature_png', $document), json_encode(array_keys($document)));
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 4 bis. El fallo del motor se encapsula (§5)
+    // ─────────────────────────────────────────────────────────────────────
+
+    echo "\n--- 4 bis. Fallo del motor encapsulado (R3-PERSISTENCE-EXC, §5) ---\n";
+
+    $engineFailure = null;
+    try {
+        $sheetRepo->insert(new IncidentServiceSheet(
+            id: null,
+            incidentId: $incidentId,
+            technicianId: $technicianId,
+            signerName: 'AB',
+            signerDocument: '12345678Z',
+            signaturePng: $traceBytes,
+            absenceReason: null,
+        ));
+    } catch (\Throwable $exception) {
+        $engineFailure = $exception;
+    }
+
+    $assert(
+        'El CHECK del motor sale como ServiceSheetPersistenceException con su causa',
+        $engineFailure instanceof ServiceSheetPersistenceException
+            && $engineFailure->getPrevious() instanceof \PDOException
+            && $engineFailure->getHttpStatusCode() === 500
+            && $engineFailure->getErrorCode() === 'SERVICE_SHEET_PERSISTENCE_FAILED',
+        $engineFailure === null
+            ? 'no hubo excepción'
+            : get_class($engineFailure) . ': ' . $engineFailure->getMessage()
+    );
 
     // ─────────────────────────────────────────────────────────────────────
     // 5. Albarán histórico tras reapertura (Q2)

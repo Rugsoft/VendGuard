@@ -35,7 +35,8 @@ interface IncidentServiceSheetRepositoryInterface
      * `$sheetId` permite imprimir una visita anterior tras una reapertura (Q2).
      *
      * @return array{
-     *     incident_id: int,
+     *     ticket_code: string,
+     *     status: string,
      *     current: bool,
      *     sheet: array<string, mixed>|null,
      *     document: array<string, mixed>,
@@ -43,6 +44,16 @@ interface IncidentServiceSheetRepositoryInterface
      * }|null Null si la incidencia no existe
      */
     public function findDocumentByIncidentId(int $incidentId, ?int $sheetId = null): ?array;
+
+    /**
+     * Autorización del técnico sobre el albarán (RD-17, contratos §6.4).
+     *
+     * Verdadero cuando la avería está asignada a ese técnico **o** alguna de sus
+     * hojas la firmó él. El firmante sigue leyendo su papel después de que la
+     * sede reabra y coordinación reasigne el expediente: la firma es su prueba
+     * de haber intervenido.
+     */
+    public function isReadableByTechnician(int $incidentId, int $technicianId): bool;
 
     /**
      * Historial de hojas de la incidencia, de la más reciente a la más antigua.

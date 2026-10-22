@@ -18,6 +18,7 @@ use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\IncidentServiceSheetRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
@@ -29,6 +30,7 @@ use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
+use VendGuard\Infrastructure\Repository\PdoIncidentServiceSheetRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
@@ -95,6 +97,9 @@ class CoordinatorController
     /** Política del Art. V.1: cuándo el descarte sanitario exige justificación. */
     private ?ColdChainOverridePolicy $coldChainPolicy;
 
+    /** Hojas de servicio (Módulo 19); se resuelve bajo demanda para no abrir conexión al construir. */
+    private ?IncidentServiceSheetRepositoryInterface $serviceSheetRepo = null;
+
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?UserRepositoryInterface $userRepo = null,
@@ -109,7 +114,8 @@ class CoordinatorController
         ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
         ?TransactionManagerInterface $transactionManager = null,
         ?SuggestedTechniciansService $suggestionService = null,
-        ?ColdChainOverridePolicy $coldChainPolicy = null
+        ?ColdChainOverridePolicy $coldChainPolicy = null,
+        ?IncidentServiceSheetRepositoryInterface $serviceSheetRepo = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->userRepo = $userRepo ?? new PdoUserRepository();
@@ -135,6 +141,19 @@ class CoordinatorController
         $this->transactionManager = $transactionManager;
         $this->suggestionService = $suggestionService;
         $this->coldChainPolicy = $coldChainPolicy;
+        $this->serviceSheetRepo = $serviceSheetRepo;
+    }
+
+    /**
+     * Hojas de servicio de la avería (Módulo 19), resuelto bajo demanda.
+     *
+     * Comparte el repositorio con el cierre firmado para que la vigencia de una hoja
+     * tenga un único dueño: la comparación entre `resolution_at` y `resolved_at` vive
+     * en la consulta, no en cada controlador (contratos §6.2).
+     */
+    private function serviceSheets(): IncidentServiceSheetRepositoryInterface
+    {
+        return $this->serviceSheetRepo ??= new PdoIncidentServiceSheetRepository();
     }
 
     /**
@@ -1175,6 +1194,108 @@ class CoordinatorController
 
         // 4. Envolvente canónica con los diez bloques del contrato del modal
         return Response::json($detail->toArray(), 200);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Módulo 19 · T-SIGN-05 — Albarán de servicio (lectura)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * GET /api/coordinator/incidents/{id}/service-sheet
+     *
+     * Entrega el albarán de servicio de cualquier avería (RF-05). La coordinación
+     * supervisa el parque completo, así que aquí no rige la regla del técnico (RD-17)
+     * sino el rol que exige el middleware de la ruta.
+     *
+     * La lectura se audita igual que la del técnico (RF-05.6): el coordinador también
+     * accede a datos personales de un tercero. El identificador admite el ID primario y
+     * el código de ticket, como el resto de rutas del expediente.
+     *
+     * Respuestas: 200 con el modelo común (§4.4); 400 `INVALID_INCIDENT_IDENTIFIER` o
+     * `INVALID_SHEET_ID`; 401/403 sin rol de coordinación; 404 `INCIDENT_NOT_FOUND` o
+     * `SERVICE_SHEET_NOT_FOUND`; 422 `INCIDENT_NOT_RESOLVED`.
+     */
+    public function serviceSheet(Request $request): Response
+    {
+        // 1. Control de acceso antes de leer nada (Art. V.4).
+        $authFailure = $this->authorizeCoordinator($request);
+        if ($authFailure !== null) {
+            return $authFailure;
+        }
+
+        // 2. Identificador de ruta: ID primario positivo o código de ticket.
+        $rawIdentifier = trim((string)($request->getRouteParam('id') ?? ''));
+        $identifier = $this->resolveIncidentIdentifier($rawIdentifier);
+        if ($identifier === null) {
+            return Response::error(
+                'INVALID_INCIDENT_IDENTIFIER',
+                'El identificador de la incidencia no es válido. Se admite un ID numérico positivo o un código de ticket (ej: INC-2026-0001).',
+                400
+            );
+        }
+
+        $incident = is_int($identifier)
+            ? $this->incidentRepo->findById($identifier)
+            : $this->incidentRepo->findByTicketCode(strtoupper(ltrim((string)$identifier, '#')));
+        if ($incident === null) {
+            return Response::error(
+                'INCIDENT_NOT_FOUND',
+                "No se encontró ninguna incidencia con identificador '{$rawIdentifier}'.",
+                404
+            );
+        }
+
+        return $this->serviceSheetResponse($request, (int)$incident->getId(), $this->extractActor($request));
+    }
+
+    /**
+     * Compone la respuesta del albarán: hoja pedida, hoja vigente o proyección viva (§4.4).
+     *
+     * @param array{id: int|null, role: string, name: string} $actor
+     */
+    private function serviceSheetResponse(Request $request, int $incidentId, array $actor): Response
+    {
+        $rawSheetId = $request->getQuery('sheet_id');
+        $sheetId = null;
+        if ($rawSheetId !== null && $rawSheetId !== '') {
+            if (!ctype_digit((string)$rawSheetId) || (int)$rawSheetId < 1) {
+                return Response::error('INVALID_SHEET_ID', 'El parámetro sheet_id debe ser un entero positivo.', 400);
+            }
+            $sheetId = (int)$rawSheetId;
+        }
+
+        $document = $this->serviceSheets()->findDocumentByIncidentId($incidentId, $sheetId);
+        if ($document === null) {
+            return Response::error('INCIDENT_NOT_FOUND', 'No se encontró la avería solicitada.', 404);
+        }
+
+        if ($sheetId !== null && $document['sheet'] === null) {
+            return Response::error(
+                'SERVICE_SHEET_NOT_FOUND',
+                'La hoja de servicio solicitada no pertenece a esta avería.',
+                404
+            );
+        }
+
+        if ($document['sheet'] === null
+            && !in_array($document['status'], ['RESOLVED', 'CLOSED', 'REOPENED'], true)
+        ) {
+            return Response::error(
+                'INCIDENT_NOT_RESOLVED',
+                'La avería no se ha cerrado nunca: todavía no hay albarán que emitir.',
+                422
+            );
+        }
+
+        $this->auditLogger->logTicketEvent(
+            $incidentId,
+            'VIEW_SERVICE_SHEET',
+            $actor,
+            null,
+            ['sheet_id' => $document['sheet']['id'] ?? null, 'current' => $document['current']]
+        );
+
+        return Response::json($document, 200);
     }
 
     // ────────────────────────────────────────────────────────────────────────

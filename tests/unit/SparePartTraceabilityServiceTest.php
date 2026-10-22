@@ -583,6 +583,11 @@ class MockServiceSheetRepository implements IncidentServiceSheetRepositoryInterf
     {
         return [];
     }
+
+    public function isReadableByTechnician(int $incidentId, int $technicianId): bool
+    {
+        return false;
+    }
 }
 
 /**

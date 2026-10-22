@@ -103,4 +103,9 @@
 
 ## Bitácora de ejecución
 
-_(Vacía: la implementación no ha comenzado. Se rellenará por unidad de trabajo, con desviaciones y hallazgos.)_
+* **WU-1 (T-SIGN-01, T-SIGN-02) — `feat(digital-signature): model the service sheet and its frozen document`.** Entidad, validador, DTO, puerto, migración `010` y esquema canónico. Suites: `ServiceSheetValidatorTest` 100/100, `PostgresServiceSheetSchemaTest` 19/19, convergencia y esquema en verde. Desvío: `DocMetricsGuard` se adelanta desde T-SIGN-08 para no cerrar la unidad con la guarda roja.
+* **WU-2 (T-SIGN-03, T-SIGN-04) — `feat(digital-signature): persist parts, stock and the sheet in one transaction`.** Repositorio `INSERT … SELECT` con documento congelado, transacción incondicional del cierre, disparadores de inmutabilidad. Suites: `ServiceSheetAtomicityTest` 39/39, `SparePartTraceabilityServiceTest` 55/55. Desvío: T-SIGN-04 se certifica extendiendo esa suite (sección 7.10) en vez de crear `ServiceSheetResolutionTest.php`.
+* **WU-3 (T-SIGN-05) — `feat(digital-signature): expose current and historical service sheets`.** Dos endpoints de lectura, autorización RD-17 en el puerto, anclaje de la hoja vigente y auditoría `VIEW_SERVICE_SHEET`. Suites: `ServiceSheetDocumentTest` 27/27, `ServiceSheetPrivacyTest` 7/7, `ServiceSheetAtomicityTest` 40/40 con el fallo del motor encapsulado. Desvíos: se documenta `INVALID_SHEET_ID` (hueco de contrato) y `TestDataCleanerIsolationTest` pasa a exigir 20 tablas transitorias.
+
+_(Las unidades WU-4 y WU-5 se añaden al cerrarlas.)_
+

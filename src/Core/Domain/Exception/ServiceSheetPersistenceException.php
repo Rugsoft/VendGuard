@@ -22,9 +22,9 @@ final class ServiceSheetPersistenceException extends RuntimeException
     public const HTTP_STATUS = 500;
     public const ERROR_CODE = 'SERVICE_SHEET_PERSISTENCE_FAILED';
 
-    public function __construct(string $message = 'No se pudo guardar la hoja de servicio; el cierre se ha revertido.')
+    public function __construct(string $message = 'No se pudo guardar la hoja de servicio; el cierre se ha revertido.', ?\Throwable $previous = null)
     {
-        parent::__construct($message, self::HTTP_STATUS);
+        parent::__construct($message, self::HTTP_STATUS, $previous);
     }
 
     public function getErrorCode(): string

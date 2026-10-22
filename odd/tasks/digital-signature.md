@@ -58,13 +58,13 @@ S22 — **Fuera de alcance (Q7, §2.2).** Preventivas sin firma ni albarán; sin
 | **T-SIGN-02** | S2, S3, S4, S8, S17 | inline | (mismo commit que T-SIGN-01) | ✅ hecho |
 | **T-SIGN-03** | S8, S9, S11, S14 | inline | `feat(digital-signature): persist parts, stock and the sheet in one transaction` | ✅ hecho (`461992d`) |
 | **T-SIGN-04** | S5, S16 | inline | (mismo commit que T-SIGN-03) | ✅ hecho (`461992d`) |
-| **T-SIGN-05** | S7, S9, S10, S11, S13, S14, S15 | inline | `feat(digital-signature): expose current and historical service sheets` | pendiente |
+| **T-SIGN-05** | S7, S9, S10, S11, S13, S14, S15 | inline | `feat(digital-signature): expose current and historical service sheets` | hecho |
 | **T-SIGN-06** | S1, S2, S3, S4, S19 | inline¹ | `feat(digital-signature): capture the signature and print the service sheet` | pendiente |
 | **T-SIGN-07** | S9, S12, S14 | inline¹ | (mismo commit que T-SIGN-06) | pendiente |
 | **T-SIGN-08** | S17, S18 | inline | `docs(digital-signature): close the module and sync documented figures` | pendiente |
 | **T-SIGN-09** | S1–S22 | inline | (cierre de la feature) | pendiente |
 
-¹ Único candidato al trigger de escritura delegada: T-SIGN-06 en paralelo con T-SIGN-05, con superficies disjuntas (`public/assets/js/components/` + su `.mjs` frente a controladores/router/repositorio). Se decide al llegar a WU-3; si no hay paralelismo real, se escribe inline.
+¹ Candidato al trigger de escritura delegada que **no llegó a dispararse**: T-SIGN-05 y T-SIGN-06 no comparten superficie (controladores/router/repositorio frente a componentes `.js` y sus `.mjs`), pero cada una es una unidad de comportamiento único —sin dos unidades independientes que lanzar a la vez—, así que ambas se escribieron inline y el trigger de paralelismo nunca se cumplió.
 
 ## Log
 
@@ -133,3 +133,28 @@ Hallazgos informativos y destino acordado (trabajo posterior, no reabren este ca
 | `R3-ATOMICITY-GATE` | `ServiceSheetAtomicityTest` es `new_engine`: `run_all.php` sigue en 313 suites y esas conductas pueden regresar sin motor. | Aceptado como límite declarado del arnés; la alternativa (duplicar la suite contra dobles) certificaría menos. Se anota en el cierre de WU-5. |
 | `R3-PREDECODE-ASSERT` | La aserción de la pre-cota base64 no distingue el guardián de su ausencia (el mismo cuerpo lo rechazan también las cotas posteriores). | WU-5: o se fija con un espía del decodificador, o se declara la pre-cota como optimización no observable. |
 | `R1-TEST-SQL-CONCAT` | La suite de integración concatena en SQL valores constantes definidos en la propia prueba. | Aceptado: no hay valor atacante; se anota para no copiarlo a código de producción. |
+
+**L9 (2026-10-22) — WU-3 (T-SIGN-05).** `Risk: item 2 (seguridad: autorización de lectura por rol sobre datos personales de un tercero)`.
+
+Evidencia observada:
+
+* RED antes de implementar: `ServiceSheetDocumentTest` 26 fallos (`ROUTE_NOT_FOUND` en ambas rutas, 0 eventos `VIEW_SERVICE_SHEET`, sin 403 ni 422) y `TestDataCleanerIsolationTest` 1 fallo (el plan de purga pasó de 19 a 20 tablas transitorias al entrar `incident_service_sheets`). Después: **27/27** y **50/50**.
+* `ServiceSheetPrivacyTest` **7/7 ya en verde en el primer intento**: el modelo de lectura existente no filtraba coste ni nota interna. Se conserva como guarda de RD-04/S10 —no como comportamiento nuevo— sobre el `json_encode()` completo y con una pieza de coste real (12,34) y una nota marcada.
+* `ServiceSheetAtomicityTest` (new_engine) **40/40** con la aserción nueva de `R3-PERSISTENCE-EXC`: un `CHECK` forzado en el motor sale como `ServiceSheetPersistenceException` con el `PDOException` original en `getPrevious()`, código `SERVICE_SHEET_PERSISTENCE_FAILED` y HTTP 500.
+* Batería hermética: **315 suites · 12.249 aserciones, 0 fallos**; cifras sincronizadas en README y los cuatro documentos auditados.
+
+Decisiones de diseño de la unidad:
+
+* **Autorización en el puerto, no en el controlador.** `isReadableByTechnician()` ejecuta la consulta `EXISTS` de §6.4 (asignado **o** firmante). Reutilizar `resolveReadableIncident()` habría atado el acceso al historial de estados (`REOPENED` + antecedentes) y habría dejado fuera justo al firmante reasignado, que es el caso que RD-17 protege.
+* **Anclaje de la hoja servida.** `READ_SQL` sirve la hoja anclada a la resolución vigente (`resolution_at = resolved_at`). Cuando la incidencia no está en `RESOLVED`/`CLOSED` (reapertura en curso) sirve la última como histórica con `current: false`; tras un nuevo cierre sin hoja vuelve a `sheet: null`. Sin ese anclaje, el segundo cierre sin firma reutilizaba la firma del primero (S7, invariante 8). La versión anterior del `SELECT` sí la reutilizaba: era un defecto real, no una preferencia.
+* **`422 INCIDENT_NOT_RESOLVED` no incluye `REOPENED`.** La reapertura en garantía demuestra un cierre anterior y la proyección viva conserva diagnóstico y acción; responder 422 diría «nunca se cerró», que es falso. Se fija en la suite (3.1) y se documenta en §4.4.
+* **Duplicación deliberada de ~30 líneas entre los dos controladores** en vez de un servicio de lectura nuevo: el mapeo de errores es presentación pura, la autorización difiere entre perfiles (RD-17 solo aplica al técnico) y el modelo ya lo compone el repositorio. Un servicio habría añadido una capa y dos excepciones para ahorrar treinta líneas.
+* **Sin servicio de lectura nuevo y sin caché**: cada `GET` recompone el modelo y escribe su evento. La lectura es barata frente al riesgo de servir una vigencia obsoleta.
+
+Desvíos declarados de esta unidad:
+
+* (a) Se añadió `INVALID_SHEET_ID` (400) al catálogo de errores y a §4.4 de los contratos: `?sheet_id=` no entero positivo no estaba cubierto y la alternativa —ignorarlo— habría servido el albarán vigente fingiendo haber atendido una petición explícita. Es un hueco de contrato, no un cambio de semántica aprobada.
+* (b) `ServiceSheetDocumentTest` y `ServiceSheetPrivacyTest` viven en la batería hermética (base `vendguard_battery`) y no en `new_engine`: la primera necesita router y middlewares reales, y la segunda solo consulta el modelo. La batería local se migró a mano con `010_incident_service_sheets.sql` porque su base se aprovisionó antes de WU-1; un `provision.sh` limpio ya la incluye vía `supabase_init.sql`.
+* (c) `TestDataCleanerIsolationTest` 2.7 se actualizó de 19 a 20 tablas: es una guarda de contrato, y la tabla nueva es transitoria por `ON DELETE RESTRICT`.
+* (d) **Hueco del contrato cerrado aquí, no en WU-2.** `ServiceSheetPersistenceException` extiende `RuntimeException` y la cadena de `catch` de `TechnicianController::resolveIncident` no la capturaba: el `500 SERVICE_SHEET_PERSISTENCE_FAILED` de §5 era inalcanzable por HTTP y la excepción escapaba al manejador fatal de PHP. Se añadió el `catch` que la mapea con su `getErrorCode()`/`getHttpStatusCode()` (3 líneas, junto al resto de excepciones de la transacción). Queda fuera de la suite HTTP por coste: verificarla exigiría doblar el servicio de trazabilidad entero en un controlador que el proyecto nunca construye con dobles; la evidencia es el test de servicio (la excepción sale con su código) más la inspección de la cadena.
+
