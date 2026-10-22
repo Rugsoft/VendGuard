@@ -1,0 +1,332 @@
+/**
+ * VendGuard - Hoja de servicio A4 (service-sheet.css)
+ *
+ * Estilos del albarán de intervención (Módulo 19: RF-04.7, RF-05.2, RNF-03).
+ *
+ * Reglas que esta hoja hace cumplir:
+ * 1. El papel mide A4 en pantalla y `@page` fija A4 y sus márgenes al imprimir.
+ * 2. Al imprimir solo queda el documento: la técnica clásica de `visibility` funciona
+ *    incluso dentro de un diálogo `position: fixed`, donde un `display: none` del resto
+ *    dejaría el papel flotando en un contenedor colapsado.
+ * 3. El bloque de firma nunca se parte entre páginas; el documento sí puede ocupar varias.
+ * 4. El lienzo de firma cancela el gesto táctil para que firmar no arrastre la página.
+ *
+ * El papel no depende de que el navegador imprima fondos: todo lo esencial es texto y
+ * borde sólido. Nada de esta hoja pinta dinero ni datos internos (Art. V.4).
+ */
+
+.vg-signature-block {
+  border: 1px solid var(--color-hairline, #c8cfda);
+  border-radius: var(--radius-card, 8px);
+  background-color: var(--color-surface-card, #ffffff);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.vg-signature-block__intro {
+  margin-bottom: 12px;
+}
+
+.vg-signature-block__title {
+  display: block;
+  font-family: var(--font-body, Inter, sans-serif);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-slate, #2c333f);
+  margin-bottom: 4px;
+}
+
+.vg-signature-block__hint {
+  margin: 0;
+  font-family: var(--font-body, Inter, sans-serif);
+  font-size: 12px;
+  color: var(--color-ink-muted, #6c7e9d);
+  line-height: 1.45;
+}
+
+.vg-signature-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.vg-signature-modes .is-active {
+  border-color: var(--color-primary, #2560ff);
+  background-color: var(--color-primary-subtle, #e5f2fc);
+  color: var(--color-primary-dark, #003db5);
+}
+
+.vg-signature-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.vg-signature-field__label {
+  display: block;
+  font-family: var(--font-body, Inter, sans-serif);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-ink-muted, #6c7e9d);
+  margin-bottom: 4px;
+}
+
+.vg-signature-field__control {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  font-family: var(--font-body, Inter, sans-serif);
+  font-size: 14px;
+  color: var(--color-slate, #2c333f);
+  border: 1px solid var(--color-hairline, #c8cfda);
+  border-radius: var(--radius-interactive, 4px);
+  background-color: var(--color-surface-card, #ffffff);
+}
+
+.vg-signature-field__control--area {
+  min-height: 88px;
+  padding: 10px;
+  resize: vertical;
+}
+
+.vg-signature-field__hint {
+  margin: 4px 0 0;
+  font-family: var(--font-body, Inter, sans-serif);
+  font-size: 11px;
+  color: var(--color-ink-muted, #6c7e9d);
+}
+
+.vg-signature-pad__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.vg-signature-canvas {
+  display: block;
+  width: 100%;
+  height: 180px;
+  border: 1px solid var(--color-hairline-soft, #a9b4c6);
+  border-radius: var(--radius-interactive, 4px);
+  background-color: var(--color-surface-card, #ffffff);
+  cursor: crosshair;
+  /* Firmar no puede arrastrar la página: el gesto pertenece al trazo (RF-01.2). */
+  touch-action: none;
+}
+
+.vg-signature-warning {
+  margin: 6px 0 0;
+  font-family: var(--font-body, Inter, sans-serif);
+  font-size: 12px;
+  color: var(--color-warning-text, #92400e);
+}
+
+.vg-service-sheet__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.vg-service-sheet__selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-body, Inter, sans-serif);
+  font-size: 12px;
+  color: var(--color-ink-muted, #6c7e9d);
+}
+
+.vg-service-sheet__selector select {
+  min-height: 36px;
+  padding: 0 8px;
+  font-family: var(--font-body, Inter, sans-serif);
+  font-size: 13px;
+  color: var(--color-slate, #2c333f);
+  border: 1px solid var(--color-hairline, #c8cfda);
+  border-radius: var(--radius-interactive, 4px);
+  background-color: var(--color-surface-card, #ffffff);
+}
+
+.vg-service-sheet__feedback {
+  padding: 24px 12px;
+  text-align: center;
+  font-family: var(--font-body, Inter, sans-serif);
+  font-size: 14px;
+  color: var(--color-ink-muted, #6c7e9d);
+}
+
+.vg-service-sheet__feedback--error {
+  color: var(--color-error-text, #b91c1c);
+}
+
+.vg-service-sheet__notice {
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--color-warning, #f8b60f);
+  border-radius: var(--radius-interactive, 4px);
+  background-color: var(--color-warning-bg, #fef8e7);
+  color: var(--color-warning-text, #92400e);
+  font-family: var(--font-body, Inter, sans-serif);
+  font-size: 13px;
+}
+
+.vg-service-sheet__paper {
+  width: 210mm;
+  max-width: 100%;
+  min-height: 297mm;
+  box-sizing: border-box;
+  padding: 18mm 16mm;
+  background-color: var(--color-surface-card, #ffffff);
+  border: 1px solid var(--color-hairline, #c8cfda);
+  color: var(--color-slate, #2c333f);
+  font-family: var(--font-body, Inter, sans-serif);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.vg-service-sheet__paper h1,
+.vg-service-sheet__paper h2,
+.vg-service-sheet__paper p {
+  margin: 0;
+}
+
+.vg-service-sheet__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--color-slate, #2c333f);
+  margin-bottom: 14px;
+}
+
+.vg-service-sheet__title {
+  font-family: var(--font-display, 'DM Sans', sans-serif);
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.vg-service-sheet__ticket {
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.vg-service-sheet__meta {
+  font-size: 11px;
+  text-align: right;
+}
+
+.vg-service-sheet__section {
+  margin-bottom: 12px;
+  break-inside: auto;
+}
+
+.vg-service-sheet__section h2 {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-ink-muted, #6c7e9d);
+  margin-bottom: 3px;
+}
+
+.vg-service-sheet__strong {
+  font-weight: 700;
+}
+
+.vg-service-sheet__muted {
+  color: var(--color-ink-muted, #6c7e9d);
+}
+
+.vg-service-sheet__parts {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.vg-service-sheet__parts th,
+.vg-service-sheet__parts td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-hairline, #c8cfda);
+}
+
+.vg-service-sheet__parts th {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-ink-muted, #6c7e9d);
+}
+
+.vg-service-sheet__qty {
+  width: 80px;
+  text-align: right;
+}
+
+.vg-service-sheet__signature {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-hairline, #c8cfda);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.vg-service-sheet__stroke {
+  display: block;
+  max-width: 70mm;
+  max-height: 40mm;
+  margin: 6px 0;
+  border: 1px solid var(--color-hairline, #c8cfda);
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  body {
+    background: none;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .vg-service-sheet__paper,
+  .vg-service-sheet__paper * {
+    visibility: visible;
+  }
+
+  .vg-service-sheet__paper {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    font-size: 11pt;
+  }
+
+  .vg-service-sheet__no-print,
+  .vg-service-sheet__toolbar,
+  .vg-service-sheet__notice,
+  .vg-service-sheet__feedback {
+    display: none !important;
+  }
+
+  .vg-service-sheet__signature {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

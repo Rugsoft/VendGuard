@@ -1154,6 +1154,20 @@ export class ApiClient {
     },
 
     /**
+     * Lee el albarán de servicio de cualquier avería (Módulo 19, RF-05, RD-17).
+     *
+     * La coordinación alcanza cualquier expediente; el cliente no duplica esa decisión.
+     * @param {number|string} incidentId
+     * @param {number|string|null} [sheetId=null] Hoja histórica concreta del historial
+     * @returns {Promise<Object>}
+     */
+    getServiceSheet: (incidentId, sheetId = null) => {
+      const hasSheetId = sheetId !== null && sheetId !== undefined && sheetId !== '';
+      const qs = hasSheetId ? `?sheet_id=${encodeURIComponent(sheetId)}` : '';
+      return this.get(`/coordinator/incidents/${encodeURIComponent(incidentId)}/service-sheet${qs}`);
+    },
+
+    /**
      * Retrieves the full conversation thread of an incident (public comments and internal
      * workshop notes) for the operations coordinator (Módulo 10, RF-01.2, RF-02.3).
      * @param {number|string} incidentId Incident id or ticket code with optional '#'.
@@ -1688,6 +1702,20 @@ export class ApiClient {
         resolution_diagnosis: payloadOrDiagnosis,
         resolution_action: actionTaken
       });
+    },
+
+    /**
+     * Lee el albarán de servicio de una avería (Módulo 19, RF-04, RF-05, RD-17).
+     *
+     * El servidor autoriza: el técnico asignado o que firmó alguna hoja de la avería.
+     * @param {number|string} incidentId
+     * @param {number|string|null} [sheetId=null] Hoja histórica concreta del historial
+     * @returns {Promise<Object>}
+     */
+    getServiceSheet: (incidentId, sheetId = null) => {
+      const hasSheetId = sheetId !== null && sheetId !== undefined && sheetId !== '';
+      const qs = hasSheetId ? `?sheet_id=${encodeURIComponent(sheetId)}` : '';
+      return this.get(`/technician/incidents/${encodeURIComponent(incidentId)}/service-sheet${qs}`);
     },
 
     // Mantenimiento Preventivo y Checklists Sanitarios (Módulo 05: RF-PREV-02, RF-PREV-03, RF-PREV-04, RF-PREV-08)

@@ -58,9 +58,9 @@ S22 — **Fuera de alcance (Q7, §2.2).** Preventivas sin firma ni albarán; sin
 | **T-SIGN-02** | S2, S3, S4, S8, S17 | inline | (mismo commit que T-SIGN-01) | ✅ hecho |
 | **T-SIGN-03** | S8, S9, S11, S14 | inline | `feat(digital-signature): persist parts, stock and the sheet in one transaction` | ✅ hecho (`461992d`) |
 | **T-SIGN-04** | S5, S16 | inline | (mismo commit que T-SIGN-03) | ✅ hecho (`461992d`) |
-| **T-SIGN-05** | S7, S9, S10, S11, S13, S14, S15 | inline | `feat(digital-signature): expose current and historical service sheets` | hecho |
-| **T-SIGN-06** | S1, S2, S3, S4, S19 | inline¹ | `feat(digital-signature): capture the signature and print the service sheet` | pendiente |
-| **T-SIGN-07** | S9, S12, S14 | inline¹ | (mismo commit que T-SIGN-06) | pendiente |
+| **T-SIGN-05** | S7, S9, S10, S11, S13, S14, S15 | inline | `feat(digital-signature): expose current and historical service sheets` | ✅ hecho (`7bc52ca` + `a8574b7`) |
+| **T-SIGN-06** | S1, S2, S3, S4, S19 | inline¹ | `feat(digital-signature): capture the signature and print the service sheet` | ✅ hecho |
+| **T-SIGN-07** | S9, S12, S14 | inline¹ | (mismo commit que T-SIGN-06) | ✅ hecho |
 | **T-SIGN-08** | S17, S18 | inline | `docs(digital-signature): close the module and sync documented figures` | pendiente |
 | **T-SIGN-09** | S1–S22 | inline | (cierre de la feature) | pendiente |
 
@@ -181,3 +181,21 @@ Deuda aceptada, para WU-5 (todas informativas, ninguna reabre el candidato):
 
 Evidencia: `ServiceSheetDocumentTest` **31/31** (27 + 2.7, 2.8, 3.1b, 3.10), `ServiceSheetAtomicityTest` **40/40**, `ServiceSheetPrivacyTest` **7/7**, `TestDataCleanerIsolationTest` **50/50**; batería **315 suites · 12.253 aserciones, 0 fallos**.
 
+**L11 (2026-10-22) — WU-4: captura de la firma y albarán imprimible (T-SIGN-06, T-SIGN-07).** Toda la unidad se escribió inline: el contrato ya estaba congelado por los specs y no hubo que mapear nada nuevo. Componentes nuevos: `TechnicianServiceSheetBlock.js` (lienzo, tinta, exclusión de vías, escalado por `devicePixelRatio`) y `ServiceSheetModal.js` (papel A4, histórico, selector de hojas, `window.print()`), más `service-sheet.css` y el enlace en `public/index.html`. Se añadió `getServiceSheet(incidentId, sheetId)` a `api.technician` y `api.coordinator`, el bloque obligatorio en el modal de resolución del técnico y el botón del albarán en la cabecera del detalle de coordinación.
+
+Decisiones de diseño de la unidad:
+
+* **La conformidad es obligatoria y falla cerrada.** `submitResolve()` aborta si el bloque no existe o no valida (RD-02). Perder la referencia no puede degradar en «cierre sin firma» silencioso: es el mismo criterio que el contrato cerrado del validador del servidor (clave desconocida ⇒ error).
+* **Todo cierre viaja como objeto.** Al existir `service_sheet`, el envío ya no puede ser posicional; el contrato posicional sigue vivo en la API para la app móvil antigua, pero la vista del técnico siempre manda `{diagnosis, action_taken, …, service_sheet}`. Se actualizaron 5.13a y 10.9, que fijaban lo contrario.
+* **El trazo y el papel se escriben en `rgb()`.** RF-01.8 exige el tono `#111`, y el trinquete `DesignTokenDebtRatchetTest` cuenta hex en **cualquier** parte del `.js`, comentarios incluidos (techo 2.269, contador 2.268). `rgb(17, 17, 17)` es el mismo color sin sumar deuda; el docblock lo explica sin escribir el literal.
+* **El albarán se abre desde el aviso de cierre.** Al resolverse, la avería sale de la ruta activa, así que el acceso posterior del técnico (RF-05.4) es el botón «Ver albarán» del propio aviso, con el expediente recordado en `serviceSheetIncidentId`.
+* **Coordinación reimprime desde la cabecera del detalle**, visible solo con `RESOLVED`, `CLOSED` o `REOPENED`: una avería abierta no tiene papel, y la reapertura conserva la hoja histórica.
+* **Una sola comprobación de tinta.** El cliente cuenta píxeles con luminancia < 200 (mínimo 150) y el servidor no decodifica píxeles (RD-12); el componente exporta `countInkPixels` para que el aserto no dependa del DOM.
+
+Desvíos declarados:
+
+* (a) `SparePartsIntegrationComponentsTest` añadió el bloque al arnés: su `submitResolve()` también es el real y ahora exige conformidad. La aserción del payload se amplió con `service_sheet`.
+* (b) No se tocó el techo del trinquete de tokens: la unidad no añade ningún hex en JS (aserción 1.4 de ambos suites nuevas lo verifica leyendo el fuente).
+* (c) Las cifras documentadas se sincronizaron en este mismo commit (`DocMetricsGuard` compara la frase canónica y la insignia).
+
+Evidencia: `TechnicianServiceSheetBlockTest` **31/31**, `ServiceSheetModalTest` **25/25**, `TechnicianRouteViewTest` **141/141** (grupo 16 nuevo), `CoordinatorIncidentDetailModalTest` **182/182** (grupo 21 nuevo), `FrontendTemplateCompileTest` verde, trinquete de tokens **2.268 / 2.269**, guardas del coordinador verdes; batería completa **317 suites · 12.323 aserciones, 0 fallos · cifras documentadas coherentes**.

@@ -106,4 +106,4 @@ El recorrido funcional de extremo a extremo ha sido ejecutado satisfactoriamente
 
 > **Nota (08/10/2026):** el guion se ejecuta además en la **Fase 4** de `php tests/run_all.php`, con el servidor HTTP todavía en marcha, de modo que una regresión de flujo rompe ya la batería global. Cifra vigente de la batería completa:
 >
-> batería global: 315 suites · 12.253 aserciones
+> batería global: 317 suites · 12.323 aserciones

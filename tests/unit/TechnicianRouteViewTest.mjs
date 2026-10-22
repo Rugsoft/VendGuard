@@ -89,12 +89,28 @@ const mockRouteIncidents = [
   }
 ];
 
+/**
+ * Bloque de conformidad del responsable (Módulo 19, RF-01, RF-02): el cierre correctivo
+ * lo exige, así que la instancia de prueba trae una atestación de ausencia válida y cada
+ * caso decide si la rompe para probar el bloqueo.
+ */
+const validServiceSheetRef = () => ({
+  validate: () => ({
+    isValid: true,
+    error: '',
+    payload: { absence_reason: 'Sede sin conserjería; llave en la central.' }
+  })
+});
+
 function createRouteInstance(initialData = {}) {
   const emits = [];
   const instance = {
     ...TechnicianRouteView.data(),
     incidents: JSON.parse(JSON.stringify(mockRouteIncidents)),
     ...initialData,
+    $refs: {
+      resolutionServiceSheetBlockRef: validServiceSheetRef()
+    },
     $emit: (evt, val) => { emits.push({ evt, val }); },
     getEmits: () => emits
   };
@@ -371,9 +387,13 @@ assert('5.10 With both fields >= 20 chars, canResolve = true', authView.canResol
 await authView.submitResolve();
 
 assert('5.11 Dispatches api.technician.resolveIncident with ID 102', resolveCalledId === 102);
-assert('5.12 Passed valid diagnosis text', resolveCalledDiag === validDiagnosis);
-assert('5.13 Passed valid corrective action text', resolveCalledAct === validAction);
-assert('5.13a Legacy resolution without refund or parts keeps the positional API contract', resolveCalledPayload === null);
+assert('5.12 Passed valid diagnosis text',
+  resolveCalledPayload?.diagnosis === validDiagnosis, JSON.stringify(resolveCalledPayload));
+assert('5.13 Passed valid corrective action text',
+  resolveCalledPayload?.action_taken === validAction, JSON.stringify(resolveCalledPayload));
+assert('5.13a Every resolution travels with the mandatory conformity of the site responsible',
+  resolveCalledPayload?.service_sheet?.absence_reason === 'Sede sin conserjería; llave en la central.',
+  JSON.stringify(resolveCalledPayload?.service_sheet));
 assert('5.14 Modal closed upon resolution', authView.showResolveModal === false);
 assert('5.15 Resolved incident is removed from active route', authView.incidents.find(i => i.id === 102) === undefined);
 
@@ -444,6 +464,7 @@ api.technician.resolveIncident = async (id, payloadOrDiagnosis, actionTaken) => 
 refundRouteView.resolveDiagnosis = 'Fallo de selector con moneda atascada en canal interno.';
 refundRouteView.resolveAction = 'Desatascado el selector y probado el pago con monedas.';
 refundRouteView.$refs = {
+  resolutionServiceSheetBlockRef: validServiceSheetRef(),
   resolutionRefundBlockRef: {
     validate: () => ({
       isValid: true,
@@ -476,6 +497,7 @@ await unclaimedRouteView.openResolveModal(paymentIncident);
 unclaimedRouteView.resolveDiagnosis = 'No hay fallo de cobro y selector se mueve con normalidad.';
 unclaimedRouteView.resolveAction = 'Limpieza interna y prueba de venta con moneda válida.';
 unclaimedRouteView.$refs = {
+  resolutionServiceSheetBlockRef: validServiceSheetRef(),
   resolutionRefundBlockRef: {
     validate: () => ({
       isValid: true,
@@ -880,6 +902,7 @@ assert('10.5 Sin bloque sanitario válido el cierre se intercepta y no llega a l
   sanitaryView.resolveError.length > 0 && sanitaryCalledId === null);
 
 sanitaryView.$refs = {
+  resolutionServiceSheetBlockRef: validServiceSheetRef(),
   resolutionSanitaryBlockRef: {
     validate: () => ({
       isValid: true,
@@ -916,8 +939,12 @@ plainView.resolveAction = 'Sustitución del selector de monedas y prueba de cicl
 assert('10.8 Sin bandera sanitaria la vista no exige las declaraciones (la vigilancia no es universal)',
   plainView.sanitaryResolutionRequired === false && plainView.canResolve === true);
 await plainView.submitResolve();
-assert('10.9 El cierre ordinario conserva el contrato posicional, sin bloque sanitario añadido',
-  sanitaryCalledId === 101 && sanitaryCalledPayload === null);
+assert('10.9 El cierre ordinario viaja como objeto con la conformidad y sin bloque sanitario',
+  sanitaryCalledId === 101
+    && sanitaryCalledPayload !== null
+    && sanitaryCalledPayload.sanitary_declarations === undefined
+    && sanitaryCalledPayload.service_sheet?.absence_reason !== undefined,
+  JSON.stringify(sanitaryCalledPayload));
 
 // ---------------------------------------------------------------------
 // TEST GROUP 11: Route filter bar lays out inside the card (RNF-03, design.md)
@@ -1098,6 +1125,7 @@ assert('14.4 El motivo del servidor se muestra tal cual, sin mensaje genérico',
 // El segundo intento conserva el informe y sólo añade el protocolo: el mismo formulario
 // que estaba en pantalla sigue vivo, con sus textos, y ahora viaja completo.
 overtakenView.$refs = {
+  resolutionServiceSheetBlockRef: validServiceSheetRef(),
   resolutionSanitaryBlockRef: {
     validate: () => ({
       isValid: true,
@@ -1248,6 +1276,110 @@ assert(
   '15.3 Control de mordida: si falta opportunisticModeLabel el render falla con ReferenceError / TypeError',
   brokenError !== null && (brokenError.message.includes('opportunisticModeLabel') || brokenError.name === 'ReferenceError')
 );
+
+// ---------------------------------------------------------------------
+// TEST GROUP 16: Conformidad del responsable de sede (Módulo 19, T-SIGN-06, T-SIGN-07)
+// ---------------------------------------------------------------------
+console.log('');
+console.log('--- Group 16: Service sheet signature and printable sheet ---');
+
+assert('16.1 La vista registra el bloque de firma y el modal del albarán',
+  TechnicianRouteView.components?.TechnicianServiceSheetBlock?.name === 'TechnicianServiceSheetBlock'
+    && TechnicianRouteView.components?.ServiceSheetModal?.name === 'ServiceSheetModal');
+
+assert('16.2 El modal de resolución monta el bloque con su referencia y recoge su change',
+  TechnicianRouteView.template.includes('ref="resolutionServiceSheetBlockRef"')
+    && TechnicianRouteView.template.includes('@change="resolveServiceSheetData = $event"')
+    && TechnicianRouteView.template.includes(':disabled="isResolving"'));
+
+assert('16.3 El bloque se remonta al cambiar de avería para no arrastrar la firma anterior',
+  TechnicianRouteView.template.includes(":key=\"'service-sheet-' + (selectedIncident?.id || 0)\""));
+
+{
+  const signingView = createRouteInstance();
+  api.technician.getRefundInspection = async () => ({ has_refund_requests: false, has_pending_verdict: false, requests: [] });
+  const signedPayloads = [];
+  api.technician.resolveIncident = async (id, payloadOrDiagnosis) => {
+    signedPayloads.push({ id, payload: payloadOrDiagnosis });
+    return { success: true, data: { id, status: 'RESOLVED', resolved_at: '2026-10-22T18:00:00Z' } };
+  };
+  await signingView.openResolveModal(mockRouteIncidents[1]);
+  signingView.resolveDiagnosis = 'Sonda NTC de temperatura descalibrada registrando 14 grados.';
+  signingView.resolveAction = 'Sustitución de sonda NTC y verificación de ciclo a 3.5 grados.';
+  signingView.$refs = {
+    resolutionServiceSheetBlockRef: {
+      validate: () => ({
+        isValid: true,
+        error: '',
+        payload: {
+          signer_name: 'María López',
+          signer_document: '12345678Z',
+          signature_png_base64: 'data:image/png;base64,AAAA'
+        }
+      })
+    }
+  };
+
+  await signingView.submitResolve();
+
+  assert('16.4 La firma recogida viaja dentro de service_sheet en el cuerpo del cierre',
+    signedPayloads.length === 1
+      && signedPayloads[0].payload?.service_sheet?.signer_name === 'María López'
+      && signedPayloads[0].payload?.service_sheet?.signer_document === '12345678Z'
+      && signedPayloads[0].payload?.service_sheet?.signature_png_base64 === 'data:image/png;base64,AAAA',
+    JSON.stringify(signedPayloads[0]?.payload?.service_sheet));
+
+  assert('16.5 Tras cerrar se recuerda el expediente para imprimir el albarán',
+    signingView.serviceSheetIncidentId === mockRouteIncidents[1].id
+      && TechnicianRouteView.template.includes('data-testid="btn-open-service-sheet"')
+      && TechnicianRouteView.template.includes('showServiceSheetModal = true'),
+    String(signingView.serviceSheetIncidentId));
+}
+
+{
+  const blockedView = createRouteInstance();
+  api.technician.getRefundInspection = async () => ({ has_refund_requests: false, has_pending_verdict: false, requests: [] });
+  let blockedCalls = 0;
+  api.technician.resolveIncident = async () => { blockedCalls++; return { success: true, data: {} }; };
+  await blockedView.openResolveModal(mockRouteIncidents[1]);
+  blockedView.resolveDiagnosis = 'Sonda NTC de temperatura descalibrada registrando 14 grados.';
+  blockedView.resolveAction = 'Sustitución de sonda NTC y verificación de ciclo a 3.5 grados.';
+  blockedView.$refs = {
+    resolutionServiceSheetBlockRef: {
+      validate: () => ({ isValid: false, field: 'signer_name', error: 'El nombre del firmante debe tener al menos 3 caracteres.' })
+    }
+  };
+
+  await blockedView.submitResolve();
+
+  assert('16.6 Sin conformidad válida el cierre se bloquea y no sale de la aplicación',
+    blockedCalls === 0
+      && blockedView.resolveError === 'El nombre del firmante debe tener al menos 3 caracteres.'
+      && blockedView.showResolveModal === true,
+    JSON.stringify({ calls: blockedCalls, error: blockedView.resolveError }));
+}
+
+{
+  const missingRefView = createRouteInstance();
+  api.technician.getRefundInspection = async () => ({ has_refund_requests: false, has_pending_verdict: false, requests: [] });
+  let missingCalls = 0;
+  api.technician.resolveIncident = async () => { missingCalls++; return { success: true, data: {} }; };
+  await missingRefView.openResolveModal(mockRouteIncidents[1]);
+  missingRefView.resolveDiagnosis = 'Sonda NTC de temperatura descalibrada registrando 14 grados.';
+  missingRefView.resolveAction = 'Sustitución de sonda NTC y verificación de ciclo a 3.5 grados.';
+  missingRefView.$refs = {};
+
+  await missingRefView.submitResolve();
+
+  assert('16.7 Si el bloque no está montado el cierre falla cerrado en vez de olvidar la firma',
+    missingCalls === 0 && /conformidad/i.test(missingRefView.resolveError),
+    missingRefView.resolveError);
+}
+
+assert('16.8 La vista monta el albarán con el expediente cerrado y el rol del técnico',
+  TechnicianRouteView.template.includes(':incident-id="serviceSheetIncidentId"')
+    && TechnicianRouteView.template.includes('audience="technician"')
+    && TechnicianRouteView.template.includes('v-model="showServiceSheetModal"'));
 
 // ---------------------------------------------------------------------
 // SUMMARY
