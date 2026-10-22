@@ -7,7 +7,9 @@
  * 1. El papel mide A4 en pantalla y `@page` fija A4 y sus márgenes al imprimir.
  * 2. Al imprimir solo queda el documento: la técnica clásica de `visibility` funciona
  *    incluso dentro de un diálogo `position: fixed`, donde un `display: none` del resto
- *    dejaría el papel flotando en un contenedor colapsado.
+ *    dejaría el papel flotando en un contenedor colapsado. Además hay que devolverle la
+ *    caja a la cadena de modales que lo contiene, porque otras hojas de impresión
+ *    (`metrics-print.css`, `qr-print.css`) ocultan todo `.vg-modal-backdrop`.
  * 3. El bloque de firma nunca se parte entre páginas; el documento sí puede ocupar varias.
  * 4. El lienzo de firma cancela el gesto táctil para que firmar no arrastre la página.
  *
@@ -323,6 +325,32 @@
   .vg-service-sheet__notice,
   .vg-service-sheet__feedback {
     display: none !important;
+  }
+
+  /*
+   * `metrics-print.css` y `qr-print.css` ocultan «modales de fondo» con
+   * `display: none !important` en toda la aplicación, y el albarán vive dentro de uno
+   * (a veces anidado en el detalle de la avería): sin devolverle la caja, el PDF sale
+   * en blanco. Los estilos de `ModalDialog` son en línea, así que solo cede ante
+   * `!important`. Se hace `static` para que el papel absoluto se ancle a la página y
+   * pueda repartirse entre varias hojas.
+   */
+  .vg-modal-backdrop:has(.vg-service-sheet__paper),
+  .vg-modal:has(.vg-service-sheet__paper) {
+    display: block !important;
+    position: static !important;
+    inset: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    transform: none !important;
   }
 
   .vg-service-sheet__signature {

@@ -374,6 +374,18 @@ assert('5.4 El lienzo de la firma cancela el gesto táctil para no hacer scroll'
 assert('5.5 La página carga la hoja de estilos del albarán',
   INDEX_SOURCE.includes('service-sheet.css'));
 
+// Regresión del PDF en blanco: `metrics-print.css` y `qr-print.css` ocultan todo
+// `.vg-modal-backdrop`, y el albarán vive dentro de uno.
+assert('5.6 Al imprimir se devuelve la caja a los modales que contienen el papel',
+  /@media\s+print[\s\S]*?\.vg-modal-backdrop:has\(\.vg-service-sheet__paper\)[\s\S]*?display:\s*block\s*!important/i.test(CSS_SOURCE)
+    && /@media\s+print[\s\S]*?\.vg-modal:has\(\.vg-service-sheet__paper\)[\s\S]*?position:\s*static\s*!important/i.test(CSS_SOURCE),
+  'el modal que contiene el albarán seguiría oculto al imprimir');
+
+assert('5.7 La hoja del albarán gana el empate de `!important` frente a las otras hojas de impresión',
+  INDEX_SOURCE.indexOf('service-sheet.css') > INDEX_SOURCE.indexOf('metrics-print.css')
+    && INDEX_SOURCE.indexOf('service-sheet.css') > INDEX_SOURCE.indexOf('qr-print.css'),
+  'service-sheet.css debe cargarse después de qr-print.css y metrics-print.css');
+
 // ─── Resumen ────────────────────────────────────────────────────────────────
 console.log('\n' + '='.repeat(70));
 console.log(` Total Aserciones: ${assertions}`);
