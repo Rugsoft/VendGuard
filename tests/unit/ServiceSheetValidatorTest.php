@@ -282,6 +282,47 @@ try {
         'declared limits match the contract'
     );
 
+    // ── Bordes del contrato (R3-2) ───────────────────────────────────────
+    // Cobertura de regresión: fija cada cota en su valor exacto para que un cambio de
+    // constante no pase inadvertido. No introduce reglas nuevas.
+    $signed = static fn(array $overrides = []): array => ServiceSheetValidator::normalize(array_merge([
+        'signer_name' => 'Ana Ruiz',
+        'signer_document' => '12345678Z',
+        'signature_png_base64' => $pngBase64,
+    ], $overrides));
+
+    assertSheetCondition(strlen($signed(['signer_name' => str_repeat('A', 120)])['signer_name']) === 120, 'name of 120 characters is accepted');
+    expectSheetRejection(static fn() => $signed(['signer_name' => str_repeat('A', 121)]), 'name of 121 characters');
+
+    assertSheetCondition(strlen($signed(['signer_document' => str_repeat('A', 20)])['signer_document']) === 20, 'document of 20 characters is accepted');
+    expectSheetRejection(static fn() => $signed(['signer_document' => str_repeat('A', 21)]), 'document of 21 characters');
+
+    assertSheetCondition(
+        strlen(ServiceSheetValidator::normalize(['absence_reason' => str_repeat('A', 500)])['absence_reason']) === 500,
+        'absence reason of exactly 500 characters is accepted'
+    );
+    expectSheetRejection(
+        static fn() => ServiceSheetValidator::normalize(['absence_reason' => str_repeat('A', 501)]),
+        'absence reason of 501 characters'
+    );
+
+    // El tope del trazo se mide sobre los bytes del PNG, no sobre el base64.
+    $exact = pngFixture(1, 1, 307200 - 65);
+    assertSheetCondition(strlen($exact) === 307200, 'fixture is exactly 307200 bytes');
+    assertSheetCondition(
+        strlen($signed(['signature_png_base64' => base64_encode($exact)])['signature_png']) === 307200,
+        'a PNG of exactly 307200 bytes is accepted'
+    );
+    expectSheetRejection(
+        static fn() => $signed(['signature_png_base64' => base64_encode(pngFixture(1, 1, 307201 - 65))]),
+        'PNG of 307201 bytes'
+    );
+    // Pre-cota: un cuerpo sobredimensionado se rechaza antes de decodificarlo.
+    expectSheetRejection(
+        static fn() => $signed(['signature_png_base64' => str_repeat('A', 409605)]),
+        'base64 above the pre-decode ceiling'
+    );
+
     echo "ServiceSheetValidator tests passed. Total Assertions: {$assertions}\n";
 } catch (Throwable $exception) {
     fwrite(STDERR, "ServiceSheetValidator test failed: {$exception->getMessage()}\n");

@@ -29,6 +29,13 @@ final class ServiceSheetValidator
     /** Tope operativo de la firma: 300 KiB (RNF-02). */
     public const MAX_PNG_BYTES = 307200;
 
+    /**
+     * Cota del base64 equivalente (307 200 bytes → 409 600 caracteres), con 4 de holgura
+     * para no rechazar un relleno `=` descuidado del cliente. Se comprueba ANTES de
+     * decodificar: un cuerpo de decenas de megas no debe llegar a `base64_decode`.
+     */
+    public const MAX_PNG_BASE64_LENGTH = 409604;
+
     /** Defensa frente a bombas de descompresión: 2 Mpx leídos del IHDR. */
     public const MAX_PIXELS = 2000000;
 
@@ -201,6 +208,17 @@ final class ServiceSheetValidator
         if ($clean === '') {
             throw new InvalidServiceSheetException([
                 'service_sheet.signature_png_base64: el trazo está vacío.',
+            ]);
+        }
+
+        // Pre-cota: se rechaza por longitud antes de decodificar, no después de haber
+        // reservado la memoria de un cuerpo arbitrariamente grande.
+        if (strlen($clean) > self::MAX_PNG_BASE64_LENGTH) {
+            throw new InvalidServiceSheetException([
+                sprintf(
+                    'service_sheet.signature_png_base64: el trazo supera los %d bytes admitidos.',
+                    self::MAX_PNG_BYTES
+                ),
             ]);
         }
 

@@ -72,6 +72,12 @@ const CONTRACT_TABLES = [
     'technician_van_stocks', 'incident_service_sheets',
 ];
 
+/**
+ * Tablas de solo inserción: la prueba genérica de `UPDATE` no puede exigir que la fila
+ * cambie, porque el motor la rechaza a propósito (Art. III.1). Se certifica el rechazo.
+ */
+const APPEND_ONLY_TABLES = ['incident_service_sheets'];
+
 $projectRoot = dirname(__DIR__, 2);
 $assertions = 0;
 $failures = 0;
@@ -214,6 +220,23 @@ try {
 
         $column = PostgresFixtureBuilder::updatableColumn($pgPdo, $table, $rows[$table]);
         $assignment = PostgresFixtureBuilder::assignment($pgPdo, $table, $column, sprintf('%02d', $index + 1));
+
+        if (in_array($table, APPEND_ONLY_TABLES, true)) {
+            [$where, $whereParams] = $primaryKeyWhere($pgPdo, $table, $rows[$table]);
+            $rejection = PostgresFixtureBuilder::expectRejection(
+                static function () use ($pgPdo, $table, $assignment, $where, $whereParams): void {
+                    $stmt = $pgPdo->prepare('UPDATE "' . $table . '" SET ' . $assignment['sql'] . ' WHERE ' . $where);
+                    $stmt->execute($assignment['params'] + $whereParams);
+                }
+            );
+
+            $assert(
+                "UPDATE · «{$table}» es de solo inserción y el motor rechaza la reescritura",
+                $rejection !== null && $rejection['state'] === '45000',
+                $rejection === null ? 'la fila se dejó reescribir' : json_encode($rejection)
+            );
+            continue;
+        }
         $nativeType = PostgresFixtureBuilder::columns($pgPdo, $table)[$column]['udt_name'];
         [$where, $whereParams] = $primaryKeyWhere($pgPdo, $table, $rows[$table]);
 

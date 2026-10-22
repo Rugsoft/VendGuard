@@ -22,7 +22,7 @@
 
 ### T-SIGN-01 · Esquema de la tabla de hojas de servicio
 **Hecho cuando:**
-* `database/supabase_init.sql` declara `incident_service_sheets` con `signed_document JSONB NOT NULL`, `resolution_at TIMESTAMPTZ NOT NULL`, el `CHECK` de rama, el `CHECK` de tamaño (64–307 200 bytes), el `CHECK` de documento objeto con `version`, el índice `(incident_id, recorded_at DESC, id DESC)` y el trigger `BEFORE DELETE`.
+* `database/supabase_init.sql` declara `incident_service_sheets` con `signed_document JSONB NOT NULL`, `resolution_at TIMESTAMPTZ NOT NULL`, el `CHECK` de rama (firmante de ≥ 3 tras `btrim`, documento de ≥ 5), el `CHECK` de tamaño (64–307 200 bytes con firma mágica de PNG), el `CHECK` de documento objeto con `version`, el índice `(incident_id, recorded_at DESC, id DESC)` y los disparadores `BEFORE DELETE` y `BEFORE UPDATE`.
 * `database/supabase_migrations/010_incident_service_sheets.sql` crea lo mismo de forma idempotente, sin `ALTER TYPE`.
 * `tests/Support/PostgresFixtureBuilder.php` crea la tabla en la base de pruebas.
 
@@ -47,7 +47,7 @@
 * Un fallo del repositorio de hojas no deja piezas, ni movimiento de stock, ni cierre (probado con doble en unitario y en integración).
 * El reintento tras el fallo no duplica piezas.
 * El evento `RESOLVE_INCIDENT` incluye `service_sheet` en `new_state`, sin el trazo.
-* `ServiceSheetResolutionTest` y `ServiceSheetAtomicityTest` en verde.
+* `SparePartTraceabilityServiceTest` (sección 7.10) y `ServiceSheetAtomicityTest` en verde.
 
 ### T-SIGN-05 · Endpoints de lectura
 **Hecho cuando:**

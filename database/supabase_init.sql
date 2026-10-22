@@ -1778,8 +1778,9 @@ CREATE OR REPLACE TRIGGER trg_touch_technician_van_stocks
 --
 -- INMUTABILIDAD
 -- No hay `UPDATE` ni `DELETE`: el disparador de borrado es el canónico del
--- Art. III.1 y no existe ruta de actualización. El `CHECK` de rama es la última
--- línea de defensa si un cliente futuro escribe sin pasar por el validador.
+-- Art. III.1, y el de actualización bloquea cualquier reescritura de la hoja ya
+-- firmada. El `CHECK` de rama es la última línea de defensa si un cliente futuro
+-- escribe sin pasar por el validador.
 CREATE TABLE IF NOT EXISTS incident_service_sheets (
     id              BIGINT GENERATED ALWAYS AS IDENTITY,
     incident_id     BIGINT NOT NULL,
@@ -1800,7 +1801,9 @@ CREATE TABLE IF NOT EXISTS incident_service_sheets (
         (
             signature_png IS NOT NULL
             AND signer_name IS NOT NULL
+            AND char_length(btrim(signer_name)) >= 3
             AND signer_document IS NOT NULL
+            AND char_length(btrim(signer_document)) >= 5
             AND absence_reason IS NULL
         )
         OR
@@ -1813,7 +1816,11 @@ CREATE TABLE IF NOT EXISTS incident_service_sheets (
         )
     ),
     CONSTRAINT chk_service_sheet_png_size CHECK (
-        signature_png IS NULL OR octet_length(signature_png) BETWEEN 64 AND 307200
+        signature_png IS NULL
+        OR (
+            octet_length(signature_png) BETWEEN 64 AND 307200
+            AND substring(signature_png FROM 1 FOR 8) = decode('89504e470d0a1a0a', 'hex')
+        )
     ),
     CONSTRAINT chk_service_sheet_document CHECK (
         jsonb_typeof(signed_document) = 'object'
@@ -1828,14 +1835,31 @@ CREATE OR REPLACE TRIGGER trg_no_delete_incident_service_sheets
     BEFORE DELETE ON incident_service_sheets
     FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
 
+-- El `BEFORE DELETE` canónico impide borrar la hoja; este otro impide reescribirla.
+-- Sin él, la inmutabilidad sería una convención del código —«no hay método update»— y
+-- cualquier ruta con permiso de escritura podría cambiar el firmante de un papel que ya
+-- se entregó a la sede en PDF (Art. III.1, invariante 2 de los contratos del Módulo 19).
+CREATE OR REPLACE FUNCTION prevent_service_sheet_rewrite()
+RETURNS TRIGGER AS $fn$
+BEGIN
+    RAISE EXCEPTION 'ART_III_1_VIOLATION: la hoja de servicio firmada no admite UPDATE (Art. III.1).'
+        USING ERRCODE = '45000';
+END;
+$fn$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER trg_no_update_incident_service_sheets
+    BEFORE UPDATE ON incident_service_sheets
+    FOR EACH ROW EXECUTE FUNCTION prevent_service_sheet_rewrite();
+
 
 -- =============================================================================
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
 -- 27 tablas (las 27 del contrato de correspondencia) · 24 tipos del dominio en sus
--- 25 columnas `ENUM` · 2 funciones canónicas de blindaje
--- 40 disparadores: 27 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1) y 13
--- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2)
+-- 25 columnas `ENUM` · 3 funciones canónicas de blindaje
+-- 41 disparadores: 27 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 13
+-- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 1 `BEFORE UPDATE` de
+-- bloqueo (`trg_no_update_incident_service_sheets`)
 -- 41 restricciones nombradas: 25 claves primarias (la del mapeo de códigos postales
 -- es el propio CP, no un identificador sintético) y 16 únicas
 -- 17 restricciones `CHECK`: las 7 de longitud mínima del Art. V.1 (A-3: 4 en

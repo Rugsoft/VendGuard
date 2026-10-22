@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/autoload.php';
 require_once __DIR__ . '/../Support/RecordingVanStockRepository.php';
+require_once __DIR__ . '/../Support/NullServiceSheetRepository.php';
 
 use VendGuard\Application\Service\SparePartAnalyticsService;
 use VendGuard\Application\Service\SparePartCatalogService;
@@ -400,7 +401,8 @@ function createControllerEnvironment(): array {
         sparePartRepo: $sparePartRepo,
         incidentRepo: $dummyIncidentRepo,
         machineRepo: $dummyMachineRepo,
-        vanStockService: new VanStockService(new RecordingVanStockRepository())
+        vanStockService: new VanStockService(new RecordingVanStockRepository()),
+        serviceSheetRepo: new NullServiceSheetRepository()
     );
 
     $controller = new CoordinatorSparePartsController(

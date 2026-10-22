@@ -57,6 +57,7 @@ use VendGuard\Infrastructure\Repository\PdoIncidentReplacedPartRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoIncidentServiceSheetRepository;
 use VendGuard\Infrastructure\Repository\PdoVanStockRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRequestRepository;
@@ -197,6 +198,7 @@ class TechnicianController
             incidentRepo: $this->incidentRepo,
             machineRepo: $this->machineRepo,
             vanStockService: new VanStockService(new PdoVanStockRepository()),
+            serviceSheetRepo: new PdoIncidentServiceSheetRepository(),
             auditLogger: new AuditLogger(new PdoAuditLogRepository()),
             notificationEnqueuer: $this->notifications()
         );

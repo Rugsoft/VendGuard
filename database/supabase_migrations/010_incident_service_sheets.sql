@@ -12,7 +12,8 @@
 --   1. `incident_service_sheets` — una fila por resolución, con el trazo en
 --      `BYTEA`, el firmante, el ancla de vigencia (`resolution_at`) y el
 --      documento congelado (`signed_document`) que imprime el albarán.
---   2. Su índice de historial y el disparador canónico de borrado.
+--   2. Su índice de historial, el disparador canónico de borrado y el de bloqueo
+--      de `UPDATE`: la hoja firmada no se reescribe ni se borra.
 --
 -- QUÉ NO DECLARA, A PROPÓSITO
 --   · Ningún valor del enumerado de auditoría: el evento `RESOLVE_INCIDENT` ya
@@ -23,7 +24,8 @@
 --     sede y el Art. V.4 prohíbe que transporte vida interna de la empresa
 --     (Art. V.4, RD-04).
 --   · Ninguna ruta de `UPDATE` ni de `DELETE`: la hoja es prueba documental y
---     una corrección exige una resolución nueva (Art. III.1, RD-01).
+--     una corrección exige una resolución nueva (Art. III.1, RD-01). Los dos
+--     disparadores lo impiden en el motor, no solo en el código.
 --
 -- NOTA SOBRE LA IDEMPOTENCIA:
 -- El ejecutor registra la huella de cada migración y no la reaplica, pero la
@@ -61,7 +63,9 @@ CREATE TABLE IF NOT EXISTS incident_service_sheets (
         (
             signature_png IS NOT NULL
             AND signer_name IS NOT NULL
+            AND char_length(btrim(signer_name)) >= 3
             AND signer_document IS NOT NULL
+            AND char_length(btrim(signer_document)) >= 5
             AND absence_reason IS NULL
         )
         OR
@@ -74,7 +78,11 @@ CREATE TABLE IF NOT EXISTS incident_service_sheets (
         )
     ),
     CONSTRAINT chk_service_sheet_png_size CHECK (
-        signature_png IS NULL OR octet_length(signature_png) BETWEEN 64 AND 307200
+        signature_png IS NULL
+        OR (
+            octet_length(signature_png) BETWEEN 64 AND 307200
+            AND substring(signature_png FROM 1 FOR 8) = decode('89504e470d0a1a0a', 'hex')
+        )
     ),
     CONSTRAINT chk_service_sheet_document CHECK (
         jsonb_typeof(signed_document) = 'object'
@@ -92,3 +100,19 @@ DROP TRIGGER IF EXISTS trg_no_delete_incident_service_sheets ON incident_service
 CREATE TRIGGER trg_no_delete_incident_service_sheets
     BEFORE DELETE ON incident_service_sheets
     FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+-- El `BEFORE DELETE` impide borrar la hoja; este otro impide reescribirla. Sin él,
+-- la inmutabilidad sería una convención del código y cualquier ruta con permiso de
+-- escritura podría cambiar el firmante de un papel ya entregado en la sede.
+CREATE OR REPLACE FUNCTION prevent_service_sheet_rewrite()
+RETURNS TRIGGER AS $fn$
+BEGIN
+    RAISE EXCEPTION 'ART_III_1_VIOLATION: la hoja de servicio firmada no admite UPDATE (Art. III.1).'
+        USING ERRCODE = '45000';
+END;
+$fn$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_no_update_incident_service_sheets ON incident_service_sheets;
+CREATE TRIGGER trg_no_update_incident_service_sheets
+    BEFORE UPDATE ON incident_service_sheets
+    FOR EACH ROW EXECUTE FUNCTION prevent_service_sheet_rewrite();

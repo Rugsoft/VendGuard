@@ -56,8 +56,8 @@ S22 — **Fuera de alcance (Q7, §2.2).** Preventivas sin firma ni albarán; sin
 | **WU-0 / T-SIGN-00** | S1–S22 (puerta SDD) | inline | `docs(digital-signature): add module 19 specification and ODD tracking` | ✅ hecho (`7daed7d`) |
 | **T-SIGN-01** | S5, S6, S8 | inline | `feat(digital-signature): model the service sheet and its frozen document` | ✅ hecho |
 | **T-SIGN-02** | S2, S3, S4, S8, S17 | inline | (mismo commit que T-SIGN-01) | ✅ hecho |
-| **T-SIGN-03** | S8, S9, S11, S14 | inline | `feat(digital-signature): persist parts, stock and the sheet in one transaction` | pendiente |
-| **T-SIGN-04** | S5, S16 | inline | (mismo commit que T-SIGN-03) | pendiente |
+| **T-SIGN-03** | S8, S9, S11, S14 | inline | `feat(digital-signature): persist parts, stock and the sheet in one transaction` | ✅ hecho (WU-2) |
+| **T-SIGN-04** | S5, S16 | inline | (mismo commit que T-SIGN-03) | ✅ hecho (WU-2) |
 | **T-SIGN-05** | S7, S9, S10, S11, S13, S14, S15 | inline | `feat(digital-signature): expose current and historical service sheets` | pendiente |
 | **T-SIGN-06** | S1, S2, S3, S4, S19 | inline¹ | `feat(digital-signature): capture the signature and print the service sheet` | pendiente |
 | **T-SIGN-07** | S9, S12, S14 | inline¹ | (mismo commit que T-SIGN-06) | pendiente |
@@ -101,3 +101,20 @@ Hallazgos informativos y destino acordado (trabajo posterior, no reabren este ca
 | `R3-1` | `ServiceSheetDto::$recordedAt` no admite `null` mientras el modelo sí. | WU-2 — al cablear la respuesta del cierre. |
 | `R1-SHEET-DECODE-BEFORE-SIZE` | Se decodifica el base64 completo antes de acotar el tamaño. | WU-2 — acotar la cadena antes de `base64_decode`. |
 | `R3-5` | La aserción de historial (`>= 3`) es tautológica y no comprueba orden. | WU-2 — al añadir la lectura ordenada. |
+
+**L7 (2026-10-22) — WU-2 (T-SIGN-03 + T-SIGN-04).** `Risk: item 4 (frontera transaccional: el cierre pasa a ser una unidad de escritura única)`. Evidencia observada:
+
+* RED del repositorio antes de implementarlo: `tests/integration/ServiceSheetAtomicityTest.php` falló con `Class "…PdoIncidentServiceSheetRepository" not found`.
+* `ServiceSheetAtomicityTest` (new_engine, esquema aislado `t_sign04_atomic`) **39/39**: rollback completo de piezas, stock y estado cuando la hoja falla; reintento sin duplicados; documento congelado inmune a renombrar sede y máquina; PNG de 12 465 bytes byte a byte; albarán histórico tras reapertura (`current` por ancla de resolución, la anterior servida por `?sheet_id`); hoja ajena excluida por el `JOIN`; proyección viva sin hoja; el repositorio no expone `update`/`delete`; el motor rechaza `UPDATE` (45000), firmante en blanco (23514) y bytes que no son PNG (23514).
+* `SparePartTraceabilityServiceTest` **55/55**: S6 reescrito (una declaración con una línea inválida ya no escribe nada: se valida y construye antes de abrir la transacción), S11 reescrito (un fallo dentro del cierre aborta la transacción y no deja la avería resuelta), S12–S17 nuevos (hoja dentro de la misma transacción, firmante/documento normalizados, respuesta sin trazo ni documento, sin bloque → `service_sheet: null`, bloque inválido → 422 antes de escribir, fallo de la hoja → aborto, auditoría con `service_sheet` y sin trazo).
+* `ServiceSheetValidatorTest` **100/100**: cotas exactas de R3-2 (nombre 120/121, documento 20/21, motivo 500/501, PNG 307 200/307 201) y pre-cota del base64 antes de `base64_decode` (R1-SHEET-DECODE-BEFORE-SIZE).
+* `PostgresServiceSheetSchemaTest` 19/19; `PostgresSchemaTest` 86/86 con `APPEND_ONLY_TABLES`: la tabla nueva se certifica por rechazo (`45000`) en vez de exigir un `UPDATE` que el motor prohíbe.
+* Batería hermética: **313 suites · 12.215 aserciones, 0 fallos**; cifras documentadas sincronizadas en README y cuatro documentos (`DocMetricsGuard` en verde).
+* Arnés: nuevo `tests/Support/NullServiceSheetRepository.php` para las suites que construyen el servicio sin ejercitar el Módulo 19; los tres tests de controladores requieren el entorno de batería (ya era así antes de esta unidad).
+
+Desvíos declarados de esta unidad:
+
+* (a) T-SIGN-04 se certifica **extendiendo** `tests/unit/SparePartTraceabilityServiceTest.php` (sección 7.10) en vez de crear `ServiceSheetResolutionTest.php`: el contrato de `tasks.md` nombraba esa suite, y un fichero nuevo habría duplicado ~400 líneas de dobles para los mismos escenarios. `tasks.md` se actualizó para nombrar la suite real.
+* (b) Cambio de comportamiento aceptado y documentado: antes, un cierre con una línea válida seguida de una inválida dejaba escrita la primera; ahora no escribe ninguna. Es exactamente S5 y el test S6 se reescribió para fijarlo.
+* (c) Se añadió el disparador `BEFORE UPDATE` porque el contrato aprobado lo exige literalmente («el trigger lo impide en base», invariante 2) y porque la inmutabilidad es el valor del módulo; la migración 010 aún no estaba desplegada.
+* (d) Los hallazgos informativos R3-4, R1-SHEET-UPDATE-NOT-ENFORCED, R3-3, R3-2, R3-1, R1-SHEET-DECODE-BEFORE-SIZE y R3-5 quedan cerrados en esta unidad; R1-SHEET-READ-SCOPE se cierra con la autorización de endpoints en WU-3.
