@@ -59,9 +59,9 @@ S22 — **Fuera de alcance (Q7, §2.2).** Preventivas sin firma ni albarán; sin
 | **T-SIGN-03** | S8, S9, S11, S14 | inline | `feat(digital-signature): persist parts, stock and the sheet in one transaction` | ✅ hecho (`461992d`) |
 | **T-SIGN-04** | S5, S16 | inline | (mismo commit que T-SIGN-03) | ✅ hecho (`461992d`) |
 | **T-SIGN-05** | S7, S9, S10, S11, S13, S14, S15 | inline | `feat(digital-signature): expose current and historical service sheets` | ✅ hecho (`7bc52ca` + `a8574b7`) |
-| **T-SIGN-06** | S1, S2, S3, S4, S19 | inline¹ | `feat(digital-signature): capture the signature and print the service sheet` | ✅ hecho |
-| **T-SIGN-07** | S9, S12, S14 | inline¹ | (mismo commit que T-SIGN-06) | ✅ hecho |
-| **T-SIGN-08** | S17, S18 | inline | `docs(digital-signature): close the module and sync documented figures` | ✅ hecho |
+| **T-SIGN-06** | S1, S2, S3, S4, S19 | inline¹ | `feat(digital-signature): capture the signature and print the service sheet` | ✅ hecho (`953544d`) |
+| **T-SIGN-07** | S9, S12, S14 | inline¹ | (mismo commit que T-SIGN-06) | ✅ hecho (`953544d`) |
+| **T-SIGN-08** | S17, S18 | inline | `docs(digital-signature): close the module and sync documented figures` | ✅ hecho (`4e6643e`) |
 | **T-SIGN-09** | S1–S22 | inline | (cierre de la feature) | ⏳ bloqueado: E2E manual pendiente |
 
 ¹ Candidato al trigger de escritura delegada que **no llegó a dispararse**: T-SIGN-05 y T-SIGN-06 no comparten superficie (controladores/router/repositorio frente a componentes `.js` y sus `.mjs`), pero cada una es una unidad de comportamiento único —sin dos unidades independientes que lanzar a la vez—, así que ambas se escribieron inline y el trigger de paralelismo nunca se cumplió.
