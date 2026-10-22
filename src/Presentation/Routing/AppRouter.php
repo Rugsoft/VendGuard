@@ -137,6 +137,9 @@ class AppRouter
         // del diálogo y publicación de notas internas o públicas bajo rol COORDINATOR.
         $router->get('/api/coordinator/incidents/{id}/comments', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'getComments'], [$coordinatorAuth]);
         $router->post('/api/coordinator/incidents/{id}/comments', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'addComment'], [$coordinatorAuth]);
+        // Albarán de servicio firmado (Módulo 19: T-SIGN-05). La coordinación lee
+        // cualquier expediente y reimprime el papel; la lectura queda auditada (RF-05.6).
+        $router->get('/api/coordinator/incidents/{id}/service-sheet', [\VendGuard\Presentation\Controller\CoordinatorController::class, 'serviceSheet'], [$coordinatorAuth]);
         // Rutas de Administración Integral (Módulo 04: Sedes, Máquinas y Personal)
         // Sedes (Locations)
         $router->get('/api/coordinator/locations', [\VendGuard\Presentation\Controller\CoordinatorAdminController::class, 'listLocations'], [$coordinatorAuth]);
@@ -273,6 +276,9 @@ class AppRouter
         // de privacidad preseleccionado en "Nota Interna de Taller" (RF-02.3, RF-03.3).
         $router->get('/api/technician/incidents/{id}/comments', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getComments'], [$technicianAuth]);
         $router->post('/api/technician/incidents/{id}/comments', [\VendGuard\Presentation\Controller\TechnicianController::class, 'addComment'], [$technicianAuth]);
+        // Albarán de servicio firmado (Módulo 19: T-SIGN-05). Lectura auditada del
+        // documento congelado; el técnico solo alcanza lo asignado o lo que firmó (RD-17).
+        $router->get('/api/technician/incidents/{id}/service-sheet', [\VendGuard\Presentation\Controller\TechnicianController::class, 'serviceSheet'], [$technicianAuth]);
         // Consulta del reintegro vinculado con DTO sin datos bancarios (Art. V.4).
         $router->get('/api/technician/incidents/{id}/refund', [TechnicianRefundController::class, 'show'], [$technicianAuth]);
         $router->post('/api/technician/incidents/{id}/resolve', [\VendGuard\Presentation\Controller\TechnicianController::class, 'resolveIncident'], [$technicianAuth]);

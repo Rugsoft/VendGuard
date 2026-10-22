@@ -6,6 +6,7 @@ namespace VendGuard\Application\Service;
 
 use DomainException;
 use InvalidArgumentException;
+use VendGuard\Application\DTO\ServiceSheetDto;
 use VendGuard\Core\Domain\Exception\IncompatibleSparePartException;
 use VendGuard\Core\Domain\Exception\InvalidOutOfCatalogJustificationException;
 use VendGuard\Core\Domain\Exception\InvalidPartQuantityException;
@@ -14,11 +15,13 @@ use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Exception\SparePartNotFoundException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentReplacedPart;
+use VendGuard\Core\Domain\Model\IncidentServiceSheet;
 use VendGuard\Core\Domain\Model\OldPartDestination;
 use VendGuard\Core\Domain\Model\SparePartRequest;
 use VendGuard\Core\Domain\Model\SparePartRequestStatus;
 use VendGuard\Core\Domain\Repository\IncidentReplacedPartRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\IncidentServiceSheetRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SparePartRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SparePartRequestRepositoryInterface;
@@ -26,6 +29,7 @@ use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Core\Service\ResolutionValidator;
+use VendGuard\Core\Service\ServiceSheetValidator;
 
 /**
  * SparePartTraceabilityService
@@ -60,6 +64,9 @@ class SparePartTraceabilityService
     /** Descuento del stock de la furgoneta del técnico (Módulo 18). */
     private VanStockService $vanStockService;
 
+    /** Hoja de servicio firmada del responsable de sede (Módulo 19). */
+    private IncidentServiceSheetRepositoryInterface $serviceSheetRepo;
+
     public function __construct(
         SparePartRequestRepositoryInterface $requestRepo,
         IncidentReplacedPartRepositoryInterface $replacedPartRepo,
@@ -67,6 +74,7 @@ class SparePartTraceabilityService
         IncidentRepositoryInterface $incidentRepo,
         MachineRepositoryInterface $machineRepo,
         VanStockService $vanStockService,
+        IncidentServiceSheetRepositoryInterface $serviceSheetRepo,
         ?AuditLogger $auditLogger = null,
         ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
         ?TransactionManagerInterface $transactionManager = null
@@ -77,6 +85,7 @@ class SparePartTraceabilityService
         $this->incidentRepo = $incidentRepo;
         $this->machineRepo = $machineRepo;
         $this->vanStockService = $vanStockService;
+        $this->serviceSheetRepo = $serviceSheetRepo;
         $this->auditLogger = $auditLogger;
         $this->notificationEnqueuer = $notificationEnqueuer;
         $this->transactionManager = $transactionManager;
@@ -377,8 +386,16 @@ class SparePartTraceabilityService
             );
         }
 
-        /** @var IncidentReplacedPart[] $insertedParts */
-        $insertedParts = [];
+        // 4.b Hoja de servicio firmada del responsable de sede (Módulo 19, §3.2).
+        //     Se valida ANTES de escribir nada: un bloque mal formado no puede
+        //     degradar en un «cierre sin firma» silencioso.
+        $sheetData = null;
+        if (array_key_exists('service_sheet', $data) && $data['service_sheet'] !== null) {
+            $sheetData = ServiceSheetValidator::normalize($data['service_sheet']);
+        }
+
+        /** @var IncidentReplacedPart[] $partEntities */
+        $partEntities = [];
         $totalPartsCost = 0.00;
 
         if ($replacedPartsDeclared) {
@@ -478,34 +495,82 @@ class SparePartTraceabilityService
                     $totalPartsCost += round($quantity * $unitCostSnapshot, 2);
                 }
 
-                $inserted = $this->replacedPartRepo->insertReplacedPart($partEntity);
-                $insertedParts[] = $inserted;
-
-                // Módulo 18: la línea declarada descuenta el stock justo después de escribirse.
-                $this->deductVanStock($inserted);
+                $partEntities[] = $partEntity;
             }
-
-            // Marcar solicitudes previas de repuestos de esta incidencia como atendidas (RF-REP-06)
-            $this->requestRepo->markAttendedByIncident($incidentId);
-        } else {
-            // No se declararon piezas sustituidas: si existían solicitudes previas en PENDING, se cancelan
-            $this->requestRepo->markCancelledByIncident($incidentId);
         }
 
-        // 5. Transicionar formalmente la incidencia a RESOLVED en el repositorio.
-        //    RF-05.5: la confirmación de servicio restablecido nace en la MISMA
-        //    transacción que el cierre técnico (garantía de 48 h incluida).
+        // 5. Unidad de escritura única (Art. III, S5). Las líneas de repuesto, el
+        //    descuento de furgoneta, las solicitudes, el paso a RESOLVED, la
+        //    confirmación de servicio (RF-05.5) y la hoja firmada comparten una sola
+        //    transacción: si la hoja no se puede escribir, no queda ni una pieza, ni
+        //    un descuento, ni la avería cerrada.
+        /** @var IncidentReplacedPart[] $insertedParts */
+        $insertedParts = [];
+        /** @var IncidentServiceSheet|null $insertedSheet */
+        $insertedSheet = null;
         $enqueuer = $this->notificationEnqueuer;
-        $resolvedIncident = $enqueuer === null
-            ? $this->incidentRepo->resolve($incidentId, $technicianId, $diagnosis, $action)
-            : $this->transactions()->runInTransaction(function () use ($incidentId, $technicianId, $diagnosis, $action, $enqueuer): Incident {
+
+        $resolvedIncident = $this->transactions()->runInTransaction(
+            function () use (
+                $incidentId,
+                $technicianId,
+                $diagnosis,
+                $action,
+                $replacedPartsDeclared,
+                $partEntities,
+                $sheetData,
+                $enqueuer,
+                &$insertedParts,
+                &$insertedSheet
+            ): Incident {
+                foreach ($partEntities as $partEntity) {
+                    $inserted = $this->replacedPartRepo->insertReplacedPart($partEntity);
+                    $insertedParts[] = $inserted;
+
+                    // Módulo 18: la línea declarada descuenta el stock en esta misma transacción.
+                    $this->deductVanStock($inserted);
+                }
+
+                if ($replacedPartsDeclared) {
+                    // Marcar solicitudes previas de repuestos de esta incidencia como atendidas (RF-REP-06)
+                    $this->requestRepo->markAttendedByIncident($incidentId);
+                } else {
+                    // No se declararon piezas: las solicitudes previas en PENDING se cancelan
+                    $this->requestRepo->markCancelledByIncident($incidentId);
+                }
+
                 $resolved = $this->incidentRepo->resolve($incidentId, $technicianId, $diagnosis, $action);
-                $enqueuer->enqueueResolution($resolved);
+
+                if ($enqueuer !== null) {
+                    $enqueuer->enqueueResolution($resolved);
+                }
+
+                if ($sheetData !== null) {
+                    $insertedSheet = $this->serviceSheetRepo->insert(new IncidentServiceSheet(
+                        id: null,
+                        incidentId: $incidentId,
+                        technicianId: $technicianId,
+                        signerName: $sheetData['signer_name'],
+                        signerDocument: $sheetData['signer_document'],
+                        signaturePng: $sheetData['signature_png'],
+                        absenceReason: $sheetData['absence_reason'],
+                    ));
+                }
 
                 return $resolved;
-            });
+            }
+        );
 
-        // 6. Registro inmutable en auditoría
+        $sheetDto = $insertedSheet === null
+            ? null
+            : new ServiceSheetDto(
+                signed: $insertedSheet->isSigned(),
+                signerName: $insertedSheet->getSignerName(),
+                recordedAt: (string)$insertedSheet->getRecordedAt(),
+            );
+
+        // 6. Registro inmutable en auditoría (después del commit: la hoja nace con el cierre
+        //    y la auditoría deja constancia de que se guardó, sin copiar el trazo).
         if ($this->auditLogger !== null) {
             $this->auditLogger->logTicketEvent(
                 ticketId: $incidentId,
@@ -519,11 +584,13 @@ class SparePartTraceabilityService
                     'replaced_parts_declared' => $replacedPartsDeclared,
                     'total_parts_cost' => round($totalPartsCost, 2),
                     'sanitary_declarations' => $sanitaryRecord,
+                    'service_sheet' => $sheetDto?->toArray(),
                 ], static fn($value): bool => $value !== null),
                 metadata: [
                     'replaced_parts_count' => count($insertedParts),
                     'total_parts_cost' => round($totalPartsCost, 2),
                     'sanitary_declarations_recorded' => $sanitaryRecord !== null,
+                    'service_sheet_recorded' => $sheetDto !== null,
                 ]
             );
         }
@@ -537,6 +604,7 @@ class SparePartTraceabilityService
             'total_parts_cost' => round($totalPartsCost, 2),
             'replaced_parts' => array_map(fn(IncidentReplacedPart $p) => $p->toArray(), $insertedParts),
             'sanitary_declarations' => $sanitaryRecord,
+            'service_sheet' => $sheetDto?->toArray(),
         ];
     }
 

@@ -19,9 +19,9 @@ Queda completamente retirado el camino dual de persistencia (MariaDB/MySQL).
 
 ---
 
-## 2. Inventario de las 26 Tablas del Dominio
+## 2. Inventario de las 27 Tablas del Dominio
 
-Todas las tablas cuentan con clave primaria y disparador constitucional `trg_no_delete_*` vinculado a `prevent_hard_delete()` (Art. III.1). La clave primaria es `id BIGINT GENERATED ALWAYS AS IDENTITY` salvo en `operational_zone_postal_codes`, donde la identidad de la fila es el propio código postal: es la forma de garantizar que un CP pertenezca a una sola zona en todo su ciclo de vida (RF-01.2, Resolución QA 7).
+Todas las tablas cuentan con clave primaria y disparador constitucional `trg_no_delete_*` vinculado a `prevent_hard_delete()` (Art. III.1). `incident_service_sheets` es además **de solo inserción**: `trg_no_update_incident_service_sheets` (`prevent_service_sheet_rewrite()`) rechaza cualquier `UPDATE` con `45000`, porque la hoja firmada es prueba documental y una corrección exige una resolución nueva (RD-01). La clave primaria es `id BIGINT GENERATED ALWAYS AS IDENTITY` salvo en `operational_zone_postal_codes`, donde la identidad de la fila es el propio código postal: es la forma de garantizar que un CP pertenezca a una sola zona en todo su ciclo de vida (RF-01.2, Resolución QA 7).
 
 1. `locations` (20 columnas)
 2. `machines` (19 columnas)
@@ -49,6 +49,7 @@ Todas las tablas cuentan con clave primaria y disparador constitucional `trg_no_
 24. `operational_zone_postal_codes` (3 columnas)
 25. `technician_zone_assignments` (6 columnas)
 26. `technician_van_stocks` (7 columnas)
+27. `incident_service_sheets` (10 columnas)
 
 Adicionalmente, `schema_migrations` gestiona el registro de huellas SHA-256 de las migraciones incrementales.
 
@@ -77,3 +78,4 @@ Adicionalmente, `schema_migrations` gestiona el registro de huellas SHA-256 de l
 - **Formato de la zona (Módulo 17, RF-01.1):** `chk_operational_zones_code_len`, `chk_operational_zones_name_len` y `chk_operational_zones_color_format CHECK (color_hex ~* '^#[0-9A-Fa-f]{6}$')`, además de las claves únicas de código y nombre.
 - **Auditoría territorial (Módulo 17, RNF-03 / QA 11):** el enumerado `audit_entity_type` añade `OPERATIONAL_ZONE` y `TECHNICIAN_ZONE` mediante la migración `007_operational_zones.sql` con `ALTER TYPE ... ADD VALUE IF NOT EXISTS`, y el traslado masivo de códigos postales emite un evento matriz `ZONE_POSTAL_CODE_TRANSFERRED` más un evento `LOCATION_ZONE_REASSIGNED` por sede afectada en la misma transacción (QA 6).
 - **Saldo declarado de la furgoneta (Módulo 18, RF-01 a RF-05):** `technician_van_stocks` declara `technician_id` y `spare_part_id` (FK `fk_van_stock_technician` y `fk_van_stock_spare_part`, ambas con `ON DELETE RESTRICT` y `ON UPDATE CASCADE`), con la unicidad `uq_van_stock_technician_part (technician_id, spare_part_id)`: el saldo es un valor vigente, no un libro de movimientos. Las cotas `chk_van_stock_quantity_range CHECK (quantity_available BETWEEN -999 AND 9999)` y `chk_van_stock_threshold_range CHECK (min_threshold BETWEEN 0 AND 9999)` acotan la erratura de captura **sin prohibir el negativo**: una cantidad negativa es un descuadre declarado y no puede bloquear el cierre de la avería (RD-04). No hay columna de coste ni de valoración (RD-05): el coste del repuesto se congela inmutablemente en `incident_replaced_parts.unit_cost_snapshot`. El enumerado `audit_entity_type` añade `TECHNICIAN_VAN_STOCK` mediante `009_technician_van_stocks.sql`.
+- **Hoja de servicio firmada (Módulo 19, RF-03):** `incident_service_sheets` declara `incident_id` y `technician_id` (FK `fk_service_sheet_incident` y `fk_service_sheet_technician`, ambas con `ON DELETE RESTRICT` y `ON UPDATE CASCADE`), el ancla de vigencia `resolution_at TIMESTAMPTZ NOT NULL` y el documento congelado `signed_document JSONB NOT NULL`. Tres `CHECK` blindan la fila: `chk_service_sheet_branch` exige exactamente una de las dos ramas (firma con nombre de al menos 3 caracteres tras `btrim` y documento de al menos 5, o ausencia con motivo de al menos 10), `chk_service_sheet_png_size` acota el trazo entre 64 y 307 200 bytes y exige la firma mágica de PNG, y `chk_service_sheet_document` exige un objeto con clave `version`. El índice `idx_service_sheet_incident (incident_id, recorded_at DESC, id DESC)` sirve la hoja vigente sin ordenación en memoria; no hay `UNIQUE (incident_id)` porque una reapertura añade otra hoja (RD-01). El enumerado `audit_entity_type` **no** cambia: la lectura del albarán reutiliza `TICKET` con la acción `VIEW_SERVICE_SHEET` (RD-09).

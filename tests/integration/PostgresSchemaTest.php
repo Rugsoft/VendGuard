@@ -11,7 +11,7 @@ declare(strict_types=1);
  * certificación. Es la sustitución del nombre engañoso `PostgresParityTest`: aquí **no** se
  * compara con el motor local —eso es la correspondencia declarada de T-HYBRID-24, que exige los
  * dos motores a la vez— sino que se demuestra que el motor nuevo **hace** las cuatro operaciones
- * sobre las 26 tablas del contrato.
+ * sobre las 27 tablas del contrato.
  *
  * QUÉ SE CERTIFICA, Y POR QUÉ ASÍ
  *
@@ -19,7 +19,7 @@ declare(strict_types=1);
  *      DDL base y la migración del motor aplicada por el ejecutor canónico. Si el DDL dejara de
  *      compilar o la migración dejara de aplicar, no habría dónde certificar nada.
  *
- *   2. **Alta mínima en las 26 tablas respetando el grafo de claves foráneas.** La fixture no se
+ *   2. **Alta mínima en las 27 tablas respetando el grafo de claves foráneas.** La fixture no se
  *      escribe a mano tabla por tabla: se deriva del catálogo vivo (`information_schema` y
  *      `pg_constraint`), de modo que una columna obligatoria nueva entra sola y una referencia
  *      nueva reordena el alta. Un ciclo en el grafo, o un tipo que el arnés no sepa sintetizar,
@@ -60,7 +60,7 @@ use VendGuard\Infrastructure\Database\PostgresMigrationRunner;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 26 tablas del contrato de correspondencia (§2.1, Módulo 14, 17 y 18). */
+/** Las 27 tablas del contrato de correspondencia (§2.1, Módulos 14, 17, 18 y 19). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -69,8 +69,14 @@ const CONTRACT_TABLES = [
     'sanitary_sweep_contentions', 'audit_log',
     'notification_outbox', 'notification_channel_settings',
     'operational_zones', 'operational_zone_postal_codes', 'technician_zone_assignments',
-    'technician_van_stocks',
+    'technician_van_stocks', 'incident_service_sheets',
 ];
+
+/**
+ * Tablas de solo inserción: la prueba genérica de `UPDATE` no puede exigir que la fila
+ * cambie, porque el motor la rechaza a propósito (Art. III.1). Se certifica el rechazo.
+ */
+const APPEND_ONLY_TABLES = ['incident_service_sheets'];
 
 $projectRoot = dirname(__DIR__, 2);
 $assertions = 0;
@@ -157,7 +163,7 @@ try {
     // ─────────────────────────────────────────────────────────────────────
     // Alta: una fila mínima por tabla, en orden que respeta el grafo de claves foráneas
     // ─────────────────────────────────────────────────────────────────────
-    echo "\n--- CREATE: alta mínima de las 26 tablas en orden de claves foráneas ---\n";
+    echo "\n--- CREATE: alta mínima de las 27 tablas en orden de claves foráneas ---\n";
 
     $order = PostgresFixtureBuilder::insertionOrder($pgPdo, $tables);
     $insertionFailure = null;
@@ -214,6 +220,23 @@ try {
 
         $column = PostgresFixtureBuilder::updatableColumn($pgPdo, $table, $rows[$table]);
         $assignment = PostgresFixtureBuilder::assignment($pgPdo, $table, $column, sprintf('%02d', $index + 1));
+
+        if (in_array($table, APPEND_ONLY_TABLES, true)) {
+            [$where, $whereParams] = $primaryKeyWhere($pgPdo, $table, $rows[$table]);
+            $rejection = PostgresFixtureBuilder::expectRejection(
+                static function () use ($pgPdo, $table, $assignment, $where, $whereParams): void {
+                    $stmt = $pgPdo->prepare('UPDATE "' . $table . '" SET ' . $assignment['sql'] . ' WHERE ' . $where);
+                    $stmt->execute($assignment['params'] + $whereParams);
+                }
+            );
+
+            $assert(
+                "UPDATE · «{$table}» es de solo inserción y el motor rechaza la reescritura",
+                $rejection !== null && $rejection['state'] === '45000',
+                $rejection === null ? 'la fila se dejó reescribir' : json_encode($rejection)
+            );
+            continue;
+        }
         $nativeType = PostgresFixtureBuilder::columns($pgPdo, $table)[$column]['udt_name'];
         [$where, $whereParams] = $primaryKeyWhere($pgPdo, $table, $rows[$table]);
 

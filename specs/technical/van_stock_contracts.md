@@ -26,8 +26,11 @@ Existe **un solo método de consumo** (`VanStockService::consume()`) invocado de
 ### 1.2. Aritmética honesta y sin coste (RD-04, RD-05)
 La tabla almacena **solo unidades y umbral**. No hay coste, valoración, ni precio de compra: el coste del repuesto ya se congela de forma inmutable en `incident_replaced_parts.unit_cost_snapshot` (M2). La cantidad puede ser negativa y ese estado es un dato de negocio válido (descuadre de carga), no un error que deba ocultarse.
 
-### 1.3. Sin transacción nueva (RD-02)
-El descuento se ejecuta con **una única sentencia atómica** (`INSERT ... ON CONFLICT ... DO UPDATE`), ejecutada en la misma unidad de escritura que la línea de pieza sustituida, sin abrir, ampliar ni reordenar la transacción del flujo de cierre existente.
+### 1.3. Transacción del flujo de cierre (RD-02, enmendada por el Módulo 19)
+
+El descuento se ejecuta con **una única sentencia atómica** (`INSERT ... ON CONFLICT ... DO UPDATE`), en la misma unidad de escritura que la línea de pieza sustituida. En el camino **preventivo** esa unidad sigue siendo autocommit, sin abrir ni ampliar la transacción del flujo.
+
+> **Enmienda (2026-10-22, Módulo 19, Q3).** En el camino **correctivo**, `SparePartTraceabilityService::resolveIncidentWithParts()` envuelve en una única transacción la inserción de piezas, el descuento, la actualización de solicitudes, la transición a `RESOLVED`, el encolado de la notificación y la hoja de servicio. Razón: el albarán firmado imprime la lista de piezas y no puede existir un cierre a medias que las duplique al reintentar. No cambia RD-04: `consume` no consulta disponibilidad y admite saldos negativos, así que la única causa de fallo es un error de base de datos. Véase [`specs/19-digital-signature/spec.md`](../19-digital-signature/spec.md) RD-16 y [`specs/technical/digital_signature_contracts.md`](digital_signature_contracts.md) §1.1.
 
 ---
 

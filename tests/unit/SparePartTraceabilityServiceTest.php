@@ -20,18 +20,22 @@ require_once __DIR__ . '/../../src/autoload.php';
 require_once __DIR__ . '/../Support/RecordingVanStockRepository.php';
 require_once __DIR__ . '/../Support/ThrowingVanStockRepository.php';
 
+use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\SparePartTraceabilityService;
 use VendGuard\Application\Service\VanStockService;
 use VendGuard\Core\Domain\Exception\IncompatibleSparePartException;
 use VendGuard\Core\Domain\Exception\InvalidOutOfCatalogJustificationException;
 use VendGuard\Core\Domain\Exception\InvalidPartQuantityException;
 use VendGuard\Core\Domain\Exception\InvalidResolutionException;
+use VendGuard\Core\Domain\Exception\InvalidServiceSheetException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Exception\SparePartNotFoundException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\IncidentHistory;
+use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\IncidentReplacedPart;
+use VendGuard\Core\Domain\Model\IncidentServiceSheet;
 use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\OldPartDestination;
@@ -39,11 +43,14 @@ use VendGuard\Core\Domain\Model\SparePart;
 use VendGuard\Core\Domain\Model\SparePartCategory;
 use VendGuard\Core\Domain\Model\SparePartRequest;
 use VendGuard\Core\Domain\Model\SparePartRequestStatus;
+use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentReplacedPartRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\IncidentServiceSheetRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SparePartRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SparePartRequestRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
@@ -534,6 +541,114 @@ class MockMachineRepository implements MachineRepositoryInterface
 // Fixtures Base de Prueba
 // =============================================================================
 
+/**
+ * Hoja de servicio en memoria (Módulo 19): registra las inserciones y puede fallar a demanda.
+ */
+class MockServiceSheetRepository implements IncidentServiceSheetRepositoryInterface
+{
+    /** @var list<IncidentServiceSheet> */
+    public array $inserted = [];
+
+    public bool $failOnInsert = false;
+
+    public function insert(IncidentServiceSheet $sheet): IncidentServiceSheet
+    {
+        if ($this->failOnInsert) {
+            throw new RuntimeException('Fallo simulado del motor al escribir la hoja de servicio.');
+        }
+
+        $stored = new IncidentServiceSheet(
+            id: count($this->inserted) + 1,
+            incidentId: $sheet->getIncidentId(),
+            technicianId: $sheet->getTechnicianId(),
+            signerName: $sheet->getSignerName(),
+            signerDocument: $sheet->getSignerDocument(),
+            signaturePng: $sheet->getSignaturePng(),
+            absenceReason: $sheet->getAbsenceReason(),
+            resolutionAt: '2026-10-22 17:42:11',
+            signedDocument: ['version' => 1],
+            recordedAt: '2026-10-22 17:42:11',
+        );
+        $this->inserted[] = $stored;
+
+        return $stored;
+    }
+
+    public function findDocumentByIncidentId(int $incidentId, ?int $sheetId = null): ?array
+    {
+        return null;
+    }
+
+    public function listByIncidentId(int $incidentId): array
+    {
+        return [];
+    }
+
+    public function isReadableByTechnician(int $incidentId, int $technicianId): bool
+    {
+        return false;
+    }
+}
+
+/**
+ * Gestor de transacciones sin motor: cuenta aperturas, confirmaciones y abortos.
+ *
+ * No deshace nada —los dobles en memoria no se rebobinan—, así que aquí solo se certifica que el
+ * cierre se ejecuta DENTRO de una unidad de trabajo y que su fallo la aborta. El rollback real de
+ * PostgreSQL lo certifica `ServiceSheetAtomicityTest`.
+ */
+class RecordingTransactionManager implements TransactionManagerInterface
+{
+    public int $opened = 0;
+    public int $committed = 0;
+    public int $aborted = 0;
+
+    public function runInTransaction(callable $operation): mixed
+    {
+        $this->opened++;
+
+        try {
+            $result = $operation();
+        } catch (Throwable $exception) {
+            $this->aborted++;
+            throw $exception;
+        }
+
+        $this->committed++;
+
+        return $result;
+    }
+}
+
+/** Repositorio de auditoría en memoria. */
+class RecordingAuditLogRepository implements AuditLogRepositoryInterface
+{
+    /** @var list<AuditEvent> */
+    public array $events = [];
+
+    public function log(AuditEvent $event): AuditEvent
+    {
+        $this->events[] = $event;
+
+        return $event;
+    }
+
+    public function findEvents(array $filters = [], int $limit = 50, int $offset = 0): array
+    {
+        return $this->events;
+    }
+
+    public function countEvents(array $filters = []): int
+    {
+        return count($this->events);
+    }
+
+    public function findByEntity(string $entityType, int $entityId): array
+    {
+        return [];
+    }
+}
+
 function createTestEnvironment(): array {
     $requestRepo = new MockSparePartRequestRepository();
     $replacedPartRepo = new MockIncidentReplacedPartRepository();
@@ -541,6 +656,8 @@ function createTestEnvironment(): array {
     $incidentRepo = new MockIncidentRepository();
     $machineRepo = new MockMachineRepository();
     $vanStockRepo = new RecordingVanStockRepository();
+    $sheetRepo = new MockServiceSheetRepository();
+    $transactions = new RecordingTransactionManager();
 
     // 1. Repuestos de prueba
     $part1 = new SparePart(
@@ -601,7 +718,9 @@ function createTestEnvironment(): array {
         sparePartRepo: $sparePartRepo,
         incidentRepo: $incidentRepo,
         machineRepo: $machineRepo,
-        vanStockService: new VanStockService($vanStockRepo)
+        vanStockService: new VanStockService($vanStockRepo),
+        serviceSheetRepo: $sheetRepo,
+        transactionManager: $transactions
     );
 
     return [
@@ -612,6 +731,8 @@ function createTestEnvironment(): array {
         'incidentRepo'     => $incidentRepo,
         'machineRepo'      => $machineRepo,
         'vanStockRepo'     => $vanStockRepo,
+        'sheetRepo'        => $sheetRepo,
+        'transactions'     => $transactions,
     ];
 }
 
@@ -1197,9 +1318,10 @@ $assert(
     $rejectedOverMax && $env['vanStockRepo']->consumptions === [] && $env['replacedPartRepo']->parts === []
 );
 
-// 7.4 [límite declarado] Dos líneas con la segunda inválida: la primera ya se escribió.
-// No es un defecto: las líneas se escriben y descuentan en el mismo acto, sin transacción que las
-// agrupe (RD-02 mantiene esa forma). Queda fijado aquí para que cualquier cambio sea deliberado.
+// 7.4 [límite declarado] Dos líneas con la segunda inválida: nada se escribe.
+// Desde el Módulo 19 el cierre valida y construye TODAS las líneas antes de abrir la
+// transacción, así que una declaración inválida no deja escrita la línea anterior: el
+// cierre es atómico de punta a punta (S5, Art. III).
 $env = createTestEnvironment();
 $partialWrite = false;
 try {
@@ -1216,8 +1338,9 @@ try {
     $partialWrite = true;
 }
 $assert(
-    'S6 línea válida previa se escribe y se descuenta antes del rechazo de la inválida',
-    $partialWrite && count($env['replacedPartRepo']->parts) === 1 && count($env['vanStockRepo']->consumptions) === 1,
+    'S6 una declaración inválida no escribe ninguna línea: el cierre valida antes de transaccionar',
+    $partialWrite && $env['replacedPartRepo']->parts === [] && $env['vanStockRepo']->consumptions === []
+        && $env['transactions']->opened === 0,
     'escrituras=' . count($env['replacedPartRepo']->parts) . ' consumos=' . json_encode($env['vanStockRepo']->consumptions)
 );
 
@@ -1299,7 +1422,10 @@ try {
 }
 $assert('S10 el constructor exige VanStockService (sin valor por defecto)', $missingDependencyThrows);
 
-// 7.9 [fallo de motor] Si el descuento no puede ejecutarse, la excepción se propaga.
+// 7.9 [fallo de motor] El cierre es una unidad de trabajo: si el descuento falla, la
+//     transacción se aborta. El rollback real de PostgreSQL lo certifica la suite de
+//     integración `ServiceSheetAtomicityTest`; aquí se certifica que el cierre se ejecuta
+//     dentro de una transacción y que un fallo la aborta en vez de dejarla a medias.
 $env = createTestEnvironment();
 $throwingService = new SparePartTraceabilityService(
     requestRepo: $env['requestRepo'],
@@ -1307,7 +1433,9 @@ $throwingService = new SparePartTraceabilityService(
     sparePartRepo: $env['sparePartRepo'],
     incidentRepo: $env['incidentRepo'],
     machineRepo: $env['machineRepo'],
-    vanStockService: new VanStockService(new ThrowingVanStockRepository())
+    vanStockService: new VanStockService(new ThrowingVanStockRepository()),
+    serviceSheetRepo: $env['sheetRepo'],
+    transactionManager: $env['transactions']
 );
 $deductionFailed = false;
 try {
@@ -1322,15 +1450,147 @@ try {
 } catch (RuntimeException) {
     $deductionFailed = true;
 }
-$linesAfterFailure = $env['replacedPartRepo']->findByIncidentId(101);
 $incidentAfterFailure = $env['incidentRepo']->findById(101);
 $assert(
-    'S11 un fallo del descuento propaga la excepción: la línea queda escrita SIN descuento',
+    'S11 un fallo dentro del cierre aborta su transacción: la avería no queda resuelta',
     $deductionFailed === true
-        && count($linesAfterFailure) === 1
+        && $env['transactions']->opened === 1
+        && $env['transactions']->aborted === 1
+        && $env['transactions']->committed === 0
         && $incidentAfterFailure !== null
         && $incidentAfterFailure->getStatus() !== IncidentStatus::RESOLVED,
-    'lineas=' . count($linesAfterFailure) . ' estado=' . ($incidentAfterFailure?->getStatus()->value ?? 'null')
+    'aperturas=' . $env['transactions']->opened . ' abortos=' . $env['transactions']->aborted
+        . ' estado=' . ($incidentAfterFailure?->getStatus()->value ?? 'null')
+);
+
+// =============================================================================
+// 7.10. Hoja de servicio firmada en el cierre (Módulo 19, T-SIGN-04)
+// =============================================================================
+echo "\n--- 7.10 Hoja de servicio firmada dentro del cierre (Módulo 19) ---\n";
+
+/** PNG 1x1 válido: firma mágica, IHDR de 1x1 y CRC correctos. */
+$tinyPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+$closePayload = [
+    'resolution_diagnosis' => 'Fuga en el racor de entrada del grupo de infusión.',
+    'resolution_action' => 'Sustitución de la electroválvula y prueba de estanqueidad del circuito.',
+    'replaced_parts_declared' => true,
+    'replaced_parts' => [
+        ['spare_part_id' => 1, 'is_out_of_catalog' => false, 'quantity' => 2, 'old_part_destination' => 'TALLER'],
+    ],
+    'service_sheet' => [
+        'signer_name' => 'María López Ferrer',
+        'signer_document' => '12345678-Z',
+        'signature_png_base64' => $tinyPngBase64,
+    ],
+];
+
+$env = createTestEnvironment();
+$withSheet = $env['service']->resolveIncidentWithParts(101, 42, $closePayload);
+
+$storedSheet = $env['sheetRepo']->inserted[0] ?? null;
+$assert(
+    'S12 la hoja se escribe dentro de la misma transacción que el cierre',
+    $env['transactions']->opened === 1
+        && $env['transactions']->committed === 1
+        && $storedSheet !== null,
+    'aperturas=' . $env['transactions']->opened . ' hojas=' . count($env['sheetRepo']->inserted)
+);
+$assert(
+    'S12 la hoja guarda el firmante y el trazo ya validados (documento normalizado)',
+    $storedSheet !== null
+        && $storedSheet->isSigned()
+        && $storedSheet->getSignerName() === 'María López Ferrer'
+        && $storedSheet->getSignerDocument() === '12345678-Z'
+        && $storedSheet->getSignaturePng() === base64_decode($tinyPngBase64, true),
+    $storedSheet === null ? 'sin hoja' : (string)$storedSheet->getSignerDocument()
+);
+$assert(
+    'S13 la respuesta anuncia la hoja sin transportar el trazo ni el documento',
+    ($withSheet['service_sheet'] ?? null) === [
+        'signed' => true,
+        'signer_name' => 'María López Ferrer',
+        'recorded_at' => '2026-10-22 17:42:11',
+    ] && !str_contains((string)json_encode($withSheet), 'signature_png')
+        && !str_contains((string)json_encode($withSheet), 'signed_document'),
+    json_encode($withSheet['service_sheet'] ?? null)
+);
+
+// Sin bloque `service_sheet` el cierre sigue funcionando y no escribe ninguna hoja.
+$envWithout = createTestEnvironment();
+$withoutSheet = $envWithout['service']->resolveIncidentWithParts(101, 42, [
+    'resolution_diagnosis' => 'Fuga en el racor de entrada del grupo de infusión.',
+    'resolution_action' => 'Sustitución de la electroválvula y prueba de estanqueidad del circuito.',
+    'replaced_parts_declared' => false,
+]);
+$assert(
+    'S14 sin bloque de firma el cierre se completa y no inventa una hoja',
+    $envWithout['sheetRepo']->inserted === []
+        && array_key_exists('service_sheet', $withoutSheet)
+        && $withoutSheet['service_sheet'] === null,
+    json_encode($withoutSheet['service_sheet'] ?? 'ausente')
+);
+
+// Un bloque inválido se rechaza ANTES de escribir: ni piezas, ni stock, ni transacción.
+$envInvalid = createTestEnvironment();
+$invalidSheetRejected = false;
+try {
+    $envInvalid['service']->resolveIncidentWithParts(101, 42, array_merge($closePayload, ['service_sheet' => []]));
+} catch (InvalidServiceSheetException) {
+    $invalidSheetRejected = true;
+}
+$assert(
+    'S15 un bloque de firma inválido se rechaza antes de escribir nada',
+    $invalidSheetRejected
+        && $envInvalid['replacedPartRepo']->findByIncidentId(101) === []
+        && $envInvalid['vanStockRepo']->consumptions === []
+        && $envInvalid['transactions']->opened === 0,
+    'lineas=' . count($envInvalid['replacedPartRepo']->findByIncidentId(101))
+        . ' transacciones=' . $envInvalid['transactions']->opened
+);
+
+// Si la hoja no se puede escribir, el cierre entero se aborta.
+$envFailing = createTestEnvironment();
+$envFailing['sheetRepo']->failOnInsert = true;
+$sheetFailurePropagated = false;
+try {
+    $envFailing['service']->resolveIncidentWithParts(101, 42, $closePayload);
+} catch (RuntimeException) {
+    $sheetFailurePropagated = true;
+}
+$assert(
+    'S16 el fallo al escribir la hoja aborta la transacción del cierre',
+    $sheetFailurePropagated
+        && $envFailing['transactions']->opened === 1
+        && $envFailing['transactions']->aborted === 1
+        && $envFailing['transactions']->committed === 0,
+    'abortos=' . $envFailing['transactions']->aborted
+);
+
+// La auditoría deja constancia de la hoja, sin copiar el trazo.
+$auditRepo = new RecordingAuditLogRepository();
+$envAudited = createTestEnvironment();
+$auditedService = new SparePartTraceabilityService(
+    requestRepo: $envAudited['requestRepo'],
+    replacedPartRepo: $envAudited['replacedPartRepo'],
+    sparePartRepo: $envAudited['sparePartRepo'],
+    incidentRepo: $envAudited['incidentRepo'],
+    machineRepo: $envAudited['machineRepo'],
+    vanStockService: new VanStockService($envAudited['vanStockRepo']),
+    serviceSheetRepo: $envAudited['sheetRepo'],
+    auditLogger: new AuditLogger($auditRepo),
+    transactionManager: $envAudited['transactions']
+);
+$auditedService->resolveIncidentWithParts(101, 42, $closePayload);
+$auditEvent = $auditRepo->events[0] ?? null;
+$auditState = is_array($auditEvent?->getNewState()) ? $auditEvent->getNewState() : [];
+$assert(
+    'S17 la auditoría registra la hoja con su firmante y sin el trazo',
+    ($auditState['service_sheet']['signed'] ?? null) === true
+        && ($auditState['service_sheet']['signer_name'] ?? null) === 'María López Ferrer'
+        && (($auditEvent?->getMetadata() ?? [])['service_sheet_recorded'] ?? null) === true
+        && !str_contains((string)json_encode($auditState), 'signature_png'),
+    json_encode($auditState['service_sheet'] ?? null)
 );
 
 // =============================================================================

@@ -26,6 +26,7 @@ use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Exception\JustificationTooShortException;
 use VendGuard\Core\Domain\Exception\ReceptionDeliveryNotAllowedException;
 use VendGuard\Core\Domain\Exception\RefundNotFoundException;
+use VendGuard\Core\Domain\Exception\ServiceSheetPersistenceException;
 use VendGuard\Core\Domain\Model\CashCustodyAction;
 use VendGuard\Core\Domain\Model\TechnicianFinding;
 use VendGuard\Core\Domain\Repository\RefundRequestRepositoryInterface;
@@ -41,6 +42,7 @@ use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\IncidentServiceSheetRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentSiteResponseRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
@@ -57,6 +59,7 @@ use VendGuard\Infrastructure\Repository\PdoIncidentReplacedPartRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoIncidentServiceSheetRepository;
 use VendGuard\Infrastructure\Repository\PdoVanStockRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRequestRepository;
@@ -123,7 +126,8 @@ class TechnicianController
         ?FileStorageCompensator $fileCompensator = null,
         ?SanitaryReportSafeguardService $sanitarySafeguard = null,
         ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?IncidentServiceSheetRepositoryInterface $serviceSheetRepo = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->machineRepo  = $machineRepo ?? new PdoMachineRepository();
@@ -157,9 +161,13 @@ class TechnicianController
         $this->sanitarySafeguard = $sanitarySafeguard;
         $this->notificationEnqueuer = $notificationEnqueuer;
         $this->auditLogger = $auditLogger;
+        $this->serviceSheetRepo = $serviceSheetRepo;
     }
 
     private ?NotificationOutboxEnqueuerService $notificationEnqueuer = null;
+
+    /** Hojas de servicio (Módulo 19); se resuelve bajo demanda para no abrir conexión al construir. */
+    private ?IncidentServiceSheetRepositoryInterface $serviceSheetRepo = null;
 
     /**
      * Registro inmutable del desbloqueo de máquina al resolver in situ
@@ -180,6 +188,18 @@ class TechnicianController
     }
 
     /**
+     * Hojas de servicio de la avería (Módulo 19), resuelto bajo demanda.
+     *
+     * La lectura del albarán comparte este repositorio con el cierre firmado: la
+     * vigencia de una hoja se decide comparando su ancla (`resolution_at`) con la
+     * resolución de la incidencia, y esa regla tiene un solo dueño (contratos §6.2).
+     */
+    private function serviceSheets(): IncidentServiceSheetRepositoryInterface
+    {
+        return $this->serviceSheetRepo ??= new PdoIncidentServiceSheetRepository();
+    }
+
+    /**
      * Servicio de aplicación de la trazabilidad de repuestos y del cierre técnico.
      *
      * Se le inyecta el `AuditLogger` de verdad (T-PAUSE-23): el cierre de la avería por
@@ -197,6 +217,7 @@ class TechnicianController
             incidentRepo: $this->incidentRepo,
             machineRepo: $this->machineRepo,
             vanStockService: new VanStockService(new PdoVanStockRepository()),
+            serviceSheetRepo: new PdoIncidentServiceSheetRepository(),
             auditLogger: new AuditLogger(new PdoAuditLogRepository()),
             notificationEnqueuer: $this->notifications()
         );
@@ -1230,6 +1251,11 @@ class TechnicianController
                     ? 'Incidencia resuelta y dictamen de efectivo registrado correctamente.'
                     : 'Incidencia resuelta con registro de repuestos.'
             );
+        } catch (ServiceSheetPersistenceException $e) {
+            // La hoja no se pudo escribir: la transacción ya revirtió piezas, stock y
+            // cierre (S5). Sin este `catch`, la excepción escaparía del controlador y el
+            // código `SERVICE_SHEET_PERSISTENCE_FAILED` del contrato §5 nunca viajaría.
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
         } catch (InvalidPartQuantityException $e) {
             return Response::error('INVALID_PART_QUANTITY', $e->getMessage(), 422);
         } catch (SparePartNotFoundException $e) {
@@ -1639,6 +1665,119 @@ class TechnicianController
             'role' => (string)$request->getAttribute('user_role', 'TECHNICIAN'),
             'name' => 'Técnico de Ruta',
         ];
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Módulo 19 · T-SIGN-05 — Albarán de servicio (lectura)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * GET /api/technician/incidents/{id}/service-sheet
+     *
+     * Entrega el albarán de la avería —firmado o con la atestación de ausencia— para
+     * consultarlo o imprimirlo (RF-04, RF-05).
+     *
+     * El técnico lee el expediente que tiene asignado **y** los que firmó: la firma
+     * manuscrita es su prueba de haber intervenido, y la reapertura en garantía devuelve
+     * el ticket a triaje sin borrar esa constancia (RD-17). Cualquier otra avería recibe
+     * `403 SERVICE_SHEET_FORBIDDEN`: el 403 no distingue si la avería es de otro técnico
+     * o si nunca se firmó. La existencia sí se resuelve antes, como en el resto de rutas
+     * del expediente (404 `INCIDENT_NOT_FOUND`), y esa es la única enumeración que la
+     * ruta expone.
+     *
+     * Cada lectura deja `VIEW_SERVICE_SHEET` en la auditoría inmutable con el actor, la
+     * hoja leída y su vigencia (RF-05.6): imprimir un documento con datos personales de
+     * un tercero es un acceso que tiene que poder reconstruirse.
+     *
+     * Respuestas: 200 con el modelo de lectura común (§4.4); 400 `INVALID_SHEET_ID`;
+     * 401 sin sesión; 403 `SERVICE_SHEET_FORBIDDEN`; 404 `INCIDENT_NOT_FOUND` o
+     * `SERVICE_SHEET_NOT_FOUND`; 422 `INCIDENT_NOT_RESOLVED`.
+     */
+    public function serviceSheet(Request $request): Response
+    {
+        // 1. Identidad del técnico autenticado (middleware InternalAuthMiddleware).
+        $technician = $this->resolveAuthenticatedTechnician($request);
+        if ($technician === null) {
+            return Response::error('UNAUTHORIZED', 'No se pudo identificar al técnico autenticado.', 401);
+        }
+
+        // 2. Expediente de la ruta: existencia (400 / 404).
+        $incident = $this->locateRequestedIncident($request);
+        if ($incident instanceof Response) {
+            return $incident;
+        }
+
+        // 3. Autorización del albarán: asignado o firmante (RD-17). Se decide con una
+        //    consulta `EXISTS` sobre las hojas, no con el historial de estados, porque
+        //    lo que se protege es el papel firmado y no la bitácora del ticket.
+        $incidentId = (int)$incident->getId();
+        if (!$this->serviceSheets()->isReadableByTechnician($incidentId, $technician['id'])) {
+            return Response::error(
+                'SERVICE_SHEET_FORBIDDEN',
+                'Esta avería no está asignada a tu ruta técnica ni consta que hayas firmado su albarán.',
+                403
+            );
+        }
+
+        return $this->serviceSheetResponse($request, $incidentId, $this->extractActor($request));
+    }
+
+    /**
+     * Compone la respuesta del albarán: hoja pedida, hoja vigente o proyección viva (§4.4).
+     *
+     * @param array{id: int|null, role: string, name: string} $actor
+     */
+    private function serviceSheetResponse(Request $request, int $incidentId, array $actor): Response
+    {
+        // Un `sheet_id` presente tiene que ser un entero positivo: `?sheet_id=` vacío no se
+        // ignora en silencio, porque serviría el albarán vigente fingiendo haber servido el
+        // pedido (contratos §4.4).
+        $rawSheetId = $request->getQuery('sheet_id');
+        $sheetId = null;
+        if ($rawSheetId !== null) {
+            if (!ctype_digit((string)$rawSheetId) || (int)$rawSheetId < 1) {
+                return Response::error('INVALID_SHEET_ID', 'El parámetro sheet_id debe ser un entero positivo.', 400);
+            }
+            $sheetId = (int)$rawSheetId;
+        }
+
+        $document = $this->serviceSheets()->findDocumentByIncidentId($incidentId, $sheetId);
+        if ($document === null) {
+            return Response::error('INCIDENT_NOT_FOUND', 'No se encontró la avería solicitada.', 404);
+        }
+
+        // Hoja concreta pedida que no pertenece a esta avería: el `JOIN` la descarta,
+        // así que la ausencia de hoja es la respuesta (404) y no una hoja ajena.
+        if ($sheetId !== null && $document['sheet'] === null) {
+            return Response::error(
+                'SERVICE_SHEET_NOT_FOUND',
+                'La hoja de servicio solicitada no pertenece a esta avería.',
+                404
+            );
+        }
+
+        // Sin hoja y sin resolución no hay documento que emitir: la avería nunca se cerró.
+        // `REOPENED` no entra aquí: la reapertura en garantía demuestra que hubo un cierre
+        // anterior y la proyección viva conserva su diagnóstico y su acción.
+        if ($document['sheet'] === null
+            && !in_array($document['status'], ['RESOLVED', 'CLOSED', 'REOPENED'], true)
+        ) {
+            return Response::error(
+                'INCIDENT_NOT_RESOLVED',
+                'La avería no se ha cerrado nunca: todavía no hay albarán que emitir.',
+                422
+            );
+        }
+
+        $this->audit()->logTicketEvent(
+            $incidentId,
+            'VIEW_SERVICE_SHEET',
+            $actor,
+            null,
+            ['sheet_id' => $document['sheet']['id'] ?? null, 'current' => $document['current']]
+        );
+
+        return Response::json($document, 200);
     }
 
     // ────────────────────────────────────────────────────────────────────────

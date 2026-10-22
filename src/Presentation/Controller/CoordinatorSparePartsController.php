@@ -28,6 +28,7 @@ use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRequestRepository;
+use VendGuard\Infrastructure\Repository\PdoIncidentServiceSheetRepository;
 use VendGuard\Infrastructure\Repository\PdoVanStockRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -90,6 +91,7 @@ class CoordinatorSparePartsController
             incidentRepo: $incidentRepoActual,
             machineRepo: $machineRepoActual,
             vanStockService: new VanStockService(new PdoVanStockRepository()),
+            serviceSheetRepo: new PdoIncidentServiceSheetRepository(),
             auditLogger: $this->auditLogger
         );
     }

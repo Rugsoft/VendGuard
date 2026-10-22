@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/Database-PostgreSQL%2016%2B%20%7C%20Supabase-3ecf8e?style=flat-square&logo=postgresql&logoColor=white)](https://supabase.com/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-312%20Suites%20%7C%2012.108%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-317%20Suites%20%7C%2012.327%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -150,6 +150,17 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 * **Despacho en Dos Toques y Salvaguarda de Frío (Art. II / Art. V.1):** El panel de triaje destaca al primer puesto y permite asignarlo con `[⚡ Asignar Sugerido]`. Si se descarta al técnico de guardia ante una avería de frío, exige `override_justification` de al menos 20 caracteres reales, auditada como `INCIDENT_ASSIGNMENT_SUGGESTION_OVERRIDDEN` sin alterar el `reassignment_reason` del flujo de reasignación.
 * **Mapa Territorial por Zona y Privacidad de Sede:** El mapa de coordinación filtra y tiñe los centros con el color de su demarcación resolviéndolo en cliente (el contrato cartográfico no admite parámetros nuevos). El portal de sede jamás recibe el nombre, código ni color de la zona del cliente (Art. V.4).
 * **Transferencia Atómica de Códigos Postales:** Mover un CP entre zonas actualiza la demarcación, bloquea con `FOR UPDATE` las sedes heredadas, reasigna su `zone_id` e inscribe el evento matriz más un evento individual por sede en la misma transacción, con rollback completo ante cualquier fallo.
+
+---
+
+### 16. Firma Digital del Responsable de Sede y Albarán de Servicio (Módulo 19)
+* **Dos Vías Excluyentes en el Cierre:** El modal de resolución exige la conformidad de la sede. O se recoge la firma manuscrita digitalizada —nombre del firmante, documento y trazo sobre lienzo— o se atestigua «No había responsable disponible en la sede» con un motivo de al menos 10 caracteres. Activar una vía vacía los datos de la otra, y un bloque incompleto bloquea el envío señalando el campo.
+* **Captura Táctil Real:** El trazo se sigue por eventos `pointer` con captura de puntero, de modo que el dedo puede salir del lienzo sin cortar la firma ni arrastrar la página (`touch-action: none`). El lienzo se pinta blanco opaco y se escala por `devicePixelRatio`, así que la firma no sale borrosa en pantallas de alta densidad. Borrar el trazo descarta el PNG y **no** toca el nombre ni el documento.
+* **Tinta Decidida en el Cliente:** Menos de 150 píxeles con luminancia inferior a 200 es un lienzo en blanco. Es la única comprobación de tinta del sistema: el servidor no decodifica píxeles. El servidor sí valida el PNG real (firma binaria, MIME con `finfo`, `IHDR`), con techo de 300 KiB y 2 Mpx.
+* **Atomicidad e Inmutabilidad:** La hoja se escribe en la misma transacción que piezas, furgoneta, solicitudes, transición a `RESOLVED` y notificación: si algo falla, nada de lo anterior queda. La tabla no admite `UPDATE` ni `DELETE`; una corrección exige una resolución nueva.
+* **Documento Congelado:** `signed_document` guarda ticket, fecha de resolución, sede, máquina, técnico, diagnóstico, acción y piezas con nombre y cantidad en el instante del cierre. Una sede renombrada o una pieza recatalogada después no alteran el papel ya firmado.
+* **Albarán A4 Imprimible:** Se compone en el navegador con `window.print()` y una hoja de estilos A4 que oculta la interfaz, admite varias páginas y nunca parte el bloque de firma. Sin costes, notas internas, SLA ni saldos. Tras una reapertura, el albarán vigente es el del último cierre; las visitas anteriores se consultan como históricas con su fecha, y una avería cerrada sin firma dice «Sin firma del responsable» sin reutilizar la firma anterior.
+* **Acceso y Trazabilidad:** El técnico lee si la avería está asignada a él o si firmó alguna de sus hojas; coordinación lee cualquiera. El resto recibe `403 SERVICE_SHEET_FORBIDDEN`. Cada lectura deja un evento `VIEW_SERVICE_SHEET` y cada cierre registra si hubo firma, quién firmó y cuándo —nunca el trazo— o el motivo de ausencia.
 
 ---
 
@@ -426,6 +437,15 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 
 ---
 
+#### Firma Digital y Albarán de Servicio (Módulo 19)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/technician/incidents/{id}/resolve` | `TECHNICIAN` | Cierre correctivo con `service_sheet` obligatorio en la interfaz: firma (`signer_name`, `signer_document`, `signature_png_base64`) o ausencia (`absence_reason`). La hoja, sus piezas y el estado se escriben en una sola transacción. |
+| `GET` | `/api/technician/incidents/{id}/service-sheet` | `TECHNICIAN` | Albarán de la resolución vigente con documento congelado, hoja, historial y vigencia. Autoriza el técnico asignado o quien firmó alguna hoja; `?sheet_id=` sirve una hoja histórica. |
+| `GET` | `/api/coordinator/incidents/{id}/service-sheet` | `COORDINATOR` | Mismo contrato de lectura para el panel de triaje: cualquier expediente, incluida la hoja histórica de una avería reabierta. |
+
+---
+
 ## 🧪 Batería Completa de Pruebas Automatizadas (T-39 & Módulos 02, 03, 04, M1, M2 y M4)
 
 La integridad de VendGuard está certificada mediante un ejecutor de pruebas automatizado nativo, ejecutado en fases continuas (unitarias PHP, unitarias reactivas JS, integración HTTP real, guion E2E de los tres perfiles y guarda de coherencia entre las cifras documentadas y las ejecutadas):
@@ -439,20 +459,20 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 312 suites · 12.108 aserciones
+batería global: 317 suites · 12.327 aserciones
 
 ```text
 ======================================================================
  RESUMEN DE EJECUCIÓN GLOBAL (T-39)
 ======================================================================
  Tiempo de ejecución total : 299.00 segundos  (variable en cada corrida)
- Suites de pruebas PHP Unit : 136 / 136 pasadas
- Suites de pruebas JS Unit  : 74 / 74 pasadas
- Suites de Integración PHP  : 101 / 101 pasadas
+ Suites de pruebas PHP Unit : 137 / 137 pasadas
+ Suites de pruebas JS Unit  : 76 / 76 pasadas
+ Suites de Integración PHP  : 103 / 103 pasadas
  Suites E2E Manuales (T-40): 1 / 1 pasadas
  ──────────────────────────────────────────────────────────────────
- Total Suites Ejecutadas    : 312
- Total Aserciones Evaluadas : 12.108
+ Total Suites Ejecutadas    : 317
+ Total Aserciones Evaluadas : 12.327
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
@@ -576,7 +596,7 @@ gestor-incidencias-vending/
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 312 suites (100% verde)
+    ├── run_all.php               # Ejecutor global de la batería de 317 suites (100% verde)
     ├── run_new_engine.php        # Canal propio de la categoría new_engine (PG_TEST_DSN)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)

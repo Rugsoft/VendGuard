@@ -84,6 +84,7 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'INCIDENT_REOPENED_IN_SITU', label: 'Reapertura In Situ en Garantía', tone: 'warning', group: 'ticket' },
   { code: 'INCIDENT_CHRONIC_REPLACED', label: 'Avería Crónica Sustituida por Sucesor Limpio', tone: 'danger', group: 'ticket' },
   { code: 'RESOLVE_INCIDENT', label: 'Resolución de Avería', tone: 'success', group: 'ticket' },
+  { code: 'VIEW_SERVICE_SHEET', label: 'Consulta del Albarán de Servicio', tone: 'info', group: 'ticket' },
   { code: 'PAUSE_PENDING_PARTS', label: 'Pausa por Repuestos', tone: 'warning', group: 'ticket' },
   { code: 'PREVENTIVE_TRIGGERED_INCIDENT', label: 'Aviso Abierto por Preventivo', tone: 'primary', group: 'ticket' },
   { code: 'URGENCY_ESCALATED_CRITICAL_BY_PREVENTIVE', label: 'Urgencia Elevada por Preventivo', tone: 'danger', group: 'ticket' },

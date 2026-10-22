@@ -38,6 +38,8 @@ import { TechnicianSparePartsPauseModal } from '../components/TechnicianSparePar
 import { TechnicianResolutionPartsBlock } from '../components/TechnicianResolutionPartsBlock.js';
 import { TechnicianResolutionRefundBlock } from '../components/TechnicianResolutionRefundBlock.js';
 import { TechnicianSanitaryResolutionBlock } from '../components/TechnicianSanitaryResolutionBlock.js';
+import { TechnicianServiceSheetBlock } from '../components/TechnicianServiceSheetBlock.js';
+import { ServiceSheetModal } from '../components/ServiceSheetModal.js';
 import { TechnicianRouteMapModal } from '../components/TechnicianRouteMapModal.js';
 import { TechnicianMachineHistoryModal } from '../components/TechnicianMachineHistoryModal.js';
 import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';
@@ -74,6 +76,8 @@ export const TechnicianRouteView = {
     TechnicianResolutionPartsBlock,
     TechnicianResolutionRefundBlock,
     TechnicianSanitaryResolutionBlock,
+    TechnicianServiceSheetBlock,
+    ServiceSheetModal,
     TechnicianRouteMapModal,
     TechnicianMachineHistoryModal,
     IncidentCommentThreadModal,
@@ -123,6 +127,11 @@ export const TechnicianRouteView = {
       resolvePartsData: { replaced_parts_declared: false, replaced_parts: [] },
       resolveRefundData: { isValid: true },
       resolveSanitaryData: { isValid: false },
+      // Conformidad del responsable de sede (Módulo 19, RF-01, RF-02): bloque obligatorio
+      // del cierre correctivo. `null` mientras ninguna de las dos vías esté completa.
+      resolveServiceSheetData: { isValid: false },
+      showServiceSheetModal: false,
+      serviceSheetIncidentId: null,
       // Declaraciones sanitarias del cierre (RF-03.5.2, Art. II): la puerta se abre
       // cuando la ruta publica `sanitary_resolution_required` o cuando el servidor
       // la exige al intentar cerrar (el reloj biológico pudo vencer entre medias).
@@ -912,6 +921,7 @@ export const TechnicianRouteView = {
       this.resolvePartsData = { replaced_parts_declared: false, replaced_parts: [] };
       this.resolveRefundData = { isValid: true };
       this.resolveSanitaryData = { isValid: false };
+      this.resolveServiceSheetData = { isValid: false };
       this.sanitaryResolutionRequired = Boolean(incident?.sanitary_resolution_required);
       this.refundRequests = [];
       this.hasPendingRefundVerdict = false;
@@ -931,6 +941,7 @@ export const TechnicianRouteView = {
       this.resolvePartsData = { replaced_parts_declared: false, replaced_parts: [] };
       this.resolveRefundData = { isValid: true };
       this.resolveSanitaryData = { isValid: false };
+      this.resolveServiceSheetData = { isValid: false };
       this.sanitaryResolutionRequired = false;
       this.refundRequests = [];
       this.hasPendingRefundVerdict = false;
@@ -1057,6 +1068,16 @@ export const TechnicianRouteView = {
         sanitaryPayload = sanitaryVal.payload || {};
       }
 
+      // Conformidad del responsable de sede (Módulo 19, RF-01.4, RF-02.1, RD-02): en la
+      // interfaz la firma o la atestación de ausencia son obligatorias, y es el bloque
+      // quien decide si el trazo tiene tinta. El servidor revalida el bloque completo.
+      const serviceSheetVal = this.$refs?.resolutionServiceSheetBlockRef?.validate?.();
+      if (!serviceSheetVal || !serviceSheetVal.isValid) {
+        this.resolveError = serviceSheetVal?.error || 'No se pudo verificar el bloque de conformidad del responsable; vuelve a abrir la resolución para intentarlo de nuevo.';
+        return;
+      }
+      const serviceSheetPayload = serviceSheetVal.payload || null;
+
       this.isResolving = true;
       this.resolveError = '';
 
@@ -1073,9 +1094,12 @@ export const TechnicianRouteView = {
           payload.replaced_parts_declared = true;
           payload.replaced_parts = replacedParts;
         }
+        if (serviceSheetPayload) {
+          payload.service_sheet = serviceSheetPayload;
+        }
         const hasRefundPayload = Object.keys(refundPayload).length > 0;
         const hasSanitaryPayload = Object.keys(sanitaryPayload).length > 0;
-        const res = hasParts || hasRefundPayload || hasSanitaryPayload
+        const res = hasParts || hasRefundPayload || hasSanitaryPayload || serviceSheetPayload !== null
           ? await api.technician.resolveIncident(this.selectedIncident.id, payload)
           : await api.technician.resolveIncident(this.selectedIncident.id, diag, act);
         const resolvedAt = res?.data?.resolved_at || new Date().toISOString();
@@ -1088,10 +1112,14 @@ export const TechnicianRouteView = {
           resolvedAt,
           replaced_parts_declared: hasParts,
           replaced_parts: replacedParts,
+          service_sheet: res?.data?.service_sheet || null,
           ...refundPayload
         });
 
         const solvedId = this.selectedIncident.id;
+        // El albarán se imprime justo después de cerrar: se recuerda el expediente porque
+        // la avería sale de la ruta en el acto (RF-05.4).
+        this.serviceSheetIncidentId = solvedId;
         this.closeResolveModal();
 
         // Remove from active route
@@ -1370,6 +1398,15 @@ export const TechnicianRouteView = {
           role="status"
         >
           <span>✓ {{ feedbackMessage }}</span>
+          <button
+            v-if="serviceSheetIncidentId"
+            type="button"
+            class="vg-btn vg-btn-success-soft"
+            data-testid="btn-open-service-sheet"
+            @click="showServiceSheetModal = true"
+          >
+            🧾 Ver albarán
+          </button>
           <button type="button" @click="feedbackMessage = ''" style="background: none; border: none; font-size: 14px; color: #065f46; cursor: pointer;">×</button>
         </div>
 
@@ -1988,6 +2025,13 @@ export const TechnicianRouteView = {
             @change="resolvePartsData = $event"
           />
 
+          <TechnicianServiceSheetBlock
+            ref="resolutionServiceSheetBlockRef"
+            :key="'service-sheet-' + (selectedIncident?.id || 0)"
+            :disabled="isResolving"
+            @change="resolveServiceSheetData = $event"
+          />
+
           <!-- Error Alert -->
           <div
             v-if="resolveError"
@@ -2031,6 +2075,15 @@ export const TechnicianRouteView = {
         v-model="showPreventiveReinspectionModal"
         :order="selectedPreventiveOrder"
         @reinspection-completed="loadRoute"
+      />
+
+      <!-- =================================================================== -->
+      <!-- MODAL 5: ALBARÁN DE SERVICIO A4 (Módulo 19, RF-04, RF-05)          -->
+      <!-- =================================================================== -->
+      <ServiceSheetModal
+        v-model="showServiceSheetModal"
+        :incident-id="serviceSheetIncidentId"
+        audience="technician"
       />
     </div>
   `

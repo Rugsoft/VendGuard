@@ -1743,24 +1743,135 @@ CREATE OR REPLACE TRIGGER trg_touch_technician_van_stocks
     FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 
 
+-- -----------------------------------------------------------------------------
+-- Tabla 27 · incident_service_sheets — conformidad firmada de la intervención (M19)
+-- -----------------------------------------------------------------------------
+-- QUÉ GUARDA
+-- La conformidad del responsable de la sede sobre un cierre correctivo, o la
+-- declaración de que no había nadie que firmara. Una fila por resolución: una
+-- reapertura genera otra hoja y conserva la anterior, porque la hoja es prueba
+-- documental de un día concreto y no un campo del expediente (RD-01, RD-11).
+--
+-- POR QUÉ EL TRAZO VIVE EN POSTGRES Y NO EN DISCO
+-- El disco del contenedor en Render es efímero: una firma guardada en
+-- `public/uploads` desaparecería en el siguiente despliegue, y con ella la
+-- prueba de que alguien firmó. `signature_png` es un `BYTEA` con los bytes
+-- crudos del PNG (RD-03).
+--
+-- POR QUÉ EL DOCUMENTO ESTÁ CONGELADO
+-- `signed_document` es el albarán tal como se firmó: sede, máquina, técnico,
+-- diagnóstico, acción y piezas con nombre y cantidad. Si mañana se renombra una
+-- sede o se cambia el nombre de una pieza en el catálogo, el papel firmado no
+-- cambia. Se compone en la misma sentencia que inserta la hoja, de modo que no
+-- pueda contar algo distinto de lo que se escribió en esa transacción (RD-10).
+--
+-- POR QUÉ NO LLEVA COSTES NI NOTAS
+-- El albarán se entrega a la sede y no puede transportar importes, notas
+-- internas de taller ni datos de SLA (Art. V.4, RD-04). Lo que no está aquí no
+-- se puede filtrar.
+--
+-- DOS INSTANTES QUE NO SON INTERCAMBIABLES
+-- `recorded_at` es cuándo se registró la hoja y ordena el historial.
+-- `resolution_at` es cuándo se cerró la avería y **identifica la resolución**:
+-- es el ancla que distingue la hoja vigente de las históricas, incluso después
+-- de que la avería se reabra y se vuelva a cerrar (RD-11).
+--
+-- INMUTABILIDAD
+-- No hay `UPDATE` ni `DELETE`: el disparador de borrado es el canónico del
+-- Art. III.1, y el de actualización bloquea cualquier reescritura de la hoja ya
+-- firmada. El `CHECK` de rama es la última línea de defensa si un cliente futuro
+-- escribe sin pasar por el validador.
+CREATE TABLE IF NOT EXISTS incident_service_sheets (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY,
+    incident_id     BIGINT NOT NULL,
+    technician_id   BIGINT NOT NULL,
+    signer_name     VARCHAR(120),
+    signer_document VARCHAR(20),
+    signature_png   BYTEA,
+    absence_reason  TEXT,
+    resolution_at   TIMESTAMPTZ NOT NULL,
+    signed_document JSONB NOT NULL,
+    recorded_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_incident_service_sheets PRIMARY KEY (id),
+    CONSTRAINT fk_service_sheet_incident FOREIGN KEY (incident_id)
+        REFERENCES incidents (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_service_sheet_technician FOREIGN KEY (technician_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_service_sheet_branch CHECK (
+        (
+            signature_png IS NOT NULL
+            AND signer_name IS NOT NULL
+            AND char_length(btrim(signer_name)) >= 3
+            AND signer_document IS NOT NULL
+            AND char_length(btrim(signer_document)) >= 5
+            AND absence_reason IS NULL
+        )
+        OR
+        (
+            signature_png IS NULL
+            AND signer_name IS NULL
+            AND signer_document IS NULL
+            AND absence_reason IS NOT NULL
+            AND char_length(btrim(absence_reason)) >= 10
+        )
+    ),
+    CONSTRAINT chk_service_sheet_png_size CHECK (
+        signature_png IS NULL
+        OR (
+            octet_length(signature_png) BETWEEN 64 AND 307200
+            AND substring(signature_png FROM 1 FOR 8) = decode('89504e470d0a1a0a', 'hex')
+        )
+    ),
+    CONSTRAINT chk_service_sheet_document CHECK (
+        jsonb_typeof(signed_document) = 'object'
+        AND signed_document ? 'version'
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_service_sheet_incident
+    ON incident_service_sheets (incident_id, recorded_at DESC, id DESC);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_incident_service_sheets
+    BEFORE DELETE ON incident_service_sheets
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+-- El `BEFORE DELETE` canónico impide borrar la hoja; este otro impide reescribirla.
+-- Sin él, la inmutabilidad sería una convención del código —«no hay método update»— y
+-- cualquier ruta con permiso de escritura podría cambiar el firmante de un papel que ya
+-- se entregó a la sede en PDF (Art. III.1, invariante 2 de los contratos del Módulo 19).
+CREATE OR REPLACE FUNCTION prevent_service_sheet_rewrite()
+RETURNS TRIGGER AS $fn$
+BEGIN
+    RAISE EXCEPTION 'ART_III_1_VIOLATION: la hoja de servicio firmada no admite UPDATE (Art. III.1).'
+        USING ERRCODE = '45000';
+END;
+$fn$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER trg_no_update_incident_service_sheets
+    BEFORE UPDATE ON incident_service_sheets
+    FOR EACH ROW EXECUTE FUNCTION prevent_service_sheet_rewrite();
+
+
 -- =============================================================================
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 26 tablas (las 26 del contrato de correspondencia) · 24 tipos del dominio en sus
--- 25 columnas `ENUM` · 2 funciones canónicas de blindaje
--- 39 disparadores: 26 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1) y 13
--- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2)
--- 40 restricciones nombradas: 24 claves primarias (la del mapeo de códigos postales
+-- 27 tablas (las 27 del contrato de correspondencia) · 24 tipos del dominio en sus
+-- 25 columnas `ENUM` · 3 funciones canónicas de blindaje
+-- 41 disparadores: 27 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 13
+-- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 1 `BEFORE UPDATE` de
+-- bloqueo (`trg_no_update_incident_service_sheets`)
+-- 41 restricciones nombradas: 25 claves primarias (la del mapeo de códigos postales
 -- es el propio CP, no un identificador sintético) y 16 únicas
--- 14 restricciones `CHECK`: las 7 de longitud mínima del Art. V.1 (A-3: 4 en
+-- 17 restricciones `CHECK`: las 7 de longitud mínima del Art. V.1 (A-3: 4 en
 -- `incidents`, 2 en `refund_requests`, 1 en `spare_part_requests`) más las 5 del
 -- Módulo 17 (longitud de código y nombre de la zona, formato `#RRGGBB` de su color,
 -- formato del CP del catálogo y formato del CP de la sede) más las 2 del Módulo 18
--- (cotas de cantidad disponible y de umbral mínimo) · 41 claves foráneas con
--- las reglas declaradas en el contrato §2.4
--- 63 índices secundarios —uno por índice no único del esquema local y con las mismas
--- columnas (D-9), más los cinco del Módulo 17 y los dos del Módulo 18— y tres
--- índices únicos parciales:
+-- (cotas de cantidad disponible y de umbral mínimo) más las 3 del Módulo 19
+-- (rama de la hoja, tamaño del trazo y forma del documento congelado) · 43 claves
+-- foráneas con las reglas declaradas en el contrato §2.4
+-- 64 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- columnas (D-9), más los cinco del Módulo 17, los dos del Módulo 18 y el del
+-- Módulo 19— y tres índices únicos parciales:
 -- `uq_machine_active_ticket` (D-6), `uq_technician_zone_live` y
 -- `uq_technician_primary_zone` (Resolución QA 10)
 -- 2 columnas canónicas (`site_code_key`, `email_key`) con índice único propio (A-1/A-2)

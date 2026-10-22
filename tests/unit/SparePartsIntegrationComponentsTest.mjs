@@ -358,6 +358,14 @@ assert(
     $refs: {
       resolutionPartsBlockRef: {
         validate: () => ({ isValid: true, error: '' })
+      },
+      // Conformidad del responsable de sede (Módulo 19, RD-02): obligatoria en el cierre.
+      resolutionServiceSheetBlockRef: {
+        validate: () => ({
+          isValid: true,
+          error: '',
+          payload: { absence_reason: 'Sede sin conserjería; llave en la central.' }
+        })
       }
     },
     // Estado del dictamen de saldo (RF-REF-04, T-REF-16). El bloqueo de repuestos
@@ -388,7 +396,8 @@ assert(
     capturedResolve.payload.action_taken.length >= 20 &&
     capturedResolve.payload.replaced_parts_declared === true &&
     capturedResolve.payload.replaced_parts.length === 1 &&
-    capturedResolve.payload.replaced_parts[0].destination === 'TALLER'
+    capturedResolve.payload.replaced_parts[0].destination === 'TALLER' &&
+    capturedResolve.payload.service_sheet.absence_reason === 'Sede sin conserjería; llave en la central.'
   );
 
   assert(

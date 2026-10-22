@@ -1669,6 +1669,52 @@ assert('20.8 The inline panel renders the shared suggestion engine and its overr
   CoordinatorIncidentDetailModal.template.includes('@select="applyDetailSuggestedTechnician"') &&
   CoordinatorIncidentDetailModal.template.includes('data-testid="detail-assign-override-justification"'));
 
+// ---------------------------------------------------------------------
+// GROUP 21: Albaran de servicio de la intervencion (Modulo 19, RF-05.4)
+// ---------------------------------------------------------------------
+console.log('');
+console.log('--- Group 21: Printable service sheet from the coordinator detail ---');
+
+assert('21.1 El modal registra el albaran de servicio como componente propio',
+  CoordinatorIncidentDetailModal.components?.ServiceSheetModal?.name === 'ServiceSheetModal');
+
+assert('21.2 El boton del albaran solo aparece cuando el expediente tiene intervencion cerrada',
+  CoordinatorIncidentDetailModal.template.includes('data-testid="incident-detail-service-sheet"')
+    && CoordinatorIncidentDetailModal.template.includes('v-if="canViewServiceSheet"')
+    && CoordinatorIncidentDetailModal.template.includes('class="vg-btn vg-btn-secondary"'));
+
+{
+  const states = {
+    OPEN: false,
+    ASSIGNED: false,
+    IN_PROGRESS: false,
+    PENDING_INFO: false,
+    CANCELLED: false,
+    RESOLVED: true,
+    CLOSED: true,
+    REOPENED: true
+  };
+
+  const mismatches = Object.entries(states).filter(([status, expected]) => {
+    const instance = createInstance({ detail: { incident: { id: 9, status } } });
+    return computed(instance, 'canViewServiceSheet') !== expected;
+  });
+
+  assert('21.3 La visibilidad del albaran sigue el estado del expediente, reapertura incluida',
+    mismatches.length === 0, JSON.stringify(mismatches.map(([status]) => status)));
+}
+
+assert('21.4 Sin expediente cargado no se ofrece el albaran',
+  computed(createInstance({ detail: null }), 'canViewServiceSheet') === false);
+
+assert('21.5 El modal del albaran se monta con el rol de coordinacion y el expediente abierto',
+  CoordinatorIncidentDetailModal.template.includes(':incident-id="incident?.id || incidentId"')
+    && CoordinatorIncidentDetailModal.template.includes('audience="coordinator"')
+    && CoordinatorIncidentDetailModal.template.includes('v-model="showServiceSheetModal"'));
+
+assert('21.6 El albaran arranca cerrado en cada expediente',
+  CoordinatorIncidentDetailModal.data().showServiceSheetModal === false);
+
 // Summary
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);

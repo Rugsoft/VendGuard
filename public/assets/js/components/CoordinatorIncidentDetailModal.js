@@ -47,6 +47,7 @@
 import { api } from '../api.js';
 import { IncidentBadge } from './IncidentBadge.js';
 import { AssignSuggestionPanel } from './AssignSuggestionPanel.js';
+import { ServiceSheetModal } from './ServiceSheetModal.js';
 import { AMBER_TECHNICAL_TOKENS } from '../utils/IncidentStatusPermissions.js';
 import {
   opportunisticModeLabel,
@@ -57,7 +58,8 @@ export const CoordinatorIncidentDetailModal = {
   name: 'CoordinatorIncidentDetailModal',
   components: {
     IncidentBadge,
-    AssignSuggestionPanel
+    AssignSuggestionPanel,
+    ServiceSheetModal
   },
   props: {
     /**
@@ -91,6 +93,8 @@ export const CoordinatorIncidentDetailModal = {
       errorMessage: '',
       /** Visor de evidencia gráfica integrado en el propio modal (RF-02.4, RNF-06). */
       photoZoomOpen: false,
+      /** Albarán de servicio de la intervención (Módulo 19, RF-05.4). */
+      showServiceSheetModal: false,
       /** Marca la evidencia rota o inaccesible para mostrar el recuadro de sustitución. */
       photoFailed: false,
       /** Borrador del formulario en línea de la bitácora (RF-05.3). */
@@ -154,6 +158,16 @@ export const CoordinatorIncidentDetailModal = {
     /** Bloque de cabecera del ticket (RF-02). */
     incident() {
       return this.detail?.incident || null;
+    },
+
+    /**
+     * El albarán solo tiene sentido cuando el expediente llegó a resolverse: una avería
+     * abierta no tiene ni hoja vigente ni papel que reimprimir (RF-04.5, RD-11). La
+     * reapertura cuenta porque conserva la hoja de la visita anterior como histórica.
+     */
+    canViewServiceSheet() {
+      const status = this.incident?.status;
+      return status === 'RESOLVED' || status === 'CLOSED' || status === 'REOPENED';
     },
 
     /**
@@ -1265,6 +1279,18 @@ export const CoordinatorIncidentDetailModal = {
             </div>
 
             <div style="display: flex; align-items: center; gap: 8px;">
+              <!-- Albarán de servicio (Módulo 19, RF-05.4): la coordinación reimprime el
+                   documento congelado de cualquier visita, incluida la histórica de una
+                   avería reabierta. -->
+              <button
+                v-if="canViewServiceSheet"
+                type="button"
+                class="vg-btn vg-btn-secondary"
+                data-testid="incident-detail-service-sheet"
+                @click="showServiceSheetModal = true"
+              >
+                🧾 Albarán de servicio
+              </button>
               <button
                 type="button"
                 class="vg-btn vg-btn-secondary btn-refresh"
@@ -2239,6 +2265,12 @@ export const CoordinatorIncidentDetailModal = {
             </button>
           </footer>
         </div>
+
+        <ServiceSheetModal
+          v-model="showServiceSheetModal"
+          :incident-id="incident?.id || incidentId"
+          audience="coordinator"
+        />
       </div>
     </Teleport>
   `
