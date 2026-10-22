@@ -356,10 +356,13 @@
   /*
    * `visibility: hidden` oculta la interfaz pero sigue ocupando altura, de modo que el
    * navegador añade una hoja en blanco por cada pantalla de aplicación que hay detrás
-   * del modal. `ModalDialog` teletransporta el modal a `body`, así que sacar del flujo a
-   * sus hermanos deja como único contenido paginable el papel del albarán.
+   * del modal. `ModalDialog` no teletransporta el diálogo (vive dentro de `#app`), así
+   * que hay que vaciar la cadena de ancestros del papel: cada contenedor conserva solo
+   * el hijo que lleva al albarán y descarta sus hermanos.
    */
-  body:has(.vg-service-sheet__paper) > *:not(.vg-modal-backdrop) {
+  body:has(.vg-service-sheet__paper) > *:not(:has(.vg-service-sheet__paper)):not(.vg-service-sheet__paper),
+  body:has(.vg-service-sheet__paper) *:has(.vg-service-sheet__paper)
+    > *:not(:has(.vg-service-sheet__paper)):not(.vg-service-sheet__paper) {
     display: none !important;
   }
 

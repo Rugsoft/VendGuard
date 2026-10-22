@@ -388,9 +388,10 @@ assert('5.7 La hoja del albarán gana el empate de `!important` frente a las otr
 
 // Regresión de las páginas en blanco: la interfaz oculta con `visibility` sigue
 // ocupando altura y el navegador añade una hoja por cada pantalla de aplicación.
-assert('5.8 Al imprimir se saca del flujo la aplicación que queda detrás del modal',
-  /body:has\(\.vg-service-sheet__paper\)\s*>\s*\*:not\(\.vg-modal-backdrop\)\s*\{[^}]*display:\s*none\s*!important/i.test(CSS_SOURCE),
-  'la altura de la aplicación oculta añadiría páginas vacías al PDF');
+assert('5.8 Al imprimir se vacía la cadena de ancestros y solo queda el albarán en el flujo',
+  /body:has\(\.vg-service-sheet__paper\)[^{]*>\s*\*:not\(:has\(\.vg-service-sheet__paper\)\):not\(\.vg-service-sheet__paper\)[^{]*\{[^}]*display:\s*none\s*!important/i.test(CSS_SOURCE)
+    && /body:has\(\.vg-service-sheet__paper\)\s*\*:has\(\.vg-service-sheet__paper\)\s*>\s*\*:not\(:has\(\.vg-service-sheet__paper\)\):not\(\.vg-service-sheet__paper\)\s*\{[^}]*display:\s*none\s*!important/i.test(CSS_SOURCE),
+  'la altura de la aplicación oculta añadiría páginas vacías al PDF o escondería el papel');
 
 // ─── Resumen ────────────────────────────────────────────────────────────────
 console.log('\n' + '='.repeat(70));
