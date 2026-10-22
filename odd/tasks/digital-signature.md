@@ -61,8 +61,8 @@ S22 — **Fuera de alcance (Q7, §2.2).** Preventivas sin firma ni albarán; sin
 | **T-SIGN-05** | S7, S9, S10, S11, S13, S14, S15 | inline | `feat(digital-signature): expose current and historical service sheets` | ✅ hecho (`7bc52ca` + `a8574b7`) |
 | **T-SIGN-06** | S1, S2, S3, S4, S19 | inline¹ | `feat(digital-signature): capture the signature and print the service sheet` | ✅ hecho |
 | **T-SIGN-07** | S9, S12, S14 | inline¹ | (mismo commit que T-SIGN-06) | ✅ hecho |
-| **T-SIGN-08** | S17, S18 | inline | `docs(digital-signature): close the module and sync documented figures` | pendiente |
-| **T-SIGN-09** | S1–S22 | inline | (cierre de la feature) | pendiente |
+| **T-SIGN-08** | S17, S18 | inline | `docs(digital-signature): close the module and sync documented figures` | ✅ hecho |
+| **T-SIGN-09** | S1–S22 | inline | (cierre de la feature) | ⏳ bloqueado: E2E manual pendiente |
 
 ¹ Candidato al trigger de escritura delegada que **no llegó a dispararse**: T-SIGN-05 y T-SIGN-06 no comparten superficie (controladores/router/repositorio frente a componentes `.js` y sus `.mjs`), pero cada una es una unidad de comportamiento único —sin dos unidades independientes que lanzar a la vez—, así que ambas se escribieron inline y el trigger de paralelismo nunca se cumplió.
 
@@ -199,3 +199,15 @@ Desvíos declarados:
 * (c) Las cifras documentadas se sincronizaron en este mismo commit (`DocMetricsGuard` compara la frase canónica y la insignia).
 
 Evidencia: `TechnicianServiceSheetBlockTest` **31/31**, `ServiceSheetModalTest` **25/25**, `TechnicianRouteViewTest` **141/141** (grupo 16 nuevo), `CoordinatorIncidentDetailModalTest` **182/182** (grupo 21 nuevo), `FrontendTemplateCompileTest` verde, trinquete de tokens **2.268 / 2.269**, guardas del coordinador verdes; batería completa **317 suites · 12.323 aserciones, 0 fallos · cifras documentadas coherentes**.
+
+**L12 (2026-10-22) — WU-5: cierre documental (T-SIGN-08, T-SIGN-09).** `README.md` gana el módulo 16 de la lista funcional y la sección de endpoints «Firma Digital y Albarán de Servicio (Módulo 19)» con el `POST` de cierre y los dos `GET` de lectura. `DocMetricsGuard` pasa a **COHERENTES** (317 suites · 12.323 aserciones; frase canónica, insignia, bloque de fases, árbol de directorios y los cuatro documentos auditados). `docs/features_pendientes.md` marca la feature 4 como implementada con su alcance real y las exclusiones, y corrige la cifra de cabecera del documento (no versionado). La spec conserva Q4 (tinta decidida solo en cliente) y Q5 (retención indefinida, sin vía de supresión) como límites definitivos.
+
+Evaluación RDD del slice (`a8574b7` + `953544d`, base `7bc52ca --committed-only`): `risk: medium`, `review_due: false`, `review_due_reason: under_budget` (22 rutas, 2.701 líneas). El slice sigue abierto dentro del presupuesto: no se inicia revisión nativa y la frontera revisada permanece en `7bc52ca`.
+
+Deuda aceptada al cerrar la feature (ninguna reabre un candidato aprobado):
+
+* **De L8 (esquema).** La migración `010_incident_service_sheets.sql` se editó in-place durante WU-1 en vez de añadir una 011; un despliegue que ya hubiera aplicado la primera versión no la reaplicaría. El pre-cote `base64` de la 010 no distingue «no había ninguna fila» de «había filas previas» (la tabla nace vacía en la 010, así que hoy es teórico). La atomicidad se certifica en `new_engine` (`ServiceSheetAtomicityTest`) y el test de esa categoría concatena SQL en el arnés.
+* **De L10 (revisión de WU-3).** `R1-DENIED-NOT-AUDITED` (el 403 no se audita: fuera de contrato), `R2-DUP-SHEET-RESPONSE` (mapeo de errores duplicado en dos controladores, deliberado), `R2-STATUS-LITERALS` (la regla de vigencia vive en tres sitios con dos membresías: un estado nuevo obliga a tocar tres copias), `R2-ID-RESOLUTION-DIVERGENCE` y `R2-TEST-HARNESS-DUP` (resolución de identificador y arnés repetidos en suites), `R3-PERSISTENCE-HTTP-MAPPING-UNPROVED` (el `catch` de 3 líneas sigue sin aserto HTTP).
+* **De WU-4.** Dos componentes de vista con estilos propios en `service-sheet.css` en vez de tokens compartidos para el papel A4 (el tamaño de página y los márgenes de impresión no son tokens del sistema de diseño); `TechnicianServiceSheetBlock` no expone un lector de tinta servidor porque RD-12 lo prohíbe por diseño.
+
+**Bloqueo abierto.** El E2E manual de T-SIGN-09 (trazo, rotación, borrado y refirma, impresión A4 de dos páginas) no se ejecutó: requiere navegador real con dispositivo táctil y un parque sembrado con una avería asignada. El guion completo queda en [`specs/19-digital-signature/tasks.md`](../../specs/19-digital-signature/tasks.md). La feature no se declara cerrada hasta registrarlo.

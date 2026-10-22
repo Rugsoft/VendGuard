@@ -107,5 +107,22 @@
 * **WU-2 (T-SIGN-03, T-SIGN-04) — `feat(digital-signature): persist parts, stock and the sheet in one transaction`.** Repositorio `INSERT … SELECT` con documento congelado, transacción incondicional del cierre, disparadores de inmutabilidad. Suites: `ServiceSheetAtomicityTest` 39/39, `SparePartTraceabilityServiceTest` 55/55. Desvío: T-SIGN-04 se certifica extendiendo esa suite (sección 7.10) en vez de crear `ServiceSheetResolutionTest.php`.
 * **WU-3 (T-SIGN-05) — `feat(digital-signature): expose current and historical service sheets`.** Dos endpoints de lectura, autorización RD-17 en el puerto, anclaje de la hoja vigente y auditoría `VIEW_SERVICE_SHEET`. Suites: `ServiceSheetDocumentTest` 27/27, `ServiceSheetPrivacyTest` 7/7, `ServiceSheetAtomicityTest` 40/40 con el fallo del motor encapsulado. Desvíos: se documenta `INVALID_SHEET_ID` (hueco de contrato) y `TestDataCleanerIsolationTest` pasa a exigir 20 tablas transitorias.
 
-_(Las unidades WU-4 y WU-5 se añaden al cerrarlas.)_
+* **WU-4 (T-SIGN-06, T-SIGN-07) — `feat(digital-signature): capture the signature and print the service sheet` (`953544d`).** Bloque táctil de conformidad (`TechnicianServiceSheetBlock`), albarán A4 (`ServiceSheetModal` + `service-sheet.css`), métodos de lectura en `api.technician`/`api.coordinator`, bloque obligatorio en el modal de resolución y botón del albarán en el detalle de coordinación. Suites: `TechnicianServiceSheetBlockTest` 31/31, `ServiceSheetModalTest` 25/25, `TechnicianRouteViewTest` 141/141 (grupo 16), `CoordinatorIncidentDetailModalTest` 182/182 (grupo 21). Desvíos: todo cierre viaja ya como objeto con `service_sheet` (se actualizaron 5.13a y 10.9) y el trazo se escribe en `rgb()` para no sumar deuda al trinquete de tokens.
+* **WU-5 (T-SIGN-08, T-SIGN-09) — `docs(digital-signature): close the module and sync documented figures`.** `README.md` documenta el módulo y los dos endpoints de lectura; `DocMetricsGuard` queda COHERENTES con 317 suites / 12.323 aserciones; `features_pendientes.md` marca la feature 4 con su alcance real; la spec conserva Q4 (tinta solo en cliente) y Q5 (retención indefinida). `SchemaConvergenceParityTest` y `SqlDialectPortabilityTest` en verde con la migración 010 dentro de la batería.
+
+**E2E manual pendiente (bloquea el cierre formal de T-SIGN-09).** No se ha podido ejecutar en el entorno del agente: hace falta una sesión de navegador real con un dispositivo táctil y un parque sembrado con una avería asignada. Guion a registrar abajo al ejecutarlo:
+
+1. Sembrar `supabase_init.sql` + `supabase_seeds.sql` y arrancar `php -S 127.0.0.1:8000 -t public public/index.php`.
+2. Sede reporta la avería, coordinación la asigna al técnico y el técnico inicia la intervención.
+3. Abrir «Resolver Avería»: el bloque aparece con «Firma del responsable» activo y el cierre bloqueado hasta completar la conformidad.
+4. Firmar con el dedo: el trazo sigue aunque el dedo salga del lienzo y la página no hace scroll.
+5. Borrar el trazo: nombre y documento permanecen y el cierre vuelve a bloquearse.
+6. Provocar los tres errores (nombre de 2 caracteres, documento `12 34`, lienzo vacío) y comprobar que cada uno señala su campo.
+7. Rotar el dispositivo: el trazo se conserva —o se pide refirmar si el navegador no permite copiar el mapa de bits— y el cierre sigue disponible.
+8. Cerrar con firma válida: aparece «Ver albarán» en el aviso de cierre.
+9. Abrir el albarán: A4, etiqueta «Firma manuscrita digitalizada», nombre, documento y fecha; sin importes, notas internas ni SLA.
+10. Imprimir o guardar como PDF: solo el documento; con diagnóstico y solución largos que ocupen dos páginas, el bloque de firma no se parte.
+11. Reabrir la avería en garantía y comprobar que el albarán vigente es el del último cierre y que el selector ofrece la visita anterior como histórica con su fecha.
+12. Coordinación: «🧾 Albarán de servicio» reimprime desde el detalle; en una avería `OPEN` el botón no aparece.
+13. Declarar ausencia (motivo ≥ 10) en otra avería: el albarán imprime el motivo y no una firma.
 

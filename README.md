@@ -153,6 +153,17 @@ El desarrollo se rige incondicionalmente por la [Constitución del Proyecto](con
 
 ---
 
+### 16. Firma Digital del Responsable de Sede y Albarán de Servicio (Módulo 19)
+* **Dos Vías Excluyentes en el Cierre:** El modal de resolución exige la conformidad de la sede. O se recoge la firma manuscrita digitalizada —nombre del firmante, documento y trazo sobre lienzo— o se atestigua «No había responsable disponible en la sede» con un motivo de al menos 10 caracteres. Activar una vía vacía los datos de la otra, y un bloque incompleto bloquea el envío señalando el campo.
+* **Captura Táctil Real:** El trazo se sigue por eventos `pointer` con captura de puntero, de modo que el dedo puede salir del lienzo sin cortar la firma ni arrastrar la página (`touch-action: none`). El lienzo se pinta blanco opaco y se escala por `devicePixelRatio`, así que la firma no sale borrosa en pantallas de alta densidad. Borrar el trazo descarta el PNG y **no** toca el nombre ni el documento.
+* **Tinta Decidida en el Cliente:** Menos de 150 píxeles con luminancia inferior a 200 es un lienzo en blanco. Es la única comprobación de tinta del sistema: el servidor no decodifica píxeles. El servidor sí valida el PNG real (firma binaria, MIME con `finfo`, `IHDR`), con techo de 300 KiB y 2 Mpx.
+* **Atomicidad e Inmutabilidad:** La hoja se escribe en la misma transacción que piezas, furgoneta, solicitudes, transición a `RESOLVED` y notificación: si algo falla, nada de lo anterior queda. La tabla no admite `UPDATE` ni `DELETE`; una corrección exige una resolución nueva.
+* **Documento Congelado:** `signed_document` guarda ticket, fecha de resolución, sede, máquina, técnico, diagnóstico, acción y piezas con nombre y cantidad en el instante del cierre. Una sede renombrada o una pieza recatalogada después no alteran el papel ya firmado.
+* **Albarán A4 Imprimible:** Se compone en el navegador con `window.print()` y una hoja de estilos A4 que oculta la interfaz, admite varias páginas y nunca parte el bloque de firma. Sin costes, notas internas, SLA ni saldos. Tras una reapertura, el albarán vigente es el del último cierre; las visitas anteriores se consultan como históricas con su fecha, y una avería cerrada sin firma dice «Sin firma del responsable» sin reutilizar la firma anterior.
+* **Acceso y Trazabilidad:** El técnico lee si la avería está asignada a él o si firmó alguna de sus hojas; coordinación lee cualquiera. El resto recibe `403 SERVICE_SHEET_FORBIDDEN`. Cada lectura deja un evento `VIEW_SERVICE_SHEET` y cada cierre registra si hubo firma, quién firmó y cuándo —nunca el trazo— o el motivo de ausencia.
+
+---
+
 ## 👥 Actores del Sistema y Credenciales de Demostración
 
 La aplicación cuenta con un conmutador de perfiles en la barra superior para alternar de forma inmediata entre roles:
@@ -423,6 +434,15 @@ Todas las respuestas cumplen con la envolvente canónica JSON (`{ success: true,
 | `GET` | `/api/coordinator/technicians/quadrants` | `COORDINATOR` | Lectura inversa: zonas vivas por técnico con el rol en cada una, incluidos los técnicos activos sin zona. |
 | `POST` | `/api/coordinator/locations/{id}/override-zone` | `COORDINATOR` | Excepción manual de sede o restablecimiento de la herencia por código postal. |
 | `GET` | `/api/coordinator/incidents/{id}/suggested-technicians` | `COORDINATOR` | Ranking territorial explicado con desglose de puntuación, insignias y salvaguarda sanitaria de guardia. |
+
+---
+
+#### Firma Digital y Albarán de Servicio (Módulo 19)
+| Método | Endpoint | Rol | Descripción del Recurso |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/technician/incidents/{id}/resolve` | `TECHNICIAN` | Cierre correctivo con `service_sheet` obligatorio en la interfaz: firma (`signer_name`, `signer_document`, `signature_png_base64`) o ausencia (`absence_reason`). La hoja, sus piezas y el estado se escriben en una sola transacción. |
+| `GET` | `/api/technician/incidents/{id}/service-sheet` | `TECHNICIAN` | Albarán de la resolución vigente con documento congelado, hoja, historial y vigencia. Autoriza el técnico asignado o quien firmó alguna hoja; `?sheet_id=` sirve una hoja histórica. |
+| `GET` | `/api/coordinator/incidents/{id}/service-sheet` | `COORDINATOR` | Mismo contrato de lectura para el panel de triaje: cualquier expediente, incluida la hoja histórica de una avería reabierta. |
 
 ---
 
