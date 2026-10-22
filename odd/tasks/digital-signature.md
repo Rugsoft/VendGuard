@@ -84,3 +84,20 @@ S22 — **Fuera de alcance (Q7, §2.2).** Preventivas sin firma ni albarán; sin
 * Batería hermética: 313 suites · 12.188 aserciones, 0 fallos, cifras documentadas coherentes.
 * Arnés ajustado: `PostgresFixtureBuilder` rellena `absence_reason` (CHECK de rama) y sintetiza `signed_document` con `version`; el CRUD no toca las columnas de la rama. `TestDataCleaner` purga la tabla nueva. Contrato de esquema actualizado a 27 tablas.
 * Desvío declarado: `DocMetricsGuard` se adelantó desde T-SIGN-08 para no cerrar la unidad con la guarda roja; volverá a tocarse en cada WU que añada suites y en el cierre.
+
+**L6 (2026-10-22) — Revisión nativa de WU-1.** `assess` dictaminó `risk: high` / `review_due_reason: high_risk`. El primer candidato (rango completo: WU-0 + WU-1, 28 ficheros / 3.180 líneas) fue rechazado con `lens_context_budget_exceeded`: **no se creó autoridad**, nada que abandonar. Se redujo el alcance a WU-1 solo (21 ficheros / 1.564 líneas) y el PO dio consentimiento sobre ese candidato (`gentle-ai.review-integration.consent/v3`). Lineage `review-21972840fe64b02a`, revisión `sha256:ae97c0…`, lentes `review-risk` + `review-reliability`.
+
+Resultado: **approved**, 0 hallazgos bloqueantes, 8 informativos. Autoridad quemada con `review-acknowledged/v1` (`consumed_revision sha256:4784754a…`, `authority: burned`). Desvío declarado: WU-0 (specs y documento ODD) nunca pasa por revisión nativa porque el candidato completo excede el presupuesto; es documentación pasiva y el arnés no la cuenta como cambio de comportamiento.
+
+Hallazgos informativos y destino acordado (trabajo posterior, no reabren este candidato):
+
+| ID | Hallazgo | Destino |
+| :--- | :--- | :--- |
+| `R3-4` | El `CHECK` de rama solo prueba `NULL`: `''` en nombre/documento y un blob de 64–307 200 bytes sin ser PNG pasan. | WU-2 — endurecer el DDL con `btrim(...) <> ''` y firma PNG en el `CHECK`, mientras la migración 010 no esté desplegada. |
+| `R1-SHEET-UPDATE-NOT-ENFORCED` | Solo existe guarda `BEFORE DELETE`; el comentario promete inmutabilidad total. | WU-2 — alinear el comentario con lo que el motor impone o añadir guarda de `UPDATE`, y decidir con RD-01. |
+| `R1-SHEET-READ-SCOPE` | El contrato de lectura no lleva actor ni exige que `sheet_id` pertenezca a la avería. | WU-2 (implementación del repositorio) + WU-3 (autorización de endpoints). |
+| `R3-3` | `resolution_at` sin unicidad ni orden por el ancla: «vigente vs histórico» queda indefinido en el escenario de RD-11. | WU-2 — consulta de hoja vigente y prueba de orden por ancla. |
+| `R3-2` | Cotas máximas sin casos límite (500, 120, 20, 307 200 exactos). | WU-2 — casos de borde en la suite del validador. |
+| `R3-1` | `ServiceSheetDto::$recordedAt` no admite `null` mientras el modelo sí. | WU-2 — al cablear la respuesta del cierre. |
+| `R1-SHEET-DECODE-BEFORE-SIZE` | Se decodifica el base64 completo antes de acotar el tamaño. | WU-2 — acotar la cadena antes de `base64_decode`. |
+| `R3-5` | La aserción de historial (`>= 3`) es tautológica y no comprueba orden. | WU-2 — al añadir la lectura ordenada. |
