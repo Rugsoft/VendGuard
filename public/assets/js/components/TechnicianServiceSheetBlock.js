@@ -13,7 +13,9 @@
  * 3. El lienzo se rellena de blanco opaco y el trazo va en el tono de tinta normativo, para que el PNG
  *    exportado se lea en papel aunque el navegador no imprima fondos (RF-01.8).
  * 4. La memoria del lienzo se escala por `devicePixelRatio`: firmar en un móvil de alta
- *    densidad no puede producir una firma borrosa (RNF-04).
+ *    densidad no puede producir una firma borrosa (RNF-04). La base del cálculo es la caja de
+ *    contenido y se sincroniza antes de dibujar: si el mapa de bits y la caja no coinciden, el
+ *    navegador estira la imagen y el trazo se separa del puntero hacia la derecha.
  * 5. «Sin tinta» se decide contando píxeles con luminancia inferior a 200; menos de 150
  *    píxeles es un lienzo en blanco (RF-01.6). Es la única comprobación de tinta del sistema:
  *    el servidor no decodifica píxeles (RD-12).
@@ -167,6 +169,19 @@ export const TechnicianServiceSheetBlock = {
       return typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1;
     },
 
+    /**
+     * Tamaño CSS del área de dibujo: la caja de contenido, sin bordes. Es la base de la
+     * memoria del lienzo, porque el mapa de bits se estira justo sobre esa caja.
+     *
+     * @returns {{width: number, height: number}}
+     */
+    contentBoxSize(canvas) {
+      return {
+        width: Math.max(1, Math.round(canvas?.clientWidth || 300)),
+        height: Math.max(1, Math.round(canvas?.clientHeight || 150))
+      };
+    },
+
     /** Prepara la memoria del lienzo con la densidad real de la pantalla. */
     prepareCanvas() {
       return this.applyBackingStore(this.canvas());
@@ -177,23 +192,25 @@ export const TechnicianServiceSheetBlock = {
      *
      * Cambiar `width`/`height` borra el contenido y reinicia la transformación; por eso este
      * método pinta el papel y devuelve si pudo preparar el contexto.
+     *
+     * La memoria se calcula sobre la caja de contenido y **no** se escribe el tamaño en línea:
+     * el CSS es el dueño del tamaño visible. Si la memoria y la caja no coinciden, el navegador
+     * estira el mapa de bits y el trazo se separa del puntero a medida que avanza hacia la
+     * derecha (la firma se ve corrida).
      */
     applyBackingStore(canvas) {
       if (!canvas || typeof canvas.getContext !== 'function') {
         return false;
       }
 
-      const rect = typeof canvas.getBoundingClientRect === 'function' ? canvas.getBoundingClientRect() : null;
-      const cssWidth = Math.max(1, Math.round(rect?.width || canvas.clientWidth || 300));
-      const cssHeight = Math.max(1, Math.round(rect?.height || canvas.clientHeight || 160));
+      const { width: cssWidth, height: cssHeight } = this.contentBoxSize(canvas);
       const ratio = this.devicePixelRatio();
 
       canvas.width = Math.round(cssWidth * ratio);
       canvas.height = Math.round(cssHeight * ratio);
-      if (canvas.style) {
-        canvas.style.width = `${cssWidth}px`;
-        canvas.style.height = `${cssHeight}px`;
-      }
+
+      this.canvasWidth = cssWidth;
+      this.canvasHeight = cssHeight;
 
       this.canvasWidth = cssWidth;
       this.canvasHeight = cssHeight;
@@ -247,6 +264,11 @@ export const TechnicianServiceSheetBlock = {
           // El navegador rechaza la captura si el puntero ya terminó: el trazo sigue vivo.
         }
       }
+
+      // El lienzo puede haberse montado con la memoria por defecto (nace dentro de un `v-if`)
+      // o haber cambiado de tamaño sin emitir `resize`: se sincroniza antes de dibujar para que
+      // el trazo caiga bajo el puntero.
+      this.preserveStrokeOnResize();
 
       this.isDrawing = true;
       this.mustResign = false;
@@ -402,9 +424,10 @@ export const TechnicianServiceSheetBlock = {
         return;
       }
 
-      const rect = typeof canvas.getBoundingClientRect === 'function' ? canvas.getBoundingClientRect() : null;
-      const nextWidth = Math.round(Math.max(1, Math.round(rect?.width || canvas.clientWidth || 300)) * this.devicePixelRatio());
-      const nextHeight = Math.round(Math.max(1, Math.round(rect?.height || canvas.clientHeight || 160)) * this.devicePixelRatio());
+      const { width: cssWidth, height: cssHeight } = this.contentBoxSize(canvas);
+      const ratio = this.devicePixelRatio();
+      const nextWidth = Math.round(cssWidth * ratio);
+      const nextHeight = Math.round(cssHeight * ratio);
       if (nextWidth === canvas.width && nextHeight === canvas.height) {
         return;
       }

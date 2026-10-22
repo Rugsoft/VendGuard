@@ -82,7 +82,7 @@ const createCanvasStub = ({ cssWidth = 320, cssHeight = 160, ratio = 1 } = {}) =
     setTransform() { this.operations.push('setTransform'); },
     fillRect() { this.operations.push('fillRect'); paintPaper(); },
     beginPath() { this.operations.push('beginPath'); },
-    arc() { this.operations.push('arc'); },
+    arc(x, y) { this.operations.push('arc'); this.lastArc = { x, y }; },
     moveTo() { this.operations.push('moveTo'); },
     lineTo() { this.operations.push('lineTo'); },
     fill() { this.operations.push('fill'); },
@@ -444,6 +444,8 @@ console.log('\n--- Grupo 6: Lienzo escalado, opaco y conservador del trazo (RF-0
   instance.prepareCanvas();
   instance.hasStroke = true;
   instance.pngBase64 = 'data:image/png;base64,FAKE';
+  stub.canvas.clientWidth = 420;
+  stub.canvas.clientHeight = 160;
   stub.canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 420, height: 160 });
 
   class ImageStub {
@@ -471,6 +473,8 @@ console.log('\n--- Grupo 6: Lienzo escalado, opaco y conservador del trazo (RF-0
   instance.prepareCanvas();
   instance.hasStroke = true;
   instance.pngBase64 = 'data:image/png;base64,FAKE';
+  stub.canvas.clientWidth = 420;
+  stub.canvas.clientHeight = 160;
   stub.canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 420, height: 160 });
   stub.canvas.toDataURL = () => { throw new Error('bitmap no copiable'); };
 
@@ -494,6 +498,26 @@ console.log('\n--- Grupo 6: Lienzo escalado, opaco y conservador del trazo (RF-0
     instance.isDrawing === false && !stub.ctx.operations.includes('stroke'),
     JSON.stringify({ drawing: instance.isDrawing, ops: stub.ctx.operations }));
 }
+
+{
+  // Regresión: el lienzo nace dentro de un `v-if`, así que al montar el bloque todavía no
+  // existe y la memoria queda en el tamaño por defecto del navegador (300×150). Con el CSS
+  // estirándolo a todo el ancho, el navegador escalaba el mapa de bits y el trazo se separaba
+  // del puntero a medida que avanzaba hacia la derecha.
+  const stub = createCanvasStub({ cssWidth: 467, cssHeight: 178, ratio: 1 });
+  stub.canvas.width = 300;
+  stub.canvas.height = 150;
+  const instance = attachCanvas(createInstance(), stub.canvas);
+  instance.mode = 'signature';
+
+  instance.onPointerDown({ clientX: 400, clientY: 90, pointerId: 1, preventDefault() {} });
+
+  assert('6.7 El lienzo sincroniza su memoria antes de dibujar y el trazo cae bajo el puntero',
+    stub.canvas.width === 467 && stub.canvas.height === 178
+      && stub.ctx.lastArc && stub.ctx.lastArc.x === 400 && stub.ctx.lastArc.y === 90,
+    JSON.stringify({ bitmap: `${stub.canvas.width}x${stub.canvas.height}`, arc: stub.ctx.lastArc }));
+}
+
 
 // ─── Resumen ─────────────────────────────────────────────────────────────────
 console.log('\n' + '='.repeat(70));
