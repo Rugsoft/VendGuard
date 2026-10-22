@@ -109,20 +109,16 @@
 
 * **WU-4 (T-SIGN-06, T-SIGN-07) — `feat(digital-signature): capture the signature and print the service sheet` (`953544d`).** Bloque táctil de conformidad (`TechnicianServiceSheetBlock`), albarán A4 (`ServiceSheetModal` + `service-sheet.css`), métodos de lectura en `api.technician`/`api.coordinator`, bloque obligatorio en el modal de resolución y botón del albarán en el detalle de coordinación. Suites: `TechnicianServiceSheetBlockTest` 31/31, `ServiceSheetModalTest` 25/25, `TechnicianRouteViewTest` 141/141 (grupo 16), `CoordinatorIncidentDetailModalTest` 182/182 (grupo 21). Desvíos: todo cierre viaja ya como objeto con `service_sheet` (se actualizaron 5.13a y 10.9) y el trazo se escribe en `rgb()` para no sumar deuda al trinquete de tokens.
 * **WU-5 (T-SIGN-08, T-SIGN-09) — `docs(digital-signature): close the module and sync documented figures`.** `README.md` documenta el módulo y los dos endpoints de lectura; `DocMetricsGuard` queda COHERENTES con 317 suites / 12.323 aserciones; `features_pendientes.md` marca la feature 4 con su alcance real; la spec conserva Q4 (tinta solo en cliente) y Q5 (retención indefinida). `SchemaConvergenceParityTest` y `SqlDialectPortabilityTest` en verde con la migración 010 dentro de la batería.
+* **Cierre de T-SIGN-09 — `feat(service-sheet): fix the defects found in the manual E2E`.** Los cuatro defectos que el E2E manual destapó se corrigieron con guarda: alineación del trazo (`e8aa50a`), PDF en blanco por el modal oculto (`5d4c653`), hojas vacías de la interfaz oculta (`60348b8`) y la corrección de esa misma regla al no estar el modal teletransportado (`4d704c6`). Batería final **317 suites · 12.327 aserciones, 0 fallos · cifras documentadas coherentes**.
 
-**E2E manual pendiente (bloquea el cierre formal de T-SIGN-09).** No se ha podido ejecutar en el entorno del agente: hace falta una sesión de navegador real con un dispositivo táctil y un parque sembrado con una avería asignada. Guion a registrar abajo al ejecutarlo:
+**E2E manual ejecutado por el usuario (2026-10-22).** Sesión real de navegador con dispositivo táctil sobre la base de demostración `vendguard_demo` (avería `INC-LOCAL-SIGN-01` de `VEND-0102`, sede `SEDE-BCN-01`, técnica asignada a Jordi). Pasos cubiertos a mano:
 
-1. Sembrar `supabase_init.sql` + `supabase_seeds.sql` y arrancar `php -S 127.0.0.1:8000 -t public public/index.php`.
-2. Sede reporta la avería, coordinación la asigna al técnico y el técnico inicia la intervención.
-3. Abrir «Resolver Avería»: el bloque aparece con «Firma del responsable» activo y el cierre bloqueado hasta completar la conformidad.
-4. Firmar con el dedo: el trazo sigue aunque el dedo salga del lienzo y la página no hace scroll.
-5. Borrar el trazo: nombre y documento permanecen y el cierre vuelve a bloquearse.
-6. Provocar los tres errores (nombre de 2 caracteres, documento `12 34`, lienzo vacío) y comprobar que cada uno señala su campo.
-7. Rotar el dispositivo: el trazo se conserva —o se pide refirmar si el navegador no permite copiar el mapa de bits— y el cierre sigue disponible.
-8. Cerrar con firma válida: aparece «Ver albarán» en el aviso de cierre.
-9. Abrir el albarán: A4, etiqueta «Firma manuscrita digitalizada», nombre, documento y fecha; sin importes, notas internas ni SLA.
-10. Imprimir o guardar como PDF: solo el documento; con diagnóstico y solución largos que ocupen dos páginas, el bloque de firma no se parte.
-11. Reabrir la avería en garantía y comprobar que el albarán vigente es el del último cierre y que el selector ofrece la visita anterior como histórica con su fecha.
-12. Coordinación: «🧾 Albarán de servicio» reimprime desde el detalle; en una avería `OPEN` el botón no aparece.
-13. Declarar ausencia (motivo ≥ 10) en otra avería: el albarán imprime el motivo y no una firma.
+1. Firma táctil sobre el lienzo en el modal de resolución (paso 4 del guion).
+2. Cierre con firma válida: la hoja queda escrita con PNG de 11.331 bytes y firmante «Cesar Baba / 56362514A» (paso 8, verificado también en `incident_service_sheets`).
+3. Apertura del albarán desde coordinación (paso 9 y la mitad del 12): A4 con la etiqueta «Firma manuscrita digitalizada», nombre, documento y fecha, sin importes, notas internas ni SLA.
+4. Impresión / guardado como PDF (paso 10): una hoja, sin páginas en blanco.
+
+Los defectos que el E2E encontró se corrigieron y quedaron con guarda: el trazo se desviaba al alejarse del origen (`e8aa50a`, aserción 6.7), el PDF salía en blanco porque otras hojas de impresión ocultaban el modal que contiene el papel (`5d4c653`, aserción 5.6) y la interfaz oculta añadía cuatro hojas vacías (`60348b8` → `4d704c6`, aserción 5.8).
+
+Pasos del guion no repetidos a mano, cubiertos por suites: errores de nombre, documento y lienzo vacío (S2/S3, `TechnicianServiceSheetBlockTest`), borrado sin tocar nombre ni documento (S1, misma suite), conservación del trazo al cambiar el tamaño (S3, aserción 6.7), reapertura e histórico (S7/S14, `ServiceSheetAtomicityTest` y `ServiceSheetDocumentTest`), ausencia con motivo (S4, `PostgresServiceSheetSchemaTest` y el validador), botón de coordinación solo con `RESOLVED`/`CLOSED`/`REOPENED` (S11, `CoordinatorIncidentDetailModalTest`).
 
