@@ -11,7 +11,7 @@ use VendGuard\Infrastructure\Database\SqlScriptSplitter;
  * Las suites de la categoría `new_engine` necesitan lo mismo antes de certificar nada: una
  * conexión al motor nuevo por su contrato de entorno (`PG_TEST_DSN`, sin valor por defecto), un
  * esquema aislado con el DDL del repositorio aplicado y la capacidad de escribir **una fila
- * válida en cada una de las 20 tablas** respetando el grafo de claves foráneas.
+ * válida en cada una de las 27 tablas** respetando el grafo de claves foráneas.
  *
  * Lo último no se puede improvisar tabla por tabla: serían veinte fixtures escritos a mano que
  * se desincronizarían del DDL a la primera columna nueva, y el día que dejaran de insertar
@@ -44,6 +44,32 @@ final class PostgresFixtureBuilder
 
     /** Instante de relleno de las columnas temporales, en la forma que el motor acepta. */
     private const FILLER_TIMESTAMP = '2026-10-14 12:00:00+00';
+
+    /**
+     * Columnas opcionales que el alta mínima rellena de todos modos.
+     *
+     * Algunas tablas exigen una de dos ramas en un `CHECK`: dejar en `NULL` todas
+     * las columnas de la rama convertiría el alta mínima en un rechazo legítimo
+     * del motor, que no es lo que la certificación mide.
+     *
+     * @var array<string, list<string>>
+     */
+    private const REQUIRED_OPTIONAL_COLUMNS = [
+        'incident_service_sheets' => ['absence_reason'],
+    ];
+
+    /**
+     * Columnas que el `UPDATE` de certificación no toca.
+     *
+     * Participan en un `CHECK` de rama: cambiar una sola dejaría la fila en un
+     * estado que el motor rechaza por diseño, y el arnés estaría midiendo su
+     * propia torpeza en lugar del CRUD.
+     *
+     * @var array<string, list<string>>
+     */
+    private const CRUD_EXCLUDED_COLUMNS = [
+        'incident_service_sheets' => ['signer_name', 'signer_document', 'signature_png'],
+    ];
 
     // ─────────────────────────────────────────────────────────────────────
     // Puerta de la categoría y ciclo de vida del esquema
@@ -136,7 +162,7 @@ final class PostgresFixtureBuilder
      * Tablas base del esquema aislado, sin el libro de migraciones.
      *
      * El libro (`schema_migrations`) es una adición declarada del motor nuevo (A-5) y no forma
-     * parte del dominio: entra en el inventario de inventarios, no en el de las 20 tablas.
+     * parte del dominio: entra en el inventario de inventarios, no en el de las 27 tablas.
      *
      * @return list<string>
      */
@@ -326,9 +352,14 @@ final class PostgresFixtureBuilder
         $targetColumns = [];
         $valueExpressions = [];
         $params = [];
+        $requiredOptional = self::REQUIRED_OPTIONAL_COLUMNS[$table] ?? [];
 
         foreach ($columns as $name => $meta) {
-            if ($meta['identity'] || $meta['generated'] || $meta['default'] !== null || $meta['nullable']) {
+            if ($meta['identity'] || $meta['generated'] || $meta['default'] !== null) {
+                continue;
+            }
+
+            if ($meta['nullable'] && !in_array($name, $requiredOptional, true)) {
                 continue;
             }
 
@@ -407,6 +438,9 @@ final class PostgresFixtureBuilder
                 continue;
             }
             if (isset($foreignKeys[$name])) {
+                continue;
+            }
+            if (in_array($name, self::CRUD_EXCLUDED_COLUMNS[$table] ?? [], true)) {
                 continue;
             }
             if (!array_key_exists($name, $row)) {
@@ -547,6 +581,10 @@ final class PostgresFixtureBuilder
             in_array($udt, ['timestamptz', 'timestamp'], true) => $variant === 'update' ? '2027-01-01 08:30:00+00' : self::FILLER_TIMESTAMP,
             $udt === 'date' => $variant === 'update' ? '2027-01-01' : '2026-10-14',
             $udt === 'time' => $variant === 'update' ? '08:30:00' : '12:00:00',
+            // El documento congelado de la hoja de servicio declara su versión:
+            // el `CHECK` del Módulo 19 rechaza un objeto vacío, y un `{}`
+            // sintetizado convertiría el alta mínima en un rechazo legítimo.
+            $column === 'signed_document' && in_array($udt, ['json', 'jsonb'], true) => '{"version":1}',
             in_array($udt, ['json', 'jsonb'], true) => '{}',
             $meta['data_type'] === 'USER-DEFINED' => self::enumLabel($pdo, $udt, $variant),
             default => throw new RuntimeException(sprintf(

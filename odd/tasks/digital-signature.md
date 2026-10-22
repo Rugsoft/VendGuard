@@ -53,9 +53,9 @@ S22 — **Fuera de alcance (Q7, §2.2).** Preventivas sin firma ni albarán; sin
 
 | ID | Specs | Ruta | Commit | Estado |
 | :--- | :--- | :--- | :--- | :--- |
-| **WU-0 / T-SIGN-00** | S1–S22 (puerta SDD) | inline | `docs(digital-signature): add module 19 specification and ODD tracking` | ✅ hecho |
-| **T-SIGN-01** | S5, S6, S8 | inline | `feat(digital-signature): model the service sheet and its frozen document` | pendiente |
-| **T-SIGN-02** | S2, S3, S4, S8, S17 | inline | (mismo commit que T-SIGN-01) | pendiente |
+| **WU-0 / T-SIGN-00** | S1–S22 (puerta SDD) | inline | `docs(digital-signature): add module 19 specification and ODD tracking` | ✅ hecho (`7daed7d`) |
+| **T-SIGN-01** | S5, S6, S8 | inline | `feat(digital-signature): model the service sheet and its frozen document` | ✅ hecho |
+| **T-SIGN-02** | S2, S3, S4, S8, S17 | inline | (mismo commit que T-SIGN-01) | ✅ hecho |
 | **T-SIGN-03** | S8, S9, S11, S14 | inline | `feat(digital-signature): persist parts, stock and the sheet in one transaction` | pendiente |
 | **T-SIGN-04** | S5, S16 | inline | (mismo commit que T-SIGN-03) | pendiente |
 | **T-SIGN-05** | S7, S9, S10, S11, S13, S14, S15 | inline | `feat(digital-signature): expose current and historical service sheets` | pendiente |
@@ -76,3 +76,11 @@ S22 — **Fuera de alcance (Q7, §2.2).** Preventivas sin firma ni albarán; sin
 **L3 (2026-10-22) — Auditoría al activar el orquestador.** Hechos re-verificados: `audit_log.action` es `VARCHAR(64)` (`supabase_init.sql:895`); `VanStockService::consume` solo lanza con `quantity <= 0` (`:132`); el descuento es `INSERT … ON CONFLICT … DO UPDATE` (`PdoVanStockRepository:160-162`); el camino preventivo inserta y descuenta **por línea** sin transacción (`SparePartTraceabilityService:668-673`); `incident_replaced_parts` no guarda nombre de catálogo. Desvíos declarados: (a) no existía documento ODD — se crea aquí, antes de la primera escritura de código; (b) se hicieron ~10+ búsquedas secuenciales inline en lugar de delegar un explorador read-only (trigger de mapeo) — no se rehace, la evidencia ya está consolidada; (c) **scope añadido pendiente de confirmación del PO**: RD-18 audita **toda** lectura, no solo la reimpresión del coordinador (el default aprobado era «la reimpresión desde coordinación se audita»).
 
 **L4 (2026-10-22) — WU-0.** Specs de 18 y 19, contratos y este documento commiteados juntos. `gh` CLI disponible (el PO lo instaló) para abrir la PR al final. `odd/` no está en `.gitignore`.
+
+**L5 (2026-10-22) — WU-1 (T-SIGN-01 + T-SIGN-02).** `Risk: none` — tabla nueva (no modifica datos existentes), validación con tests y sin contrato público consumido. Evidencia observada:
+* RED del validador antes de implementar (`Class "…ServiceSheetValidator" not found`); después 80 aserciones en verde.
+* `PostgresServiceSheetSchemaTest` (new_engine) 19/19: convergencia con la migración 010, 10 columnas, rama excluyente, cotas de 64–307 200 bytes, documento con `version`, `resolution_at` obligatorio, 3 hojas para la misma avería, índice, FKs y `DELETE` rechazado con 45000.
+* `SchemaConvergenceParityTest` 18/18, `PostgresSchemaTest` 86/86 (CRUD genérico de las 27 tablas), `PostgresConstitutionalTest` 64/64.
+* Batería hermética: 313 suites · 12.188 aserciones, 0 fallos, cifras documentadas coherentes.
+* Arnés ajustado: `PostgresFixtureBuilder` rellena `absence_reason` (CHECK de rama) y sintetiza `signed_document` con `version`; el CRUD no toca las columnas de la rama. `TestDataCleaner` purga la tabla nueva. Contrato de esquema actualizado a 27 tablas.
+* Desvío declarado: `DocMetricsGuard` se adelantó desde T-SIGN-08 para no cerrar la unidad con la guarda roja; volverá a tocarse en cada WU que añada suites y en el cierre.
