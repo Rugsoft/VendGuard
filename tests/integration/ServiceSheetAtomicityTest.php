@@ -385,6 +385,8 @@ try {
 
     $engineFailure = null;
     try {
+        // 'AB' no llega al mínimo de longitud que exige el CHECK de rama del firmante: la
+        // fila la rechaza el motor, no el validador de PHP (que no participa en `insert`).
         $sheetRepo->insert(new IncidentServiceSheet(
             id: null,
             incidentId: $incidentId,
@@ -402,6 +404,9 @@ try {
         'El CHECK del motor sale como ServiceSheetPersistenceException con su causa',
         $engineFailure instanceof ServiceSheetPersistenceException
             && $engineFailure->getPrevious() instanceof \PDOException
+            // SQLSTATE 23514 = check_violation: fija que la causa es el CHECK y no otra
+            // restricción cualquiera (duplicado, FK, conexión).
+            && (string)$engineFailure->getPrevious()->getCode() === '23514'
             && $engineFailure->getHttpStatusCode() === 500
             && $engineFailure->getErrorCode() === 'SERVICE_SHEET_PERSISTENCE_FAILED',
         $engineFailure === null

@@ -318,6 +318,28 @@ $assert(
     'status=' . $explicit->getStatusCode()
 );
 
+$emptySheetId = $get(
+    '/api/technician/incidents/' . $signedIncidentId . '/service-sheet',
+    $authHeader($primaryToken),
+    ['sheet_id' => '']
+);
+$assert(
+    '2.7 Un `sheet_id` vacío responde 400 INVALID_SHEET_ID (no sirve el vigente)',
+    $emptySheetId->getStatusCode() === 400 && $codeOf($emptySheetId) === 'INVALID_SHEET_ID',
+    'status=' . $emptySheetId->getStatusCode() . ' code=' . (string)$codeOf($emptySheetId)
+);
+
+$nonNumericSheetId = $get(
+    '/api/coordinator/incidents/' . $signedIncidentId . '/service-sheet',
+    $authHeader($coordinatorToken),
+    ['sheet_id' => 'abc']
+);
+$assert(
+    '2.8 Un `sheet_id` no numérico responde 400 INVALID_SHEET_ID',
+    $nonNumericSheetId->getStatusCode() === 400 && $codeOf($nonNumericSheetId) === 'INVALID_SHEET_ID',
+    'status=' . $nonNumericSheetId->getStatusCode() . ' code=' . (string)$codeOf($nonNumericSheetId)
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. Vigencia tras reapertura y segundo cierre sin hoja (S7, S11)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -334,6 +356,14 @@ $assert(
     'status=' . $afterReopen->getStatusCode()
 );
 $assert('3.2 La hoja anterior ya no es vigente', ($afterReopenData['current'] ?? true) === false, json_encode($afterReopenData['current'] ?? null));
+
+// La reapertura desasigna el expediente (`assigned_technician_id = NULL`), así que el 200
+// de 3.1 no puede venir de la rama «asignado»: lo decide la firma (RD-17, contratos §6.4).
+$assert(
+    '3.1b Tras la reapertura no hay técnico asignado',
+    $incidentRepo->findById($signedIncidentId)?->getAssignedTechnicianId() === null,
+    'assigned=' . var_export($incidentRepo->findById($signedIncidentId)?->getAssignedTechnicianId(), true)
+);
 
 $reopenedForeign = $get('/api/technician/incidents/' . $signedIncidentId . '/service-sheet', $authHeader($foreignToken));
 $assert('3.3 Un técnico ajeno sigue recibiendo 403 tras la reapertura', $reopenedForeign->getStatusCode() === 403, 'status=' . $reopenedForeign->getStatusCode());
@@ -398,6 +428,33 @@ $assert(
         && ($eventState['sheet_id'] ?? null) === $signedSheetId
         && ($eventState['current'] ?? null) === true,
     json_encode($event)
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3 bis. Reapertura sin hoja previa (la rama `REOPENED` del 422)
+// ─────────────────────────────────────────────────────────────────────────────
+
+echo "\n--- 3 bis. Reapertura de un cierre sin hoja (S7, §4.4) ---\n";
+
+$unsignedIncidentId = $createAssignedTicket($secondTechId);
+$incidentRepo->startIntervention($unsignedIncidentId, $secondTechId);
+$incidentRepo->resolve($unsignedIncidentId, $secondTechId, $diagnosis, $action);
+$incidentRepo->reopen($unsignedIncidentId, 'Reincidencia sin firma previa: la sede vuelve a abrir el aviso.');
+
+// La coordinación es la única que alcanza un expediente reabierto que nunca se firmó:
+// la reapertura lo desasigna y no hay hoja que acredite al técnico (RD-17).
+$unsignedRead = $get(
+    '/api/coordinator/incidents/' . $unsignedIncidentId . '/service-sheet',
+    $authHeader($coordinatorToken)
+);
+$unsignedData = $dataOf($unsignedRead);
+$assert(
+    '3.10 Una avería reabierta que nunca tuvo hoja sirve su proyección viva (no 422)',
+    $unsignedRead->getStatusCode() === 200
+        && array_key_exists('sheet', $unsignedData) && $unsignedData['sheet'] === null
+        && ($unsignedData['current'] ?? true) === false
+        && is_array($unsignedData['document'] ?? null),
+    'status=' . $unsignedRead->getStatusCode() . ' sheet=' . json_encode($unsignedData['sheet'] ?? 'ausente')
 );
 
 echo "\n" . str_repeat('=', 90) . "\n";

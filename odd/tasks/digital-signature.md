@@ -158,3 +158,26 @@ Desvíos declarados de esta unidad:
 * (c) `TestDataCleanerIsolationTest` 2.7 se actualizó de 19 a 20 tablas: es una guarda de contrato, y la tabla nueva es transitoria por `ON DELETE RESTRICT`.
 * (d) **Hueco del contrato cerrado aquí, no en WU-2.** `ServiceSheetPersistenceException` extiende `RuntimeException` y la cadena de `catch` de `TechnicianController::resolveIncident` no la capturaba: el `500 SERVICE_SHEET_PERSISTENCE_FAILED` de §5 era inalcanzable por HTTP y la excepción escapaba al manejador fatal de PHP. Se añadió el `catch` que la mapea con su `getErrorCode()`/`getHttpStatusCode()` (3 líneas, junto al resto de excepciones de la transacción). Queda fuera de la suite HTTP por coste: verificarla exigiría doblar el servicio de trazabilidad entero en un controlador que el proyecto nunca construye con dobles; la evidencia es el test de servicio (la excepción sale con su código) más la inspección de la cadena.
 
+**L10 (2026-10-22) — Revisión nativa de WU-3 (`review-cd71c8dd064cf3a7`).** Lentes `risk` + `readability` + `reliability`, 21 rutas, 1.054 líneas. Veredicto: **approved**, 0 bloqueantes, 12 hallazgos informativos, autoridad quemada con `review-acknowledge-approved` (`action: acknowledged`, `authority: burned`). No hubo corrección acotada ni validador dirigido.
+
+Hallazgo **refutado con evidencia** (no se acepta sin verificar):
+
+* `R3-SIGNER-AUTH-BRANCH-UNPROVED` (WARNING) afirmaba que ningún caso dejaba que la rama del firmante decidiera. Falso: `PdoIncidentRepository::reopen()` pone `assigned_technician_id = NULL`, así que el 200 de 3.1 solo podía venir de `EXISTS (… sh.technician_id = :tech)`. La suite no lo demostraba, así que se añadió **3.1b** (asignado nulo tras reabrir) para que el caso no vuelva a depender de una lectura del código.
+
+Hallazgos **corregidos** en el commit de seguimiento de esta revisión:
+
+* `R3-SHEET-ID-EMPTY-AND-BRANCH-UNTESTED` (WARNING): `?sheet_id=` vacío se ignoraba y servía el albarán vigente con 200, contradiciendo el `400 INVALID_SHEET_ID` que yo mismo había escrito en §4.4. Ahora está vacío ⇒ 400 en ambos controladores, con asertos 2.7 (vacío, técnico) y 2.8 (no numérico, coordinación).
+* `R1-SHEET-EXISTENCE` (WARNING): el docblock decía «la ruta no revela si existe» y era falso — el expediente se resuelve antes (404 `INCIDENT_NOT_FOUND`, como el resto de la API). No se cambia comportamiento (lo exige §4.4); se corrige la afirmación y se documenta que la única enumeración expuesta es la existencia.
+* `R3-ATOMICITY-FAILURE-CAUSE-NOT-PINNED` (SUGGESTION): la aserción de `R3-PERSISTENCE-EXC` aceptaba cualquier `PDOException`. Ahora fija `SQLSTATE 23514` (`check_violation`), y el `'AB'` lleva comentario de por qué lo rechaza el CHECK de rama.
+* `R3-REOPENED-WITHOUT-SHEET-UNPROVED` (SUGGESTION): añadido el caso **3.10** — cierre sin hoja + reapertura ⇒ 200 con proyección viva (`sheet: null`, `current: false`), no 422.
+
+Deuda aceptada, para WU-5 (todas informativas, ninguna reabre el candidato):
+
+* `R1-DENIED-NOT-AUDITED`: auditar el 403 no está en el contrato y la suite lo fija como decisión. Si se quiere rastro de sondeos, es alcance nuevo.
+* `R2-DUP-SHEET-RESPONSE`: la duplicación deliberada de `serviceSheetResponse()` en dos controladores (documentada en L9).
+* `R2-STATUS-LITERALS`: la regla de vigencia aparece en tres sitios con dos membresías (`READ_SQL` excluye `REOPENED` del anclaje; los controladores lo incluyen en la lista del 422). Un estado nuevo en el enum obliga a tocar tres copias.
+* `R2-ID-RESOLUTION-DIVERGENCE` y `R2-TEST-HARNESS-DUP`: divergencia de resolución de identificador y arnés repetido en tres suites.
+* `R3-PERSISTENCE-HTTP-MAPPING-UNPROVED`: el `catch` de 3 líneas sigue sin aserto HTTP (declarado en L9 (d)).
+
+Evidencia: `ServiceSheetDocumentTest` **31/31** (27 + 2.7, 2.8, 3.1b, 3.10), `ServiceSheetAtomicityTest` **40/40**, `ServiceSheetPrivacyTest` **7/7**, `TestDataCleanerIsolationTest` **50/50**; batería **315 suites · 12.253 aserciones, 0 fallos**.
+

@@ -1680,7 +1680,10 @@ class TechnicianController
      * El técnico lee el expediente que tiene asignado **y** los que firmó: la firma
      * manuscrita es su prueba de haber intervenido, y la reapertura en garantía devuelve
      * el ticket a triaje sin borrar esa constancia (RD-17). Cualquier otra avería recibe
-     * `403 SERVICE_SHEET_FORBIDDEN`; la ruta no revela si existe.
+     * `403 SERVICE_SHEET_FORBIDDEN`: el 403 no distingue si la avería es de otro técnico
+     * o si nunca se firmó. La existencia sí se resuelve antes, como en el resto de rutas
+     * del expediente (404 `INCIDENT_NOT_FOUND`), y esa es la única enumeración que la
+     * ruta expone.
      *
      * Cada lectura deja `VIEW_SERVICE_SHEET` en la auditoría inmutable con el actor, la
      * hoja leída y su vigencia (RF-05.6): imprimir un documento con datos personales de
@@ -1726,9 +1729,12 @@ class TechnicianController
      */
     private function serviceSheetResponse(Request $request, int $incidentId, array $actor): Response
     {
+        // Un `sheet_id` presente tiene que ser un entero positivo: `?sheet_id=` vacío no se
+        // ignora en silencio, porque serviría el albarán vigente fingiendo haber servido el
+        // pedido (contratos §4.4).
         $rawSheetId = $request->getQuery('sheet_id');
         $sheetId = null;
-        if ($rawSheetId !== null && $rawSheetId !== '') {
+        if ($rawSheetId !== null) {
             if (!ctype_digit((string)$rawSheetId) || (int)$rawSheetId < 1) {
                 return Response::error('INVALID_SHEET_ID', 'El parámetro sheet_id debe ser un entero positivo.', 400);
             }

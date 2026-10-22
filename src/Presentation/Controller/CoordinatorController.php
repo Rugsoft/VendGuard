@@ -1257,7 +1257,7 @@ class CoordinatorController
     {
         $rawSheetId = $request->getQuery('sheet_id');
         $sheetId = null;
-        if ($rawSheetId !== null && $rawSheetId !== '') {
+        if ($rawSheetId !== null) {
             if (!ctype_digit((string)$rawSheetId) || (int)$rawSheetId < 1) {
                 return Response::error('INVALID_SHEET_ID', 'El parámetro sheet_id debe ser un entero positivo.', 400);
             }
