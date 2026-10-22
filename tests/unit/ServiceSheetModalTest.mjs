@@ -386,6 +386,12 @@ assert('5.7 La hoja del albarán gana el empate de `!important` frente a las otr
     && INDEX_SOURCE.indexOf('service-sheet.css') > INDEX_SOURCE.indexOf('qr-print.css'),
   'service-sheet.css debe cargarse después de qr-print.css y metrics-print.css');
 
+// Regresión de las páginas en blanco: la interfaz oculta con `visibility` sigue
+// ocupando altura y el navegador añade una hoja por cada pantalla de aplicación.
+assert('5.8 Al imprimir se saca del flujo la aplicación que queda detrás del modal',
+  /body:has\(\.vg-service-sheet__paper\)\s*>\s*\*:not\(\.vg-modal-backdrop\)\s*\{[^}]*display:\s*none\s*!important/i.test(CSS_SOURCE),
+  'la altura de la aplicación oculta añadiría páginas vacías al PDF');
+
 // ─── Resumen ────────────────────────────────────────────────────────────────
 console.log('\n' + '='.repeat(70));
 console.log(` Total Aserciones: ${assertions}`);
