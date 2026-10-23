@@ -141,7 +141,7 @@ export const CoordinatorAbsencesTab = {
         return;
       }
 
-      const payload = {
+      const requestPayload = {
         technician_id: Number(this.createForm.technician_id),
         reason: this.createForm.reason,
         starts_at: this.createForm.is_partial_day && this.createForm.start_time
@@ -158,17 +158,17 @@ export const CoordinatorAbsencesTab = {
       try {
         const res = await api.post(
           `/coordinator/technicians/${this.createForm.technician_id}/absences`,
-          payload
+          requestPayload
         );
 
         this.showCreateModal = false;
         await this.loadAbsences();
 
-        const payload = res?.data || res || {};
-        const affected = payload?.affected_incidents || [];
+        const responseData = res?.data || res || {};
+        const affected = responseData?.affected_incidents || [];
         if (affected.length > 0) {
           this.affectedIncidents = affected;
-          this.createdAbsenceInfo = payload?.absence || null;
+          this.createdAbsenceInfo = responseData?.absence || null;
           this.showAssistedModal = true;
         } else {
           this.successMessage = 'Ausencia registrada correctamente sin averías afectadas.';

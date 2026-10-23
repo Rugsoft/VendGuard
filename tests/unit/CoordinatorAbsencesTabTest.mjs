@@ -21,6 +21,7 @@ globalThis.localStorage = {
 };
 globalThis.sessionStorage = { ...globalThis.localStorage };
 
+import { api } from '../../public/assets/js/api.js';
 import { CoordinatorAbsencesTab } from '../../public/assets/js/components/CoordinatorAbsencesTab.js';
 import { CoordinatorDashboardView } from '../../public/assets/js/views/CoordinatorDashboardView.js';
 
@@ -87,6 +88,40 @@ assert(
   'formatDate() formatea franja horaria incluyendo hora para permisos parciales',
   vm.formatDate('2026-11-20T09:30:00+00:00').includes(':')
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. Invocación de submitCreateAbsence con franja horaria (sin TDZ ni ReferenceError)
+// ─────────────────────────────────────────────────────────────────────────────
+let postCalledWith = null;
+const originalPost = api.post;
+const originalGet = api.get;
+
+api.post = async (url, data) => {
+  postCalledWith = { url, data };
+  return { data: { absence: { id: 99 }, affected_incidents: [] } };
+};
+api.get = async () => [];
+
+vm.createForm = {
+  technician_id: '5',
+  reason: 'OTHER',
+  starts_at: '2026-10-26',
+  ends_at: '2026-10-26',
+  notes: 'Permiso médico de prueba',
+  is_partial_day: true,
+  start_time: '09:00',
+  end_time: '14:00'
+};
+
+await vm.submitCreateAbsence();
+
+assert('submitCreateAbsence() no lanza TDZ ReferenceError en payload', vm.createError === '');
+assert('submitCreateAbsence() envía starts_at con hora combinada', postCalledWith && postCalledWith.data.starts_at === '2026-10-26 09:00:00');
+assert('submitCreateAbsence() envía ends_at con hora combinada', postCalledWith && postCalledWith.data.ends_at === '2026-10-26 14:00:00');
+assert('submitCreateAbsence() asigna successMessage', vm.successMessage.length > 0);
+
+api.post = originalPost;
+api.get = originalGet;
 
 console.log('\n======================================================================');
 console.log(` Total Aserciones: ${assertions} | Exitosas: ${assertions - failures} | Fallidas: ${failures}`);
