@@ -123,6 +123,37 @@ assert('submitCreateAbsence() asigna successMessage', vm.successMessage.length >
 api.post = originalPost;
 api.get = originalGet;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. Invocación de submitCancelAbsence con motivo obligatorio (>= 5 caracteres)
+// ─────────────────────────────────────────────────────────────────────────────
+let deleteCalledWith = null;
+const originalDelete = api.delete;
+
+api.delete = async (url, data) => {
+  deleteCalledWith = { url, data };
+  return { data: { cancelled: true } };
+};
+
+// Intento con motivo corto (< 5 chars)
+vm.cancelForm = {
+  absence_id: 42,
+  cancellation_reason: 'abc'
+};
+await vm.submitCancelAbsence();
+assert('submitCancelAbsence() rechaza motivos de menos de 5 caracteres', vm.cancelError.includes('al menos 5'));
+assert('submitCancelAbsence() no llama a la API si la validación falla', deleteCalledWith === null);
+
+// Intento con motivo válido (>= 5 chars)
+vm.cancelForm = {
+  absence_id: 42,
+  cancellation_reason: 'Permiso médico disfrutado correctamente'
+};
+await vm.submitCancelAbsence();
+assert('submitCancelAbsence() acepta motivo válido y limpia cancelError', vm.cancelError === '');
+assert('submitCancelAbsence() envía cancellation_reason en payload a la API', deleteCalledWith && (deleteCalledWith.data?.cancellation_reason === 'Permiso médico disfrutado correctamente' || deleteCalledWith.data?.body?.cancellation_reason === 'Permiso médico disfrutado correctamente'));
+
+api.delete = originalDelete;
+
 console.log('\n======================================================================');
 console.log(` Total Aserciones: ${assertions} | Exitosas: ${assertions - failures} | Fallidas: ${failures}`);
 console.log('======================================================================');

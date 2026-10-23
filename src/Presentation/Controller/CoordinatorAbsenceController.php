@@ -107,7 +107,7 @@ final class CoordinatorAbsenceController
         $absenceId = (int)$rawId;
 
         $body = $request->getParsedBody();
-        $reason = trim((string)($body['cancellation_reason'] ?? ''));
+        $reason = trim((string)($body['cancellation_reason'] ?? $request->getQuery('cancellation_reason', '')));
 
         if (mb_strlen($reason) < 5) {
             return Response::error(

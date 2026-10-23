@@ -644,8 +644,12 @@ export class ApiClient {
     return this.request(endpoint, { ...options, method: 'PATCH', body });
   }
 
-  delete(endpoint, options = {}) {
-    return this.request(endpoint, { ...options, method: 'DELETE' });
+  delete(endpoint, bodyOrOptions = {}, options = {}) {
+    if (bodyOrOptions && (bodyOrOptions.body !== undefined || bodyOrOptions.headers !== undefined || bodyOrOptions.params !== undefined || bodyOrOptions.signal !== undefined)) {
+      return this.request(endpoint, { ...bodyOrOptions, method: 'DELETE' });
+    }
+    const body = Object.keys(bodyOrOptions).length > 0 ? bodyOrOptions : undefined;
+    return this.request(endpoint, { ...options, method: 'DELETE', body });
   }
 
   /**
