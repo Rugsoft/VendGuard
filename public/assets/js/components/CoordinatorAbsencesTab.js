@@ -92,7 +92,7 @@ export const CoordinatorAbsencesTab = {
           params.status = this.filterStatus;
         }
 
-        const res = await api.get('/api/coordinator/technicians/absences', { params });
+        const res = await api.get('/coordinator/technicians/absences', { params });
         this.absences = Array.isArray(res?.data) ? res.data : [];
       } catch (err) {
         this.errorMessage = err?.message || 'Error al cargar el listado de ausencias.';
@@ -103,7 +103,7 @@ export const CoordinatorAbsencesTab = {
 
     async loadTechnicians() {
       try {
-        const res = await api.get('/api/coordinator/users', { params: { role: 'TECHNICIAN' } });
+        const res = await api.get('/coordinator/users', { params: { role: 'TECHNICIAN' } });
         this.technicians = Array.isArray(res?.data) ? res.data.filter(u => u.is_active !== false) : [];
       } catch (err) {
         console.error('Error al cargar técnicos para ausencias:', err);
@@ -135,7 +135,7 @@ export const CoordinatorAbsencesTab = {
       this.createError = '';
       try {
         const res = await api.post(
-          `/api/coordinator/technicians/${this.createForm.technician_id}/absences`,
+          `/coordinator/technicians/${this.createForm.technician_id}/absences`,
           this.createForm
         );
 
@@ -180,7 +180,7 @@ export const CoordinatorAbsencesTab = {
       this.isCancelling = true;
       this.cancelError = '';
       try {
-        await api.delete(`/api/coordinator/absences/${this.cancelForm.absence_id}`, {
+        await api.delete(`/coordinator/absences/${this.cancelForm.absence_id}`, {
           cancellation_reason: this.cancelForm.cancellation_reason
         });
 

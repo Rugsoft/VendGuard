@@ -392,7 +392,7 @@ export const TechnicianRouteView = {
   methods: {
     async loadShiftStatus() {
       try {
-        const res = await api.get('/api/technician/shift/status');
+        const res = await api.get('/technician/shift/status');
         if (res && res.data) {
           this.shiftStatus = res.data.status || 'OFF_SHIFT';
         }
@@ -405,7 +405,7 @@ export const TechnicianRouteView = {
       this.isShiftLoading = true;
       this.shiftError = '';
       try {
-        const res = await api.post('/api/technician/shift/start');
+        const res = await api.post('/technician/shift/start');
         if (res && res.data) {
           this.shiftStatus = res.data.status || 'ON_SHIFT';
         }
@@ -420,7 +420,7 @@ export const TechnicianRouteView = {
       this.isShiftLoading = true;
       this.shiftError = '';
       try {
-        const res = await api.post('/api/technician/shift/pause-meal');
+        const res = await api.post('/technician/shift/pause-meal');
         if (res && res.data) {
           this.shiftStatus = res.data.status || 'MEAL_BREAK';
         }
@@ -435,7 +435,7 @@ export const TechnicianRouteView = {
       this.isShiftLoading = true;
       this.shiftError = '';
       try {
-        const res = await api.post('/api/technician/shift/resume');
+        const res = await api.post('/technician/shift/resume');
         if (res && res.data) {
           this.shiftStatus = res.data.status || 'ON_SHIFT';
         }
@@ -454,7 +454,7 @@ export const TechnicianRouteView = {
       this.targetHandoverTechId = '';
       this.selectedHandoverTicketIds = this.eligibleHandoverIncidents.map(i => i.id);
       try {
-        const res = await api.get('/api/coordinator/technicians/quadrants');
+        const res = await api.get('/coordinator/technicians/quadrants');
         if (res && res.data) {
           const myId = this.currentUser?.id;
           this.availableReceptors = res.data.filter(t => t.id !== myId && t.is_active !== false);
@@ -493,7 +493,7 @@ export const TechnicianRouteView = {
           handover_notes: this.handoverNotes,
           close_reason: this.closeReason || 'Fin de jornada con relevo',
         };
-        await api.post('/api/technician/shift/close-handover', payload);
+        await api.post('/technician/shift/close-handover', payload);
         this.showShiftHandoverModal = false;
         this.shiftStatus = 'OFF_SHIFT';
         await this.loadRoute();

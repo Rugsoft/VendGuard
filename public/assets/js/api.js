@@ -318,7 +318,10 @@ export class ApiClient {
    */
   async request(endpoint, options = {}) {
     const isAbsolute = /^https?:\/\//i.test(endpoint);
-    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    let cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    if (!isAbsolute && cleanEndpoint.startsWith('/api/')) {
+      cleanEndpoint = cleanEndpoint.substring(4);
+    }
     const url = isAbsolute ? endpoint : `${this.baseUrl}${cleanEndpoint}`;
 
     const headers = { ...(options.headers || {}) };
