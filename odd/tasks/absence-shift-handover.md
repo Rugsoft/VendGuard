@@ -47,7 +47,7 @@ S14 — **Auditoría inmutable y métricas (RF-01, RF-07, Art. III.3).** Catálo
 | **WU-5 / T-ASH-08** | S6, S7, S8, S9 | inline | `feat(api): implement REST endpoints and controllers for absences and shifts` (`b5ec70e`) | ✅ hecho |
 | **WU-6 / T-ASH-09** | S13 | inline | `feat(frontend): add mobile shift controls and coordinator absences tab` (`9197950`) | ✅ hecho |
 | **WU-6 / T-ASH-10** | S13 | inline | `feat(frontend): add mobile shift controls and coordinator absences tab` (`9197950`) | ✅ hecho |
-| **WU-7 / T-ASH-11** | S14 | inline | `feat(audit): catalog audit actions and synchronize battery metrics` | ✅ hecho |
+| **WU-7 / T-ASH-11** | S14 | inline | `feat(audit): catalog audit actions and synchronize battery metrics` (`298b2b8`) | ✅ hecho |
 
 ## Log
 
