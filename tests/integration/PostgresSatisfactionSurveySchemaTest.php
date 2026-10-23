@@ -376,7 +376,7 @@ if ($crash !== null) {
 }
 
 echo "\n======================================================================\n";
-echo sprintf(" RESULTADO: %d aserciones · %d fallos\n", $assertions, $failures);
+echo " Total Aserciones: {$assertions} | Exitosas: " . ($assertions - $failures) . " | Fallidas: {$failures}\n";
 echo "======================================================================\n";
 
 exit($failures === 0 ? 0 : 1);
