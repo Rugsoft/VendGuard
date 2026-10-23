@@ -26,6 +26,9 @@ declare(strict_types=1);
  *      `SiteAuthMiddleware`; ninguna otra superficie las sirve.
  *   5. **La respuesta es inmutable.** Ni el puerto declara `update`/`delete` ni
  *      el repositorio escribe `UPDATE` o `DELETE` sobre la tabla.
+ *   6. **La superficie CSAT del técnico no se filtra (incremento 20.1, R6
+ *      revisada).** La identidad sale del token, `location_id` se descarta de la
+ *      query y la proyección es la acotada: ni sedes ni técnicos.
  *
  * Esta suite es hermética: no toca el motor ni la base de datos.
  *
@@ -261,6 +264,55 @@ $assert(
 $assert(
     'Los errores de la valoración no arrastran datos de técnico',
     (static fn(): bool => SatisfactionSurveyValidationException::alreadySubmitted()->getFieldErrors() === [])()
+);
+
+// -------------------------------------------------------------
+// 6. Superficie CSAT del técnico (incremento 20.1)
+// -------------------------------------------------------------
+echo "\n--- 6. Superficie CSAT del técnico ---\n";
+
+$techControllerCode = $codeOnly($read('src/Presentation/Controller/TechnicianMetricsController.php'));
+$csatStart = strpos($techControllerCode, 'function getMyCsat');
+$csatBody = $csatStart === false ? '' : substr($techControllerCode, $csatStart);
+
+$assert('El controlador del técnico tiene una superficie CSAT propia (R6 revisada)', $csatBody !== '');
+
+$assert(
+    'La identidad del técnico sale del token y no de la query',
+    str_contains($csatBody, '$queryParams[\'technician_id\'] = (int)$userId;')
+);
+
+$assert(
+    'location_id se descarta para no aislar una única valoración (§4.1)',
+    str_contains($csatBody, 'unset($queryParams[\'location_id\'])')
+);
+
+$assert(
+    'La superficie pasa por la proyección acotada, no por el agregado crudo',
+    str_contains($csatBody, 'TechnicianCsatDto::fromReport')
+);
+
+$assert(
+    'La superficie no sirve el desglose por sede ni por técnico',
+    !str_contains($csatBody, 'by_site') && !str_contains($csatBody, 'by_technician')
+);
+
+$routerCode = $codeOnly($read('src/Presentation/Routing/AppRouter.php'));
+$csatRouteLine = '';
+
+foreach (explode("\n", $routerCode) as $line) {
+    if (str_contains($line, '/api/technician/my-metrics/csat')) {
+        $csatRouteLine = $line;
+        break;
+    }
+}
+
+$assert('La ruta CSAT del técnico existe en el enrutador', $csatRouteLine !== '');
+
+$assert(
+    'La ruta CSAT del técnico va tras la autenticación de técnico',
+    str_contains($csatRouteLine, '$technicianAuth'),
+    trim($csatRouteLine)
 );
 
 echo "\n======================================================================\n";
