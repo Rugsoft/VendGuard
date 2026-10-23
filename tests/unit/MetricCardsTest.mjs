@@ -30,7 +30,7 @@ globalThis.window = {
   open: () => {}
 };
 
-import { api } from '../../public/assets/js/api.js';
+import { api, ApiClient } from '../../public/assets/js/api.js';
 import { CoordinatorDashboardView } from '../../public/assets/js/views/CoordinatorDashboardView.js';
 import { TechnicianRouteView } from '../../public/assets/js/views/TechnicianRouteView.js';
 import { CoordinatorMetricsView } from '../../public/assets/js/views/CoordinatorMetricsView.js';
@@ -109,11 +109,18 @@ api.metrics.getBreakdown = async (params) => {
     }
   };
 };
+api.metrics.getCsat = async () => ({
+  summary: { average: null, responses: 0, distribution: {} },
+  by_site: [],
+  by_technician: [],
+  monthly_trend: []
+});
 
 const coordViewInstance = {
   ...CoordinatorMetricsView.data(),
   currentUser: { name: 'Sara', role: 'COORDINATOR' },
   loadMetrics: CoordinatorMetricsView.methods.loadMetrics,
+  loadCsat: CoordinatorMetricsView.methods.loadCsat,
   handlePeriodChange: CoordinatorMetricsView.methods.handlePeriodChange,
   applyCustomRange: CoordinatorMetricsView.methods.applyCustomRange,
   exportMetricsCsv: CoordinatorMetricsView.methods.exportMetricsCsv
@@ -158,9 +165,137 @@ assert('4.2 MTTR personal asignado a la vista del técnico', techViewInstance.me
 assert('4.3 Incidencias en curso calculadas (1)', techViewInstance.metricsData.metrics?.current_in_progress_tickets === 1);
 assert('4.4 Tiempo medio de primera respuesta asignado (0h 35m)', techViewInstance.metricsData.metrics?.avg_first_response_formatted === '0h 35m');
 
+// -------------------------------------------------------------
+// 5. Bloque CSAT del Cuadro de Mandos (Módulo 20, RF-06)
+// -------------------------------------------------------------
+console.log('\n--- 5. Bloque CSAT del Cuadro de Mandos (Módulo 20, RF-06) ---');
+
+const csatPayload = {
+  summary: {
+    average: 4.17,
+    responses: 6,
+    distribution: { '1': 0, '2': 0, '3': 1, '4': 3, '5': 2 }
+  },
+  by_site: [
+    { location_id: 1, site_code: 'SEDE-BCN-01', location_name: 'Hospital del Mar', average: 4.5, responses: 4 },
+    { location_id: 2, site_code: 'SEDE-BCN-02', location_name: 'CAP Gràcia', average: 3.5, responses: 2 }
+  ],
+  by_technician: [
+    { technician_id: 2, technician_name: 'Jordi', average: 4.2, responses: 5 },
+    { technician_id: null, technician_name: 'Sin técnico', average: 4, responses: 1 }
+  ],
+  monthly_trend: [
+    { month: '2026-09', average: 4, responses: 2 },
+    { month: '2026-10', average: 4.25, responses: 4 }
+  ]
+};
+
+/** Instancia con los métodos y las computadas del bloque CSAT enlazados. */
+function createCsatView(overrides = {}) {
+  const view = { ...CoordinatorMetricsView.data(), ...overrides };
+
+  for (const name of ['loadMetrics', 'loadCsat', 'handlePeriodChange', 'applyCustomRange', 'exportMetricsCsv', 'csatBarWidth', 'formatCsatAverage']) {
+    view[name] = CoordinatorMetricsView.methods[name].bind(view);
+  }
+  for (const [name, fn] of Object.entries(CoordinatorMetricsView.computed)) {
+    Object.defineProperty(view, name, { get: () => fn.call(view), configurable: true });
+  }
+
+  return view;
+}
+
+// 5.1: el cliente apunta al endpoint real con el filtro vigente
+const csatClient = new ApiClient('/api');
+let csatUrl = null;
+csatClient.get = async (endpoint) => { csatUrl = endpoint; return csatPayload; };
+await csatClient.metrics.getCsat({ period: 'current_month' });
+assert('5.1 api.metrics.getCsat consulta /coordinator/metrics/csat con el periodo',
+  csatUrl === '/coordinator/metrics/csat?period=current_month');
+
+// 5.2: la carga del cuadro de mandos pide el bloque con el mismo filtro (RF-06.2)
+let csatParams = null;
+api.metrics.getSummary = async () => ({ success: true, data: { kpis: { mttr_global_formatted: '2h 10m' } } });
+api.metrics.getBreakdown = async () => ({ success: true, data: { by_location: [] } });
+api.metrics.getCsat = async (params) => {
+  csatParams = params;
+  return csatPayload;
+};
+
+let csatView = createCsatView();
+await csatView.loadMetrics();
+assert('5.2 loadMetrics solicita el bloque CSAT con el periodo vigente',
+  csatParams?.period === 'last_30_days' && csatView.csat?.summary?.responses === 6);
+assert('5.3 El bloque CSAT no altera el resumen de KPIs ya cargado',
+  csatView.summary?.kpis?.mttr_global_formatted === '2h 10m');
+assert('5.4 El bloque deja de estar en carga', csatView.csatLoading === false && csatView.csatError === '');
+
+// 5.5-5.8: resumen, media y distribución
+csatView = createCsatView({ csat: csatPayload });
+assert('5.5 El resumen expone media y respuestas',
+  csatView.csatAverageLabel === '4.17' && csatView.csatResponses === 6 && csatView.csatHasResponses === true);
+assert('5.6 Sin respuestas la media no pinta un cero',
+  CoordinatorMetricsView.computed.csatAverageLabel.call({ csatSummary: { average: null, responses: 0 } }) === '—');
+assert('5.7 La distribución recorre 5..1 con ceros rellenados',
+  csatView.csatDistribution.map((row) => row.stars).join(',') === '5,4,3,2,1'
+    && csatView.csatDistribution.map((row) => row.responses).join(',') === '2,3,1,0,0');
+assert('5.8 Las barras se miden sobre el total de respuestas',
+  csatView.csatBarWidth(2) === '33%' && csatView.csatBarWidth(3) === '50%'
+    && CoordinatorMetricsView.methods.csatBarWidth.call({ csatResponses: 0 }, 0) === '0%');
+assert('5.9 Las medias de grupo se formatean con dos decimales',
+  csatView.formatCsatAverage(4) === '4.00' && csatView.formatCsatAverage(4.25) === '4.25'
+    && csatView.formatCsatAverage(undefined) === '—');
+
+// 5.10-5.12: grupos y estado vacío
+assert('5.10 Los grupos llegan tal cual de la API',
+  csatView.csatBySite.length === 2 && csatView.csatByTechnician[1].technician_name === 'Sin técnico'
+    && csatView.csatMonthlyTrend[1].month === '2026-10');
+csatView = createCsatView({ csat: {} });
+assert('5.11 Sin bloque cargado los grupos son listas vacías',
+  csatView.csatBySite.length === 0 && csatView.csatByTechnician.length === 0 && csatView.csatMonthlyTrend.length === 0);
+assert('5.12 Sin respuestas se declara el periodo vacío',
+  CoordinatorMetricsView.computed.csatHasResponses.call({ csatSummary: { responses: 0 } }) === false);
+
+// 5.13-5.14: el periodo personalizado viaja al bloque
+csatParams = null;
+csatView = createCsatView({ selectedPeriod: 'custom', customFrom: '2026-09-01', customTo: '2026-09-30' });
+await csatView.loadMetrics();
+assert('5.13 El rango personalizado se envía también al bloque CSAT',
+  csatParams?.period === 'custom' && csatParams?.from === '2026-09-01' && csatParams?.to === '2026-09-30');
+
+let csatCalls = 0;
+api.metrics.getCsat = async () => { csatCalls++; return csatPayload; };
+csatView = createCsatView({ selectedPeriod: 'custom', customFrom: '2026-09-01', customTo: '' });
+await csatView.loadMetrics();
+assert('5.14 Un rango incompleto no dispara la petición del bloque', csatCalls === 0);
+
+// 5.15-5.16: un fallo del bloque no tumba el cuadro de mandos
+api.metrics.getCsat = async () => { throw new Error('CSAT no disponible'); };
+csatView = createCsatView();
+await csatView.loadMetrics();
+assert('5.15 El fallo del bloque se declara en su propio estado',
+  csatView.csatError === 'CSAT no disponible' && csatView.csatLoading === false);
+assert('5.16 El fallo del bloque no borra las métricas de SLA',
+  csatView.summary?.kpis?.mttr_global_formatted === '2h 10m' && csatView.errorMessage === '');
+
+// 5.17-5.19: contrato de la pestaña
+assert('5.17 La vista añade la subpestaña CSAT y su bloque',
+  CoordinatorMetricsView.template.includes('⭐ Satisfacción del Cliente (CSAT)')
+    && CoordinatorMetricsView.template.includes("activeSubTab === 'csat'")
+    && CoordinatorMetricsView.template.includes('data-testid="csat-block"'));
+assert('5.18 El estado vacío dice «Sin valoraciones en el periodo»',
+  CoordinatorMetricsView.template.includes('Sin valoraciones en el periodo'));
+const csatSection = CoordinatorMetricsView.template.slice(
+  CoordinatorMetricsView.template.indexOf('data-testid="csat-block"'),
+  CoordinatorMetricsView.template.indexOf('ExecutiveReportModal', CoordinatorMetricsView.template.indexOf('data-testid="csat-block"'))
+);
+assert('5.19 El bloque no ofrece exportación ni filtro territorial (RF-06.2, RF-06.4)',
+  !csatSection.includes('Exportar') && !csatSection.includes('selectedLocation') && !csatSection.includes('province'));
+
 console.log('\n======================================================================');
-console.log(` RESUMEN: ${assertions} aserciones superadas exitosamente (100% PASS).`);
-console.log(' CONDICIÓN T-MET-15 VERIFICADA SATISFACTORIAMENTE.');
+console.log(` RESUMEN: ${assertions - failures} de ${assertions} aserciones superadas.`);
+if (failures === 0) {
+  console.log(' CONDICIÓN T-MET-15 VERIFICADA SATISFACTORIAMENTE.');
+}
 console.log('======================================================================\n');
 
 if (failures > 0) {

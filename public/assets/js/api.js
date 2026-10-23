@@ -1909,6 +1909,16 @@ export class ApiClient {
     },
 
     /**
+     * Retrieves the CSAT block for the current filter (Módulo 20, RF-06.2).
+     * @param {Object} [params={}]
+     * @returns {Promise<Object>}
+     */
+    getCsat: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/metrics/csat${q ? `?${q}` : ''}`);
+    },
+
+    /**
      * URL for downloading metrics CSV export (RF-06).
      * @param {Object} [params={}]
      * @returns {string}
