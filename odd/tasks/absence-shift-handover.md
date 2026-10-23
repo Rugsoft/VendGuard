@@ -45,9 +45,9 @@ S14 — **Auditoría inmutable y métricas (RF-01, RF-07, Art. III.3).** Catálo
 | **WU-4 / T-ASH-06** | S12 | inline | `feat(suggester): integrate shift status and absence availability into territorial suggester` (`67e5fe0`) | ✅ hecho |
 | **WU-5 / T-ASH-07** | S4, S5, S11 | inline | `feat(api): implement REST endpoints and controllers for absences and shifts` (`b5ec70e`) | ✅ hecho |
 | **WU-5 / T-ASH-08** | S6, S7, S8, S9 | inline | `feat(api): implement REST endpoints and controllers for absences and shifts` (`b5ec70e`) | ✅ hecho |
-| **WU-6 / T-ASH-09** | S13 | inline | pendiente | ⏳ en curso |
-| **WU-6 / T-ASH-10** | S13 | inline | pendiente | ⏳ en curso |
-| **WU-7 / T-ASH-11** | S14 | inline | pendiente | ⏸️ pendiente |
+| **WU-6 / T-ASH-09** | S13 | inline | `feat(frontend): add mobile shift controls and coordinator absences tab` (`9197950`) | ✅ hecho |
+| **WU-6 / T-ASH-10** | S13 | inline | `feat(frontend): add mobile shift controls and coordinator absences tab` (`9197950`) | ✅ hecho |
+| **WU-7 / T-ASH-11** | S14 | inline | pendiente | ⏳ en curso |
 
 ## Log
 
@@ -57,3 +57,4 @@ S14 — **Auditoría inmutable y métricas (RF-01, RF-07, Art. III.3).** Catálo
 * **L4 (2026-10-23):** Finalizado WU-3 (T-ASH-04 y T-ASH-05): servicios de aplicación `TechnicianAbsenceService`, `ShiftLifecycleService` y `ShiftHandoverService` con DTOs (`TechnicianAbsenceDto`, `TechnicianShiftDto`, `ShiftHandoverResultDto`). Protocolo sanitario de frío Art. II en 2 niveles certificado en integración, bloqueo fail-fast ante averías en curso y notas internas obligatorias (`is_internal = TRUE`). Suites unitarias e integración al 100% (8/8, 12/12, 10/10, 8/8). Commits `6af6c87` y `83b8be4`.
 * **L5 (2026-10-23):** Finalizado WU-4 (T-ASH-06): integración de turnos y ausencias en `TechnicianAssignmentSuggester` y `PdoTechnicianSuggestionRepository`. Relegación de no disponibles al final con insignia `NO_DISPONIBLE`, promoción del suplente (`BACKUP`) a `RECOMENDADO ⭐` ante titular ausente y persistencia de guardia en emergencias de frío (R6). Suites unitarias e integración al 100% (35/35, 11/11, 23/23). Commit `67e5fe0`.
 * **L6 (2026-10-23):** Finalizado WU-5 (T-ASH-07 y T-ASH-08): controladores REST `CoordinatorAbsenceController`, `CoordinatorShiftController` y `TechnicianShiftController`, registrados en `AppRouter.php` bajo middlewares RBAC correspondientes. Suites de integración HTTP al 100% (14/14, 6/6, 9/9, 3/3). Commit `b5ec70e`.
+* **L7 (2026-10-23):** Finalizado WU-6 (T-ASH-09 y T-ASH-10): interfaz móvil de turno y modal de relevo en `TechnicianRouteView.js`, componente `CoordinatorAbsencesTab.js` con listado filtrado, modales de alta, reasignación asistida y anulación lógica en `CoordinatorDashboardView.js`. Cero deuda de diseño en tokens CSS (2268/2268). Suites ESM al 100% (15/15, 13/13). Commit `9197950`.
