@@ -66,16 +66,27 @@ assert('data() incluye showCancelModal en false', vm.showCancelModal === false);
 assert('data() incluye showAssistedModal en false', vm.showAssistedModal === false);
 
 assert('data() incluye createForm con reason VACATION', vm.createForm && vm.createForm.reason === 'VACATION');
+assert('data() incluye createForm con is_partial_day false por defecto', vm.createForm && vm.createForm.is_partial_day === false);
+assert('data() incluye createForm con start_time y end_time', vm.createForm && vm.createForm.start_time === '09:00' && vm.createForm.end_time === '14:00');
 assert('data() incluye cancelForm con cancellation_reason', vm.cancelForm && typeof vm.cancelForm.cancellation_reason === 'string');
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. Métodos del componente
+// 3. Métodos del componente y formateo de fechas
 // ─────────────────────────────────────────────────────────────────────────────
 assert('methods incluye loadAbsences', typeof CoordinatorAbsencesTab.methods.loadAbsences === 'function');
 assert('methods incluye openCreateModal', typeof CoordinatorAbsencesTab.methods.openCreateModal === 'function');
 assert('methods incluye submitCreateAbsence', typeof CoordinatorAbsencesTab.methods.submitCreateAbsence === 'function');
 assert('methods incluye openCancelModal', typeof CoordinatorAbsencesTab.methods.openCancelModal === 'function');
 assert('methods incluye submitCancelAbsence', typeof CoordinatorAbsencesTab.methods.submitCancelAbsence === 'function');
+
+assert(
+  'formatDate() formatea jornada completa sin hora si termina en 00:00:00 o 23:59:59',
+  !vm.formatDate('2026-11-20T00:00:00+00:00').includes(':')
+);
+assert(
+  'formatDate() formatea franja horaria incluyendo hora para permisos parciales',
+  vm.formatDate('2026-11-20T09:30:00+00:00').includes(':')
+);
 
 console.log('\n======================================================================');
 console.log(` Total Aserciones: ${assertions} | Exitosas: ${assertions - failures} | Fallidas: ${failures}`);
