@@ -7,7 +7,7 @@
 **Política de pruebas:** *test-first*. Cada tarea declara su prueba en ROJO antes de implementar. Cierra con `php tests/run_all.php` y las suites `tests/unit/*.mjs`.
 
 **Rama de trabajo:** `20-csat-satisfaction-survey`. **Estrategia de entrega:** `ask-on-risk` (ver plan §5).  
-**Estado:** WU-1 y WU-2 cerrados (último commit de WU-2: `3ecb652`). Fase 1 y puerta SDD cerradas el 2026-10-23.
+**Estado:** WU-1 a WU-5 cerrados (último commit de WU-5: `97365f0`). Fase 1 y puerta SDD cerradas el 2026-10-23.
 
 ---
 
@@ -80,13 +80,16 @@
 * **Cierre observado (2026-10-23):** `CoordinatorCsatMetricsApiTest` 35/35 sobre el motor real: media 4,17 sobre seis respuestas, distribución `1..5` = `0,0,1,3,2`, `by_site` ordenado por respuestas con las dos sedes que tienen valoraciones, `by_technician` con el nombre congelado de la encuesta más reciente (renombrar al usuario no la reescribe) y «Sin técnico» para el nulo, serie `2026-08/09/10` ascendente con una resolución del 30-S a las 22:30 UTC contada en octubre (Europe/Madrid), filtros de sede y técnico, periodo vacío con `average: null` y cinco claves a cero, `400 INVALID_FILTER_PARAMS` en periodo y fechas inválidos, `401` sin token y `403` para técnico, y técnico dado de baja que sigue en la métrica (RF-04.6). El rango y los filtros salen siempre de `MetricFilter`.
 * **Batería:** `php tests/run_all.php` → 322 suites / 12.467 aserciones, 0 fallos; cifras documentadas coherentes.
 
-### ⬜ T-CSAT-07 · Frontend del Portal de Sede
+### ✅ T-CSAT-07 · Frontend del Portal de Sede
 * **Refs:** RF-05.1–05.7 · R1, R3 · Contratos §10.1
 * **Ruta:** inline
 * **Prueba en rojo:** `tests/unit/SatisfactionSurveyModalTest.mjs`, ampliación de `LocationPortalViewTest.mjs`.
 * **Alcance:** `public/assets/js/components/SatisfactionSurveyModal.js`, `public/assets/js/views/LocationPortalView.js`, `public/assets/js/api.js`.
 * **Criterio de cierre:** modal accesible, aviso con total real, refresco tras cada envío, `409` retira el episodio y el
   error conserva nota y comentario.
+* **Cierre observado (2026-10-23, `97365f0`):** `SatisfactionSurveyModalTest` 64/64 — forma Options API, `current` sobre el episodio más reciente, contador `0/500`→`500/500`, `canSubmit` sin nota / en vuelo / con 501 caracteres, envío con nota numérica y comentario recortado (omitido si vacío), `submitted` con `incidentId` y `alreadySubmitted`, `409 SURVEY_ALREADY_SUBMITTED` sin error rojo y con aviso neutro, fallo de transporte que conserva nota y comentario, `Escape` que emite `closed`, focos iniciales y los contratos de plantilla (`role="dialog"`, `aria-modal`, `aria-live="polite"`, `1 estrella`…`5 estrellas`, `maxlength=500`, `:disabled`), más las dos URL del cliente. `LocationPortalViewTest` 76/76 con el grupo 8 nuevo — aviso `Tiene N servicios por valorar` con singular y con total real por encima del tope de 20, apertura en la primera carga, no reapertura tras cerrar dentro de la misma carga (R3), reapertura manual desde el aviso, retirada del episodio valorado y refresco del total, estado vacío, fallo del listado que no tumba el portal, y el cableado del componente en la pestaña «Máquinas e Incidencias».
+* **Trinquete de tokens:** el modal y el aviso entran solo con `var(--color-…)`, de modo que la deuda de hex baja de 2.269 a 2.268 y el techo se congela en la nueva cifra (`DesignTokenDebtRatchetTest` 3/3, acta §6 actualizada).
+* **Batería:** `php tests/run_all.php` → 323 suites / 12.556 aserciones, 0 fallos; cifras documentadas coherentes.
 
 ### ⬜ T-CSAT-08 · Frontend de coordinación
 * **Refs:** RF-06.1–06.4 · R7, R11 · Contratos §10.2
