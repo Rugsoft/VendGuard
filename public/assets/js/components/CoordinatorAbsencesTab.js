@@ -93,7 +93,8 @@ export const CoordinatorAbsencesTab = {
         }
 
         const res = await api.get('/coordinator/technicians/absences', { params });
-        this.absences = Array.isArray(res?.data) ? res.data : [];
+        const list = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
+        this.absences = list;
       } catch (err) {
         this.errorMessage = err?.message || 'Error al cargar el listado de ausencias.';
       } finally {
@@ -103,8 +104,9 @@ export const CoordinatorAbsencesTab = {
 
     async loadTechnicians() {
       try {
-        const res = await api.get('/coordinator/users', { params: { role: 'TECHNICIAN' } });
-        this.technicians = Array.isArray(res?.data) ? res.data.filter(u => u.is_active !== false) : [];
+        const res = await api.get('/coordinator/users', { params: { role: 'TECHNICIAN', status: 'active' } });
+        const list = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
+        this.technicians = list.filter(u => u.is_active !== false);
       } catch (err) {
         console.error('Error al cargar técnicos para ausencias:', err);
       }
@@ -142,10 +144,11 @@ export const CoordinatorAbsencesTab = {
         this.showCreateModal = false;
         await this.loadAbsences();
 
-        const affected = res?.data?.affected_incidents || [];
+        const payload = res?.data || res || {};
+        const affected = payload?.affected_incidents || [];
         if (affected.length > 0) {
           this.affectedIncidents = affected;
-          this.createdAbsenceInfo = res?.data?.absence || null;
+          this.createdAbsenceInfo = payload?.absence || null;
           this.showAssistedModal = true;
         } else {
           this.successMessage = 'Ausencia registrada correctamente sin averías afectadas.';

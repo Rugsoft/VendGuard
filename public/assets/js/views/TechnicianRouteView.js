@@ -393,9 +393,7 @@ export const TechnicianRouteView = {
     async loadShiftStatus() {
       try {
         const res = await api.get('/technician/shift/status');
-        if (res && res.data) {
-          this.shiftStatus = res.data.status || 'OFF_SHIFT';
-        }
+        this.shiftStatus = res?.status || res?.data?.status || 'OFF_SHIFT';
       } catch (err) {
         console.error('Error al cargar estado de turno:', err);
       }
@@ -406,9 +404,7 @@ export const TechnicianRouteView = {
       this.shiftError = '';
       try {
         const res = await api.post('/technician/shift/start');
-        if (res && res.data) {
-          this.shiftStatus = res.data.status || 'ON_SHIFT';
-        }
+        this.shiftStatus = res?.status || res?.data?.status || 'ON_SHIFT';
       } catch (err) {
         this.shiftError = err?.message || 'No se pudo iniciar el turno.';
       } finally {
@@ -421,9 +417,7 @@ export const TechnicianRouteView = {
       this.shiftError = '';
       try {
         const res = await api.post('/technician/shift/pause-meal');
-        if (res && res.data) {
-          this.shiftStatus = res.data.status || 'MEAL_BREAK';
-        }
+        this.shiftStatus = res?.status || res?.data?.status || 'MEAL_BREAK';
       } catch (err) {
         this.shiftError = err?.message || 'No se pudo pausar para comida.';
       } finally {
@@ -436,9 +430,7 @@ export const TechnicianRouteView = {
       this.shiftError = '';
       try {
         const res = await api.post('/technician/shift/resume');
-        if (res && res.data) {
-          this.shiftStatus = res.data.status || 'ON_SHIFT';
-        }
+        this.shiftStatus = res?.status || res?.data?.status || 'ON_SHIFT';
       } catch (err) {
         this.shiftError = err?.message || 'No se pudo reanudar el turno.';
       } finally {
@@ -455,10 +447,10 @@ export const TechnicianRouteView = {
       this.selectedHandoverTicketIds = this.eligibleHandoverIncidents.map(i => i.id);
       try {
         const res = await api.get('/coordinator/technicians/quadrants');
-        if (res && res.data) {
-          const myId = this.currentUser?.id;
-          this.availableReceptors = res.data.filter(t => t.id !== myId && t.is_active !== false);
-        }
+        const raw = res?.data || res || [];
+        const list = Array.isArray(raw) ? raw : [];
+        const myId = this.currentUser?.id;
+        this.availableReceptors = list.filter(t => (t.id || t.technician_id) !== myId && t.is_active !== false);
       } catch (e) {
         this.availableReceptors = [];
       }
