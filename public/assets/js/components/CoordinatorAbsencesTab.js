@@ -21,7 +21,10 @@ const EMPTY_CREATE_FORM = Object.freeze({
   reason: 'VACATION',
   starts_at: '',
   ends_at: '',
-  notes: ''
+  notes: '',
+  is_partial_day: false,
+  start_time: '09:00',
+  end_time: '14:00'
 });
 
 const EMPTY_CANCEL_FORM = Object.freeze({
@@ -133,12 +136,29 @@ export const CoordinatorAbsencesTab = {
         return;
       }
 
+      if (this.createForm.is_partial_day && (!this.createForm.start_time || !this.createForm.end_time)) {
+        this.createError = 'Debe indicar la hora de inicio y fin del permiso.';
+        return;
+      }
+
+      const payload = {
+        technician_id: Number(this.createForm.technician_id),
+        reason: this.createForm.reason,
+        starts_at: this.createForm.is_partial_day && this.createForm.start_time
+          ? `${this.createForm.starts_at} ${this.createForm.start_time}:00`
+          : this.createForm.starts_at,
+        ends_at: this.createForm.is_partial_day && this.createForm.end_time
+          ? `${this.createForm.ends_at} ${this.createForm.end_time}:00`
+          : this.createForm.ends_at,
+        notes: this.createForm.notes
+      };
+
       this.isCreating = true;
       this.createError = '';
       try {
         const res = await api.post(
           `/coordinator/technicians/${this.createForm.technician_id}/absences`,
-          this.createForm
+          payload
         );
 
         this.showCreateModal = false;
@@ -207,7 +227,13 @@ export const CoordinatorAbsencesTab = {
       if (!isoString) return '-';
       try {
         const d = new Date(isoString);
-        return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const dateStr = d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        // Si tiene hora explícita diferente a 00:00 o 23:59, mostramos también la hora
+        if (isoString.includes('T') && !isoString.endsWith('00:00:00+00:00') && !isoString.endsWith('23:59:59+00:00')) {
+          const timeStr = d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+          return `${dateStr} ${timeStr}`;
+        }
+        return dateStr;
       } catch (e) {
         return isoString;
       }
@@ -442,6 +468,47 @@ export const CoordinatorAbsencesTab = {
                 style="width: 100%; height: 38px;"
                 required
               />
+            </div>
+          </div>
+
+          <!-- Selector de franja horaria opcional (Resolución R5: permiso médico / horas) -->
+          <div style="margin-bottom: 14px; background-color: var(--color-surface-1); border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 10px 12px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--color-slate); cursor: pointer; margin-bottom: 0;">
+              <input
+                type="checkbox"
+                v-model="createForm.is_partial_day"
+                style="cursor: pointer;"
+              />
+              <span>Especificar franja horaria (permiso médico / horas parciales)</span>
+            </label>
+
+            <div v-if="createForm.is_partial_day" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+              <div>
+                <label for="create-absence-start-time" style="display: block; font-size: 11px; font-weight: 600; color: var(--color-ink-muted); margin-bottom: 4px;">
+                  Hora Inicio *
+                </label>
+                <input
+                  id="create-absence-start-time"
+                  v-model="createForm.start_time"
+                  type="time"
+                  class="vg-input"
+                  style="width: 100%; height: 34px; font-size: 13px;"
+                  required
+                />
+              </div>
+              <div>
+                <label for="create-absence-end-time" style="display: block; font-size: 11px; font-weight: 600; color: var(--color-ink-muted); margin-bottom: 4px;">
+                  Hora Fin *
+                </label>
+                <input
+                  id="create-absence-end-time"
+                  v-model="createForm.end_time"
+                  type="time"
+                  class="vg-input"
+                  style="width: 100%; height: 34px; font-size: 13px;"
+                  required
+                />
+              </div>
             </div>
           </div>
 
