@@ -119,6 +119,12 @@ $assert("3.4 Renderiza el grid responsivo de tarjetas MachineCard",
     strpos($portalContent, "<MachineCard") !== false
 );
 
+$assert("3.5 Dispone de enlaces de ayuda a la guía rápida por rol (A4) en login y cabecera de sede",
+    strpos($portalContent, 'guia_rapida_por_rol_a4.html#guia-sede') !== false &&
+    strpos($portalContent, 'btn-role-guide-location') !== false &&
+    strpos($portalContent, 'link-role-guide-login-sede') !== false
+);
+
 // =====================================================================
 // GRUPO 4: Ejecución del Runner Dinámico JS (32 aserciones activas)
 // =====================================================================

@@ -1193,6 +1193,20 @@ export const TechnicianRouteView = {
           <p style="font-size: 13px; color: var(--color-ink-muted, #6c7e9d); margin-top: 6px; line-height: 1.4;">
             Acceso de campo para gestión y resolución in situ de máquinas de vending.
           </p>
+          <div style="margin-top: 10px;">
+            <a
+              href="/docs/guia_rapida_por_rol_a4.html#guia-tecnico"
+              target="_blank"
+              rel="noopener"
+              class="vg-btn vg-btn-secondary"
+              style="height: 28px; font-size: 12px; padding: 0 10px; display: inline-flex; align-items: center; gap: 5px; text-decoration: none; border-radius: var(--radius-interactive, 4px);"
+              title="Abrir guía rápida del Técnico de Campo (A4 imprimible)"
+              aria-label="Guía rápida del Técnico de Campo"
+              data-testid="link-role-guide-login-technician"
+            >
+              <span>📖 Guía rápida del técnico</span>
+            </a>
+          </div>
         </div>
 
         <form @submit.prevent="handleInternalLogin">
@@ -1272,6 +1286,18 @@ export const TechnicianRouteView = {
           </div>
 
           <div style="display: flex; gap: 6px;">
+            <a
+              href="/docs/guia_rapida_por_rol_a4.html#guia-tecnico"
+              target="_blank"
+              rel="noopener"
+              class="vg-btn vg-btn-secondary"
+              style="height: 36px; padding: 0 10px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; text-decoration: none;"
+              title="Guía rápida del Técnico de Campo (A4 imprimible): flujo de ruta, intervenciones y diagnóstico"
+              aria-label="Abrir guía rápida del técnico en formato A4"
+              data-testid="btn-role-guide-technician"
+            >
+              <span>📖</span>
+            </a>
             <a
               href="/docs/guia_rapida_taller_repuestos_a4.html"
               target="_blank"

@@ -45,6 +45,18 @@ export const AppNavbar = {
         case 'TECHNICIAN': return 'Técnico de Ruta';
         default: return this.user.role;
       }
+    },
+    quickGuideUrl() {
+      if (this.isSiteSession) {
+        return '/docs/guia_rapida_por_rol_a4.html#guia-sede';
+      }
+      if (this.user?.role === 'COORDINATOR') {
+        return '/docs/guia_rapida_por_rol_a4.html#guia-coordinacion';
+      }
+      if (this.user?.role === 'TECHNICIAN') {
+        return '/docs/guia_rapida_por_rol_a4.html#guia-tecnico';
+      }
+      return '/docs/guia_rapida_por_rol_a4.html';
     }
   },
   methods: {
@@ -139,6 +151,21 @@ export const AppNavbar = {
               {{ user.name || user.email }}
             </span>
           </div>
+
+          <!-- Role Quick Guide Link -->
+          <a
+            :href="quickGuideUrl"
+            target="_blank"
+            rel="noopener"
+            class="vg-btn vg-btn-secondary"
+            style="height: 32px; padding: 0 10px; font-size: 13px; border-radius: var(--radius-interactive, 4px); display: inline-flex; align-items: center; gap: 6px; text-decoration: none;"
+            :title="'Abrir guía rápida para ' + (isSiteSession ? 'Responsable de Sede' : roleLabel)"
+            aria-label="Abrir guía rápida por rol en formato A4"
+            data-testid="navbar-btn-role-guide"
+          >
+            <span>📖</span>
+            <span style="font-size: 12px;">Ayuda</span>
+          </a>
 
           <!-- Logout Button (4px interactive radius) -->
           <button

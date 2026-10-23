@@ -416,6 +416,20 @@ export const LocationPortalView = {
           <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 14px; color: var(--color-ink-muted, #6c7e9d); margin-top: 6px;">
             Introduce el código de tu sede y la clave de centro entregada por el servicio técnico.
           </p>
+          <div style="margin-top: 10px;">
+            <a
+              href="/docs/guia_rapida_por_rol_a4.html#guia-sede"
+              target="_blank"
+              rel="noopener"
+              class="vg-btn vg-btn-secondary"
+              style="height: 28px; font-size: 12px; padding: 0 10px; display: inline-flex; align-items: center; gap: 5px; text-decoration: none; border-radius: var(--radius-interactive, 4px);"
+              title="Abrir guía rápida del Responsable de Sede (A4 imprimible)"
+              aria-label="Guía rápida del Responsable de Sede"
+              data-testid="link-role-guide-login-sede"
+            >
+              <span>📖 Guía rápida de sede</span>
+            </a>
+          </div>
         </div>
 
         <form @submit.prevent="handleSiteLogin">
@@ -513,20 +527,35 @@ export const LocationPortalView = {
             </p>
           </div>
 
-          <button
-            type="button"
-            class="vg-btn vg-btn-secondary"
-            style="border-radius: var(--radius-interactive, 4px); font-size: 13px;"
-            :disabled="isLoadingMachines"
-            @click="loadMachines"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;" aria-hidden="true">
-              <polyline points="23 4 23 10 17 10"></polyline>
-              <polyline points="1 20 1 14 7 14"></polyline>
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-            </svg>
-            Actualizar estado
-          </button>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <a
+              href="/docs/guia_rapida_por_rol_a4.html#guia-sede"
+              target="_blank"
+              rel="noopener"
+              class="vg-btn vg-btn-secondary"
+              style="height: 36px; padding: 0 12px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; border-radius: var(--radius-interactive, 4px);"
+              title="Guía rápida del Responsable de Sede (A4 imprimible): reportar averías, seguimiento y reaperturas"
+              aria-label="Abrir guía rápida de sede en formato A4"
+              data-testid="btn-role-guide-location"
+            >
+              <span>📖 Guía rápida</span>
+            </a>
+
+            <button
+              type="button"
+              class="vg-btn vg-btn-secondary"
+              style="border-radius: var(--radius-interactive, 4px); font-size: 13px; height: 36px;"
+              :disabled="isLoadingMachines"
+              @click="loadMachines"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;" aria-hidden="true">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <polyline points="1 20 1 14 7 14"></polyline>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+              </svg>
+              Actualizar estado
+            </button>
+          </div>
         </div>
 
         <!-- Portal Section Tabs: Machines vs Sanitary (RF-PREV-06, RF-PREV-07) -->

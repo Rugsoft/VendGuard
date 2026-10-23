@@ -1711,6 +1711,20 @@ export const CoordinatorDashboardView = {
           <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 14px; color: var(--color-ink-muted, #6c7e9d); margin-top: 6px;">
             Identifícate con tus credenciales de operador para supervisar el parque de vending.
           </p>
+          <div style="margin-top: 10px;">
+            <a
+              href="/docs/guia_rapida_por_rol_a4.html#guia-coordinacion"
+              target="_blank"
+              rel="noopener"
+              class="vg-btn vg-btn-secondary"
+              style="height: 28px; font-size: 12px; padding: 0 10px; display: inline-flex; align-items: center; gap: 5px; text-decoration: none; border-radius: var(--radius-interactive, 4px);"
+              title="Abrir guía rápida de Coordinación (A4 imprimible)"
+              aria-label="Guía rápida de Coordinación"
+              data-testid="link-role-guide-login-coordinator"
+            >
+              <span>📖 Guía rápida de coordinación</span>
+            </a>
+          </div>
         </div>
 
         <form @submit.prevent="handleInternalLogin">
@@ -1883,6 +1897,20 @@ export const CoordinatorDashboardView = {
             📊 Métricas y Auditoría
           </button>
 
+          <!-- Guía Rápida de Coordinación A4 -->
+          <a
+            href="/docs/guia_rapida_por_rol_a4.html#guia-coordinacion"
+            target="_blank"
+            rel="noopener"
+            class="vg-btn vg-btn-secondary ms-auto"
+            style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px;"
+            title="Guía rápida de Coordinación (A4 imprimible): triaje, asignaciones, SLA y auditoría"
+            aria-label="Abrir guía rápida de coordinación en formato A4"
+            data-testid="btn-role-guide-coordinator"
+          >
+            <span>📖 Guía rápida</span>
+          </a>
+
           <!--
             Centro de Notificaciones (Módulo 14, RF-06.2 / RF-06.3). Vive en la barra y
             no dentro de una pestaña a propósito: un envío en «Fallo definitivo» es una
@@ -1891,7 +1919,7 @@ export const CoordinatorDashboardView = {
           -->
           <button
             type="button"
-            class="vg-btn vg-btn-secondary ms-auto"
+            class="vg-btn vg-btn-secondary"
             data-testid="open-notification-center"
             :title="hasPermanentNotificationFailures
               ? permanentNotificationFailures + ' notificación(es) en fallo definitivo: revise la bandeja de salida'

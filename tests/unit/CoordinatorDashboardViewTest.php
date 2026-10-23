@@ -92,6 +92,12 @@ $assert("2.5 Modal de descarte exige motivo obligatorio para soft delete (RF-06 
     strpos($viewContent, 'Soft Delete') !== false
 );
 
+$assert("2.6 Dispone de enlaces de ayuda a la guía rápida por rol (A4) en login y barra de navegación de coordinación",
+    strpos($viewContent, 'guia_rapida_por_rol_a4.html#guia-coordinacion') !== false &&
+    strpos($viewContent, 'btn-role-guide-coordinator') !== false &&
+    strpos($viewContent, 'link-role-guide-login-coordinator') !== false
+);
+
 // =====================================================================
 // GRUPO 3: Ejecución del Runner Dinámico JS (24 aserciones reactivas)
 // =====================================================================

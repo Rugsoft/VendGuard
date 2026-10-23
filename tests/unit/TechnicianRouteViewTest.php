@@ -95,6 +95,12 @@ $assert("2.6 Enlace nativo a la guía rápida de repuestos A4 en cabecera de Mi 
     strpos($viewContent, 'rel="noopener"') !== false
 );
 
+$assert("2.7 Enlace nativo a la guía rápida por rol A4 en cabecera de Mi Ruta y login (Técnico)",
+    strpos($viewContent, 'guia_rapida_por_rol_a4.html#guia-tecnico') !== false &&
+    strpos($viewContent, 'btn-role-guide-technician') !== false &&
+    strpos($viewContent, 'link-role-guide-login-technician') !== false
+);
+
 // =====================================================================
 // GRUPO 3: Ejecución del Runner Dinámico JS (40 aserciones reactivas)
 // =====================================================================
