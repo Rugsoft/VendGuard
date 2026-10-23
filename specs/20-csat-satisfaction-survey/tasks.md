@@ -7,7 +7,7 @@
 **Política de pruebas:** *test-first*. Cada tarea declara su prueba en ROJO antes de implementar. Cierra con `php tests/run_all.php` y las suites `tests/unit/*.mjs`.
 
 **Rama de trabajo:** `20-csat-satisfaction-survey`. **Estrategia de entrega:** `ask-on-risk` (ver plan §5).  
-**Estado:** WU-1 cerrado (commit `7524ee2`). Fase 1 y puerta SDD cerradas el 2026-10-23.
+**Estado:** WU-1 y WU-2 cerrados (último commit de WU-2: `42937cb`). Fase 1 y puerta SDD cerradas el 2026-10-23.
 
 ---
 
@@ -34,28 +34,31 @@
 * **Alcance:** `database/supabase_migrations/011_incident_satisfaction_surveys.sql`; `database/supabase_init.sql` (sección 7, tabla 28, corrección de la cabecera «25 tablas»); `specs/technical/schema_correspondence_contract.md`; `CONTRACT_TABLES` de `SchemaConvergenceParityTest` y `PostgresSchemaTest`; `tests/Support/TestDataCleaner.php`; suite de esquema.
 * **Criterio de cierre:** tabla con `CHECK` de nota y comentario, unicidad por episodio, índices, disparadores de `UPDATE`/`DELETE` (con purga del arnés) y paridad migración/`init` en verde.
 * **Riesgo:** `item 1` (esquema persistente nuevo).
-* **Cierre observado (2026-10-23):** 17/17 aserciones del esquema en verde; guardas `PostgresSchemaTest` (89), `PostgresConstitutionalTest` (65), `SchemaConvergenceParityTest` (18) y `PostgresServiceSheetSchemaTest` (19) en verde; batería completa 317 suites / 12.327 aserciones en verde. Commit `7524ee2`.
+* **Cierre observado (2026-10-23):** 17/17 aserciones del esquema en verde; guardas `PostgresSchemaTest` (89), `PostgresConstitutionalTest` (65), `SchemaConvergenceParityTest` (18) y `PostgresServiceSheetSchemaTest` (19) en verde; batería completa 317 suites / 12.327 aserciones en verde. Commit `2e75788`.
 
-### ⬜ T-CSAT-02 · Entidad de dominio
+### ✅ T-CSAT-02 · Entidad de dominio
 * **Refs:** RF-02.3, RF-02.4 · RD-04, RD-05, RD-06 · Contratos §4.3, §4.4
 * **Ruta:** inline
 * **Prueba en rojo:** `tests/unit/SatisfactionSurveyDomainTest.php` (rango, entero/cadena, float/bool, normalización y longitud del comentario).
 * **Alcance:** `src/Core/Domain/Model/IncidentSatisfactionSurvey.php`, `src/Core/Domain/Exception/SatisfactionSurveyValidationException.php`.
 * **Criterio de cierre:** la entidad rechaza toda nota fuera de 1–5 y todo comentario no textual o de más de 500 caracteres; la cadena vacía se normaliza a `null`.
+* **Cierre observado (2026-10-23):** `tests/unit/SatisfactionSurveyDomainTest.php` 33/33 en verde (nota entera/cadena, `4.0` y `true` rechazados, comentario recortado en Unicode, 500 caracteres multibyte admitidos, 501 rechazados, precedencia nota→comentario).
 
-### ⬜ T-CSAT-03 · Puerto y repositorio PDO
+### ✅ T-CSAT-03 · Puerto y repositorio PDO
 * **Refs:** RF-01.1, RF-01.3, RF-02.6, RF-02.7, RF-04.3, RF-04.4, RF-04.5 · Contratos §3.2, §4.5, §6.3
 * **Ruta:** inline
 * **Prueba en rojo:** cobertura vía `SatisfactionSurveyServiceTest` con doble del puerto + `LocationSatisfactionApiTest`.
 * **Alcance:** `src/Core/Domain/Repository/SatisfactionSurveyRepositoryInterface.php`, `src/Infrastructure/Repository/PdoSatisfactionSurveyRepository.php` (pendientes, total, `create` con `ON CONFLICT`, agregados).
 * **Criterio de cierre:** los pendientes excluyen los episodios valorados por pareja; el alta devuelve conflicto sin excepción cruda; los agregados devuelven las cinco claves de distribución y solo grupos con respuestas.
+* **Cierre observado (2026-10-23):** verificado contra PostgreSQL real en esquema aislado: los pendientes pasan de 1 a 0 tras valorar, el alta duplicada devuelve `null`, `findEpisode` devuelve la fila y `aggregate` devuelve distribución de cinco claves, grupos solo con respuestas, «Sin técnico» para el técnico nulo y serie `2026-10`. La cobertura durable del repositorio llega con `LocationSatisfactionApiTest` (T-CSAT-05) y `CoordinatorCsatMetricsApiTest` (T-CSAT-06).
 
-### ⬜ T-CSAT-04 · Servicio de aplicación y DTOs
+### ✅ T-CSAT-04 · Servicio de aplicación y DTOs
 * **Refs:** RF-02.2, RF-02.5, RF-02.6, RF-03.2, RF-03.3 · RD-01, RD-08, RD-10 · Contratos §4.5, §7
 * **Ruta:** inline
 * **Prueba en rojo:** `tests/unit/SatisfactionSurveyServiceTest.php` (precedencia de errores, reapertura, duplicado, `resolution_at` copiado, auditoría en la misma transacción).
 * **Alcance:** `src/Application/Service/SatisfactionSurveyService.php`, `src/Application/DTO/SatisfactionSurveyDto.php`, `src/Application/DTO/CsatReportDto.php`.
 * **Criterio de cierre:** toda alta pasa por relectura bloqueada; la auditoría usa `SUBMIT_SATISFACTION_SURVEY` sobre `TICKET`; un episodio valorado sobrevive a la reapertura.
+* **Cierre observado (2026-10-23):** `tests/unit/SatisfactionSurveyServiceTest.php` 20/20 en verde (precedencia 1→8, reapertura, duplicado previo y de carrera, ancla copiada, auditoría dentro de la transacción). Batería completa 319 suites / 12.380 aserciones en verde.
 
 ### ⬜ T-CSAT-05 · API de sede
 * **Refs:** RF-01.2, RF-01.4–01.7, RF-02.1, RF-02.5 · R2, R3 · Contratos §3, §4, §5
@@ -86,12 +89,13 @@
 * **Alcance:** `public/assets/js/views/CoordinatorMetricsView.js`.
 * **Criterio de cierre:** bloque CSAT con resumen, distribución, tablas y tendencia; estado vacío explícito; sin filtro territorial ni exportación.
 
-### ⬜ T-CSAT-09 · Catálogo de auditoría y documentación
+### ✅ T-CSAT-09 · Catálogo de auditoría y documentación (adelantada)
 * **Refs:** RF-03.4 · Contratos §7
 * **Ruta:** inline
 * **Prueba en rojo:** `tests/unit/AuditActionCatalogTest.php`.
 * **Alcance:** `public/assets/js/utils/AuditActionLabels.js`; documentación de cifras (`README.md`, `CHANGELOG.md` si procede).
 * **Criterio de cierre:** la acción aparece en el grupo `ticket` con tono `primary` y el test queda verde.
+* **Cierre observado (2026-10-23):** adelantada porque `AuditActionCatalogTest` deriva el vocabulario de los literales del servicio y exige la etiqueta. Etiqueta añadida (`Valoración de Satisfacción`, `primary`) y cifras documentadas actualizadas a 319 suites / 12.380 aserciones en `README.md` y los cuatro documentos de verificación. Suite de catálogo 26/26 en verde.
 
 ### ⬜ T-CSAT-10 · Cierre del módulo
 * **Refs:** §14 de la spec
