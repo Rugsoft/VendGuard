@@ -7,7 +7,7 @@
 **Política de pruebas:** *test-first*. Cada tarea declara su prueba en ROJO antes de implementar. Cierra con `php tests/run_all.php` y las suites `tests/unit/*.mjs`.
 
 **Rama de trabajo:** `20-csat-satisfaction-survey`. **Estrategia de entrega:** `ask-on-risk` (ver plan §5).  
-**Estado:** WU-1 a WU-6 cerrados (último commit de WU-6: `f0f7db0`). Fase 1 y puerta SDD cerradas el 2026-10-23.
+**Estado:** WU-1 a WU-7 cerrados (último commit: `71e1cb9`). Fase 1 y puerta SDD cerradas el 2026-10-23; Fase 3 implementada y verificada el mismo día.
 
 ---
 
@@ -110,9 +110,11 @@
 * **Criterio de cierre:** la acción aparece en el grupo `ticket` con tono `primary` y el test queda verde.
 * **Cierre observado (2026-10-23):** adelantada porque `AuditActionCatalogTest` deriva el vocabulario de los literales del servicio y exige la etiqueta. Etiqueta añadida (`Valoración de Satisfacción`, `primary`) y cifras documentadas actualizadas a 319 suites / 12.380 aserciones en `README.md` y los cuatro documentos de verificación. Suite de catálogo 26/26 en verde.
 
-### ⬜ T-CSAT-10 · Cierre del módulo
+### ✅ T-CSAT-10 · Cierre del módulo
 * **Refs:** §14 de la spec
 * **Ruta:** inline
 * **Prueba en rojo:** no aplica (verificación final).
 * **Alcance:** `php tests/run_all.php`, suites `.mjs`, `docs/features_pendientes.md` (marcar la feature 6 como implementada).
 * **Criterio de cierre:** batería completa en verde, cifras documentadas y catálogo actualizado.
+* **Cierre observado (2026-10-23):** las diez suites de la spec §11 en verde por separado — `PostgresSatisfactionSurveySchemaTest` 17/17 contra el motor TLS del canal `new_engine` (`run_new_engine.php` filtrado, exit 0), `SatisfactionSurveyDomainTest` 33/33, `SatisfactionSurveyServiceTest` 20/20, `CsatPrivacyConstitutionalTest` 15/15, `AuditActionCatalogTest` 26/26, `LocationSatisfactionApiTest` 37/37, `CoordinatorCsatMetricsApiTest` 35/35, `SatisfactionSurveyModalTest` 64/64, `LocationPortalViewTest` 76/76 y `MetricCardsTest` 38/38. `php tests/run_all.php` → **323 suites / 12.575 aserciones, 0 fallos, cifras documentadas coherentes**. Tabla 28 presente en migración e `init` con paridad certificada (T-CSAT-01). Catálogo de auditoría sin acciones fantasma (T-CSAT-09). `docs/features_pendientes.md` marca la feature 6 como implementada en la tabla de depuración, en su ficha y en la hoja de ruta; la cabecera del documento sube a 323 / 12.575. La spec deja de declararse «pendiente de la puerta SDD».
+* **Nota de canal:** el ejecutor del canal `new_engine` cuenta las aserciones del resumen final de cada suite y hoy publica 1 para la suite de esquema, que en realidad evalúa 17; es una limitación preexistente del contador, no un fallo de la suite (verificado ejecutándola directamente).

@@ -4,7 +4,7 @@
 **Módulo:** 20 · Encuesta de Satisfacción Post-Resolución (CSAT de Sede)  
 **Documento Canónico:** `specs/20-csat-satisfaction-survey/spec.md`  
 **Versión:** 2 · incorpora las 11 resoluciones de la revisión QA (2026-10-23)  
-**Estado:** Resoluciones R1–R11 **aprobadas por el Product Owner el 2026-10-23** · v2 pendiente de la confirmación formal de la puerta SDD (fase 2) antes de abrir la fase 3  
+**Estado:** Resoluciones R1–R11 **aprobadas por el Product Owner el 2026-10-23** · puerta SDD superada el mismo día · **Fase 3 implementada y cerrada** (WU-1 a WU-7; batería global 323 suites / 12.575 aserciones en verde)  
 **Fecha:** Octubre 2026  
 **Origen:** Feature 6 del catálogo [`docs/features_pendientes.md`](../../docs/features_pendientes.md) (Bloque 2)  
 **Alineación Constitucional:** Art. I (supremacía de la especificación), Art. III.1 y III.3 (inmutabilidad y auditoría), Art. IV.1–IV.3 (PHP puro, Vue 3 estándar, cero dependencias), Art. V.4 (privacidad y segregación de la sede), Art. VI.2 (canalización del backlog). **Art. II: no aplica** (el módulo no altera cadena de frío, SLA ni cuarentenas).
