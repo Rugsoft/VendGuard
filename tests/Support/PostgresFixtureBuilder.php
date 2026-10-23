@@ -567,6 +567,9 @@ final class PostgresFixtureBuilder
         $literal = 'FX' . $suffix . ' ' . self::FILLER_TEXT;
 
         return match (true) {
+            // La nota de la encuesta CSAT está acotada por `chk_survey_rating` a 1–5:
+            // el entero genérico (7) convertiría el alta mínima en un rechazo legítimo.
+            $column === 'rating' && $udt === 'int2' => $variant === 'update' ? 4 : 5,
             in_array($udt, ['int2', 'int4', 'int8'], true) => $variant === 'update' ? 9 : 7,
             $udt === 'numeric', $udt === 'float4', $udt === 'float8' => $variant === 'update' ? '9.5000000' : '1.5000000',
             $udt === 'text' => $literal,
@@ -581,6 +584,9 @@ final class PostgresFixtureBuilder
             in_array($udt, ['timestamptz', 'timestamp'], true) => $variant === 'update' ? '2027-01-01 08:30:00+00' : self::FILLER_TIMESTAMP,
             $udt === 'date' => $variant === 'update' ? '2027-01-01' : '2026-10-14',
             $udt === 'time' => $variant === 'update' ? '08:30:00' : '12:00:00',
+            // El documento congelado de la hoja de servicio declara su versión:
+            // el `CHECK` del Módulo 19 rechaza un objeto vacío, y un `{}`
+            // sintetizado convertiría el alta mínima en un rechazo legítimo.
             // El documento congelado de la hoja de servicio declara su versión:
             // el `CHECK` del Módulo 19 rechaza un objeto vacío, y un `{}`
             // sintetizado convertiría el alta mínima en un rechazo legítimo.

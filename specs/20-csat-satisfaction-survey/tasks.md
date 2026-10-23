@@ -7,7 +7,7 @@
 **Política de pruebas:** *test-first*. Cada tarea declara su prueba en ROJO antes de implementar. Cierra con `php tests/run_all.php` y las suites `tests/unit/*.mjs`.
 
 **Rama de trabajo:** `20-csat-satisfaction-survey`. **Estrategia de entrega:** `ask-on-risk` (ver plan §5).  
-**Estado:** ninguna tarea iniciada. Fase 1 cerrada; pendiente la puerta de aprobación de la v2.
+**Estado:** WU-1 cerrado (commit `7524ee2`). Fase 1 y puerta SDD cerradas el 2026-10-23.
 
 ---
 
@@ -27,13 +27,14 @@
 
 ## Tareas
 
-### ⬜ T-CSAT-01 · Esquema de la tabla y su contrato
+### ✅ T-CSAT-01 · Esquema de la tabla y su contrato
 * **Refs:** RF-01.1, RF-02.6, RF-02.7, RF-03.1 · RD-01, RD-02, RD-06 · Contratos §2
 * **Ruta:** inline
 * **Prueba en rojo:** `tests/integration/PostgresSatisfactionSurveySchemaTest.php` + ajuste de las guardas de esquema.
 * **Alcance:** `database/supabase_migrations/011_incident_satisfaction_surveys.sql`; `database/supabase_init.sql` (sección 7, tabla 28, corrección de la cabecera «25 tablas»); `specs/technical/schema_correspondence_contract.md`; `CONTRACT_TABLES` de `SchemaConvergenceParityTest` y `PostgresSchemaTest`; `tests/Support/TestDataCleaner.php`; suite de esquema.
 * **Criterio de cierre:** tabla con `CHECK` de nota y comentario, unicidad por episodio, índices, disparadores de `UPDATE`/`DELETE` (con purga del arnés) y paridad migración/`init` en verde.
 * **Riesgo:** `item 1` (esquema persistente nuevo).
+* **Cierre observado (2026-10-23):** 17/17 aserciones del esquema en verde; guardas `PostgresSchemaTest` (89), `PostgresConstitutionalTest` (65), `SchemaConvergenceParityTest` (18) y `PostgresServiceSheetSchemaTest` (19) en verde; batería completa 317 suites / 12.327 aserciones en verde. Commit `7524ee2`.
 
 ### ⬜ T-CSAT-02 · Entidad de dominio
 * **Refs:** RF-02.3, RF-02.4 · RD-04, RD-05, RD-06 · Contratos §4.3, §4.4
