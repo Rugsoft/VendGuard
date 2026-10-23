@@ -143,8 +143,8 @@ final class TechnicianShiftController
             return Response::error('MISSING_HANDOVER_NOTES', $e->getMessage(), 422);
         } catch (InvalidShiftTransitionException $e) {
             return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
-        } catch (Throwable $e) {
-            return Response::error('INTERNAL_SERVER_ERROR', $e->getMessage(), 500);
+        } catch (Throwable) {
+            return Response::error('INTERNAL_SERVER_ERROR', 'Error interno del servidor.', 500);
         }
     }
 }

@@ -93,8 +93,8 @@ final class CoordinatorAbsenceController
             return Response::error('TECHNICIAN_NOT_FOUND', $e->getMessage(), 404);
         } catch (InvalidAbsenceException $e) {
             return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
-        } catch (Throwable $e) {
-            return Response::error('INTERNAL_SERVER_ERROR', $e->getMessage(), 500);
+        } catch (Throwable) {
+            return Response::error('INTERNAL_SERVER_ERROR', 'Error interno del servidor.', 500);
         }
     }
 
@@ -129,8 +129,8 @@ final class CoordinatorAbsenceController
             ], 200, 'Ausencia cancelada correctamente.');
         } catch (InvalidAbsenceException $e) {
             return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
-        } catch (Throwable $e) {
-            return Response::error('INTERNAL_SERVER_ERROR', $e->getMessage(), 500);
+        } catch (Throwable) {
+            return Response::error('INTERNAL_SERVER_ERROR', 'Error interno del servidor.', 500);
         }
     }
 }

@@ -318,7 +318,7 @@ final class ShiftHandoverService
                             'id' => $inc->getId(),
                             'ticket_code' => $inc->getTicketCode(),
                             'machine_id' => $inc->getMachineId(),
-                            'action' => 'UNASSIGNED_TO_REGISTERED',
+                            'sanitary_disposition' => 'UNASSIGNED_TO_REGISTERED',
                         ];
                     }
                 } else {

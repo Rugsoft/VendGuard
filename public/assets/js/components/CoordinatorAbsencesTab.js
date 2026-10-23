@@ -227,7 +227,6 @@ export const CoordinatorAbsencesTab = {
         <button
           type="button"
           class="vg-btn vg-btn-primary"
-          style="display: inline-flex; align-items: center; gap: 6px;"
           data-testid="btn-create-absence"
           @click="openCreateModal"
         >
@@ -277,7 +276,6 @@ export const CoordinatorAbsencesTab = {
         <button
           type="button"
           class="vg-btn vg-btn-secondary"
-          style="height: 34px; font-size: var(--font-size-body-sm); padding: 0 10px;"
           @click="loadAbsences"
         >
           🔄 Refrescar
@@ -358,8 +356,7 @@ export const CoordinatorAbsencesTab = {
                 <button
                   v-if="!a.is_cancelled"
                   type="button"
-                  class="vg-btn vg-btn-secondary"
-                  style="height: 28px; font-size: 11px; padding: 0 8px; color: var(--color-urgency-critical);"
+                  class="vg-btn vg-btn-danger-soft"
                   @click="openCancelModal(a)"
                 >
                   Anular
@@ -523,8 +520,7 @@ export const CoordinatorAbsencesTab = {
             </button>
             <button
               type="submit"
-              class="vg-btn vg-btn-primary"
-              style="background-color: var(--color-error); border-color: var(--color-error);"
+              class="vg-btn vg-btn-danger"
               :disabled="isCancelling"
             >
               <span v-if="!isCancelling">Confirmar Anulación</span>

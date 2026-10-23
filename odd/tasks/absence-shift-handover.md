@@ -47,7 +47,7 @@ S14 — **Auditoría inmutable y métricas (RF-01, RF-07, Art. III.3).** Catálo
 | **WU-5 / T-ASH-08** | S6, S7, S8, S9 | inline | `feat(api): implement REST endpoints and controllers for absences and shifts` (`b5ec70e`) | ✅ hecho |
 | **WU-6 / T-ASH-09** | S13 | inline | `feat(frontend): add mobile shift controls and coordinator absences tab` (`9197950`) | ✅ hecho |
 | **WU-6 / T-ASH-10** | S13 | inline | `feat(frontend): add mobile shift controls and coordinator absences tab` (`9197950`) | ✅ hecho |
-| **WU-7 / T-ASH-11** | S14 | inline | pendiente | ⏳ en curso |
+| **WU-7 / T-ASH-11** | S14 | inline | `feat(audit): catalog audit actions and synchronize battery metrics` | ✅ hecho |
 
 ## Log
 
@@ -58,3 +58,4 @@ S14 — **Auditoría inmutable y métricas (RF-01, RF-07, Art. III.3).** Catálo
 * **L5 (2026-10-23):** Finalizado WU-4 (T-ASH-06): integración de turnos y ausencias en `TechnicianAssignmentSuggester` y `PdoTechnicianSuggestionRepository`. Relegación de no disponibles al final con insignia `NO_DISPONIBLE`, promoción del suplente (`BACKUP`) a `RECOMENDADO ⭐` ante titular ausente y persistencia de guardia en emergencias de frío (R6). Suites unitarias e integración al 100% (35/35, 11/11, 23/23). Commit `67e5fe0`.
 * **L6 (2026-10-23):** Finalizado WU-5 (T-ASH-07 y T-ASH-08): controladores REST `CoordinatorAbsenceController`, `CoordinatorShiftController` y `TechnicianShiftController`, registrados en `AppRouter.php` bajo middlewares RBAC correspondientes. Suites de integración HTTP al 100% (14/14, 6/6, 9/9, 3/3). Commit `b5ec70e`.
 * **L7 (2026-10-23):** Finalizado WU-6 (T-ASH-09 y T-ASH-10): interfaz móvil de turno y modal de relevo en `TechnicianRouteView.js`, componente `CoordinatorAbsencesTab.js` con listado filtrado, modales de alta, reasignación asistida y anulación lógica en `CoordinatorDashboardView.js`. Cero deuda de diseño en tokens CSS (2268/2268). Suites ESM al 100% (15/15, 13/13). Commit `9197950`.
+* **L8 (2026-10-23):** Finalizado WU-7 (T-ASH-11): catalogación de los 10 eventos de auditoría del Módulo 21 en AuditActionLabels.js, blindaje constitucional Art. V.4 contra fugas de excepción 500 y sincronización exacta de las cifras documentales de la batería global (340 suites / 12.929 aserciones). Batería completa php tests/run_all.php al 100% (0 errors, 0 failures) y canal new_engine al 100% (19/19 en verde, 621 aserciones).
