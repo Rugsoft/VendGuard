@@ -57,19 +57,25 @@ function newEngineCategory(string $filePath): ?string
 
 /**
  * Aserciones declaradas por una suite en su resumen final.
+ *
+ * Acepta los dos formatos que el canal admite —el canónico `Total Aserciones: N` y la
+ * variante `RESULTADO: N aserciones`— y, si la suite no publica resumen, cuenta sus
+ * marcas de aserción. Antes devolvía 1 cuando no reconocía el texto, de modo que una
+ * suite con 17 aserciones publicaba 1: una cifra inventada es peor que una cifra baja
+ * que se puede ver.
  */
 function countAssertions(string $output): int
 {
-    if (preg_match('/(?:Total Aserciones|Total Assertions):\s*(\d+)/i', $output, $match) === 1) {
-        return (int)$match[1];
+    foreach ([
+        '/(?:Total Aserciones|Total Assertions):\s*(\d+)/i',
+        '/RESULTADO:\s*(\d+)\s+aserciones/i',
+    ] as $pattern) {
+        if (preg_match($pattern, $output, $match) === 1) {
+            return (int)$match[1];
+        }
     }
 
-    $passes = substr_count($output, '[PASS]');
-    if ($passes > 0) {
-        return $passes;
-    }
-
-    return 1;
+    return substr_count($output, '[PASS]') + substr_count($output, '[OK]');
 }
 
 /**

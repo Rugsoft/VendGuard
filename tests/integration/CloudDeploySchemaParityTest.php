@@ -98,6 +98,7 @@ $baseOnlySchema = 'vendguard_deploy_probe_base';
 $emptySchema = 'vendguard_deploy_probe_empty';
 $legacySchema = 'vendguard_deploy_probe_legacy';
 $zonesLegacySchema = 'vendguard_deploy_probe_zones_legacy';
+$nativePreparesSchema = 'vendguard_deploy_probe_native_prepares';
 
 // El esquema probado: el que la batería usa de verdad. Es el rasero, no el sujeto.
 $yardstickSchema = 'public';
@@ -659,6 +660,7 @@ $baseOnlyPdo = null;
 $emptyPdo = null;
 $legacyPdo = null;
 $zonesLegacyPdo = null;
+$nativePdo = null;
 
 try {
     // El rasero: el esquema contra el que corre toda la batería. No se toca.
@@ -1061,6 +1063,74 @@ try {
         'La capa incremental completa la base anterior y el arranque declara la convergencia (EARS-02.4)',
         'convergencia: ' . $zonesLegacyConvergenceFailure
     );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Caso 7: el ejecutor no depende del modo de preparación de la conexión
+    // ─────────────────────────────────────────────────────────────────────────
+    echo "\n--- Caso 7: la capa incremental sobre prepares nativos ---\n";
+
+    // `runAll()` enviaba cada sentencia por `PDO::query()`, que analiza el texto como
+    // sentencia parametrizada: con prepares nativos —el modo por defecto del driver, el que
+    // recibe cualquier PDO que no pase por `ConnectionFactory`— el operador JSONB `?` de la
+    // migración 010 se reescribe como `$1` y el motor responde 42601. El ejecutor no declara
+    // ese atributo de conexión, así que no puede suponerlo.
+    $nativeMigrationsDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vendguard_native_prepares_' . getmypid();
+    $nativeMigrationFile = $nativeMigrationsDir . '/001_jsonb_operator.sql';
+    @mkdir($nativeMigrationsDir, 0777, true);
+    file_put_contents(
+        $nativeMigrationFile,
+        "CREATE TABLE native_prepares_probe (\n"
+        . "    doc JSONB NOT NULL,\n"
+        . "    CONSTRAINT chk_native_prepares_probe CHECK (jsonb_typeof(doc) = 'object' AND doc ? 'version')\n"
+        . ");\n"
+    );
+
+    $definitionsPdo->exec("DROP SCHEMA IF EXISTS {$nativePreparesSchema} CASCADE");
+    $definitionsPdo->exec("CREATE SCHEMA {$nativePreparesSchema}");
+
+    $nativePdo = ConnectionFactory::getConnection([], true);
+    $nativePdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
+    $nativePdo->exec("SET search_path TO {$nativePreparesSchema}, public");
+
+    $nativeRunner = new PostgresMigrationRunner($nativePdo, $nativeMigrationsDir);
+    $nativeApplied = [];
+    $nativeFailure = '';
+    try {
+        $nativeApplied = $nativeRunner->runAll();
+    } catch (Throwable $exception) {
+        $nativeFailure = $exception->getMessage();
+    }
+
+    // El directorio de la migración se retira antes de asercionar: una aserción en rojo
+    // aborta la suite y dejaría el temporal huérfano justo en la corrida que se investiga.
+    @unlink($nativeMigrationFile);
+    @rmdir($nativeMigrationsDir);
+
+    $assert(
+        $nativeFailure === '' && $nativeApplied === ['001_jsonb_operator.sql'],
+        'El ejecutor aplica una migración con el operador JSONB `?` sobre una conexión con prepares nativos (el modo por defecto del driver)',
+        $nativeFailure
+    );
+
+    $nativeCheckRejects = false;
+    try {
+        $nativePdo->exec("INSERT INTO native_prepares_probe (doc) VALUES ('{\"firma\": 1}')");
+    } catch (PDOException $exception) {
+        $nativeCheckRejects = str_starts_with((string)$exception->getCode(), '23');
+    }
+    $assert(
+        $nativeCheckRejects,
+        'La restricción que usa `?` llega al motor con su semántica: rechaza un documento sin la clave version'
+    );
+
+    $executeStatementUsesQuery = preg_match(
+        '/function executeStatement\(PDO \$pdo, string \$statement\): void\s*\{[^}]*->query\(/s',
+        $bootScript
+    ) === 1;
+    $assert(
+        $executeStatementUsesQuery === false,
+        'La ruta de despliegue tampoco envía el DDL base por `query()`: el operador `?` del esquema base no puede reescribirse como marcador'
+    );
 } finally {
     // Las conexiones a las sondas se sueltan antes de borrarlas. El borrado va por una
     // conexion propia para no depender de la que quedó apuntando al esquema de sonda.
@@ -1070,9 +1140,10 @@ try {
     $emptyPdo = null;
     $legacyPdo = null;
     $zonesLegacyPdo = null;
+    $nativePdo = null;
 
     if ($definitionsPdo instanceof PDO) {
-        foreach ([$probeSchema, $baseOnlySchema, $emptySchema, $legacySchema, $zonesLegacySchema] as $scratchSchema) {
+        foreach ([$probeSchema, $baseOnlySchema, $emptySchema, $legacySchema, $zonesLegacySchema, $nativePreparesSchema] as $scratchSchema) {
             $definitionsPdo->exec("DROP SCHEMA IF EXISTS {$scratchSchema} CASCADE");
         }
     }

@@ -182,7 +182,7 @@ No hay migración, ni cambio de esquema, ni semilla.
 | **T-20.1-02** | `TechnicianMetricsController::getMyCsat()` + ruta + `TechnicianCsatApiTest` | inline | ✅ `496839a` · 39/39 |
 | **T-20.1-03** | Ampliación de `CsatPrivacyConstitutionalTest` (location_id ignorado) | inline | ✅ `8ed548f` · 22/22 |
 | **T-20.1-04** | `api.metrics.getMyCsat` + tarjeta en `TechnicianMetricsView` + grupo 6 en `MetricCardsTest` | inline | ✅ `376471a` · 52/52 · trinquete 2268 |
-| **T-20.1-05** | Cierre: spec 20 §13 marca R6 como revisada por 20.1, cifras y batería | inline | ✅ batería 325 suites / 12.656 aserciones |
+| **T-20.1-05** | Cierre: spec 20 §13 marca R6 como revisada por 20.1, cifras y batería | inline | ✅ batería 325 suites / 12.729 aserciones |
 
 Estimación: ~480 líneas autoradas, una sola unidad cohesiva. Entra como **un PR**; no hace falta cadena.
 

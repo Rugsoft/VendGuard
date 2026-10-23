@@ -257,10 +257,11 @@ final class PostgresMigrationRunner
 
         try {
             foreach (SqlScriptSplitter::split($sql) as $statement) {
-                $result = $this->pdo->query($statement);
-                if ($result instanceof \PDOStatement) {
-                    $result->closeCursor();
-                }
+                // `exec()` manda el texto tal cual. `query()` lo analiza como sentencia
+                // parametrizada y, con prepares nativos —el modo por defecto del driver—,
+                // reescribe el operador JSONB `?` de la migración 010 como `$1` y el motor
+                // responde 42601. El ejecutor acepta cualquier PDO: no puede suponer el modo.
+                $this->pdo->exec($statement);
             }
 
             $insert = $this->pdo->prepare(

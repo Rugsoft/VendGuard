@@ -116,19 +116,21 @@ function runTestProcess(string $command, string $label, string &$outputSummary =
  */
 function extractAssertionsCount(string $output): int
 {
-    // Busca patrones tipo: Total Aserciones: X | Total Assertions: X
-    if (preg_match('/(?:Total Aserciones|Total Assertions):\s*(\d+)/i', $output, $m)) {
-        return (int)$m[1];
+    foreach ([
+        '/(?:Total Aserciones|Total Assertions)(?:\s+(?:E2E\s+)?Evaluadas)?\s*:\s*(\d+)/i',
+        '/RESULTADO:\s*(\d+)\s+aserciones/i',
+        '/\(\s*(\d+)\s+assertions?\)/i',
+    ] as $pattern) {
+        if (preg_match($pattern, $output, $m) === 1) {
+            return (int)$m[1];
+        }
     }
-    // Guion E2E (T-40): " Total Aserciones E2E Evaluadas : X"
-    if (preg_match('/Total Aserciones E2E Evaluadas\s*:\s*(\d+)/i', $output, $m)) {
-        return (int)$m[1];
+
+    $markers = substr_count($output, '[PASS]') + substr_count($output, '[OK]');
+    if ($markers > 0) {
+        return $markers;
     }
-    // O conteo de [PASS]
-    $passes = substr_count($output, '[PASS]');
-    if ($passes > 0) {
-        return $passes;
-    }
+
     return 1;
 }
 

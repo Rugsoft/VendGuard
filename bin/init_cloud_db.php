@@ -328,8 +328,8 @@ function assertCatalogVerified(array $verified): void
  */
 function executeStatement(PDO $pdo, string $statement): void
 {
-    $result = $pdo->query($statement);
-    if ($result instanceof PDOStatement) {
-        $result->closeCursor();
-    }
+    // Por `exec()` y no por `query()`: el DDL base declara el operador JSONB `?`
+    // (`signed_document ? 'version'`) y `query()` analiza el texto como sentencia
+    // parametrizada; con prepares nativos lo reescribe como `$1` (42601).
+    $pdo->exec($statement);
 }
