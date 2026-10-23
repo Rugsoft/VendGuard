@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guía rápida por perfil · VendGuard</title>
+<style>
+  /* ============================================================
+     VendGuard · Hoja rápida A4 · Una página por perfil
+     Tokens de docs/design.md (inspiración Docker):
+     azul #2560ff · tinta #2c333f · hairline #c8cfda · canvas #f9fafb
+     Radios 4px (interactivo) / 8px (tarjeta). Sin dependencias.
+     ============================================================ */
+  @page { size: A4 portrait; margin: 9mm; }
+
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  :root {
+    --primary: #2560ff;
+    --primary-dark: #003db5;
+    --primary-soft: #e5f2fc;
+    --ink: #000000;
+    --slate: #2c333f;
+    --muted: #6c7e9d;
+    --canvas: #f9fafb;
+    --hairline: #c8cfda;
+    --hairline-soft: #a9b4c6;
+    --success: #38bd7d;
+    --success-dark: #177a4e;
+    --success-soft: #eaf8f1;
+    --warning: #f8b60f;
+    --warning-soft: #fef9c3;
+    --warning-ink: #854d0e;
+    --error: #ff5757;
+    --error-soft: #fddfdf;
+    --error-ink: #b91c1c;
+    --radius-xs: 4px;
+    --radius-sm: 8px;
+    --font-display: "DM Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+    --font-body: Inter, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+
+  html, body { margin: 0; padding: 0; background: #eef2f7; }
+
+  body {
+    font-family: var(--font-body);
+    color: var(--slate);
+    font-size: 9.4px;
+    line-height: 1.34;
+  }
+
+  .sheet {
+    width: 192mm;
+    min-height: 279mm;
+    margin: 10mm auto;
+    padding: 0;
+    background: #ffffff;
+    display: flex;
+    flex-direction: column;
+    page-break-after: always;
+    break-after: page;
+  }
+  .sheet:last-of-type { page-break-after: auto; break-after: auto; }
+
+  /* ---------- Cabecera ---------- */
+  .hd {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    border-bottom: 3px solid var(--primary);
+    padding-bottom: 5px;
+    margin-bottom: 7px;
+  }
+  .hd .brand {
+    font-family: var(--font-display);
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--primary);
+    margin-bottom: 2px;
+  }
+  .hd h1 {
+    font-family: var(--font-display);
+    font-size: 19px;
+    line-height: 1.05;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    color: var(--ink);
+    margin: 0;
+  }
+  .hd .sub {
+    font-size: 8.8px;
+    color: var(--muted);
+    margin-top: 3px;
+    max-width: 128mm;
+  }
+  .role {
+    background: var(--primary);
+    border: 1.5px solid var(--primary-dark);
+    border-radius: var(--radius-xs);
+    color: #ffffff;
+    font-size: 8.4px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 4px 8px;
+    text-align: center;
+    white-space: nowrap;
+    line-height: 1.2;
+  }
+  .role small {
+    display: block;
+    font-size: 7px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    opacity: 0.82;
+    margin-top: 2px;
+  }
+
+  /* ---------- Banda de flujo ---------- */
+  .flow {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    margin-bottom: 7px;
+  }
+  .flow .step {
+    flex: 1;
+    background: var(--canvas);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-xs);
+    padding: 3px 5px;
+    font-size: 7.9px;
+    font-weight: 600;
+    color: var(--slate);
+    text-align: center;
+    line-height: 1.2;
+  }
+  .flow .step b {
+    display: block;
+    color: var(--primary-dark);
+    font-size: 7.2px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .flow .arrow {
+    align-self: center;
+    color: var(--hairline-soft);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  /* ---------- Rejilla de tarjetas ---------- */
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    flex: 1 1 auto;
+    align-content: start;
+  }
+  .card {
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-sm);
+    padding: 6px 8px 7px;
+    background: #ffffff;
+  }
+  .card.wide { grid-column: 1 / -1; }
+  .card h2 {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--font-display);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--primary-dark);
+    margin: 0 0 4px;
+    padding-bottom: 3px;
+    border-bottom: 1px solid var(--hairline);
+    text-transform: uppercase;
+  }
+  .card h2 .n {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 13px;
+    height: 13px;
+    flex: 0 0 13px;
+    border-radius: var(--radius-xs);
+    background: var(--primary);
+    color: #ffffff;
+    font-size: 8px;
+    font-weight: 700;
+  }
+
+  p { margin: 0 0 3px; }
+  ul, ol { margin: 0; padding-left: 12px; }
+  li { margin-bottom: 2.5px; }
+  li:last-child { margin-bottom: 0; }
+  ol li::marker { color: var(--primary-dark); font-weight: 700; }
+
+  b, strong { color: var(--ink); }
+  .k { color: var(--ink); font-weight: 700; }
+  .muted { color: var(--muted); }
+  .small { font-size: 8.2px; }
+
+  /* Botones simulados (referencias visuales de la interfaz) */
+  .btn {
+    display: inline-block;
+    border: 1px solid var(--hairline-soft);
+    border-radius: var(--radius-xs);
+    background: var(--canvas);
+    color: var(--slate);
+    font-size: 8px;
+    font-weight: 700;
+    padding: 0 4px;
+    white-space: nowrap;
+    line-height: 1.55;
+  }
+  .btn.p { background: var(--primary); border-color: var(--primary-dark); color: #fff; }
+  .btn.g { background: var(--success-soft); border-color: var(--success); color: var(--success-dark); }
+  .btn.w { background: var(--warning-soft); border-color: var(--warning); color: var(--warning-ink); }
+  .btn.d { background: var(--error-soft); border-color: var(--error); color: var(--error-ink); }
+
+  /* Tablas compactas */
+  table { width: 100%; border-collapse: collapse; font-size: 8.1px; }
+  th {
+    background: var(--canvas);
+    color: #434c5f;
+    text-align: left;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 7.2px;
+    border: 1px solid var(--hairline);
+    padding: 2px 4px;
+  }
+  td { border: 1px solid var(--hairline); padding: 2.5px 4px; vertical-align: top; }
+  td:first-child { font-weight: 600; }
+
+  /* Avisos */
+  .callout {
+    background: var(--primary-soft);
+    border: 1px solid var(--hairline-soft);
+    border-left: 4px solid var(--primary);
+    border-radius: var(--radius-xs);
+    padding: 3px 6px;
+    font-size: 8.1px;
+    margin-top: 4px;
+  }
+  .callout.warn {
+    background: var(--warning-soft);
+    border-color: var(--warning);
+    border-left-color: var(--warning);
+    color: var(--warning-ink);
+  }
+  .callout.warn b { color: #6b3f07; }
+  .callout.danger {
+    background: var(--error-soft);
+    border-color: var(--error);
+    border-left-color: var(--error);
+    color: var(--error-ink);
+  }
+  .callout.danger b { color: #8f1414; }
+
+  .pill {
+    display: inline-block;
+    border-radius: var(--radius-xs);
+    padding: 0 4px;
+    font-size: 7.6px;
+    font-weight: 700;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .pill.gray { background: #f3f4f6; color: #4b5563; border-color: #d1d5db; }
+  .pill.red { background: var(--error-soft); color: var(--error-ink); border-color: #fca5a5; }
+  .pill.green { background: var(--success-soft); color: var(--success-dark); border-color: #86efac; }
+  .pill.amber { background: var(--warning-soft); color: var(--warning-ink); border-color: #fde047; }
+  .pill.blue { background: var(--primary-soft); color: var(--primary-dark); border-color: #9ec5fe; }
+
+  /* Pie */
+  .ft {
+    margin-top: 5px;
+    border-top: 1px solid var(--hairline);
+    padding-top: 3px;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 7.4px;
+    color: var(--muted);
+  }
+  .ft b { color: var(--slate); }
+
+  .screen-only { display: block; }
+
+  @media print {
+    html, body { background: #ffffff; }
+    .sheet { margin: 0; width: auto; min-height: 0; }
+    .screen-only { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     PÁGINA 1 · RESPONSABLE DE SEDE
+     ============================================================ -->
+<section class="sheet" aria-label="Guía rápida del Responsable de Sede">
+
+  <header class="hd">
+    <div>
+      <div class="brand">VendGuard · Guía rápida</div>
+      <h1>Responsable de Sede</h1>
+      <div class="sub">Avisa de una avería en menos de 2 minutos y sigue su reparación sin llamadas. Solo ves las máquinas y expedientes de tu centro.</div>
+    </div>
+    <div class="role">🏢 SEDE<small>1 / 3</small></div>
+  </header>
+
+  <div class="flow" aria-label="Flujo de una avería">
+    <div class="step"><b>1. Avisas</b>Reportas la avería</div>
+    <div class="arrow">›</div>
+    <div class="step"><b>2. Se asigna</b>Coordinación elige técnico</div>
+    <div class="arrow">›</div>
+    <div class="step"><b>3. Se repara</b>El técnico interviene</div>
+    <div class="arrow">›</div>
+    <div class="step"><b>4. Garantía</b>48 h para reabrir</div>
+    <div class="arrow">›</div>
+    <div class="step"><b>5. Se cierra</b>Archivo automático</div>
+  </div>
+
+  <div class="grid">
+
+    <section class="card">
+      <h2><span class="n">1</span>Tu acceso</h2>
+      <ul>
+        <li>Entra en VendGuard y elige <span class="btn p">🏢 1. Responsable Sede</span>.</li>
+        <li>Escribe el <b class="k">Código de Sede</b> (está en la etiqueta frontal de cualquier máquina) y la <b class="k">Clave de Centro</b> que te entregaron en mano.</li>
+        <li>Pulsa <span class="btn p">Acceder a mi sede</span>. La sesión dura <b class="k">24 h</b> de actividad.</li>
+      </ul>
+      <div class="callout warn"><b>Si no puedes entrar:</b> el mensaje siempre es genérico. Revisa el código y, si la clave se perdió, pide a coordinación que la reemita. La anterior deja de valer al instante.</div>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">2</span>Reportar una avería</h2>
+      <ol>
+        <li><b class="k">Máquinas e Incidencias</b> → localiza la máquina → <span class="btn p">Reportar avería</span>.</li>
+        <li>Elige la <b class="k">categoría</b>: frío, medios de pago, atasco, máquina apagada u otro.</li>
+        <li>Describe el fallo con detalle. Si es <b class="k">comida perecedera</b>, se marcará <span class="pill red">CRÍTICA</span> automáticamente.</li>
+        <li>Añade <b class="k">foto</b> si ayuda (máx. 5 MB). Indica <b class="k">nombre y teléfono</b>; el correo es opcional.</li>
+        <li>Si se tragó dinero: solicita <b class="k">reintegro</b> (genera PIN de 4 dígitos) o indica el importe como dato.</li>
+        <li>Envía y anota el <b class="k">código de ticket</b> (INC-…).</li>
+      </ol>
+      <div class="callout">Si la máquina ya tiene un ticket activo, <b>no se puede duplicar</b>. Usa <span class="btn">Anexar comentarios o fotos</span> para aportar información.</div>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">3</span>Leer la tarjeta de la máquina</h2>
+      <table>
+        <tr><th style="width:32%;">Borde</th><th>Significado y acción</th></tr>
+        <tr><td><span class="pill gray">Gris</span></td><td>Operativa. Puedes reportar si falla.</td></tr>
+        <tr><td><span class="pill red">Rojo</span></td><td>Avería activa. No se puede abrir otro ticket.</td></tr>
+        <tr><td><span class="pill green">Verde</span></td><td>Reparada, garantía 48 h. Puedes <b>reabrir</b>.</td></tr>
+        <tr><td><span class="pill amber">Ámbar</span></td><td>Pausa: el técnico necesita acceso o información.</td></tr>
+        <tr><td><span class="pill red">Rojo intenso</span></td><td>Cuarentena sanitaria. Fuera de servicio.</td></tr>
+      </table>
+      <p class="small" style="margin-top:4px;">Filtros: <b class="k">Todas</b> · <b class="k">Con Avería</b> · <b class="k">Operativas</b>. El botón <span class="btn">Actualizar estado</span> refresca el parque.</p>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">4</span>Conversación y pausas</h2>
+      <ul>
+        <li><span class="btn">💬 Conversación</span> abre el hilo del expediente. Solo ves y publicas <b class="k">comentarios públicos</b>; nunca notas internas.</li>
+        <li>Si aparece <b class="k">«Intervención en Pausa»</b>, pulsa <span class="btn p">💬 Aportar información</span> y explica el acceso, horario o autorización que falta.</li>
+        <li>La pausa <b class="k">no se reanuda sola</b> al escribir: la retoma el técnico o coordinación.</li>
+        <li>Tras <b class="k">72 h hábiles</b> sin respuesta, coordinación puede cancelar; la máquina queda bloqueada hasta que confirmes el acceso al pedir un aviso nuevo.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">5</span>Después de la reparación</h2>
+      <ul>
+        <li><b class="k">Reabrir:</b> solo por la misma causa y dentro de <b class="k">48 h</b>, indicando el motivo. Si la garantía expiró, crea un <b class="k">ticket nuevo</b>.</li>
+        <li><b class="k">Reintegros:</b> pestaña <b class="k">💶 Reintegros</b>. El afectado trae su PIN; pulsa <span class="btn p">Entregar efectivo</span> y valídalo. Cinco fallos bloquean el caso <b class="k">15 min</b>.</li>
+        <li><b class="k">Encuesta:</b> valora el servicio con 1–5 estrellas y un comentario opcional.</li>
+        <li><b class="k">Certificados:</b> pestaña <b class="k">🛡️ Control Higiénico</b>; individual y global de sede, imprimibles en A4.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">6</span>Reglas y privacidad</h2>
+      <ul>
+        <li>La sede <b class="k">no ve</b> el nombre del técnico, piezas, costes, notas internas, rutas ni otras sedes.</li>
+        <li>Fotos: máximo <b class="k">5 MB</b> y solo imágenes reales.</li>
+        <li>Un solo ticket activo por máquina; el historial no se borra.</li>
+      </ul>
+      <table style="margin-top:4px;">
+        <tr><th style="width:44%;">Si ves…</th><th>Qué hacer</th></tr>
+        <tr><td>«Código o clave no reconocidos»</td><td>Revisa y pide reemisión de la clave.</td></tr>
+        <tr><td>«Ya cuenta con un parte»</td><td>Abre la conversación y aporta datos.</td></tr>
+        <tr><td>«Garantía expirada»</td><td>Crea un ticket nuevo.</td></tr>
+        <tr><td>Foto rechazada</td><td>Reduce a menos de 5 MB o repite la foto.</td></tr>
+      </table>
+    </section>
+
+  </div>
+
+  <footer class="ft">
+    <span>Guía completa: <b>docs/guia_uso_por_rol.md</b> · Parte I, secciones 4–14</span>
+    <span>VendGuard · MVP Fase 1 · Imprimir en A4 vertical</span>
+  </footer>
+
+</section>
+
+<!-- ============================================================
+     PÁGINA 2 · COORDINACIÓN
+     ============================================================ -->
+<section class="sheet" aria-label="Guía rápida de Coordinación">
+
+  <header class="hd">
+    <div>
+      <div class="brand">VendGuard · Guía rápida</div>
+      <h1>Coordinación de Operaciones</h1>
+      <div class="sub">Convierte avisos dispersos en trabajo asignado, supervisado y auditable. Tienes la visión completa del parque y del personal.</div>
+    </div>
+    <div class="role">📊 COORDINACIÓN<small>2 / 3</small></div>
+  </header>
+
+  <div class="flow" aria-label="Flujo de trabajo de coordinación">
+    <div class="step"><b>1. Triar</b>Revisas la bandeja</div>
+    <div class="arrow">›</div>
+    <div class="step"><b>2. Asignar</b>Eliges técnico</div>
+    <div class="arrow">›</div>
+    <div class="step"><b>3. Supervisar</b>SLA y pausas</div>
+    <div class="arrow">›</div>
+    <div class="step"><b>4. Cerrar</b>Garantía 48 h</div>
+    <div class="arrow">›</div>
+    <div class="step"><b>5. Auditar</b>Métricas y registro</div>
+  </div>
+
+  <div class="grid">
+
+    <section class="card">
+      <h2><span class="n">1</span>Tu acceso</h2>
+      <ul>
+        <li>Elige <span class="btn p">📊 2. Coordinador</span> e introduce tu <b class="k">correo</b> y <b class="k">contraseña</b>.</li>
+        <li>Pulsa <span class="btn p">Entrar al panel de triaje</span>.</li>
+        <li>La barra superior es el mapa: Triaje, Parque, Mapa Territorial, Preventivo, Repuestos, Analítica, Stock, Reintegros, Administración y Métricas.</li>
+      </ul>
+      <div class="callout">Los <b>distintivos rojos</b> sobre una pestaña o sobre <b>🔔 Notificaciones</b> indican alertas pendientes: SLA roto, escalado sanitario o fallos definitivos de envío.</div>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">2</span>Triaje: cada mañana</h2>
+      <ul>
+        <li>La bandeja se refresca sola cada <b class="k">60 s</b>. Arriba: activos, críticas de frío, sin asignar y pendientes de repuesto.</li>
+        <li>Atiende el banner <b class="k">«¡ALERTA CRÍTICA DE SLA!»</b>: críticas de frío sin técnico &gt; 60 min.</li>
+        <li>Revisa <b class="k">«Espera prolongada de cliente»</b>: pausas &gt; 72 h hábiles.</li>
+        <li>Filtra por texto, estado, urgencia, <b class="k">Solo SLA &gt;60 m</b> y <b class="k">En espera de sede</b>.</li>
+        <li>Acciones de fila: <span class="btn">💬</span> hilo · <span class="btn">🔍 Ver detalle</span> · <span class="btn">🏷️ QR</span> · <span class="btn p">Asignar</span> · <span class="btn">▶️ Reanudar</span> · <span class="btn d">Descartar</span>.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">3</span>Asignar bien</h2>
+      <ol>
+        <li><b class="k">Asignar</b> abre el ranking territorial. El primer puesto lleva <span class="pill blue">Sugerido por Zona</span>; <span class="btn p">⚡ Asignar Sugerido</span> resuelve en dos toques.</li>
+        <li>También puedes elegir cualquier técnico activo del selector.</li>
+        <li>Si cambias la urgencia, el <b class="k">motivo es obligatorio</b> y queda auditado.</li>
+        <li>Si descartas al técnico de guardia en una avería de frío, justifica con <b class="k">≥ 20 caracteres</b>.</li>
+        <li>Confirma. El técnico lo ve en su ruta y recibe aviso (Telegram si está vinculado).</li>
+      </ol>
+      <div class="callout"><b>Reasignar</b> una avería que ya tiene técnico se hace desde <b>🔍 Ver detalle</b> y exige un motivo de <b>≥ 10 caracteres</b>.</div>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">4</span>Pausas y excepciones</h2>
+      <ul>
+        <li><span class="btn">▶️ Reanudar</span> descongela el SLA. Sin técnico asignado, el expediente vuelve a <b class="k">Registrada</b>, nunca a Asignada.</li>
+        <li><b class="k">Cancelar por inactividad</b> (&gt; 72 h hábiles) exige motivo <b class="k">≥ 20 caracteres</b>. La máquina queda <b class="k">bloqueada por falta de acceso</b> y el reintegro se desvincula.</li>
+        <li><b class="k">Descartar</b> es una baja lógica con motivo: no borra el historial.</li>
+        <li>La ficha <b class="k">🔍 Ver detalle</b> reúne sede, máquina, SLA, intervención, piezas, hilo y matriz de permisos.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">5</span>Preventivo y repuestos</h2>
+      <ul>
+        <li><b class="k">🛡️ Preventivo:</b> semáforos, <span class="btn p">⚡ Generar Preventivos Inminentes</span>, <span class="btn">⚙️ Frecuencias Normativas</span>, órdenes (nueva, asignar, cancelar con justificación) y <b class="k">🩺 Barrido Sanitario</b> (latido, 24 h, aplazamientos, escalado).</li>
+        <li><b class="k">📦 Repuestos:</b> catálogo maestro, homologación de piezas fuera de catálogo y coste congelado por intervención.</li>
+        <li><b class="k">📈 Analítica:</b> ranking, costes, fallo crónico (&gt; 3 sustituciones/90 días) y CSV.</li>
+        <li><b class="k">🧰 Stock Furgonetas:</b> unidades, mínimos y reposición.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">6</span>Reintegros y administración</h2>
+      <ul>
+        <li><b class="k">💶 Reintegros:</b> doble visto bueno si importe &gt; 10,00 €, discrepancia o falta de evidencia. Acciones: <b class="k">Aprobar · Pagar · Rechazar</b> (con motivo) <b>· Regularizar</b>.</li>
+        <li><b class="k">🏢 Sedes:</b> alta, edición, baja/reactivación y <span class="btn">🔑 Clave</span> (se muestra una sola vez; la anterior caduca).</li>
+        <li><b class="k">🗺️ Zonas:</b> CP, titular único, suplencias y vista inversa por técnico.</li>
+        <li><b class="k">🎰 Máquinas:</b> CRUD y transferencia auditada. <b class="k">🧑‍🔧 Personal:</b> altas, reseteo, baja con salvaguardas y Telegram del técnico.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">7</span>Métricas y notificaciones</h2>
+      <ul>
+        <li><b class="k">📊 KPIs:</b> MTTR, perecederos dentro de 4 h, tasa de resolución/backlog y reintervenciones por garantía.</li>
+        <li><b class="k">🗂️ Desglose</b> por sede, técnico, tipología y categoría. <b class="k">🛡️ Auditoría</b> inmutable y <b class="k">⭐ CSAT</b>.</li>
+        <li><span class="btn">📥 Exportar CSV</span> (hasta 10.000 filas) y <span class="btn p">📄 Generar Informe Ejecutivo</span> en A4.</li>
+        <li><b class="k">🔔 Notificaciones:</b> bandeja de salida, reintentar/cancelar envíos y webhook de emergencias <b class="k">https://</b> con prueba de 5 s.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">8</span>Checklist de supervisión</h2>
+      <table>
+        <tr><th style="width:23%;">Cuándo</th><th>Qué revisar</th></tr>
+        <tr><td>Diario</td><td>SLA, asignaciones, pausas, latido del barrido y fallos de notificación.</td></tr>
+        <tr><td>Semanal</td><td>Preventivos, homologación de repuestos, zonas, KPIs y reintegros atascados.</td></tr>
+        <tr><td>Mensual</td><td>CSV e informe ejecutivo, CSAT, auditoría de expedientes y stock.</td></tr>
+      </table>
+      <div class="callout danger"><b>No descartes</b> una recomendación sanitario sin justificar ni <b>canceles por inactividad</b> sin revisar el caso: ambas decisiones quedan auditadas.</div>
+    </section>
+
+  </div>
+
+  <footer class="ft">
+    <span>Guía completa: <b>docs/guia_uso_por_rol.md</b> · Parte II, secciones 15–30</span>
+    <span>VendGuard · MVP Fase 1 · Imprimir en A4 vertical</span>
+  </footer>
+
+</section>
+
+<!-- ============================================================
+     PÁGINA 3 · TÉCNICO DE CAMPO
+     ============================================================ -->
+<section class="sheet" aria-label="Guía rápida del Técnico de Campo">
+
+  <header class="hd">
+    <div>
+      <div class="brand">VendGuard · Guía rápida</div>
+      <h1>Técnico de Campo</h1>
+      <div class="sub">Atiende tu ruta desde el móvil, documenta cada intervención y cierra con trazabilidad. Solo ves tus paradas y tus métricas.</div>
+    </div>
+    <div class="role">📱 TÉCNICO<small>3 / 3</small></div>
+  </header>
+
+  <div class="flow" aria-label="Flujo de una intervención">
+    <div class="step"><b>1. Inicias</b>Llegas y pulsas</div>
+    <div class="arrow">›</div>
+    <div class="step"><b>2. Diagnosticas</b>Causa real</div>
+    <div class="arrow">›</div>
+    <div class="step"><b>3. Reparas</b>Acción y piezas</div>
+    <div class="arrow">›</div>
+    <div class="step"><b>4. Firmas</b>Sede o ausencia</div>
+    <div class="arrow">›</div>
+    <div class="step"><b>5. Albarán</b>A4 disponible</div>
+  </div>
+
+  <div class="grid">
+
+    <section class="card">
+      <h2><span class="n">1</span>Tu acceso y tu ruta</h2>
+      <ul>
+        <li>Elige <span class="btn p">📱 3. Técnico Móvil</span>, introduce tu correo y contraseña → <span class="btn p">Acceder a Mi Ruta</span>.</li>
+        <li>Secciones: <b class="k">📍 Averías</b> · <b class="k">🛡️ Preventivo</b> · <b class="k">📈 Mis Métricas</b>.</li>
+        <li>Orden: parada <b class="k">En curso</b> → críticas de frío por SLA → ordinarias por cercanía. Las de <b class="k">Pendiente repuesto</b> salen del orden pero siguen visibles.</li>
+        <li>Filtros: <b class="k">Todas · En curso · Por iniciar · Repuestos · En espera</b>.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">2</span>En cada parada</h2>
+      <ul>
+        <li>La tarjeta muestra ticket, urgencia, estado, máquina, planta y sede.</li>
+        <li><span class="btn">📞 Llamar conserjería</span> · <span class="btn">🧭 Navegar con GPS</span> · <span class="btn">🕘 Historial</span> · <span class="btn">💬 n mensajes</span>.</li>
+        <li>Pulsa <span class="btn p">▶ Iniciar intervención</span> al llegar, no al salir. Si estaba pendiente de repuesto: <span class="btn p">▶ Reanudar intervención</span>.</li>
+        <li>No puedes abrir una intervención <b class="k">oportunista</b> si mantienes otra abierta en una sede distinta.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">3</span>Pausar sin perder el hilo</h2>
+      <p><b class="k">Falta un repuesto</b></p>
+      <ul>
+        <li><span class="btn">⏸ Pausar repuesto</span> → pieza <b class="k">compatible</b> del catálogo o <b class="k">fuera de catálogo</b> con justificación ≥ 20 caracteres.</li>
+        <li>Indica cantidad <b class="k">1–50</b> y confirma. La parada queda <b class="k">Pendiente repuesto</b>.</li>
+      </ul>
+      <p style="margin-top:3px;"><b class="k">Falta acceso o información de la sede</b></p>
+      <ul>
+        <li><span class="btn">⏸️ Pausar por falta de acceso</span> → elige causa: edificio cerrado, máquina no localizada, corte eléctrico o falta de autorización.</li>
+        <li>Motivo <b class="k">≥ 20 caracteres</b>. El SLA se congela y puedes seguir la ruta.</li>
+        <li>Cuando la sede responda: <span class="btn p">▶ Reanudar intervención in situ</span>. La pausa no se reanuda sola.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">4</span>Resolver: comprobaciones</h2>
+      <ol>
+        <li><b class="k">Diagnóstico real</b> ≥ 20 caracteres (causa, no síntoma).</li>
+        <li><b class="k">Acción correctiva</b> ≥ 20 caracteres (qué hiciste).</li>
+        <li><b class="k">Reintegro:</b> dictamen si hay reclamación. Nunca pidas IBAN/Bizum en la ficha.</li>
+        <li><b class="k">Sanitario</b> (perecederos): temperatura real, retirada/destrucción del stock e higienización.</li>
+        <li><b class="k">Piezas:</b> <span class="btn g">✅ Sí, hubo sustitución</span> o <span class="btn">❎ No se cambiaron piezas</span>. Si es Sí: cantidad y destino <span class="pill amber">DESGUACE</span> o <span class="pill blue">TALLER</span>.</li>
+        <li><b class="k">Firma</b> del responsable o ausencia justificada.</li>
+        <li><span class="btn g">Confirmar Resolución (48h Garantía)</span>.</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">5</span>Firma y albarán</h2>
+      <ul>
+        <li><b class="k">Firma:</b> nombre del firmante, documento y trazo con el dedo. Borrar el trazo no borra los datos.</li>
+        <li><b class="k">Sin responsable:</b> marca <span class="btn">🚫 No había responsable disponible</span> y justifica con <b class="k">≥ 10 caracteres</b>.</li>
+        <li>Las dos vías son excluyentes: activar una vacía la otra. Un bloque incompleto bloquea el envío.</li>
+        <li>Tras cerrar: <span class="btn g">🧾 Ver albarán</span>. A4 con sede, máquina, técnico, diagnóstico, solución, piezas y firma. <b class="k">Sin costes, notas internas ni SLA</b>.</li>
+      </ul>
+      <div class="callout"><b>Todo se guarda en una transacción:</b> si algo falla, no queda una resolución a medias.</div>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">6</span>Oportunista y preventivo</h2>
+      <ul>
+        <li><b class="k">Oportunista:</b> disponible con una parada activa en la sede o durante <b class="k">30 min</b> tras la última visita.</li>
+        <li><b class="k">Flujo A · Nueva:</b> detección técnica o aviso verbal; descripción ≥ 10; foto ≤ 5 MB. Nace <b class="k">En curso</b>.</li>
+        <li><b class="k">Flujo B · Asumir:</b> toma una avería ya registrada en la sede y deja nota interna si procede.</li>
+        <li>Si hay críticas de frío en otra sede, el sistema exige <b class="k">confirmación expresa</b> para quedarte.</li>
+        <li><b class="k">Preventivo:</b> iniciar inspección, checklist PASS/FAIL, <span class="btn g">⚡ Marcar Todos Conformes</span>. Un fallo activa <b class="k">cuarentena</b>; se levanta con reinspección conforme.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">7</span>Errores y límites</h2>
+      <table>
+        <tr><th style="width:46%;">Si ves…</th><th>Qué hacer</th></tr>
+        <tr><td>«Faltan n caracteres»</td><td>Completa diagnóstico, acción o motivo hasta el mínimo.</td></tr>
+        <tr><td>No se habilita el cierre</td><td>Revisa piezas, bloque sanitario, dictamen o firma.</td></tr>
+        <tr><td>«Sede ya no habilitada»</td><td>Venció la ventana de 30 min o no hay parada activa.</td></tr>
+        <tr><td>«Intervención en otra sede»</td><td>Termina o pausa la intervención abierta antes de la oportunista.</td></tr>
+      </table>
+      <p class="small" style="margin-top:4px;"><b class="k">🧰 Stock de mi furgoneta</b> está plegado en Averías. <b class="k">📈 Mis Métricas</b> es privado: MTTR, resueltas, en curso y primera respuesta.</p>
+    </section>
+
+    <section class="card">
+      <h2><span class="n">8</span>Reglas de oro</h2>
+      <ul>
+        <li>Un solo ticket activo por máquina; no fuerces duplicados.</li>
+        <li>El cierre exige diagnóstico y solución reales, no «avería reparada».</li>
+        <li>Declara siempre las piezas, aunque la respuesta sea «No».</li>
+        <li>Recoge la firma en el momento; si no hay responsable, justifícalo.</li>
+        <li>La garantía es de <b class="k">48 h</b>: al volver a resolver tras una reapertura, el contador se reinicia.</li>
+        <li>La sede no ve tu nombre ni tus datos internos: trabaja con el código de operador.</li>
+      </ul>
+    </section>
+
+  </div>
+
+  <footer class="ft">
+    <span>Guía completa: <b>docs/guia_uso_por_rol.md</b> · Parte III, secciones 31–44</span>
+    <span>VendGuard · MVP Fase 1 · Imprimir en A4 vertical</span>
+  </footer>
+
+</section>
+
+<p class="screen-only" style="text-align:center;font-size:11px;color:#6c7e9d;margin:0 0 16px;">
+  Tres páginas A4 · Usa <b>Imprimir → Guardar como PDF</b> con escala 100 % y sin márgenes adicionales · <a href="guia_rapida_por_rol_a4.pdf" style="color:#2560ff;font-weight:700;">Descargar PDF</a>
+</p>
+
+</body>
+</html>
