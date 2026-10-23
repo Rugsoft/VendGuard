@@ -170,6 +170,14 @@ class AppRouter
         // de cualquier ruta `{id}` de técnico porque el `Router` resuelve por orden de
         // registro y un segmento dinámico la interpretaría como identificador.
         $router->get('/api/coordinator/technicians/quadrants', [CoordinatorZoneController::class, 'listTechnicianQuadrants'], [$coordinatorAuth]);
+        // Ausencias y turnos de técnicos (Módulo 21, T-ASH-07).
+        // Las rutas estáticas (/absences) se registran ANTES de los segmentos dinámicos ({id}).
+        $router->get('/api/coordinator/technicians/absences', [\VendGuard\Presentation\Controller\CoordinatorAbsenceController::class, 'listAbsences'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/technicians/{id}/absences', [\VendGuard\Presentation\Controller\CoordinatorAbsenceController::class, 'createAbsence'], [$coordinatorAuth]);
+        $router->delete('/api/coordinator/absences/{id}', [\VendGuard\Presentation\Controller\CoordinatorAbsenceController::class, 'cancelAbsence'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/technicians/{id}/shift', [\VendGuard\Presentation\Controller\CoordinatorShiftController::class, 'getShift'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/technicians/{id}/shifts/force-close', [\VendGuard\Presentation\Controller\CoordinatorShiftController::class, 'forceClose'], [$coordinatorAuth]);
+
         $router->get('/api/coordinator/zones/{id}/technicians', [CoordinatorZoneController::class, 'listZoneTechnicians'], [$coordinatorAuth]);
         $router->post('/api/coordinator/locations/{id}/override-zone', [CoordinatorZoneController::class, 'overrideLocationZone'], [$coordinatorAuth]);
 
@@ -310,6 +318,13 @@ class AppRouter
 
         // Inventario de la furgoneta del propio técnico (Módulo 18, RF-04.1 / RF-04.3)
         $router->get('/api/technician/van-stock', [\VendGuard\Presentation\Controller\TechnicianVanStockController::class, 'getInventory'], [$technicianAuth]);
+
+        // Ciclo de jornada y relevo de ruta (Módulo 21, T-ASH-08).
+        $router->get('/api/technician/shift/status', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'status'], [$technicianAuth]);
+        $router->post('/api/technician/shift/start', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'start'], [$technicianAuth]);
+        $router->post('/api/technician/shift/pause-meal', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'pauseMeal'], [$technicianAuth]);
+        $router->post('/api/technician/shift/resume', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'resume'], [$technicianAuth]);
+        $router->post('/api/technician/shift/close-handover', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'closeAndHandover'], [$technicianAuth]);
 
         // -----------------------------------------------------------------
         // 6. Módulo de Automatización y Tareas Cron (T-30)
