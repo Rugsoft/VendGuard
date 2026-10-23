@@ -10,7 +10,9 @@ use VendGuard\Application\Service\MetricsCalculationService;
 use VendGuard\Application\Service\MetricsExportService;
 use VendGuard\Core\Domain\Model\MetricFilter;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
+use VendGuard\Core\Domain\Repository\SatisfactionSurveyRepositoryInterface;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
+use VendGuard\Infrastructure\Repository\PdoSatisfactionSurveyRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
 
@@ -24,6 +26,7 @@ use VendGuard\Presentation\Http\Response;
  * Endpoints implementados:
  * - GET /api/coordinator/metrics/summary   (KPIs globales y estado de SLA)
  * - GET /api/coordinator/metrics/breakdown (Desglose multidimensional: sedes, técnicos, máquinas, averías)
+ * - GET /api/coordinator/metrics/csat      (Satisfacción de las sedes: media, distribución, sedes, técnicos y tendencia)
  * - GET /api/coordinator/metrics/export    (Descarga CSV de métricas agregadas)
  * - GET /api/coordinator/audit-log         (Consulta cronológica paginada y filtrable del audit log)
  * - GET /api/coordinator/audit-log/export  (Descarga CSV de eventos de auditoría acotada a 10.000 filas)
@@ -50,15 +53,18 @@ class CoordinatorMetricsController
     private MetricsCalculationService $metricsService;
     private MetricsExportService $exportService;
     private AuditLogRepositoryInterface $auditRepo;
+    private SatisfactionSurveyRepositoryInterface $surveyRepo;
 
     public function __construct(
         ?MetricsCalculationService $metricsService = null,
         ?MetricsExportService $exportService = null,
-        ?AuditLogRepositoryInterface $auditRepo = null
+        ?AuditLogRepositoryInterface $auditRepo = null,
+        ?SatisfactionSurveyRepositoryInterface $surveyRepo = null
     ) {
         $this->metricsService = $metricsService ?? new MetricsCalculationService();
         $this->exportService = $exportService ?? new MetricsExportService();
         $this->auditRepo = $auditRepo ?? new PdoAuditLogRepository();
+        $this->surveyRepo = $surveyRepo ?? new PdoSatisfactionSurveyRepository();
     }
 
     /**
@@ -100,6 +106,32 @@ class CoordinatorMetricsController
             $this->logInternalFailure($e);
 
             return Response::error('INTERNAL_SERVER_ERROR', 'Error al procesar el desglose analítico.', 500);
+        }
+    }
+
+    /**
+     * GET /api/coordinator/metrics/csat
+     *
+     * Satisfacción de las sedes en el periodo elegido (RF-04): media redondeada,
+     * distribución de cinco estrellas, tabla por sede, tabla por técnico y serie
+     * mensual (contratos §6.2).
+     *
+     * El rango y los filtros los resuelve `MetricFilter`, no este método: una
+     * segunda interpretación de `period`/`from`/`to` sería una segunda verdad
+     * sobre qué días entran en la métrica.
+     */
+    public function getCsat(Request $request): Response
+    {
+        try {
+            $filter = MetricFilter::fromQueryParams($request->getQueryParams());
+
+            return Response::json($this->surveyRepo->aggregate($filter)->toArray());
+        } catch (InvalidArgumentException $e) {
+            return Response::error('INVALID_FILTER_PARAMS', $e->getMessage(), 400);
+        } catch (Throwable $e) {
+            $this->logInternalFailure($e);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'Error al procesar la satisfacción de las sedes.', 500);
         }
     }
 
