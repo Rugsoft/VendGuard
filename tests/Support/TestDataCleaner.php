@@ -60,6 +60,10 @@ final class TestDataCleaner
         // el `ON DELETE SET NULL` de la clave foránea. El sembrador restituye
         // después el catálogo canónico.
         'operational_zones',
+        // Ausencias y turnos de técnicos (Módulo 21): cuelgan de `users`, que es
+        // una tabla protegida, por lo que el grafo desde incidents no los alcanza.
+        'technician_absences',
+        'technician_shifts',
     ];
 
     /**
@@ -98,6 +102,8 @@ final class TestDataCleaner
         'technician_van_stocks',
         'incident_service_sheets',
         'incident_satisfaction_surveys',
+        'technician_absences',
+        'technician_shifts',
     ];
 
     /** @var array<string, array<string, string>> tabla => (FK => tabla padre) caché por esquema */
