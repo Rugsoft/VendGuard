@@ -60,12 +60,16 @@
 * **Criterio de cierre:** toda alta pasa por relectura bloqueada; la auditoría usa `SUBMIT_SATISFACTION_SURVEY` sobre `TICKET`; un episodio valorado sobrevive a la reapertura.
 * **Cierre observado (2026-10-23):** `tests/unit/SatisfactionSurveyServiceTest.php` 20/20 en verde (precedencia 1→8, reapertura, duplicado previo y de carrera, ancla copiada, auditoría dentro de la transacción). Batería completa 319 suites / 12.380 aserciones en verde.
 
-### ⬜ T-CSAT-05 · API de sede
+### ✅ T-CSAT-05 · API de sede
 * **Refs:** RF-01.2, RF-01.4–01.7, RF-02.1, RF-02.5 · R2, R3 · Contratos §3, §4, §5
 * **Ruta:** inline
 * **Prueba en rojo:** `tests/integration/LocationSatisfactionApiTest.php`, `tests/unit/CsatPrivacyConstitutionalTest.php`.
 * **Alcance:** `src/Presentation/Controller/LocationSatisfactionController.php`, `src/Presentation/Routing/AppRouter.php`.
 * **Criterio de cierre:** 401/403/404/409/422/201 con la precedencia declarada; el listado nunca expone técnico; `pending_total` supera el tope de 20 sin truncarlo.
+* **Cierre observado (2026-10-23, `c847732`):** `LocationSatisfactionApiTest` 37/37 contra el motor real — 401 sin token, 404 de avería inexistente y de `{id}` no numérico, 403 de sede ajena antes que cualquier validación de cuerpo, 400 `MISSING_RATING`, 422 `INVALID_RATING` (nota 6 y `«4.0»`), 422 `COMMENT_TOO_LONG` (501 caracteres y comentario no textual), 201 con comentario normalizado, `resolution_at` copiado del expediente, evento `SUBMIT_SATISFACTION_SURVEY` firmado por la sede, 409 de duplicado sin segunda fila, reapertura → 422 `SURVEY_NOT_AVAILABLE`, cierre nuevo → 201 con dos episodios guardados, y tope de 20 con `pending_total` = 21. `CsatPrivacyConstitutionalTest` 15/15: el DTO construido desde una encuesta con técnico no filtra ni el nombre ni el identificador, la consulta de pendientes no selecciona columnas de técnico, el controlador no lee identidad técnica, las dos rutas van bajo `/api/location/` tras `SiteAuthMiddleware` y el puerto/repositorio no admiten `update` ni `delete`.
+* **Corrección asociada:** `TestDataCleanerIsolationTest` 2.7 pasa a declarar 21 tablas transitorias (la encuesta del Módulo 20 cuelga de `incidents` con `RESTRICT` y se drena por la ventana de purga).
+* **Contrato ajustado:** §3.1 y §4.1 declaran que el objeto viaja en el sobre estándar (`success`/`data`); §5 alinea el mensaje del 500 con el global del enrutador.
+* **Batería:** `php tests/run_all.php` → 321 suites / 12.432 aserciones, 0 fallos; cifras documentadas coherentes en `README.md` y los cuatro documentos de verificación.
 
 ### ⬜ T-CSAT-06 · Métrica CSAT de coordinación
 * **Refs:** RF-04.1–04.6 · R7, R8, R10, R11 · Contratos §6
