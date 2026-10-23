@@ -71,12 +71,14 @@
 * **Contrato ajustado:** §3.1 y §4.1 declaran que el objeto viaja en el sobre estándar (`success`/`data`); §5 alinea el mensaje del 500 con el global del enrutador.
 * **Batería:** `php tests/run_all.php` → 321 suites / 12.432 aserciones, 0 fallos; cifras documentadas coherentes en `README.md` y los cuatro documentos de verificación.
 
-### ⬜ T-CSAT-06 · Métrica CSAT de coordinación
+### ✅ T-CSAT-06 · Métrica CSAT de coordinación
 * **Refs:** RF-04.1–04.6 · R7, R8, R10, R11 · Contratos §6
 * **Ruta:** inline
 * **Prueba en rojo:** `tests/integration/CoordinatorCsatMetricsApiTest.php`.
 * **Alcance:** `src/Presentation/Controller/CoordinatorMetricsController.php` (método `getCsat()`), `src/Infrastructure/Repository/PdoSatisfactionSurveyRepository.php` (agregados), ruta en `AppRouter`.
 * **Criterio de cierre:** media redondeada, `average: null` sin respuestas, distribución con cinco claves, agrupaciones por nombre congelado y serie mensual en Europe/Madrid.
+* **Cierre observado (2026-10-23):** `CoordinatorCsatMetricsApiTest` 35/35 sobre el motor real: media 4,17 sobre seis respuestas, distribución `1..5` = `0,0,1,3,2`, `by_site` ordenado por respuestas con las dos sedes que tienen valoraciones, `by_technician` con el nombre congelado de la encuesta más reciente (renombrar al usuario no la reescribe) y «Sin técnico» para el nulo, serie `2026-08/09/10` ascendente con una resolución del 30-S a las 22:30 UTC contada en octubre (Europe/Madrid), filtros de sede y técnico, periodo vacío con `average: null` y cinco claves a cero, `400 INVALID_FILTER_PARAMS` en periodo y fechas inválidos, `401` sin token y `403` para técnico, y técnico dado de baja que sigue en la métrica (RF-04.6). El rango y los filtros salen siempre de `MetricFilter`.
+* **Batería:** `php tests/run_all.php` → 322 suites / 12.467 aserciones, 0 fallos; cifras documentadas coherentes.
 
 ### ⬜ T-CSAT-07 · Frontend del Portal de Sede
 * **Refs:** RF-05.1–05.7 · R1, R3 · Contratos §10.1
