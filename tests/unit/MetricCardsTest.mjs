@@ -291,6 +291,125 @@ const csatSection = CoordinatorMetricsView.template.slice(
 assert('5.19 El bloque no ofrece exportación ni filtro territorial (RF-06.2, RF-06.4)',
   !csatSection.includes('Exportar') && !csatSection.includes('selectedLocation') && !csatSection.includes('province'));
 
+// -------------------------------------------------------------
+// 6. Superficie CSAT del técnico (incremento 20.1)
+// -------------------------------------------------------------
+console.log('\n--- 6. Superficie CSAT del técnico (incremento 20.1) ---');
+
+// Evaluador mínimo de los `computed` sobre un doble de la vista: así se prueba la
+// lógica de presentación sin montar Vue.
+const computedOf = (instance) => Object.fromEntries(
+  Object.entries(TechnicianMetricsView.computed).map(([key, fn]) => [key, fn.call(instance)])
+);
+
+// Referencia al método real antes de doblarlo: `api` es un objeto compartido y el
+// doble de prueba lo sobrescribe.
+const realGetMyCsat = api.metrics.getMyCsat;
+
+let techCsatParams = null;
+let techCsatResponse = null;
+
+api.metrics.getMyCsat = async (params) => {
+  techCsatParams = params;
+  return { success: true, data: techCsatResponse };
+};
+
+const techCsatView = {
+  ...TechnicianMetricsView.data(),
+  loadMyCsat: TechnicianMetricsView.methods.loadMyCsat
+};
+
+techCsatResponse = {
+  summary: { average: 4.33, responses: 6, distribution: { '1': 0, '2': 0, '3': 1, '4': 2, '5': 3 } },
+  monthly_trend: [{ month: '2026-10', average: 4.67, responses: 3 }],
+  threshold_met: true
+};
+await techCsatView.loadMyCsat();
+let techCsatComputed = computedOf(techCsatView);
+
+assert('6.1 La vista consulta el CSAT propio con el período seleccionado',
+  techCsatParams?.period === 'last_30_days');
+assert('6.2 La media se pinta con dos decimales y su conteo',
+  techCsatComputed.csatAverage === '4.33' && techCsatView.csatData.summary.responses === 6);
+
+const bars = techCsatComputed.csatDistribution;
+assert('6.3 La distribución se ordena de cinco estrellas a una',
+  bars.map((row) => row.stars).join(',') === '5,4,3,2,1');
+assert('6.4 Cada barra calcula su porcentaje sobre las respuestas',
+  bars.map((row) => row.percent).join(',') === '50,33,17,0,0',
+  bars.map((row) => row.percent).join(','));
+assert('6.5 La tendencia mensual llega tal cual la sirve el servidor',
+  techCsatComputed.csatMonthlyTrend.length === 1
+    && techCsatComputed.csatMonthlyTrend[0].month === '2026-10');
+assert('6.6 Con valoraciones el estado no es de vacío', techCsatComputed.csatEmpty === false);
+
+techCsatResponse = {
+  summary: { average: null, responses: 2, distribution: { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 } },
+  monthly_trend: [],
+  threshold_met: false
+};
+await techCsatView.loadMyCsat();
+techCsatComputed = computedOf(techCsatView);
+
+assert('6.7 Por debajo del umbral no se publica ninguna media (RF-20.1.4)',
+  techCsatComputed.csatAverage === null && techCsatComputed.csatEmpty === false);
+assert('6.8 La plantilla declara el mensaje del umbral (RF-20.1.4)',
+  TechnicianMetricsView.template.includes('Aún no hay valoraciones suficientes para mostrar una media'));
+
+techCsatResponse = {
+  summary: { average: null, responses: 0, distribution: { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 } },
+  monthly_trend: [],
+  threshold_met: false
+};
+await techCsatView.loadMyCsat();
+
+assert('6.9 Sin valoraciones el estado es de vacío, nunca un cero (RF-20.1.3)',
+  computedOf(techCsatView).csatEmpty === true
+    && TechnicianMetricsView.template.includes('Aún no hay valoraciones en el periodo'));
+
+api.metrics.getMyMetrics = async () => ({
+  success: true,
+  data: { metrics: { my_mttr_formatted: '2h 30m' } }
+});
+api.metrics.getMyCsat = async () => {
+  throw new Error('CSAT no disponible');
+};
+
+const isolatedView = {
+  ...TechnicianMetricsView.data(),
+  loadMyMetrics: TechnicianMetricsView.methods.loadMyMetrics,
+  loadMyCsat: TechnicianMetricsView.methods.loadMyCsat
+};
+
+await isolatedView.loadMyMetrics();
+await isolatedView.loadMyCsat();
+
+assert('6.10 El fallo del CSAT no borra el resto del panel (RF-20.1.5)',
+  isolatedView.metricsData?.metrics?.my_mttr_formatted === '2h 30m'
+    && isolatedView.errorMessage === '');
+assert('6.11 El fallo se declara en el estado propio de la tarjeta',
+  isolatedView.csatError === 'CSAT no disponible' && isolatedView.csatData === null);
+
+const reloadedView = {
+  calls: [],
+  loadMyMetrics() { this.calls.push('metrics'); },
+  loadMyCsat() { this.calls.push('csat'); }
+};
+TechnicianMetricsView.methods.reload.call(reloadedView);
+
+assert('6.12 La recarga del panel pide las dos superficies',
+  reloadedView.calls.join(',') === 'metrics,csat',
+  reloadedView.calls.join(','));
+
+assert('6.13 La tarjeta no expone comentarios, sedes ni códigos de sede (RF-20.1.6)',
+  !TechnicianMetricsView.template.includes('by_site')
+    && !TechnicianMetricsView.template.includes('site_code')
+    && !TechnicianMetricsView.template.includes('comment'));
+
+assert('6.14 El CSAT propio vive en su propio endpoint',
+  typeof realGetMyCsat === 'function'
+    && realGetMyCsat.toString().includes('/technician/my-metrics/csat'));
+
 console.log('\n======================================================================');
 console.log(` RESUMEN: ${assertions - failures} de ${assertions} aserciones superadas.`);
 if (failures === 0) {

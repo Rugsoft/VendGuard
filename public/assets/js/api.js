@@ -1949,6 +1949,18 @@ export class ApiClient {
     getMyMetrics: (params = {}) => {
       const q = new URLSearchParams(params).toString();
       return this.get(`/technician/my-metrics${q ? `?${q}` : ''}`);
+    },
+
+    /**
+     * Retrieves the technician's own CSAT surface (increment 20.1, RF-20.1.1).
+     * Deliberately a separate request: a failure here must not empty the rest of
+     * the panel (RF-20.1.5).
+     * @param {Object} [params={}]
+     * @returns {Promise<Object>}
+     */
+    getMyCsat: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/technician/my-metrics/csat${q ? `?${q}` : ''}`);
     }
   };
 
