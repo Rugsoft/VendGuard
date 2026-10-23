@@ -87,6 +87,8 @@ La función de `UPDATE` se declara en la migración con `CREATE OR REPLACE FUNCT
 }
 ```
 
+El objeto viaja dentro del sobre estándar de la plataforma (`{"success": true, "data": { … }}`), igual que el resto de endpoints; los ejemplos de este documento muestran solo el contenido de `data`.
+
 * `items`: como máximo 20, orden `resolved_at DESC, incident_id DESC`.
 * `pending_total`: total real de episodios pendientes de la sede, sin tope.
 * `machine_model` puede ser `null` si la máquina no lo declara.
@@ -141,7 +143,7 @@ LIMIT 20;
 }
 ```
 
-Sin `technician_id` ni nombre de técnico: la respuesta la lee la sede.
+Sin `technician_id` ni nombre de técnico: la respuesta la lee la sede. El objeto viaja dentro del sobre estándar (`success`/`data`), como el resto de la API.
 
 ### 4.2. Orden de validación (normativo)
 
@@ -212,7 +214,7 @@ COMMIT
 | `COMMENT_TOO_LONG` | 422 | `El comentario no puede superar los 500 caracteres.` / `El comentario debe ser texto.` | Longitud o tipo. |
 | `SURVEY_ALREADY_SUBMITTED` | 409 | `Este servicio ya fue valorado.` | Unicidad por episodio. |
 | `INVALID_FILTER_PARAMS` | 400 | Mensaje de `MetricFilter`. | Solo en métricas. |
-| `INTERNAL_SERVER_ERROR` | 500 | `Se produjo un error interno.` | Sin detalle. |
+| `INTERNAL_SERVER_ERROR` | 500 | `Ha ocurrido un error interno no controlado en el servidor.` | Sin detalle; mensaje global del enrutador. |
 
 ---
 

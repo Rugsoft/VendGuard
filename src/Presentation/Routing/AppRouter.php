@@ -89,6 +89,11 @@ class AppRouter
         $router->post('/api/incidents/{ticket_code}/comments', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'addComment'], [$siteAuth]);
         $router->get('/api/incidents/{ticket_code}/comments', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'getComments'], [$siteAuth]);
         $router->post('/api/incidents/{ticket_code}/reopen', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'reopenIncident'], [$siteAuth]);
+        // Encuesta de satisfacción post-resolución (Módulo 20). La sede valorada sale
+        // de la sesión —el cuerpo no declara centro— y ninguna respuesta lleva técnico
+        // ni importe (Art. V.4). El listado se pagina a 20 y publica el total real.
+        $router->get('/api/location/satisfaction-surveys/pending', [\VendGuard\Presentation\Controller\LocationSatisfactionController::class, 'pending'], [$siteAuth]);
+        $router->post('/api/location/incidents/{id}/satisfaction-survey', [\VendGuard\Presentation\Controller\LocationSatisfactionController::class, 'submit'], [$siteAuth]);
 
         // Mantenimiento Preventivo y Certificados Sanitarios de Sede (Módulo 05: Sede - T-PREV-15)
         $router->get('/api/site/sanitary-status', [\VendGuard\Presentation\Controller\SiteSanitaryController::class, 'getSanitaryStatus'], [$siteAuth]);
