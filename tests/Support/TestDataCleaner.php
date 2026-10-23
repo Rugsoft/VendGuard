@@ -97,6 +97,7 @@ final class TestDataCleaner
         'technician_zone_assignments',
         'technician_van_stocks',
         'incident_service_sheets',
+        'incident_satisfaction_surveys',
     ];
 
     /** @var array<string, array<string, string>> tabla => (FK => tabla padre) caché por esquema */

@@ -861,6 +861,34 @@ export class ApiClient {
   };
 
   /**
+   * 3b. Encuesta de satisfacción de la sede (Módulo 20, contratos §10.1).
+   *
+   * Dos únicas llamadas: descubrir los servicios resueltos sin valorar —con el
+   * total real en `pending_total`, no el recorte de 20— y valorar el episodio
+   * vigente de una avería. La sede viaja en el token: ninguna de las dos recibe
+   * ni envía código de centro.
+   */
+  satisfaction = {
+    /**
+     * Episodios pendientes de valorar de la sede autenticada (RF-05.1, R3).
+     * @returns {Promise<{items: Array<Object>, pending_total: number}>}
+     */
+    getPending: () => {
+      return this.get('/location/satisfaction-surveys/pending');
+    },
+
+    /**
+     * Puntúa el episodio de resolución vigente de la avería (RF-02.1).
+     * @param {number|string} incidentId
+     * @param {{rating: number, comment?: string}} payload
+     * @returns {Promise<Object>}
+     */
+    submit: (incidentId, payload = {}) => {
+      return this.post(`/location/incidents/${encodeURIComponent(incidentId)}/satisfaction-survey`, payload);
+    }
+  };
+
+  /**
    * 3a. Notification Center: Outbox & Corporate Emergency Channel (Módulo 14).
    *
    * Superficie de Coordinación para supervisar la bandeja de salida garantizada
@@ -1878,6 +1906,16 @@ export class ApiClient {
     getBreakdown: (params = {}) => {
       const q = new URLSearchParams(params).toString();
       return this.get(`/coordinator/metrics/breakdown${q ? `?${q}` : ''}`);
+    },
+
+    /**
+     * Retrieves the CSAT block for the current filter (Módulo 20, RF-06.2).
+     * @param {Object} [params={}]
+     * @returns {Promise<Object>}
+     */
+    getCsat: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/metrics/csat${q ? `?${q}` : ''}`);
     },
 
     /**

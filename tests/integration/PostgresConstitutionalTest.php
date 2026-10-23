@@ -13,7 +13,7 @@ declare(strict_types=1);
  * QUÉ SE CERTIFICA, Y POR QUÉ ASÍ
  *
  *   1. **Art. III.1 — el borrado físico se rechaza con la boca abierta.** `DELETE FROM` sobre
- *      cada una de las 27 tablas lanza `SQLSTATE '45000'` con la marca `ART_III_1_VIOLATION`.
+ *      cada una de las 28 tablas lanza `SQLSTATE '45000'` con la marca `ART_III_1_VIOLATION`.
  *      Cada tabla se prueba **con una fila dentro**: un disparador `FOR EACH ROW` no ve una tabla
  *      vacía, de modo que certificar el rechazo sin filas no certificaría nada. La fixture se
  *      construye con el arnés del motor nuevo (`PostgresFixtureBuilder`), que respeta el grafo de
@@ -86,7 +86,7 @@ use VendGuard\Infrastructure\Repository\PdoUserRepository;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 27 tablas del contrato de correspondencia (§2.1, Módulos 14, 17, 18 y 19). */
+/** Las 28 tablas del contrato de correspondencia (§2.1, Módulos 14, 17, 18, 19 y 20). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -95,7 +95,7 @@ const CONTRACT_TABLES = [
     'sanitary_sweep_contentions', 'audit_log',
     'notification_outbox', 'notification_channel_settings',
     'operational_zones', 'operational_zone_postal_codes', 'technician_zone_assignments',
-    'technician_van_stocks', 'incident_service_sheets',
+    'technician_van_stocks', 'incident_service_sheets', 'incident_satisfaction_surveys',
 ];
 
 /** Las siete restricciones de longitud mínima del Art. V.1, con la tabla y la columna que vigilan. */

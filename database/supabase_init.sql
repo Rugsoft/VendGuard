@@ -1,5 +1,5 @@
 -- =============================================================================
--- VendGuard · DDL canónico del motor nuevo · COMPLETO (25 tablas)
+-- VendGuard · DDL canónico del motor nuevo · COMPLETO (28 tablas)
 -- PostgreSQL 15+ (certificado contra PostgreSQL 16.15 en deploy/local/postgres/)
 -- Fichero: database/supabase_init.sql
 -- Módulo: 12-hybrid-supabase-migration · T-HYBRID-01 (tablas 1-10) y T-HYBRID-02 (tablas 11-20)
@@ -8,7 +8,7 @@
 -- QUÉ ES ESTE FICHERO
 --   La creación del esquema relacional del motor nuevo: extensiones, los tipos
 --   `ENUM` del dominio con su tabla de correspondencia, las funciones canónicas
---   de blindaje y **las 25 tablas** con sus claves, restricciones, índices y
+--   de blindaje y **las 28 tablas** con sus claves, restricciones, índices y
 --   disparadores. La Parte 1 (§4) cubre `locations`, `machines`, `users`,
 --   `incidents`, `incident_history`, `incident_comments`, `audit_log`,
 --   `route_settings`, `preventive_settings` y `preventive_orders`; la Parte 2
@@ -17,7 +17,9 @@
 --   `refund_requests`, `unclaimed_cash_findings`, `sanitary_sweep_passes` y
 --   `sanitary_sweep_contentions`. La Parte 3 (§6) declara las tres tablas
 --   territoriales del módulo 17: `operational_zones`,
---   `operational_zone_postal_codes` y `technician_zone_assignments`.
+--   `operational_zone_postal_codes` y `technician_zone_assignments`; la Parte 4
+--   (§7) las tablas 26 a 28: `technician_van_stocks` (M18),
+--   `incident_service_sheets` (M19) e `incident_satisfaction_surveys` (M20).
 --
 -- CONTRATO QUE LO RIGE (no al revés)
 --   specs/technical/schema_correspondence_contract.md. Este DDL se escribe
@@ -1695,7 +1697,7 @@ CREATE OR REPLACE TRIGGER trg_no_delete_technician_zone_assignments
 
 
 -- =============================================================================
--- SECCIÓN 7 · Tabla 26 · Stock de repuestos de la furgoneta (Módulo 18)
+-- SECCIÓN 7 · Tablas 26 a 28 · Módulos 18, 19 y 20
 -- =============================================================================
 -- El saldo vive al final, igual que el catálogo territorial: depende de `users`
 -- (Tabla 3) y de `spare_parts` (Tabla 10), que ya existen. La declaración es
@@ -1852,26 +1854,105 @@ CREATE OR REPLACE TRIGGER trg_no_update_incident_service_sheets
     FOR EACH ROW EXECUTE FUNCTION prevent_service_sheet_rewrite();
 
 
+-- -----------------------------------------------------------------------------
+-- Tabla 28 · incident_satisfaction_surveys — encuesta de satisfacción (M20)
+-- -----------------------------------------------------------------------------
+-- QUÉ GUARDA
+-- La valoración que la sede hace del servicio ya resuelto: una nota entera de 1
+-- a 5 estrellas y un comentario opcional de hasta 500 caracteres.
+--
+-- POR QUÉ EL ANCLA ES EL EPISODIO Y NO LA AVERÍA
+-- Una reapertura pone `resolved_at = NULL` y borra el rastro de que hubo una
+-- resolución anterior. La unicidad `(incident_id, resolution_at)` conserva la
+-- encuesta ya enviada y permite valorar la siguiente resolución como un
+-- servicio distinto (RD-01). `resolution_at` se copia de `incidents.resolved_at`
+-- en la misma transacción que inserta la fila, nunca de `now()` (RF-02.6).
+--
+-- POR QUÉ EL NOMBRE DEL TÉCNICO ESTÁ CONGELADO
+-- La métrica agrupa por técnico. Si el nombre se leyera de `users` en cada
+-- consulta, un renombrado reescribiría la historia de todas sus valoraciones
+-- (R8, Art. III.3).
+--
+-- POR QUÉ NO HAY DATOS DEL RESPONDIENTE
+-- La encuesta se firma con la sede. El Art. V.4 manda minimizar y la métrica no
+-- necesita identificar a la persona que pulsó las estrellas (R2).
+--
+-- INMUTABILIDAD
+-- No hay `UPDATE` ni `DELETE`: el disparador de borrado es el canónico del
+-- Art. III.1 y el de actualización bloquea cualquier reescritura de la respuesta
+-- ya enviada (RD-06).
+CREATE TABLE IF NOT EXISTS incident_satisfaction_surveys (
+    id                       BIGINT GENERATED ALWAYS AS IDENTITY,
+    incident_id              BIGINT NOT NULL,
+    location_id              BIGINT NOT NULL,
+    technician_id            BIGINT,
+    technician_name_snapshot VARCHAR(100),
+    resolution_at            TIMESTAMPTZ NOT NULL,
+    rating                   SMALLINT NOT NULL,
+    comment                  VARCHAR(500),
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_incident_satisfaction_surveys PRIMARY KEY (id),
+    CONSTRAINT fk_survey_incident FOREIGN KEY (incident_id)
+        REFERENCES incidents (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_survey_location FOREIGN KEY (location_id)
+        REFERENCES locations (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_survey_technician FOREIGN KEY (technician_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT uq_survey_episode UNIQUE (incident_id, resolution_at),
+    CONSTRAINT chk_survey_rating CHECK (rating BETWEEN 1 AND 5),
+    CONSTRAINT chk_survey_comment CHECK (
+        comment IS NULL OR (char_length(btrim(comment)) BETWEEN 1 AND 500)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_surveys_resolution_at
+    ON incident_satisfaction_surveys (resolution_at);
+
+CREATE INDEX IF NOT EXISTS idx_surveys_location
+    ON incident_satisfaction_surveys (location_id, resolution_at);
+
+CREATE INDEX IF NOT EXISTS idx_surveys_technician
+    ON incident_satisfaction_surveys (technician_id, resolution_at);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_incident_satisfaction_surveys
+    BEFORE DELETE ON incident_satisfaction_surveys
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+-- El `BEFORE DELETE` canónico impide borrar la respuesta; este otro impide
+-- reescribirla. Sin él, la inmutabilidad sería una convención del código y
+-- cualquier ruta con permiso de escritura podría cambiar una nota ya enviada
+-- (Art. III.1, RD-06).
+CREATE OR REPLACE FUNCTION prevent_satisfaction_survey_rewrite()
+RETURNS TRIGGER AS $fn$
+BEGIN
+    RAISE EXCEPTION 'ART_III_1_VIOLATION: la encuesta de satisfacción no admite UPDATE (Art. III.1).'
+        USING ERRCODE = '45000';
+END;
+$fn$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER trg_no_update_incident_satisfaction_surveys
+    BEFORE UPDATE ON incident_satisfaction_surveys
+    FOR EACH ROW EXECUTE FUNCTION prevent_satisfaction_survey_rewrite();
+
+
 -- =============================================================================
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 27 tablas (las 27 del contrato de correspondencia) · 24 tipos del dominio en sus
--- 25 columnas `ENUM` · 3 funciones canónicas de blindaje
--- 41 disparadores: 27 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 13
--- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 1 `BEFORE UPDATE` de
--- bloqueo (`trg_no_update_incident_service_sheets`)
--- 41 restricciones nombradas: 25 claves primarias (la del mapeo de códigos postales
--- es el propio CP, no un identificador sintético) y 16 únicas
--- 17 restricciones `CHECK`: las 7 de longitud mínima del Art. V.1 (A-3: 4 en
--- `incidents`, 2 en `refund_requests`, 1 en `spare_part_requests`) más las 5 del
--- Módulo 17 (longitud de código y nombre de la zona, formato `#RRGGBB` de su color,
--- formato del CP del catálogo y formato del CP de la sede) más las 2 del Módulo 18
--- (cotas de cantidad disponible y de umbral mínimo) más las 3 del Módulo 19
--- (rama de la hoja, tamaño del trazo y forma del documento congelado) · 43 claves
+-- 28 tablas (las 28 del contrato de correspondencia) · 24 tipos del dominio en sus
+-- 25 columnas `ENUM` · 4 funciones de blindaje (las 3 canónicas más las dos de
+-- bloqueo de `UPDATE`, que comparten forma)
+-- 45 disparadores: 28 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 15
+-- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 2 `BEFORE UPDATE` de
+-- bloqueo (`trg_no_update_incident_service_sheets` y
+-- `trg_no_update_incident_satisfaction_surveys`)
+-- 46 restricciones nombradas: 28 claves primarias (la del mapeo de códigos postales
+-- es el propio CP, no un identificador sintético) y 18 únicas
+-- 23 restricciones `CHECK`: las 21 declaradas hasta el Módulo 19 más las 2 del
+-- Módulo 20 (rango de la nota y longitud del comentario) · 51 claves
 -- foráneas con las reglas declaradas en el contrato §2.4
--- 64 índices secundarios —uno por índice no único del esquema local y con las mismas
--- columnas (D-9), más los cinco del Módulo 17, los dos del Módulo 18 y el del
--- Módulo 19— y tres índices únicos parciales:
+-- 73 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1) y el
+-- Módulo 20 (3)— y tres índices únicos parciales:
 -- `uq_machine_active_ticket` (D-6), `uq_technician_zone_live` y
 -- `uq_technician_primary_zone` (Resolución QA 10)
 -- 2 columnas canónicas (`site_code_key`, `email_key`) con índice único propio (A-1/A-2)

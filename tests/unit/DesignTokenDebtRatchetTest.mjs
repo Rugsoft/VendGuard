@@ -51,7 +51,7 @@ const HEX_PATTERN = /#[0-9a-fA-F]{3,8}\b/g;
  * desde 2.271, así que el techo baja con ella.
  * Bajarlo es la direccion esperada; subirlo exige una decision explicita en el commit.
  */
-const CEILING = 2269;
+const CEILING = 2268;
 
 let assertions = 0;
 let failures = 0;

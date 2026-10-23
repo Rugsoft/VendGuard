@@ -89,6 +89,11 @@ class AppRouter
         $router->post('/api/incidents/{ticket_code}/comments', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'addComment'], [$siteAuth]);
         $router->get('/api/incidents/{ticket_code}/comments', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'getComments'], [$siteAuth]);
         $router->post('/api/incidents/{ticket_code}/reopen', [\VendGuard\Presentation\Controller\LocationPortalController::class, 'reopenIncident'], [$siteAuth]);
+        // Encuesta de satisfacción post-resolución (Módulo 20). La sede valorada sale
+        // de la sesión —el cuerpo no declara centro— y ninguna respuesta lleva técnico
+        // ni importe (Art. V.4). El listado se pagina a 20 y publica el total real.
+        $router->get('/api/location/satisfaction-surveys/pending', [\VendGuard\Presentation\Controller\LocationSatisfactionController::class, 'pending'], [$siteAuth]);
+        $router->post('/api/location/incidents/{id}/satisfaction-survey', [\VendGuard\Presentation\Controller\LocationSatisfactionController::class, 'submit'], [$siteAuth]);
 
         // Mantenimiento Preventivo y Certificados Sanitarios de Sede (Módulo 05: Sede - T-PREV-15)
         $router->get('/api/site/sanitary-status', [\VendGuard\Presentation\Controller\SiteSanitaryController::class, 'getSanitaryStatus'], [$siteAuth]);
@@ -207,6 +212,9 @@ class AppRouter
         $router->get('/api/coordinator/locations/{id}/qr-batch', [\VendGuard\Presentation\Controller\QrLabelController::class, 'getLocationBatch'], [$coordinatorAuth]);
         $router->get('/api/coordinator/metrics/summary', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'getSummary'], [$coordinatorAuth]);
         $router->get('/api/coordinator/metrics/breakdown', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'getBreakdown'], [$coordinatorAuth]);
+        // La satisfacción se agrega sobre `resolution_at`, no sobre la fecha de valoración:
+        // el servicio cuenta en el periodo en que se resolvió (contratos §6.4).
+        $router->get('/api/coordinator/metrics/csat', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'getCsat'], [$coordinatorAuth]);
         $router->get('/api/coordinator/metrics/export', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'exportMetrics'], [$coordinatorAuth]);
         $router->get('/api/coordinator/audit-log', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'getAuditLog'], [$coordinatorAuth]);
         $router->get('/api/coordinator/audit-log/export', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'exportAuditLog'], [$coordinatorAuth]);
