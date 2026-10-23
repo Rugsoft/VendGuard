@@ -40,9 +40,9 @@ S14 — **Auditoría inmutable y métricas (RF-01, RF-07, Art. III.3).** Catálo
 | **WU-1 / T-ASH-01** | S1 | inline | `feat(db): add technician absences and shifts schema migration 012` (`064fd1e`) | ✅ hecho |
 | **WU-2 / T-ASH-02** | S2 | inline | `feat(domain): define absence and shift entities, enums and domain exceptions` (`67be86c`) | ✅ hecho |
 | **WU-2 / T-ASH-03** | S3 | inline | `feat(repository): implement PDO repositories for technician absences and shifts` (`3669367`) | ✅ hecho |
-| **WU-3 / T-ASH-04** | S6, S7, S8, S9, S10 | inline | pendiente | ⏳ en curso |
-| **WU-3 / T-ASH-05** | S4, S5, S11 | inline | pendiente | ⏸️ pendiente |
-| **WU-4 / T-ASH-06** | S12 | inline | pendiente | ⏸️ pendiente |
+| **WU-3 / T-ASH-04** | S4, S5, S6, S11 | inline | `feat(service): implement absence management and shift lifecycle services` (`6af6c87`) | ✅ hecho |
+| **WU-3 / T-ASH-05** | S7, S8, S9, S10 | inline | `feat(service): implement shift handover service and sanitary fail-safe protocol` (`83b8be4`) | ✅ hecho |
+| **WU-4 / T-ASH-06** | S12 | inline | pendiente | ⏳ en curso |
 | **WU-5 / T-ASH-07** | S4, S5, S11 | inline | pendiente | ⏸️ pendiente |
 | **WU-5 / T-ASH-08** | S6, S7, S8, S9 | inline | pendiente | ⏸️ pendiente |
 | **WU-6 / T-ASH-09** | S13 | inline | pendiente | ⏸️ pendiente |
@@ -54,3 +54,4 @@ S14 — **Auditoría inmutable y métricas (RF-01, RF-07, Art. III.3).** Catálo
 * **L1 (2026-10-23):** Inicio de especificación e implementación del Módulo 21 (Feature 10: Shift Handover & Absence Coverage). Aprobación de spec v2.0 con resoluciones R1–R10 y superación de la Puerta SDD Fase 1.
 * **L2 (2026-10-23):** Finalizado WU-1 (T-ASH-01): migración `012_technician_absences_and_shifts.sql`, actualización de `supabase_init.sql`, contratos de esquema a 30 tablas y suites en verde (`PostgresAbsenceShiftSchemaTest`, `PostgresSchemaTest`, `PostgresConstitutionalTest`, `SchemaConvergenceParityTest`, `CloudDeploySchemaParityTest`, `TestDataCleanerIsolationTest` y batería `tests/run_all.php` 325/325 100% PASS). Commit `064fd1e`.
 * **L3 (2026-10-23):** Finalizado WU-2 (T-ASH-02 y T-ASH-03): entidades inmutables `TechnicianAbsence` y `TechnicianShift`, enums `AbsenceReason` y `ShiftStatus`, excepciones de dominio (`ActiveIncidentInProgressException`, `InvalidAbsenceException`, `InvalidShiftTransitionException`), interfaces y repositorios PDO (`PdoTechnicianAbsenceRepository`, `PdoTechnicianShiftRepository`). Suites de test unitarias y de integración pasando 100% (21/21, 32/32, 17/17, 18/18). Commits `67be86c` y `3669367`.
+* **L4 (2026-10-23):** Finalizado WU-3 (T-ASH-04 y T-ASH-05): servicios de aplicación `TechnicianAbsenceService`, `ShiftLifecycleService` y `ShiftHandoverService` con DTOs (`TechnicianAbsenceDto`, `TechnicianShiftDto`, `ShiftHandoverResultDto`). Protocolo sanitario de frío Art. II en 2 niveles certificado en integración, bloqueo fail-fast ante averías en curso y notas internas obligatorias (`is_internal = TRUE`). Suites unitarias e integración al 100% (8/8, 12/12, 10/10, 8/8). Commits `6af6c87` y `83b8be4`.
