@@ -4,7 +4,7 @@
 **Módulo:** 20 · Encuesta de Satisfacción Post-Resolución (CSAT de Sede)  
 **Documento Canónico:** `specs/20-csat-satisfaction-survey/spec.md`  
 **Versión:** 2 · incorpora las 11 resoluciones de la revisión QA (2026-10-23)  
-**Estado:** Resoluciones R1–R11 **aprobadas por el Product Owner el 2026-10-23** · puerta SDD superada el mismo día · **Fase 3 implementada y cerrada** (WU-1 a WU-7; batería global 323 suites / 12.575 aserciones en verde)  
+**Estado:** Resoluciones R1–R11 **aprobadas por el Product Owner el 2026-10-23** · puerta SDD superada el mismo día · **Fase 3 implementada y cerrada** (WU-1 a WU-7) · **R6 revisada por el incremento 20.1** (superficie CSAT de solo lectura para el técnico) · batería global 325 suites / 12.656 aserciones en verde  
 **Fecha:** Octubre 2026  
 **Origen:** Feature 6 del catálogo [`docs/features_pendientes.md`](../../docs/features_pendientes.md) (Bloque 2)  
 **Alineación Constitucional:** Art. I (supremacía de la especificación), Art. III.1 y III.3 (inmutabilidad y auditoría), Art. IV.1–IV.3 (PHP puro, Vue 3 estándar, cero dependencias), Art. V.4 (privacidad y segregación de la sede), Art. VI.2 (canalización del backlog). **Art. II: no aplica** (el módulo no altera cadena de frío, SLA ni cuarentenas).
@@ -306,7 +306,7 @@ Contrato completo, ejemplos y catálogo de errores en [`specs/technical/satisfac
 | **R3** | Tope de 20 | **Tope 20 + `pending_total` + refresco tras cada envío**. Sin paginación. |
 | **R4** | Rectificación de la nota | **Inmutable**, sin ventana de corrección. |
 | **R5** | Reapertura y avería crónica | Reabrir **anula el pendiente** del episodio anterior; un episodio ya valorado conserva su encuesta. El predecesor crónico **sí** es valorable. |
-| **R6** | Superficie del técnico | **Sin superficie**; el técnico no ve nota ni comentarios. |
+| **R6** | Superficie del técnico | **Sin superficie**; el técnico no ve nota ni comentarios. **Revisada por el incremento 20.1** (`spec-20.1-technician-surface.md`): el técnico ve su media, su conteo, su distribución y su tendencia mensual, nunca comentarios ni desglose por sede. |
 | **R7** | Grupos vacíos | **Solo grupos con respuestas** + estado vacío explícito. |
 | **R8** | Nombre del técnico | **Congelado** en `technician_name_snapshot`. |
 | **R9** | Tipo de `rating` | Acepta entero y cadena entera `1`–`5`; rechaza float y bool. Precedencia de errores de RF-02.2. |
