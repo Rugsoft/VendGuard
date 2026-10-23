@@ -7,7 +7,7 @@
 **Política de pruebas:** *test-first*. Cada tarea declara su prueba en ROJO antes de implementar. Cierra con `php tests/run_all.php` y las suites `tests/unit/*.mjs`.
 
 **Rama de trabajo:** `20-csat-satisfaction-survey`. **Estrategia de entrega:** `ask-on-risk` (ver plan §5).  
-**Estado:** WU-1 a WU-5 cerrados (último commit de WU-5: `97365f0`). Fase 1 y puerta SDD cerradas el 2026-10-23.
+**Estado:** WU-1 a WU-6 cerrados (último commit de WU-6: `f0f7db0`). Fase 1 y puerta SDD cerradas el 2026-10-23.
 
 ---
 
@@ -91,12 +91,16 @@
 * **Trinquete de tokens:** el modal y el aviso entran solo con `var(--color-…)`, de modo que la deuda de hex baja de 2.269 a 2.268 y el techo se congela en la nueva cifra (`DesignTokenDebtRatchetTest` 3/3, acta §6 actualizada).
 * **Batería:** `php tests/run_all.php` → 323 suites / 12.556 aserciones, 0 fallos; cifras documentadas coherentes.
 
-### ⬜ T-CSAT-08 · Frontend de coordinación
+### ✅ T-CSAT-08 · Frontend de coordinación
 * **Refs:** RF-06.1–06.4 · R7, R11 · Contratos §10.2
 * **Ruta:** inline
 * **Prueba en rojo:** ampliación de `CoordinatorMetricsViewTest.mjs`.
 * **Alcance:** `public/assets/js/views/CoordinatorMetricsView.js`.
 * **Criterio de cierre:** bloque CSAT con resumen, distribución, tablas y tendencia; estado vacío explícito; sin filtro territorial ni exportación.
+* **Cierre observado (2026-10-23, `f0f7db0`):** subpestaña «⭐ Satisfacción del Cliente (CSAT)» con media global (`4.17 / 5`), respuestas, distribución 5→1 con ceros rellenados y barras proporcionales al total, tabla por sede, tabla por técnico con el nombre congelado tal como llega y serie mensual. La carga viaja en el mismo lote que `getSummary`/`getBreakdown` y con el mismo `period`/`from`/`to`; un rango personalizado incompleto no dispara la petición. Estados `loading`, `error`, `empty` («Sin valoraciones en el periodo») y `ready`; un fallo del bloque se declara en `csatError` sin borrar las métricas de SLA. Sin filtro territorial, sin exportación propia y sin tocar el CSV global.
+* **Desvío de andamiaje:** `CoordinatorMetricsViewTest.mjs` no existe en el repositorio; la cobertura de la vista vive en `MetricCardsTest.mjs` desde T-MET-15, así que el grupo 5 se añadió allí (19 aserciones nuevas) en lugar de duplicar el arnés en un fichero nuevo. Se corrigió de paso el resumen de esa suite, que imprimía «100% PASS» aunque hubiera fallos.
+* **Cliente API:** `api.metrics.getCsat(params)` → `GET /api/coordinator/metrics/csat` con `URLSearchParams`, igual que `getSummary`/`getBreakdown`.
+* **Batería:** `php tests/run_all.php` → 323 suites / 12.575 aserciones, 0 fallos; cifras documentadas coherentes.
 
 ### ✅ T-CSAT-09 · Catálogo de auditoría y documentación (adelantada)
 * **Refs:** RF-03.4 · Contratos §7
