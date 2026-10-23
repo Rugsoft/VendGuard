@@ -7,7 +7,7 @@
 **Política de pruebas:** *test-first*. Cada tarea declara su prueba en ROJO antes de implementar. Cierra con `php tests/run_all.php` y las suites `tests/unit/*.mjs`.
 
 **Rama de trabajo:** `20-csat-satisfaction-survey`. **Estrategia de entrega:** `ask-on-risk` (ver plan §5).  
-**Estado:** WU-1 y WU-2 cerrados (último commit de WU-2: `42937cb`). Fase 1 y puerta SDD cerradas el 2026-10-23.
+**Estado:** WU-1 y WU-2 cerrados (último commit de WU-2: `3ecb652`). Fase 1 y puerta SDD cerradas el 2026-10-23.
 
 ---
 
