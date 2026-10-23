@@ -1101,6 +1101,11 @@ try {
         $nativeFailure = $exception->getMessage();
     }
 
+    // El directorio de la migración se retira antes de asercionar: una aserción en rojo
+    // aborta la suite y dejaría el temporal huérfano justo en la corrida que se investiga.
+    @unlink($nativeMigrationFile);
+    @rmdir($nativeMigrationsDir);
+
     $assert(
         $nativeFailure === '' && $nativeApplied === ['001_jsonb_operator.sql'],
         'El ejecutor aplica una migración con el operador JSONB `?` sobre una conexión con prepares nativos (el modo por defecto del driver)',
@@ -1117,9 +1122,6 @@ try {
         $nativeCheckRejects,
         'La restricción que usa `?` llega al motor con su semántica: rechaza un documento sin la clave version'
     );
-
-    @unlink($nativeMigrationFile);
-    @rmdir($nativeMigrationsDir);
 
     $executeStatementUsesQuery = preg_match(
         '/function executeStatement\(PDO \$pdo, string \$statement\): void\s*\{[^}]*->query\(/s',
