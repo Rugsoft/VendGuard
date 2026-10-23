@@ -21,6 +21,7 @@ import { MachineCard } from '../components/MachineCard.js';
 import { IncidentCommentThreadModal } from '../components/IncidentCommentThreadModal.js';
 import { IncidentReportModal } from '../components/IncidentReportModal.js';
 import { ReopenTicketModal } from '../components/ReopenTicketModal.js';
+import { SatisfactionSurveyModal } from '../components/SatisfactionSurveyModal.js';
 import { SiteSanitaryStatusTab } from '../components/SiteSanitaryStatusTab.js';
 import { SanitaryCertificateModal } from '../components/SanitaryCertificateModal.js';
 import { SiteGlobalCertificateModal } from '../components/SiteGlobalCertificateModal.js';
@@ -38,7 +39,8 @@ export const LocationPortalView = {
     SiteSanitaryStatusTab,
     SanitaryCertificateModal,
     SiteGlobalCertificateModal,
-    LocationRefundsTab
+    LocationRefundsTab,
+    SatisfactionSurveyModal
   },
   emits: ['report-incident', 'open-comments', 'reopen-incident'],
   props: {
@@ -71,7 +73,19 @@ export const LocationPortalView = {
       showReopenModal: false,
       showSanitaryCertModal: false,
       showGlobalCertModal: false,
-      selectedCertMachineCode: ''
+      selectedCertMachineCode: '',
+      /** Episodios resueltos sin valorar de la sede (Módulo 20, RF-05.1). */
+      pendingSurveys: [],
+      /** Total real de pendientes: no se recorta al tope de 20 de la lista. */
+      pendingSurveyTotal: 0,
+      isLoadingSurveys: false,
+      showSurveyModal: false,
+      /**
+       * R3: el modal se ofrece una sola vez por carga de página. Cerrarlo sin
+       * valorar no bloquea el portal ni lo reabre en cada refresco del listado;
+       * una recarga o un nuevo inicio de sesión vuelve a ofrecerlo.
+       */
+      surveyModalOffered: false
     };
   },
   computed: {
@@ -148,6 +162,16 @@ export const LocationPortalView = {
      */
     activeCommentTicketCode() {
       return this.activeCommentIncident?.ticket_code ?? null;
+    },
+    /**
+     * Aviso persistente de valoraciones pendientes (RF-05.2). Se construye con
+     * el total real del servidor: con 25 pendientes dice 25, no el tope de 20
+     * que devuelve la lista.
+     */
+    surveyNotice() {
+      const total = Number(this.pendingSurveyTotal) || 0;
+      if (total <= 0) return '';
+      return `Tiene ${total} ${total === 1 ? 'servicio' : 'servicios'} por valorar`;
     }
   },
   created() {
@@ -162,6 +186,7 @@ export const LocationPortalView = {
   mounted() {
     if (this.isAuthenticated && this.location?.site_code) {
       this.loadMachines();
+      this.loadPendingSurveys({ autoOpen: true });
     }
   },
   methods: {
@@ -192,7 +217,10 @@ export const LocationPortalView = {
         store.setSiteSession(response.location, response.token);
         this.siteCodeInput = '';
         this.accessCodeInput = '';
+        // Un inicio de sesión nuevo vuelve a ofrecer la encuesta (R3).
+        this.surveyModalOffered = false;
         await this.loadMachines();
+        await this.loadPendingSurveys({ autoOpen: true });
       } catch (err) {
         this.loginError = err.message || 'Código o clave no reconocidos. Contacte con el servicio técnico.';
       } finally {
@@ -221,6 +249,58 @@ export const LocationPortalView = {
         this.isLoadingMachines = false;
         store.setLoading(false);
       }
+    },
+
+    /**
+     * Consulta los episodios resueltos sin valorar de la sede (RF-05.1, R3).
+     *
+     * `autoOpen` abre el modal solo la primera vez de esta carga de página: un
+     * refresco del listado no vuelve a asaltar a quien ya lo cerró sin valorar.
+     */
+    async loadPendingSurveys(options = {}) {
+      const autoOpen = options?.autoOpen === true;
+      if (!this.isAuthenticated) return;
+
+      this.isLoadingSurveys = true;
+      try {
+        const data = await api.satisfaction.getPending();
+        this.pendingSurveys = Array.isArray(data?.items) ? data.items : [];
+        this.pendingSurveyTotal = Number(data?.pending_total ?? this.pendingSurveys.length) || 0;
+
+        if (autoOpen && this.pendingSurveys.length > 0 && !this.surveyModalOffered) {
+          this.surveyModalOffered = true;
+          this.showSurveyModal = true;
+        }
+      } catch (err) {
+        // La encuesta no puede tumbar el portal: sin listado no hay aviso.
+        this.pendingSurveys = [];
+        this.pendingSurveyTotal = 0;
+      } finally {
+        this.isLoadingSurveys = false;
+      }
+    },
+
+    openSurveyModal() {
+      this.surveyModalOffered = true;
+      this.showSurveyModal = true;
+    },
+
+    closeSurveyModal() {
+      this.showSurveyModal = false;
+    },
+
+    /**
+     * Una valoración enviada retira el episodio y vuelve a consultar el listado
+     * (RF-05.5): el modal pasa al siguiente o queda en su estado vacío.
+     */
+    async onSurveySubmitted(payload) {
+      const incidentId = payload?.incidentId ?? null;
+      if (incidentId !== null) {
+        this.pendingSurveys = this.pendingSurveys.filter(
+          (episode) => Number(episode?.incident_id) !== Number(incidentId)
+        );
+      }
+      await this.loadPendingSurveys({ autoOpen: true });
     },
 
     /**
@@ -506,6 +586,25 @@ export const LocationPortalView = {
 
         <!-- TAB 1: Machines & Incidents View -->
         <div v-if="activePortalTab === 'machines'">
+          <!-- Aviso persistente de valoraciones pendientes (RF-05.2, R3) -->
+          <div
+            v-if="surveyNotice"
+            class="vg-portal-survey-notice"
+            data-testid="location-portal-survey-notice"
+            style="background-color: var(--color-info-bg); border: 1px solid var(--color-info-border); border-radius: var(--radius-card, 8px); padding: 12px 16px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;"
+          >
+            <p style="font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-slate); margin: 0;">
+              ⭐ {{ surveyNotice }}
+            </p>
+            <button
+              type="button"
+              class="vg-btn vg-btn-secondary"
+              style="height: 32px; padding: 0 12px; font-size: 13px; border-radius: var(--radius-interactive, 4px);"
+              @click="openSurveyModal"
+            >
+              Valorar servicio
+            </button>
+          </div>
           <!-- Global Amber Banner when at least one machine is in PENDING_INFO (RF-05.1, RF-05.2, RNF-04) -->
           <div
             v-if="pendingInfoMachines.length > 0"
@@ -712,6 +811,15 @@ export const LocationPortalView = {
         <!-- Site Global Consolidated Certificate Modal (RF-PREV-07, EARS 7.2) -->
         <SiteGlobalCertificateModal
           v-model="showGlobalCertModal"
+        />
+
+        <!-- Post-resolution satisfaction survey (Módulo 20, RF-05.1–05.5, R3) -->
+        <SatisfactionSurveyModal
+          :is-open="showSurveyModal"
+          :episodes="pendingSurveys"
+          :loading="isLoadingSurveys"
+          @submitted="onSurveySubmitted"
+          @closed="closeSurveyModal"
         />
       </div>
     </div>

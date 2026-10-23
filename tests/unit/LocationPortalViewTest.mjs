@@ -28,6 +28,7 @@ import { api } from '../../public/assets/js/api.js';
 import { store, clearSession, setSiteSession } from '../../public/assets/js/store.js';
 import { MachineCard } from '../../public/assets/js/components/MachineCard.js';
 import { IncidentReportModal } from '../../public/assets/js/components/IncidentReportModal.js';
+import { SatisfactionSurveyModal } from '../../public/assets/js/components/SatisfactionSurveyModal.js';
 import { LocationPortalView } from '../../public/assets/js/views/LocationPortalView.js';
 
 let assertions = 0;
@@ -359,6 +360,179 @@ assert('7.7 An unknown ticket opens nothing and keeps the flag untouched',
   unknownTicketState.deepLinkHandled === false && openedTickets.length === 1);
 assert('7.8 The machine list triggers the deep link resolution after loading',
   LocationPortalView.methods.loadMachines.toString().includes('openDeepLinkedIncident'));
+
+// ---------------------------------------------------------------------
+// TEST GROUP 8: Post-resolution satisfaction survey (RF-05.1–05.5, R3)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 8: Post-resolution satisfaction survey (RF-05.1–05.5) ---');
+
+const pendingEpisode = {
+  incident_id: 42,
+  ticket_code: 'INC-2026-0042',
+  machine_code: 'VEND-0101',
+  machine_model: 'Sanden Vendo G-Drink',
+  resolved_at: '2026-07-01T09:30:00+00:00'
+};
+
+const secondPendingEpisode = {
+  incident_id: 43,
+  ticket_code: 'INC-2026-0043',
+  machine_code: 'VEND-0102',
+  machine_model: 'Necta Canto Touch',
+  resolved_at: '2026-07-02T11:00:00+00:00'
+};
+
+/**
+ * Fake `this` for the survey slice with the real methods wired together.
+ */
+function createSurveyState(overrides = {}) {
+  const state = {
+    isAuthenticated: true,
+    pendingSurveys: [],
+    pendingSurveyTotal: 0,
+    isLoadingSurveys: false,
+    showSurveyModal: false,
+    surveyModalOffered: false,
+    ...overrides
+  };
+
+  for (const name of ['loadPendingSurveys', 'openSurveyModal', 'closeSurveyModal', 'onSurveySubmitted']) {
+    state[name] = LocationPortalView.methods[name].bind(state);
+  }
+
+  return state;
+}
+
+async function withPendingSurveys(stub, run) {
+  const original = api.satisfaction.getPending;
+  api.satisfaction.getPending = stub;
+  try {
+    return await run();
+  } finally {
+    api.satisfaction.getPending = original;
+  }
+}
+
+assert('8.1 Portal registers the SatisfactionSurveyModal component',
+  LocationPortalView.components.SatisfactionSurveyModal === SatisfactionSurveyModal);
+
+const portalData = LocationPortalView.data();
+assert('8.2 Portal state starts with no pending surveys and the modal closed',
+  Array.isArray(portalData.pendingSurveys) && portalData.pendingSurveys.length === 0
+    && portalData.pendingSurveyTotal === 0 && portalData.showSurveyModal === false
+    && portalData.isLoadingSurveys === false && portalData.surveyModalOffered === false);
+
+assert('8.3 Notice reads "Tiene 3 servicios por valorar"',
+  LocationPortalView.computed.surveyNotice.call({ pendingSurveyTotal: 3 }) === 'Tiene 3 servicios por valorar');
+assert('8.4 The notice uses the singular for a single service',
+  LocationPortalView.computed.surveyNotice.call({ pendingSurveyTotal: 1 }) === 'Tiene 1 servicio por valorar');
+assert('8.5 No notice when nothing is pending',
+  LocationPortalView.computed.surveyNotice.call({ pendingSurveyTotal: 0 }) === '');
+assert('8.6 The notice shows the real total above the 20 episode cap',
+  LocationPortalView.computed.surveyNotice.call({ pendingSurveyTotal: 25 }) === 'Tiene 25 servicios por valorar');
+
+// 8.7: first load offers the modal
+let surveyState = createSurveyState();
+await withPendingSurveys(async () => ({
+  items: [pendingEpisode, secondPendingEpisode],
+  pending_total: 25
+}), async () => {
+  await surveyState.loadPendingSurveys({ autoOpen: true });
+});
+
+assert('8.7 The pending list and the real total are stored',
+  surveyState.pendingSurveys.length === 2 && surveyState.pendingSurveyTotal === 25);
+assert('8.8 The first authenticated load opens the modal',
+  surveyState.surveyModalOffered === true && surveyState.showSurveyModal === true);
+assert('8.9 The loading flag is released', surveyState.isLoadingSurveys === false);
+
+// 8.10: R3 — closing it does not reopen on a later list refresh
+surveyState.closeSurveyModal();
+assert('8.10 Closing hides the modal', surveyState.showSurveyModal === false);
+
+await withPendingSurveys(async () => ({
+  items: [pendingEpisode, secondPendingEpisode],
+  pending_total: 25
+}), async () => {
+  await surveyState.loadPendingSurveys({ autoOpen: true });
+});
+
+assert('8.11 A later refresh does not reopen the modal in the same page load',
+  surveyState.showSurveyModal === false && surveyState.pendingSurveyTotal === 25);
+
+surveyState.openSurveyModal();
+assert('8.12 The persistent notice reopens it on demand', surveyState.showSurveyModal === true);
+
+// 8.13: submitting one valuation advances the list and the total
+surveyState = createSurveyState({ showSurveyModal: true, surveyModalOffered: true });
+let pendingCalls = 0;
+await withPendingSurveys(async () => {
+  pendingCalls++;
+  return pendingCalls === 1
+    ? { items: [pendingEpisode, secondPendingEpisode], pending_total: 2 }
+    : { items: [secondPendingEpisode], pending_total: 1 };
+}, async () => {
+  await surveyState.loadPendingSurveys({ autoOpen: true });
+  await surveyState.onSurveySubmitted({ incidentId: 42, alreadySubmitted: false });
+});
+
+assert('8.13 The submitted episode leaves the local list',
+  surveyState.pendingSurveys.length === 1 && surveyState.pendingSurveys[0].incident_id === 43);
+assert('8.14 The total is refreshed from the server', surveyState.pendingSurveyTotal === 1);
+assert('8.15 The modal stays open for the next episode', surveyState.showSurveyModal === true);
+
+// 8.16: the last valuation leaves the modal in its empty state
+surveyState = createSurveyState({ showSurveyModal: true, surveyModalOffered: true });
+await withPendingSurveys(async () => ({ items: [], pending_total: 0 }), async () => {
+  await surveyState.onSurveySubmitted({ incidentId: 42, alreadySubmitted: false });
+});
+
+assert('8.16 An empty pending list leaves no notice',
+  surveyState.pendingSurveys.length === 0 && surveyState.pendingSurveyTotal === 0
+    && LocationPortalView.computed.surveyNotice.call(surveyState) === '');
+
+// 8.17: a failing survey fetch never breaks the portal
+surveyState = createSurveyState({ pendingSurveyTotal: 4 });
+let surveyThrew = false;
+await withPendingSurveys(async () => { throw new Error('500'); }, async () => {
+  try {
+    await surveyState.loadPendingSurveys({ autoOpen: true });
+  } catch (error) {
+    surveyThrew = true;
+  }
+});
+
+assert('8.17 A survey fetch failure is swallowed', surveyThrew === false);
+assert('8.18 A survey fetch failure clears the stale notice',
+  surveyState.pendingSurveys.length === 0 && surveyState.pendingSurveyTotal === 0 && surveyState.showSurveyModal === false);
+
+// 8.19: unauthenticated portal does not call the API
+surveyState = createSurveyState({ isAuthenticated: false });
+let unauthCalls = 0;
+await withPendingSurveys(async () => { unauthCalls++; return { items: [], pending_total: 0 }; }, async () => {
+  await surveyState.loadPendingSurveys({ autoOpen: true });
+});
+assert('8.19 No pending fetch without an authenticated site', unauthCalls === 0);
+
+// 8.20: template wiring
+assert('8.20 The persistent notice lives in the machines tab',
+  LocationPortalView.template.includes('data-testid="location-portal-survey-notice"')
+    && LocationPortalView.template.includes('{{ surveyNotice }}'));
+assert('8.21 The notice reopens the modal through its button',
+  LocationPortalView.template.includes('@click="openSurveyModal"'));
+assert('8.22 The modal receives the episodes, the loading flag and both listeners',
+  LocationPortalView.template.includes('<SatisfactionSurveyModal')
+    && LocationPortalView.template.includes(':episodes="pendingSurveys"')
+    && LocationPortalView.template.includes(':loading="isLoadingSurveys"')
+    && LocationPortalView.template.includes('@submitted="onSurveySubmitted"')
+    && LocationPortalView.template.includes('@closed="closeSurveyModal"'));
+assert('8.23 mounted() looks up the pending surveys of an authenticated site',
+  LocationPortalView.mounted.toString().includes('loadPendingSurveys'));
+assert('8.24 A new site login offers the survey again',
+  LocationPortalView.methods.handleSiteLogin.toString().includes('surveyModalOffered = false')
+    && LocationPortalView.methods.handleSiteLogin.toString().includes('loadPendingSurveys'));
+assert('8.25 A valuation refreshes the pending list',
+  LocationPortalView.methods.onSurveySubmitted.toString().includes('loadPendingSurveys'));
 
 // Summary
 console.log('\n======================================================================');
