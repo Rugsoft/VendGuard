@@ -272,6 +272,9 @@ class AppRouter
         // Historial de averías de una máquina de la ruta (solo lectura, Art. V.4).
         $router->get('/api/technician/machines/{id}/history', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getMachineHistory'], [$technicianAuth]);
         $router->get('/api/technician/my-metrics', [\VendGuard\Presentation\Controller\TechnicianMetricsController::class, 'getMyMetrics'], [$technicianAuth]);
+        // Valoración CSAT propia (incremento 20.1, RF-20.1.1): endpoint separado para que
+        // un fallo del agregado no vacíe el resto del panel.
+        $router->get('/api/technician/my-metrics/csat', [\VendGuard\Presentation\Controller\TechnicianMetricsController::class, 'getMyCsat'], [$technicianAuth]);
         $router->patch('/api/technician/incidents/{id}/start', [\VendGuard\Presentation\Controller\TechnicianController::class, 'startIntervention'], [$technicianAuth]);
         $router->patch('/api/technician/incidents/{id}/pause', [\VendGuard\Presentation\Controller\TechnicianController::class, 'pauseIntervention'], [$technicianAuth]);
         // Pausa por bloqueo de sede y reanudación manual in situ (Módulo 11: T-PAUSE-12).

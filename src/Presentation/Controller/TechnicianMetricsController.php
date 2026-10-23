@@ -6,10 +6,13 @@ namespace VendGuard\Presentation\Controller;
 
 use InvalidArgumentException;
 use Throwable;
+use VendGuard\Application\DTO\TechnicianCsatDto;
 use VendGuard\Application\Service\MetricsCalculationService;
 use VendGuard\Core\Domain\Model\MetricFilter;
 use VendGuard\Core\Domain\Model\User;
+use VendGuard\Core\Domain\Repository\SatisfactionSurveyRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
+use VendGuard\Infrastructure\Repository\PdoSatisfactionSurveyRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Http\Response;
@@ -30,13 +33,16 @@ class TechnicianMetricsController
 {
     private MetricsCalculationService $metricsService;
     private UserRepositoryInterface $userRepo;
+    private SatisfactionSurveyRepositoryInterface $surveyRepo;
 
     public function __construct(
         ?MetricsCalculationService $metricsService = null,
-        ?UserRepositoryInterface $userRepo = null
+        ?UserRepositoryInterface $userRepo = null,
+        ?SatisfactionSurveyRepositoryInterface $surveyRepo = null
     ) {
         $this->metricsService = $metricsService ?? new MetricsCalculationService();
         $this->userRepo = $userRepo ?? new PdoUserRepository();
+        $this->surveyRepo = $surveyRepo ?? new PdoSatisfactionSurveyRepository();
     }
 
     /**
@@ -88,6 +94,44 @@ class TechnicianMetricsController
             error_log('[vendguard] ' . $e);
 
             return Response::error('INTERNAL_SERVER_ERROR', 'Error al consultar las métricas del técnico.', 500);
+        }
+    }
+
+    /**
+     * GET /api/technician/my-metrics/csat
+     *
+     * Valoración CSAT propia del técnico autenticado (incremento 20.1, RF-20.1.1).
+     *
+     * Endpoint separado de `my-metrics` por dominio de fallo: un fallo del agregado
+     * CSAT no puede vaciar el MTTR ni las averías resueltas (RF-20.1.5).
+     *
+     * La identidad sale del token y `location_id` se **descarta**: con ese filtro el
+     * técnico aislaría una única valoración y sabría qué sede le puntuó (§4.1).
+     */
+    public function getMyCsat(Request $request): Response
+    {
+        $userId = $request->getAttribute('user_id');
+        if ($userId === null || !is_numeric($userId)) {
+            return Response::error('UNAUTHORIZED', 'No se pudo identificar al técnico autenticado.', 401);
+        }
+
+        try {
+            // El técnico solo consulta lo suyo: se sobrescribe cualquier id de la query.
+            $queryParams = $request->getQueryParams();
+            $queryParams['technician_id'] = (int)$userId;
+            unset($queryParams['location_id']);
+
+            $filter = MetricFilter::fromQueryParams($queryParams);
+            $report = $this->surveyRepo->aggregate($filter);
+
+            return Response::json(TechnicianCsatDto::fromReport($report)->toArray());
+        } catch (InvalidArgumentException $e) {
+            return Response::error('INVALID_FILTER_PARAMS', $e->getMessage(), 400);
+        } catch (Throwable $e) {
+            // El mensaje de la excepción no se devuelve: un `PDOException` incluye SQL.
+            error_log('[vendguard] ' . $e);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'Error al consultar tus valoraciones.', 500);
         }
     }
 }
