@@ -92,9 +92,11 @@ final class NotificationTrackingLinkResolver
             NotificationTemplate::INCIDENT_CANCELLED_CITIZEN_QR,
             NotificationTemplate::CITIZEN_QR_OBSERVATION_ACK => self::AUDIENCE_CITIZEN_QR,
 
-            // El técnico entrante recibe su aviso con enlace a la parada concreta.
+            // El técnico entrante recibe su aviso con enlace a la parada concreta,
+            // también cuando la asignación llega por relevo de fin de turno.
             // La desasignación se queda en INTERNAL a propósito (RF-TG-06).
-            NotificationTemplate::TECHNICIAN_ASSIGNED => self::AUDIENCE_TECHNICIAN,
+            NotificationTemplate::TECHNICIAN_ASSIGNED,
+            NotificationTemplate::TELEGRAM_INCIDENT_ASSIGNMENT => self::AUDIENCE_TECHNICIAN,
 
             default => self::AUDIENCE_INTERNAL,
         };

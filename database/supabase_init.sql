@@ -1,5 +1,5 @@
 -- =============================================================================
--- VendGuard · DDL canónico del motor nuevo · COMPLETO (28 tablas)
+-- VendGuard · DDL canónico del motor nuevo · COMPLETO (30 tablas)
 -- PostgreSQL 15+ (certificado contra PostgreSQL 16.15 en deploy/local/postgres/)
 -- Fichero: database/supabase_init.sql
 -- Módulo: 12-hybrid-supabase-migration · T-HYBRID-01 (tablas 1-10) y T-HYBRID-02 (tablas 11-20)
@@ -8,7 +8,7 @@
 -- QUÉ ES ESTE FICHERO
 --   La creación del esquema relacional del motor nuevo: extensiones, los tipos
 --   `ENUM` del dominio con su tabla de correspondencia, las funciones canónicas
---   de blindaje y **las 28 tablas** con sus claves, restricciones, índices y
+--   de blindaje y **las 30 tablas** con sus claves, restricciones, índices y
 --   disparadores. La Parte 1 (§4) cubre `locations`, `machines`, `users`,
 --   `incidents`, `incident_history`, `incident_comments`, `audit_log`,
 --   `route_settings`, `preventive_settings` y `preventive_orders`; la Parte 2
@@ -18,8 +18,9 @@
 --   `sanitary_sweep_contentions`. La Parte 3 (§6) declara las tres tablas
 --   territoriales del módulo 17: `operational_zones`,
 --   `operational_zone_postal_codes` y `technician_zone_assignments`; la Parte 4
---   (§7) las tablas 26 a 28: `technician_van_stocks` (M18),
---   `incident_service_sheets` (M19) e `incident_satisfaction_surveys` (M20).
+--   (§7) las tablas 26 a 30: `technician_van_stocks` (M18),
+--   `incident_service_sheets` (M19), `incident_satisfaction_surveys` (M20),
+--   `technician_absences` (M21) y `technician_shifts` (M21).
 --
 -- CONTRATO QUE LO RIGE (no al revés)
 --   specs/technical/schema_correspondence_contract.md. Este DDL se escribe
@@ -271,7 +272,7 @@ END $do$;
 
 DO $do$
 BEGIN
-    CREATE TYPE notification_priority AS ENUM ('CRITICAL_SANITARY', 'STANDARD');
+    CREATE TYPE notification_priority AS ENUM ('CRITICAL_SANITARY', 'PRIORITY', 'STANDARD');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
 
@@ -313,7 +314,9 @@ BEGIN
         -- Módulo 16: alerta sanitaria al posponer una parada crítica en otra sede
         -- y aviso a la sede de la reapertura practicada in situ.
         'OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT',
-        'INCIDENT_REOPENED_IN_SITU_SITE'
+        'INCIDENT_REOPENED_IN_SITU_SITE',
+        -- Módulo 21: aviso propio y prioritario al técnico receptor de un relevo.
+        'TELEGRAM_INCIDENT_ASSIGNMENT'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -1935,26 +1938,124 @@ CREATE OR REPLACE TRIGGER trg_no_update_incident_satisfaction_surveys
     FOR EACH ROW EXECUTE FUNCTION prevent_satisfaction_survey_rewrite();
 
 
+-- -----------------------------------------------------------------------------
+-- Tabla 29 · technician_absences — ausencias de técnicos (M21)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS technician_absences (
+    id                    BIGINT GENERATED ALWAYS AS IDENTITY,
+    technician_id         BIGINT NOT NULL,
+    reason                VARCHAR(30) NOT NULL,
+    starts_at             TIMESTAMPTZ NOT NULL,
+    ends_at               TIMESTAMPTZ NOT NULL,
+    notes                 TEXT,
+    created_by            BIGINT NOT NULL,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    cancelled_at          TIMESTAMPTZ,
+    cancelled_by          BIGINT,
+    cancellation_reason   TEXT,
+
+    CONSTRAINT pk_technician_absences PRIMARY KEY (id),
+    CONSTRAINT fk_tech_absences_user FOREIGN KEY (technician_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_tech_absences_creator FOREIGN KEY (created_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_tech_absences_canceller FOREIGN KEY (cancelled_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_tech_absences_dates CHECK (ends_at >= starts_at),
+    CONSTRAINT chk_tech_absences_reason CHECK (
+        reason IN ('VACATION', 'SICK_LEAVE', 'TRAINING', 'PERSONAL_LEAVE', 'COMPENSATORY', 'OTHER')
+    ),
+    CONSTRAINT chk_tech_absences_cancellation CHECK (
+        (cancelled_at IS NULL AND cancelled_by IS NULL AND cancellation_reason IS NULL)
+        OR (cancelled_at IS NOT NULL AND cancelled_by IS NOT NULL AND char_length(btrim(cancellation_reason)) >= 5)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_tech_absences_lookup 
+    ON technician_absences (technician_id, starts_at, ends_at)
+    WHERE cancelled_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_tech_absences_status 
+    ON technician_absences (starts_at, ends_at)
+    WHERE cancelled_at IS NULL;
+
+CREATE OR REPLACE TRIGGER trg_no_delete_technician_absences
+    BEFORE DELETE ON technician_absences
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 30 · technician_shifts — ciclo de turno y jornada (M21)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS technician_shifts (
+    id                    BIGINT GENERATED ALWAYS AS IDENTITY,
+    technician_id         BIGINT NOT NULL,
+    shift_date            DATE NOT NULL DEFAULT CURRENT_DATE,
+    status                VARCHAR(20) NOT NULL DEFAULT 'ON_SHIFT',
+    started_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    meal_break_started_at TIMESTAMPTZ,
+    meal_break_ended_at   TIMESTAMPTZ,
+    closed_at             TIMESTAMPTZ,
+    closed_by             BIGINT,
+    close_reason          TEXT,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT pk_technician_shifts PRIMARY KEY (id),
+    CONSTRAINT fk_tech_shifts_user FOREIGN KEY (technician_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_tech_shifts_closer FOREIGN KEY (closed_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_tech_shifts_status CHECK (
+        status IN ('ON_SHIFT', 'MEAL_BREAK', 'OFF_SHIFT')
+    ),
+    CONSTRAINT chk_tech_shifts_meal_order CHECK (
+        meal_break_ended_at IS NULL OR (meal_break_started_at IS NOT NULL AND meal_break_ended_at >= meal_break_started_at)
+    ),
+    CONSTRAINT chk_tech_shifts_close_order CHECK (
+        closed_at IS NULL OR closed_at >= started_at
+    )
+);
+
+-- Restricción de concurrencia: Máximo un turno abierto simultáneo por técnico (Resolución R3)
+-- Soporta turno partido y emergencias porque un técnico puede tener varios turnos cerrados al día.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tech_shifts_single_active 
+    ON technician_shifts (technician_id)
+    WHERE closed_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_tech_shifts_lookup 
+    ON technician_shifts (technician_id, shift_date);
+
+CREATE OR REPLACE TRIGGER trg_touch_technician_shifts
+    BEFORE UPDATE ON technician_shifts
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+CREATE OR REPLACE TRIGGER trg_no_delete_technician_shifts
+    BEFORE DELETE ON technician_shifts
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+
 -- =============================================================================
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 28 tablas (las 28 del contrato de correspondencia) · 24 tipos del dominio en sus
+-- 30 tablas (las 30 del contrato de correspondencia) · 24 tipos del dominio en sus
 -- 25 columnas `ENUM` · 4 funciones de blindaje (las 3 canónicas más las dos de
 -- bloqueo de `UPDATE`, que comparten forma)
--- 45 disparadores: 28 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 15
+-- 48 disparadores: 30 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 16
 -- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 2 `BEFORE UPDATE` de
 -- bloqueo (`trg_no_update_incident_service_sheets` y
 -- `trg_no_update_incident_satisfaction_surveys`)
--- 46 restricciones nombradas: 28 claves primarias (la del mapeo de códigos postales
+-- 48 restricciones nombradas: 30 claves primarias (la del mapeo de códigos postales
 -- es el propio CP, no un identificador sintético) y 18 únicas
--- 23 restricciones `CHECK`: las 21 declaradas hasta el Módulo 19 más las 2 del
--- Módulo 20 (rango de la nota y longitud del comentario) · 51 claves
+-- 29 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
+-- Módulo 21 (3 en ausencias y 3 en turnos) · 56 claves
 -- foráneas con las reglas declaradas en el contrato §2.4
--- 73 índices secundarios —uno por índice no único del esquema local y con las mismas
--- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1) y el
--- Módulo 20 (3)— y tres índices únicos parciales:
--- `uq_machine_active_ticket` (D-6), `uq_technician_zone_live` y
--- `uq_technician_primary_zone` (Resolución QA 10)
+-- 76 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1), el
+-- Módulo 20 (3) y el Módulo 21 (3)— y cuatro índices únicos parciales:
+-- `uq_machine_active_ticket` (D-6), `uq_technician_zone_live`,
+-- `uq_technician_primary_zone` (Resolución QA 10) y
+-- `uq_tech_shifts_single_active` (M21, Resolución R3)
 -- 2 columnas canónicas (`site_code_key`, `email_key`) con índice único propio (A-1/A-2)
 -- 1 columna derivada (`incident_replaced_parts.total_cost_snapshot`, D-7)
 -- 3 columnas `JSONB` en `audit_log` (D-4)

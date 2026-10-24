@@ -880,10 +880,38 @@ try {
     );
 
     $probeEnums = $enumMap($probePdo, $probeSchema);
+
+    // El contrato fija el conjunto de etiquetas, no su ordinal. Un arranque limpio
+    // crea el ENUM en el orden semántico del DDL; una migración incremental añade
+    // los valores nuevos al final. Comparar las listas tal cual convertiría esa
+    // diferencia legítima de ordinales en un rojo, así que se comparan conjuntos.
+    $enumSet = static function (array $enums): array {
+        foreach ($enums as &$labels) {
+            sort($labels, SORT_STRING);
+        }
+        unset($labels);
+        ksort($enums);
+
+        return $enums;
+    };
+    $enumDeviations = static function (array $expected, array $actual): array {
+        $deviations = [];
+        $types = array_unique(array_merge(array_keys($expected), array_keys($actual)));
+        foreach ($types as $type) {
+            $missing = array_values(array_diff($expected[$type] ?? [], $actual[$type] ?? []));
+            $extra = array_values(array_diff($actual[$type] ?? [], $expected[$type] ?? []));
+            if ($missing !== [] || $extra !== []) {
+                $deviations[$type] = ['faltan' => $missing, 'sobran' => $extra];
+            }
+        }
+
+        return $deviations;
+    };
+
     $assert(
-        $probeEnums === $yardstickEnums,
+        $enumSet($probeEnums) === $enumSet($yardstickEnums),
         'La ruta de despliegue declara los mismos conjuntos ENUM, con las mismas etiquetas, que el esquema probado',
-        'desviaciones: ' . json_encode(array_keys(array_diff_key($yardstickEnums, $probeEnums))) ?: ''
+        'desviaciones: ' . json_encode($enumDeviations($yardstickEnums, $probeEnums))
     );
 
     $applicationStatuses = IncidentStatus::values();

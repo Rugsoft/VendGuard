@@ -60,6 +60,10 @@ final class TestDataCleaner
         // el `ON DELETE SET NULL` de la clave foránea. El sembrador restituye
         // después el catálogo canónico.
         'operational_zones',
+        // Ausencias y turnos de técnicos (Módulo 21): cuelgan de `users`, que es
+        // una tabla protegida, por lo que el grafo desde incidents no los alcanza.
+        'technician_absences',
+        'technician_shifts',
     ];
 
     /**
@@ -98,6 +102,8 @@ final class TestDataCleaner
         'technician_van_stocks',
         'incident_service_sheets',
         'incident_satisfaction_surveys',
+        'technician_absences',
+        'technician_shifts',
     ];
 
     /** @var array<string, array<string, string>> tabla => (FK => tabla padre) caché por esquema */
@@ -125,6 +131,13 @@ final class TestDataCleaner
                     $stmt = $pdo->exec('DELETE FROM ' . $table);
                     $deleted[$table] = ($stmt === false) ? 0 : (int)$stmt;
                 }
+
+                // La guardia pasiva es estado mutable del catálogo: una suite que
+                // falle a mitad puede dejar `is_on_call = TRUE` y la siguiente
+                // elegiría como guardia al técnico equivocado (la lista se ordena
+                // por nombre, no por id). `purge()` restituye el catálogo, así que
+                // también apaga la marca antes de devolver el banco a su estado base.
+                $pdo->exec('UPDATE users SET is_on_call = FALSE WHERE is_on_call = TRUE');
 
                 return $deleted;
             });

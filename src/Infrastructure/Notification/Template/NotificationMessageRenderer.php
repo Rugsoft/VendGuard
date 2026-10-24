@@ -12,12 +12,12 @@ use VendGuard\Core\Service\AppPublicUrl;
 use VendGuard\Core\Service\NotificationTrackingLinkResolver;
 
 /**
- * NotificationMessageRenderer — Redacción de asuntos y cuerpos en castellano para las 21 plantillas (T-NOTIF-05).
+ * NotificationMessageRenderer — Redacción de asuntos y cuerpos en castellano para las 22 plantillas (T-NOTIF-05).
  *
  * Cumple con RF-01.5, RF-03.2, RF-05.1 a RF-05.9, RF-06.5.2 y la Constitución
  * Art. V.4:
  *
- * 1. **Las 21 plantillas del catálogo** (`NotificationTemplate`) generan un
+ * 1. **Las 22 plantillas del catálogo** (`NotificationTemplate`) generan un
  *    asunto (≤ 255 caracteres, límite de `notification_outbox.subject`), un
  *    cuerpo en texto plano y un cuerpo HTML responsivo. Ambos cuerpos se
  *    construyen desde el MISMO borrador estructurado, de modo que no pueden
@@ -148,7 +148,7 @@ final class NotificationMessageRenderer
     }
 
     /**
-     * Compone el borrador estructurado de cada una de las 21 plantillas.
+     * Compone el borrador estructurado de cada una de las 22 plantillas.
      *
      * @param array<string, mixed> $payload
      * @return array{
@@ -532,6 +532,22 @@ final class NotificationMessageRenderer
                     ]
                 ),
                 note: 'La garantía de reapertura de 48 horas vuelve a contar desde esta intervención.',
+            ),
+
+            NotificationTemplate::TELEGRAM_INCIDENT_ASSIGNMENT => $this->draft(
+                subject: '🔁 Avería recibida por relevo' . $ticketSuffix,
+                eyebrow: 'RELEVO DE FIN DE TURNO',
+                title: 'Su compañero le ha traspasado una avería',
+                intro: 'Un compañero ha cerrado su jornada y le ha traspasado esta avería para que la retome en su próxima visita. '
+                    . 'Revise los datos de la parada y confirme el inicio de la intervención al llegar.',
+                details: $this->mergeRows(
+                    $this->dossierRows($payload, true),
+                    [
+                        $this->row('Dirección', $this->text($payload, 'address')),
+                        $this->row('Descripción del problema', $this->text($payload, 'description')),
+                    ]
+                ),
+                note: 'Aviso prioritario de relevo. La nota interna de taller permanece en el expediente y no se incluye en este mensaje.',
             ),
         };
 

@@ -279,6 +279,47 @@ function extractAuditActions(string $source, string $relativePath): array
         $literals[$analysis['plain']] = $literals[$analysis['plain']] ?? $site;
     }
 
+    // Acciones transportadas por el parámetro interno `auditAction:`.
+    // `ShiftHandoverService::executeClose()` recibe el código y lo entrega a
+    // `new AuditEvent(action: $auditAction)`; sin esta pasada, CLOSE_TECHNICIAN_SHIFT
+    // y FORCE_CLOSE_TECHNICIAN_SHIFT se leían como filtros fantasma.
+    for ($i = 0; $i < $count; $i++) {
+        $token = $tokens[$i];
+        if (!is_array($token) || $token[0] !== T_STRING || $token[1] !== 'auditAction') {
+            continue;
+        }
+
+        $colon = $i + 1;
+        while ($colon < $count && $isSkippable($tokens[$colon])) {
+            $colon++;
+        }
+        if ($colon >= $count || $tokens[$colon] !== ':') {
+            continue;
+        }
+
+        $expression = [];
+        $depth = 0;
+        for ($k = $colon + 1; $k < $count; $k++) {
+            $inner = $tokens[$k];
+            $text = is_array($inner) ? $inner[1] : $inner;
+            if (in_array($text, ['(', '[', '{'], true)) {
+                $depth++;
+            } elseif (in_array($text, [')', ']', '}'], true)) {
+                if ($depth === 0) {
+                    break;
+                }
+                $depth--;
+            } elseif ($text === ',' && $depth === 0) {
+                break;
+            }
+            $expression[] = $inner;
+        }
+
+        if ($expression !== []) {
+            $register($expression, $relativePath . '::auditAction');
+        }
+    }
+
     // Raw inserts into audit_log (demo/metric seeders).
     if (preg_match_all("/action'\s*=>\s*'([A-Z][A-Z0-9_]+)'/", $source, $matches)) {
         foreach ($matches[1] as $literal) {
@@ -403,6 +444,13 @@ $assert(
 $assert(
     '0.4 El extractor resuelve las dos ramas de una expresión ternaria (INCIDENT_ASSIGNED + INCIDENT_REASSIGNED)',
     isset($backendActions['INCIDENT_ASSIGNED'], $backendActions['INCIDENT_REASSIGNED'])
+);
+
+$syntheticAuditAction = "<?php\n\$service->executeClose(auditAction: 'SYNTHETIC_AUDIT_ACTION_PROBE');\n";
+$syntheticAuditActionFound = extractAuditActions($syntheticAuditAction, 'synthetic');
+$assert(
+    '0.5 El extractor resuelve el parámetro interno auditAction:',
+    isset($syntheticAuditActionFound['literals']['SYNTHETIC_AUDIT_ACTION_PROBE'])
 );
 
 $syntheticDrift = "<?php\n\$logger->logTicketEvent(\n    ticketId: 1,\n    action: 'SYNTHETIC_DRIFT_PROBE',\n    user: [],\n    previousState: null,\n    newState: []\n);\n";

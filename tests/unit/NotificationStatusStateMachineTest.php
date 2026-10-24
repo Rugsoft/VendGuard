@@ -125,13 +125,18 @@ echo "\n--- Grupo 3: Value Objects de Notificación ---\n";
 $assert('3.1 NotificationChannel tiene EMAIL, WEBHOOK y TELEGRAM', count(NotificationChannel::cases()) === 3);
 $assert('3.2 NotificationChannel::fromString normaliza insensible a mayúsculas', NotificationChannel::fromString('email') === NotificationChannel::EMAIL);
 
-$assert('3.3 NotificationPriority tiene CRITICAL_SANITARY y STANDARD', count(NotificationPriority::cases()) === 2);
+$assert('3.3 NotificationPriority tiene CRITICAL_SANITARY, PRIORITY y STANDARD', count(NotificationPriority::cases()) === 3);
 $assert('3.4 NotificationPriority::CRITICAL_SANITARY isCritical() es true', NotificationPriority::CRITICAL_SANITARY->isCritical());
 $assert('3.5 NotificationPriority::STANDARD isCritical() es false', !NotificationPriority::STANDARD->isCritical());
+$assert('3.6 NotificationPriority ordena sanitaria < prioritaria < ordinaria',
+    NotificationPriority::CRITICAL_SANITARY->rank() < NotificationPriority::PRIORITY->rank()
+    && NotificationPriority::PRIORITY->rank() < NotificationPriority::STANDARD->rank());
 
-$assert('3.6 NotificationTemplate declara las 21 plantillas cerradas', count(NotificationTemplate::cases()) === 21);
-$assert('3.7 COLD_CHAIN_IMMEDIATE_ALERT asigna prioridad crítica sanitaria por defecto', NotificationTemplate::COLD_CHAIN_IMMEDIATE_ALERT->defaultPriority() === NotificationPriority::CRITICAL_SANITARY);
-$assert('3.8 INCIDENT_OPENED_SITE asigna prioridad estándar por defecto', NotificationTemplate::INCIDENT_OPENED_SITE->defaultPriority() === NotificationPriority::STANDARD);
+$assert('3.7 NotificationTemplate declara las 22 plantillas cerradas', count(NotificationTemplate::cases()) === 22);
+$assert('3.8 COLD_CHAIN_IMMEDIATE_ALERT asigna prioridad crítica sanitaria por defecto', NotificationTemplate::COLD_CHAIN_IMMEDIATE_ALERT->defaultPriority() === NotificationPriority::CRITICAL_SANITARY);
+$assert('3.9 INCIDENT_OPENED_SITE asigna prioridad estándar por defecto', NotificationTemplate::INCIDENT_OPENED_SITE->defaultPriority() === NotificationPriority::STANDARD);
+$assert('3.10 TELEGRAM_INCIDENT_ASSIGNMENT asigna prioridad operativa prioritaria',
+    NotificationTemplate::TELEGRAM_INCIDENT_ASSIGNMENT->defaultPriority() === NotificationPriority::PRIORITY);
 
 // =====================================================================
 // GRUPO 4: Entidades de Dominio (NotificationOutboxItem y Settings)

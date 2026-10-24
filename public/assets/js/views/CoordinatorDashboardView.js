@@ -51,6 +51,7 @@ import { CoordinatorSanitarySweepPanel } from '../components/CoordinatorSanitary
 import { CoordinatorSparePartsTab } from '../components/CoordinatorSparePartsTab.js';
 import { CoordinatorSparePartsAnalyticsTab } from '../components/CoordinatorSparePartsAnalyticsTab.js';
 import { CoordinatorVanStockTab } from '../components/CoordinatorVanStockTab.js';
+import { CoordinatorAbsencesTab } from '../components/CoordinatorAbsencesTab.js';
 import { CoordinatorTerritorialMapTab } from '../components/CoordinatorTerritorialMapTab.js';
 import { CoordinatorRefundsTab } from '../components/CoordinatorRefundsTab.js';
 import { CoordinatorIncidentDetailModal } from '../components/CoordinatorIncidentDetailModal.js';
@@ -85,6 +86,7 @@ export const CoordinatorDashboardView = {
     CoordinatorSparePartsTab,
     CoordinatorSparePartsAnalyticsTab,
     CoordinatorVanStockTab,
+    CoordinatorAbsencesTab,
     CoordinatorTerritorialMapTab,
     CoordinatorRefundsTab,
     CoordinatorIncidentDetailModal,
@@ -1880,6 +1882,16 @@ export const CoordinatorDashboardView = {
           <button
             type="button"
             class="vg-btn"
+            :class="activeTab === 'absences' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            @click="activeTab = 'absences'"
+            data-testid="tab-absences"
+          >
+            🏖️ Ausencias
+          </button>
+
+          <button
+            type="button"
+            class="vg-btn"
             :class="activeTab === 'admin' ? 'vg-btn-primary' : 'vg-btn-secondary'"
             @click="activeTab = 'admin'"
             data-testid="tab-admin"
@@ -2540,6 +2552,11 @@ export const CoordinatorDashboardView = {
       <!-- CONTENIDO PESTAÑA: REINTEGROS Y LIQUIDACIÓN DIGITAL (RF-REF-03, RF-REF-07, RF-REF-08 / T-REF-18) -->
       <CoordinatorRefundsTab
         v-else-if="activeTab === 'refunds'"
+      />
+
+      <!-- CONTENIDO PESTAÑA: GESTIÓN DE AUSENCIAS (Módulo 21, RF-01, RF-02) -->
+      <CoordinatorAbsencesTab
+        v-else-if="activeTab === 'absences'"
       />
 
       <!-- CONTENIDO PESTAÑA: MAPA TERRITORIAL DE TRIAJE (RF-MAP-09 / T-MAP-16) -->

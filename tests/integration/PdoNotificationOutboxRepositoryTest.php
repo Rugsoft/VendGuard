@@ -231,15 +231,21 @@ $assert(
 );
 
 // =====================================================================
-// 3. Reclamo de lote por prioridad sanitaria
+// 3. Reclamo de lote por prioridad sanitaria y operativa
 // =====================================================================
-echo "\n--- 3. claimReadyBatch con prioridad CRITICAL_SANITARY y SKIP LOCKED ---\n";
+echo "\n--- 3. claimReadyBatch con prioridades CRITICAL_SANITARY, PRIORITY y SKIP LOCKED ---\n";
 $resetOutbox();
 
 $standard = $repo->enqueue($makeItem([
     'subject' => "[TEST {$marker}] Ordinaria",
     'priority' => NotificationPriority::STANDARD,
     'dedupKey' => "std:{$marker}",
+]));
+$priority = $repo->enqueue($makeItem([
+    'subject' => "[TEST {$marker}] Relevo prioritario",
+    'priority' => NotificationPriority::PRIORITY,
+    'template' => NotificationTemplate::TELEGRAM_INCIDENT_ASSIGNMENT,
+    'dedupKey' => "priority:{$marker}",
 ]));
 $critical = $repo->enqueue($makeItem([
     'subject' => "[TEST {$marker}] Crítica sanitaria",
@@ -266,16 +272,19 @@ $assert(
 );
 $assert('3.3 Las filas reclamadas quedan en PROCESSING', ($criticalBatch[0] ?? null)?->getStatus() === NotificationStatus::PROCESSING);
 $assert(
-    '3.4 El segundo lote trae la fila ordinaria restante',
-    count($remainingBatch) === 1 && $remainingBatch[0]->getId() === $standard?->getId()
+    '3.4 El segundo lote entrega primero el relevo prioritario y después la ordinaria',
+    count($remainingBatch) === 2
+        && $remainingBatch[0]->getId() === $priority?->getId()
+        && $remainingBatch[1]->getId() === $standard?->getId()
 );
 $assert(
     '3.5 La fila programada para el futuro no se reclama',
     $future !== null && $repo->findById((int)$future->getId())?->getStatus() === NotificationStatus::PENDING
 );
 $assert(
-    '3.6 Las dos filas listas originales están en PROCESSING',
+    '3.6 Las tres filas listas originales están en PROCESSING',
     $standard !== null && $repo->findById((int)$standard->getId())?->getStatus() === NotificationStatus::PROCESSING
+        && $priority !== null && $repo->findById((int)$priority->getId())?->getStatus() === NotificationStatus::PROCESSING
         && $critical !== null && $repo->findById((int)$critical->getId())?->getStatus() === NotificationStatus::PROCESSING
 );
 

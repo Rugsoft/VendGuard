@@ -103,6 +103,9 @@ final class TechnicianAssignmentSuggester
     /** Insignia de incompatibilidad territorial visible (RF-04.1.3). */
     public const BADGE_IN_PROGRESS_ELSEWHERE = 'EN_CURSO_OTRA_SEDE';
 
+    /** Insignia de técnico no disponible (RF-08.3, Módulo 21). */
+    public const BADGE_NOT_AVAILABLE = 'NO_DISPONIBLE';
+
     /**
      * Cupo de paradas vivas por técnico para considerar desatendida la zona
      * (RF-06.1, Resolución QA 14).
@@ -172,7 +175,7 @@ final class TechnicianAssignmentSuggester
         ));
         $freeZoneTechnicians = array_filter(
             $zoneTechnicians,
-            static fn (array $candidate): bool => self::liveStops($candidate) < self::MAX_LIVE_STOPS_PER_TECHNICIAN
+            static fn (array $candidate): bool => $candidate['is_available'] && self::liveStops($candidate) < self::MAX_LIVE_STOPS_PER_TECHNICIAN
         );
         $unattendedZone = $freeZoneTechnicians === [];
         $zoneAtCapacity = $unattendedZone && $zoneTechnicians !== [];
@@ -240,11 +243,10 @@ final class TechnicianAssignmentSuggester
     private function comparator(bool $coldChainEscalation, bool $hasOnCall, bool $unattendedZone): callable
     {
         if ($coldChainEscalation && $hasOnCall) {
-            // Art. II: la guardia va delante, y dentro de cada grupo manda la
-            // puntuación. El `+100` del desglose explica el motivo; esta comparación
-            // lo convierte en garantía aunque la carga de la guardia sea alta.
+            // Art. II: la guardia va delante (persiste incluso en OFF_SHIFT por RF-08.5 / R6)
             return static function (array $left, array $right): int {
                 return ($right['technician']['is_on_call'] <=> $left['technician']['is_on_call'])
+                    ?: ($right['technician']['is_available'] <=> $left['technician']['is_available'])
                     ?: ($right['score'] <=> $left['score'])
                     ?: ($left['distance_km'] <=> $right['distance_km'])
                     ?: self::compareLastAssignment($left, $right)
@@ -253,9 +255,10 @@ final class TechnicianAssignmentSuggester
         }
 
         if ($coldChainEscalation) {
-            // QA 9: sin guardia, menor carga viva y, a igual carga, la más próxima.
+            // QA 9: sin guardia, disponibles primero, menor carga viva y, a igual carga, la más próxima.
             return static function (array $left, array $right): int {
-                return ($left['workload'] <=> $right['workload'])
+                return ($right['technician']['is_available'] <=> $left['technician']['is_available'])
+                    ?: ($left['workload'] <=> $right['workload'])
                     ?: ($left['distance_km'] <=> $right['distance_km'])
                     ?: ($right['score'] <=> $left['score'])
                     ?: self::compareLastAssignment($left, $right)
@@ -264,9 +267,10 @@ final class TechnicianAssignmentSuggester
         }
 
         if ($unattendedZone) {
-            // RF-06.1: sin cuadrante propio, proximidad y después carga.
+            // RF-06.1: disponibles primero, sin cuadrante propio, proximidad y después carga.
             return static function (array $left, array $right): int {
-                return ($left['distance_km'] <=> $right['distance_km'])
+                return ($right['technician']['is_available'] <=> $left['technician']['is_available'])
+                    ?: ($left['distance_km'] <=> $right['distance_km'])
                     ?: ($right['score'] <=> $left['score'])
                     ?: self::compareLastAssignment($left, $right)
                     ?: ($left['technician']['technician_id'] <=> $right['technician']['technician_id']);
@@ -274,7 +278,8 @@ final class TechnicianAssignmentSuggester
         }
 
         return static function (array $left, array $right): int {
-            return ($right['score'] <=> $left['score'])
+            return ($right['technician']['is_available'] <=> $left['technician']['is_available'])
+                ?: ($right['score'] <=> $left['score'])
                 ?: self::compareLastAssignment($left, $right)
                 ?: ($left['technician']['technician_id'] <=> $right['technician']['technician_id']);
         };
@@ -317,6 +322,21 @@ final class TechnicianAssignmentSuggester
         if ($technician['has_in_progress_elsewhere']) {
             $badges[] = self::BADGE_IN_PROGRESS_ELSEWHERE;
         }
+        if (!$technician['is_available']) {
+            $badges[] = self::BADGE_NOT_AVAILABLE;
+        }
+
+        $currentStatus = [
+            'has_in_progress_stop' => $technician['in_progress_location'] !== null,
+            'in_progress_location_name' => $technician['in_progress_location']['location_name'] ?? null,
+            'distance_km' => $row['distance_km'],
+        ];
+
+        if ($technician['shift_status'] !== null || $technician['active_absence'] !== null || $technician['has_explicit_availability']) {
+            $currentStatus['is_available'] = $technician['is_available'];
+            $currentStatus['unavailability_reason'] = $technician['unavailability_reason'];
+            $currentStatus['shift_status'] = $technician['shift_status'];
+        }
 
         return [
             'technician_id' => $technician['technician_id'],
@@ -332,11 +352,7 @@ final class TechnicianAssignmentSuggester
                 'pending_info_count' => $technician['pending_info_incidents'],
                 'preventive_orders_count' => $technician['preventive_orders_today'],
             ],
-            'current_status' => [
-                'has_in_progress_stop' => $technician['in_progress_location'] !== null,
-                'in_progress_location_name' => $technician['in_progress_location']['location_name'] ?? null,
-                'distance_km' => $row['distance_km'],
-            ],
+            'current_status' => $currentStatus,
             'is_top_suggestion' => $isTop,
             'badges' => $badges,
         ];
@@ -408,7 +424,7 @@ final class TechnicianAssignmentSuggester
         }
 
         foreach ($primaries as $primary) {
-            if (self::liveStops($primary) === 0) {
+            if ($primary['is_available'] && self::liveStops($primary) === 0) {
                 return false;
             }
         }
@@ -491,11 +507,43 @@ final class TechnicianAssignmentSuggester
             ? self::readFlag($technician, 'has_in_progress_elsewhere')
             : ($inProgress !== null && $inProgress['location_id'] !== $location['id']);
 
+        $shiftStatus = isset($technician['shift_status']) ? (string)$technician['shift_status'] : null;
+        $activeAbsence = isset($technician['active_absence']) && is_array($technician['active_absence'])
+            ? $technician['active_absence']
+            : null;
+
+        if (array_key_exists('is_available', $technician)) {
+            $isAvailable = self::readFlag($technician, 'is_available');
+            $unavailabilityReason = isset($technician['unavailability_reason']) ? (string)$technician['unavailability_reason'] : null;
+        } else {
+            if ($shiftStatus === 'ON_SHIFT') {
+                $isAvailable = true;
+                $unavailabilityReason = null;
+            } elseif ($activeAbsence !== null) {
+                $isAvailable = false;
+                $unavailabilityReason = (string)($activeAbsence['reason_label'] ?? $activeAbsence['reason'] ?? 'Ausencia');
+            } elseif ($shiftStatus === 'MEAL_BREAK') {
+                $isAvailable = false;
+                $unavailabilityReason = 'Pausa comida';
+            } elseif ($shiftStatus === 'OFF_SHIFT') {
+                $isAvailable = false;
+                $unavailabilityReason = 'Fuera de turno';
+            } else {
+                $isAvailable = true;
+                $unavailabilityReason = null;
+            }
+        }
+
         return [
             'technician_id' => $technicianId,
             'name' => (string)($technician['name'] ?? ''),
             'operator_code' => isset($technician['operator_code']) ? (string)$technician['operator_code'] : null,
             'is_on_call' => self::readFlag($technician, 'is_on_call'),
+            'is_available' => $isAvailable,
+            'unavailability_reason' => $unavailabilityReason,
+            'shift_status' => $shiftStatus,
+            'active_absence' => $activeAbsence,
+            'has_explicit_availability' => array_key_exists('is_available', $technician),
             'affinity' => $affinity instanceof ZoneAffinityType
                 ? $affinity
                 : ZoneAffinityType::fromString($affinity === null ? 'NONE' : (string)$affinity),

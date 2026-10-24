@@ -30,6 +30,7 @@ use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoPreventiveSettingsRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Routing\AppRouter;
@@ -106,6 +107,11 @@ $coordinatorToken = $authService->generateInternalToken($coordinator);
 
 $tech1Id = $tech1->getId();
 $tech2Id = $tech2->getId();
+
+// Módulo 21: iniciar o reanudar una intervención exige un turno ON_SHIFT.
+$shiftRepo = new PdoTechnicianShiftRepository($pdo);
+$shiftRepo->startShift($tech1Id);
+$shiftRepo->startShift($tech2Id);
 
 // ─── Máquinas y Sedes ─────────────────────────────────────────────────────────
 $location1 = $locationRepo->findBySiteCode('SEDE-BCN-01');
