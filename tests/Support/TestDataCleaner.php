@@ -672,7 +672,7 @@ final class TestDataCleaner
         $queue = array_keys($roots);
         while ($queue !== []) {
             $parent = array_shift($queue);
-            foreach ($graph[$parent]['children'] ?? [] as $child => $column) {
+            foreach ($graph[$parent]['children'] ?? [] as $child => $_column) {
                 // La autorreferencia del Módulo 16 (`incidents.chronic_predecessor_incident_id`)
                 // no es una vía hacia otra tabla: resolverla como enlace haría que el plan pidiera
                 // el subárbol de la propia tabla que está resolviendo. La raíz ya la acota.
@@ -683,7 +683,19 @@ final class TestDataCleaner
                     && !in_array($child, $purgeableMasters, true)) {
                     continue;
                 }
-                $links[$child][$column] = $parent;
+
+                // `children` indexa por tabla hija y, por tanto, no puede guardar las
+                // varias columnas que un mismo par puede tener. `technician_shifts`
+                // referencia a `users` por `technician_id` y por `closed_by`; quedarse
+                // con la última dejaría vivo el turno cuando el usuario se drena y la
+                // FK RESTRICT abortaría la restitución. Se recuperan todas las columnas
+                // del hijo que apuntan a este padre.
+                foreach ($graph[$child]['parents'] ?? [] as $column => $childParent) {
+                    if ($childParent === $parent) {
+                        $links[$child][$column] = $parent;
+                    }
+                }
+
                 if (!isset($affected[$child])) {
                     $affected[$child] = true;
                     $queue[] = $child;
