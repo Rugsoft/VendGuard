@@ -39,6 +39,7 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SeedRunner;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Routing\AppRouter;
@@ -126,6 +127,9 @@ $coordinatorToken = $authService->generateInternalToken($coordinator);
 $technicianToken  = $authService->generateInternalToken($primaryTech);
 $otherTechToken   = $authService->generateInternalToken($otherTech);
 $techId           = (int)$primaryTech->getId();
+
+// Módulo 21: iniciar o reanudar una intervención exige un turno ON_SHIFT.
+(new PdoTechnicianShiftRepository($pdo))->startShift($techId);
 $otherTechId      = (int)$otherTech->getId();
 $coordinatorId    = (int)$coordinator->getId();
 $authHeader       = static fn (string $token): array => ['Authorization' => 'Bearer ' . $token];

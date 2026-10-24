@@ -255,7 +255,11 @@ $techToken = $resTechLogin['body']['data']['token'] ?? null;
 $techUser = $resTechLogin['body']['data']['user'] ?? [];
 $assert("3.2 Rol de usuario es TECHNICIAN", ($techUser['role'] ?? '') === 'TECHNICIAN');
 
-// 3.2 Consulta de la vista móvil "Mi Ruta" (RF-07)
+// 3.2.b Turno activo (Módulo 21): sin ON_SHIFT no se puede iniciar una intervención.
+$resShiftStart = makeHttpRequest('POST', "{$baseUrl}/api/technician/shift/start", [], $techToken);
+$assert("3.2.b Inicio de turno del técnico responde HTTP 200 OK", $resShiftStart['status'] === 200);
+
+// 3.3 Consulta de la vista móvil "Mi Ruta" (RF-07)
 $resRoute = makeHttpRequest('GET', "{$baseUrl}/api/technician/my-route", [], $techToken);
 $assert("3.3 Consulta de Mi Ruta responde HTTP 200 OK", $resRoute['status'] === 200);
 $routeItems = $resRoute['body']['data'] ?? [];

@@ -40,6 +40,7 @@ use VendGuard\Infrastructure\Database\SeedRunner;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Routing\AppRouter;
@@ -131,6 +132,9 @@ $techToken = $authService->generateInternalToken($technician);
 $coworkerToken = $authService->generateInternalToken($coworker);
 $coordToken = $authService->generateInternalToken($coordinator);
 $siteToken = $authService->generateSiteToken($location);
+
+// Módulo 21: iniciar o reanudar una intervención exige un turno ON_SHIFT.
+(new PdoTechnicianShiftRepository($pdo))->startShift($technicianId);
 
 // =========================================================================
 // CASO 1: Seguridad RBAC del canal de taller
