@@ -94,6 +94,10 @@ $technician = static fn (int $id, array $overrides = []): array => array_merge([
     'operator_code' => 'OP-' . sprintf('%03d', $id),
     'is_on_call' => false,
     'is_active' => true,
+    // RF-03.1: la foto debe declarar el turno. Sin turno abierto sería OFF_SHIFT
+    // y el candidato quedaría no disponible; estos casos certifican el algoritmo
+    // territorial con todos los candidatos en jornada.
+    'shift_status' => 'ON_SHIFT',
     'affinity' => 'NONE',
     'active_incidents' => 0,
     'pending_info_incidents' => 0,

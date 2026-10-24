@@ -54,7 +54,10 @@ use VendGuard\Core\Service\TechnicianWorkloadScorer;
  * km y el desempate cae en la carga de trabajo.
  *
  * Un técnico inactivo o de baja se excluye del ranking (RF-04.1.5, RF-02.2): su
- * vinculación histórica se conserva, pero no se le puede enviar.
+ * vinculación histórica se conserva, pero no se le puede enviar. Un técnico sin
+ * turno abierto está operativamente en `OFF_SHIFT` (RF-03.1): se le marca como no
+ * disponible con el motivo «Fuera de turno» y se relega al final (RF-08.1–RF-08.3),
+ * salvo que sea guardia 24/7 en una emergencia de frío (RF-08.5 / R6).
  *
  * FORMA DE LA FOTO
  *
@@ -68,6 +71,7 @@ use VendGuard\Core\Service\TechnicianWorkloadScorer;
  *   $technicians = [[
  *     'technician_id'=>7,'name'=>'...','operator_code'=>'OP-774',
  *     'is_on_call'=>true,'is_active'=>true,'affinity'=>'PRIMARY',
+ *     'shift_status'=>'ON_SHIFT',              // sin turno abierto: OFF_SHIFT
  *     'active_incidents'=>2,'pending_info_incidents'=>0,'preventive_orders_today'=>0,
  *     'has_live_stop_at_target_location'=>false,'live_stops_in_zone_other_locations'=>1,
  *     'has_in_progress_elsewhere'=>false,      // opcional; se deriva si falta
@@ -507,7 +511,14 @@ final class TechnicianAssignmentSuggester
             ? self::readFlag($technician, 'has_in_progress_elsewhere')
             : ($inProgress !== null && $inProgress['location_id'] !== $location['id']);
 
-        $shiftStatus = isset($technician['shift_status']) ? (string)$technician['shift_status'] : null;
+        // RF-03.1: sin fila de turno abierto el técnico está operativamente en
+        // OFF_SHIFT. La foto del repositorio ya explicita ese valor, pero el caso
+        // de uso no debe depender de que el llamador rellene la clave: la ausencia
+        // de dato de turno no es una declaración de disponibilidad.
+        $rawShiftStatus = $technician['shift_status'] ?? null;
+        $shiftStatus = $rawShiftStatus !== null && trim((string)$rawShiftStatus) !== ''
+            ? (string)$rawShiftStatus
+            : 'OFF_SHIFT';
         $activeAbsence = isset($technician['active_absence']) && is_array($technician['active_absence'])
             ? $technician['active_absence']
             : null;

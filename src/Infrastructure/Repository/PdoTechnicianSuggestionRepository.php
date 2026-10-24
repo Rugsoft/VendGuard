@@ -200,7 +200,7 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
      * `LEFT JOIN` no encuentra fila y todos los candidatos quedan en `NONE`, que es
      * exactamente el escenario de zona desatendida de RF-06.1.
      *
-     * @return list<array{technician_id: int, name: string, operator_code: string|null, is_on_call: bool, is_active: bool, affinity: string}>
+     * @return list<array{technician_id: int, name: string, operator_code: string|null, is_on_call: bool, is_active: bool, affinity: string, shift_status: string, active_absence?: array<string, string>}>
      */
     private function findTechnicians(?int $zoneId): array
     {
@@ -250,9 +250,12 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
                 'affinity' => $this->affinityFrom($row['is_primary']),
             ];
 
-            if ($row['shift_status'] !== null) {
-                $rowItem['shift_status'] = (string)$row['shift_status'];
-            }
+            // RF-03.1: la ausencia de fila de turno abierto no es «sin dato», es
+            // OFF_SHIFT. Se explicita en la foto para que el recomendador no tenga
+            // que adivinar la disponibilidad por la ausencia de una clave.
+            $rowItem['shift_status'] = $row['shift_status'] !== null
+                ? (string)$row['shift_status']
+                : 'OFF_SHIFT';
             if ($absenceReasonEnum !== null) {
                 $rowItem['active_absence'] = [
                     'reason' => $absenceReasonEnum->value,

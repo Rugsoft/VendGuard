@@ -121,6 +121,17 @@ final class InMemoryIncidentLockRepository implements IncidentRowLockRepositoryI
 
         return $this->incident !== null && $this->incident->getId() === $id ? $this->incident : null;
     }
+
+    /**
+     * El doble de CSAT no ejerce el bloqueo de ruta del Módulo 21; declara el
+     * método para seguir cumpliendo el puerto segregado.
+     *
+     * @return list<Incident>
+     */
+    public function findAssignedToTechnicianForUpdate(int $technicianId): array
+    {
+        return [];
+    }
 }
 
 /**

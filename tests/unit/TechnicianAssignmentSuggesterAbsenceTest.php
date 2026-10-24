@@ -24,6 +24,9 @@ declare(strict_types=1);
  *   4. Persistencia de guardia para frío (RF-08.5 / R6):
  *      - En emergencia de frío, el técnico de guardia (is_on_call = true) puede ser priorizado
  *        aunque se encuentre en OFF_SHIFT en su jornada comercial.
+ *   5. Técnico sin turno abierto (RF-03.1 / RF-08.1):
+ *      - Si la foto no trae fila de turno, el técnico está operativamente en OFF_SHIFT:
+ *        is_available = false, motivo "Fuera de turno" e insignia NO_DISPONIBLE.
  *
  * Dogma Vanilla: PHP 8.2+ puro, cero dependencias externas.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
@@ -232,6 +235,54 @@ $ranked4 = $dto4->rankedTechnicians;
 
 $assert('En emergencia de frío el guardián 24/7 en OFF_SHIFT encabeza el escalado (Art. II / R6)', $ranked4[0]['technician_id'] === 7);
 $assert('El guardián encabeza con RECOMENDADO', in_array('RECOMENDADO', $ranked4[0]['badges'], true));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. Técnico sin turno abierto (RF-03.1 / RF-08.1)
+// ─────────────────────────────────────────────────────────────────────────────
+$technicians5 = [
+    [
+        'technician_id' => 3,
+        'name' => 'Titular Sin Turno',
+        'affinity' => 'PRIMARY',
+        'is_active' => true,
+        'is_on_call' => false,
+        // Sin clave shift_status: no hay fila de turno abierto en la foto.
+        'active_incidents' => 0,
+        'pending_info_incidents' => 0,
+        'preventive_orders_today' => 0,
+        'has_live_stop_at_target_location' => false,
+        'live_stops_in_zone_other_locations' => 0,
+    ],
+    [
+        'technician_id' => 2,
+        'name' => 'Suplente En Turno',
+        'affinity' => 'BACKUP',
+        'is_active' => true,
+        'is_on_call' => false,
+        'shift_status' => 'ON_SHIFT',
+        'active_incidents' => 0,
+        'pending_info_incidents' => 0,
+        'preventive_orders_today' => 0,
+        'has_live_stop_at_target_location' => false,
+        'live_stops_in_zone_other_locations' => 0,
+    ],
+];
+
+$dto5 = $suggester->getSuggestionsForIncident($incident, $technicians5);
+$ranked5 = $dto5->rankedTechnicians;
+
+$assert(
+    'El técnico sin turno abierto se relega y lleva NO_DISPONIBLE aunque sea el titular',
+    $ranked5[0]['technician_id'] === 2
+        && $ranked5[1]['technician_id'] === 3
+        && in_array('NO_DISPONIBLE', $ranked5[1]['badges'], true)
+);
+$assert(
+    'El técnico sin turno abierto se reporta como OFF_SHIFT con motivo Fuera de turno',
+    $ranked5[1]['current_status']['is_available'] === false
+        && $ranked5[1]['current_status']['shift_status'] === 'OFF_SHIFT'
+        && $ranked5[1]['current_status']['unavailability_reason'] === 'Fuera de turno'
+);
 
 echo "\n======================================================================\n";
 echo sprintf(" Total Aserciones: %d | Fallidas: %d\n", $assertions, $failures);

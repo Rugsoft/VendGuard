@@ -19,10 +19,12 @@ use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OnCallTechnicianRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianShiftRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 
 /**
  * ShiftHandoverService
@@ -203,9 +205,11 @@ final class ShiftHandoverService
     /**
      * Núcleo transaccional único del cierre de jornada.
      *
-     * Los llamadores ya validaron el turno y la guardia de `IN_PROGRESS`; aquí se
-     * resuelve la foto de la ruta, se aplica el relevo o el protocolo sanitario,
-     * se cierra el turno y se encolan los avisos en la misma transacción.
+     * Los llamadores ya validaron el turno y la guardia de `IN_PROGRESS` para
+     * preservar la precedencia de errores del contrato; aquí se repite esa guardia
+     * sobre las filas YA BLOQUEADAS, se resuelve la foto de la ruta, se aplica el
+     * relevo o el protocolo sanitario, se cierra el turno y se encolan los avisos
+     * en la misma transacción.
      *
      * @param list<int> $incidentIdsToTransfer
      * @param array<string, mixed> $auditMetadata
@@ -226,31 +230,49 @@ final class ShiftHandoverService
         $technicianId = (int)$technician->getId();
         $targetTechnicianId = $targetTechnician?->getId();
 
-        // Averías elegibles asignadas al técnico saliente.
-        $eligibleIncidents = $this->incidentRepo->findAssignedToTechnician(
-            $technicianId,
-            ['ASSIGNED', 'PENDING_PARTS', 'PENDING_INFO']
-        );
-
-        $eligibleMap = [];
-        foreach ($eligibleIncidents as $inc) {
-            $eligibleMap[(int)$inc->getId()] = $inc;
-        }
-
-        // Detección de colisión concurrente (RF-05.3, R9).
-        foreach ($incidentIdsToTransfer as $transferId) {
-            if (!isset($eligibleMap[$transferId])) {
-                throw new InvalidShiftTransitionException(
-                    "El ticket con ID {$transferId} ya no está asignado al técnico o cambió de estado.",
-                    'CONCURRENT_ROUTE_MODIFICATION',
-                    409
-                );
-            }
-        }
-
         $this->pdo->beginTransaction();
 
         try {
+            // Cerrojo de ruta (RF-05.3 / R9): se bloquean todas las averías
+            // activas de la ruta —incluida IN_PROGRESS, no solo las elegibles—
+            // dentro de la transacción. Así la guardia de IN_PROGRESS y la foto de
+            // la ruta se leen sobre filas que nadie puede cambiar hasta el COMMIT.
+            // La foto previa a la transacción ya no decide el relevo: si el ticket
+            // cambió, la lista bloqueada lo refleja y la solicitud se rechaza con 409.
+            $lockedIncidents = $this->lockAssignedIncidents($technicianId);
+
+            $eligibleMap = [];
+            $blockingCodes = [];
+            foreach ($lockedIncidents as $incident) {
+                $status = $incident->getStatus()->value;
+
+                if ($status === IncidentStatus::IN_PROGRESS->value) {
+                    $blockingCodes[] = (string)$incident->getTicketCode();
+                }
+
+                if (in_array($status, ['ASSIGNED', 'PENDING_PARTS', 'PENDING_INFO'], true)) {
+                    $eligibleMap[(int)$incident->getId()] = $incident;
+                }
+            }
+
+            // Repetición de la guardia de RF-04 con las filas ya bloqueadas: cierra
+            // la ventana entre el fail-fast de los llamadores y el inicio del relevo.
+            if ($blockingCodes !== []) {
+                throw new ActiveIncidentInProgressException($blockingCodes);
+            }
+
+            // Detección de colisión concurrente (RF-05.3, R9): la lista solicitada
+            // se contrasta con las filas bloqueadas, no con una foto anterior.
+            foreach ($incidentIdsToTransfer as $transferId) {
+                if (!isset($eligibleMap[$transferId])) {
+                    throw new InvalidShiftTransitionException(
+                        "El ticket con ID {$transferId} ya no está asignado al técnico o cambió de estado.",
+                        'CONCURRENT_ROUTE_MODIFICATION',
+                        409
+                    );
+                }
+            }
+
             $transferred = [];
             $retained = [];
             $sanitaryTransfers = [];
@@ -502,6 +524,25 @@ final class ShiftHandoverService
             }
             throw $e;
         }
+    }
+
+    /**
+     * Bloquea la ruta completa del técnico dentro de la transacción abierta.
+     *
+     * En producción el repositorio PDO implementa el puerto de bloqueo. Los dobles
+     * de prueba que solo implementan el contrato de lectura conservan la consulta
+     * sin cerrojo: no se finge una serialización que el doble no puede ofrecer, y
+     * la prueba de concurrencia real usa el repositorio PDO.
+     *
+     * @return list<Incident>
+     */
+    private function lockAssignedIncidents(int $technicianId): array
+    {
+        if ($this->incidentRepo instanceof IncidentRowLockRepositoryInterface) {
+            return $this->incidentRepo->findAssignedToTechnicianForUpdate($technicianId);
+        }
+
+        return $this->incidentRepo->findAssignedToTechnician($technicianId);
     }
 
     /**
