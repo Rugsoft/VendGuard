@@ -820,6 +820,8 @@ assert('6.31 Los metadatos de presentación traducen estado, prioridad, canal e 
     && helperModal.statusMetaOf('FAILED_PERMANENT').color === 'var(--color-error-text)'
     && helperModal.statusMetaOf('DESCONOCIDO').label === 'DESCONOCIDO'
     && helperModal.priorityMetaOf('CRITICAL_SANITARY').label === 'Crítica sanitaria'
+    && helperModal.priorityMetaOf('PRIORITY').label === 'Prioritaria operativa'
+    && helperModal.priorityOptions.some((option) => option.value === 'PRIORITY')
     && helperModal.priorityMetaOf('OTRA').label === 'Ordinaria'
     && helperModal.channelLabel('WEBHOOK') === 'Webhook'
     && helperModal.channelLabel('EMAIL') === 'Correo'

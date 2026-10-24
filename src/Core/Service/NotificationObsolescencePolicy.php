@@ -159,8 +159,11 @@ final class NotificationObsolescencePolicy
             }
         }
 
-        // Regla (c): Aviso de nueva asignación a un técnico que ya no es el técnico asignado vigente
-        if ($template === NotificationTemplate::TECHNICIAN_ASSIGNED) {
+        // Regla (c): Aviso de nueva asignación o de relevo a un técnico que ya
+        // no es el técnico asignado vigente.
+        if ($template === NotificationTemplate::TECHNICIAN_ASSIGNED
+            || $template === NotificationTemplate::TELEGRAM_INCIDENT_ASSIGNMENT
+        ) {
             $targetTechId = $item->getRecipientUserId();
             $currentTechId = $currentIncident->getAssignedTechnicianId();
 

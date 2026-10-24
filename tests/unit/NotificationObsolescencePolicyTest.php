@@ -133,6 +133,12 @@ $resTech_2 = NotificationObsolescencePolicy::evaluate($itemAssignTech4, $incWith
 $assert('Aviso de asignación es obsoleto si el técnico fue reemplazado por otro', $resTech_2['is_obsolete']);
 $assert('Aviso de asignación documenta motivo exacto', $resTech_2['reason'] === NotificationObsolescencePolicy::REASON_TECHNICIAN_SUPERSEDED);
 
+$itemHandoverTech4 = $createItem(NotificationTemplate::TELEGRAM_INCIDENT_ASSIGNMENT, NotificationChannel::TELEGRAM, 4);
+$resHandover = NotificationObsolescencePolicy::evaluate($itemHandoverTech4, $incWithTech4);
+$assert('Aviso de relevo es válido para el técnico receptor vigente', !$resHandover['is_obsolete']);
+$resHandoverSuperseded = NotificationObsolescencePolicy::evaluate($itemHandoverTech4, $incWithTech9);
+$assert('Aviso de relevo es obsoleto si el ticket cambia de técnico', $resHandoverSuperseded['is_obsolete']);
+
 // 4. Regla (d): Aviso de pausa a sede cuando la pausa ya fue reanudada
 echo "--- Regla (d): Aviso de pausa ya reanudada (RF-07.1.d) ---\n";
 $itemPause = $createItem(NotificationTemplate::PENDING_INFO_SITE_REQUEST);

@@ -86,6 +86,10 @@ $assert(
     '1.4 La asignación al técnico se dirige a su ruta (Módulo 15)',
     $resolver->audienceFor(NotificationTemplate::TECHNICIAN_ASSIGNED) === NotificationTrackingLinkResolver::AUDIENCE_TECHNICIAN
 );
+$assert(
+    '1.5 El aviso de relevo también se dirige a la ruta del técnico (Módulo 21)',
+    $resolver->audienceFor(NotificationTemplate::TELEGRAM_INCIDENT_ASSIGNMENT) === NotificationTrackingLinkResolver::AUDIENCE_TECHNICIAN
+);
 
 echo "\n--- 2. Ruta derivada y prioridad del payload ---\n";
 
@@ -122,6 +126,11 @@ $assert(
 $assert(
     '2.5.2 Sin ticket, el técnico aterriza en su ruta sin destino inventado',
     $resolver->route(NotificationTemplate::TECHNICIAN_ASSIGNED, []) === '/?tech=1'
+);
+$assert(
+    '2.5.2b El aviso de relevo apunta a la ruta con el ticket citado',
+    $resolver->route(NotificationTemplate::TELEGRAM_INCIDENT_ASSIGNMENT, $siteyPayload)
+        === '/?tech=1&ticket=INC-2026-000123'
 );
 $assert(
     '2.5.3 La desasignación no invita a abrir un expediente ajeno',

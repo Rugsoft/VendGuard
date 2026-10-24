@@ -6,7 +6,7 @@ declare(strict_types=1);
  * NotificationMessageRendererTest
  *
  * Suite unitaria del renderizador del Centro de Notificaciones (T-NOTIF-05):
- *   1. Las 21 plantillas del catálogo generan asunto (≤ 255), texto y HTML.
+ *   1. Las 22 plantillas del catálogo generan asunto (≤ 255), texto y HTML.
  *   2. El aviso destacado de RF-03.2 aparece en asunto y encabezado cuando no
  *      hay técnico de guardia ni técnico asignado, y sólo entonces.
  *   3. Blindaje Art. V.4: la Sede nunca recibe diagnósticos, acciones, costes,
@@ -128,11 +128,11 @@ $secretMarkers = [
 ];
 
 // ---------------------------------------------------------------------
-// 1. Cobertura de las 21 plantillas
+// 1. Cobertura de las 22 plantillas
 // ---------------------------------------------------------------------
-echo "--- 1. Las 21 plantillas del catálogo ---\n";
+echo "--- 1. Las 22 plantillas del catálogo ---\n";
 
-$assert('El catálogo cerrado declara 21 plantillas', count(NotificationTemplate::cases()) === 21);
+$assert('El catálogo cerrado declara 22 plantillas', count(NotificationTemplate::cases()) === 22);
 
 $subjects = [];
 $allRendered = [];
@@ -160,8 +160,16 @@ foreach (NotificationTemplate::cases() as $template) {
     );
 }
 
-$assert('Los 21 asuntos son distintos entre sí', count(array_unique($subjects)) === 21);
+$assert('Los 22 asuntos son distintos entre sí', count(array_unique($subjects)) === 22);
 $assert('El renderizador acepta el nombre de plantilla como cadena', $renderer->render('INCIDENT_OPENED_SITE', $payload)->template === NotificationTemplate::INCIDENT_OPENED_SITE);
+
+$handoverMessage = $allRendered['TELEGRAM_INCIDENT_ASSIGNMENT'];
+$assert(
+    'TELEGRAM_INCIDENT_ASSIGNMENT identifica el relevo y enlaza a la ruta del técnico',
+    str_contains($handoverMessage->subject, 'relevo')
+    && str_contains($handoverMessage->textBody, 'relevo')
+    && str_contains((string)$handoverMessage->ctaUrl, 'tech=1')
+);
 
 $assertThrows('Rechaza una plantilla fuera del catálogo', static fn () => $renderer->render('NOT_A_TEMPLATE', $payload));
 

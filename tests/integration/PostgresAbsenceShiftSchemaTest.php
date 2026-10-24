@@ -75,15 +75,16 @@ try {
     // ──────────────────────────────────────────────────────────────────────
     // Escenario: el esquema del repositorio en un esquema aislado
     // ──────────────────────────────────────────────────────────────────────
-    echo "\n--- Escenario (DDL base + migración 012 en un esquema aislado) ---\n";
+    echo "\n--- Escenario (DDL base + migraciones 012 y 013 en un esquema aislado) ---\n";
 
     PostgresFixtureBuilder::createIsolationSchema($pgPdo, ABSENCE_SHIFT_TEST_SCHEMA);
     $schemaReport = PostgresFixtureBuilder::applyRepositorySchema($pgPdo, $projectRoot);
     $convergence = (new PostgresMigrationRunner($pgPdo))->convergenceReport();
 
     $assert(
-        'El DDL base y la migración 012 aplican sin errores y el esquema converge',
+        'El DDL base y las migraciones 012 y 013 aplican sin errores y el esquema converge',
         in_array('012_technician_absences_and_shifts.sql', $schemaReport['migrations'], true)
+            && in_array('013_shift_handover_notification.sql', $schemaReport['migrations'], true)
             && $convergence['converged'] === true,
         sprintf(
             '%d sentencias · migraciones: %s',

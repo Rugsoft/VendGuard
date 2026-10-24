@@ -12,7 +12,7 @@ declare(strict_types=1);
  *      con sus etiquetas canónicas en castellano, y la regla de coherencia
  *      modalidad ↔ submotivo escrita una sola vez (`isAllowedFor`), que es la
  *      misma que impone `chk_incidents_opportunistic_coherence`.
- *   2. **Catálogo de plantillas.** Las 21 plantillas y la prioridad sanitaria de
+ *   2. **Catálogo de plantillas.** Las 22 plantillas y la prioridad sanitaria de
  *      la alerta de parada crítica postergada (Art. II).
  *   3. **Hidratación y serialización de `Incident`.** Un expediente ordinario
  *      (sin marcas oportunistas) sigue leyéndose y serializándose igual; uno
@@ -243,8 +243,8 @@ $assert(
 echo "\n--- 4. Catálogo de plantillas ---\n";
 
 $assert(
-    '4.1 El catálogo cerrado declara 21 plantillas',
-    count(NotificationTemplate::cases()) === 21,
+    '4.1 El catálogo cerrado declara 22 plantillas',
+    count(NotificationTemplate::cases()) === 22,
     (string)count(NotificationTemplate::cases())
 );
 

@@ -209,6 +209,147 @@ final class NotificationOutboxEnqueuerService implements SanitarySlaAlertEnqueue
     }
 
     /**
+     * RF-06.2 Nivel 2: alarma crítica a Coordinación cuando una máquina de
+     * perecederos queda desatendida al cerrar el turno sin guardia disponible.
+     *
+     * La plantilla es la alerta sanitaria crítica ya existente. No se crea un
+     * template nuevo porque el catálogo es un ENUM de PostgreSQL y el aviso
+     * operativo es exactamente el mismo: pérdida de frío con riesgo sanitario.
+     * La clave de deduplicación incorpora el turno para que dos cierres del mismo
+     * técnico no colapsen en una sola alerta.
+     *
+     * @return int Filas efectivamente encoladas.
+     */
+    public function enqueueSanitaryEmergencyAlert(
+        Incident $incident,
+        int $shiftId,
+        ?Machine $machine = null,
+        ?Location $location = null
+    ): int {
+        return $this->transactions->runInTransaction(function () use ($incident, $shiftId, $machine, $location): int {
+            $machine ??= $this->machineFor($incident);
+            $location ??= $this->locationFor($incident);
+            if ($location === null) {
+                return 0;
+            }
+
+            $payload = $this->basePayload($incident, $machine, $location, [
+                'event_at' => $this->now(),
+                'shift_id' => $shiftId,
+                'shift_close_level' => 2,
+                'on_call_technician_count' => $this->onCallTechnicians->countOnCallTechnicians(),
+            ]);
+            $cycle = $this->cycleKey($incident);
+            $count = 0;
+
+            foreach ($this->coordinatorRecipients() as $coordinator) {
+                $count += $this->queueEmail(
+                    NotificationTemplate::COLD_CHAIN_IMMEDIATE_ALERT,
+                    $coordinator['email'],
+                    self::ROLE_COORDINATOR,
+                    $coordinator['id'],
+                    null,
+                    $incident,
+                    $payload,
+                    sprintf(
+                        'inc:%d:cyc:%s:shift:%d:sanitary:u%d',
+                        (int)$incident->getId(),
+                        $cycle,
+                        $shiftId,
+                        $coordinator['id']
+                    )
+                ) ? 1 : 0;
+            }
+
+            $count += $this->queueWebhook(
+                $incident,
+                NotificationTemplate::COLD_CHAIN_IMMEDIATE_ALERT,
+                $payload,
+                sprintf('inc:%d:cyc:%s:shift:%d:sanitary:webhook', (int)$incident->getId(), $cycle, $shiftId)
+            ) ? 1 : 0;
+
+            return $count;
+        });
+    }
+
+    /**
+     * Módulo 21 · RF-05.4.4 / R8: aviso prioritario al técnico receptor de un
+     * relevo de fin de turno.
+     *
+     * Sirve tanto al traspaso manual como al Nivel 1 del protocolo sanitario
+     * (traspaso automático al guardia de frío): en ambos casos el receptor hereda
+     * una parada porque un compañero cierra su jornada, y el aviso debe viajar
+     * con identidad propia y prioridad operativa, nunca como una asignación
+     * ordinaria.
+     *
+     * El cierre de jornada no es una asignación ordinaria: el receptor debe
+     * saber que hereda la parada para el día siguiente y que el mensaje llega
+     * con el enlace directo a su ruta. Por eso usa una plantilla propia
+     * (`TELEGRAM_INCIDENT_ASSIGNMENT`) con prioridad `PRIORITY`, por delante
+     * del lote de asignaciones ordinarias y por detrás de la emergencia
+     * sanitaria del Art. II.
+     *
+     * Se encola tanto el correo como el canal personal del técnico cuando está
+     * vinculado: la falta de Telegram no silencia el aviso ni rompe el cierre.
+     * La nota interna de taller no viaja en el payload (Art. V.4); permanece en
+     * `incident_comments`.
+     *
+     * @return int Filas efectivamente encoladas.
+     */
+    public function enqueueShiftHandoverAssignment(
+        Incident $incident,
+        ?Machine $machine = null,
+        ?Location $location = null
+    ): int {
+        return $this->transactions->runInTransaction(function () use ($incident, $machine, $location): int {
+            $machine ??= $this->machineFor($incident);
+            $location ??= $this->locationFor($incident);
+            if ($location === null) {
+                return 0;
+            }
+
+            $incomingId = $incident->getAssignedTechnicianId();
+            if ($incomingId === null) {
+                return 0;
+            }
+
+            $incoming = $this->users->findById($incomingId, true);
+            if ($incoming === null) {
+                return 0;
+            }
+
+            $payload = $this->basePayload($incident, $machine, $location, [
+                'event_at' => $this->now(),
+                'handover' => true,
+            ]);
+            $count = 0;
+
+            $incomingEmail = $this->validEmail($incoming->getEmail());
+            if ($incomingEmail !== null) {
+                $count += $this->queueEmail(
+                    NotificationTemplate::TELEGRAM_INCIDENT_ASSIGNMENT,
+                    $incomingEmail,
+                    self::ROLE_TECHNICIAN,
+                    $incomingId,
+                    null,
+                    $incident,
+                    $payload
+                ) ? 1 : 0;
+            }
+
+            $count += $this->queueTelegram(
+                NotificationTemplate::TELEGRAM_INCIDENT_ASSIGNMENT,
+                $incoming->getTelegramChatId(),
+                $incomingId,
+                $incident,
+                $payload
+            ) ? 1 : 0;
+
+            return $count;
+        });
+    }
+
+    /**
      * RF-05.2: Aviso al técnico entrante y desasignación del saliente.
      *
      * La comparación se hace sobre las dos fotografías de la incidencia
@@ -1058,7 +1199,10 @@ final class NotificationOutboxEnqueuerService implements SanitarySlaAlertEnqueue
             (int)$incident->getId(),
             $previousTechnicianId,
             NotificationObsolescencePolicy::REASON_ASSIGNMENT_SUPERSEDED_IN_SITU,
-            [NotificationTemplate::TECHNICIAN_ASSIGNED->value]
+            [
+                NotificationTemplate::TECHNICIAN_ASSIGNED->value,
+                NotificationTemplate::TELEGRAM_INCIDENT_ASSIGNMENT->value,
+            ]
         );
 
         $technician = $this->users->findById($previousTechnicianId, false);

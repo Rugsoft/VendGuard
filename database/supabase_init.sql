@@ -272,7 +272,7 @@ END $do$;
 
 DO $do$
 BEGIN
-    CREATE TYPE notification_priority AS ENUM ('CRITICAL_SANITARY', 'STANDARD');
+    CREATE TYPE notification_priority AS ENUM ('CRITICAL_SANITARY', 'PRIORITY', 'STANDARD');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
 
@@ -314,7 +314,9 @@ BEGIN
         -- Módulo 16: alerta sanitaria al posponer una parada crítica en otra sede
         -- y aviso a la sede de la reapertura practicada in situ.
         'OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT',
-        'INCIDENT_REOPENED_IN_SITU_SITE'
+        'INCIDENT_REOPENED_IN_SITU_SITE',
+        -- Módulo 21: aviso propio y prioritario al técnico receptor de un relevo.
+        'TELEGRAM_INCIDENT_ASSIGNMENT'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
