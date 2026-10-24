@@ -141,8 +141,9 @@ Durante la sesión de definición y la auditoría exhaustiva de QA, el Product O
 * **RF-01.2 (Validaciones):**
   * `ends_at >= starts_at`. Error: `422 UNPROCESSABLE_ENTITY` con `INVALID_DATE_RANGE`.
   * Técnico existente, rol `TECHNICIAN`, `deleted_at IS NULL`. Error: `404 NOT_FOUND`.
-  * Detección de solapamiento con ausencias activas no canceladas del mismo técnico: `409 CONFLICT` con `ABSENCE_OVERLAP`.
-* **RF-01.3 (Cancelación Lógica):** `DELETE /api/coordinator/absences/{id}` registra `cancelled_at = CURRENT_TIMESTAMP`, `cancelled_by = :auth_user_id` y `cancellation_reason` obligatoria ($\ge 5$ caracteres). Prohibido el borrado físico (Art. III.1).
+  * `notes` superior a 500 caracteres. Error: `422 UNPROCESSABLE_ENTITY` con `NOTES_TOO_LONG`.
+  * Detección de solapamiento con ausencias activas no canceladas del mismo técnico: `409 CONFLICT` con `ABSENCE_OVERLAP`. Los rangos son semiabiertos: dos ausencias que solo comparten el instante límite no se solapan.
+* **RF-01.3 (Cancelación Lógica):** `DELETE /api/coordinator/absences/{id}` registra `cancelled_at = CURRENT_TIMESTAMP`, `cancelled_by = :auth_user_id` y `cancellation_reason` obligatoria ($\ge 5$ caracteres). Prohibido el borrado físico (Art. III.1). Una segunda cancelación responde `409 CONFLICT` con `ABSENCE_ALREADY_CANCELLED` y no vuelve a auditar.
 * **RF-01.4 (Listado y Filtros):** `GET /api/coordinator/technicians/absences` con filtros por `technician_id`, rango de fechas y estado (`active`, `future`, `cancelled`, `all`).
 
 ### RF-02 · Asistente de Reasignación en Alta de Ausencia
@@ -156,8 +157,8 @@ Durante la sesión de definición y la auditoría exhaustiva de QA, el Product O
 * **RF-03.2 (Inicio de Turno):** `POST /api/technician/shift/start` abre una sesión en `ON_SHIFT` con `started_at = CURRENT_TIMESTAMP`.
   * Si ya tiene un turno abierto en `ON_SHIFT`: Responde `200 OK` idempotente.
   * Si tiene una ausencia activa planificada: Se permite abrir turno (la presencia física manda, R4), pasando a `ON_SHIFT` y emitiendo una traza `ABSENCE_OVERRIDE_BY_SHIFT_START` en `audit_log`.
-* **RF-03.3 (Pausa de Comida):** `POST /api/technician/shift/pause-meal` transiciona de `ON_SHIFT` a `MEAL_BREAK`, marcando `meal_break_started_at = CURRENT_TIMESTAMP`. Precondición: debe estar en `ON_SHIFT`.
-* **RF-03.4 (Reanudación de Turno):** `POST /api/technician/shift/resume` transiciona de `MEAL_BREAK` a `ON_SHIFT`, marcando `meal_break_ended_at = CURRENT_TIMESTAMP`. Precondición: debe estar en `MEAL_BREAK`.
+* **RF-03.3 (Pausa de Comida):** `POST /api/technician/shift/pause-meal` transiciona de `ON_SHIFT` a `MEAL_BREAK`, marcando `meal_break_started_at = CURRENT_TIMESTAMP`. Precondición: debe estar en `ON_SHIFT`. Sin turno abierto: `409 NO_OPEN_SHIFT`; ya en pausa: `422 SHIFT_ALREADY_PAUSED`.
+* **RF-03.4 (Reanudación de Turno):** `POST /api/technician/shift/resume` transiciona de `MEAL_BREAK` a `ON_SHIFT`, marcando `meal_break_ended_at = CURRENT_TIMESTAMP`. Precondición: debe estar en `MEAL_BREAK`. Sin turno abierto: `409 NO_OPEN_SHIFT`; sin pausa previa: `422 SHIFT_NOT_IN_MEAL_BREAK`.
 * **RF-03.5 (Cierre Directo desde Pausa):** Se permite ejecutar el cierre de turno (`close-handover`) directamente desde `MEAL_BREAK` sin obligar a reanudar previamente (R10).
 
 ### RF-04 · Guardia contra Intervenciones en Curso (`IN_PROGRESS`)

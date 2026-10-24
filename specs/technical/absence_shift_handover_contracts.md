@@ -103,6 +103,7 @@ Los límites de una ausencia se interpretan en la zona operativa del parque, **`
 * Una fecha pura (`YYYY-MM-DD`) abarca desde las `00:00:00` del día inicial hasta las `23:59:59` del día final **en hora local**.
 * Una marca con hora y sin offset se interpreta también en `Europe/Madrid`; si trae offset explícito, se respeta el instante recibido.
 * La API serializa `starts_at` y `ends_at` con el offset de Madrid y publica `is_full_day = true` cuando ambos límites locales son `00:00:00` y `23:59:59`.
+* Los rangos se comparan como intervalos semiabiertos `[starts_at, ends_at)`: dos ausencias que solo comparten el instante límite (por ejemplo, `09:00–13:00` y `13:00–17:00`) **no** se consideran solapadas.
 
 ---
 
@@ -272,6 +273,20 @@ Ejecuta el protocolo de relevo de fin de turno y cierre de jornada dentro de una
 8. `handover_notes` menor de 10 caracteres reales habiendo tickets a traspasar (`422 MISSING_HANDOVER_NOTES`).
 9. Éxito: `200 OK` con JSON resumen de averías traspasadas, retenidas y derivadas a guardia.
 
+#### `POST /api/technician/shift/pause-meal`
+1. Middleware de autenticación (`401 UNAUTHORIZED`).
+2. Usuario no es `TECHNICIAN` (`403 FORBIDDEN`).
+3. Sin turno abierto (`409 NO_OPEN_SHIFT`).
+4. Turno ya en `MEAL_BREAK` (`422 SHIFT_ALREADY_PAUSED`).
+5. Éxito: `200 OK` con el turno en `MEAL_BREAK`.
+
+#### `POST /api/technician/shift/resume`
+1. Middleware de autenticación (`401 UNAUTHORIZED`).
+2. Usuario no es `TECHNICIAN` (`403 FORBIDDEN`).
+3. Sin turno abierto (`409 NO_OPEN_SHIFT`).
+4. Turno en `ON_SHIFT`, sin pausa que reanudar (`422 SHIFT_NOT_IN_MEAL_BREAK`).
+5. Éxito: `200 OK` con el turno en `ON_SHIFT`.
+
 #### `GET /api/technician/handover-targets`
 1. Middleware de autenticación interno (`401 UNAUTHORIZED`).
 2. Usuario no es `TECHNICIAN` (`403 FORBIDDEN`).
@@ -284,13 +299,14 @@ Ejecuta el protocolo de relevo de fin de turno y cierre de jornada dentro de una
 3. `{id}` inexistente o no es `TECHNICIAN` (`404 TECHNICIAN_NOT_FOUND`).
 4. `reason` no pertenece a `AbsenceReason` (`422 INVALID_ABSENCE_REASON`).
 5. `starts_at` o `ends_at` inválidos o `ends_at < starts_at` (`422 INVALID_DATE_RANGE`).
-6. Solapamiento con ausencia activa del técnico (`409 ABSENCE_OVERLAP`).
-7. Éxito: `201 CREATED` con datos de la ausencia y lista `affected_incidents` con recomendación asistida. Cada incidencia incluye `suggested_technician`: `{ id, name, operator_code, total_score, explanation, badges, current_status }`, o `null` si no hay candidatos. El técnico ausente nunca aparece como sugerido.
+6. `notes` supera los 500 caracteres (`422 NOTES_TOO_LONG`).
+7. Solapamiento con ausencia activa del técnico (`409 ABSENCE_OVERLAP`).
+8. Éxito: `201 CREATED` con datos de la ausencia y lista `affected_incidents` con recomendación asistida. Cada incidencia incluye `suggested_technician`: `{ id, name, operator_code, total_score, explanation, badges, current_status }`, o `null` si no hay candidatos. El técnico ausente nunca aparece como sugerido.
 
 #### `DELETE /api/coordinator/absences/{id}`
 1. Middleware (`401 UNAUTHORIZED` / `403 FORBIDDEN`).
 2. `{id}` no existe (`404 ABSENCE_NOT_FOUND`).
-3. Ausencia ya cancelada previamente (`409 ABSENCE_ALREADY_CANCELLED`).
+3. Ausencia ya cancelada previamente (`409 ABSENCE_ALREADY_CANCELLED`). La segunda petición no vuelve a registrar auditoría.
 4. `cancellation_reason` ausente o $< 5$ caracteres (`422 MISSING_CANCELLATION_REASON`).
 5. Éxito: `200 OK` `{ "cancelled": true, "cancelled_at": "..." }`.
 
