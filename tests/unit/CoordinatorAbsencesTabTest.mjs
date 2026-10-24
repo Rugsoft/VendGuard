@@ -21,6 +21,7 @@ globalThis.localStorage = {
 };
 globalThis.sessionStorage = { ...globalThis.localStorage };
 
+import { readFileSync } from 'node:fs';
 import { api } from '../../public/assets/js/api.js';
 import { CoordinatorAbsencesTab } from '../../public/assets/js/components/CoordinatorAbsencesTab.js';
 import { CoordinatorDashboardView } from '../../public/assets/js/views/CoordinatorDashboardView.js';
@@ -70,6 +71,16 @@ assert('data() incluye createForm con reason VACATION', vm.createForm && vm.crea
 assert('data() incluye createForm con is_partial_day false por defecto', vm.createForm && vm.createForm.is_partial_day === false);
 assert('data() incluye createForm con start_time y end_time', vm.createForm && vm.createForm.start_time === '09:00' && vm.createForm.end_time === '14:00');
 assert('data() incluye cancelForm con cancellation_reason', vm.cancelForm && typeof vm.cancelForm.cancellation_reason === 'string');
+
+// M-5: la UI no puede enviar más de lo que anuncia su etiqueta.
+const absencesTabSource = readFileSync(
+  new URL('../../public/assets/js/components/CoordinatorAbsencesTab.js', import.meta.url),
+  'utf8'
+);
+assert(
+  'El textarea de notas declara maxlength="500"',
+  /id="create-absence-notes"[\s\S]{0,200}maxlength="500"/.test(absencesTabSource)
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. Métodos del componente y formateo de fechas

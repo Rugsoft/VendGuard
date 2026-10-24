@@ -575,6 +575,7 @@ export const CoordinatorAbsencesTab = {
               v-model="createForm.notes"
               class="vg-input"
               rows="3"
+              maxlength="500"
               style="width: 100%; font-size: 13px;"
               placeholder="Detalles sobre la ausencia, justificación o cobertura..."
             ></textarea>

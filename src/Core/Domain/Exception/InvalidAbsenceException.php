@@ -63,8 +63,8 @@ final class InvalidAbsenceException extends DomainException
     {
         return new self(
             'La ausencia ya se encuentra cancelada.',
-            'ALREADY_CANCELLED',
-            422
+            'ABSENCE_ALREADY_CANCELLED',
+            409
         );
     }
 

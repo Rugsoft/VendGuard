@@ -149,11 +149,14 @@ final class PdoTechnicianAbsenceRepository implements TechnicianAbsenceRepositor
         DateTimeImmutable $endsAt,
         ?int $excludeAbsenceId = null
     ): bool {
+        // Semántica semiabierta [starts_at, ends_at): dos ausencias que solo
+        // comparten el instante límite (09:00-13:00 y 13:00-17:00) no se solapan.
+        // Comparar con <=/>= rechazaba ese contacto exacto (m-1).
         $sql = 'SELECT 1 FROM technician_absences
                  WHERE technician_id = :technician_id
                    AND cancelled_at IS NULL
-                   AND starts_at <= :ends_at
-                   AND ends_at >= :starts_at';
+                   AND starts_at < :ends_at
+                   AND ends_at > :starts_at';
 
         $params = [
             ':technician_id' => $technicianId,

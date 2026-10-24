@@ -118,7 +118,9 @@ $absenceRepo = new class($absenceStorage, $autoId) implements TechnicianAbsenceR
             if ($excludeAbsenceId !== null && $a->id() === $excludeAbsenceId) {
                 continue;
             }
-            if ($a->startsAt() <= $endsAt && $a->endsAt() >= $startsAt) {
+            // Misma semántica semiabierta que el repositorio PDO (m-1):
+            // compartir solo el instante límite no es solape.
+            if ($a->startsAt() < $endsAt && $a->endsAt() > $startsAt) {
                 return true;
             }
         }
@@ -286,11 +288,88 @@ $cancelledDto = $service->cancelAbsence(
 $assert('cancelAbsence devuelve DTO marcado como cancelado', $cancelledDto->isCancelled);
 $assert('cancelAbsence registra auditoría CANCEL_TECHNICIAN_ABSENCE', count($auditRepo->events) === 2 && $auditRepo->events[1]->getAction() === 'CANCEL_TECHNICIAN_ABSENCE');
 
+// M-2: la segunda cancelación es un conflicto, no un 200 silencioso.
+$secondCancelCode = null;
+$secondCancelStatus = null;
+try {
+    $service->cancelAbsence(
+        absenceId: $result['absence']->id,
+        cancelledBy: 1,
+        cancellationReason: 'Segundo intento sobre la misma ausencia'
+    );
+} catch (InvalidAbsenceException $e) {
+    $secondCancelCode = $e->getErrorCode();
+    $secondCancelStatus = $e->getHttpStatusCode();
+}
+$assert(
+    'cancelAbsence rechaza la segunda cancelación con ABSENCE_ALREADY_CANCELLED (409)',
+    $secondCancelCode === 'ABSENCE_ALREADY_CANCELLED' && $secondCancelStatus === 409
+);
+$assert('La segunda cancelación no vuelve a auditar', count($auditRepo->events) === 2);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. Listado con filtros
 // ─────────────────────────────────────────────────────────────────────────────
 $list = $service->listAbsences(technicianId: 7, status: 'all');
 $assert('listAbsences devuelve las ausencias del técnico', count($list) === 1);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4.b m-1: el contacto exacto entre límites no es solape
+// ─────────────────────────────────────────────────────────────────────────────
+$touchingFirst = $service->createAbsence(
+    technicianId: 7,
+    reason: 'PERSONAL_LEAVE',
+    startsAt: '2027-01-10 09:00:00+01:00',
+    endsAt: '2027-01-10 13:00:00+01:00',
+    notes: null,
+    createdBy: 1
+);
+$touchingSecond = $service->createAbsence(
+    technicianId: 7,
+    reason: 'TRAINING',
+    startsAt: '2027-01-10 13:00:00+01:00',
+    endsAt: '2027-01-10 17:00:00+01:00',
+    notes: null,
+    createdBy: 1
+);
+$assert(
+    'createAbsence admite dos ausencias que solo comparten el instante límite',
+    $touchingFirst['absence']->id > 0
+        && $touchingSecond['absence']->id > 0
+        && $touchingFirst['absence']->endsAt === $touchingSecond['absence']->startsAt
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4.c M-5: las notas nunca superan los 500 caracteres
+// ─────────────────────────────────────────────────────────────────────────────
+$notesRejected = null;
+try {
+    $service->createAbsence(
+        technicianId: 7,
+        reason: 'OTHER',
+        startsAt: '2027-02-01',
+        endsAt: '2027-02-02',
+        notes: str_repeat('a', TechnicianAbsence::MAX_NOTES_LENGTH + 1),
+        createdBy: 1
+    );
+} catch (InvalidAbsenceException $e) {
+    $notesRejected = $e->getErrorCode();
+}
+$assert('createAbsence rechaza notas de 501 caracteres con NOTES_TOO_LONG', $notesRejected === 'NOTES_TOO_LONG');
+
+$maxNotes = str_repeat('b', TechnicianAbsence::MAX_NOTES_LENGTH);
+$maxNotesAccepted = $service->createAbsence(
+    technicianId: 7,
+    reason: 'OTHER',
+    startsAt: '2027-03-01',
+    endsAt: '2027-03-02',
+    notes: $maxNotes,
+    createdBy: 1
+);
+$assert(
+    'createAbsence acepta exactamente 500 caracteres',
+    $maxNotesAccepted['absence']->notes === $maxNotes
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 5. A1: la fecha pura es una jornada completa en Madrid, no en UTC

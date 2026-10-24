@@ -71,6 +71,18 @@ final class TechnicianAbsenceService
             throw InvalidAbsenceException::invalidDateRange();
         }
 
+        // RF-01.1: las notas son opcionales pero nunca superan 500 caracteres.
+        // El repositorio inserta directamente, así que la validación debe ocurrir
+        // aquí: `TechnicianAbsence::create()` no participa en el alta (M-5).
+        $cleanNotes = $notes !== null ? trim($notes) : null;
+        if ($cleanNotes === '') {
+            $cleanNotes = null;
+        }
+
+        if ($cleanNotes !== null && mb_strlen($cleanNotes) > TechnicianAbsence::MAX_NOTES_LENGTH) {
+            throw InvalidAbsenceException::notesTooLong(TechnicianAbsence::MAX_NOTES_LENGTH);
+        }
+
         try {
             $reasonEnum = AbsenceReason::from($reason);
         } catch (\ValueError) {
@@ -90,7 +102,7 @@ final class TechnicianAbsenceService
             reason: $reasonEnum,
             startsAt: $starts,
             endsAt: $ends,
-            notes: $notes,
+            notes: $cleanNotes,
             createdBy: $createdBy
         );
 
@@ -215,6 +227,12 @@ final class TechnicianAbsenceService
             );
         }
 
+        // La cancelación es una transición única: una segunda petición no puede
+        // devolver 200 ni volver a auditar (M-2, contrato 409 ABSENCE_ALREADY_CANCELLED).
+        if ($absence->isCancelled()) {
+            throw InvalidAbsenceException::alreadyCancelled();
+        }
+
         $cleanReason = trim($cancellationReason);
         if (mb_strlen($cleanReason) < TechnicianAbsence::MIN_CANCELLATION_REASON_LENGTH) {
             throw InvalidAbsenceException::cancellationReasonTooShort(
@@ -225,11 +243,22 @@ final class TechnicianAbsenceService
         $canceller = $this->userRepo->findById($cancelledBy);
         $tech = $this->userRepo->findById($absence->technicianId());
 
-        $this->absenceRepo->cancel($absenceId, $cancelledBy, $cleanReason);
+        // El UPDATE condicionado a `cancelled_at IS NULL` es el árbitro de la
+        // carrera: si otra petición ganó, no se escribe auditoría y se responde
+        // el mismo 409 que en una segunda cancelación explícita.
+        $cancelled = $this->absenceRepo->cancel($absenceId, $cancelledBy, $cleanReason);
         $updated = $this->absenceRepo->findById($absenceId);
 
         if ($updated === null) {
-            throw new \RuntimeException('Error al recuperar ausencia tras cancelación.');
+            throw new InvalidAbsenceException(
+                "No se encontró la ausencia con ID {$absenceId}.",
+                'ABSENCE_NOT_FOUND',
+                404
+            );
+        }
+
+        if (!$cancelled) {
+            throw InvalidAbsenceException::alreadyCancelled();
         }
 
         // Auditoría

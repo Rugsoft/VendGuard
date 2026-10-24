@@ -196,6 +196,83 @@ try {
     ));
     $assert('2.10 Fecha imposible => HTTP 422 INVALID_DATE_RANGE', $resImpossibleDate->getStatusCode() === 422);
 
+    // Regresión M-1: una fecha no parseable tampoco puede escapar como 500.
+    $resMalformedDate = $router->dispatch(new Request(
+        method: 'POST',
+        path: "/api/coordinator/technicians/{$techId}/absences",
+        parsedBody: [
+            'reason' => 'VACATION',
+            'starts_at' => 'not-a-date',
+            'ends_at' => '2026-11-10',
+        ],
+        headers: ['Authorization' => 'Bearer ' . $coordToken]
+    ));
+    $assert(
+        '2.11 Fecha malformada => HTTP 422 INVALID_DATE_RANGE (nunca 500)',
+        $resMalformedDate->getStatusCode() === 422
+            && ($resMalformedDate->getDecodedBody()['error']['code'] ?? '') === 'INVALID_DATE_RANGE'
+    );
+
+    // M-5: el límite de 500 caracteres se aplica en el servidor.
+    $resLongNotes = $router->dispatch(new Request(
+        method: 'POST',
+        path: "/api/coordinator/technicians/{$techId}/absences",
+        parsedBody: [
+            'reason' => 'OTHER',
+            'starts_at' => '2027-05-01',
+            'ends_at' => '2027-05-02',
+            'notes' => str_repeat('a', 501),
+        ],
+        headers: ['Authorization' => 'Bearer ' . $coordToken]
+    ));
+    $assert(
+        '2.12 Notas de 501 caracteres => HTTP 422 NOTES_TOO_LONG',
+        $resLongNotes->getStatusCode() === 422
+            && ($resLongNotes->getDecodedBody()['error']['code'] ?? '') === 'NOTES_TOO_LONG'
+    );
+
+    // m-1: 09:00-13:00 y 13:00-17:00 comparten límite, no se solapan.
+    $resTouchingFirst = $router->dispatch(new Request(
+        method: 'POST',
+        path: "/api/coordinator/technicians/{$techId}/absences",
+        parsedBody: [
+            'reason' => 'PERSONAL_LEAVE',
+            'starts_at' => '2027-04-10 09:00:00',
+            'ends_at' => '2027-04-10 13:00:00',
+        ],
+        headers: ['Authorization' => 'Bearer ' . $coordToken]
+    ));
+    $resTouchingSecond = $router->dispatch(new Request(
+        method: 'POST',
+        path: "/api/coordinator/technicians/{$techId}/absences",
+        parsedBody: [
+            'reason' => 'TRAINING',
+            'starts_at' => '2027-04-10 13:00:00',
+            'ends_at' => '2027-04-10 17:00:00',
+        ],
+        headers: ['Authorization' => 'Bearer ' . $coordToken]
+    ));
+    $assert(
+        '2.13 Ausencias contiguas que comparten el instante límite => HTTP 201',
+        $resTouchingFirst->getStatusCode() === 201 && $resTouchingSecond->getStatusCode() === 201
+    );
+
+    $resRealOverlap = $router->dispatch(new Request(
+        method: 'POST',
+        path: "/api/coordinator/technicians/{$techId}/absences",
+        parsedBody: [
+            'reason' => 'SICK_LEAVE',
+            'starts_at' => '2027-04-10 12:00:00',
+            'ends_at' => '2027-04-10 14:00:00',
+        ],
+        headers: ['Authorization' => 'Bearer ' . $coordToken]
+    ));
+    $assert(
+        '2.14 Un solape real de 12:00-14:00 sigue devolviendo 409 ABSENCE_OVERLAP',
+        $resRealOverlap->getStatusCode() === 409
+            && ($resRealOverlap->getDecodedBody()['error']['code'] ?? '') === 'ABSENCE_OVERLAP'
+    );
+
     // ─────────────────────────────────────────────────────────────────────────
     // 3. GET /api/coordinator/technicians/absences
     // ─────────────────────────────────────────────────────────────────────────
@@ -207,7 +284,8 @@ try {
     ));
     $assert('3.1 Listado de ausencias => HTTP 200', $resList->getStatusCode() === 200);
     $listData = $resList->getDecodedBody()['data'] ?? [];
-    $assert('3.2 Devuelve la ausencia recién creada', count($listData) >= 1 && $listData[0]['id'] === $absenceId);
+    $listedIds = array_map(static fn (array $row): int => (int)($row['id'] ?? 0), $listData);
+    $assert('3.2 Devuelve la ausencia recién creada', in_array($absenceId, $listedIds, true));
 
     // ─────────────────────────────────────────────────────────────────────────
     // 4. DELETE /api/coordinator/absences/{id}
@@ -229,6 +307,36 @@ try {
     $assert('4.2 Cancelación lógica válida => HTTP 200', $resCancel->getStatusCode() === 200);
     $cancelBody = $resCancel->getDecodedBody();
     $assert('4.3 Respuesta confirma cancelación', ($cancelBody['data']['cancelled'] ?? false) === true);
+
+    // M-2: una segunda cancelación es un conflicto y no vuelve a auditar.
+    $auditCountSql = "SELECT COUNT(*) FROM audit_log
+                       WHERE action = 'CANCEL_TECHNICIAN_ABSENCE'
+                         AND entity_type = 'USER'
+                         AND entity_id = :entity_id";
+    $stmtAuditBefore = $pdo->prepare($auditCountSql);
+    $stmtAuditBefore->execute([':entity_id' => $techId]);
+    $auditBefore = (int)$stmtAuditBefore->fetchColumn();
+
+    $resCancelAgain = $router->dispatch(new Request(
+        method: 'DELETE',
+        path: "/api/coordinator/absences/{$absenceId}",
+        parsedBody: ['cancellation_reason' => 'Segundo intento de anulación'],
+        headers: ['Authorization' => 'Bearer ' . $coordToken]
+    ));
+    $assert(
+        '4.4 Segunda cancelación => HTTP 409 ABSENCE_ALREADY_CANCELLED',
+        $resCancelAgain->getStatusCode() === 409
+            && ($resCancelAgain->getDecodedBody()['error']['code'] ?? '') === 'ABSENCE_ALREADY_CANCELLED'
+    );
+
+    $stmtAuditAfter = $pdo->prepare($auditCountSql);
+    $stmtAuditAfter->execute([':entity_id' => $techId]);
+    $auditAfter = (int)$stmtAuditAfter->fetchColumn();
+    $assert(
+        '4.5 La segunda cancelación no registra otra auditoría',
+        $auditAfter === $auditBefore,
+        "antes={$auditBefore} despues={$auditAfter}"
+    );
 
 } finally {
     TestDataCleaner::purge($pdo);

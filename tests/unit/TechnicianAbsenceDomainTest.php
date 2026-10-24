@@ -152,7 +152,8 @@ $rejectedAlreadyCancelled = false;
 try {
     $cancelledAbsence->cancel(cancelledBy: 1, cancellationReason: 'Intento duplicado');
 } catch (InvalidAbsenceException $e) {
-    $rejectedAlreadyCancelled = $e->getErrorCode() === 'ALREADY_CANCELLED';
+    $rejectedAlreadyCancelled = $e->getErrorCode() === 'ABSENCE_ALREADY_CANCELLED'
+        && $e->getHttpStatusCode() === 409;
 }
 $assert('cancel() rechaza cancelar una ausencia ya cancelada', $rejectedAlreadyCancelled);
 
