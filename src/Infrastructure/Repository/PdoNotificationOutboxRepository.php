@@ -508,12 +508,19 @@ class PdoNotificationOutboxRepository implements NotificationOutboxRepositoryInt
             ':cancelled_at' => [$this->formatDate($this->now()), PDO::PARAM_STR],
         ];
 
-        $restriction = '';
+        // Varias plantillas son una alternancia, no una conjunción: el aviso de
+        // asignación del saliente puede vivir en EMAIL o en TELEGRAM, y exigir
+        // ambas a la vez no cancelaba ninguna fila.
+        $placeholders = [];
         foreach (array_values($templates) as $index => $template) {
             NotificationTemplate::fromString($template); // valida el catálogo cerrado
-            $restriction .= sprintf(' AND template = :template_%d', $index);
+            $placeholders[] = ':template_' . $index;
             $params[':template_' . $index] = [$template, PDO::PARAM_STR];
         }
+
+        $restriction = $placeholders === []
+            ? ''
+            : ' AND template IN (' . implode(', ', $placeholders) . ')';
 
         $sql = "
             UPDATE notification_outbox

@@ -501,7 +501,18 @@ if ($coordinatorCount > 0 && $jordi !== null && $marta !== null) {
 
     $assert(
         '4.1 Los dos avisos de asignación del reemplazado quedan CANCELLED_OBSOLETE',
-        count($assignmentRowsAfter) === 2 && count($cancelledRows) === 2
+        count($assignmentRowsAfter) === 2 && count($cancelledRows) === 2,
+        'Filas: ' . json_encode(array_map(
+            static fn (array $row): array => [
+                'id' => $row['id'] ?? null,
+                'incident_id' => $row['incident_id'] ?? null,
+                'recipient_user_id' => $row['recipient_user_id'] ?? null,
+                'channel' => $row['channel'] ?? null,
+                'status' => $row['status'] ?? null,
+                'template' => $row['template'] ?? null,
+            ],
+            $assignmentRowsAfter
+        ))
     );
     $assert(
         '4.2 La obsolescencia documenta el motivo del traspaso in situ',
