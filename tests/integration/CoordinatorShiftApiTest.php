@@ -13,7 +13,7 @@ declare(strict_types=1);
  *   2. POST /api/coordinator/technicians/{id}/shifts/force-close:
  *      - 404 si el técnico no existe.
  *      - 422 si el motivo tiene menos de 10 caracteres.
- *      - 422 si el técnico no tiene turno abierto.
+ *      - 409 si el técnico no tiene turno abierto (contrato §5).
  *      - 422 si el técnico tiene averías en IN_PROGRESS (guardia fail-fast).
  *      - 200 éxito con cierre a OFF_SHIFT y auditoría inmutable.
  */
@@ -114,14 +114,63 @@ try {
     $forceCloseData = $resForceClose->getDecodedBody()['data'] ?? [];
     $assert('2.3 Turno queda en OFF_SHIFT', ($forceCloseData['status'] ?? '') === 'OFF_SHIFT' || ($forceCloseData['shift']['status'] ?? '') === 'OFF_SHIFT');
 
-    // 422 Intentar forzar cierre cuando ya está cerrado
+    // 409 Intentar forzar cierre cuando ya está cerrado (contrato §5)
     $resNoActive = $router->dispatch(new Request(
         method: 'POST',
         path: "/api/coordinator/technicians/{$techId}/shifts/force-close",
         parsedBody: ['reason' => 'Intento sobre turno ya cerrado por completo'],
         headers: ['Authorization' => 'Bearer ' . $coordToken]
     ));
-    $assert('2.4 Cierre forzado sin turno abierto => HTTP 422', $resNoActive->getStatusCode() === 422);
+    $assert(
+        '2.4 Cierre forzado sin turno abierto => HTTP 409 NO_OPEN_SHIFT_TO_CLOSE',
+        $resNoActive->getStatusCode() === 409
+            && ($resNoActive->getDecodedBody()['error']['code'] ?? '') === 'NO_OPEN_SHIFT_TO_CLOSE'
+    );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 3. C1: la guardia de IN_PROGRESS también manda en el cierre forzado
+    // ─────────────────────────────────────────────────────────────────────────
+    $shiftRepo->startShift($techId);
+    $stmtBlocking = $pdo->prepare("INSERT INTO incidents
+        (ticket_code, location_id, machine_id, category, description, urgency, status, assigned_technician_id, assigned_at)
+        VALUES ('INC-C1-FORCE', 1, 1, 'PAYMENT_SYSTEM', 'Avería en curso que bloquea el cierre forzado', 'HIGH', 'IN_PROGRESS', :tech_id, NOW())
+        RETURNING id");
+    $stmtBlocking->execute([':tech_id' => $techId]);
+    $blockingIncidentId = (int)$stmtBlocking->fetchColumn();
+
+    $resBlocked = $router->dispatch(new Request(
+        method: 'POST',
+        path: "/api/coordinator/technicians/{$techId}/shifts/force-close",
+        parsedBody: ['reason' => 'Cierre administrativo con avería en curso'],
+        headers: ['Authorization' => 'Bearer ' . $coordToken]
+    ));
+    $blockedBody = $resBlocked->getDecodedBody();
+    $assert(
+        '3.1 Cierre forzado con avería IN_PROGRESS => HTTP 422 HAS_IN_PROGRESS_INCIDENTS',
+        $resBlocked->getStatusCode() === 422
+            && ($blockedBody['error']['code'] ?? '') === 'HAS_IN_PROGRESS_INCIDENTS'
+            && in_array('INC-C1-FORCE', $blockedBody['error']['details']['blocking_incidents'] ?? [], true)
+    );
+
+    $resStillOpen = $router->dispatch(new Request(
+        method: 'GET',
+        path: "/api/coordinator/technicians/{$techId}/shift",
+        headers: ['Authorization' => 'Bearer ' . $coordToken]
+    ));
+    $assert(
+        '3.2 El turno sigue ON_SHIFT tras el rechazo',
+        ($resStillOpen->getDecodedBody()['data']['status'] ?? '') === 'ON_SHIFT'
+    );
+
+    // Se libera la avería y el cierre forzado ya puede completarse.
+    $pdo->exec("UPDATE incidents SET status = 'ASSIGNED' WHERE id = {$blockingIncidentId}");
+    $resRecovered = $router->dispatch(new Request(
+        method: 'POST',
+        path: "/api/coordinator/technicians/{$techId}/shifts/force-close",
+        parsedBody: ['reason' => 'Cierre administrativo tras liberar la avería en curso'],
+        headers: ['Authorization' => 'Bearer ' . $coordToken]
+    ));
+    $assert('3.3 Cierre forzado válido tras liberar la avería => HTTP 200', $resRecovered->getStatusCode() === 200);
 
 } finally {
     TestDataCleaner::purge($pdo);

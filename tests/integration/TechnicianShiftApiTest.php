@@ -42,6 +42,7 @@ $authService = new AuthService($locationRepo, $userRepo);
 
 $failures = 0;
 $assertions = 0;
+$previousTelegramToken = getenv('VENDGUARD_TELEGRAM_BOT_TOKEN');
 
 $assert = function (string $caseTitle, bool $condition, string $message = '') use (&$failures, &$assertions): void {
     $assertions++;
@@ -62,6 +63,36 @@ try {
     $tech2Id = (int)$techRows[0];
 
     $techToken = $authService->generateInternalToken($tech1);
+    $coordinator = $userRepo->findByEmail('coordinacion@vendguard.internal');
+    $coordToken = $authService->generateInternalToken($coordinator);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 0. GET /api/technician/handover-targets (A6)
+    // ─────────────────────────────────────────────────────────────────────────
+    $resTargets = $router->dispatch(new Request(
+        method: 'GET',
+        path: '/api/technician/handover-targets',
+        headers: ['Authorization' => 'Bearer ' . $techToken]
+    ));
+    $targets = $resTargets->getDecodedBody()['data'] ?? [];
+    $assert(
+        '0.1 El técnico obtiene compañeros activos de relevo sin incluírse a sí mismo',
+        $resTargets->getStatusCode() === 200
+            && count($targets) >= 1
+            && !in_array((int)$tech1->getId(), array_map(static fn (array $t): int => (int)$t['id'], $targets), true)
+    );
+    $assert(
+        '0.2 El listado de relevo no expone email ni teléfono',
+        isset($targets[0])
+            && !array_key_exists('email', $targets[0])
+            && !array_key_exists('phone', $targets[0])
+    );
+    $resCoordTargets = $router->dispatch(new Request(
+        method: 'GET',
+        path: '/api/technician/handover-targets',
+        headers: ['Authorization' => 'Bearer ' . $coordToken]
+    ));
+    $assert('0.3 Coordinación no puede usar el endpoint móvil de relevo => HTTP 403', $resCoordTargets->getStatusCode() === 403);
 
     // ─────────────────────────────────────────────────────────────────────────
     // 1. GET /api/technician/shift/status
@@ -123,6 +154,12 @@ try {
     $stmtInc->execute([':t_id' => $tech1->getId()]);
     $incId = (int)$stmtInc->fetchColumn();
 
+    // El receptor está vinculado al bot: el aviso de relevo debe salir también
+    // por su canal personal, no sólo por correo (R8).
+    putenv('VENDGUARD_TELEGRAM_BOT_TOKEN=123456:CERT-TOKEN');
+    $pdo->prepare("UPDATE users SET telegram_chat_id = '123456789' WHERE id = :id")
+        ->execute([':id' => $tech2Id]);
+
     // Rechazo de notas cortas si hay traspaso
     $resShortNotes = $router->dispatch(new Request(
         method: 'POST',
@@ -153,7 +190,37 @@ try {
     $assert('4.3 Turno queda cerrado a OFF_SHIFT', ($handoverData['shift']['status'] ?? '') === 'OFF_SHIFT');
     $assert('4.4 Avería traspasada a tech2Id', count($handoverData['transferred_incidents'] ?? []) === 1);
 
+    $stmtOutbox = $pdo->prepare("SELECT priority, channel FROM notification_outbox
+        WHERE incident_id = :incident_id
+          AND template = 'TELEGRAM_INCIDENT_ASSIGNMENT'
+          AND recipient_user_id = :technician_id
+          AND deleted_at IS NULL
+        ORDER BY id");
+    $stmtOutbox->execute([':incident_id' => $incId, ':technician_id' => $tech2Id]);
+    $handoverRows = $stmtOutbox->fetchAll(PDO::FETCH_ASSOC);
+    $assert(
+        '4.5 El técnico receptor recibe el aviso propio de relevo en notification_outbox',
+        $handoverRows !== []
+    );
+    $assert(
+        '4.6 El aviso de relevo nace con prioridad PRIORITY',
+        $handoverRows !== [] && array_unique(array_column($handoverRows, 'priority')) === ['PRIORITY']
+    );
+    $assert(
+        '4.7 El técnico vinculado recibe el aviso de relevo también por Telegram',
+        in_array('TELEGRAM', array_column($handoverRows, 'channel'), true)
+    );
+
 } finally {
+    if ($previousTelegramToken === false) {
+        putenv('VENDGUARD_TELEGRAM_BOT_TOKEN');
+    } else {
+        putenv('VENDGUARD_TELEGRAM_BOT_TOKEN=' . $previousTelegramToken);
+    }
+    if (isset($tech2Id) && $tech2Id > 0) {
+        $pdo->prepare("UPDATE users SET telegram_chat_id = NULL WHERE id = :id")
+            ->execute([':id' => $tech2Id]);
+    }
     TestDataCleaner::purge($pdo);
 }
 

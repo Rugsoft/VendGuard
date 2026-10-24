@@ -12,7 +12,10 @@ use VendGuard\Core\Domain\Exception\InvalidShiftTransitionException;
 use VendGuard\Core\Domain\Exception\JustificationTooShortException;
 use VendGuard\Core\Domain\Exception\UserNotFoundException;
 use VendGuard\Core\Domain\Model\AuditEvent;
+use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
+use VendGuard\Core\Domain\Model\TechnicianShift;
+use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
@@ -31,10 +34,21 @@ use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
  *   - Art. II: Salvaguarda innegociable de cadena de frío en máquinas de perecederos.
  *   - Art. III.1: Cero borrado físico, inmutabilidad y atomicidad transaccional.
  *   - Art. V.4: Notas internas de traspaso estrictamente invisibles para la sede (is_internal = TRUE).
+ *
+ * Un solo motor de cierre:
+ *   - `closeAndHandover()` valida el relevo y llama al núcleo.
+ *   - `forceCloseShift()` valida la autoridad de Coordinación y llama al MISMO núcleo.
+ *
+ * Compartir el núcleo no es una comodidad: es la única forma de garantizar que el
+ * cierre forzado no pueda olvidar la guardia de `IN_PROGRESS` ni el protocolo
+ * sanitario, que son precisamente los dos defectos que la batería funcional
+ * encontró en la implementación anterior.
  */
 final class ShiftHandoverService
 {
     public const MIN_HANDOVER_NOTES_LENGTH = 10;
+
+    public const MIN_FORCE_CLOSE_REASON_LENGTH = 10;
 
     public function __construct(
         private readonly PDO $pdo,
@@ -43,11 +57,14 @@ final class ShiftHandoverService
         private readonly IncidentRepositoryInterface $incidentRepo,
         private readonly MachineRepositoryInterface $machineRepo,
         private readonly OnCallTechnicianRepositoryInterface $onCallRepo,
-        private readonly AuditLogRepositoryInterface $auditRepo
+        private readonly AuditLogRepositoryInterface $auditRepo,
+        private readonly ?NotificationOutboxEnqueuerService $notifications = null
     ) {
     }
 
     /**
+     * Cierre de jornada del técnico con relevo opcional (RF-05 y RF-06).
+     *
      * @param list<int> $incidentIdsToTransfer
      */
     public function closeAndHandover(
@@ -72,12 +89,8 @@ final class ShiftHandoverService
             );
         }
 
-        // 2. Precondición de averías en curso (RF-04 / Bloqueo fail-fast)
-        $inProgress = $this->incidentRepo->findAssignedToTechnician($technicianId, ['IN_PROGRESS']);
-        if (count($inProgress) > 0) {
-            $blockingCodes = array_map(static fn ($i): string => (string)$i->getTicketCode(), $inProgress);
-            throw new ActiveIncidentInProgressException($blockingCodes);
-        }
+        // 2. Guardia fail-fast antes de validar el relevo (RF-04 / contrato §5)
+        $this->assertNoInProgress($technicianId);
 
         // 3. Validación de relevo (RF-05)
         $targetTech = null;
@@ -121,7 +134,99 @@ final class ShiftHandoverService
             }
         }
 
-        // 4. Averías elegibles asignadas al técnico saliente
+        return $this->executeClose(
+            technician: $tech,
+            activeShift: $activeShift,
+            targetTechnician: $targetTech,
+            incidentIdsToTransfer: $incidentIdsToTransfer,
+            handoverNotes: $cleanNotes,
+            closeReason: $closeReason,
+            closedBy: $technicianId,
+            auditAction: 'CLOSE_TECHNICIAN_SHIFT'
+        );
+    }
+
+    /**
+     * Cierre administrativo forzado por Coordinación (RF-07).
+     *
+     * Aplica exactamente las mismas precondiciones y el mismo protocolo sanitario
+     * que el cierre del técnico. La única diferencia es quién firma el cierre y el
+     * evento de auditoría.
+     */
+    public function forceCloseShift(int $technicianId, int $coordinatorId, string $reason): ShiftHandoverResultDto
+    {
+        $tech = $this->userRepo->findById($technicianId);
+        if ($tech === null) {
+            throw new UserNotFoundException($technicianId, "No se encontró el técnico con ID {$technicianId}.");
+        }
+
+        $activeShift = $this->shiftRepo->findActiveShiftByTechnician($technicianId);
+        if ($activeShift === null || !$activeShift->isOpen()) {
+            throw new InvalidShiftTransitionException(
+                'El técnico no tiene ningún turno abierto para cerrar.',
+                'NO_OPEN_SHIFT_TO_CLOSE',
+                409
+            );
+        }
+
+        // Contrato §5: turno, averías en curso y después motivo.
+        $this->assertNoInProgress($technicianId);
+
+        $cleanReason = trim($reason);
+        if (mb_strlen($cleanReason) < self::MIN_FORCE_CLOSE_REASON_LENGTH) {
+            throw new JustificationTooShortException(
+                $cleanReason,
+                'El motivo de cierre forzado debe contener un mínimo de 10 caracteres descriptivos.'
+            );
+        }
+
+        $coordinator = $this->userRepo->findById($coordinatorId);
+
+        return $this->executeClose(
+            technician: $tech,
+            activeShift: $activeShift,
+            targetTechnician: null,
+            incidentIdsToTransfer: [],
+            handoverNotes: null,
+            closeReason: $cleanReason,
+            closedBy: $coordinatorId,
+            auditAction: 'FORCE_CLOSE_TECHNICIAN_SHIFT',
+            actorRole: $coordinator?->getRole()->value ?? 'COORDINATOR',
+            actorName: $coordinator?->getName() ?? 'Coordinador',
+            auditMetadata: [
+                'coordinator_name' => $coordinator?->getName() ?? 'Coordinador',
+                'coordinator_reason' => $cleanReason,
+            ]
+        );
+    }
+
+    /**
+     * Núcleo transaccional único del cierre de jornada.
+     *
+     * Los llamadores ya validaron el turno y la guardia de `IN_PROGRESS`; aquí se
+     * resuelve la foto de la ruta, se aplica el relevo o el protocolo sanitario,
+     * se cierra el turno y se encolan los avisos en la misma transacción.
+     *
+     * @param list<int> $incidentIdsToTransfer
+     * @param array<string, mixed> $auditMetadata
+     */
+    private function executeClose(
+        User $technician,
+        TechnicianShift $activeShift,
+        ?User $targetTechnician = null,
+        array $incidentIdsToTransfer = [],
+        ?string $handoverNotes = null,
+        ?string $closeReason = null,
+        int $closedBy = 0,
+        string $auditAction = 'CLOSE_TECHNICIAN_SHIFT',
+        string $actorRole = 'TECHNICIAN',
+        ?string $actorName = null,
+        array $auditMetadata = []
+    ): ShiftHandoverResultDto {
+        $technicianId = (int)$technician->getId();
+        $targetTechnicianId = $targetTechnician?->getId();
+
+        // Averías elegibles asignadas al técnico saliente.
         $eligibleIncidents = $this->incidentRepo->findAssignedToTechnician(
             $technicianId,
             ['ASSIGNED', 'PENDING_PARTS', 'PENDING_INFO']
@@ -132,7 +237,7 @@ final class ShiftHandoverService
             $eligibleMap[(int)$inc->getId()] = $inc;
         }
 
-        // Detección de colisión concurrente (RF-05.3, R9)
+        // Detección de colisión concurrente (RF-05.3, R9).
         foreach ($incidentIdsToTransfer as $transferId) {
             if (!isset($eligibleMap[$transferId])) {
                 throw new InvalidShiftTransitionException(
@@ -143,7 +248,6 @@ final class ShiftHandoverService
             }
         }
 
-        // 5. Transacción atómica
         $this->pdo->beginTransaction();
 
         try {
@@ -152,31 +256,29 @@ final class ShiftHandoverService
             $sanitaryTransfers = [];
             $sanitaryUnassigned = [];
 
-            // 5.a Relevo explícito de averías seleccionadas
+            // 1. Relevo explícito de averías seleccionadas.
             foreach ($incidentIdsToTransfer as $id) {
                 $inc = $eligibleMap[$id];
-                $this->incidentRepo->assign(
+                $after = $this->incidentRepo->assign(
                     incidentId: $id,
-                    technicianId: $targetTechnicianId,
+                    technicianId: (int)$targetTechnicianId,
                     coordinatorId: null,
                     urgencyOverride: null,
                     urgencyReason: null,
-                    reassignmentReason: $cleanNotes ?? 'Relevo de fin de turno'
+                    reassignmentReason: $handoverNotes ?? 'Relevo de fin de turno'
                 );
 
-                // Comentario interno obligatorio y confidencial (Art. V.4)
                 $comment = new IncidentComment(
                     id: null,
                     incidentId: $id,
                     authorType: 'TECHNICIAN',
                     userId: $technicianId,
-                    authorName: $tech->getName(),
-                    commentText: "Traspaso de fin de turno de {$tech->getName()} a {$targetTech->getName()}: {$cleanNotes}",
+                    authorName: $technician->getName(),
+                    commentText: "Traspaso de fin de turno de {$technician->getName()} a {$targetTechnician?->getName()}: {$handoverNotes}",
                     isInternal: true
                 );
                 $this->incidentRepo->addComment($comment);
 
-                // Auditoría de relevo
                 $event = new AuditEvent(
                     id: null,
                     entityType: AuditEvent::ENTITY_TICKET,
@@ -184,16 +286,21 @@ final class ShiftHandoverService
                     action: 'SHIFT_HANDOVER_REASSIGNMENT',
                     userId: $technicianId,
                     userRole: 'TECHNICIAN',
-                    userName: $tech->getName(),
+                    userName: $technician->getName(),
                     previousState: ['assigned_technician_id' => $technicianId],
                     newState: ['assigned_technician_id' => $targetTechnicianId],
                     metadata: [
                         'ticket_code' => $inc->getTicketCode(),
-                        'target_technician_name' => $targetTech->getName(),
-                        'notes' => $cleanNotes,
+                        'target_technician_name' => $targetTechnician?->getName(),
+                        'notes' => $handoverNotes,
                     ]
                 );
                 $this->auditRepo->log($event);
+
+                // RF-05.4.4 / R8: aviso propio y prioritario de relevo al receptor
+                // (email + Telegram si está vinculado). No es una asignación
+                // ordinaria: la plantilla y la prioridad identifican el relevo.
+                $this->notifications?->enqueueShiftHandoverAssignment($after);
 
                 $transferred[] = [
                     'id' => $inc->getId(),
@@ -201,11 +308,11 @@ final class ShiftHandoverService
                     'status' => $inc->getStatus()->value,
                     'machine_id' => $inc->getMachineId(),
                     'target_technician_id' => $targetTechnicianId,
-                    'target_technician_name' => $targetTech->getName(),
+                    'target_technician_name' => $targetTechnician?->getName(),
                 ];
             }
 
-            // 5.b Averías no seleccionadas: retención ordinaria o protocolo sanitario (RF-06, Art. II)
+            // 2. Averías no seleccionadas: retención ordinaria o protocolo sanitario.
             $remainingIds = array_diff(array_keys($eligibleMap), $incidentIdsToTransfer);
             $onCallList = null;
 
@@ -214,128 +321,144 @@ final class ShiftHandoverService
                 $machine = $this->machineRepo->findById($inc->getMachineId());
                 $isPerishable = $machine !== null && $machine->getMachineType()->requiresSanitaryWatch();
 
-                if ($isPerishable) {
-                    if ($onCallList === null) {
-                        $onCallList = $this->onCallRepo->findOnCallTechnicians();
-                    }
-
-                    if (!empty($onCallList)) {
-                        // Nivel 1: Traspaso a técnico de guardia 24/7
-                        $guard = $onCallList[0];
-                        $this->incidentRepo->assign(
-                            incidentId: $remId,
-                            technicianId: $guard->getId(),
-                            coordinatorId: null,
-                            urgencyOverride: null,
-                            urgencyReason: null,
-                            reassignmentReason: 'Protocolo sanitario Art. II: traspaso por fin de turno sin relevo a guardia de frío'
-                        );
-
-                        $comment = new IncidentComment(
-                            id: null,
-                            incidentId: $remId,
-                            authorType: 'TECHNICIAN',
-                            userId: $technicianId,
-                            authorName: $tech->getName(),
-                            commentText: "Reasignación automática por protocolo sanitario Art. II (cierre de turno sin relevo sobre máquina perecedera) a técnico de guardia {$guard->getName()}.",
-                            isInternal: true
-                        );
-                        $this->incidentRepo->addComment($comment);
-
-                        $event = new AuditEvent(
-                            id: null,
-                            entityType: AuditEvent::ENTITY_TICKET,
-                            entityId: $remId,
-                            action: 'SANITARY_SHIFT_CLOSE_FAILSAFE',
-                            userId: $technicianId,
-                            userRole: 'TECHNICIAN',
-                            userName: $tech->getName(),
-                            previousState: ['assigned_technician_id' => $technicianId],
-                            newState: ['assigned_technician_id' => $guard->getId(), 'level' => 1],
-                            metadata: [
-                                'ticket_code' => $inc->getTicketCode(),
-                                'on_call_technician' => $guard->getName(),
-                                'reason' => 'FOOD_PERISHABLE at shift close without manual handover',
-                            ]
-                        );
-                        $this->auditRepo->log($event);
-
-                        $sanitaryTransfers[] = [
-                            'id' => $inc->getId(),
-                            'ticket_code' => $inc->getTicketCode(),
-                            'machine_id' => $inc->getMachineId(),
-                            'on_call_technician_id' => $guard->getId(),
-                            'on_call_technician_name' => $guard->getName(),
-                        ];
-                    } else {
-                        // Nivel 2: Desasignación a REGISTERED con alarma crítica a Coordinación
-                        $stmtUnassign = $this->pdo->prepare("
-                            UPDATE incidents
-                               SET status = 'REGISTERED',
-                                   assigned_technician_id = NULL,
-                                   assigned_at = NULL
-                             WHERE id = :id
-                        ");
-                        $stmtUnassign->execute([':id' => $remId]);
-
-                        $this->incidentRepo->insertHistory(
-                            $remId,
-                            $technicianId,
-                            $inc->getStatus()->value,
-                            'REGISTERED',
-                            'Desasignación automática por fin de turno sin guardia disponible (Protocolo Sanitario Art. II)'
-                        );
-
-                        $comment = new IncidentComment(
-                            id: null,
-                            incidentId: $remId,
-                            authorType: 'TECHNICIAN',
-                            userId: $technicianId,
-                            authorName: $tech->getName(),
-                            commentText: "🚨 ALERTA SANITARIA ART. II: Máquina perecedera desatendida por fin de turno sin guardia disponible. Ticket desasignado a REGISTERED para triaje urgente.",
-                            isInternal: true
-                        );
-                        $this->incidentRepo->addComment($comment);
-
-                        $event = new AuditEvent(
-                            id: null,
-                            entityType: AuditEvent::ENTITY_TICKET,
-                            entityId: $remId,
-                            action: 'SANITARY_SHIFT_CLOSE_FAILSAFE',
-                            userId: $technicianId,
-                            userRole: 'TECHNICIAN',
-                            userName: $tech->getName(),
-                            previousState: ['assigned_technician_id' => $technicianId],
-                            newState: ['assigned_technician_id' => null, 'status' => 'REGISTERED', 'level' => 2],
-                            metadata: [
-                                'ticket_code' => $inc->getTicketCode(),
-                                'reason' => 'CRITICAL_NO_ON_CALL_AVAILABLE',
-                            ]
-                        );
-                        $this->auditRepo->log($event);
-
-                        $sanitaryUnassigned[] = [
-                            'id' => $inc->getId(),
-                            'ticket_code' => $inc->getTicketCode(),
-                            'machine_id' => $inc->getMachineId(),
-                            'sanitary_disposition' => 'UNASSIGNED_TO_REGISTERED',
-                        ];
-                    }
-                } else {
-                    // Avería ordinaria: se retiene para la siguiente jornada
+                if (!$isPerishable) {
                     $retained[] = [
                         'id' => $inc->getId(),
                         'ticket_code' => $inc->getTicketCode(),
                         'status' => $inc->getStatus()->value,
                         'machine_id' => $inc->getMachineId(),
                     ];
+                    continue;
                 }
+
+                if ($onCallList === null) {
+                    $onCallList = $this->onCallRepo->findOnCallTechnicians();
+                }
+
+                if ($onCallList !== []) {
+                    // Nivel 1: traspaso a técnico de guardia 24/7.
+                    $guard = $onCallList[0];
+                    $after = $this->incidentRepo->assign(
+                        incidentId: $remId,
+                        technicianId: $guard->getId(),
+                        coordinatorId: null,
+                        urgencyOverride: null,
+                        urgencyReason: null,
+                        reassignmentReason: 'Protocolo sanitario Art. II: traspaso por fin de turno sin relevo a guardia de frío'
+                    );
+
+                    $comment = new IncidentComment(
+                        id: null,
+                        incidentId: $remId,
+                        authorType: 'TECHNICIAN',
+                        userId: $technicianId,
+                        authorName: $technician->getName(),
+                        commentText: "Reasignación automática por protocolo sanitario Art. II (cierre de turno sin relevo sobre máquina perecedera) a técnico de guardia {$guard->getName()}.",
+                        isInternal: true
+                    );
+                    $this->incidentRepo->addComment($comment);
+
+                    $event = new AuditEvent(
+                        id: null,
+                        entityType: AuditEvent::ENTITY_TICKET,
+                        entityId: $remId,
+                        action: 'SANITARY_SHIFT_CLOSE_FAILSAFE',
+                        userId: $technicianId,
+                        userRole: 'TECHNICIAN',
+                        userName: $technician->getName(),
+                        previousState: ['assigned_technician_id' => $technicianId],
+                        newState: ['assigned_technician_id' => $guard->getId(), 'level' => 1],
+                        metadata: [
+                            'ticket_code' => $inc->getTicketCode(),
+                            'on_call_technician' => $guard->getName(),
+                            'reason' => 'FOOD_PERISHABLE at shift close without manual handover',
+                        ]
+                    );
+                    $this->auditRepo->log($event);
+
+                    // Nivel 1: el guardia hereda la parada por relevo de fin de
+                    // turno. Debe recibir el aviso propio y prioritario del
+                    // Módulo 21 —no la asignación ordinaria— para que el traspaso
+                    // sanitario no compita con el lote estándar (R8 / contrato §4.1).
+                    $this->notifications?->enqueueShiftHandoverAssignment($after, $machine);
+
+                    $sanitaryTransfers[] = [
+                        'id' => $inc->getId(),
+                        'ticket_code' => $inc->getTicketCode(),
+                        'machine_id' => $inc->getMachineId(),
+                        'on_call_technician_id' => $guard->getId(),
+                        'on_call_technician_name' => $guard->getName(),
+                    ];
+                    continue;
+                }
+
+                // Nivel 2: desasignación a REGISTERED con alarma crítica a Coordinación.
+                $stmtUnassign = $this->pdo->prepare("
+                    UPDATE incidents
+                       SET status = 'REGISTERED',
+                           assigned_technician_id = NULL,
+                           assigned_at = NULL
+                     WHERE id = :id
+                ");
+                $stmtUnassign->execute([':id' => $remId]);
+
+                $this->incidentRepo->insertHistory(
+                    $remId,
+                    $technicianId,
+                    $inc->getStatus()->value,
+                    'REGISTERED',
+                    'Desasignación automática por fin de turno sin guardia disponible (Protocolo Sanitario Art. II)'
+                );
+
+                $comment = new IncidentComment(
+                    id: null,
+                    incidentId: $remId,
+                    authorType: 'TECHNICIAN',
+                    userId: $technicianId,
+                    authorName: $technician->getName(),
+                    commentText: "🚨 ALERTA SANITARIA ART. II: Máquina perecedera desatendida por fin de turno sin guardia disponible. Ticket desasignado a REGISTERED para triaje urgente.",
+                    isInternal: true
+                );
+                $this->incidentRepo->addComment($comment);
+
+                $event = new AuditEvent(
+                    id: null,
+                    entityType: AuditEvent::ENTITY_TICKET,
+                    entityId: $remId,
+                    action: 'SANITARY_SHIFT_CLOSE_FAILSAFE',
+                    userId: $technicianId,
+                    userRole: 'TECHNICIAN',
+                    userName: $technician->getName(),
+                    previousState: ['assigned_technician_id' => $technicianId],
+                    newState: ['assigned_technician_id' => null, 'status' => 'REGISTERED', 'level' => 2],
+                    metadata: [
+                        'ticket_code' => $inc->getTicketCode(),
+                        'reason' => 'CRITICAL_NO_ON_CALL_AVAILABLE',
+                    ]
+                );
+                $this->auditRepo->log($event);
+
+                // Alerta crítica a Coordinación. Se relee el expediente porque el
+                // UPDATE ya lo dejó sin técnico; el payload debe reflejar ese estado.
+                $unassigned = $this->incidentRepo->findById($remId) ?? $inc;
+                $this->notifications?->enqueueSanitaryEmergencyAlert(
+                    incident: $unassigned,
+                    shiftId: (int)$activeShift->id(),
+                    machine: $machine
+                );
+
+                $sanitaryUnassigned[] = [
+                    'id' => $inc->getId(),
+                    'ticket_code' => $inc->getTicketCode(),
+                    'machine_id' => $inc->getMachineId(),
+                    'sanitary_disposition' => 'UNASSIGNED_TO_REGISTERED',
+                ];
             }
 
-            // 5.c Cierre del turno en technician_shifts
+            // 3. Cierre del turno en technician_shifts.
             $closedShift = $this->shiftRepo->closeShift(
                 shiftId: $activeShift->id(),
-                closedBy: $technicianId,
+                closedBy: $closedBy,
                 closeReason: $closeReason ?? 'Cierre de turno con relevo'
             );
 
@@ -343,12 +466,13 @@ final class ShiftHandoverService
                 id: null,
                 entityType: AuditEvent::ENTITY_USER,
                 entityId: $technicianId,
-                action: 'CLOSE_TECHNICIAN_SHIFT',
-                userId: $technicianId,
-                userRole: 'TECHNICIAN',
-                userName: $tech->getName(),
+                action: $auditAction,
+                userId: $closedBy,
+                userRole: $actorRole,
+                userName: $actorName ?? $technician->getName(),
                 previousState: $activeShift->toArray(),
-                newState: $closedShift->toArray()
+                newState: $closedShift->toArray(),
+                metadata: array_merge(['technician_name' => $technician->getName()], $auditMetadata)
             );
             $this->auditRepo->log($event);
 
@@ -363,13 +487,13 @@ final class ShiftHandoverService
             );
 
             return new ShiftHandoverResultDto(
-                shift: TechnicianShiftDto::fromEntity($closedShift, $tech->getName()),
+                shift: TechnicianShiftDto::fromEntity($closedShift, $technician->getName()),
                 transferredIncidents: $transferred,
                 retainedIncidents: $retained,
                 sanitaryEmergencyTransfers: $sanitaryTransfers,
                 sanitaryEmergencyUnassigned: $sanitaryUnassigned,
-                targetTechnicianId: $targetTechnicianId,
-                targetTechnicianName: $targetTech?->getName(),
+                targetTechnicianId: $targetTechnician?->getId(),
+                targetTechnicianName: $targetTechnician?->getName(),
                 summary: $summary
             );
         } catch (\Throwable $e) {
@@ -377,6 +501,22 @@ final class ShiftHandoverService
                 $this->pdo->rollBack();
             }
             throw $e;
+        }
+    }
+
+    /**
+     * Guardia común de RF-04: ningún cierre, ordinario o forzado, puede avanzar
+     * mientras el técnico tenga una intervención en curso.
+     */
+    private function assertNoInProgress(int $technicianId): void
+    {
+        $inProgress = $this->incidentRepo->findAssignedToTechnician($technicianId, ['IN_PROGRESS']);
+        if ($inProgress !== []) {
+            $blockingCodes = array_map(
+                static fn (Incident $incident): string => (string)$incident->getTicketCode(),
+                $inProgress
+            );
+            throw new ActiveIncidentInProgressException($blockingCodes);
         }
     }
 }

@@ -89,6 +89,9 @@ $userRepo = new class implements UserRepositoryInterface {
         if ($id === 8) {
             return new User(8, 'Técnico Entrante', 'entrante@vending.test', 'hash', UserRole::TECHNICIAN, isActive: true);
         }
+        if ($id === 1) {
+            return new User(1, 'Laura Coordinadora', 'coordinacion@vending.test', 'hash', UserRole::COORDINATOR, isActive: true);
+        }
         return null;
     }
     public function findByEmail(string $email, bool $onlyActive = true, bool $allowDeleted = false): ?User { return null; }
@@ -284,6 +287,53 @@ $assert('closeAndHandover retiene 1 ticket no transferido', count($result->retai
 // Verificar notas internas confidenciales insertadas
 $assert('Se insertó un comentario interno por cada ticket traspasado', count($addedComments) === 2);
 $assert('Los comentarios de traspaso nacen con is_internal = true (Art. V.4)', $addedComments[0]->isInternal() && $addedComments[1]->isInternal());
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. Cierre forzado: misma guardia y mismo motor que el cierre ordinario
+// ─────────────────────────────────────────────────────────────────────────────
+$shiftRepo->shift = new TechnicianShift(
+    id: 2,
+    technicianId: 4,
+    status: ShiftStatus::ON_SHIFT,
+    startedAt: new DateTimeImmutable('2026-10-23 18:00:00+00')
+);
+
+$rejectedShortForceReason = false;
+try {
+    $service->forceCloseShift(technicianId: 4, coordinatorId: 1, reason: 'olvido');
+} catch (JustificationTooShortException $e) {
+    $rejectedShortForceReason = true;
+}
+$assert('forceCloseShift rechaza motivo < 10 caracteres', $rejectedShortForceReason);
+
+$incidents[105] = new Incident(105, 'INC-0105', 4, 1, IncidentCategory::TEMPERATURE_COLD, 'En curso', UrgencyLevel::HIGH, IncidentStatus::IN_PROGRESS, assignedTechnicianId: 4);
+$rejectedForceInProgress = false;
+try {
+    $service->forceCloseShift(technicianId: 4, coordinatorId: 1, reason: 'Cierre administrativo solicitado por el cliente');
+} catch (ActiveIncidentInProgressException $e) {
+    $rejectedForceInProgress = $e->getErrorCode() === 'HAS_IN_PROGRESS_INCIDENTS'
+        && $e->getBlockingIncidentCodes() === ['INC-0105'];
+}
+$assert('forceCloseShift rechaza fail-fast con HAS_IN_PROGRESS_INCIDENTS', $rejectedForceInProgress);
+$assert('forceCloseShift mantiene el turno abierto si hay avería en curso', $shiftRepo->shift?->isOpen() === true);
+unset($incidents[105]);
+
+$forced = $service->forceCloseShift(
+    technicianId: 4,
+    coordinatorId: 1,
+    reason: 'Cierre administrativo por fin de guardia no reportado'
+);
+$assert('forceCloseShift cierra el turno a OFF_SHIFT', $forced->shift->status === 'OFF_SHIFT');
+$lastEvent = end($auditRepo->events);
+$assert('forceCloseShift audita FORCE_CLOSE_TECHNICIAN_SHIFT', $lastEvent->getAction() === 'FORCE_CLOSE_TECHNICIAN_SHIFT');
+
+$rejectedNoShift = false;
+try {
+    $service->forceCloseShift(technicianId: 4, coordinatorId: 1, reason: 'Segundo intento sobre turno ya cerrado');
+} catch (InvalidShiftTransitionException $e) {
+    $rejectedNoShift = $e->getErrorCode() === 'NO_OPEN_SHIFT_TO_CLOSE' && $e->getHttpStatusCode() === 409;
+}
+$assert('forceCloseShift sin turno abierto => 409 NO_OPEN_SHIFT_TO_CLOSE', $rejectedNoShift);
 
 echo "\n======================================================================\n";
 echo sprintf(" Total Aserciones: %d | Fallidas: %d\n", $assertions, $failures);

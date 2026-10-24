@@ -11,10 +11,10 @@ use VendGuard\Application\Service\ShiftLifecycleService;
 use VendGuard\Core\Domain\Exception\ActiveIncidentInProgressException;
 use VendGuard\Core\Domain\Exception\InvalidShiftTransitionException;
 use VendGuard\Core\Domain\Exception\JustificationTooShortException;
+use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Notification\ShiftHandoverServiceFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
-use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
-use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
@@ -29,39 +29,28 @@ use VendGuard\Presentation\Http\Response;
 final class TechnicianShiftController
 {
     private ShiftLifecycleService $lifecycleService;
+
     private ShiftHandoverService $handoverService;
+
+    private UserRepositoryInterface $userRepo;
 
     public function __construct(
         ?ShiftLifecycleService $lifecycleService = null,
         ?ShiftHandoverService $handoverService = null,
-        ?PDO $pdo = null
+        ?PDO $pdo = null,
+        ?UserRepositoryInterface $userRepo = null
     ) {
         $pdo ??= ConnectionFactory::getConnection();
-
-        $shiftRepo = new PdoTechnicianShiftRepository($pdo);
-        $absenceRepo = new PdoTechnicianAbsenceRepository($pdo);
-        $userRepo = new PdoUserRepository($pdo);
-        $incidentRepo = new PdoIncidentRepository($pdo);
-        $machineRepo = new PdoMachineRepository($pdo);
-        $onCallRepo = $userRepo; // PdoUserRepository implementa OnCallTechnicianRepositoryInterface
-        $auditRepo = new PdoAuditLogRepository($pdo);
+        $this->userRepo = $userRepo ?? new PdoUserRepository($pdo);
 
         $this->lifecycleService = $lifecycleService ?? new ShiftLifecycleService(
-            $shiftRepo,
-            $absenceRepo,
-            $userRepo,
-            $auditRepo
+            new PdoTechnicianShiftRepository($pdo),
+            new PdoTechnicianAbsenceRepository($pdo),
+            $this->userRepo,
+            new PdoAuditLogRepository($pdo)
         );
 
-        $this->handoverService = $handoverService ?? new ShiftHandoverService(
-            $pdo,
-            $shiftRepo,
-            $userRepo,
-            $incidentRepo,
-            $machineRepo,
-            $onCallRepo,
-            $auditRepo
-        );
+        $this->handoverService = $handoverService ?? ShiftHandoverServiceFactory::create($pdo);
     }
 
     public function status(Request $request): Response
@@ -106,6 +95,34 @@ final class TechnicianShiftController
         } catch (Throwable $e) {
             return Response::error('SHIFT_RESUME_FAILED', $e->getMessage(), 422);
         }
+    }
+
+    /**
+     * GET /api/technician/handover-targets
+     *
+     * Compañeros activos a los que el técnico autenticado puede traspasar su ruta.
+     * La ruta de coordinación no sirve para este propósito (403) y, además, expone
+     * datos internos que el móvil no necesita. Aquí solo viajan id, nombre y estado.
+     */
+    public function handoverTargets(Request $request): Response
+    {
+        $currentId = (int)($request->getAttribute('user_id') ?? 0);
+        $targets = [];
+
+        foreach ($this->userRepo->findAllTechnicians(true) as $technician) {
+            $id = (int)$technician->getId();
+            if ($id === $currentId) {
+                continue;
+            }
+
+            $targets[] = [
+                'id' => $id,
+                'name' => $technician->getName(),
+                'is_active' => true,
+            ];
+        }
+
+        return Response::json($targets, 200);
     }
 
     public function closeAndHandover(Request $request): Response

@@ -7,7 +7,6 @@ namespace VendGuard\Application\Service;
 use DateTimeImmutable;
 use VendGuard\Application\DTO\TechnicianShiftDto;
 use VendGuard\Core\Domain\Exception\InvalidShiftTransitionException;
-use VendGuard\Core\Domain\Exception\JustificationTooShortException;
 use VendGuard\Core\Domain\Exception\UserNotFoundException;
 use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\UserRole;
@@ -21,12 +20,12 @@ use VendGuard\Core\Domain\ValueObject\ShiftStatus;
  * ShiftLifecycleService
  *
  * Servicio de Aplicación responsable de coordinar el ciclo de jornada de los técnicos:
- * inicio de turno, pausas de comida, reanudación y cierre forzado administrativo (Módulo 21).
+ * inicio de turno, pausas de comida y reanudación (Módulo 21). El cierre, ordinario o
+ * forzado, vive en `ShiftHandoverService` para que ambos caminos compartan el protocolo
+ * sanitario y la guardia de averías en curso.
  */
 final class ShiftLifecycleService
 {
-    public const MIN_FORCE_CLOSE_REASON_LENGTH = 10;
-
     public function __construct(
         private readonly TechnicianShiftRepositoryInterface $shiftRepo,
         private readonly TechnicianAbsenceRepositoryInterface $absenceRepo,
@@ -165,56 +164,4 @@ final class ShiftLifecycleService
         return TechnicianShiftDto::offShift($technicianId, $tech?->getName());
     }
 
-    public function forceCloseShift(int $technicianId, int $coordinatorId, string $reason): TechnicianShiftDto
-    {
-        $cleanReason = trim($reason);
-        if (mb_strlen($cleanReason) < self::MIN_FORCE_CLOSE_REASON_LENGTH) {
-            throw new JustificationTooShortException(
-                $cleanReason,
-                'El motivo de cierre forzado debe contener un mínimo de 10 caracteres descriptivos.'
-            );
-        }
-
-        $tech = $this->userRepo->findById($technicianId);
-        if ($tech === null) {
-            throw new UserNotFoundException($technicianId, "No se encontró el técnico con ID {$technicianId}.");
-        }
-
-        $coordinator = $this->userRepo->findById($coordinatorId);
-
-        $activeShift = $this->shiftRepo->findActiveShiftByTechnician($technicianId);
-        if ($activeShift === null) {
-            throw new InvalidShiftTransitionException(
-                'El técnico no tiene ningún turno abierto para cerrar.',
-                'NO_ACTIVE_SHIFT',
-                422
-            );
-        }
-
-        $closed = $this->shiftRepo->closeShift(
-            shiftId: $activeShift->id(),
-            closedBy: $coordinatorId,
-            closeReason: $cleanReason
-        );
-
-        // Auditoría (Art. III.3)
-        $event = new AuditEvent(
-            id: null,
-            entityType: AuditEvent::ENTITY_USER,
-            entityId: $technicianId,
-            action: 'FORCE_CLOSE_TECHNICIAN_SHIFT',
-            userId: $coordinatorId,
-            userRole: $coordinator?->getRole()->value ?? 'COORDINATOR',
-            userName: $coordinator?->getName() ?? 'Coordinador',
-            previousState: $activeShift->toArray(),
-            newState: $closed->toArray(),
-            metadata: [
-                'technician_name' => $tech->getName(),
-                'coordinator_reason' => $cleanReason,
-            ]
-        );
-        $this->auditRepo->log($event);
-
-        return TechnicianShiftDto::fromEntity($closed, $tech->getName());
-    }
 }

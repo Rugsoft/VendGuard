@@ -14,9 +14,8 @@ declare(strict_types=1);
  *        emite aviso informativo `ABSENCE_OVERRIDE_BY_SHIFT_START` en `audit_log` (Resolución R4).
  *   2. Pausa y reanudación de comida (`pauseMeal`, `resumeShift`):
  *      - Transiciones válidas y eventos de auditoría.
- *   3. Cierre forzado por Coordinación (`forceCloseShift`):
- *      - Obliga a justificación >= 10 caracteres.
- *      - Audita `FORCE_CLOSE_TECHNICIAN_SHIFT` vinculando a coordinador y técnico.
+ *   3. El cierre forzado se certifica en `ShiftHandoverServiceTest`, porque comparte
+ *      el motor transaccional con el cierre ordinario y el protocolo sanitario.
  *
  * Dogma Vanilla: PHP 8.2+ puro, repositorios mock en memoria.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
@@ -26,7 +25,6 @@ require_once __DIR__ . '/../../src/autoload.php';
 
 use VendGuard\Application\DTO\TechnicianShiftDto;
 use VendGuard\Application\Service\ShiftLifecycleService;
-use VendGuard\Core\Domain\Exception\JustificationTooShortException;
 use VendGuard\Core\Domain\Model\TechnicianAbsence;
 use VendGuard\Core\Domain\Model\TechnicianShift;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
@@ -229,27 +227,6 @@ $assert('startShift con ausencia activa permite iniciar turno (presencia física
 
 $auditActions = array_map(fn($e) => $e->getAction(), $auditRepo->events);
 $assert('startShift con ausencia activa registra aviso ABSENCE_OVERRIDE_BY_SHIFT_START', in_array('ABSENCE_OVERRIDE_BY_SHIFT_START', $auditActions, true));
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 4. Cierre forzado por Coordinación
-// ─────────────────────────────────────────────────────────────────────────────
-$rejectedShortReason = false;
-try {
-    $service->forceCloseShift(technicianId: 5, coordinatorId: 1, reason: 'olvido');
-} catch (JustificationTooShortException $e) {
-    $rejectedShortReason = true;
-}
-$assert('forceCloseShift rechaza justificación < 10 caracteres', $rejectedShortReason);
-
-$forcedClosedDto = $service->forceCloseShift(
-    technicianId: 5,
-    coordinatorId: 1,
-    reason: 'Técnico olvidó cerrar turno al finalizar guardia'
-);
-$assert('forceCloseShift cierra turno a OFF_SHIFT', $forcedClosedDto->status === 'OFF_SHIFT');
-
-$lastEvent = end($auditRepo->events);
-$assert('forceCloseShift registra FORCE_CLOSE_TECHNICIAN_SHIFT', $lastEvent->getAction() === 'FORCE_CLOSE_TECHNICIAN_SHIFT');
 
 echo "\n======================================================================\n";
 echo sprintf(" Total Aserciones: %d | Fallidas: %d\n", $assertions, $failures);

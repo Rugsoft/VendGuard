@@ -6,11 +6,14 @@ namespace VendGuard\Presentation\Controller;
 
 use PDO;
 use Throwable;
+use VendGuard\Application\Service\ShiftHandoverService;
 use VendGuard\Application\Service\ShiftLifecycleService;
+use VendGuard\Core\Domain\Exception\ActiveIncidentInProgressException;
 use VendGuard\Core\Domain\Exception\InvalidShiftTransitionException;
 use VendGuard\Core\Domain\Exception\JustificationTooShortException;
 use VendGuard\Core\Domain\Exception\UserNotFoundException;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Notification\ShiftHandoverServiceFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
@@ -21,18 +24,30 @@ use VendGuard\Presentation\Http\Response;
 /**
  * CoordinatorShiftController
  *
- * Controlador REST para la supervisión y cierre forzado de turnos de técnicos desde Coordinación (Módulo 21).
+ * Controlador REST para la supervisión y cierre forzado de turnos de técnicos desde
+ * Coordinación (Módulo 21).
+ *
+ * `getShift` consulta el ciclo de jornada; `forceClose` delega en el motor único de
+ * cierre para que el cierre administrativo aplique exactamente las mismas reglas
+ * que el cierre del técnico: guardia de `IN_PROGRESS`, protocolo sanitario Art. II,
+ * auditoría y avisos.
  */
 final class CoordinatorShiftController
 {
     private ShiftLifecycleService $service;
 
-    public function __construct(?ShiftLifecycleService $service = null, ?PDO $pdo = null)
-    {
+    private ShiftHandoverService $handoverService;
+
+    public function __construct(
+        ?ShiftLifecycleService $service = null,
+        ?PDO $pdo = null,
+        ?ShiftHandoverService $handoverService = null
+    ) {
+        $pdo ??= ConnectionFactory::getConnection();
+
         if ($service !== null) {
             $this->service = $service;
         } else {
-            $pdo ??= ConnectionFactory::getConnection();
             $this->service = new ShiftLifecycleService(
                 new PdoTechnicianShiftRepository($pdo),
                 new PdoTechnicianAbsenceRepository($pdo),
@@ -40,6 +55,8 @@ final class CoordinatorShiftController
                 new PdoAuditLogRepository($pdo)
             );
         }
+
+        $this->handoverService = $handoverService ?? ShiftHandoverServiceFactory::create($pdo);
     }
 
     public function getShift(Request $request): Response
@@ -64,27 +81,27 @@ final class CoordinatorShiftController
 
         $body = $request->getParsedBody();
         $reason = trim((string)($body['reason'] ?? ''));
-
-        if (mb_strlen($reason) < 10) {
-            return Response::error(
-                'MISSING_FORCE_CLOSE_REASON',
-                'El motivo de cierre forzado debe tener al menos 10 caracteres.',
-                422
-            );
-        }
-
         $coordinatorId = (int)($request->getAttribute('user_id') ?? 1);
 
         try {
-            $dto = $this->service->forceCloseShift($technicianId, $coordinatorId, $reason);
+            $result = $this->handoverService->forceCloseShift($technicianId, $coordinatorId, $reason);
 
             return Response::json([
-                'status' => $dto->status,
-                'shift' => $dto->toArray(),
-                'message' => 'Turno cerrado forzosamente por coordinación.',
-            ], 200);
+                'status' => $result->shift->status,
+                'shift' => $result->shift->toArray(),
+                'sanitary_emergency_transfers' => $result->sanitaryEmergencyTransfers,
+                'sanitary_emergency_unassigned' => $result->sanitaryEmergencyUnassigned,
+                'summary' => $result->summary,
+            ], 200, $result->summary);
         } catch (UserNotFoundException $e) {
             return Response::error('TECHNICIAN_NOT_FOUND', $e->getMessage(), 404);
+        } catch (ActiveIncidentInProgressException $e) {
+            return Response::error(
+                $e->getErrorCode(),
+                $e->getMessage(),
+                $e->getHttpStatusCode(),
+                ['blocking_incidents' => $e->getBlockingIncidentCodes()]
+            );
         } catch (JustificationTooShortException $e) {
             return Response::error('MISSING_FORCE_CLOSE_REASON', $e->getMessage(), 422);
         } catch (InvalidShiftTransitionException $e) {

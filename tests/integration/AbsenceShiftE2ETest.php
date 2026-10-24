@@ -104,6 +104,15 @@ $check('1.9 Login de Técnico Jordi exitoso (HTTP 200)', $loginTech['code'] === 
 $techToken = $loginTech['body']['data']['token'] ?? null;
 $check('1.10 Token JWT de Técnico generado', $techToken !== null);
 
+$handoverTargets = httpCall('GET', '/api/technician/handover-targets', null, $techToken);
+$targetsData = $handoverTargets['body']['data'] ?? [];
+$check(
+    '1.11 El técnico obtiene compañeros de relevo desde su propio endpoint',
+    $handoverTargets['code'] === 200
+        && count($targetsData) >= 1
+        && !array_key_exists('email', $targetsData[0] ?? [])
+);
+
 echo "\n";
 
 // --------------------------------------------------------------------------
@@ -124,9 +133,10 @@ $fullDay = httpCall('POST', '/api/coordinator/technicians/2/absences', [
 $check('2.3 Alta ausencia jornada completa responde HTTP 201', $fullDay['code'] === 201);
 $fullDayId = $fullDay['body']['data']['absence']['id'] ?? null;
 $check('2.4 ID de ausencia autogenerado', $fullDayId !== null);
-$check('2.5 Expansión automática a 00:00:00 y 23:59:59 (R5)', 
-    str_contains($fullDay['body']['data']['absence']['starts_at'], '00:00:00') &&
-    str_contains($fullDay['body']['data']['absence']['ends_at'], '23:59:59')
+$check('2.5 Expansión automática a 00:00:00 y 23:59:59 en hora de Madrid (R5/A1)',
+    ($fullDay['body']['data']['absence']['starts_at'] ?? '') === '2026-11-20T00:00:00+01:00'
+    && ($fullDay['body']['data']['absence']['ends_at'] ?? '') === '2026-11-22T23:59:59+01:00'
+    && ($fullDay['body']['data']['absence']['is_full_day'] ?? false) === true
 );
 
 // 2.6 Alta por horas (permiso médico)
@@ -166,6 +176,36 @@ $inverted = httpCall('POST', '/api/coordinator/technicians/5/absences', [
     'ends_at' => '2026-11-25 10:00:00'
 ], $coordToken);
 $check('2.10 Rango de horas invertido devuelve HTTP 422 INVALID_DATE_RANGE', $inverted['code'] === 422);
+
+// 2.11-2.12: una franja de madrugada del día siguiente no puede solapar con la
+// jornada completa anterior, porque el fin local es 23:59:59 y no UTC.
+$fullDaySingle = httpCall('POST', '/api/coordinator/technicians/3/absences', [
+    'reason' => 'VACATION',
+    'starts_at' => '2026-12-01',
+    'ends_at' => '2026-12-01'
+], $coordToken);
+$fullDaySingleId = $fullDaySingle['body']['data']['absence']['id'] ?? null;
+$check(
+    '2.11 Jornada completa de un solo día queda anclada en Madrid',
+    $fullDaySingle['code'] === 201
+        && ($fullDaySingle['body']['data']['absence']['starts_at'] ?? '') === '2026-12-01T00:00:00+01:00'
+        && ($fullDaySingle['body']['data']['absence']['ends_at'] ?? '') === '2026-12-01T23:59:59+01:00'
+        && ($fullDaySingle['body']['data']['absence']['is_full_day'] ?? false) === true
+);
+
+$earlyNextDay = httpCall('POST', '/api/coordinator/technicians/3/absences', [
+    'reason' => 'SICK_LEAVE',
+    'starts_at' => '2026-12-02 00:30:00',
+    'ends_at' => '2026-12-02 01:30:00'
+], $coordToken);
+$earlyNextDayId = $earlyNextDay['body']['data']['absence']['id'] ?? null;
+$check(
+    '2.12 Franja de madrugada del día siguiente no solapa con la jornada completa',
+    $earlyNextDay['code'] === 201
+);
+
+if ($fullDaySingleId) httpCall('DELETE', '/api/coordinator/absences/' . $fullDaySingleId, ['cancellation_reason' => 'Limpieza suite'], $coordToken);
+if ($earlyNextDayId) httpCall('DELETE', '/api/coordinator/absences/' . $earlyNextDayId, ['cancellation_reason' => 'Limpieza suite'], $coordToken);
 
 echo "\n";
 
@@ -258,6 +298,18 @@ $check('4.5 Resumen confirma 1 avería traspasada', count($okHandover['body']['d
 // Verificación de reasignación en base de datos
 $rowInc = $pdo->query("SELECT assigned_technician_id, status FROM incidents WHERE id = {$incId}")->fetch(PDO::FETCH_ASSOC);
 $check('4.6 Avería en BD ahora asignada a Carlos (ID 4)', (int)$rowInc['assigned_technician_id'] === 4);
+
+$outboxReceptor = $pdo->prepare("SELECT COUNT(*) FROM notification_outbox
+    WHERE incident_id = :incident_id
+      AND template = 'TELEGRAM_INCIDENT_ASSIGNMENT'
+      AND priority = 'PRIORITY'
+      AND recipient_user_id = 4
+      AND deleted_at IS NULL");
+$outboxReceptor->execute([':incident_id' => $incId]);
+$check(
+    '4.6b El técnico receptor recibe el aviso propio y prioritario de relevo',
+    (int)$outboxReceptor->fetchColumn() >= 1
+);
 
 // Verificación de comentario interno de relevo (Art. V.4)
 $comment = $pdo->query("SELECT comment_text, is_internal FROM incident_comments WHERE incident_id = {$incId} ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);

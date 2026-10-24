@@ -320,6 +320,9 @@ class AppRouter
         $router->get('/api/technician/van-stock', [\VendGuard\Presentation\Controller\TechnicianVanStockController::class, 'getInventory'], [$technicianAuth]);
 
         // Ciclo de jornada y relevo de ruta (Módulo 21, T-ASH-08).
+        // Compañeros activos para el relevo: endpoint propio del técnico, sin exponer
+        // el cuadrante interno de Coordinación ni datos de contacto.
+        $router->get('/api/technician/handover-targets', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'handoverTargets'], [$technicianAuth]);
         $router->get('/api/technician/shift/status', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'status'], [$technicianAuth]);
         $router->post('/api/technician/shift/start', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'start'], [$technicianAuth]);
         $router->post('/api/technician/shift/pause-meal', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'pauseMeal'], [$technicianAuth]);

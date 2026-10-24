@@ -446,14 +446,31 @@ export const TechnicianRouteView = {
       this.targetHandoverTechId = '';
       this.selectedHandoverTicketIds = this.eligibleHandoverIncidents.map(i => i.id);
       try {
-        const res = await api.get('/coordinator/technicians/quadrants');
+        // Endpoint propio del técnico: el cuadrante de Coordinación exige rol
+        // COORDINATOR y devolvía 403 desde el móvil (A6).
+        const res = await api.get('/technician/handover-targets');
         const raw = res?.data || res || [];
         const list = Array.isArray(raw) ? raw : [];
-        const myId = this.currentUser?.id;
-        this.availableReceptors = list.filter(t => (t.id || t.technician_id) !== myId && t.is_active !== false);
+        const myId = Number(this.currentUser?.id);
+        this.availableReceptors = list.filter(t => Number(t.id) !== myId && t.is_active !== false);
       } catch (e) {
         this.availableReceptors = [];
+        this.handoverError = 'No se pudieron cargar los compañeros disponibles para el relevo.';
       }
+    },
+
+    /**
+     * Etiqueta de máquina del listado de relevo. La ruta publica `machine.code`
+     * anidado; el modal antiguo solo miraba `machine_code` y siempre caía a
+     * "Máquina #undefined" (A6).
+     */
+    handoverMachineLabel(incident) {
+      const code = incident?.machine?.code || incident?.machine_code;
+      if (code) {
+        return code;
+      }
+      const machineId = incident?.machine?.id || incident?.machine_id;
+      return machineId ? `Máquina #${machineId}` : 'Máquina sin identificar';
     },
 
     closeShiftHandoverModal() {
@@ -2401,7 +2418,7 @@ export const TechnicianRouteView = {
                   v-model="selectedHandoverTicketIds"
                 />
                 <label :for="'handover-inc-' + inc.id" style="cursor: pointer; flex: 1;">
-                  <strong>{{ inc.ticket_code }}</strong> - {{ inc.machine_code || ('Máquina #' + inc.machine_id) }} ({{ inc.status }})
+                  <strong>{{ inc.ticket_code }}</strong> - {{ handoverMachineLabel(inc) }} ({{ inc.status }})
                 </label>
               </div>
             </div>

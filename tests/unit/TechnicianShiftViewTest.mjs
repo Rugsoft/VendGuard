@@ -21,6 +21,7 @@ globalThis.localStorage = {
 };
 globalThis.sessionStorage = { ...globalThis.localStorage };
 
+import { api } from '../../public/assets/js/api.js';
 import { TechnicianRouteView } from '../../public/assets/js/views/TechnicianRouteView.js';
 
 console.log('======================================================================');
@@ -98,6 +99,46 @@ assert('methods incluye pauseMealShift', typeof TechnicianRouteView.methods.paus
 assert('methods incluye resumeMealShift', typeof TechnicianRouteView.methods.resumeMealShift === 'function');
 assert('methods incluye openShiftHandoverModal', typeof TechnicianRouteView.methods.openShiftHandoverModal === 'function');
 assert('methods incluye submitShiftHandover', typeof TechnicianRouteView.methods.submitShiftHandover === 'function');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. Endpoint móvil de relevo y etiqueta de máquina (A6)
+// ─────────────────────────────────────────────────────────────────────────────
+let requestedUrl = null;
+const originalGet = api.get;
+api.get = async (url) => {
+  requestedUrl = url;
+  return [
+    { id: 1, name: 'Técnico Autenticado', is_active: true },
+    { id: 2, name: 'Jordi Ruta', is_active: true },
+    { id: 9, name: 'Otro Técnico', is_active: true }
+  ];
+};
+
+const handoverCtx = {
+  ...TechnicianRouteView.data(),
+  ...TechnicianRouteView.methods,
+  currentUser: { id: 1 },
+  eligibleHandoverIncidents: []
+};
+await handoverCtx.openShiftHandoverModal();
+
+assert('openShiftHandoverModal() usa el endpoint propio del técnico', requestedUrl === '/technician/handover-targets');
+assert(
+  'openShiftHandoverModal() excluye al técnico autenticado de los receptores',
+  handoverCtx.availableReceptors.length === 2
+    && handoverCtx.availableReceptors.every((technician) => technician.id !== 1)
+);
+
+assert(
+  'handoverMachineLabel() prioriza machine.code de la ruta',
+  handoverCtx.handoverMachineLabel({ machine: { id: 5, code: 'VG-001' } }) === 'VG-001'
+);
+assert(
+  'handoverMachineLabel() cae al identificador cuando no hay código',
+  handoverCtx.handoverMachineLabel({ machine: { id: 5 } }) === 'Máquina #5'
+);
+
+api.get = originalGet;
 
 console.log('\n======================================================================');
 console.log(` Total Aserciones: ${assertions} | Exitosas: ${assertions - failures} | Fallidas: ${failures}`);

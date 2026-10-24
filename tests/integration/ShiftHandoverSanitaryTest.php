@@ -26,6 +26,7 @@ use VendGuard\Application\Service\ShiftHandoverService;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SeedRunner;
+use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
@@ -55,7 +56,8 @@ $service = new ShiftHandoverService(
     incidentRepo: $incidentRepo,
     machineRepo: $machineRepo,
     onCallRepo: $onCallRepo,
-    auditRepo: $auditRepo
+    auditRepo: $auditRepo,
+    notifications: NotificationOutboxEnqueuerFactory::create()
 );
 
 $failures = 0;
@@ -123,6 +125,27 @@ try {
     $assignedToInDb = (int)$pdo->query("SELECT assigned_technician_id FROM incidents WHERE id = {$perishableIncidentId}")->fetchColumn();
     $assert('Nivel 1: BD confirma reasignación a guardTech', $assignedToInDb === $guardTech);
 
+    $stmtLevel1Outbox = $pdo->prepare("SELECT COUNT(*) FROM notification_outbox
+        WHERE incident_id = :incident_id
+          AND template = 'TELEGRAM_INCIDENT_ASSIGNMENT'
+          AND priority = 'PRIORITY'
+          AND recipient_user_id = :technician_id
+          AND deleted_at IS NULL");
+    $stmtLevel1Outbox->execute([':incident_id' => $perishableIncidentId, ':technician_id' => $guardTech]);
+    $assert(
+        'Nivel 1: el guardia recibe el aviso propio y prioritario de relevo en notification_outbox',
+        (int)$stmtLevel1Outbox->fetchColumn() >= 1
+    );
+    $stmtLevel1Ordinary = $pdo->prepare("SELECT COUNT(*) FROM notification_outbox
+        WHERE incident_id = :incident_id
+          AND template = 'TECHNICIAN_ASSIGNED'
+          AND deleted_at IS NULL");
+    $stmtLevel1Ordinary->execute([':incident_id' => $perishableIncidentId]);
+    $assert(
+        'Nivel 1: el traspaso sanitario no se degrada al aviso ordinario de asignación',
+        (int)$stmtLevel1Ordinary->fetchColumn() === 0
+    );
+
     // ─────────────────────────────────────────────────────────────────────────
     // Escenario 2: Nivel 2 del Protocolo Sanitario (Desasignación a REGISTERED)
     // ─────────────────────────────────────────────────────────────────────────
@@ -150,6 +173,49 @@ try {
     $rowAfterNivel2 = $pdo->query("SELECT status, assigned_technician_id FROM incidents WHERE id = {$perishableIncidentId}")->fetch(PDO::FETCH_ASSOC);
     $assert('Nivel 2: BD confirma estado REGISTERED', $rowAfterNivel2['status'] === 'REGISTERED');
     $assert('Nivel 2: BD confirma assigned_technician_id IS NULL', $rowAfterNivel2['assigned_technician_id'] === null);
+
+    $stmtLevel2Outbox = $pdo->prepare("SELECT COUNT(*) FROM notification_outbox
+        WHERE incident_id = :incident_id
+          AND template = 'COLD_CHAIN_IMMEDIATE_ALERT'
+          AND recipient_role = 'COORDINATOR'
+          AND deleted_at IS NULL");
+    $stmtLevel2Outbox->execute([':incident_id' => $perishableIncidentId]);
+    $level2AlertCount = (int)$stmtLevel2Outbox->fetchColumn();
+    $assert('Nivel 2: Coordinación recibe la alerta sanitaria crítica', $level2AlertCount >= 1);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Escenario 3: C2 · cierre forzado con perecedera y sin guardia
+    // ─────────────────────────────────────────────────────────────────────────
+    $shiftRepo->startShift($tech1);
+    $pdo->exec("UPDATE incidents SET assigned_technician_id = {$tech1}, status = 'ASSIGNED' WHERE id = {$perishableIncidentId}");
+
+    $coordinatorId = (int)$pdo->query("SELECT id FROM users WHERE role = 'COORDINATOR' AND deleted_at IS NULL ORDER BY id LIMIT 1")->fetchColumn();
+    $forced = $service->forceCloseShift(
+        technicianId: $tech1,
+        coordinatorId: $coordinatorId,
+        reason: 'Cierre forzado por fin de guardia no reportado'
+    );
+
+    $assert('Forzado: el turno queda en OFF_SHIFT', $forced->shift->status === 'OFF_SHIFT');
+    $assert('Forzado: la perecedera se desasigna sin guardia', count($forced->sanitaryEmergencyUnassigned) === 1);
+
+    $rowAfterForce = $pdo->query("SELECT status, assigned_technician_id FROM incidents WHERE id = {$perishableIncidentId}")->fetch(PDO::FETCH_ASSOC);
+    $assert(
+        'Forzado: BD confirma REGISTERED y sin técnico',
+        $rowAfterForce['status'] === 'REGISTERED' && $rowAfterForce['assigned_technician_id'] === null
+    );
+
+    $stmtLevel2Outbox->execute([':incident_id' => $perishableIncidentId]);
+    $assert(
+        'Forzado: Coordinación recibe una nueva alerta sanitaria del cierre forzado',
+        (int)$stmtLevel2Outbox->fetchColumn() > $level2AlertCount
+    );
+
+    $stmtForceAudit = $pdo->prepare("SELECT COUNT(*) FROM audit_log
+        WHERE action = 'FORCE_CLOSE_TECHNICIAN_SHIFT'
+          AND entity_id = :technician_id");
+    $stmtForceAudit->execute([':technician_id' => $tech1]);
+    $assert('Forzado: se audita FORCE_CLOSE_TECHNICIAN_SHIFT', (int)$stmtForceAudit->fetchColumn() >= 1);
 
 } finally {
     TestDataCleaner::purge($pdo);
