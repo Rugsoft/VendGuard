@@ -16,7 +16,8 @@ export function suggestionBadgeLabel(badge) {
     GUARDIA_24_7: '🚨 Guardia 24/7',
     TITULAR_ZONA: 'Titular de zona',
     SUPLENTE_ZONA: 'Suplente de zona',
-    EN_CURSO_OTRA_SEDE: '⚠️ En curso en otra sede'
+    EN_CURSO_OTRA_SEDE: '⚠️ En curso en otra sede',
+    NO_DISPONIBLE: '⛔ No disponible'
   };
   return labels[badge] || String(badge);
 }

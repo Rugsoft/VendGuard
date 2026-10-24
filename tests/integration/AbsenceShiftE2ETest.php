@@ -19,6 +19,8 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SeedRunner;
 
 $pdo = ConnectionFactory::getConnection();
+TestDataCleaner::purge($pdo);
+(new SeedRunner($pdo))->seedAll();
 
 function httpCall(string $method, string $path, ?array $data = null, ?string $token = null): array {
     $url = 'http://127.0.0.1:8000' . $path;
@@ -177,6 +179,18 @@ httpCall('POST', '/api/coordinator/technicians/2/shifts/force-close', ['reason' 
 $sInit = httpCall('GET', '/api/technician/shift/status', null, $techToken);
 $check('3.1 Estado inicial del turno es OFF_SHIFT', ($sInit['body']['data']['status'] ?? '') === 'OFF_SHIFT');
 
+// Crear avería asignada a Jordi para verificar bloqueo de inicio sin turno
+$stmtPre = $pdo->prepare("INSERT INTO incidents (ticket_code, location_id, machine_id, category, description, urgency, status, assigned_technician_id, assigned_at)
+    VALUES ('INC-PRE-SHIFT-TEST', 1, 1, 'PAYMENT_SYSTEM', 'Prueba de bloqueo sin turno', 'MEDIUM', 'ASSIGNED', 2, NOW())
+    RETURNING id");
+$stmtPre->execute();
+$incPreId = (int)$stmtPre->fetchColumn();
+
+// Intento de iniciar intervención estando en OFF_SHIFT
+$failStartOff = httpCall('PATCH', "/api/technician/incidents/{$incPreId}/start", null, $techToken);
+$check('3.1b Iniciar intervención en OFF_SHIFT bloqueado con HTTP 422', $failStartOff['code'] === 422);
+$check('3.1c Código de error es SHIFT_NOT_ACTIVE', ($failStartOff['body']['error']['code'] ?? '') === 'SHIFT_NOT_ACTIVE');
+
 $sStart = httpCall('POST', '/api/technician/shift/start', null, $techToken);
 $check('3.2 Iniciar turno responde HTTP 200', $sStart['code'] === 200);
 $check('3.3 Estado pasa a ON_SHIFT', ($sStart['body']['data']['status'] ?? '') === 'ON_SHIFT');
@@ -186,9 +200,22 @@ $sPause = httpCall('POST', '/api/technician/shift/pause-meal', null, $techToken)
 $check('3.5 Pausa comida responde HTTP 200', $sPause['code'] === 200);
 $check('3.6 Estado pasa a MEAL_BREAK', ($sPause['body']['data']['status'] ?? '') === 'MEAL_BREAK');
 
+// Intento de iniciar intervención en MEAL_BREAK
+$failStartMeal = httpCall('PATCH', "/api/technician/incidents/{$incPreId}/start", null, $techToken);
+$check('3.6b Iniciar intervención en MEAL_BREAK bloqueado con HTTP 422', $failStartMeal['code'] === 422);
+$check('3.6c Código de error es SHIFT_MEAL_BREAK', ($failStartMeal['body']['error']['code'] ?? '') === 'SHIFT_MEAL_BREAK');
+
 $sResume = httpCall('POST', '/api/technician/shift/resume', null, $techToken);
 $check('3.7 Reanudar turno responde HTTP 200', $sResume['code'] === 200);
 $check('3.8 Estado vuelve a ON_SHIFT', ($sResume['body']['data']['status'] ?? '') === 'ON_SHIFT');
+
+// Ahora sí, en ON_SHIFT, iniciar intervención debe tener éxito
+$okStartOn = httpCall('PATCH', "/api/technician/incidents/{$incPreId}/start", null, $techToken);
+$check('3.9 Iniciar intervención en ON_SHIFT responde HTTP 200', $okStartOn['code'] === 200);
+$check('3.10 Incidencia pasa a IN_PROGRESS', ($okStartOn['body']['data']['status'] ?? '') === 'IN_PROGRESS');
+
+// Pausar y restablecer para no dejar avería en curso bloqueante
+$pdo->exec("UPDATE incidents SET status = 'RESOLVED', resolution_diagnosis = 'Diagnóstico válido de más de veinte caracteres', resolution_action = 'Acción técnica correctiva de más de veinte caracteres' WHERE id = {$incPreId}");
 
 echo "\n";
 
@@ -197,9 +224,9 @@ echo "\n";
 // --------------------------------------------------------------------------
 echo "--- 4. E2E: RELEVO ATÓMICO, BLOQUEO IN_PROGRESS Y BLINDAJE ART. V.4 ---\n";
 
-// Creamos avería asignada a Jordi en IN_PROGRESS
+// Creamos avería asignada a Jordi en IN_PROGRESS (usando máquina 2 para no chocar con uq_machine_active_ticket)
 $stmt = $pdo->prepare("INSERT INTO incidents (ticket_code, location_id, machine_id, category, description, urgency, status, assigned_technician_id, assigned_at)
-    VALUES ('INC-E2E-HANDOVER', 1, 1, 'PAYMENT_SYSTEM', 'Avería activa para prueba de relevo', 'HIGH', 'IN_PROGRESS', 2, NOW())
+    VALUES ('INC-E2E-HANDOVER', 1, 2, 'PAYMENT_SYSTEM', 'Avería activa para prueba de relevo', 'HIGH', 'IN_PROGRESS', 2, NOW())
     RETURNING id");
 $stmt->execute();
 $incId = (int)$stmt->fetchColumn();

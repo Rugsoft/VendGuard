@@ -100,6 +100,9 @@ $coordToken = $authService->generateInternalToken($coordinator);
 
 $techId = (int)$technician->getId();
 
+// Módulo 21: El técnico debe tener un turno abierto (ON_SHIFT) para operar intervenciones
+(new \VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository($pdo))->startShift($techId);
+
 // 3. Obtención de máquinas de prueba
 $machine1 = $machineRepo->findByCode('VEND-0101'); // Sanden Vendo G-Drink
 $machine2 = $machineRepo->findByCode('VEND-0102'); // Bianchi Gaia Espresso

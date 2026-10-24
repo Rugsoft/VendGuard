@@ -714,6 +714,17 @@ export const TechnicianRouteView = {
     async startIntervention(incident) {
       if (this.actionInProgressId) return;
 
+      if (this.shiftStatus !== 'ON_SHIFT') {
+        const msg = this.shiftStatus === 'MEAL_BREAK'
+          ? 'No puedes iniciar una intervención mientras estás en pausa de comida. Reanuda tu turno primero.'
+          : 'Debes iniciar tu turno antes de comenzar una intervención.';
+        this.errorMessage = msg;
+        if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        return;
+      }
+
       this.actionInProgressId = incident.id;
       this.feedbackMessage = '';
       this.errorMessage = '';
@@ -935,6 +946,18 @@ export const TechnicianRouteView = {
      */
     async resumePendingInfoIntervention(incident) {
       if (!incident?.id || this.isResumingPendingInfo) return;
+
+      if (this.shiftStatus !== 'ON_SHIFT') {
+        const msg = this.shiftStatus === 'MEAL_BREAK'
+          ? 'No puedes reanudar una intervención mientras estás en pausa de comida. Reanuda tu turno primero.'
+          : 'Debes iniciar tu turno antes de reanudar una intervención.';
+        this.errorMessage = msg;
+        this.pendingInfoResumeError = msg;
+        if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        return;
+      }
 
       this.isResumingPendingInfo = true;
       this.pendingInfoResumeError = '';
@@ -2031,17 +2054,21 @@ export const TechnicianRouteView = {
               </div>
 
               <!-- Action Option 1: Start Intervention (when ASSIGNED) -->
-              <button
-                v-else-if="isAssigned(incident)"
-                type="button"
-                class="vg-btn vg-btn-primary"
-                style="width: 100%; height: 46px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"
-                :disabled="actionInProgressId === incident.id"
-                @click="startIntervention(incident)"
-              >
-                <span v-if="actionInProgressId !== incident.id">▶ Iniciar intervención</span>
-                <span v-else>Iniciando...</span>
-              </button>
+              <div v-else-if="isAssigned(incident)">
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-primary"
+                  style="width: 100%; height: 46px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"
+                  :disabled="actionInProgressId === incident.id"
+                  @click="startIntervention(incident)"
+                >
+                  <span v-if="actionInProgressId !== incident.id">▶ Iniciar intervención</span>
+                  <span v-else>Iniciando...</span>
+                </button>
+                <div v-if="shiftStatus !== 'ON_SHIFT'" style="margin-top: 6px; font-size: 12px; color: var(--color-ink-muted); text-align: center;">
+                  ℹ️ Debes iniciar turno arriba para intervenir
+                </div>
+              </div>
 
               <!-- Action Option 2: In Progress Controls (when IN_PROGRESS) -->
               <div v-else-if="isInProgress(incident)" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
@@ -2064,17 +2091,21 @@ export const TechnicianRouteView = {
               </div>
 
               <!-- Action Option 3: Resume from Missing Parts (when PENDING_PARTS) -->
-              <button
-                v-else-if="isPendingParts(incident)"
-                type="button"
-                class="vg-btn vg-btn-primary"
-                style="width: 100%; height: 46px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"
-                :disabled="actionInProgressId === incident.id"
-                @click="startIntervention(incident)"
-              >
-                <span v-if="actionInProgressId !== incident.id">▶ Reanudar intervención</span>
-                <span v-else>Reanudando...</span>
-              </button>
+              <div v-else-if="isPendingParts(incident)">
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-primary"
+                  style="width: 100%; height: 46px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"
+                  :disabled="actionInProgressId === incident.id"
+                  @click="startIntervention(incident)"
+                >
+                  <span v-if="actionInProgressId !== incident.id">▶ Reanudar intervención</span>
+                  <span v-else>Reanudando...</span>
+                </button>
+                <div v-if="shiftStatus !== 'ON_SHIFT'" style="margin-top: 6px; font-size: 12px; color: var(--color-ink-muted); text-align: center;">
+                  ℹ️ Debes iniciar turno arriba para intervenir
+                </div>
+              </div>
 
               <!-- Action Option 3-bis: Otra máquina en esta sede (Módulo 16, RF-01.2, RNF-02).
                    Solo en paradas activas (asignadas o en curso) y cuando la sede sigue

@@ -10,6 +10,7 @@ use VendGuard\Core\Domain\Exception\InvalidShiftTransitionException;
 use VendGuard\Core\Domain\Model\TechnicianShift;
 use VendGuard\Core\Domain\Repository\TechnicianShiftRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\ShiftStatus;
+use VendGuard\Infrastructure\Database\ConnectionFactory;
 
 /**
  * PdoTechnicianShiftRepository
@@ -22,8 +23,11 @@ use VendGuard\Core\Domain\ValueObject\ShiftStatus;
  */
 final class PdoTechnicianShiftRepository implements TechnicianShiftRepositoryInterface
 {
-    public function __construct(private readonly PDO $pdo)
+    private readonly PDO $pdo;
+
+    public function __construct(?PDO $pdo = null)
     {
+        $this->pdo = $pdo ?? ConnectionFactory::getConnection();
     }
 
     public function findActiveShiftByTechnician(int $technicianId): ?TechnicianShift
