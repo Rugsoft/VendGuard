@@ -64,7 +64,9 @@ export const CoordinatorAbsencesTab = {
       // Asistente modal de reasignación (RF-02)
       showAssistedModal: false,
       affectedIncidents: [],
-      createdAbsenceInfo: null
+      createdAbsenceInfo: null,
+      assistedError: '',
+      reassigningIncidentId: null
     };
   },
 
@@ -221,19 +223,71 @@ export const CoordinatorAbsencesTab = {
       this.showAssistedModal = false;
       this.affectedIncidents = [];
       this.createdAbsenceInfo = null;
+      this.assistedError = '';
+      this.reassigningIncidentId = null;
     },
 
-    formatDate(isoString) {
+    /**
+     * Reasigna una incidencia afectada al técnico sugerido por el backend (RF-02.2).
+     * No se inventa un candidato en el cliente: si el servidor no propone ninguno,
+     * la interfaz no ofrece la acción.
+     */
+    async reassignAffected(incident) {
+      const suggested = incident?.suggested_technician;
+      if (!suggested || !suggested.id) {
+        this.assistedError = 'No hay un técnico sugerido para esta avería.';
+        return;
+      }
+
+      this.reassigningIncidentId = incident.id;
+      this.assistedError = '';
+      try {
+        await api.coordinator.assignTechnician(
+          incident.id,
+          suggested.id,
+          null,
+          null,
+          'Cobertura por ausencia del titular'
+        );
+
+        this.affectedIncidents = this.affectedIncidents.filter(item => item.id !== incident.id);
+        this.successMessage = `Avería ${incident.ticket_code} reasignada a ${suggested.name}.`;
+
+        if (this.affectedIncidents.length === 0) {
+          this.closeAssistedModal();
+        }
+      } catch (err) {
+        this.assistedError = err?.message || 'No se pudo reasignar la avería.';
+      } finally {
+        this.reassigningIncidentId = null;
+      }
+    },
+
+    formatDate(isoString, isFullDay = false) {
       if (!isoString) return '-';
       try {
         const d = new Date(isoString);
-        const dateStr = d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
-        // Si tiene hora explícita diferente a 00:00 o 23:59, mostramos también la hora
-        if (isoString.includes('T') && !isoString.endsWith('00:00:00+00:00') && !isoString.endsWith('23:59:59+00:00')) {
-          const timeStr = d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-          return `${dateStr} ${timeStr}`;
+        if (Number.isNaN(d.getTime())) {
+          return isoString;
         }
-        return dateStr;
+
+        const dateStr = d.toLocaleDateString('es-ES', {
+          timeZone: 'Europe/Madrid',
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        });
+
+        if (isFullDay) {
+          return dateStr;
+        }
+
+        const timeStr = d.toLocaleTimeString('es-ES', {
+          timeZone: 'Europe/Madrid',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+        return `${dateStr} ${timeStr}`;
       } catch (e) {
         return isoString;
       }
@@ -359,10 +413,10 @@ export const CoordinatorAbsencesTab = {
                 </span>
               </td>
               <td style="padding: 10px 14px; color: var(--color-slate);">
-                {{ formatDate(a.starts_at) }}
+                {{ formatDate(a.starts_at, a.is_full_day) }}
               </td>
               <td style="padding: 10px 14px; color: var(--color-slate);">
-                {{ formatDate(a.ends_at) }}
+                {{ formatDate(a.ends_at, a.is_full_day) }}
               </td>
               <td style="padding: 10px 14px; color: var(--color-ink-muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                 {{ a.notes || '-' }}
@@ -610,13 +664,49 @@ export const CoordinatorAbsencesTab = {
           El técnico ausente tiene <strong>{{ affectedIncidents.length }}</strong> avería(s) activas asignadas. Se recomienda reasignarlas para proteger los SLAs de los clientes.
         </p>
 
-        <div style="max-height: 200px; overflow-y: auto; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 8px; margin-bottom: 14px;">
+        <div v-if="assistedError" role="alert" style="background-color: var(--color-error-bg); border: 1px solid var(--color-hairline); color: var(--color-error-text); padding: 8px 10px; border-radius: var(--radius-interactive); font-size: 12px; margin-bottom: 12px;">
+          {{ assistedError }}
+        </div>
+
+        <div style="max-height: 260px; overflow-y: auto; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 8px; margin-bottom: 14px;">
           <div
             v-for="inc in affectedIncidents"
             :key="inc.id"
-            style="padding: 6px 8px; border-bottom: 1px solid var(--color-hairline); font-size: 12px;"
+            style="padding: 8px; border-bottom: 1px solid var(--color-hairline); font-size: 12px;"
           >
-            <strong>{{ inc.ticket_code }}</strong> ({{ inc.status }}) - Máquina #{{ inc.machine_id }}
+            <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap;">
+              <span>
+                <strong>{{ inc.ticket_code }}</strong> ({{ inc.status }}) - Máquina #{{ inc.machine_id }}
+              </span>
+              <span
+                v-if="inc.suggested_technician"
+                class="vg-badge"
+                style="background-color: var(--color-surface-2); color: var(--color-primary-dark); padding: 2px 6px; border-radius: var(--radius-interactive); font-weight: 700; font-size: 11px;"
+              >
+                ⭐ {{ inc.suggested_technician.name }} · {{ inc.suggested_technician.total_score }} pts
+              </span>
+              <span v-else style="color: var(--color-ink-muted); font-size: 11px;">
+                Sin recomendación disponible
+              </span>
+            </div>
+
+            <div
+              v-if="inc.suggested_technician"
+              style="display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 6px; flex-wrap: wrap;"
+            >
+              <span style="color: var(--color-ink-muted); font-size: 11px; flex: 1; min-width: 160px;">
+                {{ inc.suggested_technician.explanation || 'Candidato propuesto por el recomendador territorial.' }}
+              </span>
+              <button
+                type="button"
+                class="vg-btn vg-btn-primary"
+                style="height: 30px; font-size: 11px; padding: 0 10px;"
+                :disabled="reassigningIncidentId === inc.id"
+                @click="reassignAffected(inc)"
+              >
+                {{ reassigningIncidentId === inc.id ? 'Reasignando...' : 'Reasignar a ' + inc.suggested_technician.name }}
+              </button>
+            </div>
           </div>
         </div>
 

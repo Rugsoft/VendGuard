@@ -6,6 +6,7 @@ namespace VendGuard\Presentation\Controller;
 
 use PDO;
 use Throwable;
+use VendGuard\Application\Service\SuggestedTechniciansService;
 use VendGuard\Application\Service\TechnicianAbsenceService;
 use VendGuard\Core\Domain\Exception\InvalidAbsenceException;
 use VendGuard\Core\Domain\Exception\UserNotFoundException;
@@ -36,7 +37,8 @@ final class CoordinatorAbsenceController
                 new PdoTechnicianAbsenceRepository($pdo),
                 new PdoUserRepository($pdo),
                 new PdoIncidentRepository($pdo),
-                new PdoAuditLogRepository($pdo)
+                new PdoAuditLogRepository($pdo),
+                new SuggestedTechniciansService()
             );
         }
     }

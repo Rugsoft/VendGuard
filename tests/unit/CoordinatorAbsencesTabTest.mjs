@@ -81,12 +81,16 @@ assert('methods incluye openCancelModal', typeof CoordinatorAbsencesTab.methods.
 assert('methods incluye submitCancelAbsence', typeof CoordinatorAbsencesTab.methods.submitCancelAbsence === 'function');
 
 assert(
-  'formatDate() formatea jornada completa sin hora si termina en 00:00:00 o 23:59:59',
-  !vm.formatDate('2026-11-20T00:00:00+00:00').includes(':')
+  'formatDate() formatea jornada completa sin hora cuando is_full_day es true',
+  !vm.formatDate('2026-11-20T00:00:00+01:00', true).includes(':')
+);
+assert(
+  'formatDate() no adelanta el día final de una jornada completa (A1)',
+  vm.formatDate('2027-08-12T23:59:59+02:00', true) === '12/08/2027'
 );
 assert(
   'formatDate() formatea franja horaria incluyendo hora para permisos parciales',
-  vm.formatDate('2026-11-20T09:30:00+00:00').includes(':')
+  vm.formatDate('2026-11-20T09:30:00+01:00').includes(':')
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -153,6 +157,41 @@ assert('submitCancelAbsence() acepta motivo válido y limpia cancelError', vm.ca
 assert('submitCancelAbsence() envía cancellation_reason en payload a la API', deleteCalledWith && (deleteCalledWith.data?.cancellation_reason === 'Permiso médico disfrutado correctamente' || deleteCalledWith.data?.body?.cancellation_reason === 'Permiso médico disfrutado correctamente'));
 
 api.delete = originalDelete;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. Reasignación asistida desde el modal (RF-02.2)
+// ─────────────────────────────────────────────────────────────────────────────
+let assignArgs = null;
+const originalAssign = api.coordinator.assignTechnician;
+api.coordinator.assignTechnician = async (...args) => {
+  assignArgs = args;
+  return { data: { success: true } };
+};
+
+const affected = {
+  id: 77,
+  ticket_code: 'INC-077',
+  status: 'ASSIGNED',
+  suggested_technician: { id: 3, name: 'Jordi Ruta', total_score: 91 }
+};
+vm.affectedIncidents = [affected];
+vm.showAssistedModal = true;
+await vm.reassignAffected(affected);
+
+assert('reassignAffected() usa la incidencia y el técnico sugerido', assignArgs && assignArgs[0] === 77 && assignArgs[1] === 3);
+assert('reassignAffected() retira la incidencia reasignada de la lista', vm.affectedIncidents.length === 0);
+assert('reassignAffected() cierra el modal cuando no quedan averías', vm.showAssistedModal === false);
+assert('reassignAffected() deja un mensaje de éxito', vm.successMessage.includes('INC-077'));
+
+const noSuggestion = { id: 78, ticket_code: 'INC-078', suggested_technician: null };
+vm.affectedIncidents = [noSuggestion];
+vm.assistedError = '';
+assignArgs = null;
+await vm.reassignAffected(noSuggestion);
+assert('reassignAffected() no llama a la API si no hay sugerencia', assignArgs === null);
+assert('reassignAffected() explica la ausencia de sugerencia', vm.assistedError.includes('No hay un técnico sugerido'));
+
+api.coordinator.assignTechnician = originalAssign;
 
 console.log('\n======================================================================');
 console.log(` Total Aserciones: ${assertions} | Exitosas: ${assertions - failures} | Fallidas: ${failures}`);

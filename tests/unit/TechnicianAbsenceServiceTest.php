@@ -292,6 +292,43 @@ $assert('cancelAbsence registra auditoría CANCEL_TECHNICIAN_ABSENCE', count($au
 $list = $service->listAbsences(technicianId: 7, status: 'all');
 $assert('listAbsences devuelve las ausencias del técnico', count($list) === 1);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. A1: la fecha pura es una jornada completa en Madrid, no en UTC
+// ─────────────────────────────────────────────────────────────────────────────
+$dateOnly = $service->createAbsence(
+    technicianId: 7,
+    reason: 'VACATION',
+    startsAt: '2026-12-01',
+    endsAt: '2026-12-03',
+    notes: 'Día completo en hora local',
+    createdBy: 1
+);
+
+$assert(
+    'createAbsence ancla el inicio a las 00:00:00 de Madrid',
+    $dateOnly['absence']->startsAt === '2026-12-01T00:00:00+01:00'
+);
+$assert(
+    'createAbsence ancla el fin a las 23:59:59 de Madrid',
+    $dateOnly['absence']->endsAt === '2026-12-03T23:59:59+01:00'
+);
+$assert('createAbsence marca la jornada completa como is_full_day', $dateOnly['absence']->isFullDay === true);
+
+$impossibleDateRejected = false;
+try {
+    $service->createAbsence(
+        technicianId: 7,
+        reason: 'VACATION',
+        startsAt: '2026-02-30',
+        endsAt: '2026-03-02',
+        notes: null,
+        createdBy: 1
+    );
+} catch (InvalidAbsenceException $e) {
+    $impossibleDateRejected = $e->getErrorCode() === 'INVALID_DATE_RANGE';
+}
+$assert('createAbsence rechaza fechas imposibles sin normalizarlas', $impossibleDateRejected);
+
 echo "\n======================================================================\n";
 echo sprintf(" Total Aserciones: %d | Fallidas: %d\n", $assertions, $failures);
 echo "======================================================================\n";

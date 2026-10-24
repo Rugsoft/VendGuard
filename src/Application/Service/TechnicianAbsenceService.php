@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Application\Service;
 
 use DateTimeImmutable;
+use DateTimeZone;
 use VendGuard\Application\DTO\TechnicianAbsenceDto;
 use VendGuard\Core\Domain\Exception\InvalidAbsenceException;
 use VendGuard\Core\Domain\Exception\UserNotFoundException;
@@ -30,11 +31,15 @@ use VendGuard\Core\Domain\ValueObject\AbsenceReason;
  */
 final class TechnicianAbsenceService
 {
+    /** Zona operativa del parque: la misma que usan el calendario y la auditoría. */
+    private const OPERATIONAL_TIMEZONE = 'Europe/Madrid';
+
     public function __construct(
         private readonly TechnicianAbsenceRepositoryInterface $absenceRepo,
         private readonly UserRepositoryInterface $userRepo,
         private readonly IncidentRepositoryInterface $incidentRepo,
-        private readonly AuditLogRepositoryInterface $auditRepo
+        private readonly AuditLogRepositoryInterface $auditRepo,
+        private readonly ?SuggestedTechniciansService $suggestions = null
     ) {
     }
 
@@ -56,21 +61,11 @@ final class TechnicianAbsenceService
 
         $creator = $this->userRepo->findById($createdBy);
 
-        // Tratamiento de fechas: si viene solo 'YYYY-MM-DD', se expande a jornada completa (R5)
-        $cleanStarts = trim($startsAt);
-        $cleanEnds = trim($endsAt);
-
-        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $cleanStarts)) {
-            $starts = new DateTimeImmutable($cleanStarts . ' 00:00:00+00');
-        } else {
-            $starts = new DateTimeImmutable($cleanStarts);
-        }
-
-        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $cleanEnds)) {
-            $ends = new DateTimeImmutable($cleanEnds . ' 23:59:59+00');
-        } else {
-            $ends = new DateTimeImmutable($cleanEnds);
-        }
+        // Tratamiento de fechas: una fecha pura abarca la jornada completa en la
+        // zona operativa del parque. Antes se expandía en UTC y el fin de la
+        // ausencia caía en el día siguiente local (A1).
+        $starts = $this->parseBoundary($startsAt, false);
+        $ends = $this->parseBoundary($endsAt, true);
 
         if ($ends < $starts) {
             throw InvalidAbsenceException::invalidDateRange();
@@ -127,12 +122,38 @@ final class TechnicianAbsenceService
 
         $affectedList = [];
         foreach ($activeIncidents as $inc) {
+            $suggestion = null;
+            if ($this->suggestions !== null) {
+                try {
+                    // El técnico ausente no puede ser su propio suplente: se excluye
+                    // del ranking antes de que el motor elija al primero.
+                    $suggestion = $this->suggestions->getSuggestions(
+                        (int)$inc->getId(),
+                        [(int)$technicianId]
+                    );
+                } catch (\Throwable) {
+                    // La ausencia es el dato primario; una avería sin recomendación
+                    // no debe impedir que Coordinación la registre.
+                    $suggestion = null;
+                }
+            }
+
+            $top = $suggestion?->rankedTechnicians[0] ?? null;
             $affectedList[] = [
                 'id' => $inc->getId(),
                 'ticket_code' => $inc->getTicketCode(),
                 'status' => $inc->getStatus()->value,
                 'machine_id' => $inc->getMachineId(),
                 'location_id' => $inc->getLocationId(),
+                'suggested_technician' => $top === null ? null : [
+                    'id' => (int)$top['technician_id'],
+                    'name' => (string)$top['name'],
+                    'operator_code' => $top['operator_code'] ?? null,
+                    'total_score' => (int)$top['total_score'],
+                    'explanation' => $suggestion?->recommendation['explanation'] ?? null,
+                    'badges' => $top['badges'] ?? [],
+                    'current_status' => $top['current_status'] ?? null,
+                ],
             ];
         }
 
@@ -144,6 +165,43 @@ final class TechnicianAbsenceService
             ),
             'affected_incidents' => $affectedList,
         ];
+    }
+
+    /**
+     * Traduce un límite ISO de la API a un instante en la zona operativa.
+     *
+     * Una fecha pura es una jornada completa local, no un rango UTC. Las fechas
+     * imposibles (`2026-02-30`) se rechazan antes de que el motor las normalice.
+     */
+    private function parseBoundary(string $value, bool $isEnd): DateTimeImmutable
+    {
+        $value = trim($value);
+        $timezone = new DateTimeZone(self::OPERATIONAL_TIMEZONE);
+
+        if ($value === '') {
+            throw InvalidAbsenceException::invalidDateRange();
+        }
+
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1) {
+            $date = DateTimeImmutable::createFromFormat('!Y-m-d', $value, $timezone);
+            $errors = DateTimeImmutable::getLastErrors();
+            $hasErrors = $errors !== false
+                && (($errors['warning_count'] ?? 0) > 0 || ($errors['error_count'] ?? 0) > 0);
+
+            if ($date === false || $hasErrors) {
+                throw InvalidAbsenceException::invalidDateRange();
+            }
+
+            return $isEnd
+                ? $date->setTime(23, 59, 59)
+                : $date->setTime(0, 0, 0);
+        }
+
+        try {
+            return new DateTimeImmutable($value, $timezone);
+        } catch (\Exception) {
+            throw InvalidAbsenceException::invalidDateRange();
+        }
     }
 
     public function cancelAbsence(int $absenceId, int $cancelledBy, string $cancellationReason): TechnicianAbsenceDto

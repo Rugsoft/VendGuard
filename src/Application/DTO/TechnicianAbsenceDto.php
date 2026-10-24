@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Application\DTO;
 
 use DateTimeImmutable;
+use DateTimeZone;
 use VendGuard\Core\Domain\Model\TechnicianAbsence;
 
 /**
@@ -22,6 +23,7 @@ final class TechnicianAbsenceDto
         public readonly string $reasonLabel,
         public readonly string $startsAt,
         public readonly string $endsAt,
+        public readonly bool $isFullDay,
         public readonly ?string $notes,
         public readonly int $createdBy,
         public readonly ?string $creatorName,
@@ -40,14 +42,21 @@ final class TechnicianAbsenceDto
         ?string $creatorName = null,
         ?string $cancellerName = null
     ): self {
+        $timezone = new DateTimeZone('Europe/Madrid');
+        $startsAt = $absence->startsAt()->setTimezone($timezone);
+        $endsAt = $absence->endsAt()->setTimezone($timezone);
+        $isFullDay = $startsAt->format('H:i:s') === '00:00:00'
+            && $endsAt->format('H:i:s') === '23:59:59';
+
         return new self(
             id: (int)$absence->id(),
             technicianId: $absence->technicianId(),
             technicianName: $technicianName ?? ('Técnico #' . $absence->technicianId()),
             reason: $absence->reason()->value,
             reasonLabel: $absence->reason()->label(),
-            startsAt: $absence->startsAt()->format(DateTimeImmutable::ATOM),
-            endsAt: $absence->endsAt()->format(DateTimeImmutable::ATOM),
+            startsAt: $startsAt->format(DateTimeImmutable::ATOM),
+            endsAt: $endsAt->format(DateTimeImmutable::ATOM),
+            isFullDay: $isFullDay,
             notes: $absence->notes(),
             createdBy: $absence->createdBy(),
             creatorName: $creatorName,
@@ -70,6 +79,7 @@ final class TechnicianAbsenceDto
             'reason_label' => $this->reasonLabel,
             'starts_at' => $this->startsAt,
             'ends_at' => $this->endsAt,
+            'is_full_day' => $this->isFullDay,
             'notes' => $this->notes,
             'created_by' => $this->createdBy,
             'creator_name' => $this->creatorName,

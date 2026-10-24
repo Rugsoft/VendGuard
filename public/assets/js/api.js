@@ -317,12 +317,43 @@ export class ApiClient {
    * @throws {ApiError}
    */
   async request(endpoint, options = {}) {
-    const isAbsolute = /^https?:\/\//i.test(endpoint);
-    let cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    // Query params are part of the contract of every verb, not only GET. The
+    // absence filters and the user role filter used to be silently dropped here.
+    const params = options.params;
+    let endpointWithParams = endpoint;
+    if (params !== undefined && params !== null) {
+      const search = new URLSearchParams();
+      if (typeof URLSearchParams !== 'undefined' && params instanceof URLSearchParams) {
+        params.forEach((value, key) => search.append(key, String(value)));
+      } else if (typeof params === 'object') {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value === undefined || value === null) {
+            return;
+          }
+          if (Array.isArray(value)) {
+            value.forEach((item) => {
+              if (item !== undefined && item !== null) {
+                search.append(key, String(item));
+              }
+            });
+            return;
+          }
+          search.append(key, String(value));
+        });
+      }
+
+      if ([...search.keys()].length > 0) {
+        const separator = endpointWithParams.includes('?') ? '&' : '?';
+        endpointWithParams += separator + search.toString();
+      }
+    }
+
+    const isAbsolute = /^https?:\/\//i.test(endpointWithParams);
+    let cleanEndpoint = endpointWithParams.startsWith('/') ? endpointWithParams : `/${endpointWithParams}`;
     if (!isAbsolute && cleanEndpoint.startsWith('/api/')) {
       cleanEndpoint = cleanEndpoint.substring(4);
     }
-    const url = isAbsolute ? endpoint : `${this.baseUrl}${cleanEndpoint}`;
+    const url = isAbsolute ? endpointWithParams : `${this.baseUrl}${cleanEndpoint}`;
 
     const headers = { ...(options.headers || {}) };
     const method = (options.method || 'GET').toUpperCase();

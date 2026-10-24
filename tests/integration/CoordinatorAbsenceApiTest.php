@@ -127,6 +127,14 @@ try {
     ));
     $assert('2.3 Fechas invertidas => HTTP 422 INVALID_DATE_RANGE', $resInvertedDates->getStatusCode() === 422);
 
+    // Avería activa del técnico para certificar la sugerencia de RF-02.
+    $stmtAffected = $pdo->prepare("INSERT INTO incidents
+        (ticket_code, location_id, machine_id, category, description, urgency, status, assigned_technician_id, assigned_at)
+        VALUES ('INC-ABS-SUG', 1, 1, 'PAYMENT_SYSTEM', 'Avería afectada por ausencia', 'MEDIUM', 'ASSIGNED', :tech_id, NOW())
+        RETURNING id");
+    $stmtAffected->execute([':tech_id' => $techId]);
+    $affectedIncidentId = (int)$stmtAffected->fetchColumn();
+
     // 201 Alta exitosa
     $resCreate = $router->dispatch(new Request(
         method: 'POST',
@@ -143,7 +151,24 @@ try {
     $createBody = $resCreate->getDecodedBody();
     $absenceId = (int)($createBody['data']['absence']['id'] ?? 0);
     $assert('2.5 Retorna datos de la ausencia creada con su id', $absenceId > 0);
-    $assert('2.6 Retorna array de affected_incidents', isset($createBody['data']['affected_incidents']));
+    $assert(
+        '2.6 La jornada completa se ancla en Madrid: 00:00:00 y 23:59:59 locales',
+        ($createBody['data']['absence']['starts_at'] ?? '') === '2026-11-01T00:00:00+01:00'
+            && ($createBody['data']['absence']['ends_at'] ?? '') === '2026-11-10T23:59:59+01:00'
+            && ($createBody['data']['absence']['is_full_day'] ?? false) === true
+    );
+    $affected = $createBody['data']['affected_incidents'] ?? [];
+    $assert(
+        '2.7 affected_incidents devuelve la incidencia y su técnico sugerido',
+        count($affected) === 1
+            && (int)($affected[0]['id'] ?? 0) === $affectedIncidentId
+            && is_array($affected[0]['suggested_technician'] ?? null)
+    );
+    $suggestedId = (int)($affected[0]['suggested_technician']['id'] ?? 0);
+    $assert(
+        '2.8 El técnico ausente no se sugiere a sí mismo',
+        $suggestedId > 0 && $suggestedId !== $techId
+    );
 
     // 409 Solapamiento con ausencia existente
     $resOverlap = $router->dispatch(new Request(
@@ -156,7 +181,20 @@ try {
         ],
         headers: ['Authorization' => 'Bearer ' . $coordToken]
     ));
-    $assert('2.7 Solapamiento de fechas => HTTP 409 ABSENCE_OVERLAP', $resOverlap->getStatusCode() === 409);
+    $assert('2.9 Solapamiento de fechas => HTTP 409 ABSENCE_OVERLAP', $resOverlap->getStatusCode() === 409);
+
+    // 422 Fecha imposible: el parser estricto no deja que PHP la normalice.
+    $resImpossibleDate = $router->dispatch(new Request(
+        method: 'POST',
+        path: "/api/coordinator/technicians/{$techId}/absences",
+        parsedBody: [
+            'reason' => 'VACATION',
+            'starts_at' => '2026-02-30',
+            'ends_at' => '2026-03-02',
+        ],
+        headers: ['Authorization' => 'Bearer ' . $coordToken]
+    ));
+    $assert('2.10 Fecha imposible => HTTP 422 INVALID_DATE_RANGE', $resImpossibleDate->getStatusCode() === 422);
 
     // ─────────────────────────────────────────────────────────────────────────
     // 3. GET /api/coordinator/technicians/absences
