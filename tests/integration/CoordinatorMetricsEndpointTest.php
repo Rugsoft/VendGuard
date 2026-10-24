@@ -192,6 +192,15 @@ if ($exportWasPartial) {
         'Sin recorte no hay aviso de exportacion parcial que declarar',
         'eventos en base de datos: ' . $totalAuditEvents
     );
+    // La cabecera tiene que seguir inmediatamente al BOM. Comprobarlo mantiene
+    // constante el número de aserciones entre un banco recién sembrado y uno
+    // maduro, y además detecta una línea de aviso que se colara por error: Excel
+    // dejaría de reconocer el BOM y rompería los acentos del fichero completo.
+    $assert(
+        str_starts_with($auditBody, "\xEF\xBB\xBFID,"),
+        'La cabecera del CSV sigue inmediatamente al BOM UTF-8',
+        bin2hex(substr($auditBody, 0, 16))
+    );
 }
 
 echo "\n======================================================================\n";
