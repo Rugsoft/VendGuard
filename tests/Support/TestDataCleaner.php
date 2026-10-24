@@ -132,6 +132,13 @@ final class TestDataCleaner
                     $deleted[$table] = ($stmt === false) ? 0 : (int)$stmt;
                 }
 
+                // La guardia pasiva es estado mutable del catálogo: una suite que
+                // falle a mitad puede dejar `is_on_call = TRUE` y la siguiente
+                // elegiría como guardia al técnico equivocado (la lista se ordena
+                // por nombre, no por id). `purge()` restituye el catálogo, así que
+                // también apaga la marca antes de devolver el banco a su estado base.
+                $pdo->exec('UPDATE users SET is_on_call = FALSE WHERE is_on_call = TRUE');
+
                 return $deleted;
             });
             $pdo->commit();
