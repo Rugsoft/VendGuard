@@ -25,6 +25,7 @@ require_once __DIR__ . '/../../src/autoload.php';
 
 use VendGuard\Application\DTO\TechnicianShiftDto;
 use VendGuard\Application\Service\ShiftLifecycleService;
+use VendGuard\Core\Domain\Exception\InvalidShiftTransitionException;
 use VendGuard\Core\Domain\Model\TechnicianAbsence;
 use VendGuard\Core\Domain\Model\TechnicianShift;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
@@ -183,6 +184,22 @@ $service = new ShiftLifecycleService(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 0. m-2: sin turno abierto las transiciones devuelven NO_OPEN_SHIFT (409)
+// ─────────────────────────────────────────────────────────────────────────────
+$noShiftCode = null;
+$noShiftStatus = null;
+try {
+    $service->pauseMeal(technicianId: 5);
+} catch (InvalidShiftTransitionException $e) {
+    $noShiftCode = $e->getErrorCode();
+    $noShiftStatus = $e->getHttpStatusCode();
+}
+$assert(
+    'pauseMeal sin turno abierto => NO_OPEN_SHIFT (409)',
+    $noShiftCode === 'NO_OPEN_SHIFT' && $noShiftStatus === 409
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 1. Inicio de turno ordinario
 // ─────────────────────────────────────────────────────────────────────────────
 $shiftDto = $service->startShift(technicianId: 5);
@@ -201,9 +218,25 @@ $pausedDto = $service->pauseMeal(technicianId: 5);
 $assert('pauseMeal pasa a MEAL_BREAK', $pausedDto->status === 'MEAL_BREAK');
 $assert('pauseMeal registra PAUSE_TECHNICIAN_SHIFT_MEAL', count($auditRepo->events) === 2 && $auditRepo->events[1]->getAction() === 'PAUSE_TECHNICIAN_SHIFT_MEAL');
 
+$pauseAgainCode = null;
+try {
+    $service->pauseMeal(technicianId: 5);
+} catch (InvalidShiftTransitionException $e) {
+    $pauseAgainCode = $e->getErrorCode();
+}
+$assert('pauseMeal dos veces => SHIFT_ALREADY_PAUSED', $pauseAgainCode === 'SHIFT_ALREADY_PAUSED');
+
 $resumedDto = $service->resumeShift(technicianId: 5);
 $assert('resumeShift vuelve a ON_SHIFT', $resumedDto->status === 'ON_SHIFT');
 $assert('resumeShift registra RESUME_TECHNICIAN_SHIFT', count($auditRepo->events) === 3 && $auditRepo->events[2]->getAction() === 'RESUME_TECHNICIAN_SHIFT');
+
+$resumeAgainCode = null;
+try {
+    $service->resumeShift(technicianId: 5);
+} catch (InvalidShiftTransitionException $e) {
+    $resumeAgainCode = $e->getErrorCode();
+}
+$assert('resumeShift sin pausa previa => SHIFT_NOT_IN_MEAL_BREAK', $resumeAgainCode === 'SHIFT_NOT_IN_MEAL_BREAK');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. Precedencia de presencia física sobre ausencia activa (Resolución R4)

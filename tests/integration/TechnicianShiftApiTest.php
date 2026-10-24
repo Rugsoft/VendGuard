@@ -136,13 +136,36 @@ try {
     $assert('3.1 Pausa de comida => HTTP 200 MEAL_BREAK',
         $resPause->getStatusCode() === 200 && ($resPause->getDecodedBody()['data']['status'] ?? '') === 'MEAL_BREAK');
 
+    // m-2: pausar dos veces distingue el estado real del turno.
+    $resPauseAgain = $router->dispatch(new Request(
+        method: 'POST',
+        path: '/api/technician/shift/pause-meal',
+        headers: ['Authorization' => 'Bearer ' . $techToken]
+    ));
+    $assert(
+        '3.2 Pausa repetida => HTTP 422 SHIFT_ALREADY_PAUSED',
+        $resPauseAgain->getStatusCode() === 422
+            && ($resPauseAgain->getDecodedBody()['error']['code'] ?? '') === 'SHIFT_ALREADY_PAUSED'
+    );
+
     $resResume = $router->dispatch(new Request(
         method: 'POST',
         path: '/api/technician/shift/resume',
         headers: ['Authorization' => 'Bearer ' . $techToken]
     ));
-    $assert('3.2 Reanudación tras comida => HTTP 200 ON_SHIFT',
+    $assert('3.3 Reanudación tras comida => HTTP 200 ON_SHIFT',
         $resResume->getStatusCode() === 200 && ($resResume->getDecodedBody()['data']['status'] ?? '') === 'ON_SHIFT');
+
+    $resResumeAgain = $router->dispatch(new Request(
+        method: 'POST',
+        path: '/api/technician/shift/resume',
+        headers: ['Authorization' => 'Bearer ' . $techToken]
+    ));
+    $assert(
+        '3.4 Reanudar sin pausa => HTTP 422 SHIFT_NOT_IN_MEAL_BREAK',
+        $resResumeAgain->getStatusCode() === 422
+            && ($resResumeAgain->getDecodedBody()['error']['code'] ?? '') === 'SHIFT_NOT_IN_MEAL_BREAK'
+    );
 
     // ─────────────────────────────────────────────────────────────────────────
     // 4. POST /api/technician/shift/close-handover
@@ -209,6 +232,18 @@ try {
     $assert(
         '4.7 El técnico vinculado recibe el aviso de relevo también por Telegram',
         in_array('TELEGRAM', array_column($handoverRows, 'channel'), true)
+    );
+
+    // m-2: tras cerrar el turno ya no hay jornada sobre la que pausar.
+    $resPauseAfterClose = $router->dispatch(new Request(
+        method: 'POST',
+        path: '/api/technician/shift/pause-meal',
+        headers: ['Authorization' => 'Bearer ' . $techToken]
+    ));
+    $assert(
+        '4.8 Pausa sin turno abierto => HTTP 409 NO_OPEN_SHIFT',
+        $resPauseAfterClose->getStatusCode() === 409
+            && ($resPauseAfterClose->getDecodedBody()['error']['code'] ?? '') === 'NO_OPEN_SHIFT'
     );
 
 } finally {

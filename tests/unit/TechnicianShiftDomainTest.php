@@ -97,9 +97,10 @@ $rejectedPauseAgain = false;
 try {
     $mealShift->pauseMeal();
 } catch (InvalidShiftTransitionException $e) {
-    $rejectedPauseAgain = $e->getErrorCode() === 'INVALID_SHIFT_TRANSITION';
+    $rejectedPauseAgain = $e->getErrorCode() === 'SHIFT_ALREADY_PAUSED'
+        && $e->getHttpStatusCode() === 422;
 }
-$assert('pauseMeal rechaza pausar si ya está en MEAL_BREAK', $rejectedPauseAgain);
+$assert('pauseMeal rechaza pausar si ya está en MEAL_BREAK con SHIFT_ALREADY_PAUSED', $rejectedPauseAgain);
 
 // Reanudación
 $mealEnd = new DateTimeImmutable('2026-10-23 14:00:00+00');
@@ -113,9 +114,10 @@ $rejectedResumeAgain = false;
 try {
     $resumedShift->resume();
 } catch (InvalidShiftTransitionException $e) {
-    $rejectedResumeAgain = $e->getErrorCode() === 'INVALID_SHIFT_TRANSITION';
+    $rejectedResumeAgain = $e->getErrorCode() === 'SHIFT_NOT_IN_MEAL_BREAK'
+        && $e->getHttpStatusCode() === 422;
 }
-$assert('resume rechaza reanudar si no está en MEAL_BREAK', $rejectedResumeAgain);
+$assert('resume rechaza reanudar si no está en MEAL_BREAK con SHIFT_NOT_IN_MEAL_BREAK', $rejectedResumeAgain);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. Cierre de turno y soporte de cierre directo desde MEAL_BREAK (R10)

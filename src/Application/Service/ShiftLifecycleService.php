@@ -98,10 +98,12 @@ final class ShiftLifecycleService
         }
 
         $activeShift = $this->shiftRepo->findActiveShiftByTechnician($technicianId);
-        if ($activeShift === null || !$activeShift->isOnShift()) {
-            throw InvalidShiftTransitionException::notOnShift('pausar para comida');
+        if ($activeShift === null) {
+            throw InvalidShiftTransitionException::noOpenShift('pausar para comida');
         }
 
+        // El repositorio relee el turno con FOR UPDATE y el dominio distingue
+        // «ya en pausa» de una transición genérica (m-2).
         $updated = $this->shiftRepo->pauseMeal($activeShift->id());
 
         // Auditoría
@@ -129,8 +131,8 @@ final class ShiftLifecycleService
         }
 
         $activeShift = $this->shiftRepo->findActiveShiftByTechnician($technicianId);
-        if ($activeShift === null || !$activeShift->isMealBreak()) {
-            throw InvalidShiftTransitionException::notInMealBreak();
+        if ($activeShift === null) {
+            throw InvalidShiftTransitionException::noOpenShift('reanudar la jornada');
         }
 
         $updated = $this->shiftRepo->resumeShift($activeShift->id());

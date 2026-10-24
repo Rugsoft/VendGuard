@@ -64,8 +64,12 @@ final class TechnicianShift
 
     public function pauseMeal(?DateTimeImmutable $pausedAt = null): self
     {
+        if ($this->status === ShiftStatus::MEAL_BREAK) {
+            throw InvalidShiftTransitionException::alreadyPaused();
+        }
+
         if ($this->status !== ShiftStatus::ON_SHIFT) {
-            throw InvalidShiftTransitionException::notOnShift('pausar para comida');
+            throw InvalidShiftTransitionException::noOpenShift('pausar para comida');
         }
 
         $now = $pausedAt ?? new DateTimeImmutable('now');
@@ -88,8 +92,12 @@ final class TechnicianShift
 
     public function resume(?DateTimeImmutable $resumedAt = null): self
     {
+        if ($this->status === ShiftStatus::ON_SHIFT) {
+            throw InvalidShiftTransitionException::notPaused();
+        }
+
         if ($this->status !== ShiftStatus::MEAL_BREAK) {
-            throw InvalidShiftTransitionException::notInMealBreak();
+            throw InvalidShiftTransitionException::noOpenShift('reanudar la jornada');
         }
 
         $now = $resumedAt ?? new DateTimeImmutable('now');

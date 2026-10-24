@@ -32,20 +32,35 @@ final class InvalidShiftTransitionException extends DomainException
         return $this->httpStatusCode;
     }
 
-    public static function notOnShift(string $action): self
+    /**
+     * No existe un turno abierto sobre el que ejecutar la transición.
+     *
+     * Se separa de las transiciones inválidas sobre un turno existente para que
+     * el cliente distinga «no has fichado» de «ya estás en pausa» (m-2).
+     */
+    public static function noOpenShift(string $action): self
     {
         return new self(
-            "No se puede {$action} porque el turno no se encuentra en estado ON_SHIFT.",
-            'INVALID_SHIFT_TRANSITION',
+            "No se puede {$action} porque no hay ningún turno abierto.",
+            'NO_OPEN_SHIFT',
+            409
+        );
+    }
+
+    public static function alreadyPaused(): self
+    {
+        return new self(
+            'No se puede pausar para comida porque el turno ya se encuentra en MEAL_BREAK.',
+            'SHIFT_ALREADY_PAUSED',
             422
         );
     }
 
-    public static function notInMealBreak(): self
+    public static function notPaused(): self
     {
         return new self(
             'No se puede reanudar la jornada porque el turno no se encuentra en MEAL_BREAK.',
-            'INVALID_SHIFT_TRANSITION',
+            'SHIFT_NOT_IN_MEAL_BREAK',
             422
         );
     }
