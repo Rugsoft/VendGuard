@@ -700,8 +700,7 @@ export const CoordinatorAbsencesTab = {
               </span>
               <button
                 type="button"
-                class="vg-btn vg-btn-primary"
-                style="height: 30px; font-size: 11px; padding: 0 10px;"
+                class="vg-btn vg-btn-sm vg-btn-primary"
                 :disabled="reassigningIncidentId === inc.id"
                 @click="reassignAffected(inc)"
               >
