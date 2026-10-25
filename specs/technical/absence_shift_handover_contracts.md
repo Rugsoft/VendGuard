@@ -50,7 +50,20 @@ CREATE INDEX IF NOT EXISTS idx_tech_absences_lookup
 CREATE INDEX IF NOT EXISTS idx_tech_absences_status 
     ON technician_absences (starts_at, ends_at)
     WHERE cancelled_at IS NULL;
+
+-- Migración 014: una sola ausencia viva por técnico en cada instante.
+-- Semántica semiabierta [starts_at, ends_at): los rangos contiguos conviven.
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+ALTER TABLE technician_absences
+    ADD CONSTRAINT ex_technician_absences_no_overlap
+    EXCLUDE USING gist (
+        technician_id WITH =,
+        tstzrange(starts_at, ends_at, '[)') WITH &&
+    ) WHERE (cancelled_at IS NULL);
 ```
+
+La comprobación previa del servicio (`hasOverlappingAbsence()`) solo mejora el mensaje. La constraint es la última autoridad y protege también las escrituras que no pasen por el servicio. Una violación de exclusión devuelve `SQLSTATE 23P01` y el repositorio la traduce a `409 ABSENCE_OVERLAP`, sin propagar el mensaje del motor. El cerrojo de aplicación (`SELECT id FROM users WHERE id = :id AND deleted_at IS NULL FOR UPDATE`) serializa las altas del mismo técnico antes de comprobar e insertar.
 
 ### 1.2. Tabla 30 · `technician_shifts`
 
@@ -240,6 +253,8 @@ Ejecuta el protocolo de relevo de fin de turno y cierre de jornada dentro de una
 1. **Precondición de Integridad (RF-04):** Comprueba si el técnico tiene averías en `IN_PROGRESS`.
    * Si `count(IN_PROGRESS) > 0`: Lanza `HasInProgressIncidentsException` (HTTP 422).
 2. **Relevo Explícito de Averías (RF-05):** Si se envía `target_technician_id`:
+   * Valida la disponibilidad del receptor antes de abrir la transacción de escritura: técnico activo, rol `TECHNICIAN`, turno abierto en `ON_SHIFT` o, sin turno, guardia 24/7 (`is_on_call = TRUE`) sin ausencia activa; una ausencia sin turno, una pausa de comida o `OFF_SHIFT` sin guardia lo inhabilitan. Error: `422 TARGET_TECHNICIAN_UNAVAILABLE`.
+   * `target_technician_id` informado con `incident_ids` vacío: `422 TARGET_WITHOUT_TRANSFERS`.
    * Bloquea con `SELECT ... FOR UPDATE` los tickets solicitados (`incident_ids`).
    * Valida que pertenezcan al técnico y su estado esté en `['ASSIGNED', 'PENDING_PARTS', 'PENDING_INFO']`.
    * Si algún ticket cambió o no es elegible: `409 CONFLICT` (`CONCURRENT_ROUTE_MODIFICATION`).
@@ -250,8 +265,8 @@ Ejecuta el protocolo de relevo de fin de turno y cierre de jornada dentro de una
 3. **Cierre sin Relevo y Protocolo Sanitario de Frío (RF-06 / Art. II):**
    * Las averías comerciales ordinarias (`ASSIGNED`, `PENDING_PARTS`, `PENDING_INFO`) se retienen en el técnico saliente para el día siguiente.
    * Para cada avería sobre máquina perecedera (`FOOD_PERISHABLE`):
-     * **Nivel 1:** Si hay un técnico activo con `is_on_call = TRUE`, se le traspasa automáticamente con nota interna del sistema y alerta Telegram. Encola el mismo aviso propio y prioritario de relevo que el traspaso manual (`TELEGRAM_INCIDENT_ASSIGNMENT`, prioridad `PRIORITY`), por correo y por Telegram si el guardia está vinculado; nunca el aviso ordinario `TECHNICIAN_ASSIGNED`.
-     * **Nivel 2:** Si no hay ningún técnico de guardia en el parque, se desasigna pasando a `REGISTERED` y se emite alerta crítica al canal de Coordinación.
+     * **Nivel 1:** Si hay un técnico activo con `is_on_call = TRUE` **y disponible** (sin pausa de comida y sin ausencia activa salvo que esté en `ON_SHIFT`), se le traspasa automáticamente con nota interna del sistema y alerta Telegram. Encola el mismo aviso propio y prioritario de relevo que el traspaso manual (`TELEGRAM_INCIDENT_ASSIGNMENT`, prioridad `PRIORITY`), por correo y por Telegram si el guardia está vinculado; nunca el aviso ordinario `TECHNICIAN_ASSIGNED`. Se excluye al técnico saliente y se prefieren los guardias en turno.
+     * **Nivel 2:** Si no hay ningún guardia disponible, se desasigna pasando a `REGISTERED` y se emite alerta crítica al canal de Coordinación. La auditoría del evento registra `fallback_reason = 'NO_AVAILABLE_ON_CALL_TECHNICIAN'`.
 4. **Cierre de Turno:**
    * Actualiza el registro en `technician_shifts` con `status = 'OFF_SHIFT'`, `closed_at = CURRENT_TIMESTAMP`, `closed_by = :userId`.
    * Inserta evento `CLOSE_TECHNICIAN_SHIFT` o `SHIFT_HANDOVER_REASSIGNMENT` en `audit_log` (Art. III.3).
@@ -269,9 +284,12 @@ Ejecuta el protocolo de relevo de fin de turno y cierre de jornada dentro de una
 4. Existen averías en `IN_PROGRESS` (`422 HAS_IN_PROGRESS_INCIDENTS`).
 5. `target_technician_id` especificado pero inexistente o inactivo (`404 TARGET_TECHNICIAN_NOT_FOUND`).
 6. `target_technician_id` es el mismo técnico saliente (`422 INVALID_TARGET_TECHNICIAN`).
-7. `incident_ids` contiene tickets inexistentes o no asignados al técnico (`409 CONCURRENT_ROUTE_MODIFICATION`).
-8. `handover_notes` menor de 10 caracteres reales habiendo tickets a traspasar (`422 MISSING_HANDOVER_NOTES`).
-9. Éxito: `200 OK` con JSON resumen de averías traspasadas, retenidas y derivadas a guardia.
+7. `target_technician_id` informado con `incident_ids` vacío (`422 TARGET_WITHOUT_TRANSFERS`).
+8. `incident_ids` no vacío sin `target_technician_id` (`422 TARGET_TECHNICIAN_REQUIRED`).
+9. Receptor no disponible (ausente sin turno, en pausa o `OFF_SHIFT` sin guardia) (`422 TARGET_TECHNICIAN_UNAVAILABLE`). El mensaje es genérico y no revela el motivo ni las fechas de la ausencia.
+10. `incident_ids` contiene tickets inexistentes o no asignados al técnico (`409 CONCURRENT_ROUTE_MODIFICATION`).
+11. `handover_notes` menor de 10 caracteres reales habiendo tickets a traspasar (`422 MISSING_HANDOVER_NOTES`).
+12. Éxito: `200 OK` con JSON resumen de averías traspasadas, retenidas y derivadas a guardia. `target_technician_id: null` + `incident_ids: []` es un cierre sin relevo válido.
 
 #### `POST /api/technician/shift/pause-meal`
 1. Middleware de autenticación (`401 UNAUTHORIZED`).
@@ -290,8 +308,9 @@ Ejecuta el protocolo de relevo de fin de turno y cierre de jornada dentro de una
 #### `GET /api/technician/handover-targets`
 1. Middleware de autenticación interno (`401 UNAUTHORIZED`).
 2. Usuario no es `TECHNICIAN` (`403 FORBIDDEN`).
-3. Éxito: `200 OK` con la lista de técnicos activos distintos del solicitante.
-4. Cada fila contiene únicamente `id`, `name` e `is_active`; nunca email, teléfono ni identificador de Telegram.
+3. Éxito: `200 OK` con la lista de técnicos activos distintos del solicitante, ordenada por disponibilidad (`AVAILABLE`, `ON_CALL`, `OFF_SHIFT`, `MEAL_BREAK`, `UNAVAILABLE`) y después por nombre.
+4. Cada fila contiene `id`, `name`, `is_active`, `shift_status` (`ON_SHIFT`|`MEAL_BREAK`|`OFF_SHIFT`), `is_on_call`, `availability`, `availability_label` e `is_available_for_handover`; nunca email, teléfono, identificador de Telegram, motivo de ausencia ni fechas de ausencia.
+5. Los campos nuevos son aditivos para clientes antiguos, salvo el rechazo de receptores no disponibles, que es un cambio deliberado del contrato de `close-handover`.
 
 #### `POST /api/coordinator/technicians/{id}/absences`
 1. Middleware de autenticación interno (`401 UNAUTHORIZED`).
@@ -300,7 +319,7 @@ Ejecuta el protocolo de relevo de fin de turno y cierre de jornada dentro de una
 4. `reason` no pertenece a `AbsenceReason` (`422 INVALID_ABSENCE_REASON`).
 5. `starts_at` o `ends_at` inválidos o `ends_at < starts_at` (`422 INVALID_DATE_RANGE`).
 6. `notes` supera los 500 caracteres (`422 NOTES_TOO_LONG`).
-7. Solapamiento con ausencia activa del técnico (`409 ABSENCE_OVERLAP`).
+7. Solapamiento con ausencia activa del técnico (`409 ABSENCE_OVERLAP`), tanto en la comprobación previa como si la constraint `ex_technician_absences_no_overlap` rechaza el `INSERT` con `SQLSTATE 23P01`.
 8. Éxito: `201 CREATED` con datos de la ausencia y lista `affected_incidents` con recomendación asistida. Cada incidencia incluye `suggested_technician`: `{ id, name, operator_code, total_score, explanation, badges, current_status }`, o `null` si no hay candidatos. El técnico ausente nunca aparece como sugerido.
 
 #### `DELETE /api/coordinator/absences/{id}`

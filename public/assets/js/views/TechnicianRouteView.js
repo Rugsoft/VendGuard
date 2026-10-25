@@ -174,12 +174,14 @@ export const TechnicianRouteView = {
       isShiftLoading: false,
       shiftError: '',
       showShiftHandoverModal: false,
+      handoverMode: 'CLOSE_ONLY',
       selectedHandoverTicketIds: [],
       targetHandoverTechId: '',
       handoverNotes: '',
       closeReason: '',
       isSubmittingHandover: false,
       handoverError: '',
+      handoverTargets: [],
       availableReceptors: []
     };
   },
@@ -277,6 +279,16 @@ export const TechnicianRouteView = {
         INCIDENT_STATUSES.PENDING_INFO,
       ];
       return list.filter(inc => eligibleStatuses.includes(normalizeIncidentStatus(inc.status)));
+    },
+
+    /**
+     * Nombre del receptor elegido, para el texto del botón de confirmación.
+     */
+    selectedHandoverTargetName() {
+      const target = this.handoverTargets.find(
+        tech => String(tech.id) === String(this.targetHandoverTechId)
+      );
+      return target ? target.name : '';
     },
 
     /**
@@ -440,11 +452,47 @@ export const TechnicianRouteView = {
 
     async openShiftHandoverModal() {
       this.showShiftHandoverModal = true;
+      this.handoverMode = 'CLOSE_ONLY';
       this.handoverError = '';
       this.handoverNotes = '';
       this.closeReason = '';
       this.targetHandoverTechId = '';
-      this.selectedHandoverTicketIds = this.eligibleHandoverIncidents.map(i => i.id);
+      this.selectedHandoverTicketIds = [];
+      // En modo cierre no se consulta la lista de compañeros: el modo seguro
+      // no debe depender de una lectura que puede fallar.
+    },
+
+    /**
+     * Cambia entre cierre sin relevo y traspaso explícito.
+     *
+     * La lista de receptores se carga solo al entrar en TRASFER; abrir el modal
+     * en modo cierre no genera tráfico ni preselecciona averías.
+     */
+    async setHandoverMode(mode) {
+      if (!['CLOSE_ONLY', 'TRANSFER'].includes(mode)) {
+        return;
+      }
+
+      this.handoverMode = mode;
+      this.handoverError = '';
+
+      if (mode === 'CLOSE_ONLY') {
+        this.targetHandoverTechId = '';
+        this.selectedHandoverTicketIds = [];
+        return;
+      }
+
+      if (this.eligibleHandoverIncidents.length === 0) {
+        this.handoverError = 'No tienes averías pendientes para traspasar. Puedes cerrar sin relevo.';
+        return;
+      }
+
+      if (this.handoverTargets.length === 0) {
+        await this.loadHandoverTargets();
+      }
+    },
+
+    async loadHandoverTargets() {
       try {
         // Endpoint propio del técnico: el cuadrante de Coordinación exige rol
         // COORDINATOR y devolvía 403 desde el móvil (A6).
@@ -452,11 +500,37 @@ export const TechnicianRouteView = {
         const raw = res?.data || res || [];
         const list = Array.isArray(raw) ? raw : [];
         const myId = Number(this.currentUser?.id);
-        this.availableReceptors = list.filter(t => Number(t.id) !== myId && t.is_active !== false);
+
+        this.handoverTargets = list
+          .filter(t => Number(t.id) !== myId && t.is_active !== false)
+          .map(t => {
+            const availability = t.availability || 'AVAILABLE';
+            const canReceive = t.is_available_for_handover !== undefined
+              ? Boolean(t.is_available_for_handover)
+              : availability === 'AVAILABLE';
+
+            return {
+              ...t,
+              availability,
+              availability_label: t.availability_label || availability,
+              is_available_for_handover: canReceive,
+            };
+          });
+
+        this.availableReceptors = this.handoverTargets.filter(t => t.is_available_for_handover);
       } catch (e) {
+        this.handoverTargets = [];
         this.availableReceptors = [];
         this.handoverError = 'No se pudieron cargar los compañeros disponibles para el relevo.';
       }
+    },
+
+    selectAllHandoverIncidents() {
+      this.selectedHandoverTicketIds = this.eligibleHandoverIncidents.map(i => i.id);
+    },
+
+    clearHandoverSelection() {
+      this.selectedHandoverTicketIds = [];
     },
 
     /**
@@ -483,9 +557,23 @@ export const TechnicianRouteView = {
         this.handoverError = 'No es posible cerrar turno con averías en curso. Debe resolver la intervención o pausarla.';
         return;
       }
-      if (this.selectedHandoverTicketIds.length > 0) {
+
+      const isTransfer = this.handoverMode === 'TRANSFER';
+
+      if (isTransfer) {
+        if (this.selectedHandoverTicketIds.length === 0) {
+          this.handoverError = 'Selecciona al menos una avería para traspasar o cambia a cierre sin relevo.';
+          return;
+        }
         if (!this.targetHandoverTechId) {
           this.handoverError = 'Debe seleccionar un técnico receptor para las averías traspasadas.';
+          return;
+        }
+        const target = this.handoverTargets.find(
+          tech => String(tech.id) === String(this.targetHandoverTechId)
+        );
+        if (target && target.is_available_for_handover === false) {
+          this.handoverError = 'El técnico seleccionado no está disponible para recibir el relevo.';
           return;
         }
         if (this.handoverNotes.trim().length < 10) {
@@ -493,15 +581,24 @@ export const TechnicianRouteView = {
           return;
         }
       }
+
       this.isSubmittingHandover = true;
       this.handoverError = '';
       try {
-        const payload = {
-          target_technician_id: this.targetHandoverTechId ? Number(this.targetHandoverTechId) : null,
-          incident_ids: this.selectedHandoverTicketIds,
-          handover_notes: this.handoverNotes,
-          close_reason: this.closeReason || 'Fin de jornada con relevo',
-        };
+        const payload = isTransfer
+          ? {
+              target_technician_id: Number(this.targetHandoverTechId),
+              incident_ids: this.selectedHandoverTicketIds,
+              handover_notes: this.handoverNotes,
+              close_reason: this.closeReason || 'Fin de jornada con relevo',
+            }
+          : {
+              target_technician_id: null,
+              incident_ids: [],
+              handover_notes: '',
+              close_reason: 'Fin de jornada sin relevo',
+            };
+
         await api.post('/technician/shift/close-handover', payload);
         this.showShiftHandoverModal = false;
         this.shiftStatus = 'OFF_SHIFT';
@@ -510,6 +607,11 @@ export const TechnicianRouteView = {
         if (err?.code === 'CONCURRENT_ROUTE_MODIFICATION' || err?.status === 409) {
           this.handoverError = 'La ruta ha cambiado concurrentemente. Se ha actualizado la lista de incidencias.';
           await this.loadRoute();
+        } else if (err?.code === 'TARGET_TECHNICIAN_UNAVAILABLE') {
+          this.handoverError = err?.message || 'El técnico seleccionado no está disponible para recibir el relevo.';
+          this.targetHandoverTechId = '';
+          this.handoverTargets = [];
+          await this.loadHandoverTargets();
         } else {
           this.handoverError = err?.message || 'Error al cerrar el turno.';
         }
@@ -2397,72 +2499,125 @@ export const TechnicianRouteView = {
         </div>
 
         <div v-else>
-          <p style="font-size: 13px; color: var(--color-slate); margin-bottom: 12px;">
-            Selecciona las averías pendientes que deseas traspasar a tu relevo. Las no seleccionadas se retendrán en tu ruta para mañana (salvo máquinas de perecederos, que se derivan automáticamente a la guardia sanitaria según Art. II).
-          </p>
+          <div style="display: flex; gap: 8px; margin-bottom: 14px;">
+            <button
+              type="button"
+              class="vg-btn"
+              :class="handoverMode === 'CLOSE_ONLY' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+              @click="setHandoverMode('CLOSE_ONLY')"
+            >
+              Cerrar sin relevo
+            </button>
+            <button
+              type="button"
+              class="vg-btn"
+              :class="handoverMode === 'TRANSFER' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+              :disabled="eligibleHandoverIncidents.length === 0"
+              @click="setHandoverMode('TRANSFER')"
+            >
+              Traspasar averías
+            </button>
+          </div>
 
-          <div v-if="eligibleHandoverIncidents.length > 0" style="margin-bottom: 14px;">
-            <label style="display: block; font-size: 12px; font-weight: 700; color: var(--color-slate); margin-bottom: 6px;">
-              Averías elegibles para traspaso ({{ eligibleHandoverIncidents.length }}):
-            </label>
-            <div style="max-height: 140px; overflow-y: auto; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 6px;">
-              <div
-                v-for="inc in eligibleHandoverIncidents"
-                :key="inc.id"
-                style="display: flex; align-items: center; gap: 8px; padding: 4px 6px; font-size: 12px;"
-              >
-                <input
-                  type="checkbox"
-                  :id="'handover-inc-' + inc.id"
-                  :value="inc.id"
-                  v-model="selectedHandoverTicketIds"
-                />
-                <label :for="'handover-inc-' + inc.id" style="cursor: pointer; flex: 1;">
-                  <strong>{{ inc.ticket_code }}</strong> - {{ handoverMachineLabel(inc) }} ({{ inc.status }})
+          <div
+            v-if="handoverMode === 'CLOSE_ONLY'"
+            style="background: var(--color-canvas); border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 12px; margin-bottom: 14px; font-size: 13px; color: var(--color-slate);"
+          >
+            <strong>Cerrar sin traspaso.</strong> Las averías ordinarias se retendrán en tu ruta para mañana. Las máquinas de perecederos se derivan automáticamente a la guardia sanitaria o se desasignan con alarma crítica a Coordinación (Art. II).
+          </div>
+
+          <div v-else>
+            <p style="font-size: 13px; color: var(--color-slate); margin-bottom: 12px;">
+              Selecciona explícitamente las averías que deseas traspasar. Las no seleccionadas se retendrán en tu ruta para mañana (salvo máquinas de perecederos, que se derivan automáticamente a la guardia sanitaria según Art. II).
+            </p>
+
+            <div v-if="eligibleHandoverIncidents.length > 0" style="margin-bottom: 14px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
+                <label style="display: block; font-size: 12px; font-weight: 700; color: var(--color-slate);">
+                  Averías elegibles para traspaso ({{ eligibleHandoverIncidents.length }}):
                 </label>
+                <button
+                  v-if="selectedHandoverTicketIds.length < eligibleHandoverIncidents.length"
+                  type="button"
+                  class="vg-btn vg-btn-secondary"
+                  style="font-size: 11px; padding: 4px 8px;"
+                  @click="selectAllHandoverIncidents"
+                >
+                  Seleccionar todas
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  class="vg-btn vg-btn-secondary"
+                  style="font-size: 11px; padding: 4px 8px;"
+                  @click="clearHandoverSelection"
+                >
+                  Quitar selección
+                </button>
+              </div>
+              <div style="max-height: 140px; overflow-y: auto; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 6px;">
+                <div
+                  v-for="inc in eligibleHandoverIncidents"
+                  :key="inc.id"
+                  style="display: flex; align-items: center; gap: 8px; padding: 4px 6px; font-size: 12px;"
+                >
+                  <input
+                    type="checkbox"
+                    :id="'handover-inc-' + inc.id"
+                    :value="inc.id"
+                    v-model="selectedHandoverTicketIds"
+                  />
+                  <label :for="'handover-inc-' + inc.id" style="cursor: pointer; flex: 1;">
+                    <strong>{{ inc.ticket_code }}</strong> - {{ handoverMachineLabel(inc) }} ({{ inc.status }})
+                  </label>
+                </div>
               </div>
             </div>
-          </div>
-          <div v-else style="font-size: 13px; color: var(--color-ink-muted); margin-bottom: 14px;">
-            ℹ️ No tienes averías pendientes para traspasar. El turno se cerrará directamente.
-          </div>
-
-          <div v-if="selectedHandoverTicketIds.length > 0">
-            <div style="margin-bottom: 12px;">
-              <label for="handover-target-tech" style="display: block; font-size: 12px; font-weight: 700; color: var(--color-slate); margin-bottom: 4px;">
-                Técnico Receptor *
-              </label>
-              <select
-                id="handover-target-tech"
-                v-model="targetHandoverTechId"
-                class="vg-input"
-                style="width: 100%; height: 38px; font-size: 13px;"
-                required
-              >
-                <option value="" disabled>Selecciona técnico de relevo...</option>
-                <option
-                  v-for="tech in availableReceptors"
-                  :key="tech.id"
-                  :value="tech.id"
-                >
-                  {{ tech.name }} ({{ tech.operator_code || ('ID ' + tech.id) }})
-                </option>
-              </select>
+            <div v-else style="font-size: 13px; color: var(--color-ink-muted); margin-bottom: 14px;">
+              ℹ️ No tienes averías pendientes para traspasar.
             </div>
 
-            <div style="margin-bottom: 12px;">
-              <label for="handover-notes" style="display: block; font-size: 12px; font-weight: 700; color: var(--color-slate); margin-bottom: 4px;">
-                Nota Interna de Taller (Art. V.4, confidencial) *
-              </label>
-              <textarea
-                id="handover-notes"
-                v-model="handoverNotes"
-                class="vg-input"
-                rows="3"
-                style="width: 100%; font-size: 13px;"
-                placeholder="Detalles técnicos para el compañero que retoma la ruta (mínimo 10 caracteres)..."
-                required
-              ></textarea>
+            <div v-if="selectedHandoverTicketIds.length > 0">
+              <div style="margin-bottom: 12px;">
+                <label for="handover-target-tech" style="display: block; font-size: 12px; font-weight: 700; color: var(--color-slate); margin-bottom: 4px;">
+                  Técnico Receptor *
+                </label>
+                <select
+                  id="handover-target-tech"
+                  v-model="targetHandoverTechId"
+                  class="vg-input"
+                  style="width: 100%; height: 38px; font-size: 13px;"
+                  required
+                >
+                  <option value="" disabled>Selecciona técnico de relevo...</option>
+                  <option
+                    v-for="tech in handoverTargets"
+                    :key="tech.id"
+                    :value="tech.id"
+                    :disabled="!tech.is_available_for_handover"
+                  >
+                    {{ tech.name }} — {{ tech.availability_label }}
+                  </option>
+                </select>
+                <div v-if="handoverTargets.length === 0" style="font-size: 12px; color: var(--color-ink-muted); margin-top: 4px;">
+                  No hay compañeros disponibles. Puedes cerrar sin relevo.
+                </div>
+              </div>
+
+              <div style="margin-bottom: 12px;">
+                <label for="handover-notes" style="display: block; font-size: 12px; font-weight: 700; color: var(--color-slate); margin-bottom: 4px;">
+                  Nota Interna de Taller (Art. V.4, confidencial) *
+                </label>
+                <textarea
+                  id="handover-notes"
+                  v-model="handoverNotes"
+                  class="vg-input"
+                  rows="3"
+                  style="width: 100%; font-size: 13px;"
+                  placeholder="Detalles técnicos para el compañero que retoma la ruta (mínimo 10 caracteres)..."
+                  required
+                ></textarea>
+              </div>
             </div>
           </div>
 
@@ -2486,7 +2641,11 @@ export const TechnicianRouteView = {
               :disabled="hasInProgressIncidents || isSubmittingHandover"
               @click="submitShiftHandover"
             >
-              <span v-if="!isSubmittingHandover">Confirmar Cierre de Turno</span>
+              <span v-if="!isSubmittingHandover">
+                {{ handoverMode === 'CLOSE_ONLY'
+                  ? 'Confirmar cierre sin relevo'
+                  : 'Traspasar ' + selectedHandoverTicketIds.length + ' avería(s) a ' + (selectedHandoverTargetName || '...') }}
+              </span>
               <span v-else>Cerrando...</span>
             </button>
           </div>

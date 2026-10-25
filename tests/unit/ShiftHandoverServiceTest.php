@@ -21,6 +21,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/autoload.php';
 
 use VendGuard\Application\DTO\ShiftHandoverResultDto;
+use VendGuard\Application\Service\HandoverTargetService;
 use VendGuard\Application\Service\ShiftHandoverService;
 use VendGuard\Core\Domain\Exception\ActiveIncidentInProgressException;
 use VendGuard\Core\Domain\Exception\InvalidShiftTransitionException;
@@ -36,6 +37,7 @@ use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OnCallTechnicianRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TechnicianAbsenceRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianShiftRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
@@ -69,6 +71,15 @@ $activeShift = new TechnicianShift(
 $shiftRepo = new class($activeShift) implements TechnicianShiftRepositoryInterface {
     public function __construct(public ?TechnicianShift &$shift) {}
     public function findActiveShiftByTechnician(int $technicianId): ?TechnicianShift {
+        if ($technicianId === 8) {
+            return new TechnicianShift(
+                id: 2,
+                technicianId: 8,
+                status: ShiftStatus::ON_SHIFT,
+                startedAt: new DateTimeImmutable('2026-10-23 08:00:00+00')
+            );
+        }
+
         return ($this->shift !== null && $this->shift->technicianId() === $technicianId && $this->shift->isOpen()) ? $this->shift : null;
     }
     public function startShift(int $technicianId, ?DateTimeImmutable $startedAt = null): TechnicianShift { throw new LogicException(); }
@@ -186,9 +197,20 @@ $machineRepo = new class implements MachineRepositoryInterface {
     public function softDelete(int $id): bool { return false; }
 };
 
+$absenceRepo = new class implements TechnicianAbsenceRepositoryInterface {
+    public function create(int $technicianId, VendGuard\Core\Domain\ValueObject\AbsenceReason $reason, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt, ?string $notes, int $createdBy): VendGuard\Core\Domain\Model\TechnicianAbsence { throw new LogicException(); }
+    public function findById(int $id): ?VendGuard\Core\Domain\Model\TechnicianAbsence { return null; }
+    public function findAll(?int $technicianId = null, ?string $status = null): array { return []; }
+    public function findActiveAbsenceForTechnician(int $technicianId, ?DateTimeImmutable $referenceTime = null): ?VendGuard\Core\Domain\Model\TechnicianAbsence { return null; }
+    public function findActiveAbsencesMap(DateTimeImmutable $at): array { return []; }
+    public function hasOverlappingAbsence(int $technicianId, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt, ?int $excludeAbsenceId = null): bool { return false; }
+    public function cancel(int $id, int $cancelledBy, string $cancellationReason): bool { return true; }
+};
+
 $onCallRepo = new class implements OnCallTechnicianRepositoryInterface {
     public function setOnCall(int $userId, bool $onCall): bool { return true; }
     public function findOnCallTechnicians(): array { return []; }
+    public function findAvailableOnCallTechnicians(DateTimeImmutable $at, ?int $excludeTechnicianId = null): array { return []; }
     public function countOnCallTechnicians(): int { return 0; }
 };
 
@@ -219,7 +241,8 @@ $service = new ShiftHandoverService(
     incidentRepo: $incidentRepo,
     machineRepo: $machineRepo,
     onCallRepo: $onCallRepo,
-    auditRepo: $auditRepo
+    auditRepo: $auditRepo,
+    handoverTargets: new HandoverTargetService($userRepo, $shiftRepo, $absenceRepo)
 );
 
 // ─────────────────────────────────────────────────────────────────────────────

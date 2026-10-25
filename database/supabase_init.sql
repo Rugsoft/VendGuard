@@ -81,6 +81,10 @@
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- `btree_gist` permite combinar la igualdad de `technician_id` con el rango
+-- temporal de la constraint de exclusión de ausencias (Módulo 21). Es una
+-- extensión contrib de confianza, como las dos anteriores.
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 
 -- =============================================================================
@@ -1978,6 +1982,26 @@ CREATE INDEX IF NOT EXISTS idx_tech_absences_lookup
 CREATE INDEX IF NOT EXISTS idx_tech_absences_status 
     ON technician_absences (starts_at, ends_at)
     WHERE cancelled_at IS NULL;
+
+-- Una sola ausencia viva por técnico en cada instante. El predicado parcial
+-- libera el rango al cancelar sin borrar la fila (Art. III.1).
+DO $do$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_constraint
+         WHERE conname = 'ex_technician_absences_no_overlap'
+           AND conrelid = 'technician_absences'::regclass
+    ) THEN
+        ALTER TABLE technician_absences
+            ADD CONSTRAINT ex_technician_absences_no_overlap
+            EXCLUDE USING gist (
+                technician_id WITH =,
+                tstzrange(starts_at, ends_at, '[)') WITH &&
+            ) WHERE (cancelled_at IS NULL);
+    END IF;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $do$;
 
 CREATE OR REPLACE TRIGGER trg_no_delete_technician_absences
     BEFORE DELETE ON technician_absences

@@ -33,6 +33,13 @@ interface TechnicianAbsenceRepositoryInterface
 
     public function findActiveAbsenceForTechnician(int $technicianId, ?DateTimeImmutable $referenceTime = null): ?TechnicianAbsence;
 
+    /**
+     * Mapa de técnicos con una ausencia activa en el instante indicado.
+     *
+     * @return array<int, true> technicianId => true
+     */
+    public function findActiveAbsencesMap(DateTimeImmutable $at): array;
+
     public function hasOverlappingAbsence(int $technicianId, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt, ?int $excludeAbsenceId = null): bool;
 
     public function cancel(int $id, int $cancelledBy, string $cancellationReason): bool;

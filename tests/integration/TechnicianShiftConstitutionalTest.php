@@ -24,6 +24,7 @@ use VendGuard\Application\Service\AuthService;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SeedRunner;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Routing\AppRouter;
@@ -61,6 +62,9 @@ try {
     $tech1 = $userRepo->findByEmail('jordi.ruta@vendguard.internal');
     $techRows = $pdo->query("SELECT id FROM users WHERE role = 'TECHNICIAN' AND id != {$tech1->getId()} AND deleted_at IS NULL LIMIT 1")->fetchAll(PDO::FETCH_COLUMN);
     $tech2Id = (int)$techRows[0];
+
+    // RF-05.5: el receptor manual debe estar en turno para recibir el relevo.
+    (new PdoTechnicianShiftRepository($pdo))->startShift($tech2Id);
 
     $location = $locationRepo->findBySiteCode('SEDE-BCN-01');
     $siteToken = $authService->generateSiteToken($location);

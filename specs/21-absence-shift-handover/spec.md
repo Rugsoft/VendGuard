@@ -145,6 +145,8 @@ Durante la sesión de definición y la auditoría exhaustiva de QA, el Product O
   * Detección de solapamiento con ausencias activas no canceladas del mismo técnico: `409 CONFLICT` con `ABSENCE_OVERLAP`. Los rangos son semiabiertos: dos ausencias que solo comparten el instante límite no se solapan.
 * **RF-01.3 (Cancelación Lógica):** `DELETE /api/coordinator/absences/{id}` registra `cancelled_at = CURRENT_TIMESTAMP`, `cancelled_by = :auth_user_id` y `cancellation_reason` obligatoria ($\ge 5$ caracteres). Prohibido el borrado físico (Art. III.1). Una segunda cancelación responde `409 CONFLICT` con `ABSENCE_ALREADY_CANCELLED` y no vuelve a auditar.
 * **RF-01.4 (Listado y Filtros):** `GET /api/coordinator/technicians/absences` con filtros por `technician_id`, rango de fechas y estado (`active`, `future`, `cancelled`, `all`).
+* **RF-01.5 (Integridad de Solapamiento en Base de Datos):** el no-solapamiento de ausencias vivas del mismo técnico se garantiza con la constraint de exclusión `ex_technician_absences_no_overlap` sobre `tstzrange(starts_at, ends_at, '[)')`, con predicado parcial `cancelled_at IS NULL` (migración `014`). La comprobación previa del servicio solo mejora el mensaje; la base de datos es la última autoridad y rechaza cualquier escritura que no pase por el servicio. Una violación de exclusión (`SQLSTATE 23P01`) se traduce a `409 ABSENCE_OVERLAP`, nunca al mensaje del motor.
+* **RF-01.6 (Atomicidad de Ausencias):** el alta y la cancelación escriben su fila y su evento de auditoría en la misma transacción. Si la auditoría falla, la operación completa se deshace (`Art. III.3`). En el alta, el técnico se bloquea con `FOR UPDATE` antes de comprobar el solapamiento; la lista de averías afectadas se calcula después del `COMMIT` y su fallo no invalida un alta ya confirmada.
 
 ### RF-02 · Asistente de Reasignación en Alta de Ausencia
 
@@ -160,6 +162,7 @@ Durante la sesión de definición y la auditoría exhaustiva de QA, el Product O
 * **RF-03.3 (Pausa de Comida):** `POST /api/technician/shift/pause-meal` transiciona de `ON_SHIFT` a `MEAL_BREAK`, marcando `meal_break_started_at = CURRENT_TIMESTAMP`. Precondición: debe estar en `ON_SHIFT`. Sin turno abierto: `409 NO_OPEN_SHIFT`; ya en pausa: `422 SHIFT_ALREADY_PAUSED`.
 * **RF-03.4 (Reanudación de Turno):** `POST /api/technician/shift/resume` transiciona de `MEAL_BREAK` a `ON_SHIFT`, marcando `meal_break_ended_at = CURRENT_TIMESTAMP`. Precondición: debe estar en `MEAL_BREAK`. Sin turno abierto: `409 NO_OPEN_SHIFT`; sin pausa previa: `422 SHIFT_NOT_IN_MEAL_BREAK`.
 * **RF-03.5 (Cierre Directo desde Pausa):** Se permite ejecutar el cierre de turno (`close-handover`) directamente desde `MEAL_BREAK` sin obligar a reanudar previamente (R10).
+* **RF-03.6 (Atomicidad del Turno):** inicio, pausa de comida y reanudación escriben el turno y su evento de auditoría en la misma transacción, con la fila del técnico bloqueada con `FOR UPDATE` en el inicio. Un fallo de auditoría no deja un turno abierto sin traza (`Art. III.3`). Los errores inesperados de estos endpoints responden `500` con un código genérico (`SHIFT_START_FAILED`, `SHIFT_PAUSE_FAILED`, `SHIFT_RESUME_FAILED`) y un mensaje sin detalles internos; el `Throwable` original solo se registra en el log del servidor.
 
 ### RF-04 · Guardia contra Intervenciones en Curso (`IN_PROGRESS`)
 
@@ -180,6 +183,8 @@ Durante la sesión de definición y la auditoría exhaustiva de QA, el Product O
   2. Inserción de nota interna (`is_internal = TRUE`, Art. V.4) en cada ticket con el texto del traspaso.
   3. Cierre del turno del técnico saliente a `OFF_SHIFT` con `closed_at = CURRENT_TIMESTAMP`.
   4. Encolado de notificación prioritaria en `notification_outbox` hacia el Telegram del técnico receptor con deep linking (R8).
+* **RF-05.5 (Disponibilidad del Receptor):** el receptor manual de un traspaso debe estar activo, tener rol `TECHNICIAN` y estar en `ON_SHIFT` o, sin turno abierto, ser guardia 24/7 (`is_on_call = TRUE`) y no tener una ausencia activa. La presencia física prevalece sobre una ausencia planificada (R4); una ausencia sin turno, una pausa de comida o un `OFF_SHIFT` sin guardia lo inhabilitan para el traspaso manual. El servidor revalida la disponibilidad y rechaza con `422 TARGET_TECHNICIAN_UNAVAILABLE` y un mensaje genérico. `GET /api/technician/handover-targets` publica `shift_status`, `is_on_call`, `availability`, `availability_label` e `is_available_for_handover`; **nunca** expone el motivo ni las fechas de una ausencia (Art. V.4).
+* **RF-05.6 (Receptor sin Averías):** un `target_technician_id` informado con `incident_ids` vacío no es un traspaso válido: se rechaza con `422 TARGET_WITHOUT_TRANSFERS`. `target_technician_id = null` con `incident_ids` no vacío se rechaza con `422 TARGET_TECHNICIAN_REQUIRED`. Ambos vacíos son un cierre sin relevo válido.
 
 ### RF-06 · Cierre sin Relevo y Protocolo Sanitario de Frío (Art. II)
 
@@ -191,6 +196,8 @@ Durante la sesión de definición y la auditoría exhaustiva de QA, el Product O
     * **Nivel 1 (Traspaso a Guardia 24/7):** Si existe un técnico con `is_on_call = TRUE`, la avería perecedera se le traspasa automáticamente con nota interna del sistema y alerta urgente a su Telegram.
     * **Nivel 2 (Alarma Roja a Coordinación):** Si no hay ningún técnico de guardia en el sistema, la avería se desasigna a `REGISTERED` y se emite un aviso crítico al canal de emergencias de Coordinación: *"🚨 ALERTA ART. II: Máquina de perecederos desatendida por fin de turno sin guardia disponible"*.
     * El técnico saliente puede cerrar su turno viendo en pantalla la confirmación del traspaso a guardia o derivación a emergencias.
+* **RF-06.3 (Guardia Sanitaria Disponible):** el Nivel 1 solo considera guardias activos que, en el instante del cierre, no estén en pausa de comida y no tengan una ausencia activa sin turno. Un guardia en `ON_SHIFT` con ausencia planificada sigue siendo elegible (R4); un guardia en `OFF_SHIFT` sin ausencia sigue siendo elegible por su condición 24/7 (R6). Se excluye al técnico saliente para impedir el auto-traspaso y se prefiere a los guardias en turno. Si no hay ninguno disponible, se aplica el Nivel 2 y la auditoría registra `fallback_reason = 'NO_AVAILABLE_ON_CALL_TECHNICIAN'`.
+* **RF-06.4 (Cierre sin Relevo Explícito):** el modal móvil abre en modo `CLOSE_ONLY` («Cerrar sin relevo») y ninguna avería queda seleccionada por defecto; el modo `TRANSFER` exige seleccionar al menos una avería de forma explícita, elegir un receptor disponible y una nota de al menos 10 caracteres. El cierre sin relevo envía `target_technician_id: null`, `incident_ids: []` y un `close_reason` propio.
 
 ### RF-07 · Cierre Forzado por Coordinación
 
@@ -341,7 +348,8 @@ CREATE OR REPLACE TRIGGER trg_touch_technician_shifts
 * `POST /api/technician/shift/start`: Inicio de jornada (idempotente; admite override con auditoría si hay ausencia activa, R4).
 * `POST /api/technician/shift/pause-meal`: Pasa de `ON_SHIFT` a `MEAL_BREAK`.
 * `POST /api/technician/shift/resume`: Reanuda de `MEAL_BREAK` a `ON_SHIFT`.
-* `POST /api/technician/shift/close-handover`: Cierre de turno y traspaso opcional de averías (`ASSIGNED`, `PENDING_PARTS`, `PENDING_INFO`). Admite cierre directo desde comida (R10), dispara notificación de Telegram al receptor (R8) y aplica protocolo sanitario para perecederos si no hay relevo (R1).
+* `POST /api/technician/shift/close-handover`: Cierre de turno y traspaso opcional de averías (`ASSIGNED`, `PENDING_PARTS`, `PENDING_INFO`). Admite cierre directo desde comida (R10), dispara notificación de Telegram al receptor (R8) y aplica protocolo sanitario para perecederos si no hay relevo (R1). Rechaza un receptor no disponible (`422 TARGET_TECHNICIAN_UNAVAILABLE`) y un receptor sin averías (`422 TARGET_WITHOUT_TRANSFERS`).
+* `GET /api/technician/handover-targets`: Compañeros activos con `shift_status`, `is_on_call`, `availability`, `availability_label` e `is_available_for_handover`. Ordena disponibles primero y no publica motivos ni fechas de ausencia (Art. V.4).
 
 ---
 
@@ -351,8 +359,9 @@ CREATE OR REPLACE TRIGGER trg_touch_technician_shifts
   * Widget superior de turno: punto pulsante 🟢 `En Turno`, 🟡 `Pausa Comida` o ⚫ `Fuera de Turno`. Botones rápidos correspondientes.
   * Modal táctil de cierre de turno:
     * Si hay averías `IN_PROGRESS`: Alerta roja bloqueante.
-    * Si hay averías transferibles: Selector de compañero relevo o casilla *"Cerrar sin relevo (retener para mañana)"*.
-    * Si hay averías perecederas y no se selecciona relevo: Banner azul informativo indicando que el ticket se transfiere a la guardia sanitaria (Art. II).
+    * Abre por defecto en modo **«Cerrar sin relevo»**, con ninguna avería seleccionada. El texto advierte de que las ordinarias se retienen y las perecederas siguen el protocolo sanitario (Art. II).
+    * El modo **«Traspasar averías»** es una acción explícita: muestra la lista con todas las casillas desmarcadas, un botón *«Seleccionar todas»*, el receptor con su disponibilidad (`Disponible`, `Guardia 24/7 · solo perecederas`, `Fuera de turno`, `Pausa comida`, `No disponible`) y deshabilita los no disponibles.
+    * El botón de confirmación cambia entre «Confirmar cierre sin relevo» y «Traspasar N avería(s) a {nombre}». La lista de compañeros solo se carga al entrar en modo traspaso.
 * **Panel de Coordinación (`CoordinatorDashboardView.js`):**
   * Pestaña Equipo: Indicador en tiempo real del estado de turno de cada técnico y botón contextual `[Forzar Cierre de Turno]`.
   * Sub-pestaña de Ausencias: Calendario y tabla con botón `[+ Registrar Ausencia]`. Al crear, modal con lista de tickets afectados y recomendación asistida en dos toques.
@@ -371,8 +380,12 @@ Para certificar el Módulo 21, se implementarán y superarán las siguientes sui
 2. **Pruebas de Integración HTTP y Base de Datos:**
    * `CoordinatorAbsenceApiTest`: CRUD de ausencias, detección de solapamiento (`409`), cancelación auditada y sugerencias de reasignación.
    * `TechnicianShiftApiTest`: Flujo completo de turno móvil, pausa de comida y cierre con traspaso atómico de averías (`ASSIGNED`, `PENDING_PARTS`, `PENDING_INFO`).
-   * `ShiftHandoverSanitaryTest`: Protocolo fail-safe Art. II (traspaso a guardia de frío o desasignación a `REGISTERED` con alerta).
+   * `ShiftHandoverSanitaryTest`: Protocolo fail-safe Art. II (traspaso a guardia de frío o desasignación a `REGISTERED` con alerta), elección de guardia disponible y fallback auditado cuando todos están ausentes o en pausa.
+   * `TechnicianShiftControllerErrorTest`: contrato genérico `500` sin fuga de SQL ni detalles internos en `start`, `pause-meal` y `resume`.
    * `ShiftHandoverConcurrencyTest`: Verificación de `409 CONFLICT` ante colisiones concurrentes en el traspaso.
+   * `TechnicianAbsenceConcurrencyTest`: dos altas simultáneas sobre el mismo técnico; una gana y la otra recibe `ABSENCE_OVERLAP` sin insertar.
+   * `TechnicianAbsenceAtomicityTest` y `ShiftLifecycleAtomicityTest`: un fallo de auditoría deshace la escritura de ausencia, cancelación, inicio, pausa o reanudación.
+   * `NotificationOutboxFactoryPdoTest`: el encolador construido con un `PDO` inyectado escribe en esa conexión y respeta su `rollBack()`.
    * `CoordinatorForceCloseShiftTest`: Cierre administrativo forzado y auditoría en `audit_log`.
 3. **Pruebas Constitucionales y de Regresión:**
    * Verificación de que las notas de traspaso nacen con `is_internal = TRUE` y son inaccesibles desde `LocationPortalController` (Art. V.4).

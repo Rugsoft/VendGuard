@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace VendGuard\Infrastructure\Notification;
 
 use PDO;
+use VendGuard\Application\Service\HandoverTargetService;
 use VendGuard\Application\Service\NotificationOutboxEnqueuerService;
 use VendGuard\Application\Service\ShiftHandoverService;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 
@@ -32,16 +34,19 @@ final class ShiftHandoverServiceFactory
     ): ShiftHandoverService {
         $pdo ??= ConnectionFactory::getConnection();
         $users = new PdoUserRepository($pdo);
+        $shifts = new PdoTechnicianShiftRepository($pdo);
+        $absences = new PdoTechnicianAbsenceRepository($pdo);
 
         return new ShiftHandoverService(
             pdo: $pdo,
-            shiftRepo: new PdoTechnicianShiftRepository($pdo),
+            shiftRepo: $shifts,
             userRepo: $users,
             incidentRepo: new PdoIncidentRepository($pdo),
             machineRepo: new PdoMachineRepository($pdo),
             onCallRepo: $users,
             auditRepo: new PdoAuditLogRepository($pdo),
-            notifications: $notifications ?? NotificationOutboxEnqueuerFactory::create()
+            handoverTargets: new HandoverTargetService($users, $shifts, $absences),
+            notifications: $notifications ?? NotificationOutboxEnqueuerFactory::create($pdo)
         );
     }
 }

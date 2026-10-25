@@ -15,6 +15,9 @@ declare(strict_types=1);
  *      - Rango de fechas: `ends_at >= starts_at` (`chk_tech_absences_dates`).
  *      - Motivo cerrado: (`chk_tech_absences_reason`).
  *      - Cancelación coherente: (`chk_tech_absences_cancellation`).
+ *      - No-solapamiento en base de datos: `ex_technician_absences_no_overlap`
+ *        (migración `014`), semántica `[starts_at, ends_at)` y predicado parcial
+ *        que libera el rango al cancelar.
  *   3. **Turnos:**
  *      - Unicidad de turno activo por técnico: `uq_tech_shifts_single_active` (R3).
  *      - Turno partido: múltiples turnos cerrados admitidos para el mismo técnico.
@@ -75,16 +78,17 @@ try {
     // ──────────────────────────────────────────────────────────────────────
     // Escenario: el esquema del repositorio en un esquema aislado
     // ──────────────────────────────────────────────────────────────────────
-    echo "\n--- Escenario (DDL base + migraciones 012 y 013 en un esquema aislado) ---\n";
+    echo "\n--- Escenario (DDL base + migraciones 012, 013 y 014 en un esquema aislado) ---\n";
 
     PostgresFixtureBuilder::createIsolationSchema($pgPdo, ABSENCE_SHIFT_TEST_SCHEMA);
     $schemaReport = PostgresFixtureBuilder::applyRepositorySchema($pgPdo, $projectRoot);
     $convergence = (new PostgresMigrationRunner($pgPdo))->convergenceReport();
 
     $assert(
-        'El DDL base y las migraciones 012 y 013 aplican sin errores y el esquema converge',
+        'El DDL base y las migraciones 012, 013 y 014 aplican sin errores y el esquema converge',
         in_array('012_technician_absences_and_shifts.sql', $schemaReport['migrations'], true)
             && in_array('013_shift_handover_notification.sql', $schemaReport['migrations'], true)
+            && in_array('014_technician_absence_exclusion.sql', $schemaReport['migrations'], true)
             && $convergence['converged'] === true,
         sprintf(
             '%d sentencias · migraciones: %s',
@@ -142,6 +146,55 @@ try {
 
     $assert('Se admite una ausencia con motivo VACATION y fechas válidas', $absenceId > 0, "id={$absenceId}");
 
+    // La constraint de exclusión de la migración 014 existe en el catálogo.
+    $exclusion = $pgPdo->query(
+        "SELECT conname, contype, pg_get_constraintdef(oid) AS definition
+           FROM pg_constraint
+          WHERE conname = 'ex_technician_absences_no_overlap'
+            AND conrelid = 'technician_absences'::regclass"
+    )->fetch(PDO::FETCH_ASSOC);
+    $assert(
+        'La constraint ex_technician_absences_no_overlap existe y es de exclusión',
+        is_array($exclusion)
+            && $exclusion['contype'] === 'x'
+            && str_contains((string)$exclusion['definition'], 'tstzrange(starts_at, ends_at'),
+        is_array($exclusion) ? (string)$exclusion['definition'] : 'constraint ausente'
+    );
+
+    // Solapamiento directo por SQL: el motor lo rechaza con 23P01.
+    $rejOverlap = PostgresFixtureBuilder::expectRejection(static function () use ($pgPdo, $technicianId, $coordinatorId): void {
+        $stmt = $pgPdo->prepare("INSERT INTO technician_absences
+            (technician_id, reason, starts_at, ends_at, created_by)
+            VALUES (:tech_id, 'TRAINING', '2026-11-10 00:00:00+00', '2026-11-20 00:00:00+00', :creator)");
+        $stmt->execute([':tech_id' => $technicianId, ':creator' => $coordinatorId]);
+    });
+    $assert(
+        'Un solapamiento directo se rechaza con 23P01 por ex_technician_absences_no_overlap',
+        $rejOverlap !== null && $rejOverlap['state'] === '23P01',
+        'estado=' . ($rejOverlap['state'] ?? 'null')
+    );
+
+    // Rangos contiguos: comparten el instante límite y conviven por la semántica [).
+    $stmtMorning = $pgPdo->prepare("INSERT INTO technician_absences
+        (technician_id, reason, starts_at, ends_at, created_by)
+        VALUES (:tech_id, 'TRAINING', '2026-12-01 09:00:00+00', '2026-12-01 13:00:00+00', :creator)
+        RETURNING id");
+    $stmtMorning->execute([':tech_id' => $technicianId, ':creator' => $coordinatorId]);
+    $morningId = (int)$stmtMorning->fetchColumn();
+
+    $stmtAfternoon = $pgPdo->prepare("INSERT INTO technician_absences
+        (technician_id, reason, starts_at, ends_at, created_by)
+        VALUES (:tech_id, 'TRAINING', '2026-12-01 13:00:00+00', '2026-12-01 17:00:00+00', :creator)
+        RETURNING id");
+    $stmtAfternoon->execute([':tech_id' => $technicianId, ':creator' => $coordinatorId]);
+    $afternoonId = (int)$stmtAfternoon->fetchColumn();
+
+    $assert(
+        'Dos ausencias contiguas [09:00,13:00) y [13:00,17:00) conviven sin rechazo',
+        $morningId > 0 && $afternoonId > 0,
+        "ids={$morningId},{$afternoonId}"
+    );
+
     // Rechazo de ends_at < starts_at
     $rejDates = PostgresFixtureBuilder::expectRejection(static function () use ($pgPdo, $technicianId, $coordinatorId): void {
         $stmt = $pgPdo->prepare("INSERT INTO technician_absences
@@ -187,6 +240,19 @@ try {
         WHERE id = :id");
     $stmtCancel->execute([':canceller' => $coordinatorId, ':id' => $absenceId]);
     $assert('Se admite la cancelación lógica coherente con motivo >= 5 chars', $stmtCancel->rowCount() === 1);
+
+    // El predicado parcial libera el rango cancelado sin borrar la fila.
+    $stmtReuse = $pgPdo->prepare("INSERT INTO technician_absences
+        (technician_id, reason, starts_at, ends_at, created_by)
+        VALUES (:tech_id, 'SICK_LEAVE', '2026-11-01 00:00:00+00', '2026-11-15 23:59:59+00', :creator)
+        RETURNING id");
+    $stmtReuse->execute([':tech_id' => $technicianId, ':creator' => $coordinatorId]);
+    $reusedId = (int)$stmtReuse->fetchColumn();
+    $assert(
+        'Tras cancelar, el mismo rango puede volver a registrarse sin borrar la ausencia original',
+        $reusedId > 0 && $reusedId !== $absenceId,
+        "id={$reusedId}"
+    );
 
     // Inmutabilidad: DELETE físico rechazado con 45000
     $rejDelAbsence = PostgresFixtureBuilder::expectRejection(static function () use ($pgPdo, $absenceId): void {

@@ -6,13 +6,17 @@ namespace VendGuard\Presentation\Controller;
 
 use PDO;
 use Throwable;
+use VendGuard\Application\Service\HandoverTargetService;
 use VendGuard\Application\Service\ShiftHandoverService;
 use VendGuard\Application\Service\ShiftLifecycleService;
 use VendGuard\Core\Domain\Exception\ActiveIncidentInProgressException;
 use VendGuard\Core\Domain\Exception\InvalidShiftTransitionException;
 use VendGuard\Core\Domain\Exception\JustificationTooShortException;
+use VendGuard\Core\Domain\Exception\UserNotFoundException;
+use VendGuard\Core\Domain\Repository\TechnicianLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Notification\ShiftHandoverServiceFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
@@ -34,21 +38,35 @@ final class TechnicianShiftController
 
     private UserRepositoryInterface $userRepo;
 
+    private HandoverTargetService $handoverTargetService;
+
     public function __construct(
         ?ShiftLifecycleService $lifecycleService = null,
         ?ShiftHandoverService $handoverService = null,
         ?PDO $pdo = null,
-        ?UserRepositoryInterface $userRepo = null
+        ?UserRepositoryInterface $userRepo = null,
+        ?HandoverTargetService $handoverTargetService = null
     ) {
         $pdo ??= ConnectionFactory::getConnection();
         $this->userRepo = $userRepo ?? new PdoUserRepository($pdo);
 
+        $shifts = new PdoTechnicianShiftRepository($pdo);
+        $absences = new PdoTechnicianAbsenceRepository($pdo);
+        $lockRepo = $this->userRepo instanceof TechnicianLockRepositoryInterface
+            ? $this->userRepo
+            : new PdoUserRepository($pdo);
+
         $this->lifecycleService = $lifecycleService ?? new ShiftLifecycleService(
-            new PdoTechnicianShiftRepository($pdo),
-            new PdoTechnicianAbsenceRepository($pdo),
+            $shifts,
+            $absences,
             $this->userRepo,
-            new PdoAuditLogRepository($pdo)
+            new PdoAuditLogRepository($pdo),
+            new PdoTransactionManager($pdo),
+            $lockRepo
         );
+
+        $this->handoverTargetService = $handoverTargetService
+            ?? new HandoverTargetService($this->userRepo, $shifts, $absences);
 
         $this->handoverService = $handoverService ?? ShiftHandoverServiceFactory::create($pdo);
     }
@@ -66,8 +84,13 @@ final class TechnicianShiftController
         try {
             $dto = $this->lifecycleService->startShift($technicianId);
             return Response::json($dto->toArray(), 200, 'Turno iniciado correctamente.');
+        } catch (UserNotFoundException $e) {
+            return Response::error('TECHNICIAN_NOT_FOUND', $e->getMessage(), 404);
+        } catch (InvalidShiftTransitionException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
         } catch (Throwable $e) {
-            return Response::error('SHIFT_START_FAILED', $e->getMessage(), 422);
+            error_log('[vendguard] Fallo al iniciar turno: ' . $e);
+            return Response::error('SHIFT_START_FAILED', 'No se pudo iniciar el turno.', 500);
         }
     }
 
@@ -77,10 +100,13 @@ final class TechnicianShiftController
         try {
             $dto = $this->lifecycleService->pauseMeal($technicianId);
             return Response::json($dto->toArray(), 200, 'Pausa para comida iniciada.');
+        } catch (UserNotFoundException $e) {
+            return Response::error('TECHNICIAN_NOT_FOUND', $e->getMessage(), 404);
         } catch (InvalidShiftTransitionException $e) {
             return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
         } catch (Throwable $e) {
-            return Response::error('SHIFT_PAUSE_FAILED', $e->getMessage(), 422);
+            error_log('[vendguard] Fallo al pausar turno: ' . $e);
+            return Response::error('SHIFT_PAUSE_FAILED', 'No se pudo pausar el turno.', 500);
         }
     }
 
@@ -90,10 +116,13 @@ final class TechnicianShiftController
         try {
             $dto = $this->lifecycleService->resumeShift($technicianId);
             return Response::json($dto->toArray(), 200, 'Turno reanudado correctamente.');
+        } catch (UserNotFoundException $e) {
+            return Response::error('TECHNICIAN_NOT_FOUND', $e->getMessage(), 404);
         } catch (InvalidShiftTransitionException $e) {
             return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
         } catch (Throwable $e) {
-            return Response::error('SHIFT_RESUME_FAILED', $e->getMessage(), 422);
+            error_log('[vendguard] Fallo al reanudar turno: ' . $e);
+            return Response::error('SHIFT_RESUME_FAILED', 'No se pudo reanudar el turno.', 500);
         }
     }
 
@@ -107,22 +136,13 @@ final class TechnicianShiftController
     public function handoverTargets(Request $request): Response
     {
         $currentId = (int)($request->getAttribute('user_id') ?? 0);
-        $targets = [];
 
-        foreach ($this->userRepo->findAllTechnicians(true) as $technician) {
-            $id = (int)$technician->getId();
-            if ($id === $currentId) {
-                continue;
-            }
-
-            $targets[] = [
-                'id' => $id,
-                'name' => $technician->getName(),
-                'is_active' => true,
-            ];
+        try {
+            return Response::json($this->handoverTargetService->listFor($currentId), 200);
+        } catch (Throwable $exception) {
+            error_log('[vendguard] Fallo al listar receptores de relevo: ' . $exception);
+            return Response::error('INTERNAL_SERVER_ERROR', 'No se pudieron cargar los compañeros disponibles.', 500);
         }
-
-        return Response::json($targets, 200);
     }
 
     public function closeAndHandover(Request $request): Response

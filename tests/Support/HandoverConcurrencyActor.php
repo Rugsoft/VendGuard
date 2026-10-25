@@ -16,7 +16,7 @@ declare(strict_types=1);
  *   4. Reasigna la incidencia a otro técnico y confirma.
  *
  * Uso interno (lo invoca `tests/integration/ShiftHandoverConcurrencyTest.php`):
- *   php HandoverConcurrencyActor.php <incidentId> <toTechId> <parentPid> <readyFile> <statusFile>
+ *   php HandoverConcurrencyActor.php <incidentId> <toTechId> <parentApplicationName> <readyFile> <statusFile>
  */
 
 require_once __DIR__ . '/../bootstrap.php';
@@ -26,13 +26,13 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 
 if ($argc < 6) {
-    fwrite(STDERR, "Uso: php HandoverConcurrencyActor.php <incidentId> <toTechId> <parentPid> <readyFile> <statusFile>\n");
+    fwrite(STDERR, "Uso: php HandoverConcurrencyActor.php <incidentId> <toTechId> <parentApplicationName> <readyFile> <statusFile>\n");
     exit(2);
 }
 
 $incidentId = (int)$argv[1];
 $toTechnicianId = (int)$argv[2];
-$parentPid = (int)$argv[3];
+$parentApplicationName = (string)$argv[3];
 $readyFile = (string)$argv[4];
 $statusFile = (string)$argv[5];
 
@@ -61,14 +61,17 @@ try {
     while (microtime(true) < $deadline) {
         // `pg_locks` representa la espera de una fila como un lock de
         // transacción y `pg_stat_activity.query` conserva el último comando
-        // simple, no la sentencia extendida que está esperando. El PID del
-        // proceso del relevo es la señal inequívoca: si está en `wait_event_type
-        // = 'Lock'`, su `FOR UPDATE` está bloqueado por este actor.
+        // simple, no la sentencia extendida que está esperando. La
+        // `application_name` de la sesión del relevo es la señal inequívoca:
+        // `pg_stat_activity.pid` es el backend del servidor, no el PID del
+        // proceso cliente. Si la sesión está en `wait_event_type = 'Lock'`, su
+        // `FOR UPDATE` está bloqueado por este actor.
         $waitingStmt = $pdo->prepare(
             "SELECT COUNT(*) FROM pg_stat_activity
-              WHERE pid = :pid AND wait_event_type = 'Lock'"
+              WHERE application_name = :application_name
+                AND wait_event_type = 'Lock'"
         );
-        $waitingStmt->execute([':pid' => $parentPid]);
+        $waitingStmt->execute([':application_name' => $parentApplicationName]);
         $waiting = (int)$waitingStmt->fetchColumn();
 
         if ($waiting > 0) {

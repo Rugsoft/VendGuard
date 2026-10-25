@@ -13,6 +13,7 @@ use VendGuard\Core\Domain\Exception\InvalidShiftTransitionException;
 use VendGuard\Core\Domain\Exception\JustificationTooShortException;
 use VendGuard\Core\Domain\Exception\UserNotFoundException;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Notification\ShiftHandoverServiceFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
@@ -48,11 +49,14 @@ final class CoordinatorShiftController
         if ($service !== null) {
             $this->service = $service;
         } else {
+            $users = new PdoUserRepository($pdo);
             $this->service = new ShiftLifecycleService(
                 new PdoTechnicianShiftRepository($pdo),
                 new PdoTechnicianAbsenceRepository($pdo),
-                new PdoUserRepository($pdo),
-                new PdoAuditLogRepository($pdo)
+                $users,
+                new PdoAuditLogRepository($pdo),
+                new PdoTransactionManager($pdo),
+                $users
             );
         }
 

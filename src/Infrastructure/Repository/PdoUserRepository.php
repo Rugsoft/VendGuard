@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace VendGuard\Infrastructure\Repository;
 
+use DateTimeImmutable;
 use PDO;
 use RuntimeException;
 use Throwable;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\OnCallTechnicianRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TechnicianLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserLockoutRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -25,7 +27,7 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * —booleano literal (D-3), ventana temporal del periodo de garantía y clave canónica de
  * identidad (D-5)— se le piden al adaptador, que es el punto único de traducción (RF-01.5).
  */
-class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositoryInterface, OnCallTechnicianRepositoryInterface
+class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositoryInterface, OnCallTechnicianRepositoryInterface, TechnicianLockRepositoryInterface
 {
     private PDO $pdo;
 
@@ -444,34 +446,136 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
     /**
      * Técnicos activos con la marca de guardia (RF-03.1 y RF-03.2).
      *
+     * Un guardia en ausencia activa no recibe avisos, salvo que haya iniciado
+     * turno: la presencia física prevalece sobre la ausencia planificada (R4).
+     * La pausa de comida no lo excluye de la bandeja: sigue siendo guardia y
+     * debe poder leer el aviso al reanudar.
+     *
      * @return array<User>
      */
     public function findOnCallTechnicians(): array
     {
         $sql = "
             SELECT
-                id,
-                name,
-                email,
-                password_hash,
-                role,
-                phone,
-                is_active,
-                is_on_call,
-                created_at,
-                updated_at,
-                deleted_at
-            FROM users
-            WHERE role = 'TECHNICIAN'
-              AND is_active = {$this->dialect->booleanLiteral(true)}
-              AND is_on_call = {$this->dialect->booleanLiteral(true)}
-              AND deleted_at IS NULL
-            ORDER BY name ASC
+                u.id,
+                u.name,
+                u.email,
+                u.password_hash,
+                u.role,
+                u.phone,
+                u.is_active,
+                u.is_on_call,
+                u.telegram_chat_id,
+                u.created_at,
+                u.updated_at,
+                u.deleted_at
+            FROM users u
+            WHERE u.role = 'TECHNICIAN'
+              AND u.is_active = {$this->dialect->booleanLiteral(true)}
+              AND u.is_on_call = {$this->dialect->booleanLiteral(true)}
+              AND u.deleted_at IS NULL
+              AND (
+                  NOT EXISTS (
+                      SELECT 1 FROM technician_absences a
+                       WHERE a.technician_id = u.id
+                         AND a.cancelled_at IS NULL
+                         AND a.starts_at <= :now
+                         AND a.ends_at > :now
+                  )
+                  OR EXISTS (
+                      SELECT 1 FROM technician_shifts s
+                       WHERE s.technician_id = u.id
+                         AND s.closed_at IS NULL
+                         AND s.status = 'ON_SHIFT'
+                  )
+              )
+            ORDER BY u.name ASC
         ";
 
-        $rows = $this->pdo->query($sql)->fetchAll();
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([':now' => (new DateTimeImmutable('now'))->format(DateTimeImmutable::ATOM)]);
 
-        return array_map(static fn(array $row): User => User::fromDatabaseRow($row), $rows);
+        return array_map(
+            static fn(array $row): User => User::fromDatabaseRow($row),
+            $stmt->fetchAll()
+        );
+    }
+
+    /**
+     * Guardias que pueden recibir el Nivel 1 sanitario en el instante indicado.
+     *
+     * Excluye ausencias sin turno y pausas de comida. Un guardia en OFF_SHIFT
+     * sin ausencia sigue siendo elegible (R6 / RF-08.5). Ordena primero a los
+     * que están en turno.
+     *
+     * @return array<User>
+     */
+    public function findAvailableOnCallTechnicians(DateTimeImmutable $at, ?int $excludeTechnicianId = null): array
+    {
+        $sql = "
+            SELECT
+                u.id,
+                u.name,
+                u.email,
+                u.password_hash,
+                u.role,
+                u.phone,
+                u.is_active,
+                u.is_on_call,
+                u.telegram_chat_id,
+                u.created_at,
+                u.updated_at,
+                u.deleted_at
+            FROM users u
+            WHERE u.role = 'TECHNICIAN'
+              AND u.is_active = {$this->dialect->booleanLiteral(true)}
+              AND u.is_on_call = {$this->dialect->booleanLiteral(true)}
+              AND u.deleted_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM technician_shifts m
+                   WHERE m.technician_id = u.id
+                     AND m.closed_at IS NULL
+                     AND m.status = 'MEAL_BREAK'
+              )
+              AND (
+                  NOT EXISTS (
+                      SELECT 1 FROM technician_absences a
+                       WHERE a.technician_id = u.id
+                         AND a.cancelled_at IS NULL
+                         AND a.starts_at <= :at
+                         AND a.ends_at > :at
+                  )
+                  OR EXISTS (
+                      SELECT 1 FROM technician_shifts s
+                       WHERE s.technician_id = u.id
+                         AND s.closed_at IS NULL
+                         AND s.status = 'ON_SHIFT'
+                  )
+              )
+        ";
+
+        $params = [':at' => $at->format(DateTimeImmutable::ATOM)];
+        if ($excludeTechnicianId !== null) {
+            $sql .= ' AND u.id <> :exclude_id';
+            $params[':exclude_id'] = $excludeTechnicianId;
+        }
+
+        $sql .= "
+            ORDER BY CASE WHEN EXISTS (
+                SELECT 1 FROM technician_shifts o
+                 WHERE o.technician_id = u.id
+                   AND o.closed_at IS NULL
+                   AND o.status = 'ON_SHIFT'
+            ) THEN 0 ELSE 1 END, u.name ASC
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return array_map(
+            static fn(array $row): User => User::fromDatabaseRow($row),
+            $stmt->fetchAll()
+        );
     }
 
     /**
@@ -481,14 +585,49 @@ class PdoUserRepository implements UserRepositoryInterface, UserLockoutRepositor
     {
         $sql = "
             SELECT COUNT(*) AS total
-            FROM users
-            WHERE role = 'TECHNICIAN'
-              AND is_active = {$this->dialect->booleanLiteral(true)}
-              AND is_on_call = {$this->dialect->booleanLiteral(true)}
-              AND deleted_at IS NULL
+            FROM users u
+            WHERE u.role = 'TECHNICIAN'
+              AND u.is_active = {$this->dialect->booleanLiteral(true)}
+              AND u.is_on_call = {$this->dialect->booleanLiteral(true)}
+              AND u.deleted_at IS NULL
+              AND (
+                  NOT EXISTS (
+                      SELECT 1 FROM technician_absences a
+                       WHERE a.technician_id = u.id
+                         AND a.cancelled_at IS NULL
+                         AND a.starts_at <= :now
+                         AND a.ends_at > :now
+                  )
+                  OR EXISTS (
+                      SELECT 1 FROM technician_shifts s
+                       WHERE s.technician_id = u.id
+                         AND s.closed_at IS NULL
+                         AND s.status = 'ON_SHIFT'
+                  )
+              )
         ";
 
-        return (int)$this->pdo->query($sql)->fetchColumn();
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([':now' => (new DateTimeImmutable('now'))->format(DateTimeImmutable::ATOM)]);
+
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * Bloquea la fila del técnico hasta el final de la transacción actual.
+     */
+    public function lockTechnicianForUpdate(int $technicianId): bool
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT id FROM users
+              WHERE id = :id
+                AND role = 'TECHNICIAN'
+                AND deleted_at IS NULL
+              FOR UPDATE"
+        );
+        $stmt->execute([':id' => $technicianId]);
+
+        return $stmt->fetchColumn() !== false;
     }
 
     /**

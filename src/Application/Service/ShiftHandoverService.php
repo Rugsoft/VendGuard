@@ -60,6 +60,7 @@ final class ShiftHandoverService
         private readonly MachineRepositoryInterface $machineRepo,
         private readonly OnCallTechnicianRepositoryInterface $onCallRepo,
         private readonly AuditLogRepositoryInterface $auditRepo,
+        private readonly HandoverTargetService $handoverTargets,
         private readonly ?NotificationOutboxEnqueuerService $notifications = null
     ) {
     }
@@ -98,16 +99,27 @@ final class ShiftHandoverService
         $targetTech = null;
         $cleanNotes = null;
         $hasTransfers = count($incidentIdsToTransfer) > 0;
+        $hasTarget = $targetTechnicianId !== null;
 
-        if ($hasTransfers || $targetTechnicianId !== null) {
-            if ($targetTechnicianId === null) {
-                throw new InvalidShiftTransitionException(
-                    'Debe indicar un técnico de relevo para traspasar averías.',
-                    'TARGET_TECHNICIAN_REQUIRED',
-                    422
-                );
-            }
+        // Un receptor sin averías no es un traspaso: es un cierre sin relevo
+        // mal formado. Se rechaza antes de tocar la ruta.
+        if ($hasTarget && !$hasTransfers) {
+            throw new InvalidShiftTransitionException(
+                'Debe indicar al menos una avería para traspasar al técnico de relevo.',
+                'TARGET_WITHOUT_TRANSFERS',
+                422
+            );
+        }
 
+        if ($hasTransfers && !$hasTarget) {
+            throw new InvalidShiftTransitionException(
+                'Debe indicar un técnico de relevo para traspasar averías.',
+                'TARGET_TECHNICIAN_REQUIRED',
+                422
+            );
+        }
+
+        if ($hasTarget) {
             if ($targetTechnicianId === $technicianId) {
                 throw new InvalidShiftTransitionException(
                     'El técnico de relevo no puede ser el mismo técnico saliente.',
@@ -125,14 +137,17 @@ final class ShiftHandoverService
                 );
             }
 
-            if ($hasTransfers) {
-                $cleanNotes = trim((string)$handoverNotes);
-                if (mb_strlen($cleanNotes) < self::MIN_HANDOVER_NOTES_LENGTH) {
-                    throw new JustificationTooShortException(
-                        $cleanNotes,
-                        'La nota de traspaso debe tener al menos 10 caracteres.'
-                    );
-                }
+            // El receptor debe estar disponible: ON_SHIFT —la presencia física
+            // gana a una ausencia planificada (R4)— o guardia 24/7 sin ausencia
+            // ni pausa. Un OFF_SHIFT sin guardia no recibe.
+            $this->handoverTargets->assertCanReceiveHandover($targetTechnicianId);
+
+            $cleanNotes = trim((string)$handoverNotes);
+            if (mb_strlen($cleanNotes) < self::MIN_HANDOVER_NOTES_LENGTH) {
+                throw new JustificationTooShortException(
+                    $cleanNotes,
+                    'La nota de traspaso debe tener al menos 10 caracteres.'
+                );
             }
         }
 
@@ -354,7 +369,10 @@ final class ShiftHandoverService
                 }
 
                 if ($onCallList === null) {
-                    $onCallList = $this->onCallRepo->findOnCallTechnicians();
+                    $onCallList = $this->onCallRepo->findAvailableOnCallTechnicians(
+                        new \DateTimeImmutable('now'),
+                        $technicianId
+                    );
                 }
 
                 if ($onCallList !== []) {
@@ -456,6 +474,7 @@ final class ShiftHandoverService
                     metadata: [
                         'ticket_code' => $inc->getTicketCode(),
                         'reason' => 'CRITICAL_NO_ON_CALL_AVAILABLE',
+                        'fallback_reason' => 'NO_AVAILABLE_ON_CALL_TECHNICIAN',
                     ]
                 );
                 $this->auditRepo->log($event);
@@ -478,10 +497,14 @@ final class ShiftHandoverService
             }
 
             // 3. Cierre del turno en technician_shifts.
+            $defaultCloseReason = $targetTechnician === null && $incidentIdsToTransfer === []
+                ? 'Cierre de turno sin relevo'
+                : 'Cierre de turno con relevo';
+
             $closedShift = $this->shiftRepo->closeShift(
                 shiftId: $activeShift->id(),
                 closedBy: $closedBy,
-                closeReason: $closeReason ?? 'Cierre de turno con relevo'
+                closeReason: $closeReason ?? $defaultCloseReason
             );
 
             $event = new AuditEvent(

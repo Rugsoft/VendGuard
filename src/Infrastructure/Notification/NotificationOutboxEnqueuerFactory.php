@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace VendGuard\Infrastructure\Notification;
 
+use PDO;
 use Throwable;
 use VendGuard\Application\Service\NotificationOutboxEnqueuerService;
+use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
@@ -32,31 +34,33 @@ use VendGuard\Infrastructure\Repository\PdoUserRepository;
  */
 final class NotificationOutboxEnqueuerFactory
 {
-    public static function create(): NotificationOutboxEnqueuerService
+    public static function create(?PDO $pdo = null): NotificationOutboxEnqueuerService
     {
-        $incidents = new PdoIncidentRepository();
-        $users = new PdoUserRepository();
+        $pdo ??= ConnectionFactory::getConnection();
+        $incidents = new PdoIncidentRepository($pdo);
+        $users = new PdoUserRepository($pdo);
+        $outbox = new PdoNotificationOutboxRepository($pdo);
 
         return new NotificationOutboxEnqueuerService(
-            outbox: new PdoNotificationOutboxRepository(),
-            settings: new PdoNotificationSettingsRepository(),
-            locations: new PdoLocationRepository(),
+            outbox: $outbox,
+            settings: new PdoNotificationSettingsRepository($pdo, $outbox),
+            locations: new PdoLocationRepository($pdo),
             users: $users,
             onCallTechnicians: $users,
-            machines: new PdoMachineRepository(),
+            machines: new PdoMachineRepository($pdo),
             incidents: $incidents,
             cycles: $incidents,
-            transactions: new PdoTransactionManager()
+            transactions: new PdoTransactionManager($pdo)
         );
     }
 
     /**
      * Variante tolerante para controladores con dobles de prueba sin motor.
      */
-    public static function createOrNull(): ?NotificationOutboxEnqueuerService
+    public static function createOrNull(?PDO $pdo = null): ?NotificationOutboxEnqueuerService
     {
         try {
-            return self::create();
+            return self::create($pdo);
         } catch (Throwable) {
             return null;
         }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VendGuard\Core\Domain\Repository;
 
+use DateTimeImmutable;
 use VendGuard\Core\Domain\Model\User;
 
 /**
@@ -31,6 +32,16 @@ interface OnCallTechnicianRepositoryInterface
      * @return array<User>
      */
     public function findOnCallTechnicians(): array;
+
+    /**
+     * Guardias activos que pueden recibir el Nivel 1 sanitario en el instante
+     * indicado: sin ausencia activa (salvo presencia física ON_SHIFT) y sin
+     * pausa de comida. Un guardia en OFF_SHIFT sin ausencia sigue siendo
+     * elegible para perecederas.
+     *
+     * @return array<User>
+     */
+    public function findAvailableOnCallTechnicians(DateTimeImmutable $at, ?int $excludeTechnicianId = null): array;
 
     /**
      * Número de técnicos activos de guardia para el resumen del panel.

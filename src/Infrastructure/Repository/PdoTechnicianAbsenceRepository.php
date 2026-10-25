@@ -6,6 +6,8 @@ namespace VendGuard\Infrastructure\Repository;
 
 use DateTimeImmutable;
 use PDO;
+use PDOException;
+use VendGuard\Core\Domain\Exception\InvalidAbsenceException;
 use VendGuard\Core\Domain\Model\TechnicianAbsence;
 use VendGuard\Core\Domain\Repository\TechnicianAbsenceRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\AbsenceReason;
@@ -40,14 +42,24 @@ final class PdoTechnicianAbsenceRepository implements TechnicianAbsenceRepositor
             ) RETURNING *'
         );
 
-        $stmt->execute([
-            ':technician_id' => $technicianId,
-            ':reason' => $reason->value,
-            ':starts_at' => $startsAt->format(DateTimeImmutable::ATOM),
-            ':ends_at' => $endsAt->format(DateTimeImmutable::ATOM),
-            ':notes' => $notes !== null && trim($notes) !== '' ? trim($notes) : null,
-            ':created_by' => $createdBy,
-        ]);
+        try {
+            $stmt->execute([
+                ':technician_id' => $technicianId,
+                ':reason' => $reason->value,
+                ':starts_at' => $startsAt->format(DateTimeImmutable::ATOM),
+                ':ends_at' => $endsAt->format(DateTimeImmutable::ATOM),
+                ':notes' => $notes !== null && trim($notes) !== '' ? trim($notes) : null,
+                ':created_by' => $createdBy,
+            ]);
+        } catch (PDOException $exception) {
+            // La constraint de exclusión es la última autoridad frente a dos
+            // altas concurrentes. El mensaje del motor no se propaga al cliente.
+            if ($exception->getCode() === '23P01' || (string)($exception->errorInfo[0] ?? '') === '23P01') {
+                throw InvalidAbsenceException::overlap();
+            }
+
+            throw $exception;
+        }
 
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row)) {
@@ -87,7 +99,7 @@ final class PdoTechnicianAbsenceRepository implements TechnicianAbsenceRepositor
 
         match ($status) {
             'active' => (function () use (&$where, &$params, $nowIso) {
-                $where[] = 'cancelled_at IS NULL AND :now BETWEEN starts_at AND ends_at';
+                $where[] = 'cancelled_at IS NULL AND starts_at <= :now AND ends_at > :now';
                 $params[':now'] = $nowIso;
             })(),
             'future' => (function () use (&$where, &$params, $nowIso) {
@@ -125,7 +137,8 @@ final class PdoTechnicianAbsenceRepository implements TechnicianAbsenceRepositor
             'SELECT * FROM technician_absences
               WHERE technician_id = :technician_id
                 AND cancelled_at IS NULL
-                AND :ref_time BETWEEN starts_at AND ends_at
+                AND starts_at <= :ref_time
+                AND ends_at > :ref_time
               ORDER BY id DESC
               LIMIT 1'
         );
@@ -141,6 +154,27 @@ final class PdoTechnicianAbsenceRepository implements TechnicianAbsenceRepositor
         }
 
         return TechnicianAbsence::fromDatabaseRow($row);
+    }
+
+    /**
+     * @return array<int, true>
+     */
+    public function findActiveAbsencesMap(DateTimeImmutable $at): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT technician_id FROM technician_absences
+              WHERE cancelled_at IS NULL
+                AND starts_at <= :at
+                AND ends_at > :at'
+        );
+        $stmt->execute([':at' => $at->format(DateTimeImmutable::ATOM)]);
+
+        $map = [];
+        while (($technicianId = $stmt->fetchColumn()) !== false) {
+            $map[(int)$technicianId] = true;
+        }
+
+        return $map;
     }
 
     public function hasOverlappingAbsence(

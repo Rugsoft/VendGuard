@@ -15,6 +15,8 @@ use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianAbsenceRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TechnicianLockRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\AbsenceReason;
 
@@ -39,6 +41,8 @@ final class TechnicianAbsenceService
         private readonly UserRepositoryInterface $userRepo,
         private readonly IncidentRepositoryInterface $incidentRepo,
         private readonly AuditLogRepositoryInterface $auditRepo,
+        private readonly TransactionManagerInterface $transactions,
+        private readonly TechnicianLockRepositoryInterface $lockRepo,
         private readonly ?SuggestedTechniciansService $suggestions = null
     ) {
     }
@@ -93,44 +97,70 @@ final class TechnicianAbsenceService
             );
         }
 
-        if ($this->absenceRepo->hasOverlappingAbsence($technicianId, $starts, $ends)) {
-            throw InvalidAbsenceException::overlap();
-        }
-
-        $absence = $this->absenceRepo->create(
-            technicianId: $technicianId,
-            reason: $reasonEnum,
-            startsAt: $starts,
-            endsAt: $ends,
-            notes: $cleanNotes,
-            createdBy: $createdBy
-        );
-
-        // Registro inmutable de auditoría (Art. III.3)
-        $event = new AuditEvent(
-            id: null,
-            entityType: AuditEvent::ENTITY_USER,
-            entityId: $technicianId,
-            action: 'CREATE_TECHNICIAN_ABSENCE',
-            userId: $createdBy,
-            userRole: $creator?->getRole()->value ?? 'COORDINATOR',
-            userName: $creator?->getName() ?? 'Coordinador',
-            previousState: null,
-            newState: $absence->toArray(),
-            metadata: [
-                'technician_name' => $tech->getName(),
-                'reason' => $reasonEnum->value,
-                'starts_at' => $starts->format(DateTimeImmutable::ATOM),
-                'ends_at' => $ends->format(DateTimeImmutable::ATOM),
-            ]
-        );
-        $this->auditRepo->log($event);
-
-        // Identificación de tickets activos afectados para reasignación asistida (RF-02)
-        $activeIncidents = $this->incidentRepo->findAssignedToTechnician(
+        // El alta es una unidad de trabajo: el cerrojo por técnico serializa la
+        // comprobación de solapamiento, el INSERT y la auditoría (Art. III.3).
+        // La constraint de exclusión sigue siendo la última autoridad.
+        $absence = $this->transactions->runInTransaction(function () use (
             $technicianId,
-            ['ASSIGNED', 'PENDING_PARTS', 'PENDING_INFO']
-        );
+            $reasonEnum,
+            $starts,
+            $ends,
+            $cleanNotes,
+            $createdBy,
+            $tech,
+            $creator
+        ): TechnicianAbsence {
+            if (!$this->lockRepo->lockTechnicianForUpdate($technicianId)) {
+                throw new UserNotFoundException($technicianId, "No se encontró el técnico con ID {$technicianId}.");
+            }
+
+            if ($this->absenceRepo->hasOverlappingAbsence($technicianId, $starts, $ends)) {
+                throw InvalidAbsenceException::overlap();
+            }
+
+            $absence = $this->absenceRepo->create(
+                technicianId: $technicianId,
+                reason: $reasonEnum,
+                startsAt: $starts,
+                endsAt: $ends,
+                notes: $cleanNotes,
+                createdBy: $createdBy
+            );
+
+            $event = new AuditEvent(
+                id: null,
+                entityType: AuditEvent::ENTITY_USER,
+                entityId: $technicianId,
+                action: 'CREATE_TECHNICIAN_ABSENCE',
+                userId: $createdBy,
+                userRole: $creator?->getRole()->value ?? 'COORDINATOR',
+                userName: $creator?->getName() ?? 'Coordinador',
+                previousState: null,
+                newState: $absence->toArray(),
+                metadata: [
+                    'technician_name' => $tech->getName(),
+                    'reason' => $reasonEnum->value,
+                    'starts_at' => $starts->format(DateTimeImmutable::ATOM),
+                    'ends_at' => $ends->format(DateTimeImmutable::ATOM),
+                ]
+            );
+            $this->auditRepo->log($event);
+
+            return $absence;
+        });
+
+        // La ausencia ya está confirmada y auditada. La lectura de afectados es
+        // posterior y no debe convertir un alta correcta en un 500 que invite a
+        // repetirla: si falla, se devuelve la ausencia con lista vacía.
+        try {
+            $activeIncidents = $this->incidentRepo->findAssignedToTechnician(
+                $technicianId,
+                ['ASSIGNED', 'PENDING_PARTS', 'PENDING_INFO']
+            );
+        } catch (\Throwable $exception) {
+            error_log('[vendguard] No se pudieron leer los tickets afectados por la ausencia: ' . $exception);
+            $activeIncidents = [];
+        }
 
         $affectedList = [];
         foreach ($activeIncidents as $inc) {
@@ -245,39 +275,59 @@ final class TechnicianAbsenceService
 
         // El UPDATE condicionado a `cancelled_at IS NULL` es el árbitro de la
         // carrera: si otra petición ganó, no se escribe auditoría y se responde
-        // el mismo 409 que en una segunda cancelación explícita.
-        $cancelled = $this->absenceRepo->cancel($absenceId, $cancelledBy, $cleanReason);
-        $updated = $this->absenceRepo->findById($absenceId);
+        // el mismo 409 que en una segunda cancelación explícita. La relectura y
+        // la auditoría viajan en la misma transacción que el UPDATE.
+        $updated = $this->transactions->runInTransaction(function () use (
+            $absenceId,
+            $cancelledBy,
+            $cleanReason,
+            $canceller
+        ): TechnicianAbsence {
+            $current = $this->absenceRepo->findById($absenceId);
+            if ($current === null) {
+                throw new InvalidAbsenceException(
+                    "No se encontró la ausencia con ID {$absenceId}.",
+                    'ABSENCE_NOT_FOUND',
+                    404
+                );
+            }
 
-        if ($updated === null) {
-            throw new InvalidAbsenceException(
-                "No se encontró la ausencia con ID {$absenceId}.",
-                'ABSENCE_NOT_FOUND',
-                404
+            if ($current->isCancelled()) {
+                throw InvalidAbsenceException::alreadyCancelled();
+            }
+
+            if (!$this->absenceRepo->cancel($absenceId, $cancelledBy, $cleanReason)) {
+                throw InvalidAbsenceException::alreadyCancelled();
+            }
+
+            $updated = $this->absenceRepo->findById($absenceId);
+            if ($updated === null) {
+                throw new InvalidAbsenceException(
+                    "No se encontró la ausencia con ID {$absenceId}.",
+                    'ABSENCE_NOT_FOUND',
+                    404
+                );
+            }
+
+            $event = new AuditEvent(
+                id: null,
+                entityType: AuditEvent::ENTITY_USER,
+                entityId: $updated->technicianId(),
+                action: 'CANCEL_TECHNICIAN_ABSENCE',
+                userId: $cancelledBy,
+                userRole: $canceller?->getRole()->value ?? 'COORDINATOR',
+                userName: $canceller?->getName() ?? 'Coordinador',
+                previousState: $current->toArray(),
+                newState: $updated->toArray(),
+                metadata: [
+                    'absence_id' => $absenceId,
+                    'cancellation_reason' => $cleanReason,
+                ]
             );
-        }
+            $this->auditRepo->log($event);
 
-        if (!$cancelled) {
-            throw InvalidAbsenceException::alreadyCancelled();
-        }
-
-        // Auditoría
-        $event = new AuditEvent(
-            id: null,
-            entityType: AuditEvent::ENTITY_USER,
-            entityId: $updated->technicianId(),
-            action: 'CANCEL_TECHNICIAN_ABSENCE',
-            userId: $cancelledBy,
-            userRole: $canceller?->getRole()->value ?? 'COORDINATOR',
-            userName: $canceller?->getName() ?? 'Coordinador',
-            previousState: $absence->toArray(),
-            newState: $updated->toArray(),
-            metadata: [
-                'absence_id' => $absenceId,
-                'cancellation_reason' => $cleanReason,
-            ]
-        );
-        $this->auditRepo->log($event);
+            return $updated;
+        });
 
         return TechnicianAbsenceDto::fromEntity(
             absence: $updated,

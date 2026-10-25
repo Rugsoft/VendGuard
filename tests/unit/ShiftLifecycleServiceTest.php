@@ -30,7 +30,9 @@ use VendGuard\Core\Domain\Model\TechnicianAbsence;
 use VendGuard\Core\Domain\Model\TechnicianShift;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianAbsenceRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TechnicianLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianShiftRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\AbsenceReason;
 use VendGuard\Core\Domain\ValueObject\ShiftStatus;
@@ -123,6 +125,9 @@ $absenceRepo = new class($activeAbsence) implements TechnicianAbsenceRepositoryI
     public function findActiveAbsenceForTechnician(int $technicianId, ?DateTimeImmutable $referenceTime = null): ?TechnicianAbsence {
         return $this->activeAbsence;
     }
+    public function findActiveAbsencesMap(DateTimeImmutable $at): array {
+        return $this->activeAbsence !== null ? [$this->activeAbsence->technicianId() => true] : [];
+    }
     public function hasOverlappingAbsence(int $technicianId, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt, ?int $excludeAbsenceId = null): bool { return false; }
     public function cancel(int $id, int $cancelledBy, string $cancellationReason): bool { return true; }
 };
@@ -176,11 +181,21 @@ $userRepo = new class implements UserRepositoryInterface {
     public function countPendingIncidents(int $technicianId): int { return 0; }
 };
 
+$transactions = new class implements TransactionManagerInterface {
+    public function runInTransaction(callable $operation): mixed { return $operation(); }
+};
+
+$lockRepo = new class implements TechnicianLockRepositoryInterface {
+    public function lockTechnicianForUpdate(int $technicianId): bool { return true; }
+};
+
 $service = new ShiftLifecycleService(
     shiftRepo: $shiftRepo,
     absenceRepo: $absenceRepo,
     userRepo: $userRepo,
-    auditRepo: $auditRepo
+    auditRepo: $auditRepo,
+    transactions: $transactions,
+    lockRepo: $lockRepo
 );
 
 // ─────────────────────────────────────────────────────────────────────────────

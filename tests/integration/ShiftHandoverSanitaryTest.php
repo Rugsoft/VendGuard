@@ -22,6 +22,7 @@ require_once __DIR__ . '/../Support/TestDataCleaner.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/ConnectionFactory.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/SeedRunner.php';
 
+use VendGuard\Application\Service\HandoverTargetService;
 use VendGuard\Application\Service\ShiftHandoverService;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -31,6 +32,7 @@ use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoOnCallTechnicianRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 
@@ -47,6 +49,7 @@ $userRepo = new PdoUserRepository($pdo);
 $incidentRepo = new PdoIncidentRepository($pdo);
 $machineRepo = new PdoMachineRepository($pdo);
 $onCallRepo = $userRepo;
+$absenceRepo = new PdoTechnicianAbsenceRepository($pdo);
 $auditRepo = new PdoAuditLogRepository($pdo);
 
 $service = new ShiftHandoverService(
@@ -57,7 +60,8 @@ $service = new ShiftHandoverService(
     machineRepo: $machineRepo,
     onCallRepo: $onCallRepo,
     auditRepo: $auditRepo,
-    notifications: NotificationOutboxEnqueuerFactory::create()
+    handoverTargets: new HandoverTargetService($userRepo, $shiftRepo, $absenceRepo),
+    notifications: NotificationOutboxEnqueuerFactory::create($pdo)
 );
 
 $failures = 0;
@@ -144,6 +148,112 @@ try {
     $assert(
         'Nivel 1: el traspaso sanitario no se degrada al aviso ordinario de asignación',
         (int)$stmtLevel1Ordinary->fetchColumn() === 0
+    );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Escenario 1b: guardia de vacaciones + guardia disponible
+    // ─────────────────────────────────────────────────────────────────────────
+    $secondGuard = (int)$pdo->query("SELECT id FROM users WHERE role = 'TECHNICIAN' AND id NOT IN ({$tech1}, {$guardTech}) AND deleted_at IS NULL ORDER BY id LIMIT 1")->fetchColumn();
+    $pdo->exec("UPDATE users SET is_on_call = FALSE WHERE role = 'TECHNICIAN'");
+    $onCallRepo->setOnCall($guardTech, true);
+    $onCallRepo->setOnCall($secondGuard, true);
+
+    $pdo->prepare(
+        "INSERT INTO technician_absences (technician_id, reason, starts_at, ends_at, notes, created_by)
+         VALUES (:technician_id, 'VACATION', NOW() - INTERVAL '1 hour', NOW() + INTERVAL '2 days',
+                 'Vacaciones del guardia en la prueba sanitaria', :created_by)"
+    )->execute([':technician_id' => $guardTech, ':created_by' => $tech1]);
+
+    $shiftRepo->startShift($tech1);
+    $pdo->exec("UPDATE incidents SET assigned_technician_id = {$tech1}, status = 'ASSIGNED' WHERE id = {$perishableIncidentId}");
+
+    $stmtVacationOutbox = $pdo->prepare("SELECT COUNT(*) FROM notification_outbox
+        WHERE incident_id = :incident_id
+          AND template = 'TELEGRAM_INCIDENT_ASSIGNMENT'
+          AND recipient_user_id = :technician_id
+          AND deleted_at IS NULL");
+    $stmtVacationOutbox->execute([':incident_id' => $perishableIncidentId, ':technician_id' => $guardTech]);
+    $vacationOutboxBefore = (int)$stmtVacationOutbox->fetchColumn();
+
+    $resultVacation = $service->closeAndHandover(
+        technicianId: $tech1,
+        targetTechnicianId: null,
+        incidentIdsToTransfer: [],
+        handoverNotes: null,
+        closeReason: 'Cierre con guardia de vacaciones'
+    );
+
+    $assignedAfterVacation = (int)$pdo->query("SELECT assigned_technician_id FROM incidents WHERE id = {$perishableIncidentId}")->fetchColumn();
+    $assert(
+        'Guardia de vacaciones: la perecedera se deriva al guardia disponible, no al ausente',
+        count($resultVacation->sanitaryEmergencyTransfers) === 1 && $assignedAfterVacation === $secondGuard,
+        'asignada a=' . $assignedAfterVacation . ' esperada=' . $secondGuard
+    );
+
+    $stmtVacationOutbox->execute([':incident_id' => $perishableIncidentId, ':technician_id' => $guardTech]);
+    $vacationOutboxAfter = (int)$stmtVacationOutbox->fetchColumn();
+    $assert(
+        'Guardia de vacaciones: el ausente no recibe un nuevo aviso del traspaso sanitario',
+        $vacationOutboxAfter === $vacationOutboxBefore,
+        'avisos=' . $vacationOutboxBefore . '→' . $vacationOutboxAfter
+    );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Escenario 1c: solo guardia de vacaciones => Nivel 2 con fallback auditado
+    // ─────────────────────────────────────────────────────────────────────────
+    $pdo->exec("UPDATE users SET is_on_call = FALSE WHERE role = 'TECHNICIAN'");
+    $onCallRepo->setOnCall($guardTech, true);
+
+    $shiftRepo->startShift($tech1);
+    $pdo->exec("UPDATE incidents SET assigned_technician_id = {$tech1}, status = 'ASSIGNED' WHERE id = {$perishableIncidentId}");
+    $resultNoAvailableGuard = $service->closeAndHandover(
+        technicianId: $tech1,
+        targetTechnicianId: null,
+        incidentIdsToTransfer: [],
+        handoverNotes: null,
+        closeReason: 'Cierre sin guardia disponible'
+    );
+
+    $stmtFallbackAudit = $pdo->prepare("SELECT metadata::text FROM audit_log
+        WHERE action = 'SANITARY_SHIFT_CLOSE_FAILSAFE'
+          AND entity_id = :incident_id
+        ORDER BY id DESC LIMIT 1");
+    $stmtFallbackAudit->execute([':incident_id' => $perishableIncidentId]);
+    $fallbackMetadata = (string)$stmtFallbackAudit->fetchColumn();
+
+    $assert(
+        'Solo guardia de vacaciones: la perecedera se desasigna con alarma (Nivel 2)',
+        count($resultNoAvailableGuard->sanitaryEmergencyUnassigned) === 1
+    );
+    $assert(
+        'El fallback sanitario se audita con NO_AVAILABLE_ON_CALL_TECHNICIAN',
+        str_contains($fallbackMetadata, 'NO_AVAILABLE_ON_CALL_TECHNICIAN'),
+        'metadata=' . $fallbackMetadata
+    );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Escenario 1d: solo guardia en pausa de comida => Nivel 2
+    // ─────────────────────────────────────────────────────────────────────────
+    TestDataCleaner::withPurgeWindow($pdo, static function () use ($pdo, $guardTech): void {
+        $pdo->exec("DELETE FROM technician_absences WHERE technician_id = {$guardTech}");
+    });
+
+    $guardShift = $shiftRepo->startShift($guardTech);
+    $shiftRepo->pauseMeal($guardShift->id());
+
+    $shiftRepo->startShift($tech1);
+    $pdo->exec("UPDATE incidents SET assigned_technician_id = {$tech1}, status = 'ASSIGNED' WHERE id = {$perishableIncidentId}");
+    $resultGuardMeal = $service->closeAndHandover(
+        technicianId: $tech1,
+        targetTechnicianId: null,
+        incidentIdsToTransfer: [],
+        handoverNotes: null,
+        closeReason: 'Cierre con guardia en pausa'
+    );
+
+    $assert(
+        'Guardia en pausa de comida: la perecedera no se le traspasa y se desasigna (Nivel 2)',
+        count($resultGuardMeal->sanitaryEmergencyUnassigned) === 1
     );
 
     // ─────────────────────────────────────────────────────────────────────────

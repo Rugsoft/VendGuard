@@ -27,6 +27,7 @@ require_once __DIR__ . '/../Support/TestDataCleaner.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/ConnectionFactory.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/SeedRunner.php';
 
+use VendGuard\Application\Service\HandoverTargetService;
 use VendGuard\Application\Service\ShiftHandoverService;
 use VendGuard\Core\Domain\Exception\InvalidShiftTransitionException;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
@@ -34,6 +35,7 @@ use VendGuard\Infrastructure\Database\SeedRunner;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 
@@ -42,6 +44,9 @@ echo " VendGuard: Integración - ShiftHandoverConcurrencyTest (RF-05.3 / R9)\n";
 echo "======================================================================\n\n";
 
 $pdo = ConnectionFactory::getConnection();
+// El actor identifica esta sesión por `application_name`; `pg_stat_activity.pid`
+// es el backend del servidor y no el PID del proceso cliente.
+$pdo->exec("SET application_name TO 'vendguard-handover-concurrency-parent'");
 (new SeedRunner($pdo))->seedAll();
 TestDataCleaner::purge($pdo);
 
@@ -111,8 +116,12 @@ try {
 
     $shiftRepo = new PdoTechnicianShiftRepository($pdo);
     $shiftRepo->startShift($outgoingTechnicianId);
+    // RF-05.5: el receptor manual debe estar en turno; el rechazo de un
+    // receptor OFF_SHIFT se certifica en HandoverAvailabilityApiTest.
+    $shiftRepo->startShift($handoverTargetId);
 
     $userRepo = new PdoUserRepository($pdo);
+    $absenceRepo = new PdoTechnicianAbsenceRepository($pdo);
     $service = new ShiftHandoverService(
         pdo: $pdo,
         shiftRepo: $shiftRepo,
@@ -121,6 +130,7 @@ try {
         machineRepo: new PdoMachineRepository($pdo),
         onCallRepo: $userRepo,
         auditRepo: new PdoAuditLogRepository($pdo),
+        handoverTargets: new HandoverTargetService($userRepo, $shiftRepo, $absenceRepo),
         notifications: null
     );
 
@@ -132,14 +142,14 @@ try {
     $readyFile = $prefix . '.ready';
     $statusFile = $prefix . '.status';
 
-    $parentPid = (int)$pdo->query('SELECT pg_backend_pid()')->fetchColumn();
+    $parentApplicationName = 'vendguard-handover-concurrency-parent';
 
     $command = [
         PHP_BINARY,
         __DIR__ . '/../Support/HandoverConcurrencyActor.php',
         (string)$incidentId,
         (string)$concurrentWinnerId,
-        (string)$parentPid,
+        $parentApplicationName,
         $readyFile,
         $statusFile,
     ];

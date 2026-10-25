@@ -123,8 +123,23 @@ $techList = httpCall('GET', '/api/coordinator/users?role=TECHNICIAN&status=activ
 $check('2.1 Listado de personal técnico activo responde HTTP 200', $techList['code'] === 200);
 $check('2.2 Retorna los 5 técnicos de plantilla disponibles', count($techList['body']['data'] ?? []) >= 5);
 
+// El arnés no asume IDs fijos: la batería limpia y resiembra la base, así que
+// resuelve la plantilla por correo y usa tres técnicos distintos según el caso.
+$jordiId = (int)$pdo->query("SELECT id FROM users WHERE email = 'jordi.ruta@vendguard.internal'")->fetchColumn();
+$otherTechIds = array_values(array_map('intval', array_column(array_filter(
+    $techList['body']['data'] ?? [],
+    static fn(array $row): bool => (int)($row['id'] ?? 0) !== $jordiId
+), 'id')));
+if ($jordiId <= 0 || count($otherTechIds) < 2) {
+    fwrite(STDERR, "No se pudo resolver la plantilla técnica sembrada para la batería E2E.\n");
+    exit(1);
+}
+$absenceTechId = $otherTechIds[0];
+$partialTechId = $otherTechIds[1];
+$multiDayTechId = $otherTechIds[2] ?? $otherTechIds[0];
+
 // 2.3 Alta jornada completa
-$fullDay = httpCall('POST', '/api/coordinator/technicians/2/absences', [
+$fullDay = httpCall('POST', "/api/coordinator/technicians/{$absenceTechId}/absences", [
     'reason' => 'VACATION',
     'starts_at' => '2026-11-20',
     'ends_at' => '2026-11-22',
@@ -140,7 +155,7 @@ $check('2.5 Expansión automática a 00:00:00 y 23:59:59 en hora de Madrid (R5/A
 );
 
 // 2.6 Alta por horas (permiso médico)
-$partial = httpCall('POST', '/api/coordinator/technicians/5/absences', [
+$partial = httpCall('POST', "/api/coordinator/technicians/{$partialTechId}/absences", [
     'reason' => 'SICK_LEAVE',
     'starts_at' => '2026-11-25 09:30:00',
     'ends_at' => '2026-11-25 13:00:00',
@@ -150,7 +165,7 @@ $check('2.6 Alta ausencia con franja horaria responde HTTP 201', $partial['code'
 $partialId = $partial['body']['data']['absence']['id'] ?? null;
 
 // 2.7 Coexistencia el mismo día sin solape
-$sameDayTarde = httpCall('POST', '/api/coordinator/technicians/5/absences', [
+$sameDayTarde = httpCall('POST', "/api/coordinator/technicians/{$partialTechId}/absences", [
     'reason' => 'TRAINING',
     'starts_at' => '2026-11-25 15:30:00',
     'ends_at' => '2026-11-25 18:00:00',
@@ -160,7 +175,7 @@ $check('2.7 Segunda ausencia el mismo día en horario de tarde responde HTTP 201
 $tardeId = $sameDayTarde['body']['data']['absence']['id'] ?? null;
 
 // 2.8 Detección estricta de solape en horas
-$overlap = httpCall('POST', '/api/coordinator/technicians/5/absences', [
+$overlap = httpCall('POST', "/api/coordinator/technicians/{$partialTechId}/absences", [
     'reason' => 'PERSONAL_LEAVE',
     'starts_at' => '2026-11-25 12:00:00',
     'ends_at' => '2026-11-25 14:00:00',
@@ -170,7 +185,7 @@ $check('2.8 Detección de solapamiento en franja horaria devuelve HTTP 409', $ov
 $check('2.9 Error code es ABSENCE_OVERLAP', ($overlap['body']['error']['code'] ?? '') === 'ABSENCE_OVERLAP');
 
 // 2.10 Validación fecha/hora invertida
-$inverted = httpCall('POST', '/api/coordinator/technicians/5/absences', [
+$inverted = httpCall('POST', "/api/coordinator/technicians/{$partialTechId}/absences", [
     'reason' => 'SICK_LEAVE',
     'starts_at' => '2026-11-25 14:00:00',
     'ends_at' => '2026-11-25 10:00:00'
@@ -179,7 +194,7 @@ $check('2.10 Rango de horas invertido devuelve HTTP 422 INVALID_DATE_RANGE', $in
 
 // 2.11-2.12: una franja de madrugada del día siguiente no puede solapar con la
 // jornada completa anterior, porque el fin local es 23:59:59 y no UTC.
-$fullDaySingle = httpCall('POST', '/api/coordinator/technicians/3/absences', [
+$fullDaySingle = httpCall('POST', "/api/coordinator/technicians/{$multiDayTechId}/absences", [
     'reason' => 'VACATION',
     'starts_at' => '2026-12-01',
     'ends_at' => '2026-12-01'
@@ -193,7 +208,7 @@ $check(
         && ($fullDaySingle['body']['data']['absence']['is_full_day'] ?? false) === true
 );
 
-$earlyNextDay = httpCall('POST', '/api/coordinator/technicians/3/absences', [
+$earlyNextDay = httpCall('POST', "/api/coordinator/technicians/{$multiDayTechId}/absences", [
     'reason' => 'SICK_LEAVE',
     'starts_at' => '2026-12-02 00:30:00',
     'ends_at' => '2026-12-02 01:30:00'
@@ -214,14 +229,14 @@ echo "\n";
 // --------------------------------------------------------------------------
 echo "--- 3. FUNCIONAL: CICLO DE TURNO MÓVIL DEL TÉCNICO ---\n";
 // Reset previo de turno si hubiera quedado abierto
-httpCall('POST', '/api/coordinator/technicians/2/shifts/force-close', ['reason' => 'Limpieza de turno para test'], $coordToken);
+httpCall('POST', "/api/coordinator/technicians/{$jordiId}/shifts/force-close", ['reason' => 'Limpieza de turno para test'], $coordToken);
 
 $sInit = httpCall('GET', '/api/technician/shift/status', null, $techToken);
 $check('3.1 Estado inicial del turno es OFF_SHIFT', ($sInit['body']['data']['status'] ?? '') === 'OFF_SHIFT');
 
 // Crear avería asignada a Jordi para verificar bloqueo de inicio sin turno
 $stmtPre = $pdo->prepare("INSERT INTO incidents (ticket_code, location_id, machine_id, category, description, urgency, status, assigned_technician_id, assigned_at)
-    VALUES ('INC-PRE-SHIFT-TEST', 1, 1, 'PAYMENT_SYSTEM', 'Prueba de bloqueo sin turno', 'MEDIUM', 'ASSIGNED', 2, NOW())
+    VALUES ('INC-PRE-SHIFT-TEST', 1, 1, 'PAYMENT_SYSTEM', 'Prueba de bloqueo sin turno', 'MEDIUM', 'ASSIGNED', {$jordiId}, NOW())
     RETURNING id");
 $stmtPre->execute();
 $incPreId = (int)$stmtPre->fetchColumn();
@@ -264,16 +279,40 @@ echo "\n";
 // --------------------------------------------------------------------------
 echo "--- 4. E2E: RELEVO ATÓMICO, BLOQUEO IN_PROGRESS Y BLINDAJE ART. V.4 ---\n";
 
+// El receptor debe estar en turno: R3 rechaza relevos a compañeros no disponibles.
+$handoverTargetId = $otherTechIds[2] ?? $otherTechIds[0];
+$handoverTargetEmail = null;
+foreach ($techList['body']['data'] ?? [] as $row) {
+    if ((int)($row['id'] ?? 0) === $handoverTargetId) {
+        $handoverTargetEmail = (string)($row['email'] ?? '');
+        break;
+    }
+}
+if ($handoverTargetEmail === '') {
+    fwrite(STDERR, "No se pudo resolver el correo del técnico receptor del relevo.\n");
+    exit(1);
+}
+$loginTarget = httpCall('POST', '/api/auth/login', ['email' => $handoverTargetEmail, 'password' => 'Password123!']);
+$targetToken = $loginTarget['body']['data']['token'] ?? null;
+$targetShift = $targetToken === null
+    ? ['code' => 0, 'body' => []]
+    : httpCall('POST', '/api/technician/shift/start', null, $targetToken);
+$check(
+    '4.0 El técnico receptor está en turno antes del relevo',
+    $targetShift['code'] === 200
+        && ($targetShift['body']['data']['status'] ?? '') === 'ON_SHIFT'
+);
+
 // Creamos avería asignada a Jordi en IN_PROGRESS (usando máquina 2 para no chocar con uq_machine_active_ticket)
 $stmt = $pdo->prepare("INSERT INTO incidents (ticket_code, location_id, machine_id, category, description, urgency, status, assigned_technician_id, assigned_at)
-    VALUES ('INC-E2E-HANDOVER', 1, 2, 'PAYMENT_SYSTEM', 'Avería activa para prueba de relevo', 'HIGH', 'IN_PROGRESS', 2, NOW())
+    VALUES ('INC-E2E-HANDOVER', 1, 2, 'PAYMENT_SYSTEM', 'Avería activa para prueba de relevo', 'HIGH', 'IN_PROGRESS', {$jordiId}, NOW())
     RETURNING id");
 $stmt->execute();
 $incId = (int)$stmt->fetchColumn();
 
 // Intento de cerrar turno con ticket en IN_PROGRESS (Bloqueo fail-fast)
 $failHandover = httpCall('POST', '/api/technician/shift/close-handover', [
-    'target_technician_id' => 4,
+    'target_technician_id' => $handoverTargetId,
     'incident_ids' => [$incId],
     'handover_notes' => 'Traspaso de avería no permitida en curso',
     'close_reason' => 'Fin de turno'
@@ -284,9 +323,9 @@ $check('4.2 Error code es HAS_IN_PROGRESS_INCIDENTS', ($failHandover['body']['er
 // Pasamos ticket a ASSIGNED para permitir traspaso limpio
 $pdo->exec("UPDATE incidents SET status = 'ASSIGNED' WHERE id = {$incId}");
 
-// Relevo atómico con traspaso a Carlos (ID 4)
+// Relevo atómico con traspaso al compañero reservado para el relevo
 $okHandover = httpCall('POST', '/api/technician/shift/close-handover', [
-    'target_technician_id' => 4,
+    'target_technician_id' => $handoverTargetId,
     'incident_ids' => [$incId],
     'handover_notes' => 'Te traspaso este monedero para revisión prioritaria turno matutino',
     'close_reason' => 'Fin de turno regular'
@@ -297,15 +336,15 @@ $check('4.5 Resumen confirma 1 avería traspasada', count($okHandover['body']['d
 
 // Verificación de reasignación en base de datos
 $rowInc = $pdo->query("SELECT assigned_technician_id, status FROM incidents WHERE id = {$incId}")->fetch(PDO::FETCH_ASSOC);
-$check('4.6 Avería en BD ahora asignada a Carlos (ID 4)', (int)$rowInc['assigned_technician_id'] === 4);
+$check('4.6 Avería en BD ahora asignada al técnico receptor', (int)$rowInc['assigned_technician_id'] === $handoverTargetId);
 
 $outboxReceptor = $pdo->prepare("SELECT COUNT(*) FROM notification_outbox
     WHERE incident_id = :incident_id
       AND template = 'TELEGRAM_INCIDENT_ASSIGNMENT'
       AND priority = 'PRIORITY'
-      AND recipient_user_id = 4
+      AND recipient_user_id = :recipient
       AND deleted_at IS NULL");
-$outboxReceptor->execute([':incident_id' => $incId]);
+$outboxReceptor->execute([':incident_id' => $incId, ':recipient' => $handoverTargetId]);
 $check(
     '4.6b El técnico receptor recibe el aviso propio y prioritario de relevo',
     (int)$outboxReceptor->fetchColumn() >= 1
@@ -327,7 +366,7 @@ echo "--- 5. FUNCIONAL: CIERRE FORZADO ADMINISTRATIVO Y ANULACIÓN LÓGICA ---\n
 httpCall('POST', '/api/technician/shift/start', null, $techToken);
 
 // Coordinador fuerza cierre de turno (D9)
-$forceClose = httpCall('POST', '/api/coordinator/technicians/2/shifts/force-close', [
+$forceClose = httpCall('POST', "/api/coordinator/technicians/{$jordiId}/shifts/force-close", [
     'reason' => 'Cierre forzado administrativo por fin de horario de ruta'
 ], $coordToken);
 $check('5.1 Cierre forzado por Coordinación responde HTTP 200', $forceClose['code'] === 200);

@@ -27,6 +27,8 @@ use VendGuard\Core\Domain\Model\TechnicianAbsence;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianAbsenceRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TechnicianLockRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\AbsenceReason;
 
@@ -108,6 +110,16 @@ $absenceRepo = new class($absenceStorage, $autoId) implements TechnicianAbsenceR
             }
         }
         return null;
+    }
+
+    public function findActiveAbsencesMap(DateTimeImmutable $at): array {
+        $map = [];
+        foreach ($this->storage as $a) {
+            if ($a->isActiveAt($at)) {
+                $map[$a->technicianId()] = true;
+            }
+        }
+        return $map;
     }
 
     public function hasOverlappingAbsence(int $technicianId, DateTimeImmutable $startsAt, DateTimeImmutable $endsAt, ?int $excludeAbsenceId = null): bool {
@@ -234,11 +246,21 @@ $incidentRepo = new class([$incident]) implements IncidentRepositoryInterface {
     public function getPendingInfoIncidentsOlderThanHours(int $hours): array { return []; }
 };
 
+$transactions = new class implements TransactionManagerInterface {
+    public function runInTransaction(callable $operation): mixed { return $operation(); }
+};
+
+$lockRepo = new class implements TechnicianLockRepositoryInterface {
+    public function lockTechnicianForUpdate(int $technicianId): bool { return true; }
+};
+
 $service = new TechnicianAbsenceService(
     absenceRepo: $absenceRepo,
     userRepo: $userRepo,
     incidentRepo: $incidentRepo,
-    auditRepo: $auditRepo
+    auditRepo: $auditRepo,
+    transactions: $transactions,
+    lockRepo: $lockRepo
 );
 
 // ─────────────────────────────────────────────────────────────────────────────

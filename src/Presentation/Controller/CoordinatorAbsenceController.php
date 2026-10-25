@@ -11,6 +11,7 @@ use VendGuard\Application\Service\TechnicianAbsenceService;
 use VendGuard\Core\Domain\Exception\InvalidAbsenceException;
 use VendGuard\Core\Domain\Exception\UserNotFoundException;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
@@ -33,11 +34,14 @@ final class CoordinatorAbsenceController
             $this->service = $service;
         } else {
             $pdo ??= ConnectionFactory::getConnection();
+            $users = new PdoUserRepository($pdo);
             $this->service = new TechnicianAbsenceService(
                 new PdoTechnicianAbsenceRepository($pdo),
-                new PdoUserRepository($pdo),
+                $users,
                 new PdoIncidentRepository($pdo),
                 new PdoAuditLogRepository($pdo),
+                new PdoTransactionManager($pdo),
+                $users,
                 new SuggestedTechniciansService()
             );
         }

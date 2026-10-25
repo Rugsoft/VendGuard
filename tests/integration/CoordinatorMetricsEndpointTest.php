@@ -28,6 +28,7 @@ use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SeedRunner;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
+use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Routing\AppRouter;
 
@@ -52,11 +53,16 @@ $assert = function (bool $condition, string $message) use (&$assertionCount) {
     echo "  [PASS] Aserción {$assertionCount}: {$message}\n";
 };
 
-// Generar tokens para pruebas
-$coordUser = new User(1, 'Sara Coordinadora', 'coord@vendguard.internal', 'hash', UserRole::COORDINATOR);
+// Generar tokens para pruebas. El middleware revalida el usuario contra la base:
+// se resuelven por correo canónico para no fijar identificadores que la
+// restitución del parque puede desplazar.
+$users = new PdoUserRepository($pdo);
+$coordUser = $users->findByEmail('coordinacion@vendguard.internal');
+$techUser = $users->findByEmail('jordi.ruta@vendguard.internal');
+if ($coordUser === null || $techUser === null) {
+    throw new RuntimeException('No se encontraron los usuarios canónicos de la prueba.');
+}
 $coordToken = $authService->generateInternalToken($coordUser);
-
-$techUser = new User(2, 'Jordi Técnico', 'tech@vendguard.internal', 'hash', UserRole::TECHNICIAN);
 $techToken = $authService->generateInternalToken($techUser);
 
 // --- CASO 1: Seguridad y RBAC (401 sin auth, 403 con rol técnico) ---
