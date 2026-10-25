@@ -91,7 +91,7 @@
 
 ## Fase 3: Capa de Infraestructura y Repositorios PDO
 
-- [ ] **T-TIME-05 · Repositorio `PdoTechnicianShiftLogRepository` y su interfaz**
+- [x] **T-TIME-05 · Repositorio `PdoTechnicianShiftLogRepository` y su interfaz**
   * **Tiempo estimado:** 20 min
   * **Dependencias previas:** `T-TIME-04`
   * **Ficheros a crear o modificar:**
