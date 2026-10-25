@@ -27,6 +27,7 @@ use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SeedRunner;
+use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Routing\AppRouter;
 
@@ -51,11 +52,16 @@ $assert = function (bool $condition, string $message) use (&$assertionCount) {
     echo "  [PASS] Aserción {$assertionCount}: {$message}\n";
 };
 
-// Generar tokens para pruebas
-$coordUser = new User(1, 'Sara Coordinadora', 'coord@vendguard.internal', 'hash', UserRole::COORDINATOR);
+// Generar tokens para pruebas. El middleware revalida el usuario contra la base:
+// se resuelven por correo canónico y el ID se toma del registro real.
+$users = new PdoUserRepository($pdo);
+$coordUser = $users->findByEmail('coordinacion@vendguard.internal');
+$techUser = $users->findByEmail('jordi.ruta@vendguard.internal');
+if ($coordUser === null || $techUser === null) {
+    throw new RuntimeException('No se encontraron los usuarios canónicos de la prueba.');
+}
+$techUserId = $techUser->getId();
 $coordToken = $authService->generateInternalToken($coordUser);
-
-$techUser = new User(2, 'Jordi Técnico', 'tech@vendguard.internal', 'hash', UserRole::TECHNICIAN);
 $techToken = $authService->generateInternalToken($techUser);
 
 // --- CASO 1: Seguridad y RBAC en /api/technician/my-metrics ---
@@ -85,7 +91,7 @@ $assert($resTech->getStatusCode() === 200, "Técnico autenticado recibe 200 OK")
 
 $bodyTech = json_decode($resTech->getBody(), true);
 $assert(isset($bodyTech['success']) && $bodyTech['success'] === true, "Respuesta JSON incluye success=true");
-$assert(isset($bodyTech['data']['technician']['id']) && $bodyTech['data']['technician']['id'] === 2, "Datos vinculados al ID del técnico autenticado (2)");
+$assert(isset($bodyTech['data']['technician']['id']) && (int)$bodyTech['data']['technician']['id'] === $techUserId, "Datos vinculados al ID del técnico autenticado");
 $assert(isset($bodyTech['data']['technician']['name']), "Nombre del técnico presente en la respuesta");
 $assert(isset($bodyTech['data']['period']['key']) && $bodyTech['data']['period']['key'] === 'last_30_days', "Período por defecto es last_30_days");
 
@@ -129,7 +135,7 @@ $reqSpoofed = new Request('GET', '/api/technician/my-metrics', ['technician_id' 
 $resSpoofed = $router->dispatch($reqSpoofed);
 $assert($resSpoofed->getStatusCode() === 200, "Petición con parámetro technician_id fraudulento es procesada con 200");
 $bodySpoofed = json_decode($resSpoofed->getBody(), true);
-$assert($bodySpoofed['data']['technician']['id'] === 2, "El ID del técnico se mantuvo en 2 forzado por token de sesión (suplantación neutralizada)");
+$assert((int)$bodySpoofed['data']['technician']['id'] === $techUserId, "El ID del técnico se mantuvo forzado por el token de sesión (suplantación neutralizada)");
 
 // --- CASO 5: Bloqueo 403 Forbidden a endpoints de Coordinación (Art. V.4) ---
 echo "\n--- Caso 5: Bloqueo de acceso de técnicos a métricas de coordinación ---\n";

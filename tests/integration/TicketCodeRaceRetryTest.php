@@ -318,7 +318,15 @@ $orderRow = $orderStmt->fetch(PDO::FETCH_ASSOC);
 $assert('3.0b La máquina del puente tiene una orden preventiva vinculable', $orderRow !== false);
 
 $bridgeOrderId = (int)($orderRow['id'] ?? 0);
-$bridgeTechnicianId = (int)($orderRow['assigned_technician_id'] ?? 2);
+$bridgeTechnicianId = (int)($orderRow['assigned_technician_id'] ?? 0);
+if ($bridgeTechnicianId <= 0) {
+    // La orden puede no tener titular tras una restitución del parque: se usa
+    // un técnico real en lugar de fijar un identificador que el sembrador puede
+    // haber desplazado.
+    $bridgeTechnicianId = (int)$pdo->query(
+        "SELECT id FROM users WHERE role = 'TECHNICIAN' AND is_active = TRUE AND deleted_at IS NULL ORDER BY id LIMIT 1"
+    )->fetchColumn();
+}
 $bridgeHeldCode = 'INC-2026-G7B1';
 $bridgeFreshCode = 'INC-2026-G7B2';
 $bridge = new PreventiveCoexistenceBridgeService(

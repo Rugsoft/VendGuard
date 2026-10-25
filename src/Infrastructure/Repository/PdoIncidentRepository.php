@@ -640,6 +640,58 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
     }
 
     /**
+     * Recupera y bloquea la ruta completa de un técnico dentro de la transacción.
+     *
+     * El `FOR UPDATE OF i` afecta solo a `incidents` —no a las tablas unidas— y se
+     * mantiene hasta el COMMIT/ROLLBACK. Se bloquean todas las averías activas de la
+     * ruta —incluida `IN_PROGRESS`—, no solo las elegibles para relevo, para que una
+     * intervención que pase a `IN_PROGRESS` durante el cierre no pueda escapar de la
+     * guardia de RF-04. El filtro excluye el histórico resuelto que conserva al
+     * técnico como responsable: bloquearlo alargaría el cierre sin aportar nada a la
+     * guardia ni a la foto del relevo.
+     *
+     * @return list<Incident>
+     *
+     * @throws RuntimeException Si se invoca fuera de una transacción abierta.
+     */
+    public function findAssignedToTechnicianForUpdate(int $technicianId): array
+    {
+        if (!$this->pdo->inTransaction()) {
+            throw new RuntimeException(
+                'La lectura con bloqueo de la ruta exige una transacción abierta: sin ella el ' .
+                'bloqueo se libera al terminar la sentencia y la serialización sería ficticia.'
+            );
+        }
+
+        $sql = "
+            SELECT
+                i.*,
+                m.code AS machine_code,
+                m.model AS machine_model,
+                m.machine_type AS machine_type,
+                l.name AS location_name,
+                l.site_code AS location_site_code,
+                u.name AS technician_name
+            FROM incidents i
+            LEFT JOIN machines m ON i.machine_id = m.id
+            LEFT JOIN locations l ON i.location_id = l.id
+            LEFT JOIN users u ON i.assigned_technician_id = u.id
+            WHERE i.assigned_technician_id = :technician_id
+              AND i.deleted_at IS NULL
+              AND i.status IN ('ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS', 'PENDING_INFO')
+            ORDER BY i.id ASC
+            " . ($this->dialect->isPostgres() ? 'FOR UPDATE OF i' : 'FOR UPDATE');
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':technician_id', $technicianId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_map(static fn(array $row): Incident => Incident::fromDatabaseRow($row), $rows);
+    }
+
+    /**
      * ¿Publicó la sede un comentario público posterior al inicio de la pausa vigente?
      * (RF-05.6, enmienda del Product Owner E-1.)
      *

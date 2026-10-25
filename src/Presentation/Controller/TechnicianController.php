@@ -50,6 +50,7 @@ use VendGuard\Core\Domain\Repository\MachineBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OpportunisticIncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianRouteBoardRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TechnicianShiftRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Service\ResolutionValidator;
@@ -60,6 +61,7 @@ use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentServiceSheetRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoVanStockRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRepository;
 use VendGuard\Infrastructure\Repository\PdoSparePartRequestRepository;
@@ -112,6 +114,9 @@ class TechnicianController
     /** Transaccionalidad compensatoria del fichero (EARS-05.3); se resuelve bajo demanda. */
     private ?FileStorageCompensator $fileCompensator;
 
+    /** Persistencia de jornada y turnos del técnico (Módulo 21); se resuelve bajo demanda. */
+    private ?TechnicianShiftRepositoryInterface $shiftRepo;
+
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?MachineRepositoryInterface $machineRepo = null,
@@ -127,12 +132,14 @@ class TechnicianController
         ?SanitaryReportSafeguardService $sanitarySafeguard = null,
         ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
         ?AuditLogger $auditLogger = null,
-        ?IncidentServiceSheetRepositoryInterface $serviceSheetRepo = null
+        ?IncidentServiceSheetRepositoryInterface $serviceSheetRepo = null,
+        ?TechnicianShiftRepositoryInterface $shiftRepo = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->machineRepo  = $machineRepo ?? new PdoMachineRepository();
         $this->locationRepo = $locationRepo ?? new PdoLocationRepository();
         $this->userRepo     = $userRepo ?? new PdoUserRepository();
+        $this->shiftRepo    = $shiftRepo;
         // Igual que el hilo de comentarios y el ciclo de pausa: el servicio de
         // trazabilidad se resuelve bajo demanda, porque su instancia por defecto abre
         // conexión PDO y este controlador también se construye en suites unitarias.
@@ -264,6 +271,14 @@ class TechnicianController
             incidentRepo: $this->incidentRepo,
             notificationEnqueuer: $this->notifications()
         );
+    }
+
+    /**
+     * Repositorio de jornada y turnos del técnico (Módulo 21), resuelto bajo demanda.
+     */
+    private function shifts(): TechnicianShiftRepositoryInterface
+    {
+        return $this->shiftRepo ??= new PdoTechnicianShiftRepository();
     }
 
     /**
@@ -727,6 +742,24 @@ class TechnicianController
             return Response::error('FORBIDDEN', 'Esta incidencia no está asignada a tu ruta técnica.', 403);
         }
 
+        // 4.b Bloqueo de jornada (Módulo 21): el técnico debe tener un turno abierto en estado ON_SHIFT
+        $activeShift = $this->shifts()->findActiveShiftByTechnician($techId);
+        if ($activeShift === null || !$activeShift->isOpen() || !$activeShift->isOnShift()) {
+            if ($activeShift !== null && $activeShift->isMealBreak()) {
+                return Response::error(
+                    'SHIFT_MEAL_BREAK',
+                    'No puedes iniciar una intervención mientras estás en pausa de comida. Reanuda tu turno primero.',
+                    422
+                );
+            }
+
+            return Response::error(
+                'SHIFT_NOT_ACTIVE',
+                'Debes iniciar tu turno antes de comenzar una intervención en la máquina.',
+                422
+            );
+        }
+
         // 5. Validar transición de estado
         if (!$incident->getStatus()->canTransitionTo(IncidentStatus::IN_PROGRESS)) {
             return Response::error(
@@ -975,6 +1008,24 @@ class TechnicianController
         // 4. Sólo el técnico responsable activo reanuda su propia parada (Art. V.2).
         if ($incident->getAssignedTechnicianId() !== $techId) {
             return Response::error('FORBIDDEN', 'Esta incidencia no está asignada a tu ruta técnica.', 403);
+        }
+
+        // 4.b Bloqueo de jornada (Módulo 21): el técnico debe tener un turno abierto en estado ON_SHIFT
+        $activeShift = $this->shifts()->findActiveShiftByTechnician($techId);
+        if ($activeShift === null || !$activeShift->isOpen() || !$activeShift->isOnShift()) {
+            if ($activeShift !== null && $activeShift->isMealBreak()) {
+                return Response::error(
+                    'SHIFT_MEAL_BREAK',
+                    'No puedes reanudar una intervención mientras estás en pausa de comida. Reanuda tu turno primero.',
+                    422
+                );
+            }
+
+            return Response::error(
+                'SHIFT_NOT_ACTIVE',
+                'Debes iniciar tu turno antes de reanudar una intervención en la máquina.',
+                422
+            );
         }
 
         // 5. Cuerpo opcional: nota de reanudación y destino explícito.

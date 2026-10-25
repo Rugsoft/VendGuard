@@ -780,8 +780,9 @@ try {
 // 15. T-NOTIF-10 — Censo del catálogo: los eventos de negocio tienen su plantilla
 // ─────────────────────────────────────────────────────────────────────────────
 // Se excluyen las plantillas que este módulo no enqueuea por diseño: las dos de
-// inminencia de SLA (las emite el barrido sanitario) y las dos del Módulo 16
-// (las cubre `OpportunisticNotificationAndPrivacyTest`, T-OPP-07).
+// inminencia de SLA (las emite el barrido sanitario), las dos del Módulo 16
+// (las cubre `OpportunisticNotificationAndPrivacyTest`, T-OPP-07) y la del
+// relevo de fin de turno (Módulo 21, cubierta por `TechnicianShiftApiTest`).
 $expectedBusinessTemplates = array_values(array_filter(
     array_map(static fn (NotificationTemplate $template): string => $template->value, NotificationTemplate::cases()),
     static fn (string $value): bool => !in_array($value, [
@@ -789,6 +790,7 @@ $expectedBusinessTemplates = array_values(array_filter(
         NotificationTemplate::SLA_IMMINENCE_3H_UNSTARTED->value,
         NotificationTemplate::OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT->value,
         NotificationTemplate::INCIDENT_REOPENED_IN_SITU_SITE->value,
+        NotificationTemplate::TELEGRAM_INCIDENT_ASSIGNMENT->value,
     ], true)
 ));
 $observedTemplates = array_map(
@@ -799,8 +801,8 @@ sort($expectedBusinessTemplates);
 sort($observedTemplates);
 
 $assert(
-    'T-NOTIF-10: el catálogo cerrado mantiene exactamente 21 plantillas',
-    count(NotificationTemplate::cases()) === 21
+    'T-NOTIF-10: el catálogo cerrado mantiene exactamente 22 plantillas',
+    count(NotificationTemplate::cases()) === 22
 );
 $assert(
     'T-NOTIF-10: los 17 eventos de negocio del catálogo quedan encolados por esta suite',

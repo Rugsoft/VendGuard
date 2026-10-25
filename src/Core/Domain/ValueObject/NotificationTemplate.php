@@ -9,7 +9,7 @@ use InvalidArgumentException;
 /**
  * NotificationTemplate
  *
- * Catálogo cerrado de las 21 plantillas de notificación tipificadas (Módulos 14 y 16).
+ * Catálogo cerrado de las 22 plantillas de notificación tipificadas (Módulos 14, 16 y 21).
  * Coincide exactamente con el enum `notification_template` de PostgreSQL.
  */
 enum NotificationTemplate: string
@@ -43,6 +43,9 @@ enum NotificationTemplate: string
     case OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT = 'OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT';
     case INCIDENT_REOPENED_IN_SITU_SITE           = 'INCIDENT_REOPENED_IN_SITU_SITE';
 
+    // 5. Relevo de fin de turno (Módulo 21)
+    case TELEGRAM_INCIDENT_ASSIGNMENT              = 'TELEGRAM_INCIDENT_ASSIGNMENT';
+
     /**
      * Etiqueta descriptiva en castellano.
      */
@@ -70,6 +73,7 @@ enum NotificationTemplate: string
             self::CITIZEN_QR_OBSERVATION_ACK => 'Acuse de Observación Adicional Registrada (QR)',
             self::OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT => 'Alerta a Coordinación por Posponer una Parada Crítica de Frío',
             self::INCIDENT_REOPENED_IN_SITU_SITE => 'Aviso a Sede de Reapertura In Situ',
+            self::TELEGRAM_INCIDENT_ASSIGNMENT => 'Aviso Prioritario de Relevo al Técnico',
         };
     }
 
@@ -87,6 +91,7 @@ enum NotificationTemplate: string
             self::SLA_IMMINENCE_3H_UNSTARTED,
             self::CHRONIC_BREAKDOWN_ALERT,
             self::OPPORTUNISTIC_COLD_ROUTE_POSTPONED_ALERT => NotificationPriority::CRITICAL_SANITARY,
+            self::TELEGRAM_INCIDENT_ASSIGNMENT => NotificationPriority::PRIORITY,
             default => NotificationPriority::STANDARD,
         };
     }

@@ -62,6 +62,7 @@ const CHANNEL_OPTIONS = [
 const PRIORITY_OPTIONS = [
   { value: 'ALL', label: 'Todas las prioridades' },
   { value: 'CRITICAL_SANITARY', label: 'Crítica sanitaria (Art. II)' },
+  { value: 'PRIORITY', label: 'Prioritaria operativa' },
   { value: 'STANDARD', label: 'Ordinaria' }
 ];
 
@@ -114,6 +115,11 @@ const PRIORITY_META = {
     label: 'Crítica sanitaria',
     background: 'var(--color-error-bg)',
     color: 'var(--color-error-text)'
+  },
+  PRIORITY: {
+    label: 'Prioritaria operativa',
+    background: 'var(--color-warning-bg)',
+    color: 'var(--color-warning-text)'
   },
   STANDARD: {
     label: 'Ordinaria',

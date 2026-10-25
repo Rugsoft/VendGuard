@@ -262,6 +262,15 @@ try {
         ]);
     };
 
+    /** Abre el turno del técnico: sin fila abierta el recomendador lo relega (RF-03.1). */
+    $startShift = static function (int $technicianId) use ($pdo): void {
+        $stmt = $pdo->prepare(
+            "INSERT INTO technician_shifts (technician_id, status, shift_date, started_at)
+             VALUES (:technician_id, 'ON_SHIFT', CURRENT_DATE, CURRENT_TIMESTAMP)"
+        );
+        $stmt->execute([':technician_id' => $technicianId]);
+    };
+
     // Base central explícita: id = 1 en un esquema recién creado.
     $pdo->exec("INSERT INTO route_settings (base_name, base_latitude, base_longitude) VALUES ('Base T10', 41.3935, 2.1701)");
 
@@ -273,6 +282,10 @@ try {
     $preventiveTech = $createUser('preventivo', 'TECHNICIAN');
     $twinTech = $createUser('gemelo', 'TECHNICIAN');
     $inactiveTech = $createUser('baja', 'TECHNICIAN', false);
+
+    foreach ([$primaryBusy, $backupFree, $onCall, $onsiteTech, $preventiveTech, $twinTech] as $activeTechnicianId) {
+        $startShift($activeTechnicianId);
+    }
 
     $northZone = $createZone('ZONA-NORTE-T10', 'Zona Norte de Certificación T10');
     $southZone = $createZone('ZONA-SUR-T10', 'Zona Sur de Certificación T10');
@@ -486,6 +499,9 @@ try {
                 'has_in_progress_stop',
                 'in_progress_location_name',
                 'distance_km',
+                'is_available',
+                'unavailability_reason',
+                'shift_status',
             ]
     );
 
@@ -662,6 +678,51 @@ try {
         '5.2 La mediana de 20 repeticiones reales queda por debajo de 100 ms (RNF-01)',
         count(array_unique($signatures)) === 1 && $median < 100.0,
         sprintf('mediana=%.2f ms · min=%.2f ms · max=%.2f ms', $median, $durations[0], $durations[19])
+    );
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 6. Técnico sin turno abierto (RF-03.1 / RF-08.1)
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 6. Técnico sin turno abierto ---\n";
+
+    // Cerrar el turno deja la foto sin fila activa: el repositorio debe
+    // explicitarla como OFF_SHIFT, no omitirla y dejar que el ranking lo
+    // confunda con un técnico disponible.
+    $closeShift = $pdo->prepare(
+        "UPDATE technician_shifts
+            SET status = 'OFF_SHIFT',
+                closed_at = CURRENT_TIMESTAMP,
+                close_reason = 'Cierre de certificación T-ZONE-10'
+          WHERE technician_id = :technician_id
+            AND closed_at IS NULL"
+    );
+    $closeShift->execute([':technician_id' => $twinTech]);
+
+    $noShift = $json($call(
+        'GET',
+        '/api/coordinator/incidents/' . $ordinaryIncident . '/suggested-technicians',
+        [],
+        $coordinatorToken
+    ))['data'] ?? [];
+    $noShiftRanked = $noShift['ranked_technicians'] ?? [];
+    $noShiftRow = null;
+    foreach ($noShiftRanked as $row) {
+        if ((int)($row['technician_id'] ?? 0) === $twinTech) {
+            $noShiftRow = $row;
+            break;
+        }
+    }
+    $lastRanked = $noShiftRanked[array_key_last($noShiftRanked)] ?? [];
+
+    $assert(
+        '6.1 Sin fila de turno abierto el técnico se publica OFF_SHIFT, no disponible y relegado',
+        is_array($noShiftRow)
+            && ($noShiftRow['current_status']['shift_status'] ?? '') === 'OFF_SHIFT'
+            && ($noShiftRow['current_status']['is_available'] ?? true) === false
+            && ($noShiftRow['current_status']['unavailability_reason'] ?? '') === 'Fuera de turno'
+            && in_array('NO_DISPONIBLE', $noShiftRow['badges'] ?? [], true)
+            && (int)($lastRanked['technician_id'] ?? 0) === $twinTech,
+        json_encode($noShiftRow['current_status'] ?? null)
     );
 } catch (Throwable $exception) {
     $crash = $exception;

@@ -94,8 +94,8 @@ const OPPORTUNISTIC_NEW_TEMPLATES = [
     'INCIDENT_REOPENED_IN_SITU_SITE',
 ];
 
-/** Total esperado del catálogo cerrado tras el módulo (19 del módulo 14 + 2 del módulo 16). */
-const NOTIFICATION_TEMPLATE_TOTAL = 21;
+/** Total esperado del catálogo cerrado tras los módulos 14, 16 y 21. */
+const NOTIFICATION_TEMPLATE_TOTAL = 22;
 
 /** Combinaciones que la restricción debe admitir. */
 const COHERENCE_ACCEPTED = [
@@ -278,8 +278,9 @@ try {
     );
 
     $assert(
-        'Las dos plantillas del módulo se anexan al final del catálogo (ampliación, no reordenación)',
-        array_slice($templateLabels, -2) === OPPORTUNISTIC_NEW_TEMPLATES,
+        'Las dos plantillas del módulo 16 conservan su posición y el relevo se anexa después',
+        array_slice($templateLabels, -3, 2) === OPPORTUNISTIC_NEW_TEMPLATES
+            && end($templateLabels) === 'TELEGRAM_INCIDENT_ASSIGNMENT',
         'últimas: ' . implode('/', array_slice($templateLabels, -2))
     );
 

@@ -28,6 +28,7 @@ use VendGuard\Core\Domain\Model\UserRole;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\SeedRunner;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
+use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
 use VendGuard\Presentation\Routing\AppRouter;
 
@@ -52,11 +53,16 @@ $assert = function (bool $condition, string $message) use (&$assertionCount) {
     echo "  [PASS] Aserción {$assertionCount}: {$message}\n";
 };
 
-// Generar tokens para pruebas
-$coordUser = new User(1, 'Sara Coordinadora', 'coord@vendguard.internal', 'hash', UserRole::COORDINATOR);
+// Generar tokens para pruebas. El middleware revalida el usuario contra la base:
+// se resuelven por correo canónico para no fijar identificadores que la
+// restitución del parque puede desplazar.
+$users = new PdoUserRepository($pdo);
+$coordUser = $users->findByEmail('coordinacion@vendguard.internal');
+$techUser = $users->findByEmail('jordi.ruta@vendguard.internal');
+if ($coordUser === null || $techUser === null) {
+    throw new RuntimeException('No se encontraron los usuarios canónicos de la prueba.');
+}
 $coordToken = $authService->generateInternalToken($coordUser);
-
-$techUser = new User(2, 'Jordi Técnico', 'tech@vendguard.internal', 'hash', UserRole::TECHNICIAN);
 $techToken = $authService->generateInternalToken($techUser);
 
 // --- CASO 1: Seguridad y RBAC (401 sin auth, 403 con rol técnico) ---
@@ -191,6 +197,15 @@ if ($exportWasPartial) {
         !str_contains($auditBody, 'EXPORTACION PARCIAL'),
         'Sin recorte no hay aviso de exportacion parcial que declarar',
         'eventos en base de datos: ' . $totalAuditEvents
+    );
+    // La cabecera tiene que seguir inmediatamente al BOM. Comprobarlo mantiene
+    // constante el número de aserciones entre un banco recién sembrado y uno
+    // maduro, y además detecta una línea de aviso que se colara por error: Excel
+    // dejaría de reconocer el BOM y rompería los acentos del fichero completo.
+    $assert(
+        str_starts_with($auditBody, "\xEF\xBB\xBFID,"),
+        'La cabecera del CSV sigue inmediatamente al BOM UTF-8',
+        bin2hex(substr($auditBody, 0, 16))
     );
 }
 

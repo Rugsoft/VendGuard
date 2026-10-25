@@ -6,6 +6,7 @@ namespace VendGuard\Infrastructure\Repository;
 
 use PDO;
 use VendGuard\Core\Domain\Repository\TechnicianSuggestionRepositoryInterface;
+use VendGuard\Core\Domain\ValueObject\AbsenceReason;
 use VendGuard\Core\Domain\ValueObject\ZoneAffinityType;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
@@ -199,7 +200,7 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
      * `LEFT JOIN` no encuentra fila y todos los candidatos quedan en `NONE`, que es
      * exactamente el escenario de zona desatendida de RF-06.1.
      *
-     * @return list<array{technician_id: int, name: string, operator_code: string|null, is_on_call: bool, is_active: bool, affinity: string}>
+     * @return list<array{technician_id: int, name: string, operator_code: string|null, is_on_call: bool, is_active: bool, affinity: string, shift_status: string, active_absence?: array<string, string>}>
      */
     private function findTechnicians(?int $zoneId): array
     {
@@ -210,12 +211,21 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
                 u.operator_code,
                 u.is_on_call,
                 u.is_active,
-                a.is_primary
+                a.is_primary,
+                ts.status AS shift_status,
+                tab.reason AS absence_reason
             FROM users u
             LEFT JOIN technician_zone_assignments a
                    ON a.technician_id = u.id
                   AND a.removed_at IS NULL
                   AND a.zone_id = :zone_id
+            LEFT JOIN technician_shifts ts
+                   ON ts.technician_id = u.id
+                  AND ts.closed_at IS NULL
+            LEFT JOIN technician_absences tab
+                   ON tab.technician_id = u.id
+                  AND tab.cancelled_at IS NULL
+                  AND CURRENT_TIMESTAMP BETWEEN tab.starts_at AND tab.ends_at
             WHERE u.role = 'TECHNICIAN'
               AND u.is_active = " . $this->dialect->booleanLiteral(true) . "
               AND u.deleted_at IS NULL
@@ -228,7 +238,10 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
 
         $rows = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $rows[] = [
+            $absenceReason = isset($row['absence_reason']) && $row['absence_reason'] !== null ? (string)$row['absence_reason'] : null;
+            $absenceReasonEnum = $absenceReason !== null ? AbsenceReason::tryFrom($absenceReason) : null;
+
+            $rowItem = [
                 'technician_id' => (int)$row['technician_id'],
                 'name' => (string)$row['name'],
                 'operator_code' => $row['operator_code'] !== null ? (string)$row['operator_code'] : null,
@@ -236,6 +249,21 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
                 'is_active' => $this->toBoolean($row['is_active'] ?? false),
                 'affinity' => $this->affinityFrom($row['is_primary']),
             ];
+
+            // RF-03.1: la ausencia de fila de turno abierto no es «sin dato», es
+            // OFF_SHIFT. Se explicita en la foto para que el recomendador no tenga
+            // que adivinar la disponibilidad por la ausencia de una clave.
+            $rowItem['shift_status'] = $row['shift_status'] !== null
+                ? (string)$row['shift_status']
+                : 'OFF_SHIFT';
+            if ($absenceReasonEnum !== null) {
+                $rowItem['active_absence'] = [
+                    'reason' => $absenceReasonEnum->value,
+                    'reason_label' => $absenceReasonEnum->label(),
+                ];
+            }
+
+            $rows[] = $rowItem;
         }
 
         return $rows;
@@ -442,6 +470,8 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
             'last_assigned_at' => $lastAssignedAt,
             'in_progress_location' => $this->referenceFrom($inProgress),
             'last_completed_location' => $this->referenceFrom($lastCompleted),
+            'shift_status' => $technician['shift_status'] ?? null,
+            'active_absence' => $technician['active_absence'] ?? null,
         ];
     }
 

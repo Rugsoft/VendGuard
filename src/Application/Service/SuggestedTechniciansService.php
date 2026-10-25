@@ -50,9 +50,12 @@ final class SuggestedTechniciansService
      * Ranking explicado de la avería, o `null` si el expediente no existe.
      *
      * @param int $incidentId Avería cuyo despacho se está decidiendo.
+     * @param list<int> $excludeTechnicianIds Candidatos que no deben aparecer. La
+     *        reasignación por ausencia excluye al titular ausente para que el motor
+     *        no lo proponga como su propio suplente.
      * @return SuggestedTechnicianDto|null Ranking listo para publicar (contrato §3.6).
      */
-    public function getSuggestions(int $incidentId): ?SuggestedTechnicianDto
+    public function getSuggestions(int $incidentId, array $excludeTechnicianIds = []): ?SuggestedTechnicianDto
     {
         if ($incidentId < 1) {
             return null;
@@ -63,9 +66,15 @@ final class SuggestedTechniciansService
             return null;
         }
 
+        $excluded = array_map('intval', $excludeTechnicianIds);
+        $technicians = array_values(array_filter(
+            $photo['technicians'],
+            static fn (array $technician): bool => !in_array((int)$technician['technician_id'], $excluded, true)
+        ));
+
         return $this->suggester->getSuggestionsForIncident(
             $photo['incident'],
-            $photo['technicians'],
+            $technicians,
             $photo['options'] ?? []
         );
     }

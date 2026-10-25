@@ -69,6 +69,8 @@ final class PostgresFixtureBuilder
      */
     private const CRUD_EXCLUDED_COLUMNS = [
         'incident_service_sheets' => ['signer_name', 'signer_document', 'signature_png'],
+        'technician_absences' => ['starts_at', 'ends_at', 'cancelled_at', 'cancelled_by', 'cancellation_reason', 'reason'],
+        'technician_shifts' => ['started_at', 'meal_break_started_at', 'meal_break_ended_at', 'closed_at', 'closed_by', 'status', 'shift_date'],
     ];
 
     // ─────────────────────────────────────────────────────────────────────
@@ -570,6 +572,8 @@ final class PostgresFixtureBuilder
             // La nota de la encuesta CSAT está acotada por `chk_survey_rating` a 1–5:
             // el entero genérico (7) convertiría el alta mínima en un rechazo legítimo.
             $column === 'rating' && $udt === 'int2' => $variant === 'update' ? 4 : 5,
+            $table === 'technician_absences' && $column === 'reason' => $variant === 'update' ? 'SICK_LEAVE' : 'VACATION',
+            $table === 'technician_shifts' && $column === 'status' => $variant === 'update' ? 'OFF_SHIFT' : 'ON_SHIFT',
             in_array($udt, ['int2', 'int4', 'int8'], true) => $variant === 'update' ? 9 : 7,
             $udt === 'numeric', $udt === 'float4', $udt === 'float8' => $variant === 'update' ? '9.5000000' : '1.5000000',
             $udt === 'text' => $literal,

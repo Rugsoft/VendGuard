@@ -106,6 +106,7 @@ function createRouteInstance(initialData = {}) {
   const emits = [];
   const instance = {
     ...TechnicianRouteView.data(),
+    shiftStatus: 'ON_SHIFT',
     incidents: JSON.parse(JSON.stringify(mockRouteIncidents)),
     ...initialData,
     $refs: {
@@ -253,6 +254,15 @@ api.technician.startIncident = async (id) => {
 const assignedInc = authView.incidents.find(i => i.status === 'ASSIGNED');
 assert('3.1 Assigned incident exists in test route', assignedInc !== undefined);
 
+// Bloqueo estricto cuando está OFF_SHIFT (Módulo 21)
+authView.shiftStatus = 'OFF_SHIFT';
+await authView.startIntervention(assignedInc);
+assert('3.1b startIntervention bloqueado si shiftStatus es OFF_SHIFT', authView.errorMessage.includes('Debes iniciar tu turno'));
+assert('3.1c No invoca la API si el turno no está iniciado', startCalledId === null);
+
+// Inicio permitido cuando está ON_SHIFT
+authView.shiftStatus = 'ON_SHIFT';
+authView.errorMessage = '';
 await authView.startIntervention(assignedInc);
 
 assert('3.2 startIntervention calls api.technician.startIncident with correct ID', startCalledId === assignedInc.id);
@@ -774,6 +784,7 @@ assert('9.16 La siguiente parada programada sigue disponible y se puede iniciar'
   nextStop !== undefined
     && pausedRouteView.filteredIncidents[0].id === nextStop.id);
 
+pausedRouteView.shiftStatus = 'ON_SHIFT';
 await pausedRouteView.startIntervention(nextStop);
 assert('9.17 Iniciar la siguiente visita funciona con una parada pausada en la ruta',
   nextStop.status === 'IN_PROGRESS'

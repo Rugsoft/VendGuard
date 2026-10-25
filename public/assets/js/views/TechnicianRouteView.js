@@ -167,7 +167,22 @@ export const TechnicianRouteView = {
       enabledLocations: [],
       pendingCriticalStops: [],
       showOpportunisticModal: false,
-      opportunisticLocation: null
+      opportunisticLocation: null,
+
+      // Módulo 21: Control de Turno y Relevo de Fin de Jornada (RF-03, RF-05)
+      shiftStatus: 'OFF_SHIFT',
+      isShiftLoading: false,
+      shiftError: '',
+      showShiftHandoverModal: false,
+      handoverMode: 'CLOSE_ONLY',
+      selectedHandoverTicketIds: [],
+      targetHandoverTechId: '',
+      handoverNotes: '',
+      closeReason: '',
+      isSubmittingHandover: false,
+      handoverError: '',
+      handoverTargets: [],
+      availableReceptors: []
     };
   },
   computed: {
@@ -243,6 +258,37 @@ export const TechnicianRouteView = {
      */
     canOpenOpportunistic() {
       return this.enabledLocations.length > 0;
+    },
+
+    /**
+     * Módulo 21: Detecta si existe alguna avería en curso que bloquee el cierre de turno (RF-04).
+     */
+    hasInProgressIncidents() {
+      const list = this.assignedIncidents || this.incidents || [];
+      return list.some(inc => normalizeIncidentStatus(inc.status) === INCIDENT_STATUSES.IN_PROGRESS);
+    },
+
+    /**
+     * Módulo 21: Averías elegibles para relevo de fin de turno (ASSIGNED, PENDING_PARTS, PENDING_INFO) (RF-05).
+     */
+    eligibleHandoverIncidents() {
+      const list = this.assignedIncidents || this.incidents || [];
+      const eligibleStatuses = [
+        INCIDENT_STATUSES.ASSIGNED,
+        INCIDENT_STATUSES.PENDING_PARTS,
+        INCIDENT_STATUSES.PENDING_INFO,
+      ];
+      return list.filter(inc => eligibleStatuses.includes(normalizeIncidentStatus(inc.status)));
+    },
+
+    /**
+     * Nombre del receptor elegido, para el texto del botón de confirmación.
+     */
+    selectedHandoverTargetName() {
+      const target = this.handoverTargets.find(
+        tech => String(tech.id) === String(this.targetHandoverTechId)
+      );
+      return target ? target.name : '';
     },
 
     /**
@@ -352,9 +398,227 @@ export const TechnicianRouteView = {
   mounted() {
     if (this.isAuthenticated) {
       this.loadRoute().then(() => this.applyDeepLink());
+      this.loadShiftStatus();
     }
   },
   methods: {
+    async loadShiftStatus() {
+      try {
+        const res = await api.get('/technician/shift/status');
+        this.shiftStatus = res?.status || res?.data?.status || 'OFF_SHIFT';
+      } catch (err) {
+        console.error('Error al cargar estado de turno:', err);
+      }
+    },
+
+    async startShift() {
+      this.isShiftLoading = true;
+      this.shiftError = '';
+      try {
+        const res = await api.post('/technician/shift/start');
+        this.shiftStatus = res?.status || res?.data?.status || 'ON_SHIFT';
+      } catch (err) {
+        this.shiftError = err?.message || 'No se pudo iniciar el turno.';
+      } finally {
+        this.isShiftLoading = false;
+      }
+    },
+
+    async pauseMealShift() {
+      this.isShiftLoading = true;
+      this.shiftError = '';
+      try {
+        const res = await api.post('/technician/shift/pause-meal');
+        this.shiftStatus = res?.status || res?.data?.status || 'MEAL_BREAK';
+      } catch (err) {
+        this.shiftError = err?.message || 'No se pudo pausar para comida.';
+      } finally {
+        this.isShiftLoading = false;
+      }
+    },
+
+    async resumeMealShift() {
+      this.isShiftLoading = true;
+      this.shiftError = '';
+      try {
+        const res = await api.post('/technician/shift/resume');
+        this.shiftStatus = res?.status || res?.data?.status || 'ON_SHIFT';
+      } catch (err) {
+        this.shiftError = err?.message || 'No se pudo reanudar el turno.';
+      } finally {
+        this.isShiftLoading = false;
+      }
+    },
+
+    async openShiftHandoverModal() {
+      this.showShiftHandoverModal = true;
+      this.handoverMode = 'CLOSE_ONLY';
+      this.handoverError = '';
+      this.handoverNotes = '';
+      this.closeReason = '';
+      this.targetHandoverTechId = '';
+      this.selectedHandoverTicketIds = [];
+      // En modo cierre no se consulta la lista de compañeros: el modo seguro
+      // no debe depender de una lectura que puede fallar.
+    },
+
+    /**
+     * Cambia entre cierre sin relevo y traspaso explícito.
+     *
+     * La lista de receptores se carga solo al entrar en TRASFER; abrir el modal
+     * en modo cierre no genera tráfico ni preselecciona averías.
+     */
+    async setHandoverMode(mode) {
+      if (!['CLOSE_ONLY', 'TRANSFER'].includes(mode)) {
+        return;
+      }
+
+      this.handoverMode = mode;
+      this.handoverError = '';
+
+      if (mode === 'CLOSE_ONLY') {
+        this.targetHandoverTechId = '';
+        this.selectedHandoverTicketIds = [];
+        return;
+      }
+
+      if (this.eligibleHandoverIncidents.length === 0) {
+        this.handoverError = 'No tienes averías pendientes para traspasar. Puedes cerrar sin relevo.';
+        return;
+      }
+
+      if (this.handoverTargets.length === 0) {
+        await this.loadHandoverTargets();
+      }
+    },
+
+    async loadHandoverTargets() {
+      try {
+        // Endpoint propio del técnico: el cuadrante de Coordinación exige rol
+        // COORDINATOR y devolvía 403 desde el móvil (A6).
+        const res = await api.get('/technician/handover-targets');
+        const raw = res?.data || res || [];
+        const list = Array.isArray(raw) ? raw : [];
+        const myId = Number(this.currentUser?.id);
+
+        this.handoverTargets = list
+          .filter(t => Number(t.id) !== myId && t.is_active !== false)
+          .map(t => {
+            const availability = t.availability || 'AVAILABLE';
+            const canReceive = t.is_available_for_handover !== undefined
+              ? Boolean(t.is_available_for_handover)
+              : availability === 'AVAILABLE';
+
+            return {
+              ...t,
+              availability,
+              availability_label: t.availability_label || availability,
+              is_available_for_handover: canReceive,
+            };
+          });
+
+        this.availableReceptors = this.handoverTargets.filter(t => t.is_available_for_handover);
+      } catch (e) {
+        this.handoverTargets = [];
+        this.availableReceptors = [];
+        this.handoverError = 'No se pudieron cargar los compañeros disponibles para el relevo.';
+      }
+    },
+
+    selectAllHandoverIncidents() {
+      this.selectedHandoverTicketIds = this.eligibleHandoverIncidents.map(i => i.id);
+    },
+
+    clearHandoverSelection() {
+      this.selectedHandoverTicketIds = [];
+    },
+
+    /**
+     * Etiqueta de máquina del listado de relevo. La ruta publica `machine.code`
+     * anidado; el modal antiguo solo miraba `machine_code` y siempre caía a
+     * "Máquina #undefined" (A6).
+     */
+    handoverMachineLabel(incident) {
+      const code = incident?.machine?.code || incident?.machine_code;
+      if (code) {
+        return code;
+      }
+      const machineId = incident?.machine?.id || incident?.machine_id;
+      return machineId ? `Máquina #${machineId}` : 'Máquina sin identificar';
+    },
+
+    closeShiftHandoverModal() {
+      this.showShiftHandoverModal = false;
+      this.handoverError = '';
+    },
+
+    async submitShiftHandover() {
+      if (this.hasInProgressIncidents) {
+        this.handoverError = 'No es posible cerrar turno con averías en curso. Debe resolver la intervención o pausarla.';
+        return;
+      }
+
+      const isTransfer = this.handoverMode === 'TRANSFER';
+
+      if (isTransfer) {
+        if (this.selectedHandoverTicketIds.length === 0) {
+          this.handoverError = 'Selecciona al menos una avería para traspasar o cambia a cierre sin relevo.';
+          return;
+        }
+        if (!this.targetHandoverTechId) {
+          this.handoverError = 'Debe seleccionar un técnico receptor para las averías traspasadas.';
+          return;
+        }
+        const target = this.handoverTargets.find(
+          tech => String(tech.id) === String(this.targetHandoverTechId)
+        );
+        if (target && target.is_available_for_handover === false) {
+          this.handoverError = 'El técnico seleccionado no está disponible para recibir el relevo.';
+          return;
+        }
+        if (this.handoverNotes.trim().length < 10) {
+          this.handoverError = 'La nota de traspaso debe tener al menos 10 caracteres.';
+          return;
+        }
+      }
+
+      this.isSubmittingHandover = true;
+      this.handoverError = '';
+      try {
+        const payload = isTransfer
+          ? {
+              target_technician_id: Number(this.targetHandoverTechId),
+              incident_ids: this.selectedHandoverTicketIds,
+              handover_notes: this.handoverNotes,
+              close_reason: this.closeReason || 'Fin de jornada con relevo',
+            }
+          : {
+              target_technician_id: null,
+              incident_ids: [],
+              handover_notes: '',
+              close_reason: 'Fin de jornada sin relevo',
+            };
+
+        await api.post('/technician/shift/close-handover', payload);
+        this.showShiftHandoverModal = false;
+        this.shiftStatus = 'OFF_SHIFT';
+        await this.loadRoute();
+      } catch (err) {
+        if (err?.code === 'CONCURRENT_ROUTE_MODIFICATION' || err?.status === 409) {
+          this.handoverError = 'La ruta ha cambiado concurrentemente. Se ha actualizado la lista de incidencias.';
+          await this.loadRoute();
+        } else if (err?.code === 'TARGET_TECHNICIAN_UNAVAILABLE') {
+          this.handoverError = err?.message || 'El técnico seleccionado no está disponible para recibir el relevo.';
+          this.targetHandoverTechId = '';
+          this.handoverTargets = [];
+          await this.loadHandoverTargets();
+        } else {
+          this.handoverError = err?.message || 'Error al cerrar el turno.';
+        }
+      } finally {
+        this.isSubmittingHandover = false;
+      }
+    },
     /**
      * One-tap Google Maps driving navigation to the exact stop coordinates (RF-MAP-08).
      */
@@ -568,6 +832,17 @@ export const TechnicianRouteView = {
      */
     async startIntervention(incident) {
       if (this.actionInProgressId) return;
+
+      if (this.shiftStatus !== 'ON_SHIFT') {
+        const msg = this.shiftStatus === 'MEAL_BREAK'
+          ? 'No puedes iniciar una intervención mientras estás en pausa de comida. Reanuda tu turno primero.'
+          : 'Debes iniciar tu turno antes de comenzar una intervención.';
+        this.errorMessage = msg;
+        if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        return;
+      }
 
       this.actionInProgressId = incident.id;
       this.feedbackMessage = '';
@@ -790,6 +1065,18 @@ export const TechnicianRouteView = {
      */
     async resumePendingInfoIntervention(incident) {
       if (!incident?.id || this.isResumingPendingInfo) return;
+
+      if (this.shiftStatus !== 'ON_SHIFT') {
+        const msg = this.shiftStatus === 'MEAL_BREAK'
+          ? 'No puedes reanudar una intervención mientras estás en pausa de comida. Reanuda tu turno primero.'
+          : 'Debes iniciar tu turno antes de reanudar una intervención.';
+        this.errorMessage = msg;
+        this.pendingInfoResumeError = msg;
+        if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        return;
+      }
 
       this.isResumingPendingInfo = true;
       this.pendingInfoResumeError = '';
@@ -1332,6 +1619,85 @@ export const TechnicianRouteView = {
           </div>
         </div>
 
+        <!-- Barra de Control de Turno y Jornada (Módulo 21, RF-03) -->
+        <div
+          data-testid="shift-control-bar"
+          style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px;"
+        >
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span
+              style="width: 10px; height: 10px; border-radius: 50%; display: inline-block;"
+              :style="{
+                backgroundColor: shiftStatus === 'ON_SHIFT' ? 'var(--color-success)' : (shiftStatus === 'MEAL_BREAK' ? 'var(--color-warning)' : 'var(--color-ink-muted)')
+              }"
+            ></span>
+            <span style="font-size: 13px; font-weight: 600; color: var(--color-slate);">
+              {{ shiftStatus === 'ON_SHIFT' ? 'En turno' : (shiftStatus === 'MEAL_BREAK' ? 'Pausa comida' : 'Fuera de turno') }}
+            </span>
+          </div>
+
+          <div style="display: flex; gap: 6px;">
+            <button
+              v-if="shiftStatus === 'OFF_SHIFT'"
+              type="button"
+              class="vg-btn vg-btn-primary"
+              style="height: 32px; font-size: 12px; padding: 0 12px; border-radius: var(--radius-interactive);"
+              :disabled="isShiftLoading"
+              @click="startShift"
+            >
+              ▶ Iniciar Turno
+            </button>
+
+            <template v-else-if="shiftStatus === 'ON_SHIFT'">
+              <button
+                type="button"
+                class="vg-btn vg-btn-secondary"
+                style="height: 32px; font-size: 12px; padding: 0 10px; border-radius: var(--radius-interactive);"
+                :disabled="isShiftLoading"
+                @click="pauseMealShift"
+                title="Pausar para comida"
+              >
+                🥪 Pausa Comida
+              </button>
+              <button
+                type="button"
+                class="vg-btn vg-btn-secondary"
+                style="height: 32px; font-size: 12px; padding: 0 10px; border-radius: var(--radius-interactive); color: var(--color-urgency-critical);"
+                :disabled="isShiftLoading"
+                @click="openShiftHandoverModal"
+                title="Cerrar turno y relevo"
+              >
+                ⏹ Cerrar Turno
+              </button>
+            </template>
+
+            <template v-else-if="shiftStatus === 'MEAL_BREAK'">
+              <button
+                type="button"
+                class="vg-btn vg-btn-primary"
+                style="height: 32px; font-size: 12px; padding: 0 10px; border-radius: var(--radius-interactive);"
+                :disabled="isShiftLoading"
+                @click="resumeMealShift"
+              >
+                ▶ Reanudar
+              </button>
+              <button
+                type="button"
+                class="vg-btn vg-btn-secondary"
+                style="height: 32px; font-size: 12px; padding: 0 10px; border-radius: var(--radius-interactive); color: var(--color-urgency-critical);"
+                :disabled="isShiftLoading"
+                @click="openShiftHandoverModal"
+              >
+                ⏹ Cerrar
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <div v-if="shiftError" style="color: var(--color-urgency-critical); font-size: 12px; margin-bottom: 10px; padding: 6px 10px; background: var(--color-urgency-critical-bg); border-radius: var(--radius-interactive);">
+          {{ shiftError }}
+        </div>
+
         <!-- Barra de Navegación Móvil del Técnico (RF-07, RF-04, RF-PREV-02) -->
         <div style="display: flex; gap: 6px; margin-bottom: 14px; background: #e5f2fc; padding: 4px; border-radius: 8px;">
           <button
@@ -1807,17 +2173,21 @@ export const TechnicianRouteView = {
               </div>
 
               <!-- Action Option 1: Start Intervention (when ASSIGNED) -->
-              <button
-                v-else-if="isAssigned(incident)"
-                type="button"
-                class="vg-btn vg-btn-primary"
-                style="width: 100%; height: 46px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"
-                :disabled="actionInProgressId === incident.id"
-                @click="startIntervention(incident)"
-              >
-                <span v-if="actionInProgressId !== incident.id">▶ Iniciar intervención</span>
-                <span v-else>Iniciando...</span>
-              </button>
+              <div v-else-if="isAssigned(incident)">
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-primary"
+                  style="width: 100%; height: 46px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"
+                  :disabled="actionInProgressId === incident.id"
+                  @click="startIntervention(incident)"
+                >
+                  <span v-if="actionInProgressId !== incident.id">▶ Iniciar intervención</span>
+                  <span v-else>Iniciando...</span>
+                </button>
+                <div v-if="shiftStatus !== 'ON_SHIFT'" style="margin-top: 6px; font-size: 12px; color: var(--color-ink-muted); text-align: center;">
+                  ℹ️ Debes iniciar turno arriba para intervenir
+                </div>
+              </div>
 
               <!-- Action Option 2: In Progress Controls (when IN_PROGRESS) -->
               <div v-else-if="isInProgress(incident)" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
@@ -1840,17 +2210,21 @@ export const TechnicianRouteView = {
               </div>
 
               <!-- Action Option 3: Resume from Missing Parts (when PENDING_PARTS) -->
-              <button
-                v-else-if="isPendingParts(incident)"
-                type="button"
-                class="vg-btn vg-btn-primary"
-                style="width: 100%; height: 46px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"
-                :disabled="actionInProgressId === incident.id"
-                @click="startIntervention(incident)"
-              >
-                <span v-if="actionInProgressId !== incident.id">▶ Reanudar intervención</span>
-                <span v-else>Reanudando...</span>
-              </button>
+              <div v-else-if="isPendingParts(incident)">
+                <button
+                  type="button"
+                  class="vg-btn vg-btn-primary"
+                  style="width: 100%; height: 46px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;"
+                  :disabled="actionInProgressId === incident.id"
+                  @click="startIntervention(incident)"
+                >
+                  <span v-if="actionInProgressId !== incident.id">▶ Reanudar intervención</span>
+                  <span v-else>Reanudando...</span>
+                </button>
+                <div v-if="shiftStatus !== 'ON_SHIFT'" style="margin-top: 6px; font-size: 12px; color: var(--color-ink-muted); text-align: center;">
+                  ℹ️ Debes iniciar turno arriba para intervenir
+                </div>
+              </div>
 
               <!-- Action Option 3-bis: Otra máquina en esta sede (Módulo 16, RF-01.2, RNF-02).
                    Solo en paradas activas (asignadas o en curso) y cuando la sede sigue
@@ -2111,6 +2485,172 @@ export const TechnicianRouteView = {
         :incident-id="serviceSheetIncidentId"
         audience="technician"
       />
+
+      <!-- =================================================================== -->
+      <!-- MODAL 6: FIN DE JORNADA Y RELEVO DE RUTA (Módulo 21, RF-05)         -->
+      <!-- =================================================================== -->
+      <ModalDialog
+        v-model="showShiftHandoverModal"
+        title="Fin de Jornada y Relevo de Ruta"
+        @close="closeShiftHandoverModal"
+      >
+        <div v-if="hasInProgressIncidents" style="background-color: var(--color-urgency-critical-bg); border: 1px solid var(--color-hairline); color: var(--color-error-text); padding: 12px; border-radius: var(--radius-interactive); margin-bottom: 14px; font-size: 13px;">
+          <strong>⚠️ Bloqueo de Cierre:</strong> Tienes averías en curso (EN CURSO). Debes resolver la intervención o pausarla por repuesto o falta de acceso antes de poder cerrar la jornada.
+        </div>
+
+        <div v-else>
+          <div style="display: flex; gap: 8px; margin-bottom: 14px;">
+            <button
+              type="button"
+              class="vg-btn"
+              :class="handoverMode === 'CLOSE_ONLY' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+              @click="setHandoverMode('CLOSE_ONLY')"
+            >
+              Cerrar sin relevo
+            </button>
+            <button
+              type="button"
+              class="vg-btn"
+              :class="handoverMode === 'TRANSFER' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+              :disabled="eligibleHandoverIncidents.length === 0"
+              @click="setHandoverMode('TRANSFER')"
+            >
+              Traspasar averías
+            </button>
+          </div>
+
+          <div
+            v-if="handoverMode === 'CLOSE_ONLY'"
+            style="background: var(--color-canvas); border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 12px; margin-bottom: 14px; font-size: 13px; color: var(--color-slate);"
+          >
+            <strong>Cerrar sin traspaso.</strong> Las averías ordinarias se retendrán en tu ruta para mañana. Las máquinas de perecederos se derivan automáticamente a la guardia sanitaria o se desasignan con alarma crítica a Coordinación (Art. II).
+          </div>
+
+          <div v-else>
+            <p style="font-size: 13px; color: var(--color-slate); margin-bottom: 12px;">
+              Selecciona explícitamente las averías que deseas traspasar. Las no seleccionadas se retendrán en tu ruta para mañana (salvo máquinas de perecederos, que se derivan automáticamente a la guardia sanitaria según Art. II).
+            </p>
+
+            <div v-if="eligibleHandoverIncidents.length > 0" style="margin-bottom: 14px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
+                <label style="display: block; font-size: 12px; font-weight: 700; color: var(--color-slate);">
+                  Averías elegibles para traspaso ({{ eligibleHandoverIncidents.length }}):
+                </label>
+                <button
+                  v-if="selectedHandoverTicketIds.length < eligibleHandoverIncidents.length"
+                  type="button"
+                  class="vg-btn vg-btn-secondary"
+                  style="font-size: 11px; padding: 4px 8px;"
+                  @click="selectAllHandoverIncidents"
+                >
+                  Seleccionar todas
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  class="vg-btn vg-btn-secondary"
+                  style="font-size: 11px; padding: 4px 8px;"
+                  @click="clearHandoverSelection"
+                >
+                  Quitar selección
+                </button>
+              </div>
+              <div style="max-height: 140px; overflow-y: auto; border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); padding: 6px;">
+                <div
+                  v-for="inc in eligibleHandoverIncidents"
+                  :key="inc.id"
+                  style="display: flex; align-items: center; gap: 8px; padding: 4px 6px; font-size: 12px;"
+                >
+                  <input
+                    type="checkbox"
+                    :id="'handover-inc-' + inc.id"
+                    :value="inc.id"
+                    v-model="selectedHandoverTicketIds"
+                  />
+                  <label :for="'handover-inc-' + inc.id" style="cursor: pointer; flex: 1;">
+                    <strong>{{ inc.ticket_code }}</strong> - {{ handoverMachineLabel(inc) }} ({{ inc.status }})
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div v-else style="font-size: 13px; color: var(--color-ink-muted); margin-bottom: 14px;">
+              ℹ️ No tienes averías pendientes para traspasar.
+            </div>
+
+            <div v-if="selectedHandoverTicketIds.length > 0">
+              <div style="margin-bottom: 12px;">
+                <label for="handover-target-tech" style="display: block; font-size: 12px; font-weight: 700; color: var(--color-slate); margin-bottom: 4px;">
+                  Técnico Receptor *
+                </label>
+                <select
+                  id="handover-target-tech"
+                  v-model="targetHandoverTechId"
+                  class="vg-input"
+                  style="width: 100%; height: 38px; font-size: 13px;"
+                  required
+                >
+                  <option value="" disabled>Selecciona técnico de relevo...</option>
+                  <option
+                    v-for="tech in handoverTargets"
+                    :key="tech.id"
+                    :value="tech.id"
+                    :disabled="!tech.is_available_for_handover"
+                  >
+                    {{ tech.name }} — {{ tech.availability_label }}
+                  </option>
+                </select>
+                <div v-if="handoverTargets.length === 0" style="font-size: 12px; color: var(--color-ink-muted); margin-top: 4px;">
+                  No hay compañeros disponibles. Puedes cerrar sin relevo.
+                </div>
+              </div>
+
+              <div style="margin-bottom: 12px;">
+                <label for="handover-notes" style="display: block; font-size: 12px; font-weight: 700; color: var(--color-slate); margin-bottom: 4px;">
+                  Nota Interna de Taller (Art. V.4, confidencial) *
+                </label>
+                <textarea
+                  id="handover-notes"
+                  v-model="handoverNotes"
+                  class="vg-input"
+                  rows="3"
+                  style="width: 100%; font-size: 13px;"
+                  placeholder="Detalles técnicos para el compañero que retoma la ruta (mínimo 10 caracteres)..."
+                  required
+                ></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="handoverError" style="color: var(--color-urgency-critical); font-size: 12px; margin-bottom: 12px;">
+            {{ handoverError }}
+          </div>
+        </div>
+
+        <template #footer>
+          <div style="display: flex; justify-content: flex-end; gap: 8px;">
+            <button
+              type="button"
+              class="vg-btn vg-btn-secondary"
+              @click="closeShiftHandoverModal"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              class="vg-btn vg-btn-primary"
+              :disabled="hasInProgressIncidents || isSubmittingHandover"
+              @click="submitShiftHandover"
+            >
+              <span v-if="!isSubmittingHandover">
+                {{ handoverMode === 'CLOSE_ONLY'
+                  ? 'Confirmar cierre sin relevo'
+                  : 'Traspasar ' + selectedHandoverTicketIds.length + ' avería(s) a ' + (selectedHandoverTargetName || '...') }}
+              </span>
+              <span v-else>Cerrando...</span>
+            </button>
+          </div>
+        </template>
+      </ModalDialog>
     </div>
   `
 };

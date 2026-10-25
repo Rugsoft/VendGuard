@@ -37,7 +37,8 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  *     `FAILED_PERMANENT`.
  *   - **Reclamo sin esperas (RF-01.3, RNF-06).** `FOR UPDATE SKIP LOCKED`
  *     permite que dos despachadores solapados tomen lotes disjuntos, y el
- *     `ORDER BY` antepone siempre `CRITICAL_SANITARY` (Art. II).
+ *     `ORDER BY` antepone siempre `CRITICAL_SANITARY` (Art. II) y después
+ *     `PRIORITY` (avisos operativos de relevo) antes que `STANDARD`.
  *   - **Sin borrado físico (Art. III.1).** Toda baja es lógica; el disparador
  *     `prevent_hard_delete()` del motor sigue siendo la última línea.
  */
@@ -220,7 +221,11 @@ class PdoNotificationOutboxRepository implements NotificationOutboxRepositoryInt
                   AND next_attempt_at <= :ready_at
                   AND deleted_at IS NULL
                 ORDER BY
-                    CASE WHEN priority = 'CRITICAL_SANITARY' THEN 0 ELSE 1 END ASC,
+                    CASE
+                        WHEN priority = 'CRITICAL_SANITARY' THEN 0
+                        WHEN priority = 'PRIORITY' THEN 1
+                        ELSE 2
+                    END ASC,
                     next_attempt_at ASC,
                     id ASC
                 LIMIT :batch_limit
@@ -251,13 +256,12 @@ class PdoNotificationOutboxRepository implements NotificationOutboxRepositoryInt
         // El orden de `RETURNING` no está garantizado por el motor: el `ORDER BY`
         // del CTE decide QUÉ filas entran en el lote, no el orden en que salen.
         // Se restituye aquí el contrato de prioridad para que el despachador
-        // entregue siempre primero la emergencia sanitaria (Art. II).
+        // entregue siempre primero la emergencia sanitaria (Art. II) y, después,
+        // el aviso operativo prioritario antes del lote ordinario.
         usort($items, static function (NotificationOutboxItem $left, NotificationOutboxItem $right): int {
-            $leftCritical = $left->getPriority()->isCritical();
-            $rightCritical = $right->getPriority()->isCritical();
-
-            if ($leftCritical !== $rightCritical) {
-                return $leftCritical ? -1 : 1;
+            $byRank = $left->getPriority()->rank() <=> $right->getPriority()->rank();
+            if ($byRank !== 0) {
+                return $byRank;
             }
 
             $bySchedule = $left->getNextAttemptAt() <=> $right->getNextAttemptAt();
@@ -504,12 +508,19 @@ class PdoNotificationOutboxRepository implements NotificationOutboxRepositoryInt
             ':cancelled_at' => [$this->formatDate($this->now()), PDO::PARAM_STR],
         ];
 
-        $restriction = '';
+        // Varias plantillas son una alternancia, no una conjunción: el aviso de
+        // asignación del saliente puede vivir en EMAIL o en TELEGRAM, y exigir
+        // ambas a la vez no cancelaba ninguna fila.
+        $placeholders = [];
         foreach (array_values($templates) as $index => $template) {
             NotificationTemplate::fromString($template); // valida el catálogo cerrado
-            $restriction .= sprintf(' AND template = :template_%d', $index);
+            $placeholders[] = ':template_' . $index;
             $params[':template_' . $index] = [$template, PDO::PARAM_STR];
         }
+
+        $restriction = $placeholders === []
+            ? ''
+            : ' AND template IN (' . implode(', ', $placeholders) . ')';
 
         $sql = "
             UPDATE notification_outbox
