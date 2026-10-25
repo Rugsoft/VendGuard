@@ -574,6 +574,11 @@ final class PostgresFixtureBuilder
             $column === 'rating' && $udt === 'int2' => $variant === 'update' ? 4 : 5,
             $table === 'technician_absences' && $column === 'reason' => $variant === 'update' ? 'SICK_LEAVE' : 'VACATION',
             $table === 'technician_shifts' && $column === 'status' => $variant === 'update' ? 'OFF_SHIFT' : 'ON_SHIFT',
+            // La bitácora del Módulo 22 sólo admite los seis eventos canónicos de
+            // `ShiftEventType`: el texto sintético violaría `chk_shift_logs_event_type`
+            // y el escenario de las suites heredadas no llegaría a sembrarse.
+            $table === 'technician_shift_logs' && $column === 'event_type'
+                => $variant === 'update' ? 'RESUME_SHIFT' : 'START_SHIFT',
             in_array($udt, ['int2', 'int4', 'int8'], true) => $variant === 'update' ? 9 : 7,
             $udt === 'numeric', $udt === 'float4', $udt === 'float8' => $variant === 'update' ? '9.5000000' : '1.5000000',
             $udt === 'text' => $literal,

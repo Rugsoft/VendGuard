@@ -11,7 +11,7 @@ declare(strict_types=1);
  * certificación. Es la sustitución del nombre engañoso `PostgresParityTest`: aquí **no** se
  * compara con el motor local —eso es la correspondencia declarada de T-HYBRID-24, que exige los
  * dos motores a la vez— sino que se demuestra que el motor nuevo **hace** las cuatro operaciones
- * sobre las 28 tablas del contrato.
+ * sobre las 31 tablas del contrato.
  *
  * QUÉ SE CERTIFICA, Y POR QUÉ ASÍ
  *
@@ -19,7 +19,7 @@ declare(strict_types=1);
  *      DDL base y la migración del motor aplicada por el ejecutor canónico. Si el DDL dejara de
  *      compilar o la migración dejara de aplicar, no habría dónde certificar nada.
  *
- *   2. **Alta mínima en las 28 tablas respetando el grafo de claves foráneas.** La fixture no se
+ *   2. **Alta mínima en las 31 tablas respetando el grafo de claves foráneas.** La fixture no se
  *      escribe a mano tabla por tabla: se deriva del catálogo vivo (`information_schema` y
  *      `pg_constraint`), de modo que una columna obligatoria nueva entra sola y una referencia
  *      nueva reordena el alta. Un ciclo en el grafo, o un tipo que el arnés no sepa sintetizar,
@@ -60,7 +60,7 @@ use VendGuard\Infrastructure\Database\PostgresMigrationRunner;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 30 tablas del contrato de correspondencia (§2.1, Módulos 14, 17, 18, 19, 20 y 21). */
+/** Las 31 tablas del contrato de correspondencia (§2.1, Módulos 14, 17, 18, 19, 20, 21 y 22). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -70,14 +70,14 @@ const CONTRACT_TABLES = [
     'notification_outbox', 'notification_channel_settings',
     'operational_zones', 'operational_zone_postal_codes', 'technician_zone_assignments',
     'technician_van_stocks', 'incident_service_sheets', 'incident_satisfaction_surveys',
-    'technician_absences', 'technician_shifts',
+    'technician_absences', 'technician_shifts', 'technician_shift_logs',
 ];
 
 /**
  * Tablas de solo inserción: la prueba genérica de `UPDATE` no puede exigir que la fila
  * cambie, porque el motor la rechaza a propósito (Art. III.1). Se certifica el rechazo.
  */
-const APPEND_ONLY_TABLES = ['incident_service_sheets', 'incident_satisfaction_surveys'];
+const APPEND_ONLY_TABLES = ['incident_service_sheets', 'incident_satisfaction_surveys', 'technician_shift_logs'];
 
 $projectRoot = dirname(__DIR__, 2);
 $assertions = 0;
@@ -164,13 +164,41 @@ try {
     // ─────────────────────────────────────────────────────────────────────
     // Alta: una fila mínima por tabla, en orden que respeta el grafo de claves foráneas
     // ─────────────────────────────────────────────────────────────────────
-    echo "\n--- CREATE: alta mínima de las 28 tablas en orden de claves foráneas ---\n";
+    echo "\n--- CREATE: alta mínima de las 31 tablas en orden de claves foráneas ---\n";
 
     $order = PostgresFixtureBuilder::insertionOrder($pgPdo, $tables);
     $insertionFailure = null;
 
     foreach ($order as $index => $table) {
         try {
+            if ($table === 'technician_shift_logs') {
+                // La bitácora exige un `event_type` del catálogo cerrado y un
+                // `new_state` JSONB; el sintetizador genérico produciría un texto
+                // libre y el alta mínima se rechazaría por el CHECK del contrato.
+                $shiftRow = $rows['technician_shifts'] ?? null;
+                $actorRow = $rows['users'] ?? null;
+                if ($shiftRow === null || $actorRow === null) {
+                    throw new RuntimeException('La bitácora necesita el turno y el usuario previamente insertados.');
+                }
+
+                $shiftLogStmt = $pgPdo->prepare(
+                    "INSERT INTO technician_shift_logs (shift_id, technician_id, event_type, actor_user_id, new_state)
+                     VALUES (:shift_id, :technician_id, 'START_SHIFT', :actor_user_id, jsonb_build_object('status', 'ON_SHIFT'))
+                     RETURNING *"
+                );
+                $shiftLogStmt->execute([
+                    ':shift_id' => $shiftRow['id'],
+                    ':technician_id' => $shiftRow['technician_id'],
+                    ':actor_user_id' => $actorRow['id'],
+                ]);
+                $shiftLogRow = $shiftLogStmt->fetch();
+                if (!is_array($shiftLogRow)) {
+                    throw new RuntimeException('El motor nuevo no devolvió la fila insertada en «technician_shift_logs».');
+                }
+                $rows[$table] = $shiftLogRow;
+                continue;
+            }
+
             $rows[$table] = PostgresFixtureBuilder::insertMinimumRow($pgPdo, $table, $rows, sprintf('%02d', $index + 1));
         } catch (Throwable $exception) {
             $insertionFailure = "{$table}: " . $exception->getMessage();

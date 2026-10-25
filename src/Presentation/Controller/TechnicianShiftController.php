@@ -9,6 +9,7 @@ use Throwable;
 use VendGuard\Application\Service\HandoverTargetService;
 use VendGuard\Application\Service\ShiftHandoverService;
 use VendGuard\Application\Service\ShiftLifecycleService;
+use VendGuard\Application\Service\TechnicianWorkHoursService;
 use VendGuard\Core\Domain\Exception\ActiveIncidentInProgressException;
 use VendGuard\Core\Domain\Exception\InvalidShiftTransitionException;
 use VendGuard\Core\Domain\Exception\JustificationTooShortException;
@@ -20,6 +21,7 @@ use VendGuard\Infrastructure\Database\PdoTransactionManager;
 use VendGuard\Infrastructure\Notification\ShiftHandoverServiceFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianShiftLogRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 use VendGuard\Presentation\Http\Request;
@@ -28,7 +30,8 @@ use VendGuard\Presentation\Http\Response;
 /**
  * TechnicianShiftController
  *
- * Controlador REST para la gestión de jornada y relevo de ruta del técnico (Módulo 21).
+ * Controlador REST para la gestión de jornada y relevo de ruta del técnico (Módulo 21)
+ * y para la consulta de sus propias horas (Módulo 22).
  */
 final class TechnicianShiftController
 {
@@ -40,12 +43,15 @@ final class TechnicianShiftController
 
     private HandoverTargetService $handoverTargetService;
 
+    private TechnicianWorkHoursService $workHoursService;
+
     public function __construct(
         ?ShiftLifecycleService $lifecycleService = null,
         ?ShiftHandoverService $handoverService = null,
         ?PDO $pdo = null,
         ?UserRepositoryInterface $userRepo = null,
-        ?HandoverTargetService $handoverTargetService = null
+        ?HandoverTargetService $handoverTargetService = null,
+        ?TechnicianWorkHoursService $workHoursService = null
     ) {
         $pdo ??= ConnectionFactory::getConnection();
         $this->userRepo = $userRepo ?? new PdoUserRepository($pdo);
@@ -56,19 +62,33 @@ final class TechnicianShiftController
             ? $this->userRepo
             : new PdoUserRepository($pdo);
 
+        // La bitácora de jornada se inyecta aquí: sin ella, START/PAUSE/RESUME
+        // viajaban al dominio pero nunca quedaban registrados en
+        // `technician_shift_logs`, y la trazabilidad del Art. III.3 se perdía en
+        // producción aunque los dobles de prueba la certificaran.
         $this->lifecycleService = $lifecycleService ?? new ShiftLifecycleService(
             $shifts,
             $absences,
             $this->userRepo,
             new PdoAuditLogRepository($pdo),
             new PdoTransactionManager($pdo),
-            $lockRepo
+            $lockRepo,
+            new PdoTechnicianShiftLogRepository($pdo)
         );
 
         $this->handoverTargetService = $handoverTargetService
             ?? new HandoverTargetService($this->userRepo, $shifts, $absences);
 
         $this->handoverService = $handoverService ?? ShiftHandoverServiceFactory::create($pdo);
+
+        $this->workHoursService = $workHoursService ?? new TechnicianWorkHoursService(
+            new PdoTechnicianShiftRepository($pdo),
+            new PdoTechnicianShiftLogRepository($pdo),
+            $this->userRepo,
+            new PdoTransactionManager($pdo),
+            new PdoAuditLogRepository($pdo),
+            $lockRepo
+        );
     }
 
     public function status(Request $request): Response
@@ -123,6 +143,30 @@ final class TechnicianShiftController
         } catch (Throwable $e) {
             error_log('[vendguard] Fallo al reanudar turno: ' . $e);
             return Response::error('SHIFT_RESUME_FAILED', 'No se pudo reanudar el turno.', 500);
+        }
+    }
+
+    /**
+     * GET /api/technician/shift/my-hours
+     *
+     * Horas propias del mes en curso (contrato §5.6, RF-07 / RF-08.1).
+     *
+     * Art. V.4: el técnico sale exclusivamente del atributo `user_id` que inyecta
+     * el middleware tras validar el token. Se ignora cualquier `technician_id` de
+     * la query: admite parámetros ajenos y aun así no cambia de alcance, de modo
+     * que la opacidad frente al Portal de Sede no dependa de que el cliente se
+     * porte bien.
+     */
+    public function myHours(Request $request): Response
+    {
+        $technicianId = (int)($request->getAttribute('user_id') ?? 0);
+
+        try {
+            return Response::json($this->workHoursService->getTechnicianOwnMonthlyHours($technicianId));
+        } catch (Throwable $e) {
+            error_log('[vendguard] Fallo al calcular las horas propias del técnico: ' . $e);
+
+            return Response::error('INTERNAL_SERVER_ERROR', 'No se pudieron calcular tus horas.', 500);
         }
     }
 

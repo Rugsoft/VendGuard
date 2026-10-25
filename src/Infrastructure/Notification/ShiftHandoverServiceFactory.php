@@ -13,6 +13,7 @@ use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianAbsenceRepository;
+use VendGuard\Infrastructure\Repository\PdoTechnicianShiftLogRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoUserRepository;
 
@@ -46,7 +47,8 @@ final class ShiftHandoverServiceFactory
             onCallRepo: $users,
             auditRepo: new PdoAuditLogRepository($pdo),
             handoverTargets: new HandoverTargetService($users, $shifts, $absences),
-            notifications: $notifications ?? NotificationOutboxEnqueuerFactory::create($pdo)
+            notifications: $notifications ?? NotificationOutboxEnqueuerFactory::create($pdo),
+            shiftLogRepo: new PdoTechnicianShiftLogRepository($pdo)
         );
     }
 }

@@ -177,6 +177,11 @@ class AppRouter
         $router->delete('/api/coordinator/absences/{id}', [\VendGuard\Presentation\Controller\CoordinatorAbsenceController::class, 'cancelAbsence'], [$coordinatorAuth]);
         $router->get('/api/coordinator/technicians/{id}/shift', [\VendGuard\Presentation\Controller\CoordinatorShiftController::class, 'getShift'], [$coordinatorAuth]);
         $router->post('/api/coordinator/technicians/{id}/shifts/force-close', [\VendGuard\Presentation\Controller\CoordinatorShiftController::class, 'forceClose'], [$coordinatorAuth]);
+        // Registro de jornada y horas efectivas (Módulo 22, contrato §5.3 y §5.4).
+        // La bitácora es de solo lectura: `technician_shift_logs` no se edita ni se
+        // borra nunca (Art. III.1 y III.3), solo se rectifica el turno con motivo auditado.
+        $router->patch('/api/coordinator/shifts/{id}/adjust', [\VendGuard\Presentation\Controller\CoordinatorShiftController::class, 'adjustShift'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/shifts/{id}/logs', [\VendGuard\Presentation\Controller\CoordinatorShiftController::class, 'shiftLogs'], [$coordinatorAuth]);
 
         $router->get('/api/coordinator/zones/{id}/technicians', [CoordinatorZoneController::class, 'listZoneTechnicians'], [$coordinatorAuth]);
         $router->post('/api/coordinator/locations/{id}/override-zone', [CoordinatorZoneController::class, 'overrideLocationZone'], [$coordinatorAuth]);
@@ -224,6 +229,11 @@ class AppRouter
         // el servicio cuenta en el periodo en que se resolvió (contratos §6.4).
         $router->get('/api/coordinator/metrics/csat', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'getCsat'], [$coordinatorAuth]);
         $router->get('/api/coordinator/metrics/export', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'exportMetrics'], [$coordinatorAuth]);
+        // Registro de jornada y horas efectivas (Módulo 22, contrato §5.1 y §5.2).
+        // El router resuelve por orden de registro: la descarga se registra antes que
+        // el informe para que `/work-hours/export` no se interprete como otra ruta.
+        $router->get('/api/coordinator/metrics/work-hours/export', [\VendGuard\Presentation\Controller\CoordinatorShiftController::class, 'exportWorkHoursCsv'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/metrics/work-hours', [\VendGuard\Presentation\Controller\CoordinatorShiftController::class, 'workHoursReport'], [$coordinatorAuth]);
         $router->get('/api/coordinator/audit-log', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'getAuditLog'], [$coordinatorAuth]);
         $router->get('/api/coordinator/audit-log/export', [\VendGuard\Presentation\Controller\CoordinatorMetricsController::class, 'exportAuditLog'], [$coordinatorAuth]);
 
@@ -324,6 +334,9 @@ class AppRouter
         // el cuadrante interno de Coordinación ni datos de contacto.
         $router->get('/api/technician/handover-targets', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'handoverTargets'], [$technicianAuth]);
         $router->get('/api/technician/shift/status', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'status'], [$technicianAuth]);
+        // Horas propias del técnico autenticado (Módulo 22, contrato §5.6, Art. V.4).
+        // El alcance sale del token; el Portal de Sede no tiene ruta equivalente.
+        $router->get('/api/technician/shift/my-hours', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'myHours'], [$technicianAuth]);
         $router->post('/api/technician/shift/start', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'start'], [$technicianAuth]);
         $router->post('/api/technician/shift/pause-meal', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'pauseMeal'], [$technicianAuth]);
         $router->post('/api/technician/shift/resume', [\VendGuard\Presentation\Controller\TechnicianShiftController::class, 'resume'], [$technicianAuth]);

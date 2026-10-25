@@ -63,6 +63,9 @@ final class TestDataCleaner
         // Ausencias y turnos de técnicos (Módulo 21): cuelgan de `users`, que es
         // una tabla protegida, por lo que el grafo desde incidents no los alcanza.
         'technician_absences',
+        // La bitácora del Módulo 22 cuelga del turno; se purga antes que él para
+        // que la FK RESTRICT no impida restituir el banco de pruebas.
+        'technician_shift_logs',
         'technician_shifts',
     ];
 
@@ -103,6 +106,7 @@ final class TestDataCleaner
         'incident_service_sheets',
         'incident_satisfaction_surveys',
         'technician_absences',
+        'technician_shift_logs',
         'technician_shifts',
     ];
 

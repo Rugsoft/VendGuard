@@ -104,10 +104,12 @@ try {
         'columnas: ' . count($absenceColumns)
     );
 
+    // Doce columnas del ciclo de turno del Módulo 21 más las nueve aditivas de
+    // cómputo, marcas originales e insignias de ajuste del Módulo 22 (migración 015).
     $shiftColumns = PostgresFixtureBuilder::columns($pgPdo, 'technician_shifts');
     $assert(
-        'La tabla technician_shifts declara sus doce columnas',
-        count($shiftColumns) === 12,
+        'La tabla technician_shifts declara sus doce columnas del Módulo 21 y las nueve aditivas del Módulo 22',
+        count($shiftColumns) === 21,
         'columnas: ' . count($shiftColumns)
     );
 

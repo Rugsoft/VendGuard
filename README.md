@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/Database-PostgreSQL%2016%2B%20%7C%20Supabase-3ecf8e?style=flat-square&logo=postgresql&logoColor=white)](https://supabase.com/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-349%20Suites%20%7C%2013.176%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-355%20Suites%20%7C%2013.492%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -459,20 +459,20 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 349 suites · 13.176 aserciones
+batería global: 355 suites · 13.492 aserciones
 
 ```text
 ======================================================================
  RESUMEN DE EJECUCIÓN GLOBAL (T-39)
 ======================================================================
  Tiempo de ejecución total : 299.00 segundos  (variable en cada corrida)
- Suites de pruebas PHP Unit : 148 / 148 pasadas
- Suites de pruebas JS Unit  : 80 / 80 pasadas
- Suites de Integración PHP  : 120 / 120 pasadas
+ Suites de pruebas PHP Unit : 151 / 151 pasadas
+ Suites de pruebas JS Unit  : 82 / 82 pasadas
+ Suites de Integración PHP  : 121 / 121 pasadas
  Suites E2E Manuales (T-40): 1 / 1 pasadas
  ──────────────────────────────────────────────────────────────────
- Total Suites Ejecutadas    : 349
- Total Aserciones Evaluadas : 13.176
+ Total Suites Ejecutadas    : 355
+ Total Aserciones Evaluadas : 13.492
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
@@ -509,11 +509,26 @@ Las suites que declaran `VENDGUARD_TEST_CATEGORY = 'new_engine'` exigen un Postg
 
 ```bash
 source deploy/local/postgres/.env.local     # motor local; .env.docker-tls para el TLS
-php tests/run_new_engine.php                # las 14 suites del canal
+php tests/run_new_engine.php                # las 22 suites del canal (21 en verde, 1 no ejecutable sin TLS remoto)
 php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
 ```
 
-El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o con el motor inalcanzable, sale con código `2` y un mensaje explícito en lugar de omitir suites en silencio. Cada suite corre en su propio proceso y el resumen publica verdes, aserciones y fallos. Una suite que declara `exit 2` —la medición de latencia contra el motor remoto, que exige `DB_SSL_ROOT_CERT` y otra infraestructura— se lista como **no ejecutable**, con su motivo, y no se cuenta como fallo ni desaparece del informe.
+El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o con el motor inalcanzable, sale con código `2` y un mensaje explícito en lugar de omitir suites en silencio. Cada suite corre en su propio proceso y el resumen publica verdes, aserciones y fallos. Una suite que declara `exit 2` —la medición de latencia contra el motor remoto (`PoolerLatencyMeasurementTest.php`), que exige `DB_SSL_ROOT_CERT` y otra infraestructura— se lista como **no ejecutable**, con su motivo, y no se cuenta como fallo ni desaparece del informe.
+
+```text
+======================================================================
+ RESUMEN DEL CANAL new_engine
+ Suites evaluadas    : 22
+ Suites en verde     : 21
+ No ejecutables      : 1
+ Aserciones          : 651
+ Fallos              : 0
+ - PoolerLatencyMeasurementTest.php: [CATEGORÍA NO EJECUTABLE] Falta DB_SSL_ROOT_CERT: la identidad del servidor remoto no se puede verificar (RNF-05).
+ RESULTADO: CANAL CERRADO · 1 suite(s) declararon otro contrato y se listan arriba (no se omiten en silencio).
+======================================================================
+```
+
+Entre las suites específicas de este canal se encuentran `PostgresTimeTrackingSchemaTest` (Módulo 22 · integridad relacional de `technician_shifts` y `technician_shift_logs`), `PostgresConstitutionalTest` (Art. III.1 en 31 tablas relacionales), `PostgresAbsenceShiftSchemaTest` (Módulo 21), `PostgresSatisfactionSurveySchemaTest` (Módulo 20), `PostgresServiceSheetSchemaTest` (Módulo 19), `PostgresVanStockSchemaTest` (Módulo 18) y `PostgresZoneSchemaTest` (Módulo 17).
 
 ---
 
@@ -596,7 +611,7 @@ gestor-incidencias-vending/
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 349 suites (100% verde)
+    ├── run_all.php               # Ejecutor global de la batería de 355 suites (100% verde)
     ├── run_new_engine.php        # Canal propio de la categoría new_engine (PG_TEST_DSN)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)

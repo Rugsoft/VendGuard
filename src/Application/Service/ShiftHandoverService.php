@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace VendGuard\Application\Service;
 
+use DateTimeImmutable;
 use PDO;
 use VendGuard\Application\DTO\ShiftHandoverResultDto;
 use VendGuard\Application\DTO\TechnicianShiftDto;
 use VendGuard\Core\Domain\Exception\ActiveIncidentInProgressException;
 use VendGuard\Core\Domain\Exception\InvalidShiftTransitionException;
 use VendGuard\Core\Domain\Exception\JustificationTooShortException;
+use VendGuard\Core\Domain\Exception\ShiftAdjustmentValidationException;
 use VendGuard\Core\Domain\Exception\UserNotFoundException;
 use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\Incident;
@@ -22,9 +24,11 @@ use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OnCallTechnicianRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TechnicianShiftLogRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianShiftRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Core\Domain\ValueObject\ShiftEventType;
 
 /**
  * ShiftHandoverService
@@ -61,7 +65,8 @@ final class ShiftHandoverService
         private readonly OnCallTechnicianRepositoryInterface $onCallRepo,
         private readonly AuditLogRepositoryInterface $auditRepo,
         private readonly HandoverTargetService $handoverTargets,
-        private readonly ?NotificationOutboxEnqueuerService $notifications = null
+        private readonly ?NotificationOutboxEnqueuerService $notifications = null,
+        private readonly ?TechnicianShiftLogRepositoryInterface $shiftLogRepo = null
     ) {
     }
 
@@ -170,8 +175,12 @@ final class ShiftHandoverService
      * que el cierre del técnico. La única diferencia es quién firma el cierre y el
      * evento de auditoría.
      */
-    public function forceCloseShift(int $technicianId, int $coordinatorId, string $reason): ShiftHandoverResultDto
-    {
+    public function forceCloseShift(
+        int $technicianId,
+        int $coordinatorId,
+        string $reason,
+        ?string $effectiveClosedAtRaw = null
+    ): ShiftHandoverResultDto {
         $tech = $this->userRepo->findById($technicianId);
         if ($tech === null) {
             throw new UserNotFoundException($technicianId, "No se encontró el técnico con ID {$technicianId}.");
@@ -199,6 +208,16 @@ final class ShiftHandoverService
 
         $coordinator = $this->userRepo->findById($coordinatorId);
 
+        // El protocolo sanitario del Art. II ocurre siempre en el presente: la
+        // hora efectiva corregida solo mueve las marcas laborales del turno.
+        $executionTime = new DateTimeImmutable('now');
+        $effectiveClosedAt = $this->resolveEffectiveClose(
+            $activeShift,
+            $effectiveClosedAtRaw,
+            $cleanReason,
+            $executionTime
+        );
+
         return $this->executeClose(
             technician: $tech,
             activeShift: $activeShift,
@@ -213,8 +232,81 @@ final class ShiftHandoverService
             auditMetadata: [
                 'coordinator_name' => $coordinator?->getName() ?? 'Coordinador',
                 'coordinator_reason' => $cleanReason,
-            ]
+                'effective_closed_at' => $effectiveClosedAt?->format(DateTimeImmutable::ATOM),
+                'execution_time' => $executionTime->format(DateTimeImmutable::ATOM),
+            ],
+            effectiveClosedAt: $effectiveClosedAt,
+            isForceClosed: true,
+            executionTime: $executionTime
         );
+    }
+
+    /**
+     * Resuelve y valida la hora efectiva de salida de un cierre forzado
+     * (contrato técnico §5.5, Resolución QA 2).
+     *
+     * La ventana se comprueba contra las marcas YA registradas del turno —inicio
+     * y pausas— y contra los demás turnos del técnico; la fecha de ejecución real
+     * no se toca nunca, porque es la que sella el protocolo sanitario.
+     */
+    private function resolveEffectiveClose(
+        TechnicianShift $activeShift,
+        ?string $effectiveClosedAtRaw,
+        string $cleanReason,
+        DateTimeImmutable $executionTime
+    ): ?DateTimeImmutable {
+        $raw = $effectiveClosedAtRaw !== null ? trim($effectiveClosedAtRaw) : '';
+        if ($raw === '') {
+            return null;
+        }
+
+        // Art. V.1: una hora efectiva reescribe la jornada y exige justificación
+        // real de 20 caracteres, no la descripción mínima de un cierre normal.
+        if (mb_strlen($cleanReason) < ShiftAdjustmentValidationException::MINIMUM_REASON_LENGTH) {
+            throw ShiftAdjustmentValidationException::reasonTooShort();
+        }
+
+        try {
+            $effectiveClosedAt = new DateTimeImmutable($raw);
+        } catch (\Exception) {
+            throw ShiftAdjustmentValidationException::invalidCloseOrder();
+        }
+
+        if ($effectiveClosedAt > $executionTime) {
+            throw ShiftAdjustmentValidationException::futureTimestampNotAllowed();
+        }
+
+        if ($effectiveClosedAt <= $activeShift->startedAt()) {
+            throw ShiftAdjustmentValidationException::invalidCloseOrder();
+        }
+
+        $lastActivity = $activeShift->startedAt();
+        foreach ([$activeShift->mealBreakStartedAt(), $activeShift->mealBreakEndedAt()] as $mark) {
+            if ($mark !== null && $mark > $lastActivity) {
+                $lastActivity = $mark;
+            }
+        }
+
+        $grossSeconds = $effectiveClosedAt->getTimestamp() - $activeShift->startedAt()->getTimestamp();
+        if ($effectiveClosedAt < $lastActivity || $grossSeconds < $activeShift->mealBreakSeconds()) {
+            throw ShiftAdjustmentValidationException::effectiveCloseBeforeLastActivity();
+        }
+
+        if ($grossSeconds > ShiftAdjustmentValidationException::MAX_SHIFT_DURATION_SECONDS) {
+            throw ShiftAdjustmentValidationException::exceedsMaxShiftDuration();
+        }
+
+        $conflictId = $this->shiftRepo->findOverlappingShiftId(
+            $activeShift->technicianId(),
+            $activeShift->startedAt(),
+            $effectiveClosedAt,
+            $activeShift->id()
+        );
+        if ($conflictId !== null) {
+            throw ShiftAdjustmentValidationException::overlappingShift($conflictId);
+        }
+
+        return $effectiveClosedAt;
     }
 
     /**
@@ -240,7 +332,10 @@ final class ShiftHandoverService
         string $auditAction = 'CLOSE_TECHNICIAN_SHIFT',
         string $actorRole = 'TECHNICIAN',
         ?string $actorName = null,
-        array $auditMetadata = []
+        array $auditMetadata = [],
+        ?DateTimeImmutable $effectiveClosedAt = null,
+        bool $isForceClosed = false,
+        ?DateTimeImmutable $executionTime = null
     ): ShiftHandoverResultDto {
         $technicianId = (int)$technician->getId();
         $targetTechnicianId = $targetTechnician?->getId();
@@ -502,9 +597,23 @@ final class ShiftHandoverService
                 : 'Cierre de turno con relevo';
 
             $closedShift = $this->shiftRepo->closeShift(
-                shiftId: $activeShift->id(),
+                shiftId: (int)$activeShift->id(),
                 closedBy: $closedBy,
-                closeReason: $closeReason ?? $defaultCloseReason
+                closeReason: $closeReason ?? $defaultCloseReason,
+                closedAt: $effectiveClosedAt,
+                isForceClosed: $isForceClosed,
+                executionTime: $executionTime
+            );
+
+            // Art. III.3: la bitácora de jornada se escribe en la misma transacción
+            // que el cierre, con el estado previo y el resultante.
+            $this->recordShiftLog(
+                shift: $closedShift,
+                eventType: $isForceClosed ? ShiftEventType::FORCE_CLOSE_SHIFT : ShiftEventType::CLOSE_SHIFT,
+                actorUserId: $closedBy,
+                effectiveAt: $executionTime ?? $closedShift->closedAt() ?? new DateTimeImmutable('now'),
+                previousState: $activeShift->toArray(),
+                reason: $closedShift->closeReason()
             );
 
             $event = new AuditEvent(
@@ -547,6 +656,39 @@ final class ShiftHandoverService
             }
             throw $e;
         }
+    }
+
+    /**
+     * Registra la entrada inmutable de bitácora del cierre de jornada.
+     *
+     * El puerto es opcional para no romper los dobles de prueba que solo
+     * ejercitan el relevo y el protocolo sanitario; en producción la factoría
+     * lo inyecta y la entrada viaja dentro de la misma transacción.
+     *
+     * @param array<string, mixed>|null $previousState
+     */
+    private function recordShiftLog(
+        TechnicianShift $shift,
+        ShiftEventType $eventType,
+        int $actorUserId,
+        DateTimeImmutable $effectiveAt,
+        ?array $previousState,
+        ?string $reason
+    ): void {
+        if ($this->shiftLogRepo === null || $shift->id() === null) {
+            return;
+        }
+
+        $this->shiftLogRepo->record(
+            shiftId: (int)$shift->id(),
+            technicianId: $shift->technicianId(),
+            eventType: $eventType,
+            actorUserId: $actorUserId,
+            effectiveAt: $effectiveAt,
+            previousState: $previousState,
+            newState: $shift->toArray(),
+            reason: $reason
+        );
     }
 
     /**

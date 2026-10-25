@@ -86,7 +86,7 @@ use VendGuard\Infrastructure\Repository\PdoUserRepository;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 30 tablas del contrato de correspondencia (§2.1, Módulos 14, 17, 18, 19, 20 y 21). */
+/** Las 31 tablas del contrato de correspondencia (§2.1, Módulos 14, 17, 18, 19, 20, 21 y 22). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -96,7 +96,7 @@ const CONTRACT_TABLES = [
     'notification_outbox', 'notification_channel_settings',
     'operational_zones', 'operational_zone_postal_codes', 'technician_zone_assignments',
     'technician_van_stocks', 'incident_service_sheets', 'incident_satisfaction_surveys',
-    'technician_absences', 'technician_shifts',
+    'technician_absences', 'technician_shifts', 'technician_shift_logs',
 ];
 
 /** Las siete restricciones de longitud mínima del Art. V.1, con la tabla y la columna que vigilan. */
