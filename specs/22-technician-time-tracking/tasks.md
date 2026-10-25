@@ -154,7 +154,7 @@
 
 ## Fase 5: Controladores REST, Router y Suites de Integración HTTP
 
-- [ ] **T-TIME-09 · Endpoints en `CoordinatorShiftController`, `TechnicianShiftController` y rutas en `AppRouter`**
+- [x] **T-TIME-09 · Endpoints en `CoordinatorShiftController`, `TechnicianShiftController` y rutas en `AppRouter`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-TIME-08`
   * **Ficheros a crear o modificar:**
