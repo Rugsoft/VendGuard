@@ -119,7 +119,7 @@
 
 ## Fase 4: Servicios de Aplicación y Casos de Uso
 
-- [ ] **T-TIME-07 · Extensión de `ShiftLifecycleService` y `ShiftHandoverService` (bitácora, `today_summary`, `effective_closed_at` y blindaje Art. II)**
+- [x] **T-TIME-07 · Extensión de `ShiftLifecycleService` y `ShiftHandoverService` (bitácora, `today_summary`, `effective_closed_at` y blindaje Art. II)**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-TIME-06`
   * **Ficheros a crear o modificar:**
