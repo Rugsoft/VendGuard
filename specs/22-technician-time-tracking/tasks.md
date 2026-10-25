@@ -41,7 +41,7 @@
     3. Añadir semillas de turnos cerrados, pausas acumuladas y bitácora en `supabase_seeds.sql` y documentar la Tabla 31 en `schema_correspondence_contract.md`.
   * **Hecho cuando:** `php bin/init_cloud_db.php` aplica el esquema sin errores y las tablas `technician_shifts` y `technician_shift_logs` contienen todas las columnas, restricciones y disparadores definidos en el contrato técnico §1.
 
-- [ ] **T-TIME-02 · Actualización de guardas de esquema y suite `PostgresTimeTrackingSchemaTest`**
+- [x] **T-TIME-02 · Actualización de guardas de esquema y suite `PostgresTimeTrackingSchemaTest`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-TIME-01`
   * **Ficheros a crear o modificar:**
