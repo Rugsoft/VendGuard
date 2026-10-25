@@ -10,6 +10,7 @@
  *    - "📊 Cuadro de Mandos (KPIs)": Renderiza MetricCards.js.
  *    - "🗂️ Desglose Multidimensional": Renderiza MetricBreakdownTable.js.
  *    - "🛡️ Registro de Auditoría": Renderiza AuditLogViewer.js.
+ *    - "⏱️ Registro de Jornada y Horas": Renderiza CoordinatorWorkHoursTab.js (Módulo 22).
  * 4. Botón de acción: "📥 Exportar CSV" (con BOM UTF-8).
  * 5. Botón de acción: "📄 Generar Informe Ejecutivo" (despliega ExecutiveReportModal.js).
  * 
@@ -22,6 +23,7 @@ import { MetricCards } from '../components/MetricCards.js';
 import { MetricBreakdownTable } from '../components/MetricBreakdownTable.js';
 import { AuditLogViewer } from '../components/AuditLogViewer.js';
 import { ExecutiveReportModal } from '../components/ExecutiveReportModal.js';
+import { CoordinatorWorkHoursTab } from '../components/CoordinatorWorkHoursTab.js';
 
 export const CoordinatorMetricsView = {
   name: 'CoordinatorMetricsView',
@@ -29,11 +31,12 @@ export const CoordinatorMetricsView = {
     MetricCards,
     MetricBreakdownTable,
     AuditLogViewer,
-    ExecutiveReportModal
+    ExecutiveReportModal,
+    CoordinatorWorkHoursTab
   },
   data() {
     return {
-      activeSubTab: 'kpis', // 'kpis' | 'breakdown' | 'audit'
+      activeSubTab: 'kpis', // 'kpis' | 'breakdown' | 'audit' | 'csat' | 'work-hours'
       selectedPeriod: 'last_30_days', // 'last_7_days' | 'last_30_days' | 'current_month' | 'last_month' | 'custom'
       customFrom: '',
       customTo: '',
@@ -302,6 +305,16 @@ export const CoordinatorMetricsView = {
         >
           ⭐ Satisfacción del Cliente (CSAT)
         </button>
+
+        <button
+          type="button"
+          class="vg-btn vg-btn-tab"
+          :class="{ 'vg-btn-tab-active': activeSubTab === 'work-hours' }"
+          @click="activeSubTab = 'work-hours'"
+          data-testid="tab-work-hours"
+        >
+          ⏱️ Registro de Jornada y Horas
+        </button>
       </div>
 
       <!-- Mensaje de Error si aplica -->
@@ -439,6 +452,15 @@ export const CoordinatorMetricsView = {
             </table>
           </div>
         </div>
+      </div>
+
+      <!-- SUBPESTAÑA 5: Registro de Jornada y Horas (Módulo 22, D5/RF-05) -->
+      <div v-else-if="activeSubTab === 'work-hours'" data-testid="work-hours-block">
+        <CoordinatorWorkHoursTab
+          :period="selectedPeriod"
+          :from-date="customFrom"
+          :to-date="customTo"
+        />
       </div>
 
       <!-- Modal de Informe Resumen Ejecutivo Imprimible (RF-06, EARS 6.3) -->

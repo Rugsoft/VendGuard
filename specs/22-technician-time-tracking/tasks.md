@@ -191,7 +191,7 @@
 
 ## Fase 6: Interfaz Frontend Vanilla ES Modules y Pruebas ESM
 
-- [ ] **T-TIME-11 · Cliente `api.js`, componente `CoordinatorWorkHoursTab.js`, integración en `CoordinatorMetricsView.js` y suite ESM**
+- [x] **T-TIME-11 · Cliente `api.js`, componente `CoordinatorWorkHoursTab.js`, integración en `CoordinatorMetricsView.js` y suite ESM**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-TIME-10`
   * **Ficheros a crear o modificar:**

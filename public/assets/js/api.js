@@ -1570,6 +1570,27 @@ export class ApiClient {
         body.zone_id = Number(zoneId);
       }
       return this.post(`/coordinator/locations/${encodeURIComponent(locationId)}/override-zone`, body);
+    },
+
+    /**
+     * Rectifica las marcas horarias de un turno cerrado (Módulo 22, RF-03, contrato §5.3).
+     * El motivo exige al menos 20 caracteres reales (Art. V.1); la respuesta trae la sesión
+     * con sus marcas originales intactas y las métricas recalculadas.
+     * @param {number|string} shiftId
+     * @param {{started_at: string, closed_at: string, meal_break_seconds: number, reason: string}} payload
+     * @returns {Promise<Object>}
+     */
+    adjustShift: (shiftId, payload) => {
+      return this.patch(`/coordinator/shifts/${encodeURIComponent(shiftId)}/adjust`, payload);
+    },
+
+    /**
+     * Bitácora inmutable de eventos de una sesión (Módulo 22, RF-01.1, contrato §5.4).
+     * @param {number|string} shiftId
+     * @returns {Promise<{logs: Array<Object>}>}
+     */
+    getShiftLogs: (shiftId) => {
+      return this.get(`/coordinator/shifts/${encodeURIComponent(shiftId)}/logs`);
     }
   };
 
@@ -1820,6 +1841,37 @@ export class ApiClient {
   };
 
   /**
+   * 5 bis. Shift lifecycle and own work hours (Módulos 21 y 22)
+   */
+  technicianShift = {
+    /**
+     * Cierre forzado de la jornada de un técnico (Módulo 21, contrato §5.5).
+     * `effectiveClosedAt` es la hora real de salida: si se informa, el motivo debe
+     * alcanzar los 20 caracteres reales y el Art. II se fecha con el reloj real.
+     * @param {number|string} technicianId
+     * @param {string} reason
+     * @param {string|null} [effectiveClosedAt=null]
+     * @returns {Promise<Object>}
+     */
+    forceClose: (technicianId, reason, effectiveClosedAt = null) => {
+      const body = { reason: String(reason ?? '') };
+      if (effectiveClosedAt !== null && effectiveClosedAt !== undefined && String(effectiveClosedAt).trim() !== '') {
+        body.effective_closed_at = String(effectiveClosedAt).trim();
+      }
+      return this.post(`/coordinator/technicians/${encodeURIComponent(technicianId)}/shifts/force-close`, body);
+    },
+
+    /**
+     * Totales y sesiones propias del mes en curso (Módulo 22, RF-07, contrato §5.6).
+     * Sin parámetro de técnico: el backend resuelve el `user_id` del token (Art. V.4).
+     * @returns {Promise<Object>}
+     */
+    getMyHours: () => {
+      return this.get('/technician/shift/my-hours');
+    }
+  };
+
+  /**
    * 6. Cron / Automated Tasks
    */
   cron = {
@@ -1954,6 +2006,28 @@ export class ApiClient {
     getCsat: (params = {}) => {
       const q = new URLSearchParams(params).toString();
       return this.get(`/coordinator/metrics/csat${q ? `?${q}` : ''}`);
+    },
+
+    /**
+     * Informe de registro de jornada y horas efectivas (Módulo 22, RF-04 y RF-05,
+     * contrato §5.1): resumen, plantilla, turnos abiertos huérfanos y sesiones.
+     * @param {Object} [params={}]
+     * @returns {Promise<Object>}
+     */
+    getWorkHoursReport: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/metrics/work-hours${q ? `?${q}` : ''}`);
+    },
+
+    /**
+     * URL del CSV oficial de jornada (Módulo 22, RF-06, contrato §5.2).
+     * El token no viaja en la query: la descarga añade la cabecera Authorization.
+     * @param {Object} [params={}]
+     * @returns {string}
+     */
+    getWorkHoursCsvUrl: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return `${this.baseUrl}/coordinator/metrics/work-hours/export${q ? `?${q}` : ''}`;
     },
 
     /**
