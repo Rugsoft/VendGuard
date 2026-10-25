@@ -73,7 +73,7 @@
     3. Implementar `ShiftAdjustmentValidationException` con constructores estáticos para cada regla de negocio (`shiftStillOpen`, `reasonTooShort`, `futureTimestampNotAllowed`, `invalidCloseOrder`, `effectiveCloseBeforeLastActivity`, `invalidMealBreakDuration`, `exceedsMaxShiftDuration`, `overlappingShift`).
   * **Hecho cuando:** `php -l src/Core/Domain/ValueObject/ShiftEventType.php && php -l src/Core/Domain/Model/TechnicianShiftLog.php && php -l src/Core/Domain/Exception/ShiftAdjustmentValidationException.php` no reporta errores de sintaxis.
 
-- [ ] **T-TIME-04 · Extensión de `TechnicianShift` y suite unitaria `TechnicianShiftTimeTrackingTest`**
+- [x] **T-TIME-04 · Extensión de `TechnicianShift` y suite unitaria `TechnicianShiftTimeTrackingTest`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-TIME-03`
   * **Ficheros a crear o modificar:**
