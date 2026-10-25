@@ -62,13 +62,18 @@ final class TechnicianShiftController
             ? $this->userRepo
             : new PdoUserRepository($pdo);
 
+        // La bitácora de jornada se inyecta aquí: sin ella, START/PAUSE/RESUME
+        // viajaban al dominio pero nunca quedaban registrados en
+        // `technician_shift_logs`, y la trazabilidad del Art. III.3 se perdía en
+        // producción aunque los dobles de prueba la certificaran.
         $this->lifecycleService = $lifecycleService ?? new ShiftLifecycleService(
             $shifts,
             $absences,
             $this->userRepo,
             new PdoAuditLogRepository($pdo),
             new PdoTransactionManager($pdo),
-            $lockRepo
+            $lockRepo,
+            new PdoTechnicianShiftLogRepository($pdo)
         );
 
         $this->handoverTargetService = $handoverTargetService

@@ -173,7 +173,7 @@
        * `GET /api/technician/shift/my-hours`
   * **Hecho cuando:** `php -l src/Presentation/Controller/CoordinatorShiftController.php && php -l src/Presentation/Controller/TechnicianShiftController.php && php -l src/Presentation/Routing/AppRouter.php` valida sin errores.
 
-- [ ] **T-TIME-10 · Suite de integración HTTP y constitucional `TechnicianTimeTrackingApiTest`**
+- [x] **T-TIME-10 · Suite de integración HTTP y constitucional `TechnicianTimeTrackingApiTest`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-TIME-09`
   * **Ficheros a crear o modificar:**
