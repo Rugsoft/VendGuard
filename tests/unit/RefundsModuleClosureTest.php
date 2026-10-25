@@ -242,7 +242,8 @@ foreach ($srcFiles as $path) {
         // Los built-ins de PHP son la plataforma, no una dependencia.
         $builtins = [
             'ArrayAccess', 'Closure', 'DateTimeImmutable', 'DateTimeInterface', 'DateTimeZone',
-            'DomainException', 'InvalidArgumentException', 'JsonSerializable', 'PDO', 'PDOException',
+            'DomainException', 'Exception', 'InvalidArgumentException', 'JsonException', 'JsonSerializable',
+            'PDO', 'PDOException',
             'PDOStatement', 'RuntimeException', 'Throwable', 'finfo',
         ];
         if (in_array($fqcn, $builtins, true)) {

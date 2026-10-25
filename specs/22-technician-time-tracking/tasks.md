@@ -225,7 +225,7 @@
 
 ## Fase 7: Certificación Integral, Regresión Global y Cierre Documental
 
-- [ ] **T-TIME-13 · Batería global de regresión, sincronización de cifras (`DocMetricsGuard`) y cierre documental**
+- [x] **T-TIME-13 · Batería global de regresión, sincronización de cifras (`DocMetricsGuard`) y cierre documental**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-TIME-12`
   * **Ficheros a crear o modificar:**

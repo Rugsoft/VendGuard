@@ -197,14 +197,15 @@ $assert(
 
 // 15 tablas de la bandeja + las 3 del catálogo territorial (Módulo 17, hallazgo H-2) + el saldo
 // de furgoneta del Módulo 18 + la hoja de servicio firmada del Módulo 19 + la encuesta de
-// satisfacción del Módulo 20 + las 2 tablas de ausencias y turnos del Módulo 21: `operational_zones`
-// es raíz propia y sus dos hijas caen por el grafo de claves foráneas, `technician_van_stocks` es
-// hija de `spare_parts`, que ya es raíz, `incident_service_sheets` e `incident_satisfaction_surveys`
-// cuelgan de `incidents` con RESTRICT y se drenan por la ventana de purga del Art. III.1, y
-// `technician_absences` y `technician_shifts` son raíces operacionales propias del Módulo 21.
+// satisfacción del Módulo 20 + las 2 tablas de ausencias y turnos del Módulo 21 + la bitácora
+// inmutable de jornada del Módulo 22: `operational_zones` es raíz propia y sus dos hijas caen por
+// el grafo de claves foráneas, `technician_van_stocks` es hija de `spare_parts`, que ya es raíz,
+// `incident_service_sheets` e `incident_satisfaction_surveys` cuelgan de `incidents` con RESTRICT
+// y se drenan por la ventana de purga del Art. III.1, `technician_absences` y `technician_shifts`
+// son raíces operacionales propias y `technician_shift_logs` cae antes que su turno por la FK.
 $assert(
-    '2.7 El plan cubre las 23 tablas transitorias del contrato (15 de la bandeja + 3 territoriales + 1 de stock + 1 de hojas de servicio + 1 de encuestas CSAT + 2 de ausencias/turnos M21)',
-    count($order) === 23,
+    '2.7 El plan cubre las 24 tablas transitorias del contrato (15 de la bandeja + 3 territoriales + 1 de stock + 1 de hojas de servicio + 1 de encuestas CSAT + 3 de ausencias/turnos/bitácora M21-M22)',
+    count($order) === 24,
     'obtenidas: ' . count($order)
 );
 
