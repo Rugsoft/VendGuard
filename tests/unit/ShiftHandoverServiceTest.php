@@ -85,10 +85,23 @@ $shiftRepo = new class($activeShift) implements TechnicianShiftRepositoryInterfa
     public function startShift(int $technicianId, ?DateTimeImmutable $startedAt = null): TechnicianShift { throw new LogicException(); }
     public function pauseMeal(int $shiftId, ?DateTimeImmutable $pausedAt = null): TechnicianShift { throw new LogicException(); }
     public function resumeShift(int $shiftId, ?DateTimeImmutable $resumedAt = null): TechnicianShift { throw new LogicException(); }
-    public function closeShift(int $shiftId, int $closedBy, ?string $closeReason = null, ?DateTimeImmutable $closedAt = null): TechnicianShift {
-        $this->shift = $this->shift->close($closedBy, $closeReason, $closedAt);
+    public function closeShift(
+        int $shiftId,
+        int $closedBy,
+        ?string $closeReason = null,
+        ?DateTimeImmutable $closedAt = null,
+        bool $isForceClosed = false,
+        ?DateTimeImmutable $executionTime = null
+    ): TechnicianShift {
+        $this->shift = $this->shift->close($closedBy, $closeReason, $closedAt, $isForceClosed, $executionTime);
         return $this->shift;
     }
+    public function findById(int $shiftId): ?TechnicianShift { return $this->shift; }
+    public function saveAdjustment(TechnicianShift $adjustedShift): TechnicianShift { return $adjustedShift; }
+    public function findOverlappingShiftId(int $technicianId, DateTimeImmutable $startedAt, DateTimeImmutable $closedAt, ?int $excludeShiftId = null): ?int { return null; }
+    public function findShiftsByDateRange(string $fromDate, string $toDate, ?int $technicianId = null): array { return []; }
+    public function findOrphanOpenShiftsBefore(string $beforeDate, ?int $technicianId = null): array { return []; }
+    public function getClosedInterventionMetricsByTechnician(DateTimeImmutable $from, DateTimeImmutable $to, ?int $technicianId = null): array { return []; }
     public function getActiveShiftsMap(): array { return []; }
 };
 

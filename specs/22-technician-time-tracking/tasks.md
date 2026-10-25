@@ -103,7 +103,7 @@
     2. Implementar `PdoTechnicianShiftLogRepository` insertando estados en `JSONB` y consultando el historial ordenado por `created_at ASC, id ASC` junto con el nombre y rol del actor.
   * **Hecho cuando:** `php -l src/Infrastructure/Repository/PdoTechnicianShiftLogRepository.php` valida sin errores y el repositorio persiste y recupera entradas en PostgreSQL.
 
-- [ ] **T-TIME-06 · Extensión de `PdoTechnicianShiftRepository` para rangos, huérfanos, solapamientos e intervenciones cerradas**
+- [x] **T-TIME-06 · Extensión de `PdoTechnicianShiftRepository` para rangos, huérfanos, solapamientos e intervenciones cerradas**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-TIME-05`
   * **Ficheros a crear o modificar:**
