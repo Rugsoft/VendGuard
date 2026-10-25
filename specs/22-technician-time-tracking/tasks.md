@@ -132,7 +132,7 @@
     2. En `ShiftHandoverService`: registrar `CLOSE_SHIFT` en el cierre del técnico y extender `forceCloseShift()` con el parámetro opcional `$effectiveClosedAtRaw`, exigiendo $\ge 20$ caracteres reales cuando se informe, validando contra marcas y pausas previas, comprobando no solapamiento, y ejecutando el protocolo sanitario de frío del Artículo II siempre con `NOW()` real.
   * **Hecho cuando:** Las suites unitarias y de integración del Módulo 21 (`ShiftHandoverServiceTest.php`, `AbsenceShiftHandoverApiTest.php`) pasan al 100 % en verde.
 
-- [ ] **T-TIME-08 · Servicio `TechnicianWorkHoursService`, DTO `WorkHoursReportDto` y suite `TechnicianWorkHoursServiceTest`**
+- [x] **T-TIME-08 · Servicio `TechnicianWorkHoursService`, DTO `WorkHoursReportDto` y suite `TechnicianWorkHoursServiceTest`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-TIME-07`
   * **Ficheros a crear o modificar:**

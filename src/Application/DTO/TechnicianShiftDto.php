@@ -39,7 +39,22 @@ final class TechnicianShiftDto
         public readonly ?string $closeReason,
         public readonly ?string $createdAt,
         public readonly ?string $updatedAt,
-        public readonly ?array $todaySummary = null
+        public readonly ?array $todaySummary = null,
+        public readonly int $grossSeconds = 0,
+        public readonly string $grossFormatted = '00h 00m',
+        public readonly int $mealBreakSeconds = 0,
+        public readonly string $mealBreakFormatted = '00h 00m',
+        public readonly int $effectiveSeconds = 0,
+        public readonly string $effectiveFormatted = '00h 00m',
+        public readonly bool $isAnomalous = false,
+        public readonly bool $isForceClosed = false,
+        public readonly bool $isAdjusted = false,
+        public readonly ?string $originalStartedAt = null,
+        public readonly ?string $originalClosedAt = null,
+        public readonly ?int $originalMealBreakSeconds = null,
+        public readonly ?string $adjustedAt = null,
+        public readonly ?int $adjustedBy = null,
+        public readonly ?string $adjustmentReason = null
     ) {
     }
 
@@ -48,6 +63,8 @@ final class TechnicianShiftDto
         ?string $technicianName = null,
         ?array $todaySummary = null
     ): self {
+        $referenceNow = new DateTimeImmutable('now');
+
         return new self(
             id: $shift->id(),
             technicianId: $shift->technicianId(),
@@ -65,7 +82,22 @@ final class TechnicianShiftDto
             closeReason: $shift->closeReason(),
             createdAt: $shift->createdAt()?->format(DateTimeImmutable::ATOM),
             updatedAt: $shift->updatedAt()?->format(DateTimeImmutable::ATOM),
-            todaySummary: $todaySummary
+            todaySummary: $todaySummary,
+            grossSeconds: $shift->grossDurationSeconds($referenceNow),
+            grossFormatted: self::formatSeconds($shift->grossDurationSeconds($referenceNow)),
+            mealBreakSeconds: $shift->totalMealBreakSeconds($referenceNow),
+            mealBreakFormatted: self::formatSeconds($shift->totalMealBreakSeconds($referenceNow)),
+            effectiveSeconds: $shift->effectiveWorkSeconds($referenceNow),
+            effectiveFormatted: self::formatSeconds($shift->effectiveWorkSeconds($referenceNow)),
+            isAnomalous: $shift->isAnomalousDuration($referenceNow),
+            isForceClosed: $shift->isForceClosed(),
+            isAdjusted: $shift->isAdjusted(),
+            originalStartedAt: $shift->originalStartedAt()->format(DateTimeImmutable::ATOM),
+            originalClosedAt: $shift->originalClosedAt()?->format(DateTimeImmutable::ATOM),
+            originalMealBreakSeconds: $shift->originalMealBreakSeconds(),
+            adjustedAt: $shift->adjustedAt()?->format(DateTimeImmutable::ATOM),
+            adjustedBy: $shift->adjustedBy(),
+            adjustmentReason: $shift->adjustmentReason()
         );
     }
 
@@ -115,6 +147,29 @@ final class TechnicianShiftDto
             'created_at' => $this->createdAt,
             'updated_at' => $this->updatedAt,
             'today_summary' => $this->todaySummary,
+            'gross_seconds' => $this->grossSeconds,
+            'gross_formatted' => $this->grossFormatted,
+            'meal_break_seconds' => $this->mealBreakSeconds,
+            'meal_break_formatted' => $this->mealBreakFormatted,
+            'effective_seconds' => $this->effectiveSeconds,
+            'effective_formatted' => $this->effectiveFormatted,
+            'is_anomalous' => $this->isAnomalous,
+            'is_force_closed' => $this->isForceClosed,
+            'is_adjusted' => $this->isAdjusted,
+            'original_started_at' => $this->originalStartedAt,
+            'original_closed_at' => $this->originalClosedAt,
+            'original_meal_break_seconds' => $this->originalMealBreakSeconds,
+            'adjusted_at' => $this->adjustedAt,
+            'adjusted_by' => $this->adjustedBy,
+            'adjustment_reason' => $this->adjustmentReason,
         ];
+    }
+
+    /** Formato de duración del contrato: `HHh MMm`. */
+    private static function formatSeconds(int $seconds): string
+    {
+        $safeSeconds = max(0, $seconds);
+
+        return sprintf('%02dh %02dm', intdiv($safeSeconds, 3600), intdiv($safeSeconds % 3600, 60));
     }
 }
