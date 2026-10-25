@@ -182,7 +182,20 @@ export const TechnicianRouteView = {
       isSubmittingHandover: false,
       handoverError: '',
       handoverTargets: [],
-      availableReceptors: []
+      availableReceptors: [],
+
+      // Módulo 22: contador del día y autoconsulta «Mis Horas» (RF-07, D4, Art. V.4)
+      todaySummary: null,
+      showMyHoursModal: false,
+      myHoursLoading: false,
+      myHoursError: '',
+      myHours: {
+        month: '',
+        from_date: '',
+        to_date: '',
+        summary: {},
+        sessions: []
+      }
     };
   },
   computed: {
@@ -205,6 +218,32 @@ export const TechnicianRouteView = {
     /**
      * Metrics summary for route header chips.
      */
+    /** Totales del mes propio que publica `GET /api/technician/shift/my-hours` (RF-07.2). */
+    myHoursSummary() {
+      return this.myHours?.summary || {};
+    },
+
+    /** Sesiones propias del mes, en orden cronológico; nunca las de otro compañero (Art. V.4). */
+    myHoursSessions() {
+      return Array.isArray(this.myHours?.sessions) ? this.myHours.sessions : [];
+    },
+
+    myHoursIsEmpty() {
+      return this.myHoursSessions.length === 0;
+    },
+
+    /** «Octubre de 2026» a partir del `month` del contrato §5.6. */
+    myHoursMonthLabel() {
+      const month = this.myHours?.month;
+      if (!month || !/^\d{4}-\d{2}$/.test(String(month))) {
+        return 'Mes en curso';
+      }
+      const [year, monthNumber] = String(month).split('-').map(Number);
+      const names = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+      const name = names[monthNumber - 1] || '';
+      return `${name.charAt(0).toUpperCase()}${name.slice(1)} de ${year}`;
+    },
+
     routeMetrics() {
       const total = this.incidents.length;
       let assigned = 0;
@@ -402,10 +441,27 @@ export const TechnicianRouteView = {
     }
   },
   methods: {
+    /**
+     * Aplica la respuesta del ciclo de jornada: estado y acumulado del día.
+     *
+     * `today_summary` viaja de forma aditiva en `status`, `start`, `pause-meal` y
+     * `resume`, así que el contador se refresca sin una segunda petición (RF-07.1).
+     */
+    applyShiftResponse(response, fallbackStatus) {
+      const data = response && typeof response === 'object' && response.data && typeof response.data === 'object'
+        ? response.data
+        : response;
+      this.shiftStatus = data?.status || fallbackStatus;
+      if (data?.today_summary && typeof data.today_summary === 'object') {
+        this.todaySummary = data.today_summary;
+      }
+      return data;
+    },
+
     async loadShiftStatus() {
       try {
         const res = await api.get('/technician/shift/status');
-        this.shiftStatus = res?.status || res?.data?.status || 'OFF_SHIFT';
+        this.applyShiftResponse(res, 'OFF_SHIFT');
       } catch (err) {
         console.error('Error al cargar estado de turno:', err);
       }
@@ -416,7 +472,7 @@ export const TechnicianRouteView = {
       this.shiftError = '';
       try {
         const res = await api.post('/technician/shift/start');
-        this.shiftStatus = res?.status || res?.data?.status || 'ON_SHIFT';
+        this.applyShiftResponse(res, 'ON_SHIFT');
       } catch (err) {
         this.shiftError = err?.message || 'No se pudo iniciar el turno.';
       } finally {
@@ -429,7 +485,7 @@ export const TechnicianRouteView = {
       this.shiftError = '';
       try {
         const res = await api.post('/technician/shift/pause-meal');
-        this.shiftStatus = res?.status || res?.data?.status || 'MEAL_BREAK';
+        this.applyShiftResponse(res, 'MEAL_BREAK');
       } catch (err) {
         this.shiftError = err?.message || 'No se pudo pausar para comida.';
       } finally {
@@ -442,12 +498,83 @@ export const TechnicianRouteView = {
       this.shiftError = '';
       try {
         const res = await api.post('/technician/shift/resume');
-        this.shiftStatus = res?.status || res?.data?.status || 'ON_SHIFT';
+        this.applyShiftResponse(res, 'ON_SHIFT');
       } catch (err) {
         this.shiftError = err?.message || 'No se pudo reanudar el turno.';
       } finally {
         this.isShiftLoading = false;
       }
+    },
+
+    /** Abre la autoconsulta de solo lectura y reinicia su estado de error (RF-07.2). */
+    openMyHours() {
+      this.showMyHoursModal = true;
+      this.myHoursError = '';
+      this.myHours = { month: '', from_date: '', to_date: '', summary: {}, sessions: [] };
+      return this.loadMyHours();
+    },
+
+    closeMyHours() {
+      this.showMyHoursModal = false;
+    },
+
+    /**
+     * Carga el resumen mensual propio. Sin parámetro de técnico: el backend lo
+     * resuelve desde el token y jamás acepta un id ajeno (Art. V.4, RF-08.1).
+     */
+    async loadMyHours() {
+      this.myHoursLoading = true;
+      this.myHoursError = '';
+      try {
+        const res = await api.technicianShift.getMyHours();
+        const data = res && (res.summary || res.sessions || res.month)
+          ? res
+          : (res?.data && typeof res.data === 'object' ? res.data : {});
+        this.myHours = {
+          month: data.month || '',
+          from_date: data.from_date || '',
+          to_date: data.to_date || '',
+          summary: data.summary && typeof data.summary === 'object' ? data.summary : {},
+          sessions: Array.isArray(data.sessions) ? data.sessions : []
+        };
+      } catch (err) {
+        this.myHoursError = err?.message || 'No se pudieron cargar tus horas.';
+      } finally {
+        this.myHoursLoading = false;
+      }
+    },
+
+    formatShiftDate(value) {
+      if (!value) return '—';
+      const plain = String(value).slice(0, 10).split('-');
+      if (plain.length === 3) {
+        return `${plain[2]}/${plain[1]}/${plain[0]}`;
+      }
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '—';
+      return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
+    },
+
+    formatShiftDateTime(value) {
+      if (!value) return '—';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '—';
+      return `${this.formatShiftDate(value)} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    },
+
+    formatShiftDuration(seconds) {
+      const total = Math.max(0, Math.round(Number(seconds) || 0));
+      return `${String(Math.floor(total / 3600)).padStart(2, '0')}h ${String(Math.floor((total % 3600) / 60)).padStart(2, '0')}m`;
+    },
+
+    /** Un turno ajustado conserva visibles las marcas del primer fichaje (Art. III.3). */
+    hasShiftOriginalMarks(session) {
+      if (!session) return false;
+      return (
+        session.is_adjusted === true ||
+        (session.original_meal_break_seconds !== null && session.original_meal_break_seconds !== undefined) ||
+        Boolean(session.original_closed_at)
+      );
     },
 
     async openShiftHandoverModal() {
@@ -603,6 +730,8 @@ export const TechnicianRouteView = {
         this.showShiftHandoverModal = false;
         this.shiftStatus = 'OFF_SHIFT';
         await this.loadRoute();
+        // El cierre también consolida el acumulado del día en el contador (RF-07.1).
+        await this.loadShiftStatus();
       } catch (err) {
         if (err?.code === 'CONCURRENT_ROUTE_MODIFICATION' || err?.status === 409) {
           this.handoverError = 'La ruta ha cambiado concurrentemente. Se ha actualizado la lista de incidencias.';
@@ -1622,8 +1751,9 @@ export const TechnicianRouteView = {
         <!-- Barra de Control de Turno y Jornada (Módulo 21, RF-03) -->
         <div
           data-testid="shift-control-bar"
-          style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px;"
+          style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px 14px; margin-bottom: 14px; display: flex; flex-direction: column; align-items: stretch; gap: 8px;"
         >
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span
               style="width: 10px; height: 10px; border-radius: 50%; display: inline-block;"
@@ -1636,7 +1766,7 @@ export const TechnicianRouteView = {
             </span>
           </div>
 
-          <div style="display: flex; gap: 6px;">
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
             <button
               v-if="shiftStatus === 'OFF_SHIFT'"
               type="button"
@@ -1691,6 +1821,34 @@ export const TechnicianRouteView = {
                 ⏹ Cerrar
               </button>
             </template>
+          </div>
+          </div>
+
+          <!-- Contador diario y acceso a «Mis Horas» (Módulo 22, RF-07.1 y RF-07.2) -->
+          <div
+            data-testid="shift-today-summary"
+            style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding-top: 8px; border-top: 1px solid var(--color-hairline);"
+          >
+            <span style="font-family: var(--font-body); font-size: 12px; color: var(--color-ink-muted);">
+              Hoy:
+              <strong style="font-family: var(--font-display); font-size: 14px; font-weight: 500; color: var(--color-slate);">
+                {{ (todaySummary && todaySummary.effective_formatted) || '00h 00m' }}
+              </strong>
+              efectivas ·
+              <strong style="font-family: var(--font-display); font-size: 14px; font-weight: 500; color: var(--color-slate);">
+                {{ (todaySummary && todaySummary.meal_break_formatted) || '00h 00m' }}
+              </strong>
+              de comida
+            </span>
+
+            <button
+              type="button"
+              class="vg-btn vg-btn-ghost vg-btn-sm"
+              data-testid="btn-open-my-hours"
+              @click="openMyHours"
+            >
+              ⏱️ Mis Horas
+            </button>
           </div>
         </div>
 
@@ -2649,6 +2807,157 @@ export const TechnicianRouteView = {
               <span v-else>Cerrando...</span>
             </button>
           </div>
+        </template>
+      </ModalDialog>
+
+      <!-- Módulo 22: autoconsulta de solo lectura de horas propias (RF-07.2, RF-07.3, Art. V.4) -->
+      <ModalDialog
+        v-model="showMyHoursModal"
+        title="⏱️ Mis Horas"
+        subtitle="Tu resumen del mes en curso. Solo tú puedes ver estas sesiones."
+        size="lg"
+      >
+        <div v-if="showMyHoursModal" data-testid="modal-my-hours" style="display: flex; flex-direction: column; gap: 14px;">
+          <p v-if="myHoursLoading" style="font-size: 13px; color: var(--color-ink-muted); margin: 0;">
+            Cargando tus horas del mes…
+          </p>
+
+          <div v-else-if="myHoursError" role="alert" style="padding: 10px 12px; background-color: var(--color-error-bg); color: var(--color-error-text); border-radius: var(--radius-card); font-size: 13px;">
+            <div>{{ myHoursError }}</div>
+            <button type="button" class="vg-btn vg-btn-secondary vg-btn-sm" style="margin-top: 8px;" @click="loadMyHours">
+              Reintentar
+            </button>
+          </div>
+
+          <template v-else>
+            <div>
+              <div style="font-family: var(--font-display); font-size: 18px; font-weight: 500; color: var(--color-slate);">
+                {{ myHoursMonthLabel }}
+              </div>
+              <div style="font-size: 12px; color: var(--color-ink-muted);">
+                {{ formatShiftDate(myHours.from_date) }} — {{ formatShiftDate(myHours.to_date) }}
+              </div>
+            </div>
+
+            <div data-testid="my-hours-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px;">
+              <div style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 12px 14px;">
+                <div style="font-size: 12px; color: var(--color-ink-muted);">Sesiones</div>
+                <div style="font-family: var(--font-display); font-size: 24px; font-weight: 500; color: var(--color-slate);">
+                  {{ myHoursSummary.total_sessions || 0 }}
+                </div>
+              </div>
+              <div style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 12px 14px;">
+                <div style="font-size: 12px; color: var(--color-ink-muted);">Horas brutas</div>
+                <div style="font-family: var(--font-display); font-size: 24px; font-weight: 500; color: var(--color-slate);">
+                  {{ myHoursSummary.gross_formatted || '00h 00m' }}
+                </div>
+              </div>
+              <div style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 12px 14px;">
+                <div style="font-size: 12px; color: var(--color-ink-muted);">Comida</div>
+                <div style="font-family: var(--font-display); font-size: 24px; font-weight: 500; color: var(--color-slate);">
+                  {{ myHoursSummary.meal_break_formatted || '00h 00m' }}
+                </div>
+              </div>
+              <div style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 12px 14px;">
+                <div style="font-size: 12px; color: var(--color-ink-muted);">Efectivas netas</div>
+                <div style="font-family: var(--font-display); font-size: 24px; font-weight: 500; color: var(--color-primary);">
+                  {{ myHoursSummary.effective_formatted || '00h 00m' }}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 style="font-family: var(--font-display); font-size: 16px; font-weight: 500; color: var(--color-slate); margin: 0 0 8px;">
+                Mis sesiones del mes
+              </h4>
+
+              <p v-if="myHoursIsEmpty" data-testid="my-hours-empty" style="font-size: 13px; color: var(--color-ink-muted); margin: 0;">
+                Sin sesiones registradas este mes.
+              </p>
+
+              <ul v-else data-testid="my-hours-sessions" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px;">
+                <li
+                  v-for="session in myHoursSessions"
+                  :key="'my-hours-' + session.id"
+                  style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px 12px;"
+                >
+                  <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
+                    <strong style="font-family: var(--font-body); font-size: 14px; color: var(--color-slate);">
+                      {{ formatShiftDate(session.shift_date) }}
+                    </strong>
+                    <span style="font-family: var(--font-display); font-size: 14px; color: var(--color-primary);">
+                      {{ session.effective_formatted }}
+                    </span>
+                  </div>
+
+                  <div style="font-size: 12px; color: var(--color-ink-muted); margin-top: 2px;">
+                    {{ formatTime(session.started_at) }} → {{ session.is_open ? 'En curso' : formatTime(session.closed_at) }}
+                    · Bruto {{ session.gross_formatted }}
+                    · Comida {{ session.meal_break_formatted }}
+                  </div>
+
+                  <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;">
+                    <span
+                      v-if="session.is_open"
+                      style="display: inline-block; padding: 2px 8px; background-color: var(--color-success-bg); color: var(--color-success-text); border: 1px solid var(--color-success); border-radius: var(--radius-interactive); font-size: 12px;"
+                    >
+                      En curso
+                    </span>
+                    <span
+                      v-if="session.is_anomalous"
+                      style="display: inline-block; padding: 2px 8px; background-color: var(--color-warning-bg); color: var(--color-warning-text); border: 1px solid var(--color-warning-border); border-radius: var(--radius-interactive); font-size: 12px;"
+                    >
+                      ⚠️ &gt; 12h
+                    </span>
+                    <span
+                      v-if="session.is_force_closed"
+                      style="display: inline-block; padding: 2px 8px; background-color: var(--color-warning-bg); color: var(--color-warning-text); border: 1px solid var(--color-warning-border); border-radius: var(--radius-interactive); font-size: 12px;"
+                    >
+                      Cierre forzado
+                    </span>
+                    <span
+                      v-if="session.is_adjusted"
+                      style="display: inline-block; padding: 2px 8px; background-color: var(--color-info-bg); color: var(--color-info-text); border: 1px solid var(--color-info-border); border-radius: var(--radius-interactive); font-size: 12px;"
+                    >
+                      Ajustado por Coordinación
+                    </span>
+                  </div>
+
+                  <div
+                    v-if="hasShiftOriginalMarks(session)"
+                    style="margin-top: 8px; padding: 8px 10px; background-color: var(--color-canvas); border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); font-size: 12px; color: var(--color-ink-muted);"
+                  >
+                    <div>
+                      <strong style="color: var(--color-slate);">Marcas originales del primer fichaje:</strong>
+                      entrada {{ formatShiftDateTime(session.original_started_at) }}
+                      · salida {{ session.original_closed_at ? formatShiftDateTime(session.original_closed_at) : '—' }}
+                      · comida
+                      {{ (session.original_meal_break_seconds !== null && session.original_meal_break_seconds !== undefined)
+                        ? formatShiftDuration(session.original_meal_break_seconds)
+                        : '—' }}
+                    </div>
+                    <div v-if="session.adjustment_reason" style="margin-top: 4px;">
+                      <strong style="color: var(--color-slate);">Motivo del ajuste:</strong> {{ session.adjustment_reason }}
+                    </div>
+                    <div v-else-if="session.close_reason" style="margin-top: 4px;">
+                      <strong style="color: var(--color-slate);">Motivo del cierre:</strong> {{ session.close_reason }}
+                    </div>
+                  </div>
+
+                  <div
+                    v-else-if="session.is_force_closed && session.close_reason"
+                    style="margin-top: 8px; font-size: 12px; color: var(--color-ink-muted);"
+                  >
+                    <strong style="color: var(--color-slate);">Motivo del cierre:</strong> {{ session.close_reason }}
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </template>
+        </div>
+
+        <template #footer>
+          <button type="button" class="vg-btn vg-btn-secondary" @click="closeMyHours">Cerrar</button>
         </template>
       </ModalDialog>
     </div>

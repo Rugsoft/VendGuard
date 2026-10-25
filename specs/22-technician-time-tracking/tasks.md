@@ -208,7 +208,7 @@
     4. Crear `tests/unit/CoordinatorWorkHoursTabTest.mjs` validando el componente, sus interacciones y la ausencia de colores hex hardcodeados.
   * **Hecho cuando:** `node --test tests/unit/CoordinatorWorkHoursTabTest.mjs` pasa al 100 % en verde.
 
-- [ ] **T-TIME-12 · Contador diario y modal «⏱️ Mis Horas» en `TechnicianRouteView.js` + suite ESM**
+- [x] **T-TIME-12 · Contador diario y modal «⏱️ Mis Horas» en `TechnicianRouteView.js` + suite ESM**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-TIME-11`
   * **Ficheros a crear o modificar:**
