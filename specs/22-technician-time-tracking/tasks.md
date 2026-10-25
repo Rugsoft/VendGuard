@@ -26,7 +26,7 @@
 
 ## Fase 1: Esquema de Base de Datos PostgreSQL / Supabase y Guardas de Esquema
 
-- [ ] **T-TIME-01 · Migración `015_technician_time_tracking.sql`, convergencia en `supabase_init.sql` y semillas**
+- [x] **T-TIME-01 · Migración `015_technician_time_tracking.sql`, convergencia en `supabase_init.sql` y semillas**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** Ninguna
   * **Ficheros a crear o modificar:**

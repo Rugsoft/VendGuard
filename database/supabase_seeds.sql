@@ -17,8 +17,11 @@
 --
 -- LO QUE ESTE FICHERO NO CONTIENE (deliberadamente)
 --   · Ninguna incidencia, ni histórica ni activa, ni comentarios, ni marcas de
---     auditoría. El arranque en limpio es estricto (EARS-02.1, spec §7): los
---     expedientes de la base anterior quedan archivados en el sistema previo.
+--     auditoría de averías. El arranque en limpio es estricto (EARS-02.1, spec
+--     §7): los expedientes de la base anterior quedan archivados en el sistema
+--     previo. La Sección 14 sí siembra la jornada demo del Módulo 22 —dos turnos
+--     cerrados, su bitácora y su auditoría laboral—, porque el registro horario
+--     necesita datos demostrables sin inventar incidencias.
 --   · Ningún pedido preventivo, certificado sanitario ni checklist respondido:
 --     son *fixtures* del arnés de pruebas (EARS-02.2), y viven en
 --     `database/DemoMetricsSeeder.php` precisamente para que producción no los
@@ -492,9 +495,207 @@ WHERE NOT EXISTS (
 
 
 -- =============================================================================
+-- SECCIÓN 14 · technician_shifts y technician_shift_logs — jornada demo (M22)
+-- ============================================================================
+-- Dos sesiones cerradas y realistas: una jornada normal con dos pausas de
+-- comida acumuladas (Jordi) y un olvido de salida corregido por Coordinación
+-- con hora efectiva retroactiva (Marta). La segunda conserva la marca original
+-- de cierre del día siguiente y la deja inmutable, que es exactamente lo que
+-- el Art. III.3 exige poder demostrar.
+--
+-- Las fechas son fijas y las filas se resuelven por técnico + instante de
+-- inicio, de modo que reejecutar el catálogo no duplica la jornada ni sus
+-- eventos. La bitácora se siembra después de los turnos porque necesita su
+-- identidad generada.
+
+INSERT INTO technician_shifts (
+    technician_id, shift_date, status, started_at,
+    meal_break_started_at, meal_break_ended_at, meal_break_seconds,
+    closed_at, closed_by, close_reason,
+    original_started_at, original_closed_at, original_meal_break_seconds,
+    is_force_closed, is_adjusted, adjusted_at, adjusted_by, adjustment_reason
+)
+SELECT
+    u.id,
+    v.shift_date,
+    'OFF_SHIFT',
+    v.started_at,
+    v.meal_started_at,
+    v.meal_ended_at,
+    v.meal_seconds,
+    v.closed_at,
+    closer.id,
+    v.close_reason,
+    v.original_started_at,
+    v.original_closed_at,
+    v.original_meal_seconds,
+    v.is_force_closed,
+    v.is_adjusted,
+    v.adjusted_at,
+    adjuster.id,
+    v.adjustment_reason
+FROM (VALUES
+    (
+        'jordi.ruta@vendguard.internal',
+        DATE '2026-10-20',
+        TIMESTAMPTZ '2026-10-20 08:00:00+02',
+        TIMESTAMPTZ '2026-10-20 14:00:00+02',
+        TIMESTAMPTZ '2026-10-20 14:40:00+02',
+        3600,
+        TIMESTAMPTZ '2026-10-20 17:00:00+02',
+        'jordi.ruta@vendguard.internal',
+        'Cierre de jornada al finalizar la ruta.',
+        TIMESTAMPTZ '2026-10-20 08:00:00+02',
+        TIMESTAMPTZ '2026-10-20 17:00:00+02',
+        3600,
+        FALSE,
+        FALSE,
+        NULL::TIMESTAMPTZ,
+        NULL::TEXT,
+        NULL::TEXT
+    ),
+    (
+        'marta.ruta@vendguard.internal',
+        DATE '2026-10-21',
+        TIMESTAMPTZ '2026-10-21 08:00:00+02',
+        TIMESTAMPTZ '2026-10-21 14:00:00+02',
+        TIMESTAMPTZ '2026-10-21 14:30:00+02',
+        1800,
+        TIMESTAMPTZ '2026-10-21 17:00:00+02',
+        'coordinacion@vendguard.internal',
+        'Cierre forzado con hora real de salida tras olvido de fichaje.',
+        TIMESTAMPTZ '2026-10-21 08:00:00+02',
+        TIMESTAMPTZ '2026-10-22 09:00:00+02',
+        1800,
+        TRUE,
+        TRUE,
+        TIMESTAMPTZ '2026-10-22 09:05:00+02',
+        'coordinacion@vendguard.internal',
+        'Cierre forzado con hora real de salida tras olvido de fichaje.'
+    )
+) AS v(
+    email, shift_date, started_at, meal_started_at, meal_ended_at, meal_seconds,
+    closed_at, closer_email, close_reason, original_started_at, original_closed_at,
+    original_meal_seconds, is_force_closed, is_adjusted, adjusted_at, adjuster_email,
+    adjustment_reason
+)
+JOIN users u ON u.email_key = v.email
+JOIN users closer ON closer.email_key = v.closer_email
+LEFT JOIN users adjuster ON adjuster.email_key = v.adjuster_email
+WHERE NOT EXISTS (
+    SELECT 1
+      FROM technician_shifts s
+     WHERE s.technician_id = u.id
+       AND s.started_at = v.started_at
+);
+
+
+INSERT INTO technician_shift_logs (
+    shift_id, technician_id, event_type, actor_user_id,
+    effective_at, previous_state, new_state, reason
+)
+SELECT
+    s.id,
+    s.technician_id,
+    v.event_type,
+    actor.id,
+    v.effective_at,
+    CASE
+        WHEN v.previous_status IS NULL THEN NULL
+        ELSE jsonb_build_object('status', v.previous_status)
+    END,
+    jsonb_build_object(
+        'status', v.new_status,
+        'meal_break_seconds', v.meal_seconds,
+        'closed_at', CASE
+            WHEN v.closed_at IS NULL THEN NULL
+            ELSE to_char(v.closed_at AT TIME ZONE 'Europe/Madrid', 'YYYY-MM-DD"T"HH24:MI:SS')
+        END
+    ),
+    v.reason
+FROM (VALUES
+    ('jordi.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-20 08:00:00+02', 'START_SHIFT', TIMESTAMPTZ '2026-10-20 08:00:00+02', 'jordi.ruta@vendguard.internal', NULL::TEXT, 'ON_SHIFT', 0, NULL::TIMESTAMPTZ, NULL::TEXT),
+    ('jordi.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-20 08:00:00+02', 'PAUSE_MEAL', TIMESTAMPTZ '2026-10-20 10:00:00+02', 'jordi.ruta@vendguard.internal', 'ON_SHIFT', 'MEAL_BREAK', 0, NULL::TIMESTAMPTZ, NULL::TEXT),
+    ('jordi.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-20 08:00:00+02', 'RESUME_SHIFT', TIMESTAMPTZ '2026-10-20 10:20:00+02', 'jordi.ruta@vendguard.internal', 'MEAL_BREAK', 'ON_SHIFT', 1200, NULL::TIMESTAMPTZ, NULL::TEXT),
+    ('jordi.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-20 08:00:00+02', 'PAUSE_MEAL', TIMESTAMPTZ '2026-10-20 14:00:00+02', 'jordi.ruta@vendguard.internal', 'ON_SHIFT', 'MEAL_BREAK', 1200, NULL::TIMESTAMPTZ, NULL::TEXT),
+    ('jordi.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-20 08:00:00+02', 'RESUME_SHIFT', TIMESTAMPTZ '2026-10-20 14:40:00+02', 'jordi.ruta@vendguard.internal', 'MEAL_BREAK', 'ON_SHIFT', 3600, NULL::TIMESTAMPTZ, NULL::TEXT),
+    ('jordi.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-20 08:00:00+02', 'CLOSE_SHIFT', TIMESTAMPTZ '2026-10-20 17:00:00+02', 'jordi.ruta@vendguard.internal', 'ON_SHIFT', 'OFF_SHIFT', 3600, TIMESTAMPTZ '2026-10-20 17:00:00+02', NULL::TEXT),
+    ('marta.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-21 08:00:00+02', 'START_SHIFT', TIMESTAMPTZ '2026-10-21 08:00:00+02', 'marta.ruta@vendguard.internal', NULL::TEXT, 'ON_SHIFT', 0, NULL::TIMESTAMPTZ, NULL::TEXT),
+    ('marta.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-21 08:00:00+02', 'PAUSE_MEAL', TIMESTAMPTZ '2026-10-21 14:00:00+02', 'marta.ruta@vendguard.internal', 'ON_SHIFT', 'MEAL_BREAK', 0, NULL::TIMESTAMPTZ, NULL::TEXT),
+    ('marta.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-21 08:00:00+02', 'RESUME_SHIFT', TIMESTAMPTZ '2026-10-21 14:30:00+02', 'marta.ruta@vendguard.internal', 'MEAL_BREAK', 'ON_SHIFT', 1800, NULL::TIMESTAMPTZ, NULL::TEXT),
+    ('marta.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-21 08:00:00+02', 'FORCE_CLOSE_SHIFT', TIMESTAMPTZ '2026-10-22 09:00:00+02', 'coordinacion@vendguard.internal', 'ON_SHIFT', 'OFF_SHIFT', 1800, TIMESTAMPTZ '2026-10-21 17:00:00+02', 'Cierre forzado con hora real de salida tras olvido de fichaje.'),
+    ('marta.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-21 08:00:00+02', 'ADJUST_SHIFT', TIMESTAMPTZ '2026-10-22 09:05:00+02', 'coordinacion@vendguard.internal', 'OFF_SHIFT', 'OFF_SHIFT', 1800, TIMESTAMPTZ '2026-10-21 17:00:00+02', 'Cierre forzado con hora real de salida tras olvido de fichaje.')
+) AS v(
+    email, shift_started_at, event_type, effective_at, actor_email,
+    previous_status, new_status, meal_seconds, closed_at, reason
+)
+JOIN users technician_user ON technician_user.email_key = v.email
+JOIN technician_shifts s
+  ON s.technician_id = technician_user.id
+ AND s.started_at = v.shift_started_at
+JOIN users actor ON actor.email_key = v.actor_email
+WHERE NOT EXISTS (
+    SELECT 1
+      FROM technician_shift_logs l
+     WHERE l.shift_id = s.id
+       AND l.event_type = v.event_type
+       AND l.effective_at = v.effective_at
+);
+
+
+INSERT INTO audit_log (
+    entity_type, entity_id, action, user_id, user_role, user_name,
+    previous_state, new_state, metadata, created_at
+)
+SELECT
+    'USER'::audit_entity_type,
+    s.technician_id,
+    v.action,
+    actor.id,
+    'COORDINATOR',
+    actor.name,
+    v.previous_state,
+    v.new_state,
+    jsonb_build_object('shift_id', s.id, 'reason', v.reason),
+    v.created_at
+FROM (VALUES
+    (
+        TIMESTAMPTZ '2026-10-21 08:00:00+02',
+        'FORCE_CLOSE_TECHNICIAN_SHIFT',
+        jsonb_build_object('status', 'ON_SHIFT'),
+        jsonb_build_object('status', 'OFF_SHIFT', 'closed_at', '2026-10-21T17:00:00+02:00'),
+        TIMESTAMPTZ '2026-10-22 09:00:00+02',
+        'Cierre forzado con hora real de salida tras olvido de fichaje.'
+    ),
+    (
+        TIMESTAMPTZ '2026-10-21 08:00:00+02',
+        'ADJUST_TECHNICIAN_SHIFT',
+        jsonb_build_object('started_at', '2026-10-21T08:00:00+02:00', 'closed_at', '2026-10-22T09:00:00+02:00', 'meal_break_seconds', 1800),
+        jsonb_build_object('started_at', '2026-10-21T08:00:00+02:00', 'closed_at', '2026-10-21T17:00:00+02:00', 'meal_break_seconds', 1800, 'is_adjusted', TRUE),
+        TIMESTAMPTZ '2026-10-22 09:05:00+02',
+        'Cierre forzado con hora real de salida tras olvido de fichaje.'
+    )
+) AS v(shift_started_at, action, previous_state, new_state, created_at, reason)
+JOIN technician_shifts s
+  ON s.started_at = v.shift_started_at
+JOIN users technician_user ON technician_user.id = s.technician_id
+ AND technician_user.email_key = 'marta.ruta@vendguard.internal'
+JOIN users actor ON actor.email_key = 'coordinacion@vendguard.internal'
+WHERE NOT EXISTS (
+    SELECT 1
+      FROM audit_log a
+     WHERE a.entity_type = 'USER'::audit_entity_type
+       AND a.entity_id = s.technician_id
+       AND a.action = v.action
+       AND a.created_at = v.created_at
+);
+
+
+-- ============================================================================
 -- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
 --       de cuadrante · 5 saldos de stock de furgoneta · 1 configuración de ruta ·
 --       13 máquinas · 6 usuarios internos · 5 frecuencias normativas · 13 repuestos ·
---       50 compatibilidades · 1 canal emergencias.
---       0 incidencias · 0 histórico · 0 auditoría (arranque en limpio estricto).
+--       50 compatibilidades · 1 canal emergencias · 2 turnos demo ·
+--       11 eventos de bitácora · 2 eventos de auditoría de jornada.
+--       0 incidencias · 0 histórico de averías (arranque en limpio estricto).
 -- =============================================================================

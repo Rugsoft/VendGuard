@@ -1,5 +1,5 @@
 -- =============================================================================
--- VendGuard · DDL canónico del motor nuevo · COMPLETO (30 tablas)
+-- VendGuard · DDL canónico del motor nuevo · COMPLETO (31 tablas)
 -- PostgreSQL 15+ (certificado contra PostgreSQL 16.15 en deploy/local/postgres/)
 -- Fichero: database/supabase_init.sql
 -- Módulo: 12-hybrid-supabase-migration · T-HYBRID-01 (tablas 1-10) y T-HYBRID-02 (tablas 11-20)
@@ -8,7 +8,7 @@
 -- QUÉ ES ESTE FICHERO
 --   La creación del esquema relacional del motor nuevo: extensiones, los tipos
 --   `ENUM` del dominio con su tabla de correspondencia, las funciones canónicas
---   de blindaje y **las 30 tablas** con sus claves, restricciones, índices y
+--   de blindaje y **las 31 tablas** con sus claves, restricciones, índices y
 --   disparadores. La Parte 1 (§4) cubre `locations`, `machines`, `users`,
 --   `incidents`, `incident_history`, `incident_comments`, `audit_log`,
 --   `route_settings`, `preventive_settings` y `preventive_orders`; la Parte 2
@@ -20,7 +20,8 @@
 --   `operational_zone_postal_codes` y `technician_zone_assignments`; la Parte 4
 --   (§7) las tablas 26 a 30: `technician_van_stocks` (M18),
 --   `incident_service_sheets` (M19), `incident_satisfaction_surveys` (M20),
---   `technician_absences` (M21) y `technician_shifts` (M21).
+--   `technician_absences` (M21), `technician_shifts` (M21) y
+--   `technician_shift_logs` (M22).
 --
 -- CONTRATO QUE LO RIGE (no al revés)
 --   specs/technical/schema_correspondence_contract.md. Este DDL se escribe
@@ -1861,6 +1862,18 @@ CREATE OR REPLACE TRIGGER trg_no_update_incident_service_sheets
     FOR EACH ROW EXECUTE FUNCTION prevent_service_sheet_rewrite();
 
 
+-- La bitácora de jornada del Módulo 22 es append-only: ni `DELETE` ni `UPDATE`.
+-- El nombre de esta función es el declarado por el contrato del Módulo 22; su
+-- cuerpo sirve a cualquier superficie de solo inserción (Art. III.3).
+CREATE OR REPLACE FUNCTION prevent_service_sheet_update()
+RETURNS TRIGGER AS $fn$
+BEGIN
+    RAISE EXCEPTION 'ART_III_1_VIOLATION: la bitácora de jornada no admite UPDATE (Art. III.3).'
+        USING ERRCODE = '45000';
+END;
+$fn$ LANGUAGE plpgsql;
+
+
 -- -----------------------------------------------------------------------------
 -- Tabla 28 · incident_satisfaction_surveys — encuesta de satisfacción (M20)
 -- -----------------------------------------------------------------------------
@@ -2019,9 +2032,18 @@ CREATE TABLE IF NOT EXISTS technician_shifts (
     started_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     meal_break_started_at TIMESTAMPTZ,
     meal_break_ended_at   TIMESTAMPTZ,
+    meal_break_seconds    INT NOT NULL DEFAULT 0,
     closed_at             TIMESTAMPTZ,
     closed_by             BIGINT,
     close_reason          TEXT,
+    original_started_at   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    original_closed_at    TIMESTAMPTZ,
+    original_meal_break_seconds INT,
+    is_force_closed       BOOLEAN NOT NULL DEFAULT FALSE,
+    is_adjusted           BOOLEAN NOT NULL DEFAULT FALSE,
+    adjusted_at           TIMESTAMPTZ,
+    adjusted_by           BIGINT,
+    adjustment_reason     TEXT,
     created_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -2029,6 +2051,8 @@ CREATE TABLE IF NOT EXISTS technician_shifts (
     CONSTRAINT fk_tech_shifts_user FOREIGN KEY (technician_id)
         REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT fk_tech_shifts_closer FOREIGN KEY (closed_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_tech_shifts_adjuster FOREIGN KEY (adjusted_by)
         REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT chk_tech_shifts_status CHECK (
         status IN ('ON_SHIFT', 'MEAL_BREAK', 'OFF_SHIFT')
@@ -2038,6 +2062,22 @@ CREATE TABLE IF NOT EXISTS technician_shifts (
     ),
     CONSTRAINT chk_tech_shifts_close_order CHECK (
         closed_at IS NULL OR closed_at >= started_at
+    ),
+    CONSTRAINT chk_tech_shifts_meal_seconds CHECK (
+        meal_break_seconds >= 0
+        AND (
+            closed_at IS NULL
+            OR meal_break_seconds <= EXTRACT(EPOCH FROM (closed_at - started_at))::INT
+        )
+    ),
+    CONSTRAINT chk_tech_shifts_adjustment_consistency CHECK (
+        (is_adjusted = FALSE AND adjusted_at IS NULL AND adjusted_by IS NULL AND adjustment_reason IS NULL)
+        OR (
+            is_adjusted = TRUE
+            AND adjusted_at IS NOT NULL
+            AND adjusted_by IS NOT NULL
+            AND char_length(btrim(adjustment_reason)) >= 20
+        )
     )
 );
 
@@ -2059,30 +2099,98 @@ CREATE OR REPLACE TRIGGER trg_no_delete_technician_shifts
     FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
 
 
+-- -----------------------------------------------------------------------------
+-- Tabla 31 · technician_shift_logs — bitácora inmutable de jornada (M22)
+-- -----------------------------------------------------------------------------
+-- QUÉ GUARDA
+--   La secuencia append-only de los seis eventos canónicos del turno: inicio,
+--   pausa de comida, reanudación, cierre del técnico, cierre forzado de
+--   Coordinación y rectificación administrativa. Cada fila conserva el estado
+--   previo y el resultante, de modo que una rectificación posterior nunca
+--   borra la marca original (Art. III.3).
+--
+-- POR QUÉ NO HAY `UPDATE` NI `DELETE`
+--   La bitácora es prueba documental del fichaje. `prevent_hard_delete()`
+--   levanta el 45000 ante un borrado y `prevent_service_sheet_update()` hace lo
+--   mismo ante una reescritura. La corrección se expresa añadiendo un evento
+--   nuevo, no editando el anterior.
+CREATE TABLE IF NOT EXISTS technician_shift_logs (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY,
+    shift_id        BIGINT NOT NULL,
+    technician_id   BIGINT NOT NULL,
+    event_type      VARCHAR(30) NOT NULL,
+    actor_user_id   BIGINT NOT NULL,
+    effective_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    previous_state  JSONB,
+    new_state       JSONB NOT NULL,
+    reason          TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT pk_technician_shift_logs PRIMARY KEY (id),
+    CONSTRAINT fk_shift_logs_shift FOREIGN KEY (shift_id)
+        REFERENCES technician_shifts (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_shift_logs_technician FOREIGN KEY (technician_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_shift_logs_actor FOREIGN KEY (actor_user_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_shift_logs_event_type CHECK (
+        event_type IN (
+            'START_SHIFT',
+            'PAUSE_MEAL',
+            'RESUME_SHIFT',
+            'CLOSE_SHIFT',
+            'FORCE_CLOSE_SHIFT',
+            'ADJUST_SHIFT'
+        )
+    ),
+    CONSTRAINT chk_shift_logs_adjust_reason CHECK (
+        event_type <> 'ADJUST_SHIFT'
+        OR (reason IS NOT NULL AND char_length(btrim(reason)) >= 20)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_tech_shift_logs_shift
+    ON technician_shift_logs (shift_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_tech_shift_logs_tech
+    ON technician_shift_logs (technician_id, created_at);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_technician_shift_logs
+    BEFORE DELETE ON technician_shift_logs
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+CREATE OR REPLACE TRIGGER trg_no_update_technician_shift_logs
+    BEFORE UPDATE ON technician_shift_logs
+    FOR EACH ROW EXECUTE FUNCTION prevent_service_sheet_update();
+
+
 -- =============================================================================
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 30 tablas (las 30 del contrato de correspondencia) · 24 tipos del dominio en sus
--- 25 columnas `ENUM` · 4 funciones de blindaje (las 3 canónicas más las dos de
--- bloqueo de `UPDATE`, que comparten forma)
--- 48 disparadores: 30 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 16
--- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 2 `BEFORE UPDATE` de
--- bloqueo (`trg_no_update_incident_service_sheets` y
--- `trg_no_update_incident_satisfaction_surveys`)
--- 48 restricciones nombradas: 30 claves primarias (la del mapeo de códigos postales
+-- 31 tablas (las 31 del contrato de correspondencia) · 24 tipos del dominio en sus
+-- 25 columnas `ENUM` · 5 funciones de blindaje: `prevent_hard_delete()`,
+-- `touch_updated_at()`, `prevent_service_sheet_rewrite()`,
+-- `prevent_satisfaction_survey_rewrite()` y `prevent_service_sheet_update()`
+-- (las tres últimas de bloqueo de `UPDATE` comparten forma)
+-- 50 disparadores: 31 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 16
+-- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 3 `BEFORE UPDATE` de
+-- bloqueo (`trg_no_update_incident_service_sheets`,
+-- `trg_no_update_incident_satisfaction_surveys` y
+-- `trg_no_update_technician_shift_logs`)
+-- 49 restricciones nombradas: 31 claves primarias (la del mapeo de códigos postales
 -- es el propio CP, no un identificador sintético) y 18 únicas
--- 29 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
--- Módulo 21 (3 en ausencias y 3 en turnos) · 56 claves
--- foráneas con las reglas declaradas en el contrato §2.4
--- 76 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- 33 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
+-- Módulo 21 (3 en ausencias y 3 en turnos) y las 4 del Módulo 22 (2 en turnos y 2
+-- en la bitácora) · 60 claves foráneas con las reglas declaradas en el contrato §2.4
+-- 78 índices secundarios —uno por índice no único del esquema local y con las mismas
 -- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1), el
--- Módulo 20 (3) y el Módulo 21 (3)— y cuatro índices únicos parciales:
+-- Módulo 20 (3), el Módulo 21 (3) y el Módulo 22 (2)— y cuatro índices únicos parciales:
 -- `uq_machine_active_ticket` (D-6), `uq_technician_zone_live`,
 -- `uq_technician_primary_zone` (Resolución QA 10) y
 -- `uq_tech_shifts_single_active` (M21, Resolución R3)
 -- 2 columnas canónicas (`site_code_key`, `email_key`) con índice único propio (A-1/A-2)
 -- 1 columna derivada (`incident_replaced_parts.total_cost_snapshot`, D-7)
--- 3 columnas `JSONB` en `audit_log` (D-4)
+-- 5 columnas `JSONB`: 3 en `audit_log` (D-4) y 2 en `technician_shift_logs` (M22)
 --
 -- La verificación de correspondencia entre motores y la convergencia del esquema
 -- desplegado son T-HYBRID-23 y T-HYBRID-24; las semillas maestras, T-HYBRID-03.
