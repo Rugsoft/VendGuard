@@ -59,7 +59,7 @@
 
 ## Fase 2: Modelos de Dominio, Value Objects y Excepciones
 
-- [ ] **T-TIME-03 · Enum `ShiftEventType`, entidad `TechnicianShiftLog` y excepción `ShiftAdjustmentValidationException`**
+- [x] **T-TIME-03 · Enum `ShiftEventType`, entidad `TechnicianShiftLog` y excepción `ShiftAdjustmentValidationException`**
   * **Tiempo estimado:** 20 min
   * **Dependencias previas:** `T-TIME-02`
   * **Ficheros a crear o modificar:**
