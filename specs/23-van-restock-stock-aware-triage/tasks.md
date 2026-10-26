@@ -196,7 +196,7 @@
     4. Ampliar la lista de claves vedadas en `LocationPortalController` (`van_stock_match`, `van_stock_readiness`, `active_dispatched_order`, `last_confirmed_order`, `restock_order`, Art. V.4) y registrar todas las rutas nuevas en `AppRouter.php`.
   * **Hecho cuando:** `php -l src/Presentation/Controller/CoordinatorVanRestockOrderController.php && php -l src/Presentation/Controller/TechnicianVanStockController.php && php -l src/Presentation/Routing/AppRouter.php` no reporta errores y `php tests/unit/VanStockPrivacyTest.php` pasa en verde.
 
-- [ ] **T-RESTOCK-11 · Suite de integración `VanRestockOrderApiTest`**
+- [x] **T-RESTOCK-11 · Suite de integración `VanRestockOrderApiTest`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-RESTOCK-10`
   * **Ficheros a crear o modificar:**
