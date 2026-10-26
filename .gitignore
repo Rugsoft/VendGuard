@@ -30,3 +30,6 @@ public/uploads/*
 deploy/local/postgres/tls/certs/
 deploy/local/postgres/.env.docker-tls
 deploy/local/postgres/.env.battery
+
+# Configuración de cliente MCP local
+.agents/mcp.json
