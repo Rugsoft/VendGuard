@@ -116,7 +116,7 @@
     3. Incluir en cada candidato sugerido el bloque `van_stock_match` y la insignia informativa (`STOCK_COMPATIBLE`, `STOCK_PARCIAL`, `SIN_STOCK_COMPATIBLE`) en `badges`, **manteniendo 100 % intactos `TechnicianWorkloadScorer`, `total_score`, `score_breakdown` y el protocolo de escalado sanitario del Art. II (`D2`)**.
   * **Hecho cuando:** `php tests/unit/TechnicianWorkloadScorerTest.php && php tests/unit/TechnicianAssignmentSuggesterTest.php` siguen pasando al 100 % en verde sin regresiones.
 
-- [ ] **T-RESTOCK-06 · Suite unitaria `TechnicianAssignmentSuggesterVanStockTest`**
+- [x] **T-RESTOCK-06 · Suite unitaria `TechnicianAssignmentSuggesterVanStockTest`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-RESTOCK-05`
   * **Ficheros a crear o modificar:**
