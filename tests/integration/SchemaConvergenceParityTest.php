@@ -43,7 +43,7 @@ use VendGuard\Infrastructure\Database\SqlScriptSplitter;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 31 tablas del contrato de correspondencia (§2.1, Módulos 14, 17, 18, 19, 20, 21 y 22). */
+/** Las 33 tablas del contrato de correspondencia (§2.1, Módulos 14, 17, 18, 19, 20, 21, 22 y 23). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -54,6 +54,7 @@ const CONTRACT_TABLES = [
     'operational_zones', 'operational_zone_postal_codes', 'technician_zone_assignments',
     'technician_van_stocks', 'incident_service_sheets', 'incident_satisfaction_surveys',
     'technician_absences', 'technician_shifts', 'technician_shift_logs',
+    'van_restock_orders', 'van_restock_order_items',
 ];
 
 /** Adiciones declaradas del motor nuevo (§5). */
@@ -251,7 +252,7 @@ try {
 
     $baseOnlyTables = $readTables($pgPdo, $schema);
     $assert(
-        'El DDL base crea las 31 tablas del contrato y ninguna más',
+        'El DDL base crea las 33 tablas del contrato y ninguna más',
         $sameSet($baseOnlyTables, CONTRACT_TABLES),
         'tablas: ' . count($baseOnlyTables) . ' · ' . $listSample(array_merge(array_diff($baseOnlyTables, CONTRACT_TABLES), array_diff(CONTRACT_TABLES, $baseOnlyTables)))
     );
@@ -287,6 +288,7 @@ try {
             '013_shift_handover_notification.sql',
             '014_technician_absence_exclusion.sql',
             '015_technician_time_tracking.sql',
+            '016_van_restock_orders.sql',
         ],
         'aplicadas: ' . $listSample($applied)
     );
@@ -294,7 +296,7 @@ try {
     $runner->assertConverged();
     $convergedTables = $readTables($pgPdo, $schema);
     $assert(
-        'Tras la migración, el inventario converge al del repositorio (31 tablas + libro A-5)',
+        'Tras la migración, el inventario converge al del repositorio (33 tablas + libro A-5)',
         $sameSet($convergedTables, array_merge(CONTRACT_TABLES, [ADDITION_LEDGER])),
         'tablas: ' . count($convergedTables)
     );
@@ -302,7 +304,7 @@ try {
     $ledgerRows = $pgPdo->query('SELECT filename, checksum FROM ' . ADDITION_LEDGER . ' ORDER BY filename')->fetchAll();
     $assert(
         'El libro registra las migraciones con su huella de 64 caracteres',
-        count($ledgerRows) === 15
+        count($ledgerRows) === 16
         && $ledgerRows[0]['filename'] === '001_initial_baseline.sql'
         && strlen((string)$ledgerRows[0]['checksum']) === 64
         && $ledgerRows[1]['filename'] === '002_notification_center_outbox.sql'
@@ -333,6 +335,8 @@ try {
         && strlen((string)$ledgerRows[13]['checksum']) === 64
         && $ledgerRows[14]['filename'] === '015_technician_time_tracking.sql'
         && strlen((string)$ledgerRows[14]['checksum']) === 64
+        && $ledgerRows[15]['filename'] === '016_van_restock_orders.sql'
+        && strlen((string)$ledgerRows[15]['checksum']) === 64
     );
 
     $assert('Reejecutar el ejecutor no aplica nada (idempotente)', $runner->runAll() === []);
@@ -356,15 +360,15 @@ try {
 
     $pgTables = $readTables($pgPdo, $schema);
     $assert(
-        'El motor único declara las 31 tablas canónicas del dominio',
+        'El motor único declara las 33 tablas canónicas del dominio',
         $sameSet(array_values(array_diff($pgTables, [ADDITION_LEDGER])), CONTRACT_TABLES),
         'tablas: ' . count($pgTables)
     );
 
     $pgColumns = $readColumnNames($pgPdo, $schema);
     $assert(
-        'Todas las 31 tablas tienen columnas declaradas en PostgreSQL',
-        count($pgColumns) >= 31
+        'Todas las 33 tablas tienen columnas declaradas en PostgreSQL',
+        count($pgColumns) >= 33
     );
 
     // A-1 y A-2: claves canónicas
@@ -401,7 +405,7 @@ try {
         'faltan: ' . $listSample($missingChecks)
     );
 
-    // A-4: 31 disparadores BEFORE DELETE en el motor único
+    // A-4: 33 disparadores BEFORE DELETE en el motor único
     $triggerStmt = $pgPdo->prepare(
         "SELECT event_object_table AS table_name FROM information_schema.triggers
           WHERE trigger_schema = :schema AND event_manipulation = 'DELETE' AND action_timing = 'BEFORE'"
@@ -409,8 +413,8 @@ try {
     $triggerStmt->execute([':schema' => $schema]);
     $pgTriggerTables = array_map(static fn (array $row): string => (string)$row['table_name'], $triggerStmt->fetchAll());
     $assert(
-        'A-4: las 31 tablas del dominio tienen su disparador BEFORE DELETE vinculado a prevent_hard_delete',
-        count(array_unique($pgTriggerTables)) === 31 && !in_array(ADDITION_LEDGER, $pgTriggerTables, true),
+        'A-4: las 33 tablas del dominio tienen su disparador BEFORE DELETE vinculado a prevent_hard_delete',
+        count(array_unique($pgTriggerTables)) === 33 && !in_array(ADDITION_LEDGER, $pgTriggerTables, true),
         'tablas con disparador: ' . count(array_unique($pgTriggerTables))
     );
 

@@ -11,7 +11,7 @@ declare(strict_types=1);
  * certificación. Es la sustitución del nombre engañoso `PostgresParityTest`: aquí **no** se
  * compara con el motor local —eso es la correspondencia declarada de T-HYBRID-24, que exige los
  * dos motores a la vez— sino que se demuestra que el motor nuevo **hace** las cuatro operaciones
- * sobre las 31 tablas del contrato.
+ * sobre las 33 tablas del contrato.
  *
  * QUÉ SE CERTIFICA, Y POR QUÉ ASÍ
  *
@@ -19,7 +19,7 @@ declare(strict_types=1);
  *      DDL base y la migración del motor aplicada por el ejecutor canónico. Si el DDL dejara de
  *      compilar o la migración dejara de aplicar, no habría dónde certificar nada.
  *
- *   2. **Alta mínima en las 31 tablas respetando el grafo de claves foráneas.** La fixture no se
+ *   2. **Alta mínima en las 33 tablas respetando el grafo de claves foráneas.** La fixture no se
  *      escribe a mano tabla por tabla: se deriva del catálogo vivo (`information_schema` y
  *      `pg_constraint`), de modo que una columna obligatoria nueva entra sola y una referencia
  *      nueva reordena el alta. Un ciclo en el grafo, o un tipo que el arnés no sepa sintetizar,
@@ -60,7 +60,7 @@ use VendGuard\Infrastructure\Database\PostgresMigrationRunner;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 31 tablas del contrato de correspondencia (§2.1, Módulos 14, 17, 18, 19, 20, 21 y 22). */
+/** Las 33 tablas del contrato de correspondencia (§2.1, Módulos 14, 17, 18, 19, 20, 21, 22 y 23). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -71,6 +71,7 @@ const CONTRACT_TABLES = [
     'operational_zones', 'operational_zone_postal_codes', 'technician_zone_assignments',
     'technician_van_stocks', 'incident_service_sheets', 'incident_satisfaction_surveys',
     'technician_absences', 'technician_shifts', 'technician_shift_logs',
+    'van_restock_orders', 'van_restock_order_items',
 ];
 
 /**
@@ -164,7 +165,7 @@ try {
     // ─────────────────────────────────────────────────────────────────────
     // Alta: una fila mínima por tabla, en orden que respeta el grafo de claves foráneas
     // ─────────────────────────────────────────────────────────────────────
-    echo "\n--- CREATE: alta mínima de las 31 tablas en orden de claves foráneas ---\n";
+    echo "\n--- CREATE: alta mínima de las 33 tablas en orden de claves foráneas ---\n";
 
     $order = PostgresFixtureBuilder::insertionOrder($pgPdo, $tables);
     $insertionFailure = null;

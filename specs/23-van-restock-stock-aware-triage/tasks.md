@@ -43,7 +43,7 @@
     4. Añadir semillas de órdenes de carga en `database/supabase_seeds.sql` y `SeedRunner.php`, y actualizar `specs/technical/schema_correspondence_contract.md` y el bloque final de recuentos de `database/supabase_init.sql` (33 tablas).
   * **Hecho cuando:** `php bin/init_cloud_db.php` aplica el esquema y las semillas sin errores sobre PostgreSQL.
 
-- [ ] **T-RESTOCK-02 · Actualización de guardas de esquema y suite `PostgresVanRestockSchemaTest`**
+- [x] **T-RESTOCK-02 · Actualización de guardas de esquema y suite `PostgresVanRestockSchemaTest`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-RESTOCK-01`
   * **Ficheros a crear o modificar:**
