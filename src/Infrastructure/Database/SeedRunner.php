@@ -1398,6 +1398,343 @@ class SeedRunner
     }
 
     /**
+     * Órdenes de carga demo del Módulo 23, una por estado del ciclo.
+     *
+     * La orden no nace de una avería: nace de la demanda logística, de modo que
+     * el arranque en limpio puede demostrar el albarán sin inventar expedientes.
+     * La orden de Jordi incluye una línea retirada con baja lógica (Art. III.1) y
+     * la de Marta un despacho parcial (`dispatched_qty` menor que lo solicitado).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function canonicalVanRestockOrderRows(): array
+    {
+        $coordinator = 'coordinacion@vendguard.internal';
+
+        return [
+            [
+                'technician_email' => 'jordi.ruta@vendguard.internal',
+                'status' => 'PENDING_PICKING',
+                'notes' => 'Reposición matinal: preparar en jaula 3 antes de las 08:30.',
+                'created_at' => '2026-10-26 07:45:00+02',
+                'dispatcher_email' => null,
+                'dispatched_at' => null,
+                'confirmer_email' => null,
+                'confirmed_at' => null,
+                'canceller_email' => null,
+                'cancelled_at' => null,
+                'cancellation_reason' => null,
+                'items' => [
+                    ['part_code' => 'JUNT-TOR-01', 'current_quantity' => 1, 'min_threshold' => 2, 'pending_request_qty' => 0, 'requested_qty' => 2, 'dispatched_qty' => null, 'reason' => 'LOW_STOCK', 'removed_at' => null, 'remover_email' => null],
+                    ['part_code' => 'SOND-NTC-01', 'current_quantity' => 0, 'min_threshold' => 1, 'pending_request_qty' => 2, 'requested_qty' => 4, 'dispatched_qty' => null, 'reason' => 'BOTH', 'removed_at' => null, 'remover_email' => null],
+                    ['part_code' => 'FILT-AGUA-01', 'current_quantity' => 0, 'min_threshold' => 0, 'pending_request_qty' => 0, 'requested_qty' => 1, 'dispatched_qty' => null, 'reason' => 'MANUAL', 'removed_at' => '2026-10-26 07:50:00+02', 'remover_email' => $coordinator],
+                ],
+            ],
+            [
+                'technician_email' => 'marta.ruta@vendguard.internal',
+                'status' => 'DISPATCHED',
+                'notes' => 'Entregado parcialmente en el mostrador de almacén.',
+                'created_at' => '2026-10-25 07:40:00+02',
+                'dispatcher_email' => $coordinator,
+                'dispatched_at' => '2026-10-25 08:05:00+02',
+                'confirmer_email' => null,
+                'confirmed_at' => null,
+                'canceller_email' => null,
+                'cancelled_at' => null,
+                'cancellation_reason' => null,
+                'items' => [
+                    ['part_code' => 'BOMB-VIB-02', 'current_quantity' => 3, 'min_threshold' => 0, 'pending_request_qty' => 4, 'requested_qty' => 1, 'dispatched_qty' => 1, 'reason' => 'PENDING_REQUEST', 'removed_at' => null, 'remover_email' => null],
+                    ['part_code' => 'TELEC-NAYAX-01', 'current_quantity' => -1, 'min_threshold' => 0, 'pending_request_qty' => 1, 'requested_qty' => 3, 'dispatched_qty' => 2, 'reason' => 'BOTH', 'removed_at' => null, 'remover_email' => null],
+                ],
+            ],
+            [
+                'technician_email' => 'carlos.ruta@vendguard.internal',
+                'status' => 'CONFIRMED_BY_TECH',
+                'notes' => 'Carga recibida antes de iniciar la ruta del sud.',
+                'created_at' => '2026-10-24 07:30:00+02',
+                'dispatcher_email' => $coordinator,
+                'dispatched_at' => '2026-10-24 08:00:00+02',
+                'confirmer_email' => 'carlos.ruta@vendguard.internal',
+                'confirmed_at' => '2026-10-24 08:20:00+02',
+                'canceller_email' => null,
+                'cancelled_at' => null,
+                'cancellation_reason' => null,
+                'items' => [
+                    ['part_code' => 'TERM-SEG-01', 'current_quantity' => 0, 'min_threshold' => 1, 'pending_request_qty' => 1, 'requested_qty' => 3, 'dispatched_qty' => 3, 'reason' => 'BOTH', 'removed_at' => null, 'remover_email' => null],
+                    ['part_code' => 'MOT-ESP-01', 'current_quantity' => 0, 'min_threshold' => 0, 'pending_request_qty' => 1, 'requested_qty' => 1, 'dispatched_qty' => 1, 'reason' => 'PENDING_REQUEST', 'removed_at' => null, 'remover_email' => null],
+                ],
+            ],
+            [
+                'technician_email' => 'elena.ruta@vendguard.internal',
+                'status' => 'CANCELLED',
+                'notes' => 'Preparada la víspera de un cambio de ruta.',
+                'created_at' => '2026-10-23 07:35:00+02',
+                'dispatcher_email' => null,
+                'dispatched_at' => null,
+                'confirmer_email' => null,
+                'confirmed_at' => null,
+                'canceller_email' => $coordinator,
+                'cancelled_at' => '2026-10-23 09:10:00+02',
+                'cancellation_reason' => 'Devolución física de la caja a estantería por cambio de ruta.',
+                'items' => [
+                    ['part_code' => 'VALV-ULKA-01', 'current_quantity' => 0, 'min_threshold' => 0, 'pending_request_qty' => 2, 'requested_qty' => 2, 'dispatched_qty' => null, 'reason' => 'PENDING_REQUEST', 'removed_at' => null, 'remover_email' => null],
+                    ['part_code' => 'DISP-LCD-01', 'current_quantity' => 0, 'min_threshold' => 0, 'pending_request_qty' => 0, 'requested_qty' => 1, 'dispatched_qty' => null, 'reason' => 'MANUAL', 'removed_at' => null, 'remover_email' => null],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Órdenes de carga demo y sus eventos de auditoría (Módulo 23).
+     *
+     * Se resuelven por la clave canónica del técnico (`email_key`) y por el
+     * instante de creación de la orden, que es la identidad natural de la
+     * semilla: reejecutar el catálogo no duplica ni la orden ni sus líneas. La
+     * línea retirada se conserva con `removed_at`/`removed_by` y jamás se borra
+     * (Art. III.1); el saldo del vehículo no se toca aquí, porque una orden
+     * sembrada no representa una recepción real.
+     *
+     * @return int Órdenes canónicas vivas tras sembrar.
+     */
+    public function seedVanRestockOrders(): int
+    {
+        $identityColumn = $this->dialect->requiresCanonicalIdentityColumns() ? 'email_key' : 'email';
+
+        $insertOrder = $this->pdo->prepare(sprintf(
+            'INSERT INTO van_restock_orders (
+                technician_id, status, notes, created_by, created_at,
+                dispatched_by, dispatched_at, confirmed_by, confirmed_at,
+                cancelled_by, cancelled_at, cancellation_reason
+             )
+             SELECT technician.id, :status, :notes, creator.id, :created_at,
+                    dispatcher.id, :dispatched_at, confirmer.id, :confirmed_at,
+                    canceller.id, :cancelled_at, :cancellation_reason
+               FROM users technician
+               JOIN users creator ON creator.%1$s = :creator_email
+               LEFT JOIN users dispatcher ON dispatcher.%1$s = :dispatcher_email
+               LEFT JOIN users confirmer ON confirmer.%1$s = :confirmer_email
+               LEFT JOIN users canceller ON canceller.%1$s = :canceller_email
+              WHERE technician.%1$s = :technician_email
+                AND NOT EXISTS (
+                    SELECT 1 FROM van_restock_orders o
+                     WHERE o.technician_id = technician.id
+                       AND o.created_at = :created_at_lookup
+                )',
+            $identityColumn
+        ));
+
+        $findOrder = $this->pdo->prepare(sprintf(
+            'SELECT o.id
+               FROM van_restock_orders o
+               JOIN users technician ON technician.id = o.technician_id
+              WHERE technician.%s = :technician_email
+                AND o.created_at = :created_at
+              ORDER BY o.id ASC
+              LIMIT 1',
+            $identityColumn
+        ));
+
+        $insertItem = $this->pdo->prepare(sprintf(
+            'INSERT INTO van_restock_order_items (
+                order_id, spare_part_id,
+                current_quantity_snapshot, min_threshold_snapshot, pending_request_qty_snapshot,
+                requested_qty, dispatched_qty, reason,
+                removed_at, removed_by, created_at
+             )
+             SELECT :order_id, spare_part.id, :current_quantity, :min_threshold, :pending_request_qty,
+                    :requested_qty, :dispatched_qty, :reason,
+                    :removed_at, remover.id, :created_at
+               FROM spare_parts spare_part
+               LEFT JOIN users remover ON remover.%1$s = :remover_email
+              WHERE spare_part.part_code = :part_code
+                AND NOT EXISTS (
+                    SELECT 1 FROM van_restock_order_items i
+                     WHERE i.order_id = :order_id_lookup
+                       AND i.spare_part_id = spare_part.id
+                )',
+            $identityColumn
+        ));
+
+        $insertAudit = $this->pdo->prepare(sprintf(
+            'INSERT INTO audit_log (
+                entity_type, entity_id, action, user_id, user_role, user_name,
+                previous_state, new_state, metadata, created_at
+             )
+             SELECT \'VAN_RESTOCK_ORDER\', :entity_id, :action, actor.id, :user_role, actor.name,
+                    :previous_state, :new_state, :metadata, :created_at
+               FROM users actor
+              WHERE actor.%1$s = :actor_email
+                AND NOT EXISTS (
+                    SELECT 1 FROM audit_log a
+                     WHERE a.entity_type = \'VAN_RESTOCK_ORDER\'
+                       AND a.entity_id = :entity_id_lookup
+                       AND a.action = :action_lookup
+                       AND a.created_at = :created_at_lookup
+                )',
+            $identityColumn
+        ));
+
+        foreach (self::canonicalVanRestockOrderRows() as $order) {
+            $insertOrder->execute([
+                ':status' => $order['status'],
+                ':notes' => $order['notes'],
+                ':created_at' => $order['created_at'],
+                ':dispatched_at' => $order['dispatched_at'],
+                ':confirmed_at' => $order['confirmed_at'],
+                ':cancelled_at' => $order['cancelled_at'],
+                ':cancellation_reason' => $order['cancellation_reason'],
+                ':creator_email' => 'coordinacion@vendguard.internal',
+                ':dispatcher_email' => $order['dispatcher_email'],
+                ':confirmer_email' => $order['confirmer_email'],
+                ':canceller_email' => $order['canceller_email'],
+                ':technician_email' => $order['technician_email'],
+                ':created_at_lookup' => $order['created_at'],
+            ]);
+
+            $findOrder->execute([
+                ':technician_email' => $order['technician_email'],
+                ':created_at' => $order['created_at'],
+            ]);
+            $orderId = (int)$findOrder->fetchColumn();
+            $findOrder->closeCursor();
+
+            if ($orderId <= 0) {
+                continue;
+            }
+
+            foreach ($order['items'] as $item) {
+                $insertItem->execute([
+                    ':order_id' => $orderId,
+                    ':current_quantity' => $item['current_quantity'],
+                    ':min_threshold' => $item['min_threshold'],
+                    ':pending_request_qty' => $item['pending_request_qty'],
+                    ':requested_qty' => $item['requested_qty'],
+                    ':dispatched_qty' => $item['dispatched_qty'],
+                    ':reason' => $item['reason'],
+                    ':removed_at' => $item['removed_at'],
+                    ':remover_email' => $item['remover_email'],
+                    ':created_at' => $order['created_at'],
+                    ':part_code' => $item['part_code'],
+                    ':order_id_lookup' => $orderId,
+                ]);
+            }
+
+            foreach ($this->vanRestockOrderAuditEvents($order, $orderId) as $event) {
+                $insertAudit->execute([
+                    ':entity_id' => $orderId,
+                    ':action' => $event['action'],
+                    ':user_role' => $event['user_role'],
+                    ':previous_state' => $event['previous_state'],
+                    ':new_state' => $event['new_state'],
+                    ':metadata' => $event['metadata'],
+                    ':created_at' => $event['created_at'],
+                    ':actor_email' => $event['actor_email'],
+                    ':entity_id_lookup' => $orderId,
+                    ':action_lookup' => $event['action'],
+                    ':created_at_lookup' => $event['created_at'],
+                ]);
+            }
+        }
+
+        $count = 0;
+        foreach (self::canonicalVanRestockOrderRows() as $order) {
+            $findOrder->execute([
+                ':technician_email' => $order['technician_email'],
+                ':created_at' => $order['created_at'],
+            ]);
+            $count += $findOrder->fetchColumn() !== false ? 1 : 0;
+            $findOrder->closeCursor();
+        }
+
+        return $count;
+    }
+
+    /**
+     * Eventos de auditoría que acompañan a una orden sembrada.
+     *
+     * @param array<string, mixed> $order
+     * @return list<array<string, mixed>>
+     */
+    private function vanRestockOrderAuditEvents(array $order, int $orderId): array
+    {
+        $coordinator = 'coordinacion@vendguard.internal';
+        $metadata = json_encode(
+            ['order_code' => sprintf('RO-%06d', $orderId), 'source' => 'SEED'],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+        );
+        $encode = static fn(array $state): string => (string)json_encode($state, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        $events = [[
+            'action' => 'CREATE_VAN_RESTOCK_ORDER',
+            'actor_email' => $coordinator,
+            'user_role' => 'COORDINATOR',
+            'previous_state' => null,
+            'new_state' => $encode(['status' => 'PENDING_PICKING', 'source' => 'SEED']),
+            'metadata' => $metadata,
+            'created_at' => $order['created_at'],
+        ]];
+
+        $removedAt = null;
+        foreach ($order['items'] as $item) {
+            if ($item['removed_at'] !== null && ($removedAt === null || $item['removed_at'] > $removedAt)) {
+                $removedAt = $item['removed_at'];
+            }
+        }
+        if ($removedAt !== null) {
+            $events[] = [
+                'action' => 'UPDATE_VAN_RESTOCK_ORDER',
+                'actor_email' => $coordinator,
+                'user_role' => 'COORDINATOR',
+                'previous_state' => $encode(['status' => 'PENDING_PICKING']),
+                'new_state' => $encode(['status' => 'PENDING_PICKING', 'soft_removed' => true]),
+                'metadata' => $metadata,
+                'created_at' => $removedAt,
+            ];
+        }
+
+        if ($order['dispatched_at'] !== null) {
+            $events[] = [
+                'action' => 'DISPATCH_VAN_RESTOCK_ORDER',
+                'actor_email' => $order['dispatcher_email'] ?? $coordinator,
+                'user_role' => 'COORDINATOR',
+                'previous_state' => $encode(['status' => 'PENDING_PICKING']),
+                'new_state' => $encode(['status' => 'DISPATCHED']),
+                'metadata' => $metadata,
+                'created_at' => $order['dispatched_at'],
+            ];
+        }
+
+        if ($order['confirmed_at'] !== null) {
+            $events[] = [
+                'action' => 'CONFIRM_VAN_RESTOCK_ORDER',
+                'actor_email' => $order['confirmer_email'] ?? $order['technician_email'],
+                'user_role' => 'TECHNICIAN',
+                'previous_state' => $encode(['status' => 'DISPATCHED']),
+                'new_state' => $encode(['status' => 'CONFIRMED_BY_TECH']),
+                'metadata' => $metadata,
+                'created_at' => $order['confirmed_at'],
+            ];
+        }
+
+        if ($order['cancelled_at'] !== null) {
+            $events[] = [
+                'action' => 'CANCEL_VAN_RESTOCK_ORDER',
+                'actor_email' => $order['canceller_email'] ?? $coordinator,
+                'user_role' => 'COORDINATOR',
+                'previous_state' => $encode(['status' => 'PENDING_PICKING']),
+                'new_state' => $encode([
+                    'status' => 'CANCELLED',
+                    'cancellation_reason' => $order['cancellation_reason'],
+                ]),
+                'metadata' => $metadata,
+                'created_at' => $order['cancelled_at'],
+            ];
+        }
+
+        return $events;
+    }
+
+    /**
      * Ejecuta todas las semillas dentro de una transacción.
      *
      * @param string $defaultPassword
@@ -1427,6 +1764,9 @@ class SeedRunner
             // El saldo de furgoneta se siembra después del catálogo maestro: lo resuelve
             // por `part_code` y por la clave canónica del técnico (Módulo 18).
             $vanStockCount = $this->seedVanStocks();
+            // Las órdenes de carga demo (Módulo 23) cuelgan de técnico y repuesto,
+            // así que entran cuando ambas maestras ya están sembradas.
+            $vanRestockOrderCount = $this->seedVanRestockOrders();
 
             $this->pdo->commit();
 
@@ -1443,6 +1783,7 @@ class SeedRunner
                 'spare_parts' => $partsRes['parts'],
                 'spare_part_compatibilities' => $partsRes['compatibilities'],
                 'technician_van_stocks' => $vanStockCount,
+                'van_restock_orders' => $vanRestockOrderCount,
             ];
         } catch (PDOException $e) {
             if ($this->pdo->inTransaction()) {

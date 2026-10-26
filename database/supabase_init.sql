@@ -1,5 +1,5 @@
 -- =============================================================================
--- VendGuard · DDL canónico del motor nuevo · COMPLETO (31 tablas)
+-- VendGuard · DDL canónico del motor nuevo · COMPLETO (33 tablas)
 -- PostgreSQL 15+ (certificado contra PostgreSQL 16.15 en deploy/local/postgres/)
 -- Fichero: database/supabase_init.sql
 -- Módulo: 12-hybrid-supabase-migration · T-HYBRID-01 (tablas 1-10) y T-HYBRID-02 (tablas 11-20)
@@ -8,7 +8,7 @@
 -- QUÉ ES ESTE FICHERO
 --   La creación del esquema relacional del motor nuevo: extensiones, los tipos
 --   `ENUM` del dominio con su tabla de correspondencia, las funciones canónicas
---   de blindaje y **las 31 tablas** con sus claves, restricciones, índices y
+--   de blindaje y **las 33 tablas** con sus claves, restricciones, índices y
 --   disparadores. La Parte 1 (§4) cubre `locations`, `machines`, `users`,
 --   `incidents`, `incident_history`, `incident_comments`, `audit_log`,
 --   `route_settings`, `preventive_settings` y `preventive_orders`; la Parte 2
@@ -21,7 +21,8 @@
 --   (§7) las tablas 26 a 30: `technician_van_stocks` (M18),
 --   `incident_service_sheets` (M19), `incident_satisfaction_surveys` (M20),
 --   `technician_absences` (M21), `technician_shifts` (M21) y
---   `technician_shift_logs` (M22).
+--   `technician_shift_logs` (M22), más las tablas 32 y 33 del Módulo 23
+--   (`van_restock_orders` y `van_restock_order_items`).
 --
 -- CONTRATO QUE LO RIGE (no al revés)
 --   specs/technical/schema_correspondence_contract.md. Este DDL se escribe
@@ -142,7 +143,7 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 -- |   |                                   |  'SANITARY_CERTIFICATE','REFUND_REQUEST','UNCLAIMED_CASH_FINDING',|                                                                                  |               |
 -- |   |                                   |  'NOTIFICATION_OUTBOX','NOTIFICATION_CHANNEL_SETTING',       |                                                                                  |               |
 -- |   |                                   |  'OPERATIONAL_ZONE','TECHNICIAN_ZONE',                       |                                                                                  |               |
--- |   |                                   |  'TECHNICIAN_VAN_STOCK')                                     |                                                                                  |               |
+-- |   |                                   |  'TECHNICIAN_VAN_STOCK','VAN_RESTOCK_ORDER')                 |                                                                                  |               |
 -- | 24| certificate_status                | ('VALID','SUSPENDED','REVOKED')                              | sanitary_certificates.status                                                     | Parte 2       |
 --
 -- Reparto del trabajo: 12 conjuntos (13 columnas) se declaran en la Parte 1 y los
@@ -238,7 +239,10 @@ BEGIN
         'OPERATIONAL_ZONE', 'TECHNICIAN_ZONE',
         -- Saldo de furgoneta del Módulo 18 (RF-05.1): el ajuste de stock se
         -- audita con tipo propio, no como edición del repuesto ni del técnico.
-        'TECHNICIAN_VAN_STOCK'
+        'TECHNICIAN_VAN_STOCK',
+        -- Orden de carga del Módulo 23 (RF-01 a RF-05): su ciclo de vida se
+        -- audita con tipo propio para no confundirlo con el saldo del vehículo.
+        'VAN_RESTOCK_ORDER'
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $do$;
@@ -2164,30 +2168,202 @@ CREATE OR REPLACE TRIGGER trg_no_update_technician_shift_logs
     FOR EACH ROW EXECUTE FUNCTION prevent_service_sheet_update();
 
 
+-- -----------------------------------------------------------------------------
+-- Tabla 32 · van_restock_orders — cabecera del albarán de carga (M23)
+-- -----------------------------------------------------------------------------
+-- QUÉ GUARDA
+--   La orden formal con la que Coordinación pide a almacén la reposición de una
+--   furgoneta. El técnico destinatario es único, el ciclo tiene cuatro estados
+--   (PENDING_PICKING, DISPATCHED, CONFIRMED_BY_TECH y CANCELLED) y cada rama
+--   conserva sus propias marcas de actor e instante.
+--
+-- POR QUÉ EL ÍNDICE PARCIAL ES ÚNICO
+--   D3 prohíbe que un técnico tenga dos órdenes abiertas a la vez. El índice
+--   parcial lo garantiza en el motor y no sólo en el servicio: dos peticiones
+--   concurrentes no pueden emitir dos cajas para la misma furgoneta.
+--
+-- POR QUÉ LA CANCELACIÓN EXIGE 20 CARACTERES
+--   Art. V.1: una orden abierta puede tener material físico reservado. Cancelar
+--   sin justificar dejaría una caja sin destino conocido, así que el `CHECK`
+--   exige el mismo mínimo real (`btrim`) que valida el dominio.
+CREATE TABLE IF NOT EXISTS van_restock_orders (
+    id                  BIGINT GENERATED ALWAYS AS IDENTITY,
+    technician_id       BIGINT NOT NULL,
+    status              VARCHAR(30) NOT NULL DEFAULT 'PENDING_PICKING',
+    notes               TEXT,
+    created_by          BIGINT NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    dispatched_by       BIGINT,
+    dispatched_at       TIMESTAMPTZ,
+    confirmed_by        BIGINT,
+    confirmed_at        TIMESTAMPTZ,
+    cancelled_by        BIGINT,
+    cancelled_at        TIMESTAMPTZ,
+    cancellation_reason TEXT,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT pk_van_restock_orders PRIMARY KEY (id),
+    CONSTRAINT fk_van_restock_orders_technician FOREIGN KEY (technician_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_van_restock_orders_creator FOREIGN KEY (created_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_van_restock_orders_dispatcher FOREIGN KEY (dispatched_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_van_restock_orders_confirmer FOREIGN KEY (confirmed_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_van_restock_orders_canceller FOREIGN KEY (cancelled_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_van_restock_orders_status CHECK (
+        status IN ('PENDING_PICKING', 'DISPATCHED', 'CONFIRMED_BY_TECH', 'CANCELLED')
+    ),
+    CONSTRAINT chk_van_restock_orders_dispatch_consistency CHECK (
+        (status = 'PENDING_PICKING' AND dispatched_at IS NULL AND dispatched_by IS NULL)
+        OR (status IN ('DISPATCHED', 'CONFIRMED_BY_TECH') AND dispatched_at IS NOT NULL AND dispatched_by IS NOT NULL)
+        OR (status = 'CANCELLED')
+    ),
+    CONSTRAINT chk_van_restock_orders_confirm_consistency CHECK (
+        (status = 'CONFIRMED_BY_TECH' AND confirmed_at IS NOT NULL AND confirmed_by IS NOT NULL)
+        OR (status <> 'CONFIRMED_BY_TECH' AND confirmed_at IS NULL AND confirmed_by IS NULL)
+    ),
+    CONSTRAINT chk_van_restock_orders_cancel_consistency CHECK (
+        (status <> 'CANCELLED' AND cancelled_at IS NULL AND cancelled_by IS NULL AND cancellation_reason IS NULL)
+        OR (
+            status = 'CANCELLED'
+            AND cancelled_at IS NOT NULL
+            AND cancelled_by IS NOT NULL
+            AND cancellation_reason IS NOT NULL
+            AND char_length(btrim(cancellation_reason)) >= 20
+        )
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_van_restock_open_per_tech
+    ON van_restock_orders (technician_id)
+    WHERE status IN ('PENDING_PICKING', 'DISPATCHED');
+
+CREATE INDEX IF NOT EXISTS idx_van_restock_orders_tech_status
+    ON van_restock_orders (technician_id, status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_van_restock_orders_status_created
+    ON van_restock_orders (status, created_at DESC);
+
+CREATE OR REPLACE TRIGGER trg_touch_van_restock_orders
+    BEFORE UPDATE ON van_restock_orders
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+CREATE OR REPLACE TRIGGER trg_no_delete_van_restock_orders
+    BEFORE DELETE ON van_restock_orders
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+
+-- -----------------------------------------------------------------------------
+-- Tabla 33 · van_restock_order_items — líneas del albarán de carga (M23)
+-- -----------------------------------------------------------------------------
+-- QUÉ GUARDA
+--   Cada referencia de la orden con los snapshots que explican por qué se pidió
+--   (saldo y umbral del vehículo, unidades pedidas en averías), la cantidad
+--   solicitada, la realmente despachada por almacén y el motivo de inclusión.
+--
+-- POR QUÉ HAY BAJA LÓGICA
+--   Retirar una pieza durante la edición no puede borrar la fila: el historial
+--   de la orden es prueba documental (Art. III.1). `removed_at` y `removed_by`
+--   se mueven siempre juntos (QA 1) y la reactivación consiste en devolverlos a
+--   NULL; el índice de líneas vivas sirve la hoja A4 y el despacho.
+--
+-- POR QUÉ LA CANTIDAD TIENE DOBLE COTA
+--   La unidad mínima es 1 al solicitar y 0 al despachar (una referencia puede
+--   estar agotada en almacén), y ninguna de las dos supera 9.999. El tope del
+--   saldo proyectado se valida además en el dominio, porque depende del stock
+--   vivo del vehículo y no sólo de esta fila.
+CREATE TABLE IF NOT EXISTS van_restock_order_items (
+    id                           BIGINT GENERATED ALWAYS AS IDENTITY,
+    order_id                     BIGINT NOT NULL,
+    spare_part_id                BIGINT NOT NULL,
+    current_quantity_snapshot    INTEGER NOT NULL DEFAULT 0,
+    min_threshold_snapshot       INTEGER NOT NULL DEFAULT 0,
+    pending_request_qty_snapshot INTEGER NOT NULL DEFAULT 0,
+    requested_qty                INTEGER NOT NULL DEFAULT 1,
+    dispatched_qty               INTEGER,
+    reason                       VARCHAR(30) NOT NULL DEFAULT 'MANUAL',
+    removed_at                   TIMESTAMPTZ,
+    removed_by                   BIGINT,
+    created_at                   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT pk_van_restock_order_items PRIMARY KEY (id),
+    CONSTRAINT uq_van_restock_order_item_part UNIQUE (order_id, spare_part_id),
+    CONSTRAINT fk_van_restock_items_order FOREIGN KEY (order_id)
+        REFERENCES van_restock_orders (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_van_restock_items_part FOREIGN KEY (spare_part_id)
+        REFERENCES spare_parts (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_van_restock_items_remover FOREIGN KEY (removed_by)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT chk_van_restock_items_current_snapshot CHECK (
+        current_quantity_snapshot BETWEEN -999 AND 9999
+    ),
+    CONSTRAINT chk_van_restock_items_threshold_snapshot CHECK (
+        min_threshold_snapshot BETWEEN 0 AND 9999
+    ),
+    CONSTRAINT chk_van_restock_items_pending_snapshot CHECK (
+        pending_request_qty_snapshot BETWEEN 0 AND 9999
+    ),
+    CONSTRAINT chk_van_restock_items_requested_qty CHECK (
+        requested_qty BETWEEN 1 AND 9999
+    ),
+    CONSTRAINT chk_van_restock_items_dispatched_qty CHECK (
+        dispatched_qty IS NULL OR (dispatched_qty BETWEEN 0 AND 9999)
+    ),
+    CONSTRAINT chk_van_restock_items_reason CHECK (
+        reason IN ('LOW_STOCK', 'PENDING_REQUEST', 'BOTH', 'MANUAL')
+    ),
+    CONSTRAINT chk_van_restock_items_removed_consistency CHECK (
+        (removed_at IS NULL AND removed_by IS NULL)
+        OR (removed_at IS NOT NULL AND removed_by IS NOT NULL)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_van_restock_items_order
+    ON van_restock_order_items (order_id)
+    WHERE removed_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_van_restock_items_part
+    ON van_restock_order_items (spare_part_id);
+
+CREATE OR REPLACE TRIGGER trg_touch_van_restock_order_items
+    BEFORE UPDATE ON van_restock_order_items
+    FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+CREATE OR REPLACE TRIGGER trg_no_delete_van_restock_order_items
+    BEFORE DELETE ON van_restock_order_items
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
+
 -- =============================================================================
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 31 tablas (las 31 del contrato de correspondencia) · 24 tipos del dominio en sus
+-- 33 tablas (las 33 del contrato de correspondencia) · 24 tipos del dominio en sus
 -- 25 columnas `ENUM` · 5 funciones de blindaje: `prevent_hard_delete()`,
 -- `touch_updated_at()`, `prevent_service_sheet_rewrite()`,
 -- `prevent_satisfaction_survey_rewrite()` y `prevent_service_sheet_update()`
 -- (las tres últimas de bloqueo de `UPDATE` comparten forma)
--- 50 disparadores: 31 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 16
+-- 54 disparadores: 33 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 18
 -- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 3 `BEFORE UPDATE` de
 -- bloqueo (`trg_no_update_incident_service_sheets`,
 -- `trg_no_update_incident_satisfaction_surveys` y
 -- `trg_no_update_technician_shift_logs`)
--- 49 restricciones nombradas: 31 claves primarias (la del mapeo de códigos postales
--- es el propio CP, no un identificador sintético) y 18 únicas
--- 33 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
--- Módulo 21 (3 en ausencias y 3 en turnos) y las 4 del Módulo 22 (2 en turnos y 2
--- en la bitácora) · 60 claves foráneas con las reglas declaradas en el contrato §2.4
--- 78 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- 52 restricciones nombradas: 33 claves primarias (la del mapeo de códigos postales
+-- es el propio CP, no un identificador sintético) y 19 únicas
+-- 44 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
+-- Módulo 21 (3 en ausencias y 3 en turnos), las 4 del Módulo 22 (2 en turnos y 2
+-- en la bitácora) y las 11 del Módulo 23 (4 en órdenes y 7 en líneas) · 68 claves
+-- foráneas con las reglas declaradas en el contrato §2.4
+-- 82 índices secundarios —uno por índice no único del esquema local y con las mismas
 -- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1), el
--- Módulo 20 (3), el Módulo 21 (3) y el Módulo 22 (2)— y cuatro índices únicos parciales:
--- `uq_machine_active_ticket` (D-6), `uq_technician_zone_live`,
--- `uq_technician_primary_zone` (Resolución QA 10) y
--- `uq_tech_shifts_single_active` (M21, Resolución R3)
+-- Módulo 20 (3), el Módulo 21 (3), el Módulo 22 (2) y el Módulo 23 (4)— y cinco
+-- índices únicos parciales: `uq_machine_active_ticket` (D-6),
+-- `uq_technician_zone_live`, `uq_technician_primary_zone` (Resolución QA 10),
+-- `uq_tech_shifts_single_active` (M21, Resolución R3) y
+-- `uq_van_restock_open_per_tech` (M23, Decisión D3)
 -- 2 columnas canónicas (`site_code_key`, `email_key`) con índice único propio (A-1/A-2)
 -- 1 columna derivada (`incident_replaced_parts.total_cost_snapshot`, D-7)
 -- 5 columnas `JSONB`: 3 en `audit_log` (D-4) y 2 en `technician_shift_logs` (M22)
