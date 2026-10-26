@@ -306,7 +306,8 @@ final class FakeVanRestockOrderRepositoryForServiceTest implements VanRestockOrd
 
     public function confirmOrderAndIncrementVanStock(
         int $orderId,
-        int $authenticatedTechnicianId
+        int $authenticatedTechnicianId,
+        ?string $receptionNote = null
     ): array {
         if (!isset($this->orders[$orderId])) {
             throw VanRestockOrderValidationException::orderNotFound($orderId);
@@ -370,6 +371,7 @@ final class FakeVanRestockOrderRepositoryForServiceTest implements VanRestockOrd
         $this->orders[$orderId]['status'] = VanRestockOrder::STATUS_CONFIRMED_BY_TECH;
         $this->orders[$orderId]['confirmed_by'] = $authenticatedTechnicianId;
         $this->orders[$orderId]['confirmed_at'] = '2026-10-26T08:50:00+01:00';
+        $this->orders[$orderId]['reception_note'] = $receptionNote;
         $this->orders[$orderId]['updated_at'] = '2026-10-26T08:50:00+01:00';
 
         return [
@@ -548,6 +550,7 @@ final class FakeVanRestockOrderRepositoryForServiceTest implements VanRestockOrd
             $row['cancelled_by'] === null ? null : 'Ana Coordinadora',
             $row['cancelled_at'] === null ? null : (string)$row['cancelled_at'],
             $row['cancellation_reason'] === null ? null : (string)$row['cancellation_reason'],
+            $row['reception_note'] ?? null,
             (string)$row['updated_at'],
             $items
         );
@@ -982,6 +985,20 @@ $assert('5.14 Confirmación idéntica en ON_SHIFT y OFF_SHIFT (QA 4)', $shiftCon
     'ON_SHIFT' => true,
     'OFF_SHIFT' => true,
 ], json_encode($shiftConfirmations));
+
+$noteOrder = $service->createOrder(7, null, [['spare_part_id' => 101, 'requested_qty' => 1]], 1);
+$service->dispatchOrder($noteOrder->id, [101 => 1], 1);
+
+$assertThrows('5.14.1 Nota de recepción > 500 caracteres rechazada (422)', static function () use ($service, $noteOrder): void {
+    $service->confirmOrder($noteOrder->id, 7, str_repeat('a', 501));
+}, VanRestockOrderValidationException::INVALID_RESTOCK_ORDER_PAYLOAD);
+
+$confirmedWithNote = $service->confirmOrder($noteOrder->id, 7, '  Material recibido en buen estado  ')['order'];
+$assert('5.14.2 Nota de recepción se recorta y persiste en orden y comprobante',
+    $confirmedWithNote->receptionNote === 'Material recibido en buen estado'
+    && ($confirmedWithNote->toCoordinatorArray()['reception_note'] ?? null) === 'Material recibido en buen estado'
+    && ($confirmedWithNote->toTechnicianConfirmedSummaryArray()['reception_note'] ?? null) === 'Material recibido en buen estado'
+);
 
 $constructor = (new ReflectionClass(VanRestockOrderService::class))->getConstructor();
 $assert('5.15 El servicio solo depende del puerto de órdenes, sin turnos', $constructor !== null

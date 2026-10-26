@@ -90,6 +90,7 @@ final class VanRestockOrder
         public readonly ?string $cancelledByName,
         public readonly ?string $cancelledAt,
         public readonly ?string $cancellationReason,
+        public readonly ?string $receptionNote,
         public readonly string $updatedAt,
         public readonly array $items = []
     ) {
@@ -238,6 +239,7 @@ final class VanRestockOrder
             'cancelled_by_name' => $this->cancelledByName,
             'cancelled_at' => $this->cancelledAt,
             'cancellation_reason' => $this->cancellationReason,
+            'reception_note' => $this->receptionNote,
             'updated_at' => $this->updatedAt,
             'items' => array_map(
                 static fn (VanRestockOrderItem $item): array => $item->toCoordinatorArray(),
@@ -287,6 +289,7 @@ final class VanRestockOrder
             'id' => $this->id,
             'order_code' => $this->orderCode(),
             'confirmed_at' => $this->confirmedAt,
+            'reception_note' => $this->receptionNote,
             'total_received_units' => $this->totalDispatchedUnits() ?? 0,
             'items' => array_map(
                 static fn (VanRestockOrderItem $item): array => $item->toTechnicianConfirmedSummaryArray(),

@@ -133,8 +133,21 @@ class TechnicianVanStockController
             );
         }
 
+        $receptionNote = $request->getBodyParam('reception_note');
+        if ($receptionNote !== null && !is_string($receptionNote)) {
+            return Response::error(
+                'INVALID_RESTOCK_ORDER_PAYLOAD',
+                'La nota de recepción debe ser un texto.',
+                422
+            );
+        }
+
         try {
-            $result = $this->restockOrderService()->confirmOrder((int)$rawOrderId, (int)$technicianId);
+            $result = $this->restockOrderService()->confirmOrder(
+                (int)$rawOrderId,
+                (int)$technicianId,
+                $receptionNote !== null ? (string)$receptionNote : null
+            );
         } catch (VanRestockOrderValidationException $exception) {
             return Response::error(
                 $exception->getErrorCode(),
@@ -153,6 +166,7 @@ class TechnicianVanStockController
                 'order_code' => $order->orderCode(),
                 'status' => $order->status,
                 'confirmed_at' => $order->confirmedAt,
+                'reception_note' => $order->receptionNote,
                 'total_received_units' => $totalUnits,
             ],
             'updated_van_stock' => $result['updated_van_stock'],

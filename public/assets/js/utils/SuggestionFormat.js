@@ -17,7 +17,10 @@ export function suggestionBadgeLabel(badge) {
     TITULAR_ZONA: 'Titular de zona',
     SUPLENTE_ZONA: 'Suplente de zona',
     EN_CURSO_OTRA_SEDE: '⚠️ En curso en otra sede',
-    NO_DISPONIBLE: '⛔ No disponible'
+    NO_DISPONIBLE: '⛔ No disponible',
+    STOCK_COMPATIBLE: '✅ Stock compatible',
+    STOCK_PARCIAL: '⚠️ Stock parcial',
+    SIN_STOCK_COMPATIBLE: '⚠️ Sin stock en furgoneta'
   };
   return labels[badge] || String(badge);
 }

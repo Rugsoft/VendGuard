@@ -399,7 +399,10 @@ export const CoordinatorDashboardView = {
         .map((technician) => ({
           technicianId: technician.technician_id,
           name: technician.name || 'Técnico sin nombre',
-          label: technician.van_stock_match.label || 'Sin stock compatible',
+          label: technician.van_stock_match.label
+            || (technician.van_stock_match.status === 'NOT_APPLICABLE'
+              ? 'ℹ️ Sin repuestos catalogados para este modelo/categoría'
+              : 'Sin stock compatible'),
           badge: technician.van_stock_match.badge || null,
           status: technician.van_stock_match.status || 'NOT_APPLICABLE',
           chipClass: this.vanStockMatchChipClass(technician.van_stock_match.badge)
@@ -418,7 +421,10 @@ export const CoordinatorDashboardView = {
         .map((technician) => ({
           technicianId: technician.technician_id,
           name: technician.name || 'Técnico sin nombre',
-          label: technician.van_stock_match.label || 'Sin stock compatible',
+          label: technician.van_stock_match.label
+            || (technician.van_stock_match.status === 'NOT_APPLICABLE'
+              ? 'ℹ️ Sin repuestos catalogados para este modelo/categoría'
+              : 'Sin stock compatible'),
           badge: technician.van_stock_match.badge || null,
           status: technician.van_stock_match.status || 'NOT_APPLICABLE',
           chipClass: this.vanStockMatchChipClass(technician.van_stock_match.badge)

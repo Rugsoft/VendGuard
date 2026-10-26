@@ -218,14 +218,20 @@ $assert(
     json_encode($noStockMatch, JSON_UNESCAPED_UNICODE)
 );
 
-$negative = $suggester->getSuggestionsForIncident(
-    $withVanStockContext($incident(), [14 => 1], false, [14]),
-    [$technician(2, ['van_stock' => [14 => -4]])],
+$zeroCoveredPositiveStock = $suggester->getSuggestionsForIncident(
+    $withVanStockContext($incident(), [14 => 5, 8 => 3], false, [14, 8]),
+    [$technician(2, ['van_stock' => [14 => 2, 8 => 0]])],
     $base
 );
+$zeroCoveredMatch = $rowFor($zeroCoveredPositiveStock->rankedTechnicians, 2)['van_stock_match'] ?? null;
 $assert(
-    '1.6 Un saldo negativo por descuadre vale 0 y no cubre la solicitud',
-    ($rowFor($negative->rankedTechnicians, 2)['van_stock_match']['status'] ?? null) === 'NO_STOCK'
+    '1.6b M=0 pero con saldo positivo en alguna referencia => PARTIAL_MATCH con STOCK_PARCIAL (EARS 05.2)',
+    $zeroCoveredMatch !== null
+        && $zeroCoveredMatch['status'] === 'PARTIAL_MATCH'
+        && $zeroCoveredMatch['badge'] === SuggestedTechnicianDto::BADGE_STOCK_PARCIAL
+        && $zeroCoveredMatch['matched_references'] === 0
+        && $zeroCoveredMatch['total_references'] === 2
+        && $zeroCoveredMatch['label'] === 'Repuesto solicitado parcial (0/2 ref.)'
 );
 
 $mixedOutOfCatalog = $suggester->getSuggestionsForIncident(
@@ -358,14 +364,14 @@ $emptyUniverse = $suggester->getSuggestionsForIncident(
 );
 $emptyMatch = $rowFor($emptyUniverse->rankedTechnicians, 2)['van_stock_match'] ?? null;
 $assert(
-    '2.3 Universo compatible vacío => NOT_APPLICABLE sin etiqueta ni insignia (C1)',
+    '2.3 Universo compatible vacío => NOT_APPLICABLE con etiqueta neutra sin insignia (C1)',
     $emptyMatch !== null
         && $emptyMatch['status'] === 'NOT_APPLICABLE'
         && $emptyMatch['evaluation_level'] === 'CATEGORY_COMPATIBILITY'
         && $emptyMatch['badge'] === null
         && $emptyMatch['matched_references'] === 0
         && $emptyMatch['total_references'] === 0
-        && $emptyMatch['label'] === null
+        && $emptyMatch['label'] === 'ℹ️ Sin repuestos catalogados para este modelo/categoría'
 );
 
 $negativeUniverse = $suggester->getSuggestionsForIncident(

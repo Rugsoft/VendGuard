@@ -1875,8 +1875,8 @@ export class ApiClient {
     getVanStock: () => {
       return this.get('/technician/van-stock');
     },
-    confirmVanRestockOrder: (orderId) => {
-      return this.post(`/technician/van-stock/restock-orders/${encodeURIComponent(orderId)}/confirm`, {});
+    confirmVanRestockOrder: (orderId, payload = {}) => {
+      return this.post(`/technician/van-stock/restock-orders/${encodeURIComponent(orderId)}/confirm`, payload);
     }
   };
 

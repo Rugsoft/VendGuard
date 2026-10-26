@@ -285,6 +285,9 @@ assert('2.6 Elegir al sugerido no exige justificación adicional',
 assert('2.7 Las insignias del motor se traducen al castellano',
   panel.suggestionBadgeLabel('GUARDIA_24_7') === '🚨 Guardia 24/7'
     && panel.suggestionBadgeLabel('TITULAR_ZONA') === 'Titular de zona'
+    && panel.suggestionBadgeLabel('STOCK_COMPATIBLE') === '✅ Stock compatible'
+    && panel.suggestionBadgeLabel('STOCK_PARCIAL') === '⚠️ Stock parcial'
+    && panel.suggestionBadgeLabel('SIN_STOCK_COMPATIBLE') === '⚠️ Sin stock en furgoneta'
     && panel.suggestionBadgeLabel('DESCONOCIDA') === 'DESCONOCIDA');
 assert('2.8 El desglose explica la puntuación y la distancia de referencia',
   panel.suggestionBreakdown(panel.suggestedTechnician).includes('Guardia +100')

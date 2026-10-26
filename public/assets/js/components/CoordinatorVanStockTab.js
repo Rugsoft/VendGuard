@@ -46,6 +46,7 @@
 
 import { api } from '../api.js';
 import { ModalDialog } from './ModalDialog.js';
+import { formatDateTime } from '../utils/DateTimeFormat.js';
 
 /** Estados del formulario de ajuste de stock, para no repetir cadenas sueltas. */
 const EMPTY_FORM = Object.freeze({
@@ -221,9 +222,13 @@ export const CoordinatorVanStockTab = {
       return 'La orden nace en Pendiente de picking; el stock no cambia hasta que el técnico confirme la recepción.';
     },
 
-    /** Un formulario de orden exige destinatario y al menos una línea completa. */
+    /** Un formulario de orden exige destinatario válido y activo en alta, y al menos una línea completa. */
     canSaveOrder() {
       if (String(this.orderForm.technician_id).trim() === '') {
+        return false;
+      }
+
+      if (this.orderForm.id === null && this.isRecipientInactive(this.orderForm)) {
         return false;
       }
 
@@ -479,34 +484,35 @@ export const CoordinatorVanStockTab = {
       return CATEGORY_LABELS[String(category || '').toUpperCase()] || String(category || '—');
     },
 
+    isRecipientInactive(recipient) {
+      if (!recipient) {
+        return false;
+      }
+      const val = recipient.technician_is_active;
+      return val === false || val === 0 || val === '0' || val === 'f' || val === 'false';
+    },
+
     /**
      * Alerta de lectura del destinatario (C2, EARS 03.3): ausencia vigente o
      * baja sobrevenida. El servidor publica ambas marcas y la interfaz no debe
      * olvidar ninguna de las dos.
      */
     hasRecipientAlert(recipient) {
-      return Boolean(recipient)
-        && (recipient.technician_is_active === false || recipient.recipient_currently_absent === true);
+      if (!recipient) {
+        return false;
+      }
+      const isInactive = this.isRecipientInactive(recipient);
+      const isAbsent = recipient.recipient_currently_absent === true
+        || recipient.recipient_currently_absent === 1
+        || recipient.recipient_currently_absent === '1'
+        || recipient.recipient_currently_absent === 't'
+        || recipient.recipient_currently_absent === 'true';
+
+      return isInactive || isAbsent;
     },
 
     formatDateTime(value) {
-      if (value === null || value === undefined || value === '') {
-        return '—';
-      }
-
-      const normalized = String(value).includes('T')
-        ? String(value)
-        : String(value).replace(' ', 'T');
-      const parsed = new Date(normalized);
-
-      if (Number.isNaN(parsed.getTime())) {
-        return String(value);
-      }
-
-      return new Intl.DateTimeFormat('es-ES', {
-        dateStyle: 'short',
-        timeStyle: 'short'
-      }).format(parsed);
+      return formatDateTime(value);
     },
 
     proposalUnits(proposal) {
@@ -550,6 +556,8 @@ export const CoordinatorVanStockTab = {
           ...emptyOrderForm(),
           technician_id: proposal.technician_id,
           technician_name: proposal.technician_name,
+          technician_is_active: proposal.technician_is_active,
+          recipient_currently_absent: proposal.recipient_currently_absent,
           items: (proposal.items || []).map((line) => ({
             spare_part_id: line.spare_part_id,
             requested_qty: line.suggested_qty,
@@ -560,9 +568,12 @@ export const CoordinatorVanStockTab = {
         return;
       }
 
+      const defaultTech = this.technicians[0];
       this.orderForm = {
         ...emptyOrderForm(),
-        technician_id: this.technicians[0]?.id || ''
+        technician_id: defaultTech?.id || '',
+        technician_name: defaultTech?.name || '',
+        technician_is_active: defaultTech ? defaultTech.is_active !== false : true
       };
       this.showOrderForm = true;
     },
@@ -790,15 +801,22 @@ export const CoordinatorVanStockTab = {
         return;
       }
 
+      this.pickingOrder = null;
       this.isLoadingPicking = true;
+      this.showPickingModal = true;
       this.ordersError = '';
 
       try {
         const response = await api.coordinator.getVanRestockOrder(order.id);
-        this.pickingOrder = response?.data || response || null;
-        this.showPickingModal = this.pickingOrder !== null;
+        const data = response?.data || response || null;
+        if (!data) {
+          throw new Error('No se encontró el albarán solicitado.');
+        }
+        this.pickingOrder = data;
       } catch (error) {
         this.ordersError = error.message || 'No se pudo cargar el albarán de Picking.';
+        this.showPickingModal = false;
+        this.pickingOrder = null;
       } finally {
         this.isLoadingPicking = false;
       }
@@ -1031,7 +1049,7 @@ export const CoordinatorVanStockTab = {
                           type="button"
                           class="vg-btn vg-btn-sm vg-btn-primary-outline"
                           :data-testid="'coord-restock-proposal-create-' + proposal.technician_id"
-                          :disabled="proposal.open_order_id || (proposal.items || []).length === 0"
+                          :disabled="proposal.open_order_id || (proposal.items || []).length === 0 || isRecipientInactive(proposal)"
                           @click="openOrderForm(null, proposal)"
                         >
                           Crear orden

@@ -423,14 +423,24 @@ class TechnicianController
             }
 
             if ($eligibleIncidentIds !== []) {
-                $requestsByIncident = $this->pendingSparePartRequestsByIncident($eligibleIncidentIds);
-                $pendingRequestsByIncident = VanStockReadinessCalculator::summarizePendingRequests(
-                    $requestsByIncident
-                );
+                $repository = $this->sparePartRequests();
+                if ($repository instanceof \VendGuard\Core\Domain\Repository\SparePartRequestPendingSummaryInterface) {
+                    $pendingRequestsByIncident = $repository->findPendingSummaryByIncidentIds($eligibleIncidentIds);
+                } else {
+                    $requestsByIncident = $this->pendingSparePartRequestsByIncident($eligibleIncidentIds);
+                    $pendingRequestsByIncident = VanStockReadinessCalculator::summarizePendingRequests(
+                        $requestsByIncident
+                    );
+                }
             }
 
-            foreach ($this->vanStock()->listByTechnician($technicianId) as $item) {
-                $vanStockByTechnicianAndPart[$item->technicianId][$item->sparePartId] = $item->quantityAvailable;
+            $vanStockRepo = $this->vanStock();
+            if ($vanStockRepo instanceof \VendGuard\Core\Domain\Repository\VanStockQuantityMapInterface) {
+                $vanStockByTechnicianAndPart = $vanStockRepo->findQuantityMapByTechnicianIds([$technicianId]);
+            } else {
+                foreach ($vanStockRepo->listByTechnician($technicianId) as $item) {
+                    $vanStockByTechnicianAndPart[$item->technicianId][$item->sparePartId] = $item->quantityAvailable;
+                }
             }
         }
 

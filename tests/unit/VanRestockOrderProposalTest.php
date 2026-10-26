@@ -142,7 +142,8 @@ final class FakeVanRestockOrderRepositoryForProposalTest implements VanRestockOr
 
     public function confirmOrderAndIncrementVanStock(
         int $orderId,
-        int $authenticatedTechnicianId
+        int $authenticatedTechnicianId,
+        ?string $receptionNote = null
     ): array {
         $this->writeAttempts++;
         throw new LogicException('confirmOrderAndIncrementVanStock no se usa en la suite de propuestas.');

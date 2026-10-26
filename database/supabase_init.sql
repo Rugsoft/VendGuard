@@ -1233,6 +1233,7 @@ CREATE TABLE IF NOT EXISTS spare_part_requests (
 );
 
 CREATE INDEX IF NOT EXISTS idx_requests_incident ON spare_part_requests (incident_id);
+CREATE INDEX IF NOT EXISTS idx_requests_pending_incident ON spare_part_requests (incident_id) WHERE status = 'PENDING';
 CREATE INDEX IF NOT EXISTS idx_requests_part ON spare_part_requests (spare_part_id);
 CREATE INDEX IF NOT EXISTS idx_requests_status ON spare_part_requests (status);
 CREATE INDEX IF NOT EXISTS idx_requests_user ON spare_part_requests (requested_by_user_id);
@@ -2200,6 +2201,7 @@ CREATE TABLE IF NOT EXISTS van_restock_orders (
     cancelled_by        BIGINT,
     cancelled_at        TIMESTAMPTZ,
     cancellation_reason TEXT,
+    reception_note      TEXT,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT pk_van_restock_orders PRIMARY KEY (id),
@@ -2234,6 +2236,9 @@ CREATE TABLE IF NOT EXISTS van_restock_orders (
             AND cancellation_reason IS NOT NULL
             AND char_length(btrim(cancellation_reason)) >= 20
         )
+    ),
+    CONSTRAINT chk_van_restock_orders_reception_note CHECK (
+        reception_note IS NULL OR char_length(btrim(reception_note)) BETWEEN 1 AND 500
     )
 );
 
@@ -2353,13 +2358,13 @@ CREATE OR REPLACE TRIGGER trg_no_delete_van_restock_order_items
 -- `trg_no_update_technician_shift_logs`)
 -- 52 restricciones nombradas: 33 claves primarias (la del mapeo de códigos postales
 -- es el propio CP, no un identificador sintético) y 19 únicas
--- 44 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
+-- 45 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
 -- Módulo 21 (3 en ausencias y 3 en turnos), las 4 del Módulo 22 (2 en turnos y 2
--- en la bitácora) y las 11 del Módulo 23 (4 en órdenes y 7 en líneas) · 68 claves
+-- en la bitácora) y las 12 del Módulo 23 (5 en órdenes y 7 en líneas) · 68 claves
 -- foráneas con las reglas declaradas en el contrato §2.4
--- 82 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- 83 índices secundarios —uno por índice no único del esquema local y con las mismas
 -- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1), el
--- Módulo 20 (3), el Módulo 21 (3), el Módulo 22 (2) y el Módulo 23 (4)— y cinco
+-- Módulo 20 (3), el Módulo 21 (3), el Módulo 22 (2) y el Módulo 23 (5)— y cinco
 -- índices únicos parciales: `uq_machine_active_ticket` (D-6),
 -- `uq_technician_zone_live`, `uq_technician_primary_zone` (Resolución QA 10),
 -- `uq_tech_shifts_single_active` (M21, Resolución R3) y

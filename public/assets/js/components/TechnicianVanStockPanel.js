@@ -40,6 +40,7 @@
  */
 
 import { api } from '../api.js';
+import { formatDateTime } from '../utils/DateTimeFormat.js';
 
 export const TechnicianVanStockPanel = {
   name: 'TechnicianVanStockPanel',
@@ -52,6 +53,7 @@ export const TechnicianVanStockPanel = {
       lastConfirmedOrder: null,
       isLoading: false,
       errorMessage: '',
+      receptionNote: '',
       isConfirming: false,
       confirmError: '',
       confirmMessage: ''
@@ -154,10 +156,15 @@ export const TechnicianVanStockPanel = {
       this.confirmMessage = '';
 
       try {
-        const response = await api.technician.confirmVanRestockOrder(this.activeDispatchedOrder.id);
+        const payloadToSend = {};
+        if (this.receptionNote && this.receptionNote.trim()) {
+          payloadToSend.reception_note = this.receptionNote.trim();
+        }
+        const response = await api.technician.confirmVanRestockOrder(this.activeDispatchedOrder.id, payloadToSend);
         const payload = response?.data || response || {};
         this.confirmMessage = payload.message
           || 'Carga confirmada. El stock de tu furgoneta ya está actualizado.';
+        this.receptionNote = '';
 
         await this.loadInventory();
       } catch (error) {
@@ -182,23 +189,7 @@ export const TechnicianVanStockPanel = {
     },
 
     formatDateTime(value) {
-      if (value === null || value === undefined || value === '') {
-        return '—';
-      }
-
-      const normalized = String(value).includes('T')
-        ? String(value)
-        : String(value).replace(' ', 'T');
-      const parsed = new Date(normalized);
-
-      if (Number.isNaN(parsed.getTime())) {
-        return String(value);
-      }
-
-      return new Intl.DateTimeFormat('es-ES', {
-        dateStyle: 'short',
-        timeStyle: 'short'
-      }).format(parsed);
+      return formatDateTime(value);
     }
   },
 
@@ -297,6 +288,20 @@ export const TechnicianVanStockPanel = {
           <p v-if="activeDispatchedOrder.notes" style="margin: 8px 0 0; font-family: var(--font-body); font-size: var(--font-size-caption); color: var(--color-ink-secondary);">
             Nota de almacén: {{ activeDispatchedOrder.notes }}
           </p>
+
+          <div style="margin-top: 10px;">
+            <label style="display: flex; flex-direction: column; gap: 4px; font-family: var(--font-body); font-size: var(--font-size-caption); font-weight: 600; color: var(--color-ink-secondary);">
+              <span>Nota de recepción opcional <small style="font-weight: 400;">({{ (receptionNote || '').length }}/500)</small></span>
+              <textarea
+                v-model="receptionNote"
+                maxlength="500"
+                rows="2"
+                class="vg-input vg-textarea"
+                placeholder="Observación al recibir el material (opcional)"
+                data-testid="tech-van-stock-reception-note"
+              ></textarea>
+            </label>
+          </div>
         </section>
 
         <!-- Comprobante de la última carga confirmada (QA 5) -->
@@ -316,6 +321,9 @@ export const TechnicianVanStockPanel = {
           <div style="margin-top: 4px; font-family: var(--font-body); font-size: var(--font-size-body-sm); color: var(--color-ink-secondary);">
             {{ formatDateTime(lastConfirmedOrder.confirmed_at) }} · <strong>{{ lastConfirmedOrder.total_received_units }}</strong> unidades recibidas
           </div>
+          <p v-if="lastConfirmedOrder.reception_note" data-testid="tech-van-stock-last-reception-note" style="margin: 6px 0 0; font-family: var(--font-body); font-size: var(--font-size-caption); color: var(--color-ink-muted); font-style: italic;">
+            Nota del técnico: "{{ lastConfirmedOrder.reception_note }}"
+          </p>
           <ul data-testid="tech-van-stock-last-confirmed-items" style="list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px;">
             <li
               v-for="line in (lastConfirmedOrder.items || [])"

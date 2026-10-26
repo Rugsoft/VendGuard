@@ -537,9 +537,14 @@ final class TechnicianAssignmentSuggester
 
         if ($totalCatalogReferences > 0 || $hasOutOfCatalog) {
             $matchedReferences = 0;
+            $hasAnyPositiveStock = false;
             foreach ($catalog as $sparePartId => $requestedQty) {
-                if (self::availableInVan($technicianStock, (int)$sparePartId) >= (int)$requestedQty) {
+                $available = self::availableInVan($technicianStock, (int)$sparePartId);
+                if ($available >= (int)$requestedQty) {
                     $matchedReferences++;
+                }
+                if ($available > 0) {
+                    $hasAnyPositiveStock = true;
                 }
             }
 
@@ -587,7 +592,7 @@ final class TechnicianAssignmentSuggester
                 );
             }
 
-            if ($matchedReferences >= 1) {
+            if ($matchedReferences >= 1 || $hasAnyPositiveStock) {
                 return self::vanStockMatchRow(
                     self::VAN_STOCK_PARTIAL_MATCH,
                     self::VAN_STOCK_LEVEL_EXPLICIT_REQUESTS,
@@ -626,7 +631,7 @@ final class TechnicianAssignmentSuggester
                 0,
                 0,
                 false,
-                null
+                'ℹ️ Sin repuestos catalogados para este modelo/categoría'
             );
         }
 

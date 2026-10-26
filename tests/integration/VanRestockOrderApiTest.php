@@ -839,7 +839,7 @@ try {
     $confirmResponse = $call(
         'POST',
         '/api/technician/van-stock/restock-orders/' . $orderId . '/confirm',
-        [],
+        ['reception_note' => 'Caja recibida completa y revisada en almacén central.'],
         $technicianToken
     );
     $confirmData = $data($confirmResponse);
@@ -854,6 +854,7 @@ try {
         '8.6 La confirmación en un toque cierra la orden y suma las tres unidades',
         $confirmResponse->getStatusCode() === 200
             && ($confirmData['order']['status'] ?? '') === 'CONFIRMED_BY_TECH'
+            && ($confirmData['order']['reception_note'] ?? null) === 'Caja recibida completa y revisada en almacén central.'
             && ($confirmData['order']['total_received_units'] ?? null) === 3
             && ($updatedStock['previous_quantity_available'] ?? null) === -2
             && ($updatedStock['dispatched_qty'] ?? null) === 3
@@ -885,6 +886,7 @@ try {
         '8.8 El inventario publica el comprobante de la última recepción y ya no la orden activa',
         ($inventoryAfterData['active_dispatched_order'] ?? null) === null
             && ($confirmationReceipt['id'] ?? null) === $orderId
+            && ($confirmationReceipt['reception_note'] ?? null) === 'Caja recibida completa y revisada en almacén central.'
             && ($confirmationReceipt['total_received_units'] ?? null) === 3
             && count($confirmationReceipt['items'] ?? []) === 1
             && ($stockAfterConfirm['quantity_available'] ?? null) === 1,

@@ -257,7 +257,7 @@ assert(
 
 assert(
   '1.3 La confirmación móvil solo envía el identificador de la orden, nunca un técnico',
-  /confirmVanRestockOrder:\s*\(orderId\)/.test(API_SOURCE)
+  /confirmVanRestockOrder:\s*\(orderId/.test(API_SOURCE)
     && !/confirmVanRestockOrder[\s\S]{0,250}technician_id/.test(API_SOURCE)
 );
 
@@ -545,11 +545,24 @@ assert(
 assert(
   '3.14 El aviso de destinatario cubre la baja sobrevenida además de la ausencia (C2)',
   pickingTab.hasRecipientAlert(makeOrder({ technician_is_active: false, recipient_currently_absent: false })) === true
+    && pickingTab.hasRecipientAlert(makeOrder({ technician_is_active: '0', recipient_currently_absent: false })) === true
     && pickingTab.hasRecipientAlert(makeOrder({ technician_is_active: true, recipient_currently_absent: true })) === true
     && pickingTab.hasRecipientAlert(makeOrder({ technician_is_active: true, recipient_currently_absent: false })) === false
     && COORDINATOR_SOURCE.includes('hasRecipientAlert(proposal)')
     && COORDINATOR_SOURCE.includes('hasRecipientAlert(order)')
     && COORDINATOR_SOURCE.includes('hasRecipientAlert(pickingOrder)')
+);
+
+const inactiveTab = createComponentInstance(CoordinatorVanStockTab);
+inactiveTab.orderForm = {
+  id: null,
+  technician_id: 99,
+  technician_is_active: false,
+  items: [{ spare_part_id: 1, requested_qty: 1 }]
+};
+assert(
+  '3.14b El formulario de alta bloquea el guardado para técnicos inactivos',
+  inactiveTab.canSaveOrder === false
 );
 
 assert(
@@ -593,6 +606,7 @@ assert(
   TECHNICIAN_SOURCE.includes('data-testid="tech-van-stock-active-order"')
     && TECHNICIAN_SOURCE.includes('data-testid="tech-van-stock-last-confirmed"')
     && TECHNICIAN_SOURCE.includes('data-testid="tech-van-stock-primary-action"')
+    && TECHNICIAN_SOURCE.includes('data-testid="tech-van-stock-reception-note"')
 );
 
 const confirmCalls = [];

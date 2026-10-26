@@ -334,11 +334,27 @@ final class VanRestockOrderService
      *   }>
      * }
      */
-    public function confirmOrder(int $orderId, int $authenticatedTechnicianId): array
-    {
+    public function confirmOrder(
+        int $orderId,
+        int $authenticatedTechnicianId,
+        ?string $receptionNote = null
+    ): array {
+        $cleanNote = null;
+        if ($receptionNote !== null) {
+            $cleanNote = trim($receptionNote);
+            if ($cleanNote === '') {
+                $cleanNote = null;
+            } elseif (mb_strlen($cleanNote, 'UTF-8') > 500) {
+                throw VanRestockOrderValidationException::invalidPayload(
+                    'la nota de recepción no puede superar los 500 caracteres.'
+                );
+            }
+        }
+
         return $this->repository->confirmOrderAndIncrementVanStock(
             $orderId,
-            $authenticatedTechnicianId
+            $authenticatedTechnicianId,
+            $cleanNote
         );
     }
 

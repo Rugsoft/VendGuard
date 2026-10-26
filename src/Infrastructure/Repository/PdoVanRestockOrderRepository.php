@@ -84,7 +84,7 @@ final class PdoVanRestockOrderRepository implements VanRestockOrderRepositoryInt
     private const ORDER_COLUMNS = 'o.id, o.technician_id, o.status, o.notes,
         o.created_by, o.created_at, o.dispatched_by, o.dispatched_at,
         o.confirmed_by, o.confirmed_at, o.cancelled_by, o.cancelled_at,
-        o.cancellation_reason, o.updated_at,
+        o.cancellation_reason, o.reception_note, o.updated_at,
         t.name AS technician_name, t.operator_code AS technician_operator_code,
         t.is_active AS technician_is_active,
         EXISTS (
@@ -578,7 +578,8 @@ final class PdoVanRestockOrderRepository implements VanRestockOrderRepositoryInt
      */
     public function confirmOrderAndIncrementVanStock(
         int $orderId,
-        int $authenticatedTechnicianId
+        int $authenticatedTechnicianId,
+        ?string $receptionNote = null
     ): array {
         if ($authenticatedTechnicianId < 1) {
             throw VanRestockOrderValidationException::ownershipMismatch();
@@ -708,14 +709,21 @@ final class PdoVanRestockOrderRepository implements VanRestockOrderRepositoryInt
                 );
             }
 
+            $cleanReceptionNote = $receptionNote !== null ? trim($receptionNote) : null;
+            if ($cleanReceptionNote === '') {
+                $cleanReceptionNote = null;
+            }
+
             $confirm = $this->pdo->prepare(
                 "UPDATE van_restock_orders
                     SET status = 'CONFIRMED_BY_TECH',
                         confirmed_by = :confirmed_by,
-                        confirmed_at = CURRENT_TIMESTAMP
+                        confirmed_at = CURRENT_TIMESTAMP,
+                        reception_note = :reception_note
                   WHERE id = :id"
             );
             $confirm->bindValue(':confirmed_by', $technicianId, PDO::PARAM_INT);
+            $confirm->bindValue(':reception_note', $cleanReceptionNote, $cleanReceptionNote !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
             $confirm->bindValue(':id', $orderId, PDO::PARAM_INT);
             $confirm->execute();
 
@@ -732,6 +740,7 @@ final class PdoVanRestockOrderRepository implements VanRestockOrderRepositoryInt
                 [
                     'status' => VanRestockOrder::STATUS_CONFIRMED_BY_TECH,
                     'confirmed_at' => $this->now(),
+                    'reception_note' => $cleanReceptionNote,
                     'stock_after' => array_map(
                         static fn (array $row): array => [
                             'spare_part_id' => $row['spare_part_id'],
@@ -1626,6 +1635,7 @@ final class PdoVanRestockOrderRepository implements VanRestockOrderRepositoryInt
             $row['cancelled_by_name'] === null ? null : (string)$row['cancelled_by_name'],
             $row['cancelled_at'] === null ? null : (string)$row['cancelled_at'],
             $row['cancellation_reason'] === null ? null : (string)$row['cancellation_reason'],
+            $row['reception_note'] === null ? null : (string)$row['reception_note'],
             (string)$row['updated_at'],
             array_map(fn (array $itemRow): VanRestockOrderItem => $this->hydrateItem($itemRow), $itemRows)
         );

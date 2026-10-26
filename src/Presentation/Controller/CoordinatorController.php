@@ -497,24 +497,36 @@ class CoordinatorController
 
         if ($this->hasVanStockReadinessSources()) {
             $eligibleIncidentIds = [];
+            $eligibleTechIds = [];
             foreach ($rows as $row) {
                 if (
                     $row['assigned_technician_id'] !== null
                     && in_array($row['status'], VanStockReadinessCalculator::ACTIVE_INCIDENT_STATUSES, true)
                 ) {
                     $eligibleIncidentIds[] = $row['incident_id'];
+                    $eligibleTechIds[(int)$row['assigned_technician_id']] = (int)$row['assigned_technician_id'];
                 }
             }
 
             if ($eligibleIncidentIds !== []) {
-                $requestsByIncident = $this->pendingSparePartRequestsByIncident($eligibleIncidentIds);
-                $pendingRequestsByIncident = VanStockReadinessCalculator::summarizePendingRequests(
-                    $requestsByIncident
-                );
+                $repository = $this->sparePartRequests();
+                if ($repository instanceof \VendGuard\Core\Domain\Repository\SparePartRequestPendingSummaryInterface) {
+                    $pendingRequestsByIncident = $repository->findPendingSummaryByIncidentIds($eligibleIncidentIds);
+                } else {
+                    $requestsByIncident = $this->pendingSparePartRequestsByIncident($eligibleIncidentIds);
+                    $pendingRequestsByIncident = VanStockReadinessCalculator::summarizePendingRequests(
+                        $requestsByIncident
+                    );
+                }
             }
 
-            foreach ($this->vanStock()->listInventory(null) as $item) {
-                $vanStockByTechnicianAndPart[$item->technicianId][$item->sparePartId] = $item->quantityAvailable;
+            $vanStockRepo = $this->vanStock();
+            if ($vanStockRepo instanceof \VendGuard\Core\Domain\Repository\VanStockQuantityMapInterface) {
+                $vanStockByTechnicianAndPart = $vanStockRepo->findQuantityMapByTechnicianIds(array_values($eligibleTechIds));
+            } else {
+                foreach ($vanStockRepo->listInventory(null) as $item) {
+                    $vanStockByTechnicianAndPart[$item->technicianId][$item->sparePartId] = $item->quantityAvailable;
+                }
             }
         }
 

@@ -203,8 +203,8 @@ assert(
 console.log('\n--- BLOQUE 4: Solo lectura, mínimo privilegio y deuda cromática ---');
 
 assert(
-  '4.1 La vista no tiene ningún control que mute el saldo (RF-04.1)',
-  !/<input\b/i.test(SOURCE) && !/<select\b/i.test(SOURCE) && !/<textarea\b/i.test(SOURCE)
+  '4.1 La vista no tiene ningún control que mute el saldo directamente (RF-04.1; la nota de recepción en textarea de confirmación es M23)',
+  !/<input\b/i.test(SOURCE) && !/<select\b/i.test(SOURCE)
 );
 assert(
   '4.2 La vista no menciona el umbral mínimo, que RF-04.1 deja fuera del panel del técnico',

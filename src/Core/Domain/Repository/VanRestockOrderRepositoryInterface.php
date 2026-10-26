@@ -168,7 +168,8 @@ interface VanRestockOrderRepositoryInterface
      */
     public function confirmOrderAndIncrementVanStock(
         int $orderId,
-        int $authenticatedTechnicianId
+        int $authenticatedTechnicianId,
+        ?string $receptionNote = null
     ): array;
 
     /**
