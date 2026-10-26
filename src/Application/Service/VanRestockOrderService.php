@@ -192,13 +192,18 @@ final class VanRestockOrderService
                     $actorUserId
                 );
             } catch (VanRestockOrderValidationException $exception) {
-                // Una carrera con otra creación del mismo técnico no debe
-                // abortar el lote entero: se informa como omitido y se sigue.
-                if ($exception->getErrorCode() === VanRestockOrderValidationException::OPEN_RESTOCK_ORDER_ALREADY_EXISTS) {
+                // Una carrera con otra creación del mismo técnico o un cambio sobrevenido
+                // no debe abortar el lote entero: se informa como omitido y se sigue.
+                if (
+                    $exception->getErrorCode() === VanRestockOrderValidationException::OPEN_RESTOCK_ORDER_ALREADY_EXISTS
+                    || $exception->getErrorCode() === VanRestockOrderValidationException::TECHNICIAN_NOT_ELIGIBLE
+                ) {
                     $skipped[] = [
                         'technician_id' => $proposal->technicianId,
                         'technician_name' => $proposal->technicianName,
-                        'skip_reason' => self::SKIP_OPEN_ORDER_EXISTS,
+                        'skip_reason' => $exception->getErrorCode() === VanRestockOrderValidationException::OPEN_RESTOCK_ORDER_ALREADY_EXISTS
+                            ? self::SKIP_OPEN_ORDER_EXISTS
+                            : self::SKIP_ACTIVE_ABSENCE,
                         'open_order_id' => null,
                     ];
                     continue;

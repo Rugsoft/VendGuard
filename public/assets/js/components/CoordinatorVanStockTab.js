@@ -1589,7 +1589,7 @@ export const CoordinatorVanStockTab = {
               <strong>{{ pickingOrder.technician_operator_code || '—' }}</strong>
             </div>
             <div>
-              <span class="vg-picking-sheet__label">Preparado por</span>
+              <span class="vg-picking-sheet__label">Emitida por</span>
               <strong>{{ pickingOrder.created_by_name || '—' }}</strong>
             </div>
             <div>
@@ -1602,7 +1602,7 @@ export const CoordinatorVanStockTab = {
             </div>
           </section>
 
-          <div v-if="hasRecipientAlert(pickingOrder)" class="vg-alert vg-alert-warning" data-testid="coord-picking-absent-warning">
+          <div v-if="isOpenOrder(pickingOrder) && hasRecipientAlert(pickingOrder)" class="vg-alert vg-alert-warning" data-testid="coord-picking-absent-warning">
             ⚠️ Destinatario actualmente ausente / inactivo. La caja se prepara igualmente y se entrega a su incorporación.
           </div>
 

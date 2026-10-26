@@ -116,7 +116,9 @@ final class PdoVanRestockOrderRepository implements VanRestockOrderRepositoryInt
     private const ITEM_COLUMNS = 'i.id, i.order_id, i.spare_part_id, i.current_quantity_snapshot,
         i.min_threshold_snapshot, i.pending_request_qty_snapshot, i.requested_qty,
         i.dispatched_qty, i.reason, i.removed_at, i.removed_by,
-        sp.part_code, sp.name AS part_name, sp.category';
+        COALESCE(i.part_code_snapshot, sp.part_code) AS part_code,
+        COALESCE(i.part_name_snapshot, sp.name) AS part_name,
+        COALESCE(i.category_snapshot, sp.category::text) AS category';
 
     private const ITEM_ORDER = "CASE i.reason
             WHEN 'BOTH' THEN 1
@@ -298,7 +300,10 @@ final class PdoVanRestockOrderRepository implements VanRestockOrderRepositoryInt
                 // convierte en un segundo registro para la misma pieza.
                 $update = $this->pdo->prepare(
                     'UPDATE van_restock_order_items
-                        SET current_quantity_snapshot = :current_quantity_snapshot,
+                        SET part_code_snapshot = :part_code_snapshot,
+                            part_name_snapshot = :part_name_snapshot,
+                            category_snapshot = :category_snapshot,
+                            current_quantity_snapshot = :current_quantity_snapshot,
                             min_threshold_snapshot = :min_threshold_snapshot,
                             pending_request_qty_snapshot = :pending_request_qty_snapshot,
                             requested_qty = :requested_qty,
@@ -307,6 +312,9 @@ final class PdoVanRestockOrderRepository implements VanRestockOrderRepositoryInt
                             removed_by = NULL
                       WHERE id = :id'
                 );
+                $update->bindValue(':part_code_snapshot', $item->partCode, PDO::PARAM_STR);
+                $update->bindValue(':part_name_snapshot', $item->partName, PDO::PARAM_STR);
+                $update->bindValue(':category_snapshot', $item->category, PDO::PARAM_STR);
                 $update->bindValue(':current_quantity_snapshot', $item->currentQuantitySnapshot, PDO::PARAM_INT);
                 $update->bindValue(':min_threshold_snapshot', $item->minThresholdSnapshot, PDO::PARAM_INT);
                 $update->bindValue(':pending_request_qty_snapshot', $item->pendingRequestQtySnapshot, PDO::PARAM_INT);
@@ -828,11 +836,18 @@ final class PdoVanRestockOrderRepository implements VanRestockOrderRepositoryInt
     /**
      * {@inheritDoc}
      */
-    public function findAllForCoordinator(?int $technicianId = null, ?string $status = null): array
-    {
+    public function findAllForCoordinator(
+        ?int $technicianId = null,
+        ?string $status = null,
+        int $limit = 100,
+        int $offset = 0
+    ): array {
         if ($technicianId !== null && $technicianId < 1) {
             throw new InvalidArgumentException('El identificador del técnico debe ser un entero positivo.');
         }
+
+        $clampedLimit = max(1, min($limit, 200));
+        $clampedOffset = max(0, $offset);
 
         $filter = $this->normalizeStatusFilter($status);
 
@@ -853,7 +868,8 @@ final class PdoVanRestockOrderRepository implements VanRestockOrderRepositoryInt
 
         // RF-04.4: las abiertas primero y, dentro de cada bloque, la más reciente.
         $sql .= ' ORDER BY CASE WHEN o.status IN (\'PENDING_PICKING\', \'DISPATCHED\') THEN 0 ELSE 1 END ASC,
-                           o.created_at DESC, o.id DESC';
+                           o.created_at DESC, o.id DESC
+                 LIMIT :limit OFFSET :offset';
 
         $stmt = $this->pdo->prepare($sql);
         foreach ($params as $placeholder => $value) {
@@ -863,6 +879,8 @@ final class PdoVanRestockOrderRepository implements VanRestockOrderRepositoryInt
                 $placeholder === ':status' ? PDO::PARAM_STR : PDO::PARAM_INT
             );
         }
+        $stmt->bindValue(':limit', $clampedLimit, PDO::PARAM_INT);
+        $stmt->bindValue(':offset', $clampedOffset, PDO::PARAM_INT);
         $stmt->execute();
 
         return $this->hydrateOrders($stmt->fetchAll());
@@ -1679,15 +1697,20 @@ final class PdoVanRestockOrderRepository implements VanRestockOrderRepositoryInt
     {
         $stmt = $this->pdo->prepare(
             'INSERT INTO van_restock_order_items (
-                order_id, spare_part_id, current_quantity_snapshot, min_threshold_snapshot,
+                order_id, spare_part_id, part_code_snapshot, part_name_snapshot, category_snapshot,
+                current_quantity_snapshot, min_threshold_snapshot,
                 pending_request_qty_snapshot, requested_qty, reason
              ) VALUES (
-                :order_id, :spare_part_id, :current_quantity_snapshot, :min_threshold_snapshot,
+                :order_id, :spare_part_id, :part_code_snapshot, :part_name_snapshot, :category_snapshot,
+                :current_quantity_snapshot, :min_threshold_snapshot,
                 :pending_request_qty_snapshot, :requested_qty, :reason
              )'
         );
         $stmt->bindValue(':order_id', $orderId, PDO::PARAM_INT);
         $stmt->bindValue(':spare_part_id', $item->sparePartId, PDO::PARAM_INT);
+        $stmt->bindValue(':part_code_snapshot', $item->partCode, PDO::PARAM_STR);
+        $stmt->bindValue(':part_name_snapshot', $item->partName, PDO::PARAM_STR);
+        $stmt->bindValue(':category_snapshot', $item->category, PDO::PARAM_STR);
         $stmt->bindValue(':current_quantity_snapshot', $item->currentQuantitySnapshot, PDO::PARAM_INT);
         $stmt->bindValue(':min_threshold_snapshot', $item->minThresholdSnapshot, PDO::PARAM_INT);
         $stmt->bindValue(':pending_request_qty_snapshot', $item->pendingRequestQtySnapshot, PDO::PARAM_INT);

@@ -373,8 +373,13 @@ class CoordinatorController
 
         // 6.c Insignia de disponibilidad de repuesto en la tarjeta (Módulo 23, RF-05.4,
         //     QA 3). Se calcula una vez para toda la bandeja con el calculador puro: no
-        //     escribe nada ni cambia el estado de la avería (Art. III.3).
-        $vanStockReadiness = $this->vanStockReadinessByIncident($incidents);
+        //     escribe nada ni cambia el estado de la avería (Art. III.3). Si la lectura
+        //     falla, la bandeja de triaje no se interrumpe y cae a NOT_APPLICABLE.
+        try {
+            $vanStockReadiness = $this->vanStockReadinessByIncident($incidents);
+        } catch (\Throwable $readinessError) {
+            $vanStockReadiness = [];
+        }
 
         // 7. Enriquecer con cálculo de minutos de espera y evaluación de SLA 24/7 (RF-11 / EARS 11.1)
         $now = time();

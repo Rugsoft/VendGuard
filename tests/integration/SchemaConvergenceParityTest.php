@@ -291,6 +291,7 @@ try {
             '016_van_restock_orders.sql',
             '017_van_restock_reception_note.sql',
             '018_spare_part_requests_pending_index.sql',
+            '019_van_restock_order_items_snapshots.sql',
         ],
         'aplicadas: ' . $listSample($applied)
     );
@@ -306,7 +307,7 @@ try {
     $ledgerRows = $pgPdo->query('SELECT filename, checksum FROM ' . ADDITION_LEDGER . ' ORDER BY filename')->fetchAll();
     $assert(
         'El libro registra las migraciones con su huella de 64 caracteres',
-        count($ledgerRows) === 18
+        count($ledgerRows) === 19
         && $ledgerRows[0]['filename'] === '001_initial_baseline.sql'
         && strlen((string)$ledgerRows[0]['checksum']) === 64
         && $ledgerRows[1]['filename'] === '002_notification_center_outbox.sql'
@@ -343,6 +344,8 @@ try {
         && strlen((string)$ledgerRows[16]['checksum']) === 64
         && $ledgerRows[17]['filename'] === '018_spare_part_requests_pending_index.sql'
         && strlen((string)$ledgerRows[17]['checksum']) === 64
+        && $ledgerRows[18]['filename'] === '019_van_restock_order_items_snapshots.sql'
+        && strlen((string)$ledgerRows[18]['checksum']) === 64
     );
 
     $assert('Reejecutar el ejecutor no aplica nada (idempotente)', $runner->runAll() === []);

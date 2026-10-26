@@ -191,9 +191,16 @@ interface VanRestockOrderRepositoryInterface
      *
      * @param string|null $status Uno de los cuatro estados, `OPEN` para las dos
      *        abiertas, o `null` para todas.
+     * @param int $limit Límite de resultados (por defecto 100).
+     * @param int $offset Desplazamiento (por defecto 0).
      * @return list<VanRestockOrder>
      */
-    public function findAllForCoordinator(?int $technicianId = null, ?string $status = null): array;
+    public function findAllForCoordinator(
+        ?int $technicianId = null,
+        ?string $status = null,
+        int $limit = 100,
+        int $offset = 0
+    ): array;
 
     /**
      * Orden `DISPATCHED` pendiente de recepción del técnico autenticado

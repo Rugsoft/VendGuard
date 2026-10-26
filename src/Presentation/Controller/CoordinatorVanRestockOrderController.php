@@ -110,10 +110,30 @@ class CoordinatorVanRestockOrderController
             }
         }
 
+        $limit = 100;
+        $rawLimit = $request->getQuery('limit');
+        if ($rawLimit !== null && trim((string)$rawLimit) !== '') {
+            $parsedLimit = filter_var($rawLimit, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 200]]);
+            if ($parsedLimit === false) {
+                return $this->invalidPayload(['limit' => 'Debe ser un entero entre 1 y 200.']);
+            }
+            $limit = (int)$parsedLimit;
+        }
+
+        $offset = 0;
+        $rawOffset = $request->getQuery('offset');
+        if ($rawOffset !== null && trim((string)$rawOffset) !== '') {
+            $parsedOffset = filter_var($rawOffset, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+            if ($parsedOffset === false) {
+                return $this->invalidPayload(['offset' => 'Debe ser un entero mayor o igual a 0.']);
+            }
+            $offset = (int)$parsedOffset;
+        }
+
         return Response::json([
             'items' => array_map(
                 static fn (VanRestockOrder $order): array => $order->toCoordinatorArray(),
-                $this->repository->findAllForCoordinator($technicianId, $status)
+                $this->repository->findAllForCoordinator($technicianId, $status, $limit, $offset)
             ),
         ], 200);
     }

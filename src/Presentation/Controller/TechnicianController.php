@@ -340,7 +340,12 @@ class TechnicianController
 
         // Insignia de cobertura de repuestos en cada parada (Módulo 23, RF-05.4,
         // QA 3). Es informativa: no reactiva la avería ni toca sus solicitudes.
-        $routeData = $this->withVanStockReadiness($routeData, $techId);
+        // Un fallo transitorio en la lectura de stock no interrumpe la ruta del técnico.
+        try {
+            $routeData = $this->withVanStockReadiness($routeData, $techId);
+        } catch (\Throwable $readinessError) {
+            // Se conserva routeData tal cual sin abortar
+        }
 
         // Contexto oportunista opcional (Módulo 16, RF-01.2 y RF-03.1). La raíz sigue
         // siendo el array de paradas cuando el cliente no lo pide: los contratos de los

@@ -550,7 +550,7 @@ assert(
     && pickingTab.hasRecipientAlert(makeOrder({ technician_is_active: true, recipient_currently_absent: false })) === false
     && COORDINATOR_SOURCE.includes('hasRecipientAlert(proposal)')
     && COORDINATOR_SOURCE.includes('hasRecipientAlert(order)')
-    && COORDINATOR_SOURCE.includes('hasRecipientAlert(pickingOrder)')
+    && COORDINATOR_SOURCE.includes('isOpenOrder(pickingOrder) && hasRecipientAlert(pickingOrder)')
 );
 
 const inactiveTab = createComponentInstance(CoordinatorVanStockTab);

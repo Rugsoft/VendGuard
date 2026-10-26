@@ -398,8 +398,12 @@ final class FakeVanRestockOrderRepositoryForServiceTest implements VanRestockOrd
         return null;
     }
 
-    public function findAllForCoordinator(?int $technicianId = null, ?string $status = null): array
-    {
+    public function findAllForCoordinator(
+        ?int $technicianId = null,
+        ?string $status = null,
+        int $limit = 100,
+        int $offset = 0
+    ): array {
         $result = [];
         foreach ($this->orders as $orderId => $row) {
             if ($technicianId !== null && (int)$row['technician_id'] !== $technicianId) {

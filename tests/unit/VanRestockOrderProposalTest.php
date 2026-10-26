@@ -159,8 +159,12 @@ final class FakeVanRestockOrderRepositoryForProposalTest implements VanRestockOr
         throw new LogicException('findOpenOrderForTechnician no se usa en la suite de propuestas.');
     }
 
-    public function findAllForCoordinator(?int $technicianId = null, ?string $status = null): array
-    {
+    public function findAllForCoordinator(
+        ?int $technicianId = null,
+        ?string $status = null,
+        int $limit = 100,
+        int $offset = 0
+    ): array {
         throw new LogicException('findAllForCoordinator no se usa en la suite de propuestas.');
     }
 
