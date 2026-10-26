@@ -15,6 +15,7 @@ use VendGuard\Application\Service\NotificationOutboxEnqueuerService;
 use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Application\Service\SanitaryReportSafeguardService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
+use VendGuard\Application\Service\VanStockReadinessCalculator;
 use VendGuard\Application\Service\VanStockService;
 use VendGuard\Application\Service\TechnicianRefundService;
 use VendGuard\Core\Domain\Exception\ConversationSealedException;
@@ -39,6 +40,7 @@ use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Exception\SparePartNotFoundException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\Location;
+use VendGuard\Core\Domain\Model\SparePartRequestStatus;
 use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
@@ -49,9 +51,11 @@ use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\OpportunisticIncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\SparePartRequestRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianRouteBoardRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianShiftRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
+use VendGuard\Core\Domain\Repository\VanStockRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Service\ResolutionValidator;
 use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
@@ -117,6 +121,12 @@ class TechnicianController
     /** Persistencia de jornada y turnos del técnico (Módulo 21); se resuelve bajo demanda. */
     private ?TechnicianShiftRepositoryInterface $shiftRepo;
 
+    /** Solicitudes `PENDING` por avería para la insignia `van_stock_readiness` (Módulo 23). */
+    private ?SparePartRequestRepositoryInterface $sparePartRequestRepo = null;
+
+    /** Saldos de furgoneta para la insignia `van_stock_readiness` (Módulo 23). */
+    private ?VanStockRepositoryInterface $vanStockRepo = null;
+
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?MachineRepositoryInterface $machineRepo = null,
@@ -133,7 +143,9 @@ class TechnicianController
         ?NotificationOutboxEnqueuerService $notificationEnqueuer = null,
         ?AuditLogger $auditLogger = null,
         ?IncidentServiceSheetRepositoryInterface $serviceSheetRepo = null,
-        ?TechnicianShiftRepositoryInterface $shiftRepo = null
+        ?TechnicianShiftRepositoryInterface $shiftRepo = null,
+        ?SparePartRequestRepositoryInterface $sparePartRequestRepo = null,
+        ?VanStockRepositoryInterface $vanStockRepo = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->machineRepo  = $machineRepo ?? new PdoMachineRepository();
@@ -169,6 +181,8 @@ class TechnicianController
         $this->notificationEnqueuer = $notificationEnqueuer;
         $this->auditLogger = $auditLogger;
         $this->serviceSheetRepo = $serviceSheetRepo;
+        $this->sparePartRequestRepo = $sparePartRequestRepo;
+        $this->vanStockRepo = $vanStockRepo;
     }
 
     private ?NotificationOutboxEnqueuerService $notificationEnqueuer = null;
@@ -323,6 +337,10 @@ class TechnicianController
             ? $this->routeFromBoard($techId, $routeStatuses)
             : $this->routeFromReads($techId, $routeStatuses);
 
+        // Insignia de cobertura de repuestos en cada parada (Módulo 23, RF-05.4,
+        // QA 3). Es informativa: no reactiva la avería ni toca sus solicitudes.
+        $routeData = $this->withVanStockReadiness($routeData, $techId);
+
         // Contexto oportunista opcional (Módulo 16, RF-01.2 y RF-03.1). La raíz sigue
         // siendo el array de paradas cuando el cliente no lo pide: los contratos de los
         // Módulos 03, 07, 11 y 15 no pueden cambiar de forma por una extensión.
@@ -360,6 +378,125 @@ class TechnicianController
                 $pendingStops
             ),
         ], 200);
+    }
+
+    /**
+     * Anexa `van_stock_readiness` a cada parada de la ruta (Módulo 23).
+     *
+     * El calculador es puro y recibe las solicitudes `PENDING` de cada avería y
+     * el saldo de la furgoneta del técnico autenticado. Los saldos se leen con el
+     * `user_id` del token —nunca con un identificador de la petición— y el
+     * resultado no escribe ni cambia el estado de la avería (Art. V.4, C5).
+     *
+     * Con un doble de prueba sin base de datos la parada publica
+     * `NOT_APPLICABLE`: la insignia es informativa y no puede tumbar la ruta.
+     *
+     * @param list<array<string, mixed>> $stops Paradas ya compuestas.
+     * @param int $technicianId Técnico autenticado.
+     * @return list<array<string, mixed>>
+     */
+    private function withVanStockReadiness(array $stops, int $technicianId): array
+    {
+        if ($stops === []) {
+            return $stops;
+        }
+
+        $rows = [];
+        foreach ($stops as $stop) {
+            $rows[] = [
+                'incident_id' => (int)($stop['id'] ?? 0),
+                'status' => (string)($stop['status'] ?? ''),
+                'assigned_technician_id' => $technicianId,
+            ];
+        }
+
+        $pendingRequestsByIncident = [];
+        $vanStockByTechnicianAndPart = [];
+
+        if ($this->hasVanStockReadinessSources()) {
+            foreach ($rows as $row) {
+                if (!in_array($row['status'], VanStockReadinessCalculator::ACTIVE_INCIDENT_STATUSES, true)) {
+                    continue;
+                }
+
+                foreach ($this->sparePartRequests()->findByIncidentId($row['incident_id']) as $request) {
+                    if ($request->getStatus() !== SparePartRequestStatus::PENDING) {
+                        continue;
+                    }
+
+                    $sparePartId = $request->getSparePartId();
+                    if ($sparePartId === null) {
+                        $pendingRequestsByIncident[$row['incident_id']]['out_of_catalog'] =
+                            ($pendingRequestsByIncident[$row['incident_id']]['out_of_catalog'] ?? 0) + 1;
+                        continue;
+                    }
+
+                    $pendingRequestsByIncident[$row['incident_id']]['catalog'][$sparePartId] =
+                        ($pendingRequestsByIncident[$row['incident_id']]['catalog'][$sparePartId] ?? 0)
+                        + $request->getQuantity();
+                }
+            }
+
+            foreach ($this->vanStock()->listByTechnician($technicianId) as $item) {
+                $vanStockByTechnicianAndPart[$item->technicianId][$item->sparePartId] = $item->quantityAvailable;
+            }
+        }
+
+        $readiness = (new VanStockReadinessCalculator())->calculate(
+            $rows,
+            $pendingRequestsByIncident,
+            $vanStockByTechnicianAndPart
+        );
+
+        foreach ($stops as $index => $stop) {
+            $stops[$index]['van_stock_readiness'] = $readiness[(int)($stop['id'] ?? 0)]
+                ?? $this->notApplicableVanStockReadiness();
+        }
+
+        return $stops;
+    }
+
+    /**
+     * ¿Hay fuente de datos para la insignia? El adaptador PDO de expedientes
+     * implica el motor vivo; un doble de prueba sólo enciende la lectura si la
+     * suite inyecta expresamente los dos repositorios de apoyo.
+     */
+    private function hasVanStockReadinessSources(): bool
+    {
+        return ($this->sparePartRequestRepo !== null && $this->vanStockRepo !== null)
+            || $this->incidentRepo instanceof PdoIncidentRepository;
+    }
+
+    private function sparePartRequests(): SparePartRequestRepositoryInterface
+    {
+        return $this->sparePartRequestRepo ??= new PdoSparePartRequestRepository();
+    }
+
+    private function vanStock(): VanStockRepositoryInterface
+    {
+        return $this->vanStockRepo ??= new PdoVanStockRepository();
+    }
+
+    /**
+     * Descriptor neutro para una parada sin datos de cobertura.
+     *
+     * @return array{
+     *   status: string,
+     *   badge_label: null,
+     *   covered_references: int,
+     *   total_catalog_references: int,
+     *   has_out_of_catalog_requests: bool
+     * }
+     */
+    private function notApplicableVanStockReadiness(): array
+    {
+        return [
+            'status' => VanStockReadinessCalculator::STATUS_NOT_APPLICABLE,
+            'badge_label' => null,
+            'covered_references' => 0,
+            'total_catalog_references' => 0,
+            'has_out_of_catalog_requests' => false,
+        ];
     }
 
     /**

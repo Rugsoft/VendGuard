@@ -178,7 +178,7 @@
 
 ## Fase 6: Controladores REST, Router, Privacidad y Suites de Integración HTTP
 
-- [ ] **T-RESTOCK-10 · Controladores `CoordinatorVanRestockOrderController`, extensión de `TechnicianVanStockController`, enriquecimiento de tarjetas de avería y rutas en `AppRouter`**
+- [x] **T-RESTOCK-10 · Controladores `CoordinatorVanRestockOrderController`, extensión de `TechnicianVanStockController`, enriquecimiento de tarjetas de avería y rutas en `AppRouter`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-RESTOCK-04`, `T-RESTOCK-08`
   * **Ficheros a crear o modificar:**
