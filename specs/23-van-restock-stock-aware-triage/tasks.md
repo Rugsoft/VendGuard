@@ -132,7 +132,7 @@
 
 ## Fase 4: Capa de Infraestructura y Repositorio PDO de Órdenes de Carga
 
-- [ ] **T-RESTOCK-07 · Implementación de `PdoVanRestockOrderRepository`**
+- [x] **T-RESTOCK-07 · Implementación de `PdoVanRestockOrderRepository`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-RESTOCK-03`
   * **Ficheros a crear o modificar:**
