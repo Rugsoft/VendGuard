@@ -149,7 +149,7 @@
 
 ## Fase 5: Servicio de Aplicación de Órdenes de Carga y Pruebas Unitarias
 
-- [ ] **T-RESTOCK-08 · Servicio `VanRestockOrderService` y suite `VanRestockOrderProposalTest`**
+- [x] **T-RESTOCK-08 · Servicio `VanRestockOrderService` y suite `VanRestockOrderProposalTest`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-RESTOCK-07`
   * **Ficheros a crear o modificar:**
