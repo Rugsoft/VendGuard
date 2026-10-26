@@ -24,7 +24,12 @@ use JsonSerializable;
  *    explican el contexto —escalado sanitario y zona desatendida— y la frase que se
  *    muestra al coordinador.
  *  - `ranked_technicians`: el ranking completo con el desglose exacto de la
- *    puntuación, la carga viva y la distancia de referencia de cada técnico.
+ *    puntuación, la carga viva y la distancia de referencia de cada técnico. Cuando
+ *    la foto trae el contexto de furgoneta (Módulo 23), cada fila añade además el
+ *    bloque de solo lectura `van_stock_match` y, si procede, su insignia de
+ *    cobertura en `badges`. Ese bloque **no** participa en `total_score` ni en el
+ *    orden: es información para el coordinador, nunca un criterio de prelación
+ *    (`D2`, Art. II).
  *
  * La identidad contable se comprueba en el constructor (Fail-Fast): si la
  * recomendación no coincide con la primera fila del ranking, el panel mostraría
@@ -35,6 +40,15 @@ use JsonSerializable;
  */
 final readonly class SuggestedTechnicianDto implements JsonSerializable
 {
+    /** Insignia de cobertura completa de repuestos en la furgoneta (`RF-06.2`). */
+    public const BADGE_STOCK_COMPATIBLE = 'STOCK_COMPATIBLE';
+
+    /** Insignia de cobertura parcial (`RF-06.2`, `C1`). */
+    public const BADGE_STOCK_PARCIAL = 'STOCK_PARCIAL';
+
+    /** Insignia de ausencia de repuestos compatibles en la furgoneta (`RF-06.1`). */
+    public const BADGE_SIN_STOCK_COMPATIBLE = 'SIN_STOCK_COMPATIBLE';
+
     /**
      * @param array<string, mixed> $incident Bloque de la avería.
      * @param array<string, mixed> $recommendation Bloque de la recomendación.

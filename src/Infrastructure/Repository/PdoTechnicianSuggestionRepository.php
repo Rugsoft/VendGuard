@@ -15,20 +15,28 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * PdoTechnicianSuggestionRepository
  *
  * Lectura del recomendador de asignación contra PostgreSQL (Módulo 17, RF-04 a
- * RF-06). Compone la foto operativa en **cinco viajes fijos**, independientes del
- * número de técnicos del parque:
+ * RF-06, enriquecido por el Módulo 23). Compone la foto operativa en **ocho
+ * viajes fijos**, independientes del número de técnicos del parque:
  *
- *   1. la avería con su sede, su zona y el tipo de máquina;
+ *   1. la avería con su sede, su zona, su tipo de máquina, su modelo y su categoría;
  *   2. la base central de ruta (`route_settings`);
  *   3. los técnicos activos con su afinidad territorial viva;
  *   4. las paradas vivas (y las resueltas de hoy) de esos técnicos;
- *   5. los preventivos de hoy de esos técnicos.
+ *   5. los preventivos de hoy de esos técnicos;
+ *   6. las solicitudes `PENDING` de la avería (referencias y fuera de catálogo);
+ *   7. el universo de repuestos activos compatibles con el modelo y la categoría;
+ *   8. los saldos de furgoneta de los candidatos para esas piezas.
  *
- * El N+1 se evita agrupando en PHP las dos últimas consultas, que llegan
- * acotadas al conjunto de candidatos: la carga de trabajo de un técnico son sus
- * paradas vivas —unas pocas—, no su histórico completo. Se prefiere agregar en
- * PHP, y no con subconsultas correlacionadas por técnico, porque así el SQL se
- * lee como lo que consulta y no como una máquina de estados de contadores.
+ * El N+1 se evita agrupando en PHP las consultas por candidato, que llegan
+ * acotadas al conjunto de candidatos y al de piezas relevantes: la carga de
+ * trabajo de un técnico son sus paradas vivas —unas pocas—, no su histórico
+ * completo. Se prefiere agregar en PHP, y no con subconsultas correlacionadas por
+ * técnico, porque así el SQL se lee como lo que consulta y no como una máquina de
+ * estados de contadores.
+ *
+ * El cruce de furgoneta es **solo lectura**: ninguna de estas consultas escribe,
+ * abre transacción ni cambia el estado de la avería, y el coste del repuesto no
+ * sale del catálogo (`Art. V.4`).
  *
  * Las consultas no escriben, no abren transacción y no leen el reloj del proceso:
  * la ventana «hoy» la resuelve el motor (`CURRENT_DATE`), de modo que dos
@@ -47,6 +55,19 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
 
     /** Estados preventivos que consumen el día del técnico (contrato §4.1). */
     private const PREVENTIVE_STATUSES = ['IN_INSPECTION', 'SCHEDULED'];
+
+    /**
+     * Mapeo de la categoría de la avería a la categoría del catálogo de repuestos
+     * (Módulo 23, contrato §3.2). `OTHER` no filtra: cualquier categoría compatible
+     * con el modelo vale.
+     */
+    private const INCIDENT_CATEGORY_TO_PART_CATEGORY = [
+        'TEMPERATURE_COLD' => 'THERMAL',
+        'PAYMENT_SYSTEM' => 'PAYMENT_SYSTEM',
+        'PRODUCT_JAM' => 'MECHANICAL',
+        'ELECTRICAL_OFF' => 'ELECTRONIC',
+        'OTHER' => null,
+    ];
 
     private PDO $pdo;
 
@@ -82,6 +103,13 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
         $stopsByTechnician = $this->findStopRows($technicianIds);
         $preventiveByTechnician = $this->findPreventiveCounts($technicianIds);
 
+        $pendingRequests = $this->findPendingRequests($incidentId);
+        $compatibleParts = $this->findCompatibleParts($incident['machine_model'], $incident['category']);
+        $vanStockByTechnician = $this->findVanStockForCandidates(
+            $technicianIds,
+            $this->relevantSparePartIds($pendingRequests['catalog'], $compatibleParts)
+        );
+
         $rows = [];
         foreach ($technicians as $technician) {
             $technicianId = $technician['technician_id'];
@@ -90,7 +118,8 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
                 $stopsByTechnician[$technicianId] ?? [],
                 $preventiveByTechnician[$technicianId] ?? 0,
                 $targetLocationId,
-                $zoneId
+                $zoneId,
+                $vanStockByTechnician[$technicianId] ?? []
             );
         }
 
@@ -100,6 +129,11 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
                 'ticket_code' => $incident['ticket_code'],
                 'priority' => $incident['priority'],
                 'machine_type' => $incident['machine_type'],
+                'category' => $incident['category'],
+                'machine_model' => $incident['machine_model'],
+                'pending_catalog_requests' => $pendingRequests['catalog'],
+                'has_pending_out_of_catalog_requests' => $pendingRequests['has_out_of_catalog'],
+                'compatible_parts' => $compatibleParts,
                 'location' => $location,
             ],
             'technicians' => $rows,
@@ -125,6 +159,7 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
                 i.id,
                 i.ticket_code,
                 i.urgency,
+                i.category,
                 i.location_id,
                 l.site_code AS location_site_code,
                 l.name AS location_name,
@@ -133,7 +168,8 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
                 l.latitude AS location_latitude,
                 l.longitude AS location_longitude,
                 z.name AS zone_name,
-                COALESCE(m.machine_type, i.machine_type_snapshot) AS machine_type
+                COALESCE(m.machine_type, i.machine_type_snapshot) AS machine_type,
+                m.model AS machine_model
             FROM incidents i
             LEFT JOIN locations l ON l.id = i.location_id
             LEFT JOIN operational_zones z ON z.id = l.zone_id
@@ -153,12 +189,17 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
         }
 
         $machineType = $row['machine_type'] !== null ? (string)$row['machine_type'] : null;
+        $machineModel = isset($row['machine_model']) && $row['machine_model'] !== null
+            ? trim((string)$row['machine_model'])
+            : null;
 
         return [
             'id' => (int)$row['id'],
             'ticket_code' => (string)$row['ticket_code'],
             'priority' => strtoupper((string)$row['urgency']),
             'machine_type' => $machineType,
+            'category' => $row['category'] !== null ? strtoupper((string)$row['category']) : null,
+            'machine_model' => $machineModel !== null && $machineModel !== '' ? $machineModel : null,
             'location' => [
                 'id' => $row['location_id'] !== null ? (int)$row['location_id'] : null,
                 'site_code' => $row['location_site_code'] !== null ? (string)$row['location_site_code'] : null,
@@ -392,10 +433,195 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
     }
 
     /**
+     * Solicitudes `PENDING` de la avería (Módulo 23, contrato §3.2).
+     *
+     * Una sola consulta devuelve las referencias catalogadas con su cantidad
+     * acumulada y cuántas filas fuera de catálogo hay: el caso de uso distingue
+     * ambas cosas sin un segundo viaje.
+     *
+     * @return array{catalog: array<int, int>, has_out_of_catalog: bool}
+     */
+    private function findPendingRequests(int $incidentId): array
+    {
+        $sql = "
+            SELECT
+                spare_part_id,
+                SUM(quantity) AS requested_qty,
+                SUM(CASE WHEN spare_part_id IS NULL THEN 1 ELSE 0 END) AS out_of_catalog_rows
+            FROM spare_part_requests
+            WHERE incident_id = :incident_id
+              AND status = 'PENDING'
+            GROUP BY spare_part_id
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':incident_id', $incidentId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $catalog = [];
+        $hasOutOfCatalog = false;
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if ($row['spare_part_id'] === null) {
+                $hasOutOfCatalog = (int)($row['out_of_catalog_rows'] ?? 0) > 0;
+                continue;
+            }
+
+            $catalog[(int)$row['spare_part_id']] = (int)($row['requested_qty'] ?? 0);
+        }
+
+        return ['catalog' => $catalog, 'has_out_of_catalog' => $hasOutOfCatalog];
+    }
+
+    /**
+     * Universo de repuestos activos compatibles con el modelo y la categoría del
+     * fallo (Módulo 23, contrato §3.2).
+     *
+     * La categoría de la avería se traduce aquí al vocabulario del catálogo; `OTHER`
+     * —y una categoría ausente— no filtra por categoría. Sin modelo de máquina no hay
+     * compatibilidad que consultar y el universo es vacío: el caso de uso lo trata
+     * como «sin repuestos catalogados para este modelo».
+     *
+     * @return list<array{spare_part_id: int, part_code: string, part_name: string, category: string}>
+     */
+    private function findCompatibleParts(?string $machineModel, ?string $incidentCategory): array
+    {
+        if ($machineModel === null || trim($machineModel) === '') {
+            return [];
+        }
+
+        $partCategory = self::sparePartCategoryFor($incidentCategory);
+
+        $sql = "
+            SELECT DISTINCT
+                sp.id AS spare_part_id,
+                sp.part_code,
+                sp.name AS part_name,
+                sp.category
+            FROM spare_parts sp
+            INNER JOIN spare_part_compatibilities spc
+                    ON spc.spare_part_id = sp.id
+                   AND spc.is_active = " . $this->dialect->booleanLiteral(true) . "
+                   AND spc.deleted_at IS NULL
+                   AND TRIM(LOWER(spc.machine_model)) = TRIM(LOWER(:machine_model))
+            WHERE sp.is_active = " . $this->dialect->booleanLiteral(true) . "
+              AND sp.deleted_at IS NULL
+        ";
+
+        // Vocabulario cerrado del repositorio, nunca dato del cliente.
+        if ($partCategory !== null) {
+            $sql .= " AND sp.category = '" . $partCategory . "'";
+        }
+
+        $sql .= ' ORDER BY sp.part_code ASC, sp.id ASC';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':machine_model', trim($machineModel), PDO::PARAM_STR);
+        $stmt->execute();
+
+        $parts = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $parts[] = [
+                'spare_part_id' => (int)$row['spare_part_id'],
+                'part_code' => (string)$row['part_code'],
+                'part_name' => (string)$row['part_name'],
+                'category' => (string)$row['category'],
+            ];
+        }
+
+        return $parts;
+    }
+
+    /**
+     * Saldos de furgoneta de los candidatos para las piezas relevantes.
+     *
+     * «Relevantes» son las solicitadas en la avería y las del universo compatible:
+     * el cruce de nivel 1 y el de nivel 2 se resuelven con este único viaje.
+     *
+     * @param list<int> $technicianIds
+     * @param list<int> $sparePartIds
+     * @return array<int, array<int, int>> técnico => pieza => unidades
+     */
+    private function findVanStockForCandidates(array $technicianIds, array $sparePartIds): array
+    {
+        if ($technicianIds === [] || $sparePartIds === []) {
+            return [];
+        }
+
+        $technicianPlaceholders = [];
+        $partPlaceholders = [];
+        $params = [];
+
+        foreach ($technicianIds as $index => $technicianId) {
+            $key = ':stock_tech_' . $index;
+            $technicianPlaceholders[] = $key;
+            $params[$key] = $technicianId;
+        }
+        foreach ($sparePartIds as $index => $sparePartId) {
+            $key = ':stock_part_' . $index;
+            $partPlaceholders[] = $key;
+            $params[$key] = $sparePartId;
+        }
+
+        $sql = "
+            SELECT technician_id, spare_part_id, quantity_available
+            FROM technician_van_stocks
+            WHERE technician_id IN (" . implode(', ', $technicianPlaceholders) . ")
+              AND spare_part_id IN (" . implode(', ', $partPlaceholders) . ")
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        $stock = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $stock[(int)$row['technician_id']][(int)$row['spare_part_id']] = (int)$row['quantity_available'];
+        }
+
+        return $stock;
+    }
+
+    /**
+     * Unión de las piezas solicitadas en la avería y las compatibles con el modelo.
+     *
+     * @param array<int, int> $pendingCatalogRequests
+     * @param list<array{spare_part_id: int}> $compatibleParts
+     * @return list<int>
+     */
+    private function relevantSparePartIds(array $pendingCatalogRequests, array $compatibleParts): array
+    {
+        $ids = array_map('intval', array_keys($pendingCatalogRequests));
+        foreach ($compatibleParts as $part) {
+            $ids[] = (int)$part['spare_part_id'];
+        }
+
+        $ids = array_values(array_unique($ids));
+        sort($ids, SORT_NUMERIC);
+
+        return $ids;
+    }
+
+    /**
+     * Traduce la categoría de la avería al vocabulario de `spare_parts.category`
+     * (contrato §3.2). Una categoría desconocida no filtra, igual que `OTHER`.
+     */
+    private static function sparePartCategoryFor(?string $incidentCategory): ?string
+    {
+        if ($incidentCategory === null) {
+            return null;
+        }
+
+        return self::INCIDENT_CATEGORY_TO_PART_CATEGORY[strtoupper(trim($incidentCategory))] ?? null;
+    }
+
+    /**
      * Proyecta un técnico a la foto que consume el caso de uso.
      *
      * @param array<string, mixed> $technician
      * @param list<array<string, mixed>> $stops
+     * @param array<int, int> $vanStock Saldo por pieza de la furgoneta del candidato.
      * @return array<string, mixed>
      */
     private function projectTechnician(
@@ -403,7 +629,8 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
         array $stops,
         int $preventiveOrdersToday,
         ?int $targetLocationId,
-        ?int $zoneId
+        ?int $zoneId,
+        array $vanStock = []
     ): array {
         $activeIncidents = 0;
         $pendingInfo = 0;
@@ -472,6 +699,7 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
             'last_completed_location' => $this->referenceFrom($lastCompleted),
             'shift_status' => $technician['shift_status'] ?? null,
             'active_absence' => $technician['active_absence'] ?? null,
+            'van_stock' => $vanStock,
         ];
     }
 

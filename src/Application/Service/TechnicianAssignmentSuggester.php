@@ -59,6 +59,18 @@ use VendGuard\Core\Service\TechnicianWorkloadScorer;
  * disponible con el motivo «Fuera de turno» y se relega al final (RF-08.1–RF-08.3),
  * salvo que sea guardia 24/7 en una emergencia de frío (RF-08.5 / R6).
  *
+ * CRUCE INFORMATIVO DE FURGONETA (Módulo 23, `D2`, `C1`, `QA 2`)
+ *
+ * Cuando la foto incluye el contexto de furgoneta —las solicitudes `PENDING` de la
+ * avería y el universo de repuestos compatibles— cada candidato recibe además el
+ * bloque `van_stock_match` y, si procede, una insignia de cobertura en `badges`.
+ * El evaluador mira primero las referencias exactas solicitadas y, si no hay
+ * ninguna, la compatibilidad por modelo y categoría. **No entra en el comparador,
+ * no altera `total_score` ni `score_breakdown` y no toca el escalado sanitario del
+ * Art. II**: es información para decidir, no un criterio de prelación. Una foto sin
+ * ese contexto (por ejemplo, la de una suite del Módulo 17) conserva exactamente la
+ * forma anterior, sin el bloque.
+ *
  * FORMA DE LA FOTO
  *
  *   $incident = [
@@ -109,6 +121,24 @@ final class TechnicianAssignmentSuggester
 
     /** Insignia de técnico no disponible (RF-08.3, Módulo 21). */
     public const BADGE_NOT_AVAILABLE = 'NO_DISPONIBLE';
+
+    /** Nivel de evaluación del cruce: referencias solicitadas en la avería (`QA 2`). */
+    public const VAN_STOCK_LEVEL_EXPLICIT_REQUESTS = 'EXPLICIT_REQUESTS';
+
+    /** Nivel de evaluación del cruce: compatibilidad por modelo y categoría (`C1`). */
+    public const VAN_STOCK_LEVEL_CATEGORY_COMPATIBILITY = 'CATEGORY_COMPATIBILITY';
+
+    /** Cobertura completa del nivel evaluado. */
+    public const VAN_STOCK_FULL_MATCH = 'FULL_MATCH';
+
+    /** Cobertura parcial del nivel evaluado. */
+    public const VAN_STOCK_PARTIAL_MATCH = 'PARTIAL_MATCH';
+
+    /** Sin unidades de las referencias evaluadas. */
+    public const VAN_STOCK_NO_STOCK = 'NO_STOCK';
+
+    /** No hay nada que evaluar en furgoneta (solo fuera de catálogo o catálogo vacío). */
+    public const VAN_STOCK_NOT_APPLICABLE = 'NOT_APPLICABLE';
 
     /**
      * Cupo de paradas vivas por técnico para considerar desatendida la zona
@@ -186,6 +216,12 @@ final class TechnicianAssignmentSuggester
 
         $hasOnCall = array_filter($candidates, static fn (array $candidate): bool => $candidate['is_on_call']) !== [];
 
+        // Módulo 23: el cruce de furgoneta sólo se evalúa si la foto lo trae. Sin
+        // contexto, la forma del ranking permanece intacta (D2, retrocompatibilidad).
+        $vanStockContext = self::hasVanStockContext($incident)
+            ? self::normalizeVanStockContext($incident)
+            : null;
+
         $rows = [];
         foreach ($candidates as $candidate) {
             $breakdown = TechnicianWorkloadScorer::computeBreakdown([
@@ -216,7 +252,7 @@ final class TechnicianAssignmentSuggester
 
         $ranked = [];
         foreach ($rows as $index => $row) {
-            $ranked[] = $this->projectRow($row, $index === 0);
+            $ranked[] = $this->projectRow($row, $index === 0, $vanStockContext);
         }
 
         $top = $ranked[0] ?? null;
@@ -303,10 +339,15 @@ final class TechnicianAssignmentSuggester
     /**
      * Proyección de una fila al contrato del ranking (§3.6).
      *
+     * El bloque `van_stock_match` se añade al final, cuando la foto trae contexto
+     * de furgoneta, y su insignia se suma a `badges`. Ni el bloque ni la insignia
+     * participan en la puntuación ni en el orden: la fila ya viene ordenada.
+     *
      * @param array<string, mixed> $row
+     * @param array<string, mixed>|null $vanStockContext Contexto normalizado de furgoneta, o `null`.
      * @return array<string, mixed>
      */
-    private function projectRow(array $row, bool $isTop): array
+    private function projectRow(array $row, bool $isTop, ?array $vanStockContext = null): array
     {
         $technician = $row['technician'];
         $affinity = $technician['affinity'];
@@ -330,6 +371,14 @@ final class TechnicianAssignmentSuggester
             $badges[] = self::BADGE_NOT_AVAILABLE;
         }
 
+        $vanStockMatch = null;
+        if ($vanStockContext !== null) {
+            $vanStockMatch = self::evaluateVanStockMatch($vanStockContext, $technician['van_stock']);
+            if ($vanStockMatch['badge'] !== null) {
+                $badges[] = $vanStockMatch['badge'];
+            }
+        }
+
         $currentStatus = [
             'has_in_progress_stop' => $technician['in_progress_location'] !== null,
             'in_progress_location_name' => $technician['in_progress_location']['location_name'] ?? null,
@@ -342,7 +391,7 @@ final class TechnicianAssignmentSuggester
             $currentStatus['shift_status'] = $technician['shift_status'];
         }
 
-        return [
+        $projection = [
             'technician_id' => $technician['technician_id'],
             'name' => $technician['name'],
             'operator_code' => $technician['operator_code'],
@@ -360,6 +409,341 @@ final class TechnicianAssignmentSuggester
             'is_top_suggestion' => $isTop,
             'badges' => $badges,
         ];
+
+        if ($vanStockMatch !== null) {
+            $projection['van_stock_match'] = $vanStockMatch;
+        }
+
+        return $projection;
+    }
+
+    /**
+     * ¿La foto declara el contexto de furgoneta del Módulo 23?
+     *
+     * Se exige al menos una de sus claves para no confundir una foto antigua con
+     * una furgoneta vacía: sin contexto no se evalúa ni se emite el bloque.
+     *
+     * @param array<string, mixed> $incident
+     */
+    private static function hasVanStockContext(array $incident): bool
+    {
+        return array_key_exists('pending_catalog_requests', $incident)
+            || array_key_exists('has_pending_out_of_catalog_requests', $incident)
+            || array_key_exists('compatible_parts', $incident);
+    }
+
+    /**
+     * Normaliza el contexto de furgoneta de la avería (§3.2 del contrato).
+     *
+     * Descarta cantidades no positivas y piezas repetidas, y valida en voz alta los
+     * datos ilegibles: un cruce silencioso con una pieza ignorada pintaría una
+     * cobertura falsa.
+     *
+     * @param array<string, mixed> $incident
+     * @return array{
+     *   pending_catalog_requests: array<int, int>,
+     *   has_pending_out_of_catalog_requests: bool,
+     *   compatible_part_ids: list<int>
+     * }
+     */
+    private static function normalizeVanStockContext(array $incident): array
+    {
+        $rawCatalog = $incident['pending_catalog_requests'] ?? [];
+        if (!is_array($rawCatalog)) {
+            throw new InvalidArgumentException(
+                'Las solicitudes pendientes de la avería deben llegar como mapa de pieza a cantidad.'
+            );
+        }
+
+        $catalog = [];
+        foreach ($rawCatalog as $sparePartId => $quantity) {
+            if (!is_numeric($sparePartId) || !is_numeric($quantity)) {
+                throw new InvalidArgumentException(
+                    'Las solicitudes pendientes contienen una pieza o una cantidad ilegible.'
+                );
+            }
+
+            if ((int)$sparePartId <= 0 || (int)$quantity <= 0) {
+                continue;
+            }
+
+            $catalog[(int)$sparePartId] = (int)$quantity;
+        }
+
+        $rawCompatible = $incident['compatible_parts'] ?? [];
+        if (!is_array($rawCompatible)) {
+            throw new InvalidArgumentException(
+                'El universo de repuestos compatibles debe llegar como lista de referencias.'
+            );
+        }
+
+        $compatiblePartIds = [];
+        foreach ($rawCompatible as $part) {
+            if (!is_array($part) || !isset($part['spare_part_id']) || !is_numeric($part['spare_part_id'])) {
+                throw new InvalidArgumentException(
+                    'El universo de repuestos compatibles contiene una referencia ilegible.'
+                );
+            }
+
+            $compatiblePartIds[] = (int)$part['spare_part_id'];
+        }
+
+        return [
+            'pending_catalog_requests' => $catalog,
+            'has_pending_out_of_catalog_requests' => self::readFlag(
+                $incident,
+                'has_pending_out_of_catalog_requests',
+                false
+            ),
+            'compatible_part_ids' => array_values(array_unique($compatiblePartIds)),
+        ];
+    }
+
+    /**
+     * Cruce puro de stock en 2 niveles (§3.2, `D2`, `C1`, `QA 2`).
+     *
+     * Nivel 1: si la avería tiene solicitudes `PENDING`, cuenta cuántas
+     * referencias catalogadas cubre el técnico. Una solicitud fuera de catálogo
+     * degrada la cobertura completa a parcial —no es verificable en furgoneta— y,
+     * si es la única, deja el bloque en no aplicable con su aviso.
+     *
+     * Nivel 2: sin solicitudes, cuenta cuántas referencias compatibles con el
+     * modelo y la categoría del fallo lleva el técnico con al menos una unidad.
+     *
+     * Los saldos negativos valen `0`. El resultado no altera las puntuaciones: es
+     * una lectura informativa.
+     *
+     * @param array{
+     *   pending_catalog_requests: array<int, int>,
+     *   has_pending_out_of_catalog_requests: bool,
+     *   compatible_part_ids: list<int>
+     * } $context
+     * @param array<int, int> $technicianStock Saldo por pieza del candidato.
+     * @return array{
+     *   status: string,
+     *   evaluation_level: string,
+     *   badge: string|null,
+     *   matched_references: int,
+     *   total_references: int,
+     *   has_out_of_catalog_requests: bool,
+     *   label: string|null
+     * }
+     */
+    public static function evaluateVanStockMatch(array $context, array $technicianStock): array
+    {
+        $catalog = $context['pending_catalog_requests'] ?? [];
+        $hasOutOfCatalog = (bool)($context['has_pending_out_of_catalog_requests'] ?? false);
+        $totalCatalogReferences = count($catalog);
+
+        if ($totalCatalogReferences > 0 || $hasOutOfCatalog) {
+            $matchedReferences = 0;
+            foreach ($catalog as $sparePartId => $requestedQty) {
+                if (self::availableInVan($technicianStock, (int)$sparePartId) >= (int)$requestedQty) {
+                    $matchedReferences++;
+                }
+            }
+
+            // Sólo solicitudes fuera de catálogo: no hay referencia verificable.
+            if ($totalCatalogReferences === 0) {
+                return self::vanStockMatchRow(
+                    self::VAN_STOCK_NOT_APPLICABLE,
+                    self::VAN_STOCK_LEVEL_EXPLICIT_REQUESTS,
+                    null,
+                    0,
+                    0,
+                    true,
+                    'Solicitud fuera de catálogo (no verificable en furgoneta)'
+                );
+            }
+
+            $suffix = $hasOutOfCatalog ? ' + pieza fuera de catálogo' : '';
+
+            if ($matchedReferences === $totalCatalogReferences) {
+                if (!$hasOutOfCatalog) {
+                    return self::vanStockMatchRow(
+                        self::VAN_STOCK_FULL_MATCH,
+                        self::VAN_STOCK_LEVEL_EXPLICIT_REQUESTS,
+                        SuggestedTechnicianDto::BADGE_STOCK_COMPATIBLE,
+                        $matchedReferences,
+                        $totalCatalogReferences,
+                        false,
+                        sprintf('Repuesto solicitado en furgoneta (%d/%d ref.)', $matchedReferences, $totalCatalogReferences)
+                    );
+                }
+
+                return self::vanStockMatchRow(
+                    self::VAN_STOCK_PARTIAL_MATCH,
+                    self::VAN_STOCK_LEVEL_EXPLICIT_REQUESTS,
+                    SuggestedTechnicianDto::BADGE_STOCK_PARCIAL,
+                    $matchedReferences,
+                    $totalCatalogReferences,
+                    true,
+                    sprintf(
+                        'Repuesto solicitado parcial (%d/%d ref.%s)',
+                        $matchedReferences,
+                        $totalCatalogReferences,
+                        $suffix
+                    )
+                );
+            }
+
+            if ($matchedReferences >= 1) {
+                return self::vanStockMatchRow(
+                    self::VAN_STOCK_PARTIAL_MATCH,
+                    self::VAN_STOCK_LEVEL_EXPLICIT_REQUESTS,
+                    SuggestedTechnicianDto::BADGE_STOCK_PARCIAL,
+                    $matchedReferences,
+                    $totalCatalogReferences,
+                    $hasOutOfCatalog,
+                    sprintf(
+                        'Repuesto solicitado parcial (%d/%d ref.%s)',
+                        $matchedReferences,
+                        $totalCatalogReferences,
+                        $suffix
+                    )
+                );
+            }
+
+            return self::vanStockMatchRow(
+                self::VAN_STOCK_NO_STOCK,
+                self::VAN_STOCK_LEVEL_EXPLICIT_REQUESTS,
+                SuggestedTechnicianDto::BADGE_SIN_STOCK_COMPATIBLE,
+                0,
+                $totalCatalogReferences,
+                $hasOutOfCatalog,
+                sprintf('Sin repuesto solicitado en furgoneta (0/%d ref.%s)', $totalCatalogReferences, $suffix)
+            );
+        }
+
+        $compatiblePartIds = $context['compatible_part_ids'] ?? [];
+        $totalCompatibleReferences = count($compatiblePartIds);
+
+        if ($totalCompatibleReferences === 0) {
+            return self::vanStockMatchRow(
+                self::VAN_STOCK_NOT_APPLICABLE,
+                self::VAN_STOCK_LEVEL_CATEGORY_COMPATIBILITY,
+                null,
+                0,
+                0,
+                false,
+                null
+            );
+        }
+
+        $matchedCompatible = 0;
+        foreach ($compatiblePartIds as $sparePartId) {
+            if (self::availableInVan($technicianStock, (int)$sparePartId) >= 1) {
+                $matchedCompatible++;
+            }
+        }
+
+        if ($matchedCompatible === $totalCompatibleReferences) {
+            return self::vanStockMatchRow(
+                self::VAN_STOCK_FULL_MATCH,
+                self::VAN_STOCK_LEVEL_CATEGORY_COMPATIBILITY,
+                SuggestedTechnicianDto::BADGE_STOCK_COMPATIBLE,
+                $matchedCompatible,
+                $totalCompatibleReferences,
+                false,
+                sprintf('Stock compatible (%d/%d ref.)', $matchedCompatible, $totalCompatibleReferences)
+            );
+        }
+
+        if ($matchedCompatible >= 1) {
+            return self::vanStockMatchRow(
+                self::VAN_STOCK_PARTIAL_MATCH,
+                self::VAN_STOCK_LEVEL_CATEGORY_COMPATIBILITY,
+                SuggestedTechnicianDto::BADGE_STOCK_PARCIAL,
+                $matchedCompatible,
+                $totalCompatibleReferences,
+                false,
+                sprintf('Stock compatible parcial (%d/%d ref.)', $matchedCompatible, $totalCompatibleReferences)
+            );
+        }
+
+        return self::vanStockMatchRow(
+            self::VAN_STOCK_NO_STOCK,
+            self::VAN_STOCK_LEVEL_CATEGORY_COMPATIBILITY,
+            SuggestedTechnicianDto::BADGE_SIN_STOCK_COMPATIBLE,
+            0,
+            $totalCompatibleReferences,
+            false,
+            sprintf('Sin stock compatible (0/%d ref.)', $totalCompatibleReferences)
+        );
+    }
+
+    /**
+     * Saldo de una pieza en la furgoneta; un descuadre negativo vale `0`.
+     *
+     * @param array<int, int> $technicianStock
+     */
+    private static function availableInVan(array $technicianStock, int $sparePartId): int
+    {
+        return max(0, (int)($technicianStock[$sparePartId] ?? 0));
+    }
+
+    /**
+     * Forma canónica del bloque `van_stock_match` (§5.12).
+     *
+     * @return array{
+     *   status: string,
+     *   evaluation_level: string,
+     *   badge: string|null,
+     *   matched_references: int,
+     *   total_references: int,
+     *   has_out_of_catalog_requests: bool,
+     *   label: string|null
+     * }
+     */
+    private static function vanStockMatchRow(
+        string $status,
+        string $evaluationLevel,
+        ?string $badge,
+        int $matchedReferences,
+        int $totalReferences,
+        bool $hasOutOfCatalogRequests,
+        ?string $label
+    ): array {
+        return [
+            'status' => $status,
+            'evaluation_level' => $evaluationLevel,
+            'badge' => $badge,
+            'matched_references' => $matchedReferences,
+            'total_references' => $totalReferences,
+            'has_out_of_catalog_requests' => $hasOutOfCatalogRequests,
+            'label' => $label,
+        ];
+    }
+
+    /**
+     * Saldo por pieza de la furgoneta del candidato.
+     *
+     * @return array<int, int>
+     */
+    private static function readVanStock(mixed $value): array
+    {
+        if (!is_array($value)) {
+            throw new InvalidArgumentException(
+                'El saldo de furgoneta del candidato debe ser un mapa de pieza a unidades.'
+            );
+        }
+
+        $stock = [];
+        foreach ($value as $sparePartId => $quantity) {
+            if (!is_numeric($sparePartId) || !is_numeric($quantity)) {
+                throw new InvalidArgumentException(
+                    'El saldo de furgoneta contiene una pieza o una cantidad ilegible.'
+                );
+            }
+
+            if ((int)$sparePartId <= 0) {
+                continue;
+            }
+
+            $stock[(int)$sparePartId] = (int)$quantity;
+        }
+
+        return $stock;
     }
 
     /**
@@ -570,6 +954,7 @@ final class TechnicianAssignmentSuggester
                 'last_completed_location'
             ),
             'last_assigned_at' => self::parseTimestamp($technician['last_assigned_at'] ?? null),
+            'van_stock' => self::readVanStock($technician['van_stock'] ?? []),
         ];
     }
 

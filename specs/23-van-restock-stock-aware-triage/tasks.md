@@ -102,7 +102,7 @@
 
 ## Fase 3: Cruce Informativo en 2 Niveles en Triaje (Módulo 17 + Módulo 18)
 
-- [ ] **T-RESTOCK-05 · Extensión de `PdoTechnicianSuggestionRepository`, `TechnicianAssignmentSuggester` y `SuggestedTechnicianDto` con cruce informativo en 2 niveles**
+- [x] **T-RESTOCK-05 · Extensión de `PdoTechnicianSuggestionRepository`, `TechnicianAssignmentSuggester` y `SuggestedTechnicianDto` con cruce informativo en 2 niveles**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-RESTOCK-04`
   * **Ficheros a crear o modificar:**
