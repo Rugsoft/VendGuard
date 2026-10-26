@@ -75,6 +75,16 @@ class AuditEvent implements JsonSerializable
     public const ENTITY_TECHNICIAN_VAN_STOCK = 'TECHNICIAN_VAN_STOCK';
 
     /**
+     * Orden de carga de furgoneta (Módulo 23, RF-01 a RF-05).
+     *
+     * El enumerado `audit_log.entity_type` admite este valor desde la migración
+     * 016 y el repositorio de órdenes lo escribe en cada transición. Sin la
+     * entrada en la whitelist, el historial completo de auditoría no podía
+     * hidratarse: el export del coordinador fallaba al reconstruir el evento.
+     */
+    public const ENTITY_VAN_RESTOCK_ORDER = 'VAN_RESTOCK_ORDER';
+
+    /**
      * Whitelist completa de tipos de entidad admitidos por el dominio.
      *
      * Debe coincidir exactamente con el enum `audit_log.entity_type` de la base
@@ -97,6 +107,7 @@ class AuditEvent implements JsonSerializable
         self::ENTITY_OPERATIONAL_ZONE,
         self::ENTITY_TECHNICIAN_ZONE,
         self::ENTITY_TECHNICIAN_VAN_STOCK,
+        self::ENTITY_VAN_RESTOCK_ORDER,
     ];
 
     /**

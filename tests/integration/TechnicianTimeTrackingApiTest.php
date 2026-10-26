@@ -632,10 +632,13 @@ try {
     $carlosShift = $shiftRepo->startShift($carlosId, new DateTimeImmutable('2026-09-30T08:00:00+02:00'));
     $shiftRepo->closeShift((int)$carlosShift->id(), $carlosId, 'Actividad fuera del rango del informe', new DateTimeImmutable('2026-09-30T16:00:00+02:00'));
 
+    // El rango cierra en el día real de la corrida: las sesiones que la propia
+    // suite crea con `$now` (turno de hoy y cierre forzado) deben entrar en el
+    // informe. Una fecha tope fija dejaba fuera esas sesiones al cambiar el día.
     $reportQuery = [
         'period' => 'custom',
         'from' => '2026-10-01',
-        'to' => '2026-10-25',
+        'to' => $now->format('Y-m-d'),
     ];
     $report = $api('GET', '/api/coordinator/metrics/work-hours', $coordToken, null, $reportQuery);
     $reportData = $report->getDecodedBody()['data'] ?? [];
@@ -655,7 +658,7 @@ try {
         '4.2 El filtro ecoa el rango personalizado y la zona operativa',
         ($reportData['filter']['period'] ?? '') === 'custom'
             && ($reportData['filter']['from_date'] ?? '') === '2026-10-01'
-            && ($reportData['filter']['to_date'] ?? '') === '2026-10-25'
+            && ($reportData['filter']['to_date'] ?? '') === $now->format('Y-m-d')
             && ($reportData['filter']['timezone'] ?? '') === 'Europe/Madrid'
     );
     $assert(
@@ -710,7 +713,7 @@ try {
             && str_starts_with((string)$export->getHeader('Content-Type'), 'text/csv')
             && str_contains(
                 (string)$export->getHeader('Content-Disposition'),
-                'vendguard_registro_jornada_20261001_20261025.csv'
+                'vendguard_registro_jornada_20261001_' . $now->format('Ymd') . '.csv'
             ),
         'status=' . $export->getStatusCode() . ' content-type=' . (string)$export->getHeader('Content-Type')
     );

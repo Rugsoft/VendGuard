@@ -343,7 +343,11 @@ $assert(
 
 echo "\n--- Grupo 3: proyección pública mínima y telemetría que hay que pedir ---\n";
 
-$publicProjection = $liveService->check(false)->toArray(false);
+// Una sola lectura alimenta la proyección y el DTO: dos sondas seguidas pueden
+// caer en segundos distintos y harían fallar la comparación por el sello UTC,
+// no por una fuga de telemetría.
+$publicDto = $liveService->check(false);
+$publicProjection = $publicDto->toArray(false);
 
 $assert(
     '3.1 La proyección pública declara exactamente `status` y `timestamp_utc`',
@@ -357,7 +361,7 @@ $assert(
     (string)$publicProjection['timestamp_utc']
 );
 
-$encodedDto = json_encode($liveService->check(false));
+$encodedDto = json_encode($publicDto);
 
 $assert(
     '3.3 Un `json_encode` despistado del DTO no puede publicar telemetría (lo seguro es el defecto)',

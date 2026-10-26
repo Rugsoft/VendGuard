@@ -65,7 +65,10 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   TECHNICIAN_ZONE: 'Cuadrante Técnico',
   // Entidad del Módulo 18: el saldo de la furgoneta se audita con tipo propio, y
   // el visor necesita su etiqueta o el filtro perdería esas filas del historial.
-  TECHNICIAN_VAN_STOCK: 'Stock de Furgoneta'
+  TECHNICIAN_VAN_STOCK: 'Stock de Furgoneta',
+  // Entidad del Módulo 23: cada transición de la orden de carga se audita con
+  // tipo propio, y el catálogo del visor debe cubrir el enumerado completo.
+  VAN_RESTOCK_ORDER: 'Orden de Carga de Furgoneta'
 });
 
 /**

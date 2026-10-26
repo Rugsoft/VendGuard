@@ -233,7 +233,7 @@
     5. Crear `tests/unit/VanRestockUiComponentsTest.mjs` verificando `data-testid`, ausencia de `reference_cost` en el Picking A4 y cumplimiento del trinquete de tokens CSS.
   * **Hecho cuando:** `node tests/unit/VanRestockUiComponentsTest.mjs`, `node tests/unit/CoordinatorButtonVariantsGuardTest.mjs` y `php tests/unit/DesignTokenDebtRatchetTest.php` pasan al 100 % en verde.
 
-- [ ] **T-RESTOCK-13 · Certificación Integral, Regresión Global y Cierre Documental**
+- [x] **T-RESTOCK-13 · Certificación Integral, Regresión Global y Cierre Documental**
   * **Tiempo estimado:** 20 min
   * **Dependencias previas:** `T-RESTOCK-12`
   * **Ficheros a crear o modificar:**
