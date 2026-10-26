@@ -39,6 +39,7 @@ Consecuencias normativas de esta autorización:
 Queda **fuera** de este módulo, y no debe implementarse ni diseñarse aquí:
 
 * **Albarán de reposición automática** desde Base Central hacia la furgoneta, y cualquier trasvase logístico de custodia física. Es una exclusión ya declarada en la spec aprobada de M2: [`specs/functional/spare_parts_spec.md`](../functional/spare_parts_spec.md) §167 *("No se generan albaranes logísticos de custodia física ni trasvases de furgoneta en esta fase")* y §173, [`specs/06-spare-parts/plan.md`](../06-spare-parts/plan.md) §306 y [`specs/technical/spare_parts_contracts.md`](../technical/spare_parts_contracts.md) §Art. VI. Incorporarlo exigiría **enmienda previa de la spec de M2** (Art. I + `AGENTS.md` §5.5), no una simple ampliación de este módulo.
+  > **Enmienda SDD (2026-10-26, Módulo 23):** El Product Owner autoriza la Fase 2 en [`specs/23-van-restock-stock-aware-triage/spec.md`](../23-van-restock-stock-aware-triage/spec.md), habilitando las órdenes de carga (`van_restock_orders`, `van_restock_order_items`), la Hoja de Carga Matutina (Picking A4 sin costes), la confirmación móvil (`CONFIRMED_BY_TECH`) y el cruce informativo en triaje (`TechnicianAssignmentSuggester`).
 * Órdenes de compra a proveedores, picking, gestión de almacenes físicos o ubicaciones en estanterías.
 * Valoración monetaria del inventario de furgoneta (no se almacena coste en el stock, ver RD-05).
 * Nuevas plantillas de notificación en el catálogo cerrado de `notification_template` (el aviso es una superficie de interfaz, no un canal).

@@ -171,7 +171,9 @@ En cumplimiento estricto del Artículo V.4 de la Constitución, los usuarios inf
 ## 7. Fuera de Alcance (Out of Scope)
 
 1. **Gestión integral de almacenes físicos y compras**: No se implementa gestión de órdenes de compra automáticas a proveedores, albaranes de entrega de logística ni control de ubicaciones físicas en estanterías de almacén.
+   > **Enmienda SDD (2026-10-26, Módulo 23):** El Product Owner autoriza en [`specs/23-van-restock-stock-aware-triage/spec.md`](../23-van-restock-stock-aware-triage/spec.md) las **Órdenes de Carga de Furgoneta** (`van_restock_orders` y `van_restock_order_items`) y la **Hoja de Carga Matutina (Picking A4)** sin costes desde Base Central hacia la furgoneta. Las compras a proveedores y la gestión de estanterías siguen fuera de alcance.
 2. **Control de stock en furgonetas en tiempo real**: No se realiza descuento dinámico de stock por inventario de furgoneta ni trasvase entre técnicos; se modela el catálogo con costes de referencia y registro de consumo.
+   > **Enmienda SDD (Módulos 18 y 23):** El inventario de furgoneta y el descuento automático quedaron autorizados e implementados en [`specs/18-van-stock/spec.md`](../18-van-stock/spec.md), y su reposición mediante órdenes de carga en [`specs/23-van-restock-stock-aware-triage/spec.md`](../23-van-restock-stock-aware-triage/spec.md).
 3. **Facturación a clientes por piezas**: No se generan facturas ni cargos a clientes por repuestos en garantía o fuera de garantía; el coste es analítico interno para el gestor del parque.
 4. **Trazabilidad logística de custodia individual de componentes en taller**: No se crea un submódulo de inventario para piezas reacondicionadas en taller central.
 
