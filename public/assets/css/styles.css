@@ -1,0 +1,251 @@
+/**
+ * VendGuard - Órdenes de carga y Albarán de Picking A4 (styles.css)
+ *
+ * Hoja de presentación del Módulo 23. El albarán se imprime con las reglas
+ * nativas de `@media print` y `window.print()`; no hay librería PDF ni
+ * dependencia externa (Art. IV).
+ *
+ * REGLAS QUE ESTA HOJA HACE CUMPLIR
+ *
+ * 1. En pantalla, el papel se lee como un documento técnico: cabecera de
+ *    identificación, tabla de líneas y bloque de firmas, con bordes hairline y
+ *    radio de tarjeta del sistema.
+ * 2. Al imprimir, solo queda el papel. La técnica de `visibility` funciona
+ *    dentro de un diálogo `position: fixed`, y la cadena de ancestros se vacía
+ *    para que no se añada una hoja en blanco por cada pantalla de aplicación
+ *    que haya detrás.
+ * 3. El documento no imprime dinero: no hay ninguna regla que pinte importes
+ *    porque el albarán no transporta ninguno (Art. V.4).
+ * 4. Todo el color entra por token (`var(--color-…)`); esta hoja no declara un
+ *    solo literal hexadecimal.
+ */
+
+.vg-picking-sheet {
+  padding: 16px;
+  color: var(--color-ink);
+  background-color: var(--color-surface-card);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-card);
+  font-family: var(--font-body);
+  font-size: var(--font-size-body-sm);
+  line-height: 1.45;
+}
+
+.vg-picking-sheet__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--color-ink);
+}
+
+.vg-picking-sheet__eyebrow {
+  font-size: var(--font-size-caption);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+
+.vg-picking-sheet__title {
+  margin: 4px 0 0;
+  font-family: var(--font-display);
+  font-size: var(--font-size-display-sm);
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--color-ink);
+}
+
+.vg-picking-sheet__subtitle {
+  margin: 4px 0 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-ink-muted);
+}
+
+.vg-picking-sheet__identity {
+  text-align: right;
+}
+
+.vg-picking-sheet__code {
+  font-family: var(--font-display);
+  font-size: var(--font-size-heading-lg);
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--color-ink);
+}
+
+.vg-picking-sheet__meta-line {
+  margin-top: 2px;
+  font-size: var(--font-size-caption);
+  color: var(--color-ink-secondary);
+}
+
+.vg-picking-sheet__meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.vg-picking-sheet__label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: var(--font-size-caption);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+
+.vg-picking-sheet__table {
+  width: 100%;
+  margin-top: 12px;
+  border-collapse: collapse;
+  font-size: var(--font-size-body-sm);
+}
+
+.vg-picking-sheet__table th,
+.vg-picking-sheet__table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--color-hairline);
+  text-align: left;
+  vertical-align: top;
+}
+
+.vg-picking-sheet__table thead th {
+  font-size: var(--font-size-caption);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-ink-secondary);
+  border-bottom: 1px solid var(--color-ink);
+}
+
+.vg-picking-sheet__table tfoot td {
+  font-weight: 700;
+  border-top: 1px solid var(--color-ink);
+  border-bottom: 0;
+}
+
+.vg-picking-sheet__number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.vg-picking-sheet__check {
+  width: 44px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--color-ink);
+}
+
+.vg-picking-sheet__code-cell {
+  font-family: monospace;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.vg-picking-sheet__notes {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-interactive);
+  background-color: var(--color-surface-2);
+}
+
+.vg-picking-sheet__notes p {
+  margin: 0;
+  font-size: var(--font-size-body-sm);
+  color: var(--color-ink-slate);
+}
+
+.vg-picking-sheet__signature {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin-top: 22px;
+}
+
+.vg-picking-sheet__signature-line {
+  margin-top: 28px;
+  border-bottom: 1px solid var(--color-ink);
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+
+  body {
+    background: none;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .vg-picking-sheet,
+  .vg-picking-sheet * {
+    visibility: visible;
+  }
+
+  .vg-picking-sheet {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    font-size: 10pt;
+    line-height: 1.4;
+  }
+
+  .vg-picking-sheet__table {
+    font-size: 9.5pt;
+  }
+
+  .vg-picking-sheet__table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .vg-picking-sheet__signature {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* `qr-print.css` oculta todos los botones y fondos de modal con
+     `display: none !important`. El albarán vive dentro de uno, así que la cadena
+     que lo contiene debe recuperar su caja y sus hermanos desaparecer. */
+  body:has(.vg-picking-sheet) .vg-modal-backdrop,
+  body:has(.vg-picking-sheet) .vg-modal {
+    display: block !important;
+    position: static !important;
+    inset: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    transform: none !important;
+  }
+
+  body:has(.vg-picking-sheet) > *:not(:has(.vg-picking-sheet)):not(.vg-picking-sheet),
+  body:has(.vg-picking-sheet) *:has(.vg-picking-sheet)
+    > *:not(:has(.vg-picking-sheet)):not(.vg-picking-sheet) {
+    display: none !important;
+  }
+}

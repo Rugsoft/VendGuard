@@ -212,7 +212,7 @@
 
 ## Fase 7: Interfaz Frontend Vanilla ES Modules, Picking A4 y Certificación Integral
 
-- [ ] **T-RESTOCK-12 · Componentes Frontend (`CoordinatorVanStockTab.js`, `TechnicianVanStockPanel.js`, `CoordinatorDashboardView.js`, `TechnicianRouteView.js`), Picking A4 y suite `VanRestockUiComponentsTest.mjs`**
+- [x] **T-RESTOCK-12 · Componentes Frontend (`CoordinatorVanStockTab.js`, `TechnicianVanStockPanel.js`, `CoordinatorDashboardView.js`, `TechnicianRouteView.js`), Picking A4 y suite `VanRestockUiComponentsTest.mjs`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-RESTOCK-11`
   * **Ficheros a crear o modificar:**

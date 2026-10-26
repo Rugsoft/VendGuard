@@ -1,32 +1,41 @@
 /**
  * VendGuard - TechnicianVanStockPanel Component (TechnicianVanStockPanel.js)
  *
- * Inventario de repuestos de la furgoneta del técnico autenticado (Módulo 18, RF-04.1).
+ * Inventario de repuestos de la furgoneta del técnico autenticado (Módulo 18,
+ * RF-04.1) y recepción móvil de la orden de carga (Módulo 23, RF-05.1 a RF-05.3).
  *
  * QUÉ PINTA Y QUÉ NO
  *
- * Pinta lo que el contrato §4.1 devuelve: código, nombre, categoría, cantidad disponible y la
- * insignia de bajo umbral. **No** pinta el umbral mínimo —no es un dato de la vista del técnico,
- * RF-04.1 lo excluye expresamente— ni ningún importe: el coste del repuesto vive congelado en la
- * línea de la avería y la sede no lo ve, así que la furgoneta tampoco (Art. V.4, RD-05).
+ * Pinta lo que el contrato §4.1 devuelve: código, nombre, categoría, cantidad
+ * disponible y la insignia de bajo umbral. **No** pinta el umbral mínimo —no es
+ * un dato de la vista del técnico, RF-04.1 lo excluye expresamente— ni ningún
+ * importe: el coste del repuesto vive congelado en la línea de la avería y la
+ * sede no lo ve, así que la furgoneta tampoco (Art. V.4, RD-05).
  *
- * Superficie de solo lectura. No hay aquí ni un control que mute el saldo: quien declara el stock
- * es la Coordinación (RF-01.1). El único botón es *Actualizar*, que vuelve a leer.
+ * RECEPCIÓN EN UN TOQUE
+ *
+ * Cuando el servidor publica `active_dispatched_order`, la tarjeta destacada
+ * muestra el albarán pendiente y el botón principal confirma la recepción. Es un
+ * único toque, sin consultar ni exigir turno (QA 4), y el servidor aísla la
+ * operación al `user_id` del token (Art. V.4). Tras confirmar, `loadInventory()`
+ * trae el saldo actualizado y el comprobante `last_confirmed_order`.
  *
  * EL DESCUADRE NO SE ETIQUETA AQUÍ
  *
- * La proyección del técnico no transporta `is_negative` a propósito: el servidor decide qué ve
- * cada público y el técnico ve su cantidad, incluido un negativo, sin la etiqueta de descuadre
- * que la Coordinación usa para triaje (RF-03.3). Reconstruir esa etiqueta en el cliente a partir
- * del signo sería reintroducir por la puerta de atrás un dato que el contrato retiró.
+ * La proyección del técnico no transporta `is_negative` a propósito: el servidor
+ * decide qué ve cada público y el técnico ve su cantidad, incluido un negativo,
+ * sin la etiqueta de descuadre que la Coordinación usa para triaje (RF-03.3).
  *
  * DISEÑO
  *
- * Tokens del sistema (`var(--color-…)`, `var(--radius-…)`) y ni un literal hexadecimal: la deuda
- * cromática está congelada por `DesignTokenDebtRatchetTest`. Tarjetas de 8 px, chips de 4 px y
- * objetivo táctil de 44 px en el único botón, porque esta vista se usa de pie frente a la máquina.
+ * Tokens del sistema (`var(--color-…)`, `var(--radius-…)`) y ni un literal
+ * hexadecimal: la deuda cromática está congelada por
+ * `DesignTokenDebtRatchetTest`. Tarjetas de 8 px, chips de 4 px y objetivo táctil
+ * de 44 px en la acción principal, porque esta vista se usa de pie frente a la
+ * máquina.
  *
- * Dogma Vanilla: Vue 3 Options API con plantilla en navegador, sin bundler ni dependencias.
+ * Dogma Vanilla: Vue 3 Options API con plantilla en navegador, sin bundler ni
+ * dependencias.
  * Dualismo Lingüístico: código en inglés, texto de interfaz en castellano.
  */
 
@@ -39,8 +48,13 @@ export const TechnicianVanStockPanel = {
     return {
       technicianId: null,
       items: [],
+      activeDispatchedOrder: null,
+      lastConfirmedOrder: null,
       isLoading: false,
-      errorMessage: ''
+      errorMessage: '',
+      isConfirming: false,
+      confirmError: '',
+      confirmMessage: ''
     };
   },
 
@@ -62,6 +76,30 @@ export const TechnicianVanStockPanel = {
 
     isEmpty() {
       return !this.isLoading && this.items.length === 0;
+    },
+
+    /** La orden despachada pendiente de recepción (QA 5). */
+    hasActiveOrder() {
+      return this.activeDispatchedOrder !== null
+        && this.activeDispatchedOrder.id !== undefined
+        && this.activeDispatchedOrder.id !== null;
+    },
+
+    /** Unidades que el técnico va a recibir físicamente al confirmar. */
+    activeOrderUnits() {
+      if (!this.hasActiveOrder) {
+        return 0;
+      }
+
+      const reported = Number(this.activeDispatchedOrder.total_dispatched_units);
+      if (Number.isFinite(reported)) {
+        return reported;
+      }
+
+      return (this.activeDispatchedOrder.items || []).reduce(
+        (total, line) => total + Number(line.dispatched_qty || 0),
+        0
+      );
     },
 
     /** Las tres cifras de cabecera, ya resueltas para no calcular en la plantilla. */
@@ -90,11 +128,42 @@ export const TechnicianVanStockPanel = {
         const data = response?.data || response || {};
         this.technicianId = data.technician_id ?? null;
         this.items = Array.isArray(data.items) ? data.items : [];
+        this.activeDispatchedOrder = data.active_dispatched_order || null;
+        this.lastConfirmedOrder = data.last_confirmed_order || null;
       } catch (error) {
         this.errorMessage = error.message || 'No se pudo cargar el stock de tu furgoneta.';
         this.items = [];
+        this.activeDispatchedOrder = null;
+        this.lastConfirmedOrder = null;
       } finally {
         this.isLoading = false;
+      }
+    },
+
+    /**
+     * Confirma en un toque la carga expedida. El endpoint usa el sujeto del token:
+     * la petición no acepta ni envía un identificador de técnico (Art. V.4).
+     */
+    async confirmActiveOrder() {
+      if (!this.hasActiveOrder || this.isConfirming) {
+        return;
+      }
+
+      this.isConfirming = true;
+      this.confirmError = '';
+      this.confirmMessage = '';
+
+      try {
+        const response = await api.technician.confirmVanRestockOrder(this.activeDispatchedOrder.id);
+        const payload = response?.data || response || {};
+        this.confirmMessage = payload.message
+          || 'Carga confirmada. El stock de tu furgoneta ya está actualizado.';
+
+        await this.loadInventory();
+      } catch (error) {
+        this.confirmError = error.message || 'No se pudo confirmar la recepción de la carga.';
+      } finally {
+        this.isConfirming = false;
       }
     },
 
@@ -110,6 +179,26 @@ export const TechnicianVanStockPanel = {
       };
 
       return labels[String(category || '').toUpperCase()] || String(category || '');
+    },
+
+    formatDateTime(value) {
+      if (value === null || value === undefined || value === '') {
+        return '—';
+      }
+
+      const normalized = String(value).includes('T')
+        ? String(value)
+        : String(value).replace(' ', 'T');
+      const parsed = new Date(normalized);
+
+      if (Number.isNaN(parsed.getTime())) {
+        return String(value);
+      }
+
+      return new Intl.DateTimeFormat('es-ES', {
+        dateStyle: 'short',
+        timeStyle: 'short'
+      }).format(parsed);
     }
   },
 
@@ -163,6 +252,81 @@ export const TechnicianVanStockPanel = {
             </div>
           </div>
         </div>
+
+        <!-- Carga expedida pendiente de recepción: la tarjeta que el técnico ve al llegar a almacén -->
+        <section
+          v-if="hasActiveOrder"
+          data-testid="tech-van-stock-active-order"
+          style="padding: 14px; background-color: var(--color-primary-subtle); border: 1px solid var(--color-primary); border-radius: var(--radius-card);"
+        >
+          <div style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px;">
+            <div>
+              <div style="font-family: var(--font-body); font-size: var(--font-size-caption); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-primary-dark);">
+                📦 Carga pendiente de recibir
+              </div>
+              <div style="margin-top: 2px; font-family: var(--font-display); font-size: var(--font-size-heading-md); font-weight: 700; color: var(--color-ink);">
+                {{ activeDispatchedOrder.order_code }}
+              </div>
+            </div>
+            <span class="vg-chip vg-chip-warning">Expedida</span>
+          </div>
+
+          <div style="display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px; font-family: var(--font-body); font-size: var(--font-size-body-sm); color: var(--color-ink-secondary);">
+            <span>Expedida: <strong>{{ formatDateTime(activeDispatchedOrder.dispatched_at) }}</strong></span>
+            <span>Por: <strong>{{ activeDispatchedOrder.dispatched_by_name || '—' }}</strong></span>
+            <span data-testid="tech-van-stock-active-units">Unidades: <strong>{{ activeOrderUnits }}</strong></span>
+          </div>
+
+          <ul data-testid="tech-van-stock-active-order-items" style="list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px;">
+            <li
+              v-for="line in (activeDispatchedOrder.items || [])"
+              :key="line.spare_part_id"
+              :data-testid="'tech-van-stock-active-line-' + line.spare_part_id"
+              style="display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 9px; background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: var(--font-size-body-sm);"
+            >
+              <span style="min-width: 0;">
+                <strong style="font-family: monospace; font-size: var(--font-size-caption); color: var(--color-ink-muted);">{{ line.part_code }}</strong>
+                <span style="display: block; color: var(--color-ink);">{{ line.part_name }}</span>
+              </span>
+              <strong style="font-family: var(--font-display); font-size: var(--font-size-heading-md); color: var(--color-ink); white-space: nowrap;">
+                {{ line.dispatched_qty }} u.
+              </strong>
+            </li>
+          </ul>
+
+          <p v-if="activeDispatchedOrder.notes" style="margin: 8px 0 0; font-family: var(--font-body); font-size: var(--font-size-caption); color: var(--color-ink-secondary);">
+            Nota de almacén: {{ activeDispatchedOrder.notes }}
+          </p>
+        </section>
+
+        <!-- Comprobante de la última carga confirmada (QA 5) -->
+        <section
+          v-if="lastConfirmedOrder"
+          data-testid="tech-van-stock-last-confirmed"
+          style="padding: 12px 14px; background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card);"
+        >
+          <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;">
+            <div style="font-family: var(--font-body); font-size: var(--font-size-caption); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-ink-muted);">
+              🧾 Última recepción confirmada
+            </div>
+            <span style="font-family: monospace; font-size: var(--font-size-caption); font-weight: 700; color: var(--color-ink-secondary);">
+              {{ lastConfirmedOrder.order_code }}
+            </span>
+          </div>
+          <div style="margin-top: 4px; font-family: var(--font-body); font-size: var(--font-size-body-sm); color: var(--color-ink-secondary);">
+            {{ formatDateTime(lastConfirmedOrder.confirmed_at) }} · <strong>{{ lastConfirmedOrder.total_received_units }}</strong> unidades recibidas
+          </div>
+          <ul data-testid="tech-van-stock-last-confirmed-items" style="list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px;">
+            <li
+              v-for="line in (lastConfirmedOrder.items || [])"
+              :key="line.spare_part_id"
+              style="display: flex; align-items: center; justify-content: space-between; gap: 10px; font-family: var(--font-body); font-size: var(--font-size-caption); color: var(--color-ink-secondary);"
+            >
+              <span>{{ line.part_code }} · {{ line.part_name }}</span>
+              <strong style="color: var(--color-ink);">{{ line.dispatched_qty }} u.</strong>
+            </li>
+          </ul>
+        </section>
 
         <!-- Estado vacío explicativo (RF-04.3): una furgoneta sin declarar no es un error -->
         <div
@@ -220,14 +384,39 @@ export const TechnicianVanStockPanel = {
           </li>
         </ul>
 
+        <div
+          v-if="confirmError"
+          role="alert"
+          data-testid="tech-van-stock-confirm-error"
+          style="padding: 10px 12px; background-color: var(--color-error-bg); border: 1px solid var(--color-error-border); border-radius: var(--radius-card); color: var(--color-error-text); font-family: var(--font-body); font-size: var(--font-size-body-sm);"
+        >
+          ⚠️ {{ confirmError }}
+        </div>
+
+        <div
+          v-if="confirmMessage"
+          data-testid="tech-van-stock-confirm-success"
+          style="padding: 10px 12px; background-color: var(--color-success-bg); border: 1px solid var(--color-success); border-radius: var(--radius-card); color: var(--color-success-text); font-family: var(--font-body); font-size: var(--font-size-body-sm);"
+        >
+          ✅ {{ confirmMessage }}
+        </div>
+
+        <!-- Acción principal: confirmar la carga si está pendiente; si no, releer el inventario -->
         <button
           type="button"
-          class="vg-btn vg-btn-secondary"
+          class="vg-btn"
+          :class="hasActiveOrder ? 'vg-btn-primary' : 'vg-btn-secondary'"
           style="min-height: 44px; align-self: flex-start;"
-          data-testid="tech-van-stock-refresh"
-          @click="loadInventory"
+          data-testid="tech-van-stock-primary-action"
+          :disabled="isConfirming"
+          @click="hasActiveOrder ? confirmActiveOrder() : loadInventory()"
         >
-          🔄 Actualizar el stock
+          <template v-if="hasActiveOrder">
+            {{ isConfirming ? 'Confirmando…' : ('📦 Confirmar recepción (' + activeOrderUnits + ' u.)') }}
+          </template>
+          <template v-else>
+            🔄 Actualizar el stock
+          </template>
         </button>
       </template>
     </div>

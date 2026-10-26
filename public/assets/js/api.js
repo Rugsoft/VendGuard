@@ -1398,6 +1398,41 @@ export class ApiClient {
       return this.put('/coordinator/van-stocks', payload);
     },
 
+    // Órdenes de carga de furgoneta (Módulo 23, contrato §5.2 a §5.9).
+    //
+    // El pre-cálculo y el ciclo del albarán son superficies distintas: la propuesta
+    // es una lectura que jamás persiste nada y la orden es la mutación auditada.
+    // Se mantienen como métodos separados para que el componente no tenga que
+    // conocer ni las rutas ni la forma en que viajan los filtros.
+    getVanRestockProposals: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/van-restock-orders/proposals${q ? `?${q}` : ''}`);
+    },
+    getVanRestockOrders: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return this.get(`/coordinator/van-restock-orders${q ? `?${q}` : ''}`);
+    },
+    getVanRestockOrder: (orderId) => {
+      return this.get(`/coordinator/van-restock-orders/${encodeURIComponent(orderId)}`);
+    },
+    createVanRestockOrder: (payload) => {
+      return this.post('/coordinator/van-restock-orders', payload);
+    },
+    generateVanRestockBatch: (payload = {}) => {
+      return this.post('/coordinator/van-restock-orders/generate-batch', payload);
+    },
+    updateVanRestockOrder: (orderId, payload) => {
+      return this.put(`/coordinator/van-restock-orders/${encodeURIComponent(orderId)}`, payload);
+    },
+    dispatchVanRestockOrder: (orderId, payload) => {
+      return this.post(`/coordinator/van-restock-orders/${encodeURIComponent(orderId)}/dispatch`, payload);
+    },
+    cancelVanRestockOrder: (orderId, cancellationReason) => {
+      return this.post(`/coordinator/van-restock-orders/${encodeURIComponent(orderId)}/cancel`, {
+        cancellation_reason: String(cancellationReason ?? '')
+      });
+    },
+
     // Gestión de Reintegros e Importe Retenido (Módulo 08 - RF-REF-03, RF-REF-07, RF-REF-08)
     /**
      * Retrieves the global refund inbox with full financial detail and filters.
@@ -1834,9 +1869,14 @@ export class ApiClient {
       return this.get(`/technician/spare-parts/catalog?${q}`);
     },
 
-    // Stock de la furgoneta del propio técnico (Módulo 18: RF-04.1)
+    // Stock de la furgoneta del propio técnico (Módulo 18: RF-04.1) y recepción
+    // de la orden despachada (Módulo 23: RF-05.1 a RF-05.3). La confirmación no
+    // acepta un identificador de técnico: el servidor usa el sujeto del token.
     getVanStock: () => {
       return this.get('/technician/van-stock');
+    },
+    confirmVanRestockOrder: (orderId) => {
+      return this.post(`/technician/van-stock/restock-orders/${encodeURIComponent(orderId)}/confirm`, {});
     }
   };
 

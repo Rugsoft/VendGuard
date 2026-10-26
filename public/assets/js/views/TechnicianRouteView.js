@@ -956,6 +956,19 @@ export const TechnicianRouteView = {
     },
 
     /**
+     * Tono del chip de disponibilidad del repuesto en la furgoneta (Módulo 23, QA 3).
+     *
+     * `READY_IN_VAN` afirma cobertura completa; `SHARED_IN_VAN` avisa de que el
+     * saldo se comparte con otras averías del mismo técnico. Es una lectura: el
+     * técnico no cambia nada al pulsarla porque no es un control.
+     */
+    vanStockReadinessChipClass(status) {
+      return String(status || '') === 'SHARED_IN_VAN'
+        ? 'vg-chip vg-chip-warning'
+        : 'vg-chip vg-chip-success';
+    },
+
+    /**
      * Starts or resumes intervention on an incident (RF-07 / EARS 7.1, 7.3).
      * @param {Object} incident
      */
@@ -2143,6 +2156,17 @@ export const TechnicianRouteView = {
               </div>
               <div style="font-size: 12px; color: var(--color-ink-muted, #6c7e9d); margin-top: 2px;">
                 🏢 {{ incident.location?.name || 'Sede' }} ({{ incident.location?.address || '' }})
+              </div>
+
+              <!-- Disponibilidad del repuesto en la furgoneta (Módulo 23, RF-05.4 / QA 3).
+                   El descriptor lo calcula el servidor; la vista solo lo lee. -->
+              <div v-if="incident.van_stock_readiness?.badge_label" style="margin-top: 6px;">
+                <span
+                  data-testid="tech-stop-van-stock-readiness"
+                  :class="vanStockReadinessChipClass(incident.van_stock_readiness.status)"
+                >
+                  {{ incident.van_stock_readiness.badge_label }}
+                </span>
               </div>
 
               <!-- Quick Direct Telephone Link (One-Touch Call) -->
