@@ -80,7 +80,7 @@
     4. Declarar `VanRestockOrderRepositoryInterface`.
   * **Hecho cuando:** `php -l src/Core/Domain/Model/VanRestockOrder.php && php -l src/Core/Domain/Model/VanRestockOrderItem.php && php -l src/Application/DTO/VanRestockProposalDto.php && php -l src/Core/Domain/Exception/VanRestockOrderValidationException.php && php -l src/Core/Domain/Repository/VanRestockOrderRepositoryInterface.php` no reporta errores de sintaxis.
 
-- [ ] **T-RESTOCK-04 · Calculador `VanStockReadinessCalculator` y suite unitaria `VanStockReadinessCalculatorTest`**
+- [x] **T-RESTOCK-04 · Calculador `VanStockReadinessCalculator` y suite unitaria `VanStockReadinessCalculatorTest`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-RESTOCK-03`
   * **Ficheros a crear o modificar:**
