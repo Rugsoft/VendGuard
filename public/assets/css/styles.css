@@ -222,6 +222,14 @@
     page-break-inside: avoid;
   }
 
+  /* `qr-print.css` oculta globalmente `header`, `nav`, `footer` y `button` con
+     `display: none !important` para las etiquetas de sede. El albarán usa un
+     `<header>` propio para identificar la orden, así que debe recuperar su caja
+     con mayor especificidad o el papel sale sin número ni fecha. */
+  .vg-picking-sheet__header {
+    display: flex !important;
+  }
+
   /* `qr-print.css` oculta todos los botones y fondos de modal con
      `display: none !important`. El albarán vive dentro de uno, así que la cadena
      que lo contiene debe recuperar su caja y sus hermanos desaparecer. */
