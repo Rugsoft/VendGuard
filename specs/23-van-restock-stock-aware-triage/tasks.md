@@ -162,7 +162,7 @@
     3. Crear `tests/unit/VanRestockOrderProposalTest.php` certificando todos los casos de la fórmula de pre-cálculo (incluyendo saldos negativos `C2`, umbral `0`, demanda combinada `BOTH`, tope doble `9999` `QA 1` y ordenación determinista `QA 5`).
   * **Hecho cuando:** `php tests/unit/VanRestockOrderProposalTest.php` pasa al 100 % en verde con código de salida `0`.
 
-- [ ] **T-RESTOCK-09 · Suite unitaria `VanRestockOrderServiceTest`**
+- [x] **T-RESTOCK-09 · Suite unitaria `VanRestockOrderServiceTest`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-RESTOCK-08`
   * **Ficheros a crear o modificar:**
