@@ -63,7 +63,7 @@
 
 ## Fase 2: Modelos de Dominio, DTOs, Excepciones y Calculador de Disponibilidad
 
-- [ ] **T-RESTOCK-03 · Entidades `VanRestockOrder` y `VanRestockOrderItem`, DTO `VanRestockProposalDto`, excepción `VanRestockOrderValidationException` e interfaz `VanRestockOrderRepositoryInterface`**
+- [x] **T-RESTOCK-03 · Entidades `VanRestockOrder` y `VanRestockOrderItem`, DTO `VanRestockProposalDto`, excepción `VanRestockOrderValidationException` e interfaz `VanRestockOrderRepositoryInterface`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-RESTOCK-02`
   * **Ficheros a crear o modificar:**
