@@ -43,7 +43,7 @@ a un módulo funcional certificado por la batería global.
 
 ### Certificación
 
-- **batería global: 360 suites · 13.728 aserciones** · 0 fallos · base restaurada a semillas.
+- **batería global: 360 suites · 13.738 aserciones** · 0 fallos · base restaurada a semillas.
 - Canal `new_engine`: 24 suites evaluadas, 23 en verde y 733 aserciones; `PoolerLatencyMeasurementTest`
   sigue declarando otro contrato por falta de `DB_SSL_ROOT_CERT` y no se omite en silencio.
 

@@ -29,7 +29,13 @@ require_once __DIR__ . '/../../src/autoload.php';
 
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
+use VendGuard\Core\Domain\Model\SparePartRequest;
+use VendGuard\Core\Domain\Model\SparePartRequestStatus;
+use VendGuard\Core\Domain\Model\VanStockItem;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
+use VendGuard\Core\Domain\Repository\SparePartRequestBatchRepositoryInterface;
+use VendGuard\Core\Domain\Repository\SparePartRequestRepositoryInterface;
+use VendGuard\Core\Domain\Repository\VanStockRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
@@ -79,7 +85,9 @@ $rowTwo = new Incident(
     category: IncidentCategory::PAYMENT_SYSTEM,
     description: 'Fallo en billetero.',
     urgency: UrgencyLevel::HIGH,
-    status: IncidentStatus::ASSIGNED
+    status: IncidentStatus::ASSIGNED,
+    assignedTechnicianId: 77,
+    technicianName: 'Carlos Mendoza'
 );
 
 $incidentRepo = new class($rowOne, $rowTwo) implements IncidentRepositoryInterface {
@@ -158,8 +166,55 @@ $incidentRepo = new class($rowOne, $rowTwo) implements IncidentRepositoryInterfa
     public function getPendingInfoIncidentsOlderThanHours(int $hours): array { throw new LogicException('Not used.'); }
 };
 
+$readinessRequests = new class implements SparePartRequestRepositoryInterface, SparePartRequestBatchRepositoryInterface {
+    /** @var list<list<int>> */
+    public array $batchCalls = [];
+
+    /** @var list<int> */
+    public array $singleCalls = [];
+
+    public function findPendingByIncidentIds(array $incidentIds): array
+    {
+        $this->batchCalls[] = array_values($incidentIds);
+
+        return [
+            902 => [new SparePartRequest(1, 902, 14, false, null, 1, SparePartRequestStatus::PENDING, 77, 'COMP-TH-01', 'Termostato', 'Carlos')],
+        ];
+    }
+
+    public function findByIncidentId(int $incidentId): array
+    {
+        $this->singleCalls[] = $incidentId;
+
+        return [];
+    }
+
+    public function createRequest(SparePartRequest $request): SparePartRequest { return $request; }
+    public function findById(int $id): ?SparePartRequest { return null; }
+    public function markAttendedByIncident(int $incidentId): int { return 0; }
+    public function markCancelledByIncident(int $incidentId): int { return 0; }
+    public function findPendingOutOfCatalogReviews(): array { return []; }
+};
+
+$readinessStock = new class implements VanStockRepositoryInterface {
+    public function listInventory(?int $technicianId = null): array
+    {
+        return [new VanStockItem(1, 77, 14, 5, 0)];
+    }
+
+    public function listByTechnician(int $technicianId): array { return []; }
+    public function listBelowThreshold(?int $technicianId = null): array { return []; }
+    public function findByPair(int $technicianId, int $sparePartId): ?VanStockItem { return null; }
+    public function adjust(VanStockItem $item, ?int $previousQuantity, ?int $actorUserId): VanStockItem { return $item; }
+    public function consume(int $technicianId, int $sparePartId, int $quantity): void {}
+    public function findTechnician(int $technicianId): ?array { return null; }
+    public function sparePartExists(int $sparePartId): bool { return true; }
+};
+
 $controller = new CoordinatorController(
-    incidentRepo: $incidentRepo
+    incidentRepo: $incidentRepo,
+    sparePartRequestRepo: $readinessRequests,
+    vanStockRepo: $readinessStock
 );
 
 $request = new Request('GET', '/api/coordinator/incidents');
@@ -254,16 +309,33 @@ $assert(
 );
 
 // =====================================================================
-// GRUPO 3: Filtros de la bandeja intactos tras el enriquecimiento
+// GRUPO 3: La readiness de la bandeja lee las solicitudes por lote
 // =====================================================================
-echo "\n--- Grupo 3: Integridad de los filtros de triaje ---\n";
+echo "\n--- Grupo 3: Lectura por lote de la readiness ---\n";
+
+$assert(
+    '3.1 Las solicitudes PENDING de la bandeja se leen en UNA sola llamada',
+    $readinessRequests->batchCalls === [[902]] && $readinessRequests->singleCalls === [],
+    'Lotes: ' . json_encode($readinessRequests->batchCalls) . ' · individuales: ' . json_encode($readinessRequests->singleCalls)
+);
+
+$assert(
+    '3.2 La fila asignada publica READY_IN_VAN con el saldo inyectado',
+    ($rows[1]['van_stock_readiness']['status'] ?? '') === 'READY_IN_VAN',
+    json_encode($rows[1]['van_stock_readiness'] ?? null)
+);
+
+// =====================================================================
+// GRUPO 4: Filtros de la bandeja intactos tras el enriquecimiento
+// =====================================================================
+echo "\n--- Grupo 4: Integridad de los filtros de triaje ---\n";
 
 $invalidStatusRequest = new Request('GET', '/api/coordinator/incidents', ['status' => 'INVENTADO']);
 $invalidStatusResponse = $controller->getIncidents($invalidStatusRequest);
 $invalidStatusBody = $invalidStatusResponse->getDecodedBody() ?? [];
 
 $assert(
-    '3.1 Un filtro de estado inválido sigue respondiendo HTTP 400',
+    '4.1 Un filtro de estado inválido sigue respondiendo HTTP 400',
     $invalidStatusResponse->getStatusCode() === 400
         && ($invalidStatusBody['error']['code'] ?? '') === 'INVALID_STATUS_FILTER',
     'Código recibido: ' . $invalidStatusResponse->getStatusCode()
@@ -272,7 +344,7 @@ $assert(
 $callsAfterInvalidFilter = count($incidentRepo->batchCalls);
 
 $assert(
-    '3.2 Una petición rechazada no consulta ningún hilo de conversación',
+    '4.2 Una petición rechazada no consulta ningún hilo de conversación',
     $callsAfterInvalidFilter === 1 && $incidentRepo->countCalls === [],
     'Consultas acumuladas: ' . $callsAfterInvalidFilter
 );

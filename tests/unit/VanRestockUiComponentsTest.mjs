@@ -135,6 +135,7 @@ const makeOrder = (overrides = {}) => ({
   order_code: 'RO-000042',
   technician_id: 2,
   technician_name: 'Carlos Mendoza',
+  technician_operator_code: 'OP-02',
   technician_is_active: true,
   recipient_currently_absent: false,
   status: 'PENDING_PICKING',
@@ -528,6 +529,34 @@ assert('3.11 Imprimir llama al mecanismo nativo, sin librería PDF', (globalThis
 assert(
   '3.12 El Picking A4 no transporta coste, precio ni importe (Art. V.4)',
   !/reference_cost|unit_cost|price|cost_snapshot/.test(COORDINATOR_SOURCE)
+);
+
+assert(
+  '3.13 El A4 publica operador, fecha de la orden y las diez columnas de EARS 03.1',
+  ['Hecho', 'Referencia', 'Pieza', 'Categoría', 'Saldo', 'Umbral', 'Pedidas', 'Solicitado', 'Servido', 'Motivo']
+    .every((heading) => COORDINATOR_SOURCE.includes(`>${heading}<`))
+    && COORDINATOR_SOURCE.includes('technician_operator_code')
+    && COORDINATOR_SOURCE.includes('Fecha de la orden:')
+    && COORDINATOR_SOURCE.includes('current_quantity_snapshot')
+    && COORDINATOR_SOURCE.includes('min_threshold_snapshot')
+    && COORDINATOR_SOURCE.includes('pending_request_qty_snapshot')
+);
+
+assert(
+  '3.14 El aviso de destinatario cubre la baja sobrevenida además de la ausencia (C2)',
+  pickingTab.hasRecipientAlert(makeOrder({ technician_is_active: false, recipient_currently_absent: false })) === true
+    && pickingTab.hasRecipientAlert(makeOrder({ technician_is_active: true, recipient_currently_absent: true })) === true
+    && pickingTab.hasRecipientAlert(makeOrder({ technician_is_active: true, recipient_currently_absent: false })) === false
+    && COORDINATOR_SOURCE.includes('hasRecipientAlert(proposal)')
+    && COORDINATOR_SOURCE.includes('hasRecipientAlert(order)')
+    && COORDINATOR_SOURCE.includes('hasRecipientAlert(pickingOrder)')
+);
+
+assert(
+  '3.15 La categoría del A4 se traduce al castellano y no se enseña el enum crudo',
+  pickingTab.categoryLabel('THERMAL') === 'Térmica'
+    && pickingTab.categoryLabel('HYDRAULIC') === 'Hidráulica'
+    && COORDINATOR_SOURCE.includes('categoryLabel(line.category)')
 );
 
 // =========================================================================

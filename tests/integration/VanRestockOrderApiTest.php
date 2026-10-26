@@ -677,6 +677,11 @@ try {
         $costLeaks($detail) === []
     );
 
+    $assert(
+        '5.4 El detalle publica el código de operador del técnico para el A4',
+        ($detail['technician_operator_code'] ?? null) === 'R23-ALFA'
+    );
+
     $itemCountBeforeEdit = (int)$pdo->query(
         'SELECT COUNT(*) FROM van_restock_order_items WHERE order_id = ' . $orderId
     )->fetchColumn();

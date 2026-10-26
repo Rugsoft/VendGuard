@@ -23,6 +23,7 @@ use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentServiceSheetRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
+use VendGuard\Core\Domain\Repository\SparePartRequestBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SparePartRequestRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
@@ -495,30 +496,21 @@ class CoordinatorController
         $vanStockByTechnicianAndPart = [];
 
         if ($this->hasVanStockReadinessSources()) {
+            $eligibleIncidentIds = [];
             foreach ($rows as $row) {
                 if (
-                    $row['assigned_technician_id'] === null
-                    || !in_array($row['status'], VanStockReadinessCalculator::ACTIVE_INCIDENT_STATUSES, true)
+                    $row['assigned_technician_id'] !== null
+                    && in_array($row['status'], VanStockReadinessCalculator::ACTIVE_INCIDENT_STATUSES, true)
                 ) {
-                    continue;
+                    $eligibleIncidentIds[] = $row['incident_id'];
                 }
+            }
 
-                foreach ($this->sparePartRequests()->findByIncidentId($row['incident_id']) as $request) {
-                    if ($request->getStatus() !== SparePartRequestStatus::PENDING) {
-                        continue;
-                    }
-
-                    $sparePartId = $request->getSparePartId();
-                    if ($sparePartId === null) {
-                        $pendingRequestsByIncident[$row['incident_id']]['out_of_catalog'] =
-                            ($pendingRequestsByIncident[$row['incident_id']]['out_of_catalog'] ?? 0) + 1;
-                        continue;
-                    }
-
-                    $pendingRequestsByIncident[$row['incident_id']]['catalog'][$sparePartId] =
-                        ($pendingRequestsByIncident[$row['incident_id']]['catalog'][$sparePartId] ?? 0)
-                        + $request->getQuantity();
-                }
+            if ($eligibleIncidentIds !== []) {
+                $requestsByIncident = $this->pendingSparePartRequestsByIncident($eligibleIncidentIds);
+                $pendingRequestsByIncident = VanStockReadinessCalculator::summarizePendingRequests(
+                    $requestsByIncident
+                );
             }
 
             foreach ($this->vanStock()->listInventory(null) as $item) {
@@ -531,6 +523,39 @@ class CoordinatorController
             $pendingRequestsByIncident,
             $vanStockByTechnicianAndPart
         );
+    }
+
+    /**
+     * Solicitudes `PENDING` de varias averías en una sola lectura cuando el
+     * repositorio declara la capacidad de lote; si no, mantiene el camino
+     * individual de los dobles de prueba y de implementaciones antiguas.
+     *
+     * @param list<int> $incidentIds
+     * @return array<int, list<\VendGuard\Core\Domain\Model\SparePartRequest>>
+     */
+    private function pendingSparePartRequestsByIncident(array $incidentIds): array
+    {
+        $repository = $this->sparePartRequests();
+
+        if ($repository instanceof SparePartRequestBatchRepositoryInterface) {
+            return $repository->findPendingByIncidentIds($incidentIds);
+        }
+
+        $grouped = [];
+        foreach ($incidentIds as $incidentId) {
+            $requests = [];
+            foreach ($repository->findByIncidentId($incidentId) as $request) {
+                if ($request->getStatus() === SparePartRequestStatus::PENDING) {
+                    $requests[] = $request;
+                }
+            }
+
+            if ($requests !== []) {
+                $grouped[$incidentId] = $requests;
+            }
+        }
+
+        return $grouped;
     }
 
     /**

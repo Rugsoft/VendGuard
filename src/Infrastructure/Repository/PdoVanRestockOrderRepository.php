@@ -85,7 +85,8 @@ final class PdoVanRestockOrderRepository implements VanRestockOrderRepositoryInt
         o.created_by, o.created_at, o.dispatched_by, o.dispatched_at,
         o.confirmed_by, o.confirmed_at, o.cancelled_by, o.cancelled_at,
         o.cancellation_reason, o.updated_at,
-        t.name AS technician_name, t.is_active AS technician_is_active,
+        t.name AS technician_name, t.operator_code AS technician_operator_code,
+        t.is_active AS technician_is_active,
         EXISTS (
             SELECT 1 FROM technician_absences a
              WHERE a.technician_id = o.technician_id
@@ -1607,6 +1608,7 @@ final class PdoVanRestockOrderRepository implements VanRestockOrderRepositoryInt
             (int)$row['id'],
             (int)$row['technician_id'],
             (string)$row['technician_name'],
+            $row['technician_operator_code'] === null ? null : (string)$row['technician_operator_code'],
             (bool)$row['technician_is_active'],
             (bool)$row['recipient_currently_absent'],
             (string)$row['status'],

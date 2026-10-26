@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace VendGuard\Application\Service;
 
+use VendGuard\Core\Domain\Model\SparePartRequest;
+use VendGuard\Core\Domain\Model\SparePartRequestStatus;
+
 /**
  * VanStockReadinessCalculator
  *
@@ -167,6 +170,44 @@ final class VanStockReadinessCalculator
         }
 
         return $readiness;
+    }
+
+    /**
+     * Resume las solicitudes por avería en la forma que consume `calculate()`.
+     *
+     * La lectura por lote devuelve entidades agrupadas; este adaptador puro las
+     * convierte en cantidades catalogadas y en el contador de piezas fuera de
+     * catálogo. Se mantiene fuera de los controladores para que las dos bandejas
+     * apliquen exactamente la misma regla (QA 2).
+     *
+     * @param array<int, list<SparePartRequest>> $requestsByIncident
+     * @return array<int, array{catalog: array<int, int>, out_of_catalog: int}>
+     */
+    public static function summarizePendingRequests(array $requestsByIncident): array
+    {
+        $summary = [];
+
+        foreach ($requestsByIncident as $incidentId => $requests) {
+            $normalizedIncidentId = (int)$incidentId;
+            foreach ($requests as $request) {
+                if (!$request instanceof SparePartRequest || $request->getStatus() !== SparePartRequestStatus::PENDING) {
+                    continue;
+                }
+
+                $sparePartId = $request->getSparePartId();
+                if ($sparePartId === null) {
+                    $summary[$normalizedIncidentId]['out_of_catalog'] =
+                        ($summary[$normalizedIncidentId]['out_of_catalog'] ?? 0) + 1;
+                    continue;
+                }
+
+                $summary[$normalizedIncidentId]['catalog'][$sparePartId] =
+                    ($summary[$normalizedIncidentId]['catalog'][$sparePartId] ?? 0)
+                    + $request->getQuantity();
+            }
+        }
+
+        return $summary;
     }
 
     /**

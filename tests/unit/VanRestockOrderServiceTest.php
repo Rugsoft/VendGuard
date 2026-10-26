@@ -530,6 +530,7 @@ final class FakeVanRestockOrderRepositoryForServiceTest implements VanRestockOrd
             (int)$row['id'],
             (int)$row['technician_id'],
             (string)$technician['technician_name'],
+            $technician['operator_code'] === null ? null : (string)$technician['operator_code'],
             (bool)$technician['is_active'],
             (bool)$technician['is_currently_absent'],
             (string)$row['status'],
@@ -1015,6 +1016,8 @@ $assert('6.5 La orden conserva su código legible', $order->orderCode() === 'RO-
 $assert('6.6 La línea de Coordinación conserva los snapshots', $coordinator['items'][0]['current_quantity_snapshot'] === 2
     && $coordinator['items'][0]['min_threshold_snapshot'] === 2
     && $coordinator['items'][0]['pending_request_qty_snapshot'] === 0);
+$assert('6.7 La proyección de Coordinación publica el código de operador para el A4',
+    ($coordinator['technician_operator_code'] ?? null) === 'TEC-7');
 
 echo "\n======================================================================\n";
 echo " Total Aserciones: {$assertions} | Exitosas: " . ($assertions - $failures) . " | Fallidas: {$failures}\n";

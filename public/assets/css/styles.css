@@ -104,16 +104,27 @@
   width: 100%;
   margin-top: 12px;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: var(--font-size-body-sm);
 }
 
 .vg-picking-sheet__table th,
 .vg-picking-sheet__table td {
-  padding: 7px 8px;
+  padding: 6px 5px;
   border-bottom: 1px solid var(--color-hairline);
   text-align: left;
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
+
+/* Reparto fijo de la hoja: diez columnas caben en A4 sin empujar la tabla
+   fuera del margen de impresión. */
+.vg-picking-sheet__col-check { width: 5%; }
+.vg-picking-sheet__col-reference { width: 14%; }
+.vg-picking-sheet__col-piece { width: 22%; }
+.vg-picking-sheet__col-category { width: 10%; }
+.vg-picking-sheet__col-quantity { width: 6%; }
+.vg-picking-sheet__col-reason { width: 19%; }
 
 .vg-picking-sheet__table thead th {
   font-size: var(--font-size-caption);
@@ -137,7 +148,7 @@
 }
 
 .vg-picking-sheet__check {
-  width: 44px;
+  width: auto;
   font-family: var(--font-display);
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -147,7 +158,7 @@
 .vg-picking-sheet__code-cell {
   font-family: monospace;
   font-weight: 700;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .vg-picking-sheet__notes {
@@ -209,7 +220,12 @@
   }
 
   .vg-picking-sheet__table {
-    font-size: 9.5pt;
+    font-size: 8pt;
+  }
+
+  .vg-picking-sheet__table th,
+  .vg-picking-sheet__table td {
+    padding: 4px 3px;
   }
 
   .vg-picking-sheet__table tr {

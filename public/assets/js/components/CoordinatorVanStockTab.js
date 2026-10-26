@@ -63,6 +63,16 @@ const ORDER_STATUS_LABELS = Object.freeze({
   CANCELLED: 'Cancelada'
 });
 
+/** Rótulos legibles de la categoría de pieza (contrato §5.3). */
+const CATEGORY_LABELS = Object.freeze({
+  HYDRAULIC: 'Hidráulica',
+  THERMAL: 'Térmica',
+  ELECTRONIC: 'Electrónica',
+  MECHANICAL: 'Mecánica',
+  CONSUMABLE: 'Consumible',
+  OTHER: 'Otra'
+});
+
 /** Rótulos de motivo de reposición de una línea (contrato §5.3). */
 const REASON_LABELS = Object.freeze({
   BOTH: 'Umbral y solicitud',
@@ -463,6 +473,20 @@ export const CoordinatorVanStockTab = {
 
     reasonLabel(reason) {
       return REASON_LABELS[String(reason || '').toUpperCase()] || String(reason || '—');
+    },
+
+    categoryLabel(category) {
+      return CATEGORY_LABELS[String(category || '').toUpperCase()] || String(category || '—');
+    },
+
+    /**
+     * Alerta de lectura del destinatario (C2, EARS 03.3): ausencia vigente o
+     * baja sobrevenida. El servidor publica ambas marcas y la interfaz no debe
+     * olvidar ninguna de las dos.
+     */
+    hasRecipientAlert(recipient) {
+      return Boolean(recipient)
+        && (recipient.technician_is_active === false || recipient.recipient_currently_absent === true);
     },
 
     formatDateTime(value) {
@@ -985,7 +1009,7 @@ export const CoordinatorVanStockTab = {
                   >
                     <td style="padding: 8px 10px; border-bottom: 1px solid var(--color-hairline-soft); color: var(--color-ink);">
                       <div style="font-weight: 600;">{{ proposal.technician_name }}</div>
-                      <div v-if="proposal.recipient_currently_absent" data-testid="coord-restock-absent-warning" style="margin-top: 4px; display: inline-block; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); font-size: var(--font-size-caption); font-weight: 700;">
+                      <div v-if="hasRecipientAlert(proposal)" data-testid="coord-restock-absent-warning" style="margin-top: 4px; display: inline-block; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); font-size: var(--font-size-caption); font-weight: 700;">
                         ⚠️ Destinatario actualmente ausente / inactivo
                       </div>
                     </td>
@@ -1062,7 +1086,7 @@ export const CoordinatorVanStockTab = {
                     </td>
                     <td style="padding: 8px 10px; border-bottom: 1px solid var(--color-hairline-soft); color: var(--color-ink);">
                       <div style="font-weight: 600;">{{ order.technician_name }}</div>
-                      <div v-if="order.recipient_currently_absent" :data-testid="'coord-restock-order-absent-' + order.id" style="margin-top: 4px; display: inline-block; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); font-size: var(--font-size-caption); font-weight: 700;">
+                      <div v-if="hasRecipientAlert(order)" :data-testid="'coord-restock-order-absent-' + order.id" style="margin-top: 4px; display: inline-block; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); font-size: var(--font-size-caption); font-weight: 700;">
                         ⚠️ Destinatario actualmente ausente / inactivo
                       </div>
                     </td>
@@ -1532,7 +1556,8 @@ export const CoordinatorVanStockTab = {
             <div class="vg-picking-sheet__identity">
               <div class="vg-picking-sheet__code" data-testid="coord-picking-order-code">{{ pickingOrder.order_code }}</div>
               <div class="vg-picking-sheet__meta-line">{{ orderStatusLabel(pickingOrder.status) }}</div>
-              <div class="vg-picking-sheet__meta-line">Emitido: {{ pickingIssuedAt }}</div>
+              <div class="vg-picking-sheet__meta-line">Fecha de la orden: {{ formatDateTime(pickingOrder.created_at) }}</div>
+              <div class="vg-picking-sheet__meta-line">Impreso: {{ pickingIssuedAt }}</div>
             </div>
           </header>
 
@@ -1540,6 +1565,10 @@ export const CoordinatorVanStockTab = {
             <div>
               <span class="vg-picking-sheet__label">Destinatario</span>
               <strong>{{ pickingOrder.technician_name }}</strong>
+            </div>
+            <div>
+              <span class="vg-picking-sheet__label">Operador</span>
+              <strong>{{ pickingOrder.technician_operator_code || '—' }}</strong>
             </div>
             <div>
               <span class="vg-picking-sheet__label">Preparado por</span>
@@ -1555,19 +1584,35 @@ export const CoordinatorVanStockTab = {
             </div>
           </section>
 
-          <div v-if="pickingOrder.recipient_currently_absent" class="vg-alert vg-alert-warning" data-testid="coord-picking-absent-warning">
+          <div v-if="hasRecipientAlert(pickingOrder)" class="vg-alert vg-alert-warning" data-testid="coord-picking-absent-warning">
             ⚠️ Destinatario actualmente ausente / inactivo. La caja se prepara igualmente y se entrega a su incorporación.
           </div>
 
           <table class="vg-picking-sheet__table" data-testid="coord-picking-table">
+            <colgroup>
+              <col class="vg-picking-sheet__col-check" />
+              <col class="vg-picking-sheet__col-reference" />
+              <col class="vg-picking-sheet__col-piece" />
+              <col class="vg-picking-sheet__col-category" />
+              <col class="vg-picking-sheet__col-quantity" />
+              <col class="vg-picking-sheet__col-quantity" />
+              <col class="vg-picking-sheet__col-quantity" />
+              <col class="vg-picking-sheet__col-quantity" />
+              <col class="vg-picking-sheet__col-quantity" />
+              <col class="vg-picking-sheet__col-reason" />
+            </colgroup>
             <thead>
               <tr>
                 <th scope="col">Hecho</th>
                 <th scope="col">Referencia</th>
                 <th scope="col">Pieza</th>
-                <th scope="col">Motivo</th>
+                <th scope="col">Categoría</th>
+                <th scope="col" class="vg-picking-sheet__number">Saldo</th>
+                <th scope="col" class="vg-picking-sheet__number">Umbral</th>
+                <th scope="col" class="vg-picking-sheet__number">Pedidas</th>
                 <th scope="col" class="vg-picking-sheet__number">Solicitado</th>
                 <th scope="col" class="vg-picking-sheet__number">Servido</th>
+                <th scope="col">Motivo</th>
               </tr>
             </thead>
             <tbody>
@@ -1575,16 +1620,21 @@ export const CoordinatorVanStockTab = {
                 <td class="vg-picking-sheet__check">[ ]</td>
                 <td class="vg-picking-sheet__code-cell">{{ line.part_code }}</td>
                 <td>{{ line.part_name }}</td>
-                <td>{{ reasonLabel(line.reason) }}</td>
+                <td>{{ categoryLabel(line.category) }}</td>
+                <td class="vg-picking-sheet__number">{{ line.current_quantity_snapshot }}</td>
+                <td class="vg-picking-sheet__number">{{ line.min_threshold_snapshot }}</td>
+                <td class="vg-picking-sheet__number">{{ line.pending_request_qty_snapshot }}</td>
                 <td class="vg-picking-sheet__number">{{ line.requested_qty }}</td>
                 <td class="vg-picking-sheet__number">{{ line.dispatched_qty === null ? '—' : line.dispatched_qty }}</td>
+                <td>{{ reasonLabel(line.reason) }}</td>
               </tr>
             </tbody>
             <tfoot>
               <tr>
-                <td colspan="4">Total de la orden</td>
+                <td colspan="7">Total de la orden</td>
                 <td class="vg-picking-sheet__number">{{ pickingOrder.total_requested_units }}</td>
                 <td class="vg-picking-sheet__number">{{ pickingOrder.total_dispatched_units === null ? '—' : pickingOrder.total_dispatched_units }}</td>
+                <td></td>
               </tr>
             </tfoot>
           </table>

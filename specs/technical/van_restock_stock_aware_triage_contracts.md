@@ -496,6 +496,7 @@ Calcula en tiempo real la propuesta de carga para un técnico concreto (`?techni
     {
       "technician_id": 2,
       "technician_name": "Carlos Mendoza (Ruta Norte)",
+      "technician_operator_code": "OP-02",
       "technician_is_active": true,
       "recipient_currently_absent": false,
       "open_order_id": null,
@@ -549,6 +550,7 @@ Devuelve el listado de órdenes de carga. Ordenación canónica (`RF-04.4`): pri
       "order_code": "RO-000042",
       "technician_id": 2,
       "technician_name": "Carlos Mendoza (Ruta Norte)",
+      "technician_operator_code": "OP-02",
       "technician_is_active": true,
       "recipient_currently_absent": false,
       "status": "PENDING_PICKING",

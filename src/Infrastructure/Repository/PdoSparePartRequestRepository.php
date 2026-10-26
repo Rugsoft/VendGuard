@@ -9,6 +9,7 @@ use PDOException;
 use RuntimeException;
 use VendGuard\Core\Domain\Model\SparePartRequest;
 use VendGuard\Core\Domain\Model\SparePartRequestStatus;
+use VendGuard\Core\Domain\Repository\SparePartRequestBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\SparePartRequestRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
@@ -24,7 +25,7 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * única diferencia declarada que este repositorio tiene, el literal booleano (D-3), se le pide al
  * adaptador de dialecto, que es el punto único de traducción (RF-01.5, T-HYBRID-25).
  */
-class PdoSparePartRequestRepository implements SparePartRequestRepositoryInterface
+class PdoSparePartRequestRepository implements SparePartRequestRepositoryInterface, SparePartRequestBatchRepositoryInterface
 {
     private PDO $pdo;
 
@@ -159,6 +160,56 @@ class PdoSparePartRequestRepository implements SparePartRequestRepositoryInterfa
         }
 
         return $results;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function findPendingByIncidentIds(array $incidentIds): array
+    {
+        $normalizedIds = [];
+        foreach ($incidentIds as $incidentId) {
+            $normalized = filter_var($incidentId, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($normalized !== false) {
+                $normalizedIds[(int)$normalized] = (int)$normalized;
+            }
+        }
+
+        if ($normalizedIds === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        foreach (array_values($normalizedIds) as $index => $incidentId) {
+            $placeholders[] = ':incident_' . $index;
+        }
+
+        $sql = "
+            SELECT
+                spr.*,
+                sp.part_code,
+                sp.name AS part_name,
+                u.name AS technician_name
+            FROM spare_part_requests spr
+            LEFT JOIN spare_parts sp ON sp.id = spr.spare_part_id
+            LEFT JOIN users u ON u.id = spr.requested_by_user_id
+            WHERE spr.incident_id IN (" . implode(', ', $placeholders) . ")
+              AND spr.status = 'PENDING'
+            ORDER BY spr.incident_id ASC, spr.created_at ASC, spr.id ASC
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach (array_values($normalizedIds) as $index => $incidentId) {
+            $stmt->bindValue(':incident_' . $index, $incidentId, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        $grouped = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $grouped[(int)$row['incident_id']][] = $this->hydrateRequest($row);
+        }
+
+        return $grouped;
     }
 
     /**

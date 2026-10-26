@@ -41,6 +41,9 @@ use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\PreventiveSetting;
+use VendGuard\Core\Domain\Model\SparePartRequest;
+use VendGuard\Core\Domain\Model\SparePartRequestStatus;
+use VendGuard\Core\Domain\Model\VanStockItem;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
@@ -48,7 +51,10 @@ use VendGuard\Core\Domain\Repository\MachineBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsBatchRepositoryInterface;
 use VendGuard\Core\Domain\Repository\PreventiveSettingsRepositoryInterface;
+use VendGuard\Core\Domain\Repository\SparePartRequestBatchRepositoryInterface;
+use VendGuard\Core\Domain\Repository\SparePartRequestRepositoryInterface;
 use VendGuard\Core\Domain\Repository\TechnicianRouteBoardRepositoryInterface;
+use VendGuard\Core\Domain\Repository\VanStockRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
@@ -56,6 +62,7 @@ use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoPreventiveSettingsRepository;
+use VendGuard\Infrastructure\Repository\PdoSparePartRequestRepository;
 use VendGuard\Presentation\Controller\TechnicianController;
 use VendGuard\Presentation\Http\Request;
 
@@ -818,6 +825,116 @@ $assert(
     ($responseBoardBody['data'][1]['site_response_since_pause'] ?? null) === true
         && ($responseBoardBody['data'][0]['site_response_since_pause'] ?? null) === false,
     'Valores: ' . var_export($responseBoardBody['data'][1]['site_response_since_pause'] ?? null, true)
+);
+
+// =====================================================================
+// GRUPO 5: la readiness de la ruta lee las solicitudes en UNA sola llamada
+// =====================================================================
+// La insignia `van_stock_readiness` necesita las solicitudes PENDING de todas
+// las paradas. Leerlas una por avería reintroducía el N+1 que T-HYBRID-27
+// eliminó: con 13 paradas eran 13 viajes extra antes de calcular nada.
+
+echo "\n--- Grupo 5: lectura por lote de solicitudes para la readiness ---\n";
+
+$readinessRequests = new class implements SparePartRequestRepositoryInterface, SparePartRequestBatchRepositoryInterface {
+    /** @var list<list<int>> */
+    public array $batchCalls = [];
+
+    /** @var list<int> */
+    public array $singleCalls = [];
+
+    /** @var array<int, list<SparePartRequest>> */
+    private array $byIncident;
+
+    public function __construct()
+    {
+        $this->byIncident = [
+            601 => [new SparePartRequest(1, 601, 14, false, null, 2, SparePartRequestStatus::PENDING, 77, 'COMP-TH-01', 'Termostato', 'Carlos')],
+            602 => [new SparePartRequest(2, 602, 21, false, null, 1, SparePartRequestStatus::PENDING, 77, 'VALV-HY-02', 'Electroválvula', 'Carlos')],
+        ];
+    }
+
+    public function findPendingByIncidentIds(array $incidentIds): array
+    {
+        $this->batchCalls[] = array_values($incidentIds);
+        $grouped = [];
+        foreach ($incidentIds as $incidentId) {
+            if (isset($this->byIncident[(int)$incidentId])) {
+                $grouped[(int)$incidentId] = $this->byIncident[(int)$incidentId];
+            }
+        }
+
+        return $grouped;
+    }
+
+    public function findByIncidentId(int $incidentId): array
+    {
+        $this->singleCalls[] = $incidentId;
+
+        return $this->byIncident[$incidentId] ?? [];
+    }
+
+    public function createRequest(SparePartRequest $request): SparePartRequest { return $request; }
+    public function findById(int $id): ?SparePartRequest { return null; }
+    public function markAttendedByIncident(int $incidentId): int { return 0; }
+    public function markCancelledByIncident(int $incidentId): int { return 0; }
+    public function findPendingOutOfCatalogReviews(): array { return []; }
+};
+
+$readinessStock = new class implements VanStockRepositoryInterface {
+    /** @var list<int> */
+    public array $listCalls = [];
+
+    public function listByTechnician(int $technicianId): array
+    {
+        $this->listCalls[] = $technicianId;
+
+        return [
+            new VanStockItem(1, $technicianId, 14, 5, 0),
+            new VanStockItem(2, $technicianId, 21, 1, 0),
+        ];
+    }
+
+    public function listInventory(?int $technicianId = null): array { return $this->listByTechnician((int)$technicianId); }
+    public function listBelowThreshold(?int $technicianId = null): array { return []; }
+    public function findByPair(int $technicianId, int $sparePartId): ?VanStockItem { return null; }
+    public function adjust(VanStockItem $item, ?int $previousQuantity, ?int $actorUserId): VanStockItem { return $item; }
+    public function consume(int $technicianId, int $sparePartId, int $quantity): void {}
+    public function findTechnician(int $technicianId): ?array { return null; }
+    public function sparePartExists(int $sparePartId): bool { return true; }
+};
+
+$readinessController = new TechnicianController(
+    incidentRepo: $buildIncidentRepo([$stopOne, $stopTwo]),
+    machineRepo: $machinesWithBatch($buildMachines()),
+    locationRepo: $locationsWithBatch($buildLocation()),
+    pauseService: new IncidentPauseService(settingsRepo: $settingsWithBatch($buildSettings())),
+    sparePartRequestRepo: $readinessRequests,
+    vanStockRepo: $readinessStock
+);
+
+$readinessBody = $readinessController->getMyRoute($request)->getDecodedBody() ?? [];
+$readinessStops = $readinessBody['data'] ?? [];
+
+$assert(
+    '5.1 Las solicitudes PENDING de las dos paradas se leen en UNA sola llamada',
+    $readinessRequests->batchCalls === [[601, 602]] && $readinessRequests->singleCalls === [],
+    'Lotes: ' . json_encode($readinessRequests->batchCalls) . ' · individuales: ' . json_encode($readinessRequests->singleCalls)
+);
+
+$assert(
+    '5.2 La insignia se calcula con esa única lectura y sin consultas por parada',
+    ($readinessStops[0]['van_stock_readiness']['status'] ?? '') === 'READY_IN_VAN'
+        && ($readinessStops[1]['van_stock_readiness']['status'] ?? '') === 'READY_IN_VAN'
+        && $readinessStock->listCalls === [77],
+    json_encode(array_map(static fn (array $stop): array => $stop['van_stock_readiness'] ?? [], $readinessStops))
+);
+
+$assert(
+    '5.3 El repositorio PDO declara la capacidad de lote sin ensanchar la interfaz principal',
+    (new ReflectionClass(PdoSparePartRequestRepository::class))->implementsInterface(SparePartRequestBatchRepositoryInterface::class)
+        && !method_exists(SparePartRequestRepositoryInterface::class, 'findPendingByIncidentIds'),
+    'La capacidad debe vivir en un contrato segregado, como las lecturas por lote de Mi Ruta.'
 );
 
 // =====================================================================
