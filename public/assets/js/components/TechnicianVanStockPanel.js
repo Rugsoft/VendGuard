@@ -190,6 +190,16 @@ export const TechnicianVanStockPanel = {
 
     formatDateTime(value) {
       return formatDateTime(value);
+    },
+
+    /**
+     * Concordancia del comprobante de recepción: una unidad no es «1 unidades».
+     * El número lo pinta la plantilla; aquí solo vive la palabra que lo acompaña.
+     */
+    receivedUnitsLabel(order) {
+      const units = Number(order?.total_received_units ?? 0);
+
+      return units === 1 ? 'unidad recibida' : 'unidades recibidas';
     }
   },
 
@@ -319,7 +329,7 @@ export const TechnicianVanStockPanel = {
             </span>
           </div>
           <div style="margin-top: 4px; font-family: var(--font-body); font-size: var(--font-size-body-sm); color: var(--color-ink-secondary);">
-            {{ formatDateTime(lastConfirmedOrder.confirmed_at) }} · <strong>{{ lastConfirmedOrder.total_received_units }}</strong> unidades recibidas
+            {{ formatDateTime(lastConfirmedOrder.confirmed_at) }} · <strong>{{ lastConfirmedOrder.total_received_units }}</strong> {{ receivedUnitsLabel(lastConfirmedOrder) }}
           </div>
           <p v-if="lastConfirmedOrder.reception_note" data-testid="tech-van-stock-last-reception-note" style="margin: 6px 0 0; font-family: var(--font-body); font-size: var(--font-size-caption); color: var(--color-ink-muted); font-style: italic;">
             Nota del técnico: "{{ lastConfirmedOrder.reception_note }}"

@@ -169,6 +169,24 @@ assert(
     && panel.categoryLabel('SIN_CATEGORIA') === 'SIN_CATEGORIA'
 );
 
+assert(
+  '2.8 El comprobante de recepción concuerda en singular con una sola unidad',
+  panel.receivedUnitsLabel({ total_received_units: 1 }) === 'unidad recibida'
+    && panel.receivedUnitsLabel({ total_received_units: '1' }) === 'unidad recibida'
+);
+assert(
+  '2.9 El comprobante usa el plural con cero, con varias unidades y sin dato',
+  panel.receivedUnitsLabel({ total_received_units: 0 }) === 'unidades recibidas'
+    && panel.receivedUnitsLabel({ total_received_units: 3 }) === 'unidades recibidas'
+    && panel.receivedUnitsLabel({}) === 'unidades recibidas'
+    && panel.receivedUnitsLabel(null) === 'unidades recibidas'
+);
+assert(
+  '2.10 La plantilla delega la concordancia en el método y no la fija en el texto',
+  SOURCE.includes('{{ receivedUnitsLabel(lastConfirmedOrder) }}')
+    && !/>\s*unidades recibidas/.test(SOURCE)
+);
+
 // =========================================================================
 // BLOQUE 3: Estado vacío y error recuperable
 // =========================================================================
