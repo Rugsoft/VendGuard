@@ -26,7 +26,7 @@
 
 ## Fase 1: Esquema de Base de Datos PostgreSQL / Supabase y Guardas de Esquema
 
-- [ ] **T-OFFLINE-01 · Migración `020_offline_pwa_sync.sql`, convergencia en `supabase_init.sql` y semillas**
+- [x] **T-OFFLINE-01 · Migración `020_offline_pwa_sync.sql`, convergencia en `supabase_init.sql` y semillas**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** Ninguna
   * **Ficheros a crear o modificar:**

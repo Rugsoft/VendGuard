@@ -1,5 +1,5 @@
 -- =============================================================================
--- VendGuard · DDL canónico del motor nuevo · COMPLETO (33 tablas)
+-- VendGuard · DDL canónico del motor nuevo · COMPLETO (34 tablas)
 -- PostgreSQL 15+ (certificado contra PostgreSQL 16.15 en deploy/local/postgres/)
 -- Fichero: database/supabase_init.sql
 -- Módulo: 12-hybrid-supabase-migration · T-HYBRID-01 (tablas 1-10) y T-HYBRID-02 (tablas 11-20)
@@ -8,7 +8,7 @@
 -- QUÉ ES ESTE FICHERO
 --   La creación del esquema relacional del motor nuevo: extensiones, los tipos
 --   `ENUM` del dominio con su tabla de correspondencia, las funciones canónicas
---   de blindaje y **las 33 tablas** con sus claves, restricciones, índices y
+--   de blindaje y **las 34 tablas** con sus claves, restricciones, índices y
 --   disparadores. La Parte 1 (§4) cubre `locations`, `machines`, `users`,
 --   `incidents`, `incident_history`, `incident_comments`, `audit_log`,
 --   `route_settings`, `preventive_settings` y `preventive_orders`; la Parte 2
@@ -22,7 +22,8 @@
 --   `incident_service_sheets` (M19), `incident_satisfaction_surveys` (M20),
 --   `technician_absences` (M21), `technician_shifts` (M21) y
 --   `technician_shift_logs` (M22), más las tablas 32 y 33 del Módulo 23
---   (`van_restock_orders` y `van_restock_order_items`).
+--   (`van_restock_orders` y `van_restock_order_items`) y la Tabla 34 del
+--   Módulo 24 (`offline_sync_mutations`).
 --
 -- CONTRATO QUE LO RIGE (no al revés)
 --   specs/technical/schema_correspondence_contract.md. Este DDL se escribe
@@ -2346,35 +2347,124 @@ CREATE OR REPLACE TRIGGER trg_no_delete_van_restock_order_items
     FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
 
 
+-- -----------------------------------------------------------------------------
+-- Tabla 34 · offline_sync_mutations — libro de operaciones sincronizadas (M24)
+-- -----------------------------------------------------------------------------
+-- QUÉ GUARDA
+--   Una fila por operación que el dispositivo encoló sin cobertura y el servidor
+--   acabó aplicando (o volcando como conflicto). `client_mutation_id` la genera
+--   el teléfono y, junto al técnico, es la clave de idempotencia: un reintento
+--   por señal intermitente devuelve el resultado ya guardado en lugar de repetir
+--   el descuento de repuestos, el comentario o el albarán (RF-04.2).
+--
+-- POR QUÉ TRES MARCAS TEMPORALES
+--   `client_occurred_at` es lo que el reloj del dispositivo declaró,
+--   `effective_occurred_at` el instante que el servidor aplicó tras resolver el
+--   desfase y `synced_at` cuándo llegó la operación. El primero sin el segundo no
+--   prueba que hubo ajuste; el segundo sin el primero borra el tiempo real in
+--   situ de la métrica (QA 4).
+--
+-- POR QUÉ LA PARADA ES POLIMÓRFICA Y SIN CLAVE FORÁNEA
+--   `stop_type` discrimina entre avería y orden preventiva, dos tablas con
+--   secuencias independientes. Una FK doble exigiría dos columnas anulables más
+--   un CHECK de exclusividad para expresar lo mismo. La aplicación escribe esta
+--   fila dentro de la transacción del cambio de estado, nunca suelta, y el
+--   catálogo cerrado de `stop_type` es el que cierra la forma.
+--
+-- POR QUÉ `response_payload` ES JSONB
+--   Es la respuesta que el reintento recibe literalmente, para que el cliente
+--   reconstruya el albarán o el identificador del comentario sin volver a
+--   pedirlos. Su forma la dicta el contrato del endpoint, no esta tabla.
+CREATE TABLE IF NOT EXISTS offline_sync_mutations (
+    id                      BIGINT GENERATED ALWAYS AS IDENTITY,
+    technician_id           BIGINT NOT NULL,
+    client_mutation_id      VARCHAR(64) NOT NULL,
+    stop_type               VARCHAR(20) NOT NULL,
+    stop_id                 BIGINT NOT NULL,
+    operation_type          VARCHAR(40) NOT NULL,
+    outcome_status          VARCHAR(30) NOT NULL DEFAULT 'APPLIED',
+    client_occurred_at      TIMESTAMPTZ NOT NULL,
+    chain_started_at        TIMESTAMPTZ,
+    effective_occurred_at   TIMESTAMPTZ NOT NULL,
+    synced_at               TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    clock_skew_adjusted     BOOLEAN NOT NULL DEFAULT FALSE,
+    sanitary_seal_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+    response_http_status    INT NOT NULL DEFAULT 200,
+    response_payload        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT pk_offline_sync_mutations PRIMARY KEY (id),
+    CONSTRAINT fk_offline_sync_mutations_technician FOREIGN KEY (technician_id)
+        REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT uq_offline_sync_tech_mutation UNIQUE (technician_id, client_mutation_id),
+    CONSTRAINT chk_offline_sync_mutation_id_format CHECK (
+        char_length(btrim(client_mutation_id)) BETWEEN 8 AND 64
+        AND client_mutation_id ~ '^[A-Za-z0-9_.:-]+$'
+    ),
+    CONSTRAINT chk_offline_sync_stop_type CHECK (
+        stop_type IN ('INCIDENT', 'PREVENTIVE_ORDER')
+    ),
+    CONSTRAINT chk_offline_sync_operation_type CHECK (
+        operation_type IN (
+            'START_INCIDENT',
+            'RESUME_INCIDENT_PENDING_INFO',
+            'PAUSE_INCIDENT_PARTS',
+            'PAUSE_INCIDENT_PENDING_INFO',
+            'RESOLVE_INCIDENT',
+            'START_PREVENTIVE',
+            'COMPLETE_PREVENTIVE',
+            'REINSPECT_PREVENTIVE',
+            'ADD_INCIDENT_COMMENT'
+        )
+    ),
+    CONSTRAINT chk_offline_sync_outcome_status CHECK (
+        outcome_status IN ('APPLIED', 'CONFLICT_DUMPED', 'DEACTIVATED_ACCOUNT_DUMP')
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_offline_sync_mutations_stop
+    ON offline_sync_mutations (stop_type, stop_id, synced_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_offline_sync_mutations_tech_synced
+    ON offline_sync_mutations (technician_id, synced_at DESC);
+
+CREATE OR REPLACE TRIGGER trg_no_delete_offline_sync_mutations
+    BEFORE DELETE ON offline_sync_mutations
+    FOR EACH ROW EXECUTE FUNCTION prevent_hard_delete();
+
 -- =============================================================================
 -- RESULTADO DEL FICHERO COMPLETO
 -- =============================================================================
--- 33 tablas (las 33 del contrato de correspondencia) · 24 tipos del dominio en sus
+-- 34 tablas (las 34 del contrato de correspondencia) · 24 tipos del dominio en sus
 -- 25 columnas `ENUM` · 5 funciones de blindaje: `prevent_hard_delete()`,
 -- `touch_updated_at()`, `prevent_service_sheet_rewrite()`,
 -- `prevent_satisfaction_survey_rewrite()` y `prevent_service_sheet_update()`
 -- (las tres últimas de bloqueo de `UPDATE` comparten forma)
--- 54 disparadores: 33 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 18
+-- 55 disparadores: 34 `BEFORE DELETE` (`trg_no_delete_*`, Art. III.1), 18
 -- `BEFORE UPDATE` (`trg_touch_*`, forma PostgreSQL de D-2) y 3 `BEFORE UPDATE` de
 -- bloqueo (`trg_no_update_incident_service_sheets`,
 -- `trg_no_update_incident_satisfaction_surveys` y
 -- `trg_no_update_technician_shift_logs`)
--- 52 restricciones nombradas: 33 claves primarias (la del mapeo de códigos postales
--- es el propio CP, no un identificador sintético) y 19 únicas
--- 45 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
+-- 55 restricciones nombradas: 34 claves primarias (la del mapeo de códigos postales
+-- es el propio CP, no un identificador sintético) y 21 únicas
+-- 49 restricciones `CHECK`: las 23 declaradas hasta el Módulo 20 más las 6 del
 -- Módulo 21 (3 en ausencias y 3 en turnos), las 4 del Módulo 22 (2 en turnos y 2
--- en la bitácora) y las 12 del Módulo 23 (5 en órdenes y 7 en líneas) · 68 claves
--- foráneas con las reglas declaradas en el contrato §2.4
--- 83 índices secundarios —uno por índice no único del esquema local y con las mismas
+-- en la bitácora), las 12 del Módulo 23 (5 en órdenes y 7 en líneas) y las 4 del
+-- Módulo 24 (formato del identificador, tipo de parada, operación y resultado)
+-- · 69 claves foráneas con las reglas declaradas en el contrato §2.4
+-- 85 índices secundarios —uno por índice no único del esquema local y con las mismas
 -- columnas (D-9), más los del Módulo 17 (5), el Módulo 18 (2), el Módulo 19 (1), el
--- Módulo 20 (3), el Módulo 21 (3), el Módulo 22 (2) y el Módulo 23 (5)— y cinco
--- índices únicos parciales: `uq_machine_active_ticket` (D-6),
+-- Módulo 20 (3), el Módulo 21 (3), el Módulo 22 (2), el Módulo 23 (5) y el
+-- Módulo 24 (2)— y siete índices únicos parciales: `uq_machine_active_ticket` (D-6),
 -- `uq_technician_zone_live`, `uq_technician_primary_zone` (Resolución QA 10),
+-- `uq_users_telegram_chat_id` (M16), `uq_zone_postal_codes_live` (M17),
 -- `uq_tech_shifts_single_active` (M21, Resolución R3) y
 -- `uq_van_restock_open_per_tech` (M23, Decisión D3)
 -- 2 columnas canónicas (`site_code_key`, `email_key`) con índice único propio (A-1/A-2)
 -- 1 columna derivada (`incident_replaced_parts.total_cost_snapshot`, D-7)
--- 5 columnas `JSONB`: 3 en `audit_log` (D-4) y 2 en `technician_shift_logs` (M22)
+-- 8 columnas `JSONB`: 3 en `audit_log` (D-4), 2 en `technician_shift_logs` (M22),
+-- `signed_document` en `incident_service_sheets` (M19), `payload_json` en
+-- `notification_outbox` (M16) y `response_payload` en `offline_sync_mutations` (M24)
 --
 -- La verificación de correspondencia entre motores y la convergencia del esquema
 -- desplegado son T-HYBRID-23 y T-HYBRID-24; las semillas maestras, T-HYBRID-03.

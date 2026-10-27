@@ -1735,6 +1735,186 @@ class SeedRunner
     }
 
     /**
+     * Mutaciones de sincronización sembradas del Módulo 24.
+     *
+     * Deja en el libro de idempotencia las dos ramas que la bandeja del técnico
+     * necesita demostrar: una inspección preventiva completada sin cobertura y
+     * aplicada al recuperar la señal, y una reinspección que llegó cuando la
+     * orden ya estaba cerrada y se volcó como conflicto conservando el desfase
+     * de reloj del dispositivo. Se resuelven por la clave canónica del técnico y
+     * por `order_code`, nunca por identificadores que la secuencia asigna
+     * distinto en cada base; reejecutar el catálogo no duplica ninguna fila.
+     *
+     * La auditoría de la mutación aplicada reutiliza la acción ya catalogada
+     * `EVALUATE_PREVENTIVE_CHECKLIST`. El volcado en conflicto estrena su propia
+     * acción con el repositorio del módulo y su etiqueta en el visor, así que
+     * sembrarla ahora dejaría `audit_log` con una acción que coordinación no
+     * sabría nombrar (el guardián del vocabulario lo rechaza).
+     *
+     * @return int Mutaciones canónicas vivas tras sembrar.
+     */
+    public function seedOfflineSyncMutations(): int
+    {
+        $identityColumn = $this->dialect->requiresCanonicalIdentityColumns() ? 'email_key' : 'email';
+
+        $insertMutation = $this->pdo->prepare(sprintf(
+            'INSERT INTO offline_sync_mutations (
+                technician_id, client_mutation_id, stop_type, stop_id, operation_type,
+                outcome_status, client_occurred_at, chain_started_at, effective_occurred_at,
+                synced_at, clock_skew_adjusted, sanitary_seal_confirmed,
+                response_http_status, response_payload
+             )
+             SELECT technician.id, :client_mutation_id, \'PREVENTIVE_ORDER\', preventive.id,
+                    :operation_type, :outcome_status, :client_occurred_at,
+                    :chain_started_at, :effective_occurred_at, :synced_at,
+                    CAST(:clock_skew_adjusted AS BOOLEAN),
+                    CAST(:sanitary_seal_confirmed AS BOOLEAN),
+                    :response_http_status, CAST(:response_payload AS JSONB)
+               FROM users technician
+               JOIN preventive_orders preventive ON preventive.order_code = :order_code
+              WHERE technician.%1$s = :technician_email
+                AND NOT EXISTS (
+                    SELECT 1 FROM offline_sync_mutations m
+                     WHERE m.technician_id = technician.id
+                       AND m.client_mutation_id = :client_mutation_id_lookup
+                )',
+            $identityColumn
+        ));
+
+        $insertAudit = $this->pdo->prepare(
+            'INSERT INTO audit_log (
+                entity_type, entity_id, action, user_id, user_role, user_name,
+                previous_state, new_state, metadata, created_at
+             )
+             SELECT \'PREVENTIVE_ORDER\', m.stop_id, \'EVALUATE_PREVENTIVE_CHECKLIST\',
+                    m.technician_id, \'TECHNICIAN\', technician.name,
+                    :previous_state, :new_state, :metadata, m.synced_at
+               FROM offline_sync_mutations m
+               JOIN users technician ON technician.id = m.technician_id
+              WHERE m.stop_type = \'PREVENTIVE_ORDER\'
+                AND m.client_mutation_id = :client_mutation_id
+                AND NOT EXISTS (
+                    SELECT 1 FROM audit_log a
+                     WHERE a.entity_type = \'PREVENTIVE_ORDER\'
+                       AND a.entity_id = m.stop_id
+                       AND a.action = \'EVALUATE_PREVENTIVE_CHECKLIST\'
+                       AND a.created_at = m.synced_at
+                )'
+        );
+
+        $now = new \DateTimeImmutable('now');
+        $seeded = 0;
+
+        foreach (self::canonicalOfflineSyncMutationRows() as $row) {
+            $syncedAt = $now->modify(sprintf('%+d seconds', -$row['sync_delay_seconds']));
+            $clientOccurredAt = $syncedAt->modify(sprintf('%+d seconds', $row['client_offset_seconds']));
+            $chainStartedAt = $clientOccurredAt->modify(sprintf('%+d seconds', $row['chain_offset_seconds']));
+            $effectiveOccurredAt = $row['clock_skew_adjusted'] ? $syncedAt : $clientOccurredAt;
+
+            $insertMutation->execute([
+                ':client_mutation_id' => $row['client_mutation_id'],
+                ':client_mutation_id_lookup' => $row['client_mutation_id'],
+                ':operation_type' => $row['operation_type'],
+                ':outcome_status' => $row['outcome_status'],
+                ':client_occurred_at' => $clientOccurredAt->format('Y-m-d H:i:sP'),
+                ':chain_started_at' => $chainStartedAt->format('Y-m-d H:i:sP'),
+                ':effective_occurred_at' => $effectiveOccurredAt->format('Y-m-d H:i:sP'),
+                ':synced_at' => $syncedAt->format('Y-m-d H:i:sP'),
+                ':clock_skew_adjusted' => $row['clock_skew_adjusted'] ? 'true' : 'false',
+                ':sanitary_seal_confirmed' => $row['sanitary_seal_confirmed'] ? 'true' : 'false',
+                ':response_http_status' => $row['response_http_status'],
+                ':response_payload' => (string)json_encode(
+                    $row['response_payload'],
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                ),
+                ':order_code' => $row['order_code'],
+                ':technician_email' => $row['technician_email'],
+            ]);
+
+            $seeded += $insertMutation->rowCount();
+
+            if ($row['outcome_status'] !== 'APPLIED') {
+                continue;
+            }
+
+            $insertAudit->execute([
+                ':previous_state' => (string)json_encode(['status' => 'IN_PROGRESS'], JSON_UNESCAPED_UNICODE),
+                ':new_state' => (string)json_encode(
+                    ['status' => 'COMPLETED', 'result' => 'CONFORME'],
+                    JSON_UNESCAPED_UNICODE
+                ),
+                ':metadata' => (string)json_encode([
+                    'source' => 'SEED',
+                    'offline_sync' => [
+                        'client_mutation_id' => $row['client_mutation_id'],
+                        'operation_type' => $row['operation_type'],
+                        'client_occurred_at' => $clientOccurredAt->format('Y-m-d H:i:sP'),
+                        'effective_occurred_at' => $effectiveOccurredAt->format('Y-m-d H:i:sP'),
+                        'synced_at' => $syncedAt->format('Y-m-d H:i:sP'),
+                        'clock_skew_adjusted' => $row['clock_skew_adjusted'],
+                    ],
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ':client_mutation_id' => $row['client_mutation_id'],
+            ]);
+        }
+
+        return $seeded;
+    }
+
+    /**
+     * Las dos mutaciones canónicas del Módulo 24.
+     *
+     * `sync_delay_seconds` sitúa la sincronización en el pasado; los desplazamientos
+     * de cliente y cadena reproducen el reloj desajustado del segundo caso, que es
+     * justo el que el servidor corrige preservando la duración relativa (QA 4).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function canonicalOfflineSyncMutationRows(): array
+    {
+        return [
+            [
+                'technician_email' => 'jordi.ruta@vendguard.internal',
+                'order_code' => 'ORD-PREV-2026-0001',
+                'client_mutation_id' => 'seed-offline-20261026-0001',
+                'operation_type' => 'COMPLETE_PREVENTIVE',
+                'outcome_status' => 'APPLIED',
+                'sync_delay_seconds' => 86400,
+                'client_offset_seconds' => 0,
+                'chain_offset_seconds' => -1500,
+                'clock_skew_adjusted' => false,
+                'sanitary_seal_confirmed' => false,
+                'response_http_status' => 200,
+                'response_payload' => [
+                    'status' => 'COMPLETED',
+                    'result' => 'CONFORME',
+                    'idempotent_replay' => false,
+                    'source' => 'SEED',
+                ],
+            ],
+            [
+                'technician_email' => 'jordi.ruta@vendguard.internal',
+                'order_code' => 'ORD-PREV-2026-0002',
+                'client_mutation_id' => 'seed-offline-20261026-0002',
+                'operation_type' => 'REINSPECT_PREVENTIVE',
+                'outcome_status' => 'CONFLICT_DUMPED',
+                'sync_delay_seconds' => 172800,
+                'client_offset_seconds' => -86400,
+                'chain_offset_seconds' => -1500,
+                'clock_skew_adjusted' => true,
+                'sanitary_seal_confirmed' => false,
+                'response_http_status' => 409,
+                'response_payload' => [
+                    'error' => 'OFFLINE_MUTATION_CONFLICT',
+                    'conflict_reason' => 'La orden preventiva ya constaba como completada en el servidor al recuperar la cobertura.',
+                    'work_summary' => ['checklist_completed' => true, 'evidence_photos' => 1],
+                    'source' => 'SEED',
+                ],
+            ],
+        ];
+    }
+
+    /**
      * Ejecuta todas las semillas dentro de una transacción.
      *
      * @param string $defaultPassword
@@ -1767,6 +1947,9 @@ class SeedRunner
             // Las órdenes de carga demo (Módulo 23) cuelgan de técnico y repuesto,
             // así que entran cuando ambas maestras ya están sembradas.
             $vanRestockOrderCount = $this->seedVanRestockOrders();
+            // El libro de idempotencia del Módulo 24 se apoya en las órdenes
+            // preventivas ya sembradas: sin ellas no hay parada a la que apuntar.
+            $offlineSyncMutationCount = $this->seedOfflineSyncMutations();
 
             $this->pdo->commit();
 
@@ -1784,6 +1967,7 @@ class SeedRunner
                 'spare_part_compatibilities' => $partsRes['compatibilities'],
                 'technician_van_stocks' => $vanStockCount,
                 'van_restock_orders' => $vanRestockOrderCount,
+                'offline_sync_mutations' => $offlineSyncMutationCount,
             ];
         } catch (PDOException $e) {
             if ($this->pdo->inTransaction()) {
