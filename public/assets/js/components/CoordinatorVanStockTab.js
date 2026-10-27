@@ -1030,6 +1030,9 @@ export const CoordinatorVanStockTab = {
                       <div v-if="hasRecipientAlert(proposal)" data-testid="coord-restock-absent-warning" style="margin-top: 4px; display: inline-block; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); font-size: var(--font-size-caption); font-weight: 700;">
                         ⚠️ Destinatario actualmente ausente / inactivo
                       </div>
+                      <div v-else-if="!isRecipientInactive(proposal) && (proposal.items || []).length === 0" :data-testid="'coord-restock-proposal-covered-' + proposal.technician_id" class="vg-chip vg-chip-success" style="margin-top: 4px;">
+                        Stock cubierto
+                      </div>
                     </td>
                     <td style="padding: 8px 10px; border-bottom: 1px solid var(--color-hairline-soft); color: var(--color-ink-secondary);">
                       {{ (proposal.items || []).length }}
@@ -1104,7 +1107,7 @@ export const CoordinatorVanStockTab = {
                     </td>
                     <td style="padding: 8px 10px; border-bottom: 1px solid var(--color-hairline-soft); color: var(--color-ink);">
                       <div style="font-weight: 600;">{{ order.technician_name }}</div>
-                      <div v-if="hasRecipientAlert(order)" :data-testid="'coord-restock-order-absent-' + order.id" style="margin-top: 4px; display: inline-block; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); font-size: var(--font-size-caption); font-weight: 700;">
+                      <div v-if="isOpenOrder(order) && hasRecipientAlert(order)" :data-testid="'coord-restock-order-absent-' + order.id" style="margin-top: 4px; display: inline-block; padding: 2px 6px; border-radius: var(--radius-interactive); background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); font-size: var(--font-size-caption); font-weight: 700;">
                         ⚠️ Destinatario actualmente ausente / inactivo
                       </div>
                     </td>

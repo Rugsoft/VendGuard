@@ -8,7 +8,7 @@
 **Fecha:** Octubre 2026  
 **Alineación Constitucional:**
 * **Art. I.1 (SDD estricto):** Ninguna línea de código sin especificación y contrato aprobados; cero implementaciones simuladas o *stubs*.
-* **Art. II (Prioridad Sanitaria Absoluta):** El cruce de stock en triaje (`RF-06`, `D2`) es **100% informativo**. No altera ni un solo punto de `TechnicianWorkloadScorer` (`BREAKDOWN_KEYS` intactas) ni interfiere con el escalado al técnico de guardia en averías críticas de máquinas perecederas.
+* **Art. II (Prioridad Sanitaria Absoluta):** El cruce de stock en triaje (`RF-05`, `D2`) es **100% informativo**. No altera ni un solo punto de `TechnicianWorkloadScorer` (`BREAKDOWN_KEYS` intactas) ni interfiere con el escalado al técnico de guardia en averías críticas de máquinas perecederas.
 * **Art. III.1 y III.3 (Inviolabilidad de Datos e Histórico):** Prohibición absoluta de `DELETE FROM` en lógica de aplicación. Las tablas `van_restock_orders` y `van_restock_order_items` incluyen disparadores `trg_no_delete_*` (`prevent_hard_delete()`). La eliminación de líneas durante la edición en `PENDING_PICKING` se realiza mediante **baja lógica** (`removed_at TIMESTAMPTZ` y `removed_by BIGINT`, `QA 1`). La confirmación de carga no reescribe `incident_replaced_parts` ni transiciona automáticamente estados de averías ni de `spare_part_requests` (`C4`, `QA 3`).
 * **Art. IV.1–IV.3 (Dogma Vanilla):** Backend en PHP 8.2+ POO estricto (`declare(strict_types=1);`) con PDO (`pdo_pgsql`); frontend en Vue 3 mediante Vanilla ES Modules nativos sin *bundlers*; impresión del Albarán de Picking A4 mediante CSS `@media print` y `window.print()`, sin librerías PDF externas.
 * **Art. V.1 y V.4 (Reglas de Negocio y Privacidad):** Justificación obligatoria $\ge 20$ caracteres reales tras `btrim()` al cancelar una orden. Segregación estricta frente al `LOCATION_RESPONSIBLE` (`403 FORBIDDEN` y saneador de salida) y aislamiento por `user_id` entre técnicos. Ausencia total de costes (`reference_cost`) en API y en el Picking A4.
@@ -41,14 +41,14 @@
 | **Core / Domain** | `src/Core/Domain/Repository/VanRestockOrderRepositoryInterface.php` | **Crear** | Puerto de persistencia: cálculo de insumos de propuesta (`fetchProposalInputs()`), CRUD sin borrado físico (`createOrder()`, `updatePendingOrderWithSoftDelete()`, `markDispatched()`, `markCancelled()`), confirmación transaccional con cerrojo `FOR UPDATE` (`confirmOrderAndIncrementVanStock()`), y consultas (`findById()`, `findAllForCoordinator()`, `findActiveDispatchedForTechnician()`, `findLastConfirmedForTechnician()`). |
 | **Application** | `src/Application/DTO/VanRestockProposalDto.php` | **Crear** | Proyección inmutable de propuesta de carga por técnico con sus líneas ordenadas de forma determinista (`QA 5`), indicador `recipient_currently_absent` (`QA 4`) y referencia a orden abierta si existe. |
 | **Application** | `src/Application/Service/VanRestockOrderService.php` | **Crear** | Orquestador de casos de uso (`RF-01` a `RF-05`): fórmula de pre-cálculo (`LOW_STOCK`, `PENDING_REQUEST`, `BOTH`) con tope doble `9999` (`QA 1`), ordenación determinista (`QA 5`), creación individual (`RF-02.1`), generación por lotes omitiendo ausentes/sin déficit/con orden abierta (`RF-02.2`, `QA 4`), edición en `PENDING_PICKING` con baja lógica (`RF-02.4`, `QA 1`), expedición (`RF-04.1`), cancelación justificada (`RF-04.2`) y confirmación móvil en 1 toque (`RF-05.2`). |
-| **Application** | `src/Application/Service/TechnicianAssignmentSuggester.php` | **Modificar** | Incorporación del cálculo informativo en 2 niveles (`evaluateVanStockMatch()`, `RF-06`, `D2`, `C1`, `QA 2`) y adición de la insignia (`STOCK_COMPATIBLE`, `STOCK_PARCIAL`, `SIN_STOCK_COMPATIBLE`) y del objeto `van_stock_match` en cada candidato de `SuggestedTechnicianDto`, **sin modificar `TechnicianWorkloadScorer`**. |
+| **Application** | `src/Application/Service/TechnicianAssignmentSuggester.php` | **Modificar** | Incorporación del cálculo informativo en 2 niveles (`evaluateVanStockMatch()`, `RF-05`, `D2`, `C1`, `QA 2`) y adición de la insignia (`STOCK_COMPATIBLE`, `STOCK_PARCIAL`, `SIN_STOCK_COMPATIBLE`) y del objeto `van_stock_match` en cada candidato de `SuggestedTechnicianDto`, **sin modificar `TechnicianWorkloadScorer`**. |
 | **Application** | `src/Application/DTO/SuggestedTechnicianDto.php` | **Modificar** | Inclusión de las constantes de insignia de stock y del campo `van_stock_match` en la proyección de cada candidato sugerido. |
-| **Application** | `src/Application/Service/VanStockReadinessCalculator.php` | **Crear** | Calculador puro del indicador `van_stock_readiness` (`READY_IN_VAN`, `SHARED_IN_VAN`, `NOT_READY`, `HAS_OUT_OF_CATALOG`, `NOT_APPLICABLE`, `RF-05.4` y `QA 3`) para enriquecer las tarjetas de averías activas sin N+1. |
+| **Application** | `src/Application/Service/VanStockReadinessCalculator.php` | **Crear** | Calculador puro del indicador `van_stock_readiness` (`READY_IN_VAN`, `SHARED_IN_VAN`, `NOT_READY`, `HAS_OUT_OF_CATALOG`, `NOT_APPLICABLE`, `RF-04.3` y `QA 3`) para enriquecer las tarjetas de averías activas sin N+1. |
 | **Infrastructure** | `src/Infrastructure/Repository/PdoVanRestockOrderRepository.php` | **Crear** | Implementación PDO sobre PostgreSQL de `VanRestockOrderRepositoryInterface`: consultas agregadas sin N+1, reactivación o baja lógica de líneas en `PUT`, bloqueo pesimista `SELECT ... FOR UPDATE` en `van_restock_orders` y `technician_van_stocks` durante la confirmación móvil, y escritura atómica en `audit_log` (`entity_type = 'VAN_RESTOCK_ORDER'`). |
 | **Infrastructure** | `src/Infrastructure/Repository/PdoTechnicianSuggestionRepository.php` | **Modificar** | Ampliación de `findSuggestionPhoto()` en un número constante de viajes SQL para aportar: (a) `incident.category` y `incident.machine_model`, (b) solicitudes `PENDING` de la avería (`spare_part_requests` catalogadas y flag de fuera de catálogo), (c) universo de repuestos activos compatibles con `(machine_model, category)` y (d) saldos de `technician_van_stocks` de los candidatos para esas piezas (`RNF-01`). |
 | **Presentation** | `src/Presentation/Controller/CoordinatorVanRestockOrderController.php` | **Crear** | Controlador REST para Coordinación: `getProposals()`, `listOrders()`, `getOrderDetail()`, `createOrder()`, `generateBatch()`, `updateOrder()`, `dispatchOrder()`, `cancelOrder()`. |
 | **Presentation** | `src/Presentation/Controller/TechnicianVanStockController.php` | **Modificar** | Enriquecimiento de `getInventory()` con `active_dispatched_order` y `last_confirmed_order` (`RF-05.1`, `QA 5`), y nuevo método `confirmRestockOrder()` (`POST /api/technician/van-stock/restock-orders/{id}/confirm`, `RF-05.2`) independiente del estado de turno (`QA 4`). |
-| **Presentation** | `src/Presentation/Controller/CoordinatorController.php` y `src/Presentation/Controller/TechnicianController.php` | **Modificar** | Enriquecimiento de las tarjetas de averías activas en `GET /api/coordinator/incidents` y `GET /api/technician/my-route` con `van_stock_readiness` (`RF-05.4`, `QA 3`). |
+| **Presentation** | `src/Presentation/Controller/CoordinatorController.php` y `src/Presentation/Controller/TechnicianController.php` | **Modificar** | Enriquecimiento de las tarjetas de averías activas en `GET /api/coordinator/incidents` y `GET /api/technician/my-route` con `van_stock_readiness` (`RF-04.3`, `QA 3`). |
 | **Presentation** | `src/Presentation/Controller/LocationPortalController.php` | **Modificar** | Ampliación de la lista de claves vedadas del saneador del portal de sede con `van_stock_match`, `van_stock_readiness`, `active_dispatched_order`, `last_confirmed_order` y `restock_order` (`Art. V.4`, `RNF-03`). |
 | **Presentation** | `src/Presentation/Routing/AppRouter.php` | **Modificar** | Registro de las 8 rutas de Coordinación y la ruta de confirmación del Técnico bajo `InternalAuthMiddleware`. |
 
@@ -59,8 +59,8 @@
 | `public/assets/js/api.js` | **Modificar** | Nuevos métodos en `api.coordinator` (`getVanRestockProposals`, `getVanRestockOrders`, `getVanRestockOrderDetail`, `createVanRestockOrder`, `generateVanRestockBatch`, `updateVanRestockOrder`, `dispatchVanRestockOrder`, `cancelVanRestockOrder`) y en `api.technician` (`confirmVanRestockOrder`). |
 | `public/assets/js/components/CoordinatorVanStockTab.js` | **Modificar** | Incorporación de la sub-vista **«📦 Órdenes de Carga y Propuestas»** junto a «Alertas» e «Inventario completo»: listado de propuestas pre-calculadas con botón **«Generar órdenes de carga pendientes (Lote)»**, formulario de creación/edición en `PENDING_PICKING` con adición manual (`MANUAL`) y baja lógica de líneas, modal de expedición con `dispatched_qty` por línea, modal de cancelación ($\ge 20$ caracteres), alerta visual `⚠️ Destinatario actualmente ausente / inactivo` (`QA 4`) y vista de impresión de **Albarán de Picking A4** (`window.print()`, `RF-03`) sin ningún coste ni precio. |
 | `public/assets/js/components/TechnicianVanStockPanel.js` | **Modificar** | Incorporación de la tarjeta destacada de recepción **«📦 Carga Expedida Pendiente de Confirmar»** con botón de 1 toque **«Confirmar recepción de carga»** (`min-height: 44px`, `RF-05.1`, `RF-05.2`) y bloque colapsable/resumen de **«Última carga confirmada»** (`last_confirmed_order`, `QA 5`). |
-| `public/assets/js/views/CoordinatorDashboardView.js` | **Modificar** | Renderizado de la insignia informativa de stock (`🟢 Stock compatible`, `🟡 Stock parcial`, `⚪ Sin stock compatible`) y del texto `van_stock_match.label` en cada candidato del modal de sugerencia de triaje (`RF-06`), además del chip `📦 Repuesto ya en furgoneta` / `📦 Repuesto en furgoneta (stock compartido)` en las tarjetas de averías activas (`RF-05.4`, `QA 3`). |
-| `public/assets/js/views/TechnicianRouteView.js` | **Modificar** | Renderizado del chip `van_stock_readiness.badge_label` (`📦 Repuesto ya en furgoneta` o `📦 Repuesto en furgoneta (stock compartido)`) en las tarjetas de averías activas de Mi Ruta (`RF-05.4`, `QA 3`). |
+| `public/assets/js/views/CoordinatorDashboardView.js` | **Modificar** | Renderizado de la insignia informativa de stock (`🟢 Stock compatible`, `🟡 Stock parcial`, `⚪ Sin stock compatible`) y del texto `van_stock_match.label` en cada candidato del modal de sugerencia de triaje (`RF-05`), además del chip `📦 Repuesto ya en furgoneta` / `📦 Repuesto en furgoneta (stock compartido)` en las tarjetas de averías activas (`RF-04.3`, `QA 3`). |
+| `public/assets/js/views/TechnicianRouteView.js` | **Modificar** | Renderizado del chip `van_stock_readiness.badge_label` (`📦 Repuesto ya en furgoneta` o `📦 Repuesto en furgoneta (stock compartido)`) en las tarjetas de averías activas de Mi Ruta (`RF-04.3`, `QA 3`). |
 | `public/assets/js/utils/AuditActionLabels.js` | **Modificar** | Etiquetas en castellano para `CREATE_VAN_RESTOCK_ORDER`, `UPDATE_VAN_RESTOCK_ORDER`, `DISPATCH_VAN_RESTOCK_ORDER`, `CONFIRM_VAN_RESTOCK_ORDER` y `CANCEL_VAN_RESTOCK_ORDER`. |
 | `public/assets/css/styles.css` | **Modificar** | Reglas `@media print` para el Albarán de Picking A4 (ocultando navegación lateral, cabeceras de aplicación y botones de acción, y formateando la tabla técnica con casillas de verificación física `[ ]` usando exclusivamente variables CSS `var(--color-*)` para respetar `DesignTokenDebtRatchetTest`). |
 
@@ -73,7 +73,7 @@
 | # | Método | Endpoint | Rol Requerido | Códigos HTTP | Requisitos |
 | :---: | :---: | :--- | :---: | :---: | :--- |
 | **1** | `GET` | `/api/coordinator/van-restock-orders/proposals` | `COORDINATOR` | `200`, `401`, `403`, `422` | `RF-01`, `QA 1`, `QA 4`, `QA 5` |
-| **2** | `GET` | `/api/coordinator/van-restock-orders` | `COORDINATOR` | `200`, `401`, `403`, `422` | `RF-02`, `RF-04.4`, `QA 4` |
+| **2** | `GET` | `/api/coordinator/van-restock-orders` | `COORDINATOR` | `200`, `401`, `403`, `422` | `RF-02`, `RF-02.2`, `QA 4` |
 | **3** | `GET` | `/api/coordinator/van-restock-orders/{id}` | `COORDINATOR` | `200`, `401`, `403`, `404` | `RF-03`, `Art. V.4` |
 | **4** | `POST` | `/api/coordinator/van-restock-orders` | `COORDINATOR` | `201`, `401`, `403`, `409`, `422` | `RF-02.1`, `RF-02.3`, `D3`, `QA 1`, `QA 4` |
 | **5** | `POST` | `/api/coordinator/van-restock-orders/generate-batch` | `COORDINATOR` | `200`, `401`, `403` | `RF-02.2`, `D3`, `QA 4` |
@@ -82,8 +82,8 @@
 | **8** | `POST` | `/api/coordinator/van-restock-orders/{id}/cancel` | `COORDINATOR` | `200`, `401`, `403`, `404`, `409`, `422` | `RF-04.2`, `Art. V.1` |
 | **9** | `GET` | `/api/technician/van-stock` *(enriquecido)* | `TECHNICIAN` | `200`, `401`, `403` | `RF-05.1`, `QA 5`, `Art. V.4` |
 | **10** | `POST` | `/api/technician/van-stock/restock-orders/{id}/confirm` | `TECHNICIAN` | `200`, `401`, `403`, `404`, `409`, `422` | `RF-05.2`, `D3`, `QA 1`, `QA 4`, `RNF-02` |
-| **11** | `GET` | `/api/coordinator/incidents/{id}/suggested-technicians` *(enriquecido)* | `COORDINATOR` | `200`, `401`, `403`, `404` | `RF-06`, `D2`, `C1`, `QA 2`, `RNF-01` |
-| **12** | `GET` | `/api/coordinator/incidents` y `/api/technician/my-route` *(enriquecidos)* | `COORDINATOR` / `TECHNICIAN` | `200`, `401`, `403` | `RF-05.4`, `QA 3` |
+| **11** | `GET` | `/api/coordinator/incidents/{id}/suggested-technicians` *(enriquecido)* | `COORDINATOR` | `200`, `401`, `403`, `404` | `RF-05`, `D2`, `C1`, `QA 2`, `RNF-01` |
+| **12** | `GET` | `/api/coordinator/incidents` y `/api/technician/my-route` *(enriquecidos)* | `COORDINATOR` / `TECHNICIAN` | `200`, `401`, `403` | `RF-04.3`, `QA 3` |
 
 ### 2.2. Síntesis de Payloads Clave
 
@@ -264,7 +264,7 @@ FUNCTION confirmOrderAndIncrementVanStock(orderId, authenticatedTechnicianId):
         RETHROW e
 ```
 
-### 3.4. Algoritmo de Cruce Informativo en 2 Niveles en Triaje (`RF-06`, `D2`, `C1`, `QA 2`)
+### 3.4. Algoritmo de Cruce Informativo en 2 Niveles en Triaje (`RF-05`, `D2`, `C1`, `QA 2`)
 
 ```text
 FUNCTION evaluateVanStockMatch(incidentContext, technicianVanStockMap):
@@ -360,7 +360,7 @@ FUNCTION evaluateVanStockMatch(incidentContext, technicianVanStockMap):
     END IF
 ```
 
-### 3.5. Cálculo de `van_stock_readiness` en Tarjetas de Avería Activa (`RF-05.4`, `QA 3`)
+### 3.5. Cálculo de `van_stock_readiness` en Tarjetas de Avería Activa (`RF-04.3`, `QA 3`)
 
 ```text
 FUNCTION computeIncidentVanStockReadiness(incident, pendingReqsByIncident, totalPendingByTechAndPart, vanStockByTechAndPart):
@@ -415,7 +415,7 @@ FUNCTION computeIncidentVanStockReadiness(incident, pendingReqsByIncident, total
 
 ## 4. Arquitectura de Vistas y Componentes Frontend (Sistema de Diseño `docs/design.md`)
 
-Todas las vistas y componentes nuevos o modificados cumplen estrictamente las reglas de [`docs/design.md`](../../docs/design.md) y sus guardas automatizadas (`CoordinatorButtonVariantsGuardTest.mjs`, `LegacyButtonPaletteRetirementTest.php` y `DesignTokenDebtRatchetTest.php`):
+Todas las vistas y componentes nuevos o modificados cumplen estrictamente las reglas de [`docs/design.md`](../../docs/design.md) y sus guardas automatizadas (`CoordinatorButtonVariantsGuardTest.mjs`, `LegacyButtonPaletteRetirementTest.mjs` y `DesignTokenDebtRatchetTest.mjs`):
 
 * **Escalera única de botones (`vg-btn`) y cero geometría inline en `Coordinator*.js` (`docs/design.md` §§ Components / Do's and Don'ts):**
   * Todo `<button>` en `CoordinatorVanStockTab.js` y `CoordinatorDashboardView.js` viste obligatoriamente la clase base `vg-btn` más su peldaño (`vg-btn-sm` de 30px en acciones de fila de tabla y filtros; `vg-btn` estándar de 36px en barras de acción y modales; `vg-btn-lg` de 40px en acciones primarias de ancho completo) y su variante de tono (`vg-btn-primary`, `vg-btn-secondary`, `vg-btn-primary-outline`, `vg-btn-danger`, `vg-btn-danger-soft`, `vg-btn-tab` + `vg-btn-tab-active`).
@@ -493,7 +493,7 @@ Todas las vistas y componentes nuevos o modificados cumplen estrictamente las re
 | **RF-03** (Albarán de Picking A4 imprimible sin costes) | `CoordinatorVanRestockOrderController::getOrderDetail`, `CoordinatorVanStockTab.js`, `styles.css` (`@media print`) | `VanRestockUiComponentsTest.mjs`, `VanRestockOrderApiTest` |
 | **RF-04** (Expedición con `dispatched_qty` y cancelación $\ge 20$ chars) | `VanRestockOrderService::dispatchOrder`, `VanRestockOrderService::cancelOrder`, `chk_van_restock_orders_cancel_consistency` | `VanRestockOrderServiceTest`, `VanRestockOrderApiTest` |
 | **RF-05** (Confirmación móvil en 1 toque + incremento atómico + `van_stock_readiness`) | `PdoVanRestockOrderRepository::confirmOrderAndIncrementVanStock`, `TechnicianVanStockController::confirmRestockOrder`, `VanStockReadinessCalculator` | `VanRestockOrderServiceTest`, `VanStockReadinessCalculatorTest`, `VanRestockOrderApiTest` |
-| **RF-06** (Cruce informativo en 2 niveles en Triaje sin alterar puntos ni Art. II) | `TechnicianAssignmentSuggester`, `PdoTechnicianSuggestionRepository`, `SuggestedTechnicianDto`, `CoordinatorDashboardView.js` | `TechnicianAssignmentSuggesterVanStockTest`, `VanRestockOrderApiTest` |
+| **RF-05** (Cruce informativo en 2 niveles en Triaje sin alterar puntos ni Art. II) | `TechnicianAssignmentSuggester`, `PdoTechnicianSuggestionRepository`, `SuggestedTechnicianDto`, `CoordinatorDashboardView.js` | `TechnicianAssignmentSuggesterVanStockTest`, `VanRestockOrderApiTest` |
 | **RNF-01** (Rendimiento $\le 300\text{ ms}$ y cero N+1) | `PdoTechnicianSuggestionRepository`, `PdoVanRestockOrderRepository`, `VanStockReadinessCalculator` | `TechnicianAssignmentSuggesterVanStockTest`, `VanRestockOrderApiTest` |
 | **RNF-02** (Atomicidad `SELECT ... FOR UPDATE` e idempotencia) | `PdoVanRestockOrderRepository::confirmOrderAndIncrementVanStock`, `uq_van_restock_open_per_tech` | `VanRestockOrderServiceTest`, `VanRestockOrderApiTest` |
 | **RNF-03** (Segregación Art. V.4 y ausencia de costes) | `AppRouter`, `LocationPortalController`, `TechnicianVanStockController`, `CoordinatorVanStockTab.js` | `VanRestockOrderApiTest`, `VanRestockUiComponentsTest.mjs` |

@@ -4,12 +4,12 @@
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
 **Módulo:** `23-van-restock-stock-aware-triage`  
 **Documento:** `specs/technical/van_restock_stock_aware_triage_contracts.md`  
-**Referencia Funcional:** [`specs/23-van-restock-stock-aware-triage/spec.md`](../23-van-restock-stock-aware-triage/spec.md) y [`specs/functional/van_restock_stock_aware_triage_spec.md`](../functional/van_restock_stock_aware_triage_spec.md) (`RF-01` a `RF-06`, `RNF-01` a `RNF-04`, `QA 1` a `QA 5`)  
+**Referencia Funcional:** [`specs/23-van-restock-stock-aware-triage/spec.md`](../23-van-restock-stock-aware-triage/spec.md) y [`specs/functional/van_restock_stock_aware_triage_spec.md`](../functional/van_restock_stock_aware_triage_spec.md) (`RF-01` a `RF-06` de la Spec v2.1, `RNF-01` a `RNF-04`, `QA 1` a `QA 5`)  
 **Protocolo:** HTTP/1.1 · JSON (`application/json; charset=utf-8`)  
 **Metodología:** SDD (Specification-Driven Development) · Contratos API-First  
 **Conformidad Constitucional:**
 * **Artículo I:** La Especificación es la Única Fuente de Verdad. Ninguna implementación sin contrato previo; cero código simulado.
-* **Artículo II:** Prioridad Sanitaria Absoluta. El cruce de stock en triaje (`RF-06`) es **estrictamente informativo** (`D2`): jamás altera la puntuación `total_score` ni el desglose `score_breakdown` de `TechnicianWorkloadScorer`, ni interfiere con el escalado a guardia en averías críticas de máquinas perecederas.
+* **Artículo II:** Prioridad Sanitaria Absoluta. El cruce de stock en triaje (`RF-05`) es **estrictamente informativo** (`D2`): jamás altera la puntuación `total_score` ni el desglose `score_breakdown` de `TechnicianWorkloadScorer`, ni interfiere con el escalado a guardia en averías críticas de máquinas perecederas.
 * **Artículo III:** Inviolabilidad de Datos e Histórico.
   * Art. III.1: Cero borrado físico (`DELETE FROM`). Las dos tablas nuevas (`van_restock_orders` y `van_restock_order_items`) portan disparador `trg_no_delete_*` (`prevent_hard_delete()`). La retirada de líneas durante la edición en `PENDING_PICKING` se ejecuta mediante **baja lógica** (`removed_at TIMESTAMPTZ` y `removed_by BIGINT`, `QA 1`).
   * Art. III.3: La confirmación de recepción (`CONFIRMED_BY_TECH`) no reescribe `incident_replaced_parts` ni transiciona automáticamente el estado de averías ni de `spare_part_requests` (`C4`, `QA 3`).
@@ -25,8 +25,8 @@
 
 ### 1.1. Separación entre Pre-cálculo, Ciclo de Albarán y Saldo de Furgoneta
 El módulo introduce dos responsabilidades cohesivas sobre la base del Módulo 18 (`VanStockService`) y del Módulo 17 (`SuggestedTechniciansService` / `TechnicianAssignmentSuggester`):
-1. **`VanRestockOrderService`:** Calcula las propuestas de reposición por déficit de umbral y solicitudes pendientes de averías activas (`RF-01`), gestiona el ciclo de vida de la orden (`PENDING_PICKING` $\rightarrow$ `DISPATCHED` $\rightarrow$ `CONFIRMED_BY_TECH` / `CANCELLED`, `RF-02` a `RF-04`) y ejecuta el incremento atómico de `technician_van_stocks.quantity_available` bajo bloqueo pesimista `SELECT ... FOR UPDATE` al confirmar la recepción móvil (`RF-05`).
-2. **Enriquecimiento informativo de Triaje y Tarjetas de Avería (`RF-06` y `QA 3`):**
+1. **`VanRestockOrderService`:** Calcula las propuestas de reposición por déficit de umbral y solicitudes pendientes de averías activas (`RF-02`), gestiona el ciclo de vida de la orden (`PENDING_PICKING` $\rightarrow$ `DISPATCHED` $\rightarrow$ `CONFIRMED_BY_TECH` / `CANCELLED`, `RF-01` y `RF-03`) y ejecuta el incremento atómico de `technician_van_stocks.quantity_available` bajo bloqueo pesimista `SELECT ... FOR UPDATE` al confirmar la recepción móvil (`RF-04`).
+2. **Enriquecimiento informativo de Triaje y Tarjetas de Avería (`RF-05` y `QA 3`):**
    * `TechnicianAssignmentSuggester` incorpora el evaluador puro de cobertura en 2 niveles (`van_stock_match` e insignias `STOCK_COMPATIBLE`, `STOCK_PARCIAL`, `SIN_STOCK_COMPATIBLE`) sin modificar una sola constante ni regla de `TechnicianWorkloadScorer`.
    * Los listados operativos de averías activas (`GET /api/coordinator/incidents` y `GET /api/technician/my-route`) incorporan el descriptor calculado `van_stock_readiness` (`READY_IN_VAN`, `SHARED_IN_VAN`, `NOT_READY`, `HAS_OUT_OF_CATALOG`, `NOT_APPLICABLE`) para visibilizar inmediatamente cuándo una avería con repuestos solicitados ya cuenta con stock físico en la furgoneta del técnico asignado (`QA 3`).
 
@@ -113,7 +113,7 @@ ALTER TYPE audit_entity_type ADD VALUE IF NOT EXISTS 'VAN_RESTOCK_ORDER';
 ALTER TYPE audit_entity_type ADD VALUE IF NOT EXISTS 'VAN_RESTOCK_ORDER';
 
 -- ----------------------------------------------------------------------------
--- 1. Tabla 32 · van_restock_orders — cabecera del albarán de carga (RF-02 a RF-05)
+-- 1. Tabla 32 · van_restock_orders — cabecera del albarán de carga (RF-01, RF-03 y RF-04)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS van_restock_orders (
     id                  BIGINT GENERATED ALWAYS AS IDENTITY,
@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS van_restock_orders (
     )
 );
 
--- Máximo una orden abierta simultánea por técnico (D3, RF-02.3, RNF-02)
+-- Máximo una orden abierta simultánea por técnico (D3, RF-01.1, RNF-02)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_van_restock_open_per_tech
     ON van_restock_orders (technician_id)
     WHERE status IN ('PENDING_PICKING', 'DISPATCHED');
@@ -188,7 +188,7 @@ CREATE TRIGGER trg_touch_van_restock_orders
     FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 
 -- ----------------------------------------------------------------------------
--- 2. Tabla 33 · van_restock_order_items — líneas del albarán de carga (RF-02, QA 1)
+-- 2. Tabla 33 · van_restock_order_items — líneas del albarán de carga (RF-01.3, RF-01.4, QA 1)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS van_restock_order_items (
     id                           BIGINT GENERATED ALWAYS AS IDENTITY,
@@ -263,7 +263,7 @@ CREATE TRIGGER trg_touch_van_restock_order_items
 
 ## 3. Fórmulas de Dominio, Cruce de Stock y Algoritmos
 
-### 3.1. Fórmula de Pre-cálculo de Propuesta de Carga (`RF-01`, `D4`, `QA 1`, `QA 5`)
+### 3.1. Fórmula de Pre-cálculo de Propuesta de Carga (`RF-02.1`, `D4`, `QA 1`, `QA 5`)
 
 Para un técnico elegible (`role = 'TECHNICIAN' AND is_active = TRUE`):
 1. **Saldo actual y umbral (`technician_van_stocks`):** Para cada repuesto activo (`spare_parts.is_active = TRUE`), se toma `current_quantity = COALESCE(tvs.quantity_available, 0)` y `min_threshold = COALESCE(tvs.min_threshold, 0)`.
@@ -290,7 +290,7 @@ Para un técnico elegible (`role = 'TECHNICIAN' AND is_active = TRUE`):
    2. Menor `current_quantity` ascendente (saldos negativos primero).
    3. `part_code` ascendente (`A–Z`).
 
-### 3.2. Algoritmo de Cruce Informativo en 2 Niveles en Triaje (`RF-06`, `D2`, `C1`, `QA 2`)
+### 3.2. Algoritmo de Cruce Informativo en 2 Niveles en Triaje (`RF-05`, `D2`, `C1`, `QA 2`)
 
 Invocado dentro de `TechnicianAssignmentSuggester::getSuggestionsForIncident()` para cada técnico candidato, **sin tocar `TechnicianWorkloadScorer`**:
 
@@ -333,7 +333,7 @@ Invocado dentro de `TechnicianAssignmentSuggester::getSuggestionsForIncident()` 
   * Sea $M$ el número de repuestos de $U$ para los cuales el técnico tiene `quantity_available >= 1`.
   * **Determinación de `status`, `badge` y `label` (`C1`):**
     * Si $N == 0$:
-      * `status = 'NOT_APPLICABLE'`, `badge = null`, `label = null`
+      * `status = 'NOT_APPLICABLE'`, `badge = null`, `label = 'ℹ️ Sin repuestos catalogados para este modelo/categoría'`
     * Si $N \ge 1$ y $M == N$:
       * `status = 'FULL_MATCH'`, `badge = 'STOCK_COMPATIBLE'`, `label = "Stock compatible ({$M}/{$N} ref.)"`
     * Si $N \ge 1$ y $1 \le M < N$:
@@ -341,7 +341,7 @@ Invocado dentro de `TechnicianAssignmentSuggester::getSuggestionsForIncident()` 
     * Si $N \ge 1$ y $M == 0$:
       * `status = 'NO_STOCK'`, `badge = 'SIN_STOCK_COMPATIBLE'`, `label = "Sin stock compatible (0/{$N} ref.)"`
 
-### 3.3. Indicador `van_stock_readiness` en Tarjetas de Averías Activas (`RF-05.4`, `QA 3`)
+### 3.3. Indicador `van_stock_readiness` en Tarjetas de Averías Activas (`RF-04.3`, `QA 3`)
 
 Para cada avería en estado activo (`ASSIGNED`, `IN_PROGRESS`, `PENDING_PARTS`, `PENDING_INFO`, `REOPENED`) con `assigned_technician_id IS NOT NULL` que posea al menos una solicitud en `spare_part_requests` con `status = 'PENDING'`:
 1. Si tiene solicitudes fuera de catálogo (`spare_part_id IS NULL`) pendientes y cero de catálogo, o si tiene solicitudes fuera de catálogo pendientes junto con las de catálogo:
@@ -468,18 +468,18 @@ Ubicación: `src/Core/Domain/Exception/VanRestockOrderValidationException.php`
 
 | # | Método y Ruta | Roles Autorizados | Propósito (`RF`) |
 | :---: | :--- | :--- | :--- |
-| **1** | `GET /api/coordinator/van-restock-orders/proposals` | `COORDINATOR` | Pre-cálculo de sugerencias de reposición (por técnico o global para la flota activa, `RF-01`). |
-| **2** | `GET /api/coordinator/van-restock-orders` | `COORDINATOR` | Listado de órdenes de carga con filtro opcional por `technician_id` y `status` (`RF-02` a `RF-04`). |
-| **3** | `GET /api/coordinator/van-restock-orders/{id}` | `COORDINATOR` | Detalle de una orden de carga y datos para el Albarán de Picking A4 sin costes (`RF-03`). |
-| **4** | `POST /api/coordinator/van-restock-orders` | `COORDINATOR` | Creación individual de orden en `PENDING_PICKING` (`RF-02.1`, `RF-02.3`). |
-| **5** | `POST /api/coordinator/van-restock-orders/generate-batch` | `COORDINATOR` | Generación por lotes para técnicos elegibles con déficit y sin ausencia activa (`RF-02.2`, `QA 4`). |
-| **6** | `PUT /api/coordinator/van-restock-orders/{id}` | `COORDINATOR` | Edición de líneas y notas en `PENDING_PICKING` con baja lógica de líneas retiradas (`RF-02.4`, `QA 1`). |
-| **7** | `POST /api/coordinator/van-restock-orders/{id}/dispatch` | `COORDINATOR` | Expedición de almacén (`PENDING_PICKING` $\rightarrow$ `DISPATCHED`) con `dispatched_qty` por línea (`RF-04.1`). |
-| **8** | `POST /api/coordinator/van-restock-orders/{id}/cancel` | `COORDINATOR` | Cancelación auditada (`PENDING_PICKING` \| `DISPATCHED` $\rightarrow$ `CANCELLED`) con motivo $\ge 20$ caracteres (`RF-04.2`). |
-| **9** | `GET /api/technician/van-stock` *(enriquecido)* | `TECHNICIAN` | Inventario propio + `active_dispatched_order` + `last_confirmed_order` (`RF-05.1`, `QA 5`). |
-| **10** | `POST /api/technician/van-stock/restock-orders/{id}/confirm` | `TECHNICIAN` | Confirmación móvil en 1 toque (`DISPATCHED` $\rightarrow$ `CONFIRMED_BY_TECH`) + suma atómica al stock (`RF-05.2`). |
-| **11** | `GET /api/coordinator/incidents/{id}/suggested-technicians` *(enriquecido)* | `COORDINATOR` | Ranking de triaje con bloque informativo `van_stock_match` en 2 niveles (`RF-06`, `D2`). |
-| **12** | `GET /api/coordinator/incidents` y `GET /api/technician/my-route` *(enriquecidos)* | `COORDINATOR` / `TECHNICIAN` | Tarjetas de averías activas enriquecidas con `van_stock_readiness` (`RF-05.4`, `QA 3`). |
+| **1** | `GET /api/coordinator/van-restock-orders/proposals` | `COORDINATOR` | Pre-cálculo de sugerencias de reposición (por técnico o global para la flota activa, `RF-02`). |
+| **2** | `GET /api/coordinator/van-restock-orders` | `COORDINATOR` | Listado de órdenes de carga con filtro opcional por `technician_id` y `status` (`RF-02.2`). |
+| **3** | `GET /api/coordinator/van-restock-orders/{id}` | `COORDINATOR` | Detalle de una orden de carga y datos para el Albarán de Picking A4 sin costes (`RF-03.1`). |
+| **4** | `POST /api/coordinator/van-restock-orders` | `COORDINATOR` | Creación individual de orden en `PENDING_PICKING` (`RF-01.1`, `RF-01.2`, `RF-02.3`). |
+| **5** | `POST /api/coordinator/van-restock-orders/generate-batch` | `COORDINATOR` | Generación por lotes para técnicos elegibles con déficit y sin ausencia activa (`RF-02.4`, `QA 4`). |
+| **6** | `PUT /api/coordinator/van-restock-orders/{id}` | `COORDINATOR` | Edición de líneas y notas en `PENDING_PICKING` con baja lógica de líneas retiradas (`RF-01.3`, `RF-01.4`, `QA 1`). |
+| **7** | `POST /api/coordinator/van-restock-orders/{id}/dispatch` | `COORDINATOR` | Expedición de almacén (`PENDING_PICKING` $\rightarrow$ `DISPATCHED`) con `dispatched_qty` por línea (`RF-03.2`). |
+| **8** | `POST /api/coordinator/van-restock-orders/{id}/cancel` | `COORDINATOR` | Cancelación auditada (`PENDING_PICKING` \| `DISPATCHED` $\rightarrow$ `CANCELLED`) con motivo $\ge 20$ caracteres (`RF-03.4`). |
+| **9** | `GET /api/technician/van-stock` *(enriquecido)* | `TECHNICIAN` | Inventario propio + `active_dispatched_order` + `last_confirmed_order` (`RF-04.1`, `QA 5`). |
+| **10** | `POST /api/technician/van-stock/restock-orders/{id}/confirm` | `TECHNICIAN` | Confirmación móvil en 1 toque (`DISPATCHED` $\rightarrow$ `CONFIRMED_BY_TECH`) + suma atómica al stock (`RF-04.2`). |
+| **11** | `GET /api/coordinator/incidents/{id}/suggested-technicians` *(enriquecido)* | `COORDINATOR` | Ranking de triaje con bloque informativo `van_stock_match` en 2 niveles (`RF-05`, `D2`). |
+| **12** | `GET /api/coordinator/incidents` y `GET /api/technician/my-route` *(enriquecidos)* | `COORDINATOR` / `TECHNICIAN` | Tarjetas de averías activas enriquecidas con `van_stock_readiness` (`RF-04.3`, `QA 3`). |
 
 ---
 
@@ -536,7 +536,7 @@ Calcula en tiempo real la propuesta de carga para un técnico concreto (`?techni
 
 ### 5.3. `GET /api/coordinator/van-restock-orders`
 
-Devuelve el listado de órdenes de carga. Ordenación canónica (`RF-04.4`): primero las órdenes abiertas (`PENDING_PICKING`, `DISPATCHED`) ordenadas por `created_at DESC, id DESC`, seguidas del histórico cerrado (`CONFIRMED_BY_TECH`, `CANCELLED`) ordenado por `created_at DESC, id DESC`.
+Devuelve el listado de órdenes de carga. Ordenación canónica (`RF-02.2`): primero las órdenes abiertas (`PENDING_PICKING`, `DISPATCHED`) ordenadas por `created_at DESC, id DESC`, seguidas del histórico cerrado (`CONFIRMED_BY_TECH`, `CANCELLED`) ordenado por `created_at DESC, id DESC`.
 
 * **Query Parameters:**
   * `technician_id` (`int`, opcional)
@@ -605,7 +605,7 @@ Devuelve el detalle íntegro de la orden (incluyendo la estructura lista para im
 
 ### 5.5. `POST /api/coordinator/van-restock-orders`
 
-Crea una orden de carga individual en estado `PENDING_PICKING` (`RF-02.1`, `RF-02.3`).
+Crea una orden de carga individual en estado `PENDING_PICKING` (`RF-01.1`, `RF-01.2`, `RF-02.3`).
 
 * **Request Body:**
 ```json
@@ -643,10 +643,10 @@ Crea una orden de carga individual en estado `PENDING_PICKING` (`RF-02.1`, `RF-0
 
 ### 5.6. `POST /api/coordinator/van-restock-orders/generate-batch`
 
-Genera órdenes `PENDING_PICKING` en lote para todos los técnicos activos con rol `TECHNICIAN` que tengan al menos una pieza sugerida en el pre-cálculo (`RF-02.2`, `QA 4`).
+Genera órdenes `PENDING_PICKING` en lote para todos los técnicos activos con rol `TECHNICIAN` que tengan al menos una pieza sugerida en el pre-cálculo (`RF-02.4`, `QA 4`).
 
 * **Request Body:** `{}` (cuerpo vacío o `{"notes": "Lote matinal de almacén"}`).
-* **Reglas de exclusión en el lote (`RF-02.2`, `QA 4`):**
+* **Reglas de exclusión en el lote (`RF-02.4`, `QA 4`):**
   * Si el técnico tiene una ausencia vigente en el instante actual (`starts_at <= NOW() AND ends_at >= NOW() AND cancelled_at IS NULL`), se omite con motivo `SKIPPED_ACTIVE_ABSENCE`.
   * Si el técnico ya posee una orden abierta (`PENDING_PICKING` o `DISPATCHED`), se omite con motivo `SKIPPED_OPEN_ORDER_EXISTS`.
   * Si el pre-cálculo del técnico arroja 0 líneas sugeridas, se omite con motivo `SKIPPED_NO_DEFICIT`.
@@ -693,7 +693,7 @@ Genera órdenes `PENDING_PICKING` en lote para todos los técnicos activos con r
 
 ### 5.7. `PUT /api/coordinator/van-restock-orders/{id}`
 
-Actualiza las líneas y/o notas de una orden exclusivamente mientras permanece en `PENDING_PICKING` (`RF-02.4`, `QA 1`).
+Actualiza las líneas y/o notas de una orden exclusivamente mientras permanece en `PENDING_PICKING` (`RF-01.3`, `RF-01.4`, `QA 1`).
 
 * **Request Body:**
 ```json
@@ -725,7 +725,7 @@ Actualiza las líneas y/o notas de una orden exclusivamente mientras permanece e
 
 ### 5.8. `POST /api/coordinator/van-restock-orders/{id}/dispatch`
 
-Registra la expedición física desde el almacén central y transiciona la orden de `PENDING_PICKING` a `DISPATCHED` (`RF-04.1`, `D1`, `QA 1`).
+Registra la expedición física desde el almacén central y transiciona la orden de `PENDING_PICKING` a `DISPATCHED` (`RF-03.2`, `D1`, `QA 1`).
 
 * **Request Body:**
 ```json
@@ -747,7 +747,7 @@ Registra la expedición física desde el almacén central y transiciona la orden
   1. La orden debe estar en estado `PENDING_PICKING` (`409 INVALID_RESTOCK_ORDER_TRANSITION`).
   2. Deben declararse los `dispatched_qty` de todas las líneas activas (`removed_at IS NULL`) de la orden.
   3. Cada `dispatched_qty` debe ser entero en `[0, 9999]` y cumplir con el saldo actual vivo de la furgoneta: `current_quantity_available + dispatched_qty <= 9999` (`QA 1`, `422 INVALID_RESTOCK_ORDER_PAYLOAD`).
-  4. La suma total $\sum \text{dispatched\_qty}$ de las líneas activas debe ser **$\ge 1$** (`RF-04.1`: si no hay ninguna unidad disponible en almacén, procede cancelar la orden, no expedir 0 unidades).
+  4. La suma total $\sum \text{dispatched\_qty}$ de las líneas activas debe ser **$\ge 1$** (`RF-03.2`: si no hay ninguna unidad disponible en almacén, procede cancelar la orden, no expedir 0 unidades).
   5. *(Nota `QA 4`):* Aunque un repuesto haya sido desactivado en el catálogo tras crearse la orden, si ya forma parte de las líneas activas de la orden se permite su expedición y posterior confirmación para reflejar el movimiento físico real.
 * **Respuesta Exitosa (`200 OK`):**
 ```json
@@ -761,7 +761,7 @@ Registra la expedición física desde el almacén central y transiciona la orden
 
 ### 5.9. `POST /api/coordinator/van-restock-orders/{id}/cancel`
 
-Cancela una orden en estado `PENDING_PICKING` o `DISPATCHED` con justificación obligatoria (`RF-04.2`, Art. V.1).
+Cancela una orden en estado `PENDING_PICKING` o `DISPATCHED` con justificación obligatoria (`RF-03.4`, Art. V.1).
 
 * **Request Body:**
 ```json
@@ -783,7 +783,7 @@ Cancela una orden en estado `PENDING_PICKING` o `DISPATCHED` con justificación 
 
 ---
 
-### 5.10. `GET /api/technician/van-stock` *(Enriquecimiento Retrocompatible, `RF-05.1`, `QA 5`)*
+### 5.10. `GET /api/technician/van-stock` *(Enriquecimiento Retrocompatible, `RF-04.1`, `QA 5`)*
 
 Extiende la respuesta actual del Módulo 18 añadiendo las claves `active_dispatched_order` (la orden en estado `DISPATCHED` pendiente de recepción por el técnico autenticado, o `null`) y `last_confirmed_order` (resumen de la última orden confirmada por el técnico, o `null`, `QA 5`).
 
@@ -844,7 +844,7 @@ Extiende la respuesta actual del Módulo 18 añadiendo las claves `active_dispat
 
 ### 5.11. `POST /api/technician/van-stock/restock-orders/{id}/confirm`
 
-Confirma en 1 toque la recepción de una orden en estado `DISPATCHED` por parte del técnico destinatario (`RF-05.2`, `D3`, `QA 1`, `QA 4`).
+Confirma en 1 toque la recepción de una orden en estado `DISPATCHED` por parte del técnico destinatario (`RF-04.2`, `D3`, `QA 1`, `QA 4`).
 
 * **Independencia del estado de turno (`QA 4`):** Este endpoint **no** bloquea al técnico si su jornada en `technician_shifts` está en `OFF_SHIFT` o `MEAL_BREAK`, permitiendo recoger material en almacén antes de fichar el inicio de ruta.
 * **Protocolo Transaccional (`RNF-02`):**
@@ -889,7 +889,7 @@ Confirma en 1 toque la recepción de una orden en estado `DISPATCHED` por parte 
 
 ---
 
-### 5.12. Enriquecimiento de `GET /api/coordinator/incidents/{id}/suggested-technicians` (`RF-06`, `D2`, `C1`, `QA 2`)
+### 5.12. Enriquecimiento de `GET /api/coordinator/incidents/{id}/suggested-technicians` (`RF-05`, `D2`, `C1`, `QA 2`)
 
 Cada elemento dentro de `suggestions` en la respuesta del endpoint del Módulo 17 mantiene intactos todos sus campos actuales (`technician_id`, `name`, `total_score`, `score_breakdown`, `badges`, etc.) y añade el objeto `van_stock_match` además de incluir la insignia informativa correspondiente (`STOCK_COMPATIBLE`, `STOCK_PARCIAL` o `SIN_STOCK_COMPATIBLE`) en el array `badges` cuando `van_stock_match.badge !== null`:
 
@@ -929,7 +929,7 @@ Cada elemento dentro de `suggestions` en la respuesta del endpoint del Módulo 1
 
 ---
 
-### 5.13. Enriquecimiento de Tarjetas de Avería Activa (`GET /api/coordinator/incidents` y `GET /api/technician/my-route`, `RF-05.4`, `QA 3`)
+### 5.13. Enriquecimiento de Tarjetas de Avería Activa (`GET /api/coordinator/incidents` y `GET /api/technician/my-route`, `RF-04.3`, `QA 3`)
 
 Cada avería serializada en los listados operativos de Coordinación y de Mi Ruta incluye el campo `van_stock_readiness`:
 

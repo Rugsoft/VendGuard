@@ -1225,6 +1225,92 @@ try {
         $costLeaksFound === [],
         implode(',', $costLeaksFound)
     );
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 13. Guarda de transición y C3 (pieza desactivada en tránsito)
+    // ─────────────────────────────────────────────────────────────────────
+    echo "\n--- 13. Transición desde PENDING_PICKING y C3 (D1, EARS 04.1) ---\n";
+
+    $pendingResponse = $call('POST', '/api/coordinator/van-restock-orders', [
+        'technician_id' => $technicianId,
+        'notes' => 'Dotación manual para certificar la guarda de transición.',
+        'items' => [
+            ['spare_part_id' => $partFilter, 'requested_qty' => 1, 'reason' => 'MANUAL'],
+        ],
+    ], $coordinatorToken);
+    $pendingOrder = $data($pendingResponse);
+    $pendingOrderId = (int)($pendingOrder['order']['id'] ?? 0);
+
+    $pendingConfirm = $call(
+        'POST',
+        '/api/technician/van-stock/restock-orders/' . $pendingOrderId . '/confirm',
+        [],
+        $technicianToken
+    );
+    $stockStmt->execute([':technician_id' => $technicianId, ':spare_part_id' => $partFilter]);
+    $assert(
+        '13.1 Confirmar una orden en PENDING_PICKING responde 409 sin tocar el stock',
+        $pendingConfirm->getStatusCode() === 409
+            && $errorCode($pendingConfirm) === 'INVALID_RESTOCK_ORDER_TRANSITION'
+            && (int)$stockStmt->fetchColumn() === 1
+    );
+
+    $pendingCancel = $call('POST', '/api/coordinator/van-restock-orders/' . $pendingOrderId . '/cancel', [
+        'cancellation_reason' => 'Se anula la dotación de prueba tras certificar la guarda de transición.',
+    ], $coordinatorToken);
+    $assert(
+        '13.2 La orden de prueba queda cancelada y libera el hueco abierto',
+        $pendingCancel->getStatusCode() === 200
+            && ($data($pendingCancel)['order']['status'] ?? '') === 'CANCELLED'
+    );
+
+    $partRetired = $createPart('R23-RETIRED-01', 'Pieza retirada en tránsito', 'MECHANICAL');
+    $retiredOrderResponse = $call('POST', '/api/coordinator/van-restock-orders', [
+        'technician_id' => $technicianId,
+        'notes' => 'Carga con pieza que se descataloga durante el tránsito.',
+        'items' => [
+            ['spare_part_id' => $partRetired, 'requested_qty' => 2, 'reason' => 'MANUAL'],
+        ],
+    ], $coordinatorToken);
+    $retiredOrder = $data($retiredOrderResponse);
+    $retiredOrderId = (int)($retiredOrder['order']['id'] ?? 0);
+
+    $retiredDispatch = $call('POST', '/api/coordinator/van-restock-orders/' . $retiredOrderId . '/dispatch', [
+        'items' => [
+            ['spare_part_id' => $partRetired, 'dispatched_qty' => 2],
+        ],
+    ], $coordinatorToken);
+
+    $pdo->prepare('UPDATE spare_parts SET is_active = FALSE WHERE id = :id')
+        ->execute([':id' => $partRetired]);
+
+    try {
+        $retiredConfirm = $call(
+            'POST',
+            '/api/technician/van-stock/restock-orders/' . $retiredOrderId . '/confirm',
+            [],
+            $technicianToken
+        );
+        $retiredPayload = $data($retiredConfirm);
+        $retiredStock = $pdo->prepare(
+            'SELECT quantity_available FROM technician_van_stocks
+              WHERE technician_id = :technician_id AND spare_part_id = :spare_part_id'
+        );
+        $retiredStock->execute([':technician_id' => $technicianId, ':spare_part_id' => $partRetired]);
+        $retiredStockQty = $retiredStock->fetchColumn();
+
+        $assert(
+            '13.3 C3: una pieza desactivada en tránsito se puede recepcionar',
+            $retiredDispatch->getStatusCode() === 200
+                && $retiredConfirm->getStatusCode() === 200
+                && ($retiredPayload['order']['status'] ?? '') === 'CONFIRMED_BY_TECH'
+                && (int)$retiredStockQty === 2,
+            json_encode($retiredPayload['order'] ?? [])
+        );
+    } finally {
+        $pdo->prepare('UPDATE spare_parts SET is_active = TRUE WHERE id = :id')
+            ->execute([':id' => $partRetired]);
+    }
 } catch (Throwable $exception) {
     $crash = $exception;
 } finally {

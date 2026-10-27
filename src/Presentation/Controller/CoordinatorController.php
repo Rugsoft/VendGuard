@@ -371,7 +371,7 @@ class CoordinatorController
 
         $commentCounts = $this->incidentRepo->countCommentsForIncidents($incidentIds, true);
 
-        // 6.c Insignia de disponibilidad de repuesto en la tarjeta (Módulo 23, RF-05.4,
+        // 6.c Insignia de disponibilidad de repuesto en la tarjeta (Módulo 23, RF-04.3,
         //     QA 3). Se calcula una vez para toda la bandeja con el calculador puro: no
         //     escribe nada ni cambia el estado de la avería (Art. III.3). Si la lectura
         //     falla, la bandeja de triaje no se interrumpe y cae a NOT_APPLICABLE.
@@ -447,7 +447,7 @@ class CoordinatorController
                 // sin hilo, la fila publica 0 y nunca un valor ausente.
                 'comments_count' => $commentCounts[(int)$incident->getId()] ?? 0,
                 // Cobertura de repuestos de la furgoneta del técnico asignado
-                // (Módulo 23, RF-05.4, QA 3). Indicador 100 % informativo: no altera
+                // (Módulo 23, RF-04.3, QA 3). Indicador 100 % informativo: no altera
                 // el ranking de triaje ni la prioridad sanitaria (Art. II).
                 'van_stock_readiness' => $vanStockReadiness[(int)$incident->getId()]
                     ?? $this->notApplicableVanStockReadiness(),

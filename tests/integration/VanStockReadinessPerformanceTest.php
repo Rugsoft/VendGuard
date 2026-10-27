@@ -15,6 +15,9 @@ declare(strict_types=1);
  *      acotada a los técnicos elegibles.
  *   3. Presupuesto total acotado: el enriquecimiento completo de la bandeja no supera el presupuesto fijo
  *      de round-trips a base de datos.
+ *   4. RNF-01 en la superficie móvil: la consulta del inventario y la confirmación
+ *      de la orden de carga quedan por debajo de 250 ms de MEDIANA (40 y 5 muestras).
+ *      El presupuesto de 200 ms del triaje se mide en SuggestedTechniciansApiTest 5.2.
  *
  * CATEGORÍA: new_engine (canal propio con PG_TEST_DSN).
  */
@@ -24,7 +27,10 @@ require_once __DIR__ . '/../Support/PostgresFixtureBuilder.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/SqlScriptSplitter.php';
 require_once __DIR__ . '/../../src/Infrastructure/Database/PostgresMigrationRunner.php';
 
+use VendGuard\Application\Service\VanStockService;
+use VendGuard\Core\Domain\Model\VanRestockOrderItem;
 use VendGuard\Infrastructure\Repository\PdoSparePartRequestRepository;
+use VendGuard\Infrastructure\Repository\PdoVanRestockOrderRepository;
 use VendGuard\Infrastructure\Repository\PdoVanStockRepository;
 
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
@@ -81,7 +87,8 @@ try {
     $countingPdo->exec("
         INSERT INTO users (id, name, email, email_key, password_hash, role, is_active) OVERRIDING SYSTEM VALUE
         VALUES (101, 'Técnico Perf 1', 'tech1.perf@vendguard.test', 'tech1.perf@vendguard.test', 'hash', 'TECHNICIAN', TRUE),
-               (102, 'Técnico Perf 2', 'tech2.perf@vendguard.test', 'tech2.perf@vendguard.test', 'hash', 'TECHNICIAN', TRUE)
+               (102, 'Técnico Perf 2', 'tech2.perf@vendguard.test', 'tech2.perf@vendguard.test', 'hash', 'TECHNICIAN', TRUE),
+               (103, 'Coordinación Perf', 'coord.perf@vendguard.test', 'coord.perf@vendguard.test', 'hash', 'COORDINATOR', TRUE)
         ON CONFLICT DO NOTHING;
 
         INSERT INTO spare_parts (id, part_code, name, category, manufacturer, is_active) OVERRIDING SYSTEM VALUE
@@ -173,6 +180,94 @@ try {
     $assert(
         '3.1 El índice parcial idx_requests_pending_incident existe sobre spare_part_requests',
         $hasIndex === true
+    );
+
+    // 4. RNF-01 · Presupuesto de latencia de la superficie móvil
+    //
+    // El triaje ya está medido en SuggestedTechniciansApiTest 5.2 (mediana de 20
+    // peticiones HTTP por debajo de 100 ms, más estricto que los 200 ms del RNF).
+    // Aquí se cierra la mitad que faltaba: la consulta y la confirmación de la
+    // orden de carga desde el móvil. Se evalúa la MEDIANA, no una muestra única,
+    // para que el ruido del sistema operativo no dicte el veredicto.
+    $medianMs = static function (callable $work, int $runs = 40): array {
+        for ($warmup = 0; $warmup < 3; $warmup++) {
+            $work();
+        }
+
+        $samples = [];
+        for ($i = 0; $i < $runs; $i++) {
+            $startedAt = hrtime(true);
+            $work();
+            $samples[] = (hrtime(true) - $startedAt) / 1_000_000;
+        }
+        sort($samples);
+
+        return [
+            'median' => $samples[intdiv($runs, 2)],
+            'best' => $samples[0],
+            'worst' => $samples[$runs - 1],
+        ];
+    };
+
+    $vanStockService = new VanStockService(new PdoVanStockRepository($countingPdo));
+    $restockRepo = new PdoVanRestockOrderRepository($countingPdo);
+
+    $mobileRead = static function () use ($vanStockService, $restockRepo): void {
+        $vanStockService->listByTechnician(101);
+        $restockRepo->findActiveDispatchedForTechnician(101);
+        $restockRepo->findLastConfirmedForTechnician(101);
+    };
+
+    $readTiming = $medianMs($mobileRead);
+    $assert(
+        '4.1 La mediana de la consulta móvil queda por debajo de 250 ms (RNF-01)',
+        $readTiming['median'] < 250.0,
+        sprintf(
+            'mediana=%.2f ms · min=%.2f ms · max=%.2f ms',
+            $readTiming['median'],
+            $readTiming['best'],
+            $readTiming['worst']
+        )
+    );
+
+    $confirmSamples = [];
+    for ($i = 0; $i < 5; $i++) {
+        $order = $restockRepo->createOrder(
+            101,
+            'Confirmación medida por la certificación RNF-01.',
+            [
+                VanRestockOrderItem::requested(
+                    201,
+                    'PART-PERF-01',
+                    'Electroválvula Perf',
+                    'HYDRAULIC',
+                    5,
+                    2,
+                    0,
+                    1,
+                    'MANUAL'
+                ),
+            ],
+            103
+        );
+        $restockRepo->markDispatched($order->id, [201 => 1], 103);
+
+        $startedAt = hrtime(true);
+        $restockRepo->confirmOrderAndIncrementVanStock($order->id, 101);
+        $confirmSamples[] = (hrtime(true) - $startedAt) / 1_000_000;
+    }
+    sort($confirmSamples);
+    $confirmMedian = $confirmSamples[intdiv(count($confirmSamples), 2)];
+
+    $assert(
+        '4.2 La mediana de la confirmación móvil queda por debajo de 250 ms (RNF-01)',
+        $confirmMedian < 250.0,
+        sprintf(
+            'mediana=%.2f ms · min=%.2f ms · max=%.2f ms',
+            $confirmMedian,
+            $confirmSamples[0],
+            $confirmSamples[count($confirmSamples) - 1]
+        )
     );
 
 } finally {

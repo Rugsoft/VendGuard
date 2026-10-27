@@ -412,6 +412,13 @@ assert(
     && !orderFormCatalogue.linePartOptions(0).some((part) => Number(part.id) === 8)
 );
 
+assert(
+  '2.12 La propuesta sin déficit avisa de stock cubierto (EARS 02.3)',
+  COORDINATOR_SOURCE.includes('Stock cubierto')
+    && COORDINATOR_SOURCE.includes('coord-restock-proposal-covered-')
+    && COORDINATOR_SOURCE.includes('!isRecipientInactive(proposal) && (proposal.items || []).length === 0')
+);
+
 // =========================================================================
 // BLOQUE 3: Expedición, cancelación y Picking A4
 // =========================================================================
@@ -550,6 +557,7 @@ assert(
     && pickingTab.hasRecipientAlert(makeOrder({ technician_is_active: true, recipient_currently_absent: false })) === false
     && COORDINATOR_SOURCE.includes('hasRecipientAlert(proposal)')
     && COORDINATOR_SOURCE.includes('hasRecipientAlert(order)')
+    && COORDINATOR_SOURCE.includes('isOpenOrder(order) && hasRecipientAlert(order)')
     && COORDINATOR_SOURCE.includes('isOpenOrder(pickingOrder) && hasRecipientAlert(pickingOrder)')
 );
 
