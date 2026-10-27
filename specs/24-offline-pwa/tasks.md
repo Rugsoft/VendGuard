@@ -78,7 +78,7 @@
     4. Declarar `OfflineSyncMutationRepositoryInterface`.
   * **Hecho cuando:** `php -l src/Core/Domain/Model/OfflineSyncMutation.php && php -l src/Core/Domain/ValueObject/OfflineSyncMetadata.php && php -l src/Core/Domain/Exception/OfflineSyncValidationException.php && php -l src/Core/Domain/Repository/OfflineSyncMutationRepositoryInterface.php` no reporta errores de sintaxis.
 
-- [ ] **T-OFFLINE-04 · Suite unitaria `OfflineSyncClockAndQuotaTest`**
+- [x] **T-OFFLINE-04 · Suite unitaria `OfflineSyncClockAndQuotaTest`**
   * **Tiempo estimado:** 20 min
   * **Dependencias previas:** `T-OFFLINE-03`
   * **Ficheros a crear o modificar:**
