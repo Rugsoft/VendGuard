@@ -112,7 +112,7 @@
 
 ## Fase 4: Servicio de Aplicación y Casos de Uso (`OfflineSyncService`)
 
-- [ ] **T-OFFLINE-06 · Implementación de `OfflineBootstrapSnapshotDto` y `OfflineSyncService`**
+- [x] **T-OFFLINE-06 · Implementación de `OfflineBootstrapSnapshotDto` y `OfflineSyncService`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-OFFLINE-05`
   * **Ficheros a crear o modificar:**
