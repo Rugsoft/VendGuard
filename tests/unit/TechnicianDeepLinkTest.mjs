@@ -26,6 +26,7 @@ globalThis.sessionStorage = { ...globalThis.localStorage };
 
 import { TechnicianRouteView } from '../../public/assets/js/views/TechnicianRouteView.js';
 import { App } from '../../public/assets/js/app.js';
+import { store, setInternalSession, clearSession } from '../../public/assets/js/store.js';
 
 console.log('======================================================================');
 console.log(' VendGuard: Frontend Test Suite - TechnicianDeepLink (Módulo 15)');
@@ -158,6 +159,45 @@ assert(
   '4.5 La tarjeta lleva un identificador estable para el desplazamiento',
   String(TechnicianRouteView.template).includes('technician-stop-')
 );
+
+console.log('\n--- 5. Selector de perfil con una sesión abierta ---\n');
+
+/** Contexto mínimo del componente raíz para el selector de perfil. */
+const makeAppContext = (currentView) => ({
+  currentView,
+  switchView: App.methods.switchView,
+  sessionView: App.methods.sessionView
+});
+
+clearSession();
+setInternalSession({ id: 1, name: 'Sara Coordinadora', role: 'COORDINATOR' }, 'auth_token_demo.firma');
+const toTechnician = makeAppContext('coordinator');
+toTechnician.switchView('technician');
+assert(
+  '5.1 Cambiar al perfil técnico cierra la sesión de coordinación',
+  store.state.user === null && store.state.location === null,
+  `usuario=${store.state.user?.role ?? 'null'}`
+);
+assert(
+  '5.2 El perfil destino queda activo y pedirá sus propias credenciales',
+  toTechnician.currentView === 'technician' && toTechnician.sessionView() === null
+);
+
+setInternalSession({ id: 2, name: 'Jordi Técnico', role: 'TECHNICIAN' }, 'auth_token_demo.firma');
+const sameProfile = makeAppContext('technician');
+sameProfile.switchView('technician');
+assert(
+  '5.3 Volver a pulsar el perfil ya activo conserva la sesión',
+  store.state.user?.role === 'TECHNICIAN'
+);
+
+const toCoordinator = makeAppContext('technician');
+toCoordinator.switchView('coordinator');
+assert(
+  '5.4 Cambiar entre roles internos también cierra la sesión anterior',
+  store.state.user === null && toCoordinator.currentView === 'coordinator'
+);
+clearSession();
 
 console.log('\n======================================================================');
 console.log(` Total Aserciones: ${assertions} | Fallas: ${failures}`);

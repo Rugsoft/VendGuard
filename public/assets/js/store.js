@@ -173,6 +173,46 @@ export function clearSession() {
  * Restores session from localStorage on application startup.
  * @returns {boolean} True if a session was restored
  */
+/**
+ * ¿Sigue vigente el token guardado? Solo se pronuncia cuando puede leer su
+ * payload: los tokens del servidor llevan `exp` dentro del JSON firmado
+ * (`auth_token_<base64url>.<hmac>`). Si no se puede decodificar —formato
+ * inesperado o doble de pruebas— se deja pasar y decide el servidor, que es
+ * quien verifica la firma.
+ *
+ * Restaurar a ciegas un token caducado montaba la vista protegida y disparaba
+ * sus sondeos en paralelo: cuatro 401 en consola antes de que el manejador de
+ * sesión expirada reaccionara. Descartarlo aquí evita esas peticiones.
+ *
+ * @param {string} token
+ * @returns {boolean}
+ */
+function isStoredTokenFresh(token) {
+  const parts = String(token).split('.');
+  if (parts.length !== 2) {
+    return true;
+  }
+
+  const encoded = parts[0].replace(/^auth_token_/, '').replace(/^site_token_/, '');
+
+  try {
+    if (typeof atob !== 'function') {
+      return true;
+    }
+
+    const padded = encoded + '='.repeat((4 - (encoded.length % 4)) % 4);
+    const payload = JSON.parse(atob(padded.replace(/-/g, '+').replace(/_/g, '/')));
+
+    if (typeof payload.exp !== 'number') {
+      return true;
+    }
+
+    return payload.exp > Math.floor(Date.now() / 1000);
+  } catch (e) {
+    return true;
+  }
+}
+
 export function restoreSession() {
   try {
     if (typeof localStorage === 'undefined') {
@@ -185,6 +225,11 @@ export function restoreSession() {
 
     const session = JSON.parse(raw);
     if (!session || !session.token) {
+      return false;
+    }
+
+    if (!isStoredTokenFresh(session.token)) {
+      clearSession();
       return false;
     }
 
