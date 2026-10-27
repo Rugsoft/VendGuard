@@ -179,14 +179,31 @@ try {
     $statusInMeal = $api('GET', '/api/technician/shift/status', $jordiToken);
     $statusInMealData = $statusInMeal->getDecodedBody()['data'] ?? [];
     $mealSummary = $statusInMealData['today_summary'] ?? [];
+    // El descuento de la pausa viva se certifica con la identidad contable de la
+    // jornada —la misma que audita 1.7 tras el cierre— y no con un valor absoluto.
+    // Exigir `effective === 0` obligaba a que el primer tramo de trabajo cayera
+    // dentro del mismo segundo que el arranque: bajo carga los sellos se separan
+    // un segundo, el neto real pasa a 1 y la suite fallaba sin que nada estuviera
+    // roto. Con la identidad, la aserción mide lo que importa (la pausa se
+    // descuenta de verdad) y deja de depender del redondeo.
+    $grossInMeal = (int)($mealSummary['gross_seconds'] ?? -1);
+    $mealInMeal = (int)($mealSummary['meal_break_seconds'] ?? -1);
+    $effectiveInMeal = (int)($mealSummary['effective_seconds'] ?? -1);
     $assert(
         '1.5 Estado en pausa viva => MEAL_BREAK con la pausa descontada del día',
         $statusInMeal->getStatusCode() === 200
             && ($statusInMealData['status'] ?? '') === 'MEAL_BREAK'
             && (int)($mealSummary['sessions_count'] ?? -1) === 1
-            && (int)($mealSummary['meal_break_seconds'] ?? 0) >= 1
-            && (int)($mealSummary['effective_seconds'] ?? 0) === 0,
-        'body=' . $statusInMeal->getBody()
+            && $mealInMeal >= 1
+            && $effectiveInMeal === max(0, $grossInMeal - $mealInMeal)
+            && $effectiveInMeal < $grossInMeal,
+        sprintf(
+            'gross=%d meal=%d effective=%d · body=%s',
+            $grossInMeal,
+            $mealInMeal,
+            $effectiveInMeal,
+            $statusInMeal->getBody()
+        )
     );
 
     $closeFromMeal = $api('POST', '/api/technician/shift/close-handover', $jordiToken);
