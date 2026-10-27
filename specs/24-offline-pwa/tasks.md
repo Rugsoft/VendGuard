@@ -191,7 +191,7 @@
     3. Enlazar el manifiesto y registrar `/sw.js` en `public/index.html`.
   * **Hecho cuando:** `public/manifest.webmanifest` es JSON válido y `public/sw.js` contiene la lista completa del App Shell y la regla `Network-Only` para `/api/`.
 
-- [ ] **T-OFFLINE-11 · Almacenamiento local `OfflineStorage.js` e implementación del motor `OfflineSyncManager.js`**
+- [x] **T-OFFLINE-11 · Almacenamiento local `OfflineStorage.js` e implementación del motor `OfflineSyncManager.js`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-OFFLINE-10`
   * **Ficheros a crear o modificar:**

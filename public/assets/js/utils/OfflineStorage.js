@@ -1,0 +1,960 @@
+/**
+ * VendGuard - Copia local de ruta y bandeja de mutaciones (utils/OfflineStorage.js)
+ *
+ * Adaptador nativo sobre `IndexedDB` para que el técnico trabaje sin cobertura
+ * (Módulo 24, RF-02, RF-03 y RF-06). Este módulo es la única fuente de verdad del
+ * navegador sobre cuatro cosas que el servidor no puede decidir por él:
+ *
+ *  - **Aislamiento por técnico (`Art. V.4`)**: el almacén `route_snapshots` usa
+ *    `technician_id` como clave, y `mutation_outbox` filtra siempre por ese
+ *    identificador. Un dispositivo compartido nunca mezcla colas de dos cuentas.
+ *  - **Vigencia de la copia (`D6`)**: `FRESH` hasta 4 h, aviso ámbar entre 4 h y
+ *    12 h, y solo lectura a partir de 12 h. El paquete trae `warn_after_seconds`
+ *    y `readonly_after_seconds` del servidor, así que la política no se
+ *    reimplementa aquí: solo se compara la edad con los umbrales del contrato.
+ *  - **Mutación optimista y stock provisional (`D5`)**: al encolar se refleja el
+ *    nuevo estado en la parada local y se descuenta del saldo visible de la
+ *    furgoneta lo que el técnico declara consumir, para que las paradas
+ *    siguientes muestren el stock real. La reversión es exactamente simétrica.
+ *  - **Cuota fotográfica (`D3`, `QA 3`)**: máximo 5 fotografías o 25 MB en la
+ *    bandeja. El trazo PNG de la firma digital (`signature_png_base64`, exento)
+ *    nunca se cuenta aquí: solo pesan los adjuntos de cámara o galería.
+ *
+ * Sin `IndexedDB` disponible (Node en las pruebas unitarias) el módulo degrada a
+ * un respaldo en memoria con la misma interfaz, de modo que la lógica de cola y
+ * de vigencia se certifica sin navegador y sin dependencias externas.
+ *
+ * Dogma Vanilla: ESM nativo, funciones puras, datos congelados, cero dependencias.
+ */
+
+export const OFFLINE_DB_NAME = 'vendguard_offline_v1';
+export const OFFLINE_DB_VERSION = 1;
+export const ROUTE_SNAPSHOTS_STORE = 'route_snapshots';
+export const MUTATION_OUTBOX_STORE = 'mutation_outbox';
+
+/** Aviso ámbar de la copia local: 4,0 horas (`D6`, `RF-02.2`). */
+export const SNAPSHOT_WARNING_AGE_MS = 4 * 60 * 60 * 1000;
+/** Paso a solo lectura: 12,0 horas (`D6`, `RF-02.3`). */
+export const SNAPSHOT_MAX_VALID_AGE_MS = 12 * 60 * 60 * 1000;
+
+/** Cuota de evidencias sin conexión (`D3`, `QA 3`, `Art. V.5`). */
+export const OFFLINE_PHOTO_MAX_COUNT = 5;
+export const OFFLINE_PHOTO_MAX_SINGLE_BYTES = 5 * 1024 * 1024;
+export const OFFLINE_PHOTO_MAX_TOTAL_BYTES = 25 * 1024 * 1024;
+/** Tope del trazo de firma, exento de la cuota porque cierra la intervención. */
+export const OFFLINE_SIGNATURE_MAX_BYTES = 300 * 1024;
+
+/** Extensiones y tipos gráficos seguros admitidos (`EARS 03.5.2`). */
+export const OFFLINE_PHOTO_EXTENSIONS = Object.freeze(['jpg', 'jpeg', 'png', 'webp']);
+export const OFFLINE_PHOTO_MIME_TYPES = Object.freeze(['image/jpeg', 'image/png', 'image/webp']);
+
+/** Estados de vigencia de la copia local (`RF-02.2` a `RF-02.4`). */
+export const SNAPSHOT_VALIDITY = Object.freeze({
+  MISSING: 'MISSING',
+  FRESH: 'FRESH',
+  STALE_WARNING: 'STALE_WARNING',
+  EXPIRED_READONLY: 'EXPIRED_READONLY'
+});
+
+/** Estados de un elemento de la bandeja (`D3`, `RF-05.1`). */
+export const MUTATION_STATUS = Object.freeze({
+  PENDING: 'PENDING',
+  SYNCING: 'SYNCING',
+  CONFLICT: 'CONFLICT'
+});
+
+/** Tipos de parada del catálogo cerrado (`D1`). */
+export const STOP_TYPE = Object.freeze({
+  INCIDENT: 'INCIDENT',
+  PREVENTIVE_ORDER: 'PREVENTIVE_ORDER'
+});
+
+/**
+ * Tipos de máquina bajo vigilancia sanitaria, espejo de
+ * `MachineType::requiresSanitaryWatch()`.
+ */
+export const PERISHABLE_MACHINE_TYPES = Object.freeze(['PERISHABLE_FOOD', 'COMBO']);
+
+/** Estados de ítem de checklist que exigen precinto físico in situ (`QA 1`). */
+export const SANITARY_RISK_CHECKLIST_STATUSES = Object.freeze(['FAIL', 'NO_CONFORME', 'WARN']);
+
+/**
+ * Catálogo cerrado de operaciones encolables (`D1`) con su ruta real, método y
+ * naturaleza de transición. `is_state_transition: false` solo para el comentario
+ * intermedio, que puede fallar sin arrastrar el cierre posterior de la parada
+ * (`RF-05.1.2`, `QA 3`).
+ */
+export const OFFLINE_OPERATIONS = Object.freeze({
+  START_INCIDENT: Object.freeze({
+    stopType: STOP_TYPE.INCIDENT,
+    method: 'PATCH',
+    isStateTransition: true,
+    path: (stopId) => `/technician/incidents/${encodeURIComponent(stopId)}/start`
+  }),
+  RESUME_INCIDENT_PENDING_INFO: Object.freeze({
+    stopType: STOP_TYPE.INCIDENT,
+    method: 'POST',
+    isStateTransition: true,
+    path: (stopId) => `/technician/incidents/${encodeURIComponent(stopId)}/resume-pending-info`
+  }),
+  PAUSE_INCIDENT_PARTS: Object.freeze({
+    stopType: STOP_TYPE.INCIDENT,
+    method: 'PATCH',
+    isStateTransition: true,
+    path: (stopId) => `/technician/incidents/${encodeURIComponent(stopId)}/pause`
+  }),
+  PAUSE_INCIDENT_PENDING_INFO: Object.freeze({
+    stopType: STOP_TYPE.INCIDENT,
+    method: 'POST',
+    isStateTransition: true,
+    path: (stopId) => `/technician/incidents/${encodeURIComponent(stopId)}/pause-pending-info`
+  }),
+  RESOLVE_INCIDENT: Object.freeze({
+    stopType: STOP_TYPE.INCIDENT,
+    method: 'POST',
+    isStateTransition: true,
+    path: (stopId) => `/technician/incidents/${encodeURIComponent(stopId)}/resolve`
+  }),
+  ADD_INCIDENT_COMMENT: Object.freeze({
+    stopType: STOP_TYPE.INCIDENT,
+    method: 'POST',
+    isStateTransition: false,
+    path: (stopId) => `/technician/incidents/${encodeURIComponent(stopId)}/comments`
+  }),
+  START_PREVENTIVE: Object.freeze({
+    stopType: STOP_TYPE.PREVENTIVE_ORDER,
+    method: 'POST',
+    isStateTransition: true,
+    path: (stopId) => `/technician/preventive/orders/${encodeURIComponent(stopId)}/start`
+  }),
+  COMPLETE_PREVENTIVE: Object.freeze({
+    stopType: STOP_TYPE.PREVENTIVE_ORDER,
+    method: 'POST',
+    isStateTransition: true,
+    path: (stopId) => `/technician/preventive/orders/${encodeURIComponent(stopId)}/complete`
+  }),
+  REINSPECT_PREVENTIVE: Object.freeze({
+    stopType: STOP_TYPE.PREVENTIVE_ORDER,
+    method: 'POST',
+    isStateTransition: true,
+    path: (stopId) => `/technician/preventive/orders/${encodeURIComponent(stopId)}/reinspect`
+  })
+});
+
+/**
+ * Estado local que refleja cada operación al instante (`EARS 03.3.2`).
+ * El comentario intermedio no cambia el estado de la parada.
+ */
+export const OPTIMISTIC_STATUS_BY_OPERATION = Object.freeze({
+  START_INCIDENT: 'IN_PROGRESS',
+  RESUME_INCIDENT_PENDING_INFO: 'IN_PROGRESS',
+  PAUSE_INCIDENT_PARTS: 'PENDING_PARTS',
+  PAUSE_INCIDENT_PENDING_INFO: 'PENDING_INFO',
+  RESOLVE_INCIDENT: 'RESOLVED',
+  ADD_INCIDENT_COMMENT: null,
+  START_PREVENTIVE: 'IN_INSPECTION',
+  COMPLETE_PREVENTIVE: 'COMPLETED',
+  REINSPECT_PREVENTIVE: 'COMPLETED'
+});
+
+/** Textos normativos del módulo (castellano neutro, `RNF-04`). */
+export const OFFLINE_MESSAGES = Object.freeze({
+  STALE_WARNING:
+    '⚠️ Tu copia de ruta lleva más de 4 horas sin actualizarse. Recupera cobertura cuanto antes, '
+    + 'especialmente si atiendes máquinas de alimentos perecederos.',
+  EXPIRED_READONLY:
+    '🔒 Copia de ruta caducada (> 12 h sin conexión). Conéctate para actualizar tu ruta antes de '
+    + 'registrar nuevas intervenciones.',
+  SANITARY_SEAL_REQUIRED:
+    'Debes confirmar que has precintado físicamente la máquina in situ antes de guardar.',
+  PHOTO_QUOTA_EXCEEDED:
+    'Se ha alcanzado el límite de seguridad sin conexión (máx. 5 fotografías o 25 MB en cola). '
+    + 'Guarda sin foto o sincroniza primero.',
+  PHOTO_TOO_LARGE:
+    'La fotografía supera los 5 MB permitidos o está vacía. Reduce su tamaño o guarda la acción sin foto.',
+  PHOTO_UNSUPPORTED_FORMAT:
+    'Formato de imagen no admitido. Adjunta una fotografía JPG, PNG o WebP.',
+  OPERATION_NOT_OFFLINE: 
+    'Esta operación necesita conexión en vivo con el servidor. Recupera cobertura para completarla.',
+  UNPARSEABLE_SNAPSHOT:
+    'La copia local de ruta no tiene una fecha de sincronización válida. Conéctate para restaurarla.'
+});
+
+/**
+ * Error de la cola sin conexión: viaja con código estable para que la interfaz
+ * distinga el motivo exacto sin leer el texto (`EARS 03.5.2`).
+ */
+export class OfflineQueueError extends Error {
+  /**
+   * @param {string} code - Código estable (`SNAPSHOT_EXPIRED_READONLY`, `OFFLINE_PHOTO_QUOTA_EXCEEDED`...)
+   * @param {string} message - Mensaje en castellano para el técnico
+   * @param {Object|null} [details=null]
+   */
+  constructor(code, message, details = null) {
+    super(message);
+    this.name = 'OfflineQueueError';
+    this.code = code;
+    this.details = details;
+  }
+}
+
+/**
+ * Evalúa la vigencia de la copia local frente a cuatro umbrales del contrato
+ * (`D6`, `RF-02.2` a `RF-02.4`).
+ *
+ * @param {Object|null} snapshot - Copia local guardada, o `null` si no existe.
+ * @param {number} [nowMs=Date.now()] - Reloj de referencia (inyectable en pruebas).
+ * @returns {{status: string, canEnqueueNewActions: boolean, ageMinutes: (number|null),
+ *   warningMessage?: string, errorMessage?: string}}
+ */
+export function evaluateSnapshotValidity(snapshot, nowMs = Date.now()) {
+  if (!snapshot) {
+    return { status: SNAPSHOT_VALIDITY.MISSING, canEnqueueNewActions: false, ageMinutes: null };
+  }
+
+  const syncedAtMs = Date.parse(String(snapshot.synced_at ?? ''));
+  if (!Number.isFinite(syncedAtMs)) {
+    return {
+      status: SNAPSHOT_VALIDITY.EXPIRED_READONLY,
+      canEnqueueNewActions: false,
+      ageMinutes: null,
+      errorMessage: OFFLINE_MESSAGES.UNPARSEABLE_SNAPSHOT
+    };
+  }
+
+  const ageMs = Math.max(0, nowMs - syncedAtMs);
+  const ageMinutes = Math.floor(ageMs / 60000);
+
+  if (ageMs <= SNAPSHOT_WARNING_AGE_MS) {
+    return { status: SNAPSHOT_VALIDITY.FRESH, canEnqueueNewActions: true, ageMinutes };
+  }
+
+  if (ageMs <= SNAPSHOT_MAX_VALID_AGE_MS) {
+    return {
+      status: SNAPSHOT_VALIDITY.STALE_WARNING,
+      canEnqueueNewActions: true,
+      ageMinutes,
+      warningMessage: OFFLINE_MESSAGES.STALE_WARNING
+    };
+  }
+
+  return {
+    status: SNAPSHOT_VALIDITY.EXPIRED_READONLY,
+    canEnqueueNewActions: false,
+    ageMinutes,
+    errorMessage: OFFLINE_MESSAGES.EXPIRED_READONLY
+  };
+}
+
+/**
+ * ¿La operación exige el precinto físico in situ? (`EARS 03.4`, `QA 1`, `Art. II`)
+ *
+ * Espejo exacto de `OfflineSyncService`: sobre una máquina bajo vigilancia
+ * sanitaria toda pausa es riesgo por definición, y en preventivas el riesgo lo
+ * declara el propio checklist remitido. Ninguna otra operación encolada lo exige.
+ *
+ * @param {string} operationType
+ * @param {Object} payload
+ * @param {string|null} machineType
+ * @returns {boolean}
+ */
+export function requiresSanitarySeal(operationType, payload = {}, machineType = null) {
+  if (!PERISHABLE_MACHINE_TYPES.includes(String(machineType ?? '').toUpperCase())) {
+    return false;
+  }
+
+  if (operationType === 'PAUSE_INCIDENT_PARTS' || operationType === 'PAUSE_INCIDENT_PENDING_INFO') {
+    return true;
+  }
+
+  if (operationType === 'COMPLETE_PREVENTIVE') {
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    return items.some((item) => SANITARY_RISK_CHECKLIST_STATUSES.includes(
+      String(item?.status ?? '').toUpperCase()
+    ));
+  }
+
+  return false;
+}
+
+/**
+ * Repuestos catalogados que la operación declara consumidos (`D5`, `EARS 03.3.3`).
+ *
+ * @param {string} operationType
+ * @param {Object} payload
+ * @returns {Array<{spare_part_id: number, quantity: number}>}
+ */
+export function extractConsumedCatalogParts(operationType, payload = {}) {
+  if (operationType !== 'RESOLVE_INCIDENT' && operationType !== 'COMPLETE_PREVENTIVE') {
+    return [];
+  }
+
+  const declared = Array.isArray(payload?.replaced_parts) ? payload.replaced_parts : [];
+
+  return declared
+    .map((part) => ({
+      spare_part_id: Number(part?.spare_part_id ?? 0),
+      quantity: Number(part?.quantity ?? 0)
+    }))
+    .filter((part) => Number.isInteger(part.spare_part_id) && part.spare_part_id > 0
+      && Number.isInteger(part.quantity) && part.quantity > 0);
+}
+
+/**
+ * Valida la fotografía antes de encolarla (`EARS 03.5.2`, `QA 3`, `Art. V.5`).
+ *
+ * La firma digital no entra aquí a propósito: viaja dentro de
+ * `payload.service_sheet.signature_png_base64` y no consume ni cupo ni bytes.
+ *
+ * @param {{name?: string, type?: string, size?: number}|null} photo
+ * @param {Array<Object>} activeItems - Elementos ya presentes en la bandeja del técnico.
+ * @returns {{name: string, type: string, size: number}|null}
+ * @throws {OfflineQueueError}
+ */
+export function validatePhotoAttachment(photo, activeItems = []) {
+  if (!photo) {
+    return null;
+  }
+
+  const name = String(photo.name ?? '');
+  const type = String(photo.type ?? '').toLowerCase();
+  const size = Number(photo.size ?? 0);
+  const extension = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+
+  if (!OFFLINE_PHOTO_MIME_TYPES.includes(type) && !OFFLINE_PHOTO_EXTENSIONS.includes(extension)) {
+    throw new OfflineQueueError('OFFLINE_PHOTO_UNSUPPORTED_FORMAT', OFFLINE_MESSAGES.PHOTO_UNSUPPORTED_FORMAT);
+  }
+
+  if (!Number.isFinite(size) || size <= 0 || size > OFFLINE_PHOTO_MAX_SINGLE_BYTES) {
+    throw new OfflineQueueError('OFFLINE_PHOTO_TOO_LARGE', OFFLINE_MESSAGES.PHOTO_TOO_LARGE);
+  }
+
+  const withPhoto = activeItems.filter((item) => item?.photo_attachment);
+  const totalBytes = withPhoto.reduce(
+    (sum, item) => sum + Number(item.photo_attachment.size ?? 0),
+    0
+  );
+
+  if (withPhoto.length + 1 > OFFLINE_PHOTO_MAX_COUNT
+    || totalBytes + size > OFFLINE_PHOTO_MAX_TOTAL_BYTES) {
+    throw new OfflineQueueError('OFFLINE_PHOTO_QUOTA_EXCEEDED', OFFLINE_MESSAGES.PHOTO_QUOTA_EXCEEDED);
+  }
+
+  return { name, type, size };
+}
+
+/**
+ * Serializa la evidencia fotográfica para que sobreviva al cierre de la pestaña
+ * (plan §3.1: `{ name, type, size, base64 }`).
+ *
+ * Un `Blob` vive en memoria y muere con el navegador; el texto codificado sí se
+ * persiste en `IndexedDB`. Sin esto la foto se perdería al cerrar la aplicación
+ * y el técnico creería haber adjuntado una evidencia que nunca llegó.
+ *
+ * @param {(Blob|File|null)} photo
+ * @returns {Promise<{name: string, type: string, size: number, base64: string}|null>}
+ */
+export async function serializePhoto(photo) {
+  if (!photo) {
+    return null;
+  }
+
+  return {
+    name: String(photo.name ?? 'evidencia.jpg'),
+    type: String(photo.type ?? 'image/jpeg'),
+    size: Number(photo.size ?? 0),
+    base64: typeof photo.base64 === 'string' ? photo.base64 : await readAsBase64(photo)
+  };
+}
+
+/**
+ * Reconstruye el `Blob` de una foto serializada para enviarla por multipart.
+ *
+ * @param {{type?: string, base64?: string}|null} attachment
+ * @returns {Blob|null}
+ */
+export function photoAttachmentBlob(attachment) {
+  if (!attachment?.base64 || typeof Blob === 'undefined' || typeof atob !== 'function') {
+    return null;
+  }
+
+  const binary = atob(attachment.base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return new Blob([bytes], { type: attachment.type || 'image/jpeg' });
+}
+
+/**
+ * Normaliza el paquete de bootstrap a la forma que exige el contrato §3.1.
+ *
+ * Los instantes de aviso y caducidad se derivan de `synced_at` más los segundos
+ * que manda el servidor: la PWA nunca decide la política por su cuenta (`D6`).
+ * Si se refresca la copia, los descuentos provisionales pendientes se conservan
+ * y se vuelven a aplicar sobre el saldo nuevo de la furgoneta.
+ *
+ * @param {Object} bootstrap - Respuesta de `GET /api/technician/offline/bootstrap`
+ * @param {Object|null} [previous=null] - Copia local anterior del mismo técnico
+ * @returns {Object}
+ * @throws {OfflineQueueError}
+ */
+export function normalizeSnapshot(bootstrap, previous = null) {
+  const technicianId = Number(bootstrap?.technician_id);
+  if (!Number.isInteger(technicianId) || technicianId < 1) {
+    throw new OfflineQueueError(
+      'INVALID_BOOTSTRAP_SNAPSHOT',
+      'El paquete de ruta no identifica al técnico autenticado.'
+    );
+  }
+
+  const syncedAtMs = Date.parse(String(bootstrap?.synced_at ?? ''));
+  if (!Number.isFinite(syncedAtMs)) {
+    throw new OfflineQueueError(
+      'INVALID_BOOTSTRAP_SNAPSHOT',
+      'El paquete de ruta no declara un instante de sincronización válido.'
+    );
+  }
+
+  const warnSeconds = positiveNumberOr(bootstrap?.warn_after_seconds, SNAPSHOT_WARNING_AGE_MS / 1000);
+  const readonlySeconds = positiveNumberOr(
+    bootstrap?.readonly_after_seconds,
+    SNAPSHOT_MAX_VALID_AGE_MS / 1000
+  );
+  const route = bootstrap?.route ?? {};
+
+  const snapshot = {
+    technician_id: technicianId,
+    technician_email: bootstrap?.technician_email ?? null,
+    technician_name: bootstrap?.technician_name ?? null,
+    synced_at: new Date(syncedAtMs).toISOString(),
+    warn_after_at: new Date(syncedAtMs + warnSeconds * 1000).toISOString(),
+    readonly_after_at: new Date(syncedAtMs + readonlySeconds * 1000).toISOString(),
+    route_envelope: {
+      stops: Array.isArray(route?.stops) ? route.stops : [],
+      enabled_locations: Array.isArray(route?.enabled_locations) ? route.enabled_locations : [],
+      pending_critical_stops_other_locations: Array.isArray(route?.pending_critical_stops_other_locations)
+        ? route.pending_critical_stops_other_locations
+        : []
+    },
+    preventive_orders: Array.isArray(bootstrap?.preventive_orders) ? bootstrap.preventive_orders : [],
+    preventive_checklists_by_order: bootstrap?.preventive_checklists_by_order ?? {},
+    spare_parts_catalog_by_machine: bootstrap?.spare_parts_catalog_by_machine ?? {},
+    van_stock: normalizeVanStock(bootstrap?.van_stock),
+    provisional_stock_deductions: { ...(previous?.provisional_stock_deductions ?? {}) }
+  };
+
+  // El saldo que llega del servidor aún no conoce los consumos encolados: se
+  // vuelven a descontar para que el stock visible siga siendo el real.
+  for (const part of provisionalParts(previous)) {
+    decrementAvailable(snapshot.van_stock, part);
+  }
+
+  return snapshot;
+}
+
+/**
+ * Refleja al instante el estado que produce cada operación y descuenta el stock
+ * provisional declarado (`D5`, `EARS 03.3.2` y `EARS 03.3.3`).
+ *
+ * No muta la copia recibida: devuelve una nueva, para que la vista pueda
+ * comparar antes y después sin sorpresas.
+ *
+ * @param {Object} snapshot
+ * @param {{stopType: string, stopId: number|string, operationType: string, payload?: Object}} change
+ * @returns {Object|null}
+ */
+export function applyOptimisticStopChange(snapshot, change) {
+  if (!snapshot) {
+    return null;
+  }
+
+  const targetId = Number(change?.stopId ?? 0);
+  const operationType = String(change?.operationType ?? '');
+  const nextStatus = OPTIMISTIC_STATUS_BY_OPERATION[operationType] ?? null;
+  const parts = extractConsumedCatalogParts(operationType, change?.payload ?? {});
+
+  const next = {
+    ...snapshot,
+    route_envelope: {
+      ...(snapshot.route_envelope ?? {}),
+      stops: Array.isArray(snapshot.route_envelope?.stops) ? [...snapshot.route_envelope.stops] : []
+    },
+    preventive_orders: Array.isArray(snapshot.preventive_orders) ? [...snapshot.preventive_orders] : [],
+    van_stock: normalizeVanStock(snapshot.van_stock),
+    provisional_stock_deductions: { ...(snapshot.provisional_stock_deductions ?? {}) }
+  };
+
+  if (nextStatus !== null) {
+    if (change?.stopType === STOP_TYPE.PREVENTIVE_ORDER) {
+      next.preventive_orders = next.preventive_orders.map((order) => (
+        Number(order?.id) === targetId ? { ...order, status: nextStatus } : order
+      ));
+    } else {
+      next.route_envelope.stops = next.route_envelope.stops.map((stop) => (
+        Number(stop?.incident_id ?? stop?.id) === targetId ? { ...stop, status: nextStatus } : stop
+      ));
+    }
+  }
+
+  applyStockDeduction(next, parts);
+  return next;
+}
+
+/**
+ * Devuelve a la furgoneta el stock que se descontó de forma provisional cuando
+ * una transición acaba en conflicto (`RF-05.1.1`).
+ *
+ * @param {Object} snapshot
+ * @param {Array<{spare_part_id: number, quantity: number}>} parts
+ * @returns {Object|null}
+ */
+export function revertProvisionalStockChange(snapshot, parts = []) {
+  if (!snapshot) {
+    return null;
+  }
+
+  const next = {
+    ...snapshot,
+    van_stock: normalizeVanStock(snapshot.van_stock),
+    provisional_stock_deductions: { ...(snapshot.provisional_stock_deductions ?? {}) }
+  };
+
+  for (const part of parts) {
+    const key = String(part.spare_part_id);
+    const pending = (next.provisional_stock_deductions[key] ?? 0) - Number(part.quantity);
+
+    if (pending > 0) {
+      next.provisional_stock_deductions[key] = pending;
+    } else {
+      delete next.provisional_stock_deductions[key];
+    }
+
+    const item = next.van_stock.items.find(
+      (candidate) => Number(candidate?.spare_part_id) === Number(part.spare_part_id)
+    );
+    if (item) {
+      item.quantity_available = Number(item.quantity_available ?? 0) + Number(part.quantity);
+    }
+  }
+
+  return next;
+}
+
+/**
+ * Validez mínima del saldo de furgoneta para poder descontar sin romper la vista.
+ *
+ * @param {Object|null} vanStock
+ * @returns {{items: Array<Object>, active_dispatched_order: (Object|null), last_confirmed_order: (Object|null)}}
+ */
+export function normalizeVanStock(vanStock) {
+  const items = Array.isArray(vanStock?.items)
+    ? vanStock.items.map((item) => ({ ...item }))
+    : [];
+
+  return {
+    items,
+    active_dispatched_order: vanStock?.active_dispatched_order ?? null,
+    last_confirmed_order: vanStock?.last_confirmed_order ?? null
+  };
+}
+
+/**
+ * Adaptador de almacenamiento local aislado por técnico.
+ *
+ * Todas las operaciones son asíncronas: `IndexedDB` lo es, y el respaldo en
+ * memoria conserva la misma firma para que la lógica de cola no cambie entre
+ * navegador y pruebas.
+ */
+export class OfflineStorage {
+  /**
+   * @param {{indexedDB?: (IDBFactory|null)}} [options={}]
+   */
+  constructor(options = {}) {
+    const factory = options.indexedDB !== undefined
+      ? options.indexedDB
+      : (typeof globalThis !== 'undefined' ? globalThis.indexedDB : undefined);
+
+    this.factory = factory ?? null;
+    this.memory = this.factory === null ? { snapshots: new Map(), outbox: new Map() } : null;
+    this.dbPromise = null;
+  }
+
+  /** ¿Está funcionando con el respaldo en memoria? (solo pruebas y entornos sin IndexedDB). */
+  isMemoryBacked() {
+    return this.memory !== null;
+  }
+
+  /**
+   * Guarda la copia local del técnico a partir del paquete de bootstrap.
+   * @param {Object} bootstrap
+   * @returns {Promise<Object>} Copia normalizada ya persistida
+   */
+  async saveSnapshot(bootstrap) {
+    const technicianId = Number(bootstrap?.technician_id);
+    const previous = Number.isInteger(technicianId) ? await this.getSnapshot(technicianId) : null;
+    const snapshot = normalizeSnapshot(bootstrap, previous);
+    await this.putSnapshot(snapshot);
+
+    return snapshot;
+  }
+
+  /**
+   * @param {number} technicianId
+   * @returns {Promise<Object|null>}
+   */
+  async getSnapshot(technicianId) {
+    const key = Number(technicianId);
+    if (this.memory !== null) {
+      return this.memory.snapshots.get(key) ?? null;
+    }
+
+    const db = await this.open();
+    const request = db.transaction(ROUTE_SNAPSHOTS_STORE, 'readonly')
+      .objectStore(ROUTE_SNAPSHOTS_STORE)
+      .get(key);
+
+    return (await requestResult(request)) ?? null;
+  }
+
+  /**
+   * Vigencia de la copia del técnico, lista para pintar el aviso o bloquear la
+   * captura de nuevas acciones (`RF-02.2` a `RF-02.4`).
+   *
+   * @param {number} technicianId
+   * @param {number} [nowMs=Date.now()]
+   * @returns {Promise<Object>}
+   */
+  async getValidity(technicianId, nowMs = Date.now()) {
+    return evaluateSnapshotValidity(await this.getSnapshot(technicianId), nowMs);
+  }
+
+  /**
+   * Persiste la copia ya normalizada (sin volver a derivar umbrales).
+   * @param {Object} snapshot
+   * @returns {Promise<Object>}
+   */
+  async putSnapshot(snapshot) {
+    if (this.memory !== null) {
+      this.memory.snapshots.set(Number(snapshot.technician_id), snapshot);
+      return snapshot;
+    }
+
+    const db = await this.open();
+    const transaction = db.transaction(ROUTE_SNAPSHOTS_STORE, 'readwrite');
+    transaction.objectStore(ROUTE_SNAPSHOTS_STORE).put(snapshot);
+    await transactionComplete(transaction);
+
+    return snapshot;
+  }
+
+  /**
+   * @param {Object} mutation
+   * @returns {Promise<Object>}
+   */
+  async putMutation(mutation) {
+    if (this.memory !== null) {
+      this.memory.outbox.set(String(mutation.client_mutation_id), mutation);
+      return mutation;
+    }
+
+    const db = await this.open();
+    const transaction = db.transaction(MUTATION_OUTBOX_STORE, 'readwrite');
+    transaction.objectStore(MUTATION_OUTBOX_STORE).put(mutation);
+    await transactionComplete(transaction);
+
+    return mutation;
+  }
+
+  /**
+   * @param {string} clientMutationId
+   * @returns {Promise<Object|null>}
+   */
+  async getMutation(clientMutationId) {
+    const key = String(clientMutationId);
+    if (this.memory !== null) {
+      return this.memory.outbox.get(key) ?? null;
+    }
+
+    const db = await this.open();
+    const request = db.transaction(MUTATION_OUTBOX_STORE, 'readonly')
+      .objectStore(MUTATION_OUTBOX_STORE)
+      .get(key);
+
+    return (await requestResult(request)) ?? null;
+  }
+
+  /**
+   * @param {string} clientMutationId
+   * @returns {Promise<void>}
+   */
+  async deleteMutation(clientMutationId) {
+    const key = String(clientMutationId);
+    if (this.memory !== null) {
+      this.memory.outbox.delete(key);
+      return;
+    }
+
+    const db = await this.open();
+    const transaction = db.transaction(MUTATION_OUTBOX_STORE, 'readwrite');
+    transaction.objectStore(MUTATION_OUTBOX_STORE).delete(key);
+    await transactionComplete(transaction);
+  }
+
+  /**
+   * Elementos de la bandeja del técnico en orden FIFO estricto (`RF-04.1`).
+   *
+   * @param {number} technicianId
+   * @param {Array<string>|null} [statuses=null] - Filtrar por estado; `null` devuelve todos.
+   * @returns {Promise<Array<Object>>}
+   */
+  async listMutations(technicianId, statuses = null) {
+    const key = Number(technicianId);
+    const wanted = Array.isArray(statuses) ? statuses : null;
+    const matches = (mutation) => wanted === null || wanted.includes(mutation.status);
+
+    let items;
+    if (this.memory !== null) {
+      items = [...this.memory.outbox.values()].filter((item) => Number(item.technician_id) === key);
+    } else {
+      const db = await this.open();
+      const index = db.transaction(MUTATION_OUTBOX_STORE, 'readonly')
+        .objectStore(MUTATION_OUTBOX_STORE)
+        .index('by_technician');
+
+      items = (await requestResult(index.getAll(key))) ?? [];
+    }
+
+    return items
+      .filter(matches)
+      .sort((left, right) => Number(left.sequence_order) - Number(right.sequence_order));
+  }
+
+  /**
+   * Siguiente número de secuencia del técnico, sin huecos entre elementos.
+   * @param {number} technicianId
+   * @returns {Promise<number>}
+   */
+  async nextSequenceOrder(technicianId) {
+    const items = await this.listMutations(technicianId);
+    const highest = items.reduce((max, item) => Math.max(max, Number(item.sequence_order ?? 0)), 0);
+
+    return highest + 1;
+  }
+
+  /**
+   * Aplica la mutación optimista a la copia local del técnico (`D5`).
+   * @param {number} technicianId
+   * @param {Object} mutation
+   * @returns {Promise<Object|null>} Copia actualizada, o `null` si no hay copia local
+   */
+  async applyOptimisticMutation(technicianId, mutation) {
+    const snapshot = await this.getSnapshot(technicianId);
+    if (snapshot === null) {
+      return null;
+    }
+
+    const updated = applyOptimisticStopChange(snapshot, {
+      stopType: mutation.stop_type,
+      stopId: mutation.stop_id,
+      operationType: mutation.operation_type,
+      payload: mutation.payload ?? {}
+    });
+
+    return this.putSnapshot(updated);
+  }
+
+  /**
+   * Revierte el descuento provisional de una transición rechazada (`RF-05.1.1`).
+   * @param {number} technicianId
+   * @param {Array<{spare_part_id: number, quantity: number}>} parts
+   * @returns {Promise<Object|null>}
+   */
+  async revertProvisionalStock(technicianId, parts = []) {
+    if (!Array.isArray(parts) || parts.length === 0) {
+      return this.getSnapshot(technicianId);
+    }
+
+    const snapshot = await this.getSnapshot(technicianId);
+    if (snapshot === null) {
+      return null;
+    }
+
+    return this.putSnapshot(revertProvisionalStockChange(snapshot, parts));
+  }
+
+  /**
+   * Borra la copia local y la bandeja del técnico (`EARS 06.5`, `QA 5`).
+   * @param {number} technicianId
+   * @returns {Promise<void>}
+   */
+  async clearTechnician(technicianId) {
+    const key = Number(technicianId);
+
+    if (this.memory !== null) {
+      this.memory.snapshots.delete(key);
+      for (const [id, item] of this.memory.outbox) {
+        if (Number(item.technician_id) === key) {
+          this.memory.outbox.delete(id);
+        }
+      }
+      return;
+    }
+
+    const db = await this.open();
+    const transaction = db.transaction([ROUTE_SNAPSHOTS_STORE, MUTATION_OUTBOX_STORE], 'readwrite');
+    transaction.objectStore(ROUTE_SNAPSHOTS_STORE).delete(key);
+
+    const outbox = transaction.objectStore(MUTATION_OUTBOX_STORE);
+    const request = outbox.index('by_technician').getAllKeys(key);
+    request.onsuccess = () => {
+      for (const id of request.result ?? []) {
+        outbox.delete(id);
+      }
+    };
+
+    await transactionComplete(transaction);
+  }
+
+  /**
+   * Abre (una sola vez) la base local con sus dos almacenes e índices (`§3.1`, `§3.2`).
+   * @returns {Promise<IDBDatabase>}
+   */
+  async open() {
+    if (this.memory !== null) {
+      throw new OfflineQueueError('INDEXEDDB_UNAVAILABLE', 'Este entorno no dispone de IndexedDB.');
+    }
+
+    if (this.dbPromise === null) {
+      this.dbPromise = new Promise((resolve, reject) => {
+        const request = this.factory.open(OFFLINE_DB_NAME, OFFLINE_DB_VERSION);
+
+        request.onupgradeneeded = () => {
+          const db = request.result;
+
+          if (!db.objectStoreNames.contains(ROUTE_SNAPSHOTS_STORE)) {
+            db.createObjectStore(ROUTE_SNAPSHOTS_STORE, { keyPath: 'technician_id' });
+          }
+
+          if (!db.objectStoreNames.contains(MUTATION_OUTBOX_STORE)) {
+            const outbox = db.createObjectStore(MUTATION_OUTBOX_STORE, { keyPath: 'client_mutation_id' });
+            outbox.createIndex('by_technician', 'technician_id');
+            outbox.createIndex('by_tech_sequence', ['technician_id', 'sequence_order'], { unique: true });
+            outbox.createIndex('by_tech_status', ['technician_id', 'status']);
+          }
+        };
+
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    return this.dbPromise;
+  }
+}
+
+/** Envuelve una petición de `IndexedDB` en una promesa. */
+function requestResult(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/** Espera el cierre de una transacción (commit real, no solo la petición). */
+function transactionComplete(transaction) {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
+}
+
+/** Descuenta del saldo visible y acumula el descuento provisional por repuesto. */
+function applyStockDeduction(snapshot, parts) {
+  for (const part of parts) {
+    const key = String(part.spare_part_id);
+    snapshot.provisional_stock_deductions[key] =
+      (snapshot.provisional_stock_deductions[key] ?? 0) + Number(part.quantity);
+
+    decrementAvailable(snapshot.van_stock, part);
+  }
+}
+
+/** Baja unidades del saldo visible de una línea, sin dejarlo en negativo. */
+function decrementAvailable(vanStock, part) {
+  const item = vanStock.items.find(
+    (candidate) => Number(candidate?.spare_part_id) === Number(part.spare_part_id)
+  );
+
+  if (item) {
+    item.quantity_available = Math.max(0, Number(item.quantity_available ?? 0) - Number(part.quantity));
+  }
+}
+
+/** Descuentos pendientes de una copia anterior, en la forma del extractor. */
+function provisionalParts(previous) {
+  return Object.entries(previous?.provisional_stock_deductions ?? {})
+    .map(([sparePartId, quantity]) => ({
+      spare_part_id: Number(sparePartId),
+      quantity: Number(quantity)
+    }))
+    .filter((part) => Number.isInteger(part.spare_part_id) && part.spare_part_id > 0
+      && Number.isInteger(part.quantity) && part.quantity > 0);
+}
+
+/** Número positivo con respaldo cuando el servidor no lo envía. */
+function positiveNumberOr(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/** Lee el contenido binario de la foto como base64, sin dependencias. */
+async function readAsBase64(photo) {
+  if (typeof photo.arrayBuffer !== 'function' || typeof btoa !== 'function') {
+    return '';
+  }
+
+  const bytes = new Uint8Array(await photo.arrayBuffer());
+  let binary = '';
+  const chunkSize = 0x8000;
+
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+
+  return btoa(binary);
+}
+
+export default {
+  OFFLINE_DB_NAME,
+  OFFLINE_DB_VERSION,
+  ROUTE_SNAPSHOTS_STORE,
+  MUTATION_OUTBOX_STORE,
+  SNAPSHOT_WARNING_AGE_MS,
+  SNAPSHOT_MAX_VALID_AGE_MS,
+  OFFLINE_PHOTO_MAX_COUNT,
+  OFFLINE_PHOTO_MAX_SINGLE_BYTES,
+  OFFLINE_PHOTO_MAX_TOTAL_BYTES,
+  OFFLINE_SIGNATURE_MAX_BYTES,
+  SNAPSHOT_VALIDITY,
+  MUTATION_STATUS,
+  STOP_TYPE,
+  PERISHABLE_MACHINE_TYPES,
+  OFFLINE_OPERATIONS,
+  OPTIMISTIC_STATUS_BY_OPERATION,
+  OFFLINE_MESSAGES,
+  OfflineQueueError,
+  OfflineStorage,
+  evaluateSnapshotValidity,
+  requiresSanitarySeal,
+  extractConsumedCatalogParts,
+  validatePhotoAttachment,
+  normalizeSnapshot,
+  normalizeVanStock,
+  applyOptimisticStopChange,
+  revertProvisionalStockChange,
+  serializePhoto,
+  photoAttachmentBlob
+};

@@ -177,6 +177,10 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'NOTIFICATION_PERMANENT_FAILURE', label: 'Fallo Definitivo de Notificación', tone: 'danger', group: 'notification' },
   { code: 'NOTIFICATION_WEBHOOK_UPDATED', label: 'Canal de Emergencias Actualizado', tone: 'info', group: 'notification' },
   { code: 'NOTIFICATION_WEBHOOK_TESTED', label: 'Conexión del Canal de Emergencias Probada', tone: 'neutral', group: 'notification' },
+  // Módulo 24: el servidor archiva el trabajo sin conexión como nota interna y
+  // registra el hecho; sin estas dos etiquetas el visor mostraría el código crudo.
+  { code: 'OFFLINE_CONFLICT_DUMPED', label: 'Volcado Offline de Conflicto en Expediente', tone: 'warning', group: 'ticket' },
+  { code: 'OFFLINE_DEACTIVATED_ACCOUNT_DUMP', label: 'Volcado Offline por Baja de Cuenta', tone: 'danger', group: 'ticket' },
 ]);
 
 const CATALOG_BY_CODE = Object.freeze(

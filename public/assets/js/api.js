@@ -162,6 +162,42 @@ export function combineWithTimeoutSignal(callerSignal, timeout) {
 }
 
 /**
+ * Construye un cuerpo `multipart/form-data` con los campos de un objeto y un
+ * archivo opcional (Módulo 24, contrato §6.3, Art. V.5).
+ *
+ * Multipart no conserva anidamiento: los valores compuestos viajan serializados
+ * como JSON bajo su propia clave, y los escalares como texto. Se usa en los dos
+ * puntos que adjuntan evidencia fotográfica —el volcado de conflicto y el envío
+ * de una operación encolada con foto— para que el cuerpo se forme en un solo
+ * sitio.
+ *
+ * @param {Object} fields Campos a enviar
+ * @param {(Blob|File|null)} [file=null] Archivo adjunto
+ * @param {string|null} [fileName=null] Nombre del archivo si el blob no lo trae
+ * @returns {FormData}
+ */
+export function buildMultipartBody(fields, file = null, fileName = null) {
+  const formData = new FormData();
+
+  for (const [key, value] of Object.entries(fields ?? {})) {
+    if (value === undefined || value === null) {
+      continue;
+    }
+    formData.append(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
+  }
+
+  if (file) {
+    if (fileName) {
+      formData.append('photo', file, fileName);
+    } else {
+      formData.append('photo', file);
+    }
+  }
+
+  return formData;
+}
+
+/**
  * Bloque de mensajes que carga cada petición del hilo: los 50 más recientes del
  * expediente (Módulo 10, RF-01.2 de specs/10-incident-comments/spec.md).
  */
@@ -1877,6 +1913,38 @@ export class ApiClient {
     },
     confirmVanRestockOrder: (orderId, payload = {}) => {
       return this.post(`/technician/van-stock/restock-orders/${encodeURIComponent(orderId)}/confirm`, payload);
+    },
+
+    // Copia local de ruta y volcados de la cola sin conexión (Módulo 24).
+    // El paquete de bootstrap trae los relojes de vigencia del servidor (D6) y se
+    // guarda en `IndexedDB` aislado por técnico (Art. V.4).
+    getOfflineBootstrap: () => {
+      return this.get('/technician/offline/bootstrap');
+    },
+    /**
+     * Vuelca en un toque el trabajo de una parada en conflicto (`RF-05.3`, `QA 1`, `QA 2`).
+     * Acepta JSON, o `multipart/form-data` cuando hay fotografía de evidencia.
+     * @param {Object} payload Contrato §6.3 (metadatos, motivo y resumen del trabajo)
+     * @param {(Blob|File|null)} [photoFile=null]
+     * @param {string|null} [photoName=null]
+     * @returns {Promise<Object>}
+     */
+    dumpOfflineConflict: (payload, photoFile = null, photoName = null) => {
+      const endpoint = '/technician/offline/conflicts/dump';
+
+      return photoFile
+        ? this.upload(endpoint, buildMultipartBody(payload, photoFile, photoName))
+        : this.post(endpoint, payload);
+    },
+    /**
+     * Volcado automático de auditoría cuando la cuenta del técnico fue dada de baja
+     * mientras trabajaba sin conexión (`EARS 06.4`, `QA 5`). No altera estados ni
+     * titularidad: solo archiva constancia de lo realizado.
+     * @param {Array<Object>} items Elementos de la cola con su resumen de trabajo
+     * @returns {Promise<{clear_local_storage: boolean}>}
+     */
+    dumpDeactivatedAccountOfflineQueue: (items) => {
+      return this.post('/technician/offline/deactivated-account-dump', { items });
     }
   };
 
