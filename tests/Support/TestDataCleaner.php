@@ -74,6 +74,11 @@ final class TestDataCleaner
         // bloquearía la siguiente prueba con el índice de orden abierta (D3).
         'van_restock_order_items',
         'van_restock_orders',
+        // Libro de idempotencia del Módulo 24: cuelga de `users`, que es una tabla
+        // protegida, de modo que el grafo desde `incidents` no lo alcanza. Sin esta
+        // raíz, las mutaciones de una suite sobrevivirían al reinicio y la siguiente
+        // encontraría ocupado el hueco de idempotencia que va a certificar.
+        'offline_sync_mutations',
     ];
 
     /**
@@ -117,6 +122,7 @@ final class TestDataCleaner
         'technician_shifts',
         'van_restock_order_items',
         'van_restock_orders',
+        'offline_sync_mutations',
     ];
 
     /** @var array<string, array<string, string>> tabla => (FK => tabla padre) caché por esquema */

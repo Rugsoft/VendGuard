@@ -42,7 +42,7 @@
     3. Añadir semillas representativas de mutaciones sincronizadas (`APPLIED` y `CONFLICT_DUMPED`) en `database/supabase_seeds.sql` y `SeedRunner.php`, y actualizar `specs/technical/schema_correspondence_contract.md` y el bloque final de recuentos de `database/supabase_init.sql` (34 tablas).
   * **Hecho cuando:** `php bin/init_cloud_db.php` aplica el esquema y las semillas sin errores sobre PostgreSQL.
 
-- [ ] **T-OFFLINE-02 · Actualización de guardas de esquema y suite `PostgresOfflineSyncSchemaTest`**
+- [x] **T-OFFLINE-02 · Actualización de guardas de esquema y suite `PostgresOfflineSyncSchemaTest`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-OFFLINE-01`
   * **Ficheros a crear o modificar:**

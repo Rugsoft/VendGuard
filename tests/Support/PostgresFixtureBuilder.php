@@ -77,6 +77,11 @@ final class PostgresFixtureBuilder
         // numérica de la línea, de modo que no deja la fila en una rama imposible.
         'van_restock_orders' => ['status', 'dispatched_at', 'dispatched_by', 'confirmed_at', 'confirmed_by', 'cancelled_at', 'cancelled_by', 'cancellation_reason'],
         'van_restock_order_items' => ['reason', 'dispatched_qty', 'removed_at', 'removed_by'],
+        // Libro de idempotencia del Módulo 24: el identificador del cliente tiene un
+        // formato cerrado y los otros tres campos pertenecen a catálogos cerrados.
+        // El `UPDATE` genérico escribiría texto sintético y el motor lo rechazaría por
+        // diseño; la modificación se certifica sobre la marca temporal.
+        'offline_sync_mutations' => ['client_mutation_id', 'stop_type', 'operation_type', 'outcome_status'],
     ];
 
     // ─────────────────────────────────────────────────────────────────────
@@ -585,6 +590,13 @@ final class PostgresFixtureBuilder
             // y el escenario de las suites heredadas no llegaría a sembrarse.
             $table === 'technician_shift_logs' && $column === 'event_type'
                 => $variant === 'update' ? 'RESUME_SHIFT' : 'START_SHIFT',
+            // El alta mínima del Módulo 24 necesita valores que respeten el formato
+            // del identificador y los dos catálogos cerrados; el texto sintético
+            // genérico convertiría el alta en un rechazo legítimo del motor.
+            $table === 'offline_sync_mutations' && $column === 'client_mutation_id'
+                => $variant === 'update' ? 'fixture.update.m24.0001' : 'fixture.insert.m24.0001',
+            $table === 'offline_sync_mutations' && $column === 'stop_type' => 'INCIDENT',
+            $table === 'offline_sync_mutations' && $column === 'operation_type' => 'START_INCIDENT',
             in_array($udt, ['int2', 'int4', 'int8'], true) => $variant === 'update' ? 9 : 7,
             $udt === 'numeric', $udt === 'float4', $udt === 'float8' => $variant === 'update' ? '9.5000000' : '1.5000000',
             $udt === 'text' => $literal,
