@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="VendGuard">
+  <title>VendGuard</title>
+  <!-- Icono maskable: mismo trazo que la variante de 192, escalado al lienzo de 512.
+       Fondo a sangre y marca dentro de la zona segura del 80 % (102,4–409,6). -->
+  <rect width="512" height="512" fill="#2560ff"/>
+  <path d="M155 149 L256 363 L357 149" fill="none" stroke="#f9fafb" stroke-width="59" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

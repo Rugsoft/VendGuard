@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192" role="img" aria-label="VendGuard">
+  <title>VendGuard</title>
+  <!-- Icono maskable: el fondo ocupa el lienzo completo para que la máscara del
+       lanzador no recorte el color de marca; la marca queda dentro de la zona
+       segura del 80 % (38,4–153,6). Paleta del sistema de diseño. -->
+  <rect width="192" height="192" fill="#2560ff"/>
+  <path d="M58 56 L96 136 L134 56" fill="none" stroke="#f9fafb" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

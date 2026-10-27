@@ -175,7 +175,7 @@
 
 ## Fase 6: PWA Nativa, Almacenamiento `IndexedDB`, Gestor de Cola e Interfaz Frontend (Vue 3 ESM)
 
-- [ ] **T-OFFLINE-10 · Manifiesto Web (`manifest.webmanifest`), iconos vectoriales y Service Worker (`sw.js`)**
+- [x] **T-OFFLINE-10 · Manifiesto Web (`manifest.webmanifest`), iconos vectoriales y Service Worker (`sw.js`)**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-OFFLINE-09`
   * **Ficheros a crear o modificar:**
