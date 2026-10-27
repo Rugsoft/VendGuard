@@ -33,3 +33,6 @@ deploy/local/postgres/.env.battery
 
 # Configuración de cliente MCP local
 .agents/mcp.json
+
+# Capturas y PDF de revisión visual (evidencia local, no se versiona)
+screenshots/
