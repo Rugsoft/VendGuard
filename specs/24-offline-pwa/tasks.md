@@ -125,7 +125,7 @@
     3. Implementar `OfflineSyncService::dumpConflict()` (`EARS 05.3`, `QA 1`, `QA 2`) y `OfflineSyncService::dumpDeactivatedAccountQueue()` (`EARS 06.4`, `QA 5`).
   * **Hecho cuando:** `php -l src/Application/DTO/OfflineBootstrapSnapshotDto.php && php -l src/Application/Service/OfflineSyncService.php` no reporta errores de sintaxis.
 
-- [ ] **T-OFFLINE-07 · Suite unitaria `OfflineSyncServiceTest`**
+- [x] **T-OFFLINE-07 · Suite unitaria `OfflineSyncServiceTest`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-OFFLINE-06`
   * **Ficheros a crear o modificar:**
