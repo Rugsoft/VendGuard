@@ -142,7 +142,7 @@
 
 ## Fase 5: Controladores REST, Router y Suites de Integración HTTP
 
-- [ ] **T-OFFLINE-08 · Controlador `TechnicianOfflineSyncController`, integración en controladores de parada, blindaje de Sede y rutas en `AppRouter`**
+- [x] **T-OFFLINE-08 · Controlador `TechnicianOfflineSyncController`, integración en controladores de parada, blindaje de Sede y rutas en `AppRouter`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-OFFLINE-07`
   * **Ficheros a crear o modificar:**

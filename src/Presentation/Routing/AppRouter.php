@@ -12,6 +12,7 @@ use VendGuard\Presentation\Controller\HealthController;
 use VendGuard\Presentation\Controller\LocationRefundController;
 use VendGuard\Presentation\Controller\PublicRefundController;
 use VendGuard\Presentation\Controller\TechnicianOpportunisticController;
+use VendGuard\Presentation\Controller\TechnicianOfflineSyncController;
 use VendGuard\Presentation\Controller\TechnicianRefundController;
 use VendGuard\Presentation\Controller\TechnicianRouteMapController;
 use VendGuard\Presentation\Http\Request;
@@ -292,6 +293,18 @@ class AppRouter
             \VendGuard\Core\Domain\Model\UserRole::TECHNICIAN
         );
         $router->get('/api/technician/route/map', [TechnicianRouteMapController::class, 'getRouteMap'], [$technicianAuth]);
+
+        // Modo Sin Conexión e Instalabilidad Móvil (Módulo 24: T-OFFLINE-08).
+        // El paquete de ruta y los dos volcados de auditoría son supervivencia del
+        // dispositivo, no acciones de parada: el token acredita al técnico y aquí
+        // sólo se lee o se archiva su cola (RF-02.1, RF-05.3, RF-06.4).
+        $router->get('/api/technician/offline/bootstrap', [TechnicianOfflineSyncController::class, 'getBootstrap'], [$technicianAuth]);
+        $router->post('/api/technician/offline/conflicts/dump', [TechnicianOfflineSyncController::class, 'dumpConflict'], [$technicianAuth]);
+        // El volcado por baja de cuenta se autentica con el token del propio técnico
+        // desactivado: el middleware verifica firma y rol, y el controlador comprueba
+        // `users.is_active` para no saltarse la sincronización normal mientras siga activa.
+        $router->post('/api/technician/offline/deactivated-account-dump', [TechnicianOfflineSyncController::class, 'dumpDeactivatedAccount'], [$technicianAuth]);
+
         $router->get('/api/technician/my-route', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getMyRoute'], [$technicianAuth]);
         // Avería Oportunista In Situ (Módulo 16: T-OPP-09, RF-01 a RF-05).
         // El catálogo exige que la sede esté habilitada para este técnico; el alta y
