@@ -62,7 +62,7 @@
 
 ## Fase 2: Modelos de Dominio, Value Objects y Excepciones
 
-- [ ] **T-OFFLINE-03 · Entidad `OfflineSyncMutation`, Value Object `OfflineSyncMetadata`, excepción `OfflineSyncValidationException` e interfaz `OfflineSyncMutationRepositoryInterface`**
+- [x] **T-OFFLINE-03 · Entidad `OfflineSyncMutation`, Value Object `OfflineSyncMetadata`, excepción `OfflineSyncValidationException` e interfaz `OfflineSyncMutationRepositoryInterface`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-OFFLINE-02`
   * **Ficheros a crear o modificar:**
