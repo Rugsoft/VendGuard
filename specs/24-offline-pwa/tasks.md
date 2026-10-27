@@ -94,7 +94,7 @@
 
 ## Fase 3: Capa de Infraestructura y Repositorio PDO
 
-- [ ] **T-OFFLINE-05 · Implementación de `PdoOfflineSyncMutationRepository`**
+- [x] **T-OFFLINE-05 · Implementación de `PdoOfflineSyncMutationRepository`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-OFFLINE-04`
   * **Ficheros a crear o modificar:**
