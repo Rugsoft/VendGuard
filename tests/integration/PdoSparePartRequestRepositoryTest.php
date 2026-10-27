@@ -160,6 +160,15 @@ $assert("4.1 findByIncidentId devuelve 2 solicitudes para la incidencia 1", coun
 $assert("4.2 Primera solicitud corresponde a la pieza de catálogo", $inc1Requests[0]->getId() === $createdCatalog->getId());
 $assert("4.3 Segunda solicitud corresponde a fuera de catálogo", $inc1Requests[1]->getId() === $createdCustom->getId());
 
+$batchRequests = $requestRepo->findPendingByIncidentIds([$inc1Id, $inc2Id, $inc1Id, 0]);
+$assert(
+    "4.4 findPendingByIncidentIds agrupa PENDING por avería y deduplica la entrada",
+    array_keys($batchRequests) === [$inc1Id]
+        && count($batchRequests[$inc1Id]) === 2
+        && $batchRequests[$inc1Id][0]->getId() === $createdCatalog->getId()
+        && $batchRequests[$inc1Id][1]->getId() === $createdCustom->getId()
+);
+
 // =====================================================================
 // CASO 5: Bandeja de piezas fuera de catálogo pendientes de revisión (findPendingOutOfCatalogReviews)
 // =====================================================================

@@ -3,7 +3,7 @@
 **Fase:** Fase 8 — Verificación Global y Auditoría de Cierre (Tarea T-40)  
 **Metodología:** SDD (Specification-Driven Development) & Dogma Vanilla  
 **Fecha de Validación:** Septiembre 2026  
-**Resultado de Auditoría:** 100% Satisfactorio (0 fallos / 44 aserciones E2E verificadas)
+**Resultado de Auditoría:** 100% Satisfactorio (0 fallos / 45 aserciones E2E verificadas)
 
 ---
 
@@ -104,6 +104,6 @@ sequenceDiagram
 ## 4. Conclusión de la Tarea T-40
 El recorrido funcional de extremo a extremo ha sido ejecutado satisfactoriamente por el ejecutor automatizado [`tests/Manual/E2EVerificationRunner.php`](file:///C:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/tests/Manual/E2EVerificationRunner.php), cumpliendo al 100% la condición "Hecho cuando:" de la tarea **T-40**.
 
-> **Nota (08/10/2026):** el guion se ejecuta además en la **Fase 4** de `php tests/run_all.php`, con el servidor HTTP todavía en marcha, de modo que una regresión de flujo rompe ya la batería global. Cifra vigente de la batería completa:
->
-> batería global: 355 suites · 13.492 aserciones
+> **Nota (08/10/2026):** el guion se ejecuta además en la **Fase 4** de `php tests/run_all.php`, con el servidor HTTP todavía en marcha, de modo que una regresión de flujo rompe ya la batería global. La cifra vigente de la batería completa se declara una sola vez en [`README.md`](../README.md#resumen-de-ejecución-global-octubre-2026).
+
+> **Nota (27/10/2026):** la Fase 4 ejecuta hoy **dos** guiones. Junto a este, [`tests/Manual/VanRestockWalkthroughRunner.php`](file:///C:/Users/Friki/.gemini/antigravity/scratch/gestor-incidencias-vending/tests/Manual/VanRestockWalkthroughRunner.php) certifica por HTTP real el ciclo de órdenes de carga de furgoneta del **Módulo 23** —propuesta, alta, bloqueo de la segunda orden abierta, cancelación justificada, albarán A4, baja lógica de líneas, expedición parcial, recepción móvil, doble toque rechazado, comprobante, privacidad de sede e insignias de triaje— con **72 aserciones** y base propia (purga y re-siembra en cada corrida), tal y como exige el contrato de la carpeta. La misma cifra se certificó por separado antes de incorporarlo a la batería; ahora ninguna regresión del módulo puede pasar sin romperla.

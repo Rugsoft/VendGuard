@@ -31,6 +31,7 @@ export const AUDIT_ACTION_GROUPS = Object.freeze({
   sanitary: 'Sanidad Alimentaria',
   refund: 'Reintegros y Efectivo',
   spare_parts: 'Repuestos',
+  restock: 'Órdenes de Carga',
   notification: 'Centro de Notificaciones'
 });
 
@@ -64,7 +65,10 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   TECHNICIAN_ZONE: 'Cuadrante Técnico',
   // Entidad del Módulo 18: el saldo de la furgoneta se audita con tipo propio, y
   // el visor necesita su etiqueta o el filtro perdería esas filas del historial.
-  TECHNICIAN_VAN_STOCK: 'Stock de Furgoneta'
+  TECHNICIAN_VAN_STOCK: 'Stock de Furgoneta',
+  // Entidad del Módulo 23: cada transición de la orden de carga se audita con
+  // tipo propio, y el catálogo del visor debe cubrir el enumerado completo.
+  VAN_RESTOCK_ORDER: 'Orden de Carga de Furgoneta'
 });
 
 /**
@@ -163,6 +167,11 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'REFUND_DETACHED_BY_INACTIVITY', label: 'Reintegro Desvinculado por Inactividad', tone: 'warning', group: 'refund' },
   { code: 'EXPORT_SPARE_PARTS_CSV', label: 'Exportación CSV de Repuestos', tone: 'neutral', group: 'spare_parts' },
   { code: 'VAN_STOCK_ADJUSTED', label: 'Ajuste de Stock de Furgoneta', tone: 'primary', group: 'spare_parts' },
+  { code: 'CREATE_VAN_RESTOCK_ORDER', label: 'Alta de Orden de Carga', tone: 'primary', group: 'restock' },
+  { code: 'UPDATE_VAN_RESTOCK_ORDER', label: 'Edición de Orden de Carga', tone: 'neutral', group: 'restock' },
+  { code: 'DISPATCH_VAN_RESTOCK_ORDER', label: 'Expedición de Orden de Carga', tone: 'info', group: 'restock' },
+  { code: 'CONFIRM_VAN_RESTOCK_ORDER', label: 'Recepción de Carga Confirmada', tone: 'success', group: 'restock' },
+  { code: 'CANCEL_VAN_RESTOCK_ORDER', label: 'Cancelación de Orden de Carga', tone: 'danger', group: 'restock' },
   { code: 'NOTIFICATION_MANUAL_RETRY', label: 'Reintento Manual de Notificación', tone: 'warning', group: 'notification' },
   { code: 'NOTIFICATION_MANUAL_CANCEL', label: 'Cancelación Manual de Notificación', tone: 'danger', group: 'notification' },
   { code: 'NOTIFICATION_PERMANENT_FAILURE', label: 'Fallo Definitivo de Notificación', tone: 'danger', group: 'notification' },

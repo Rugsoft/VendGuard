@@ -11,6 +11,9 @@ use VendGuard\Core\Domain\Model\SparePartRequest;
  * 
  * Contrato de persistencia para las solicitudes estructuradas de repuesto
  * emitidas durante las pausas técnicas de incidencias correctivas (RF-REP-03 / RF-REP-04).
+ *
+ * Para leer las solicitudes de varias averías sin N+1, usa el contrato segregado
+ * `SparePartRequestBatchRepositoryInterface`.
  */
 interface SparePartRequestRepositoryInterface
 {

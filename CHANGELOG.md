@@ -4,6 +4,55 @@ Registro de los hitos de producto y de los módulos cerrados bajo el ciclo SDD.
 El proyecto no publica versiones semánticas independientes: cada entrada corresponde
 a un módulo funcional certificado por la batería global.
 
+## [Módulo 23] · Órdenes de Carga de Furgoneta y Cruce de Stock en Triaje — 2026-10-26
+
+**Estado:** Cerrado · especificación funcional, contratos técnicos, implementación y certificación en verde.
+
+### Añadido
+
+- Órdenes de carga `van_restock_orders` y líneas `van_restock_order_items` (Tablas 32 y 33) con ciclo
+  `PENDING_PICKING` → `DISPATCHED` → `CONFIRMED_BY_TECH` / `CANCELLED`, índice único parcial
+  `uq_van_restock_open_per_tech` para una sola orden abierta por técnico (D3) y disparadores
+  `trg_no_delete_*` de blindaje constitucional (Art. III.1).
+- Propuesta de reposición que combina el umbral mínimo con las solicitudes pendientes de averías activas
+  (fórmula aditiva de «Ambos», Resolución QA 3), ordenación determinista por motivo, saldo y referencia,
+  y generación en lote que omite técnicos sin déficit, ausentes o con orden abierta.
+- Edición de órdenes en preparación con **baja lógica** de líneas (`removed_at` / `removed_by`) y
+  reactivación al volver a añadir la pieza, sin `DELETE` físico (Art. III.1 y Resolución QA 1).
+- Expedición con cantidades reales servidas (`dispatched_qty`), despacho parcial permitido y tope
+  `saldo + cantidad ≤ 9.999`; cancelación con justificación de al menos 20 caracteres reales (`btrim`,
+  Art. V.1) y motivo persistido en auditoría.
+- **Albarán de Picking A4** imprimible con CSS `@media print` y `window.print()`, cabecera de orden,
+  casillas físicas y firmas, sin ningún coste ni precio (Art. V.4).
+- Recepción móvil en un toque con independencia del estado de turno, incremento atómico de
+  `technician_van_stocks` bajo `SELECT ... FOR UPDATE` y comprobante de la última carga confirmada
+  (Resoluciones QA 4 y QA 5).
+- Cruce informativo `van_stock_match` en dos niveles (piezas solicitadas y familia compatible) y
+  `van_stock_readiness` en las averías activas, sin alterar `TechnicianWorkloadScorer`, `total_score`,
+  `score_breakdown` ni el escalado sanitario del Art. II (D2 y C1).
+- Aislamiento horizontal de la orden móvil al `user_id` autenticado y opacidad total en el Portal de
+  Sede y el canal QR (Art. V.4).
+
+### Corregido
+
+- `AuditEvent` reconoce `VAN_RESTOCK_ORDER` en su whitelist, alineada con el enum `audit_entity_type`
+  de la migración 016; sin esta entrada la exportación del historial de auditoría fallaba al hidratar
+  los eventos de las órdenes de carga.
+- La suite de jornada cierra su rango de informe en el día real de la corrida, de modo que las sesiones
+  creadas con la fecha actual no queden fuera al cambiar el día.
+
+### Certificación
+
+- Recorrido funcional del módulo **versionado como suite de la batería**: `tests/Manual/VanRestockWalkthroughRunner.php`
+  ejercita el ciclo completo por HTTP real —cURL contra `php -S`, con el sobre `{success, data}` y los códigos de
+  estado que ve el navegador— sobre base propia (purga y re-siembra en cada corrida): propuesta, alta, bloqueo de
+  la segunda orden abierta, cancelación justificada, albarán A4, baja lógica, expedición parcial, recepción móvil,
+  doble toque rechazado, comprobante, privacidad de sede e insignias de triaje, en **72 aserciones**.
+- 362 suites y 13.829 aserciones ejecutadas en esa corrida · 0 fallos · base restaurada a semillas.
+  *(La cifra vigente se declara una sola vez, en el README, y la audita `DocMetricsGuard`.)*
+- Canal `new_engine`: 25 suites evaluadas, 24 en verde y 744 aserciones; `PoolerLatencyMeasurementTest`
+  sigue declarando otro contrato por falta de `DB_SSL_ROOT_CERT` y no se omite en silencio.
+
 ## [Módulo 17] · Corrección de los ocho hallazgos de la verificación funcional — 2026-10-21
 
 **Estado:** Cerrado · H-1 a H-8 corregidos y certificados por la batería global.

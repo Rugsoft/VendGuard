@@ -124,8 +124,37 @@ export const App = {
   },
   methods: {
     switchView(view) {
+      // El selector de perfil es un atajo de demo, no un cambio de rol: arrastrar
+      // la sesión de Coordinación a la pestaña del técnico dejaba la cabecera, la
+      // navegación y el contenido en desacuerdo —la pestaña se marcaba y la vista
+      // no cambiaba—. Cambiar de perfil con una sesión de otro rol la cierra para
+      // que el perfil destino pida sus propias credenciales.
+      const sessionView = this.sessionView();
+
+      if (sessionView !== null && sessionView !== view) {
+        store.clearSession();
+      }
+
       this.currentView = view;
     },
+
+    /** Vista que corresponde a la sesión activa, o `null` si no hay sesión. */
+    sessionView() {
+      if (store.state.location) {
+        return 'portal';
+      }
+
+      if (store.state.user?.role === 'COORDINATOR') {
+        return 'coordinator';
+      }
+
+      if (store.state.user?.role === 'TECHNICIAN') {
+        return 'technician';
+      }
+
+      return null;
+    },
+
     handleLogout() {
       store.clearSession();
     },

@@ -179,14 +179,31 @@ try {
     $statusInMeal = $api('GET', '/api/technician/shift/status', $jordiToken);
     $statusInMealData = $statusInMeal->getDecodedBody()['data'] ?? [];
     $mealSummary = $statusInMealData['today_summary'] ?? [];
+    // El descuento de la pausa viva se certifica con la identidad contable de la
+    // jornada —la misma que audita 1.7 tras el cierre— y no con un valor absoluto.
+    // Exigir `effective === 0` obligaba a que el primer tramo de trabajo cayera
+    // dentro del mismo segundo que el arranque: bajo carga los sellos se separan
+    // un segundo, el neto real pasa a 1 y la suite fallaba sin que nada estuviera
+    // roto. Con la identidad, la aserción mide lo que importa (la pausa se
+    // descuenta de verdad) y deja de depender del redondeo.
+    $grossInMeal = (int)($mealSummary['gross_seconds'] ?? -1);
+    $mealInMeal = (int)($mealSummary['meal_break_seconds'] ?? -1);
+    $effectiveInMeal = (int)($mealSummary['effective_seconds'] ?? -1);
     $assert(
         '1.5 Estado en pausa viva => MEAL_BREAK con la pausa descontada del día',
         $statusInMeal->getStatusCode() === 200
             && ($statusInMealData['status'] ?? '') === 'MEAL_BREAK'
             && (int)($mealSummary['sessions_count'] ?? -1) === 1
-            && (int)($mealSummary['meal_break_seconds'] ?? 0) >= 1
-            && (int)($mealSummary['effective_seconds'] ?? 0) === 0,
-        'body=' . $statusInMeal->getBody()
+            && $mealInMeal >= 1
+            && $effectiveInMeal === max(0, $grossInMeal - $mealInMeal)
+            && $effectiveInMeal < $grossInMeal,
+        sprintf(
+            'gross=%d meal=%d effective=%d · body=%s',
+            $grossInMeal,
+            $mealInMeal,
+            $effectiveInMeal,
+            $statusInMeal->getBody()
+        )
     );
 
     $closeFromMeal = $api('POST', '/api/technician/shift/close-handover', $jordiToken);
@@ -632,10 +649,13 @@ try {
     $carlosShift = $shiftRepo->startShift($carlosId, new DateTimeImmutable('2026-09-30T08:00:00+02:00'));
     $shiftRepo->closeShift((int)$carlosShift->id(), $carlosId, 'Actividad fuera del rango del informe', new DateTimeImmutable('2026-09-30T16:00:00+02:00'));
 
+    // El rango cierra en el día real de la corrida: las sesiones que la propia
+    // suite crea con `$now` (turno de hoy y cierre forzado) deben entrar en el
+    // informe. Una fecha tope fija dejaba fuera esas sesiones al cambiar el día.
     $reportQuery = [
         'period' => 'custom',
         'from' => '2026-10-01',
-        'to' => '2026-10-25',
+        'to' => $now->format('Y-m-d'),
     ];
     $report = $api('GET', '/api/coordinator/metrics/work-hours', $coordToken, null, $reportQuery);
     $reportData = $report->getDecodedBody()['data'] ?? [];
@@ -655,7 +675,7 @@ try {
         '4.2 El filtro ecoa el rango personalizado y la zona operativa',
         ($reportData['filter']['period'] ?? '') === 'custom'
             && ($reportData['filter']['from_date'] ?? '') === '2026-10-01'
-            && ($reportData['filter']['to_date'] ?? '') === '2026-10-25'
+            && ($reportData['filter']['to_date'] ?? '') === $now->format('Y-m-d')
             && ($reportData['filter']['timezone'] ?? '') === 'Europe/Madrid'
     );
     $assert(
@@ -710,7 +730,7 @@ try {
             && str_starts_with((string)$export->getHeader('Content-Type'), 'text/csv')
             && str_contains(
                 (string)$export->getHeader('Content-Disposition'),
-                'vendguard_registro_jornada_20261001_20261025.csv'
+                'vendguard_registro_jornada_20261001_' . $now->format('Ymd') . '.csv'
             ),
         'status=' . $export->getStatusCode() . ' content-type=' . (string)$export->getHeader('Content-Type')
     );

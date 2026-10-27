@@ -1476,6 +1476,15 @@ class LocationPortalController
             'min_threshold',
             'is_below_threshold',
             'is_negative',
+            // Art. V.4 / Módulo 23: la cobertura de repuestos del triaje, la orden de
+            // carga y su comprobante son datos internos de operación. La sede no ve
+            // ni el cruce informativo ni la carga de la furgoneta de ningún técnico.
+            'van_stock_match',
+            'van_stock_readiness',
+            'active_dispatched_order',
+            'last_confirmed_order',
+            'restock_order',
+            'restock_orders',
         ];
 
         foreach ($forbiddenExactKeys as $key) {
@@ -1496,7 +1505,7 @@ class LocationPortalController
 
         foreach ($data as $key => $value) {
             if (is_string($key)) {
-                if (preg_match('/(spare_part|replaced_part|part_code|unit_cost|total_cost|cost_snapshot|reference_cost|old_part_dest|van_stock|quantity_available|min_threshold|is_below_threshold)/i', $key)) {
+                if (preg_match('/(spare_part|replaced_part|part_code|unit_cost|total_cost|cost_snapshot|reference_cost|old_part_dest|van_stock|quantity_available|min_threshold|is_below_threshold|restock_order)/i', $key)) {
                     unset($data[$key]);
                     continue;
                 }

@@ -10,8 +10,9 @@
 --   motor nuevo (EARS-02.1): las 10 sedes con su código postal, las 3 zonas
 --   operativas del Módulo 17 con sus códigos postales y el cuadrante técnico demo,
 --   la configuración de la ruta base, las 13 máquinas del parque, el personal
---   interno con su contraseña hasheada, las frecuencias normativas del preventivo
---   y el catálogo maestro de repuestos con sus compatibilidades por modelo. Solo
+--   interno con su contraseña hasheada, las frecuencias normativas del preventivo,
+--   el catálogo maestro de repuestos con sus compatibilidades por modelo y las
+--   cuatro órdenes de carga demo del Módulo 23 (una por estado del ciclo). Solo
 --   datos: no crea ni modifica esquema, que es responsabilidad de
 --   `database/supabase_init.sql` y de `database/supabase_migrations/`.
 --
@@ -60,6 +61,8 @@
 --   | operational_zone_postal_codes | `postal_code` (clave primaria)    | ninguno: se inserta solo si no existe; el CP es único en todo el catálogo (QA 7)             |
 --   | technician_zone_assignments | `(technician_id, zone_id)` vivo     | ninguno: se inserta solo si no existe (la baja es lógica, QA 10)                              |
 --   | technician_van_stocks      | `(technician_id, spare_part_id)`    | ninguno: se inserta solo si no existe (Módulo 18)                                            |
+--   | van_restock_orders         | `(technician_id, created_at)` de la semilla | ninguno: se inserta solo si no existe (Módulo 23)                                    |
+--   | van_restock_order_items    | `(order_id, spare_part_id)`         | ninguno: se inserta solo si no existe (Módulo 23; la retirada es lógica, QA 1)              |
 --
 --   Dos consecuencias buscadas de esa regla:
 --     1. Reejecutarlo no duplica nada y deja el catálogo igual: el arranque del
@@ -691,11 +694,281 @@ WHERE NOT EXISTS (
 );
 
 
+-- =============================================================================
+-- SECCIÓN 15 · van_restock_orders y van_restock_order_items — cargas demo (M23)
+-- =============================================================================
+-- Cuatro órdenes, una por estado del ciclo, para que la superficie de Coordinación
+-- y el móvil del técnico tengan algo demostrable desde el primer arranque sin
+-- inventar averías: la orden no nace de un expediente, nace de la demanda
+-- logística. Se resuelven por la clave canónica del técnico (`email_key`), por
+-- su instante de creación (identidad natural de la semilla) y por el código de
+-- la pieza, nunca por identificadores que la secuencia asigna distinto en cada
+-- base. Reejecutar el catálogo no duplica ninguna orden.
+--
+-- La orden de Jordi incluye una línea `MANUAL` dada de baja lógica: la hoja A4 y
+-- el despacho la excluyen, pero la fila permanece con su actor y su instante
+-- (Art. III.1 y QA 1). La de Marta se sembró con despacho parcial (`dispatched_qty`
+-- menor que la cantidad solicitada) y la de Carlos ya fue confirmada por el
+-- técnico, con su marca de recepción. La de Elena ejemplifica la cancelación
+-- justificada (Art. V.1) sin tocar el stock del vehículo.
+
+INSERT INTO van_restock_orders (
+    technician_id, status, notes, created_by, created_at,
+    dispatched_by, dispatched_at, confirmed_by, confirmed_at,
+    cancelled_by, cancelled_at, cancellation_reason
+)
+SELECT
+    technician.id,
+    v.status,
+    v.notes,
+    creator.id,
+    v.created_at,
+    dispatcher.id,
+    v.dispatched_at,
+    confirmer.id,
+    v.confirmed_at,
+    canceller.id,
+    v.cancelled_at,
+    v.cancellation_reason
+FROM (VALUES
+    (
+        'jordi.ruta@vendguard.internal',
+        'PENDING_PICKING',
+        'Reposición matinal: preparar en jaula 3 antes de las 08:30.',
+        'coordinacion@vendguard.internal',
+        TIMESTAMPTZ '2026-10-26 07:45:00+02',
+        NULL::TEXT,
+        NULL::TIMESTAMPTZ,
+        NULL::TEXT,
+        NULL::TIMESTAMPTZ,
+        NULL::TEXT,
+        NULL::TIMESTAMPTZ,
+        NULL::TEXT
+    ),
+    (
+        'marta.ruta@vendguard.internal',
+        'DISPATCHED',
+        'Entregado parcialmente en el mostrador de almacén.',
+        'coordinacion@vendguard.internal',
+        TIMESTAMPTZ '2026-10-25 07:40:00+02',
+        'coordinacion@vendguard.internal',
+        TIMESTAMPTZ '2026-10-25 08:05:00+02',
+        NULL::TEXT,
+        NULL::TIMESTAMPTZ,
+        NULL::TEXT,
+        NULL::TIMESTAMPTZ,
+        NULL::TEXT
+    ),
+    (
+        'carlos.ruta@vendguard.internal',
+        'CONFIRMED_BY_TECH',
+        'Carga recibida antes de iniciar la ruta del sud.',
+        'coordinacion@vendguard.internal',
+        TIMESTAMPTZ '2026-10-24 07:30:00+02',
+        'coordinacion@vendguard.internal',
+        TIMESTAMPTZ '2026-10-24 08:00:00+02',
+        'carlos.ruta@vendguard.internal',
+        TIMESTAMPTZ '2026-10-24 08:20:00+02',
+        NULL::TEXT,
+        NULL::TIMESTAMPTZ,
+        NULL::TEXT
+    ),
+    (
+        'elena.ruta@vendguard.internal',
+        'CANCELLED',
+        'Preparada la víspera de un cambio de ruta.',
+        'coordinacion@vendguard.internal',
+        TIMESTAMPTZ '2026-10-23 07:35:00+02',
+        NULL::TEXT,
+        NULL::TIMESTAMPTZ,
+        NULL::TEXT,
+        NULL::TIMESTAMPTZ,
+        'coordinacion@vendguard.internal',
+        TIMESTAMPTZ '2026-10-23 09:10:00+02',
+        'Devolución física de la caja a estantería por cambio de ruta.'
+    )
+) AS v(
+    technician_email, status, notes, creator_email, created_at,
+    dispatcher_email, dispatched_at, confirmer_email, confirmed_at,
+    canceller_email, cancelled_at, cancellation_reason
+)
+JOIN users technician ON technician.email_key = v.technician_email
+JOIN users creator ON creator.email_key = v.creator_email
+LEFT JOIN users dispatcher ON dispatcher.email_key = v.dispatcher_email
+LEFT JOIN users confirmer ON confirmer.email_key = v.confirmer_email
+LEFT JOIN users canceller ON canceller.email_key = v.canceller_email
+WHERE NOT EXISTS (
+    SELECT 1
+      FROM van_restock_orders o
+     WHERE o.technician_id = technician.id
+       AND o.created_at = v.created_at
+);
+
+
+INSERT INTO van_restock_order_items (
+    order_id, spare_part_id,
+    current_quantity_snapshot, min_threshold_snapshot, pending_request_qty_snapshot,
+    requested_qty, dispatched_qty, reason,
+    removed_at, removed_by, created_at
+)
+SELECT
+    o.id,
+    sp.id,
+    v.current_quantity,
+    v.min_threshold,
+    v.pending_request_qty,
+    v.requested_qty,
+    v.dispatched_qty,
+    v.reason,
+    v.removed_at,
+    remover.id,
+    v.created_at
+FROM (VALUES
+    -- Orden de Jordi (PENDING_PICKING): stock bajo, demanda combinada y una
+    -- línea manual retirada antes del despacho (baja lógica, QA 1).
+    ('jordi.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-26 07:45:00+02', 'JUNT-TOR-01',   1, 2, 0, 2, NULL::INTEGER, 'LOW_STOCK',       NULL::TIMESTAMPTZ, NULL::TEXT, TIMESTAMPTZ '2026-10-26 07:45:00+02'),
+    ('jordi.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-26 07:45:00+02', 'SOND-NTC-01',   0, 1, 2, 4, NULL::INTEGER, 'BOTH',            NULL::TIMESTAMPTZ, NULL::TEXT, TIMESTAMPTZ '2026-10-26 07:45:00+02'),
+    ('jordi.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-26 07:45:00+02', 'FILT-AGUA-01',  0, 0, 0, 1, NULL::INTEGER, 'MANUAL',          TIMESTAMPTZ '2026-10-26 07:50:00+02', 'coordinacion@vendguard.internal', TIMESTAMPTZ '2026-10-26 07:45:00+02'),
+    -- Orden de Marta (DISPATCHED): despacho parcial real de almacén (C3).
+    ('marta.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-25 07:40:00+02', 'BOMB-VIB-02',   3, 0, 4, 1, 1,             'PENDING_REQUEST', NULL::TIMESTAMPTZ, NULL::TEXT, TIMESTAMPTZ '2026-10-25 07:40:00+02'),
+    ('marta.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-25 07:40:00+02', 'TELEC-NAYAX-01', -1, 0, 1, 3, 2,            'BOTH',            NULL::TIMESTAMPTZ, NULL::TEXT, TIMESTAMPTZ '2026-10-25 07:40:00+02'),
+    -- Orden de Carlos (CONFIRMED_BY_TECH): recepción móvil ya sellada.
+    ('carlos.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-24 07:30:00+02', 'TERM-SEG-01',   0, 1, 1, 3, 3,             'BOTH',            NULL::TIMESTAMPTZ, NULL::TEXT, TIMESTAMPTZ '2026-10-24 07:30:00+02'),
+    ('carlos.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-24 07:30:00+02', 'MOT-ESP-01',    0, 0, 1, 1, 1,             'PENDING_REQUEST', NULL::TIMESTAMPTZ, NULL::TEXT, TIMESTAMPTZ '2026-10-24 07:30:00+02'),
+    -- Orden de Elena (CANCELLED): material solicitado pero nunca despachado.
+    ('elena.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-23 07:35:00+02', 'VALV-ULKA-01',   0, 0, 2, 2, NULL::INTEGER, 'PENDING_REQUEST', NULL::TIMESTAMPTZ, NULL::TEXT, TIMESTAMPTZ '2026-10-23 07:35:00+02'),
+    ('elena.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-23 07:35:00+02', 'DISP-LCD-01',    0, 0, 0, 1, NULL::INTEGER, 'MANUAL',          NULL::TIMESTAMPTZ, NULL::TEXT, TIMESTAMPTZ '2026-10-23 07:35:00+02')
+) AS v(
+    technician_email, order_created_at, part_code,
+    current_quantity, min_threshold, pending_request_qty,
+    requested_qty, dispatched_qty, reason,
+    removed_at, remover_email, created_at
+)
+JOIN users technician ON technician.email_key = v.technician_email
+JOIN van_restock_orders o
+  ON o.technician_id = technician.id
+ AND o.created_at = v.order_created_at
+JOIN spare_parts sp ON sp.part_code = v.part_code
+LEFT JOIN users remover ON remover.email_key = v.remover_email
+WHERE NOT EXISTS (
+    SELECT 1
+      FROM van_restock_order_items i
+     WHERE i.order_id = o.id
+       AND i.spare_part_id = sp.id
+);
+
+
+-- Eventos de auditoría del ciclo sembrado (Art. III.3). El tipo
+-- `VAN_RESTOCK_ORDER` se estrena con estas órdenes, y cada evento conserva el
+-- estado previo y el resultante para que la traza sea reconstruible.
+INSERT INTO audit_log (
+    entity_type, entity_id, action, user_id, user_role, user_name,
+    previous_state, new_state, metadata, created_at
+)
+SELECT
+    'VAN_RESTOCK_ORDER'::audit_entity_type,
+    o.id,
+    v.action,
+    actor.id,
+    v.user_role,
+    actor.name,
+    v.previous_state,
+    v.new_state,
+    jsonb_build_object(
+        'order_code', 'RO-' || lpad(o.id::text, 6, '0'),
+        'source', 'SEED'
+    ),
+    v.created_at
+FROM (VALUES
+    (
+        'jordi.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-26 07:45:00+02',
+        'CREATE_VAN_RESTOCK_ORDER', 'coordinacion@vendguard.internal', 'COORDINATOR',
+        NULL::JSONB,
+        jsonb_build_object('status', 'PENDING_PICKING', 'technician_id', 'jordi.ruta@vendguard.internal', 'source', 'SEED'),
+        TIMESTAMPTZ '2026-10-26 07:45:00+02'
+    ),
+    (
+        'jordi.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-26 07:45:00+02',
+        'UPDATE_VAN_RESTOCK_ORDER', 'coordinacion@vendguard.internal', 'COORDINATOR',
+        jsonb_build_object('status', 'PENDING_PICKING', 'active_items', jsonb_build_array('JUNT-TOR-01', 'SOND-NTC-01', 'FILT-AGUA-01')),
+        jsonb_build_object('status', 'PENDING_PICKING', 'active_items', jsonb_build_array('JUNT-TOR-01', 'SOND-NTC-01'), 'soft_removed_part_codes', jsonb_build_array('FILT-AGUA-01')),
+        TIMESTAMPTZ '2026-10-26 07:50:00+02'
+    ),
+    (
+        'marta.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-25 07:40:00+02',
+        'CREATE_VAN_RESTOCK_ORDER', 'coordinacion@vendguard.internal', 'COORDINATOR',
+        NULL::JSONB,
+        jsonb_build_object('status', 'PENDING_PICKING', 'source', 'SEED'),
+        TIMESTAMPTZ '2026-10-25 07:40:00+02'
+    ),
+    (
+        'marta.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-25 07:40:00+02',
+        'DISPATCH_VAN_RESTOCK_ORDER', 'coordinacion@vendguard.internal', 'COORDINATOR',
+        jsonb_build_object('status', 'PENDING_PICKING'),
+        jsonb_build_object('status', 'DISPATCHED', 'total_dispatched_units', 3),
+        TIMESTAMPTZ '2026-10-25 08:05:00+02'
+    ),
+    (
+        'carlos.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-24 07:30:00+02',
+        'CREATE_VAN_RESTOCK_ORDER', 'coordinacion@vendguard.internal', 'COORDINATOR',
+        NULL::JSONB,
+        jsonb_build_object('status', 'PENDING_PICKING', 'source', 'SEED'),
+        TIMESTAMPTZ '2026-10-24 07:30:00+02'
+    ),
+    (
+        'carlos.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-24 07:30:00+02',
+        'DISPATCH_VAN_RESTOCK_ORDER', 'coordinacion@vendguard.internal', 'COORDINATOR',
+        jsonb_build_object('status', 'PENDING_PICKING'),
+        jsonb_build_object('status', 'DISPATCHED', 'total_dispatched_units', 4),
+        TIMESTAMPTZ '2026-10-24 08:00:00+02'
+    ),
+    (
+        'carlos.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-24 07:30:00+02',
+        'CONFIRM_VAN_RESTOCK_ORDER', 'carlos.ruta@vendguard.internal', 'TECHNICIAN',
+        jsonb_build_object('status', 'DISPATCHED'),
+        jsonb_build_object('status', 'CONFIRMED_BY_TECH', 'total_received_units', 4),
+        TIMESTAMPTZ '2026-10-24 08:20:00+02'
+    ),
+    (
+        'elena.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-23 07:35:00+02',
+        'CREATE_VAN_RESTOCK_ORDER', 'coordinacion@vendguard.internal', 'COORDINATOR',
+        NULL::JSONB,
+        jsonb_build_object('status', 'PENDING_PICKING', 'source', 'SEED'),
+        TIMESTAMPTZ '2026-10-23 07:35:00+02'
+    ),
+    (
+        'elena.ruta@vendguard.internal', TIMESTAMPTZ '2026-10-23 07:35:00+02',
+        'CANCEL_VAN_RESTOCK_ORDER', 'coordinacion@vendguard.internal', 'COORDINATOR',
+        jsonb_build_object('status', 'PENDING_PICKING'),
+        jsonb_build_object('status', 'CANCELLED', 'cancellation_reason', 'Devolución física de la caja a estantería por cambio de ruta.'),
+        TIMESTAMPTZ '2026-10-23 09:10:00+02'
+    )
+) AS v(
+    technician_email, order_created_at, action, actor_email, user_role,
+    previous_state, new_state, created_at
+)
+JOIN users technician ON technician.email_key = v.technician_email
+JOIN van_restock_orders o
+  ON o.technician_id = technician.id
+ AND o.created_at = v.order_created_at
+JOIN users actor ON actor.email_key = v.actor_email
+WHERE NOT EXISTS (
+    SELECT 1
+      FROM audit_log a
+     WHERE a.entity_type = 'VAN_RESTOCK_ORDER'::audit_entity_type
+       AND a.entity_id = o.id
+       AND a.action = v.action
+       AND a.created_at = v.created_at
+);
+
+
 -- ============================================================================
 -- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
 --       de cuadrante · 5 saldos de stock de furgoneta · 1 configuración de ruta ·
 --       13 máquinas · 6 usuarios internos · 5 frecuencias normativas · 13 repuestos ·
 --       50 compatibilidades · 1 canal emergencias · 2 turnos demo ·
---       11 eventos de bitácora · 2 eventos de auditoría de jornada.
+--       11 eventos de bitácora · 2 eventos de auditoría de jornada ·
+--       4 órdenes de carga (una por estado) · 9 líneas (1 con baja lógica) ·
+--       9 eventos de auditoría de carga.
 --       0 incidencias · 0 histórico de averías (arranque en limpio estricto).
 -- =============================================================================

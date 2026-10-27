@@ -67,6 +67,13 @@ final class TestDataCleaner
         // que la FK RESTRICT no impida restituir el banco de pruebas.
         'technician_shift_logs',
         'technician_shifts',
+        // Órdenes de carga del Módulo 23: cuelgan de `users`, que es una tabla
+        // protegida, de modo que el grafo desde `incidents` no las alcanza. La
+        // cabecera entra como raíz propia y las líneas caen antes por su FK
+        // RESTRICT; sin ellas, una orden de una suite sobreviviría al reinicio y
+        // bloquearía la siguiente prueba con el índice de orden abierta (D3).
+        'van_restock_order_items',
+        'van_restock_orders',
     ];
 
     /**
@@ -108,6 +115,8 @@ final class TestDataCleaner
         'technician_absences',
         'technician_shift_logs',
         'technician_shifts',
+        'van_restock_order_items',
+        'van_restock_orders',
     ];
 
     /** @var array<string, array<string, string>> tabla => (FK => tabla padre) caché por esquema */

@@ -6,6 +6,7 @@ namespace VendGuard\Presentation\Routing;
 
 use VendGuard\Presentation\Controller\CoordinatorRefundController;
 use VendGuard\Presentation\Controller\CoordinatorRouteMapController;
+use VendGuard\Presentation\Controller\CoordinatorVanRestockOrderController;
 use VendGuard\Presentation\Controller\CoordinatorZoneController;
 use VendGuard\Presentation\Controller\HealthController;
 use VendGuard\Presentation\Controller\LocationRefundController;
@@ -272,6 +273,18 @@ class AppRouter
         $router->get('/api/coordinator/van-stocks', [\VendGuard\Presentation\Controller\CoordinatorVanStockController::class, 'getInventory'], [$coordinatorAuth]);
         $router->put('/api/coordinator/van-stocks', [\VendGuard\Presentation\Controller\CoordinatorVanStockController::class, 'upsertStock'], [$coordinatorAuth]);
 
+        // Órdenes de carga de furgoneta (Módulo 23, T-RESTOCK-10, contrato §5.2 a §5.9).
+        // Las rutas estáticas se registran antes de los segmentos dinámicos `{id}` para
+        // que «proposals» y «generate-batch» no se interpreten como identificadores.
+        $router->get('/api/coordinator/van-restock-orders/proposals', [CoordinatorVanRestockOrderController::class, 'getProposals'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/van-restock-orders/generate-batch', [CoordinatorVanRestockOrderController::class, 'generateBatch'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/van-restock-orders', [CoordinatorVanRestockOrderController::class, 'listOrders'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/van-restock-orders', [CoordinatorVanRestockOrderController::class, 'createOrder'], [$coordinatorAuth]);
+        $router->get('/api/coordinator/van-restock-orders/{id}', [CoordinatorVanRestockOrderController::class, 'getOrderDetail'], [$coordinatorAuth]);
+        $router->put('/api/coordinator/van-restock-orders/{id}', [CoordinatorVanRestockOrderController::class, 'updateOrder'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/van-restock-orders/{id}/dispatch', [CoordinatorVanRestockOrderController::class, 'dispatchOrder'], [$coordinatorAuth]);
+        $router->post('/api/coordinator/van-restock-orders/{id}/cancel', [CoordinatorVanRestockOrderController::class, 'cancelOrder'], [$coordinatorAuth]);
+
         // -----------------------------------------------------------------
         // 5. Módulo de Técnico de Campo / "Mi Ruta" (T-28, T-29)
         // -----------------------------------------------------------------
@@ -327,7 +340,9 @@ class AppRouter
         $router->get('/api/technician/spare-parts/catalog', [\VendGuard\Presentation\Controller\TechnicianSparePartsController::class, 'getCatalog'], [$technicianAuth]);
 
         // Inventario de la furgoneta del propio técnico (Módulo 18, RF-04.1 / RF-04.3)
+        // y recepción de la orden de carga despachada (Módulo 23, RF-05.1 a RF-05.3).
         $router->get('/api/technician/van-stock', [\VendGuard\Presentation\Controller\TechnicianVanStockController::class, 'getInventory'], [$technicianAuth]);
+        $router->post('/api/technician/van-stock/restock-orders/{id}/confirm', [\VendGuard\Presentation\Controller\TechnicianVanStockController::class, 'confirmRestockOrder'], [$technicianAuth]);
 
         // Ciclo de jornada y relevo de ruta (Módulo 21, T-ASH-08).
         // Compañeros activos para el relevo: endpoint propio del técnico, sin exponer

@@ -387,6 +387,51 @@ export const CoordinatorDashboardView = {
     },
 
     /**
+     * Cruce informativo de stock del ranking unitario (Módulo 23, RF-06, D2).
+     *
+     * Es una lectura pura de `van_stock_match`: no entra en la puntuación, no
+     * reordena el ranking y no toca el escalado sanitario. Se publica aparte del
+     * panel compartido para que la insignia viaje con su etiqueta completa.
+     */
+    vanStockMatchRows() {
+      return this.rankedTechnicians
+        .filter((technician) => technician?.van_stock_match)
+        .map((technician) => ({
+          technicianId: technician.technician_id,
+          name: technician.name || 'Técnico sin nombre',
+          label: technician.van_stock_match.label
+            || (technician.van_stock_match.status === 'NOT_APPLICABLE'
+              ? 'ℹ️ Sin repuestos catalogados para este modelo/categoría'
+              : 'Sin stock compatible'),
+          badge: technician.van_stock_match.badge || null,
+          status: technician.van_stock_match.status || 'NOT_APPLICABLE',
+          chipClass: this.vanStockMatchChipClass(technician.van_stock_match.badge)
+        }));
+    },
+
+    /** El mismo cruce sobre el expediente de referencia del lote territorial. */
+    bulkVanStockMatchRows() {
+      const ranked = this.bulkAssignSuggestions?.ranked_technicians;
+      if (!Array.isArray(ranked)) {
+        return [];
+      }
+
+      return ranked
+        .filter((technician) => technician?.van_stock_match)
+        .map((technician) => ({
+          technicianId: technician.technician_id,
+          name: technician.name || 'Técnico sin nombre',
+          label: technician.van_stock_match.label
+            || (technician.van_stock_match.status === 'NOT_APPLICABLE'
+              ? 'ℹ️ Sin repuestos catalogados para este modelo/categoría'
+              : 'Sin stock compatible'),
+          badge: technician.van_stock_match.badge || null,
+          status: technician.van_stock_match.status || 'NOT_APPLICABLE',
+          chipClass: this.vanStockMatchChipClass(technician.van_stock_match.badge)
+        }));
+    },
+
+    /**
      * Primer puesto del ranking: el técnico destacado con la insignia «Sugerido por Zona».
      * Se toma de la lista ordenada y no de `recommendation.top_technician_id` para que la
      * identidad contable recomendación ↔ primer puesto se cumpla por construcción.
@@ -1176,6 +1221,31 @@ export const CoordinatorDashboardView = {
     /** Rótulo en castellano de las insignias del motor (contrato §3.6). */
     suggestionBadgeLabel(badge) {
       return suggestionBadgeLabel(badge);
+    },
+
+    /**
+     * Tono de lectura del cruce de stock (Módulo 23): compatible en verde,
+     * parcial en ámbar y sin stock en rojo. El ámbar es una ficha de lectura,
+     * nunca un botón (CoordinatorButtonVariantsGuardTest).
+     */
+    vanStockMatchChipClass(badge) {
+      switch (String(badge || '')) {
+        case 'STOCK_COMPATIBLE':
+          return 'vg-chip vg-chip-success';
+        case 'STOCK_PARCIAL':
+          return 'vg-chip vg-chip-warning';
+        case 'SIN_STOCK_COMPATIBLE':
+          return 'vg-chip vg-chip-danger';
+        default:
+          return 'vg-chip';
+      }
+    },
+
+    /** Tono del chip de disponibilidad en las tarjetas de avería activa (QA 3). */
+    vanStockReadinessChipClass(status) {
+      return String(status || '') === 'SHARED_IN_VAN'
+        ? 'vg-chip vg-chip-warning'
+        : 'vg-chip vg-chip-success';
     },
 
     /** Desglose legible de la puntuación del sugerido (RF-04.3). */
@@ -2269,6 +2339,14 @@ export const CoordinatorDashboardView = {
                         type="opportunistic"
                         size="sm"
                       />
+                      <!-- Disponibilidad del repuesto en la furgoneta del técnico asignado (QA 3). -->
+                      <span
+                        v-if="inc.van_stock_readiness?.badge_label"
+                        data-testid="row-van-stock-readiness"
+                        :class="vanStockReadinessChipClass(inc.van_stock_readiness.status)"
+                      >
+                        {{ inc.van_stock_readiness.badge_label }}
+                      </span>
                     </div>
                   </td>
 
@@ -2597,6 +2675,35 @@ export const CoordinatorDashboardView = {
             @dispatch="assignSuggestedTechnician"
           />
 
+          <!-- Cruce informativo con la furgoneta (Módulo 23, RF-06, D2): la
+               insignia dice si el técnico lleva la pieza, pero no modifica ni
+               la puntuación ni el escalado sanitario del recomendador. -->
+          <section
+            v-if="vanStockMatchRows.length > 0"
+            data-testid="coord-assign-van-stock-match"
+            class="vg-alert vg-alert-info"
+            style="margin-bottom: 16px;"
+          >
+            <div style="font-family: var(--font-body); font-size: var(--font-size-caption); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-info-text);
+            ">
+              📦 Cruce con la furgoneta · informativo
+            </div>
+            <ul style="list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px;">
+              <li
+                v-for="row in vanStockMatchRows"
+                :key="'van-match-' + row.technicianId"
+                :data-testid="'coord-van-stock-match-' + row.technicianId"
+                style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px;"
+              >
+                <span style="font-family: var(--font-body); font-size: var(--font-size-body-sm); color: var(--color-ink);">{{ row.name }}</span>
+                <span :class="row.chipClass">{{ row.label }}</span>
+              </li>
+            </ul>
+            <p style="margin: 6px 0 0; font-family: var(--font-body); font-size: var(--font-size-caption); color: var(--color-ink-secondary);">
+              El cruce de stock es solo una lectura: no altera la puntuación territorial ni el escalado sanitario (Art. II).
+            </p>
+          </section>
+
           <!-- Technician Selector -->
           <div style="margin-bottom: 16px;">
             <label for="assign-tech-select" style="display: block; font-size: 13px; font-weight: 600; color: var(--color-slate, #2c333f); margin-bottom: 6px;">
@@ -2763,6 +2870,29 @@ export const CoordinatorDashboardView = {
             :caption="bulkAssignSuggestionCaption"
             @select="applyBulkSuggestedTechnician"
           />
+
+          <!-- El mismo cruce informativo del lote, sin tocar la puntuación (D2). -->
+          <section
+            v-if="bulkVanStockMatchRows.length > 0"
+            data-testid="coord-bulk-van-stock-match"
+            class="vg-alert vg-alert-info"
+            style="margin-bottom: 16px;"
+          >
+            <div style="font-family: var(--font-body); font-size: var(--font-size-caption); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-info-text);">
+              📦 Cruce con la furgoneta · informativo
+            </div>
+            <ul style="list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px;">
+              <li
+                v-for="row in bulkVanStockMatchRows"
+                :key="'bulk-van-match-' + row.technicianId"
+                :data-testid="'coord-bulk-van-stock-match-' + row.technicianId"
+                style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px;"
+              >
+                <span style="font-family: var(--font-body); font-size: var(--font-size-body-sm); color: var(--color-ink);">{{ row.name }}</span>
+                <span :class="row.chipClass">{{ row.label }}</span>
+              </li>
+            </ul>
+          </section>
 
           <!-- Technician Selector -->
           <div style="margin-bottom: 16px;">

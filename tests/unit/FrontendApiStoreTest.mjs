@@ -220,6 +220,43 @@ assert('3.24 Restored state.user matches storage', state.user?.role === 'TECHNIC
 assert('3.25 store.isTechnician is true', store.isTechnician === true);
 assert('3.26 api.getToken() was restored', api.getToken() === 'restored_token_111');
 
+// 3.27–3.29: un token caducado no se restaura. Restaurarlo a ciegas montaba la
+// vista protegida y disparaba sus sondeos: cuatro 401 en consola antes de que el
+// manejador de sesión expirada reaccionara.
+const encodeTokenPayload = (payload) => Buffer.from(JSON.stringify(payload))
+  .toString('base64')
+  .replace(/\+/g, '-')
+  .replace(/\//g, '_')
+  .replace(/=+$/, '');
+
+clearSession();
+localStorage.setItem('vendguard_session', JSON.stringify({
+  authType: 'internal',
+  token: `auth_token_${encodeTokenPayload({ exp: Math.floor(Date.now() / 1000) - 60 })}.firma`,
+  user: { id: 3, name: 'Sara Coordinadora', role: 'COORDINATOR' }
+}));
+const expiredRestore = restoreSession();
+assert(
+  '3.27 Un token caducado se descarta al arrancar sin montar la vista protegida',
+  expiredRestore === false && state.user === null && api.getToken() === null
+);
+assert(
+  '3.28 El almacén queda limpio tras descartar la sesión caducada',
+  localStorage.getItem('vendguard_session') === null
+);
+
+localStorage.setItem('vendguard_session', JSON.stringify({
+  authType: 'internal',
+  token: `auth_token_${encodeTokenPayload({ exp: Math.floor(Date.now() / 1000) + 3600 })}.firma`,
+  user: { id: 4, name: 'Sara Coordinadora', role: 'COORDINATOR' }
+}));
+const freshRestore = restoreSession();
+assert(
+  '3.29 Un token vigente se restaura con normalidad',
+  freshRestore === true && state.user?.role === 'COORDINATOR' && api.getToken().startsWith('auth_token_')
+);
+clearSession();
+
 // ---------------------------------------------------------------------
 // TEST GROUP 4: Alerts and UI Reactive State
 // ---------------------------------------------------------------------

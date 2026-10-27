@@ -11,6 +11,7 @@ use VendGuard\Application\DTO\VanStockEntryDto;
 use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\VanStockItem;
 use VendGuard\Core\Domain\Repository\AuditLogRepositoryInterface;
+use VendGuard\Core\Domain\Repository\VanStockQuantityMapInterface;
 use VendGuard\Core\Domain\Repository\VanStockRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 
@@ -41,7 +42,7 @@ use VendGuard\Infrastructure\Database\ConnectionFactory;
  * Dogma Vanilla: PHP 8.2+ puro, PDO nativo, sin dependencias externas.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
  */
-final class PdoVanStockRepository implements VanStockRepositoryInterface
+final class PdoVanStockRepository implements VanStockRepositoryInterface, VanStockQuantityMapInterface
 {
     /** Columnas del saldo que proyecta la entidad. */
     private const STOCK_COLUMNS = 'id, technician_id, spare_part_id, quantity_available, min_threshold';
@@ -265,6 +266,46 @@ final class PdoVanStockRepository implements VanStockRepositoryInterface
             'role' => strtoupper((string)$row['role']),
             'operator_code' => $row['operator_code'] === null ? null : (string)$row['operator_code'],
         ];
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function findQuantityMapByTechnicianIds(array $technicianIds): array
+    {
+        $normalizedIds = [];
+        foreach ($technicianIds as $techId) {
+            $normalized = filter_var($techId, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($normalized !== false) {
+                $normalizedIds[(int)$normalized] = (int)$normalized;
+            }
+        }
+
+        if ($normalizedIds === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        foreach (array_values($normalizedIds) as $index => $id) {
+            $placeholders[] = ':tech_' . $index;
+        }
+
+        $sql = 'SELECT technician_id, spare_part_id, quantity_available
+                  FROM technician_van_stocks
+                 WHERE technician_id IN (' . implode(', ', $placeholders) . ')';
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach (array_values($normalizedIds) as $index => $id) {
+            $stmt->bindValue(':tech_' . $index, $id, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        $map = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $map[(int)$row['technician_id']][(int)$row['spare_part_id']] = (int)$row['quantity_available'];
+        }
+
+        return $map;
     }
 
     /**

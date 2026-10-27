@@ -71,6 +71,12 @@ final class PostgresFixtureBuilder
         'incident_service_sheets' => ['signer_name', 'signer_document', 'signature_png'],
         'technician_absences' => ['starts_at', 'ends_at', 'cancelled_at', 'cancelled_by', 'cancellation_reason', 'reason'],
         'technician_shifts' => ['started_at', 'meal_break_started_at', 'meal_break_ended_at', 'closed_at', 'closed_by', 'status', 'shift_date'],
+        // Órdenes de carga del Módulo 23: cada columna de estado pertenece a una
+        // rama de `CHECK` (despacho, confirmación y cancelación). El `UPDATE`
+        // genérico de certificación toca `notes` en la cabecera y una columna
+        // numérica de la línea, de modo que no deja la fila en una rama imposible.
+        'van_restock_orders' => ['status', 'dispatched_at', 'dispatched_by', 'confirmed_at', 'confirmed_by', 'cancelled_at', 'cancelled_by', 'cancellation_reason'],
+        'van_restock_order_items' => ['reason', 'dispatched_qty', 'removed_at', 'removed_by'],
     ];
 
     // ─────────────────────────────────────────────────────────────────────
