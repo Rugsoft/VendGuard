@@ -301,9 +301,13 @@ class AppRouter
         $router->get('/api/technician/offline/bootstrap', [TechnicianOfflineSyncController::class, 'getBootstrap'], [$technicianAuth]);
         $router->post('/api/technician/offline/conflicts/dump', [TechnicianOfflineSyncController::class, 'dumpConflict'], [$technicianAuth]);
         // El volcado por baja de cuenta se autentica con el token del propio técnico
-        // desactivado: el middleware verifica firma y rol, y el controlador comprueba
-        // `users.is_active` para no saltarse la sincronización normal mientras siga activa.
-        $router->post('/api/technician/offline/deactivated-account-dump', [TechnicianOfflineSyncController::class, 'dumpDeactivatedAccount'], [$technicianAuth]);
+        // desactivado: el middleware verifica firma y rol (permitiendo cuenta inactiva),
+        // y el controlador comprueba `users.is_active` para responder 409 si sigue activa.
+        $technicianDeactivatedAuth = new \VendGuard\Presentation\Http\Middleware\InternalAuthMiddleware(
+            \VendGuard\Core\Domain\Model\UserRole::TECHNICIAN,
+            allowInactive: true
+        );
+        $router->post('/api/technician/offline/deactivated-account-dump', [TechnicianOfflineSyncController::class, 'dumpDeactivatedAccount'], [$technicianDeactivatedAuth]);
 
         $router->get('/api/technician/my-route', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getMyRoute'], [$technicianAuth]);
         // Avería Oportunista In Situ (Módulo 16: T-OPP-09, RF-01 a RF-05).

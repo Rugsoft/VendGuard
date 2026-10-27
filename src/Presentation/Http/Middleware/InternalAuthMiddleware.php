@@ -35,11 +35,13 @@ class InternalAuthMiddleware
      * @param UserRole|string|null $requiredRole Rol obligatorio para superar el middleware.
      * @param AuthService|null $authService
      * @param UserRepositoryInterface|null $userRepo
+     * @param bool $allowInactive Permite usuarios inactivos (p. ej. volcado por baja de cuenta QA 5).
      */
     public function __construct(
         UserRole|string|null $requiredRole = null,
         ?AuthService $authService = null,
-        ?UserRepositoryInterface $userRepo = null
+        ?UserRepositoryInterface $userRepo = null,
+        private readonly bool $allowInactive = false
     ) {
         if (is_string($requiredRole)) {
             $this->requiredRole = UserRole::fromString($requiredRole);
@@ -77,8 +79,8 @@ class InternalAuthMiddleware
             );
         }
 
-        // 3. Verificar que el usuario sigue existiendo y está activo en base de datos
-        $user = $this->userRepo->findById((int)$payload['user_id']);
+        // 3. Verificar que el usuario sigue existiendo en base de datos (y activo si no se permite inactivo)
+        $user = $this->userRepo->findById((int)$payload['user_id'], onlyActive: !$this->allowInactive);
         if ($user === null) {
             return Response::error(
                 'UNAUTHORIZED',

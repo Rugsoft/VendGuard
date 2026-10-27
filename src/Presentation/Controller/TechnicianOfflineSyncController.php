@@ -196,7 +196,10 @@ class TechnicianOfflineSyncController
             return Response::error('UNAUTHORIZED', 'No se pudo identificar al técnico autenticado.', 401);
         }
 
-        $user = $this->users()->findById($technicianId);
+        $user = $request->getAttribute('authenticated_user');
+        if (!$user instanceof User) {
+            $user = $this->users()->findById($technicianId, onlyActive: false);
+        }
         if ($user === null) {
             return Response::error('UNAUTHORIZED', 'Usuario del token no encontrado o dado de baja.', 401);
         }
