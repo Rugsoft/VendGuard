@@ -43,9 +43,14 @@ a un módulo funcional certificado por la batería global.
 
 ### Certificación
 
-- 361 suites y 13.766 aserciones ejecutadas en esa corrida · 0 fallos · base restaurada a semillas.
+- Recorrido funcional del módulo **versionado como suite de la batería**: `tests/Manual/VanRestockWalkthroughRunner.php`
+  ejercita el ciclo completo por HTTP real —cURL contra `php -S`, con el sobre `{success, data}` y los códigos de
+  estado que ve el navegador— sobre base propia (purga y re-siembra en cada corrida): propuesta, alta, bloqueo de
+  la segunda orden abierta, cancelación justificada, albarán A4, baja lógica, expedición parcial, recepción móvil,
+  doble toque rechazado, comprobante, privacidad de sede e insignias de triaje, en **72 aserciones**.
+- 362 suites y 13.829 aserciones ejecutadas en esa corrida · 0 fallos · base restaurada a semillas.
   *(La cifra vigente se declara una sola vez, en el README, y la audita `DocMetricsGuard`.)*
-- Canal `new_engine`: 24 suites evaluadas, 23 en verde y 733 aserciones; `PoolerLatencyMeasurementTest`
+- Canal `new_engine`: 25 suites evaluadas, 24 en verde y 744 aserciones; `PoolerLatencyMeasurementTest`
   sigue declarando otro contrato por falta de `DB_SSL_ROOT_CERT` y no se omite en silencio.
 
 ## [Módulo 17] · Corrección de los ocho hallazgos de la verificación funcional — 2026-10-21

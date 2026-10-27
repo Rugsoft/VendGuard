@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/Database-PostgreSQL%2016%2B%20%7C%20Supabase-3ecf8e?style=flat-square&logo=postgresql&logoColor=white)](https://supabase.com/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-361%20Suites%20%7C%2013.757%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-362%20Suites%20%7C%2013.829%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -459,7 +459,7 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 361 suites · 13.757 aserciones
+batería global: 362 suites · 13.829 aserciones
 
 ```text
 ======================================================================
@@ -469,10 +469,10 @@ batería global: 361 suites · 13.757 aserciones
  Suites de pruebas PHP Unit : 155 / 155 pasadas
  Suites de pruebas JS Unit  : 84 / 84 pasadas
  Suites de Integración PHP  : 121 / 121 pasadas
- Suites E2E Manuales (T-40): 1 / 1 pasadas
+ Suites E2E Manuales (T-40): 2 / 2 pasadas
  ──────────────────────────────────────────────────────────────────
- Total Suites Ejecutadas    : 361
- Total Aserciones Evaluadas : 13.757
+ Total Suites Ejecutadas    : 362
+ Total Aserciones Evaluadas : 13.829
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
@@ -521,7 +521,7 @@ El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o c
  Suites evaluadas    : 25
  Suites en verde     : 24
  No ejecutables      : 1
- Aserciones          : 739
+ Aserciones          : 744
  Fallos              : 0
  - PoolerLatencyMeasurementTest.php: [CATEGORÍA NO EJECUTABLE] Falta DB_SSL_ROOT_CERT: la identidad del servidor remoto no se puede verificar (RNF-05).
  RESULTADO: CANAL CERRADO · 1 suite(s) declararon otro contrato y se listan arriba (no se omiten en silencio).
@@ -611,7 +611,7 @@ gestor-incidencias-vending/
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 361 suites (100% verde)
+    ├── run_all.php               # Ejecutor global de la batería de 362 suites (100% verde)
     ├── run_new_engine.php        # Canal propio de la categoría new_engine (PG_TEST_DSN)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)

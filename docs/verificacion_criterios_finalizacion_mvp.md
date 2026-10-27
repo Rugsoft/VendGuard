@@ -1,7 +1,7 @@
 # Verificación de los Criterios de Finalización del MVP (Fase 1)
 
 **Fecha:** 2026-10-08 · **Rama:** `incident-comments` · **Pliego:** `specs/functional/mvp_functional_spec.md` §8 (Definition of Done)
-**Batería:** `php tests/run_all.php` → 361 suites · 0 fallos · exit 0 · base restaurada a semillas (cifra viva de aserciones: [`README.md`](../README.md#resumen-de-ejecución-global-octubre-2026))
+**Batería:** `php tests/run_all.php` → 362 suites · 0 fallos · exit 0 · base restaurada a semillas (cifra viva de aserciones: [`README.md`](../README.md#resumen-de-ejecución-global-octubre-2026))
 
 ## 1. Método
 
