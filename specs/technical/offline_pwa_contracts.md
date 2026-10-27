@@ -14,7 +14,7 @@
   * Toda pausa de avería térmica/crítica o inspección preventiva desfavorable registrada sin conexión sobre una máquina `FOOD_PERISHABLE` exige `sanitary_seal_confirmed = true` (`EARS 03.4`, `QA 1`).
 * **Artículo III:** Inviolabilidad de Datos e Histórico.
   * Art. III.1: Cero borrado físico (`DELETE FROM`). La nueva Tabla 34 `offline_sync_mutations` porta disparador `trg_no_delete_offline_sync_mutations` (`prevent_hard_delete()`).
-  * Art. III.3: Queda prohibido el descarte silencioso de conflictos (`QA 1`). Todo conflicto se vuelca al servidor mediante `POST /api/technician/offline/conflicts/dump` dejando rastro en `incident_comments` (`is_internal = TRUE`), en `preventive_orders.execution_notes` y en `audit_log` con doble sello temporal (`client_occurred_at` y `synced_at`).
+  * Art. III.3: Queda prohibido el descarte silencioso de conflictos (`QA 1`). Todo conflicto se vuelca al servidor mediante `POST /api/technician/offline/conflicts/dump` dejando rastro en `incident_comments` (`is_internal = TRUE`), en `preventive_orders.notes` y en `audit_log` con doble sello temporal (`client_occurred_at` y `synced_at`).
 * **Artículo IV:** Minimalismo Tecnológico y Cero Bloatware.
   * PHP 8.2+ POO puro (`declare(strict_types=1);`) con PDO (`pdo_pgsql`).
   * Frontend en Vue 3 ES Modules nativos, `navigator.serviceWorker`, `CacheStorage` e `IndexedDB` nativo sin librerías externas (sin Workbox, sin Dexie, sin localForage).
@@ -463,7 +463,7 @@ Vuelca en 1 toque el trabajo realizado sin conexión sobre una parada cuya trans
      * Registra la fila en `offline_sync_mutations` con `outcome_status = 'CONFLICT_DUMPED'` y el evento `OFFLINE_CONFLICT_DUMPED` en `audit_log` (`entity_type = 'TICKET'`).
   3. **Si `stop_type === 'PREVENTIVE_ORDER'`:**
      * Verifica que la orden `preventive_orders.id = :stop_id` exista (`404 PREVENTIVE_ORDER_NOT_FOUND` si no existe).
-     * Anexa el bloque `[VOLCADO OFFLINE EN CONFLICTO · ...]` en `preventive_orders.execution_notes` sin cambiar el `status` ni el `assigned_technician_id` de la orden.
+     * Anexa el bloque `[VOLCADO OFFLINE EN CONFLICTO · ...]` en `preventive_orders.notes` sin cambiar el `status` ni el `assigned_technician_id` de la orden.
      * Registra la fila en `offline_sync_mutations` con `outcome_status = 'CONFLICT_DUMPED'` y el evento `OFFLINE_CONFLICT_DUMPED` en `audit_log` (`entity_type = 'PREVENTIVE_ORDER'`).
 * **Respuesta Exitosa (`200 OK`):**
 ```json
@@ -508,7 +508,7 @@ Permite liberar un dispositivo que contiene acciones pendientes o en conflicto c
 }
 ```
 * **Comportamiento Transaccional:**
-  1. Para cada elemento de `items` (idempotente por `client_mutation_id`), vuelca el resumen como Nota Interna de Taller (`is_internal = TRUE`) en `incident_comments` (o en `preventive_orders.execution_notes` si es preventiva) con el encabezado `[VOLCADO AUTOMÁTICO POR BAJA DE CUENTA · ...]` y registra la fila en `offline_sync_mutations` (`outcome_status = 'DEACTIVATED_ACCOUNT_DUMP'`) y en `audit_log` (`OFFLINE_DEACTIVATED_ACCOUNT_DUMP`).
+  1. Para cada elemento de `items` (idempotente por `client_mutation_id`), vuelca el resumen como Nota Interna de Taller (`is_internal = TRUE`) en `incident_comments` (o en `preventive_orders.notes` si es preventiva) con el encabezado `[VOLCADO AUTOMÁTICO POR BAJA DE CUENTA · ...]` y registra la fila en `offline_sync_mutations` (`outcome_status = 'DEACTIVATED_ACCOUNT_DUMP'`) y en `audit_log` (`OFFLINE_DEACTIVATED_ACCOUNT_DUMP`).
   2. Devuelve `200 OK` con `"clear_local_storage": true` para que el cliente vacíe `IndexedDB` y cierre la sesión local.
 
 ---

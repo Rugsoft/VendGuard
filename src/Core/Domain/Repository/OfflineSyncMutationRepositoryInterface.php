@@ -25,7 +25,7 @@ use VendGuard\Core\Domain\Model\OfflineSyncMutation;
  *  - **El volcado de conflicto es una excepción de auditoría.** Puede insertar
  *    la Nota Interna de Taller (`is_internal = TRUE`) aunque el técnico ya no
  *    sea el titular y aunque la avería esté en `CANCELLED` o `CLOSED` hace más
- *    de 48 horas; en preventivas anexa en `preventive_orders.execution_notes`
+ *    de 48 horas; en preventivas anexa en `preventive_orders.notes`
  *    sin cambiar estado ni titularidad (Art. III.3, `QA 2`). El contenido
  *    volcado jamás se expone al Portal de Sede (Art. V.4).
  *  - **El volcado por baja de cuenta no aplica transiciones.** Registra el
@@ -100,7 +100,7 @@ interface OfflineSyncMutationRepositoryInterface
      *
      * En averías inserta una Nota Interna de Taller confidencial con el resumen
      * estructurado y la foto de evidencia opcional; en órdenes preventivas
-     * anexa el resumen en `execution_notes`. En ambos casos persiste la fila con
+     * anexa el resumen en `notes`. En ambos casos persiste la fila con
      * `outcome_status = 'CONFLICT_DUMPED'` y el evento
      * `OFFLINE_CONFLICT_DUMPED`. No altera estado ni titularidad.
      *
