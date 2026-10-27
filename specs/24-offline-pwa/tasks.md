@@ -158,7 +158,7 @@
     3. Añadir las claves internas de sincronización al saneador de `LocationPortalController` (Art. V.4) y registrar las rutas en `AppRouter.php`.
   * **Hecho cuando:** `php -l src/Presentation/Controller/TechnicianOfflineSyncController.php && php -l src/Presentation/Controller/TechnicianController.php && php -l src/Presentation/Controller/TechnicianPreventiveController.php && php -l src/Presentation/Routing/AppRouter.php` no reporta errores de sintaxis.
 
-- [ ] **T-OFFLINE-09 · Suite de integración `OfflinePwaSyncApiTest`**
+- [x] **T-OFFLINE-09 · Suite de integración `OfflinePwaSyncApiTest`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-OFFLINE-08`
   * **Ficheros a crear o modificar:**
