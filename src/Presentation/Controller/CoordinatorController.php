@@ -19,6 +19,7 @@ use VendGuard\Core\Domain\Exception\InvalidUploadException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\SparePartRequestStatus;
 use VendGuard\Core\Domain\Model\User;
+use VendGuard\Core\Domain\Repository\IncidentAssignmentAuditRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentServiceSheetRepositoryInterface;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
@@ -763,20 +764,62 @@ class CoordinatorController
 
         // 8. ID del coordinador autenticado (para auditoría)
         $coordinatorId = $request->getAttribute('user_id');
+        $actor = $this->extractActor($request);
+
+        // 8.bis El evento se compone antes del cambio. Si el repositorio ofrece la
+        // puerta fusionada, la auditoría viaja en la misma sentencia que la
+        // asignación: un viaje menos sobre el agrupador y ninguna ventana en la
+        // que el cambio exista sin su rastro (RNF-01, Art. III.3).
+        $assignmentAudit = $this->auditLogger->buildTicketEvent(
+            ticketId: $incidentId,
+            action: $isReassignment ? 'INCIDENT_REASSIGNED' : 'INCIDENT_ASSIGNED',
+            user: $actor,
+            previousState: [
+                'status' => $incident->getStatus()->value,
+                'assigned_technician_id' => $incident->getAssignedTechnicianId(),
+            ],
+            newState: $isReassignment
+                ? [
+                    'status' => $incident->getStatus()->value,
+                    'assigned_technician_id' => $technicianId,
+                    'reassignment_reason' => $reassignmentReason,
+                ]
+                : [
+                    'status' => IncidentStatus::ASSIGNED->value,
+                    'assigned_technician_id' => $technicianId,
+                ],
+            metadata: $isReassignment
+                ? [
+                    'previous_technician_id' => $incident->getAssignedTechnicianId(),
+                    'new_technician_id' => $technicianId,
+                ]
+                : null
+        );
+        $mergeAudit = $this->incidentRepo instanceof IncidentAssignmentAuditRepositoryInterface;
 
         // 9. Realizar la asignación o reasignación transaccional en el repositorio.
         //    RF-05.2 / RF-03.1: los avisos de entrada/salida y la posible reclasificación
         //    crítica a frío se encolan en la MISMA transacción que el cambio de técnico.
         try {
             $enqueuer = $this->notifications();
-            $assign = fn (): Incident => $this->incidentRepo->assign(
-                incidentId: $incident,
-                technicianId: $technicianId,
-                coordinatorId: $coordinatorId !== null ? (int)$coordinatorId : null,
-                urgencyOverride: ($urgencyOverride !== null && $urgencyOverride !== '') ? $urgencyOverride : null,
-                urgencyReason: ($urgencyReason !== null && $urgencyReason !== '') ? $urgencyReason : null,
-                reassignmentReason: $isReassignment ? $reassignmentReason : null,
-            );
+            $assign = fn (): Incident => $mergeAudit
+                ? $this->incidentRepo->assignWithAudit(
+                    incidentId: $incident,
+                    technicianId: $technicianId,
+                    coordinatorId: $coordinatorId !== null ? (int)$coordinatorId : null,
+                    urgencyOverride: ($urgencyOverride !== null && $urgencyOverride !== '') ? $urgencyOverride : null,
+                    urgencyReason: ($urgencyReason !== null && $urgencyReason !== '') ? $urgencyReason : null,
+                    reassignmentReason: $isReassignment ? $reassignmentReason : null,
+                    auditEvent: $assignmentAudit,
+                )
+                : $this->incidentRepo->assign(
+                    incidentId: $incident,
+                    technicianId: $technicianId,
+                    coordinatorId: $coordinatorId !== null ? (int)$coordinatorId : null,
+                    urgencyOverride: ($urgencyOverride !== null && $urgencyOverride !== '') ? $urgencyOverride : null,
+                    urgencyReason: ($urgencyReason !== null && $urgencyReason !== '') ? $urgencyReason : null,
+                    reassignmentReason: $isReassignment ? $reassignmentReason : null,
+                );
 
             $assigned = $enqueuer === null
                 ? $assign()
@@ -792,35 +835,12 @@ class CoordinatorController
             return Response::error('ASSIGNMENT_FAILED', $e->getMessage(), 500);
         }
 
-        // 10. Evento inmutable en `audit_log` con el coordinador autenticado (RNF-04,
-        //     plan §2.2): INCIDENT_REASSIGNED cuando cambia el responsable e
-        //     INCIDENT_ASSIGNED en la asignación inicial del aviso.
-        $actor = $this->extractActor($request);
-        $this->auditLogger->logTicketEvent(
-            ticketId: $incidentId,
-            action: $isReassignment ? 'INCIDENT_REASSIGNED' : 'INCIDENT_ASSIGNED',
-            user: $actor,
-            previousState: [
-                'status' => $incident->getStatus()->value,
-                'assigned_technician_id' => $incident->getAssignedTechnicianId(),
-            ],
-            newState: $isReassignment
-                ? [
-                    'status' => $assigned->getStatus()->value,
-                    'assigned_technician_id' => $assigned->getAssignedTechnicianId(),
-                    'reassignment_reason' => $reassignmentReason,
-                ]
-                : [
-                    'status' => $assigned->getStatus()->value,
-                    'assigned_technician_id' => $assigned->getAssignedTechnicianId(),
-                ],
-            metadata: $isReassignment
-                ? [
-                    'previous_technician_id' => $incident->getAssignedTechnicianId(),
-                    'new_technician_id' => $technicianId,
-                ]
-                : null
-        );
+        // 10. El rastro viajó con la asignación cuando el repositorio lo admite; en
+        //     los dobles de prueba que no escriben en el motor se persiste aquí, con
+        //     el MISMO evento compuesto, para no cambiar el comportamiento.
+        if (!$mergeAudit) {
+            $this->auditLogger->logEvent($assignmentAudit);
+        }
 
         // 10.bis El descarte de la recomendación sanitaria deja su propio rastro inmutable
         //        (Art. III.3, contrato §5.1): quién se sugería, a quién se envió y la

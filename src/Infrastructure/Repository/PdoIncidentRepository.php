@@ -17,13 +17,16 @@ use VendGuard\Core\Domain\Exception\DuplicateIncidentException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
 use VendGuard\Core\Domain\Exception\TicketCodeCollisionException;
 use VendGuard\Core\Domain\Exception\WarrantyExpiredException;
+use VendGuard\Core\Domain\Model\AuditEvent;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\IncidentComment;
 use VendGuard\Core\Domain\Model\IncidentHistory;
 use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\Machine;
 use VendGuard\Core\Domain\Model\MachineType;
+use VendGuard\Core\Domain\Repository\IncidentAssignmentAuditRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentNotificationCycleRepositoryInterface;
+use VendGuard\Core\Domain\Repository\IncidentPauseTransitionRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentReopenNotificationInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
@@ -54,7 +57,7 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  * El orden del triaje no es una diferencia de dialecto —tiene forma común—, pero tampoco se
  * escribe a mano dos veces: se deriva del rango de prioridad que declara el dominio.
  */
-class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, SanitarySlaWatchRepositoryInterface, TechnicianRouteBoardRepositoryInterface, IncidentNotificationCycleRepositoryInterface, IncidentReopenNotificationInterface, OpportunisticIncidentRepositoryInterface
+class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowLockRepositoryInterface, IncidentSiteResponseRepositoryInterface, SanitaryClockCandidateRepositoryInterface, SanitarySlaWatchRepositoryInterface, TechnicianRouteBoardRepositoryInterface, IncidentNotificationCycleRepositoryInterface, IncidentReopenNotificationInterface, OpportunisticIncidentRepositoryInterface, IncidentAssignmentAuditRepositoryInterface, IncidentPauseTransitionRepositoryInterface
 {
     /**
      * Marcadores canónicos de las notas de auditoría de la pausa (RF-01.4).
@@ -604,6 +607,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     m.machine_type AS machine_type,
                     l.name AS location_name,
                     l.site_code AS location_site_code,
+                    m.floor_wing AS machine_floor_wing,
+                    l.address AS location_address,
+                    l.contact_email AS location_contact_email,
                     u.name AS technician_name
                 FROM incidents i
                 LEFT JOIN machines m ON i.machine_id = m.id
@@ -770,6 +776,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 m.machine_type AS machine_type,
                 l.name AS location_name,
                 l.site_code AS location_site_code,
+                m.floor_wing AS machine_floor_wing,
+                l.address AS location_address,
+                l.contact_email AS location_contact_email,
                 u.name AS technician_name
             FROM incidents i
             LEFT JOIN machines m ON i.machine_id = m.id
@@ -807,6 +816,9 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 m.machine_type AS machine_type,
                 l.name AS location_name,
                 l.site_code AS location_site_code,
+                m.floor_wing AS machine_floor_wing,
+                l.address AS location_address,
+                l.contact_email AS location_contact_email,
                 u.name AS technician_name
             FROM incidents i
             LEFT JOIN machines m ON i.machine_id = m.id
@@ -2667,6 +2679,100 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
     }
 
     /**
+     * Persiste la pausa y su evento de historial en una sola sentencia.
+     *
+     * Escribe sólo las columnas que la transición cambia: el resto del expediente
+     * conserva su valor persistido. El historial se inserta desde la fila
+     * actualizada, de modo que no puede quedar una pausa sin su rastro (Art. III).
+     */
+    public function updateAndRecordPauseEvent(
+        Incident $incident,
+        int $userId,
+        IncidentStatus $fromStatus,
+        IncidentPauseReasonCategory $category,
+        string $reasonText,
+        DateTimeImmutable $pausedAt
+    ): bool {
+        if ($incident->getId() === null) {
+            return false;
+        }
+
+        $normalizedReason = trim($reasonText);
+        if ($normalizedReason === '') {
+            throw new InvalidArgumentException('El evento de pausa exige la justificación declarada.');
+        }
+
+        if (!$this->dialect->isPostgres()) {
+            // El motor heredado conserva la ruta de dos escrituras: la unidad
+            // transaccional la garantiza el servicio que llama.
+            if (!$this->update($incident)) {
+                return false;
+            }
+
+            $this->recordPauseEvent($incident->getId(), $userId, $fromStatus, $category, $normalizedReason, $pausedAt);
+
+            return true;
+        }
+
+        $actionNote = 'Pausa de SLA (Pendiente de Información).'
+            . self::PAUSE_NOTE_CAUSE_MARKER . $category->label() . ' [' . $category->value . '].'
+            . self::PAUSE_NOTE_REASON_MARKER . $normalizedReason;
+
+        $sql = "
+            WITH updated AS (
+                UPDATE incidents
+                SET status = :status,
+                    pending_info_reason_category = :reason_category,
+                    pending_info_reason_text = :reason_text,
+                    paused_at = :paused_at,
+                    total_pending_info_seconds = :total_pending_info_seconds,
+                    sla_target_at = :sla_target_at
+                WHERE id = :id
+                  AND deleted_at IS NULL
+                RETURNING id
+            ),
+            new_hist AS (
+                INSERT INTO incident_history (
+                    incident_id,
+                    user_id,
+                    from_status,
+                    to_status,
+                    action_note,
+                    created_at
+                )
+                SELECT
+                    id,
+                    :user_id,
+                    :from_status,
+                    :to_status,
+                    :action_note,
+                    :event_at
+                FROM updated
+                RETURNING id
+            )
+            SELECT updated.id, (SELECT COUNT(*) FROM new_hist) AS history_rows
+            FROM updated
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':status', $incident->getStatus()->value, PDO::PARAM_STR);
+        $stmt->bindValue(':reason_category', $category->value, PDO::PARAM_STR);
+        $stmt->bindValue(':reason_text', $incident->getPendingInfoReasonText(), $incident->getPendingInfoReasonText() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(':paused_at', $incident->getPausedAt(), $incident->getPausedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(':total_pending_info_seconds', $incident->getTotalPendingInfoSeconds(), PDO::PARAM_INT);
+        $stmt->bindValue(':sla_target_at', $incident->getSlaTargetAt(), $incident->getSlaTargetAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(':id', $incident->getId(), PDO::PARAM_INT);
+        $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->bindValue(':from_status', $fromStatus->value, PDO::PARAM_STR);
+        $stmt->bindValue(':to_status', IncidentStatus::PENDING_INFO->value, PDO::PARAM_STR);
+        $stmt->bindValue(':action_note', $actionNote, PDO::PARAM_STR);
+        $stmt->bindValue(':event_at', $pausedAt->format('Y-m-d\TH:i:sP'), PDO::PARAM_STR);
+        $stmt->execute();
+
+        return $stmt->fetch(PDO::FETCH_ASSOC) !== false;
+    }
+
+    /**
      * Aplica Soft Delete preservando intacto el registro físico en la base de datos (RNF-03).
      */
     public function softDelete(int $id): bool
@@ -3164,7 +3270,8 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         ?int $coordinatorId = null,
         ?string $urgencyOverride = null,
         ?string $urgencyReason = null,
-        ?string $reassignmentReason = null
+        ?string $reassignmentReason = null,
+        ?AuditEvent $auditEvent = null
     ): Incident {
         $isOwnTransaction = !$this->pdo->inTransaction();
         if ($isOwnTransaction) {
@@ -3267,8 +3374,36 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             :action_note
                         FROM updated
                         RETURNING id
+                    ),
+                    new_audit AS (
+                        INSERT INTO audit_log (
+                            entity_type,
+                            entity_id,
+                            action,
+                            user_id,
+                            user_role,
+                            user_name,
+                            previous_state,
+                            new_state,
+                            metadata,
+                            created_at
+                        )
+                        SELECT
+                            CAST(:audit_entity_type AS audit_entity_type),
+                            CAST(:audit_entity_id AS bigint),
+                            CAST(:audit_action AS text),
+                            CAST(:audit_user_id AS bigint),
+                            CAST(:audit_user_role AS text),
+                            CAST(:audit_user_name AS text),
+                            CAST(:audit_previous_state AS jsonb),
+                            CAST(:audit_new_state AS jsonb),
+                            CAST(:audit_metadata AS jsonb),
+                            CAST(:audit_created_at AS timestamptz)
+                        WHERE CAST(:audit_action AS text) IS NOT NULL
+                        RETURNING id
                     )
-                    SELECT * FROM updated;
+                    SELECT updated.*, (SELECT COUNT(*) FROM new_audit) AS audit_rows
+                    FROM updated;
                 ";
 
                 $stmt = $this->pdo->prepare($sql);
@@ -3279,6 +3414,32 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $stmt->bindValue(':from_status', $incident->getStatus()->value, PDO::PARAM_STR);
                 $stmt->bindValue(':to_status', $isReassignment ? $incident->getStatus()->value : 'ASSIGNED', PDO::PARAM_STR);
                 $stmt->bindValue(':action_note', $actionNote, PDO::PARAM_STR);
+
+                // La auditoría viaja en la MISMA sentencia que la asignación: un
+                // solo viaje para el cambio y su rastro inmutable, y sin ventana
+                // en la que el cambio exista sin su evento (Art. III.3). Cuando
+                // no se pide fusión, el parámetro nulo no inserta fila.
+                $auditPreviousJson = $auditEvent?->getPreviousState() !== null
+                    ? json_encode($auditEvent->getPreviousState(), JSON_UNESCAPED_UNICODE)
+                    : null;
+                $auditNewStateJson = $auditEvent !== null
+                    ? json_encode($auditEvent->getNewState(), JSON_UNESCAPED_UNICODE)
+                    : null;
+                $auditMetadataJson = $auditEvent?->getMetadata() !== null
+                    ? json_encode($auditEvent->getMetadata(), JSON_UNESCAPED_UNICODE)
+                    : null;
+
+                $stmt->bindValue(':audit_entity_type', $auditEvent?->getEntityType(), $auditEvent !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':audit_entity_id', $auditEvent?->getEntityId(), $auditEvent !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+                $stmt->bindValue(':audit_action', $auditEvent?->getAction(), $auditEvent !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':audit_user_id', $auditEvent?->getUserId(), $auditEvent?->getUserId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+                $stmt->bindValue(':audit_user_role', $auditEvent?->getUserRole(), $auditEvent !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':audit_user_name', $auditEvent?->getUserName(), $auditEvent !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':audit_previous_state', $auditPreviousJson, $auditPreviousJson !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':audit_new_state', $auditNewStateJson, $auditNewStateJson !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':audit_metadata', $auditMetadataJson, $auditMetadataJson !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+                $stmt->bindValue(':audit_created_at', $auditEvent?->getCreatedAt(), $auditEvent !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+
                 $stmt->execute();
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -3331,6 +3492,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     locationName: $incident->getLocationName(),
                     locationSiteCode: $incident->getLocationSiteCode(),
                     technicianName: $incident->getTechnicianName(),
+                    machineFloorWing: $incident->getMachineFloorWing(),
+                    locationAddress: $incident->getLocationAddress(),
+                    locationContactEmail: $incident->getLocationContactEmail(),
+                    notificationContextHydrated: $incident->hasNotificationContext(),
                     technicianOperatorCode: $incident->getTechnicianOperatorCode(),
                     pendingInfoReasonCategory: $incident->getPendingInfoReasonCategory(),
                     pendingInfoReasonText: $incident->getPendingInfoReasonText(),
@@ -3390,6 +3555,12 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 );
             }
 
+            // El motor heredado no admite la fusión en una sola sentencia: el rastro
+            // se escribe antes del commit para que la unidad siga siendo atómica.
+            if (!$this->dialect->isPostgres() && $auditEvent !== null) {
+                (new PdoAuditLogRepository($this->pdo))->log($auditEvent);
+            }
+
             if ($isOwnTransaction) {
                 $this->pdo->commit();
             }
@@ -3430,6 +3601,10 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     locationName: $incident->getLocationName(),
                     locationSiteCode: $incident->getLocationSiteCode(),
                     technicianName: $incident->getTechnicianName(),
+                    machineFloorWing: $incident->getMachineFloorWing(),
+                    locationAddress: $incident->getLocationAddress(),
+                    locationContactEmail: $incident->getLocationContactEmail(),
+                    notificationContextHydrated: $incident->hasNotificationContext(),
                     technicianOperatorCode: $incident->getTechnicianOperatorCode(),
                     pendingInfoReasonCategory: $incident->getPendingInfoReasonCategory(),
                     pendingInfoReasonText: $incident->getPendingInfoReasonText(),
@@ -3451,6 +3626,32 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             }
             throw $e;
         }
+    }
+
+    /**
+     * Asigna o reasigna y escribe el rastro de auditoría en la misma sentencia.
+     *
+     * Implementa el puerto estrecho que usa la puerta de asignación para no pagar
+     * dos viajes por un cambio y su evento (RNF-01, Art. III.3).
+     */
+    public function assignWithAudit(
+        int|Incident $incidentId,
+        int $technicianId,
+        ?int $coordinatorId,
+        ?string $urgencyOverride,
+        ?string $urgencyReason,
+        ?string $reassignmentReason,
+        AuditEvent $auditEvent
+    ): Incident {
+        return $this->assign(
+            $incidentId,
+            $technicianId,
+            $coordinatorId,
+            $urgencyOverride,
+            $urgencyReason,
+            $reassignmentReason,
+            $auditEvent
+        );
     }
 
     /**

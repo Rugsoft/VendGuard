@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\Machine;
+use VendGuard\Core\Domain\Model\MachineType;
 
 use VendGuard\Core\Domain\Repository\IncidentNotificationCycleRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
@@ -365,9 +366,16 @@ final class NotificationOutboxEnqueuerService implements SanitarySlaAlertEnqueue
         ?Location $location = null
     ): int {
         return $this->transactions->runInTransaction(function () use ($before, $after, $machine, $location): int {
-            $machine ??= $this->machineFor($after);
-            $location ??= $this->locationFor($after);
-            if ($location === null) {
+            // El expediente hidratado trae el contexto de máquina y sede en su propio
+            // JOIN: repetir esas dos lecturas era pagar dos viajes por un dato que ya
+            // estaba en la mano. Un expediente construido en memoria no lo trae y
+            // conserva la ruta de lectura anterior.
+            if (!$after->hasNotificationContext()) {
+                $machine ??= $this->machineFor($after);
+                $location ??= $this->locationFor($after);
+            }
+
+            if ($location === null && $after->getLocationId() < 1) {
                 return 0;
             }
 
@@ -449,10 +457,13 @@ final class NotificationOutboxEnqueuerService implements SanitarySlaAlertEnqueue
         ?Location $location = null
     ): int {
         return $this->transactions->runInTransaction(function () use ($incident, $machine, $location): int {
-            $machine ??= $this->machineFor($incident);
-            $location ??= $this->locationFor($incident);
-            $email = $this->validEmail($location?->getContactEmail());
-            if ($location === null || $email === null) {
+            if (!$incident->hasNotificationContext()) {
+                $machine ??= $this->machineFor($incident);
+                $location ??= $this->locationFor($incident);
+            }
+
+            $email = $this->validEmail($location?->getContactEmail() ?? $incident->getLocationContactEmail());
+            if ($email === null) {
                 return 0;
             }
 
@@ -468,7 +479,7 @@ final class NotificationOutboxEnqueuerService implements SanitarySlaAlertEnqueue
                 $email,
                 self::ROLE_LOCATION,
                 null,
-                (int)$location->getId(),
+                $location?->getId() ?? (int)$incident->getLocationId(),
                 $incident,
                 $payload
             ) ? 1 : 0;
@@ -1572,14 +1583,15 @@ final class NotificationOutboxEnqueuerService implements SanitarySlaAlertEnqueue
     private function basePayload(
         Incident $incident,
         ?Machine $machine,
-        Location $location,
+        ?Location $location,
         array $extra = []
     ): array {
-        $machineLabel = null;
-        if ($machine !== null) {
-            $model = trim($machine->getModel());
-            $machineLabel = $machine->getCode() . ($model !== '' ? ' · ' . $model : '');
-        }
+        $machineCode = $machine?->getCode() ?? $incident->getMachineCode();
+        $machineModel = $machine !== null ? trim($machine->getModel()) : trim((string)$incident->getMachineModel());
+        $machineLabel = $machineCode !== null && $machineCode !== ''
+            ? $machineCode . ($machineModel !== '' ? ' · ' . $machineModel : '')
+            : null;
+
 
         $technicianLabel = null;
         if ($incident->getAssignedTechnicianId() !== null) {
@@ -1595,12 +1607,16 @@ final class NotificationOutboxEnqueuerService implements SanitarySlaAlertEnqueue
 
         return array_filter(array_merge([
             'ticket_code' => $incident->getTicketCode(),
-            'machine_code' => $machine?->getCode() ?? $incident->getMachineCode(),
+            'machine_code' => $machineCode,
             'machine_label' => $machineLabel,
-            'site_code' => $location->getSiteCode() !== '' ? $location->getSiteCode() : $incident->getLocationSiteCode(),
-            'site_name' => $location->getName() !== '' ? $location->getName() : $incident->getLocationName(),
-            'site_address' => $location->getAddress(),
-            'floor_area' => $machine?->getFloorWing() ?? '',
+            'site_code' => ($location !== null && $location->getSiteCode() !== '')
+                ? $location->getSiteCode()
+                : $incident->getLocationSiteCode(),
+            'site_name' => ($location !== null && $location->getName() !== '')
+                ? $location->getName()
+                : $incident->getLocationName(),
+            'site_address' => $location?->getAddress() ?? $incident->getLocationAddress(),
+            'floor_area' => $machine?->getFloorWing() ?? $incident->getMachineFloorWing() ?? '',
             'category_label' => $incident->getCategory()->label(),
             'urgency_label' => $incident->getUrgency()->label(),
             'description' => $incident->getDescription(),
@@ -1714,7 +1730,15 @@ final class NotificationOutboxEnqueuerService implements SanitarySlaAlertEnqueue
             return false;
         }
 
-        if ($machine === null || !$machine->getMachineType()->requiresSanitaryWatch()) {
+        // El tipo viaja en el expediente hidratado aunque el llamante no aporte la
+        // máquina: la guarda sanitaria no puede apagarse por una optimización de
+        // lectura (Art. II).
+        $machineType = $machine?->getMachineType();
+        if ($machineType === null && $incident->getMachineType() !== null) {
+            $machineType = MachineType::tryFrom($incident->getMachineType());
+        }
+
+        if ($machineType === null || !$machineType->requiresSanitaryWatch()) {
             return false;
         }
 

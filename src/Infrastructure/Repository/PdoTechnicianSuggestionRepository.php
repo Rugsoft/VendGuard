@@ -88,6 +88,14 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
             return null;
         }
 
+        // PostgreSQL compone la foto en un único viaje: las seis lecturas que la
+        // forman comparten `target`, y separarlas cuesta una ida y vuelta por cada
+        // una sobre el agrupador remoto. El motor heredado conserva la ruta
+        // multi-consulta, que allí es la única portable.
+        if ($this->dialect->isPostgres()) {
+            return $this->findSuggestionPhotoInSingleTrip($incidentId);
+        }
+
         $incident = $this->findIncident($incidentId);
         if ($incident === null) {
             return null;
@@ -139,6 +147,265 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
             'technicians' => $rows,
             'options' => $this->findBaseCoordinates(),
         ];
+    }
+
+    /**
+     * Foto operativa completa en una sola sentencia (PostgreSQL).
+     *
+     * Cada CTE reproduce exactamente la consulta que antes era un viaje propio y
+     * la proyección en PHP es la MISMA (`map*` + `projectTechnician`): el viaje se
+     * ahorra, la forma no cambia. La sentencia no escribe ni abre transacción.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function findSuggestionPhotoInSingleTrip(int $incidentId): ?array
+    {
+        $sql = "
+            WITH target AS (
+                SELECT
+                    i.id,
+                    i.ticket_code,
+                    i.urgency,
+                    i.category,
+                    i.location_id,
+                    l.site_code AS location_site_code,
+                    l.name AS location_name,
+                    l.postal_code AS location_postal_code,
+                    l.zone_id AS location_zone_id,
+                    l.latitude AS location_latitude,
+                    l.longitude AS location_longitude,
+                    z.name AS zone_name,
+                    COALESCE(m.machine_type, i.machine_type_snapshot) AS machine_type,
+                    m.model AS machine_model
+                FROM incidents i
+                LEFT JOIN locations l ON l.id = i.location_id
+                LEFT JOIN operational_zones z ON z.id = l.zone_id
+                LEFT JOIN machines m ON m.id = i.machine_id
+                WHERE i.id = :incident_id
+                  AND i.deleted_at IS NULL
+                LIMIT 1
+            ),
+            technicians AS (
+                SELECT
+                    u.id AS technician_id,
+                    u.name,
+                    u.operator_code,
+                    u.is_on_call,
+                    u.is_active,
+                    a.is_primary,
+                    ts.status AS shift_status,
+                    tab.reason AS absence_reason
+                FROM users u
+                LEFT JOIN technician_zone_assignments a
+                       ON a.technician_id = u.id
+                      AND a.removed_at IS NULL
+                      AND a.zone_id = (SELECT location_zone_id FROM target)
+                LEFT JOIN technician_shifts ts
+                       ON ts.technician_id = u.id
+                      AND ts.closed_at IS NULL
+                LEFT JOIN technician_absences tab
+                       ON tab.technician_id = u.id
+                      AND tab.cancelled_at IS NULL
+                      AND CURRENT_TIMESTAMP BETWEEN tab.starts_at AND tab.ends_at
+                WHERE u.role = 'TECHNICIAN'
+                  AND u.is_active = TRUE
+                  AND u.deleted_at IS NULL
+                ORDER BY u.id ASC
+            ),
+            stops AS (
+                SELECT
+                    i.assigned_technician_id AS technician_id,
+                    i.id AS stop_id,
+                    i.status,
+                    i.location_id,
+                    l.name AS location_name,
+                    l.zone_id AS location_zone_id,
+                    l.latitude AS location_latitude,
+                    l.longitude AS location_longitude,
+                    i.assigned_at,
+                    i.resolved_at,
+                    CASE WHEN i.assigned_at >= CURRENT_DATE THEN 1 ELSE 0 END AS assigned_today
+                FROM incidents i
+                LEFT JOIN locations l ON l.id = i.location_id
+                WHERE i.deleted_at IS NULL
+                  AND i.assigned_technician_id IN (SELECT technician_id FROM technicians)
+                  AND (
+                        i.status IN ('ASSIGNED', 'IN_PROGRESS', 'PENDING_PARTS', 'PENDING_INFO')
+                     OR (i.status = 'RESOLVED' AND i.resolved_at >= CURRENT_DATE)
+                  )
+                ORDER BY i.assigned_at DESC, i.id DESC
+            ),
+            preventive AS (
+                SELECT assigned_technician_id AS technician_id, COUNT(*) AS total
+                FROM preventive_orders
+                WHERE deleted_at IS NULL
+                  AND scheduled_date = CURRENT_DATE
+                  AND status IN ('IN_INSPECTION', 'SCHEDULED')
+                  AND assigned_technician_id IN (SELECT technician_id FROM technicians)
+                GROUP BY assigned_technician_id
+            ),
+            pending AS (
+                SELECT
+                    spare_part_id,
+                    SUM(quantity) AS requested_qty,
+                    SUM(CASE WHEN spare_part_id IS NULL THEN 1 ELSE 0 END) AS out_of_catalog_rows
+                FROM spare_part_requests
+                WHERE incident_id = :incident_id
+                  AND status = 'PENDING'
+                GROUP BY spare_part_id
+            ),
+            parts AS (
+                SELECT DISTINCT
+                    sp.id AS spare_part_id,
+                    sp.part_code,
+                    sp.name AS part_name,
+                    sp.category
+                FROM spare_parts sp
+                INNER JOIN spare_part_compatibilities spc
+                        ON spc.spare_part_id = sp.id
+                       AND spc.is_active = TRUE
+                       AND spc.deleted_at IS NULL
+                       AND TRIM(LOWER(spc.machine_model)) = TRIM(LOWER((SELECT machine_model FROM target)))
+                WHERE sp.is_active = TRUE
+                  AND sp.deleted_at IS NULL
+                  AND (SELECT machine_model FROM target) IS NOT NULL
+                  AND TRIM((SELECT machine_model FROM target)) <> ''
+                  AND (
+                        CAST((SELECT category FROM target) AS text) IS NULL
+                     OR CAST((SELECT category FROM target) AS text) = 'OTHER'
+                     OR CAST(sp.category AS text) = CASE CAST((SELECT category FROM target) AS text)
+                            WHEN 'TEMPERATURE_COLD' THEN 'THERMAL'
+                            WHEN 'PAYMENT_SYSTEM' THEN 'PAYMENT_SYSTEM'
+                            WHEN 'PRODUCT_JAM' THEN 'MECHANICAL'
+                            WHEN 'ELECTRICAL_OFF' THEN 'ELECTRONIC'
+                            ELSE NULL
+                        END
+                  )
+                ORDER BY sp.part_code ASC, sp.id ASC
+            ),
+            stock AS (
+                SELECT vs.technician_id, vs.spare_part_id, vs.quantity_available
+                FROM technician_van_stocks vs
+                WHERE vs.technician_id IN (SELECT technician_id FROM technicians)
+                  AND vs.spare_part_id IN (
+                        SELECT spare_part_id FROM pending WHERE spare_part_id IS NOT NULL
+                        UNION
+                        SELECT spare_part_id FROM parts
+                  )
+            ),
+            base AS (
+                SELECT base_latitude, base_longitude FROM route_settings WHERE id = 1 LIMIT 1
+            )
+            SELECT
+                (SELECT row_to_json(t) FROM target t) AS incident,
+                COALESCE((SELECT json_agg(row_to_json(x) ORDER BY x.technician_id) FROM technicians x), '[]'::json) AS technicians,
+                COALESCE((SELECT json_agg(row_to_json(s) ORDER BY s.assigned_at DESC, s.stop_id DESC) FROM stops s), '[]'::json) AS stops,
+                COALESCE((SELECT json_agg(row_to_json(p) ORDER BY p.technician_id) FROM preventive p), '[]'::json) AS preventive,
+                COALESCE((SELECT json_agg(row_to_json(r)) FROM pending r), '[]'::json) AS pending,
+                COALESCE((SELECT json_agg(row_to_json(c) ORDER BY c.part_code ASC, c.spare_part_id ASC) FROM parts c), '[]'::json) AS parts,
+                COALESCE((SELECT json_agg(row_to_json(v)) FROM stock v), '[]'::json) AS stock,
+                (SELECT row_to_json(b) FROM base b) AS base
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':incident_id', $incidentId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false || $row['incident'] === null || $row['incident'] === '') {
+            return null;
+        }
+
+        $incident = json_decode((string)$row['incident'], true);
+        if (!is_array($incident)) {
+            return null;
+        }
+
+        $technicians = $this->mapTechnicianRows($this->decodeJsonList($row['technicians'] ?? null));
+        $stops = $this->mapStopRows($this->decodeJsonList($row['stops'] ?? null));
+        $preventive = $this->mapPreventiveRows($this->decodeJsonList($row['preventive'] ?? null));
+        $pending = $this->mapPendingRows($this->decodeJsonList($row['pending'] ?? null));
+        $compatibleParts = $this->mapCompatibleRows($this->decodeJsonList($row['parts'] ?? null));
+        $vanStock = $this->mapStockRows($this->decodeJsonList($row['stock'] ?? null));
+
+        $base = null;
+        if (isset($row['base']) && $row['base'] !== null && $row['base'] !== '') {
+            $decodedBase = json_decode((string)$row['base'], true);
+            $base = is_array($decodedBase) ? $decodedBase : null;
+        }
+
+        $machineType = $incident['machine_type'] !== null ? (string)$incident['machine_type'] : null;
+        $machineModel = isset($incident['machine_model']) && $incident['machine_model'] !== null
+            ? trim((string)$incident['machine_model'])
+            : null;
+
+        $location = [
+            'id' => $incident['location_id'] !== null ? (int)$incident['location_id'] : null,
+            'site_code' => $incident['location_site_code'] !== null ? (string)$incident['location_site_code'] : null,
+            'name' => $incident['location_name'] !== null ? (string)$incident['location_name'] : null,
+            'postal_code' => $incident['location_postal_code'] !== null ? (string)$incident['location_postal_code'] : null,
+            'zone_id' => $incident['location_zone_id'] !== null ? (int)$incident['location_zone_id'] : null,
+            'zone_name' => $incident['zone_name'] !== null ? (string)$incident['zone_name'] : null,
+            'latitude' => $incident['location_latitude'] !== null ? (float)$incident['location_latitude'] : null,
+            'longitude' => $incident['location_longitude'] !== null ? (float)$incident['location_longitude'] : null,
+        ];
+
+        $targetLocationId = $location['id'];
+        $zoneId = $location['zone_id'];
+
+        $rows = [];
+        foreach ($technicians as $technician) {
+            $technicianId = $technician['technician_id'];
+            $rows[] = $this->projectTechnician(
+                $technician,
+                $stops[$technicianId] ?? [],
+                $preventive[$technicianId] ?? 0,
+                $targetLocationId,
+                $zoneId,
+                $vanStock[$technicianId] ?? []
+            );
+        }
+
+        return [
+            'incident' => [
+                'id' => (int)$incident['id'],
+                'ticket_code' => (string)$incident['ticket_code'],
+                'priority' => strtoupper((string)$incident['urgency']),
+                'machine_type' => $machineType,
+                'category' => $incident['category'] !== null ? strtoupper((string)$incident['category']) : null,
+                'machine_model' => $machineModel !== null && $machineModel !== '' ? $machineModel : null,
+                'pending_catalog_requests' => $pending['catalog'],
+                'has_pending_out_of_catalog_requests' => $pending['has_out_of_catalog'],
+                'compatible_parts' => $compatibleParts,
+                'location' => $location,
+            ],
+            'technicians' => $rows,
+            'options' => [
+                'base_latitude' => $base !== null && isset($base['base_latitude']) && $base['base_latitude'] !== null
+                    ? (float)$base['base_latitude']
+                    : null,
+                'base_longitude' => $base !== null && isset($base['base_longitude']) && $base['base_longitude'] !== null
+                    ? (float)$base['base_longitude']
+                    : null,
+            ],
+        ];
+    }
+
+    /**
+     * Decodifica una lista JSON de la lectura consolidada; una lista vacía es una
+     * lista vacía, no un fallo.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function decodeJsonList(mixed $json): array
+    {
+        if (!is_string($json) || $json === '') {
+            return [];
+        }
+
+        $decoded = json_decode($json, true);
+
+        return is_array($decoded) ? array_values(array_filter($decoded, 'is_array')) : [];
     }
 
     /**
@@ -277,8 +544,23 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
         $stmt->bindValue(':zone_id', $zoneId, $zoneId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
         $stmt->execute();
 
-        $rows = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        return $this->mapTechnicianRows($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Proyecta las filas de `users` a la forma de candidato de la foto.
+     *
+     * Vive separada de la consulta porque la lectura consolidada de PostgreSQL
+     * entrega estas mismas filas dentro de un único JSON y comparte la proyección:
+     * una sola definición de la forma, dos formas de traerla.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private function mapTechnicianRows(array $rows): array
+    {
+        $mapped = [];
+        foreach ($rows as $row) {
             $absenceReason = isset($row['absence_reason']) && $row['absence_reason'] !== null ? (string)$row['absence_reason'] : null;
             $absenceReasonEnum = $absenceReason !== null ? AbsenceReason::tryFrom($absenceReason) : null;
 
@@ -304,10 +586,10 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
                 ];
             }
 
-            $rows[] = $rowItem;
+            $mapped[] = $rowItem;
         }
 
-        return $rows;
+        return $mapped;
     }
 
     /**
@@ -367,8 +649,19 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
         }
         $stmt->execute();
 
+        return $this->mapStopRows($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Agrupa las paradas por técnico conservando el orden de la consulta.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return array<int, list<array<string, mixed>>>
+     */
+    private function mapStopRows(array $rows): array
+    {
         $grouped = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($rows as $row) {
             $technicianId = (int)$row['technician_id'];
             $grouped[$technicianId][] = [
                 'status' => strtoupper((string)$row['status']),
@@ -424,8 +717,17 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
         }
         $stmt->execute();
 
+        return $this->mapPreventiveRows($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return array<int, int>
+     */
+    private function mapPreventiveRows(array $rows): array
+    {
         $counts = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($rows as $row) {
             $counts[(int)$row['technician_id']] = (int)$row['total'];
         }
 
@@ -458,9 +760,18 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
         $stmt->bindValue(':incident_id', $incidentId, PDO::PARAM_INT);
         $stmt->execute();
 
+        return $this->mapPendingRows($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return array{catalog: array<int, int>, has_out_of_catalog: bool}
+     */
+    private function mapPendingRows(array $rows): array
+    {
         $catalog = [];
         $hasOutOfCatalog = false;
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($rows as $row) {
             if ($row['spare_part_id'] === null) {
                 $hasOutOfCatalog = (int)($row['out_of_catalog_rows'] ?? 0) > 0;
                 continue;
@@ -518,8 +829,17 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
         $stmt->bindValue(':machine_model', trim($machineModel), PDO::PARAM_STR);
         $stmt->execute();
 
+        return $this->mapCompatibleRows($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return list<array{spare_part_id: int, part_code: string, part_name: string, category: string}>
+     */
+    private function mapCompatibleRows(array $rows): array
+    {
         $parts = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($rows as $row) {
             $parts[] = [
                 'spare_part_id' => (int)$row['spare_part_id'],
                 'part_code' => (string)$row['part_code'],
@@ -575,8 +895,17 @@ final class PdoTechnicianSuggestionRepository implements TechnicianSuggestionRep
         }
         $stmt->execute();
 
+        return $this->mapStockRows($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return array<int, array<int, int>>
+     */
+    private function mapStockRows(array $rows): array
+    {
         $stock = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($rows as $row) {
             $stock[(int)$row['technician_id']][(int)$row['spare_part_id']] = (int)$row['quantity_available'];
         }
 
