@@ -220,7 +220,7 @@
     3. Integrar en `AppNavbar.js` el bloqueo de «Cerrar sesión» cuando existen elementos pendientes o en conflicto en la cola del técnico (`EARS 06.1`) y la limpieza de la copia local al cerrar sesión con la bandeja vacía (`EARS 06.5`).
   * **Hecho cuando:** `OfflineSyncTrayModal.js`, `TechnicianRouteView.js` y `AppNavbar.js` cargan sin errores y respetan el trinquete de tokens de diseño.
 
-- [ ] **T-OFFLINE-13 · Suites unitarias ESM `OfflineStorageAndSyncManagerTest.mjs` y `OfflinePwaAssetsAndUiGuardTest.mjs`**
+- [x] **T-OFFLINE-13 · Suites unitarias ESM `OfflineStorageAndSyncManagerTest.mjs` y `OfflinePwaAssetsAndUiGuardTest.mjs`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-OFFLINE-12`
   * **Ficheros a crear o modificar:**
