@@ -37,6 +37,15 @@ export const SNAPSHOT_WARNING_AGE_MS = 4 * 60 * 60 * 1000;
 /** Paso a solo lectura: 12,0 horas (`D6`, `RF-02.3`). */
 export const SNAPSHOT_MAX_VALID_AGE_MS = 12 * 60 * 60 * 1000;
 
+/**
+ * Estados de turno que la copia local puede recordar (`EARS 03.1`).
+ *
+ * Iniciar una intervención sin red exige que el técnico siga en turno: al
+ * recargar la PWA, el estado del turno se restaura desde la misma copia con la
+ * que se pinta la ruta. La lista es cerrada para no persistir texto libre.
+ */
+export const OFFLINE_SHIFT_STATUSES = Object.freeze(['ON_SHIFT', 'MEAL_BREAK', 'OFF_SHIFT']);
+
 /** Cuota de evidencias sin conexión (`D3`, `QA 3`, `Art. V.5`). */
 export const OFFLINE_PHOTO_MAX_COUNT = 5;
 export const OFFLINE_PHOTO_MAX_SINGLE_BYTES = 5 * 1024 * 1024;
@@ -247,6 +256,44 @@ export function evaluateSnapshotValidity(snapshot, nowMs = Date.now()) {
 }
 
 /**
+ * Estado de turno restaurable desde la copia local (`EARS 03.1`).
+ *
+ * La restauración se ata a la vigencia de la copia y a la antigüedad del propio
+ * registro: ni una copia caducada ni un turno anotado hace más de 12 h pueden
+ * reabrir la puerta de una intervención sin red. Sin registro válido la vista
+ * conserva su valor por defecto (`OFF_SHIFT`), que es el fallo seguro.
+ *
+ * @param {Object|null} snapshot - Copia local del técnico.
+ * @param {number} [nowMs=Date.now()] - Reloj de referencia (inyectable en pruebas).
+ * @returns {{status: (string|null), recordedAt: (string|null), ageMinutes: (number|null), restorable: boolean}}
+ */
+export function evaluateOfflineShift(snapshot, nowMs = Date.now()) {
+  const record = snapshot?.offline_shift ?? null;
+  const status = String(record?.status ?? '').toUpperCase();
+
+  if (!OFFLINE_SHIFT_STATUSES.includes(status)) {
+    return { status: null, recordedAt: null, ageMinutes: null, restorable: false };
+  }
+
+  const recordedAtMs = Date.parse(String(record?.recorded_at ?? ''));
+  if (!Number.isFinite(recordedAtMs)) {
+    return { status: null, recordedAt: null, ageMinutes: null, restorable: false };
+  }
+
+  const validity = evaluateSnapshotValidity(snapshot, nowMs);
+  const copyIsUsable = validity.status === SNAPSHOT_VALIDITY.FRESH
+    || validity.status === SNAPSHOT_VALIDITY.STALE_WARNING;
+  const ageMs = Math.max(0, nowMs - recordedAtMs);
+
+  return {
+    status,
+    recordedAt: new Date(recordedAtMs).toISOString(),
+    ageMinutes: Math.floor(ageMs / 60000),
+    restorable: copyIsUsable && ageMs <= SNAPSHOT_MAX_VALID_AGE_MS
+  };
+}
+
+/**
  * ¿La operación exige el precinto físico in situ? (`EARS 03.4`, `QA 1`, `Art. II`)
  *
  * Espejo exacto de `OfflineSyncService`: sobre una máquina bajo vigilancia
@@ -442,7 +489,10 @@ export function normalizeSnapshot(bootstrap, previous = null) {
     preventive_checklists_by_order: bootstrap?.preventive_checklists_by_order ?? {},
     spare_parts_catalog_by_machine: bootstrap?.spare_parts_catalog_by_machine ?? {},
     van_stock: normalizeVanStock(bootstrap?.van_stock),
-    provisional_stock_deductions: { ...(previous?.provisional_stock_deductions ?? {}) }
+    provisional_stock_deductions: { ...(previous?.provisional_stock_deductions ?? {}) },
+    // Campo local, ausente del paquete del servidor: refrescar la ruta no debe
+    // borrar el turno que el técnico ya tenía anotado en este dispositivo.
+    offline_shift: normalizeOfflineShift(previous?.offline_shift)
   };
 
   // El saldo que llega del servidor aún no conoce los consumos encolados: se
@@ -561,6 +611,26 @@ export function normalizeVanStock(vanStock) {
 }
 
 /**
+ * Reduce el turno persistido a la forma segura del contrato local.
+ *
+ * Un valor desconocido o una fecha ilegible se descartan: es preferible perder
+ * el atajo sin red a abrir la puerta del turno con datos corruptos.
+ *
+ * @param {{status?: string, recorded_at?: string}|null|undefined} record
+ * @returns {{status: string, recorded_at: string}|null}
+ */
+function normalizeOfflineShift(record) {
+  const status = String(record?.status ?? '').toUpperCase();
+  const recordedAtMs = Date.parse(String(record?.recorded_at ?? ''));
+
+  if (!OFFLINE_SHIFT_STATUSES.includes(status) || !Number.isFinite(recordedAtMs)) {
+    return null;
+  }
+
+  return { status, recorded_at: new Date(recordedAtMs).toISOString() };
+}
+
+/**
  * Adaptador de almacenamiento local aislado por técnico.
  *
  * Todas las operaciones son asíncronas: `IndexedDB` lo es, y el respaldo en
@@ -647,6 +717,38 @@ export class OfflineStorage {
     await transactionComplete(transaction);
 
     return snapshot;
+  }
+
+  /**
+   * Anota el estado de turno observado para poder restaurarlo sin red
+   * (`EARS 03.1`, `EARS 06.2`).
+   *
+   * Solo se escribe si el técnico ya tiene copia local: sin ruta no hay
+   * intervención que iniciar y el registro quedaría huérfano.
+   *
+   * @param {number} technicianId
+   * @param {string} status - `ON_SHIFT` | `MEAL_BREAK` | `OFF_SHIFT`
+   * @param {number} [nowMs=Date.now()]
+   * @returns {Promise<Object|null>} Copia actualizada, o `null` si no hay copia
+   */
+  async saveShiftStatus(technicianId, status, nowMs = Date.now()) {
+    const normalized = String(status ?? '').toUpperCase();
+    if (!OFFLINE_SHIFT_STATUSES.includes(normalized)) {
+      return null;
+    }
+
+    const snapshot = await this.getSnapshot(technicianId);
+    if (snapshot === null) {
+      return null;
+    }
+
+    return this.putSnapshot({
+      ...snapshot,
+      offline_shift: {
+        status: normalized,
+        recorded_at: new Date(nowMs).toISOString()
+      }
+    });
   }
 
   /**
@@ -934,6 +1036,7 @@ export default {
   MUTATION_OUTBOX_STORE,
   SNAPSHOT_WARNING_AGE_MS,
   SNAPSHOT_MAX_VALID_AGE_MS,
+  OFFLINE_SHIFT_STATUSES,
   OFFLINE_PHOTO_MAX_COUNT,
   OFFLINE_PHOTO_MAX_SINGLE_BYTES,
   OFFLINE_PHOTO_MAX_TOTAL_BYTES,
@@ -948,6 +1051,7 @@ export default {
   OfflineQueueError,
   OfflineStorage,
   evaluateSnapshotValidity,
+  evaluateOfflineShift,
   requiresSanitarySeal,
   extractConsumedCatalogParts,
   validatePhotoAttachment,

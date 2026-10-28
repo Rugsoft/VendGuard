@@ -39,6 +39,7 @@ import {
   OfflineStorage,
   SNAPSHOT_VALIDITY,
   STOP_TYPE,
+  evaluateOfflineShift,
   evaluateSnapshotValidity,
   requiresSanitarySeal,
   validatePhotoAttachment
@@ -874,6 +875,58 @@ assert(
     && rejectedSummary.pending === 0
     && rejectedSummary.interrupted === null,
   JSON.stringify(rejectedSummary)
+);
+
+console.log('\n--- 11. Turno activo restaurable sin red (EARS 03.1, EARS 06.2) ---');
+
+const shiftStorage = await seedStorage();
+const noSnapshotShift = await newStorage().saveShiftStatus(99, 'ON_SHIFT', NOW);
+assert('11.1 Sin copia local no se anota un turno huérfano', noSnapshotShift === null);
+
+const savedShift = await shiftStorage.saveShiftStatus(2, 'ON_SHIFT', NOW);
+assert(
+  '11.2 El turno se persiste junto a la copia del titular',
+  savedShift?.offline_shift?.status === 'ON_SHIFT'
+    && savedShift?.offline_shift?.recorded_at === new Date(NOW).toISOString(),
+  JSON.stringify(savedShift?.offline_shift)
+);
+
+const freshShift = evaluateOfflineShift(savedShift, NOW + 11 * HOUR_MS);
+assert(
+  '11.3 Dentro de las 12 h la intervención sin red sigue habilitada por el turno',
+  freshShift.restorable === true && freshShift.status === 'ON_SHIFT'
+);
+
+const expiredShift = evaluateOfflineShift(savedShift, NOW + 12 * HOUR_MS + 1);
+assert(
+  '11.4 Pasadas las 12 h el turno no se restaura (fallo seguro)',
+  expiredShift.restorable === false
+);
+
+const refreshedShiftSnapshot = await shiftStorage.saveSnapshot(bootstrap({
+  synced_at: new Date(NOW + 6 * HOUR_MS).toISOString()
+}));
+assert(
+  '11.5 Refrescar la ruta no borra el turno anotado en el dispositivo',
+  refreshedShiftSnapshot.offline_shift?.status === 'ON_SHIFT',
+  JSON.stringify(refreshedShiftSnapshot.offline_shift)
+);
+
+const unknownShift = await shiftStorage.saveShiftStatus(2, 'EN_OTRO_SITIO', NOW);
+assert('11.6 Un estado de turno desconocido no se persiste', unknownShift === null);
+
+const expiredCopyStorage = await newStorage();
+await expiredCopyStorage.saveSnapshot(bootstrap({ synced_at: new Date(NOW - 13 * HOUR_MS).toISOString() }));
+const expiredCopyShift = await expiredCopyStorage.saveShiftStatus(2, 'MEAL_BREAK', NOW);
+assert(
+  '11.7 Una copia caducada no puede reactivar el turno ni siquiera recién anotado',
+  evaluateOfflineShift(expiredCopyShift, NOW).restorable === false
+);
+
+await shiftStorage.clearTechnician(2);
+assert(
+  '11.8 Cerrar sesión limpia la copia y con ella el turno recordado (EARS 06.5)',
+  await shiftStorage.getSnapshot(2) === null
 );
 
 console.log('\n======================================================================');

@@ -61,6 +61,7 @@ import {
   OfflineStorage,
   PERISHABLE_MACHINE_TYPES,
   SNAPSHOT_VALIDITY,
+  evaluateOfflineShift,
   evaluateSnapshotValidity,
   requiresSanitarySeal
 } from '../utils/OfflineStorage.js';
@@ -624,11 +625,31 @@ export const TechnicianRouteView = {
     },
 
     async loadShiftStatus() {
+      // Con el navegador sin red no se espera al plazo de la petición: la copia
+      // local del turno se aplica de inmediato para que la parada asignada se
+      // pueda iniciar en el sótano (`EARS 03.1`).
+      if (this.isOfflineMode || this.isBrowserOffline()) {
+        const restored = await this.restoreOfflineShiftStatus();
+        if (restored) {
+          this.offlineNotice = 'Sin cobertura: tu turno se ha restaurado desde la copia local del dispositivo.';
+        }
+        return;
+      }
+
       try {
         const res = await api.get('/technician/shift/status');
         this.applyShiftResponse(res, 'OFF_SHIFT');
+        await this.persistOfflineShiftStatus();
       } catch (err) {
         console.error('Error al cargar estado de turno:', err);
+        // Sin servidor la pantalla no puede quedarse «Fuera de turno»: el
+        // técnico sigue trabajando y la copia local acredita su turno durante
+        // la vigencia de 12 h del paquete (`EARS 03.1`, `EARS 06.2`).
+        const restored = await this.restoreOfflineShiftStatus();
+        if (restored) {
+          this.offlineNotice = 'Sin conexión con el servidor: tu turno se ha restaurado '
+            + 'desde la copia local del dispositivo.';
+        }
       }
     },
 
@@ -643,6 +664,7 @@ export const TechnicianRouteView = {
       try {
         const res = await api.post('/technician/shift/start');
         this.applyShiftResponse(res, 'ON_SHIFT');
+        await this.persistOfflineShiftStatus();
       } catch (err) {
         this.shiftError = err?.message || 'No se pudo iniciar el turno.';
       } finally {
@@ -661,6 +683,7 @@ export const TechnicianRouteView = {
       try {
         const res = await api.post('/technician/shift/pause-meal');
         this.applyShiftResponse(res, 'MEAL_BREAK');
+        await this.persistOfflineShiftStatus();
       } catch (err) {
         this.shiftError = err?.message || 'No se pudo pausar para comida.';
       } finally {
@@ -679,6 +702,7 @@ export const TechnicianRouteView = {
       try {
         const res = await api.post('/technician/shift/resume');
         this.applyShiftResponse(res, 'ON_SHIFT');
+        await this.persistOfflineShiftStatus();
       } catch (err) {
         this.shiftError = err?.message || 'No se pudo reanudar el turno.';
       } finally {
@@ -920,6 +944,7 @@ export const TechnicianRouteView = {
         await api.post('/technician/shift/close-handover', payload);
         this.showShiftHandoverModal = false;
         this.shiftStatus = 'OFF_SHIFT';
+        await this.persistOfflineShiftStatus();
         await this.loadRoute();
         // El cierre también consolida el acumulado del día en el contador (RF-07.1).
         await this.loadShiftStatus();
@@ -994,7 +1019,74 @@ export const TechnicianRouteView = {
       this.isOfflineMode = this.isBrowserOffline();
       this.attachOfflineListeners();
 
-      return this.refreshOfflineState();
+      const ready = this.refreshOfflineState();
+      if (this.isBrowserOffline()) {
+        return ready.then(() => this.restoreOfflineShiftStatus());
+      }
+
+      return ready;
+    },
+
+    /**
+     * Anota el turno observado junto a la copia local (`EARS 03.1`).
+     *
+     * Se guarda después de cada respuesta del ciclo de jornada y tras cada
+     * carga online: así la recarga sin red encuentra el último estado conocido
+     * del titular, no el valor por defecto de la vista.
+     *
+     * @returns {Promise<Object|null>}
+     */
+    async persistOfflineShiftStatus() {
+      const technicianId = this.offlineTechnicianId();
+      if (!(technicianId > 0) || !this.offlineStorage) {
+        return null;
+      }
+
+      try {
+        const snapshot = await this.offlineStorage.saveShiftStatus(technicianId, this.shiftStatus);
+        if (snapshot !== null) {
+          this.offlineSnapshot = snapshot;
+        }
+
+        return snapshot;
+      } catch (error) {
+        // Un fallo de `IndexedDB` no puede tumbar la jornada online.
+        return null;
+      }
+    },
+
+    /**
+     * Restaura el turno desde la copia local si sigue vigente (`EARS 03.1`).
+     *
+     * Ni una copia caducada (> 12 h) ni un registro de turno más antiguo que el
+     * paquete reabren la puerta: en ese caso se conserva `OFF_SHIFT`, que es el
+     * fallo seguro y el que ya aplicaba la vista.
+     *
+     * @returns {Promise<boolean>} `true` si se restauró un turno operativo.
+     */
+    async restoreOfflineShiftStatus() {
+      const technicianId = this.offlineTechnicianId();
+      if (!(technicianId > 0) || !this.offlineStorage) {
+        return false;
+      }
+
+      try {
+        // Se lee siempre por la clave del técnico autenticado: una copia en
+        // memoria de otra cuenta —o desactualizada por otra pestaña— no puede
+        // prestar su turno (`Art. V.4`).
+        const snapshot = await this.offlineStorage.getSnapshot(technicianId);
+        const state = evaluateOfflineShift(snapshot, Date.now());
+        if (!state.restorable) {
+          return false;
+        }
+
+        this.offlineSnapshot = snapshot;
+        this.shiftStatus = state.status;
+
+        return state.status !== 'OFF_SHIFT';
+      } catch (error) {
+        return false;
+      }
     },
 
     /** Registra los eventos nativos `online` / `offline` y el aviso de la cola. */
@@ -1288,6 +1380,7 @@ export const TechnicianRouteView = {
           await this.hydrateOfflineRoute();
         }
         await this.refreshOfflineState();
+        await this.restoreOfflineShiftStatus();
         this.offlineNotice = 'Estás sin conexión: tu ruta se muestra desde la copia local del dispositivo.';
         return;
       }
@@ -1297,6 +1390,9 @@ export const TechnicianRouteView = {
 
       if (summary?.interrupted !== 'reauth_required') {
         await this.loadRoute();
+        // Al volver la cobertura manda el servidor: el turno restaurado desde
+        // la copia se contrasta y, si ya no está abierto, la puerta se cierra.
+        await this.loadShiftStatus();
       }
     },
 
@@ -1651,6 +1747,7 @@ export const TechnicianRouteView = {
         if (this.isNetworkFailure(err)) {
           this.isOfflineMode = true;
           const hydrated = await this.hydrateOfflineRoute();
+          await this.restoreOfflineShiftStatus();
 
           if (hydrated) {
             this.offlineNotice = 'Estás sin conexión: tu ruta se muestra desde la copia local del dispositivo. '
@@ -1811,6 +1908,10 @@ export const TechnicianRouteView = {
         this.loginPassword = '';
         this.offlineReauthOwner = null;
         await this.loadRoute();
+        // El turno activo del servidor se hidrata ya en el acceso: si la
+        // cobertura cae después, la copia local puede restaurarlo sin esperar
+        // a una recarga (`EARS 03.1`).
+        await this.loadShiftStatus();
 
         if (this.offlineQueue.total > 0) {
           await this.syncOfflineQueue({ silent: false });
@@ -1918,6 +2019,13 @@ export const TechnicianRouteView = {
      */
     async startIntervention(incident) {
       if (this.actionInProgressId) return;
+
+      // La recarga sin red puede terminar antes que la consulta de turno: si la
+      // vista aún no sabe nada, la copia local decide antes de bloquear la
+      // parada asignada (`EARS 03.1`).
+      if (this.shiftStatus === 'OFF_SHIFT') {
+        await this.restoreOfflineShiftStatus();
+      }
 
       if (this.shiftStatus !== 'ON_SHIFT') {
         const msg = this.shiftStatus === 'MEAL_BREAK'
@@ -2209,6 +2317,12 @@ export const TechnicianRouteView = {
      */
     async resumePendingInfoIntervention(incident) {
       if (!incident?.id || this.isResumingPendingInfo) return;
+
+      // Misma puerta que el inicio: la copia local puede acreditar el turno
+      // cuando la recarga sin red llega antes que la consulta al servidor.
+      if (this.shiftStatus === 'OFF_SHIFT') {
+        await this.restoreOfflineShiftStatus();
+      }
 
       if (this.shiftStatus !== 'ON_SHIFT') {
         const msg = this.shiftStatus === 'MEAL_BREAK'

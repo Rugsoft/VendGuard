@@ -144,6 +144,10 @@ Almacena la copia local aislada por técnico (`Art. V.4`):
   "synced_at": "2026-10-27T08:00:00.000Z",
   "warn_after_at": "2026-10-27T12:00:00.000Z",
   "readonly_after_at": "2026-10-27T20:00:00.000Z",
+  "offline_shift": {
+    "status": "ON_SHIFT",
+    "recorded_at": "2026-10-27T08:00:00.000Z"
+  },
   "route_envelope": {
     "stops": [],
     "enabled_locations": [],
@@ -167,6 +171,7 @@ Almacena la copia local aislada por técnico (`Art. V.4`):
 }
 ```
 
+* **Turno local para iniciar intervenciones sin red (`EARS 03.1`):** `offline_shift` es un campo **exclusivo del dispositivo**, no viaja en el paquete de bootstrap. Guarda el último estado de turno observado (`ON_SHIFT`, `MEAL_BREAK` u `OFF_SHIFT`) y el instante en que se observó. Al recargar sin red, `evaluateOfflineShift()` lo restaura solo si la copia sigue vigente (≤ 12 h) y el registro tiene menos de 12 h; en cualquier otro caso la vista conserva `OFF_SHIFT` (fallo seguro). Refrescar la copia desde el servidor conserva este campo, y cerrar sesión con la bandeja vacía lo elimina junto con `route_snapshots` (`EARS 06.5`). El servidor sigue siendo la autoridad: al recuperar cobertura, `loadShiftStatus()` contrasta y sobrescribe el valor local.
 * **Cálculo de estado de vigencia de la copia local (`RF-02.2` a `RF-02.4`):**
   * `FRESH` ($\text{edad} \le 4\text{ h}$): Operativa completa sin avisos de antigüedad.
   * `STALE_WARNING` ($4\text{ h} < \text{edad} \le 12\text{ h}$): Operativa permitida mostrando banner ámbar preventivo (*«⚠️ Tu copia de ruta lleva más de 4 horas sin actualizarse. Recupera cobertura cuanto antes, especialmente si atiendes máquinas de alimentos perecederos.»*).

@@ -30,6 +30,7 @@ import { TechnicianResolutionRefundBlock } from '../../public/assets/js/componen
 import { store, setInternalSession, clearSession } from '../../public/assets/js/store.js';
 import { PendingInfoPauseModal } from '../../public/assets/js/components/PendingInfoPauseModal.js';
 import { AMBER_TECHNICAL_TOKENS } from '../../public/assets/js/utils/IncidentStatusPermissions.js';
+import { OfflineStorage } from '../../public/assets/js/utils/OfflineStorage.js';
 
 console.log('======================================================================');
 console.log(' VendGuard: Frontend Test Suite - TechnicianRouteView (T-38)');
@@ -1699,6 +1700,9 @@ console.log('\n--- Group 21: Automatic queue sync on reconnection (EARS 04.1) --
   connectivityView.loadRoute = async () => {
     loadCalls++;
   };
+  // El contraste del turno al reconectar tiene su propio grupo (22.3); aquí solo
+  // se certifica el disparo de la cola y la recarga de ruta.
+  connectivityView.loadShiftStatus = async () => {};
 
   await connectivityView.handleConnectivityChange(true);
   const onlineTriggered = syncCalls === 1
@@ -1719,6 +1723,199 @@ console.log('\n--- Group 21: Automatic queue sync on reconnection (EARS 04.1) --
   assert(
     '21.3 El botón «Sincronizar ahora» invoca la misma cola en modo visible',
     TechnicianRouteView.template.includes('@sync-now="syncOfflineQueue({ silent: false })"')
+  );
+}
+
+// ---------------------------------------------------------------------
+// TEST GROUP 22: Active shift restored from the local copy (M24: EARS 03.1)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 22: Offline shift restoration (EARS 03.1) ---');
+
+const originalGetForShiftTests = api.get;
+
+function shiftBootstrap(technicianId, syncedAt) {
+  return {
+    technician_id: technicianId,
+    technician_name: 'Jordi Técnico Ruta',
+    technician_email: 'jordi.ruta@vendguard.internal',
+    synced_at: syncedAt,
+    route: { stops: [], enabled_locations: [], pending_critical_stops_other_locations: [] },
+    preventive_orders: [],
+    preventive_checklists_by_order: {},
+    spare_parts_catalog_by_machine: {},
+    van_stock: { items: [] }
+  };
+}
+
+{
+  const storage = new OfflineStorage({ indexedDB: null });
+  await storage.saveSnapshot(shiftBootstrap(2, new Date().toISOString()));
+  await storage.saveShiftStatus(2, 'ON_SHIFT');
+
+  const restoredView = createRouteInstance();
+  restoredView.offlineStorage = storage;
+  restoredView.isOfflineMode = true;
+  restoredView.shiftStatus = 'OFF_SHIFT';
+
+  const restored = await restoredView.restoreOfflineShiftStatus();
+
+  assert(
+    '22.1 Al recargar sin red el turno activo se restaura desde la copia local',
+    restored === true && restoredView.shiftStatus === 'ON_SHIFT'
+  );
+
+  let queuedIncidentId = null;
+  restoredView.queueStartOffline = async (incident) => {
+    queuedIncidentId = incident.id;
+    incident.status = 'IN_PROGRESS';
+  };
+  restoredView.errorMessage = '';
+  const assigned = restoredView.incidents.find((incident) => incident.status === 'ASSIGNED');
+
+  await restoredView.startIntervention(assigned);
+
+  assert(
+    '22.2 Con el turno restaurado la intervención se encola sin red y sin bloqueo de turno',
+    queuedIncidentId === assigned.id && !restoredView.errorMessage.includes('Debes iniciar tu turno')
+  );
+}
+
+{
+  const storage = new OfflineStorage({ indexedDB: null });
+  await storage.saveSnapshot(shiftBootstrap(2, new Date().toISOString()));
+
+  const persistView = createRouteInstance();
+  persistView.offlineStorage = storage;
+  persistView.shiftStatus = 'OFF_SHIFT';
+  api.get = async (url) => {
+    if (url !== '/technician/shift/status') {
+      throw new Error(`URL inesperada: ${url}`);
+    }
+
+    return { status: 'ON_SHIFT' };
+  };
+
+  await persistView.loadShiftStatus();
+  api.get = originalGetForShiftTests;
+
+  const persisted = await storage.getSnapshot(2);
+  assert(
+    '22.3 La carga online del turno lo deja anotado para la próxima recarga sin red',
+    persistView.shiftStatus === 'ON_SHIFT' && persisted?.offline_shift?.status === 'ON_SHIFT'
+  );
+}
+
+{
+  const storage = new OfflineStorage({ indexedDB: null });
+  await storage.saveSnapshot(shiftBootstrap(2, new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString()));
+  await storage.saveShiftStatus(2, 'ON_SHIFT', Date.now() - 13 * 60 * 60 * 1000);
+
+  const expiredView = createRouteInstance();
+  expiredView.offlineStorage = storage;
+  expiredView.shiftStatus = 'OFF_SHIFT';
+
+  const restored = await expiredView.restoreOfflineShiftStatus();
+
+  assert(
+    '22.4 Una copia caducada no reabre el turno: se conserva el fallo seguro',
+    restored === false && expiredView.shiftStatus === 'OFF_SHIFT'
+  );
+}
+
+{
+  const storage = new OfflineStorage({ indexedDB: null });
+  await storage.saveSnapshot(shiftBootstrap(2, new Date().toISOString()));
+  await storage.saveShiftStatus(2, 'ON_SHIFT');
+
+  const raceView = createRouteInstance();
+  raceView.offlineStorage = storage;
+  raceView.isOfflineMode = true;
+  raceView.shiftStatus = 'OFF_SHIFT';
+  let queued = false;
+  raceView.queueStartOffline = async (incident) => {
+    queued = true;
+    incident.status = 'IN_PROGRESS';
+  };
+  const assigned = raceView.incidents.find((incident) => incident.status === 'ASSIGNED');
+
+  await raceView.startIntervention(assigned);
+
+  assert(
+    '22.5 La primera pulsación tras una recarga sin turno cargado también restaura y encola (EARS 03.1)',
+    queued === true && raceView.shiftStatus === 'ON_SHIFT'
+  );
+}
+
+{
+  const storage = new OfflineStorage({ indexedDB: null });
+  await storage.saveSnapshot(shiftBootstrap(2, new Date().toISOString()));
+
+  const otherAccountView = createRouteInstance();
+  otherAccountView.offlineStorage = storage;
+  otherAccountView.offlineSnapshot = {
+    ...shiftBootstrap(3, new Date().toISOString()),
+    offline_shift: { status: 'ON_SHIFT', recorded_at: new Date().toISOString() }
+  };
+  otherAccountView.shiftStatus = 'OFF_SHIFT';
+
+  const restored = await otherAccountView.restoreOfflineShiftStatus();
+
+  assert(
+    '22.6 La copia en memoria de otra cuenta no puede prestar su turno (Art. V.4)',
+    restored === false && otherAccountView.shiftStatus === 'OFF_SHIFT'
+  );
+}
+
+{
+  const storage = new OfflineStorage({ indexedDB: null });
+  await storage.saveSnapshot(shiftBootstrap(2, new Date().toISOString()));
+  await storage.saveShiftStatus(2, 'ON_SHIFT');
+
+  const fallbackView = createRouteInstance();
+  fallbackView.offlineStorage = storage;
+  fallbackView.shiftStatus = 'OFF_SHIFT';
+  fallbackView.offlineNotice = '';
+  api.get = async () => {
+    throw Object.assign(new Error('Sin respuesta del servidor.'), { status: 0, code: 'NETWORK_ERROR' });
+  };
+  const originalConsoleError = console.error;
+  console.error = () => {};
+
+  await fallbackView.loadShiftStatus();
+
+  console.error = originalConsoleError;
+  api.get = originalGetForShiftTests;
+
+  assert(
+    '22.7 Si la consulta de turno falla, la vista cae en la copia local en vez de «Fuera de turno»',
+    fallbackView.shiftStatus === 'ON_SHIFT' && fallbackView.offlineNotice.includes('copia local')
+  );
+}
+
+{
+  const loginView = createRouteInstance();
+  let shiftLoads = 0;
+  loginView.loadRoute = async () => {};
+  loginView.loadShiftStatus = async () => { shiftLoads++; };
+  loginView.loginEmail = 'jordi.ruta@vendguard.internal';
+  loginView.loginPassword = 'Password123!';
+  const originalLogin = api.auth.internalLogin;
+  api.auth.internalLogin = async () => ({
+    user: {
+      id: 2,
+      name: 'Jordi Técnico Ruta',
+      email: 'jordi.ruta@vendguard.internal',
+      role: 'TECHNICIAN'
+    },
+    token: 'token_login_shift'
+  });
+
+  await loginView.handleInternalLogin();
+  api.auth.internalLogin = originalLogin;
+
+  assert(
+    '22.8 El acceso nuevo hidrata el turno antes de que pueda caer la cobertura (EARS 03.1)',
+    shiftLoads === 1 && store.state.user?.role === 'TECHNICIAN'
   );
 }
 

@@ -86,7 +86,7 @@
 ### 2.2. Síntesis de Esquemas `IndexedDB` (`vendguard_offline_v1`) y Payloads REST
 
 1. **Almacén `route_snapshots` (`keyPath: 'technician_id'`):**
-   * Guarda `technician_id`, `technician_email`, `synced_at` (ISO-8601), `warn_after_at` (`synced_at + 4h`), `readonly_after_at` (`synced_at + 12h`), `route_envelope`, `preventive_orders`, `preventive_checklists_by_order`, `spare_parts_catalog_by_machine`, `van_stock` y el mapa `provisional_stock_deductions` (`{ [spare_part_id]: qty }`).
+   * Guarda `technician_id`, `technician_email`, `synced_at` (ISO-8601), `warn_after_at` (`synced_at + 4h`), `readonly_after_at` (`synced_at + 12h`), `route_envelope`, `preventive_orders`, `preventive_checklists_by_order`, `spare_parts_catalog_by_machine`, `van_stock`, el mapa `provisional_stock_deductions` (`{ [spare_part_id]: qty }`) y el campo **local** `offline_shift` (`{ status, recorded_at }`) que restaura el turno activo al recargar sin red dentro de la vigencia de 12 h (`EARS 03.1`).
 2. **Almacén `mutation_outbox` (`keyPath: 'client_mutation_id'`):**
    * Guarda `client_mutation_id`, `technician_id`, `sequence_order` (entero monótono ascendente), `status` (`PENDING` | `SYNCING` | `CONFLICT`), `stop_type` (`INCIDENT` | `PREVENTIVE_ORDER`), `stop_id`, `operation_type`, `is_state_transition` (`boolean`), `client_occurred_at`, `chain_started_at`, `chain_ended_at`, `sanitary_seal_confirmed`, `payload`, `photo_attachment` (`{ name, type, size, base64 }` $\le 5\text{ MB}$), `provisional_parts_deducted` y `conflict` (`{ code, message, detected_at }`).
 3. **Metadatos de Sincronización en Peticiones a Paradas (`§6.2` de Contratos):**
