@@ -175,9 +175,14 @@ $resolveChain = static function (
         $deviceStart
     );
 
+    // En producción el cierre recibe como hito previo el `started_at` que dejó
+    // el inicio (su instante efectivo), no la asignación original. Reproducirlo
+    // evita medir una cadena que en el servidor no existe así.
+    $start = $startMetadata->resolveEffectiveTimestamp($previous, $syncedAt);
+
     return [
-        'start' => $startMetadata->resolveEffectiveTimestamp($previous, $syncedAt),
-        'close' => $closeMetadata->resolveEffectiveTimestamp($previous, $syncedAt),
+        'start' => $start,
+        'close' => $closeMetadata->resolveEffectiveTimestamp($start['effective_occurred_at'], $syncedAt),
     ];
 };
 

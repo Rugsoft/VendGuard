@@ -236,7 +236,7 @@
 
 ## Fase 7: Certificación Integral, Matriz de Trazabilidad, Regresión Global y Cierre Documental
 
-- [ ] **T-OFFLINE-14 · Matriz de trazabilidad (`traceability-matrix.md`), batería global `run_all.php` y actualización de `docs/features_pendientes.md`**
+- [x] **T-OFFLINE-14 · Matriz de trazabilidad (`traceability-matrix.md`), batería global `run_all.php` y actualización de `docs/features_pendientes.md`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-OFFLINE-13`
   * **Ficheros a crear o modificar:**

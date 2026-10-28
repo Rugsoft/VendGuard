@@ -8,7 +8,6 @@ use DateTimeImmutable;
 use DateTimeZone;
 use InvalidArgumentException;
 use JsonSerializable;
-use stdClass;
 
 /**
  * OfflineBootstrapSnapshotDto
@@ -30,7 +29,7 @@ use stdClass;
  *  - **Los mapas se serializan como objetos.** `preventive_checklists_by_order`
  *    y `spare_parts_catalog_by_machine` son diccionarios indexados por
  *    identificador; un `[]` vacío los convertiría en listas y rompería el
- *    contrato. Vacíos se emiten como `{}` mediante `stdClass`.
+ *    contrato. Vacíos se emiten como `{}` mediante un objeto anónimo.
  *
  * No incluye coste, precio ni importe alguno: la copia local opera sobre
  * unidades físicas y textos de trabajo (Art. V.4).
@@ -145,10 +144,10 @@ final readonly class OfflineBootstrapSnapshotDto implements JsonSerializable
      * Un diccionario vacío debe viajar como `{}` y no como `[]`.
      *
      * @param array<int|string, mixed> $map
-     * @return array<int|string, mixed>|stdClass
+     * @return array<int|string, mixed>|object
      */
-    private function asJsonObject(array $map): array|stdClass
+    private function asJsonObject(array $map): array|object
     {
-        return $map === [] ? new stdClass() : $map;
+        return $map === [] ? (object)[] : $map;
     }
 }

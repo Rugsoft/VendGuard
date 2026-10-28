@@ -279,11 +279,19 @@ try {
         'Tipos no declarados hallados: ' . implode(', ', $unknownTypes)
     );
 
+    // La guarda solo puede mirar el histórico anterior al 2026-10-01: ese día el
+    // dominio empezó a emitir PREVENTIVE_ORDER y SANITARY_CERTIFICATE para eventos
+    // nuevos. Contar todas las filas de esos tipos convertiría cada inspección
+    // preventiva legítima —y el residuo append-only que la batería acumula entre
+    // corridas— en un falso reetiquetado. Un UPDATE de una fila antigua conserva
+    // `created_at`, así que el corte sigue detectando la manipulación que busca.
     $preventiveLegacyCount = (int)$pdo->query(
-        "SELECT COUNT(*) FROM audit_log WHERE entity_type IN ('PREVENTIVE_ORDER', 'SANITARY_CERTIFICATE')"
+        "SELECT COUNT(*) FROM audit_log
+          WHERE entity_type IN ('PREVENTIVE_ORDER', 'SANITARY_CERTIFICATE')
+            AND created_at < TIMESTAMPTZ '2026-10-01 00:00:00+00'"
     )->fetchColumn();
     $assert(
-        '4.9 El histórico preventivo sigue registrado bajo MACHINE/TICKET (sin reetiquetar)',
+        '4.9 El histórico preventivo anterior a la habilitación sigue bajo MACHINE/TICKET (sin reetiquetar)',
         $preventiveLegacyCount === 0,
         "Eventos preventivo/sanitario reetiquetados: {$preventiveLegacyCount}"
     );

@@ -207,13 +207,19 @@ final class OfflineSyncMetadata
             }
         }
 
-        // Paso final de una cadena: el inicio ya quedó anclado a
-        // max(T_prev, T_sync − Δt), de modo que el cierre se ancla a T_sync y la
-        // diferencia entre ambos conserva exactamente el Δt real (QA 4).
+        // Paso final de una cadena: el hito previo ya es el instante efectivo
+        // del inicio, así que el cierre se ancla a ese hito más Δt. Anclarlo a
+        // `synced_at` dejaba que la latencia entre las dos peticiones —un
+        // segundo basta— alterara la duración real de la intervención in situ
+        // (QA 4). El tope en `synced_at` impide que un Δt recortado por el suelo
+        // del hito proyecte el cierre al futuro.
         if ($effective === null && $this->chainStartedAt !== null) {
             $delta = $clientAt->getTimestamp() - $this->chainStartedAt->getTimestamp();
             if ($delta > 0 && $delta <= self::MAX_CHAIN_DELTA_SECONDS) {
-                $effective = $synced;
+                $effective = $previousMilestone->modify('+' . $delta . ' seconds');
+                if ($effective > $synced) {
+                    $effective = $synced;
+                }
             }
         }
 
