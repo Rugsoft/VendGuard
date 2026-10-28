@@ -27,6 +27,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, posix } from 'node:path';
+import { OfflineSyncTrayModal } from '../../public/assets/js/components/OfflineSyncTrayModal.js';
 
 const PROJECT_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const PUBLIC_ROOT = join(PROJECT_ROOT, 'public');
@@ -431,6 +432,57 @@ assert(
   '4.4 Las tarjetas conservan el borde hairline y el radio conservador de 8 px',
   /border: 1px solid var\(--color-hairline\)/.test(traySource)
     && traySource.includes('var(--radius-card)')
+);
+
+console.log('\n--- 5. Indicador permanente de antigüedad y conectividad (EARS 02.2, D6) ---');
+
+/**
+ * Ejecuta un `computed` real del componente con un estado simulado. Las
+ * propiedades derivadas se resuelven como en Vue para no reimplementar la
+ * lógica del reloj ni del estado de red en la prueba.
+ */
+function trayComputed(name, state) {
+  const self = { ...state };
+
+  for (const [key, getter] of Object.entries(OfflineSyncTrayModal.computed)) {
+    Object.defineProperty(self, key, {
+      configurable: true,
+      get: () => getter.call(self)
+    });
+  }
+
+  return self[name];
+}
+
+assert(
+  '5.1 El reloj muestra la antigüedad en minutos cuando la copia es reciente',
+  trayComputed('ageLabel', { validity: { ageMinutes: 5 } })
+    === 'Última sincronización: hace 5 min'
+);
+assert(
+  '5.2 Pasada la hora el reloj combina horas y minutos sin redondear a la baja',
+  trayComputed('ageLabel', { validity: { ageMinutes: 65 } })
+    === 'Última sincronización: hace 1 h 5 min'
+);
+assert(
+  '5.3 Sin copia local el reloj lo declara en lugar de inventar una antigüedad',
+  trayComputed('ageLabel', { validity: {} })
+    === 'Última sincronización: sin copia local de ruta'
+);
+assert(
+  '5.4 El estado de conexión distingue en línea, sin conexión y sincronizando N de M',
+  trayComputed('connectionLabel', { connectionStatus: 'ONLINE' }) === '🟢 En línea'
+    && trayComputed('connectionLabel', { connectionStatus: 'OFFLINE' }) === '🟠 Modo sin conexión'
+    && trayComputed('connectionLabel', {
+      connectionStatus: 'SYNCING',
+      progress: { current: 2, total: 3 }
+    }) === '🔵 Sincronizando (2/3)…'
+);
+assert(
+  '5.5 La bandeja pinta ambos indicadores de forma permanente en su cabecera',
+  OfflineSyncTrayModal.template.includes('data-testid="offline-connection-state"')
+    && /\{\{\s*connectionLabel\s*\}\}/.test(OfflineSyncTrayModal.template)
+    && /\{\{\s*ageLabel\s*\}\}/.test(OfflineSyncTrayModal.template)
 );
 
 console.log('\n======================================================================');

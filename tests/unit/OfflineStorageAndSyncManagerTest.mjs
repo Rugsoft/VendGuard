@@ -731,6 +731,151 @@ assert(
     && OFFLINE_OPERATIONS.START_PREVENTIVE.path(77) === '/technician/preventive/orders/77/start'
 );
 
+console.log('\n--- 9. Orden FIFO estricto y disparo de la cola (EARS 04.1) ---');
+
+const fifoStorage = await seedStorage();
+const fifoMutation = (sequenceOrder, stopId) => ({
+  client_mutation_id: `fifo-${sequenceOrder}-${stopId}`,
+  technician_id: 2,
+  technician_email: 'jordi@vendguard.internal',
+  sequence_order: sequenceOrder,
+  status: MUTATION_STATUS.PENDING,
+  stop_type: STOP_TYPE.INCIDENT,
+  stop_id: stopId,
+  operation_type: 'ADD_INCIDENT_COMMENT',
+  is_state_transition: false,
+  http_method: 'POST',
+  endpoint: `/technician/incidents/${stopId}/comments`,
+  client_occurred_at: new Date(NOW).toISOString(),
+  chain_started_at: null,
+  chain_ended_at: null,
+  sanitary_seal_confirmed: false,
+  payload: { body: `Comentario FIFO de la parada ${stopId}` },
+  photo_attachment: null,
+  provisional_parts_deducted: [],
+  conflict: null
+});
+
+// Se insertan deliberadamente en orden 3, 1, 2: el orden de la bandeja no
+// puede depender del orden de inserción ni del reloj del dispositivo.
+await fifoStorage.putMutation(fifoMutation(3, 103));
+await fifoStorage.putMutation(fifoMutation(1, 101));
+await fifoStorage.putMutation(fifoMutation(2, 102));
+
+const fifoList = await fifoStorage.listMutations(2);
+assert(
+  '9.1 La bandeja ordena por sequence_order aunque las inserciones lleguen desordenadas',
+  fifoList.map((item) => item.sequence_order).join(',') === '1,2,3',
+  fifoList.map((item) => item.sequence_order).join(',')
+);
+
+const fifoRequests = [];
+const fifoManager = new OfflineSyncManager({
+  storage: fifoStorage,
+  client: {
+    request: async (endpoint) => {
+      fifoRequests.push(endpoint);
+      return { ok: true };
+    }
+  },
+  now: () => NOW,
+  dispatch: () => {}
+});
+
+const fifoSummary = await fifoManager.processOutboxQueue(2);
+assert(
+  '9.2 El envío respeta el orden FIFO de la bandeja (101, 102, 103)',
+  fifoRequests.length === 3
+    && fifoRequests[0].includes('/incidents/101/')
+    && fifoRequests[1].includes('/incidents/102/')
+    && fifoRequests[2].includes('/incidents/103/')
+    && fifoSummary.applied === 3
+    && fifoSummary.pending === 0,
+  JSON.stringify({ requests: fifoRequests, summary: fifoSummary })
+);
+
+console.log('\n--- 10. Comentario intermedio rechazado sin bloquear la resolución (EARS 05.1.2, QA 3) ---');
+
+const rejectedCommentStorage = await seedStorage();
+const rejectedRequests = [];
+const rejectedManager = new OfflineSyncManager({
+  storage: rejectedCommentStorage,
+  client: {
+    request: async (endpoint) => {
+      rejectedRequests.push(endpoint);
+
+      // Solo el comentario intermedio se rechaza con 4xx; el resto de la cola
+      // debe continuar y la resolución posterior sí llegar al servidor.
+      if (endpoint.endsWith('/comments')) {
+        throw Object.assign(new Error('Comentario rechazado por el servidor.'), {
+          status: 409,
+          code: 'COMMENT_REJECTED'
+        });
+      }
+
+      return { ok: true };
+    }
+  },
+  now: () => NOW,
+  dispatch: () => {}
+});
+
+const rejectedStart = await rejectedManager.enqueue({
+  technicianId: 2,
+  stopType: STOP_TYPE.INCIDENT,
+  stopId: 101,
+  operationType: 'START_INCIDENT',
+  payload: {}
+});
+const rejectedComment = await rejectedManager.enqueue({
+  technicianId: 2,
+  stopType: STOP_TYPE.INCIDENT,
+  stopId: 101,
+  operationType: 'ADD_INCIDENT_COMMENT',
+  payload: { body: 'Comentario que el servidor rechazará.' }
+});
+const rejectedResolve = await rejectedManager.enqueue({
+  technicianId: 2,
+  stopType: STOP_TYPE.INCIDENT,
+  stopId: 101,
+  operationType: 'RESOLVE_INCIDENT',
+  payload: {
+    diagnosis: 'Compresor bloqueado y sustituido.',
+    action_taken: 'Se sustituye el compresor y se valida el frío.'
+  }
+});
+const rejectedOtherStop = await rejectedManager.enqueue({
+  technicianId: 2,
+  stopType: STOP_TYPE.INCIDENT,
+  stopId: 102,
+  operationType: 'START_INCIDENT',
+  payload: {}
+});
+
+const rejectedSummary = await rejectedManager.processOutboxQueue(2);
+const rejectedCommentState = await rejectedCommentStorage.getMutation(rejectedComment.client_mutation_id);
+
+assert(
+  '10.1 El comentario rechazado con 409 queda en CONFLICT y no se descarta',
+  rejectedCommentState?.status === MUTATION_STATUS.CONFLICT
+    && rejectedCommentState?.conflict?.code === 'COMMENT_REJECTED'
+);
+assert(
+  '10.2 La resolución posterior de la misma parada se envía y se retira de la cola',
+  await rejectedCommentStorage.getMutation(rejectedResolve.client_mutation_id) === null
+    && rejectedRequests.some((endpoint) => endpoint.endsWith('/incidents/101/resolve'))
+);
+assert(
+  '10.3 La parada ajena continúa y la cola no se pausa por un rechazo 4xx',
+  await rejectedCommentStorage.getMutation(rejectedOtherStop.client_mutation_id) === null
+    && await rejectedCommentStorage.getMutation(rejectedStart.client_mutation_id) === null
+    && rejectedSummary.applied === 3
+    && rejectedSummary.conflicts === 1
+    && rejectedSummary.pending === 0
+    && rejectedSummary.interrupted === null,
+  JSON.stringify(rejectedSummary)
+);
+
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 

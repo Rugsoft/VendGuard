@@ -1509,6 +1509,174 @@ console.log('\n--- Group 17: Shift gate and re-auth with a live offline queue (E
 }
 
 // ---------------------------------------------------------------------
+// TEST GROUP 18: Online-only guards (M24: EARS 03.2.1)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 18: Online-only guards (EARS 03.2.1) ---');
+
+const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+const originalInternalLogin = api.auth.internalLogin;
+const originalPost = api.post;
+
+function restoreNavigator() {
+  if (originalNavigatorDescriptor) {
+    Object.defineProperty(globalThis, 'navigator', originalNavigatorDescriptor);
+  } else {
+    delete globalThis.navigator;
+  }
+}
+
+{
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { onLine: false }
+  });
+
+  const loginGuardView = createRouteInstance();
+  loginGuardView.loginEmail = 'jordi.ruta@vendguard.internal';
+  loginGuardView.loginPassword = 'clave-valida';
+  loginGuardView.loginError = '';
+  let loginCalls = 0;
+  api.auth.internalLogin = async () => {
+    loginCalls++;
+    return { user: { id: 2, role: 'TECHNICIAN' }, token: 'token' };
+  };
+
+  await loginGuardView.handleInternalLogin();
+
+  assert(
+    '18.1 Sin red el acceso inicial no llama a la API y explica que hace falta conexión',
+    loginCalls === 0 && loginGuardView.loginError.includes('conexión a la red')
+  );
+
+  restoreNavigator();
+  api.auth.internalLogin = originalInternalLogin;
+}
+
+{
+  const shiftGuardView = createRouteInstance();
+  shiftGuardView.isOfflineMode = true;
+  let postCalls = 0;
+  api.post = async () => {
+    postCalls++;
+    return { status: 'ON_SHIFT' };
+  };
+
+  await shiftGuardView.startShift();
+  const startBlocked = postCalls === 0 && shiftGuardView.shiftError.includes('conexión en vivo');
+
+  await shiftGuardView.resumeMealShift();
+  const resumeBlocked = postCalls === 0 && shiftGuardView.shiftError.includes('conexión en vivo');
+
+  shiftGuardView.handoverError = '';
+  shiftGuardView.isOfflineMode = true;
+  await shiftGuardView.submitShiftHandover();
+  const handoverBlocked = postCalls === 0 && shiftGuardView.handoverError.includes('conexión en vivo');
+
+  assert(
+    '18.2 Iniciar turno sin red se bloquea antes de tocar la API',
+    startBlocked
+  );
+  assert(
+    '18.3 Reanudar turno sin red se bloquea antes de tocar la API',
+    resumeBlocked
+  );
+  assert(
+    '18.4 Cerrar turno y relevo sin red se bloquea antes de tocar la API',
+    handoverBlocked
+  );
+
+  api.post = originalPost;
+}
+
+{
+  const opportunisticGuardView = createRouteInstance();
+  opportunisticGuardView.isOfflineMode = true;
+  opportunisticGuardView.showOpportunisticModal = false;
+  opportunisticGuardView.errorMessage = '';
+
+  opportunisticGuardView.openOpportunisticModal({ location_id: 1 });
+
+  assert(
+    '18.5 Registrar una avería oportunista sin red no abre el modal y avisa de la conexión',
+    opportunisticGuardView.showOpportunisticModal === false
+      && opportunisticGuardView.errorMessage.includes('conexión en vivo')
+  );
+}
+
+// ---------------------------------------------------------------------
+// TEST GROUP 19: Offline resolution enables the deferred A4 service sheet (EARS 03.2.2)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 19: Deferred A4 service sheet after offline sync (EARS 03.2.2) ---');
+
+{
+  // El grupo 17.6 cierra la sesión para probar que otra cuenta no asume la cola;
+  // el albarán diferido necesita un técnico autenticado con su copia local.
+  setInternalSession(
+    { id: 2, name: 'Jordi Técnico Ruta', email: 'jordi.ruta@vendguard.internal', role: 'TECHNICIAN' },
+    'fake_tech_token_123'
+  );
+
+  const sheetView = createRouteInstance();
+  sheetView.serviceSheetIncidentId = null;
+  sheetView.isOfflineMode = false;
+  sheetView.offlineQueue = { pending: 1, syncing: 0, conflicts: 0, total: 1, photoCount: 0, photoBytes: 0 };
+  sheetView.offlineQueueItems = [
+    { operation_type: 'RESOLVE_INCIDENT', stop_type: 'INCIDENT', stop_id: 105 }
+  ];
+  sheetView.refreshOfflineState = async () => {};
+  sheetView.offlineManager = {
+    processOutboxQueue: async () => ({ applied: 1, conflicts: 0, pending: 0, interrupted: null })
+  };
+
+  await sheetView.syncOfflineQueue({ silent: true });
+
+  assert(
+    '19.1 Al confirmarse la resolución en cola se habilita el Albarán A4 de esa avería',
+    sheetView.serviceSheetIncidentId === 105,
+    String(sheetView.serviceSheetIncidentId)
+  );
+  assert(
+    '19.2 El aviso diferido y el binding del albarán siguen presentes en la plantilla',
+    TechnicianRouteView.template.includes('data-testid="offline-service-sheet-pending"')
+      && TechnicianRouteView.template.includes('Albarán oficial A4 disponible al sincronizar con el servidor')
+      && TechnicianRouteView.template.includes(':incident-id="serviceSheetIncidentId"')
+  );
+}
+
+// ---------------------------------------------------------------------
+// TEST GROUP 20: Offline stop badge (M24: EARS 03.3.2)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 20: Offline stop badge (EARS 03.3.2) ---');
+
+{
+  const badgeView = createRouteInstance();
+  const badgeIncident = { id: 101 };
+
+  badgeView.offlineQueueItems = [
+    { stop_type: 'INCIDENT', stop_id: 101, status: 'PENDING' }
+  ];
+  const pendingLabel = badgeView.offlineStopBadgeLabel(badgeIncident);
+
+  badgeView.offlineQueueItems = [
+    { stop_type: 'INCIDENT', stop_id: 101, status: 'CONFLICT' }
+  ];
+  const conflictLabel = badgeView.offlineStopBadgeLabel(badgeIncident);
+
+  badgeView.offlineQueueItems = [];
+  const emptyLabel = badgeView.offlineStopBadgeLabel(badgeIncident);
+
+  assert('20.1 Una parada con trabajo pendiente muestra «⏳ Pendiente de sincronizar»', pendingLabel === '⏳ Pendiente de sincronizar');
+  assert('20.2 Una parada con conflicto muestra «⚠️ Conflicto sin volcar»', conflictLabel === '⚠️ Conflicto sin volcar');
+  assert('20.3 Una parada sin trabajo local no muestra insignia', emptyLabel === '');
+  assert(
+    '20.4 La plantilla pinta la insignia solo cuando hay estado local',
+    TechnicianRouteView.template.includes('data-testid="offline-stop-badge"')
+      && TechnicianRouteView.template.includes('v-if="offlineStopBadgeLabel(incident)"')
+      && TechnicianRouteView.template.includes('{{ offlineStopBadgeLabel(incident) }}')
+  );
+}
+
+// ---------------------------------------------------------------------
 // SUMMARY
 // ---------------------------------------------------------------------
 console.log('\n======================================================================');

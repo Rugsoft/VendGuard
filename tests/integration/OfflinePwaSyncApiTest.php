@@ -272,6 +272,17 @@ try {
         ]);
     };
 
+    $seedCompatibility = static function (int $sparePartId, string $machineModel) use ($pdo): void {
+        $stmt = $pdo->prepare(
+            'INSERT INTO spare_part_compatibilities (spare_part_id, machine_model)
+             VALUES (:spare_part_id, :machine_model)'
+        );
+        $stmt->execute([
+            ':spare_part_id' => $sparePartId,
+            ':machine_model' => $machineModel,
+        ]);
+    };
+
     // Usuarios del test
     $coordId = $createUser('coord', 'COORDINATOR');
     $tech1Id = $createUser('jordi', 'TECHNICIAN');
@@ -297,6 +308,7 @@ try {
     $location = $locationRepo->findById($locId);
     $siteToken = $authService->generateSiteToken($location);
 
+    $machBootstrap = $createMachine($locId, 'VM-OFF-BOOT', 'Mod-Cold', 'COLD_DRINKS');
     $machChain = $createMachine($locId, 'VM-OFF-CHAIN', 'Mod-Cold', 'COLD_DRINKS');
     $machRefund = $createMachine($locId, 'VM-OFF-REFUND', 'Mod-Cold', 'COLD_DRINKS');
     $machReass = $createMachine($locId, 'VM-OFF-REASS', 'Mod-Cold', 'COLD_DRINKS');
@@ -311,6 +323,25 @@ try {
     // Furgoneta de Tech 1 con 4 unidades de la sonda
     $seedStock($tech1Id, $partSensor, 4, 1);
     $seedStock($tech1Id, $partValve, 2, 1);
+
+    // Catálogo compatible con el modelo de las máquinas de la ruta: sin esta
+    // semilla el paquete solo podría certificar la forma de las claves.
+    $seedCompatibility($partSensor, 'Mod-Cold');
+    $seedCompatibility($partValve, 'Mod-Cold');
+
+    // Contenido real del paquete antes de pedir /bootstrap.
+    $incBootstrapId = $createIncident(
+        'INC-OFF-BOOT',
+        $machBootstrap,
+        $locId,
+        'COLD_DRINKS',
+        'TEMPERATURE_COLD',
+        'MEDIUM',
+        'ASSIGNED',
+        $tech1Id,
+        (new DateTimeImmutable('-1 hour'))->format('Y-m-d H:i:sP')
+    );
+    $poBootstrapId = $createPreventiveOrder('PO-OFF-BOOT', $machPo, $locId, $tech1Id);
 
     $router = AppRouter::create();
 
@@ -361,6 +392,54 @@ try {
             && ($bootData['warn_after_seconds'] ?? null) === 14400
             && ($bootData['readonly_after_seconds'] ?? null) === 43200
             && isset($bootData['route'], $bootData['preventive_orders'], $bootData['van_stock'])
+    );
+
+    $bootStops = $bootData['route']['stops'] ?? [];
+    $bootStopIds = array_map(static fn (array $stop): int => (int)($stop['id'] ?? 0), $bootStops);
+    $bootStop = null;
+    foreach ($bootStops as $stop) {
+        if ((int)($stop['id'] ?? 0) === $incBootstrapId) {
+            $bootStop = $stop;
+            break;
+        }
+    }
+    $assert(
+        '1.5 La ruta del paquete incluye la avería asignada con su máquina y su sede',
+        in_array($incBootstrapId, $bootStopIds, true)
+            && (int)($bootStop['machine']['id'] ?? 0) === $machBootstrap
+            && (int)($bootStop['location']['id'] ?? 0) === $locId
+            && (string)($bootStop['status'] ?? '') === 'ASSIGNED'
+    );
+
+    $bootPreventiveIds = array_map(
+        static fn (array $order): int => (int)($order['id'] ?? 0),
+        $bootData['preventive_orders'] ?? []
+    );
+    $assert(
+        '1.6 El paquete incluye la orden preventiva asignada al técnico',
+        in_array($poBootstrapId, $bootPreventiveIds, true)
+    );
+
+    $bootCatalog = $bootData['spare_parts_catalog_by_machine'][$machBootstrap]['compatible_parts'] ?? [];
+    $bootCatalogPartIds = array_map(
+        static fn (array $part): int => (int)($part['spare_part_id'] ?? 0),
+        $bootCatalog
+    );
+    $assert(
+        '1.7 El catálogo por máquina trae los repuestos compatibles con el modelo real',
+        in_array($partSensor, $bootCatalogPartIds, true)
+            && in_array($partValve, $bootCatalogPartIds, true)
+    );
+
+    $bootStock = $bootData['van_stock']['items'] ?? [];
+    $bootStockByPart = [];
+    foreach ($bootStock as $item) {
+        $bootStockByPart[(int)($item['spare_part_id'] ?? 0)] = (int)($item['quantity_available'] ?? 0);
+    }
+    $assert(
+        '1.8 El saldo de furgoneta del paquete conserva las dos piezas y sus cantidades',
+        ($bootStockByPart[$partSensor] ?? null) === 4
+            && ($bootStockByPart[$partValve] ?? null) === 2
     );
 
     // ─────────────────────────────────────────────────────────────────────
