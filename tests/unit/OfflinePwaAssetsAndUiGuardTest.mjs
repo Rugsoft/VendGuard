@@ -132,10 +132,16 @@ const shellSet = new Set(shellAssets);
 assert('2.1 El Service Worker declara la lista explícita del App Shell', shellAssets.length > 50, `entradas=${shellAssets.length}`);
 assert(
   '2.2 El documento, el manifiesto y la caché versionada entran en el shell',
-  shellSet.has('/')
-    && shellSet.has('/index.html')
+  shellSet.has('/index.html')
+    && !shellSet.has('/')
     && shellSet.has('/manifest.webmanifest')
     && /const CACHE_NAME = 'vendguard-app-shell-v\d+'/.test(swSource)
+);
+assert(
+  '2.2b La raíz no se precachea con el health JSON y `/index.html` se sirve como HTML',
+  !shellSet.has('/')
+    && !/cache\.add\('\/'\)/.test(swSource)
+    && /'html'\s*=>\s*'text\/html; charset=UTF-8'/.test(readPublic('/index.php'))
 );
 assert(
   '2.3 Los módulos del modo sin conexión están precacheados',

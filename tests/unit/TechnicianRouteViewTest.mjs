@@ -1393,6 +1393,122 @@ assert('16.8 La vista monta el albarán con el expediente cerrado y el rol del t
     && TechnicianRouteView.template.includes('v-model="showServiceSheetModal"'));
 
 // ---------------------------------------------------------------------
+// TEST GROUP 17: Offline shift gate and re-authentication (M24: EARS 06.2, 06.3)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 17: Shift gate and re-auth with a live offline queue (EARS 06.2, 06.3) ---');
+
+{
+  const offlineShiftView = createRouteInstance();
+  offlineShiftView.isOfflineMode = true;
+  offlineShiftView.shiftError = '';
+
+  const offlineAllowed = await offlineShiftView.ensureOfflineQueueReadyForShift();
+
+  assert(
+    '17.1 Sin red la pausa o el cierre de turno se bloquean antes de tocar el servidor (EARS 06.2)',
+    offlineAllowed === false && offlineShiftView.shiftError.includes('conexión en vivo')
+  );
+}
+
+{
+  const conflictedShiftView = createRouteInstance();
+  conflictedShiftView.isOfflineMode = false;
+  conflictedShiftView.shiftError = '';
+  conflictedShiftView.offlineQueue = { pending: 1, syncing: 0, conflicts: 0, total: 1, photoCount: 0, photoBytes: 0 };
+
+  let refreshedAfterSync = false;
+  conflictedShiftView.refreshOfflineState = async () => {
+    if (refreshedAfterSync) {
+      conflictedShiftView.offlineQueue = { ...conflictedShiftView.offlineQueue, conflicts: 1 };
+    }
+  };
+  conflictedShiftView.syncOfflineQueue = async () => {
+    refreshedAfterSync = true;
+
+    return { applied: 0, conflicts: 1, pending: 1, interrupted: null };
+  };
+
+  const conflictedAllowed = await conflictedShiftView.ensureOfflineQueueReadyForShift();
+
+  assert(
+    '17.2 Con conflictos vivos el turno no cambia y se exige el volcado en 1 toque (EARS 06.2)',
+    conflictedAllowed === false
+      && conflictedShiftView.shiftError.includes('volcar')
+      && conflictedShiftView.showOfflineTray === true
+  );
+}
+
+{
+  const cleanShiftView = createRouteInstance();
+  cleanShiftView.isOfflineMode = false;
+  cleanShiftView.offlineQueue = { pending: 0, syncing: 0, conflicts: 0, total: 0, photoCount: 0, photoBytes: 0 };
+  cleanShiftView.refreshOfflineState = async () => {};
+  cleanShiftView.syncOfflineQueue = async () => ({ applied: 0, conflicts: 0, pending: 0, interrupted: null });
+
+  const cleanAllowed = await cleanShiftView.ensureOfflineQueueReadyForShift();
+
+  assert('17.3 Con la bandeja vacía el turno sí tramita el cambio', cleanAllowed === true);
+}
+
+{
+  const reauthView = createRouteInstance();
+  reauthView.offlineStorage = {
+    async getSnapshot(technicianId) {
+      return {
+        technician_id: technicianId,
+        technician_name: 'Jordi Técnico Ruta',
+        technician_email: 'jordi.ruta@vendguard.internal'
+      };
+    }
+  };
+
+  await reauthView.handleReauthRequired({ technicianId: 2 });
+
+  assert(
+    '17.4 La caducidad de sesión conserva la cola y nombra al titular que debe volver a entrar (EARS 06.3)',
+    reauthView.offlineReauthOwner?.technician_id === 2
+      && reauthView.offlineReauthOwner?.technician_email === 'jordi.ruta@vendguard.internal'
+      && reauthView.offlineNotice.includes('cola sigue intacta')
+      && reauthView.showOfflineTray === true
+  );
+
+  reauthView.requestOfflineReauth();
+
+  assert(
+    '17.5 El formulario de acceso pide explícitamente la misma cuenta de la cola',
+    reauthView.showOfflineTray === false
+      && reauthView.loginError.includes('jordi.ruta@vendguard.internal')
+  );
+}
+
+{
+  const wrongOwnerView = createRouteInstance();
+  wrongOwnerView.offlineReauthOwner = {
+    technician_id: 2,
+    technician_name: 'Jordi Técnico Ruta',
+    technician_email: 'jordi.ruta@vendguard.internal'
+  };
+  wrongOwnerView.loginEmail = 'otro@vendguard.internal';
+  wrongOwnerView.loginPassword = 'clave-ajena';
+  wrongOwnerView.offlineQueue = { pending: 1, syncing: 0, conflicts: 0, total: 1, photoCount: 0, photoBytes: 0 };
+
+  api.auth.internalLogin = async () => ({
+    user: { id: 9, name: 'Otro Técnico', email: 'otro@vendguard.internal', role: 'TECHNICIAN' },
+    token: 'token_otro'
+  });
+  clearSession();
+
+  await wrongOwnerView.handleInternalLogin();
+
+  assert(
+    '17.6 Otra cuenta no puede asumir la cola: se nombra al titular y no se mezcla trabajo (EARS 06.3, Art. V.4)',
+    wrongOwnerView.loginError.includes('jordi.ruta@vendguard.internal')
+      && wrongOwnerView.offlineQueue.total === 1
+      && store.state.token === null
+  );
+}
+
+// ---------------------------------------------------------------------
 // SUMMARY
 // ---------------------------------------------------------------------
 console.log('\n======================================================================');

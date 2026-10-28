@@ -34,6 +34,10 @@ if ($path !== '/' && $path !== '/index.php' && is_file($filePath)) {
         'jpeg' => 'image/jpeg',
         'webp' => 'image/webp',
         'json' => 'application/json; charset=UTF-8',
+        // El App Shell se sirve también por `/index.html` (fallback offline del
+        // Service Worker): sin este MIME el navegador lo descargaba en vez de
+        // renderizarlo y la navegación sin red no pintaba la interfaz.
+        'html' => 'text/html; charset=UTF-8',
         'ico'  => 'image/x-icon',
         'woff2'=> 'font/woff2',
     ];

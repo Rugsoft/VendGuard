@@ -115,6 +115,34 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
     /**
      * {@inheritDoc}
      */
+    public function findLatestAppliedChainStart(int $technicianId, string $stopType, int $stopId): ?OfflineSyncMutation
+    {
+        if ($technicianId < 1 || $stopId < 1) {
+            return null;
+        }
+
+        $row = $this->fetchOne(
+            "SELECT * FROM offline_sync_mutations
+              WHERE technician_id = :technician_id
+                AND stop_type = :stop_type
+                AND stop_id = :stop_id
+                AND outcome_status = 'APPLIED'
+                AND operation_type IN ('START_INCIDENT', 'RESUME_INCIDENT_PENDING_INFO', 'START_PREVENTIVE')
+              ORDER BY synced_at DESC, id DESC
+              LIMIT 1",
+            [
+                ':technician_id' => $technicianId,
+                ':stop_type' => $stopType,
+                ':stop_id' => $stopId,
+            ]
+        );
+
+        return $row === null ? null : $this->hydrateMutation($row);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function fetchBootstrapSnapshotForTechnician(int $technicianId): array
     {
         if ($technicianId < 1) {

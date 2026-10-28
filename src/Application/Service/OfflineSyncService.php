@@ -255,7 +255,7 @@ final class OfflineSyncService
 
         // 3. Sello temporal efectivo y preservación de Δt (RF-04.3, QA 4).
         $resolved = $metadata->resolveEffectiveTimestamp(
-            $this->previousMilestone($stopFacts, $syncedAt),
+            $this->chainStartAnchor($technicianId, $stopType, $stopId, $metadata, $stopFacts, $syncedAt),
             $syncedAt
         );
 
@@ -644,6 +644,45 @@ final class OfflineSyncService
             && $operationType === OfflineSyncMutation::OPERATION_RESOLVE_INCIDENT
             && (bool)($stopFacts['machine_is_perishable'] ?? false)
             && (string)($stopFacts['machine_status'] ?? '') === self::MACHINE_STATUS_SANITARY_QUARANTINE;
+    }
+
+    /**
+     * Hito previo del cierre encadenado (`RF-04.3`, `QA 4`).
+     *
+     * En una cadena con reanudación el segmento activo empieza en la
+     * reanudación, no en el `started_at` original de la incidencia. El ancla es
+     * el instante efectivo de la última mutación `START_*`/`RESUME_*` aplicada
+     * de la misma parada; si el inicio fue online y no hay mutación, se usa el
+     * hito del expediente.
+     *
+     * @param array<string, mixed> $stopFacts
+     */
+    private function chainStartAnchor(
+        int $technicianId,
+        string $stopType,
+        int $stopId,
+        OfflineSyncMetadata $metadata,
+        array $stopFacts,
+        DateTimeImmutable $syncedAt
+    ): DateTimeImmutable {
+        $milestone = $this->previousMilestone($stopFacts, $syncedAt);
+
+        if ($metadata->chainStartedAt === null) {
+            return $milestone;
+        }
+
+        $priorStart = $this->repository->findLatestAppliedChainStart($technicianId, $stopType, $stopId);
+        if ($priorStart === null) {
+            return $milestone;
+        }
+
+        try {
+            $effectiveStart = new DateTimeImmutable($priorStart->effectiveOccurredAt);
+        } catch (\Exception) {
+            return $milestone;
+        }
+
+        return $effectiveStart->setTimezone(new DateTimeZone('UTC'));
     }
 
     /**

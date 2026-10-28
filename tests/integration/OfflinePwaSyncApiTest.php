@@ -302,6 +302,7 @@ try {
     $machReass = $createMachine($locId, 'VM-OFF-REASS', 'Mod-Cold', 'COLD_DRINKS');
     $machCanc = $createMachine($locId, 'VM-OFF-CANC', 'Mod-Cold', 'COLD_DRINKS');
     $machPo = $createMachine($locId, 'VM-OFF-PO', 'Mod-Cold', 'COLD_DRINKS');
+    $machOwn = $createMachine($locId, 'VM-OFF-OWN', 'Mod-Cold', 'COLD_DRINKS');
     $machPerish = $createMachine($locId, 'VM-OFF-FOOD', 'Mod-Fresh', 'PERISHABLE_FOOD', 'QUARANTINE');
 
     $partSensor = $createPart('P-SENS-01', 'Sonda térmica NTC', 'ELECTRONIC');
@@ -475,6 +476,23 @@ try {
         '2.5 Se preserva el intervalo exacto Δt = 25 min in situ a pesar del reloj atrasado 24h (QA 4)',
         $deltaSec === 1500,
         "delta medido: {$deltaSec} s"
+    );
+
+    // El inicio sin conexión debe dejar en `incidents.started_at` su instante
+    // efectivo, no el reloj del servidor: es el ancla del cierre encadenado
+    // cuando la incidencia se reanuda después (EARS 04.3, QA 4).
+    $stmtStartAnchor = $pdo->prepare(
+        "SELECT EXTRACT(EPOCH FROM (i.started_at - m.effective_occurred_at)) AS skew_sec
+           FROM incidents i, offline_sync_mutations m
+          WHERE i.id = :incident_id
+            AND m.client_mutation_id = 'mut_start_enc_001'"
+    );
+    $stmtStartAnchor->execute([':incident_id' => $incEncadenadaId]);
+    $startAnchorSkew = (int)round((float)$stmtStartAnchor->fetchColumn());
+    $assert(
+        '2.6 El inicio offline persiste su instante efectivo en started_at (RF-04.3)',
+        $startAnchorSkew === 0,
+        "desviación del ancla: {$startAnchorSkew} s"
     );
 
     // ─────────────────────────────────────────────────────────────────────
@@ -746,6 +764,48 @@ try {
         '6.5 El Portal de Sede no recibe la Nota Interna del conflicto volcado (comments = [])',
         $resSiteComments->getStatusCode() === 200
             && count($siteCommentsData['comments'] ?? []) === 0
+    );
+
+    // 6.e Titularidad vigente en servidor (EARS 05.1, Art. V.3): la transición
+    //     encolada por el técnico anterior recibe 409 y no toca el expediente.
+    $incStaleOwnerId = $createIncident(
+        'INC-OFF-OWN',
+        $machOwn,
+        $locId,
+        'COLD_DRINKS',
+        'ELECTRICAL_OFF',
+        'MEDIUM',
+        'ASSIGNED',
+        $tech1Id
+    );
+    $pdo->prepare('UPDATE incidents SET assigned_technician_id = :tech WHERE id = :id')
+        ->execute([':tech' => $tech2Id, ':id' => $incStaleOwnerId]);
+
+    $resStaleStart = $call(
+        'PATCH',
+        "/api/technician/incidents/{$incStaleOwnerId}/start",
+        [
+            'client_mutation_id' => 'mut_start_stale_owner_001',
+            'client_occurred_at' => (new DateTimeImmutable('-20 minutes'))->format('Y-m-d\TH:i:sP'),
+        ],
+        $tech1Token
+    );
+    $assert(
+        '6.6 Una transición encolada tras el cambio de titular recibe 409 y no se aplica (EARS 05.1, Art. V.3)',
+        $resStaleStart->getStatusCode() === 409
+            && $errorCode($resStaleStart) === 'INCIDENT_OWNERSHIP_MISMATCH'
+    );
+
+    $stmtStaleStatus = $pdo->prepare('SELECT status FROM incidents WHERE id = :id');
+    $stmtStaleStatus->execute([':id' => $incStaleOwnerId]);
+    $stmtStaleMutation = $pdo->prepare(
+        "SELECT COUNT(*) FROM offline_sync_mutations WHERE client_mutation_id = 'mut_start_stale_owner_001'"
+    );
+    $stmtStaleMutation->execute();
+    $assert(
+        '6.7 El rechazo no altera el estado ni escribe una mutación aplicada',
+        (string)$stmtStaleStatus->fetchColumn() === 'ASSIGNED'
+            && (int)$stmtStaleMutation->fetchColumn() === 0
     );
 
     // ─────────────────────────────────────────────────────────────────────

@@ -293,6 +293,17 @@ FUNCTION executeIdempotentMutation(techId, metadata, stopType, stopId, opType, p
     maxAllowedAt = syncedAt + 5 MINUTES
     clientAt = metadata.clientOccurredAt
 
+    // Ancla del segmento activo: la última mutación APPLIED de inicio o
+    // reanudación de la misma parada. Si el inicio fue online, el hito del
+    // expediente sigue siendo el ancla.
+    chainAnchorAt = previousMilestoneAt
+    IF metadata.chainStartedAt IS NOT NULL THEN
+        priorStart = repo.findLatestAppliedChainStart(techId, stopType, stopId)
+        IF priorStart IS NOT NULL THEN
+            chainAnchorAt = priorStart.effectiveOccurredAt
+        END IF
+    END IF
+
     IF clientAt >= previousMilestoneAt AND clientAt <= maxAllowedAt THEN
         effectiveAt = clientAt
         clockSkewAdjusted = FALSE
@@ -309,8 +320,12 @@ FUNCTION executeIdempotentMutation(techId, metadata, stopType, stopId, opType, p
            AND metadata.chainStartedAt IS NOT NULL
            AND (clientAt - metadata.chainStartedAt) > 0
            AND (clientAt - metadata.chainStartedAt) <= 12 HOURS THEN
-            // El paso inicial ya se ancló a MAX(assigned_at, syncedAt - Δt); el cierre se ancla a syncedAt
-            effectiveAt = MAX(previousMilestoneAt, syncedAt)
+            // El cierre se ancla al inicio o la reanudación efectivos, nunca a
+            // la asignación; el tope en syncedAt descarta el latido de la
+            // petición sin recortar Δt.
+            deltaSeconds = clientAt - metadata.chainStartedAt
+            effectiveAt = MIN(syncedAt, chainAnchorAt + deltaSeconds)
+            effectiveAt = MAX(chainAnchorAt, effectiveAt)
         ELSE
             effectiveAt = MAX(previousMilestoneAt, syncedAt)
         END IF
@@ -357,7 +372,7 @@ FUNCTION executeIdempotentMutation(techId, metadata, stopType, stopId, opType, p
 | **DT-02** | `IndexedDB` nativo encapsulado en `OfflineStorage.js` sin librerías externas. | Instalar `Dexie.js`, `idb` o `localForage`, o usar `localStorage`. | El **Art. IV.3** prohíbe dependencias de terceros; además, `localStorage` es síncrono y está limitado a ~5 MB, incapaz de alojar la cuota de 5 fotografías / 25 MB (`D3`). |
 | **DT-03** | Tabla relacional `offline_sync_mutations` con clave única `(technician_id, client_mutation_id)`. | Confiar solo en la memoria de sesión o no persistir claves de mutación en PostgreSQL. | Garantiza idempotencia transaccional real en PostgreSQL/Supavisor ante cortes de señal en mitad de una respuesta HTTP (`RF-04.2`) y conserva el doble sello temporal (`RF-04.3`, **Art. III.3**). |
 | **DT-04** | Excepción de auditoría en `POST /api/technician/offline/conflicts/dump` y prohibición del botón de descarte local (`QA 1`, `QA 2`). | Permitir borrar el conflicto en el cliente o rechazar la nota interna si el ticket fue cancelado. | Cumple de forma incondicional el **Art. III.1 y III.3**: ningún trabajo técnico ejecutado in situ puede desaparecer sin dejar rastro en el expediente y en `audit_log`. |
-| **DT-05** | Preservación del intervalo relativo $\Delta t = t_2 - t_1$ al corregir relojes desajustados en pasos encadenados (`QA 4`). | Sustituir tanto `started_at` como `resolved_at` por `synced_at`. | Evita que una intervención real de 30 minutos en un sótano con el reloj del móvil desajustado se registre con `0 segundos` de duración, protegiendo el MTTR (Módulo 03) y las horas efectivas in situ (Módulo 22). |
+| **DT-05** | Preservación del intervalo relativo $\Delta t = t_2 - t_1$ al corregir relojes desajustados en pasos encadenados (`QA 4`). | Anclar el cierre en el instante efectivo de la última mutación `START_*`/`RESUME_*` de la parada y aplicar $\min(synced\_at, inicio\_efectivo + \Delta t)$; persistir el inicio offline con su instante efectivo en `incidents.started_at`. | Evita que una intervención real de 30 minutos en un sótano con el reloj del móvil desajustado se registre con `0 segundos` de duración, y que la latencia entre las dos peticiones alargue artificialmente el segmento in situ; protege el MTTR (Módulo 03) y las horas efectivas (Módulo 22). |
 
 ---
 

@@ -10,6 +10,8 @@
  *    en la sede física donde el técnico se encuentra trabajando y permite su autoasignación inmediata con un solo toque.
  * 4. Control de inicio de inspección in situ (transición formal a IN_INSPECTION).
  * 5. Señalización higiénica prioritaria para máquinas de alimentos perecederos (Art. II).
+ * 6. Bloqueo explícito del reclamo libre cuando el dispositivo está sin conexión
+ *    (EARS 03.2, D1): la operación exige red en vivo y no se encola.
  * 
  * Dogma Vanilla: Vue 3 Options API vía ES Modules (cero dependencias externas).
  * Dualismo Lingüístico: Código en inglés, interfaz y mensajes en español.
@@ -33,6 +35,15 @@ export const TechnicianPreventiveRouteTab = {
     enabledLocations: {
       type: Array,
       default: () => []
+    },
+    /**
+     * El dispositivo está sin conexión (EARS 03.2, Decisión D1). Reclamar una
+     * orden preventiva libre exige verificar en vivo la unicidad de titularidad
+     * (Art. V.3): no se puede encolar y no debe intentarse contra la API.
+     */
+    isOffline: {
+      type: Boolean,
+      default: false
     }
   },
   emits: ['open-checklist', 'order-claimed', 'inspection-started', 'refresh', 'open-opportunistic'],
@@ -150,9 +161,19 @@ export const TechnicianPreventiveRouteTab = {
      * Autoasignación inmediata con un solo toque (Visita Oportunista, EARS 2.3)
      */
     async claimOrder(order) {
-      this.actionLoadingId = order.id;
       this.errorMessage = '';
       this.successMessage = '';
+
+      // Bloqueo en vivo (EARS 03.2): el reclamo de una orden libre no está en
+      // la cola sin conexión porque el servidor debe verificar la titularidad
+      // en el momento (Art. V.3). Se avisa, no se envía la petición.
+      if (this.isOffline) {
+        this.errorMessage = 'Reclamar una orden preventiva libre requiere conexión en vivo con el '
+          + 'servidor para verificar la titularidad. Conéctate y vuelve a intentarlo.';
+        return;
+      }
+
+      this.actionLoadingId = order.id;
 
       try {
         await api.technician.claimPreventiveOrder(order.id);

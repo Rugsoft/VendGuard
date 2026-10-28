@@ -50,6 +50,17 @@ interface OfflineSyncMutationRepositoryInterface
     public function findByTechnicianAndMutationId(int $technicianId, string $clientMutationId): ?OfflineSyncMutation;
 
     /**
+     * Última mutación `APPLIED` de inicio o reanudación de una parada
+     * (`RF-04.3`, `QA 4`).
+     *
+     * Es el ancla del cierre encadenado: en una cadena con reanudación el
+     * segmento activo empieza en la reanudación, no en el `started_at` original
+     * de la incidencia. Devuelve `null` si el inicio fue online y no hay
+     * mutación de cola que consultar.
+     */
+    public function findLatestAppliedChainStart(int $technicianId, string $stopType, int $stopId): ?OfflineSyncMutation;
+
+    /**
      * Paquete consolidado de la ruta del técnico autenticado (`RF-02.1`), en un
      * número constante de consultas y sin N+1 por parada, máquina ni orden.
      *

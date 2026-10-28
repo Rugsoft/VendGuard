@@ -227,6 +227,34 @@ assert('2.2 Mensaje de éxito confirma la visita oportunista',
 assert('2.3 Emite evento order-claimed', tab._emitted['order-claimed']?.id === 12);
 
 // =========================================================================
+// BLOQUE 2-bis: Bloqueo del reclamo sin conexión (Módulo 24, EARS 03.2, D1)
+// =========================================================================
+console.log('\n--- BLOQUE 2-bis: Reclamo preventivo sin conexión (EARS 03.2) ---');
+
+const offlineTab = {
+  ...TechnicianPreventiveRouteTab.data(),
+  ...TechnicianPreventiveRouteTab.methods,
+  enabledLocations: [],
+  isOffline: true,
+  $emit() {}
+};
+
+apiClaimCalledId = null;
+await offlineTab.claimOrder(orderToClaim);
+
+assert(
+  '2.4 Sin conexión el reclamo se bloquea antes de llamar a la API',
+  apiClaimCalledId === null && offlineTab.actionLoadingId === null,
+  `ID enviado: ${apiClaimCalledId}`
+);
+assert(
+  '2.5 El bloqueo informa de que la operación exige conexión en vivo',
+  offlineTab.errorMessage.includes('conexión en vivo')
+    && offlineTab.errorMessage.includes('titularidad')
+    && offlineTab.successMessage === ''
+);
+
+// =========================================================================
 // BLOQUE 3: Inicio de Inspección in situ y Navegación a Checklist
 // =========================================================================
 console.log('\n--- BLOQUE 3: Inicio de Inspección y Checklist ---');
@@ -265,6 +293,11 @@ assert('5.1 TechnicianRouteView registra TechnicianPreventiveRouteTab en compone
 assert('5.2 TechnicianRouteView template contiene botón y sección para tab preventiva',
   TechnicianRouteView.template.includes('tech-tab-preventive') &&
   TechnicianRouteView.template.includes('TechnicianPreventiveRouteTab'));
+
+assert(
+  '5.3 La vista propaga el modo sin conexión a los hijos que exigen red en vivo',
+  (TechnicianRouteView.template.match(/:is-offline="isOfflineMode"/g) || []).length >= 2
+);
 
 console.log('\n======================================================================');
 if (failures === 0) {

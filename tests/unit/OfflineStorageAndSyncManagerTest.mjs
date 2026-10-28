@@ -30,6 +30,7 @@
 
 import {
   MUTATION_STATUS,
+  OFFLINE_OPERATIONS,
   OFFLINE_PHOTO_MAX_COUNT,
   OFFLINE_PHOTO_MAX_SINGLE_BYTES,
   OFFLINE_PHOTO_MAX_TOTAL_BYTES,
@@ -650,6 +651,84 @@ assert(
   '7.5 Al cerrar con la bandeja vacía se limpia la copia local del técnico',
   clearedIds.length === 1 && clearedIds[0] === 2,
   `clearedIds=${clearedIds.join(',')}`
+);
+
+console.log('\n--- 8. Copia automática del paquete y catálogo offline (EARS 02.1, 03.1) ---');
+
+const refreshStorage = newStorage();
+let bootstrapRequests = 0;
+const refreshManager = new OfflineSyncManager({
+  storage: refreshStorage,
+  client: {
+    technician: {
+      async getOfflineBootstrap() {
+        bootstrapRequests++;
+        return bootstrap({
+          technician_id: 4,
+          technician_email: 'nuria@vendguard.internal',
+          technician_name: 'Nuria Técnica',
+          synced_at: new Date(NOW).toISOString()
+        });
+      }
+    }
+  },
+  now: () => NOW
+});
+
+const refreshed = await refreshManager.refreshSnapshot(4);
+const persisted = await refreshStorage.getSnapshot(4);
+
+assert(
+  '8.1 Al cargar con red se descarga el paquete consolidado y se guarda para el técnico (EARS 02.1)',
+  bootstrapRequests === 1
+    && refreshed.snapshot?.technician_id === 4
+    && persisted?.technician_id === 4
+    && persisted?.technician_email === 'nuria@vendguard.internal'
+);
+assert(
+  '8.2 La copia guardada incluye ruta, preventivas, catálogo y furgoneta, no solo las paradas',
+  Array.isArray(persisted?.route_envelope?.stops)
+    && persisted.route_envelope.stops.length === 2
+    && Array.isArray(persisted?.preventive_orders)
+    && Object.prototype.hasOwnProperty.call(persisted, 'spare_parts_catalog_by_machine')
+    && Array.isArray(persisted?.van_stock?.items)
+);
+assert(
+  '8.3 La copia recién guardada nace FRESH y admite acciones sin conexión',
+  refreshed.validity?.status === SNAPSHOT_VALIDITY.FRESH
+    && refreshed.validity?.canEnqueueNewActions === true
+);
+
+const allowedOperations = Object.keys(OFFLINE_OPERATIONS).sort();
+const expectedOperations = [
+  'ADD_INCIDENT_COMMENT',
+  'COMPLETE_PREVENTIVE',
+  'PAUSE_INCIDENT_PARTS',
+  'PAUSE_INCIDENT_PENDING_INFO',
+  'REINSPECT_PREVENTIVE',
+  'RESOLVE_INCIDENT',
+  'RESUME_INCIDENT_PENDING_INFO',
+  'START_INCIDENT',
+  'START_PREVENTIVE'
+].sort();
+
+assert(
+  '8.4 La cola sólo admite las nueve operaciones de parada del contrato (EARS 03.1)',
+  JSON.stringify(allowedOperations) === JSON.stringify(expectedOperations),
+  allowedOperations.join(',')
+);
+assert(
+  '8.5 Las operaciones que exigen red en vivo no tienen variante offline (EARS 03.2)',
+  !allowedOperations.some((code) => /CLAIM|RESTOCK|SHIFT|LOGIN|OPPORTUNISTIC/.test(code))
+);
+assert(
+  '8.6 Cada operación declara su tipo de parada, método y ruta reales',
+  OFFLINE_OPERATIONS.START_INCIDENT.stopType === STOP_TYPE.INCIDENT
+    && OFFLINE_OPERATIONS.START_INCIDENT.method === 'PATCH'
+    && OFFLINE_OPERATIONS.START_INCIDENT.path(105) === '/technician/incidents/105/start'
+    && OFFLINE_OPERATIONS.RESOLVE_INCIDENT.method === 'POST'
+    && OFFLINE_OPERATIONS.START_PREVENTIVE.stopType === STOP_TYPE.PREVENTIVE_ORDER
+    && OFFLINE_OPERATIONS.START_PREVENTIVE.path(77) === '/technician/preventive/orders/77/start'
 );
 
 console.log('\n======================================================================');

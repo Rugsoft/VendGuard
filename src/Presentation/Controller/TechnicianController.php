@@ -1038,8 +1038,16 @@ class TechnicianController
                 $metadata,
                 // Hito previo = asignación del expediente (§5.1).
                 ['previous_milestone_at' => $this->milestoneAt($incident->getAssignedAt())],
-                function (array $context) use ($incidentId, $techId): array {
-                    $started = $this->incidentRepo->startIntervention($incidentId, $techId);
+                function (array $context) use ($incidentId, $techId, $metadata): array {
+                    // El inicio sin conexión se persiste con su instante efectivo: el cierre
+                    // encadenado lo usa como ancla para conservar Δt (RF-04.3, QA 4). La
+                    // llamada online conserva el reloj del servidor.
+                    $effectiveStart = $metadata !== null ? ($context['effective_occurred_at'] ?? null) : null;
+                    $started = $this->incidentRepo->startIntervention(
+                        $incidentId,
+                        $techId,
+                        $effectiveStart instanceof \DateTimeImmutable ? $effectiveStart : null
+                    );
 
                     return [
                         'http_status' => 200,

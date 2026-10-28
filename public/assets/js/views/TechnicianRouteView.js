@@ -3259,6 +3259,7 @@ export const TechnicianRouteView = {
 
           <TechnicianPreventiveRouteTab
             :enabled-locations="enabledLocations"
+            :is-offline="isOfflineMode"
             @open-checklist="handleOpenPreventiveChecklist($event)"
             @order-claimed="loadRoute"
             @inspection-started="loadRoute"
@@ -3287,7 +3288,7 @@ export const TechnicianRouteView = {
                 El saldo visible incluye los descuentos provisionales de tu bandeja.
                 Confirmar la recepción de una orden de carga requiere conexión en vivo.
               </div>
-              <TechnicianVanStockPanel />
+              <TechnicianVanStockPanel :is-offline="isOfflineMode" />
             </div>
           </details>
 

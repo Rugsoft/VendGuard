@@ -3655,7 +3655,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
      * Inicia o reanuda la intervención técnica en campo (RF-07 / EARS 7.1, 7.3).
      * Transiciona a IN_PROGRESS, registra started_at si es la primera vez y anota en auditoría.
      */
-    public function startIntervention(int $incidentId, int $technicianId): Incident
+    public function startIntervention(int $incidentId, int $technicianId, ?DateTimeImmutable $startedAt = null): Incident
     {
         $isOwnTransaction = !$this->pdo->inTransaction();
         if ($isOwnTransaction) {
@@ -3682,17 +3682,25 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 );
             }
 
-            // 3. Actualizar estado a IN_PROGRESS y fijar started_at (conservando si ya existía)
+            // 3. Actualizar estado a IN_PROGRESS y fijar started_at (conservando si ya existía).
+            //    Cuando la operación viene de la cola sin conexión, el inicio se persiste con su
+            //    instante efectivo: es el ancla que el cierre encadenado usa para preservar Δt
+            //    (RF-04.3, QA 4). La llamada online conserva CURRENT_TIMESTAMP.
+            $hasEffectiveStart = $startedAt !== null;
+            $startedAtSql = $hasEffectiveStart ? ':started_at' : 'CURRENT_TIMESTAMP';
             $sql = "
                 UPDATE incidents
                 SET status = 'IN_PROGRESS',
-                    started_at = COALESCE(started_at, CURRENT_TIMESTAMP)
+                    started_at = COALESCE(started_at, {$startedAtSql})
                 WHERE id = :id
                   AND deleted_at IS NULL
             ";
 
             $stmt = $this->pdo->prepare($sql);
             $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+            if ($hasEffectiveStart) {
+                $stmt->bindValue(':started_at', $startedAt->format('Y-m-d H:i:sP'), PDO::PARAM_STR);
+            }
             $stmt->execute();
 
             // 4. Registrar en historial inmutable

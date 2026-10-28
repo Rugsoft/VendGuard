@@ -105,6 +105,33 @@ final class InMemoryOfflineSyncMutationRepository implements OfflineSyncMutation
         ];
     }
 
+    public function findLatestAppliedChainStart(int $technicianId, string $stopType, int $stopId): ?OfflineSyncMutation
+    {
+        $candidates = array_filter(
+            $this->rows,
+            static fn (OfflineSyncMutation $row): bool => $row->technicianId === $technicianId
+                && $row->stopType === $stopType
+                && $row->stopId === $stopId
+                && $row->isApplied()
+                && in_array($row->operationType, [
+                    OfflineSyncMutation::OPERATION_START_INCIDENT,
+                    OfflineSyncMutation::OPERATION_RESUME_INCIDENT_PENDING_INFO,
+                    OfflineSyncMutation::OPERATION_START_PREVENTIVE,
+                ], true)
+        );
+
+        if ($candidates === []) {
+            return null;
+        }
+
+        usort(
+            $candidates,
+            static fn (OfflineSyncMutation $a, OfflineSyncMutation $b): int => [$b->syncedAt, $b->id] <=> [$a->syncedAt, $a->id]
+        );
+
+        return $candidates[0];
+    }
+
     public function recordAppliedMutation(OfflineSyncMutation $mutation): OfflineSyncMutation
     {
         $key = $mutation->technicianId . ':' . $mutation->clientMutationId;
@@ -870,6 +897,156 @@ $assert(
     $missingIdFailure instanceof OfflineSyncValidationException
         && $missingIdFailure->getErrorCode() === OfflineSyncValidationException::INVALID_OFFLINE_DUMP_PAYLOAD
         && count($deactivatedRepo->rows) === 2
+);
+
+// =============================================================================
+// 6. Anclaje del cierre encadenado con reanudación — EARS 04.3, QA 4
+// =============================================================================
+echo "\n--- 6. Anclaje del cierre encadenado tras reanudar (EARS 04.3, QA 4) ---\n";
+
+$chainRepo = new InMemoryOfflineSyncMutationRepository();
+$chainService = new OfflineSyncService($chainRepo);
+$chainSyncedAt = new DateTimeImmutable('2026-10-27T12:00:00+00:00');
+
+$recordChainStart = static function (
+    string $operationType,
+    string $effectiveAt,
+    string $syncedAt,
+    string $mutationId
+) use ($chainRepo): void {
+    $chainRepo->recordAppliedMutation(new OfflineSyncMutation(
+        id: OfflineSyncMutation::UNPERSISTED_ID,
+        technicianId: 2,
+        clientMutationId: $mutationId,
+        stopType: OfflineSyncMutation::STOP_TYPE_INCIDENT,
+        stopId: 905,
+        operationType: $operationType,
+        outcomeStatus: OfflineSyncMutation::OUTCOME_APPLIED,
+        clientOccurredAt: $effectiveAt,
+        chainStartedAt: null,
+        effectiveOccurredAt: $effectiveAt,
+        syncedAt: $syncedAt,
+        clockSkewAdjusted: true,
+        sanitarySealConfirmed: false,
+        responseHttpStatus: 200,
+        responsePayload: ['status' => 'IN_PROGRESS'],
+        createdAt: $syncedAt
+    ));
+};
+
+$recordChainStart(
+    OfflineSyncMutation::OPERATION_START_INCIDENT,
+    '2026-10-27T09:00:00+00:00',
+    '2026-10-27T09:20:00+00:00',
+    'mut_20261027_091900_chain001'
+);
+$recordChainStart(
+    OfflineSyncMutation::OPERATION_RESUME_INCIDENT_PENDING_INFO,
+    '2026-10-27T10:00:00+00:00',
+    '2026-10-27T10:20:00+00:00',
+    'mut_20261027_101900_chain002'
+);
+
+$chainContext = null;
+$chainResolve = $chainService->executeIdempotentMutation(
+    technicianId: 2,
+    stopType: OfflineSyncMutation::STOP_TYPE_INCIDENT,
+    stopId: 905,
+    operationType: OfflineSyncMutation::OPERATION_RESOLVE_INCIDENT,
+    metadata: new OfflineSyncMetadata(
+        'mut_20261027_120000_chain003',
+        new DateTimeImmutable('2026-10-27T15:30:00Z'),
+        new DateTimeImmutable('2026-10-27T15:00:00Z')
+    ),
+    // El expediente conserva el started_at original: el ancla debe salir de la
+    // reanudación aplicada, no de este hito (EARS 04.3).
+    stopFacts: ['previous_milestone_at' => new DateTimeImmutable('2026-10-27T09:00:00+00:00')],
+    applyTransition: static function (array $context) use (&$chainContext): array {
+        $chainContext = $context;
+
+        return ['http_status' => 200, 'payload' => ['status' => 'RESOLVED']];
+    },
+    now: $chainSyncedAt
+);
+
+$assert(
+    '6.1 El cierre se ancla en la reanudación, no en el inicio original',
+    ($chainContext['effective_occurred_at'] ?? null) instanceof DateTimeImmutable
+        && $chainContext['effective_occurred_at']->format('Y-m-d\TH:i:s') === '2026-10-27T10:30:00'
+        && $chainContext['clock_skew_adjusted'] === true,
+    ($chainContext['effective_occurred_at'] ?? null) instanceof DateTimeImmutable
+        ? $stamp($chainContext['effective_occurred_at']->format('c'))
+        : 'sin contexto'
+);
+$assert(
+    '6.2 El sobre conserva Δt = 30 min y sincroniza a las 12:00',
+    ($chainResolve['offline_sync']['effective_occurred_at'] ?? '') === '2026-10-27T10:30:00+00:00'
+        && ($chainResolve['offline_sync']['synced_at'] ?? '') === '2026-10-27T12:00:00+00:00'
+        && ($chainResolve['offline_sync']['clock_skew_adjusted'] ?? false) === true
+);
+$assert(
+    '6.3 La mutación aplicada conserva el ancla reanudada',
+    ($chainRepo->rows['2:mut_20261027_120000_chain003']->effectiveOccurredAt ?? '') === '2026-10-27T10:30:00+00:00'
+        && ($chainRepo->rows['2:mut_20261027_120000_chain003']->chainStartedAt ?? '') === '2026-10-27T15:00:00+00:00'
+);
+
+$fallbackRepo = new InMemoryOfflineSyncMutationRepository();
+$fallbackService = new OfflineSyncService($fallbackRepo);
+$fallbackContext = null;
+$fallback = $fallbackService->executeIdempotentMutation(
+    technicianId: 2,
+    stopType: OfflineSyncMutation::STOP_TYPE_INCIDENT,
+    stopId: 915,
+    operationType: OfflineSyncMutation::OPERATION_RESOLVE_INCIDENT,
+    metadata: new OfflineSyncMetadata(
+        'mut_20261027_120100_chain004',
+        new DateTimeImmutable('2026-10-27T15:30:00Z'),
+        new DateTimeImmutable('2026-10-27T15:00:00Z')
+    ),
+    stopFacts: ['previous_milestone_at' => new DateTimeImmutable('2026-10-27T09:00:00+00:00')],
+    applyTransition: static function (array $context) use (&$fallbackContext): array {
+        $fallbackContext = $context;
+
+        return ['http_status' => 200, 'payload' => ['status' => 'RESOLVED']];
+    },
+    now: $chainSyncedAt
+);
+$assert(
+    '6.4 Sin inicio offline aplicado, el cierre cae en el hito del expediente + Δt',
+    ($fallbackContext['effective_occurred_at'] ?? null) instanceof DateTimeImmutable
+        && $fallbackContext['effective_occurred_at']->format('Y-m-d\TH:i:s') === '2026-10-27T09:30:00'
+        && ($fallback['offline_sync']['effective_occurred_at'] ?? '') === '2026-10-27T09:30:00+00:00'
+);
+
+$recordChainStart(
+    OfflineSyncMutation::OPERATION_RESUME_INCIDENT_PENDING_INFO,
+    '2026-10-27T11:50:00+00:00',
+    '2026-10-27T11:55:00+00:00',
+    'mut_20261027_115400_chain005'
+);
+$clampedContext = null;
+$chainService->executeIdempotentMutation(
+    technicianId: 2,
+    stopType: OfflineSyncMutation::STOP_TYPE_INCIDENT,
+    stopId: 905,
+    operationType: OfflineSyncMutation::OPERATION_RESOLVE_INCIDENT,
+    metadata: new OfflineSyncMetadata(
+        'mut_20261027_120200_chain006',
+        new DateTimeImmutable('2026-10-27T15:30:00Z'),
+        new DateTimeImmutable('2026-10-27T15:00:00Z')
+    ),
+    stopFacts: ['previous_milestone_at' => new DateTimeImmutable('2026-10-27T09:00:00+00:00')],
+    applyTransition: static function (array $context) use (&$clampedContext): array {
+        $clampedContext = $context;
+
+        return ['http_status' => 200, 'payload' => ['status' => 'RESOLVED']];
+    },
+    now: new DateTimeImmutable('2026-10-27T12:00:00+00:00')
+);
+$assert(
+    '6.5 El cierre nunca se adelanta a su recepción: tope en synced_at',
+    ($clampedContext['effective_occurred_at'] ?? null) instanceof DateTimeImmutable
+        && $clampedContext['effective_occurred_at']->format('Y-m-d\TH:i:s') === '2026-10-27T12:00:00'
 );
 
 // =============================================================================

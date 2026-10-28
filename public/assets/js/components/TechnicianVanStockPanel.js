@@ -20,6 +20,12 @@
  * operación al `user_id` del token (Art. V.4). Tras confirmar, `loadInventory()`
  * trae el saldo actualizado y el comprobante `last_confirmed_order`.
  *
+ * SIN RED NO SE CONFIRMA
+ *
+ * La recepción de una carga de almacén exige red en vivo (EARS 03.2, D1): el
+ * botón informa del bloqueo y no llama a la API cuando el padre declara el
+ * dispositivo sin conexión. No hay variante offline de esta operación.
+ *
  * EL DESCUADRE NO SE ETIQUETA AQUÍ
  *
  * La proyección del técnico no transporta `is_negative` a propósito: el servidor
@@ -44,6 +50,18 @@ import { formatDateTime } from '../utils/DateTimeFormat.js';
 
 export const TechnicianVanStockPanel = {
   name: 'TechnicianVanStockPanel',
+
+  props: {
+    /**
+     * El dispositivo está sin conexión (EARS 03.2, Decisión D1). Confirmar la
+     * recepción de una carga de almacén exige red en vivo: no se encola y no
+     * debe intentarse contra la API. El padre ya muestra el aviso de contexto.
+     */
+    isOffline: {
+      type: Boolean,
+      default: false
+    }
+  },
 
   data() {
     return {
@@ -148,6 +166,16 @@ export const TechnicianVanStockPanel = {
      */
     async confirmActiveOrder() {
       if (!this.hasActiveOrder || this.isConfirming) {
+        return;
+      }
+
+      // Bloqueo en vivo (EARS 03.2): la recepción de carga mueve el inventario
+      // de la furgoneta y exige confirmación del servidor; no hay variante
+      // offline en la cola. Se informa sin lanzar la petición.
+      if (this.isOffline) {
+        this.confirmError = 'Confirmar la recepción de una orden de carga requiere conexión en vivo '
+          + 'con el servidor. Conéctate y vuelve a intentarlo.';
+        this.confirmMessage = '';
         return;
       }
 

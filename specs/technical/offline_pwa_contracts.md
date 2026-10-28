@@ -356,7 +356,9 @@ Cuando el servidor recibe una operación con `client_occurred_at` (y opcionalmen
    * `clock_skew_adjusted = true`.
    * **Si es un paso aislado o es el paso `START_INCIDENT` / `START_PREVENTIVE` acompañado en la cola por un cierre posterior con intervalo coherente ($\Delta t = t_{\text{fin}} - t_{\text{inicio}} > 0$ y $\Delta t \le 12\text{ horas}$):**
      * Para el paso inicial: $\text{effective\_occurred\_at} = \max\big(T_{\text{prev}},\; T_{\text{sync}} - \Delta t\big)$.
-     * Para el paso final (*Pausar* / *Resolver* / *Completar*): $\text{effective\_occurred\_at} = T_{\text{sync}}$.
+     * Para el paso final (*Pausar* / *Resolver* / *Completar*): $\text{effective\_occurred\_at} = \min\big(T_{\text{sync}},\; \text{inicio\_efectivo} + \Delta t\big)$.
+     * `inicio_efectivo` es el `effective_occurred_at` de la última mutación `APPLIED` con operación `START_INCIDENT`, `RESUME_INCIDENT_PENDING_INFO` o `START_PREVENTIVE` de la misma parada. Si el inicio fue online y no hay mutación, se usa `started_at`. En una cadena con reanudación, el ancla es la reanudación, no el inicio original.
+     * El cierre efectivo puede ser anterior a `T_{\text{sync}}` por la latencia entre las dos peticiones; esa diferencia no altera $\Delta t$ ni se contabiliza como trabajo in situ. `synced_at` se registra aparte como instante de recepción.
      * De este modo, si el técnico trabajó 25 minutos en el sótano con el reloj del teléfono desconfigurado, la diferencia $\text{resolved\_at} - \text{started\_at}$ conserva exactamente los **25 minutos reales** (o el máximo disponible desde `assigned_at`), nunca colapsando a `0 segundos` (`QA 4`).
 
 ---
