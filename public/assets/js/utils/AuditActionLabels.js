@@ -181,6 +181,19 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   // registra el hecho; sin estas dos etiquetas el visor mostraría el código crudo.
   { code: 'OFFLINE_CONFLICT_DUMPED', label: 'Volcado Offline de Conflicto en Expediente', tone: 'warning', group: 'ticket' },
   { code: 'OFFLINE_DEACTIVATED_ACCOUNT_DUMP', label: 'Volcado Offline por Baja de Cuenta', tone: 'danger', group: 'ticket' },
+  // Módulo 24: `recordAppliedMutation()` escribe en `audit_log` el código de la
+  // operación encolada, no el hecho de dominio. Esa segunda fila es la que
+  // acredita la procedencia offline (`client_mutation_id`, desfase de reloj y
+  // Δt), así que se nombra por la operación y no se pliega sobre el evento de
+  // dominio que el propio flujo ya registró.
+  { code: 'START_INCIDENT', label: 'Inicio de Intervención Offline', tone: 'primary', group: 'ticket' },
+  { code: 'RESUME_INCIDENT_PENDING_INFO', label: 'Reanudación Offline tras Pausa por Información', tone: 'info', group: 'ticket' },
+  { code: 'PAUSE_INCIDENT_PARTS', label: 'Pausa Offline por Repuestos', tone: 'warning', group: 'ticket' },
+  { code: 'PAUSE_INCIDENT_PENDING_INFO', label: 'Pausa Offline por Falta de Información', tone: 'warning', group: 'ticket' },
+  { code: 'ADD_INCIDENT_COMMENT', label: 'Comentario Offline en el Hilo', tone: 'info', group: 'ticket' },
+  { code: 'START_PREVENTIVE', label: 'Inicio Offline de Inspección Preventiva', tone: 'primary', group: 'preventive' },
+  { code: 'COMPLETE_PREVENTIVE', label: 'Cierre Offline de Inspección Preventiva', tone: 'success', group: 'preventive' },
+  { code: 'REINSPECT_PREVENTIVE', label: 'Reinspección Offline tras Subsanación', tone: 'info', group: 'preventive' },
 ]);
 
 const CATALOG_BY_CODE = Object.freeze(
