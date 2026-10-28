@@ -1677,6 +1677,52 @@ console.log('\n--- Group 20: Offline stop badge (EARS 03.3.2) ---');
 }
 
 // ---------------------------------------------------------------------
+// TEST GROUP 21: Automatic queue sync on reconnection (M24: EARS 04.1)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 21: Automatic queue sync on reconnection (EARS 04.1) ---');
+
+{
+  const connectivityView = createRouteInstance();
+  connectivityView.isOfflineMode = false;
+  connectivityView.offlineQueue = { pending: 1, syncing: 0, conflicts: 0, total: 1, photoCount: 0, photoBytes: 0 };
+  connectivityView.refreshOfflineState = async () => {};
+
+  let syncCalls = 0;
+  let loadCalls = 0;
+  let lastSyncOptions = null;
+  connectivityView.syncOfflineQueue = async (options) => {
+    syncCalls++;
+    lastSyncOptions = options;
+
+    return { applied: 0, conflicts: 0, pending: 1, interrupted: null };
+  };
+  connectivityView.loadRoute = async () => {
+    loadCalls++;
+  };
+
+  await connectivityView.handleConnectivityChange(true);
+  const onlineTriggered = syncCalls === 1
+    && lastSyncOptions?.silent === true
+    && loadCalls === 1;
+
+  await connectivityView.handleConnectivityChange(false);
+  const offlineDidNotSync = syncCalls === 1;
+
+  assert(
+    '21.1 Al recuperar la conexión la cola se sincroniza automáticamente y luego se recarga la ruta',
+    onlineTriggered
+  );
+  assert(
+    '21.2 Perder la conexión no dispara una sincronización ni una recarga de ruta',
+    offlineDidNotSync && loadCalls === 1
+  );
+  assert(
+    '21.3 El botón «Sincronizar ahora» invoca la misma cola en modo visible',
+    TechnicianRouteView.template.includes('@sync-now="syncOfflineQueue({ silent: false })"')
+  );
+}
+
+// ---------------------------------------------------------------------
 // SUMMARY
 // ---------------------------------------------------------------------
 console.log('\n======================================================================');
