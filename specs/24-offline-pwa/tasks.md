@@ -3,7 +3,7 @@
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
 **Módulo:** 24 · Modo Sin Conexión para Técnicos de Campo (*Offline PWA Mode for Field Technicians*)  
 **Documento Canónico:** `specs/24-offline-pwa/tasks.md`  
-**Especificación Funcional:** [`spec.md`](spec.md) (v2.0, 2026-10-27)  
+**Especificación Funcional:** [`spec.md`](spec.md) (v2.1, 2026-10-27)  
 **Contratos Técnicos:** [`../technical/offline_pwa_contracts.md`](../technical/offline_pwa_contracts.md)  
 **Plan Arquitectónico:** [`plan.md`](plan.md)  
 **Fecha:** Octubre 2026  

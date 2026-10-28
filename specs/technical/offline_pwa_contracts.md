@@ -4,7 +4,7 @@
 **Proyecto:** Gestor de Incidencias de Vending (*VendGuard*)  
 **Módulo:** `24-offline-pwa`  
 **Documento:** `specs/technical/offline_pwa_contracts.md`  
-**Referencia Funcional:** [`specs/24-offline-pwa/spec.md`](../24-offline-pwa/spec.md) (`RF-01` a `RF-06` de la Spec v2.0, `RNF-01` a `RNF-04`, Decisiones `D1`–`D6` y Resoluciones `QA 1`–`QA 5`)  
+**Referencia Funcional:** [`specs/24-offline-pwa/spec.md`](../24-offline-pwa/spec.md) (`RF-01` a `RF-06` de la Spec v2.1, `RNF-01` a `RNF-04`, Decisiones `D1`–`D6` y Resoluciones `QA 1`–`QA 5`)  
 **Protocolo:** HTTP/1.1 · JSON (`application/json; charset=utf-8`) y `multipart/form-data` · Web App Manifest · Service Worker Cache API · IndexedDB API  
 **Metodología:** SDD (Specification-Driven Development) · Contratos API-First  
 **Conformidad Constitucional:**
@@ -106,9 +106,10 @@ Se enlaza en [`public/index.html`](../../public/index.html) mediante `<link rel=
 
 ### 2.2. Contrato del Service Worker (`public/sw.js`)
 
-* **Nombre de caché versionado:** `CACHE_NAME = 'vendguard-app-shell-v1'`.
+* **Nombre de caché versionado:** `CACHE_NAME = 'vendguard-app-shell-v2'`.
 * **Activos precacheados en `install` (`APP_SHELL_ASSETS`):**
-  * `/`, `/index.html`, `/manifest.webmanifest`
+  * `/index.html`, `/manifest.webmanifest`
+  * La raíz `/` **no** se precachea: su respuesta depende de la negociación de contenido y el health JSON puede contaminar la caché del App Shell. La navegación sin red se resuelve explícitamente contra `/index.html`.
   * `/assets/css/design-tokens.css`, `/assets/css/qr-print.css`, `/assets/css/metrics-print.css`, `/assets/css/service-sheet.css`
   * `/assets/js/app.js`, `/assets/js/api.js`, `/assets/js/store.js`, `/assets/js/vendor/vue.esm-browser.prod.js`
   * Todos los módulos de `/assets/js/views/*.js`, `/assets/js/components/*.js` y `/assets/js/utils/*.js`.

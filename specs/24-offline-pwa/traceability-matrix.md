@@ -4,7 +4,7 @@
 
 **Esquema de referencia:** `RF-01` instalabilidad y carga sin red · `RF-02` copia local y vigencia · `RF-03` encolado, precinto y cuota · `RF-04` sincronización, idempotencia y Δt · `RF-05` conflictos y cuarentena · `RF-06` sesión, turno y baja de cuenta.
 
-**Corrida de certificación:** 28 de octubre de 2026 (PostgreSQL local `vendguard_battery`; canal `new_engine` ejecutado con `PG_TEST_DSN`: **27 suites evaluadas, 26 en verde, 1 no ejecutable por falta de TLS remoto, 796 aserciones, 0 fallos**).
+**Corrida de certificación:** 28 de octubre de 2026 (PostgreSQL local `vendguard_battery`; canal `new_engine` ejecutado con `PG_TEST_DSN`: **27 suites evaluadas, 26 en verde, 1 no ejecutable por falta de TLS remoto, 800 aserciones, 0 fallos**).
 
 ---
 
@@ -14,55 +14,55 @@
 
 | Criterio | Artefacto de código | Test que lo cubre | Resultado medido |
 |---|---|---|---|
-| **01.1** Metadatos de instalación y iconos escalables | `public/manifest.webmanifest`, `public/assets/icons/vendguard-icon-192.svg`, `vendguard-icon-512.svg`, `public/index.html` | `OfflinePwaAssetsAndUiGuardTest.mjs` 1.1–1.7 | 34/34 ✅ |
-| **01.2** Carga completa de la interfaz sin red | `public/sw.js` (`APP_SHELL_ASSETS`, precache activo a activo), `public/index.html` (registro), `TechnicianRouteView.js` (imports estáticos) | `OfflinePwaAssetsAndUiGuardTest.mjs` 2.1–2.5, 2.7–2.12 | 34/34 ✅ — el shell es cerrado: todo módulo importado por un recurso precacheado también se precachea |
-| **01.3** Actualización transparente de versión | `public/sw.js` (`CACHE_NAME` versionado, *Stale-While-Revalidate*, `skipWaiting`/`clients.claim`) | `OfflinePwaAssetsAndUiGuardTest.mjs` 2.2, 2.11 | 34/34 ✅ — el activo se sirve de caché y se refresca en segundo plano |
+| **01.1** Metadatos de instalación y iconos escalables | `public/manifest.webmanifest`, `public/assets/icons/vendguard-icon-192.svg`, `vendguard-icon-512.svg`, `public/index.html` | `OfflinePwaAssetsAndUiGuardTest.mjs` 1.1–1.7 | 39/39 ✅ |
+| **01.2** Carga completa de la interfaz sin red | `public/sw.js` (`APP_SHELL_ASSETS`, precache activo a activo), `public/index.html` (registro), `TechnicianRouteView.js` (imports estáticos) | `OfflinePwaAssetsAndUiGuardTest.mjs` 2.1–2.5, 2.7–2.12 | 39/39 ✅ — el shell es cerrado: todo módulo importado por un recurso precacheado también se precachea |
+| **01.3** Actualización transparente de versión | `public/sw.js` (`CACHE_NAME` versionado, *Stale-While-Revalidate*, `skipWaiting`/`clients.claim`) | `OfflinePwaAssetsAndUiGuardTest.mjs` 2.2, 2.11 | 39/39 ✅ — el activo se sirve de caché y se refresca en segundo plano |
 
 ### RF-02 · Copia local de la ruta y control de vigencia (D6, QA 4)
 
 | Criterio | Artefacto de código | Test que lo cubre | Resultado medido |
 |---|---|---|---|
-| **02.1** Guardado automático del paquete de ruta | `TechnicianOfflineSyncController::getBootstrap`, `OfflineBootstrapSnapshotDto`, `PdoOfflineSyncMutationRepository::fetchBootstrapSnapshotForTechnician`, `OfflineSyncManager::refreshSnapshot`, `OfflineStorage::saveSnapshot`, `TechnicianRouteView.refreshOfflineSnapshotFromServer` | `OfflinePwaSyncApiTest.php` 1.1–1.6 · `OfflineStorageAndSyncManagerTest.mjs` 3.x, 4.x, **8.1–8.3** · `OfflineSyncServiceTest.php` | 26/26 · 53/53 · 41/41 ✅ — el paquete completo se guarda y nace `FRESH` |
-| **02.2** Indicador permanente de antigüedad y conectividad | `OfflineSyncTrayModal.js` (`offline-connection-state`, reloj «Última sincronización»), `TechnicianRouteView.offlineSnapshotLabel` | `OfflinePwaAssetsAndUiGuardTest.mjs` 3.3 · `OfflineStorageAndSyncManagerTest.mjs` 1.1–1.7 | 34/34 · 53/53 ✅ |
-| **02.3** Aviso ámbar a las 4 h | `evaluateSnapshotValidity` (`STALE_WARNING`), `OfflineSyncTrayModal.js` (`offline-stale-warning`) | `OfflineStorageAndSyncManagerTest.mjs` 1.2–1.3 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.3 | 53/53 · 34/34 ✅ |
-| **02.4** Solo lectura a las 12 h sin perder la cola | `evaluateSnapshotValidity` (`EXPIRED_READONLY`), `OfflineSyncManager::enqueue` (`SNAPSHOT_EXPIRED_READONLY`), `OfflineSyncTrayModal.js` (`offline-readonly-warning`) | `OfflineStorageAndSyncManagerTest.mjs` 1.4–1.5 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.3 | 53/53 · 34/34 ✅ |
+| **02.1** Guardado automático del paquete de ruta | `TechnicianOfflineSyncController::getBootstrap`, `OfflineBootstrapSnapshotDto`, `PdoOfflineSyncMutationRepository::fetchBootstrapSnapshotForTechnician`, `OfflineSyncManager::refreshSnapshot`, `OfflineStorage::saveSnapshot`, `TechnicianRouteView.refreshOfflineSnapshotFromServer` | `OfflinePwaSyncApiTest.php` 1.1–1.8 · `OfflineStorageAndSyncManagerTest.mjs` 3.x, 4.x, **8.1–8.3** · `OfflineSyncServiceTest.php` | 30/30 · 58/58 · 41/41 ✅ — la ruta, la preventiva, el catálogo y la furgoneta reales viajan en el paquete y la copia nace `FRESH` |
+| **02.2** Indicador permanente de antigüedad y conectividad | `OfflineSyncTrayModal.js` (`offline-connection-state`, `ageLabel`, `connectionLabel`) | `OfflinePwaAssetsAndUiGuardTest.mjs` 3.3, **5.1–5.5** · `OfflineStorageAndSyncManagerTest.mjs` 1.1–1.7 | 39/39 · 58/58 ✅ — el reloj y el estado de red se ejecutan sobre el componente real, no solo se inspeccionan como texto |
+| **02.3** Aviso ámbar a las 4 h | `evaluateSnapshotValidity` (`STALE_WARNING`), `OfflineSyncTrayModal.js` (`offline-stale-warning`) | `OfflineStorageAndSyncManagerTest.mjs` 1.2–1.3 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.3 | 58/58 · 39/39 ✅ |
+| **02.4** Solo lectura a las 12 h sin perder la cola | `evaluateSnapshotValidity` (`EXPIRED_READONLY`), `OfflineSyncManager::enqueue` (`SNAPSHOT_EXPIRED_READONLY`), `OfflineSyncTrayModal.js` (`offline-readonly-warning`) | `OfflineStorageAndSyncManagerTest.mjs` 1.4–1.5 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.3 | 58/58 · 39/39 ✅ |
 
 ### RF-03 · Encolado de operaciones, precinto sanitario y cuota fotográfica (D1, D3, D5, QA 1, QA 3, QA 4)
 
 | Criterio | Artefacto de código | Test que lo cubre | Resultado medido |
 |---|---|---|---|
-| **03.1** Las 9 operaciones encolables y su encadenamiento | `OFFLINE_OPERATIONS` (catálogo cerrado), `OfflineSyncManager::enqueue`, `TechnicianRouteView` (encolado de inicio, reanudación, pausas, resolución, comentario, preventivas y reinspección) | `OfflineStorageAndSyncManagerTest.mjs` 3.1–3.5, 5.4–5.5, 6.1–6.6, **8.4–8.6** · `OfflinePwaSyncApiTest.php` 2.1–2.5 | 53/53 · 26/26 ✅ — catálogo exacto y rutas reales; ninguna operación en vivo se cuela en la cola |
-| **03.2** Bloqueo de operaciones en vivo y Albarán A4 diferido | `TechnicianRouteView.guardOnlineOnly`, `ensureOfflineQueueReadyForShift`, aviso `offline-preventive-notice`; **bloqueo duro en `TechnicianPreventiveRouteTab.claimOrder` y `TechnicianVanStockPanel.confirmActiveOrder`**; aviso «📄 Albarán oficial A4 disponible al sincronizar con el servidor»; `OfflineSyncManager` rechaza operaciones fuera del catálogo | `OfflineStorageAndSyncManagerTest.mjs` 5.4, 8.5 · `TechnicianPreventiveRouteTabTest.mjs` 2.4–2.5 · `TechnicianVanStockPanelTest.mjs` 3.4–3.6 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.7 | 53/53 · 22/22 · 26/26 · 34/34 ✅ — los dos componentes hijos bloquean antes de la API e informan de que la operación exige conexión en vivo |
-| **03.3** Identificador único, estado local inmediato y descuento provisional | `OfflineSyncManager::enqueue` (`client_mutation_id`, `sequence_order`, `chain_started_at`), `applyOptimisticStopChange`, `applyStockDeduction`, `OfflineStorage::applyOptimisticMutation` | `OfflineStorageAndSyncManagerTest.mjs` 3.1–3.5 | 53/53 ✅ — Δt exacto y stock de 10 → 8 → 10 tras reversión |
-| **03.4** Precinto físico in situ en máquinas perecederas | `requiresSanitarySeal`, `OfflineSyncManager::enqueue` (`SANITARY_SEAL_CONFIRMATION_REQUIRED`), `TechnicianRouteView` (`offline-sanitary-seal-block`, casilla obligatoria), `OfflineSyncService::assertSanitarySeal` | `OfflineStorageAndSyncManagerTest.mjs` 5.1–5.5 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.1–3.2 · `OfflineSyncClockAndQuotaTest.php` 3.x | 53/53 · 34/34 · 19/19 ✅ |
-| **03.5** Cuota de 5 fotos / 25 MB y firma PNG exenta | `validatePhotoAttachment`, `serializePhoto`, `OFFLINE_PHOTO_MAX_*`, `OFFLINE_SIGNATURE_MAX_BYTES`, `OfflineSyncManager::getQueueSummary` | `OfflineStorageAndSyncManagerTest.mjs` 2.1–2.11 · `OfflinePwaSyncApiTest.php` 2.3 | 53/53 · 26/26 ✅ — la firma no consume cupo ni bytes |
+| **03.1** Las 9 operaciones encolables y su encadenamiento | `OFFLINE_OPERATIONS` (catálogo cerrado), `OfflineSyncManager::enqueue`, `TechnicianRouteView` (encolado de inicio, reanudación, pausas, resolución, comentario, preventivas y reinspección) | `OfflineStorageAndSyncManagerTest.mjs` 3.1–3.5, 5.4–5.5, 6.1–6.6, **8.4–8.6** · `OfflinePwaSyncApiTest.php` 2.1–2.5 | 58/58 · 30/30 ✅ — catálogo exacto y rutas reales; ninguna operación en vivo se cuela en la cola |
+| **03.2** Bloqueo de operaciones en vivo y Albarán A4 diferido | `TechnicianRouteView.guardOnlineOnly`, `ensureOfflineQueueReadyForShift`, aviso `offline-preventive-notice`; **bloqueo duro en `TechnicianPreventiveRouteTab.claimOrder` y `TechnicianVanStockPanel.confirmActiveOrder`**; aviso «📄 Albarán oficial A4 disponible al sincronizar con el servidor»; `OfflineSyncManager` rechaza operaciones fuera del catálogo | `OfflineStorageAndSyncManagerTest.mjs` 5.4, 8.5 · `TechnicianPreventiveRouteTabTest.mjs` 2.4–2.5 · `TechnicianVanStockPanelTest.mjs` 3.4–3.6 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.7 · `TechnicianRouteViewTest.mjs` **18.1–18.5, 19.1–19.2** | 58/58 · 22/22 · 26/26 · 39/39 · **160/160** ✅ — los dos componentes hijos bloquean antes de la API, la vista bloquea login/turno/relevo/oportunista y el albarán se habilita al confirmar la resolución offline |
+| **03.3** Identificador único, estado local inmediato y descuento provisional | `OfflineSyncManager::enqueue` (`client_mutation_id`, `sequence_order`, `chain_started_at`), `applyOptimisticStopChange`, `applyStockDeduction`, `OfflineStorage::applyOptimisticMutation` | `OfflineStorageAndSyncManagerTest.mjs` 3.1–3.5 | 58/58 ✅ — Δt exacto y stock de 10 → 8 → 10 tras reversión |
+| **03.4** Precinto físico in situ en máquinas perecederas | `requiresSanitarySeal`, `OfflineSyncManager::enqueue` (`SANITARY_SEAL_CONFIRMATION_REQUIRED`), `TechnicianRouteView` (`offline-sanitary-seal-block`, casilla obligatoria), `OfflineSyncService::assertSanitarySeal` | `OfflineStorageAndSyncManagerTest.mjs` 5.1–5.5 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.1–3.2 · `OfflineSyncClockAndQuotaTest.php` 3.x | 58/58 · 39/39 · 19/19 ✅ |
+| **03.5** Cuota de 5 fotos / 25 MB y firma PNG exenta | `validatePhotoAttachment`, `serializePhoto`, `OFFLINE_PHOTO_MAX_*`, `OFFLINE_SIGNATURE_MAX_BYTES`, `OfflineSyncManager::getQueueSummary` | `OfflineStorageAndSyncManagerTest.mjs` 2.1–2.11 · `OfflinePwaSyncApiTest.php` 2.3 | 58/58 · 30/30 ✅ — la firma no consume cupo ni bytes |
 
 ### RF-04 · Sincronización FIFO, idempotencia y doble sello temporal (D2, QA 4)
 
 | Criterio | Artefacto de código | Test que lo cubre | Resultado medido |
 |---|---|---|---|
-| **04.1** FIFO estricto y disparo automático/manual | `OfflineStorage::listMutations` (orden por `sequence_order`), `OfflineSyncManager::processOutboxQueue`, `TechnicianRouteView` (reconexión y «Sincronizar ahora») | `OfflineStorageAndSyncManagerTest.mjs` 6.1–6.6 · `OfflinePwaSyncApiTest.php` 2.x | 53/53 · 26/26 ✅ |
-| **04.2** Idempotencia por `(technician_id, client_mutation_id)` | `020_offline_pwa_sync.sql` (`uq_offline_tech_mutation`), `PdoOfflineSyncMutationRepository::findByTechnicianAndMutationId`, `OfflineSyncService::executeIdempotentMutation` | `OfflineSyncServiceTest.php` 1.1–1.5 · `OfflinePwaSyncApiTest.php` 3.1–3.2 · `PostgresOfflineSyncSchemaTest.php` | 41/41 · 26/26 · 22/22 ✅ — el reenvío responde `idempotent_replay` y no vuelve a descontar stock |
-| **04.3** Sello efectivo, tolerancia de 5 min, Δt y auditoría dual | `OfflineSyncMetadata::resolveEffectiveTimestamp`, `OfflineSyncService::chainStartAnchor` (ancla en la última mutación `START_*`/`RESUME_*`), `PdoOfflineSyncMutationRepository::findLatestAppliedChainStart`, `PdoIncidentRepository::startIntervention` (persiste el instante efectivo), `PdoOfflineSyncMutationRepository::recordAppliedMutation` | `OfflineSyncServiceTest.php` 6.1–6.5 · `OfflineSyncClockAndQuotaTest.php` 1.1–2.6 · `OfflinePwaSyncApiTest.php` 2.1–2.6 | 41/41 · 19/19 · 26/26 ✅ — Δt de 1.500 s exacto con 24 h de desfase, ancla en la reanudación y tope en `synced_at`; `incidents.started_at` conserva el instante efectivo |
+| **04.1** FIFO estricto y disparo automático/manual | `OfflineStorage::listMutations` (orden por `sequence_order`), `OfflineSyncManager::processOutboxQueue`, `TechnicianRouteView` (reconexión y «Sincronizar ahora») | `OfflineStorageAndSyncManagerTest.mjs` **9.1–9.2**, 6.1–6.6 · `OfflinePwaSyncApiTest.php` 2.x | 58/58 · 30/30 ✅ — la bandeja ordena inserciones desordenadas y el envío respeta 101 → 102 → 103 |
+| **04.2** Idempotencia por `(technician_id, client_mutation_id)` | `020_offline_pwa_sync.sql` (`uq_offline_tech_mutation`), `PdoOfflineSyncMutationRepository::findByTechnicianAndMutationId`, `OfflineSyncService::executeIdempotentMutation` | `OfflineSyncServiceTest.php` 1.1–1.5 · `OfflinePwaSyncApiTest.php` 3.1–3.2 · `PostgresOfflineSyncSchemaTest.php` | 41/41 · 30/30 · 22/22 ✅ — el reenvío responde `idempotent_replay` y no vuelve a descontar stock |
+| **04.3** Sello efectivo, tolerancia de 5 min, Δt y auditoría dual | `OfflineSyncMetadata::resolveEffectiveTimestamp`, `OfflineSyncService::chainStartAnchor` (ancla en la última mutación `START_*`/`RESUME_*`), `PdoOfflineSyncMutationRepository::findLatestAppliedChainStart`, `PdoIncidentRepository::startIntervention` (persiste el instante efectivo), `PdoOfflineSyncMutationRepository::recordAppliedMutation` | `OfflineSyncServiceTest.php` 6.1–6.5 · `OfflineSyncClockAndQuotaTest.php` 1.1–2.6 · `OfflinePwaSyncApiTest.php` 2.1–2.6 | 41/41 · 19/19 · 30/30 ✅ — Δt de 1.500 s exacto con 24 h de desfase, ancla en la reanudación y tope en `synced_at`; `incidents.started_at` conserva el instante efectivo |
 
 ### RF-05 · Conflictos auditados y blindaje sanitario (D2, QA 1, QA 2, QA 3)
 
 | Criterio | Artefacto de código | Test que lo cubre | Resultado medido |
 |---|---|---|---|
-| **05.1** Titularidad vigente, conflicto aislado por parada y comentarios independientes | `OfflineSyncManager::processOutboxQueue` (`failedStateStops`, `STATE_CHAIN_BLOCKED`, comentario `is_state_transition = false`), `handleSyncFailure` (403/409/422), `revertProvisionalStock`; `TechnicianController` responde `409 INCIDENT_OWNERSHIP_MISMATCH` desde la cola | `OfflineStorageAndSyncManagerTest.mjs` 6.1–6.6 · `OfflinePwaSyncApiTest.php` 6.6–6.7 · `TechnicianRouteViewTest.mjs` 17.6 | 53/53 · 26/26 · 149/149 ✅ — el cambio de titular no escribe estado ni mutación; el comentario y la otra parada continúan |
-| **05.2** Colisión parcial exclusiva de reintegro | `OfflineSyncService` (`partialRefundCollision`, `skip_refund_block`), `PdoOfflineSyncMutationRepository::recordAppliedMutation` (nota interna automática) | `OfflineSyncServiceTest.php` 2.x · `OfflinePwaSyncApiTest.php` 4.1–4.2 | 41/41 · 26/26 ✅ |
-| **05.3** Volcado obligatorio en 1 toque, canceladas/cerradas y preventivas | `OfflineSyncService::dumpConflict`, `PdoOfflineSyncMutationRepository::recordConflictDump`, `TechnicianOfflineSyncController::dumpConflict`, `OfflineSyncTrayModal.js` (`offline-conflict-dump`), `OfflineSyncManager::dumpConflict` | `OfflineStorageAndSyncManagerTest.mjs` 6.7–6.12 · `OfflineSyncServiceTest.php` 3.x · `OfflinePwaSyncApiTest.php` 6.1–6.5 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.4–3.5 | 53/53 · 41/41 · 26/26 · 34/34 ✅ — sin botón de descarte; `is_internal = TRUE` invisible a la sede |
-| **05.4** Cuarentena sanitaria innegociable a las 4 h | `OfflineSyncService` (`preserveSanitaryQuarantine`, `sanitary_quarantine_retained`), `TechnicianController` (resolución offline) | `OfflineSyncServiceTest.php` 4.x · `OfflinePwaSyncApiTest.php` 5.1–5.3 | 41/41 · 26/26 ✅ — la avería se cierra, `machines.status = 'SANITARY_QUARANTINE'` permanece |
+| **05.1** Titularidad vigente, conflicto aislado por parada y comentarios independientes | `OfflineSyncManager::processOutboxQueue` (`failedStateStops`, `STATE_CHAIN_BLOCKED`, comentario `is_state_transition = false`), `handleSyncFailure` (403/409/422), `revertProvisionalStock`; `TechnicianController` responde `409 INCIDENT_OWNERSHIP_MISMATCH` desde la cola | `OfflineStorageAndSyncManagerTest.mjs` 6.1–6.6, **10.1–10.3** · `OfflinePwaSyncApiTest.php` 6.6–6.7 · `TechnicianRouteViewTest.mjs` 17.6 | 58/58 · 30/30 · 160/160 ✅ — el cambio de titular no escribe estado ni mutación; un comentario rechazado con 4xx queda en conflicto y la resolución posterior sí se envía |
+| **05.2** Colisión parcial exclusiva de reintegro | `OfflineSyncService` (`partialRefundCollision`, `skip_refund_block`), `PdoOfflineSyncMutationRepository::recordAppliedMutation` (nota interna automática) | `OfflineSyncServiceTest.php` 2.x · `OfflinePwaSyncApiTest.php` 4.1–4.2 | 41/41 · 30/30 ✅ |
+| **05.3** Volcado obligatorio en 1 toque, canceladas/cerradas y preventivas | `OfflineSyncService::dumpConflict`, `PdoOfflineSyncMutationRepository::recordConflictDump`, `TechnicianOfflineSyncController::dumpConflict`, `OfflineSyncTrayModal.js` (`offline-conflict-dump`), `OfflineSyncManager::dumpConflict` | `OfflineStorageAndSyncManagerTest.mjs` 6.7–6.12 · `OfflineSyncServiceTest.php` 4.x · `OfflinePwaSyncApiTest.php` 6.1–6.5 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.4–3.5 | 58/58 · 41/41 · 30/30 · 39/39 ✅ — sin botón de descarte; `is_internal = TRUE` invisible a la sede |
+| **05.4** Cuarentena sanitaria innegociable a las 4 h | `OfflineSyncService` (`shouldPreserveQuarantine`, `sanitary_quarantine_retained`), `TechnicianController` (resolución offline) | `OfflineSyncServiceTest.php` 3.x · `OfflinePwaSyncApiTest.php` 5.1–5.3 | 41/41 · 30/30 ✅ — la avería se cierra, `machines.status = 'SANITARY_QUARANTINE'` permanece |
 
 ### RF-06 · Sesión, turno y baja sobrevenida de cuenta (D4, QA 5)
 
 | Criterio | Artefacto de código | Test que lo cubre | Resultado medido |
 |---|---|---|---|
-| **06.1** Bloqueo del cierre de sesión con cola viva | `AppNavbar::handleLogout` (`logout-blocked`), `OfflineSyncManager::getQueueSummary`, insignia `navbar-offline-queue-badge` | `OfflineStorageAndSyncManagerTest.mjs` 7.1–7.3 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.6 | 53/53 · 34/34 ✅ |
-| **06.2** Sincronización previa a pausar/cerrar turno | `TechnicianRouteView::ensureOfflineQueueReadyForShift` (sincroniza, exige volcar conflictos y bloquea el cambio de turno) | `TechnicianRouteViewTest.mjs` 17.1–17.3 | 149/149 ✅ — sin red no se llama al servidor; con conflictos vivos se exige el volcado; con la bandeja vacía el turno tramita |
-| **06.3** Re-autenticación del mismo técnico ante 401 | `OfflineSyncManager::handleSyncFailure` (`reauth_required`, cola intacta en `PENDING`), `TechnicianRouteView.handleReauthRequired` / `requestOfflineReauth` / `handleInternalLogin`, `OfflineSyncTrayModal.js` (`offline-reauth-owner`) | `TechnicianRouteViewTest.mjs` 17.4–17.6 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.7 | 149/149 · 34/34 ✅ — la cola se conserva, se nombra al titular y una cuenta ajena no puede asumirla |
-| **06.4** Volcado automático por baja de cuenta | `OfflineSyncManager::dumpDeactivatedAccountQueue`, `TechnicianOfflineSyncController::dumpDeactivatedAccount`, `PdoOfflineSyncMutationRepository::recordDeactivatedAccountDumpBatch` | `OfflineSyncServiceTest.php` 5.x · `OfflinePwaSyncApiTest.php` 7.1–7.3 | 41/41 · 26/26 ✅ — `clear_local_storage = true` y `DEACTIVATED_ACCOUNT_DUMP` |
-| **06.5** Limpieza de la copia local al salir sin pendientes | `AppNavbar::handleLogout` (`clearTechnician`), `OfflineStorage::clearTechnician` | `OfflineStorageAndSyncManagerTest.mjs` 4.2, 7.4–7.5 | 53/53 ✅ |
+| **06.1** Bloqueo del cierre de sesión con cola viva | `AppNavbar::handleLogout` (`logout-blocked`), `OfflineSyncManager::getQueueSummary`, insignia `navbar-offline-queue-badge` | `OfflineStorageAndSyncManagerTest.mjs` 7.1–7.3 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.6 | 58/58 · 39/39 ✅ |
+| **06.2** Sincronización previa a pausar/cerrar turno | `TechnicianRouteView::ensureOfflineQueueReadyForShift` (sincroniza, exige volcar conflictos y bloquea el cambio de turno) | `TechnicianRouteViewTest.mjs` 17.1–17.3 | 160/160 ✅ — sin red no se llama al servidor; con conflictos vivos se exige el volcado; con la bandeja vacía el turno tramita |
+| **06.3** Re-autenticación del mismo técnico ante 401 | `OfflineSyncManager::handleSyncFailure` (`reauth_required`, cola intacta en `PENDING`), `TechnicianRouteView.handleReauthRequired` / `requestOfflineReauth` / `handleInternalLogin`, `OfflineSyncTrayModal.js` (`offline-reauth-owner`) | `TechnicianRouteViewTest.mjs` 17.4–17.6 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.7 | 160/160 · 39/39 ✅ — la cola se conserva, se nombra al titular y una cuenta ajena no puede asumirla |
+| **06.4** Volcado automático por baja de cuenta | `OfflineSyncManager::dumpDeactivatedAccountQueue`, `TechnicianOfflineSyncController::dumpDeactivatedAccount`, `PdoOfflineSyncMutationRepository::recordDeactivatedAccountDumpBatch` | `OfflineSyncServiceTest.php` 5.x · `OfflinePwaSyncApiTest.php` 7.1–7.3 | 41/41 · 30/30 ✅ — `clear_local_storage = true` y `DEACTIVATED_ACCOUNT_DUMP` |
+| **06.5** Limpieza de la copia local al salir sin pendientes | `AppNavbar::handleLogout` (`clearTechnician`), `OfflineStorage::clearTechnician` | `OfflineStorageAndSyncManagerTest.mjs` 4.2, 7.4–7.5 | 58/58 ✅ |
 
 ---
 
@@ -71,8 +71,8 @@
 | RNF | Artefacto | Test / evidencia | Resultado medido |
 |---|---|---|---|
 | **RNF-01** Carga sin red < 2 s y encolado local < 150 ms | `sw.js` (precache del shell, raíz excluida), `OfflineStorage` (`IndexedDB`/respaldo en memoria), `TechnicianRouteView` (hidratación local) | `OfflinePwaAssetsAndUiGuardTest.mjs` 2.1–2.12 · `OfflineStorageAndSyncManagerTest.mjs` · **acta reproducible [`docs/verificacion_modulo_24_rnf01_rnf04.md`](../../docs/verificacion_modulo_24_rnf01_rnf04.md) §6** | ✅ **Medido en Chromium real**: apertura sin red 157,4 ms de mediana (5 recargas, `transferSize = 0`, servidor detenido) y encolado local 5,85 ms de mediana / 7,6 ms p95 (10 acciones, `IndexedDB` incluido). Ambos por debajo de 2.000 ms y 150 ms |
-| **RNF-02** Cero dependencias externas (Art. IV.3) | `public/sw.js`, `OfflineStorage.js`, `OfflineSyncManager.js`, `OfflineSyncTrayModal.js`; sin `package.json`/Composer en el frontend | `RefundsModuleClosureTest.php` 1.9 · `OfflinePwaAssetsAndUiGuardTest.mjs` | ✅ 60/60 · 34/34 — `src/` solo importa el espacio propio y built-ins; el DTO evita `stdClass` |
-| **RNF-03** Sistema de diseño (`docs/design.md`) | `OfflineSyncTrayModal.js`, `TechnicianRouteView.js`, `TechnicianPreventiveRouteTab.js` (avisos de bloqueo), `public/assets/css/design-tokens.css` | `DesignTokenDebtRatchetTest.mjs` · `OfflinePwaAssetsAndUiGuardTest.mjs` 4.1–4.4 | ✅ 3/3 (techo 2.268, contador 2.268) · 34/34 — cero hexadecimales nuevos, 44 px, radios 4/8 px y borde hairline |
+| **RNF-02** Cero dependencias externas (Art. IV.3) | `public/sw.js`, `OfflineStorage.js`, `OfflineSyncManager.js`, `OfflineSyncTrayModal.js`; sin `package.json`/Composer en el frontend | `RefundsModuleClosureTest.php` 1.9 · `OfflinePwaAssetsAndUiGuardTest.mjs` | ✅ 60/60 · 39/39 — `src/` solo importa el espacio propio y built-ins; el DTO evita `stdClass` |
+| **RNF-03** Sistema de diseño (`docs/design.md`) | `OfflineSyncTrayModal.js`, `TechnicianRouteView.js`, `TechnicianPreventiveRouteTab.js` (avisos de bloqueo), `public/assets/css/design-tokens.css` | `DesignTokenDebtRatchetTest.mjs` · `OfflinePwaAssetsAndUiGuardTest.mjs` 4.1–4.4 | ✅ 3/3 (techo 2.268, contador 2.268) · 39/39 — cero hexadecimales nuevos, 44 px, radios 4/8 px y borde hairline |
 | **RNF-04** Dualidad lingüística | Literales de UI, mensajes de `OFFLINE_MESSAGES`, avisos de bloqueo en vivo, notas de volcado y comentarios de código | `OfflineStorageAndSyncManagerTest.mjs` (mensajes de precinto, cuota y catálogo) · `TechnicianRouteViewTest.mjs` 17.x · `TechnicianPreventiveRouteTabTest.mjs` 2.5 · `TechnicianVanStockPanelTest.mjs` 3.5 · **acta §5** | ✅ mensajes en castellano neutro; identificadores y códigos en inglés |
 
 ---
@@ -81,15 +81,15 @@
 
 | Elemento | Escenario | Artefacto / Test | Resultado |
 |---|---|---|---|
-| **D1** Frontera de operaciones | 9 operaciones encolables; login, turno, relevo, carga, reclamo libre y oportunistas fuera de ruta exigen red | `OFFLINE_OPERATIONS` · `OfflineStorageAndSyncManagerTest.mjs` 5.4, 8.4–8.6 · `TechnicianRouteView.guardOnlineOnly` · bloqueo duro de `claimOrder` y `confirmActiveOrder` (`TechnicianPreventiveRouteTabTest.mjs` 2.4–2.5, `TechnicianVanStockPanelTest.mjs` 3.4–3.6) | ✅ |
+| **D1** Frontera de operaciones | 9 operaciones encolables; login, turno, relevo, carga, reclamo libre y oportunistas fuera de ruta exigen red | `OFFLINE_OPERATIONS` · `OfflineStorageAndSyncManagerTest.mjs` 5.4, 8.4–8.6 · `TechnicianRouteView.guardOnlineOnly` · `TechnicianRouteViewTest.mjs` **18.1–18.5** · bloqueo duro de `claimOrder` y `confirmActiveOrder` (`TechnicianPreventiveRouteTabTest.mjs` 2.4–2.5, `TechnicianVanStockPanelTest.mjs` 3.4–3.6) | ✅ |
 | **D2** Conflictos sin pérdida y doble sello | 409 conserva la operación, aísla la parada y permite volcar; auditoría con `client_occurred_at`, `effective_occurred_at` y `synced_at` | `OfflineStorageAndSyncManagerTest.mjs` 6.1–6.9 · `OfflinePwaSyncApiTest.php` 2.1–3.2, 6.1–6.7 · `OfflineSyncServiceTest.php` 6.1–6.5 | ✅ |
 | **D3** Cuota de evidencias | 5 fotos / 25 MB; firma PNG exenta; formatos seguros y 5 MB por archivo | `OfflineStorageAndSyncManagerTest.mjs` 2.1–2.11 | ✅ |
 | **D4** Protección de sesión | Logout bloqueado con cola; re-autenticación del mismo titular; limpieza al salir vacío | `OfflineStorageAndSyncManagerTest.mjs` 7.1–7.5 · `TechnicianRouteViewTest.mjs` 17.4–17.6 · `OfflineSyncTrayModal.js` | ✅ |
 | **D5** Encadenamiento y stock provisional | Inicio → comentario → resolución; estado local y descuento/reversión de furgoneta | `OfflineStorageAndSyncManagerTest.mjs` 3.1–3.5, 6.3 | ✅ |
 | **D6** Vigencia 4 h / 12 h | Aviso ámbar y solo lectura, conservando la cola ya encolada | `OfflineStorageAndSyncManagerTest.mjs` 1.1–1.7 | ✅ |
 | **QA 1** Precinto y no descarte | Casilla obligatoria en perecederos; botón único de volcado; sin vía de borrado | `OfflineStorageAndSyncManagerTest.mjs` 5.1–5.5, 6.10–6.12 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.1–3.5 | ✅ |
-| **QA 2** Canceladas/cerradas, preventivas y reintegro | Excepción de auditoría a 48 h, notas en orden preventiva y colisión parcial | `OfflineSyncServiceTest.php` 2.x, 3.x · `OfflinePwaSyncApiTest.php` 4.1–4.2, 6.1–6.5 | ✅ |
-| **QA 3** Firma exenta y comentarios independientes | La firma no ocupa cupo; un comentario fallido no bloquea la transición posterior | `OfflineStorageAndSyncManagerTest.mjs` 2.11, 6.3 | ✅ |
+| **QA 2** Canceladas/cerradas, preventivas y reintegro | Excepción de auditoría a 48 h, notas en orden preventiva y colisión parcial | `OfflineSyncServiceTest.php` 2.x, 4.x · `OfflinePwaSyncApiTest.php` 4.1–4.2, 6.1–6.5 | ✅ |
+| **QA 3** Firma exenta y comentarios independientes | La firma no ocupa cupo; un comentario fallido no bloquea la transición posterior | `OfflineStorageAndSyncManagerTest.mjs` 2.11, 6.3, **10.1–10.3** | ✅ |
 | **QA 4** Δt, reclamo en vivo y Albarán diferido | Δt exacto con reloj desajustado; reanudación como ancla; operaciones libres bloqueadas; aviso de albarán | `OfflineSyncServiceTest.php` 6.1–6.5 · `OfflineSyncClockAndQuotaTest.php` 2.1–2.6 · `OfflinePwaSyncApiTest.php` 2.1–2.6 · `TechnicianPreventiveRouteTabTest.mjs` 2.4–2.5 · `TechnicianVanStockPanelTest.mjs` 3.4–3.6 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.7 | ✅ |
 | **QA 5** Turno y baja de cuenta | Sincronización previa al turno; volcado automático y limpieza del dispositivo | `TechnicianRouteViewTest.mjs` 17.1–17.3 · `OfflinePwaSyncApiTest.php` 7.1–7.3 | ✅ |
 
@@ -99,7 +99,7 @@
 
 | Caso | Cobertura | Resultado |
 |---|---|---|
-| **§6.1** Cadena cuya primera transición falla frente a comentario intermedio fallido | `OfflineStorageAndSyncManagerTest.mjs` 6.1–6.6 | ✅ |
+| **§6.1** Cadena cuya primera transición falla frente a comentario intermedio fallido | `OfflineStorageAndSyncManagerTest.mjs` 6.1–6.6, 10.1–10.3 | ✅ |
 | **§6.2** Corte de señal en mitad de la sincronización e idempotencia del reintento | `OfflinePwaSyncApiTest.php` 3.1–3.2 · `OfflineSyncServiceTest.php` | ✅ |
 | **§6.3** Reloj atrasado 24 h con Δt de 35/25 min | `OfflineSyncClockAndQuotaTest.php` 2.1–2.6 · `OfflinePwaSyncApiTest.php` 2.5 | ✅ Δt exacto |
 | **§6.4** Reintegro ya regularizado por Coordinación | `OfflineSyncServiceTest.php` · `OfflinePwaSyncApiTest.php` 4.1–4.2 | ✅ |
@@ -111,14 +111,14 @@
 
 | DoD | Evidencia | Estado |
 |---|---|---|
-| **1.** Instalación y carga de la interfaz sin red | `OfflinePwaAssetsAndUiGuardTest.mjs` 1.1–2.12 · acta §3 | ◐ funcional y protocolo reproducible listo; la cifra < 2 s queda pendiente de firmar el acta |
-| **2.** Copia local por técnico, antigüedad visible y bloqueo a las 12 h | `OfflineStorageAndSyncManagerTest.mjs` 1.1–1.7, 4.1–4.2, 8.1–8.3 · `OfflinePwaSyncApiTest.php` 1.1–1.6 | ✅ |
+| **1.** Instalación y carga de la interfaz sin red | `OfflinePwaAssetsAndUiGuardTest.mjs` 1.1–2.12 · **acta §6.1** | ✅ **Medido en Chromium real**: apertura sin red 157,4 ms de mediana (5 recargas, `transferSize = 0`, servidor detenido), por debajo de 2.000 ms |
+| **2.** Copia local por técnico, antigüedad visible y bloqueo a las 12 h | `OfflineStorageAndSyncManagerTest.mjs` 1.1–1.7, 4.1–4.2, 8.1–8.3 · `OfflinePwaSyncApiTest.php` 1.1–1.8 | ✅ |
 | **3.** Flujo completo sin conexión con precinto y cuota | `OfflineStorageAndSyncManagerTest.mjs` 2.x, 3.x, 5.x · `OfflinePwaSyncApiTest.php` 2.x | ✅ |
-| **4.** Operaciones online-only y Albarán A4 diferido | `TechnicianRouteView.guardOnlineOnly`, `ensureOfflineQueueReadyForShift` · `TechnicianPreventiveRouteTabTest.mjs` 2.4–2.5 · `TechnicianVanStockPanelTest.mjs` 3.4–3.6 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.7 | ✅ bloqueo duro en vista y en los dos componentes hijos |
-| **5.** FIFO, idempotencia, Δt y cuarentena | `OfflineSyncClockAndQuotaTest.php` 19/19 · `OfflineSyncServiceTest.php` 41/41 · `OfflinePwaSyncApiTest.php` 26/26 | ✅ |
+| **4.** Operaciones online-only y Albarán A4 diferido | `TechnicianRouteView.guardOnlineOnly`, `ensureOfflineQueueReadyForShift` · `TechnicianRouteViewTest.mjs` **18.1–18.5, 19.1–19.2, 20.1–20.4** · `TechnicianPreventiveRouteTabTest.mjs` 2.4–2.5 · `TechnicianVanStockPanelTest.mjs` 3.4–3.6 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.7 | ✅ bloqueo duro en vista y en los dos componentes hijos; el albarán diferido se enciende con la resolución confirmada |
+| **5.** FIFO, idempotencia, Δt y cuarentena | `OfflineSyncClockAndQuotaTest.php` 19/19 · `OfflineSyncServiceTest.php` 41/41 · `OfflinePwaSyncApiTest.php` 30/30 | ✅ |
 | **6.** Conflictos volcados en 1 toque, sin descarte | `OfflineStorageAndSyncManagerTest.mjs` 6.7–6.12 · `OfflinePwaSyncApiTest.php` 6.1–6.7 | ✅ |
-| **7.** Sesión, turno, re-autenticación y baja | `OfflineStorageAndSyncManagerTest.mjs` 7.1–7.5 · `TechnicianRouteViewTest.mjs` 17.1–17.6 · `OfflinePwaSyncApiTest.php` 7.1–7.3 | ✅ |
-| **8.** Batería global al 100 % | `php tests/run_all.php` + `php tests/run_new_engine.php` | ✅ 367 suites / 13.997 aserciones / 0 fallos (hermética) · canal 27/26 + 1 no ejecutable / 796 aserciones / 0 fallos |
+| **7.** Sesión, turno, re-autenticación y baja | `OfflineStorageAndSyncManagerTest.mjs` 7.1–7.5 · `TechnicianRouteViewTest.mjs` 17.1–17.6, 18.1–18.5 · `OfflinePwaSyncApiTest.php` 7.1–7.3 | ✅ |
+| **8.** Batería global al 100 % | `php tests/run_all.php` + `php tests/run_new_engine.php` | ✅ 367 suites / 14.018 aserciones / 0 fallos (hermética) · canal 27/26 + 1 no ejecutable / 800 aserciones / 0 fallos |
 
 ---
 
@@ -130,12 +130,12 @@
 |---|---:|
 | `OfflineSyncClockAndQuotaTest.php` | 19/19 |
 | `OfflineSyncServiceTest.php` | 41/41 |
-| `OfflineStorageAndSyncManagerTest.mjs` | 53/53 |
-| `OfflinePwaAssetsAndUiGuardTest.mjs` | 34/34 |
-| `TechnicianRouteViewTest.mjs` | 149/149 |
+| `OfflineStorageAndSyncManagerTest.mjs` | 58/58 |
+| `OfflinePwaAssetsAndUiGuardTest.mjs` | 39/39 |
+| `TechnicianRouteViewTest.mjs` | 160/160 |
 | `TechnicianPreventiveRouteTabTest.mjs` | 22/22 |
 | `TechnicianVanStockPanelTest.mjs` | 26/26 |
-| `OfflinePwaSyncApiTest.php` (canal `new_engine`) | 26/26 |
+| `OfflinePwaSyncApiTest.php` (canal `new_engine`) | 30/30 |
 | `PostgresOfflineSyncSchemaTest.php` (canal `new_engine`) | 22/22 |
 | `PostgresSchemaTest.php` (canal `new_engine`) | 107/107 |
 | `SchemaConvergenceParityTest.php` (canal `new_engine`) | 18/18 |
@@ -144,7 +144,7 @@
 **Limitaciones declaradas (no se presentan como verdes):**
 
 1. **Carga < 2 s y encolado < 150 ms (RNF-01):** medidos en navegador real según el acta §6: 157,4 ms de mediana para la apertura sin red (5 recargas con el servidor detenido y `transferSize = 0`) y 5,85 ms de mediana / 7,6 ms p95 para el encolado local (10 acciones). La cifra procede de una única máquina (Chromium/Windows, 390 × 844) y no se extrapola a hardware móvil de gama baja; la guarda automática certifica además el shell cerrado y que la API nunca se cachea.
-2. **Corrida global:** `php tests/run_all.php` cierra con 367 suites / 13.997 aserciones, 0 fallos, cifras del README coherentes y código de salida 0. `php tests/run_new_engine.php` cierra el canal con 27 suites evaluadas, 26 en verde, 1 no ejecutable (`PoolerLatencyMeasurementTest` por falta de TLS remoto), 796 aserciones y 0 fallos.
+2. **Corrida global:** `php tests/run_all.php` cierra con 367 suites / 14.018 aserciones, 0 fallos, cifras del README coherentes y código de salida 0. `php tests/run_new_engine.php` cierra el canal con 27 suites evaluadas, 26 en verde, 1 no ejecutable (`PoolerLatencyMeasurementTest` por falta de TLS remoto), 800 aserciones y 0 fallos.
 3. **Doble sello temporal:** la suite de integración verifica `effective_occurred_at`, `client_occurred_at` y `synced_at`; la visualización del sello dual en el visor de auditoría no forma parte de este módulo.
 
 ---

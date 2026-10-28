@@ -4,6 +4,24 @@ Registro de los hitos de producto y de los módulos cerrados bajo el ciclo SDD.
 El proyecto no publica versiones semánticas independientes: cada entrada corresponde
 a un módulo funcional certificado por la batería global.
 
+## [Módulo 24] · Cierre de cobertura del Modo Sin Conexión PWA — 2026-10-28
+
+**Estado:** Cerrado · cobertura EARS completa y documentación alineada con el código.
+
+### Añadido
+
+- Certificación directa del indicador permanente de antigüedad y conectividad (`ageLabel` / `connectionLabel`) del Módulo 24.
+- Certificación del orden FIFO de la bandeja y del rechazo 4xx de un comentario intermedio sin bloquear la resolución posterior.
+- Certificación de las guardas online-only de login, turno, relevo y avería oportunista, del albarán A4 diferido y de la insignia local de parada.
+- Contenido real del paquete `/bootstrap`: ruta, preventiva, catálogo por modelo y saldo de furgoneta, no solo la presencia de las claves.
+
+### Corregido
+
+- Contratos del Service Worker: `CACHE_NAME` v2, ausencia de `/` en el App Shell y caída explícita a `/index.html` en navegación sin red.
+- Matriz de trazabilidad del Módulo 24: referencias de pruebas, recuentos y estado del DoD 1 alineados con la corrida real.
+
+---
+
 ## [Módulo 23] · Órdenes de Carga de Furgoneta y Cruce de Stock en Triaje — 2026-10-26
 
 **Estado:** Cerrado · especificación funcional, contratos técnicos, implementación y certificación en verde.
