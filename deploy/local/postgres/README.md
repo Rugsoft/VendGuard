@@ -311,9 +311,12 @@ El recuento no se mantiene a mano: `run_new_engine.php` descubre las suites por 
 `tests/unit/NewEngineChannelDocumentationTest.php` falla si esta línea deja de coincidir con
 lo descubierto. El comando exige `PG_TEST_DSN` y un motor alcanzable: sin uno de los dos sale
 con código `2` y lo dice. Cada suite sigue siendo invocable por separado para depurar, pero
-la certificación del canal se lee en el resumen agregado. `PoolerLatencyMeasurementTest` sale
-con código `2` cuando falta el contrato remoto (`DB_SSL_ROOT_CERT`): el runner la lista como **no ejecutable**
-con su motivo, sin contarla como fallo y sin omitirla en silencio.
+la certificación del canal se lee en el resumen agregado. `PoolerLatencyMeasurementTest` declara su
+**contrato de entorno propio** (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`) y el
+runner lo resuelve solo para ese proceso hijo: inyecta `DATABASE_URL` y `DB_SSL_ROOT_CERT` sin publicar
+sus valores, de modo que la medición remota y el banco del arnés conviven en la misma corrida. Si el
+fichero falta, la suite sale con código `2` y el runner la lista como **no ejecutable** con su motivo,
+sin contarla como fallo y sin omitirla en silencio.
 
 Sin `PG_TEST_DSN` —o con el motor inalcanzable— las suites de la categoría se declaran **no
 ejecutables** con código de salida `2` en lugar de omitirse en silencio. El **informe** agregado

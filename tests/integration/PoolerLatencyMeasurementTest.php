@@ -100,9 +100,15 @@ declare(strict_types=1);
  *   destinatario (plan §8). Sin él, la suite **se declara no ejecutable con código 2** en lugar de
  *   omitirse en silencio, igual que las otras suites del canal.
  *
- *       source deploy/local/supabase/.env.local
- *       php deploy/local/postgres/verify.php          # sonda local (canal ordinario, opcional)
- *       php tests/integration/PoolerLatencyMeasurementTest.php
+ *   Ese contrato es el único destinatario distinto del banco del arnés, así que la suite lo
+ *   **declara** (`VENDGUARD_TEST_ENV_CONTRACT`) y `tests/run_new_engine.php` lo resuelve solo para
+ *   este proceso hijo: el canal entero mide contra el banco local y esta medición contra el
+ *   agrupador remoto, en una misma corrida y sin que ningún valor llegue a la salida. El fichero
+ *   no se versiona; si falta, la puerta de abajo sigue fallando en cerrado.
+ *
+ *       source deploy/local/postgres/.env.local
+ *       php tests/run_new_engine.php                    # el canal completo, 27/27
+ *       php tests/integration/PoolerLatencyMeasurementTest.php   # sola, con el contrato ya cargado
  *
  * Dogma Vanilla: PHP 8.2+ puro, PDO nativo, cero dependencias externas.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
@@ -122,6 +128,15 @@ use VendGuard\Presentation\Routing\AppRouter;
 
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
+
+/**
+ * Contrato propio de la suite (ignorado por git).
+ *
+ * `tests/run_new_engine.php` lo resuelve para este proceso y solo para este: inyecta
+ * `DATABASE_URL` y `DB_SSL_ROOT_CERT` de modo que la medición mide el enlace remoto mientras
+ * el resto del canal sigue midiendo el banco del arnés. No se imprime ningún valor.
+ */
+const VENDGUARD_TEST_ENV_CONTRACT = 'deploy/local/supabase/.env.local';
 
 /** Muestras mínimas por operación representativa (enunciado de T-HYBRID-27). */
 const SAMPLE_TARGET = 20;
@@ -383,17 +398,41 @@ $authService  = new AuthService($locationRepo, $userRepo);
  * @var list<array{machine_id:int, machine_code:string, site_code:string, token:string}>
  */
 $slots = [];
+
+// Una máquina con un ticket no cerrado ni cancelado no admite un alta nueva:
+// el repositorio considera activo todo `status NOT IN ('CLOSED','CANCELLED')`,
+// incluido un `RESOLVED` pendiente de cierre. Intentarlo abortaría la ronda en
+// la primera coincidencia. Se excluyen del parque de medición sin escribir ni
+// borrar nada; la sonda sigue exigiendo 20 muestras y no relaja ninguna aserción.
+$blockedMachineIds = array_map(
+    static fn (mixed $id): int => (int)$id,
+    $pdo->query(
+        "SELECT DISTINCT i.machine_id
+           FROM incidents i
+          WHERE i.deleted_at IS NULL
+            AND i.status NOT IN ('CLOSED', 'CANCELLED')"
+    )->fetchAll(PDO::FETCH_COLUMN)
+);
+$blockedMachineMap = array_fill_keys($blockedMachineIds, true);
+
 foreach ($locationRepo->findAllActive() as $location) {
     $token = $authService->generateSiteToken($location);
     foreach ($machineRepo->findActiveByLocationId($location->getId()) as $machine) {
+        $machineId = (int)$machine->getId();
+        if (isset($blockedMachineMap[$machineId])) {
+            continue;
+        }
+
         $slots[] = [
-            'machine_id'   => (int)$machine->getId(),
+            'machine_id'   => $machineId,
             'machine_code' => (string)$machine->getCode(),
             'site_code'    => (string)$location->getSiteCode(),
             'token'        => $token,
         ];
     }
 }
+
+echo '  · Máquinas excluidas por avería viva o garantía de 48 h: ' . count($blockedMachineIds) . "\n";
 
 $coordinator = $userRepo->findByEmail('coordinacion@vendguard.internal');
 $technician  = $userRepo->findByEmail('jordi.ruta@vendguard.internal');
@@ -475,6 +514,13 @@ echo sprintf(
 echo "\n--- Grupo 4: medición por el camino real (" . SAMPLE_TARGET . " muestras por operación) ---\n";
 
 $before  = $tableCounts($pdo);
+
+// Frontera del barrido sanitario programado: el motor remoto tiene un proceso
+// externo que inserta una pasada cada cuarto de hora. Su fila no es residuo de
+// esta sonda, y el recuento exacto por sí solo no puede distinguirlo. Se guarda
+// el máximo para atribuir después cualquier alta a otra transacción (xmin).
+$sweepMaxBefore = (int)$pdo->query('SELECT COALESCE(MAX(id), 0) FROM sanitary_sweep_passes')->fetchColumn();
+
 $samples = array_fill_keys(MEASURED_OPERATIONS, []);
 $live    = [];          // ranura => expediente vivo de una ronda anterior
 $completedSamples = 0;
@@ -483,6 +529,11 @@ $abortReason = null;
 $insideLinkSamples = [];
 
 $pdo->beginTransaction();
+
+// Identidad de la transacción de la medición: después de la reversión ninguna
+// fila de las 20 tablas puede llevar este xid. Es la prueba directa de que la
+// sonda no dejó nada, incluso si un proceso externo escribió mientras corría.
+$measurementXid = (string)$pdo->query('SELECT txid_current()')->fetchColumn();
 
 try {
     // Ida y vuelta medida **dentro de la misma transacción** que las operaciones: es la forma de
@@ -758,17 +809,68 @@ $assert(
 // =========================================================================
 echo "\n--- Grupo 6: sin residuo — las 20 tablas quedan como estaban ---\n";
 
+// Atribución de las filas nuevas del barrido: son externas si ninguna lleva el
+// xid de la sonda. Una pasada legítima del proceso programado no invalida la
+// medición; una fila propia sí, y la detecta también la comprobación 6.4.
+$newSweepRows = 0;
+$newSweepOwned = 0;
+if (($after['sanitary_sweep_passes'] ?? 0) !== ($before['sanitary_sweep_passes'] ?? 0)) {
+    $newSweepRows = (int)$pdo->query('SELECT COUNT(*) FROM sanitary_sweep_passes WHERE id > ' . $sweepMaxBefore)->fetchColumn();
+    $sweepOwnedStmt = $pdo->prepare('SELECT COUNT(*) FROM sanitary_sweep_passes WHERE id > :max_id AND xmin::text = :xid');
+    $sweepOwnedStmt->bindValue(':max_id', $sweepMaxBefore, PDO::PARAM_INT);
+    $sweepOwnedStmt->bindValue(':xid', $measurementXid, PDO::PARAM_STR);
+    $sweepOwnedStmt->execute();
+    $newSweepOwned = (int)$sweepOwnedStmt->fetchColumn();
+}
+
+$sweepIncreaseIsExternal = $newSweepRows > 0 && $newSweepOwned === 0;
+
 $changedTables = [];
 foreach (CONTRACT_TABLES as $table) {
-    if (($before[$table] ?? null) !== ($after[$table] ?? null)) {
-        $changedTables[] = sprintf('%s (%d → %d)', $table, $before[$table] ?? -1, $after[$table] ?? -1);
+    if (($before[$table] ?? null) === ($after[$table] ?? null)) {
+        continue;
     }
+
+    if ($table === 'sanitary_sweep_passes' && $sweepIncreaseIsExternal) {
+        continue;
+    }
+
+    $changedTables[] = sprintf('%s (%d → %d)', $table, $before[$table] ?? -1, $after[$table] ?? -1);
 }
 
 $assert(
     '6.1 Las 20 tablas del contrato conservan su recuento exacto tras la reversión',
     $changedTables === [],
     'Tablas con residuo: ' . implode(', ', $changedTables)
+);
+
+if ($sweepIncreaseIsExternal) {
+    echo "  · El barrido sanitario programado insertó {$newSweepRows} pasada(s) durante la corrida:\n";
+    echo "    se atribuyen a otra transacción (xmin distinto) y no cuentan como residuo.\n";
+}
+
+$residueByXid = [];
+$residueParts = array_map(
+    static fn (string $table): string => sprintf(
+        "SELECT '%s' AS t, COUNT(*) AS touched FROM %s WHERE xmin::text = :xid OR xmax::text = :xid",
+        $table,
+        $table
+    ),
+    CONTRACT_TABLES
+);
+$residueStmt = $pdo->prepare(implode(' UNION ALL ', $residueParts));
+$residueStmt->bindValue(':xid', $measurementXid, PDO::PARAM_STR);
+$residueStmt->execute();
+foreach ($residueStmt->fetchAll(PDO::FETCH_ASSOC) as $residueRow) {
+    if ((int)$residueRow['touched'] > 0) {
+        $residueByXid[] = $residueRow['t'] . ' (' . (int)$residueRow['touched'] . ')';
+    }
+}
+
+$assert(
+    '6.4 Ninguna fila de las 20 tablas lleva el xid de la transacción de la sonda',
+    $residueByXid === [],
+    'Tablas con filas propias: ' . implode(', ', $residueByXid) . ' (xid ' . $measurementXid . ')'
 );
 
 $assert(

@@ -4,7 +4,7 @@
 
 **Esquema de referencia:** `RF-01` instalabilidad y carga sin red · `RF-02` copia local y vigencia · `RF-03` encolado, precinto y cuota · `RF-04` sincronización, idempotencia y Δt · `RF-05` conflictos y cuarentena · `RF-06` sesión, turno y baja de cuenta.
 
-**Corrida de certificación:** 28 de octubre de 2026 (PostgreSQL local `vendguard_battery`; canal `new_engine` ejecutado con `PG_TEST_DSN`: **27 suites evaluadas, 26 en verde, 1 no ejecutable por falta de TLS remoto, 800 aserciones, 0 fallos**).
+**Corrida de certificación:** 28 de octubre de 2026 (PostgreSQL local `vendguard_battery`; canal `new_engine` ejecutado con `PG_TEST_DSN`: **27 suites evaluadas, 27 en verde, 0 no ejecutables, 830 aserciones, 0 fallos**, incluida la medición remota con su contrato TLS propio).
 
 ---
 
@@ -118,7 +118,7 @@
 | **5.** FIFO, idempotencia, Δt y cuarentena | `OfflineSyncClockAndQuotaTest.php` 19/19 · `OfflineSyncServiceTest.php` 41/41 · `OfflinePwaSyncApiTest.php` 30/30 | ✅ |
 | **6.** Conflictos volcados en 1 toque, sin descarte | `OfflineStorageAndSyncManagerTest.mjs` 6.7–6.12 · `OfflinePwaSyncApiTest.php` 6.1–6.7 | ✅ |
 | **7.** Sesión, turno, re-autenticación y baja | `OfflineStorageAndSyncManagerTest.mjs` 7.1–7.5 · `TechnicianRouteViewTest.mjs` 17.1–17.6, 18.1–18.5, 21.1–21.3 · `OfflinePwaSyncApiTest.php` 7.1–7.3 | ✅ |
-| **8.** Batería global al 100 % | `php tests/run_all.php` + `php tests/run_new_engine.php` | ✅ 367 suites / 14.021 aserciones / 0 fallos (hermética) · canal 27/26 + 1 no ejecutable / 800 aserciones / 0 fallos |
+| **8.** Batería global al 100 % | `php tests/run_all.php` + `php tests/run_new_engine.php` | ✅ 367 suites / 14.021 aserciones / 0 fallos (hermética) · canal 27/27 / 830 aserciones / 0 fallos |
 
 ---
 
@@ -144,7 +144,7 @@
 **Limitaciones declaradas (no se presentan como verdes):**
 
 1. **Carga < 2 s y encolado < 150 ms (RNF-01):** medidos en navegador real según el acta §6: 157,4 ms de mediana para la apertura sin red (5 recargas con el servidor detenido y `transferSize = 0`) y 5,85 ms de mediana / 7,6 ms p95 para el encolado local (10 acciones). La cifra procede de una única máquina (Chromium/Windows, 390 × 844) y no se extrapola a hardware móvil de gama baja; la guarda automática certifica además el shell cerrado y que la API nunca se cachea.
-2. **Corrida global:** `php tests/run_all.php` cierra con 367 suites / 14.021 aserciones, 0 fallos, cifras del README coherentes y código de salida 0. `php tests/run_new_engine.php` cierra el canal con 27 suites evaluadas, 26 en verde, 1 no ejecutable (`PoolerLatencyMeasurementTest` por falta de TLS remoto), 800 aserciones y 0 fallos.
+2. **Corrida global:** `php tests/run_all.php` cierra con 367 suites / 14.021 aserciones, 0 fallos, cifras del README coherentes y código de salida 0. `php tests/run_new_engine.php` cierra el canal con 27 suites evaluadas, 27 en verde, 0 no ejecutables, 830 aserciones y 0 fallos. `PoolerLatencyMeasurementTest` aporta 30 de esas aserciones y resuelve su contrato TLS propio (`deploy/local/supabase/.env.local`) solo para su proceso hijo, sin que el resto del canal herede el motor remoto.
 3. **Doble sello temporal:** la suite de integración verifica `effective_occurred_at`, `client_occurred_at` y `synced_at`; la visualización del sello dual en el visor de auditoría no forma parte de este módulo.
 
 ---

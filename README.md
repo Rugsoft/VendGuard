@@ -509,22 +509,21 @@ Las suites que declaran `VENDGUARD_TEST_CATEGORY = 'new_engine'` exigen un Postg
 
 ```bash
 source deploy/local/postgres/.env.local     # motor local; .env.docker-tls para el TLS
-php tests/run_new_engine.php                # las 27 suites del canal (26 en verde, 1 no ejecutable sin TLS remoto)
+php tests/run_new_engine.php                # las 27 suites del canal (27 en verde con el contrato remoto)
 php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
 ```
 
-El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o con el motor inalcanzable, sale con código `2` y un mensaje explícito en lugar de omitir suites en silencio. Cada suite corre en su propio proceso y el resumen publica verdes, aserciones y fallos. Una suite que declara `exit 2` —la medición de latencia contra el motor remoto (`PoolerLatencyMeasurementTest.php`), que exige `DB_SSL_ROOT_CERT` y otra infraestructura— se lista como **no ejecutable**, con su motivo, y no se cuenta como fallo ni desaparece del informe.
+El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o con el motor inalcanzable, sale con código `2` y un mensaje explícito en lugar de omitir suites en silencio. Cada suite corre en su propio proceso y el resumen publica verdes, aserciones y fallos. La medición de latencia contra el motor remoto (`PoolerLatencyMeasurementTest.php`) declara su **contrato de entorno propio** (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`, ignorado por git); el canal lo resuelve solo para ese proceso hijo e inyecta `DATABASE_URL` y `DB_SSL_ROOT_CERT` sin publicar sus valores, mientras el resto de suites sigue midiendo el banco del arnés. Si el fichero falta, la suite declara `exit 2` y el informe la lista como **no ejecutable** con su motivo, sin contarla como fallo ni omitirla.
 
 ```text
 ======================================================================
  RESUMEN DEL CANAL new_engine
  Suites evaluadas    : 27
- Suites en verde     : 26
- No ejecutables      : 1
- Aserciones          : 800
+ Suites en verde     : 27
+ No ejecutables      : 0
+ Aserciones          : 830
  Fallos              : 0
- - PoolerLatencyMeasurementTest.php: [CATEGORÍA NO EJECUTABLE] Falta DB_SSL_ROOT_CERT: la identidad del servidor remoto no se puede verificar (RNF-05).
- RESULTADO: CANAL CERRADO · 1 suite(s) declararon otro contrato y se listan arriba (no se omiten en silencio).
+ RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
 ======================================================================
 ```
 
