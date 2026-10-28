@@ -37,23 +37,13 @@ declare(strict_types=1);
 $projectRoot = dirname(__DIR__);
 $integrationDir = __DIR__ . '/integration';
 
+// La misma clase que usa la guarda documental: el runner y el README no pueden
+// contar cosas distintas si comparten el descubrimiento.
+require_once __DIR__ . '/Support/NewEngineChannel.php';
+
 const EXIT_OK = 0;
 const EXIT_FAILURES = 1;
 const EXIT_NOT_EXECUTABLE = 2;
-
-/**
- * Marca de categoría declarada por una suite, o null si no declara ninguna.
- */
-function newEngineCategory(string $filePath): ?string
-{
-    $source = (string)file_get_contents($filePath);
-
-    if (preg_match('/const\s+VENDGUARD_TEST_CATEGORY\s*=\s*\'([a-z0-9_]+)\';/i', $source, $match) !== 1) {
-        return null;
-    }
-
-    return $match[1];
-}
 
 /**
  * Aserciones declaradas por una suite en su resumen final.
@@ -157,21 +147,14 @@ if ($driver !== 'pgsql') {
 // contrato y, si falta, la suite lo declara en lugar de medir a ciegas.
 
 $filter = trim((string)($argv[1] ?? ''));
-$suites = [];
-foreach (glob($integrationDir . '/*.php') ?: [] as $filePath) {
-    if (newEngineCategory($filePath) !== 'new_engine') {
-        continue;
+$suites = NewEngineChannel::discover($integrationDir);
+if ($filter !== '') {
+    foreach (array_keys($suites) as $name) {
+        if (stripos($name, $filter) === false) {
+            unset($suites[$name]);
+        }
     }
-
-    $name = basename($filePath);
-    if ($filter !== '' && stripos($name, $filter) === false) {
-        continue;
-    }
-
-    $suites[$name] = $filePath;
 }
-
-ksort($suites);
 
 if ($suites === []) {
     fwrite(STDERR, "\n[CANAL NO EJECUTABLE] Ninguna suite del canal «new_engine» casa con el filtro"
