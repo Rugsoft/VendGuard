@@ -206,7 +206,7 @@
     3. Añadir en `api.js` los métodos `getOfflineBootstrap()`, `dumpOfflineConflict()` y `dumpDeactivatedAccountOfflineQueue()`, y en `AuditActionLabels.js` las etiquetas de `OFFLINE_CONFLICT_DUMPED` y `OFFLINE_DEACTIVATED_ACCOUNT_DUMP`.
   * **Hecho cuando:** Los módulos ES importan limpiamente en Node sin errores de sintaxis.
 
-- [ ] **T-OFFLINE-12 · Componente `OfflineSyncTrayModal.js` e integración en `TechnicianRouteView.js` y `AppNavbar.js`**
+- [x] **T-OFFLINE-12 · Componente `OfflineSyncTrayModal.js` e integración en `TechnicianRouteView.js` y `AppNavbar.js`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-OFFLINE-11`
   * **Ficheros a crear o modificar:**

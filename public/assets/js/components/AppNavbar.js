@@ -6,9 +6,15 @@
  * - Contextual session badges (Site code badge for Location Responsible, Role badge for Coordinator/Technician).
  * - Accessible logout action invoking store.clearSession() and emitting 'logout'.
  * - Global network loading indicator bar.
+ * - Guardia de cierre de sesión con la bandeja sin conexión viva (Módulo 24,
+ *   RF-06.1 y RF-06.5, D4): con acciones pendientes o en conflicto el botón
+ *   bloquea la salida y muestra el recuento; con la bandeja vacía limpia la
+ *   copia local del técnico para dejar el dispositivo listo para otro operario.
  */
 
 import { store } from '../store.js';
+import { OfflineStorage } from '../utils/OfflineStorage.js';
+import { OFFLINE_QUEUE_EVENT } from '../utils/OfflineSyncManager.js';
 
 export const AppNavbar = {
   name: 'AppNavbar',
@@ -21,7 +27,32 @@ export const AppNavbar = {
       default: 'VendGuard'
     }
   },
-  emits: ['logout', 'navigate-home'],
+  emits: ['logout', 'navigate-home', 'logout-blocked'],
+  data() {
+    return {
+      /** Resumen de la cola del técnico para la guardia de salida (`EARS 06.1`). */
+      offlineQueue: { pending: 0, syncing: 0, conflicts: 0, total: 0 },
+      logoutBlockedMessage: '',
+      /** Adaptador de `IndexedDB`; solo se consulta para la sesión de técnico. */
+      offlineStorage: new OfflineStorage()
+    };
+  },
+  mounted() {
+    this.refreshOfflineQueue();
+
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener(OFFLINE_QUEUE_EVENT, this.handleOfflineQueueEvent);
+      window.addEventListener('online', this.handleOfflineQueueEvent);
+      window.addEventListener('offline', this.handleOfflineQueueEvent);
+    }
+  },
+  beforeUnmount() {
+    if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+      window.removeEventListener(OFFLINE_QUEUE_EVENT, this.handleOfflineQueueEvent);
+      window.removeEventListener('online', this.handleOfflineQueueEvent);
+      window.removeEventListener('offline', this.handleOfflineQueueEvent);
+    }
+  },
   computed: {
     isAuthenticated() {
       return store.isAuthenticated;
@@ -37,6 +68,14 @@ export const AppNavbar = {
     },
     isLoading() {
       return store.state.isLoading;
+    },
+    /** Solo el técnico de campo opera con la bandeja sin conexión (Módulo 24). */
+    isTechnicianSession() {
+      return Boolean(store.state.user && store.state.user.role === 'TECHNICIAN');
+    },
+    /** Operaciones que impiden cerrar sesión: pendientes, en envío o en conflicto. */
+    pendingOfflineCount() {
+      return Math.max(0, Number(this.offlineQueue?.total) || 0);
     },
     roleLabel() {
       if (!this.user?.role) return '';
@@ -60,12 +99,77 @@ export const AppNavbar = {
     }
   },
   methods: {
+    /**
+     * Guardia de salida (Módulo 24, `RF-06.1`, `EARS 06.1`).
+     *
+     * Con trabajo vivo en el dispositivo no se cierra la sesión: se muestra el
+     * recuento y se deja la bandeja accesible. Sin pendientes se limpia la copia
+     * local del técnico —paradas, inventario y cola— antes de salir, para que un
+     * dispositivo compartido no se quede con la ruta del operario anterior
+     * (`EARS 06.5`, Art. V.4).
+     */
     handleLogout() {
+      const total = Math.max(0, Number(this.offlineQueue?.total) || 0);
+
+      if (this.isTechnicianSession && total > 0) {
+        const pending = Math.max(0, Number(this.offlineQueue?.pending) || 0);
+        const conflicts = Math.max(0, Number(this.offlineQueue?.conflicts) || 0);
+        this.logoutBlockedMessage = `No puedes cerrar sesión: ${total} operación(es) sin sincronizar `
+          + `(${pending} pendiente(s), ${conflicts} en conflicto). Sincroniza y vuelca los conflictos `
+          + 'desde tu ruta antes de salir.';
+        this.$emit('logout-blocked', { total, pending, conflicts });
+        return;
+      }
+
+      // Limpieza de la copia local con la bandeja vacía (`EARS 06.5`). Se lanza
+      // sin esperar: cerrar sesión no puede depender de la latencia del disco.
+      try {
+        const technicianId = Number(this.user?.id ?? 0);
+        if (this.offlineStorage && technicianId > 0) {
+          Promise.resolve(this.offlineStorage.clearTechnician(technicianId)).catch(() => {});
+        }
+      } catch (error) {
+        // La sesión se cierra igualmente: el dato local ya no tiene utilidad
+        // para nadie sin la cuenta que lo generó.
+      }
+
       store.clearSession();
       this.$emit('logout');
     },
     handleBrandClick() {
       this.$emit('navigate-home');
+    },
+    /** Relee la cola del técnico autenticado (aislada por `technician_id`). */
+    async refreshOfflineQueue() {
+      if (!this.isTechnicianSession) {
+        this.offlineQueue = { pending: 0, syncing: 0, conflicts: 0, total: 0 };
+        return;
+      }
+
+      const technicianId = Number(this.user?.id ?? 0);
+      if (!(technicianId > 0)) {
+        return;
+      }
+
+      try {
+        const items = await this.offlineStorage.listMutations(technicianId);
+        const count = (status) => items.filter((item) => item?.status === status).length;
+        this.offlineQueue = {
+          pending: count('PENDING'),
+          syncing: count('SYNCING'),
+          conflicts: count('CONFLICT'),
+          total: items.length
+        };
+
+        if (items.length === 0) {
+          this.logoutBlockedMessage = '';
+        }
+      } catch (error) {
+        // Sin `IndexedDB` legible no hay cola demostrable que bloquee la salida.
+      }
+    },
+    handleOfflineQueueEvent() {
+      this.refreshOfflineQueue();
     }
   },
   template: `
@@ -190,7 +294,36 @@ export const AppNavbar = {
               <polyline points="16 17 21 12 16 7"></polyline>
               <line x1="21" y1="12" x2="9" y2="12"></line>
             </svg>
+            <span
+              v-if="isTechnicianSession && pendingOfflineCount > 0"
+              data-testid="navbar-offline-queue-badge"
+              style="display: inline-flex; align-items: center; gap: 4px; background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); border-radius: var(--radius-interactive); padding: 1px 6px; font-family: var(--font-body); font-size: 11px; font-weight: 700;"
+              :title="'Acciones pendientes de sincronizar: ' + pendingOfflineCount"
+            >
+              ⏳ {{ pendingOfflineCount }}
+            </span>
             <span>Salir</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Guardia de cierre de sesión con trabajo vivo en el dispositivo (Módulo 24,
+           RF-06.1 / EARS 06.1): el recuento exacto se anuncia bajo la cabecera. -->
+      <div
+        v-if="logoutBlockedMessage"
+        role="alert"
+        data-testid="navbar-offline-logout-blocked"
+        style="max-width: 1200px; margin: 0 auto; padding: 8px 16px 10px 16px;"
+      >
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); border-radius: var(--radius-interactive); padding: 8px 12px; font-family: var(--font-body); font-size: 12px; line-height: 1.4;">
+          <span>🔒 {{ logoutBlockedMessage }}</span>
+          <button
+            type="button"
+            style="background: none; border: none; color: var(--color-warning-text); font-size: 14px; cursor: pointer;"
+            aria-label="Descartar aviso"
+            @click="logoutBlockedMessage = ''"
+          >
+            ×
           </button>
         </div>
       </div>
