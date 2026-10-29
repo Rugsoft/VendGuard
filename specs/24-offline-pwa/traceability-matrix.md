@@ -133,7 +133,7 @@
 | `OfflineStorageAndSyncManagerTest.mjs` | 86/86 |
 | `OfflineDumpPhotoCleanupTest.php` | 10/10 |
 | `OfflineStorageAtomicEnqueueTest.mjs` | 11/11 |
-| `OfflineStorageSessionPurgeTest.mjs` | 21/21 |
+| `OfflineStorageSessionPurgeTest.mjs` | 24/24 |
 | `OfflinePwaAssetsAndUiGuardTest.mjs` | 39/39 |
 | `TechnicianRouteViewTest.mjs` | 171/171 |
 | `TechnicianPreventiveRouteTabTest.mjs` | 22/22 |
