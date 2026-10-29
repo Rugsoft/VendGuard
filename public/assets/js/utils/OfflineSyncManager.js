@@ -227,9 +227,25 @@ export class OfflineSyncManager {
       return task();
     }
 
+    // `locks.request` adopta la promesa del callback, así que el fallo de la
+    // tarea llega por el mismo `catch` que un cerrojo denegado. Sin esta marca,
+    // el respaldo volvería a ejecutar un envío que ya había empezado —en el
+    // encolado, con una clave de idempotencia nueva— en lugar de propagar el
+    // error original (`R1`).
+    let started = false;
+
     try {
-      return await locks.request(SYNC_LOCK_NAME, { mode: 'exclusive' }, () => task());
+      return await locks.request(SYNC_LOCK_NAME, { mode: 'exclusive' }, () => {
+        started = true;
+
+        return task();
+      });
     } catch (error) {
+      // La tarea ya arrancó bajo el cerrojo: el fallo es suyo y no se reintenta.
+      if (started) {
+        throw error;
+      }
+
       // Un cerrojo que el navegador rechaza no puede impedir trabajar sin red:
       // el mutex local sigue serializando esta pestaña.
       return task();

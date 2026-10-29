@@ -1413,6 +1413,57 @@ assert(
   JSON.stringify(channelBus.posts)
 );
 
+/** Cerrojo que deniega la concesión sin llegar a invocar el callback. */
+const refusingLocks = {
+  request: async () => {
+    throw new DOMException('El cerrojo no está disponible.', 'NotSupportedError');
+  }
+};
+
+const taskFailureLocks = createFakeLocks();
+const taskFailureManager = new OfflineSyncManager({
+  storage: await seedStorage(),
+  client: {},
+  locks: taskFailureLocks.lock,
+  channel: null,
+  now: () => NOW,
+  dispatch: () => {}
+});
+let failingTaskRuns = 0;
+let failingTaskError = null;
+try {
+  await taskFailureManager.withSyncLock(async () => {
+    failingTaskRuns++;
+    throw new Error('fallo de la tarea bajo el cerrojo');
+  });
+} catch (error) {
+  failingTaskError = error;
+}
+assert(
+  '13.8 Un fallo de la tarea bajo el cerrojo se propaga sin volver a ejecutarla',
+  failingTaskRuns === 1 && failingTaskError?.message === 'fallo de la tarea bajo el cerrojo',
+  JSON.stringify({ runs: failingTaskRuns, error: failingTaskError?.message ?? null })
+);
+
+const refusingManager = new OfflineSyncManager({
+  storage: await seedStorage(),
+  client: {},
+  locks: refusingLocks,
+  channel: null,
+  now: () => NOW,
+  dispatch: () => {}
+});
+let refusedTaskRuns = 0;
+const refusedValue = await refusingManager.withSyncLock(async () => {
+  refusedTaskRuns++;
+  return 'sin-cerrojo';
+});
+assert(
+  '13.9 Un cerrojo denegado no impide trabajar: la tarea corre una sola vez',
+  refusedTaskRuns === 1 && refusedValue === 'sin-cerrojo',
+  JSON.stringify({ runs: refusedTaskRuns, value: refusedValue })
+);
+
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VendGuard\Presentation\Controller;
 
 use DomainException;
+use Throwable;
 use VendGuard\Application\Service\OfflineSyncService;
 use VendGuard\Core\Domain\Exception\IncidentNotFoundException;
 use VendGuard\Core\Domain\Exception\InvalidUploadException;
@@ -145,6 +146,13 @@ class TechnicianOfflineSyncController
             }
         }
 
+        // La evidencia sólo se conserva si un registro llega a referenciarla.
+        // Un reintento idempotente devuelve el comentario del ganador, la orden
+        // preventiva no adjunta foto y un rechazo no escribe nada: en los tres
+        // casos el archivo recién subido queda sin dueño y hay que retirarlo
+        // (`R3`), o el dispositivo llenaría el disco con evidencias huérfanas.
+        $consumed = false;
+
         try {
             $result = $this->service()->dumpConflict(
                 $technicianId,
@@ -156,6 +164,9 @@ class TechnicianOfflineSyncController
                 is_array($workSummary) ? $workSummary : [],
                 $photoPath
             );
+
+            $consumed = ($result['idempotent_replay'] ?? false) !== true
+                && ($result['internal_comment_id'] ?? null) !== null;
         } catch (OfflineSyncValidationException $e) {
             return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
         } catch (IncidentNotFoundException $e) {
@@ -176,6 +187,10 @@ class TechnicianOfflineSyncController
             }
 
             return Response::error('DOMAIN_ERROR', $e->getMessage(), 400);
+        } finally {
+            if (!$consumed) {
+                $this->discardPhoto($photoPath);
+            }
         }
 
         return Response::json($result['payload'], $result['http_status']);
@@ -302,6 +317,25 @@ class TechnicianOfflineSyncController
     private function uploader(): LocalFileUploader
     {
         return $this->fileUploader ??= new LocalFileUploader();
+    }
+
+    /**
+     * Retira la evidencia que ningún registro llegó a referenciar (`R3`).
+     *
+     * Un archivo huérfano no puede tumbar la respuesta del contrato: si el
+     * borrado falla, el volcado ya se resolvió y se devuelve igualmente.
+     */
+    private function discardPhoto(?string $photoPath): void
+    {
+        if ($photoPath === null || trim($photoPath) === '') {
+            return;
+        }
+
+        try {
+            $this->uploader()->delete($photoPath);
+        } catch (Throwable $error) {
+            // La respuesta contractual no depende del borrado del adjunto.
+        }
     }
 
     private function technicianId(Request $request): ?int
