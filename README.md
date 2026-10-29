@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/Database-PostgreSQL%2016%2B%20%7C%20Supabase-3ecf8e?style=flat-square&logo=postgresql&logoColor=white)](https://supabase.com/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-370%20Suites%20%7C%2014.104%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-371%20Suites%20%7C%2014.137%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -273,6 +273,7 @@ CMD ["sh", "-c", "env > /etc/vendguard/cron.env && chmod 600 /etc/vendguard/cron
 | `VENDGUARD_SMTP_HOST`, `VENDGUARD_SMTP_FROM_ADDRESS` | Para envío de emails | Servidor SMTP (ej. `smtp-relay.brevo.com`) y remitente verificado. Si no se declaran, se registra `UnconfiguredEmailTransport` y los correos quedan en fallo transitorio visible en la bandeja. |
 | `VENDGUARD_SMTP_PORT`, `VENDGUARD_SMTP_ENCRYPTION`, `VENDGUARD_SMTP_USERNAME`, `VENDGUARD_SMTP_PASSWORD`, `VENDGUARD_SMTP_FROM_NAME` | Opcionales (con SMTP) | Puerto (`587`/`2525` con `tls` o `465` con `ssl`), credenciales `AUTH LOGIN` y nombre visible del remitente. |
 | `VENDGUARD_DEV_SITE_KEYS` | **Nunca** en producción | Solo en local: siembra claves de centro deterministas `DEV-<site_code>`. En producción no se siembra ninguna: cada sede recibe su clave aleatoria al alta o al reemitirse desde coordinación. |
+| `VENDGUARD_ALLOW_INSECURE_HTTP` | **Nunca** en producción | Rebaja la política de transporte del frontal: sin ella, cualquier petición pública por HTTP plano recibe `308` a la misma URL sobre HTTPS (con método y cuerpo conservados), porque el cerrojo entre pestañas y el Service Worker solo existen en contexto seguro. El bucle local y `/api/health` quedan exentos siempre. Con `1` se admite HTTP plano en una demo controlada de LAN sin terminador TLS. |
 
 **Cron en la plataforma:** un *Cron Job* con la misma imagen ejecutando `php bin/sanitary_clock_sweep.php` cada 15 minutos (o una llamada externa a `POST /api/cron/sanitary-clock-sweep` con la cabecera `X-Cron-Secret`) y `POST /api/cron/auto-close` una vez al día. Sin el barrido programado, la pestaña *🩺 Barrido Sanitario* lo delata con el latido envejecido: la superficie distingue «no hay nada que hacer» de «el barrido no está corriendo».
 
@@ -459,20 +460,20 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 370 suites · 14.104 aserciones
+batería global: 371 suites · 14.137 aserciones
 
 ```text
 ======================================================================
  RESUMEN DE EJECUCIÓN GLOBAL (T-39)
 ======================================================================
  Tiempo de ejecución total : 299.00 segundos  (variable en cada corrida)
- Suites de pruebas PHP Unit : 159 / 159 pasadas
+ Suites de pruebas PHP Unit : 160 / 160 pasadas
  Suites de pruebas JS Unit  : 88 / 88 pasadas
  Suites de Integración PHP  : 121 / 121 pasadas
  Suites E2E Manuales (T-40): 2 / 2 pasadas
  ──────────────────────────────────────────────────────────────────
- Total Suites Ejecutadas    : 370
- Total Aserciones Evaluadas : 14.104
+ Total Suites Ejecutadas    : 371
+ Total Aserciones Evaluadas : 14.137
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
@@ -612,7 +613,7 @@ gestor-incidencias-vending/
 │           ├── components/       # Componentes UI (MetricCards, RouteMapModal, TerritorialMapTab, etc.)
 │           └── views/            # Vistas (CoordinatorDashboardView, TechnicianRouteView, etc.)
 └── tests/
-    ├── run_all.php               # Ejecutor global de la batería de 370 suites (100% verde)
+    ├── run_all.php               # Ejecutor global de la batería de 371 suites (100% verde)
     ├── run_new_engine.php        # Canal propio de la categoría new_engine (PG_TEST_DSN)
     ├── bootstrap.php             # Autoloader compartido de las suites
     ├── Manual/                   # Ejecutor de verificación E2E manual (T-40)

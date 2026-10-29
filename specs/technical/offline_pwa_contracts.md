@@ -261,6 +261,16 @@ El elemento nace en `PENDING`; al enviarse pasa a `SYNCING` con la marca `syncin
 
 **Coordinación entre pestañas (`H5`).** Dos pestañas del mismo técnico comparten la misma `mutation_outbox`: sin coordinación, ambas leen el mismo `PENDING`, ambas lo envían y la segunda pisa el estado de la primera. `OfflineSyncManager::withSyncLock()` encadena dos cerrojos: un mutex local que serializa las llamadas de esta pestaña —también en navegadores sin Web Locks— y `navigator.locks.request('vendguard-offline-sync', { mode: 'exclusive' })`, que impide que otra pestaña toque la cola a la vez. Cubre `enqueue`, `processOutboxQueue` y `dumpConflict`; las operaciones anidadas (el volcado por baja de cuenta dentro del envío) no vuelven a pedir el cerrojo y, si el navegador rechaza el cerrojo, el mutex local sigue serializando. Ese respaldo cubre únicamente el fallo de **concesión**: si el callback ya arrancó, su excepción se propaga sin volver a ejecutar la tarea (`R1`), porque reintentarla duplicaría el envío —o el alta, con una clave de idempotencia nueva— en lugar de informar del error. Además, `BroadcastChannel('vendguard-offline-sync-channel')` avisa a las demás pestañas de `enqueued`, `queue_recovered`, `queue_processed`, `conflict`, `conflict_dumped` y `account_dump_completed`; la receptora relee su estado (`queue_changed` con `remote: true`) sin reemitirlo, así que no hay eco y una pestaña que solo escucha jamás escribe la cola.
 
+**Contexto seguro y despliegue (`R2`).** `navigator.locks` solo existe en **contexto seguro** y, sobre HTTP plano, el navegador además no registra el Service Worker: la coordinación no puede depender de un supuesto. `withDeviceLock()` elige el mejor mecanismo disponible y `lockMode` publica cuál se está usando de verdad:
+
+| `lockMode` | Cuándo | Garantía |
+| :--- | :--- | :--- |
+| `web-locks` | Origen seguro con `navigator.locks` | Exclusión del navegador en todo el origen |
+| `storage-lease` | Sin Web Locks pero con `localStorage` | Arriendo con token, caducidad de 5 s, latido cada `TTL/3` y sondeo de 120 ms; espera como esperaría Web Locks y caduca solo si el titular muere |
+| `tab-only` | Sin almacén compartido (modo privado, cuota agotada) | Solo serializa esta pestaña; la bandeja lo advierte con `offline-lock-warning` y la idempotencia del servidor sigue siendo la red de seguridad |
+
+El despliegue queda protegido en el propio frontal y no en la buena voluntad del operador. `HttpsPolicy` responde `308` —conservando método y cuerpo, de modo que un `POST` de la API no se convierte en un `GET` vacío— a cualquier petición pública por HTTP plano, exime únicamente el bucle local (`localhost`, `127.0.0.1`, `::1`, `0.0.0.0`, `*.localhost`, contexto seguro por definición) y la sonda `/api/health` —que el orquestador consulta por la red interna—, emite `Strict-Transport-Security` cuando la petición ya viaja por TLS, directa (`HTTPS`) o terminada en un proxy (`X-Forwarded-Proto`), y sanea `Host` antes de construir `Location` para no convertirlo en redirección abierta ni en inyección de cabeceras. La única excepción es `VENDGUARD_ALLOW_INSECURE_HTTP=1`, explícita, para una demo en LAN sin terminador TLS.
+
 **Clasificación de fallos de envío.** El motor distingue el veredicto del hipo:
 
 | Desenlace | Códigos | Efecto en la bandeja |

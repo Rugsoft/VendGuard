@@ -220,6 +220,9 @@ export const TechnicianRouteView = {
       // ───────────────────────────────────────────────────────────────────
       offlineStorage: null,
       offlineManager: null,
+      // Modo de exclusión realmente disponible (`R2`): Web Locks, arriendo en
+      // almacenamiento compartido o solo la pestaña. La bandeja lo advierte.
+      offlineLockMode: 'web-locks',
       offlineSnapshot: null,
       offlineValidity: { status: SNAPSHOT_VALIDITY.MISSING, canEnqueueNewActions: false, ageMinutes: null },
       offlineQueue: { pending: 0, syncing: 0, conflicts: 0, total: 0, photoCount: 0, photoBytes: 0 },
@@ -1015,6 +1018,8 @@ export const TechnicianRouteView = {
       if (this.offlineManager === null) {
         this.offlineManager = new OfflineSyncManager({ storage: this.offlineStorage });
       }
+
+      this.offlineLockMode = this.offlineManager.lockMode;
 
       this.isOfflineMode = this.isBrowserOffline();
       this.attachOfflineListeners();
@@ -3216,6 +3221,7 @@ export const TechnicianRouteView = {
           :queue="offlineQueue"
           :items="offlineQueueItems"
           :progress="offlineSyncProgress"
+          :lock-mode="offlineLockMode"
           :reauth-owner="offlineReauthOwner"
           :dumping-mutation-id="offlineDumpInProgressId"
           @update:open="showOfflineTray = $event"

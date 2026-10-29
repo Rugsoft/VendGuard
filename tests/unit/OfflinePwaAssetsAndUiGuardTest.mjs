@@ -485,6 +485,26 @@ assert(
     && /\{\{\s*ageLabel\s*\}\}/.test(OfflineSyncTrayModal.template)
 );
 
+console.log('\n--- 6. Exclusión entre pestañas declarada en la interfaz (R2) ---');
+
+assert(
+  '6.1 Sin Web Locks ni almacén compartido la bandeja advierte de que hay que usar una sola ventana',
+  trayComputed('lockWarningMessage', { lockMode: 'tab-only' }).includes('una sola ventana')
+    && trayComputed('lockWarningMessage', { lockMode: 'storage-lease' }) === ''
+    && trayComputed('lockWarningMessage', { lockMode: 'web-locks' }) === ''
+);
+assert(
+  '6.2 El aviso se pinta con su testid y su mensaje, no queda como texto muerto',
+  OfflineSyncTrayModal.template.includes('data-testid="offline-lock-warning"')
+    && /\{\{\s*lockWarningMessage\s*\}\}/.test(OfflineSyncTrayModal.template)
+    && OfflineSyncTrayModal.props.lockMode.default === 'web-locks'
+);
+assert(
+  '6.3 La vista pasa a la bandeja el modo que declara el motor',
+  routeViewSource.includes(':lock-mode="offlineLockMode"')
+    && routeViewSource.includes('this.offlineLockMode = this.offlineManager.lockMode')
+);
+
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 

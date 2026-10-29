@@ -1464,6 +1464,148 @@ assert(
   JSON.stringify({ runs: refusedTaskRuns, value: refusedValue })
 );
 
+// ─────────────────────────────────────────────────────────────────────
+// 14. Coordinación sin Web Locks: arriendo compartido (R2)
+// ─────────────────────────────────────────────────────────────────────
+console.log('\n--- 14. Arriendo compartido cuando no hay Web Locks (R2) ---');
+
+/** `localStorage` de mentira compartido por las pestañas del mismo origen. */
+function createSharedLeaseStorage() {
+  const entries = new Map();
+
+  return {
+    entries,
+    getItem(key) {
+      return entries.has(key) ? entries.get(key) : null;
+    },
+    setItem(key, value) {
+      entries.set(key, String(value));
+    },
+    removeItem(key) {
+      entries.delete(key);
+    }
+  };
+}
+
+const LEASE_KEY = 'vendguard-offline-sync-lease';
+
+const modeManager = (options) => new OfflineSyncManager({
+  storage: newStorage(),
+  client: {},
+  channel: null,
+  dispatch: () => {},
+  ...options
+});
+
+assert(
+  '14.1 Sin Web Locks pero con almacén compartido el modo es «storage-lease»',
+  modeManager({ locks: null, leaseStorage: createSharedLeaseStorage() }).lockMode === 'storage-lease'
+);
+assert(
+  '14.2 Con Web Locks el modo es «web-locks» aunque el almacén esté disponible',
+  modeManager({ locks: createFakeLocks().lock, leaseStorage: createSharedLeaseStorage() }).lockMode === 'web-locks'
+);
+assert(
+  '14.3 Sin Web Locks ni almacén compartido el modo es «tab-only» y la bandeja lo advierte',
+  modeManager({ locks: null, leaseStorage: null }).lockMode === 'tab-only'
+);
+
+const leaseBus = createSharedLeaseStorage();
+const leaseStorageBus = await seedStorage();
+for (const order of [1, 2, 3, 4]) {
+  await leaseStorageBus.putMutation(interruptedMutation(
+    `lease-${order}`,
+    order,
+    MUTATION_STATUS.PENDING,
+    null,
+    900 + order
+  ));
+}
+
+let leaseActive = 0;
+let leaseMaxActive = 0;
+const leaseSends = [];
+const leaseClient = {
+  request: async (endpoint) => {
+    leaseActive++;
+    leaseMaxActive = Math.max(leaseMaxActive, leaseActive);
+    leaseSends.push(endpoint);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    leaseActive--;
+    return { ok: true };
+  }
+};
+
+// Dos «pestañas»: mismo `IndexedDB` (el mismo doble de almacenamiento) y el
+// mismo `localStorage`, pero sin Web Locks (origen inseguro).
+const leaseTabA = new OfflineSyncManager({
+  storage: leaseStorageBus,
+  client: leaseClient,
+  locks: null,
+  leaseStorage: leaseBus,
+  channel: null,
+  now: () => NOW,
+  dispatch: () => {}
+});
+const leaseTabB = new OfflineSyncManager({
+  storage: leaseStorageBus,
+  client: leaseClient,
+  locks: null,
+  leaseStorage: leaseBus,
+  channel: null,
+  now: () => NOW,
+  dispatch: () => {}
+});
+
+const [leaseRunA, leaseRunB] = await Promise.all([
+  leaseTabA.processOutboxQueue(2),
+  leaseTabB.processOutboxQueue(2)
+]);
+assert(
+  '14.4 Dos pestañas sin Web Locks tampoco vacían la cola a la vez',
+  leaseMaxActive === 1
+    && leaseSends.length === 4
+    && leaseRunA.applied + leaseRunB.applied === 4,
+  JSON.stringify({ maxActive: leaseMaxActive, sends: leaseSends.length, a: leaseRunA, b: leaseRunB })
+);
+assert(
+  '14.5 El arriendo queda libre al terminar',
+  leaseBus.getItem(LEASE_KEY) === null,
+  String(leaseBus.getItem(LEASE_KEY))
+);
+
+const expiredBus = createSharedLeaseStorage();
+expiredBus.setItem(LEASE_KEY, JSON.stringify({ token: 'pestana-muerta', expires_at: NOW - 1 }));
+let expiredRuns = 0;
+await modeManager({ locks: null, leaseStorage: expiredBus }).withSyncLock(async () => {
+  expiredRuns++;
+  return 'ok';
+});
+assert(
+  '14.6 Un arriendo caducado de una pestaña muerta no bloquea a las demás',
+  expiredRuns === 1 && expiredBus.getItem(LEASE_KEY) === null,
+  JSON.stringify({ runs: expiredRuns, lease: expiredBus.getItem(LEASE_KEY) })
+);
+
+const brokenBus = {
+  getItem: () => null,
+  setItem: () => {
+    throw new Error('QuotaExceededError');
+  },
+  removeItem: () => {}
+};
+const brokenManager = modeManager({ locks: null, leaseStorage: brokenBus });
+let brokenRuns = 0;
+await brokenManager.withSyncLock(async () => {
+  brokenRuns++;
+  return 'ok';
+});
+assert(
+  '14.7 Si el almacén rechaza el arriendo se degrada a «tab-only» y la tarea corre una vez',
+  brokenRuns === 1 && brokenManager.lockMode === 'tab-only',
+  JSON.stringify({ runs: brokenRuns, mode: brokenManager.lockMode })
+);
+
 console.log('\n======================================================================');
 console.log(` Total Assertions: ${assertions} | Passed: ${assertions - failures} | Failed: ${failures}`);
 

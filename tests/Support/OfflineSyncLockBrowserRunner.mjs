@@ -13,6 +13,9 @@
  *    vez aunque las dos pestañas vacíen a la vez.
  *  - **Aviso entre pestañas:** `BroadcastChannel` entrega `queue_changed` con
  *    `remote: true` a la pestaña que no estaba trabajando.
+ *  - **Origen no seguro (R2):** se oculta `navigator.locks` en las dos pestañas
+ *    —lo que ve una PWA servida por HTTP plano— y se repite el vaciado: el
+ *    arriendo compartido en `localStorage` debe sostener la misma exclusión.
  *
  * El arnés usa solo lo que trae Node (servidor `http`, `WebSocket` global para el
  * protocolo DevTools) y el Chromium instalado en la máquina (Chrome o Edge). Si
@@ -204,7 +207,10 @@ function mutation(index, sequenceOrder) {
 function buildManager(locks) {
   return new OfflineSyncManager({
     storage,
-    ...(locks === null ? { locks: null } : {}),
+    // El control negativo desactiva también el arriendo: si solo se quitara
+    // Web Locks, la coordinación seguiría existiendo por localStorage y el
+    // arnés no podría demostrar que sabe detectar el solapamiento (R2).
+    ...(locks === null ? { locks: null, leaseStorage: null } : {}),
     client: {
       request: async (endpoint, options) => {
         const body = options?.body ?? {};
@@ -263,6 +269,32 @@ window.__lockHarness = {
     manager = buildManager(null);
 
     return { tab, lock: 'disabled', queued: (await storage.listMutations(2)).length };
+  },
+
+  /**
+   * R2: el mismo escenario en un origen no seguro.
+   *
+   * Se oculta navigator.locks en la propia pestaña —que es exactamente lo que
+   * ve una PWA servida por HTTP plano— pero se conserva localStorage. Con dos
+   * pestañas reales del mismo perfil, el arriendo compartido debe sostener la
+   * exclusión que antes solo existía bajo Web Locks.
+   */
+  async armWithLease() {
+    Object.defineProperty(window.navigator, 'locks', { value: undefined, configurable: true });
+    storage = storage ?? new OfflineStorage();
+
+    if (tab === 'A') {
+      await seedQueue();
+    }
+
+    manager = buildManager(undefined);
+
+    return {
+      tab,
+      lockMode: manager.lockMode,
+      lease: typeof localStorage?.getItem === 'function',
+      queued: (await storage.listMutations(2)).length
+    };
   },
 
   async run() {
@@ -584,6 +616,53 @@ try {
     '4.2 Sin cerrojo el servidor sí ve dos envíos en vuelo',
     unlockedState.maxConcurrent >= 2,
     `maxConcurrent=${unlockedState.maxConcurrent}`
+  );
+
+  console.log('\n--- 5. Sin Web Locks: el arriendo compartido sostiene la exclusión (R2) ---');
+  await fetch(`${origin}/reset`, { method: 'POST' });
+
+  const leaseA = await tabA.evaluate('window.__lockHarness.armWithLease()');
+  const leaseB = await tabB.evaluate('window.__lockHarness.armWithLease()');
+
+  assert(
+    '5.1 Sin `navigator.locks` el motor declara «storage-lease» en las dos pestañas',
+    leaseA.lockMode === 'storage-lease' && leaseB.lockMode === 'storage-lease',
+    JSON.stringify({ a: leaseA.lockMode, b: leaseB.lockMode })
+  );
+  assert(
+    '5.2 El navegador real comparte el arriendo entre pestañas (`localStorage`)',
+    leaseA.lease === true && leaseB.lease === true && leaseA.queued === MUTATION_COUNT,
+    JSON.stringify({ a: leaseA, b: leaseB })
+  );
+
+  const [leaseRunA, leaseRunB] = await Promise.all([
+    tabA.evaluate('window.__lockHarness.run()'),
+    tabB.evaluate('window.__lockHarness.run()')
+  ]);
+
+  const leaseState = await (await fetch(`${origin}/state`)).json();
+  const leaseSends = leaseState.events.filter((event) => event.kind === 'start');
+  const leaseDuplicates = leaseSends
+    .map((event) => event.mutationId)
+    .filter((mutationId, index, list) => list.indexOf(mutationId) !== index);
+
+  assert(
+    '5.3 Con arriendo el servidor tampoco ve dos envíos en vuelo (maxConcurrent = 1)',
+    leaseState.maxConcurrent === 1,
+    `maxConcurrent=${leaseState.maxConcurrent} envíos=${leaseSends.length}`
+  );
+  assert(
+    '5.4 Cada operación sale una vez y la bandeja queda vacía en las dos pestañas',
+    leaseSends.length === MUTATION_COUNT
+      && leaseDuplicates.length === 0
+      && leaseRunA.remaining === 0
+      && leaseRunB.remaining === 0,
+    JSON.stringify({
+      envíos: leaseSends.length,
+      duplicados: leaseDuplicates.length,
+      a: leaseRunA.remaining,
+      b: leaseRunB.remaining
+    })
   );
 } catch (error) {
   failures++;

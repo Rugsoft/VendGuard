@@ -62,6 +62,33 @@ const SYNC_LOCK_NAME = 'vendguard-offline-sync';
 const SYNC_CHANNEL_NAME = 'vendguard-offline-sync-channel';
 
 /**
+ * Cerrojo de respaldo cuando el navegador no ofrece Web Locks (`R2`).
+ *
+ * `navigator.locks` solo existe en contexto seguro, así que una PWA servida por
+ * HTTP plano —una demo en LAN, un despliegue sin TLS— se quedaba con el mutex
+ * de la pestaña y dos ventanas podían vaciar la misma cola sin que nadie lo
+ * dijera. El arriendo vive en `localStorage`, que sí comparten todas las
+ * pestañas del origen: el titular lo renueva con un latido mientras trabaja y,
+ * si la pestaña muere, el arriendo caduca solo.
+ */
+const SYNC_LEASE_KEY = 'vendguard-offline-sync-lease';
+
+/** Vigencia de un arriendo sin latido; se renueva mientras la tarea corre. */
+const SYNC_LEASE_TTL_MS = 5000;
+
+/**
+ * Espera tras escribir el arriendo antes de darlo por propio.
+ *
+ * `localStorage` no tiene compare-and-set: dos pestañas pueden leer «libre» y
+ * escribir a la vez. Escribir, esperar y releer convierte esa carrera en un
+ * ganador observable; el perdedor ve el token ajeno y vuelve a esperar.
+ */
+const SYNC_LEASE_SETTLE_MS = 30;
+
+/** Cadencia con la que el aspirante reintenta un arriendo ocupado. */
+const SYNC_LEASE_POLL_MS = 120;
+
+/**
  * Anuncios que otra pestaña necesita conocer para no mostrar una bandeja vieja.
  *
  * `syncing` queda fuera a propósito: es ruido por elemento y no cambia el total.
@@ -182,7 +209,7 @@ export class OfflineSyncManager {
   /**
    * @param {{storage?: OfflineStorage, client?: Object, now?: function(): number,
    *   dispatch?: function(Object): void, locks?: Object|null,
-   *   channel?: Object|null}} [options={}]
+   *   channel?: Object|null, leaseStorage?: Object|null}} [options={}]
    */
   constructor(options = {}) {
     this.storage = options.storage ?? new OfflineStorage();
@@ -191,6 +218,7 @@ export class OfflineSyncManager {
     this.dispatch = typeof options.dispatch === 'function' ? options.dispatch : null;
     this.locks = options.locks !== undefined ? options.locks : defaultLocks();
     this.channel = options.channel !== undefined ? options.channel : openSyncChannel();
+    this.leaseStorage = options.leaseStorage !== undefined ? options.leaseStorage : defaultLeaseStorage();
     this.syncTail = Promise.resolve();
 
     if (this.channel !== null && this.channel !== undefined
@@ -202,10 +230,12 @@ export class OfflineSyncManager {
   /**
    * Ejecuta una operación de bandeja en exclusiva en todo el dispositivo.
    *
-   * Se apilan dos cerrojos porque cubren fallos distintos: el mutex local
-   * serializa las llamadas de esta pestaña (aunque el navegador no soporte Web
-   * Locks) y el `navigator.locks` impide que otra pestaña del mismo origen toque
-   * la cola a la vez. Las operaciones anidadas no vuelven a pedir el cerrojo.
+   * Se apilan dos niveles porque cubren fallos distintos: el mutex local
+   * serializa las llamadas de esta pestaña (siempre) y la exclusión de
+   * dispositivo impide que otra pestaña del mismo origen toque la cola a la vez.
+   * Esa segunda capa usa `navigator.locks` cuando existe y, si el origen no es
+   * seguro, un arriendo en `localStorage` (`R2`). Las operaciones anidadas no
+   * vuelven a pedir el cerrojo.
    *
    * @template T
    * @param {function(): Promise<T>} task
@@ -213,17 +243,162 @@ export class OfflineSyncManager {
    */
   async withSyncLock(task) {
     const previous = this.syncTail ?? Promise.resolve();
-    const run = previous.then(() => this.withWebLock(task), () => this.withWebLock(task));
+    const run = previous.then(() => this.withDeviceLock(task), () => this.withDeviceLock(task));
     this.syncTail = run.then(() => undefined, () => undefined);
 
     return run;
+  }
+
+  /**
+   * Modo de exclusión realmente disponible (`R2`).
+   *
+   * `web-locks` es la garantía del navegador; `storage-lease` la sustituye con
+   * un arriendo compartido cuando el origen no es seguro; `tab-only` es el
+   * último recurso y la interfaz lo advierte, porque entonces dos pestañas solo
+   * quedan serializadas por la idempotencia del servidor.
+   *
+   * @returns {'web-locks'|'storage-lease'|'tab-only'}
+   */
+  get lockMode() {
+    if (hasWebLocks(this.locks)) {
+      return 'web-locks';
+    }
+
+    return this.leaseStorage !== null ? 'storage-lease' : 'tab-only';
+  }
+
+  /**
+   * Exclusión en todo el dispositivo, con el mejor mecanismo disponible.
+   *
+   * @template T
+   * @param {function(): Promise<T>} task
+   * @returns {Promise<T>}
+   */
+  async withDeviceLock(task) {
+    if (hasWebLocks(this.locks)) {
+      return this.withWebLock(task);
+    }
+
+    if (this.leaseStorage === null) {
+      return task();
+    }
+
+    return this.withStorageLease(task);
+  }
+
+  /**
+   * Toma el arriendo compartido y lo mantiene vivo mientras dura la tarea.
+   *
+   * Espera como esperaría Web Locks: el aspirante sondea hasta que el titular
+   * libera o su arriendo caduca. Renovar con un latido evita que una pasada
+   * larga —una cola de varias fotos— expire en manos de su propio dueño.
+   *
+   * @template T
+   * @param {function(): Promise<T>} task
+   * @returns {Promise<T>}
+   */
+  async withStorageLease(task) {
+    const token = `${this.now()}-${randomHex(8)}`;
+
+    await this.acquireStorageLease(token);
+
+    const heartbeat = setInterval(
+      () => this.writeLease(token),
+      Math.max(250, Math.floor(SYNC_LEASE_TTL_MS / 3))
+    );
+
+    try {
+      return await task();
+    } finally {
+      clearInterval(heartbeat);
+      this.releaseLease(token);
+    }
+  }
+
+  /**
+   * Consigue el arriendo o degrada a `tab-only` si el almacén no coopera.
+   *
+   * @param {string} token
+   * @returns {Promise<void>}
+   */
+  async acquireStorageLease(token) {
+    for (;;) {
+      const current = this.readLease();
+      const holderAlive = current !== null && current.token !== token
+        && Number(current.expires_at) > this.now();
+
+      if (!holderAlive) {
+        if (!this.writeLease(token)) {
+          // Sin almacén compartido no hay coordinación posible: mejor seguir con
+          // el mutex de la pestaña que bloquear la sincronización para siempre.
+          this.leaseStorage = null;
+
+          return;
+        }
+
+        await delay(SYNC_LEASE_SETTLE_MS + Math.floor(Math.random() * SYNC_LEASE_SETTLE_MS));
+
+        const confirmed = this.readLease();
+        if (confirmed !== null && confirmed.token === token) {
+          return;
+        }
+      }
+
+      await delay(SYNC_LEASE_POLL_MS);
+    }
+  }
+
+  /** Arriendo vigente, o `null` si no hay o está corrupto. */
+  readLease() {
+    try {
+      const raw = this.leaseStorage?.getItem(SYNC_LEASE_KEY);
+      if (typeof raw !== 'string' || raw === '') {
+        return null;
+      }
+
+      const parsed = JSON.parse(raw);
+
+      return parsed !== null && typeof parsed === 'object' && typeof parsed.token === 'string'
+        ? parsed
+        : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /** Escribe el arriendo con su caducidad; `false` si el almacén lo rechaza. */
+  writeLease(token) {
+    try {
+      this.leaseStorage.setItem(SYNC_LEASE_KEY, JSON.stringify({
+        token,
+        expires_at: this.now() + SYNC_LEASE_TTL_MS
+      }));
+
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /** Libera el arriendo solo si sigue siendo propio. */
+  releaseLease(token) {
+    const current = this.readLease();
+    if (current === null || current.token !== token) {
+      return;
+    }
+
+    try {
+      this.leaseStorage.removeItem(SYNC_LEASE_KEY);
+    } catch (error) {
+      // El arriendo caducará solo: no hay nada más que hacer aquí.
+    }
   }
 
   /** Toma el cerrojo del navegador cuando existe; si no, ejecuta sin él. */
   async withWebLock(task) {
     const locks = this.locks;
 
-    if (locks === null || locks === undefined || typeof locks.request !== 'function') {
+    if (!hasWebLocks(locks)) {
       return task();
     }
 
@@ -797,6 +972,41 @@ function defaultLocks() {
   const locks = globalThis.navigator?.locks;
 
   return locks !== undefined && locks !== null && typeof locks.request === 'function' ? locks : null;
+}
+
+/** ¿El navegador expone el cerrojo entre pestañas? (`R2`) */
+function hasWebLocks(locks) {
+  return locks !== null && locks !== undefined && typeof locks.request === 'function';
+}
+
+/**
+ * Almacén compartido por las pestañas del origen, o `null` cuando no se puede
+ * ni tocar (`R2`).
+ *
+ * Leer `localStorage` lanza en un iframe con `sandbox` sin `allow-same-origin` y
+ * en algunos modos privados; el arriendo es una mejora de coordinación, no un
+ * requisito para trabajar sin red.
+ */
+function defaultLeaseStorage() {
+  try {
+    const storage = globalThis.localStorage ?? null;
+
+    return storage !== null
+      && typeof storage.getItem === 'function'
+      && typeof storage.setItem === 'function'
+      && typeof storage.removeItem === 'function'
+      ? storage
+      : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+/** Espera cooperativa para el sondeo del arriendo. */
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 /** Abre el canal de aviso entre pestañas, o devuelve `null` sin soporte. */

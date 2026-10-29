@@ -78,6 +78,15 @@ export const OfflineSyncTrayModal = {
     dumpingMutationId: {
       type: String,
       default: ''
+    },
+    /**
+     * Modo de exclusión realmente disponible entre pestañas (`R2`):
+     * `web-locks`, `storage-lease` o `tab-only`. Solo el último se advierte,
+     * porque es el único en el que dos ventanas podrían vaciar la misma cola.
+     */
+    lockMode: {
+      type: String,
+      default: 'web-locks'
     }
   },
   emits: ['update:visible', 'update:open', 'sync-now', 'dump-conflict', 'reauth'],
@@ -105,6 +114,14 @@ export const OfflineSyncTrayModal = {
     },
     isOffline() {
       return this.connectionStatus === 'OFFLINE';
+    },
+    lockWarningMessage() {
+      if (this.lockMode !== 'tab-only') {
+        return '';
+      }
+
+      return 'Este navegador no ofrece cerrojo entre pestañas ni almacenamiento compartido: '
+        + 'sincroniza desde una sola ventana para no duplicar envíos.';
     },
     validityStatus() {
       return String(this.validity?.status || SNAPSHOT_VALIDITY.MISSING);
@@ -368,6 +385,15 @@ export const OfflineSyncTrayModal = {
         style="margin-top: 10px; background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); border-radius: var(--radius-interactive); padding: 10px 12px; font-family: var(--font-body); font-size: 12px; line-height: 1.4;"
       >
         {{ staleMessage }}
+      </div>
+
+      <div
+        v-if="lockWarningMessage"
+        role="alert"
+        data-testid="offline-lock-warning"
+        style="margin-top: 10px; background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); border-radius: var(--radius-interactive); padding: 10px 12px; font-family: var(--font-body); font-size: 12px; line-height: 1.4;"
+      >
+        {{ lockWarningMessage }}
       </div>
 
       <div
