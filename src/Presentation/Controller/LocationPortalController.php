@@ -1485,6 +1485,13 @@ class LocationPortalController
             'last_confirmed_order',
             'restock_order',
             'restock_orders',
+            // Art. V.4 / Módulo 24: la identidad idempotente del dispositivo, el
+            // desajuste de reloj y el volcado de efectivo en colisión son rastro
+            // interno de sincronización del técnico, no información de la sede.
+            'offline_sync',
+            'client_mutation_id',
+            'clock_skew_adjusted',
+            'partial_refund_collision_dumped',
         ];
 
         foreach ($forbiddenExactKeys as $key) {

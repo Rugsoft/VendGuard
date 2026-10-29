@@ -88,6 +88,10 @@ class Incident implements ArrayAccess, JsonSerializable
     private ?string $machineType;
     private ?string $locationName;
     private ?string $locationSiteCode;
+    private ?string $machineFloorWing;
+    private ?string $locationAddress;
+    private ?string $locationContactEmail;
+    private bool $notificationContextHydrated;
     private ?string $technicianName;
     private ?string $technicianOperatorCode;
 
@@ -140,7 +144,11 @@ class Incident implements ArrayAccess, JsonSerializable
         ?OpportunisticMode $opportunisticMode = null,
         ?OpportunisticOriginReason $opportunisticOriginReason = null,
         ?string $opportunisticInformantName = null,
-        ?int $chronicPredecessorIncidentId = null
+        ?int $chronicPredecessorIncidentId = null,
+        ?string $machineFloorWing = null,
+        ?string $locationAddress = null,
+        ?string $locationContactEmail = null,
+        bool $notificationContextHydrated = false
     ) {
         $this->id = $id;
         $this->ticketCode = strtoupper(trim($ticketCode));
@@ -180,6 +188,10 @@ class Incident implements ArrayAccess, JsonSerializable
         $this->machineType = $machineType;
         $this->locationName = $locationName;
         $this->locationSiteCode = $locationSiteCode;
+        $this->machineFloorWing = $machineFloorWing;
+        $this->locationAddress = $locationAddress;
+        $this->locationContactEmail = $locationContactEmail;
+        $this->notificationContextHydrated = $notificationContextHydrated;
         $this->technicianName = $technicianName;
         $this->technicianOperatorCode = $technicianOperatorCode;
         $this->pendingInfoReasonCategory = $pendingInfoReasonCategory;
@@ -303,7 +315,21 @@ class Incident implements ArrayAccess, JsonSerializable
                 : null,
             isset($row['chronic_predecessor_incident_id']) && $row['chronic_predecessor_incident_id'] !== null
                 ? (int)$row['chronic_predecessor_incident_id']
-                : null
+                : null,
+            isset($row['machine_floor_wing']) && $row['machine_floor_wing'] !== null
+                ? (string)$row['machine_floor_wing']
+                : null,
+            isset($row['location_address']) && $row['location_address'] !== null
+                ? (string)$row['location_address']
+                : null,
+            isset($row['location_contact_email']) && $row['location_contact_email'] !== null
+                ? (string)$row['location_contact_email']
+                : null,
+            // La fila trae las columnas del contexto aunque vengan vacías: eso es lo
+            // que permite al encolador de avisos no repetir la lectura de máquina y
+            // sede. Un expediente construido en memoria no las trae y conserva la
+            // ruta de lectura anterior.
+            array_key_exists('location_address', $row)
         );
     }
 
@@ -505,6 +531,35 @@ class Incident implements ArrayAccess, JsonSerializable
     public function getLocationSiteCode(): ?string
     {
         return $this->locationSiteCode;
+    }
+
+    /**
+     * Planta o zona física de la máquina, para los avisos que la nombran.
+     */
+    public function getMachineFloorWing(): ?string
+    {
+        return $this->machineFloorWing;
+    }
+
+    public function getLocationAddress(): ?string
+    {
+        return $this->locationAddress;
+    }
+
+    public function getLocationContactEmail(): ?string
+    {
+        return $this->locationContactEmail;
+    }
+
+    /**
+     * ¿La lectura trajo el contexto de máquina y sede que necesitan los avisos?
+     *
+     * Permite al encolador usar esos datos sin una segunda lectura y, a la vez,
+     * conservar la ruta anterior para un expediente construido en memoria.
+     */
+    public function hasNotificationContext(): bool
+    {
+        return $this->notificationContextHydrated;
     }
 
     public function getTechnicianName(): ?string

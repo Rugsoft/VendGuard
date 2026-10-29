@@ -17,6 +17,7 @@ use VendGuard\Core\Domain\Model\MachineType;
 use VendGuard\Core\Domain\Model\RefundRequest;
 use VendGuard\Core\Domain\Model\RefundStatus;
 use VendGuard\Core\Domain\Model\UserRole;
+use VendGuard\Core\Domain\Repository\IncidentPauseTransitionRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentRowLockRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
@@ -750,21 +751,40 @@ final class IncidentPauseService
             $fromStatus = $incident->getStatus();
             $pausedIncident = $incident->pausePendingInfo($reasonCategory, $reason, $now);
 
-            if (!$this->incidents()->update($pausedIncident)) {
-                throw new RuntimeException(sprintf(
-                    'No se pudo persistir la pausa de la incidencia %d.',
-                    $incidentId
-                ));
-            }
+            // El repositorio del motor nuevo escribe la pausa y su historial en una
+            // sola sentencia; los dobles de prueba conservan las dos escrituras.
+            $repository = $this->incidents();
+            if ($repository instanceof IncidentPauseTransitionRepositoryInterface) {
+                if (!$repository->updateAndRecordPauseEvent(
+                    $pausedIncident,
+                    $actorUserId,
+                    $fromStatus,
+                    $reasonCategory,
+                    $reason,
+                    $now
+                )) {
+                    throw new RuntimeException(sprintf(
+                        'No se pudo persistir la pausa de la incidencia %d.',
+                        $incidentId
+                    ));
+                }
+            } else {
+                if (!$repository->update($pausedIncident)) {
+                    throw new RuntimeException(sprintf(
+                        'No se pudo persistir la pausa de la incidencia %d.',
+                        $incidentId
+                    ));
+                }
 
-            $this->incidents()->recordPauseEvent(
-                $incidentId,
-                $actorUserId,
-                $fromStatus,
-                $reasonCategory,
-                $reason,
-                $now
-            );
+                $repository->recordPauseEvent(
+                    $incidentId,
+                    $actorUserId,
+                    $fromStatus,
+                    $reasonCategory,
+                    $reason,
+                    $now
+                );
+            }
 
             // RF-05.3: solicitud de acceso/información EXCLUSIVAMENTE a la Sede.
             $this->notificationEnqueuer?->enqueuePendingInfoRequest($pausedIncident);

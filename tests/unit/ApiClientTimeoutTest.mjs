@@ -53,10 +53,13 @@ globalThis.window = {
   }
 };
 
+const NATIVE_FORM_DATA = globalThis.FormData;
+
 const {
   ApiClient,
   ApiError,
   REQUEST_TIMEOUT_MS,
+  UPLOAD_TIMEOUT_MS,
   NETWORK_STATUS_EVENT,
   REQUEST_STATE_EVENT,
   buildTimeoutSignal,
@@ -178,7 +181,7 @@ assert('1.3 Toda petición viaja con su señal de aborto',
 
 assert('1.4 El reloj se arma con el mecanismo nativo y con el plazo de la casa, sin argumentos espurios',
   SOURCE.includes('config.signal = linkedSignal.signal')
-    && SOURCE.includes('buildTimeoutSignal()')
+    && SOURCE.includes('buildTimeoutSignal(timeoutMs)')
     && SOURCE.includes('AbortSignal.timeout(timeoutMs)'));
 
 assert('1.5 El mecanismo de reserva (`AbortController`) también existe y es correcto',
@@ -418,44 +421,44 @@ assert('5.5 Fuera del aire, la misma entrega vuelve a salir (el guardián es de 
   fetchCalls.length === 2);
 
 assert('5.6 Dos cuerpos distintos no se confunden entre sí',
-  (async () => {
+  await (async () => {
     fetchCalls = [];
-    let release;
-    fetchBehavior = () => new Promise((resolve) => { release = () => resolve(jsonResponse({ ok: 1 })); });
+    const releases = [];
+    fetchBehavior = () => new Promise((resolve) => { releases.push(() => resolve(jsonResponse({ ok: 1 }))); });
     const a = duplicateClient.post('/incidents', { machine_id: 4, description: 'Uno distinto del otro.' });
     const b = duplicateClient.post('/incidents', { machine_id: 5, description: 'Otro distinto del primero.' });
     const simultaneous = fetchCalls.length;
-    release();
+    releases.forEach((release) => release());
     await Promise.all([a, b]);
     return simultaneous === 2;
   })());
 
 assert('5.7 Dos lecturas iguales simultáneas no se fusionan (compartir respuesta sería ahorrar mintiendo)',
-  (async () => {
+  await (async () => {
     fetchCalls = [];
-    let release;
-    fetchBehavior = () => new Promise((resolve) => { release = () => resolve(jsonResponse({ listo: 1 })); });
+    const releases = [];
+    fetchBehavior = () => new Promise((resolve) => { releases.push(() => resolve(jsonResponse({ listo: 1 }))); });
     const a = duplicateClient.get('/incidents');
     const b = duplicateClient.get('/incidents');
     const simultaneous = fetchCalls.length;
-    release();
+    releases.forEach((release) => release());
     await Promise.all([a, b]);
     return simultaneous === 2;
   })());
 
 assert('5.8 Dos subidas de archivo simultáneas no se fusionan (jamás se descarta una evidencia)',
-  (async () => {
+  await (async () => {
     const originalFormData = globalThis.FormData;
     class MockFormData {}
     globalThis.FormData = MockFormData;
     try {
       fetchCalls = [];
-      let release;
-      fetchBehavior = () => new Promise((resolve) => { release = () => resolve(jsonResponse({ subida: 1 })); });
+      const releases = [];
+      fetchBehavior = () => new Promise((resolve) => { releases.push(() => resolve(jsonResponse({ subida: 1 }))); });
       const a = duplicateClient.upload('/incidents/1/photos', new MockFormData());
       const b = duplicateClient.upload('/incidents/1/photos', new MockFormData());
       const simultaneous = fetchCalls.length;
-      release();
+      releases.forEach((release) => release());
       await Promise.all([a, b]);
       return simultaneous === 2;
     } finally {
@@ -491,7 +494,7 @@ assert('6.2 El interceptor no recarga la página por su cuenta (EARS-04.3: el bo
   'Recargar destruiría el borrador que el aviso promete conservar.');
 
 assert('6.3 La descarga de archivos también viaja con su señal de aborto',
-  (async () => {
+  await (async () => {
     fetchCalls = [];
     fetchBehavior = async () => ({
       ok: true,
@@ -511,7 +514,7 @@ assert('6.3 La descarga de archivos también viaja con su señal de aborto',
   })());
 
 assert('6.4 La descarga caída también avisa al banner con su reintento',
-  (async () => {
+  await (async () => {
     announced.length = 0;
     fetchCalls = [];
     fetchBehavior = networkDown;
@@ -524,7 +527,7 @@ assert('6.4 La descarga caída también avisa al banner con su reintento',
   })());
 
 assert('6.5 Un envío que no llega a salir no deja el guardián de duplicados bloqueado',
-  (async () => {
+  await (async () => {
     const blocked = new ApiClient('/api');
     fetchBehavior = networkDown;
     const failing = blocked.post('/incidents', { machine_id: 9, description: 'Intento que no llega.' });
@@ -537,6 +540,102 @@ assert('6.5 Un envío que no llega a salir no deja el guardián de duplicados bl
 
 assert('6.6 El módulo sigue sin una sola dependencia externa (Dogma Vanilla)',
   !/^\s*import\s/m.test(SOURCE) && !SOURCE.includes('require('));
+
+// ---------------------------------------------------------------------
+console.log('\n--- Grupo 7: Plazo propio de las subidas multipart (M1, EARS-04.1) ---');
+
+// El grupo 5.8 sustituye `globalThis.FormData` por un doble sin `append` y no siempre lo repone
+// antes de este punto: aquí se recupera el nativo capturado antes de cualquier parche.
+globalThis.FormData = NATIVE_FORM_DATA;
+
+assert('7.1 Las subidas de evidencia tienen un plazo mayor que el ordinario y acotado',
+  UPLOAD_TIMEOUT_MS > REQUEST_TIMEOUT_MS && UPLOAD_TIMEOUT_MS === 30000,
+  `upload=${UPLOAD_TIMEOUT_MS}, ordinario=${REQUEST_TIMEOUT_MS}`);
+
+/**
+ * Espía del reloj de la casa: registra el plazo con el que se arma cada petición.
+ *
+ * Devuelve el reloj nativo acortado para no dejar temporizadores de 30 s vivos en la suite; el
+ * `fetch` de la prueba responde antes de que venza.
+ */
+async function recordArmedTimeout(run) {
+  const armed = [];
+  const originalTimeout = AbortSignal.timeout;
+  AbortSignal.timeout = (ms) => {
+    armed.push(ms);
+    return originalTimeout.call(AbortSignal, 50);
+  };
+
+  try {
+    await run();
+  } finally {
+    AbortSignal.timeout = originalTimeout;
+  }
+
+  return armed;
+}
+
+const uploadClockClient = new ApiClient('/api');
+fetchCalls = [];
+fetchBehavior = async () => jsonResponse({ sincronizado: true });
+const uploadForm = new FormData();
+uploadForm.append('client_mutation_id', 'mut_20261028_100000_a1b2c3d4e5f60718');
+uploadForm.append('payload', JSON.stringify({ comment_text: 'Cambio de sonda con foto.' }));
+uploadForm.append('photo', new Blob(['evidencia'], { type: 'image/jpeg' }), 'evidencia.jpg');
+
+const uploadClock = await recordArmedTimeout(() => uploadClockClient.request('/technician/incidents/101/comments', {
+  method: 'POST',
+  body: uploadForm
+}));
+
+assert('7.2 Una subida multipart arma el plazo de 30,0 s, no el de 5,0 s',
+  uploadClock.length === 1 && uploadClock[0] === UPLOAD_TIMEOUT_MS,
+  JSON.stringify(uploadClock));
+
+const jsonClock = await recordArmedTimeout(() => uploadClockClient.request('/incidents', {
+  method: 'POST',
+  body: { machine_id: 3, description: 'Sin foto, plazo ordinario.' }
+}));
+
+assert('7.3 Un JSON corriente conserva el plazo ordinario de 5,0 s',
+  jsonClock.length === 1 && jsonClock[0] === REQUEST_TIMEOUT_MS,
+  JSON.stringify(jsonClock));
+
+announced.length = 0;
+fetchBehavior = timedOut;
+let uploadTimeoutError = null;
+try {
+  const uploadTimeoutClient = new ApiClient('/api');
+  const timeoutForm = new FormData();
+  timeoutForm.append('client_mutation_id', 'mut_20261028_100001_b1c2d3e4f5061728');
+  timeoutForm.append('photo', new Blob(['evidencia'], { type: 'image/jpeg' }), 'evidencia.jpg');
+  await uploadTimeoutClient.request('/technician/incidents/102/comments', {
+    method: 'POST',
+    body: timeoutForm
+  });
+} catch (error) {
+  uploadTimeoutError = error;
+}
+
+assert('7.4 El aviso de plazo agotado en una subida habla de 30,0 segundos, no de 5,0',
+  uploadTimeoutError?.code === 'REQUEST_TIMEOUT'
+    && lastStatus()?.message?.includes('30,0 segundos') === true
+    && lastStatus()?.message?.includes('5,0 segundos') === false,
+  JSON.stringify({ code: uploadTimeoutError?.code, message: lastStatus()?.message }));
+
+announced.length = 0;
+fetchBehavior = timedOut;
+let jsonTimeoutError = null;
+try {
+  await new ApiClient('/api').get('/incidents/pending');
+} catch (error) {
+  jsonTimeoutError = error;
+}
+
+assert('7.5 Una petición corriente que agota su plazo sigue avisando de 5,0 segundos',
+  jsonTimeoutError?.code === 'REQUEST_TIMEOUT'
+    && lastStatus()?.message?.includes('5,0 segundos') === true,
+  lastStatus()?.message ?? '');
 
 // ---------------------------------------------------------------------
 console.log('\n======================================================================');

@@ -9,6 +9,7 @@ use DomainException;
 use InvalidArgumentException;
 use Throwable;
 use VendGuard\Application\Service\AuditLogger;
+use VendGuard\Application\Service\OfflineSyncService;
 use VendGuard\Application\Service\PreventiveChecklistEvaluationService;
 use VendGuard\Application\Service\PreventiveCoexistenceBridgeService;
 use VendGuard\Application\Service\SanitaryCertificateService;
@@ -23,6 +24,7 @@ use VendGuard\Core\Domain\Exception\PreventiveOrderNotInInspectionException;
 use VendGuard\Core\Domain\Exception\ReinspectionTemperatureExceededException;
 use VendGuard\Core\Domain\Exception\SparePartNotFoundException;
 use VendGuard\Core\Domain\Model\PreventiveOrder;
+use VendGuard\Core\Domain\Model\OfflineSyncMutation;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\LocationRepositoryInterface;
 use VendGuard\Core\Domain\Repository\MachineRepositoryInterface;
@@ -34,6 +36,7 @@ use VendGuard\Infrastructure\Repository\PdoIncidentReplacedPartRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoOfflineSyncMutationRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentServiceSheetRepository;
 use VendGuard\Infrastructure\Repository\PdoVanStockRepository;
 use VendGuard\Infrastructure\Repository\PdoPreventiveItemRepository;
@@ -83,6 +86,9 @@ class TechnicianPreventiveController
     private AuditLogger $auditLogger;
     private SparePartTraceabilityService $traceabilityService;
 
+    /** Orquestador de la sincronización sin conexión (Módulo 24); se resuelve bajo demanda. */
+    private ?OfflineSyncService $offlineSyncService = null;
+
     public function __construct(
         ?PreventiveOrderRepositoryInterface $orderRepo = null,
         ?PreventiveSettingsRepositoryInterface $settingsRepo = null,
@@ -93,7 +99,8 @@ class TechnicianPreventiveController
         ?LocationRepositoryInterface $locationRepo = null,
         ?UserRepositoryInterface $userRepo = null,
         ?AuditLogger $auditLogger = null,
-        ?SparePartTraceabilityService $traceabilityService = null
+        ?SparePartTraceabilityService $traceabilityService = null,
+        ?OfflineSyncService $offlineSyncService = null
     ) {
         $this->orderRepo = $orderRepo ?? new PdoPreventiveOrderRepository();
         $this->settingsRepo = $settingsRepo ?? new PdoPreventiveSettingsRepository();
@@ -140,6 +147,8 @@ class TechnicianPreventiveController
             serviceSheetRepo: new PdoIncidentServiceSheetRepository(),
             auditLogger: $this->auditLogger
         );
+
+        $this->offlineSyncService = $offlineSyncService;
     }
 
     // =========================================================================
@@ -315,26 +324,49 @@ class TechnicianPreventiveController
                 return Response::error('ORDER_NOT_FOUND', "La orden de inspección preventiva especificada no existe.", 404);
             }
 
-            $this->evaluationService->startInspection($orderId, $technicianId);
+            $metadata = TechnicianOfflineSyncController::readMetadata($request);
+            if ($metadata instanceof Response) {
+                return $metadata;
+            }
 
-            $this->auditLogger->logMachineEvent(
-                $order->getMachineId(),
-                'START_PREVENTIVE_INSPECTION',
-                $actor,
-                ['status' => $order->getStatus()],
-                [
-                    'status' => 'IN_INSPECTION',
-                    'order_id' => $orderId,
-                    'started_at' => date('Y-m-d H:i:s'),
-                ]
+            $result = $this->offlineSync()->executeIdempotentMutation(
+                $technicianId,
+                OfflineSyncMutation::STOP_TYPE_PREVENTIVE_ORDER,
+                $orderId,
+                OfflineSyncMutation::OPERATION_START_PREVENTIVE,
+                $metadata,
+                [],
+                function (array $context) use ($order, $orderId, $technicianId, $actor): array {
+                    $this->evaluationService->startInspection($orderId, $technicianId);
+
+                    $this->auditLogger->logMachineEvent(
+                        $order->getMachineId(),
+                        'START_PREVENTIVE_INSPECTION',
+                        $actor,
+                        ['status' => $order->getStatus()],
+                        [
+                            'status' => 'IN_INSPECTION',
+                            'order_id' => $orderId,
+                            'started_at' => date('Y-m-d H:i:s'),
+                        ]
+                    );
+
+                    return [
+                        'http_status' => 200,
+                        'payload' => [
+                            'order_id' => $orderId,
+                            'order_code' => $order->getOrderCode(),
+                            'status' => 'IN_INSPECTION',
+                            'started_at' => date('c'),
+                        ],
+                    ];
+                }
             );
 
-            return Response::json([
-                'order_id' => $orderId,
-                'order_code' => $order->getOrderCode(),
-                'status' => 'IN_INSPECTION',
-                'started_at' => date('c'),
-            ], 200, 'Inspección preventiva iniciada correctamente in situ.');
+            return TechnicianOfflineSyncController::respond(
+                $result,
+                'Inspección preventiva iniciada correctamente in situ.'
+            );
         });
     }
 
@@ -357,93 +389,139 @@ class TechnicianPreventiveController
             $technicianId = $actor['id'];
             $body = $request->getParsedBody();
 
+            $metadata = TechnicianOfflineSyncController::readMetadata($request);
+            if ($metadata instanceof Response) {
+                return $metadata;
+            }
+
             $order = $this->orderRepo->findById($orderId);
             if ($order === null) {
                 return Response::error('ORDER_NOT_FOUND', "La orden de inspección preventiva especificada no existe.", 404);
             }
 
-            // 1. Evaluación del Checklist por el servicio de dominio (EARS 3.1-3.5, 4.1-4.2)
-            $evalResult = $this->evaluationService->evaluateChecklist(
-                $orderId,
-                $technicianId,
-                $body,
-                $actor
-            );
-
-            // 2. Registro opcional de repuestos sustituidos en preventivo (RF-REP-07)
-            $replacedPartsDeclared = !empty($body['replaced_parts_declared']);
-            $partsResult = null;
-            if ($replacedPartsDeclared || !empty($body['replaced_parts'])) {
-                try {
-                    $partsResult = $this->traceabilityService->recordPreventiveReplacedParts(
-                        $orderId,
-                        $technicianId,
-                        $order->getMachineId(),
-                        $order->getLocationId(),
-                        $body['replaced_parts'] ?? [],
-                        $actor
-                    );
-                } catch (\InvalidArgumentException $e) {
-                    $msg = $e->getMessage();
-                    $errCode = str_contains($msg, 'destino') ? 'INVALID_PART_DESTINATION' : 'INVALID_ARGUMENT';
-                    return Response::error($errCode, $msg, 422);
-                }
-            }
-
-            // 3. Si el dictamen es NO_CONFORME, gestionar cuarentena y correctivo con el coexistence bridge
-            if ($evalResult['result'] === 'NO_CONFORME' || $evalResult['is_quarantine_triggered']) {
-                $nonConformItems = array_filter($body['items'] ?? [], function ($item) {
-                    $st = strtoupper((string)($item['status'] ?? ''));
-                    return in_array($st, ['FAIL', 'NO_CONFORME', 'WARN'], true);
-                });
-
-                $generalNotes = $body['general_notes'] ?? ($body['notes'] ?? null);
-
-                $correctiveResult = $this->coexistenceBridge->handleNonConformity(
-                    $orderId,
+            // `$failure` transporta el rechazo de un colaborador que devuelve
+            // `Response` en lugar de lanzar: el callback sólo puede devolver un
+            // array, así que el rechazo viaja como excepción y se devuelve tal cual.
+            $failure = null;
+            try {
+                $result = $this->offlineSync()->executeIdempotentMutation(
                     $technicianId,
-                    $evalResult['temperature_measured'],
-                    array_values($nonConformItems),
-                    $generalNotes,
-                    $actor
-                );
+                    OfflineSyncMutation::STOP_TYPE_PREVENTIVE_ORDER,
+                    $orderId,
+                    OfflineSyncMutation::OPERATION_COMPLETE_PREVENTIVE,
+                    $metadata,
+                    [
+                        // Una inspección desfavorable sin conexión exige el precinto
+                        // físico in situ en máquina perecedera (EARS 03.4, QA 1, Art. II).
+                        'machine_is_perishable' => $metadata !== null && $this->machineIsPerishable((int)$order->getMachineId()),
+                        'operation_has_sanitary_risk' => $this->hasUnfavorableChecklistItems($body),
+                    ],
+                    function (array $context) use ($order, $orderId, $technicianId, $body, $actor, &$failure): array {
+                        // 1. Evaluación del Checklist por el servicio de dominio (EARS 3.1-3.5, 4.1-4.2)
+                        $evalResult = $this->evaluationService->evaluateChecklist(
+                            $orderId,
+                            $technicianId,
+                            $body,
+                            $actor
+                        );
 
-                return Response::json([
-                    'order_id' => $orderId,
-                    'order_code' => $evalResult['order_code'],
-                    'result' => 'NO_CONFORME',
-                    'status' => 'COMPLETED',
-                    'is_quarantine_triggered' => true,
-                    'temperature_measured' => $evalResult['temperature_measured'],
-                    'machine_sanitary_status' => 'QUARANTINE',
-                    'corrective_action' => $correctiveResult,
-                    'replaced_parts_count' => $partsResult['replaced_parts_count'] ?? 0,
-                    'total_parts_cost' => $partsResult['total_parts_cost'] ?? 0.00,
-                    'replaced_parts' => $partsResult['replaced_parts'] ?? [],
-                ], 200, 'ALERTA SANITARIA (Art. II): Máquina puesta en cuarentena y bloqueada en código QR. Incidencia correctiva vinculada procesada.');
+                        // 2. Registro opcional de repuestos sustituidos en preventivo (RF-REP-07)
+                        $replacedPartsDeclared = !empty($body['replaced_parts_declared']);
+                        $partsResult = null;
+                        if ($replacedPartsDeclared || !empty($body['replaced_parts'])) {
+                            try {
+                                $partsResult = $this->traceabilityService->recordPreventiveReplacedParts(
+                                    $orderId,
+                                    $technicianId,
+                                    $order->getMachineId(),
+                                    $order->getLocationId(),
+                                    $body['replaced_parts'] ?? [],
+                                    $actor
+                                );
+                            } catch (\InvalidArgumentException $e) {
+                                $msg = $e->getMessage();
+                                $errCode = str_contains($msg, 'destino') ? 'INVALID_PART_DESTINATION' : 'INVALID_ARGUMENT';
+                                $failure = Response::error($errCode, $msg, 422);
+                                throw new DomainException('El registro de repuestos del preventivo no se pudo completar.');
+                            }
+                        }
+
+                        // 3. Si el dictamen es NO_CONFORME, gestionar cuarentena y correctivo con el coexistence bridge
+                        if ($evalResult['result'] === 'NO_CONFORME' || $evalResult['is_quarantine_triggered']) {
+                            $nonConformItems = array_filter($body['items'] ?? [], function ($item) {
+                                $st = strtoupper((string)($item['status'] ?? ''));
+                                return in_array($st, ['FAIL', 'NO_CONFORME', 'WARN'], true);
+                            });
+
+                            $generalNotes = $body['general_notes'] ?? ($body['notes'] ?? null);
+
+                            $correctiveResult = $this->coexistenceBridge->handleNonConformity(
+                                $orderId,
+                                $technicianId,
+                                $evalResult['temperature_measured'],
+                                array_values($nonConformItems),
+                                $generalNotes,
+                                $actor
+                            );
+
+                            return [
+                                'http_status' => 200,
+                                'payload' => [
+                                    'order_id' => $orderId,
+                                    'order_code' => $evalResult['order_code'],
+                                    'result' => 'NO_CONFORME',
+                                    'status' => 'COMPLETED',
+                                    'is_quarantine_triggered' => true,
+                                    'temperature_measured' => $evalResult['temperature_measured'],
+                                    'machine_sanitary_status' => 'QUARANTINE',
+                                    'corrective_action' => $correctiveResult,
+                                    'replaced_parts_count' => $partsResult['replaced_parts_count'] ?? 0,
+                                    'total_parts_cost' => $partsResult['total_parts_cost'] ?? 0.00,
+                                    'replaced_parts' => $partsResult['replaced_parts'] ?? [],
+                                ],
+                            ];
+                        }
+
+                        // 4. Si el dictamen es CONFORME o CONFORME_CON_OBSERVACIONES, emitir certificado sanitario oficial
+                        $certificate = $this->sanitaryCertificateService->issueCertificate($orderId, $actor);
+
+                        return [
+                            'http_status' => 200,
+                            'payload' => [
+                                'order_id' => $orderId,
+                                'order_code' => $evalResult['order_code'],
+                                'result' => $evalResult['result'],
+                                'status' => 'COMPLETED',
+                                'is_quarantine_triggered' => false,
+                                'temperature_measured' => $evalResult['temperature_measured'],
+                                'next_sanitary_inspection_due' => $certificate->getValidUntil(),
+                                'certificate' => [
+                                    'certificate_code' => $certificate->getCertificateCode(),
+                                    'valid_until' => $certificate->getValidUntil(),
+                                    'technician_operator_code' => $certificate->getTechnicianOperatorCode(),
+                                ],
+                                'machine_sanitary_status' => 'OK',
+                                'replaced_parts_count' => $partsResult['replaced_parts_count'] ?? 0,
+                                'total_parts_cost' => $partsResult['total_parts_cost'] ?? 0.00,
+                                'replaced_parts' => $partsResult['replaced_parts'] ?? [],
+                            ],
+                        ];
+                    }
+                );
+            } catch (DomainException $e) {
+                if ($failure instanceof Response) {
+                    return $failure;
+                }
+
+                throw $e;
             }
 
-            // 4. Si el dictamen es CONFORME o CONFORME_CON_OBSERVACIONES, emitir certificado sanitario oficial
-            $certificate = $this->sanitaryCertificateService->issueCertificate($orderId, $actor);
-
-            return Response::json([
-                'order_id' => $orderId,
-                'order_code' => $evalResult['order_code'],
-                'result' => $evalResult['result'],
-                'status' => 'COMPLETED',
-                'is_quarantine_triggered' => false,
-                'temperature_measured' => $evalResult['temperature_measured'],
-                'next_sanitary_inspection_due' => $certificate->getValidUntil(),
-                'certificate' => [
-                    'certificate_code' => $certificate->getCertificateCode(),
-                    'valid_until' => $certificate->getValidUntil(),
-                    'technician_operator_code' => $certificate->getTechnicianOperatorCode(),
-                ],
-                'machine_sanitary_status' => 'OK',
-                'replaced_parts_count' => $partsResult['replaced_parts_count'] ?? 0,
-                'total_parts_cost' => $partsResult['total_parts_cost'] ?? 0.00,
-                'replaced_parts' => $partsResult['replaced_parts'] ?? [],
-            ], 200, 'Inspección conforme. Certificado sanitario emitido correctamente.');
+            return TechnicianOfflineSyncController::respond(
+                $result,
+                ($result['payload']['result'] ?? '') === 'NO_CONFORME'
+                    ? 'ALERTA SANITARIA (Art. II): Máquina puesta en cuarentena y bloqueada en código QR. Incidencia correctiva vinculada procesada.'
+                    : 'Inspección conforme. Certificado sanitario emitido correctamente.'
+            );
         });
     }
 
@@ -484,30 +562,95 @@ class TechnicianPreventiveController
                 throw new InvalidArgumentException('Debe incluir anotaciones descriptivas sobre la reinspección realizada.');
             }
 
-            $reinspectResult = $this->coexistenceBridge->reinspectAfterSubsanacion(
-                $orderId,
+            $metadata = TechnicianOfflineSyncController::readMetadata($request);
+            if ($metadata instanceof Response) {
+                return $metadata;
+            }
+
+            $result = $this->offlineSync()->executeIdempotentMutation(
                 $technicianId,
-                $temperature,
-                $notes,
-                $actor
+                OfflineSyncMutation::STOP_TYPE_PREVENTIVE_ORDER,
+                $orderId,
+                OfflineSyncMutation::OPERATION_REINSPECT_PREVENTIVE,
+                $metadata,
+                [],
+                function (array $context) use ($orderId, $technicianId, $temperature, $notes, $actor): array {
+                    $reinspectResult = $this->coexistenceBridge->reinspectAfterSubsanacion(
+                        $orderId,
+                        $technicianId,
+                        $temperature,
+                        $notes,
+                        $actor
+                    );
+
+                    return [
+                        'http_status' => 200,
+                        'payload' => [
+                            'order_id' => $reinspectResult['order_id'],
+                            'order_code' => $reinspectResult['order_code'],
+                            'order_type' => 'REINSPECTION',
+                            'result' => 'CONFORME',
+                            'temperature_measured' => $temperature,
+                            'machine_sanitary_status' => 'OK',
+                            'qr_unblocked' => $reinspectResult['qr_unblocked'],
+                            'certificate' => $reinspectResult['certificate'],
+                        ],
+                    ];
+                }
             );
 
-            return Response::json([
-                'order_id' => $reinspectResult['order_id'],
-                'order_code' => $reinspectResult['order_code'],
-                'order_type' => 'REINSPECTION',
-                'result' => 'CONFORME',
-                'temperature_measured' => $temperature,
-                'machine_sanitary_status' => 'OK',
-                'qr_unblocked' => $reinspectResult['qr_unblocked'],
-                'certificate' => $reinspectResult['certificate'],
-            ], 200, 'Reinspección superada satisfactoriamente. Cuarentena levantada y máquina en servicio.');
+            return TechnicianOfflineSyncController::respond(
+                $result,
+                'Reinspección superada satisfactoriamente. Cuarentena levantada y máquina en servicio.'
+            );
         });
     }
 
     // =========================================================================
     // Métodos Auxiliares y Mapeo Centralizado de Excepciones
     // =========================================================================
+
+    /**
+     * Orquestador de la sincronización sin conexión (Módulo 24).
+     *
+     * Se resuelve bajo demanda para que el controlador se construya en suites
+     * unitarias sin abrir conexión adicional.
+     */
+    private function offlineSync(): OfflineSyncService
+    {
+        return $this->offlineSyncService ??= new OfflineSyncService(new PdoOfflineSyncMutationRepository());
+    }
+
+    /**
+     * La máquina de la orden queda bajo vigilancia sanitaria del Art. II.
+     */
+    private function machineIsPerishable(int $machineId): bool
+    {
+        $machine = $this->machineRepo->findById($machineId, false);
+
+        return $machine !== null && $machine->getMachineType()->requiresSanitaryWatch();
+    }
+
+    /**
+     * El checklist remitido contiene algún ítem desfavorable.
+     *
+     * Es la aproximación honesta disponible antes de evaluar el checklist: sin
+     * conexión, el precinto físico debe exigirse mirando lo que el técnico ya
+     * marcó in situ, no un dictamen que el servidor todavía no ha calculado.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function hasUnfavorableChecklistItems(array $body): bool
+    {
+        foreach (($body['items'] ?? []) as $item) {
+            $status = strtoupper(trim((string)(is_array($item) ? ($item['status'] ?? '') : '')));
+            if (in_array($status, ['FAIL', 'NO_CONFORME', 'WARN'], true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private function handleExecution(Closure $callback): Response
     {

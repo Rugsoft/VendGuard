@@ -22,6 +22,11 @@ declare(strict_types=1);
  *   - Cada suite corre en su propio proceso, con la salida y el error capturados en
  *     ficheros temporales (nunca por tubería: una traza larga por `stderr` puede
  *     bloquear al ejecutor esperando `stdout`).
+ *   - Una suite puede declarar `VENDGUARD_TEST_ENV_CONTRACT` para medir contra un
+ *     destinatario distinto del banco del arnés. El canal lee ese fichero (ignorado
+ *     por git), inyecta solo `DATABASE_URL` y `DB_SSL_ROOT_CERT` en su proceso hijo y
+ *     deja intacto el contrato del resto. Sin el fichero, la suite decide: la medición
+ *     remota sigue declarándose no ejecutable, nunca se sustituye en silencio.
  *   - Códigos de salida: 0 todo en verde · 1 alguna suite falló · 2 canal no
  *     ejecutable (sin DSN, motor inalcanzable o canal vacío).
  *
@@ -37,23 +42,13 @@ declare(strict_types=1);
 $projectRoot = dirname(__DIR__);
 $integrationDir = __DIR__ . '/integration';
 
+// La misma clase que usa la guarda documental: el runner y el README no pueden
+// contar cosas distintas si comparten el descubrimiento.
+require_once __DIR__ . '/Support/NewEngineChannel.php';
+
 const EXIT_OK = 0;
 const EXIT_FAILURES = 1;
 const EXIT_NOT_EXECUTABLE = 2;
-
-/**
- * Marca de categoría declarada por una suite, o null si no declara ninguna.
- */
-function newEngineCategory(string $filePath): ?string
-{
-    $source = (string)file_get_contents($filePath);
-
-    if (preg_match('/const\s+VENDGUARD_TEST_CATEGORY\s*=\s*\'([a-z0-9_]+)\';/i', $source, $match) !== 1) {
-        return null;
-    }
-
-    return $match[1];
-}
 
 /**
  * Aserciones declaradas por una suite en su resumen final.
@@ -88,10 +83,22 @@ function countAssertions(string $output): int
  *
  * @return array{0: bool, 1: string, 2: int, 3: int}
  */
-function runSuite(string $filePath): array
+function runSuite(string $filePath, array $environmentOverlay = []): array
 {
     $stdoutPath = (string)tempnam(sys_get_temp_dir(), 'vendguard_new_engine_out_');
     $stderrPath = (string)tempnam(sys_get_temp_dir(), 'vendguard_new_engine_err_');
+
+    // `proc_open` recibe el entorno completo cuando se le pasa el quinto argumento:
+    // se parte del heredado y se superponen las claves del contrato propio de la
+    // suite, sin reemplazar el resto (PATH, PG_TEST_DSN, HOME...).
+    $environment = null;
+    if ($environmentOverlay !== []) {
+        $inherited = getenv();
+        $environment = is_array($inherited) ? $inherited : [];
+        foreach ($environmentOverlay as $key => $value) {
+            $environment[$key] = $value;
+        }
+    }
 
     $process = proc_open(
         [PHP_BINARY, $filePath],
@@ -100,7 +107,9 @@ function runSuite(string $filePath): array
             1 => ['file', $stdoutPath, 'w'],
             2 => ['file', $stderrPath, 'w'],
         ],
-        $pipes
+        $pipes,
+        null,
+        $environment
     );
 
     if (!is_resource($process)) {
@@ -157,21 +166,14 @@ if ($driver !== 'pgsql') {
 // contrato y, si falta, la suite lo declara en lugar de medir a ciegas.
 
 $filter = trim((string)($argv[1] ?? ''));
-$suites = [];
-foreach (glob($integrationDir . '/*.php') ?: [] as $filePath) {
-    if (newEngineCategory($filePath) !== 'new_engine') {
-        continue;
+$suites = NewEngineChannel::discover($integrationDir);
+if ($filter !== '') {
+    foreach (array_keys($suites) as $name) {
+        if (stripos($name, $filter) === false) {
+            unset($suites[$name]);
+        }
     }
-
-    $name = basename($filePath);
-    if ($filter !== '' && stripos($name, $filter) === false) {
-        continue;
-    }
-
-    $suites[$name] = $filePath;
 }
-
-ksort($suites);
 
 if ($suites === []) {
     fwrite(STDERR, "\n[CANAL NO EJECUTABLE] Ninguna suite del canal «new_engine» casa con el filtro"
@@ -191,7 +193,27 @@ $assertions = 0;
 
 foreach ($suites as $name => $filePath) {
     echo "▶ {$name}\n";
-    [$ok, $output, $count, $exitCode] = runSuite($filePath);
+
+    // Contrato propio: solo se inyectan las dos claves que la suite declara medir.
+    // El fichero no se versiona y sus valores no se publican nunca en la salida.
+    $overlay = [];
+    $declaredContract = NewEngineChannel::environmentContractOf($filePath);
+    if ($declaredContract !== null) {
+        $contractFile = $projectRoot . '/' . ltrim($declaredContract, '/\\');
+        if (is_file($contractFile)) {
+            $overlay = NewEngineChannel::readEnvironmentContract(
+                $contractFile,
+                ['DATABASE_URL', 'DB_SSL_ROOT_CERT']
+            );
+            echo '  · contrato propio: ' . $declaredContract
+                . ' (' . count($overlay) . " clave(s) inyectada(s))\n";
+        } else {
+            echo '  · contrato propio declarado pero ausente: ' . $declaredContract
+                . " · la suite decidirá si puede medir\n";
+        }
+    }
+
+    [$ok, $output, $count, $exitCode] = runSuite($filePath, $overlay);
 
     if ($ok) {
         $assertions += $count;

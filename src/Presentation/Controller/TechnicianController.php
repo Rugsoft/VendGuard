@@ -12,6 +12,7 @@ use VendGuard\Application\Service\AuditLogger;
 use VendGuard\Application\Service\IncidentCommentService;
 use VendGuard\Application\Service\IncidentPauseService;
 use VendGuard\Application\Service\NotificationOutboxEnqueuerService;
+use VendGuard\Application\Service\OfflineSyncService;
 use VendGuard\Application\Service\RefundManagementService;
 use VendGuard\Application\Service\SanitaryReportSafeguardService;
 use VendGuard\Application\Service\SparePartTraceabilityService;
@@ -37,11 +38,13 @@ use VendGuard\Core\Domain\Exception\InvalidOutOfCatalogJustificationException;
 use VendGuard\Core\Domain\Exception\InvalidPartQuantityException;
 use VendGuard\Core\Domain\Exception\InvalidResolutionException;
 use VendGuard\Core\Domain\Exception\InvalidTransitionException;
+use VendGuard\Core\Domain\Exception\OfflineSyncValidationException;
 use VendGuard\Core\Domain\Exception\SparePartNotFoundException;
 use VendGuard\Core\Domain\Model\Incident;
 use VendGuard\Core\Domain\Model\Location;
 use VendGuard\Core\Domain\Model\SparePartRequestStatus;
 use VendGuard\Core\Domain\Model\Machine;
+use VendGuard\Core\Domain\Model\OfflineSyncMutation;
 use VendGuard\Core\Domain\Model\User;
 use VendGuard\Core\Domain\Repository\IncidentRepositoryInterface;
 use VendGuard\Core\Domain\Repository\IncidentServiceSheetRepositoryInterface;
@@ -58,6 +61,7 @@ use VendGuard\Core\Domain\Repository\TechnicianShiftRepositoryInterface;
 use VendGuard\Core\Domain\Repository\UserRepositoryInterface;
 use VendGuard\Core\Domain\Repository\VanStockRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
+use VendGuard\Core\Domain\ValueObject\OfflineSyncMetadata;
 use VendGuard\Core\Service\ResolutionValidator;
 use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
 use VendGuard\Infrastructure\Repository\PdoAuditLogRepository;
@@ -65,6 +69,7 @@ use VendGuard\Infrastructure\Repository\PdoIncidentReplacedPartRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentRepository;
 use VendGuard\Infrastructure\Repository\PdoLocationRepository;
 use VendGuard\Infrastructure\Repository\PdoMachineRepository;
+use VendGuard\Infrastructure\Repository\PdoOfflineSyncMutationRepository;
 use VendGuard\Infrastructure\Repository\PdoIncidentServiceSheetRepository;
 use VendGuard\Infrastructure\Repository\PdoTechnicianShiftRepository;
 use VendGuard\Infrastructure\Repository\PdoVanStockRepository;
@@ -128,6 +133,9 @@ class TechnicianController
     /** Saldos de furgoneta para la insignia `van_stock_readiness` (Módulo 23). */
     private ?VanStockRepositoryInterface $vanStockRepo = null;
 
+    /** Orquestador de la sincronización sin conexión (Módulo 24); se resuelve bajo demanda. */
+    private ?OfflineSyncService $offlineSyncService = null;
+
     public function __construct(
         ?IncidentRepositoryInterface $incidentRepo = null,
         ?MachineRepositoryInterface $machineRepo = null,
@@ -146,7 +154,8 @@ class TechnicianController
         ?IncidentServiceSheetRepositoryInterface $serviceSheetRepo = null,
         ?TechnicianShiftRepositoryInterface $shiftRepo = null,
         ?SparePartRequestRepositoryInterface $sparePartRequestRepo = null,
-        ?VanStockRepositoryInterface $vanStockRepo = null
+        ?VanStockRepositoryInterface $vanStockRepo = null,
+        ?OfflineSyncService $offlineSyncService = null
     ) {
         $this->incidentRepo = $incidentRepo ?? new PdoIncidentRepository();
         $this->machineRepo  = $machineRepo ?? new PdoMachineRepository();
@@ -184,6 +193,7 @@ class TechnicianController
         $this->serviceSheetRepo = $serviceSheetRepo;
         $this->sparePartRequestRepo = $sparePartRequestRepo;
         $this->vanStockRepo = $vanStockRepo;
+        $this->offlineSyncService = $offlineSyncService;
     }
 
     private ?NotificationOutboxEnqueuerService $notificationEnqueuer = null;
@@ -207,6 +217,62 @@ class TechnicianController
     private function audit(): AuditLogger
     {
         return $this->auditLogger ??= new AuditLogger(new PdoAuditLogRepository());
+    }
+
+    /**
+     * Orquestador de la sincronización sin conexión (Módulo 24).
+     *
+     * Se resuelve bajo demanda, como el resto de colaboradores opcionales, para que
+     * el controlador se construya en suites unitarias sin abrir conexión.
+     */
+    private function offlineSync(): OfflineSyncService
+    {
+        return $this->offlineSyncService ??= new OfflineSyncService(new PdoOfflineSyncMutationRepository());
+    }
+
+    /**
+     * La máquina del expediente queda bajo vigilancia sanitaria del Art. II.
+     *
+     * Se pregunta al modelo y no al `JOIN` del expediente porque el precinto físico
+     * no puede depender de que una lectura traiga la tipología rellena: un `null`
+     * silencioso ahorraría la guarda sanitaria sobre una máquina perecedera.
+     */
+    private function isPerishableMachine(Incident $incident): bool
+    {
+        $machine = $this->machineRepo->findById((int)$incident->getMachineId(), false);
+
+        return $machine !== null && $machine->getMachineType()->requiresSanitaryWatch();
+    }
+
+    /**
+     * Hito temporal previo del expediente para el sello efectivo (§5.1, `QA 4`).
+     */
+    private function milestoneAt(?string $timestamp): ?DateTimeImmutable
+    {
+        return ($timestamp !== null && trim($timestamp) !== '') ? new DateTimeImmutable($timestamp) : null;
+    }
+
+    /**
+     * El reintegro del expediente ya fue regularizado por Coordinación (`QA 2`).
+     *
+     * Sólo cuenta cuando hay reclamaciones y ninguna espera dictamen: ese es el
+     * supuesto en que el cierre no puede volver a dictaminar el saldo y el hallazgo
+     * del técnico debe quedar como Nota Interna de Taller.
+     */
+    private function refundAlreadyRegularized(int $incidentId): bool
+    {
+        $cases = $this->refundRepo->findRestrictedByIncident($incidentId);
+        if ($cases === []) {
+            return false;
+        }
+
+        foreach ($cases as $case) {
+            if ($case->awaitsInspection()) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -914,9 +980,23 @@ class TechnicianController
             return Response::error('INCIDENT_NOT_FOUND', "No se encontró ninguna incidencia con ID {$incidentId}.", 404);
         }
 
+        // 3.b Metadatos de sincronización sin conexión (Módulo 24, contratos §6.2).
+        //     Sin `client_mutation_id` la petición es online y el servicio no escribe
+        //     nada en el libro de sincronización.
+        $metadata = TechnicianOfflineSyncController::readMetadata($request);
+        if ($metadata instanceof Response) {
+            return $metadata;
+        }
+
         // 4. Verificar asignación a este técnico
         if ($incident->getAssignedTechnicianId() !== $techId) {
-            return Response::error('FORBIDDEN', 'Esta incidencia no está asignada a tu ruta técnica.', 403);
+            return TechnicianOfflineSyncController::conflict(
+                $metadata,
+                'INCIDENT_OWNERSHIP_MISMATCH',
+                'Esta incidencia no está asignada a tu ruta técnica.',
+                'FORBIDDEN',
+                403
+            );
         }
 
         // 4.b Bloqueo de jornada (Módulo 21): el técnico debe tener un turno abierto en estado ON_SHIFT
@@ -937,8 +1017,10 @@ class TechnicianController
             );
         }
 
-        // 5. Validar transición de estado
-        if (!$incident->getStatus()->canTransitionTo(IncidentStatus::IN_PROGRESS)) {
+        // 5. Validar transición de estado. Con metadatos offline esta puerta no
+        //    corre: un reenvío del mismo `client_mutation_id` debe devolver la
+        //    respuesta original (§6.2) y el estado ya no admite la transición.
+        if ($metadata === null && !$incident->getStatus()->canTransitionTo(IncidentStatus::IN_PROGRESS)) {
             return Response::error(
                 'INVALID_STATUS_FOR_START',
                 "No se puede iniciar intervención en una incidencia en estado {$incident->getStatus()->value}.",
@@ -946,21 +1028,53 @@ class TechnicianController
             );
         }
 
-        // 6. Ejecutar inicio en repositorio
+        // 6. Inicio idempotente de la intervención (RF-04.2, RF-04.3, QA 4).
         try {
-            $started = $this->incidentRepo->startIntervention($incidentId, $techId);
+            $result = $this->offlineSync()->executeIdempotentMutation(
+                $techId,
+                OfflineSyncMutation::STOP_TYPE_INCIDENT,
+                $incidentId,
+                OfflineSyncMutation::OPERATION_START_INCIDENT,
+                $metadata,
+                // Hito previo = asignación del expediente (§5.1).
+                ['previous_milestone_at' => $this->milestoneAt($incident->getAssignedAt())],
+                function (array $context) use ($incidentId, $techId, $metadata): array {
+                    // El inicio sin conexión se persiste con su instante efectivo: el cierre
+                    // encadenado lo usa como ancla para conservar Δt (RF-04.3, QA 4). La
+                    // llamada online conserva el reloj del servidor.
+                    $effectiveStart = $metadata !== null ? ($context['effective_occurred_at'] ?? null) : null;
+                    $started = $this->incidentRepo->startIntervention(
+                        $incidentId,
+                        $techId,
+                        $effectiveStart instanceof \DateTimeImmutable ? $effectiveStart : null
+                    );
+
+                    return [
+                        'http_status' => 200,
+                        'payload' => [
+                            'id'         => $started->getId(),
+                            'status'     => $started->getStatus()->value,
+                            'started_at' => $started->getStartedAt(),
+                        ],
+                    ];
+                }
+            );
+        } catch (OfflineSyncValidationException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
         } catch (InvalidTransitionException $e) {
-            return Response::error('INVALID_STATUS_FOR_START', $e->getMessage(), 422);
+            return TechnicianOfflineSyncController::conflict(
+                $metadata,
+                'INVALID_INCIDENT_TRANSITION',
+                $e->getMessage(),
+                'INVALID_STATUS_FOR_START',
+                422
+            );
         } catch (\DomainException $e) {
             return Response::error('OPERATION_FAILED', $e->getMessage(), 500);
         }
 
         // 7. Respuesta exitosa (contrato 5.2)
-        return Response::json([
-            'id'         => $started->getId(),
-            'status'     => $started->getStatus()->value,
-            'started_at' => $started->getStartedAt(),
-        ], 200);
+        return TechnicianOfflineSyncController::respond($result);
     }
 
     /**
@@ -988,6 +1102,12 @@ class TechnicianController
         // 3. Extraer cuerpo de la petición
         $body = $request->getParsedBody();
 
+        // 3.b Metadatos de sincronización sin conexión (Módulo 24, contratos §6.2).
+        $metadata = TechnicianOfflineSyncController::readMetadata($request);
+        if ($metadata instanceof Response) {
+            return $metadata;
+        }
+
         // 4. Verificar existencia de la incidencia
         $incident = $this->incidentRepo->findById($incidentId);
         if ($incident === null) {
@@ -996,11 +1116,17 @@ class TechnicianController
 
         // 5. Verificar asignación a este técnico
         if ($incident->getAssignedTechnicianId() !== $techId) {
-            return Response::error('FORBIDDEN', 'Esta incidencia no está asignada a tu ruta técnica.', 403);
+            return TechnicianOfflineSyncController::conflict(
+                $metadata,
+                'INCIDENT_OWNERSHIP_MISMATCH',
+                'Esta incidencia no está asignada a tu ruta técnica.',
+                'FORBIDDEN',
+                403
+            );
         }
 
-        // 6. Validar transición de estado
-        if (!$incident->getStatus()->canTransitionTo(IncidentStatus::PENDING_PARTS)) {
+        // 6. Validar transición de estado (el reenvío idempotente no pasa por aquí).
+        if ($metadata === null && !$incident->getStatus()->canTransitionTo(IncidentStatus::PENDING_PARTS)) {
             return Response::error(
                 'INVALID_STATUS_FOR_PAUSE',
                 "No se puede pausar por repuestos una incidencia en estado {$incident->getStatus()->value}.",
@@ -1011,48 +1137,78 @@ class TechnicianController
         // 7. Determinar si es solicitud estructurada (RF-REP-03 / RF-REP-04) o texto libre legacy
         $isStructured = array_key_exists('requested_parts', $body) || array_key_exists('is_out_of_catalog', $body);
 
-        if ($isStructured) {
-            $actor = $this->extractActor($request);
-            try {
-                $result = $this->traceability()->pauseIncidentWithParts($incidentId, $techId, $body, $actor);
-                return Response::json($result, 200, 'Intervención pausada por repuestos correctamente.');
-            } catch (IncompatibleSparePartException $e) {
-                return Response::error('INCOMPATIBLE_SPARE_PART', $e->getMessage(), 422);
-            } catch (InvalidOutOfCatalogJustificationException $e) {
-                return Response::error('INVALID_OUT_OF_CATALOG_JUSTIFICATION', $e->getMessage(), 422);
-            } catch (InvalidPartQuantityException $e) {
-                return Response::error('INVALID_PART_QUANTITY', $e->getMessage(), 422);
-            } catch (SparePartNotFoundException $e) {
-                return Response::error('SPARE_PART_NOT_FOUND', $e->getMessage(), 404);
-            } catch (InvalidTransitionException $e) {
-                return Response::error('INVALID_STATUS_FOR_PAUSE', $e->getMessage(), 422);
-            } catch (\InvalidArgumentException $e) {
-                return Response::error('MISSING_PARTS_REQUEST', $e->getMessage(), 422);
-            } catch (\DomainException $e) {
-                return Response::error('OPERATION_FAILED', $e->getMessage(), 400);
+        $reason = '';
+        if (!$isStructured) {
+            // Flujo legacy (T-28): motivo en texto libre
+            $reason = isset($body['pending_parts_reason'])
+                ? trim((string)$body['pending_parts_reason'])
+                : (isset($body['parts_note']) ? trim((string)$body['parts_note']) : '');
+            if ($reason === '') {
+                return Response::error('MISSING_PENDING_PARTS_REASON', 'La descripción del repuesto requerido es obligatoria (pending_parts_reason obligatorio).', 422);
             }
         }
 
-        // Flujo legacy (T-28): motivo en texto libre
-        $reason = isset($body['pending_parts_reason']) 
-            ? trim((string)$body['pending_parts_reason']) 
-            : (isset($body['parts_note']) ? trim((string)$body['parts_note']) : '');
-        if ($reason === '') {
-            return Response::error('MISSING_PENDING_PARTS_REASON', 'La descripción del repuesto requerido es obligatoria (pending_parts_reason obligatorio).', 422);
-        }
-
+        // 8. Pausa idempotente (RF-04.2): la pausa térmica exige el precinto físico
+        //    in situ cuando la máquina es perecedera (Art. II, QA 1).
+        $actor = $this->extractActor($request);
         try {
-            $paused = $this->incidentRepo->pauseIntervention($incidentId, $techId, $reason);
+            $result = $this->offlineSync()->executeIdempotentMutation(
+                $techId,
+                OfflineSyncMutation::STOP_TYPE_INCIDENT,
+                $incidentId,
+                OfflineSyncMutation::OPERATION_PAUSE_INCIDENT_PARTS,
+                $metadata,
+                [
+                    'machine_is_perishable' => $metadata !== null && $this->isPerishableMachine($incident),
+                    'previous_milestone_at' => $this->milestoneAt($incident->getStartedAt()),
+                ],
+                function (array $context) use ($isStructured, $incidentId, $techId, $body, $actor, $reason): array {
+                    if ($isStructured) {
+                        return [
+                            'http_status' => 200,
+                            'payload' => $this->traceability()->pauseIncidentWithParts($incidentId, $techId, $body, $actor),
+                        ];
+                    }
+
+                    $paused = $this->incidentRepo->pauseIntervention($incidentId, $techId, $reason);
+
+                    return [
+                        'http_status' => 200,
+                        'payload' => [
+                            'id'     => $paused->getId(),
+                            'status' => $paused->getStatus()->value,
+                        ],
+                    ];
+                }
+            );
+        } catch (OfflineSyncValidationException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
+        } catch (IncompatibleSparePartException $e) {
+            return Response::error('INCOMPATIBLE_SPARE_PART', $e->getMessage(), 422);
+        } catch (InvalidOutOfCatalogJustificationException $e) {
+            return Response::error('INVALID_OUT_OF_CATALOG_JUSTIFICATION', $e->getMessage(), 422);
+        } catch (InvalidPartQuantityException $e) {
+            return Response::error('INVALID_PART_QUANTITY', $e->getMessage(), 422);
+        } catch (SparePartNotFoundException $e) {
+            return Response::error('SPARE_PART_NOT_FOUND', $e->getMessage(), 404);
         } catch (InvalidTransitionException $e) {
-            return Response::error('INVALID_STATUS_FOR_PAUSE', $e->getMessage(), 422);
+            return TechnicianOfflineSyncController::conflict(
+                $metadata,
+                'INVALID_INCIDENT_TRANSITION',
+                $e->getMessage(),
+                'INVALID_STATUS_FOR_PAUSE',
+                422
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Response::error('MISSING_PARTS_REQUEST', $e->getMessage(), 422);
         } catch (\DomainException $e) {
-            return Response::error('OPERATION_FAILED', $e->getMessage(), 500);
+            return Response::error('OPERATION_FAILED', $e->getMessage(), $isStructured ? 400 : 500);
         }
 
-        return Response::json([
-            'id'     => $paused->getId(),
-            'status' => $paused->getStatus()->value,
-        ], 200);
+        return TechnicianOfflineSyncController::respond(
+            $result,
+            $isStructured ? 'Intervención pausada por repuestos correctamente.' : null
+        );
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -1099,6 +1255,12 @@ class TechnicianController
             );
         }
 
+        // 3.b Metadatos de sincronización sin conexión (Módulo 24, contratos §6.2).
+        $metadata = TechnicianOfflineSyncController::readMetadata($request);
+        if ($metadata instanceof Response) {
+            return $metadata;
+        }
+
         // 4. Existencia del expediente.
         $incident = $this->incidentRepo->findById($incidentId);
         if ($incident === null) {
@@ -1107,9 +1269,15 @@ class TechnicianController
 
         // 5. Un único técnico responsable activo (Art. V.2) y expedientes vivos.
         if ($incident->getAssignedTechnicianId() !== $techId) {
-            return Response::error('FORBIDDEN', 'Esta incidencia no está asignada a tu ruta técnica.', 403);
+            return TechnicianOfflineSyncController::conflict(
+                $metadata,
+                'INCIDENT_OWNERSHIP_MISMATCH',
+                'Esta incidencia no está asignada a tu ruta técnica.',
+                'FORBIDDEN',
+                403
+            );
         }
-        if ($incident->getStatus()->isTerminal()) {
+        if ($metadata === null && $incident->getStatus()->isTerminal()) {
             return Response::error(
                 'FORBIDDEN',
                 "No se puede pausar una incidencia cerrada; el expediente está en estado {$incident->getStatus()->value}.",
@@ -1124,25 +1292,48 @@ class TechnicianController
             return Response::error('INVALID_PAUSE_REQUEST', $e->getMessage(), 422);
         }
 
-        // 7. Unidad de trabajo del servicio: transición + rastro inmutable (Art. III).
+        // 7. Unidad de trabajo idempotente: transición + rastro inmutable (Art. III).
         try {
-            $paused = $this->pauses()->declarePendingInfoPause(
-                $incidentId,
+            $result = $this->offlineSync()->executeIdempotentMutation(
                 $techId,
-                $pauseRequest->reasonCategory,
-                $pauseRequest->normalizedReasonText()
+                OfflineSyncMutation::STOP_TYPE_INCIDENT,
+                $incidentId,
+                OfflineSyncMutation::OPERATION_PAUSE_INCIDENT_PENDING_INFO,
+                $metadata,
+                [
+                    'machine_is_perishable' => $metadata !== null && $this->isPerishableMachine($incident),
+                    'previous_milestone_at' => $this->milestoneAt($incident->getStartedAt()),
+                ],
+                function (array $context) use ($incidentId, $techId, $pauseRequest): array {
+                    return [
+                        'http_status' => 200,
+                        'payload' => $this->pauses()->declarePendingInfoPause(
+                            $incidentId,
+                            $techId,
+                            $pauseRequest->reasonCategory,
+                            $pauseRequest->normalizedReasonText()
+                        )->toArray(),
+                    ];
+                }
             );
+        } catch (OfflineSyncValidationException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
         } catch (InvalidTransitionException $e) {
-            return Response::error('INVALID_STATUS_FOR_PAUSE', $e->getMessage(), 422);
+            return TechnicianOfflineSyncController::conflict(
+                $metadata,
+                'INVALID_INCIDENT_TRANSITION',
+                $e->getMessage(),
+                'INVALID_STATUS_FOR_PAUSE',
+                422
+            );
         } catch (\InvalidArgumentException $e) {
             return Response::error('INVALID_PAUSE_REQUEST', $e->getMessage(), 422);
         } catch (\DomainException | \RuntimeException $e) {
             return Response::error('OPERATION_FAILED', $e->getMessage(), 500);
         }
 
-        return Response::json(
-            $paused->toArray(),
-            200,
+        return TechnicianOfflineSyncController::respond(
+            $result,
             'Incidencia pausada correctamente. Reloj contractual de SLA congelado.'
         );
     }
@@ -1176,6 +1367,12 @@ class TechnicianController
         }
         $techId = (int)$technicianId;
 
+        // 2.b Metadatos de sincronización sin conexión (Módulo 24, contratos §6.2).
+        $metadata = TechnicianOfflineSyncController::readMetadata($request);
+        if ($metadata instanceof Response) {
+            return $metadata;
+        }
+
         // 3. Existencia del expediente.
         $incident = $this->incidentRepo->findById($incidentId);
         if ($incident === null) {
@@ -1184,7 +1381,13 @@ class TechnicianController
 
         // 4. Sólo el técnico responsable activo reanuda su propia parada (Art. V.2).
         if ($incident->getAssignedTechnicianId() !== $techId) {
-            return Response::error('FORBIDDEN', 'Esta incidencia no está asignada a tu ruta técnica.', 403);
+            return TechnicianOfflineSyncController::conflict(
+                $metadata,
+                'INCIDENT_OWNERSHIP_MISMATCH',
+                'Esta incidencia no está asignada a tu ruta técnica.',
+                'FORBIDDEN',
+                403
+            );
         }
 
         // 4.b Bloqueo de jornada (Módulo 21): el técnico debe tener un turno abierto en estado ON_SHIFT
@@ -1226,25 +1429,45 @@ class TechnicianController
             ? trim($body['resume_note'])
             : null;
 
-        // 6. Unidad de trabajo del servicio: cierre del intervalo + desplazamiento de SLA.
+        // 6. Unidad de trabajo idempotente: cierre del intervalo + desplazamiento de SLA.
         try {
-            $resumed = $this->pauses()->resumePendingInfoManually(
-                $incidentId,
+            $result = $this->offlineSync()->executeIdempotentMutation(
                 $techId,
-                IncidentStatus::IN_PROGRESS,
-                $resumeNote
+                OfflineSyncMutation::STOP_TYPE_INCIDENT,
+                $incidentId,
+                OfflineSyncMutation::OPERATION_RESUME_INCIDENT_PENDING_INFO,
+                $metadata,
+                [],
+                function (array $context) use ($incidentId, $techId, $resumeNote): array {
+                    return [
+                        'http_status' => 200,
+                        'payload' => $this->pauses()->resumePendingInfoManually(
+                            $incidentId,
+                            $techId,
+                            IncidentStatus::IN_PROGRESS,
+                            $resumeNote
+                        )->toArray(),
+                    ];
+                }
             );
+        } catch (OfflineSyncValidationException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
         } catch (InvalidTransitionException $e) {
-            return Response::error('INVALID_STATUS_FOR_RESUME', $e->getMessage(), 422);
+            return TechnicianOfflineSyncController::conflict(
+                $metadata,
+                'INVALID_INCIDENT_TRANSITION',
+                $e->getMessage(),
+                'INVALID_STATUS_FOR_RESUME',
+                422
+            );
         } catch (\InvalidArgumentException $e) {
             return Response::error('INVALID_RESUME_TARGET', $e->getMessage(), 422);
         } catch (\DomainException | \RuntimeException $e) {
             return Response::error('OPERATION_FAILED', $e->getMessage(), 500);
         }
 
-        return Response::json(
-            $resumed->toArray(),
-            200,
+        return TechnicianOfflineSyncController::respond(
+            $result,
             'Intervención reanudada en curso. Reloj contractual de SLA reactivado con desplazamiento aplicado.'
         );
     }
@@ -1286,6 +1509,12 @@ class TechnicianController
             return Response::error('UNAUTHORIZED', 'No se pudo identificar al técnico autenticado.', 401);
         }
         $techId = (int)$technicianId;
+
+        // 2.b Metadatos de sincronización sin conexión (Módulo 24, contratos §6.2).
+        $metadata = TechnicianOfflineSyncController::readMetadata($request);
+        if ($metadata instanceof Response) {
+            return $metadata;
+        }
 
         // 3. Extraer y validar cuerpo de la petición (EARS 8.1)
         $body = $request->getParsedBody();
@@ -1331,11 +1560,20 @@ class TechnicianController
 
         // 5. Verificar asignación a este técnico
         if ($incident->getAssignedTechnicianId() !== $techId) {
-            return Response::error('FORBIDDEN', 'Esta incidencia no está asignada a tu ruta técnica.', 403);
+            return TechnicianOfflineSyncController::conflict(
+                $metadata,
+                'INCIDENT_OWNERSHIP_MISMATCH',
+                'Esta incidencia no está asignada a tu ruta técnica.',
+                'FORBIDDEN',
+                403
+            );
         }
 
         // 6. Validar que el estado actual permita transicionar a RESOLVED (EARS 8.2: debe estar en IN_PROGRESS)
-        if (!$incident->getStatus()->canTransitionTo(IncidentStatus::RESOLVED)) {
+        //    Con metadatos offline esta puerta no corre: el reenvío del mismo
+        //    `client_mutation_id` sobre una avería ya cerrada debe devolver la
+        //    respuesta original (§6.2), no un 422 de estado.
+        if ($metadata === null && !$incident->getStatus()->canTransitionTo(IncidentStatus::RESOLVED)) {
             return Response::error(
                 'INVALID_STATUS_FOR_RESOLUTION',
                 "No se puede resolver una incidencia en estado {$incident->getStatus()->value}. La intervención debe estar previamente en curso (IN_PROGRESS).",
@@ -1417,68 +1655,134 @@ class TechnicianController
             $body['sanitary_declarations'] = $rawDeclarations;
         }
 
-        // 8. Bloque de dictamen de saldo (RF-REF-04, RF-REF-05, contrato §4.2.2).
+        // 8-10. Cierre idempotente del expediente (RF-04.2, RF-05.2, Art. II).
         //
-        //    Orden deliberado: TODA la validación ocurre antes de la primera
-        //    escritura y el dictamen se registra ANTES de resolver la avería.
+        //    El dictamen de saldo, el hallazgo de monedas y la transición final
+        //    ocurren DENTRO de la mutación: un reenvío de la cola devuelve la
+        //    respuesta original sin volver a mover dinero, stock ni piezas. El
+        //    orden interno se conserva —dictamen antes de cerrar la avería— porque
+        //    un dictamen perdido deja el dinero del consumidor en el limbo y al
+        //    técnico ya de camino (RF-REF-09).
         //
-        //    Why: the technician is standing at the machine. A 422 costs them a
-        //    dropdown and one retry; a verdict silently dropped would leave the
-        //    consumer's money in limbo with no record of what happened to it, and
-        //    the technician has already driven away. Conversely the machine is
-        //    never held out of service by a refund problem: the technical repair
-        //    is the last write, so a failure there is reported honestly with the
-        //    verdict already on file (RF-REF-09 decoupling).
-        $refundBlock = $this->readRefundInspection($request, (int)$incident->getId());
-        if ($refundBlock instanceof Response) {
-            return $refundBlock;
-        }
-
-        $refundOutcome = null;
-        if ($refundBlock instanceof TechnicianRefundInspectionDTO) {
-            $refundOutcome = $this->fileRefundVerdict(
-                $incidentId,
-                $incident,
-                $refundBlock,
-                $techId,
-                $request
-            );
-            if ($refundOutcome instanceof Response) {
-                return $refundOutcome;
-            }
-        }
-
-        // 9. Hallazgo de monedas de oficio (RF-REF-04): opcional e independiente
-        //    de que exista o no una reclamación previa.
-        $unclaimedFindingId = null;
-        if ($this->wantsUnclaimedCash($body)) {
-            $unclaimedFindingId = $this->registerUnclaimedCash($incidentId, $incident, $techId, $body, $request);
-            if ($unclaimedFindingId instanceof Response) {
-                return $unclaimedFindingId;
-            }
-        }
-
-        // 10. Declaracion obligatoria de repuestos en la resolucion (RF-REP-05 / Modulo M2)
-        $actor = $this->extractActor($request);
-        if (!array_key_exists('replaced_parts_declared', $body) && !array_key_exists('replaced_parts', $body)) {
-            $body['replaced_parts_declared'] = false;
-        }
-
+        //    `$failure` transporta la respuesta de error de un colaborador que
+        //    devuelve `Response` en lugar de lanzar: el callback sólo puede
+        //    devolver un array, así que el rechazo viaja como excepción y se
+        //    devuelve tal cual desde el `catch` exterior.
+        $failure = null;
         try {
-            $result = $this->traceability()->resolveIncidentWithParts($incidentId, $techId, $body, $actor);
+            $result = $this->offlineSync()->executeIdempotentMutation(
+                $techId,
+                OfflineSyncMutation::STOP_TYPE_INCIDENT,
+                $incidentId,
+                OfflineSyncMutation::OPERATION_RESOLVE_INCIDENT,
+                $metadata,
+                [
+                    // Blindaje sanitario (Art. II): la cuarentena declarada por la
+                    // central se conserva aunque la avería se cierre. Los hechos de
+                    // máquina sólo cuestan una lectura cuando la operación viene de
+                    // la cola; la resolución online no paga nada nuevo.
+                    'machine_is_perishable' => $metadata !== null && $this->isPerishableMachine($incident),
+                    'machine_status' => $metadata !== null && $quarantineOnArrival
+                        ? OfflineSyncService::MACHINE_STATUS_SANITARY_QUARANTINE
+                        : null,
+                    'previous_milestone_at' => $this->milestoneAt($incident->getStartedAt()),
+                    // Colisión parcial de reintegro (QA 2): sólo se evalúa cuando la
+                    // operación llega de la cola; la resolución online no cambia.
+                    'refund_already_regularized' => $metadata !== null
+                        && $this->refundAlreadyRegularized($incidentId),
+                ],
+                function (array $context) use (
+                    $incidentId,
+                    $incident,
+                    $techId,
+                    $request,
+                    $body,
+                    $sanitaryRequired,
+                    &$failure
+                ): array {
+                    // 8. Dictamen de saldo (RF-REF-04, RF-REF-05).
+                    $refundOutcome = null;
+                    $refundCollisionNoteId = 0;
 
-            // RF-06.1.1 / RF-06.1.2: la reparación in situ devuelve la máquina al parque
-            // si estaba fuera de servicio por falta de acceso. La puerta sanitaria manda:
-            // una cuarentena vigente NO se levanta por cerrar la avería (Art. II).
-            $result += $this->releaseNoAccessBlockAfterResolution($incident, $request, $sanitaryRequired);
+                    if ($context['skip_refund_block']) {
+                        // El reintegro ya fue regularizado por Coordinación: el
+                        // hallazgo del técnico no puede volver a dictaminar el saldo,
+                        // pero tampoco puede perderse (QA 2, Art. III.3).
+                        $refundCollisionNoteId = $this->dumpRefundCollisionNote($incidentId, $techId, $request);
+                    } else {
+                        $refundBlock = $this->readRefundInspection($request, $incidentId);
+                        if ($refundBlock instanceof Response) {
+                            $failure = $refundBlock;
+                            throw new \DomainException('El dictamen de saldo no se pudo registrar.');
+                        }
 
-            return Response::json(
-                $result + $this->buildRefundSummary($incidentId, $refundOutcome, $unclaimedFindingId),
-                200,
-                $refundOutcome !== null
-                    ? 'Incidencia resuelta y dictamen de efectivo registrado correctamente.'
-                    : 'Incidencia resuelta con registro de repuestos.'
+                        if ($refundBlock instanceof TechnicianRefundInspectionDTO) {
+                            $refundOutcome = $this->fileRefundVerdict(
+                                $incidentId,
+                                $incident,
+                                $refundBlock,
+                                $techId,
+                                $request
+                            );
+                            if ($refundOutcome instanceof Response) {
+                                $failure = $refundOutcome;
+                                throw new \DomainException('El dictamen de saldo no se pudo registrar.');
+                            }
+                        }
+                    }
+
+                    // 9. Hallazgo de monedas de oficio (RF-REF-04): opcional e
+                    //    independiente de que exista o no una reclamación previa.
+                    $unclaimedFindingId = null;
+                    if ($this->wantsUnclaimedCash($body)) {
+                        $unclaimedFindingId = $this->registerUnclaimedCash($incidentId, $incident, $techId, $body, $request);
+                        if ($unclaimedFindingId instanceof Response) {
+                            $failure = $unclaimedFindingId;
+                            throw new \DomainException('El hallazgo de monedas no se pudo registrar.');
+                        }
+                    }
+
+                    // 10. Declaración obligatoria de repuestos (RF-REP-05 / Módulo M2).
+                    $payloadBody = $body;
+                    if (!array_key_exists('replaced_parts_declared', $payloadBody)
+                        && !array_key_exists('replaced_parts', $payloadBody)) {
+                        $payloadBody['replaced_parts_declared'] = false;
+                    }
+
+                    $outcome = $this->traceability()->resolveIncidentWithParts(
+                        $incidentId,
+                        $techId,
+                        $payloadBody,
+                        $this->extractActor($request)
+                    );
+
+                    // RF-06.1.1 / RF-06.1.2: la reparación in situ devuelve la máquina
+                    // al parque si estaba fuera de servicio por falta de acceso. La
+                    // puerta sanitaria manda: una cuarentena vigente NO se levanta por
+                    // cerrar la avería (Art. II).
+                    $outcome += $this->releaseNoAccessBlockAfterResolution($incident, $request, $sanitaryRequired);
+                    $outcome += $this->buildRefundSummary($incidentId, $refundOutcome, $unclaimedFindingId);
+
+                    $transition = [
+                        'http_status' => 200,
+                        'payload' => $outcome,
+                    ];
+
+                    if ($refundCollisionNoteId > 0) {
+                        $transition['refund_collision_note_id'] = $refundCollisionNoteId;
+                    }
+
+                    // La cuarentena retenida se declara explícitamente: el servicio
+                    // exige que el cierre no la levante (EARS 05.4, Art. II).
+                    if ($context['preserve_sanitary_quarantine']) {
+                        $transition['machine_status_after'] = OfflineSyncService::MACHINE_STATUS_SANITARY_QUARANTINE;
+                    }
+
+                    return $transition;
+                }
             );
+        } catch (OfflineSyncValidationException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
         } catch (ServiceSheetPersistenceException $e) {
             // La hoja no se pudo escribir: la transacción ya revirtió piezas, stock y
             // cierre (S5). Sin este `catch`, la excepción escaparía del controlador y el
@@ -1491,7 +1795,13 @@ class TechnicianController
         } catch (InvalidResolutionException $e) {
             return Response::error('INVALID_RESOLUTION', $e->getMessage(), 422, ['errors' => $e->getErrors()]);
         } catch (InvalidTransitionException $e) {
-            return Response::error('INVALID_STATUS_FOR_RESOLUTION', $e->getMessage(), 422);
+            return TechnicianOfflineSyncController::conflict(
+                $metadata,
+                'INVALID_INCIDENT_TRANSITION',
+                $e->getMessage(),
+                'INVALID_STATUS_FOR_RESOLUTION',
+                422
+            );
         } catch (\InvalidArgumentException $e) {
             $msg = $e->getMessage();
             $errCode = 'INVALID_RESOLUTION';
@@ -1504,11 +1814,29 @@ class TechnicianController
             }
             return Response::error($errCode, $msg, 422);
         } catch (\DomainException $e) {
+            // El rechazo de un colaborador que devuelve `Response` viaja por aquí.
+            if ($failure instanceof Response) {
+                return $failure;
+            }
+
             $errCode = (str_contains($e->getMessage(), 'transacci') || str_contains($e->getMessage(), 'base de datos'))
                 ? 'SPARE_PART_TRANSACTION_FAILED'
                 : 'OPERATION_FAILED';
             return Response::error($errCode, $e->getMessage(), 500);
         }
+
+        $message = array_key_exists('refund_processed', $result['payload'])
+            ? 'Incidencia resuelta y dictamen de efectivo registrado correctamente.'
+            : 'Incidencia resuelta con registro de repuestos.';
+
+        // Blindaje sanitario del cierre sin conexión (EARS 05.4, Art. II): la avería
+        // se cierra, pero la máquina no vuelve al servicio. La resolución online
+        // conserva su mensaje de siempre.
+        if ($metadata !== null && ($result['sanitary_quarantine_retained'] ?? false) === true) {
+            $message = TechnicianOfflineSyncController::SANITARY_QUARANTINE_RETAINED_MESSAGE;
+        }
+
+        return TechnicianOfflineSyncController::respond($result, $message);
     }
 
     /**
@@ -1661,6 +1989,64 @@ class TechnicianController
         } catch (\InvalidArgumentException $e) {
             return Response::error('INVALID_REFUND_INSPECTION', $e->getMessage(), 422);
         }
+    }
+
+    /**
+     * Archiva el hallazgo de efectivo del técnico como Nota Interna de Taller
+     * cuando el reintegro ya estaba regularizado por Coordinación (`QA 2`).
+     *
+     * El cierre sin conexión no puede volver a dictaminar un saldo ya resuelto,
+     * pero el trabajo del técnico no se descarta en silencio: queda archivado como
+     * nota interna confidencial, invisible para el responsable de sede (Art. V.4).
+     *
+     * @return int Identificador de la nota creada (0 si el servicio no la devolvió).
+     */
+    private function dumpRefundCollisionNote(int $incidentId, int $techId, Request $request): int
+    {
+        $raw = $request->getParsedBody()['refund_inspection'] ?? [];
+        $raw = is_array($raw) ? $raw : [];
+
+        $finding = strtoupper(trim((string)($raw['finding'] ?? '')));
+        $recovered = $raw['recovered_amount'] ?? null;
+        $justification = trim((string)($raw['justification'] ?? ''));
+
+        $text = '[DICTAMEN DE EFECTIVO SIN CONEXIÓN · El reintegro ya estaba regularizado por Coordinación. '
+            . 'Hallazgo in situ: ' . ($finding !== '' ? $finding : 'NO DECLARADO') . '.';
+
+        if ($recovered !== null && $recovered !== '' && is_numeric($recovered)) {
+            $text .= ' Importe recuperado: ' . number_format((float)$recovered, 2, ',', '.') . ' EUR.';
+        }
+
+        if ($justification !== '') {
+            $text .= ' Justificación: ' . $justification;
+        }
+
+        $text .= ']';
+
+        // El límite del hilo (1.000 caracteres) es del servicio; se recorta aquí para
+        // que una justificación larga no convierta el cierre en un 422 sin salida.
+        if (mb_strlen($text) > IncidentCommentService::MAX_COMMENT_LENGTH) {
+            $text = mb_substr($text, 0, IncidentCommentService::MAX_COMMENT_LENGTH - 1) . ']';
+        }
+
+        $actor = $this->extractActor($request);
+        if (mb_strlen($text) < IncidentCommentService::MIN_COMMENT_LENGTH) {
+            $text = '[DICTAMEN DE EFECTIVO SIN CONEXIÓN]';
+        }
+
+        $thread = $this->comments()->addComment(
+            $incidentId,
+            'TECHNICIAN',
+            $text,
+            [
+                'id' => $techId,
+                'role' => 'TECHNICIAN',
+                'name' => (string)($actor['name'] ?? 'Técnico de Ruta'),
+            ],
+            true
+        );
+
+        return (int)($thread->pagination['latest_id'] ?? 0);
     }
 
     /**
@@ -2100,6 +2486,14 @@ class TechnicianController
             return $incident;
         }
 
+        // 2.b Metadatos de sincronización sin conexión (Módulo 24, contratos §6.2).
+        //     El comentario es independiente de la cadena de la parada y su
+        //     conflicto no bloquea la resolución posterior (`QA 3`).
+        $metadata = TechnicianOfflineSyncController::readMetadata($request);
+        if ($metadata instanceof Response) {
+            return $metadata;
+        }
+
         // 3. Texto del mensaje: solo se comprueba su presencia (400); los límites
         //    de 5 a 1.000 caracteres descriptivos los aplica el servicio (RF-03.1).
         $commentText = trim((string)($request->getBodyParam('comment_text')
@@ -2135,18 +2529,35 @@ class TechnicianController
 
         // 6. Publicación orquestada: sellado, clasificación y auditoría en el servicio.
         try {
-            $thread = $this->comments()->addComment(
+            $result = $this->offlineSync()->executeIdempotentMutation(
+                $technician['id'],
+                OfflineSyncMutation::STOP_TYPE_INCIDENT,
                 (int)$incident->getId(),
-                'TECHNICIAN',
-                $commentText,
-                [
-                    'id' => $technician['id'],
-                    'role' => 'TECHNICIAN',
-                    'name' => $technician['name'],
-                ],
-                $isInternal,
-                $photoFile
+                OfflineSyncMutation::OPERATION_ADD_INCIDENT_COMMENT,
+                $metadata,
+                [],
+                function (array $context) use ($incident, $technician, $commentText, $isInternal, $photoFile): array {
+                    $thread = $this->comments()->addComment(
+                        (int)$incident->getId(),
+                        'TECHNICIAN',
+                        $commentText,
+                        [
+                            'id' => $technician['id'],
+                            'role' => 'TECHNICIAN',
+                            'name' => $technician['name'],
+                        ],
+                        $isInternal,
+                        $photoFile
+                    );
+
+                    return [
+                        'http_status' => 201,
+                        'payload' => $thread->jsonSerialize(),
+                    ];
+                }
             );
+        } catch (OfflineSyncValidationException $e) {
+            return Response::error($e->getErrorCode(), $e->getMessage(), $e->getHttpStatusCode());
         } catch (InvalidCommentLengthException $e) {
             // RF-07.1: se devuelven los datos de texto íntegros para el reintento.
             return Response::error(
@@ -2181,9 +2592,8 @@ class TechnicianController
         }
 
         // 7. Respuesta 201 Created con el hilo actualizado del expediente (RF-03.4).
-        return Response::json(
-            $thread->jsonSerialize(),
-            201,
+        return TechnicianOfflineSyncController::respond(
+            $result,
             $isInternal
                 ? 'Nota interna registrada en el hilo de conversación'
                 : 'Comentario publicado en el hilo de conversación'

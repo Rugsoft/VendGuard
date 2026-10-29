@@ -963,12 +963,162 @@ WHERE NOT EXISTS (
 
 
 -- ============================================================================
+-- SECCIÓN 16 · offline_sync_mutations — sincronizaciones demo (M24)
+-- ============================================================================
+-- QUÉ DEMUESTRA
+--   Dos operaciones reales del libro de idempotencia: una inspección preventiva
+--   completada sin cobertura y aplicada al recuperar la señal (`APPLIED`), y una
+--   reinspección que llegó cuando la orden ya no admitía el cambio y se volcó
+--   como conflicto (`CONFLICT_DUMPED`), conservando el desfase de reloj del
+--   dispositivo en la fila. Son las dos ramas que la bandeja del técnico y el
+--   expediente de coordinación necesitan para no arrancar vacíos.
+--
+-- POR QUÉ LA SECCIÓN PUEDE INSERTAR CERO FILAS
+--   El arranque en limpio (`bin/init_cloud_db.php`) no siembra órdenes
+--   preventivas: su catálogo es maestro y deja el histórico a cero. Como la
+--   parada es polimórfica y apunta a una orden preventiva concreta, las filas se
+--   resuelven por `order_code` y sólo entran cuando esa orden existe —el camino
+--   de `SeedRunner::seedAll()`, que sí la crea—. Inventar un `stop_id` sin fila
+--   detrás sería peor que no sembrar: el libro de idempotencia quedaría
+--   apuntando a un expediente inexistente.
+--
+-- POR QUÉ EL VOLCADO NO SIEMBRA SU EVENTO DE AUDITORÍA
+--   La acción `OFFLINE_CONFLICT_DUMPED` nace en el repositorio del módulo
+--   (T-OFFLINE-05) y su etiqueta en el visor llega con la interfaz
+--   (T-OFFLINE-11); el guardián del vocabulario rechaza cualquier acción
+--   persistida que el visor todavía no sepa nombrar. Sembrarla hoy dejaría
+--   `audit_log` con una acción invisible para coordinación. La mutación
+--   aplicada sí deja rastro con la acción que ya está catalogada.
+
+INSERT INTO offline_sync_mutations (
+    technician_id, client_mutation_id, stop_type, stop_id, operation_type,
+    outcome_status, client_occurred_at, chain_started_at, effective_occurred_at,
+    synced_at, clock_skew_adjusted, sanitary_seal_confirmed,
+    response_http_status, response_payload
+)
+SELECT
+    technician.id,
+    v.client_mutation_id,
+    'PREVENTIVE_ORDER',
+    preventive.id,
+    v.operation_type,
+    v.outcome_status,
+    v.client_occurred_at,
+    v.chain_started_at,
+    v.effective_occurred_at,
+    v.synced_at,
+    v.clock_skew_adjusted,
+    v.sanitary_seal_confirmed,
+    v.response_http_status,
+    v.response_payload || jsonb_build_object('preventive_order_id', preventive.id)
+FROM (VALUES
+    (
+        'jordi.ruta@vendguard.internal',
+        'ORD-PREV-2026-0001',
+        'seed-offline-20261026-0001',
+        'COMPLETE_PREVENTIVE',
+        'APPLIED',
+        CURRENT_TIMESTAMP - INTERVAL '1 day',
+        CURRENT_TIMESTAMP - INTERVAL '1 day',
+        CURRENT_TIMESTAMP - INTERVAL '1 day 25 minutes',
+        CURRENT_TIMESTAMP - INTERVAL '1 day',
+        FALSE,
+        FALSE,
+        200,
+        jsonb_build_object(
+            'status', 'COMPLETED',
+            'result', 'CONFORME',
+            'idempotent_replay', false,
+            'source', 'SEED'
+        )
+    ),
+    (
+        'jordi.ruta@vendguard.internal',
+        'ORD-PREV-2026-0002',
+        'seed-offline-20261026-0002',
+        'REINSPECT_PREVENTIVE',
+        'CONFLICT_DUMPED',
+        CURRENT_TIMESTAMP - INTERVAL '2 days',
+        CURRENT_TIMESTAMP - INTERVAL '3 days',
+        CURRENT_TIMESTAMP - INTERVAL '3 days 25 minutes',
+        CURRENT_TIMESTAMP - INTERVAL '2 days',
+        TRUE,
+        FALSE,
+        409,
+        jsonb_build_object(
+            'error', 'OFFLINE_MUTATION_CONFLICT',
+            'conflict_reason', 'La orden preventiva ya constaba como completada en el servidor al recuperar la cobertura.',
+            'work_summary', jsonb_build_object('checklist_completed', true, 'evidence_photos', 1),
+            'source', 'SEED'
+        )
+    )
+) AS v(
+    technician_email, order_code, client_mutation_id, operation_type,
+    outcome_status, synced_at, client_occurred_at, chain_started_at,
+    effective_occurred_at, clock_skew_adjusted, sanitary_seal_confirmed,
+    response_http_status, response_payload
+)
+JOIN users technician ON technician.email_key = v.technician_email
+JOIN preventive_orders preventive ON preventive.order_code = v.order_code
+WHERE NOT EXISTS (
+    SELECT 1
+      FROM offline_sync_mutations m
+     WHERE m.technician_id = technician.id
+       AND m.client_mutation_id = v.client_mutation_id
+);
+
+
+-- Rastro de auditoría de la mutación aplicada (RF-04.3, Art. III.3). El evento
+-- conserva la hora declarada, la efectiva y la de sincronización para que el
+-- visor pueda distinguir una intervención in situ de una llegada tardía.
+INSERT INTO audit_log (
+    entity_type, entity_id, action, user_id, user_role, user_name,
+    previous_state, new_state, metadata, created_at
+)
+SELECT
+    'PREVENTIVE_ORDER'::audit_entity_type,
+    m.stop_id,
+    'EVALUATE_PREVENTIVE_CHECKLIST',
+    m.technician_id,
+    'TECHNICIAN',
+    technician.name,
+    jsonb_build_object('status', 'IN_PROGRESS'),
+    jsonb_build_object('status', 'COMPLETED', 'result', 'CONFORME'),
+    jsonb_build_object(
+        'source', 'SEED',
+        'offline_sync', jsonb_build_object(
+            'client_mutation_id', m.client_mutation_id,
+            'operation_type', m.operation_type,
+            'client_occurred_at', m.client_occurred_at,
+            'effective_occurred_at', m.effective_occurred_at,
+            'synced_at', m.synced_at,
+            'clock_skew_adjusted', m.clock_skew_adjusted
+        )
+    ),
+    m.synced_at
+FROM offline_sync_mutations m
+JOIN users technician ON technician.id = m.technician_id
+WHERE m.stop_type = 'PREVENTIVE_ORDER'
+  AND m.client_mutation_id = 'seed-offline-20261026-0001'
+  AND NOT EXISTS (
+      SELECT 1
+        FROM audit_log a
+       WHERE a.entity_type = 'PREVENTIVE_ORDER'::audit_entity_type
+         AND a.entity_id = m.stop_id
+         AND a.action = 'EVALUATE_PREVENTIVE_CHECKLIST'
+         AND a.created_at = m.synced_at
+  );
+
+-- ============================================================================
 -- FIN · 10 sedes con CP · 3 zonas operativas · 10 códigos postales · 7 vinculaciones
 --       de cuadrante · 5 saldos de stock de furgoneta · 1 configuración de ruta ·
 --       13 máquinas · 6 usuarios internos · 5 frecuencias normativas · 13 repuestos ·
 --       50 compatibilidades · 1 canal emergencias · 2 turnos demo ·
 --       11 eventos de bitácora · 2 eventos de auditoría de jornada ·
 --       4 órdenes de carga (una por estado) · 9 líneas (1 con baja lógica) ·
---       9 eventos de auditoría de carga.
+--       9 eventos de auditoría de carga · 2 mutaciones de sincronización y 1
+--       evento de auditoría de sincronización **cuando el catálogo preventivo ya
+--       existe** (`SeedRunner`); en el arranque en limpio la Sección 16 no inserta
+--       nada porque no hay orden preventiva a la que apuntar.
 --       0 incidencias · 0 histórico de averías (arranque en limpio estricto).
 -- =============================================================================

@@ -52,18 +52,29 @@ $assert = function (string $label, bool $condition, string $detail = '') use (&$
  * extraction below cannot enumerate; it must be reviewed by hand.
  */
 const KNOWN_DYNAMIC_ACTION_SITES = [
-    'src/Presentation/Controller/CoordinatorController.php::logTicketEvent',
+    // El triaje fusiona la auditoría con la asignación: `buildTicketEvent()`
+    // recibe la acción ya calculada según haya reasignación o no. Las dos ramas
+    // del ternario sí se enumeran como literales, así que la guarda las extrae;
+    // el sitio se declara porque la expresión no es un literal plano.
+    'src/Presentation/Controller/CoordinatorController.php::buildTicketEvent',
     // Módulo 16: `logOpportunisticEvent()` valida la acción contra su catálogo
     // cerrado y delega en `logTicketEvent()` con el código ya normalizado. La
     // delegación es dinámica por diseño; las seis acciones reales se enumeran
     // como literales en cada llamada de `OpportunisticIncidentService` y este
     // guard las extrae de allí.
     'src/Application/Service/AuditLogger.php::logTicketEvent',
+    // Misma delegación: `logTicketEvent()` compone el evento con
+    // `buildTicketEvent(action: $action)` y lo persiste. La acción real la
+    // enumeran los llamadores del servicio, no esta capa.
+    'src/Application/Service/AuditLogger.php::buildTicketEvent',
 ];
 
 /** AuditLogger writers whose second argument (or `action:` named argument) is the action. */
 const AUDIT_WRITER_METHODS = [
     'logTicketEvent',
+    // El triaje fusionado compone el evento antes del cambio y lo entrega al
+    // repositorio en la misma sentencia; la firma de la acción es la misma.
+    'buildTicketEvent',
     'logMachineEvent',
     'logLocationEvent',
     'logUserEvent',
@@ -324,6 +335,30 @@ function extractAuditActions(string $source, string $relativePath): array
     if (preg_match_all("/action'\s*=>\s*'([A-Z][A-Z0-9_]+)'/", $source, $matches)) {
         foreach ($matches[1] as $literal) {
             $literals[$literal] = $literals[$literal] ?? $relativePath . ' (raw insert)';
+        }
+    }
+
+    // Acciones que un escritor directo de `audit_log` declara como constante
+    // propia y entrega por parámetro (`recordAudit(action: self::ACTION_X)`).
+    // Sin esta pasada, Módulo 24 escribía OFFLINE_CONFLICT_DUMPED y
+    // OFFLINE_DEACTIVATED_ACCOUNT_DUMP con un valor ligado a la consulta, y el
+    // catálogo del visor se leía como dos filtros fantasma cuando sí tenían autor.
+    if (str_contains($source, 'INSERT INTO audit_log')
+        && preg_match_all("/const\s+ACTION_[A-Z0-9_]*\s*=\s*'([A-Z][A-Z0-9_]+)'/", $source, $matches)) {
+        foreach ($matches[1] as $literal) {
+            $literals[$literal] = $literals[$literal] ?? $relativePath . ' (action constant)';
+        }
+    }
+
+    // Módulo 24: `PdoOfflineSyncMutationRepository::recordAppliedMutation()`
+    // transcribe `operationType` a `audit_log.action`, y los valores posibles son
+    // la lista cerrada `OfflineSyncMutation::OPERATION_*`. Sin esta pasada esas
+    // filas no tenían escritor enumerable y las nueve operaciones offline se
+    // leían como filtros fantasma en cuanto el visor las ofrecía.
+    if (str_contains($source, 'public const OPERATION_')
+        && preg_match_all("/public const OPERATION_[A-Z0-9_]*\s*=\s*'([A-Z][A-Z0-9_]+)'/", $source, $matches)) {
+        foreach ($matches[1] as $literal) {
+            $literals[$literal] = $literals[$literal] ?? $relativePath . ' (offline operation)';
         }
     }
 

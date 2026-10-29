@@ -216,6 +216,44 @@ assert(
 );
 
 // =========================================================================
+// BLOQUE 3-bis: Recepción de carga sin conexión (Módulo 24, EARS 03.2, D1)
+// =========================================================================
+console.log('\n--- BLOQUE 3-bis: Recepción de carga sin conexión (EARS 03.2) ---');
+
+const offlinePanel = createComponentInstance();
+offlinePanel.isOffline = true;
+offlinePanel.activeDispatchedOrder = {
+  id: 77,
+  order_code: 'RST-2026-0077',
+  total_dispatched_units: 3,
+  items: []
+};
+
+let restockCalls = 0;
+api.technician.confirmVanRestockOrder = async () => {
+  restockCalls++;
+  return { success: true, data: { message: 'Carga confirmada.' } };
+};
+
+await offlinePanel.confirmActiveOrder();
+
+assert(
+  '3.4 Sin conexión la recepción se bloquea antes de llamar a la API',
+  restockCalls === 0 && offlinePanel.isConfirming === false,
+  `llamadas: ${restockCalls}`
+);
+assert(
+  '3.5 El bloqueo informa de que la operación exige conexión en vivo',
+  offlinePanel.confirmError.includes('conexión en vivo')
+    && offlinePanel.confirmMessage === ''
+);
+assert(
+  '3.6 La plantilla conserva el aviso de error para mostrar el bloqueo',
+  SOURCE.includes('data-testid="tech-van-stock-confirm-error"')
+    && SOURCE.includes('{{ confirmError }}')
+);
+
+// =========================================================================
 // BLOQUE 4: Solo lectura, mínimo privilegio y deuda cromática
 // =========================================================================
 console.log('\n--- BLOQUE 4: Solo lectura, mínimo privilegio y deuda cromática ---');

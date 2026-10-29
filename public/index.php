@@ -9,6 +9,32 @@ declare(strict_types=1);
  * Desarrollado bajo la metodología SDD y Dogma Vanilla (PHP 8.2+ puro).
  */
 
+require_once __DIR__ . '/../src/autoload.php';
+
+use VendGuard\Presentation\Http\HttpsPolicy;
+use VendGuard\Presentation\Http\Request;
+use VendGuard\Presentation\Routing\AppRouter;
+
+// 0. Transporte seguro antes de servir nada (Módulo 24, RNF-06, `R2`).
+//
+// La PWA del técnico necesita contexto seguro: sin TLS no hay Web Locks —la
+// coordinación entre pestañas cae al arriendo compartido— ni Service Worker, y
+// la sesión viaja en claro. El backend confía en `X-Forwarded-Proto` cuando un
+// proxy termina el TLS delante, de modo que el despliegue en Cloudflare o bajo
+// Nginx no entra en bucle. `308` conserva método y cuerpo para que un POST de
+// la API llegue intacto a su destino HTTPS.
+$requestScheme = HttpsPolicy::requestScheme($_SERVER);
+if (HttpsPolicy::shouldRedirect($_SERVER)) {
+    header('Location: ' . HttpsPolicy::targetUrl($_SERVER), true, 308);
+    exit;
+}
+
+// HSTS en cuanto la petición es segura, también para los estáticos: el shell y
+// los módulos de la PWA son los que instalan el contexto seguro en el móvil.
+if ($requestScheme === 'https' && !headers_sent()) {
+    header(HttpsPolicy::HSTS_HEADER);
+}
+
 // 1. Despachar ficheros estáticos existentes (/assets/, /uploads/, etc.)
 $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
 $path = parse_url($requestUri, PHP_URL_PATH);
@@ -34,6 +60,10 @@ if ($path !== '/' && $path !== '/index.php' && is_file($filePath)) {
         'jpeg' => 'image/jpeg',
         'webp' => 'image/webp',
         'json' => 'application/json; charset=UTF-8',
+        // El App Shell se sirve también por `/index.html` (fallback offline del
+        // Service Worker): sin este MIME el navegador lo descargaba en vez de
+        // renderizarlo y la navegación sin red no pintaba la interfaz.
+        'html' => 'text/html; charset=UTF-8',
         'ico'  => 'image/x-icon',
         'woff2'=> 'font/woff2',
     ];
@@ -52,11 +82,6 @@ if ($path !== '/' && $path !== '/index.php' && is_file($filePath)) {
     readfile($filePath);
     exit;
 }
-
-require_once __DIR__ . '/../src/autoload.php';
-
-use VendGuard\Presentation\Http\Request;
-use VendGuard\Presentation\Routing\AppRouter;
 
 // Cabeceras de seguridad y CORS
 if (!headers_sent()) {

@@ -43,6 +43,20 @@ export class ApiError extends Error {
 export const REQUEST_TIMEOUT_MS = 5000;
 
 /**
+ * Plazo propio de las subidas `multipart/form-data` (EARS-04.1, Módulo 24).
+ *
+ * Cinco segundos bastan de sobra para un JSON pequeño, pero no para mover hasta 5 MB de
+ * evidencia fotográfica desde una máquina de vending en un sótano con cobertura mala: el
+ * temporizador mide **la transferencia completa**, y abortar a los 5 s convertía una subida
+ * legítima en un `REQUEST_TIMEOUT` que dejaba la cola reintentando para siempre.
+ *
+ * Treinta segundos cubren 5 MB a ~1,4 Mbps sostenidos y siguen acotando la espera del operario.
+ * Solo cambia el plazo del **cuerpo**: el tiempo de conexión del driver PDO mide la ejecución de
+ * la consulta, no la recepción del archivo, así que el techo del servidor sigue intacto.
+ */
+export const UPLOAD_TIMEOUT_MS = 30000;
+
+/**
  * Evento nativo con el que el transporte publica el estado de la conexión (RF-04.3, RF-04.4).
  *
  * El consumidor canónico es `components/ConnectionStateBanner.js`, que reconoce los estados
@@ -159,6 +173,42 @@ export function combineWithTimeoutSignal(callerSignal, timeout) {
       timeout?.cancel?.();
     }
   };
+}
+
+/**
+ * Construye un cuerpo `multipart/form-data` con los campos de un objeto y un
+ * archivo opcional (Módulo 24, contrato §6.3, Art. V.5).
+ *
+ * Multipart no conserva anidamiento: los valores compuestos viajan serializados
+ * como JSON bajo su propia clave, y los escalares como texto. Se usa en los dos
+ * puntos que adjuntan evidencia fotográfica —el volcado de conflicto y el envío
+ * de una operación encolada con foto— para que el cuerpo se forme en un solo
+ * sitio.
+ *
+ * @param {Object} fields Campos a enviar
+ * @param {(Blob|File|null)} [file=null] Archivo adjunto
+ * @param {string|null} [fileName=null] Nombre del archivo si el blob no lo trae
+ * @returns {FormData}
+ */
+export function buildMultipartBody(fields, file = null, fileName = null) {
+  const formData = new FormData();
+
+  for (const [key, value] of Object.entries(fields ?? {})) {
+    if (value === undefined || value === null) {
+      continue;
+    }
+    formData.append(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
+  }
+
+  if (file) {
+    if (fileName) {
+      formData.append('photo', file, fileName);
+    } else {
+      formData.append('photo', file);
+    }
+  }
+
+  return formData;
 }
 
 /**
@@ -384,10 +434,16 @@ export class ApiClient {
     };
 
     // EARS-04.1 — Tiempo de espera ordinario estricto en TODA petición. Si el llamante trae su
-    // propia señal se encadenan las dos: quien cancela sigue pudiendo cancelar y el plazo de
-    // 5,0 s sigue mordiendo. El motivo de cada una viaja distinto para que el sistema sepa si
-    // tiene que avisar al operario (avería) o callarse (cancelación deliberada).
-    const timeout = buildTimeoutSignal();
+    // propia señal se encadenan las dos: quien cancela sigue pudiendo cancelar y el plazo sigue
+    // mordiendo. El motivo de cada una viaja distinto para que el sistema sepa si tiene que
+    // avisar al operario (avería) o callarse (cancelación deliberada).
+    //
+    // La única excepción es el cuerpo `multipart/form-data`: mover hasta 5 MB de foto no cabe en
+    // 5,0 s, así que la subida tiene plazo propio (`UPLOAD_TIMEOUT_MS`) en lugar de convertir una
+    // transferencia lenta pero viva en un fallo de red.
+    const isUpload = typeof FormData !== 'undefined' && config.body instanceof FormData;
+    const timeoutMs = isUpload ? UPLOAD_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+    const timeout = buildTimeoutSignal(timeoutMs);
     const linkedSignal = combineWithTimeoutSignal(options.signal, timeout);
     config.signal = linkedSignal.signal;
 
@@ -406,6 +462,7 @@ export class ApiClient {
       callerOptions: options,
       callerSignal: options.signal,
       hasTimedOut: linkedSignal.hasTimedOut,
+      timeoutMs,
       cancelTimeout: linkedSignal.cancel
     });
 
@@ -427,11 +484,21 @@ export class ApiClient {
    * tarde justo en el caso que existe para cubrir.
    *
    * @param {{endpoint: string, url: string, config: Object, callerOptions: Object,
-   *   callerSignal: (AbortSignal|undefined), hasTimedOut: Function, cancelTimeout: Function}} transport
+   *   callerSignal: (AbortSignal|undefined), hasTimedOut: Function, timeoutMs: number,
+   *   cancelTimeout: Function}} transport
    * @returns {Promise<any>}
    */
   async dispatchRequest(transport) {
-    const { endpoint, url, config, callerOptions, callerSignal, hasTimedOut, cancelTimeout } = transport;
+    const {
+      endpoint,
+      url,
+      config,
+      callerOptions,
+      callerSignal,
+      hasTimedOut,
+      timeoutMs,
+      cancelTimeout
+    } = transport;
 
     this.pendingRequests++;
     this.announceRequestState();
@@ -440,7 +507,7 @@ export class ApiClient {
     try {
       response = await fetch(url, config);
     } catch (networkError) {
-      const failure = this.describeTransportFailure(networkError, { hasTimedOut, callerSignal });
+      const failure = this.describeTransportFailure(networkError, { hasTimedOut, callerSignal, timeoutMs });
 
       // Una cancelación deliberada no es una avería de red: quien canceló ya lo sabe, y anunciar
       // una desconexión global por su decisión sería mentir al resto de la aplicación.
@@ -553,7 +620,7 @@ export class ApiClient {
    * tiene que saber que lo suyo no se ha perdido.
    *
    * @param {*} networkError Error lanzado por `fetch`.
-   * @param {{hasTimedOut?: Function, callerSignal?: AbortSignal}} [transport={}]
+   * @param {{hasTimedOut?: Function, callerSignal?: AbortSignal, timeoutMs?: number}} [transport={}]
    * @returns {{announce: boolean, error: ApiError}}
    */
   describeTransportFailure(networkError, transport = {}) {
@@ -575,7 +642,8 @@ export class ApiClient {
       };
     }
 
-    const seconds = (REQUEST_TIMEOUT_MS / 1000).toFixed(1).replace('.', ',');
+    const appliedTimeoutMs = Number.isFinite(transport.timeoutMs) ? transport.timeoutMs : REQUEST_TIMEOUT_MS;
+    const seconds = (appliedTimeoutMs / 1000).toFixed(1).replace('.', ',');
     const message = timedOut
       ? `El servidor ha tardado más de ${seconds} segundos en responder. Lo que has escrito sigue en el formulario: reintenta cuando recuperes la conexión.`
       : 'Error de conexión con el servidor. Lo que has escrito sigue en el formulario: comprueba tu conexión y reintenta.';
@@ -1877,6 +1945,38 @@ export class ApiClient {
     },
     confirmVanRestockOrder: (orderId, payload = {}) => {
       return this.post(`/technician/van-stock/restock-orders/${encodeURIComponent(orderId)}/confirm`, payload);
+    },
+
+    // Copia local de ruta y volcados de la cola sin conexión (Módulo 24).
+    // El paquete de bootstrap trae los relojes de vigencia del servidor (D6) y se
+    // guarda en `IndexedDB` aislado por técnico (Art. V.4).
+    getOfflineBootstrap: () => {
+      return this.get('/technician/offline/bootstrap');
+    },
+    /**
+     * Vuelca en un toque el trabajo de una parada en conflicto (`RF-05.3`, `QA 1`, `QA 2`).
+     * Acepta JSON, o `multipart/form-data` cuando hay fotografía de evidencia.
+     * @param {Object} payload Contrato §6.3 (metadatos, motivo y resumen del trabajo)
+     * @param {(Blob|File|null)} [photoFile=null]
+     * @param {string|null} [photoName=null]
+     * @returns {Promise<Object>}
+     */
+    dumpOfflineConflict: (payload, photoFile = null, photoName = null) => {
+      const endpoint = '/technician/offline/conflicts/dump';
+
+      return photoFile
+        ? this.upload(endpoint, buildMultipartBody(payload, photoFile, photoName))
+        : this.post(endpoint, payload);
+    },
+    /**
+     * Volcado automático de auditoría cuando la cuenta del técnico fue dada de baja
+     * mientras trabajaba sin conexión (`EARS 06.4`, `QA 5`). No altera estados ni
+     * titularidad: solo archiva constancia de lo realizado.
+     * @param {Array<Object>} items Elementos de la cola con su resumen de trabajo
+     * @returns {Promise<{clear_local_storage: boolean}>}
+     */
+    dumpDeactivatedAccountOfflineQueue: (items) => {
+      return this.post('/technician/offline/deactivated-account-dump', { items });
     }
   };
 

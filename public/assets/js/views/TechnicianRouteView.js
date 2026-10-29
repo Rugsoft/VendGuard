@@ -54,6 +54,18 @@ import {
   opportunisticModeLabel as resolveOpportunisticModeLabel,
   summarizePendingCriticalStops
 } from '../utils/OpportunisticContext.js';
+import { OfflineSyncTrayModal } from '../components/OfflineSyncTrayModal.js';
+import {
+  MUTATION_STATUS,
+  OFFLINE_MESSAGES,
+  OfflineStorage,
+  PERISHABLE_MACHINE_TYPES,
+  SNAPSHOT_VALIDITY,
+  evaluateOfflineShift,
+  evaluateSnapshotValidity,
+  requiresSanitarySeal
+} from '../utils/OfflineStorage.js';
+import { OFFLINE_QUEUE_EVENT, OfflineSyncManager } from '../utils/OfflineSyncManager.js';
 
 export const TechnicianRouteView = {
   name: 'TechnicianRouteView',
@@ -83,7 +95,8 @@ export const TechnicianRouteView = {
     IncidentCommentThreadModal,
     PendingInfoPauseModal,
     TechnicianOpportunisticModal,
-    TechnicianVanStockPanel
+    TechnicianVanStockPanel,
+    OfflineSyncTrayModal
   },
   data() {
     return {
@@ -195,7 +208,66 @@ export const TechnicianRouteView = {
         to_date: '',
         summary: {},
         sessions: []
-      }
+      },
+
+      // ───────────────────────────────────────────────────────────────────
+      // Módulo 24 · Modo sin conexión (RF-02 a RF-06)
+      //
+      // La copia local de ruta y la bandeja viven en `IndexedDB` aisladas por
+      // `technician_id` (Art. V.4). La vista solo lee el estado ya calculado por
+      // `OfflineStorage` / `OfflineSyncManager`: la política de vigencia (4 h / 12 h),
+      // la cuota fotográfica y el encadenamiento temporal no se reimplementan aquí.
+      // ───────────────────────────────────────────────────────────────────
+      offlineStorage: null,
+      offlineManager: null,
+      // Modo de exclusión realmente disponible (`R2`): Web Locks, arriendo en
+      // almacenamiento compartido o solo la pestaña. La bandeja lo advierte.
+      offlineLockMode: 'web-locks',
+      offlineSnapshot: null,
+      offlineValidity: { status: SNAPSHOT_VALIDITY.MISSING, canEnqueueNewActions: false, ageMinutes: null },
+      offlineQueue: { pending: 0, syncing: 0, conflicts: 0, total: 0, photoCount: 0, photoBytes: 0 },
+      offlineQueueItems: [],
+      offlineSyncProgress: { current: 0, total: 0 },
+      isOfflineMode: false,
+      isSyncingOffline: false,
+      offlineNotice: '',
+      showOfflineTray: false,
+      offlineReauthOwner: null,
+      offlineDumpInProgressId: '',
+
+      // Pausa sin conexión: formulario propio de la vista porque los modales
+      // enriquecidos de repuesto y bloqueo de sede exigen red para completarse.
+      showOfflinePauseModal: false,
+      offlinePauseIncident: null,
+      offlinePauseOperation: 'PAUSE_INCIDENT_PARTS',
+      offlinePauseCategory: '',
+      offlinePauseReason: '',
+      offlinePauseError: '',
+      isOfflinePausing: false,
+      sanitarySealConfirmed: false,
+
+      // Comentario in situ sin conexión (RF-03.1.5, D3, QA 3).
+      showOfflineCommentModal: false,
+      offlineCommentIncident: null,
+      offlineCommentText: '',
+      offlineCommentInternal: true,
+      offlineCommentPhoto: null,
+      offlineCommentPhotoError: '',
+      offlineCommentError: '',
+      isOfflineCommenting: false,
+
+      // Checklist preventivo sin conexión (RF-03.1.4, EARS 03.4).
+      showOfflineChecklistModal: false,
+      offlineChecklistOrder: null,
+      offlineChecklistOperation: 'COMPLETE_PREVENTIVE',
+      offlineChecklistItems: [],
+      offlineChecklistTemperature: '',
+      offlineChecklistGeneralNotes: '',
+      offlineChecklistReinspectionNotes: '',
+      offlineChecklistError: '',
+      offlineChecklistSealConfirmed: false,
+      isOfflineChecklistSubmitting: false,
+      offlinePreventiveSelection: ''
     };
   },
   computed: {
@@ -230,6 +302,78 @@ export const TechnicianRouteView = {
 
     myHoursIsEmpty() {
       return this.myHoursSessions.length === 0;
+    },
+
+    /**
+     * Estado de conexión que pinta la bandeja (`RF-02.2`).
+     *
+     * Se deriva del estado del motor y del navegador: una sincronización en curso
+     * manda sobre la etiqueta de red para que el técnico vea el progreso real.
+     *
+     * @returns {string} `ONLINE` | `OFFLINE` | `SYNCING`
+     */
+    offlineConnectionStatus() {
+      if (this.isSyncingOffline) {
+        return 'SYNCING';
+      }
+
+      return this.isOfflineMode ? 'OFFLINE' : 'ONLINE';
+    },
+
+    /** Paradas con una resolución esperando en la cola (`QA 4`). */
+    pendingResolutionStops() {
+      return this.offlineQueueItems.filter(
+        (item) => item?.operation_type === 'RESOLVE_INCIDENT'
+      );
+    },
+
+    /** ¿Hay que avisar de que el Albarán A4 aún no puede imprimirse? (`QA 4`). */
+    hasPendingServiceSheets() {
+      return this.pendingResolutionStops.length > 0;
+    },
+
+    /** ¿La copia local admite nuevas acciones? (`RF-02.4`, `D6`). */
+    canRegisterOfflineActions() {
+      return this.offlineValidity?.canEnqueueNewActions === true;
+    },
+
+    /** Catálogo de causas de pausa por bloqueo de sede, expuesto a la plantilla. */
+    pauseReasonCategories() {
+      return PAUSE_REASON_CATEGORIES;
+    },
+
+    /** Órdenes preventivas ya asignadas que la copia local permite inspeccionar. */
+    offlinePreventiveOrders() {
+      const orders = this.offlineSnapshot?.preventive_orders;
+
+      return Array.isArray(orders)
+        ? orders.filter((order) => ['SCHEDULED', 'IN_INSPECTION', 'REINSPECTION_PENDING'].includes(
+          String(order?.status ?? '')
+        ))
+        : [];
+    },
+
+    /** ¿El checklist local es una reinspección sanitaria? */
+    offlineChecklistIsReinspection() {
+      return this.offlineChecklistOperation === 'REINSPECT_PREVENTIVE';
+    },
+
+    /** Tipo de máquina de la orden preventiva en curso. */
+    offlineChecklistMachineType() {
+      return String(this.offlineChecklistOrder?.machine_type ?? '').toUpperCase();
+    },
+
+    /** ¿La inspección preventiva exige precinto físico in situ? (`EARS 03.4`). */
+    offlineChecklistSealRequired() {
+      if (this.offlineChecklistIsReinspection) {
+        return false;
+      }
+
+      return requiresSanitarySeal(
+        'COMPLETE_PREVENTIVE',
+        { items: this.offlineChecklistItems.map((item) => ({ status: item.status })) },
+        this.offlineChecklistMachineType
+      );
     },
 
     /** «Octubre de 2026» a partir del `month` del contrato §5.6. */
@@ -435,9 +579,34 @@ export const TechnicianRouteView = {
     }
   },
   mounted() {
+    // El motor local arranca antes de la primera petición: si la ruta cae por
+    // falta de cobertura, la copia ya está disponible para hidratar la pantalla.
+    this.initializeOfflineMode().then(() => {
+      // Cola heredada de la sesión anterior con cobertura disponible: se envía
+      // sin esperar a que el técnico pulse nada (`EARS 04.1`).
+      if (this.isAuthenticated && this.offlineQueue.total > 0 && !this.isBrowserOffline()) {
+        this.syncOfflineQueue({ silent: true });
+      }
+    });
+
+    // El reloj de antigüedad debe avanzar solo: una pestaña abierta toda la
+    // mañana sin cobertura tiene que cruzar el aviso de 4 h y el bloqueo de
+    // 12 h sin que el técnico toque nada (`EARS 02.2` a `EARS 02.4`).
+    if (typeof setInterval === 'function') {
+      this._offlineClock = setInterval(() => this.refreshOfflineState(), 60 * 1000);
+    }
+
     if (this.isAuthenticated) {
       this.loadRoute().then(() => this.applyDeepLink());
       this.loadShiftStatus();
+    }
+  },
+  beforeUnmount() {
+    this.detachOfflineListeners();
+
+    if (this._offlineClock) {
+      clearInterval(this._offlineClock);
+      this._offlineClock = null;
     }
   },
   methods: {
@@ -459,20 +628,46 @@ export const TechnicianRouteView = {
     },
 
     async loadShiftStatus() {
+      // Con el navegador sin red no se espera al plazo de la petición: la copia
+      // local del turno se aplica de inmediato para que la parada asignada se
+      // pueda iniciar en el sótano (`EARS 03.1`).
+      if (this.isOfflineMode || this.isBrowserOffline()) {
+        const restored = await this.restoreOfflineShiftStatus();
+        if (restored) {
+          this.offlineNotice = 'Sin cobertura: tu turno se ha restaurado desde la copia local del dispositivo.';
+        }
+        return;
+      }
+
       try {
         const res = await api.get('/technician/shift/status');
         this.applyShiftResponse(res, 'OFF_SHIFT');
+        await this.persistOfflineShiftStatus();
       } catch (err) {
         console.error('Error al cargar estado de turno:', err);
+        // Sin servidor la pantalla no puede quedarse «Fuera de turno»: el
+        // técnico sigue trabajando y la copia local acredita su turno durante
+        // la vigencia de 12 h del paquete (`EARS 03.1`, `EARS 06.2`).
+        const restored = await this.restoreOfflineShiftStatus();
+        if (restored) {
+          this.offlineNotice = 'Sin conexión con el servidor: tu turno se ha restaurado '
+            + 'desde la copia local del dispositivo.';
+        }
       }
     },
 
     async startShift() {
+      if (!this.guardOnlineOnly('Iniciar turno')) {
+        this.shiftError = 'Iniciar turno requiere conexión en vivo con el servidor.';
+        return;
+      }
+
       this.isShiftLoading = true;
       this.shiftError = '';
       try {
         const res = await api.post('/technician/shift/start');
         this.applyShiftResponse(res, 'ON_SHIFT');
+        await this.persistOfflineShiftStatus();
       } catch (err) {
         this.shiftError = err?.message || 'No se pudo iniciar el turno.';
       } finally {
@@ -481,11 +676,17 @@ export const TechnicianRouteView = {
     },
 
     async pauseMealShift() {
+      // EARS 06.2 / QA 5: la pausa de comida exige la cola vacía o volcada.
+      if (!(await this.ensureOfflineQueueReadyForShift())) {
+        return;
+      }
+
       this.isShiftLoading = true;
       this.shiftError = '';
       try {
         const res = await api.post('/technician/shift/pause-meal');
         this.applyShiftResponse(res, 'MEAL_BREAK');
+        await this.persistOfflineShiftStatus();
       } catch (err) {
         this.shiftError = err?.message || 'No se pudo pausar para comida.';
       } finally {
@@ -494,11 +695,17 @@ export const TechnicianRouteView = {
     },
 
     async resumeMealShift() {
+      if (!this.guardOnlineOnly('Reanudar turno')) {
+        this.shiftError = 'Reanudar turno requiere conexión en vivo con el servidor.';
+        return;
+      }
+
       this.isShiftLoading = true;
       this.shiftError = '';
       try {
         const res = await api.post('/technician/shift/resume');
         this.applyShiftResponse(res, 'ON_SHIFT');
+        await this.persistOfflineShiftStatus();
       } catch (err) {
         this.shiftError = err?.message || 'No se pudo reanudar el turno.';
       } finally {
@@ -578,6 +785,12 @@ export const TechnicianRouteView = {
     },
 
     async openShiftHandoverModal() {
+      // El cierre de turno solo puede evaluar el estado real de las paradas
+      // (`EARS 06.2`): primero se envía la cola y se exige volcar conflictos.
+      if (!(await this.ensureOfflineQueueReadyForShift())) {
+        return;
+      }
+
       this.showShiftHandoverModal = true;
       this.handoverMode = 'CLOSE_ONLY';
       this.handoverError = '';
@@ -680,6 +893,11 @@ export const TechnicianRouteView = {
     },
 
     async submitShiftHandover() {
+      if (!this.guardOnlineOnly('Cerrar turno y relevo')) {
+        this.handoverError = 'Cerrar turno requiere conexión en vivo con el servidor.';
+        return;
+      }
+
       if (this.hasInProgressIncidents) {
         this.handoverError = 'No es posible cerrar turno con averías en curso. Debe resolver la intervención o pausarla.';
         return;
@@ -729,6 +947,7 @@ export const TechnicianRouteView = {
         await api.post('/technician/shift/close-handover', payload);
         this.showShiftHandoverModal = false;
         this.shiftStatus = 'OFF_SHIFT';
+        await this.persistOfflineShiftStatus();
         await this.loadRoute();
         // El cierre también consolida el acumulado del día en el contador (RF-07.1).
         await this.loadShiftStatus();
@@ -763,8 +982,788 @@ export const TechnicianRouteView = {
       }
     },
 
+    // =======================================================================
+    // Módulo 24 · Modo sin conexión (RF-02 a RF-06)
+    // =======================================================================
+
+    /** ¿El navegador declara estar sin red? (`API` disponible fuera del navegador → `false`). */
+    isBrowserOffline() {
+      return typeof navigator !== 'undefined' && navigator.onLine === false;
+    },
+
+    /** ¿El fallo es de transporte (caída o plazo agotado), no una respuesta del servidor? */
+    isNetworkFailure(error) {
+      const status = Number(error?.status ?? -1);
+      const code = String(error?.code ?? '');
+
+      return status === 0 || code === 'NETWORK_ERROR' || code === 'REQUEST_TIMEOUT';
+    },
+
+    /** Identificador del técnico autenticado: dueño único de su copia local (Art. V.4). */
+    offlineTechnicianId() {
+      return Number(this.currentUser?.id ?? 0);
+    },
+
+    /**
+     * Enciende el motor local y se suscribe a los cambios de red y de bandeja.
+     *
+     * Se ejecuta en `mounted()` antes de la primera carga de ruta para que la
+     * hidratación desde `IndexedDB` no dependa del orden de las peticiones.
+     */
+    initializeOfflineMode() {
+      if (this.offlineStorage === null) {
+        this.offlineStorage = new OfflineStorage();
+      }
+
+      if (this.offlineManager === null) {
+        this.offlineManager = new OfflineSyncManager({ storage: this.offlineStorage });
+      }
+
+      this.offlineLockMode = this.offlineManager.lockMode;
+
+      this.isOfflineMode = this.isBrowserOffline();
+      this.attachOfflineListeners();
+
+      const ready = this.purgeLocalSessions().then(() => this.refreshOfflineState());
+      if (this.isBrowserOffline()) {
+        return ready.then(() => this.restoreOfflineShiftStatus());
+      }
+
+      return ready;
+    },
+
+    /**
+     * Purga del dispositivo los restos de sesiones que ya no son de este turno
+     * (`M3`, `Art. V.4`).
+     *
+     * Un móvil de ruta se comparte: la copia de otro técnico —ruta, contactos y
+     * evidencias— solo puede quedarse si aún tiene trabajo pendiente, y entonces
+     * el acceso la protege con el titular de la cola (`EARS 06.3`). Las copias
+     * caducadas sin nada que enviar se retiran igual.
+     *
+     * @returns {Promise<void>}
+     */
+    async purgeLocalSessions() {
+      const technicianId = this.offlineTechnicianId();
+      if (!(technicianId > 0) || this.offlineStorage === null) {
+        return;
+      }
+
+      try {
+        await this.offlineStorage.purgeForeignTechnicians(technicianId);
+        await this.offlineStorage.purgeExpiredSessions();
+      } catch (error) {
+        // Un fallo de purga no puede impedir cargar la ruta de la sesión viva.
+      }
+    },
+
+    /**
+     * Anota el turno observado junto a la copia local (`EARS 03.1`).
+     *
+     * Se guarda después de cada respuesta del ciclo de jornada y tras cada
+     * carga online: así la recarga sin red encuentra el último estado conocido
+     * del titular, no el valor por defecto de la vista.
+     *
+     * @returns {Promise<Object|null>}
+     */
+    async persistOfflineShiftStatus() {
+      const technicianId = this.offlineTechnicianId();
+      if (!(technicianId > 0) || !this.offlineStorage) {
+        return null;
+      }
+
+      try {
+        const snapshot = await this.offlineStorage.saveShiftStatus(technicianId, this.shiftStatus);
+        if (snapshot !== null) {
+          this.offlineSnapshot = snapshot;
+        }
+
+        return snapshot;
+      } catch (error) {
+        // Un fallo de `IndexedDB` no puede tumbar la jornada online.
+        return null;
+      }
+    },
+
+    /**
+     * Restaura el turno desde la copia local si sigue vigente (`EARS 03.1`).
+     *
+     * Ni una copia caducada (> 12 h) ni un registro de turno más antiguo que el
+     * paquete reabren la puerta: en ese caso se conserva `OFF_SHIFT`, que es el
+     * fallo seguro y el que ya aplicaba la vista.
+     *
+     * @returns {Promise<boolean>} `true` si se restauró un turno operativo.
+     */
+    async restoreOfflineShiftStatus() {
+      const technicianId = this.offlineTechnicianId();
+      if (!(technicianId > 0) || !this.offlineStorage) {
+        return false;
+      }
+
+      try {
+        // Se lee siempre por la clave del técnico autenticado: una copia en
+        // memoria de otra cuenta —o desactualizada por otra pestaña— no puede
+        // prestar su turno (`Art. V.4`).
+        const snapshot = await this.offlineStorage.getSnapshot(technicianId);
+        const state = evaluateOfflineShift(snapshot, Date.now());
+        if (!state.restorable) {
+          return false;
+        }
+
+        this.offlineSnapshot = snapshot;
+        this.shiftStatus = state.status;
+
+        return state.status !== 'OFF_SHIFT';
+      } catch (error) {
+        return false;
+      }
+    },
+
+    /** Registra los eventos nativos `online` / `offline` y el aviso de la cola. */
+    attachOfflineListeners() {
+      if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
+        return;
+      }
+
+      if (this._offlineHandlers) {
+        return;
+      }
+
+      this._offlineHandlers = {
+        online: () => this.handleConnectivityChange(true),
+        offline: () => this.handleConnectivityChange(false),
+        queue: (event) => this.handleOfflineQueueEvent(event)
+      };
+
+      window.addEventListener('online', this._offlineHandlers.online);
+      window.addEventListener('offline', this._offlineHandlers.offline);
+      window.addEventListener(OFFLINE_QUEUE_EVENT, this._offlineHandlers.queue);
+    },
+
+    /** Retira los listeners al desmontar la vista (sin fugas entre sesiones). */
+    detachOfflineListeners() {
+      if (typeof window === 'undefined' || typeof window.removeEventListener !== 'function') {
+        return;
+      }
+
+      const handlers = this._offlineHandlers;
+      if (!handlers) {
+        return;
+      }
+
+      window.removeEventListener('online', handlers.online);
+      window.removeEventListener('offline', handlers.offline);
+      window.removeEventListener(OFFLINE_QUEUE_EVENT, handlers.queue);
+      this._offlineHandlers = null;
+    },
+
+    /** Relee vigencia, cola y conflictos del técnico autenticado. */
+    async refreshOfflineState() {
+      const technicianId = this.offlineTechnicianId();
+      if (!(technicianId > 0) || this.offlineStorage === null) {
+        return;
+      }
+
+      try {
+        // Los envíos huérfanos vuelven a la cola antes de contar: si una pestaña
+        // murió a mitad de un envío, el elemento quedó en `SYNCING` y la bandeja
+        // lo mostraría como «enviándose» para siempre, sin forma de sincronizarlo
+        // ni de cerrar sesión (`EARS 06.1`, `RF-04.1`).
+        await this.offlineStorage.recoverInterruptedMutations(technicianId);
+
+        const snapshot = await this.offlineStorage.getSnapshot(technicianId);
+        this.offlineSnapshot = snapshot;
+        this.offlineValidity = evaluateSnapshotValidity(snapshot, Date.now());
+
+        const items = await this.offlineStorage.listMutations(technicianId);
+        const count = (status) => items.filter((item) => item?.status === status).length;
+        const withPhoto = items.filter((item) => item?.photo_attachment);
+
+        this.offlineQueueItems = items;
+        this.offlineQueue = {
+          pending: count(MUTATION_STATUS.PENDING),
+          syncing: count(MUTATION_STATUS.SYNCING),
+          conflicts: count(MUTATION_STATUS.CONFLICT),
+          total: items.length,
+          photoCount: withPhoto.length,
+          photoBytes: withPhoto.reduce(
+            (sum, item) => sum + Number(item.photo_attachment?.size ?? 0),
+            0
+          )
+        };
+      } catch (error) {
+        // Sin `IndexedDB` legible la ruta online sigue funcionando: el modo local
+        // no puede tumbar la pantalla que lo contiene.
+      }
+    },
+
+    /**
+     * Guarda la copia local desde el paquete de bootstrap del servidor (`EARS 02.1`).
+     *
+     * Un fallo aquí no rompe la carga de ruta: la ruta ya está pintada y lo único
+     * que se pierde es la posibilidad de trabajar sin cobertura en este viaje.
+     */
+    async refreshOfflineSnapshotFromServer() {
+      const technicianId = this.offlineTechnicianId();
+      if (!(technicianId > 0) || this.offlineManager === null) {
+        return null;
+      }
+
+      try {
+        const result = await this.offlineManager.refreshSnapshot(technicianId);
+        this.offlineSnapshot = result.snapshot;
+        this.offlineValidity = result.validity;
+
+        return result.snapshot;
+      } catch (error) {
+        return null;
+      }
+    },
+
+    /** Normaliza una parada del paquete local a la forma que pinta la tarjeta. */
+    normalizeOfflineStop(stop) {
+      const machine = stop?.machine && typeof stop.machine === 'object' ? { ...stop.machine } : {};
+      const pendingInfo = stop?.pending_info && typeof stop.pending_info === 'object'
+        ? stop.pending_info
+        : {};
+
+      return {
+        ...stop,
+        id: Number(stop?.id ?? stop?.incident_id ?? 0),
+        comments_count: Number(stop?.comments_count ?? 0),
+        site_response_since_pause: stop?.site_response_since_pause === true,
+        pending_info_reason_category: stop?.pending_info_reason_category ?? pendingInfo.category ?? null,
+        pending_info_reason_text: stop?.pending_info_reason_text ?? pendingInfo.reason ?? null,
+        machine
+      };
+    },
+
+    /**
+     * Hidrata la pantalla desde la copia local cuando no hay red (`RF-02.1`).
+     *
+     * @returns {Promise<boolean>} `true` si había copia local del técnico.
+     */
+    async hydrateOfflineRoute() {
+      const technicianId = this.offlineTechnicianId();
+      if (!(technicianId > 0) || this.offlineStorage === null) {
+        return false;
+      }
+
+      try {
+        const snapshot = this.offlineSnapshot ?? (await this.offlineStorage.getSnapshot(technicianId));
+        this.offlineValidity = evaluateSnapshotValidity(snapshot, Date.now());
+
+        if (snapshot === null) {
+          return false;
+        }
+
+        this.offlineSnapshot = snapshot;
+        const envelope = snapshot.route_envelope ?? {};
+        this.incidents = Array.isArray(envelope.stops)
+          ? envelope.stops.map((stop) => this.normalizeOfflineStop(stop))
+          : [];
+        this.enabledLocations = Array.isArray(envelope.enabled_locations)
+          ? envelope.enabled_locations
+          : [];
+        this.pendingCriticalStops = Array.isArray(envelope.pending_critical_stops_other_locations)
+          ? envelope.pending_critical_stops_other_locations
+          : [];
+
+        return true;
+      } catch (error) {
+        return false;
+      }
+    },
+
+    /**
+     * Encola una acción de parada con sus metadatos de sincronización (`D1`, `D5`).
+     *
+     * @param {Object} request
+     * @returns {Promise<Object>} Mutación persistida en la bandeja local
+     */
+    async enqueueOfflineAction(request) {
+      const technicianId = this.offlineTechnicianId();
+      if (!(technicianId > 0) || this.offlineManager === null) {
+        throw new Error('No se pudo identificar tu cuenta para guardar el trabajo sin conexión.');
+      }
+
+      const incident = request?.incident ?? null;
+      let machineType = String(
+        incident?.machine?.machine_type ?? incident?.machine?.type ?? ''
+      ).toUpperCase();
+
+      // La ruta online no publica el tipo de máquina; la copia local sí. Sin este
+      // respaldo, una caída de red justo al pausar una máquina perecedera perdería
+      // la puerta del precinto y el servidor rechazaría la pausa al sincronizar.
+      if (machineType === '') {
+        const localStop = (this.offlineSnapshot?.route_envelope?.stops ?? []).find(
+          (stop) => Number(stop?.id ?? stop?.incident_id) === Number(incident?.id)
+        );
+        machineType = String(localStop?.machine?.machine_type ?? '').toUpperCase();
+      }
+
+      const mutation = await this.offlineManager.enqueue({
+        technicianId,
+        technicianEmail: this.currentUser?.email ?? null,
+        stopType: request.stopType,
+        stopId: request.stopId,
+        operationType: request.operationType,
+        payload: request.payload ?? {},
+        photoFile: request.photoFile ?? null,
+        sanitarySealConfirmed: request.sanitarySealConfirmed === true,
+        ticketOrOrderCode: incident?.ticket_code ?? request.ticketOrOrderCode ?? null,
+        machineId: incident?.machine?.id ?? incident?.machine_id ?? null,
+        machineCode: incident?.machine?.code ?? null,
+        machineType: machineType === '' ? null : machineType
+      });
+
+      await this.refreshOfflineState();
+
+      return mutation;
+    },
+
+    /**
+     * Procesa la cola completa en FIFO y resume el resultado para el técnico
+     * (`EARS 04.1`, `RF-05`).
+     *
+     * @param {{silent?: boolean}} [options={}]
+     * @returns {Promise<{applied: number, conflicts: number, pending: number, interrupted: (string|null)}>}
+     */
+    async syncOfflineQueue(options = {}) {
+      const silent = options?.silent === true;
+      const technicianId = this.offlineTechnicianId();
+
+      if (this.isSyncingOffline) {
+        return { applied: 0, conflicts: 0, pending: this.offlineQueue.total, interrupted: 'already_running' };
+      }
+
+      if (!(technicianId > 0) || this.offlineManager === null) {
+        return { applied: 0, conflicts: 0, pending: 0, interrupted: 'unavailable' };
+      }
+
+      if (this.isBrowserOffline()) {
+        this.isOfflineMode = true;
+        if (!silent) {
+          this.offlineNotice = 'Sin cobertura: la cola queda guardada y se enviará automáticamente al recuperar la conexión.';
+        }
+        return { applied: 0, conflicts: 0, pending: this.offlineQueue.total, interrupted: 'offline' };
+      }
+
+      if (this.offlineQueue.total === 0) {
+        await this.refreshOfflineState();
+      }
+
+      const pendingBefore = Math.max(1, this.offlineQueue.pending + this.offlineQueue.syncing);
+      // Resoluciones que esperan sello: al confirmarse el envío se habilita de
+      // inmediato el Albarán oficial A4 de la primera (`QA 4`, `EARS 03.2.2`).
+      const pendingResolutionIds = this.offlineQueueItems
+        .filter((item) => item?.operation_type === 'RESOLVE_INCIDENT')
+        .map((item) => Number(item?.stop_id))
+        .filter((id) => id > 0);
+      this.isSyncingOffline = true;
+      this.offlineSyncProgress = { current: 0, total: pendingBefore };
+
+      try {
+        const summary = await this.offlineManager.processOutboxQueue(technicianId);
+        this.offlineSyncProgress = {
+          current: Math.min(pendingBefore, summary.applied + summary.conflicts),
+          total: pendingBefore
+        };
+        await this.refreshOfflineState();
+
+        if (summary.conflicts > 0) {
+          this.offlineNotice = `Hay ${summary.conflicts} intervención(es) en conflicto. `
+            + 'Debes volcarlas al expediente antes de cerrar sesión o turno.';
+          this.showOfflineTray = true;
+        } else if (!silent && summary.applied > 0) {
+          this.feedbackMessage = `Se han sincronizado ${summary.applied} intervención(es) con el servidor.`;
+        }
+
+        if (summary.applied > 0 && summary.conflicts === 0 && pendingResolutionIds.length > 0) {
+          this.serviceSheetIncidentId = pendingResolutionIds[0];
+        }
+
+        if (summary.interrupted === 'reauth_required') {
+          await this.handleReauthRequired({ technicianId });
+        } else if (summary.interrupted === 'account_deactivated') {
+          // EARS 06.4 / QA 5: el volcado ya archivó el trabajo como constancia de
+          // auditoría; el dispositivo se libera cerrando la sesión de esa cuenta.
+          this.offlineNotice = 'Tu cuenta ha sido desactivada. El trabajo pendiente se ha volcado '
+            + 'como constancia de auditoría y la sesión se cierra para liberar el dispositivo.';
+          store.clearSession();
+        } else if (summary.interrupted === 'network') {
+          this.isOfflineMode = true;
+        }
+
+        return summary;
+      } catch (error) {
+        if (!silent) {
+          this.offlineNotice = error?.message || 'No se pudo completar la sincronización. La cola sigue guardada.';
+        }
+
+        return { applied: 0, conflicts: 0, pending: this.offlineQueue.total, interrupted: 'error' };
+      } finally {
+        this.isSyncingOffline = false;
+      }
+    },
+
+    /** Reacciona a la recuperación o pérdida de red. */
+    async handleConnectivityChange(isOnline) {
+      this.isOfflineMode = !isOnline;
+
+      if (!isOnline) {
+        if (this.incidents.length === 0) {
+          await this.hydrateOfflineRoute();
+        }
+        await this.refreshOfflineState();
+        await this.restoreOfflineShiftStatus();
+        this.offlineNotice = 'Estás sin conexión: tu ruta se muestra desde la copia local del dispositivo.';
+        return;
+      }
+
+      this.offlineNotice = '';
+      const summary = await this.syncOfflineQueue({ silent: true });
+
+      if (summary?.interrupted !== 'reauth_required') {
+        await this.loadRoute();
+        // Al volver la cobertura manda el servidor: el turno restaurado desde
+        // la copia se contrasta y, si ya no está abierto, la puerta se cierra.
+        await this.loadShiftStatus();
+      }
+    },
+
+    /** Lee los eventos del motor de cola y mantiene la bandeja al día. */
+    handleOfflineQueueEvent(event) {
+      const detail = event?.detail ?? {};
+
+      if (detail.type === 'reauth_required') {
+        this.handleReauthRequired(detail);
+      } else if (detail.type === 'queue_recovered') {
+        const recovered = Array.isArray(detail.mutations) ? detail.mutations.length : 0;
+        this.offlineNotice = `Se ${recovered === 1 ? 'ha' : 'han'} recuperado ${recovered} `
+          + 'envío(s) que quedaron a medias en este dispositivo. La cola los reenviará al servidor.';
+      } else if (detail.type === 'conflict') {
+        this.offlineNotice = 'Una operación ha quedado en conflicto: vuelca el trabajo al expediente desde la bandeja.';
+      } else if (detail.type === 'account_dump_completed') {
+        this.offlineNotice = 'Tu cuenta ya no está activa: el trabajo pendiente se ha volcado como constancia de auditoría.';
+      } else if (detail.type === 'account_dump_failed') {
+        this.errorMessage = 'No se pudo volcar la cola de la cuenta desactivada. Conserva el dispositivo encendido y con cobertura.';
+      }
+
+      return this.refreshOfflineState();
+    },
+
+    /**
+     * Conserva la identidad del titular de la cola cuando la sesión cadua al
+     * sincronizar (`EARS 06.3`, `D4`).
+     */
+    async handleReauthRequired(detail = {}) {
+      const technicianId = Number(detail?.technicianId ?? this.offlineTechnicianId() ?? 0);
+      const snapshot = technicianId > 0 && this.offlineStorage !== null
+        ? await this.offlineStorage.getSnapshot(technicianId)
+        : null;
+
+      this.offlineReauthOwner = {
+        technician_id: technicianId,
+        technician_name: snapshot?.technician_name ?? this.currentUser?.name ?? null,
+        technician_email: snapshot?.technician_email ?? this.currentUser?.email ?? null
+      };
+      this.offlineNotice = 'Tu sesión ha caducado. La cola sigue intacta en el dispositivo: '
+        + 'vuelve a identificarte con la misma cuenta para sincronizarla.';
+      this.showOfflineTray = true;
+    },
+
+    /** Abre el formulario de acceso desde la bandeja (re-autenticación, `EARS 06.3`). */
+    requestOfflineReauth() {
+      this.showOfflineTray = false;
+      this.loginError = this.offlineReauthOwner?.technician_email
+        ? `Identifícate como ${this.offlineReauthOwner.technician_email} para sincronizar su trabajo pendiente.`
+        : 'Vuelve a identificarte con la misma cuenta para sincronizar el trabajo pendiente.';
+
+      if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    },
+
+    /** Volcado de 1 toque de una transición en conflicto (`RF-05.3`, `QA 1`). */
+    async dumpOfflineConflict(clientMutationId) {
+      if (this.offlineManager === null || !clientMutationId) {
+        return;
+      }
+
+      this.offlineDumpInProgressId = String(clientMutationId);
+      this.offlineNotice = '';
+
+      try {
+        await this.offlineManager.dumpConflict(clientMutationId);
+        this.feedbackMessage = 'Trabajo volcado al expediente como Nota Interna de Taller. Conflicto cerrado.';
+      } catch (error) {
+        this.errorMessage = error?.message || 'No se pudo volcar el conflicto al expediente. Inténtalo de nuevo.';
+      } finally {
+        this.offlineDumpInProgressId = '';
+        await this.refreshOfflineState();
+      }
+    },
+
+    /** Estado local de una parada: `''`, `PENDING` o `CONFLICT`. */
+    offlineStopState(incident) {
+      const stopId = Number(incident?.id ?? 0);
+      const items = this.offlineQueueItems.filter(
+        (item) => item?.stop_type === 'INCIDENT' && Number(item?.stop_id) === stopId
+      );
+
+      if (items.some((item) => item?.status === MUTATION_STATUS.CONFLICT)) {
+        return 'CONFLICT';
+      }
+
+      return items.length > 0 ? 'PENDING' : '';
+    },
+
+    /** Etiqueta de la insignia «⏳ Pendiente de sincronizar» (`EARS 03.3.2`). */
+    offlineStopBadgeLabel(incident) {
+      const state = this.offlineStopState(incident);
+      if (state === 'CONFLICT') return '⚠️ Conflicto sin volcar';
+      if (state === 'PENDING') return '⏳ Pendiente de sincronizar';
+
+      return '';
+    },
+
+    /** Tono de esa insignia: semántica de aviso o de error, nunca un color nuevo. */
+    offlineStopBadgeStyle(incident) {
+      if (this.offlineStopState(incident) === 'CONFLICT') {
+        return {
+          backgroundColor: 'var(--color-error-bg)',
+          borderColor: 'var(--color-error-border)',
+          color: 'var(--color-error-text)'
+        };
+      }
+
+      return {
+        backgroundColor: 'var(--color-warning-bg)',
+        borderColor: 'var(--color-warning-border)',
+        color: 'var(--color-warning-text)'
+      };
+    },
+
+    /** Tipo de máquina del paquete local (necesario para la puerta sanitaria). */
+    offlineMachineType(incident) {
+      return String(incident?.machine?.machine_type ?? incident?.machine?.type ?? '').toUpperCase();
+    },
+
+    /** ¿La operación que se va a encolar exige precinto físico in situ? (`EARS 03.4`). */
+    offlineSealRequiredForPause() {
+      return requiresSanitarySeal(
+        this.offlinePauseOperation,
+        {},
+        this.offlineMachineType(this.offlinePauseIncident)
+      );
+    },
+
+    /** Bloquea las operaciones que exigen red en vivo (`RF-03.2`, `D1`). */
+    guardOnlineOnly(operationLabel) {
+      if (!this.isOfflineMode && !this.isBrowserOffline()) {
+        return true;
+      }
+
+      this.errorMessage = `${operationLabel} requiere conexión en vivo con el servidor. `
+        + 'Recupera cobertura para completarla; el trabajo ya guardado en la bandeja no se pierde.';
+
+      return false;
+    },
+
+    /**
+     * Sincronización previa obligatoria antes de pausar o cerrar turno
+     * (`EARS 06.2`, `QA 5`).
+     *
+     * @returns {Promise<boolean>} `true` si la jornada puede cambiar de estado.
+     */
+    async ensureOfflineQueueReadyForShift() {
+      if (this.isOfflineMode || this.isBrowserOffline()) {
+        this.shiftError = 'Los cambios de turno requieren conexión en vivo con el servidor.';
+        return false;
+      }
+
+      await this.refreshOfflineState();
+
+      if (this.offlineQueue.total === 0) {
+        return true;
+      }
+
+      const summary = await this.syncOfflineQueue({ silent: true });
+      await this.refreshOfflineState();
+
+      if (summary?.interrupted === 'reauth_required' || this.offlineQueue.conflicts > 0) {
+        this.shiftError = 'Antes de pausar o cerrar turno debes volcar al expediente las intervenciones en conflicto.';
+        this.showOfflineTray = true;
+        return false;
+      }
+
+      if (this.offlineQueue.total > 0) {
+        this.shiftError = 'No se han podido sincronizar todas las intervenciones pendientes. Reintenta cuando recuperes cobertura.';
+        this.showOfflineTray = true;
+        return false;
+      }
+
+      return true;
+    },
+
+    /** Abre la pausa simplificada sin conexión (repuesto o falta de acceso). */
+    openOfflinePauseModal(incident, operationType) {
+      this.offlinePauseIncident = incident;
+      this.offlinePauseOperation = operationType;
+      this.offlinePauseCategory = '';
+      this.offlinePauseReason = '';
+      this.offlinePauseError = '';
+      this.sanitarySealConfirmed = false;
+      this.showOfflinePauseModal = true;
+      this.selectedIncident = incident;
+    },
+
+    closeOfflinePauseModal() {
+      this.showOfflinePauseModal = false;
+      this.offlinePauseIncident = null;
+      this.offlinePauseError = '';
+      this.offlinePauseReason = '';
+      this.sanitarySealConfirmed = false;
+    },
+
+    /** Valida y encola la pausa sin conexión (`RF-03.1.2`, `EARS 03.4`). */
+    async submitOfflinePause() {
+      const incident = this.offlinePauseIncident;
+      const reason = this.offlinePauseReason.trim();
+      const isPendingInfo = this.offlinePauseOperation === 'PAUSE_INCIDENT_PENDING_INFO';
+      const minimum = isPendingInfo ? 20 : 10;
+
+      if (isPendingInfo && !this.offlinePauseCategory) {
+        this.offlinePauseError = 'Selecciona la causa tipificada de la falta de acceso o información.';
+        return;
+      }
+
+      if (reason.length < minimum) {
+        this.offlinePauseError = `La justificación debe tener al menos ${minimum} caracteres reales para quedar trazada (Art. V.1).`;
+        return;
+      }
+
+      if (this.offlineSealRequiredForPause() && this.sanitarySealConfirmed !== true) {
+        this.offlinePauseError = OFFLINE_MESSAGES.SANITARY_SEAL_REQUIRED;
+        return;
+      }
+
+      if (!this.canRegisterOfflineActions) {
+        this.offlinePauseError = this.offlineValidity?.errorMessage
+          || 'La copia local de la ruta ha caducado: conéctate para actualizarla.';
+        return;
+      }
+
+      this.isOfflinePausing = true;
+      this.offlinePauseError = '';
+
+      const payload = isPendingInfo
+        ? { reason_category: this.offlinePauseCategory, reason_text: reason }
+        : { pending_parts_reason: reason };
+
+      try {
+        await this.enqueueOfflineAction({
+          incident,
+          stopType: 'INCIDENT',
+          stopId: incident.id,
+          operationType: this.offlinePauseOperation,
+          payload,
+          sanitarySealConfirmed: this.sanitarySealConfirmed === true
+        });
+
+        incident.status = isPendingInfo ? INCIDENT_STATUSES.PENDING_INFO : INCIDENT_STATUSES.PENDING_PARTS;
+        if (!isPendingInfo) {
+          incident.pending_parts_reason = reason;
+        }
+
+        this.feedbackMessage = 'Pausa guardada en el dispositivo: ⏳ pendiente de sincronizar.';
+        this.closeOfflinePauseModal();
+      } catch (error) {
+        this.offlinePauseError = error?.message || 'No se pudo guardar la pausa sin conexión.';
+      } finally {
+        this.isOfflinePausing = false;
+      }
+    },
+
+    /** Abre el comentario in situ sin conexión (`RF-03.1.5`). */
+    openOfflineCommentModal(incident) {
+      this.offlineCommentIncident = incident;
+      this.offlineCommentText = '';
+      this.offlineCommentInternal = true;
+      this.offlineCommentPhoto = null;
+      this.offlineCommentPhotoError = '';
+      this.offlineCommentError = '';
+      this.showOfflineCommentModal = true;
+    },
+
+    closeOfflineCommentModal() {
+      this.showOfflineCommentModal = false;
+      this.offlineCommentIncident = null;
+      this.offlineCommentText = '';
+      this.offlineCommentPhoto = null;
+      this.offlineCommentPhotoError = '';
+      this.offlineCommentError = '';
+    },
+
+    /** Captura la evidencia fotográfica del selector nativo (sin red). */
+    handleOfflineCommentPhoto(event) {
+      const file = event?.target?.files?.[0] ?? null;
+      this.offlineCommentPhoto = file;
+      this.offlineCommentPhotoError = '';
+    },
+
+    /** Encola el comentario con su cuota fotográfica (`D3`, `QA 3`). */
+    async submitOfflineComment() {
+      const incident = this.offlineCommentIncident;
+      const text = this.offlineCommentText.trim();
+
+      if (text.length < 3) {
+        this.offlineCommentError = 'Escribe el comentario antes de guardarlo en la bandeja.';
+        return;
+      }
+
+      if (!this.canRegisterOfflineActions) {
+        this.offlineCommentError = this.offlineValidity?.errorMessage
+          || 'La copia local de la ruta ha caducado: conéctate para actualizarla.';
+        return;
+      }
+
+      this.isOfflineCommenting = true;
+      this.offlineCommentError = '';
+
+      try {
+        await this.enqueueOfflineAction({
+          incident,
+          stopType: 'INCIDENT',
+          stopId: incident.id,
+          operationType: 'ADD_INCIDENT_COMMENT',
+          payload: {
+            comment_text: text,
+            is_internal: this.offlineCommentInternal === true
+          },
+          photoFile: this.offlineCommentPhoto
+        });
+
+        if (incident) {
+          incident.comments_count = this.commentCountOf(incident) + 1;
+        }
+
+        this.feedbackMessage = 'Comentario guardado en el dispositivo: ⏳ pendiente de sincronizar.';
+        this.closeOfflineCommentModal();
+      } catch (error) {
+        this.offlineCommentError = error?.message || 'No se pudo guardar el comentario sin conexión.';
+      } finally {
+        this.isOfflineCommenting = false;
+      }
+    },
+
     /**
      * Loads assigned route incidents from backend (RF-07).
+     *
+     * Con red guarda además la copia local de la jornada (`EARS 02.1`). Si la
+     * petición cae por falta de cobertura, la vista se hidrata desde esa copia
+     * en lugar de quedarse en blanco (`EARS 01.2`, `EARS 02.4`).
      */
     async loadRoute() {
       this.isLoading = true;
@@ -778,8 +1777,28 @@ export const TechnicianRouteView = {
         this.incidents = envelope.stops;
         this.enabledLocations = envelope.enabledLocations;
         this.pendingCriticalStops = envelope.pendingCriticalStops;
+        this.isOfflineMode = false;
+        this.offlineNotice = '';
+
+        // La copia local se guarda con el paquete completo (preventivas, catálogo
+        // y furgoneta): la ruta sola no basta para trabajar en el sótano.
+        await this.refreshOfflineSnapshotFromServer();
       } catch (err) {
-        this.errorMessage = err?.message || 'No se pudo sincronizar la ruta de averías. Comprueba tu conexión.';
+        if (this.isNetworkFailure(err)) {
+          this.isOfflineMode = true;
+          const hydrated = await this.hydrateOfflineRoute();
+          await this.restoreOfflineShiftStatus();
+
+          if (hydrated) {
+            this.offlineNotice = 'Estás sin conexión: tu ruta se muestra desde la copia local del dispositivo. '
+              + 'Los cambios se enviarán al recuperar cobertura.';
+          } else {
+            this.errorMessage = 'No hay conexión ni copia local de tu ruta en este dispositivo. '
+              + 'Conéctate una vez para descargarla.';
+          }
+        } else {
+          this.errorMessage = err?.message || 'No se pudo sincronizar la ruta de averías. Comprueba tu conexión.';
+        }
       } finally {
         this.isLoading = false;
       }
@@ -791,6 +1810,12 @@ export const TechnicianRouteView = {
      * @param {{location_id?: number, location?: Object}|null} source Sede habilitada o parada de la ruta.
      */
     openOpportunisticModal(source = null) {
+      // Reclamar una máquina fuera de la ruta exige verificar la titularidad en
+      // vivo (`RF-03.2`, `D1`, Art. V.3).
+      if (!this.guardOnlineOnly('Registrar una avería oportunista')) {
+        return;
+      }
+
       const locationId = Number(
         source?.location_id ?? source?.location?.id ?? this.enabledLocations[0]?.location_id ?? 0
       );
@@ -881,6 +1906,13 @@ export const TechnicianRouteView = {
      * Technician login handler (RF-04).
      */
     async handleInternalLogin() {
+      // El acceso inicial exige red en vivo (`D1`); sin ella solo cabe reutilizar
+      // una sesión ya restaurada en el dispositivo.
+      if (this.isBrowserOffline()) {
+        this.loginError = 'Necesitas conexión a la red para identificarte. La sesión ya abierta sigue funcionando sin cobertura.';
+        return;
+      }
+
       if (!this.loginEmail.trim() || !this.loginPassword.trim()) {
         this.loginError = 'Por favor, introduce correo electrónico y contraseña.';
         return;
@@ -897,10 +1929,36 @@ export const TechnicianRouteView = {
           return;
         }
 
+        // EARS 06.3 y Art. V.4: la cola pendiente pertenece a UN técnico. Si el
+        // dispositivo guarda trabajo de otro operario, no se mezcla ni se envía
+        // con credenciales ajenas: se nombra al titular que debe entrar.
+        const queueOwnerId = Number(this.offlineReauthOwner?.technician_id ?? 0);
+        if (queueOwnerId > 0 && Number(response.user.id) !== queueOwnerId) {
+          const ownerEmail = this.offlineReauthOwner?.technician_email
+            || this.offlineReauthOwner?.technician_name
+            || 'el técnico titular de la cola';
+          store.clearSession();
+          this.loginError = `Este dispositivo tiene trabajo sin sincronizar de ${ownerEmail}. `
+            + 'Identifícate con esa misma cuenta para enviarlo antes de cambiar de usuario.';
+          return;
+        }
+
         store.setInternalSession(response.user, response.token);
         this.loginEmail = '';
         this.loginPassword = '';
+        this.offlineReauthOwner = null;
+        // La sesión anterior deja de ser la del dispositivo en este instante
+        // (`M3`): lo suyo se purga si ya no tiene trabajo pendiente.
+        await this.purgeLocalSessions();
         await this.loadRoute();
+        // El turno activo del servidor se hidrata ya en el acceso: si la
+        // cobertura cae después, la copia local puede restaurarlo sin esperar
+        // a una recarga (`EARS 03.1`).
+        await this.loadShiftStatus();
+
+        if (this.offlineQueue.total > 0) {
+          await this.syncOfflineQueue({ silent: false });
+        }
         // El enlace del mensaje ya estaba en la URL: se aplica después del
         // acceso, que es el único momento en que la ruta es visible.
         this.applyDeepLink();
@@ -912,13 +1970,43 @@ export const TechnicianRouteView = {
     },
 
     /**
-     * Logs out the technician.
+     * Cierra la sesión del técnico sin dejar trabajo atrapado (`EARS 06.1`, `EARS 06.5`).
+     *
+     * Con acciones pendientes o en conflicto la salida se bloquea y se abre la
+     * bandeja con el recuento exacto. Sin cola se borra la copia local del técnico
+     * —paradas, catálogos y bandeja— y el dispositivo queda limpio para otro turno
+     * (Art. V.4).
      */
-    handleLogout() {
+    async handleLogout() {
+      await this.refreshOfflineState();
+
+      if (this.offlineQueue.total > 0) {
+        const pending = this.offlineQueue.pending + this.offlineQueue.syncing;
+        this.errorMessage = `No puedes cerrar sesión: ${this.offlineQueue.total} operación(es) `
+          + `sin sincronizar (${pending} pendiente(s), ${this.offlineQueue.conflicts} en conflicto). `
+          + 'Sincroniza y vuelca los conflictos antes de salir.';
+        this.showOfflineTray = true;
+        return;
+      }
+
+      try {
+        const technicianId = this.offlineTechnicianId();
+        if (technicianId > 0 && this.offlineStorage !== null) {
+          await this.offlineStorage.clearTechnician(technicianId);
+        }
+      } catch (error) {
+        // La sesión se cierra igualmente: sin la cuenta, la copia local no sirve.
+      }
+
       store.clearSession();
+      this.offlineSnapshot = null;
+      this.offlineQueueItems = [];
+      this.offlineQueue = { pending: 0, syncing: 0, conflicts: 0, total: 0, photoCount: 0, photoBytes: 0 };
       this.incidents = [];
       this.feedbackMessage = '';
       this.errorMessage = '';
+      this.offlineNotice = '';
+      this.showOfflineTray = false;
     },
 
     isAssigned(incident) {
@@ -975,6 +2063,13 @@ export const TechnicianRouteView = {
     async startIntervention(incident) {
       if (this.actionInProgressId) return;
 
+      // La recarga sin red puede terminar antes que la consulta de turno: si la
+      // vista aún no sabe nada, la copia local decide antes de bloquear la
+      // parada asignada (`EARS 03.1`).
+      if (this.shiftStatus === 'OFF_SHIFT') {
+        await this.restoreOfflineShiftStatus();
+      }
+
       if (this.shiftStatus !== 'ON_SHIFT') {
         const msg = this.shiftStatus === 'MEAL_BREAK'
           ? 'No puedes iniciar una intervención mientras estás en pausa de comida. Reanuda tu turno primero.'
@@ -990,6 +2085,14 @@ export const TechnicianRouteView = {
       this.feedbackMessage = '';
       this.errorMessage = '';
 
+      // Sin cobertura la acción se guarda con su instante real y se refleja al
+      // instante en la parada local (`EARS 03.1`, `EARS 03.3.2`).
+      if (this.isOfflineMode || this.isBrowserOffline()) {
+        await this.queueStartOffline(incident);
+        this.actionInProgressId = null;
+        return;
+      }
+
       try {
         const res = await api.technician.startIncident(incident.id);
         const startedAt = res?.data?.started_at || new Date().toISOString();
@@ -1001,9 +2104,36 @@ export const TechnicianRouteView = {
         this.feedbackMessage = 'Intervención iniciada en máquina ' + (incident.machine?.code || incident.ticket_code) + '.';
         this.$emit('started', { incidentId: incident.id, startedAt });
       } catch (err) {
-        this.errorMessage = err?.message || 'Error al iniciar la intervención. Revisa el estado de la máquina.';
+        // Una caída de red en el umbral de la máquina no pierde la pulsación:
+        // se convierte en la primera operación de la cadena local (`QA 4`).
+        if (this.isNetworkFailure(err)) {
+          await this.queueStartOffline(incident);
+        } else {
+          this.errorMessage = err?.message || 'Error al iniciar la intervención. Revisa el estado de la máquina.';
+        }
       } finally {
         this.actionInProgressId = null;
+      }
+    },
+
+    /** Encola el inicio/reanudación de una intervención (`D1`, `D5`). */
+    async queueStartOffline(incident) {
+      try {
+        await this.enqueueOfflineAction({
+          incident,
+          stopType: 'INCIDENT',
+          stopId: incident.id,
+          operationType: 'START_INCIDENT',
+          payload: {}
+        });
+
+        const startedAt = new Date().toISOString();
+        incident.status = INCIDENT_STATUSES.IN_PROGRESS;
+        incident.started_at = startedAt;
+        this.feedbackMessage = 'Intervención iniciada sin conexión: ⏳ pendiente de sincronizar.';
+        this.$emit('started', { incidentId: incident.id, startedAt, offline: true });
+      } catch (error) {
+        this.errorMessage = error?.message || 'No se pudo guardar el inicio de la intervención sin conexión.';
       }
     },
 
@@ -1044,6 +2174,14 @@ export const TechnicianRouteView = {
      */
     openCommentsModal(incident) {
       if (!incident) return;
+
+      // El hilo online requiere red; sin cobertura se publica la nota in situ
+      // con la misma garantía de cola y cuota fotográfica (`RF-03.1.5`, `D3`).
+      if (this.isOfflineMode || this.isBrowserOffline()) {
+        this.openOfflineCommentModal(incident);
+        return;
+      }
+
       this.selectedCommentIncident = incident;
       this.showCommentsModal = true;
     },
@@ -1078,6 +2216,13 @@ export const TechnicianRouteView = {
      * @param {Object} incident
      */
     openPauseModal(incident) {
+      // Sin red el modal estructurado de repuestos no puede consultar el catálogo
+      // ni confirmar piezas: se usa el formulario local equivalente (`RF-03.1.2`).
+      if (this.isOfflineMode || this.isBrowserOffline()) {
+        this.openOfflinePauseModal(incident, 'PAUSE_INCIDENT_PARTS');
+        return;
+      }
+
       this.selectedIncident = incident;
       this.pauseReason = incident.pending_parts_reason || '';
       this.pauseError = '';
@@ -1154,6 +2299,14 @@ export const TechnicianRouteView = {
      */
     openPendingInfoPauseModal(incident) {
       if (!incident) return;
+
+      // Sin red se usa el formulario local con la misma causa tipificada y el
+      // umbral de 20 caracteres reales del Art. V.1 (`RF-03.1.2`).
+      if (this.isOfflineMode || this.isBrowserOffline()) {
+        this.openOfflinePauseModal(incident, 'PAUSE_INCIDENT_PENDING_INFO');
+        return;
+      }
+
       this.pendingInfoIncident = incident;
       this.pendingInfoResumeError = '';
       this.showPendingInfoPauseModal = true;
@@ -1208,6 +2361,12 @@ export const TechnicianRouteView = {
     async resumePendingInfoIntervention(incident) {
       if (!incident?.id || this.isResumingPendingInfo) return;
 
+      // Misma puerta que el inicio: la copia local puede acreditar el turno
+      // cuando la recarga sin red llega antes que la consulta al servidor.
+      if (this.shiftStatus === 'OFF_SHIFT') {
+        await this.restoreOfflineShiftStatus();
+      }
+
       if (this.shiftStatus !== 'ON_SHIFT') {
         const msg = this.shiftStatus === 'MEAL_BREAK'
           ? 'No puedes reanudar una intervención mientras estás en pausa de comida. Reanuda tu turno primero.'
@@ -1223,6 +2382,12 @@ export const TechnicianRouteView = {
       this.isResumingPendingInfo = true;
       this.pendingInfoResumeError = '';
       this.errorMessage = '';
+
+      if (this.isOfflineMode || this.isBrowserOffline()) {
+        await this.queueResumeOffline(incident);
+        this.isResumingPendingInfo = false;
+        return;
+      }
 
       try {
         const payload = await api.technician.resumeIncidentPendingInfo(
@@ -1242,9 +2407,41 @@ export const TechnicianRouteView = {
           status: payload.status || INCIDENT_STATUSES.IN_PROGRESS
         });
       } catch (err) {
-        this.pendingInfoResumeError = err?.message || 'No se pudo reanudar la intervención. Inténtalo de nuevo.';
+        if (this.isNetworkFailure(err)) {
+          await this.queueResumeOffline(incident);
+        } else {
+          this.pendingInfoResumeError = err?.message || 'No se pudo reanudar la intervención. Inténtalo de nuevo.';
+        }
       } finally {
         this.isResumingPendingInfo = false;
+      }
+    },
+
+    /** Encola la reanudación de una pausa por bloqueo de sede (`D1`, `QA 4`). */
+    async queueResumeOffline(incident) {
+      try {
+        await this.enqueueOfflineAction({
+          incident,
+          stopType: 'INCIDENT',
+          stopId: incident.id,
+          operationType: 'RESUME_INCIDENT_PENDING_INFO',
+          payload: {}
+        });
+
+        incident.status = INCIDENT_STATUSES.IN_PROGRESS;
+        incident.paused_at = null;
+        if (!incident.started_at) {
+          incident.started_at = new Date().toISOString();
+        }
+
+        this.feedbackMessage = 'Intervención reanudada sin conexión: ⏳ pendiente de sincronizar.';
+        this.$emit('pending-info-resumed', {
+          incidentId: incident.id,
+          status: INCIDENT_STATUSES.IN_PROGRESS,
+          offline: true
+        });
+      } catch (error) {
+        this.pendingInfoResumeError = error?.message || 'No se pudo guardar la reanudación sin conexión.';
       }
     },
 
@@ -1396,6 +2593,18 @@ export const TechnicianRouteView = {
         return;
       }
 
+      // Sin red no se puede consultar el sub-bloque de reintegro. El cierre offline
+      // se admite sin veredicto y el servidor resolverá la colisión parcial al
+      // sincronizar, anexando el dictamen como Nota Interna (`EARS 05.2`, `QA 2`).
+      if (this.isOfflineMode || this.isBrowserOffline()) {
+        this.refundRequests = [];
+        this.hasPendingRefundVerdict = false;
+        this.refundInspectionFailed = false;
+        this.resolveRefundData = { isValid: true };
+        this.isLoadingRefundInspection = false;
+        return;
+      }
+
       const requestId = this.refundInspectionRequestId;
       this.refundInspectionFailed = false;
       this.isLoadingRefundInspection = true;
@@ -1510,22 +2719,32 @@ export const TechnicianRouteView = {
       this.isResolving = true;
       this.resolveError = '';
 
+      const hasParts = Boolean(this.resolvePartsData?.replaced_parts_declared);
+      const replacedParts = hasParts ? (this.resolvePartsData?.replaced_parts || []) : [];
+      const payload = {
+        diagnosis: diag,
+        action_taken: act,
+        ...refundPayload,
+        ...sanitaryPayload
+      };
+      if (hasParts) {
+        payload.replaced_parts_declared = true;
+        payload.replaced_parts = replacedParts;
+      }
+      if (serviceSheetPayload) {
+        payload.service_sheet = serviceSheetPayload;
+      }
+
+      // Sin cobertura la resolución viaja entera a la bandeja: diagnóstico, acción,
+      // piezas, reintegro y firma. El Albarán A4 solo se habilita cuando el servidor
+      // confirma el cierre (`EARS 03.2.2`, `QA 4`).
+      if (this.isOfflineMode || this.isBrowserOffline()) {
+        await this.queueResolutionOffline({ incident: this.selectedIncident, payload, diag, act, hasParts, replacedParts });
+        this.isResolving = false;
+        return;
+      }
+
       try {
-        const hasParts = Boolean(this.resolvePartsData?.replaced_parts_declared);
-        const replacedParts = hasParts ? (this.resolvePartsData?.replaced_parts || []) : [];
-        const payload = {
-          diagnosis: diag,
-          action_taken: act,
-          ...refundPayload,
-          ...sanitaryPayload
-        };
-        if (hasParts) {
-          payload.replaced_parts_declared = true;
-          payload.replaced_parts = replacedParts;
-        }
-        if (serviceSheetPayload) {
-          payload.service_sheet = serviceSheetPayload;
-        }
         const hasRefundPayload = Object.keys(refundPayload).length > 0;
         const hasSanitaryPayload = Object.keys(sanitaryPayload).length > 0;
         const res = hasParts || hasRefundPayload || hasSanitaryPayload || serviceSheetPayload !== null
@@ -1554,6 +2773,12 @@ export const TechnicianRouteView = {
         // Remove from active route
         this.incidents = this.incidents.filter(inc => inc.id !== solvedId);
       } catch (err) {
+        // Caída de red en el último segundo: el parte íntegro se guarda en la
+        // bandeja en lugar de perderse o quedar a medias.
+        if (this.isNetworkFailure(err)) {
+          await this.queueResolutionOffline({ incident: this.selectedIncident, payload, diag, act, hasParts, replacedParts });
+          return;
+        }
         // El reloj biológico pudo vencer entre la carga de la ruta y el intento de
         // cierre: el servidor exige las declaraciones y la puerta se abre en el acto
         // para que el técnico pueda completarlas sin reabrir el modal.
@@ -1569,6 +2794,44 @@ export const TechnicianRouteView = {
         this.resolveError = err?.message || 'No se pudo resolver la incidencia. Comprueba los requisitos de validación.';
       } finally {
         this.isResolving = false;
+      }
+    },
+
+    /**
+     * Guarda la resolución completa en la bandeja local (`EARS 05.3`, `QA 4`).
+     *
+     * El aviso del Albarán se muestra en positivo mientras el envío está pendiente:
+     * el documento oficial solo existe cuando el servidor sella la resolución.
+     */
+    async queueResolutionOffline({ incident, payload, diag, act, hasParts, replacedParts }) {
+      try {
+        await this.enqueueOfflineAction({
+          incident,
+          stopType: 'INCIDENT',
+          stopId: incident.id,
+          operationType: 'RESOLVE_INCIDENT',
+          payload
+        });
+
+        const resolvedAt = new Date().toISOString();
+        incident.status = INCIDENT_STATUSES.RESOLVED;
+        this.feedbackMessage = 'Resolución guardada sin conexión. '
+          + '📄 Albarán oficial A4 disponible al sincronizar con el servidor.';
+        this.$emit('resolved', {
+          incidentId: incident.id,
+          diagnosis: diag,
+          action: act,
+          resolvedAt,
+          replaced_parts_declared: hasParts,
+          replaced_parts: replacedParts,
+          service_sheet: null,
+          offline: true
+        });
+
+        this.closeResolveModal();
+        this.incidents = this.incidents.filter(inc => inc.id !== incident.id);
+      } catch (error) {
+        this.resolveError = error?.message || 'No se pudo guardar la resolución sin conexión.';
       }
     },
 
@@ -1592,12 +2855,200 @@ export const TechnicianRouteView = {
      */
     handleOpenPreventiveChecklist(order) {
       this.selectedPreventiveOrder = order;
+
+      // Sin cobertura, el checklist se cumplimenta contra la copia local y se
+      // encola con su operación real (`RF-03.1.4`, `EARS 03.1`).
+      if (this.isOfflineMode || this.isBrowserOffline()) {
+        this.openOfflineChecklistModal(order);
+        this.$emit('open-preventive-checklist', order);
+        return;
+      }
+
       if (order?.order_type === 'REINSPECTION' || order?.status === 'REINSPECTION_PENDING') {
         this.showPreventiveReinspectionModal = true;
       } else {
         this.showPreventiveChecklistModal = true;
       }
       this.$emit('open-preventive-checklist', order);
+    },
+
+    /** Abre el checklist de la orden elegida en el selector local (`RF-03.1.4`). */
+    openSelectedOfflineChecklist() {
+      const selectedId = Number(this.offlinePreventiveSelection);
+      const order = this.offlinePreventiveOrders.find((candidate) => Number(candidate.id) === selectedId);
+
+      if (!order) {
+        this.errorMessage = 'Selecciona una orden preventiva asignada de tu copia local.';
+        return;
+      }
+
+      this.openOfflineChecklistModal(order);
+    },
+
+    /** Abre el checklist preventivo de la copia local (`RF-03.1.4`). */
+    openOfflineChecklistModal(order) {
+      const isReinspection = order?.order_type === 'REINSPECTION'
+        || order?.status === 'REINSPECTION_PENDING';
+      const checklists = this.offlineSnapshot?.preventive_checklists_by_order ?? {};
+      const entry = checklists[String(order?.id ?? '')] ?? checklists[order?.id] ?? null;
+      const items = Array.isArray(entry?.items) ? entry.items : [];
+
+      if (!isReinspection && items.length === 0) {
+        this.errorMessage = 'La copia local de la ruta no contiene el checklist de esta orden. '
+          + 'Conéctate para descargarlo antes de inspeccionarla sin cobertura.';
+        return;
+      }
+
+      this.offlineChecklistOrder = order;
+      this.offlineChecklistOperation = isReinspection ? 'REINSPECT_PREVENTIVE' : 'COMPLETE_PREVENTIVE';
+      this.offlineChecklistItems = items.map((item) => ({
+        item_code: String(item?.item_code ?? ''),
+        title: String(item?.item_description ?? item?.item_code ?? 'Punto de verificación'),
+        is_critical: item?.is_critical === true,
+        status: '',
+        observations: ''
+      }));
+      this.offlineChecklistTemperature = '';
+      this.offlineChecklistGeneralNotes = '';
+      this.offlineChecklistReinspectionNotes = '';
+      this.offlineChecklistError = '';
+      this.offlineChecklistSealConfirmed = false;
+      this.showOfflineChecklistModal = true;
+    },
+
+    closeOfflineChecklistModal() {
+      this.showOfflineChecklistModal = false;
+      this.offlineChecklistOrder = null;
+      this.offlineChecklistItems = [];
+      this.offlineChecklistError = '';
+    },
+
+    /** Valida y encola la inspección preventiva sin cobertura (`D1`, `QA 1`). */
+    async submitOfflineChecklist() {
+      const order = this.offlineChecklistOrder;
+      if (!order?.id) {
+        return;
+      }
+
+      const temperatureRaw = String(this.offlineChecklistTemperature ?? '').trim();
+      const temperature = temperatureRaw === '' ? null : Number(temperatureRaw);
+
+      if (temperatureRaw !== '' && !Number.isFinite(temperature)) {
+        this.offlineChecklistError = 'La temperatura debe ser un número en grados Celsius.';
+        return;
+      }
+
+      if (!this.canRegisterOfflineActions) {
+        this.offlineChecklistError = this.offlineValidity?.errorMessage
+          || 'La copia local de la ruta ha caducado: conéctate para actualizarla.';
+        return;
+      }
+
+      let payload = {
+        temperature_measured: temperature,
+        general_notes: this.offlineChecklistGeneralNotes.trim() || undefined
+      };
+
+      if (this.offlineChecklistIsReinspection) {
+        const notes = this.offlineChecklistReinspectionNotes.trim();
+        if (notes.length < 10) {
+          this.offlineChecklistError = 'Detalla la comprobación técnica realizada (mínimo 10 caracteres).';
+          return;
+        }
+
+        const machineType = this.offlineChecklistMachineType;
+        if (PERISHABLE_MACHINE_TYPES.includes(machineType) && Number.isFinite(temperature) && temperature > 4.0) {
+          this.offlineChecklistError = 'No se puede declarar conforme una reinspección de perecederos por encima de 4,0 °C (Art. II).';
+          return;
+        }
+
+        payload = {
+          temperature_measured: temperature,
+          notes,
+          items: [{
+            item_code: 'THERMAL_STABILITY',
+            status: Number.isFinite(temperature) && temperature > 4.0 ? 'FAIL' : 'PASS',
+            observations: Number.isFinite(temperature)
+              ? `Comprobación térmica in situ sin conexión: ${temperature} °C.`
+              : 'Comprobación térmica in situ sin conexión.'
+          }]
+        };
+      } else {
+        // Todo punto debe quedar respondido; un desfavorable exige su justificación
+        // y, en perecederos, el precinto físico (Art. II, `QA 1`).
+        for (const item of this.offlineChecklistItems) {
+          if (!['PASS', 'WARN', 'FAIL'].includes(String(item.status ?? ''))) {
+            this.offlineChecklistError = `Debes responder el punto «${item.title}».`;
+            return;
+          }
+
+          if (['WARN', 'FAIL'].includes(String(item.status)) && String(item.observations ?? '').trim() === '') {
+            this.offlineChecklistError = `Justifica el resultado desfavorable de «${item.title}».`;
+            return;
+          }
+        }
+
+        if (this.offlineChecklistSealRequired && this.offlineChecklistSealConfirmed !== true) {
+          this.offlineChecklistError = OFFLINE_MESSAGES.SANITARY_SEAL_REQUIRED;
+          return;
+        }
+
+        payload = {
+          temperature_measured: temperature,
+          general_notes: this.offlineChecklistGeneralNotes.trim() || undefined,
+          items: this.offlineChecklistItems.map((item) => ({
+            item_code: item.item_code,
+            status: item.status,
+            observations: String(item.observations ?? '').trim() || null
+          }))
+        };
+      }
+
+      this.isOfflineChecklistSubmitting = true;
+      this.offlineChecklistError = '';
+
+      const machineRef = {
+        ticket_code: order.order_code ?? null,
+        machine: {
+          id: order.machine_id ?? null,
+          code: order.machine_code ?? null,
+          machine_type: order.machine_type ?? null
+        }
+      };
+
+      try {
+        // Completar exige que la orden esté formalmente en inspección: si el
+        // técnico no llegó a pulsar «Iniciar» con cobertura, el arranque entra
+        // delante en la misma cadena FIFO (`RF-03.1.4`, `QA 4`).
+        if (!this.offlineChecklistIsReinspection && String(order.status ?? '') !== 'IN_INSPECTION') {
+          await this.enqueueOfflineAction({
+            stopType: 'PREVENTIVE_ORDER',
+            stopId: order.id,
+            operationType: 'START_PREVENTIVE',
+            payload: {},
+            ticketOrOrderCode: order.order_code ?? null,
+            incident: machineRef
+          });
+        }
+
+        await this.enqueueOfflineAction({
+          stopType: 'PREVENTIVE_ORDER',
+          stopId: order.id,
+          operationType: this.offlineChecklistOperation,
+          payload,
+          ticketOrOrderCode: order.order_code ?? null,
+          incident: machineRef,
+          sanitarySealConfirmed: this.offlineChecklistSealConfirmed === true
+        });
+
+        order.status = 'COMPLETED';
+        this.feedbackMessage = 'Inspección preventiva guardada sin conexión: ⏳ pendiente de sincronizar.';
+        this.closeOfflineChecklistModal();
+      } catch (error) {
+        this.offlineChecklistError = error?.message || 'No se pudo guardar la inspección sin conexión.';
+      } finally {
+        this.isOfflineChecklistSubmitting = false;
+      }
     }
   },
   template: `
@@ -1761,6 +3212,24 @@ export const TechnicianRouteView = {
           </div>
         </div>
 
+        <!-- Barra de estado y bandeja sin conexión (Módulo 24, RF-02.2 a RF-02.4) -->
+        <OfflineSyncTrayModal
+          :visible="isAuthenticated"
+          :open="showOfflineTray"
+          :connection-status="offlineConnectionStatus"
+          :validity="offlineValidity"
+          :queue="offlineQueue"
+          :items="offlineQueueItems"
+          :progress="offlineSyncProgress"
+          :lock-mode="offlineLockMode"
+          :reauth-owner="offlineReauthOwner"
+          :dumping-mutation-id="offlineDumpInProgressId"
+          @update:open="showOfflineTray = $event"
+          @sync-now="syncOfflineQueue({ silent: false })"
+          @dump-conflict="dumpOfflineConflict"
+          @reauth="requestOfflineReauth"
+        />
+
         <!-- Barra de Control de Turno y Jornada (Módulo 21, RF-03) -->
         <div
           data-testid="shift-control-bar"
@@ -1904,8 +3373,51 @@ export const TechnicianRouteView = {
 
         <!-- SECCIÓN 3: MANTENIMIENTO PREVENTIVO Y VISITA OPORTUNISTA (RF-PREV-02, EARS 2.3) -->
         <div v-else-if="activeSection === 'preventive'">
+          <!-- Operaciones online-only del bloque preventivo (RF-03.2, QA 4).
+               Sin red se puede trabajar lo ya asignado, pero no reclamar órdenes
+               libres: la unicidad de titularidad se verifica en el servidor. -->
+          <div
+            v-if="isOfflineMode"
+            data-testid="offline-preventive-notice"
+            role="status"
+            style="background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); border-radius: var(--radius-card); padding: 10px 12px; font-family: var(--font-body); font-size: 12px; line-height: 1.45; margin-bottom: 12px;"
+          >
+            🟠 Sin conexión: solo puedes inspeccionar las órdenes preventivas ya asignadas de tu ruta.
+            El reclamo de órdenes libres y la recepción de órdenes de carga requieren conexión en vivo.
+          </div>
+
+          <div
+            v-if="isOfflineMode && offlinePreventiveOrders.length > 0"
+            data-testid="offline-preventive-launcher"
+            style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 12px; margin-bottom: 12px;"
+          >
+            <label for="offline-preventive-order" style="display: block; font-family: var(--font-body); font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+              Inspeccionar sin conexión
+            </label>
+            <select
+              id="offline-preventive-order"
+              v-model="offlinePreventiveSelection"
+              class="vg-select"
+              style="min-height: 44px; width: 100%; margin-bottom: 10px;"
+            >
+              <option value="">Selecciona una orden asignada…</option>
+              <option v-for="order in offlinePreventiveOrders" :key="order.id" :value="String(order.id)">
+                {{ order.order_code }} · {{ order.machine_code }} ({{ order.status }})
+              </option>
+            </select>
+            <button
+              type="button"
+              class="vg-btn vg-btn-primary"
+              style="width: 100%; min-height: 44px; font-weight: 600;"
+              @click="openSelectedOfflineChecklist"
+            >
+              Abrir checklist sin conexión
+            </button>
+          </div>
+
           <TechnicianPreventiveRouteTab
             :enabled-locations="enabledLocations"
+            :is-offline="isOfflineMode"
             @open-checklist="handleOpenPreventiveChecklist($event)"
             @order-claimed="loadRoute"
             @inspection-started="loadRoute"
@@ -1926,7 +3438,15 @@ export const TechnicianRouteView = {
               🧰 Stock de mi furgoneta
             </summary>
             <div style="margin-top: 12px;">
-              <TechnicianVanStockPanel />
+              <div
+                v-if="isOfflineMode"
+                role="status"
+                style="background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); border-radius: var(--radius-interactive); padding: 8px 10px; font-family: var(--font-body); font-size: 12px; line-height: 1.4; margin-bottom: 10px;"
+              >
+                El saldo visible incluye los descuentos provisionales de tu bandeja.
+                Confirmar la recepción de una orden de carga requiere conexión en vivo.
+              </div>
+              <TechnicianVanStockPanel :is-offline="isOfflineMode" />
             </div>
           </details>
 
@@ -1980,6 +3500,30 @@ export const TechnicianRouteView = {
         >
           <span>⚠️ {{ errorMessage }}</span>
           <button type="button" @click="errorMessage = ''" style="background: none; border: none; font-size: 14px; color: #b91c1c; cursor: pointer;">×</button>
+        </div>
+
+        <!-- Aviso de modo sin conexión y trabajo en cola (Módulo 24, RF-02.2) -->
+        <div
+          v-if="offlineNotice"
+          data-testid="offline-route-notice"
+          role="status"
+          style="background-color: var(--color-warning-bg); border: 1px solid var(--color-warning-border); color: var(--color-warning-text); padding: 10px 14px; border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: 13px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px;"
+        >
+          <span>ℹ️ {{ offlineNotice }}</span>
+          <button type="button" @click="offlineNotice = ''" style="background: none; border: none; font-size: 14px; color: var(--color-warning-text); cursor: pointer;">×</button>
+        </div>
+
+        <!-- Albarán A4 diferido mientras la resolución espera en la cola (QA 4) -->
+        <div
+          v-if="hasPendingServiceSheets"
+          data-testid="offline-service-sheet-pending"
+          role="status"
+          style="background-color: var(--color-info-bg); border: 1px solid var(--color-info-border); color: var(--color-info-text); padding: 10px 14px; border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: 13px; margin-bottom: 12px; line-height: 1.4;"
+        >
+          📄 Albarán oficial A4 disponible al sincronizar con el servidor.
+          <span style="display: block; margin-top: 4px; font-size: 12px;">
+            Resolución(es) en cola: {{ pendingResolutionStops.length }}. El documento se sella cuando el servidor confirma el cierre.
+          </span>
         </div>
 
         <!-- Enlace entrante de una asignación (Módulo 15, RF-TG-08): si el
@@ -2136,6 +3680,15 @@ export const TechnicianRouteView = {
               <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 <IncidentBadge type="urgency" :value="incident.urgency" />
                 <IncidentBadge type="status" :value="incident.status" />
+                <!-- Insignia de trabajo local pendiente de envío (EARS 03.3.2) -->
+                <span
+                  v-if="offlineStopBadgeLabel(incident)"
+                  data-testid="offline-stop-badge"
+                  style="display: inline-flex; align-items: center; padding: 2px 8px; border: 1px solid; border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: 11px; font-weight: 700;"
+                  :style="offlineStopBadgeStyle(incident)"
+                >
+                  {{ offlineStopBadgeLabel(incident) }}
+                </span>
                 <!-- Trazabilidad oportunista (Módulo 16, RF-06.4). -->
                 <IncidentBadge
                   v-if="opportunisticModeLabel(incident)"
@@ -2469,6 +4022,301 @@ export const TechnicianRouteView = {
         @close="closeCommentsModal"
         @comment-added="onCommentAdded"
       />
+
+      <!-- =================================================================== -->
+      <!-- MODAL 24-A: PAUSA SIN CONEXIÓN (Módulo 24, RF-03.1.2, EARS 03.4)      -->
+      <!-- =================================================================== -->
+      <ModalDialog
+        v-model="showOfflinePauseModal"
+        title="Pausar intervención sin conexión"
+        :subtitle="offlinePauseIncident ? ('Ticket ' + offlinePauseIncident.ticket_code + ' · ' + (offlinePauseIncident.machine?.code || '')) : ''"
+        size="md"
+        @close="closeOfflinePauseModal"
+      >
+        <form @submit.prevent="submitOfflinePause">
+          <div style="background-color: var(--color-info-bg); border: 1px solid var(--color-info-border); border-radius: var(--radius-interactive); padding: 10px 12px; font-family: var(--font-body); font-size: 12px; color: var(--color-info-text); margin-bottom: 14px; line-height: 1.4;">
+            La pausa se guarda en el dispositivo con la hora real y se enviará al recuperar cobertura.
+            La insignia «⏳ Pendiente de sincronizar» quedará visible en la parada.
+          </div>
+
+          <div v-if="offlinePauseOperation === 'PAUSE_INCIDENT_PENDING_INFO'" style="margin-bottom: 14px;">
+            <label for="offline-pause-category" style="display: block; font-family: var(--font-body); font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+              Causa tipificada <span style="color: var(--color-error-text);">*</span>
+            </label>
+            <select
+              id="offline-pause-category"
+              v-model="offlinePauseCategory"
+              class="vg-select"
+              :disabled="isOfflinePausing"
+              style="min-height: 44px; width: 100%;"
+            >
+              <option value="">Selecciona el motivo…</option>
+              <option v-for="category in pauseReasonCategories" :key="category.value" :value="category.value">
+                {{ category.icon }} {{ category.label }}
+              </option>
+            </select>
+          </div>
+
+          <div style="margin-bottom: 14px;">
+            <label for="offline-pause-reason" style="display: block; font-family: var(--font-body); font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+              Justificación de la pausa (mínimo {{ offlinePauseOperation === 'PAUSE_INCIDENT_PENDING_INFO' ? 20 : 10 }} caracteres) <span style="color: var(--color-error-text);">*</span>
+            </label>
+            <textarea
+              id="offline-pause-reason"
+              v-model="offlinePauseReason"
+              class="vg-textarea"
+              rows="3"
+              :disabled="isOfflinePausing"
+              placeholder="Describe la pieza que falta o el impedimento real encontrado in situ…"
+            ></textarea>
+          </div>
+
+          <div
+            v-if="offlineSealRequiredForPause()"
+            data-testid="offline-sanitary-seal-block"
+            style="background-color: var(--color-error-bg); border: 1px solid var(--color-error-border); color: var(--color-error-text); border-radius: var(--radius-card); padding: 12px; margin-bottom: 14px; line-height: 1.45;"
+          >
+            <div style="font-family: var(--font-display); font-size: 15px; font-weight: 500; margin-bottom: 6px;">
+              ⚠️ Alerta sanitaria crítica (Art. II)
+            </div>
+            <p style="font-family: var(--font-body); font-size: 13px; margin: 0 0 10px 0;">
+              Máquina de alimentos perecederos. La pausa solo se guarda si confirmas el precinto físico in situ.
+            </p>
+            <label style="display: flex; align-items: flex-start; gap: 10px; min-height: 44px; cursor: pointer; font-family: var(--font-body); font-size: 13px;">
+              <input type="checkbox" v-model="sanitarySealConfirmed" style="width: 20px; height: 20px; margin-top: 2px; flex: 0 0 auto;" />
+              <span>
+                Confirmo que he precintado físicamente la máquina / inhabilitado la venta in situ
+                y acudiré a una zona con cobertura al finalizar para transmitir la alerta sanitaria.
+              </span>
+            </label>
+          </div>
+
+          <div
+            v-if="offlinePauseError"
+            role="alert"
+            style="background-color: var(--color-error-bg); border: 1px solid var(--color-error-border); color: var(--color-error-text); padding: 10px; border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: 13px; margin-bottom: 14px;"
+          >
+            {{ offlinePauseError }}
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--color-hairline); padding-top: 14px;">
+            <button type="button" class="vg-btn vg-btn-secondary" style="min-height: 44px; padding: 0 14px;" :disabled="isOfflinePausing" @click="closeOfflinePauseModal">
+              Cancelar
+            </button>
+            <button type="submit" class="vg-btn vg-btn-primary" style="min-height: 44px; padding: 0 14px; font-weight: 600;" :disabled="isOfflinePausing">
+              {{ isOfflinePausing ? 'Guardando en la bandeja…' : 'Guardar pausa sin conexión' }}
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
+
+      <!-- =================================================================== -->
+      <!-- MODAL 24-B: COMENTARIO IN SITU SIN CONEXIÓN (RF-03.1.5, D3)          -->
+      <!-- =================================================================== -->
+      <ModalDialog
+        v-model="showOfflineCommentModal"
+        title="Comentario sin conexión"
+        :subtitle="offlineCommentIncident ? ('Ticket ' + offlineCommentIncident.ticket_code + ' · ' + (offlineCommentIncident.machine?.code || '')) : ''"
+        size="md"
+        @close="closeOfflineCommentModal"
+      >
+        <form @submit.prevent="submitOfflineComment">
+          <div style="background-color: var(--color-info-bg); border: 1px solid var(--color-info-border); border-radius: var(--radius-interactive); padding: 10px 12px; font-family: var(--font-body); font-size: 12px; color: var(--color-info-text); margin-bottom: 14px; line-height: 1.4;">
+            El mensaje viaja en la bandeja local con la cuota de 5 fotografías o 25 MB.
+            La firma digital no consume ese cupo.
+          </div>
+
+          <div style="margin-bottom: 14px;">
+            <label for="offline-comment-text" style="display: block; font-family: var(--font-body); font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+              Mensaje o nota de taller <span style="color: var(--color-error-text);">*</span>
+            </label>
+            <textarea
+              id="offline-comment-text"
+              v-model="offlineCommentText"
+              class="vg-textarea"
+              rows="3"
+              :disabled="isOfflineCommenting"
+              placeholder="Describe lo observado o lo actuado in situ…"
+            ></textarea>
+          </div>
+
+          <label style="display: flex; align-items: center; gap: 10px; min-height: 44px; margin-bottom: 12px; font-family: var(--font-body); font-size: 13px; color: var(--color-slate); cursor: pointer;">
+            <input type="checkbox" v-model="offlineCommentInternal" style="width: 20px; height: 20px;" />
+            <span>Nota Interna de Taller (oculta al Portal de Sede, Art. V.4)</span>
+          </label>
+
+          <div style="margin-bottom: 14px;">
+            <label for="offline-comment-photo" style="display: block; font-family: var(--font-body); font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+              Evidencia fotográfica (opcional · JPG, PNG o WebP · máx. 5 MB)
+            </label>
+            <input
+              id="offline-comment-photo"
+              type="file"
+              accept=".jpg,.jpeg,.png,.webp"
+              :disabled="isOfflineCommenting"
+              style="min-height: 44px; width: 100%; font-family: var(--font-body); font-size: 13px;"
+              @change="handleOfflineCommentPhoto"
+            />
+            <div v-if="offlineCommentPhoto" style="font-family: var(--font-body); font-size: 12px; color: var(--color-ink-muted); margin-top: 4px;">
+              Adjunta: {{ offlineCommentPhoto.name }}
+            </div>
+            <div v-if="offlineCommentPhotoError" style="font-family: var(--font-body); font-size: 12px; color: var(--color-error-text); margin-top: 4px;">
+              {{ offlineCommentPhotoError }}
+            </div>
+          </div>
+
+          <div
+            v-if="offlineCommentError"
+            role="alert"
+            style="background-color: var(--color-error-bg); border: 1px solid var(--color-error-border); color: var(--color-error-text); padding: 10px; border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: 13px; margin-bottom: 14px;"
+          >
+            {{ offlineCommentError }}
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--color-hairline); padding-top: 14px;">
+            <button type="button" class="vg-btn vg-btn-secondary" style="min-height: 44px; padding: 0 14px;" :disabled="isOfflineCommenting" @click="closeOfflineCommentModal">
+              Cancelar
+            </button>
+            <button type="submit" class="vg-btn vg-btn-primary" style="min-height: 44px; padding: 0 14px; font-weight: 600;" :disabled="isOfflineCommenting">
+              {{ isOfflineCommenting ? 'Guardando en la bandeja…' : 'Guardar comentario sin conexión' }}
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
+
+      <!-- =================================================================== -->
+      <!-- MODAL 24-C: CHECKLIST PREVENTIVO SIN CONEXIÓN (RF-03.1.4)             -->
+      <!-- =================================================================== -->
+      <ModalDialog
+        v-model="showOfflineChecklistModal"
+        :title="offlineChecklistIsReinspection ? 'Reinspección sanitaria sin conexión' : 'Checklist preventivo sin conexión'"
+        :subtitle="offlineChecklistOrder ? ((offlineChecklistOrder.order_code || 'Orden') + ' · ' + (offlineChecklistOrder.machine_code || '')) : ''"
+        size="md"
+        @close="closeOfflineChecklistModal"
+      >
+        <form @submit.prevent="submitOfflineChecklist">
+          <div style="background-color: var(--color-info-bg); border: 1px solid var(--color-info-border); border-radius: var(--radius-interactive); padding: 10px 12px; font-family: var(--font-body); font-size: 12px; color: var(--color-info-text); margin-bottom: 14px; line-height: 1.4;">
+            La inspección se guarda con la hora real en la bandeja del dispositivo y se enviará al recuperar cobertura.
+          </div>
+
+          <div style="margin-bottom: 14px;">
+            <label for="offline-checklist-temperature" style="display: block; font-family: var(--font-body); font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+              Temperatura medida (°C)
+            </label>
+            <input
+              id="offline-checklist-temperature"
+              v-model="offlineChecklistTemperature"
+              class="vg-input"
+              type="number"
+              step="0.1"
+              min="-5"
+              max="25"
+              inputmode="decimal"
+              :disabled="isOfflineChecklistSubmitting"
+              placeholder="Ej: 3,5"
+              style="min-height: 44px;"
+            />
+          </div>
+
+          <div v-if="!offlineChecklistIsReinspection" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px;">
+            <div
+              v-for="item in offlineChecklistItems"
+              :key="item.item_code"
+              data-testid="offline-checklist-item"
+              style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card); padding: 10px 12px;"
+            >
+              <div style="font-family: var(--font-body); font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+                <span v-if="item.is_critical" style="color: var(--color-error-text);">● </span>{{ item.title }}
+              </div>
+              <select
+                v-model="item.status"
+                class="vg-select"
+                :disabled="isOfflineChecklistSubmitting"
+                style="min-height: 44px; width: 100%;"
+              >
+                <option value="">Sin responder…</option>
+                <option value="PASS">Conforme</option>
+                <option value="WARN">Aviso</option>
+                <option value="FAIL">No conforme</option>
+              </select>
+              <textarea
+                v-if="item.status === 'WARN' || item.status === 'FAIL'"
+                v-model="item.observations"
+                class="vg-textarea"
+                rows="2"
+                :disabled="isOfflineChecklistSubmitting"
+                placeholder="Justifica el resultado desfavorable…"
+                style="margin-top: 8px;"
+              ></textarea>
+            </div>
+          </div>
+
+          <div v-else style="margin-bottom: 14px;">
+            <label for="offline-reinspection-notes" style="display: block; font-family: var(--font-body); font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+              Comprobación técnica realizada <span style="color: var(--color-error-text);">*</span>
+            </label>
+            <textarea
+              id="offline-reinspection-notes"
+              v-model="offlineChecklistReinspectionNotes"
+              class="vg-textarea"
+              rows="3"
+              :disabled="isOfflineChecklistSubmitting"
+              placeholder="Detalla la verificación térmica y sanitaria efectuada in situ…"
+            ></textarea>
+          </div>
+
+          <div v-if="!offlineChecklistIsReinspection" style="margin-bottom: 14px;">
+            <label for="offline-checklist-notes" style="display: block; font-family: var(--font-body); font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 6px;">
+              Observaciones generales
+            </label>
+            <textarea
+              id="offline-checklist-notes"
+              v-model="offlineChecklistGeneralNotes"
+              class="vg-textarea"
+              rows="2"
+              :disabled="isOfflineChecklistSubmitting"
+              placeholder="Anotaciones de la inspección para el expediente…"
+            ></textarea>
+          </div>
+
+          <div
+            v-if="offlineChecklistSealRequired"
+            data-testid="offline-preventive-seal-block"
+            style="background-color: var(--color-error-bg); border: 1px solid var(--color-error-border); color: var(--color-error-text); border-radius: var(--radius-card); padding: 12px; margin-bottom: 14px; line-height: 1.45;"
+          >
+            <div style="font-family: var(--font-display); font-size: 15px; font-weight: 500; margin-bottom: 6px;">
+              ⚠️ Alerta sanitaria crítica (Art. II)
+            </div>
+            <p style="font-family: var(--font-body); font-size: 13px; margin: 0 0 10px 0;">
+              La inspección ha detectado un resultado desfavorable en una máquina de alimentos perecederos.
+            </p>
+            <label style="display: flex; align-items: flex-start; gap: 10px; min-height: 44px; cursor: pointer; font-family: var(--font-body); font-size: 13px;">
+              <input type="checkbox" v-model="offlineChecklistSealConfirmed" style="width: 20px; height: 20px; margin-top: 2px; flex: 0 0 auto;" />
+              <span>
+                Confirmo que he precintado físicamente la máquina / inhabilitado la venta in situ
+                y acudiré a una zona con cobertura al finalizar para transmitir la alerta sanitaria.
+              </span>
+            </label>
+          </div>
+
+          <div
+            v-if="offlineChecklistError"
+            role="alert"
+            style="background-color: var(--color-error-bg); border: 1px solid var(--color-error-border); color: var(--color-error-text); padding: 10px; border-radius: var(--radius-interactive); font-family: var(--font-body); font-size: 13px; margin-bottom: 14px;"
+          >
+            {{ offlineChecklistError }}
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--color-hairline); padding-top: 14px;">
+            <button type="button" class="vg-btn vg-btn-secondary" style="min-height: 44px; padding: 0 14px;" :disabled="isOfflineChecklistSubmitting" @click="closeOfflineChecklistModal">
+              Cancelar
+            </button>
+            <button type="submit" class="vg-btn vg-btn-primary" style="min-height: 44px; padding: 0 14px; font-weight: 600;" :disabled="isOfflineChecklistSubmitting">
+              {{ isOfflineChecklistSubmitting ? 'Guardando en la bandeja…' : 'Guardar inspección sin conexión' }}
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
 
       <!-- =================================================================== -->
       <!-- MODAL: INTERVENCIÓN OPORTUNISTA IN SITU (Módulo 16, T-OPP-11)          -->

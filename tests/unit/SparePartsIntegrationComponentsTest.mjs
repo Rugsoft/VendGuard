@@ -347,6 +347,9 @@ assert(
   const emitted = [];
   const instance = {
     selectedIncident: { id: 102, ticket_code: 'INC-2026-0102' },
+    // Ruta conectada: el cierre debe seguir el camino en vivo del Módulo 24.
+    isOfflineMode: false,
+    isBrowserOffline: () => false,
     resolveDiagnosis: 'Sustituido motor extractor averiado por bloqueo mecánico',
     resolveAction: 'Instalado motor extractor nuevo modelo compatible de repuesto',
     resolvePartsData: {

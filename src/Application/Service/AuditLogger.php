@@ -70,6 +70,32 @@ class AuditLogger
         array $newState,
         ?array $metadata = null
     ): AuditEvent {
+        return $this->auditRepo->log($this->buildTicketEvent(
+            ticketId: $ticketId,
+            action: $action,
+            user: $user,
+            previousState: $previousState,
+            newState: $newState,
+            metadata: $metadata
+        ));
+    }
+
+    /**
+     * Compone el evento sin persistirlo.
+     *
+     * Permite que una operación crítica escriba su rastro en la MISMA sentencia que
+     * el cambio de negocio (un viaje menos sobre el agrupador) sin duplicar la
+     * validación ni la forma del evento. Quien lo persiste sigue siendo este
+     * servicio a través de `logEvent()`.
+     */
+    public function buildTicketEvent(
+        int $ticketId,
+        string $action,
+        array $user,
+        ?array $previousState,
+        array $newState,
+        ?array $metadata = null
+    ): AuditEvent {
         $actionUpper = strtoupper(trim($action));
 
         // Verificación de justificación obligatoria al resolver (Art. V.1 y EARS 5.1.3)
@@ -81,7 +107,7 @@ class AuditLogger
             ResolutionValidator::validate($diagnosis, $solution);
         }
 
-        $event = new AuditEvent(
+        return new AuditEvent(
             id: null,
             entityType: AuditEvent::ENTITY_TICKET,
             entityId: $ticketId,
@@ -93,7 +119,13 @@ class AuditLogger
             newState: $newState,
             metadata: $metadata
         );
+    }
 
+    /**
+     * Persiste un evento ya compuesto.
+     */
+    public function logEvent(AuditEvent $event): AuditEvent
+    {
         return $this->auditRepo->log($event);
     }
 

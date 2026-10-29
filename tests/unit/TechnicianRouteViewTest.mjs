@@ -30,6 +30,7 @@ import { TechnicianResolutionRefundBlock } from '../../public/assets/js/componen
 import { store, setInternalSession, clearSession } from '../../public/assets/js/store.js';
 import { PendingInfoPauseModal } from '../../public/assets/js/components/PendingInfoPauseModal.js';
 import { AMBER_TECHNICAL_TOKENS } from '../../public/assets/js/utils/IncidentStatusPermissions.js';
+import { OfflineStorage } from '../../public/assets/js/utils/OfflineStorage.js';
 
 console.log('======================================================================');
 console.log(' VendGuard: Frontend Test Suite - TechnicianRouteView (T-38)');
@@ -1391,6 +1392,532 @@ assert('16.8 La vista monta el albarán con el expediente cerrado y el rol del t
   TechnicianRouteView.template.includes(':incident-id="serviceSheetIncidentId"')
     && TechnicianRouteView.template.includes('audience="technician"')
     && TechnicianRouteView.template.includes('v-model="showServiceSheetModal"'));
+
+// ---------------------------------------------------------------------
+// TEST GROUP 17: Offline shift gate and re-authentication (M24: EARS 06.2, 06.3)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 17: Shift gate and re-auth with a live offline queue (EARS 06.2, 06.3) ---');
+
+{
+  const offlineShiftView = createRouteInstance();
+  offlineShiftView.isOfflineMode = true;
+  offlineShiftView.shiftError = '';
+
+  const offlineAllowed = await offlineShiftView.ensureOfflineQueueReadyForShift();
+
+  assert(
+    '17.1 Sin red la pausa o el cierre de turno se bloquean antes de tocar el servidor (EARS 06.2)',
+    offlineAllowed === false && offlineShiftView.shiftError.includes('conexión en vivo')
+  );
+}
+
+{
+  const conflictedShiftView = createRouteInstance();
+  conflictedShiftView.isOfflineMode = false;
+  conflictedShiftView.shiftError = '';
+  conflictedShiftView.offlineQueue = { pending: 1, syncing: 0, conflicts: 0, total: 1, photoCount: 0, photoBytes: 0 };
+
+  let refreshedAfterSync = false;
+  conflictedShiftView.refreshOfflineState = async () => {
+    if (refreshedAfterSync) {
+      conflictedShiftView.offlineQueue = { ...conflictedShiftView.offlineQueue, conflicts: 1 };
+    }
+  };
+  conflictedShiftView.syncOfflineQueue = async () => {
+    refreshedAfterSync = true;
+
+    return { applied: 0, conflicts: 1, pending: 1, interrupted: null };
+  };
+
+  const conflictedAllowed = await conflictedShiftView.ensureOfflineQueueReadyForShift();
+
+  assert(
+    '17.2 Con conflictos vivos el turno no cambia y se exige el volcado en 1 toque (EARS 06.2)',
+    conflictedAllowed === false
+      && conflictedShiftView.shiftError.includes('volcar')
+      && conflictedShiftView.showOfflineTray === true
+  );
+}
+
+{
+  const cleanShiftView = createRouteInstance();
+  cleanShiftView.isOfflineMode = false;
+  cleanShiftView.offlineQueue = { pending: 0, syncing: 0, conflicts: 0, total: 0, photoCount: 0, photoBytes: 0 };
+  cleanShiftView.refreshOfflineState = async () => {};
+  cleanShiftView.syncOfflineQueue = async () => ({ applied: 0, conflicts: 0, pending: 0, interrupted: null });
+
+  const cleanAllowed = await cleanShiftView.ensureOfflineQueueReadyForShift();
+
+  assert('17.3 Con la bandeja vacía el turno sí tramita el cambio', cleanAllowed === true);
+}
+
+{
+  const reauthView = createRouteInstance();
+  reauthView.offlineStorage = {
+    async getSnapshot(technicianId) {
+      return {
+        technician_id: technicianId,
+        technician_name: 'Jordi Técnico Ruta',
+        technician_email: 'jordi.ruta@vendguard.internal'
+      };
+    }
+  };
+
+  await reauthView.handleReauthRequired({ technicianId: 2 });
+
+  assert(
+    '17.4 La caducidad de sesión conserva la cola y nombra al titular que debe volver a entrar (EARS 06.3)',
+    reauthView.offlineReauthOwner?.technician_id === 2
+      && reauthView.offlineReauthOwner?.technician_email === 'jordi.ruta@vendguard.internal'
+      && reauthView.offlineNotice.includes('cola sigue intacta')
+      && reauthView.showOfflineTray === true
+  );
+
+  reauthView.requestOfflineReauth();
+
+  assert(
+    '17.5 El formulario de acceso pide explícitamente la misma cuenta de la cola',
+    reauthView.showOfflineTray === false
+      && reauthView.loginError.includes('jordi.ruta@vendguard.internal')
+  );
+}
+
+{
+  const wrongOwnerView = createRouteInstance();
+  wrongOwnerView.offlineReauthOwner = {
+    technician_id: 2,
+    technician_name: 'Jordi Técnico Ruta',
+    technician_email: 'jordi.ruta@vendguard.internal'
+  };
+  wrongOwnerView.loginEmail = 'otro@vendguard.internal';
+  wrongOwnerView.loginPassword = 'clave-ajena';
+  wrongOwnerView.offlineQueue = { pending: 1, syncing: 0, conflicts: 0, total: 1, photoCount: 0, photoBytes: 0 };
+
+  api.auth.internalLogin = async () => ({
+    user: { id: 9, name: 'Otro Técnico', email: 'otro@vendguard.internal', role: 'TECHNICIAN' },
+    token: 'token_otro'
+  });
+  clearSession();
+
+  await wrongOwnerView.handleInternalLogin();
+
+  assert(
+    '17.6 Otra cuenta no puede asumir la cola: se nombra al titular y no se mezcla trabajo (EARS 06.3, Art. V.4)',
+    wrongOwnerView.loginError.includes('jordi.ruta@vendguard.internal')
+      && wrongOwnerView.offlineQueue.total === 1
+      && store.state.token === null
+  );
+}
+
+// ---------------------------------------------------------------------
+// TEST GROUP 18: Online-only guards (M24: EARS 03.2.1)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 18: Online-only guards (EARS 03.2.1) ---');
+
+const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+const originalInternalLogin = api.auth.internalLogin;
+const originalPost = api.post;
+
+function restoreNavigator() {
+  if (originalNavigatorDescriptor) {
+    Object.defineProperty(globalThis, 'navigator', originalNavigatorDescriptor);
+  } else {
+    delete globalThis.navigator;
+  }
+}
+
+{
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { onLine: false }
+  });
+
+  const loginGuardView = createRouteInstance();
+  loginGuardView.loginEmail = 'jordi.ruta@vendguard.internal';
+  loginGuardView.loginPassword = 'clave-valida';
+  loginGuardView.loginError = '';
+  let loginCalls = 0;
+  api.auth.internalLogin = async () => {
+    loginCalls++;
+    return { user: { id: 2, role: 'TECHNICIAN' }, token: 'token' };
+  };
+
+  await loginGuardView.handleInternalLogin();
+
+  assert(
+    '18.1 Sin red el acceso inicial no llama a la API y explica que hace falta conexión',
+    loginCalls === 0 && loginGuardView.loginError.includes('conexión a la red')
+  );
+
+  restoreNavigator();
+  api.auth.internalLogin = originalInternalLogin;
+}
+
+{
+  const shiftGuardView = createRouteInstance();
+  shiftGuardView.isOfflineMode = true;
+  let postCalls = 0;
+  api.post = async () => {
+    postCalls++;
+    return { status: 'ON_SHIFT' };
+  };
+
+  await shiftGuardView.startShift();
+  const startBlocked = postCalls === 0 && shiftGuardView.shiftError.includes('conexión en vivo');
+
+  await shiftGuardView.resumeMealShift();
+  const resumeBlocked = postCalls === 0 && shiftGuardView.shiftError.includes('conexión en vivo');
+
+  shiftGuardView.handoverError = '';
+  shiftGuardView.isOfflineMode = true;
+  await shiftGuardView.submitShiftHandover();
+  const handoverBlocked = postCalls === 0 && shiftGuardView.handoverError.includes('conexión en vivo');
+
+  assert(
+    '18.2 Iniciar turno sin red se bloquea antes de tocar la API',
+    startBlocked
+  );
+  assert(
+    '18.3 Reanudar turno sin red se bloquea antes de tocar la API',
+    resumeBlocked
+  );
+  assert(
+    '18.4 Cerrar turno y relevo sin red se bloquea antes de tocar la API',
+    handoverBlocked
+  );
+
+  api.post = originalPost;
+}
+
+{
+  const opportunisticGuardView = createRouteInstance();
+  opportunisticGuardView.isOfflineMode = true;
+  opportunisticGuardView.showOpportunisticModal = false;
+  opportunisticGuardView.errorMessage = '';
+
+  opportunisticGuardView.openOpportunisticModal({ location_id: 1 });
+
+  assert(
+    '18.5 Registrar una avería oportunista sin red no abre el modal y avisa de la conexión',
+    opportunisticGuardView.showOpportunisticModal === false
+      && opportunisticGuardView.errorMessage.includes('conexión en vivo')
+  );
+}
+
+// ---------------------------------------------------------------------
+// TEST GROUP 19: Offline resolution enables the deferred A4 service sheet (EARS 03.2.2)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 19: Deferred A4 service sheet after offline sync (EARS 03.2.2) ---');
+
+{
+  // El grupo 17.6 cierra la sesión para probar que otra cuenta no asume la cola;
+  // el albarán diferido necesita un técnico autenticado con su copia local.
+  setInternalSession(
+    { id: 2, name: 'Jordi Técnico Ruta', email: 'jordi.ruta@vendguard.internal', role: 'TECHNICIAN' },
+    'fake_tech_token_123'
+  );
+
+  const sheetView = createRouteInstance();
+  sheetView.serviceSheetIncidentId = null;
+  sheetView.isOfflineMode = false;
+  sheetView.offlineQueue = { pending: 1, syncing: 0, conflicts: 0, total: 1, photoCount: 0, photoBytes: 0 };
+  sheetView.offlineQueueItems = [
+    { operation_type: 'RESOLVE_INCIDENT', stop_type: 'INCIDENT', stop_id: 105 }
+  ];
+  sheetView.refreshOfflineState = async () => {};
+  sheetView.offlineManager = {
+    processOutboxQueue: async () => ({ applied: 1, conflicts: 0, pending: 0, interrupted: null })
+  };
+
+  await sheetView.syncOfflineQueue({ silent: true });
+
+  assert(
+    '19.1 Al confirmarse la resolución en cola se habilita el Albarán A4 de esa avería',
+    sheetView.serviceSheetIncidentId === 105,
+    String(sheetView.serviceSheetIncidentId)
+  );
+  assert(
+    '19.2 El aviso diferido y el binding del albarán siguen presentes en la plantilla',
+    TechnicianRouteView.template.includes('data-testid="offline-service-sheet-pending"')
+      && TechnicianRouteView.template.includes('Albarán oficial A4 disponible al sincronizar con el servidor')
+      && TechnicianRouteView.template.includes(':incident-id="serviceSheetIncidentId"')
+  );
+}
+
+// ---------------------------------------------------------------------
+// TEST GROUP 20: Offline stop badge (M24: EARS 03.3.2)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 20: Offline stop badge (EARS 03.3.2) ---');
+
+{
+  const badgeView = createRouteInstance();
+  const badgeIncident = { id: 101 };
+
+  badgeView.offlineQueueItems = [
+    { stop_type: 'INCIDENT', stop_id: 101, status: 'PENDING' }
+  ];
+  const pendingLabel = badgeView.offlineStopBadgeLabel(badgeIncident);
+
+  badgeView.offlineQueueItems = [
+    { stop_type: 'INCIDENT', stop_id: 101, status: 'CONFLICT' }
+  ];
+  const conflictLabel = badgeView.offlineStopBadgeLabel(badgeIncident);
+
+  badgeView.offlineQueueItems = [];
+  const emptyLabel = badgeView.offlineStopBadgeLabel(badgeIncident);
+
+  assert('20.1 Una parada con trabajo pendiente muestra «⏳ Pendiente de sincronizar»', pendingLabel === '⏳ Pendiente de sincronizar');
+  assert('20.2 Una parada con conflicto muestra «⚠️ Conflicto sin volcar»', conflictLabel === '⚠️ Conflicto sin volcar');
+  assert('20.3 Una parada sin trabajo local no muestra insignia', emptyLabel === '');
+  assert(
+    '20.4 La plantilla pinta la insignia solo cuando hay estado local',
+    TechnicianRouteView.template.includes('data-testid="offline-stop-badge"')
+      && TechnicianRouteView.template.includes('v-if="offlineStopBadgeLabel(incident)"')
+      && TechnicianRouteView.template.includes('{{ offlineStopBadgeLabel(incident) }}')
+  );
+}
+
+// ---------------------------------------------------------------------
+// TEST GROUP 21: Automatic queue sync on reconnection (M24: EARS 04.1)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 21: Automatic queue sync on reconnection (EARS 04.1) ---');
+
+{
+  const connectivityView = createRouteInstance();
+  connectivityView.isOfflineMode = false;
+  connectivityView.offlineQueue = { pending: 1, syncing: 0, conflicts: 0, total: 1, photoCount: 0, photoBytes: 0 };
+  connectivityView.refreshOfflineState = async () => {};
+
+  let syncCalls = 0;
+  let loadCalls = 0;
+  let lastSyncOptions = null;
+  connectivityView.syncOfflineQueue = async (options) => {
+    syncCalls++;
+    lastSyncOptions = options;
+
+    return { applied: 0, conflicts: 0, pending: 1, interrupted: null };
+  };
+  connectivityView.loadRoute = async () => {
+    loadCalls++;
+  };
+  // El contraste del turno al reconectar tiene su propio grupo (22.3); aquí solo
+  // se certifica el disparo de la cola y la recarga de ruta.
+  connectivityView.loadShiftStatus = async () => {};
+
+  await connectivityView.handleConnectivityChange(true);
+  const onlineTriggered = syncCalls === 1
+    && lastSyncOptions?.silent === true
+    && loadCalls === 1;
+
+  await connectivityView.handleConnectivityChange(false);
+  const offlineDidNotSync = syncCalls === 1;
+
+  assert(
+    '21.1 Al recuperar la conexión la cola se sincroniza automáticamente y luego se recarga la ruta',
+    onlineTriggered
+  );
+  assert(
+    '21.2 Perder la conexión no dispara una sincronización ni una recarga de ruta',
+    offlineDidNotSync && loadCalls === 1
+  );
+  assert(
+    '21.3 El botón «Sincronizar ahora» invoca la misma cola en modo visible',
+    TechnicianRouteView.template.includes('@sync-now="syncOfflineQueue({ silent: false })"')
+  );
+}
+
+// ---------------------------------------------------------------------
+// TEST GROUP 22: Active shift restored from the local copy (M24: EARS 03.1)
+// ---------------------------------------------------------------------
+console.log('\n--- Group 22: Offline shift restoration (EARS 03.1) ---');
+
+const originalGetForShiftTests = api.get;
+
+function shiftBootstrap(technicianId, syncedAt) {
+  return {
+    technician_id: technicianId,
+    technician_name: 'Jordi Técnico Ruta',
+    technician_email: 'jordi.ruta@vendguard.internal',
+    synced_at: syncedAt,
+    route: { stops: [], enabled_locations: [], pending_critical_stops_other_locations: [] },
+    preventive_orders: [],
+    preventive_checklists_by_order: {},
+    spare_parts_catalog_by_machine: {},
+    van_stock: { items: [] }
+  };
+}
+
+{
+  const storage = new OfflineStorage({ indexedDB: null });
+  await storage.saveSnapshot(shiftBootstrap(2, new Date().toISOString()));
+  await storage.saveShiftStatus(2, 'ON_SHIFT');
+
+  const restoredView = createRouteInstance();
+  restoredView.offlineStorage = storage;
+  restoredView.isOfflineMode = true;
+  restoredView.shiftStatus = 'OFF_SHIFT';
+
+  const restored = await restoredView.restoreOfflineShiftStatus();
+
+  assert(
+    '22.1 Al recargar sin red el turno activo se restaura desde la copia local',
+    restored === true && restoredView.shiftStatus === 'ON_SHIFT'
+  );
+
+  let queuedIncidentId = null;
+  restoredView.queueStartOffline = async (incident) => {
+    queuedIncidentId = incident.id;
+    incident.status = 'IN_PROGRESS';
+  };
+  restoredView.errorMessage = '';
+  const assigned = restoredView.incidents.find((incident) => incident.status === 'ASSIGNED');
+
+  await restoredView.startIntervention(assigned);
+
+  assert(
+    '22.2 Con el turno restaurado la intervención se encola sin red y sin bloqueo de turno',
+    queuedIncidentId === assigned.id && !restoredView.errorMessage.includes('Debes iniciar tu turno')
+  );
+}
+
+{
+  const storage = new OfflineStorage({ indexedDB: null });
+  await storage.saveSnapshot(shiftBootstrap(2, new Date().toISOString()));
+
+  const persistView = createRouteInstance();
+  persistView.offlineStorage = storage;
+  persistView.shiftStatus = 'OFF_SHIFT';
+  api.get = async (url) => {
+    if (url !== '/technician/shift/status') {
+      throw new Error(`URL inesperada: ${url}`);
+    }
+
+    return { status: 'ON_SHIFT' };
+  };
+
+  await persistView.loadShiftStatus();
+  api.get = originalGetForShiftTests;
+
+  const persisted = await storage.getSnapshot(2);
+  assert(
+    '22.3 La carga online del turno lo deja anotado para la próxima recarga sin red',
+    persistView.shiftStatus === 'ON_SHIFT' && persisted?.offline_shift?.status === 'ON_SHIFT'
+  );
+}
+
+{
+  const storage = new OfflineStorage({ indexedDB: null });
+  await storage.saveSnapshot(shiftBootstrap(2, new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString()));
+  await storage.saveShiftStatus(2, 'ON_SHIFT', Date.now() - 13 * 60 * 60 * 1000);
+
+  const expiredView = createRouteInstance();
+  expiredView.offlineStorage = storage;
+  expiredView.shiftStatus = 'OFF_SHIFT';
+
+  const restored = await expiredView.restoreOfflineShiftStatus();
+
+  assert(
+    '22.4 Una copia caducada no reabre el turno: se conserva el fallo seguro',
+    restored === false && expiredView.shiftStatus === 'OFF_SHIFT'
+  );
+}
+
+{
+  const storage = new OfflineStorage({ indexedDB: null });
+  await storage.saveSnapshot(shiftBootstrap(2, new Date().toISOString()));
+  await storage.saveShiftStatus(2, 'ON_SHIFT');
+
+  const raceView = createRouteInstance();
+  raceView.offlineStorage = storage;
+  raceView.isOfflineMode = true;
+  raceView.shiftStatus = 'OFF_SHIFT';
+  let queued = false;
+  raceView.queueStartOffline = async (incident) => {
+    queued = true;
+    incident.status = 'IN_PROGRESS';
+  };
+  const assigned = raceView.incidents.find((incident) => incident.status === 'ASSIGNED');
+
+  await raceView.startIntervention(assigned);
+
+  assert(
+    '22.5 La primera pulsación tras una recarga sin turno cargado también restaura y encola (EARS 03.1)',
+    queued === true && raceView.shiftStatus === 'ON_SHIFT'
+  );
+}
+
+{
+  const storage = new OfflineStorage({ indexedDB: null });
+  await storage.saveSnapshot(shiftBootstrap(2, new Date().toISOString()));
+
+  const otherAccountView = createRouteInstance();
+  otherAccountView.offlineStorage = storage;
+  otherAccountView.offlineSnapshot = {
+    ...shiftBootstrap(3, new Date().toISOString()),
+    offline_shift: { status: 'ON_SHIFT', recorded_at: new Date().toISOString() }
+  };
+  otherAccountView.shiftStatus = 'OFF_SHIFT';
+
+  const restored = await otherAccountView.restoreOfflineShiftStatus();
+
+  assert(
+    '22.6 La copia en memoria de otra cuenta no puede prestar su turno (Art. V.4)',
+    restored === false && otherAccountView.shiftStatus === 'OFF_SHIFT'
+  );
+}
+
+{
+  const storage = new OfflineStorage({ indexedDB: null });
+  await storage.saveSnapshot(shiftBootstrap(2, new Date().toISOString()));
+  await storage.saveShiftStatus(2, 'ON_SHIFT');
+
+  const fallbackView = createRouteInstance();
+  fallbackView.offlineStorage = storage;
+  fallbackView.shiftStatus = 'OFF_SHIFT';
+  fallbackView.offlineNotice = '';
+  api.get = async () => {
+    throw Object.assign(new Error('Sin respuesta del servidor.'), { status: 0, code: 'NETWORK_ERROR' });
+  };
+  const originalConsoleError = console.error;
+  console.error = () => {};
+
+  await fallbackView.loadShiftStatus();
+
+  console.error = originalConsoleError;
+  api.get = originalGetForShiftTests;
+
+  assert(
+    '22.7 Si la consulta de turno falla, la vista cae en la copia local en vez de «Fuera de turno»',
+    fallbackView.shiftStatus === 'ON_SHIFT' && fallbackView.offlineNotice.includes('copia local')
+  );
+}
+
+{
+  const loginView = createRouteInstance();
+  let shiftLoads = 0;
+  loginView.loadRoute = async () => {};
+  loginView.loadShiftStatus = async () => { shiftLoads++; };
+  loginView.loginEmail = 'jordi.ruta@vendguard.internal';
+  loginView.loginPassword = 'Password123!';
+  const originalLogin = api.auth.internalLogin;
+  api.auth.internalLogin = async () => ({
+    user: {
+      id: 2,
+      name: 'Jordi Técnico Ruta',
+      email: 'jordi.ruta@vendguard.internal',
+      role: 'TECHNICIAN'
+    },
+    token: 'token_login_shift'
+  });
+
+  await loginView.handleInternalLogin();
+  api.auth.internalLogin = originalLogin;
+
+  assert(
+    '22.8 El acceso nuevo hidrata el turno antes de que pueda caer la cobertura (EARS 03.1)',
+    shiftLoads === 1 && store.state.user?.role === 'TECHNICIAN'
+  );
+}
 
 // ---------------------------------------------------------------------
 // SUMMARY

@@ -282,8 +282,9 @@ mide lo mismo que en el cliente local: acepta las dos formas del SAN y rechaza l
 
 Este directorio aporta el motor, el contrato y la sonda; las **suites** de la categoría
 declaran su marca (`const VENDGUARD_TEST_CATEGORY = 'new_engine';`), de modo que
-`run_all.php` las enumera en voz alta y **no** las mezcla con la batería hermética. El canal
-se ejecuta con la sonda como puerta y las tres suites juntas (T-HYBRID-21):
+`run_all.php` las enumera en voz alta y **no** las mezcla con la batería hermética. La
+evidencia original de T-HYBRID-21 se reunió con la sonda como puerta y tres suites
+ejecutadas a mano:
 
 ```bash
 # Motor nativo (loopback, sin TLS): es el que se usó para la evidencia de T-HYBRID-21
@@ -302,15 +303,26 @@ leen `PG_TEST_DSN` y no la forma en que el motor se aprovisionó.
 Con el contrato cargado, el canal completo se ejecuta con un solo comando (hallazgo H-4):
 
 ```bash
-php tests/run_new_engine.php            # las 14 suites de la categoría
+php tests/run_new_engine.php            # las 29 suites de la categoría
 php tests/run_new_engine.php Zone       # sólo las que casan con el filtro
 ```
 
-El comando exige `PG_TEST_DSN` y un motor alcanzable: sin uno de los dos sale con código `2`
-y lo dice. Cada suite sigue siendo invocable por separado para depurar, pero la certificación
-del canal se lee en el resumen agregado. `PoolerLatencyMeasurementTest` sale con código `2`
-cuando falta el contrato remoto (`DB_SSL_ROOT_CERT`): el runner la lista como **no ejecutable**
-con su motivo, sin contarla como fallo y sin omitirla en silencio.
+La suite `OfflineSyncLockBrowserTest.php` también vive en este canal aunque no consulte PostgreSQL:
+lo que necesita es un motor real de otro tipo —Chromium— para abrir dos pestañas del mismo perfil y
+certificar el cerrojo de sincronización del Módulo 24. Si no encuentra Chrome, Edge ni Chromium (o
+falta `VENDGUARD_CHROME_PATH`), sale con código `2` y el runner la lista como **no ejecutable**, con
+su motivo, en lugar de dar por bueno un doble de `navigator.locks`.
+
+El recuento no se mantiene a mano: `run_new_engine.php` descubre las suites por su marca y
+`tests/unit/NewEngineChannelDocumentationTest.php` falla si esta línea deja de coincidir con
+lo descubierto. El comando exige `PG_TEST_DSN` y un motor alcanzable: sin uno de los dos sale
+con código `2` y lo dice. Cada suite sigue siendo invocable por separado para depurar, pero
+la certificación del canal se lee en el resumen agregado. `PoolerLatencyMeasurementTest` declara su
+**contrato de entorno propio** (`VENDGUARD_TEST_ENV_CONTRACT` → `deploy/local/supabase/.env.local`) y el
+runner lo resuelve solo para ese proceso hijo: inyecta `DATABASE_URL` y `DB_SSL_ROOT_CERT` sin publicar
+sus valores, de modo que la medición remota y el banco del arnés conviven en la misma corrida. Si el
+fichero falta, la suite sale con código `2` y el runner la lista como **no ejecutable** con su motivo,
+sin contarla como fallo y sin omitirla en silencio.
 
 Sin `PG_TEST_DSN` —o con el motor inalcanzable— las suites de la categoría se declaran **no
 ejecutables** con código de salida `2` en lugar de omitirse en silencio. El **informe** agregado
