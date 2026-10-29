@@ -43,6 +43,20 @@ export class ApiError extends Error {
 export const REQUEST_TIMEOUT_MS = 5000;
 
 /**
+ * Plazo propio de las subidas `multipart/form-data` (EARS-04.1, Módulo 24).
+ *
+ * Cinco segundos bastan de sobra para un JSON pequeño, pero no para mover hasta 5 MB de
+ * evidencia fotográfica desde una máquina de vending en un sótano con cobertura mala: el
+ * temporizador mide **la transferencia completa**, y abortar a los 5 s convertía una subida
+ * legítima en un `REQUEST_TIMEOUT` que dejaba la cola reintentando para siempre.
+ *
+ * Treinta segundos cubren 5 MB a ~1,4 Mbps sostenidos y siguen acotando la espera del operario.
+ * Solo cambia el plazo del **cuerpo**: el tiempo de conexión del driver PDO mide la ejecución de
+ * la consulta, no la recepción del archivo, así que el techo del servidor sigue intacto.
+ */
+export const UPLOAD_TIMEOUT_MS = 30000;
+
+/**
  * Evento nativo con el que el transporte publica el estado de la conexión (RF-04.3, RF-04.4).
  *
  * El consumidor canónico es `components/ConnectionStateBanner.js`, que reconoce los estados
@@ -420,10 +434,16 @@ export class ApiClient {
     };
 
     // EARS-04.1 — Tiempo de espera ordinario estricto en TODA petición. Si el llamante trae su
-    // propia señal se encadenan las dos: quien cancela sigue pudiendo cancelar y el plazo de
-    // 5,0 s sigue mordiendo. El motivo de cada una viaja distinto para que el sistema sepa si
-    // tiene que avisar al operario (avería) o callarse (cancelación deliberada).
-    const timeout = buildTimeoutSignal();
+    // propia señal se encadenan las dos: quien cancela sigue pudiendo cancelar y el plazo sigue
+    // mordiendo. El motivo de cada una viaja distinto para que el sistema sepa si tiene que
+    // avisar al operario (avería) o callarse (cancelación deliberada).
+    //
+    // La única excepción es el cuerpo `multipart/form-data`: mover hasta 5 MB de foto no cabe en
+    // 5,0 s, así que la subida tiene plazo propio (`UPLOAD_TIMEOUT_MS`) en lugar de convertir una
+    // transferencia lenta pero viva en un fallo de red.
+    const isUpload = typeof FormData !== 'undefined' && config.body instanceof FormData;
+    const timeoutMs = isUpload ? UPLOAD_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+    const timeout = buildTimeoutSignal(timeoutMs);
     const linkedSignal = combineWithTimeoutSignal(options.signal, timeout);
     config.signal = linkedSignal.signal;
 
@@ -442,6 +462,7 @@ export class ApiClient {
       callerOptions: options,
       callerSignal: options.signal,
       hasTimedOut: linkedSignal.hasTimedOut,
+      timeoutMs,
       cancelTimeout: linkedSignal.cancel
     });
 
@@ -463,11 +484,21 @@ export class ApiClient {
    * tarde justo en el caso que existe para cubrir.
    *
    * @param {{endpoint: string, url: string, config: Object, callerOptions: Object,
-   *   callerSignal: (AbortSignal|undefined), hasTimedOut: Function, cancelTimeout: Function}} transport
+   *   callerSignal: (AbortSignal|undefined), hasTimedOut: Function, timeoutMs: number,
+   *   cancelTimeout: Function}} transport
    * @returns {Promise<any>}
    */
   async dispatchRequest(transport) {
-    const { endpoint, url, config, callerOptions, callerSignal, hasTimedOut, cancelTimeout } = transport;
+    const {
+      endpoint,
+      url,
+      config,
+      callerOptions,
+      callerSignal,
+      hasTimedOut,
+      timeoutMs,
+      cancelTimeout
+    } = transport;
 
     this.pendingRequests++;
     this.announceRequestState();
@@ -476,7 +507,7 @@ export class ApiClient {
     try {
       response = await fetch(url, config);
     } catch (networkError) {
-      const failure = this.describeTransportFailure(networkError, { hasTimedOut, callerSignal });
+      const failure = this.describeTransportFailure(networkError, { hasTimedOut, callerSignal, timeoutMs });
 
       // Una cancelación deliberada no es una avería de red: quien canceló ya lo sabe, y anunciar
       // una desconexión global por su decisión sería mentir al resto de la aplicación.
@@ -589,7 +620,7 @@ export class ApiClient {
    * tiene que saber que lo suyo no se ha perdido.
    *
    * @param {*} networkError Error lanzado por `fetch`.
-   * @param {{hasTimedOut?: Function, callerSignal?: AbortSignal}} [transport={}]
+   * @param {{hasTimedOut?: Function, callerSignal?: AbortSignal, timeoutMs?: number}} [transport={}]
    * @returns {{announce: boolean, error: ApiError}}
    */
   describeTransportFailure(networkError, transport = {}) {
@@ -611,7 +642,8 @@ export class ApiClient {
       };
     }
 
-    const seconds = (REQUEST_TIMEOUT_MS / 1000).toFixed(1).replace('.', ',');
+    const appliedTimeoutMs = Number.isFinite(transport.timeoutMs) ? transport.timeoutMs : REQUEST_TIMEOUT_MS;
+    const seconds = (appliedTimeoutMs / 1000).toFixed(1).replace('.', ',');
     const message = timedOut
       ? `El servidor ha tardado más de ${seconds} segundos en responder. Lo que has escrito sigue en el formulario: reintenta cuando recuperes la conexión.`
       : 'Error de conexión con el servidor. Lo que has escrito sigue en el formulario: comprueba tu conexión y reintenta.';
