@@ -12,7 +12,9 @@ use VendGuard\Application\DTO\OfflineBootstrapSnapshotDto;
 use VendGuard\Core\Domain\Exception\OfflineSyncValidationException;
 use VendGuard\Core\Domain\Model\OfflineSyncMutation;
 use VendGuard\Core\Domain\Repository\OfflineSyncMutationRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\OfflineSyncMetadata;
+use VendGuard\Infrastructure\Database\PdoTransactionManager;
 
 /**
  * OfflineSyncService
@@ -77,11 +79,16 @@ use VendGuard\Core\Domain\ValueObject\OfflineSyncMetadata;
  * ## Sobre la carrera entre dos reintentos simultáneos
  *
  * La comprobación previa cubre el reenvío normal. Si dos peticiones con la
- * misma clave entran a la vez, la clave única del motor decide cuál persiste y
- * `recordAppliedMutation()` devuelve la fila ganadora; el servicio la reconoce
- * por su sello `synced_at` y responde como repetición idempotente. La segunda
- * transición la frena el propio estado de la parada (una avería ya resuelta no
- * vuelve a resolverse), que es la guarda constitucional del dominio.
+ * misma clave entran a la vez, la reserva de idempotencia (`H3`) se decide
+ * **dentro de la transacción del caso de uso** y **antes** de ejecutar el
+ * dominio: el índice único `uq_offline_sync_tech_mutation` elige dueño, la
+ * petición perdedora espera a que la ganadora confirme y recibe su fila para
+ * responder como repetición idempotente. Sólo la dueña de la reserva ejecuta la
+ * transición, así que no hay dos escrituras de dominio compitiendo ni hueco
+ * entre «comprobar» y «persistir».
+ *
+ * Un veredicto negativo del dominio no quema la clave: la excepción deshace la
+ * transacción entera —reserva incluida— y la operación puede reintentarse.
  *
  * Dogma Vanilla: PHP 8.2+ puro, POO limpia, sin dependencias externas.
  * Dualismo Lingüístico: código en inglés, documentación y mensajes en castellano.
@@ -122,9 +129,23 @@ final class OfflineSyncService
         'refund_collision_note_id',
     ];
 
+    /**
+     * Puerto de unidad de trabajo. Si no se inyecta, se resuelve de forma
+     * perezosa sobre la conexión PDO compartida, igual que los servicios de
+     * aplicación que ya envuelven varios repositorios (Art. III).
+     */
+    private ?TransactionManagerInterface $transactionManager;
+
     public function __construct(
-        private readonly OfflineSyncMutationRepositoryInterface $repository
+        private readonly OfflineSyncMutationRepositoryInterface $repository,
+        ?TransactionManagerInterface $transactionManager = null
     ) {
+        $this->transactionManager = $transactionManager;
+    }
+
+    private function transactions(): TransactionManagerInterface
+    {
+        return $this->transactionManager ??= new PdoTransactionManager();
     }
 
     /**
@@ -262,50 +283,11 @@ final class OfflineSyncService
         $partialRefundCollision = $operationType === OfflineSyncMutation::OPERATION_RESOLVE_INCIDENT
             && (bool)($stopFacts['refund_already_regularized'] ?? false);
 
-        // 4. Transición real del dominio con el contexto ya corregido.
-        $transition = $this->invokeTransition($applyTransition, [
-            'is_offline' => true,
-            'effective_occurred_at' => $resolved['effective_occurred_at'],
-            'synced_at' => $syncedAt,
-            'clock_skew_adjusted' => $resolved['clock_skew_adjusted'],
-            'sanitary_seal_confirmed' => $metadata->sanitarySealConfirmed,
-            'preserve_sanitary_quarantine' => $preserveQuarantine,
-            'skip_refund_block' => $partialRefundCollision,
-        ]);
-
-        // 5. Blindaje sanitario (EARS 05.4): la avería se cierra, la cuarentena
-        //    no se levanta. El cierre tardío no puede reabrir la máquina al público.
-        if ($preserveQuarantine) {
-            if ($transition['machine_status_after'] !== self::MACHINE_STATUS_SANITARY_QUARANTINE) {
-                throw new DomainException(
-                    'La resolución sin conexión no puede levantar la cuarentena sanitaria de una máquina '
-                    . 'de alimentos perecederos (Art. II). El cierre queda abortado para revisión.'
-                );
-            }
-        }
-
-        // 6. Colisión parcial de reintegro (EARS 05.2, QA 2): el hallazgo del
-        //    técnico debe quedar como Nota Interna; sin ella el cierre no vale.
-        if ($partialRefundCollision) {
-            if (($transition['refund_collision_note_id'] ?? 0) <= 0) {
-                throw new DomainException(
-                    'El cierre con reintegro ya regularizado debe volcar el dictamen de efectivo como Nota '
-                    . 'Interna de Taller antes de completarse (QA 2, Art. III.3).'
-                );
-            }
-        }
-
-        $envelope = $this->buildEnvelope(
-            $metadata,
-            $resolved,
-            $syncedAt,
-            $preserveQuarantine,
-            $partialRefundCollision
-        );
-        $payload = $transition['payload'];
-        $payload['offline_sync'] = $envelope;
-
-        $mutation = new OfflineSyncMutation(
+        // 4. Reserva, transición y confirmación en una sola unidad atómica
+        //    (RF-04.2, H3). La fila provisional se inserta ANTES de ejecutar el
+        //    dominio: el índice único decide el dueño de la clave y ninguna otra
+        //    petición puede colarse entre la comprobación y la persistencia.
+        $reservation = new OfflineSyncMutation(
             id: OfflineSyncMutation::UNPERSISTED_ID,
             technicianId: $technicianId,
             clientMutationId: $metadata->clientMutationId,
@@ -321,31 +303,134 @@ final class OfflineSyncService
             syncedAt: $this->format($syncedAt),
             clockSkewAdjusted: $resolved['clock_skew_adjusted'],
             sanitarySealConfirmed: $metadata->sanitarySealConfirmed,
-            responseHttpStatus: $transition['http_status'],
-            responsePayload: $payload,
+            responseHttpStatus: 200,
+            responsePayload: [],
             createdAt: $this->format($syncedAt)
         );
 
-        $persisted = $this->repository->recordAppliedMutation($mutation);
-        $persistedEnvelope = $this->envelopeFrom($persisted);
+        return $this->transactions()->runInTransaction(function () use (
+            $reservation,
+            $applyTransition,
+            $metadata,
+            $resolved,
+            $syncedAt,
+            $preserveQuarantine,
+            $partialRefundCollision
+        ): array {
+            $claim = $this->repository->reserveAppliedMutation($reservation);
 
-        // 7. Si el motor devolvió otra fila, el reintento simultáneo llegó antes:
-        //    se responde como repetición idempotente, nunca como una segunda
-        //    aplicación silenciosa.
-        $replayed = ($persistedEnvelope['synced_at'] ?? null) !== $this->format($syncedAt);
+            if (!$claim['reserved']) {
+                $winner = $claim['existing'];
 
-        return [
-            'http_status' => $persisted->responseHttpStatus,
-            'payload' => $persisted->responsePayload,
-            'idempotent_replay' => $replayed,
-            'offline_sync' => $persistedEnvelope === [] ? null : $persistedEnvelope,
-            'partial_refund_collision_dumped' => (bool)(
-                $persistedEnvelope['partial_refund_collision_dumped'] ?? false
-            ),
-            'sanitary_quarantine_retained' => (bool)(
-                $persistedEnvelope['sanitary_quarantine_retained'] ?? false
-            ),
-        ];
+                if ($winner === null) {
+                    throw OfflineSyncValidationException::mutationConflict(
+                        'La misma operación se está aplicando en otra petición: reintenta en unos segundos.'
+                    );
+                }
+
+                if (!$winner->isApplied()) {
+                    throw OfflineSyncValidationException::mutationConflict(
+                        'Esa operación ya quedó registrada como volcado de auditoría y no puede reaplicarse.'
+                    );
+                }
+
+                return $this->replayResult($winner);
+            }
+
+            // 5. Transición real del dominio con el contexto ya corregido. Sólo
+            //    la dueña de la reserva llega aquí.
+            $transition = $this->invokeTransition($applyTransition, [
+                'is_offline' => true,
+                'effective_occurred_at' => $resolved['effective_occurred_at'],
+                'synced_at' => $syncedAt,
+                'clock_skew_adjusted' => $resolved['clock_skew_adjusted'],
+                'sanitary_seal_confirmed' => $metadata->sanitarySealConfirmed,
+                'preserve_sanitary_quarantine' => $preserveQuarantine,
+                'skip_refund_block' => $partialRefundCollision,
+            ]);
+
+            // 6. Blindaje sanitario (EARS 05.4): la avería se cierra, la
+            //    cuarentena no se levanta. El cierre tardío no puede reabrir la
+            //    máquina al público.
+            if ($preserveQuarantine) {
+                if ($transition['machine_status_after'] !== self::MACHINE_STATUS_SANITARY_QUARANTINE) {
+                    throw new DomainException(
+                        'La resolución sin conexión no puede levantar la cuarentena sanitaria de una máquina '
+                        . 'de alimentos perecederos (Art. II). El cierre queda abortado para revisión.'
+                    );
+                }
+            }
+
+            // 7. Colisión parcial de reintegro (EARS 05.2, QA 2): el hallazgo
+            //    del técnico debe quedar como Nota Interna; sin ella el cierre
+            //    no vale.
+            if ($partialRefundCollision) {
+                if (($transition['refund_collision_note_id'] ?? 0) <= 0) {
+                    throw new DomainException(
+                        'El cierre con reintegro ya regularizado debe volcar el dictamen de efectivo como Nota '
+                        . 'Interna de Taller antes de completarse (QA 2, Art. III.3).'
+                    );
+                }
+            }
+
+            $payload = $transition['payload'];
+            $payload['offline_sync'] = $this->buildEnvelope(
+                $metadata,
+                $resolved,
+                $syncedAt,
+                $preserveQuarantine,
+                $partialRefundCollision
+            );
+
+            $persisted = $this->repository->completeReservedMutation(
+                $this->withResponse($reservation, $transition['http_status'], $payload)
+            );
+            $persistedEnvelope = $this->envelopeFrom($persisted);
+
+            return [
+                'http_status' => $persisted->responseHttpStatus,
+                'payload' => $persisted->responsePayload,
+                'idempotent_replay' => false,
+                'offline_sync' => $persistedEnvelope === [] ? null : $persistedEnvelope,
+                'partial_refund_collision_dumped' => (bool)(
+                    $persistedEnvelope['partial_refund_collision_dumped'] ?? false
+                ),
+                'sanitary_quarantine_retained' => (bool)(
+                    $persistedEnvelope['sanitary_quarantine_retained'] ?? false
+                ),
+            ];
+        });
+    }
+
+    /**
+     * Copia la reserva con el veredicto definitivo de la transición.
+     *
+     * La entidad es inmutable y la clave de idempotencia no cambia: se conserva
+     * el mismo sello temporal provisional para que la confirmación actualice la
+     * fila exacta que se reservó.
+     *
+     * @param array<string, mixed> $payload
+     */
+    private function withResponse(OfflineSyncMutation $reservation, int $httpStatus, array $payload): OfflineSyncMutation
+    {
+        return new OfflineSyncMutation(
+            id: $reservation->id,
+            technicianId: $reservation->technicianId,
+            clientMutationId: $reservation->clientMutationId,
+            stopType: $reservation->stopType,
+            stopId: $reservation->stopId,
+            operationType: $reservation->operationType,
+            outcomeStatus: $reservation->outcomeStatus,
+            clientOccurredAt: $reservation->clientOccurredAt,
+            chainStartedAt: $reservation->chainStartedAt,
+            effectiveOccurredAt: $reservation->effectiveOccurredAt,
+            syncedAt: $reservation->syncedAt,
+            clockSkewAdjusted: $reservation->clockSkewAdjusted,
+            sanitarySealConfirmed: $reservation->sanitarySealConfirmed,
+            responseHttpStatus: $httpStatus,
+            responsePayload: $payload,
+            createdAt: $reservation->createdAt
+        );
     }
 
     /**

@@ -303,7 +303,7 @@ leen `PG_TEST_DSN` y no la forma en que el motor se aprovisionó.
 Con el contrato cargado, el canal completo se ejecuta con un solo comando (hallazgo H-4):
 
 ```bash
-php tests/run_new_engine.php            # las 27 suites de la categoría
+php tests/run_new_engine.php            # las 28 suites de la categoría
 php tests/run_new_engine.php Zone       # sólo las que casan con el filtro
 ```
 

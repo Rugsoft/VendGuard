@@ -46,7 +46,44 @@ use VendGuard\Application\Service\OfflineSyncService;
 use VendGuard\Core\Domain\Exception\OfflineSyncValidationException;
 use VendGuard\Core\Domain\Model\OfflineSyncMutation;
 use VendGuard\Core\Domain\Repository\OfflineSyncMutationRepositoryInterface;
+use VendGuard\Core\Domain\Repository\TransactionManagerInterface;
 use VendGuard\Core\Domain\ValueObject\OfflineSyncMetadata;
+
+/**
+ * Doble de la unidad de trabajo.
+ *
+ * Ejecuta el trabajo sin abrir transacción real y, si la operación falla,
+ * devuelve el libro en memoria a su estado anterior: así el doble reproduce la
+ * única propiedad que el servicio necesita del motor —un veredicto negativo
+ * deshace la reserva de idempotencia (`H3`)—. La atomicidad real la certifica
+ * la suite de integración contra PostgreSQL.
+ */
+final class ImmediateTransactionManager implements TransactionManagerInterface
+{
+    /** Unidades de trabajo abiertas por el servicio. */
+    public int $opened = 0;
+
+    public function __construct(
+        private readonly ?InMemoryOfflineSyncMutationRepository $repository = null
+    ) {
+    }
+
+    public function runInTransaction(callable $operation): mixed
+    {
+        $this->opened++;
+        $snapshot = $this->repository?->snapshotState();
+
+        try {
+            return $operation();
+        } catch (Throwable $exception) {
+            if ($snapshot !== null) {
+                $this->repository->restoreState($snapshot);
+            }
+
+            throw $exception;
+        }
+    }
+}
 
 /**
  * Doble en memoria del libro de sincronización.
@@ -146,6 +183,76 @@ final class InMemoryOfflineSyncMutationRepository implements OfflineSyncMutation
         return $stored;
     }
 
+    /**
+     * Reserva de idempotencia (`H3`).
+     *
+     * La fila provisional entra antes de que se ejecute la transición, igual
+     * que en PostgreSQL: quien encuentra la clave tomada recibe al ganador.
+     *
+     * @return array{reserved: bool, existing: OfflineSyncMutation|null}
+     */
+    public function reserveAppliedMutation(OfflineSyncMutation $mutation): array
+    {
+        $key = $mutation->technicianId . ':' . $mutation->clientMutationId;
+
+        if (isset($this->rows[$key])) {
+            return ['reserved' => false, 'existing' => $this->rows[$key]];
+        }
+
+        $stored = $this->withIdentity($mutation);
+        $this->rows[$key] = $stored;
+        $this->recorded[] = $stored;
+
+        return ['reserved' => true, 'existing' => null];
+    }
+
+    /**
+     * Confirma la reserva con el cuerpo definitivo.
+     *
+     * Si la reserva no está, falla cerrado: nunca escribe un resultado
+     * huérfano, igual que el repositorio real.
+     */
+    public function completeReservedMutation(OfflineSyncMutation $mutation): OfflineSyncMutation
+    {
+        $key = $mutation->technicianId . ':' . $mutation->clientMutationId;
+
+        if (!isset($this->rows[$key])) {
+            throw new DomainException('La reserva de idempotencia desapareció antes de confirmarse.');
+        }
+
+        $reserved = $this->rows[$key];
+        $stored = new OfflineSyncMutation(
+            id: $reserved->id,
+            technicianId: $reserved->technicianId,
+            clientMutationId: $reserved->clientMutationId,
+            stopType: $reserved->stopType,
+            stopId: $reserved->stopId,
+            operationType: $reserved->operationType,
+            outcomeStatus: $reserved->outcomeStatus,
+            clientOccurredAt: $reserved->clientOccurredAt,
+            chainStartedAt: $reserved->chainStartedAt,
+            effectiveOccurredAt: $reserved->effectiveOccurredAt,
+            syncedAt: $reserved->syncedAt,
+            clockSkewAdjusted: $reserved->clockSkewAdjusted,
+            sanitarySealConfirmed: $reserved->sanitarySealConfirmed,
+            responseHttpStatus: $mutation->responseHttpStatus,
+            responsePayload: $mutation->responsePayload,
+            createdAt: $reserved->createdAt
+        );
+
+        $this->rows[$key] = $stored;
+
+        foreach ($this->recorded as $index => $row) {
+            if ($row->technicianId === $stored->technicianId
+                && $row->clientMutationId === $stored->clientMutationId
+            ) {
+                $this->recorded[$index] = $stored;
+            }
+        }
+
+        return $stored;
+    }
+
     public function recordConflictDump(
         OfflineSyncMutation $mutation,
         string $conflictReason,
@@ -239,6 +346,25 @@ final class InMemoryOfflineSyncMutationRepository implements OfflineSyncMutation
     }
 
     /**
+     * Foto del libro para deshacer una unidad de trabajo fallida.
+     *
+     * @return array{rows: array<string, OfflineSyncMutation>, recorded: list<OfflineSyncMutation>}
+     */
+    public function snapshotState(): array
+    {
+        return ['rows' => $this->rows, 'recorded' => $this->recorded];
+    }
+
+    /**
+     * @param array{rows: array<string, OfflineSyncMutation>, recorded: list<OfflineSyncMutation>} $state
+     */
+    public function restoreState(array $state): void
+    {
+        $this->rows = $state['rows'];
+        $this->recorded = $state['recorded'];
+    }
+
+    /**
      * @param array<string, mixed>|null $payload
      */
     private function withIdentity(OfflineSyncMutation $mutation, ?array $payload = null): OfflineSyncMutation
@@ -301,7 +427,7 @@ $capture = static function (callable $operation): ?Throwable {
 };
 
 $repo = new InMemoryOfflineSyncMutationRepository();
-$service = new OfflineSyncService($repo);
+$service = new OfflineSyncService($repo, new ImmediateTransactionManager($repo));
 
 $offlineMetadata = static fn (
     string $mutationId,
@@ -471,7 +597,8 @@ $assert(
 echo "\n--- 2. Colisión parcial de reintegro (RF-05.2, QA 2) ---\n";
 
 $refundContext = null;
-$refundService = new OfflineSyncService(new InMemoryOfflineSyncMutationRepository());
+$refundRepo = new InMemoryOfflineSyncMutationRepository();
+$refundService = new OfflineSyncService($refundRepo, new ImmediateTransactionManager($refundRepo));
 
 $refundResult = $refundService->executeIdempotentMutation(
     technicianId: 2,
@@ -513,7 +640,7 @@ $assert(
 );
 
 $repoWithoutNote = new InMemoryOfflineSyncMutationRepository();
-$serviceWithoutNote = new OfflineSyncService($repoWithoutNote);
+$serviceWithoutNote = new OfflineSyncService($repoWithoutNote, new ImmediateTransactionManager($repoWithoutNote));
 $missingNoteFailure = $capture(static fn () => $serviceWithoutNote->executeIdempotentMutation(
     technicianId: 2,
     stopType: OfflineSyncMutation::STOP_TYPE_INCIDENT,
@@ -544,7 +671,7 @@ $assert(
 echo "\n--- 3. Cuarentena sanitaria y precinto in situ (RF-05.4, QA 1, Art. II) ---\n";
 
 $quarantineRepo = new InMemoryOfflineSyncMutationRepository();
-$quarantineService = new OfflineSyncService($quarantineRepo);
+$quarantineService = new OfflineSyncService($quarantineRepo, new ImmediateTransactionManager($quarantineRepo));
 
 $quarantineResult = $quarantineService->executeIdempotentMutation(
     technicianId: 2,
@@ -612,7 +739,7 @@ $assert(
 );
 
 $sealRepo = new InMemoryOfflineSyncMutationRepository();
-$sealService = new OfflineSyncService($sealRepo);
+$sealService = new OfflineSyncService($sealRepo, new ImmediateTransactionManager($sealRepo));
 $sealCalled = false;
 $sealFailure = $capture(static function () use ($sealService, $offlineMetadata, $synced, $assignedAt, &$sealCalled): void {
     $sealService->executeIdempotentMutation(
@@ -671,7 +798,7 @@ $dumpRepo->incidentStatus[405] = 'CANCELLED';
 $dumpRepo->incidentOwner[405] = 7;
 $dumpRepo->incidentStatus[406] = 'CLOSED';
 $dumpRepo->incidentOwner[406] = 2;
-$dumpService = new OfflineSyncService($dumpRepo);
+$dumpService = new OfflineSyncService($dumpRepo, new ImmediateTransactionManager($dumpRepo));
 
 $cancelledSummary = [
     'diagnosis' => 'Compresor sin arranque por relé térmico disparado.',
@@ -828,7 +955,7 @@ echo "\n--- 5. Volcado por baja de cuenta (RF-06.4, QA 5) ---\n";
 $deactivatedRepo = new InMemoryOfflineSyncMutationRepository();
 $deactivatedRepo->incidentStatus[605] = 'IN_PROGRESS';
 $deactivatedRepo->incidentOwner[605] = 2;
-$deactivatedService = new OfflineSyncService($deactivatedRepo);
+$deactivatedService = new OfflineSyncService($deactivatedRepo, new ImmediateTransactionManager($deactivatedRepo));
 
 $queue = [
     [
@@ -905,7 +1032,7 @@ $assert(
 echo "\n--- 6. Anclaje del cierre encadenado tras reanudar (EARS 04.3, QA 4) ---\n";
 
 $chainRepo = new InMemoryOfflineSyncMutationRepository();
-$chainService = new OfflineSyncService($chainRepo);
+$chainService = new OfflineSyncService($chainRepo, new ImmediateTransactionManager($chainRepo));
 $chainSyncedAt = new DateTimeImmutable('2026-10-27T12:00:00+00:00');
 
 $recordChainStart = static function (
@@ -991,7 +1118,7 @@ $assert(
 );
 
 $fallbackRepo = new InMemoryOfflineSyncMutationRepository();
-$fallbackService = new OfflineSyncService($fallbackRepo);
+$fallbackService = new OfflineSyncService($fallbackRepo, new ImmediateTransactionManager($fallbackRepo));
 $fallbackContext = null;
 $fallback = $fallbackService->executeIdempotentMutation(
     technicianId: 2,

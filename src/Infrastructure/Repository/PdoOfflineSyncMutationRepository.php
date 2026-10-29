@@ -193,52 +193,142 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
             );
         }
 
-        $this->pdo->beginTransaction();
+        $isOwnTransaction = !$this->pdo->inTransaction();
+        if ($isOwnTransaction) {
+            $this->pdo->beginTransaction();
+        }
 
         try {
-            $existing = $this->findByTechnicianAndMutationId($mutation->technicianId, $mutation->clientMutationId);
-            if ($existing !== null) {
-                $this->pdo->commit();
+            $reservation = $this->reserveAppliedMutation($mutation);
+
+            if (!$reservation['reserved']) {
+                $existing = $reservation['existing'];
+                if ($existing === null) {
+                    throw new DomainException(
+                        'La clave de idempotencia está tomada pero su fila todavía no es visible.'
+                    );
+                }
+
+                if ($isOwnTransaction) {
+                    $this->pdo->commit();
+                }
 
                 return $existing;
             }
 
-            $mutationId = $this->insertMutation($mutation);
+            $persisted = $this->completeReservedMutation($mutation);
 
-            $this->recordAudit(
-                entityType: $this->auditEntityType($mutation->stopType),
-                entityId: $mutation->stopId,
-                action: $mutation->operationType,
-                actorUserId: $mutation->technicianId,
-                createdAt: $mutation->syncedAt,
-                newState: [
-                    'offline_sync' => $this->offlineSyncEnvelope($mutation),
-                    'operation_type' => $mutation->operationType,
-                    'outcome_status' => OfflineSyncMutation::OUTCOME_APPLIED,
-                    'response_http_status' => $mutation->responseHttpStatus,
-                ]
-            );
-
-            $this->pdo->commit();
-
-            return $this->findPersistedMutation($mutationId);
-        } catch (Throwable $error) {
-            if ($this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
+            if ($isOwnTransaction) {
+                $this->pdo->commit();
             }
 
-            if ($this->isUniqueViolation($error)) {
-                $existing = $this->findByTechnicianAndMutationId(
-                    $mutation->technicianId,
-                    $mutation->clientMutationId
-                );
-                if ($existing !== null) {
-                    return $existing;
-                }
+            return $persisted;
+        } catch (Throwable $error) {
+            if ($isOwnTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
             }
 
             throw $error;
         }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function reserveAppliedMutation(OfflineSyncMutation $mutation): array
+    {
+        if (!$mutation->isApplied()) {
+            throw new InvalidArgumentException(
+                '`reserveAppliedMutation` sólo admite mutaciones con resultado APPLIED.'
+            );
+        }
+
+        if (!$this->pdo->inTransaction()) {
+            throw new \LogicException(
+                'La reserva de idempotencia exige la transacción abierta por el caso de uso.'
+            );
+        }
+
+        if ($this->insertMutationIfAbsent($mutation)) {
+            return ['reserved' => true, 'existing' => null];
+        }
+
+        // Otra petición con la misma clave ganó la carrera. `ON CONFLICT DO
+        // NOTHING` esperó a que confirmara, así que su fila ya es visible en
+        // esta transacción y el reenvío puede replicar su respuesta.
+        return [
+            'reserved' => false,
+            'existing' => $this->findByTechnicianAndMutationId(
+                $mutation->technicianId,
+                $mutation->clientMutationId
+            ),
+        ];
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function completeReservedMutation(OfflineSyncMutation $mutation): OfflineSyncMutation
+    {
+        if (!$mutation->isApplied()) {
+            throw new InvalidArgumentException(
+                '`completeReservedMutation` sólo admite mutaciones con resultado APPLIED.'
+            );
+        }
+
+        if (!$this->pdo->inTransaction()) {
+            throw new \LogicException(
+                'La confirmación de la reserva exige la transacción abierta por el caso de uso.'
+            );
+        }
+
+        $stmt = $this->pdo->prepare(
+            'UPDATE offline_sync_mutations
+                SET response_http_status = :response_http_status,
+                    response_payload = :response_payload
+              WHERE technician_id = :technician_id
+                AND client_mutation_id = :client_mutation_id'
+        );
+        $stmt->bindValue(':response_http_status', $mutation->responseHttpStatus, PDO::PARAM_INT);
+        $stmt->bindValue(
+            ':response_payload',
+            $this->encodeJson($mutation->responsePayload),
+            PDO::PARAM_STR
+        );
+        $stmt->bindValue(':technician_id', $mutation->technicianId, PDO::PARAM_INT);
+        $stmt->bindValue(':client_mutation_id', $mutation->clientMutationId, PDO::PARAM_STR);
+        $stmt->execute();
+
+        if ($stmt->rowCount() !== 1) {
+            throw new DomainException(
+                'La reserva de idempotencia desapareció antes de confirmarse: el resultado no se escribe a ciegas.'
+            );
+        }
+
+        $this->recordAudit(
+            entityType: $this->auditEntityType($mutation->stopType),
+            entityId: $mutation->stopId,
+            action: $mutation->operationType,
+            actorUserId: $mutation->technicianId,
+            createdAt: $mutation->syncedAt,
+            newState: [
+                'offline_sync' => $this->offlineSyncEnvelope($mutation),
+                'operation_type' => $mutation->operationType,
+                'outcome_status' => OfflineSyncMutation::OUTCOME_APPLIED,
+                'response_http_status' => $mutation->responseHttpStatus,
+            ]
+        );
+
+        $persisted = $this->findByTechnicianAndMutationId(
+            $mutation->technicianId,
+            $mutation->clientMutationId
+        );
+
+        if ($persisted === null) {
+            throw new DomainException('No se pudo releer la mutación recién confirmada.');
+        }
+
+        return $persisted;
     }
 
     /**
@@ -974,20 +1064,51 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
 
     private function insertMutation(OfflineSyncMutation $mutation): int
     {
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO offline_sync_mutations (
-                technician_id, client_mutation_id, stop_type, stop_id, operation_type,
-                outcome_status, client_occurred_at, chain_started_at, effective_occurred_at,
-                synced_at, clock_skew_adjusted, sanitary_seal_confirmed,
-                response_http_status, response_payload
-             ) VALUES (
-                :technician_id, :client_mutation_id, :stop_type, :stop_id, :operation_type,
-                :outcome_status, :client_occurred_at, :chain_started_at, :effective_occurred_at,
-                :synced_at, :clock_skew_adjusted, :sanitary_seal_confirmed,
-                :response_http_status, :response_payload
-             )'
-        );
+        $stmt = $this->pdo->prepare($this->insertMutationSql());
+        $this->bindMutationValues($stmt, $mutation);
+        $stmt->execute();
 
+        return (int)$this->pdo->lastInsertId();
+    }
+
+    /**
+     * Inserta la reserva sin pisar una clave ya tomada.
+     *
+     * `ON CONFLICT DO NOTHING` es lo que convierte la comprobación de
+     * idempotencia en una garantía y no en una carrera: si otra transacción
+     * tiene la misma clave sin confirmar, esta espera su veredicto y no inserta
+     * nada cuando gana. Un `INSERT` normal habría lanzado `23505` y dejado la
+     * transacción abortada, sin forma de leer la fila ganadora.
+     */
+    private function insertMutationIfAbsent(OfflineSyncMutation $mutation): bool
+    {
+        $stmt = $this->pdo->prepare(
+            $this->insertMutationSql()
+            . ' ON CONFLICT (technician_id, client_mutation_id) DO NOTHING'
+        );
+        $this->bindMutationValues($stmt, $mutation);
+        $stmt->execute();
+
+        return $stmt->rowCount() === 1;
+    }
+
+    private function insertMutationSql(): string
+    {
+        return 'INSERT INTO offline_sync_mutations (
+                    technician_id, client_mutation_id, stop_type, stop_id, operation_type,
+                    outcome_status, client_occurred_at, chain_started_at, effective_occurred_at,
+                    synced_at, clock_skew_adjusted, sanitary_seal_confirmed,
+                    response_http_status, response_payload
+                 ) VALUES (
+                    :technician_id, :client_mutation_id, :stop_type, :stop_id, :operation_type,
+                    :outcome_status, :client_occurred_at, :chain_started_at, :effective_occurred_at,
+                    :synced_at, :clock_skew_adjusted, :sanitary_seal_confirmed,
+                    :response_http_status, :response_payload
+                 )';
+    }
+
+    private function bindMutationValues(\PDOStatement $stmt, OfflineSyncMutation $mutation): void
+    {
         $stmt->bindValue(':technician_id', $mutation->technicianId, PDO::PARAM_INT);
         $stmt->bindValue(':client_mutation_id', $mutation->clientMutationId, PDO::PARAM_STR);
         $stmt->bindValue(':stop_type', $mutation->stopType, PDO::PARAM_STR);
@@ -1010,9 +1131,6 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
             $this->encodeJson($mutation->responsePayload),
             PDO::PARAM_STR
         );
-        $stmt->execute();
-
-        return (int)$this->pdo->lastInsertId();
     }
 
     private function findPersistedMutation(int $mutationId): OfflineSyncMutation

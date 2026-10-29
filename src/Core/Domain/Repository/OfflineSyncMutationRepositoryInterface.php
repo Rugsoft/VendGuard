@@ -15,11 +15,12 @@ use VendGuard\Core\Domain\Model\OfflineSyncMutation;
  * Reglas que este puerto impone a cualquier implementación:
  *
  *  - **Una operación, una fila.** `(technician_id, client_mutation_id)` es la
- *    clave de idempotencia: `findByTechnicianAndMutationId()` es la guarda que
- *    permite devolver el `response_payload` original en un reenvío y
- *    `recordAppliedMutation()` debe traducir la violación de
- *    `uq_offline_sync_tech_mutation` a una repetición idempotente, nunca a un
- *    error de motor (RF-04.2).
+ *    clave de idempotencia: `findByTechnicianAndMutationId()` permite devolver el
+ *    `response_payload` original en un reenvío, y la pareja
+ *    `reserveAppliedMutation()` / `completeReservedMutation()` decide el dueño de
+ *    la clave **antes** de ejecutar la transición de dominio, dentro de la misma
+ *    transacción. La violación de `uq_offline_sync_tech_mutation` se traduce
+ *    siempre a una repetición idempotente, nunca a un error de motor (RF-04.2).
  *  - **Nunca se borra.** No existe método de baja: el disparador
  *    `trg_no_delete_offline_sync_mutations` lo impide en el motor (Art. III.1).
  *  - **El volcado de conflicto es una excepción de auditoría.** Puede insertar
@@ -48,6 +49,42 @@ interface OfflineSyncMutationRepositoryInterface
      * otra operación y no se filtra su resultado.
      */
     public function findByTechnicianAndMutationId(int $technicianId, string $clientMutationId): ?OfflineSyncMutation;
+
+    /**
+     * Reserva la clave de idempotencia **dentro de la transacción del caso de
+     * uso** (`RF-04.2`).
+     *
+     * Inserta la fila con un cuerpo provisional antes de que se ejecute la
+     * transición de dominio, de modo que el índice único
+     * `uq_offline_sync_tech_mutation` decida el ganador mientras la transición
+     * todavía no ha ocurrido. Una petición simultánea con la misma clave espera
+     * a que la primera confirme y recibe su fila: sólo el dueño de la reserva
+     * ejecuta la transición.
+     *
+     * La implementación debe invocarse con una transacción ya abierta por el
+     * llamador. Si la transición se rechaza o falla, el rollback libera la
+     * clave y la operación puede reintentarse: un veredicto negativo no quema
+     * la idempotencia.
+     *
+     * @return array{reserved: bool, existing: OfflineSyncMutation|null}
+     *         `reserved = true` cuando esta llamada es la dueña de la clave;
+     *         `existing` es la fila ganadora cuando ya existía (aplicada o
+     *         volcada), para que el servicio replique su respuesta o rechace el
+     *         reintento sobre un volcado.
+     */
+    public function reserveAppliedMutation(OfflineSyncMutation $mutation): array;
+
+    /**
+     * Confirma la reserva con el veredicto real de la transición y firma su
+     * evento de auditoría, **en la misma transacción** (`Art. III.3`).
+     *
+     * Si la reserva ya no existe —rollback ajeno, fila borrada— la
+     * implementación falla cerrado en lugar de escribir un resultado huérfano.
+     *
+     * @return OfflineSyncMutation La fila persistida, con el cuerpo definitivo
+     *         y `created_at` asignado.
+     */
+    public function completeReservedMutation(OfflineSyncMutation $mutation): OfflineSyncMutation;
 
     /**
      * Última mutación `APPLIED` de inicio o reanudación de una parada
@@ -99,6 +136,11 @@ interface OfflineSyncMutationRepositoryInterface
      * La inserción y el evento forman una sola unidad de escritura. Si la fila
      * ya existe para `(technician_id, client_mutation_id)`, la implementación
      * devuelve la existente sin duplicar el evento (`RF-04.2`).
+     *
+     * No es la vía del caso de uso sin conexión: el servicio usa la pareja
+     * `reserveAppliedMutation()` / `completeReservedMutation()` para que la
+     * reserva de la clave y la transición del dominio compartan unidad
+     * atómica (`H3`).
      *
      * @return OfflineSyncMutation La fila persistida, con identidad y
      *         `created_at` asignados.

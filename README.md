@@ -509,7 +509,7 @@ Las suites que declaran `VENDGUARD_TEST_CATEGORY = 'new_engine'` exigen un Postg
 
 ```bash
 source deploy/local/postgres/.env.local     # motor local; .env.docker-tls para el TLS
-php tests/run_new_engine.php                # las 27 suites del canal (27 en verde con el contrato remoto)
+php tests/run_new_engine.php                # las 28 suites del canal (28 en verde con el contrato remoto)
 php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
 ```
 
@@ -518,10 +518,10 @@ El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o c
 ```text
 ======================================================================
  RESUMEN DEL CANAL new_engine
- Suites evaluadas    : 27
- Suites en verde     : 27
+ Suites evaluadas    : 28
+ Suites en verde     : 28
  No ejecutables      : 0
- Aserciones          : 830
+ Aserciones          : 842
  Fallos              : 0
  RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
 ======================================================================

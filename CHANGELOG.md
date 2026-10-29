@@ -14,9 +14,11 @@ a un módulo funcional certificado por la batería global.
 - Certificación del orden FIFO de la bandeja y del rechazo 4xx de un comentario intermedio sin bloquear la resolución posterior.
 - Certificación de las guardas online-only de login, turno, relevo y avería oportunista, del albarán A4 diferido y de la insignia local de parada.
 - Contenido real del paquete `/bootstrap`: ruta, preventiva, catálogo por modelo y saldo de furgoneta, no solo la presencia de las claves.
+- Prueba de concurrencia real de la idempotencia (`OfflineSyncMutationConcurrencyTest`, canal `new_engine`): dos conexiones PostgreSQL certifican que la petición perdedora espera en el índice único y responde como repetición sin ejecutar el dominio, y que un veredicto negativo del dominio deshace la reserva.
 
 ### Corregido
 
+- Idempotencia atómica: la reserva de la clave `(technician_id, client_mutation_id)` se escribe dentro de la misma transacción que la transición de dominio y **antes** de ejecutarla. Una segunda petición con la misma clave espera al ganador y responde como repetición en lugar de competir por la transición, y un veredicto negativo del dominio deshace la reserva en vez de quemar la clave.
 - Rescate de envíos interrumpidos: un elemento que quedó en `SYNCING` porque la pestaña murió a mitad de envío vuelve a la cola al hidratar y en cada pasada de sincronización, en lugar de bloquear el cierre de sesión para siempre sin nada que enviar.
 - Veredictos `4xx` permanentes: un `404`, `400` o `410` (antes tratado como caída de red) queda aislado como conflicto y el FIFO continúa; un `413` conserva el trabajo y retira solo la evidencia que el servidor rechazó. Solo `408`, `425`, `429` y los `5xx` se reintentan.
 - Contratos del Service Worker: `CACHE_NAME` v2, ausencia de `/` en el App Shell y caída explícita a `/index.html` en navegación sin red.
