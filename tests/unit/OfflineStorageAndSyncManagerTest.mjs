@@ -291,6 +291,35 @@ assert(
   `photoCount=${afterSignature.photoCount}, photoBytes=${afterSignature.photoBytes}, total=${afterSignature.total}`
 );
 
+let encodedReads = 0;
+await assertThrowsCode(
+  '2.12 Una foto que excede el límite se rechaza sin leer sus bytes (B2)',
+  () => photoManager.enqueue({
+    technicianId: 2,
+    stopType: STOP_TYPE.INCIDENT,
+    stopId: 101,
+    operationType: 'ADD_INCIDENT_COMMENT',
+    payload: { body: 'Comentario con una foto enorme' },
+    photoFile: {
+      name: 'enorme.jpg',
+      type: 'image/jpeg',
+      size: 6 * MB,
+      arrayBuffer: async () => {
+        encodedReads++;
+
+        return new ArrayBuffer(0);
+      }
+    },
+    machineType: 'PERISHABLE_FOOD'
+  }),
+  'OFFLINE_PHOTO_TOO_LARGE'
+);
+assert(
+  '2.13 El codificador no lee la evidencia rechazada',
+  encodedReads === 0,
+  `lecturas=${encodedReads}`
+);
+
 console.log('\n--- 3. Encadenamiento optimista y stock provisional (D5, EARS 03.3) ---');
 
 const chainStorage = await seedStorage();

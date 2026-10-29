@@ -221,11 +221,15 @@ export class OfflineSyncManager {
     }
 
     const activeItems = await this.storage.listMutations(technicianId);
-    const photoAttachment = await serializePhoto(request?.photoFile ?? null);
 
+    // Primero se valida y después se codifica: serializar un archivo de 5 MB
+    // declara su tamaño a partir del propio `File`, así que no hay razón para
+    // leer la evidencia entera antes de saber si cabe en la cuota.
     if (request?.photoFile) {
       validatePhotoAttachment(request.photoFile, activeItems);
     }
+
+    const photoAttachment = await serializePhoto(request?.photoFile ?? null);
 
     const occurredAt = new Date(this.now()).toISOString();
     const priorStart = this.findPriorStart(activeItems, stopType, Number(request?.stopId ?? 0));
