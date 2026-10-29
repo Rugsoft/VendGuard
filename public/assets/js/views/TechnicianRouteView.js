@@ -1019,12 +1019,37 @@ export const TechnicianRouteView = {
       this.isOfflineMode = this.isBrowserOffline();
       this.attachOfflineListeners();
 
-      const ready = this.refreshOfflineState();
+      const ready = this.purgeLocalSessions().then(() => this.refreshOfflineState());
       if (this.isBrowserOffline()) {
         return ready.then(() => this.restoreOfflineShiftStatus());
       }
 
       return ready;
+    },
+
+    /**
+     * Purga del dispositivo los restos de sesiones que ya no son de este turno
+     * (`M3`, `Art. V.4`).
+     *
+     * Un móvil de ruta se comparte: la copia de otro técnico —ruta, contactos y
+     * evidencias— solo puede quedarse si aún tiene trabajo pendiente, y entonces
+     * el acceso la protege con el titular de la cola (`EARS 06.3`). Las copias
+     * caducadas sin nada que enviar se retiran igual.
+     *
+     * @returns {Promise<void>}
+     */
+    async purgeLocalSessions() {
+      const technicianId = this.offlineTechnicianId();
+      if (!(technicianId > 0) || this.offlineStorage === null) {
+        return;
+      }
+
+      try {
+        await this.offlineStorage.purgeForeignTechnicians(technicianId);
+        await this.offlineStorage.purgeExpiredSessions();
+      } catch (error) {
+        // Un fallo de purga no puede impedir cargar la ruta de la sesión viva.
+      }
     },
 
     /**
@@ -1917,6 +1942,9 @@ export const TechnicianRouteView = {
         this.loginEmail = '';
         this.loginPassword = '';
         this.offlineReauthOwner = null;
+        // La sesión anterior deja de ser la del dispositivo en este instante
+        // (`M3`): lo suyo se purga si ya no tiene trabajo pendiente.
+        await this.purgeLocalSessions();
         await this.loadRoute();
         // El turno activo del servidor se hidrata ya en el acceso: si la
         // cobertura cae después, la copia local puede restaurarlo sin esperar

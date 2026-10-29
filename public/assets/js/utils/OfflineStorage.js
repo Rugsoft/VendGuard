@@ -24,6 +24,12 @@
  *  - **Cuota fotográfica (`D3`, `QA 3`)**: máximo 5 fotografías o 25 MB en la
  *    bandeja. El trazo PNG de la firma digital (`signature_png_base64`, exento)
  *    nunca se cuenta aquí: solo pesan los adjuntos de cámara o galería.
+ *  - **Evidencia como `Blob` (`M3`, DB v2)**: la foto se guarda binaria, tal
+ *    como la produce la cámara, en lugar de una cadena base64 un 33 % mayor.
+ *  - **Retención y minimización (`M3`)**: la copia solo persiste lo que el
+ *    trabajo sin red necesita —se descartan el correo y el nombre del contacto
+ *    de sede, que no se pintan en la ruta— y cualquier sesión ajena o caducada
+ *    sin trabajo pendiente se purga del dispositivo compartido (`Art. V.4`).
  *
  * Sin `IndexedDB` disponible (Node en las pruebas unitarias) el módulo degrada a
  * un respaldo en memoria con la misma interfaz, de modo que la lógica de cola y
@@ -32,8 +38,21 @@
  * Dogma Vanilla: ESM nativo, funciones puras, datos congelados, cero dependencias.
  */
 
+/**
+ * Nombre de la base local. Se conserva el de la v1 a propósito: renombrarla
+ * dejaría huérfana la bandeja de quien ya tenía trabajo sin sincronizar.
+ */
 export const OFFLINE_DB_NAME = 'vendguard_offline_v1';
-export const OFFLINE_DB_VERSION = 1;
+
+/**
+ * Versión 2 de la base local (`M3`).
+ *
+ * El salto de la v1 a la v2 no toca el esquema: cambia el contenido de
+ * `photo_attachment`, que pasa de `base64` a `blob`. La actualización convierte
+ * las evidencias ya encoladas para no perder ni un archivo, y el campo `blob`
+ * evita la copia base64 (un 33 % más de bytes y una cadena gigante en memoria).
+ */
+export const OFFLINE_DB_VERSION = 2;
 export const ROUTE_SNAPSHOTS_STORE = 'route_snapshots';
 export const MUTATION_OUTBOX_STORE = 'mutation_outbox';
 
@@ -419,37 +438,63 @@ export function validatePhotoAttachment(photo, activeItems = []) {
 }
 
 /**
- * Serializa la evidencia fotográfica para que sobreviva al cierre de la pestaña
- * (plan §3.1: `{ name, type, size, base64 }`).
+ * Serializa la evidencia fotográfica para que sobreviva al cierre de la pestaña.
  *
- * Un `Blob` vive en memoria y muere con el navegador; el texto codificado sí se
- * persiste en `IndexedDB`. Sin esto la foto se perdería al cerrar la aplicación
- * y el técnico creería haber adjuntado una evidencia que nunca llegó.
+ * `IndexedDB` persiste `Blob` de forma nativa, así que la v2 guarda el archivo
+ * binario tal cual: sin la cadena base64 (un 33 % más de bytes) y sin tener que
+ * decodificarla en memoria al reenviar. El respaldo `base64` solo se usa en un
+ * entorno sin `Blob` (pruebas antiguas o un navegador sin soporte).
  *
- * @param {(Blob|File|null)} photo
- * @returns {Promise<{name: string, type: string, size: number, base64: string}|null>}
+ * @param {(Blob|File|{name?: string, type?: string, size?: number, base64?: string}|null)} photo
+ * @returns {Promise<{name: string, type: string, size: number, blob?: Blob, base64?: string}|null>}
  */
 export async function serializePhoto(photo) {
   if (!photo) {
     return null;
   }
 
+  const name = String(photo.name ?? 'evidencia.jpg');
+  const type = String(photo.type ?? 'image/jpeg');
+  const size = Number(photo.size ?? 0);
+
+  if (typeof Blob !== 'undefined') {
+    const blob = photo instanceof Blob ? photo : photoAttachmentBlob(photo);
+
+    if (blob !== null) {
+      return {
+        name,
+        type: String(blob.type || type),
+        size: Number(blob.size ?? size),
+        blob
+      };
+    }
+  }
+
   return {
-    name: String(photo.name ?? 'evidencia.jpg'),
-    type: String(photo.type ?? 'image/jpeg'),
-    size: Number(photo.size ?? 0),
+    name,
+    type,
+    size,
     base64: typeof photo.base64 === 'string' ? photo.base64 : await readAsBase64(photo)
   };
 }
 
 /**
- * Reconstruye el `Blob` de una foto serializada para enviarla por multipart.
+ * Devuelve el `Blob` de una foto serializada, venga como `blob` (v2) o como
+ * `base64` (v1 en un navegador sin `Blob`).
  *
- * @param {{type?: string, base64?: string}|null} attachment
+ * @param {{type?: string, blob?: Blob, base64?: string}|null} attachment
  * @returns {Blob|null}
  */
 export function photoAttachmentBlob(attachment) {
-  if (!attachment?.base64 || typeof Blob === 'undefined' || typeof atob !== 'function') {
+  if (!attachment) {
+    return null;
+  }
+
+  if (typeof Blob !== 'undefined' && attachment.blob instanceof Blob) {
+    return attachment.blob;
+  }
+
+  if (!attachment.base64 || typeof Blob === 'undefined' || typeof atob !== 'function') {
     return null;
   }
 
@@ -460,6 +505,80 @@ export function photoAttachmentBlob(attachment) {
   }
 
   return new Blob([bytes], { type: attachment.type || 'image/jpeg' });
+}
+
+/**
+ * Campos de contacto que la copia local no necesita (`M3`, `Art. V.4`).
+ *
+ * El teléfono se conserva porque la tarjeta ofrece la llamada en un toque y sin
+ * red es la única forma de avisar a la sede. El correo y el nombre del contacto
+ * no se pintan en ninguna pantalla offline: guardarlos sería acumular datos
+ * personales en un dispositivo que se comparte entre turnos.
+ */
+export const SNAPSHOT_CONTACT_PII_FIELDS = Object.freeze(['contact_email', 'contact_name']);
+
+/**
+ * Reduce la copia local a lo operativo (`M3`): elimina los campos de contacto
+ * que no se usan sin red, recorriendo la copia sin mutarla.
+ *
+ * @param {Object|null} value
+ * @returns {Object|null}
+ */
+export function minimizeSnapshot(value) {
+  if (value === null || value === undefined || typeof value !== 'object') {
+    return value ?? null;
+  }
+
+  if (typeof Blob !== 'undefined' && value instanceof Blob) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => minimizeSnapshot(item));
+  }
+
+  const next = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (SNAPSHOT_CONTACT_PII_FIELDS.includes(key)) {
+      continue;
+    }
+    next[key] = minimizeSnapshot(item);
+  }
+
+  return next;
+}
+
+/**
+ * Convierte una entrada de la bandeja de la v1 a la forma de la v2 (`M3`).
+ *
+ * La migración de esquema no puede perder una evidencia: si el `base64` se deja
+ * decodificar, el registro se reescribe con su `Blob`; si no, se conserva tal
+ * cual y el envío lo decodifica en el último momento.
+ *
+ * @param {Object} record
+ * @returns {Object}
+ */
+export function migrateQueuedPhotoAttachment(record) {
+  const attachment = record?.photo_attachment ?? null;
+
+  if (attachment === null || typeof attachment.base64 !== 'string' || attachment.base64 === '') {
+    return record;
+  }
+
+  const blob = photoAttachmentBlob(attachment);
+  if (blob === null) {
+    return record;
+  }
+
+  return {
+    ...record,
+    photo_attachment: {
+      name: String(attachment.name ?? 'evidencia.jpg'),
+      type: String(blob.type || attachment.type || 'image/jpeg'),
+      size: Number(blob.size ?? attachment.size ?? 0),
+      blob
+    }
+  };
 }
 
 /**
@@ -529,7 +648,9 @@ export function normalizeSnapshot(bootstrap, previous = null) {
     decrementAvailable(snapshot.van_stock, part);
   }
 
-  return snapshot;
+  // Minimización antes de persistir (`M3`): lo que no se necesita sin red no se
+  // guarda, y menos aún en un dispositivo compartido entre turnos.
+  return minimizeSnapshot(snapshot);
 }
 
 /**
@@ -1177,6 +1298,93 @@ export class OfflineStorage {
   }
 
   /**
+   * Identificadores de técnico con copia local en este dispositivo.
+   *
+   * @returns {Promise<Array<number>>}
+   */
+  async listTechnicianIds() {
+    if (this.memory !== null) {
+      return [...this.memory.snapshots.keys()].map(Number);
+    }
+
+    const db = await this.open();
+    const keys = await requestResult(
+      db.transaction(ROUTE_SNAPSHOTS_STORE, 'readonly')
+        .objectStore(ROUTE_SNAPSHOTS_STORE)
+        .getAllKeys()
+    );
+
+    return (keys ?? []).map(Number);
+  }
+
+  /**
+   * Purga los datos de sesiones ajenas al técnico que acaba de entrar (`M3`).
+   *
+   * Un dispositivo de ruta se comparte entre turnos: en cuanto otra cuenta
+   * inicia sesión, la copia de la anterior —ruta, contactos y evidencias— deja
+   * de tener dueño en ese aparato. Se borra solo cuando ya no conserva trabajo
+   * pendiente: una cola viva es trabajo del técnico y no se descarta nunca en
+   * silencio (`Art. III.1`). Lo que se conserva se devuelve para poder avisarlo.
+   *
+   * @param {number} technicianId Técnico de la sesión actual
+   * @returns {Promise<{purged: number, retained: Array<number>}>}
+   */
+  async purgeForeignTechnicians(technicianId) {
+    const keeper = Number(technicianId);
+    const ids = await this.listTechnicianIds();
+    const retained = [];
+    let purged = 0;
+
+    for (const id of ids) {
+      if (id === keeper) {
+        continue;
+      }
+
+      if ((await this.listMutations(id)).length > 0) {
+        retained.push(id);
+        continue;
+      }
+
+      await this.clearTechnician(id);
+      purged++;
+    }
+
+    return { purged, retained };
+  }
+
+  /**
+   * Purga copias caducadas que ya no tienen nada que enviar (`M3`, `RF-02.4`).
+   *
+   * Pasadas las 12 h la copia es de solo lectura: no admite acciones nuevas y
+   * solo sirve para sincronizar lo que ya está en la bandeja. Cuando además la
+   * bandeja está vacía, conservarla únicamente acumula datos personales.
+   *
+   * @param {number} [nowMs=Date.now()]
+   * @returns {Promise<Array<number>>} Técnicos purgados
+   */
+  async purgeExpiredSessions(nowMs = Date.now()) {
+    const ids = await this.listTechnicianIds();
+    const purged = [];
+
+    for (const id of ids) {
+      const validity = evaluateSnapshotValidity(await this.getSnapshot(id), nowMs);
+
+      if (validity.status !== SNAPSHOT_VALIDITY.EXPIRED_READONLY) {
+        continue;
+      }
+
+      if ((await this.listMutations(id)).length > 0) {
+        continue;
+      }
+
+      await this.clearTechnician(id);
+      purged.push(id);
+    }
+
+    return purged;
+  }
+
+  /**
    * Abre (una sola vez) la base local con sus dos almacenes e índices (`§3.1`, `§3.2`).
    * @returns {Promise<IDBDatabase>}
    */
@@ -1189,7 +1397,7 @@ export class OfflineStorage {
       this.dbPromise = new Promise((resolve, reject) => {
         const request = this.factory.open(OFFLINE_DB_NAME, OFFLINE_DB_VERSION);
 
-        request.onupgradeneeded = () => {
+        request.onupgradeneeded = (event) => {
           const db = request.result;
 
           if (!db.objectStoreNames.contains(ROUTE_SNAPSHOTS_STORE)) {
@@ -1202,6 +1410,12 @@ export class OfflineStorage {
             outbox.createIndex('by_tech_sequence', ['technician_id', 'sequence_order'], { unique: true });
             outbox.createIndex('by_tech_status', ['technician_id', 'status']);
           }
+
+          // v1 → v2 (`M3`): la evidencia pasa de `base64` a `blob` sin perder
+          // ninguna foto que estuviera esperando al servidor.
+          if (Number(event?.oldVersion ?? 0) < 2) {
+            migrateOutboxPhotosToV2(request);
+          }
         };
 
         request.onsuccess = () => resolve(request.result);
@@ -1211,6 +1425,52 @@ export class OfflineStorage {
 
     return this.dbPromise;
   }
+}
+
+/**
+ * Reescribe las evidencias de la bandeja en la forma de la v2 durante la
+ * actualización de esquema (`M3`).
+ *
+ * Recorre el almacén con un cursor dentro de la misma transacción
+ * `versionchange`: si algo falla, la actualización se aborta y el navegador
+ * conserva la v1 intacta, que es el fallo seguro.
+ *
+ * @param {IDBOpenDBRequest} request
+ * @returns {void}
+ */
+function migrateOutboxPhotosToV2(request) {
+  const transaction = request?.transaction;
+
+  if (!transaction || typeof transaction.objectStore !== 'function') {
+    return;
+  }
+
+  let outbox;
+  try {
+    outbox = transaction.objectStore(MUTATION_OUTBOX_STORE);
+  } catch (error) {
+    return;
+  }
+
+  if (outbox === null || outbox === undefined || typeof outbox.openCursor !== 'function') {
+    return;
+  }
+
+  const cursorRequest = outbox.openCursor();
+  cursorRequest.onsuccess = () => {
+    const cursor = cursorRequest.result;
+
+    if (!cursor) {
+      return;
+    }
+
+    const migrated = migrateQueuedPhotoAttachment(cursor.value);
+    if (migrated !== cursor.value) {
+      cursor.update(migrated);
+    }
+
+    cursor.continue();
+  };
 }
 
 /** Envuelve una petición de `IndexedDB` en una promesa. */
@@ -1318,5 +1578,7 @@ export default {
   applyOptimisticStopChange,
   revertProvisionalStockChange,
   serializePhoto,
-  photoAttachmentBlob
+  photoAttachmentBlob,
+  minimizeSnapshot,
+  migrateQueuedPhotoAttachment
 };

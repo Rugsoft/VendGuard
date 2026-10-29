@@ -95,6 +95,16 @@ class FakeTransaction {
   }
 
   objectStore(name) {
+    // Un almacén creado dentro de `onupgradeneeded` entra en la transacción de
+    // actualización igual que en el motor real: se incorpora al vuelo.
+    if (!this._working.has(name) && this.database.stores.has(name)) {
+      this._working.set(name, {
+        ...this.database.stores.get(name),
+        data: new Map()
+      });
+      this._baselineKeys.set(name, new Set());
+    }
+
     const store = this._working.get(name);
     if (!store) {
       throw new Error(`FakeIndexedDb: la transacción no incluye «${name}».`);
@@ -269,6 +279,56 @@ class FakeObjectStore {
 
     return new FakeIndex(this, index);
   }
+
+  getAllKeys() {
+    const request = new FakeRequest();
+    request.succeed([...this.store.data.keys()]);
+    this.transaction._scheduleCommit();
+
+    return request;
+  }
+
+  /**
+   * Cursor de lectura con `update()` y `continue()`, sobre una copia de las
+   * entradas para que actualizar un registro no descoloque el recorrido.
+   */
+  openCursor() {
+    const request = new FakeRequest();
+    const entries = [...this.store.data.entries()].map(([key, value]) => [key, structuredCloneValue(value)]);
+    let index = 0;
+
+    const step = () => {
+      if (index >= entries.length) {
+        request.result = undefined;
+        soon(() => request.onsuccess?.());
+        this.transaction._scheduleCommit();
+
+        return;
+      }
+
+      const [key, value] = entries[index++];
+      request.result = {
+        key,
+        value,
+        update: (next) => {
+          this.store.data.set(key, structuredCloneValue(next));
+          this.transaction._scheduleCommit();
+
+          return new FakeRequest();
+        },
+        continue: () => {
+          soon(step);
+          this.transaction._scheduleCommit();
+        }
+      };
+      soon(() => request.onsuccess?.());
+      this.transaction._scheduleCommit();
+    };
+
+    step();
+
+    return request;
+  }
 }
 
 class FakeIndex {
@@ -373,14 +433,26 @@ class FakeFactory {
     }
 
     const needsUpgrade = requested > database.version;
+    const oldVersion = database.version;
     request.result = database;
 
     // Una sola macrotarea reproduce el orden del motor: primero la actualización
-    // de esquema (si toca) y después el `onsuccess` que abre la conexión.
+    // de esquema (si toca) y después el `onsuccess` que abre la conexión. La
+    // transacción `versionchange` es la que el motor expone en
+    // `request.transaction` durante la actualización.
     soon(() => {
       if (needsUpgrade) {
+        const upgrade = new FakeTransaction(database, [...database.stores.keys()], 'versionchange');
+        request.transaction = upgrade;
         database.version = requested;
-        request.onupgradeneeded?.({ oldVersion: 0, newVersion: requested, target: request });
+        // El motor real no abre la conexión hasta que la transacción
+        // `versionchange` confirma: así la migración de datos (cursores y
+        // `update`) termina antes de que nadie lea.
+        upgrade.oncomplete = () => request.onsuccess?.();
+        upgrade.onabort = () => request.onerror?.();
+        request.onupgradeneeded?.({ oldVersion, newVersion: requested, target: request });
+
+        return;
       }
 
       request.onsuccess?.();
