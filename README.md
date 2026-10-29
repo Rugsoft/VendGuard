@@ -4,7 +4,7 @@
 [![Frontend](https://img.shields.io/badge/Vue.js%203-ES%20Modules%20(No%20Bundler)-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
 [![Database](https://img.shields.io/badge/Database-PostgreSQL%2016%2B%20%7C%20Supabase-3ecf8e?style=flat-square&logo=postgresql&logoColor=white)](https://supabase.com/)
 [![Design System](https://img.shields.io/badge/Design%20System-Docker%20Tokens%20(%232560ff)-2496ED?style=flat-square&logo=docker&logoColor=white)](docs/design.md)
-[![Tests Status](https://img.shields.io/badge/Tests-371%20Suites%20%7C%2014.137%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
+[![Tests Status](https://img.shields.io/badge/Tests-371%20Suites%20%7C%2014.140%20Pass%20(100%25)-38bd7d?style=flat-square)](tests/)
 [![Constitutional Status](https://img.shields.io/badge/Constitution-Audited%20%26%20Certified-003db5?style=flat-square)](constitution.md)
 
 **VendGuard** es una plataforma web integral de nivel industrial para la gestión, triaje, intervención técnica, métricas de SLA y auditoría inmutable de averías en parques de máquinas de vending (bebidas calientes, frías, snacks y comida perecedera).
@@ -460,7 +460,7 @@ php tests/run_all.php
 
 La cifra vigente se declara una sola vez y la propia batería la audita (`tests/Support/DocMetricsGuard.php`), de modo que un desfase documental la pone en rojo:
 
-batería global: 371 suites · 14.137 aserciones
+batería global: 371 suites · 14.140 aserciones
 
 ```text
 ======================================================================
@@ -473,7 +473,7 @@ batería global: 371 suites · 14.137 aserciones
  Suites E2E Manuales (T-40): 2 / 2 pasadas
  ──────────────────────────────────────────────────────────────────
  Total Suites Ejecutadas    : 371
- Total Aserciones Evaluadas : 14.137
+ Total Aserciones Evaluadas : 14.140
  Fallos Detectados          : 0
  Cifras documentadas        : COHERENTES
  Base de datos restablecida : SÍ (Semillas intactas)
@@ -528,7 +528,7 @@ El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o c
 ======================================================================
 ```
 
-El canal incluye además `OfflineSyncLockBrowserTest`, única suite que exige **navegador real**: abre dos pestañas de Chromium sobre el mismo perfil, comparte `IndexedDB` entre ambas y comprueba con un servidor de pruebas que el cerrojo `vendguard-offline-sync` impide dos envíos en vuelo y que el control negativo sin cerrojo sí los detecta (12 aserciones).
+El canal incluye además `OfflineSyncLockBrowserTest`, única suite que exige **navegador real**: abre dos pestañas de Chromium sobre el mismo perfil, comparte `IndexedDB` entre ambas y comprueba con un servidor de pruebas que el cerrojo `vendguard-offline-sync` impide dos envíos en vuelo y que el control negativo sin cerrojo sí los detecta. La quinta sección oculta `navigator.locks` en las dos pestañas —lo que ve una PWA servida por HTTP plano— y verifica que el arriendo en `localStorage` sostiene la misma exclusión (16 aserciones en total).
 
 Entre las suites específicas de este canal se encuentran `PostgresTimeTrackingSchemaTest` (Módulo 22 · integridad relacional de `technician_shifts` y `technician_shift_logs`), `PostgresConstitutionalTest` (Art. III.1 en 33 tablas relacionales), `PostgresAbsenceShiftSchemaTest` (Módulo 21), `PostgresSatisfactionSurveySchemaTest` (Módulo 20), `PostgresServiceSheetSchemaTest` (Módulo 19), `PostgresVanRestockSchemaTest` (Módulo 23 · órdenes de carga y baja lógica), `PostgresVanStockSchemaTest` (Módulo 18) y `PostgresZoneSchemaTest` (Módulo 17).
 
