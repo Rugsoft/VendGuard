@@ -47,14 +47,16 @@ flowchart LR
     SSLCertificateFile    "<temp>/cert.pem"
     SSLCertificateKeyFile "<temp>/key.pem"
     ProxyPreserveHost On
-    RequestHeader set X-Forwarded-Proto "https"      # fija, no añade
+    # Fija el esquema; no lo añade (set, no setifempty).
+    RequestHeader set X-Forwarded-Proto "https"
     ProxyPass        "/" "http://127.0.0.1:18100/"
     ProxyPassReverse "/" "http://127.0.0.1:18100/"
 </VirtualHost>
 
 <VirtualHost *:18080>
     ProxyPreserveHost On
-    RequestHeader set X-Forwarded-Proto "http"       # neutraliza un XFP falseado por el cliente
+    # Neutraliza un X-Forwarded-Proto falseado por el cliente.
+    RequestHeader set X-Forwarded-Proto "http"
     ProxyPass        "/" "http://127.0.0.1:18100/"
     ProxyPassReverse "/" "http://127.0.0.1:18100/"
 </VirtualHost>
