@@ -1531,15 +1531,17 @@ function minimizeStoredSnapshots(request) {
     const current = cursor.value;
 
     if (current !== null && typeof current === 'object' && !Array.isArray(current)) {
-      const minimized = minimizeSnapshot(current);
+      try {
+        const minimized = minimizeSnapshot(current);
 
-      if (JSON.stringify(minimized) !== JSON.stringify(current)) {
-        try {
+        if (JSON.stringify(minimized) !== JSON.stringify(current)) {
           const updateRequest = cursor.update(minimized);
           updateRequest.onerror = (event) => event?.preventDefault?.();
-        } catch (error) {
-          // Fila no escribible: se conserva como estaba.
         }
+      } catch (error) {
+        // Fila no escribible o no serializable: se conserva como estaba.
+        // Nunca se aborta la actualización por una copia; la cola es lo único
+        // que no se puede perder.
       }
     }
 
