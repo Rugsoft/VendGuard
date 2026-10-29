@@ -26,10 +26,12 @@
  *    nunca se cuenta aquí: solo pesan los adjuntos de cámara o galería.
  *  - **Evidencia como `Blob` (`M3`, DB v2)**: la foto se guarda binaria, tal
  *    como la produce la cámara, en lugar de una cadena base64 un 33 % mayor.
- *  - **Retención y minimización (`M3`)**: la copia solo persiste lo que el
+ *  - **Retención y minimización (`M3`, `R4`)**: la copia solo persiste lo que el
  *    trabajo sin red necesita —se descartan el correo y el nombre del contacto
  *    de sede, que no se pintan en la ruta— y cualquier sesión ajena o caducada
  *    sin trabajo pendiente se purga del dispositivo compartido (`Art. V.4`).
+ *    La actualización a la v2 pasa también por la poda las copias que la v1 ya
+ *    había guardado, para que la minimización no dependa del siguiente paquete.
  *
  * Sin `IndexedDB` disponible (Node en las pruebas unitarias) el módulo degrada a
  * un respaldo en memoria con la misma interfaz, de modo que la lógica de cola y
@@ -1415,6 +1417,9 @@ export class OfflineStorage {
           // ninguna foto que estuviera esperando al servidor.
           if (Number(event?.oldVersion ?? 0) < 2) {
             migrateOutboxPhotosToV2(request);
+            // Y las copias que la v1 guardó antes de que existiera la
+            // minimización se limpian en el mismo paso (`R4`).
+            minimizeStoredSnapshots(request);
           }
         };
 
@@ -1467,6 +1472,75 @@ function migrateOutboxPhotosToV2(request) {
     const migrated = migrateQueuedPhotoAttachment(cursor.value);
     if (migrated !== cursor.value) {
       cursor.update(migrated);
+    }
+
+    cursor.continue();
+  };
+}
+
+/**
+ * Re-minimiza las copias de ruta que la v1 guardó sin minimizar (`R4`).
+ *
+ * La minimización de `M3` se aplica al normalizar el paquete del servidor, así
+ * que una instalación que actualizaba conservaba el correo y el nombre del
+ * contacto de sede ya escritos hasta el siguiente bootstrap; y sin cobertura ese
+ * bootstrap puede no llegar en días. La limpieza se hace aquí, dentro de la
+ * misma transacción `versionchange` que migra la evidencia: la actualización y
+ * la poda son un solo paso atómico y, si algo falla, el navegador conserva la
+ * v1 intacta (el fallo seguro de la migración).
+ *
+ * Una fila que ya está limpia no se reescribe, y el error de una fila concreta
+ * no tumba la actualización: se conserva tal cual y el siguiente paquete la
+ * normaliza. La cola no se toca.
+ *
+ * @param {IDBOpenDBRequest} request
+ * @returns {void}
+ */
+function minimizeStoredSnapshots(request) {
+  const transaction = request?.transaction;
+
+  if (!transaction || typeof transaction.objectStore !== 'function') {
+    return;
+  }
+
+  let snapshots;
+  try {
+    snapshots = transaction.objectStore(ROUTE_SNAPSHOTS_STORE);
+  } catch (error) {
+    // Base recién creada: el almacén existe, pero no hay nada que podar.
+    return;
+  }
+
+  if (snapshots === null || snapshots === undefined || typeof snapshots.openCursor !== 'function') {
+    return;
+  }
+
+  const cursorRequest = snapshots.openCursor();
+  cursorRequest.onerror = (event) => {
+    // Una copia ilegible no puede impedir el arranque: la cola, que es lo único
+    // que no se puede perder, vive en su propio almacén.
+    event?.preventDefault?.();
+  };
+  cursorRequest.onsuccess = () => {
+    const cursor = cursorRequest.result;
+
+    if (!cursor) {
+      return;
+    }
+
+    const current = cursor.value;
+
+    if (current !== null && typeof current === 'object' && !Array.isArray(current)) {
+      const minimized = minimizeSnapshot(current);
+
+      if (JSON.stringify(minimized) !== JSON.stringify(current)) {
+        try {
+          const updateRequest = cursor.update(minimized);
+          updateRequest.onerror = (event) => event?.preventDefault?.();
+        } catch (error) {
+          // Fila no escribible: se conserva como estaba.
+        }
+      }
     }
 
     cursor.continue();

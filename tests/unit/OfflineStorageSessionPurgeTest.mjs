@@ -276,6 +276,51 @@ await new Promise((resolve, reject) => {
 });
 v1Ready.close?.();
 
+// `R4`: la v1 guardaba la copia completa, sin minimizar. La actualización debe
+// podarla en el mismo paso, sin esperar a que llegue un paquete del servidor.
+const legacySnapshot = {
+  technician_id: 2,
+  technician_email: 'tecnico@vendguard.test',
+  technician_name: 'Técnico de certificación',
+  synced_at: '2026-10-28T06:00:00.000Z',
+  route: {
+    stops: [{
+      incident_id: 701,
+      status: 'ASSIGNED',
+      location: {
+        site_name: 'Sede Centro',
+        contact_phone: '911 000 111',
+        contact_email: 'sede@vendguard.test',
+        contact_name: 'Ana Pérez'
+      }
+    }],
+    enabled_locations: [],
+    pending_critical_stops_other_locations: []
+  },
+  preventive_orders: [],
+  preventive_checklists_by_order: {},
+  spare_parts_catalog_by_machine: {},
+  van_stock: { items: [] },
+  provisional_stock_deductions: {},
+  offline_shift: { status: 'ON_SHIFT', recorded_at: '2026-10-28T06:00:00.000Z' }
+};
+
+const cleanSnapshot = {
+  technician_id: 9,
+  synced_at: '2026-10-28T06:00:00.000Z',
+  route: { stops: [], enabled_locations: [], pending_critical_stops_other_locations: [] },
+  van_stock: { items: [] },
+  offline_shift: { status: 'OFF_SHIFT', recorded_at: '2026-10-28T06:00:00.000Z' }
+};
+
+const v1Snapshots = v1Ready.transaction('route_snapshots', 'readwrite');
+v1Snapshots.objectStore('route_snapshots').put(legacySnapshot);
+v1Snapshots.objectStore('route_snapshots').put(cleanSnapshot);
+await new Promise((resolve, reject) => {
+  v1Snapshots.oncomplete = () => resolve();
+  v1Snapshots.onerror = () => reject(v1Snapshots.error);
+});
+
 const upgradedStorage = new OfflineStorage({ indexedDB: factory });
 const upgradedQueue = await upgradedStorage.listMutations(2);
 const upgradedPhoto = upgradedQueue[0]?.photo_attachment;
@@ -289,6 +334,25 @@ assert('4.2 La evidencia encolada en v1 se reescribe como Blob, sin perder bytes
     && upgradedPhoto?.base64 === undefined
     && (await upgradedPhoto.blob.arrayBuffer()).byteLength === photoBytes.length,
   JSON.stringify({ blob: upgradedPhoto?.blob instanceof Blob, keys: Object.keys(upgradedPhoto ?? {}) }));
+
+const prunedSnapshot = await upgradedStorage.getSnapshot(2);
+assert('4.3 La actualización poda el correo y el nombre que la v1 ya había guardado (R4)',
+  prunedSnapshot?.route?.stops?.[0]?.location?.contact_email === undefined
+    && prunedSnapshot?.route?.stops?.[0]?.location?.contact_name === undefined
+    && JSON.stringify(prunedSnapshot).includes('sede@vendguard.test') === false,
+  JSON.stringify(prunedSnapshot?.route?.stops?.[0]?.location ?? {}));
+assert('4.4 La poda conserva lo que el trabajo sin red necesita',
+  prunedSnapshot?.route?.stops?.[0]?.location?.contact_phone === '911 000 111'
+    && prunedSnapshot?.route?.stops?.[0]?.incident_id === 701
+    && prunedSnapshot?.offline_shift?.status === 'ON_SHIFT'
+    && prunedSnapshot?.technician_id === 2,
+  JSON.stringify({
+    phone: prunedSnapshot?.route?.stops?.[0]?.location?.contact_phone,
+    shift: prunedSnapshot?.offline_shift?.status
+  }));
+assert('4.5 Una copia que ya estaba limpia sobrevive a la actualización sin cambios',
+  JSON.stringify(await upgradedStorage.getSnapshot(9)) === JSON.stringify(cleanSnapshot),
+  JSON.stringify(await upgradedStorage.getSnapshot(9)));
 
 console.log('\n--- 5. Purga sobre IndexedDB (no solo en memoria) ---');
 
