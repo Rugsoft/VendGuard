@@ -123,7 +123,7 @@ Se enlaza en [`public/index.html`](../../public/index.html) mediante `<link rel=
 
 ## 3. Contrato de Almacenamiento Local en `IndexedDB` (`RF-02`, `RF-03`, `RF-06`)
 
-* **Base de datos `IndexedDB`:** `vendguard_offline_v1` (versión `1`).
+* **Base de datos `IndexedDB`:** `vendguard_offline_v1` (versión `2`, `M3`). El nombre se conserva a propósito: renombrar la base al migrar dejaría huérfana la bandeja de quien ya tenía trabajo sin sincronizar. La v2 no cambia índices; convierte `photo_attachment.base64` en `photo_attachment.blob` dentro de la misma transacción `versionchange` (si algo falla, la actualización se aborta y el navegador conserva la v1 intacta).
 * **Constantes Normativas de Vigencia y Cuota (`D3`, `D6`, `QA 3`):**
   * `SNAPSHOT_WARNING_AGE_MS = 4 * 60 * 60 * 1000` (`14.400.000 ms` = **4,0 horas**).
   * `SNAPSHOT_MAX_VALID_AGE_MS = 12 * 60 * 60 * 1000` (`43.200.000 ms` = **12,0 horas**).
@@ -173,6 +173,8 @@ Almacena la copia local aislada por técnico (`Art. V.4`):
 
 * **Escritura transaccional de la copia (`M2`):** toda modificación —refresco del paquete, turno local, proyección optimista y reversión de stock— pasa por una única transacción `readwrite` sobre `route_snapshots` que lee, transforma y escribe en el mismo turno. Dentro de una pestaña las operaciones se encadenan y entre pestañas se serializan con el cerrojo `vendguard-offline-sync`; un patrón leer-modificar-escribir suelto perdía la escritura de quien llegaba primero. El mutador debe ser **síncrono**: se rechaza con `SNAPSHOT_MUTATOR_ASYNC` cualquier promesa intermedia que dejaría cerrar la transacción antes de escribir.
 * **Turno local para iniciar intervenciones sin red (`EARS 03.1`):** `offline_shift` es un campo **exclusivo del dispositivo**, no viaja en el paquete de bootstrap. Guarda el último estado de turno observado (`ON_SHIFT`, `MEAL_BREAK` u `OFF_SHIFT`) y el instante en que se observó. Al recargar sin red, `evaluateOfflineShift()` lo restaura solo si la copia sigue vigente (≤ 12 h) y el registro tiene menos de 12 h; en cualquier otro caso la vista conserva `OFF_SHIFT` (fallo seguro). Refrescar la copia desde el servidor conserva este campo, y cerrar sesión con la bandeja vacía lo elimina junto con `route_snapshots` (`EARS 06.5`). El servidor sigue siendo la autoridad: al recuperar cobertura, `loadShiftStatus()` contrasta y sobrescribe el valor local.
+* **Minimización de la copia (`M3`, `Art. V.4`):** antes de persistir, `minimizeSnapshot()` recorre el paquete y descarta `contact_email` y `contact_name` de las sedes. Ninguna pantalla offline los pinta; el `contact_phone` se conserva porque la tarjeta ofrece la llamada en un toque y sin cobertura es la única forma de avisar a la sede. Un dispositivo de ruta se comparte entre turnos: lo que no se necesita no se guarda.
+* **Purga por sesión (`M3`):** al iniciar sesión y al hidratar la vista se ejecutan `purgeForeignTechnicians()` y `purgeExpiredSessions()`. La copia de otro técnico se borra en cuanto no conserva trabajo pendiente; si conserva cola, se mantiene y el acceso sigue exigiendo al titular (`EARS 06.3`), porque el trabajo no se descarta nunca en silencio (`Art. III.1`). Una copia caducada (> 12 h) sin nada que enviar se purga: solo acumularía datos personales. El cierre de sesión con la bandeja vacía sigue borrando todo con `clearTechnician()` (`EARS 06.5`).
 * **Cálculo de estado de vigencia de la copia local (`RF-02.2` a `RF-02.4`):**
   * `FRESH` ($\text{edad} \le 4\text{ h}$): Operativa completa sin avisos de antigüedad.
   * `STALE_WARNING` ($4\text{ h} < \text{edad} \le 12\text{ h}$): Operativa permitida mostrando banner ámbar preventivo (*«⚠️ Tu copia de ruta lleva más de 4 horas sin actualizarse. Recupera cobertura cuanto antes, especialmente si atiendes máquinas de alimentos perecederos.»*).
@@ -225,7 +227,12 @@ Estructura de cada registro en `mutation_outbox`:
       "signature_png_base64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA..."
     }
   },
-  "photo_attachment": null,
+  "photo_attachment": {
+    "name": "evidencia.jpg",
+    "type": "image/jpeg",
+    "size": 1834200,
+    "blob": "(Blob binario)"
+  },
   "provisional_parts_deducted": [
     { "spare_part_id": 14, "quantity": 1 }
   ],
@@ -233,6 +240,7 @@ Estructura de cada registro en `mutation_outbox`:
 }
 ```
 
+* **Evidencia binaria (`M3`, DB v2):** `photo_attachment` viaja como `{ name, type, size, blob }`. `IndexedDB` persiste el `Blob` nativo, de modo que no se guarda la cadena base64 (un 33 % más de bytes) ni hay que recodificarla para reenviar: `buildMultipartBody()` adjunta ese mismo `Blob`. Una evidencia escrita por la v1 (`base64`) sigue siendo enviable y la actualización la convierte a `blob` sin perder bytes.
 * **Alta transaccional (`H4`):** el `sequence_order` se calcula, la fila se inserta, el inicio previo de la cadena se cierra con `chain_ended_at` y la proyección optimista se aplica al snapshot en **una sola** transacción sobre `[mutation_outbox, route_snapshots]`. O queda todo, o no queda nada: nunca un cambio local visible sin su entrada en la cola. Si el índice único `by_tech_sequence` rechaza el turno porque otra pestaña se adelantó, la transacción se deshace entera y el alta se reintenta hasta tres veces releyendo el máximo; agotados los intentos responde `OFFLINE_SEQUENCE_EXHAUSTED`.
 * **Catálogo cerrado de `operation_type` y bandera `is_state_transition` (`D1`, `QA 3`):**
   1. `START_INCIDENT` (`is_state_transition: true`, `PATCH /technician/incidents/{id}/start`)
@@ -249,7 +257,9 @@ Estructura de cada registro en `mutation_outbox`:
 
 El elemento nace en `PENDING`; al enviarse pasa a `SYNCING` con la marca `syncing_since`; se elimina del almacén cuando el servidor confirma, y pasa a `CONFLICT` cuando el servidor emite un veredicto definitivo. No existe un cuarto estado ni una vía de descarte silencioso (`Art. III.1`).
 
-**Rescate de envíos interrumpidos.** El estado `SYNCING` solo es válido mientras hay una pestaña enviando. Si el cliente muere en ese punto —el sistema operativo mata la pestaña, el móvil se apaga, se cierra el navegador— el elemento quedaría fuera del FIFO para siempre y el cierre de sesión bloquearía al técnico sin nada que sincronizar (`EARS 06.1`). Por eso, al hidratar la copia y al abrir cada pasada de la cola, `OfflineStorage::recoverInterruptedMutations()` devuelve a `PENDING` todo `SYNCING` cuya marca `syncing_since` supere `SYNCING_STALE_AFTER_MS` (2 minutos) o falte. El reenvío es seguro por la idempotencia del servidor: si el primer envío llegó a aplicarse, la respuesta es la original y no se mueve estado, stock ni dinero (`RF-04.2`). El margen protege el envío legítimo de otra pestaña en curso (una foto de 5 MB puede tardar más que una petición normal); la coordinación entre pestañas queda fuera de este contrato.
+**Rescate de envíos interrumpidos.** El estado `SYNCING` solo es válido mientras hay una pestaña enviando. Si el cliente muere en ese punto —el sistema operativo mata la pestaña, el móvil se apaga, se cierra el navegador— el elemento quedaría fuera del FIFO para siempre y el cierre de sesión bloquearía al técnico sin nada que sincronizar (`EARS 06.1`). Por eso, al hidratar la copia y al abrir cada pasada de la cola, `OfflineStorage::recoverInterruptedMutations()` devuelve a `PENDING` todo `SYNCING` cuya marca `syncing_since` supere `SYNCING_STALE_AFTER_MS` (2 minutos) o falte. El reenvío es seguro por la idempotencia del servidor: si el primer envío llegó a aplicarse, la respuesta es la original y no se mueve estado, stock ni dinero (`RF-04.2`). El margen protege el envío legítimo de otra pestaña en curso (una foto de 5 MB puede tardar más que una petición normal).
+
+**Coordinación entre pestañas (`H5`).** Dos pestañas del mismo técnico comparten la misma `mutation_outbox`: sin coordinación, ambas leen el mismo `PENDING`, ambas lo envían y la segunda pisa el estado de la primera. `OfflineSyncManager::withSyncLock()` encadena dos cerrojos: un mutex local que serializa las llamadas de esta pestaña —también en navegadores sin Web Locks— y `navigator.locks.request('vendguard-offline-sync', { mode: 'exclusive' })`, que impide que otra pestaña toque la cola a la vez. Cubre `enqueue`, `processOutboxQueue` y `dumpConflict`; las operaciones anidadas (el volcado por baja de cuenta dentro del envío) no vuelven a pedir el cerrojo y, si el navegador rechaza el cerrojo, el mutex local sigue serializando. Además, `BroadcastChannel('vendguard-offline-sync-channel')` avisa a las demás pestañas de `enqueued`, `queue_recovered`, `queue_processed`, `conflict`, `conflict_dumped` y `account_dump_completed`; la receptora relee su estado (`queue_changed` con `remote: true`) sin reemitirlo, así que no hay eco y una pestaña que solo escucha jamás escribe la cola.
 
 **Clasificación de fallos de envío.** El motor distingue el veredicto del hipo:
 
@@ -390,6 +400,8 @@ Cuando el servidor recibe una operación con `client_occurred_at` (y opcionalmen
 ---
 
 ## 6. Contratos de Endpoints REST (`/api/technician/offline/*` y Extensiones)
+
+* **Plazo de transporte (`M1`, `EARS-04.1`):** toda petición ordinaria conserva el techo de **5,0 s** en cliente y en el `ATTR_TIMEOUT` del driver PDO. La única excepción es el cuerpo `multipart/form-data` con evidencia: usa `UPLOAD_TIMEOUT_MS = 30000` porque el temporizador mide la transferencia completa y 5 MB sobre cobertura móvil débil no caben en 5,0 s. El techo del servidor no cambia: el tiempo de conexión de PDO mide la ejecución de la consulta, no la recepción del archivo. Una subida que agota su plazo informa de «30,0 segundos», no de «5,0 segundos», para no mentir sobre lo que ha pasado.
 
 ### 6.1. `GET /api/technician/offline/bootstrap`
 

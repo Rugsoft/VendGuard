@@ -24,6 +24,16 @@ a un módulo funcional certificado por la batería global.
 - Contratos del Service Worker: `CACHE_NAME` v2, ausencia de `/` en el App Shell y caída explícita a `/index.html` en navegación sin red.
 - Matriz de trazabilidad del Módulo 24: referencias de pruebas, recuentos y estado del DoD 1 alineados con la corrida real.
 
+### Corregido en la revisión del PR #9 — 2026-10-29
+
+- **Alta atómica de la cola (H4):** el `sequence_order`, el alta en `mutation_outbox`, el cierre del inicio previo y la proyección optimista viajan en una sola transacción sobre ambos almacenes. Una colisión del índice único ya no deja el cambio local sin su entrada en la cola: la transacción se deshace entera y el alta se reintenta releyendo el máximo.
+- **Copia local transaccional (M2):** toda lectura-modificación-escritura del snapshot (refresco, turno, proyección, reversión de stock) pasa por `mutateSnapshot()`, encadenada dentro de la pestaña y serializada entre pestañas; un mutador asíncrono se rechaza con `SNAPSHOT_MUTATOR_ASYNC` en lugar de cerrar la transacción antes de escribir.
+- **Coordinación entre pestañas (H5):** la bandeja se abre bajo `navigator.locks` (`vendguard-offline-sync`) más un mutex local —también sin Web Locks—, de modo que dos pestañas del mismo técnico no vacían la misma cola a la vez; un `BroadcastChannel` avisa del cambio para que la otra relea su estado, sin eco y sin que una pestaña que solo escucha escriba nunca.
+- **Plazo propio de las subidas (M1):** las peticiones `multipart/form-data` con evidencia usan `UPLOAD_TIMEOUT_MS = 30000` (5 MB no caben en 5,0 s sobre cobertura móvil débil) y el aviso de plazo agotado informa de 30,0 segundos; el resto de peticiones conserva los 5,0 s y el `ATTR_TIMEOUT` del driver PDO no cambia.
+- **Evidencia binaria y purga por sesión (M3):** la base local sube a la v2 y guarda la foto como `Blob` (sin la copia base64 un 33 % mayor), con migración de las evidencias ya encoladas en la v1; la copia descarta el correo y el nombre del contacto de sede, purga las sesiones ajenas sin trabajo pendiente y las copias caducadas vacías, y el cierre de sesión sigue borrando todo el dispositivo.
+- **Volcado de conflicto acotado a la ruta del técnico (B1):** un `stop_id` de una avería que nunca fue suya o de una preventiva ajena responde `404` sin escribir Nota Interna ni mutación, en lugar de aceptar cualquier identificador.
+- **Validación de la evidencia antes de codificarla (B2):** el tamaño y el formato se comprueban sobre el archivo antes de leer sus bytes; una foto de más de 5 MB se rechaza sin codificarla en memoria.
+
 ---
 
 ## [Módulo 23] · Órdenes de Carga de Furgoneta y Cruce de Stock en Triaje — 2026-10-26
