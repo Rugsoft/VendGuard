@@ -303,9 +303,15 @@ leen `PG_TEST_DSN` y no la forma en que el motor se aprovisionó.
 Con el contrato cargado, el canal completo se ejecuta con un solo comando (hallazgo H-4):
 
 ```bash
-php tests/run_new_engine.php            # las 28 suites de la categoría
+php tests/run_new_engine.php            # las 29 suites de la categoría
 php tests/run_new_engine.php Zone       # sólo las que casan con el filtro
 ```
+
+La suite `OfflineSyncLockBrowserTest.php` también vive en este canal aunque no consulte PostgreSQL:
+lo que necesita es un motor real de otro tipo —Chromium— para abrir dos pestañas del mismo perfil y
+certificar el cerrojo de sincronización del Módulo 24. Si no encuentra Chrome, Edge ni Chromium (o
+falta `VENDGUARD_CHROME_PATH`), sale con código `2` y el runner la lista como **no ejecutable**, con
+su motivo, en lugar de dar por bueno un doble de `navigator.locks`.
 
 El recuento no se mantiene a mano: `run_new_engine.php` descubre las suites por su marca y
 `tests/unit/NewEngineChannelDocumentationTest.php` falla si esta línea deja de coincidir con

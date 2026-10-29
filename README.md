@@ -509,7 +509,7 @@ Las suites que declaran `VENDGUARD_TEST_CATEGORY = 'new_engine'` exigen un Postg
 
 ```bash
 source deploy/local/postgres/.env.local     # motor local; .env.docker-tls para el TLS
-php tests/run_new_engine.php                # las 28 suites del canal (28 en verde con el contrato remoto)
+php tests/run_new_engine.php                # las 29 suites del canal (29 en verde con el contrato remoto y navegador disponible)
 php tests/run_new_engine.php Zone           # filtra por subcadena del nombre
 ```
 
@@ -526,6 +526,8 @@ El canal lee `PG_TEST_DSN` del entorno y **falla cerrado**: sin la variable, o c
  RESULTADO: 100% EN VERDE. CANAL new_engine CERRADO.
 ======================================================================
 ```
+
+El canal incluye además `OfflineSyncLockBrowserTest`, única suite que exige **navegador real**: abre dos pestañas de Chromium sobre el mismo perfil, comparte `IndexedDB` entre ambas y comprueba con un servidor de pruebas que el cerrojo `vendguard-offline-sync` impide dos envíos en vuelo y que el control negativo sin cerrojo sí los detecta (12 aserciones).
 
 Entre las suites específicas de este canal se encuentran `PostgresTimeTrackingSchemaTest` (Módulo 22 · integridad relacional de `technician_shifts` y `technician_shift_logs`), `PostgresConstitutionalTest` (Art. III.1 en 33 tablas relacionales), `PostgresAbsenceShiftSchemaTest` (Módulo 21), `PostgresSatisfactionSurveySchemaTest` (Módulo 20), `PostgresServiceSheetSchemaTest` (Módulo 19), `PostgresVanRestockSchemaTest` (Módulo 23 · órdenes de carga y baja lógica), `PostgresVanStockSchemaTest` (Módulo 18) y `PostgresZoneSchemaTest` (Módulo 17).
 

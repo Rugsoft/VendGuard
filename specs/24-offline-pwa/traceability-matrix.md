@@ -4,7 +4,7 @@
 
 **Esquema de referencia:** `RF-01` instalabilidad y carga sin red · `RF-02` copia local y vigencia · `RF-03` encolado, precinto y cuota · `RF-04` sincronización, idempotencia y Δt · `RF-05` conflictos y cuarentena · `RF-06` sesión, turno y baja de cuenta.
 
-**Corrida de certificación:** 29 de octubre de 2026 (PostgreSQL local `vendguard_battery`; canal `new_engine` ejecutado con `PG_TEST_DSN`: **28 suites evaluadas, 28 en verde, 0 no ejecutables, 846 aserciones, 0 fallos**, incluida la medición remota con su contrato TLS propio). Batería hermética: **369 suites / 14.092 aserciones / 0 fallos**.
+**Corrida de certificación:** 29 de octubre de 2026 (PostgreSQL local `vendguard_battery`; canal `new_engine` ejecutado con `PG_TEST_DSN` y Chromium: **29 suites evaluadas, 29 en verde, 0 no ejecutables, 858 aserciones, 0 fallos**, incluida la medición remota con su contrato TLS propio y el cerrojo entre pestañas en navegador real). Batería hermética: **369 suites / 14.092 aserciones / 0 fallos**.
 
 ---
 
@@ -118,7 +118,7 @@
 | **5.** FIFO, idempotencia, Δt y cuarentena | `OfflineSyncClockAndQuotaTest.php` 19/19 · `OfflineSyncServiceTest.php` 41/41 · `OfflinePwaSyncApiTest.php` 30/30 | ✅ |
 | **6.** Conflictos volcados en 1 toque, sin descarte | `OfflineStorageAndSyncManagerTest.mjs` 6.7–6.12 · `OfflinePwaSyncApiTest.php` 6.1–6.7 | ✅ |
 | **7.** Sesión, turno, re-autenticación y baja | `OfflineStorageAndSyncManagerTest.mjs` 7.1–7.5 · `TechnicianRouteViewTest.mjs` 17.1–17.6, 18.1–18.5, 21.1–21.3 · `OfflinePwaSyncApiTest.php` 7.1–7.3 | ✅ |
-| **8.** Batería global al 100 % | `php tests/run_all.php` + `php tests/run_new_engine.php` | ✅ 369 suites / 14.092 aserciones / 0 fallos (hermética) · canal 28/28 / 846 aserciones / 0 fallos |
+| **8.** Batería global al 100 % | `php tests/run_all.php` + `php tests/run_new_engine.php` | ✅ 369 suites / 14.092 aserciones / 0 fallos (hermética) · canal 29/29 / 858 aserciones / 0 fallos |
 
 ---
 
@@ -138,6 +138,7 @@
 | `TechnicianPreventiveRouteTabTest.mjs` | 22/22 |
 | `TechnicianVanStockPanelTest.mjs` | 26/26 |
 | `OfflinePwaSyncApiTest.php` (canal `new_engine`) | 34/34 |
+| `OfflineSyncLockBrowserTest.php` (canal `new_engine`, navegador real) | 12/12 |
 | `PostgresOfflineSyncSchemaTest.php` (canal `new_engine`) | 22/22 |
 | `OfflineSyncMutationConcurrencyTest.php` (canal `new_engine`) | 12/12 |
 | `PostgresSchemaTest.php` (canal `new_engine`) | 107/107 |
@@ -146,8 +147,8 @@
 
 **Limitaciones declaradas (no se presentan como verdes):**
 
-1. **Carga < 2 s y encolado < 150 ms (RNF-01):** medidos en navegador real según el acta §6: 157,4 ms de mediana para la apertura sin red (5 recargas con el servidor detenido y `transferSize = 0`) y 5,85 ms de mediana / 7,6 ms p95 para el encolado local (10 acciones). La cifra procede de una única máquina (Chromium/Windows, 390 × 844) y no se extrapola a hardware móvil de gama baja; la guarda automática certifica además el shell cerrado y que la API nunca se cachea.
-2. **Corrida global:** `php tests/run_all.php` cierra con 369 suites / 14.092 aserciones, 0 fallos, cifras del README coherentes y código de salida 0. `php tests/run_new_engine.php` cierra el canal con 28 suites evaluadas, 28 en verde, 0 no ejecutables, 846 aserciones y 0 fallos. `PoolerLatencyMeasurementTest` aporta 30 de esas aserciones y resuelve su contrato TLS propio (`deploy/local/supabase/.env.local`) solo para su proceso hijo, sin que el resto del canal herede el motor remoto.
+1. **Carga < 2 s y encolado < 150 ms (RNF-01):** medidos en navegador real según el acta §6: 157,4 ms de mediana para la apertura sin red (5 recargas con el servidor detenido y `transferSize = 0`) y 5,85 ms de mediana / 7,6 ms p95 para el encolado local (10 acciones). La cifra procede de una única máquina (Chromium/Windows, 390 × 844) y no se extrapola a hardware móvil de gama baja; la guarda automática certifica además el shell cerrado y que la API nunca se cachea. El cerrojo entre pestañas sí queda certificado en navegador real (`OfflineSyncLockBrowserTest`), con dos pestañas del mismo perfil y control negativo; lo que no se mide es la latencia del cerrojo ni su comportamiento con más de dos pestañas.
+2. **Corrida global:** `php tests/run_all.php` cierra con 369 suites / 14.092 aserciones, 0 fallos, cifras del README coherentes y código de salida 0. `php tests/run_new_engine.php` cierra el canal con 29 suites evaluadas, 29 en verde, 0 no ejecutables, 858 aserciones y 0 fallos. `PoolerLatencyMeasurementTest` aporta 30 de esas aserciones y resuelve su contrato TLS propio (`deploy/local/supabase/.env.local`) solo para su proceso hijo, sin que el resto del canal herede el motor remoto.
 3. **Doble sello temporal:** la suite de integración verifica `effective_occurred_at`, `client_occurred_at` y `synced_at`; la visualización del sello dual en el visor de auditoría no forma parte de este módulo.
 
 ---
@@ -157,7 +158,7 @@
 | Hallazgo | Riesgo | Corrección | Test que lo cubre |
 |---|---|---|---|
 | **H4** | Concurrencia / integridad | `OfflineStorage::enqueueMutation()` escribe `sequence_order`, el alta, el cierre del inicio previo y la proyección optimista en **una sola** transacción sobre `[mutation_outbox, route_snapshots]`; una colisión del índice único deshace todo y el alta se reintenta hasta tres veces releyendo el máximo | `OfflineStorageAtomicEnqueueTest.mjs` 1.1–1.5, 2.1–2.2 (11/11) |
-| **H5** | Concurrencia entre pestañas | `OfflineSyncManager::withSyncLock()` encadena un mutex local (también sin Web Locks) con `navigator.locks.request('vendguard-offline-sync')`; `BroadcastChannel` avisa del cambio sin eco y la pestaña receptora solo relee | `OfflineStorageAndSyncManagerTest.mjs` 13.1–13.7 |
+| **H5** | Concurrencia entre pestañas | `OfflineSyncManager::withSyncLock()` encadena un mutex local (también sin Web Locks) con `navigator.locks.request('vendguard-offline-sync')`; `BroadcastChannel` avisa del cambio sin eco y la pestaña receptora solo relee | `OfflineStorageAndSyncManagerTest.mjs` 13.1–13.7 · `OfflineSyncLockBrowserTest.php` 1.1–4.2 (dos pestañas de Chromium reales, con control negativo sin cerrojo) |
 | **M1** | UX offline | Las subidas `multipart/form-data` usan `UPLOAD_TIMEOUT_MS = 30000` y su aviso habla de 30,0 s; el resto conserva 5,0 s y el `ATTR_TIMEOUT` de PDO no cambia | `ApiClientTimeoutTest.mjs` 7.1–7.5 (42/42) |
 | **M2** | Concurrencia | Toda lectura-modificación-escritura del snapshot pasa por `mutateSnapshot()` (transacción única, encadenada en la pestaña y serializada entre pestañas); un mutador asíncrono se rechaza con `SNAPSHOT_MUTATOR_ASYNC` | `OfflineStorageAtomicEnqueueTest.mjs` 2.1–2.5, 3.1 (11/11) |
 | **M3** | Seguridad / privacidad | Base local v2 con la evidencia como `Blob` (migración de la v1), purga de sesiones ajenas y copias caducadas vacías, y copia minimizada sin correo ni nombre del contacto de sede | `OfflineStorageSessionPurgeTest.mjs` 1.1–5.2 (21/21) |

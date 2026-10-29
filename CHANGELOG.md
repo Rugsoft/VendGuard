@@ -33,6 +33,7 @@ a un módulo funcional certificado por la batería global.
 - **Evidencia binaria y purga por sesión (M3):** la base local sube a la v2 y guarda la foto como `Blob` (sin la copia base64 un 33 % mayor), con migración de las evidencias ya encoladas en la v1; la copia descarta el correo y el nombre del contacto de sede, purga las sesiones ajenas sin trabajo pendiente y las copias caducadas vacías, y el cierre de sesión sigue borrando todo el dispositivo.
 - **Volcado de conflicto acotado a la ruta del técnico (B1):** un `stop_id` de una avería que nunca fue suya o de una preventiva ajena responde `404` sin escribir Nota Interna ni mutación, en lugar de aceptar cualquier identificador.
 - **Validación de la evidencia antes de codificarla (B2):** el tamaño y el formato se comprueban sobre el archivo antes de leer sus bytes; una foto de más de 5 MB se rechaza sin codificarla en memoria.
+- **Certificación del cerrojo en navegador real:** `OfflineSyncLockBrowserTest` abre dos pestañas de Chromium sobre el mismo perfil, comparte `IndexedDB` y arranca el vaciado de la misma cola a la vez. Un servidor de pruebas mide los envíos en vuelo: con cerrojo hay 3 envíos y `maxConcurrent = 1`; en el control negativo sin cerrojo se ven más de 3 envíos y solapamiento, de modo que el verde no puede venir de un arnés que no sabe detectar el fallo. La suite vive en el canal `new_engine` porque exige navegador y sale con código 2 si no lo encuentra.
 
 ---
 
