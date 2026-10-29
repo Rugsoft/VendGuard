@@ -274,7 +274,6 @@ await new Promise((resolve, reject) => {
   v1Transaction.oncomplete = () => resolve();
   v1Transaction.onerror = () => reject(v1Transaction.error);
 });
-v1Ready.close?.();
 
 // `R4`: la v1 guardaba la copia completa, sin minimizar. La actualización debe
 // podarla en el mismo paso, sin esperar a que llegue un paquete del servidor.
@@ -320,6 +319,10 @@ await new Promise((resolve, reject) => {
   v1Snapshots.oncomplete = () => resolve();
   v1Snapshots.onerror = () => reject(v1Snapshots.error);
 });
+
+// La conexión v1 se cierra solo cuando el sembrado ha terminado: una transacción
+// abierta después de `close()` es un error en un IndexedDB real.
+v1Ready.close?.();
 
 const upgradedStorage = new OfflineStorage({ indexedDB: factory });
 const upgradedQueue = await upgradedStorage.listMutations(2);
