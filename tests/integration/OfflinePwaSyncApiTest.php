@@ -218,6 +218,62 @@ try {
         return (int)$stmt->fetchColumn();
     };
 
+    /**
+     * Simula una reasignación real: cambia el titular y deja el rastro que escribe
+     * Coordinación (`INCIDENT_REASSIGNED` con el técnico anterior y el nuevo).
+     *
+     * Un `UPDATE` a palo seco dejaría el expediente sin historia y, desde B1, el
+     * volcado del técnico anterior ya no tendría por qué aceptarse: la prueba tiene
+     * que escenificar el caso legítimo completo, no solo el estado final.
+     */
+    $reassignIncident = static function (int $incidentId, int $fromTechnicianId, int $toTechnicianId) use ($pdo): void {
+        $pdo->prepare('UPDATE incidents SET assigned_technician_id = :tech WHERE id = :id')
+            ->execute([':tech' => $toTechnicianId, ':id' => $incidentId]);
+
+        $pdo->prepare(
+            "INSERT INTO audit_log (
+                entity_type, entity_id, action, user_id, user_role, user_name,
+                previous_state, new_state, metadata
+             ) VALUES (
+                'TICKET', :entity_id, 'INCIDENT_REASSIGNED', NULL, 'COORDINATOR', 'Coordinación',
+                :previous_state, :new_state, :metadata
+             )"
+        )->execute([
+            ':entity_id' => $incidentId,
+            ':previous_state' => json_encode(['assigned_technician_id' => $fromTechnicianId]),
+            ':new_state' => json_encode(['assigned_technician_id' => $toTechnicianId]),
+            ':metadata' => json_encode([
+                'previous_technician_id' => $fromTechnicianId,
+                'new_technician_id' => $toTechnicianId,
+            ]),
+        ]);
+    };
+
+    /**
+     * Deja la orden preventiva en manos de otro técnico con el rastro real de la
+     * asignación: primero el evento que la puso en manos del técnico anterior y
+     * después el de la reasignación (B1).
+     */
+    $assignPreventiveOrder = static function (int $orderId, int $technicianId, ?int $previousTechnicianId = null) use ($pdo): void {
+        $pdo->prepare(
+            "INSERT INTO audit_log (
+                entity_type, entity_id, action, user_id, user_role, user_name,
+                previous_state, new_state, metadata
+             ) VALUES (
+                'PREVENTIVE_ORDER', :entity_id, 'ASSIGN_PREVENTIVE_ORDER', NULL, 'COORDINATOR', 'Coordinación',
+                :previous_state, :new_state, :metadata
+             )"
+        )->execute([
+            ':entity_id' => $orderId,
+            ':previous_state' => json_encode(['assigned_technician_id' => $previousTechnicianId]),
+            ':new_state' => json_encode(['status' => 'SCHEDULED', 'assigned_technician_id' => $technicianId]),
+            ':metadata' => $previousTechnicianId === null ? null : json_encode([
+                'previous_technician_id' => $previousTechnicianId,
+                'new_technician_id' => $technicianId,
+            ]),
+        ]);
+    };
+
     $createPreventiveOrder = static function (
         string $orderCode,
         int $machineId,
@@ -736,8 +792,9 @@ try {
         'ELECTRICAL_OFF',
         'MEDIUM',
         'ASSIGNED',
-        $tech2Id // Asignada a tech 2
+        $tech1Id // Nació en manos del técnico 1…
     );
+    $reassignIncident($incReassignedId, $tech1Id, $tech2Id); // …y Coordinación se la pasó al 2
 
     $resDumpReass = $call(
         'POST',
@@ -802,7 +859,11 @@ try {
     );
 
     // 6.c Orden preventiva en conflicto
-    $poId = $createPreventiveOrder('PO-OFF-001', $machPo, $locId, $tech2Id);
+    $poId = $createPreventiveOrder('PO-OFF-001', $machPo, $locId, $tech1Id);
+    $assignPreventiveOrder($poId, $tech1Id);
+    $pdo->prepare('UPDATE preventive_orders SET assigned_technician_id = :tech WHERE id = :id')
+        ->execute([':tech' => $tech2Id, ':id' => $poId]);
+    $assignPreventiveOrder($poId, $tech2Id, $tech1Id);
 
     $resDumpPo = $call(
         'POST',
@@ -885,6 +946,92 @@ try {
         '6.7 El rechazo no altera el estado ni escribe una mutación aplicada',
         (string)$stmtStaleStatus->fetchColumn() === 'ASSIGNED'
             && (int)$stmtStaleMutation->fetchColumn() === 0
+    );
+
+    // 6.f B1: el volcado exige que el técnico haya tenido la parada alguna vez.
+    //      Una avería que nació en manos de otro no admite Nota Interna propia.
+    $incForeignId = $createIncident(
+        'INC-OFF-FOREIGN',
+        $machCanc,
+        $locId,
+        'COLD_DRINKS',
+        'ELECTRICAL_OFF',
+        'MEDIUM',
+        'ASSIGNED',
+        $tech2Id
+    );
+
+    $resDumpForeign = $call(
+        'POST',
+        '/api/technician/offline/conflicts/dump',
+        [
+            'client_mutation_id' => 'mut_dump_foreign_001',
+            'client_occurred_at' => (new DateTimeImmutable('-10 minutes'))->format('Y-m-d\TH:i:sP'),
+            'stop_type' => 'INCIDENT',
+            'stop_id' => $incForeignId,
+            'operation_type' => 'RESOLVE_INCIDENT',
+            'conflict_reason' => 'Avería que el técnico 1 nunca tuvo asignada.',
+            'work_summary' => [
+                'diagnosis' => 'Intento de volcado sobre un expediente ajeno.',
+                'action_taken' => 'Sin trabajo real: la prueba verifica el rechazo.',
+            ],
+        ],
+        $tech1Token
+    );
+
+    $stmtForeignComments = $pdo->prepare('SELECT COUNT(*) FROM incident_comments WHERE incident_id = :id');
+    $stmtForeignComments->execute([':id' => $incForeignId]);
+    $assert(
+        '6.8 Un volcado sobre una avería que nunca fue del técnico responde 404 INCIDENT_NOT_FOUND',
+        $resDumpForeign->getStatusCode() === 404
+            && $errorCode($resDumpForeign) === 'INCIDENT_NOT_FOUND',
+        'http=' . $resDumpForeign->getStatusCode() . ' code=' . $errorCode($resDumpForeign)
+    );
+    $assert(
+        '6.9 El rechazo no escribe Nota Interna ni mutación en la avería ajena',
+        (int)$stmtForeignComments->fetchColumn() === 0
+    );
+
+    $resDumpMissing = $call(
+        'POST',
+        '/api/technician/offline/conflicts/dump',
+        [
+            'client_mutation_id' => 'mut_dump_missing_001',
+            'client_occurred_at' => (new DateTimeImmutable('-10 minutes'))->format('Y-m-d\TH:i:sP'),
+            'stop_type' => 'INCIDENT',
+            'stop_id' => 999999,
+            'operation_type' => 'RESOLVE_INCIDENT',
+            'conflict_reason' => 'Expediente inexistente.',
+            'work_summary' => ['diagnosis' => 'Sin expediente de destino.'],
+        ],
+        $tech1Token
+    );
+    $assert(
+        '6.10 Un stop_id inexistente sigue respondiendo 404 INCIDENT_NOT_FOUND',
+        $resDumpMissing->getStatusCode() === 404
+            && $errorCode($resDumpMissing) === 'INCIDENT_NOT_FOUND'
+    );
+
+    $foreignOrderId = $createPreventiveOrder('PREV-OFF-FOREIGN', $machReass, $locId, $tech2Id);
+    $resDumpForeignOrder = $call(
+        'POST',
+        '/api/technician/offline/conflicts/dump',
+        [
+            'client_mutation_id' => 'mut_dump_foreign_prev_001',
+            'client_occurred_at' => (new DateTimeImmutable('-10 minutes'))->format('Y-m-d\TH:i:sP'),
+            'stop_type' => 'PREVENTIVE_ORDER',
+            'stop_id' => $foreignOrderId,
+            'operation_type' => 'COMPLETE_PREVENTIVE',
+            'conflict_reason' => 'Orden preventiva de otro técnico.',
+            'work_summary' => ['diagnosis' => 'Intento de anexar trabajo en una orden ajena.'],
+        ],
+        $tech1Token
+    );
+    $assert(
+        '6.11 Una orden preventiva ajena responde 404 PREVENTIVE_ORDER_NOT_FOUND',
+        $resDumpForeignOrder->getStatusCode() === 404
+            && $errorCode($resDumpForeignOrder) === 'PREVENTIVE_ORDER_NOT_FOUND',
+        'http=' . $resDumpForeignOrder->getStatusCode() . ' code=' . $errorCode($resDumpForeignOrder)
     );
 
     // ─────────────────────────────────────────────────────────────────────

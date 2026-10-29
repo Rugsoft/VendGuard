@@ -374,6 +374,15 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
                     throw new IncidentNotFoundException($mutation->stopId);
                 }
 
+                // La excepción de auditoría permite escribir aunque el técnico ya
+                // no sea el titular; lo que no permite es escribir en una parada
+                // con la que nunca tuvo relación (`Art. V.2`, `Art. V.4`, B1).
+                $this->assertDumpableIncident(
+                    $mutation->technicianId,
+                    $mutation->stopId,
+                    $incident['assigned_technician_id']
+                );
+
                 $internalCommentId = $this->insertInternalComment(
                     incidentId: $mutation->stopId,
                     actorUserId: $mutation->technicianId,
@@ -384,12 +393,16 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
                     createdAt: $mutation->syncedAt
                 );
             } else {
-                $this->appendPreventiveAuditNote($mutation->stopId, $this->buildDumpText(
-                    self::HEADER_CONFLICT,
-                    $mutation,
-                    $trimmedReason,
-                    $workSummary
-                ));
+                $this->appendPreventiveAuditNote(
+                    $mutation->technicianId,
+                    $mutation->stopId,
+                    $this->buildDumpText(
+                        self::HEADER_CONFLICT,
+                        $mutation,
+                        $trimmedReason,
+                        $workSummary
+                    )
+                );
             }
 
             $mutationId = $this->insertMutation($mutation);
@@ -505,6 +518,7 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
                         $targetFound = true;
                         $targetStatus = (string)$preventive['status'];
                         $this->appendPreventiveAuditNote(
+                            null,
                             $mutation->stopId,
                             $this->buildDumpText(
                                 self::HEADER_DEACTIVATED,
@@ -1199,7 +1213,7 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
     private function lockPreventiveOrder(int $orderId): ?array
     {
         $row = $this->fetchOne(
-            'SELECT id, status, notes
+            'SELECT id, status, notes, assigned_technician_id
                FROM preventive_orders
               WHERE id = :order_id
                 AND deleted_at IS NULL
@@ -1215,7 +1229,99 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
             'id' => (int)$row['id'],
             'status' => (string)$row['status'],
             'notes' => $this->nullableString($row['notes']),
+            'assigned_technician_id' => $row['assigned_technician_id'] !== null
+                ? (int)$row['assigned_technician_id']
+                : null,
         ];
+    }
+
+    /**
+     * ¿Puede este técnico archivar trabajo en esta avería? (`Art. V.2`, `Art. V.4`, B1)
+     *
+     * El volcado existe para que el trabajo hecho in situ no se pierda cuando la
+     * parada ya no está en manos del técnico: reasignada a un compañero, cancelada
+     * o cerrada hace más de 48 horas. Eso exige que el técnico **la haya tenido**
+     * alguna vez. Sin esta comprobación, cualquier credencial técnica válida podía
+     * inyectar una Nota Interna en una avería de otra sede pasando un `stop_id`
+     * arbitrario, que es justo lo que prohíben el Art. V.2 y el aislamiento por
+     * sede del Art. V.4.
+     *
+     * La falta de relación se responde como inexistencia: el llamador no debe poder
+     * distinguir «no existe» de «no es tuya».
+     */
+    private function assertDumpableIncident(int $technicianId, int $incidentId, ?int $currentOwnerId): void
+    {
+        if ($currentOwnerId !== null && $currentOwnerId === $technicianId) {
+            return;
+        }
+
+        if ($this->technicianHasStopHistory($technicianId, $incidentId, 'TICKET')) {
+            return;
+        }
+
+        throw new IncidentNotFoundException($incidentId);
+    }
+
+    /**
+     * La misma regla para órdenes preventivas, donde la titularidad es una sola
+     * columna y también puede haberse perdido por reasignación.
+     */
+    private function assertDumpablePreventiveOrder(
+        int $technicianId,
+        int $orderId,
+        ?int $currentTechnicianId
+    ): void {
+        if ($currentTechnicianId !== null && $currentTechnicianId === $technicianId) {
+            return;
+        }
+
+        if ($this->technicianHasStopHistory($technicianId, $orderId, 'PREVENTIVE_ORDER')) {
+            return;
+        }
+
+        // El controlador traduce cualquier `DomainException` de una preventiva a
+        // 404 `PREVENTIVE_ORDER_NOT_FOUND`, así que el mensaje no delata nada más.
+        throw new DomainException("No existe la orden preventiva {$orderId} que se pretende volcar.");
+    }
+
+    /**
+     * Rastro de que la parada estuvo asignada al técnico alguna vez.
+     *
+     * `INCIDENT_ASSIGNED`/`INCIDENT_REASSIGNED` guardan el técnico anterior y el
+     * nuevo en `metadata`, y cualquier evento posterior conserva el titular en
+     * `new_state.assigned_technician_id`. La consulta usa las tres vías porque un
+     * expediente puede haber pasado por el técnico antes de que se registrara el
+     * motivo de la reasignación.
+     */
+    private function technicianHasStopHistory(int $technicianId, int $stopId, string $entityType): bool
+    {
+        $newTechnician = $this->dialect->jsonExtract('metadata', 'new_technician_id');
+        $previousTechnician = $this->dialect->jsonExtract('metadata', 'previous_technician_id');
+        $stateTechnician = $this->dialect->jsonExtract('new_state', 'assigned_technician_id');
+
+        $row = $this->fetchOne(
+            "SELECT 1 AS found
+               FROM audit_log
+              WHERE entity_type = :entity_type
+                AND entity_id = :entity_id
+                AND (
+                    {$newTechnician} = :technician_new
+                    OR {$previousTechnician} = :technician_previous
+                    OR {$stateTechnician} = :technician_state
+                )
+              LIMIT 1",
+            [
+                ':entity_type' => $entityType,
+                ':entity_id' => $stopId,
+                // El operador JSON devuelve texto: comparar con el entero obligaría
+                // a castear en SQL y en PostgreSQL eso falla en tiempo de ejecución.
+                ':technician_new' => (string)$technicianId,
+                ':technician_previous' => (string)$technicianId,
+                ':technician_state' => (string)$technicianId,
+            ]
+        );
+
+        return $row !== null;
     }
 
     /**
@@ -1226,11 +1332,25 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
      * bloque se concatena con dos saltos de línea y nunca sustituye lo que
      * Coordinación hubiera escrito.
      */
-    private function appendPreventiveAuditNote(int $orderId, string $block): void
+    /**
+     * Anexa un bloque de auditoría a las observaciones de una orden preventiva.
+     *
+     * `$technicianId` es `null` solo en el volcado por baja de cuenta (`QA 5`), donde
+     * la cuenta ya no puede reclamar titularidad y el objetivo es preservar el
+     * trabajo de un dispositivo que se va a liberar. En el volcado de conflicto se
+     * pasa siempre y la relación previa se exige (B1).
+     */
+    private function appendPreventiveAuditNote(?int $technicianId, int $orderId, string $block): void
     {
         $order = $this->lockPreventiveOrder($orderId);
         if ($order === null) {
             throw new DomainException("No existe la orden preventiva {$orderId} que se pretende volcar.");
+        }
+
+        // La orden se bloquea antes de comprobar la relación: entre el `SELECT` y
+        // el `UPDATE` no cabe una reasignación que invalide el veredicto.
+        if ($technicianId !== null) {
+            $this->assertDumpablePreventiveOrder($technicianId, $orderId, $order['assigned_technician_id']);
         }
 
         // Un nombre de parámetro por posición: el motor nativo rechaza el mismo

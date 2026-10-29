@@ -483,12 +483,13 @@ Vuelca en 1 toque el trabajo realizado sin conexión sobre una parada cuya trans
 ```
 * **Reglas de Negocio Transaccionales (`QA 1`, `QA 2`):**
   1. **Idempotencia:** Si `(technician_id, client_mutation_id)` ya figura en `offline_sync_mutations`, devuelve el resultado previo (`200 OK`) sin duplicar la nota.
-  2. **Si `stop_type === 'INCIDENT'` (Excepción de Auditoría Art. III.3):**
-     * Verifica que el expediente `incidents.id = :stop_id` exista (`404 INCIDENT_NOT_FOUND` si no existe).
+  2. **Relación previa con la parada (B1, Art. V.2 y Art. V.4):** el volcado solo se acepta si el técnico autenticado **tuvo** esa parada alguna vez: es el titular vigente, o existe rastro en `audit_log` de que fue el técnico anterior o el nuevo de un `INCIDENT_REASSIGNED`/`INCIDENT_ASSIGNED` (`metadata.previous_technician_id`, `metadata.new_technician_id` o `new_state.assigned_technician_id`). En órdenes preventivas vale la misma regla sobre `PREVENTIVE_ORDER` y `preventive_orders.assigned_technician_id`. Sin relación se responde **`404 INCIDENT_NOT_FOUND` / `404 PREVENTIVE_ORDER_NOT_FOUND`**, igual que si la parada no existiera: no se confirma la existencia de un expediente ajeno. La excepción de auditoría permite escribir cuando la titularidad se **perdió** (reasignación, cancelación, cierre tardío), nunca cuando nunca se tuvo.
+  3. **Si `stop_type === 'INCIDENT'` (Excepción de Auditoría Art. III.3):**
+     * Verifica que el expediente `incidents.id = :stop_id` exista y que se cumpla la regla 2 (`404 INCIDENT_NOT_FOUND` si no existe o no hubo relación).
      * Inserta una **Nota Interna de Taller confidencial (`is_internal = TRUE`)** en `incident_comments` con el texto estructurado `[VOLCADO OFFLINE EN CONFLICTO · Ejecutado in situ: ...]`, adjuntando la foto si se envió, **con independencia de quién sea el técnico asignado actual y aunque la avería esté en `CANCELLED`, `CLOSED` o hayan transcurrido más de 48 horas desde su resolución** (`QA 2`).
      * Registra la fila en `offline_sync_mutations` con `outcome_status = 'CONFLICT_DUMPED'` y el evento `OFFLINE_CONFLICT_DUMPED` en `audit_log` (`entity_type = 'TICKET'`).
-  3. **Si `stop_type === 'PREVENTIVE_ORDER'`:**
-     * Verifica que la orden `preventive_orders.id = :stop_id` exista (`404 PREVENTIVE_ORDER_NOT_FOUND` si no existe).
+  4. **Si `stop_type === 'PREVENTIVE_ORDER'`:**
+     * Verifica que la orden `preventive_orders.id = :stop_id` exista y que se cumpla la regla 2 (`404 PREVENTIVE_ORDER_NOT_FOUND` si no existe o no hubo relación).
      * Anexa el bloque `[VOLCADO OFFLINE EN CONFLICTO · ...]` en `preventive_orders.notes` sin cambiar el `status` ni el `assigned_technician_id` de la orden.
      * Registra la fila en `offline_sync_mutations` con `outcome_status = 'CONFLICT_DUMPED'` y el evento `OFFLINE_CONFLICT_DUMPED` en `audit_log` (`entity_type = 'PREVENTIVE_ORDER'`).
 * **Respuesta Exitosa (`200 OK`):**
