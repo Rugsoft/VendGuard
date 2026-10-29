@@ -171,6 +171,7 @@ Almacena la copia local aislada por técnico (`Art. V.4`):
 }
 ```
 
+* **Escritura transaccional de la copia (`M2`):** toda modificación —refresco del paquete, turno local, proyección optimista y reversión de stock— pasa por una única transacción `readwrite` sobre `route_snapshots` que lee, transforma y escribe en el mismo turno. Dentro de una pestaña las operaciones se encadenan y entre pestañas se serializan con el cerrojo `vendguard-offline-sync`; un patrón leer-modificar-escribir suelto perdía la escritura de quien llegaba primero. El mutador debe ser **síncrono**: se rechaza con `SNAPSHOT_MUTATOR_ASYNC` cualquier promesa intermedia que dejaría cerrar la transacción antes de escribir.
 * **Turno local para iniciar intervenciones sin red (`EARS 03.1`):** `offline_shift` es un campo **exclusivo del dispositivo**, no viaja en el paquete de bootstrap. Guarda el último estado de turno observado (`ON_SHIFT`, `MEAL_BREAK` u `OFF_SHIFT`) y el instante en que se observó. Al recargar sin red, `evaluateOfflineShift()` lo restaura solo si la copia sigue vigente (≤ 12 h) y el registro tiene menos de 12 h; en cualquier otro caso la vista conserva `OFF_SHIFT` (fallo seguro). Refrescar la copia desde el servidor conserva este campo, y cerrar sesión con la bandeja vacía lo elimina junto con `route_snapshots` (`EARS 06.5`). El servidor sigue siendo la autoridad: al recuperar cobertura, `loadShiftStatus()` contrasta y sobrescribe el valor local.
 * **Cálculo de estado de vigencia de la copia local (`RF-02.2` a `RF-02.4`):**
   * `FRESH` ($\text{edad} \le 4\text{ h}$): Operativa completa sin avisos de antigüedad.
@@ -232,6 +233,7 @@ Estructura de cada registro en `mutation_outbox`:
 }
 ```
 
+* **Alta transaccional (`H4`):** el `sequence_order` se calcula, la fila se inserta, el inicio previo de la cadena se cierra con `chain_ended_at` y la proyección optimista se aplica al snapshot en **una sola** transacción sobre `[mutation_outbox, route_snapshots]`. O queda todo, o no queda nada: nunca un cambio local visible sin su entrada en la cola. Si el índice único `by_tech_sequence` rechaza el turno porque otra pestaña se adelantó, la transacción se deshace entera y el alta se reintenta hasta tres veces releyendo el máximo; agotados los intentos responde `OFFLINE_SEQUENCE_EXHAUSTED`.
 * **Catálogo cerrado de `operation_type` y bandera `is_state_transition` (`D1`, `QA 3`):**
   1. `START_INCIDENT` (`is_state_transition: true`, `PATCH /technician/incidents/{id}/start`)
   2. `RESUME_INCIDENT_PENDING_INFO` (`is_state_transition: true`, `POST /technician/incidents/{id}/resume-pending-info`)

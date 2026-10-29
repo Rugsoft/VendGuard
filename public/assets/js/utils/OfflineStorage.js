@@ -16,6 +16,11 @@
  *    nuevo estado en la parada local y se descuenta del saldo visible de la
  *    furgoneta lo que el técnico declara consumir, para que las paradas
  *    siguientes muestren el stock real. La reversión es exactamente simétrica.
+ *  - **Atomicidad de la copia y de la cola (`H4`, `M2`)**: el alta de una
+ *    mutación y su reflejo optimista viajan en **una sola** transacción de
+ *    `IndexedDB`, igual que toda lectura-modificación-escritura del snapshot.
+ *    Ni el cambio local puede quedar sin su entrada en la cola, ni dos
+ *    escrituras concurrentes pueden pisarse y perder la de quien llegó primero.
  *  - **Cuota fotográfica (`D3`, `QA 3`)**: máximo 5 fotografías o 25 MB en la
  *    bandeja. El trazo PNG de la firma digital (`signature_png_base64`, exento)
  *    nunca se cuenta aquí: solo pesan los adjuntos de cámara o galería.
@@ -84,6 +89,16 @@ export const MUTATION_STATUS = Object.freeze({
  * reencolarlo sería enviarlo dos veces.
  */
 export const SYNCING_STALE_AFTER_MS = 2 * 60 * 1000;
+
+/**
+ * Intentos de alta cuando otra pestaña se adelantó con el mismo turno (`H4`).
+ *
+ * El índice único `by_tech_sequence` aborta la transacción entera, incluida la
+ * proyección: reintentar releyendo el máximo no duplica nada y evita perder el
+ * trabajo. Con el cerrojo entre pestañas de `OfflineSyncManager` el reintento es
+ * una red de seguridad, no el camino normal.
+ */
+export const ENQUEUE_SEQUENCE_RETRIES = 3;
 
 /** Tipos de parada del catálogo cerrado (`D1`). */
 export const STOP_TYPE = Object.freeze({
@@ -662,6 +677,13 @@ export class OfflineStorage {
     this.factory = factory ?? null;
     this.memory = this.factory === null ? { snapshots: new Map(), outbox: new Map() } : null;
     this.dbPromise = null;
+    // Turno de escritura de la copia local dentro de esta pestaña (`M2`).
+    //
+    // IndexedDB ya aísla cada transacción, pero el patrón `leer → transformar →
+    // escribir` abría una ventana entre el `get` y el `put`: dos acciones del
+    // mismo hilo pedían la versión anterior y la segunda borraba la primera.
+    // Encadenarlas convierte esa ventana en una cola estricta.
+    this.snapshotChain = Promise.resolve();
   }
 
   /** ¿Está funcionando con el respaldo en memoria? (solo pruebas y entornos sin IndexedDB). */
@@ -676,11 +698,101 @@ export class OfflineStorage {
    */
   async saveSnapshot(bootstrap) {
     const technicianId = Number(bootstrap?.technician_id);
-    const previous = Number.isInteger(technicianId) ? await this.getSnapshot(technicianId) : null;
-    const snapshot = normalizeSnapshot(bootstrap, previous);
-    await this.putSnapshot(snapshot);
 
-    return snapshot;
+    // Un paquete sin técnico válido no llega a tocar el almacén: el normalizador
+    // es quien lanza el error del contrato (`INVALID_BOOTSTRAP_SNAPSHOT`).
+    if (!Number.isInteger(technicianId) || technicianId < 1) {
+      return normalizeSnapshot(bootstrap, null);
+    }
+
+    return this.mutateSnapshot(technicianId, (previous) => normalizeSnapshot(bootstrap, previous));
+  }
+
+  /**
+   * Lee, transforma y guarda la copia local dentro de una sola transacción (`M2`).
+   *
+   * El mutador recibe la copia vigente —o `null`— y devuelve la nueva, o
+   * `null`/`undefined` para no tocar nada. Debe ser **síncrono**: una promesa
+   * intermedia dejaría que `IndexedDB` cerrase la transacción antes de escribir,
+   * que es exactamente la pérdida de escritura que esta puerta existe para no
+   * permitir.
+   *
+   * Dentro de la pestaña las llamadas se encadenan; entre pestañas el cerrojo de
+   * `OfflineSyncManager` las serializa.
+   *
+   * @param {number} technicianId
+   * @param {(snapshot: (Object|null)) => (Object|null|undefined)} mutator
+   * @returns {Promise<Object|null>} Copia resultante
+   */
+  async mutateSnapshot(technicianId, mutator) {
+    const key = Number(technicianId);
+
+    if (!Number.isInteger(key) || key < 1) {
+      throw new OfflineQueueError(
+        'INVALID_BOOTSTRAP_SNAPSHOT',
+        'La copia local exige un técnico autenticado.'
+      );
+    }
+
+    const run = () => this.runSnapshotMutation(key, mutator);
+    const operation = this.snapshotChain.then(run, run);
+    // La cadena no se contamina con el fallo: una escritura rechazada no puede
+    // dejar bloqueadas las siguientes.
+    this.snapshotChain = operation.then(() => undefined, () => undefined);
+
+    return operation;
+  }
+
+  /**
+   * @param {number} technicianId
+   * @param {(snapshot: (Object|null)) => (Object|null|undefined)} mutator
+   * @returns {Promise<Object|null>}
+   */
+  async runSnapshotMutation(technicianId, mutator) {
+    if (this.memory !== null) {
+      const current = this.memory.snapshots.get(technicianId) ?? null;
+      const next = mutator(current);
+
+      if (next === null || next === undefined) {
+        return current;
+      }
+
+      this.memory.snapshots.set(technicianId, next);
+
+      return next;
+    }
+
+    const db = await this.open();
+    const transaction = db.transaction(ROUTE_SNAPSHOTS_STORE, 'readwrite');
+
+    try {
+      const store = transaction.objectStore(ROUTE_SNAPSHOTS_STORE);
+      const current = (await requestResult(store.get(technicianId))) ?? null;
+      const next = mutator(current);
+
+      if (next !== null && next !== undefined && typeof next.then === 'function') {
+        throw new OfflineQueueError(
+          'SNAPSHOT_MUTATOR_ASYNC',
+          'El mutador de la copia local debe ser síncrono para no romper la transacción.'
+        );
+      }
+
+      if (next !== null && next !== undefined) {
+        store.put(next);
+      }
+
+      await transactionComplete(transaction);
+
+      return next ?? current;
+    } catch (error) {
+      if (transaction.error === null) {
+        try {
+          transaction.abort();
+        } catch { /* La transacción ya estaba cerrada. */ }
+      }
+
+      throw error;
+    }
   }
 
   /**
@@ -714,25 +826,6 @@ export class OfflineStorage {
   }
 
   /**
-   * Persiste la copia ya normalizada (sin volver a derivar umbrales).
-   * @param {Object} snapshot
-   * @returns {Promise<Object>}
-   */
-  async putSnapshot(snapshot) {
-    if (this.memory !== null) {
-      this.memory.snapshots.set(Number(snapshot.technician_id), snapshot);
-      return snapshot;
-    }
-
-    const db = await this.open();
-    const transaction = db.transaction(ROUTE_SNAPSHOTS_STORE, 'readwrite');
-    transaction.objectStore(ROUTE_SNAPSHOTS_STORE).put(snapshot);
-    await transactionComplete(transaction);
-
-    return snapshot;
-  }
-
-  /**
    * Anota el estado de turno observado para poder restaurarlo sin red
    * (`EARS 03.1`, `EARS 06.2`).
    *
@@ -750,17 +843,18 @@ export class OfflineStorage {
       return null;
     }
 
-    const snapshot = await this.getSnapshot(technicianId);
-    if (snapshot === null) {
-      return null;
-    }
-
-    return this.putSnapshot({
-      ...snapshot,
-      offline_shift: {
-        status: normalized,
-        recorded_at: new Date(nowMs).toISOString()
+    return this.mutateSnapshot(technicianId, (snapshot) => {
+      if (snapshot === null) {
+        return null;
       }
+
+      return {
+        ...snapshot,
+        offline_shift: {
+          status: normalized,
+          recorded_at: new Date(nowMs).toISOString()
+        }
+      };
     });
   }
 
@@ -847,15 +941,124 @@ export class OfflineStorage {
   }
 
   /**
-   * Siguiente número de secuencia del técnico, sin huecos entre elementos.
+   * Da de alta una mutación y su reflejo optimista en una sola transacción (`H4`).
+   *
+   * Antes se calculaba el `sequence_order`, se escribía la proyección y, por
+   * último, se insertaba la entrada. Una colisión del índice único
+   * `by_tech_sequence` —dos altas concurrentes que leyeron el mismo máximo— dejaba
+   * el cambio local aplicado y la cola sin su registro: la parada aparecía
+   * iniciada o resuelta y nadie la enviaba nunca.
+   *
+   * Ahora el número de secuencia, el alta, el cierre del inicio previo y la
+   * proyección comparten transacción: o queda todo, o no queda nada. Si otra
+   * pestaña se adelantó con el mismo número, el motor aborta por restricción y se
+   * reintenta releyendo el máximo.
+   *
    * @param {number} technicianId
-   * @returns {Promise<number>}
+   * @param {(context: {sequenceOrder: number}) => Object} build Construye el registro
+   *        definitivo con el número de secuencia ya asignado.
+   * @param {{closePriorStart?: (Object|null)}} [options={}] Inicio previo de la
+   *        cadena, que se cierra con `chain_ended_at` en la misma transacción.
+   * @returns {Promise<Object>} Registro encolado
    */
-  async nextSequenceOrder(technicianId) {
-    const items = await this.listMutations(technicianId);
-    const highest = items.reduce((max, item) => Math.max(max, Number(item.sequence_order ?? 0)), 0);
+  async enqueueMutation(technicianId, build, options = {}) {
+    const key = Number(technicianId);
 
-    return highest + 1;
+    if (!Number.isInteger(key) || key < 1) {
+      throw new OfflineQueueError(
+        'INVALID_TECHNICIAN',
+        'La bandeja sin conexión exige un técnico autenticado.'
+      );
+    }
+
+    const closePrior = options?.closePriorStart ?? null;
+    const project = (snapshot, record) => applyOptimisticStopChange(snapshot, {
+      stopType: record.stop_type,
+      stopId: record.stop_id,
+      operationType: record.operation_type,
+      payload: record.payload ?? {}
+    });
+
+    if (this.memory !== null) {
+      const items = [...this.memory.outbox.values()]
+        .filter((item) => Number(item.technician_id) === key);
+      const highest = items.reduce((max, item) => Math.max(max, Number(item.sequence_order ?? 0)), 0);
+      const record = build({ sequenceOrder: highest + 1 });
+      const snapshot = this.memory.snapshots.get(key) ?? null;
+      const projected = snapshot === null ? null : project(snapshot, record);
+
+      if (closePrior !== null) {
+        this.memory.outbox.set(String(closePrior.client_mutation_id), closePrior);
+      }
+      this.memory.outbox.set(String(record.client_mutation_id), record);
+      if (projected !== null) {
+        this.memory.snapshots.set(key, projected);
+      }
+
+      return record;
+    }
+
+    const db = await this.open();
+
+    for (let attempt = 0; attempt < ENQUEUE_SEQUENCE_RETRIES; attempt++) {
+      try {
+        return await this.insertQueuedMutation(db, key, build, closePrior, project);
+      } catch (error) {
+        if (error?.name !== 'ConstraintError') {
+          throw error;
+        }
+      }
+    }
+
+    throw new OfflineQueueError(
+      'OFFLINE_SEQUENCE_EXHAUSTED',
+      'No se pudo reservar un turno en la bandeja del técnico. Reintenta la acción.'
+    );
+  }
+
+  /**
+   * Intento único de alta dentro de una transacción sobre los dos almacenes.
+   *
+   * @param {IDBDatabase} db
+   * @param {number} technicianId
+   * @param {(context: {sequenceOrder: number}) => Object} build
+   * @param {(Object|null)} closePrior
+   * @param {(snapshot: Object, record: Object) => Object} project
+   * @returns {Promise<Object>}
+   */
+  async insertQueuedMutation(db, technicianId, build, closePrior, project) {
+    const transaction = db.transaction([MUTATION_OUTBOX_STORE, ROUTE_SNAPSHOTS_STORE], 'readwrite');
+
+    try {
+      const outbox = transaction.objectStore(MUTATION_OUTBOX_STORE);
+      const snapshots = transaction.objectStore(ROUTE_SNAPSHOTS_STORE);
+      const existing = (await requestResult(outbox.index('by_technician').getAll(technicianId))) ?? [];
+      const highest = existing.reduce((max, item) => Math.max(max, Number(item?.sequence_order ?? 0)), 0);
+      const record = build({ sequenceOrder: highest + 1 });
+
+      const snapshot = (await requestResult(snapshots.get(technicianId))) ?? null;
+      const projected = snapshot === null ? null : project(snapshot, record);
+
+      if (closePrior !== null) {
+        outbox.put(closePrior);
+      }
+      outbox.put(record);
+      if (projected !== null) {
+        snapshots.put(projected);
+      }
+
+      await transactionComplete(transaction);
+
+      return record;
+    } catch (error) {
+      if (transaction.error === null) {
+        try {
+          transaction.abort();
+        } catch { /* La transacción ya estaba cerrada. */ }
+      }
+
+      throw transaction.error ?? error;
+    }
   }
 
   /**
@@ -910,19 +1113,18 @@ export class OfflineStorage {
    * @returns {Promise<Object|null>} Copia actualizada, o `null` si no hay copia local
    */
   async applyOptimisticMutation(technicianId, mutation) {
-    const snapshot = await this.getSnapshot(technicianId);
-    if (snapshot === null) {
-      return null;
-    }
+    return this.mutateSnapshot(technicianId, (snapshot) => {
+      if (snapshot === null) {
+        return null;
+      }
 
-    const updated = applyOptimisticStopChange(snapshot, {
-      stopType: mutation.stop_type,
-      stopId: mutation.stop_id,
-      operationType: mutation.operation_type,
-      payload: mutation.payload ?? {}
+      return applyOptimisticStopChange(snapshot, {
+        stopType: mutation.stop_type,
+        stopId: mutation.stop_id,
+        operationType: mutation.operation_type,
+        payload: mutation.payload ?? {}
+      });
     });
-
-    return this.putSnapshot(updated);
   }
 
   /**
@@ -936,12 +1138,9 @@ export class OfflineStorage {
       return this.getSnapshot(technicianId);
     }
 
-    const snapshot = await this.getSnapshot(technicianId);
-    if (snapshot === null) {
-      return null;
-    }
-
-    return this.putSnapshot(revertProvisionalStockChange(snapshot, parts));
+    return this.mutateSnapshot(technicianId, (snapshot) => (
+      snapshot === null ? null : revertProvisionalStockChange(snapshot, parts)
+    ));
   }
 
   /**

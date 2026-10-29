@@ -234,41 +234,45 @@ export class OfflineSyncManager {
     const occurredAt = new Date(this.now()).toISOString();
     const priorStart = this.findPriorStart(activeItems, stopType, Number(request?.stopId ?? 0));
     const chainStartedAt = priorStart !== null ? priorStart.client_occurred_at : null;
-
-    if (priorStart !== null && CHAIN_END_OPERATIONS.includes(operationType)) {
-      await this.storage.putMutation({ ...priorStart, chain_ended_at: occurredAt });
-    }
-
+    const clientMutationId = generateClientMutationId(new Date(this.now()));
     const machineType = String(request?.machineType ?? '').toUpperCase();
 
-    const mutation = {
-      client_mutation_id: generateClientMutationId(new Date(this.now())),
-      technician_id: technicianId,
-      technician_email: request?.technicianEmail ?? null,
-      sequence_order: await this.storage.nextSequenceOrder(technicianId),
-      status: MUTATION_STATUS.PENDING,
-      stop_type: stopType,
-      stop_id: Number(request?.stopId ?? 0),
-      ticket_or_order_code: request?.ticketOrOrderCode ?? null,
-      machine_id: request?.machineId ?? null,
-      machine_code: request?.machineCode ?? null,
-      is_perishable_machine: PERISHABLE_MACHINE_TYPES.includes(machineType),
-      operation_type: operationType,
-      is_state_transition: operation.isStateTransition,
-      http_method: operation.method,
-      endpoint: operation.path(request?.stopId),
-      client_occurred_at: occurredAt,
-      chain_started_at: chainStartedAt,
-      chain_ended_at: null,
-      sanitary_seal_confirmed: request?.sanitarySealConfirmed === true,
-      payload,
-      photo_attachment: photoAttachment,
-      provisional_parts_deducted: extractConsumedCatalogParts(operationType, payload),
-      conflict: null
-    };
+    // Cierre del inicio previo y alta de la nueva mutación viajan en la misma
+    // transacción que la proyección local (`H4`): o queda todo, o no queda nada.
+    const closePriorStart = priorStart !== null && CHAIN_END_OPERATIONS.includes(operationType)
+      ? { ...priorStart, chain_ended_at: occurredAt }
+      : null;
 
-    await this.storage.applyOptimisticMutation(technicianId, mutation);
-    await this.storage.putMutation(mutation);
+    const mutation = await this.storage.enqueueMutation(
+      technicianId,
+      ({ sequenceOrder }) => ({
+        client_mutation_id: clientMutationId,
+        technician_id: technicianId,
+        technician_email: request?.technicianEmail ?? null,
+        sequence_order: sequenceOrder,
+        status: MUTATION_STATUS.PENDING,
+        stop_type: stopType,
+        stop_id: Number(request?.stopId ?? 0),
+        ticket_or_order_code: request?.ticketOrOrderCode ?? null,
+        machine_id: request?.machineId ?? null,
+        machine_code: request?.machineCode ?? null,
+        is_perishable_machine: PERISHABLE_MACHINE_TYPES.includes(machineType),
+        operation_type: operationType,
+        is_state_transition: operation.isStateTransition,
+        http_method: operation.method,
+        endpoint: operation.path(request?.stopId),
+        client_occurred_at: occurredAt,
+        chain_started_at: chainStartedAt,
+        chain_ended_at: null,
+        sanitary_seal_confirmed: request?.sanitarySealConfirmed === true,
+        payload,
+        photo_attachment: photoAttachment,
+        provisional_parts_deducted: extractConsumedCatalogParts(operationType, payload),
+        conflict: null
+      }),
+      { closePriorStart }
+    );
+
     this.announce({ type: 'enqueued', technicianId, mutation });
 
     return mutation;
