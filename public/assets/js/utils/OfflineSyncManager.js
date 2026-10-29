@@ -66,6 +66,19 @@ const CHAIN_END_OPERATIONS = Object.freeze([
 /** Código con el que el middleware rechaza a una cuenta dada de baja (`QA 5`). */
 const ACCOUNT_DEACTIVATED_CODE = 'ACCOUNT_DEACTIVATED';
 
+/**
+ * Códigos 4xx que el servidor emite como «vuelve más tarde», no como veredicto.
+ *
+ * El resto de 4xx es una decisión definitiva sobre esa operación: reintentarla
+ * no la va a arreglar y, en cabeza del FIFO, bloquea a todas las que vienen
+ * detrás (`RF-04.1`).
+ */
+const RETRYABLE_CLIENT_STATUSES = Object.freeze([408, 425, 429]);
+
+/** Motivo visible cuando el rechazo es por tamaño de la evidencia (`413`). */
+const PAYLOAD_TOO_LARGE_MESSAGE = 'El servidor rechazó la fotografía por tamaño. '
+  + 'El trabajo queda en conflicto para volcarlo al expediente sin la evidencia.';
+
 /** Instante del conflicto que bloquea las transiciones posteriores de la parada. */
 const CHAIN_BLOCKED_MESSAGE = 'Paso previo de esta parada rechazado por conflicto en el servidor.';
 
@@ -266,6 +279,17 @@ export class OfflineSyncManager {
    */
   async processOutboxQueue(technicianId) {
     const id = Number(technicianId);
+
+    // Antes de vaciar nada se rescatan los envíos que quedaron huérfanos: una
+    // pestaña que murió a mitad de un envío deja el elemento en `SYNCING`, y ese
+    // estado no vuelve a `PENDING` por sí solo. Sin este rescate el trabajo no
+    // se sincroniza nunca y el cierre de sesión queda bloqueado para siempre
+    // (`EARS 06.1`). Es seguro por la idempotencia del servidor (`RF-04.2`).
+    const recovered = await this.storage.recoverInterruptedMutations(id, this.now());
+    if (recovered.length > 0) {
+      this.announce({ type: 'queue_recovered', technicianId: id, mutations: recovered });
+    }
+
     const queue = await this.storage.listMutations(id, [MUTATION_STATUS.PENDING]);
     const failedStateStops = new Set();
     const summary = { applied: 0, conflicts: 0, pending: queue.length, interrupted: null };
@@ -284,7 +308,11 @@ export class OfflineSyncManager {
         continue;
       }
 
-      await this.storage.putMutation({ ...item, status: MUTATION_STATUS.SYNCING });
+      await this.storage.putMutation({
+        ...item,
+        status: MUTATION_STATUS.SYNCING,
+        syncing_since: new Date(this.now()).toISOString()
+      });
       this.announce({ type: 'syncing', technicianId: id, mutation: item });
 
       try {
@@ -479,24 +507,35 @@ export class OfflineSyncManager {
       return 'account_deactivated';
     }
 
-    if (status === 403 || status === 409 || status === 422) {
-      if (item.is_state_transition === true) {
-        failedStateStops.add(`${item.stop_type}:${item.stop_id}`);
+    if (isPermanentClientFailure(status)) {
+      // `413` no se puede volcar con la misma evidencia que el servidor rechazó:
+      // la foto se retira del elemento y el motivo lo deja dicho, para que el
+      // trabajo llegue al expediente en lugar de quedarse bloqueado sin salida.
+      const rejected = status === 413 ? { ...item, photo_attachment: null } : item;
+
+      if (rejected.is_state_transition === true) {
+        failedStateStops.add(`${rejected.stop_type}:${rejected.stop_id}`);
       }
 
-      await this.markAsConflict(item, {
+      await this.markAsConflict(rejected, {
         code: code || 'OFFLINE_CONFLICT',
-        message: textOrNull(error?.message) ?? CHAIN_BLOCKED_MESSAGE
+        message: status === 413
+          ? PAYLOAD_TOO_LARGE_MESSAGE
+          : (textOrNull(error?.message) ?? CHAIN_BLOCKED_MESSAGE)
       });
-      await this.storage.revertProvisionalStock(technicianId, item.provisional_parts_deducted ?? []);
+      await this.storage.revertProvisionalStock(
+        technicianId,
+        rejected.provisional_parts_deducted ?? []
+      );
       summary.conflicts++;
       summary.pending--;
 
       return null;
     }
 
-    // Caída de red, plazo agotado o error del servidor: la operación conserva su
-    // clave y vuelve a PENDING; el resto de la cola espera a la próxima reconexión.
+    // Fallo transitorio —caída de red, plazo agotado (408), límite de tasa (429)
+    // o error del servidor—: la operación conserva su clave y vuelve a PENDING;
+    // el resto de la cola espera a la próxima reconexión.
     await this.storage.putMutation({ ...item, status: MUTATION_STATUS.PENDING });
     this.announce({ type: 'sync_interrupted', technicianId, mutation: item, error });
 
@@ -558,6 +597,17 @@ export class OfflineSyncManager {
 function textOrNull(value) {
   const text = typeof value === 'string' ? value.trim() : '';
   return text === '' ? null : text;
+}
+
+/**
+ * ¿El rechazo es un veredicto definitivo del servidor sobre esta operación?
+ *
+ * Un 4xx es permanente salvo que el propio protocolo lo declare transitorio
+ * (`408`, `425`, `429`). Tratarlo como caída de red deja el elemento en cabeza
+ * del FIFO para siempre y arrastra a toda la cola con él.
+ */
+function isPermanentClientFailure(status) {
+  return status >= 400 && status < 500 && !RETRYABLE_CLIENT_STATUSES.includes(status);
 }
 
 /** Constancia textual de la firma recogida in situ, o de su ausencia declarada. */

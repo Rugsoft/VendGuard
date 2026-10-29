@@ -1135,6 +1135,12 @@ export const TechnicianRouteView = {
       }
 
       try {
+        // Los envíos huérfanos vuelven a la cola antes de contar: si una pestaña
+        // murió a mitad de un envío, el elemento quedó en `SYNCING` y la bandeja
+        // lo mostraría como «enviándose» para siempre, sin forma de sincronizarlo
+        // ni de cerrar sesión (`EARS 06.1`, `RF-04.1`).
+        await this.offlineStorage.recoverInterruptedMutations(technicianId);
+
         const snapshot = await this.offlineStorage.getSnapshot(technicianId);
         this.offlineSnapshot = snapshot;
         this.offlineValidity = evaluateSnapshotValidity(snapshot, Date.now());
@@ -1402,6 +1408,10 @@ export const TechnicianRouteView = {
 
       if (detail.type === 'reauth_required') {
         this.handleReauthRequired(detail);
+      } else if (detail.type === 'queue_recovered') {
+        const recovered = Array.isArray(detail.mutations) ? detail.mutations.length : 0;
+        this.offlineNotice = `Se ${recovered === 1 ? 'ha' : 'han'} recuperado ${recovered} `
+          + 'envío(s) que quedaron a medias en este dispositivo. La cola los reenviará al servidor.';
       } else if (detail.type === 'conflict') {
         this.offlineNotice = 'Una operación ha quedado en conflicto: vuelca el trabajo al expediente desde la bandeja.';
       } else if (detail.type === 'account_dump_completed') {

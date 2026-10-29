@@ -193,6 +193,7 @@ Estructura de cada registro en `mutation_outbox`:
   "technician_email": "carlos.mendoza@vendguard.es",
   "sequence_order": 1,
   "status": "PENDING",
+  "syncing_since": null,
   "stop_type": "INCIDENT",
   "stop_id": 105,
   "ticket_or_order_code": "INC-2026-0105",
@@ -241,6 +242,23 @@ Estructura de cada registro en `mutation_outbox`:
   7. `COMPLETE_PREVENTIVE` (`is_state_transition: true`, `POST /technician/preventive/orders/{id}/complete`)
   8. `REINSPECT_PREVENTIVE` (`is_state_transition: true`, `POST /technician/preventive/orders/{id}/reinspect`)
   9. `ADD_INCIDENT_COMMENT` (`is_state_transition: false`, `POST /technician/incidents/{id}/comments`)
+
+### 3.3. Ciclo de vida del elemento de la bandeja (`RF-04.1`, `RF-05.1`, `EARS 06.1`)
+
+El elemento nace en `PENDING`; al enviarse pasa a `SYNCING` con la marca `syncing_since`; se elimina del almacén cuando el servidor confirma, y pasa a `CONFLICT` cuando el servidor emite un veredicto definitivo. No existe un cuarto estado ni una vía de descarte silencioso (`Art. III.1`).
+
+**Rescate de envíos interrumpidos.** El estado `SYNCING` solo es válido mientras hay una pestaña enviando. Si el cliente muere en ese punto —el sistema operativo mata la pestaña, el móvil se apaga, se cierra el navegador— el elemento quedaría fuera del FIFO para siempre y el cierre de sesión bloquearía al técnico sin nada que sincronizar (`EARS 06.1`). Por eso, al hidratar la copia y al abrir cada pasada de la cola, `OfflineStorage::recoverInterruptedMutations()` devuelve a `PENDING` todo `SYNCING` cuya marca `syncing_since` supere `SYNCING_STALE_AFTER_MS` (2 minutos) o falte. El reenvío es seguro por la idempotencia del servidor: si el primer envío llegó a aplicarse, la respuesta es la original y no se mueve estado, stock ni dinero (`RF-04.2`). El margen protege el envío legítimo de otra pestaña en curso (una foto de 5 MB puede tardar más que una petición normal); la coordinación entre pestañas queda fuera de este contrato.
+
+**Clasificación de fallos de envío.** El motor distingue el veredicto del hipo:
+
+| Desenlace | Códigos | Efecto en la bandeja |
+| :--- | :--- | :--- |
+| Rechazo definitivo | Cualquier `4xx` salvo `408`, `425` y `429` | `CONFLICT` aislado por parada; el FIFO **continúa** con el resto |
+| Transitorio | `408`, `425`, `429`, `5xx` y fallo de transporte | Vuelve a `PENDING` y la pasada se interrumpe hasta el siguiente disparo |
+| Reautenticación | `401` | `PENDING` + aviso de reautenticación; la pasada se interrumpe |
+| Cuenta dada de baja | `403 ACCOUNT_DEACTIVATED` | Volcado automático de la cola (`QA 5`) |
+
+Un `4xx` no reintentable tratado como caída de red quedaría en cabeza del FIFO y bloquearía todas las operaciones posteriores, además del cierre de sesión; por eso el veredicto se aísla y se vuelca (`RF-05.1`, `QA 3`). En el caso concreto de `413` (evidencia rechazada por tamaño), el elemento conserva el trabajo y retira únicamente `photo_attachment`; el motivo se escribe en `conflict.message`, viaja como `conflict_reason` y deja constancia en la Nota Interna de que la evidencia no se pudo archivar.
 
 ---
 

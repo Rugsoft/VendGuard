@@ -72,6 +72,19 @@ export const MUTATION_STATUS = Object.freeze({
   CONFLICT: 'CONFLICT'
 });
 
+/**
+ * Margen a partir del cual un envío en `SYNCING` se considera huérfano.
+ *
+ * El estado solo existe mientras una pestaña está enviando. Si la pestaña muere
+ * en ese instante —el sistema la mata, el móvil se apaga, se cierra el navegador—
+ * el elemento se queda en `SYNCING` y nadie vuelve a mirarlo: la bandeja lo
+ * enseña como «enviándose» para siempre y el cierre de sesión queda bloqueado
+ * (`EARS 06.1`). El margen es holgado a propósito: por debajo de él puede haber
+ * un envío legítimo de otra pestaña en curso (una foto de 5 MB tarda), y
+ * reencolarlo sería enviarlo dos veces.
+ */
+export const SYNCING_STALE_AFTER_MS = 2 * 60 * 1000;
+
 /** Tipos de parada del catálogo cerrado (`D1`). */
 export const STOP_TYPE = Object.freeze({
   INCIDENT: 'INCIDENT',
@@ -846,6 +859,51 @@ export class OfflineStorage {
   }
 
   /**
+   * Devuelve a la cola los envíos que quedaron huérfanos en `SYNCING`.
+   *
+   * Un elemento en `SYNCING` sin la operación viva detrás es trabajo que nunca
+   * volvería a enviarse: `processOutboxQueue` solo recoge `PENDING` y el cierre
+   * de sesión lo cuenta como vivo. Reencolarlo es seguro porque el servidor es
+   * idempotente por `(technician_id, client_mutation_id)`: si el envío llegó a
+   * aplicarse antes de morir la pestaña, el reenvío recibe la respuesta original
+   * y no mueve stock, dinero ni estado (`RF-04.2`).
+   *
+   * @param {number} technicianId
+   * @param {number} [nowMs=Date.now()]
+   * @param {number} [staleAfterMs=SYNCING_STALE_AFTER_MS]
+   * @returns {Promise<Array<Object>>} Elementos devueltos a `PENDING`
+   */
+  async recoverInterruptedMutations(
+    technicianId,
+    nowMs = Date.now(),
+    staleAfterMs = SYNCING_STALE_AFTER_MS
+  ) {
+    const items = await this.listMutations(technicianId, [MUTATION_STATUS.SYNCING]);
+    const recovered = [];
+
+    for (const item of items) {
+      const startedAt = Date.parse(String(item?.syncing_since ?? ''));
+      // Sin marca de inicio no hay forma de saber si el envío sigue vivo, y una
+      // marca en el futuro solo puede venir de un reloj que retrocedió después:
+      // ambos casos se tratan como huérfanos, que es el fallo seguro (el reenvío
+      // es idempotente).
+      const age = Number.isNaN(startedAt) || startedAt > nowMs
+        ? Number.POSITIVE_INFINITY
+        : nowMs - startedAt;
+
+      if (age < staleAfterMs) {
+        continue;
+      }
+
+      const requeued = { ...item, status: MUTATION_STATUS.PENDING, syncing_since: null };
+      await this.putMutation(requeued);
+      recovered.push(requeued);
+    }
+
+    return recovered;
+  }
+
+  /**
    * Aplica la mutación optimista a la copia local del técnico (`D5`).
    * @param {number} technicianId
    * @param {Object} mutation
@@ -1043,6 +1101,7 @@ export default {
   OFFLINE_SIGNATURE_MAX_BYTES,
   SNAPSHOT_VALIDITY,
   MUTATION_STATUS,
+  SYNCING_STALE_AFTER_MS,
   STOP_TYPE,
   PERISHABLE_MACHINE_TYPES,
   OFFLINE_OPERATIONS,

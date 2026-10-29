@@ -17,6 +17,8 @@ a un módulo funcional certificado por la batería global.
 
 ### Corregido
 
+- Rescate de envíos interrumpidos: un elemento que quedó en `SYNCING` porque la pestaña murió a mitad de envío vuelve a la cola al hidratar y en cada pasada de sincronización, en lugar de bloquear el cierre de sesión para siempre sin nada que enviar.
+- Veredictos `4xx` permanentes: un `404`, `400` o `410` (antes tratado como caída de red) queda aislado como conflicto y el FIFO continúa; un `413` conserva el trabajo y retira solo la evidencia que el servidor rechazó. Solo `408`, `425`, `429` y los `5xx` se reintentan.
 - Contratos del Service Worker: `CACHE_NAME` v2, ausencia de `/` en el App Shell y caída explícita a `/index.html` en navegación sin red.
 - Matriz de trazabilidad del Módulo 24: referencias de pruebas, recuentos y estado del DoD 1 alineados con la corrida real.
 

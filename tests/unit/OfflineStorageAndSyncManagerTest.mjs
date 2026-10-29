@@ -24,6 +24,12 @@
  *  - **Bloqueo de cierre de sesión (D4, EARS 06.1):** con cola viva el técnico no
  *    puede salir de la aplicación, y con la bandeja vacía la copia local se
  *    limpia antes de cerrar.
+ *  - **Rescate de envíos interrumpidos (EARS 06.1, RF-04.2):** un elemento que
+ *    quedó en `SYNCING` porque la pestaña murió vuelve a la cola; uno que está
+ *    siendo enviado por otra pestaña en ese momento no se toca.
+ *  - **Veredictos 4xx (RF-04.1, RF-05.1):** un rechazo definitivo del servidor
+ *    (`404`, `400`, `410`, `413`) queda aislado como conflicto y no interrumpe
+ *    el resto del FIFO; solo `408`, `425`, `429` y los `5xx` se reintentan.
  *
  * Dogma Vanilla: Node.js native ESM, zero external dependencies, zero network in tests.
  */
@@ -927,6 +933,192 @@ await shiftStorage.clearTechnician(2);
 assert(
   '11.8 Cerrar sesión limpia la copia y con ella el turno recordado (EARS 06.5)',
   await shiftStorage.getSnapshot(2) === null
+);
+
+console.log('\n--- 12. Rescate de envíos interrumpidos y veredictos 4xx (H1, H2) ---');
+
+const recoveryStorage = await seedStorage();
+const interruptedMutation = (id, sequenceOrder, status, syncingSince, stopId) => ({
+  client_mutation_id: id,
+  technician_id: 2,
+  technician_email: 'jordi@vendguard.internal',
+  sequence_order: sequenceOrder,
+  status,
+  stop_type: STOP_TYPE.INCIDENT,
+  stop_id: stopId,
+  operation_type: 'ADD_INCIDENT_COMMENT',
+  is_state_transition: false,
+  http_method: 'POST',
+  endpoint: `/technician/incidents/${stopId}/comments`,
+  client_occurred_at: new Date(NOW).toISOString(),
+  chain_started_at: null,
+  chain_ended_at: null,
+  syncing_since: syncingSince,
+  sanitary_seal_confirmed: false,
+  payload: { body: `Comentario de la parada ${stopId}` },
+  photo_attachment: null,
+  provisional_parts_deducted: [],
+  conflict: null
+});
+
+// Un envío de hace media hora (la pestaña murió), otro sin marca de inicio
+// (murió entre las dos escrituras) y uno vivo de otra pestaña en este momento.
+await recoveryStorage.putMutation(interruptedMutation(
+  'stuck-syncing-01',
+  1,
+  MUTATION_STATUS.SYNCING,
+  new Date(NOW - 30 * 60 * 1000).toISOString(),
+  201
+));
+await recoveryStorage.putMutation(interruptedMutation('stuck-syncing-02', 2, MUTATION_STATUS.SYNCING, null, 202));
+await recoveryStorage.putMutation(interruptedMutation(
+  'live-syncing-03',
+  3,
+  MUTATION_STATUS.SYNCING,
+  new Date(NOW - 5 * 1000).toISOString(),
+  203
+));
+
+const recoveredFromCrash = await recoveryStorage.recoverInterruptedMutations(2, NOW);
+assert(
+  '12.1 Un envío huérfano vuelve a PENDING y el que otra pestaña está enviando ahora no se toca',
+  recoveredFromCrash.length === 2
+    && recoveredFromCrash.every((item) => item.status === MUTATION_STATUS.PENDING
+      && item.syncing_since === null)
+    && (await recoveryStorage.getMutation('live-syncing-03'))?.status === MUTATION_STATUS.SYNCING,
+  recoveredFromCrash.map((item) => item.client_mutation_id).join(',')
+);
+
+const recoveredRequests = [];
+const recoveryManager = new OfflineSyncManager({
+  storage: recoveryStorage,
+  client: {
+    request: async (endpoint) => {
+      recoveredRequests.push(endpoint);
+      return { ok: true };
+    }
+  },
+  now: () => NOW,
+  dispatch: () => {}
+});
+
+const recoverySummary = await recoveryManager.processOutboxQueue(2);
+assert(
+  '12.2 La cola reenvía lo rescatado y deja fuera el envío que sigue vivo',
+  recoverySummary.applied === 2
+    && recoveredRequests.length === 2
+    && recoveredRequests.every((endpoint) => !endpoint.includes('/incidents/203/')),
+  JSON.stringify({ requests: recoveredRequests, summary: recoverySummary })
+);
+
+const recoveryQueue = await recoveryManager.getQueueSummary(2);
+assert(
+  '12.3 El envío vivo sigue contando como en curso, no como pendiente',
+  recoveryQueue.syncing === 1 && recoveryQueue.pending === 0 && recoveryQueue.total === 1,
+  JSON.stringify(recoveryQueue)
+);
+
+const verdictStorage = await seedStorage();
+const verdictMutation = (sequenceOrder, stopId, overrides = {}) => ({
+  ...interruptedMutation(`verdict-${sequenceOrder}-${stopId}`, sequenceOrder, MUTATION_STATUS.PENDING, null, stopId),
+  ...overrides
+});
+
+await verdictStorage.putMutation(verdictMutation(1, 301));
+await verdictStorage.putMutation(verdictMutation(2, 302));
+await verdictStorage.putMutation(verdictMutation(3, 303));
+await verdictStorage.putMutation(verdictMutation(4, 304, { photo_attachment: photo('evidencia.jpg', MB) }));
+await verdictStorage.putMutation(verdictMutation(5, 305));
+
+const verdictFailures = { 301: 404, 302: 400, 303: 410, 304: 413 };
+const verdictRequests = [];
+const verdictManager = new OfflineSyncManager({
+  storage: verdictStorage,
+  client: {
+    request: async (endpoint) => {
+      verdictRequests.push(endpoint);
+      const stopId = Number((endpoint.match(/incidents\/(\d+)\//) ?? [])[1] ?? 0);
+      const status = verdictFailures[stopId];
+
+      if (status !== undefined) {
+        throw Object.assign(new Error(`Rechazo ${status} de la parada ${stopId}`), {
+          status,
+          code: `HTTP_${status}`
+        });
+      }
+
+      return { ok: true };
+    }
+  },
+  now: () => NOW,
+  dispatch: () => {}
+});
+
+const verdictSummary = await verdictManager.processOutboxQueue(2);
+assert(
+  '12.4 Un 4xx permanente no interrumpe la cola: las operaciones posteriores se envían',
+  verdictSummary.interrupted === null && verdictSummary.applied === 1 && verdictSummary.conflicts === 4,
+  JSON.stringify(verdictSummary)
+);
+assert(
+  '12.5 404, 400 y 410 quedan en conflicto para volcarlos, no como caída de red',
+  (await verdictStorage.getMutation('verdict-1-301'))?.status === MUTATION_STATUS.CONFLICT
+    && (await verdictStorage.getMutation('verdict-2-302'))?.status === MUTATION_STATUS.CONFLICT
+    && (await verdictStorage.getMutation('verdict-3-303'))?.status === MUTATION_STATUS.CONFLICT
+);
+
+const oversizedItem = await verdictStorage.getMutation('verdict-4-304');
+assert(
+  '12.6 El 413 retira solo la evidencia y conserva el trabajo para el volcado',
+  oversizedItem?.photo_attachment === null
+    && oversizedItem?.conflict?.message.includes('fotografía')
+    && oversizedItem?.payload?.body.includes('304'),
+  JSON.stringify({ photo: oversizedItem?.photo_attachment, conflict: oversizedItem?.conflict })
+);
+assert(
+  '12.7 La operación posterior al último rechazo se aplicó y salió de la bandeja',
+  await verdictStorage.getMutation('verdict-5-305') === null
+);
+
+const transientStorage = await seedStorage();
+await transientStorage.putMutation(verdictMutation(1, 401));
+await transientStorage.putMutation(verdictMutation(2, 402));
+const transientRequests = [];
+const transientManager = new OfflineSyncManager({
+  storage: transientStorage,
+  client: {
+    request: async (endpoint) => {
+      transientRequests.push(endpoint);
+      throw Object.assign(new Error('Servicio no disponible'), { status: 500, code: 'SERVER_ERROR' });
+    }
+  },
+  now: () => NOW,
+  dispatch: () => {}
+});
+
+const transientSummary = await transientManager.processOutboxQueue(2);
+assert(
+  '12.8 Un 500 sigue siendo transitorio: la cola se interrumpe y el trabajo queda pendiente',
+  transientSummary.interrupted === 'network'
+    && transientSummary.applied === 0
+    && (await transientStorage.getMutation('verdict-1-401'))?.status === MUTATION_STATUS.PENDING
+    && (await transientStorage.getMutation('verdict-2-402'))?.status === MUTATION_STATUS.PENDING
+    && transientRequests.length === 1,
+  JSON.stringify(transientSummary)
+);
+
+const driftedStorage = await seedStorage();
+await driftedStorage.putMutation(interruptedMutation(
+  'drifted-syncing-05',
+  1,
+  MUTATION_STATUS.SYNCING,
+  new Date(NOW + HOUR_MS).toISOString(),
+  205
+));
+const driftedRecovered = await driftedStorage.recoverInterruptedMutations(2, NOW);
+assert(
+  '12.9 Un sello de envío en el futuro (reloj que retrocedió después) también se rescata',
+  driftedRecovered.length === 1 && driftedRecovered[0].status === MUTATION_STATUS.PENDING
 );
 
 console.log('\n======================================================================');

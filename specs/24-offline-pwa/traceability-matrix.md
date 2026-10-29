@@ -41,7 +41,7 @@
 
 | Criterio | Artefacto de código | Test que lo cubre | Resultado medido |
 |---|---|---|---|
-| **04.1** FIFO estricto y disparo automático/manual | `OfflineStorage::listMutations` (orden por `sequence_order`), `OfflineSyncManager::processOutboxQueue`, `TechnicianRouteView` (reconexión y «Sincronizar ahora») | `OfflineStorageAndSyncManagerTest.mjs` **9.1–9.2**, 6.1–6.6 · `TechnicianRouteViewTest.mjs` **21.1–21.3** · `OfflinePwaSyncApiTest.php` 2.x | 66/66 · 171/171 · 30/30 ✅ — la bandeja ordena inserciones desordenadas, el envío respeta 101 → 102 → 103 y la reconexión dispara la cola sin esperar a un toque |
+| **04.1** FIFO estricto y disparo automático/manual | `OfflineStorage::listMutations` (orden por `sequence_order`), `OfflineStorage::recoverInterruptedMutations` (`syncing_since`, `SYNCING_STALE_AFTER_MS`), `OfflineSyncManager::processOutboxQueue`, `TechnicianRouteView` (reconexión, «Sincronizar ahora» y rescate al hidratar) | `OfflineStorageAndSyncManagerTest.mjs` **9.1–9.2**, 6.1–6.6, **12.1–12.3** · `TechnicianRouteViewTest.mjs` **21.1–21.3** · `OfflinePwaSyncApiTest.php` 2.x | 75/75 · 171/171 · 30/30 ✅ — la bandeja ordena inserciones desordenadas, el envío respeta 101 → 102 → 103, la reconexión dispara la cola sin esperar a un toque y un envío huérfano de una pestaña muerta vuelve al FIFO sin tocar el que otra pestaña está enviando |
 | **04.2** Idempotencia por `(technician_id, client_mutation_id)` | `020_offline_pwa_sync.sql` (`uq_offline_tech_mutation`), `PdoOfflineSyncMutationRepository::findByTechnicianAndMutationId`, `OfflineSyncService::executeIdempotentMutation` | `OfflineSyncServiceTest.php` 1.1–1.5 · `OfflinePwaSyncApiTest.php` 3.1–3.2 · `PostgresOfflineSyncSchemaTest.php` | 41/41 · 30/30 · 22/22 ✅ — el reenvío responde `idempotent_replay` y no vuelve a descontar stock |
 | **04.3** Sello efectivo, tolerancia de 5 min, Δt y auditoría dual | `OfflineSyncMetadata::resolveEffectiveTimestamp`, `OfflineSyncService::chainStartAnchor` (ancla en la última mutación `START_*`/`RESUME_*`), `PdoOfflineSyncMutationRepository::findLatestAppliedChainStart`, `PdoIncidentRepository::startIntervention` (persiste el instante efectivo), `PdoOfflineSyncMutationRepository::recordAppliedMutation` | `OfflineSyncServiceTest.php` 6.1–6.5 · `OfflineSyncClockAndQuotaTest.php` 1.1–2.6 · `OfflinePwaSyncApiTest.php` 2.1–2.6 | 41/41 · 19/19 · 30/30 ✅ — Δt de 1.500 s exacto con 24 h de desfase, ancla en la reanudación y tope en `synced_at`; `incidents.started_at` conserva el instante efectivo |
 
@@ -49,7 +49,7 @@
 
 | Criterio | Artefacto de código | Test que lo cubre | Resultado medido |
 |---|---|---|---|
-| **05.1** Titularidad vigente, conflicto aislado por parada y comentarios independientes | `OfflineSyncManager::processOutboxQueue` (`failedStateStops`, `STATE_CHAIN_BLOCKED`, comentario `is_state_transition = false`), `handleSyncFailure` (403/409/422), `revertProvisionalStock`; `TechnicianController` responde `409 INCIDENT_OWNERSHIP_MISMATCH` desde la cola | `OfflineStorageAndSyncManagerTest.mjs` 6.1–6.6, **10.1–10.3** · `OfflinePwaSyncApiTest.php` 6.6–6.7 · `TechnicianRouteViewTest.mjs` 17.6 | 66/66 · 30/30 · 171/171 ✅ — el cambio de titular no escribe estado ni mutación; un comentario rechazado con 4xx queda en conflicto y la resolución posterior sí se envía |
+| **05.1** Titularidad vigente, conflicto aislado por parada y comentarios independientes | `OfflineSyncManager::processOutboxQueue` (`failedStateStops`, `STATE_CHAIN_BLOCKED`, comentario `is_state_transition = false`), `handleSyncFailure` (todo `4xx` salvo `408`/`425`/`429` es veredicto; `413` retira solo la evidencia), `revertProvisionalStock`; `TechnicianController` responde `409 INCIDENT_OWNERSHIP_MISMATCH` desde la cola | `OfflineStorageAndSyncManagerTest.mjs` 6.1–6.6, **10.1–10.3**, **12.4–12.8** · `OfflinePwaSyncApiTest.php` 6.6–6.7 · `TechnicianRouteViewTest.mjs` 17.6 | 75/75 · 30/30 · 171/171 ✅ — el cambio de titular no escribe estado ni mutación; un `404`/`400`/`410` queda en conflicto sin interrumpir el FIFO, el `413` conserva el trabajo sin la foto y solo `5xx`/`408`/`429` se reintentan |
 | **05.2** Colisión parcial exclusiva de reintegro | `OfflineSyncService` (`partialRefundCollision`, `skip_refund_block`), `PdoOfflineSyncMutationRepository::recordAppliedMutation` (nota interna automática) | `OfflineSyncServiceTest.php` 2.x · `OfflinePwaSyncApiTest.php` 4.1–4.2 | 41/41 · 30/30 ✅ |
 | **05.3** Volcado obligatorio en 1 toque, canceladas/cerradas y preventivas | `OfflineSyncService::dumpConflict`, `PdoOfflineSyncMutationRepository::recordConflictDump`, `TechnicianOfflineSyncController::dumpConflict`, `OfflineSyncTrayModal.js` (`offline-conflict-dump`), `OfflineSyncManager::dumpConflict` | `OfflineStorageAndSyncManagerTest.mjs` 6.7–6.12 · `OfflineSyncServiceTest.php` 4.x · `OfflinePwaSyncApiTest.php` 6.1–6.5 · `OfflinePwaAssetsAndUiGuardTest.mjs` 3.4–3.5 | 66/66 · 41/41 · 30/30 · 39/39 ✅ — sin botón de descarte; `is_internal = TRUE` invisible a la sede |
 | **05.4** Cuarentena sanitaria innegociable a las 4 h | `OfflineSyncService` (`shouldPreserveQuarantine`, `sanitary_quarantine_retained`), `TechnicianController` (resolución offline) | `OfflineSyncServiceTest.php` 3.x · `OfflinePwaSyncApiTest.php` 5.1–5.3 | 41/41 · 30/30 ✅ — la avería se cierra, `machines.status = 'SANITARY_QUARANTINE'` permanece |
@@ -118,7 +118,7 @@
 | **5.** FIFO, idempotencia, Δt y cuarentena | `OfflineSyncClockAndQuotaTest.php` 19/19 · `OfflineSyncServiceTest.php` 41/41 · `OfflinePwaSyncApiTest.php` 30/30 | ✅ |
 | **6.** Conflictos volcados en 1 toque, sin descarte | `OfflineStorageAndSyncManagerTest.mjs` 6.7–6.12 · `OfflinePwaSyncApiTest.php` 6.1–6.7 | ✅ |
 | **7.** Sesión, turno, re-autenticación y baja | `OfflineStorageAndSyncManagerTest.mjs` 7.1–7.5 · `TechnicianRouteViewTest.mjs` 17.1–17.6, 18.1–18.5, 21.1–21.3 · `OfflinePwaSyncApiTest.php` 7.1–7.3 | ✅ |
-| **8.** Batería global al 100 % | `php tests/run_all.php` + `php tests/run_new_engine.php` | ✅ 367 suites / 14.037 aserciones / 0 fallos (hermética) · canal 27/27 / 830 aserciones / 0 fallos |
+| **8.** Batería global al 100 % | `php tests/run_all.php` + `php tests/run_new_engine.php` | ✅ 367 suites / 14.046 aserciones / 0 fallos (hermética) · canal 27/27 / 830 aserciones / 0 fallos |
 
 ---
 
@@ -130,7 +130,7 @@
 |---|---:|
 | `OfflineSyncClockAndQuotaTest.php` | 19/19 |
 | `OfflineSyncServiceTest.php` | 41/41 |
-| `OfflineStorageAndSyncManagerTest.mjs` | 66/66 |
+| `OfflineStorageAndSyncManagerTest.mjs` | 75/75 |
 | `OfflinePwaAssetsAndUiGuardTest.mjs` | 39/39 |
 | `TechnicianRouteViewTest.mjs` | 171/171 |
 | `TechnicianPreventiveRouteTabTest.mjs` | 22/22 |
@@ -144,7 +144,7 @@
 **Limitaciones declaradas (no se presentan como verdes):**
 
 1. **Carga < 2 s y encolado < 150 ms (RNF-01):** medidos en navegador real según el acta §6: 157,4 ms de mediana para la apertura sin red (5 recargas con el servidor detenido y `transferSize = 0`) y 5,85 ms de mediana / 7,6 ms p95 para el encolado local (10 acciones). La cifra procede de una única máquina (Chromium/Windows, 390 × 844) y no se extrapola a hardware móvil de gama baja; la guarda automática certifica además el shell cerrado y que la API nunca se cachea.
-2. **Corrida global:** `php tests/run_all.php` cierra con 367 suites / 14.037 aserciones, 0 fallos, cifras del README coherentes y código de salida 0. `php tests/run_new_engine.php` cierra el canal con 27 suites evaluadas, 27 en verde, 0 no ejecutables, 830 aserciones y 0 fallos. `PoolerLatencyMeasurementTest` aporta 30 de esas aserciones y resuelve su contrato TLS propio (`deploy/local/supabase/.env.local`) solo para su proceso hijo, sin que el resto del canal herede el motor remoto.
+2. **Corrida global:** `php tests/run_all.php` cierra con 367 suites / 14.046 aserciones, 0 fallos, cifras del README coherentes y código de salida 0. `php tests/run_new_engine.php` cierra el canal con 27 suites evaluadas, 27 en verde, 0 no ejecutables, 830 aserciones y 0 fallos. `PoolerLatencyMeasurementTest` aporta 30 de esas aserciones y resuelve su contrato TLS propio (`deploy/local/supabase/.env.local`) solo para su proceso hijo, sin que el resto del canal herede el motor remoto.
 3. **Doble sello temporal:** la suite de integración verifica `effective_occurred_at`, `client_occurred_at` y `synced_at`; la visualización del sello dual en el visor de auditoría no forma parte de este módulo.
 
 ---
