@@ -30,6 +30,10 @@
  *  - **Veredictos 4xx (RF-04.1, RF-05.1):** un rechazo definitivo del servidor
  *    (`404`, `400`, `410`, `413`) queda aislado como conflicto y no interrumpe
  *    el resto del FIFO; solo `408`, `425`, `429` y los `5xx` se reintentan.
+ *  - **Coordinación entre pestañas (RF-04.1, EARS 06.1):** dos pestañas del
+ *    mismo técnico nunca vacían la cola a la vez (`navigator.locks` más un
+ *    mutex local), y la que cambia la bandeja avisa a la otra por
+ *    `BroadcastChannel` para que relea su estado sin ecos.
  *
  * Dogma Vanilla: Node.js native ESM, zero external dependencies, zero network in tests.
  */
@@ -139,8 +143,15 @@ function newStorage() {
   return new OfflineStorage({ indexedDB: null });
 }
 
+/**
+ * Evidencia de prueba con su `Blob` real del tamaño pedido.
+ *
+ * Desde la DB v2 la foto se persiste binaria y su tamaño es el del archivo, no
+ * el declarado: un doble con `base64` de cuatro caracteres ya no representa una
+ * foto de 1 MB y falsearía la cuota.
+ */
 function photo(name, size) {
-  return { name, type: 'image/jpeg', size, base64: 'AAAA' };
+  return { name, type: 'image/jpeg', size, blob: new Blob([new Uint8Array(size)], { type: 'image/jpeg' }) };
 }
 
 async function seedStorage(overrides = {}) {
@@ -1148,6 +1159,258 @@ const driftedRecovered = await driftedStorage.recoverInterruptedMutations(2, NOW
 assert(
   '12.9 Un sello de envío en el futuro (reloj que retrocedió después) también se rescata',
   driftedRecovered.length === 1 && driftedRecovered[0].status === MUTATION_STATUS.PENDING
+);
+
+console.log('\n--- 13. Coordinación entre pestañas (RF-04.1, EARS 06.1) ---');
+
+/** Web Locks de mentira con la misma semántica: exclusión y cola de espera. */
+function createFakeLocks() {
+  const state = { requests: 0, concurrent: 0, maxConcurrent: 0 };
+  let tail = Promise.resolve();
+
+  state.lock = {
+    request: (name, optionsOrCallback, maybeCallback) => {
+      const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+      state.requests++;
+      const run = tail.then(async () => {
+        state.concurrent++;
+        state.maxConcurrent = Math.max(state.maxConcurrent, state.concurrent);
+        try {
+          return await callback();
+        } finally {
+          state.concurrent--;
+        }
+      });
+      tail = run.then(() => undefined, () => undefined);
+
+      return run;
+    }
+  };
+
+  return state;
+}
+
+/** `BroadcastChannel` de mentira: entrega a las demás pestañas, nunca al emisor. */
+function createChannelBus() {
+  const channels = [];
+  const posts = [];
+
+  return {
+    posts,
+    open() {
+      const channel = {
+        listeners: [],
+        addEventListener(type, handler) {
+          if (type === 'message') {
+            this.listeners.push(handler);
+          }
+        },
+        postMessage(message) {
+          posts.push(message);
+          for (const peer of channels) {
+            if (peer === channel) {
+              continue;
+            }
+            for (const listener of peer.listeners) {
+              listener({ data: { ...message } });
+            }
+          }
+        }
+      };
+      channels.push(channel);
+
+      return channel;
+    }
+  };
+}
+
+const lockState = createFakeLocks();
+const lockStorage = await seedStorage();
+for (const order of [1, 2, 3]) {
+  await lockStorage.putMutation(interruptedMutation(
+    `lock-${order}`,
+    order,
+    MUTATION_STATUS.PENDING,
+    null,
+    500 + order
+  ));
+}
+const lockSends = [];
+const lockManager = new OfflineSyncManager({
+  storage: lockStorage,
+  client: {
+    request: async (endpoint) => {
+      lockSends.push(endpoint);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { ok: true };
+    }
+  },
+  locks: lockState.lock,
+  channel: null,
+  now: () => NOW,
+  dispatch: () => {}
+});
+
+const [lockRunA, lockRunB] = await Promise.all([
+  lockManager.processOutboxQueue(2),
+  lockManager.processOutboxQueue(2)
+]);
+assert(
+  '13.1 Dos vaciados simultáneos de la misma pestaña no duplican envíos',
+  lockSends.length === 3 && lockRunA.applied + lockRunB.applied === 3,
+  JSON.stringify({ sends: lockSends.length, a: lockRunA, b: lockRunB })
+);
+assert(
+  '13.2 El cerrojo del navegador se toma una vez por operación de bandeja',
+  lockState.requests === 2 && lockState.maxConcurrent === 1,
+  JSON.stringify(lockState)
+);
+
+const tabLocks = createFakeLocks();
+const tabStorage = await seedStorage();
+for (const order of [1, 2, 3, 4]) {
+  await tabStorage.putMutation(interruptedMutation(
+    `tab-${order}`,
+    order,
+    MUTATION_STATUS.PENDING,
+    null,
+    600 + order
+  ));
+}
+let tabActive = 0;
+let tabMaxActive = 0;
+const tabSends = [];
+const tabClient = {
+  request: async (endpoint) => {
+    tabActive++;
+    tabMaxActive = Math.max(tabMaxActive, tabActive);
+    tabSends.push(endpoint);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    tabActive--;
+    return { ok: true };
+  }
+};
+const tabManagerA = new OfflineSyncManager({
+  storage: tabStorage,
+  client: tabClient,
+  locks: tabLocks.lock,
+  channel: null,
+  now: () => NOW,
+  dispatch: () => {}
+});
+const tabManagerB = new OfflineSyncManager({
+  storage: tabStorage,
+  client: tabClient,
+  locks: tabLocks.lock,
+  channel: null,
+  now: () => NOW,
+  dispatch: () => {}
+});
+
+const [tabRunA, tabRunB] = await Promise.all([
+  tabManagerA.processOutboxQueue(2),
+  tabManagerB.processOutboxQueue(2)
+]);
+assert(
+  '13.3 Dos pestañas del mismo técnico no vacían la cola a la vez',
+  tabMaxActive === 1 && tabSends.length === 4 && tabRunA.applied + tabRunB.applied === 4,
+  JSON.stringify({ maxActive: tabMaxActive, sends: tabSends.length, a: tabRunA, b: tabRunB })
+);
+
+const fallbackStorage = await seedStorage();
+for (const order of [1, 2]) {
+  await fallbackStorage.putMutation(interruptedMutation(
+    `fallback-${order}`,
+    order,
+    MUTATION_STATUS.PENDING,
+    null,
+    700 + order
+  ));
+}
+let fallbackActive = 0;
+let fallbackMaxActive = 0;
+const fallbackSends = [];
+const fallbackManager = new OfflineSyncManager({
+  storage: fallbackStorage,
+  client: {
+    request: async (endpoint) => {
+      fallbackActive++;
+      fallbackMaxActive = Math.max(fallbackMaxActive, fallbackActive);
+      fallbackSends.push(endpoint);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      fallbackActive--;
+      return { ok: true };
+    }
+  },
+  locks: null,
+  channel: null,
+  now: () => NOW,
+  dispatch: () => {}
+});
+
+const [fallbackRunA, fallbackRunB] = await Promise.all([
+  fallbackManager.processOutboxQueue(2),
+  fallbackManager.processOutboxQueue(2)
+]);
+assert(
+  '13.4 Sin Web Locks el mutex local sigue serializando los vaciados',
+  fallbackMaxActive === 1
+    && fallbackSends.length === 2
+    && fallbackRunA.applied + fallbackRunB.applied === 2,
+  JSON.stringify({ maxActive: fallbackMaxActive, sends: fallbackSends.length })
+);
+
+const channelBus = createChannelBus();
+const localEvents = [];
+const peerEvents = [];
+const localTab = new OfflineSyncManager({
+  storage: await seedStorage(),
+  client: {},
+  locks: null,
+  channel: channelBus.open(),
+  now: () => NOW,
+  dispatch: (detail) => localEvents.push(detail)
+});
+const peerTab = new OfflineSyncManager({
+  storage: await seedStorage(),
+  client: {},
+  locks: null,
+  channel: channelBus.open(),
+  now: () => NOW,
+  dispatch: (detail) => peerEvents.push(detail)
+});
+
+await localTab.enqueue({
+  technicianId: 2,
+  stopType: STOP_TYPE.INCIDENT,
+  stopId: 102,
+  operationType: 'START_INCIDENT',
+  payload: {},
+  machineType: 'COLD_DRINKS'
+});
+assert(
+  '13.5 La pestaña que encola avisa a la otra, que relee su bandeja',
+  channelBus.posts.length === 1
+    && channelBus.posts[0].type === 'queue_changed'
+    && channelBus.posts[0].cause === 'enqueued'
+    && channelBus.posts[0].technician_id === 2
+    && peerEvents.length === 1
+    && peerEvents[0].type === 'queue_changed'
+    && peerEvents[0].remote === true
+    && peerEvents[0].technicianId === 2,
+  JSON.stringify({ posts: channelBus.posts, peer: peerEvents })
+);
+assert(
+  '13.6 El aviso recibido no se reemite (sin eco entre pestañas)',
+  channelBus.posts.length === 1 && localEvents.length === 1 && peerEvents.length === 1,
+  JSON.stringify({ posts: channelBus.posts.length, local: localEvents.length, peer: peerEvents.length })
+);
+
+localTab.announce({ type: 'syncing', technicianId: 2, mutation: null });
+assert(
+  '13.7 Un anuncio que no cambia la bandeja no viaja a otras pestañas',
+  channelBus.posts.length === 1,
+  JSON.stringify(channelBus.posts)
 );
 
 console.log('\n======================================================================');

@@ -47,6 +47,34 @@ import {
 /** Evento nativo con el que la bandeja anuncia cambios de estado (`EARS 06.1`). */
 export const OFFLINE_QUEUE_EVENT = 'vendguard:offline-queue-change';
 
+/**
+ * Cerrojo entre pestañas del mismo dispositivo.
+ *
+ * Dos pestañas abiertas sobre el mismo técnico comparten la misma
+ * `mutation_outbox`: sin coordinación, ambas leen el mismo `PENDING`, ambas lo
+ * envían y la segunda pisa el estado de la primera (`RF-04.1`, `EARS 06.1`).
+ * El nombre es único por origen y dispositivo, de modo que el cerrojo se toma
+ * exactamente una vez por operación de bandeja.
+ */
+const SYNC_LOCK_NAME = 'vendguard-offline-sync';
+
+/** Canal con el que las pestañas se avisan de que la bandeja cambió. */
+const SYNC_CHANNEL_NAME = 'vendguard-offline-sync-channel';
+
+/**
+ * Anuncios que otra pestaña necesita conocer para no mostrar una bandeja vieja.
+ *
+ * `syncing` queda fuera a propósito: es ruido por elemento y no cambia el total.
+ */
+const BROADCAST_ANNOUNCEMENTS = Object.freeze([
+  'enqueued',
+  'queue_recovered',
+  'queue_processed',
+  'conflict',
+  'conflict_dumped',
+  'account_dump_completed'
+]);
+
 /** Operaciones de inicio que abren una cadena temporal en la parada (`QA 4`). */
 const CHAIN_START_OPERATIONS = Object.freeze([
   'START_INCIDENT',
@@ -153,13 +181,59 @@ export function buildOfflineWorkSummary(item) {
 export class OfflineSyncManager {
   /**
    * @param {{storage?: OfflineStorage, client?: Object, now?: function(): number,
-   *   dispatch?: function(Object): void}} [options={}]
+   *   dispatch?: function(Object): void, locks?: Object|null,
+   *   channel?: Object|null}} [options={}]
    */
   constructor(options = {}) {
     this.storage = options.storage ?? new OfflineStorage();
     this.client = options.client ?? api;
     this.now = typeof options.now === 'function' ? options.now : () => Date.now();
     this.dispatch = typeof options.dispatch === 'function' ? options.dispatch : null;
+    this.locks = options.locks !== undefined ? options.locks : defaultLocks();
+    this.channel = options.channel !== undefined ? options.channel : openSyncChannel();
+    this.syncTail = Promise.resolve();
+
+    if (this.channel !== null && this.channel !== undefined
+      && typeof this.channel.addEventListener === 'function') {
+      this.channel.addEventListener('message', (event) => this.handlePeerAnnouncement(event));
+    }
+  }
+
+  /**
+   * Ejecuta una operación de bandeja en exclusiva en todo el dispositivo.
+   *
+   * Se apilan dos cerrojos porque cubren fallos distintos: el mutex local
+   * serializa las llamadas de esta pestaña (aunque el navegador no soporte Web
+   * Locks) y el `navigator.locks` impide que otra pestaña del mismo origen toque
+   * la cola a la vez. Las operaciones anidadas no vuelven a pedir el cerrojo.
+   *
+   * @template T
+   * @param {function(): Promise<T>} task
+   * @returns {Promise<T>}
+   */
+  async withSyncLock(task) {
+    const previous = this.syncTail ?? Promise.resolve();
+    const run = previous.then(() => this.withWebLock(task), () => this.withWebLock(task));
+    this.syncTail = run.then(() => undefined, () => undefined);
+
+    return run;
+  }
+
+  /** Toma el cerrojo del navegador cuando existe; si no, ejecuta sin él. */
+  async withWebLock(task) {
+    const locks = this.locks;
+
+    if (locks === null || locks === undefined || typeof locks.request !== 'function') {
+      return task();
+    }
+
+    try {
+      return await locks.request(SYNC_LOCK_NAME, { mode: 'exclusive' }, () => task());
+    } catch (error) {
+      // Un cerrojo que el navegador rechaza no puede impedir trabajar sin red:
+      // el mutex local sigue serializando esta pestaña.
+      return task();
+    }
   }
 
   /**
@@ -198,6 +272,16 @@ export class OfflineSyncManager {
    * @throws {OfflineQueueError}
    */
   async enqueue(request) {
+    return this.withSyncLock(() => this.enqueueLocked(request));
+  }
+
+  /**
+   * Cuerpo del encolado, ya bajo el cerrojo del dispositivo.
+   *
+   * @param {Object} request
+   * @returns {Promise<Object>}
+   */
+  async enqueueLocked(request) {
     const technicianId = Number(request?.technicianId ?? 0);
     const operationType = String(request?.operationType ?? '');
     const stopType = String(request?.stopType ?? '');
@@ -288,6 +372,18 @@ export class OfflineSyncManager {
   async processOutboxQueue(technicianId) {
     const id = Number(technicianId);
 
+    return this.withSyncLock(() => this.drainOutboxQueue(id));
+  }
+
+  /**
+   * Vacía la bandeja ya bajo el cerrojo del dispositivo.
+   *
+   * @param {number} technicianId
+   * @returns {Promise<{applied: number, conflicts: number, pending: number, interrupted: (string|null)}>}
+   */
+  async drainOutboxQueue(technicianId) {
+    const id = Number(technicianId);
+
     // Antes de vaciar nada se rescatan los envíos que quedaron huérfanos: una
     // pestaña que murió a mitad de un envío deja el elemento en `SYNCING`, y ese
     // estado no vuelve a `PENDING` por sí solo. Sin este rescate el trabajo no
@@ -349,6 +445,16 @@ export class OfflineSyncManager {
    * @returns {Promise<Object>} Respuesta del servidor
    */
   async dumpConflict(clientMutationId) {
+    return this.withSyncLock(() => this.dumpConflictLocked(clientMutationId));
+  }
+
+  /**
+   * Cuerpo del volcado, ya bajo el cerrojo del dispositivo.
+   *
+   * @param {string} clientMutationId
+   * @returns {Promise<Object>}
+   */
+  async dumpConflictLocked(clientMutationId) {
     const item = await this.storage.getMutation(clientMutationId);
     if (item === null) {
       throw new OfflineQueueError(
@@ -587,6 +693,8 @@ export class OfflineSyncManager {
 
   /** Publica el cambio de la bandeja a quien esté escuchando. */
   announce(detail) {
+    this.broadcastToPeers(detail);
+
     if (this.dispatch !== null) {
       this.dispatch(detail);
       return;
@@ -598,6 +706,52 @@ export class OfflineSyncManager {
     }
 
     globalThis.dispatchEvent(new globalThis.CustomEvent(OFFLINE_QUEUE_EVENT, { detail }));
+  }
+
+  /**
+   * Avisa a las demás pestañas de que la bandeja cambió.
+   *
+   * El canal nunca devuelve el mensaje a quien lo emite, así que no hay eco; y
+   * lo que llega de otra pestaña se anuncia con `remote: true`, que a su vez no
+   * se reemite. Una pestaña que sólo escucha jamás escribe la cola.
+   */
+  broadcastToPeers(detail) {
+    const type = detail?.type;
+
+    if (!BROADCAST_ANNOUNCEMENTS.includes(type)) {
+      return;
+    }
+
+    if (this.channel === null || this.channel === undefined
+      || typeof this.channel.postMessage !== 'function') {
+      return;
+    }
+
+    try {
+      this.channel.postMessage({
+        type: 'queue_changed',
+        cause: type,
+        technician_id: Number(detail?.technicianId ?? 0)
+      });
+    } catch (error) {
+      // Un canal cerrado no puede tumbar la operación que ya está en curso.
+    }
+  }
+
+  /** Traduce el aviso de otra pestaña en una relectura del estado local. */
+  handlePeerAnnouncement(event) {
+    const message = event?.data ?? null;
+
+    if (message === null || message?.type !== 'queue_changed') {
+      return;
+    }
+
+    this.announce({
+      type: 'queue_changed',
+      cause: message.cause ?? null,
+      technicianId: Number(message.technician_id ?? 0),
+      remote: true
+    });
   }
 }
 
@@ -616,6 +770,30 @@ function textOrNull(value) {
  */
 function isPermanentClientFailure(status) {
   return status >= 400 && status < 500 && !RETRYABLE_CLIENT_STATUSES.includes(status);
+}
+
+/** Web Locks del navegador, o `null` cuando el entorno no los ofrece. */
+function defaultLocks() {
+  if (typeof globalThis === 'undefined') {
+    return null;
+  }
+
+  const locks = globalThis.navigator?.locks;
+
+  return locks !== undefined && locks !== null && typeof locks.request === 'function' ? locks : null;
+}
+
+/** Abre el canal de aviso entre pestañas, o devuelve `null` sin soporte. */
+function openSyncChannel() {
+  if (typeof globalThis === 'undefined' || typeof globalThis.BroadcastChannel !== 'function') {
+    return null;
+  }
+
+  try {
+    return new globalThis.BroadcastChannel(SYNC_CHANNEL_NAME);
+  } catch (error) {
+    return null;
+  }
 }
 
 /** Constancia textual de la firma recogida in situ, o de su ausencia declarada. */
