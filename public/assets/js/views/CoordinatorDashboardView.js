@@ -50,6 +50,7 @@ import { CoordinatorPreventiveSettingsModal } from '../components/CoordinatorPre
 import { CoordinatorSanitarySweepPanel } from '../components/CoordinatorSanitarySweepPanel.js';
 import { CoordinatorSparePartsTab } from '../components/CoordinatorSparePartsTab.js';
 import { CoordinatorSparePartsAnalyticsTab } from '../components/CoordinatorSparePartsAnalyticsTab.js';
+import { CoordinatorRootCauseParetoTab } from '../components/CoordinatorRootCauseParetoTab.js';
 import { CoordinatorVanStockTab } from '../components/CoordinatorVanStockTab.js';
 import { CoordinatorAbsencesTab } from '../components/CoordinatorAbsencesTab.js';
 import { CoordinatorTerritorialMapTab } from '../components/CoordinatorTerritorialMapTab.js';
@@ -85,6 +86,7 @@ export const CoordinatorDashboardView = {
     CoordinatorSanitarySweepPanel,
     CoordinatorSparePartsTab,
     CoordinatorSparePartsAnalyticsTab,
+    CoordinatorRootCauseParetoTab,
     CoordinatorVanStockTab,
     CoordinatorAbsencesTab,
     CoordinatorTerritorialMapTab,
@@ -98,7 +100,7 @@ export const CoordinatorDashboardView = {
   data() {
     return {
       // Navigation Tabs (RF-FLEET-01, RF-03, RF-05, RF-PREV-02, RF-REP-01, RF-REP-09)
-      activeTab: 'incidents', // 'incidents' | 'fleet' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'stock-furgonetas' | 'refunds' | 'admin' | 'metrics'
+      activeTab: 'incidents', // 'incidents' | 'fleet' | 'mapa-territorial' | 'preventive' | 'repuestos' | 'analitica-repuestos' | 'pareto-causas' | 'stock-furgonetas' | 'refunds' | 'admin' | 'metrics'
       activeAdminSubTab: 'locations', // 'locations' | 'zones' | 'machines' | 'users'
       activePreventiveSubTab: 'dashboard', // 'dashboard' | 'orders' | 'sweep'
       showPreventiveSettingsModal: false,
@@ -1932,6 +1934,16 @@ export const CoordinatorDashboardView = {
           <button
             type="button"
             class="vg-btn"
+            :class="activeTab === 'pareto-causas' ? 'vg-btn-primary' : 'vg-btn-secondary'"
+            @click="activeTab = 'pareto-causas'"
+            data-testid="tab-pareto-causas"
+          >
+            🔍 Pareto Causas Raíz
+          </button>
+
+          <button
+            type="button"
+            class="vg-btn"
             :class="activeTab === 'stock-furgonetas' ? 'vg-btn-primary' : 'vg-btn-secondary'"
             @click="activeTab = 'stock-furgonetas'"
             data-testid="tab-stock-furgonetas"
@@ -2620,6 +2632,11 @@ export const CoordinatorDashboardView = {
       <CoordinatorSparePartsAnalyticsTab
         v-else-if="activeTab === 'analitica-repuestos'"
         @open-catalog="activeTab = 'repuestos'"
+      />
+
+      <!-- CONTENIDO PESTAÑA: PARETO 80/20 DE CAUSAS RAÍZ Y GARANTÍAS (Módulo 25, RF-05, D5) -->
+      <CoordinatorRootCauseParetoTab
+        v-else-if="activeTab === 'pareto-causas'"
       />
 
       <!-- CONTENIDO PESTAÑA: STOCK DE LAS FURGONETAS (Módulo 18, RF-03, RF-04.2) -->

@@ -24,6 +24,7 @@ import { MetricBreakdownTable } from '../components/MetricBreakdownTable.js';
 import { AuditLogViewer } from '../components/AuditLogViewer.js';
 import { ExecutiveReportModal } from '../components/ExecutiveReportModal.js';
 import { CoordinatorWorkHoursTab } from '../components/CoordinatorWorkHoursTab.js';
+import { CoordinatorRootCauseParetoTab } from '../components/CoordinatorRootCauseParetoTab.js';
 
 export const CoordinatorMetricsView = {
   name: 'CoordinatorMetricsView',
@@ -32,11 +33,12 @@ export const CoordinatorMetricsView = {
     MetricBreakdownTable,
     AuditLogViewer,
     ExecutiveReportModal,
-    CoordinatorWorkHoursTab
+    CoordinatorWorkHoursTab,
+    CoordinatorRootCauseParetoTab
   },
   data() {
     return {
-      activeSubTab: 'kpis', // 'kpis' | 'breakdown' | 'audit' | 'csat' | 'work-hours'
+      activeSubTab: 'kpis', // 'kpis' | 'breakdown' | 'cause-pareto' | 'audit' | 'csat' | 'work-hours'
       selectedPeriod: 'last_30_days', // 'last_7_days' | 'last_30_days' | 'current_month' | 'last_month' | 'custom'
       customFrom: '',
       customTo: '',
@@ -288,6 +290,17 @@ export const CoordinatorMetricsView = {
           🗂️ Desglose Multidimensional
         </button>
 
+        <!-- Módulo 25: Pareto 80/20 de causas raíz y garantías (RF-05, D5) -->
+        <button
+          type="button"
+          class="vg-btn vg-btn-tab"
+          :class="{ 'vg-btn-tab-active': activeSubTab === 'cause-pareto' }"
+          @click="activeSubTab = 'cause-pareto'"
+          data-testid="tab-cause-pareto"
+        >
+          🔍 Pareto Causas Raíz
+        </button>
+
         <button
           type="button"
           class="vg-btn vg-btn-tab"
@@ -332,12 +345,17 @@ export const CoordinatorMetricsView = {
         <MetricBreakdownTable :breakdown="breakdown" :is-loading="isLoading" />
       </div>
 
-      <!-- SUBPESTAÑA 3: Registro Inmutable de Auditoría -->
+      <!-- SUBPESTAÑA 3: Pareto 80/20 de causas raíz (Módulo 25, RF-05, D5) -->
+      <div v-else-if="activeSubTab === 'cause-pareto'" data-testid="cause-pareto-block">
+        <CoordinatorRootCauseParetoTab />
+      </div>
+
+      <!-- SUBPESTAÑA 4: Registro Inmutable de Auditoría -->
       <div v-else-if="activeSubTab === 'audit'">
         <AuditLogViewer />
       </div>
 
-      <!-- SUBPESTAÑA 4: Satisfacción del Cliente (Módulo 20, RF-06.1–06.4) -->
+      <!-- SUBPESTAÑA 5: Satisfacción del Cliente (Módulo 20, RF-06.1–06.4) -->
       <div v-else-if="activeSubTab === 'csat'" data-testid="csat-block">
         <div class="vg-card">
           <h3 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 18px; font-weight: 700; color: var(--color-ink); margin: 0 0 4px;">
@@ -454,7 +472,7 @@ export const CoordinatorMetricsView = {
         </div>
       </div>
 
-      <!-- SUBPESTAÑA 5: Registro de Jornada y Horas (Módulo 22, D5/RF-05) -->
+      <!-- SUBPESTAÑA 6: Registro de Jornada y Horas (Módulo 22, D5/RF-05) -->
       <div v-else-if="activeSubTab === 'work-hours'" data-testid="work-hours-block">
         <CoordinatorWorkHoursTab
           :period="selectedPeriod"

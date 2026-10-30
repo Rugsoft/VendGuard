@@ -263,7 +263,7 @@
        * Incorporar el mismo selector obligatorio de Causa Raíz y Solución Estandarizada cuando el Coordinador resuelva manualmente una avería desde el panel (`QA 3`).
   * **Hecho cuando:** `TechnicianRouteView.js` y `CoordinatorIncidentDetailModal.js` cargan sin errores y cumplen `DesignTokenDebtRatchetTest`.
 
-- [ ] **T-TAXONOMY-14 · Componentes `CoordinatorRootCauseParetoTab.js` y `CoordinatorRootCauseCatalogModal.js` e integración en Coordinación y `sw.js`**
+- [x] **T-TAXONOMY-14 · Componentes `CoordinatorRootCauseParetoTab.js` y `CoordinatorRootCauseCatalogModal.js` e integración en Coordinación y `sw.js`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-TAXONOMY-13`
   * **Ficheros a crear o modificar:**
