@@ -866,6 +866,49 @@ try {
         $preservedNote === false ? 'sin nota de preservación' : (string)$preservedNote
     );
 
+    // El cierre anterior también es visible para Coordinación y para el propio
+    // técnico responsable, sin exponer costes ni reintegros (EARS 04.1, C1).
+    $coordinatorReopenDetail = $call(
+        'GET',
+        '/api/coordinator/incidents/' . $incidentReopen . '/detail',
+        [],
+        $coordinatorToken
+    );
+    $coordinatorReopenPrevious = $data($coordinatorReopenDetail)['timeline']['previous_classifications'] ?? [];
+    $assert(
+        '3.11.b El detalle de Coordinación publica el cierre anterior preservado',
+        $coordinatorReopenDetail->getStatusCode() === 200
+            && count($coordinatorReopenPrevious) === 1
+            && ($coordinatorReopenPrevious[0]['root_cause']['code'] ?? '') === 'RC-TAX-B'
+            && ($coordinatorReopenPrevious[0]['root_cause']['name'] ?? '') === $bName
+            && ($coordinatorReopenPrevious[0]['root_cause']['category_label'] ?? '') === 'Temperatura / Pérdida de frío'
+            && ($coordinatorReopenPrevious[0]['standard_solution']['code'] ?? '') === 'SOL-TAX-B1'
+            && is_string($coordinatorReopenPrevious[0]['preserved_at'] ?? null),
+        json_encode($coordinatorReopenPrevious)
+    );
+
+    $technicianReopenDetail = $call(
+        'GET',
+        '/api/technician/incidents/' . $incidentReopen . '/detail',
+        [],
+        $technicianToken
+    );
+    $technicianReopenData = $data($technicianReopenDetail);
+    $technicianReopenPrevious = $technicianReopenData['previous_classifications'] ?? [];
+    $technicianReopenPayload = strtolower(json_encode($technicianReopenData) ?: '');
+    $assert(
+        '3.11.c El detalle del técnico publica la causa vigente C y el cierre anterior B',
+        $technicianReopenDetail->getStatusCode() === 200
+            && ($technicianReopenData['resolution']['root_cause']['code'] ?? '') === 'RC-TAX-C'
+            && ($technicianReopenData['resolution']['standard_solution']['code'] ?? '') === 'SOL-TAX-C1'
+            && count($technicianReopenPrevious) === 1
+            && ($technicianReopenPrevious[0]['root_cause']['code'] ?? '') === 'RC-TAX-B'
+            && ($technicianReopenPrevious[0]['standard_solution']['code'] ?? '') === 'SOL-TAX-B1'
+            && !str_contains($technicianReopenPayload, 'parts_cost')
+            && !str_contains($technicianReopenPayload, 'refund'),
+        json_encode($technicianReopenData)
+    );
+
     $incidentCClose = $call('POST', '/api/technician/incidents/' . $incidentCauseC . '/resolve', [
         'resolution_diagnosis' => 'Diagnóstico de conmutación de predeterminada en el catálogo.',
         'resolution_action' => 'Aplicación de la solución C2 y prueba funcional del canal.',

@@ -536,6 +536,128 @@ $assert(
 );
 
 // =====================================================================
+// GRUPO 8: Cierres previos preservados en la línea de tiempo (EARS 04.1, C1)
+// =====================================================================
+echo "\n--- Grupo 8: Cierres previos preservados en la línea de tiempo (EARS 04.1, C1) ---\n";
+
+$preservedSnapshot = [
+    'root_cause_code' => 'RC-PAY-001',
+    'root_cause_category' => 'PAYMENT_SYSTEM',
+    'root_cause_name' => 'Moneda doblada en el selector multimoneda',
+    'standard_solution_code' => 'SOL-PAY-001A',
+    'standard_solution_name' => 'Apertura de canal y limpieza óptica',
+];
+$structuredNote = 'Clasificación previa preservada antes de re-clasificar el expediente (Art. III.3, C1): '
+    . '[Causa Raíz: RC-PAY-001 - Moneda doblada en el selector multimoneda | Solución: SOL-PAY-001A - Apertura de canal y limpieza óptica] '
+    . '[TAXONOMY_SNAPSHOT]' . json_encode($preservedSnapshot, JSON_UNESCAPED_UNICODE);
+
+$classificationFixture = $fixture;
+$classificationFixture['history'][] = [
+    'id' => 90,
+    'user_id' => null,
+    'from_status' => 'IN_PROGRESS',
+    'to_status' => 'RESOLVED',
+    'action_note' => $structuredNote,
+    'created_at' => '2026-10-02 11:35:00',
+    'user_name' => null,
+    'user_role' => null,
+];
+$classificationRepo = new CoordinatorIncidentDetailServiceStubRepo();
+$classificationRepo->fixture = $classificationFixture;
+$classificationBlocks = (new CoordinatorIncidentDetailService($classificationRepo))->buildDetail(142, $at1115)->toArray();
+$episodes = $classificationBlocks['timeline']['previous_classifications'] ?? [];
+
+$assert(
+    '8.1 La línea de tiempo publica el cierre anterior preservado con su causa y solución',
+    count($episodes) === 1
+        && ($episodes[0]['root_cause']['code'] ?? '') === 'RC-PAY-001'
+        && ($episodes[0]['root_cause']['category'] ?? '') === 'PAYMENT_SYSTEM'
+        && ($episodes[0]['root_cause']['category_label'] ?? '') === 'Fallo en sistema de pago / Monedero / TPV'
+        && ($episodes[0]['root_cause']['name'] ?? '') === 'Moneda doblada en el selector multimoneda'
+        && ($episodes[0]['standard_solution']['code'] ?? '') === 'SOL-PAY-001A'
+        && ($episodes[0]['standard_solution']['name'] ?? '') === 'Apertura de canal y limpieza óptica'
+        && ($episodes[0]['preserved_at'] ?? '') === '2026-10-02 11:35:00'
+);
+
+$legacyFixture = $fixture;
+$legacyFixture['history'][] = [
+    'id' => 91,
+    'user_id' => null,
+    'from_status' => 'IN_PROGRESS',
+    'to_status' => 'RESOLVED',
+    'action_note' => 'Clasificación previa preservada antes de re-clasificar el expediente (Art. III.3, C1): '
+        . '[Causa Raíz: RC-PAY-001 - Moneda doblada | Solución: SOL-PAY-001A - Apertura óptica]',
+    'created_at' => '2026-10-02 11:36:00',
+    'user_name' => null,
+    'user_role' => null,
+];
+$legacyRepo = new CoordinatorIncidentDetailServiceStubRepo();
+$legacyRepo->fixture = $legacyFixture;
+$legacyEpisodes = (new CoordinatorIncidentDetailService($legacyRepo))->buildDetail(142, $at1115)->toArray()['timeline']['previous_classifications'] ?? [];
+$assert(
+    '8.2 La nota anterior al marcador se acepta como respaldo, sin inventar categoría',
+    count($legacyEpisodes) === 1
+        && ($legacyEpisodes[0]['root_cause']['code'] ?? '') === 'RC-PAY-001'
+        && ($legacyEpisodes[0]['root_cause']['category'] ?? null) === null
+        && ($legacyEpisodes[0]['root_cause']['category_label'] ?? null) === null
+);
+
+$malformedFixture = $fixture;
+$malformedFixture['history'][] = [
+    'id' => 92,
+    'user_id' => null,
+    'from_status' => 'IN_PROGRESS',
+    'to_status' => 'RESOLVED',
+    'action_note' => 'Clasificación previa preservada antes de re-clasificar el expediente. [TAXONOMY_SNAPSHOT]{roto}',
+    'created_at' => '2026-10-02 11:37:00',
+    'user_name' => null,
+    'user_role' => null,
+];
+$malformedRepo = new CoordinatorIncidentDetailServiceStubRepo();
+$malformedRepo->fixture = $malformedFixture;
+$malformedBlocks = (new CoordinatorIncidentDetailService($malformedRepo))->buildDetail(142, $at1115)->toArray();
+$assert(
+    '8.3 Una nota corrupta no rompe el detalle ni inventa un cierre previo',
+    !array_key_exists('previous_classifications', $malformedBlocks['timeline'])
+);
+
+$plainBlocks = (new CoordinatorIncidentDetailService($repo))->buildDetail(142, $at1115)->toArray();
+$assert(
+    '8.4 Una avería sin reapertura conserva el contrato anterior, sin clave vacía',
+    !array_key_exists('previous_classifications', $plainBlocks['timeline'])
+);
+
+// Dos preservaciones: orden cronológico de la auditoría.
+$twoEpisodesFixture = $classificationFixture;
+$secondSnapshot = array_merge($preservedSnapshot, [
+    'root_cause_code' => 'RC-ELE-001',
+    'root_cause_category' => 'ELECTRICAL_OFF',
+    'root_cause_name' => 'Fallo de placa controladora',
+    'standard_solution_code' => 'SOL-ELE-001A',
+    'standard_solution_name' => 'Sustitución de placa y prueba de arranque',
+]);
+$twoEpisodesFixture['history'][] = [
+    'id' => 93,
+    'user_id' => null,
+    'from_status' => 'IN_PROGRESS',
+    'to_status' => 'RESOLVED',
+    'action_note' => 'Clasificación previa preservada antes de re-clasificar el expediente. [TAXONOMY_SNAPSHOT]' . json_encode($secondSnapshot, JSON_UNESCAPED_UNICODE),
+    'created_at' => '2026-10-02 11:40:00',
+    'user_name' => null,
+    'user_role' => null,
+];
+$twoEpisodesRepo = new CoordinatorIncidentDetailServiceStubRepo();
+$twoEpisodesRepo->fixture = $twoEpisodesFixture;
+$twoEpisodes = (new CoordinatorIncidentDetailService($twoEpisodesRepo))->buildDetail(142, $at1115)->toArray()['timeline']['previous_classifications'] ?? [];
+$assert(
+    '8.5 Varias preservaciones conservan el orden cronológico de la auditoría',
+    count($twoEpisodes) === 2
+        && ($twoEpisodes[0]['root_cause']['code'] ?? '') === 'RC-PAY-001'
+        && ($twoEpisodes[1]['root_cause']['code'] ?? '') === 'RC-ELE-001'
+        && ($twoEpisodes[1]['root_cause']['category_label'] ?? '') === 'Máquina apagada / Sin corriente'
+);
+
+// =====================================================================
 // RESUMEN DE EJECUCIÓN
 // =====================================================================
 echo "\n======================================================================\n";

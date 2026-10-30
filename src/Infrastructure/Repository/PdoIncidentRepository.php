@@ -38,6 +38,7 @@ use VendGuard\Core\Domain\Repository\TechnicianRouteBoardRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentPauseReasonCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\UrgencyLevel;
+use VendGuard\Core\Service\ResolutionTaxonomyHistoryParser;
 use VendGuard\Core\Service\OpportunisticLocationEligibilityPolicy;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Database\UniqueViolationDetector;
@@ -2799,6 +2800,22 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         $note = 'Clasificación previa preservada antes de re-clasificar el expediente (Art. III.3, C1): '
             . '[Causa Raíz: ' . $previous['root_cause_code_snapshot'] . ' - ' . $previous['root_cause_name_snapshot']
             . ' | Solución: ' . $previous['standard_solution_code_snapshot'] . ' - ' . $previous['standard_solution_name_snapshot'] . ']';
+
+        // Bloque máquina-legible para la línea de tiempo de Coordinación y el
+        // detalle del técnico (`EARS 04.1`). El texto humano anterior se conserva
+        // para la lectura de auditoría; si la codificación fallara, el evento
+        // sigue existiendo con la nota humana y el parser cae al respaldo.
+        $snapshot = [
+            'root_cause_code' => (string)$previous['root_cause_code_snapshot'],
+            'root_cause_category' => (string)$previous['root_cause_category_snapshot'],
+            'root_cause_name' => (string)$previous['root_cause_name_snapshot'],
+            'standard_solution_code' => (string)$previous['standard_solution_code_snapshot'],
+            'standard_solution_name' => (string)$previous['standard_solution_name_snapshot'],
+        ];
+        $encodedSnapshot = json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($encodedSnapshot !== false) {
+            $note .= ' ' . ResolutionTaxonomyHistoryParser::JSON_MARKER . $encodedSnapshot;
+        }
 
         $this->insertHistory(
             $incidentId,

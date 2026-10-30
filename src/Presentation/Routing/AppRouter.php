@@ -341,6 +341,10 @@ class AppRouter
         $router->post('/api/technician/opportunistic/incidents/{id}/assume', [TechnicianOpportunisticController::class, 'assumeIncident'], [$technicianAuth]);
         // Historial de averías de una máquina de la ruta (solo lectura, Art. V.4).
         $router->get('/api/technician/machines/{id}/history', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getMachineHistory'], [$technicianAuth]);
+        // Detalle read-only de una avería para el técnico (Módulo 25, EARS 04.1):
+        // resolución congelada y cierres previos de una reapertura, sin costes ni
+        // datos de sede (Art. V.4).
+        $router->get('/api/technician/incidents/{id}/detail', [\VendGuard\Presentation\Controller\TechnicianController::class, 'getIncidentDetail'], [$technicianAuth]);
         $router->get('/api/technician/my-metrics', [\VendGuard\Presentation\Controller\TechnicianMetricsController::class, 'getMyMetrics'], [$technicianAuth]);
         // Valoración CSAT propia (incremento 20.1, RF-20.1.1): endpoint separado para que
         // un fallo del agregado no vacíe el resto del panel.

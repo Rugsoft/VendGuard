@@ -433,6 +433,7 @@ La semilla dota al sistema de **16 Causas Raíz** y **34 Soluciones Estandarizad
   7. **Rastro histórico en `incident_history` y `audit_log` (`EARS 02.5`, `EARS 03.1`):**
      * En `incidents` se actualizan `root_cause_id`, `standard_solution_id` y las 5 columnas `*_snapshot`.
      * En `incident_history.action_note` del paso a `RESOLVED` se registra el prefijo estructurado `[Causa Raíz: {code} - {name} | Solución: {sol_code} - {sol_name}] ` seguido del diagnóstico y acción, de modo que si la avería se reabre en garantía (< 48 h, `C1`) y vuelve a resolverse con otra causa, el cierre anterior queda perpetuado de forma inmutable en la línea de tiempo del expediente.
+     * **Nota de preservación máquina-legible (`EARS 03.1`, `EARS 04.1`, `C1`):** cuando la re-clasificación sustituye una clasificación previa, el evento de preservación conserva el texto humano anterior y añade al final el marcador `[TAXONOMY_SNAPSHOT]` seguido de un objeto JSON con los cinco campos congelados: `root_cause_code`, `root_cause_category`, `root_cause_name`, `standard_solution_code` y `standard_solution_name`. El marcador permite reconstruir el cierre anterior sin depender de expresiones regulares sobre nombres libres. Las notas anteriores al marcador se admiten como respaldo, con `category = null`.
 * **Respuesta `200 OK` (campos añadidos al payload de resolución):**
   ```json
   {
@@ -484,9 +485,31 @@ La semilla dota al sistema de **16 Causas Raíz** y **34 Soluciones Estandarizad
        "total_parts_cost": 0.0
      }
      ```
-2. **Historial Técnico de Máquina (`GET /api/technician/machines/{id}/history`) y Mi Ruta (`GET /api/technician/my-route`):**
+2. **Historial Técnico de Máquina (`GET /api/technician/machines/{id}/history`):**
    * Cada ítem de avería incluye `root_cause` y `standard_solution` con su código, categoría y nombre congelado (`null` si no fue clasificada).
-3. **Prohibición Estricta de Fuga de Datos (`EARS 04.3`, Art. V.4):**
+   * El bloque `timeline` del detalle de Coordinación publica, **sólo cuando existen cierres anteriores**, la lista cronológica `previous_classifications`:
+     ```json
+     "previous_classifications": [
+       {
+         "root_cause": {
+           "code": "RC-PAY-01",
+           "category": "PAYMENT_SYSTEM",
+           "category_label": "Sistema de Pago / Monedero",
+           "name": "Moneda doblada o cuerpo extraño en selector multimoneda"
+         },
+         "standard_solution": {
+           "code": "SOL-PAY-01A",
+           "name": "Apertura de canal, retirada de objeto y limpieza óptica"
+         },
+         "preserved_at": "2026-10-30 14:15:00"
+       }
+     ]
+     ```
+3. **Detalle read-only del técnico (`GET /api/technician/incidents/{id}/detail`):**
+   * Autorización: el técnico autenticado debe ser el responsable histórico del expediente o tener una avería activa de la misma máquina en su ruta; en caso contrario, `403 NOT_ASSIGNED_TO_TECHNICIAN`.
+   * Respuesta `200 OK`: resumen del ticket, bloque `machine`, `resolution` con `diagnosis`, `corrective_action`, `root_cause` y `standard_solution`, y `previous_classifications` con la misma forma del punto 2.
+   * **Nunca** publica costes de repuestos, importes de reintegro, datos de contacto de la sede ni el catálogo administrativo completo. Es la superficie con la que el técnico consulta el detalle de una incidencia resuelta o cerrada (`EARS 04.1`).
+4. **Prohibición Estricta de Fuga de Datos (`EARS 04.3`, Art. V.4):**
    * En `GET /api/locations/{site_code}/machines`, `GET /api/qr/{code}`, `POST /api/qr/{code}/report`, `GET /api/location/...` y en el documento `signed_document` de `GET /api/*/incidents/{id}/service-sheet` **jamás** se serializan `root_cause`, `standard_solution`, `root_cause_id`, `root_cause_code_snapshot`, etc.
 
 ---

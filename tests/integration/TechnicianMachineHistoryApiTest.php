@@ -298,6 +298,85 @@ foreach ($privateFragments as $fragment) {
 }
 $assert("4.1 El payload no contiene ningún dato privado de reintegros (Art. V.4)", $found === []);
 
+// =========================================================================
+// CASO 5: Detalle read-only del expediente (T-TAXONOMY-18, EARS 04.1)
+// =========================================================================
+echo "\n--- Caso 5: Detalle read-only del expediente (T-TAXONOMY-18) ---\n";
+
+$res = $router->dispatch(new Request(method: 'GET', path: "/api/technician/incidents/{$recentClosed->getId()}/detail"));
+$assert("5.1 Sin token => 401 UNAUTHORIZED",
+    $res->getStatusCode() === 401 && ($res->getDecodedBody()['error']['code'] ?? '') === 'UNAUTHORIZED');
+
+$res = $dispatch("/api/technician/incidents/{$recentClosed->getId()}/detail", $coordinatorToken);
+$assert("5.2 Coordinador en el detalle del técnico => 403 FORBIDDEN",
+    $res->getStatusCode() === 403 && ($res->getDecodedBody()['error']['code'] ?? '') === 'FORBIDDEN');
+
+$res = $dispatch('/api/technician/incidents/999999/detail', $tech2Token);
+$assert("5.3 Expediente inexistente => 404 INCIDENT_NOT_FOUND",
+    $res->getStatusCode() === 404 && ($res->getDecodedBody()['error']['code'] ?? '') === 'INCIDENT_NOT_FOUND');
+
+$res = $dispatch("/api/technician/incidents/{$recentClosed->getId()}/detail", $tech1Token);
+$assert("5.4 Técnico ajeno sin ruta ni histórico => 403 NOT_ASSIGNED_TO_TECHNICIAN",
+    $res->getStatusCode() === 403 && ($res->getDecodedBody()['error']['code'] ?? '') === 'NOT_ASSIGNED_TO_TECHNICIAN');
+
+$res = $dispatch("/api/technician/incidents/{$recentClosed->getId()}/detail", $tech2Token);
+$detailBody = $res->getDecodedBody();
+$detailData = $detailBody['data'] ?? [];
+$assert("5.5 El técnico con la máquina en ruta obtiene el detalle con su contrato",
+    $res->getStatusCode() === 200
+        && ((int)($detailData['incident']['id'] ?? 0)) === (int)$recentClosed->getId()
+        && ((int)($detailData['machine']['id'] ?? 0)) === $machineId
+        && array_key_exists('diagnosis', $detailData['resolution'] ?? [])
+        && array_key_exists('corrective_action', $detailData['resolution'] ?? [])
+        && is_array($detailData['previous_classifications'] ?? null));
+
+// El responsable histórico conserva acceso aunque el ticket ya esté reasignado.
+$incidentRepo->insertHistory(
+    (int)$oldClosed->getId(),
+    $coordinator->getId(),
+    null,
+    'ASSIGNED',
+    "Incidencia asignada al técnico ID {$tech1Id}."
+);
+$res = $dispatch("/api/technician/incidents/{$oldClosed->getId()}/detail", $tech1Token);
+$assert("5.6 El responsable histórico conserva acceso al detalle sin tener la ruta activa",
+    $res->getStatusCode() === 200
+        && ((int)(($res->getDecodedBody()['data']['incident']['id'] ?? 0))) === (int)$oldClosed->getId());
+
+// El parser reconstruye el cierre preservado en una reapertura (C1, EARS 04.1).
+$incidentRepo->insertHistory(
+    (int)$recentClosed->getId(),
+    $coordinator->getId(),
+    'REOPENED',
+    'IN_PROGRESS',
+    "Clasificación previa preservada. [Causa Raíz: RC-LEG-001 - Sensor óptico desalineado | Solución: SOL-LEG-001A - Recalibración óptica] [TAXONOMY_SNAPSHOT]{\"root_cause_code\":\"RC-LEG-001\",\"root_cause_category\":\"PRODUCT_JAM\",\"root_cause_name\":\"Sensor óptico desalineado\",\"standard_solution_code\":\"SOL-LEG-001A\",\"standard_solution_name\":\"Recalibración óptica\"}"
+);
+$res = $dispatch("/api/technician/incidents/{$recentClosed->getId()}/detail", $tech2Token);
+$detailData = $res->getDecodedBody()['data'] ?? [];
+$previous = $detailData['previous_classifications'] ?? [];
+$assert("5.7 El detalle publica los cierres anteriores preservados con su fecha",
+    $res->getStatusCode() === 200
+        && count($previous) === 1
+        && ($previous[0]['root_cause']['code'] ?? '') === 'RC-LEG-001'
+        && ($previous[0]['root_cause']['category_label'] ?? '') === 'Atasco de producto en espiral'
+        && ($previous[0]['standard_solution']['code'] ?? '') === 'SOL-LEG-001A'
+        && is_string($previous[0]['preserved_at'] ?? null));
+$assert("5.8 Una avería sin clasificar no publica causa ni solución inventadas",
+    array_key_exists('root_cause', $detailData['resolution'] ?? [])
+        && ($detailData['resolution']['root_cause'] ?? null) === null
+        && ($detailData['resolution']['standard_solution'] ?? null) === null);
+
+$detailSerialized = strtolower(json_encode($detailBody) ?: '');
+$privateDetailFragments = ['parts_cost', 'total_parts_cost', 'claimed_amount', 'iban', 'bizum_phone', 'claimant_contact', 'refund_status'];
+$foundPrivateDetail = [];
+foreach ($privateDetailFragments as $fragment) {
+    if (str_contains($detailSerialized, $fragment)) {
+        $foundPrivateDetail[] = $fragment;
+    }
+}
+$assert("5.9 El detalle del técnico no expone costes, reintegros ni datos de sede (Art. V.4)",
+    $foundPrivateDetail === []);
+
 // ---------------------------------------------------------------------
 // SUMMARY
 // ---------------------------------------------------------------------

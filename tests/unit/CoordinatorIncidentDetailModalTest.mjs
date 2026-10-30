@@ -562,6 +562,44 @@ assert('8.9 formatDateTime renders DD/MM/YYYY HH:MM without timezone drift',
   CoordinatorIncidentDetailModal.methods.formatDateTime.call(fixtureInstance, '2026-10-01 08:15:00') === '01/10/2026 08:15' &&
   CoordinatorIncidentDetailModal.methods.formatDateTime.call(fixtureInstance, null) === '');
 
+// Cierres previos preservados (EARS 04.1, C1): se pintan antes del cierre vigente.
+const previousFixture = createInstance({
+  detail: {
+    ...detailFixture,
+    timeline: {
+      ...detailFixture.timeline,
+      previous_classifications: [
+        {
+          root_cause: {
+            code: 'RC-ELE-001',
+            category: 'ELECTRICAL_OFF',
+            category_label: 'Máquina apagada / Sin corriente',
+            name: 'Fallo de placa controladora'
+          },
+          standard_solution: {
+            code: 'SOL-ELE-001A',
+            name: 'Sustitución de placa y prueba de arranque'
+          },
+          preserved_at: '2026-10-02 11:35:00'
+        }
+      ]
+    }
+  }
+});
+const previousMilestones = computed(previousFixture, 'timelineMilestones');
+const previousIndex = previousMilestones.findIndex((m) => m.key === 'previous-resolution-0');
+const resolvedIndex = previousMilestones.findIndex((m) => m.key === 'resolved');
+assert('8.10 El cierre anterior preservado aparece antes de la resolución vigente',
+  previousIndex >= 0 && resolvedIndex > previousIndex);
+assert('8.11 El cierre anterior publica causa, categoría, solución y fecha de preservación',
+  previousMilestones[previousIndex].detail.includes('[RC-ELE-001]')
+    && previousMilestones[previousIndex].detail.includes('Máquina apagada / Sin corriente')
+    && previousMilestones[previousIndex].detail.includes('[SOL-ELE-001A]')
+    && previousMilestones[previousIndex].at === '2026-10-02 11:35:00');
+assert('8.12 Sin cierres previos no se inventa ningún hito adicional',
+  computed(fixtureInstance, 'previousClassifications').length === 0
+    && fixtureMilestones.every((m) => !m.key.startsWith('previous-resolution-')));
+
 // ---------------------------------------------------------------------
 // GROUP 9: SLA monitor and integrated photo viewer (T-IDM-09)
 // ---------------------------------------------------------------------

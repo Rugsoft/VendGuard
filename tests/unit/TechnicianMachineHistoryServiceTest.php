@@ -185,7 +185,8 @@ $makeIncident = function (
     IncidentStatus $status,
     string $createdAt,
     ?string $resolvedAt = null,
-    ?string $closedAt = null
+    ?string $closedAt = null,
+    bool $classified = false
 ): Incident {
     return new Incident(
         id: $id,
@@ -202,7 +203,14 @@ $makeIncident = function (
         closedAt: $closedAt,
         machineCode: 'VM-012',
         machineModel: 'Necta Koro',
-        technicianName: 'Jordi Ruta'
+        technicianName: 'Jordi Ruta',
+        rootCauseId: $classified ? 5 : null,
+        standardSolutionId: $classified ? 9 : null,
+        rootCauseCodeSnapshot: $classified ? 'RC-PAY-001' : null,
+        rootCauseCategorySnapshot: $classified ? IncidentCategory::PAYMENT_SYSTEM : null,
+        rootCauseNameSnapshot: $classified ? 'Moneda doblada en el selector multimoneda' : null,
+        standardSolutionCodeSnapshot: $classified ? 'SOL-PAY-001A' : null,
+        standardSolutionNameSnapshot: $classified ? 'Apertura de canal y limpieza óptica' : null
     );
 };
 
@@ -217,8 +225,8 @@ $buildController = function (?Incident $activeIncident = null) use ($makeMachine
 
     // Historial de la máquina 12: reabierta (reciente), resuelta y cerrada (antigua) + descarte.
     $reopened = $makeIncident(3401, 12, IncidentStatus::REOPENED, '2026-10-05 08:00:00');
-    $resolved = $makeIncident(3300, 12, IncidentStatus::RESOLVED, '2026-09-28 10:00:00', '2026-09-28 12:30:00');
-    $closed   = $makeIncident(3200, 12, IncidentStatus::CLOSED, '2026-09-10 09:00:00', '2026-09-10 11:00:00', '2026-09-12 11:00:01');
+    $resolved = $makeIncident(3300, 12, IncidentStatus::RESOLVED, '2026-09-28 10:00:00', '2026-09-28 12:30:00', null, true);
+    $closed   = $makeIncident(3200, 12, IncidentStatus::CLOSED, '2026-09-10 09:00:00', '2026-09-10 11:00:00', '2026-09-12 11:00:01', true);
     $cancelled = $makeIncident(3100, 12, IncidentStatus::CANCELLED, '2026-09-01 09:00:00');
     $incidentRepo->byMachine = [$reopened, $resolved, $closed, $cancelled];
     $incidentRepo->reopenCounts = [3401 => 2, 3300 => 0, 3200 => 1];
@@ -327,6 +335,24 @@ $assert("4.8 Recuento de reaperturas por expediente (EARS H.2)",
 $assert("4.9 Fechas de resolución y cierre presentes cuando aplican (EARS H.2)",
     ($history[1]['resolved_at'] ?? '') === '2026-09-28 12:30:00'
         && ($history[2]['closed_at'] ?? '') === '2026-09-12 11:00:01');
+
+// Clasificación congelada (EARS 04.1, Art. III.3).
+$resolvedEntry = $history[1] ?? [];
+$assert("4.10 La avería resuelta publica la causa raíz congelada completa (EARS 04.1)",
+    ($resolvedEntry['root_cause']['id'] ?? 0) === 5
+        && ($resolvedEntry['root_cause']['code'] ?? '') === 'RC-PAY-001'
+        && ($resolvedEntry['root_cause']['category'] ?? '') === 'PAYMENT_SYSTEM'
+        && ($resolvedEntry['root_cause']['category_label'] ?? '') === IncidentCategory::PAYMENT_SYSTEM->label()
+        && ($resolvedEntry['root_cause']['name'] ?? '') === 'Moneda doblada en el selector multimoneda');
+$assert("4.11 La avería resuelta publica la solución estandarizada congelada (EARS 04.1)",
+    ($resolvedEntry['standard_solution']['id'] ?? 0) === 9
+        && ($resolvedEntry['standard_solution']['code'] ?? '') === 'SOL-PAY-001A'
+        && ($resolvedEntry['standard_solution']['name'] ?? '') === 'Apertura de canal y limpieza óptica');
+$assert("4.12 La avería reabierta sin clasificar publica null en ambos bloques (EARS 04.1)",
+    array_key_exists('root_cause', $first) && $first['root_cause'] === null
+        && array_key_exists('standard_solution', $first) && $first['standard_solution'] === null);
+$assert("4.13 La clasificación no altera los snapshots ante un renombrado del catálogo",
+    ($history[2]['root_cause']['name'] ?? '') === 'Moneda doblada en el selector multimoneda');
 
 // =========================================================================
 // CASO 5: Privacidad — cero datos privados en la respuesta (EARS H.5 / Art. V.4)

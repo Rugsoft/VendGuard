@@ -54,6 +54,26 @@ import {
   opportunisticOriginLabel
 } from '../utils/OpportunisticContext.js';
 
+/**
+ * Etiqueta común de una clasificación congelada (EARS 04.1).
+ * Vive fuera del componente para que los computed puedan usarla sin depender
+ * del binding de métodos de Vue (y las pruebas la ejerzan igual que la vista).
+ *
+ * @param {Object|null} cause
+ * @param {Object|null} solution
+ * @returns {string}
+ */
+function formatTaxonomyLabel(cause, solution) {
+  if (!cause || !solution || !cause.name || !solution.name) {
+    return '';
+  }
+
+  const causeLabel = `${cause.code ? `[${cause.code}] ` : ''}${cause.name}`.trim();
+  const solutionLabel = `${solution.code ? `[${solution.code}] ` : ''}${solution.name}`.trim();
+
+  return `${causeLabel}${cause.category_label ? ` (${cause.category_label})` : ''} → ${solutionLabel}`;
+}
+
 export const CoordinatorIncidentDetailModal = {
   name: 'CoordinatorIncidentDetailModal',
   components: {
@@ -346,12 +366,26 @@ export const CoordinatorIncidentDetailModal = {
         return '';
       }
 
-      const cause = classification.root_cause || {};
-      const solution = classification.standard_solution || {};
-      const causeLabel = `${cause.code ? `[${cause.code}] ` : ''}${cause.name || ''}`.trim();
-      const solutionLabel = `${solution.code ? `[${solution.code}] ` : ''}${solution.name || ''}`.trim();
+      return formatTaxonomyLabel(classification.root_cause, classification.standard_solution);
+    },
 
-      return `${causeLabel}${cause.category_label ? ` (${cause.category_label})` : ''} → ${solutionLabel}`;
+    /**
+     * Etiqueta común de una clasificación congelada (`EARS 04.1`).
+     * @param {Object|null} cause
+     * @param {Object|null} solution
+     * @returns {string}
+     */
+    taxonomyLabel(cause, solution) {
+      return formatTaxonomyLabel(cause, solution);
+    },
+
+    /**
+     * Cierres anteriores preservados en la auditoría (`C1`, `EARS 04.1`).
+     * @returns {Array<Object>}
+     */
+    previousClassifications() {
+      const list = this.timeline?.previous_classifications;
+      return Array.isArray(list) ? list : [];
     },
 
     /** Resumen textual de la clasificación para la línea temporal (`RF-04`). */
@@ -692,11 +726,20 @@ export const CoordinatorIncidentDetailModal = {
         return [];
       }
 
+      const previousMilestones = this.previousClassifications.map((episode, index) => ({
+        key: `previous-resolution-${index}`,
+        label: 'Clasificación anterior preservada',
+        at: episode.preserved_at || null,
+        done: true,
+        detail: formatTaxonomyLabel(episode.root_cause, episode.standard_solution)
+      }));
+
       const milestones = [
         { key: 'created', label: 'Aviso registrado', at: timeline.created_at || null, done: Boolean(timeline.created_at) },
         { key: 'assigned', label: 'Asignación técnica', at: timeline.assigned_at || null, done: Boolean(timeline.assigned_at) },
         { key: 'started', label: 'Intervención iniciada in situ', at: timeline.started_at || null, done: Boolean(timeline.started_at) },
         { key: 'paused', label: 'Pausa por repuestos', at: timeline.paused_at || null, done: Boolean(timeline.paused_at) },
+        ...previousMilestones,
         { key: 'resolved', label: 'Resolución técnica documentada', at: timeline.resolved_at || null, done: Boolean(timeline.resolved_at), detail: this.resolutionTimelineDetail }
       ].filter((milestone) => milestone.key !== 'paused' || milestone.done);
 

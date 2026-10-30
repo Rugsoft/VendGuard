@@ -1947,6 +1947,18 @@ export class ApiClient {
     },
 
     /**
+     * Retrieves the read-only detail of an incident the technician owns or that
+     * belongs to a machine in the technician's route (Módulo 25, EARS 04.1).
+     * Includes the frozen resolution and the previous classifications preserved
+     * across guarantee reopenings; never exposes costs or refund data (Art. V.4).
+     * @param {number|string} incidentId
+     * @returns {Promise<Object>}
+     */
+    getIncidentDetail: (incidentId) => {
+      return this.get(`/technician/incidents/${encodeURIComponent(incidentId)}/detail`);
+    },
+
+    /**
      * Retrieves privacy-safe refund claims for a route incident (T-REF-16, Art. V.4).
      * @param {number|string} incidentId
      * @returns {Promise<Object>}

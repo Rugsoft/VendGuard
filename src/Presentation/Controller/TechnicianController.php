@@ -65,6 +65,7 @@ use VendGuard\Core\Domain\Repository\VanStockRepositoryInterface;
 use VendGuard\Core\Domain\ValueObject\IncidentCategory;
 use VendGuard\Core\Domain\ValueObject\IncidentStatus;
 use VendGuard\Core\Domain\ValueObject\OfflineSyncMetadata;
+use VendGuard\Core\Service\ResolutionTaxonomyHistoryParser;
 use VendGuard\Core\Service\ResolutionTaxonomyValidator;
 use VendGuard\Core\Service\ResolutionValidator;
 use VendGuard\Infrastructure\Notification\NotificationOutboxEnqueuerFactory;
@@ -1039,6 +1040,7 @@ class TechnicianController
         $history = $this->incidentRepo->findAllByMachineId($machineId);
         $historyPayload = [];
         foreach ($history as $incident) {
+            $classification = $this->resolutionTaxonomyPayload($incident);
             $historyPayload[] = [
                 'id'              => $incident->getId(),
                 'ticket_code'     => $incident->getTicketCode(),
@@ -1051,6 +1053,11 @@ class TechnicianController
                 'resolved_at'     => $incident->getResolvedAt(),
                 'closed_at'       => $incident->getClosedAt(),
                 'reopen_count'    => $this->incidentRepo->countReopenEvents((int)$incident->getId()),
+                // Clasificación congelada al cierre (EARS 04.1, Art. III.3).
+                // Una avería histórica sin clasificar publica `null` en ambos
+                // bloques; nunca se rellena desde el catálogo vigente.
+                'root_cause'        => $classification['root_cause'] ?? null,
+                'standard_solution' => $classification['standard_solution'] ?? null,
             ];
         }
 
@@ -1062,6 +1069,181 @@ class TechnicianController
             ],
             'history' => $historyPayload,
         ], 200);
+    }
+
+    /**
+     * Clasificación congelada de un expediente para las superficies del técnico
+     * (EARS 04.1, Art. III.3).
+     *
+     * Se construye exclusivamente con los cinco snapshots de la avería: un
+     * renombrado posterior del catálogo no puede reescribir lo que se declaró al
+     * cerrar el expediente. Devuelve `null` cuando la avería no fue clasificada.
+     *
+     * @return array{
+     *   root_cause: array{id: int, code: string, category: string, category_label: string|null, name: string},
+     *   standard_solution: array{id: int, code: string, name: string}
+     * }|null
+     */
+    private function resolutionTaxonomyPayload(Incident $incident): ?array
+    {
+        $rootCauseId = $incident->getRootCauseId();
+        $standardSolutionId = $incident->getStandardSolutionId();
+        $rootCauseCode = $incident->getRootCauseCodeSnapshot();
+        $rootCauseCategory = $incident->getRootCauseCategorySnapshot();
+        $rootCauseName = $incident->getRootCauseNameSnapshot();
+        $solutionCode = $incident->getStandardSolutionCodeSnapshot();
+        $solutionName = $incident->getStandardSolutionNameSnapshot();
+
+        if ($rootCauseId === null || $standardSolutionId === null
+            || $rootCauseCode === null || $rootCauseCategory === null || $rootCauseName === null
+            || $solutionCode === null || $solutionName === null) {
+            return null;
+        }
+
+        return [
+            'root_cause' => [
+                'id' => $rootCauseId,
+                'code' => $rootCauseCode,
+                'category' => $rootCauseCategory->value,
+                'category_label' => $rootCauseCategory->label(),
+                'name' => $rootCauseName,
+            ],
+            'standard_solution' => [
+                'id' => $standardSolutionId,
+                'code' => $solutionCode,
+                'name' => $solutionName,
+            ],
+        ];
+    }
+
+    /**
+     * GET /api/technician/incidents/{id}/detail
+     *
+     * Detalle de solo lectura de un expediente para el técnico de campo
+     * (Módulo 25, `EARS 04.1`, contrato §3). Devuelve el resumen del ticket, la
+     * máquina, la resolución congelada y los cierres anteriores preservados de
+     * una reapertura en garantía (`C1`).
+     *
+     * Autorización: el técnico debe ser el responsable vigente del expediente o
+     * haberlo sido en alguna asignación anterior; si no, basta con tener en su
+     * ruta una avería activa de la misma máquina (la misma puerta que el
+     * historial de máquina). Nunca publica costes de repuestos, reintegros ni
+     * datos de contacto de la sede (Art. V.4).
+     */
+    public function getIncidentDetail(Request $request): Response
+    {
+        // 1. Identidad del técnico autenticado.
+        $technicianId = $request->getAttribute('user_id');
+        if ($technicianId === null || !is_numeric($technicianId)) {
+            return Response::error('UNAUTHORIZED', 'No se pudo identificar al técnico autenticado.', 401);
+        }
+        $techId = (int)$technicianId;
+
+        // 2. ID de incidencia de la ruta.
+        $rawIncidentId = $request->getRouteParam('id');
+        if ($rawIncidentId === null || !ctype_digit((string)$rawIncidentId)) {
+            return Response::error('INVALID_INCIDENT_ID', 'El ID de incidencia de la ruta no es válido.', 400);
+        }
+        $incidentId = (int)$rawIncidentId;
+
+        // 3. El expediente debe existir (404 si no).
+        $incident = $this->incidentRepo->findById($incidentId);
+        if ($incident === null) {
+            return Response::error('INCIDENT_NOT_FOUND', "No se encontró ninguna incidencia con ID {$incidentId}.", 404);
+        }
+
+        // 4. Autorización. El historial se lee una sola vez y sirve tanto para
+        //    acreditar la responsabilidad histórica como para reconstruir los
+        //    cierres previos (EARS 04.1, C1).
+        $historyRows = array_map(
+            static fn ($row): array => [
+                'action_note' => $row->getActionNote(),
+                'created_at' => $row->getCreatedAt(),
+            ],
+            $this->incidentRepo->getHistory($incidentId)
+        );
+
+        $isResponsible = $incident->getAssignedTechnicianId() === $techId
+            || $this->wasHistoricallyResponsible($historyRows, $techId);
+
+        if (!$isResponsible) {
+            $activeIncident = $this->incidentRepo->findActiveByMachineId($incident->getMachineId());
+            $isResponsible = $activeIncident !== null
+                && $activeIncident->getAssignedTechnicianId() === $techId;
+        }
+
+        if (!$isResponsible) {
+            return Response::error(
+                'NOT_ASSIGNED_TO_TECHNICIAN',
+                'Solo puedes consultar el detalle de tus expedientes o de máquinas con una avería activa asignada a tu ruta.',
+                403
+            );
+        }
+
+        $classification = $this->resolutionTaxonomyPayload($incident);
+        $previousClassifications = (new ResolutionTaxonomyHistoryParser())
+            ->extractPreviousClassifications($historyRows);
+
+        return Response::json([
+            'incident' => [
+                'id'            => $incident->getId(),
+                'ticket_code'   => $incident->getTicketCode(),
+                'status'        => $incident->getStatus()->value,
+                'urgency'       => $incident->getUrgency()->value,
+                'category'      => $incident->getCategory()->value,
+                'description'   => $incident->getDescription(),
+                'technician_name' => $incident->getTechnicianName(),
+                'created_at'    => $incident->getCreatedAt(),
+                'resolved_at'   => $incident->getResolvedAt(),
+                'closed_at'     => $incident->getClosedAt(),
+                'reopen_count'  => $this->incidentRepo->countReopenEvents($incidentId),
+            ],
+            'machine' => [
+                'id'    => $incident->getMachineId(),
+                'code'  => $incident->getMachineCode(),
+                'model' => $incident->getMachineModel(),
+            ],
+            'resolution' => [
+                'diagnosis'         => $incident->getResolutionDiagnosis(),
+                'corrective_action' => $incident->getResolutionAction(),
+                'root_cause'        => $classification['root_cause'] ?? null,
+                'standard_solution' => $classification['standard_solution'] ?? null,
+            ],
+            'previous_classifications' => $previousClassifications,
+        ], 200);
+    }
+
+    /**
+     * ¿El técnico fue responsable del expediente en alguna asignación anterior?
+     *
+     * La asignación y la reasignación escriben su rastro en la nota inmutable de
+     * `incident_history` con el formato del repositorio («Incidencia asignada al
+     * técnico ID N.» / «Reasignación técnica: del técnico ID N al técnico ID M.»).
+     * Se acepta cualquier nota de asignación que nombre al técnico, en la posición
+     * de origen o de destino: en ambos casos fue responsable en algún momento.
+     *
+     * @param list<array{action_note: string|null, created_at: string|null}> $historyRows
+     */
+    private function wasHistoricallyResponsible(array $historyRows, int $technicianId): bool
+    {
+        foreach ($historyRows as $row) {
+            $note = (string)($row['action_note'] ?? '');
+            if (!str_contains($note, 'Incidencia asignada') && !str_contains($note, 'Reasignación técnica')) {
+                continue;
+            }
+
+            if (preg_match_all('/técnico ID (\d+)/u', $note, $matches) === false) {
+                continue;
+            }
+
+            foreach ($matches[1] as $candidate) {
+                if ((int)$candidate === $technicianId) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
