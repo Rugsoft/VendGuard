@@ -284,7 +284,7 @@
     3. Integrar la pestaña/acceso en `CoordinatorDashboardView.js` y `CoordinatorMetricsView.js`, añadir estilos con tokens CSS (`var(--color-*)`, bordes `4px`/`8px`) en `public/assets/css/styles.css` y actualizar `public/sw.js` (`CACHE_NAME = 'vendguard-app-shell-v3'` e inclusión de `/assets/js/vendor/chart.umd.min.js`, `/assets/js/components/CoordinatorRootCauseParetoTab.js` y `/assets/js/components/CoordinatorRootCauseCatalogModal.js` en `APP_SHELL_ASSETS`).
   * **Hecho cuando:** `php tests/unit/DesignTokenDebtRatchetTest.php` pasa en verde y `public/sw.js` enumera todos los nuevos activos del App Shell.
 
-- [ ] **T-TAXONOMY-15 · Suite unitaria ESM `RootCauseTaxonomyFrontendAndPwaTest.mjs`**
+- [x] **T-TAXONOMY-15 · Suite unitaria ESM `RootCauseTaxonomyFrontendAndPwaTest.mjs`**
   * **Tiempo estimado:** 20 min
   * **Dependencias previas:** `T-TAXONOMY-14`
   * **Ficheros a crear o modificar:**
