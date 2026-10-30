@@ -209,7 +209,7 @@
     5. Blindar `LocationPortalController` (Art. V.4, `D4`, `QA 5`) añadiendo `root_cause_id`, `standard_solution_id`, `root_cause_code_snapshot`, `root_cause_category_snapshot`, `root_cause_name_snapshot`, `standard_solution_code_snapshot`, `standard_solution_name_snapshot` y `root_cause_classification` a la lista de claves internas excluidas para `LOCATION_RESPONSIBLE`, y registrar todas las nuevas rutas en `AppRouter.php`.
   * **Hecho cuando:** `php -l src/Presentation/Controller/CoordinatorRootCauseController.php && php -l src/Presentation/Controller/CoordinatorMetricsController.php && php -l src/Presentation/Controller/TechnicianController.php && php -l src/Presentation/Controller/CoordinatorController.php && php -l src/Presentation/Routing/AppRouter.php` no reporta errores de sintaxis.
 
-- [ ] **T-TAXONOMY-11 · Suite de integración `RootCauseTaxonomyIntegrationTest`**
+- [x] **T-TAXONOMY-11 · Suite de integración `RootCauseTaxonomyIntegrationTest`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-TAXONOMY-10`
   * **Ficheros a crear o modificar:**
