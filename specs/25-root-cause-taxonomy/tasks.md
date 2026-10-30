@@ -116,7 +116,7 @@
     2. Ampliar `PdoIncidentRepository` para hidratar y persistir las 7 columnas de taxonomía en `incidents` y, cuando una avería reabierta en garantía (`< 48h`, `C1`) recibe una nueva clasificación en su segundo cierre, registrar la clasificación del episodio anterior en el historial/comentario de trazabilidad antes de actualizar los campos vigentes.
   * **Hecho cuando:** `php -l src/Infrastructure/Repository/PdoRootCauseRepository.php && php -l src/Infrastructure/Repository/PdoIncidentRepository.php` no reporta errores de sintaxis.
 
-- [ ] **T-TAXONOMY-06 · Implementación de `PdoRootCauseParetoAnalyticsRepository`**
+- [x] **T-TAXONOMY-06 · Implementación de `PdoRootCauseParetoAnalyticsRepository`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-TAXONOMY-05`
   * **Ficheros a crear o modificar:**
