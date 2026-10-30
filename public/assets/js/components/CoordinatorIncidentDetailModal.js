@@ -138,7 +138,24 @@ export const CoordinatorIncidentDetailModal = {
       inactivityErrorMessage: '',
       /** Reanudación de la pausa contractual desde la ficha (RF-06.2). */
       isSubmittingResume: false,
-      pauseActionErrorMessage: ''
+      pauseActionErrorMessage: '',
+      /**
+       * Resolución administrativa manual desde Coordinación (Módulo 25, QA 3).
+       * La clasificación es obligatoria y se elige con el mismo patrón que en la
+       * ruta: causas de la categoría del aviso más `OTHER`, conmutador de catálogo
+       * completo y solución predeterminada preseleccionada en un toque.
+       */
+      isResolvePanelOpen: false,
+      resolveDiagnosis: '',
+      resolveAction: '',
+      rootCauseCatalog: [],
+      rootCauseCatalogError: '',
+      isLoadingRootCauseCatalog: false,
+      showAllRootCauseCategories: false,
+      selectedRootCauseId: null,
+      selectedStandardSolutionId: null,
+      isSubmittingResolve: false,
+      resolveErrorMessage: ''
     };
   },
   computed: {
@@ -311,6 +328,146 @@ export const CoordinatorIncidentDetailModal = {
       return this.technicalIntervention?.resolution || null;
     },
 
+    /**
+     * Insignia congelada de la clasificación (`RF-04`, `EARS 04.1`).
+     *
+     * Se lee del bloque que publica el DTO con los cinco snapshots del cierre:
+     * un renombrado posterior del catálogo no reescribe la ficha histórica.
+     */
+    resolutionTaxonomyLabel() {
+      const classification = this.resolution?.root_cause_classification
+        || (this.resolution?.root_cause && this.resolution?.standard_solution
+          ? {
+              root_cause: this.resolution.root_cause,
+              standard_solution: this.resolution.standard_solution
+            }
+          : null);
+      if (!classification) {
+        return '';
+      }
+
+      const cause = classification.root_cause || {};
+      const solution = classification.standard_solution || {};
+      const causeLabel = `${cause.code ? `[${cause.code}] ` : ''}${cause.name || ''}`.trim();
+      const solutionLabel = `${solution.code ? `[${solution.code}] ` : ''}${solution.name || ''}`.trim();
+
+      return `${causeLabel}${cause.category_label ? ` (${cause.category_label})` : ''} → ${solutionLabel}`;
+    },
+
+    /** Resumen textual de la clasificación para la línea temporal (`RF-04`). */
+    resolutionTimelineDetail() {
+      return this.resolutionTaxonomyLabel || null;
+    },
+
+    /** El coordinador puede resolver mientras el expediente siga en curso y con técnico. */
+    canResolveManually() {
+      return this.incident?.status === 'IN_PROGRESS'
+        && Boolean(this.technician?.assigned)
+        && !this.resolution?.is_resolved;
+    },
+
+    /** Caracteres reales del diagnóstico administrativo (Art. V.1). */
+    resolveDiagnosisLength() {
+      return Array.from(String(this.resolveDiagnosis || '').trim()).length;
+    },
+
+    /** Caracteres reales de la acción administrativa (Art. V.1). */
+    resolveActionLength() {
+      return Array.from(String(this.resolveAction || '').trim()).length;
+    },
+
+    /** Causas visibles: las de la categoría del aviso más `OTHER`, o todas (`D3`). */
+    resolveVisibleRootCauses() {
+      const normalize = (value) => String(value ?? '').trim().toUpperCase();
+      const causes = (Array.isArray(this.rootCauseCatalog) ? this.rootCauseCatalog : [])
+        .filter((cause) => cause && cause.is_active !== false);
+      const preferredCategory = normalize(this.incident?.category);
+      const selectedId = Number(this.selectedRootCauseId ?? 0);
+      const selectedCause = causes.find((cause) => Number(cause?.id) === selectedId) ?? null;
+      const visible = this.showAllRootCauseCategories || preferredCategory === ''
+        ? [...causes]
+        : causes.filter((cause) => {
+            const category = normalize(cause?.category);
+            return category === preferredCategory || category === 'OTHER';
+          });
+
+      if (selectedCause !== null && !visible.some((cause) => Number(cause?.id) === selectedId)) {
+        visible.push(selectedCause);
+      }
+
+      return visible.sort((left, right) => {
+        const rank = (cause) => {
+          const category = normalize(cause?.category);
+          if (category === preferredCategory) return 0;
+          if (category === 'OTHER') return 1;
+          return 2;
+        };
+        const rankDiff = rank(left) - rank(right);
+        if (rankDiff !== 0) return rankDiff;
+
+        return String(left?.code ?? '').localeCompare(String(right?.code ?? ''));
+      });
+    },
+
+    /** Causa elegida en la resolución administrativa. */
+    resolveSelectedRootCause() {
+      const selectedId = Number(this.selectedRootCauseId ?? 0);
+
+      return (Array.isArray(this.rootCauseCatalog) ? this.rootCauseCatalog : [])
+        .find((cause) => Number(cause?.id) === selectedId) ?? null;
+    },
+
+    /** Soluciones activas de la causa elegida, con la predeterminada primero. */
+    resolveAvailableSolutions() {
+      const solutions = Array.isArray(this.resolveSelectedRootCause?.solutions)
+        ? this.resolveSelectedRootCause.solutions.filter((solution) => solution && solution.is_active !== false)
+        : [];
+
+      return solutions.sort((left, right) => {
+        const defaultDiff = Number(right?.is_default === true) - Number(left?.is_default === true);
+        if (defaultDiff !== 0) return defaultDiff;
+
+        return String(left?.code ?? '').localeCompare(String(right?.code ?? ''));
+      });
+    },
+
+    /** Solución elegida en la resolución administrativa. */
+    resolveSelectedSolution() {
+      const selectedId = Number(this.selectedStandardSolutionId ?? 0);
+
+      return this.resolveAvailableSolutions
+        .find((solution) => Number(solution?.id) === selectedId) ?? null;
+    },
+
+    /** Hay una pareja válida y activa de causa y solución. */
+    isResolveTaxonomyValid() {
+      return Boolean(this.resolveSelectedRootCause && this.resolveSelectedSolution);
+    },
+
+    /** Resumen de la pareja elegida, sin escribir nada en los textos libres. */
+    resolveTaxonomyPreview() {
+      if (!this.resolveSelectedRootCause || !this.resolveSelectedSolution) {
+        return '';
+      }
+
+      return `${this.formatRootCauseOption(this.resolveSelectedRootCause)} → ${this.formatStandardSolutionOption(this.resolveSelectedSolution)}`;
+    },
+
+    /** El botón de cierre manual exige los 20 caracteres y la clasificación. */
+    isResolveFormValid() {
+      return this.resolveDiagnosisLength >= 20
+        && this.resolveActionLength >= 20
+        && this.isResolveTaxonomyValid;
+    },
+
+    /** Hay un borrador de resolución administrativa sin enviar. */
+    hasUnsavedResolveDraft() {
+      return Boolean(this.isResolvePanelOpen)
+        && (String(this.resolveDiagnosis || '').trim() !== ''
+          || String(this.resolveAction || '').trim() !== ''
+          || this.selectedRootCauseId !== null);
+    },
+
     /** Descarte justificado del aviso (RF-04.4, Art. III.2). */
     cancellation() {
       return this.technicalIntervention?.cancellation || null;
@@ -452,7 +609,8 @@ export const CoordinatorIncidentDetailModal = {
       return this.hasUnsavedComment
         || this.hasUnsavedCancelReason
         || this.hasUnsavedAssignReason
-        || this.hasUnsavedInactivityReason;
+        || this.hasUnsavedInactivityReason
+        || this.hasUnsavedResolveDraft;
     },
 
     /** Acción directa de descarte habilitada mientras el ticket siga activo (RF-07.1). */
@@ -539,7 +697,7 @@ export const CoordinatorIncidentDetailModal = {
         { key: 'assigned', label: 'Asignación técnica', at: timeline.assigned_at || null, done: Boolean(timeline.assigned_at) },
         { key: 'started', label: 'Intervención iniciada in situ', at: timeline.started_at || null, done: Boolean(timeline.started_at) },
         { key: 'paused', label: 'Pausa por repuestos', at: timeline.paused_at || null, done: Boolean(timeline.paused_at) },
-        { key: 'resolved', label: 'Resolución técnica documentada', at: timeline.resolved_at || null, done: Boolean(timeline.resolved_at) }
+        { key: 'resolved', label: 'Resolución técnica documentada', at: timeline.resolved_at || null, done: Boolean(timeline.resolved_at), detail: this.resolutionTimelineDetail }
       ].filter((milestone) => milestone.key !== 'paused' || milestone.done);
 
       if (this.hasReopening) {
@@ -717,6 +875,156 @@ export const CoordinatorIncidentDetailModal = {
       this.inactivityReason = '';
       this.inactivityErrorMessage = '';
       this.pauseActionErrorMessage = '';
+      this.resetResolveDraft();
+    },
+
+    /** Limpia el borrador y el catálogo de la resolución administrativa. */
+    resetResolveDraft() {
+      this.isResolvePanelOpen = false;
+      this.resolveDiagnosis = '';
+      this.resolveAction = '';
+      this.rootCauseCatalog = [];
+      this.rootCauseCatalogError = '';
+      this.isLoadingRootCauseCatalog = false;
+      this.showAllRootCauseCategories = false;
+      this.selectedRootCauseId = null;
+      this.selectedStandardSolutionId = null;
+      this.isSubmittingResolve = false;
+      this.resolveErrorMessage = '';
+    },
+
+    /**
+     * Abre la resolución administrativa y carga el catálogo activo de Coordinación
+     * (Módulo 25, `QA 3`). Los demás paneles en línea se cierran para no apilar
+     * formularios sobre el mismo expediente (RNF-06).
+     */
+    async openResolvePanel() {
+      this.isAssignPanelOpen = false;
+      this.isCancelPanelOpen = false;
+      this.isInactivityPanelOpen = false;
+      this.isResolvePanelOpen = true;
+      this.resolveDiagnosis = '';
+      this.resolveAction = '';
+      this.rootCauseCatalog = [];
+      this.rootCauseCatalogError = '';
+      this.showAllRootCauseCategories = false;
+      this.selectedRootCauseId = null;
+      this.selectedStandardSolutionId = null;
+      this.resolveErrorMessage = '';
+
+      await this.loadRootCauseCatalog();
+    },
+
+    /** Cierra el panel conservando el guardián de formulario sucio del modal. */
+    closeResolvePanel() {
+      this.resetResolveDraft();
+    },
+
+    /** Descarga el catálogo completo y deja solo las entradas vigentes. */
+    async loadRootCauseCatalog() {
+      this.isLoadingRootCauseCatalog = true;
+      this.rootCauseCatalogError = '';
+
+      try {
+        const response = await api.getCoordinatorRootCauses({ only_active: true });
+        const items = Array.isArray(response?.items)
+          ? response.items
+          : (Array.isArray(response?.data?.items) ? response.data.items : []);
+
+        this.rootCauseCatalog = items.filter((cause) => cause && cause.is_active !== false);
+        if (this.rootCauseCatalog.length === 0) {
+          this.rootCauseCatalogError = 'No hay causas raíz activas en el catálogo maestro.';
+        }
+      } catch (error) {
+        this.rootCauseCatalog = [];
+        this.rootCauseCatalogError = error?.message
+          || 'No se pudo cargar el catálogo de causas raíz. Inténtelo de nuevo.';
+      } finally {
+        this.isLoadingRootCauseCatalog = false;
+      }
+    },
+
+    /** Una pulsación en la causa preselecciona su solución predeterminada (`EARS 02.4`). */
+    handleResolveRootCauseChange(event) {
+      const raw = event?.target?.value ?? '';
+      this.selectedRootCauseId = raw === '' ? null : Number(raw);
+      this.selectedStandardSolutionId = null;
+
+      const preferred = this.resolveAvailableSolutions[0] ?? null;
+      this.selectedStandardSolutionId = preferred ? Number(preferred.id) : null;
+    },
+
+    /** Cambia la solución entre las alternativas activas de la causa. */
+    handleResolveSolutionChange(event) {
+      const raw = event?.target?.value ?? '';
+      this.selectedStandardSolutionId = raw === '' ? null : Number(raw);
+    },
+
+    /** Texto de una causa en el selector administrativo. */
+    formatRootCauseOption(cause) {
+      const code = String(cause?.code ?? '');
+      const name = String(cause?.name ?? '');
+      const category = String(cause?.category_label ?? cause?.category ?? '');
+
+      return `${code ? `[${code}] ` : ''}${name}${category ? ` — ${category}` : ''}`;
+    },
+
+    /** Texto de una solución, marcando la predeterminada. */
+    formatStandardSolutionOption(solution) {
+      const code = String(solution?.code ?? '');
+      const name = String(solution?.name ?? '');
+      const suffix = solution?.is_default === true ? ' · Predeterminada' : '';
+
+      return `${code ? `[${code}] ` : ''}${name}${suffix}`;
+    },
+
+    /**
+     * Resolución administrativa manual (`QA 3`).
+     *
+     * La clasificación es una puerta independiente del Art. V.1: no rellena ni
+     * acorta los dos textos libres, que se validan por su cuenta antes de enviar.
+     */
+    async submitManualResolution() {
+      if (!this.canResolveManually || !this.isResolvePanelOpen) {
+        return;
+      }
+
+      const diagnosis = String(this.resolveDiagnosis || '').trim();
+      const action = String(this.resolveAction || '').trim();
+
+      if (this.resolveDiagnosisLength < 20 || this.resolveActionLength < 20) {
+        this.resolveErrorMessage = 'El diagnóstico y la acción correctiva deben contener al menos 20 caracteres descriptivos cada uno.';
+        return;
+      }
+
+      if (!this.isResolveTaxonomyValid) {
+        this.resolveErrorMessage = this.rootCauseCatalogError
+          || 'Seleccione una causa raíz y su solución estandarizada para cerrar la avería.';
+        return;
+      }
+
+      this.isSubmittingResolve = true;
+      this.resolveErrorMessage = '';
+
+      try {
+        await api.post(`/coordinator/incidents/${encodeURIComponent(this.actionableIncidentId)}/resolve`, {
+          resolution_diagnosis: diagnosis,
+          resolution_action: action,
+          root_cause_id: Number(this.selectedRootCauseId),
+          standard_solution_id: Number(this.selectedStandardSolutionId),
+          replaced_parts_declared: false,
+          require_taxonomy: true
+        });
+
+        this.resetResolveDraft();
+        await this.fetchDetail();
+        this.notifyIncidentUpdated({ reason: 'resolution' });
+      } catch (error) {
+        this.resolveErrorMessage = error?.message
+          || 'No se pudo consolidar la resolución administrativa de la avería.';
+      } finally {
+        this.isSubmittingResolve = false;
+      }
     },
 
     /**
@@ -872,6 +1180,7 @@ export const CoordinatorIncidentDetailModal = {
     openAssignPanel() {
       this.isCancelPanelOpen = false;
       this.isInactivityPanelOpen = false;
+      this.resetResolveDraft();
       this.isAssignPanelOpen = true;
       this.assignErrorMessage = '';
       this.reassignReason = '';
@@ -962,6 +1271,7 @@ export const CoordinatorIncidentDetailModal = {
     openCancelPanel() {
       this.isAssignPanelOpen = false;
       this.isInactivityPanelOpen = false;
+      this.resetResolveDraft();
       this.isCancelPanelOpen = true;
       this.cancelErrorMessage = '';
     },
@@ -973,6 +1283,7 @@ export const CoordinatorIncidentDetailModal = {
     openInactivityPanel() {
       this.isAssignPanelOpen = false;
       this.isCancelPanelOpen = false;
+      this.resetResolveDraft();
       this.isInactivityPanelOpen = true;
       this.inactivityErrorMessage = '';
       this.pauseActionErrorMessage = '';
@@ -1707,6 +2018,13 @@ export const CoordinatorIncidentDetailModal = {
                   <h4 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 14px; font-weight: 500; color: var(--color-success-text, #065f46); margin: 0 0 6px;">
                     ✅ Resolución técnica documentada
                   </h4>
+                  <div
+                    v-if="resolutionTaxonomyLabel"
+                    data-testid="resolution-taxonomy-badge"
+                    style="background-color: var(--color-surface-card); border: 1px solid var(--color-hairline); border-radius: var(--radius-interactive, 4px); padding: 8px 10px; margin-bottom: 8px; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-slate); line-height: 1.45;"
+                  >
+                    {{ resolutionTaxonomyLabel }}
+                  </div>
                   <p style="margin: 0 0 4px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-slate, #2c333f); line-height: 1.45;">
                     <strong>Diagnóstico:</strong> {{ resolution.diagnosis || 'No registrado' }}
                   </p>
@@ -1940,6 +2258,134 @@ export const CoordinatorIncidentDetailModal = {
               </section>
 
               <!-- 8. Paneles operativos en línea (RF-07.3, RF-07.4, RNF-06) -->
+              <div
+                v-if="isResolvePanelOpen"
+                class="inline-action-panel"
+                data-testid="resolve-panel"
+                style="background-color: var(--color-surface-card); border: 1px solid var(--color-primary); border-radius: var(--radius-card, 8px); padding: 16px 20px; margin-bottom: 16px;"
+              >
+                <h4 style="font-family: var(--font-display, 'DM Sans', sans-serif); font-size: 14px; font-weight: 500; color: var(--color-slate); margin: 0 0 6px;">
+                  🧾 Resolver Avería desde Coordinación
+                </h4>
+                <p style="margin: 0 0 12px; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-ink-muted); line-height: 1.45;">
+                  El diagnóstico y la acción exigen 20 caracteres reales cada uno. La causa raíz y su solución estandarizada son obligatorias e independientes de esos textos.
+                </p>
+
+                <label for="coordinator-resolve-diagnosis" style="display: block; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-ink-secondary); margin-bottom: 4px;">
+                  Diagnóstico real del fallo <span style="color: var(--color-error-text);">*</span>
+                </label>
+                <textarea
+                  id="coordinator-resolve-diagnosis"
+                  v-model="resolveDiagnosis"
+                  class="vg-textarea"
+                  data-testid="resolve-diagnosis"
+                  rows="3"
+                  placeholder="Describe el fallo observado (mínimo 20 caracteres)..."
+                  :disabled="isSubmittingResolve"
+                  style="width: 100%; box-sizing: border-box; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-slate); background-color: var(--color-canvas); border: 1px solid var(--color-hairline-soft); border-radius: var(--radius-interactive, 4px); padding: 8px 12px; resize: vertical;"
+                ></textarea>
+                <span data-testid="resolve-diagnosis-counter" style="display: block; margin: 4px 0 10px; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-ink-muted);">
+                  {{ resolveDiagnosisLength }} / 20 caracteres
+                </span>
+
+                <label for="coordinator-resolve-action" style="display: block; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-ink-secondary); margin-bottom: 4px;">
+                  Acción técnica correctiva <span style="color: var(--color-error-text);">*</span>
+                </label>
+                <textarea
+                  id="coordinator-resolve-action"
+                  v-model="resolveAction"
+                  class="vg-textarea"
+                  data-testid="resolve-action"
+                  rows="3"
+                  placeholder="Describe la reparación aplicada (mínimo 20 caracteres)..."
+                  :disabled="isSubmittingResolve"
+                  style="width: 100%; box-sizing: border-box; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-slate); background-color: var(--color-canvas); border: 1px solid var(--color-hairline-soft); border-radius: var(--radius-interactive, 4px); padding: 8px 12px; resize: vertical;"
+                ></textarea>
+                <span data-testid="resolve-action-counter" style="display: block; margin: 4px 0 10px; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-ink-muted);">
+                  {{ resolveActionLength }} / 20 caracteres
+                </span>
+
+                <label for="coordinator-resolve-root-cause" style="display: block; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-ink-secondary); margin-bottom: 4px;">
+                  Causa raíz <span style="color: var(--color-error-text);">*</span>
+                </label>
+                <select
+                  id="coordinator-resolve-root-cause"
+                  class="vg-select"
+                  data-testid="coordinator-resolve-root-cause-select"
+                  :value="selectedRootCauseId ?? ''"
+                  :disabled="isSubmittingResolve || isLoadingRootCauseCatalog || resolveVisibleRootCauses.length === 0"
+                  style="width: 100%; min-height: 44px; margin-bottom: 8px;"
+                  @change="handleResolveRootCauseChange"
+                >
+                  <option value="">Selecciona una causa raíz</option>
+                  <option v-for="cause in resolveVisibleRootCauses" :key="cause.id" :value="cause.id">
+                    {{ formatRootCauseOption(cause) }}
+                  </option>
+                </select>
+
+                <label for="coordinator-resolve-standard-solution" style="display: block; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-ink-secondary); margin-bottom: 4px;">
+                  Solución estandarizada <span style="color: var(--color-error-text);">*</span>
+                </label>
+                <select
+                  id="coordinator-resolve-standard-solution"
+                  class="vg-select"
+                  data-testid="coordinator-resolve-standard-solution-select"
+                  :value="selectedStandardSolutionId ?? ''"
+                  :disabled="isSubmittingResolve || resolveAvailableSolutions.length === 0"
+                  style="width: 100%; min-height: 44px; margin-bottom: 8px;"
+                  @change="handleResolveSolutionChange"
+                >
+                  <option value="">Selecciona una solución</option>
+                  <option v-for="solution in resolveAvailableSolutions" :key="solution.id" :value="solution.id">
+                    {{ formatStandardSolutionOption(solution) }}
+                  </option>
+                </select>
+
+                <label style="display: flex; align-items: center; gap: 8px; min-height: 44px; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-ink-secondary); cursor: pointer;">
+                  <input
+                    type="checkbox"
+                    v-model="showAllRootCauseCategories"
+                    :disabled="isSubmittingResolve || isLoadingRootCauseCatalog"
+                    style="width: 18px; height: 18px;"
+                  >
+                  Mostrar todas las categorías
+                </label>
+
+                <p v-if="isLoadingRootCauseCatalog" role="status" style="margin: 6px 0; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-ink-muted);">
+                  Cargando catálogo de causas raíz...
+                </p>
+                <p v-else-if="rootCauseCatalogError" role="alert" data-testid="resolve-catalog-error" style="margin: 6px 0; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; color: var(--color-error-text);">
+                  {{ rootCauseCatalogError }}
+                </p>
+                <p v-if="resolveTaxonomyPreview" data-testid="resolve-taxonomy-preview" style="margin: 4px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 12px; font-weight: 600; color: var(--color-slate);">
+                  {{ resolveTaxonomyPreview }}
+                </p>
+                <p v-if="resolveErrorMessage" data-testid="resolve-error" role="alert" style="margin: 8px 0 0; font-family: var(--font-body, Inter, sans-serif); font-size: 13px; color: var(--color-error-text);">
+                  {{ resolveErrorMessage }}
+                </p>
+
+                <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
+                  <button
+                    type="button"
+                    class="vg-btn vg-btn-secondary"
+                    data-testid="resolve-dismiss"
+                    :disabled="isSubmittingResolve"
+                    @click="closeResolvePanel"
+                  >
+                    Volver
+                  </button>
+                  <button
+                    type="button"
+                    class="vg-btn vg-btn-primary"
+                    data-testid="resolve-confirm"
+                    :disabled="isSubmittingResolve || isLoadingRootCauseCatalog || !isResolveFormValid"
+                    @click="submitManualResolution"
+                  >
+                    {{ isSubmittingResolve ? 'Resolviendo…' : 'Confirmar Resolución' }}
+                  </button>
+                </div>
+              </div>
+
               <div
                 v-if="isAssignPanelOpen"
                 class="inline-action-panel"
@@ -2226,6 +2672,15 @@ export const CoordinatorIncidentDetailModal = {
                 @click="openInactivityPanel"
               >
                 Cancelar por Inactividad de Sede
+              </button>
+              <button
+                v-if="canResolveManually && !isResolvePanelOpen"
+                type="button"
+                class="vg-btn vg-btn-primary"
+                data-testid="incident-detail-resolve-trigger"
+                @click="openResolvePanel"
+              >
+                Resolver Avería
               </button>
               <button
                 v-if="canAssign && !isAssignPanelOpen"

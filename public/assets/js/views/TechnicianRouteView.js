@@ -157,6 +157,17 @@ export const TechnicianRouteView = {
       isResolving: false,
       resolveError: '',
 
+      // Clasificación del cierre (Módulo 25 · RF-02, EARS 02.1-02.4): catálogo
+      // activo recibido del servidor o de la copia local, selección obligatoria
+      // y conmutador de categorías. La selección nunca escribe en los textos
+      // libres de diagnóstico ni de acción (D2, Art. V.1).
+      rootCauseCatalog: [],
+      isLoadingRootCauseCatalog: false,
+      rootCauseCatalogError: '',
+      selectedRootCauseId: null,
+      selectedStandardSolutionId: null,
+      showAllRootCauseCategories: false,
+
       // Interactive route map (RF-MAP-07, RF-MAP-08)
       showRouteMapModal: false,
 
@@ -544,9 +555,94 @@ export const TechnicianRouteView = {
     isActionValid() {
       return this.actionLength >= 20;
     },
+
+    /**
+     * Causas visibles en el selector (D3, `EARS 02.3`).
+     *
+     * Sin el conmutador se muestran primero las de la categoría de la avería y
+     * después las transversales `OTHER`; con el conmutador se abre el catálogo
+     * completo. La causa ya elegida se conserva visible para que apagar el
+     * conmutador no borre una selección válida por sorpresa.
+     */
+    availableRootCauses() {
+      const normalize = (value) => String(value ?? '').trim().toUpperCase();
+      const causes = Array.isArray(this.rootCauseCatalog)
+        ? this.rootCauseCatalog.filter((cause) => cause && cause.is_active !== false)
+        : [];
+      const preferredCategory = normalize(this.selectedIncident?.category);
+      const selectedId = Number(this.selectedRootCauseId ?? 0);
+      const selectedCause = causes.find((cause) => Number(cause?.id) === selectedId) ?? null;
+      const visible = this.showAllRootCauseCategories || preferredCategory === ''
+        ? [...causes]
+        : causes.filter((cause) => {
+            const category = normalize(cause?.category);
+            return category === preferredCategory || category === 'OTHER';
+          });
+
+      if (selectedCause !== null && !visible.some((cause) => Number(cause?.id) === selectedId)) {
+        visible.push(selectedCause);
+      }
+
+      return visible.sort((left, right) => {
+        const rank = (cause) => {
+          const category = normalize(cause?.category);
+          if (category === preferredCategory) return 0;
+          if (category === 'OTHER') return 1;
+          return 2;
+        };
+        const rankDiff = rank(left) - rank(right);
+        if (rankDiff !== 0) return rankDiff;
+
+        return String(left?.code ?? '').localeCompare(String(right?.code ?? ''));
+      });
+    },
+
+    /** Causa seleccionada en el formulario de resolución. */
+    selectedRootCause() {
+      const selectedId = Number(this.selectedRootCauseId ?? 0);
+
+      return (Array.isArray(this.rootCauseCatalog) ? this.rootCauseCatalog : [])
+        .find((cause) => Number(cause?.id) === selectedId) ?? null;
+    },
+
+    /** Soluciones activas de la causa elegida, con la predeterminada primero (`EARS 02.4`). */
+    availableStandardSolutions() {
+      const solutions = Array.isArray(this.selectedRootCause?.solutions)
+        ? this.selectedRootCause.solutions.filter((solution) => solution && solution.is_active !== false)
+        : [];
+
+      return solutions.sort((left, right) => {
+        const defaultDiff = Number(right?.is_default === true) - Number(left?.is_default === true);
+        if (defaultDiff !== 0) return defaultDiff;
+
+        return String(left?.code ?? '').localeCompare(String(right?.code ?? ''));
+      });
+    },
+
+    /** Solución seleccionada, para el resumen del formulario. */
+    selectedStandardSolution() {
+      const selectionId = Number(this.selectedStandardSolutionId ?? 0);
+
+      return this.availableStandardSolutions
+        .find((solution) => Number(solution?.id) === selectionId) ?? null;
+    },
+
+    /** La pareja causa/solución es obligatoria y debe pertenecer a la misma rama. */
+    isTaxonomySelectionValid() {
+      const rootCauseId = Number(this.selectedRootCauseId ?? 0);
+      const solutionId = Number(this.selectedStandardSolutionId ?? 0);
+      if (!Number.isInteger(rootCauseId) || rootCauseId < 1
+        || !Number.isInteger(solutionId) || solutionId < 1) {
+        return false;
+      }
+
+      return this.availableStandardSolutions.some((solution) => Number(solution?.id) === solutionId);
+    },
+
     canResolve() {
       return this.isDiagnosisValid
         && this.isActionValid
+        && this.isTaxonomySelectionValid
         && this.resolveRefundData.isValid
         && (!this.sanitaryResolutionRequired || this.resolveSanitaryData.isValid);
     },
@@ -2537,6 +2633,119 @@ export const TechnicianRouteView = {
     },
 
     /**
+     * Catálogo de clasificación desde la copia local (`RF-03.2`, `EARS 03.2`).
+     *
+     * Es el camino normal sin cobertura y el respaldo cuando la consulta online
+     * falla. No se filtra por vigencia de la copia: la clasificación es un dato
+     * de catálogo sin importes y el servidor vuelve a validar la pareja al
+     * sincronizar; la caducidad ya bloquea el encolado cuando corresponde.
+     *
+     * @returns {Promise<Array<Object>>}
+     */
+    async loadCachedRootCauseTaxonomy() {
+      const technicianId = this.offlineTechnicianId();
+      if (!(technicianId > 0) || this.offlineStorage === null) {
+        return [];
+      }
+
+      try {
+        const snapshot = this.offlineSnapshot ?? (await this.offlineStorage.getSnapshot(technicianId));
+        this.offlineSnapshot = snapshot ?? this.offlineSnapshot;
+
+        return Array.isArray(snapshot?.root_cause_taxonomy) ? snapshot.root_cause_taxonomy : [];
+      } catch (error) {
+        return [];
+      }
+    },
+
+    /**
+     * Carga el catálogo activo para el selector de resolución correctiva.
+     *
+     * Online se pide al endpoint filtrado por categoría; si la red falla o no
+     * devuelve causas utilizables, se recurre a la copia local. Sin catálogo no
+     * se inventan causas ni se desbloquea el cierre (`D1`, `D3`).
+     *
+     * @param {Object} incident
+     */
+    async loadRootCauseTaxonomy(incident) {
+      this.isLoadingRootCauseCatalog = true;
+      this.rootCauseCatalogError = '';
+      this.rootCauseCatalog = [];
+      this.selectedRootCauseId = null;
+      this.selectedStandardSolutionId = null;
+
+      try {
+        if (!this.isOfflineMode && !this.isBrowserOffline()) {
+          try {
+            const response = await api.getTechnicianRootCauses(incident?.category ?? null);
+            const items = Array.isArray(response?.items)
+              ? response.items
+              : (Array.isArray(response?.data?.items) ? response.data.items : []);
+
+            if (items.length > 0) {
+              this.rootCauseCatalog = items;
+              return;
+            }
+          } catch (error) {
+            // Se cae a la copia local: el catálogo offline sigue siendo válido
+            // para clasificar y el servidor decidirá al sincronizar.
+          }
+        }
+
+        const cached = await this.loadCachedRootCauseTaxonomy();
+        if (cached.length > 0) {
+          this.rootCauseCatalog = cached;
+          return;
+        }
+
+        this.rootCauseCatalogError = 'No se pudo cargar el catálogo de causas raíz. '
+          + 'Recupera cobertura y vuelve a abrir la resolución.';
+      } finally {
+        this.isLoadingRootCauseCatalog = false;
+      }
+    },
+
+    /**
+     * Una pulsación en la causa preselecciona su solución predeterminada activa
+     * (`EARS 02.4`). No toca diagnóstico ni acción: esos textos los escribe el
+     * técnico y siguen su propio contador de 20 caracteres (`D2`).
+     */
+    handleRootCauseSelection(event) {
+      const raw = event?.target?.value ?? '';
+      this.selectedRootCauseId = raw === '' ? null : Number(raw);
+      this.selectedStandardSolutionId = null;
+
+      const solutions = this.availableStandardSolutions;
+      const preferred = solutions.find((solution) => solution.is_default === true) ?? solutions[0] ?? null;
+
+      this.selectedStandardSolutionId = preferred ? Number(preferred.id) : null;
+    },
+
+    /** Cambia la solución dentro de las alternativas activas de la causa elegida. */
+    handleStandardSolutionSelection(event) {
+      const raw = event?.target?.value ?? '';
+      this.selectedStandardSolutionId = raw === '' ? null : Number(raw);
+    },
+
+    /** Texto de una opción de causa para el selector táctil. */
+    formatRootCauseOption(cause) {
+      const code = String(cause?.code ?? '');
+      const name = String(cause?.name ?? '');
+      const category = String(cause?.category_label ?? cause?.category ?? '');
+
+      return `${code ? `[${code}] ` : ''}${name}${category ? ` — ${category}` : ''}`;
+    },
+
+    /** Texto de una opción de solución, marcando la predeterminada. */
+    formatStandardSolutionOption(solution) {
+      const code = String(solution?.code ?? '');
+      const name = String(solution?.name ?? '');
+      const suffix = solution?.is_default === true ? ' · Predeterminada' : '';
+
+      return `${code ? `[${code}] ` : ''}${name}${suffix}`;
+    },
+
+    /**
      * Opens the Resolve Modal with strict justification and spare parts block (RF-08 / EARS 8.1, 8.2 / RF-REP-05).
      * @param {Object} incident
      */
@@ -2555,8 +2764,16 @@ export const TechnicianRouteView = {
       this.refundInspectionRequestId++;
       this.isLoadingRefundInspection = true;
       this.resolveError = '';
+      this.rootCauseCatalog = [];
+      this.rootCauseCatalogError = '';
+      this.selectedRootCauseId = null;
+      this.selectedStandardSolutionId = null;
+      this.showAllRootCauseCategories = false;
       this.showResolveModal = true;
-      await this.loadRefundInspection(incident);
+      await Promise.all([
+        this.loadRootCauseTaxonomy(incident),
+        this.loadRefundInspection(incident)
+      ]);
     },
 
     closeResolveModal() {
@@ -2575,6 +2792,11 @@ export const TechnicianRouteView = {
       this.refundInspectionRequestId++;
       this.isLoadingRefundInspection = false;
       this.resolveError = '';
+      this.rootCauseCatalog = [];
+      this.rootCauseCatalogError = '';
+      this.selectedRootCauseId = null;
+      this.selectedStandardSolutionId = null;
+      this.showAllRootCauseCategories = false;
     },
 
     /**
@@ -2661,6 +2883,18 @@ export const TechnicianRouteView = {
         return;
       }
 
+      // La clasificación es una puerta independiente del Art. V.1: no rellena
+      // ni acorta los textos y su ausencia no se compensa con un diagnóstico
+      // largo (`D2`, `QA 3`).
+      if (!this.isTaxonomySelectionValid) {
+        this.resolveError = this.rootCauseCatalogError
+          || 'Selecciona una causa raíz y su solución estandarizada para cerrar la avería.';
+        return;
+      }
+
+      const rootCauseId = Number(this.selectedRootCauseId);
+      const standardSolutionId = Number(this.selectedStandardSolutionId);
+
       if (this.isLoadingRefundInspection) {
         this.resolveError = 'Espera a que termine la consulta de reclamaciones de saldo antes de resolver.';
         return;
@@ -2724,6 +2958,8 @@ export const TechnicianRouteView = {
       const payload = {
         diagnosis: diag,
         action_taken: act,
+        root_cause_id: rootCauseId,
+        standard_solution_id: standardSolutionId,
         ...refundPayload,
         ...sanitaryPayload
       };
@@ -4422,6 +4658,90 @@ export const TechnicianRouteView = {
             ></textarea>
             <div v-if="actionLength > 0 && !isActionValid" style="font-size: 11px; color: #dc2626; margin-top: 3px;">
               Faltan {{ 20 - actionLength }} caracteres para alcanzar el mínimo de 20.
+            </div>
+          </div>
+
+          <!-- Clasificación estructurada (Módulo 25 · D1-D3, RF-02, QA 3) -->
+          <div
+            style="border: 1px solid var(--color-hairline); border-radius: var(--radius-card, 8px); padding: 12px; margin-bottom: 14px; background: var(--color-primary-subtle);"
+          >
+            <div style="font-size: 13px; font-weight: 600; color: var(--color-slate); margin-bottom: 4px;">
+              Clasificación estructurada del cierre <span style="color: var(--color-error-text);">*</span>
+            </div>
+            <p style="margin: 0 0 10px; font-size: 12px; line-height: 1.4; color: var(--color-ink-muted);">
+              Obligatoria e independiente del diagnóstico y la acción: no rellena ni sustituye esos textos.
+            </p>
+
+            <div v-if="isLoadingRootCauseCatalog" role="status" style="font-size: 13px; color: var(--color-ink-muted);">
+              Cargando catálogo de causas raíz...
+            </div>
+            <div
+              v-else-if="rootCauseCatalogError"
+              role="alert"
+              style="border: 1px solid var(--color-error-border); border-radius: var(--radius-interactive, 4px); background: var(--color-error-bg); color: var(--color-error-text); padding: 8px 10px; font-size: 12px; margin-bottom: 10px;"
+            >
+              {{ rootCauseCatalogError }}
+            </div>
+
+            <label
+              for="resolve-root-cause-select"
+              style="display: block; font-size: 12px; font-weight: 600; color: var(--color-slate); margin-bottom: 4px;"
+            >
+              Causa raíz
+            </label>
+            <select
+              id="resolve-root-cause-select"
+              class="vg-select"
+              data-testid="resolve-root-cause-select"
+              :value="selectedRootCauseId ?? ''"
+              :disabled="isResolving || isLoadingRootCauseCatalog || availableRootCauses.length === 0"
+              style="width: 100%; min-height: 44px; margin-bottom: 8px;"
+              @change="handleRootCauseSelection"
+            >
+              <option value="">Selecciona una causa raíz</option>
+              <option v-for="cause in availableRootCauses" :key="cause.id" :value="cause.id">
+                {{ formatRootCauseOption(cause) }}
+              </option>
+            </select>
+
+            <label
+              for="resolve-standard-solution-select"
+              style="display: block; font-size: 12px; font-weight: 600; color: var(--color-slate); margin-bottom: 4px;"
+            >
+              Solución estandarizada
+            </label>
+            <select
+              id="resolve-standard-solution-select"
+              class="vg-select"
+              data-testid="resolve-standard-solution-select"
+              :value="selectedStandardSolutionId ?? ''"
+              :disabled="isResolving || availableStandardSolutions.length === 0"
+              style="width: 100%; min-height: 44px; margin-bottom: 8px;"
+              @change="handleStandardSolutionSelection"
+            >
+              <option value="">Selecciona una solución</option>
+              <option v-for="solution in availableStandardSolutions" :key="solution.id" :value="solution.id">
+                {{ formatStandardSolutionOption(solution) }}
+              </option>
+            </select>
+
+            <label
+              style="display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 13px; color: var(--color-slate); cursor: pointer;"
+            >
+              <input
+                type="checkbox"
+                v-model="showAllRootCauseCategories"
+                :disabled="isResolving || isLoadingRootCauseCatalog"
+                style="width: 18px; height: 18px;"
+              >
+              Mostrar todas las categorías
+            </label>
+
+            <div
+              v-if="selectedRootCause && selectedStandardSolution"
+              style="font-size: 12px; font-weight: 600; color: var(--color-slate); border-top: 1px solid var(--color-hairline); padding-top: 8px; margin-top: 4px;"
+            >
+              {{ formatRootCauseOption(selectedRootCause) }} → {{ formatStandardSolutionOption(selectedStandardSolution) }}
             </div>
           </div>
 

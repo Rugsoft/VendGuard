@@ -246,7 +246,7 @@
     4. Añadir en `AuditActionLabels.js` las etiquetas en castellano para `CREATE_ROOT_CAUSE`, `UPDATE_ROOT_CAUSE`, `CREATE_STANDARD_SOLUTION` y `UPDATE_STANDARD_SOLUTION`.
   * **Hecho cuando:** `public/assets/js/vendor/chart.umd.min.js` existe, `public/index.html` lo referencia localmente y los módulos ES importan limpiamente en Node.
 
-- [ ] **T-TAXONOMY-13 · Selector guiado con preselección 1-Tap en `TechnicianRouteView.js` y `CoordinatorIncidentDetailModal.js`**
+- [x] **T-TAXONOMY-13 · Selector guiado con preselección 1-Tap en `TechnicianRouteView.js` y `CoordinatorIncidentDetailModal.js`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-TAXONOMY-12`
   * **Ficheros a crear o modificar:**
