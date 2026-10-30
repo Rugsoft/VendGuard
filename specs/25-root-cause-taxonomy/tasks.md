@@ -45,7 +45,7 @@
     5. Actualizar `specs/technical/database_schema.md` y `specs/technical/schema_correspondence_contract.md` (36 tablas de dominio y 50 columnas en `incidents`).
   * **Hecho cuando:** `php bin/init_cloud_db.php` aplica el esquema y las semillas sin errores sobre PostgreSQL.
 
-- [ ] **T-TAXONOMY-02 · Actualización de guardas de esquema y suite `PostgresRootCauseTaxonomySchemaTest`**
+- [x] **T-TAXONOMY-02 · Actualización de guardas de esquema y suite `PostgresRootCauseTaxonomySchemaTest`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-TAXONOMY-01`
   * **Ficheros a crear o modificar:**

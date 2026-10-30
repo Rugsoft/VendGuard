@@ -11,7 +11,7 @@ use VendGuard\Infrastructure\Database\SqlScriptSplitter;
  * Las suites de la categoría `new_engine` necesitan lo mismo antes de certificar nada: una
  * conexión al motor nuevo por su contrato de entorno (`PG_TEST_DSN`, sin valor por defecto), un
  * esquema aislado con el DDL del repositorio aplicado y la capacidad de escribir **una fila
- * válida en cada una de las 27 tablas** respetando el grafo de claves foráneas.
+ * válida en cada una de las 36 tablas** respetando el grafo de claves foráneas.
  *
  * Lo último no se puede improvisar tabla por tabla: serían veinte fixtures escritos a mano que
  * se desincronizarían del DDL a la primera columna nueva, y el día que dejaran de insertar
@@ -82,6 +82,11 @@ final class PostgresFixtureBuilder
         // El `UPDATE` genérico escribiría texto sintético y el motor lo rechazaría por
         // diseño; la modificación se certifica sobre la marca temporal.
         'offline_sync_mutations' => ['client_mutation_id', 'stop_type', 'operation_type', 'outcome_status'],
+        // Catálogo maestro del Módulo 25: `code` es inmutable por Constitución
+        // (Art. III.3, C4) y su disparador rechaza la reescritura. El `UPDATE`
+        // genérico certifica el CRUD sobre una columna descriptiva mutable.
+        'root_causes' => ['code'],
+        'standard_solutions' => ['code'],
     ];
 
     // ─────────────────────────────────────────────────────────────────────
@@ -597,6 +602,14 @@ final class PostgresFixtureBuilder
                 => $variant === 'update' ? 'fixture.update.m24.0001' : 'fixture.insert.m24.0001',
             $table === 'offline_sync_mutations' && $column === 'stop_type' => 'INCIDENT',
             $table === 'offline_sync_mutations' && $column === 'operation_type' => 'START_INCIDENT',
+            // El catálogo de taxonomía (Módulo 25) tiene un formato de código
+            // cerrado (`^[A-Z0-9_-]{3,32}$`): el texto sintético genérico, con
+            // espacios y minúsculas, convertiría el alta mínima en un rechazo
+            // legítimo del CHECK y el CRUD dejaría de certificarse.
+            $table === 'root_causes' && $column === 'code'
+                => $variant === 'update' ? 'RC-FIXTURE-UPDATE' : 'RC-FIXTURE-INSERT',
+            $table === 'standard_solutions' && $column === 'code'
+                => $variant === 'update' ? 'SOL-FIXTURE-UPDATE' : 'SOL-FIXTURE-INSERT',
             in_array($udt, ['int2', 'int4', 'int8'], true) => $variant === 'update' ? 9 : 7,
             $udt === 'numeric', $udt === 'float4', $udt === 'float8' => $variant === 'update' ? '9.5000000' : '1.5000000',
             $udt === 'text' => $literal,

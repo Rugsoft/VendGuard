@@ -43,7 +43,7 @@ use VendGuard\Infrastructure\Database\SqlScriptSplitter;
 /** Marca de categoría: `run_all.php` la lee para no confundir esta suite con la batería hermética. */
 const VENDGUARD_TEST_CATEGORY = 'new_engine';
 
-/** Las 34 tablas del contrato de correspondencia (§2.1, Módulos 14, 17, 18, 19, 20, 21, 22, 23 y 24). */
+/** Las 36 tablas del contrato de correspondencia (§2.1, Módulos 14 a 25). */
 const CONTRACT_TABLES = [
     'locations', 'machines', 'users', 'incidents', 'incident_history', 'incident_comments',
     'incident_replaced_parts', 'refund_requests', 'unclaimed_cash_findings', 'spare_parts',
@@ -56,6 +56,8 @@ const CONTRACT_TABLES = [
     'technician_absences', 'technician_shifts', 'technician_shift_logs',
     'van_restock_orders', 'van_restock_order_items',
     'offline_sync_mutations',
+    // Módulo 25 · taxonomía de causas raíz y soluciones estandarizadas.
+    'root_causes', 'standard_solutions',
 ];
 
 /** Adiciones declaradas del motor nuevo (§5). */
@@ -253,7 +255,7 @@ try {
 
     $baseOnlyTables = $readTables($pgPdo, $schema);
     $assert(
-        'El DDL base crea las 34 tablas del contrato y ninguna más',
+        'El DDL base crea las 36 tablas del contrato y ninguna más',
         $sameSet($baseOnlyTables, CONTRACT_TABLES),
         'tablas: ' . count($baseOnlyTables) . ' · ' . $listSample(array_merge(array_diff($baseOnlyTables, CONTRACT_TABLES), array_diff(CONTRACT_TABLES, $baseOnlyTables)))
     );
@@ -294,6 +296,7 @@ try {
             '018_spare_part_requests_pending_index.sql',
             '019_van_restock_order_items_snapshots.sql',
             '020_offline_pwa_sync.sql',
+            '021_root_cause_taxonomy.sql',
         ],
         'aplicadas: ' . $listSample($applied)
     );
@@ -301,7 +304,7 @@ try {
     $runner->assertConverged();
     $convergedTables = $readTables($pgPdo, $schema);
     $assert(
-        'Tras la migración, el inventario converge al del repositorio (34 tablas + libro A-5)',
+        'Tras la migración, el inventario converge al del repositorio (36 tablas + libro A-5)',
         $sameSet($convergedTables, array_merge(CONTRACT_TABLES, [ADDITION_LEDGER])),
         'tablas: ' . count($convergedTables)
     );
@@ -309,7 +312,7 @@ try {
     $ledgerRows = $pgPdo->query('SELECT filename, checksum FROM ' . ADDITION_LEDGER . ' ORDER BY filename')->fetchAll();
     $assert(
         'El libro registra las migraciones con su huella de 64 caracteres',
-        count($ledgerRows) === 20
+        count($ledgerRows) === 21
         && $ledgerRows[0]['filename'] === '001_initial_baseline.sql'
         && strlen((string)$ledgerRows[0]['checksum']) === 64
         && $ledgerRows[1]['filename'] === '002_notification_center_outbox.sql'
@@ -350,6 +353,8 @@ try {
         && strlen((string)$ledgerRows[18]['checksum']) === 64
         && $ledgerRows[19]['filename'] === '020_offline_pwa_sync.sql'
         && strlen((string)$ledgerRows[19]['checksum']) === 64
+        && $ledgerRows[20]['filename'] === '021_root_cause_taxonomy.sql'
+        && strlen((string)$ledgerRows[20]['checksum']) === 64
     );
 
     $assert('Reejecutar el ejecutor no aplica nada (idempotente)', $runner->runAll() === []);
@@ -373,15 +378,30 @@ try {
 
     $pgTables = $readTables($pgPdo, $schema);
     $assert(
-        'El motor único declara las 34 tablas canónicas del dominio',
+        'El motor único declara las 36 tablas canónicas del dominio',
         $sameSet(array_values(array_diff($pgTables, [ADDITION_LEDGER])), CONTRACT_TABLES),
         'tablas: ' . count($pgTables)
     );
 
     $pgColumns = $readColumnNames($pgPdo, $schema);
     $assert(
-        'Todas las 34 tablas tienen columnas declaradas en PostgreSQL',
-        count($pgColumns) >= 34
+        'Todas las 36 tablas tienen columnas declaradas en PostgreSQL',
+        count($pgColumns) >= 36
+    );
+    $assert(
+        'incidents declara las 50 columnas del contrato (43 + 7 de taxonomía)',
+        count($pgColumns['incidents'] ?? []) === 50,
+        'columnas: ' . count($pgColumns['incidents'] ?? [])
+    );
+    $assert(
+        'root_causes declara sus 8 columnas canónicas',
+        count($pgColumns['root_causes'] ?? []) === 8,
+        'columnas: ' . count($pgColumns['root_causes'] ?? [])
+    );
+    $assert(
+        'standard_solutions declara sus 8 columnas canónicas',
+        count($pgColumns['standard_solutions'] ?? []) === 8,
+        'columnas: ' . count($pgColumns['standard_solutions'] ?? [])
     );
 
     // A-1 y A-2: claves canónicas
@@ -426,8 +446,8 @@ try {
     $triggerStmt->execute([':schema' => $schema]);
     $pgTriggerTables = array_map(static fn (array $row): string => (string)$row['table_name'], $triggerStmt->fetchAll());
     $assert(
-        'A-4: las 34 tablas del dominio tienen su disparador BEFORE DELETE vinculado a prevent_hard_delete',
-        count(array_unique($pgTriggerTables)) === 34 && !in_array(ADDITION_LEDGER, $pgTriggerTables, true),
+        'A-4: las 36 tablas del dominio tienen su disparador BEFORE DELETE vinculado a prevent_hard_delete',
+        count(array_unique($pgTriggerTables)) === 36 && !in_array(ADDITION_LEDGER, $pgTriggerTables, true),
         'tablas con disparador: ' . count(array_unique($pgTriggerTables))
     );
 
