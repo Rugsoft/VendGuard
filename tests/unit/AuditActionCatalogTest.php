@@ -86,6 +86,11 @@ const AUDIT_WRITER_METHODS = [
     'logNotificationChannelSettingEvent',
     // Módulo 16: firma de los seis hechos de la avería oportunista in situ.
     'logOpportunisticEvent',
+    // Módulo 25: el catálogo maestro construye su `AuditEvent` en un único punto
+    // y recibe la acción como argumento nombrado. Sin esta firma, las acciones
+    // CREATE/UPDATE/REACTIVATE/DEACTIVATE del catálogo quedaban invisibles para
+    // la guarda y el visor las ofrecía como filtros fantasma.
+    'recordTaxonomyAudit',
 ];
 
 /**

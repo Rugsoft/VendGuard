@@ -95,6 +95,42 @@ const mockRouteIncidents = [
  * lo exige, así que la instancia de prueba trae una atestación de ausencia válida y cada
  * caso decide si la rompe para probar el bloqueo.
  */
+const RESOLUTION_TAXONOMY = [
+  {
+    id: 1,
+    code: 'RC-TEST-01',
+    category: 'OTHER',
+    category_label: 'Otras causas',
+    name: 'Causa raíz de certificación',
+    is_active: true,
+    solutions: [
+      {
+        id: 11,
+        root_cause_id: 1,
+        code: 'SOL-TEST-01A',
+        name: 'Solución estandarizada de certificación',
+        is_default: true,
+        is_active: true
+      }
+    ]
+  }
+];
+
+api.technician.getTechnicianRootCauses = async () => ({
+  items: JSON.parse(JSON.stringify(RESOLUTION_TAXONOMY))
+});
+
+/**
+ * Selecciona la pareja obligatoria de taxonomía (Módulo 25, D1/D2) tras abrir
+ * el modal, igual que el técnico con un toque sobre la causa.
+ */
+function selectResolutionTaxonomy(view) {
+  view.rootCauseCatalog = JSON.parse(JSON.stringify(RESOLUTION_TAXONOMY));
+  view.selectedRootCauseId = null;
+  view.selectedStandardSolutionId = null;
+  view.handleRootCauseSelection({ target: { value: '1' } });
+}
+
 const validServiceSheetRef = () => ({
   validate: () => ({
     isValid: true,
@@ -144,6 +180,21 @@ function createRouteInstance(initialData = {}) {
   });
   Object.defineProperty(instance, 'canResolve', {
     get: () => TechnicianRouteView.computed.canResolve.call(instance)
+  });
+  Object.defineProperty(instance, 'availableRootCauses', {
+    get: () => TechnicianRouteView.computed.availableRootCauses.call(instance)
+  });
+  Object.defineProperty(instance, 'selectedRootCause', {
+    get: () => TechnicianRouteView.computed.selectedRootCause.call(instance)
+  });
+  Object.defineProperty(instance, 'availableStandardSolutions', {
+    get: () => TechnicianRouteView.computed.availableStandardSolutions.call(instance)
+  });
+  Object.defineProperty(instance, 'selectedStandardSolution', {
+    get: () => TechnicianRouteView.computed.selectedStandardSolution.call(instance)
+  });
+  Object.defineProperty(instance, 'isTaxonomySelectionValid', {
+    get: () => TechnicianRouteView.computed.isTaxonomySelectionValid.call(instance)
   });
 
   // Bind methods
@@ -393,7 +444,8 @@ authView.resolveAction = validAction;
 
 assert('5.8 With both fields >= 20 chars, isDiagnosisValid = true', authView.isDiagnosisValid === true);
 assert('5.9 With both fields >= 20 chars, isActionValid = true', authView.isActionValid === true);
-assert('5.10 With both fields >= 20 chars, canResolve = true', authView.canResolve === true);
+selectResolutionTaxonomy(authView);
+assert('5.10 With both fields >= 20 chars and a taxonomy selection, canResolve = true', authView.canResolve === true);
 
 await authView.submitResolve();
 
@@ -405,6 +457,10 @@ assert('5.13 Passed valid corrective action text',
 assert('5.13a Every resolution travels with the mandatory conformity of the site responsible',
   resolveCalledPayload?.service_sheet?.absence_reason === 'Sede sin conserjería; llave en la central.',
   JSON.stringify(resolveCalledPayload?.service_sheet));
+assert('5.13b Every resolution travels with the selected root cause and standard solution',
+  resolveCalledPayload?.root_cause_id === 1
+    && resolveCalledPayload?.standard_solution_id === 11,
+  JSON.stringify({ root_cause_id: resolveCalledPayload?.root_cause_id, standard_solution_id: resolveCalledPayload?.standard_solution_id }));
 assert('5.14 Modal closed upon resolution', authView.showResolveModal === false);
 assert('5.15 Resolved incident is removed from active route', authView.incidents.find(i => i.id === 102) === undefined);
 
@@ -474,6 +530,7 @@ api.technician.resolveIncident = async (id, payloadOrDiagnosis, actionTaken) => 
 };
 refundRouteView.resolveDiagnosis = 'Fallo de selector con moneda atascada en canal interno.';
 refundRouteView.resolveAction = 'Desatascado el selector y probado el pago con monedas.';
+selectResolutionTaxonomy(refundRouteView);
 refundRouteView.$refs = {
   resolutionServiceSheetBlockRef: validServiceSheetRef(),
   resolutionRefundBlockRef: {
@@ -507,6 +564,7 @@ api.technician.getRefundInspection = async () => ({
 await unclaimedRouteView.openResolveModal(paymentIncident);
 unclaimedRouteView.resolveDiagnosis = 'No hay fallo de cobro y selector se mueve con normalidad.';
 unclaimedRouteView.resolveAction = 'Limpieza interna y prueba de venta con moneda válida.';
+selectResolutionTaxonomy(unclaimedRouteView);
 unclaimedRouteView.$refs = {
   resolutionServiceSheetBlockRef: validServiceSheetRef(),
   resolutionRefundBlockRef: {
@@ -533,6 +591,7 @@ assert('6.11 A failed lookup leaves resolution blocked and shows the lookup erro
     && failedLookupView.resolveError === 'No hay conexión');
 failedLookupView.resolveDiagnosis = 'Monedero sin evidencia de atasco en canal interno.';
 failedLookupView.resolveAction = 'Verificado el ciclo de pago con moneda de prueba válida.';
+selectResolutionTaxonomy(failedLookupView);
 const payloadCountBeforeFailedLookupSubmit = receivedPayloads.length;
 await failedLookupView.submitResolve();
 assert('6.12 Resolution is refused after an unsuccessful refund lookup, regardless of local block state',
@@ -904,6 +963,7 @@ assert('10.3 La ruta que publica sanitary_resolution_required abre la puerta san
 
 sanitaryView.resolveDiagnosis = 'Sonda NTC descalibrada registrando 14 grados en cámara de frescos.';
 sanitaryView.resolveAction = 'Sustitución de sonda NTC y verificación del ciclo a 3,5 grados.';
+selectResolutionTaxonomy(sanitaryView);
 assert('10.4 Con los textos válidos y sin declaraciones sanitarias el cierre sigue bloqueado',
   sanitaryView.isDiagnosisValid === true
     && sanitaryView.isActionValid === true
@@ -948,6 +1008,7 @@ sanitaryCalledPayload = 'sin-llamar';
 await plainView.openResolveModal(JSON.parse(JSON.stringify(mockRouteIncidents.find(i => i.id === 101))));
 plainView.resolveDiagnosis = 'Monedero con el selector de monedas desgastado y sin retorno de cambio.';
 plainView.resolveAction = 'Sustitución del selector de monedas y prueba de ciclo completo de cobro.';
+selectResolutionTaxonomy(plainView);
 assert('10.8 Sin bandera sanitaria la vista no exige las declaraciones (la vigilancia no es universal)',
   plainView.sanitaryResolutionRequired === false && plainView.canResolve === true);
 await plainView.submitResolve();
@@ -1109,6 +1170,7 @@ const overtakenDiagnosis = 'Sonda NTC descalibrada con lectura real de 14 grados
 const overtakenAction = 'Sustitución de la sonda NTC y verificación del ciclo completo de frío a 3,5 grados.';
 overtakenView.resolveDiagnosis = overtakenDiagnosis;
 overtakenView.resolveAction = overtakenAction;
+selectResolutionTaxonomy(overtakenView);
 
 assert('14.1 La parada sin bandera sanitaria abre la resolución por el camino ordinario',
   overtakenView.sanitaryResolutionRequired === false && overtakenView.canResolve === true);
@@ -1167,6 +1229,7 @@ api.technician.resolveIncident = async () => {
 await unrelatedView.openResolveModal(JSON.parse(JSON.stringify(mockRouteIncidents.find(i => i.id === 101))));
 unrelatedView.resolveDiagnosis = overtakenDiagnosis;
 unrelatedView.resolveAction = overtakenAction;
+selectResolutionTaxonomy(unrelatedView);
 await unrelatedView.submitResolve();
 
 assert('14.6 Un rechazo ajeno a la cuarentena no abre el bloque sanitario (control negativo)',
@@ -1318,6 +1381,7 @@ assert('16.3 El bloque se remonta al cambiar de avería para no arrastrar la fir
   await signingView.openResolveModal(mockRouteIncidents[1]);
   signingView.resolveDiagnosis = 'Sonda NTC de temperatura descalibrada registrando 14 grados.';
   signingView.resolveAction = 'Sustitución de sonda NTC y verificación de ciclo a 3.5 grados.';
+  selectResolutionTaxonomy(signingView);
   signingView.$refs = {
     resolutionServiceSheetBlockRef: {
       validate: () => ({
@@ -1356,6 +1420,7 @@ assert('16.3 El bloque se remonta al cambiar de avería para no arrastrar la fir
   await blockedView.openResolveModal(mockRouteIncidents[1]);
   blockedView.resolveDiagnosis = 'Sonda NTC de temperatura descalibrada registrando 14 grados.';
   blockedView.resolveAction = 'Sustitución de sonda NTC y verificación de ciclo a 3.5 grados.';
+  selectResolutionTaxonomy(blockedView);
   blockedView.$refs = {
     resolutionServiceSheetBlockRef: {
       validate: () => ({ isValid: false, field: 'signer_name', error: 'El nombre del firmante debe tener al menos 3 caracteres.' })
@@ -1379,6 +1444,7 @@ assert('16.3 El bloque se remonta al cambiar de avería para no arrastrar la fir
   await missingRefView.openResolveModal(mockRouteIncidents[1]);
   missingRefView.resolveDiagnosis = 'Sonda NTC de temperatura descalibrada registrando 14 grados.';
   missingRefView.resolveAction = 'Sustitución de sonda NTC y verificación de ciclo a 3.5 grados.';
+  selectResolutionTaxonomy(missingRefView);
   missingRefView.$refs = {};
 
   await missingRefView.submitResolve();

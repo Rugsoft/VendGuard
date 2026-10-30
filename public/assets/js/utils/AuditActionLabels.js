@@ -176,6 +176,8 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   // servicio; sin etiqueta el visor mostraría el código crudo.
   { code: 'CREATE_ROOT_CAUSE', label: 'Alta de Causa Raíz', tone: 'success', group: 'taxonomy' },
   { code: 'UPDATE_ROOT_CAUSE', label: 'Modificación de Causa Raíz', tone: 'neutral', group: 'taxonomy' },
+  { code: 'REACTIVATE_ROOT_CAUSE', label: 'Reactivación de Causa Raíz', tone: 'success', group: 'taxonomy' },
+  { code: 'DEACTIVATE_ROOT_CAUSE', label: 'Desactivación de Causa Raíz', tone: 'danger', group: 'taxonomy' },
   { code: 'CREATE_STANDARD_SOLUTION', label: 'Alta de Solución Estandarizada', tone: 'success', group: 'taxonomy' },
   { code: 'UPDATE_STANDARD_SOLUTION', label: 'Modificación de Solución Estandarizada', tone: 'neutral', group: 'taxonomy' },
   // Exportación del informe Pareto 80/20: la escribe el mismo módulo y el

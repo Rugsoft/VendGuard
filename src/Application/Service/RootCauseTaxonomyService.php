@@ -142,16 +142,16 @@ final class RootCauseTaxonomyService
                 throw $this->translateUniqueViolation($exception);
             }
 
-            $this->recordAudit(
-                'CREATE_ROOT_CAUSE',
-                (int) $persistedCause->getId(),
-                null,
-                [
+            $this->recordTaxonomyAudit(
+                action: 'CREATE_ROOT_CAUSE',
+                entityId: (int) $persistedCause->getId(),
+                previous: null,
+                new: [
                     'root_cause' => $persistedCause->toArray(),
                     'initial_solution' => $persistedSolution->toArray(),
                 ],
-                $coordinatorId,
-                $coordinatorName
+                coordinatorId: $coordinatorId,
+                coordinatorName: $coordinatorName
             );
 
             return $persistedCause->withSolutions([$persistedSolution]);
@@ -217,19 +217,38 @@ final class RootCauseTaxonomyService
                 $current->getUpdatedAt()
             ));
 
-            $action = 'UPDATE_ROOT_CAUSE';
-            if ($current->isActive() !== $updated->isActive()) {
-                $action = $updated->isActive() ? 'REACTIVATE_ROOT_CAUSE' : 'DEACTIVATE_ROOT_CAUSE';
+            // Tres literales, no una acción calculada: la guarda de vocabulario
+            // (`AuditActionCatalogTest`) deriva el catálogo del visor de las
+            // llamadas reales y una variable opaca dejaría las transiciones de
+            // vigencia fuera del vocabulario auditado.
+            if (!$current->isActive() && $updated->isActive()) {
+                $this->recordTaxonomyAudit(
+                    action: 'REACTIVATE_ROOT_CAUSE',
+                    entityId: $rootCauseId,
+                    previous: $current->toArray(),
+                    new: $updated->toArray(),
+                    coordinatorId: $coordinatorId,
+                    coordinatorName: $coordinatorName
+                );
+            } elseif ($current->isActive() && !$updated->isActive()) {
+                $this->recordTaxonomyAudit(
+                    action: 'DEACTIVATE_ROOT_CAUSE',
+                    entityId: $rootCauseId,
+                    previous: $current->toArray(),
+                    new: $updated->toArray(),
+                    coordinatorId: $coordinatorId,
+                    coordinatorName: $coordinatorName
+                );
+            } else {
+                $this->recordTaxonomyAudit(
+                    action: 'UPDATE_ROOT_CAUSE',
+                    entityId: $rootCauseId,
+                    previous: $current->toArray(),
+                    new: $updated->toArray(),
+                    coordinatorId: $coordinatorId,
+                    coordinatorName: $coordinatorName
+                );
             }
-
-            $this->recordAudit(
-                $action,
-                $rootCauseId,
-                $current->toArray(),
-                $updated->toArray(),
-                $coordinatorId,
-                $coordinatorName
-            );
 
             return $updated;
         });
@@ -285,13 +304,13 @@ final class RootCauseTaxonomyService
                 throw $this->translateUniqueViolation($exception);
             }
 
-            $this->recordAudit(
-                'CREATE_STANDARD_SOLUTION',
-                (int) $persisted->getId(),
-                null,
-                $persisted->toArray(),
-                $coordinatorId,
-                $coordinatorName
+            $this->recordTaxonomyAudit(
+                action: 'CREATE_STANDARD_SOLUTION',
+                entityId: (int) $persisted->getId(),
+                previous: null,
+                new: $persisted->toArray(),
+                coordinatorId: $coordinatorId,
+                coordinatorName: $coordinatorName
             );
 
             return $persisted;
@@ -385,13 +404,13 @@ final class RootCauseTaxonomyService
                 $current->getUpdatedAt()
             ));
 
-            $this->recordAudit(
-                'UPDATE_STANDARD_SOLUTION',
-                $solutionId,
-                $current->toArray(),
-                $updated->toArray(),
-                $coordinatorId,
-                $coordinatorName
+            $this->recordTaxonomyAudit(
+                action: 'UPDATE_STANDARD_SOLUTION',
+                entityId: $solutionId,
+                previous: $current->toArray(),
+                new: $updated->toArray(),
+                coordinatorId: $coordinatorId,
+                coordinatorName: $coordinatorName
             );
 
             return $updated;
@@ -438,13 +457,13 @@ final class RootCauseTaxonomyService
         // La designación muta una segunda fila del catálogo: se audita también,
         // o la reactivación de la causa no dejaría rastro de qué solución pasó a
         // ser la predeterminada (Art. III.3, QA 1).
-        $this->recordAudit(
-            'UPDATE_STANDARD_SOLUTION',
-            $solutionId,
-            $solution->toArray(),
-            $designated->toArray(),
-            $coordinatorId,
-            $coordinatorName
+        $this->recordTaxonomyAudit(
+            action: 'UPDATE_STANDARD_SOLUTION',
+            entityId: $solutionId,
+            previous: $solution->toArray(),
+            new: $designated->toArray(),
+            coordinatorId: $coordinatorId,
+            coordinatorName: $coordinatorName
         );
     }
 
@@ -549,7 +568,7 @@ final class RootCauseTaxonomyService
      * @param array<string, mixed> $previous
      * @param array<string, mixed> $new
      */
-    private function recordAudit(
+    private function recordTaxonomyAudit(
         string $action,
         int $entityId,
         ?array $previous,
