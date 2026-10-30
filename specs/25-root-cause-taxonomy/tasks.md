@@ -312,3 +312,70 @@
     2. Actualizar `docs/features_pendientes.md` marcando la **Feature 11 (🔍 Taxonomía de Causas Raíz y Soluciones Estandarizadas)** como **100 % IMPLEMENTADA (Módulo 25: `25-root-cause-taxonomy`)**.
     3. Ejecutar la batería completa del proyecto (`php tests/run_all.php`), incluyendo `SchemaCorrespondenceTest`, `SingleEngineDialectContractTest` y `DesignTokenDebtRatchetTest`, verificando 0 fallos.
   * **Hecho cuando:** `php tests/run_all.php` finaliza con el 100 % de las suites y aserciones en verde (`exit code 0`).
+
+---
+
+## Fase 8: Remediación de los huecos de visibilidad y evidencia (Auditoría Spec 25)
+
+- [x] **T-TAXONOMY-17 · Taxonomía congelada en el historial de máquina**
+  * **Tiempo estimado:** 15 min
+  * **Dependencias previas:** `T-TAXONOMY-16`
+  * **Ficheros a crear o modificar:**
+    * `src/Presentation/Controller/TechnicianController.php` **(modificar)**
+    * `public/assets/js/components/TechnicianMachineHistoryModal.js` **(modificar)**
+    * `tests/unit/TechnicianMachineHistoryServiceTest.php` **(modificar)**
+    * `tests/integration/TechnicianMachineHistoryApiTest.php` **(modificar)**
+    * `tests/unit/TechnicianMachineHistoryModalTest.mjs` **(modificar)**
+  * **Requisitos que cubre:** `RF-04` (`EARS 04.1`), `D4`, `QA 5`, Art. V.4, Criterio de Finalización 4.
+  * **Detalle de implementación:**
+    1. En `getMachineHistory()`, publicar `root_cause` y `standard_solution` por cada expediente a partir de los cinco snapshots congelados, con `null` cuando la avería no fue clasificada. Sin costes, reintegros ni datos de sede.
+    2. Pintar en el modal la insignia `[RC-CODE] Nombre (Categoría) → [SOL-CODE] Nombre` con tokens CSS y sin nuevos literales hexadecimales.
+    3. Certificar el payload en servicio y API real, la ausencia de datos privados y el render del modal.
+  * **Hecho cuando:** `php tests/unit/TechnicianMachineHistoryServiceTest.php && php tests/integration/TechnicianMachineHistoryApiTest.php && node tests/unit/TechnicianMachineHistoryModalTest.mjs` pasan al 100 % en verde.
+
+- [x] **T-TAXONOMY-18 · Detalle del técnico y cierres previos en la línea de tiempo**
+  * **Tiempo estimado:** 30 min
+  * **Dependencias previas:** `T-TAXONOMY-17`
+  * **Ficheros a crear o modificar:**
+    * `src/Infrastructure/Repository/PdoIncidentRepository.php` **(modificar)**
+    * `src/Core/Service/ResolutionTaxonomyHistoryParser.php` **(crear)**
+    * `src/Application/Service/CoordinatorIncidentDetailService.php` **(modificar)**
+    * `src/Presentation/Controller/TechnicianController.php` **(modificar)**
+    * `src/Presentation/Routing/AppRouter.php` **(modificar)**
+    * `public/assets/js/api.js` **(modificar)**
+    * `public/assets/js/components/TechnicianMachineHistoryModal.js` **(modificar)**
+    * `public/assets/js/components/CoordinatorIncidentDetailModal.js` **(modificar)**
+    * `tests/unit/CoordinatorIncidentDetailServiceTest.php` **(modificar)**
+    * `tests/unit/CoordinatorIncidentDetailModalTest.mjs` **(modificar)**
+    * `tests/unit/TechnicianMachineHistoryServiceTest.php` **(modificar)**
+    * `tests/integration/TechnicianMachineHistoryApiTest.php` **(modificar)**
+    * `tests/unit/TechnicianMachineHistoryModalTest.mjs` **(modificar)**
+    * `tests/integration/RootCauseTaxonomyIntegrationTest.php` **(modificar)**
+    * `tests/unit/FrontendApiStoreTest.mjs` **(modificar)**
+  * **Requisitos que cubre:** `RF-03` (`EARS 03.1`), `RF-04` (`EARS 04.1`), `C1`, `QA 2`, `QA 3`, Art. III.3 y Art. V.4, Criterio de Finalización 4.
+  * **Detalle de implementación:**
+    1. Añadir a la nota de preservación el marcador `[TAXONOMY_SNAPSHOT]` con los cinco campos congelados, manteniendo el texto humano y sin perder el evento si la codificación falla.
+    2. Crear `ResolutionTaxonomyHistoryParser` (JSON primero, nota antigua como respaldo, notas ajenas ignoradas, orden cronológico).
+    3. Publicar `timeline.previous_classifications` en el detalle de Coordinación y pintarlas antes del cierre vigente.
+    4. Crear `GET /api/technician/incidents/{id}/detail` con autorización de responsable histórico o máquina en ruta, sin costes ni reintegros, y exponerlo en `api.js` y en la expansión del historial de máquina.
+    5. Certificar el ciclo completo de reapertura: causa vigente nueva y causa/solución anteriores visibles en Coordinación y en el detalle del técnico.
+  * **Hecho cuando:** las suites enfocadas de Coordinación, Técnico, API y el caso de reapertura de `RootCauseTaxonomyIntegrationTest` pasan al 100 % en verde y `php -l` no reporta errores.
+
+- [x] **T-TAXONOMY-19 · Certificación de RNF-03, índice real y exención crónica**
+  * **Tiempo estimado:** 25 min
+  * **Dependencias previas:** `T-TAXONOMY-18`
+  * **Ficheros a crear o modificar:**
+    * `tests/integration/RootCauseParetoPerformanceTest.php` **(crear)**
+    * `tests/integration/PostgresRootCauseTaxonomySchemaTest.php` **(modificar)**
+    * `tests/integration/OpportunisticIncidentApiIntegrationTest.php` **(modificar)**
+    * `specs/25-root-cause-taxonomy/traceability-matrix.md` **(modificar)**
+    * `specs/25-root-cause-taxonomy/tasks.md` **(modificar)**
+    * `README.md` **(modificar)**
+    * `deploy/local/postgres/README.md` **(modificar)**
+  * **Requisitos que cubre:** `RNF-03`, `RF-02` (`EARS 02.1`), `RF-05` (`EARS 05.1` a `EARS 05.6`), `QA 3`, `C3`, `D5`, Art. III.1, Criterios de Finalización 5 y 6.
+  * **Detalle de implementación:**
+    1. Crear la suite `new_engine` de rendimiento: 10.000 incidencias clasificadas con repuestos, calentamiento, tres muestras, mediana < 500 ms y ≤ 4 sentencias SQL por informe mediante un PDO contador.
+    2. Verificar en `PostgresRootCauseTaxonomySchemaTest` el índice real `idx_incidents_pareto_resolved` sobre `(resolved_at, root_cause_id)` con predicado parcial; corregir la atribución al índice inexistente.
+    3. Añadir a `OpportunisticIncidentApiIntegrationTest` la prueba de que el predecesor crónico queda `CLOSED` sin taxonomía inventada.
+    4. Corregir la matriz (`04.1`, `02.1`/`QA 3`, `RNF-03`, inventario y corrida de certificación) y sincronizar los recuentos documentales tras la corrida real.
+  * **Hecho cuando:** `php tests/integration/RootCauseParetoPerformanceTest.php` pasa con mediana < 500 ms, `php tests/run_new_engine.php` termina 32/32 en verde y `php tests/run_all.php` termina con 0 fallos y cifras documentadas coherentes.

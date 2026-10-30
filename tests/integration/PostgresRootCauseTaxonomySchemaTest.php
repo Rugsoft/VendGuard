@@ -90,6 +90,27 @@ try {
         sprintf('%d sentencias · migraciones: %s', $schemaReport['statements'], implode(', ', $schemaReport['migrations']))
     );
 
+    // El Pareto 80/20 se apoya en un índice real, no en uno declarado sólo en la
+    // documentación (RNF-03, T-TAXONOMY-19). Se verifica la definición completa:
+    // columnas, predicado parcial y estado del borrado lógico.
+    $paretoIndex = $pgPdo->query(
+        "SELECT indexdef
+           FROM pg_indexes
+          WHERE schemaname = current_schema()
+            AND tablename = 'incidents'
+            AND indexname = 'idx_incidents_pareto_resolved'"
+    )->fetchColumn();
+    $assert(
+        'El índice idx_incidents_pareto_resolved existe sobre (resolved_at, root_cause_id) con predicado parcial',
+        is_string($paretoIndex)
+            && str_contains($paretoIndex, '(resolved_at, root_cause_id)')
+            && str_contains($paretoIndex, 'WHERE')
+            && str_contains($paretoIndex, 'RESOLVED')
+            && str_contains($paretoIndex, 'CLOSED')
+            && str_contains($paretoIndex, 'deleted_at IS NULL'),
+        $paretoIndex === false ? 'índice ausente en el catálogo vivo' : (string)$paretoIndex
+    );
+
     // Padres mínimos del expediente: el alta genérica del arnés respeta el grafo.
     $parents = [];
     $parents['locations'] = PostgresFixtureBuilder::insertMinimumRow($pgPdo, 'locations', $parents, '01');

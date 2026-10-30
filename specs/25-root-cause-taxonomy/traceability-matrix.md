@@ -8,7 +8,7 @@
 
 **Esquema de referencia:** `RF-01` catálogo maestro · `RF-02` captura en resolución e independencia del Art. V.1 · `RF-03` reaperturas y modo sin conexión · `RF-04` expediente y privacidad por rol · `RF-05` Pareto 80/20 y exportación de garantías.
 
-**Corrida de certificación:** batería hermética con el motor PostgreSQL 16 del arnés (`vendguard_battery`): **376 suites · 14.302 aserciones · 0 fallos · exit 0**. Canal `new_engine`: **31 suites descubiertas**. Las suites de esquema, integración HTTP y dialecto se ejecutan en el canal del motor real conforme a su contrato de entorno.
+**Corrida de certificación:** batería hermética con el motor PostgreSQL 16 del arnés (`vendguard_battery`): **376 suites · 14.336 aserciones · 0 fallos · exit 0**. Canal `new_engine`: **32 suites en verde · 963 aserciones · 0 fallos · exit 0**. Las suites de esquema, integración HTTP y dialecto se ejecutan en el canal del motor real conforme a su contrato de entorno.
 
 ---
 
@@ -38,7 +38,7 @@
 
 | Criterio | Artefacto de código | Test que lo cubre | Resultado medido |
 |---|---|---|---|
-| **02.1** Obligatoriedad en `RESOLVED` y exención del cierre por 3.ª reincidencia | `ResolutionTaxonomyValidator`; `SparePartTraceabilityService::resolveIncidentWithConsumption`; `TechnicianController::resolveIncident`; `CoordinatorController::resolveIncident`; `TechnicianOpportunisticController` (exención del reemplazo crónico) | `ResolutionTaxonomyValidatorTest.php`; `RootCauseTaxonomyIntegrationTest.php` (técnico y coordinador `422`, exención crónica); `TechnicianRouteViewTest.mjs`; `SparePartsIntegrationComponentsTest.mjs` | ✅ |
+| **02.1** Obligatoriedad en `RESOLVED` y exención del cierre por 3.ª reincidencia | `ResolutionTaxonomyValidator`; `SparePartTraceabilityService::resolveIncidentWithConsumption`; `TechnicianController::resolveIncident`; `CoordinatorController::resolveIncident`; `TechnicianOpportunisticController` (exención del reemplazo crónico) | `ResolutionTaxonomyValidatorTest.php`; `RootCauseTaxonomyIntegrationTest.php` (técnico y coordinador `422`, exención crónica); `OpportunisticIncidentApiIntegrationTest.php` (4.11: predecesor crónico sin taxonomía inventada); `TechnicianRouteViewTest.mjs`; `SparePartsIntegrationComponentsTest.mjs` | ✅ |
 | **02.2** Independencia estricta de los 20 caracteres | `ResolutionTaxonomyValidator` (no toca `diagnosis`/`action`); `ResolutionValidator`; `TechnicianRouteView.js` (selectores sin escritura en texto libre) | `ResolutionTaxonomyValidatorTest.php` (independencia Art. V.1); `RootCauseTaxonomyFrontendAndPwaTest.mjs`; `TechnicianRouteViewTest.mjs`; `RootCauseTaxonomyIntegrationTest.php` | ✅ |
 | **02.3** Priorización por categoría + «Mostrar todas» | `TechnicianRouteView.js` (`resolutionCauseOptions`, conmutador `showAllCategories`); `CoordinatorIncidentDetailModal.js` | `RootCauseTaxonomyFrontendAndPwaTest.mjs`; `TechnicianRouteViewTest.mjs` | ✅ |
 | **02.4** Preselección automática de la solución predeterminada | `TechnicianRouteView.js`; `CoordinatorIncidentDetailModal.js`; `api.getTechnicianRootCauses()` | `RootCauseTaxonomyFrontendAndPwaTest.mjs`; `TechnicianRouteViewTest.mjs` | ✅ |
@@ -57,7 +57,7 @@
 
 | Criterio | Artefacto de código | Test que lo cubre | Resultado medido |
 |---|---|---|---|
-| **04.1** Visibilidad en expediente e historial | `CoordinatorIncidentDetailDto` (`root_cause_classification`); `CoordinatorIncidentDetailService`; `CoordinatorIncidentDetailModal.js` | `CoordinatorIncidentDetailDtoTest.php`; `RootCauseTaxonomyIntegrationTest.php`; `RootCauseTaxonomyFrontendAndPwaTest.mjs` | ✅ |
+| **04.1** Visibilidad en expediente e historial | `CoordinatorIncidentDetailDto` (`root_cause_classification` y `timeline.previous_classifications`); `CoordinatorIncidentDetailService`; `ResolutionTaxonomyHistoryParser`; `CoordinatorIncidentDetailModal.js`; `TechnicianController::getMachineHistory` / `getIncidentDetail`; `TechnicianMachineHistoryModal.js` | `CoordinatorIncidentDetailDtoTest.php`; `CoordinatorIncidentDetailServiceTest.php` (cierres previos); `CoordinatorIncidentDetailModalTest.mjs`; `RootCauseTaxonomyIntegrationTest.php` (3.11.b y 3.11.c); `TechnicianMachineHistoryServiceTest.php`; `TechnicianMachineHistoryApiTest.php`; `TechnicianMachineHistoryModalTest.mjs`; `RootCauseTaxonomyFrontendAndPwaTest.mjs` | ✅ |
 | **04.2** Pareto, CSV y CRUD exclusivos de Coordinación | `CoordinatorRootCauseController`; `CoordinatorMetricsController`; `AppRouter`; `CoordinatorRootCauseParetoTab.js`; `CoordinatorRootCauseCatalogModal.js` | `RootCauseTaxonomyIntegrationTest.php` (`403` para técnico y sede); `RootCauseTaxonomyFrontendAndPwaTest.mjs` | ✅ |
 | **04.3** Opacidad en Sede, QR y Albarán A4 | `LocationPortalController` (lista de claves internas excluidas); `LocationPortalView.js`; `QrReportView.js`; `ServiceSheetModal.js`; `QrBatchPrintView.js` | `RootCauseTaxonomyIntegrationTest.php`; `RootCauseTaxonomyFrontendAndPwaTest.mjs`; `SiteManagerPartsDataSegregationTest.php`/`SiteManagerRefundDataSegregationTest.php` (segregación Art. V.4 de la superficie de sede) | ✅ |
 
@@ -80,7 +80,7 @@
 |---|---|---|---|
 | **RNF-01** Autonomía de red y offline | Chart.js y catálogo servidos localmente; shell precacheado | `public/assets/js/vendor/chart.umd.min.js`; `public/sw.js` (`vendguard-app-shell-v3`); `OfflineStorage.js` | `RootCauseTaxonomyFrontendAndPwaTest.mjs` (precache y `Network-Only` de `/api/`); `OfflinePwaAssetsAndUiGuardTest.mjs` |
 | **RNF-02** Fidelidad al sistema de diseño | Tokens CSS, tipografía dual, radios 4/8 px y objetivos táctiles ≥ 44 px; cero hexadecimales en JS | `public/assets/css/design-tokens.css`; `styles.css`; `CoordinatorRootCauseParetoTab.js`; `CoordinatorRootCauseCatalogModal.js`; `TechnicianRouteView.js` | `DesignTokenDebtRatchetTest.mjs`; `RootCauseTaxonomyFrontendAndPwaTest.mjs`; `DesignTokensTest.php` |
-| **RNF-03** Rendimiento analítico | Agregación en SQL sin N+1; índice `idx_incidents_root_cause_pareto` | `PdoRootCauseParetoAnalyticsRepository`; `021_root_cause_taxonomy.sql`; `supabase_init.sql` | `RootCauseTaxonomyIntegrationTest.php` (consulta completa por la API); `PostgresRootCauseTaxonomySchemaTest.php` (índices declarados) |
+| **RNF-03** Rendimiento analítico | Agregación en SQL sin N+1; índice real `idx_incidents_pareto_resolved` sobre `(resolved_at, root_cause_id)` con predicado parcial | `PdoRootCauseParetoAnalyticsRepository`; `RootCauseParetoService`; `021_root_cause_taxonomy.sql`; `supabase_init.sql` | `RootCauseParetoPerformanceTest.php` (10.000 averías y 20.000 repuestos; mediana **170,9 ms** en tres muestras y **4 sentencias SQL** por informe); `PostgresRootCauseTaxonomySchemaTest.php` (definición completa del índice en el catálogo vivo); `RootCauseTaxonomyIntegrationTest.php` (consulta completa por la API) |
 
 ---
 
@@ -116,7 +116,7 @@
 |---|---|---|---|
 | **QA 1** | 2, 6, 7, 8, 13 | Alta atómica con predeterminada, inmutabilidad de código/categoría, guardas de reactivación y auditoría antes/después bajo `ROOT_CAUSE_TAXONOMY` | `RootCauseTaxonomyServiceTest.php`; `RootCauseTaxonomyIntegrationTest.php`; `AuditActionCatalogTest.php`; `PostgresRootCauseTaxonomySchemaTest.php` |
 | **QA 2** | 3, 4, 5, 11 | Filtro por `resolved_at` vigente, atribución íntegra del expediente, cierre exacto en `100.00%` y CSV con nombre vigente + congelado | `RootCauseParetoServiceTest.php`; `RootCauseTaxonomyIntegrationTest.php`; `RootCauseTaxonomyFrontendAndPwaTest.mjs` |
-| **QA 3** | 9, 10 | Obligatoriedad en todo paso a `RESOLVED` de técnico y coordinador, exención del cierre por reemplazo en 3.ª reincidencia e inmutabilidad post-cierre | `ResolutionTaxonomyValidatorTest.php`; `RootCauseTaxonomyIntegrationTest.php`; `TechnicianRouteViewTest.mjs`; `SparePartsIntegrationComponentsTest.mjs` |
+| **QA 3** | 9, 10 | Obligatoriedad en todo paso a `RESOLVED` de técnico y coordinador, exención del cierre por reemplazo en 3.ª reincidencia sin taxonomía inventada e inmutabilidad post-cierre | `ResolutionTaxonomyValidatorTest.php`; `RootCauseTaxonomyIntegrationTest.php`; `OpportunisticIncidentApiIntegrationTest.php` (4.11); `TechnicianRouteViewTest.mjs`; `SparePartsIntegrationComponentsTest.mjs` |
 | **QA 4** | 1 | Fabricante determinista en Formato Título y filtro por modelo acotado | `ManufacturerNormalizerTest.php`; `RootCauseParetoServiceTest.php`; `RootCauseTaxonomyIntegrationTest.php`; `RootCauseTaxonomyFrontendAndPwaTest.mjs` |
 | **QA 5** | 12 | CRUD, Pareto, costes y CSV exclusivos de `COORDINATOR`; `403` a técnico y sede; opacidad total en Sede/QR/A4 | `RootCauseTaxonomyIntegrationTest.php`; `RootCauseTaxonomyFrontendAndPwaTest.mjs`; `SiteManagerRouteDataSegregationTest.php` |
 | **Art. III.1 / III.3** | Borrado físico y auditabilidad | `ON DELETE RESTRICT` en ambas tablas; soft-delete; snapshots congelados; auditoría con estado anterior y nuevo | `PostgresRootCauseTaxonomySchemaTest.php`; `RootCauseTaxonomyServiceTest.php`; `RootCauseTaxonomyIntegrationTest.php` |
@@ -130,7 +130,8 @@
 
 | Suite | Tipo | Cobertura principal |
 |---|---|---|
-| `tests/integration/PostgresRootCauseTaxonomySchemaTest.php` | Integración PostgreSQL | Tablas 35/36, índice de predeterminada única, `chk_incidents_taxonomy_pair_consistency`, `ON DELETE RESTRICT` |
+| `tests/integration/PostgresRootCauseTaxonomySchemaTest.php` | Integración PostgreSQL | Tablas 35/36, índice de predeterminada única, coherencia todo-o-nada de snapshots, `ON DELETE RESTRICT` e índice real `idx_incidents_pareto_resolved` |
+| `tests/integration/RootCauseParetoPerformanceTest.php` | Integración PostgreSQL | RNF-03: 10.000 averías con 20.000 repuestos, mediana < 500 ms y ≤ 4 sentencias SQL por informe |
 | `tests/unit/ResolutionTaxonomyValidatorTest.php` | Unitaria PHP | Presencia, pertenencia, inactividad online, tolerancia offline e independencia Art. V.1 |
 | `tests/unit/ManufacturerNormalizerTest.php` | Unitaria PHP | Extracción determinista y Formato Título (QA 4) |
 | `tests/unit/RootCauseTaxonomyServiceTest.php` | Unitaria PHP | Alta atómica, guardas `409`/`422`, conmutación y auditoría (QA 1, C2, C4) |
@@ -141,6 +142,11 @@
 | `tests/integration/OfflinePwaSyncApiTest.php` | Integración HTTP | Bootstrap con `root_cause_taxonomy` y resolución offline |
 | `tests/unit/OfflineStorageAndSyncManagerTest.mjs` | Unitaria ESM | Persistencia de taxonomía en `IndexedDB` y transporte en `RESOLVE_INCIDENT` |
 | `tests/unit/CoordinatorIncidentDetailDtoTest.php` | Unitaria PHP | `root_cause_classification` y snapshots en expediente |
+| `tests/unit/CoordinatorIncidentDetailServiceTest.php` | Unitaria PHP | Reconstrucción de cierres previos preservados en la línea de tiempo (`C1`, EARS 04.1) |
+| `tests/unit/CoordinatorIncidentDetailModalTest.mjs` | Unitaria ESM | Hitos de cierre anterior y etiqueta congelada de causa/solución |
+| `tests/unit/TechnicianMachineHistoryServiceTest.php` | Unitaria PHP | Historial de máquina con snapshots congelados y sin datos privados |
+| `tests/integration/TechnicianMachineHistoryApiTest.php` | Integración HTTP | Historial y detalle read-only del técnico, autorización (vigente e histórica) y privacidad Art. V.4 |
+| `tests/unit/TechnicianMachineHistoryModalTest.mjs` | Unitaria ESM | Insignia de clasificación congelada y detalle ampliable del expediente |
 | `tests/unit/AuditActionCatalogTest.php` | Unitaria PHP | Catálogo de acciones y etiquetas de auditoría del visor |
 | `tests/unit/DesignTokenDebtRatchetTest.mjs` | Guarda de diseño | Cero deuda de tokens y radios/objetivos táctiles |
 | `tests/unit/OfflinePwaAssetsAndUiGuardTest.mjs` | Guarda PWA | App Shell, Chart.js precacheado y `Network-Only` |
@@ -158,11 +164,14 @@
 | Normalizador | `php tests/unit/ManufacturerNormalizerTest.php` | ✅ 100 % en verde |
 | Servicio de catálogo | `php tests/unit/RootCauseTaxonomyServiceTest.php` | ✅ 100 % en verde |
 | Motor Pareto | `php tests/unit/RootCauseParetoServiceTest.php` | ✅ 100 % en verde |
-| Integración HTTP | `php tests/integration/RootCauseTaxonomyIntegrationTest.php` | ✅ 100 % en verde |
+| Integración HTTP | `php tests/integration/RootCauseTaxonomyIntegrationTest.php` | ✅ 100 % en verde (66 aserciones) |
+| Rendimiento del Pareto | `php tests/integration/RootCauseParetoPerformanceTest.php` | ✅ **11 aserciones · mediana 170,9 ms · 3×4 sentencias SQL** |
+| Detalle read-only del técnico | `php tests/integration/TechnicianMachineHistoryApiTest.php` | ✅ 100 % en verde (23 aserciones) |
+| Canal del motor nuevo | `php tests/run_new_engine.php` | ✅ **32/32 suites · 963 aserciones · 0 no ejecutables · exit 0** |
 | Frontend y PWA | `node tests/unit/RootCauseTaxonomyFrontendAndPwaTest.mjs` | ✅ 100 % en verde |
 | Guarda de diseño | `php tests/unit/DesignTokenDebtRatchetTest.php` | ✅ 100 % en verde |
 | Guarda de dialecto | `php tests/unit/SqlDialectPortabilityTest.php` | ✅ 100 % en verde |
-| Regresión completa | `php tests/run_all.php` | ✅ **376 suites · 14.302 aserciones · 0 fallos · exit 0** |
+| Regresión completa | `php tests/run_all.php` | ✅ **376 suites · 14.336 aserciones · 0 fallos · exit 0** |
 
 ---
 

@@ -612,7 +612,12 @@ $incidentRepo->insertHistory((int)$chronicCandidate->getId(), $jordi->getId(), '
     ['reopen_reason' => 'Tercera reincidencia del mismo monedero en menos de 48 horas.']
 );
 $chronic = $body['data'] ?? [];
-$stmt = $pdo->prepare('SELECT status, reopen_reason FROM incidents WHERE id = :id');
+$stmt = $pdo->prepare(
+    'SELECT status, reopen_reason, root_cause_id, standard_solution_id,
+            root_cause_code_snapshot, root_cause_category_snapshot, root_cause_name_snapshot,
+            standard_solution_code_snapshot, standard_solution_name_snapshot
+       FROM incidents WHERE id = :id'
+);
 $stmt->execute([':id' => $chronicCandidate->getId()]);
 $predecessor = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 $assert(
@@ -627,6 +632,28 @@ $assert(
     ($predecessor['status'] ?? null) === 'CLOSED'
         && str_contains((string)($predecessor['reopen_reason'] ?? ''), '[AVERÍA CRÓNICA]')
         && (int)($chronic['chronic_predecessor_incident_id'] ?? 0) === (int)$chronicCandidate->getId()
+);
+
+// La retirada por reemplazo crónico es la única puerta que cierra sin
+// clasificación (QA 3): el predecesor no hereda ni inventa taxonomía, y tampoco
+// sus cinco snapshots. Cualquier relleno aquí falsearía el Pareto 80/20.
+$predecessorTaxonomyFields = [
+    'root_cause_id',
+    'standard_solution_id',
+    'root_cause_code_snapshot',
+    'root_cause_category_snapshot',
+    'root_cause_name_snapshot',
+    'standard_solution_code_snapshot',
+    'standard_solution_name_snapshot',
+];
+$inventedTaxonomy = array_values(array_filter(
+    $predecessorTaxonomyFields,
+    static fn (string $field): bool => ($predecessor[$field] ?? null) !== null
+));
+$assert(
+    '4.11 El predecesor crónico se cierra sin clasificación inventada (QA 3)',
+    $inventedTaxonomy === [],
+    'campos rellenos: ' . implode(', ', $inventedTaxonomy)
 );
 
 // =========================================================================
