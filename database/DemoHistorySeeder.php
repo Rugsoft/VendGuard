@@ -622,6 +622,8 @@ final class DemoHistorySeeder
         $technicians = $this->technicianCatalog();
         $coordinator = $this->coordinator();
 
+        $rootCauses = $this->rootCauseCatalog();
+
         $this->pdo->beginTransaction();
 
         try {
@@ -676,7 +678,7 @@ final class DemoHistorySeeder
                     continue;
                 }
 
-                $this->upsertIncident($fixture, $machine, $technicianId, $timeline);
+                $this->upsertIncident($fixture, $machine, $technicianId, $timeline, $rootCauses);
                 $incidentCount++;
 
                 $incidentId = $this->incidentId($fixture['ticket_code']);
@@ -716,6 +718,29 @@ final class DemoHistorySeeder
     }
 
     /**
+     * Mapeo canónico de causas raíz para las averías cerradas/resueltas de demostración.
+     *
+     * Distribución intencionada tipo Pareto (80/20):
+     * - RC-PAY-01 y RC-JAM-01 concentran el volumen principal.
+     * - RC-COLD-01 y RC-ELEC-01 aportan volumen secundario.
+     * - Otras causas completan la cola de la distribución.
+     *
+     * @var array<string, string>
+     */
+    private const DEMO_TAXONOMY_MAP = [
+        'INC-DEMO-1101' => 'RC-COLD-01',
+        'INC-DEMO-1103' => 'RC-COLD-02',
+        'INC-DEMO-1105' => 'RC-JAM-01',
+        'INC-DEMO-1107' => 'RC-PAY-03',
+        'INC-DEMO-1109' => 'RC-JAM-01',
+        'INC-DEMO-1111' => 'RC-COLD-01',
+        'INC-DEMO-1113' => 'RC-ELEC-01',
+        'INC-DEMO-1115' => 'RC-PAY-01',
+        'INC-DEMO-1119' => 'RC-PAY-01',
+        'INC-DEMO-1121' => 'RC-JAM-01',
+    ];
+
+    /**
      * Alta idempotente de la avería: la clave natural es su código de ticket.
      *
      * La cláusula de reafirmación la renderiza el adaptador (`EXCLUDED` en el
@@ -725,8 +750,15 @@ final class DemoHistorySeeder
      * @param array<string, mixed> $fixture
      * @param array{id: int, location_id: int, machine_type: string} $machine
      * @param array<string, string> $timeline
+     * @param array<string, array<string, mixed>> $rootCauses
      */
-    private function upsertIncident(array $fixture, array $machine, int $technicianId, array $timeline): void
+    private function upsertIncident(
+        array $fixture,
+        array $machine,
+        int $technicianId,
+        array $timeline,
+        array $rootCauses = []
+    ): void
     {
         $columns = [
             'ticket_code', 'machine_id', 'machine_type_snapshot', 'location_id',
@@ -735,6 +767,23 @@ final class DemoHistorySeeder
             'resolved_at', 'closed_at', 'reopened_at', 'reopen_reason',
             'resolution_diagnosis', 'resolution_action', 'created_at', 'updated_at',
         ];
+
+        $causeCode = self::DEMO_TAXONOMY_MAP[$fixture['ticket_code']] ?? null;
+        $taxonomy = ($causeCode !== null && isset($rootCauses[$causeCode]))
+            ? $rootCauses[$causeCode]
+            : null;
+
+        if ($taxonomy !== null) {
+            $columns = array_merge($columns, [
+                'root_cause_id',
+                'standard_solution_id',
+                'root_cause_code_snapshot',
+                'root_cause_category_snapshot',
+                'root_cause_name_snapshot',
+                'standard_solution_code_snapshot',
+                'standard_solution_name_snapshot',
+            ]);
+        }
 
         $refresh = array_values(array_filter(
             $columns,
@@ -746,7 +795,7 @@ final class DemoHistorySeeder
             . ') '
             . $this->dialect->upsertFromInsertedRow(['ticket_code'], $refresh);
 
-        $this->pdo->prepare($sql)->execute([
+        $params = [
             ':ticket_code' => $fixture['ticket_code'],
             ':machine_id' => $machine['id'],
             ':machine_type_snapshot' => $machine['machine_type'],
@@ -768,7 +817,19 @@ final class DemoHistorySeeder
             ':resolution_action' => $this->effectiveAction($fixture),
             ':created_at' => $timeline['created'],
             ':updated_at' => $timeline['closed'] ?? $timeline['resolved'],
-        ]);
+        ];
+
+        if ($taxonomy !== null) {
+            $params[':root_cause_id'] = $taxonomy['root_cause_id'];
+            $params[':standard_solution_id'] = $taxonomy['standard_solution_id'];
+            $params[':root_cause_code_snapshot'] = $taxonomy['root_cause_code'];
+            $params[':root_cause_category_snapshot'] = $taxonomy['root_cause_category'];
+            $params[':root_cause_name_snapshot'] = $taxonomy['root_cause_name'];
+            $params[':standard_solution_code_snapshot'] = $taxonomy['standard_solution_code'];
+            $params[':standard_solution_name_snapshot'] = $taxonomy['standard_solution_name'];
+        }
+
+        $this->pdo->prepare($sql)->execute($params);
     }
 
     /**
@@ -1474,6 +1535,58 @@ final class DemoHistorySeeder
         $name = $statement->fetchColumn();
 
         return $name === false ? '' : trim((string)$name);
+    }
+
+    /**
+     * Catálogo maestro de causas raíz con su solución predeterminada activa.
+     *
+     * Si la tabla `root_causes` no existe en la base o no tiene registros,
+     * devuelve un array vacío de modo que los incidentes de demo se siembren
+     * sin taxonomía de forma retrocompatible.
+     *
+     * @return array<string, array{root_cause_id: int, standard_solution_id: int, root_cause_code: string, root_cause_category: string, root_cause_name: string, standard_solution_code: string, standard_solution_name: string}>
+     */
+    private function rootCauseCatalog(): array
+    {
+        try {
+            $sql = "
+                SELECT
+                    rc.id AS root_cause_id,
+                    rc.code AS root_cause_code,
+                    rc.category AS root_cause_category,
+                    rc.name AS root_cause_name,
+                    ss.id AS standard_solution_id,
+                    ss.code AS standard_solution_code,
+                    ss.name AS standard_solution_name
+                FROM root_causes rc
+                JOIN standard_solutions ss ON ss.root_cause_id = rc.id
+                WHERE rc.is_active = TRUE
+                  AND ss.is_active = TRUE
+                  AND ss.is_default = TRUE
+            ";
+
+            $stmt = $this->pdo->query($sql);
+            if ($stmt === false) {
+                return [];
+            }
+
+            $catalog = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $catalog[(string)$row['root_cause_code']] = [
+                    'root_cause_id' => (int)$row['root_cause_id'],
+                    'standard_solution_id' => (int)$row['standard_solution_id'],
+                    'root_cause_code' => (string)$row['root_cause_code'],
+                    'root_cause_category' => (string)$row['root_cause_category'],
+                    'root_cause_name' => (string)$row['root_cause_name'],
+                    'standard_solution_code' => (string)$row['standard_solution_code'],
+                    'standard_solution_name' => (string)$row['standard_solution_name'],
+                ];
+            }
+
+            return $catalog;
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     /**
