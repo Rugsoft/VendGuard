@@ -398,6 +398,19 @@ final class CoordinatorIncidentDetailService
                     : null,
             'created_at' => (string)($incident['created_at'] ?? ''),
             'updated_at' => (string)($incident['updated_at'] ?? ''),
+            // Taxonomía congelada al cierre (Módulo 25, RF-04, Art. III.3).
+            // Permite al DTO construir el bloque root_cause_classification.
+            'root_cause_id' => isset($incident['root_cause_id']) && $incident['root_cause_id'] !== null
+                ? (int)$incident['root_cause_id']
+                : null,
+            'standard_solution_id' => isset($incident['standard_solution_id']) && $incident['standard_solution_id'] !== null
+                ? (int)$incident['standard_solution_id']
+                : null,
+            'root_cause_code_snapshot' => $incident['root_cause_code_snapshot'] ?? null,
+            'root_cause_category_snapshot' => $incident['root_cause_category_snapshot'] ?? null,
+            'root_cause_name_snapshot' => $incident['root_cause_name_snapshot'] ?? null,
+            'standard_solution_code_snapshot' => $incident['standard_solution_code_snapshot'] ?? null,
+            'standard_solution_name_snapshot' => $incident['standard_solution_name_snapshot'] ?? null,
         ];
     }
 
