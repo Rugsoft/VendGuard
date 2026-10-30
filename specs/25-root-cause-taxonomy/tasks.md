@@ -65,7 +65,7 @@
 
 ## Fase 2: Modelos de Dominio, Validadores Puros y Normalizador de Fabricante
 
-- [ ] **T-TAXONOMY-03 · Entidades `RootCause` y `StandardSolution`, ampliación de `Incident`, validador `ResolutionTaxonomyValidator`, normalizador `ManufacturerNormalizer` e interfaz `RootCauseRepositoryInterface`**
+- [x] **T-TAXONOMY-03 · Entidades `RootCause` y `StandardSolution`, ampliación de `Incident`, validador `ResolutionTaxonomyValidator`, normalizador `ManufacturerNormalizer` e interfaz `RootCauseRepositoryInterface`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-TAXONOMY-02`
   * **Ficheros a crear o modificar:**

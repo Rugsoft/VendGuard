@@ -82,6 +82,18 @@ class Incident implements ArrayAccess, JsonSerializable
     private ?string $opportunisticInformantName;
     private ?int $chronicPredecessorIncidentId;
 
+    // Clasificación de resolución en la taxonomía de causas raíz (módulo 25).
+    // Los siete campos se congelan juntos al resolver (EARS 02.5): las dos
+    // referencias al catálogo y los cinco nombres/códigos del episodio, de modo
+    // que un renombrado posterior del catálogo no reescriba el histórico.
+    private ?int $rootCauseId;
+    private ?int $standardSolutionId;
+    private ?string $rootCauseCodeSnapshot;
+    private ?IncidentCategory $rootCauseCategorySnapshot;
+    private ?string $rootCauseNameSnapshot;
+    private ?string $standardSolutionCodeSnapshot;
+    private ?string $standardSolutionNameSnapshot;
+
     // Campos enriquecidos opcionales (vía JOIN)
     private ?string $machineCode;
     private ?string $machineModel;
@@ -148,7 +160,14 @@ class Incident implements ArrayAccess, JsonSerializable
         ?string $machineFloorWing = null,
         ?string $locationAddress = null,
         ?string $locationContactEmail = null,
-        bool $notificationContextHydrated = false
+        bool $notificationContextHydrated = false,
+        ?int $rootCauseId = null,
+        ?int $standardSolutionId = null,
+        ?string $rootCauseCodeSnapshot = null,
+        ?IncidentCategory $rootCauseCategorySnapshot = null,
+        ?string $rootCauseNameSnapshot = null,
+        ?string $standardSolutionCodeSnapshot = null,
+        ?string $standardSolutionNameSnapshot = null
     ) {
         $this->id = $id;
         $this->ticketCode = strtoupper(trim($ticketCode));
@@ -242,6 +261,37 @@ class Incident implements ArrayAccess, JsonSerializable
         $this->opportunisticOriginReason = $opportunisticOriginReason;
         $this->opportunisticInformantName = $informant;
         $this->chronicPredecessorIncidentId = $chronicPredecessorIncidentId;
+
+        // Espejo de `chk_incidents_taxonomy_coherence`: la clasificación es
+        // todo-o-nada. Una hidratación histórica trae los siete en NULL y un
+        // cierre clasificado los trae todos; un estado intermedio delataría una
+        // escritura a medias y se rechaza antes de tocar el motor.
+        $taxonomyValues = [
+            $rootCauseId,
+            $standardSolutionId,
+            $rootCauseCodeSnapshot,
+            $rootCauseCategorySnapshot,
+            $rootCauseNameSnapshot,
+            $standardSolutionCodeSnapshot,
+            $standardSolutionNameSnapshot,
+        ];
+        $declaredTaxonomyValues = array_filter(
+            $taxonomyValues,
+            static fn (mixed $value): bool => $value !== null
+        );
+        if (count($declaredTaxonomyValues) !== 0 && count($declaredTaxonomyValues) !== count($taxonomyValues)) {
+            throw new InvalidArgumentException(
+                'La clasificación de la avería es todo-o-nada: los siete campos de taxonomía deben declararse juntos o quedar todos vacíos.'
+            );
+        }
+
+        $this->rootCauseId = $rootCauseId;
+        $this->standardSolutionId = $standardSolutionId;
+        $this->rootCauseCodeSnapshot = $rootCauseCodeSnapshot;
+        $this->rootCauseCategorySnapshot = $rootCauseCategorySnapshot;
+        $this->rootCauseNameSnapshot = $rootCauseNameSnapshot;
+        $this->standardSolutionCodeSnapshot = $standardSolutionCodeSnapshot;
+        $this->standardSolutionNameSnapshot = $standardSolutionNameSnapshot;
     }
 
     /**
@@ -329,7 +379,24 @@ class Incident implements ArrayAccess, JsonSerializable
             // que permite al encolador de avisos no repetir la lectura de máquina y
             // sede. Un expediente construido en memoria no las trae y conserva la
             // ruta de lectura anterior.
-            array_key_exists('location_address', $row)
+            array_key_exists('location_address', $row),
+            isset($row['root_cause_id']) && $row['root_cause_id'] !== null ? (int)$row['root_cause_id'] : null,
+            isset($row['standard_solution_id']) && $row['standard_solution_id'] !== null ? (int)$row['standard_solution_id'] : null,
+            isset($row['root_cause_code_snapshot']) && $row['root_cause_code_snapshot'] !== null
+                ? (string)$row['root_cause_code_snapshot']
+                : null,
+            isset($row['root_cause_category_snapshot']) && $row['root_cause_category_snapshot'] !== null && $row['root_cause_category_snapshot'] !== ''
+                ? IncidentCategory::fromString((string)$row['root_cause_category_snapshot'])
+                : null,
+            isset($row['root_cause_name_snapshot']) && $row['root_cause_name_snapshot'] !== null
+                ? (string)$row['root_cause_name_snapshot']
+                : null,
+            isset($row['standard_solution_code_snapshot']) && $row['standard_solution_code_snapshot'] !== null
+                ? (string)$row['standard_solution_code_snapshot']
+                : null,
+            isset($row['standard_solution_name_snapshot']) && $row['standard_solution_name_snapshot'] !== null
+                ? (string)$row['standard_solution_name_snapshot']
+                : null
         );
     }
 
@@ -688,6 +755,95 @@ class Incident implements ArrayAccess, JsonSerializable
     public function getChronicPredecessorIncidentId(): ?int
     {
         return $this->chronicPredecessorIncidentId;
+    }
+
+    public function getRootCauseId(): ?int
+    {
+        return $this->rootCauseId;
+    }
+
+    public function getStandardSolutionId(): ?int
+    {
+        return $this->standardSolutionId;
+    }
+
+    public function getRootCauseCodeSnapshot(): ?string
+    {
+        return $this->rootCauseCodeSnapshot;
+    }
+
+    public function getRootCauseCategorySnapshot(): ?IncidentCategory
+    {
+        return $this->rootCauseCategorySnapshot;
+    }
+
+    public function getRootCauseNameSnapshot(): ?string
+    {
+        return $this->rootCauseNameSnapshot;
+    }
+
+    public function getStandardSolutionCodeSnapshot(): ?string
+    {
+        return $this->standardSolutionCodeSnapshot;
+    }
+
+    public function getStandardSolutionNameSnapshot(): ?string
+    {
+        return $this->standardSolutionNameSnapshot;
+    }
+
+    /**
+     * ¿El expediente quedó clasificado en la taxonomía de causas raíz?
+     *
+     * `false` en las averías históricas previas al Módulo 25 y en el cierre
+     * directo a `CLOSED` por reemplazo en 3.ª reincidencia crónica (QA 3).
+     */
+    public function hasResolutionTaxonomy(): bool
+    {
+        return $this->rootCauseId !== null && $this->standardSolutionId !== null;
+    }
+
+    /**
+     * Congela la clasificación del cierre en una NUEVA instancia (Art. III.3,
+     * EARS 02.5, C4).
+     *
+     * La instantánea copia el código y el nombre vigentes en este instante, de
+     * modo que un renombrado o una recategorización posterior del catálogo no
+     * altere la trazabilidad histórica del expediente ni la exportación a
+     * fabricante. La vigencia de las entidades **no** se comprueba aquí: la
+     * tolerancia offline ante una baja sobrevenida la decide
+     * `ResolutionTaxonomyValidator` (`EARS 03.3`), y esta entidad sólo obedece
+     * una clasificación ya validada.
+     *
+     * @throws InvalidArgumentException Si la solución no pertenece a la causa o alguna no está persistida.
+     */
+    public function applyResolutionTaxonomySnapshot(RootCause $rootCause, StandardSolution $standardSolution): self
+    {
+        $causeId = $rootCause->getId();
+        if ($causeId === null || $standardSolution->getId() === null) {
+            throw new InvalidArgumentException(
+                'No se puede congelar la taxonomía de una causa o una solución que aún no están persistidas.'
+            );
+        }
+
+        if ($standardSolution->getRootCauseId() !== $causeId) {
+            throw new InvalidArgumentException(sprintf(
+                'La solución «%s» no pertenece a la causa raíz «%s» y no puede congelarse como su clasificación.',
+                $standardSolution->getCode(),
+                $rootCause->getCode()
+            ));
+        }
+
+        $clone = clone $this;
+        $clone->rootCauseId = $causeId;
+        $clone->standardSolutionId = $standardSolution->getId();
+        $clone->rootCauseCodeSnapshot = $rootCause->getCode();
+        $clone->rootCauseCategorySnapshot = $rootCause->getCategory();
+        $clone->rootCauseNameSnapshot = $rootCause->getName();
+        $clone->standardSolutionCodeSnapshot = $standardSolution->getCode();
+        $clone->standardSolutionNameSnapshot = $standardSolution->getName();
+
+        return $clone;
     }
 
     public function isOpportunistic(): bool
