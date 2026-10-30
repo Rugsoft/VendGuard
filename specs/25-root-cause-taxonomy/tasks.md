@@ -26,7 +26,7 @@
 
 ## Fase 1: Esquema de Base de Datos PostgreSQL / Supabase, Semillas y Guardas de Esquema
 
-- [ ] **T-TAXONOMY-01 · Migración `021_root_cause_taxonomy.sql`, convergencia en `supabase_init.sql` y semillas del catálogo inicial**
+- [x] **T-TAXONOMY-01 · Migración `021_root_cause_taxonomy.sql`, convergencia en `supabase_init.sql` y semillas del catálogo inicial**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** Ninguna
   * **Ficheros a crear o modificar:**
