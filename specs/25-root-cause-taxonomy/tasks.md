@@ -149,7 +149,7 @@
     2. Crear `tests/unit/RootCauseTaxonomyServiceTest.php` certificando todos los invariantes anteriores.
   * **Hecho cuando:** `php tests/unit/RootCauseTaxonomyServiceTest.php` pasa al 100 % en verde con código de salida `0`.
 
-- [ ] **T-TAXONOMY-08 · Implementación de `RootCauseParetoService`, DTOs de Pareto y suite `RootCauseParetoServiceTest`**
+- [x] **T-TAXONOMY-08 · Implementación de `RootCauseParetoService`, DTOs de Pareto y suite `RootCauseParetoServiceTest`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-TAXONOMY-07`
   * **Ficheros a crear o modificar:**
