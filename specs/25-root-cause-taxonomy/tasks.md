@@ -190,7 +190,7 @@
 
 ## Fase 5: Controladores REST, Router, Blindaje de Roles Art. V.4 y Suites de Integración HTTP
 
-- [ ] **T-TAXONOMY-10 · Controlador `CoordinatorRootCauseController`, ampliación de controladores de métricas/resolución, blindaje de Sede y rutas en `AppRouter`**
+- [x] **T-TAXONOMY-10 · Controlador `CoordinatorRootCauseController`, ampliación de controladores de métricas/resolución, blindaje de Sede y rutas en `AppRouter`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-TAXONOMY-09`
   * **Ficheros a crear o modificar:**

@@ -1451,6 +1451,20 @@ class LocationPortalController
             'technician_phone',
             'internal_notes',
             'notes_taller',
+            // Art. V.4 / Módulo 25: la sede no recibe ninguna referencia ni texto
+            // del catálogo maestro de causas raíz. El bloque completo, las dos
+            // claves foráneas y las cinco copias congeladas al cierre se excluyen
+            // aquí y, por si un bloque futuro las anida, también por patrón.
+            'root_cause_id',
+            'standard_solution_id',
+            'root_cause_code_snapshot',
+            'root_cause_category_snapshot',
+            'root_cause_name_snapshot',
+            'standard_solution_code_snapshot',
+            'standard_solution_name_snapshot',
+            'root_cause_classification',
+            'root_cause',
+            'standard_solution',
             // Art. V.4 / Módulo 17: la sede no ve la demarcación territorial ni su
             // cuadrante. La zona es un dato interno de planificación (RF-07.1) y la
             // excepción manual revela una decisión de coordinación sobre su centro.
@@ -1521,6 +1535,14 @@ class LocationPortalController
                 // `zone_affinity.*`): el filtro por nombre evita que un bloque nuevo del
                 // contrato abra una fuga por olvido de la lista exacta.
                 if (preg_match('/(^|_)(zone|zona)($|_)|operational_zone|zone_affinity|is_manual_override/i', $key)) {
+                    unset($data[$key]);
+                    continue;
+                }
+
+                // Art. V.4 / Módulo 25: cualquier clave de taxonomía —también las
+                // anidadas (`resolution.root_cause`, `snapshots.standard_solution_*`)—
+                // queda fuera de toda proyección de sede o QR público.
+                if (preg_match('/(root_cause|standard_solution)/i', $key)) {
                     unset($data[$key]);
                     continue;
                 }
