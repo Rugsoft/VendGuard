@@ -100,7 +100,7 @@
 
 ## Fase 3: Capa de Infraestructura y Repositorios PDO (`pdo_pgsql`)
 
-- [ ] **T-TAXONOMY-05 · Implementación de `PdoRootCauseRepository` y ampliación de `PdoIncidentRepository`**
+- [x] **T-TAXONOMY-05 · Implementación de `PdoRootCauseRepository` y ampliación de `PdoIncidentRepository`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-TAXONOMY-04`
   * **Ficheros a crear o modificar:**

@@ -217,7 +217,14 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             opportunistic_mode,
                             opportunistic_origin_reason,
                             opportunistic_informant_name,
-                            chronic_predecessor_incident_id
+                            chronic_predecessor_incident_id,
+                            root_cause_id,
+                            standard_solution_id,
+                            root_cause_code_snapshot,
+                            root_cause_category_snapshot,
+                            root_cause_name_snapshot,
+                            standard_solution_code_snapshot,
+                            standard_solution_name_snapshot
                         )
                         SELECT
                             :ticket_code,
@@ -249,7 +256,14 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                             :opportunistic_mode,
                             :opportunistic_origin_reason,
                             :opportunistic_informant_name,
-                            :chronic_predecessor_incident_id
+                            :chronic_predecessor_incident_id,
+                            :root_cause_id,
+                            :standard_solution_id,
+                            :root_cause_code_snapshot,
+                            :root_cause_category_snapshot,
+                            :root_cause_name_snapshot,
+                            :standard_solution_code_snapshot,
+                            :standard_solution_name_snapshot
                         WHERE NOT EXISTS (SELECT 1 FROM existing_check)
                         RETURNING id, status
                     ),
@@ -319,6 +333,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 $stmt->bindValue(':opportunistic_origin_reason', $incident->getOpportunisticOriginReason()?->value, $incident->getOpportunisticOriginReason() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
                 $stmt->bindValue(':opportunistic_informant_name', $incident->getOpportunisticInformantName(), $incident->getOpportunisticInformantName() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
                 $stmt->bindValue(':chronic_predecessor_incident_id', $incident->getChronicPredecessorIncidentId(), $incident->getChronicPredecessorIncidentId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+                $this->bindResolutionTaxonomy($stmt, $incident);
                 $stmt->bindValue(':user_id', $userId, $userId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
                 $note = $initialNote ?? 'Aviso creado por el responsable de sede';
                 $stmt->bindValue(':action_note', $note, PDO::PARAM_STR);
@@ -416,7 +431,14 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     opportunistic_mode,
                     opportunistic_origin_reason,
                     opportunistic_informant_name,
-                    chronic_predecessor_incident_id
+                    chronic_predecessor_incident_id,
+                    root_cause_id,
+                    standard_solution_id,
+                    root_cause_code_snapshot,
+                    root_cause_category_snapshot,
+                    root_cause_name_snapshot,
+                    standard_solution_code_snapshot,
+                    standard_solution_name_snapshot
                 ) VALUES (
                     :ticket_code,
                     :machine_id,
@@ -447,7 +469,14 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                     :opportunistic_mode,
                     :opportunistic_origin_reason,
                     :opportunistic_informant_name,
-                    :chronic_predecessor_incident_id
+                    :chronic_predecessor_incident_id,
+                    :root_cause_id,
+                    :standard_solution_id,
+                    :root_cause_code_snapshot,
+                    :root_cause_category_snapshot,
+                    :root_cause_name_snapshot,
+                    :standard_solution_code_snapshot,
+                    :standard_solution_name_snapshot
                 )
             ";
 
@@ -490,6 +519,7 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
             $stmt->bindValue(':opportunistic_origin_reason', $incident->getOpportunisticOriginReason()?->value, $incident->getOpportunisticOriginReason() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
             $stmt->bindValue(':opportunistic_informant_name', $incident->getOpportunisticInformantName(), $incident->getOpportunisticInformantName() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
             $stmt->bindValue(':chronic_predecessor_incident_id', $incident->getChronicPredecessorIncidentId(), $incident->getChronicPredecessorIncidentId() !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+            $this->bindResolutionTaxonomy($stmt, $incident);
 
             $stmt->execute();
             $newId = (int)$this->pdo->lastInsertId();
@@ -2636,10 +2666,24 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
                 pending_info_reason_text = :pending_info_reason_text,
                 paused_at = :paused_at,
                 total_pending_info_seconds = :total_pending_info_seconds,
-                sla_target_at = :sla_target_at
+                sla_target_at = :sla_target_at,
+                root_cause_id = :root_cause_id,
+                standard_solution_id = :standard_solution_id,
+                root_cause_code_snapshot = :root_cause_code_snapshot,
+                root_cause_category_snapshot = :root_cause_category_snapshot,
+                root_cause_name_snapshot = :root_cause_name_snapshot,
+                standard_solution_code_snapshot = :standard_solution_code_snapshot,
+                standard_solution_name_snapshot = :standard_solution_name_snapshot
             WHERE id = :id
               AND deleted_at IS NULL
         ";
+
+        // C1 / Art. III.3: si el expediente ya tenía una clasificación y esta
+        // escritura la sustituye, el episodio anterior se perpetúa en la línea
+        // de tiempo inmutable antes de tocar las columnas vigentes. Así una
+        // reapertura en garantía (< 48 h) que se resuelve con otra causa no
+        // borra el voto anterior de la trazabilidad del expediente.
+        $this->preservePreviousResolutionTaxonomy($incident);
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->bindValue(':id', $incident->getId(), PDO::PARAM_INT);
@@ -2674,8 +2718,95 @@ class PdoIncidentRepository implements IncidentRepositoryInterface, IncidentRowL
         $stmt->bindValue(':paused_at', $incident->getPausedAt(), $incident->getPausedAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
         $stmt->bindValue(':total_pending_info_seconds', $incident->getTotalPendingInfoSeconds(), PDO::PARAM_INT);
         $stmt->bindValue(':sla_target_at', $incident->getSlaTargetAt(), $incident->getSlaTargetAt() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $this->bindResolutionTaxonomy($stmt, $incident);
 
         return $stmt->execute();
+    }
+
+    /**
+     * Enlaza los siete parámetros de la clasificación de resolución (Módulo 25).
+     *
+     * La categoría congelada viaja como etiqueta del `ENUM`; un `NULL` en los
+     * siete campos es el estado válido de un expediente histórico sin clasificar,
+     * y la coherencia todo-o-nada la garantiza `chk_incidents_taxonomy_coherence`
+     * además de la validación de la entidad.
+     */
+    private function bindResolutionTaxonomy(PDOStatement $stmt, Incident $incident): void
+    {
+        $rootCauseId = $incident->getRootCauseId();
+        $solutionId = $incident->getStandardSolutionId();
+        $categorySnapshot = $incident->getRootCauseCategorySnapshot();
+
+        $stmt->bindValue(':root_cause_id', $rootCauseId, $rootCauseId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+        $stmt->bindValue(':standard_solution_id', $solutionId, $solutionId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+        $stmt->bindValue(':root_cause_code_snapshot', $incident->getRootCauseCodeSnapshot(), $incident->getRootCauseCodeSnapshot() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(':root_cause_category_snapshot', $categorySnapshot?->value, $categorySnapshot !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(':root_cause_name_snapshot', $incident->getRootCauseNameSnapshot(), $incident->getRootCauseNameSnapshot() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(':standard_solution_code_snapshot', $incident->getStandardSolutionCodeSnapshot(), $incident->getStandardSolutionCodeSnapshot() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(':standard_solution_name_snapshot', $incident->getStandardSolutionNameSnapshot(), $incident->getStandardSolutionNameSnapshot() !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+    }
+
+    /**
+     * Perpetúa en `incident_history` la clasificación que va a ser sustituida
+     * (C1, Art. III.3).
+     *
+     * Sólo actúa cuando la fila persistida ya tenía taxonomía y la entidad que
+     * se va a grabar trae otra distinta; así una actualización rutinaria del
+     * expediente no escribe eventos de más y un renombrado del catálogo no
+     * altera los snapshots (que son copias, no referencias).
+     */
+    private function preservePreviousResolutionTaxonomy(Incident $incident): void
+    {
+        $incidentId = $incident->getId();
+        if ($incidentId === null || !$incident->hasResolutionTaxonomy()) {
+            return;
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT status,
+                    root_cause_id,
+                    standard_solution_id,
+                    root_cause_code_snapshot,
+                    root_cause_category_snapshot,
+                    root_cause_name_snapshot,
+                    standard_solution_code_snapshot,
+                    standard_solution_name_snapshot
+               FROM incidents
+              WHERE id = :id
+                AND deleted_at IS NULL
+              LIMIT 1'
+        );
+        $stmt->bindValue(':id', $incidentId, PDO::PARAM_INT);
+        $stmt->execute();
+        $previous = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($previous === false || $previous['root_cause_id'] === null) {
+            return;
+        }
+
+        $unchanged = (int)$previous['root_cause_id'] === $incident->getRootCauseId()
+            && (int)$previous['standard_solution_id'] === $incident->getStandardSolutionId()
+            && (string)$previous['root_cause_code_snapshot'] === $incident->getRootCauseCodeSnapshot()
+            && (string)$previous['root_cause_category_snapshot'] === $incident->getRootCauseCategorySnapshot()?->value
+            && (string)$previous['root_cause_name_snapshot'] === $incident->getRootCauseNameSnapshot()
+            && (string)$previous['standard_solution_code_snapshot'] === $incident->getStandardSolutionCodeSnapshot()
+            && (string)$previous['standard_solution_name_snapshot'] === $incident->getStandardSolutionNameSnapshot();
+
+        if ($unchanged) {
+            return;
+        }
+
+        $note = 'Clasificación previa preservada antes de re-clasificar el expediente (Art. III.3, C1): '
+            . '[Causa Raíz: ' . $previous['root_cause_code_snapshot'] . ' - ' . $previous['root_cause_name_snapshot']
+            . ' | Solución: ' . $previous['standard_solution_code_snapshot'] . ' - ' . $previous['standard_solution_name_snapshot'] . ']';
+
+        $this->insertHistory(
+            $incidentId,
+            null,
+            $previous['status'] !== null ? (string)$previous['status'] : null,
+            $incident->getStatus()->value,
+            $note
+        );
     }
 
     /**
