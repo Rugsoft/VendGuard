@@ -84,7 +84,7 @@
     5. Declarar `RootCauseRepositoryInterface`.
   * **Hecho cuando:** `php -l src/Core/Domain/Model/RootCause.php && php -l src/Core/Domain/Model/StandardSolution.php && php -l src/Core/Domain/Model/Incident.php && php -l src/Core/Service/ResolutionTaxonomyValidator.php && php -l src/Core/Service/ManufacturerNormalizer.php` no reporta errores de sintaxis.
 
-- [ ] **T-TAXONOMY-04 · Suites unitarias `ResolutionTaxonomyValidatorTest` y `ManufacturerNormalizerTest`**
+- [x] **T-TAXONOMY-04 · Suites unitarias `ResolutionTaxonomyValidatorTest` y `ManufacturerNormalizerTest`**
   * **Tiempo estimado:** 20 min
   * **Dependencias previas:** `T-TAXONOMY-03`
   * **Ficheros a crear o modificar:**
