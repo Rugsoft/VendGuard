@@ -132,7 +132,7 @@
 
 ## Fase 4: Servicios de Aplicación (`RootCauseTaxonomyService`, `RootCauseParetoService` e Integración)
 
-- [ ] **T-TAXONOMY-07 · Implementación de `RootCauseTaxonomyService`, DTOs de catálogo y suite `RootCauseTaxonomyServiceTest`**
+- [x] **T-TAXONOMY-07 · Implementación de `RootCauseTaxonomyService`, DTOs de catálogo y suite `RootCauseTaxonomyServiceTest`**
   * **Tiempo estimado:** 30 min
   * **Dependencias previas:** `T-TAXONOMY-06`
   * **Ficheros a crear o modificar:**
