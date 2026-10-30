@@ -43,6 +43,12 @@
     });
   </script>
 
+  <!-- Chart.js 4.x local (Módulo 25 · D6): build UMD autocontenido servido desde
+       el propio origen, sin CDN externo, para que el análisis Pareto 80/20
+       funcione también con la PWA precacheada y sin red. Debe cargarse antes de
+       la aplicación para que `window.Chart` exista cuando se monte la vista. -->
+  <script src="/assets/js/vendor/chart.umd.min.js"></script>
+
   <!-- Vanilla Vue 3 Application Root (ES Module) -->
   <script type="module" src="/assets/js/app.js"></script>
 

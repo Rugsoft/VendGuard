@@ -31,6 +31,7 @@ export const AUDIT_ACTION_GROUPS = Object.freeze({
   sanitary: 'Sanidad Alimentaria',
   refund: 'Reintegros y Efectivo',
   spare_parts: 'Repuestos',
+  taxonomy: 'Taxonomía de Causas',
   restock: 'Órdenes de Carga',
   notification: 'Centro de Notificaciones'
 });
@@ -68,7 +69,10 @@ export const AUDIT_ENTITY_LABELS = Object.freeze({
   TECHNICIAN_VAN_STOCK: 'Stock de Furgoneta',
   // Entidad del Módulo 23: cada transición de la orden de carga se audita con
   // tipo propio, y el catálogo del visor debe cubrir el enumerado completo.
-  VAN_RESTOCK_ORDER: 'Orden de Carga de Furgoneta'
+  VAN_RESTOCK_ORDER: 'Orden de Carga de Furgoneta',
+  // Entidad del Módulo 25: el catálogo maestro y su exportación Pareto se
+  // auditan con tipo propio para que el filtro del visor no pierda esas filas.
+  ROOT_CAUSE_TAXONOMY: 'Taxonomía de Causas Raíz'
 });
 
 /**
@@ -167,6 +171,16 @@ export const AUDIT_ACTION_CATALOG = Object.freeze([
   { code: 'REFUND_DETACHED_BY_INACTIVITY', label: 'Reintegro Desvinculado por Inactividad', tone: 'warning', group: 'refund' },
   { code: 'EXPORT_SPARE_PARTS_CSV', label: 'Exportación CSV de Repuestos', tone: 'neutral', group: 'spare_parts' },
   { code: 'VAN_STOCK_ADJUSTED', label: 'Ajuste de Stock de Furgoneta', tone: 'primary', group: 'spare_parts' },
+  // Módulo 25: el catálogo maestro se audita con entidad propia
+  // (`ROOT_CAUSE_TAXONOMY`) y estas cuatro acciones son las que escribe el
+  // servicio; sin etiqueta el visor mostraría el código crudo.
+  { code: 'CREATE_ROOT_CAUSE', label: 'Alta de Causa Raíz', tone: 'success', group: 'taxonomy' },
+  { code: 'UPDATE_ROOT_CAUSE', label: 'Modificación de Causa Raíz', tone: 'neutral', group: 'taxonomy' },
+  { code: 'CREATE_STANDARD_SOLUTION', label: 'Alta de Solución Estandarizada', tone: 'success', group: 'taxonomy' },
+  { code: 'UPDATE_STANDARD_SOLUTION', label: 'Modificación de Solución Estandarizada', tone: 'neutral', group: 'taxonomy' },
+  // Exportación del informe Pareto 80/20: la escribe el mismo módulo y el
+  // visor debe etiquetarla en lugar de mostrar el código crudo.
+  { code: 'EXPORT_ROOT_CAUSE_PARETO_CSV', label: 'Exportación CSV del Pareto de Causas Raíz', tone: 'neutral', group: 'taxonomy' },
   { code: 'CREATE_VAN_RESTOCK_ORDER', label: 'Alta de Orden de Carga', tone: 'primary', group: 'restock' },
   { code: 'UPDATE_VAN_RESTOCK_ORDER', label: 'Edición de Orden de Carga', tone: 'neutral', group: 'restock' },
   { code: 'DISPATCH_VAN_RESTOCK_ORDER', label: 'Expedición de Orden de Carga', tone: 'info', group: 'restock' },

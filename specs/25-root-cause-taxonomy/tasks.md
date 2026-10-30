@@ -228,7 +228,7 @@
 
 ## Fase 6: Integración de Chart.js Local, Precaché PWA y Componentes Frontend (Vue 3 ESM)
 
-- [ ] **T-TAXONOMY-12 · Incorporación de Chart.js 4.x local (`/public/assets/js/vendor/chart.umd.min.js`), enlace en `index.html`, soporte en `OfflineStorage.js` y `api.js`**
+- [x] **T-TAXONOMY-12 · Incorporación de Chart.js 4.x local (`/public/assets/js/vendor/chart.umd.min.js`), enlace en `index.html`, soporte en `OfflineStorage.js` y `api.js`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-TAXONOMY-11`
   * **Ficheros a crear o modificar:**
