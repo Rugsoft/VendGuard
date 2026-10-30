@@ -987,9 +987,18 @@ CREATE INDEX IF NOT EXISTS idx_incidents_status_urgency ON incidents (status, ur
 CREATE INDEX IF NOT EXISTS idx_incidents_technician ON incidents (assigned_technician_id);
 -- Universo del Pareto 80/20: expedientes vivos resueltos o cerrados, por fecha
 -- de resolución vigente y causa raíz (Módulo 25, QA 2, C3).
-CREATE INDEX IF NOT EXISTS idx_incidents_pareto_resolved
-    ON incidents (resolved_at, root_cause_id)
-    WHERE status IN ('RESOLVED', 'CLOSED') AND deleted_at IS NULL;
+-- En bases preexistentes anteriores al Módulo 25, `CREATE TABLE IF NOT EXISTS
+-- incidents` no añade `root_cause_id` (eso lo hace la migración
+-- `021_root_cause_taxonomy.sql` en el paso 4/6 de `bin/init_cloud_db.php`). Se
+-- tolera `undefined_column` para no abortar el paso 3/6 antes de llegar al
+-- ejecutor, igual que en los índices territoriales y oportunistas.
+DO $do$
+BEGIN
+    CREATE INDEX IF NOT EXISTS idx_incidents_pareto_resolved
+        ON incidents (resolved_at, root_cause_id)
+        WHERE status IN ('RESOLVED', 'CLOSED') AND deleted_at IS NULL;
+EXCEPTION WHEN duplicate_object OR undefined_column THEN NULL;
+END $do$;
 
 -- Índice parcial de las intervenciones oportunistas vigentes (RF-06.4): el
 -- indicador de desplazamientos evitados sólo cuenta lo no borrado lógicamente.

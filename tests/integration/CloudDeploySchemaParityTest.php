@@ -60,6 +60,8 @@ declare(strict_types=1);
  *    such a column -- the opportunistic index did -- aborted the boot with
  *    SQLSTATE 42703 before the runner was reached. The probe reproduces that
  *    table, reapplies the base DDL and certifies that migrations complete it.
+ *    The same probe now drops the seven taxonomy columns of Módulo 25, so the
+ *    Pareto index of migration 021 is covered by the identical guard.
  * 6. The same holds for **Módulo 17** (2026-10-20): a base that served before the
  *    operational zoning shipped has `locations` without `zone_id`, and the base DDL
  *    aborted the boot with SQLSTATE 42703 on the foreign key that references it. The
@@ -942,7 +944,7 @@ try {
     );
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Caso 5: el despliegue sobre una base anterior al Módulo 16
+    // Caso 5: el despliegue sobre una base anterior a los Módulos 16 y 25
     // ─────────────────────────────────────────────────────────────────────────
     echo "\n--- Caso 5: el DDL base se reaplica sobre un esquema preexistente ---\n";
 
@@ -951,7 +953,9 @@ try {
     // EXISTS` no añade las columnas oportunistas: las añade la migración 005. Si el
     // DDL base declara un índice sobre esa columna sin guarda, el paso 3/6 aborta con
     // SQLSTATE 42703 y el ejecutor nunca llega al paso 4/6. Este caso reproduce esa
-    // base y certifica que la ruta converge igual.
+    // base y certifica que la ruta converge igual. La misma prueba cubre el índice
+    // del Pareto de la migración 021: una base anterior al Módulo 25 tampoco tiene
+    // `incidents.root_cause_id` cuando el DDL base se reaplica.
     $legacyPdo = ConnectionFactory::getConnection([], true);
     $legacyPdo->exec("SET search_path TO {$legacySchema}, public");
     $applySqlFile($legacyPdo, $deployDdlFile);
@@ -966,6 +970,21 @@ try {
         . 'DROP COLUMN IF EXISTS chronic_predecessor_incident_id CASCADE'
     );
 
+    // Se retiran también las siete columnas de la migración 021 (y, en cascada,
+    // sus restricciones y el índice del Pareto) para dejar una base anterior al
+    // Módulo 25. Sin la guarda del índice, este es el punto exacto en el que el
+    // arranque desplegado abortaba con `column "root_cause_id" does not exist`.
+    $legacyPdo->exec(
+        'ALTER TABLE incidents '
+        . 'DROP COLUMN IF EXISTS root_cause_id, '
+        . 'DROP COLUMN IF EXISTS standard_solution_id, '
+        . 'DROP COLUMN IF EXISTS root_cause_code_snapshot, '
+        . 'DROP COLUMN IF EXISTS root_cause_category_snapshot, '
+        . 'DROP COLUMN IF EXISTS root_cause_name_snapshot, '
+        . 'DROP COLUMN IF EXISTS standard_solution_code_snapshot, '
+        . 'DROP COLUMN IF EXISTS standard_solution_name_snapshot CASCADE'
+    );
+
     $columnExists = static function (PDO $pdo, string $schema, string $table, string $column): bool {
         $stmt = $pdo->prepare(
             'SELECT COUNT(*) FROM information_schema.columns '
@@ -977,8 +996,9 @@ try {
     };
 
     $assert(
-        !$columnExists($legacyPdo, $legacySchema, 'incidents', 'opportunistic_mode'),
-        'La sonda reproduce una base anterior al Módulo 16, sin la columna oportunista'
+        !$columnExists($legacyPdo, $legacySchema, 'incidents', 'opportunistic_mode')
+        && !$columnExists($legacyPdo, $legacySchema, 'incidents', 'root_cause_id'),
+        'La sonda reproduce una base anterior a los Módulos 16 y 25, sin columna oportunista ni taxonomía'
     );
 
     $legacyReapplyFailure = '';
@@ -1005,14 +1025,22 @@ try {
     $legacyIndexDefinition = (string)$legacyPdo->query(
         "SELECT indexdef FROM pg_indexes WHERE schemaname = '{$legacySchema}' AND indexname = 'idx_incidents_opportunistic_mode'"
     )->fetchColumn();
+    $legacyParetoIndexDefinition = (string)$legacyPdo->query(
+        "SELECT indexdef FROM pg_indexes WHERE schemaname = '{$legacySchema}' AND indexname = 'idx_incidents_pareto_resolved'"
+    )->fetchColumn();
+    $legacyAppliedNames = array_map('basename', $legacyApplied);
     $assert(
         $legacyConvergenceFailure === ''
-        && in_array('005_opportunistic_incident.sql', array_map('basename', $legacyApplied), true)
+        && in_array('005_opportunistic_incident.sql', $legacyAppliedNames, true)
+        && in_array('021_root_cause_taxonomy.sql', $legacyAppliedNames, true)
         && $columnExists($legacyPdo, $legacySchema, 'incidents', 'opportunistic_mode')
+        && $columnExists($legacyPdo, $legacySchema, 'incidents', 'root_cause_id')
         && str_contains($legacyIndexDefinition, 'opportunistic_mode')
-        && str_contains($legacyIndexDefinition, 'deleted_at IS NULL'),
-        'La capa incremental completa la base anterior: columna e índice parcial presentes y convergencia declarada',
-        'convergencia: ' . $legacyConvergenceFailure . ' · índice: ' . $legacyIndexDefinition
+        && str_contains($legacyIndexDefinition, 'deleted_at IS NULL')
+        && str_contains($legacyParetoIndexDefinition, 'root_cause_id')
+        && str_contains($legacyParetoIndexDefinition, 'deleted_at IS NULL'),
+        'La capa incremental completa la base anterior: columnas e índices parciales de 005 y 021 presentes y convergencia declarada',
+        'convergencia: ' . $legacyConvergenceFailure . ' · índice 005: ' . $legacyIndexDefinition . ' · índice 021: ' . $legacyParetoIndexDefinition
     );
 
     // ─────────────────────────────────────────────────────────────────────────
