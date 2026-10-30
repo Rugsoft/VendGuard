@@ -12,6 +12,8 @@ use PDOException;
 use Throwable;
 use VendGuard\Core\Domain\Exception\IncidentNotFoundException;
 use VendGuard\Core\Domain\Model\OfflineSyncMutation;
+use VendGuard\Core\Domain\Model\RootCause;
+use VendGuard\Core\Domain\Model\StandardSolution;
 use VendGuard\Core\Domain\Repository\OfflineSyncMutationRepositoryInterface;
 use VendGuard\Infrastructure\Database\ConnectionFactory;
 use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
@@ -30,9 +32,10 @@ use VendGuard\Infrastructure\Dialect\SqlDialectAdapter;
  *     traduce en la fila ya persistida: nunca en un error de motor expuesto al
  *     cliente (`RF-04.2`).
  *  2. **Bootstrap sin N+1.** La foto de ruta se arma con un número fijo de
- *     consultas —once— con independencia del número de paradas, órdenes,
+ *     consultas —doce— con independencia del número de paradas, órdenes,
  *     máquinas o piezas. Las listas se cruzan en PHP por identificador, no con
- *     una consulta por elemento.
+ *     una consulta por elemento; el catálogo de causas viaja en una sola
+ *     lectura agregada.
  *  3. **Volcado con excepción de auditoría.** La Nota Interna de Taller se
  *     inserta directamente en `incident_comments` con `is_internal = TRUE`
  *     aunque el técnico ya no sea el titular y aunque la avería esté
@@ -179,7 +182,47 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
             'preventive_checklists_by_order' => $checklists,
             'spare_parts_catalog_by_machine' => $this->fetchSparePartsCatalogByMachine($machinesOnRoute),
             'van_stock' => $this->fetchVanStock($technicianId),
+            'root_cause_taxonomy' => $this->fetchRootCauseTaxonomy(),
         ];
+    }
+
+    /**
+     * Catálogo activo de causas y soluciones para clasificar sin cobertura
+     * (Módulo 25, RF-03.2, contrato §4.2).
+     *
+     * Se apoya en la consulta única del repositorio del catálogo: una sola
+     * lectura por paquete, sin una consulta por causa ni por solución, y sin
+     * precios, costes ni datos financieros (Art. V.4). Las causas activas sin
+     * ninguna solución activa no viajan: no son una opción resoluble.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function fetchRootCauseTaxonomy(): array
+    {
+        $catalog = (new PdoRootCauseRepository($this->pdo))->findActiveCatalogWithSolutions();
+
+        return array_map(
+            static fn(RootCause $rootCause): array => [
+                'id' => $rootCause->getId(),
+                'code' => $rootCause->getCode(),
+                'category' => $rootCause->getCategory()->value,
+                'category_label' => $rootCause->getCategory()->label(),
+                'name' => $rootCause->getName(),
+                'default_solution_id' => $rootCause->getDefaultSolution()?->getId(),
+                'solutions' => array_map(
+                    static fn(StandardSolution $solution): array => [
+                        'id' => $solution->getId(),
+                        'root_cause_id' => $solution->getRootCauseId(),
+                        'code' => $solution->getCode(),
+                        'name' => $solution->getName(),
+                        'is_default' => $solution->isDefault(),
+                        'is_active' => $solution->isActive(),
+                    ],
+                    $rootCause->getSolutions()
+                ),
+            ],
+            $catalog
+        );
     }
 
     /**
@@ -367,6 +410,7 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
 
             $actor = $this->resolveActor($mutation->technicianId);
             $internalCommentId = null;
+            $rootCauseClassification = $this->offlineRootCauseClassification($workSummary);
 
             if ($mutation->stopType === OfflineSyncMutation::STOP_TYPE_INCIDENT) {
                 $incident = $this->lockIncident($mutation->stopId);
@@ -415,6 +459,11 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
                 'synced_at' => $mutation->syncedAt,
                 'message' => 'El trabajo realizado sin conexión se ha guardado como Nota Interna de Taller en el expediente.',
             ];
+
+            if ($rootCauseClassification !== null) {
+                $payload['offline_root_cause_classification'] = $rootCauseClassification;
+            }
+
             $this->storeMutationResponse($mutationId, $payload);
 
             $auditId = $this->recordAudit(
@@ -430,6 +479,7 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
                     'synced_at' => $mutation->syncedAt,
                     'conflict_reason' => $trimmedReason,
                     'work_summary' => $workSummary,
+                    'offline_root_cause_classification' => $rootCauseClassification,
                     'internal_comment_id' => $internalCommentId,
                 ]
             );
@@ -491,6 +541,8 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
                 $internalCommentId = null;
                 $targetFound = false;
                 $targetStatus = null;
+                $summary = $this->workSummaryFromPayload($mutation);
+                $rootCauseClassification = $this->offlineRootCauseClassification($summary);
 
                 if ($mutation->stopType === OfflineSyncMutation::STOP_TYPE_INCIDENT) {
                     $incident = $this->lockIncident($mutation->stopId);
@@ -505,7 +557,7 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
                                 self::HEADER_DEACTIVATED,
                                 $mutation,
                                 null,
-                                $this->workSummaryFromPayload($mutation)
+                                $summary
                             ),
                             photoPath: null,
                             createdAt: $mutation->syncedAt
@@ -524,7 +576,7 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
                                 self::HEADER_DEACTIVATED,
                                 $mutation,
                                 null,
-                                $this->workSummaryFromPayload($mutation)
+                                $summary
                             )
                         );
                     }
@@ -540,6 +592,11 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
                     'internal_comment_id' => $internalCommentId,
                     'synced_at' => $mutation->syncedAt,
                 ];
+
+                if ($rootCauseClassification !== null) {
+                    $payload['offline_root_cause_classification'] = $rootCauseClassification;
+                }
+
                 $this->storeMutationResponse($mutationId, $payload);
 
                 $this->recordAudit(
@@ -554,7 +611,8 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
                         'operation_type' => $mutation->operationType,
                         'client_occurred_at' => $mutation->clientOccurredAt,
                         'synced_at' => $mutation->syncedAt,
-                        'work_summary' => $this->workSummaryFromPayload($mutation),
+                        'work_summary' => $summary,
+                        'offline_root_cause_classification' => $rootCauseClassification,
                         'target_found' => $targetFound,
                         'target_status' => $targetStatus,
                         'internal_comment_id' => $internalCommentId,
@@ -1437,6 +1495,14 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
             $lines[] = 'Acción realizada: ' . $actionTaken;
         }
 
+        $classification = $this->offlineRootCauseClassification($workSummary);
+        if ($classification !== null) {
+            $lines[] = '• Causa raíz declarada in situ: ' . $classification['root_cause_code']
+                . ' — ' . $classification['root_cause_name']
+                . ' | Solución estándar: ' . $classification['standard_solution_code']
+                . ' — ' . $classification['standard_solution_name'];
+        }
+
         $pauseReason = $this->summaryText($workSummary['pause_reason'] ?? null);
         if ($pauseReason !== null) {
             $lines[] = 'Motivo de la pausa: ' . $pauseReason;
@@ -1480,6 +1546,66 @@ final class PdoOfflineSyncMutationRepository implements OfflineSyncMutationRepos
         $summary = $mutation->responsePayload['work_summary'] ?? [];
 
         return is_array($summary) ? $summary : [];
+    }
+
+    /**
+     * Bloque de clasificación declarado in situ dentro del volcado (Módulo 25,
+     * `EARS 03.4`, `C5`).
+     *
+     * Acepta las dos formas que puede entregar la cola offline: el bloque
+     * `offline_root_cause_classification` con las seis claves planas del contrato
+     * o una estructura anidada con `root_cause` / `standard_solution`. Si falta
+     * el código de la causa o el de la solución no hay clasificación que
+     * preservar: no se inventa una etiqueta a medias.
+     *
+     * @param array<string, mixed> $workSummary
+     * @return array{
+     *   root_cause_id: int|null,
+     *   root_cause_code: string,
+     *   root_cause_name: string,
+     *   standard_solution_id: int|null,
+     *   standard_solution_code: string,
+     *   standard_solution_name: string
+     * }|null
+     */
+    private function offlineRootCauseClassification(array $workSummary): ?array
+    {
+        $block = $workSummary['offline_root_cause_classification']
+            ?? $workSummary['root_cause_classification']
+            ?? null;
+
+        $source = is_array($block) ? $block : $workSummary;
+        $cause = is_array($source['root_cause'] ?? null) ? $source['root_cause'] : $source;
+        $solution = is_array($source['standard_solution'] ?? null)
+            ? $source['standard_solution']
+            : $source;
+
+        $causeCode = $this->summaryText($cause['code'] ?? $cause['root_cause_code'] ?? null);
+        $solutionCode = $this->summaryText(
+            $solution['code'] ?? $solution['standard_solution_code'] ?? $solution['solution_code'] ?? null
+        );
+
+        if ($causeCode === null || $solutionCode === null) {
+            return null;
+        }
+
+        $causeId = $cause['id'] ?? $cause['root_cause_id'] ?? null;
+        $solutionId = $solution['id']
+            ?? $solution['standard_solution_id']
+            ?? $solution['solution_id']
+            ?? null;
+
+        return [
+            'root_cause_id' => is_numeric($causeId) ? (int)$causeId : null,
+            'root_cause_code' => $causeCode,
+            'root_cause_name' => $this->summaryText($cause['name'] ?? $cause['root_cause_name'] ?? null)
+                ?? 'Sin nombre declarado',
+            'standard_solution_id' => is_numeric($solutionId) ? (int)$solutionId : null,
+            'standard_solution_code' => $solutionCode,
+            'standard_solution_name' => $this->summaryText(
+                $solution['name'] ?? $solution['standard_solution_name'] ?? $solution['solution_name'] ?? null
+            ) ?? 'Sin nombre declarado',
+        ];
     }
 
     private function summaryText(mixed $value): ?string

@@ -169,7 +169,7 @@
     3. Crear `tests/unit/RootCauseParetoServiceTest.php` verificando la matemática 80/20, el cierre en `100.00%`, los desempates, el estado vacío y las dos secciones del CSV.
   * **Hecho cuando:** `php tests/unit/RootCauseParetoServiceTest.php` pasa al 100 % en verde con código de salida `0`.
 
-- [ ] **T-TAXONOMY-09 · Integración en `SparePartTraceabilityService`, `OfflineBootstrapSnapshotDto`, `OfflineSyncService` y `CoordinatorIncidentDetailDto`**
+- [x] **T-TAXONOMY-09 · Integración en `SparePartTraceabilityService`, `OfflineBootstrapSnapshotDto`, `OfflineSyncService` y `CoordinatorIncidentDetailDto`**
   * **Tiempo estimado:** 25 min
   * **Dependencias previas:** `T-TAXONOMY-08`
   * **Ficheros a crear o modificar:**
