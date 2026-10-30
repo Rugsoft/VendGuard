@@ -1,0 +1,3 @@
+# ESPECIFICACIÓN FUNCIONAL: TAXONOMÍA DE CAUSAS RAÍZ Y SOLUCIONES ESTANDARIZADAS (MÓDULO 25)
+
+**Documento espejo de especificación funcional:** La fuente de verdad completa (Versión 2.1, auditada por QA con los 13 hallazgos cerrados al 100 %) con Contexto y Objetivo, Decisiones (`D1`–`D6`), Casos Límite (`C1`–`C6`), Resoluciones QA (`QA 1`–`QA 5`), Usuarios, Historias de Usuario (`HU-01`–`HU-04`), Requisitos Funcionales (`RF-01`–`RF-05`) en notación EARS en español, Requisitos No Funcionales (`RNF-01`–`RNF-03`), Fuera de Alcance y Criterios de Finalización reside en [`specs/25-root-cause-taxonomy/spec.md`](../25-root-cause-taxonomy/spec.md).
